@@ -280,6 +280,12 @@ describe("harness work context", () => {
     mkdirSync(join(root, "z-readable"));
     writeFileSync(join(root, "z-readable", "package.json"), "{}");
     const realReaddir = fs.promises.readdir.bind(fs.promises);
+    const sameDirectory = (left: string, right: string): boolean => {
+      const a = fs.statSync(left, { bigint: true });
+      const b = fs.statSync(right, { bigint: true });
+      return a.isDirectory() && b.isDirectory() && a.ino !== 0n
+        && a.dev === b.dev && a.ino === b.ino;
+    };
     const scannedDirectories: string[] = [];
     let denyUnreadable = true;
     const deps = {
@@ -288,7 +294,7 @@ describe("harness work context", () => {
         stat: fs.promises.stat.bind(fs.promises),
         readdir: async (...args: Parameters<typeof fs.promises.readdir>) => {
           scannedDirectories.push(String(args[0]));
-          if (denyUnreadable && resolve(String(args[0])).toLowerCase() === resolve(unreadable).toLowerCase()) {
+          if (denyUnreadable && sameDirectory(String(args[0]), unreadable)) {
             throw Object.assign(new Error("denied"), { code: "EACCES" });
           }
           return realReaddir(...args);
@@ -300,8 +306,7 @@ describe("harness work context", () => {
       expect(found.candidates.map((candidate) => candidate.path)).toEqual(["z-readable"]);
       expect(found.truncated).toBe(false);
       expect(found.nextCursor).toBeUndefined();
-      expect(scannedDirectories.map((directory) => resolve(directory).toLowerCase()))
-        .toContain(resolve(unreadable).toLowerCase());
+      expect(scannedDirectories.some((directory) => sameDirectory(directory, unreadable))).toBe(true);
       expect(found.unreadablePaths).toEqual(["a-unreadable"]);
 
       denyUnreadable = false;

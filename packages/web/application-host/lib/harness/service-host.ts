@@ -1,4 +1,5 @@
 import path from "node:path";
+import { stat } from "node:fs/promises";
 import { createOutputStore, type OutputStore } from "./output-store.js";
 import { createPathLockService, type PathLockService } from "./path-lock.js";
 import { discoverShells } from "./shell-discovery.js";
@@ -784,9 +785,26 @@ export function createHarnessServiceHost(options: HarnessServiceHostOptions): Ha
       throw new HarnessServiceError("unavailable", "Work-context workspace or launch directory is missing or inaccessible");
     }
     const state = snapshot.context ?? seedWorkContext(authorityRoot, ctx.workspaceRoot);
+    const sameDirectory = async (storedPath: string, currentIdentity: string): Promise<boolean> => {
+      try {
+        const storedIdentity = await canonicalizePathIdentity(storedPath);
+        if (normalizePathIdentity(storedIdentity) === normalizePathIdentity(currentIdentity)) return true;
+        // Windows may report an 8.3 path for one spelling and the long name
+        // for another. Compare the existing directory itself before treating
+        // a journal binding as a different workspace.
+        const [stored, current] = await Promise.all([
+          stat(storedPath, { bigint: true }),
+          stat(currentIdentity, { bigint: true }),
+        ]);
+        return stored.isDirectory() && current.isDirectory() && stored.ino !== 0n
+          && stored.dev === current.dev && stored.ino === current.ino;
+      } catch {
+        return false;
+      }
+    };
     if (snapshot.context && (snapshot.context.workspaceId !== ctx.workspaceId
-      || normalizePathIdentity(snapshot.context.authorityRoot) !== normalizePathIdentity(authorityRootIdentity)
-      || normalizePathIdentity(snapshot.context.sessionRoot) !== normalizePathIdentity(sessionRootIdentity))) {
+      || !await sameDirectory(snapshot.context.authorityRoot, authorityRootIdentity)
+      || !await sameDirectory(snapshot.context.sessionRoot, sessionRootIdentity))) {
       throw new HarnessServiceError("unavailable", "Stored work context belongs to a different workspace or session launch directory");
     }
     if (!options.pathAuthority || !ctx.workspaceId) {

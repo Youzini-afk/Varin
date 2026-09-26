@@ -21,6 +21,15 @@ import { createThreadWorktreeRuntime } from "./thread-worktree.js";
 const WORKSPACE = "workspace-1";
 const PARENT = { kind: "session", id: "parent-1" } as const;
 
+const expectSameDirectory = (actual: string | undefined, expected: string): void => {
+  expect(actual).toBeDefined();
+  const left = fs.statSync(actual!, { bigint: true });
+  const right = fs.statSync(expected, { bigint: true });
+  expect(left.isDirectory()).toBe(true);
+  expect(left.ino).not.toBe(0n);
+  expect([left.dev, left.ino]).toEqual([right.dev, right.ino]);
+};
+
 const createThreadRuntime = (
   options: Omit<ThreadRuntimeOptions, "workingStates"> & {
     workingStates?: TestWorkspaceWorkingStateAccess | WorkspaceWorkingStateRootAccess;
@@ -218,9 +227,10 @@ describe("thread runtime", () => {
         prompt: async () => {
           ordered.push("prompt");
           expect(created[0]?.initialWorkContext).toMatchObject({
-            authorityRoot: childRoot, sessionRoot: childRoot,
             operationDir: "project-a", queryScope: ["project-a/src"], revision: 1,
           });
+          expectSameDirectory(created[0]?.initialWorkContext?.authorityRoot, childRoot);
+          expectSameDirectory(created[0]?.initialWorkContext?.sessionRoot, childRoot);
         },
       },
       resolveWorkspaceRoot: async (id) => id === WORKSPACE ? parentRoot : childRoot,
@@ -275,9 +285,8 @@ describe("thread runtime", () => {
       sessions: {
         ...sessionAdapter,
         create: async (input) => {
-          expect(input.initialWorkContext).toMatchObject({
-            authorityRoot: childRoot, operationDir: "project-a", queryScope: ["project-a"],
-          });
+          expect(input.initialWorkContext).toMatchObject({ operationDir: "project-a", queryScope: ["project-a"] });
+          expectSameDirectory(input.initialWorkContext?.authorityRoot, childRoot);
           expect(fs.readFileSync(join(input.cwd, "project-a", "source.txt"), "utf8"))
             .toBe("current parent tree");
           return snapshot("nested-child", input.cwd);
