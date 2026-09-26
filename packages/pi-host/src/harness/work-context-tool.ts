@@ -37,11 +37,11 @@ export function createWorkContextTool(bridge: HostServicesBridge, sync: WorkCont
     label: "Work Context",
     description:
       "View or change this session's work context inside the authorized workspace. "
-      + "The operation dir is the anchor for every relative tool path (read/write/edit/ls/find/grep/bash cwd). "
+      + "The operation dir anchors relative file paths and the default shell start directory. A shell's cd affects only that shell. "
       + "Use discover to list candidate project dirs, select to switch into one, scope to restrict retrieval, reset to return to the session launch dir.",
     promptSnippet: "work_context: view/select the session operation dir and retrieval scope within the authorized workspace",
     promptGuidelines: [
-      "Relative paths in all tools resolve against the operation dir shown by work_context get.",
+      "Relative file paths resolve against the operation dir shown by work_context get; a persistent shell may have its own cwd after cd.",
       "Call work_context discover when the workspace may contain multiple projects, then select the intended one before reading or editing files.",
       "Pass expectedRevision when acting on a previously read context so a concurrent change is not silently overwritten.",
     ],

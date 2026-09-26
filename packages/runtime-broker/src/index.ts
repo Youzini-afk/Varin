@@ -1,6 +1,7 @@
 export * from "./errors.js";
 export * from "./foundational-package-provisioner.js";
 export * from "./host-client.js";
+export * from "./host-capabilities.js";
 export * from "./host-entry.js";
 export * from "./package-provisioning-receipt-store.js";
 export * from "./runtime-dispatcher.js";

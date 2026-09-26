@@ -357,6 +357,72 @@ const waitUntil = async (predicate: () => Promise<boolean>): Promise<void> => {
 };
 
 describe("session e2e — durable work context", () => {
+  it("keeps desktop-capability read and write calls behind the authorized root", async () => {
+    await withTempRoot("varin-desktop-path-boundary-", async (outer) => {
+      const root = join(outer, "workspace");
+      await mkdir(root);
+      const outside = join(outer, "outside.txt");
+      const secret = "outside-workspace-marker";
+      await writeFile(outside, secret);
+      const faux = registerFauxProvider();
+      faux.setResponses([
+        () => fauxAssistantMessage([fauxToolCall("write", { path: "inside.txt", content: "inside" })]),
+        () => fauxAssistantMessage([fauxToolCall("write", { path: "../escape.txt", content: "escape" })]),
+        () => fauxAssistantMessage([fauxToolCall("read", { path: "../outside.txt" })]),
+        () => fauxAssistantMessage("done"),
+      ]);
+      const authority = createHarnessPathAuthority({
+        authorityId: "desktop-path-boundary",
+        documents: { inspectWorkspace: async () => ({ root }) },
+      });
+      const committed: string[] = [];
+      const session = await setupSession({
+        root,
+        faux,
+        harnessDocumentRead: true,
+        harnessWorkContext: true,
+        answerDialog: () => "Allow once",
+        authorizeWorkspacePath: (actor, candidate, options) => authority.resolve(actor, candidate, options),
+        serviceHostOptions: {
+          pathAuthority: authority,
+          documentSurfaceWrite: async (_sessionId, _workspaceId, _context, changes) => {
+            for (const change of changes) {
+              committed.push(change.resourceId);
+              if (change.action === "write") await writeFile(join(root, change.resourceId), change.content ?? "");
+            }
+            return {
+              status: "applied" as const,
+              results: changes.map((change) => ({ path: change.resourceId, target: "disk" as const, status: "applied" as const })),
+            };
+          },
+        },
+      });
+      try {
+        const created = await session.host.create(root, undefined, undefined, undefined, undefined, { mode: "bypass", rules: [] });
+        assert.ok(created.activeTools.includes("work_context"));
+        assert.ok(created.activeTools.includes("document_read"));
+        await session.host.prompt(created.sessionId, "Check the workspace path boundary");
+        await session.host.session.waitForIdle();
+        const branch = session.host.session.sessionManager.getBranch();
+        assert.deepEqual(committed, ["inside.txt"], JSON.stringify(branch.filter((entry) => entry.type === "message" && entry.message.role === "toolResult")));
+        assert.equal(await readFile(join(root, "inside.txt"), "utf8"), "inside");
+        assert.equal(existsSync(join(outer, "escape.txt")), false);
+        const writeResults = branch.filter((entry) => entry.type === "message"
+          && entry.message.role === "toolResult" && entry.message.toolName === "write");
+        assert.equal(writeResults.length, 2);
+        assert.match(JSON.stringify(writeResults[1]), /outside the actor workspace/);
+        const readResult = branch.find((entry) => entry.type === "message"
+          && entry.message.role === "toolResult" && entry.message.toolName === "read");
+        assert.ok(readResult && readResult.type === "message");
+        assert.match(JSON.stringify(readResult.message), /outside the actor workspace/);
+        assert.ok(!JSON.stringify(readResult.message).includes(secret), "an outside read must not disclose the file");
+      } finally {
+        await session.dispose();
+        faux.unregister();
+      }
+    });
+  });
+
   it("commits inside an Agent tool call and preserves Pi tool-result pairing and continuation", async () => {
     await withTempRoot("varin-work-context-e2e-", async (root) => {
       await mkdir(join(root, "project"));
@@ -390,6 +456,7 @@ describe("session e2e — durable work context", () => {
         await session.host.prompt(created.sessionId, "Select the project");
         await session.host.session.waitForIdle();
         assert.match(JSON.stringify(firstRequest), /varin-work-context/);
+        assert.match(JSON.stringify(firstRequest), /workspaceRoot/);
         assert.match(JSON.stringify(firstRequest), /operationDir/);
         const journal = session.host.workContextRead(created.sessionId);
         assert.equal(journal.context?.operationDir, "project", JSON.stringify(session.host.session.sessionManager.getBranch()));

@@ -1,4 +1,4 @@
-import { PiRuntimeBroker, resolveBundledPiHostEntry } from '@varin/runtime-broker';
+import { applicationHostClientCapabilities, PiRuntimeBroker, resolveBundledPiHostEntry } from '@varin/runtime-broker';
 import type {
   PiRuntimeBrokerOptions,
   PiSessionExecutionAdmission,
@@ -69,21 +69,13 @@ export function createWebPiRuntimeBroker({
     ...(typeof agentDir === 'string' && agentDir.trim() ? { agentDir: agentDir.trim() } : {}),
     ...(typeof admitSessionExecution === 'function' ? { admitSessionExecution } : {}),
     client: {
-      capabilities: {
-        harnessDocumentRead,
-        harnessDocumentPathOverlay,
-        harnessWorkContext,
-        harnessExperiments: true,
-        harnessSettings: true,
-        harnessFollowUps: true,
-        harnessScheduledTasks: true,
-        harnessLspNavigation: true,
-        harnessMaterials: true,
-        harnessThreads: true,
-        harnessWebRead,
-        harnessWebSearch,
-        workspaceMutationJournal: true,
-      },
+      capabilities: applicationHostClientCapabilities({
+        documentRead: harnessDocumentRead,
+        documentPathOverlay: harnessDocumentPathOverlay,
+        workContext: harnessWorkContext,
+        webRead: harnessWebRead,
+        webSearch: harnessWebSearch,
+      }),
       clientName: 'varin-web-server',
       clientVersion: typeof clientVersion === 'string' && clientVersion ? clientVersion : '0.1.0',
       mode: 'headless',

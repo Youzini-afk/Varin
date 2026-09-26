@@ -31,6 +31,7 @@ describe("harness path authority", () => {
       expect(relative?.canonicalResourceId).toBe(absolute?.canonicalResourceId);
       expect(relative).toMatchObject({ authorityId: "host-1", workspaceId: "workspace-1", inputPath: "file.ts" });
       expect(await authority.resolve(actor(), join(root, "..", "outside.ts"), { allowMissing: true })).toBeNull();
+      expect(await authority.resolve(actor(), "../outside.ts", { allowMissing: true })).toBeNull();
     } finally {
       rmSync(root, { recursive: true, force: true });
     }
@@ -125,6 +126,11 @@ describe("harness path authority", () => {
       // With allowMissing the miss resolves as an authorized future path.
       expect((await authority.resolve(anchored, "root-only.ts", { allowMissing: true }))?.resourceId)
         .toBe("packages/web/root-only.ts");
+      // `..` is valid for another path inside the authorized workspace, but
+      // cannot climb past its root even when the destination does not exist.
+      expect((await authority.resolve(anchored, "../../root-only.ts", { allowMissing: false }))?.resourceId)
+        .toBe("root-only.ts");
+      expect(await authority.resolve(anchored, "../../../outside.ts", { allowMissing: true })).toBeNull();
       // Absolute and scope authorization still apply unchanged.
       const scoped = { ...anchored, workspaceScope: ["packages/web"] };
       await expect(authority.resolve(scoped, "inside.ts", { allowMissing: false })).resolves.not.toBeNull();

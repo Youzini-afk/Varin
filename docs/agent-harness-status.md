@@ -38,6 +38,8 @@ RR0 完成源码级故障分层（E01 路径权限、E11 断连丢事件、E12 `
 
 **后续四项收口：**子 Agent 的 `thread.dispatch` 在首个异步步骤前冻结父分支操作目录与 `queryScope`，写进 Thread manifest；子 Pi 会话在首次模型/工具请求前建立独立 journal。隔离子工作区只在来源和目录可证明映射时继承，受限 scope 不兼容时明确失败。项目发现支持已授权显式起点、签名续页游标和不受默认深度 3/候选 200 限制的逐页扫描；每页重检授权，读失败目录以 `unreadablePaths` 明示。出站网络设置落在执行 Host：环境代理不自动成为可信代理，显式代理可由部署者委托代理侧最终地址策略；凭据在 Host 的 Pi auth owner 中单独保存、绑定代理端点，配置/认证失败和诊断不静默直连或泄露秘密。`document.readSource` 的 disk 分支现在由 Host 对授权 canonical target 打开句柄并返回实际 bytes；Pi `read`/`apply_patch` 不再按原路径二次读取。验证包括真 Pi 子线程首轮纵切、五层项目分页、受控 HTTP/HTTPS 代理与认证交错、Windows junction 换链后读取外部 fd 再拒绝返回的测试。
 
+**打包桌面端验收更正（2026-09-26）：**真实桌面会话出现 `work_context` 缺席、`read/write` 以 Pi 原生工具越过工作区根。根因是 Electron 独立创建 `PiRuntimeBroker` 时未传 Application Host 的握手能力，故 RR2/RR4 的 Host 路径与检索接线没有进入桌面 Pi worker；此前 Web/进程内测试不能证明桌面已接线。Electron 与 Web 现共用能力声明，桌面构造器也传递执行准入、运行世代及工作焦点解析。真 Pi worker 测试确认桌面会话注册 `work_context`、`document_read`、设置工具；真 Agent loop + Host router 夹具确认工作区内 `write` 成功、越界 `read/write` 被拒且不落盘/泄露正文；路径权威测试覆盖相对 `..` 越界拒绝与工作区内合法上行；新 Windows x64 包构建和已打包应用启动 smoke 通过。**尚未用新安装包的真实模型工具调用复测越界写入**，因此不把 RR2 桌面纵切标为 Proven。任意 shell 本身不是文件工具的工作区沙箱，严格隔离仍须独立处理。
+
 **边界：**可信代理委托的依据是部署者确认代理侧会限制最终目标；Host 无法独立观察其远端 DNS 结果。Node 当前路径读取没有跨平台的目录句柄相对打开，已验证的原路径/父 junction 交换可被拒绝，但不能宣称抵御攻击者精确操纵的所有父目录 ABA 交错。真实 Electron 安装包断网恢复、远程 Host、真实代理策略与 fake-IP、跨平台行为仍未实测；RR6 不因此标为 proven。
 
 下文既有阶段的历史交付记录保留；它们不覆盖上表新发现的缺陷与修复目标。

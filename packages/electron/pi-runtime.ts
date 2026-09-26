@@ -4,6 +4,7 @@ import {
   isExternalPiHostEntry,
   PiHostEntryUnavailableError,
   PiRuntimeBroker,
+  applicationHostClientCapabilities,
   resolveBundledPiHostEntry,
 } from '@varin/runtime-broker';
 import { FOUNDATIONAL_PI_PACKAGE_MANIFEST } from '@varin/protocol';
@@ -71,8 +72,10 @@ export const resolveElectronPiHostEntry = (options: {
 };
 
 export interface DesktopPiRuntimeBrokerOptions {
+  admitSessionExecution?: PiRuntimeBrokerOptions['admitSessionExecution'];
   agentDir?: string;
   clientVersion: string;
+  cwd?: string;
   emit: (event: PiRuntimeBrokerEvent) => void;
   foundationalPackages?: readonly FoundationalPiPackageManifestEntry[];
   hostEntry?: string;
@@ -80,12 +83,16 @@ export interface DesktopPiRuntimeBrokerOptions {
   packageRoot?: string;
   packaged: boolean;
   resourcesPath?: string;
+  resolveProjectWorkFocus?: PiRuntimeBrokerOptions['resolveProjectWorkFocus'];
+  runtimeGeneration?: number;
   runtimeSource?: PiRuntimeBrokerOptions['runtimeSource'];
 }
 
 export const createDesktopPiRuntimeBroker = ({
+  admitSessionExecution,
   agentDir,
   clientVersion,
+  cwd,
   emit,
   foundationalPackages = FOUNDATIONAL_PI_PACKAGE_MANIFEST.integrations,
   hostEntry,
@@ -93,6 +100,8 @@ export const createDesktopPiRuntimeBroker = ({
   packaged,
   packageRoot,
   resourcesPath,
+  resolveProjectWorkFocus,
+  runtimeGeneration,
   runtimeSource,
 }: DesktopPiRuntimeBrokerOptions): PiRuntimeBroker => {
   const resolvedHostEntry = hostEntry
@@ -102,8 +111,16 @@ export const createDesktopPiRuntimeBroker = ({
         ...(resourcesPath !== undefined ? { resourcesPath } : {}),
       });
   return new PiRuntimeBroker({
+    ...(admitSessionExecution ? { admitSessionExecution } : {}),
     ...(agentDir ? { agentDir } : {}),
     client: {
+      capabilities: applicationHostClientCapabilities({
+        documentRead: true,
+        documentPathOverlay: true,
+        workContext: true,
+        webRead: true,
+        webSearch: true,
+      }),
       clientName: 'varin-electron',
       clientVersion,
       mode: 'desktop',
@@ -111,8 +128,11 @@ export const createDesktopPiRuntimeBroker = ({
     emit,
     foundationalPackages,
     hostEntry: resolvedHostEntry,
+    ...(cwd ? { cwd } : {}),
     ...(nodePath ? { nodePath } : {}),
     ...(packageRoot ? { packageRoot } : {}),
+    ...(resolveProjectWorkFocus ? { resolveProjectWorkFocus } : {}),
+    ...(runtimeGeneration !== undefined ? { runtimeGeneration } : {}),
     ...(runtimeSource ? { runtimeSource } : {}),
   });
 };
