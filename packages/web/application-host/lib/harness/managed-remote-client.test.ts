@@ -50,4 +50,44 @@ describe("managed remote target recovery", () => {
     expect(reconciled).toEqual([{ workspaceId: "workspace-a", machineId: "managed:remote-host" }]);
     expect(fetchMock.mock.calls.some(([input]) => String(input).includes("/jobs/submit"))).toBe(false);
   });
+
+  it("passes an actor cancellation into the remote shell HTTP request", async () => {
+    let entered!: () => void;
+    const requestEntered = new Promise<void>((resolve) => { entered = resolve; });
+    const fetchMock = vi.fn(async (input: string | URL | Request, init?: RequestInit) => {
+      const url = String(input);
+      if (url.includes("/identity")) {
+        return new Response(JSON.stringify({
+          protocolVersion: 1,
+          hostId: "remote-host",
+          capabilities: ["managed-execution"],
+          machine: { machineId: "managed:remote-host", kind: "managed-remote", state: "available" },
+        }), { status: 200, headers: { "x-varin-managed-host": "remote-host" } });
+      }
+      expect(url).toContain("/shell/exec");
+      entered();
+      await new Promise<void>((_resolve, reject) => {
+        const signal = init?.signal;
+        if (!signal) return reject(new Error("remote request has no cancellation signal"));
+        if (signal.aborted) return reject(signal.reason);
+        signal.addEventListener("abort", () => reject(signal.reason), { once: true });
+      });
+      throw new Error("unreachable");
+    });
+    const registry = createManagedRemoteTargetRegistry({
+      coordinatorHostId: "coordinator",
+      kernel: {} as never,
+      resources: { listMachines: async () => [], registerMachine: async () => ({}) } as never,
+      readSettings: async () => ({ desktopHosts: [{ id: "remote", apiUrl: "https://remote.example" }] }),
+      fetch: fetchMock as typeof fetch,
+    });
+    await registry.refresh("workspace-a");
+    const controller = new AbortController();
+    const pending = registry.shellExec("workspace-a", "managed:remote-host", {
+      toolCallId: "call-1", command: "echo test", waitMs: 60_000,
+    }, controller.signal);
+    await requestEntered;
+    controller.abort();
+    await expect(pending).rejects.toBeInstanceOf(DOMException);
+  });
 });

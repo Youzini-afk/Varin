@@ -101,9 +101,10 @@ class ManagedTargetClient {
     return responseBody as Result;
   }
 
-  json<Result>(relativePath: string, body?: unknown, method = "POST"): Promise<Result> {
+  json<Result>(relativePath: string, body?: unknown, method = "POST", signal?: AbortSignal): Promise<Result> {
     return this.request(relativePath, {
       method,
+      ...(signal ? { signal } : {}),
       headers: { Accept: "application/json", ...(body === undefined ? {} : { "Content-Type": "application/json" }) },
       ...(body === undefined ? {} : { body: JSON.stringify(body) }),
     });
@@ -268,14 +269,14 @@ export function createManagedRemoteTargetRegistry(options: ManagedRemoteTargetRe
     } catch { return null; }
   };
 
-  const shellExec = async (workspaceId: string, machineId: string, input: { toolCallId: string; command: string; cwd?: string; waitMs: number }) => {
+  const shellExec = async (workspaceId: string, machineId: string, input: { toolCallId: string; command: string; cwd?: string; waitMs: number }, signal?: AbortSignal) => {
     const target = await targetFor(workspaceId, machineId);
     if (!target) throw new Error(`Managed target ${machineId} is unavailable`);
     const client = new ManagedTargetClient(target, fetchImpl);
     const result = await client.json<import("@varin/protocol").ShellExecResult>("/shell/exec", {
       coordinatorHostId: options.coordinatorHostId,
       ...input,
-    });
+    }, "POST", signal);
     if (result.kind === "spawn-failed") return result;
     const executionId = result.executionId ? routedShellId(machineId, result.executionId) : undefined;
     const id = "id" in result ? routedShellId(machineId, result.id) : undefined;
@@ -286,7 +287,7 @@ export function createManagedRemoteTargetRegistry(options: ManagedRemoteTargetRe
     };
   };
 
-  const shellRead = async (workspaceId: string, id: string, offset?: number, length?: number, waitMs?: number) => {
+  const shellRead = async (workspaceId: string, id: string, offset?: number, length?: number, waitMs?: number, signal?: AbortSignal) => {
     const route = parseShellId(id);
     if (!route) return null;
     if (!targets.has(route.machineId)) await refresh(workspaceId);
@@ -297,7 +298,7 @@ export function createManagedRemoteTargetRegistry(options: ManagedRemoteTargetRe
     if (offset !== undefined) query.set("offset", String(offset));
     if (length !== undefined) query.set("length", String(length));
     if (waitMs !== undefined) query.set("waitMs", String(waitMs));
-    const result = await client.request<import("@varin/protocol").ShellReadResult>(`/shell/${encodeURIComponent(options.coordinatorHostId)}/${encodeURIComponent(route.processId)}?${query}`);
+    const result = await client.request<import("@varin/protocol").ShellReadResult>(`/shell/${encodeURIComponent(options.coordinatorHostId)}/${encodeURIComponent(route.processId)}?${query}`, signal ? { signal } : {});
     return {
       ...result,
       ...(result.executionId ? { executionId: routedShellId(route.machineId, result.executionId) } : {}),

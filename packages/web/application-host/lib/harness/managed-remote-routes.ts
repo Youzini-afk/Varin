@@ -37,9 +37,19 @@ const sendError = (response: Response, error: unknown): void => {
   response.status(status).json({ error: message });
 };
 
+const whileResponseOpen = async <T>(response: Response, work: (signal: AbortSignal) => Promise<T>): Promise<T> => {
+  const controller = new AbortController();
+  const abort = (): void => { if (!response.writableEnded) controller.abort(); };
+  response.once("close", abort);
+  if (response.destroyed) abort();
+  try { return await work(controller.signal); }
+  finally { response.off("close", abort); }
+};
+
 const route = (handler: (request: Request, response: Response) => Promise<void>) => (
   async (request: Request, response: Response, next: NextFunction) => {
     try { await handler(request, response); } catch (error) {
+      if (response.destroyed) return;
       if (response.headersSent) next(error);
       else sendError(response, error);
     }
@@ -190,23 +200,26 @@ export function registerManagedRemoteRoutes(
   app.post(`${base}/shell/exec`, requireAuth, requireManagedAuth, route(async (request, response) => {
     const body = value(request.body);
     const owner = authorize(request, body.coordinatorHostId);
-    response.json(await service.shellExec(owner.principalId, {
+    const result = await whileResponseOpen(response, (signal) => service.shellExec(owner.principalId, {
       coordinatorHostId: owner.coordinatorHostId,
       toolCallId: asString(body.toolCallId, "Tool call identity"),
       command: asString(body.command, "Command"),
       ...(typeof body.cwd === "string" && body.cwd.trim() ? { cwd: body.cwd.trim() } : {}),
       waitMs: body.waitMs === undefined ? 10_000 : asNonNegativeInteger(body.waitMs, "waitMs"),
-    }));
+    }, signal));
+    if (!response.destroyed) response.json(result);
   }));
 
   app.get(`${base}/shell/:coordinatorHostId/:processId`, requireAuth, requireManagedAuth, route(async (request, response) => {
     const owner = authorize(request, request.params.coordinatorHostId);
-    response.json(await service.shellRead(
+    const result = await whileResponseOpen(response, (signal) => service.shellRead(
       owner.principalId, owner.coordinatorHostId, asString(request.params.processId, "Shell identity"),
       request.query.offset === undefined ? 0 : asNonNegativeInteger(request.query.offset, "offset"),
       request.query.length === undefined ? 32 * 1024 : asNonNegativeInteger(request.query.length, "length"),
       request.query.waitMs === undefined ? 0 : asNonNegativeInteger(request.query.waitMs, "waitMs"),
+      signal,
     ));
+    if (!response.destroyed) response.json(result);
   }));
 
   app.post(`${base}/shell/:coordinatorHostId/:processId/write`, requireAuth, requireManagedAuth, route(async (request, response) => {

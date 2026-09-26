@@ -737,7 +737,8 @@ export function createManagedRemoteExecutionService(options: ManagedRemoteExecut
     return { scoped, record, payload };
   };
 
-  const shellExec = async (principalId: string, input: { coordinatorHostId: string; toolCallId: string; command: string; cwd?: string; waitMs: number }): Promise<ShellExecResult> => {
+  const shellExec = async (principalId: string, input: { coordinatorHostId: string; toolCallId: string; command: string; cwd?: string; waitMs: number }, signal?: AbortSignal): Promise<ShellExecResult> => {
+    signal?.throwIfAborted();
     const coordinatorHostId = input.coordinatorHostId.trim();
     const toolCallId = input.toolCallId.trim();
     const command = input.command.trim();
@@ -751,11 +752,13 @@ export function createManagedRemoteExecutionService(options: ManagedRemoteExecut
       const payload = recordPayload(record);
       if (text(payload.command) !== command || text(payload.canonicalCwd) !== canonicalCwd) throw new Error("Remote shell tool call is already bound to another command or cwd");
     } else {
+      signal?.throwIfAborted();
       record = await putRecord({
         recordId, recordType: "managed.remote.shell", state: "accepted",
         payload: { id: recordId.slice(SHELL_PREFIX.length), principalId, coordinatorHostId, toolCallId, processId, command, canonicalCwd, createdAt: now() },
       });
     }
+    signal?.throwIfAborted();
     const root = await scoped.fileRootRegister({ workspaceId: WORKSPACE_ID, executionWorkspaceId: WORKSPACE_ID, canonicalRoot: canonicalCwd });
     const rootId = text(root.rootId);
     if (!rootId) throw new Error("Managed remote shell cwd has no root identity");
@@ -765,6 +768,7 @@ export function createManagedRemoteExecutionService(options: ManagedRemoteExecut
     const environment = Object.fromEntries(Object.entries(process.env)
       .filter((entry): entry is [string, string] => TARGET_BASE_ENVIRONMENT.has(entry[0]) && typeof entry[1] === "string"));
     const startedAt = now();
+    signal?.throwIfAborted();
     await scoped.processSpawn({
       workspaceId: WORKSPACE_ID, processId, rootId, cwd: "", command: executable, args,
       env: Object.entries(environment).map(([name, value]) => ({ name, value })), mode: "pipe",
@@ -772,9 +776,11 @@ export function createManagedRemoteExecutionService(options: ManagedRemoteExecut
     const deadline = startedAt + Math.max(0, input.waitMs);
     let snapshot = await shellSnapshot(scoped, processId);
     while (snapshot.observation.writerActive && now() < deadline) {
+      signal?.throwIfAborted();
       await new Promise((resolve) => setTimeout(resolve, Math.min(100, Math.max(1, deadline - now()))));
       snapshot = await shellSnapshot(scoped, processId);
     }
+    signal?.throwIfAborted();
     if (!snapshot.observation.writerActive && snapshot.observation.status !== "unknown") {
       return {
         kind: "completed", exitCode: snapshot.observation.exitCode ?? null, durationMs: Math.max(0, now() - startedAt),
@@ -785,16 +791,19 @@ export function createManagedRemoteExecutionService(options: ManagedRemoteExecut
     return { kind: "background", id: processId, waitedMs: Math.max(0, now() - startedAt), cwd: canonicalCwd, outputSoFar: snapshot.stdout, command, toolCallId, executionId: processId };
   };
 
-  const shellRead = async (principalId: string, coordinatorHostId: string, processId: string, offset: number, length: number, waitMs = 0): Promise<ShellReadResult> => {
+  const shellRead = async (principalId: string, coordinatorHostId: string, processId: string, offset: number, length: number, waitMs = 0, signal?: AbortSignal): Promise<ShellReadResult> => {
+    signal?.throwIfAborted();
     const { scoped, payload } = await shellRecord(principalId, coordinatorHostId, processId);
     let snapshot = await shellSnapshot(scoped, processId);
     const initialLength = Buffer.byteLength(`${snapshot.stdout}${snapshot.stderr}`, "utf8");
     const deadline = now() + Math.max(0, waitMs);
     while (snapshot.observation.writerActive && now() < deadline && initialLength <= offset) {
+      signal?.throwIfAborted();
       await new Promise((resolve) => setTimeout(resolve, Math.min(100, Math.max(1, deadline - now()))));
       snapshot = await shellSnapshot(scoped, processId);
       if (Buffer.byteLength(`${snapshot.stdout}${snapshot.stderr}`, "utf8") > offset) break;
     }
+    signal?.throwIfAborted();
     const combined = `${snapshot.stdout}${snapshot.stderr ? `\n[stderr]\n${snapshot.stderr}` : ""}`;
     const slice = sliceUtf8ByBytes(combined, offset, length);
     const command = text(payload.command);

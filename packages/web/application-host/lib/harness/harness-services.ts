@@ -280,7 +280,7 @@ export function createShellExecService(host: HarnessServiceHost): HarnessService
           command: params.command,
           ...(params.cwd ? { cwd: params.cwd } : {}),
           waitMs: params.waitMs ?? 60_000,
-        });
+        }, ctx.signal);
         if (remote.kind === "completed" && remote.executionId) {
           host.observeShellCompletion(ctx.sessionId, {
             command: params.command,
@@ -388,7 +388,7 @@ export function createShellReadService(host: HarnessServiceHost): HarnessService
   return {
     handle: async (params, ctx: HarnessServiceContext) => {
       if (host.managedRemoteTargets) {
-        const remote = await host.managedRemoteTargets.shellRead(requiredWorkspaceId(ctx), params.id, params.offset, params.length, params.waitMs);
+        const remote = await host.managedRemoteTargets.shellRead(requiredWorkspaceId(ctx), params.id, params.offset, params.length, params.waitMs, ctx.signal);
         if (remote) return remote;
       }
       const supervisor = host.getShellSupervisor(ctx.sessionId);
