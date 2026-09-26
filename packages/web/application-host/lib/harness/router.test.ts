@@ -590,4 +590,26 @@ describe("scheduler wait admission transport", () => {
     await pending;
     expect(signal!.aborted).toBe(true);
   });
+
+  it("keeps an explicitly long shell observation alive until cancellation", async () => {
+    let signal: AbortSignal | undefined;
+    const router = createHarnessRouter({
+      defaultTimeoutMs: 10, respond: async () => undefined,
+      resolveActor: async () => resolvedActor(["process.shell"]),
+    });
+    router.register("shell.read", {
+      handle: async (_params, ctx) => {
+        signal = ctx.signal;
+        await new Promise<void>((resolve) => ctx.signal.addEventListener("abort", () => resolve(), { once: true }));
+        return { text: "", offset: 0, length: 0, nextOffset: 0, total: 0, eof: true, running: false };
+      },
+    });
+    const pending = router.processEvent(harnessEvent("shell.read", { id: "sh_1", waitMs: 60_000 }, { timeoutMs: 0 }));
+    await vi.waitFor(() => expect(signal).toBeDefined());
+    await new Promise((resolve) => setTimeout(resolve, 30));
+    expect(signal!.aborted).toBe(false);
+    router.dispose();
+    await pending;
+    expect(signal!.aborted).toBe(true);
+  });
 });

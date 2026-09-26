@@ -277,6 +277,9 @@ process manager.
   setting, chosen from focused-check versus package-typecheck timings observed
   during 7H and still configurable per workspace. Timing reports accepted,
   sent, first output, detached, exited, and responded stages.
+- An explicitly longer `shell.exec` or `shell.read` wait is not shortened by
+  the generic one-hour Harness RPC ceiling. The requested wait owns its
+  deadline; cancellation and actor disposal still end the observation.
 - `shell.read(waitMs)` waits on output/exit events only when an incremental read
   has no unread bytes. Explicit byte slices and static outputs remain immediate.
   Request cancellation removes the observer without terminating the process;

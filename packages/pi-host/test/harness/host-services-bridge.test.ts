@@ -181,4 +181,15 @@ describe("scheduler wait transport lifetime", () => {
       (error: unknown) => error instanceof HarnessRequestError && error.code === "timeout");
     bridge.dispose();
   });
+
+  it("lets a shell observation own its wait beyond the generic RPC deadline", async () => {
+    const controller = new AbortController();
+    const bridge = new HostServicesBridge({ emit: () => undefined, sessionId: "session-1", defaultTimeoutMs: 10 });
+    const pending = bridge.request("shell.read", { id: "sh_1", waitMs: 60_000 }, { timeoutMs: 0, signal: controller.signal });
+    const rejected = assert.rejects(pending, (error: unknown) => error instanceof HarnessRequestError && error.message === "aborted");
+    await new Promise((resolve) => setTimeout(resolve, 30));
+    controller.abort();
+    await rejected;
+    bridge.dispose();
+  });
 });

@@ -8,6 +8,7 @@ import {
   createDiagnosticsTool,
 } from "../../src/harness/output-tools.js";
 import type { HostServicesBridge } from "../../src/harness/host-services-bridge.js";
+import { HARNESS_MAX_REQUEST_TIMEOUT_MS } from "@varin/protocol";
 
 function createFakeBridge(handler: (method: string, params: Record<string, unknown>) => unknown): Pick<HostServicesBridge, "request"> {
   return {
@@ -90,6 +91,20 @@ describe("get_output tool", () => {
     await executeTool(tool, { handle: "sh_1", waitMs: 2_000 });
     assert.deepEqual(observed.params, { id: "sh_1", waitMs: 2_000 });
     assert.deepEqual(observed.options, { timeoutMs: 32_000 });
+  });
+
+  it("keeps a longer shell observation wait without the generic RPC ceiling", async () => {
+    let observed: { params?: unknown; options?: unknown } = {};
+    const bridge = {
+      request: async (_method: string, params: unknown, options: unknown) => {
+        observed = { params, options };
+        return { text: "", offset: 0, length: 0, nextOffset: 0, total: 0, eof: true, running: true };
+      },
+    } as unknown as HostServicesBridge;
+    const waitMs = HARNESS_MAX_REQUEST_TIMEOUT_MS + 1;
+    await executeTool(createGetOutputTool(bridge, "s1"), { handle: "sh_1", waitMs });
+    assert.deepEqual(observed.params, { id: "sh_1", waitMs });
+    assert.deepEqual(observed.options, { timeoutMs: 0 });
   });
 
   it("reads stored output via output.read for out_ handles", async () => {

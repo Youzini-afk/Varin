@@ -69,10 +69,12 @@ export function createBashTool(
         const waitMs = params.waitMs ?? defaultWaitMs;
         // The observation request must outlive the requested foreground wait.
         // This governs the RPC only; it never becomes a process execution limit.
-        const requestTimeoutMs = Math.min(
-          HARNESS_MAX_REQUEST_TIMEOUT_MS,
-          Math.max(30_000, waitMs + 30_000),
-        );
+        const requestedTimeoutMs = Math.max(30_000, waitMs + 30_000);
+        // A requested foreground wait may exceed the generic RPC ceiling.
+        // Shell execution still detaches at waitMs, and actor cancellation
+        // remains available; do not turn that wait into a transport failure.
+        const requestTimeoutMs = requestedTimeoutMs >= HARNESS_MAX_REQUEST_TIMEOUT_MS
+          ? 0 : requestedTimeoutMs;
         const result = await bridge.request("shell.exec", {
           command: params.command,
           toolCallId,

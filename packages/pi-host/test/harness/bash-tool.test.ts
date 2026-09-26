@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import { describe, it } from "node:test";
 import { createBashTool } from "../../src/harness/bash-tool.js";
 import type { HostServicesBridge } from "../../src/harness/host-services-bridge.js";
-import type { ShellExecResult } from "@varin/protocol";
+import { HARNESS_MAX_REQUEST_TIMEOUT_MS, type ShellExecResult } from "@varin/protocol";
 
 function createFakeBridge(result: ShellExecResult): Pick<HostServicesBridge, "request"> {
   return {
@@ -29,6 +29,21 @@ describe("bash tool", () => {
     await tool.execute("call-1", { command: "long", waitMs: 0 }, undefined, undefined, undefined as never);
     assert.deepEqual(observed.params, { command: "long", toolCallId: "call-1", waitMs: 0 });
     assert.deepEqual(observed.options, { timeoutMs: 30_000 });
+  });
+
+  it("does not truncate an explicitly longer foreground wait to the generic RPC ceiling", async () => {
+    let observed: { params?: unknown; options?: unknown } = {};
+    const bridge = {
+      request: async (_method: string, params: unknown, options: unknown) => {
+        observed = { params, options };
+        return { kind: "preparing", id: "exec_long", executionId: "exec_long", waitedMs: 0, command: "long" };
+      },
+    } as unknown as HostServicesBridge;
+    const waitMs = HARNESS_MAX_REQUEST_TIMEOUT_MS + 1;
+    const tool = createBashTool(bridge, "s1", "/workspace");
+    await tool.execute("call-long", { command: "long", waitMs }, undefined, undefined, undefined as never);
+    assert.deepEqual(observed.params, { command: "long", toolCallId: "call-long", waitMs });
+    assert.deepEqual(observed.options, { timeoutMs: 0 });
   });
 
   it("uses the configured session wait when the call omits waitMs", async () => {

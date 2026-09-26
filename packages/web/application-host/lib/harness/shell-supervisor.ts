@@ -31,6 +31,22 @@ export interface SelectInterpreterInput {
 }
 
 const WSL_PATH_PATTERN = /^\\\\wsl(\$|\.localhost)\\([^\\]+)/i;
+const MAX_TIMER_DELAY_MS = 2_147_483_647;
+
+/** A timer is only a wake-up hint; the accepted deadline decides when to detach. */
+const scheduleAtDeadline = (deadlineAt: number, onDeadline: () => void): (() => void) => {
+  let timer: ReturnType<typeof setTimeout>;
+  const check = (): void => {
+    const remaining = deadlineAt - Date.now();
+    if (remaining > 0) {
+      timer = setTimeout(check, Math.min(remaining, MAX_TIMER_DELAY_MS));
+      return;
+    }
+    onDeadline();
+  };
+  timer = setTimeout(check, Math.min(Math.max(0, deadlineAt - Date.now()), MAX_TIMER_DELAY_MS));
+  return () => clearTimeout(timer);
+};
 
 export function selectInterpreter(input: SelectInterpreterInput): ShellInterpreter | { unavailable: { reason: string; hint: string } } {
   const { platform, workspaceRoot, setting, discovered, remote } = input;
@@ -501,7 +517,7 @@ export function createShellSupervisor(deps: ShellSupervisorOptions) {
     command: string;
     resolve: (result: ShellExecResult) => void;
     reject: (error: Error) => void;
-    timeout: ReturnType<typeof setTimeout>;
+    cancelTimeout: () => void;
     cwd: string;
     anchorCwdToApply?: string;
     writer: ShellWriter | null;
@@ -809,7 +825,7 @@ export function createShellSupervisor(deps: ShellSupervisorOptions) {
       if (isCurrentSession()) {
         shellReady = false;
         shellReadyReject?.(error);
-        if (pendingCommand) { clearTimeout(pendingCommand.timeout); pendingCommand.reject(error); }
+        if (pendingCommand) { pendingCommand.cancelTimeout(); pendingCommand.reject(error); }
       }
       // Keep handles and writers until a real exit, not merely a broken pipe.
     }));
@@ -836,7 +852,7 @@ export function createShellSupervisor(deps: ShellSupervisorOptions) {
       if (disposeRequested) {
         const ownsPending = pendingCommand?.commandRunId === handle.id;
         if (ownsPending) {
-          clearTimeout(pendingCommand!.timeout);
+          pendingCommand!.cancelTimeout();
           completeCommand(event.exitCode, true, true);
         }
         const background = backgroundShells.get(handle.id);
@@ -848,7 +864,7 @@ export function createShellSupervisor(deps: ShellSupervisorOptions) {
         return;
       }
       if (pendingCommand && wasCurrent) {
-        clearTimeout(pendingCommand.timeout);
+        pendingCommand.cancelTimeout();
         completeCommand(event.exitCode, false);
       }
       const background = backgroundShells.get(handle.id);
@@ -972,7 +988,7 @@ export function createShellSupervisor(deps: ShellSupervisorOptions) {
 
   const completeCommand = (exitCode: number | null, cancelled: boolean, disposedResult = false): void => {
     if (!pendingCommand) return;
-    clearTimeout(pendingCommand.timeout);
+    pendingCommand.cancelTimeout();
     pendingCommand.abortCleanup?.();
     const cmd = pendingCommand;
     pendingCommand = null;
@@ -1181,7 +1197,7 @@ export function createShellSupervisor(deps: ShellSupervisorOptions) {
         outputBuffer = "";
         const detachToBackground = (): void => {
           if (pendingCommand?.token !== token) return;
-          clearTimeout(timeout);
+          cancelTimeout();
           pendingCommand.abortCleanup?.();
           const handle = sessionHandle;
           if (!handle) {
@@ -1246,8 +1262,7 @@ export function createShellSupervisor(deps: ShellSupervisorOptions) {
           notifyShellChanged(id);
           notifyShellChanged(executionId);
         };
-        const timeout = setTimeout(detachToBackground,
-          Math.max(0, options.waitMs - (Date.now() - timing.acceptedAt)));
+        const cancelTimeout = scheduleAtDeadline(timing.acceptedAt + options.waitMs, detachToBackground);
         const onAbort = (): void => detachToBackground();
 
         pendingCommand = {
@@ -1257,7 +1272,7 @@ export function createShellSupervisor(deps: ShellSupervisorOptions) {
           command,
           resolve: resolvePromise,
           reject: rejectPromise,
-          timeout,
+          cancelTimeout,
           cwd,
           ...(reanchor && options.cwd === undefined && admittedAnchor !== undefined
             ? { anchorCwdToApply: admittedAnchor }
@@ -1283,7 +1298,7 @@ export function createShellSupervisor(deps: ShellSupervisorOptions) {
         // If cwd is different from current, cd first
         const shell = sessionHandle;
         if (!shell) {
-          clearTimeout(timeout);
+          cancelTimeout();
           pendingCommand?.abortCleanup?.();
           pendingCommand = null;
           commandStarting = false;
@@ -1304,7 +1319,7 @@ export function createShellSupervisor(deps: ShellSupervisorOptions) {
           shell.write(`${framed}${interpreter.kind === "powershell" ? "\r\n" : "\n"}`);
           notifyShellChanged(executionId);
         } catch (error) {
-          clearTimeout(timeout);
+          cancelTimeout();
           pendingCommand?.abortCleanup?.();
           pendingCommand = null;
           commandStarting = false;
@@ -1379,7 +1394,7 @@ export function createShellSupervisor(deps: ShellSupervisorOptions) {
     const settleResponse = (result: ShellExecResult): void => {
       if (responseSettled) return;
       responseSettled = true;
-      clearTimeout(preparationTimer);
+      cancelPreparationTimer();
       const respondedAt = Date.now();
       timing.respondedAt = respondedAt;
       const returned = "timing" in result
@@ -1393,7 +1408,7 @@ export function createShellSupervisor(deps: ShellSupervisorOptions) {
       resolveResponse(returned);
     };
     const waitBudget = Math.max(0, options.waitMs);
-    const preparationTimer = setTimeout(() => {
+    const onPreparationBudget = (): void => {
       if (accepted.result) {
         settleResponse(accepted.result);
         return;
@@ -1411,7 +1426,8 @@ export function createShellSupervisor(deps: ShellSupervisorOptions) {
         timing: { ...timing },
       });
       notifyShellChanged(executionId);
-    }, waitBudget);
+    };
+    const cancelPreparationTimer = scheduleAtDeadline(timing.acceptedAt + waitBudget, onPreparationBudget);
 
     void execCommand(command, options, accepted).then((result) => {
       accepted.result = compactAcceptedResult(result);
@@ -1425,7 +1441,7 @@ export function createShellSupervisor(deps: ShellSupervisorOptions) {
       accepted.phase = "failed";
       if (!responseSettled) {
         responseSettled = true;
-        clearTimeout(preparationTimer);
+        cancelPreparationTimer();
         delete accepted.promise;
         rejectResponse(error);
       }
@@ -1539,7 +1555,7 @@ export function createShellSupervisor(deps: ShellSupervisorOptions) {
       const waiters = shellChangeWaiters.get(waitId) ?? new Set<() => void>();
       shellChangeWaiters.set(waitId, waiters);
       const cleanup = (): void => {
-        if (timer) clearTimeout(timer);
+        cancelTimeout();
         signal?.removeEventListener("abort", onAbort);
         waiters.delete(wake);
         if (waiters.size === 0 && shellChangeWaiters.get(waitId) === waiters) shellChangeWaiters.delete(waitId);
@@ -1554,7 +1570,7 @@ export function createShellSupervisor(deps: ShellSupervisorOptions) {
       const wake = (): void => finish();
       const onAbort = (): void => finish(new Error("Shell output wait aborted"));
       waiters.add(wake);
-      const timer = setTimeout(wake, waitMs);
+      const cancelTimeout = scheduleAtDeadline(Date.now() + waitMs, wake);
       if (signal?.aborted) {
         onAbort();
         return;
@@ -1622,7 +1638,7 @@ export function createShellSupervisor(deps: ShellSupervisorOptions) {
       shellReady = false;
       rejectReady?.(new Error("Shell supervisor has been disposed"));
       if (pendingCommand) {
-        clearTimeout(pendingCommand.timeout);
+        pendingCommand.cancelTimeout();
         pendingCommand.abortCleanup?.();
       }
 

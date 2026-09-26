@@ -385,10 +385,10 @@ export const createHarnessRouter = (options: HarnessRouterOptions) => {
     const requestTimeoutMs = (typeof data.timeoutMs === "number" && data.timeoutMs > 0)
       ? Math.min(data.timeoutMs, HARNESS_MAX_REQUEST_TIMEOUT_MS)
       : defaultTimeoutMs;
-    // Only the actor-scoped scheduler waits may outlive their dependency or
-    // reply deadline. Worker cancellation, generation replacement, and Host
-    // disposal still abort them.
-    const timer = (data.method === "thread.wait" || data.method === "thread.send" || data.method === "experiment.wait" || data.method === "compaction.run" || data.method === "materials.read") && data.timeoutMs === 0
+    // Scheduler waits and shell observations may own their requested wait
+    // duration. Worker cancellation, generation replacement, and Host disposal
+    // still abort these zero-transport-timeout requests.
+    const timer = (data.method === "thread.wait" || data.method === "thread.send" || data.method === "experiment.wait" || data.method === "compaction.run" || data.method === "materials.read" || data.method === "shell.exec" || data.method === "shell.read") && data.timeoutMs === 0
       ? undefined : setTimeout(() => controller.abort(), requestTimeoutMs);
     try {
       const actor = await options.resolveActor(identity, controller.signal, data.contextEntryId);

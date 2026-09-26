@@ -1953,8 +1953,9 @@ export interface HarnessRequestData {
    * uses it instead of its own default so a deliberately long call such as
    * `thread.wait` is not aborted at the default 30s. Clamped by the router
    * to `HARNESS_MAX_REQUEST_TIMEOUT_MS`; absent means "use the default".
-   * Only `thread.wait` accepts 0: its dependency timeout is in params, while
-   * execution-slot reacquisition remains bound to cancellation and actor lifetime.
+   * A zero transport timeout is reserved for methods with their own wait
+   * deadline or lifecycle, including scheduler waits and shell observations;
+   * cancellation and actor lifetime still bound the request.
    */
   timeoutMs?: number;
 }

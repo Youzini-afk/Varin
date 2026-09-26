@@ -54,10 +54,8 @@ export function createGetOutputTool(bridge: HostServicesBridge, _sessionId: stri
             ? (signal === undefined ? {} : { signal })
             : {
                 ...(signal === undefined ? {} : { signal }),
-                timeoutMs: Math.min(
-                  HARNESS_MAX_REQUEST_TIMEOUT_MS,
-                  Math.max(30_000, params.waitMs + 30_000),
-                ),
+                timeoutMs: params.waitMs + 30_000 >= HARNESS_MAX_REQUEST_TIMEOUT_MS
+                  ? 0 : Math.max(30_000, params.waitMs + 30_000),
               });
         }
         const shellCompletion = result.running === false && result.executionId
