@@ -1,4 +1,3 @@
-import path from "node:path";
 import type { HarnessService, HarnessServiceContext } from "./router.js";
 import type { FetchResult, HarnessServiceMap, ShellExecResultSpawnFailed, WebFetchRequest } from "@varin/protocol";
 import { createMaterialReadService } from "./material-read-service.js";
@@ -748,13 +747,57 @@ export function createDocumentSurfaceWriteService(
         ...(change.expectedRevision === undefined ? {} : { expectedRevision: change.expectedRevision }),
         ...(change.expectedHash === undefined ? {} : { expectedHash: change.expectedHash }),
       }));
-      return host.documentSurfaceWrite(
-        ctx.sessionId,
-        ctx.authorizedPaths[0]!.workspaceId,
-        ctx.inputContext ?? { source: "disk" },
-        mapped,
-        ctx.signal,
-      );
+      // Changes may span multiple resource roots (cross-directory patch);
+      // Documents resolves each resourceId against its own root, so write
+      // per root and merge the per-change outcomes in request order.
+      const groups = new Map<string, Array<{ index: number; change: (typeof mapped)[number] }>>();
+      for (const [index, change] of mapped.entries()) {
+        const workspaceId = ctx.authorizedPaths[index]!.workspaceId;
+        const group = groups.get(workspaceId) ?? [];
+        group.push({ index, change });
+        groups.set(workspaceId, group);
+      }
+      if (groups.size === 1) {
+        return host.documentSurfaceWrite(
+          ctx.sessionId,
+          ctx.authorizedPaths[0]!.workspaceId,
+          ctx.inputContext ?? { source: "disk" },
+          mapped,
+          ctx.signal,
+        );
+      }
+      const mergedResults: (import("@varin/protocol").DocumentSurfaceWritePathResult | undefined)[] =
+        new Array(mapped.length);
+      let allDisk = true;
+      let allApplied = true;
+      let allUnavailable = true;
+      let allConflict = true;
+      for (const [workspaceId, group] of groups) {
+        const result = await host.documentSurfaceWrite(
+          ctx.sessionId,
+          workspaceId,
+          ctx.inputContext ?? { source: "disk" },
+          group.map((row) => row.change),
+          ctx.signal,
+        );
+        if (result.status === "disk") {
+          allApplied = false;
+          allUnavailable = false;
+          allConflict = false;
+          for (const row of group) mergedResults[row.index] = { path: row.change.resourceId, target: "disk", status: "disk" };
+          continue;
+        }
+        allDisk = false;
+        if (result.status !== "applied") allApplied = false;
+        if (result.status !== "unavailable") allUnavailable = false;
+        if (result.status !== "conflict") allConflict = false;
+        for (const [rowIndex, row] of group.entries()) {
+          mergedResults[row.index] = result.results[rowIndex] ?? { path: row.change.resourceId, target: "disk", status: "unavailable" };
+        }
+      }
+      if (allDisk) return { status: "disk" };
+      const status = allApplied ? "applied" : allUnavailable ? "unavailable" : allConflict ? "conflict" : "partial";
+      return { status, results: mergedResults.map((row, index) => row ?? { path: mapped[index]!.resourceId, target: "disk" as const, status: "unavailable" as const }) };
     },
   };
 }

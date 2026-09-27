@@ -10,11 +10,13 @@ evidence may still name that surface where it records work completed before reti
 
 Last updated: 2026-09-27
 
-Design direction (D-337, not implemented): [task/resource Harness and continuous retrieval](resource-oriented-harness-design.md)
+Design direction (D-337, implemented HR0–HR5): [task/resource Harness and continuous retrieval](resource-oriented-harness-design.md)
 separates project grouping from session/task ownership, resource identity, execution directories and indexes.
-HR0–HR5 replace the mutable session work-context and workspace-bound retrieval model. The process and
-workspace descriptions below continue to describe existing implementation until their consumers change;
-this design entry does not claim that the replacement has shipped.
+HR0–HR5 replaced the mutable session work-context and workspace-bound retrieval model: tools resolve paths
+against the session cwd and resource roots at admission, retrieval scopes are per-request, and indexes key
+on resource/content version/model. Per-scenario evidence and remaining untested boundaries are recorded in
+[agent-harness-status.md](agent-harness-status.md); the process and workspace descriptions below describe
+current implementation.
 
 ## 1. Context
 
@@ -298,8 +300,8 @@ working directory before Pi loads extensions. New sessions already provide that 
 sessions without an explicit override are resolved from the session header by the selected Pi SDK
 before the child process is created. This keeps extensions that read `process.cwd()` during their
 factory phase aligned with Pi's session snapshot, project trust, worktrees, and project configuration.
-The reusable catalog worker deliberately retains the broker's fixed discovery directory and switches
-workspace context through the Host protocol instead of changing process-wide state.
+The reusable catalog worker deliberately retains the broker's fixed discovery directory and addresses
+per-request resource roots through the Host protocol instead of changing process-wide state.
 
 Opened sessions stay live until explicitly closed or the application exits. An optional hot-worker
 budget and idle eviction remain a later deployment optimization; eviction must be graceful: stop

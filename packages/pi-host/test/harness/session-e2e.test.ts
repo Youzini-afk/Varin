@@ -14,7 +14,7 @@
  */
 import assert from "node:assert/strict";
 import { existsSync } from "node:fs";
-import { mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
+import { mkdir, mkdtemp, readFile, realpath, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path, { join } from "node:path";
 import { spawn } from "node:child_process";
@@ -340,7 +340,7 @@ const waitUntil = async (predicate: () => Promise<boolean>): Promise<void> => {
   }
 };
 
-describe("session e2e — durable work context", () => {
+describe("session e2e — authorized path boundary", () => {
   it("keeps desktop-capability read and write calls behind the authorized root", async () => {
     await withTempRoot("varin-desktop-path-boundary-", async (outer) => {
       const root = join(outer, "workspace");
@@ -405,6 +405,72 @@ describe("session e2e — durable work context", () => {
     });
   });
 
+});
+
+describe("session e2e — cross-directory access", () => {
+  it("reads an authorized external file by absolute path through the real read tool", async () => {
+    await withTempRoot("varin-cross-dir-read-", async (outer) => {
+      const root = join(outer, "workspace");
+      await mkdir(root);
+      const externalDir = join(outer, "external");
+      await mkdir(externalDir);
+      const externalFile = join(externalDir, "notes.md");
+      await writeFile(externalFile, "external payload\n");
+      const faux = registerFauxProvider();
+      let toolResult = "";
+      faux.setResponses([
+        () => fauxAssistantMessage([fauxToolCall("read", { path: externalFile })]),
+        (context) => {
+          toolResult = serializedToolResult(context, "read");
+          return fauxAssistantMessage("done");
+        },
+      ]);
+      // Real path authority over a minimal registry: the session workspace
+      // plus one directory resource root covering the external directory.
+      const externalCanonical = await realpath(externalDir);
+      const externalRoot = { workspaceId: "external-root-b", canonicalPath: externalCanonical, kind: "directory" as const };
+      const authority = createHarnessPathAuthority({
+        authorityId: "cross-dir-authority",
+        documents: {
+          inspectWorkspace: async (id) => {
+            if (id === externalRoot.workspaceId) return { root: externalRoot.canonicalPath };
+            return { root };
+          },
+          findContainingResourceRoot: async (canonical) => {
+            const rel = path.relative(externalRoot.canonicalPath, canonical);
+            return rel !== "" && !rel.startsWith("..") && !path.isAbsolute(rel) ? externalRoot : null;
+          },
+          ensureResourceRoot: async (canonical, kind) => {
+            assert.equal(kind, "file");
+            return { workspaceId: "external-root-file", canonicalPath: canonical, kind };
+          },
+        },
+      });
+      const session = await setupSession({
+        root,
+        faux,
+        harnessDocumentRead: true,
+        authorizeWorkspacePath: (actor, candidate, options) => authority.resolve(actor, candidate, options),
+        serviceHostOptions: {
+          pathAuthority: authority,
+          documentReadSource: async (_sessionId, _context, resourceId) => {
+            assert.equal(resourceId, "notes.md");
+            return { status: "disk" as const };
+          },
+          readAuthorizedDiskFile: (ctx, authorized) => authority.readAuthorizedFile(ctx.actor, authorized, ctx.signal),
+        },
+      });
+      try {
+        const created = await session.host.create(root);
+        await session.host.prompt(created.sessionId, "Read the external file");
+        await session.host.session.waitForIdle();
+        assert.match(toolResult, /external payload/, JSON.stringify(toolResult));
+      } finally {
+        await session.dispose();
+        faux.unregister();
+      }
+    });
+  });
 });
 
 describe("session e2e — work focus", () => {

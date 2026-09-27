@@ -86,6 +86,30 @@ cwd/资源根语义并新增外部锚定用例。
 ui typecheck 绿；protocol/runtime-broker/extension dist 重建。
 未测：真实桌面会话重开与目录离线的产品化纵切（属 HR5 场景验收）。
 
+HR5 已接线（wired，设计 §12 场景逐条对证据）：
+
+- 无项目聊天+子任务：service-host 无项目注册/launch 目录离线不阻塞（HR0 用例）、session scope 的 todo/knowledge/
+  Thread owner 持久化；pi 侧工具在无 workspace 会话下经资源根寻址照常工作。
+- 同一任务跨目录读/写/输出：session-e2e 新增"绝对路径外部文件经真实 read 工具+真实 path-authority+Host 授权字节"
+  纵切；document-read-source 新增"一次 surfaceWrite 跨两个资源根"用例——发现并修复 `document.surfaceWrite` 原先把
+  全部 changes 归到 `authorizedPaths[0].workspaceId` 的错路由缺陷（现按根分组逐根写、按序合并结果，跨根原子性
+  如实降为逐根）。path-authority 资源根用例覆盖外部文件/目录根、allowMissing 写目标、ENOENT。
+- 新目录即时检索与冷/热组合：`search.content` 多单元模型（HR2）+ 语义空时如实降级（HR3，semantic-workspace e2e
+  的独立工作区与 unconfigured/invalid/failure 分态用例）。
+- 外部修改/草稿视图：`document.readSource` 固定草稿纵切（磁盘旧值 vs 草稿不串）、junction 换链 ABA 防护用例、
+  `observeDocumentMutation` 按资源根失效；并发双 Agent 互不改变路径基准由"每请求固定 actor.cwd 快照"保证，
+  shell 纵切验证句柄级状态隔离。
+- 关闭/重开/Host 重启：thread-registry scope owner 持久化 + runtime-broker 重连套件 + session-e2e 回执去重重放。
+- 杀掉持久 shell 后再执行：shell-supervisor dispose 保护套件与 accepted-execution-unavailable 用例；
+  新命令 cwd 始终来自本次参数（快照固定）。
+- 固定快照/隔离 worktree/远程同名：fixed surface read/edit e2e、git worktree 服务测试、managedRemoteTargets
+  shell 路径；内容视图与执行位置在 source/provenance 字段分开。
+
+验证：web 套件 300 文件 2686 全绿（vitest.kernel 的 document-read-source 9/9 含新跨根用例）；
+session-e2e 40/40（含新跨目录读纵切）；app-host/pi-host/ui typecheck 绿。
+**未测**：真实桌面安装包的会话重开/目录离线/并发 Agent 产品化纵切与性能数字（无可复现基线前不报数）；
+父子项目同时展示同一文件的 UI 共存纵切（Documents owner 模型已就位，双视图产品路径未实测）。
+
 **运行时可靠性专项 RR（2026-09-26：RR0–RR5 的代码路径与定向行为已复核；RR6 的真实安装包/外部代理平台纵切仍待验证）。**
 
 实施合同和 E01–E12 证据台账见 [Agent 运行时可靠性与多项目工作区计划](agent-runtime-reliability-plan.md)。

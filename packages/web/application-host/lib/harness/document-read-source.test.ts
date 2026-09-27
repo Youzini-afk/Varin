@@ -389,4 +389,31 @@ describe("native read source through Host router and Documents", () => {
       await fs.rm(outside, { recursive: true, force: true });
     }
   });
+
+  it("routes one multi-change write across two resource roots without misrouting resource ids", async () => {
+    const f = await fixture();
+    const outsideDir = path.join(path.dirname(f.workspace), "external-b");
+    await fs.mkdir(outsideDir);
+    const outsideMapping = await f.documents.resolveWorkspace({ path: outsideDir });
+    const outsideFile = path.join(outsideDir, "out.txt");
+    const written = await f.write({
+      changes: [
+        { path: "in-workspace.txt", action: "write", content: "A root payload\n" },
+        { path: outsideFile, action: "write", content: "B root payload\n" },
+      ],
+    }, { source: "disk" });
+    expect(written, JSON.stringify(written)).toMatchObject({ ok: true, result: { status: "applied" } });
+    if (!written.ok || written.result.status === "disk") throw new Error("Expected an applied surface write");
+    expect(written.result.results).toHaveLength(2);
+    expect(written.result.results[0]).toMatchObject({ path: "in-workspace.txt", status: "applied" });
+    expect(written.result.results[1]).toMatchObject({ path: "out.txt", status: "applied" });
+    expect(await fs.readFile(path.join(f.workspace, "in-workspace.txt"), "utf8")).toBe("A root payload\n");
+    expect(await fs.readFile(outsideFile, "utf8")).toBe("B root payload\n");
+    // The external file stays reachable through its own resource root for rereads.
+    const reread = await f.request(outsideFile, { source: "disk" });
+    expect(reread.ok).toBe(true);
+    if (!reread.ok || reread.result.source !== "disk") throw new Error("Expected disk bytes");
+    expect(Buffer.from(reread.result.base64, "base64").toString("utf8")).toBe("B root payload\n");
+    expect(outsideMapping.workspaceId).not.toBe(f.actor.workspaceId);
+  });
 });
