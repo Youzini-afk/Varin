@@ -544,6 +544,8 @@ export interface HarnessServiceHost {
 export interface HarnessServiceHostOptions {
   search: HarnessSearchDeps["search"];
   resolveWorkspaceRoot: (workspaceId: string) => Promise<string | null>;
+  /** HR2: unbound sessions resolve their authority root into a directory resource root for default search scope. */
+  resolveScopeRoot?: HarnessSearchDeps["resolveScopeRoot"];
   /** Path authority shared with the router; authorizes context mutations. */
   pathAuthority?: HarnessPathAuthority;
   /** Pi SessionManager active-branch journal, accessed out-of-band during a tool call. */
@@ -669,6 +671,7 @@ export function createHarnessServiceHost(options: HarnessServiceHostOptions): Ha
   const searchService = createHarnessSearchService({
     search: options.search,
     resolveWorkspaceRoot: options.resolveWorkspaceRoot,
+    ...(options.resolveScopeRoot ? { resolveScopeRoot: options.resolveScopeRoot } : {}),
     ...(options.readExploreFile ? { readFile: options.readExploreFile } : {}),
     ...(options.pinWorkingBranchQuery ? { pinWorkingBranchQuery: options.pinWorkingBranchQuery } : {}),
     ...(options.agentInputDraftPaths ? { draftPaths: options.agentInputDraftPaths } : {}),

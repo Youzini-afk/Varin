@@ -220,6 +220,13 @@ export interface SearchContentHit {
 export type ExploreTermCoverage = "complete" | "lower-bound" | "unknown";
 
 export interface SearchContentFile {
+  /**
+   * Reopenable resource reference. Single-workspace queries return the
+   * workspace-relative resource id; queries spanning multiple resource roots
+   * (file roots, external directories) return absolute canonical paths so the
+   * result reopens under the same authorized root regardless of session
+   * classification.
+   */
   path: string;
   hits: SearchContentHit[];
 }

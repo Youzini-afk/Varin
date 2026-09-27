@@ -34,6 +34,14 @@ export function createRelatedQueryService(
       if (pathAnchor && ctx.authorizedPaths.length !== 1) {
         throw new HarnessServiceError("forbidden", "The related path anchor was not authorized.");
       }
+      // HR2: a path anchor resolved to a resource root outside the actor
+      // workspace cannot be re-read as a workspace-relative resource id.
+      if (pathAnchor && ctx.authorizedPaths[0]!.workspaceId !== ctx.actor.workspaceId) {
+        throw new HarnessServiceError(
+          "unavailable",
+          "Related symbol lookup is bound to the actor workspace's graph. Use content search for external resources.",
+        );
+      }
       const anchor = pathAnchor ? (ctx.authorizedPaths[0]!.resourceId || ".") : requestedAnchor;
       const defaultRoots = ctx.actor.queryScope?.length
         ? [...ctx.actor.queryScope]

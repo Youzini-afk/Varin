@@ -1,3 +1,4 @@
+import path from "node:path";
 import { describe, expect, it, vi } from "vitest";
 import { createHarnessSearchService, type HarnessSearchDeps } from "./search-service.js";
 import type { WorkspaceContentSearchOptions, WorkspaceContentSearchResult, WorkspaceSearchHit } from "../search/content.js";
@@ -749,7 +750,7 @@ describe("harness search service", () => {
         : { status: "empty", generation: options.generation, scannedFiles: 7 };
     });
     const rr4Actor = (extra: Partial<HarnessActorContext> = {}): HarnessActorContext => ({ ...actor, ...extra });
-    const rr4Ctx = (extra: Partial<HarnessActorContext> = {}, authorizedPaths?: ReadonlyArray<{ resourceId: string }>) => ({
+    const rr4Ctx = (extra: Partial<HarnessActorContext> = {}, authorizedPaths?: ReadonlyArray<{ workspaceId: string; resourceId: string }>) => ({
       actor: rr4Actor(extra),
       workspaceId: "ws-1",
       signal: new AbortController().signal,
@@ -788,7 +789,7 @@ describe("harness search service", () => {
       });
       const result = await service.search(
         { pattern: "x", paths: ["../a", "b"] },
-        rr4Ctx({ operationDir: "root/pkg" }, [{ resourceId: "a" }, { resourceId: "b" }]),
+        rr4Ctx({ operationDir: "root/pkg" }, [{ workspaceId: "ws-1", resourceId: "a" }, { workspaceId: "ws-1", resourceId: "b" }]),
       );
       expect(result.status).toBe("ready");
       expect(seen).toEqual([["a", "b"]]);
@@ -830,6 +831,126 @@ describe("harness search service", () => {
       const missing = await unknown.search({ pattern: "x" }, rr4Ctx());
       expect(missing.status).toBe("empty");
       expect(missing.searchedFiles).toBeUndefined();
+    });
+  });
+
+  describe("HR2 multi-resource scope", () => {
+    const multiSearch = (
+      hitsByRoot: Record<string, WorkspaceSearchHit[]>,
+      calls: string[] = [],
+    ) => vi.fn(async (
+      request: Parameters<HarnessSearchDeps["search"]>[0],
+      options: WorkspaceContentSearchOptions,
+    ): Promise<WorkspaceContentSearchResult> => {
+      calls.push(request.workspaceId);
+      const hits = hitsByRoot[request.workspaceId] ?? [];
+      const paths = request.paths ?? [""];
+      const scoped = hits.filter((hit) => paths.some((prefix) => (
+        !prefix || hit.resource.resourceId === prefix || hit.resource.resourceId.startsWith(`${prefix}/`)
+      )));
+      return scoped.length
+        ? { status: "ready", generation: options.generation, hits: scoped, scannedFiles: 3 }
+        : { status: "empty", generation: options.generation, scannedFiles: 3 };
+    });
+    const multiRoots: Record<string, string> = { "dir-a": "/ext/a", "dir-b": "/ext/b", "file-x": "/ext/a/f.ts" };
+    const hr2Ctx = (
+      authorizedPaths: ReadonlyArray<{ workspaceId: string; resourceId: string }>,
+    ) => ({
+      actor,
+      workspaceId: "ws-1",
+      signal: new AbortController().signal,
+      authorizedPaths,
+    });
+    const service = (search: HarnessSearchDeps["search"], extra: Partial<HarnessSearchDeps> = {}) =>
+      createHarnessSearchService({
+        search,
+        resolveWorkspaceRoot: async (workspaceId) => multiRoots[workspaceId] ?? (workspaceId === "ws-1" ? "/workspace" : null),
+        ...extra,
+      });
+
+    it("merges hits from unrelated directory roots with reopenable absolute paths", async () => {
+      const calls: string[] = [];
+      const result = await service(multiSearch({
+        "dir-a": [makeHit("src/one.ts", 2, "match a")],
+        "dir-b": [makeHit("two.ts", 4, "match b")],
+      }, calls)).search(
+        { pattern: "match" },
+        hr2Ctx([{ workspaceId: "dir-a", resourceId: "src" }, { workspaceId: "dir-b", resourceId: "" }]),
+      );
+      expect(result.status).toBe("ready");
+      expect(new Set(calls)).toEqual(new Set(["dir-a", "dir-b"]));
+      expect(result.files.map((file) => file.path).sort()).toEqual([
+        path.join("/ext/a", "src/one.ts"),
+        path.join("/ext/b", "two.ts"),
+      ]);
+      expect(result.totalHits).toBe(2);
+      expect(result.searchedFiles).toBe(6);
+      expect(result.partial).toBe(false);
+    });
+
+    it("combines a file root and a directory root and dedupes overlapping hits", async () => {
+      const overlapping = { resource: { resourceId: "", workspaceId: "file-x" }, line: 1, column: 1, preview: "dup" } as WorkspaceSearchHit;
+      const result = await service(multiSearch({
+        "dir-a": [makeHit("f.ts", 1, "dup"), makeHit("g.ts", 5, "only-dir")],
+        "file-x": [overlapping],
+      })).search(
+        { pattern: "dup|only-dir" },
+        hr2Ctx([{ workspaceId: "dir-a", resourceId: "" }, { workspaceId: "file-x", resourceId: "" }]),
+      );
+      expect(result.status).toBe("ready");
+      const paths = result.files.map((file) => file.path).sort();
+      expect(paths).toEqual([path.join("/ext/a", "f.ts"), path.join("/ext/a", "g.ts")]);
+      expect(result.totalHits).toBe(2);
+    });
+
+    it("marks the result partial when one requested root cannot be resolved", async () => {
+      const result = await service(multiSearch({
+        "dir-a": [makeHit("one.ts", 1, "a")],
+      })).search(
+        { pattern: "a" },
+        hr2Ctx([{ workspaceId: "dir-a", resourceId: "" }, { workspaceId: "gone", resourceId: "" }]),
+      );
+      expect(result.status).toBe("ready");
+      expect(result.partial).toBe(true);
+      expect(result.files.map((file) => file.path)).toEqual([path.join("/ext/a", "one.ts")]);
+    });
+
+    it("reports unavailable when every requested root fails", async () => {
+      const result = await service(multiSearch({})).search(
+        { pattern: "a" },
+        hr2Ctx([{ workspaceId: "gone-1", resourceId: "" }, { workspaceId: "gone-2", resourceId: "" }]),
+      );
+      expect(result.status).toBe("unavailable");
+    });
+
+    it("searches the session authority root when no workspace is bound", async () => {
+      const calls: string[] = [];
+      const resolveScopeRoot = vi.fn(async (canonicalPath: string) =>
+        canonicalPath === "/launch" ? { workspaceId: "dir-a", root: "/ext/a" } : null);
+      const result = await service(multiSearch({ "dir-a": [makeHit("cold/note.md", 3, "hit")] }, calls), { resolveScopeRoot }).search(
+        { pattern: "hit" },
+        {
+          actor: { ...actor, workspaceId: null, authorityRoot: "/launch" },
+          workspaceId: null,
+          signal: new AbortController().signal,
+        },
+      );
+      expect(resolveScopeRoot).toHaveBeenCalledWith("/launch");
+      expect(calls).toEqual(["dir-a"]);
+      expect(result.status).toBe("ready");
+      expect(result.files.map((file) => file.path)).toEqual([path.join("/ext/a", "cold/note.md")]);
+    });
+
+    it("stays unavailable for an unbound session without a resolvable authority root", async () => {
+      const result = await service(multiSearch({}), { resolveScopeRoot: async () => null }).search(
+        { pattern: "hit" },
+        {
+          actor: { ...actor, workspaceId: null, authorityRoot: "/untrusted" },
+          workspaceId: null,
+          signal: new AbortController().signal,
+        },
+      );
+      expect(result.status).toBe("unavailable");
     });
   });
 });

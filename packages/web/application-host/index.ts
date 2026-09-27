@@ -2959,6 +2959,14 @@ async function main(options: StartWebUiServerOptions = {}): Promise<WebUiServerC
         return null;
       }
     },
+    resolveScopeRoot: async (canonicalPath) => {
+      try {
+        const mapping = await documentsAuthority.ensureResourceRoot(canonicalPath, 'directory');
+        return { workspaceId: mapping.workspaceId, root: mapping.canonicalPath };
+      } catch {
+        return null;
+      }
+    },
     pathAuthority: harnessPathAuthority,
     createTerminalSession: async (input) => {
       const runtime = terminalRuntime;

@@ -12,6 +12,12 @@ import type { KernelComputeText } from "../kernel/compute-service.js";
 export interface HarnessSearchDeps {
   search(request: WorkspaceContentSearchRequest & { query: string; workspaceId: string }, options: WorkspaceContentSearchOptions): Promise<WorkspaceContentSearchResult>;
   resolveWorkspaceRoot: (workspaceId: string) => Promise<string | null>;
+  /**
+   * HR2: resolve an unbound session's default search scope — register (or find)
+   * the session authority root as a directory resource root. The trusted-root
+   * gate applies; returns null when the directory is untrusted or unavailable.
+   */
+  resolveScopeRoot?: (canonicalPath: string) => Promise<{ workspaceId: string; root: string } | null>;
   readFile?: ExploreFileReader;
   /** Dirty paths this turn's fixed source still owns (D-088). */
   draftPaths?: (sessionId: string, context: AgentInputContext) => readonly string[];
@@ -24,11 +30,13 @@ export interface HarnessSearchContext {
   signal: AbortSignal;
   actor?: HarnessActorContext;
   /**
-   * Router-authorized scope roots (workspace-relative resource ids). When
-   * present these are the explicit path params — already anchored at the
-   * actor's operation dir — and take precedence over queryScope defaults.
+   * Router-authorized scope entries for this query. Each entry carries the
+   * resource root it resolved against (`workspaceId`, which may be an external
+   * file/directory root unrelated to the actor's workspace classification) and
+   * the root-relative resource id. Multiple roots in one query are searched
+   * independently and merged; entries take precedence over queryScope defaults.
    */
-  authorizedPaths?: ReadonlyArray<{ resourceId: string }>;
+  authorizedPaths?: ReadonlyArray<{ workspaceId: string; resourceId: string }>;
   inputContext?: AgentInputContext;
   /**
    * Explore-only working hit budget. Absent for `search.content` / grep, which
@@ -188,43 +196,60 @@ export type HarnessSearchService = ReturnType<typeof createHarnessSearchService>
 export function createHarnessSearchService(deps: HarnessSearchDeps) {
   return {
     async search(params: SearchContentParams, ctx: HarnessSearchContext): Promise<SearchContentResult> {
-      const workspaceId=ctx.workspaceId;
-      if(!workspaceId)return unavailableResult();
-      const root=await deps.resolveWorkspaceRoot(workspaceId);if(!root)return unavailableResult();
-      if(ctx.inputContext?.source==="surface"&&ctx.inputContext.workspaceId!==workspaceId)return unavailableResult();
+      if(ctx.inputContext?.source==="surface"&&ctx.inputContext.workspaceId!==ctx.workspaceId)return unavailableResult();
       if(typeof params.pattern!=="string"||!params.pattern.trim())return emptyResult();
       if(ctx.signal.aborted)return {...emptyResult(),partial:true};
-      const normalizePrefix=(value:string):string|null=>{
-        const absolute=path.resolve(root,value);const relative=path.relative(root,absolute).replaceAll("\\","/");
-        return path.isAbsolute(relative)||relative.split("/").includes("..")?null:relative;
-      };
-      const toPrefixes=(values:readonly string[]|undefined)=>{
-        if(values===undefined)return [""];const result=values.map(normalizePrefix);
-        return result.some(r=>r===null)?[]:result as string[];
-      };
       const within=(file:string,prefix:string)=>{
         if(process.platform==="win32"){file=file.toLowerCase();prefix=prefix.toLowerCase();}
         return !prefix||file===prefix||file.startsWith(prefix+"/");
       };
-      // RR4: explicit path params authorized by the router arrive as
-      // workspace-relative resource ids (relative inputs anchored at the
-      // operation dir, absolute inputs reduced to resource ids). Internal
-      // callers like explore pass workspace-relative `path`/`paths` directly
-      // without router authorization. With no explicit path the session
-      // query scope applies, then the operation dir as the default anchor.
-      // workspaceScope still intersects last.
-      const explicit=ctx.authorizedPaths?.length
-        ? ctx.authorizedPaths.map((entry)=>entry.resourceId)
-        : params.paths!==undefined?[...params.paths]
-          : params.path!==undefined?[params.path]:undefined;
-      const defaultScope=ctx.actor?.queryScope?.length
-        ? [...ctx.actor.queryScope]
-        : ctx.actor?.operationDir?[ctx.actor.operationDir]:undefined;
-      const allowed=toPrefixes(ctx.workspaceScope),requested=toPrefixes(explicit??defaultScope);
-      const prefixes=[...new Set(allowed.flatMap(a=>requested.flatMap(r=>within(r,a)?[r]:within(a,r)?[a]:[])))];
-      if(!prefixes.length)return emptyResult();
+      const normalizePrefix=(root:string,value:string):string|null=>{
+        const absolute=path.resolve(root,value);const relative=path.relative(root,absolute).replaceAll("\\","/");
+        return path.isAbsolute(relative)||relative.split("/").includes("..")?null:relative;
+      };
+      const toPrefixes=(root:string,values:readonly string[]|undefined)=>{
+        if(values===undefined)return [""];const result=values.map((value)=>normalizePrefix(root,value));
+        return result.some(r=>r===null)?[]:result as string[];
+      };
+      // HR2: a query is a set of independently resolved resource units, not one
+      // workspace root. Authorized path entries already carry the root each one
+      // resolved against at admission — group them per root so a file root,
+      // several directory roots, and the actor's own workspace can combine.
+      // Internal callers (explore) pass workspace-relative `path`/`paths`
+      // without router authorization; their single unit is the actor workspace.
+      // With no explicit scope the actor's query scope applies, then the
+      // operation dir, and for unbound sessions the authority root registers
+      // itself as this query's directory scope.
+      interface SearchUnit{rootWorkspaceId:string;root:string;prefixes:string[];actorBound:boolean;}
+      const units:SearchUnit[]=[];
+      let missingScope=false;
+      if(ctx.authorizedPaths?.length){
+        const byRoot=new Map<string,Set<string>>();
+        for(const entry of ctx.authorizedPaths){
+          const bucket=byRoot.get(entry.workspaceId)??new Set<string>();
+          bucket.add(entry.resourceId);byRoot.set(entry.workspaceId,bucket);
+        }
+        for(const [rootWorkspaceId,resourceIds] of byRoot){
+          const root=await deps.resolveWorkspaceRoot(rootWorkspaceId).catch(()=>null);
+          if(!root){missingScope=true;continue;}
+          units.push({rootWorkspaceId,root,prefixes:[...resourceIds],actorBound:rootWorkspaceId===ctx.workspaceId});
+        }
+        if(!units.length)return unavailableResult();
+      }else if(ctx.workspaceId){
+        const root=await deps.resolveWorkspaceRoot(ctx.workspaceId);if(!root)return unavailableResult();
+        const explicit=params.paths!==undefined?[...params.paths]:params.path!==undefined?[params.path]:undefined;
+        const defaultScope=ctx.actor?.queryScope?.length?[...ctx.actor.queryScope]:ctx.actor?.operationDir?[ctx.actor.operationDir]:undefined;
+        const allowed=toPrefixes(root,ctx.workspaceScope),requested=toPrefixes(root,explicit??defaultScope);
+        const prefixes=[...new Set(allowed.flatMap(a=>requested.flatMap(r=>within(r,a)?[r]:within(a,r)?[a]:[])))];
+        if(!prefixes.length)return emptyResult();
+        units.push({rootWorkspaceId:ctx.workspaceId,root,prefixes,actorBound:true});
+      }else if(ctx.actor?.authorityRoot&&deps.resolveScopeRoot){
+        const scope=await deps.resolveScopeRoot(ctx.actor.authorityRoot).catch(()=>null);
+        const root=scope?await deps.resolveWorkspaceRoot(scope.workspaceId).catch(()=>null):null;
+        if(!scope||!root)return unavailableResult();
+        units.push({rootWorkspaceId:scope.workspaceId,root,prefixes:[""],actorBound:false});
+      }else return unavailableResult();
       const glob=compileGlobFilter(params.glob);if(!glob)return unavailableResult();
-      const inView=(file:string)=>prefixes.some(prefix=>within(file,prefix))&&glob.matches(file);
       const limit=params.limit??DEFAULT_LIMIT;
       const candidateMode=ctx.candidateBudget!==undefined;
       const candidateBudget=Math.max(1,ctx.candidateBudget??limit);
@@ -233,37 +258,79 @@ export function createHarnessSearchService(deps: HarnessSearchDeps) {
       const timeout=new AbortController();const timer=setTimeout(()=>timeout.abort(new DOMException("Search timed out","AbortError")),DEFAULT_TIMEOUT_MS);
       const signal=AbortSignal.any([ctx.signal,timeout.signal]);
       let ownedPin:WorkingBranchQuerySnapshot|null=null;
-      try {
-        const pinned=ctx.pinnedBranchQuery??(ctx.actor&&deps.pinWorkingBranchQuery
-          ? ownedPin=await deps.pinWorkingBranchQuery(ctx.actor.sessionId,{roots:prefixes,signal}) : null);
+      const runUnit=async(unit:SearchUnit)=>{
+        const inView=(file:string)=>unit.prefixes.some(prefix=>within(file,prefix))&&glob.matches(file);
+        // Working-branch pins and draft overlays belong to the actor's own
+        // workspace surface only; external roots read committed state.
+        let unitPin:WorkingBranchQuerySnapshot|null=null;
+        const pinned=unit.actorBound
+          ? ctx.pinnedBranchQuery??(ctx.actor&&deps.pinWorkingBranchQuery
+            ? unitPin=await deps.pinWorkingBranchQuery(ctx.actor.sessionId,{roots:unit.prefixes,signal}) : null)
+          : null;
         const overlays:KernelComputeText[]=[];
         const context=ctx.inputContext??{source:"disk" as const};
-        if(!pinned&&context.source==="surface"&&ctx.actor){
+        if(unit.actorBound&&!pinned&&context.source==="surface"&&ctx.actor){
           const paths=deps.draftPaths?.(ctx.actor.sessionId,context)??context.dirtyPaths;
-          for(const raw of paths){signal.throwIfAborted();const file=normalizePrefix(raw);if(file===null||!inView(file))continue;
-            if(!deps.readFile)return unavailableResult();
+          for(const raw of paths){signal.throwIfAborted();const file=normalizePrefix(unit.root,raw);if(file===null||!inView(file))continue;
+            if(!deps.readFile)throw new Error("unavailable");
             const snapshot=await deps.readFile(ctx.actor,file,signal,context);
-            if(snapshot.status!=="ready"||snapshot.source!=="surface-draft")return unavailableResult();
+            if(snapshot.status!=="ready"||snapshot.source!=="surface-draft")throw new Error("unavailable");
             overlays.push({path:file,revision:snapshot.revision,text:snapshot.content});
           }
         }
-        const request={query:params.pattern,workspaceId,...(prefixes.length===1&&prefixes[0]===""?{}:{paths:prefixes}),before,after,
+        const request={query:params.pattern,workspaceId:unit.rootWorkspaceId,
+          ...(unit.prefixes.length===1&&unit.prefixes[0]===""?{}:{paths:unit.prefixes}),before,after,
           ...(backendLimit===undefined?{}:{maxResults:backendLimit}),...(glob.rgPatterns.length?{glob:glob.rgPatterns}:{}),
           ...(params.ignoreCase===undefined?{}:{ignoreCase:params.ignoreCase}),...(params.fixedStrings===undefined?{}:{fixedStrings:params.fixedStrings})};
         const result=pinned?await pinned.search(request,{signal}):await deps.search(request,{signal,...(overlays.length?{overlays}:{})});
-        if(result.status==="cancelled")return {...emptyResult(),partial:true};
-        if(result.status==="failure")return unavailableResult();
-        if(result.status!=="ready")return {...emptyResult(),...(result.scannedFiles===undefined?{}:{searchedFiles:result.scannedFiles})};
-        const hits=result.hits.filter(hit=>inView(hit.resource.resourceId));
-        const grouped=groupAndSort(hits,root,candidateMode?candidateBudget:limit,{
+        return {unit,result,inView,pin:unitPin};
+      };
+      try {
+        const settled=await Promise.all(units.map((unit)=>runUnit(unit).then((ok)=>ok,()=>null)));
+        // Result paths must reopen: with a single unit on the actor's own
+        // workspace they stay root-relative resource ids; any external or
+        // multi-root query emits absolute paths, which resource-root
+        // addressing resolves back to the same authorized roots.
+        const multiRoot=units.length>1||units[0]!.rootWorkspaceId!==ctx.workspaceId;
+        const hits:WorkspaceSearchHit[]=[];const seen=new Set<string>();
+        let scanned=0,scannedKnown=true,backendCapped=false,backendIncomplete=false;
+        let failedUnits=missingScope,succeededUnits=0,cancelledUnits=0;
+        for(const entry of settled){
+          if(!entry){failedUnits=true;continue;}
+          const {unit,result,inView}=entry;
+          if(result.status==="cancelled"){failedUnits=true;cancelledUnits+=1;continue;}
+          if(result.status==="failure"){failedUnits=true;continue;}
+          succeededUnits+=1;
+          if(entry.pin)ownedPin=entry.pin;
+          if(result.scannedFiles===undefined)scannedKnown=false;else scanned+=result.scannedFiles;
+          if(result.status==="ready"){
+            if(result.incomplete===true)backendIncomplete=true;
+            if(backendLimit!==undefined&&result.hits.length>=backendLimit)backendCapped=true;
+            for(const hit of result.hits){
+              if(!inView(hit.resource.resourceId))continue;
+              const file=multiRoot?path.join(unit.root,hit.resource.resourceId):hit.resource.resourceId;
+              const key=`${file}\n${hit.line}\n${hit.column}\n${hit.preview}`;
+              if(multiRoot&&seen.has(key))continue;
+              seen.add(key);
+              hits.push({...hit,resource:{workspaceId:unit.rootWorkspaceId,resourceId:file}});
+            }
+          }
+        }
+        // Every unit failed or nothing authorized resolved — nothing was
+        // actually searched, so do not report a clean "empty".
+        if(signal.aborted)return {...emptyResult(),partial:true};
+        if(succeededUnits===0){
+          if(cancelledUnits>0)return {...emptyResult(),partial:true};
+          return unavailableResult();
+        }
+        const grouped=groupAndSort(hits,multiRoot?"":units[0]!.root,candidateMode?candidateBudget:limit,{
           ...(ctx.hitsPerFile===undefined?{}:{hitsPerFile:ctx.hitsPerFile}),useFileScore:!candidateMode,breadthFirst:candidateMode,
         });
         const shown=grouped.files.reduce((sum,file)=>sum+file.hits.length,0);
-        const backendCapped=result.incomplete===true||(backendLimit!==undefined&&result.hits.length>=backendLimit);
-        const partial=backendCapped||shown<grouped.totalHits||grouped.perFileCapped||grouped.filesDropped>0||signal.aborted;
+        const partial=failedUnits||backendCapped||backendIncomplete||shown<grouped.totalHits||grouped.perFileCapped||grouped.filesDropped>0||signal.aborted;
         return {status:grouped.totalHits?"ready":"empty",files:grouped.files,totalHits:grouped.totalHits,totalFiles:grouped.totalFiles,
-          ...(result.scannedFiles===undefined?{}:{searchedFiles:result.scannedFiles}),partial,
-          ...(candidateMode?{filesDropped:grouped.filesDropped,fileCoverage:uniqueFileCoverage({filesDropped:grouped.filesDropped,backendIncomplete:result.incomplete===true,backendCapped})}:{})};
+          ...(scannedKnown?{searchedFiles:scanned}:{}),partial,
+          ...(candidateMode?{filesDropped:grouped.filesDropped,fileCoverage:uniqueFileCoverage({filesDropped:grouped.filesDropped,backendIncomplete:backendIncomplete||failedUnits,backendCapped})}:{})};
       }catch{return ctx.signal.aborted||timeout.signal.aborted?{...emptyResult(),partial:true}:unavailableResult();}
       finally{clearTimeout(timer);await ownedPin?.release();}
     },

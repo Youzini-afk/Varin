@@ -18,7 +18,7 @@ Last updated: 2026-09-27
 Default-on 列只记当前代码，尚未完成的正式目标单独列为待实施。
 [roadmap.md](roadmap.md) 只引用本文件，不再自述测试数。
 
-**D-337 / 阶段 HR：面向任务与资源的 Harness（2026-09-27，方向确认 / HR0 归属与资源寻址已接线，HR1–HR5 实施中）。**
+**D-337 / 阶段 HR：面向任务与资源的 Harness（2026-09-27，方向确认 / HR0–HR2 已接线，HR3–HR5 实施中）。**
 
 [工作区解耦与持续检索设计](resource-oriented-harness-design.md) 定义 HR0–HR5：资源与数据归属、会话与操作、直接检索、
 持续索引、产品与旧机制收口、真实使用验收。工作区回到会话/项目组织职责，执行与查询使用明确的本次目标；
@@ -41,6 +41,20 @@ HR1 已接线（wired）：`shell.exec` 每次执行的默认 cwd 锚定 actor `
 `fs.lock`、文档读写与恢复校验。
 验证：harness 目录 114 文件 1264 全绿；app-host 源码与测试 typecheck 绿。
 未测：真实桌面/打包环境的无项目聊天纵切、外部文件经真实 Documents 写入的端到端——列入 HR5 验收。
+
+HR2 已接线（wired）：`search.content` 改为"问题 + 本次资源范围"的多单元模型——router `authorizedPaths`
+按各自解析出的资源根（可含外部 file/directory 根与 actor 工作区）分组，逐根独立下发 kernel 搜索后合并；
+多根结果输出绝对规范路径，经资源根寻址可直接再打开/引用；单根 actor 工作区结果保持相对 resourceId 不变。
+范围链：显式 `paths[]`（受理时逐条授权）→ 会话 `queryScope` → `operationDir` → `workspaceScope` 相交，
+范围在候选预算与 top-k 之前生效且只属于本次查询；无项目会话无显式范围时以 `authorityRoot` 注册为目录资源根
+作本次默认范围。覆盖诚实性：任一请求根不可解析/失败标 `partial`，全部失败返回 `unavailable`（不冒充空结果），
+`searchedFiles` 为各根真实 `scannedFiles` 之和、任一根未知则整体缺省；跨根重叠命中按键去重。
+`explore`/`related` 的结构与符号图仍绑定 actor 工作区语言服务——外部根锚点现在显式拒绝（`unavailable`），
+不再把外部根的 resourceId 静默错读为工作区相对路径；跨目录内容检索走 `search.content`/`grep`。
+验证：harness 目录 114 文件 1270 全绿（含新增多资源域 6 例：双目录根合并、file+dir 根去重、
+单根失效 partial、全根失效 unavailable、无项目会话 authorityRoot 默认范围、untrusted 拒绝）；
+app-host 源码与测试 typecheck 绿。未测：materials 集合作为检索范围的组合（材料集合仍走
+`materials.collections` 自有服务）、冷目录语义索引（属 HR3）。
 
 **运行时可靠性专项 RR（2026-09-26：RR0–RR5 的代码路径与定向行为已复核；RR6 的真实安装包/外部代理平台纵切仍待验证）。**
 

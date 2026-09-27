@@ -68,6 +68,17 @@ export function resolveExploreScopeAndAnchors(
   if (ctx.authorizedPaths.length !== expectedAuthorizedCount) {
     throw new HarnessServiceError("forbidden", "Search paths and path anchors were not authorized.");
   }
+  // HR2: authorized entries carry the resource root they resolved against.
+  // Explore's structure/symbol graph is bound to the actor workspace's language
+  // service — a foreign root's resourceId must never be re-read as a
+  // workspace-relative path. Cross-directory content search goes through
+  // `search.content`, which handles multi-root scopes directly.
+  if (ctx.authorizedPaths.some((authorized) => authorized.workspaceId !== ctx.actor.workspaceId)) {
+    throw new HarnessServiceError(
+      "unavailable",
+      "Explore structure and relationships are bound to the actor workspace. Use content search for external resources.",
+    );
+  }
 
   const explicitPaths = ctx.authorizedPaths
     .slice(0, explicitPathCount)
