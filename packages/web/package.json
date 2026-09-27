@@ -131,7 +131,7 @@
     "@varin/ui": "workspace:*",
     "@vitejs/plugin-react": "^6.1.1",
     "better-sqlite3": "^13.0.3",
-    "eslint": "^10.10.0",
+    "eslint": "^10.11.0",
     "nodemon": "^3.1.7",
     "supertest": "^7.2.2",
     "tree-sitter-javascript": "0.25.0",
