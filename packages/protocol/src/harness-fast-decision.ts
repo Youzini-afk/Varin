@@ -3,7 +3,7 @@
  * capability. This is not a chat slot, not a rerank endpoint, and not free-text
  * generation: the caller supplies a goal, authorized material, and typed
  * questions; the adapter maps them onto the provider's native protocol
- * (TypeSafe `systemone` is the first). See docs/fast-decision-model-design.md.
+ * (TypeSafe `systemone` is the first). See docs/design/fast-decision-model-design.md.
  */
 
 import { HarnessInferenceSettingsValidationError } from "./harness-inference.js";

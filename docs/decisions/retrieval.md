@@ -2,7 +2,7 @@
 
 范围：3.2/3.3/3.15/3.16 explore、related、快速检索接线与返工、语义索引、embedding/rerank 与检索量具。
 
-本卷是 [agent-harness-decisions.md](../agent-harness-decisions.md) 的分卷；条目只追加、不改写，索引状态以总索引为准。
+本卷是 [decisions/README.md](README.md) 的分卷；条目只追加、不改写，索引状态以总索引为准。
 
 ### D-069 · 2026-09-05 · 3.2 / 6.1（explore v2：把 Devin 的多轮展开成结构查询）
 
@@ -182,7 +182,7 @@ Documents authority。单独捕获、内容寻址、引用传递同时满足窗�
 runtime-broker dispatcher；pi-host SessionHost/HostServicesBridge；Application Host Documents authority/routes/snapshot store、Harness
 router/service/explore；设计 6.1、plan 0.7/3.2、status、architecture 与模块文档。
 
-状态：已实施；本地证据和仍未接的固定视图消费者见 agent-harness-status.md。
+状态：已实施；本地证据和仍未接的固定视图消费者见 status.md。
 
 ### D-085 · 2026-09-06 · 普通 read/grep 消费固定窗口草稿
 
@@ -529,7 +529,7 @@ anchor 优先（打包阶段 `windowScore` 给 anchor +100），故只影响候�
 
 观察（同一目录 `--skip-scan`）：问题 1 的三个无关另一端从 #4/#5/#6 退到 #11/#12/#13，排在全部八个 `explore.search` 窗口之后；`limit=20` 未被更好证据填满时它们仍占尾部槽位，**没有消失**。问题 1/9 与五个变体仍满足 `wants`。问题 4/6 的诊断改为如实报告窗口不含所需证据。尾部噪声与无对象 how 问句留给下一层。
 
-影响：`docs/agent-harness.md` 头部；`scripts/explore-observe.ts`；`explore.ts` 连线展开与 `windowGrade`；`explore.test.ts`；订正 D-149 的诊断要求与 D-150 第三条。
+影响：`docs/design/agent-harness.md` 头部；`scripts/explore-observe.ts`；`explore.ts` 连线展开与 `windowGrade`；`explore.test.ts`；订正 D-149 的诊断要求与 D-150 第三条。
 
 状态：已实施。
 
@@ -1618,7 +1618,7 @@ foreign receiptId 不授权。同 URL 在飞读取按
 验证：material-collections/web-fetch/web-materials 聚焦套件 35/35；pi-host webfetch/websearch/research_search/select-tools 30/30；application-host 与 pi-host typecheck、protocol build 通过。真实 provider、付费渠道与完整桌面路径未实测。
 
 状态：已实施，未推送（待主代理验收）。
-[agent-harness-status.md](../agent-harness-status.md)。
+[status.md](../status.md)。
 
 ### D-321 · 2026-09-23 · L2–L6 主代理验收修正
 
@@ -1720,7 +1720,7 @@ Pi `webfetch` 工具验证 image content；application-host 与 pi-host 类型�
 验证：material-collections 套件 9/9（含 grant 授权、跨根拒绝、不可读快照拒绝、幂等、grant 随线程释放、整集共享后可列可搜不可写）；application-host 与 pi-host typecheck、protocol build 通过。真实线程间端到端（实际 dispatch→send→read 链）以既有 thread-runtime 套件为准，未新增桌面 E2E。
 
 状态：已实施，未推送（待主代理验收）。
-[agent-harness-status.md](../agent-harness-status.md)。
+[status.md](../status.md)。
 
 ### D-319 · 2026-09-23 · L5 Web/学术快速决策消费者
 
@@ -1738,7 +1738,7 @@ Pi `webfetch` 工具验证 image content；application-host 与 pi-host 类型�
 验证：research-decide 套件 7/7（排序、choose 选择、unconfigured/disabled/unavailable 回退、不可读快照拒绝、purpose 推断与覆盖、取消与失败不伪造成绩、畸形输入拒绝）；material-collections 与 explore-fast-decision 回归全绿；protocol build、application-host/pi-host typecheck、改动文件 lint 通过。真实 fastDecision provider 未实测，候选排序质量无数据不宣称收益。
 
 状态：已实施，未推送（待主代理验收）。
-[agent-harness-status.md](../agent-harness-status.md)。
+[status.md](../status.md)。
 
 ### D-320 · 2026-09-23 · L6 设置与工作台收口
 
@@ -1755,4 +1755,4 @@ Pi `webfetch` 工具验证 image content；application-host 与 pi-host 类型�
 验证：ui 侧 i18nParity 4/4、harness 设置与来源投影测试全绿、ui/pi-host/application-host typecheck 通过、改动文件 lint 干净、test:docs 9/9。
 
 状态：已实施，未推送（待主代理验收）。
-[agent-harness-status.md](../agent-harness-status.md)。
+[status.md](../status.md)。

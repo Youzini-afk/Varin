@@ -109,7 +109,7 @@ Varin 不会 fork 这些扩展，也不会复制它们的私有状态。已维�
 记忆系统、后台任务和 LSP/工具链配置——因此插件可以继续独立更新。
 
 每个扩展的集成面——Varin 读取或调用哪些命令、事件和原生配置，以及哪些文件仍归插件所有——记录在
-[扩展集成契约](../../docs/extension-compatibility.md)。Varin 不逐版本认证插件与 Pi 的搭配。
+[扩展集成契约](../../docs/design/extension-compatibility.md)。Varin 不逐版本认证插件与 Pi 的搭配。
 
 ## 开发 Varin 扩展
 
@@ -134,7 +134,7 @@ npx varin-extension test
 ```
 
 完整的清单格式、能力、生命周期、存储、发布和测试说明见
-[Varin 扩展开发指南](../../docs/varin-extension-authoring.md)。
+[Varin 扩展开发指南](../../docs/ops/varin-extension-authoring.md)。
 
 ## 下载桌面版
 
@@ -211,7 +211,7 @@ curl --fail http://127.0.0.1:3000/health
 ```
 
 打开 `http://127.0.0.1:3000`，使用刚生成的密码登录。任何面向公网的部署都应置于 TLS 反向代理
-或经过审核的隧道之后，具体转发要求见[反向代理配置](../../docs/REVERSE_PROXY.md)。生产环境请将
+或经过审核的隧道之后，具体转发要求见[反向代理配置](../../docs/ops/REVERSE_PROXY.md)。生产环境请将
 `VARIN_IMAGE` 固定为已验证的不可变摘要，不要依赖浮动标签。
 
 若智能体要在容器里编译 Python、Java、Go 或 Rust，叠加工具链覆盖层：
@@ -221,7 +221,7 @@ docker compose -f docker-compose.yml -f docker-compose.toolbelt.yml up -d
 ```
 
 镜像同时发布 `linux/amd64` 和 `linux/arm64` 版本，并带有 provenance 与 SBOM 证明。持久化路径、
-环境变量、容器及 SSH 回滚的完整约定见[云端部署](../../docs/cloud-deployment.md)。
+环境变量、容器及 SSH 回滚的完整约定见[云端部署](../../docs/ops/cloud-deployment.md)。
 
 ## 架构
 
@@ -253,7 +253,7 @@ Electron 在主进程里运行同一个宿主，而不是再造一套桌面后�
 
 第三方 Pi 包是拥有当前用户操作系统权限的可执行代码。Varin 会展示观察到的能力，并对项目内
 可执行资源设置授权门槛，但不会把受信任扩展宣传成完整的沙箱。在公开远程实例或安装陌生代码之前，
-请阅读[安全策略](../translations/SECURITY.zh-CN.md)和[安全模型](../../docs/security.md)。
+请阅读[安全策略](../translations/SECURITY.zh-CN.md)和[安全模型](../../docs/design/security.md)。
 
 ## 仓库结构
 
@@ -312,16 +312,16 @@ CI 固定为三条职责不同的门禁：Ubuntu 源码质量、Windows 运行�
 - [工程开发与知识导航](../../docs/development.md)
 - [架构](../../docs/architecture.md)
 - [路线图](../../docs/roadmap.md)
-- [Agent Harness 契约](../../docs/agent-harness.md)，附[交付状态](../../docs/agent-harness-status.md)、[实施计划](../../docs/agent-harness-plan.md)与[决策日志](../../docs/agent-harness-decisions.md)
-- [Rust 系统内核设计](../../docs/rust-kernel-design.md)与[审查记录](../../docs/rust-kernel-audit.md)
-- [可组合工作台与 IDE 约定](../../docs/composable-workbench.md)
-- [统一文件编辑器平台](../../docs/unified-file-editor-platform.md)
-- [Varin 扩展平台](../../docs/varin-extension-platform.md)
-- [从 OpenChamber 迁移到 Pi 的约定](../../docs/openchamber-pi-migration.md)
-- [插件 GUI 与状态归属设计](../../docs/plugin-gui-design.md)
-- [恢复模型](../../docs/recovery.md)
-- [云端部署](../../docs/cloud-deployment.md)
-- [安全模型](../../docs/security.md)
+- [Agent Harness 契约](../../docs/design/agent-harness.md)，附[交付状态](../../docs/status.md)、[实施计划](../../docs/plan/agent-harness-plan.md)与[决策日志](../../docs/decisions/README.md)
+- [Rust 系统内核设计](../../docs/design/rust-kernel-design.md)与[审查记录](../../docs/plan/rust-kernel-audit.md)
+- [可组合工作台与 IDE 约定](../../docs/design/composable-workbench.md)
+- [统一文件编辑器平台](../../docs/design/unified-file-editor-platform.md)
+- [Varin 扩展平台](../../docs/design/varin-extension-platform.md)
+- [从 OpenChamber 迁移到 Pi 的约定](../../docs/ops/openchamber-pi-migration.md)
+- [插件 GUI 与状态归属设计](../../docs/design/plugin-gui-design.md)
+- [恢复模型](../../docs/design/recovery.md)
+- [云端部署](../../docs/ops/cloud-deployment.md)
+- [安全模型](../../docs/design/security.md)
 
 ## 项目沿革与许可证
 

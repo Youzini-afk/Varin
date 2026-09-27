@@ -138,4 +138,4 @@ idle period usually means a proxy timeout; updates arriving in bursts usually me
 
 For container persistence, health checks, immutable digests, and rollback behavior, see
 [cloud deployment](cloud-deployment.md). For authentication and trust boundaries, see
-[the security model](security.md).
+[the security model](../design/security.md).

@@ -5,7 +5,7 @@
 Varin 会接触源码、终端权限、Git 与 SSH 操作、模型提供商凭据、Pi 会话历史、扩展配置和远程连接。
 这些边界上的缺陷可能产生超出应用 UI 的影响，因此我们非常重视私密且可复现的安全报告。
 
-实现层面的威胁模型和发布门槛另见 [docs/security.md](../../docs/security.md)。
+实现层面的威胁模型和发布门槛另见 [docs/design/security.md](../../docs/design/security.md)。
 
 ## 支持的版本
 
@@ -112,7 +112,7 @@ GitHub Security Advisory。是否公开致谢遵循报告者意愿。
   Issue 报告。
 
 持久化路径、密钥文件权限、容器证明、不可变发布和回滚行为见
-[云端部署](../../docs/cloud-deployment.md)。
+[云端部署](../../docs/ops/cloud-deployment.md)。
 
 ## 构建与发布完整性
 

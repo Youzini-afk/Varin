@@ -129,7 +129,7 @@ Remote requirements:
 - a stable directory for Varin data that is not inside an individual release.
 
 Configure targets in `~/.config/varin/varin-dev.json`. Start from
-[`scripts/varin-dev.config.example.json`](../scripts/varin-dev.config.example.json):
+[`scripts/varin-dev.config.example.json`](../../scripts/varin-dev.config.example.json):
 
 ```json
 {

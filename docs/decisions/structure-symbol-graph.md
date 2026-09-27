@@ -2,7 +2,7 @@
 
 范围：3.1/3.8/3.11/3.12 符号图采集与验收、tree-sitter 结构切片、语法 wasm、LSP 导航。
 
-本卷是 [agent-harness-decisions.md](../agent-harness-decisions.md) 的分卷；条目只追加、不改写，索引状态以总索引为准。
+本卷是 [decisions/README.md](README.md) 的分卷；条目只追加、不改写，索引状态以总索引为准。
 
 ### D-051 · 2026-09-04 · 3.8（LSP 导航接入真实 LanguageSupervisor）
 

@@ -128,7 +128,7 @@ Varin はこれらの拡張をフォークせず、プライベートな状態�
 メモリシステム、バックグラウンドタスク、LSP/ツール設定で、パッケージの更新は独立して進められます。
 
 各アダプタの統合面——どのコマンド、イベント、ネイティブ設定を読み取りまたは呼び出すか、どのファイルが
-プラグイン所有のままか——は[拡張インテグレーション契約](../../docs/extension-compatibility.md)に記録されています。
+プラグイン所有のままか——は[拡張インテグレーション契約](../../docs/design/extension-compatibility.md)に記録されています。
 Varin はプラグインのバージョンを Pi のリリースに対して認証しません。
 
 ## Varin 拡張を開発する
@@ -156,7 +156,7 @@ npx varin-extension test
 ```
 
 マニフェスト、ケイパビリティ、ライフサイクル、ストレージ、公開、テストの完全な契約は
-[Varin 拡張オーサリングガイド](../../docs/varin-extension-authoring.md)を参照してください。
+[Varin 拡張オーサリングガイド](../../docs/ops/varin-extension-authoring.md)を参照してください。
 
 ## デスクトップ版をダウンロード
 
@@ -241,7 +241,7 @@ curl --fail http://127.0.0.1:3000/health
 
 `http://127.0.0.1:3000` を開き、生成されたパスワードを使ってください。インターネットに面する
 デプロイの前には、TLS リバースプロキシまたは承認済みトンネルを置いてください。必要な転送ルールは
-[リバースプロキシの設定](../../docs/REVERSE_PROXY.md)を参照してください。本番環境では、フローティング
+[リバースプロキシの設定](../../docs/ops/REVERSE_PROXY.md)を参照してください。本番環境では、フローティング
 タグに頼らず、`VARIN_IMAGE` を検証済みのイミュータブルダイジェストに設定してください。
 
 エージェントがコンテナ内で Python、Java、Go、Rust をコンパイルする必要がある場合は、ツールベルト
@@ -253,7 +253,7 @@ docker compose -f docker-compose.yml -f docker-compose.toolbelt.yml up -d
 
 イメージは `linux/amd64` と `linux/arm64` 向けに、provenance と SBOM アテステーション付きで公開されて
 います。永続パス、環境、コンテナ、SSH ロールバックの完全な契約は
-[クラウドデプロイ](../../docs/cloud-deployment.md)に記載しています。
+[クラウドデプロイ](../../docs/ops/cloud-deployment.md)に記載しています。
 
 ## アーキテクチャ
 
@@ -291,8 +291,8 @@ Electron は同じホストをメインプロセスで実行し、並列のデ�
 サードパーティの Pi パッケージは、ユーザーの OS 権限を持つ実行可能コードです。Varin は観測された
 ケイパビリティを表示し、プロジェクトローカルの実行可能リソースにゲートを設けますが、信頼された拡張を
 完全なサンドボックスに変えるとは主張しません。リモートインスタンスを公開したり、不慣れなコードを
-インストールしたりする前に、[セキュリティポリシー](../../.github/SECURITY.md)と
-[セキュリティモデル](../../docs/security.md)を読んでください。
+インストールしたりする前に、[セキュリティポリシー](../SECURITY.md)と
+[セキュリティモデル](../../docs/design/security.md)を読んでください。
 
 ## リポジトリ構成
 
@@ -346,7 +346,7 @@ CI は責務の異なる 3 つの安定したゲートを公開しています�
 ツールベルトのベース/アプリケーションイメージをビルドし、イミュータブルダイジェストで両方の
 アプリケーションをスモークし、両候補が合格した後にのみタグを昇格させます。
 
-貢献する前に [CONTRIBUTING.md](../../.github/CONTRIBUTING.md)、リポジトリ固有のルールである
+貢献する前に [CONTRIBUTING.md](../CONTRIBUTING.md)、リポジトリ固有のルールである
 [AGENTS.md](../../AGENTS.md)、[エンジニアリングガイド](../../docs/development.md)を読んでください。
 
 ## 設計・運用ドキュメント
@@ -354,16 +354,16 @@ CI は責務の異なる 3 つの安定したゲートを公開しています�
 - [アーキテクチャ](../../docs/architecture.md)
 - [エンジニアリングガイド](../../docs/development.md)
 - [ロードマップ](../../docs/roadmap.md)
-- [エージェントハーネス契約](../../docs/agent-harness.md)（中国語）、[デリバリーステータス](../../docs/agent-harness-status.md)、[計画](../../docs/agent-harness-plan.md)、[決定ログ](../../docs/agent-harness-decisions.md)付き
-- [Rust システムカーネル設計](../../docs/rust-kernel-design.md)と[監査記録](../../docs/rust-kernel-audit.md)
-- [コンポーザブルワークベンチと IDE 契約](../../docs/composable-workbench.md)（中国語）
-- [統合ファイルエディタプラットフォーム](../../docs/unified-file-editor-platform.md)
-- [Varin 拡張プラットフォーム](../../docs/varin-extension-platform.md)
-- [OpenChamber から Pi への移行契約](../../docs/openchamber-pi-migration.md)
-- [プラグイン GUI と所有権設計](../../docs/plugin-gui-design.md)
-- [リカバリモデル](../../docs/recovery.md)
-- [クラウドデプロイ](../../docs/cloud-deployment.md)
-- [セキュリティモデル](../../docs/security.md)
+- [エージェントハーネス契約](../../docs/design/agent-harness.md)（中国語）、[デリバリーステータス](../../docs/status.md)、[計画](../../docs/plan/agent-harness-plan.md)、[決定ログ](../../docs/decisions/README.md)付き
+- [Rust システムカーネル設計](../../docs/design/rust-kernel-design.md)と[監査記録](../../docs/plan/rust-kernel-audit.md)
+- [コンポーザブルワークベンチと IDE 契約](../../docs/design/composable-workbench.md)（中国語）
+- [統合ファイルエディタプラットフォーム](../../docs/design/unified-file-editor-platform.md)
+- [Varin 拡張プラットフォーム](../../docs/design/varin-extension-platform.md)
+- [OpenChamber から Pi への移行契約](../../docs/ops/openchamber-pi-migration.md)
+- [プラグイン GUI と所有権設計](../../docs/design/plugin-gui-design.md)
+- [リカバリモデル](../../docs/design/recovery.md)
+- [クラウドデプロイ](../../docs/ops/cloud-deployment.md)
+- [セキュリティモデル](../../docs/design/security.md)
 
 ## 系譜とライセンス
 

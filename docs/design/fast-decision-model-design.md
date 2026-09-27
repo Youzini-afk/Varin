@@ -5,8 +5,8 @@ Status: implemented and wired for the `explore` consumer (D-312, F0–F4); provi
 Last updated: 2026-09-21
 
 本设计由 [Agent Harness](agent-harness.md) 第 6.1、8.5 节引用，实施顺序见
-[阶段 F](agent-harness-plan.md#阶段-f快速决策模型与渐进检索d-312)，实际交付只记入
-[能力状态](agent-harness-status.md)。本文定义通用能力与首个检索消费者，不代表 Jev 已接入。
+[阶段 F](../plan/agent-harness-plan.md#阶段-f快速决策模型与渐进检索d-312)，实际交付只记入
+[能力状态](../status.md)。本文定义通用能力与首个检索消费者，不代表 Jev 已接入。
 
 D-313 的 [Varin 全面更名](varin-rebrand-design.md) 阶段 B 优先实施；阶段 F 随后采用新产品命名。
 更名不改变本设计的能力合同、Pi 推理归属与检索目标。

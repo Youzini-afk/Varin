@@ -1,6 +1,6 @@
 /**
  * fresh-input assembly — shared section structure for a `fresh` Run's seed
- * input (agent-harness-plan.md §2.6A, consumed by §3.18B).
+ * input (plan/agent-harness-plan.md §2.6A, consumed by §3.18B).
  *
  * A fresh continuation is not a summary of the old transcript. The new input
  * carries: the current task and still-valid user requirements (verbatim

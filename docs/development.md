@@ -25,18 +25,18 @@ or implementation in the same coherent change.
 | Area | Current authority |
 | --- | --- |
 | Product/process/data architecture | [architecture.md](architecture.md) |
-| Varin naming and distribution cutover | [varin-rebrand-design.md](varin-rebrand-design.md), Stage B in the harness plan; source/repository implemented, first publication tracked in status |
-| Agent harness contract, plan, status, decision log | [agent-harness.md](agent-harness.md), [agent-harness-plan.md](agent-harness-plan.md), [agent-harness-status.md](agent-harness-status.md), [agent-harness-decisions.md](agent-harness-decisions.md) |
-| Task/resource Harness and continuous retrieval (D-337, implemented HR0–HR5) | [resource-oriented-harness-design.md](resource-oriented-harness-design.md): project-independent sessions/resources, per-operation paths, resource/version indexes; replaced the RR2 work-context and related RR4 ownership targets — per-scenario evidence in [agent-harness-status.md](agent-harness-status.md) |
-| Agent runtime reliability (RR, existing implementation and validation record) | [agent-runtime-reliability-plan.md](agent-runtime-reliability-plan.md): live-session recovery and cancellation, shell/output reliability, retrieval evidence, and proxy-aware networking; directory-model replacement is specified by D-337 |
-| Background compaction Agent (D-314, wired) | [context-compaction-agent-design.md](context-compaction-agent-design.md); Stage C in the harness plan |
-| Web and scholarly search (D-315, L0/L2 initial slices wired) | [web-research-search-design.md](web-research-search-design.md); Stage L in the harness plan; reuses existing retrieval/investigation threads |
-| Office and daily work continuity (D-327, design accepted / not implemented) | [office-work-continuity-design.md](office-work-continuity-design.md); future O0–O4 delivery stages; reuses existing workbench, Thread/Run, materials, artifacts, follow-up, and Rust authorities |
-| Rust system kernel | [rust-kernel-design.md](rust-kernel-design.md), [rust-kernel-audit.md](rust-kernel-audit.md), [kernel/README.md](../kernel/README.md) |
-| OpenChamber source and non-regression boundary | [openchamber-pi-migration.md](openchamber-pi-migration.md) |
-| Workbench profiles and extension composition | [composable-workbench.md](composable-workbench.md) |
-| Documents, Monaco, mobile adapters, language services | [unified-file-editor-platform.md](unified-file-editor-platform.md) and the module docs under `packages/ui/src/lib` |
-| Varin extension platform | [varin-extension-platform.md](varin-extension-platform.md) and [varin-extension-authoring.md](varin-extension-authoring.md) |
+| Varin naming and distribution cutover | [varin-rebrand-design.md](design/varin-rebrand-design.md), Stage B in the harness plan; source/repository implemented, first publication tracked in status |
+| Agent harness contract, plan, status, decision log | [agent-harness.md](design/agent-harness.md), [agent-harness-plan.md](plan/agent-harness-plan.md), [status.md](status.md), [decisions/README.md](decisions/README.md) |
+| Task/resource Harness and continuous retrieval (D-337, implemented HR0–HR5) | [resource-oriented-harness-design.md](design/resource-oriented-harness-design.md): project-independent sessions/resources, per-operation paths, resource/version indexes; replaced the RR2 work-context and related RR4 ownership targets — per-scenario evidence in [status.md](status.md) |
+| Agent runtime reliability (RR, existing implementation and validation record) | [agent-runtime-reliability-plan.md](plan/agent-runtime-reliability-plan.md): live-session recovery and cancellation, shell/output reliability, retrieval evidence, and proxy-aware networking; directory-model replacement is specified by D-337 |
+| Background compaction Agent (D-314, wired) | [context-compaction-agent-design.md](design/context-compaction-agent-design.md); Stage C in the harness plan |
+| Web and scholarly search (D-315, L0/L2 initial slices wired) | [web-research-search-design.md](design/web-research-search-design.md); Stage L in the harness plan; reuses existing retrieval/investigation threads |
+| Office and daily work continuity (D-327, design accepted / not implemented) | [office-work-continuity-design.md](design/office-work-continuity-design.md); future O0–O4 delivery stages; reuses existing workbench, Thread/Run, materials, artifacts, follow-up, and Rust authorities |
+| Rust system kernel | [rust-kernel-design.md](design/rust-kernel-design.md), [rust-kernel-audit.md](plan/rust-kernel-audit.md), [kernel/README.md](../kernel/README.md) |
+| OpenChamber source and non-regression boundary | [openchamber-pi-migration.md](ops/openchamber-pi-migration.md) |
+| Workbench profiles and extension composition | [composable-workbench.md](design/composable-workbench.md) |
+| Documents, Monaco, mobile adapters, language services | [unified-file-editor-platform.md](design/unified-file-editor-platform.md) and the module docs under `packages/ui/src/lib` |
+| Varin extension platform | [varin-extension-platform.md](design/varin-extension-platform.md) and [varin-extension-authoring.md](ops/varin-extension-authoring.md) |
 | Shared UI, themes, localization, settings, interactions | [packages/ui/DOCUMENTATION.md](../packages/ui/DOCUMENTATION.md) |
 | Shared runtime APIs, authenticated URLs, runtime switching | [packages/application-client/README.md](../packages/application-client/README.md) and [packages/ui/src/lib/api/DOCUMENTATION.md](../packages/ui/src/lib/api/DOCUMENTATION.md) |
 | UI stores, synchronization, cache identity, visible-demand work | [packages/ui/src/stores/DOCUMENTATION.md](../packages/ui/src/stores/DOCUMENTATION.md) |
@@ -44,8 +44,8 @@ or implementation in the same coherent change.
 | Web CLI commands and output modes | [packages/web/cli/lib/DOCUMENTATION.md](../packages/web/cli/lib/DOCUMENTATION.md) |
 | Relay transport and wire compatibility | [packages/web/application-host/lib/relay/DOCUMENTATION.md](../packages/web/application-host/lib/relay/DOCUMENTATION.md) |
 | Mobile builds and iOS Simulator scripts | [packages/mobile/README.md](../packages/mobile/README.md) |
-| Cloud deployment and container contract | [cloud-deployment.md](cloud-deployment.md) |
-| Security model | [security.md](security.md) |
+| Cloud deployment and container contract | [cloud-deployment.md](ops/cloud-deployment.md) |
+| Security model | [security.md](design/security.md) |
 
 ## Working on a change
 
@@ -73,8 +73,8 @@ Run a broader suite when it can expose a different class of failure, not merely 
 Avoid repeating a successful expensive check after changes that cannot affect it. Report important
 coverage gaps instead of converting them into a false pass.
 
-Stage Q, specified in [testing-ci-design.md](testing-ci-design.md) and the
-[harness implementation plan](agent-harness-plan.md), is the completed engineering phase before the
+Stage Q, specified in [testing-ci-design.md](design/testing-ci-design.md) and the
+[harness implementation plan](plan/agent-harness-plan.md), is the completed engineering phase before the
 AI4S implementation stage. It reassessed test responsibilities, fixtures, discovery, repeated
 builds and CI execution across the repository. The 2026-09-21 follow-up removes source-text, type-literal,
 retired migration and release-layout checks that remained after Q; the dispositions are recorded in

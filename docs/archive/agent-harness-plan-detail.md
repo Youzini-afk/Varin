@@ -1,8 +1,8 @@
 # Agent harness 实施计划 — 交付阶段细节（自 agent-harness-plan.md 迁入）
 
 Status: historical delivery record — archived 2026-09-27。本文件保留已收口阶段的完整交付合同与验收叙述，
-**不再更新**；阶段定义骨架与仍在实施的部分见 [agent-harness-plan.md](../agent-harness-plan.md)，
-能力现状见 [agent-harness-status.md](../agent-harness-status.md)。
+**不再更新**；阶段定义骨架与仍在实施的部分见 [agent-harness-plan.md](../plan/agent-harness-plan.md)，
+能力现状见 [status.md](../status.md)。
 
 ---
 
@@ -358,7 +358,7 @@ web 工具仅在 Host 已装配时可用。交付物由 `submit_facts` → `thre
 取消/失联复用既有 Thread 生命周期，真正删除 Thread 同时释放 pending/sealed/temporary artifact 与 receipt 引用。
 
 D-315 / 阶段 L 计划将自然语言报告接为正常交付并保留可选 `submit_facts`，详细见
-[Web 与科研检索](../web-research-search-design.md)；该合同调整尚未实施，不与上述当前事实协议混写。
+[Web 与科研检索](../design/web-research-search-design.md)；该合同调整尚未实施，不与上述当前事实协议混写。
 
 ### 3.7 自动 review
 
@@ -734,7 +734,7 @@ execution workspace、cwd、规范资源、网络目标和 thread scope，`/vari
 
 ## 阶段 R：Rust 系统内核与 Host 分层（D-252）
 
-目标架构、资源归属和失败语义见 [rust-kernel-design.md](../rust-kernel-design.md)。D-282 已在 R0–R5 各自接管后完成 R6 汇总验收，
+目标架构、资源归属和失败语义见 [rust-kernel-design.md](../design/rust-kernel-design.md)。D-282 已在 R0–R5 各自接管后完成 R6 汇总验收，
 因此阶段 R 整体完成。模块迁移后的生产默认只有新写者；TS 保留产品编排、Pi runtime、Document Registry、知识领域和模型/索引装饰层。
 
 | 里程碑 | 交付范围 | 必须接通的消费者与删除的旧路径 |
@@ -815,7 +815,7 @@ archive 保留引用；history release/delete 先核依赖和真实写者，再�
 验收 Git/非 Git/无 HEAD、queued/nested/virtual+shell 两阶段编辑、固定结果后 live 变动、filter 配置、
 共享引用删除、回收恢复、目录占用和 ENOSPC/中断。实际 clone 与普通 copy 分别报告；未测文件系统不能称已证明 CoW。
 
-D-277 已接入本阶段主要原语和生产消费者；D-278 重新打开整体完成度，具体缺口见 [审查记录](../rust-kernel-audit.md)：WorkingState baseline 的 filesystem inventory/body capture 改由 kernel `file.scan` / `file.capture` 完成，且使用 Host-admitted root 与创建 branch 的同一 scoped grant；Git 继续提供 staged/unstaged/untracked、index mode、dirty-content identity 和真实 filter/EOL 语义。完整 capture 后重读同一路径集合，Git/目录 inventory 与 frozen captureScopes 也在窗口两端核对，变化时不发布混合 root。
+D-277 已接入本阶段主要原语和生产消费者；D-278 重新打开整体完成度，具体缺口见 [审查记录](../plan/rust-kernel-audit.md)：WorkingState baseline 的 filesystem inventory/body capture 改由 kernel `file.scan` / `file.capture` 完成，且使用 Host-admitted root 与创建 branch 的同一 scoped grant；Git 继续提供 staged/unstaged/untracked、index mode、dirty-content identity 和真实 filter/EOL 语义。完整 capture 后重读同一路径集合，Git/目录 inventory 与 frozen captureScopes 也在窗口两端核对，变化时不发布混合 root。
 
 virtual→materialized 使用 kernel `file.materialize` 从固定 root 构建 operation-specific staging，校验对象后执行真实 clone backend 或正式 copy fallback，以 backup/promotion + restart reconciliation 切换 execution generation。Git 只附加 linked-worktree metadata，并经 `read-tree`、`add -A`、内部 baseline commit 建立执行 Git 身份；required filter 失败直接中止，不把 TS copy 当退路。materialized settle 由 Git changed paths + prior/current captureScopes 或非 Git完整 Rust inventory 发布 immutable result root；native archive/history 不再依赖旁路 snapshot。reclaim/discard/delete 走 kernel subtree remove 并 prune linked-worktree metadata；`file.measure` 在 Unix 使用实际 block 计数，Windows 未有已验证 physical-allocation backend 时明确返回 unknown。Windows release-kernel 的 scan/measure/materialize 与 live-backup-before-promote restart 反例已通过；Windows 当前只证明普通 copy，未测文件系统不称已证明 CoW。D-278 当时据此只承认原语和部分消费者证据，并要求补跨域持久 switch、真实退出/回收交接。D-279 已补齐该 gate：Thread Registry 先持久化固定 root/revision/writeRevision、operationId 与 pinId，kernel persistent pin 保活固定源；materialize 和 Git attach 各持久 receipt，同一 operationId 重入；git-attached receipt 在 pin release 成功前不会清除，setup timeout/abort 等 child close。R3 因而完成；R0 与 R4–R6 不变。
 
@@ -829,7 +829,7 @@ stdin/resize、输出原字节/游标、自动后台、退出码、终止与 wri
 不重放命令、不在未知状态回收目录；恢复新 epoch 后旧 handle 不复用。用户 shell hooks 与现有 OSC 命令事实不退化为猜测。
 验证本机真实 shell、UI attach/输入、后台自然退出、停止失败、Host/kernel 单独退出、LSP/DAP 流和已有任务消费者。
 
-D-280 已完成本节生产接管，消费者与 native failure evidence 见 [唯一状态记录](../agent-harness-status.md) 及 [process ownership](../../packages/web/application-host/lib/process/DOCUMENTATION.md)。kernel 使用同一 executable 的 guardian 隔离阻塞 I/O/进程树；guardian 不开 SQLite，唯一 Storage 保留 durable identity/tombstone。Window Job、Unix session（Linux subreaper）提供实际生命周期证据；未证明旧进程退出就保持 unknown。不存在 Node/Bun PTY 生产 fallback，也不把死亡会话重启成另一个 shell。进程作用域与 R2 file gate 共用物理目录边界。
+D-280 已完成本节生产接管，消费者与 native failure evidence 见 [唯一状态记录](../status.md) 及 [process ownership](../../packages/web/application-host/lib/process/DOCUMENTATION.md)。kernel 使用同一 executable 的 guardian 隔离阻塞 I/O/进程树；guardian 不开 SQLite，唯一 Storage 保留 durable identity/tombstone。Window Job、Unix session（Linux subreaper）提供实际生命周期证据；未证明旧进程退出就保持 unknown。不存在 Node/Bun PTY 生产 fallback，也不把死亡会话重启成另一个 shell。进程作用域与 R2 file gate 共用物理目录边界。
 
 R4 不声称新增恶意代码 OS sandbox，也不要求用户本地其他平台/签名/物理断电。旧分发依赖与 rebuild probe 的移除、完整 packaged smoke、受控多进程性能仍按 R0/R6；已定义的短命 Git 语义命令和发现/bootstrap 探测不因此迁成第二套 Rust 调度器。
 
@@ -875,7 +875,7 @@ binary 验证。Application Host build 会对 emitted import graph 做运行时�
 - 默认 runtime：直接交付 bundled Pi、Runtime Manager 默认选择与 Git Bash 就绪说明，保留自有 runtime；实际 Electron smoke。
   已有版本依赖明确，不等 harness 全部完成。
 - 外部 runtime：排在 D-283 的原生权限与 web 收口之后；届时按实际 Host 服务接 MCP/ACP/能力协商，选定 adapter 的协议版本在实现中完成，不先预建全部未来兼容框架。
-- research/文件知识工作：以 [科研集群设计](../research-cluster-design.md) 为准，沿共享工具、存储、文档、线程、调度和验证器实现
+- research/文件知识工作：以 [科研集群设计](../design/research-cluster-design.md) 为准，沿共享工具、存储、文档、线程、调度和验证器实现
   异构模型并行研究。首个纵切从开放计算问题开始，包含问题发现、文献/代码调查、实验设计、快速执行、自然交流与综合和写作回流；
   论文复现只是场景，不先建设科研管理表单或第二套 Agent runtime。工作台 UIUX 和 Agent 工作侧重独立；科研消费者发展公共接口，不要求先交付办公场景。
   SaaS 连接器与 Windows 沙箱保持范围之外。
@@ -885,7 +885,7 @@ binary 验证。Application Host build 会对 emitted import graph 做运行时�
 
 ## 阶段 Q：测试与 CI 体系重整（D-292，已验收收口）
 
-设计权威为 [testing-ci-design.md](../testing-ci-design.md)，现状审计与处置结果见 [testing-ci-audit.md](testing-ci-audit.md)。本阶段覆盖全仓；其后 D-296 已收口，再开始 AI4S 的 7A–7F。
+设计权威为 [testing-ci-design.md](../design/testing-ci-design.md)，现状审计与处置结果见 [testing-ci-audit.md](testing-ci-audit.md)。本阶段覆盖全仓；其后 D-296 已收口，再开始 AI4S 的 7A–7F。
 先建立整体判断，再分责任完成修改；不得把它交付成只修近期几处失败、只删源码断言或只移动 workflow 的局部补丁。
 当前状态是 Q0–Q3 已实施并经主代理验收收口（D-293/D-295）；D-296 已完成原 VS Code
 companion 的完整退役，故它不再是当前 required CI 或手动入口。以下编号保留为实施记录，不构成每次
@@ -985,8 +985,8 @@ packaged、跨平台或远端 CI 结果外推为本地证据；D-296 已完成�
 app/Pi/client/action 写入、session→Surface 绑定、typed action-operation、组合更新与产品 Skill 已接线。
 同一 session 同时连接多个 Surface 时明确返回 ambiguous，不允许模型猜选本地窗口；无 owner API 的条目如实 unavailable。
 外部登录/安装与跨平台 Surface 现场未实测，但不构成当前生产通路的未实现项。设计 authority 为
-[agent-settings-design.md](../agent-settings-design.md)，本节只规定实施责任和完成边界。
-实施现状见 [agent-harness-status.md](../agent-harness-status.md) 的 D-306 记录。
+[agent-settings-design.md](../design/agent-settings-design.md)，本节只规定实施责任和完成边界。
+实施现状见 [status.md](../status.md) 的 D-306 记录。
 
 目标是设置页与对话管理同一套配置，覆盖现有主要设置类别及相关管理动作，不只交付几个 Harness 开关。
 现有 settings.get/update、resource CRUD、扩展管理 API 是基础；尚不能据此声明 Agent 设置能力已接线。
@@ -1066,9 +1066,9 @@ S0–S4 是同一完整阶段内的实施顺序，不是把剩余设置长期列
 外部查询、普通 shell 与 manual 来源，跨来源 `all`/`any`，共享观察，受管远程续接，Thread/session 生命周期及
 calendar Agent 管理均已接线。普通 shell 仍遵循本地进程 owner 生命周期，Host 重启后无法重附着时转 unavailable；
 file/metric 在 Host 收到边沿后先耐久化 observation，不能把来源 owner 尚未送达的瞬时事件宣称为跨进程 exactly-once。设计 authority 为
-[agent-follow-up-design.md](../agent-follow-up-design.md)。本阶段复用 7G/7H/7I、现有 Thread/Run、Goal、
+[agent-follow-up-design.md](../design/agent-follow-up-design.md)。本阶段复用 7G/7H/7I、现有 Thread/Run、Goal、
 原生权限和 scheduler 服务；支持原会话续接，并保留按日历新建工作的用途。
-实施进展与未覆盖边界见 [agent-harness-status.md](../agent-harness-status.md) 的 D-307 记录。
+实施进展与未覆盖边界见 [status.md](../status.md) 的 D-307 记录。
 
 ### W0：续接合同、来源与状态责任
 
@@ -1142,7 +1142,7 @@ file/metric 在 Host 收到边沿后先耐久化 observation，不能把来源 o
 ## 阶段 B：Varin 全面更名（D-313）
 
 状态：**源码、品牌资源、构建配置与 GitHub 仓库已切换并通过本地生产链检查；新品牌公开发行待发布**。
-设计 authority 为 [Varin 全面更名](../varin-rebrand-design.md)，实际证据与 npm/发行边界见 status。
+设计 authority 为 [Varin 全面更名](../design/varin-rebrand-design.md)，实际证据与 npm/发行边界见 status。
 B0–B4 的内部实现完成，后续进入 F；没有新旧共存机制，也不把未发布的新坐标标成已有下载产物。
 
 ### B0：命名映射与真实消费入口
@@ -1206,7 +1206,7 @@ B0–B4 的内部实现完成，后续进入 F；没有新旧共存机制，也�
 ## 阶段 F：快速决策模型与渐进检索（D-312）
 
 状态：**F0–F4 已实施并进入生产调用链（wired）；交付事实与未实测项见 status**。承接 S/W 收口，并在 D-313 阶段 B 完成后使用新产品命名；设计 authority 为
-[快速决策模型与渐进检索](../fast-decision-model-design.md)。本阶段交付通用能力及代码检索消费者，
+[快速决策模型与渐进检索](../design/fast-decision-model-design.md)。本阶段交付通用能力及代码检索消费者，
 Jev 是首个 adapter；不实现 Computer Use，不扩成新的长期 Agent runtime。
 
 ### F0：能力合同、绑定与设置入口
@@ -1272,9 +1272,9 @@ Jev 是首个 adapter；不实现 Computer Use，不扩成新的长期 Agent run
 ## 阶段 C：后台压缩 Agent 与语义续接（D-314）
 
 状态：**已交付（wired）**。承接已交付的阶段 F；D-284/D-286 的固定候选、较长原文、历史权威与
-容量驱动仍是基础。设计 authority 为 [context-compaction-agent-design.md](../context-compaction-agent-design.md)。
+容量驱动仍是基础。设计 authority 为 [context-compaction-agent-design.md](../design/context-compaction-agent-design.md)。
 顺序为 C0 → C1 → C2 → C3 → C4；生产路径为 broker 派生的专用 `compaction` worker 沿同一机制替换旧单次摘要，
-无双引擎或新增 keeper；交付状态见 [agent-harness-status.md](../agent-harness-status.md)。
+无双引擎或新增 keeper；交付状态见 [status.md](../status.md)。
 
 ### C0：固定材料、来源与共同提示词
 
@@ -1343,7 +1343,7 @@ Jev 是首个 adapter；不实现 Computer Use，不扩成新的长期 Agent run
 ## 阶段 L：Web 与科研检索（D-315）
 
 状态：**L0–L6 均已交付并接线**。设计 authority 为
-[Web 与科研检索](../web-research-search-design.md)。本阶段承接 C，不与已交付的 7H 工具并发/长命令阶段混淆。
+[Web 与科研检索](../design/web-research-search-design.md)。本阶段承接 C，不与已交付的 7H 工具并发/长命令阶段混淆。
 使用现有 Pi Agent、Thread/Run、Host 网络服务、Rust 对象/记录与快速决策服务；默认 Web 能力和用户已有选择继续有效。
 实现阶段按下列依赖交付，不一次性重写全部搜索。每个切片接上公开工具和必要消费者，再记录其完成范围。
 

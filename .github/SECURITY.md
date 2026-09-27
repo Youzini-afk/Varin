@@ -8,7 +8,7 @@ boundaries can have consequences beyond the application UI, so private and repro
 appreciated.
 
 The implementation threat model and release gates are documented separately in
-[docs/security.md](../docs/security.md).
+[docs/design/security.md](../docs/design/security.md).
 
 ## Supported versions
 
@@ -136,7 +136,7 @@ given according to the reporter's preference.
 - Do not place passwords, provider keys, tunnel tokens, or SSH material in images, build arguments,
   repositories, command histories, screenshots, or issue reports.
 
-See [Cloud deployment](../docs/cloud-deployment.md) for persistent paths, secret-file permissions,
+See [Cloud deployment](../docs/ops/cloud-deployment.md) for persistent paths, secret-file permissions,
 container attestations, immutable releases, and rollback behavior.
 
 ## Build and release integrity

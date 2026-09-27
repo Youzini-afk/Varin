@@ -84,7 +84,7 @@ describe("file roles", () => {
   it("classifies source, test, docs, and lock without using provider status", () => {
     expect(classifyFileRole("packages/web/application-host/lib/harness/explore.ts")).toBe("source");
     expect(classifyFileRole("packages/pi-host/test/harness/session-e2e.test.ts")).toBe("test");
-    expect(classifyFileRole("docs/agent-harness.md")).toBe("docs");
+    expect(classifyFileRole("docs/design/agent-harness.md")).toBe("docs");
     expect(classifyFileRole("bun.lock")).toBe("lock");
     expect(classifyFileRole("LICENSE")).toBe("lock");
   });

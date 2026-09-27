@@ -2,7 +2,7 @@
 
 范围：2.x 知识库、Zone 2 组装、host 观察、memory keeper、压缩接管、建议/审阅、模型槽位与召回。
 
-本卷是 [agent-harness-decisions.md](../agent-harness-decisions.md) 的分卷；条目只追加、不改写，索引状态以总索引为准。
+本卷是 [decisions/README.md](README.md) 的分卷；条目只追加、不改写，索引状态以总索引为准。
 
 ### D-019 · 2026-09-03 · 2.1
 类型：偏离
@@ -41,7 +41,7 @@
 决定：(1) 记忆 agent 以 **shadow mode** 接入：维护块、进 Zone 2、进 UI 面板，但**不接管压缩**；Pi 默认摘要保留。(2) 压缩接管、`explore` 默认开启、TTL 唤醒等**影响模型行为**的能力，`default-on` 的前提是通过**回放集**对比；基础设施类能力（bash / grep 覆盖、截断、权限门）`proven` 即可默认开启。(3) 回放集第一版：5–8 个来自 Piarium 自身历史的真实任务（跨多文件修改、测试失败到修复、长上下文后回忆早前决定、编辑器有未保存改动时的恢复），固定起点（commit + 工作区状态）与判定标准；三个指标：任务是否成功、总 token、人工介入次数；每次失败附一个类别（`retrieval miss` / `lost context` / `wrong edit` / `permission interruption` / `tool-runtime failure` / `coordination failure`）。对比必须同模型、同 provider、同起点。Recovery、安全、崩溃等确定性行为由 E2E 与故障注入验证，不进回放集。(4) 设计 8.6 "不建立独立评测集"改为上述最小回放集。(5) 设计 8.4.1 关于记忆 agent "前缀逐字节相同、整段缓存命中"的论证标为**未验证假设**：记忆 agent 必须带 `memory_edit` 工具才能 `tool_choice`，而不变量 8 禁止主 agent 有此工具，两者的 tools 块必然不同；Anthropic 的缓存层级为 tools → system → messages，tools 变则整段前缀失效。按 provider 实测分段命中后再定记忆 agent 的模型与成本模型。
 原因：四个计数器只能回答"贵不贵、吵不吵"，回答不了"任务做对没有"；没有 baseline 就无法判断 explore 是否优于 grep、压缩接管是否丢关键事实、多线程是提速还是制造合并工作。记忆 agent 的成本论证有一个设计层面的洞（tools 不同），在它成立之前不能让压缩正确性依赖它。当前代码的接管条件（D-028 (5)：需存在 keeper 块）在记忆 agent 未接线时等价于 shadow mode，与本条一致。
 考虑过的替代：(a) 大 benchmark——超出需要，且会腐烂。(b) 只看计数器——见上。
-影响：设计 8.4.1、8.4.2、8.6 回写；`agent-harness-status.md` 的 `Default-on` 列以回放证据为门禁；回放集放 `packages/pi-host/test/replay/`（或独立脚本），与单测分开。
+影响：设计 8.4.1、8.4.2、8.6 回写；`status.md` 的 `Default-on` 列以回放证据为门禁；回放集放 `packages/pi-host/test/replay/`（或独立脚本），与单测分开。
 状态：待实施（P0 之后、线程纵切之前建立第一版回放集）
 
 ### D-045 · 2026-09-04 · T3（上下文观察与 memory shadow 的生产形状）
@@ -266,7 +266,7 @@ modelSlotUsage 聚合与传输。后续记忆、explore、review 不再新增同
 影响：ContextSidebarTab、harnessCounterPresentation、pi-host counter/session 装配、SessionStats、i18n；设计 8.4–8.6、
 plan 0.7/2.4/2.9/3.2/3.7 和 status。D-068、D-078 中要求辅助模型分项用量/费用展示的部分由本决定取代，其余规则保留。
 
-状态：已按本范围实施；验证记录见 agent-harness-status.md。
+状态：已按本范围实施；验证记录见 status.md。
 
 ### D-081 · 2026-09-06 · 2.4 / 2.6（默认记忆与逐次压缩接管）
 
@@ -301,7 +301,7 @@ checkpoint；无 keeper 证据时同步阻塞跑一次模型会增加压缩等�
 extensions；Application Host coverage、facts 与服务；Harness Settings、Context sidebar、i18n；设计 8.4、plan 0.7/2.4/2.6、status、
 architecture 与两侧模块文档。
 
-状态：已实施；本地验证与外部边界见 agent-harness-status.md。
+状态：已实施；本地验证与外部边界见 status.md。
 
 ### D-142 · 2026-09-07 · 观察回路：一个读不了的文件不许让整次检索归零
 

@@ -145,7 +145,7 @@ LSP/outillage — ce qui permet à ces paquets de continuer à évoluer de leur 
 
 La surface d'intégration de chaque adaptateur — les commandes, événements et fichiers de
 configuration natifs qu'il lit ou invoque, et les fichiers qui restent détenus par le plugin — est
-consignée dans [le contrat d'intégration des extensions](../../docs/extension-compatibility.md). Varin
+consignée dans [le contrat d'intégration des extensions](../../docs/design/extension-compatibility.md). Varin
 ne certifie pas les versions de plugins face aux versions de Pi.
 
 ## Développer des extensions Varin
@@ -174,7 +174,7 @@ npx varin-extension test
 ```
 
 Les contrats complets de manifeste, de capacités, de cycle de vie, de stockage, de publication et de
-test sont dans le [guide de développement d'extensions Varin](../../docs/varin-extension-authoring.md).
+test sont dans le [guide de développement d'extensions Varin](../../docs/ops/varin-extension-authoring.md).
 
 ## Télécharger la version bureau
 
@@ -264,7 +264,7 @@ curl --fail http://127.0.0.1:3000/health
 
 Ouvrez `http://127.0.0.1:3000` et utilisez le mot de passe généré. Placez un reverse proxy TLS ou un
 tunnel approuvé devant tout déploiement exposé à Internet ; voir
-[la configuration du reverse proxy](../../docs/REVERSE_PROXY.md) pour les règles de transfert
+[la configuration du reverse proxy](../../docs/ops/REVERSE_PROXY.md) pour les règles de transfert
 nécessaires. En production, fixez `VARIN_IMAGE` à un digest immuable testé plutôt que de compter
 sur un tag flottant.
 
@@ -277,7 +277,7 @@ docker compose -f docker-compose.yml -f docker-compose.toolbelt.yml up -d
 
 Les images sont publiées pour `linux/amd64` et `linux/arm64`, avec attestations de provenance et
 SBOM. Le contrat complet des chemins persistants, de l'environnement, des conteneurs et du rollback
-SSH est documenté dans [Déploiement cloud](../../docs/cloud-deployment.md).
+SSH est documenté dans [Déploiement cloud](../../docs/ops/cloud-deployment.md).
 
 ## Architecture
 
@@ -316,7 +316,7 @@ dialogue, franchissent la frontière du preload Electron.
 Les paquets Pi tiers sont du code exécutable disposant des permissions système de l'utilisateur.
 Varin affiche les capacités observées et conditionne l'accès aux ressources exécutables locales au
 projet, mais il ne prétend pas transformer des extensions de confiance en bac à sable complet. Lisez
-la [politique de sécurité](../../.github/SECURITY.md) et le [modèle de sécurité](../../docs/security.md) avant
+la [politique de sécurité](../SECURITY.md) et le [modèle de sécurité](../../docs/design/security.md) avant
 d'exposer une instance distante ou d'installer du code inconnu.
 
 ## Organisation du dépôt
@@ -374,7 +374,7 @@ images de base et applicatives allégée et toolbelt associées, teste les deux 
 immuable, et ne promeut les tags qu'après le passage des deux candidates.
 
 Avant de contribuer, lisez [le guide d'ingénierie](../../docs/development.md),
-[CONTRIBUTING.md](../../.github/CONTRIBUTING.md) et les règles propres au dépôt dans
+[CONTRIBUTING.md](../CONTRIBUTING.md) et les règles propres au dépôt dans
 [AGENTS.md](../../AGENTS.md).
 
 ## Documentation de conception et d'exploitation
@@ -382,16 +382,16 @@ Avant de contribuer, lisez [le guide d'ingénierie](../../docs/development.md),
 - [Architecture](../../docs/architecture.md)
 - [Guide d'ingénierie](../../docs/development.md)
 - [Feuille de route](../../docs/roadmap.md)
-- [Contrat du harness d'agent](../../docs/agent-harness.md) (en chinois simplifié), avec [l'état de livraison](../../docs/agent-harness-status.md), [le plan](../../docs/agent-harness-plan.md) et [le journal des décisions](../../docs/agent-harness-decisions.md)
-- [Conception du noyau système Rust](../../docs/rust-kernel-design.md) et [compte rendu d'audit](../../docs/rust-kernel-audit.md)
-- [Contrat du workbench composable et de l'IDE](../../docs/composable-workbench.md) (en chinois simplifié)
-- [Plateforme d'éditeur de fichiers unifié](../../docs/unified-file-editor-platform.md)
-- [Plateforme d'extensions Varin](../../docs/varin-extension-platform.md)
-- [Contrat de migration d'OpenChamber vers Pi](../../docs/openchamber-pi-migration.md)
-- [Conception de l'interface et de la possession des plugins](../../docs/plugin-gui-design.md)
-- [Modèle de restauration](../../docs/recovery.md)
-- [Déploiement cloud](../../docs/cloud-deployment.md)
-- [Modèle de sécurité](../../docs/security.md)
+- [Contrat du harness d'agent](../../docs/design/agent-harness.md) (en chinois simplifié), avec [l'état de livraison](../../docs/status.md), [le plan](../../docs/plan/agent-harness-plan.md) et [le journal des décisions](../../docs/decisions/README.md)
+- [Conception du noyau système Rust](../../docs/design/rust-kernel-design.md) et [compte rendu d'audit](../../docs/plan/rust-kernel-audit.md)
+- [Contrat du workbench composable et de l'IDE](../../docs/design/composable-workbench.md) (en chinois simplifié)
+- [Plateforme d'éditeur de fichiers unifié](../../docs/design/unified-file-editor-platform.md)
+- [Plateforme d'extensions Varin](../../docs/design/varin-extension-platform.md)
+- [Contrat de migration d'OpenChamber vers Pi](../../docs/ops/openchamber-pi-migration.md)
+- [Conception de l'interface et de la possession des plugins](../../docs/design/plugin-gui-design.md)
+- [Modèle de restauration](../../docs/design/recovery.md)
+- [Déploiement cloud](../../docs/ops/cloud-deployment.md)
+- [Modèle de sécurité](../../docs/design/security.md)
 
 ## Filiation et licence
 

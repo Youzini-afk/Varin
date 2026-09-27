@@ -1,8 +1,8 @@
 /**
  * Native permission gate — tool_call gating with policy file.
  *
- * Design: agent-harness.md §9.1.2
- * Plan: agent-harness-plan.md §3b.1
+ * Design: design/harness-verification.md §9.1.2
+ * Plan: plan/agent-harness-plan.md §3b.1
  *
  * Policy schema: { mode, rules: [{ tool, match?, decision }] }
  * mode: normal | accept-edits | bypass | smart

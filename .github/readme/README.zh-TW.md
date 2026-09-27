@@ -110,7 +110,7 @@ Varin 不會 fork 這些擴充，也不會複製它們的私有狀態。已維�
 記憶系統、背景任務與 LSP/工具鏈設定——因此外掛可以繼續獨立更新。
 
 每個擴充的整合面——Varin 讀取或呼叫哪些命令、事件與原生設定，以及哪些檔案仍歸外掛所有——記錄在
-[擴充整合契約](../../docs/extension-compatibility.md)。Varin 不逐版本認證外掛與 Pi 的搭配。
+[擴充整合契約](../../docs/design/extension-compatibility.md)。Varin 不逐版本認證外掛與 Pi 的搭配。
 
 ## 開發 Varin 擴充
 
@@ -135,7 +135,7 @@ npx varin-extension test
 ```
 
 完整的清單格式、能力、生命週期、儲存、發布與測試說明見
-[Varin 擴充開發指南](../../docs/varin-extension-authoring.md)。
+[Varin 擴充開發指南](../../docs/ops/varin-extension-authoring.md)。
 
 ## 下載桌面版
 
@@ -212,7 +212,7 @@ curl --fail http://127.0.0.1:3000/health
 ```
 
 開啟 `http://127.0.0.1:3000`，使用剛產生的密碼登入。任何面向公網的部署都應置於 TLS 反向代理
-或經過審核的隧道之後，具體轉發要求見[反向代理設定](../../docs/REVERSE_PROXY.md)。生產環境請將
+或經過審核的隧道之後，具體轉發要求見[反向代理設定](../../docs/ops/REVERSE_PROXY.md)。生產環境請將
 `VARIN_IMAGE` 固定為已驗證的不可變摘要，不要依賴浮動標籤。
 
 若智慧體要在容器裡編譯 Python、Java、Go 或 Rust，疊加工具鏈覆寫層：
@@ -222,7 +222,7 @@ docker compose -f docker-compose.yml -f docker-compose.toolbelt.yml up -d
 ```
 
 映像同時發布 `linux/amd64` 與 `linux/arm64` 版本，並帶有 provenance 與 SBOM 證明。持久化路徑、
-環境變數、容器及 SSH 回復的完整約定見[雲端部署](../../docs/cloud-deployment.md)。
+環境變數、容器及 SSH 回復的完整約定見[雲端部署](../../docs/ops/cloud-deployment.md)。
 
 ## 架構
 
@@ -254,7 +254,7 @@ Electron 在主處理序裡執行同一個宿主，而不是再造一套桌面�
 
 第三方 Pi 套件是擁有目前使用者作業系統權限的可執行程式碼。Varin 會展示觀察到的能力，並對專案內
 可執行資源設定授權門檻，但不會把受信任擴充宣傳成完整的沙箱。在公開遠端執行個體或安裝陌生程式碼
-之前，請閱讀[安全政策](../../.github/SECURITY.md)和[安全模型](../../docs/security.md)。
+之前，請閱讀[安全政策](../SECURITY.md)和[安全模型](../../docs/design/security.md)。
 
 ## 儲存庫結構
 
@@ -305,7 +305,7 @@ CI 固定為三條職責不同的門禁：Ubuntu 原始碼品質、Windows 執�
 發生變化時，Docker 工作流程只驗證容器契約，並組建配套的精簡與工具鏈基礎映像及應用映像；兩個
 候選應用都通過不可變摘要煙測後，才會提升可安裝標籤。
 
-參與貢獻前，請閱讀[工程開發指南](../../docs/development.md)、[貢獻指南](../../.github/CONTRIBUTING.md)和精簡的
+參與貢獻前，請閱讀[工程開發指南](../../docs/development.md)、[貢獻指南](../CONTRIBUTING.md)和精簡的
 儲存庫邊界說明 [AGENTS.md](../../AGENTS.md)。
 
 ## 設計與維運文件
@@ -313,16 +313,16 @@ CI 固定為三條職責不同的門禁：Ubuntu 原始碼品質、Windows 執�
 - [工程開發與知識導覽](../../docs/development.md)
 - [架構](../../docs/architecture.md)
 - [路線圖](../../docs/roadmap.md)
-- [Agent Harness 契約](../../docs/agent-harness.md)，附[交付狀態](../../docs/agent-harness-status.md)、[實施計畫](../../docs/agent-harness-plan.md)與[決策日誌](../../docs/agent-harness-decisions.md)
-- [Rust 系統內核設計](../../docs/rust-kernel-design.md)與[審查記錄](../../docs/rust-kernel-audit.md)
-- [可組合工作台與 IDE 約定](../../docs/composable-workbench.md)
-- [統一檔案編輯器平台](../../docs/unified-file-editor-platform.md)
-- [Varin 擴充平台](../../docs/varin-extension-platform.md)
-- [從 OpenChamber 遷移到 Pi 的約定](../../docs/openchamber-pi-migration.md)
-- [外掛 GUI 與狀態歸屬設計](../../docs/plugin-gui-design.md)
-- [復原模型](../../docs/recovery.md)
-- [雲端部署](../../docs/cloud-deployment.md)
-- [安全模型](../../docs/security.md)
+- [Agent Harness 契約](../../docs/design/agent-harness.md)，附[交付狀態](../../docs/status.md)、[實施計畫](../../docs/plan/agent-harness-plan.md)與[決策日誌](../../docs/decisions/README.md)
+- [Rust 系統內核設計](../../docs/design/rust-kernel-design.md)與[審查記錄](../../docs/plan/rust-kernel-audit.md)
+- [可組合工作台與 IDE 約定](../../docs/design/composable-workbench.md)
+- [統一檔案編輯器平台](../../docs/design/unified-file-editor-platform.md)
+- [Varin 擴充平台](../../docs/design/varin-extension-platform.md)
+- [從 OpenChamber 遷移到 Pi 的約定](../../docs/ops/openchamber-pi-migration.md)
+- [外掛 GUI 與狀態歸屬設計](../../docs/design/plugin-gui-design.md)
+- [復原模型](../../docs/design/recovery.md)
+- [雲端部署](../../docs/ops/cloud-deployment.md)
+- [安全模型](../../docs/design/security.md)
 
 ## 專案沿革與授權條款
 

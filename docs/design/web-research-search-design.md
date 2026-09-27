@@ -5,8 +5,8 @@ Status: accepted design / implemented through L5 (D-315, Stage L); L0–L5 are w
 Last updated: 2026-09-23
 
 本文记录 Web search 与科研搜索讨论的设计结论。实施顺序见
-[阶段 L](agent-harness-plan.md#阶段-lweb-与科研检索d-315)，实际交付只记入
-[能力状态](agent-harness-status.md)。复用 [Harness](agent-harness.md)、
+[阶段 L](../plan/agent-harness-plan.md#阶段-lweb-与科研检索d-315)，实际交付只记入
+[能力状态](../status.md)。复用 [Harness](agent-harness.md)、
 [科研集群](research-cluster-design.md) 和 [快速决策模型](fast-decision-model-design.md) 的现有生产通路。
 下文区分当前实现、目标契约和后续探索；已接线的 `research_search` 与 retrieval 报告合同以代码和 status 为准，其他接口示例仍是设计形状。
 
@@ -45,16 +45,16 @@ Last updated: 2026-09-23
 
 代码入口：
 
-- [搜索 provider 与 Host 服务](../packages/web/application-host/lib/harness/web-search.ts)、
-  [网页读取](../packages/web/application-host/lib/harness/web-fetch.ts)、
-  [公开读取工具](../packages/pi-host/src/harness/webfetch-tool.ts)。
-- [通用预设](../packages/protocol/src/harness-presets.ts)、
-  [科研能力](../packages/protocol/src/research-capabilities.ts)、
-  [派发工具](../packages/pi-host/src/harness/thread-tools.ts)、
-  [线程服务](../packages/web/application-host/lib/harness/thread-services.ts)。
-- [来源登记](../packages/web/application-host/lib/harness/sources.ts)、
-  [来源核对](../packages/web/application-host/lib/harness/retrieval-evidence.ts)、
-  [快速决策消费者定义](../packages/protocol/src/harness-fast-decision.ts)。
+- [搜索 provider 与 Host 服务](../../packages/web/application-host/lib/harness/web-search.ts)、
+  [网页读取](../../packages/web/application-host/lib/harness/web-fetch.ts)、
+  [公开读取工具](../../packages/pi-host/src/harness/webfetch-tool.ts)。
+- [通用预设](../../packages/protocol/src/harness-presets.ts)、
+  [科研能力](../../packages/protocol/src/research-capabilities.ts)、
+  [派发工具](../../packages/pi-host/src/harness/thread-tools.ts)、
+  [线程服务](../../packages/web/application-host/lib/harness/thread-services.ts)。
+- [来源登记](../../packages/web/application-host/lib/harness/sources.ts)、
+  [来源核对](../../packages/web/application-host/lib/harness/retrieval-evidence.ts)、
+  [快速决策消费者定义](../../packages/protocol/src/harness-fast-decision.ts)。
 
 当前 retrieval 报告可以直接使用自然语言；`submit_facts` 只为需要逐项、Host 核验的结构化事实提供补充。
 URL 来源回执仅由获准的 active retrieval Run 铸造并绑定 workspace/session/thread/run；普通获取正文不自动得到同等权威。

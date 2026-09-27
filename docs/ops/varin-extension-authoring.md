@@ -90,7 +90,7 @@ receive JSON-safe props defined in `@varin/extension-contract`
 
 Animation does not impose an official page structure on a Shell. The versioned Transition Scene and
 future optional Motion-service boundary are specified in
-[Varin Motion and replaceable transition scenes](varin-motion-platform.md). A complete Shell owns
+[Varin Motion and replaceable transition scenes](../design/varin-motion-platform.md). A complete Shell owns
 its internal elements and animation; Varin only coordinates cross-owner handoff.
 
 ### Transition Scene
@@ -725,7 +725,7 @@ first-class workflow even when no catalog contains the extension.
 7. Stage an update and verify both apply and discard behavior before publishing it as the default.
 
 Varin's complete lifecycle, trust, data-ownership, contribution, workbench, and routing architecture
-is recorded in [varin-extension-platform.md](varin-extension-platform.md).
+is recorded in [varin-extension-platform.md](../design/varin-extension-platform.md).
 
 ## Varin public tooling releases
 

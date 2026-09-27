@@ -1,7 +1,7 @@
-# Harness 阶段交付日志（自 agent-harness-status.md 迁入）
+# Harness 阶段交付日志（自 status.md 迁入）
 
 Status: historical delivery record — archived 2026-09-27. 本文件是从
-[能力状态矩阵](../agent-harness-status.md) 抽出的逐阶段交付叙述与实施证据，**不再更新**；
+[能力状态矩阵](../status.md) 抽出的逐阶段交付叙述与实施证据，**不再更新**；
 现行能力状态以矩阵为准，两者冲突时以矩阵为准。
 
 原始位置说明：第一段为各阶段交付叙述（原 status 历史交付记录区），第二段为阶段 R 交付明细，
@@ -9,10 +9,111 @@ Status: historical delivery record — archived 2026-09-27. 本文件是从
 
 ---
 
+## 阶段 HR：面向任务与资源的 Harness
+
+**D-337（2026-09-27，方向确认 / HR0–HR5 已接线并收口）。**
+
+[工作区解耦与持续检索设计](../design/resource-oriented-harness-design.md) 定义 HR0–HR5：资源与数据归属、会话与操作、直接检索、
+持续索引、产品与旧机制收口、真实使用验收。工作区回到会话/项目组织职责，执行与查询使用明确的本次目标；
+索引仍按资源根分片，内容计算按版本复用；冷目录可直接搜索，未索引部分的语义覆盖会如实标注。
+下文 RR2/RR4 的目录模型记录保留为历史实现事实，其后续目标由 D-337 替代；恢复、输出和其他既有正确性成果继续保留。
+
+HR0 已接线（wired）：Thread catalog、session binding、todo/子任务与知识库的所有者统一为 scope（项目 workspaceId 或
+`session:<id>`，持久化键经文件名安全哈希），`resolveSessionOwner`/`scopeForSession` 对无项目会话返回会话自身 scope；
+session 注册不再要求目录型 workspace（`workspaceId: null` 是完整注册态，actor 携带 `authorityRoot` 发射目录）；
+path-authority 走 Documents 资源根寻址——已登记的 file/directory 资源根可寻址外部绝对路径，相对路径锚定
+`authorityRoot`，未登记目标仅在 `allowMissing` 写入场景注册新根，缺失目标 `allowMissing:false` 仍抛 ENOENT，
+`workspaceScope` 继续作为绝对授权门；launch 目录离线不再阻塞无项目会话的 journal 准备。
+验证：web 套件 303 文件 2704 全绿（含新增 path-authority 资源根 5 例、service-host 无项目注册 2 例、
+thread-registry session-scope 持久化 1 例）；app-host 源码与测试 typecheck、protocol 构建全绿。
+
+HR1 已接线（wired）：`shell.exec` 每次执行的默认 cwd 锚定 actor `authorityRoot`（无项目会话=启动目录），
+不再经 `resolveWorkspaceRoot` 反推；`lsp.diagnostics`/`lsp.diagnosticsSnapshot` 按 `authorizedPaths[0]` 的
+资源根（而非会话 workspace 分类）调 provider，外部文件诊断不再被会话身份挡住；`web.fetch` 对无项目会话以
+`session:<id>` scope 记账与裁决，不再要求 workspace。受理时一次资源解析（router `authorizedPaths`）贯穿
+`fs.lock`、文档读写与恢复校验。
+验证：harness 目录 114 文件 1264 全绿；app-host 源码与测试 typecheck 绿。
+未测：真实桌面/打包环境的无项目聊天纵切、外部文件经真实 Documents 写入的端到端——列入 HR5 验收。
+
+HR2 已接线（wired）：`search.content` 改为"问题 + 本次资源范围"的多单元模型——router `authorizedPaths`
+按各自解析出的资源根（可含外部 file/directory 根与 actor 工作区）分组，逐根独立下发 kernel 搜索后合并；
+多根结果输出绝对规范路径，经资源根寻址可直接再打开/引用；单根 actor 工作区结果保持相对 resourceId 不变。
+范围链：显式 `paths[]`（受理时逐条授权）→ 会话 `cwd` 默认范围 → `workspaceScope` 相交，
+范围在候选预算与 top-k 之前生效且只属于本次查询；无项目会话无显式范围时以 `authorityRoot` 注册为目录资源根
+作本次默认范围。覆盖诚实性：任一请求根不可解析/失败标 `partial`，全部失败返回 `unavailable`（不冒充空结果），
+`searchedFiles` 为各根真实 `scannedFiles` 之和、任一根未知则整体缺省；跨根重叠命中按键去重。
+补充验收后，`explore.search`、渐进式 `explore.query` 与 `related` 按实际资源根寻址；外部根没有相容图谱或语义来源时标记覆盖缺口，不能借用 actor 项目的同名路径或事实。外部单文件资源根也可搜索。
+验证：harness 目录 114 文件 1270 全绿（含新增多资源域 6 例：双目录根合并、file+dir 根去重、
+单根失效 partial、全根失效 unavailable、无项目会话 authorityRoot 默认范围、untrusted 拒绝）；
+app-host 源码与测试 typecheck 绿。未测：materials 集合作为检索范围的组合（材料集合仍走
+`materials.collections` 自有服务）、冷目录语义索引（属 HR3）。
+
+HR3 已接线（wired）：语义运行时与资源根的"一目录一 workspace worker"装配解耦——`WorkspaceState` 不再携带
+per-root cwd，settings.get / inference.describe / embed / rerank / fastDecision 与 global config watch 统一走
+`configCwd`（VARIN_DATA_DIR）的一个共享 worker；`requestForWorkspace(rootCwd)` 不再为每个被索引目录生成进程。
+核实事实：harness embedding/rerank/fastDecision 绑定与 `embeddingSettingsFromSnapshot`/`rerankSettingsFromSnapshot`
+本就只读 `global.harness`（pi-host `SettingsManager.create(..., {projectTrusted:false})` 明确排除项目层），
+因此共享 worker 对项目根也无配置差异；模型空间 `spaceIdOf`、配方 `recipeIdOf`、文档 revision 键维持
+"内容版本×解析配置×实际模型"身份，缓存键不含会话分类 workspaceId。符号图（symbol-runtime）与语义索引按
+registry 根 id 寻址，外部 file/directory 根经 `inspectWorkspace` 直接索引；`catalogScan.start` 与启动 reconcile
+循环跳过 session scope/哈希店键（session 存储无资源根可扫，此前会打一条 inspectWorkspace 失败日志）。
+增量失效使用 `observeDocumentMutation` 与 Documents 文件观察，并在返回旧命中前核对当前修订；观察不可用会标记覆盖缺口。观察器仍不能证明从未漏掉新文件，静默漏事件需要后续重扫。冷目录语义为空时探索层如实降级，
+不包装成热覆盖。阶段原验证：knowledge 目录 26 文件 193 全绿（含新增"不同根共享同一 inference cwd"用例）、
+harness/search 套件与 app-host typecheck 绿。未测：真实打包环境共享 worker 的凭据可见性（桌面纵切属 HR5）。
+
+HR4 已接线（wired）：RR2 的可变会话操作上下文机制整体移除——pi-host 删 `work-context.ts`/`work-context-tool.ts`/
+`session-work-context.ts` 与 `WorkContextMirror`，Host 删 `work-context.ts` 及 `context.discover/get/select/scope/reset`
+五个服务，`work_context` 从 Agent 工具面与能力声明（Web/Electron/presets）中移除；broker 打开会话不再等待
+`session.workContext.sync`，注册前无 journal 恢复门闸；`harness.respond` 不再 piggyback `contextEntryId`/目录修订，
+Thread manifest 的 `initialWorkContext` 收敛为冻结 `authorityRoot` 事实。
+接替语义：相对路径与 `shell.exec` 默认锚均取会话 `cwd`（注册时记录的启动目录，快照固定，actor 缺席时回落 supervisor
+注册锚）；`authorityRoot` 只做授权边界；`search.content`/explore/related 的默认范围改为会话 cwd；
+普通 shell 调用现在独立使用本次 cwd，载荷内的 `cd`/环境修改不污染下一次调用；持续状态由明确的进程句柄持有。子任务派发直接用 actor 权威根校验并严格执行父 Run 冻结工具集（`work_context` 特赦删除）；Pi read/write 工具
+以 cwd 锚定相对路径、绝对路径经 Host 授权。UI 的会话指示从 `workContext.operationDir` 改为显示会话 cwd
+（十个 locale 键同步改名）。目录离线只使相关操作报错，不阻塞会话注册与聊天。
+删除的测试只覆盖已删机制（work-context 双侧、journal 门闸、context 工具、scheduler 上下文切换）；其余测试改写为
+cwd/资源根语义并新增外部锚定用例。
+验证：web 套件 300 文件 2686 全绿（shell-supervisor dispose 竞态未处理拒绝为并行运行偶发，文件未改动、
+单跑 49/49 绿）；app-host 源码+测试 typecheck、pi-host tsc、runtime-broker 86/86、electron pi-runtime 6/6、
+ui typecheck 绿；protocol/runtime-broker/extension dist 重建。
+未测：真实桌面会话重开与目录离线的产品化纵切（属 HR5 场景验收）。
+
+HR5 已接线（wired，设计 §12 场景逐条对证据）：
+
+- 无项目聊天+子任务：service-host 无项目注册/launch 目录离线不阻塞（HR0 用例）、session scope 的 todo/knowledge/
+  Thread owner 持久化；pi 侧工具在无 workspace 会话下经资源根寻址照常工作。
+- 同一任务跨目录读/写/输出：session-e2e 新增"绝对路径外部文件经真实 read 工具+真实 path-authority+Host 授权字节"
+  纵切；document-read-source 新增"一次 surfaceWrite 跨两个资源根"用例——发现并修复 `document.surfaceWrite` 原先把
+  全部 changes 归到 `authorizedPaths[0].workspaceId` 的错路由缺陷（现按根分组逐根写、按序合并结果，跨根原子性
+  如实降为逐根）。path-authority 资源根用例覆盖外部文件/目录根、allowMissing 写目标、ENOENT。
+- 新目录即时检索与冷/热组合：`search.content` 多单元模型（HR2）+ 语义空时如实降级（HR3，semantic-workspace e2e
+  的独立工作区与 unconfigured/invalid/failure 分态用例）。
+- 外部修改/草稿视图：`document.readSource` 固定草稿纵切（磁盘旧值 vs 草稿不串）、junction 换链 ABA 防护用例、
+  `observeDocumentMutation` 按资源根失效；并发双 Agent 互不改变路径基准由"每请求固定 actor.cwd 快照"保证，
+  shell 纵切验证句柄级状态隔离。
+- 关闭/重开/Host 重启：thread-registry scope owner 持久化 + runtime-broker 重连套件 + session-e2e 回执去重重放。
+- 杀掉持久 shell 后再执行：shell-supervisor dispose 保护套件与 accepted-execution-unavailable 用例；
+  新命令 cwd 始终来自本次参数（快照固定）。
+- 固定快照/隔离 worktree/远程同名：fixed surface read/edit e2e、git worktree 服务测试、managedRemoteTargets
+  shell 路径；内容视图与执行位置在 source/provenance 字段分开。
+
+验证：web 套件 300 文件 2686 全绿（vitest.kernel 的 document-read-source 9/9 含新跨根用例）；
+session-e2e 40/40（含新跨目录读纵切）；app-host/pi-host/ui typecheck 绿。
+**未测**：真实桌面安装包的会话重开/目录离线/并发 Agent 产品化纵切与性能数字（无可复现基线前不报数）；
+父子项目同文件的组件级共存已验证；真实桌面双视图路径未实测。
+
+**HR 补充验收与修复（2026-09-27）：** 初次 HR5 报告未覆盖跨根草稿和虚拟分支的真实目标身份。现已修复 A 分支将 B 同名文件写进 A 并报成功、B 读取串到 A 草稿、A 草稿阻断 B 普通写、父子项目同一物理文件的重复编辑缓冲/写入队列，以及无项目会话材料读取和本地 shell 句柄误需项目身份。固定草稿改为一个引用携带多个带资源根身份的文件；同一物理文件的别名共用 UI 缓冲，已观察的写入同时使这些别名的旧草稿失效。目录消失的旧 Pi 会话可从应用管理目录启动 worker，历史 cwd 仍保留为工具目标；外部目标失效只影响该操作。搜索命中按当前正文修订复核，外部目录与单文件进入直接和渐进式 Explore；所有来源失败或固定草稿缺失时不能包装成干净的零命中。
+
+定向证据：UI Document/Monaco/Workbench 44/44；Web Documents/分支定向 66/66，检索定向 81/81，真实 kernel 的材料读取与 Explore 34/34；Host 源码/测试、Pi Host、协议、客户端、Broker、Electron 与 UI 类型检查通过。独立 worktree 的固定 baseline 能去重父子项目同一实体草稿；**真正位于外部根的未保存草稿仍不能安全物化进单根隔离子任务**，当前明确返回不可用而不悄悄读取磁盘旧版。语义索引仍按资源根维护，漏掉的外部新文件需重扫；桌面安装包重开、离线和多 Agent 产品纵切未测。以上定向结果不等于全仓或安装包验收。
+
+**后续来源视图与索引盘点修正（2026-09-27，本工作树）：** 上段的“外部草稿派发不可用”已由固定来源视图替代：外部草稿写入内核 `agent.source-view` 内容对象与记录，Thread manifest 固定视图 ID，首次与后续子任务输入从该视图读取，删除/启动孤儿清理释放引用。真实 Windows release kernel 的记录写入、按身份读取与释放测试已通过；重建 Store 实例的读取由持久记录夹具验证，尚未做完整 Host 重启纵切。A 分支与 B 别名同指一文件时，B 读取映射到当前虚拟或物化分支，`ls/find` 可遮蔽分支删除的 B 磁盘旧名；外部 B 的独立未保存草稿现在经 Documents 按捕获的 owner/修订直接提交到 B 的实时编辑缓冲；用户续编导致冲突，成功后固定来源视图前进；若 Host 在两次持久提交之间退出，下次读取会核对 Documents 的终态记录恢复视图，确无操作记录且编辑器仍处于原修订时清除未发出的准备状态；无法证明结果时保留待确认状态而不回退到旧正文。语义扫描不再为目录清单请求全文 hash；Rust 返回 stat metadata，Host 只处理新/变更/已知失效路径。命中仍核对 Documents 修订，跳过正文的盘点以范围级 partial 缺口表示，普通查询不触发全目录扫描。已有定向测试和类型检查覆盖这些纵切；真实桌面安装包与跨根草稿完整 Agent 交互尚未实测；静默漏掉新文件的定期后台补漏已接线并有定向测试，大目录资源成本尚未实测，不能把本轮解释为 HR3 全部完成。设计与边界见 [§14](../design/resource-oriented-harness-design.md#14-后续修正固定来源视图与索引盘点)。
+
+本次继续验证：真实内核记录与真实 Documents 编辑器夹具验证 B 写回、成功后再读、用户续编冲突及磁盘不被改动；旧版本缺 owner 的来源记录仍能读取，但明确拒绝无凭据的编辑器写入。语义补漏的定向测试验证静默新增文件最终入索引、扫描在飞时前台查询继续返回、关闭后不再调度。相关 4 个测试文件 111 项通过，Application Host 源码/测试类型检查与改动源码 ESLint 通过。混合 A 虚拟分支和独立 B 编辑器的一次补丁仍需拆成两次提交；结果不明的编辑器操作需要人工处理，当前没有自动跨提交域回滚或完整桌面重启证明。
+
 下文既有阶段的历史交付记录保留；它们不覆盖上表新发现的缺陷与修复目标。
 
 **D-315 / 阶段 L：Web 与科研检索（2026-09-23），L0–L6 均已接线。**
-设计见 [web-research-search-design.md](../web-research-search-design.md)，计划为 L0–L6。
+设计见 [web-research-search-design.md](../design/web-research-search-design.md)，计划为 L0–L6。
 通用 `retrieval` 现在允许自然语言报告作为正常结果，`submit_facts` 只在需要结构化、Host 核验的事实时使用；
 没有结构化事实时不会覆盖有效 prose，也不会把 prose 标成 source-checked。科研 `investigation` 与普通派发仍复用同一套线程运行时。
 L1 已接线（wired）：`web.search` 接受 `query`/`objective`/`queries[]`/`urls[]`/`cursor` 批量条目，每项独立返回
@@ -75,7 +176,7 @@ D-321 验收修正：新服务已补入 `HarnessServiceHost` 的生产装配；`
 固定 snapshot 阅读器现由页面图路由和来源卡入口提供；更完整的并排材料阅读器、表格单元格编辑和解析任务进度仍可继续打磨。
 
 **D-314 / 阶段 C：后台压缩 Agent 与语义续接（2026-09-22），C0–C4 已交付并进入生产调用链（wired）。**
-设计见 [context-compaction-agent-design.md](../context-compaction-agent-design.md)。
+设计见 [context-compaction-agent-design.md](../design/context-compaction-agent-design.md)。
 
 已接线：
 
@@ -122,7 +223,7 @@ invalid-summary）与 D-284 admission 经真实 in-process worker Agent 验证�
 不再以进程内替代测试代表该证据。不声称语义质量或缓存/速度收益。
 
 **D-313 / 阶段 B：Varin 全面更名（2026-09-21），产品源码与仓库切换完成；首次新品牌发行待发布。**
-设计见 [varin-rebrand-design.md](../varin-rebrand-design.md)，B0–B4 的内部切换已落地，下一实施阶段为 F。
+设计见 [varin-rebrand-design.md](../design/varin-rebrand-design.md)，B0–B4 的内部切换已落地，下一实施阶段为 F。
 包命名空间、CLI、协议/事件、配置目录与 key、原生 appId、kernel、工作台 ID、当前文档和发布脚本统一为 Varin，
 没有旧名别名、回退、双写或迁移层。真实 Pi 包、`PI_CODING_AGENT_DIR`、`.pi`、AuthStorage 与原生会话仍归 Pi。
 名称切换时保留过原方块 π 图标；后续用户已定稿“回折”标志（横边向外延伸、两半小幅斜向错开）。
@@ -142,7 +243,7 @@ invalid-summary）与 D-284 admission 经真实 in-process worker Agent 验证�
   发行工作流生成。未声称已有新品牌下载产物，也未进行真实浏览器、macOS/iOS 或 Android 原生构建验收。
 
 **D-312 / 阶段 F：快速决策模型与渐进检索（2026-09-21），F0–F4 已交付并进入生产调用链（wired）。**
-设计见 [fast-decision-model-design.md](../fast-decision-model-design.md)。
+设计见 [fast-decision-model-design.md](../design/fast-decision-model-design.md)。
 
 已接线：
 
@@ -170,8 +271,8 @@ invalid-summary）与 D-284 admission 经真实 in-process worker Agent 验证�
 工具路由等其他消费者未注册为可用能力。
 
 **D-306 / 阶段 S：对话式设置与 Agent 管理（2026-09-20），经 D-308/D-310/D-311 收口，当前产品范围已完成并进入生产调用链。**
-设计见 [agent-settings-design.md](../agent-settings-design.md)，实施顺序见
-[plan S0–S4](../agent-harness-plan.md#阶段-s对话式设置与-agent-管理d-306)。
+设计见 [agent-settings-design.md](../design/agent-settings-design.md)，实施顺序见
+[plan S0–S4](../plan/agent-harness-plan.md#阶段-s对话式设置与-agent-管理d-306)。
 
 已接线：
 
@@ -211,8 +312,8 @@ invalid-summary）与 D-284 admission 经真实 in-process worker Agent 验证�
 按本阶段交付选择不再作为完成门槛，也不据此宣称这些外部环境已经 proven。
 
 **D-307 / 阶段 W：会话等待、触发与续接（2026-09-20），经 D-308/D-310/D-311 收口，W0–W4 当前产品范围已完成并进入生产调用链。**
-设计见 [agent-follow-up-design.md](../agent-follow-up-design.md)，任务见
-[plan W0–W4](../agent-harness-plan.md#阶段-w会话等待触发与续接d-307)。
+设计见 [agent-follow-up-design.md](../design/agent-follow-up-design.md)，任务见
+[plan W0–W4](../plan/agent-harness-plan.md#阶段-w会话等待触发与续接d-307)。
 
 已接线：
 
@@ -255,7 +356,7 @@ Stage W 后续来源已接线：`any`/`all` 使用隐藏 leaf definition 与 par
 未实测，按本阶段交付选择不再作为完成门槛。
 
 **D-292/D-295 阶段 Q：测试与 CI 体系重整（2026-09-19），实施完成、本地验证通过，已由主代理验收收口。** 现状审计与处置见
-[testing-ci-audit.md](testing-ci-audit.md)，设计见 [testing-ci-design.md](../testing-ci-design.md)。
+[testing-ci-audit.md](testing-ci-audit.md)，设计见 [testing-ci-design.md](../design/testing-ci-design.md)。
 
 已交付：kernel/native 验收集由 `packages/web/vitest.kernel.config.ts` 唯一归属（主 Web 套件 271 文件/2334 用例全绿且不再依赖
 Rust 产物；`test:kernel` 26 node 用例 + 17 文件/120 用例全绿）；恢复测试已重定向到生产 journal 引擎与忠实内存 durable
@@ -313,7 +414,7 @@ D-299 当时只证明入口与执行身份纵切；动态升级、同 Thread 换
 不宣称异构科研集群、真实付费模型质量或完整桌面跨平台验收完成。
 
 **D-300（2026-09-19）：实验执行与通用多 Agent 协作设计；分段实施及验收见下。**
-[设计第 6–7 节](../research-cluster-design.md) 与 plan 7C–7E 取代强制 ResearchUpdate/研究板和机械事件综合：
+[设计第 6–7 节](../design/research-cluster-design.md) 与 plan 7C–7E 取代强制 ResearchUpdate/研究板和机械事件综合：
 原 7D 范围包含本机/受管远程/首个原生集群后端（后由 D-304 延期原生集群）、资源观测与确认分配、真实取消/重连及产物保留；7E 使用自然语言消息与可选等待，
 从最后一段已有可见输出生成约 20 字现状预览，持续经 Zone 2 增量提供并可展开原文，不增加汇报或总结模型。
 
@@ -358,7 +459,7 @@ D-304 将受管远程、多机器执行、轻量批量操作与材料复用排�
 目标：传统环境观察在每次实际模型请求前检查，新事实送达后留在历史；每个授权 Agent 同时获得当前关系范围内的完整短表，
 作为临时尾部附页，不只推变化行、不只给主 Agent、不把历次表写入历史。固定协作说明放稳定系统提示，动态材料默认为标明来源的
 `user` 内容；内部消息类型/权限保持区分。历史前缀不重排，快照成本计入实际请求容量；普通状态与消息/结果正文不混淆交付。
-详细实施和定向验收见 [plan 7.11 的 7G](../agent-harness-plan.md#711-分阶段交付) 与 [Harness 8.1.1](../agent-harness.md#811-d-301环境增量留史团队现状作为请求尾部快照后续-7g)。
+详细实施和定向验收见 [plan 7.11 的 7G](../plan/agent-harness-plan.md#711-分阶段交付) 与 [Harness 8.1.1](../design/harness-context.md#811-d-301环境增量留史团队现状作为请求尾部快照后续-7g)。
 生产 `ContextRequestBoundary` 在每次 Agent provider 请求前准备两类材料，先计入容量；环境材料在 provider 真正开始后写入 Pi 原生历史并确认收据，
 团队表每次完整重建但不留史。压缩后重新准备；请求未开始、Host 不可用和空团队分别表达。团队进展取真实最后可见段落及 Run/entry 来源，无状态总结模型。
 
@@ -368,7 +469,7 @@ Pi 的真实执行入口现在消费工具在权限确认后给出的资源计�
 
 `bash` 默认短等待并支持 `waitMs:0`，RPC 期限覆盖观察窗口但不是进程期限；`get_output` 可事件等待，输入/终止控制不被等待占住。
 真实完成、失败和取消按 executionId 去重后进入 7G，已由工具结果保留的终态不会重复。普通本地 shell 仍不冒充跨 Host 重启耐久实验。
-详见 [Harness 5.9](../agent-harness.md#59-并发) 和 [plan 7.11 的 7H](../agent-harness-plan.md#711-分阶段交付)。
+详见 [Harness 5.9](../design/harness-tools.md#59-并发) 和 [plan 7.11 的 7H](../plan/agent-harness-plan.md#711-分阶段交付)。
 原交付验收与 D-305 的 7G/7H 实施分别记录。
 
 **D-304 / 7I（2026-09-20，D-305 已实施）：受管远程、多机器执行与按需运维线程。**
@@ -418,7 +519,7 @@ Note（inform）定向消息控件与最近消息来源/held状态显示；公�
 
 **D-282 已完成 R0/R6，并据此完成阶段 R。** R0–R6 的生产责任均已按各自可执行契约接管：Rust kernel 统一拥有工作状态/恢复元数据、文件资源与物化、受管进程/PTY、固定视图文件与结构计算；TypeScript Application Host 保留产品策略、公开 API、Documents/Registry 协调、知识与模型编排，Pi worker 保留 Agent loop、provider、会话和扩展。R0 的 request-credit、取消/断线和发行身份，以及当时 Desktop/Web/云/VS Code 发行布局的历史证据，均已在该阶段收口；VS Code companion 的当前支持面随后由 D-296 退役。阶段 R 不再是当前实施主线。
 
-完整边界见 [rust-kernel-design.md](../rust-kernel-design.md)。本机真实证据为 Windows x64；Windows ARM64、Linux x64/ARM64、macOS x64/ARM64 的相同 native build/verify/package/smoke 已固化在 release workflow，当前提交尚未观察这些远端 runner 的实际结果，因此不把本机结果外推成其他平台实测。代码签名仍按产品合同可选，真实 ReFS/APFS extent sharing、物理断电和付费模型质量不是阶段 R 的实现完成条件。
+完整边界见 [rust-kernel-design.md](../design/rust-kernel-design.md)。本机真实证据为 Windows x64；Windows ARM64、Linux x64/ARM64、macOS x64/ARM64 的相同 native build/verify/package/smoke 已固化在 release workflow，当前提交尚未观察这些远端 runner 的实际结果，因此不把本机结果外推成其他平台实测。代码签名仍按产品合同可选，真实 ReFS/APFS extent sharing、物理断电和付费模型质量不是阶段 R 的实现完成条件。
 D-253 明确当前无用户兼容需求：取消默认旧内部库转换要求，直接替换内部格式并删除旧路径；正常新格式的数据完整性契约保留。
 
 **P0 integrity、T1 线程核心与 T2 权限纵切（2026-09-04）已完成**：broker Actor、Host 静态授权、versioned
@@ -896,7 +997,7 @@ state-trie、thread-runtime 套件回归通过。
 
 ## 历史快照：阶段 1 小结（2026-09-03，自决策日志迁入）
 
-以下内容原位于 `agent-harness-decisions.md`，按 D-030 迁到此处；只是当时的快照，现行状态以上表为准。
+以下内容原位于 `decisions/README.md`，按 D-030 迁到此处；只是当时的快照，现行状态以上表为准。
 
 ### 模块已写并有单测
 
@@ -953,7 +1054,7 @@ state-trie、thread-runtime 套件回归通过。
 
 **运行时可靠性专项 RR（2026-09-26：RR0–RR5 的代码路径与定向行为已复核；RR6 的真实安装包/外部代理平台纵切仍待验证）。**
 
-实施合同和 E01–E12 证据台账见 [Agent 运行时可靠性与多项目工作区计划](../agent-runtime-reliability-plan.md)。
+实施合同和 E01–E12 证据台账见 [Agent 运行时可靠性与多项目工作区计划](../plan/agent-runtime-reliability-plan.md)。
 RR0 完成源码级故障分层（E01 路径权限、E11 断连丢事件、E12 `3044800b` 停止语义），建立版本基线（host 0.9.19 / Node 24.18 / Varin 1.3.14）。
 执行者在下表记录生产接线、行为证据、提交及明确未测项；不通过增加单测数量自动提升状态。
 

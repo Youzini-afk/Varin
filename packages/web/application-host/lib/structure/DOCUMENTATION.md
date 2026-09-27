@@ -229,5 +229,5 @@ comment or string.
 
 A repeatable agent-view cold-start measurement lives in
 `packages/web/scripts/structure-cold-start.ts` (`bun run --cwd packages/web structure:cold-start`).
-It is not in the default test suite. Numbers go in `docs/agent-harness-status.md`;
+It is not in the default test suite. Numbers go in `docs/status.md`;
 do not turn them into speedup claims.

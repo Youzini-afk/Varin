@@ -4,8 +4,8 @@ Status: Stage S delivered through D-311: owner-backed fields/actions, session-bo
 
 Last updated: 2026-09-21
 
-实施顺序见 [Harness plan 的阶段 S](agent-harness-plan.md#阶段-s对话式设置与-agent-管理d-306)，
-交付事实见 [Harness status](agent-harness-status.md)，决策见 [D-306](decisions/tool-environment.md#d-306--2026-09-20--阶段-s对话式设置与-agent-管理)。
+实施顺序见 [Harness plan 的阶段 S](../plan/agent-harness-plan.md#阶段-s对话式设置与-agent-管理d-306)，
+交付事实见 [Harness status](../status.md)，决策见 [D-306](../decisions/tool-environment.md#d-306--2026-09-20--阶段-s对话式设置与-agent-管理)。
 本文同时定义完整目标和当前实现边界；字段目录、查询/修改、UI 同步、领域动作、客户端 Surface 操作、
 跨 owner 组合更新和 S4 组合指南已经接线；认证 Surface、逐项 CAS、secret 投影与初轮验收修订见 D-310，
 session→Surface 绑定及 typed action-operation 收口见 D-311，
@@ -34,14 +34,14 @@ session→Surface 绑定及 typed action-operation 收口见 D-311，
 
 | 现有责任 | 入口 | 本阶段的处理 |
 | --- | --- | --- |
-| 应用设置保存与副作用 | [settings-runtime.ts](../packages/web/application-host/lib/platform/settings-runtime.ts) | 复用保存 authority，补齐语义化操作、并发条件与变更通知 |
-| 应用设置客户端 | [settings.ts](../packages/web/src/api/settings.ts) | UI 与 Agent 汇入同一操作服务 |
-| UI 偏好应用与同步 | [persistence.ts](../packages/ui/src/lib/persistence.ts) | 复用界面应用逻辑，避免收到远端更新后又写回旧值 |
-| 设置搜索目录 | [search.ts](../packages/ui/src/lib/settings/search.ts) | 拆出界面无关的共用定义，替换独立手写搜索表 |
-| Pi/Harness 设置协议 | [methods.ts](../packages/protocol/src/methods.ts) | 复用 settings.get/update 与 revision，保留字段所有权 |
-| Pi 设置、Skill、提示词资源 | [session-host.ts](../packages/pi-host/src/session-host.ts) | 复用资源所有权和配置写入，协调运行中的 reload |
-| 原生工具装配 | [select-tools.ts](../packages/pi-host/src/harness/select-tools.ts) | 注册稳定的设置工具及实际可用的管理动作入口 |
-| Varin 扩展生命周期 | [routes.ts](../packages/web/application-host/lib/extensions/routes.ts) | 调用既有扩展服务，不创建第二份扩展状态 |
+| 应用设置保存与副作用 | [settings-runtime.ts](../../packages/web/application-host/lib/platform/settings-runtime.ts) | 复用保存 authority，补齐语义化操作、并发条件与变更通知 |
+| 应用设置客户端 | [settings.ts](../../packages/web/src/api/settings.ts) | UI 与 Agent 汇入同一操作服务 |
+| UI 偏好应用与同步 | [persistence.ts](../../packages/ui/src/lib/persistence.ts) | 复用界面应用逻辑，避免收到远端更新后又写回旧值 |
+| 设置搜索目录 | [search.ts](../../packages/ui/src/lib/settings/search.ts) | 拆出界面无关的共用定义，替换独立手写搜索表 |
+| Pi/Harness 设置协议 | [methods.ts](../../packages/protocol/src/methods.ts) | 复用 settings.get/update 与 revision，保留字段所有权 |
+| Pi 设置、Skill、提示词资源 | [session-host.ts](../../packages/pi-host/src/session-host.ts) | 复用资源所有权和配置写入，协调运行中的 reload |
+| 原生工具装配 | [select-tools.ts](../../packages/pi-host/src/harness/select-tools.ts) | 注册稳定的设置工具及实际可用的管理动作入口 |
+| Varin 扩展生命周期 | [routes.ts](../../packages/web/application-host/lib/extensions/routes.ts) | 调用既有扩展服务，不创建第二份扩展状态 |
 
 应用设置、Pi 原生配置、扩展配置以及客户端呈现状态的 owner 不同。统一的是发现、描述和操作合同，
 不把它们搬进新数据库，也不让 Agent 直接修改内部 SQLite、浏览器缓存或发行安装目录来代替正常操作。
@@ -241,7 +241,7 @@ Pi 包、Varin 扩展和原生 UI 能力仍保留各自权威；第三方设置�
 
 ## 10. 验收与交付边界
 
-实施与验证按 [阶段 S](agent-harness-plan.md#阶段-s对话式设置与-agent-管理d-306) 推进。
+实施与验证按 [阶段 S](../plan/agent-harness-plan.md#阶段-s对话式设置与-agent-管理d-306) 推进。
 核心判断是设置能否被找到、正确理解、写回原 owner 并实际应用，以及界面和 Agent 能否读到同一结果。
 以下是应核对的行为，不是要求每项建立独立测试或重新跑完整平台矩阵：
 

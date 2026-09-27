@@ -1,8 +1,8 @@
 /**
  * todo tool — plan block management for the main agent.
  *
- * Design: agent-harness.md §5.6
- * Plan: agent-harness-plan.md §2.5
+ * Design: design/harness-tools.md §5.6
+ * Plan: plan/agent-harness-plan.md §2.5
  *
  * Schema: { items: Array<{ text; status: 'open'|'done'|'blocked' }>; confidence?: number }
  * Replaces the entire `plan` block (updatedBy: 'agent').

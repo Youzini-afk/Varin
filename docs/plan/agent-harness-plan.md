@@ -1,14 +1,14 @@
 # Agent harness 实施计划
 
 Status: active execution plan; accepted capabilities ship as usable defaults (D-078)。各阶段定义骨架保留于此
-（锚点不变）；已收口阶段的完整合同与验收细节见 [archive/agent-harness-plan-detail.md](archive/agent-harness-plan-detail.md)；
-能力现状以 [agent-harness-status.md](agent-harness-status.md) 为准。
+（锚点不变）；已收口阶段的完整合同与验收细节见 [archive/agent-harness-plan-detail.md](../archive/agent-harness-plan-detail.md)；
+能力现状以 [status.md](../status.md) 为准。
 
 Last updated: 2026-09-27
 
-设计与边界见 [agent-harness.md](agent-harness.md)，Rust 系统内核的完整目标见
-[rust-kernel-design.md](rust-kernel-design.md)，交付事实只看 [agent-harness-status.md](agent-harness-status.md)，
-理由追加到 [agent-harness-decisions.md](agent-harness-decisions.md)。正式能力直接实施、完成后默认提供；独立评测不是前置。
+设计与边界见 [agent-harness.md](../design/agent-harness.md)，Rust 系统内核的完整目标见
+[rust-kernel-design.md](../design/rust-kernel-design.md)，交付事实只看 [status.md](../status.md)，
+理由追加到 [decisions/README.md](../decisions/README.md)。正式能力直接实施、完成后默认提供；独立评测不是前置。
 全部交付后删除本计划，决策日志归档保留。
 
 阶段 Q、D-296 旧 companion 清理、D-303 本机实验/协作及 D-305 的 **7G → 7H → 7I** 已完成：
@@ -17,29 +17,29 @@ Last updated: 2026-09-27
 
 **阶段 S：对话式设置与 Agent 管理（D-306）** 已在 D-311 收口，owner-backed 字段/动作、session-bound Surface、typed operation 与组合管理进入生产链。
 它覆盖现有大部分设置的查询、修改与实际生效，工具负责实时事实和执行，Skill 按需指导组合用法；
-完整合同见 [agent-settings-design.md](agent-settings-design.md)，不追溯扩大 7G–7I 的交付范围。
+完整合同见 [agent-settings-design.md](../design/agent-settings-design.md)，不追溯扩大 7G–7I 的交付范围。
 
 **阶段 W：会话等待、触发与续接（D-307）** 同样在 D-311 收口，耐久/实时来源、复合与共享观察、统一续接、远程对账、Thread/session 生命周期与 calendar 管理已接线。
 Agent 可自然登记条件和后续工作，程序通过时间/事件/确定性检查决定何时交付，同一会话或线程在需要时恢复。
-完整设计见 [agent-follow-up-design.md](agent-follow-up-design.md)；交付事实与未覆盖边界见 status。
+完整设计见 [agent-follow-up-design.md](../design/agent-follow-up-design.md)；交付事实与未覆盖边界见 status。
 
 **阶段 B：Varin 全面更名（D-313，源码/产品与 GitHub 仓库已切换；首次新品牌发行待发布）。**
 产品、自有代码/协议/配置、构建发行和当前文档一次切换为 Varin，不留旧名称兼容层；
-真实 Pi 依赖、已有成果与历史记录按原归属保留。完整设计见 [varin-rebrand-design.md](varin-rebrand-design.md)。
+真实 Pi 依赖、已有成果与历史记录按原归属保留。完整设计见 [varin-rebrand-design.md](../design/varin-rebrand-design.md)。
 
 **阶段 F：快速决策模型与渐进检索（D-312）已交付并接线。**
 通用能力与首个 Jev 适配、模型配置、`explore` 选材和动态下一步选择按 F0 → F1 → F2 → F3 → F4 推进。
-完整合同见 [fast-decision-model-design.md](fast-decision-model-design.md)；Computer Use 等未来用途只保留复用边界。
+完整合同见 [fast-decision-model-design.md](../design/fast-decision-model-design.md)；Computer Use 等未来用途只保留复用边界。
 
 **阶段 C：后台压缩 Agent 与语义续接（D-314）已交付并接线。**
 原固定候选的一次摘要调用已替换为独立内部 worker：按需查询历史/产物/任务记录，按语义保留有效要求，
 以近期原文帮助理解工作位置，继续复用容量预留、候选等待与 Pi 安全提交。完整设计与实现说明见
-[后台压缩 Agent](context-compaction-agent-design.md)，交付状态见
-[agent-harness-status.md](agent-harness-status.md)。
+[后台压缩 Agent](../design/context-compaction-agent-design.md)，交付状态见
+[status.md](../status.md)。
 
 **阶段 L：Web 与科研检索（D-315）正在实施。** L0 的自然语言 retrieval 报告/可选 `submit_facts` 已接线；L1 连续 Web 阅读/复用、
 L2 论文发现与关系展开、L3 材料集合与结构阅读均已接线。L4–L6 仍按顺序推进。复用已有通用 `retrieval`、科研 `investigation` 和普通派发，不另建搜索 Agent runtime。
-完整目标见 [Web 与科研检索](web-research-search-design.md)，交付事实以 status 为准。
+完整目标见 [Web 与科研检索](../design/web-research-search-design.md)，交付事实以 status 为准。
 
 **阶段 N：会话下一步选择（D-325，已实施）。** 已将输入框上方默认启用的单条建议改为用户主动配置的模型分工能力：
 Agent 结束后发起一次短输入、短输出的后台模型请求，可返回零条或多个不同方向的草稿；移除自动会话回顾。
@@ -51,11 +51,11 @@ Agent 结束后发起一次短输入、短输出的后台模型请求，可返�
 已验证的恢复、取消、输出、资源正确性和覆盖反馈保留，历史测试记录不代替新设计交付。
 
 **阶段 HR：面向任务与资源的 Harness（D-337，HR0–HR5 已接线并收口）。**
-完整合同见 [工作区解耦与持续检索设计](resource-oriented-harness-design.md)。已按 HR0 资源与归属基础、HR1 会话/操作纵切、
+完整合同见 [工作区解耦与持续检索设计](../design/resource-oriented-harness-design.md)。已按 HR0 资源与归属基础、HR1 会话/操作纵切、
 HR2 直接检索与多范围、HR3 持续索引、HR4 产品与旧机制收口、HR5 真实使用验收交付。
 工作区主要承担会话/项目组织，任务与资源独立成立；索引按资源与内容版本复用，新目录无需注册工作区即可搜索。
 WorkContextMirror、目录修订同步和隐式查询作用域等旧机制已移除，复用现有 Pi、Host、Rust、Documents 和 Thread/Run。
-逐阶段交付事实与 §12 场景验收证据见 [agent-harness-status.md](agent-harness-status.md)。
+逐阶段交付事实与 §12 场景验收证据见 [status.md](../status.md)。
 
 ## 0. 执行者须知
 
@@ -85,8 +85,8 @@ WorkContextMirror、目录修订同步和隐式查询作用域等旧机制已移
 
 ### 0.2 阅读入口
 
-[AGENTS.md](../AGENTS.md)、[development.md](development.md)、[agent-harness.md](agent-harness.md)、
-[architecture.md](architecture.md)、[native-workspace-recovery-design.md](native-workspace-recovery-design.md)。
+[AGENTS.md](../../AGENTS.md)、[development.md](../development.md)、[agent-harness.md](../design/agent-harness.md)、
+[architecture.md](../architecture.md)、[native-workspace-recovery-design.md](../design/native-workspace-recovery-design.md)。
 实施前读所属模块文档、确切代码和消费者；已读资料按变化与需要复查，不机械重读。
 
 ### 0.3 验证命令
@@ -198,7 +198,7 @@ TriviumDB 优先保留，不启动 SQLite 迁移；Windows 沙箱排除。平台
 ## 阶段 0 / 1 / 1b 与 P0：已交付入口
 当前事实与证据保留在 status，此处不重复已完成计划与废弃接口。
 
-> 本节已收口；交付合同与验收细节全文见 [archive/agent-harness-plan-detail.md](archive/agent-harness-plan-detail.md) 同名标题节。
+> 本节已收口；交付合同与验收细节全文见 [archive/agent-harness-plan-detail.md](../archive/agent-harness-plan-detail.md) 同名标题节。
 
 ### P0.1 broker 会话身份 pin
 ### P0.2 Router Actor 与静态授权
@@ -211,7 +211,7 @@ TriviumDB 优先保留，不启动 SQLite 迁移；Windows 沙箱排除。平台
 ### 1b.8 默认网页搜索与原文续读（D-289，已实施）
 ## 阶段 2：上下文与知识
 
-> 本节已收口；交付合同与验收细节全文见 [archive/agent-harness-plan-detail.md](archive/agent-harness-plan-detail.md) 同名标题节。
+> 本节已收口；交付合同与验收细节全文见 [archive/agent-harness-plan-detail.md](../archive/agent-harness-plan-detail.md) 同名标题节。
 
 ### 2.1 知识库服务
 ### 2.2 Zone 2
@@ -229,7 +229,7 @@ TriviumDB 优先保留，不启动 SQLite 迁移；Windows 沙箱排除。平台
 ### 2.10 recall
 ## 阶段 3：检索、工作状态与线程
 
-> 本节已收口；交付合同与验收细节全文见 [archive/agent-harness-plan-detail.md](archive/agent-harness-plan-detail.md) 同名标题节。
+> 本节已收口；交付合同与验收细节全文见 [archive/agent-harness-plan-detail.md](../archive/agent-harness-plan-detail.md) 同名标题节。
 
 ### 3.1 符号图
 ### 3.2 explore：正式默认工具
@@ -258,13 +258,13 @@ TriviumDB 优先保留，不启动 SQLite 迁移；Windows 沙箱排除。平台
 `normal` / `accept-edits` / `bypass` / `smart`、用户规则、workspace 只收紧和 `permissionJudge` 都作用于这条唯一链；Host 继续只做
 非交互 actor/capability/workspace/path enforcement。D-283 完成了以下纵切：
 
-> 本节已收口；交付合同与验收细节全文见 [archive/agent-harness-plan-detail.md](archive/agent-harness-plan-detail.md) 同名标题节。
+> 本节已收口；交付合同与验收细节全文见 [archive/agent-harness-plan-detail.md](../archive/agent-harness-plan-detail.md) 同名标题节。
 
 ## 阶段 R：Rust 系统内核与 Host 分层（D-252）
-目标架构、资源归属和失败语义见 [rust-kernel-design.md](rust-kernel-design.md)。D-282 已在 R0–R5 各自接管后完成 R6 汇总验收，
+目标架构、资源归属和失败语义见 [rust-kernel-design.md](../design/rust-kernel-design.md)。D-282 已在 R0–R5 各自接管后完成 R6 汇总验收，
 因此阶段 R 整体完成。模块迁移后的生产默认只有新写者；TS 保留产品编排、Pi runtime、Document Registry、知识领域和模型/索引装饰层。
 
-> 本节已收口；交付合同与验收细节全文见 [archive/agent-harness-plan-detail.md](archive/agent-harness-plan-detail.md) 同名标题节。
+> 本节已收口；交付合同与验收细节全文见 [archive/agent-harness-plan-detail.md](../archive/agent-harness-plan-detail.md) 同名标题节。
 
 ### R0. 契约、运行时与发行基础
 ### R1. 工作状态与恢复存储接管
@@ -276,16 +276,16 @@ TriviumDB 优先保留，不启动 SQLite 迁移；Windows 沙箱排除。平台
 ## 阶段 4–6：既有默认 runtime 与后续领域
   已有版本依赖明确，不等 harness 全部完成。
 
-> 本节已收口；交付合同与验收细节全文见 [archive/agent-harness-plan-detail.md](archive/agent-harness-plan-detail.md) 同名标题节。
+> 本节已收口；交付合同与验收细节全文见 [archive/agent-harness-plan-detail.md](../archive/agent-harness-plan-detail.md) 同名标题节。
 
 ## 阶段 Q：测试与 CI 体系重整（D-292，已验收收口）
-设计权威为 [testing-ci-design.md](testing-ci-design.md)，现状审计与处置结果见 [testing-ci-audit.md](archive/testing-ci-audit.md)。本阶段覆盖全仓；其后 D-296 已收口，再开始 AI4S 的 7A–7F。
+设计权威为 [testing-ci-design.md](../design/testing-ci-design.md)，现状审计与处置结果见 [testing-ci-audit.md](../archive/testing-ci-audit.md)。本阶段覆盖全仓；其后 D-296 已收口，再开始 AI4S 的 7A–7F。
 先建立整体判断，再分责任完成修改；不得把它交付成只修近期几处失败、只删源码断言或只移动 workflow 的局部补丁。
 当前状态是 Q0–Q3 已实施并经主代理验收收口（D-293/D-295）；D-296 已完成原 VS Code
 companion 的完整退役，故它不再是当前 required CI 或手动入口。以下编号保留为实施记录，不构成每次
 日常开发都要重复的检查流程。
 
-> 本节已收口；交付合同与验收细节全文见 [archive/agent-harness-plan-detail.md](archive/agent-harness-plan-detail.md) 同名标题节。
+> 本节已收口；交付合同与验收细节全文见 [archive/agent-harness-plan-detail.md](../archive/agent-harness-plan-detail.md) 同名标题节。
 
 ### Q0. 全仓现状、责任和目标结构
 ### Q1. 清理无效约束，修正测试行为与装配
@@ -297,7 +297,7 @@ D-296 紧接阶段 Q，完成 AI4S 7A–7F 之前的产品边界收口。实现�
 涉及 LSP 包、TextMate 格式、外部编辑器启动或 provenance 的文字按原语义保留，历史 changelog、决策正文
 和阶段 R 交付证据不改写。
 
-> 本节已收口；交付合同与验收细节全文见 [archive/agent-harness-plan-detail.md](archive/agent-harness-plan-detail.md) 同名标题节。
+> 本节已收口；交付合同与验收细节全文见 [archive/agent-harness-plan-detail.md](../archive/agent-harness-plan-detail.md) 同名标题节。
 
 ## 阶段 7：AI4S 科研集群（D-291/D-297/D-300，分阶段实施）
 
@@ -316,7 +316,7 @@ Thread/Run、WorkingState、检索、上下文、权限、Rust kernel 和 Pi run
 浏览项目/对话或改变侧重不自动切 UIUX。未来办公采用同样的分离，本阶段不实现办公专属能力。
 
 未实现的目标不得写入 status 的 wired/proven/default-on；已交付的 7A/7B 按其实际范围保留。具体产品设计见
-[research-cluster-design.md](research-cluster-design.md)。以下是执行顺序和不可改变的实现边界。
+[research-cluster-design.md](../design/research-cluster-design.md)。以下是执行顺序和不可改变的实现边界。
 
 ### 7.0 实施规则与边界
 
@@ -590,7 +590,7 @@ UI 与每个 Agent 的观察游标独立，新消息到达不会被其他观察�
 
 **7A：工作台入口、独立工作侧重与根主线。**
 
-状态：D-298 已实现本阶段生产入口，验证范围见 [status](agent-harness-status.md)。科研集群整体仍在实施，
+状态：D-298 已实现本阶段生产入口，验证范围见 [status](../status.md)。科研集群整体仍在实施，
 下一阶段为 7B。工作侧重在新 Run 启动前应用；进行中的 Run 及其 followUp 队列保持冻结配置。
 
 - 保留「Agent / IDE」切换，旁边以独立「通用 / 科研」菜单选择工作台，不做三选一；进入 IDE 保留工作台选择，
@@ -671,8 +671,8 @@ D-300 的原任务按当时边界交付；下列增量现状路径随后由 D-30
 可复用的投影、消息账本、原文引用和请求准备接缝继续使用，
 不重做实验管理/通信实现，也不因缺少真实远端或付费模型环境而阻断可独立完成的上下文改造。
 
-目标详见 [Harness 8.1.1](agent-harness.md#811-d-301环境增量留史团队现状作为请求尾部快照后续-7g) 与
-[科研集群设计 7.4](research-cluster-design.md#74-持续更新与-zone-2)。本阶段适用于每个授权 Agent，包括主线、子线和同组协作线程。
+目标详见 [Harness 8.1.1](../design/harness-context.md#811-d-301环境增量留史团队现状作为请求尾部快照后续-7g) 与
+[科研集群设计 7.4](../design/research-cluster-design.md#74-持续更新与-zone-2)。本阶段适用于每个授权 Agent，包括主线、子线和同组协作线程。
 
 1. **一处请求前准备，两种保留方式。** 传统环境观察从仅 `before_agent_start` 扩展到每次实际请求前；新增事实放在完整历史/
    工具结果之后并按实际送达留为可重放消息。团队现状表是其后的完整临时快照，覆盖当前授权/所选范围，不把旧表写入历史。
@@ -707,7 +707,7 @@ D-300 的原任务按当时边界交付；下列增量现状路径随后由 D-30
 状态：D-305 已实施并完成定向验收。真实 Pi 工具执行接缝按资源冲突建立顺序，独立调用并行；
 后台命令完成事实进入 7G 的同一请求准备入口，不再依赖回合开始的通知副本。
 适用于 coding 与科研；不以远端实测完成为前置，也不以本阶段替代 7I 的受管实验与资源管理；Slurm 延期。
-目标与权威边界见 [Harness 5.9](agent-harness.md#59-并发)。
+目标与权威边界见 [Harness 5.9](../design/harness-tools.md#59-并发)。
 
 按下面责任分段交付，每段使用实际消费者，不能只提交未接线的队列或工具元数据：
 
@@ -746,7 +746,7 @@ provider 允许的工具配对与上下文边界仍保持；跨平台、真实�
 
 状态：D-305 已实施生产纵切。现有可信连接可登记受管目标；固定输入按缺失对象增量传输到目标 Host，
 每个 attempt 使用独立工作目录并由目标 Rust kernel 监督进程、日志、取消和远端产物。显式目标保持，未指定目标按当前可确认资源稳定放置并写入 attempt。
-详见 [科研集群设计 6.6–6.9](research-cluster-design.md#66-受管远程的职责与实际操作d-304--后续-7i)。
+详见 [科研集群设计 6.6–6.9](../design/research-cluster-design.md#66-受管远程的职责与实际操作d-304--后续-7i)。
 目标是让自然产生的实验使用远端现场，并可靠地准备、运行、观察和取回成果。Slurm 等原生集群、独立矩阵产品、
 参数搜索语言、固定管理层级和第二套 Agent runtime 均不在本阶段范围。
 
@@ -833,10 +833,10 @@ provider 允许的工具配对与上下文边界仍保持；跨平台、真实�
 app/Pi/client/action 写入、session→Surface 绑定、typed action-operation、组合更新与产品 Skill 已接线。
 同一 session 同时连接多个 Surface 时明确返回 ambiguous，不允许模型猜选本地窗口；无 owner API 的条目如实 unavailable。
 外部登录/安装与跨平台 Surface 现场未实测，但不构成当前生产通路的未实现项。设计 authority 为
-[agent-settings-design.md](agent-settings-design.md)，本节只规定实施责任和完成边界。
-实施现状见 [agent-harness-status.md](agent-harness-status.md) 的 D-306 记录。
+[agent-settings-design.md](../design/agent-settings-design.md)，本节只规定实施责任和完成边界。
+实施现状见 [status.md](../status.md) 的 D-306 记录。
 
-> 本节已收口；交付合同与验收细节全文见 [archive/agent-harness-plan-detail.md](archive/agent-harness-plan-detail.md) 同名标题节。
+> 本节已收口；交付合同与验收细节全文见 [archive/agent-harness-plan-detail.md](../archive/agent-harness-plan-detail.md) 同名标题节。
 
 ### S0：全量覆盖映射与共用定义
 ### S1：目录、实时查询与渐进式披露
@@ -848,11 +848,11 @@ app/Pi/client/action 写入、session→Surface 绑定、typed action-operation�
 外部查询、普通 shell 与 manual 来源，跨来源 `all`/`any`，共享观察，受管远程续接，Thread/session 生命周期及
 calendar Agent 管理均已接线。普通 shell 仍遵循本地进程 owner 生命周期，Host 重启后无法重附着时转 unavailable；
 file/metric 在 Host 收到边沿后先耐久化 observation，不能把来源 owner 尚未送达的瞬时事件宣称为跨进程 exactly-once。设计 authority 为
-[agent-follow-up-design.md](agent-follow-up-design.md)。本阶段复用 7G/7H/7I、现有 Thread/Run、Goal、
+[agent-follow-up-design.md](../design/agent-follow-up-design.md)。本阶段复用 7G/7H/7I、现有 Thread/Run、Goal、
 原生权限和 scheduler 服务；支持原会话续接，并保留按日历新建工作的用途。
-实施进展与未覆盖边界见 [agent-harness-status.md](agent-harness-status.md) 的 D-307 记录。
+实施进展与未覆盖边界见 [status.md](../status.md) 的 D-307 记录。
 
-> 本节已收口；交付合同与验收细节全文见 [archive/agent-harness-plan-detail.md](archive/agent-harness-plan-detail.md) 同名标题节。
+> 本节已收口；交付合同与验收细节全文见 [archive/agent-harness-plan-detail.md](../archive/agent-harness-plan-detail.md) 同名标题节。
 
 ### W0：续接合同、来源与状态责任
 ### W1：程序触发与耐久观察
@@ -861,10 +861,10 @@ file/metric 在 Host 收到边沿后先耐久化 observation，不能把来源 o
 ### W4：合并交付、恢复与文档验收
 ## 阶段 B：Varin 全面更名（D-313）
 状态：**源码、品牌资源、构建配置与 GitHub 仓库已切换并通过本地生产链检查；新品牌公开发行待发布**。
-设计 authority 为 [Varin 全面更名](varin-rebrand-design.md)，实际证据与 npm/发行边界见 status。
+设计 authority 为 [Varin 全面更名](../design/varin-rebrand-design.md)，实际证据与 npm/发行边界见 status。
 B0–B4 的内部实现完成，后续进入 F；没有新旧共存机制，也不把未发布的新坐标标成已有下载产物。
 
-> 本节已收口；交付合同与验收细节全文见 [archive/agent-harness-plan-detail.md](archive/agent-harness-plan-detail.md) 同名标题节。
+> 本节已收口；交付合同与验收细节全文见 [archive/agent-harness-plan-detail.md](../archive/agent-harness-plan-detail.md) 同名标题节。
 
 ### B0：命名映射与真实消费入口
 ### B1：包、运行时合同与数据身份一起切换
@@ -873,10 +873,10 @@ B0–B4 的内部实现完成，后续进入 F；没有新旧共存机制，也�
 ### B4：闭合验证与阶段收口
 ## 阶段 F：快速决策模型与渐进检索（D-312）
 状态：**F0–F4 已实施并进入生产调用链（wired）；交付事实与未实测项见 status**。承接 S/W 收口，并在 D-313 阶段 B 完成后使用新产品命名；设计 authority 为
-[快速决策模型与渐进检索](fast-decision-model-design.md)。本阶段交付通用能力及代码检索消费者，
+[快速决策模型与渐进检索](../design/fast-decision-model-design.md)。本阶段交付通用能力及代码检索消费者，
 Jev 是首个 adapter；不实现 Computer Use，不扩成新的长期 Agent runtime。
 
-> 本节已收口；交付合同与验收细节全文见 [archive/agent-harness-plan-detail.md](archive/agent-harness-plan-detail.md) 同名标题节。
+> 本节已收口；交付合同与验收细节全文见 [archive/agent-harness-plan-detail.md](../archive/agent-harness-plan-detail.md) 同名标题节。
 
 ### F0：能力合同、绑定与设置入口
 ### F1：共用推理通路与 Jev adapter
@@ -885,11 +885,11 @@ Jev 是首个 adapter；不实现 Computer Use，不扩成新的长期 Agent run
 ### F4：交付收口与实际使用观察
 ## 阶段 C：后台压缩 Agent 与语义续接（D-314）
 状态：**已交付（wired）**。承接已交付的阶段 F；D-284/D-286 的固定候选、较长原文、历史权威与
-容量驱动仍是基础。设计 authority 为 [context-compaction-agent-design.md](context-compaction-agent-design.md)。
+容量驱动仍是基础。设计 authority 为 [context-compaction-agent-design.md](../design/context-compaction-agent-design.md)。
 顺序为 C0 → C1 → C2 → C3 → C4；生产路径为 broker 派生的专用 `compaction` worker 沿同一机制替换旧单次摘要，
-无双引擎或新增 keeper；交付状态见 [agent-harness-status.md](agent-harness-status.md)。
+无双引擎或新增 keeper；交付状态见 [status.md](../status.md)。
 
-> 本节已收口；交付合同与验收细节全文见 [archive/agent-harness-plan-detail.md](archive/agent-harness-plan-detail.md) 同名标题节。
+> 本节已收口；交付合同与验收细节全文见 [archive/agent-harness-plan-detail.md](../archive/agent-harness-plan-detail.md) 同名标题节。
 
 ### C0：固定材料、来源与共同提示词
 ### C1：内部子进程与查询能力
@@ -898,11 +898,11 @@ Jev 是首个 adapter；不实现 Computer Use，不扩成新的长期 Agent run
 ### C4：消费者、文档与验收收口
 ## 阶段 L：Web 与科研检索（D-315）
 状态：**L0–L6 均已交付并接线**。设计 authority 为
-[Web 与科研检索](web-research-search-design.md)。本阶段承接 C，不与已交付的 7H 工具并发/长命令阶段混淆。
+[Web 与科研检索](../design/web-research-search-design.md)。本阶段承接 C，不与已交付的 7H 工具并发/长命令阶段混淆。
 使用现有 Pi Agent、Thread/Run、Host 网络服务、Rust 对象/记录与快速决策服务；默认 Web 能力和用户已有选择继续有效。
 实现阶段按下列依赖交付，不一次性重写全部搜索。每个切片接上公开工具和必要消费者，再记录其完成范围。
 
-> 本节已收口；交付合同与验收细节全文见 [archive/agent-harness-plan-detail.md](archive/agent-harness-plan-detail.md) 同名标题节。
+> 本节已收口；交付合同与验收细节全文见 [archive/agent-harness-plan-detail.md](../archive/agent-harness-plan-detail.md) 同名标题节。
 
 ### L0：现有检索线程、结果合同与能力发现
 ### L1：连续 Web 搜索、阅读视图与复用（已交付，wired）
@@ -916,7 +916,7 @@ Jev 是首个 adapter；不实现 Computer Use，不扩成新的长期 Agent run
 返回零条或多条候选；用户级 `harness.nextStep.enabled` 默认关闭，模型分工的 `models.knowledgeSuggestions` 用于知识库建议，
 不控制这条会话建议。本阶段替换该生产路径，不把已交付的知识建议误当成同一功能。
 
-> 本节已收口；交付合同与验收细节全文见 [archive/agent-harness-plan-detail.md](archive/agent-harness-plan-detail.md) 同名标题节。
+> 本节已收口；交付合同与验收细节全文见 [archive/agent-harness-plan-detail.md](../archive/agent-harness-plan-detail.md) 同名标题节。
 
 ### N0：配置、模型权威与旧路径清理
 ### N1：一次短请求理解当前局面

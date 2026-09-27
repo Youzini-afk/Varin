@@ -1,8 +1,8 @@
 /**
  * Permission gate protocol types — shared between pi-host and web host.
  *
- * Design: agent-harness.md §9.1.2
- * Plan: agent-harness-plan.md §3b.1
+ * Design: design/harness-verification.md §9.1.2
+ * Plan: plan/agent-harness-plan.md §3b.1
  */
 
 export type PermissionMode = "normal" | "accept-edits" | "bypass" | "smart";

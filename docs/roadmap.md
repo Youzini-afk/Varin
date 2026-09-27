@@ -23,7 +23,7 @@ authoritative record of delivery, and each phase names the design document that 
 | 8 | OpenChamber upstream capability absorption | Complete |
 | 9 | Varin extension platform | Complete |
 | 10 | Composable workbench, IDE Workbench, and unified editor | Complete |
-| R | Rust system kernel and Host separation | Complete (D-282); delivery evidence in [harness status](agent-harness-status.md) |
+| R | Rust system kernel and Host separation | Complete (D-282); delivery evidence in [harness status](status.md) |
 | Q | Repository-wide testing and CI redesign | Implemented and accepted (D-292–D-295); locally verified |
 | D-296 | Former VS Code companion retirement | Implemented and locally verified; AI4S follows |
 | 11 | AI4S heterogeneous research cluster | 7A–7I main slices delivered at D-298/D-303/D-305 (Partial); D-300's revised 7C–7E (remote execution / resource management) not yet delivered as product code; Slurm deferred |
@@ -36,22 +36,22 @@ authoritative record of delivery, and each phase names the design document that 
 | O | Office and daily work continuity | Design accepted (D-327); O0–O4 are planned and not implemented. The design starts with a materials-to-editable-deliverable loop and reuses existing authorities. |
 | HR | Task/resource Harness: workspace decoupling, resource identity, continuous retrieval | Implemented (D-337, HR0–HR5 wired): scope-owned threads/knowledge, session-cwd path anchoring, per-request multi-root scopes, resource/version-driven indexes, mutable work-context removed; per-scenario evidence in harness status |
 
-Stage R completed the [Rust kernel design](rust-kernel-design.md) and R0–R6 in the
-[harness implementation plan](agent-harness-plan.md): protocol/runtime, working-state and recovery
+Stage R completed the [Rust kernel design](design/rust-kernel-design.md) and R0–R6 in the
+[harness implementation plan](plan/agent-harness-plan.md): protocol/runtime, working-state and recovery
 storage, Documents/file operations, materialization, processes/terminals, file/structure computation,
 and production/performance/release acceptance. Rust owns those system resources through one private
 Application Host child; TypeScript retains product/Agent policy and the bundled Pi runtime remains the
 Agent loop/provider/session authority. Current evidence and platform-specific limits are recorded only in
-[harness status](agent-harness-status.md).
+[harness status](status.md).
 
-Stage Q is specified in [testing-ci-design.md](testing-ci-design.md), with Q0–Q3 in the
-[harness implementation plan](agent-harness-plan.md). It covers test value and ownership, fixtures,
+Stage Q is specified in [testing-ci-design.md](design/testing-ci-design.md), with Q0–Q3 in the
+[harness implementation plan](plan/agent-harness-plan.md). It covers test value and ownership, fixtures,
 portable discovery, duplicated execution/builds, platform and release checks, and actionable failures.
 The goal is trustworthy feedback with less maintenance, not a target test count or green checks achieved
 by hiding failures. Q is accepted and locally verified. Existing repairs and authorized releases
 continue on their own applicable evidence.
 
-Phase 11 follows D-296 and is specified in [research-cluster-design.md](research-cluster-design.md).
+Phase 11 follows D-296 and is specified in [research-cluster-design.md](design/research-cluster-design.md).
 D-297 separates the research workbench's complete UIUX from Agent work focus. The workbench entry sits
 alongside the existing Agent/IDE switching area and reuses the transition animation; projects supply new
 conversation defaults, and conversations can override their focus without switching the shell. Navigating
@@ -100,24 +100,24 @@ responsible for machine groups, environments or data. They use existing tools, m
 context, without a mandatory hierarchy or model call for every sample. Slurm and other native cluster
 adapters are deferred until there is an actual deployment need. The managed-remote production slice shipped at D-305.
 
-Stage S follows the D-305 delivery and is specified in [agent-settings-design.md](agent-settings-design.md).
+Stage S follows the D-305 delivery and is specified in [agent-settings-design.md](design/agent-settings-design.md).
 It makes the settings UI and conversation two clients of the same owner-backed configuration services,
 covering the existing main settings categories and related management actions. Stable query/update tools
 provide live values, supported scopes, effective state and on-demand details; Skills teach compound uses.
 The implementation sequence is coverage/shared definitions, discovery, mutation/action adapters,
 UI/runtime synchronization, and Skill/coverage closure. Existing APIs alone do not satisfy this stage;
 saved versus applied state, concurrent edits and local-client versus remote-Host identity remain explicit.
-See [plan S0–S4](agent-harness-plan.md#阶段-s对话式设置与-agent-管理d-306); current production delivery and remaining boundaries are recorded in harness status.
+See [plan S0–S4](plan/agent-harness-plan.md#阶段-s对话式设置与-agent-管理d-306); current production delivery and remaining boundaries are recorded in harness status.
 
-Stage W follows S and is specified in [agent-follow-up-design.md](agent-follow-up-design.md).
+Stage W follows S and is specified in [agent-follow-up-design.md](design/agent-follow-up-design.md).
 Agents naturally register what to wait for and what to do afterwards. Time, authoritative events and
 deterministic checks handle observation without idle model polling; explicit waiting also suppresses
 Goal auto-continuation. Active/idle targets reuse existing context delivery and session/Thread admission,
 with durable trigger identity, cancellation and recovery. Calendar tasks still support new work, while
 their results must follow actual execution rather than merely dispatch acceptance. See
-[plan W0–W4](agent-harness-plan.md#阶段-w会话等待触发与续接d-307); harness status separates the delivered durable source/continuation slice from ordinary-shell durability, composite/shared observation and remaining recovery limits.
+[plan W0–W4](plan/agent-harness-plan.md#阶段-w会话等待触发与续接d-307); harness status separates the delivered durable source/continuation slice from ordinary-shell durability, composite/shared observation and remaining recovery limits.
 
-Stage B follows S/W and is specified in [varin-rebrand-design.md](varin-rebrand-design.md).
+Stage B follows S/W and is specified in [varin-rebrand-design.md](design/varin-rebrand-design.md).
 B0–B4 cover the naming map, package/runtime/storage cutover, product identity and assets, distribution/docs,
 and focused closure. The new brand is Varin; there are no existing-user compatibility requirements, so
 old aliases, fallback paths, dual writes and migration helpers are excluded. Actual Pi dependencies,
@@ -125,7 +125,7 @@ developer assets and historical attribution remain intact. The repository is now
 new npm packages and release assets have not been published. Source/build/startup evidence and these
 distribution boundaries are recorded in harness status. Stages F and C are delivered; Stage L is the next implementation stage.
 
-Stage F follows B and is specified in [fast-decision-model-design.md](fast-decision-model-design.md).
+Stage F follows B and is specified in [fast-decision-model-design.md](design/fast-decision-model-design.md).
 F0–F4 cover capability/configuration, provider inference, source selection, dynamic exploration actions and
 delivery closure. Fast Decision Model is the shared product category; Jev is the first adapter target.
 The existing explore query keeps its scope, source identity and execution authority. Fast decisions assess
@@ -134,14 +134,14 @@ Future Computer Use and other consumers can reuse the capability, but are outsid
 F0–F4 are delivered and wired for the `explore` consumer; real paid-provider calls, cross-platform checks,
 and retrieval-quality evidence are recorded as untested in harness status.
 
-Stage C follows F and is specified in [context-compaction-agent-design.md](context-compaction-agent-design.md).
+Stage C follows F and is specified in [context-compaction-agent-design.md](design/context-compaction-agent-design.md).
 C0–C4 are delivered and wired: the broker spawns a dedicated `compaction` pi-host worker pinned to the parent
 session; frozen S0/A/B material ships verbatim retained text with an explicit elision notice when paginated;
 the worker runs a real Agent loop with scoped read-only queries over history, outputs and records; capacity-bound
 requests wait on the same in-flight task; commit stays session-owned through the native Pi compaction writer.
 Paid-model quality and full platform observations are recorded as untested in harness status.
 
-Stage L follows C and is specified in [web-research-search-design.md](web-research-search-design.md).
+Stage L follows C and is specified in [web-research-search-design.md](design/web-research-search-design.md).
 L0–L1 improve the existing generic retrieval report, capability discovery, Web search and fixed source reading;
 L2–L3 add scholarly identities/relations, scoped passage retrieval and structured reading; L4–L6 connect
 shared materials, existing Thread communication, Web/scholarly fast-decision consumers and product surfaces.

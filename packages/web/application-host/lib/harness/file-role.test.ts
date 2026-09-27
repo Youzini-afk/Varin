@@ -12,7 +12,7 @@ describe("shared file role", () => {
       role: "test",
       ground: "filename-pattern",
     });
-    expect(classifyFileRoleDecision("docs/agent-harness.md")).toEqual({
+    expect(classifyFileRoleDecision("docs/design/agent-harness.md")).toEqual({
       role: "docs",
       ground: "filename-pattern",
     });

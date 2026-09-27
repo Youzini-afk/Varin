@@ -2,7 +2,7 @@
 
 范围：3b.x 权限三层、交互确认门、插件共存与范围边界。
 
-本卷是 [agent-harness-decisions.md](../agent-harness-decisions.md) 的分卷；条目只追加、不改写，索引状态以总索引为准。
+本卷是 [decisions/README.md](README.md) 的分卷；条目只追加、不改写，索引状态以总索引为准。
 
 ### D-021 · 2026-09-03 · 3b.3
 类型：偏离（已回退）

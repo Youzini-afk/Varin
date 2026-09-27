@@ -1,11 +1,9 @@
-# Agent harness 能力状态矩阵
+# Agent harness 能力矩阵
 
-Status: living document maintained by the executing agent; the only authority on what is delivered
+Status: living document — Harness 能力交付明细的唯一权威；项目级阶段进度见 [../status.md](../status.md)。
+Owner：`host` = `packages/web/application-host/lib/harness`（或 `lib/knowledge`），`pi-host` = `packages/pi-host/src/harness`，`protocol` = `packages/protocol/src`，`ui` = `packages/ui`。
 
-Last updated: 2026-09-27
-
-这是 [agent-harness.md](agent-harness.md) 所述能力的**交付状态**，四级定义见
-[agent-harness-plan.md](agent-harness-plan.md) 0.1（D-038，经 D-078 修订）：
+四级定义（[plan/agent-harness-plan.md](../plan/agent-harness-plan.md) 0.1，D-038 经 D-078 修订）：
 
 | 级别 | 含义 |
 | --- | --- |
@@ -16,123 +14,9 @@ Last updated: 2026-09-27
 
 规则：proven 才算已验证的可用路径，证据列给具体文件；Blocker 写实际未完成行为/特定环境问题，不把优化或缺独立评测当通用阻塞。
 Default-on 列只记当前代码，尚未完成的正式目标单独列为待实施。
-[roadmap.md](roadmap.md) 只引用本文件，不再自述测试数。
+[roadmap.md](../roadmap.md) 只引用本文件，不再自述测试数。
 
-## 阶段 HR：面向任务与资源的 Harness
-
-**D-337（2026-09-27，方向确认 / HR0–HR5 已接线并收口）。**
-
-[工作区解耦与持续检索设计](resource-oriented-harness-design.md) 定义 HR0–HR5：资源与数据归属、会话与操作、直接检索、
-持续索引、产品与旧机制收口、真实使用验收。工作区回到会话/项目组织职责，执行与查询使用明确的本次目标；
-索引仍按资源根分片，内容计算按版本复用；冷目录可直接搜索，未索引部分的语义覆盖会如实标注。
-下文 RR2/RR4 的目录模型记录保留为历史实现事实，其后续目标由 D-337 替代；恢复、输出和其他既有正确性成果继续保留。
-
-HR0 已接线（wired）：Thread catalog、session binding、todo/子任务与知识库的所有者统一为 scope（项目 workspaceId 或
-`session:<id>`，持久化键经文件名安全哈希），`resolveSessionOwner`/`scopeForSession` 对无项目会话返回会话自身 scope；
-session 注册不再要求目录型 workspace（`workspaceId: null` 是完整注册态，actor 携带 `authorityRoot` 发射目录）；
-path-authority 走 Documents 资源根寻址——已登记的 file/directory 资源根可寻址外部绝对路径，相对路径锚定
-`authorityRoot`，未登记目标仅在 `allowMissing` 写入场景注册新根，缺失目标 `allowMissing:false` 仍抛 ENOENT，
-`workspaceScope` 继续作为绝对授权门；launch 目录离线不再阻塞无项目会话的 journal 准备。
-验证：web 套件 303 文件 2704 全绿（含新增 path-authority 资源根 5 例、service-host 无项目注册 2 例、
-thread-registry session-scope 持久化 1 例）；app-host 源码与测试 typecheck、protocol 构建全绿。
-
-HR1 已接线（wired）：`shell.exec` 每次执行的默认 cwd 锚定 actor `authorityRoot`（无项目会话=启动目录），
-不再经 `resolveWorkspaceRoot` 反推；`lsp.diagnostics`/`lsp.diagnosticsSnapshot` 按 `authorizedPaths[0]` 的
-资源根（而非会话 workspace 分类）调 provider，外部文件诊断不再被会话身份挡住；`web.fetch` 对无项目会话以
-`session:<id>` scope 记账与裁决，不再要求 workspace。受理时一次资源解析（router `authorizedPaths`）贯穿
-`fs.lock`、文档读写与恢复校验。
-验证：harness 目录 114 文件 1264 全绿；app-host 源码与测试 typecheck 绿。
-未测：真实桌面/打包环境的无项目聊天纵切、外部文件经真实 Documents 写入的端到端——列入 HR5 验收。
-
-HR2 已接线（wired）：`search.content` 改为"问题 + 本次资源范围"的多单元模型——router `authorizedPaths`
-按各自解析出的资源根（可含外部 file/directory 根与 actor 工作区）分组，逐根独立下发 kernel 搜索后合并；
-多根结果输出绝对规范路径，经资源根寻址可直接再打开/引用；单根 actor 工作区结果保持相对 resourceId 不变。
-范围链：显式 `paths[]`（受理时逐条授权）→ 会话 `cwd` 默认范围 → `workspaceScope` 相交，
-范围在候选预算与 top-k 之前生效且只属于本次查询；无项目会话无显式范围时以 `authorityRoot` 注册为目录资源根
-作本次默认范围。覆盖诚实性：任一请求根不可解析/失败标 `partial`，全部失败返回 `unavailable`（不冒充空结果），
-`searchedFiles` 为各根真实 `scannedFiles` 之和、任一根未知则整体缺省；跨根重叠命中按键去重。
-补充验收后，`explore.search`、渐进式 `explore.query` 与 `related` 按实际资源根寻址；外部根没有相容图谱或语义来源时标记覆盖缺口，不能借用 actor 项目的同名路径或事实。外部单文件资源根也可搜索。
-验证：harness 目录 114 文件 1270 全绿（含新增多资源域 6 例：双目录根合并、file+dir 根去重、
-单根失效 partial、全根失效 unavailable、无项目会话 authorityRoot 默认范围、untrusted 拒绝）；
-app-host 源码与测试 typecheck 绿。未测：materials 集合作为检索范围的组合（材料集合仍走
-`materials.collections` 自有服务）、冷目录语义索引（属 HR3）。
-
-HR3 已接线（wired）：语义运行时与资源根的"一目录一 workspace worker"装配解耦——`WorkspaceState` 不再携带
-per-root cwd，settings.get / inference.describe / embed / rerank / fastDecision 与 global config watch 统一走
-`configCwd`（VARIN_DATA_DIR）的一个共享 worker；`requestForWorkspace(rootCwd)` 不再为每个被索引目录生成进程。
-核实事实：harness embedding/rerank/fastDecision 绑定与 `embeddingSettingsFromSnapshot`/`rerankSettingsFromSnapshot`
-本就只读 `global.harness`（pi-host `SettingsManager.create(..., {projectTrusted:false})` 明确排除项目层），
-因此共享 worker 对项目根也无配置差异；模型空间 `spaceIdOf`、配方 `recipeIdOf`、文档 revision 键维持
-"内容版本×解析配置×实际模型"身份，缓存键不含会话分类 workspaceId。符号图（symbol-runtime）与语义索引按
-registry 根 id 寻址，外部 file/directory 根经 `inspectWorkspace` 直接索引；`catalogScan.start` 与启动 reconcile
-循环跳过 session scope/哈希店键（session 存储无资源根可扫，此前会打一条 inspectWorkspace 失败日志）。
-增量失效使用 `observeDocumentMutation` 与 Documents 文件观察，并在返回旧命中前核对当前修订；观察不可用会标记覆盖缺口。观察器仍不能证明从未漏掉新文件，静默漏事件需要后续重扫。冷目录语义为空时探索层如实降级，
-不包装成热覆盖。阶段原验证：knowledge 目录 26 文件 193 全绿（含新增"不同根共享同一 inference cwd"用例）、
-harness/search 套件与 app-host typecheck 绿。未测：真实打包环境共享 worker 的凭据可见性（桌面纵切属 HR5）。
-
-HR4 已接线（wired）：RR2 的可变会话操作上下文机制整体移除——pi-host 删 `work-context.ts`/`work-context-tool.ts`/
-`session-work-context.ts` 与 `WorkContextMirror`，Host 删 `work-context.ts` 及 `context.discover/get/select/scope/reset`
-五个服务，`work_context` 从 Agent 工具面与能力声明（Web/Electron/presets）中移除；broker 打开会话不再等待
-`session.workContext.sync`，注册前无 journal 恢复门闸；`harness.respond` 不再 piggyback `contextEntryId`/目录修订，
-Thread manifest 的 `initialWorkContext` 收敛为冻结 `authorityRoot` 事实。
-接替语义：相对路径与 `shell.exec` 默认锚均取会话 `cwd`（注册时记录的启动目录，快照固定，actor 缺席时回落 supervisor
-注册锚）；`authorityRoot` 只做授权边界；`search.content`/explore/related 的默认范围改为会话 cwd；
-普通 shell 调用现在独立使用本次 cwd，载荷内的 `cd`/环境修改不污染下一次调用；持续状态由明确的进程句柄持有。子任务派发直接用 actor 权威根校验并严格执行父 Run 冻结工具集（`work_context` 特赦删除）；Pi read/write 工具
-以 cwd 锚定相对路径、绝对路径经 Host 授权。UI 的会话指示从 `workContext.operationDir` 改为显示会话 cwd
-（十个 locale 键同步改名）。目录离线只使相关操作报错，不阻塞会话注册与聊天。
-删除的测试只覆盖已删机制（work-context 双侧、journal 门闸、context 工具、scheduler 上下文切换）；其余测试改写为
-cwd/资源根语义并新增外部锚定用例。
-验证：web 套件 300 文件 2686 全绿（shell-supervisor dispose 竞态未处理拒绝为并行运行偶发，文件未改动、
-单跑 49/49 绿）；app-host 源码+测试 typecheck、pi-host tsc、runtime-broker 86/86、electron pi-runtime 6/6、
-ui typecheck 绿；protocol/runtime-broker/extension dist 重建。
-未测：真实桌面会话重开与目录离线的产品化纵切（属 HR5 场景验收）。
-
-HR5 已接线（wired，设计 §12 场景逐条对证据）：
-
-- 无项目聊天+子任务：service-host 无项目注册/launch 目录离线不阻塞（HR0 用例）、session scope 的 todo/knowledge/
-  Thread owner 持久化；pi 侧工具在无 workspace 会话下经资源根寻址照常工作。
-- 同一任务跨目录读/写/输出：session-e2e 新增"绝对路径外部文件经真实 read 工具+真实 path-authority+Host 授权字节"
-  纵切；document-read-source 新增"一次 surfaceWrite 跨两个资源根"用例——发现并修复 `document.surfaceWrite` 原先把
-  全部 changes 归到 `authorizedPaths[0].workspaceId` 的错路由缺陷（现按根分组逐根写、按序合并结果，跨根原子性
-  如实降为逐根）。path-authority 资源根用例覆盖外部文件/目录根、allowMissing 写目标、ENOENT。
-- 新目录即时检索与冷/热组合：`search.content` 多单元模型（HR2）+ 语义空时如实降级（HR3，semantic-workspace e2e
-  的独立工作区与 unconfigured/invalid/failure 分态用例）。
-- 外部修改/草稿视图：`document.readSource` 固定草稿纵切（磁盘旧值 vs 草稿不串）、junction 换链 ABA 防护用例、
-  `observeDocumentMutation` 按资源根失效；并发双 Agent 互不改变路径基准由"每请求固定 actor.cwd 快照"保证，
-  shell 纵切验证句柄级状态隔离。
-- 关闭/重开/Host 重启：thread-registry scope owner 持久化 + runtime-broker 重连套件 + session-e2e 回执去重重放。
-- 杀掉持久 shell 后再执行：shell-supervisor dispose 保护套件与 accepted-execution-unavailable 用例；
-  新命令 cwd 始终来自本次参数（快照固定）。
-- 固定快照/隔离 worktree/远程同名：fixed surface read/edit e2e、git worktree 服务测试、managedRemoteTargets
-  shell 路径；内容视图与执行位置在 source/provenance 字段分开。
-
-验证：web 套件 300 文件 2686 全绿（vitest.kernel 的 document-read-source 9/9 含新跨根用例）；
-session-e2e 40/40（含新跨目录读纵切）；app-host/pi-host/ui typecheck 绿。
-**未测**：真实桌面安装包的会话重开/目录离线/并发 Agent 产品化纵切与性能数字（无可复现基线前不报数）；
-父子项目同文件的组件级共存已验证；真实桌面双视图路径未实测。
-
-**HR 补充验收与修复（2026-09-27）：** 初次 HR5 报告未覆盖跨根草稿和虚拟分支的真实目标身份。现已修复 A 分支将 B 同名文件写进 A 并报成功、B 读取串到 A 草稿、A 草稿阻断 B 普通写、父子项目同一物理文件的重复编辑缓冲/写入队列，以及无项目会话材料读取和本地 shell 句柄误需项目身份。固定草稿改为一个引用携带多个带资源根身份的文件；同一物理文件的别名共用 UI 缓冲，已观察的写入同时使这些别名的旧草稿失效。目录消失的旧 Pi 会话可从应用管理目录启动 worker，历史 cwd 仍保留为工具目标；外部目标失效只影响该操作。搜索命中按当前正文修订复核，外部目录与单文件进入直接和渐进式 Explore；所有来源失败或固定草稿缺失时不能包装成干净的零命中。
-
-定向证据：UI Document/Monaco/Workbench 44/44；Web Documents/分支定向 66/66，检索定向 81/81，真实 kernel 的材料读取与 Explore 34/34；Host 源码/测试、Pi Host、协议、客户端、Broker、Electron 与 UI 类型检查通过。独立 worktree 的固定 baseline 能去重父子项目同一实体草稿；**真正位于外部根的未保存草稿仍不能安全物化进单根隔离子任务**，当前明确返回不可用而不悄悄读取磁盘旧版。语义索引仍按资源根维护，漏掉的外部新文件需重扫；桌面安装包重开、离线和多 Agent 产品纵切未测。以上定向结果不等于全仓或安装包验收。
-
-**后续来源视图与索引盘点修正（2026-09-27，本工作树）：** 上段的“外部草稿派发不可用”已由固定来源视图替代：外部草稿写入内核 `agent.source-view` 内容对象与记录，Thread manifest 固定视图 ID，首次与后续子任务输入从该视图读取，删除/启动孤儿清理释放引用。真实 Windows release kernel 的记录写入、按身份读取与释放测试已通过；重建 Store 实例的读取由持久记录夹具验证，尚未做完整 Host 重启纵切。A 分支与 B 别名同指一文件时，B 读取映射到当前虚拟或物化分支，`ls/find` 可遮蔽分支删除的 B 磁盘旧名；外部 B 的独立未保存草稿现在经 Documents 按捕获的 owner/修订直接提交到 B 的实时编辑缓冲；用户续编导致冲突，成功后固定来源视图前进；若 Host 在两次持久提交之间退出，下次读取会核对 Documents 的终态记录恢复视图，确无操作记录且编辑器仍处于原修订时清除未发出的准备状态；无法证明结果时保留待确认状态而不回退到旧正文。语义扫描不再为目录清单请求全文 hash；Rust 返回 stat metadata，Host 只处理新/变更/已知失效路径。命中仍核对 Documents 修订，跳过正文的盘点以范围级 partial 缺口表示，普通查询不触发全目录扫描。已有定向测试和类型检查覆盖这些纵切；真实桌面安装包与跨根草稿完整 Agent 交互尚未实测；静默漏掉新文件的定期后台补漏已接线并有定向测试，大目录资源成本尚未实测，不能把本轮解释为 HR3 全部完成。设计与边界见 [§14](resource-oriented-harness-design.md#14-后续修正固定来源视图与索引盘点)。
-
-本次继续验证：真实内核记录与真实 Documents 编辑器夹具验证 B 写回、成功后再读、用户续编冲突及磁盘不被改动；旧版本缺 owner 的来源记录仍能读取，但明确拒绝无凭据的编辑器写入。语义补漏的定向测试验证静默新增文件最终入索引、扫描在飞时前台查询继续返回、关闭后不再调度。相关 4 个测试文件 111 项通过，Application Host 源码/测试类型检查与改动源码 ESLint 通过。混合 A 虚拟分支和独立 B 编辑器的一次补丁仍需拆成两次提交；结果不明的编辑器操作需要人工处理，当前没有自动跨提交域回滚或完整桌面重启证明。
-
-## 阶段 RR：运行时可靠性专项
-
-**RR0–RR5 代码路径与定向行为已复核（2026-09-26）；RR6 真实安装包/外部代理平台纵切仍待验证（见缺口表）。**
-实施合同和 E01–E12 证据台账见 [Agent 运行时可靠性与多项目工作区计划](agent-runtime-reliability-plan.md)；
-逐日叙述与更正记录已归档至 [archive/harness-delivery-log.md](archive/harness-delivery-log.md)。RR2 的可变操作目录
-与 RR4 的持久 queryScope 机制已被阶段 HR 替换移除（见上节），此处仅为历史验收背景。
-
-
-## 历史交付记录
-
-各阶段交付叙述与 D-xxx 实施证据已归档至 [archive/harness-delivery-log.md](archive/harness-delivery-log.md)，
-不再更新；现行能力状态以下方矩阵为准，冲突时矩阵优先。
-
-## 矩阵
+## 能力矩阵
 
 Owner：`host` = `packages/web/application-host/lib/harness`（或 `lib/knowledge`），`pi-host` = `packages/pi-host/src/harness`，`protocol` = `packages/protocol/src`，`ui` = `packages/ui`。
 
@@ -197,21 +81,3 @@ Owner：`host` = `packages/web/application-host/lib/harness`（或 `lib/knowledg
 | **T4** 可选配对回放记录器 | evaluation / scripts | ✓ | ✗（尚无真实模型配对结果） | `evaluation/harness/cases.json`（6 个历史任务）；`scripts/harness-replay.test.mjs`（commit/ancestor、记录、配对与失败分类） | — | 不运行不产生模型请求/设置变化 | 自动执行尚缺单会话配置；只有实际安排配对时才需要，不再阻塞其他功能或默认启用（D-078） |
 | **3.4a** 内容寻址工作分支、草稿基线与结果物化 | host / protocol / pi-host | ✓ | Partial（D-216–D-224 已接线 owning/execution、执行 Git baseline、查询级固定视图、dispatch 内容身份、branch Integration 锁顺序/WAL、directory reconcile execution gate、dequeue 冻结权限、binding 对账、知识 owning、级联 lifecycle serialization 与 scope 完整 `..` 段；D-231 又补受管 retrieval scratch、managedRoot 与只读 settle。旧记录缺 managedRoot 时拒绝自动动作，真实付费嵌套 Pi / 完整桌面重启未测） | `working-state/working-state-store.test.ts`（schema 4 trie-only、拒绝旧 schema/平表、draft objects/ref、固定多修订、窄路径与 captureScopes、effectiveState/origin、writeRevision CAS、新文件 mode 不写 `.varin-mode-probe-*`）；`working-state/draft-baseline.test.ts`；`working-state/materializer.test.ts`；`working-state/branch-view.test.ts`；`working-state/working-branch-view.test.ts`（Host router 上的 read/grep/find/ls，lease 后正文与 provenance 一致，explore start pin 后词法/原文/语义不读后写）；`working-state/working-branch-writes.test.ts`（虚拟 write 不碰父盘、兄弟隔离、迟到修订冲突、物化后 publishDirectoryResult）；`working-state/execution-baseline.test.ts`（isolated init 虚拟写+shell 写 settle/merge，无 bad object；reclaim/rematerialize；crash recovery baseline）；`working-state/virtual-write-invariants.test.ts` / `virtual-write-tree.test.ts` / `materialization-switch.test.ts`（失败物化并发写、孙 merge 后再写再物化、writeRevision 标签、树拒绝、semantic pin、abort/crash 恢复）；`working-state/workspace-baseline.test.ts`（Git 变化集与 ignored/captureScopes、unborn/非 Git、字节诚实、取消不建分支、listing 失败不发明完整 inventory、gitlink 列出）；`thread-runtime.test.ts`（surface 释放后的 queued spawn、revision 0、copyIgnored scope、虚拟 spawn 绑定、scratch 回收、bash 预算预占、prepare 后父漂移隔离、Git 失败/捕获窗口变化/writer/gitlink/dirty 内容替换不建完整分支、setWorkingState 失败清理未绑定 branch）；`thread-services.test.ts`（dispatch 必准备、失败删除、baseline-changed 可重试）；`nested-threads.test.ts`（父虚拟分支作孙基线、嵌套 merge 不写根盘、父结果再入工作区、captureScopes 继承父冻结范围）；`working-state/integration-coordinator.test.ts`（虚拟新文件省略 mode 仍可应用到工作区；物化父 directory 不把 recovery objects 写入父目录且 live/reconcile 走 execution Documents gate；无法解析 execution directory 则 needs-attention；branch 集成对账/撤销）；`dequeue-permissions.test.ts`；`knowledge-owning.test.ts`；`thread-registry.test.ts`（binding 重建与 stale 拒绝）；`thread-worktree.test.ts`（fixed/live、virtual scratch、detached Git 上下文、`executionBaseline`）；`workspace-identity.test.ts`；`working-state/path-requirement.test.ts`；pi-host `read-tool.test.ts` / `find-ls-tool.test.ts`（working-branch provenance）；`workspace-mutation-journal.test.ts` / `apply-patch-tool.test.ts`（`document.branchWrite` 优先；Varin Host 的 disk/surface target 都经 `document.surfaceWrite`，pi-host 不保留本地磁盘 fallback） | — | 旧 Git base/resultCommit 是导入来源；带草稿的 Thread 缺原生结果时不走旧合并旁路；shared/none 仍读 live 父目录 | D-239 已接旧结果引用释放 UI、Host 依赖重查与中断对账；当前分支/结果和仍在使用的版本保持保护。D-277 已把生产 baseline/materialization/copy-or-clone/reclaim 后端迁入 kernel；未测文件系统不宣称 CoW 已证明。整个 Thread/当前分支删除 UI 仍按其产品面单独验收。D-220–D-223 已关执行 baseline / 固定视图 / dispatch 内容身份、branch Integration WAL、directory reconcile execution gate、dequeue 冻结权限、binding 对账、知识 owning、级联 lifecycle 与 scope segment 反例；D-231 补受管 retrieval 目录和只读 settle。旧记录缺 managedRoot 会拒绝自动动作；真实付费嵌套 Pi 与完整桌面重启未测。物化预算与占用治理见 D-204；显式 copyIgnored 已随 branch 冻结并捕获后续新增/修改/删除；基线读工作目录字节，不把 Git blob 冒充转换后正文 |
 | **3.5a** 固定修订 Integration、草稿写回与绑定预览（D-203） | host / protocol / ui | ✓ | ✓ | `integration-coordinator.test.ts`（旧预览拒绝、持久 intent/回执、故障与条件补偿）；`integration-surface-vertical.test.js`（真实 Documents barrier + Registry + Coordinator，磁盘/草稿同一操作合并及撤销，草稿变 clean）；`documents/authority.test.ts`（定向注册、取消与固定来源更新）；UI `documents/registry.test.ts`（实例替换、观察者异常、重试/撤销）；`HarnessThreadIntegrationPanel.behavior.test.tsx`（真实 React 挂载、无请求循环、迟到丢弃、提交审阅绑定）；`thread-routes.test.ts`、Pi `phase3-e2e.test.ts` | ✓（UI 与 agent 共用 Host 定向执行；缓冲不保存） | 不明执行状态保留 needs-attention；不可用缓冲不写盘；失败不等于未写入；旧输入来源不冒充新正文 | 草稿目标支持文本；缓冲无法表达的类型/权限位变化明确 unavailable。完整浏览器点击链未跑；可应用性不代表测试或行为兼容 |
-
-
-## 当前缺口与后续顺序
-
-**现行主线已收口：**D-337 / HR0–HR5（上方 HR 段）完成资源寻址模型切换，旧的目录型 work-context/queryScope/operationDir
-机制已删除。后续按设计文档与矩阵推进，不以本文件继续追加工作日志——新阶段交付事实直接进矩阵与本节。
-
-**未交付/待实测（按来源）：**
-
-| 缺口 | 现状 |
-| --- | --- |
-| AI4S 阶段 7 剩余合同 | 7A–7I 主体已由 D-298/D-303/D-305 交付为 Partial；D-300 修订的 7C–7E（远程执行与资源管理部分）仍未作为产品代码交付，Slurm/原生集群后端延后 |
-| 阶段 L / O | L0–L6 已接线；O0–O4（办公连续性）设计已接受、未实施 |
-| 平台与真实环境验收 | 打包桌面端的会话重开、目录离线、并发 Agent 纵切；真实代理/fake-IP/远端 CI；macOS/Linux 真机；真实付费模型质量与延迟——均**未测**，不以源码测试宣称 |
-| 性能数字 | 无测量不写提升倍数或毫秒承诺；既有实测数字见各阶段归档记录 |
-
-**归档指针：**逐阶段交付叙述、D-xxx 实施证据明细、阶段 R 明细、历史缺口叙述与阶段 1 快照见
-[archive/harness-delivery-log.md](archive/harness-delivery-log.md)。

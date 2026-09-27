@@ -63,11 +63,11 @@ become another public search service or model runtime.
 authority, storage adapter, and combined Recovery suites. `node scripts/test-kernel-authority.mjs --build` builds
 with the toolchain pinned in this workspace before acceptance; existing Linux/Windows CI jobs run it.
 
-The D-278 [audit](../docs/rust-kernel-audit.md) repairs retain independent native regression cases.
+The D-278 [audit](../docs/plan/rust-kernel-audit.md) repairs retain independent native regression cases.
 D-279 subsequently closes its specific R2 pending-operation and R3 kernel/Git/Registry handoff gaps.
 D-280 closes native process authority, and D-281 closes fixed/live file and structure computation through the
 production search, Harness, symbol, and semantic consumers.
-Current milestone evidence is in [harness status](../docs/agent-harness-status.md).
+Current milestone evidence is in [harness status](../docs/status.md).
 
 ## R4 native process resources
 

@@ -54,7 +54,7 @@ playback behavior; they do not freeze the generated CSS/HTML or the renderer's s
 
 Use the Varin container images, Docker Compose, or the atomic SSH deployment helper. Image names,
 persistent paths, environment variables, remote configuration, health validation, and rollback
-behavior are documented in [Cloud deployment](../../docs/cloud-deployment.md).
+behavior are documented in [Cloud deployment](../../docs/ops/cloud-deployment.md).
 
 ## Runtime data
 

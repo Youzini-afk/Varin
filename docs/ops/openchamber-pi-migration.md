@@ -35,7 +35,7 @@ equivalent user behavior, persistence, security boundaries, platform support, an
 equivalence is supplemented; a materially divergent implementation is not adopted.
 
 The current upstream review and per-capability disposition are recorded in
-[openchamber-upstream-20260813.md](archive/openchamber-upstream-20260813.md). This keeps the Git conflict
+[openchamber-upstream-20260813.md](../archive/openchamber-upstream-20260813.md). This keeps the Git conflict
 resolution, the product decision, and the Pi-native implementation as three separately reviewable
 steps.
 

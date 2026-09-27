@@ -1,23 +1,23 @@
 # Agent 运行时可靠性与多项目工作区实施计划
 
-Status: accepted implementation plan; RR0–RR5 的代码路径与定向行为已复核，RR6 的真实安装包及外部代理平台纵切仍待验证。具体证据、委托边界与未测项见 docs/agent-harness-status.md。
+Status: accepted implementation plan; RR0–RR5 的代码路径与定向行为已复核，RR6 的真实安装包及外部代理平台纵切仍待验证。具体证据、委托边界与未测项见 docs/status.md。
 
 Last updated: 2026-09-27
 
-**设计替代说明（D-337，HR0–HR5 已实施）：** [面向任务与资源的 Harness](resource-oriented-harness-design.md) 已交付。
+**设计替代说明（D-337，HR0–HR5 已实施）：** [面向任务与资源的 Harness](../design/resource-oriented-harness-design.md) 已交付。
 下文 RR2 的可变会话操作目录、目录镜像与恢复，以及 RR4 的持久 queryScope 和目录型 workspace 数据/索引归属，
-已被移除并替换为单次执行参数、资源引用与持续索引（交付证据见 [agent-harness-status.md](agent-harness-status.md)）。
+已被移除并替换为单次执行参数、资源引用与持续索引（交付证据见 [status.md](../status.md)）。
 RR1 恢复/停止、RR3 执行与输出、RR5 联网及真实覆盖反馈继续有效；本文件保留为历史实施背景。
 
 源码核查基线：`0135144f`，仓库版本 `0.9.19`。问题输入来自维护者提供的 Varin 内部 Agent 体检报告，以及维护者实际观察到的聊天中途停止刷新。报告中的耗时、复现结果和环境信息属于报告证据，不是本计划编写时重新实测的结果。
 
-本计划细化 [Harness 总计划](agent-harness-plan.md) 的运行时可靠性专项，采用独立阶段前缀 **RR**，不与已完成的 Rust 阶段 R 混淆。交付事实统一记入 [能力状态矩阵](agent-harness-status.md)；重要实现取舍按现有格式追加到 [决策日志](agent-harness-decisions.md)。本文件负责目标、合同、任务和验收，不另建一份交付事实账本。
+本计划细化 [Harness 总计划](agent-harness-plan.md) 的运行时可靠性专项，采用独立阶段前缀 **RR**，不与已完成的 Rust 阶段 R 混淆。交付事实统一记入 [能力状态矩阵](../status.md)；重要实现取舍按现有格式追加到 [决策日志](../decisions/README.md)。本文件负责目标、合同、任务和验收，不另建一份交付事实账本。
 
 ## 0. 执行授权与完成定义
 
 维护者已经同意实施本轮讨论的完整方向。执行 Agent 应直接分阶段实现，不再提交一份替代计划等待逐项批准。仓库范围内的合理工程取舍自行决定并记录；目录导航、正常工具使用和每个小改动不需要维护者反复确认。
 
-首先遵循 [AGENTS.md](../AGENTS.md)、[开发指南](development.md) 与 [架构](architecture.md)。本计划不授权发布版本、部署外部服务、修改真实系统代理/证书、改变凭据、关闭安全保护、force-push 或写其他真实项目。跨项目行为验证在临时夹具中进行，不把 `opencr` 下其他项目当试验田。
+首先遵循 [AGENTS.md](../../AGENTS.md)、[开发指南](../development.md) 与 [架构](../architecture.md)。本计划不授权发布版本、部署外部服务、修改真实系统代理/证书、改变凭据、关闭安全保护、force-push 或写其他真实项目。跨项目行为验证在临时夹具中进行，不把 `opencr` 下其他项目当试验田。
 
 完成必须是 **实际消费者接线 + 与风险相称的行为验证 + 同步文档**。只有 helper、伪造终态、CSS/源码字符串断言、修改工具文案、让用户关闭代理或重启客户端，均不算修复。未测平台/真实 provider 需要明确记录，不冒充通过，也不成为无限期搁置其他可验证工作的理由。
 
@@ -59,15 +59,15 @@ RR1 恢复/停止、RR3 执行与输出、RR5 联网及真实覆盖反馈继续�
 
 | 范围 | 入口 |
 | --- | --- |
-| 路径、actor、注册 | [path-authority.ts](../packages/web/application-host/lib/harness/path-authority.ts)、[router.ts](../packages/web/application-host/lib/harness/router.ts)、[session-registration.ts](../packages/web/application-host/lib/harness/session-registration.ts)、[service-host.ts](../packages/web/application-host/lib/harness/service-host.ts) |
-| Host 生产装配 | [index.ts](../packages/web/application-host/index.ts)、[Host Harness 文档](../packages/web/application-host/lib/harness/DOCUMENTATION.md) |
-| Pi 工具和会话 | [工具文档](../packages/pi-host/src/harness/README.md)、[session-host.ts](../packages/pi-host/src/session-host.ts)、[protocol-projector.ts](../packages/pi-host/src/protocol-projector.ts)、[HostServicesBridge](../packages/pi-host/src/harness/host-services-bridge.ts) |
-| 连接与事件 | [client.ts](../packages/runtime-client/src/client.ts)、[websocket.ts](../packages/runtime-client/src/websocket.ts)、[surface connection](../packages/runtime-broker/src/runtime-surface-connection.ts)、[gateway.ts](../packages/web/application-host/lib/pi-runtime/gateway.ts) |
-| UI 同步 | [UI client.ts](../packages/ui/src/lib/pi-runtime/client.ts)、[usePiSessionStore.ts](../packages/ui/src/stores/usePiSessionStore.ts)、[Store 文档](../packages/ui/src/stores/DOCUMENTATION.md)、[PiChatView.tsx](../packages/ui/src/components/pi-session/PiChatView.tsx) |
-| shell 与输出 | [shell-supervisor.ts](../packages/web/application-host/lib/harness/shell-supervisor.ts)、[harness-services.ts](../packages/web/application-host/lib/harness/harness-services.ts)、[output-store.ts](../packages/web/application-host/lib/harness/output-store.ts)、[terminal runtime](../packages/web/application-host/lib/terminal/runtime.ts) |
-| 检索与计划 | [search-service.ts](../packages/web/application-host/lib/harness/search-service.ts)、[explore-service.ts](../packages/web/application-host/lib/harness/explore-service.ts)、[todo-tool.ts](../packages/web/application-host/lib/harness/todo-tool.ts)、[快速决策设计](fast-decision-model-design.md)、[Knowledge 文档](../packages/web/application-host/lib/knowledge/DOCUMENTATION.md) |
-| 网络 | [web-fetch.ts](../packages/web/application-host/lib/harness/web-fetch.ts)、[ssrf-policy.ts](../packages/web/application-host/lib/harness/ssrf-policy.ts)、[安全设计](security.md) |
-| 协议与文件状态 | [protocol](../packages/protocol/package.json)、[application-client](../packages/application-client/README.md)、[Rust 设计](rust-kernel-design.md)、[工作区恢复](native-workspace-recovery-design.md) |
+| 路径、actor、注册 | [path-authority.ts](../../packages/web/application-host/lib/harness/path-authority.ts)、[router.ts](../../packages/web/application-host/lib/harness/router.ts)、[session-registration.ts](../../packages/web/application-host/lib/harness/session-registration.ts)、[service-host.ts](../../packages/web/application-host/lib/harness/service-host.ts) |
+| Host 生产装配 | [index.ts](../../packages/web/application-host/index.ts)、[Host Harness 文档](../../packages/web/application-host/lib/harness/DOCUMENTATION.md) |
+| Pi 工具和会话 | [工具文档](../../packages/pi-host/src/harness/README.md)、[session-host.ts](../../packages/pi-host/src/session-host.ts)、[protocol-projector.ts](../../packages/pi-host/src/protocol-projector.ts)、[HostServicesBridge](../../packages/pi-host/src/harness/host-services-bridge.ts) |
+| 连接与事件 | [client.ts](../../packages/runtime-client/src/client.ts)、[websocket.ts](../../packages/runtime-client/src/websocket.ts)、[surface connection](../../packages/runtime-broker/src/runtime-surface-connection.ts)、[gateway.ts](../../packages/web/application-host/lib/pi-runtime/gateway.ts) |
+| UI 同步 | [UI client.ts](../../packages/ui/src/lib/pi-runtime/client.ts)、[usePiSessionStore.ts](../../packages/ui/src/stores/usePiSessionStore.ts)、[Store 文档](../../packages/ui/src/stores/DOCUMENTATION.md)、[PiChatView.tsx](../../packages/ui/src/components/pi-session/PiChatView.tsx) |
+| shell 与输出 | [shell-supervisor.ts](../../packages/web/application-host/lib/harness/shell-supervisor.ts)、[harness-services.ts](../../packages/web/application-host/lib/harness/harness-services.ts)、[output-store.ts](../../packages/web/application-host/lib/harness/output-store.ts)、[terminal runtime](../../packages/web/application-host/lib/terminal/runtime.ts) |
+| 检索与计划 | [search-service.ts](../../packages/web/application-host/lib/harness/search-service.ts)、[explore-service.ts](../../packages/web/application-host/lib/harness/explore-service.ts)、[todo-tool.ts](../../packages/web/application-host/lib/harness/todo-tool.ts)、[快速决策设计](../design/fast-decision-model-design.md)、[Knowledge 文档](../../packages/web/application-host/lib/knowledge/DOCUMENTATION.md) |
+| 网络 | [web-fetch.ts](../../packages/web/application-host/lib/harness/web-fetch.ts)、[ssrf-policy.ts](../../packages/web/application-host/lib/harness/ssrf-policy.ts)、[安全设计](../design/security.md) |
+| 协议与文件状态 | [protocol](../../packages/protocol/package.json)、[application-client](../../packages/application-client/README.md)、[Rust 设计](../design/rust-kernel-design.md)、[工作区恢复](../design/native-workspace-recovery-design.md) |
 
 ## 3. 执行顺序和边界
 
@@ -291,9 +291,9 @@ plan 是会话/分支工作状态，不能因压缩、结束一个辅助 worker�
 
 ### 9.1 先澄清问题
 
-fake-IP 是某些代理 DNS 模式使用的域名映射地址，不是 Varin 的必要依赖。IANA 将 `198.18.0.0/15` 登记为 Benchmarking、非全球可达；mihomo 文档示例在这一范围设置 fake-IP 池，但地址池可配置。检测到它只能说明“特殊用途地址，可能存在代理映射”，不能证明目标安全或具体代理存在。[外部参考](#external-references)
+fake-IP 是某些代理 DNS 模式使用的域名映射地址，不是 Varin 的必要依赖。IANA 将 `198.18.0.0/15` 登记为 Benchmarking、非全球可达；mihomo 文档示例在这一范围设置 fake-IP 池，但地址池可配置。检测到它只能说明“特殊用途地址，可能存在代理映射”，不能证明目标安全或具体代理存在。[外部参考](../../#external-references)
 
-当前 Host 的 `lookup()` 前置检查与后面的全局 `fetch()` 是不同步骤；curl、独立 Node、Electron 内嵌 Host、Pi worker、远程 Host 和浏览器未必共享 DNS/代理。Node 官方代理能力还有版本和启动配置条件。执行者必须检查实际运行路径，不能只加环境变量就宣布全部联网修好。[外部参考](#external-references)
+当前 Host 的 `lookup()` 前置检查与后面的全局 `fetch()` 是不同步骤；curl、独立 Node、Electron 内嵌 Host、Pi worker、远程 Host 和浏览器未必共享 DNS/代理。Node 官方代理能力还有版本和启动配置条件。执行者必须检查实际运行路径，不能只加环境变量就宣布全部联网修好。[外部参考](../../#external-references)
 
 ### 9.2 出站配置及接线
 

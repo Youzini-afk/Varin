@@ -2,8 +2,8 @@
  * Host observers — subscribe to document/terminal/lsp/git events and write
  * them as `event` nodes to the knowledge store.
  *
- * Design: agent-harness.md §7.3
- * Plan: agent-harness-plan.md §2.3
+ * Design: design/harness-knowledge.md §7.3
+ * Plan: plan/agent-harness-plan.md §2.3
  *
  * Source determination:
  * - Document write with active `pi-worker` writer → 'agent'

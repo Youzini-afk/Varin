@@ -10,12 +10,12 @@ evidence may still name that surface where it records work completed before reti
 
 Last updated: 2026-09-27
 
-Design direction (D-337, implemented HR0–HR5): [task/resource Harness and continuous retrieval](resource-oriented-harness-design.md)
+Design direction (D-337, implemented HR0–HR5): [task/resource Harness and continuous retrieval](design/resource-oriented-harness-design.md)
 separates project grouping from session/task ownership, resource identity, execution directories and indexes.
 HR0–HR5 replaced the mutable session work-context and workspace-bound retrieval model: tools resolve paths
 against the session cwd and resource roots at admission, retrieval scopes are per-request, and indexes key
 on resource/content version/model. Per-scenario evidence and remaining untested boundaries are recorded in
-[agent-harness-status.md](agent-harness-status.md); the process and workspace descriptions below describe
+[status.md](status.md); the process and workspace descriptions below describe
 current implementation.
 
 ## 1. Context
@@ -26,16 +26,16 @@ the Agent loop, model/provider stack, native session tree, and extension ecosyst
 originated from the maintainer's OpenChamber fork, whose product capabilities are retained. That
 source fork remains read-only; all Varin edits and history live in this repository.
 
-Identity cutover (D-313): [Varin rebrand](varin-rebrand-design.md) is implemented across owned packages,
+Identity cutover (D-313): [Varin rebrand](design/varin-rebrand-design.md) is implemented across owned packages,
 runtime contracts, storage names, product assets and distribution configuration without old-name aliases
 or migration layers. The GitHub repository is now `Youzini-afk/Varin`; actual Pi dependencies and native
 data retain their names and owners. Process boundaries and capabilities do not change. First new-brand
 publication and platform validation boundaries remain in harness status; Fast Decision Model is next.
 
 The production architecture separates a Rust system kernel from the TypeScript product and Agent
-orchestration layers. [rust-kernel-design.md](rust-kernel-design.md) defines the implemented responsibilities;
-[agent-harness-plan.md](agent-harness-plan.md) stage R records the completed R0–R6 transition. Current release and
-verification evidence remains in [agent-harness-status.md](agent-harness-status.md).
+orchestration layers. [rust-kernel-design.md](design/rust-kernel-design.md) defines the implemented responsibilities;
+[agent-harness-plan.md](plan/agent-harness-plan.md) stage R records the completed R0–R6 transition. Current release and
+verification evidence remains in [status.md](status.md).
 
 Desktop was the first surface to ship, and Windows, Linux, and macOS packages are published from
 matching runners. The same process and protocol boundaries carry the remote host, browser client, and
@@ -134,7 +134,7 @@ can be recreated, with no legacy readers, upgrade importers, or version branches
 native Pi data, and external configuration remain intact; any unfinished real work is handed off
 explicitly without preserving its old internal schema. There is no dual writer or silent return to
 the old backend on native-runtime failure. Exact protocol, data, lifecycle, performance, and packaging
-requirements are in [rust-kernel-design.md](rust-kernel-design.md).
+requirements are in [rust-kernel-design.md](design/rust-kernel-design.md).
 
 Inside the Rust crate, the executable `main.rs` is only the process entry. `lib.rs` assembles the
 runtime and storage modules; `runtime.rs` owns framed transport, handshake, admission, and cancellation.
@@ -177,7 +177,7 @@ gate, while its Varin adapter may contribute status or controls through the comp
 No shield control is shown when no enforcing plugin is installed.
 
 The conversation renderer follows the Pi-native interaction contract in
-[chat-experience.md](chat-experience.md): one session record owns preview/live/optimistic/view projections,
+[chat-experience.md](design/chat-experience.md): one session record owns preview/live/optimistic/view projections,
 messages project into stable turns, the timeline has one virtual-list and scroll owner, and Queue/Steer
 state comes only from the Pi runtime. OpenChamber's current chat is reference evidence rather than a
 second renderer or state layer.
@@ -331,9 +331,9 @@ summarized raw entries back from the session's own branch. The heavy services be
 shell supervision, ranked search, diagnostics, output storage, and the TriviumDB workspace knowledge
 store — run in the application host and are reached over typed worker-to-host requests, never by
 handing the worker host credentials. The harness contract, its cache rules, and the profile model
-are specified in [agent-harness.md](agent-harness.md); which of its capabilities are implemented,
+are specified in [agent-harness.md](design/agent-harness.md); which of its capabilities are implemented,
 wired into a real session, proven by end-to-end evidence, or on by default is tracked only in
-[agent-harness-status.md](agent-harness-status.md).
+[status.md](status.md).
 
 D-284's replacement context policy is implemented and D-287 closes its consumers: one fixed-range summary is derived from the active
 model request near capacity while foreground work continues, then committed with retained original
@@ -346,7 +346,7 @@ active context; Zone 2 then emits changed material instead of rebuilding a dashb
 compaction; a retired `harness.memory.mode: "off"` value still disables preparation as a migration
 read, not a running mode. See harness section 8.4 and plan 2.4/2.6.
 
-D-314 implements the [compaction Agent design](context-compaction-agent-design.md). The broker owns its
+D-314 implements the [compaction Agent design](design/context-compaction-agent-design.md). The broker owns its
 internal child process; query responses route to that worker ID without blocking behind the parent session.
 The parent owns the fixed source and native compaction commit. Replaced material is complete; retained
 recent messages are supplied verbatim or as explicitly sourced excerpts when space is limited. Both manual
@@ -445,7 +445,7 @@ Internal phases update that same query; public `explore` remains one tool call. 
 precedes final selection/formatting and has a separate input budget. The Host can execute grounded
 local follow-ups and must retain required source spans; validating their identity does not validate the
 model's semantic judgment. This adds no durable conversation or generic workflow framework. Delivery
-state is in agent-harness-status.md. Remote embedding and HTTP rerank are user-owned harness bindings,
+state is in status.md. Remote embedding and HTTP rerank are user-owned harness bindings,
 not chat model slots. When `harness.embedding` is set, the workspace-worker Pi runtime resolves the
 provider endpoint and credential, and the application host submits authorized text through
 `harness.embed` without receiving secrets. Unconfigured workspaces use local MiniLM only after the user
@@ -459,7 +459,7 @@ MiniLM. A configured remote failure reports semantic `failed`/`unavailable` and 
 mix the local vector space. Dedicated rerank uses `harness.rerank` on already-built explore views and
 is skipped when `models.explore` already selected candidates. See harness sections 6.1, 7.5, and 8.5.
 
-D-312 delivers the [Fast Decision Model](fast-decision-model-design.md) capability with the `explore`
+D-312 delivers the [Fast Decision Model](design/fast-decision-model-design.md) capability with the `explore`
 consumer wired (F0–F4). `harness.fastDecision` is a user-owned default binding with per-purpose override or
 `"off"`; the Pi side resolves it into a credential-free `configurationId` binding that each query freezes.
 `explore-fast-decision.ts` runs a progressive loop inside the live query: typed judgments decide which real
@@ -471,7 +471,7 @@ Generative search planning remains separate. Pi inference retains credentials an
 decision service does not own search, permissions or action execution. Computer Use and other consumers are
 future integrations, not delivered features. See harness status for verification and untested boundaries.
 
-D-315 / Stage L is the [Web and research search extension](web-research-search-design.md). Its L0–L6
+D-315 / Stage L is the [Web and research search extension](design/web-research-search-design.md). Its L0–L6
 service slices are wired: generic `retrieval` can return natural-language reports with optional Host-validated
 `submit_facts`; `websearch` accepts batch query/objective/URL items with per-item status and
 provider-minted pagination cursors; `webfetch` pins fetched bodies to durable `web.snapshot` kernel
@@ -592,7 +592,7 @@ session or parallel research catalog exists. Shell changes do not apply focus, c
 sessions. D-299 adds the first capability-routing slice: dedicated research model slots and frozen
 branch manifests; D-303 closes local experiments, continuation upgrades and collaboration consumers.
 Managed remote and multi-machine execution is delivered by D-305. The product
-design is [research-cluster-design.md](research-cluster-design.md).
+design is [research-cluster-design.md](design/research-cluster-design.md).
 
 D-300 defines execution and collaboration, with local production slices accepted at D-303. Experiment
 specifications and attempts use the existing Rust typed catalog and object domain; Host coordinates
@@ -610,7 +610,7 @@ a full current request-only tail snapshot for every authorized Agent, while envi
 in history. Explicit messages and established
 waits drive continuation; Host does not classify scientific significance to launch stronger models.
 These contracts and the local/remote acceptance sequence are specified in
-[plan stage 7](agent-harness-plan.md); current implementation is distinguished from follow-up design in status.
+[plan stage 7](plan/agent-harness-plan.md); current implementation is distinguished from follow-up design in status.
 
 D-304 / 7I is implemented at D-305. Existing connection management reaches a remote Rust executor or Varin
 Host; the coordinator owns research intent and placement, while the target owns actual jobs, output and
@@ -673,7 +673,7 @@ live Document Registry model. A nested Git repository is stored as a workspace-r
 not as another workspace. Chat/PR patch renderers remain specialized read-only surfaces.
 The complete model, language, worker,
 extension, and migration contract is
-[unified-file-editor-platform.md](unified-file-editor-platform.md).
+[unified-file-editor-platform.md](design/unified-file-editor-platform.md).
 
 Mobile and embedded CodeMirror views submit offset edits against the same captured Document Registry
 revision and consume the applicable subset of the shared language DTO. They are separate Surface
@@ -714,7 +714,7 @@ follow one document identity instead of competing projections.
 Surface parity is explicit rather than assumed. Agent Workspace declares web, desktop, and mobile;
 the official IDE Workbench declares web and desktop only. The full workbench contract, performance
 requirements, and per-slice acceptance criteria are in
-[composable-workbench.md](composable-workbench.md).
+[composable-workbench.md](design/composable-workbench.md).
 
 ## 5. Versioned host protocol
 
@@ -1083,8 +1083,8 @@ budgets instead of guessed fixed limits. Full capture costs belong to branch cre
 not to every prompt or rollback; Merkle sharing does not make initial capture or file hashing constant time.
 
 The detailed contract and implementation sequence are in
-[agent-harness.md](agent-harness.md) section 9.2.5b and
-[agent-harness-plan.md](agent-harness-plan.md) sections 3.4–3.5. These are accepted implementation tasks,
+[agent-harness.md](design/agent-harness.md) section 9.2.5b and
+[agent-harness-plan.md](plan/agent-harness-plan.md) sections 3.4–3.5. These are accepted implementation tasks,
 not a candidate direction awaiting a separate benchmark or another consumer.
 
 The implemented disk path uses the recovery engine's selected storage, catalog, file-state primitives,
@@ -1095,7 +1095,7 @@ read/write/move/delete in that authority instance; directory operations cover de
 paths remain concurrent. This queue does not cover raw filesystem or shell writes in other execution paths.
 Reclamation holds the Documents writer barrier through deletion and preserves materializations used by
 controlled processes or editor surfaces. Fixed-revision LSP, surface-buffer integration, and the full space
-budget UI remain separately tracked in [agent-harness-status.md](agent-harness-status.md); their helper
+budget UI remain separately tracked in [status.md](status.md); their helper
 types do not count as delivered product paths.
 
 ## 7. Pi extension integration architecture
@@ -1175,7 +1175,7 @@ package sources remain installable directly, and the generic UI bridge allows un
 work without a Varin-specific adapter.
 
 The page boundaries, native authorities, risk treatment, and adapter acceptance criteria are
-defined in [plugin-gui-design.md](plugin-gui-design.md). The imported Magic Context, OpenAgent, and
+defined in [plugin-gui-design.md](design/plugin-gui-design.md). The imported Magic Context, OpenAgent, and
 Agent Orchestration screens have been retired; their capability disposition remains documented
 there rather than leaving an OpenCode compatibility surface in production code.
 
@@ -1213,18 +1213,18 @@ contract.
 The platform makes built-in pages and workflows replaceable above a narrow recovery kernel, supports
 declarative, managed, isolated, and explicitly trusted-native Surface entrypoints, and defines
 truthful dynamic-disable guarantees for each mode. Its target architecture is specified in
-[varin-extension-platform.md](varin-extension-platform.md). None of those entrypoints authorize
+[varin-extension-platform.md](design/varin-extension-platform.md). None of those entrypoints authorize
 loading Pi extension code or private plugin state in the renderer.
 
 The workbench shell itself is now the largest consumer of this platform: both first-party working
 shapes are built-in extensions selected by profile, and the public authoring surface ships through
 `@varin/extension-sdk`, `@varin/extension-react`, and `@varin/extension-cli` templates. See
-section 4.5 and [varin-extension-authoring.md](varin-extension-authoring.md).
+section 4.5 and [varin-extension-authoring.md](ops/varin-extension-authoring.md).
 
 ### 7.4 Conversational settings and Agent administration (delivered, D-306–D-311)
 
-[agent-settings-design.md](agent-settings-design.md) defines Stage S in the
-[harness plan](agent-harness-plan.md#阶段-s对话式设置与-agent-管理d-306). The implemented core field slice makes Settings UI and Agent tools share
+[agent-settings-design.md](design/agent-settings-design.md) defines Stage S in the
+[harness plan](plan/agent-harness-plan.md#阶段-s对话式设置与-agent-管理d-306). The implemented core field slice makes Settings UI and Agent tools share
 discovery metadata, validation sources and owner-backed operations across the existing settings surface.
 Application settings, Pi configuration/resources, extensions and client-native behavior retain their
 current authorities; the design does not add a settings database or a second Agent-only writer.
@@ -1248,7 +1248,7 @@ awaited owner calls report their terminal result directly. Entries without an ow
 
 ### 7.5 Session follow-ups and triggers (delivered, D-307–D-311)
 
-[agent-follow-up-design.md](agent-follow-up-design.md) defines Stage W. The implemented slice lets Agents register
+[agent-follow-up-design.md](design/agent-follow-up-design.md) defines Stage W. The implemented slice lets Agents register
 conditions and continuation intent against existing sessions/Threads; time, authoritative events and
 deterministic source checks decide when facts are delivered. Semantic judgment belongs to the resumed
 work at a chosen checkpoint, not a model call for each log chunk or status poll.
@@ -1299,7 +1299,7 @@ process changes are marked incomplete instead of causing a full-workspace scan.
 
 Storage location, verified transfer, cleanup, and explicit deletion remain provider-owned and
 replaceable. Conversation-only fallback remains available when no provider is selected. The complete
-contract is documented in [native-workspace-recovery-design.md](native-workspace-recovery-design.md).
+contract is documented in [native-workspace-recovery-design.md](design/native-workspace-recovery-design.md).
 
 The v5 provider coordinates dirty buffers across connected document surfaces before affected-path
 inspection, uses a durable shared/exclusive lease for cross-process workspace-local storage, and maintains
@@ -1318,7 +1318,7 @@ be textually nested inside its canonical spelling. Requested paths still pass le
 checks first, and every existing target or nearest existing parent must resolve inside that one
 canonical root before it can be read or written.
 
-See [security.md](security.md) for the threat model and release gates.
+See [security.md](design/security.md) for the threat model and release gates.
 
 ## 10. Runtime selection
 
@@ -1397,7 +1397,7 @@ This is a direct migration, not a permanent compatibility stack:
    history in the right sidebar/settings.
 
 The exact source and non-regression contract are recorded in
-[openchamber-pi-migration.md](openchamber-pi-migration.md). Copied MIT material retains its license
+[openchamber-pi-migration.md](ops/openchamber-pi-migration.md). Copied MIT material retains its license
 notice and will be rebranded before public release.
 
 ### Agent harness D-224 state refinements
@@ -1462,7 +1462,7 @@ remain in their existing Host/Registry domains. R4–R6 are unchanged.
 
 ## D-278 audit correction
 
-The [R0–R3 audit](rust-kernel-audit.md) retains the single Rust storage authority and Registry buffer authority,
+The [R0–R3 audit](plan/rust-kernel-audit.md) retains the single Rust storage authority and Registry buffer authority,
 but reopens R2/R3 completion claims. Independent release-kernel cases reproduced physical-root lease partitioning,
 reversed coverage, destructive operation replay, stale GC cleanup, epoch pin leaks, and actual consumer identity
 failures. These are repaired without introducing another persistent authority. Native lifecycle acceptance still

@@ -24,7 +24,7 @@ reliable as code, a script, or normal documentation.
 - The OpenCode cutover is complete. Do not restore OpenCode contracts, compatibility facades, parallel
   implementations, or dead migration paths.
 - Preserve the fork capabilities recorded in
-  [docs/openchamber-pi-migration.md](docs/openchamber-pi-migration.md) unless a reviewed Pi-native
+  [docs/ops/openchamber-pi-migration.md](docs/ops/openchamber-pi-migration.md) unless a reviewed Pi-native
   implementation is behaviorally and security-equivalent.
 - Do not add speculative restrictions. A limit needs a concrete protocol, platform, safety, data, or
   measured resource failure behind it; defaults, warnings, and configurable budgets are distinct from
@@ -48,8 +48,8 @@ reliable as code, a script, or normal documentation.
 - `packages/mobile` is a Capacitor client connected to a Varin server.
 - Runtime, protocol, and extension packages own their named process and contract boundaries as mapped in
   [docs/architecture.md](docs/architecture.md).
-- Stage R in [docs/agent-harness-plan.md](docs/agent-harness-plan.md) completed the Rust system-kernel
-  transition at D-282; [docs/rust-kernel-design.md](docs/rust-kernel-design.md) owns its implemented boundaries.
+- Stage R in [docs/plan/agent-harness-plan.md](docs/plan/agent-harness-plan.md) completed the Rust system-kernel
+  transition at D-282; [docs/design/rust-kernel-design.md](docs/design/rust-kernel-design.md) owns its implemented boundaries.
   Rust is the production authority for the transferred state, file, materialization, process, and compute
   resources. Do not reintroduce dual TS/Rust writers or fallback authorities. The kernel is a private
   Application Host component shared by surfaces, not a second Electron backend. Delivery facts remain in

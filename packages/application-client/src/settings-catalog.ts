@@ -171,7 +171,7 @@ export const SETTINGS_CATALOG: readonly SettingsCatalogEntry[] = [
     field: { path: 'harness.tools', kind: 'json', scope: 'user-or-project',
       note: 'Record<toolName, boolean> enablement map; absent tools use the assembled default set' },
     apply: 'next-run',
-    helpRef: 'docs/agent-settings-design.md#harness',
+    helpRef: 'docs/design/agent-settings-design.md#harness',
     ui: { page: 'harness-tools', titleKey: 'settings.page.harness.section.tools',
       keywords: ['bash', 'grep', 'apply_patch', 'diagnostics', 'tools'] },
   },

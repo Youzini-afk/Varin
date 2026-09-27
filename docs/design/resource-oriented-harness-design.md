@@ -4,7 +4,7 @@ Status: accepted direction / HR0–HR5 wired; corrective verification in progres
 
 Last updated: 2026-09-27
 
-设计时的源码核查基线：`19c010d7`，Varin `0.9.19`。本文记录维护者确认的重设计方向、替代合同及验收场景。HR0–HR5 已接入代码；后续验收发现的跨根草稿、检索和执行边界正在按实际行为修正。当前交付与未测范围统一记入 [能力状态矩阵](agent-harness-status.md)。
+设计时的源码核查基线：`19c010d7`，Varin `0.9.19`。本文记录维护者确认的重设计方向、替代合同及验收场景。HR0–HR5 已接入代码；后续验收发现的跨根草稿、检索和执行边界正在按实际行为修正。当前交付与未测范围统一记入 [能力状态矩阵](../status.md)。
 
 ## 1. 设计判断
 
@@ -22,14 +22,14 @@ Harness 的目标是减少 Agent 为环境做的准备工作：明确目标就�
 
 | 当前事实 | 影响 | 源码入口 |
 | --- | --- | --- |
-| Broker 打开会话后等待 `session.workContext.sync`，Host 注册前恢复工作上下文 | 文件目录准备进入聊天激活的关键路径；上一轮修复解决了顺序死锁，但依赖仍在 | [runtime-broker](../packages/runtime-broker/src/runtime-broker.ts)、[service-host](../packages/web/application-host/lib/harness/service-host.ts) |
-| Host actor 注册、会话知识库定位、普通子任务需要 workspace | 无项目聊天无法自然获得同等完整的 Harness；科研入口还会按 cwd 补注册 workspace | [Host 装配](../packages/web/application-host/index.ts)、[thread-services](../packages/web/application-host/lib/harness/thread-services.ts) |
-| Documents 资源键含 workspaceId，同一实际文件可由不同目录注册得到不同键 | 项目组织方式进入文件身份、编辑协调及派生状态 | [authority](../packages/web/application-host/lib/documents/authority.ts)、[workspace-registry](../packages/web/application-host/lib/documents/workspace-registry.ts) |
-| 关键词搜索首先要求 workspaceId，再取得根目录 | 原本可直接搜索的新目录必须先被工作区系统接纳 | [search/content](../packages/web/application-host/lib/search/content.ts) |
-| 语义运行实例、扫描、配置读取及持久索引按 workspace 组织 | 会话/工作区装配影响检索初始化；重叠目录容易重复维护 | [workspace-runtime](../packages/web/application-host/lib/knowledge/semantic/workspace-runtime.ts)、[identity](../packages/web/application-host/lib/knowledge/semantic/identity.ts) |
-| Host 状态、Pi 镜像、journal、响应修订和 shell anchor 共同维护操作目录 | 一个路径默认值需要跨进程收敛，工具准备与执行还需处理状态变更 | `pi-host/src/harness/work-context.ts`（HR4 已删）、[tool-execution-resources](../packages/pi-host/src/harness/tool-execution-resources.ts) |
+| Broker 打开会话后等待 `session.workContext.sync`，Host 注册前恢复工作上下文 | 文件目录准备进入聊天激活的关键路径；上一轮修复解决了顺序死锁，但依赖仍在 | [runtime-broker](../../packages/runtime-broker/src/runtime-broker.ts)、[service-host](../../packages/web/application-host/lib/harness/service-host.ts) |
+| Host actor 注册、会话知识库定位、普通子任务需要 workspace | 无项目聊天无法自然获得同等完整的 Harness；科研入口还会按 cwd 补注册 workspace | [Host 装配](../../packages/web/application-host/index.ts)、[thread-services](../../packages/web/application-host/lib/harness/thread-services.ts) |
+| Documents 资源键含 workspaceId，同一实际文件可由不同目录注册得到不同键 | 项目组织方式进入文件身份、编辑协调及派生状态 | [authority](../../packages/web/application-host/lib/documents/authority.ts)、[workspace-registry](../../packages/web/application-host/lib/documents/workspace-registry.ts) |
+| 关键词搜索首先要求 workspaceId，再取得根目录 | 原本可直接搜索的新目录必须先被工作区系统接纳 | [search/content](../../packages/web/application-host/lib/search/content.ts) |
+| 语义运行实例、扫描、配置读取及持久索引按 workspace 组织 | 会话/工作区装配影响检索初始化；重叠目录容易重复维护 | [workspace-runtime](../../packages/web/application-host/lib/knowledge/semantic/workspace-runtime.ts)、[identity](../../packages/web/application-host/lib/knowledge/semantic/identity.ts) |
+| Host 状态、Pi 镜像、journal、响应修订和 shell anchor 共同维护操作目录 | 一个路径默认值需要跨进程收敛，工具准备与执行还需处理状态变更 | `pi-host/src/harness/work-context.ts`（HR4 已删）、[tool-execution-resources](../../packages/pi-host/src/harness/tool-execution-resources.ts) |
 
-现有实现并非全部需要重写。Documents 的内容与修订处理、Rust 文件/进程/计算能力、固定材料快照、Pi 原生历史、Thread/Run 和检索算法继续使用。已有 [向量缓存](../packages/web/application-host/lib/knowledge/semantic/vector-cache.ts) 按向量空间、用途和实际输入文本复用计算，可作为新索引复用的基础。
+现有实现并非全部需要重写。Documents 的内容与修订处理、Rust 文件/进程/计算能力、固定材料快照、Pi 原生历史、Thread/Run 和检索算法继续使用。已有 [向量缓存](../../packages/web/application-host/lib/knowledge/semantic/vector-cache.ts) 按向量空间、用途和实际输入文本复用计算，可作为新索引复用的基础。
 
 ## 3. 用户与 Agent 应获得的行为
 
@@ -279,7 +279,7 @@ HR0 应优先做可运行的窄纵切，借它检验合同后再推广。共享�
 
 ## 13. 交付边界
 
-本文定义设计与 HR 实施顺序；HR0–HR5 已接线（资源与归属、会话与操作、直接检索、持续索引、旧机制收口、场景验收），逐阶段事实、§12 证据映射与未测边界记入 [能力状态矩阵](agent-harness-status.md)。最终交付标准是用户和 Agent 减少目录准备、跨位置工作直接可用、计算持续复用，以及旧状态确实被删除，而不是新增类型和服务数量。
+本文定义设计与 HR 实施顺序；HR0–HR5 已接线（资源与归属、会话与操作、直接检索、持续索引、旧机制收口、场景验收），逐阶段事实、§12 证据映射与未测边界记入 [能力状态矩阵](../status.md)。最终交付标准是用户和 Agent 减少目录准备、跨位置工作直接可用、计算持续复用，以及旧状态确实被删除，而不是新增类型和服务数量。
 
 ## 14. 后续修正：固定来源视图与索引盘点
 

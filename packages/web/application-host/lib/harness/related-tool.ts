@@ -7,8 +7,8 @@
  * relations are persisted on the symbol graph around real queries; explore
  * consumes the same stored edges.
  *
- * Design: agent-harness.md §6.2
- * Plan: agent-harness-plan.md §3.12
+ * Design: design/harness-retrieval.md §6.2
+ * Plan: plan/agent-harness-plan.md §3.12
  */
 
 import type {

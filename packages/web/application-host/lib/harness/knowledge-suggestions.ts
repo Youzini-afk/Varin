@@ -1,8 +1,8 @@
 /**
  * Knowledge suggestions — three triggers, review tray, dual-temporal supersedes.
  *
- * Design: agent-harness.md §7.2.2
- * Plan: agent-harness-plan.md §2.7
+ * Design: design/harness-knowledge.md §7.2.2
+ * Plan: plan/agent-harness-plan.md §2.7
  *
  * Triggers (only these two, no heuristics):
  * 1. User "remember this" action on message/tool result/block entry

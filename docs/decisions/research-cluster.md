@@ -2,7 +2,7 @@
 
 范围：AI4S 的产品中心、工作台与工作侧重、异构模型协作、研究分支调度与科研运行时接缝。
 
-本卷是 [agent-harness-decisions.md](../agent-harness-decisions.md) 的分卷；条目只追加，索引状态以总索引为准。
+本卷是 [decisions/README.md](README.md) 的分卷；条目只追加，索引状态以总索引为准。
 
 ### D-291 · 2026-09-19 · research profile / AI4S
 
@@ -30,7 +30,7 @@
 - 为科研再建一个 Agent runtime、工作图或存储后端：不采用，复用 Pi、Thread/Run、Host 和 Rust kernel；研究关系通过引用和现有结果交付表达。
 - 普通运行也持续唤醒模型监查：不采用，进程事件和指标由程序处理，异常、冲突和关键结果才触发模型。
 
-影响：新增 [research-cluster-design.md](../research-cluster-design.md)；更新 `agent-harness.md` 的 research profile、`agent-harness-plan.md` 的后续领域顺序、`roadmap.md` 的 research 条目与 `agent-harness-status.md` 的未接线说明。后续实现使用现有 `dispatch` / `send` / `wait` / `read_thread` / WorkingState / Rust kernel 接缝；本条不宣称任何生产代码已接线。
+影响：新增 [research-cluster-design.md](../design/research-cluster-design.md)；更新 `agent-harness.md` 的 research profile、`agent-harness-plan.md` 的后续领域顺序、`roadmap.md` 的 research 条目与 `status.md` 的未接线说明。后续实现使用现有 `dispatch` / `send` / `wait` / `read_thread` / WorkingState / Rust kernel 接缝；本条不宣称任何生产代码已接线。
 
 状态：已接受设计；待实施。
 
@@ -64,8 +64,8 @@
 原因：科研同时需要讨论、检索、计算、编码和写作。让用户选择适合当前操作的 UIUX，并另行指定 Agent 工作方式，
 才能在同一项目和同一任务中使用这些能力；界面导航不应成为修改执行配置的隐式动作。
 
-影响：[research-cluster-design.md](../research-cluster-design.md) 第 10 节；[agent-harness.md](../agent-harness.md)
-第 10 节；[agent-harness-plan.md](../agent-harness-plan.md) 阶段 7；[composable-workbench.md](../composable-workbench.md)
+影响：[research-cluster-design.md](../design/research-cluster-design.md) 第 10 节；[agent-harness.md](../design/agent-harness.md)
+第 10 节；[agent-harness-plan.md](../plan/agent-harness-plan.md) 阶段 7；[composable-workbench.md](../design/composable-workbench.md)
 选择语义；architecture、roadmap、status 与决策索引。D-291 正文保留；本条补齐其产品形态与独立绑定。
 
 状态：设计已在 D-298 的 7A 中实现；异构能力路由、调度、实验和写作仍按 7B–7F 继续实施。
@@ -93,7 +93,7 @@
 持久格式：Thread catalog 使用 schema 10，session-binding 索引使用 schema 2；不引入旧内部格式迁移或双写。
 原生 Pi JSONL、用户工作区文件与项目资产不改写。工作台选择与 session work focus 各守既有权威。
 
-状态：7A 已实现并接线；本地验证与未实测边界见 [status](../agent-harness-status.md)。7B–7F 未宣称交付。
+状态：7A 已实现并接线；本地验证与未实测边界见 [status](../status.md)。7B–7F 未宣称交付。
 
 ### D-299 · 2026-09-19 · AI4S 7B 第一段：能力路由与冻结分支
 
@@ -164,8 +164,8 @@ Host 根据事件类别自动叫首席，会混淆运行事实与科学价值；
 
 影响：本条部分取代 D-291 的强制交接格式、共同维护研究板及自动事件综合设计；D-285 的已交付消息账本与生命周期保留，
 其公开 inform/request 选择将按本条的自然交流/可选等待目标改造。旧条目正文不改，当前代码未随本决策改动。
-同步 [research-cluster-design.md](../research-cluster-design.md) 第 6–7 节、[plan](../agent-harness-plan.md) 7C–7F、
-[通用 Harness](../agent-harness.md) 9.2.5a/9.3.7/10.3，以及 architecture、roadmap、status 和索引。
+同步 [research-cluster-design.md](../design/research-cluster-design.md) 第 6–7 节、[plan](../plan/agent-harness-plan.md) 7C–7F、
+[通用 Harness](../design/agent-harness.md) 9.2.5a/9.3.7/10.3，以及 architecture、roadmap、status 和索引。
 
 状态：讨论已接受并写入设计/计划，待实施；7A/D-298 与 7B 首段/D-299 的交付保持，不能据此宣称新工具、现状表或远程实验已接线。
 

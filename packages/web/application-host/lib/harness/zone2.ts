@@ -1,8 +1,8 @@
 /**
  * Zone 2 assembly — varin-context message for before_agent_start.
  *
- * Design: agent-harness.md §8.1, §8.3
- * Plan: agent-harness-plan.md §2.2
+ * Design: design/harness-context.md §8.1, §8.3
+ * Plan: plan/agent-harness-plan.md §2.2
  *
  * Zone 2 material is assembled from:
  * - userEdits: events with source !== 'agent' and kind='edit'

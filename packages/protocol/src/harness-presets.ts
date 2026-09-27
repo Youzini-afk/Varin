@@ -1,8 +1,8 @@
 /**
  * Execution presets — named, fixed configurations a dispatch can opt into.
  *
- * Design: agent-harness.md §9.2.2 / D-285
- * Plan: agent-harness-plan.md §3.18A
+ * Design: design/harness-verification.md §9.2.2 / D-285
+ * Plan: plan/agent-harness-plan.md §3.18A
  *
  * Dispatch is task-centered: `task` is the core input and `preset` is
  * optional. A normal dispatch runs on the caller's current model and its

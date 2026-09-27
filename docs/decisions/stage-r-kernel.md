@@ -2,7 +2,7 @@
 
 范围：D-252~D-283 Rust 系统内核迁移全程（R0–R6）与 D-283 权限/Web 收口。
 
-本卷是 [agent-harness-decisions.md](../agent-harness-decisions.md) 的分卷；条目只追加、不改写，索引状态以总索引为准。
+本卷是 [decisions/README.md](README.md) 的分卷；条目只追加、不改写，索引状态以总索引为准。
 
 ### D-252 · 2026-09-12 · 阶段 R：Rust 系统内核与 Host 分层
 
@@ -39,7 +39,7 @@ Rust 可用于集中这些责任，TS 继续利用产品与 Pi 生态。最近�
 继续 TS 并只做 worker 隔离可缓解事件循环阻塞，但不落实本次选择的原生系统内核；保留双后端会形成两份持久权威。
 因此选择按完整职责迁移的正式阶段。
 
-影响：[rust-kernel-design.md](../rust-kernel-design.md)、architecture 第 1/2/4 节、agent-harness 第 1/2/4/9.2.5b/12 节、
+影响：[rust-kernel-design.md](../design/rust-kernel-design.md)、architecture 第 1/2/4 节、agent-harness 第 1/2/4/9.2.5b/12 节、
 plan 0.1/0.7/3.4/阶段 R、status 阶段 R、roadmap、AGENTS 与 native recovery 的目标边界。
 本条只追加，D-001–D-251 正文保持原样。
 
@@ -452,7 +452,7 @@ Rust catalog `user_version` 与握手 storage format 同为 v9。R1 仍为 Parti
 
 状态修正：R1 核心 production metadata cutover 保持 Complete，本轮修复其 GC/pin 正确性。R2 改为 Partial（生产文件权威已接通，低层 pending operation 到 Host 可见处置仍待闭环）；R3 改为 Partial（kernel 原语/主要消费者已接通，kernel promotion→Git executionBaseline→Thread Registry/execution view 尚无贯穿的 durable switch intent/receipt，setup 停止与真实退出也需验收）。这不是新增签名、本地跨平台或物理断电门槛，也不恢复 TS writer。R0 保持 Partial，R4–R6 不变。
 
-证据与未决项详见 [rust-kernel-audit.md](../rust-kernel-audit.md)。新增反例在真实 release kernel 上运行；真实 DocumentAuthority 的保存/移动/删除、独立 owning/execution 的 materialize/publish/restore，以及去掉 no-op gate 的 combined Recovery/restart/undo 均纳入同一验收。更新 workflow 不冒充远端 CI 已绿，legacy seam 单测不冒充 native 生命周期证明。
+证据与未决项详见 [rust-kernel-audit.md](../plan/rust-kernel-audit.md)。新增反例在真实 release kernel 上运行；真实 DocumentAuthority 的保存/移动/删除、独立 owning/execution 的 materialize/publish/restore，以及去掉 no-op gate 的 combined Recovery/restart/undo 均纳入同一验收。更新 workflow 不冒充远端 CI 已绿，legacy seam 单测不冒充 native 生命周期证明。
 
 ### D-279 · 2026-09-14 · R2/R3 复核收口：未决文件操作可处置，物化跨域 handoff 可重入
 
@@ -486,7 +486,7 @@ Host 注入同一 native service 到用户终端、Harness shell、Thread setup�
 
 边界：Pi session/catalog/inference worker 生命周期仍归 runtime-broker；Git 短命令、shell 发现/bootstrap 留作既有领域适配，不另造统一调度框架。生产不选择 Node/Bun PTY；剩余 unused distribution dependency/rebuild probe 清理属于 R6。没有新增敌对代码 OS sandbox、物理断电、付费模型、本地 macOS/Linux 或签名验收门槛。旧内部 catalog 直接按 v10 校验，不自动迁移或删除用户 Workspace/Pi/Git 数据。
 
-证据：Windows release `bun run test:kernel` 80 passed（Node 25 + authority audit 26 + storage 5 + combined Recovery 1 + native process 16 + consumer/admission 7）；affected focused suites 233 passed / 1 platform symlink skip；Application Host source/test、Protocol 与 UI 类型检查、Protocol build、targeted lint 通过。Rust release build、check、unit tests 4/4 与 format/protocol drift 已验证。独立真实 Host 进程退出、kernel death/restart、后代进程清理、kill refusal、lease/revoke、backpressure 和不重放均有原生反例。另有显式授权 temp workspace 的真实 Application Host HTTP terminal create/inspect/delete/stop smoke；不是完整 browser/Electron smoke，远端 CI 结果另行记录。准确证据与后续范围见 [status](../agent-harness-status.md)。
+证据：Windows release `bun run test:kernel` 80 passed（Node 25 + authority audit 26 + storage 5 + combined Recovery 1 + native process 16 + consumer/admission 7）；affected focused suites 233 passed / 1 platform symlink skip；Application Host source/test、Protocol 与 UI 类型检查、Protocol build、targeted lint 通过。Rust release build、check、unit tests 4/4 与 format/protocol drift 已验证。独立真实 Host 进程退出、kernel death/restart、后代进程清理、kill refusal、lease/revoke、backpressure 和不重放均有原生反例。另有显式授权 temp workspace 的真实 Application Host HTTP terminal create/inspect/delete/stop smoke；不是完整 browser/Electron smoke，远端 CI 结果另行记录。准确证据与后续范围见 [status](../status.md)。
 
 结果：R4 按生产 process authority/consumer/failure 契约 Complete，R1–R3 保持 Complete。R0 Partial，R5/R6 未完成；整个阶段 R 未完成。
 

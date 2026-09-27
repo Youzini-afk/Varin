@@ -6,12 +6,12 @@ Last updated: 2026-09-21
 
 2026-09-21 补充：阶段 Q 主要修正了测试装配与执行归属，未充分清理验证内容本身。
 本轮直接删除源码/样式字面量、手写 DTO 自证和退休迁移检查，收窄发布 smoke；具体去向见
-[审计补充](archive/testing-ci-audit.md#11-test-content-reduction-2026-09-21)。本设计中的历史基线不代表现存文件或待执行的固定清单。
+[审计补充](../archive/testing-ci-audit.md#11-test-content-reduction-2026-09-21)。本设计中的历史基线不代表现存文件或待执行的固定清单。
 
 本文定义全仓测试、测试装配、构建与 CI 的重整目标。实施顺序见
-[agent-harness-plan.md 的阶段 Q](agent-harness-plan.md#阶段-q测试与-ci-体系重整d-292已验收收口)，
-交付事实仍记在 [agent-harness-status.md](agent-harness-status.md)。这是 AI4S 实施前的独立工程阶段；
-实施结果与每项处置的实际去向记录在 [testing-ci-audit.md](archive/testing-ci-audit.md)。
+[agent-harness-plan.md 的阶段 Q](../plan/agent-harness-plan.md#阶段-q测试与-ci-体系重整d-292已验收收口)，
+交付事实仍记在 [status.md](../status.md)。这是 AI4S 实施前的独立工程阶段；
+实施结果与每项处置的实际去向记录在 [testing-ci-audit.md](../archive/testing-ci-audit.md)。
 
 ## 1. 要解决的问题
 
@@ -36,8 +36,8 @@ Last updated: 2026-09-21
 | 最新 CI 源码/Windows 检查通过，云运行时首次部署启动失败 | 存在真实成品故障，不能把所有红灯归咎于测试或通过取消检查消除 |
 
 历史调查入口包括 CI 源码断言 `scripts/docker-cloud-tools.test.js`（已删除，容器构建与启动检查验证产物）、部署源码断言 `scripts/cloud-remote-deploy.test.js`（已删除）、
-[桌面契约测试](../packages/electron/desktop-contract.test.ts)、[文档检查](../scripts/docs/engineering-docs.mjs)、
-[上下文稳定性测试](../packages/pi-host/test/zone0-stability.test.ts) 和 [原生验收入口](../scripts/test-kernel-authority.mjs)。
+[桌面契约测试](../../packages/electron/desktop-contract.test.ts)、[文档检查](../../scripts/docs/engineering-docs.mjs)、
+[上下文稳定性测试](../../packages/pi-host/test/zone0-stability.test.ts) 和 [原生验收入口](../../scripts/test-kernel-authority.mjs)。
 这些是历史定位线索，不是必须保持原名或固定数量的契约；清理后同步或移除失效链接。
 
 Zone 0 测试的模拟回复不足以覆盖其完整 prompt/tool 继续流程，断言只检查此前采集的请求，存在错误结局未被判失败的缺口。

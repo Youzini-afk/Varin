@@ -8,7 +8,7 @@ Last updated: 2026-09-15
 
 审查基线是 `e465e2df`，即此前标记 R3 Complete 的提交。本轮从实际生产装配、权限和文件资源边界、durable operation、GC、物化与 Thread 生命周期往下追，再用真实 release kernel 反例验证，而不是从状态文档或测试总数推导完成度。
 
-结论：**架构方向成立，但此前 R2/R3 的完成度高估；存在可以复现的数据安全、权限边界和生产装配缺陷，不只是代码风格问题。** 首批独立编写的十个反例在修改前的 release binary 上全部失败；随后又复现 GC 对象复活删除、未完成 operation 被释放、查询 pin 跨 epoch 泄漏和 Documents 嵌套 scope 绕过。本轮已修复这些问题，并补入正向消费者验证。当前里程碑以 [agent-harness-status.md](agent-harness-status.md) 为准；下表保留 D-278/D-279 当时的判断，R0/R6 已在 D-282 后完成。
+结论：**架构方向成立，但此前 R2/R3 的完成度高估；存在可以复现的数据安全、权限边界和生产装配缺陷，不只是代码风格问题。** 首批独立编写的十个反例在修改前的 release binary 上全部失败；随后又复现 GC 对象复活删除、未完成 operation 被释放、查询 pin 跨 epoch 泄漏和 Documents 嵌套 scope 绕过。本轮已修复这些问题，并补入正向消费者验证。当前里程碑以 [status.md](../status.md) 为准；下表保留 D-278/D-279 当时的判断，R0/R6 已在 D-282 后完成。
 
 | 阶段 | 本轮判断 | 依据与边界 |
 | --- | --- | --- |

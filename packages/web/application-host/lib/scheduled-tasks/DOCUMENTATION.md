@@ -72,7 +72,7 @@ the Markdown content revision through as a CAS guard; `schedule.run` waits for t
 the tool uses the harness maximum request timeout and a longer-running task reports timeout while its true
 terminal state lands in `state`. Manual run-now uses the same global/project admission queue and may run a disabled task; disabling controls future calendar fires, not an explicit invocation. `schedule.status` is scoped to the caller's project, while the existing desktop status route retains its global quit-risk view.
 
-Native follow-ups are implemented under [Stage W / D-307](../../../../../docs/agent-follow-up-design.md):
+Native follow-ups are implemented under [Stage W / D-307](../../../../../docs/design/agent-follow-up-design.md):
 the `follow_up` tool, the durable follow-up service, and session-level waiting UI reuse the existing
 Thread/Run lifecycle, kernel records, and broker admission. Calendar/Markdown tasks remain distinct
 from session continuation — a loop always creates new work on its own schedule.

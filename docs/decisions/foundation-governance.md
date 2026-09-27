@@ -2,16 +2,16 @@
 
 范围：0.x 基础契约、交叉治理（测试卫生、日志治理、执行规则）、交付政策、回放/测量规范与阶段小结。
 
-本卷是 [agent-harness-decisions.md](../agent-harness-decisions.md) 的分卷；条目只追加、不改写，索引状态以总索引为准。
+本卷是 [decisions/README.md](README.md) 的分卷；条目只追加、不改写，索引状态以总索引为准。
 
 ## 阶段小结 · 阶段 1
 
-本节原为阶段 1 的状态快照（模块 / 接线 / e2e 断言表），按 D-030 已整体迁入 [agent-harness-status.md](../agent-harness-status.md)「历史快照：阶段 1 小结」。它曾存在于 1.11 交付点（提交 `9494a195` 前后）。
+本节原为阶段 1 的状态快照（模块 / 接线 / e2e 断言表），按 D-030 已整体迁入 [status.md](../status.md)「历史快照：阶段 1 小结」。它曾存在于 1.11 交付点（提交 `9494a195` 前后）。
 
 ### D-001 · 2026-09-03 · 0.1
 类型：实验结果
 决定：Pi 版本已对齐在 0.84.3，无需变更；计划中"node_modules 为 0.83.0"的描述是写作时的旧状态。
-原因：`packages/pi-host/package.json`、`scripts/cloud-runtime.bun.lock`、`docs/security.md` 三处均为 0.84.3，`node_modules` 中 0.84.3 已安装且可用。
+原因：`packages/pi-host/package.json`、`scripts/cloud-runtime.bun.lock`、`docs/design/security.md` 三处均为 0.84.3，`node_modules` 中 0.84.3 已安装且可用。
 考虑过的替代：无。
 影响：0.1 的版本对齐步骤直接通过，进入钩子形状复核。所有钩子形状（`before_agent_start` 可返回 `{ message, systemPrompt }`、`session_before_compact` 含 `preparation/branchEntries/reason` 且可返回 `{ compaction, cancel }`、`session_compact` 含 `compactionEntry`、`tool_result` 可替换 `content/details/isError`、`tool_call` 可返回 `{ block, reason }`、`turn_end` 含 `turnIndex/message/toolResults`、`before_provider_request` 含 `payload`、`ToolDefinition` 含 `promptSnippet/promptGuidelines/executionMode`）在 0.84.3 的 `types.d.ts` 中核实成立。`customTools` 同名覆盖由 `workspace-mutation-journal.ts` 的既有实现验证。`SessionBeforeCompactResult` 和 `ToolResultEventResult` 未从顶层包导出，编译期断言改用 `SessionBeforeCompactEvent` / `ToolResultEvent` 的事件形状验证。
 状态：已实施
@@ -80,10 +80,10 @@
 
 ### D-030 · 2026-09-04 · 交叉（决策日志治理）
 类型：默认值调整
-决定：本日志的治理规则改为四条。(1) **条目只追加，永不改写、重排或删除**，编号乱序（D-013、D-015 早于 D-011、D-012）与 D-005、D-013 的原地修订作为历史保留。(2) 新增"决策索引"一节（见文末），每条记录 `Current status`（active / implementation / experiment-result / superseded / reverted / contradicted / open-question / folded-in）、`Superseded by`、`Folded into`；索引可以随时更新，它不是条目。(3) 分类为 active-design 的条目**必须回写**到 `agent-harness.md` 或 `agent-harness-plan.md`，回写完成后索引标 `folded-in`；日志不是现行规格，执行 agent 以设计文档与 plan 为准，日志只解释"为什么"。(4) 状态快照（测试数、接线表、e2e 断言表）不属于日志，原"阶段小结 · 阶段 1"迁入 `agent-harness-status.md`，原位置保留一行链接。plan 交付完成后本日志**归档为交付历史**，不删除。
+决定：本日志的治理规则改为四条。(1) **条目只追加，永不改写、重排或删除**，编号乱序（D-013、D-015 早于 D-011、D-012）与 D-005、D-013 的原地修订作为历史保留。(2) 新增"决策索引"一节（见文末），每条记录 `Current status`（active / implementation / experiment-result / superseded / reverted / contradicted / open-question / folded-in）、`Superseded by`、`Folded into`；索引可以随时更新，它不是条目。(3) 分类为 active-design 的条目**必须回写**到 `agent-harness.md` 或 `agent-harness-plan.md`，回写完成后索引标 `folded-in`；日志不是现行规格，执行 agent 以设计文档与 plan 为准，日志只解释"为什么"。(4) 状态快照（测试数、接线表、e2e 断言表）不属于日志，原"阶段小结 · 阶段 1"迁入 `status.md`，原位置保留一行链接。plan 交付完成后本日志**归档为交付历史**，不删除。
 原因：三轮验收发现设计漂移的主要来源就是这份日志：D-013、D-014、D-023、D-028 等已成为现行契约的决定只存在于此处，设计与 plan 仍写着旧形状，执行 agent 每次压缩后重读 plan 就会再走一遍旧路径。另一方面，D-026 被原地改写、D-005 被原地修订，说明"只追加"没有被当成硬规则。
 考虑过的替代：(a) 把日志直接改写成现行规格——历史消失，之后没人能回答"当时为什么这么定"。(b) 不加索引、靠阅读全文判断哪条还有效——每条的"状态"字段混着未完成与偏离，读不出来（D-027 已经证明这一点）。
-影响：本文件（索引节、阶段小结迁出）；`docs/agent-harness-status.md`（新文件）。
+影响：本文件（索引节、阶段小结迁出）；`docs/status.md`（新文件）。
 状态：已实施
 
 ### D-038 · 2026-09-04 · 交叉（执行规则）
@@ -94,7 +94,7 @@
 
 (2) **交付单位**从"一个工作项一个提交"改为"一个可运行纵切一个交付组"：协议 → host → worker → 一条真实 E2E 全部到位才算交付，缺任何一段标 `implemented`（休眠）。
 
-(3) **四级能力状态**：`implemented`（模块存在且单测通过）→ `wired`（进入真实生产调用链）→ `proven`（E2E、崩溃、平台行为验证，证据链接到具体测试或 smoke）→ `default-on`（对普通用户默认启用；影响模型行为的能力需回放对比）。只有 `proven` 算纵切完成。状态矩阵在 `agent-harness-status.md`，由执行 agent 随交付维护，roadmap 只引用它。
+(3) **四级能力状态**：`implemented`（模块存在且单测通过）→ `wired`（进入真实生产调用链）→ `proven`（E2E、崩溃、平台行为验证，证据链接到具体测试或 smoke）→ `default-on`（对普通用户默认启用；影响模型行为的能力需回放对比）。只有 `proven` 算纵切完成。状态矩阵在 `status.md`，由执行 agent 随交付维护，roadmap 只引用它。
 
 (4) **P0 integrity 纵切**的固定边界，七项做完立即进入真实 child session 的线程纵切，不顺手清其他债务：① broker 身份 pin；② Router `ActorContext` + Host 静态授权；③ 注册表错误分类、schema 版本、启动对账；④ 最小 Thread + ThreadRun 与正交状态；⑤ `OutputRef` / `TranscriptRef` 与 UTF-8 偏移；⑥ 工作区级规范路径锁；⑦ 对应的故障注入（崩溃、损坏、跨会话、Unicode）与契约测试。
 
@@ -103,7 +103,7 @@
 (6) 报告规则：每条"已实施"附代码位置；"定义了但无调用点"不算已实施；推迟必须说明为什么现有骨架不可用。不做历史重写、不 force-push；误提交用正向删除提交处理。
 原因："不停下来问"让权限插件被提前移除又恢复、权限门上线即锁死所有会话；"一个工作项一个提交"产生了 90 个模块测试全绿而生产链路没接通的"完成品"；设计头、plan、日志、roadmap 对"完成"定义不同，执行 agent 才会把单测等同于阶段完成。
 考虑过的替代：暂停范围定义为"一切公共协议变更"——每加一个可选字段都要等人，执行会瘫。
-影响：`agent-harness-plan.md` 0.1 / 0.4 / 验收节重写；`agent-harness-status.md` 新建。
+影响：`agent-harness-plan.md` 0.1 / 0.4 / 验收节重写；`status.md` 新建。
 状态：已实施（文档）
 
 ### D-047 · 2026-09-04 · T4（最小回放集与执行边界）
@@ -275,7 +275,7 @@ Q3 核对实际范围、反馈成本和当前证据引用后收口。本次仅�
 考虑过的替代：只修最近红灯会保留系统性问题；按数量大批删测试会误删有效保护；全部改端到端会增加耗时和定位困难；
 再建统一测试平台、强制登记表或新审批门禁会扩大维护负担。因此沿现有 runner、package scripts 和模块边界整理。
 
-影响：[testing-ci-design.md](../testing-ci-design.md)；plan 阶段 Q0–Q3 与当前顺序；roadmap、status、development、
+影响：[testing-ci-design.md](../design/testing-ci-design.md)；plan 阶段 Q0–Q3 与当前顺序；roadmap、status、development、
 agent-harness 及 research-cluster-design 的入口/实施前置。D-291 的科研产品方向不变，Q 后进入 7A–7F。
 既有修复和授权发行继续依据各自产物证据推进，不以 Q 尚未完成作为通用阻断。
 
@@ -326,7 +326,7 @@ Logo 造型尚未选定，沿现有矢量资产管线落实实际方案；不把
 考虑过的替代：只更换显示名会留下混杂的开发/运行/发布身份；双品牌过渡和自动迁移器增加无需求的维护路径；
 对所有 `pi` 做替换会损坏上游合同；另建仓库复制代码会割裂项目历史。因此按责任完整更名并保留真实依赖和历史。
 
-影响：[varin-rebrand-design.md](../varin-rebrand-design.md)；plan 阶段 B/F 顺序；harness、architecture、status、
+影响：[varin-rebrand-design.md](../design/varin-rebrand-design.md)；plan 阶段 B/F 顺序；harness、architecture、status、
 roadmap、development 与快速决策设计入口。现有协议版本不为名称机械递增，发布版本与外部操作遵循实际任务授权。
 
 状态：设计与计划已接受，尚未实施。当前代码和发行身份仍为 Piarium；本次不改仓库名、不注册外部资源、不发布新版本。

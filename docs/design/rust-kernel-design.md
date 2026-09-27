@@ -5,11 +5,11 @@ Status: implemented architecture; R0–R6 and Stage R complete through D-282.
 Last updated: 2026-09-15
 
 本文规定 Varin Rust 系统内核的当前职责和跨进程契约。R0–R6 的实施记录见
-[agent-harness-plan.md](agent-harness-plan.md) 阶段 R，实际交付只看
-[agent-harness-status.md](agent-harness-status.md)。本阶段以长期稳定性、工作区规模、并发执行和可维护性为目标；
+[agent-harness-plan.md](../plan/agent-harness-plan.md) 阶段 R，实际交付只看
+[status.md](../status.md)。本阶段以长期稳定性、工作区规模、并发执行和可维护性为目标；
 不是原生加速函数试验，也不以完成一个存储 helper 宣告整体迁移完成。
 
-R1 已将 WorkingState root/revision、内容对象与 Recovery/Integration durable metadata 接到唯一 Rust writer；内置 storage 固定共址于 application data，Registry 继续拥有未保存正文。D-278 通过真实反例修复物理租约、owner、GC、重试和实际 root admission，并重新打开 R2/R3；D-279 随后完成 low-level pending operation 的 Host-visible disposition/reconcile，以及 kernel/Git/Registry 的 durable materialization handoff 和真实 setup 退出确认。D-280 把实际 PTY/pipe、process tree、原始输出与 writer 生命周期接到 Rust。D-281 再把固定 WorkingState pin、live revision-bound file search/inventory、native tree-sitter structure/chunks 以及 symbol/semantic 索引输入接入同一 kernel compute boundary，并删除生产 TS ripgrep/branch-corpus/Host AST 扫描路径。D-282 完成 transport/request-credit、发行 surface、旧 authority 清理、真实 release smoke 与受控资源测量；R0–R6 现均按各自可执行契约完成。[审查记录](rust-kernel-audit.md) 保留 D-278 的历史缺口与 D-279 的关闭证据。
+R1 已将 WorkingState root/revision、内容对象与 Recovery/Integration durable metadata 接到唯一 Rust writer；内置 storage 固定共址于 application data，Registry 继续拥有未保存正文。D-278 通过真实反例修复物理租约、owner、GC、重试和实际 root admission，并重新打开 R2/R3；D-279 随后完成 low-level pending operation 的 Host-visible disposition/reconcile，以及 kernel/Git/Registry 的 durable materialization handoff 和真实 setup 退出确认。D-280 把实际 PTY/pipe、process tree、原始输出与 writer 生命周期接到 Rust。D-281 再把固定 WorkingState pin、live revision-bound file search/inventory、native tree-sitter structure/chunks 以及 symbol/semantic 索引输入接入同一 kernel compute boundary，并删除生产 TS ripgrep/branch-corpus/Host AST 扫描路径。D-282 完成 transport/request-credit、发行 surface、旧 authority 清理、真实 release smoke 与受控资源测量；R0–R6 现均按各自可执行契约完成。[审查记录](../plan/rust-kernel-audit.md) 保留 D-278 的历史缺口与 D-279 的关闭证据。
 
 ## 1. 产品与阶段目标
 
@@ -280,7 +280,7 @@ Windows ConPTY 先关闭 master 并排完最后输出，再清理 Job 残余成�
 导致丢字节/exit receipt。Linux subreaper 处理 reparented descendants；其他 Unix 用会话证据。
 这些是管理进程生命周期，不构成恶意进程 sandbox。跨平台实际结果交由 native CI，本文不以
 Windows 用例外推所有平台。完整消费者图和测试边界见
-[process module](../packages/web/application-host/lib/process/DOCUMENTATION.md)。
+[process module](../../packages/web/application-host/lib/process/DOCUMENTATION.md)。
 
 ## D-281 原生文件与结构计算的实际交付边界
 

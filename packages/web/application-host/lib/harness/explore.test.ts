@@ -1065,7 +1065,7 @@ describe("explore 3.13 ranking and verification", () => {
         if (pattern !== "explore.search") return [];
         return [
           { path: "bun.lock", line: 1, text: "explore.search" },
-          { path: "docs/agent-harness.md", line: 1, text: "explore.search is registered on the host" },
+          { path: "docs/design/agent-harness.md", line: 1, text: "explore.search is registered on the host" },
           { path: "packages/web/application-host/lib/harness/harness-services.ts", line: 1, text: "register(\"explore.search\", createExploreSearchService)" },
         ];
       },

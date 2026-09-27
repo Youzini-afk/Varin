@@ -1,8 +1,9 @@
 /**
  * Tool card compact rendering — one-line summaries and grouping.
  *
- * Summaries are derived from `details` (not `content`), per agent-harness.md
- * section 5.1 principle 2: details are for rendering, content is for the model.
+ * Summaries are derived from `details` (not `content`), per
+ * docs/design/harness-tools.md section 5.1 principle 2: details are for rendering,
+ * content is for the model.
  *
  * Grouping: consecutive read-only calls (grep, read, find, ls, diagnostics,
  * webfetch, websearch) in the same assistant step are folded into a group

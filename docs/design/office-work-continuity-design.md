@@ -6,8 +6,8 @@ Last updated: 2026-09-24
 
 This document defines the product direction for the future office and daily-work
 profile. It is a design boundary, not a delivery claim. Current implementation
-status remains in [agent-harness-status.md](agent-harness-status.md), and the
-shared workbench contract remains in [architecture.md](architecture.md) and
+status remains in [status.md](../status.md), and the
+shared workbench contract remains in [architecture.md](../architecture.md) and
 [composable-workbench.md](composable-workbench.md).
 
 ## 1. Product thesis

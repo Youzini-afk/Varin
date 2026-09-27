@@ -22,7 +22,7 @@ one Rust durable writer. D-276 completed the R2 file-resource cutover: affected-
 apply/compensation, exact/subtree overlap leases and restart reconciliation use the Rust file authority.
 The public recovery service and affected-path semantics remain; Document Registry remains the mutable buffer
 owner and Pi remains the conversation owner. Current milestone evidence is recorded in
-[agent-harness-status.md](agent-harness-status.md) and [agent-harness-plan.md](agent-harness-plan.md).
+[status.md](../status.md) and [agent-harness-plan.md](../plan/agent-harness-plan.md).
 D-282 completes the surrounding R0/R6 release boundary: production artifacts carry the manifest-verified
 kernel, the old TS file writer is test-only, and the cross-domain Registry+disk apply/undo vertical runs
 against the real Rust storage/file/recovery authority.
@@ -360,4 +360,4 @@ Evidence required by the accepted revisions:
 R4 registers actual process-tree ownership with the same Rust file-resource boundary. Deleting or
 materializing an ancestor of a live/unknown cwd is denied. Process kill is only a request; exit
 receipts, not closed protocol sockets or missing Host handles, release that protection. Recovery
-and Registry retain their prior responsibilities. See [process ownership](../packages/web/application-host/lib/process/DOCUMENTATION.md).
+and Registry retain their prior responsibilities. See [process ownership](../../packages/web/application-host/lib/process/DOCUMENTATION.md).

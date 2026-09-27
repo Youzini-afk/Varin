@@ -125,7 +125,7 @@ layout exception does not automatically justify another wrapper component.
 Icons use the sprite-backed `Icon`/`IconName` contract documented in
 [src/components/icon/README.md](src/components/icon/README.md). The generator is
 `bun run scripts/generate-icon-sprite.mjs`; `sprite.ts` is generated output. User theme format and
-authoritative data locations are documented in [docs/CUSTOM_THEMES.md](../../docs/CUSTOM_THEMES.md).
+authoritative data locations are documented in [docs/ops/CUSTOM_THEMES.md](../../docs/ops/CUSTOM_THEMES.md).
 
 ## User-facing text
 

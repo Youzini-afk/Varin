@@ -2,7 +2,7 @@
 
 范围：3.4/3.4a/3.5/3.6/3.7/3.10 工作状态、Thread/Run 生命周期、Integration/恢复应用、P0 存储形状与 T 纵切。
 
-本卷是 [agent-harness-decisions.md](../agent-harness-decisions.md) 的分卷；条目只追加、不改写，索引状态以总索引为准。
+本卷是 [decisions/README.md](README.md) 的分卷；条目只追加、不改写，索引状态以总索引为准。
 
 ### D-024 · 2026-09-03 · 3.4–3.5
 类型：偏离
@@ -421,7 +421,7 @@ Git 协调器立即 fallback，以及检索读取失败仍声明连续正文。�
 影响：Host working-state/thread/recovery、index 生产装配、相关 protocol/Pi 工具、explore 服务和 Documents reader；更新 status
 只记录实际调用与验证。窗口草稿/无目录工具等未接面按事实保留待做，不再以 helper 的存在标为交付。
 
-状态：方案已采用并进入实现；最终交付证据见 agent-harness-status.md。
+状态：方案已采用并进入实现；最终交付证据见 status.md。
 
 ### D-083 · 2026-09-06 · thread.dispatch 持久草稿基线与 surface 集成边界
 
@@ -459,7 +459,7 @@ LSP 尚未直接读取 WorkingState 虚拟视图；隔离线程通过真实物�
 SurfaceSnapshotStore、ThreadRegistry、Thread services/runtime/worktree、WorkingState store/materializer/IntegrationCoordinator；
 设计 6.1/9.2.5b/9.3、plan 0.7/3.2/3.4/3.5、status、architecture 与模块文档。
 
-状态：已实施；本地证据和当前未接边界见 agent-harness-status.md。
+状态：已实施；本地证据和当前未接边界见 status.md。
 
 ### D-084 · 2026-09-06 · copyIgnored 成为持久结果捕获范围
 

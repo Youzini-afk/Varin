@@ -23,7 +23,7 @@ import { persistentProviderMessages, providerRosterMessages } from "./harness/pr
 
 // ---------------------------------------------------------------------------
 // Compile-time assertions: verify Pi 0.84.3 hook shapes match what the
-// agent harness design (agent-harness.md §4.1) requires.  These `satisfies`
+// agent harness design (design/agent-harness.md §4.1) requires.  These `satisfies`
 // checks are erased at runtime but fail compilation when an upstream type
 // changes shape.
 // ---------------------------------------------------------------------------

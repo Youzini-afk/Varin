@@ -5,8 +5,8 @@ Status: implemented product/source cutover; D-313; first Varin distribution pend
 Last updated: 2026-09-21
 
 本设计确定产品由 **Piarium 全面更名为 Varin**。实施顺序见
-[阶段 B](agent-harness-plan.md#阶段-bvarin-全面更名d-313)，实际完成情况只记入
-[能力状态](agent-harness-status.md)。产品源码、品牌资源和 GitHub 仓库已切换；新发行资产与 npm 发布状态单独记录。
+[阶段 B](../plan/agent-harness-plan.md#阶段-bvarin-全面更名d-313)，实际完成情况只记入
+[能力状态](../status.md)。产品源码、品牌资源和 GitHub 仓库已切换；新发行资产与 npm 发布状态单独记录。
 
 ## 1. 产品决定与边界
 

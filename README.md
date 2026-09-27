@@ -125,7 +125,7 @@ extension's public commands, events, settings files, and capability contracts â€
 fleets, context managers, workspace history, MCP servers, web access, memory systems, background
 tasks, and LSP/tooling configuration â€” so package updates can continue to advance independently.
 
-See [maintained extension integration](docs/extension-compatibility.md) for the per-extension
+See [maintained extension integration](docs/design/extension-compatibility.md) for the per-extension
 command, event, and native-configuration contract, and which files stay plugin-owned. Varin does
 not certify plugin versions against Pi releases.
 
@@ -152,7 +152,7 @@ npx varin-extension build
 npx varin-extension test
 ```
 
-See the [Varin extension authoring guide](docs/varin-extension-authoring.md) for the complete
+See the [Varin extension authoring guide](docs/ops/varin-extension-authoring.md) for the complete
 manifest, capability, lifecycle, storage, publishing, and testing contracts.
 
 ## Download Desktop
@@ -235,7 +235,7 @@ curl --fail http://127.0.0.1:3000/health
 ```
 
 Open `http://127.0.0.1:3000` and use the generated password. Put a TLS reverse proxy or an approved
-tunnel in front of any Internet-facing deployment; see [reverse proxy setup](docs/REVERSE_PROXY.md)
+tunnel in front of any Internet-facing deployment; see [reverse proxy setup](docs/ops/REVERSE_PROXY.md)
 for the required forwarding rules. For production, set `VARIN_IMAGE` to a tested immutable digest
 instead of relying on a floating tag.
 
@@ -248,7 +248,7 @@ docker compose -f docker-compose.yml -f docker-compose.toolbelt.yml up -d
 
 Images are published for `linux/amd64` and `linux/arm64` with provenance and SBOM attestations. The
 complete persistent-path, environment, container, and SSH rollback contract is documented in
-[Cloud deployment](docs/cloud-deployment.md).
+[Cloud deployment](docs/ops/cloud-deployment.md).
 
 ## Architecture
 
@@ -284,7 +284,7 @@ native capability such as windows, menus, and dialogs crosses the Electron prelo
 Third-party Pi packages are executable code with the user's operating-system permissions. Varin
 shows observed capabilities and gates project-local executable resources, but it does not claim to
 turn trusted extensions into a complete sandbox. Read the [security policy](.github/SECURITY.md) and
-[security model](docs/security.md) before exposing a remote instance or installing unfamiliar code.
+[security model](docs/design/security.md) before exposing a remote instance or installing unfamiliar code.
 
 ## Repository layout
 
@@ -346,16 +346,16 @@ Before contributing, read [CONTRIBUTING.md](.github/CONTRIBUTING.md), the reposi
 - [Architecture](docs/architecture.md)
 - [Engineering guide](docs/development.md)
 - [Roadmap](docs/roadmap.md)
-- [Agent harness contract](docs/agent-harness.md) (Chinese), with [delivery status](docs/agent-harness-status.md), [plan](docs/agent-harness-plan.md), and [decision log](docs/agent-harness-decisions.md)
-- [Rust system kernel design](docs/rust-kernel-design.md) and [audit record](docs/rust-kernel-audit.md)
-- [Composable workbench and IDE contract](docs/composable-workbench.md) (Chinese)
-- [Unified file editor platform](docs/unified-file-editor-platform.md)
-- [Varin extension platform](docs/varin-extension-platform.md)
-- [OpenChamber-to-Pi migration contract](docs/openchamber-pi-migration.md)
-- [Plugin GUI and ownership design](docs/plugin-gui-design.md)
-- [Recovery model](docs/recovery.md)
-- [Cloud deployment](docs/cloud-deployment.md)
-- [Security model](docs/security.md)
+- [Agent harness contract](docs/design/agent-harness.md) (Chinese), with [delivery status](docs/status.md), [plan](docs/plan/agent-harness-plan.md), and [decision log](docs/decisions/README.md)
+- [Rust system kernel design](docs/design/rust-kernel-design.md) and [audit record](docs/plan/rust-kernel-audit.md)
+- [Composable workbench and IDE contract](docs/design/composable-workbench.md) (Chinese)
+- [Unified file editor platform](docs/design/unified-file-editor-platform.md)
+- [Varin extension platform](docs/design/varin-extension-platform.md)
+- [OpenChamber-to-Pi migration contract](docs/ops/openchamber-pi-migration.md)
+- [Plugin GUI and ownership design](docs/design/plugin-gui-design.md)
+- [Recovery model](docs/design/recovery.md)
+- [Cloud deployment](docs/ops/cloud-deployment.md)
+- [Security model](docs/design/security.md)
 
 - Thanks to the [LinuxDO](https://linux.do) community for their support
 

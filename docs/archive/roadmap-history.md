@@ -2,7 +2,7 @@
 
 Status: historical record — archived 2026-09-27。已完成/被取代阶段的逐段叙述保留于此，不再更新；
 当前阶段状态见 [roadmap.md](../roadmap.md) 的 Phase status 表，能力证据见
-[agent-harness-status.md](../agent-harness-status.md)。
+[status.md](../status.md)。
 
 ---
 
@@ -81,7 +81,7 @@ the retained Electron boundary, not as the current desktop specification.
   independent commands, configuration, and history.
 
 Acceptance: the prototype evidence informed the retained UX and safety contract; production
-acceptance is owned by [native-workspace-recovery-design.md](../native-workspace-recovery-design.md).
+acceptance is owned by [native-workspace-recovery-design.md](../design/native-workspace-recovery-design.md).
 
 ## Phase 4 — OpenChamber fork product base (complete)
 
@@ -101,7 +101,7 @@ retained before engine surgery begins.
 
 This phase replaced the imported OpenCode engine with Varin-owned Pi contracts. The architectural
 result is specified in [architecture.md](../architecture.md); the source and non-regression contract is
-[openchamber-pi-migration.md](../openchamber-pi-migration.md). The entries below are the delivery
+[openchamber-pi-migration.md](../ops/openchamber-pi-migration.md). The entries below are the delivery
 record, kept at full detail because each one names an ownership decision that is still binding.
 
 - Implemented foundation: reusable Pi protocol client, browser-safe surface client, and
@@ -217,8 +217,8 @@ without starting or bundling OpenCode and without a permanent OpenCode compatibi
 
 This phase built the recovery interaction model and the first-class plugin adapters without forking
 any plugin. Current native-ownership and adapter boundaries live in
-[plugin-gui-design.md](../plugin-gui-design.md), [architecture.md](../architecture.md), and
-[extension-compatibility.md](../extension-compatibility.md).
+[plugin-gui-design.md](../design/plugin-gui-design.md), [architecture.md](../architecture.md), and
+[extension-compatibility.md](../design/extension-compatibility.md).
 
 - Implemented: persist the conversation-only, conversation+files, or always-ask policy across
   application settings. Optional `pi-workspace-history` and `pi-wtf` packages remain manageable
@@ -409,7 +409,7 @@ implementation.
 ## Phase 9 — Varin extension platform (complete)
 
 The complete target architecture is specified in
-[varin-extension-platform.md](../varin-extension-platform.md). Varin extensions are a separate
+[varin-extension-platform.md](../design/varin-extension-platform.md). Varin extensions are a separate
 product/runtime from Pi packages: the former extend the workbench and application host, while the
 latter continue to extend Pi through Pi's own `PackageManager` and extension runner.
 
@@ -449,7 +449,7 @@ always enter safe mode with non-kernel extensions disabled.
 ## Phase 10 — Composable workbench and IDE Workbench (delivered)
 
 The current architecture, product decisions, and ownership contract are specified in
-[composable-workbench.md](../composable-workbench.md). Historical delivery slices remain in this
+[composable-workbench.md](../design/composable-workbench.md). Historical delivery slices remain in this
 roadmap only; the architecture document intentionally does not preserve their numbering.
 
 This phase turned Varin from a fixed agent workspace into a workspace platform whose entire UI can
@@ -465,7 +465,7 @@ Workbench Profile. There is no global `ideMode`/`agentMode` branch, no second ap
 fork of Code OSS. The unified editor platform now gives desktop/Web Agent and IDE one shared Monaco
 path, while mobile and embedded editors keep a lightweight CodeMirror adapter; the Document Registry
 and Host authorities delivered here stay unchanged. See
-[unified-file-editor-platform.md](../unified-file-editor-platform.md). Pi Packages and Pi Plugin Settings
+[unified-file-editor-platform.md](../design/unified-file-editor-platform.md). Pi Packages and Pi Plugin Settings
 keep their independent lifecycle and native authority and are not folded into the Varin extension
 lifecycle.
 
@@ -587,7 +587,7 @@ perform no background work; language, debug, and test results are provider-isola
 results rejected and project trust enforced at the host; and no Pi plugin private state is copied
 into the renderer.
 
-The next composability slice is [Varin Motion and replaceable transition scenes](../varin-motion-platform.md).
+The next composability slice is [Varin Motion and replaceable transition scenes](../design/varin-motion-platform.md).
 It does not define a fixed page-element schema: complete Shells continue to own their information
 architecture and internal animation, while Core owns only cross-owner staging, authoritative handoff,
 failure recovery, and the first-paint bootstrap boundary.
@@ -599,7 +599,7 @@ remaining Motion work is the pre-React bootstrap projection and the optional gen
 Shell-owned local motion; neither introduces fixed page-element names.
 
 The file-editor convergence in
-[unified-file-editor-platform.md](../unified-file-editor-platform.md) is complete. Desktop/Web Agent and
+[unified-file-editor-platform.md](../design/unified-file-editor-platform.md) is complete. Desktop/Web Agent and
 IDE share one Monaco model, language bridge, diff/debug/test projection, and Agent collaboration path;
 mobile and embedded CodeMirror submit to the same document authority; the public editor contract and
 optional owner-scoped Monaco augmentation service are shipped. Retired desktop/VS Code CodeMirror
@@ -609,20 +609,20 @@ environment-specific omissions are recorded in that design document rather than 
 ledger.
 
 UI dependency-boundary and extension-contract governance is complete. Current ownership is recorded in
-[architecture.md](../architecture.md), [varin-extension-authoring.md](../varin-extension-authoring.md),
+[architecture.md](../architecture.md), [varin-extension-authoring.md](../ops/varin-extension-authoring.md),
 and the [`@varin/application-client` README](../../packages/application-client/README.md); executable
 conformance remains in the package tests and architecture checks.
 
 ## Agent harness — Phase 2/3/3b (2026-09-03)
 
 > **Authority note (2026-09-04).** Per-capability delivery state now lives in
-> [agent-harness-status.md](../agent-harness-status.md) (four levels: implemented / wired /
+> [status.md](../status.md) (four levels: implemented / wired /
 > proven / default-on, with evidence links). The entries below are the historical
 > delivery narrative and are no longer updated; where they disagree with the status
 > matrix, the matrix wins. P0 integrity, the T1 real-child thread slice, T2 permissions,
 > and the core T3 context-shadow path have since shipped; compaction takeover remains
 > explicitly default-off pending replay evidence. Follow
-> [agent-harness-plan.md](../agent-harness-plan.md) for the current order.
+> [agent-harness-plan.md](../plan/agent-harness-plan.md) for the current order.
 
 ### Phase 2: Context layer (modules + wiring complete 2026-09-03)
 
@@ -752,5 +752,5 @@ tests pass, 102/102 web harness+knowledge tests pass. See D-023.
   contains only the maintained MCP adapter.
 
 Current delivery evidence and remaining blockers live only in
-[`agent-harness-status.md`](../agent-harness-status.md); D-044 remains only as the
+[`status.md`](../status.md); D-044 remains only as the
 historical coexistence record superseded by D-283.

@@ -6,7 +6,7 @@ Last updated: 2026-09-20
 
 本文定义 Varin AI4S（AI for Science）方向的产品中心、研究集群协作形态和第一阶段实施边界。
 它建立在现有 Varin Agent Harness、Thread/Run、Rust kernel、检索、上下文和权限能力之上，不另建一套
-Agent runtime、文件权威或持久化系统。当前交付状态仍以 [agent-harness-status.md](agent-harness-status.md)
+Agent runtime、文件权威或持久化系统。当前交付状态仍以 [status.md](../status.md)
 为准；本文中的“应当”描述目标设计，不能当作已经接线。
 
 ## 1. 产品判断
@@ -371,7 +371,7 @@ Host 用已有输出、消息、Run 和结果事件维护可重建投影。流�
 
 固定协作说明放稳定系统提示，介绍现状表和查看/发送/等待能力，不要求逐行回应或每步沟通。动态材料默认以标注来源的
 `user` 内容传给 provider；内部仍区分真实用户消息、环境观察和团队快照，不能把别的 Agent 原话提升为系统指令或本 Agent 输出。
-工具结果配对和 provider 合法续接边界优先。具体上下文结构、缓存和容量契约见 [Harness 8.1.1](agent-harness.md#811-d-301环境增量留史团队现状作为请求尾部快照后续-7g)。
+工具结果配对和 provider 合法续接边界优先。具体上下文结构、缓存和容量契约见 [Harness 8.1.1](harness-context.md#811-d-301环境增量留史团队现状作为请求尾部快照后续-7g)。
 
 历史前缀及在途请求保持不动；快照通常每次需要处理，是持续感知的明确成本，通过短表和按需展开控制呈现，不引入猜测的配额。
 容量计算包含快照与环境增量。环境事件按实际接收者确认送达，UI 展开不推进模型游标，准备/失败不冒充交付；
@@ -381,7 +381,7 @@ Host 用已有输出、消息、Run 和结果事件维护可重建投影。流�
 D-302 / 7H 已将普通后台命令的完成事实接入同一环境增量，提供退出状态与日志入口，不把进程清单塞进团队四列表，
 也不靠输出增长唤醒模型。工具可按资源并行、长命令可及时交回控制权；需要时再读日志或进行可取消的事件等待。
 这是 coding/科研共享能力，普通 shell 的会话生命周期与本设计第 6 节的 durable experiment attempt 保持区分；
-真实机器分配、远端恢复和实验产物仍由实验执行合同承担。实施接缝与验收见 [Harness 5.9](agent-harness.md#59-并发) 和 plan 7H。
+真实机器分配、远端恢复和实验产物仍由实验执行合同承担。实施接缝与验收见 [Harness 5.9](harness-tools.md#59-并发) 和 plan 7H。
 
 ### 7.5 研究理解与原始材料
 
@@ -568,7 +568,7 @@ Workbench Profile 与 Agent Profile 在命名、存储字段和消费者中保�
 D-292 的 [测试与 CI 体系重整](testing-ci-design.md)（阶段 Q）和 D-296 的旧伴侧插件清理均已完成，
 现在进入本节科研功能实施。D-297 补齐工作台与工作侧重的独立选择，D-300 补齐实验执行、远程资源和通用协作设计，
 替换机械事件综合及强制交接格式，不增加科研表单、模型质量审批或固定评测分数门槛。
-实施沿用 Q 整理后的验证职责，不另建科研专用测试框架；具体交付顺序见 [实施计划](agent-harness-plan.md)。
+实施沿用 Q 整理后的验证职责，不另建科研专用测试框架；具体交付顺序见 [实施计划](../plan/agent-harness-plan.md)。
 
 ### 13.1 设计阶段之后的第一批能力
 
@@ -612,8 +612,8 @@ D-292 的 [测试与 CI 体系重整](testing-ci-design.md)（阶段 Q）和 D-2
 ## 14. 与现有文档的关系
 
 - [agent-harness.md](agent-harness.md) 保留通用 Harness、Agent Profile（工作侧重）、Thread/Run 和工具契约；其研究能力按本文的集群与独立选择设计发展。
-- [agent-harness-plan.md](agent-harness-plan.md) 记录实施顺序、接口责任和验收；研究集群不阻塞已经交付的 code harness、Rust kernel、上下文和网页能力。
-- [agent-harness-status.md](agent-harness-status.md) 只记录实际接线和验证；在实现前不能把研究集群写成 wired 或 default-on。
-- [agent-harness-decisions.md](agent-harness-decisions.md) 及 `decisions/research-cluster.md` 记录本设计的接受和后续偏离。
-- [architecture.md](architecture.md) 的进程边界继续有效：TS 负责产品/Agent 编排，Pi 负责 Agent loop/provider/session，Rust kernel 负责系统资源，科研能力复用这些边界。
+- [agent-harness-plan.md](../plan/agent-harness-plan.md) 记录实施顺序、接口责任和验收；研究集群不阻塞已经交付的 code harness、Rust kernel、上下文和网页能力。
+- [status.md](../status.md) 只记录实际接线和验证；在实现前不能把研究集群写成 wired 或 default-on。
+- [decisions/README.md](../decisions/README.md) 及 `decisions/research-cluster.md` 记录本设计的接受和后续偏离。
+- [architecture.md](../architecture.md) 的进程边界继续有效：TS 负责产品/Agent 编排，Pi 负责 Agent loop/provider/session，Rust kernel 负责系统资源，科研能力复用这些边界。
 - [composable-workbench.md](composable-workbench.md) 负责科研工作台的 Shell、contribution 和选择权威；本文第 10 节规定产品入口与解耦行为，具体组件布局由工作台实现。

@@ -1,8 +1,8 @@
 /**
  * Review sensor — open a hidden review thread for one published result revision.
  *
- * Design: agent-harness.md §9.2.3
- * Plan: agent-harness-plan.md §3.7
+ * Design: design/harness-verification.md §9.2.3
+ * Plan: plan/agent-harness-plan.md §3.7
  *
  * Trigger is a published child result with a non-empty diff, not a parent
  * journaled-change scan. The review thread is created through the same
