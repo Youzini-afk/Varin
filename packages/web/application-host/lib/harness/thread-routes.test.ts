@@ -15,7 +15,7 @@ describe("harness thread routes", () => {
       } as never,
       runtime: {
         scopeForSession: vi.fn(async () => ({
-          workspaceId: "workspace-1",
+          scopeId: "workspace-1",
           parent: { kind: "session", id: "session-1" },
           snapshot: {},
         })),
@@ -102,7 +102,7 @@ describe("harness thread routes", () => {
       registry: { getThread } as never,
       runtime: {
         scopeForSession: vi.fn(async () => ({
-          workspaceId: "workspace-1",
+          scopeId: "workspace-1",
           parent: { kind: "session", id: "session-1" },
         })),
         previewIntegration,
@@ -235,7 +235,7 @@ describe("harness thread routes", () => {
       } as never,
       runtime: {
         scopeForSession: vi.fn(async () => ({
-          workspaceId: "workspace-1",
+          scopeId: "workspace-1",
           parent: { kind: "session", id: "session-1" },
         })),
         archiveUser,
@@ -281,7 +281,7 @@ describe("harness thread routes", () => {
       registry: {} as never,
       runtime: {
         scopeForSession: vi.fn(async () => ({
-          workspaceId: "workspace-1",
+          scopeId: "workspace-1",
           parent: { kind: "session", id: "session-1" },
         })),
         deleteUser,
@@ -310,7 +310,7 @@ describe("harness thread routes", () => {
     registerHarnessThreadRoutes(missing, {
       registry: {} as never,
       runtime: {
-        scopeForSession: vi.fn(async () => ({ workspaceId: "w", parent: { kind: "session", id: "s" } })),
+        scopeForSession: vi.fn(async () => ({ scopeId: "w", parent: { kind: "session", id: "s" } })),
         deleteUser: vi.fn(async () => { throw new ThreadRuntimeError("not-found", "Thread not found: thread-9"); }),
       } as never,
     });
@@ -326,7 +326,7 @@ describe("harness thread routes", () => {
     const getThread = vi.fn(async () => ({ id: "thread-1", lifecycle: "active" }));
     const getActiveRun = vi.fn(async () => ({ id: "run-1", workerState: "running" }));
     const scopeForSession = vi.fn(async () => ({
-      workspaceId: "workspace-1",
+      scopeId: "workspace-1",
       parent: { kind: "session", id: "session-1" },
     }));
     registerHarnessThreadRoutes(app, {

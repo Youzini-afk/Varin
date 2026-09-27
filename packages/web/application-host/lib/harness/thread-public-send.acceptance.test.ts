@@ -75,7 +75,7 @@ const assistantMessage = (text: string): PiMessage => ({
 });
 
 const createInput = (): CreateThreadInput => ({
-  workspaceId: WORKSPACE,
+  scopeId: WORKSPACE,
   parent: PARENT,
   brief: "Implement the feature",
   preset: "hard-implement",

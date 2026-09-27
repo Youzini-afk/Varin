@@ -20,7 +20,7 @@ describe("research root UI messaging", () => {
     const workspaceId = "workspace";
     const sessionId = "user-session";
     const root = await registry.createThread({
-      workspaceId,
+      scopeId: workspaceId,
       parent: { kind: "session", id: sessionId },
       brief: "research question",
       kind: "discussion",
@@ -39,7 +39,7 @@ describe("research root UI messaging", () => {
     })).run;
     await registry.markRunRunning(workspaceId, root.id, rootRun.id, sessionId);
     const branch = await registry.createThread({
-      workspaceId,
+      scopeId: workspaceId,
       parent: { kind: "thread", id: root.id },
       brief: "bounded branch",
       kind: "discussion",

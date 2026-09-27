@@ -500,7 +500,14 @@ export const createDocumentAuthority = (options: DocumentAuthorityOptions) => {
     }
     let root: string;
     try {
-      root = await canonicalizePathIdentity(mapping.canonicalPath, { fsPromises, pathModule });
+      // A file root may address a file that does not exist yet; canonicalize
+      // through its existing ancestors. Directory roots stay strict — an
+      // unreachable root is an unavailable workspace, not an empty one.
+      root = await canonicalizePathIdentity(mapping.canonicalPath, {
+        allowMissing: mapping.kind === 'file',
+        fsPromises,
+        pathModule,
+      });
     } catch (error) {
       throw new DocumentWorkspaceUnavailableError(undefined, { cause: error });
     }
@@ -759,6 +766,37 @@ export const createDocumentAuthority = (options: DocumentAuthorityOptions) => {
     } catch {
       return null;
     }
+  };
+
+  /**
+   * HR0: resource-rooted Documents addressing for targets outside any project
+   * workspace. A `file` root addresses exactly one canonical file; a
+   * `directory` root addresses a subtree. These records are backend addressing
+   * details — they carry no project identity, no session lifecycle, and no
+   * classification role. The existing trusted-root gate applies on
+   * registration and on every loadWorkspace.
+   */
+  const findContainingResourceRoot = async (canonicalPath: string): Promise<WorkspaceMapping | null> => (
+    registry.findContaining(canonicalPath)
+  );
+
+  const findExactResourceRoot = async (
+    canonicalPath: string,
+    kind?: 'directory' | 'file',
+  ): Promise<WorkspaceMapping | null> => registry.findExact(canonicalPath, kind);
+
+  const ensureResourceRoot = async (
+    canonicalPath: string,
+    kind: 'directory' | 'file',
+  ): Promise<WorkspaceMapping> => {
+    if (!await isAllowedRoot(canonicalPath)) {
+      throw new DocumentPathError('Resource root is not allowed');
+    }
+    const mapping = await registry.resolve({ canonicalPath, create: true, kind });
+    if (!mapping) {
+      throw new DocumentAuthorityError('Resource root registration failed', { code: 'failed', statusCode: 500 });
+    }
+    return mapping;
   };
 
   const registerWriterForScope = async (
@@ -2146,6 +2184,9 @@ export const createDocumentAuthority = (options: DocumentAuthorityOptions) => {
       }
     },
     resolveScopeId,
+    findContainingResourceRoot,
+    findExactResourceRoot,
+    ensureResourceRoot,
     registerWriterForScope,
     runMutationForScope,
     runResourceOperation,

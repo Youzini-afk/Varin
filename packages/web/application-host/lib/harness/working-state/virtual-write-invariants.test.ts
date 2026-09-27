@@ -192,7 +192,7 @@ async function fixture(options?: { attachGit?: () => Promise<void> }) {
 
   const bindThread = async () => {
     const thread = await registry.createThread({
-      workspaceId,
+      scopeId: workspaceId,
       parent: { kind: "session", id: "root" },
       brief: "virtual writes",
       preset: "hard-implement",

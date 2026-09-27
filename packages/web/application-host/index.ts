@@ -82,6 +82,7 @@ import { createThreadRegistry } from './lib/harness/thread-registry.js';
 import { createOnThreadDequeued } from './lib/harness/thread-dequeue.js';
 import { createThreadTranscriptReader } from './lib/harness/thread-transcript.js';
 import { createHarnessPathAuthority } from './lib/harness/path-authority.js';
+import { sessionScopeId, isSessionScopeId, knowledgeStoreKeyForScope } from './lib/harness/owner-scope.js';
 import { createExploreFileReader } from './lib/harness/explore-file-reader.js';
 import { createThreadWorktreeRuntime } from './lib/harness/thread-worktree.js';
 import { createThreadRuntime } from './lib/harness/thread-runtime.js';
@@ -312,13 +313,13 @@ export function mergeSessionSnapshotForKnowledgeOwner(previousValue: unknown, ne
   return merged;
 }
 
-export async function resolveKnowledgeWorkspaceOwner(
-  resolveDurableOwner: () => Promise<{ owningWorkspaceId: string } | null>,
-  fallbackWorkspaceId: string | null,
+export async function resolveKnowledgeScopeOwner(
+  resolveDurableOwner: () => Promise<{ owningScopeId: string } | null>,
+  fallbackScopeId: string | null,
   snapshotWorkspaceId: string | null,
 ): Promise<string | null> {
   const owner = await resolveDurableOwner();
-  return owner?.owningWorkspaceId ?? fallbackWorkspaceId ?? snapshotWorkspaceId;
+  return owner?.owningScopeId ?? fallbackScopeId ?? snapshotWorkspaceId;
 }
 
 const isEnvFlagEnabled = (value: unknown): boolean => {
@@ -1111,7 +1112,7 @@ async function main(options: StartWebUiServerOptions = {}): Promise<WebUiServerC
       const resolved = await harnessSessionRegistration.resolveActor(actor).catch(() => null);
       if (!resolved?.workspaceId) throw new Error(`Kernel actor is stale: ${sessionId}`);
       const binding = await threadRegistry.getSessionBinding(sessionId).catch(() => null);
-      const owningWorkspace = binding?.owningWorkspaceId ?? resolved.workspaceId;
+      const owningWorkspace = binding?.owningScopeId ?? resolved.workspaceId;
       if (owningWorkspace !== workspaceId) throw new Error(`Kernel actor ${sessionId} does not own workspace ${workspaceId}`);
       const threadId = binding?.threadId;
       const runId = actor.runId ?? binding?.runId;
@@ -1163,7 +1164,7 @@ async function main(options: StartWebUiServerOptions = {}): Promise<WebUiServerC
   const kernelPathLockService = new KernelPathLockService(kernelStorageAdapter, {
     resolveOwningWorkspaceId: async (sessionId, executionWorkspaceId) => {
       const binding = await threadRegistry.getSessionBinding(sessionId).catch(() => null);
-      return binding?.owningWorkspaceId ?? executionWorkspaceId;
+      return binding?.owningScopeId ?? executionWorkspaceId;
     },
     resolveWorkspaceRoot: async (workspaceId) => (await documentsAuthority.inspectWorkspace(workspaceId)).root,
   });
@@ -1479,7 +1480,7 @@ async function main(options: StartWebUiServerOptions = {}): Promise<WebUiServerC
     knowledgeStore: async (workspaceId, scope) => (
       scope === 'user'
         ? getUserKnowledgeStore().catch(() => null)
-        : getKnowledgeStoreForWorkspace(workspaceId).catch(() => null)
+        : getKnowledgeStoreForScope(workspaceId).catch(() => null)
     ),
     gitIdentities: gitIdentityStorage,
     surfaceHint: () => {
@@ -1918,7 +1919,7 @@ async function main(options: StartWebUiServerOptions = {}): Promise<WebUiServerC
     },
     loadParentWindows: async (workspaceId, parentSessionId) => {
       const binding = await threadRegistry.getSessionBinding(parentSessionId);
-      const owningWorkspaceId = binding?.owningWorkspaceId ?? workspaceId;
+      const owningWorkspaceId = binding?.owningScopeId ?? workspaceId;
       const parent = binding
         ? { kind: 'thread' as const, id: binding.threadId }
         : { kind: 'session' as const, id: parentSessionId };
@@ -1982,7 +1983,7 @@ async function main(options: StartWebUiServerOptions = {}): Promise<WebUiServerC
       // Delete the session's event/block/session knowledge nodes through the
       // existing KnowledgeStore.deleteSession (D-242 rework). Accepted
       // workspace/user knowledge is retained.
-      const store = knowledgeStores.get(workspaceId) ?? null;
+      const store = knowledgeStores.get(knowledgeStoreKeyForScope(workspaceId)) ?? null;
       if (store) await store.deleteSession(sessionId);
     },
     releaseThreadEvidence: (workspaceId, threadId) => retrievalArtifacts.releaseThreadEvidence(workspaceId, threadId),
@@ -2057,7 +2058,7 @@ async function main(options: StartWebUiServerOptions = {}): Promise<WebUiServerC
       return resolvePresets(merged.models, main).find((preset) => preset.id === 'review') ?? null;
     },
     recallProjectKnowledge: async (workspaceId, query) => {
-      const store = await getKnowledgeStoreForWorkspace(workspaceId);
+      const store = await getKnowledgeStoreForScope(workspaceId);
       const hits = await store.recall(query, 5);
       return hits.map((hit) => {
         const payload = hit.node.payload;
@@ -2486,7 +2487,7 @@ async function main(options: StartWebUiServerOptions = {}): Promise<WebUiServerC
   });
   registerHarnessKnowledgeCatalogRoutes(app, {
     resolveWorkspace: async ({ workspaceId }) => documentsAuthority.resolveWorkspace({ workspaceId }),
-    getWorkspaceStore: getKnowledgeStoreForWorkspace,
+    getWorkspaceStore: getKnowledgeStoreForScope,
     getUserStore: getUserKnowledgeStore,
     onKnowledgeChanged: ({ scope, workspaceId }) => {
       broadcastGlobalUiEvent?.({
@@ -2540,39 +2541,44 @@ async function main(options: StartWebUiServerOptions = {}): Promise<WebUiServerC
   const catalogScan = {
     start(_workspaceId: string): void {},
   };
-  async function getKnowledgeStoreForWorkspace(workspaceId: string): Promise<KnowledgeStore> {
-    const existing = knowledgeStores.get(workspaceId);
+  async function getKnowledgeStoreForScope(scopeId: string): Promise<KnowledgeStore> {
+    // HR0: scope ids are either project workspace ids or `session:<id>`; only
+    // the persisted store key differs — records keep their real scope.
+    const scope = isSessionScopeId(scopeId) ? 'session' as const : 'workspace' as const;
+    const storeKey = knowledgeStoreKeyForScope(scopeId);
+    const existing = knowledgeStores.get(storeKey);
     if (existing) return existing;
-    const pending = knowledgeStoreLoads.get(workspaceId);
+    const pending = knowledgeStoreLoads.get(storeKey);
     if (pending) return pending;
     const loading = openWorkspaceKnowledge({
       dataDir: VARIN_DATA_DIR,
       hostId,
-      workspaceId,
+      workspaceId: storeKey,
+      scope,
       embedding: null, // Authority .tdb stays placeholder-dim; knowledge vectors are derived (D-196)
       onKnowledgeChanged: (ids) => {
-        const store = knowledgeStores.get(workspaceId);
+        const store = knowledgeStores.get(storeKey);
         if (!store || !knowledgeVectors) return;
-        knowledgeVectors.notify(store, 'workspace', workspaceId, workspaceId, ids);
+        knowledgeVectors.notify(store, scope, scopeId, scopeId, ids);
       },
       onBlocksChanged: (sessionId) => {
         broadcastGlobalUiEvent?.({
           type: 'varin:harness-blocks-changed',
-          properties: { workspaceId, sessionId },
+          properties: { workspaceId: scopeId, sessionId },
         });
       },
     }).then((store) => {
-      knowledgeStores.set(workspaceId, store);
-      catalogScan.start(workspaceId);
-      knowledgeVectors?.scheduleReconcile(store, 'workspace', workspaceId, workspaceId);
-      if (userKnowledgeStore) knowledgeVectors?.scheduleReconcile(userKnowledgeStore, 'user', 'user', workspaceId);
+      knowledgeStores.set(storeKey, store);
+      catalogScan.start(scopeId);
+      knowledgeVectors?.scheduleReconcile(store, scope, scopeId, scopeId);
+      if (userKnowledgeStore) knowledgeVectors?.scheduleReconcile(userKnowledgeStore, 'user', 'user', scopeId);
       return store;
     });
-    knowledgeStoreLoads.set(workspaceId, loading);
+    knowledgeStoreLoads.set(storeKey, loading);
     try {
       return await loading;
     } finally {
-      knowledgeStoreLoads.delete(workspaceId);
+      knowledgeStoreLoads.delete(storeKey);
     }
   }
 
@@ -2583,7 +2589,7 @@ async function main(options: StartWebUiServerOptions = {}): Promise<WebUiServerC
     return typeof workspace.id === 'string' && workspace.id.trim() ? workspace.id : null;
   }
 
-  async function owningKnowledgeWorkspaceIdForSession(
+  async function owningKnowledgeScopeIdForSession(
     sessionId: string,
     fallback: string | null = null,
   ): Promise<string | null> {
@@ -2593,7 +2599,7 @@ async function main(options: StartWebUiServerOptions = {}): Promise<WebUiServerC
     // A broken/unreadable catalog is an owner-resolution failure, not evidence
     // that this session has no durable owner. Let it reach the caller instead
     // of falling through to an execution workspace or a partial UI snapshot.
-    return resolveKnowledgeWorkspaceOwner(
+    return resolveKnowledgeScopeOwner(
       () => threadRegistry.resolveSessionOwner(sessionId),
       fallback,
       snapshotKnowledgeWorkspaceId(sessionId),
@@ -2601,8 +2607,10 @@ async function main(options: StartWebUiServerOptions = {}): Promise<WebUiServerC
   }
 
   async function getKnowledgeStoreForSession(sessionId: string): Promise<KnowledgeStore | null> {
-    const workspaceId = await owningKnowledgeWorkspaceIdForSession(sessionId);
-    return workspaceId ? getKnowledgeStoreForWorkspace(workspaceId) : null;
+    // HR0: a session's durable owner is its binding/catalog scope; an unbound
+    // chat falls back to its own session scope, never a guessed directory.
+    const scopeId = await owningKnowledgeScopeIdForSession(sessionId) ?? sessionScopeId(sessionId);
+    return getKnowledgeStoreForScope(scopeId);
   }
 
   async function getUserKnowledgeStore(): Promise<KnowledgeStore> {
@@ -2632,7 +2640,7 @@ async function main(options: StartWebUiServerOptions = {}): Promise<WebUiServerC
   }
 
   const knowledgeContextRuntime = createKnowledgeContextRuntime({
-    getStore: getKnowledgeStoreForWorkspace,
+    getStore: getKnowledgeStoreForScope,
     getUserStore: getUserKnowledgeStore,
     recall: async (workspaceId, store, query, signal) => {
       if (!knowledgeVectors) return store.recall(query, 5);
@@ -2693,7 +2701,7 @@ async function main(options: StartWebUiServerOptions = {}): Promise<WebUiServerC
     }),
   ]);
   const symbolGraphRuntime = createSymbolGraphRuntime({
-    getStore: getKnowledgeStoreForWorkspace,
+    getStore: getKnowledgeStoreForScope,
     documents: documentsAuthority,
     supervisor: languageSupervisor,
     structureSource,
@@ -2771,9 +2779,12 @@ async function main(options: StartWebUiServerOptions = {}): Promise<WebUiServerC
     semanticRuntime.observeDocumentMutation(event);
   };
   const knowledgeLanguageSubscriptions = new Map<string, { close(): void }>();
-  const bindKnowledgeSession = (sessionId: string, workspaceId: string): void => {
-    knowledgeContextRuntime.bindSession(sessionId, workspaceId);
-    if (knowledgeLanguageSubscriptions.has(workspaceId)) return;
+  const bindKnowledgeSession = (sessionId: string, scopeId: string): void => {
+    knowledgeContextRuntime.bindSession(sessionId, scopeId);
+    // Language subscriptions are workspace-addressed; a session-owned scope
+    // has no workspace LSP to observe.
+    if (isSessionScopeId(scopeId) || knowledgeLanguageSubscriptions.has(scopeId)) return;
+    const workspaceId = scopeId;
     knowledgeLanguageSubscriptions.set(workspaceId, languageSupervisor.subscribe(workspaceId, (value) => {
       const event = recordOf(value);
       if (event.kind !== 'diagnostics' || typeof event.resourceId !== 'string') return;
@@ -2823,9 +2834,9 @@ async function main(options: StartWebUiServerOptions = {}): Promise<WebUiServerC
 
   // Recall deps provider
   async function recallDepsProvider(sessionId: string, workspaceId: string | null): Promise<RecallToolDeps> {
-    const owningWorkspaceId = await owningKnowledgeWorkspaceIdForSession(sessionId, workspaceId);
-    if (!owningWorkspaceId) throw new Error('No knowledge workspace for session');
-    const workspaceStore = await getKnowledgeStoreForWorkspace(owningWorkspaceId);
+    const owningWorkspaceId = await owningKnowledgeScopeIdForSession(sessionId, workspaceId)
+      ?? sessionScopeId(sessionId);
+    const workspaceStore = await getKnowledgeStoreForScope(owningWorkspaceId);
     return {
       workspaceStore,
       userStore: await getUserKnowledgeStore(),
@@ -2840,7 +2851,7 @@ async function main(options: StartWebUiServerOptions = {}): Promise<WebUiServerC
   const relationCollector = createRelationCollector({
     documents: documentsAuthority,
     supervisor: languageSupervisor,
-    getStore: (workspaceId) => knowledgeStores.get(workspaceId) ?? null,
+    getStore: (workspaceId) => knowledgeStores.get(knowledgeStoreKeyForScope(workspaceId)) ?? null,
   });
 
   const discoveredShells = discoverShells();
@@ -2881,7 +2892,7 @@ async function main(options: StartWebUiServerOptions = {}): Promise<WebUiServerC
     releaseRetrievalTemporaryArtifacts: retrievalArtifacts.releaseTemporaryArtifacts,
     releaseWebFetchReceipts: async (sessionId, fallbackWorkspaceId) => {
       const binding = await threadRegistry.getSessionBinding(sessionId).catch(() => null);
-      const workspaceId = binding?.owningWorkspaceId ?? fallbackWorkspaceId;
+      const workspaceId = binding?.owningScopeId ?? fallbackWorkspaceId;
       if (!workspaceId) return;
       await retrievalArtifacts.releaseReceiptAuthority(workspaceId, {
         owningWorkspaceId: workspaceId,
@@ -2973,7 +2984,7 @@ async function main(options: StartWebUiServerOptions = {}): Promise<WebUiServerC
       // becomes graph rows so later related/explore queries reuse the
       // resolution instead of re-asking the language view.
       recordRelations: async (input) => {
-        const owningWorkspaceId = await owningKnowledgeWorkspaceIdForSession(input.sessionId, input.workspaceId);
+        const owningWorkspaceId = await owningKnowledgeScopeIdForSession(input.sessionId, input.workspaceId);
         // A child execution view may contain unpublished branch text. It can use
         // LSP answers in that view, but those rows must not enter the owning
         // workspace graph as committed facts.
@@ -2986,9 +2997,10 @@ async function main(options: StartWebUiServerOptions = {}): Promise<WebUiServerC
     // this consults an already-open store and reports "not answered" otherwise.
     // The session's own knowledge work opens it (D-112).
     graphRecall: async (sessionId, executionWorkspaceId) => {
-      const owningWorkspaceId = await owningKnowledgeWorkspaceIdForSession(sessionId, executionWorkspaceId);
+      const owningWorkspaceId = await owningKnowledgeScopeIdForSession(sessionId, executionWorkspaceId)
+        ?? sessionScopeId(sessionId);
       if (!owningWorkspaceId) return null;
-      const store = knowledgeStores.get(owningWorkspaceId);
+      const store = knowledgeStores.get(knowledgeStoreKeyForScope(owningWorkspaceId));
       return store ? {
         workspaceId: owningWorkspaceId,
         store,
@@ -3010,7 +3022,7 @@ async function main(options: StartWebUiServerOptions = {}): Promise<WebUiServerC
       });
     },
     fileRelations: async (workspaceId, resourceId) => {
-      const store = knowledgeStores.get(workspaceId);
+      const store = knowledgeStores.get(knowledgeStoreKeyForScope(workspaceId));
       if (!store) throw new Error(`knowledge store is not open for workspace ${workspaceId}`);
       const relations = await store.getFileRelations(resourceId);
       if (!relations) return null;
@@ -3105,9 +3117,9 @@ async function main(options: StartWebUiServerOptions = {}): Promise<WebUiServerC
     todoDepsProvider,
     recallDepsProvider,
     knowledgeSuggestDepsProvider: async (sessionId, workspaceId) => {
-      const owningWorkspaceId = await owningKnowledgeWorkspaceIdForSession(sessionId, workspaceId);
+      const owningWorkspaceId = await owningKnowledgeScopeIdForSession(sessionId, workspaceId);
       const store = owningWorkspaceId && owningWorkspaceId !== 'user'
-        ? await getKnowledgeStoreForWorkspace(owningWorkspaceId)
+        ? await getKnowledgeStoreForScope(owningWorkspaceId)
         : null;
       if (!store) return null;
       return {
@@ -3391,21 +3403,24 @@ async function main(options: StartWebUiServerOptions = {}): Promise<WebUiServerC
       sessionSnapshots.set(sessionId, snapshot);
       const name = typeof envelopeData.name === 'string' ? envelopeData.name.trim() : '';
       if (name) sessionNames.set(sessionId, name);
-      // Register harness session when workspace is bound
+      // HR0: harness sessions register on session identity — a bound project
+      // workspace is classification, not an admission requirement. An unbound
+      // (no-project) chat registers with `workspaceId: null`; its durable
+      // owner scope is the session itself.
       const workspace = recordOf(snapshot.workspace);
-      const harnessWorkspaceId = typeof workspace.authorityId === 'string' && workspace.authorityId.trim()
-        ? workspace.authorityId
-        : typeof workspace.id === 'string' && workspace.id.trim()
-          ? workspace.id
-          : '';
-      if (
-        event.actor
-        && workspace?.kind === 'workspace'
-        && harnessWorkspaceId
-        && typeof envelopeData.cwd === 'string'
-      ) {
+      const harnessWorkspaceId = workspace?.kind === 'workspace'
+        ? typeof workspace.authorityId === 'string' && workspace.authorityId.trim()
+          ? workspace.authorityId
+          : typeof workspace.id === 'string' && workspace.id.trim()
+            ? workspace.id
+            : ''
+        : '';
+      if (event.actor && typeof envelopeData.cwd === 'string' && envelopeData.cwd) {
         void threadRegistry.getSessionBinding(sessionId).then((binding) => {
-          bindKnowledgeSession(sessionId, binding?.owningWorkspaceId ?? harnessWorkspaceId);
+          bindKnowledgeSession(
+            sessionId,
+            binding?.owningScopeId ?? harnessWorkspaceId ?? sessionScopeId(sessionId),
+          );
         }).catch((error) => {
           console.error('[HarnessKnowledge] Session knowledge bind failed:', errorMessage(error));
         });
@@ -3415,7 +3430,7 @@ async function main(options: StartWebUiServerOptions = {}): Promise<WebUiServerC
             : [];
           void harnessSessionRegistration.register({
             actor: event.actor,
-            workspaceId: harnessWorkspaceId,
+            workspaceId: harnessWorkspaceId || null,
             workspaceRoot: envelopeData.cwd,
             grantedCapabilities: deriveHarnessCapabilities(activeTools, {
               documentRead: true,
@@ -3432,7 +3447,7 @@ async function main(options: StartWebUiServerOptions = {}): Promise<WebUiServerC
         void (async () => {
           const binding = await threadRegistry.getSessionBinding(sessionId);
           await threadRuntime.resumeLostForParent(
-            binding?.owningWorkspaceId ?? harnessWorkspaceId,
+            binding?.owningScopeId ?? harnessWorkspaceId ?? sessionScopeId(sessionId),
             binding
               ? { kind: 'thread', id: binding.threadId }
               : { kind: 'session', id: sessionId },

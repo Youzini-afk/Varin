@@ -142,7 +142,7 @@ export async function openKnowledgeStoreEngine(deps: KnowledgeStoreEngineOptions
   if (!existsSync(dbDir)) mkdirSync(dbDir, { recursive: true });
   const dbPath = join(dbDir, `${workspaceId}.tdb`);
 
-  const recallScope: KnowledgeScope = workspaceId === "user" ? "user" : "workspace";
+  const recallScope: KnowledgeScope = deps.scope ?? (workspaceId === "user" ? "user" : "workspace");
   const dim = embedding?.dim ?? PLACEHOLDER_DIM;
   const nativeDb = new TriviumDB(dbPath, {
     dim,

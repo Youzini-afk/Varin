@@ -376,7 +376,7 @@ export interface HarnessServiceHost {
    * rebuilds the input on a new session while results/files/transcript stay.
    */
   threadContinueRun?: ((input: {
-    workspaceId: string;
+    scopeId: string;
     parent: import("@varin/protocol").ThreadParent;
     threadId: string;
     mode: "continue" | "fresh";
@@ -782,7 +782,14 @@ export function createHarnessServiceHost(options: HarnessServiceHostOptions): Ha
         canonicalizePathIdentity(ctx.workspaceRoot),
       ]);
     } catch {
-      throw new HarnessServiceError("unavailable", "Work-context workspace or launch directory is missing or inaccessible");
+      // HR0/HR1: a missing or offline launch directory does not block session
+      // admission for an unbound chat — directory-dependent operations fail
+      // individually later. A bound workspace still requires its root.
+      if (ctx.workspaceId) {
+        throw new HarnessServiceError("unavailable", "Work-context workspace or launch directory is missing or inaccessible");
+      }
+      authorityRootIdentity = path.resolve(authorityRoot);
+      sessionRootIdentity = path.resolve(ctx.workspaceRoot);
     }
     const state = snapshot.context ?? seedWorkContext(authorityRoot, ctx.workspaceRoot);
     const sameDirectory = async (storedPath: string, currentIdentity: string): Promise<boolean> => {
@@ -807,7 +814,7 @@ export function createHarnessServiceHost(options: HarnessServiceHostOptions): Ha
       || !await sameDirectory(snapshot.context.sessionRoot, sessionRootIdentity))) {
       throw new HarnessServiceError("unavailable", "Stored work context belongs to a different workspace or session launch directory");
     }
-    if (!options.pathAuthority || !ctx.workspaceId) {
+    if (!options.pathAuthority) {
       throw new HarnessServiceError("unavailable", "Work-context path authority is unavailable");
     }
     const actor: HarnessActorContext = {
@@ -825,6 +832,15 @@ export function createHarnessServiceHost(options: HarnessServiceHostOptions): Ha
         authorizeAnchor: (candidate, authorizeOptions) => options.pathAuthority!.resolve(anchorActor, candidate, authorizeOptions),
         anchorScopeRoots: actor.workspaceScope.map((scope) => path.isAbsolute(scope) ? scope : path.resolve(authorityRoot, scope)),
       } : {}),
+    }).catch((error: unknown) => {
+      // HR0/HR1: a bound workspace session must prove its launch dir; an
+      // unbound chat registers anyway, and operations that touch the missing
+      // root fail individually when they run. Only directory-access failures
+      // are tolerated — malformed or foreign stored contexts still reject.
+      const tolerable = error instanceof HarnessServiceError
+        && /missing or inaccessible|no longer authorized/.test(error.message);
+      if (ctx.workspaceId || !tolerable) throw error;
+      return state;
     });
     return { state: validated, leafId: snapshot.leafId, entryId: snapshot.entryId, authorityRootIdentity, sessionRootIdentity };
   };
@@ -1059,6 +1075,7 @@ export function createHarnessServiceHost(options: HarnessServiceHostOptions): Ha
         ...identity,
         allowedMethods: [...COMPACTION_QUERY_METHODS],
         workspaceId: entry.workspaceId,
+        authorityRoot: entry.authorityRoot,
         operationDir: entry.workContext.operationDir,
         contextRevision: entry.workContext.revision,
         queryScope: entry.workContext.queryScope === null ? null : [...entry.workContext.queryScope],
@@ -1080,6 +1097,7 @@ export function createHarnessServiceHost(options: HarnessServiceHostOptions): Ha
     return {
       ...identity,
       workspaceId: entry.workspaceId,
+      authorityRoot: entry.authorityRoot,
       operationDir: entry.workContext.operationDir,
       contextRevision: entry.workContext.revision,
       queryScope: entry.workContext.queryScope === null ? null : [...entry.workContext.queryScope],

@@ -248,39 +248,39 @@ const zone2ThreadTask = (
 
 const zone2Scope = async (
   options: Zone2ThreadProjectionOptions,
-  input: { sessionId: string; workspaceId: string },
-): Promise<{ objectId: string; parent: ThreadParent; workspaceId: string }> => {
+  input: { sessionId: string; scopeId: string },
+): Promise<{ objectId: string; parent: ThreadParent; scopeId: string }> => {
   const binding = typeof options.registry.getSessionBinding === "function"
     ? await options.registry.getSessionBinding(input.sessionId)
     : null;
   if (binding) {
     const parent: ThreadParent = { kind: "thread", id: binding.threadId };
     return {
-      objectId: `${binding.owningWorkspaceId}\0${parent.kind}\0${parent.id}`,
+      objectId: `${binding.owningScopeId}\0${parent.kind}\0${parent.id}`,
       parent,
-      workspaceId: binding.owningWorkspaceId,
+      scopeId: binding.owningScopeId,
     };
   }
   const parent: ThreadParent = { kind: "session", id: input.sessionId };
-  return { objectId: `${input.workspaceId}\0${parent.kind}\0${parent.id}`, parent, workspaceId: input.workspaceId };
+  return { objectId: `${input.scopeId}\0${parent.kind}\0${parent.id}`, parent, scopeId: input.scopeId };
 };
 
 export async function projectZone2Threads(
   options: Zone2ThreadProjectionOptions,
-  input: { sessionId: string; workspaceId: string },
+  input: { sessionId: string; scopeId: string },
 ): Promise<Zone2Threads> {
   const scope = await zone2Scope(options, input);
   return options.cursors.observe<Zone2ThreadCursor, Zone2Threads>(
     input.sessionId,
     "zone2-threads",
     scope.objectId,
-    zone2ThreadTask(options, scope.workspaceId, scope.parent),
+    zone2ThreadTask(options, scope.scopeId, scope.parent),
   );
 }
 
 export async function prepareZone2Threads(
   options: Zone2ThreadProjectionOptions,
-  input: { sessionId: string; workspaceId: string },
+  input: { sessionId: string; scopeId: string },
 ): Promise<PendingObservation<Zone2Threads> & {
   commitPresented(ids: ReadonlySet<string>, overlapPresented: boolean): boolean;
 }> {
@@ -291,7 +291,7 @@ export async function prepareZone2Threads(
     input.sessionId,
     "zone2-threads",
     scope.objectId,
-    zone2ThreadTask(options, scope.workspaceId, scope.parent, (cursor, baseline) => {
+    zone2ThreadTask(options, scope.scopeId, scope.parent, (cursor, baseline) => {
       next = cursor;
       previous = baseline;
     }, true),

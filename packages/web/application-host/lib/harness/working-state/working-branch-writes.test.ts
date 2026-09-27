@@ -312,7 +312,7 @@ describe("WorkingState Host virtual write production chain", () => {
       content: "virtual then shell\n",
     })).toMatchObject({ ok: true, result: { status: "committed", revision: 1 } });
     const thread = await f.registry.createThread({
-      workspaceId: f.workspaceId,
+      scopeId: f.workspaceId,
       parent: { kind: "session", id: "parent-1" },
       brief: "materialize",
       preset: "hard-implement",

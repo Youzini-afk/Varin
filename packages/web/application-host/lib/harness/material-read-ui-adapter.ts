@@ -4,6 +4,7 @@ import type { PdfMaterialRouteOptions } from "./pdf-material-routes.js";
 import type { HarnessPathAuthority } from "./path-authority.js";
 import type { HarnessActorContext } from "@varin/protocol";
 import { createMaterialReadService } from "./material-read-service.js";
+import { isSessionScopeId } from "./owner-scope.js";
 
 /** Authenticated UI requests resolve the session's execution workspace on the Host. */
 export function createUserMaterialReadAdapter(
@@ -14,13 +15,17 @@ export function createUserMaterialReadAdapter(
   return async ({ sessionId, request, signal }) => {
     const scope = await runtime.scopeForSession(sessionId);
     const workspace = scope.snapshot?.workspace;
-    const executionWorkspaceId = workspace?.kind === "workspace" ? workspace.authorityId ?? workspace.id : scope.workspaceId;
+    const sessionOwned = isSessionScopeId(scope.scopeId);
+    const executionWorkspaceId = workspace?.kind === "workspace" ? workspace.authorityId ?? workspace.id : scope.scopeId;
     const actor: HarnessActorContext = {
       authorityInstanceId: "ui-material-reader",
       sessionId,
       workerId: "ui-material-reader",
       workerGeneration: 0,
-      workspaceId: executionWorkspaceId,
+      // A session-owned chat has no workspace identity; relative paths anchor
+      // to its launch directory via `authorityRoot` instead.
+      workspaceId: sessionOwned ? null : executionWorkspaceId,
+      ...(sessionOwned && scope.snapshot?.cwd ? { authorityRoot: scope.snapshot.cwd } : {}),
       grantedCapabilities: [],
     };
     const authorizedPaths = [];

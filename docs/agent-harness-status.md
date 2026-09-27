@@ -18,12 +18,22 @@ Last updated: 2026-09-27
 Default-on 列只记当前代码，尚未完成的正式目标单独列为待实施。
 [roadmap.md](roadmap.md) 只引用本文件，不再自述测试数。
 
-**D-337 / 阶段 HR：面向任务与资源的 Harness（2026-09-27，方向确认 / 设计文档完成 / 全部尚未实施）。**
+**D-337 / 阶段 HR：面向任务与资源的 Harness（2026-09-27，方向确认 / HR0 归属与资源寻址已接线，HR1–HR5 实施中）。**
 
 [工作区解耦与持续检索设计](resource-oriented-harness-design.md) 定义 HR0–HR5：资源与数据归属、会话与操作、直接检索、
 持续索引、产品与旧机制收口、真实使用验收。工作区回到会话/项目组织职责，执行与查询使用明确的本次目标；
-索引按资源及内容版本复用，冷目录可直接搜索。当前代码仍使用 RR2 工作上下文与 workspace 索引，不把设计标为 wired。
+索引按资源及内容版本复用，冷目录可直接搜索。
 下文 RR2/RR4 的目录模型记录保留为历史实现事实，其后续目标由 D-337 替代；恢复、输出和其他既有正确性成果继续保留。
+
+HR0 已接线（wired）：Thread catalog、session binding、todo/子任务与知识库的所有者统一为 scope（项目 workspaceId 或
+`session:<id>`，持久化键经文件名安全哈希），`resolveSessionOwner`/`scopeForSession` 对无项目会话返回会话自身 scope；
+session 注册不再要求目录型 workspace（`workspaceId: null` 是完整注册态，actor 携带 `authorityRoot` 发射目录）；
+path-authority 走 Documents 资源根寻址——已登记的 file/directory 资源根可寻址外部绝对路径，相对路径锚定
+`authorityRoot`，未登记目标仅在 `allowMissing` 写入场景注册新根，缺失目标 `allowMissing:false` 仍抛 ENOENT，
+`workspaceScope` 继续作为绝对授权门；launch 目录离线不再阻塞无项目会话的 journal 准备。
+验证：web 套件 303 文件 2704 全绿（含新增 path-authority 资源根 5 例、service-host 无项目注册 2 例、
+thread-registry session-scope 持久化 1 例）；app-host 源码与测试 typecheck、protocol 构建全绿。
+未测：真实桌面/打包环境的无项目聊天纵切、外部文件经真实 Documents 写入的端到端——列入 HR5 验收。
 
 **运行时可靠性专项 RR（2026-09-26：RR0–RR5 的代码路径与定向行为已复核；RR6 的真实安装包/外部代理平台纵切仍待验证）。**
 

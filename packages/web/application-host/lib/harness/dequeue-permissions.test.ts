@@ -54,7 +54,7 @@ const stats: SessionStats = {
 };
 
 const createInput = (overrides: Partial<CreateThreadInput> = {}): CreateThreadInput => ({
-  workspaceId: WORKSPACE,
+  scopeId: WORKSPACE,
   parent: PARENT,
   brief: "queued work",
   preset: "hard-implement",

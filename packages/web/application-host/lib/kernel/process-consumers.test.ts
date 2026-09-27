@@ -119,7 +119,7 @@ describe.skipIf(!hasNativeProcessKernel)("production native process root admissi
     await fs.mkdir(live,{recursive:true});await fs.mkdir(sibling);
     const execution = enrollment === "enrolled" ? (await docs.authority.resolveWorkspace({ path: live })).workspaceId : null;
     if (execution) expect(execution).not.toBe(docs.identity.workspaceId);
-    const thread=await registry.createThread({workspaceId:docs.identity.workspaceId,parent:{kind:"session",id:"parent"},brief:"Native admission",preset:"hard-implement",kind:"implementation",createdBy:"user",concurrency:1,autoRun:false,worktree:"isolated",scope:[],tools:[],permissions:{}});
+    const thread=await registry.createThread({scopeId:docs.identity.workspaceId,parent:{kind:"session",id:"parent"},brief:"Native admission",preset:"hard-implement",kind:"implementation",createdBy:"user",concurrency:1,autoRun:false,worktree:"isolated",scope:[],tools:[],permissions:{}});
     await registry.setWorktree(docs.identity.workspaceId,thread.id,{path:live,managedRoot,base:"zero-commit",materialized:true,viewMode:"materialized"});
     const admission=createManagedRootAdmission({
       listWorktrees:async(workspaceId)=>(await registry.listWorkspaceThreads(workspaceId)).flatMap(t=>t.worktree?[t.worktree]:[]),

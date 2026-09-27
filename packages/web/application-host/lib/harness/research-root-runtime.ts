@@ -135,7 +135,7 @@ export function createResearchRootRuntime(options: ResearchRootRuntimeOptions) {
     const existingBinding = await options.registry.getSessionBinding(sessionId);
     if (existingBinding?.owner === "spawned-child") return;
     if (existingBinding?.owner === "attached-root") {
-      const run = await options.registry.getActiveRun(existingBinding.owningWorkspaceId, existingBinding.threadId);
+      const run = await options.registry.getActiveRun(existingBinding.owningScopeId, existingBinding.threadId);
       if (run?.id === existingBinding.runId && run.outcome === null) {
         const entries = await options.sessions.entries(sessionId, "branch").catch(() => null);
         const input = entries ? userInputFromEntries(entries) : null;
@@ -145,7 +145,7 @@ export function createResearchRootRuntime(options: ResearchRootRuntimeOptions) {
           messages: [],
           runId: run.id,
           threadId: existingBinding.threadId,
-          workspaceId: existingBinding.owningWorkspaceId,
+          workspaceId: existingBinding.owningScopeId,
         });
         return;
       }
@@ -158,7 +158,7 @@ export function createResearchRootRuntime(options: ResearchRootRuntimeOptions) {
     let thread = await findRoot(workspaceId, sessionId);
     if (!thread) {
       thread = await options.registry.createThread({
-        workspaceId,
+        scopeId: workspaceId,
         parent: { kind: "session", id: sessionId },
         brief: input.text,
         kind: "discussion",

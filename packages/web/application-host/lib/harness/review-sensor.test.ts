@@ -36,7 +36,7 @@ describe("onPublishedResult", () => {
   });
 
   const sourceThread = async () => registry.createThread({
-    workspaceId,
+    scopeId: workspaceId,
     parent,
     brief: "Implement login",
     preset: "hardImplement",

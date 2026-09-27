@@ -19,7 +19,7 @@ const registry = (binding: ThreadSessionBinding | null) => ({
 
 describe("research relationship access", () => {
   it("includes the branch's real parent, siblings and children, without unrelated roots or nieces", async () => {
-    const binding = { sessionId: "s-a", owningWorkspaceId: "owning", threadId: "a", runId: "run-a" } as ThreadSessionBinding;
+    const binding = { sessionId: "s-a", owningScopeId: "owning", threadId: "a", runId: "run-a" } as ThreadSessionBinding;
     const caller = await resolveResearchCaller(registry(binding), { sessionId: "s-a", workspaceId: "execution" });
     expect(caller.workspaceId).toBe("owning");
     expect(caller.executionWorkspaceId).toBe("execution");

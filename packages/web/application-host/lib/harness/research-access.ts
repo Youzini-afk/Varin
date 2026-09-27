@@ -17,7 +17,7 @@ export async function resolveResearchCaller(
   },
 ): Promise<ExperimentCaller> {
   const binding = await registry.getSessionBinding(input.sessionId);
-  const workspaceId = binding?.owningWorkspaceId ?? input.workspaceId;
+  const workspaceId = binding?.owningScopeId ?? input.workspaceId;
   const visible = new Map<string, Thread>();
   let rootSessionId = input.sessionId;
   const children = (parent: ThreadParent) => registry.listThreads(workspaceId, parent);

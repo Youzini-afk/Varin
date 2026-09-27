@@ -28,7 +28,7 @@ async function fixture() {
   const service = createThreadSendService({ threadRegistry: registry, threadSendToSession: deliver } as never);
   const create = async (name: string) => {
     const thread = await registry.createThread({
-      workspaceId: "workspace",
+      scopeId: "workspace",
       parent: { kind: "session", id: "root" },
       brief: name,
       kind: "implementation",

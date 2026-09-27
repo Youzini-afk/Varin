@@ -17,7 +17,7 @@ describe("fixed Thread deliveries", () => {
       actor: { authorityInstanceId: "test", sessionId: "parent", workerId: "worker", workerGeneration: 1,
         workspaceId: "workspace", grantedCapabilities: ["control.thread"] } };
     try {
-      const thread = await registry.createThread({ workspaceId: "workspace", parent, brief: "Deliver API", kind: "implementation",
+      const thread = await registry.createThread({ scopeId: "workspace", parent, brief: "Deliver API", kind: "implementation",
         createdBy: "agent", concurrency: 1, autoRun: true, worktree: "isolated", tools: ["read", "write"], permissions: {} });
       const first = await registry.startRun("workspace", thread.id);
       const delivery: ThreadReport = { conclusion: "R1_PUBLIC_API\n" + "exact material\n".repeat(700), resultRevision: 1,

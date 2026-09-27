@@ -139,4 +139,134 @@ describe("harness path authority", () => {
       rmSync(root, { recursive: true, force: true });
     }
   });
+
+  describe("HR0 resource roots", () => {
+    const resourceRoots = (entries: Array<{ canonicalPath: string; kind: "directory" | "file" }>) => {
+      const roots = new Map(entries.map((entry, index) => [
+        path.resolve(entry.canonicalPath),
+        { workspaceId: `root-${index}`, canonicalPath: path.resolve(entry.canonicalPath), kind: entry.kind },
+      ]));
+      const registered: Array<{ canonicalPath: string; kind: string }> = [];
+      const norm = (value: string) => path.resolve(value);
+      return {
+        registered,
+        inspectWorkspace: async () => { throw new Error("no project workspace"); },
+        findExactResourceRoot: async (canonicalPath: string, kind?: "directory" | "file") => {
+          const hit = roots.get(norm(canonicalPath));
+          return hit && (!kind || hit.kind === kind) ? hit : null;
+        },
+        findContainingResourceRoot: async (canonicalPath: string) => {
+          const needle = norm(canonicalPath);
+          let best: { workspaceId: string; canonicalPath: string; kind: "directory" | "file" } | null = null;
+          for (const root of roots.values()) {
+            if (root.kind !== "directory") continue;
+            const relative = path.relative(root.canonicalPath, needle);
+            if (relative === "" || (!relative.startsWith("..") && !path.isAbsolute(relative))) {
+              if (!best || root.canonicalPath.length > best.canonicalPath.length) best = root;
+            }
+          }
+          return best;
+        },
+        ensureResourceRoot: async (canonicalPath: string, kind: "directory" | "file") => {
+          const root = { workspaceId: `root-${roots.size}`, canonicalPath: norm(canonicalPath), kind };
+          roots.set(root.canonicalPath, root);
+          registered.push({ canonicalPath: root.canonicalPath, kind });
+          return root;
+        },
+      };
+    };
+    const unbound = (authorityRoot: string): HarnessActorContext => ({
+      authorityInstanceId: "broker-1",
+      sessionId: "session-1",
+      workerId: "worker-1",
+      workerGeneration: 1,
+      workspaceId: null,
+      authorityRoot,
+      grantedCapabilities: ["write.document"],
+    });
+
+    it("addresses an external file through an admitted file root for a no-project session", async () => {
+      const launch = mkdtempSync(join(tmpdir(), "harness-launch-"));
+      const external = mkdtempSync(join(tmpdir(), "harness-external-"));
+      const target = join(external, "paper.pdf");
+      writeFileSync(target, "bytes");
+      const documents = resourceRoots([{ canonicalPath: target, kind: "file" }]);
+      const authority = createHarnessPathAuthority({ authorityId: "host-1", documents });
+      try {
+        const resolved = await authority.resolve(unbound(launch), target, { allowMissing: false });
+        expect(resolved).toMatchObject({ workspaceId: "root-0", resourceId: "", resolvedPath: path.resolve(target) });
+        expect(await authority.readAuthorizedFile(unbound(launch), resolved!)).toEqual(Buffer.from("bytes"));
+      } finally {
+        rmSync(launch, { recursive: true, force: true });
+        rmSync(external, { recursive: true, force: true });
+      }
+    });
+
+    it("resolves a relative path through the session authority root under a directory resource root", async () => {
+      const launch = mkdtempSync(join(tmpdir(), "harness-launch-"));
+      writeFileSync(join(launch, "notes.md"), "note");
+      const documents = resourceRoots([{ canonicalPath: launch, kind: "directory" }]);
+      const authority = createHarnessPathAuthority({ authorityId: "host-1", documents });
+      try {
+        const resolved = await authority.resolve(unbound(launch), "notes.md", { allowMissing: false });
+        expect(resolved).toMatchObject({ workspaceId: "root-0", resourceId: "notes.md" });
+      } finally {
+        rmSync(launch, { recursive: true, force: true });
+      }
+    });
+
+    it("resolves a missing write target inside an admitted directory root without registering anything", async () => {
+      const launch = mkdtempSync(join(tmpdir(), "harness-launch-"));
+      const target = join(launch, "out", "result.txt");
+      const documents = resourceRoots([{ canonicalPath: launch, kind: "directory" }]);
+      const authority = createHarnessPathAuthority({ authorityId: "host-1", documents });
+      try {
+        const write = await authority.resolve(unbound(launch), target, { allowMissing: true });
+        expect(write).toMatchObject({ resourceId: "out/result.txt" });
+        expect(documents.registered).toEqual([]);
+        await expect(authority.resolve(unbound(launch), target, { allowMissing: false }))
+          .rejects.toMatchObject({ code: "ENOENT" });
+      } finally {
+        rmSync(launch, { recursive: true, force: true });
+      }
+    });
+
+    it("returns null outside admitted roots when no resource registration is wired", async () => {
+      const launch = mkdtempSync(join(tmpdir(), "harness-launch-"));
+      const external = mkdtempSync(join(tmpdir(), "harness-external-"));
+      const authority = createHarnessPathAuthority({
+        authorityId: "host-1",
+        documents: { inspectWorkspace: async () => { throw new Error("none"); } },
+      });
+      try {
+        writeFileSync(join(external, "x.txt"), "x");
+        expect(await authority.resolve(unbound(launch), join(external, "x.txt"), { allowMissing: false })).toBeNull();
+      } finally {
+        rmSync(launch, { recursive: true, force: true });
+        rmSync(external, { recursive: true, force: true });
+      }
+    });
+
+    it("keeps workspaceScope as an absolute gate over resource-rooted targets", async () => {
+      const launch = mkdtempSync(join(tmpdir(), "harness-launch-"));
+      const inside = join(launch, "inside.txt");
+      const external = mkdtempSync(join(tmpdir(), "harness-external-"));
+      const outside = join(external, "outside.txt");
+      writeFileSync(inside, "in");
+      writeFileSync(outside, "out");
+      const documents = resourceRoots([
+        { canonicalPath: launch, kind: "directory" },
+        { canonicalPath: external, kind: "directory" },
+      ]);
+      const authority = createHarnessPathAuthority({ authorityId: "host-1", documents });
+      const scoped = { ...unbound(launch), workspaceScope: [launch] };
+      try {
+        expect(await authority.resolve(scoped, inside, { allowMissing: false })).not.toBeNull();
+        expect(await authority.resolve(scoped, outside, { allowMissing: false })).toBeNull();
+      } finally {
+        rmSync(launch, { recursive: true, force: true });
+        rmSync(external, { recursive: true, force: true });
+      }
+    });
+  });
 });

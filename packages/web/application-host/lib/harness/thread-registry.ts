@@ -119,13 +119,13 @@ export class ThreadRegistryError extends Error {
 
 export interface ThreadCatalogDocument {
   schemaVersion: typeof THREAD_REGISTRY_SCHEMA_VERSION;
-  workspaceId: string;
+  scopeId: string;
   threads: Thread[];
   runs: ThreadRun[];
 }
 
 export interface CreateThreadInput {
-  workspaceId: string;
+  scopeId: string;
   parent: ThreadParent;
   brief: string;
   preset?: string;
@@ -158,19 +158,19 @@ export interface CreateThreadInput {
 export interface ThreadRegistryOptions {
   dataDir: string;
   hostId: string;
-  onThreadChanged?: (workspaceId: string, parent: ThreadParent, thread: Thread, activeRun: ThreadRun | null) => void;
-  onThreadDone?: (workspaceId: string, parent: ThreadParent, threadId: string, report: ThreadReport) => void;
+  onThreadChanged?: (scopeId: string, parent: ThreadParent, thread: Thread, activeRun: ThreadRun | null) => void;
+  onThreadDone?: (scopeId: string, parent: ThreadParent, threadId: string, report: ThreadReport) => void;
   /** A report newly persisted by this completed Run, including failure/cancellation. */
-  onThreadReturned?: (workspaceId: string, parent: ThreadParent, threadId: string, run: ThreadRun, report: ThreadReport) => void;
-  onThreadDequeued?: (workspaceId: string, parent: ThreadParent, thread: Thread) => Promise<void>;
+  onThreadReturned?: (scopeId: string, parent: ThreadParent, threadId: string, run: ThreadRun, report: ThreadReport) => void;
+  onThreadDequeued?: (scopeId: string, parent: ThreadParent, thread: Thread) => Promise<void>;
   /**
    * Fires whenever the shared root execution budget may have freed a slot —
    * after a dequeue pass or when a Thread marks a dependency wait. Consumers
    * re-check admission and retry deferred work (lost-run resume).
    */
-  onAdmissionFreed?: (workspaceId: string, parent: ThreadParent) => void | Promise<void>;
+  onAdmissionFreed?: (scopeId: string, parent: ThreadParent) => void | Promise<void>;
   onObserverError?: (error: unknown) => void;
-  onThreadRemoved?: (workspaceId: string, threadId: string) => void | Promise<void>;
+  onThreadRemoved?: (scopeId: string, threadId: string) => void | Promise<void>;
   maxConcurrency?: number;
   fsPromises?: Pick<typeof fs.promises, "mkdir" | "readFile" | "readdir" | "rename" | "rm" | "writeFile">;
   now?: () => Date;
@@ -685,16 +685,16 @@ const parentEquals = (left: ThreadParent, right: ThreadParent): boolean => (
   left.kind === right.kind && left.id === right.id
 );
 
-const scopeKey = (workspaceId: string, parent: ThreadParent): string => (
-  `${workspaceId}\0${parent.kind}\0${parent.id}`
+const scopeKey = (scopeId: string, parent: ThreadParent): string => (
+  `${scopeId}\0${parent.kind}\0${parent.id}`
 );
 
-const workspaceFileName = (workspaceId: string): string => (
-  `${createHash("sha256").update(workspaceId).digest("hex")}.json`
+const workspaceFileName = (scopeId: string): string => (
+  `${createHash("sha256").update(scopeId).digest("hex")}.json`
 );
 
-export const threadCatalogPath = (dataDir: string, hostId: string, workspaceId: string): string => (
-  join(dataDir, "threads", hostId, workspaceFileName(workspaceId))
+export const threadCatalogPath = (dataDir: string, hostId: string, scopeId: string): string => (
+  join(dataDir, "threads", hostId, workspaceFileName(scopeId))
 );
 
 export const threadSessionBindingsPath = (dataDir: string, hostId: string): string => (
@@ -714,9 +714,9 @@ interface ThreadSessionBindingsDocument {
   bindings: ThreadSessionBinding[];
 }
 
-const emptyCatalog = (workspaceId: string): ThreadCatalogDocument => ({
+const emptyCatalog = (scopeId: string): ThreadCatalogDocument => ({
   schemaVersion: THREAD_REGISTRY_SCHEMA_VERSION,
-  workspaceId,
+  scopeId,
   threads: [],
   runs: [],
 });
@@ -750,7 +750,7 @@ const normalizeWorktreePreparation = (thread: Thread): Thread => {
   };
 };
 
-const parseCatalog = (raw: string, path: string, expectedWorkspaceId?: string): ThreadCatalogDocument => {
+const parseCatalog = (raw: string, path: string, expectedScopeId?: string): ThreadCatalogDocument => {
   const value = parseJson(raw, path);
   if (!isRecord(value)) {
     throw new ThreadRegistryError("corrupt", `Thread registry catalog must be an object: ${path}`, path);
@@ -769,11 +769,18 @@ const parseCatalog = (raw: string, path: string, expectedWorkspaceId?: string): 
   if (schemaVersion !== THREAD_REGISTRY_SCHEMA_VERSION) {
     throw new ThreadRegistryError("corrupt", `Unsupported thread registry schema ${schemaVersion}: ${path}`, path);
   }
-  if (!isString(value.workspaceId) || !Array.isArray(value.threads) || !Array.isArray(value.runs)) {
+  // Catalogs written before the scope rename carry `workspaceId` for the same
+  // shard identity; accept it once and normalize to `scopeId`.
+  const catalogScopeId = isString(value.scopeId) && value.scopeId.length > 0
+    ? value.scopeId
+    : isString(value.workspaceId) && value.workspaceId.length > 0
+      ? value.workspaceId
+      : null;
+  if (!catalogScopeId || !Array.isArray(value.threads) || !Array.isArray(value.runs)) {
     throw new ThreadRegistryError("corrupt", `Thread registry catalog shape is invalid: ${path}`, path);
   }
-  if (expectedWorkspaceId !== undefined && value.workspaceId !== expectedWorkspaceId) {
-    throw new ThreadRegistryError("corrupt", `Thread registry workspace identity does not match its catalog: ${path}`, path);
+  if (expectedScopeId !== undefined && catalogScopeId !== expectedScopeId) {
+    throw new ThreadRegistryError("corrupt", `Thread registry scope identity does not match its catalog: ${path}`, path);
   }
   if (!value.runs.every(isThreadRun)) {
     throw new ThreadRegistryError("corrupt", `Thread registry contains malformed run records: ${path}`, path);
@@ -784,13 +791,13 @@ const parseCatalog = (raw: string, path: string, expectedWorkspaceId?: string): 
   const current = value as unknown as ThreadCatalogDocument;
   const catalog: ThreadCatalogDocument = {
     schemaVersion: THREAD_REGISTRY_SCHEMA_VERSION,
-    workspaceId: current.workspaceId,
+    scopeId: catalogScopeId,
     runs: structuredClone(current.runs),
     threads: current.threads.map((thread) => normalizeWorktreePreparation(structuredClone(thread))),
   };
   const threadIds = new Set<string>();
   for (const thread of catalog.threads) {
-    if (thread.workspaceId !== catalog.workspaceId || threadIds.has(thread.id)) {
+    if (thread.workspaceId !== catalog.scopeId || threadIds.has(thread.id)) {
       throw new ThreadRegistryError("corrupt", `Thread registry contains duplicate or cross-workspace threads: ${path}`, path);
     }
     threadIds.add(thread.id);
@@ -875,23 +882,23 @@ export function createThreadRegistry(options: ThreadRegistryOptions) {
     }
   };
 
-  const loadWorkspace = async (workspaceId: string): Promise<ThreadCatalogDocument> => {
-    const cached = cache.get(workspaceId);
+  const loadWorkspace = async (scopeId: string): Promise<ThreadCatalogDocument> => {
+    const cached = cache.get(scopeId);
     if (cached) return cached;
-    const pending = loads.get(workspaceId);
+    const pending = loads.get(scopeId);
     if (pending) return pending;
-    const path = threadCatalogPath(dataDir, hostId, workspaceId);
+    const path = threadCatalogPath(dataDir, hostId, scopeId);
     const loading = (async () => {
       const raw = await readText(path);
-      const catalog = raw === null ? emptyCatalog(workspaceId) : parseCatalog(raw, path, workspaceId);
-      cache.set(workspaceId, catalog);
+      const catalog = raw === null ? emptyCatalog(scopeId) : parseCatalog(raw, path, scopeId);
+      cache.set(scopeId, catalog);
       return catalog;
     })();
-    loads.set(workspaceId, loading);
+    loads.set(scopeId, loading);
     try {
       return await loading;
     } finally {
-      loads.delete(workspaceId);
+      loads.delete(scopeId);
     }
   };
 
@@ -910,7 +917,8 @@ export function createThreadRegistry(options: ThreadRegistryOptions) {
       if (
         !isRecord(entry)
         || !isString(entry.sessionId) || entry.sessionId.length === 0
-        || !isString(entry.owningWorkspaceId) || entry.owningWorkspaceId.length === 0
+        || !(isString(entry.owningScopeId) && entry.owningScopeId.length > 0)
+          && !(isString(entry.owningWorkspaceId) && entry.owningWorkspaceId.length > 0)
         || !isString(entry.threadId) || entry.threadId.length === 0
         || !isString(entry.runId) || entry.runId.length === 0
         || !isParent(entry.parent)
@@ -918,9 +926,13 @@ export function createThreadRegistry(options: ThreadRegistryOptions) {
       ) {
         throw new ThreadRegistryError("corrupt", `Thread session binding is invalid: ${path}`, path);
       }
+      // Records written before the scope rename carry `owningWorkspaceId`.
+      const owningScopeId = isString(entry.owningScopeId) && entry.owningScopeId.length > 0
+        ? entry.owningScopeId
+        : entry.owningWorkspaceId as string;
       bindings.push({
         sessionId: entry.sessionId,
-        owningWorkspaceId: entry.owningWorkspaceId,
+        owningScopeId,
         threadId: entry.threadId,
         runId: entry.runId,
         parent: entry.parent,
@@ -1034,7 +1046,7 @@ export function createThreadRegistry(options: ThreadRegistryOptions) {
 
   const sameBinding = (left: ThreadSessionBinding, right: ThreadSessionBinding): boolean => (
     left.sessionId === right.sessionId
-    && left.owningWorkspaceId === right.owningWorkspaceId
+    && left.owningScopeId === right.owningScopeId
     && left.threadId === right.threadId
     && left.runId === right.runId
     && left.owner === right.owner
@@ -1056,7 +1068,7 @@ export function createThreadRegistry(options: ThreadRegistryOptions) {
       || (run.workerState !== "starting" && run.workerState !== "running" && run.workerState !== "lost")) return null;
     return {
       sessionId: run.sessionId,
-      owningWorkspaceId: catalog.workspaceId,
+      owningScopeId: catalog.scopeId,
       threadId: run.threadId,
       runId: run.id,
       parent: thread.parent,
@@ -1065,7 +1077,7 @@ export function createThreadRegistry(options: ThreadRegistryOptions) {
   };
 
   const bindingMatchesCatalog = (binding: ThreadSessionBinding, catalog: ThreadCatalogDocument): boolean => {
-    if (catalog.workspaceId !== binding.owningWorkspaceId) return false;
+    if (catalog.scopeId !== binding.owningScopeId) return false;
     const thread = catalog.threads.find((entry) => entry.id === binding.threadId) ?? null;
     const run = catalog.runs.find((entry) => entry.id === binding.runId && entry.threadId === binding.threadId);
     return !!thread
@@ -1078,12 +1090,12 @@ export function createThreadRegistry(options: ThreadRegistryOptions) {
       && parentEquals(thread.parent, binding.parent);
   };
 
-  const readExistingCatalog = async (workspaceId: string): Promise<ThreadCatalogDocument | null> => {
-    if (cache.has(workspaceId)) return cache.get(workspaceId)!;
-    const path = threadCatalogPath(dataDir, hostId, workspaceId);
+  const readExistingCatalog = async (scopeId: string): Promise<ThreadCatalogDocument | null> => {
+    if (cache.has(scopeId)) return cache.get(scopeId)!;
+    const path = threadCatalogPath(dataDir, hostId, scopeId);
     const raw = await readText(path);
     if (raw === null) return null;
-    return loadWorkspace(workspaceId);
+    return loadWorkspace(scopeId);
   };
 
   const loadHostCatalogs = async (): Promise<void> => {
@@ -1104,8 +1116,8 @@ export function createThreadRegistry(options: ThreadRegistryOptions) {
         const parsed = parseJson(raw, path);
         if (Array.isArray(parsed)) continue;
         const catalog = parseCatalog(raw, path);
-        if (threadCatalogPath(dataDir, hostId, catalog.workspaceId) !== path) continue;
-        if (!cache.has(catalog.workspaceId)) cache.set(catalog.workspaceId, catalog);
+        if (threadCatalogPath(dataDir, hostId, catalog.scopeId) !== path) continue;
+        if (!cache.has(catalog.scopeId)) cache.set(catalog.scopeId, catalog);
       } catch {
         // One malformed workspace catalog must not hide healthy workspace
         // roots or prevent rebuilding the derived session index.
@@ -1167,14 +1179,14 @@ export function createThreadRegistry(options: ThreadRegistryOptions) {
    */
   const resolveSessionOwner = async (
     sessionId: string,
-  ): Promise<Pick<ThreadSessionBinding, "owningWorkspaceId" | "threadId" | "runId" | "owner"> | null> => {
+  ): Promise<Pick<ThreadSessionBinding, "owningScopeId" | "threadId" | "runId" | "owner"> | null> => {
     await ensureSessionBindings();
     const existing = sessionBindings.get(sessionId);
     if (existing) {
-      const catalog = await readExistingCatalog(existing.owningWorkspaceId);
+      const catalog = await readExistingCatalog(existing.owningScopeId);
       if (catalog && bindingMatchesCatalog(existing, catalog)) {
         return {
-          owningWorkspaceId: existing.owningWorkspaceId,
+          owningScopeId: existing.owningScopeId,
           threadId: existing.threadId,
           runId: existing.runId,
           owner: existing.owner,
@@ -1183,18 +1195,18 @@ export function createThreadRegistry(options: ThreadRegistryOptions) {
     }
     // Refresh the catalog view so workspaces created after startup are seen.
     await loadHostCatalogs();
-    let best: { workspaceId: string; run: ThreadRun } | null = null;
+    let best: { scopeId: string; run: ThreadRun } | null = null;
     for (const catalog of cache.values()) {
       for (const run of catalog.runs) {
         if (run.sessionId !== sessionId) continue;
         if (!best || run.startedAt.localeCompare(best.run.startedAt) > 0) {
-          best = { workspaceId: catalog.workspaceId, run };
+          best = { scopeId: catalog.scopeId, run };
         }
       }
     }
     return best
       ? {
-        owningWorkspaceId: best.workspaceId,
+        owningScopeId: best.scopeId,
         threadId: best.run.threadId,
         runId: best.run.id,
         owner: best.run.sessionOwner === "attached-root" ? "attached-root" : "spawned-child",
@@ -1206,7 +1218,7 @@ export function createThreadRegistry(options: ThreadRegistryOptions) {
     await ensureSessionBindings();
     const existing = sessionBindings.get(sessionId);
     if (existing) {
-      const catalog = await readExistingCatalog(existing.owningWorkspaceId);
+      const catalog = await readExistingCatalog(existing.owningScopeId);
       if (catalog && bindingMatchesCatalog(existing, catalog)) return structuredClone(existing);
     }
     if (staleBindingIds.has(sessionId)) {
@@ -1240,7 +1252,7 @@ export function createThreadRegistry(options: ThreadRegistryOptions) {
   };
 
   const writeCatalog = async (catalog: ThreadCatalogDocument): Promise<void> => {
-    const path = threadCatalogPath(dataDir, hostId, catalog.workspaceId);
+    const path = threadCatalogPath(dataDir, hostId, catalog.scopeId);
     const directory = join(dataDir, "threads", hostId);
     persistCounter += 1;
     const temporary = `${path}.${process.pid}.${persistCounter}.tmp`;
@@ -1267,14 +1279,14 @@ export function createThreadRegistry(options: ThreadRegistryOptions) {
   const emitChanges = (catalog: ThreadCatalogDocument, mutation: MutationResult<unknown>): void => {
     for (const thread of mutation.changed) {
       try {
-        options.onThreadChanged?.(catalog.workspaceId, thread.parent, structuredClone(thread), structuredClone(activeRunFor(catalog, thread)));
+        options.onThreadChanged?.(catalog.scopeId, thread.parent, structuredClone(thread), structuredClone(activeRunFor(catalog, thread)));
       } catch (error) {
         reportObserverError(error);
       }
       const done = mutation.done?.find((entry) => entry.thread.id === thread.id);
       if (done) {
         try {
-          options.onThreadDone?.(catalog.workspaceId, thread.parent, thread.id, structuredClone(done.report));
+          options.onThreadDone?.(catalog.scopeId, thread.parent, thread.id, structuredClone(done.report));
         } catch (error) {
           reportObserverError(error);
         }
@@ -1282,12 +1294,12 @@ export function createThreadRegistry(options: ThreadRegistryOptions) {
       const returned = mutation.returned?.find((entry) => entry.thread.id === thread.id);
       if (returned) {
         try {
-          options.onThreadReturned?.(catalog.workspaceId, thread.parent, thread.id, structuredClone(returned.run), structuredClone(returned.report));
+          options.onThreadReturned?.(catalog.scopeId, thread.parent, thread.id, structuredClone(returned.run), structuredClone(returned.report));
         } catch (error) {
           reportObserverError(error);
         }
       }
-      const callbacks = waiters.get(scopeKey(catalog.workspaceId, thread.parent));
+      const callbacks = waiters.get(scopeKey(catalog.scopeId, thread.parent));
       if (callbacks) {
         for (const callback of callbacks) {
           try { callback(); } catch (error) { reportObserverError(error); }
@@ -1296,7 +1308,7 @@ export function createThreadRegistry(options: ThreadRegistryOptions) {
       }
     }
     for (const parent of mutation.wakeParents ?? []) {
-      const callbacks = waiters.get(scopeKey(catalog.workspaceId, parent));
+      const callbacks = waiters.get(scopeKey(catalog.scopeId, parent));
       if (!callbacks) continue;
       for (const callback of callbacks) {
         try { callback(); } catch (error) { reportObserverError(error); }
@@ -1306,22 +1318,22 @@ export function createThreadRegistry(options: ThreadRegistryOptions) {
   };
 
   const mutateWorkspace = async <T>(
-    workspaceId: string,
+    scopeId: string,
     mutate: (catalog: ThreadCatalogDocument) => MutationResult<T>,
   ): Promise<T> => {
-    const previous = mutationTails.get(workspaceId) ?? Promise.resolve();
+    const previous = mutationTails.get(scopeId) ?? Promise.resolve();
     let value!: T;
     const operation = previous.then(async () => {
-      const current = await loadWorkspace(workspaceId);
+      const current = await loadWorkspace(scopeId);
       const draft = structuredClone(current);
       const mutation = mutate(draft);
       value = mutation.value;
       if (mutation.write !== false) {
         await writeCatalog(draft);
-        cache.set(workspaceId, draft);
+        cache.set(scopeId, draft);
         emitChanges(draft, mutation);
         if (mutation.changed.length > 0) {
-          const listeners = admissionWaiters.get(workspaceId);
+          const listeners = admissionWaiters.get(scopeId);
           if (listeners) {
             for (const listener of [...listeners]) listener();
             listeners.clear();
@@ -1329,15 +1341,15 @@ export function createThreadRegistry(options: ThreadRegistryOptions) {
         }
       }
     });
-    mutationTails.set(workspaceId, operation.then(() => undefined, () => undefined));
+    mutationTails.set(scopeId, operation.then(() => undefined, () => undefined));
     await operation;
     return structuredClone(value);
   };
 
   const nextEventSeq = (catalog: ThreadCatalogDocument): number => catalogMaxEventSeq(catalog) + 1;
 
-  const catalogForScope = async (workspaceId: string, _parent: ThreadParent): Promise<ThreadCatalogDocument> => {
-    return loadWorkspace(workspaceId);
+  const catalogForScope = async (scopeId: string, _parent: ThreadParent): Promise<ThreadCatalogDocument> => {
+    return loadWorkspace(scopeId);
   };
 
   const findThread = (catalog: ThreadCatalogDocument, threadId: string): Thread | null => (
@@ -1349,10 +1361,10 @@ export function createThreadRegistry(options: ThreadRegistryOptions) {
     return thread && parentEquals(thread.parent, parent) ? thread : null;
   };
 
-  const cascadeBlocksParent = (workspaceId: string, catalog: ThreadCatalogDocument, parent: ThreadParent): boolean => {
+  const cascadeBlocksParent = (scopeId: string, catalog: ThreadCatalogDocument, parent: ThreadParent): boolean => {
     let current: ThreadParent | null = parent;
     while (current?.kind === "thread") {
-      if (cascadingThreads.has(scopeKey(workspaceId, current))) return true;
+      if (cascadingThreads.has(scopeKey(scopeId, current))) return true;
       const ancestor = findThread(catalog, current.id);
       if (!ancestor) return false;
       if (ancestor.lifecycle === "archived" || ancestor.deletion) return true;
@@ -1361,18 +1373,18 @@ export function createThreadRegistry(options: ThreadRegistryOptions) {
     return false;
   };
 
-  const cascadeBlocksThread = (workspaceId: string, catalog: ThreadCatalogDocument, thread: Thread): boolean => (
-    cascadingThreads.has(scopeKey(workspaceId, { kind: "thread", id: thread.id }))
+  const cascadeBlocksThread = (scopeId: string, catalog: ThreadCatalogDocument, thread: Thread): boolean => (
+    cascadingThreads.has(scopeKey(scopeId, { kind: "thread", id: thread.id }))
       || thread.deletion !== undefined
-      || cascadeBlocksParent(workspaceId, catalog, thread.parent)
+      || cascadeBlocksParent(scopeId, catalog, thread.parent)
   );
 
-  const beginCascade = async (workspaceId: string, threadId: string): Promise<() => void> => {
-    const key = scopeKey(workspaceId, { kind: "thread", id: threadId });
+  const beginCascade = async (scopeId: string, threadId: string): Promise<() => void> => {
+    const key = scopeKey(scopeId, { kind: "thread", id: threadId });
     // Enter the fence through the workspace mutation tail.  Any create/start
     // queued after this operation observes the fence synchronously inside its
     // own catalog mutation.
-    await mutateWorkspace(workspaceId, (catalog) => {
+    await mutateWorkspace(scopeId, (catalog) => {
       if (!findThread(catalog, threadId)) throw new Error(`Unknown thread: ${threadId}`);
       if (cascadingThreads.has(key)) throw new Error(`Thread cascade is already active: ${threadId}`);
       cascadingThreads.add(key);
@@ -1395,12 +1407,12 @@ export function createThreadRegistry(options: ThreadRegistryOptions) {
     if (input.draftBaselineId !== undefined && (!input.draftBaselineId || input.worktree !== "isolated")) {
       throw new Error("A Thread draft baseline requires a non-empty id and an isolated worktree");
     }
-    const key = scopeKey(input.workspaceId, input.parent);
+    const key = scopeKey(input.scopeId, input.parent);
     if (draining.has(key) || retiredParents.has(key)) {
       throw new Error("Cannot create a thread while its parent is being deleted");
     }
-    return mutateWorkspace(input.workspaceId, (catalog) => {
-      if (draining.has(key) || retiredParents.has(key) || cascadeBlocksParent(input.workspaceId, catalog, input.parent)) {
+    return mutateWorkspace(input.scopeId, (catalog) => {
+      if (draining.has(key) || retiredParents.has(key) || cascadeBlocksParent(input.scopeId, catalog, input.parent)) {
         throw new Error("Cannot create a thread while its parent is archived or being cascaded");
       }
       const timestamp = nowISO();
@@ -1413,7 +1425,7 @@ export function createThreadRegistry(options: ThreadRegistryOptions) {
       const thread: Thread = {
         id: `thread-${randomUUID().slice(0, 8)}`,
         parent: structuredClone(input.parent),
-        workspaceId: input.workspaceId,
+        workspaceId: input.scopeId,
         forkPoint: input.forkPoint ?? null,
         brief: input.brief,
         preset: input.preset ?? null,
@@ -1458,27 +1470,27 @@ export function createThreadRegistry(options: ThreadRegistryOptions) {
     });
   };
 
-  const assertDispatchAllowed = async (workspaceId: string, threadId: string): Promise<void> => {
-    await mutateWorkspace(workspaceId, (catalog) => {
+  const assertDispatchAllowed = async (scopeId: string, threadId: string): Promise<void> => {
+    await mutateWorkspace(scopeId, (catalog) => {
       const thread = findThread(catalog, threadId);
       if (!thread) throw new Error(`Unknown thread: ${threadId}`);
-      if (thread.lifecycle === "archived" || thread.lifecycle === "settled" || cascadeBlocksThread(workspaceId, catalog, thread)) {
+      if (thread.lifecycle === "archived" || thread.lifecycle === "settled" || cascadeBlocksThread(scopeId, catalog, thread)) {
         throw new Error(`Cannot dispatch while the thread or an ancestor is settled, archived, or being cascaded: ${threadId}`);
       }
       return { value: undefined, changed: [], write: false };
     });
   };
 
-  const getThread = async (workspaceId: string, parent: ThreadParent, threadId: string): Promise<Thread | null> => {
-    const catalog = await catalogForScope(workspaceId, parent);
+  const getThread = async (scopeId: string, parent: ThreadParent, threadId: string): Promise<Thread | null> => {
+    const catalog = await catalogForScope(scopeId, parent);
     return structuredClone(findThreadInScope(catalog, parent, threadId));
   };
 
   const updateThreadBrief = async (
-    workspaceId: string,
+    scopeId: string,
     threadId: string,
     brief: string,
-  ): Promise<Thread | null> => mutateWorkspace(workspaceId, (catalog) => {
+  ): Promise<Thread | null> => mutateWorkspace(scopeId, (catalog) => {
     const thread = findThread(catalog, threadId);
     if (!thread) return { value: null, changed: [], write: false };
     const normalized = brief.trim();
@@ -1490,13 +1502,13 @@ export function createThreadRegistry(options: ThreadRegistryOptions) {
     return { value: thread, changed: [thread] };
   });
 
-  const listWorkspaceThreads = async (workspaceId: string): Promise<Thread[]> => {
-    const catalog = await loadWorkspace(workspaceId);
+  const listWorkspaceThreads = async (scopeId: string): Promise<Thread[]> => {
+    const catalog = await loadWorkspace(scopeId);
     return structuredClone(catalog.threads);
   };
 
-  const listWorkspaceThreadSnapshots = async (workspaceId: string): Promise<Array<{ thread: Thread; activeRun: ThreadRun | null }>> => {
-    const catalog = await loadWorkspace(workspaceId);
+  const listWorkspaceThreadSnapshots = async (scopeId: string): Promise<Array<{ thread: Thread; activeRun: ThreadRun | null }>> => {
+    const catalog = await loadWorkspace(scopeId);
     return structuredClone(catalog.threads.map((thread) => ({ thread, activeRun: activeRunFor(catalog, thread) })));
   };
 
@@ -1507,15 +1519,15 @@ export function createThreadRegistry(options: ThreadRegistryOptions) {
    * object-file collection happens after it returns.
    */
   const withThreadRetentionSnapshot = async <T>(
-    workspaceId: string,
+    scopeId: string,
     operation: (snapshots: Array<{ thread: Thread; activeRun: ThreadRun | null }>) => Promise<T>,
   ): Promise<T> => {
-    const previous = mutationTails.get(workspaceId) ?? Promise.resolve();
+    const previous = mutationTails.get(scopeId) ?? Promise.resolve();
     const task = previous.then(async () => {
-      const catalog = await loadWorkspace(workspaceId);
+      const catalog = await loadWorkspace(scopeId);
       return operation(structuredClone(catalog.threads.map((thread) => ({ thread, activeRun: activeRunFor(catalog, thread) }))));
     });
-    mutationTails.set(workspaceId, task.then(() => undefined, () => undefined));
+    mutationTails.set(scopeId, task.then(() => undefined, () => undefined));
     return task;
   };
 
@@ -1524,48 +1536,48 @@ export function createThreadRegistry(options: ThreadRegistryOptions) {
     return [...cache.keys()].sort();
   };
 
-  const listThreads = async (workspaceId: string, parent: ThreadParent, includeHidden = false): Promise<Thread[]> => {
-    const catalog = await catalogForScope(workspaceId, parent);
+  const listThreads = async (scopeId: string, parent: ThreadParent, includeHidden = false): Promise<Thread[]> => {
+    const catalog = await catalogForScope(scopeId, parent);
     return structuredClone(catalog.threads.filter((thread) => (
       parentEquals(thread.parent, parent) && (includeHidden || !thread.hidden)
     )));
   };
 
   const listThreadSnapshots = async (
-    workspaceId: string,
+    scopeId: string,
     parent: ThreadParent,
     includeHidden = false,
   ): Promise<Array<{ thread: Thread; activeRun: ThreadRun | null }>> => {
-    const catalog = await catalogForScope(workspaceId, parent);
+    const catalog = await catalogForScope(scopeId, parent);
     return structuredClone(catalog.threads
       .filter((thread) => parentEquals(thread.parent, parent) && (includeHidden || !thread.hidden))
       .map((thread) => ({ thread, activeRun: activeRunFor(catalog, thread) })));
   };
 
-  const getActiveRun = async (workspaceId: string, threadId: string): Promise<ThreadRun | null> => {
-    const catalog = await loadWorkspace(workspaceId);
+  const getActiveRun = async (scopeId: string, threadId: string): Promise<ThreadRun | null> => {
+    const catalog = await loadWorkspace(scopeId);
     const thread = findThread(catalog, threadId);
     return structuredClone(thread ? activeRunFor(catalog, thread) : null);
   };
 
-  const listRuns = async (workspaceId: string, threadId: string): Promise<ThreadRun[]> => {
-    const catalog = await loadWorkspace(workspaceId);
+  const listRuns = async (scopeId: string, threadId: string): Promise<ThreadRun[]> => {
+    const catalog = await loadWorkspace(scopeId);
     return structuredClone(catalog.runs.filter((run) => run.threadId === threadId).toSorted((a, b) => a.attempt - b.attempt));
   };
 
-  const getThreadById = async (workspaceId: string, threadId: string): Promise<Thread | null> => {
-    const catalog = await loadWorkspace(workspaceId);
+  const getThreadById = async (scopeId: string, threadId: string): Promise<Thread | null> => {
+    const catalog = await loadWorkspace(scopeId);
     return structuredClone(findThread(catalog, threadId));
   };
 
-  const getThreadSnapshot = async (workspaceId: string, threadId: string): Promise<{ thread: Thread; activeRun: ThreadRun | null } | null> => {
-    const catalog = await loadWorkspace(workspaceId);
+  const getThreadSnapshot = async (scopeId: string, threadId: string): Promise<{ thread: Thread; activeRun: ThreadRun | null } | null> => {
+    const catalog = await loadWorkspace(scopeId);
     const thread = findThread(catalog, threadId);
     return thread ? structuredClone({ thread, activeRun: activeRunFor(catalog, thread) }) : null;
   };
 
-  const getThreadForSession = async (workspaceId: string, sessionId: string): Promise<Thread | null> => {
-    const catalog = await loadWorkspace(workspaceId);
+  const getThreadForSession = async (scopeId: string, sessionId: string): Promise<Thread | null> => {
+    const catalog = await loadWorkspace(scopeId);
     for (const thread of catalog.threads) {
       const run = activeRunFor(catalog, thread);
       if (!run || run.sessionId !== sessionId || !bindingFromRun(catalog, run)) continue;
@@ -1614,8 +1626,8 @@ export function createThreadRegistry(options: ThreadRegistryOptions) {
    * Every admission decision — dispatch, dequeue, lost-run resume,
    * continuation, review — must go through this count.
    */
-  const countActiveInRoot = async (workspaceId: string, parent: ThreadParent): Promise<number> => {
-    const catalog = await catalogForScope(workspaceId, parent);
+  const countActiveInRoot = async (scopeId: string, parent: ThreadParent): Promise<number> => {
+    const catalog = await catalogForScope(scopeId, parent);
     return countActiveInCatalog(catalog, rootSessionFor(catalog, parent));
   };
 
@@ -1629,9 +1641,9 @@ export function createThreadRegistry(options: ThreadRegistryOptions) {
 
   /** Only an actually blocked tool may release a model slot; attention is presentation. */
   const yieldExecutionSlot = async (
-    workspaceId: string, threadId: string, runId: string, waitingFor: ThreadWaitingFor,
+    scopeId: string, threadId: string, runId: string, waitingFor: ThreadWaitingFor,
   ): Promise<Thread | null> => {
-    const updated = await mutateWorkspace(workspaceId, (catalog) => {
+    const updated = await mutateWorkspace(scopeId, (catalog) => {
       const thread = findThread(catalog, threadId);
       const run = thread ? activeRunFor(catalog, thread) : null;
       if (!thread || !run || run.id !== runId || thread.lifecycle !== "active"
@@ -1649,25 +1661,25 @@ export function createThreadRegistry(options: ThreadRegistryOptions) {
       touchThread(catalog, thread);
       return { value: thread, changed: [thread] };
     });
-    if (updated) void tryDequeue(workspaceId, updated.parent).catch(reportObserverError);
+    if (updated) void tryDequeue(scopeId, updated.parent).catch(reportObserverError);
     return updated;
   };
 
   /** Reacquisition and clearing the yield are one catalog transaction. */
   const awaitExecutionSlot = async (
-    workspaceId: string, threadId: string, runId: string, signal: AbortSignal,
+    scopeId: string, threadId: string, runId: string, signal: AbortSignal,
   ): Promise<void> => {
     while (true) {
       signal.throwIfAborted();
       if (disposed) throw new Error("Thread registry disposed while awaiting execution admission");
       let wake!: () => void;
       const changed = new Promise<void>((resolve) => { wake = resolve; });
-      let listeners = admissionWaiters.get(workspaceId);
-      if (!listeners) { listeners = new Set(); admissionWaiters.set(workspaceId, listeners); }
+      let listeners = admissionWaiters.get(scopeId);
+      if (!listeners) { listeners = new Set(); admissionWaiters.set(scopeId, listeners); }
       listeners.add(wake);
       signal.addEventListener("abort", wake, { once: true });
       try {
-        const admitted = await mutateWorkspace(workspaceId, (catalog) => {
+        const admitted = await mutateWorkspace(scopeId, (catalog) => {
           signal.throwIfAborted();
           if (disposed) throw new Error("Thread registry is disposed");
           const thread = findThread(catalog, threadId);
@@ -1695,14 +1707,14 @@ export function createThreadRegistry(options: ThreadRegistryOptions) {
         await changed;
       } finally {
         listeners.delete(wake);
-        if (listeners.size === 0) admissionWaiters.delete(workspaceId);
+        if (listeners.size === 0) admissionWaiters.delete(scopeId);
         signal.removeEventListener("abort", wake);
       }
     }
   };
 
   const admitRun = async (
-    workspaceId: string,
+    scopeId: string,
     threadId: string,
     runtimeId = "pi",
     options: {
@@ -1713,11 +1725,11 @@ export function createThreadRegistry(options: ThreadRegistryOptions) {
       sessionOwner?: ThreadSessionOwner;
     } = {},
   ): Promise<{ run: ThreadRun; started: boolean }> => (
-    mutateWorkspace<{ run: ThreadRun; started: boolean }>(workspaceId, (catalog) => {
+    mutateWorkspace<{ run: ThreadRun; started: boolean }>(scopeId, (catalog) => {
       const thread = findThread(catalog, threadId);
       if (!thread) throw new Error(`Unknown thread: ${threadId}`);
-      const parentKey = scopeKey(workspaceId, thread.parent);
-      if (draining.has(parentKey) || retiredParents.has(parentKey) || cascadeBlocksThread(workspaceId, catalog, thread)) {
+      const parentKey = scopeKey(scopeId, thread.parent);
+      if (draining.has(parentKey) || retiredParents.has(parentKey) || cascadeBlocksThread(scopeId, catalog, thread)) {
         throw new Error("Cannot start a thread while its parent is archived or being cascaded");
       }
       if (options.request) {
@@ -1825,12 +1837,12 @@ export function createThreadRegistry(options: ThreadRegistryOptions) {
   const startRun = async (...args: Parameters<typeof admitRun>): Promise<ThreadRun> => (await admitRun(...args)).run;
 
   const markRunRunning = async (
-    workspaceId: string,
+    scopeId: string,
     threadId: string,
     runId: string,
     sessionId: string,
   ): Promise<ThreadRun> => {
-    const run = await mutateWorkspace(workspaceId, (catalog) => {
+    const run = await mutateWorkspace(scopeId, (catalog) => {
       const thread = findThread(catalog, threadId);
       const candidate = catalog.runs.find((entry) => entry.id === runId && entry.threadId === threadId);
       if (!thread || !candidate || thread.activeRunId !== runId) throw new Error(`Unknown active run: ${runId}`);
@@ -1845,7 +1857,7 @@ export function createThreadRegistry(options: ThreadRegistryOptions) {
     });
     await bindRunSession({
       sessionId,
-      owningWorkspaceId: workspaceId,
+      owningScopeId: scopeId,
       threadId,
       runId,
       parent: run.parent,
@@ -1854,21 +1866,21 @@ export function createThreadRegistry(options: ThreadRegistryOptions) {
     return structuredClone(run.run);
   };
 
-  const maybeDequeue = async (workspaceId: string, parent: ThreadParent): Promise<void> => {
-    const key = scopeKey(workspaceId, parent);
+  const maybeDequeue = async (scopeId: string, parent: ThreadParent): Promise<void> => {
+    const key = scopeKey(scopeId, parent);
     if (draining.has(key)) return;
-    await tryDequeue(workspaceId, parent);
+    await tryDequeue(scopeId, parent);
   };
 
   const endRun = async (
-    workspaceId: string,
+    scopeId: string,
     threadId: string,
     runId: string,
     outcome: ThreadRunOutcome,
     exitReason: string | null = null,
     report: ThreadReport | null = null,
   ): Promise<Thread> => {
-    const result = await mutateWorkspace(workspaceId, (catalog) => {
+    const result = await mutateWorkspace(scopeId, (catalog) => {
       const thread = findThread(catalog, threadId);
       const run = catalog.runs.find((candidate) => candidate.id === runId && candidate.threadId === threadId);
       if (!thread || !run || thread.activeRunId !== runId) throw new Error(`Unknown active run: ${runId}`);
@@ -1939,12 +1951,12 @@ export function createThreadRegistry(options: ThreadRegistryOptions) {
         ...(outcome !== "lost" && report ? { returned: [{ thread, run, report }] } : {}),
       };
     });
-    await maybeDequeue(workspaceId, result.parent).catch(reportObserverError);
+    await maybeDequeue(scopeId, result.parent).catch(reportObserverError);
     return result;
   };
 
   const updateRunProgress = async (
-    workspaceId: string,
+    scopeId: string,
     threadId: string,
     progress: {
       steps?: number;
@@ -1953,7 +1965,7 @@ export function createThreadRegistry(options: ThreadRegistryOptions) {
       diffStats?: ThreadDiffStats;
       costUsd?: number;
     },
-  ): Promise<Thread | null> => mutateWorkspace(workspaceId, (catalog) => {
+  ): Promise<Thread | null> => mutateWorkspace(scopeId, (catalog) => {
     const thread = findThread(catalog, threadId);
     if (!thread) return { value: null, changed: [], write: false };
     const run = activeRunFor(catalog, thread);
@@ -1970,12 +1982,12 @@ export function createThreadRegistry(options: ThreadRegistryOptions) {
   });
 
   const setAttention = async (
-    workspaceId: string,
+    scopeId: string,
     threadId: string,
     attention: ThreadAttention,
     waitingFor: ThreadWaitingFor | null = null,
   ): Promise<Thread | null> => {
-    const updated = await mutateWorkspace(workspaceId, (catalog) => {
+    const updated = await mutateWorkspace(scopeId, (catalog) => {
       const thread = findThread(catalog, threadId);
       if (!thread) return { value: null, changed: [], write: false };
       if ((attention === "user" || attention === "permission" || attention === "thread" || attention === "experiment" || attention === "followup") && waitingFor === null) {
@@ -1992,7 +2004,7 @@ export function createThreadRegistry(options: ThreadRegistryOptions) {
     // Attention updates cannot grant or release an execution slot. Re-evaluate
     // queued work, but only yieldExecutionSlot changes a live Run's admission.
     if (updated && attention === "thread") {
-      void tryDequeue(workspaceId, updated.parent).catch(reportObserverError);
+      void tryDequeue(scopeId, updated.parent).catch(reportObserverError);
     }
     return updated;
   };
@@ -2009,8 +2021,8 @@ export function createThreadRegistry(options: ThreadRegistryOptions) {
   // Serializes the recipient's input boundary, not its model execution. The
   // durable ledger below, rather than this transient lock, owns retry state.
   const messageDeliveryTails = new Map<string, Promise<void>>();
-  const withMessageDelivery = async <T>(workspaceId: string, target: string, task: () => Promise<T>): Promise<T> => {
-    const key = workspaceId + "\0" + target;
+  const withMessageDelivery = async <T>(scopeId: string, target: string, task: () => Promise<T>): Promise<T> => {
+    const key = scopeId + "\0" + target;
     const previous = messageDeliveryTails.get(key) ?? Promise.resolve();
     let release!: () => void;
     const next = new Promise<void>((resolve) => { release = resolve; });
@@ -2087,18 +2099,18 @@ export function createThreadRegistry(options: ThreadRegistryOptions) {
 
   /** Accept/acknowledge both ledgers in one durable catalog transaction. */
   const recordDirectedMessage = async (
-    workspaceId: string, message: Omit<ThreadMessageRecord, "direction">,
-  ): Promise<ThreadMessageRecord> => mutateWorkspace(workspaceId, (catalog) => {
+    scopeId: string, message: Omit<ThreadMessageRecord, "direction">,
+  ): Promise<ThreadMessageRecord> => mutateWorkspace(scopeId, (catalog) => {
     const result = writeDirectedMessage(catalog, message);
     for (const thread of result.changed) touchThread(catalog, thread);
     return result;
   });
 
   const recordThreadMessage = async (
-    workspaceId: string,
+    scopeId: string,
     threadId: string,
     message: ThreadMessageRecord,
-  ): Promise<ThreadMessageRecord> => mutateWorkspace(workspaceId, (catalog) => {
+  ): Promise<ThreadMessageRecord> => mutateWorkspace(scopeId, (catalog) => {
     const thread = findThread(catalog, threadId);
     if (!thread) throw new Error(`Unknown thread: ${threadId}`);
     const ledger = [...(thread.messages ?? [])];
@@ -2116,11 +2128,11 @@ export function createThreadRegistry(options: ThreadRegistryOptions) {
   });
 
   const patchThreadMessage = async (
-    workspaceId: string,
+    scopeId: string,
     threadId: string,
     messageId: string,
     patch: { status?: ThreadMessageRecord["status"]; runId?: string },
-  ): Promise<ThreadMessageRecord | null> => mutateWorkspace(workspaceId, (catalog) => {
+  ): Promise<ThreadMessageRecord | null> => mutateWorkspace(scopeId, (catalog) => {
     const thread = findThread(catalog, threadId);
     if (!thread) return { value: null, changed: [], write: false };
     const entry = thread.messages?.find((message) => message.id === messageId);
@@ -2133,11 +2145,11 @@ export function createThreadRegistry(options: ThreadRegistryOptions) {
 
   /** Patch both copies of an already-authorized directed-message receipt. */
   const patchDirectedMessage = async (
-    workspaceId: string,
+    scopeId: string,
     threadId: string,
     messageId: string,
     patch: { status?: ThreadMessageRecord["status"]; runId?: string },
-  ): Promise<ThreadMessageRecord | null> => mutateWorkspace(workspaceId, (catalog) => {
+  ): Promise<ThreadMessageRecord | null> => mutateWorkspace(scopeId, (catalog) => {
     const thread = findThread(catalog, threadId);
     const incoming = thread?.messages?.find((message) => message.direction === "in" && message.id === messageId);
     if (!incoming) return { value: null, changed: [], write: false };
@@ -2153,9 +2165,9 @@ export function createThreadRegistry(options: ThreadRegistryOptions) {
 
   /** Read pending input without claiming the consumer has accepted it. */
   const listPendingThreadMessages = async (
-    workspaceId: string, threadId: string, excludeId?: string,
+    scopeId: string, threadId: string, excludeId?: string,
   ): Promise<ThreadMessageRecord[]> => {
-    const catalog = await loadWorkspace(workspaceId);
+    const catalog = await loadWorkspace(scopeId);
     const thread = findThread(catalog, threadId);
     if (!thread) throw new Error(`Unknown thread: ${threadId}`);
     return structuredClone((thread.messages ?? []).filter((message) => (
@@ -2167,10 +2179,10 @@ export function createThreadRegistry(options: ThreadRegistryOptions) {
 
   /** Both parties' receipts commit together, after actual input acceptance. */
   const acknowledgeThreadMessages = async (
-    workspaceId: string, threadId: string, ids: readonly string[], runId?: string,
+    scopeId: string, threadId: string, ids: readonly string[], runId?: string,
   ): Promise<void> => {
     if (ids.length === 0) return;
-    await mutateWorkspace(workspaceId, (catalog) => {
+    await mutateWorkspace(scopeId, (catalog) => {
       const thread = findThread(catalog, threadId);
       if (!thread) throw new Error(`Unknown thread: ${threadId}`);
       if (runId && !catalog.runs.some((run) => run.id === runId && run.threadId === threadId)) {
@@ -2188,8 +2200,8 @@ export function createThreadRegistry(options: ThreadRegistryOptions) {
     });
   };
 
-  const failRunRequest = async (workspaceId: string, threadId: string, runId: string, failure: string): Promise<void> => {
-    await mutateWorkspace(workspaceId, (catalog) => {
+  const failRunRequest = async (scopeId: string, threadId: string, runId: string, failure: string): Promise<void> => {
+    await mutateWorkspace(scopeId, (catalog) => {
       const thread = findThread(catalog, threadId);
       const run = catalog.runs.find((entry) => entry.threadId === threadId && entry.id === runId);
       const message = thread?.messages?.find((entry) => entry.direction === "in" && entry.id === run?.request?.requestId);
@@ -2202,8 +2214,8 @@ export function createThreadRegistry(options: ThreadRegistryOptions) {
 
   /** Queue every distinct request; no later caller may overwrite accepted work. */
   const enqueueContinuation = async (
-    workspaceId: string, threadId: string, continuation: ThreadPendingContinuation,
-  ): Promise<Thread> => mutateWorkspace(workspaceId, (catalog) => {
+    scopeId: string, threadId: string, continuation: ThreadPendingContinuation,
+  ): Promise<Thread> => mutateWorkspace(scopeId, (catalog) => {
     const thread = findThread(catalog, threadId);
     if (!thread) throw new Error(`Unknown thread: ${threadId}`);
     const queue = thread.pendingContinuations ?? [];
@@ -2223,13 +2235,13 @@ export function createThreadRegistry(options: ThreadRegistryOptions) {
   });
 
   const setIntegration = async (
-    workspaceId: string,
+    scopeId: string,
     threadId: string,
     integration: ThreadIntegration,
     diffStats?: ThreadDiffStats | null,
     mergedCommit?: string | null,
     mergedResultRevision?: number | null,
-  ): Promise<Thread | null> => mutateWorkspace(workspaceId, (catalog) => {
+  ): Promise<Thread | null> => mutateWorkspace(scopeId, (catalog) => {
     const thread = findThread(catalog, threadId);
     if (!thread) return { value: null, changed: [], write: false };
     const nextMergedCommit = mergedCommit === undefined
@@ -2262,10 +2274,10 @@ export function createThreadRegistry(options: ThreadRegistryOptions) {
   });
 
   const setIntegrationBinding = async (
-    workspaceId: string,
+    scopeId: string,
     threadId: string,
     binding: ThreadIntegrationBinding | null,
-  ): Promise<Thread | null> => mutateWorkspace(workspaceId, (catalog) => {
+  ): Promise<Thread | null> => mutateWorkspace(scopeId, (catalog) => {
     const thread = findThread(catalog, threadId);
     if (!thread) return { value: null, changed: [], write: false };
     if (binding) {
@@ -2285,10 +2297,10 @@ export function createThreadRegistry(options: ThreadRegistryOptions) {
   });
 
   const invalidateIntegrationBinding = async (
-    workspaceId: string,
+    scopeId: string,
     threadId: string,
     expectedBindingFingerprint: string,
-  ): Promise<Thread | null> => mutateWorkspace(workspaceId, (catalog) => {
+  ): Promise<Thread | null> => mutateWorkspace(scopeId, (catalog) => {
     const thread = findThread(catalog, threadId);
     if (!thread) return { value: null, changed: [], write: false };
     if (thread.integration === "merged" || thread.integration === "none"
@@ -2304,10 +2316,10 @@ export function createThreadRegistry(options: ThreadRegistryOptions) {
   });
 
   const setVerification = async (
-    workspaceId: string,
+    scopeId: string,
     threadId: string,
     verification: ThreadVerificationProjection | null,
-  ): Promise<Thread | null> => mutateWorkspace(workspaceId, (catalog) => {
+  ): Promise<Thread | null> => mutateWorkspace(scopeId, (catalog) => {
     const thread = findThread(catalog, threadId);
     if (!thread) return { value: null, changed: [], write: false };
     if (verification) {
@@ -2323,8 +2335,8 @@ export function createThreadRegistry(options: ThreadRegistryOptions) {
     return { value: thread, changed: [thread] };
   });
 
-  const setWorktree = async (workspaceId: string, threadId: string, worktree: ThreadWorktree): Promise<Thread | null> => (
-    mutateWorkspace(workspaceId, (catalog) => {
+  const setWorktree = async (scopeId: string, threadId: string, worktree: ThreadWorktree): Promise<Thread | null> => (
+    mutateWorkspace(scopeId, (catalog) => {
       const thread = findThread(catalog, threadId);
       if (!thread) return { value: null, changed: [], write: false };
       thread.worktree = normalizeThreadWorktree(worktree);
@@ -2334,7 +2346,7 @@ export function createThreadRegistry(options: ThreadRegistryOptions) {
   );
 
   const setWorkingState = async (
-    workspaceId: string,
+    scopeId: string,
     threadId: string,
     input: {
       branchId: string;
@@ -2342,7 +2354,7 @@ export function createThreadRegistry(options: ThreadRegistryOptions) {
       worktree?: ThreadWorktree;
       diffStats?: ThreadDiffStats;
     },
-  ): Promise<Thread | null> => mutateWorkspace(workspaceId, (catalog) => {
+  ): Promise<Thread | null> => mutateWorkspace(scopeId, (catalog) => {
     const thread = findThread(catalog, threadId);
     if (!thread) return { value: null, changed: [], write: false };
     thread.workBranchId = input.branchId;
@@ -2373,11 +2385,11 @@ export function createThreadRegistry(options: ThreadRegistryOptions) {
   });
 
   const setPendingEvidence = async (
-    workspaceId: string,
+    scopeId: string,
     threadId: string,
     runId: string,
     evidence: RetrievalEvidence,
-  ): Promise<Thread> => mutateWorkspace(workspaceId, (catalog) => {
+  ): Promise<Thread> => mutateWorkspace(scopeId, (catalog) => {
     const thread = findThread(catalog, threadId);
     if (!thread) throw new Error(`Unknown thread: ${threadId}`);
     if (thread.preset !== "retrieval") throw new Error(`Thread is not a retrieval preset: ${threadId}`);
@@ -2391,26 +2403,26 @@ export function createThreadRegistry(options: ThreadRegistryOptions) {
   });
 
   const completeThread = async (
-    workspaceId: string,
+    scopeId: string,
     threadId: string,
     report: ThreadReport,
   ): Promise<Thread | null> => {
-    const catalog = await loadWorkspace(workspaceId);
+    const catalog = await loadWorkspace(scopeId);
     const thread = findThread(catalog, threadId);
     if (!thread) return null;
     if (thread.lifecycle === "settled" && thread.report) return structuredClone(thread);
     if (!thread.activeRunId) throw new Error(`Thread has no active run: ${threadId}`);
-    return endRun(workspaceId, threadId, thread.activeRunId, "success", null, report);
+    return endRun(scopeId, threadId, thread.activeRunId, "success", null, report);
   };
 
-  const cancelThread = async (workspaceId: string, threadId: string, exitReason = "cancelled by user or parent"): Promise<Thread | null> => {
-    const catalog = await loadWorkspace(workspaceId);
+  const cancelThread = async (scopeId: string, threadId: string, exitReason = "cancelled by user or parent"): Promise<Thread | null> => {
+    const catalog = await loadWorkspace(scopeId);
     const thread = findThread(catalog, threadId);
     if (!thread) return null;
     if (thread.lifecycle === "archived") return structuredClone(thread);
     const run = activeRunFor(catalog, thread);
-    if (run && run.outcome === null) return endRun(workspaceId, threadId, run.id, "cancelled", exitReason);
-    const result = await mutateWorkspace(workspaceId, (draft) => {
+    if (run && run.outcome === null) return endRun(scopeId, threadId, run.id, "cancelled", exitReason);
+    const result = await mutateWorkspace(scopeId, (draft) => {
       const candidate = findThread(draft, threadId);
       if (!candidate) return { value: null, changed: [], write: false };
       candidate.lifecycle = "settled";
@@ -2419,12 +2431,12 @@ export function createThreadRegistry(options: ThreadRegistryOptions) {
       touchThread(draft, candidate);
       return { value: candidate, changed: [candidate] };
     });
-    if (result) await maybeDequeue(workspaceId, result.parent).catch(reportObserverError);
+    if (result) await maybeDequeue(scopeId, result.parent).catch(reportObserverError);
     return result;
   };
 
-  const archiveThread = async (workspaceId: string, threadId: string, keepWorktree?: boolean): Promise<Thread | null> => {
-    const result = await mutateWorkspace(workspaceId, (catalog) => {
+  const archiveThread = async (scopeId: string, threadId: string, keepWorktree?: boolean): Promise<Thread | null> => {
+    const result = await mutateWorkspace(scopeId, (catalog) => {
       const thread = findThread(catalog, threadId);
       if (!thread) return { value: null, changed: [], write: false };
       const activeRun = activeRunFor(catalog, thread);
@@ -2438,16 +2450,16 @@ export function createThreadRegistry(options: ThreadRegistryOptions) {
       touchThread(catalog, thread);
       return { value: thread, changed: [thread] };
     });
-    if (result) await maybeDequeue(workspaceId, result.parent).catch(reportObserverError);
+    if (result) await maybeDequeue(scopeId, result.parent).catch(reportObserverError);
     return result;
   };
 
-  const restoreThread = async (workspaceId: string, threadId: string): Promise<Thread | null> => (
-    mutateWorkspace(workspaceId, (catalog) => {
+  const restoreThread = async (scopeId: string, threadId: string): Promise<Thread | null> => (
+    mutateWorkspace(scopeId, (catalog) => {
       const thread = findThread(catalog, threadId);
       if (!thread) return { value: null, changed: [], write: false };
       if (thread.lifecycle !== "archived") return { value: thread, changed: [], write: false };
-      if (cascadeBlocksThread(workspaceId, catalog, thread)) {
+      if (cascadeBlocksThread(scopeId, catalog, thread)) {
         throw new Error(`Cannot restore thread while its ancestor is archived or being cascaded: ${threadId}`);
       }
       const run = activeRunFor(catalog, thread);
@@ -2457,8 +2469,8 @@ export function createThreadRegistry(options: ThreadRegistryOptions) {
     })
   );
 
-  const setKeepWorktree = async (workspaceId: string, threadId: string, keepWorktree: boolean): Promise<Thread | null> => (
-    mutateWorkspace(workspaceId, (catalog) => {
+  const setKeepWorktree = async (scopeId: string, threadId: string, keepWorktree: boolean): Promise<Thread | null> => (
+    mutateWorkspace(scopeId, (catalog) => {
       const thread = findThread(catalog, threadId);
       if (!thread) return { value: null, changed: [], write: false };
       thread.keepWorktree = keepWorktree;
@@ -2468,11 +2480,11 @@ export function createThreadRegistry(options: ThreadRegistryOptions) {
   );
 
   const markDeletionCascade = async (
-    workspaceId: string,
+    scopeId: string,
     threadIds: readonly string[],
     rootThreadId: string,
     operationId: string,
-  ): Promise<Thread[]> => mutateWorkspace(workspaceId, (catalog) => {
+  ): Promise<Thread[]> => mutateWorkspace(scopeId, (catalog) => {
     const timestamp = nowISO();
     const changed: Thread[] = [];
     for (const threadId of threadIds) {
@@ -2499,12 +2511,12 @@ export function createThreadRegistry(options: ThreadRegistryOptions) {
   });
 
   const setDeletionPhase = async (
-    workspaceId: string,
+    scopeId: string,
     threadId: string,
     operationId: string,
     phase: NonNullable<Thread["deletion"]>["phase"],
     error?: string,
-  ): Promise<Thread | null> => mutateWorkspace(workspaceId, (catalog) => {
+  ): Promise<Thread | null> => mutateWorkspace(scopeId, (catalog) => {
     const thread = findThread(catalog, threadId);
     if (!thread) return { value: null, changed: [], write: false };
     if (!thread.deletion || thread.deletion.operationId !== operationId) {
@@ -2518,13 +2530,13 @@ export function createThreadRegistry(options: ThreadRegistryOptions) {
     return { value: thread, changed: [thread] };
   });
 
-  const listDeletionRoots = async (): Promise<Array<{ workspaceId: string; parent: ThreadParent; threadId: string }>> => {
-    const roots: Array<{ workspaceId: string; parent: ThreadParent; threadId: string }> = [];
-    for (const workspaceId of await listWorkspaceIds()) {
-      const catalog = await loadWorkspace(workspaceId);
+  const listDeletionRoots = async (): Promise<Array<{ scopeId: string; parent: ThreadParent; threadId: string }>> => {
+    const roots: Array<{ scopeId: string; parent: ThreadParent; threadId: string }> = [];
+    for (const scopeId of await listWorkspaceIds()) {
+      const catalog = await loadWorkspace(scopeId);
       for (const thread of catalog.threads) {
         if (thread.deletion?.rootThreadId === thread.id) {
-          roots.push({ workspaceId, parent: structuredClone(thread.parent), threadId: thread.id });
+          roots.push({ scopeId, parent: structuredClone(thread.parent), threadId: thread.id });
         }
       }
     }
@@ -2532,9 +2544,9 @@ export function createThreadRegistry(options: ThreadRegistryOptions) {
   };
 
   const archiveThreadsForDeletedSession = async (
-    workspaceId: string,
+    scopeId: string,
     sessionId: string,
-  ): Promise<Thread[]> => mutateWorkspace(workspaceId, (catalog) => {
+  ): Promise<Thread[]> => mutateWorkspace(scopeId, (catalog) => {
     const timestamp = nowISO();
     const affectedIds = new Set(
       catalog.runs.filter((run) => run.sessionId === sessionId).map((run) => run.threadId),
@@ -2566,7 +2578,7 @@ export function createThreadRegistry(options: ThreadRegistryOptions) {
   const archiveThreadsForDeletedSessionAcrossWorkspaces = async (
     sessionId: string,
   ): Promise<Thread[]> => {
-    const workspaceIds = new Set(cache.keys());
+    const scopeIds = new Set(cache.keys());
     const directory = join(dataDir, "threads", hostId);
     let entries: fs.Dirent<string>[];
     try {
@@ -2583,21 +2595,21 @@ export function createThreadRegistry(options: ThreadRegistryOptions) {
       const parsed = parseJson(raw, path);
       if (Array.isArray(parsed)) continue;
       const catalog = parseCatalog(raw, path);
-      if (threadCatalogPath(dataDir, hostId, catalog.workspaceId) !== path) {
+      if (threadCatalogPath(dataDir, hostId, catalog.scopeId) !== path) {
         throw new ThreadRegistryError("corrupt", `Thread registry filename does not match its workspace identity: ${path}`, path);
       }
-      if (!cache.has(catalog.workspaceId)) cache.set(catalog.workspaceId, catalog);
-      workspaceIds.add(catalog.workspaceId);
+      if (!cache.has(catalog.scopeId)) cache.set(catalog.scopeId, catalog);
+      scopeIds.add(catalog.scopeId);
     }
     const archived: Thread[] = [];
-    for (const workspaceId of workspaceIds) {
-      archived.push(...await archiveThreadsForDeletedSession(workspaceId, sessionId));
+    for (const scopeId of scopeIds) {
+      archived.push(...await archiveThreadsForDeletedSession(scopeId, sessionId));
     }
     return archived;
   };
 
   const convertThread = async (
-    workspaceId: string,
+    scopeId: string,
     threadId: string,
     input: {
       model?: { providerId: string; modelId: string };
@@ -2606,7 +2618,7 @@ export function createThreadRegistry(options: ThreadRegistryOptions) {
       tools: string[];
       worktree: ThreadWorktree;
     },
-  ): Promise<{ run: ThreadRun; thread: Thread } | null> => mutateWorkspace(workspaceId, (catalog) => {
+  ): Promise<{ run: ThreadRun; thread: Thread } | null> => mutateWorkspace(scopeId, (catalog) => {
     const thread = findThread(catalog, threadId);
     if (!thread) return { value: null, changed: [], write: false };
     if (thread.kind !== "discussion") throw new Error(`Thread is already an implementation thread: ${threadId}`);
@@ -2684,25 +2696,25 @@ export function createThreadRegistry(options: ThreadRegistryOptions) {
     return { value: { thread, run }, changed: [thread] };
   });
 
-  const mergeThread = async (workspaceId: string, threadId: string): Promise<Thread | null> => (
-    setIntegration(workspaceId, threadId, "merged")
+  const mergeThread = async (scopeId: string, threadId: string): Promise<Thread | null> => (
+    setIntegration(scopeId, threadId, "merged")
   );
 
   const cancelAllForParent = async (
-    workspaceId: string,
+    scopeId: string,
     parent: ThreadParent,
     stopActive?: (thread: Thread) => Promise<void>,
   ): Promise<void> => {
-    const key = scopeKey(workspaceId, parent);
+    const key = scopeKey(scopeId, parent);
     draining.add(key);
     try {
-      const threads = await listThreads(workspaceId, parent, true);
+      const threads = await listThreads(scopeId, parent, true);
       for (const thread of threads) {
         if (thread.lifecycle === "queued" || thread.lifecycle === "active") {
           if (thread.lifecycle === "active") await stopActive?.(thread);
-          await cancelThread(workspaceId, thread.id, "parent session deleted");
+          await cancelThread(scopeId, thread.id, "parent session deleted");
         }
-        await archiveThread(workspaceId, thread.id);
+        await archiveThread(scopeId, thread.id);
       }
       retiredParents.add(key);
     } finally {
@@ -2710,15 +2722,15 @@ export function createThreadRegistry(options: ThreadRegistryOptions) {
     }
   };
 
-  const deleteThread = async (workspaceId: string, parent: ThreadParent, threadId: string): Promise<boolean> => {
-    const removed = await mutateWorkspace(workspaceId, (catalog) => {
+  const deleteThread = async (scopeId: string, parent: ThreadParent, threadId: string): Promise<boolean> => {
+    const removed = await mutateWorkspace(scopeId, (catalog) => {
       const index = catalog.threads.findIndex((thread) => thread.id === threadId && parentEquals(thread.parent, parent));
       if (index < 0) return { value: false, changed: [], write: false };
       const thread = catalog.threads[index]!;
       // This entry point is used to discard a dispatch that never acquired a
       // Run. Once a lifecycle cascade owns the thread, or another path has
       // advanced it, leave the durable record for that owner to settle/archive.
-      if (cascadeBlocksThread(workspaceId, catalog, thread)
+      if (cascadeBlocksThread(scopeId, catalog, thread)
         || thread.lifecycle === "archived"
         || thread.lifecycle === "settled"
         || thread.activeRunId !== null) {
@@ -2729,7 +2741,7 @@ export function createThreadRegistry(options: ThreadRegistryOptions) {
       for (const key of cursors.keys()) if (key.endsWith(`\0${threadId}`)) cursors.delete(key);
       return { value: true, changed: [], wakeParents: [parent] };
     });
-    if (removed) await Promise.resolve(options.onThreadRemoved?.(workspaceId, threadId)).catch(reportObserverError);
+    if (removed) await Promise.resolve(options.onThreadRemoved?.(scopeId, threadId)).catch(reportObserverError);
     return removed;
   };
 
@@ -2739,8 +2751,8 @@ export function createThreadRegistry(options: ThreadRegistryOptions) {
    * dispatch that never acquired a Run — this is the delete path's durable
    * removal: it also drops session bindings for every Run the Thread owned.
    */
-  const removeThread = async (workspaceId: string, parent: ThreadParent, threadId: string): Promise<Thread | null> => {
-    const removed = await mutateWorkspace(workspaceId, (catalog) => {
+  const removeThread = async (scopeId: string, parent: ThreadParent, threadId: string): Promise<Thread | null> => {
+    const removed = await mutateWorkspace(scopeId, (catalog) => {
       const index = catalog.threads.findIndex((thread) => thread.id === threadId && parentEquals(thread.parent, parent));
       if (index < 0) return { value: null, changed: [], write: false };
       const thread = catalog.threads[index]!;
@@ -2758,7 +2770,7 @@ export function createThreadRegistry(options: ThreadRegistryOptions) {
     for (const sessionId of removed.sessionIds) {
       await unbindRunSession(sessionId).catch(reportObserverError);
     }
-    await Promise.resolve(options.onThreadRemoved?.(workspaceId, threadId)).catch(reportObserverError);
+    await Promise.resolve(options.onThreadRemoved?.(scopeId, threadId)).catch(reportObserverError);
     return removed.thread;
   };
 
@@ -2793,8 +2805,8 @@ export function createThreadRegistry(options: ThreadRegistryOptions) {
     }
   };
 
-  const subscribeToChanges = (workspaceId: string, parent: ThreadParent, callback: () => void): (() => void) => {
-    const key = scopeKey(workspaceId, parent);
+  const subscribeToChanges = (scopeId: string, parent: ThreadParent, callback: () => void): (() => void) => {
+    const key = scopeKey(scopeId, parent);
     let callbacks = waiters.get(key);
     if (!callbacks) {
       callbacks = new Set();
@@ -2807,14 +2819,14 @@ export function createThreadRegistry(options: ThreadRegistryOptions) {
     };
   };
 
-  async function tryDequeue(workspaceId: string, parent: ThreadParent): Promise<Thread | null> {
-    const catalog = await catalogForScope(workspaceId, parent);
+  async function tryDequeue(scopeId: string, parent: ThreadParent): Promise<Thread | null> {
+    const catalog = await catalogForScope(scopeId, parent);
     const root = rootSessionFor(catalog, parent);
     // Dequeue and admission are root-wide: the oldest candidate anywhere under
     // the root task wins a freed slot, regardless of which scope freed it.
     const key = root !== null
-      ? scopeKey(workspaceId, { kind: "session", id: root })
-      : scopeKey(workspaceId, parent);
+      ? scopeKey(scopeId, { kind: "session", id: root })
+      : scopeKey(scopeId, parent);
     if (dequeueing.has(key)) return null;
     const next = catalog.threads
       .filter((thread) => {
@@ -2829,23 +2841,23 @@ export function createThreadRegistry(options: ThreadRegistryOptions) {
       ))[0] ?? null;
     if (next && countActiveInCatalog(catalog, root) >= next.manifest.concurrency) return null;
     if (!next || !options.onThreadDequeued) {
-      if (next === null) await Promise.resolve(options.onAdmissionFreed?.(workspaceId, parent)).catch(reportObserverError);
+      if (next === null) await Promise.resolve(options.onAdmissionFreed?.(scopeId, parent)).catch(reportObserverError);
       return structuredClone(next);
     }
     dequeueing.add(key);
     try {
-      await options.onThreadDequeued(workspaceId, next.parent, structuredClone(next));
+      await options.onThreadDequeued(scopeId, next.parent, structuredClone(next));
       return structuredClone(next);
     } finally {
       dequeueing.delete(key);
-      await Promise.resolve(options.onAdmissionFreed?.(workspaceId, parent)).catch(reportObserverError);
+      await Promise.resolve(options.onAdmissionFreed?.(scopeId, parent)).catch(reportObserverError);
     }
   }
 
   const reconcileWorkspace = async (
-    workspaceId: string,
+    scopeId: string,
     activeSessionIds: ReadonlySet<string> = new Set(),
-  ): Promise<number> => mutateWorkspace(workspaceId, (catalog) => {
+  ): Promise<number> => mutateWorkspace(scopeId, (catalog) => {
     let reconciled = 0;
     const changed: Thread[] = [];
     for (const run of catalog.runs) {
@@ -2900,13 +2912,13 @@ export function createThreadRegistry(options: ThreadRegistryOptions) {
           continue;
         }
         const catalog = parseCatalog(raw, path);
-        const expectedPath = threadCatalogPath(dataDir, hostId, catalog.workspaceId);
+        const expectedPath = threadCatalogPath(dataDir, hostId, catalog.scopeId);
         if (expectedPath !== path) {
           throw new ThreadRegistryError("corrupt", `Thread registry filename does not match its workspace identity: ${path}`, path);
         }
-        cache.set(catalog.workspaceId, catalog);
+        cache.set(catalog.scopeId, catalog);
         workspaces += 1;
-        reconciledRuns += await reconcileWorkspace(catalog.workspaceId);
+        reconciledRuns += await reconcileWorkspace(catalog.scopeId);
       } catch (error) {
         const failure = error instanceof ThreadRegistryError
           ? error

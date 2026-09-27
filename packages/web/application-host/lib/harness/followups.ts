@@ -216,7 +216,7 @@ export interface FollowUpServiceDeps {
   sessionBusy(sessionId: string): Promise<boolean>;
   /** Single thread.send-compatible message/admission path for Thread targets. */
   sendToThread(input: {
-    workspaceId: string;
+    scopeId: string;
     threadId: string;
     text: string;
     requestId: string;
@@ -2540,7 +2540,7 @@ export function createFollowUpService(deps: FollowUpServiceDeps) {
       return { delivery: "continued" as const };
     }
     return deps.sendToThread({
-      workspaceId,
+      scopeId: workspaceId,
       threadId: definition.threadId,
       text: task,
       requestId,

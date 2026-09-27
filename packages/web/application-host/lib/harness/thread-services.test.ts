@@ -305,7 +305,7 @@ describe("thread services", () => {
     } as never);
     try {
       const root = await registry.createThread({
-        workspaceId: "workspace-1",
+        scopeId: "workspace-1",
         parent: { kind: "session", id: "parent-1" },
         brief: "principal research",
         kind: "discussion",
@@ -434,7 +434,7 @@ describe("thread services", () => {
     } as never);
     try {
       const parent = await registry.createThread({
-        workspaceId: "workspace-1",
+        scopeId: "workspace-1",
         parent: { kind: "session", id: "root-session" },
         brief: "limited parent",
         kind: "implementation",
@@ -501,7 +501,7 @@ describe("thread services", () => {
     } as never);
     try {
       const parent = await registry.createThread({
-        workspaceId: "workspace-1",
+        scopeId: "workspace-1",
         parent: { kind: "session", id: "root-session" },
         brief: "parent implementer",
         preset: "hard-implement",
@@ -541,7 +541,7 @@ describe("thread services", () => {
       );
       expect(retrieval?.manifest.worktree).toBe("isolated");
       expect(prepareIsolatedBranch).toHaveBeenCalledWith(expect.objectContaining({
-        workspaceId: "workspace-1",
+        scopeId: "workspace-1",
         parent: { kind: "thread", id: parent.id },
         threadId: queuedRetrieval.threadId,
       }));
@@ -571,7 +571,7 @@ describe("thread services", () => {
     } as never);
     try {
       const scoped = await registry.createThread({
-        workspaceId: "workspace-1",
+        scopeId: "workspace-1",
         parent: { kind: "session", id: "root-session" },
         brief: "scoped parent",
         preset: "hard-implement",
@@ -594,7 +594,7 @@ describe("thread services", () => {
         .rejects.toMatchObject({ harnessCode: "denied" });
 
       const review = await registry.createThread({
-        workspaceId: "workspace-1",
+        scopeId: "workspace-1",
         parent: { kind: "session", id: "root-session" },
         brief: "review parent",
         preset: "review",
@@ -764,7 +764,7 @@ describe("thread services", () => {
       expect(thread?.manifest.scope).toEqual(["src/foo..bar", "version...txt"]);
 
       const scoped = await registry.createThread({
-        workspaceId: "workspace-1",
+        scopeId: "workspace-1",
         parent: { kind: "session", id: "root-session" },
         brief: "scoped parent",
         preset: "hard-implement",
@@ -809,7 +809,7 @@ describe("thread services", () => {
     } as never);
     try {
       const scoped = await registry.createThread({
-        workspaceId: "workspace-1",
+        scopeId: "workspace-1",
         parent: { kind: "session", id: "root-session" },
         brief: "scoped parent",
         preset: "hard-implement",
@@ -929,7 +929,7 @@ describe("thread services", () => {
       brief: string,
       worktree: "isolated" | "none" = "none",
     ) => ({
-      workspaceId: "workspace-1",
+      scopeId: "workspace-1",
       parent,
       brief,
       preset: "hard-implement" as const,
@@ -1063,7 +1063,7 @@ describe("thread services", () => {
 
   const settledThread = async (registry: ReturnType<typeof createThreadRegistry>) => {
     const thread = await registry.createThread({
-      workspaceId: "workspace-1",
+      scopeId: "workspace-1",
       parent: { kind: "session", id: "parent-1" },
       brief: "Implement the feature",
       kind: "implementation" as const,
@@ -1107,7 +1107,7 @@ describe("thread services", () => {
       }, serviceContext());
       expect(result).toMatchObject({ accepted: true, lifecycle: "active", runId: "run-2" });
       expect(continueRun).toHaveBeenCalledWith(expect.objectContaining({
-        workspaceId: "workspace-1",
+        scopeId: "workspace-1",
         parent: { kind: "session", id: "parent-1" },
         threadId: thread.id,
         mode: "continue",
@@ -1191,7 +1191,7 @@ describe("thread services", () => {
     concurrency = 2,
   ) => {
     const thread = await registry.createThread({
-      workspaceId: "workspace-1",
+      scopeId: "workspace-1",
       parent,
       brief,
       kind: "implementation" as const,
@@ -1591,7 +1591,7 @@ describe("thread services", () => {
     } as never);
     try {
       const queued = await registry.createThread({
-        workspaceId: "workspace-1",
+        scopeId: "workspace-1",
         parent: { kind: "session", id: "parent-1" },
         brief: "queued",
         kind: "implementation",
@@ -1627,7 +1627,7 @@ describe("thread services", () => {
 
   const researchCaller = async (registry: ReturnType<typeof createThreadRegistry>) => {
     const caller = await registry.createThread({
-      workspaceId: "workspace-1",
+      scopeId: "workspace-1",
       parent: { kind: "session", id: "root-1" },
       brief: "principal researcher",
       kind: "implementation" as const,
@@ -1649,7 +1649,7 @@ describe("thread services", () => {
     parentThreadId: string,
   ) => {
     const child = await registry.createThread({
-      workspaceId: "workspace-1",
+      scopeId: "workspace-1",
       parent: { kind: "thread", id: parentThreadId },
       brief: "investigate the hypothesis",
       kind: "implementation" as const,
@@ -1735,7 +1735,7 @@ describe("thread services", () => {
     try {
       const caller = await researchCaller(registry);
       const child = await registry.createThread({
-        workspaceId: "workspace-1",
+        scopeId: "workspace-1",
         parent: { kind: "thread", id: caller.thread.id },
         brief: "research implementation",
         kind: "implementation" as const,
@@ -1879,7 +1879,7 @@ describe("thread services", () => {
       }, threadCtx(caller.sessionId))).rejects.toMatchObject({ harnessCode: "invalid-params" });
       // A running target cannot be re-routed mid-Run.
       const live = await registry.createThread({
-        workspaceId: "workspace-1",
+        scopeId: "workspace-1",
         parent: { kind: "thread", id: caller.thread.id },
         brief: "live",
         kind: "implementation" as const,

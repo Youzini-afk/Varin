@@ -89,7 +89,7 @@ it('continues the original session after Git/native archive, reclaim and restore
   });
   const parent = { kind: 'session', id: 'parent' } as const;
   const input = {
-    workspaceId, parent, brief: 'Implement the result', kind: 'implementation' as const, createdBy: 'agent' as const,
+    scopeId: workspaceId, parent, brief: 'Implement the result', kind: 'implementation' as const, createdBy: 'agent' as const,
     concurrency: 12, autoRun: true, worktree: 'isolated' as const, tools: ['read', 'edit'], permissions: {},
   };
   try {

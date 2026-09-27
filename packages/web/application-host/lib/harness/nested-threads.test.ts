@@ -76,7 +76,7 @@ describe("nested thread production chain", () => {
     });
     const coordinator = new IntegrationCoordinator({ workingStates });
     const input = (overrides: Partial<CreateThreadInput> = {}): CreateThreadInput => ({
-      workspaceId: "ws",
+      scopeId: "ws",
       parent: PARENT,
       brief: "parent",
       preset: "hard-implement",
@@ -92,7 +92,7 @@ describe("nested thread production chain", () => {
     try {
       const parent = await registry.createThread(input());
       await runtime.prepareIsolatedBranch({
-        workspaceId: "ws",
+        scopeId: "ws",
         parent: PARENT,
         threadId: parent.id,
       });
@@ -110,7 +110,7 @@ describe("nested thread production chain", () => {
         preset: "check",
       }));
       await runtime.prepareIsolatedBranch({
-        workspaceId: "ws",
+        scopeId: "ws",
         parent: { kind: "thread", id: parent.id },
         threadId: child.id,
       });
@@ -243,7 +243,7 @@ describe("nested thread production chain", () => {
     });
     try {
       const parent = await registry.createThread({
-        workspaceId: "ws",
+        scopeId: "ws",
         parent: PARENT,
         brief: "parent",
         preset: "hard-implement",
@@ -255,7 +255,7 @@ describe("nested thread production chain", () => {
         tools: ["dispatch"],
         permissions: {},
       });
-      await runtime.prepareIsolatedBranch({ workspaceId: "ws", parent: PARENT, threadId: parent.id });
+      await runtime.prepareIsolatedBranch({ scopeId: "ws", parent: PARENT, threadId: parent.id });
       const preparedParent = await registry.getThread("ws", PARENT, parent.id);
       materializedParentRoot = preparedParent!.worktree!.path;
       await workingStates.withStore("ws", "materialize-parent-for-nested-capture", async (store) => {
@@ -269,7 +269,7 @@ describe("nested thread production chain", () => {
       });
       copyIgnored = ["later.env"];
       const child = await registry.createThread({
-        workspaceId: "ws",
+        scopeId: "ws",
         parent: { kind: "thread", id: parent.id },
         brief: "child",
         preset: "check",
@@ -282,7 +282,7 @@ describe("nested thread production chain", () => {
         permissions: {},
       });
       await runtime.prepareIsolatedBranch({
-        workspaceId: "ws",
+        scopeId: "ws",
         parent: { kind: "thread", id: parent.id },
         threadId: child.id,
       });

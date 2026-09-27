@@ -39,7 +39,7 @@ async function setup() {
   const registry = createThreadRegistry({ hostId: "test", dataDir: path.join(root, "threads") });
   const parent = { kind: "session", id: "parent" } as const;
   const thread = await registry.createThread({
-    workspaceId: "ws", parent, brief: "Retained work", kind: "implementation", createdBy: "user",
+    scopeId: "ws", parent, brief: "Retained work", kind: "implementation", createdBy: "user",
     concurrency: 8, autoRun: true, worktree: "isolated", tools: ["read", "edit"], permissions: {},
   });
   const branchId = thread.id;
@@ -143,7 +143,7 @@ describe("user Thread history release", () => {
     await h.publish("old\n"); await h.publish("new\n");
     expect((await h.inspect().expect(200)).body.results[1].protectedReasons).toEqual([]);
     const review = await h.registry.createThread({
-      workspaceId: "ws", parent: h.parent, brief: "Review old result", kind: "implementation", createdBy: "agent",
+      scopeId: "ws", parent: h.parent, brief: "Review old result", kind: "implementation", createdBy: "agent",
       concurrency: 8, autoRun: false, worktree: "none", tools: ["read"], permissions: {}, preset: "review",
       reviewOf: { sourceThreadId: h.thread.id, resultRevision: 1 },
     });

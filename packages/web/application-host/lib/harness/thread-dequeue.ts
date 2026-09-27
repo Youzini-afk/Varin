@@ -22,7 +22,7 @@ export const createOnThreadDequeued = (options: {
       // Only startRun may consume this durable intent, in the same transaction
       // that reserves a slot. Failed preparation leaves it available for retry.
       await runtime.continueRun({
-        workspaceId,
+        scopeId: workspaceId,
         parent,
         threadId: thread.id,
         mode: continuation.mode,
@@ -46,7 +46,7 @@ export const createOnThreadDequeued = (options: {
       throw error;
     }
     void runtime.spawn({
-      workspaceId,
+      scopeId: workspaceId,
       parent,
       threadId: thread.id,
       runId: run.id,

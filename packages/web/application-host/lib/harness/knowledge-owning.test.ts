@@ -49,7 +49,7 @@ describe("thread knowledge owning workspace", () => {
     const registry = createThreadRegistry({ dataDir, hostId: "host" });
     cleanup.push(() => registry.dispose());
     const thread = await registry.createThread({
-      workspaceId: "owning-ws",
+      scopeId: "owning-ws",
       parent: { kind: "session", id: "root-session" },
       brief: "nested worker",
       preset: "hard-implement",
@@ -78,7 +78,7 @@ describe("thread knowledge owning workspace", () => {
       fallback: string | null,
     ): Promise<string | null> => {
       const binding = await registry.getSessionBinding(sessionId);
-      return binding?.owningWorkspaceId ?? fallback;
+      return binding?.owningScopeId ?? fallback;
     };
 
     const host = createHarnessServiceHost({

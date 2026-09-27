@@ -35,7 +35,7 @@ const baseline = {
 
 describe("root execution admission — service/registry acceptance", () => {
   const input = (kind: "implementation" | "discussion" = "implementation"): CreateThreadInput => ({
-    workspaceId: "workspace", parent: { kind: "session", id: "parent" },
+    scopeId: "workspace", parent: { kind: "session", id: "parent" },
     brief: "admission", kind, createdBy: "agent", concurrency: 1,
     autoRun: true, worktree: kind === "discussion" ? "none" : "isolated",
     tools: ["read"], permissions: {},

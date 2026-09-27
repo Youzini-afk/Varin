@@ -30,7 +30,7 @@ export function createMaterialReadService(host: MaterialReadHost): HarnessServic
         return { status: "failed", url: "", reason: "A valid experiment attempt and artifact are required" };
       }
       const binding = await host.threadRegistry?.getSessionBinding(ctx.sessionId);
-      const workspaceId = binding?.owningWorkspaceId ?? ctx.workspaceId;
+      const workspaceId = binding?.owningScopeId ?? ctx.workspaceId;
       const webBinding = host.getWebBinding(ctx.sessionId);
       const domains = webBinding ? webBinding.settings?.domains
         : snapshotId ? await host.materialWebPolicy?.(ctx.sessionId) : undefined;

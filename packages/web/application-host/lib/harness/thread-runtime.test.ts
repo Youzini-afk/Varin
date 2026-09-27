@@ -105,7 +105,7 @@ const assistantMessage = (text: string): PiMessage => ({
 });
 
 const createInput = (): CreateThreadInput => ({
-  workspaceId: WORKSPACE,
+  scopeId: WORKSPACE,
   parent: PARENT,
   brief: "Implement the feature",
   preset: "hard-implement",
@@ -384,7 +384,7 @@ describe("thread runtime", () => {
     });
     vi.mocked(sessionAdapter.open).mockRejectedValueOnce(new Error("open failed"));
     await expect(runtime.continueRun({
-      workspaceId: WORKSPACE, parent: PARENT, threadId: thread.id,
+      scopeId: WORKSPACE, parent: PARENT, threadId: thread.id,
       mode: "continue", task: "continue the work", requestId: "failed-open-request",
     })).rejects.toThrow("open failed");
     const held = (await registry.getThreadById(WORKSPACE, thread.id))!.messages!.find((message) => message.id === "held-on-open-failure");
@@ -571,7 +571,7 @@ describe("thread runtime", () => {
       expect(captured.draftBaselineId).toEqual(expect.any(String));
       const input: CreateThreadInput = {
         ...createInput(),
-        workspaceId: identity.workspaceId,
+        scopeId: identity.workspaceId,
         draftBaselineId: captured.draftBaselineId!,
       };
       const thread = await registry.createThread(input);
@@ -680,7 +680,7 @@ describe("thread runtime", () => {
     try {
       const input: CreateThreadInput = {
         ...createInput(),
-        workspaceId: identity.workspaceId,
+        scopeId: identity.workspaceId,
         tools: ["read", "grep", "find", "ls", "explore"],
       };
       const thread = await registry.createThread(input);
@@ -823,10 +823,10 @@ describe("thread runtime", () => {
       },
     });
     try {
-      const input = { ...createInput(), workspaceId: identity.workspaceId };
+      const input = { ...createInput(), scopeId: identity.workspaceId };
       const thread = await registry.createThread(input);
       await baselineRuntime.prepareIsolatedBranch({
-        workspaceId: identity.workspaceId,
+        scopeId: identity.workspaceId,
         parent: PARENT,
         threadId: thread.id,
       });
@@ -907,10 +907,10 @@ describe("thread runtime", () => {
       },
     });
     try {
-      const input = { ...createInput(), workspaceId: identity.workspaceId };
+      const input = { ...createInput(), scopeId: identity.workspaceId };
       const failedInventory = await registry.createThread(input);
       await expect(honestyRuntime.prepareIsolatedBranch({
-        workspaceId: identity.workspaceId,
+        scopeId: identity.workspaceId,
         parent: PARENT,
         threadId: failedInventory.id,
       })).rejects.toThrow(/Permission denied/);
@@ -924,7 +924,7 @@ describe("thread runtime", () => {
         .mockResolvedValueOnce({ kind: "git", baseRef: "abc", unborn: false, paths: ["kept.txt", "late.txt"], gitlinks: [] });
       const drifted = await registry.createThread({ ...input, brief: "Parent wrote during capture" });
       await expect(honestyRuntime.prepareIsolatedBranch({
-        workspaceId: identity.workspaceId,
+        scopeId: identity.workspaceId,
         parent: PARENT,
         threadId: drifted.id,
       })).rejects.toMatchObject({
@@ -941,7 +941,7 @@ describe("thread runtime", () => {
       inspectGit.mockResolvedValue({ kind: "git", baseRef: "abc", unborn: false, paths: ["kept.txt"], gitlinks: ["vendor/lib"] });
       const submodule = await registry.createThread({ ...input, brief: "Reject gitlinks" });
       await expect(honestyRuntime.prepareIsolatedBranch({
-        workspaceId: identity.workspaceId,
+        scopeId: identity.workspaceId,
         parent: PARENT,
         threadId: submodule.id,
       })).rejects.toThrow(/Git submodule paths: vendor\/lib/);
@@ -971,7 +971,7 @@ describe("thread runtime", () => {
       });
       const blocked = await registry.createThread({ ...input, brief: "Active writer" });
       await expect(writerRuntime.prepareIsolatedBranch({
-        workspaceId: identity.workspaceId,
+        scopeId: identity.workspaceId,
         parent: PARENT,
         threadId: blocked.id,
       })).rejects.toMatchObject({
@@ -1009,7 +1009,7 @@ describe("thread runtime", () => {
       };
       const orphaned = await registry.createThread({ ...input, brief: "Persist failed after createBranch" });
       await expect(persistRuntime.prepareIsolatedBranch({
-        workspaceId: identity.workspaceId,
+        scopeId: identity.workspaceId,
         parent: PARENT,
         threadId: orphaned.id,
       })).rejects.toThrow(/catalog persist failed/);
@@ -1101,11 +1101,11 @@ describe("thread runtime", () => {
     try {
       const drifted = await registry.createThread({
         ...createInput(),
-        workspaceId: identity.workspaceId,
+        scopeId: identity.workspaceId,
         brief: "Dirty contents changed mid-scan",
       });
       await expect(contentRuntime.prepareIsolatedBranch({
-        workspaceId: identity.workspaceId,
+        scopeId: identity.workspaceId,
         parent: PARENT,
         threadId: drifted.id,
       })).rejects.toMatchObject({
@@ -1199,9 +1199,9 @@ describe("thread runtime", () => {
       },
     });
     try {
-      const thread = await registry.createThread({ ...createInput(), workspaceId: identity.workspaceId, brief: "Ignored scope drift" });
+      const thread = await registry.createThread({ ...createInput(), scopeId: identity.workspaceId, brief: "Ignored scope drift" });
       await expect(ignoredRuntime.prepareIsolatedBranch({
-        workspaceId: identity.workspaceId,
+        scopeId: identity.workspaceId,
         parent: PARENT,
         threadId: thread.id,
       })).rejects.toMatchObject({
@@ -3448,7 +3448,7 @@ describe("thread runtime", () => {
     });
     const thread = await registry.createThread(createInput());
     const preparing = hangingRuntime.prepareIsolatedBranch({
-      workspaceId: WORKSPACE,
+      scopeId: WORKSPACE,
       parent: PARENT,
       threadId: thread.id,
     });
@@ -4048,7 +4048,7 @@ describe("thread runtime", () => {
   it("continue on a settled Thread reopens the retained session and prompts the task", async () => {
     const { thread } = await settle();
     const { runId } = await runtime.continueRun({
-      workspaceId: WORKSPACE,
+      scopeId: WORKSPACE,
       parent: PARENT,
       threadId: thread.id,
       mode: "continue",
@@ -4072,7 +4072,7 @@ describe("thread runtime", () => {
       ...reportFor(""),
     });
     await expect(runtime.continueRun({
-      workspaceId: WORKSPACE,
+      scopeId: WORKSPACE,
       parent: PARENT,
       threadId: thread.id,
       mode: "continue",
@@ -4097,7 +4097,7 @@ describe("thread runtime", () => {
     }));
     const { thread } = await settle();
     const { runId } = await runtime.continueRun({
-      workspaceId: WORKSPACE,
+      scopeId: WORKSPACE,
       parent: PARENT,
       threadId: thread.id,
       mode: "fresh",
@@ -4122,7 +4122,7 @@ describe("thread runtime", () => {
   it("continueRun rejects an active Thread instead of starting a second Run", async () => {
     const { thread } = await start();
     await expect(runtime.continueRun({
-      workspaceId: WORKSPACE,
+      scopeId: WORKSPACE,
       parent: PARENT,
       threadId: thread.id,
       mode: "continue",
@@ -4151,7 +4151,7 @@ describe("thread runtime", () => {
       at: "2026-09-05T00:00:00.000Z",
     });
     const result = await runtime.continueRun({
-      workspaceId: WORKSPACE,
+      scopeId: WORKSPACE,
       parent: PARENT,
       threadId: thread.id,
       mode: "continue",
@@ -4185,7 +4185,7 @@ describe("thread runtime", () => {
       research: { capability: "experimental-design" as const, resources: { cpu: true } },
     };
     const { runId } = await runtime.continueRun({
-      workspaceId: WORKSPACE,
+      scopeId: WORKSPACE,
       parent: PARENT,
       threadId: thread.id,
       mode: "continue",
@@ -4220,7 +4220,7 @@ describe("thread runtime", () => {
     await runtime.spawn({ ...input, threadId: thread.id, runId: firstRun.id });
     await registry.endRun(WORKSPACE, thread.id, firstRun.id, "success", null, reportFor("child-1"));
     const { runId } = await runtime.continueRun({
-      workspaceId: WORKSPACE,
+      scopeId: WORKSPACE,
       parent: PARENT,
       threadId: thread.id,
       mode: "continue",
@@ -4265,7 +4265,7 @@ describe("thread runtime", () => {
       research: { capability: "investigation" as const, resources: { network: true } },
     };
     const result = await runtime.continueRun({
-      workspaceId: WORKSPACE,
+      scopeId: WORKSPACE,
       parent: PARENT,
       threadId: thread.id,
       mode: "continue",
@@ -4293,7 +4293,7 @@ describe("thread runtime", () => {
       at: "2026-09-05T00:00:00.000Z",
     });
     await runtime.continueRun({
-      workspaceId: WORKSPACE,
+      scopeId: WORKSPACE,
       parent: PARENT,
       threadId: thread.id,
       mode: "continue",

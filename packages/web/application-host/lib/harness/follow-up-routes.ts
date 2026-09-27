@@ -52,8 +52,8 @@ export function registerHarnessFollowUpRoutes(
   const callerFor = async (sessionId: string) => {
     const scope = await runtime.scopeForSession(sessionId);
     const caller = await resolveResearchCaller(registry, {
-      workspaceId: scope.workspaceId,
-      executionWorkspaceId: scope.workspaceId,
+      workspaceId: scope.scopeId,
+      executionWorkspaceId: scope.scopeId,
       sessionId,
       user: true,
     });

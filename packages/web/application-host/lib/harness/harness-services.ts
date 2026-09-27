@@ -74,9 +74,9 @@ export const performHarnessWebFetch = async (
     return { status: "failed", url, reason: "no workspace" };
   }
   const binding = await host.threadRegistry?.getSessionBinding(ctx.sessionId);
-  const workspaceId = binding?.owningWorkspaceId ?? ctx.workspaceId;
+  const workspaceId = binding?.owningScopeId ?? ctx.workspaceId;
   const owner = binding
-    ? await host.threadRegistry?.getThreadById(binding.owningWorkspaceId, binding.threadId)
+    ? await host.threadRegistry?.getThreadById(binding.owningScopeId, binding.threadId)
     : null;
   const issueReceipt = Boolean(
     binding
@@ -229,7 +229,7 @@ function createPermissionInspectService(host: HarnessServiceHost): HarnessServic
         source: params.source,
         action: params.action,
         executionWorkspaceId: ctx.workspaceId,
-        owningWorkspaceId: binding?.owningWorkspaceId ?? ctx.workspaceId,
+        owningWorkspaceId: binding?.owningScopeId ?? ctx.workspaceId,
         cwd: cwd.canonicalResourceId,
         paths: ctx.authorizedPaths.slice(1).map((path) => ({
           inputPath: path.inputPath,
@@ -839,7 +839,7 @@ export function createZone2AssembleService(
             cursors: host.observationCursors,
           }, {
             sessionId: ctx.sessionId,
-            workspaceId: ctx.workspaceId,
+            scopeId: ctx.workspaceId,
           });
           threads = pendingThreads.result;
         } catch (error) {
@@ -925,7 +925,7 @@ export function createZone2StatusService(host: HarnessServiceHost): HarnessServi
         const binding = typeof registry.getSessionBinding === "function"
           ? await registry.getSessionBinding(ctx.sessionId)
           : null;
-        const workspaceId = binding?.owningWorkspaceId ?? ctx.workspaceId;
+        const workspaceId = binding?.owningScopeId ?? ctx.workspaceId;
         if (!workspaceId) return { status: "unavailable", content: null, reason: "workspace unavailable" };
         const parent = binding
           ? { kind: "thread" as const, id: binding.threadId }

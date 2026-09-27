@@ -69,17 +69,17 @@ describe("context consumers — presentation and retained-source authority", () 
     const registry = createThreadRegistry({ dataDir, hostId: "test" });
     const cursors = createObservationCursorStore();
     try {
-      const common = { workspaceId: "workspace", parent: { kind: "session" as const, id: "parent" },
+      const common = { scopeId: "workspace", parent: { kind: "session" as const, id: "parent" },
         brief: "task", kind: "implementation" as const, createdBy: "agent" as const,
         concurrency: 2, autoRun: true, worktree: "isolated" as const, tools: ["read"], permissions: {} };
       const first = await registry.createThread(common);
       const second = await registry.createThread(common);
       await registry.setWorkingState("workspace", first.id, { branchId: "branch-first", resultRevision: 1 });
       await registry.setWorkingState("workspace", second.id, { branchId: "branch-second", resultRevision: 1 });
-      const pending = await prepareZone2Threads({ registry, cursors }, { sessionId: "parent", workspaceId: "workspace" });
+      const pending = await prepareZone2Threads({ registry, cursors }, { sessionId: "parent", scopeId: "workspace" });
       expect(pending.result.status === "ready" && pending.result.items.length).toBe(2);
       pending.commitPresented(new Set([first.id]), false);
-      const next = await prepareZone2Threads({ registry, cursors }, { sessionId: "parent", workspaceId: "workspace" });
+      const next = await prepareZone2Threads({ registry, cursors }, { sessionId: "parent", scopeId: "workspace" });
       expect(next.result.status === "ready" && next.result.items.map((item) => item.id)).toEqual([second.id]);
       next.abort();
     } finally { cursors.dispose(); await registry.dispose(); await rm(dataDir, { recursive: true, force: true }); }

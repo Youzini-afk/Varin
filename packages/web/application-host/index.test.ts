@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 import {
   mergeSessionSnapshotForKnowledgeOwner,
-  resolveKnowledgeWorkspaceOwner,
+  resolveKnowledgeScopeOwner,
 } from "./index.js";
 
 describe("application-host knowledge ownership helpers", () => {
@@ -28,7 +28,7 @@ describe("application-host knowledge ownership helpers", () => {
   });
 
   it("does not use an execution or snapshot fallback when durable catalog lookup fails", async () => {
-    await expect(resolveKnowledgeWorkspaceOwner(
+    await expect(resolveKnowledgeScopeOwner(
       async () => { throw new Error("thread catalog read failed"); },
       "execution-workspace",
       "snapshot-workspace",

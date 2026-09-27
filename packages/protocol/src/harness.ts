@@ -753,7 +753,7 @@ export interface KnowledgeSuggestResult {
     content: string;
     trigger: string;
     status: "suggested" | "accepted";
-    scope: "workspace" | "user";
+    scope: "workspace" | "user" | "session";
   };
 }
 
@@ -1805,8 +1805,19 @@ export interface HarnessActorIdentity {
 
 /** Identity completed with workspace and frozen authority by the Host. */
 export interface HarnessActorContext extends HarnessActorIdentity {
+  /**
+   * Session classification: the project workspace this chat is associated
+   * with, if any. HR0: `null` is a fully registered state — path resolution,
+   * todo/subtask ownership, and tool admission do not require it.
+   */
   workspaceId: string | null;
   workspaceScope?: readonly string[];
+  /**
+   * Absolute authority root the session's relative paths anchor to: the
+   * authorized workspace root for bound sessions, the session's own launch
+   * directory for unbound ones. Pinned per request at actor resolution.
+   */
+  authorityRoot?: string | null;
   /**
    * Session operation dir relative to the workspace root; relative path
    * parameters resolve against it instead of the root. Absent/`""`/`null`

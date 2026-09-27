@@ -130,6 +130,7 @@ describe("harness service host authorization", () => {
         operationDir: "",
         contextRevision: 0,
         queryScope: null,
+        authorityRoot: "D:/workspace",
       });
       await expect(host.resolveActor({ ...ACTOR, workerId: "stale-worker" })).resolves.toBeNull();
       await expect(host.resolveActor({ ...ACTOR, workerGeneration: 2 })).resolves.toBeNull();
@@ -288,6 +289,59 @@ describe("harness service host authorization", () => {
       host.dropSession(ACTOR.sessionId, { ...ACTOR, runId: "run-9" });
       await expect(host.resolveActor(ACTOR)).resolves.toBeNull();
       await expect(host.resolveActor({ ...ACTOR, workerId: "worker-compaction-2" })).resolves.toBeNull();
+    } finally {
+      await host.dispose();
+    }
+  });
+});
+
+describe("HR0 unbound session admission", () => {
+  it("registers a no-project session and resolves its actor with a launch-dir authority root", async () => {
+    const launch = "D:/external/launch";
+    const host = createHarnessServiceHost({
+      search: async () => ({ status: "empty", generation: undefined }),
+      resolveWorkspaceRoot: async () => { throw new Error("no project workspace"); },
+      discoveredShells: { hasBash: false },
+    });
+    try {
+      host.registerSession({
+        actor: ACTOR,
+        grantedCapabilities: ["read.output"],
+        workspaceId: null,
+        workspaceRoot: launch,
+      });
+      const resolved = await host.resolveActor({ ...ACTOR, runId: "run-1" });
+      expect(resolved).toMatchObject({
+        sessionId: ACTOR.sessionId,
+        workspaceId: null,
+        authorityRoot: launch,
+        operationDir: "",
+        contextRevision: 0,
+      });
+    } finally {
+      await host.dispose();
+    }
+  });
+
+  it("does not block unbound admission when the launch directory is unreachable", async () => {
+    const host = createHarnessServiceHost({
+      search: async () => ({ status: "empty", generation: undefined }),
+      resolveWorkspaceRoot: async () => { throw new Error("offline"); },
+      discoveredShells: { hasBash: false },
+      workContextJournal: { read: async () => ({ context: null }) } as never,
+      pathAuthority: { resolve: async () => null } as never,
+    });
+    try {
+      const prepared = await host.prepareWorkContext({
+        actor: ACTOR,
+        grantedCapabilities: ["read.output"],
+        workspaceId: null,
+        workspaceRoot: "Z:/offline/share",
+      });
+      host.registerSession(prepared);
+      const resolved = await host.resolveActor({ ...ACTOR, runId: "run-1" });
+      expect(resolved?.workspaceId).toBeNull();
+      expect(resolved?.authorityRoot).toBe("Z:/offline/share");
     } finally {
       await host.dispose();
     }

@@ -215,7 +215,7 @@ describe("execution Git baseline production chain", () => {
   it("settles virtual and shell writes through an isolated init without a bad object", async () => {
     const f = await fixture();
     const thread = await f.registry.createThread({
-      workspaceId: f.workspaceId,
+      scopeId: f.workspaceId,
       parent: { kind: "session", id: "parent-1" },
       brief: "isolated execution baseline",
       preset: "hard-implement",
@@ -229,14 +229,14 @@ describe("execution Git baseline production chain", () => {
       permissions: {},
     });
     await f.runtime.prepareIsolatedBranch({
-      workspaceId: f.workspaceId,
+      scopeId: f.workspaceId,
       parent: { kind: "session", id: "parent-1" },
       threadId: thread.id,
     });
     const run = await f.registry.startRun(f.workspaceId, thread.id);
     f.actor.runId = run.id;
     await f.runtime.spawn({
-      workspaceId: f.workspaceId,
+      scopeId: f.workspaceId,
       parent: { kind: "session", id: "parent-1" },
       threadId: thread.id,
       runId: run.id,
@@ -298,7 +298,7 @@ describe("execution Git baseline production chain", () => {
   it("recovers a promoted materialization crash with a resolvable execution baseline", async () => {
     const f = await fixture();
     const thread = await f.registry.createThread({
-      workspaceId: f.workspaceId,
+      scopeId: f.workspaceId,
       parent: { kind: "session", id: "parent-1" },
       brief: "crash recovery baseline",
       preset: "hard-implement",
@@ -312,14 +312,14 @@ describe("execution Git baseline production chain", () => {
       permissions: {},
     });
     const prepared = await f.runtime.prepareIsolatedBranch({
-      workspaceId: f.workspaceId,
+      scopeId: f.workspaceId,
       parent: { kind: "session", id: "parent-1" },
       threadId: thread.id,
     });
     const run = await f.registry.startRun(f.workspaceId, thread.id);
     f.actor.runId = run.id;
     await f.runtime.spawn({
-      workspaceId: f.workspaceId,
+      scopeId: f.workspaceId,
       parent: { kind: "session", id: "parent-1" },
       threadId: thread.id,
       runId: run.id,

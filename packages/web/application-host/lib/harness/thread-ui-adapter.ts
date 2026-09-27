@@ -3,6 +3,7 @@ import type { HarnessThreadRoutesOptions } from "./thread-routes.js";
 import type { ThreadRuntime } from "./thread-runtime.js";
 import type { ThreadSendParams } from "@varin/protocol";
 import { createThreadSendService } from "./thread-services.js";
+import { isSessionScopeId } from "./owner-scope.js";
 
 /**
  * Authenticated HTTP routes call this Host adapter. Worker-supplied `from`
@@ -14,7 +15,11 @@ export function createUserThreadSendAdapter(
   runtime: Pick<ThreadRuntime, "scopeForSession">,
 ): NonNullable<HarnessThreadRoutesOptions["sendToThread"]> {
   return async (input) => {
-    const { workspaceId } = await runtime.scopeForSession(input.parentSessionId);
+    const { scopeId } = await runtime.scopeForSession(input.parentSessionId);
+    // Session-owned scopes are not workspace identities for the actor; the
+    // actor's workspace stays null for unbound chats while routing still uses
+    // the durable scope.
+    const workspaceId = isSessionScopeId(scopeId) ? null : scopeId;
     // Routes are registered before service-host assembly. Resolve lazily at
     // request time, after bootstrap has established the trusted authority.
     const service = createThreadSendService(getHost());

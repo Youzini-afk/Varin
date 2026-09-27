@@ -19,7 +19,7 @@ const WORKSPACE = "workspace-1";
 const PARENT = { kind: "session", id: "parent-1" } as const;
 
 const input = (overrides: Partial<CreateThreadInput> = {}): CreateThreadInput => ({
-  workspaceId: WORKSPACE,
+  scopeId: WORKSPACE,
   parent: PARENT,
   brief: "verify the implementation",
   preset: "check",

@@ -25,7 +25,7 @@ it("emits only a newly persisted Run report, with fixed Run identity and no stal
   };
   try {
     const thread = await registry.createThread({
-      workspaceId: "ws", parent: { kind: "session", id: "parent" }, kind: "implementation", createdBy: "agent",
+      scopeId: "ws", parent: { kind: "session", id: "parent" }, kind: "implementation", createdBy: "agent",
       brief: "work", autoRun: true, concurrency: 8, worktree: "none", tools: [], permissions: {},
     });
     const first = await registry.startRun("ws", thread.id);

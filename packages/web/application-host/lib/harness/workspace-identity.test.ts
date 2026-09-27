@@ -152,7 +152,7 @@ describe("owning vs execution workspace identity", () => {
 
     const parent = { kind: "session" as const, id: "root-session" };
     const input = {
-      workspaceId: owning.workspaceId,
+      scopeId: owning.workspaceId,
       parent,
       brief: "parent implementer",
       preset: "hard-implement",
@@ -168,7 +168,7 @@ describe("owning vs execution workspace identity", () => {
     let response: unknown;
     const parentThread = await registry.createThread(input);
     await runtime.prepareIsolatedBranch({
-      workspaceId: owning.workspaceId,
+      scopeId: owning.workspaceId,
       parent,
       threadId: parentThread.id,
     });
@@ -265,7 +265,7 @@ describe("owning vs execution workspace identity", () => {
       const zone2 = await projectZone2Threads({
         registry,
         cursors: createObservationCursorStore(),
-      }, { sessionId: parentSession.sessionId, workspaceId: execution.workspaceId });
+      }, { sessionId: parentSession.sessionId, scopeId: execution.workspaceId });
       expect(zone2.status === "ready" ? zone2.items.map((item) => item.id) : []).toEqual([grandchildId]);
 
       const grandchildRun = await registry.getActiveRun(owning.workspaceId, grandchildId);
@@ -273,7 +273,7 @@ describe("owning vs execution workspace identity", () => {
       await registry.endRun(owning.workspaceId, grandchildId, grandchildRun.id, "lost", "worker lost");
       const binding = await registry.getSessionBinding(parentSession.sessionId);
       if (!binding) throw new Error("parent session binding missing after dispatch");
-      await runtime.resumeLostForParent(binding.owningWorkspaceId, { kind: "thread", id: binding.threadId });
+      await runtime.resumeLostForParent(binding.owningScopeId, { kind: "thread", id: binding.threadId });
       await vi.waitFor(async () => {
         expect(sessions.open).toHaveBeenCalled();
         expect(await registry.getActiveRun(owning.workspaceId, grandchildId)).toMatchObject({

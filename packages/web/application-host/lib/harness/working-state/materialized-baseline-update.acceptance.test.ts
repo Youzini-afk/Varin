@@ -28,7 +28,7 @@ async function fixture() {
   const { workspaceId } = await documents.resolveWorkspace({ path: workspace });
   const registry = createThreadRegistry({ hostId: "baseline-host", dataDir: join(root, "threads") });
   const native = await createNativeAuthorityTestRuntime({ documents, hostId: "baseline-host", dataDir: join(root, "data") });
-  const common = { workspaceId, brief: "Implement", kind: "implementation" as const, createdBy: "agent" as const,
+  const common = { scopeId: workspaceId, brief: "Implement", kind: "implementation" as const, createdBy: "agent" as const,
     concurrency: 2, autoRun: true, worktree: "isolated" as const, tools: ["read", "write", "update"], permissions: {} };
   const parent = await registry.createThread({ ...common, parent: { kind: "session", id: "root-session" } });
   const ownerRun = await registry.startRun(workspaceId, parent.id);
@@ -152,7 +152,7 @@ describe("materialized baseline — public Host service and release Rust authori
         expect((await f.registry.getThreadById(f.workspaceId, f.child.id))?.worktree?.baselineUpdate?.phase).toBe("prepared");
         const merged = await readFile(join(f.directory, "code.txt"), "utf8");
         expect(merged).toContain("parent first"); expect(merged).toContain("child fifth");
-        await expect(firstRuntime.continueRun({ workspaceId: f.workspaceId, parent: { kind: "thread", id: f.parent.id },
+        await expect(firstRuntime.continueRun({ scopeId: f.workspaceId, parent: { kind: "thread", id: f.parent.id },
           threadId: f.child.id, mode: "fresh", task: "must not run over an unfinished handoff" })).rejects.toThrow(/Finish baseline update/);
         expect(await f.registry.listRuns(f.workspaceId, f.child.id)).toHaveLength(1);
         await firstRuntime.dispose();

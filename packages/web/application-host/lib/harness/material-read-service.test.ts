@@ -17,7 +17,7 @@ function fixture() {
     documentReader: { ingest, read }, readMaterialFile,
     getWebBinding: () => ({ generation: "1", settings: { domains: { block: ["blocked.example"] } } }),
     documentReadingSettings: async () => ({ doclingCommand: "docling", tesseractCommand: "tesseract", ocrLanguage: "eng" }),
-    threadRegistry: { getSessionBinding: async () => ({ owningWorkspaceId: "owner", threadId: "thread", runId: "run" }) },
+    threadRegistry: { getSessionBinding: async () => ({ owningScopeId: "owner", threadId: "thread", runId: "run" }) },
   } as unknown as HarnessServiceHost;
   return { host, ingest, read, readMaterialFile };
 }
@@ -56,7 +56,7 @@ describe("material reading authority", () => {
     const f = fixture();
     const resolve = vi.fn(async () => authorized);
     const adapter = createUserMaterialReadAdapter(() => f.host, {
-      scopeForSession: async () => ({ workspaceId: "owner", parent: { kind: "thread", id: "thread" }, snapshot: { workspace: { kind: "workspace", id: "execution" } } as never }),
+      scopeForSession: async () => ({ scopeId: "owner", parent: { kind: "thread", id: "thread" }, snapshot: { workspace: { kind: "workspace", id: "execution" } } as never }),
     }, { resolve });
     await adapter({ sessionId: "session", request: { path: "paper.pdf", view: "overview" }, signal: new AbortController().signal });
     expect(resolve).toHaveBeenCalledWith(expect.objectContaining({ workspaceId: "execution" }), "paper.pdf", { allowMissing: true });

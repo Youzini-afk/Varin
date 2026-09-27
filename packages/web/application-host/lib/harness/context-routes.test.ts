@@ -129,7 +129,7 @@ describe("harness context routes", () => {
       getStore: async () => store,
       getBranchEntryIds: async () => [],
       getSuggestionSettings: async () => ({
-        autoAcceptSuggestions: { workspace: true, user: false },
+        autoAcceptSuggestions: { workspace: true, user: false, session: false },
       }),
     });
 

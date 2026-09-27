@@ -43,11 +43,12 @@ export interface KnowledgeSuggestionsSettings {
   autoAcceptSuggestions: {
     workspace: boolean;
     user: boolean;
+    session: boolean;
   };
 }
 
 export const DEFAULT_SUGGESTIONS_SETTINGS: KnowledgeSuggestionsSettings = {
-  autoAcceptSuggestions: { workspace: false, user: false },
+  autoAcceptSuggestions: { workspace: false, user: false, session: false },
 };
 
 const record = (value: unknown): Record<string, unknown> => (
@@ -65,6 +66,7 @@ export const suggestionSettingsFromSnapshot = (snapshot: PiSettingsSnapshot): Kn
     autoAcceptSuggestions: {
       workspace: resolved.workspace === true,
       user: resolved.user === true,
+      session: false,
     },
   };
 };

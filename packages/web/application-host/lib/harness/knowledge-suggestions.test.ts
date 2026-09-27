@@ -41,10 +41,10 @@ describe("suggestion settings", () => {
       projectTrusted: true,
     };
     expect(suggestionSettingsFromSnapshot(snapshot)).toEqual({
-      autoAcceptSuggestions: { workspace: true, user: true },
+      autoAcceptSuggestions: { workspace: true, user: true, session: false },
     });
     expect(suggestionSettingsFromSnapshot({ ...snapshot, projectTrusted: false })).toEqual({
-      autoAcceptSuggestions: { workspace: false, user: true },
+      autoAcceptSuggestions: { workspace: false, user: true, session: false },
     });
   });
 });
@@ -134,7 +134,7 @@ describe("createSuggestion", () => {
   it("auto-accepts when configured", async () => {
     const result = await createSuggestion(
       { trigger: "user-mark", content: "Always use bun", sessionId: "s1", kind: "message" },
-      { store, settings: { ...DEFAULT_SUGGESTIONS_SETTINGS, autoAcceptSuggestions: { workspace: true, user: false } } },
+      { store, settings: { ...DEFAULT_SUGGESTIONS_SETTINGS, autoAcceptSuggestions: { workspace: true, user: false, session: false } } },
     );
     const accepted = await store.listKnowledge({ status: "accepted" });
     expect(accepted).toHaveLength(1);

@@ -23,6 +23,7 @@ export async function openWorkspaceKnowledge(deps: OpenWorkspaceKnowledgeDeps): 
   try {
     const result = await owner.request(storeId, "open", [{
       dataDir: deps.dataDir, hostId: deps.hostId, workspaceId: deps.workspaceId,
+      ...(deps.scope === undefined ? {} : { scope: deps.scope }),
       // The authority store uses only the dimension. Embedding callbacks belong
       // to the derived semantic adapters and must not cross a process boundary.
       embedding: deps.embedding ? { dim: deps.embedding.dim } : null,

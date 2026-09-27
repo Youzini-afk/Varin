@@ -8,6 +8,12 @@ const SCHEMA_VERSION = 1;
 interface WorkspaceEntry {
   workspaceId: string;
   canonicalPath: string;
+  /**
+   * `directory` roots address a subtree; `file` roots address exactly one file
+   * (HR0: resource-rooted Documents addressing for paths outside any project).
+   * Legacy entries without the field are directory roots.
+   */
+  kind?: 'directory' | 'file';
   createdAt?: string;
 }
 
@@ -21,12 +27,15 @@ export interface WorkspaceMapping {
   workspaceId: string;
   canonicalPath: string;
   hostId: string;
+  kind: 'directory' | 'file';
 }
 
 export interface WorkspaceRegistryResolveInput {
   canonicalPath?: string;
   workspaceId?: string;
   create?: boolean;
+  /** Root kind recorded when `create` mints a new mapping. */
+  kind?: 'directory' | 'file';
 }
 
 export interface WorkspaceRegistryOptions {
@@ -125,20 +134,31 @@ export const createWorkspaceRegistry = ({
     const needle = normalizeComparePath(canonicalPath, pathModule);
     return current.workspaces
       .filter((entry) => {
+        // A file root addresses exactly one file; it never "contains" a path.
+        if (entry.kind === 'file') return false;
         const root = normalizeComparePath(entry.canonicalPath, pathModule);
         return needle === root || needle.startsWith(`${root}${pathModule.sep}`);
       })
       .sort((left, right) => right.canonicalPath.length - left.canonicalPath.length)[0] ?? null;
   };
 
+  const findExactPath = (current: RegistryDocument, canonicalPath: string, kind?: 'directory' | 'file'): WorkspaceEntry | null => {
+    const needle = normalizeComparePath(canonicalPath, pathModule);
+    return current.workspaces.find((entry) => (
+      normalizeComparePath(entry.canonicalPath, pathModule) === needle
+      && (kind === undefined || (entry.kind ?? 'directory') === kind)
+    )) ?? null;
+  };
+
   const toMapping = (entry: WorkspaceEntry): WorkspaceMapping => ({
     workspaceId: entry.workspaceId,
     canonicalPath: entry.canonicalPath,
     hostId,
+    kind: entry.kind ?? 'directory',
   });
 
   return {
-    async resolve({ canonicalPath, workspaceId, create }: WorkspaceRegistryResolveInput): Promise<WorkspaceMapping | null> {
+    async resolve({ canonicalPath, workspaceId, create, kind }: WorkspaceRegistryResolveInput): Promise<WorkspaceMapping | null> {
       if (workspaceId) {
         const current = await read();
         const existing = current.workspaces.find((entry) => entry.workspaceId === workspaceId);
@@ -160,6 +180,7 @@ export const createWorkspaceRegistry = ({
         const created: WorkspaceEntry = {
           workspaceId: randomUUID(),
           canonicalPath,
+          ...(kind === 'file' ? { kind: 'file' as const } : {}),
           createdAt: new Date().toISOString(),
         };
         current.workspaces.push(created);
@@ -182,6 +203,14 @@ export const createWorkspaceRegistry = ({
     async findContaining(canonicalPath: string): Promise<WorkspaceMapping | null> {
       const current = await read();
       const existing = findContainingPath(current, canonicalPath);
+      if (!existing) return null;
+      return toMapping(existing);
+    },
+
+    /** Exact-path lookup; optionally restricted to one root kind. */
+    async findExact(canonicalPath: string, kind?: 'directory' | 'file'): Promise<WorkspaceMapping | null> {
+      const current = await read();
+      const existing = findExactPath(current, canonicalPath, kind);
       if (!existing) return null;
       return toMapping(existing);
     },

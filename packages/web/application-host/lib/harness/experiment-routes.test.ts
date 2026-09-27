@@ -33,7 +33,7 @@ const source = {
 };
 
 const scope = {
-  workspaceId: "workspace-1",
+  scopeId: "workspace-1",
   parent: { kind: "session" as const, id: "session-1" },
   snapshot: null,
 };

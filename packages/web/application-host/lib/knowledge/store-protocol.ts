@@ -24,7 +24,7 @@ export const isStoreMethod = (value: unknown): value is StoreMethod => (
   typeof value === "string" && Object.hasOwn(STORE_METHODS, value)
 );
 
-export type StoreOpenOptions = Pick<OpenWorkspaceKnowledgeDeps, "dataDir" | "hostId" | "workspaceId"> & {
+export type StoreOpenOptions = Pick<OpenWorkspaceKnowledgeDeps, "dataDir" | "hostId" | "workspaceId" | "scope"> & {
   embedding: { dim: number } | null;
 };
 export type StoreRequest = {

@@ -102,7 +102,7 @@ export async function onPublishedResult(input: ReviewDispatchInput): Promise<Rev
   ].filter((line): line is string => line !== null).join("\n\n");
 
   const thread = await input.createAndStart({
-    workspaceId: input.workspaceId,
+    scopeId: input.workspaceId,
     parent: source.parent,
     brief: `Review ${source.id}@${resultRevision} (${changedPaths.length} files)`,
     preset: reviewPreset.id,

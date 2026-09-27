@@ -37,12 +37,18 @@ export type ThreadParent =
 
 /**
  * Host-owned mapping from a live Pi session to the Thread catalog it belongs to.
- * `owningWorkspaceId` is the original project workspace; it is not the scratch
- * or materialized execution workspace Documents assigns to the Run cwd.
+ * `owningScopeId` is the durable owner scope (project workspace id or
+ * `session:<id>`); it is not the scratch or materialized execution workspace
+ * Documents assigns to the Run cwd.
  */
 export interface ThreadSessionBinding {
   sessionId: string;
-  owningWorkspaceId: string;
+  /**
+   * Durable owner scope of the Thread/Run this session executes: a project
+   * workspace id, or `session:<sessionId>` for session-owned work (HR0).
+   * Resolution must never require a directory to exist.
+   */
+  owningScopeId: string;
   threadId: string;
   runId: string;
   parent: ThreadParent;

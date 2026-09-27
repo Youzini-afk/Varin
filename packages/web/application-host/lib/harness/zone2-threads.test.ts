@@ -13,7 +13,7 @@ const WORKSPACE = "workspace-1";
 const PARENT = { kind: "session", id: "parent-1" } as const;
 
 const input = (overrides: Partial<CreateThreadInput> = {}): CreateThreadInput => ({
-  workspaceId: WORKSPACE,
+  scopeId: WORKSPACE,
   parent: PARENT,
   brief: "verify the implementation",
   preset: "check",
@@ -64,14 +64,14 @@ describe("Zone 2 thread projection", () => {
     });
 
     const options = { registry, cursors };
-    const first = await projectZone2Threads(options, { sessionId: PARENT.id, workspaceId: WORKSPACE });
-    const second = await projectZone2Threads(options, { sessionId: PARENT.id, workspaceId: WORKSPACE });
+    const first = await projectZone2Threads(options, { sessionId: PARENT.id, scopeId: WORKSPACE });
+    const second = await projectZone2Threads(options, { sessionId: PARENT.id, scopeId: WORKSPACE });
     expect(first.status === "ready" ? first.items : []).toMatchObject([{ id: thread.id, workerState: "running", steps: 3 }]);
     expect(second.status === "ready" ? second.items : []).toHaveLength(0);
 
     await registry.completeThread(WORKSPACE, thread.id, report());
-    const completed = await projectZone2Threads(options, { sessionId: PARENT.id, workspaceId: WORKSPACE });
-    const unchanged = await projectZone2Threads(options, { sessionId: PARENT.id, workspaceId: WORKSPACE });
+    const completed = await projectZone2Threads(options, { sessionId: PARENT.id, scopeId: WORKSPACE });
+    const unchanged = await projectZone2Threads(options, { sessionId: PARENT.id, scopeId: WORKSPACE });
     expect(completed.status === "ready" ? completed.items : []).toMatchObject([{ id: thread.id, outcome: "success", conclusion: "all checks pass" }]);
     expect(unchanged).toEqual({ status: "ready", items: [] });
   });
@@ -86,9 +86,9 @@ describe("Zone 2 thread projection", () => {
       autoRun: false,
       worktree: "none",
     }));
-    const result = await projectZone2Threads({ registry, cursors }, { sessionId: "child-session", workspaceId: "execution-ws" });
+    const result = await projectZone2Threads({ registry, cursors }, { sessionId: "child-session", scopeId: "execution-ws" });
     expect(result.status === "ready" ? result.items.map((item) => item.id) : []).toEqual([nested.id]);
-    const root = await projectZone2Threads({ registry, cursors }, { sessionId: PARENT.id, workspaceId: WORKSPACE });
+    const root = await projectZone2Threads({ registry, cursors }, { sessionId: PARENT.id, scopeId: WORKSPACE });
     expect(root.status === "ready" ? root.items.map((item) => item.id) : []).toEqual([outer.id]);
   });
 
@@ -139,7 +139,7 @@ describe("Zone 2 thread projection", () => {
     }));
 
     const options = { registry, cursors };
-    const result = await projectZone2Threads(options, { sessionId: PARENT.id, workspaceId: WORKSPACE });
+    const result = await projectZone2Threads(options, { sessionId: PARENT.id, scopeId: WORKSPACE });
     expect(result.status).toBe("ready");
     if (result.status === "ready") {
       expect(result.overlapWarning).toBeDefined();

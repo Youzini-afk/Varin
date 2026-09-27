@@ -24,6 +24,7 @@ import { HarnessServiceError } from "./service-error.js";
 import { EXECUTION_PRESETS } from "./presets.js";
 import { RESEARCH_CAPABILITY_DEFINITIONS, isResearchCapability, type ResearchResourceManifest } from "@varin/protocol";
 import { resolveNestedThreadScope, type ThreadControlToolName } from "./thread-nesting.js";
+import { sessionScopeId } from "./owner-scope.js";
 import { sameFrozenRunConfig, ThreadAdmissionError, ThreadRegistryError, type ThreadRegistry } from "./thread-registry.js";
 import { ThreadRuntimeError } from "./thread-runtime.js";
 
@@ -54,23 +55,24 @@ const resolveOwningContext = async (
   }
   if (binding) {
     const owner = typeof registry!.getThreadById === "function"
-      ? await registry!.getThreadById(binding.owningWorkspaceId, binding.threadId)
+      ? await registry!.getThreadById(binding.owningScopeId, binding.threadId)
       : null;
     if (!owner) {
       throw new HarnessServiceError("denied", "Thread session binding does not match a catalog Thread");
     }
-    const run = await registry!.getActiveRun(binding.owningWorkspaceId, binding.threadId);
+    const run = await registry!.getActiveRun(binding.owningScopeId, binding.threadId);
     if (!run?.frozen || run.id !== binding.runId || run.sessionId !== ctx.sessionId) {
       throw new HarnessServiceError("denied", "The caller no longer owns this frozen Thread Run");
     }
     return {
-      workspaceId: binding.owningWorkspaceId,
+      workspaceId: binding.owningScopeId,
       parent: { kind: "thread", id: binding.threadId },
       owner: { ...owner, execution: run.frozen },
     };
   }
-  if (!ctx.workspaceId) throw new HarnessServiceError("unavailable", "Thread operations require a workspace");
-  return { workspaceId: ctx.workspaceId, parent: parentFor(ctx), owner: null };
+  // HR0: an unbound chat is its own durable owner scope; Thread operations do
+  // not require a directory classification.
+  return { workspaceId: ctx.workspaceId ?? sessionScopeId(ctx.sessionId), parent: parentFor(ctx), owner: null };
 };
 
 const assertOwnerTool = (owner: ExecutingThread | null, tool: ThreadControlToolName): void => {
@@ -351,7 +353,7 @@ export function createThreadDispatchService(host: HarnessServiceHost): HarnessSe
         }
       }
       const input = {
-        workspaceId,
+        scopeId: workspaceId,
         parent,
         brief: params.task,
         ...(preset ? { preset: preset.id } : {}),
@@ -398,7 +400,7 @@ export function createThreadDispatchService(host: HarnessServiceHost): HarnessSe
         }
         try {
           await host.threadPrepareIsolatedBranch({
-            workspaceId,
+            scopeId: workspaceId,
             parent,
             threadId: thread.id,
             draftBaselineId: captured.draftBaselineId,
@@ -481,7 +483,7 @@ export function createThreadFactsSetService(host: HarnessServiceHost): HarnessSe
         throw new HarnessServiceError("denied", "submit_facts is only available on a retrieval thread session");
       }
       const thread = typeof registry.getThreadById === "function"
-        ? await registry.getThreadById(binding.owningWorkspaceId, binding.threadId)
+        ? await registry.getThreadById(binding.owningScopeId, binding.threadId)
         : null;
       if (!thread) {
         throw new HarnessServiceError("denied", "Thread session binding does not match a catalog Thread");
@@ -500,7 +502,7 @@ export function createThreadFactsSetService(host: HarnessServiceHost): HarnessSe
       }
       const runId = binding.runId;
       const receiptAuthority = {
-        owningWorkspaceId: binding.owningWorkspaceId,
+        owningWorkspaceId: binding.owningScopeId,
         sessionId: ctx.sessionId,
         threadId: thread.id,
         runId,
@@ -523,14 +525,14 @@ export function createThreadFactsSetService(host: HarnessServiceHost): HarnessSe
           sessionId: ctx.sessionId,
           receiptAuthority,
           ...(host.storeRetrievalArtifact
-            ? { storeArtifact: (bytes) => host.storeRetrievalArtifact!(binding.owningWorkspaceId, bytes, receiptAuthority) }
+            ? { storeArtifact: (bytes) => host.storeRetrievalArtifact!(binding.owningScopeId, bytes, receiptAuthority) }
             : {}),
           ...(host.lookupWebFetchReceipt
-            ? { lookupReceipt: (receiptId, authority) => host.lookupWebFetchReceipt!(binding.owningWorkspaceId, authority, receiptId) }
+            ? { lookupReceipt: (receiptId, authority) => host.lookupWebFetchReceipt!(binding.owningScopeId, authority, receiptId) }
             : {}),
         });
         try {
-          await registry.setPendingEvidence(binding.owningWorkspaceId, thread.id, runId, evidence);
+          await registry.setPendingEvidence(binding.owningScopeId, thread.id, runId, evidence);
           catalogCommitted = true;
         } catch (error) {
           throw new HarnessServiceError(
@@ -539,7 +541,7 @@ export function createThreadFactsSetService(host: HarnessServiceHost): HarnessSe
           );
         }
         await host.protectRetrievalEvidence?.({
-          workspaceId: binding.owningWorkspaceId,
+          workspaceId: binding.owningScopeId,
           threadId: thread.id,
           runId,
           evidence,
@@ -549,7 +551,7 @@ export function createThreadFactsSetService(host: HarnessServiceHost): HarnessSe
       } finally {
         if (!catalogCommitted) {
           await host.releaseRetrievalTemporaryArtifacts?.(
-            binding.owningWorkspaceId,
+            binding.owningScopeId,
             receiptAuthority,
           ).catch(() => undefined);
         }
@@ -822,7 +824,7 @@ const continueError = (error: unknown): never => {
 };
 
 export interface AuthorizedThreadRequestInput {
-  workspaceId: string;
+  scopeId: string;
   threadId: string;
   text: string;
   requestId: string;
@@ -832,7 +834,7 @@ export interface AuthorizedThreadRequestInput {
 export interface AuthorizedThreadRequestDeps {
   registry: ThreadRegistry;
   continueRun?(input: {
-    workspaceId: string;
+    scopeId: string;
     parent: ThreadParent;
     threadId: string;
     mode: "continue";
@@ -852,10 +854,10 @@ export const deliverAuthorizedThreadRequest = async (
   deps: AuthorizedThreadRequestDeps,
   input: AuthorizedThreadRequestInput,
 ): Promise<{ accepted: true; lifecycle: Thread["lifecycle"]; attention: Thread["attention"]; messageId: string; delivery: "delivered" | "held" | "scheduled"; runId?: string; route?: "active" | "continued" }> => deps.registry.withMessageDelivery(
-  input.workspaceId,
+  input.scopeId,
   `thread:${input.threadId}`,
   async () => {
-    const thread = await deps.registry.getThreadById(input.workspaceId, input.threadId);
+    const thread = await deps.registry.getThreadById(input.scopeId, input.threadId);
     if (!thread) throw new HarnessServiceError("not-found", `Thread not found: ${input.threadId}`);
     if (thread.lifecycle === "archived" || thread.deletion) {
       throw new HarnessServiceError("unavailable", `Thread is unavailable: ${thread.id}`);
@@ -868,7 +870,7 @@ export const deliverAuthorizedThreadRequest = async (
         throw new HarnessServiceError("invalid-params", "requestId is already bound to a different message or sender");
       }
       const continuation = thread.pendingContinuations?.find((candidate) => candidate.requestId === input.requestId);
-      const priorRun = (await deps.registry.listRuns(input.workspaceId, thread.id))
+      const priorRun = (await deps.registry.listRuns(input.scopeId, thread.id))
         .find((candidate) => candidate.request?.requestId === input.requestId);
       if (continuation) return { accepted: true, lifecycle: thread.lifecycle, attention: thread.attention,
         messageId: input.requestId, delivery: "scheduled" };
@@ -882,7 +884,7 @@ export const deliverAuthorizedThreadRequest = async (
     }
     const at = previous?.at ?? new Date().toISOString();
     if (!previous) {
-      await deps.registry.recordDirectedMessage(input.workspaceId, {
+      await deps.registry.recordDirectedMessage(input.scopeId, {
         id: input.requestId,
         from: input.from,
         to,
@@ -894,7 +896,7 @@ export const deliverAuthorizedThreadRequest = async (
       });
     }
     const patch = (status: ThreadMessageRecord["status"], runId?: string) => (
-      deps.registry.patchDirectedMessage(input.workspaceId, thread.id, input.requestId, {
+      deps.registry.patchDirectedMessage(input.scopeId, thread.id, input.requestId, {
         status,
         ...(runId ? { runId } : {}),
       })
@@ -903,14 +905,14 @@ export const deliverAuthorizedThreadRequest = async (
       return { accepted: true, lifecycle: thread.lifecycle, attention: thread.attention,
         messageId: input.requestId, delivery: "scheduled" };
     }
-    const run = await deps.registry.getActiveRun(input.workspaceId, thread.id);
+    const run = await deps.registry.getActiveRun(input.scopeId, thread.id);
     const lostWorker = thread.lifecycle === "active" && (run?.outcome === "lost" || run?.workerState === "lost");
     if (thread.lifecycle === "settled" || lostWorker) {
       if (!deps.continueRun) throw new HarnessServiceError("unavailable", "Thread runtime is not configured for continuation");
       let continued: { runId?: string };
       try {
         continued = await deps.continueRun({
-          workspaceId: input.workspaceId,
+          scopeId: input.scopeId,
           parent: thread.parent,
           threadId: thread.id,
           mode: "continue",
@@ -922,7 +924,7 @@ export const deliverAuthorizedThreadRequest = async (
         return continueError(error);
       }
       if (!continued.runId) {
-        await deps.registry.enqueueContinuation(input.workspaceId, thread.id, {
+        await deps.registry.enqueueContinuation(input.scopeId, thread.id, {
           requestId: input.requestId,
           mode: "continue",
           task: input.text,
@@ -945,7 +947,7 @@ export const deliverAuthorizedThreadRequest = async (
       return { accepted: true, lifecycle: thread.lifecycle, attention: thread.attention,
         messageId: input.requestId, delivery: "scheduled" };
     }
-    const held = await deps.registry.listPendingThreadMessages(input.workspaceId, thread.id, input.requestId);
+    const held = await deps.registry.listPendingThreadMessages(input.scopeId, thread.id, input.requestId);
     if (!deps.sendToSession) throw new HarnessServiceError("unavailable", "Thread session delivery is not configured");
     for (const heldMessage of held) {
       await deps.sendToSession(run.sessionId!, heldMessage.text, {
@@ -953,7 +955,7 @@ export const deliverAuthorizedThreadRequest = async (
         messageId: heldMessage.id,
         ...(heldMessage.kind === "request" ? { requestId: heldMessage.id } : {}),
       });
-      await deps.registry.acknowledgeThreadMessages(input.workspaceId, thread.id, [heldMessage.id], run.id);
+      await deps.registry.acknowledgeThreadMessages(input.scopeId, thread.id, [heldMessage.id], run.id);
     }
     await patch("pending", run.id);
     await deps.sendToSession(run.sessionId!, input.text, {
@@ -964,7 +966,7 @@ export const deliverAuthorizedThreadRequest = async (
     await patch("delivered", run.id);
     let attention = thread.attention;
     if (thread.waitingFor?.kind === "thread") {
-      attention = (await deps.registry.setAttention(input.workspaceId, thread.id, "none"))?.attention ?? "none";
+      attention = (await deps.registry.setAttention(input.scopeId, thread.id, "none"))?.attention ?? "none";
     }
     return { accepted: true, lifecycle: "active", attention, runId: run.id,
       messageId: input.requestId, delivery: "delivered", route: "active" };
@@ -1093,7 +1095,7 @@ export function createThreadSendService(host: HarnessServiceHost): HarnessServic
           ...(host.threadContinueRun ? { continueRun: host.threadContinueRun } : {}),
           ...(host.threadSendToSession ? { sendToSession: (sessionId, message, meta) => host.threadSendToSession!(sessionId, message, meta) } : {}),
         }, {
-          workspaceId,
+          scopeId: workspaceId,
           threadId: target.id,
           text: params.message,
           requestId: params.requestId ?? `msg-${randomUUID()}`,
@@ -1293,7 +1295,7 @@ export function createThreadSendService(host: HarnessServiceHost): HarnessServic
         let continued: { runId?: string };
         try {
           continued = await host.threadContinueRun({
-            workspaceId,
+            scopeId: workspaceId,
             parent: thread.parent,
             threadId: thread.id,
             mode: executionMode,

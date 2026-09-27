@@ -132,7 +132,7 @@ describe("research root runtime", () => {
     });
 
     const branch = await registry.createThread({
-      workspaceId: WORKSPACE,
+      scopeId: WORKSPACE,
       parent: { kind: "thread", id: root!.id },
       brief: "bounded route",
       kind: "discussion",

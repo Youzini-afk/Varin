@@ -3,7 +3,7 @@ import { deliverAuthorizedThreadRequest, type AuthorizedThreadRequestDeps } from
 
 /** Follow-up adapter over the exact already-authorized thread.send request core. */
 export const createFollowUpThreadSender = (deps: AuthorizedThreadRequestDeps) => async (input: {
-  workspaceId: string;
+  scopeId: string;
   threadId: string;
   text: string;
   requestId: string;

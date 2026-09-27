@@ -21,7 +21,7 @@ const WORKSPACE = "workspace-1";
 const PARENT: ThreadParent = { kind: "session", id: "parent-1" };
 
 const createInput = (overrides: Partial<CreateThreadInput> = {}): CreateThreadInput => ({
-  workspaceId: WORKSPACE,
+  scopeId: WORKSPACE,
   parent: PARENT,
   brief: "write tests",
   preset: "check",
@@ -78,7 +78,7 @@ describe("thread registry", () => {
     expect(await registry.getSessionBinding("child-session-1")).toEqual({
       sessionId: "child-session-1",
       owner: "spawned-child",
-      owningWorkspaceId: WORKSPACE,
+      owningScopeId: WORKSPACE,
       threadId: thread.id,
       runId: starting.id,
       parent: PARENT,
@@ -94,7 +94,7 @@ describe("thread registry", () => {
     expect(await registry.getSessionBinding("child-session-1")).toEqual({
       sessionId: "child-session-1",
       owner: "spawned-child",
-      owningWorkspaceId: WORKSPACE,
+      owningScopeId: WORKSPACE,
       threadId: thread.id,
       runId: run.id,
       parent: PARENT,
@@ -114,7 +114,7 @@ describe("thread registry", () => {
     expect(await registry.getSessionBinding("child-session-1")).toEqual({
       sessionId: "child-session-1",
       owner: "spawned-child",
-      owningWorkspaceId: WORKSPACE,
+      owningScopeId: WORKSPACE,
       threadId: thread.id,
       runId: run.id,
       parent: PARENT,
@@ -344,7 +344,7 @@ describe("thread registry", () => {
     const path = threadCatalogPath(dataDir, "test-host", WORKSPACE);
     const document = JSON.parse(await readFile(path, "utf8")) as Record<string, unknown>;
     expect(document.schemaVersion).toBe(THREAD_REGISTRY_SCHEMA_VERSION);
-    expect(document.workspaceId).toBe(WORKSPACE);
+    expect(document.scopeId).toBe(WORKSPACE);
     expect(document.threads).toHaveLength(1);
     expect(document.runs).toHaveLength(1);
 
@@ -886,7 +886,7 @@ describe("thread registry", () => {
     await expect(registry.getSessionBinding("child-session-9")).rejects.toMatchObject({ code: "stale-binding" });
     // …but durable ownership still resolves from the catalog record.
     expect(await registry.resolveSessionOwner("child-session-9")).toEqual({
-      owningWorkspaceId: WORKSPACE,
+      owningScopeId: WORKSPACE,
       threadId: thread.id,
       runId: run.id,
       owner: "spawned-child",
@@ -894,11 +894,29 @@ describe("thread registry", () => {
     await registry.dispose();
     registry = createThreadRegistry({ dataDir, hostId: "test-host" });
     expect(await registry.resolveSessionOwner("child-session-9")).toEqual({
-      owningWorkspaceId: WORKSPACE,
+      owningScopeId: WORKSPACE,
       threadId: thread.id,
       runId: run.id,
       owner: "spawned-child",
     });
     expect(await registry.resolveSessionOwner("never-seen")).toBeNull();
+  });
+
+  it("HR0: a session-owned catalog persists and reloads under a filename-safe scope key", async () => {
+    const scope = "session:chat-no-project";
+    const parent: ThreadParent = { kind: "session", id: "chat-no-project" };
+    const thread = await registry.createThread(createInput({ scopeId: scope, parent }));
+    const run = await registry.startRun(scope, thread.id);
+    await registry.markRunRunning(scope, thread.id, run.id, "chat-no-project");
+    await registry.dispose();
+    registry = createThreadRegistry({ dataDir, hostId: "test-host" });
+    expect(await registry.getThread(scope, parent, thread.id)).toMatchObject({ id: thread.id });
+    expect(await registry.resolveSessionOwner("chat-no-project")).toMatchObject({
+      owningScopeId: scope,
+      threadId: thread.id,
+    });
+    // The persisted file name never embeds the raw `session:` scope id.
+    const catalogDir = join(dataDir, "threads", "test-host");
+    for (const name of fs.readdirSync(catalogDir)) expect(name).not.toContain(":");
   });
 });

@@ -116,7 +116,7 @@ describe("branch integration lock order", () => {
         return store.publishHeadResult("thread-child");
       });
       const parent = await registry.createThread({
-        workspaceId,
+        scopeId: workspaceId,
         parent: { kind: "session", id: "root" },
         brief: "parent",
         preset: "hard-implement",
@@ -146,7 +146,7 @@ describe("branch integration lock order", () => {
         draftBasePaths: [],
       });
       const child = await registry.createThread({
-        workspaceId,
+        scopeId: workspaceId,
         parent: { kind: "thread", id: parent.id },
         brief: "child",
         preset: "hard-implement",

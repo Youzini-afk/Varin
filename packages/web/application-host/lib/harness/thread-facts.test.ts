@@ -353,7 +353,7 @@ describe("thread.read retrieval pagination", () => {
     };
     let registry = createThreadRegistry({ dataDir, hostId: "host-1" });
     const thread = await registry.createThread({
-      workspaceId: "workspace-1",
+      scopeId: "workspace-1",
       parent: { kind: "session", id: "parent-1" },
       brief: "large evidence",
       preset: "retrieval",

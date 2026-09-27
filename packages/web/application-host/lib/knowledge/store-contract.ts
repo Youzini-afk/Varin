@@ -88,7 +88,7 @@ export class KnowledgeBlockConflictError extends Error {
   }
 }
 
-export type KnowledgeScope = "workspace" | "user";
+export type KnowledgeScope = "workspace" | "user" | "session";
 export type KnowledgeStatus = "suggested" | "accepted" | "dismissed";
 
 /** Values that identify the revision a caller opened before a mutation. */
@@ -502,7 +502,13 @@ export interface KnowledgeStore {
 export interface OpenWorkspaceKnowledgeDeps {
   dataDir: string;
   hostId: string;
+  /**
+   * Storage shard key. Workspace/user stores keep their existing key; HR0
+   * session-owned stores use `session-*` keys derived from the session scope.
+   */
   workspaceId: string;
+  /** Owner scope classification for records written into this store. */
+  scope?: KnowledgeScope;
   embedding: EmbeddingProvider | null;
   onBlocksChanged?: (sessionId: string, change: BlockChange) => void;
   onKnowledgeChanged?: (ids: readonly NodeId[]) => void;
