@@ -117,7 +117,7 @@
     "@types/express": "^5.0.0",
     "@types/luxon": "^3.7.5",
     "@types/multer": "^2.2.0",
-    "@types/node": "^24.3.1",
+    "@types/node": "^26.6.2",
     "@types/picomatch": "^4.0.3",
     "@types/qrcode-terminal": "^0.12.2",
     "@types/react": "^19.1.10",

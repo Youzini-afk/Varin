@@ -45,7 +45,7 @@
     "@capacitor/android": "^8.5.2",
     "@capacitor/cli": "^8.5.2",
     "@capacitor/ios": "^8.5.2",
-    "@types/node": "^24.3.1",
+    "@types/node": "^26.6.2",
     "serve-sim": "^0.1.45",
     "sharp": "^0.35.4",
     "typescript": "~5.9.0"
