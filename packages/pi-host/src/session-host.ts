@@ -823,6 +823,18 @@ export class SessionHost {
     });
   }
 
+  rejectUnboundHarness(requestId: string): boolean {
+    const sessionId = this.sessionId;
+    if (!sessionId) return false;
+    return this.respondHarness(sessionId, requestId, {
+      ok: false,
+      error: {
+        code: "unavailable",
+        message: "Harness request arrived before the broker bound this session worker",
+      },
+    });
+  }
+
   async create(
     cwd: string,
     name?: string,
@@ -888,10 +900,8 @@ export class SessionHost {
     }
     const manager = SessionManager.open(sessionFile, undefined, input.cwd);
     await this.#replaceWith(manager);
-    // The first reopened snapshot must reflect Host-revalidated branch state.
-    // #bindSession emitted the registration event; context.get waits for its
-    // exact worker generation before this open request returns.
-    if (this.#harnessWorkContextEnabled) await this.#workContextSync?.ensureCurrent();
+    // The broker must pin this worker and publish its workspace binding before
+    // a Host-owned context.get can be admitted. It calls syncWorkContext next.
     return this.snapshot();
   }
 
@@ -1737,6 +1747,14 @@ export class SessionHost {
   workContextRead(sessionId: string): import("@varin/protocol").PiWorkContextSnapshot {
     this.assertSession(sessionId);
     return readSessionWorkContext(this.session.sessionManager);
+  }
+
+  async syncWorkContext(sessionId: string): Promise<SessionSnapshot> {
+    this.assertSession(sessionId);
+    if (this.#harnessWorkContextEnabled) await this.#workContextSync?.ensureCurrent();
+    const snapshot = this.snapshot();
+    this.#emit("session.snapshot", snapshot);
+    return snapshot;
   }
 
   workContextCommit(input: import("@varin/protocol").PiWorkContextCommit): import("@varin/protocol").PiWorkContextSnapshot {

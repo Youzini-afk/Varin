@@ -232,6 +232,11 @@ export interface HostMethodMap {
     params: HarnessRespondParams;
     result: { accepted: boolean };
   };
+  /** Broker-only negative acknowledgement for a request emitted before worker identity is pinned. */
+  "harness.rejectUnbound": {
+    params: { requestId: string };
+    result: { accepted: boolean };
+  };
   /** Broker → dedicated compaction worker: run the frozen internal task (D-314). */
   "compaction.run": {
     params: import("./harness-compaction.js").CompactionTaskSpec;
@@ -417,6 +422,11 @@ export interface HostMethodMap {
   "session.workContext.read": {
     params: { sessionId: string };
     result: PiWorkContextSnapshot;
+  };
+  /** Revalidate a reopened session after the broker has pinned its worker and published its workspace binding. */
+  "session.workContext.sync": {
+    params: { sessionId: string };
+    result: SessionSnapshot;
   };
   "session.workContext.commit": {
     params: PiWorkContextCommit;

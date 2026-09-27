@@ -754,7 +754,16 @@ export class PiRuntimeBroker {
       }
       const enriched = await this.#enrichSnapshot(opened.worker, opened.snapshot);
       opened.worker.flushDeferredSessionSnapshots();
-      return enriched;
+      if (enriched.workspace?.kind !== "workspace"
+        || this.#options.client.capabilities?.harnessWorkContext !== true) return enriched;
+      // The initial snapshot registers this pinned worker with the Host.
+      // Only then may the reopened branch ask the Host to revalidate its
+      // work context. The worker's earlier session.open reply is intentionally
+      // free of Host requests while its session identity is still unbound.
+      const synchronized = await opened.worker.request("session.workContext.sync", {
+        sessionId: opened.snapshot.sessionId,
+      });
+      return this.#enrichSnapshot(opened.worker, synchronized);
     } catch (error) {
       await this.#removeWorker(opened.worker);
       throw error;
@@ -2034,6 +2043,16 @@ export class PiRuntimeBroker {
               role,
               workerId: client.id,
             });
+            if (envelope.event === "harness.request" && client.sessionId === undefined) {
+              void client.request("harness.rejectUnbound", { requestId: envelope.data.requestId })
+                .catch((error) => this.#emit({
+                  kind: "diagnostic",
+                  level: "error",
+                  message: `Failed to reject an unbound Harness request: ${error instanceof Error ? error.message : String(error)}`,
+                  role,
+                  workerId: client.id,
+                }));
+            }
           }
           return;
         }

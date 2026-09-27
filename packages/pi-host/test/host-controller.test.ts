@@ -1016,4 +1016,44 @@ describe("HostController", () => {
       await rm(root, { force: true, recursive: true });
     }
   });
+
+  it("rejects an unbound Harness request immediately while a session method waits", async () => {
+    const root = await mkdtemp(join(tmpdir(), "varin-unbound-harness-"));
+    const cwd = join(root, "workspace");
+    const agentDir = join(root, "agent");
+    await mkdir(cwd, { recursive: true });
+    const transport = new MemoryHostTransport();
+    const controller = new HostController({ agentDir, transport });
+    controller.start();
+    try {
+      transport.receive(createRequest("handshake-unbound", "host.handshake", {
+        clientName: "host-test", clientVersion: "0.0.0", mode: "test",
+        protocolVersions: [VARIN_PROTOCOL_VERSION],
+        capabilities: { harnessWorkContext: true },
+      }));
+      const handshake = await transport.waitFor((entry) => isResponse(entry, "handshake-unbound"));
+      assert.ok(handshake.kind === "response" && handshake.ok);
+      transport.receive(createRequest("create-unbound", "session.create", { cwd }));
+      const created = await transport.waitFor((entry) => isResponse(entry, "create-unbound"));
+      assert.ok(created.kind === "response" && created.ok);
+      const sessionId = (created.result as SessionSnapshot).sessionId;
+
+      transport.receive(createRequest("sync-unbound", "session.workContext.sync", { sessionId }));
+      const request = await transport.waitFor((entry) => isEvent(entry, "harness.request"));
+      assert.ok(request.kind === "event" && request.event === "harness.request");
+      assert.equal(request.data.method, "context.get");
+      transport.receive(createRequest("reject-unbound", "harness.rejectUnbound", {
+        requestId: request.data.requestId,
+      }));
+      const rejected = await transport.waitFor((entry) => isResponse(entry, "reject-unbound"));
+      assert.ok(rejected.kind === "response" && rejected.ok);
+      assert.deepEqual(rejected.result, { accepted: true });
+      const sync = await transport.waitFor((entry) => isResponse(entry, "sync-unbound"));
+      assert.ok(sync.kind === "response" && !sync.ok);
+      assert.match(sync.error.message, /before the broker bound this session worker/);
+    } finally {
+      await controller.dispose();
+      await rm(root, { force: true, recursive: true });
+    }
+  });
 });

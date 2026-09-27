@@ -166,8 +166,12 @@ const OUT_OF_BAND_METHODS = new Set([
   "config.unwatch",
   "extension.ui.respond",
   "harness.respond",
+  "harness.rejectUnbound",
   "session.workContext.read",
   "session.workContext.commit",
+  // Reopen sync waits for Host registration, which first reads settings through
+  // the ordinary request queue. Keep the sync observation off that queue.
+  "session.workContext.sync",
   "harness.inference.cancel",
   "provider.auth.cancel",
   "provider.auth.respond",
@@ -1082,6 +1086,8 @@ export class HostController {
         );
       case "session.workContext.read":
         return this.#sessionHost.workContextRead(readString(params, "sessionId"));
+      case "session.workContext.sync":
+        return this.#sessionHost.syncWorkContext(readString(params, "sessionId"));
       case "session.workContext.commit":
         return this.#sessionHost.workContextCommit({
           sessionId: readString(params, "sessionId"),
@@ -1566,6 +1572,8 @@ export class HostController {
           ),
         };
       }
+      case "harness.rejectUnbound":
+        return { accepted: this.#sessionHost.rejectUnboundHarness(readString(params, "requestId")) };
       case "compaction.run":
         if (this.#workerRole !== "compaction") {
           throw new HostError("worker_role_violation", "compaction.run requires a compaction worker");
