@@ -37,7 +37,7 @@ Status: append-only decision log; entries live in the domain volumes under decis
 | [workingstate-threads](decisions/workingstate-threads.md) | 3.4/3.4a/3.5/3.6/3.7/3.10/3.18 工作状态、任务线程/协作、Integration/恢复应用、P0 存储形状与 T 纵切。 | 58 |
 | [stage-r-kernel](decisions/stage-r-kernel.md) | D-252~D-283 Rust 系统内核迁移全程（R0–R6）与 D-283 权限/Web 收口。 | 32 |
 | [research-cluster](decisions/research-cluster.md) | D-291/D-297–D-301/D-303–D-304 科研集群、工作台与侧重、能力路由、实验执行、通用协作、请求上下文、验收及受管远程/运维。 | 8 |
-| [runtime-reliability](decisions/runtime-reliability.md) | RR 专项：断连追赶与权威重同步、可靠停止状态机、工作上下文、shell 边界、检索范围、出站联网。 | 2 |
+| [runtime-reliability](decisions/runtime-reliability.md) | RR 专项及 HR 替代设计：恢复/停止、shell/联网、工作上下文及其向任务资源与持续检索的解耦。 | 10 |
 
 ## 决策索引
 
@@ -370,3 +370,4 @@ Status: append-only decision log; entries live in the domain volumes under decis
 | D-334 | 2026-09-26 | RR6：跨层故障注入落在真实 WS（gateway.test.ts 杀线用例），平台/打包/真实代理边界如实标未测，不笼统全绿 | implemented / wired | 跨层证据只补真实可执行的：真 socket 断开→ambiguous pending→重连恢复；打包纵切无环境则记录 | gateway.test.ts；status RR6；plan Status 头 | [runtime-reliability](decisions/runtime-reliability.md) |
 | D-335 | 2026-09-26 | RR1–RR6 验收纠正：单次权威追赶、按 Run 停止、分支持久工作上下文及调用期固定语义 | focused acceptance / incomplete | 修复已复现的竞态和路径/网络检查缺陷；子 Agent 继承、项目发现续查、可信代理出口与平台 smoke 仍未闭环 | protocol/pi-host/app-host/ui；status RR 复核记录 | [runtime-reliability](decisions/runtime-reliability.md) |
 | D-336 | 2026-09-26 | RR2/RR5 收口：子 Agent 冻结继承、可续页项目发现、执行 Host 的可信代理委托、授权句柄读取磁盘字节 | implemented / focused acceptance | 四项原代码缺口完成实际消费者接线与交错验证；真实代理和安装包、对抗性父目录 ABA 仍按证据保留边界 | thread-runtime；work-context；egress/settings；document.readSource；status RR | [runtime-reliability](decisions/runtime-reliability.md) |
+| D-337 | 2026-09-27 | 面向任务与资源的 Harness：工作区回归分类，执行参数固定目标，索引按资源与内容版本持续复用 | accepted direction / design recorded / not implemented | 替代 D-330 及 D-332 的目录上下文、检索/存储归属目标；保留恢复、输出、资源修订与现有算法；HR0–HR5 尚未实施 | protocol；Pi/Host/Rust；Documents；Thread/knowledge；search/semantic；UI；plan/status/architecture/development | [runtime-reliability](decisions/runtime-reliability.md) |

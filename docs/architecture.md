@@ -8,7 +8,13 @@ product surfaces. The cleanup and root build were locally verified; packaged, cr
 remote-CI evidence remains owned by their respective release checks. Historical Stage R and migration
 evidence may still name that surface where it records work completed before retirement.
 
-Last updated: 2026-09-22
+Last updated: 2026-09-27
+
+Design direction (D-337, not implemented): [task/resource Harness and continuous retrieval](resource-oriented-harness-design.md)
+separates project grouping from session/task ownership, resource identity, execution directories and indexes.
+HR0–HR5 replace the mutable session work-context and workspace-bound retrieval model. The process and
+workspace descriptions below continue to describe existing implementation until their consumers change;
+this design entry does not claim that the replacement has shipped.
 
 ## 1. Context
 

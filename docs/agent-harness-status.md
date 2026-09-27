@@ -2,7 +2,7 @@
 
 Status: living document maintained by the executing agent; the only authority on what is delivered
 
-Last updated: 2026-09-26
+Last updated: 2026-09-27
 
 这是 [agent-harness.md](agent-harness.md) 所述能力的**交付状态**，四级定义见
 [agent-harness-plan.md](agent-harness-plan.md) 0.1（D-038，经 D-078 修订）：
@@ -17,6 +17,13 @@ Last updated: 2026-09-26
 规则：proven 才算已验证的可用路径，证据列给具体文件；Blocker 写实际未完成行为/特定环境问题，不把优化或缺独立评测当通用阻塞。
 Default-on 列只记当前代码，尚未完成的正式目标单独列为待实施。
 [roadmap.md](roadmap.md) 只引用本文件，不再自述测试数。
+
+**D-337 / 阶段 HR：面向任务与资源的 Harness（2026-09-27，方向确认 / 设计文档完成 / 全部尚未实施）。**
+
+[工作区解耦与持续检索设计](resource-oriented-harness-design.md) 定义 HR0–HR5：资源与数据归属、会话与操作、直接检索、
+持续索引、产品与旧机制收口、真实使用验收。工作区回到会话/项目组织职责，执行与查询使用明确的本次目标；
+索引按资源及内容版本复用，冷目录可直接搜索。当前代码仍使用 RR2 工作上下文与 workspace 索引，不把设计标为 wired。
+下文 RR2/RR4 的目录模型记录保留为历史实现事实，其后续目标由 D-337 替代；恢复、输出和其他既有正确性成果继续保留。
 
 **运行时可靠性专项 RR（2026-09-26：RR0–RR5 的代码路径与定向行为已复核；RR6 的真实安装包/外部代理平台纵切仍待验证）。**
 
