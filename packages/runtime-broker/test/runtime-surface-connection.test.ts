@@ -181,6 +181,33 @@ test("surface connection projects routed host events only after handshake", asyn
   }
 });
 
+test("surface connection forwards compaction progress without treating the worker as a session", async () => {
+  const harness = createHarness();
+  try {
+    await handshake(harness);
+    harness.emit({
+      envelope: createEvent(3, "compaction.trace", {
+        sessionId: "session-1", taskId: "task-1", type: "delta", channel: "text", delta: "Working",
+      }),
+      kind: "host",
+      role: "compaction",
+      runtimeGeneration: 2,
+      sessionId: "session-1",
+      workerId: "worker-compaction",
+    });
+    const event = await harness.next();
+    assert.equal(event.kind, "event");
+    if (event.kind !== "event") assert.fail("expected event");
+    assert.equal(event.event, "compaction.trace");
+    assert.equal(event.source.role, "compaction");
+    assert.deepEqual(event.data, {
+      sessionId: "session-1", taskId: "task-1", type: "delta", channel: "text", delta: "Working",
+    });
+  } finally {
+    harness.connection.close();
+  }
+});
+
 test("surface connection reports a session worker exit to every connected surface", async () => {
   const harness = createHarness();
   try {

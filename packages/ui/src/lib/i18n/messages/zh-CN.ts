@@ -2507,6 +2507,8 @@ export const dict: Record<I18nKey, string> = {
   'chat.piComposer.submission.uncertain': '发送结果未知',
   'chat.piComposer.submission.failed': '未发送',
   'chat.piAssistant.working': '处理中',
+  'chat.compaction.inProgress': '上下文压缩中…',
+  'chat.compaction.thinking': '思考过程',
   'chat.piComposer.agent.imageUnsupported': '所选智能体无法接收图片附件。请移除图片或改用 Pi。',
   'chat.piComposer.pdfAttachment.uploadFailed': '无法上传 {name}。',
   'chat.piComposer.pdfAttachment.unsupported': '此会话工作区不支持上传 PDF。',

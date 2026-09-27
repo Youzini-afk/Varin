@@ -1651,6 +1651,39 @@ describe('Pi session store', () => {
     }]);
   });
 
+  test('shows auxiliary compaction steps in the owning chat without merging them into its assistant turn', async () => {
+    const runtime = new FakeRuntime();
+    runtime.handler = (method) => {
+      if (method === 'agent.compact') return { firstKeptEntryId: 'kept', summary: 'done', tokensBefore: 12000 };
+      throw new Error(`Unexpected ${method}`);
+    };
+    const store = createPiSessionStore(runtime);
+    await store.getState().compactSession('session-a');
+    const emitTrace = (type: 'started' | 'entry' | 'finished', entry?: { kind: 'assistant'; at: number; text: string }) => {
+      runtime.emit({
+        kind: 'event', event: 'compaction.trace', seq: type === 'started' ? 1 : type === 'entry' ? 3 : 4,
+        data: { sessionId: 'session-a', taskId: 'task-a', type, ...(entry ? { entry } : {}) },
+        source: { role: 'compaction', runtimeGeneration: 1, sessionId: 'session-a', workerId: 'worker-compaction' },
+        v: VARIN_PROTOCOL_VERSION,
+      } as RuntimeEventEnvelope);
+    };
+    emitTrace('started');
+    runtime.emit({
+      kind: 'event', event: 'compaction.trace', seq: 2,
+      data: { sessionId: 'session-a', taskId: 'task-a', type: 'delta', channel: 'thinking', delta: 'Checking' },
+      source: { role: 'compaction', runtimeGeneration: 1, sessionId: 'session-a', workerId: 'worker-compaction' },
+      v: VARIN_PROTOCOL_VERSION,
+    } as RuntimeEventEnvelope);
+    expect(store.getState().records['session-a']?.compactionTraces?.['task-a']?.partial?.thinking).toBe('Checking');
+    emitTrace('entry', { kind: 'assistant', at: 1, text: 'Checking the current task.' });
+    emitTrace('finished');
+    expect(store.getState().records['session-a']?.compactionTraces?.['task-a']).toEqual({
+      taskId: 'task-a', status: 'finished', partial: { text: '', thinking: '' },
+      entries: [{ kind: 'assistant', at: 1, text: 'Checking the current task.' }],
+    });
+    expect(store.getState().records['session-a']?.liveAssistant).toBeUndefined();
+  });
+
   test('loads the authoritative Pi session tree', async () => {
     const runtime = new FakeRuntime();
     const tree = {

@@ -2520,6 +2520,8 @@ export const dict: Record<I18nKey, string> = {
   "chat.piComposer.submission.uncertain": "Resultado do envio desconhecido",
   "chat.piComposer.submission.failed": "Não enviado",
   "chat.piAssistant.working": "Processando",
+  "chat.compaction.inProgress": "Compactando o contexto…",
+  "chat.compaction.thinking": "Raciocínio",
   "chat.piComposer.agent.imageUnsupported": "O agente selecionado não pode receber imagens anexadas. Remova as imagens ou use o Pi.",
   'chat.piComposer.pdfAttachment.uploadFailed': 'Could not upload {name}.',
   'chat.piComposer.pdfAttachment.unsupported': 'PDF upload is not supported for this session workspace.',

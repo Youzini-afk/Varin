@@ -551,14 +551,25 @@ export const PiTimeline: React.FC<PiTimelineProps> = (props) => {
     props.threadBusyEntryId,
   ]);
   const endBreathingSpace = React.useMemo(() => (
-    <div
-      aria-hidden="true"
-      className={isMobile
-        ? 'h-[clamp(7rem,24dvh,13rem)]'
-        : 'h-[clamp(14rem,42dvh,30rem)]'}
-      data-pi-timeline-end-space="true"
-    />
-  ), [isMobile]);
+    <>
+      {props.compactionPending ? (
+        <div className="chat-message-column py-1.5">
+          <button type="button" className="flex w-full items-center gap-2 rounded-lg border border-border/60 bg-muted/20 px-3 py-2 text-left typography-meta hover:bg-interactive-hover" onClick={props.onOpenCompaction}>
+            <Icon name="loader-4" className="size-3.5 animate-spin" />
+            {t('chat.compaction.inProgress')}
+            <span className="ml-auto text-primary">{t('harness.threads.transcript')}</span>
+          </button>
+        </div>
+      ) : null}
+      <div
+        aria-hidden="true"
+        className={isMobile
+          ? 'h-[clamp(7rem,24dvh,13rem)]'
+          : 'h-[clamp(14rem,42dvh,30rem)]'}
+        data-pi-timeline-end-space="true"
+      />
+    </>
+  ), [isMobile, props.compactionPending, props.onOpenCompaction, t]);
 
   const releaseAutomationForIntent = React.useCallback((intent: PiTimelineScrollIntent) => {
     if (!shouldReleasePiTimelineFollow(modeRef.current, atEndRef.current, intent)) return;

@@ -2436,6 +2436,8 @@ export const dict = {
   'chat.piComposer.submission.uncertain': 'Send result unknown',
   'chat.piComposer.submission.failed': 'Not sent',
   'chat.piAssistant.working': 'Working',
+  'chat.compaction.inProgress': 'Compacting context…',
+  'chat.compaction.thinking': 'Thinking',
   'chat.piComposer.agent.imageUnsupported': 'The selected Agent cannot receive image attachments. Remove the images or use Pi.',
   'chat.piComposer.pdfAttachment.uploadFailed': 'Could not upload {name}.',
   'chat.piComposer.pdfAttachment.unsupported': 'PDF upload is not supported for this session workspace.',

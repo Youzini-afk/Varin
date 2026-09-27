@@ -16,7 +16,7 @@ import {
 } from "@earendil-works/pi-coding-agent";
 import type { AgentMessage } from "@earendil-works/pi-agent-core";
 import type { Api, Model, Usage } from "@earendil-works/pi-ai";
-import type { CompactionRunResult, CompactionTaskSpec, JsonValue } from "@varin/protocol";
+import type { CompactionRunResult, CompactionTaskSpec, CompactionTrace, JsonValue } from "@varin/protocol";
 import { retainedContextState } from "./retained-context.js";
 import { activeCompactionMessages } from "./compaction-context.js";
 import {
@@ -34,8 +34,8 @@ import {
 /**
  * Context preparation extension — fixed-candidate background compaction.
  *
- * Design: agent-harness.md §8.4–8.6, context-compaction-agent-design.md (D-314)
- * Plan: agent-harness-plan.md §2.4A/B, §2.6A, stage C
+ * Design: design/harness-context.md §8.4–8.6, design/context-compaction-agent-design.md (D-314)
+ * Plan: plan/agent-harness-plan.md §2.4A/B, §2.6A, stage C
  * Decisions: D-284, D-286, D-314
  *
  * Budget is measured on the `context` hook, which Pi runs before every
@@ -100,6 +100,7 @@ export interface PreparedCandidate extends FixedPreparation {
   abort: AbortController;
   done: Promise<void>;
   summary?: string;
+  trace?: CompactionTrace;
   usage?: Usage;
   error?: string;
 }
@@ -592,6 +593,7 @@ export function createContextPreparationExtension(
           throw new Error("Compaction returned no summary text");
         }
         cand.summary = result.summary;
+        if (result.trace !== undefined) cand.trace = result.trace;
         if (result.usage !== undefined) cand.usage = result.usage as unknown as Usage;
         cand.status = "ready";
         prepStats.set(cand.modelKey, {
@@ -648,6 +650,7 @@ export function createContextPreparationExtension(
           summary: cand.summary!,
           tokensBefore: event.preparation.tokensBefore,
           ...(cand.usage === undefined ? {} : { usage: cand.usage }),
+          ...(cand.trace === undefined ? {} : { details: { varinCompactionTrace: cand.trace } }),
         };
       }
       options.onFailure?.("commit", cand.error ?? "The prepared source was cancelled or changed");
@@ -701,6 +704,7 @@ export function createContextPreparationExtension(
         summary: result.summary,
         tokensBefore: event.preparation.tokensBefore,
         ...(result.usage === undefined ? {} : { usage: result.usage as unknown as Usage }),
+        ...(result.trace === undefined ? {} : { details: { varinCompactionTrace: result.trace } }),
       };
     } catch (error) {
       options.onFailure?.("commit", error instanceof Error ? error.message : String(error));

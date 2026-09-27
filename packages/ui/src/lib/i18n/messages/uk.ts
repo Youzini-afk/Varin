@@ -2523,6 +2523,8 @@ export const dict: Record<I18nKey, string> = {
   "chat.piComposer.submission.uncertain": "Результат надсилання невідомий",
   "chat.piComposer.submission.failed": "Не надіслано",
   "chat.piAssistant.working": "Опрацювання",
+  "chat.compaction.inProgress": "Стискання контексту…",
+  "chat.compaction.thinking": "Міркування",
   "chat.piComposer.agent.imageUnsupported": "Вибраний агент не може отримувати вкладені зображення. Видаліть зображення або скористайтеся Pi.",
   'chat.piComposer.pdfAttachment.uploadFailed': 'Could not upload {name}.',
   'chat.piComposer.pdfAttachment.unsupported': 'PDF upload is not supported for this session workspace.',

@@ -258,9 +258,14 @@ describe("context preparation extension", () => {
     await new Promise((resolve) => setTimeout(resolve, 20));
     assert.equal(harness.calls.length, 1);
 
-    harness.calls[0]!.resolve(okResult("Working summary of earlier turns."));
+    harness.calls[0]!.resolve({ ...okResult("Working summary of earlier turns."), trace: {
+      taskId: "preparation-1", entries: [{ kind: "assistant", at: 1, text: "Working summary of earlier turns." }],
+    } });
     const result = await commitPromise as { compaction?: { summary: string; firstKeptEntryId: string } };
     assert.equal(result.compaction?.summary, "Working summary of earlier turns.");
+    assert.deepEqual((result.compaction as { details?: unknown })?.details, { varinCompactionTrace: {
+      taskId: "preparation-1", entries: [{ kind: "assistant", at: 1, text: "Working summary of earlier turns." }],
+    } });
     assert.ok(harness.entries.some((e) => e.id === result.compaction?.firstKeptEntryId));
     assert.deepEqual(harness.successes, ["prepare", "commit"]);
     assert.equal(harness.calls.length, 1);
@@ -288,9 +293,14 @@ describe("context preparation extension", () => {
     // The synchronous spec carries B verbatim through the fixed leaf as well.
     assert.ok(harness.calls[0]!.spec.keptMessages.length > 0);
     assert.equal(harness.calls[0]!.spec.fixedLeafEntryId, "e6");
-    harness.calls[0]!.resolve(okResult("Synchronous summary."));
+    harness.calls[0]!.resolve({ ...okResult("Synchronous summary."), trace: {
+      taskId: "manual-1", entries: [{ kind: "assistant", at: 2, text: "Synchronous summary." }],
+    } });
     const result = await commitPromise as { compaction?: { summary: string; firstKeptEntryId: string } };
     assert.equal(result.compaction?.summary, "Synchronous summary.");
+    assert.deepEqual((result.compaction as { details?: unknown })?.details, { varinCompactionTrace: {
+      taskId: "manual-1", entries: [{ kind: "assistant", at: 2, text: "Synchronous summary." }],
+    } });
     assert.equal(result.compaction?.firstKeptEntryId, harness.entries[harness.entries.length - 2]!.id);
     assert.deepEqual(harness.successes, ["commit"]);
   });

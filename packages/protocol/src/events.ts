@@ -18,6 +18,7 @@ import type { PiAgentEvent } from "./session.js";
 import type { ProviderConfigDeleteScope } from "./provider.js";
 import type { HarnessCancelData, HarnessRequestData } from "./harness.js";
 import type { Thread, ThreadReport, ThreadRun } from "./harness-threads.js";
+import type { CompactionTraceUpdate } from "./harness-compaction.js";
 
 interface WorkspaceMutationRequestBase {
   path: string;
@@ -33,6 +34,7 @@ export type WorkspaceMutationRequest = WorkspaceMutationRequestBase & (
 );
 
 export interface HostEventMap {
+  "compaction.trace": CompactionTraceUpdate;
   "agent.event": {
     event: PiAgentEvent;
     sessionId: string;
@@ -118,6 +120,7 @@ export interface HostEventMap {
 
 export const HOST_EVENTS = [
   "agent.event",
+  "compaction.trace",
   "config.changed",
   "extension.ui.dismiss",
   "extension.ui.request",

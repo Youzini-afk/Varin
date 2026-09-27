@@ -97,6 +97,12 @@ export interface PiSessionViewState {
   allEntries?: SessionEntriesResult;
   branchEntries?: SessionEntriesResult;
   branchEntriesSource?: 'live' | 'preview';
+  /** Live read-only view of auxiliary compaction workers; completed traces also live in Pi entries. */
+  compactionTraces?: Record<string, import('@varin/protocol').CompactionTrace & {
+    status: 'running' | 'finished' | 'failed';
+    error?: string;
+    partial?: { text: string; thinking: string };
+  }>;
   extensionStates: Record<string, JsonValue>;
   lastAgentEvent?: PiAgentEvent;
   liveAssistant?: PiAssistantMessage;
@@ -914,6 +920,30 @@ export const createPiSessionStore = (
 
     const applyRuntimeEvent = (runtimeKey: string, envelope: RuntimeEventEnvelope): void => {
       if (!contextIsCurrent(runtimeKey)) return;
+      if (envelope.source.role === 'compaction' && envelope.event === 'compaction.trace') {
+        const { sessionId, taskId } = envelope.data;
+        if (envelope.source.sessionId !== sessionId) return;
+        set((state) => ({
+          records: upsertRecord(state.records, sessionId, (current) => {
+            const previous = current.compactionTraces?.[taskId];
+            const trace = previous ?? { taskId, entries: [], status: 'running' as const };
+            const updated = envelope.data.type === 'entry'
+              ? { ...trace, entries: [...trace.entries, envelope.data.entry], partial: { text: '', thinking: '' } }
+              : envelope.data.type === 'delta'
+                ? { ...trace, partial: {
+                  text: `${trace.partial?.text ?? ''}${envelope.data.channel === 'text' ? envelope.data.delta : ''}`,
+                  thinking: `${trace.partial?.thinking ?? ''}${envelope.data.channel === 'thinking' ? envelope.data.delta : ''}`,
+                } }
+              : envelope.data.type === 'failed'
+                ? { ...trace, status: 'failed' as const, error: envelope.data.message }
+                : envelope.data.type === 'finished'
+                  ? { ...trace, status: 'finished' as const }
+                  : trace;
+            return { ...current, compactionTraces: { ...current.compactionTraces, [taskId]: updated } };
+          }),
+        }));
+        return;
+      }
       // Catalog workers open short-lived workspace contexts for provider/model
       // operations. Their snapshots are not user sessions and must never enter
       // the session catalog or current-session state.

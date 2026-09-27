@@ -2371,6 +2371,8 @@ export const dict: Record<I18nKey, string> = {
   'chat.piComposer.submission.uncertain': '送信結果は不明',
   'chat.piComposer.submission.failed': '未送信',
   'chat.piAssistant.working': '処理中',
+  'chat.compaction.inProgress': 'コンテキストを圧縮中…',
+  'chat.compaction.thinking': '思考過程',
   'chat.piComposer.agent.imageUnsupported': '選択したエージェントは画像添付を受け取れません。画像を削除するか Pi を使用してください。',
   'chat.piComposer.pdfAttachment.uploadFailed': 'Could not upload {name}.',
   'chat.piComposer.pdfAttachment.unsupported': 'PDF upload is not supported for this session workspace.',

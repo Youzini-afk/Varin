@@ -6,6 +6,7 @@ import type {
 import { PiRuntimeAmbiguousRequestError } from '@varin/runtime-client';
 import { runtimeFetch } from '@varin/application-client';
 import type {
+  CompactionTrace,
   ModelDescriptor,
   PiSessionMessageEntry,
   PiUserMessage,
@@ -81,6 +82,8 @@ import { projectHarnessWebSources } from './harnessWebSources';
 import { useWebSourcesStore } from '@/stores/useWebSourcesStore';
 import { PdfMaterialReader } from './PdfMaterialReader';
 import { PDF_MATERIAL_OPEN_EVENT, parsePdfMaterialCitationUrl } from '@/lib/pi-runtime/pdfMaterialCitation';
+import { parseCompactionTraceDetails, PI_COMPACTION_TRACE_OPEN_EVENT } from '@/lib/pi-runtime/compactionTrace';
+import { PiCompactionTraceDialog } from './PiCompactionTraceDialog';
 
 const LazyPiTimeline = React.lazy(async () => {
   const module = await import('./PiTimeline');
@@ -273,9 +276,48 @@ export const PiChatView: React.FC<PiChatViewProps> = ({
   const [threadBusyEntryId, setThreadBusyEntryId] = React.useState<string | null>(null);
   const [treeInitialQuery, setTreeInitialQuery] = React.useState('');
   const [activePdfMaterial, setActivePdfMaterial] = React.useState<ActivePdfMaterial | null>(null);
+  const [selectedCompactionTrace, setSelectedCompactionTrace] = React.useState<CompactionTrace | null>(null);
+  const [selectedCompactionTaskId, setSelectedCompactionTaskId] = React.useState<string | null>(null);
+  const [compactionTraceOpen, setCompactionTraceOpen] = React.useState(false);
+  const [compactionViewError, setCompactionViewError] = React.useState<string | null>(null);
   const appliedEditorRevisions = React.useRef(new Map<string, number>());
   const compactionsInFlight = React.useRef(new Set<string>());
+  const compactionTraceBaseline = React.useRef(new Map<string, Set<string>>());
   const [compactingSessions, setCompactingSessions] = React.useState<ReadonlySet<string>>(() => new Set());
+  const currentCompactionTraces = currentRecord?.compactionTraces;
+  const currentCompactionKey = JSON.stringify([runtimeKey, currentSessionId]);
+  const traceBaseline = compactionTraceBaseline.current.get(currentCompactionKey);
+  const activeCompactionTrace = Object.values(currentCompactionTraces ?? {})
+    .filter((trace) => traceBaseline ? !traceBaseline.has(trace.taskId) : trace.status === 'running')
+    .at(-1) ?? null;
+  const openActiveCompaction = React.useCallback(() => {
+    setSelectedCompactionTrace(null);
+    setSelectedCompactionTaskId(activeCompactionTrace?.taskId ?? null);
+    setCompactionTraceOpen(true);
+  }, [activeCompactionTrace?.taskId]);
+  const visibleCompactionTrace = selectedCompactionTaskId
+    ? selectedCompactionTrace ?? currentCompactionTraces?.[selectedCompactionTaskId]
+    : selectedCompactionTrace;
+
+  React.useEffect(() => {
+    if (compactionTraceOpen && !selectedCompactionTaskId && !selectedCompactionTrace && activeCompactionTrace) {
+      setSelectedCompactionTaskId(activeCompactionTrace.taskId);
+    }
+  }, [activeCompactionTrace, compactionTraceOpen, selectedCompactionTaskId, selectedCompactionTrace]);
+
+  React.useEffect(() => {
+    const openTrace = (event: Event) => {
+      const detail = (event as CustomEvent<{ sessionId?: unknown; trace?: unknown }>).detail;
+      if (!active || detail?.sessionId !== currentSessionId || !detail.trace
+        || typeof detail.trace !== 'object' || !('taskId' in detail.trace)) return;
+      const trace = detail.trace as CompactionTrace;
+      setSelectedCompactionTrace(trace);
+      setSelectedCompactionTaskId(trace.taskId);
+      setCompactionTraceOpen(true);
+    };
+    window.addEventListener(PI_COMPACTION_TRACE_OPEN_EVENT, openTrace);
+    return () => window.removeEventListener(PI_COMPACTION_TRACE_OPEN_EVENT, openTrace);
+  }, [active, currentSessionId]);
 
   React.useEffect(() => {
     if (!active) {
@@ -489,6 +531,10 @@ export const PiChatView: React.FC<PiChatViewProps> = ({
       }
       const compactionKey = JSON.stringify([runtimeKey, currentSessionId]);
       if (compactionsInFlight.current.has(compactionKey)) return;
+      compactionTraceBaseline.current.set(compactionKey, new Set(Object.keys(
+        usePiSessionStore.getState().records[currentSessionId]?.compactionTraces ?? {},
+      )));
+      setCompactionViewError(null);
       compactionsInFlight.current.add(compactionKey);
       setCompactingSessions(new Set(compactionsInFlight.current));
       // A manual compaction can take a full model request. The command has been
@@ -496,19 +542,27 @@ export const PiChatView: React.FC<PiChatViewProps> = ({
       // button look unresponsive and allows duplicate requests.
       clearPiDraft(currentSessionId, runtimeKey);
       try {
-        await usePiSessionStore.getState().compactSession(
+        const result = await usePiSessionStore.getState().compactSession(
           currentSessionId,
           command.customInstructions,
           runtimeKey,
         );
+        const committedTrace = parseCompactionTraceDetails(result.details);
+        if (committedTrace) {
+          setSelectedCompactionTrace((previous) => previous ?? committedTrace);
+          setSelectedCompactionTaskId((previous) => previous ?? committedTrace.taskId);
+        }
       } catch (error) {
         const latestDraft = readPiDraft(currentSessionId, runtimeKey);
         if (!latestDraft.text.trim() && latestDraft.images.length === 0) {
           setPiDraft(currentSessionId, currentDraft, runtimeKey);
         }
-        toast.error(error instanceof Error ? error.message : t('chat.chatInput.toast.compactFailed'));
+        const message = error instanceof Error ? error.message : t('chat.chatInput.toast.compactFailed');
+        setCompactionViewError(message);
+        toast.error(message);
       } finally {
         compactionsInFlight.current.delete(compactionKey);
+        compactionTraceBaseline.current.delete(compactionKey);
         setCompactingSessions(new Set(compactionsInFlight.current));
       }
       return;
@@ -959,6 +1013,7 @@ export const PiChatView: React.FC<PiChatViewProps> = ({
                 <LazyPiTimeline
                   key={`${runtimeKey}:${currentSessionId}`}
                   {...(assistantWaiting ? { assistantWaiting } : {})}
+                  compactionPending={!previewOnly && compactingSessions.has(JSON.stringify([runtimeKey, currentSessionId]))}
                   cwd={sessionCwd}
                   entries={entries}
                   hiddenThinkingLabel={extensionUi?.hiddenThinkingLabel}
@@ -968,6 +1023,7 @@ export const PiChatView: React.FC<PiChatViewProps> = ({
                   liveUserStatus={currentRecord.liveUser ? undefined : submission?.status}
                   forkBusyEntryId={forkBusyEntryId}
                   onFork={previewOnly ? undefined : handleFork}
+                  onOpenCompaction={openActiveCompaction}
                   onOpenThread={previewOnly || !threadWorkspaceId ? undefined : handleOpenThread}
                   onRecover={previewOnly ? undefined : handleRecover}
                   onScrollContainerChange={handleTimelineScrollContainerChange}
@@ -1025,12 +1081,6 @@ export const PiChatView: React.FC<PiChatViewProps> = ({
               <span className="truncate font-mono">
                 {t('chat.context.cwd', { dir: snapshot.cwd })}
               </span>
-              {compactingSessions.has(JSON.stringify([runtimeKey, currentSessionId])) ? (
-                <span className="ml-auto flex shrink-0 items-center gap-1" role="status">
-                  <Icon name="loader-4" className="size-3 animate-spin" />
-                  /compact · {t('chat.piAssistant.working')}
-                </span>
-              ) : null}
             </div>
           </div>
         ) : null}
@@ -1146,6 +1196,17 @@ export const PiChatView: React.FC<PiChatViewProps> = ({
           onOpenChange={(open) => { if (!open) setActivePdfMaterial(null); }}
         />
       ) : null}
+      <PiCompactionTraceDialog
+        open={compactionTraceOpen}
+        onOpenChange={setCompactionTraceOpen}
+        trace={visibleCompactionTrace ?? null}
+        partial={selectedCompactionTrace ? undefined : currentCompactionTraces?.[selectedCompactionTaskId ?? '']?.partial}
+        status={selectedCompactionTrace ? 'finished' : currentCompactionTraces?.[selectedCompactionTaskId ?? '']?.status
+          ?? (compactionViewError ? 'failed' : 'running')}
+        {...(currentCompactionTraces?.[selectedCompactionTaskId ?? '']?.error
+          ? { error: currentCompactionTraces[selectedCompactionTaskId ?? '']!.error }
+          : compactionViewError ? { error: compactionViewError } : {})}
+      />
     </TooltipProvider>
   );
 };

@@ -56,8 +56,14 @@ test("compaction runs and queries in its own process, cancels, and rejects an ex
   });
   let registeredWorker = "";
   let droppedWorker = "";
+  const progress: string[] = [];
   const unsubscribe = broker.subscribe((event) => {
-    if (event.kind !== "host" || event.role !== "compaction" || event.envelope.event !== "harness.request") return;
+    if (event.kind !== "host" || event.role !== "compaction") return;
+    if (event.envelope.event === "compaction.trace") {
+      progress.push(event.envelope.data.type);
+      return;
+    }
+    if (event.envelope.event !== "harness.request") return;
     const data = event.envelope.data as { requestId: string; method: string };
     assert.equal(event.workerId, registeredWorker);
     assert.equal(data.method, "compaction.history");
@@ -85,6 +91,10 @@ test("compaction runs and queries in its own process, cancels, and rejects an ex
     const result = await broker.runCompactionTask(session.sessionId, spec, callbacks);
     assert.match(result.summary, /recorded evidence/);
     assert.equal(result.queries, 1);
+    assert.ok(result.trace?.taskId);
+    assert.deepEqual(result.trace?.entries.map((entry) => entry.kind), ["tool-call", "tool-result", "assistant"]);
+    assert.equal(result.trace?.entries.at(-1)?.text, result.summary);
+    assert.deepEqual(progress.filter((type) => type !== "delta"), ["started", "entry", "entry", "entry", "finished"]);
     assert.equal(droppedWorker, registeredWorker);
     assert.match(JSON.stringify(bodies[0]), /earlier requirement must survive/);
     assert.equal(broker.workerCount, 1, "only the parent session remains");

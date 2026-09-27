@@ -1,4 +1,5 @@
 import { join } from "node:path";
+import { randomUUID } from "node:crypto";
 import { Agent } from "@earendil-works/pi-agent-core";
 import {
   convertToLlm,
@@ -10,9 +11,12 @@ import type { AssistantMessage, ThinkingBudgets, ThinkingLevel, Transport, Usage
 import {
   readCompactionTaskSpec,
   type CompactionRunResult,
+  type CompactionTrace,
+  type CompactionTraceEntry,
   type CompactionTaskSpec,
   type HarnessError,
   type HostEventData,
+  type JsonValue,
 } from "@varin/protocol";
 import {
   COMPACTION_SYSTEM_PROMPT,
@@ -60,7 +64,7 @@ function addUsage(total: Usage | undefined, next: Usage | undefined): Usage | un
  * parent session's model and resolved execution config, and returns S1. It
  * never creates a session, worktree, thread, or a second history database.
  */
-type CompactionEmit = <E extends "harness.request" | "harness.cancel">(
+type CompactionEmit = <E extends "harness.request" | "harness.cancel" | "compaction.trace">(
   event: E,
   data: HostEventData<E>,
 ) => void;
@@ -112,6 +116,12 @@ export class CompactionWorkerRuntime {
   async run(params: unknown): Promise<CompactionRunResult> {
     this.#throwIfAborted();
     const spec: CompactionTaskSpec = readCompactionTaskSpec(params);
+    const trace: CompactionTrace = { taskId: randomUUID(), entries: [] };
+    const progress = (update: { type: "started" | "finished" } | { type: "delta"; channel: "text" | "thinking"; delta: string } | { type: "entry"; entry: CompactionTraceEntry } | { type: "failed"; message: string }) => {
+      try { this.#emit("compaction.trace", { sessionId: spec.sessionId, taskId: trace.taskId, ...update }); }
+      catch { /* The summary remains authoritative when a viewer disconnects. */ }
+    };
+    progress({ type: "started" });
     const bridge = new HostServicesBridge({
       emit: (event, data) => this.#emit(event, data),
       sessionId: spec.sessionId,
@@ -269,9 +279,37 @@ export class CompactionWorkerRuntime {
       let lastAssistant: AssistantMessage | undefined;
       let totalUsage: Usage | undefined;
       const unsubscribe = agent.subscribe(async (event) => {
+        if (event.type === "message_update") {
+          const delta = event.assistantMessageEvent;
+          if (delta.type === "text_delta" || delta.type === "thinking_delta") {
+            progress({ type: "delta", channel: delta.type === "text_delta" ? "text" : "thinking", delta: delta.delta });
+          }
+        }
         if (event.type === "message_end" && event.message.role === "assistant") {
           lastAssistant = event.message as AssistantMessage;
           totalUsage = addUsage(totalUsage, lastAssistant.usage);
+          const text = lastAssistant.content.filter((block) => block.type === "text").map((block) => block.text).join("\n");
+          const thinking = lastAssistant.content.filter((block) => block.type === "thinking").map((block) => block.thinking).join("\n");
+          if (text || thinking) {
+            const entry: CompactionTraceEntry = { kind: "assistant", at: Date.now(), ...(text ? { text } : {}), ...(thinking ? { thinking } : {}) };
+            trace.entries.push(entry);
+            progress({ type: "entry", entry });
+          }
+        } else if (event.type === "tool_execution_start") {
+          const entry: CompactionTraceEntry = {
+            kind: "tool-call", at: Date.now(), toolCallId: event.toolCallId, toolName: event.toolName,
+            args: JSON.parse(JSON.stringify(event.args ?? null)) as JsonValue,
+          };
+          trace.entries.push(entry);
+          progress({ type: "entry", entry });
+        } else if (event.type === "tool_execution_end") {
+          const entry: CompactionTraceEntry = {
+            kind: "tool-result", at: Date.now(), toolCallId: event.toolCallId, toolName: event.toolName,
+            isError: event.isError,
+            result: JSON.parse(JSON.stringify(event.result ?? null)) as JsonValue,
+          };
+          trace.entries.push(entry);
+          progress({ type: "entry", entry });
         }
       });
       try {
@@ -302,13 +340,18 @@ export class CompactionWorkerRuntime {
         .join("\n")
         .trim();
       if (!summary) throw new Error("Compaction returned no summary text");
+      progress({ type: "finished" });
       return {
         summary,
         queries: this.#queries,
+        trace,
         ...(totalUsage === undefined
           ? {}
           : { usage: JSON.parse(JSON.stringify(totalUsage)) }),
       };
+    } catch (error) {
+      progress({ type: "failed", message: error instanceof Error ? error.message : String(error) });
+      throw error;
     } finally {
       this.#agent = undefined;
       this.#bridge = undefined;

@@ -62,8 +62,10 @@ import {
 } from './piSortedTurnProjection';
 import { RememberKnowledgeButton } from './RememberKnowledgeButton';
 import { HarnessThreadMarkers } from './HarnessThreadMarkers';
+import { parseCompactionTraceDetails, PI_COMPACTION_TRACE_OPEN_EVENT } from '@/lib/pi-runtime/compactionTrace';
 
 export interface PiTimelineProps {
+  compactionPending?: boolean;
   assistantWaiting?: PiAssistantWaitingPresentation;
   cwd: string;
   entries: PiSessionEntry[];
@@ -74,6 +76,7 @@ export interface PiTimelineProps {
   liveUser?: PiUserMessage;
   liveUserStatus?: PiSessionSubmissionStatus;
   onFork?(entry: PiSessionMessageEntry): void;
+  onOpenCompaction?(): void;
   onOpenThread?(entry: PiSessionMessageEntry, options: { carryBlocks: boolean }): void;
   onRecover?(entry: PiSessionMessageEntry): void;
   onScrollContainerChange?(element: HTMLElement | null): void;
@@ -1259,11 +1262,19 @@ export const PiTimelineEntryList: React.FC<Omit<
             );
           }
           if (entry.type === 'compaction' || entry.type === 'branch_summary') {
+            const trace = entry.type === 'compaction' ? parseCompactionTraceDetails(entry.details) : null;
             return (
               <article key={entry.id} className="rounded-lg border border-border/60 bg-muted/20 px-3 py-2">
                 <div className="mb-1 flex items-center gap-2 typography-meta font-medium text-muted-foreground">
                   <Icon name="contract-up-down" className="size-3.5" />
                   {entry.type === 'compaction' ? `Compaction · ${entry.tokensBefore} tokens` : 'Branch summary'}
+                  {trace ? (
+                    <button type="button" className="ml-auto text-primary hover:underline" onClick={() => {
+                      window.dispatchEvent(new CustomEvent(PI_COMPACTION_TRACE_OPEN_EVENT, { detail: { sessionId, trace } }));
+                    }}>
+                      {t('harness.threads.transcript')}
+                    </button>
+                  ) : null}
                 </div>
                 <MarkdownRenderer content={entry.summary} messageId={entry.id} />
               </article>

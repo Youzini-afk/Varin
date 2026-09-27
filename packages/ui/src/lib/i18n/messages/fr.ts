@@ -2258,6 +2258,8 @@ export const dict = {
   'chat.piComposer.submission.uncertain': 'Résultat de l’envoi inconnu',
   'chat.piComposer.submission.failed': 'Non envoyé',
   'chat.piAssistant.working': 'Traitement',
+  'chat.compaction.inProgress': 'Compression du contexte…',
+  'chat.compaction.thinking': 'Réflexion',
   'chat.piComposer.agent.imageUnsupported': 'L’agent sélectionné ne peut pas recevoir d’images. Supprimez-les ou utilisez Pi.',
   'chat.piComposer.pdfAttachment.uploadFailed': 'Could not upload {name}.',
   'chat.piComposer.pdfAttachment.unsupported': 'PDF upload is not supported for this session workspace.',

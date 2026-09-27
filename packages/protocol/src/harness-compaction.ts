@@ -75,7 +75,37 @@ export interface CompactionRunResult {
   usage?: JsonValue;
   /** Number of query tool calls the worker issued; observational only. */
   queries: number;
+  /** Read-only worker conversation, persisted with the committed Pi compaction entry. */
+  trace?: CompactionTrace;
 }
+
+export interface CompactionTraceEntry {
+  kind: "assistant" | "tool-call" | "tool-result";
+  at: number;
+  text?: string;
+  thinking?: string;
+  toolCallId?: string;
+  toolName?: string;
+  args?: JsonValue;
+  result?: JsonValue;
+  isError?: boolean;
+}
+
+export interface CompactionTrace {
+  taskId: string;
+  entries: CompactionTraceEntry[];
+}
+
+export type CompactionTraceUpdate = {
+  sessionId: string;
+  taskId: string;
+} & (
+  | { type: "started" }
+  | { type: "delta"; channel: "text" | "thinking"; delta: string }
+  | { type: "entry"; entry: CompactionTraceEntry }
+  | { type: "finished" }
+  | { type: "failed"; message: string }
+);
 
 export type CompactionHistoryParams = HistoryReadParams;
 export type CompactionHistoryResult = HistoryReadResult;
