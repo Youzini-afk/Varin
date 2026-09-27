@@ -1,6 +1,6 @@
 {
   "name": "varin-monorepo",
-  "version": "0.9.19",
+  "version": "0.9.20",
   "description": "An independent agent workspace and harness for coding and research, with a bundled Pi runtime.",
   "private": true,
   "type": "module",
