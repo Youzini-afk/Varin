@@ -1,4 +1,6 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
+import fs from 'node:fs';
+import path from 'node:path';
 import type { PiRuntimeBrokerEvent } from '@varin/runtime-broker';
 import type { HarnessInferenceBindingSnapshot, HarnessRerankSettings, PiSettingsSnapshot } from '@varin/protocol';
 import { createDocumentAuthorityHarness } from '../../documents/contract-fixtures.js';
@@ -37,9 +39,11 @@ async function setup(hooks: {
   const reranked: string[] = [];
   const removedWatches: string[] = [];
   const executionViews = new ThreadExecutionViewRegistry();
+  const requestCwds: string[] = [];
   let watchId = 0;
   const broker = {
-    requestForWorkspace: async (_cwd: string, method: string, params: Record<string, unknown>) => {
+    requestForWorkspace: async (cwd: string, method: string, params: Record<string, unknown>) => {
+      requestCwds.push(cwd);
       if (method === 'settings.get') return hooks.settings?.() ?? settings('initial');
       if (method === 'harness.inference.describe') return hooks.describe?.() ?? binding('initial');
       if (method === 'harness.rerank') {
@@ -59,11 +63,12 @@ async function setup(hooks: {
   const runtime = createWorkspaceSemanticRuntime({
     dataDir: documents.dataDir, hostId: 'workspace-test', documents: documents.authority,
     structureSource: createStructureSource([]), embedder: local,
+    configCwd: documents.dataDir,
     getBroker: () => broker,
     executionViews, workingBranches: { pinQuery: hooks.pinQuery ?? (async () => null) },
   });
   disposes.push(() => runtime.dispose());
-  return { runtime, workspaceId: documents.identity.workspaceId, embedded, removedWatches, reranked, executionViews };
+  return { runtime, workspaceId: documents.identity.workspaceId, embedded, removedWatches, reranked, executionViews, requestCwds, documents };
 }
 
 describe('production workspace semantic assembly lifecycle', () => {
@@ -188,5 +193,17 @@ describe('production workspace semantic assembly lifecycle', () => {
     await Promise.all([disposing, rejected]);
     expect(harness.removedWatches.sort()).toEqual(['watch-1', 'watch-2']);
     await expect(harness.runtime.harnessSettings(harness.workspaceId)).rejects.toThrow('closed');
+  });
+
+  it('serves distinct resource roots through one shared inference worker', async () => {
+    const harness = await setup();
+    const nested = path.join(harness.documents.workspaceRoot, 'nested-root');
+    await fs.promises.mkdir(nested, { recursive: true });
+    const second = await harness.documents.authority.resolveWorkspace({ path: nested });
+    await harness.runtime.harnessSettings(harness.workspaceId);
+    await harness.runtime.harnessSettings(second.workspaceId);
+    // Every settings/inference request went to the shared config worker; the
+    // second root never triggered a worker for its own directory.
+    expect(new Set(harness.requestCwds)).toEqual(new Set([harness.documents.dataDir]));
   });
 });

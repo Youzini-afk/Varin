@@ -21,6 +21,14 @@ type PathMutation = Pick<DocumentMutationObservation, 'workspaceId' | 'resourceI
 export interface WorkspaceSemanticRuntimeOptions extends Omit<SemanticIndexRuntimeOptions, 'getEmbedder' | 'documents'> {
   documents: Pick<DocumentAuthority, 'read' | 'inspectWorkspace' | 'agentInputDraftPaths' | 'readAgentInputSnapshot'>;
   getBroker(): InferenceBroker | null;
+  /**
+   * HR3: one shared worker directory for settings/inference transport. Harness
+   * inference resolves global configuration only (project scope never feeds
+   * embedding/rerank/fast-decision), so every resource root can reuse the same
+   * worker instead of spawning a workspace worker per indexed directory.
+   * Root cwd still owns document reads and scan addressing.
+   */
+  configCwd: string;
   executionViews: Pick<ThreadExecutionViewRegistry, 'get'>;
   workingBranches: Pick<ReturnType<typeof createWorkingBranchLookups>, 'pinQuery'>;
   onBindingChanged?: (workspaceId: string) => void;
@@ -28,7 +36,6 @@ export interface WorkspaceSemanticRuntimeOptions extends Omit<SemanticIndexRunti
 
 type WorkspaceState = {
   workspaceId: string;
-  cwd: string;
   backend: ReturnType<typeof createSemanticBackend>;
   runtime: ReturnType<typeof createSemanticIndexRuntime>;
   binding: HarnessInferenceBindingSnapshot;
@@ -86,8 +93,8 @@ export function createWorkspaceSemanticRuntime(options: WorkspaceSemanticRuntime
     const broker = options.getBroker();
     if (!broker) { markUnavailable(state); return; }
     const [settings, binding] = await Promise.allSettled([
-      broker.requestForWorkspace(state.cwd, 'settings.get', {}),
-      broker.requestForWorkspace(state.cwd, 'harness.inference.describe', {}),
+      broker.requestForWorkspace(options.configCwd, 'settings.get', {}),
+      broker.requestForWorkspace(options.configCwd, 'harness.inference.describe', {}),
     ]);
     // A worker replacement cannot publish the old worker's settings as current.
     if (disposed || startedEpoch !== epoch || broker !== options.getBroker()) return;
@@ -123,8 +130,8 @@ export function createWorkspaceSemanticRuntime(options: WorkspaceSemanticRuntime
     state.needsRefresh = true;
     state.watching = (async () => {
       const results = await Promise.allSettled([
-        broker.watchConfig({ cwd: state.cwd }, { kind: 'settings', scope: 'global' }),
-        broker.watchConfig({ cwd: state.cwd }, { kind: 'document', path: 'models.json', scope: 'global' }),
+        broker.watchConfig({ cwd: options.configCwd }, { kind: 'settings', scope: 'global' }),
+        broker.watchConfig({ cwd: options.configCwd }, { kind: 'document', path: 'models.json', scope: 'global' }),
       ]);
       for (const result of results) {
         if (result.status !== 'fulfilled') continue;
@@ -157,7 +164,9 @@ export function createWorkspaceSemanticRuntime(options: WorkspaceSemanticRuntime
       return existing;
     }
     const task = (async () => {
-      const cwd = (await options.documents.inspectWorkspace(workspaceId)).root;
+      // Resolve the resource root so missing/unavailable directories fail here,
+      // not inside an inference or scan task.
+      await options.documents.inspectWorkspace(workspaceId);
       assertActive();
       const backend = createSemanticBackend({
         local: localEmbedder,
@@ -165,7 +174,7 @@ export function createWorkspaceSemanticRuntime(options: WorkspaceSemanticRuntime
           embed: (params) => {
             const broker = options.getBroker();
             if (!broker) throw new Error('Pi workspace binding is unavailable');
-            return requestWorkspaceInference(broker, cwd, 'harness.embed', {
+            return requestWorkspaceInference(broker, options.configCwd, 'harness.embed', {
               purpose: params.purpose, providerId: params.providerId, modelId: params.modelId,
               protocol: 'openai-compatible', configurationId: params.configurationId,
               items: params.items, batchId: params.batchId, maxTokens: params.maxTokens,
@@ -176,7 +185,7 @@ export function createWorkspaceSemanticRuntime(options: WorkspaceSemanticRuntime
       });
       const runtime = createSemanticIndexRuntime({ ...options, getEmbedder: () => backend.embedder });
       const state: WorkspaceState = {
-        workspaceId, cwd, backend, runtime,
+        workspaceId, backend, runtime,
         binding: {
           embedding: { status: 'unconfigured' },
           rerank: { status: 'unconfigured' },
@@ -262,7 +271,7 @@ export function createWorkspaceSemanticRuntime(options: WorkspaceSemanticRuntime
       throw new Error('Rerank settings changed after the query view was frozen');
     }
     const batchId = randomUUID();
-    const result = await requestWorkspaceInference(broker, state.cwd, 'harness.rerank', {
+    const result = await requestWorkspaceInference(broker, options.configCwd, 'harness.rerank', {
       providerId: configured.providerId, modelId: configured.modelId, protocol: 'http-rerank',
       configurationId: configured.configurationId, query: input.query, documents: input.documents, batchId,
       ...(configured.endpoint ? { endpoint: configured.endpoint } : {}),
@@ -311,7 +320,7 @@ export function createWorkspaceSemanticRuntime(options: WorkspaceSemanticRuntime
       throw new Error('Fast decision settings changed after the query binding was frozen');
     }
     const batchId = randomUUID();
-    const result = await requestWorkspaceInference(broker, state.cwd, 'harness.fastDecision', {
+    const result = await requestWorkspaceInference(broker, options.configCwd, 'harness.fastDecision', {
       providerId: input.settings.providerId,
       modelId: input.settings.modelId,
       protocol: 'typesafe-systemone',

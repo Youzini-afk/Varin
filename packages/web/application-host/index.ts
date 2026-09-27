@@ -82,7 +82,7 @@ import { createThreadRegistry } from './lib/harness/thread-registry.js';
 import { createOnThreadDequeued } from './lib/harness/thread-dequeue.js';
 import { createThreadTranscriptReader } from './lib/harness/thread-transcript.js';
 import { createHarnessPathAuthority } from './lib/harness/path-authority.js';
-import { sessionScopeId, isSessionScopeId, knowledgeStoreKeyForScope } from './lib/harness/owner-scope.js';
+import { sessionScopeId, isSessionScopeId, isSessionStoreKey, knowledgeStoreKeyForScope } from './lib/harness/owner-scope.js';
 import { createExploreFileReader } from './lib/harness/explore-file-reader.js';
 import { createThreadWorktreeRuntime } from './lib/harness/thread-worktree.js';
 import { createThreadRuntime } from './lib/harness/thread-runtime.js';
@@ -2723,6 +2723,9 @@ async function main(options: StartWebUiServerOptions = {}): Promise<WebUiServerC
   const semanticRuntime = createWorkspaceSemanticRuntime({
     dataDir: VARIN_DATA_DIR,
     hostId,
+    // HR3: one shared worker serves settings/inference for every resource root;
+    // indexing no longer spawns a workspace worker per directory.
+    configCwd: VARIN_DATA_DIR,
     documents: documentsAuthority,
     structureSource,
     searchFilesystemFiles: catalogFileSearch.searchFilesystemFiles,
@@ -2753,6 +2756,9 @@ async function main(options: StartWebUiServerOptions = {}): Promise<WebUiServerC
     resolveEmbedder: semanticRuntime.resolveKnowledgeEmbedder,
   });
   catalogScan.start = (workspaceId: string): void => {
+    // Session-owned stores have no resource root to index; callers pass either
+    // the scope id or its hashed store key depending on the loop they run in.
+    if (isSessionScopeId(workspaceId) || isSessionStoreKey(workspaceId)) return;
     queueMicrotask(() => {
       void symbolGraphRuntime.scanWorkspace(workspaceId).catch((error) => {
         console.error('[HarnessKnowledge] Catalog scan failed:', errorMessage(error));
@@ -2763,10 +2769,12 @@ async function main(options: StartWebUiServerOptions = {}): Promise<WebUiServerC
         });
     });
   };
-  for (const [workspaceId, store] of knowledgeStores) {
-    catalogScan.start(workspaceId);
-    knowledgeVectors.scheduleReconcile(store, 'workspace', workspaceId, workspaceId);
-    if (userKnowledgeStore) knowledgeVectors.scheduleReconcile(userKnowledgeStore, 'user', 'user', workspaceId);
+  for (const [storeKey, store] of knowledgeStores) {
+    // Store keys may be hashed session scopes — only real resource roots index.
+    if (isSessionStoreKey(storeKey)) continue;
+    catalogScan.start(storeKey);
+    knowledgeVectors.scheduleReconcile(store, 'workspace', storeKey, storeKey);
+    if (userKnowledgeStore) knowledgeVectors.scheduleReconcile(userKnowledgeStore, 'user', 'user', storeKey);
   }
   const observeKnowledgeGitStatus = createGitStatusObserver({
     resolveWorkspaceId: (scope) => documentsAuthority.resolveScopeId(scope),

@@ -27,3 +27,8 @@ export const knowledgeStoreKeyForScope = (scopeId: string): string => (
     ? `session-${createHash("sha256").update(sessionIdFromScopeId(scopeId)).digest("hex").slice(0, 32)}`
     : scopeId
 );
+
+/** True for the hashed filename-safe form — session store keys are not resource roots. */
+export const isSessionStoreKey = (value: unknown): value is string => (
+  typeof value === "string" && /^session-[0-9a-f]{32}$/.test(value)
+);

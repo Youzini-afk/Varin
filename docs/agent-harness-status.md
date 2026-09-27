@@ -18,7 +18,7 @@ Last updated: 2026-09-27
 Default-on 列只记当前代码，尚未完成的正式目标单独列为待实施。
 [roadmap.md](roadmap.md) 只引用本文件，不再自述测试数。
 
-**D-337 / 阶段 HR：面向任务与资源的 Harness（2026-09-27，方向确认 / HR0–HR2 已接线，HR3–HR5 实施中）。**
+**D-337 / 阶段 HR：面向任务与资源的 Harness（2026-09-27，方向确认 / HR0–HR3 已接线，HR4–HR5 实施中）。**
 
 [工作区解耦与持续检索设计](resource-oriented-harness-design.md) 定义 HR0–HR5：资源与数据归属、会话与操作、直接检索、
 持续索引、产品与旧机制收口、真实使用验收。工作区回到会话/项目组织职责，执行与查询使用明确的本次目标；
@@ -55,6 +55,19 @@ HR2 已接线（wired）：`search.content` 改为"问题 + 本次资源范围"�
 单根失效 partial、全根失效 unavailable、无项目会话 authorityRoot 默认范围、untrusted 拒绝）；
 app-host 源码与测试 typecheck 绿。未测：materials 集合作为检索范围的组合（材料集合仍走
 `materials.collections` 自有服务）、冷目录语义索引（属 HR3）。
+
+HR3 已接线（wired）：语义运行时与资源根的"一目录一 workspace worker"装配解耦——`WorkspaceState` 不再携带
+per-root cwd，settings.get / inference.describe / embed / rerank / fastDecision 与 global config watch 统一走
+`configCwd`（VARIN_DATA_DIR）的一个共享 worker；`requestForWorkspace(rootCwd)` 不再为每个被索引目录生成进程。
+核实事实：harness embedding/rerank/fastDecision 绑定与 `embeddingSettingsFromSnapshot`/`rerankSettingsFromSnapshot`
+本就只读 `global.harness`（pi-host `SettingsManager.create(..., {projectTrusted:false})` 明确排除项目层），
+因此共享 worker 对项目根也无配置差异；模型空间 `spaceIdOf`、配方 `recipeIdOf`、文档 revision 键维持
+"内容版本×解析配置×实际模型"身份，缓存键不含会话分类 workspaceId。符号图（symbol-runtime）与语义索引按
+registry 根 id 寻址，外部 file/directory 根经 `inspectWorkspace` 直接索引；`catalogScan.start` 与启动 reconcile
+循环跳过 session scope/哈希店键（session 存储无资源根可扫，此前会打一条 inspectWorkspace 失败日志）。
+增量失效沿用 `observeDocumentMutation`（事件已按资源根 id 寻址）；冷目录语义为空时探索层如实降级，
+不包装成热覆盖。验证：knowledge 目录 26 文件 193 全绿（含新增"不同根共享同一 inference cwd"用例）、
+harness/search 套件与 app-host typecheck 绿。未测：真实打包环境共享 worker 的凭据可见性（桌面纵切属 HR5）。
 
 **运行时可靠性专项 RR（2026-09-26：RR0–RR5 的代码路径与定向行为已复核；RR6 的真实安装包/外部代理平台纵切仍待验证）。**
 
