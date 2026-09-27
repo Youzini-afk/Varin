@@ -264,6 +264,7 @@ export function createThreadDispatchService(host: HarnessServiceHost): HarnessSe
       const inputContext = ctx.inputContext ?? { source: "disk" as const };
       let captured: Awaited<ReturnType<NonNullable<HarnessServiceHost["threadCaptureDraftBaseline"]>>> = {
         draftBaselineId: null,
+        sourceViewId: null,
         cleanup: async () => undefined,
       };
       if (inputContext.source === "surface") {
@@ -351,6 +352,7 @@ export function createThreadDispatchService(host: HarnessServiceHost): HarnessSe
         autoRun: true,
         worktree,
         ...(captured.draftBaselineId ? { draftBaselineId: captured.draftBaselineId } : {}),
+        ...(captured.sourceViewId ? { sourceViewId: captured.sourceViewId } : {}),
         tools,
         permissions: normalizeFrozenHarnessPermissions(owner?.execution.permissions),
         ...(params.model ? { model: params.model } : {}),

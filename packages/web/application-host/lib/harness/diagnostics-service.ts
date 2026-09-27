@@ -1,9 +1,9 @@
 import type { HarnessService, HarnessServiceContext } from "./router.js";
-import type { DiagnosticItem } from "@varin/protocol";
+import type { DiagnosticItem, LanguageTextProvenance } from "@varin/protocol";
 import type { ObservationCursorStore } from "./observation-cursors.js";
 
 export type BindDocumentResult =
-  | { status: "bound"; revision: string; source: "disk" | "surface-draft" }
+  | { status: "bound"; revision: string; source: LanguageTextProvenance }
   | { status: "unavailable"; message: string }
   | { status: "unsupported" };
 

@@ -12,16 +12,17 @@ export type SemanticQueryView = {
   view: "disk" | "working-state";
 };
 
+export type SemanticDraftReadResult =
+  | { status: "ready"; content: string; revision: string; source?: "surface-draft" | "working-branch" }
+  | { status: "unavailable"; message?: string }
+  | { status: "disk"; superseded?: true }
+  | { status: "deleted" };
+
 export async function pinSemanticQueryView(input: {
   inputContext: AgentInputContext;
   workspaceId?: string;
   draftPaths?: readonly string[];
-  readDraft?: (path: string) => (
-    | { status: "ready"; content: string; revision: string }
-    | { status: "unavailable" }
-    | { status: "disk"; superseded?: true }
-    | { status: "deleted" }
-  );
+  readDraft?: (path: string) => SemanticDraftReadResult | Promise<SemanticDraftReadResult>;
   threadDocuments?: Array<{
     path: string;
     content: string | null;
@@ -50,7 +51,7 @@ export async function pinSemanticQueryView(input: {
     ? roots.find((root) => root.workspaceId === input.workspaceId)
     : roots.length === 1 ? roots[0] : undefined;
   for (const path of input.draftPaths ?? matchingRoot?.dirtyPaths ?? []) {
-    const draft = input.readDraft?.(path);
+    const draft = await input.readDraft?.(path);
     if (draft?.status === "disk" && draft.superseded) continue;
     if (draft?.status === "ready") {
       overlays.push({

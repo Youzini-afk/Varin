@@ -62,6 +62,7 @@ import {
 } from "./working-state/materialization-switch.js";
 import { encodeDocumentText } from "../documents/inspect.js";
 import type { SurfaceSnapshotCloneResult } from "../documents/surface-snapshot-store.js";
+import type { createSourceViewStore } from "./source-view-store.js";
 import { normalizePathIdentity } from "../workspace/path-safety.js";
 import { sameState } from "../recovery/journal-files.js";
 import type { VerificationCoordinator } from "./verification-coordinator.js";
@@ -99,7 +100,7 @@ export interface ThreadSessionAdapter {
     workFocus: import("@varin/protocol").WorkFocusId;
     workspaceId: string;
   }): Promise<SessionSnapshot>;
-  prompt(sessionId: string, text: string, instructions?: string, images?: import("@varin/protocol").ImageAttachment[]): Promise<void>;
+  prompt(sessionId: string, text: string, instructions?: string, images?: import("@varin/protocol").ImageAttachment[], inputContext?: AgentInputContext): Promise<void>;
   send(sessionId: string, text: string): Promise<void>;
   /** Passive durable input; implementations must never emulate this with prompt/followUp. */
   notify?(sessionId: string, text: string, messageId: string): Promise<void>;
@@ -157,6 +158,7 @@ export interface ThreadRuntimeOptions {
   executionViews?: ThreadExecutionViewRegistry | undefined;
   virtualWriteGate?: VirtualWriteGate | undefined;
   cloneAgentInputSnapshot?(sessionId: string, context: AgentInputContext): SurfaceSnapshotCloneResult;
+  sourceViews?: Pick<ReturnType<typeof createSourceViewStore>, "capture" | "contextFor" | "release">;
   resolveIntegrationCoordinator?(workspaceId: string): Promise<(Pick<IntegrationCoordinator, "mergeResult" | "previewResult" | "undoIntegration" | "invalidateWorkspace"> & Partial<Pick<IntegrationCoordinator, "invalidateThread">>) | null> | (Pick<IntegrationCoordinator, "mergeResult" | "previewResult" | "undoIntegration" | "invalidateWorkspace"> & Partial<Pick<IntegrationCoordinator, "invalidateThread">>) | null;
   canReclaimWorktree?(workspaceId: string, threadId: string, path: string): Promise<{ safe: boolean; reason?: string; release?: () => Promise<void> }>;
   hasActiveCommands?(directory: string): boolean | Promise<boolean>;
@@ -175,6 +177,7 @@ export interface SpawnThreadRunInput extends CreateThreadInput {
 
 export interface CapturedThreadDraftBaseline {
   draftBaselineId: string | null;
+  sourceViewId: string | null;
   cleanup(): Promise<void>;
 }
 
@@ -1628,10 +1631,20 @@ export function createThreadRuntime(options: ThreadRuntimeOptions) {
     workspaceId: string,
     context: AgentInputContext,
   ): Promise<CapturedThreadDraftBaseline> => {
-    const empty = { draftBaselineId: null, cleanup: async () => undefined };
+    const empty = { draftBaselineId: null, sourceViewId: null, cleanup: async () => undefined };
     if (context.source === "disk") return empty;
     if (context.snapshot.status === "unavailable") {
-      throw new ThreadRuntimeError("unavailable", "The editor source snapshot is unavailable; dirty documents cannot be safely inherited");
+      if (context.roots.length === 0 || context.roots.some((root) => root.workspaceId === workspaceId && root.dirtyPaths.length > 0)) {
+        throw new ThreadRuntimeError("unavailable", "The worktree source snapshot is unavailable; its dirty files cannot be safely inherited");
+      }
+      if (!options.sourceViews) throw new ThreadRuntimeError("unavailable", "Fixed external source storage is unavailable");
+      const fixed = await options.sourceViews.capture({ status: "ready", resources: [], supersededResources: [] }, workspaceId,
+        context.roots.flatMap((root) => root.dirtyPaths.map((resourceId) => ({ workspaceId: root.workspaceId, resourceId }))));
+      return fixed ? {
+        draftBaselineId: null,
+        sourceViewId: fixed.viewId,
+        cleanup: () => options.sourceViews!.release(fixed.viewId),
+      } : empty;
     }
     if (!options.cloneAgentInputSnapshot) {
       throw new ThreadRuntimeError("unavailable", "The application host cannot clone editor source snapshots");
@@ -1642,21 +1655,11 @@ export function createThreadRuntime(options: ThreadRuntimeOptions) {
         ? cloned.message
         : "The editor source snapshot is unavailable");
     }
-    const targetResources = cloned.resources.filter((resource) => resource.resource.workspaceId === workspaceId);
-    const targetByCoordinationId = new Map(targetResources
-      .filter((resource) => resource.coordinationId)
-      .map((resource) => [resource.coordinationId!, resource]));
-    // Multiple project roots can name the same physical editor buffer. Only
-    // the target root is materialized in this child's worktree; other active
-    // drafts must be proven aliases of those exact bytes before we omit them.
-    const externalDraft = cloned.resources.find((resource) => {
-      if (resource.resource.workspaceId === workspaceId) return false;
-      const target = resource.coordinationId && targetByCoordinationId.get(resource.coordinationId);
-      return !target || target.content !== resource.content;
-    });
-    if (externalDraft) {
-      throw new ThreadRuntimeError("unavailable", "The editor source includes an external draft that this isolated child cannot inherit as one fixed worktree");
-    }
+    const targetResources = [...new Map(cloned.resources.flatMap((resource) =>
+      (resource.aliases ?? [resource.resource])
+        .filter((alias) => alias.workspaceId === workspaceId)
+        .map((alias) => [alias.resourceId, { ...resource, resource: alias }] as const)
+    )).values()];
     const requestedPaths = [...(context.roots.find((root) => root.workspaceId === workspaceId)?.dirtyPaths ?? [])].sort();
     // A path written during this turn is answered from disk, which the Run
     // materializes anyway; overlaying its older draft would undo that write.
@@ -1670,12 +1673,23 @@ export function createThreadRuntime(options: ThreadRuntimeOptions) {
       || clonedPaths.some((file, index) => file !== requestedPaths[index])) {
       throw new ThreadRuntimeError("unavailable", "The editor source snapshot no longer matches the dispatch context");
     }
-    if (targetResources.length === 0) return empty;
+    const hasExternal = cloned.resources.some((resource) =>
+      (resource.aliases ?? [resource.resource]).some((alias) => alias.workspaceId !== workspaceId));
+    if (hasExternal && !options.sourceViews) throw new ThreadRuntimeError("unavailable", "Fixed external source storage is unavailable");
+    const fixed = hasExternal ? await options.sourceViews!.capture(cloned, workspaceId) : null;
+    if (targetResources.length === 0) return fixed ? {
+      draftBaselineId: null,
+      sourceViewId: fixed.viewId,
+      cleanup: () => options.sourceViews!.release(fixed.viewId),
+    } : empty;
     if (!options.workingStates) {
+      if (fixed) await options.sourceViews!.release(fixed.viewId);
       throw new ThreadRuntimeError("unavailable", "Persistent working state is unavailable for editor drafts");
     }
-    const baseline = await options.workingStates.withBranchStore(workspaceId, "thread-draft-baseline-capture", (store) => (
-      store.createDraftBaseline(workspaceId, targetResources.map((resource) => ({
+    let baseline;
+    try {
+      baseline = await options.workingStates.withBranchStore(workspaceId, "thread-draft-baseline-capture", (store) => (
+        store.createDraftBaseline(workspaceId, targetResources.map((resource) => ({
         path: resource.resource.resourceId,
         content: encodeDocumentText({
           content: resource.content,
@@ -1689,11 +1703,19 @@ export function createThreadRuntime(options: ThreadRuntimeOptions) {
           localEditRevision: resource.localEditRevision,
           revision: resource.revision,
         },
-      })))
-    ));
+        })))
+      ));
+    } catch (error) {
+      if (fixed) await options.sourceViews!.release(fixed.viewId);
+      throw error;
+    }
     return {
       draftBaselineId: baseline.id,
-      cleanup: () => options.workingStates!.withBranchStore(workspaceId, "thread-draft-baseline-create-failed", (store) => store.deleteDraftBaseline(baseline.id)),
+      sourceViewId: fixed?.viewId ?? null,
+      cleanup: async () => {
+        await options.workingStates!.withBranchStore(workspaceId, "thread-draft-baseline-create-failed", (store) => store.deleteDraftBaseline(baseline.id));
+        if (fixed) await options.sourceViews!.release(fixed.viewId);
+      },
     };
   };
 
@@ -2068,6 +2090,10 @@ export function createThreadRuntime(options: ThreadRuntimeOptions) {
     if (existing && (input.draftBaselineId ?? null) !== existing.manifest.draftBaselineId) {
       throw new ThreadRuntimeError("invalid-request", "Thread draft baseline does not match its immutable launch manifest");
     }
+    const sourceViewId = existing?.manifest.sourceViewId ?? input.sourceViewId ?? null;
+    if (existing && (input.sourceViewId ?? null) !== (existing.manifest.sourceViewId ?? null)) {
+      throw new ThreadRuntimeError("invalid-request", "Thread source view does not match its immutable launch manifest");
+    }
     if (draftBaselineId && input.worktree !== "isolated") {
       throw new ThreadRuntimeError("invalid-request", "Threads with editor drafts require an isolated worktree");
     }
@@ -2372,6 +2398,8 @@ export function createThreadRuntime(options: ThreadRuntimeOptions) {
       // input here — they never start execution on their own (3.18C).
       const heldMessages = await options.registry.listPendingThreadMessages(input.scopeId, input.threadId, run.request?.requestId);
       const basePrompt = input.kind === "discussion" ? discussionPrompt(input, parentBlocks) : initialPrompt(input, parentBlocks);
+      const sourceContext = sourceViewId ? await options.sourceViews?.contextFor(sourceViewId) : undefined;
+      if (sourceViewId && !sourceContext) throw new ThreadRuntimeError("unavailable", "The fixed thread source view is unavailable");
       await options.sessions.prompt(
         sessionId,
         heldMessages.length > 0
@@ -2379,6 +2407,7 @@ export function createThreadRuntime(options: ThreadRuntimeOptions) {
           : basePrompt,
         undefined,
         input.inheritedContext?.images,
+        sourceContext ?? undefined,
       );
       await options.registry.acknowledgeThreadMessages(input.scopeId, input.threadId, heldMessages.map((message) => message.id), input.runId);
       checkPreparation();
@@ -3225,6 +3254,7 @@ export function createThreadRuntime(options: ThreadRuntimeOptions) {
               carryBlocks: thread.manifest.carryBlocks,
               concurrency: thread.manifest.concurrency,
               ...(thread.manifest.draftBaselineId ? { draftBaselineId: thread.manifest.draftBaselineId } : {}),
+              ...(thread.manifest.sourceViewId ? { sourceViewId: thread.manifest.sourceViewId } : {}),
               ...(thread.manifest.inputOrigin !== undefined ? { inputOrigin: thread.manifest.inputOrigin } : {}),
               ...(thread.manifest.inheritedContext ? { inheritedContext: thread.manifest.inheritedContext } : {}),
               autoRun: true,
@@ -4470,6 +4500,7 @@ export function createThreadRuntime(options: ThreadRuntimeOptions) {
         }
       }, "exclusive");
     }
+    if (thread.manifest.sourceViewId) await options.sourceViews?.release(thread.manifest.sourceViewId);
   };
 
   /**
@@ -5805,6 +5836,7 @@ export function createThreadRuntime(options: ThreadRuntimeOptions) {
         carryBlocks: thread.manifest.carryBlocks,
         concurrency: thread.manifest.concurrency,
         ...(thread.manifest.draftBaselineId ? { draftBaselineId: thread.manifest.draftBaselineId } : {}),
+        ...(thread.manifest.sourceViewId ? { sourceViewId: thread.manifest.sourceViewId } : {}),
         autoRun: true,
         worktree: frozen.worktree,
         ...(frozen.model ? { model: frozen.model } : {}),

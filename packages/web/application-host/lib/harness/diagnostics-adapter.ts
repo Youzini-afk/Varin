@@ -2,6 +2,7 @@ import type { DocumentAuthority } from "../documents/authority.js";
 import type { createLanguageSupervisor } from "../lsp/supervisor.js";
 import { AGENT_LANGUAGE_VIEW } from "../lsp/supervisor.js";
 import { createLanguageViewBinder } from "../lsp/language-view.js";
+import type { HarnessDocumentReadSource } from "./service-host.js";
 import type { DiagnosticsProvider } from "./diagnostics-service.js";
 import { languageIdForPath } from "./language-id.js";
 
@@ -39,9 +40,10 @@ export function createLanguageSupervisorDiagnosticsProvider(
   options: {
     resolveWorkspaceId: (workspaceRoot: string) => Promise<string | null>;
     documents: Pick<DocumentAuthority, "read" | "readAgentInputSnapshot">;
+    readSource?: HarnessDocumentReadSource;
   },
 ): DiagnosticsProvider {
-  const binder = createLanguageViewBinder({ documents: options.documents, supervisor });
+  const binder = createLanguageViewBinder({ documents: options.documents, supervisor, ...(options.readSource ? { readSource: options.readSource } : {}) });
   // workspaceId → resourceId → cached diagnostics
   const cache = new Map<string, Map<string, CachedDiagnostics>>();
   // workspaceId → subscriptions

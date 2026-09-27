@@ -18,6 +18,7 @@ export function createExploreFileReader(
   documents: Pick<DocumentAuthority, "read" | "readAgentInputSnapshot">,
   paths: Pick<HarnessPathAuthority, "resolve">,
   branchExplore?: (sessionId: string, resourceId: string, workspaceId: string) => Promise<ExploreFileSnapshot | null>,
+  fixedSource?: (sessionId: string, context: AgentInputContext, resourceId: string, workspaceId: string) => Promise<ExploreFileSnapshot | null>,
 ): ExploreFileReader {
   return async (actor, path, signal, inputContext = { source: "disk" }) => {
     signal.throwIfAborted();
@@ -33,6 +34,17 @@ export function createExploreFileReader(
             return { status: "stale", message: "Path identity changed while reading. Search again." };
           }
           return branch;
+        }
+      }
+      if (fixedSource) {
+        const fixed = await fixedSource(actor.sessionId, inputContext, before.resourceId, before.workspaceId);
+        if (fixed) {
+          const after = await paths.resolve(actor, path, { allowMissing: true });
+          signal.throwIfAborted();
+          if (!after || before.canonicalResourceId !== after.canonicalResourceId) {
+            return { status: "stale", message: "Path identity changed while reading. Search again." };
+          }
+          return fixed;
         }
       }
       const surface = documents.readAgentInputSnapshot(actor.sessionId, inputContext, before.resourceId, before.workspaceId);

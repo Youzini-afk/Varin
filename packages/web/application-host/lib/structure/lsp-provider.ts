@@ -2,6 +2,7 @@ import { languageIdForPath } from "@varin/protocol";
 import type { DocumentAuthority } from "../documents/authority.js";
 import { AGENT_LANGUAGE_VIEW, type createLanguageSupervisor } from "../lsp/supervisor.js";
 import { createLanguageViewBinder } from "../lsp/language-view.js";
+import type { HarnessDocumentReadSource } from "../harness/service-host.js";
 import { structureKindFromLsp } from "./kinds.js";
 import { lspRangeToLines, type LspLikeRange } from "./ranges.js";
 import {
@@ -23,6 +24,7 @@ type LanguageSupervisor = Pick<ReturnType<typeof createLanguageSupervisor>, "doc
 export interface LspStructureProviderOptions {
   documents: Pick<DocumentAuthority, "read" | "readAgentInputSnapshot">;
   supervisor: LanguageSupervisor;
+  readSource?: HarnessDocumentReadSource;
 }
 
 const recordOf = (value: unknown): Record<string, unknown> => (
@@ -97,7 +99,7 @@ const unusedCapability = (
  * Cold, missing-capability, and revision mismatch stay distinct statuses.
  */
 export function createLspStructureProvider(options: LspStructureProviderOptions): StructureProvider {
-  const binder = createLanguageViewBinder({ documents: options.documents, supervisor: options.supervisor });
+  const binder = createLanguageViewBinder({ documents: options.documents, supervisor: options.supervisor, ...(options.readSource ? { readSource: options.readSource } : {}) });
 
   return {
     id: "lsp",

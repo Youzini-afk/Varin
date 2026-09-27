@@ -41,7 +41,7 @@ describe("native filesystem search projection", () => {
     });
     const runtime = runtimeWith(directory);
 
-    const files = await runtime.searchFilesystemFiles("/repo", { query: "", respectGitignore: true });
+    const files = await runtime.searchFilesystemFiles("/repo", { query: "", respectGitignore: true, includeRevisions: true });
 
     expect(directory).toHaveBeenCalledTimes(1);
     expect(directory.mock.calls[0]?.[1]).toMatchObject({
@@ -55,6 +55,24 @@ describe("native filesystem search projection", () => {
       ["src/deep/nested.ts", "sha256-nested"],
     ]);
     expect(files.enumerationStatus).toBe("complete");
+  });
+
+  it("projects lightweight metadata without requesting content revisions", async () => {
+    const directory = vi.fn(async (_root, input, runOptions) => {
+      const records = [{
+        ...entry("src/app.ts", ""),
+        data: { kind: "file", metadata: { byteLength: "128", modifiedTimeNs: "123456789" } },
+      }];
+      await runOptions?.onRecords?.(records);
+      return result(records);
+    });
+    const runtime = runtimeWith(directory);
+
+    const files = await runtime.searchFilesystemFiles("/repo", { query: "" });
+
+    expect(directory.mock.calls[0]?.[1]).not.toHaveProperty("includeRevisions");
+    expect(files).toMatchObject([{ relativePath: "src/app.ts", metadata: { byteLength: "128", modifiedTimeNs: "123456789" } }]);
+    expect(files[0]?.revision).toBeUndefined();
   });
 
   it("does fuzzy ranking after native membership filtering", async () => {

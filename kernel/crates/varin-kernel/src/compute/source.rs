@@ -7,7 +7,8 @@ use rusqlite::{Connection, OpenFlags};
 use sha2::{Digest,Sha256};
 use std::{collections::{HashMap,HashSet}, fs::{self,File}, io::Read, path::{Path,PathBuf}};
 
-pub(crate) struct Document {pub path:String,pub revision:String,pub state:PathState,pub bytes:Option<Vec<u8>>}
+pub(crate) struct SourceMetadata {pub byte_length:u64,pub modified_time_ns:Option<String>}
+pub(crate) struct Document {pub path:String,pub revision:String,pub state:PathState,pub bytes:Option<Vec<u8>>,pub metadata:Option<SourceMetadata>}
 pub(crate) fn within(path:&str,root:&str)->bool {root.is_empty()||path==root||path.starts_with(&(root.to_string()+"/"))}
 pub(crate) fn normalize(value:&str)->Result<String>{
     let value=value.replace('\\',"/");
@@ -58,8 +59,8 @@ fn load_object(source:ObjectSource,content:bool,shared:&Shared)->Result<Document
     if let Some(file)=source.file{
         let bytes=if content{Some(read_bytes(file,source.hash.as_deref(),shared)?)}else{None};
         let length=bytes.as_ref().map(|b|b.len() as u64).unwrap_or(0);
-        Ok(Document{path:source.path,revision:source.revision,state:PathState::RegularFile{object_hash:source.hash.unwrap_or_default(),byte_length:length,mode:0o644},bytes})
-    }else{Ok(Document{path:source.path,revision:source.revision,state:PathState::Missing,bytes:None})}
+        Ok(Document{path:source.path,revision:source.revision,state:PathState::RegularFile{object_hash:source.hash.unwrap_or_default(),byte_length:length,mode:0o644},bytes,metadata:None})
+    }else{Ok(Document{path:source.path,revision:source.revision,state:PathState::Missing,bytes:None,metadata:None})}
 }
 fn safe_disk_path(root:&Path,path:&Path,scopes:&[String])->Result<PathBuf>{
     let canonical=fs::canonicalize(path).map_err(|e|e.to_string())?;
@@ -140,7 +141,7 @@ pub(crate) fn visit(task:&mut Task,shared:&Shared,mut callback:impl FnMut(Docume
                     },_=>None};
                     let revision=if let Some(bytes)=bytes.as_deref(){revision(bytes)}
                         else if let Some(hash)=state.object_hash(){revision_from_object_hash(hash)?}else{root.clone()};
-                    if !callback(Document{path,revision,state,bytes})?{return Ok(partial);}
+                    if !callback(Document{path,revision,state,bytes,metadata:None})?{return Ok(partial);}
                 }
             }}
         },
@@ -171,6 +172,18 @@ pub(crate) fn visit(task:&mut Task,shared:&Shared,mut callback:impl FnMut(Docume
                 if shadowed.iter().any(|p|within(&path,p))||!eligible(&path,kind.is_dir()){continue;}
                 if task.params.immediate.unwrap_or(false)&&!roots.iter().any(|r|path==*r||path.rsplit_once('/').map(|(p,_)|p==r).unwrap_or(r.is_empty())){continue;}
                 let mut bytes=None;
+                let metadata=if task.params.operation=="list"&&kind.is_file(){
+                    match fs::symlink_metadata(entry.path()){
+                        Ok(metadata) if metadata.is_file()=>Some(SourceMetadata{
+                            byte_length:metadata.len(),
+                            modified_time_ns:metadata.modified().ok()
+                                .and_then(|time|time.duration_since(std::time::UNIX_EPOCH).ok())
+                                .map(|modified|modified.as_nanos().to_string()),
+                        }),
+                        Ok(_)=>{partial=true;continue;},
+                        Err(error)=>{partial=true;shared.emit("error",&path,"",serde_json::json!({"message":error.to_string()}))?;continue;}
+                    }
+                }else{None};
                 let state=if kind.is_dir(){PathState::Directory{mode:None}}else if kind.is_symlink(){PathState::Symlink{symlink_target:fs::read_link(entry.path()).map_err(|e|e.to_string())?.to_string_lossy().into(),mode:None}}
                 else if kind.is_file(){
                     if content {
@@ -178,10 +191,10 @@ pub(crate) fn visit(task:&mut Task,shared:&Shared,mut callback:impl FnMut(Docume
                             if fs::canonicalize(entry.path()).map_err(|e|e.to_string())?!=canonical{return Err("File identity changed during native capture".into());}Ok(b)})();
                         match result{Ok(b)=>bytes=Some(b),Err(e)=>{shared.check()?;partial=true;shared.emit("error",&path,"",serde_json::json!({"message":e}))?;continue;}}
                     }
-                    PathState::RegularFile{object_hash:bytes.as_deref().map(|b|format!("sha256-{}",hex::encode(Sha256::digest(b)))).unwrap_or_default(),byte_length:bytes.as_ref().map(|b|b.len() as u64).unwrap_or(0),mode:0o644}
+                    PathState::RegularFile{object_hash:bytes.as_deref().map(|b|format!("sha256-{}",hex::encode(Sha256::digest(b)))).unwrap_or_default(),byte_length:bytes.as_ref().map(|b|b.len() as u64).or_else(||metadata.as_ref().map(|value|value.byte_length)).unwrap_or(0),mode:0o644}
                 }else{PathState::Unsupported};
                 let revision=bytes.as_deref().map(revision).unwrap_or_default();
-                if !callback(Document{path,revision,state,bytes})?{return Ok(partial);}
+                if !callback(Document{path,revision,state,bytes,metadata})?{return Ok(partial);}
             }
         }
     }

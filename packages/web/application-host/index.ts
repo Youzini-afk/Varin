@@ -55,7 +55,7 @@ import { createDocumentRootGuard } from './lib/documents/allowed-roots.js';
 import { createWorkspaceConfig } from './lib/workspace/workspace-config.js';
 
 import { createHarnessRouter, buildHarnessRespondParams } from './lib/harness/router.js';
-import { createHarnessServiceHost, deriveHarnessCapabilities } from './lib/harness/service-host.js';
+import { createHarnessServiceHost, deriveHarnessCapabilities, type HarnessDocumentReadLookup } from './lib/harness/service-host.js';
 import { discoverShells } from './lib/harness/shell-discovery.js';
 import { createHarnessSessionRegistration } from './lib/harness/session-registration.js';
 import { performHarnessWebFetch, registerHarnessServices } from './lib/harness/harness-services.js';
@@ -103,7 +103,7 @@ import { createWorkingBranchWriteServices } from './lib/harness/working-state/wo
 import { acquireVirtualWriteTicket, VirtualWriteGate } from './lib/harness/working-state/virtual-write-gate.js';
 import { IntegrationCoordinator } from './lib/harness/working-state/integration-coordinator.js';
 import { reconcileInterruptedKernelBranchIntegrations } from './lib/recovery/durable-file-operation.js';
-import { DEFAULT_HARNESS_SETTINGS, mergeHarnessSettings, resolveHarnessDocumentReadingSettings, resolvePresets, THINKING_LEVELS, type SessionSnapshot } from '@varin/protocol';
+import { DEFAULT_HARNESS_SETTINGS, mergeHarnessSettings, resolveHarnessDocumentReadingSettings, resolvePresets, THINKING_LEVELS, type AgentInputContext, type SessionSnapshot } from '@varin/protocol';
 import { createSettingsService, settingsDocumentRevision } from './lib/harness/settings-service.js';
 import { createFollowUpService } from './lib/harness/followups.js';
 import { createFollowUpThreadSender } from './lib/harness/followup-delivery.js';
@@ -116,6 +116,7 @@ import { getGitHubAuth, getGitHubAuthAccounts, isGhCliActive, isGhCliDisabled } 
 import { getGhCliToken } from './lib/github/gh-cli-credential.js';
 import { getStatus as getGitStatus } from './lib/git/service.js';
 import { createVerificationCoordinator } from './lib/harness/verification-coordinator.js';
+import { createSourceViewStore, SOURCE_VIEW_STORAGE_SCOPE, sourceViewIdFromContext } from './lib/harness/source-view-store.js';
 import { createKernelClient, type KernelClient } from './lib/kernel/kernel-client.js';
 import { registerHarnessExperimentRoutes } from './lib/harness/experiment-routes.js';
 import { registerHarnessFollowUpRoutes } from './lib/harness/follow-up-routes.js';
@@ -1089,13 +1090,17 @@ async function main(options: StartWebUiServerOptions = {}): Promise<WebUiServerC
     onExit: (error) => console.error('[VarinKernel] Kernel process exited:', error.message),
   });
   await kernelClient.start();
+  const sourceViewStorageRoot = path.join(VARIN_DATA_DIR, 'source-views');
+  await fsPromises.mkdir(sourceViewStorageRoot, { recursive: true });
   const kernelSessionActors = new Map<string, { authorityInstanceId: string; sessionId: string; workerId: string; workerGeneration: number; runId?: string }>();
   const kernelStorageAdapter = new KernelStorageAdapter({
     client: kernelClient,
     hostId: extensionRuntime.services.hostId,
     hostGeneration: `${extensionRuntime.services.hostId}:${process.pid}`,
     storageRoot: path.join(VARIN_DATA_DIR, 'kernel', extensionRuntime.services.hostId),
-    resolveWorkspaceRoot: async (workspaceId) => (await documentsAuthority.inspectWorkspace(workspaceId)).root,
+    resolveWorkspaceRoot: async (workspaceId) => workspaceId === SOURCE_VIEW_STORAGE_SCOPE
+      ? sourceViewStorageRoot
+      : (await documentsAuthority.inspectWorkspace(workspaceId)).root,
     resolveActor: async (workspaceId, purpose, hint) => {
       const maintenance = hint?.capabilities?.some((capability) => (
         capability === 'recovery.maintenance' || capability === 'storage.maintenance'
@@ -1652,18 +1657,6 @@ async function main(options: StartWebUiServerOptions = {}): Promise<WebUiServerC
   // Scholarly APIs share the same egress authority — proxies and SSRF
   // classification apply identically to every outbound consumer.
   const researchSearchService = createResearchSearchService({ fetch: egressRuntime.fetch as typeof globalThis.fetch });
-  const harnessDiagnosticsProvider = createLanguageSupervisorDiagnosticsProvider(languageSupervisor, {
-    documents: documentsAuthority,
-    resolveWorkspaceId: async (workspaceRoot) => {
-      try {
-        const workspace = await documentsAuthority.inspectWorkspace(workspaceRoot);
-        return workspace.workspaceId;
-      } catch {
-        return null;
-      }
-    },
-  });
-
   // ── Phase 2: Knowledge store, memory agent, observers ────────────
   // Knowledge stores are opened lazily per workspace and cached.
   const knowledgeStores = new Map<string, KnowledgeStore>();
@@ -1837,6 +1830,29 @@ async function main(options: StartWebUiServerOptions = {}): Promise<WebUiServerC
     }
   };
   const harnessWorkingStates = createKernelWorkspaceWorkingStateAccess(kernelStorageAdapter, foundationalRecoveryEngine, kernelRecoveryStore);
+  const sourceViews = createSourceViewStore(harnessWorkingStates);
+  const sourceViewForSession = async (sessionId: string, context: AgentInputContext): Promise<string | null> => {
+    const viewId = sourceViewIdFromContext(context);
+    if (!viewId) return null;
+    const binding = await threadRegistry.getSessionBinding(sessionId);
+    const thread = binding && await threadRegistry.getThreadById(binding.owningScopeId, binding.threadId);
+    if (thread?.manifest.sourceViewId !== viewId) throw new Error('The fixed source view does not belong to this thread');
+    const fixed = await sourceViews.contextFor(viewId);
+    if (!fixed || fixed.source !== 'surface' || context.source !== 'surface'
+      || JSON.stringify(fixed.roots) !== JSON.stringify(context.roots)) {
+      throw new Error('The fixed source view no longer matches this thread input');
+    }
+    return viewId;
+  };
+  const threadSourceContext = async (sessionId: string): Promise<AgentInputContext | undefined> => {
+    const binding = await threadRegistry.getSessionBinding(sessionId);
+    const thread = binding && await threadRegistry.getThreadById(binding.owningScopeId, binding.threadId);
+    const viewId = thread?.manifest.sourceViewId;
+    if (!viewId) return undefined;
+    const context = await sourceViews.contextFor(viewId);
+    if (!context) throw new Error(`The fixed source view for thread ${thread.id} is unavailable`);
+    return context;
+  };
   const retrievalArtifacts = createRetrievalArtifactAccess(harnessWorkingStates);
   const webMaterials = createWebMaterialStore(harnessWorkingStates);
   webMaterialAccess.put = webMaterials.put;
@@ -1876,7 +1892,10 @@ async function main(options: StartWebUiServerOptions = {}): Promise<WebUiServerC
   const researchDecideService = createResearchDecideService(researchDecideDeps);
   retrievalEvidenceAccess.persistReceipt = retrievalArtifacts.persistReceipt;
   retrievalEvidenceAccess.syncThread = retrievalArtifacts.syncThreadEvidence;
+  const retainedSourceViewIds = new Set<string>();
   for (const workspaceId of await threadRegistry.listWorkspaceIds()) {
+    const workspaceThreads = await threadRegistry.listWorkspaceThreads(workspaceId);
+    for (const thread of workspaceThreads) if (thread.manifest.sourceViewId) retainedSourceViewIds.add(thread.manifest.sourceViewId);
     await harnessWorkingStates.withBranchStore(
       workspaceId,
       'startup-branch-integration-reconcile',
@@ -1889,15 +1908,52 @@ async function main(options: StartWebUiServerOptions = {}): Promise<WebUiServerC
     );
     await retrievalArtifacts.reconcileWorkspaceEvidence(
       workspaceId,
-      await threadRegistry.listWorkspaceThreads(workspaceId),
+      workspaceThreads,
     );
   }
+  await sourceViews.reconcile(retainedSourceViewIds);
   const threadExecutionViews = new ThreadExecutionViewRegistry();
   const virtualWriteGate = new VirtualWriteGate();
   const workingBranchLookups = createWorkingBranchLookups({
     views: threadExecutionViews,
     workingStates: harnessWorkingStates,
   });
+  const readHarnessSource = async (
+    sessionId: string, context: AgentInputContext, resourceId: string, workspaceId: string,
+  ): Promise<HarnessDocumentReadLookup> => {
+    const branch = await workingBranchLookups.readSource(sessionId, resourceId, workspaceId);
+    if (branch) return branch;
+    const viewId = await sourceViewForSession(sessionId, context);
+    if (viewId) {
+      const identity = await documentsAuthority.resolveResourceIdentity({ workspaceId, resourceId }).catch(() => null);
+      const targetAlias = await sourceViews.targetAlias(viewId, workspaceId, resourceId, identity?.coordinationId ?? null);
+      if (targetAlias) {
+        const aliasedBranch = await workingBranchLookups.readSource(sessionId, targetAlias.resourceId, targetAlias.workspaceId);
+        if (aliasedBranch) return aliasedBranch;
+        const view = threadExecutionViews.get(sessionId);
+        if (view?.mode !== 'materialized' || view.workspaceId !== targetAlias.workspaceId) {
+          return { status: 'unavailable', message: 'The aliased source has no active child execution view' };
+        }
+        const binding = await threadRegistry.getSessionBinding(sessionId);
+        const thread = binding && await threadRegistry.getThreadById(binding.owningScopeId, binding.threadId);
+        if (!thread?.worktree?.path || thread.worktree.materialized === false) {
+          return { status: 'unavailable', message: 'The materialized child directory is unavailable' };
+        }
+        await threadWorktreeRuntime.assertOwnership(thread.worktree, 'read materialized source alias');
+        const childRoot = await documentsAuthority.resolveWorkspace({ path: thread.worktree.path });
+        const snapshot = await documentsAuthority.read({ workspaceId: childRoot.workspaceId, resourceId: targetAlias.resourceId });
+        const provenance = { branchId: view.branchId, revision: view.writeRevision, origin: 'materialized' as const };
+        if (snapshot.status === 'missing') return { status: 'working-branch', revision: `materialized:${view.branchId}:${snapshot.status}`, provenance, missing: true };
+        if (snapshot.status !== 'ready') return { status: 'unavailable', message: `The materialized child source cannot be read (${snapshot.status})` };
+        return {
+          status: 'working-branch', revision: `materialized:${view.branchId}:${snapshot.revision}`,
+          provenance, base64: encodeDocumentText(snapshot).toString('base64'),
+        };
+      }
+      return sourceViews.read(viewId, workspaceId, resourceId, identity?.coordinationId ?? null);
+    }
+    return documentsAuthority.readAgentInputSnapshot(sessionId, context, resourceId, workspaceId);
+  };
   const workingBranchWrites = createWorkingBranchWriteServices({
     views: threadExecutionViews,
     workingStates: harnessWorkingStates,
@@ -2007,6 +2063,7 @@ async function main(options: StartWebUiServerOptions = {}): Promise<WebUiServerC
       }, relative);
     },
     cloneAgentInputSnapshot: (sessionId, context) => documentsAuthority.cloneAgentInputSnapshot(sessionId, context),
+    sourceViews,
     resolveIntegrationCoordinator: () => threadIntegrationCoordinator,
     canReclaimWorktree: createWorktreeReclaimGuard(documentsAuthority),
     resolveBaselineApplyContext: resolveDirectoryApplyContext,
@@ -2151,12 +2208,14 @@ async function main(options: StartWebUiServerOptions = {}): Promise<WebUiServerC
         tools: input.tools,
         workFocusRole: 'branch',
       }),
-      prompt: async (sessionId, text, instructions, images) => {
+      prompt: async (sessionId, text, instructions, images, inputContext) => {
+        const fixedContext = inputContext ?? await threadSourceContext(sessionId);
         const result = await piRuntimeBroker.requestForSession(sessionId, 'agent.prompt', {
           sessionId,
           text,
           ...(instructions ? { instructions } : {}),
           ...(images?.length ? { images } : {}),
+          ...(fixedContext ? { inputContext: fixedContext } : {}),
         });
         if (!result.accepted) throw new Error(`Pi child session rejected its initial prompt: ${sessionId}`);
       },
@@ -2169,7 +2228,10 @@ async function main(options: StartWebUiServerOptions = {}): Promise<WebUiServerC
         if (!result.accepted) throw new Error(`Pi session rejected passive input: ${sessionId}`);
       },
       send: async (sessionId, text) => {
-        const result = await piRuntimeBroker.requestForSession(sessionId, 'agent.followUp', { sessionId, text });
+        const inputContext = await threadSourceContext(sessionId);
+        const result = await piRuntimeBroker.requestForSession(sessionId, 'agent.followUp', {
+          sessionId, text, ...(inputContext ? { inputContext } : {}),
+        });
         if (!result.accepted) throw new Error(`Pi child session rejected follow-up input: ${sessionId}`);
       },
       abort: async (sessionId) => { await piRuntimeBroker.requestForSession(sessionId, 'agent.abort', { sessionId }); },
@@ -2696,6 +2758,7 @@ async function main(options: StartWebUiServerOptions = {}): Promise<WebUiServerC
     createLspStructureProvider({
       documents: documentsAuthority,
       supervisor: languageSupervisor,
+      readSource: readHarnessSource,
     }),
   ]);
   const symbolGraphRuntime = createSymbolGraphRuntime({
@@ -2725,6 +2788,19 @@ async function main(options: StartWebUiServerOptions = {}): Promise<WebUiServerC
     // indexing no longer spawns a workspace worker per directory.
     configCwd: VARIN_DATA_DIR,
     documents: documentsAuthority,
+    readDraft: async (sessionId, context, resourceId, workspaceId) => {
+      const source = await readHarnessSource(sessionId, context, resourceId, workspaceId);
+      if (source.status !== 'working-branch') return source;
+      if (source.message || source.missing || source.base64 === undefined) {
+        return { status: 'unavailable', message: source.message ?? 'The working-branch source is missing' };
+      }
+      return {
+        status: 'ready',
+        content: Buffer.from(source.base64, 'base64').toString('utf8'),
+        revision: source.revision,
+        source: 'working-branch',
+      };
+    },
     structureSource,
     searchFilesystemFiles: catalogFileSearch.searchFilesystemFiles,
     isIndexablePath: async (id, resourceId, signal) => catalogFileSearch.isSearchableFile(
@@ -2876,6 +2952,19 @@ async function main(options: StartWebUiServerOptions = {}): Promise<WebUiServerC
       documentsAuthority,
       harnessPathAuthority,
       (sessionId, resourceId, workspaceId) => workingBranchLookups.exploreFile(sessionId, resourceId, workspaceId),
+      async (sessionId, context, resourceId, workspaceId) => {
+        if (!sourceViewIdFromContext(context)) return null;
+        const source = await readHarnessSource(sessionId, context, resourceId, workspaceId);
+        if (source.status === 'disk') return null;
+        if (source.status === 'unavailable') return source;
+        if (source.status === 'working-branch') {
+          if (source.message || source.missing || source.base64 === undefined) {
+            return { status: 'unavailable', message: source.message ?? 'The working-branch source is missing' };
+          }
+          return { status: 'ready', content: Buffer.from(source.base64, 'base64').toString('utf8'), revision: source.revision, source: 'working-branch' };
+        }
+        return { status: 'ready', content: source.content, revision: source.revision, source: source.source };
+      },
     ),
     storeRetrievalArtifact: retrievalArtifacts.storeArtifact,
     readRetrievalArtifact: retrievalArtifacts.readArtifact,
@@ -2903,14 +2992,21 @@ async function main(options: StartWebUiServerOptions = {}): Promise<WebUiServerC
     },
     pinWorkingBranchQuery: (sessionId, pinOptions) => workingBranchLookups.pinQuery(sessionId, pinOptions),
     agentInputDraftPaths: (sessionId, context, workspaceId) => documentsAuthority.agentInputDraftPaths(sessionId, context, workspaceId),
-    documentReadSource: async (sessionId, context, resourceId, workspaceId) => {
-      const branch = await workingBranchLookups.readSource(sessionId, resourceId, workspaceId);
-      if (branch) return branch;
-      return documentsAuthority.readAgentInputSnapshot(sessionId, context, resourceId, workspaceId);
-    },
+    documentReadSource: readHarnessSource,
     documentPathOverlay: async (sessionId, context, resourceId, workspaceId) => {
       const branch = await workingBranchLookups.pathOverlay(sessionId, resourceId, workspaceId);
       if (branch) return branch;
+      const viewId = await sourceViewForSession(sessionId, context);
+      if (viewId) return sourceViews.overlay(viewId, workspaceId, resourceId, async (alias) => {
+        const source = await readHarnessSource(sessionId, context, alias.resourceId, alias.workspaceId);
+        if (source.status === 'working-branch') {
+          if (source.message) return { status: 'unavailable', message: source.message };
+          if (source.missing) return { status: 'missing' };
+          return { status: 'ready', revision: source.revision };
+        }
+        if (source.status === 'ready') return { status: 'ready', revision: source.revision };
+        return { status: 'unavailable', message: source.status === 'unavailable' ? source.message : 'The aliased child source is unavailable' };
+      });
       return documentsAuthority.overlayAgentInputSnapshot(sessionId, context, resourceId, workspaceId);
     },
     documentWriteGuard: (sessionId, context, resourceId, workspaceId) => documentsAuthority.inspectAgentWriteTarget(
@@ -2938,8 +3034,12 @@ async function main(options: StartWebUiServerOptions = {}): Promise<WebUiServerC
       }
       return threadRuntime.materializeExecutionView(sessionId, signal);
     },
-    commitAgentInputContext: (sessionId, context) => documentsAuthority.commitAgentInputSnapshot(sessionId, context),
-    releaseAgentInputContext: (sessionId, context) => documentsAuthority.releaseAgentInputSnapshot(sessionId, context),
+    commitAgentInputContext: async (sessionId, context) => sourceViewIdFromContext(context)
+      ? { committed: Boolean(await sourceViewForSession(sessionId, context)) }
+      : documentsAuthority.commitAgentInputSnapshot(sessionId, context),
+    releaseAgentInputContext: async (sessionId, context) => sourceViewIdFromContext(context)
+      ? { released: Boolean(await sourceViewForSession(sessionId, context)) }
+      : documentsAuthority.releaseAgentInputSnapshot(sessionId, context),
     dropAgentInputContexts: (sessionId) => documentsAuthority.dropAgentInputSnapshots(sessionId),
     search: async (request, options) => workspaceContentSearch.searchContent({
       query: request.query,
@@ -2986,10 +3086,22 @@ async function main(options: StartWebUiServerOptions = {}): Promise<WebUiServerC
       if (!writer) throw new Error('Harness shell has no workspace writer authority');
       return { close: async () => { await writer.close(); } };
     },
-    ...(harnessDiagnosticsProvider ? { diagnosticsProvider: harnessDiagnosticsProvider } : {}),
+    diagnosticsProvider: createLanguageSupervisorDiagnosticsProvider(languageSupervisor, {
+      documents: documentsAuthority,
+      readSource: readHarnessSource,
+      resolveWorkspaceId: async (workspaceRoot) => {
+        try {
+          const workspace = await documentsAuthority.inspectWorkspace(workspaceRoot);
+          return workspace.workspaceId;
+        } catch {
+          return null;
+        }
+      },
+    }),
     lspNavigationServices: createLspNavigationServices({
       documents: documentsAuthority,
       supervisor: languageSupervisor,
+      readSource: readHarnessSource,
       // Write-behind (D-240): a disk-bound lsp.references/lsp.definition answer
       // becomes graph rows so later related/explore queries reuse the
       // resolution instead of re-asking the language view.

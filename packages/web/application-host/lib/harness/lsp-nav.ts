@@ -3,6 +3,7 @@ import type { DocumentAuthority } from "../documents/authority.js";
 import type { createLanguageSupervisor } from "../lsp/supervisor.js";
 import { AGENT_LANGUAGE_VIEW } from "../lsp/supervisor.js";
 import { createLanguageViewBinder, type LanguageTextSource } from "../lsp/language-view.js";
+import type { HarnessDocumentReadSource } from "./service-host.js";
 import type { HarnessService, HarnessServiceContext } from "./router.js";
 import { languageIdForPath } from "./language-id.js";
 import { identifierAt } from "../knowledge/relations.js";
@@ -14,6 +15,7 @@ type LanguageSupervisor = Pick<ReturnType<typeof createLanguageSupervisor>,
 interface LspNavigationDeps {
   documents: Pick<DocumentAuthority, "read" | "readAgentInputSnapshot">;
   supervisor: LanguageSupervisor;
+  readSource?: HarnessDocumentReadSource;
   /**
    * Persist already-obtained resolution results into the workspace knowledge
    * graph (D-240). Called only for disk-bound documents — a surface-draft
@@ -165,7 +167,7 @@ export function createLspNavigationServices(deps: LspNavigationDeps): {
   references: HarnessService<"lsp.references">;
   hover: HarnessService<"lsp.hover">;
 } {
-  const binder = createLanguageViewBinder({ documents: deps.documents, supervisor: deps.supervisor });
+  const binder = createLanguageViewBinder({ documents: deps.documents, supervisor: deps.supervisor, ...(deps.readSource ? { readSource: deps.readSource } : {}) });
 
   const prepareDocument = async (
     path: string,

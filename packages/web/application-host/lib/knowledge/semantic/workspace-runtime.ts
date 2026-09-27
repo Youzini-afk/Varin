@@ -2,7 +2,7 @@ import { randomUUID } from 'node:crypto';
 import path from 'node:path';
 import type { PiRuntimeBroker, PiRuntimeBrokerEvent } from '@varin/runtime-broker';
 import { FAST_DECISION_PURPOSES } from '@varin/protocol';
-import type { HarnessInferenceBindingSnapshot, PiSettingsSnapshot } from '@varin/protocol';
+import type { AgentInputContext, HarnessInferenceBindingSnapshot, PiSettingsSnapshot } from '@varin/protocol';
 import type { DocumentAuthority, DocumentMutationObservation } from '../../documents/authority.js';
 import type { HarnessServiceHost } from '../../harness/service-host.js';
 import type { createWorkingBranchLookups } from '../../harness/working-state/working-branch-lookups.js';
@@ -11,7 +11,7 @@ import { createSemanticBackend } from './backend.js';
 import type { SemanticEmbedder } from './embedder.js';
 import { waitWithSignal } from './cancellation.js';
 import { workspaceScope } from './identity.js';
-import { pinSemanticQueryView } from './query-view.js';
+import { pinSemanticQueryView, type SemanticDraftReadResult } from './query-view.js';
 import { createSemanticIndexRuntime, type SemanticIndexRuntimeOptions } from './runtime.js';
 import { requestWorkspaceInference, resolveInferenceBinding } from './workspace-inference.js';
 
@@ -20,6 +20,12 @@ type PathMutation = Pick<DocumentMutationObservation, 'workspaceId' | 'resourceI
 
 export interface WorkspaceSemanticRuntimeOptions extends Omit<SemanticIndexRuntimeOptions, 'getEmbedder' | 'documents'> {
   documents: Pick<DocumentAuthority, 'read' | 'inspectWorkspace' | 'watch' | 'agentInputDraftPaths' | 'readAgentInputSnapshot'>;
+  readDraft?: (
+    sessionId: string,
+    inputContext: AgentInputContext,
+    resourceId: string,
+    workspaceId: string,
+  ) => SemanticDraftReadResult | Promise<SemanticDraftReadResult>;
   getBroker(): InferenceBroker | null;
   /**
    * HR3: one shared worker directory for settings/inference transport. Harness
@@ -129,7 +135,7 @@ export function createWorkspaceSemanticRuntime(options: WorkspaceSemanticRuntime
     try {
       const documentWatch = options.documents.watch(state.workspaceId, (event) => {
         if (event.kind === 'reset') {
-          track(state.runtime.scanWorkspace(state.workspaceId));
+          track(state.runtime.scanWorkspace(state.workspaceId, { forceContentVerification: true }));
           return;
         }
         const resource = event.resource;
@@ -155,7 +161,7 @@ export function createWorkspaceSemanticRuntime(options: WorkspaceSemanticRuntime
       }
       // A root that was temporarily unavailable needs one reconciliation when
       // it becomes observable again; a successful retry is not a baseline.
-      if (reconcileOnRecovery && !wasReady) track(state.runtime.scanWorkspace(state.workspaceId));
+      if (reconcileOnRecovery && !wasReady) track(state.runtime.scanWorkspace(state.workspaceId, { forceContentVerification: true }));
       return true;
     } catch {
       state.documentWatch?.close();
@@ -289,7 +295,9 @@ export function createWorkspaceSemanticRuntime(options: WorkspaceSemanticRuntime
         workspaceId,
         ...(draftPaths === undefined ? {} : { draftPaths }),
         ...(threadQuery ? { threadDocuments: [] } : threadDocuments ? { threadDocuments } : sessionId ? {
-          readDraft: (resourceId: string) => options.documents.readAgentInputSnapshot(sessionId, inputContext, resourceId, workspaceId),
+          readDraft: (resourceId: string) => options.readDraft
+            ? options.readDraft(sessionId, inputContext, resourceId, workspaceId)
+            : options.documents.readAgentInputSnapshot(sessionId, inputContext, resourceId, workspaceId),
         } : {}),
       });
       const result = await state.runtime.search(workspaceScope(workspaceId), question, limit, {

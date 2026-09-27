@@ -407,6 +407,8 @@ export interface ThreadLaunchManifest {
   concurrency: number;
   /** Host-owned immutable editor draft baseline captured at dispatch. */
   draftBaselineId: string | null;
+  /** Immutable non-worktree resources captured with the first dispatched input. */
+  sourceViewId?: string;
   /**
    * How the Thread's first Run input was constructed (D-285.4): `task` is a
    * fresh task brief; `inherit` carries `inheritedContext`. Later Runs carry

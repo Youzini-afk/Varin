@@ -15,7 +15,12 @@ derived store (`../vectors/`); they reuse `harness.embed` but never this MiniLM 
 - Overlay: `query-view.ts` pins surface/thread drafts at query start; masked disk paths cannot leak
   old vectors. Thread view is fixed baseline + this branch’s delta.
 - Storage: `store.ts` — one TriviumDB generation per scope/space; scoped Top-K (D-189); `publishToken`.
-- Runtime: `runtime.ts` — Documents-revision incremental scan, first-publish wait, overlay extras.
+- Runtime: `runtime.ts` — native directory inventory first returns path and stat metadata without
+  reading every file body. New, changed, invalidated and failed paths then enter Documents reads,
+  parsing and embedding. A normal query never traverses the root; returned old hits are checked
+  against current Documents revision. Metadata-only skips keep a range-level partial coverage
+  marker, while watcher reset/recovery forces content verification. `workspace-runtime.ts` injects
+  the Host fixed-source reader for external child drafts and working-branch aliases.
 - Production assembly: `workspace-runtime.ts` owns per-workspace Settings/describe resolution, remote
   transport, config watches, backend refresh, query view selection and shutdown. Application Host uses
   its `semanticRecall` / `harnessSettings` / `rerankExploreViews` directly; tests consume those same methods.

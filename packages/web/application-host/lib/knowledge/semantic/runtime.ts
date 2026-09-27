@@ -4,7 +4,7 @@
  */
 
 import type { DocumentAuthority, DocumentMutationObservation } from "../../documents/authority.js";
-import type { FileSearchItem } from "../../fs/types.js";
+import type { FileSearchEnumerationStatus, FileSearchItem } from "../../fs/types.js";
 import { languageIdForPath } from "../../harness/language-id.js";
 import { TREE_SITTER_LANGUAGE_SPECS } from "../../structure/languages.js";
 import type { StructureSource, StructureUnitsResult } from "../../structure/types.js";
@@ -46,6 +46,8 @@ export type SemanticScanBatchProgress = {
 export type SemanticScanOptions = {
   signal?: AbortSignal;
   onBatchComplete?: (progress: SemanticScanBatchProgress) => void;
+  /** Watch continuity was lost: metadata is not enough to retain old content. */
+  forceContentVerification?: boolean;
 };
 
 export type SemanticQueryOverlay = {
@@ -55,6 +57,9 @@ export type SemanticQueryOverlay = {
   origin: "surface-draft" | "thread";
   gap?: "draft-vector-pending" | "draft-unavailable" | "thread-vector-pending";
 };
+
+type SemanticScanFile = FileSearchItem & { metadata?: { byteLength: string; modifiedTimeNs: string } };
+type SemanticScanFiles = SemanticScanFile[] & { enumerationStatus?: FileSearchEnumerationStatus };
 
 export type SemanticSearchRequest = {
   threadQuery?: import("../../harness/working-state/working-branch-query.js").WorkingBranchQuerySnapshot;
@@ -83,7 +88,7 @@ export interface SemanticIndexRuntimeOptions {
   searchFilesystemFiles?: (
     rootPath: string,
     options: { query: string; respectGitignore?: boolean; includeRevisions?: boolean; signal?: AbortSignal },
-  ) => Promise<FileSearchItem[]>;
+  ) => Promise<SemanticScanFiles>;
   isIndexablePath?: (workspaceId: string, path: string, signal: AbortSignal) => Promise<boolean>;
   embedder: SemanticEmbedder;
   getEmbedder?: () => SemanticEmbedder;
@@ -97,8 +102,13 @@ export function createSemanticIndexRuntime(options: SemanticIndexRuntimeOptions)
   const pending = new Set<Promise<void>>();
   const scanControllers = new Map<string, AbortController>();
   const inFlightScans = new Map<string, Promise<void>>();
+  const verifyingScanKeys = new Set<string>();
   const activeScanGates = new Map<string, { promise: Promise<void>; resolve: () => void; resolved: boolean }>();
   const unverifiedPaths = new Map<string, Set<string>>();
+  // Metadata only gates repeat reads within this Host lifetime. It is a hint,
+  // never a content revision; skipped paths remain visible as coverage gaps.
+  const verifiedScanMetadata = new Map<string, Map<string, string>>();
+  const metadataUnverifiedPaths = new Map<string, Set<string>>();
   const mutationPending = new Map<string, Set<string>>();
   const indexReadFailures = new Map<string, Set<string>>();
   const scanFailures = new Set<string>();
@@ -145,6 +155,14 @@ export function createSemanticIndexRuntime(options: SemanticIndexRuntimeOptions)
     `${scope.scopeKind}\0${scope.scopeId}\0${spaceId ?? spaceIdOf(embedderOf().space)}`
   );
   const scopeIdentity = (scope: SemanticScopeKey): string => `${scope.scopeKind}\0${scope.scopeId}`;
+  const forgetScanMetadata = (scope: SemanticScopeKey, documentId: string): void => {
+    const prefix = `${scopeIdentity(scope)}\0`;
+    for (const [key, metadata] of verifiedScanMetadata) if (key.startsWith(prefix)) metadata.delete(documentId);
+    for (const [key, paths] of metadataUnverifiedPaths) if (key.startsWith(prefix)) paths.delete(documentId);
+  };
+  const metadataIdentity = (metadata: SemanticScanFile["metadata"]): string | undefined => (
+    metadata ? JSON.stringify([metadata.byteLength, metadata.modifiedTimeNs]) : undefined
+  );
 
   const createScanGate = () => {
     let resolve = (): void => undefined;
@@ -329,6 +347,7 @@ export function createSemanticIndexRuntime(options: SemanticIndexRuntimeOptions)
     const languageId = languageIdForPath(event.resourceId);
     if (!languageId || !SEMANTIC_SCAN_LANGUAGES.has(languageId)) return;
     const pendingForScope = mutationPending.get(scopeIdentity(workspaceScope(event.workspaceId))) ?? new Set<string>();
+    forgetScanMetadata(workspaceScope(event.workspaceId), event.resourceId);
     pendingForScope.add(event.resourceId);
     mutationPending.set(scopeIdentity(workspaceScope(event.workspaceId)), pendingForScope);
     track(indexDocument(workspaceScope(event.workspaceId), event.resourceId, event.kind === "deleted" ? "deleted" : "modified"));
@@ -341,7 +360,9 @@ export function createSemanticIndexRuntime(options: SemanticIndexRuntimeOptions)
     const key = scopeKey(scope, spaceIdOf(initialEmbedder.space));
     const existing = inFlightScans.get(key);
     if (existing) {
-      if (!scanControllers.get(key)?.signal.aborted) return existing;
+      if (optionsForScan?.forceContentVerification && !verifyingScanKeys.has(key)) {
+        scanControllers.get(key)?.abort();
+      } else if (!scanControllers.get(key)?.signal.aborted) return existing;
       await existing;
       return scanScope(scope, optionsForScan);
     }
@@ -368,11 +389,10 @@ export function createSemanticIndexRuntime(options: SemanticIndexRuntimeOptions)
         const files = await options.searchFilesystemFiles!(root, {
           query: "",
           respectGitignore: true,
-          includeRevisions: true,
           signal,
         });
         signal.throwIfAborted();
-        const catalog = files.filter((file) => SEMANTIC_SCAN_LANGUAGES.has(languageIdForPath(file.relativePath) ?? ""));
+        const catalog = (files as SemanticScanFiles).filter((file) => SEMANTIC_SCAN_LANGUAGES.has(languageIdForPath(file.relativePath) ?? ""));
         if (catalog.length === 0 && initialEmbedder.space.dim <= 0) {
           // There is no document body with which to resolve an automatic remote
           // dimension. Remember the successful empty catalog. The first real
@@ -384,43 +404,69 @@ export function createSemanticIndexRuntime(options: SemanticIndexRuntimeOptions)
           scanFailures.delete(scopeScanKey);
           return;
         }
-        let bootstrapText = catalog[0]?.relativePath ?? ".";
-        if (initialEmbedder.space.dim <= 0 && catalog[0]) {
-          try {
-            bootstrapText = (await diskChunksFor(
-              scope.scopeId,
-              root,
-              catalog[0].relativePath,
-              initialEmbedder,
-              signal,
-            )).chunks[0]?.embedText ?? bootstrapText;
-          } catch { /* prepareDocument below records the read failure */ }
-        }
+        // The model dimension can be resolved with a path probe. Resolving it
+        // must not force a body read for a file that metadata may later skip.
+        const bootstrapText = catalog[0]?.relativePath ?? ".";
         const embedder = await ensureEmbedderSpace(initialEmbedder, signal, bootstrapText);
         signal.throwIfAborted();
         resolvedKey = scopeKey(scope, spaceIdOf(embedder.space));
         if (resolvedKey !== key) {
           inFlightScans.set(resolvedKey, runHolder.promise!);
           scanControllers.set(resolvedKey, controller);
+          if (optionsForScan?.forceContentVerification) verifyingScanKeys.add(resolvedKey);
         }
         store = storeFor(scope, embedder);
         store.markBuilding(store.lifecycle === "ready" ? "rebuilding" : "building");
         const publishedBefore = await store.listDocumentIds();
+        const publishedIds = new Set(publishedBefore);
         const catalogIds = new Set(catalog.map((file) => file.relativePath));
-        const removed = publishedBefore.filter((documentId) => !catalogIds.has(documentId));
+        const enumerationComplete = files.enumerationStatus === undefined || files.enumerationStatus === "complete";
+        if (!enumerationComplete) scanComplete = false;
+        const removed = enumerationComplete ? publishedBefore.filter((documentId) => !catalogIds.has(documentId)) : [];
         const removalTokens = new Map(removed.map((documentId) => [documentId, scanTokenFor(scope, documentId, scanToken)]));
         const unverified = new Set([...publishedBefore, ...catalog.map((file) => file.relativePath)].filter((documentId) => (
           (documentTokens.get(`${scopeKey(scope, "token")}\0${documentId}`) ?? 0) <= scanToken
         )));
         unverifiedPaths.set(resolvedKey, unverified);
-        scanFailures.delete(scopeScanKey);
+        const priorMetadata = verifiedScanMetadata.get(resolvedKey) ?? new Map<string, string>();
+        const nextMetadata = new Map(priorMetadata);
+        const previouslyMetadataUnverified = metadataUnverifiedPaths.get(resolvedKey) ?? new Set<string>();
+        const metadataUnverified = enumerationComplete ? new Set<string>() : new Set(previouslyMetadataUnverified);
         const readFailures = indexReadFailures.get(resolvedKey) ?? new Set<string>();
         indexReadFailures.set(resolvedKey, readFailures);
-        for (const failedPath of readFailures) if (!catalogIds.has(failedPath)) readFailures.delete(failedPath);
+        if (enumerationComplete) {
+          for (const failedPath of readFailures) if (!catalogIds.has(failedPath)) readFailures.delete(failedPath);
+        }
+        const toProcess: SemanticScanFile[] = [];
+        for (const file of catalog) {
+          const path = file.relativePath;
+          scanTokenFor(scope, path, scanToken);
+          const identity = metadataIdentity(file.metadata);
+          const pendingMutation = mutationPending.get(scopeIdentity(scope))?.has(path) ?? false;
+          const canSkip = identity !== undefined
+            && optionsForScan?.forceContentVerification !== true
+            && priorMetadata.get(path) === identity
+            && publishedIds.has(path)
+            && !readFailures.has(path)
+            && !pendingMutation
+            && isCurrentToken(scope, path, scanToken);
+          if (canSkip) {
+            // Keep the prior index available so its candidate revision can be
+            // checked against Documents. The scan still cannot claim complete
+            // recall because metadata equality does not prove equal contents.
+            metadataUnverified.add(path);
+            unverified.delete(path);
+          } else {
+            toProcess.push(file);
+            metadataUnverified.delete(path);
+            nextMetadata.delete(path);
+          }
+        }
+        scanFailures.delete(scopeScanKey);
         await embedder.prepare();
-        for (let offset = 0; offset < catalog.length; offset += CATALOG_SCAN_BATCH) {
+        for (let offset = 0; offset < toProcess.length; offset += CATALOG_SCAN_BATCH) {
           signal.throwIfAborted();
-          const batch = catalog.slice(offset, offset + CATALOG_SCAN_BATCH);
+          const batch = toProcess.slice(offset, offset + CATALOG_SCAN_BATCH);
           const prepared = await Promise.all(batch.map((file) => (
             prepareDocument(
               scope,
@@ -442,10 +488,16 @@ export function createSemanticIndexRuntime(options: SemanticIndexRuntimeOptions)
             if ("kind" in publication && publication.kind === "read-failed") {
               scanComplete = false;
               readFailures.add(path);
+              metadataUnverified.delete(path);
+              nextMetadata.delete(path);
             } else if (!("kind" in publication) || publication.kind === "unchanged-current") {
               unverified.delete(path);
               readFailures.delete(path);
               mutationPending.get(scopeIdentity(scope))?.delete(path);
+              metadataUnverified.delete(path);
+              const identity = metadataIdentity(batch[index]!.metadata);
+              if (identity) nextMetadata.set(path, identity);
+              else nextMetadata.delete(path);
             }
           }
           if (prepared.some((publication) => !("kind" in publication) || publication.kind === "unchanged-current")) gate.resolve();
@@ -459,10 +511,26 @@ export function createSemanticIndexRuntime(options: SemanticIndexRuntimeOptions)
           await yieldToEventLoop();
         }
         signal.throwIfAborted();
+        for (const path of [...metadataUnverified]) {
+          if (!isCurrentToken(scope, path, scanToken)) {
+            metadataUnverified.delete(path);
+            nextMetadata.delete(path);
+          }
+        }
         const currentRemovals = removed.filter((documentId) => isCurrentToken(scope, documentId, removalTokens.get(documentId)!));
         await Promise.all(currentRemovals.map((documentId) => store!.removeDocument(documentId, removalTokens.get(documentId)!)));
-        for (const documentId of currentRemovals) unverified.delete(documentId);
-        store.markReady(scanComplete && unverified.size === 0);
+        for (const documentId of currentRemovals) {
+          unverified.delete(documentId);
+          nextMetadata.delete(documentId);
+          metadataUnverified.delete(documentId);
+        }
+        if (enumerationComplete) {
+          for (const documentId of nextMetadata.keys()) if (!catalogIds.has(documentId)) nextMetadata.delete(documentId);
+        }
+        verifiedScanMetadata.set(resolvedKey, nextMetadata);
+        if (metadataUnverified.size > 0) metadataUnverifiedPaths.set(resolvedKey, metadataUnverified);
+        else metadataUnverifiedPaths.delete(resolvedKey);
+        store.markReady(scanComplete && unverified.size === 0 && metadataUnverified.size === 0);
         deferredDimensionScans.get(embedder)?.delete(scopeScanKey);
       } catch (error) {
         if (!signal.aborted && !disposed) {
@@ -476,10 +544,13 @@ export function createSemanticIndexRuntime(options: SemanticIndexRuntimeOptions)
         if (scanControllers.get(resolvedKey) === controller) scanControllers.delete(resolvedKey);
         if (inFlightScans.get(key) === runHolder.promise) inFlightScans.delete(key);
         if (inFlightScans.get(resolvedKey) === runHolder.promise) inFlightScans.delete(resolvedKey);
+        verifyingScanKeys.delete(key);
+        verifyingScanKeys.delete(resolvedKey);
       }
     })();
     runHolder.promise = run;
     inFlightScans.set(key, run);
+    if (optionsForScan?.forceContentVerification) verifyingScanKeys.add(key);
     return run;
   };
 
@@ -687,9 +758,16 @@ export function createSemanticIndexRuntime(options: SemanticIndexRuntimeOptions)
           overlay.extras.push(...material.extras);overlay.gaps.push(...material.gaps);
         }
       }
+      const diskIndexEnabled = searchOptions?.view !== "working-state" && !searchOptions?.threadQuery;
       const indexGaps: SemanticSearchResult["gaps"] = [...(indexReadFailures.get(key) ?? [])]
         .filter((path) => pathInRoots(path, searchOptions?.roots))
         .map((path) => ({ path, reason: "index-read-failed" as const }));
+      // One scope-level gap represents the inventory's coverage uncertainty.
+      // Expanding every unchanged file into a query result would make a large
+      // workspace's response scale with its file count even for a one-hit query.
+      const hasMetadataGap = diskIndexEnabled && [...(metadataUnverifiedPaths.get(key) ?? [])]
+        .some((path) => pathInRoots(path, searchOptions?.roots));
+      if (hasMetadataGap) indexGaps.push({ path: ".", reason: "index-watch-unavailable" });
       const store = storeFor(scope, embedder);
       const maskPaths = [
         ...overlays.map((overlay) => overlay.path),
@@ -754,6 +832,7 @@ export function createSemanticIndexRuntime(options: SemanticIndexRuntimeOptions)
         || store.lifecycle === "building"
         || store.lifecycle === "rebuilding"
         || (unverifiedPaths.get(key)?.size ?? 0) > 0
+        || (diskIndexEnabled && [...(metadataUnverifiedPaths.get(key) ?? [])].some((path) => pathInRoots(path, searchOptions?.roots)))
         || (mutationPending.get(scopeId)?.size ?? 0) > 0;
       return {
         status: {
@@ -788,6 +867,8 @@ export function createSemanticIndexRuntime(options: SemanticIndexRuntimeOptions)
     await drain();
     await Promise.allSettled([...stores.values()].map((store) => store.close()));
     stores.clear();
+    verifiedScanMetadata.clear();
+    metadataUnverifiedPaths.clear();
   };
 
   return {

@@ -629,14 +629,21 @@ Nested children reuse the same registry, Run, review, archive, and lost-resume
 path. Host restart resumes lost Runs for the snapshot session's owning Thread
 parent from the persisted session binding, so an execution-workspace snapshot
 cannot look up the wrong catalog.
-When dispatch carries dirty editor input, the runtime first clones the complete
-fixed surface snapshot into a persistent WorkingState draft baseline. Its id is
-frozen in the Thread launch manifest; queued or restarted Runs overlay the exact
-draft bytes into the branch base (and into a materialized directory only after a
-path-binding tool switches the Run) and use that effective state as branch
+When dispatch carries dirty editor input, the runtime materializes drafts belonging
+to the target root in a persistent WorkingState draft baseline. Independent external
+drafts become an immutable `agent.source-view` record and content objects in a
+private kernel store; the Thread manifest holds its view ID. A parent/child root
+alias of the same physical file resolves to the child's current branch version.
+Queued or restarted Runs overlay target-root draft bytes into the branch base
+(and into a materialized directory only after a path-binding tool switches the Run)
+and use that effective state as branch
 revision zero. Virtual publication reads the live branch head; materialized
 publication reads the directory. Merge and migration continue to read the selected
 fixed result. Draft-derived paths are checked even when Git ignores them.
+External fixed drafts remain readable after the parent surface snapshot retires;
+their writeback needs the external editor's own versioned target and is not
+misdirected into this Thread's single-root branch. Thread deletion releases the
+source view; startup reconciliation releases captures that never acquired a Thread.
 Configured `copyIgnored` roots are stored as branch `captureScopes`; nested
 children inherit or narrow that frozen list and do not reread live settings.
 Narrowed publication scans only those roots plus known changed paths, so ignored

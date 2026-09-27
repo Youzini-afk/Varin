@@ -736,6 +736,7 @@ impl Storage {
             "retrieval.artifact",
             "retrieval.receipt",
             "retrieval.evidence",
+            "agent.source-view",
             "recovery.metadata",
             "recovery.checkpoint",
             "recovery.change",

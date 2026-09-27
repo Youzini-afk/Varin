@@ -88,7 +88,11 @@ pub(crate) fn execute(mut task:Task,shared:&Shared,syntax:&mut SyntaxRuntime)->R
         if params.operation=="list"{
             if name_matcher.as_ref().is_some_and(|q|!path.to_lowercase().contains(q)){return Ok(true);}
             let kind=match &document.state{PathState::Directory{..}=>"directory",PathState::Symlink{..}=>"symlink",PathState::RegularFile{..}=>"file",_=>"unsupported"};
-            shared.emit("entry",path,revision,json!({"kind":kind,"state":document.state}))?;count+=1;
+            let mut data=json!({"kind":kind,"state":document.state});
+            if let Some(metadata)=document.metadata {
+                data["metadata"]=json!({"byteLength":metadata.byte_length.to_string(),"modifiedTimeNs":metadata.modified_time_ns});
+            }
+            shared.emit("entry",path,revision,data)?;count+=1;
         }else if let Some(bytes)=document.bytes{
             shared.scanned();found.insert(path.clone());
             if params.operation=="bytes"{

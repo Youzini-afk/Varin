@@ -199,6 +199,40 @@ describe("thread runtime", () => {
     return { input, thread, run };
   };
 
+  it("passes the immutable external source view into the child's first prompt", async () => {
+    const fixedContext = {
+      source: "surface" as const,
+      roots: [{ workspaceId: "external-root", dirtyPaths: ["draft.ts"] }],
+      snapshot: { status: "ready" as const, ref: "source-view:view-1" },
+    };
+    const fixedRuntime = createThreadRuntime({
+      registry,
+      sessions: sessionAdapter,
+      resolveWorkspaceRoot: async () => "/workspace",
+      resolveRuntimeWorkspaceId: async () => "runtime-workspace-1",
+      sourceViews: {
+        capture: async () => null,
+        contextFor: async (viewId) => viewId === "view-1" ? fixedContext : null,
+        release: async () => undefined,
+      },
+      worktrees: {
+        prepare: prepareWorktree,
+        snapshot: async (worktree) => worktree,
+        inspect: async () => ({ patch: "", untracked: [], changedFiles: [], diffStats: { files: 0, insertions: 0, deletions: 0 } }),
+        merge: async () => ({ merged: 0, conflicts: [], conflictState: "none", changedFiles: [], diffStats: { files: 0, insertions: 0, deletions: 0 } }),
+      },
+    });
+    try {
+      const input = { ...createInput(), sourceViewId: "view-1" };
+      const thread = await registry.createThread(input);
+      const run = await registry.startRun(WORKSPACE, thread.id);
+      await fixedRuntime.spawn({ ...input, threadId: thread.id, runId: run.id });
+      expect(sessionAdapter.prompt).toHaveBeenCalledWith("child-1", expect.any(String), undefined, undefined, fixedContext);
+    } finally {
+      await fixedRuntime.dispose();
+    }
+  });
+
   it("carries the frozen parent authority root through spawn validation", async () => {
     const parentRoot = join(dataDir, "parent");
     const childRoot = join(dataDir, "child");
@@ -396,7 +430,7 @@ describe("thread runtime", () => {
     }
   });
 
-  it("materializes a shared parent/child project draft once but rejects an independent external draft", async () => {
+  it("materializes the target draft and retains an independent external draft as a fixed source view", async () => {
     const created = vi.fn(() => ({ id: "draft-baseline" }));
     const removed = vi.fn();
     const workingStates = {
@@ -419,12 +453,23 @@ describe("thread runtime", () => {
       ...target,
       resource: { workspaceId: "nested-project", resourceId: "draft.ts" },
     };
+    const capturedViews: string[] = [];
+    const releasedViews: string[] = [];
     const draftRuntime = createThreadRuntime({
       registry,
       sessions: sessionAdapter,
       resolveWorkspaceRoot: async () => "/workspace",
       resolveRuntimeWorkspaceId: async () => WORKSPACE,
       workingStates,
+      sourceViews: {
+        capture: async () => {
+          const viewId = `view-${capturedViews.length + 1}`;
+          capturedViews.push(viewId);
+          return { viewId, context: { source: "surface" as const, roots: [], snapshot: { status: "ready" as const, ref: `source-view:${viewId}` } } };
+        },
+        contextFor: async () => null,
+        release: async (viewId) => { releasedViews.push(viewId); },
+      },
       cloneAgentInputSnapshot: () => ({ status: "ready", resources: [target, external], supersededResources: [] }),
       worktrees: {
         prepare: prepareWorktree,
@@ -444,14 +489,17 @@ describe("thread runtime", () => {
     try {
       const baseline = await draftRuntime.captureDraftBaseline("parent-1", WORKSPACE, inputContext);
       expect(baseline.draftBaselineId).toBe("draft-baseline");
+      expect(baseline.sourceViewId).toBe("view-1");
       expect(created).toHaveBeenCalledWith(WORKSPACE, [expect.objectContaining({ path: "nested/draft.ts" })]);
       await baseline.cleanup();
       expect(removed).toHaveBeenCalledWith("draft-baseline");
+      expect(releasedViews).toEqual(["view-1"]);
 
       external = { ...external, coordinationId: "another-physical-file" };
-      await expect(draftRuntime.captureDraftBaseline("parent-1", WORKSPACE, inputContext))
-        .rejects.toMatchObject({ code: "unavailable" });
-      expect(created).toHaveBeenCalledTimes(1);
+      const second = await draftRuntime.captureDraftBaseline("parent-1", WORKSPACE, inputContext);
+      expect(second.sourceViewId).toBe("view-2");
+      expect(created).toHaveBeenCalledTimes(2);
+      await second.cleanup();
     } finally {
       await draftRuntime.dispose();
     }

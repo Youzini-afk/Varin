@@ -478,8 +478,8 @@ export interface HarnessServiceHost {
   /** Dirty paths this turn's fixed source still owns (D-088). */
   agentInputDraftPaths?: (sessionId: string, context: import("@varin/protocol").AgentInputContext, workspaceId: string) => readonly string[];
   agentInputSurfaceOwner?: import("../documents/authority.js").DocumentAuthority["agentInputSurfaceOwner"];
-  commitAgentInputContext: (sessionId: string, context: import("@varin/protocol").AgentInputContext) => { committed: boolean };
-  releaseAgentInputContext: (sessionId: string, context: import("@varin/protocol").AgentInputContext) => { released: boolean };
+  commitAgentInputContext: (sessionId: string, context: import("@varin/protocol").AgentInputContext) => { committed: boolean } | Promise<{ committed: boolean }>;
+  releaseAgentInputContext: (sessionId: string, context: import("@varin/protocol").AgentInputContext) => { released: boolean } | Promise<{ released: boolean }>;
   verification: VerificationCoordinator;
   // Phase 4: experiment execution and resource facts (7C/7D, D-300)
   experimentService: import("./experiments.js").ExperimentService | null;

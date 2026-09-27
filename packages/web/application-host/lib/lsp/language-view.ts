@@ -1,10 +1,11 @@
 import type { AgentInputContext } from '@varin/protocol';
 import type { DocumentAuthority } from '../documents/authority.js';
+import type { HarnessDocumentReadSource } from '../harness/service-host.js';
 import { AGENT_LANGUAGE_VIEW, type createLanguageSupervisor } from './supervisor.js';
 
 type LanguageSupervisor = Pick<ReturnType<typeof createLanguageSupervisor>, 'syncDocument'>;
 
-export type LanguageTextSource = 'disk' | 'surface-draft';
+export type LanguageTextSource = 'disk' | 'surface-draft' | 'working-branch';
 
 export interface BoundLanguageDocument {
   status: 'bound';
@@ -30,6 +31,7 @@ export interface BindLanguageDocumentInput {
 interface LanguageViewBinderDeps {
   documents: Pick<DocumentAuthority, 'read' | 'readAgentInputSnapshot'>;
   supervisor: LanguageSupervisor;
+  readSource?: HarnessDocumentReadSource;
 }
 
 const recordOf = (value: unknown): Record<string, unknown> => (
@@ -49,8 +51,16 @@ export function createLanguageViewBinder(deps: LanguageViewBinderDeps) {
   ): Promise<{ content: string; revision: string; source: LanguageTextSource } | { status: 'unavailable'; message: string }> => {
     const resource = { workspaceId: input.workspaceId, resourceId: input.resourceId };
     if (input.text === 'input-context' && input.sessionId && input.inputContext) {
-      const draft = deps.documents.readAgentInputSnapshot(input.sessionId, input.inputContext, input.resourceId, input.workspaceId);
+      const draft = deps.readSource
+        ? await deps.readSource(input.sessionId, input.inputContext, input.resourceId, input.workspaceId)
+        : deps.documents.readAgentInputSnapshot(input.sessionId, input.inputContext, input.resourceId, input.workspaceId);
       if (draft.status === 'unavailable') return draft;
+      if (draft.status === 'working-branch') {
+        if (draft.message || draft.missing || draft.base64 === undefined) {
+          return { status: 'unavailable', message: draft.message ?? 'The working-branch document is missing' };
+        }
+        return { content: Buffer.from(draft.base64, 'base64').toString('utf8'), revision: draft.revision, source: 'working-branch' };
+      }
       if (draft.status === 'ready') {
         return { content: draft.content, revision: draft.revision, source: 'surface-draft' };
       }

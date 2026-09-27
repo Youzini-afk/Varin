@@ -112,6 +112,13 @@ it("R5 native directory inventory applies Git ignore rules while retaining force
   await fs.writeFile(path.join(f.workspace,".gitignore"),"generated/\n");
   execFileSync("git",["init","--quiet"],{cwd:f.workspace,stdio:"ignore"});
   execFileSync("git",["add","-f","--","generated/tracked.ts"],{cwd:f.workspace,stdio:"ignore"});
+  const inventory=await f.service.directory(f.workspace,{operation:"list",lane:"background",respectGitignore:true,includeTracked:true});
+  const inventoryFiles=inventory.records.filter(r=>r.kind==="entry"&&(data(r).kind==="file"));
+  const inventoryTracked=inventoryFiles.find(r=>r.path==="generated/tracked.ts");
+  const metadata=data(inventoryTracked!).metadata as {byteLength:string;modifiedTimeNs:string};
+  assert.equal(inventoryTracked?.revision,"");
+  assert.equal(metadata.byteLength,String(Buffer.byteLength("export const tracked = 1;\n")));
+  assert.ok(metadata.modifiedTimeNs);
   const listed=await f.service.directory(f.workspace,{operation:"list",lane:"background",respectGitignore:true,includeTracked:true,includeRevisions:true});
   const paths=listed.records.filter(r=>r.kind==="entry"&&(data(r).kind==="file")).map(r=>r.path).sort();
   assert.ok(paths.includes("src/a.ts"),JSON.stringify(paths));

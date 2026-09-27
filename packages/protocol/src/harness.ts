@@ -270,7 +270,7 @@ export interface DiagnosticItem {
 }
 
 /** Which text a Host language answer was computed from (D-087). */
-export type LanguageTextProvenance = "disk" | "surface-draft";
+export type LanguageTextProvenance = "disk" | "surface-draft" | "working-branch";
 
 export interface DiagnosticsResult {
   observationRef?: string;
@@ -430,7 +430,7 @@ export interface SearchResultItem {
  * Pi runtime; surface drafts are returned as save-compatible bytes by the
  * authenticated Application Host.
  */
-export type WorkingBranchPathOrigin = "base" | "delta" | "draft-base";
+export type WorkingBranchPathOrigin = "base" | "delta" | "draft-base" | "materialized";
 
 export interface WorkingBranchReadProvenance {
   branchId: string;
@@ -469,7 +469,7 @@ export interface DocumentPathOverlayParams {
 
 export type DocumentPathOverlayResult =
   | { status: "disk" }
-  | { status: "ready"; entries: DocumentPathOverlayEntry[]; authority?: "surface" | "working-branch" };
+  | { status: "ready"; entries: DocumentPathOverlayEntry[]; removedPaths?: string[]; authority?: "surface" | "working-branch" };
 
 /**
  * Whether a native `write` / `edit` / `apply_patch` may proceed on one path.

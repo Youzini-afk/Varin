@@ -78,6 +78,27 @@ describe("surface-aware native find and ls", () => {
     }
   });
 
+  it("hides a disk alias deleted in the child's fixed working view", async () => {
+    const root = await mkdtemp(path.join(tmpdir(), "varin-find-ls-removed-alias-"));
+    await writeFile(path.join(root, "removed.ts"), "stale disk\n", "utf8");
+    await writeFile(path.join(root, "keep.ts"), "keep disk\n", "utf8");
+    const bridge = {
+      request: async () => ({ status: "ready" as const, entries: [], removedPaths: ["removed.ts"] }),
+    } as unknown as HostServicesBridge;
+    try {
+      const listed = await createSurfaceAwareLsTool(bridge, root).execute("ls", {}, undefined, undefined, context);
+      const lsText = (listed.content[0] as { text: string }).text;
+      assert.match(lsText, /keep\.ts/);
+      assert.doesNotMatch(lsText, /removed\.ts/);
+      const found = await createSurfaceAwareFindTool(bridge, root).execute("find", { pattern: "*.ts" }, undefined, undefined, context);
+      const findText = (found.content[0] as { text: string }).text;
+      assert.match(findText, /keep\.ts/);
+      assert.doesNotMatch(findText, /removed\.ts/);
+    } finally {
+      await rm(root, { recursive: true, force: true });
+    }
+  });
+
   it("keeps native directories and bracketed filenames while merging fixed paths", async () => {
     const root = await mkdtemp(path.join(tmpdir(), "varin-find-ls-merge-"));
     await writeFile(path.join(root, "[disk].ts"), "disk\n", "utf8");

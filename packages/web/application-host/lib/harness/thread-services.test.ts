@@ -459,6 +459,31 @@ describe("thread services", () => {
     expect(cleanup).toHaveBeenCalledOnce();
   });
 
+  it("persists an external fixed source view in the child launch manifest", async () => {
+    const dataDir = mkdtempSync(join(tmpdir(), "thread-source-view-dispatch-"));
+    const registry = createThreadRegistry({ dataDir, hostId: "host-1" });
+    const cleanup = vi.fn(async () => undefined);
+    const service = dispatchService({
+      threadRegistry: registry,
+      threadSpawnSession: vi.fn(async () => ({ sessionId: "child-source-session" })),
+      threadCaptureDraftBaseline: vi.fn(async () => ({ draftBaselineId: null, sourceViewId: "fixed-external-view", cleanup })),
+      threadPrepareIsolatedBranch: prepareIsolatedBranch,
+    } as never);
+    try {
+      const result = await service.handle({ preset: "hard-implement", task: "Read the external draft" }, serviceContext({
+        source: "surface",
+        roots: [{ workspaceId: "external-root", dirtyPaths: ["draft.ts"] }],
+        snapshot: { status: "ready", ref: "parent-snapshot" },
+      }));
+      const thread = await registry.getThreadById("workspace-1", result.threadId);
+      expect(thread?.manifest.sourceViewId).toBe("fixed-external-view");
+      expect(cleanup).not.toHaveBeenCalled();
+    } finally {
+      await registry.dispose();
+      rmSync(dataDir, { force: true, recursive: true });
+    }
+  });
+
   it("parents a nested dispatch to the owning Thread and reuses its concurrency queue", async () => {
     const dataDir = mkdtempSync(join(tmpdir(), "thread-nested-dispatch-"));
     const registry = createThreadRegistry({ dataDir, hostId: "host-1" });

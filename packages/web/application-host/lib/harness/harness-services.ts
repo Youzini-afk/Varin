@@ -614,6 +614,9 @@ export function createDocumentPathOverlayService(
       return {
         status: "ready",
         entries,
+        ...("removedPaths" in snapshot && snapshot.removedPaths?.length
+          ? { removedPaths: snapshot.removedPaths.filter(isOverlayRelativePath).map(normalizeGlobPath) }
+          : {}),
         ...("authority" in snapshot && snapshot.authority ? { authority: snapshot.authority } : {}),
       };
     },

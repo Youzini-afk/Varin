@@ -28,6 +28,7 @@ const makeOperations = (
 ): LsOperations => {
   const exclusive = overlay.authority === "working-branch";
   const nodes = new Map<string, OverlayNode>();
+  const removed = new Set((overlay.removedPaths ?? []).map((relative) => pathKey(path.resolve(rootPath, relative))));
   const addNode = (absolutePath: string, kind: OverlayNode["kind"]): void => {
     const normalized = path.resolve(absolutePath);
     const key = pathKey(normalized);
@@ -60,6 +61,11 @@ const makeOperations = (
   const stat = async (absolutePath: string): Promise<{ isDirectory: () => boolean }> => {
     throwIfAborted();
     const normalized = path.resolve(absolutePath);
+    if (removed.has(pathKey(normalized))) {
+      const error = new Error(`ENOENT: ${normalized}`) as NodeJS.ErrnoException;
+      error.code = "ENOENT";
+      throw error;
+    }
     const node = findNode(normalized);
     if (node) return { isDirectory: () => node.kind === "directory" };
     if (exclusive) {
@@ -76,6 +82,7 @@ const makeOperations = (
   return {
     exists: async (absolutePath) => {
       throwIfAborted();
+      if (removed.has(pathKey(path.resolve(absolutePath)))) return false;
       if (findNode(absolutePath)) return true;
       if (exclusive) return false;
       try {
@@ -93,7 +100,7 @@ const makeOperations = (
       if (!exclusive) {
         try {
           for (const name of await fs.readdir(normalized)) {
-            names.set(pathKey(name), name);
+            if (!removed.has(pathKey(path.resolve(normalized, name)))) names.set(pathKey(name), name);
           }
         } catch (error) {
           if ((error as NodeJS.ErrnoException)?.code !== "ENOENT"

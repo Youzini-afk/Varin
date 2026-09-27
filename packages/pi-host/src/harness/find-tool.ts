@@ -146,6 +146,7 @@ export function createSurfaceAwareFindTool(
         if (normalized) merged.set(pathKey(normalized), { path: normalized, kind: candidate.kind });
       }
       for (const candidate of fixedPaths) merged.set(pathKey(candidate.path), candidate);
+      for (const removed of overlay.removedPaths ?? []) merged.delete(pathKey(removed));
       const sorted = sortPaths([...merged.values()]);
       if (sorted.length === 0) {
         return {

@@ -135,6 +135,7 @@ export interface CreateThreadInput {
   carryBlocks?: boolean;
   concurrency: number;
   draftBaselineId?: string;
+  sourceViewId?: string;
   /** How the first Run's input is constructed; `inherit` requires inheritedContext. */
   inputOrigin?: "task" | "inherit";
   inheritedContext?: ThreadInheritedContext;
@@ -525,6 +526,7 @@ const isLaunchManifest = (value: unknown): value is ThreadLaunchManifest => (
   && typeof value.carryBlocks === "boolean"
   && Number.isSafeInteger(value.concurrency) && Number(value.concurrency) > 0
   && (value.draftBaselineId === null || (isString(value.draftBaselineId) && value.draftBaselineId.length > 0))
+  && (value.sourceViewId === undefined || (isString(value.sourceViewId) && value.sourceViewId.length > 0))
   && (value.inputOrigin === undefined || value.inputOrigin === "task" || value.inputOrigin === "inherit")
   && (value.inheritedContext === undefined || isInheritedContext(value.inheritedContext))
   && (value.initialAuthorityRoot === undefined || isString(value.initialAuthorityRoot))
@@ -1426,6 +1428,7 @@ export function createThreadRegistry(options: ThreadRegistryOptions) {
           carryBlocks: input.carryBlocks ?? true,
           concurrency: input.concurrency,
           draftBaselineId: input.draftBaselineId ?? null,
+          ...(input.sourceViewId ? { sourceViewId: input.sourceViewId } : {}),
           ...(input.inputOrigin !== undefined ? { inputOrigin: input.inputOrigin } : {}),
           ...(input.inheritedContext !== undefined ? { inheritedContext: structuredClone(input.inheritedContext) } : {}),
           ...(input.initialAuthorityRoot !== undefined ? { initialAuthorityRoot: input.initialAuthorityRoot } : {}),

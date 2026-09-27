@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it } from "vitest";
-import { writeFileSync, unlinkSync } from "node:fs";
+import { writeFileSync, unlinkSync, statSync, utimesSync } from "node:fs";
 import { join } from "node:path";
 import { createDocumentAuthorityHarness } from "../../documents/contract-fixtures.js";
 import type { WorkingBranchQuerySnapshot } from "../../harness/working-state/working-branch-query.js";
@@ -152,12 +152,13 @@ describe("semantic index runtime", () => {
     disposes.push(() => documents.cleanup());
     const filePath = join(documents.workspaceRoot, "changed.ts");
     writeFileSync(filePath, 'export function changed() { return "old indexed needle"; }\n', "utf8");
+    const originalStat = statSync(filePath);
     const runtime = createSemanticIndexRuntime({
       dataDir: documents.dataDir,
       hostId: "semantic-hit-version",
       documents: documents.authority,
       structureSource: parsingSource(),
-      searchFilesystemFiles: async () => [{ name: "changed.ts", path: filePath, relativePath: "changed.ts" }],
+      searchFilesystemFiles: async () => [{ name: "changed.ts", path: filePath, relativePath: "changed.ts", metadata: { byteLength: String(originalStat.size), modifiedTimeNs: "same-stat" } }],
       embedder: createHashEmbedder(),
     });
     disposes.push(() => runtime.dispose());
@@ -165,12 +166,67 @@ describe("semantic index runtime", () => {
     await runtime.scanScope(scope);
     expect((await runtime.search(scope, "old indexed needle", 8)).hits[0]?.documentId).toBe("changed.ts");
 
-    writeFileSync(filePath, 'export function changed() { return "new body"; }\n', "utf8");
+    writeFileSync(filePath, 'export function changed() { return "new indexed phrase"; }\n', "utf8");
+    utimesSync(filePath, originalStat.atime, originalStat.mtime);
+    await runtime.scanScope(scope);
     const result = await runtime.search(scope, "old indexed needle", 8);
 
     expect(result.hits).toEqual([]);
     expect(result.status.status).toBe("incomplete");
     expect(result.gaps).toContainEqual({ path: "changed.ts", reason: "content-changed" });
+    await runtime.drain();
+    expect((await runtime.search(scope, "new indexed phrase", 8)).hits[0]?.body).toContain("new indexed phrase");
+  });
+
+  it("uses inventory metadata to skip stable bodies while discovering a new file", async () => {
+    const documents = await createDocumentAuthorityHarness();
+    disposes.push(() => documents.cleanup());
+    const oldPath = join(documents.workspaceRoot, "old.ts");
+    const newPath = join(documents.workspaceRoot, "new.ts");
+    writeFileSync(oldPath, 'export const oldValue = "existing marker";\n', "utf8");
+    const metadata = { byteLength: String(Buffer.byteLength('export const oldValue = "existing marker";\n')), modifiedTimeNs: "stable" };
+    let inventory = [{ name: "old.ts", path: oldPath, relativePath: "old.ts", metadata }];
+    const native = parsingSource();
+    const processed: string[] = [];
+    const runtime = createSemanticIndexRuntime({
+      dataDir: documents.dataDir,
+      hostId: "semantic-metadata-inventory",
+      documents: documents.authority,
+      structureSource: {
+        ...native,
+        unitsFile: async (request) => {
+          processed.push(request.path);
+          return native.unitsFile!(request);
+        },
+      },
+      searchFilesystemFiles: async (_root, request) => {
+        expect(request.includeRevisions).toBeUndefined();
+        return inventory;
+      },
+      embedder: createHashEmbedder(),
+    });
+    disposes.push(() => runtime.dispose());
+    const scope = workspaceScope(documents.identity.workspaceId);
+
+    await runtime.scanScope(scope);
+    inventory = [
+      ...inventory,
+      { name: "new.ts", path: newPath, relativePath: "new.ts", metadata: { byteLength: String(Buffer.byteLength('export const newValue = "newly discovered marker";\n')), modifiedTimeNs: "new" } },
+    ];
+    writeFileSync(newPath, 'export const newValue = "newly discovered marker";\n', "utf8");
+    await runtime.scanScope(scope);
+
+    expect(processed).toEqual(["old.ts", "new.ts"]);
+    const found = await runtime.search(scope, "newly discovered marker", 1);
+    expect(found.hits[0]?.documentId).toBe("new.ts");
+    expect(found.gaps).toContainEqual({ path: ".", reason: "index-watch-unavailable" });
+    expect(found.status.coverage).toBe("partial");
+    expect(found.status.status).toBe("incomplete");
+    await runtime.scanScope(scope, { forceContentVerification: true });
+    expect(processed).toEqual(["old.ts", "new.ts", "old.ts", "new.ts"]);
+    const verified = await runtime.search(scope, "newly discovered marker", 1);
+    expect(verified.status.coverage).toBe("complete");
+    expect(verified.gaps).toEqual([]);
   });
 
   it("increments from Documents revisions and can sit at partial coverage", async () => {

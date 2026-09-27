@@ -2,7 +2,7 @@ import { afterEach, describe, expect, it, vi } from 'vitest';
 import fs from 'node:fs';
 import path from 'node:path';
 import type { PiRuntimeBrokerEvent } from '@varin/runtime-broker';
-import type { HarnessInferenceBindingSnapshot, HarnessRerankSettings, PiSettingsSnapshot } from '@varin/protocol';
+import type { AgentInputContext, HarnessInferenceBindingSnapshot, HarnessRerankSettings, PiSettingsSnapshot } from '@varin/protocol';
 import { createDocumentAuthorityHarness } from '../../documents/contract-fixtures.js';
 import { ThreadExecutionViewRegistry } from '../../harness/working-state/execution-view.js';
 import { createStructureSource } from '../../structure/source.js';
@@ -31,6 +31,7 @@ async function setup(hooks: {
   describe?: () => Promise<HarnessInferenceBindingSnapshot>;
   watch?: (id: string) => Promise<void>;
   pinQuery?: WorkspaceSemanticRuntimeOptions['workingBranches']['pinQuery'];
+  readDraft?: WorkspaceSemanticRuntimeOptions['readDraft'];
 } = {}) {
   const documents = await createDocumentAuthorityHarness();
   disposes.push(() => documents.cleanup());
@@ -66,12 +67,39 @@ async function setup(hooks: {
     configCwd: documents.dataDir,
     getBroker: () => broker,
     executionViews, workingBranches: { pinQuery: hooks.pinQuery ?? (async () => null) },
+    ...(hooks.readDraft ? { readDraft: hooks.readDraft } : {}),
   });
   disposes.push(() => runtime.dispose());
   return { runtime, workspaceId: documents.identity.workspaceId, embedded, removedWatches, reranked, executionViews, requestCwds, documents };
 }
 
 describe('production workspace semantic assembly lifecycle', () => {
+  it('uses the injected asynchronous draft reader for fixed semantic overlays', async () => {
+    const readDraft = vi.fn(async (_sessionId: string, _context: AgentInputContext, resourceId: string, _workspaceId: string) => ({
+      status: 'ready' as const,
+      content: 'export const sourceViewValue = "fixed external draft";',
+      revision: `source-view:${resourceId}`,
+      source: 'working-branch' as const,
+      encoding: 'utf-8',
+      bom: false,
+    }));
+    const harness = await setup({ readDraft });
+    const workspaceId = harness.workspaceId;
+    const inputContext: AgentInputContext = {
+      source: 'surface',
+      roots: [{ workspaceId, dirtyPaths: ['draft.ts'] }],
+      snapshot: { status: 'ready', ref: 'source-view:view-1' },
+    };
+
+    const result = await harness.runtime.semanticRecall(harness.workspaceId, 'fixed external draft', 5, {
+      sessionId: 'subtask',
+      inputContext,
+    });
+
+    expect(readDraft).toHaveBeenCalledWith('subtask', inputContext, 'draft.ts', workspaceId);
+    expect(result.gaps ?? []).not.toContainEqual({ path: 'draft.ts', reason: 'draft-unavailable' });
+  });
+
   it('does not search a disk corpus when the active virtual branch cannot be pinned', async () => {
     const harness = await setup();
     harness.executionViews.bind({

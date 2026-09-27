@@ -73,7 +73,7 @@ export interface SurfaceSnapshotOverlayEntry {
 
 export type SurfaceSnapshotOverlayResult =
   | { status: 'disk' }
-  | { status: 'ready'; entries: SurfaceSnapshotOverlayEntry[] }
+  | { status: 'ready'; entries: SurfaceSnapshotOverlayEntry[]; removedPaths?: string[] }
   | { status: 'unavailable'; message: string };
 
 export type SurfaceSnapshotCloneResult =

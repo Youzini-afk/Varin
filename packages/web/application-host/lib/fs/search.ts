@@ -2,6 +2,7 @@ import pathModule from "node:path";
 import type { KernelComputeService } from "../kernel/compute-service.js";
 import type { FileSearchItem, FileSearchItems, PathModule } from "./types.js";
 const EXCLUDED = ["node_modules", ".git", "dist", "build", ".next", ".turbo", ".cache", "coverage", "tmp", "logs"];
+type FileMetadata = { byteLength: string; modifiedTimeNs: string };
 const fuzzyMatchScoreNormalized = (normalizedQuery: string, candidate: string): number | null => {
   if (!normalizedQuery) return 0;
 
@@ -77,7 +78,7 @@ export const createFsSearchRuntime = ({ compute, path = pathModule }: {
     respectGitignore?: boolean;
     signal?: AbortSignal;
   }): Promise<FileSearchItems> => {
-    const candidates:Array<FileSearchItem & {score:number}>=[];
+    const candidates:Array<FileSearchItem & {score:number;metadata?:FileMetadata}>=[];
     const query=options.query.trim().toLowerCase();
     const result=await compute.directory(rootPath,{operation:"list",lane:query?"foreground":"background",
       includeTracked:true,respectGitignore:options.respectGitignore!==false,includeHidden:options.includeHidden??false,excludeDirectories:EXCLUDED,
@@ -87,7 +88,11 @@ export const createFsSearchRuntime = ({ compute, path = pathModule }: {
         if(record.kind!=="entry"||(record.data as {kind?:unknown}).kind!=="file")continue;
         const score=fuzzyMatchScoreNormalized(query,record.path);if(score===null)continue;
         const name=path.basename(record.path),extension=name.includes(".")?name.split(".").pop()?.toLowerCase():undefined;
-        candidates.push({name,path:path.join(rootPath,record.path),relativePath:record.path,revision:record.revision,score,...(extension?{extension}:{})});
+        const rawMetadata=(record.data as {metadata?:{byteLength?:unknown;modifiedTimeNs?:unknown}}).metadata;
+        const metadata=typeof rawMetadata?.byteLength==="string"&&typeof rawMetadata.modifiedTimeNs==="string"
+          ?{byteLength:rawMetadata.byteLength,modifiedTimeNs:rawMetadata.modifiedTimeNs}:undefined;
+        candidates.push({name,path:path.join(rootPath,record.path),relativePath:record.path,score,
+          ...(record.revision?{revision:record.revision}:{}),...(metadata?{metadata}:{}),...(extension?{extension}:{})});
       }
     }});
     options.signal?.throwIfAborted();

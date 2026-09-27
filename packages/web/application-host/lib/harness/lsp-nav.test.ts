@@ -140,6 +140,28 @@ describe("LSP navigation services", () => {
     }));
   });
 
+  it("binds an aliased child working-branch source through the shared read callback", async () => {
+    const deps = createDeps();
+    const readSource = vi.fn(async () => ({
+      status: "working-branch" as const,
+      base64: Buffer.from("export const value = 3;").toString("base64"),
+      revision: "working-branch:child@4",
+      provenance: { branchId: "child", revision: 4, origin: "delta" as const },
+    }));
+    const services = createLspNavigationServices({ ...deps, readSource } as never);
+    const fixedContext = {
+      ...context,
+      inputContext: { source: "surface" as const, roots: [{ workspaceId: "workspace-1", dirtyPaths: ["src/a.ts"] }], snapshot: { status: "ready" as const, ref: "source-view:fixed" } },
+    };
+    const result = await services.hover.handle({ path: "src/a.ts", line: 1 }, fixedContext);
+    expect(result).toMatchObject({ status: "ready", revision: "working-branch:child@4", source: "working-branch" });
+    expect(readSource).toHaveBeenCalledWith(context.sessionId, fixedContext.inputContext, "src/a.ts", "workspace-1");
+    expect(deps.documents.read).not.toHaveBeenCalled();
+    expect(deps.supervisor.syncDocument).toHaveBeenCalledWith(expect.objectContaining({
+      content: "export const value = 3;", contentRevision: "working-branch:child@4",
+    }));
+  });
+
   it("never falls back to disk when a known dirty path has no fixed draft", async () => {
     const deps = createDeps();
     deps.documents.readAgentInputSnapshot = vi.fn(() => ({
