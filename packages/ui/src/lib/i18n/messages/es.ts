@@ -2524,6 +2524,8 @@ export const dict: Record<I18nKey, string> = {
   "chat.piComposer.submission.failed": "No enviado",
   "chat.piAssistant.working": "Procesando",
   "chat.compaction.inProgress": "Comprimiendo el contexto…",
+  "chat.compaction.ready": "Resumen listo; se aplicará cuando el contexto necesite espacio",
+  "chat.compaction.failed": "Error al comprimir el contexto",
   "chat.compaction.thinking": "Razonamiento",
   "chat.piComposer.agent.imageUnsupported": "El agente seleccionado no puede recibir imágenes adjuntas. Elimina las imágenes o usa Pi.",
   'chat.piComposer.pdfAttachment.uploadFailed': 'Could not upload {name}.',

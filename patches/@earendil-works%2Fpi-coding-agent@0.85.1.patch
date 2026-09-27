@@ -62,3 +62,31 @@ diff --git a/dist/core/session-cwd.js b/dist/core/session-cwd.js
      const issue = getMissingSessionCwdIssue(sessionManager, fallbackCwd);
      if (issue) {
          throw new MissingSessionCwdError(issue);
+diff --git a/dist/core/agent-session.d.ts b/dist/core/agent-session.d.ts
+--- a/dist/core/agent-session.d.ts
++++ b/dist/core/agent-session.d.ts
+@@ -156,6 +156,8 @@ export interface PromptOptions {
+     source?: InputSource;
+     /** Internal hook used by RPC mode to observe prompt preflight acceptance or rejection. */
+     preflightResult?: (success: boolean) => void;
++    /** Let the host-owned request boundary handle context capacity after the run starts. */
++    skipPrePromptCompaction?: boolean;
+ }
+ /** Options for model/thinking mutations. */
+ export interface ModelMutationOptions {
+diff --git a/dist/core/agent-session.js b/dist/core/agent-session.js
+--- a/dist/core/agent-session.js
++++ b/dist/core/agent-session.js
+@@ -891,7 +891,9 @@ export class AgentSession {
+             // Check if we need to compact before sending (catches aborted responses).
+             // The user's new prompt is sent below, so do not call agent.continue() here.
+-            const lastAssistant = this._findLastAssistantMessage();
+-            if (lastAssistant) {
+-                await this._checkCompaction(lastAssistant, false);
++            if (!options?.skipPrePromptCompaction) {
++                const lastAssistant = this._findLastAssistantMessage();
++                if (lastAssistant) {
++                    await this._checkCompaction(lastAssistant, false);
++                }
+             }
+             // Build messages array (custom message if any, then user message)

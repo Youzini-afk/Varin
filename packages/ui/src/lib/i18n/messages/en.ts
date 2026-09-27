@@ -2437,6 +2437,8 @@ export const dict = {
   'chat.piComposer.submission.failed': 'Not sent',
   'chat.piAssistant.working': 'Working',
   'chat.compaction.inProgress': 'Compacting context…',
+  'chat.compaction.ready': 'Summary ready; applies when the context needs space',
+  'chat.compaction.failed': 'Context compaction failed',
   'chat.compaction.thinking': 'Thinking',
   'chat.piComposer.agent.imageUnsupported': 'The selected Agent cannot receive image attachments. Remove the images or use Pi.',
   'chat.piComposer.pdfAttachment.uploadFailed': 'Could not upload {name}.',

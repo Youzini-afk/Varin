@@ -2259,6 +2259,8 @@ export const dict = {
   'chat.piComposer.submission.failed': 'Non envoyé',
   'chat.piAssistant.working': 'Traitement',
   'chat.compaction.inProgress': 'Compression du contexte…',
+  'chat.compaction.ready': 'Résumé prêt ; appliqué quand le contexte aura besoin de place',
+  'chat.compaction.failed': 'Échec de la compression du contexte',
   'chat.compaction.thinking': 'Réflexion',
   'chat.piComposer.agent.imageUnsupported': 'L’agent sélectionné ne peut pas recevoir d’images. Supprimez-les ou utilisez Pi.',
   'chat.piComposer.pdfAttachment.uploadFailed': 'Could not upload {name}.',

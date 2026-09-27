@@ -1421,6 +1421,10 @@ export class SessionHost {
       const run = session.prompt(text, {
         ...(images === undefined ? {} : { images: toImages(images) }),
         preflightResult: accept,
+        // The Varin request boundary handles capacity after agent_start. Pi's
+        // native pre-prompt check can run a full model compaction before the
+        // user message is accepted, leaving the UI stuck at "sending".
+        skipPrePromptCompaction: true,
         source: "interactive",
       });
       const accepted = await Promise.race([preflight, run.then(() => false)]);
@@ -1660,6 +1664,15 @@ export class SessionHost {
       });
     }
     return wasBusy;
+  }
+
+  prepareCompaction(sessionId: string, customInstructions?: string): { taskId: string; status: "preparing" | "ready" } {
+    this.assertSession(sessionId);
+    const preparation = this.#contextPreparation;
+    if (!preparation) throw new HostError("compaction_unavailable", "Context preparation is unavailable for this session");
+    const result = preparation.prepareManual(customInstructions);
+    this.#emit("compaction.trace", { sessionId, taskId: result.taskId, type: "requested", manual: true, phase: result.status });
+    return result;
   }
 
   async compact(sessionId: string, customInstructions?: string) {
@@ -2159,7 +2172,7 @@ export class SessionHost {
     }
     const compact = /^\/compact(?:\s+([\s\S]*))?$/i.exec(command.trim());
     if (compact) {
-      return toJsonValue(await this.compact(sessionId, compact[1]?.trim() || undefined));
+      return toJsonValue(this.prepareCompaction(sessionId, compact[1]?.trim() || undefined));
     }
     await this.session.prompt(command);
     return { executed: true };
@@ -3581,6 +3594,21 @@ export class SessionHost {
                     if (this.#contextConfigReader !== undefined) {
                       this.#clearContextFailure(phase);
                     }
+                  },
+                  onManualReady: (taskId) => {
+                    if (this.sessionId) this.#emit("compaction.trace", {
+                      sessionId: this.sessionId, taskId, type: "finished",
+                    });
+                  },
+                  onManualCommitted: (taskId) => {
+                    if (this.sessionId) this.#emit("compaction.trace", {
+                      sessionId: this.sessionId, taskId, type: "committed",
+                    });
+                  },
+                  onManualFailed: (taskId, message) => {
+                    if (this.sessionId) this.#emit("compaction.trace", {
+                      sessionId: this.sessionId, taskId, type: "failed", message,
+                    });
                   },
                 });
                 this.#contextPreparation = contextPreparation;

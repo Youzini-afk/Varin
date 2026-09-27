@@ -552,11 +552,14 @@ export const PiTimeline: React.FC<PiTimelineProps> = (props) => {
   ]);
   const endBreathingSpace = React.useMemo(() => (
     <>
-      {props.compactionPending ? (
+      {props.compactionStatus ? (
         <div className="chat-message-column py-1.5">
           <button type="button" className="flex w-full items-center gap-2 rounded-lg border border-border/60 bg-muted/20 px-3 py-2 text-left typography-meta hover:bg-interactive-hover" onClick={props.onOpenCompaction}>
-            <Icon name="loader-4" className="size-3.5 animate-spin" />
-            {t('chat.compaction.inProgress')}
+            <Icon name={props.compactionStatus === 'failed' ? 'error-warning'
+              : props.compactionStatus === 'ready' ? 'check' : 'loader-4'}
+              className={cn('size-3.5', (props.compactionStatus === 'requested' || props.compactionStatus === 'running') && 'animate-spin')} />
+            {props.compactionStatus === 'failed' ? t('chat.compaction.failed')
+              : props.compactionStatus === 'ready' ? t('chat.compaction.ready') : t('chat.compaction.inProgress')}
             <span className="ml-auto text-primary">{t('harness.threads.transcript')}</span>
           </button>
         </div>
@@ -569,7 +572,7 @@ export const PiTimeline: React.FC<PiTimelineProps> = (props) => {
         data-pi-timeline-end-space="true"
       />
     </>
-  ), [isMobile, props.compactionPending, props.onOpenCompaction, t]);
+  ), [isMobile, props.compactionStatus, props.onOpenCompaction, t]);
 
   const releaseAutomationForIntent = React.useCallback((intent: PiTimelineScrollIntent) => {
     if (!shouldReleasePiTimelineFollow(modeRef.current, atEndRef.current, intent)) return;

@@ -2412,6 +2412,8 @@ export const dict: Record<I18nKey, string> = {
   'chat.piComposer.submission.failed': '未傳送',
   'chat.piAssistant.working': '處理中',
   'chat.compaction.inProgress': '正在壓縮上下文…',
+  'chat.compaction.ready': '摘要已準備，將在上下文需要空間時套用',
+  'chat.compaction.failed': '上下文壓縮失敗',
   'chat.compaction.thinking': '思考過程',
   'chat.piComposer.agent.imageUnsupported': '所選智慧體無法接收圖片附件。請移除圖片或改用 Pi。',
   'chat.piComposer.pdfAttachment.uploadFailed': '無法上傳 {name}。',

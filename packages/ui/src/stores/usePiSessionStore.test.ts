@@ -1626,11 +1626,7 @@ describe('Pi session store', () => {
     const runtime = new FakeRuntime();
     runtime.handler = (method) => {
       if (method === 'agent.compact') {
-        return {
-          firstKeptEntryId: 'entry-kept',
-          summary: 'Earlier work and the active constraints.',
-          tokensBefore: 12000,
-        };
+        return { taskId: 'manual-1', status: 'preparing' };
       }
       throw new Error(`Unexpected ${method}`);
     };
@@ -1641,7 +1637,8 @@ describe('Pi session store', () => {
       'Keep the migration decision and the remaining validation step.',
     );
 
-    expect(result.summary).toContain('active constraints');
+    expect(result).toEqual({ taskId: 'manual-1', status: 'preparing' });
+    expect(store.getState().records['session-a']?.compactionTraces?.['manual-1']?.manual).toBe(true);
     expect(runtime.calls).toEqual([{
       method: 'agent.compact',
       params: {
@@ -1654,11 +1651,18 @@ describe('Pi session store', () => {
   test('shows auxiliary compaction steps in the owning chat without merging them into its assistant turn', async () => {
     const runtime = new FakeRuntime();
     runtime.handler = (method) => {
-      if (method === 'agent.compact') return { firstKeptEntryId: 'kept', summary: 'done', tokensBefore: 12000 };
+      if (method === 'agent.compact') return { taskId: 'task-a', status: 'preparing' };
       throw new Error(`Unexpected ${method}`);
     };
     const store = createPiSessionStore(runtime);
     await store.getState().compactSession('session-a');
+    runtime.emit({
+      kind: 'event', event: 'compaction.trace', seq: 1,
+      data: { sessionId: 'session-a', taskId: 'task-a', type: 'requested', manual: true, phase: 'preparing' },
+      source: { role: 'session', runtimeGeneration: 1, sessionId: 'session-a', workerId: 'worker-session' },
+      v: VARIN_PROTOCOL_VERSION,
+    } as RuntimeEventEnvelope);
+    expect(store.getState().records['session-a']?.compactionTraces?.['task-a']?.status).toBe('requested');
     const emitTrace = (type: 'started' | 'entry' | 'finished', entry?: { kind: 'assistant'; at: number; text: string }) => {
       runtime.emit({
         kind: 'event', event: 'compaction.trace', seq: type === 'started' ? 1 : type === 'entry' ? 3 : 4,
@@ -1678,9 +1682,18 @@ describe('Pi session store', () => {
     emitTrace('entry', { kind: 'assistant', at: 1, text: 'Checking the current task.' });
     emitTrace('finished');
     expect(store.getState().records['session-a']?.compactionTraces?.['task-a']).toEqual({
-      taskId: 'task-a', status: 'finished', partial: { text: '', thinking: '' },
+      taskId: 'task-a', status: 'ready', manual: true, partial: { text: '', thinking: '' },
       entries: [{ kind: 'assistant', at: 1, text: 'Checking the current task.' }],
     });
+    runtime.emit({
+      kind: 'event', event: 'compaction.trace', seq: 5,
+      data: { sessionId: 'session-a', taskId: 'task-a', type: 'committed' },
+      source: { role: 'session', runtimeGeneration: 1, sessionId: 'session-a', workerId: 'worker-session' },
+      v: VARIN_PROTOCOL_VERSION,
+    } as RuntimeEventEnvelope);
+    expect(store.getState().records['session-a']?.compactionTraces?.['task-a']?.status).toBe('committed');
+    emitTrace('started');
+    expect(store.getState().records['session-a']?.compactionTraces?.['task-a']?.status).toBe('committed');
     expect(store.getState().records['session-a']?.liveAssistant).toBeUndefined();
   });
 
@@ -2386,7 +2399,13 @@ describe('Pi session store', () => {
       },
     });
 
-    expect(await store.getState().prompt('session-a', 'inspect my draft')).toBe(true);
+    let inputCapturedBeforeDispatch = false;
+    expect(await store.getState().prompt('session-a', 'inspect my draft', undefined, undefined, undefined, () => {
+      expect(captures).toHaveLength(1);
+      expect(runtime.calls).toHaveLength(0);
+      inputCapturedBeforeDispatch = true;
+    })).toBe(true);
+    expect(inputCapturedBeforeDispatch).toBe(true);
     expect(captures).toHaveLength(1);
     expect(captures[0]?.resources.map(({ content, localEditRevision }) => ({ content, localEditRevision }))).toEqual([
       { content: 'private dirty-only phrase', localEditRevision: 1 },

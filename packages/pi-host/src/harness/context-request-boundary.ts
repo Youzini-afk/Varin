@@ -102,6 +102,8 @@ export function contextRequestKey(model: Model<Api>, context: Context, options: 
 
 export interface ContextRequestBoundaryOptions {
   getCompactionSettings(): Required<Pick<CompactionSettings, "enabled" | "reserveTokens" | "keepRecentTokens">>;
+  /** An explicit manual summary may be applied at capacity even with automatic compaction disabled. */
+  hasPreparedExplicitCompaction?(): boolean;
   /** Observe every request; needsSpace requests must not start a second task. */
   observe(request: ContextModelRequest): void;
   /** Return one fixed, validated compaction. Failure must not fall through. */
@@ -184,7 +186,7 @@ export function attachContextRequestBoundary(session: AgentSession, options: Con
     try {
       await prepare();
       while (next.needsSpace) {
-        if (!options.getCompactionSettings().enabled) {
+        if (!options.getCompactionSettings().enabled && !options.hasPreparedExplicitCompaction?.()) {
           throw new ContextCapacityError(`Model input needs approximately ${next.inputTokens} tokens plus ${next.reserveTokens} reserved output tokens, beyond the ${model.contextWindow}-token context window; automatic compaction is disabled. History was not changed.`);
         }
         if (!committing) {

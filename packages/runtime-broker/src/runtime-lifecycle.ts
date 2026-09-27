@@ -18,6 +18,7 @@ import {
   type PiRuntimeBrokerOptions,
   type PiSessionDeleteCoordinator,
   type PiSessionRunCoordinator,
+  type PiSessionRunCoordinatorOptions,
   type ProjectTrustDecision,
 } from "./runtime-broker.js";
 import {
@@ -62,6 +63,7 @@ export class PiRuntimeLifecycle {
   #revision = 0;
   #sessionDeleteCoordinator: PiSessionDeleteCoordinator | undefined;
   #sessionRunCoordinator: PiSessionRunCoordinator | undefined;
+  #sessionRunCoordinatorOptions: PiSessionRunCoordinatorOptions = {};
 
   constructor(options: PiRuntimeLifecycleOptions) {
     this.#createBroker = options.createBroker;
@@ -120,10 +122,14 @@ export class PiRuntimeLifecycle {
     }
   }
 
-  setSessionRunCoordinator(coordinate: PiSessionRunCoordinator | undefined): void {
+  setSessionRunCoordinator(
+    coordinate: PiSessionRunCoordinator | undefined,
+    options: PiSessionRunCoordinatorOptions = {},
+  ): void {
     this.#sessionRunCoordinator = coordinate;
+    this.#sessionRunCoordinatorOptions = options;
     for (const generation of this.#generations.values()) {
-      generation.broker.setSessionRunCoordinator(coordinate);
+      generation.broker.setSessionRunCoordinator(coordinate, options);
     }
   }
 
@@ -284,7 +290,7 @@ export class PiRuntimeLifecycle {
           return (coordinate: PiSessionDeleteCoordinator | undefined) => this.setSessionDeleteCoordinator(coordinate);
         }
         if (property === "setSessionRunCoordinator") {
-          return (coordinate: PiSessionRunCoordinator | undefined) => this.setSessionRunCoordinator(coordinate);
+          return (coordinate: PiSessionRunCoordinator | undefined, options?: PiSessionRunCoordinatorOptions) => this.setSessionRunCoordinator(coordinate, options);
         }
         if (property === "requestForSession") {
           return (
@@ -354,7 +360,7 @@ export class PiRuntimeLifecycle {
       broker.setSessionDeleteCoordinator(this.#sessionDeleteCoordinator);
     }
     if (this.#sessionRunCoordinator !== undefined) {
-      broker.setSessionRunCoordinator(this.#sessionRunCoordinator);
+      broker.setSessionRunCoordinator(this.#sessionRunCoordinator, this.#sessionRunCoordinatorOptions);
     }
     let handshake: HostHandshakeResult;
     try {

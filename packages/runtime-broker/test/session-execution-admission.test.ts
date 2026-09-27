@@ -157,6 +157,18 @@ test("session execution admission precedes worker and agent execution and owns c
     throwOnClose = false;
     assert.equal(activeLeases, 0);
 
+    let coordinatedCodeRuns = 0;
+    broker.setSessionRunCoordinator(async () => { coordinatedCodeRuns += 1; }, {
+      appliesToWorkFocus: ["research"],
+    });
+    const submitted = await broker.requestForSession(created.sessionId, "agent.prompt", {
+      sessionId: created.sessionId,
+      text: "/admission-write",
+    });
+    assert.equal(submitted.accepted, true);
+    assert.equal(coordinatedCodeRuns, 0,
+      "an already selected code focus does not need research workspace preparation");
+
     await broker.closeSession(created.sessionId);
     assert.equal(activeLeases, 0);
   } finally {

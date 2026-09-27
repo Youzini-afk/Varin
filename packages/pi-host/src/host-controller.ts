@@ -1112,7 +1112,7 @@ export class HostController {
           readAgentInputContext(params),
         );
       case "agent.compact":
-        return this.#sessionHost.compact(
+        return this.#sessionHost.prepareCompaction(
           readString(params, "sessionId"),
           optionalString(params, "customInstructions"),
         );

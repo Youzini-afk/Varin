@@ -25,6 +25,8 @@ export type CompactionModelSpec = JsonValue;
  * - `previousSummary` is the prior summary (S0) when present.
  */
 export interface CompactionTaskSpec {
+  /** Stable id shared by preparation, live progress, and the eventual commit. */
+  taskId?: string;
   /** Owning session id; must equal the requesting actor's session. */
   sessionId: string;
   /** Resolved parent trust, including a one-session grant not saved on disk. */
@@ -100,10 +102,12 @@ export type CompactionTraceUpdate = {
   sessionId: string;
   taskId: string;
 } & (
+  | { type: "requested"; manual: true; phase: "preparing" | "ready" }
   | { type: "started" }
   | { type: "delta"; channel: "text" | "thinking"; delta: string }
   | { type: "entry"; entry: CompactionTraceEntry }
   | { type: "finished" }
+  | { type: "committed" }
   | { type: "failed"; message: string }
 );
 
@@ -193,6 +197,7 @@ export function readCompactionTaskSpec(value: unknown): CompactionTaskSpec {
   }
   if (!isRecord(value.model)) throw new Error("compaction task requires a model spec");
   return {
+    ...(value.taskId === undefined ? {} : { taskId: readString(value, "taskId") }),
     sessionId: readString(value, "sessionId"),
     projectTrusted: value.projectTrusted,
     boundaryCompactionId: readNullableString(value, "boundaryCompactionId"),

@@ -109,7 +109,7 @@ describe('PiTimeline scroll ownership', () => {
   it('shows a submitted compaction in the scrolling conversation before the end spacer', () => {
     const markup = renderToStaticMarkup(
       <PiTimeline cwd="/workspace" entries={[]} sessionId="session-1" toolExecutions={{}}
-        compactionPending onOpenCompaction={() => undefined} />,
+        compactionStatus="running" onOpenCompaction={() => undefined} />,
     );
     expect(markup).toContain('chat.compaction.inProgress');
     expect(markup.indexOf('chat.compaction.inProgress')).toBeLessThan(markup.indexOf('data-pi-timeline-end-space'));

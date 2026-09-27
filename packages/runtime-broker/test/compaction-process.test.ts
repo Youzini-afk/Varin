@@ -75,6 +75,7 @@ test("compaction runs and queries in its own process, cancels, and rejects an ex
   try {
     const session = await broker.createSession(root);
     const spec: CompactionTaskSpec = {
+      taskId: "test-compaction-task",
       projectTrusted: true,
       sessionId: session.sessionId, boundaryCompactionId: null,
       firstSummarizedEntryId: "old", lastSummarizedEntryId: "old", firstKeptEntryId: "recent",
@@ -91,7 +92,7 @@ test("compaction runs and queries in its own process, cancels, and rejects an ex
     const result = await broker.runCompactionTask(session.sessionId, spec, callbacks);
     assert.match(result.summary, /recorded evidence/);
     assert.equal(result.queries, 1);
-    assert.ok(result.trace?.taskId);
+    assert.equal(result.trace?.taskId, spec.taskId);
     assert.deepEqual(result.trace?.entries.map((entry) => entry.kind), ["tool-call", "tool-result", "assistant"]);
     assert.equal(result.trace?.entries.at(-1)?.text, result.summary);
     assert.deepEqual(progress.filter((type) => type !== "delta"), ["started", "entry", "entry", "entry", "finished"]);

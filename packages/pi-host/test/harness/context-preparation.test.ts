@@ -98,6 +98,9 @@ interface Harness {
   calls: RecordedCall[];
   failures: [string, string][];
   successes: string[];
+  manualReady: string[];
+  manualCommitted: string[];
+  manualFailed: Array<{ taskId: string; message: string }>;
   compactions: import("@varin/protocol").ContextRetentionParams[];
   config: { enabled: boolean; waterline: number };
   entries: SessionEntry[];
@@ -118,6 +121,9 @@ const createHarness = (entries: SessionEntry[], tokensNow: number): Harness => {
     calls,
     failures: [],
     successes: [],
+    manualReady: [],
+    manualCommitted: [],
+    manualFailed: [],
     compactions: [],
     config: { enabled: true, waterline: 0.75 },
     entries,
@@ -143,6 +149,9 @@ const createHarness = (entries: SessionEntry[], tokensNow: number): Harness => {
     onRetention: (params) => { harness.compactions.push(params); },
     onFailure: (phase, message) => harness.failures.push([phase, message]),
     onSuccess: (phase) => harness.successes.push(phase),
+    onManualReady: (taskId) => harness.manualReady.push(taskId),
+    onManualCommitted: (taskId) => harness.manualCommitted.push(taskId),
+    onManualFailed: (taskId, message) => harness.manualFailed.push({ taskId, message }),
   });
   harness.extension({
     on: (event: string, handler: (event: never, ctx: never) => unknown) => handlers.set(event, handler),
@@ -320,6 +329,66 @@ describe("context preparation extension", () => {
     harness.calls[1]!.resolve(okResult("Schema-focused summary."));
     const result = await commitPromise as { compaction?: { summary: string } };
     assert.equal(result.compaction?.summary, "Schema-focused summary.");
+  });
+
+  it("reuses one candidate after new turns append behind its frozen source", async () => {
+    const harness = createHarness(branchEntries(1_300), 12_000);
+    fireContext(harness, 12_000);
+    assert.equal(harness.calls.length, 1);
+    harness.entries.push(entry("e7", "e6", userMessage("A later clarification stays raw.")));
+    fireContext(harness, 12_100);
+    assert.equal(harness.calls.length, 1, "appending a turn must not restart the same summary");
+    harness.calls[0]!.resolve(okResult("Frozen-prefix summary"));
+    await waitFor(() => harness.extension.status().candidate === "ready");
+    const result = await harness.handlers.get("session_before_compact")!(compactEvent(harness) as never, harness.ctx as never) as {
+      compaction?: { summary: string; firstKeptEntryId: string };
+    };
+    assert.equal(result.compaction?.summary, "Frozen-prefix summary");
+    assert.equal(result.compaction?.firstKeptEntryId, harness.calls[0]!.spec.firstKeptEntryId);
+    assert.equal(harness.calls.length, 1);
+  });
+
+  it("shares a manual background candidate with later capacity admission", async () => {
+    const harness = createHarness(branchEntries(1_300), 1_300);
+    fireContext(harness, 1_300);
+    assert.equal(harness.calls.length, 0);
+    const first = harness.extension.prepareManual();
+    const repeated = harness.extension.prepareManual();
+    assert.deepEqual(repeated, first);
+    assert.equal(first.status, "preparing");
+    assert.equal(harness.calls.length, 1);
+    assert.equal(harness.calls[0]!.spec.taskId, first.taskId);
+    harness.config.enabled = false;
+    fireContext(harness, 1_350);
+    assert.equal(harness.extension.status().candidate, "preparing", "disabling automatic preparation must not cancel a manual request");
+    harness.config.enabled = true;
+    harness.entries.push(entry("e7", "e6", userMessage("New work continues while the summary runs.")));
+    fireContext(harness, 12_100);
+    const committing = harness.handlers.get("session_before_compact")!(compactEvent(harness) as never, harness.ctx as never);
+    assert.equal(harness.calls.length, 1);
+    harness.calls[0]!.resolve(okResult("Shared manual summary"));
+    const result = await committing as { compaction?: { details?: unknown; summary: string } };
+    assert.equal(result.compaction?.summary, "Shared manual summary");
+    assert.deepEqual(result.compaction?.details, { varinCompactionTrace: { taskId: first.taskId, entries: [] } });
+    assert.deepEqual(harness.manualReady, [first.taskId]);
+    await harness.handlers.get("session_compact")!({
+      type: "session_compact",
+      compactionEntry: { details: result.compaction?.details },
+    } as never, harness.ctx as never);
+    assert.deepEqual(harness.manualCommitted, [first.taskId]);
+    assert.equal(harness.calls.length, 1);
+  });
+
+  it("reports a manual source change that occurs while its worker is finishing", async () => {
+    const harness = createHarness(branchEntries(1_300), 1_300);
+    fireContext(harness, 1_300);
+    const manual = harness.extension.prepareManual();
+    harness.ctx.model = { ...MODEL, id: "another-model" };
+    harness.calls[0]!.resolve(okResult("Summary from the old model"));
+    await waitFor(() => harness.manualFailed.length === 1);
+    assert.equal(harness.extension.status().candidate, "none");
+    assert.deepEqual(harness.manualFailed, [{ taskId: manual.taskId,
+      message: "compaction source changed while preparation ran" }]);
   });
 
   it("routes a bound manual compaction through the same worker and preserves custom focus", async () => {

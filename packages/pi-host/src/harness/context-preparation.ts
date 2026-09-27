@@ -1,3 +1,4 @@
+import { randomUUID } from "node:crypto";
 import {
   buildSessionContext,
   convertToLlm,
@@ -25,7 +26,7 @@ import {
 } from "./compaction-agent.js";
 
 import {
-  attachContextRequestBoundary, ContextCapacityError, contextRequestKey, estimateModelInputTokens,
+  attachContextRequestBoundary, ContextCapacityError, estimateModelInputTokens,
   modelRequestOptions,
   type ContextModelRequest,
   type ContextRequestBoundaryOptions,
@@ -49,11 +50,11 @@ import {
  * S0/A/B material plus the shared continuation prompt and may issue
  * read-only history/output/record queries under an auxiliary actor.
  *
- * When Pi actually needs compaction (threshold or overflow), the
- * `session_before_compact` hook commits the matching candidate, waits for
- * an in-flight one, or runs a fresh worker task from Pi's own preparation.
- * Failure keeps the original history; submission always goes through Pi's
- * native compaction writer at the request boundary.
+ * When a constructed provider request needs space, the request boundary
+ * adopts the matching candidate, waits for an in-flight one, or starts a
+ * fresh task. Prepared summaries do not replace history merely because a
+ * turn became idle; the request boundary uses Pi's native compaction writer.
+ * Failure keeps the original history.
  */
 
 export interface ContextPreparationConfig {
@@ -103,6 +104,8 @@ export interface PreparedCandidate extends FixedPreparation {
   trace?: CompactionTrace;
   usage?: Usage;
   error?: string;
+  manualRequested?: boolean;
+  manualReadyNotified?: boolean;
 }
 
 export interface ContextPreparationOptions {
@@ -129,6 +132,9 @@ export interface ContextPreparationOptions {
   onFailure?: (phase: "prepare" | "commit", message: string) => void;
   onSuccess?: (phase: "prepare" | "commit") => void;
   onStatus?: () => void;
+  onManualReady?: (taskId: string) => void;
+  onManualCommitted?: (taskId: string) => void;
+  onManualFailed?: (taskId: string, message: string) => void;
   now?: () => number;
 }
 
@@ -454,6 +460,7 @@ export type ContextPreparationExtension = ExtensionFactory & {
   isBound(): boolean;
   isCommitting(): boolean;
   observeRequest(request: ContextModelRequest): void;
+  prepareManual(customInstructions?: string): { taskId: string; status: "preparing" | "ready" };
 };
 
 export function createContextPreparationExtension(
@@ -466,7 +473,6 @@ export function createContextPreparationExtension(
   let api: ExtensionAPI | undefined;
   let latestContext: ExtensionContext | undefined;
   let epoch = 0;
-  let candidateSeq = 0;
   // Waterline adaptation per model: measured growth while a preparation ran
   // shifts the next preparation earlier so it still finishes before capacity.
   const prepStats = new Map<string, { durationMs: number }>();
@@ -474,10 +480,10 @@ export function createContextPreparationExtension(
   let lastAt = 0;
   const now = options.now ?? (() => Date.now());
 
+  // A candidate freezes its source prefix. Later append-only turns do not
+  // invalidate that prefix, so the key must not include request messages.
   const modelKey = (model: Model<Api> | undefined): string =>
-    model === undefined ? "" : latestRequest
-      ? contextRequestKey(model, latestRequest.context, latestRequest.options)
-      : JSON.stringify({ provider: model.provider, id: model.id, api: model.api, contextWindow: model.contextWindow, maxTokens: model.maxTokens });
+    model === undefined ? "" : JSON.stringify(serializeCompactionModel(model));
 
   // Growth rate measured between consecutive context events (tokens/ms).
   let tokenRatePerMs = 0;
@@ -510,9 +516,22 @@ export function createContextPreparationExtension(
     && branchEntries.some((entry) => entry.id === cand.lastSummarizedEntryId)
     && branchEntries.some((entry) => entry.id === cand.fixedLeafEntryId);
 
+  const notifyManualReady = (cand: PreparedCandidate): void => {
+    if (!cand.manualRequested || cand.manualReadyNotified) return;
+    cand.manualReadyNotified = true;
+    options.onManualReady?.(cand.id);
+  };
+
+  const failManual = (cand: PreparedCandidate, message: string): void => {
+    if (!cand.manualRequested) return;
+    cand.manualRequested = false;
+    options.onManualFailed?.(cand.id, message);
+  };
+
   const discard = (reason: string): void => {
     epoch += 1;
     if (!candidate) return;
+    failManual(candidate, reason);
     if (candidate.status === "in-flight") candidate.abort.abort();
     candidate = undefined;
     void reason;
@@ -538,9 +557,10 @@ export function createContextPreparationExtension(
     pi: ExtensionAPI,
     tokensNow: number,
     usable: number,
-  ): void => {
+    manual?: { customInstructions?: string },
+  ): PreparedCandidate | undefined => {
     const model = ctx.model;
-    if (!model) return;
+    if (!model) return undefined;
     const sessionId = ctx.sessionManager.getSessionId();
     const entries = ctx.sessionManager.getBranch();
     const reserve = options.getCompactionSettings().reserveTokens;
@@ -555,10 +575,12 @@ export function createContextPreparationExtension(
     // boundary can make another finite, source-bound pass.
     const preparation = computeFixedPreparation(entries, keepRecent, tokensNow)
       ?? computeFixedPreparation(entries, 1, tokensNow);
-    if (!preparation) return;
-    const fitted = fitPreparationToWindow(entries, preparation, model, sessionId, options.getProjectTrusted(), summaryOut, latestRequest);
-    if (!fitted) return;
+    if (!preparation) return undefined;
+    const fitted = fitPreparationToWindow(entries, preparation, model, sessionId, options.getProjectTrusted(), summaryOut, latestRequest, manual?.customInstructions);
+    if (!fitted) return undefined;
     const { preparation: fixed, spec } = fitted;
+    const id = randomUUID();
+    spec.taskId = id;
     const cand: PreparedCandidate = {
       ...fixed,
       spec,
@@ -566,16 +588,18 @@ export function createContextPreparationExtension(
       done: Promise.resolve(),
       epoch,
       fixedAt: now(),
-      id: `ctxprep-${++candidateSeq}`,
+      id,
       modelKey: modelKey(model),
       status: "in-flight",
       tokensAtFix: tokensNow,
+      ...(manual === undefined ? {} : { manualRequested: true }),
     };
     discard("replace invalid candidate");
     cand.epoch = epoch;
     candidate = cand;
-    const sourceSignal = latestRequest?.options.signal;
+    const sourceSignal = manual === undefined ? latestRequest?.options.signal : undefined;
     const cancel = () => {
+      if (cand.manualRequested) return;
       cand.abort.abort();
       if (candidate === cand) discard("request cancelled");
     };
@@ -588,7 +612,11 @@ export function createContextPreparationExtension(
         // let a newer request shape drift into an already-fixed task.
         const result = await options.runCompactionTask(cand.spec, cand.abort.signal);
         cand.abort.signal.throwIfAborted();
-        if (candidate !== cand || !candidateValid(cand, ctx, ctx.sessionManager.getBranch())) return;
+        if (candidate !== cand) return;
+        if (!candidateValid(cand, ctx, ctx.sessionManager.getBranch())) {
+          discard("compaction source changed while preparation ran");
+          return;
+        }
         if (typeof result.summary !== "string" || result.summary.trim().length === 0) {
           throw new Error("Compaction returned no summary text");
         }
@@ -600,16 +628,19 @@ export function createContextPreparationExtension(
           durationMs: Math.max(1, now() - cand.fixedAt),
         });
         options.onSuccess?.("prepare");
+        notifyManualReady(cand);
       } catch (error) {
         if (cand.abort.signal.aborted) return;
         cand.status = "failed";
         cand.error = error instanceof Error ? error.message : String(error);
         options.onFailure?.("prepare", cand.error);
+        failManual(cand, cand.error);
       } finally {
         sourceSignal?.removeEventListener("abort", cancel);
         options.onStatus?.();
       }
     })();
+    return cand;
   };
 
   const commitFromEvent = async (
@@ -621,17 +652,20 @@ export function createContextPreparationExtension(
     // its fixed range was already summarized, and messages appended after
     // fixation stay raw behind firstKeptEntryId.
     if (event.signal.aborted) return undefined;
-    if (event.customInstructions && candidate) discard("manual summary focus changed");
+    if (candidate && event.customInstructions !== undefined
+      && candidate.spec.customInstructions !== event.customInstructions) discard("manual summary focus changed");
     if (candidate && !candidateValid(candidate, ctx, event.branchEntries)) discard("compaction source changed");
     const cand = candidate;
-    if (cand && !event.customInstructions && candidateValid(cand, ctx, event.branchEntries)) {
+    if (cand && candidateValid(cand, ctx, event.branchEntries)) {
       if (cand.status === "in-flight") {
         // Capacity is already needed — wait for this same in-flight call
         // rather than starting a second summarization.
         await new Promise<void>((resolve) => {
           const cancel = () => {
-            cand.abort.abort();
-            if (candidate === cand) discard("compaction cancelled");
+            if (!cand.manualRequested) {
+              cand.abort.abort();
+              if (candidate === cand) discard("compaction cancelled");
+            }
             resolve();
           };
           event.signal.addEventListener("abort", cancel, { once: true });
@@ -650,7 +684,7 @@ export function createContextPreparationExtension(
           summary: cand.summary!,
           tokensBefore: event.preparation.tokensBefore,
           ...(cand.usage === undefined ? {} : { usage: cand.usage }),
-          ...(cand.trace === undefined ? {} : { details: { varinCompactionTrace: cand.trace } }),
+          details: { varinCompactionTrace: cand.trace ?? { taskId: cand.id, entries: [] } },
         };
       }
       options.onFailure?.("commit", cand.error ?? "The prepared source was cancelled or changed");
@@ -716,7 +750,8 @@ export function createContextPreparationExtension(
     api = pi;
     pi.on("context", (event, ctx) => {
       latestContext = ctx;
-      if (!options.getPreparationConfig().enabled || !options.getCompactionSettings().enabled) {
+      if ((!options.getPreparationConfig().enabled || !options.getCompactionSettings().enabled)
+        && !candidate?.manualRequested) {
         discard("preparation disabled");
       }
       return { messages: activeCompactionMessages(event.messages) };
@@ -736,7 +771,12 @@ export function createContextPreparationExtension(
       }
     });
 
-    pi.on("session_compact", async (_event, ctx) => {
+    pi.on("session_compact", async (event, ctx) => {
+      const details = event.compactionEntry.details as { varinCompactionTrace?: { taskId?: string } } | undefined;
+      if (candidate?.manualRequested && details?.varinCompactionTrace?.taskId === candidate.id) {
+        candidate.manualRequested = false;
+        options.onManualCommitted?.(candidate.id);
+      }
       discard("compacted");
       lastTokens = 0;
       lastAt = 0;
@@ -767,6 +807,25 @@ export function createContextPreparationExtension(
   const extension = factory as ContextPreparationExtension;
   extension.isBound = () => boundary !== undefined;
   extension.isCommitting = () => boundary?.isCommitting() ?? false;
+  extension.prepareManual = (customInstructions) => {
+    const ctx = boundSession?.extensionRunner?.createContext() ?? latestContext;
+    if (!ctx || !api || !ctx.model) throw new Error("The session compaction context is unavailable");
+    const focus = customInstructions?.trim() || undefined;
+    const entries = ctx.sessionManager.getBranch();
+    if (candidate && !candidateValid(candidate, ctx, entries)) discard("compaction source changed");
+    if (candidate && candidate.status !== "failed" && candidate.spec.customInstructions === focus) {
+      candidate.manualRequested = true;
+      if (candidate.status === "ready") notifyManualReady(candidate);
+      return { taskId: candidate.id, status: candidate.status === "ready" ? "ready" : "preparing" };
+    }
+    if (candidate) discard("manual summary focus changed");
+    const usable = ctx.model.contextWindow - options.getCompactionSettings().reserveTokens;
+    const estimated = estimateModelInputTokens({ messages: convertToLlm(activeCompactionMessages(buildSessionContext(entries).messages)) });
+    const tokensNow = Math.max(ctx.getContextUsage()?.tokens ?? 0, estimated);
+    const started = startPreparation(ctx, api, tokensNow, usable, { ...(focus ? { customInstructions: focus } : {}) });
+    if (!started) throw new Error("Nothing in this session can be compacted yet");
+    return { taskId: started.id, status: "preparing" };
+  };
   extension.observeRequest = (request) => {
     latestRequest = request;
     const at = now();
@@ -779,7 +838,10 @@ export function createContextPreparationExtension(
     const ctx = boundSession?.extensionRunner?.createContext() ?? latestContext;
     if (!ctx || !api) return;
     const config = options.getPreparationConfig();
-    if (!config.enabled || !options.getCompactionSettings().enabled) { discard("preparation disabled"); return; }
+    if (!config.enabled || !options.getCompactionSettings().enabled) {
+      if (!candidate?.manualRequested) discard("preparation disabled");
+      return;
+    }
     const usable = request.model.contextWindow - request.reserveTokens;
     if (candidate && !candidateValid(candidate, ctx, ctx.sessionManager.getBranch())) discard("request configuration or source changed");
     if (request.needsSpace || usable <= 0) return;
@@ -792,6 +854,11 @@ export function createContextPreparationExtension(
     boundSession = session;
     boundary = attachContextRequestBoundary(session, {
       getCompactionSettings: options.getCompactionSettings,
+      hasPreparedExplicitCompaction: () => {
+        const ctx = session.extensionRunner?.createContext() ?? latestContext;
+        return !!(candidate?.manualRequested && candidate.status !== "failed" && ctx
+          && candidateValid(candidate, ctx, ctx.sessionManager.getBranch()));
+      },
       observe: extension.observeRequest,
       ...(options.inject ? { inject: options.inject } : {}),
       onEvent,
@@ -802,6 +869,9 @@ export function createContextPreparationExtension(
         if (!ctx || !api) throw new ContextCapacityError("The Pi context extension is unavailable");
         const entries = ctx.sessionManager.getBranch();
         if (!candidate || !candidateValid(candidate, ctx, entries) || candidate.status === "failed") {
+          if (!options.getCompactionSettings().enabled) {
+            throw new ContextCapacityError("The explicit summary is no longer available and automatic compaction is disabled; original history was retained");
+          }
           startPreparation(ctx, api, request.inputTokens, request.model.contextWindow - request.reserveTokens);
         }
         const fixed = candidate;

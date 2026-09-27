@@ -466,6 +466,7 @@ export class DocumentRegistry {
 
   async captureAgentInputContext(sessionId: string): Promise<AgentInputContext> {
     this.assertActive();
+    const generation = this.getGeneration();
     const dirtyBuffers = [...this.records.values()].filter((record) => record.dirty);
     if (dirtyBuffers.length === 0) return { source: 'disk' };
     const knownRecords = dirtyBuffers.flatMap((record) => this.aliasesFor(record.identity)
@@ -482,8 +483,7 @@ export class DocumentRegistry {
     // Registered aliases can go offline between editor operations. Recheck the
     // physical identity once per dirty buffer so an unavailable secondary root
     // neither blocks a valid source nor makes a different target inherit it.
-    const dirtyRecords: typeof knownRecords = [];
-    for (const record of dirtyBuffers) {
+    const verifiedRecords = await Promise.all(dirtyBuffers.map(async (record): Promise<typeof knownRecords | null> => {
       let verified: VarinResourceReference[] | null = null;
       for (const alias of this.aliasesFor(record.identity)) {
         try {
@@ -494,15 +494,20 @@ export class DocumentRegistry {
           }
         } catch { /* Another known alias may still address this buffer. */ }
       }
-      if (!verified) return unavailable(knownRecords);
+      if (!verified) return null;
       const unique = new Map(verified.map((alias) => [`${alias.workspaceId}\0${alias.resourceId}`, alias]));
-      for (const alias of unique.values()) dirtyRecords.push({ record, alias });
+      return [...unique.values()].map((alias) => ({ record, alias }));
+    }));
+    if (verifiedRecords.some((entries) => entries === null)
+      || this.disposed || generation !== this.getGeneration()
+      || dirtyBuffers.some((record) => this.records.get(this.keyFor(record.identity)) !== record)) {
+      return unavailable(knownRecords);
     }
+    const dirtyRecords: typeof knownRecords = verifiedRecords.flatMap((entries) => entries ?? []);
     dirtyRecords.sort((left, right) => left.alias.workspaceId.localeCompare(right.alias.workspaceId)
       || left.alias.resourceId.localeCompare(right.alias.resourceId));
     const roots = rootsOf(dirtyRecords);
     if (!this.documents.captureAgentInputSnapshot) return unavailable(dirtyRecords);
-    const generation = this.getGeneration();
     const resources = await Promise.all(dirtyRecords.map(async ({ record, alias }) => ({
       baseRevision: record.baseRevision,
       bufferHash: await bufferHash(record.buffer),
@@ -514,6 +519,10 @@ export class DocumentRegistry {
       localEditRevision: record.localEditRevision,
       resource: { workspaceId: alias.workspaceId, resourceId: alias.resourceId },
     })));
+    if (this.disposed || generation !== this.getGeneration()
+      || dirtyBuffers.some((record) => this.records.get(this.keyFor(record.identity)) !== record)) {
+      return unavailable(dirtyRecords);
+    }
     try {
       await Promise.all(roots.map(async ({ workspaceId }) => {
         this.ensureWatch(workspaceId);

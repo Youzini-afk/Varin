@@ -276,6 +276,11 @@ export interface PiCompactionResult {
   usage?: PiUsage;
 }
 
+export interface PiCompactionStartResult {
+  taskId: string;
+  status: "preparing" | "ready";
+}
+
 export interface PiAgentEventPosition {
   runId?: string;
   leafId: string | null;

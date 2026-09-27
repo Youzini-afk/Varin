@@ -116,7 +116,7 @@ export class CompactionWorkerRuntime {
   async run(params: unknown): Promise<CompactionRunResult> {
     this.#throwIfAborted();
     const spec: CompactionTaskSpec = readCompactionTaskSpec(params);
-    const trace: CompactionTrace = { taskId: randomUUID(), entries: [] };
+    const trace: CompactionTrace = { taskId: spec.taskId ?? randomUUID(), entries: [] };
     const progress = (update: { type: "started" | "finished" } | { type: "delta"; channel: "text" | "thinking"; delta: string } | { type: "entry"; entry: CompactionTraceEntry } | { type: "failed"; message: string }) => {
       try { this.#emit("compaction.trace", { sessionId: spec.sessionId, taskId: trace.taskId, ...update }); }
       catch { /* The summary remains authoritative when a viewer disconnects. */ }

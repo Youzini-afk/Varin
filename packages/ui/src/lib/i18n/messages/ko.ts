@@ -2444,6 +2444,8 @@ export const dict: Record<I18nKey, string> = {
   'chat.piComposer.submission.failed': '전송되지 않음',
   'chat.piAssistant.working': '처리 중',
   'chat.compaction.inProgress': '컨텍스트 압축 중…',
+  'chat.compaction.ready': '요약 준비 완료, 컨텍스트 공간이 필요할 때 적용',
+  'chat.compaction.failed': '컨텍스트 압축 실패',
   'chat.compaction.thinking': '사고 과정',
   'chat.piComposer.agent.imageUnsupported': '선택한 에이전트는 이미지 첨부를 받을 수 없습니다. 이미지를 제거하거나 Pi를 사용하세요.',
   'chat.piComposer.pdfAttachment.uploadFailed': 'Could not upload {name}.',

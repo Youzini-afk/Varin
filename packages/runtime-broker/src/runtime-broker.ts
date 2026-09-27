@@ -96,6 +96,11 @@ export type PiSessionRunCoordinator = (request: {
   summary: SessionSummary;
 }) => Promise<{ workspace?: SessionWorkspaceBinding } | void>;
 
+export interface PiSessionRunCoordinatorOptions {
+  /** Skip coordinator reads for work focuses that have no pre-run binding work. */
+  appliesToWorkFocus?: readonly WorkFocusId[];
+}
+
 interface SessionExecutionAdmissionState {
   awaitsAgentSettlement: boolean;
   client: PiHostClient;
@@ -367,6 +372,7 @@ export class PiRuntimeBroker {
   #sessionExecutionAdmission: PiSessionExecutionAdmission | undefined;
   #sessionDeleteCoordinator: PiSessionDeleteCoordinator | undefined;
   #sessionRunCoordinator: PiSessionRunCoordinator | undefined;
+  #sessionRunCoordinatorFocuses: ReadonlySet<WorkFocusId> | undefined;
 
   constructor(options: PiRuntimeBrokerOptions) {
     this.#options = options;
@@ -432,11 +438,16 @@ export class PiRuntimeBroker {
     this.#sessionDeleteCoordinator = coordinate;
   }
 
-  setSessionRunCoordinator(coordinate: PiSessionRunCoordinator | undefined): void {
+  setSessionRunCoordinator(
+    coordinate: PiSessionRunCoordinator | undefined,
+    options: PiSessionRunCoordinatorOptions = {},
+  ): void {
     if (coordinate !== undefined && typeof coordinate !== "function") {
       throw new TypeError("Pi session run coordinator must be a function");
     }
     this.#sessionRunCoordinator = coordinate;
+    this.#sessionRunCoordinatorFocuses = options.appliesToWorkFocus === undefined
+      ? undefined : new Set(options.appliesToWorkFocus);
   }
 
   async warmup(): Promise<HostHandshakeResult> {
@@ -1012,7 +1023,10 @@ export class PiRuntimeBroker {
           `Workspace context is unavailable for Pi session: ${sessionId}`,
         );
       }
-      if (this.#sessionRunCoordinator) {
+      if (this.#sessionRunCoordinator && (
+        this.#sessionRunCoordinatorFocuses === undefined
+        || this.#sessionRunCoordinatorFocuses.has(current.selected.id)
+      )) {
         const rawSnapshot = await worker.request("session.snapshot", { sessionId });
         const snapshot = await this.#enrichSnapshot(worker, rawSnapshot);
         const summary = this.#knownSummaries.get(sessionId);

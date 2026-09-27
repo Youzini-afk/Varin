@@ -2524,6 +2524,8 @@ export const dict: Record<I18nKey, string> = {
   "chat.piComposer.submission.failed": "Не надіслано",
   "chat.piAssistant.working": "Опрацювання",
   "chat.compaction.inProgress": "Стискання контексту…",
+  "chat.compaction.ready": "Підсумок готовий; його буде застосовано, коли контексту знадобиться місце",
+  "chat.compaction.failed": "Не вдалося стиснути контекст",
   "chat.compaction.thinking": "Міркування",
   "chat.piComposer.agent.imageUnsupported": "Вибраний агент не може отримувати вкладені зображення. Видаліть зображення або скористайтеся Pi.",
   'chat.piComposer.pdfAttachment.uploadFailed': 'Could not upload {name}.',

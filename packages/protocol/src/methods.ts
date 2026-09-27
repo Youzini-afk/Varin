@@ -133,10 +133,10 @@ export interface HostMethodMap {
     params: { sessionId: string; expectedRunId?: string };
     result: { aborted: boolean };
   };
-  /** Run an explicit Pi context compaction through the owning session. */
+  /** Start or reuse background preparation for an explicit context compaction. */
   "agent.compact": {
     params: { customInstructions?: string; sessionId: string };
-    result: import("./session.js").PiCompactionResult;
+    result: import("./session.js").PiCompactionStartResult;
   };
   /** Host-only passive delivery; deliberately absent from the surface method catalog. */
   "agent.notify": {

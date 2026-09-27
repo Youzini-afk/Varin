@@ -528,6 +528,44 @@ describe('DocumentRegistry', () => {
     }
   });
 
+  test('verifies independent dirty files concurrently before sending a prompt', async () => {
+    const memory = createMemoryDocuments();
+    const first = { workspaceId: 'project-a', resourceId: 'a.txt' };
+    const second = { workspaceId: 'project-b', resourceId: 'b.txt' };
+    memory.files.set(`${first.workspaceId}\0${first.resourceId}`, { content: 'A', revision: 'd1_a' });
+    memory.files.set(`${second.workspaceId}\0${second.resourceId}`, { content: 'B', revision: 'd1_b' });
+    let delayIdentity = false;
+    const releaseIdentity: Array<() => void> = [];
+    const documents: DocumentsAPI = {
+      ...memory.api,
+      resolveResourceIdentity: async (reference) => {
+        if (delayIdentity) await new Promise<void>((resolve) => { releaseIdentity.push(resolve); });
+        return memory.api.resolveResourceIdentity(reference);
+      },
+      captureAgentInputSnapshot: async () => ({
+        source: 'surface',
+        roots: [first, second].map((reference) => ({ workspaceId: reference.workspaceId, dirtyPaths: [reference.resourceId] })),
+        snapshot: { status: 'ready', ref: 'parallel-identity' },
+      }),
+    };
+    const registry = new DocumentRegistry({ documents, getGeneration: () => 1, recoverySessionId: 'parallel-capture' });
+    try {
+      await Promise.all([registry.open(first), registry.open(second)]);
+      registry.applyTransaction(first, 'A draft', { origin: 'editor' });
+      registry.applyTransaction(second, 'B draft', { origin: 'editor' });
+      delayIdentity = true;
+      const capture = registry.captureAgentInputContext('session-1');
+      await new Promise((resolve) => setTimeout(resolve, 0));
+      const startedTogether = releaseIdentity.length;
+      delayIdentity = false;
+      releaseIdentity.forEach((release) => release());
+      expect(startedTogether).toBe(2);
+      expect((await capture).source).toBe('surface');
+    } finally {
+      await registry.dispose();
+    }
+  });
+
   test('shares one dirty buffer across parent and child project aliases', async () => {
     const memory = createMemoryDocuments();
     const { api, coordinationOverrides, files, waitForDirtyPublication } = memory;

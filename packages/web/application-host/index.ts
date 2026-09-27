@@ -2459,7 +2459,7 @@ async function main(options: StartWebUiServerOptions = {}): Promise<WebUiServerC
         { cause: error },
       );
     }
-  });
+  }, { appliesToWorkFocus: ['research'] });
   registerHarnessThreadRoutes(app, {
     registry: threadRegistry,
     runtime: threadRuntime,

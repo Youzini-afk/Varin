@@ -99,7 +99,8 @@ export interface PiSessionViewState {
   branchEntriesSource?: 'live' | 'preview';
   /** Live read-only view of auxiliary compaction workers; completed traces also live in Pi entries. */
   compactionTraces?: Record<string, import('@varin/protocol').CompactionTrace & {
-    status: 'running' | 'finished' | 'failed';
+    status: 'requested' | 'running' | 'ready' | 'committed' | 'failed';
+    manual?: boolean;
     error?: string;
     partial?: { text: string; thinking: string };
   }>;
@@ -208,6 +209,7 @@ export interface PiSessionStoreState {
     images?: ImageAttachment[],
     instructions?: string,
     expectedRuntimeKey?: string,
+    onInputCaptured?: () => void,
   ): Promise<boolean>;
   forkSession(
     sessionId: string,
@@ -234,6 +236,7 @@ export interface PiSessionStoreState {
     images?: ImageAttachment[],
     instructions?: string,
     expectedRuntimeKey?: string,
+    onInputCaptured?: () => void,
   ): Promise<boolean>;
   recoverTo(
     sessionId: string,
@@ -273,6 +276,7 @@ export interface PiSessionStoreState {
     images?: ImageAttachment[],
     instructions?: string,
     expectedRuntimeKey?: string,
+    onInputCaptured?: () => void,
   ): Promise<boolean>;
   unarchiveSession(sessionId: string): Promise<SessionSummary>;
   updateSubmission(
@@ -920,14 +924,20 @@ export const createPiSessionStore = (
 
     const applyRuntimeEvent = (runtimeKey: string, envelope: RuntimeEventEnvelope): void => {
       if (!contextIsCurrent(runtimeKey)) return;
-      if (envelope.source.role === 'compaction' && envelope.event === 'compaction.trace') {
+      if ((envelope.source.role === 'compaction' || envelope.source.role === 'session')
+        && envelope.event === 'compaction.trace') {
         const { sessionId, taskId } = envelope.data;
         if (envelope.source.sessionId !== sessionId) return;
         set((state) => ({
           records: upsertRecord(state.records, sessionId, (current) => {
             const previous = current.compactionTraces?.[taskId];
+            if (previous?.status === 'committed' || previous?.status === 'failed') return current;
             const trace = previous ?? { taskId, entries: [], status: 'running' as const };
-            const updated = envelope.data.type === 'entry'
+            const updated = envelope.data.type === 'requested'
+              ? { ...trace, manual: true, status: envelope.data.phase === 'ready' ? 'ready' as const : (previous?.status ?? 'requested' as const) }
+              : envelope.data.type === 'started'
+                ? { ...trace, status: previous?.status === 'ready' ? 'ready' as const : 'running' as const }
+                : envelope.data.type === 'entry'
               ? { ...trace, entries: [...trace.entries, envelope.data.entry], partial: { text: '', thinking: '' } }
               : envelope.data.type === 'delta'
                 ? { ...trace, partial: {
@@ -937,7 +947,9 @@ export const createPiSessionStore = (
               : envelope.data.type === 'failed'
                 ? { ...trace, status: 'failed' as const, error: envelope.data.message }
                 : envelope.data.type === 'finished'
-                  ? { ...trace, status: 'finished' as const }
+                  ? { ...trace, status: 'ready' as const }
+                  : envelope.data.type === 'committed'
+                    ? { ...trace, status: 'committed' as const }
                   : trace;
             return { ...current, compactionTraces: { ...current.compactionTraces, [taskId]: updated } };
           }),
@@ -1520,6 +1532,18 @@ export const createPiSessionStore = (
           ...(customInstructions === undefined ? {} : { customInstructions }),
           sessionId,
         }, expectedRuntimeKey);
+        set((state) => ({
+          records: upsertRecord(state.records, sessionId, (current) => {
+            const prior = current.compactionTraces?.[result.taskId];
+            return { ...current, compactionTraces: {
+              ...current.compactionTraces,
+              [result.taskId]: prior
+                ? { ...prior, manual: true }
+                : { taskId: result.taskId, entries: [], manual: true,
+                    status: result.status === 'ready' ? 'ready' as const : 'requested' as const },
+            } };
+          }),
+        }));
         return result;
       },
 
@@ -1717,9 +1741,10 @@ export const createPiSessionStore = (
         return result;
       },
 
-      followUp: async (sessionId, text, images, instructions, expectedRuntimeKey) => {
+      followUp: async (sessionId, text, images, instructions, expectedRuntimeKey, onInputCaptured) => {
         const inputContext = await captureInputContext(sessionId);
         try {
+          onInputCaptured?.();
           const { result } = await request('agent.followUp', {
             ...(images === undefined ? {} : { images }),
             inputContext,
@@ -1935,9 +1960,10 @@ export const createPiSessionStore = (
         }
       },
 
-      prompt: async (sessionId, text, images, instructions, expectedRuntimeKey) => {
+      prompt: async (sessionId, text, images, instructions, expectedRuntimeKey, onInputCaptured) => {
         const inputContext = await captureInputContext(sessionId);
         try {
+          onInputCaptured?.();
           const { result } = await request('agent.prompt', {
             ...(images === undefined ? {} : { images }),
             inputContext,
@@ -2279,9 +2305,10 @@ export const createPiSessionStore = (
         }));
       },
 
-      steer: async (sessionId, text, images, instructions, expectedRuntimeKey) => {
+      steer: async (sessionId, text, images, instructions, expectedRuntimeKey, onInputCaptured) => {
         const inputContext = await captureInputContext(sessionId);
         try {
+          onInputCaptured?.();
           const { result } = await request('agent.steer', {
             ...(images === undefined ? {} : { images }),
             inputContext,
