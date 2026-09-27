@@ -33,6 +33,7 @@ import { createZone2DeliveryService, prepareZone2Threads } from "./zone2-threads
 import { selectNewZone2Material, zone2MaterialRevision } from "./zone2-material.js";
 import { formatZone2ThreadMaterial } from "./zone2.js";
 import { ThreadRegistryError } from "./thread-registry.js";
+import { sessionScopeId } from "./owner-scope.js";
 import { createExploreSearchService } from "./explore-service.js";
 import { isTerminalAttemptState, type ExperimentCaller } from "./experiments.js";
 import { resolveResearchCaller } from "./research-access.js";
@@ -70,11 +71,10 @@ export const performHarnessWebFetch = async (
 ): Promise<FetchResult> => {
   const url = params.url?.trim() ?? "";
   const snapshotId = params.snapshotId?.trim() ?? "";
-  if (!ctx.workspaceId) {
-    return { status: "failed", url, reason: "no workspace" };
-  }
   const binding = await host.threadRegistry?.getSessionBinding(ctx.sessionId);
-  const workspaceId = binding?.owningScopeId ?? ctx.workspaceId;
+  // HR0: an unbound session owns its receipts/materials under its own scope;
+  // web fetch does not require a project workspace.
+  const workspaceId = binding?.owningScopeId ?? ctx.workspaceId ?? sessionScopeId(ctx.sessionId);
   const owner = binding
     ? await host.threadRegistry?.getThreadById(binding.owningScopeId, binding.threadId)
     : null;
@@ -316,17 +316,22 @@ export function createShellExecService(host: HarnessServiceHost): HarnessService
         return { kind: "spawn-failed", reason, interpreter: "", hint } as ShellExecResultSpawnFailed;
       }
       let defaultAnchorCwd: string | undefined;
-      if (params.cwd === undefined && acceptedOperationDir !== undefined && acceptedWorkspaceId) {
-        const workspaceRoot = await host.resolveWorkspaceRoot?.(acceptedWorkspaceId) ?? null;
-        if (!workspaceRoot) {
+      if (params.cwd === undefined && acceptedOperationDir !== undefined) {
+        // HR0: the operation dir anchors at the actor's authority root — the
+        // authorized workspace root for bound sessions, the session launch
+        // directory for unbound ones.
+        const anchorRoot = acceptedWorkspaceId
+          ? await host.resolveWorkspaceRoot?.(acceptedWorkspaceId) ?? null
+          : ctx.actor.authorityRoot ?? null;
+        if (!anchorRoot) {
           return {
             kind: "spawn-failed",
             reason: "workspace-root-unavailable",
             interpreter: "",
-            hint: "The request's workspace root could not be resolved for its pinned operation directory.",
+            hint: "The request's authority root could not be resolved for its pinned operation directory.",
           } as ShellExecResultSpawnFailed;
         }
-        defaultAnchorCwd = path.resolve(workspaceRoot, acceptedOperationDir ?? "");
+        defaultAnchorCwd = path.resolve(anchorRoot, acceptedOperationDir ?? "");
       }
       // The router authorized params.cwd against the actor's operation dir;
       // run against the resolved absolute, not the raw relative (which would

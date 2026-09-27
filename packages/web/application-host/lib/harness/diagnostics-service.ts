@@ -36,7 +36,8 @@ export interface DiagnosticsProvider {
 export function createLspDiagnosticsService(provider: DiagnosticsProvider): HarnessService<"lsp.diagnostics"> {
   return {
     handle: async (params, ctx: HarnessServiceContext) => {
-      if (!ctx.workspaceId) {
+      const providerWorkspaceId = ctx.authorizedPaths[0]?.workspaceId ?? ctx.workspaceId;
+      if (!providerWorkspaceId) {
         return { status: "unavailable", diagnostics: [], reason: "no workspace" };
       }
       try {
@@ -44,7 +45,7 @@ export function createLspDiagnosticsService(provider: DiagnosticsProvider): Harn
         // authorizedPaths already reduced absolute/operation-dir-anchored
         // inputs to that form (RR4/E08).
         const resourcePath = ctx.authorizedPaths[0]?.resourceId ?? params.path;
-        const bound = await provider.bindDocument(ctx.workspaceId, resourcePath);
+        const bound = await provider.bindDocument(providerWorkspaceId, resourcePath);
         if (bound.status === "unsupported") {
           return { status: "unavailable", diagnostics: [], reason: "no language server for this file type" };
         }
@@ -54,9 +55,9 @@ export function createLspDiagnosticsService(provider: DiagnosticsProvider): Harn
         const waitMs = params.waitMs ?? 5000;
         const deadline = Date.now() + waitMs;
         for (;;) {
-          const diagnostics = await provider.getDiagnosticsForRevision(ctx.workspaceId, resourcePath, bound.revision);
+          const diagnostics = await provider.getDiagnosticsForRevision(providerWorkspaceId, resourcePath, bound.revision);
           if (diagnostics) {
-            const snapshot = await provider.getSnapshot(ctx.workspaceId, resourcePath);
+            const snapshot = await provider.getSnapshot(providerWorkspaceId, resourcePath);
             return {
               status: "ready",
               ...(snapshot !== null ? { snapshot } : {}),
@@ -118,14 +119,15 @@ export function createLspDiagnosticsSnapshotService(
 ): HarnessService<"lsp.diagnosticsSnapshot"> {
   return {
     handle: async (params, ctx: HarnessServiceContext) => {
-      if (!ctx.workspaceId) {
+      const providerWorkspaceId = ctx.authorizedPaths[0]?.workspaceId ?? ctx.workspaceId;
+      if (!providerWorkspaceId) {
         return { status: "unavailable", diagnostics: [], reason: "no workspace" };
       }
       // Binding both starts the Host view on demand and reports the text the
       // observation describes; an incremental observer never waits for it.
       // The provider keys documents by workspace-relative resource id.
       const resourcePath = ctx.authorizedPaths[0]?.resourceId ?? params.path;
-      const bound = await provider.bindDocument(ctx.workspaceId, resourcePath);
+      const bound = await provider.bindDocument(providerWorkspaceId, resourcePath);
       if (bound.status === "unsupported") {
         return { status: "unavailable", diagnostics: [], reason: "no language server for this file type" };
       }
@@ -135,8 +137,8 @@ export function createLspDiagnosticsSnapshotService(
       const provenance = { revision: bound.revision, source: bound.source };
       try {
         if (params.full === true) {
-          const diagnostics = await provider.getDiagnostics(ctx.workspaceId, resourcePath);
-          const snapshot = await provider.getSnapshot(ctx.workspaceId, resourcePath);
+          const diagnostics = await provider.getDiagnostics(providerWorkspaceId, resourcePath);
+          const snapshot = await provider.getSnapshot(providerWorkspaceId, resourcePath);
           return {
             status: "ready",
             ...(snapshot !== null ? { snapshot } : {}),
@@ -145,14 +147,18 @@ export function createLspDiagnosticsSnapshotService(
           };
         }
         const canonicalResourceId = ctx.authorizedPaths[0]?.canonicalResourceId ?? params.path;
-        const objectId = `${ctx.workspaceId}\0${canonicalResourceId}`;
+        // HR0: provider calls are addressed by the authorized resource root,
+        // not the actor's session classification (which may be null for an
+        // unbound session reading an external file).
+        const resourceWorkspaceId = ctx.authorizedPaths[0]?.workspaceId ?? ctx.workspaceId!;
+        const objectId = `${resourceWorkspaceId}\0${canonicalResourceId}`;
         const pending = await cursors.prepare<DiagnosticsCursor, import("@varin/protocol").DiagnosticsResult>(
           ctx.sessionId,
           "diagnostics",
           objectId,
           async (previous) => {
-            const diagnostics = await provider.getDiagnostics(ctx.workspaceId!, resourcePath);
-            const snapshot = await provider.getSnapshot(ctx.workspaceId!, resourcePath);
+            const diagnostics = await provider.getDiagnostics(resourceWorkspaceId, resourcePath);
+            const snapshot = await provider.getSnapshot(resourceWorkspaceId, resourcePath);
             const added = previous === null
               ? diagnostics
               : subtractDiagnostics(diagnostics, previous.value.diagnostics);

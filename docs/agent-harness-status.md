@@ -33,6 +33,13 @@ path-authority 走 Documents 资源根寻址——已登记的 file/directory �
 `workspaceScope` 继续作为绝对授权门；launch 目录离线不再阻塞无项目会话的 journal 准备。
 验证：web 套件 303 文件 2704 全绿（含新增 path-authority 资源根 5 例、service-host 无项目注册 2 例、
 thread-registry session-scope 持久化 1 例）；app-host 源码与测试 typecheck、protocol 构建全绿。
+
+HR1 已接线（wired）：`shell.exec` 每次执行的默认 cwd 锚定 actor `authorityRoot`（无项目会话=启动目录），
+不再经 `resolveWorkspaceRoot` 反推；`lsp.diagnostics`/`lsp.diagnosticsSnapshot` 按 `authorizedPaths[0]` 的
+资源根（而非会话 workspace 分类）调 provider，外部文件诊断不再被会话身份挡住；`web.fetch` 对无项目会话以
+`session:<id>` scope 记账与裁决，不再要求 workspace。受理时一次资源解析（router `authorizedPaths`）贯穿
+`fs.lock`、文档读写与恢复校验。
+验证：harness 目录 114 文件 1264 全绿；app-host 源码与测试 typecheck 绿。
 未测：真实桌面/打包环境的无项目聊天纵切、外部文件经真实 Documents 写入的端到端——列入 HR5 验收。
 
 **运行时可靠性专项 RR（2026-09-26：RR0–RR5 的代码路径与定向行为已复核；RR6 的真实安装包/外部代理平台纵切仍待验证）。**
