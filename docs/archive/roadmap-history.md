@@ -18,7 +18,7 @@ Status: historical record — archived 2026-09-27。已完成/被取代阶段的
    the D-296 retirement and AI4S implementation slices. No fixed deletion ratio, coverage quota, test count,
    or retry-until-green policy.
 
-Delivered per [testing-ci-audit.md](archive/testing-ci-audit.md): single-owner kernel/i18n/Electron
+Delivered per [testing-ci-audit.md](testing-ci-audit.md): single-owner kernel/i18n/Electron
 suites, quoted-glob discovery, retargeted recovery evidence on the production journal engine,
 artifact-driven CI with docs-only gating, and the cloud daemon boot failure fixed at its product
 root cause (a production dependency declaration). The former VS Code companion is outside the
@@ -68,7 +68,7 @@ with a fake provider, exercises extension UI, and shuts down without a child pro
 Acceptance: the prototype proved the broker/preload/session path before its temporary shell was
 removed in favor of the imported OpenChamber product base. Its protocol and host work continue in
 the maintained packages rather than a parallel desktop application. The prototype's process and
-security boundary is recorded in [phase-2-desktop.md](archive/phase-2-desktop.md); read it as provenance for
+security boundary is recorded in [phase-2-desktop.md](phase-2-desktop.md); read it as provenance for
 the retained Electron boundary, not as the current desktop specification.
 
 ## Phase 3 — Recovery semantics prototype (superseded)
@@ -382,7 +382,7 @@ verified manually; they have no automated release gate.
 ## Phase 8 — OpenChamber upstream capability absorption (complete)
 
 The reviewed fork/upstream reconciliation and capability-by-capability disposition live in
-[openchamber-upstream-20260813.md](archive/openchamber-upstream-20260813.md). The merge is used as an audit
+[openchamber-upstream-20260813.md](openchamber-upstream-20260813.md). The merge is used as an audit
 source rather than copied over the Pi-native engine. Every capability in that ledger now carries a
 final disposition: adopted at its Pi owner, supplemented beyond the upstream implementation, or
 reviewed and deliberately not copied.

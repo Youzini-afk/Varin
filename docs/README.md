@@ -15,36 +15,25 @@ Last updated: 2026-09-27
 - [agent-harness-plan.md](agent-harness-plan.md) — Harness 实施计划骨架与在途阶段（锚点稳定）
 - [agent-harness-decisions.md](agent-harness-decisions.md) — D-xxx 决策日志（追加式）
 - [decisions/](decisions/) — 专题决策备忘（harness-tools、documents、retrieval、working-state、test-suite）
-- [docs-review-log.md](docs-review-log.md) — 文档审计轮换日志
 
 ## 专题设计（状态见各文件 Status 行）
 
 - [agent-harness.md](agent-harness.md) — Harness 总体设计原文（契约仍部分现役；实现细节以 status 为准）
 - [research-cluster-design.md](research-cluster-design.md) — AI4S 科研集群（Phase 11）
 - [resource-oriented-harness-design.md](resource-oriented-harness-design.md) — HR0–HR5 资源寻址模型（已交付）
-- [recovery.md](recovery.md) / [recovery-runtime-authority.md](recovery-runtime-authority.md) — 恢复模型与运行时权威
-- [session-model.md](session-model.md) — 会话生命周期模型
+- [recovery.md](recovery.md) — 恢复模型与运行时权威
 - [plugin-gui-design.md](plugin-gui-design.md) / [varin-extension-platform.md](varin-extension-platform.md) — 插件 GUI 与扩展平台
 - [agent-follow-up-design.md](agent-follow-up-design.md) / [agent-settings-design.md](agent-settings-design.md) — Agent 续接与设置
-- [rust-kernel-design.md](rust-kernel-design.md) / [kernel-crates-ownership.md](kernel-crates-ownership.md) — Rust 内核与 crate 归属
+- [rust-kernel-design.md](rust-kernel-design.md) — Rust 内核设计
 - [testing-ci-design.md](testing-ci-design.md) — Stage Q 测试与 CI 规范
 - [web-research-search-design.md](web-research-search-design.md) — 阶段 L Web/科研检索
-- [task-division-tree.md](task-division-tree.md) — 线程分治树（实验性，见文件状态）
-- [memory-kernel-design.md](memory-kernel-design.md) — 记忆内核设计（探索）
-- [quick-decision-model-evaluation-plan.md](quick-decision-model-evaluation-plan.md) — 快速决策模型评测计划
-- [research-agent-bootstrap.md](research-agent-bootstrap.md) — 阶段 W 研究 Agent 引导（设计）
-- [technology.md](technology.md) / [packaging.md](packaging.md) / [linux-packaging.md](linux-packaging.md) — 技术选型与打包
 - [unified-file-editor-platform.md](unified-file-editor-platform.md) — 统一文件编辑器平台（设计）
-- [multi-ai-collaboration.md](multi-ai-collaboration.md) — 多 Agent 协作设计
-- [openchamber-pi-migration.md](openchamber-pi-migration.md) / [pi-model-capability-catalog.md](pi-model-capability-catalog.md) — Pi 迁移与模型能力
+- [openchamber-pi-migration.md](openchamber-pi-migration.md) — Pi 迁移与模型能力
 - [rust-kernel-audit.md](rust-kernel-audit.md) — Rust 内核审计（进行中）
-- [windows-local-ai-setup.md](windows-local-ai-setup.md) — Windows 本地 AI 环境
 
 ## 过程文档
 
 - [roadmap.md](roadmap.md) — 交付路线图与 Phase status 表
-- [merge-log.md](merge-log.md) / [upstream-pull.md](upstream-pull.md) — 上游合并记录
-- [local-lan-sharing.md](local-lan-sharing.md) — LAN 共享
 
 ## 历史归档（[archive/](archive/)）
 

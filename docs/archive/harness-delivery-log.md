@@ -134,7 +134,7 @@ invalid-summary）与 D-284 admission 经真实 in-process worker Agent 验证�
   编译后的 host/broker/client smoke 6 项与 Logo/Splash 40 项通过。
 - Host、kernel、CLI、Electron main/preload、Web/PWA 和移动资源完成构建。首次 CLI 构建命中了旧的本地
   `.application-host-types`，重建类型产物后通过；没有为旧符号增加兼容导出。
-- [kernel release smoke](../scripts/smoke-kernel-release.mjs) 验证新二进制的文件写入、检索、结构解析与 shell。
+- [kernel release smoke](../../scripts/smoke-kernel-release.mjs) 验证新二进制的文件写入、检索、结构解析与 shell。
   一次性完整 Host 启动检查使用新建的 Varin 数据目录与独立 Pi agent 目录：内置 Pi 就绪，Web 入口、
   `/health` 和 `/api/version` 正常，随后正常停止并清理测试目录；没有触碰开发者已有数据。
 - **发行边界**：当前版本号已更新为 0.9.13；未移动 tag、覆盖旧安装包或发布新 npm 包。npm 本地登录返回 E401，
@@ -255,7 +255,7 @@ Stage W 后续来源已接线：`any`/`all` 使用隐藏 leaf definition 与 par
 未实测，按本阶段交付选择不再作为完成门槛。
 
 **D-292/D-295 阶段 Q：测试与 CI 体系重整（2026-09-19），实施完成、本地验证通过，已由主代理验收收口。** 现状审计与处置见
-[testing-ci-audit.md](archive/testing-ci-audit.md)，设计见 [testing-ci-design.md](../testing-ci-design.md)。
+[testing-ci-audit.md](testing-ci-audit.md)，设计见 [testing-ci-design.md](../testing-ci-design.md)。
 
 已交付：kernel/native 验收集由 `packages/web/vitest.kernel.config.ts` 唯一归属（主 Web 套件 271 文件/2334 用例全绿且不再依赖
 Rust 产物；`test:kernel` 26 node 用例 + 17 文件/120 用例全绿）；恢复测试已重定向到生产 journal 引擎与忠实内存 durable
