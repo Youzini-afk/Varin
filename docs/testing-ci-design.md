@@ -6,12 +6,12 @@ Last updated: 2026-09-21
 
 2026-09-21 补充：阶段 Q 主要修正了测试装配与执行归属，未充分清理验证内容本身。
 本轮直接删除源码/样式字面量、手写 DTO 自证和退休迁移检查，收窄发布 smoke；具体去向见
-[审计补充](testing-ci-audit.md#11-test-content-reduction-2026-09-21)。本设计中的历史基线不代表现存文件或待执行的固定清单。
+[审计补充](archive/testing-ci-audit.md#11-test-content-reduction-2026-09-21)。本设计中的历史基线不代表现存文件或待执行的固定清单。
 
 本文定义全仓测试、测试装配、构建与 CI 的重整目标。实施顺序见
-[agent-harness-plan.md 的阶段 Q](agent-harness-plan.md#阶段-q测试与-ci-体系重整d-292待实施)，
+[agent-harness-plan.md 的阶段 Q](agent-harness-plan.md#阶段-q测试与-ci-体系重整d-292已验收收口)，
 交付事实仍记在 [agent-harness-status.md](agent-harness-status.md)。这是 AI4S 实施前的独立工程阶段；
-实施结果与每项处置的实际去向记录在 [testing-ci-audit.md](testing-ci-audit.md)。
+实施结果与每项处置的实际去向记录在 [testing-ci-audit.md](archive/testing-ci-audit.md)。
 
 ## 1. 要解决的问题
 

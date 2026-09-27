@@ -12,7 +12,8 @@ Varin uses a docs-first repository model rather than repository-local workflow S
 2. The nearest package or module `README.md` / `DOCUMENTATION.md` records local ownership and
    non-obvious invariants.
 3. Documents under `docs/` describe product-wide architecture, delivered designs, migration decisions,
-   security, and operations.
+   security, and operations; [docs/README.md](README.md) indexes them by status (current authority,
+   design, or archived history).
 4. `AGENTS.md` contains only the small set of cross-project boundaries that should remain stable.
 
 Examples and historical plans are evidence, not commands. When a document disagrees with current code,
@@ -77,7 +78,7 @@ Stage Q, specified in [testing-ci-design.md](testing-ci-design.md) and the
 AI4S implementation stage. It reassessed test responsibilities, fixtures, discovery, repeated
 builds and CI execution across the repository. The 2026-09-21 follow-up removes source-text, type-literal,
 retired migration and release-layout checks that remained after Q; the dispositions are recorded in
-[the audit addendum](testing-ci-audit.md#11-test-content-reduction-2026-09-21). Current scripts remain the
+[the audit addendum](archive/testing-ci-audit.md#11-test-content-reduction-2026-09-21). Current scripts remain the
 command authority. Do not turn cleanup into a checklist for every change or replace every deleted
 assertion with a new test. Prefer fewer tests that exercise distinct product behavior.
 

@@ -4,10 +4,10 @@ Status: accepted implementation plan; RR0–RR5 的代码路径与定向行为�
 
 Last updated: 2026-09-27
 
-**设计替代说明（D-337，尚未实施）：**维护者已确认 [面向任务与资源的 Harness](resource-oriented-harness-design.md) 方向。
+**设计替代说明（D-337，HR0–HR5 已实施）：** [面向任务与资源的 Harness](resource-oriented-harness-design.md) 已交付。
 下文 RR2 的可变会话操作目录、目录镜像与恢复，以及 RR4 的持久 queryScope 和目录型 workspace 数据/索引归属，
-作为已有实现与验收背景保留，不再是继续扩张的目标。后续按 HR0–HR5 改为单次执行参数、资源引用与持续索引。
-RR1 恢复/停止、RR3 执行与输出、RR5 联网及真实覆盖反馈继续有效；本说明不宣称代码已经完成替换。
+已被移除并替换为单次执行参数、资源引用与持续索引（交付证据见 [agent-harness-status.md](agent-harness-status.md)）。
+RR1 恢复/停止、RR3 执行与输出、RR5 联网及真实覆盖反馈继续有效；本文件保留为历史实施背景。
 
 源码核查基线：`0135144f`，仓库版本 `0.9.19`。问题输入来自维护者提供的 Varin 内部 Agent 体检报告，以及维护者实际观察到的聊天中途停止刷新。报告中的耗时、复现结果和环境信息属于报告证据，不是本计划编写时重新实测的结果。
 
