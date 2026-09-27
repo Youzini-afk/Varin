@@ -62,6 +62,7 @@ import type { PiComposerAgentSelection } from '@/lib/pi-runtime/composerAgent';
 import { useMessageHistory } from '@/components/chat/composer/state/useMessageHistory';
 import { isPiAbortError } from '@/lib/pi-runtime/abort';
 import { projectPiComposerActions } from './piComposerActions';
+import { parsePiLocalCommand } from './piLocalCommands';
 import type { WorkFocusId } from '@varin/protocol';
 import { PiWorkFocusControl } from './PiWorkFocusControl';
 import {
@@ -512,6 +513,15 @@ export const PiComposer: React.FC<PiComposerProps> = ({
   }, [messageHistory, onSendText]);
 
   const handleEditorKeyDown = React.useCallback((event: KeyboardEvent): boolean => {
+    if (autocomplete?.kind === 'command'
+      && event.key === 'Enter'
+      && !event.shiftKey
+      && !isIMECompositionEvent(event)
+      && parsePiLocalCommand(draft)?.kind === 'compact') {
+      setAutocomplete(null);
+      if (canSend && !sending) void submit();
+      return true;
+    }
     if (
       autocomplete !== null
       && (event.key === 'Enter'

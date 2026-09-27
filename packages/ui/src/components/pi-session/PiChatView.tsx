@@ -274,6 +274,8 @@ export const PiChatView: React.FC<PiChatViewProps> = ({
   const [treeInitialQuery, setTreeInitialQuery] = React.useState('');
   const [activePdfMaterial, setActivePdfMaterial] = React.useState<ActivePdfMaterial | null>(null);
   const appliedEditorRevisions = React.useRef(new Map<string, number>());
+  const compactionsInFlight = React.useRef(new Set<string>());
+  const [compactingSessions, setCompactingSessions] = React.useState<ReadonlySet<string>>(() => new Set());
 
   React.useEffect(() => {
     if (!active) {
@@ -485,15 +487,29 @@ export const PiChatView: React.FC<PiChatViewProps> = ({
         toast.error(t('chat.chatInput.toast.compactFailed'));
         return;
       }
+      const compactionKey = JSON.stringify([runtimeKey, currentSessionId]);
+      if (compactionsInFlight.current.has(compactionKey)) return;
+      compactionsInFlight.current.add(compactionKey);
+      setCompactingSessions(new Set(compactionsInFlight.current));
+      // A manual compaction can take a full model request. The command has been
+      // submitted now; leaving it in the editor makes both Enter and the send
+      // button look unresponsive and allows duplicate requests.
+      clearPiDraft(currentSessionId, runtimeKey);
       try {
         await usePiSessionStore.getState().compactSession(
           currentSessionId,
           command.customInstructions,
           runtimeKey,
         );
-        clearPiDraft(currentSessionId, runtimeKey);
       } catch (error) {
+        const latestDraft = readPiDraft(currentSessionId, runtimeKey);
+        if (!latestDraft.text.trim() && latestDraft.images.length === 0) {
+          setPiDraft(currentSessionId, currentDraft, runtimeKey);
+        }
         toast.error(error instanceof Error ? error.message : t('chat.chatInput.toast.compactFailed'));
+      } finally {
+        compactionsInFlight.current.delete(compactionKey);
+        setCompactingSessions(new Set(compactionsInFlight.current));
       }
       return;
     }
@@ -508,7 +524,7 @@ export const PiChatView: React.FC<PiChatViewProps> = ({
       return;
     }
     await sendDraft(currentSessionId, currentDraft, runtimeKey);
-  }, [clearPiDraft, currentSessionId, runtimeKey, sendDraft, setTreeDialogOpen, t]);
+  }, [clearPiDraft, currentSessionId, runtimeKey, sendDraft, setPiDraft, setTreeDialogOpen, t]);
 
   const handleDictationSend = React.useCallback(async (transcript: string) => {
     if (!currentSessionId) return;
@@ -1009,6 +1025,12 @@ export const PiChatView: React.FC<PiChatViewProps> = ({
               <span className="truncate font-mono">
                 {t('chat.context.cwd', { dir: snapshot.cwd })}
               </span>
+              {compactingSessions.has(JSON.stringify([runtimeKey, currentSessionId])) ? (
+                <span className="ml-auto flex shrink-0 items-center gap-1" role="status">
+                  <Icon name="loader-4" className="size-3 animate-spin" />
+                  /compact · {t('chat.piAssistant.working')}
+                </span>
+              ) : null}
             </div>
           </div>
         ) : null}
@@ -1039,7 +1061,7 @@ export const PiChatView: React.FC<PiChatViewProps> = ({
                 selectedThinkingLevel={snapshot.thinkingLevel}
                 workFocus={snapshot.workFocus?.selected.id ?? 'code'}
                 defaultWorkFocus={conversationProject ? conversationProject.defaultWorkFocus ?? 'code' : undefined}
-                sending={creating || sending || sessionOpening}
+                sending={creating || sending || sessionOpening || compactingSessions.has(JSON.stringify([runtimeKey, currentSessionId]))}
                 sessionId={snapshot.sessionId}
                 snapshot={snapshot}
                 workspace={snapshot.workspace}
