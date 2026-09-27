@@ -158,6 +158,7 @@ export interface ThreadRuntimeOptions {
   executionViews?: ThreadExecutionViewRegistry | undefined;
   virtualWriteGate?: VirtualWriteGate | undefined;
   cloneAgentInputSnapshot?(sessionId: string, context: AgentInputContext): SurfaceSnapshotCloneResult;
+  agentInputSurfaceOwner?(sessionId: string, context: AgentInputContext, workspaceId: string): { ownerId: string; generation: number; workspaceId: string } | null;
   sourceViews?: Pick<ReturnType<typeof createSourceViewStore>, "capture" | "contextFor" | "release">;
   resolveIntegrationCoordinator?(workspaceId: string): Promise<(Pick<IntegrationCoordinator, "mergeResult" | "previewResult" | "undoIntegration" | "invalidateWorkspace"> & Partial<Pick<IntegrationCoordinator, "invalidateThread">>) | null> | (Pick<IntegrationCoordinator, "mergeResult" | "previewResult" | "undoIntegration" | "invalidateWorkspace"> & Partial<Pick<IntegrationCoordinator, "invalidateThread">>) | null;
   canReclaimWorktree?(workspaceId: string, threadId: string, path: string): Promise<{ safe: boolean; reason?: string; release?: () => Promise<void> }>;
@@ -1676,7 +1677,14 @@ export function createThreadRuntime(options: ThreadRuntimeOptions) {
     const hasExternal = cloned.resources.some((resource) =>
       (resource.aliases ?? [resource.resource]).some((alias) => alias.workspaceId !== workspaceId));
     if (hasExternal && !options.sourceViews) throw new ThreadRuntimeError("unavailable", "Fixed external source storage is unavailable");
-    const fixed = hasExternal ? await options.sourceViews!.capture(cloned, workspaceId) : null;
+    const externalWorkspaceIds = [...new Set(cloned.resources.flatMap((resource) =>
+      (resource.aliases ?? [resource.resource]).map((alias) => alias.workspaceId)
+    ))].filter((id) => id !== workspaceId);
+    const owners = externalWorkspaceIds.flatMap((id) => {
+      const owner = options.agentInputSurfaceOwner?.(sessionId, context, id);
+      return owner ? [owner] : [];
+    });
+    const fixed = hasExternal ? await options.sourceViews!.capture(cloned, workspaceId, [], owners) : null;
     if (targetResources.length === 0) return fixed ? {
       draftBaselineId: null,
       sourceViewId: fixed.viewId,

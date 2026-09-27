@@ -1,7 +1,12 @@
-import { randomUUID } from "node:crypto";
+import { createHash, randomUUID } from "node:crypto";
 import type { AgentInputContext } from "@varin/protocol";
+import type { DocumentSurfaceWriteResult } from "@varin/protocol";
 import type { WorkspaceWorkingStateRootAccess } from "./working-state/types.js";
-import type { SurfaceSnapshotCloneResult, SurfaceSnapshotOverlayResult, SurfaceSnapshotReadResult } from "../documents/surface-snapshot-store.js";
+import type { SurfaceSnapshotCloneResult, SurfaceSnapshotInspectResult, SurfaceSnapshotOverlayResult, SurfaceSnapshotReadResult } from "../documents/surface-snapshot-store.js";
+import type { AgentSurfaceWriteChange } from "../documents/surface-mutation.js";
+import { applySurfaceEdits } from "../documents/surface-mutation.js";
+import { detectLineEnding, normalizeEditorLineEndings, serializeEditorContent } from "../documents/line-ending.js";
+import type { DirtyBufferPublication, FixedSourceMutationView } from "../documents/authority.js";
 import type { KernelRecordContext } from "./retrieval-artifacts.js";
 
 /** A private kernel storage partition. It is not a user project or a file-access root. */
@@ -19,12 +24,18 @@ interface ViewEntry {
   revision: string;
   encoding: string;
   bom: boolean;
+  baseRevision: string | null;
+  localEditRevision: number;
+  bufferHash?: string;
+  lineEnding?: "lf" | "crlf" | "cr";
+  pending?: { operationId: string; sessionId: string; instanceId: string; workspaceId: string; resourceId: string; nextHash: string; nextByteLength: number; nextBufferHash: string; nextSlot: string };
 }
 
 interface ViewRecord {
   viewId: string;
   entries: ViewEntry[];
   unavailable: Array<{ workspaceId: string; resourceId: string }>;
+  owners: Array<{ workspaceId: string; ownerId: string; generation: number }>;
 }
 
 const recordId = (viewId: string): string => `${RECORD_TYPE}:${viewId}`;
@@ -36,10 +47,13 @@ const parseRecord = (value: string): ViewRecord | null => {
     const record = JSON.parse(value) as ViewRecord;
     if (!record || typeof record.viewId !== "string" || !Array.isArray(record.entries)
       || !Array.isArray(record.unavailable)
+      || (record.owners !== undefined && !Array.isArray(record.owners))
       || record.entries.some((entry) => typeof entry.coordinationId !== "string"
         || typeof entry.slot !== "string" || typeof entry.hash !== "string"
         || !Array.isArray(entry.aliases))) return null;
-    return record;
+    // Views captured before editor-write support remain readable. They have no
+    // captured owner, so a write must still fail rather than guessing one.
+    return { ...record, owners: record.owners ?? [] };
   } catch {
     return null;
   }
@@ -52,6 +66,7 @@ export const sourceViewIdFromContext = (context: AgentInputContext): string | nu
     : null;
 
 export const createSourceViewStore = (workingStates: WorkspaceWorkingStateRootAccess) => {
+  const instanceId = randomUUID();
   const requireContext = (value: unknown): KernelRecordContext => {
     const context = value as KernelRecordContext | undefined;
     if (!context?.records) throw new Error("Kernel source-view record storage is unavailable");
@@ -90,6 +105,7 @@ export const createSourceViewStore = (workingStates: WorkspaceWorkingStateRootAc
     cloned: Extract<SurfaceSnapshotCloneResult, { status: "ready" }>,
     excludedWorkspaceId: string,
     unavailable: Array<{ workspaceId: string; resourceId: string }> = [],
+    owners: Array<{ workspaceId: string; ownerId: string; generation: number }> = [],
   ): Promise<{ viewId: string; context: AgentInputContext } | null> => {
     const byIdentity = new Map<string, { entry: (typeof cloned.resources)[number]; aliases: Map<string, { workspaceId: string; resourceId: string }> }>();
     for (const entry of cloned.resources) {
@@ -149,9 +165,13 @@ export const createSourceViewStore = (workingStates: WorkspaceWorkingStateRootAc
           revision: entry.revision,
           encoding: entry.encoding,
           bom: entry.bom,
+          baseRevision: entry.baseRevision,
+          localEditRevision: entry.localEditRevision,
+          bufferHash: entry.bufferHash ?? `sha256-${createHash("sha256").update(normalizeEditorLineEndings(entry.content), "utf8").digest("hex")}`,
+          ...(entry.lineEnding ? { lineEnding: entry.lineEnding } : {}),
         });
       }
-      const value: ViewRecord = { viewId, entries, unavailable: pending };
+      const value: ViewRecord = { viewId, entries, unavailable: pending, owners };
       await records.put({
         operationId: `source-view-capture:${viewId}`,
         recordId: recordId(viewId),
@@ -193,6 +213,7 @@ export const createSourceViewStore = (workingStates: WorkspaceWorkingStateRootAc
       }
       const entry = value.entries.find((item) => item.aliases.some((alias) => aliasKey(alias) === key));
       if (!entry) return { status: "disk" };
+      if (entry.pending) return { status: "unavailable", message: "The external editor write has not been confirmed" };
       if (!coordinationId || coordinationId !== entry.coordinationId) {
         return { status: "unavailable", message: "The external file identity changed after dispatch" };
       }
@@ -210,6 +231,201 @@ export const createSourceViewStore = (workingStates: WorkspaceWorkingStateRootAc
       };
     },
     "shared",
+  );
+
+  const prepareMutation = async (
+    viewId: string,
+    sessionId: string,
+    workspaceId: string,
+    changes: readonly AgentSurfaceWriteChange[],
+  ): Promise<{ fixedView: FixedSourceMutationView; fixedPaths: string[] } | null> => workingStates.withBranchStore(
+    SOURCE_VIEW_STORAGE_SCOPE,
+    "source-view-write-prepare",
+    async (store, context) => {
+      const storage = requireContext(context);
+      const record = await storage.records.get(recordId(viewId));
+      const value = record?.recordType === RECORD_TYPE && record.state !== "released"
+        ? parseRecord(record.payloadJson) : null;
+      if (!record || !value) throw new Error("The fixed source view is no longer available");
+      const selected = changes.flatMap((change) => {
+        const key = aliasKey({ workspaceId, resourceId: change.resourceId });
+        const entry = value.entries.find((item) => item.aliases.some((alias) => aliasKey(alias) === key));
+        return entry ? [{ change, entry }] : [];
+      });
+      if (selected.length === 0) return null;
+      if (new Set(selected.map(({ entry }) => entry.coordinationId)).size !== selected.length) {
+        throw new Error("One editor draft appears more than once in this write; no file was changed");
+      }
+      const owner = value.owners.find((item) => item.workspaceId === workspaceId);
+      if (!owner) throw new Error(`The external editor for ${workspaceId} has no captured owner`);
+      const operationId = randomUUID();
+      const inspections = new Map<string, SurfaceSnapshotInspectResult>();
+      const ownerIds: string[] = [];
+      for (const { change, entry } of selected) {
+        if (entry.targetAlias) throw new Error(`${change.resourceId} belongs to the child's own branch, not the external editor`);
+        if (entry.pending) throw new Error(`${change.resourceId} has an unconfirmed editor write`);
+        if (!Number.isSafeInteger(entry.localEditRevision) || entry.localEditRevision < 0) {
+          throw new Error(`${change.resourceId} has no captured editor version; reopen the child source view before writing`);
+        }
+        if (change.action === "delete") throw new Error(`${change.resourceId} is an editor buffer and cannot be deleted by a text tool`);
+        const bytes = storage.client
+          ? Buffer.from((await storage.client.getBlob(entry.hash, { recordId: record.recordId, slot: entry.slot })).bytesBase64, "base64")
+          : await store.getObject(entry.hash);
+        if (!bytes || bytes.byteLength !== entry.byteLength) throw new Error(`${change.resourceId} fixed draft bytes are unavailable`);
+        const content = bytes.toString("utf8");
+        const lineEnding = entry.lineEnding ?? detectLineEnding(content);
+        if (change.action === "write" && typeof change.content !== "string") {
+          throw new Error("write requires text content");
+        }
+        if (change.action === "edit" && !change.edits?.length) {
+          throw new Error("edit requires at least one replacement");
+        }
+        const next = change.action === "write"
+          ? serializeEditorContent(change.content!, lineEnding)
+          : applySurfaceEdits(content, change.edits!, lineEnding);
+        if (next.includes("\0")) throw new Error(`${change.resourceId} is not a text file`);
+        const nextObject = await store.putObject(Buffer.from(next, "utf8"));
+        const nextOwnerId = store.ownerIdForObject?.(nextObject.hash);
+        if (nextOwnerId) ownerIds.push(nextOwnerId);
+        const nextSlot = `pending:${randomUUID()}`;
+        const bufferHash = entry.bufferHash ?? `sha256-${createHash("sha256").update(normalizeEditorLineEndings(content), "utf8").digest("hex")}`;
+        inspections.set(change.resourceId, {
+          status: "ready", source: "surface-draft", content, revision: entry.revision,
+          resource: { workspaceId, resourceId: change.resourceId },
+          baseRevision: entry.baseRevision, localEditRevision: entry.localEditRevision,
+          encoding: entry.encoding, bom: entry.bom, bufferHash, lineEnding,
+        });
+        entry.pending = {
+          operationId, sessionId, instanceId, workspaceId, resourceId: change.resourceId,
+          nextHash: nextObject.hash, nextByteLength: nextObject.byteLength,
+          nextBufferHash: `sha256-${createHash("sha256").update(normalizeEditorLineEndings(next), "utf8").digest("hex")}`,
+          nextSlot,
+        };
+      }
+      const references = value.entries.flatMap((entry) => [
+        { slot: entry.slot, objectHash: entry.hash },
+        ...(entry.pending ? [{ slot: entry.pending.nextSlot, objectHash: entry.pending.nextHash }] : []),
+      ]);
+      await storage.records.put({
+        operationId: `source-view-write-prepare:${operationId}`, recordId: record.recordId,
+        recordType: RECORD_TYPE, state: record.state, payloadJson: JSON.stringify(value),
+        ownerIds, references, expectedRecordRevision: record.recordRevision,
+      });
+      return {
+        fixedPaths: [...inspections.keys()],
+        fixedView: {
+          operationId,
+          inspect: (resourceId, targetWorkspaceId) => {
+            if (targetWorkspaceId !== workspaceId) return { status: "disk" };
+            const fixed = inspections.get(resourceId);
+            if (fixed) return fixed;
+            return value.unavailable.some((alias) => alias.workspaceId === workspaceId && alias.resourceId === resourceId)
+              ? { status: "unavailable", message: "The external editor draft was unavailable at dispatch" }
+              : { status: "disk" };
+          },
+          owner: (targetWorkspaceId) => targetWorkspaceId === workspaceId ? owner : null,
+        },
+      };
+    },
+  );
+
+  const pendingOperation = async (viewId: string, workspaceId: string, resourceId: string) => {
+    const record = await load(viewId);
+    const key = aliasKey({ workspaceId, resourceId });
+    return record?.entries.find((entry) => entry.aliases.some((alias) => aliasKey(alias) === key))?.pending ?? null;
+  };
+
+  const clearUnstartedMutation = async (
+    viewId: string, operationId: string, livePublications: readonly DirtyBufferPublication[],
+  ): Promise<boolean> => workingStates.withBranchStore(
+    SOURCE_VIEW_STORAGE_SCOPE, "source-view-clear-unstarted", async (_store, context) => {
+      const records = requireContext(context).records;
+      const record = await records.get(recordId(viewId));
+      const value = record?.recordType === RECORD_TYPE && record.state !== "released"
+        ? parseRecord(record.payloadJson) : null;
+      if (!record || !value) return false;
+      const pending = value.entries.filter((entry) => entry.pending?.operationId === operationId);
+      if (!pending.length || pending.some((entry) => entry.pending!.instanceId === instanceId)) return false;
+      // A missing durable operation alone is insufficient if old journal rows
+      // were collected. Require the same editor owner, hash and local revision.
+      for (const entry of pending) {
+        const marker = entry.pending!;
+        const owner = value.owners.find((candidate) => candidate.workspaceId === marker.workspaceId);
+        const live = owner && livePublications.find((publication) => publication.workspaceId === marker.workspaceId
+          && publication.ownerId === owner.ownerId && publication.generation === owner.generation)
+          ?.resources.find((resource) => resource.resource.resourceId === marker.resourceId);
+        if (!live || live.localEditRevision !== entry.localEditRevision || live.bufferHash !== entry.bufferHash) return false;
+      }
+      for (const entry of pending) delete entry.pending;
+      await records.put({
+        operationId: `source-view-clear-unstarted:${operationId}`, recordId: record.recordId,
+        recordType: RECORD_TYPE, state: record.state, payloadJson: JSON.stringify(value),
+        references: value.entries.flatMap((entry) => [
+          { slot: entry.slot, objectHash: entry.hash },
+          ...(entry.pending ? [{ slot: entry.pending.nextSlot, objectHash: entry.pending.nextHash }] : []),
+        ]), expectedRecordRevision: record.recordRevision,
+      });
+      return true;
+    },
+  );
+
+  const finishMutation = async (
+    viewId: string, operationId: string, result: DocumentSurfaceWriteResult, livePublications: readonly DirtyBufferPublication[] = [],
+  ): Promise<void> => workingStates.withBranchStore(
+    SOURCE_VIEW_STORAGE_SCOPE,
+    "source-view-write-finish",
+    async (_store, context) => {
+      const records = requireContext(context).records;
+      const record = await records.get(recordId(viewId));
+      const value = record?.recordType === RECORD_TYPE && record.state !== "released"
+        ? parseRecord(record.payloadJson) : null;
+      if (!record || !value) throw new Error("The fixed source view disappeared before write confirmation");
+      const outcomes = result.status === "disk" ? [] : result.results;
+      let changed = false;
+      for (const entry of value.entries) {
+        const pending = entry.pending;
+        if (pending?.operationId !== operationId) continue;
+        const outcome = outcomes.find((item) => item.path === pending.resourceId);
+        if (outcome?.status === "applied" && outcome.revision) {
+          const revision = Number(outcome.revision.slice(outcome.revision.lastIndexOf(":") + 1));
+          if (!Number.isSafeInteger(revision) || revision <= entry.localEditRevision) continue;
+          entry.hash = pending.nextHash;
+          entry.byteLength = pending.nextByteLength;
+          entry.slot = pending.nextSlot;
+          entry.bufferHash = pending.nextBufferHash;
+          entry.localEditRevision = revision;
+          entry.revision = outcome.revision;
+          delete entry.pending;
+          changed = true;
+        } else if (outcome?.status === "compensated") {
+          const owner = value.owners.find((item) => item.workspaceId === pending.workspaceId);
+          if (!owner) continue;
+          const live = livePublications.find((item) => item.workspaceId === pending.workspaceId
+            && item.ownerId === owner.ownerId && item.generation === owner.generation)
+            ?.resources.find((item) => item.resource.resourceId === pending.resourceId);
+          if (!live || live.bufferHash !== entry.bufferHash || !Number.isSafeInteger(live.localEditRevision)) continue;
+          entry.localEditRevision = live.localEditRevision;
+          entry.revision = `surface-draft:source-view:${viewId}:${live.localEditRevision}`;
+          delete entry.pending;
+          changed = true;
+        } else if (outcome && outcome.status !== "needs-attention") {
+          // The completed Documents transaction confirms no editor change for
+          // this path. An uncertain or compensated mutation keeps the marker.
+          delete entry.pending;
+          changed = true;
+        }
+      }
+      if (!changed) return;
+      await records.put({
+        operationId: `source-view-write-finish:${operationId}`, recordId: record.recordId,
+        recordType: RECORD_TYPE, state: record.state, payloadJson: JSON.stringify(value),
+        references: value.entries.flatMap((entry) => [
+          { slot: entry.slot, objectHash: entry.hash },
+          ...(entry.pending ? [{ slot: entry.pending.nextSlot, objectHash: entry.pending.nextHash }] : []),
+        ]),
+        expectedRecordRevision: record.recordRevision,
+      });
+    },
   );
 
   const targetAlias = async (
@@ -250,6 +466,7 @@ export const createSourceViewStore = (workingStates: WorkspaceWorkingStateRootAc
     let sawRelevantAlias = false;
     for (const entry of record.entries) for (const alias of entry.aliases) {
       if (alias.workspaceId !== workspaceId || !within(alias.resourceId)) continue;
+      if (entry.pending) return { status: "unavailable", message: "The external editor write has not been confirmed" };
       sawRelevantAlias = true;
       let revision = entry.revision;
       if (entry.targetAlias && resolveAliasedSource) {
@@ -306,5 +523,5 @@ export const createSourceViewStore = (workingStates: WorkspaceWorkingStateRootAc
     },
   );
 
-  return { capture, contextFor, read, targetAlias, overlay, release, reconcile };
+  return { capture, contextFor, read, targetAlias, overlay, prepareMutation, pendingOperation, clearUnstartedMutation, finishMutation, release, reconcile };
 };

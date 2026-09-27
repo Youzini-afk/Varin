@@ -640,9 +640,16 @@ and use that effective state as branch
 revision zero. Virtual publication reads the live branch head; materialized
 publication reads the directory. Merge and migration continue to read the selected
 fixed result. Draft-derived paths are checked even when Git ignores them.
-External fixed drafts remain readable after the parent surface snapshot retires;
-their writeback needs the external editor's own versioned target and is not
-misdirected into this Thread's single-root branch. Thread deletion releases the
+External fixed drafts remain readable after the parent surface snapshot retires.
+Independent external draft writes use the captured editor owner and Documents'
+versioned surface operation. A durable pending source-view record precedes the
+editor side effect; a confirmed result advances the fixed bytes and version for
+subsequent child reads. An intervening user edit conflicts without touching the
+buffer. After a Host restart, the next read recovers confirmed writes from Documents'
+durable operation result; a prepare with no durable operation may be cleared
+only if the live owner, buffer hash, and edit revision still match the capture.
+Unknown outcomes remain unavailable instead of replaying the write or
+reading stale bytes. Same-file aliases still target the child's branch. Thread deletion releases the
 source view; startup reconciliation releases captures that never acquired a Thread.
 Configured `copyIgnored` roots are stored as branch `captureScopes`; nested
 children inherit or narrow that frozen list and do not reread live settings.

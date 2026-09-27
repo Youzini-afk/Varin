@@ -164,7 +164,7 @@ export const applyTextEdits = (
   return next;
 };
 
-const applySurfaceEdits = (
+export const applySurfaceEdits = (
   serialized: string,
   edits: ReadonlyArray<{ oldText: string; newText: string }>,
   lineEnding: DocumentLineEnding,
@@ -310,6 +310,7 @@ export async function applyAgentSurfaceMutation(
     workspaceId: string;
     changes: readonly AgentSurfaceWriteChange[];
     signal?: AbortSignal;
+    operationId?: string;
   },
 ): Promise<{ result: DocumentSurfaceWriteResult; record: AgentMutationRecord | null }> {
   if (input.changes.length === 0) {
@@ -477,7 +478,7 @@ export async function applyAgentSurfaceMutation(
 
   const toApplySurface = planned.filter((item) => item.class === "surface");
   const toApplyDisk = planned.filter((item) => item.class === "disk");
-  const operationId = randomUUID();
+  const operationId = input.operationId ?? randomUUID();
   const applied: Array<
     | { kind: "surface"; item: PlannedPath; receipt: DocumentSurfaceOperationResult }
     | { kind: "disk"; item: PlannedPath; before: NonNullable<PlannedPath["diskBefore"]> }

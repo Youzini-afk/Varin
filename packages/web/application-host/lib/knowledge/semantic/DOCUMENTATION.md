@@ -24,6 +24,10 @@ derived store (`../vectors/`); they reuse `harness.embed` but never this MiniLM 
 - Production assembly: `workspace-runtime.ts` owns per-workspace Settings/describe resolution, remote
   transport, config watches, backend refresh, query view selection and shutdown. Application Host uses
   its `semanticRecall` / `harnessSettings` / `rerankExploreViews` directly; tests consume those same methods.
+  One Host-owned serial reconciler periodically inventories activated roots to recover additions missed
+  by quiet watches. The first interval is at least one minute; later quiet intervals use the prior scan's
+  elapsed time to target about 1% wall-time duty. Periodic scans stay detached from query latency, while
+  watcher reset/recovery still forces content verification.
   A virtual Thread uses its pinned WorkingBranch files. A materialized Thread indexes its execution
   Documents workspace, never the owning workspace's current files. Both Documents mutations and successful
   native-tool journal completions notify this runtime. Open indexes mask an observed path before the tool

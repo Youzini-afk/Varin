@@ -19,6 +19,8 @@ type InferenceBroker = Pick<PiRuntimeBroker, 'requestForWorkspace' | 'watchConfi
 type PathMutation = Pick<DocumentMutationObservation, 'workspaceId' | 'resourceId' | 'kind'>;
 
 export interface WorkspaceSemanticRuntimeOptions extends Omit<SemanticIndexRuntimeOptions, 'getEmbedder' | 'documents'> {
+  /** Override the quiet first/retry interval in hosts that need different pacing. */
+  reconcileMinimumIntervalMs?: number;
   documents: Pick<DocumentAuthority, 'read' | 'inspectWorkspace' | 'watch' | 'agentInputDraftPaths' | 'readAgentInputSnapshot'>;
   readDraft?: (
     sessionId: string,
@@ -55,6 +57,12 @@ type WorkspaceState = {
   documentWatchReady: boolean;
 };
 
+// Reconcile each active root only after a quiet first minute. Later intervals
+// scale with the previous scan so inventory work stays near 1% of wall time.
+const RECONCILE_MINIMUM_INTERVAL_MS = 60_000;
+const RECONCILE_DUTY_FRACTION = 0.01;
+const MAX_TIMER_DELAY_MS = 2_147_483_647;
+
 /** The production owner of workspace settings, inference transport and query views. */
 export function createWorkspaceSemanticRuntime(options: WorkspaceSemanticRuntimeOptions) {
   let localEmbedder = options.embedder;
@@ -64,10 +72,68 @@ export function createWorkspaceSemanticRuntime(options: WorkspaceSemanticRuntime
   const pending = new Set<Promise<unknown>>();
   let epoch = 0;
   let disposed = false;
+  let reconcileTimer: ReturnType<typeof setTimeout> | null = null;
+  let reconcileDueAt = 0;
+  let reconcileCursor = 0;
+  let reconcileRunning = false;
+  let reconcilingWorkspaceId: string | null = null;
+  const reconcileMinimumIntervalMs = typeof options.reconcileMinimumIntervalMs === 'number'
+    && Number.isFinite(options.reconcileMinimumIntervalMs)
+    && options.reconcileMinimumIntervalMs > 0
+    ? options.reconcileMinimumIntervalMs
+    : RECONCILE_MINIMUM_INTERVAL_MS;
   const report = (error: unknown): void => { try { options.onError?.(error); } catch { /* observation only */ } };
   const track = (task: Promise<unknown>): void => {
     pending.add(task);
     void task.catch(report).finally(() => pending.delete(task));
+  };
+  const armReconcileTimer = (): void => {
+    if (disposed || reconcileTimer || reconcileRunning || states.size === 0) return;
+    const remaining = Math.max(0, reconcileDueAt - Date.now());
+    // Node clamps larger timeouts to a near-immediate callback. Re-arm in
+    // platform-sized pieces without imposing a cap on the intended interval.
+    reconcileTimer = setTimeout(() => {
+      reconcileTimer = null;
+      if (disposed) return;
+      if (reconcileDueAt - Date.now() > 0) {
+        armReconcileTimer();
+        return;
+      }
+      track(reconcileNextRoot());
+    }, Math.min(remaining, MAX_TIMER_DELAY_MS));
+  };
+  const scheduleReconcile = (delayMs = reconcileMinimumIntervalMs): void => {
+    if (disposed || !options.searchFilesystemFiles || reconcileTimer || reconcileRunning || states.size === 0) return;
+    reconcileDueAt = Date.now() + Math.max(0, delayMs);
+    armReconcileTimer();
+  };
+  const reconcileNextRoot = async (): Promise<void> => {
+    if (disposed || states.size === 0) return;
+    reconcileRunning = true;
+    const workspaceIds = [...states.keys()];
+    const workspaceId = workspaceIds[reconcileCursor % workspaceIds.length]!;
+    reconcileCursor = (reconcileCursor + 1) % workspaceIds.length;
+    const state = states.get(workspaceId);
+    if (!state) {
+      reconcileRunning = false;
+      scheduleReconcile();
+      return;
+    }
+    const startedAt = performance.now();
+    reconcilingWorkspaceId = workspaceId;
+    try {
+      // scanWorkspace's default is metadata-only. Its per-scope in-flight map
+      // also joins an initial or mutation-triggered scan already in progress.
+      await state.runtime.scanWorkspace(workspaceId);
+    } finally {
+      if (reconcilingWorkspaceId === workspaceId) reconcilingWorkspaceId = null;
+      reconcileRunning = false;
+      if (!disposed) {
+        const elapsedMs = Math.max(0, performance.now() - startedAt);
+        const quietMs = elapsedMs * (1 - RECONCILE_DUTY_FRACTION) / RECONCILE_DUTY_FRACTION;
+        scheduleReconcile(Math.max(reconcileMinimumIntervalMs, quietMs));
+      }
+    }
   };
   const assertActive = (): void => {
     if (disposed) throw new Error('Workspace semantic runtime is closed');
@@ -254,6 +320,7 @@ export function createWorkspaceSemanticRuntime(options: WorkspaceSemanticRuntime
       // Never let a query run against the local backend before settings resolve.
       markUnavailable(state);
       states.set(workspaceId, state);
+      scheduleReconcile();
       // Subscribe before the first scan so writes during enumeration are either
       // observed incrementally or cause the scope to be reconciled.
       await ensureDocumentWatch(state, false);
@@ -303,6 +370,7 @@ export function createWorkspaceSemanticRuntime(options: WorkspaceSemanticRuntime
       const result = await state.runtime.search(workspaceScope(workspaceId), question, limit, {
         ...(searchOptions?.signal ? { signal: searchOptions.signal } : {}),
         ...(searchOptions?.roots ? { roots: searchOptions.roots } : {}),
+        ...(reconcilingWorkspaceId === workspaceId ? { waitForFirstPublish: false } : {}),
         overlays: view.overlays, view: view.view,
         ...(threadQuery ? { threadQuery } : {}),
       });
@@ -320,10 +388,10 @@ export function createWorkspaceSemanticRuntime(options: WorkspaceSemanticRuntime
         scope: result.status.scope, lifecycle: result.status.lifecycle, hits: result.hits,
         ...(gaps.length > 0 ? { gaps } : {}),
         note: !state.documentWatchReady
-          ? 'Filesystem watching is unavailable; changes and additions may be absent until this root is rescanned.'
+          ? 'Filesystem watching is unavailable; changes and additions may be absent until periodic root reconciliation.'
           : gaps.some((gap) => gap.reason === 'content-changed')
-            ? 'Changed indexed files were omitted and queued for reindexing. Newly added files rely on filesystem observation.'
-            : 'Disk hit revisions are checked against Documents. Newly added files rely on filesystem observation; a missed watch event can remain absent until a root rescan.',
+            ? 'Changed indexed files were omitted and queued for reindexing. Periodic metadata reconciliation also discovers new files.'
+            : 'Disk hit revisions are checked against Documents. Periodic root reconciliation discovers additions missed by filesystem observation.',
       };
     } finally {
       await threadSnapshot?.release();
@@ -464,6 +532,8 @@ export function createWorkspaceSemanticRuntime(options: WorkspaceSemanticRuntime
     dispose: async () => {
       disposed = true;
       epoch++;
+      if (reconcileTimer) clearTimeout(reconcileTimer);
+      reconcileTimer = null;
       for (const state of states.values()) state.documentWatch?.close();
       await Promise.allSettled([...states.values()].map((state) => state.runtime.dispose()));
       await Promise.allSettled([...loads.values(), ...pending]);

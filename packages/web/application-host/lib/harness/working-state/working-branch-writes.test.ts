@@ -230,9 +230,14 @@ describe("WorkingState Host virtual write production chain", () => {
       action: "write",
       content: "wrong target\n",
     });
-    expect(write).toMatchObject({ ok: true, result: { status: "rejected" } });
+    expect(write).toMatchObject({ ok: true, result: { status: "disk" } });
     expect(await fs.readFile(externalFile, "utf8")).toBe("external kept\n");
     expect(await fs.readFile(path.join(f.workspace, "kept.txt"), "utf8")).toBe("fixed kept\n");
+    const mixed = await f.writes.branchWrite("session-a", [
+      { workspaceId: f.workspaceId, resourceId: "kept.txt", action: "write", content: "branch attempt\n" },
+      { workspaceId: "external-root", resourceId: "kept.txt", action: "write", content: "external attempt\n" },
+    ]);
+    expect(mixed.status).toBe("rejected");
     const branch = await f.writes.branchWrite("session-a", [{ workspaceId: f.workspaceId, resourceId: "kept.txt", action: "edit", edits: [{ oldText: "fixed kept", newText: "branch kept" }] }]);
     expect(branch.status).toBe("committed");
   });

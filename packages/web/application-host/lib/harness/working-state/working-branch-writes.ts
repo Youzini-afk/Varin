@@ -111,8 +111,12 @@ export function createWorkingBranchWriteServices(options: {
 
   return {
     async branchWrite(sessionId, changes, expectedRevision, signal) {
-      return runWhenVirtual(sessionId, async (view) => (
-        options.workingStates.withBranchStore( view.workspaceId, "working-branch-write", async (store) => {
+      return runWhenVirtual(sessionId, async (view) => {
+        if (changes.every((change) => change.workspaceId !== view.workspaceId)) return { status: "disk" as const };
+        if (changes.some((change) => change.workspaceId !== view.workspaceId)) {
+          return rejected("A single patch spans the child branch and an external resource; no file was written. Apply the resource changes separately.");
+        }
+        return options.workingStates.withBranchStore( view.workspaceId, "working-branch-write", async (store) => {
           const live = options.views.get(sessionId);
           if (!live || live.mode !== "virtual") return { status: "disk" as const };
           const expected = expectedRevision ?? live.writeRevision;
@@ -207,8 +211,8 @@ export function createWorkingBranchWriteServices(options: {
             revision: committed.writeRevision,
             provenance: { branchId: live.branchId, revision: committed.writeRevision, origin },
           };
-        }, "exclusive", { sessionId: view.sessionId, threadId: view.threadId, runId: view.runId })
-      ), signal);
+        }, "exclusive", { sessionId: view.sessionId, threadId: view.threadId, runId: view.runId });
+      }, signal);
     },
 
     async commitBranchWrites(sessionId, files, expectedWriteRevision, store, signal) {

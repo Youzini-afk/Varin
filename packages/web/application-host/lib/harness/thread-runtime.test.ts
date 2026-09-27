@@ -454,6 +454,7 @@ describe("thread runtime", () => {
       resource: { workspaceId: "nested-project", resourceId: "draft.ts" },
     };
     const capturedViews: string[] = [];
+    const capturedOwners: Array<Array<{ workspaceId: string; ownerId: string; generation: number }>> = [];
     const releasedViews: string[] = [];
     const draftRuntime = createThreadRuntime({
       registry,
@@ -461,8 +462,10 @@ describe("thread runtime", () => {
       resolveWorkspaceRoot: async () => "/workspace",
       resolveRuntimeWorkspaceId: async () => WORKSPACE,
       workingStates,
+      agentInputSurfaceOwner: (_sessionId, _context, workspaceId) => ({ workspaceId, ownerId: "editor-owner", generation: 2 }),
       sourceViews: {
-        capture: async () => {
+        capture: async (_cloned, _excluded, _unavailable, owners) => {
+          capturedOwners.push(owners ?? []);
           const viewId = `view-${capturedViews.length + 1}`;
           capturedViews.push(viewId);
           return { viewId, context: { source: "surface" as const, roots: [], snapshot: { status: "ready" as const, ref: `source-view:${viewId}` } } };
@@ -490,6 +493,7 @@ describe("thread runtime", () => {
       const baseline = await draftRuntime.captureDraftBaseline("parent-1", WORKSPACE, inputContext);
       expect(baseline.draftBaselineId).toBe("draft-baseline");
       expect(baseline.sourceViewId).toBe("view-1");
+      expect(capturedOwners[0]).toEqual([{ workspaceId: "nested-project", ownerId: "editor-owner", generation: 2 }]);
       expect(created).toHaveBeenCalledWith(WORKSPACE, [expect.objectContaining({ path: "nested/draft.ts" })]);
       await baseline.cleanup();
       expect(removed).toHaveBeenCalledWith("draft-baseline");

@@ -6,6 +6,7 @@ import type { AgentInputContext, HarnessInferenceBindingSnapshot, HarnessRerankS
 import { createDocumentAuthorityHarness } from '../../documents/contract-fixtures.js';
 import { ThreadExecutionViewRegistry } from '../../harness/working-state/execution-view.js';
 import { createStructureSource } from '../../structure/source.js';
+import { createTreeSitterStructureProvider } from '../../structure/native-provider.test-helper.js';
 import { createHashEmbedder } from './embedder.js';
 import { createWorkspaceSemanticRuntime, type WorkspaceSemanticRuntimeOptions } from './workspace-runtime.js';
 
@@ -16,6 +17,7 @@ const deferred = <T>() => {
   const promise = new Promise<T>((done) => { resolve = done; });
   return { promise, resolve };
 };
+const pause = (ms: number): Promise<void> => new Promise((resolve) => setTimeout(resolve, ms));
 const rerank: HarnessRerankSettings = { protocol: 'http-rerank', providerId: 'remote', modelId: 'ranking' };
 const settings = (revision: string): PiSettingsSnapshot => ({
   global: { harness: { rerank: { ...rerank } } }, globalRevision: revision,
@@ -32,6 +34,10 @@ async function setup(hooks: {
   watch?: (id: string) => Promise<void>;
   pinQuery?: WorkspaceSemanticRuntimeOptions['workingBranches']['pinQuery'];
   readDraft?: WorkspaceSemanticRuntimeOptions['readDraft'];
+  searchFilesystemFiles?: WorkspaceSemanticRuntimeOptions['searchFilesystemFiles'];
+  structureSource?: WorkspaceSemanticRuntimeOptions['structureSource'];
+  watchDocuments?: WorkspaceSemanticRuntimeOptions['documents']['watch'];
+  reconcileMinimumIntervalMs?: number;
 } = {}) {
   const documents = await createDocumentAuthorityHarness();
   disposes.push(() => documents.cleanup());
@@ -62,8 +68,11 @@ async function setup(hooks: {
     unwatchConfig: async (id: string) => { removedWatches.push(id); return { unwatched: true }; },
   } as unknown as NonNullable<ReturnType<WorkspaceSemanticRuntimeOptions['getBroker']>>;
   const runtime = createWorkspaceSemanticRuntime({
-    dataDir: documents.dataDir, hostId: 'workspace-test', documents: documents.authority,
-    structureSource: createStructureSource([]), embedder: local,
+    dataDir: documents.dataDir, hostId: 'workspace-test',
+    documents: { ...documents.authority, watch: hooks.watchDocuments ?? documents.authority.watch },
+    structureSource: hooks.structureSource ?? createStructureSource([]), embedder: local,
+    ...(hooks.searchFilesystemFiles ? { searchFilesystemFiles: hooks.searchFilesystemFiles } : {}),
+    ...(hooks.reconcileMinimumIntervalMs === undefined ? {} : { reconcileMinimumIntervalMs: hooks.reconcileMinimumIntervalMs }),
     configCwd: documents.dataDir,
     getBroker: () => broker,
     executionViews, workingBranches: { pinQuery: hooks.pinQuery ?? (async () => null) },
@@ -233,5 +242,99 @@ describe('production workspace semantic assembly lifecycle', () => {
     // Every settings/inference request went to the shared config worker; the
     // second root never triggered a worker for its own directory.
     expect(new Set(harness.requestCwds)).toEqual(new Set([harness.documents.dataDir]));
+  });
+
+  it('reconciles missed additions in the background and clears its timer on disposal', async () => {
+    const oldBody = 'export const oldValue = "existing reconcile marker";\n';
+    const newBody = 'export const newValue = "quietly added reconcile marker";\n';
+    let inventory: Array<{ name: string; path: string; relativePath: string; metadata: { byteLength: string; modifiedTimeNs: string } }> = [];
+    let scans = 0;
+    const secondScanEntered = deferred<void>();
+    const resumeSecondScan = deferred<void>();
+    const indexedPaths: string[] = [];
+    const nativeStructure = createStructureSource([createTreeSitterStructureProvider({ parseBudgetMs: 30_000 })]);
+    // Keep the document watch quiet to simulate a file creation missed by
+    // Documents observation.
+    const controlled = await setup({
+      watchDocuments: () => ({ ready: Promise.resolve(true), settle: async () => undefined, close() {} }),
+      searchFilesystemFiles: async () => {
+        scans += 1;
+        if (scans === 2) {
+          secondScanEntered.resolve(undefined);
+          await resumeSecondScan.promise;
+        }
+        return inventory;
+      },
+      structureSource: {
+        ...nativeStructure,
+        unitsFile: async (request) => {
+          indexedPaths.push(request.path);
+          return nativeStructure.unitsFile!(request);
+        },
+      },
+      reconcileMinimumIntervalMs: 1_000,
+    });
+    const oldPath = path.join(controlled.documents.workspaceRoot, 'old.ts');
+    const newPath = path.join(controlled.documents.workspaceRoot, 'new.ts');
+    await fs.promises.writeFile(oldPath, oldBody, 'utf8');
+    inventory = [{ name: 'old.ts', path: oldPath, relativePath: 'old.ts', metadata: {
+      byteLength: String(Buffer.byteLength(oldBody)), modifiedTimeNs: 'old-stat',
+    } }];
+    try {
+      await controlled.runtime.harnessSettings(controlled.workspaceId);
+      await controlled.runtime.drain();
+      expect(scans).toBe(1);
+      expect(indexedPaths).toEqual(['old.ts']);
+
+      await fs.promises.writeFile(newPath, newBody, 'utf8');
+      inventory = [...inventory, { name: 'new.ts', path: newPath, relativePath: 'new.ts', metadata: {
+        byteLength: String(Buffer.byteLength(newBody)), modifiedTimeNs: 'new-stat',
+      } }];
+      await pause(100);
+      expect(scans).toBe(1);
+      await secondScanEntered.promise;
+
+      // A query against the last published generation returns while the
+      // metadata inventory call is deliberately held open.
+      const query = controlled.runtime.semanticRecall(controlled.workspaceId, 'existing reconcile marker', 5);
+      const oldResult = await Promise.race([
+        query,
+        new Promise<never>((_resolve, reject) => setTimeout(() => reject(new Error('query waited for periodic reconciliation')), 2_000)),
+      ]);
+      expect(oldResult.status).toBeDefined();
+
+      // The measured inventory duration should push the next interval well
+      // beyond the one-second minimum, preserving a low scan duty cycle.
+      await pause(100);
+      resumeSecondScan.resolve(undefined);
+      await controlled.runtime.drain();
+      expect(indexedPaths).toContain('new.ts');
+      const added = await controlled.runtime.semanticRecall(controlled.workspaceId, 'quietly added reconcile marker', 5);
+      expect(added.hits[0]?.documentId).toBe('new.ts');
+
+      await pause(100);
+      expect(scans).toBe(2);
+      await controlled.runtime.dispose();
+      await pause(550);
+      expect(scans).toBe(2);
+    } finally {
+      resumeSecondScan.resolve(undefined);
+    }
+  });
+
+  it('cancels the pending reconcile timer when the Host runtime is disposed', async () => {
+    let scans = 0;
+    const harness = await setup({
+      watchDocuments: () => ({ ready: Promise.resolve(true), settle: async () => undefined, close() {} }),
+      searchFilesystemFiles: async () => { scans += 1; return []; },
+      reconcileMinimumIntervalMs: 1_000,
+    });
+    await harness.runtime.harnessSettings(harness.workspaceId);
+    await harness.runtime.drain();
+    expect(scans).toBe(1);
+
+    await harness.runtime.dispose();
+    await pause(1_050);
+    expect(scans).toBe(1);
   });
 });

@@ -5,6 +5,7 @@ import { createHash, randomUUID } from 'node:crypto';
 import {
   parseAgentInputContext,
   type AgentInputContext,
+  type DocumentSurfaceWritePathResult,
   type DocumentSurfaceWriteResult,
   type DocumentWriteGuardResult,
 } from '@varin/protocol';
@@ -50,6 +51,7 @@ import {
 } from './workspace-registry.js';
 import {
   createSurfaceSnapshotStore,
+  type SurfaceSnapshotInspectResult,
   type SurfaceSnapshotResource,
 } from './surface-snapshot-store.js';
 
@@ -58,6 +60,13 @@ import {
 export interface DocumentResource {
   workspaceId: string;
   resourceId: string;
+}
+
+/** An immutable source view may provide the same captured text/owner contract as a live turn snapshot. */
+export interface FixedSourceMutationView {
+  operationId: string;
+  inspect(resourceId: string, workspaceId: string): SurfaceSnapshotInspectResult;
+  owner(workspaceId: string): { ownerId: string; generation: number; workspaceId: string } | null;
 }
 
 export interface DocumentResourceOperation {
@@ -2059,6 +2068,7 @@ export const createDocumentAuthority = (options: DocumentAuthorityOptions) => {
     context: AgentInputContext,
     changes: readonly AgentSurfaceWriteChange[],
     signal?: AbortSignal,
+    fixedView?: FixedSourceMutationView,
   ): Promise<DocumentSurfaceWriteResult> => {
     if (!durableMutationStorage) {
       return {
@@ -2068,8 +2078,12 @@ export const createDocumentAuthority = (options: DocumentAuthorityOptions) => {
     }
     const run = async (durable: DurableFileOperationContext): Promise<DocumentSurfaceWriteResult> => {
       const { result } = await applyAgentSurfaceMutation({
-        inspectSnapshot: surfaceSnapshots.inspect,
-        surfaceOwner: surfaceSnapshots.owner,
+        inspectSnapshot: fixedView
+          ? (_sessionId, _context, resourceId, targetWorkspaceId) => fixedView.inspect(resourceId, targetWorkspaceId)
+          : surfaceSnapshots.inspect,
+        surfaceOwner: fixedView
+          ? (_sessionId, _context, targetWorkspaceId) => fixedView.owner(targetWorkspaceId)
+          : surfaceSnapshots.owner,
         inspectDirtyBuffers,
         requestSurfaceOperation,
         inspectWorkspace: async (id) => mutations.inspect(id),
@@ -2124,10 +2138,30 @@ export const createDocumentAuthority = (options: DocumentAuthorityOptions) => {
           return { status: 'conflict', message: `${request.resourceId} could not be deleted on disk.` };
         },
         durable,
-      }, { sessionId, context, workspaceId, changes, ...(signal ? { signal } : {}) });
+      }, { sessionId, context, workspaceId, changes, ...(signal ? { signal } : {}), ...(fixedView ? { operationId: fixedView.operationId } : {}) });
       return result;
     };
     return durableMutationStorage(workspaceId, (durable) => run(durable));
+  };
+
+  const confirmedAgentSurfaceOperation = async (
+    workspaceId: string, operationId: string, sessionId: string,
+  ): Promise<{ status: 'missing' | 'pending' } | { status: 'confirmed'; result: DocumentSurfaceWriteResult }> => {
+    if (!durableMutationStorage) return { status: 'pending' };
+    const operation = await durableMutationStorage(workspaceId, (durable) =>
+      durable.durableRecoveryStore.getOperation(workspaceId, operationId, sessionId));
+    if (!operation) return { status: 'missing' };
+    if (operation.kind !== 'agent-mutation' || operation.sessionId !== sessionId
+      || !['complete', 'aborted', 'compensated', 'conflict', 'needs-attention'].includes(String(operation.state))) return { status: 'pending' };
+    const result = operation.result;
+    if (!result || typeof result !== 'object' || !Array.isArray((result as Record<string, unknown>).results)) return { status: 'pending' };
+    const rows = (result as { results: unknown[] }).results;
+    if (!rows.every((row) => row && typeof row === 'object'
+      && typeof (row as { path?: unknown }).path === 'string'
+      && typeof (row as { status?: unknown }).status === 'string')) return { status: 'pending' };
+    // The caller uses the durable per-path outcomes to advance only confirmed
+    // editor writes; the aggregate status is not used as proof of success.
+    return { status: 'confirmed', result: { status: 'partial', operationId, results: rows as DocumentSurfaceWritePathResult[] } };
   };
 
   /**
@@ -2269,6 +2303,7 @@ export const createDocumentAuthority = (options: DocumentAuthorityOptions) => {
     agentInputDraftPaths: surfaceSnapshots.draftPaths,
     agentInputSurfaceOwner: surfaceSnapshots.owner,
     applyAgentSurfaceWrite,
+    confirmedAgentSurfaceOperation,
     bindDurableMutationStorage: (fn: DurableMutationStorageFn | null) => {
       durableMutationStorage = fn;
     },

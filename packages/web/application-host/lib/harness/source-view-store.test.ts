@@ -6,8 +6,13 @@ import { fileURLToPath } from "node:url";
 import { describe, expect, it } from "vitest";
 import type { WorkingStateRootContext, WorkingStateRootStore, WorkspaceWorkingStateRootAccess } from "./working-state/types.js";
 import { createSourceViewStore, SOURCE_VIEW_STORAGE_SCOPE } from "./source-view-store.js";
+import { createSourceViewRuntime } from "./source-view-runtime.js";
 import { createKernelClient } from "../kernel/kernel-client.js";
 import { createKernelWorkspaceWorkingStateAccess, KernelStorageAdapter } from "../kernel/storage-adapter.js";
+import { attachLiveSurfaceCompleter, createDocumentAuthorityHarness, hashSurfaceText, type LiveSurfaceBuffer } from "../documents/contract-fixtures.js";
+import type { DirtyBufferPublication } from "../documents/authority.js";
+import { createInMemoryRecoveryDurablePort } from "../recovery/recovery-durable-port.test-helper.js";
+import { createRecoveryFileStore } from "../recovery/file-store.test-helper.js";
 
 const openStore = () => {
   const objects = new Map<string, Buffer>();
@@ -38,7 +43,7 @@ const openStore = () => {
       return operation(store as unknown as WorkingStateRootStore, context as unknown as WorkingStateRootContext);
     },
   };
-  return { views: createSourceViewStore(workingStates), reopen: () => createSourceViewStore(workingStates), scopes };
+  return { views: createSourceViewStore(workingStates), reopen: () => createSourceViewStore(workingStates), scopes, records };
 };
 
 describe("fixed source views", () => {
@@ -86,6 +91,56 @@ describe("fixed source views", () => {
     await opened.reopen().reconcile(new Set([kept!.viewId]));
     expect(await opened.views.contextFor(kept!.viewId)).not.toBeNull();
     expect(await opened.views.contextFor(orphan!.viewId)).toBeNull();
+  });
+
+  it("keeps older ownerless source views readable without granting editor writes", async () => {
+    const opened = openStore();
+    const captured = await opened.views.capture({
+      status: "ready", resources: [{
+        resource: { workspaceId: "B", resourceId: "draft.ts" }, coordinationId: "file-1",
+        content: "old draft", revision: "r1", baseRevision: null, encoding: "utf-8", bom: false,
+        localEditRevision: 1,
+      }], supersededResources: [],
+    }, "A");
+    const record = opened.records.get(`agent.source-view:${captured!.viewId}`)!;
+    const oldPayload = JSON.parse(record.payloadJson) as Record<string, unknown>;
+    delete oldPayload.owners;
+    record.payloadJson = JSON.stringify(oldPayload);
+    expect(await opened.reopen().read(captured!.viewId, "B", "draft.ts", "file-1"))
+      .toMatchObject({ status: "ready", content: "old draft" });
+    await expect(opened.reopen().prepareMutation(captured!.viewId, "child", "B", [{
+      resourceId: "draft.ts", action: "write", content: "new draft",
+    }])).rejects.toThrow("no captured owner");
+  });
+
+  it("clears a prepare left before Documents recorded an operation only after reopening", async () => {
+    const opened = openStore();
+    const captured = await opened.views.capture({
+      status: "ready", resources: [{
+        resource: { workspaceId: "B", resourceId: "draft.ts" }, coordinationId: "file-1",
+        content: "before", revision: "r1", baseRevision: null, encoding: "utf-8", bom: false,
+        localEditRevision: 1,
+      }], supersededResources: [],
+    }, "A", [], [{ workspaceId: "B", ownerId: "editor-B", generation: 1 }]);
+    const viewId = captured!.viewId;
+    const prepared = await opened.views.prepareMutation(viewId, "child", "B", [{
+      resourceId: "draft.ts", action: "write", content: "after",
+    }]);
+    expect(prepared).not.toBeNull();
+    const live: DirtyBufferPublication[] = [{ workspaceId: "B", ownerId: "editor-B", generation: 1,
+      updatedAt: new Date().toISOString(), resources: [{
+      resource: { workspaceId: "B", resourceId: "draft.ts" }, baseRevision: null, localEditRevision: 1,
+      bufferHash: `sha256-${createHash("sha256").update("before").digest("hex")}`,
+    }] }];
+    expect(await opened.views.clearUnstartedMutation(viewId, prepared!.fixedView.operationId, live)).toBe(false);
+    expect(await opened.views.read(viewId, "B", "draft.ts", "file-1")).toMatchObject({ status: "unavailable" });
+    const restarted = opened.reopen();
+    expect(await restarted.clearUnstartedMutation(viewId, prepared!.fixedView.operationId, [{
+      ...live[0]!, resources: [{ ...live[0]!.resources[0]!, localEditRevision: 2 }],
+    }])).toBe(false);
+    expect(await restarted.clearUnstartedMutation(viewId, prepared!.fixedView.operationId, live)).toBe(true);
+    expect(await restarted.read(viewId, "B", "draft.ts", "file-1"))
+      .toMatchObject({ status: "ready", content: "before" });
   });
 
   it("maps cross-root aliases of the target branch instead of returning stale captured bytes", async () => {
@@ -159,10 +214,20 @@ it.skipIf(!hasKernel)("round-trips a source view through the native kernel recor
         localEditRevision: 3,
       }],
       supersededResources: [],
-    }, "target");
+    }, "target", [], [{ workspaceId: "external", ownerId: "editor-owner", generation: 2 }]);
     expect(captured).not.toBeNull();
     expect(await views.read(captured!.viewId, "external", "draft.txt", "stable-file-identity"))
       .toMatchObject({ status: "ready", content: "fixed unsaved text" });
+    const prepared = await views.prepareMutation(captured!.viewId, "child", "external", [{ resourceId: "draft.txt", action: "write", content: "child update" }]);
+    expect(prepared?.fixedView.owner("external")).toEqual({ workspaceId: "external", ownerId: "editor-owner", generation: 2 });
+    expect(prepared?.fixedView.inspect("draft.txt", "external")).toMatchObject({ status: "ready", content: "fixed unsaved text" });
+    expect(await views.read(captured!.viewId, "external", "draft.txt", "stable-file-identity"))
+      .toMatchObject({ status: "unavailable" });
+    await views.finishMutation(captured!.viewId, prepared!.fixedView.operationId, {
+      status: "applied", results: [{ path: "draft.txt", target: "surface", status: "applied", revision: "surface-draft:source-view:test:4" }],
+    });
+    expect(await views.read(captured!.viewId, "external", "draft.txt", "stable-file-identity"))
+      .toMatchObject({ status: "ready", content: "child update" });
     const orphan = await views.capture({
       status: "ready", resources: [{
         resource: { workspaceId: "external", resourceId: "orphan.txt" },
@@ -179,5 +244,108 @@ it.skipIf(!hasKernel)("round-trips a source view through the native kernel recor
     await adapter.dispose();
     await client.close();
     await fs.rm(root, { recursive: true, force: true });
+  }
+});
+
+it.skipIf(!hasKernel)("applies a child edit to B's live editor, advances the fixed view, and conflicts on a later user edit", async () => {
+  const harness = await createDocumentAuthorityHarness();
+  const kernelRoot = await fs.mkdtemp(path.join(os.tmpdir(), "varin-external-editor-view-"));
+  const storageRoot = path.join(kernelRoot, "storage");
+  const sourceRoot = path.join(kernelRoot, "source-views");
+  await fs.mkdir(sourceRoot);
+  const version = JSON.parse(await fs.readFile(path.join(repositoryRoot, "package.json"), "utf8")).version as string;
+  const client = createKernelClient({ hostId: "external-editor-test", storageRoot, buildVersion: version, kernelPath, allowCargoDevRunner: false });
+  const adapter = new KernelStorageAdapter({ client, hostId: "external-editor-test", storageRoot,
+    resolveWorkspaceRoot: async () => sourceRoot });
+  const live = new Map<string, LiveSurfaceBuffer>();
+  const surface = attachLiveSurfaceCompleter(harness.authority, {
+    generation: 1, live, ownerId: "editor-B", workspaceId: harness.identity.workspaceId,
+  });
+  try {
+    await client.start();
+    const views = createSourceViewStore(createKernelWorkspaceWorkingStateAccess(adapter));
+    const durableRecoveryStore = createInMemoryRecoveryDurablePort();
+    const inspected = await harness.authority.inspectWorkspace(harness.identity.workspaceId);
+    harness.authority.bindDurableMutationStorage(async (_workspaceId, operation) => operation({
+      durableRecoveryStore,
+      fileStore: createRecoveryFileStore(),
+      identity: { authorityId: harness.authority.hostId, canonicalRoot: inspected.root, filesystemProfile: "test", workspaceId: harness.identity.workspaceId },
+      resourceOperationGate: { run: (_resources, callback) => callback() },
+      root: path.join(harness.dataDir, "external-editor-recovery"),
+    }));
+    await fs.writeFile(path.join(harness.workspaceRoot, "draft.ts"), "disk A\n");
+    const disk = await harness.authority.read(harness.resource("draft.ts"));
+    if (disk.status !== "ready") throw new Error("Expected the B disk fixture");
+    const binding = {
+      baseRevision: disk.revision, localEditRevision: 2, documentInstanceId: "B-document-instance",
+      bufferHash: hashSurfaceText("draft B\n"), encoding: "utf-8" as const, bom: false,
+      lineEnding: "lf" as const, resource: harness.resource("draft.ts"),
+    };
+    live.set("draft.ts", { ...binding, content: "draft B\n" });
+    await harness.authority.publishDirtyBuffers({ generation: 1, ownerId: "editor-B", resources: [binding], workspaceId: harness.identity.workspaceId });
+    const parentContext = await harness.authority.captureAgentInputSnapshot({
+      generation: 1, ownerId: "editor-B", sessionId: "parent-session", resources: [{ ...binding, content: "draft B\n" }],
+    });
+    const cloned = harness.authority.cloneAgentInputSnapshot("parent-session", parentContext);
+    if (cloned.status !== "ready") throw new Error("Expected captured editor input");
+    const fixed = await views.capture(cloned, "child-target-root", [], [{ workspaceId: harness.identity.workspaceId, ownerId: "editor-B", generation: 1 }]);
+    if (!fixed) throw new Error("Expected external fixed source view");
+    type RuntimeOptions = Parameters<typeof createSourceViewRuntime>[0];
+    const runtime = createSourceViewRuntime({
+      documents: harness.authority,
+      registry: {
+        getSessionBinding: async () => ({ owningScopeId: "child-target-root", threadId: "child" }),
+        getThreadById: async () => ({ id: "child", manifest: { sourceViewId: fixed.viewId } }),
+      } as unknown as RuntimeOptions["registry"],
+      views: { get: () => undefined } as unknown as RuntimeOptions["views"],
+      branchLookups: { readSource: async () => null, pathOverlay: async () => null } as unknown as RuntimeOptions["branchLookups"],
+      branchWrites: { branchWrite: async () => ({ status: "disk" }) },
+      worktrees: { assertOwnership: async () => undefined },
+      sourceViews: views,
+    });
+    expect(await runtime.branchWrite("child-session", [{ workspaceId: harness.identity.workspaceId,
+      resourceId: "draft.ts", action: "edit", edits: [{ oldText: "draft B", newText: "child C" }] }]))
+      .toEqual({ status: "disk" });
+    const change = { resourceId: "draft.ts", action: "edit" as const, edits: [{ oldText: "draft B", newText: "child C" }] };
+    const first = await runtime.surfaceWrite("child-session", harness.identity.workspaceId, fixed.context, [change]);
+    expect(first).toMatchObject({ status: "applied", results: [{ target: "surface", status: "applied" }] });
+    const physical = cloned.resources[0]?.coordinationId ?? null;
+    expect(await views.read(fixed.viewId, harness.identity.workspaceId, "draft.ts", physical))
+      .toMatchObject({ status: "ready", content: "child C\n" });
+    expect(live.get("draft.ts")?.content).toBe("child C\n");
+    expect(await fs.readFile(path.join(harness.workspaceRoot, "draft.ts"), "utf8")).toBe("disk A\n");
+
+    // Simulate a Host loss after Documents persisted the successful editor
+    // operation but before it advanced the child's private source view.
+    const recoveredChange = { resourceId: "draft.ts", action: "edit" as const,
+      edits: [{ oldText: "child C", newText: "resumed R" }] };
+    const pending = await views.prepareMutation(fixed.viewId, "child-session", harness.identity.workspaceId, [recoveredChange]);
+    if (!pending) throw new Error("Expected durable pending source mutation");
+    const durableResult = await harness.authority.applyAgentSurfaceWrite(
+      "child-session", harness.identity.workspaceId, fixed.context, [recoveredChange], undefined, pending.fixedView,
+    );
+    expect(durableResult).toMatchObject({ status: "applied" });
+    expect(await views.read(fixed.viewId, harness.identity.workspaceId, "draft.ts", physical))
+      .toMatchObject({ status: "unavailable" });
+    expect(await runtime.readSource("child-session", fixed.context, "draft.ts", harness.identity.workspaceId))
+      .toMatchObject({ status: "ready", content: "resumed R\n" });
+    expect(live.get("draft.ts")?.content).toBe("resumed R\n");
+    expect(await fs.readFile(path.join(harness.workspaceRoot, "draft.ts"), "utf8")).toBe("disk A\n");
+
+    live.set("draft.ts", { ...binding, content: "user D\n", localEditRevision: 9, bufferHash: hashSurfaceText("user D\n") });
+    await harness.authority.publishDirtyBuffers({ generation: 1, ownerId: "editor-B", workspaceId: harness.identity.workspaceId,
+      resources: [{ ...binding, localEditRevision: 9, bufferHash: hashSurfaceText("user D\n") }] });
+    const secondChange = { resourceId: "draft.ts", action: "edit" as const, edits: [{ oldText: "resumed R", newText: "child E" }] };
+    const conflict = await runtime.surfaceWrite("child-session", harness.identity.workspaceId, fixed.context, [secondChange]);
+    expect(conflict).toMatchObject({ status: "conflict" });
+    expect(live.get("draft.ts")?.content).toBe("user D\n");
+    expect(await views.read(fixed.viewId, harness.identity.workspaceId, "draft.ts", physical))
+      .toMatchObject({ status: "ready", content: "resumed R\n" });
+  } finally {
+    surface.close();
+    await adapter.dispose();
+    await client.close();
+    await harness.cleanup();
+    await fs.rm(kernelRoot, { recursive: true, force: true });
   }
 });
