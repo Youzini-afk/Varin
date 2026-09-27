@@ -55,16 +55,6 @@ const resolveSearchDirectory = async ({
   const normalized = typeof normalizeDirectoryPath === 'function'
     ? normalizeDirectoryPath(target)
     : target;
-  if (resolvedProject?.resolved) {
-    const root = resolvedProject.resolved;
-    const relative = path.relative(root, normalized);
-    if (relative.startsWith('..') || path.isAbsolute(relative)) {
-      throw Object.assign(new Error('Search directory is outside the workspace'), {
-        code: 'path-escape',
-        statusCode: 403,
-      });
-    }
-  }
   return normalized;
 };
 
@@ -75,10 +65,12 @@ export interface WorkspaceSearchRouteOptions {
   os: Pick<typeof os, "homedir">;
   path: typeof path;
   resolveProjectDirectory(req: Request): Promise<ResolvedProjectDirectory | null>;
+  authorizeSearchDirectory?: (directory: string) => Promise<boolean>;
   uiAuthController?: { requireAuth?: RequestHandler };
 }
 export const registerWorkspaceSearchRoutes = (app: Express, {
   contentSearch, fileSearch, uiAuthController, path, os, normalizeDirectoryPath, resolveProjectDirectory,
+  authorizeSearchDirectory,
 }: WorkspaceSearchRouteOptions) => {
   const requireAuth = uiAuthController?.requireAuth ?? ((_req, _res, next) => next());
 
@@ -99,6 +91,17 @@ export const registerWorkspaceSearchRoutes = (app: Express, {
         normalizeDirectoryPath,
         resolveProjectDirectory,
       });
+      const allowed = authorizeSearchDirectory
+        ? await authorizeSearchDirectory(directory)
+        : await (async () => {
+          const project = await resolveProjectDirectory(req);
+          if (!project?.resolved) return false;
+          const relative = path.relative(project.resolved, directory);
+          return !(relative === '..' || relative.startsWith(`..${path.sep}`) || path.isAbsolute(relative));
+        })();
+      if (!allowed) {
+        return res.status(403).json({ error: 'Search directory is outside the permitted host roots', reason: 'path-escape' });
+      }
       const limit = Number.parseInt(String(req.query?.limit ?? ''), 10);
       const includeHidden = req.query?.includeHidden === 'true';
       const respectGitignore = req.query?.respectGitignore !== 'false';

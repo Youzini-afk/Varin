@@ -49,3 +49,16 @@ index e05fec9af11eb54a30b282550e11f18f1656e92c..61496cea1dab8f63b93dd3660fb9f704
          executionMode: tool.executionMode,
          execute: async (toolCallId, params, signal, onUpdate) => tool.execute(toolCallId, params, signal, onUpdate),
      };
+diff --git a/dist/core/session-cwd.js b/dist/core/session-cwd.js
+--- a/dist/core/session-cwd.js
++++ b/dist/core/session-cwd.js
+@@ -30,6 +30,9 @@ export class MissingSessionCwdError extends Error {
+     }
+ }
+ export function assertSessionCwdExists(sessionManager, fallbackCwd) {
++    if (process.env.VARIN_ALLOW_MISSING_SESSION_CWD === "1") {
++        return;
++    }
+     const issue = getMissingSessionCwdIssue(sessionManager, fallbackCwd);
+     if (issue) {
+         throw new MissingSessionCwdError(issue);

@@ -24,6 +24,7 @@ async function publicEpoch<T extends { status: string }>(work: Promise<T>): Prom
 
 const documentsClient = (authority: DocumentAuthority): DocumentsAPI => ({
   resolveWorkspace: authority.resolveWorkspace,
+  resolveResourceIdentity: authority.resolveResourceIdentity,
   read: authority.read,
   write: (request) => publicEpoch(authority.write(request)),
   move: (request) => publicEpoch(authority.move(request)),

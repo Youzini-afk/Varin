@@ -1329,8 +1329,7 @@ describe("session e2e — fixed surface read", () => {
         const snapshot = await session.host.create(root);
         const inputContext = {
           source: "surface" as const,
-          workspaceId: WORKSPACE_ID,
-          dirtyPaths: ["draft.ts"],
+          roots: [{ workspaceId: WORKSPACE_ID, dirtyPaths: ["draft.ts"] }],
           snapshot: { status: "ready" as const, ref: "fixed" },
         };
         await session.host.prompt(snapshot.sessionId, "read the current editor", undefined, undefined, inputContext);
@@ -1430,8 +1429,8 @@ describe("session e2e — fixed surface edit", () => {
           commitAgentInputContext: (sessionId, context) => (
             harness.authority.commitAgentInputSnapshot(sessionId, context)
           ),
-          documentReadSource: (sessionId, context, resourceId) => (
-            harness.authority.readAgentInputSnapshot(sessionId, context, resourceId)
+          documentReadSource: (sessionId, context, resourceId, workspaceId) => (
+            harness.authority.readAgentInputSnapshot(sessionId, context, resourceId, workspaceId)
           ),
           documentSurfaceWrite: (sessionId, context, changes, signal) => (
             harness.authority.applyAgentSurfaceWrite(sessionId, context, changes, signal)
@@ -1446,7 +1445,6 @@ describe("session e2e — fixed surface edit", () => {
           ownerId: "surface",
           resources: [{ ...binding, content: "B unique-buffer\n" }],
           sessionId: snapshot.sessionId,
-          workspaceId: harness.identity.workspaceId,
         });
         harness.authority.commitAgentInputSnapshot(snapshot.sessionId, rebound);
         await session.host.prompt(
@@ -1527,8 +1525,7 @@ describe("session e2e — fixed surface find and ls", () => {
         const snapshot = await session.host.create(root);
         const inputContext = {
           source: "surface" as const,
-          workspaceId: WORKSPACE_ID,
-          dirtyPaths: ["nested/new.ts"],
+          roots: [{ workspaceId: WORKSPACE_ID, dirtyPaths: ["nested/new.ts"] }],
           snapshot: { status: "ready" as const, ref: "fixed" },
         };
         await session.host.prompt(snapshot.sessionId, "find the unsaved nested file", undefined, undefined, inputContext);

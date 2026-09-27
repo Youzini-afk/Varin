@@ -171,15 +171,17 @@ export function createLspNavigationServices(deps: LspNavigationDeps): {
     path: string,
     ctx: HarnessServiceContext,
   ): Promise<PreparedDocument | LspNavigationResult> => {
-    if (!ctx.workspaceId) return unavailable("LSP unavailable: no workspace");
-    const resourceId = ctx.authorizedPaths.find((entry) => entry.inputPath === path)?.resourceId ?? path;
+    const authorized = ctx.authorizedPaths.find((entry) => entry.inputPath === path);
+    const workspaceId = authorized?.workspaceId ?? ctx.workspaceId;
+    if (!workspaceId) return unavailable("LSP unavailable: document path was not authorized");
+    const resourceId = authorized?.resourceId ?? path;
     const languageId = languageIdForPath(resourceId);
     if (!languageId) return unavailable(`LSP unavailable: unsupported file type for ${path}`);
-    const resource = { workspaceId: ctx.workspaceId, resourceId };
+    const resource = { workspaceId, resourceId };
     // Navigation follows the same fixed source as read/grep for this turn, so a
     // reported position refers to text the agent can actually obtain.
     const bound = await binder.bind({
-      workspaceId: ctx.workspaceId,
+      workspaceId,
       resourceId,
       languageId,
       text: "input-context",

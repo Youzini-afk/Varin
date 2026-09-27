@@ -48,8 +48,8 @@ async function fixture(options: {
     search: async () => ({ status: "empty", generation: undefined }),
     resolveWorkspaceRoot: async () => workspace,
     discoveredShells: {},
-    documentReadSource: options.lookup ?? ((sessionId, context, resourceId) => (
-      documents.readAgentInputSnapshot(sessionId, context, resourceId)
+    documentReadSource: options.lookup ?? ((sessionId, context, resourceId, targetWorkspaceId) => (
+      documents.readAgentInputSnapshot(sessionId, context, resourceId, targetWorkspaceId)
     )),
     readAuthorizedDiskFile: (ctx, authorized) => paths.readAuthorizedFile(ctx.actor, authorized, ctx.signal),
     documentSurfaceWrite: (sessionId, workspaceId, context, changes, signal) => (
@@ -128,7 +128,6 @@ async function fixture(options: {
       ownerId: "surface",
       resources: [{ baseRevision, bom, content, encoding: "utf-8", localEditRevision, resource }],
       sessionId: actor.sessionId,
-      workspaceId,
     });
   };
   return { actor, capture, documents, paths, request, workspace, write };
@@ -140,7 +139,6 @@ describe("native read source through Host router and Documents", () => {
     const context = snapshots.capture({
       ownerId: "surface",
       sessionId: "session",
-      workspaceId: "workspace",
       resources: [{
         baseRevision: null,
         bom: false,
@@ -151,7 +149,7 @@ describe("native read source through Host router and Documents", () => {
       }],
     });
 
-    expect(snapshots.read("session", context, "SRC/draft.ts")).toMatchObject({
+    expect(snapshots.read("session", context, "SRC/draft.ts", "workspace")).toMatchObject({
       status: "ready",
       content: "fixed\n",
     });
@@ -194,6 +192,66 @@ describe("native read source through Host router and Documents", () => {
     expect(JSON.stringify(expired)).not.toContain("must not leak");
   });
 
+  it("does not read disk when capture failed before the dirty roots were known", async () => {
+    const f = await fixture();
+    await fs.writeFile(path.join(f.workspace, "unknown.txt"), "disk must wait\n");
+    const context: AgentInputContext = {
+      source: "surface",
+      roots: [],
+      snapshot: { status: "unavailable", reason: "surface-unavailable" },
+    };
+    const response = await f.request("unknown.txt", context);
+    expect(response).toMatchObject({ ok: false, error: { code: "unavailable" } });
+    expect(JSON.stringify(response)).not.toContain("disk must wait");
+  });
+
+  it("reads the external disk file when the turn has a same-name draft in another root", async () => {
+    const f = await fixture();
+    await fs.writeFile(path.join(f.workspace, "same.txt"), "A disk\n");
+    const context = await f.capture("same.txt", "A draft\n", 1);
+    const outside = path.join(path.dirname(f.workspace), "external-read");
+    await fs.mkdir(outside);
+    await f.documents.resolveWorkspace({ path: outside });
+    const target = path.join(outside, "same.txt");
+    await fs.writeFile(target, "B disk\n");
+
+    expect(await f.request("same.txt", context)).toMatchObject({ ok: true, result: { source: "surface-draft" } });
+    expect(await f.request(target, context)).toEqual({
+      ok: true,
+      result: { source: "disk", base64: Buffer.from("B disk\n").toString("base64") },
+    });
+  });
+
+  it("reads each root's own fixed draft when one turn captures both roots", async () => {
+    const f = await fixture();
+    const outside = path.join(path.dirname(f.workspace), "external-draft");
+    await fs.mkdir(outside);
+    const external = await f.documents.resolveWorkspace({ path: outside });
+    const first = { workspaceId: f.actor.workspaceId!, resourceId: "same.txt" };
+    const second = { workspaceId: external.workspaceId, resourceId: "same.txt" };
+    await fs.writeFile(path.join(f.workspace, "same.txt"), "A disk\n");
+    await fs.writeFile(path.join(outside, "same.txt"), "B disk\n");
+    const firstDisk = await f.documents.read(first);
+    const secondDisk = await f.documents.read(second);
+    if (firstDisk.status !== "ready" || secondDisk.status !== "ready") throw new Error("Expected two disk files");
+    const rows = [
+      { resource: first, baseRevision: firstDisk.revision, localEditRevision: 1, content: "A draft\n", encoding: "utf-8", bom: false },
+      { resource: second, baseRevision: secondDisk.revision, localEditRevision: 1, content: "B draft\n", encoding: "utf-8", bom: false },
+    ];
+    for (const row of rows) {
+      await f.documents.publishDirtyBuffers({ ownerId: "two-root-surface", generation: 1, workspaceId: row.resource.workspaceId, resources: [row] });
+    }
+    const context = await f.documents.captureAgentInputSnapshot({
+      ownerId: "two-root-surface", generation: 1, sessionId: f.actor.sessionId, resources: rows,
+    });
+    for (const [target, expected] of [["same.txt", "A draft\n"], [path.join(outside, "same.txt"), "B draft\n"]] as const) {
+      const response = await f.request(target, context);
+      expect(response).toMatchObject({ ok: true, result: { source: "surface-draft" } });
+      if (!response.ok || response.result.source !== "surface-draft") throw new Error("Expected fixed draft");
+      expect(Buffer.from(response.result.base64, "base64").toString("utf8")).toBe(expected);
+    }
+  });
+
   it("reads back the agent's own write instead of the draft captured before it", async () => {
     const f = await fixture();
     await fs.writeFile(path.join(f.workspace, "draft.ts"), "disk value\n", "utf8");
@@ -210,7 +268,7 @@ describe("native read source through Host router and Documents", () => {
       ok: true,
       result: { source: "disk", base64: Buffer.from("agent write\n").toString("base64") },
     });
-    expect(f.documents.agentInputDraftPaths(f.actor.sessionId, context)).toEqual([]);
+    expect(f.documents.agentInputDraftPaths(f.actor.sessionId, context, f.actor.workspaceId!)).toEqual([]);
   });
 
   it("writes the fixed draft through the router and keeps disk unchanged", async () => {
@@ -247,7 +305,6 @@ describe("native read source through Host router and Documents", () => {
       ownerId: "surface",
       resources: [{ ...binding, content: "B\n" }],
       sessionId: f.actor.sessionId,
-      workspaceId: f.actor.workspaceId!,
     });
     f.documents.commitAgentInputSnapshot(f.actor.sessionId, context);
     try {
@@ -415,5 +472,29 @@ describe("native read source through Host router and Documents", () => {
     if (!reread.ok || reread.result.source !== "disk") throw new Error("Expected disk bytes");
     expect(Buffer.from(reread.result.base64, "base64").toString("utf8")).toBe("B root payload\n");
     expect(outsideMapping.workspaceId).not.toBe(f.actor.workspaceId);
+  });
+
+  it("writes an external root while preserving an unrelated same-name draft", async () => {
+    const f = await fixture();
+    const local = path.join(f.workspace, "same.txt");
+    await fs.writeFile(local, "A disk\n");
+    const context = await f.capture("same.txt", "A draft\n", 1);
+    const outside = path.join(path.dirname(f.workspace), "external-write");
+    await fs.mkdir(outside);
+    await f.documents.resolveWorkspace({ path: outside });
+    const target = path.join(outside, "same.txt");
+    await fs.writeFile(target, "B disk\n");
+
+    const written = await f.write({ path: target, action: "write", content: "B changed\n" }, context);
+    expect(written).toMatchObject({ ok: true, result: { status: "applied", results: [{ target: "disk", status: "applied" }] } });
+    expect(await fs.readFile(target, "utf8")).toBe("B changed\n");
+    expect(await fs.readFile(local, "utf8")).toBe("A disk\n");
+    const localWrite = await f.write({ path: "same.txt", action: "write", content: "A overwritten\n" }, context);
+    expect(localWrite).toMatchObject({ ok: true, result: { status: "conflict" } });
+    expect(await fs.readFile(local, "utf8")).toBe("A disk\n");
+    const draft = await f.request("same.txt", context);
+    expect(draft).toMatchObject({ ok: true, result: { source: "surface-draft" } });
+    if (!draft.ok || draft.result.source !== "surface-draft") throw new Error("Expected A draft to remain fixed");
+    expect(Buffer.from(draft.result.base64, "base64").toString("utf8")).toBe("A draft\n");
   });
 });

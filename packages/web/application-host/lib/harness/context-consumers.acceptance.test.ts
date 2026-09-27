@@ -84,4 +84,40 @@ describe("context consumers — presentation and retained-source authority", () 
       next.abort();
     } finally { cursors.dispose(); await registry.dispose(); await rm(dataDir, { recursive: true, force: true }); }
   });
+
+  it("includes child material for a root session without a project", async () => {
+    const dataDir = await mkdtemp(join(tmpdir(), "zone2-session-scope-"));
+    const registry = createThreadRegistry({ dataDir, hostId: "test" });
+    const cursors = createObservationCursorStore();
+    try {
+      const child = await registry.createThread({
+        scopeId: "session:parent",
+        parent: { kind: "session", id: "parent" },
+        brief: "inspect attachment",
+        kind: "discussion",
+        createdBy: "agent",
+        concurrency: 2,
+        autoRun: false,
+        worktree: "none",
+        tools: [],
+        permissions: {},
+      });
+      await registry.setWorkingState("session:parent", child.id, { branchId: "branch-child", resultRevision: 1 });
+      const host = {
+        observationCursors: cursors,
+        threadRegistry: registry,
+        zone2Delivery: createZone2DeliveryService(),
+        zone2Provider: async () => ({
+          material: { userEdits: [], userCommands: [], newDiagnostics: [], git: null, blocks: [], knowledge: [], contextUsage: null },
+          eventCursor: 0,
+        }),
+      } as unknown as HarnessServiceHost;
+      const observer = context();
+      observer.workspaceId = null;
+      observer.actor.workspaceId = null;
+
+      const assembled = await createZone2AssembleService(host).handle({ sinceTurn: 0, branchEntryIds: [] }, observer);
+      expect(assembled.content).toContain(child.id);
+    } finally { cursors.dispose(); await registry.dispose(); await rm(dataDir, { recursive: true, force: true }); }
+  });
 });

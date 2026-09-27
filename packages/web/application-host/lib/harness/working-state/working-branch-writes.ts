@@ -10,6 +10,7 @@ import { acquireVirtualWriteTicket, type VirtualWriteGate } from "./virtual-writ
 import { assertTextUtf8, VirtualWriteTreeError } from "./virtual-write-tree.js";
 
 export interface WorkingBranchWriteChange {
+  workspaceId: string;
   resourceId: string;
   action: DocumentBranchWriteAction;
   content?: string;
@@ -117,6 +118,9 @@ export function createWorkingBranchWriteServices(options: {
           const expected = expectedRevision ?? live.writeRevision;
           const files: Record<string, RecoveryState> = {};
           for (const change of changes) {
+            if (change.workspaceId !== live.workspaceId) {
+              return rejected(`${change.resourceId} is outside the isolated working branch; no file was written`);
+            }
             let resolved;
             try {
               resolved = await resolveBranchPath(store, live.branchId, change.resourceId);

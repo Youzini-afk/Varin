@@ -433,7 +433,7 @@ describe("shell respawn working directory", () => {
     }
   });
 
-  it("does not mark a new work-context anchor applied until the shell confirms the directory switch", async () => {
+  it("retries the request's frozen cwd after a failed directory switch", async () => {
     const workspace = mkdtempSync(join(tmpdir(), "shell-anchor-confirm-"));
     const selected = join(workspace, "selected");
     mkdirSync(selected);
@@ -563,7 +563,7 @@ describe("shell respawn working directory", () => {
 
   it("does not fall back to the Host cwd when the session root no longer exists", async () => {
     const workspace = mkdtempSync(join(tmpdir(), "shell-cwd-"));
-    const { provider, processes } = controlledShell(() => workspace);
+    const { provider, processes, spawnCwds } = controlledShell(() => workspace);
     const outputStore = createOutputStore();
     const supervisor = createShellSupervisor({
       interpreter: { kind: "bash", command: "bash", args: [], env: {} },
@@ -577,7 +577,8 @@ describe("shell respawn working directory", () => {
       processes[0]!.kill();
       rmSync(workspace, { recursive: true, force: true });
       await expect(supervisor.exec("echo should-not-run", { waitMs: 1000 }))
-        .rejects.toThrow("No usable working directory remains for this shell session");
+        .resolves.toMatchObject({ kind: "spawn-failed", reason: "invalid-cwd" });
+      expect(spawnCwds).toEqual([workspace]);
     } finally {
       await supervisor.dispose().catch(() => undefined);
       outputStore.dispose();

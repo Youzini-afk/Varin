@@ -147,7 +147,8 @@ const quotePosixShell = (value: string): string => `'${value.replace(/'/g, "'\\'
  * without depending on the payload's content, so heredocs without a trailing
  * newline, tail comments, complex quoting, and unterminated constructs are
  * confined to the payload evaluation — the epilogue sentinels always run.
- * `exit`/`exec` and process death surface through the real PTY exit event.
+ * The user payload cannot alter the PTY shell's cwd/environment. A real PTY
+ * exit still reports process death independently of the command sentinels.
  */
 
 const quoteAnsiC = (value: string): string => {
@@ -165,47 +166,51 @@ const quoteAnsiC = (value: string): string => {
   return `${out}'`;
 };
 
-const reportedShellCwd = (kind: ShellInterpreterKind): string => kind === "git-bash" ? '"$(builtin pwd -W)"' : '"$PWD"';
-
-function buildCommandWrapper(command: string, token: string, kind: ShellInterpreterKind, requestedCwd?: string): string {
+function buildCommandWrapper(command: string, token: string, kind: ShellInterpreterKind, cwd: string): string {
   if (kind === "powershell") {
-    const begin = quotePowerShell(`${SENTINEL}${token}:B`);
-    const cwd = quotePowerShell(`${SENTINEL}${token}:C:`);
-    const end = quotePowerShell(`${SENTINEL}${token}:E:`);
-    // Capture status inside the evaluated script: Invoke-Expression itself
-    // reports success for a native command that returned a nonzero exit code.
-    const payload = Buffer.from(`${command}\n; $__varin_success = $?; $__varin_exit = $LASTEXITCODE`, "utf8").toString("base64");
-    const invoke = `Write-Output ${begin}; try { Invoke-Expression $__varin_payload } catch { $__varin_success = $false; $__varin_exit = 1; Write-Output $_ }`;
-    const execute = requestedCwd === undefined
-      ? invoke
-      : `try { Set-Location -LiteralPath ${quotePowerShell(requestedCwd)} -ErrorAction Stop } catch { $__varin_cwd_ok = $false; $__varin_success = $false; $__varin_exit = 1; Write-Output $_ }; if ($__varin_cwd_ok) { ${invoke} }`;
+    // Assemble markers at runtime. A ConPTY can echo the submitted control
+    // line; no complete marker may appear there or the parser could mistake it
+    // for command output before PowerShell executes it.
+    const markerBase = quotePowerShell(`${SENTINEL}${token}`);
+    const beginMarker = `$__varin_${token}_begin_marker`;
+    const cwdMarker = `$__varin_${token}_cwd_marker`;
+    const endMarker = `$__varin_${token}_end_marker`;
+    const commandSuccess = `$global:__varin_${token}_success`;
+    const commandExit = `$global:__varin_${token}_exit`;
+    // Capture status inside the payload: Invoke-Expression itself reports
+    // success for a native command that returned a nonzero exit code.
+    const payload = Buffer.from(`${command}\n; ${commandSuccess} = $?; ${commandExit} = $LASTEXITCODE`, "utf8").toString("base64");
+    const invoke = [
+      `Write-Output ${beginMarker}`,
+      `& { try { Invoke-Expression $__varin_payload } catch { ${commandSuccess} = $false; ${commandExit} = 1; Write-Output $_ } }`,
+      `$__varin_success = ${commandSuccess}`,
+      `$__varin_exit = ${commandExit}`,
+      `Remove-Variable -Scope Global -Name '__varin_${token}_success' -ErrorAction SilentlyContinue`,
+      `Remove-Variable -Scope Global -Name '__varin_${token}_exit' -ErrorAction SilentlyContinue`,
+    ].join("; ");
+    const execute = `try { Set-Location -LiteralPath ${quotePowerShell(cwd)} -ErrorAction Stop; $__varin_command_cwd = (Get-Location).ProviderPath; ${invoke} } catch { $__varin_success = $false; $__varin_exit = 1; Write-Output $_ }`;
     return [
       `$__varin_payload = [System.Text.Encoding]::UTF8.GetString([System.Convert]::FromBase64String('${payload}'))`,
-      "$global:LASTEXITCODE = 0; $__varin_success = $true; $__varin_exit = 0; $__varin_cwd_ok = $true",
+      // `cwd` in the result means where this invocation started. Payload
+      // `Set-Location` calls remain private to this command and do not rewrite it.
+      "$__varin_original_location = (Get-Location).ProviderPath; $__varin_original_environment = [System.Environment]::GetEnvironmentVariables(); $__varin_command_cwd = $__varin_original_location",
+      "$__varin_success = $true; $__varin_exit = 0; $global:LASTEXITCODE = 0",
+      `${beginMarker} = ${markerBase} + ':B'; ${cwdMarker} = ${markerBase} + ':C:'; ${endMarker} = ${markerBase} + ':E:'`,
       execute,
       "$__varin_code = if ($__varin_success) { 0 } elseif ($__varin_exit -is [int] -and $__varin_exit -ne 0) { [int]$__varin_exit } else { 1 }",
-      `Write-Output (${cwd} + (Get-Location).Path)`,
-      `Write-Output (${end} + $__varin_code)`,
+      "try { Set-Location -LiteralPath $__varin_original_location -ErrorAction Stop } catch { $__varin_success = $false; $__varin_code = 1; Write-Output $_ }",
+      "$__varin_current_environment = [System.Environment]::GetEnvironmentVariables(); foreach ($__varin_name in @($__varin_current_environment.Keys)) { if (-not $__varin_original_environment.Contains($__varin_name)) { [System.Environment]::SetEnvironmentVariable([string]$__varin_name, $null) } }; foreach ($__varin_name in $__varin_original_environment.Keys) { [System.Environment]::SetEnvironmentVariable([string]$__varin_name, [string]$__varin_original_environment[$__varin_name]) }",
+      "$__varin_code = if ($__varin_success) { 0 } elseif ($__varin_exit -is [int] -and $__varin_exit -ne 0) { [int]$__varin_exit } else { 1 }",
+      `Write-Output (${cwdMarker} + $__varin_command_cwd)`,
+      `Write-Output (${endMarker} + $__varin_code)`,
     ].join("; ");
   }
-  // The payload carries an explicit trailing newline inside the eval string:
-  // a command whose last line is a heredoc delimiter or a `#` comment still
-  // terminates inside eval, leaving the epilogue lines untouched.
+  // Keep the command inside a child shell so `cd`, exports, variable changes,
+  // `exit`, and `exec` cannot mutate or terminate the PTY's reusable shell.
+  // The payload's own trailing newline keeps heredocs and tail comments inside
+  // eval, while the outer sentinels still run after the child exits.
   const payload = quoteAnsiC(`${command}\n`);
-  return `echo '${SENTINEL}${token}:B'; eval ${payload}; __ec=$?; echo '${SENTINEL}${token}:C:'${reportedShellCwd(kind)}; echo '${SENTINEL}${token}:E:'"$__ec"`;
-}
-
-/**
- * Wrap a command for a shell whose cwd must be switched first. The whole
- * framed sequence (begin marker + payload eval) is gated behind `cd`: if the
- * directory switch fails, the payload never executes in the stale cwd and the
- * epilogue reports the cd's own exit code.
- */
-function buildCommandWrapperWithCwd(command: string, token: string, cwd: string, kind: ShellInterpreterKind): string {
-  if (kind === "powershell") {
-    return buildCommandWrapper(command, token, kind, cwd);
-  }
-  return `cd -- ${quotePosixShell(cwd)} && { echo '${SENTINEL}${token}:B'; eval ${quoteAnsiC(`${command}\n`)}; }; __ec=$?; echo '${SENTINEL}${token}:C:'${reportedShellCwd(kind)}; echo '${SENTINEL}${token}:E:'"$__ec"`;
+  return `( cd -- ${quotePosixShell(cwd)} && { echo '${SENTINEL}${token}:B'; eval ${payload}; } ); __ec=$?; echo '${SENTINEL}${token}:C:'${quotePosixShell(cwd)}; echo '${SENTINEL}${token}:E:'"$__ec"`;
 }
 
 // ── PTY Provider ────────────────────────────────────────────────────
@@ -385,7 +390,6 @@ interface BackgroundShell {
   observedOutputBytes: number;
   outputControlState: OutputControlState;
   outputHandle?: string;
-  anchorCwdToApply?: string;
   writer: { close: () => Promise<void> } | null;
   writerClosePromise?: Promise<void>;
   handle: TerminalHandle;
@@ -438,17 +442,10 @@ export function createShellSupervisor(deps: ShellSupervisorOptions) {
     }
   };
 
-  // lastCwd tracks the shell's own location: deleted directories and foreign
-  // path forms both make it an invalid spawn cwd. Validate candidates and fall
-  // back instead of failing every later command after a shell dies.
-  // anchorCwd is the session's declared work-context operation dir: a respawn
-  // lands on it before lastCwd so a crashed shell restarts at the selected
-  // project rather than a stale cd target.
+  // The shell process is reusable, but each accepted command has its own cwd.
+  // lastCwd records the last command's resolved cwd for recovery only; it is
+  // never the implicit cwd of a later command when an anchor is available.
   let anchorCwd: string | undefined;
-  // Which operation-directory anchor has actually reached the shell. This is
-  // separate from lastCwd because a command may intentionally `cd` elsewhere
-  // while the selected work-context anchor remains unchanged.
-  let appliedAnchorCwd: string | undefined;
   const resolveSpawnCwd = async (preferredCwd?: string): Promise<string> => {
     const seen = new Set<string>();
     const candidates = [preferredCwd, anchorCwd, lastCwd, deps.cwd];
@@ -519,7 +516,6 @@ export function createShellSupervisor(deps: ShellSupervisorOptions) {
     reject: (error: Error) => void;
     cancelTimeout: () => void;
     cwd: string;
-    anchorCwdToApply?: string;
     writer: ShellWriter | null;
     startedAt: number;
     observedOutputBytes: number;
@@ -943,7 +939,6 @@ export function createShellSupervisor(deps: ShellSupervisorOptions) {
       const sentinelLine = match[1];
       if (sentinelLine === "B") {
         // Begin sentinel — remove everything up to and including it
-        if (pendingCommand.anchorCwdToApply !== undefined) appliedAnchorCwd = pendingCommand.anchorCwdToApply;
         outputBuffer = outputBuffer.slice(match.index + match[0].length);
         sentinelPattern.lastIndex = 0;
       } else if (sentinelLine?.startsWith("C:")) {
@@ -968,7 +963,6 @@ export function createShellSupervisor(deps: ShellSupervisorOptions) {
     while ((match = sentinelPattern.exec(background.output)) !== null) {
       const sentinelLine = match[1];
       if (sentinelLine === "B") {
-        if (background.anchorCwdToApply !== undefined) appliedAnchorCwd = background.anchorCwdToApply;
         background.output = background.output.slice(match.index + match[0].length);
         sentinelPattern.lastIndex = 0;
       } else if (sentinelLine?.startsWith("C:")) {
@@ -1097,15 +1091,11 @@ export function createShellSupervisor(deps: ShellSupervisorOptions) {
     if (pendingCommand || commandStarting) throw new Error("Another command is already running");
 
     const timing = accepted.timing;
-    // A service may provide the actor's frozen default anchor. It is only a
-    // reanchor target when this anchor has not yet been applied to the shell;
-    // passing it as `cwd` unconditionally would erase the shell's persistent
-    // `cd` state after every command.
-    const admittedAnchor = options.defaultAnchorCwd ?? anchorCwd;
-    const reanchor = options.cwd === undefined
-      && admittedAnchor !== undefined
-      && appliedAnchorCwd !== admittedAnchor;
-    const selectedCwd = options.cwd ?? (reanchor ? admittedAnchor : undefined);
+    // Freeze the default directory at command admission. A prior payload may
+    // have changed its child shell's cwd, but that state never selects the next
+    // command's directory.
+    const admittedAnchor = options.defaultAnchorCwd ?? anchorCwd ?? deps.cwd ?? process.cwd();
+    const selectedCwd = options.cwd ?? admittedAnchor;
     commandStarting = true;
     let startFinished = false;
     let finishStart: () => void = () => undefined;
@@ -1115,22 +1105,18 @@ export function createShellSupervisor(deps: ShellSupervisorOptions) {
       // Do not let a new wrapper cross the previous command's completion
       // callback and writer-release boundary.
       await Promise.all([...commandLifecyclePromises]);
-      let requestedCwd: string | undefined;
-      if (selectedCwd !== undefined) {
-        const resolved = await resolveExistingDirectory(selectedCwd);
-        if (!resolved) {
-          commandStarting = false;
-          return {
-            kind: "spawn-failed",
-            reason: "invalid-cwd",
-            interpreter: interpreter.command,
-            hint: `Invalid working directory: ${selectedCwd}`,
-          };
-        }
-        requestedCwd = resolved;
+      const requestedCwd = await resolveExistingDirectory(selectedCwd);
+      if (!requestedCwd) {
+        commandStarting = false;
+        return {
+          kind: "spawn-failed",
+          reason: "invalid-cwd",
+          interpreter: interpreter.command,
+          hint: `Invalid working directory: ${selectedCwd}`,
+        };
       }
-      commandStartingCwd = requestedCwd ?? admittedAnchor ?? lastCwd;
-      await ensureShell(requestedCwd ?? admittedAnchor);
+      commandStartingCwd = requestedCwd;
+      await ensureShell(requestedCwd);
       if (!sessionHandle) {
         commandStarting = false;
         return { kind: "spawn-failed", reason: "no-shell", interpreter: interpreter.command, hint: "Shell not initialized" };
@@ -1138,8 +1124,8 @@ export function createShellSupervisor(deps: ShellSupervisorOptions) {
 
       const token = randomBytes(8).toString("hex");
       const executionId = accepted.executionId;
-      const wrapped = buildCommandWrapper(command, token, interpreter.kind);
-      const cwd = requestedCwd ?? lastCwd;
+      const wrapped = buildCommandWrapper(command, token, interpreter.kind, shellCwdForCommand(requestedCwd));
+      const cwd = requestedCwd;
       const startedAt = Date.now();
       const commandRunId = sessionHandle.id;
 
@@ -1227,8 +1213,6 @@ export function createShellSupervisor(deps: ShellSupervisorOptions) {
             lastOutputAt: stripControlSequences(outputBuffer).length > 0 ? Date.now() : null,
             observedOutputBytes: pendingCommand?.observedOutputBytes ?? 0,
             outputControlState: pendingCommand?.outputControlState ?? "text",
-            ...(pendingCommand?.anchorCwdToApply === undefined
-              ? {} : { anchorCwdToApply: pendingCommand.anchorCwdToApply }),
             writer,
             handle,
             timing,
@@ -1274,9 +1258,6 @@ export function createShellSupervisor(deps: ShellSupervisorOptions) {
           reject: rejectPromise,
           cancelTimeout,
           cwd,
-          ...(reanchor && options.cwd === undefined && admittedAnchor !== undefined
-            ? { anchorCwdToApply: admittedAnchor }
-            : {}),
           writer,
           startedAt,
           timing,
@@ -1295,7 +1276,6 @@ export function createShellSupervisor(deps: ShellSupervisorOptions) {
         startFinished = true;
         commandStarting = false;
 
-        // If cwd is different from current, cd first
         const shell = sessionHandle;
         if (!shell) {
           cancelTimeout();
@@ -1308,15 +1288,9 @@ export function createShellSupervisor(deps: ShellSupervisorOptions) {
           return;
         }
         try {
-          // A requested cwd is folded into the same framed payload so a failed
-          // `cd` reports its own exit code instead of running the command in
-          // the stale directory.
-          const framed = requestedCwd
-            ? buildCommandWrapperWithCwd(command, token, shellCwdForCommand(requestedCwd), interpreter.kind)
-            : wrapped;
           timing.sentAt = Date.now();
           accepted.phase = "running";
-          shell.write(`${framed}${interpreter.kind === "powershell" ? "\r\n" : "\n"}`);
+          shell.write(`${wrapped}${interpreter.kind === "powershell" ? "\r\n" : "\n"}`);
           notifyShellChanged(executionId);
         } catch (error) {
           cancelTimeout();

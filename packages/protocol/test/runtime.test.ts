@@ -53,8 +53,7 @@ describe("surface runtime protocol", () => {
     const promptRequest = createRuntimeRequest("req-3", "agent.prompt", {
       inputContext: {
         source: "surface",
-        workspaceId: "workspace-1",
-        dirtyPaths: ["draft.ts"],
+        roots: [{ workspaceId: "workspace-1", dirtyPaths: ["draft.ts"] }],
         snapshot: { status: "ready", ref: "opaque-ref" },
       },
       instructions: "hidden context",

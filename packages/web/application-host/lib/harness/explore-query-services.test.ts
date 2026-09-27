@@ -1,4 +1,5 @@
-import { describe, expect, it } from "vitest";
+import { resolve } from "node:path";
+import { describe, expect, it, vi } from "vitest";
 import type { AgentInputContext, HarnessActorContext } from "@varin/protocol";
 import {
   createExploreQueryCancelService,
@@ -25,8 +26,7 @@ const actor: HarnessActorContext = {
 
 const surface: AgentInputContext = {
   source: "surface",
-  workspaceId: "workspace-1",
-  dirtyPaths: ["a.ts"],
+  roots: [{ workspaceId: "workspace-1", dirtyPaths: ["a.ts"] }],
   snapshot: { status: "ready", ref: "surface" },
 };
 
@@ -157,6 +157,55 @@ describe("explore query services", () => {
     }, ctx);
     expect(store.get(actor.sessionId, started.queryId)?.paths).toEqual(["src"]);
     store.dispose();
+  });
+
+  it("runs a progressive query across two authorized resource roots with same-named files", async () => {
+    const store = createExploreQueryStore();
+    const rootA = resolve("external-query-a");
+    const rootB = resolve("external-query-b");
+    const pathA = resolve(rootA, "src");
+    const pathB = resolve(rootB, "src");
+    const searched: string[] = [];
+    const readPaths: string[] = [];
+    const host = {
+      exploreQueryStore: store,
+      searchService: {
+        resolveWorkspaceRoot: async (workspaceId: string) => ({ A: rootA, B: rootB })[workspaceId as "A" | "B"] ?? null,
+        search: vi.fn(async (_request: unknown, options: { authorizedPaths?: Array<{ workspaceId: string }> }) => {
+          const workspaceId = options.authorizedPaths?.[0]?.workspaceId;
+          if (!workspaceId) throw new Error("Search lost the authorized resource root");
+          searched.push(workspaceId);
+          const root = workspaceId === "A" ? rootA : rootB;
+          return {
+            status: "ready",
+            files: [{ path: resolve(root, "src", "same.ts"), hits: [{ line: 1, text: "needle", revision: `${workspaceId}-r1`, before: [], after: [] }] }],
+            partial: false,
+          };
+        }),
+      },
+      readExploreFile: async (_actor: HarnessActorContext, path: string) => {
+        readPaths.push(path);
+        return { status: "ready" as const, content: "needle", revision: "read-r1", source: "disk" as const };
+      },
+    } as unknown as Pick<HarnessServiceHost,
+      "searchService" | "readExploreFile" | "structureSource" | "graphRecall" | "semanticRecall" | "agentInputDraftPaths" | "exploreQueryStore">;
+    const ctx: HarnessServiceContext = {
+      ...context({ source: "disk" }),
+      authorizedPaths: [
+        { authorityId: "test-host", workspaceId: "A", canonicalResourceId: pathA, resolvedPath: pathA, inputPath: pathA, resourceId: "src" },
+        { authorityId: "test-host", workspaceId: "B", canonicalResourceId: pathB, resolvedPath: pathB, inputPath: pathB, resourceId: "src" },
+      ],
+    };
+    try {
+      const started = await createExploreQueryStartService(host).handle({ question: "needle", paths: [pathA, pathB] }, ctx);
+      await createExploreQueryViewsService(host).handle({ queryId: started.queryId }, ctx);
+      expect(searched).toContain("A");
+      expect(searched).toContain("B");
+      expect(readPaths).toContain(resolve(rootA, "src", "same.ts"));
+      expect(readPaths).toContain(resolve(rootB, "src", "same.ts"));
+    } finally {
+      store.dispose();
+    }
   });
 
   it("normalizes path anchors from Router authorization without changing symbol anchors", async () => {
@@ -389,7 +438,7 @@ describe("explore query services", () => {
         readPaths.push(path);
         return { status: "ready" as const, content: "export function NeedleSymbol() {}", revision: "rev-1", source: "disk" as const };
       },
-      graphRecall: async () => ({ workspaceId: "ws", store: graph, directFactsCompatible: true }),
+      graphRecall: async (_sessionId: string, workspaceId: string) => ({ workspaceId, store: graph, directFactsCompatible: true }),
       semanticRecall: async (
         _workspaceId: string,
         _question: string,

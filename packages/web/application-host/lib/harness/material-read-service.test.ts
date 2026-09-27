@@ -52,6 +52,32 @@ describe("material reading authority", () => {
     expect(f.readMaterialFile).not.toHaveBeenCalled();
   });
 
+  it("reads an existing snapshot from a session without a project", async () => {
+    const f = fixture();
+    f.host.threadRegistry = { getSessionBinding: async () => null } as never;
+    await createMaterialReadService(f.host).handle({ snapshotId: "fixed" }, {
+      ...context,
+      actor: { ...actor, workspaceId: null },
+      workspaceId: null,
+      authorizedPaths: [],
+    });
+    expect(f.read).toHaveBeenCalledWith({ snapshotId: "fixed" }, expect.objectContaining({
+      workspaceId: "session:session",
+      authority: expect.objectContaining({ owningWorkspaceId: "session:session", sessionId: "session" }),
+    }));
+  });
+
+  it("reads an authorized PDF outside the session's project", async () => {
+    const f = fixture();
+    const external = { ...authorized, workspaceId: "external-root", canonicalResourceId: "/outside/paper.pdf" };
+    await createMaterialReadService(f.host).handle({ path: "paper.pdf" }, {
+      ...context,
+      authorizedPaths: [external],
+    });
+    expect(f.readMaterialFile).toHaveBeenCalledWith(expect.anything(), external);
+    expect(f.ingest).toHaveBeenCalledOnce();
+  });
+
   it("authorizes UI local reads against the session execution workspace, not its parent material store", async () => {
     const f = fixture();
     const resolve = vi.fn(async () => authorized);
@@ -61,6 +87,25 @@ describe("material reading authority", () => {
     await adapter({ sessionId: "session", request: { path: "paper.pdf", view: "overview" }, signal: new AbortController().signal });
     expect(resolve).toHaveBeenCalledWith(expect.objectContaining({ workspaceId: "execution" }), "paper.pdf", { allowMissing: true });
     expect(f.ingest).toHaveBeenCalledOnce();
+  });
+
+  it("lets an unbound UI session read an external PDF through its resource root", async () => {
+    const f = fixture();
+    f.host.threadRegistry = { getSessionBinding: async () => null } as never;
+    const external = { ...authorized, workspaceId: "external-root", canonicalResourceId: "/outside/paper.pdf" };
+    const resolve = vi.fn(async () => external);
+    const adapter = createUserMaterialReadAdapter(() => f.host, {
+      scopeForSession: async () => ({
+        scopeId: "session:session",
+        parent: { kind: "session", id: "session" },
+        snapshot: { cwd: "/home/user" } as never,
+      }),
+    }, { resolve });
+
+    await adapter({ sessionId: "session", request: { path: "paper.pdf" }, signal: new AbortController().signal });
+    expect(resolve).toHaveBeenCalledWith(expect.objectContaining({ workspaceId: null, authorityRoot: "/home/user" }), "paper.pdf", { allowMissing: true });
+    expect(f.readMaterialFile).toHaveBeenCalledWith(expect.anything(), external);
+    expect(f.ingest).toHaveBeenCalledWith(expect.anything(), expect.objectContaining({ workspaceId: "session:session" }), expect.anything());
   });
 
   it("uses experiment access before importing an artifact and refuses a tool without that capability", async () => {

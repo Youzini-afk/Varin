@@ -4,6 +4,7 @@ import type { DocumentReadRequest, FetchResult } from "@varin/protocol";
 import type { HarnessService, HarnessServiceContext } from "./router.js";
 import type { HarnessServiceHost } from "./service-host.js";
 import { resolveResearchCaller } from "./research-access.js";
+import { sessionScopeId } from "./owner-scope.js";
 
 type MaterialReadHost = Pick<HarnessServiceHost,
   "documentReader" | "readMaterialFile" | "documentReadingSettings" | "materialWebPolicy" | "threadRegistry" | "getWebBinding" | "experimentService"
@@ -16,7 +17,7 @@ export function createMaterialReadService(host: MaterialReadHost): HarnessServic
       if (!request || typeof request !== "object" || Array.isArray(request)) {
         return { status: "failed", url: "", reason: "A document read request is required" };
       }
-      if (!host.documentReader || !ctx.workspaceId) {
+      if (!host.documentReader) {
         return { status: "failed", url: "", reason: "Document reading is unavailable for this session" };
       }
       const localPath = typeof request.path === "string" ? request.path.trim() : "";
@@ -30,7 +31,7 @@ export function createMaterialReadService(host: MaterialReadHost): HarnessServic
         return { status: "failed", url: "", reason: "A valid experiment attempt and artifact are required" };
       }
       const binding = await host.threadRegistry?.getSessionBinding(ctx.sessionId);
-      const workspaceId = binding?.owningScopeId ?? ctx.workspaceId;
+      const workspaceId = binding?.owningScopeId ?? ctx.workspaceId ?? sessionScopeId(ctx.sessionId);
       const webBinding = host.getWebBinding(ctx.sessionId);
       const domains = webBinding ? webBinding.settings?.domains
         : snapshotId ? await host.materialWebPolicy?.(ctx.sessionId) : undefined;
@@ -59,7 +60,7 @@ export function createMaterialReadService(host: MaterialReadHost): HarnessServic
             return { status: "failed", url: "", reason: "Experiment reading is not granted to this agent" };
           }
           const caller = await resolveResearchCaller(host.threadRegistry, {
-            sessionId: ctx.sessionId, workspaceId, executionWorkspaceId: ctx.workspaceId,
+            sessionId: ctx.sessionId, workspaceId, executionWorkspaceId: ctx.workspaceId ?? workspaceId,
             ...(ctx.workspaceScope ? { workspaceScope: ctx.workspaceScope } : {}),
             ...(ctx.requestSource === "user" ? { user: true } : {}),
           });
@@ -74,7 +75,7 @@ export function createMaterialReadService(host: MaterialReadHost): HarnessServic
         }
         const authorized = ctx.authorizedPaths[0];
         if (!host.readMaterialFile || !authorized || ctx.authorizedPaths.length !== 1
-          || authorized.workspaceId !== ctx.workspaceId || authorized.inputPath !== request.path) {
+          || authorized.inputPath !== request.path) {
           return { status: "failed", url: "", reason: "Document path has not been authorized for this session" };
         }
         const source = await host.readMaterialFile(ctx, authorized);

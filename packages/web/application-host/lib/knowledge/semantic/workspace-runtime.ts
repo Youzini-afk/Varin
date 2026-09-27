@@ -19,7 +19,7 @@ type InferenceBroker = Pick<PiRuntimeBroker, 'requestForWorkspace' | 'watchConfi
 type PathMutation = Pick<DocumentMutationObservation, 'workspaceId' | 'resourceId' | 'kind'>;
 
 export interface WorkspaceSemanticRuntimeOptions extends Omit<SemanticIndexRuntimeOptions, 'getEmbedder' | 'documents'> {
-  documents: Pick<DocumentAuthority, 'read' | 'inspectWorkspace' | 'agentInputDraftPaths' | 'readAgentInputSnapshot'>;
+  documents: Pick<DocumentAuthority, 'read' | 'inspectWorkspace' | 'watch' | 'agentInputDraftPaths' | 'readAgentInputSnapshot'>;
   getBroker(): InferenceBroker | null;
   /**
    * HR3: one shared worker directory for settings/inference transport. Harness
@@ -45,6 +45,8 @@ type WorkspaceState = {
   refreshTail: Promise<void>;
   watches: Array<{ id: string; broker: InferenceBroker }>;
   watching: Promise<void> | null;
+  documentWatch: { ready: Promise<boolean>; close(): void } | null;
+  documentWatchReady: boolean;
 };
 
 /** The production owner of workspace settings, inference transport and query views. */
@@ -119,6 +121,49 @@ export function createWorkspaceSemanticRuntime(options: WorkspaceSemanticRuntime
     state.refreshTail = task.then(() => undefined, () => undefined);
     return task;
   };
+  const ensureDocumentWatch = async (state: WorkspaceState, reconcileOnRecovery: boolean): Promise<boolean> => {
+    if (state.documentWatchReady && state.documentWatch) return true;
+    state.documentWatch?.close();
+    state.documentWatch = null;
+    const wasReady = state.documentWatchReady;
+    try {
+      const documentWatch = options.documents.watch(state.workspaceId, (event) => {
+        if (event.kind === 'reset') {
+          track(state.runtime.scanWorkspace(state.workspaceId));
+          return;
+        }
+        const resource = event.resource;
+        if (!resource || resource.workspaceId !== state.workspaceId) return;
+        state.runtime.observeDocumentMutation({
+          workspaceId: state.workspaceId,
+          resourceId: resource.resourceId,
+          kind: event.kind === 'deleted' ? 'deleted' : 'modified',
+        });
+      });
+      state.documentWatch = documentWatch;
+      state.documentWatchReady = await documentWatch.ready;
+      if (disposed) {
+        documentWatch.close();
+        state.documentWatch = null;
+        state.documentWatchReady = false;
+        return false;
+      }
+      if (!state.documentWatchReady) {
+        documentWatch.close();
+        state.documentWatch = null;
+        return false;
+      }
+      // A root that was temporarily unavailable needs one reconciliation when
+      // it becomes observable again; a successful retry is not a baseline.
+      if (reconcileOnRecovery && !wasReady) track(state.runtime.scanWorkspace(state.workspaceId));
+      return true;
+    } catch {
+      state.documentWatch?.close();
+      state.documentWatch = null;
+      state.documentWatchReady = false;
+      return false;
+    }
+  };
   const watch = async (state: WorkspaceState): Promise<void> => {
     if (disposed || state.watches.length > 0) return;
     if (state.watching) return state.watching;
@@ -156,6 +201,7 @@ export function createWorkspaceSemanticRuntime(options: WorkspaceSemanticRuntime
     if (loading) return loading;
     const existing = states.get(workspaceId);
     if (existing) {
+      await ensureDocumentWatch(existing, true);
       await watch(existing);
       // Also wait for a refresh already queued by config.changed.
       if (existing.needsRefresh) await refresh(existing, autoScan);
@@ -197,11 +243,14 @@ export function createWorkspaceSemanticRuntime(options: WorkspaceSemanticRuntime
           },
         },
         snapshot: null, bindingKey: '', needsRefresh: true, refreshTail: Promise.resolve(),
-        watches: [], watching: null,
+        watches: [], watching: null, documentWatch: null, documentWatchReady: false,
       };
       // Never let a query run against the local backend before settings resolve.
       markUnavailable(state);
       states.set(workspaceId, state);
+      // Subscribe before the first scan so writes during enumeration are either
+      // observed incrementally or cause the scope to be reconciled.
+      await ensureDocumentWatch(state, false);
       // Register observation before reading settings, so changes made while a
       // watch is being created are included in the first binding snapshot.
       await watch(state);
@@ -231,13 +280,16 @@ export function createWorkspaceSemanticRuntime(options: WorkspaceSemanticRuntime
       const threadDocuments = searchOptions?.threadDocuments;
       const threadQuery = searchOptions?.threadQuery ?? threadSnapshot ?? undefined;
       if (execution?.mode === 'virtual' && !threadDocuments && !threadQuery) throw new Error('Working-branch query view is unavailable');
-      const draftPaths = sessionId ? options.documents.agentInputDraftPaths(sessionId, inputContext)
-        : inputContext.source === 'surface' ? inputContext.dirtyPaths : undefined;
+      const draftPaths = sessionId ? options.documents.agentInputDraftPaths(sessionId, inputContext, workspaceId)
+        : inputContext.source === 'surface'
+          ? inputContext.roots.find((root) => root.workspaceId === workspaceId)?.dirtyPaths ?? []
+          : undefined;
       const view = await pinSemanticQueryView({
         inputContext,
+        workspaceId,
         ...(draftPaths === undefined ? {} : { draftPaths }),
         ...(threadQuery ? { threadDocuments: [] } : threadDocuments ? { threadDocuments } : sessionId ? {
-          readDraft: (resourceId: string) => options.documents.readAgentInputSnapshot(sessionId, inputContext, resourceId),
+          readDraft: (resourceId: string) => options.documents.readAgentInputSnapshot(sessionId, inputContext, resourceId, workspaceId),
         } : {}),
       });
       const result = await state.runtime.search(workspaceScope(workspaceId), question, limit, {
@@ -246,12 +298,24 @@ export function createWorkspaceSemanticRuntime(options: WorkspaceSemanticRuntime
         overlays: view.overlays, view: view.view,
         ...(threadQuery ? { threadQuery } : {}),
       });
+      const gaps = [...result.gaps];
+      const status = { ...result.status };
+      if (!state.documentWatchReady && !gaps.some((gap) => gap.reason === 'index-watch-unavailable')) {
+        gaps.push({ path: '.', reason: 'index-watch-unavailable' as const });
+        status.status = status.status === 'failed' || status.status === 'unavailable' ? status.status : 'incomplete';
+        if (status.coverage === 'complete') status.coverage = 'partial';
+      }
       return {
-        status: result.status.status, coverage: result.status.coverage,
+        status: status.status, coverage: status.coverage,
         ...(result.status.generation ? { generation: result.status.generation } : {}),
         ...(result.status.spaceId ? { spaceId: result.status.spaceId } : {}),
         scope: result.status.scope, lifecycle: result.status.lifecycle, hits: result.hits,
-        ...(result.gaps.length > 0 ? { gaps: result.gaps } : {}),
+        ...(gaps.length > 0 ? { gaps } : {}),
+        note: !state.documentWatchReady
+          ? 'Filesystem watching is unavailable; changes and additions may be absent until this root is rescanned.'
+          : gaps.some((gap) => gap.reason === 'content-changed')
+            ? 'Changed indexed files were omitted and queued for reindexing. Newly added files rely on filesystem observation.'
+            : 'Disk hit revisions are checked against Documents. Newly added files rely on filesystem observation; a missed watch event can remain absent until a root rescan.',
       };
     } finally {
       await threadSnapshot?.release();
@@ -392,6 +456,7 @@ export function createWorkspaceSemanticRuntime(options: WorkspaceSemanticRuntime
     dispose: async () => {
       disposed = true;
       epoch++;
+      for (const state of states.values()) state.documentWatch?.close();
       await Promise.allSettled([...states.values()].map((state) => state.runtime.dispose()));
       await Promise.allSettled([...loads.values(), ...pending]);
       await Promise.allSettled([...states.values()].map(async (state) => {

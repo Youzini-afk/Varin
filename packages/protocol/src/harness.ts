@@ -210,6 +210,8 @@ export interface SearchContentHit {
   text: string;
   before: string[];
   after: string[];
+  /** Source document revision reported by the search backend. */
+  revision?: string;
 }
 
 /**
@@ -967,6 +969,8 @@ export type ExploreIndexLifecycle = "idle" | "building" | "rebuilding" | "ready"
 export interface ExploreSemanticDetails {
   status: ExploreSemanticStatus;
   coverage: ExploreSemanticCoverage;
+  /** Limits of current-version checks and filesystem change observation. */
+  note?: string;
   generation?: string;
   spaceId?: string;
   scope?: { scopeKind: string; scopeId: string };
@@ -1107,7 +1111,9 @@ export type ExploreSemanticGapReason =
   | "draft-vector-pending"
   | "draft-unavailable"
   | "thread-vector-pending"
-  | "index-read-failed";
+  | "index-read-failed"
+  | "content-changed"
+  | "index-watch-unavailable";
 
 export interface ExploreSemanticGap {
   path: string;

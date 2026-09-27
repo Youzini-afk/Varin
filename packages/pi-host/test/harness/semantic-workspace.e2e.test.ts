@@ -174,6 +174,7 @@ async function createSemanticHarness(options: {
     documents: {
       read: documents.read,
       inspectWorkspace: documents.inspectWorkspace,
+      watch: documents.watch,
       agentInputDraftPaths: documents.agentInputDraftPaths,
       readAgentInputSnapshot: documents.readAgentInputSnapshot,
     },

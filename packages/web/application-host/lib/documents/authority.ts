@@ -303,7 +303,6 @@ interface CaptureAgentInputSnapshotRequest {
   ownerId: string;
   resources: unknown[];
   sessionId: string;
-  workspaceId: string;
 }
 
 interface BeginDirtyStateBarrierOptions {
@@ -368,11 +367,18 @@ export type DocumentFsPromises = typeof fs.promises;
 // ── Helpers ──────────────────────────────────────────────────────────────
 
 const resourceKey = (
-  workspaceId: string,
+  hostId: string,
   canonicalPath: string,
   pathModule: typeof path,
   platform: string,
-): string => `${workspaceId}\0${normalizePathIdentity(canonicalPath, { pathModule, platform }).replace(/\\/g, '/')}`;
+): string => `${hostId}\0${normalizePathIdentity(canonicalPath, { pathModule, platform }).replace(/\\/g, '/')}`;
+
+const coordinationIdFor = (
+  hostId: string,
+  canonicalPath: string,
+  pathModule: typeof path,
+  platform: string,
+): string => `document:${createHash('sha256').update(resourceKey(hostId, canonicalPath, pathModule, platform)).digest('base64url')}`;
 
 const toIso = (mtimeMs: number): string => new Date(mtimeMs).toISOString();
 
@@ -553,6 +559,46 @@ export const createDocumentAuthority = (options: DocumentAuthorityOptions) => {
     throw new DocumentPathError('Path is outside workspace');
   };
 
+  const resolveResourceIdentity = async (resource: DocumentResource): Promise<{ coordinationId: string; aliases: DocumentResource[] }> => {
+    const { resolved } = await resolveResourcePath(resource, true);
+    const canonical = await canonicalizePathIdentity(resolved.absolutePath, {
+      allowMissing: true, fsPromises, pathModule,
+    }).catch((error) => fail(error));
+    const aliases = new Map<string, DocumentResource>();
+    const addAlias = (alias: DocumentResource): void => {
+      aliases.set(`${alias.workspaceId}\0${alias.resourceId}`, alias);
+    };
+    addAlias(resource);
+    for (const mapping of await registry.list()) {
+      const candidateRelative = pathModule.relative(mapping.canonicalPath, canonical);
+      const possibleAlias = mapping.kind === 'file'
+        ? normalizePathIdentity(mapping.canonicalPath, { pathModule, platform })
+          === normalizePathIdentity(canonical, { pathModule, platform })
+        : Boolean(candidateRelative) && !pathModule.isAbsolute(candidateRelative)
+          && candidateRelative !== '..' && !candidateRelative.startsWith(`..${pathModule.sep}`);
+      if (!possibleAlias) continue;
+      let workspace: LoadedWorkspace;
+      try {
+        workspace = await loadWorkspace(mapping.workspaceId);
+      } catch {
+        continue;
+      }
+      if (workspace.kind === 'file') {
+        if (normalizePathIdentity(workspace.root, { pathModule, platform })
+          === normalizePathIdentity(canonical, { pathModule, platform })) {
+          addAlias({ workspaceId: workspace.workspaceId, resourceId: '' });
+        }
+        continue;
+      }
+      const relative = pathModule.relative(workspace.root, canonical);
+      if (relative && !pathModule.isAbsolute(relative) && relative !== '..'
+        && !relative.startsWith(`..${pathModule.sep}`)) {
+        addAlias({ workspaceId: workspace.workspaceId, resourceId: relative.split(pathModule.sep).join('/') });
+      }
+    }
+    return { coordinationId: coordinationIdFor(hostId, canonical, pathModule, platform), aliases: [...aliases.values()] };
+  };
+
   const withResolvedResourceOperation = async <Result>(
     requests: ReadonlyArray<{ resource: DocumentResource; scope: 'exact' | 'subtree' }>,
     operation: (resolved: readonly ResolveResourceResult[]) => Promise<Result>,
@@ -563,7 +609,7 @@ export const createDocumentAuthority = (options: DocumentAuthorityOptions) => {
       { allowMissing: true, fsPromises, pathModule },
     ))).catch((error) => fail(error));
     const queueResources: SerialQueueResource[] = resolved.map((_entry, index) => ({
-      key: resourceKey(requests[index]!.resource.workspaceId, canonicalPaths[index]!, pathModule, platform),
+      key: resourceKey(hostId, canonicalPaths[index]!, pathModule, platform),
       scope: requests[index]!.scope,
     }));
     const held = activeResourceKeys.getStore();
@@ -582,7 +628,7 @@ export const createDocumentAuthority = (options: DocumentAuthorityOptions) => {
         });
       }
       const keys = new Set(queueResources.map((resource) => resource.key));
-      return activeResourceKeys.run(keys, () => storage(workspaceId, (context) => context.resourceOperationGate.run(
+      const execute = () => activeResourceKeys.run(keys, () => storage(workspaceId, (context) => context.resourceOperationGate.run(
         requests.map((request, index) => {
           const relative = pathModule.relative(resolved[index]!.workspace.root, canonicalPaths[index]!);
           if (pathModule.isAbsolute(relative) || relative === '..' || relative.startsWith(`..${pathModule.sep}`)) {
@@ -592,6 +638,9 @@ export const createDocumentAuthority = (options: DocumentAuthorityOptions) => {
         }),
         () => operation(resolved),
       )));
+      // The kernel lease is scoped to one Documents workspace. The host queue
+      // joins aliases from overlapping workspace roots before entering it.
+      return nested ? execute() : queues.runResources(queueResources, execute);
     }
     return queues.runResources(queueResources, () => activeResourceKeys.run(
       new Set(queueResources.map((resource) => resource.key)),
@@ -1523,7 +1572,6 @@ export const createDocumentAuthority = (options: DocumentAuthorityOptions) => {
         || !(entry as Record<string, unknown>).resource
         || ((entry as Record<string, unknown>).resource as Record<string, unknown>).workspaceId !== request.workspaceId
         || typeof ((entry as Record<string, unknown>).resource as Record<string, unknown>).resourceId !== 'string'
-        || !((entry as Record<string, unknown>).resource as Record<string, unknown>).resourceId
         || ((entry as Record<string, unknown>).baseRevision !== null && typeof (entry as Record<string, unknown>).baseRevision !== 'string')
         || !Number.isSafeInteger((entry as Record<string, unknown>).localEditRevision)
         || ((entry as Record<string, unknown>).localEditRevision as number) < 0
@@ -1878,19 +1926,9 @@ export const createDocumentAuthority = (options: DocumentAuthorityOptions) => {
   const captureAgentInputSnapshot = async (request: CaptureAgentInputSnapshotRequest): Promise<AgentInputContext> => {
     if (!request || typeof request.sessionId !== 'string' || !request.sessionId
       || typeof request.ownerId !== 'string' || !request.ownerId
-      || typeof request.workspaceId !== 'string' || !request.workspaceId
       || !Number.isSafeInteger(request.generation) || request.generation < 0
-      || !Array.isArray(request.resources)) {
+      || !Array.isArray(request.resources) || request.resources.length === 0) {
       throw new DocumentAuthorityError('Agent input snapshot capture is malformed', { code: 'failed', statusCode: 400 });
-    }
-    await loadWorkspace(request.workspaceId);
-    const key = dirtyBufferKey(request.ownerId, request.workspaceId);
-    const publication = dirtyBuffersByOwner.get(key);
-    if (!publication || publication.generation !== request.generation) {
-      throw new DocumentAuthorityError('Dirty buffer publication is unavailable for capture', {
-        code: 'stale-completion',
-        statusCode: 409,
-      });
     }
     const resources: SurfaceSnapshotResource[] = request.resources.map((entry) => {
       const candidate = entry && typeof entry === 'object' && !Array.isArray(entry)
@@ -1899,8 +1937,8 @@ export const createDocumentAuthority = (options: DocumentAuthorityOptions) => {
       const resource = candidate.resource && typeof candidate.resource === 'object' && !Array.isArray(candidate.resource)
         ? candidate.resource as Record<string, unknown>
         : {};
-      if (resource.workspaceId !== request.workspaceId
-        || typeof resource.resourceId !== 'string' || !resource.resourceId
+      if (typeof resource.workspaceId !== 'string' || !resource.workspaceId
+        || typeof resource.resourceId !== 'string'
         || (candidate.baseRevision !== null && typeof candidate.baseRevision !== 'string')
         || !Number.isSafeInteger(candidate.localEditRevision) || Number(candidate.localEditRevision) < 0
         || typeof candidate.content !== 'string'
@@ -1924,34 +1962,55 @@ export const createDocumentAuthority = (options: DocumentAuthorityOptions) => {
         bom: candidate.bom === undefined ? false : candidate.bom,
         content: candidate.content,
         localEditRevision: Number(candidate.localEditRevision),
-        resource: { workspaceId: request.workspaceId, resourceId: resource.resourceId },
+        resource: { workspaceId: resource.workspaceId, resourceId: resource.resourceId },
         bufferHash,
         lineEnding,
       };
     });
-    const requestedByPath = new Map(resources.map((resource) => [resource.resource.resourceId, resource]));
-    const publishedByPath = new Map(publication.resources.map((resource) => [resource.resource.resourceId, resource]));
-    if (requestedByPath.size !== resources.length
-      || publishedByPath.size !== publication.resources.length
-      || requestedByPath.size !== publishedByPath.size
-      || [...requestedByPath].some(([resourceId, resource]) => {
-        const published = publishedByPath.get(resourceId);
-        const publishedHash = published?.bufferHash;
-        const serializedHash = `sha256-${createHash('sha256').update(normalizeEditorLineEndings(resource.content), 'utf8').digest('hex')}`;
-        return !published
-          || published.resource.workspaceId !== request.workspaceId
-          || published.baseRevision !== resource.baseRevision
-          || published.localEditRevision !== resource.localEditRevision
-          || (publishedHash !== undefined && publishedHash !== serializedHash)
-          || (resource.bufferHash !== undefined && resource.bufferHash !== serializedHash);
-      })) {
-      throw new DocumentAuthorityError('Dirty buffer publication changed before capture', {
-        code: 'stale-completion',
-        statusCode: 409,
-      });
+    const byRoot = new Map<string, SurfaceSnapshotResource[]>();
+    for (const resource of resources) {
+      const entries = byRoot.get(resource.resource.workspaceId) ?? [];
+      entries.push(resource);
+      byRoot.set(resource.resource.workspaceId, entries);
     }
-    await Promise.all(resources.map((resource) => resolveResourcePath(resource.resource, true)));
-    if (dirtyBuffersByOwner.get(key) !== publication) {
+    const publications = new Map<string, DirtyBufferPublication>();
+    for (const [workspaceId, entries] of byRoot) {
+      await loadWorkspace(workspaceId);
+      const publication = dirtyBuffersByOwner.get(dirtyBufferKey(request.ownerId, workspaceId));
+      if (!publication || publication.generation !== request.generation) {
+        throw new DocumentAuthorityError('Dirty buffer publication is unavailable for capture', {
+          code: 'stale-completion', statusCode: 409,
+        });
+      }
+      const requestedByPath = new Map(entries.map((resource) => [resource.resource.resourceId, resource]));
+      const publishedByPath = new Map(publication.resources.map((resource) => [resource.resource.resourceId, resource]));
+      if (requestedByPath.size !== entries.length
+        || publishedByPath.size !== publication.resources.length
+        || requestedByPath.size !== publishedByPath.size
+        || [...requestedByPath].some(([resourceId, resource]) => {
+          const published = publishedByPath.get(resourceId);
+          const publishedHash = published?.bufferHash;
+          const serializedHash = `sha256-${createHash('sha256').update(normalizeEditorLineEndings(resource.content), 'utf8').digest('hex')}`;
+          return !published
+            || published.resource.workspaceId !== workspaceId
+            || published.baseRevision !== resource.baseRevision
+            || published.localEditRevision !== resource.localEditRevision
+            || (publishedHash !== undefined && publishedHash !== serializedHash)
+            || (resource.bufferHash !== undefined && resource.bufferHash !== serializedHash);
+        })) {
+        throw new DocumentAuthorityError('Dirty buffer publication changed before capture', {
+          code: 'stale-completion', statusCode: 409,
+        });
+      }
+      publications.set(workspaceId, publication);
+    }
+    const resolvedResources = await Promise.all(resources.map(async (resource) => ({
+      ...resource,
+      ...await resolveResourceIdentity(resource.resource),
+    })));
+    if ([...publications].some(([workspaceId, publication]) => (
+      dirtyBuffersByOwner.get(dirtyBufferKey(request.ownerId, workspaceId)) !== publication
+    ))) {
       throw new DocumentAuthorityError('Dirty buffer publication changed before capture', {
         code: 'stale-completion',
         statusCode: 409,
@@ -1960,9 +2019,8 @@ export const createDocumentAuthority = (options: DocumentAuthorityOptions) => {
     return surfaceSnapshots.capture({
       ownerId: request.ownerId,
       ownerGeneration: request.generation,
-      resources,
+      resources: resolvedResources,
       sessionId: request.sessionId,
-      workspaceId: request.workspaceId,
     });
   };
 
@@ -1992,7 +2050,8 @@ export const createDocumentAuthority = (options: DocumentAuthorityOptions) => {
     sessionId: string,
     context: AgentInputContext,
     resourceId: string,
-  ) => surfaceSnapshots.overlay(sessionId, context, resourceId);
+    workspaceId: string,
+  ) => surfaceSnapshots.overlay(sessionId, context, resourceId, workspaceId);
 
   const applyAgentSurfaceWrite = async (
     sessionId: string,
@@ -2001,12 +2060,6 @@ export const createDocumentAuthority = (options: DocumentAuthorityOptions) => {
     changes: readonly AgentSurfaceWriteChange[],
     signal?: AbortSignal,
   ): Promise<DocumentSurfaceWriteResult> => {
-    if (context.source === 'surface' && context.workspaceId !== workspaceId) {
-      return {
-        status: 'unavailable',
-        results: changes.map((change) => ({ path: change.resourceId, target: 'surface', status: 'unavailable', message: 'Document surface workspace identity changed.' })),
-      };
-    }
     if (!durableMutationStorage) {
       return {
         status: 'unavailable',
@@ -2071,7 +2124,7 @@ export const createDocumentAuthority = (options: DocumentAuthorityOptions) => {
           return { status: 'conflict', message: `${request.resourceId} could not be deleted on disk.` };
         },
         durable,
-      }, { sessionId, context, changes, ...(signal ? { signal } : {}) });
+      }, { sessionId, context, workspaceId, changes, ...(signal ? { signal } : {}) });
       return result;
     };
     return durableMutationStorage(workspaceId, (durable) => run(durable));
@@ -2086,8 +2139,9 @@ export const createDocumentAuthority = (options: DocumentAuthorityOptions) => {
     sessionId: string,
     context: AgentInputContext,
     resourceId: string,
+    workspaceId: string,
   ): Promise<DocumentWriteGuardResult> => {
-    const draft = surfaceSnapshots.read(sessionId, context, resourceId);
+    const draft = surfaceSnapshots.read(sessionId, context, resourceId, workspaceId);
     // No draft owns this path: either the turn reads disk anyway, or a write
     // already superseded the draft, so reads and writes share one source.
     if (draft.status === 'disk') return { status: 'allow' };
@@ -2103,7 +2157,7 @@ export const createDocumentAuthority = (options: DocumentAuthorityOptions) => {
     if (context.source !== 'surface') return { status: 'allow' };
     let disk;
     try {
-      disk = await read({ workspaceId: context.workspaceId, resourceId });
+      disk = await read({ workspaceId, resourceId });
     } catch {
       return {
         status: 'unavailable',
@@ -2167,6 +2221,7 @@ export const createDocumentAuthority = (options: DocumentAuthorityOptions) => {
   return {
     hostId,
     resolveWorkspace,
+    resolveResourceIdentity,
     listWorkspaceRegistrations: () => registry.list(),
     inspectWorkspace: async (workspaceId: string) => {
       try {
@@ -2178,6 +2233,7 @@ export const createDocumentAuthority = (options: DocumentAuthorityOptions) => {
           workspaceId: workspace.workspaceId,
           hostId,
           root: workspace.root,
+          kind: workspace.kind,
         };
       } catch (error) {
         return fail(error);

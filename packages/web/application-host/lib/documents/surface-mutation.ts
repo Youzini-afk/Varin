@@ -77,10 +77,12 @@ export interface SurfaceMutationDependencies {
     sessionId: string,
     context: AgentInputContext,
     resourceId: string,
+    workspaceId: string,
   ) => SurfaceSnapshotInspectResult;
   surfaceOwner: (
     sessionId: string,
     context: AgentInputContext,
+    workspaceId: string,
   ) => { ownerId: string; generation: number; workspaceId: string } | null;
   inspectDirtyBuffers: (workspaceId: string) => Promise<DirtyBufferPublication[]>;
   requestSurfaceOperation: (
@@ -219,10 +221,6 @@ const liveMismatch = (
   return null;
 };
 
-const contextWorkspaceId = (context: AgentInputContext): string => (
-  context.source === "surface" ? context.workspaceId : ""
-);
-
 const pathResult = (
   base: Omit<DocumentSurfaceWritePathResult, "revision" | "message"> & {
     revision?: string | undefined;
@@ -309,6 +307,7 @@ export async function applyAgentSurfaceMutation(
   input: {
     sessionId: string;
     context: AgentInputContext;
+    workspaceId: string;
     changes: readonly AgentSurfaceWriteChange[];
     signal?: AbortSignal;
   },
@@ -317,9 +316,10 @@ export async function applyAgentSurfaceMutation(
     return { result: { status: "disk" }, record: null };
   }
 
+  const workspaceId = input.workspaceId;
   const planned: PlannedPath[] = [];
   for (const change of input.changes) {
-    const inspect = deps.inspectSnapshot(input.sessionId, input.context, change.resourceId);
+    const inspect = deps.inspectSnapshot(input.sessionId, input.context, change.resourceId, workspaceId);
     if (inspect.status === "unavailable") {
       planned.push({
         change,
@@ -437,7 +437,8 @@ export async function applyAgentSurfaceMutation(
     return { result: { status: "disk" }, record: null };
   }
 
-  const owner = deps.surfaceOwner(input.sessionId, input.context);
+  const snapshotOwner = deps.surfaceOwner(input.sessionId, input.context, workspaceId);
+  const owner = snapshotOwner?.workspaceId === workspaceId ? snapshotOwner : null;
   const surfaceItems = planned.filter((item) => item.class === "surface");
   if (surfaceItems.length > 0 && !owner) {
     for (const item of surfaceItems) {
@@ -487,7 +488,6 @@ export async function applyAgentSurfaceMutation(
   const persistIntent = async (): Promise<PersistedAgentMutationData | null> => {
     if (!deps.durable) return durable;
     if (durable) return durable;
-    const workspaceId = owner?.workspaceId ?? deps.durable?.identity.workspaceId ?? contextWorkspaceId(input.context);
     const surfaceBindings: Record<string, AgentMutationSurfaceBinding> = {};
     const diskIdentities: Record<string, AgentMutationDiskIdentity> = {};
     const targets: Record<string, { expected: RecoveryState; target: RecoveryState }> = {};
@@ -691,7 +691,6 @@ export async function applyAgentSurfaceMutation(
             };
         continue;
       }
-      const workspaceId = owner?.workspaceId ?? deps.durable?.identity.workspaceId ?? contextWorkspaceId(input.context);
       if (!entry.before.existed) {
         const removed = await deps.deleteDisk({
           workspaceId,
@@ -856,8 +855,6 @@ export async function applyAgentSurfaceMutation(
   if (failed) await compensate();
 
   if (!failed && toApplyDisk.some((entry) => entry.class === "disk")) {
-    const workspaceId = owner?.workspaceId ?? deps.durable?.identity.workspaceId
-      ?? (input.context.source === "surface" ? input.context.workspaceId : "");
     const token = await diskToken(deps, workspaceId);
         for (const item of toApplyDisk.filter((entry) => entry.class === "disk")) {
       try {
@@ -1100,7 +1097,7 @@ export async function applyAgentSurfaceMutation(
   const record: AgentMutationRecord = {
     operationId,
     sessionId: input.sessionId,
-    workspaceId: owner?.workspaceId ?? deps.durable?.identity.workspaceId ?? contextWorkspaceId(input.context),
+    workspaceId,
     targetKinds: Object.fromEntries(planned.map((item) => [
       item.change.resourceId,
       item.result?.target ?? (item.class === "disk" ? "disk" : "surface"),

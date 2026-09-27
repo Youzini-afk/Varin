@@ -176,6 +176,7 @@ export const createWebDocumentsAPI = (): DocumentsAPI => ({
   readSurfaceOperation: (request) => postJson('/api/documents/surface-operation/read', request) as ReturnType<NonNullable<DocumentsAPI['readSurfaceOperation']>>,
   completeSurfaceOperation: (request) => postJson('/api/documents/surface-operation/complete', request) as ReturnType<NonNullable<DocumentsAPI['completeSurfaceOperation']>>,
   resolveWorkspace: (input) => postJson('/api/documents/workspace/resolve', input) as Promise<VarinWorkspaceIdentity>,
+  resolveResourceIdentity: (resource) => postJson('/api/documents/resource/identity', { resource }) as ReturnType<DocumentsAPI['resolveResourceIdentity']>,
   read: (resource: VarinResourceReference) => postJson('/api/documents/read', { resource }) as Promise<VarinDocumentReadResult>,
   write: (request: VarinDocumentWriteRequest) => postJson('/api/documents/write', request) as Promise<VarinDocumentWriteResult>,
   move: (request: VarinDocumentMoveRequest) => postJson('/api/documents/move', request) as Promise<VarinDocumentMoveResult>,

@@ -71,6 +71,51 @@ describe("LSP navigation services", () => {
     }));
   });
 
+  it("binds an authorized external file by its resource root in a projectless session", async () => {
+    const deps = createDeps();
+    const services = createLspNavigationServices(deps as never);
+    const outside = {
+      ...context,
+      workspaceId: null,
+      actor: { ...context.actor, workspaceId: null },
+      authorizedPaths: [{
+        authorityId: "host-1",
+        workspaceId: "external-root",
+        resourceId: "src/a.ts",
+        canonicalResourceId: "/external/src/a.ts",
+        inputPath: "/external/src/a.ts",
+      }],
+    } satisfies HarnessServiceContext;
+
+    const result = await services.symbols.handle({ path: "/external/src/a.ts", query: "value" }, outside);
+    expect(result.status).toBe("ready");
+    expect(deps.documents.read).toHaveBeenCalledWith({ workspaceId: "external-root", resourceId: "src/a.ts" });
+    expect(deps.supervisor.syncDocument).toHaveBeenCalledWith(expect.objectContaining({
+      resource: { workspaceId: "external-root", resourceId: "src/a.ts" },
+    }));
+  });
+
+  it("passes the authorized root when consulting a fixed editor draft", async () => {
+    const deps = createDeps();
+    const services = createLspNavigationServices(deps as never);
+    const outside = {
+      ...context,
+      authorizedPaths: [{
+        authorityId: "host-1",
+        workspaceId: "external-root",
+        resourceId: "src/a.ts",
+        canonicalResourceId: "/external/src/a.ts",
+        inputPath: "/external/src/a.ts",
+      }],
+      inputContext: { source: "surface" as const, roots: [{ workspaceId: "workspace-1", dirtyPaths: ["src/a.ts"] }], snapshot: { status: "ready" as const, ref: "ref-1" } },
+    } satisfies HarnessServiceContext;
+
+    await services.hover.handle({ path: "/external/src/a.ts", line: 1 }, outside);
+    expect(deps.documents.readAgentInputSnapshot).toHaveBeenCalledWith(
+      "session-1", outside.inputContext, "src/a.ts", "external-root",
+    );
+  });
+
   it("reads the turn's fixed editor draft instead of disk for a dirty path", async () => {
     const deps = createDeps();
     deps.documents.readAgentInputSnapshot = vi.fn(() => ({
@@ -84,7 +129,7 @@ describe("LSP navigation services", () => {
     const services = createLspNavigationServices(deps as never);
     const draftContext = {
       ...context,
-      inputContext: { source: "surface" as const, workspaceId: "workspace-1", dirtyPaths: ["src/a.ts"], snapshot: { status: "ready" as const, ref: "ref-1" } },
+      inputContext: { source: "surface" as const, roots: [{ workspaceId: "workspace-1", dirtyPaths: ["src/a.ts"] }], snapshot: { status: "ready" as const, ref: "ref-1" } },
     };
     const result = await services.hover.handle({ path: "src/a.ts", line: 1 }, draftContext);
     expect(result).toMatchObject({ status: "ready", revision: "surface-draft:ref-1:4", source: "surface-draft" });
@@ -104,7 +149,7 @@ describe("LSP navigation services", () => {
     const services = createLspNavigationServices(deps as never);
     const expiredContext = {
       ...context,
-      inputContext: { source: "surface" as const, workspaceId: "workspace-1", dirtyPaths: ["src/a.ts"], snapshot: { status: "ready" as const, ref: "ref-1" } },
+      inputContext: { source: "surface" as const, roots: [{ workspaceId: "workspace-1", dirtyPaths: ["src/a.ts"] }], snapshot: { status: "ready" as const, ref: "ref-1" } },
     };
     await expect(services.hover.handle({ path: "src/a.ts", line: 1 }, expiredContext)).resolves.toMatchObject({
       status: "unavailable",
@@ -265,7 +310,7 @@ describe("LSP navigation services", () => {
     const services = createLspNavigationServices({ ...deps, recordRelations } as never);
     const draftContext = {
       ...context,
-      inputContext: { source: "surface" as const, workspaceId: "workspace-1", dirtyPaths: ["src/a.ts"], snapshot: { status: "ready" as const, ref: "ref-1" } },
+      inputContext: { source: "surface" as const, roots: [{ workspaceId: "workspace-1", dirtyPaths: ["src/a.ts"] }], snapshot: { status: "ready" as const, ref: "ref-1" } },
     };
     const result = await services.references.handle({ path: "src/a.ts", line: 1, character: 14 }, draftContext);
     expect(result).toMatchObject({ status: "ready", source: "surface-draft" });

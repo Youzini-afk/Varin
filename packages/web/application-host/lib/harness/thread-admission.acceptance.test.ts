@@ -191,8 +191,7 @@ describe("root execution admission — service/registry acceptance", () => {
         ...context(),
         inputContext: {
           source: "surface",
-          workspaceId: "workspace",
-          dirtyPaths: ["draft.ts"],
+          roots: [{ workspaceId: "workspace", dirtyPaths: ["draft.ts"] }],
           snapshot: { status: "ready", ref: "draft-snapshot" },
         },
       })).rejects.toThrow("parent input unavailable");

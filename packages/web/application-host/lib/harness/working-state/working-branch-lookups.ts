@@ -10,9 +10,9 @@ import { createWorkingBranchQuery, type WorkingBranchPinOptions, type WorkingBra
 export type { WorkingBranchPinOptions, WorkingBranchQuerySnapshot } from "./working-branch-query.js";
 
 export interface WorkingBranchLookups {
-  readSource(sessionId: string, resourceId: string): Promise<HarnessDocumentReadLookup | null>;
-  pathOverlay(sessionId: string, resourceId: string): Promise<HarnessDocumentPathOverlayLookup | null>;
-  exploreFile(sessionId: string, resourceId: string): Promise<ExploreFileSnapshot | null>;
+  readSource(sessionId: string, resourceId: string, workspaceId: string): Promise<HarnessDocumentReadLookup | null>;
+  pathOverlay(sessionId: string, resourceId: string, workspaceId: string): Promise<HarnessDocumentPathOverlayLookup | null>;
+  exploreFile(sessionId: string, resourceId: string, workspaceId: string): Promise<ExploreFileSnapshot | null>;
   pinQuery(sessionId: string, options?: WorkingBranchPinOptions): Promise<WorkingBranchQuerySnapshot | null>;
 }
 
@@ -49,8 +49,10 @@ export function createWorkingBranchLookups(options: {
   };
 
   return {
-    async readSource(sessionId, resourceId) {
+    async readSource(sessionId, resourceId, workspaceId) {
+      if (options.views.get(sessionId)?.workspaceId !== workspaceId) return null;
       return withView(sessionId, async (view, store) => {
+        if (view.workspaceId !== workspaceId) return null;
         const result = await readBranchFile(store, view.branchId, resourceId);
         if ("unavailable" in result) {
           return {
@@ -77,8 +79,10 @@ export function createWorkingBranchLookups(options: {
       });
     },
 
-    async pathOverlay(sessionId, resourceId) {
+    async pathOverlay(sessionId, resourceId, workspaceId) {
+      if (options.views.get(sessionId)?.workspaceId !== workspaceId) return null;
       return withView(sessionId, async (view, store) => {
+        if (view.workspaceId !== workspaceId) return null;
         const pin = await store.pinBranch(view.branchId);
         try {
           const result = await store.queryFiles(pin, { lane: "foreground", operation: "list", paths: [resourceId], includeHidden: true });
@@ -97,8 +101,10 @@ export function createWorkingBranchLookups(options: {
       });
     },
 
-    async exploreFile(sessionId, resourceId) {
+    async exploreFile(sessionId, resourceId, workspaceId) {
+      if (options.views.get(sessionId)?.workspaceId !== workspaceId) return null;
       return withView(sessionId, async (view, store) => {
+        if (view.workspaceId !== workspaceId) return null;
         const result = await readBranchFile(store, view.branchId, resourceId);
         if ("unavailable" in result) {
           return { status: "unavailable" as const, message: result.unavailable };

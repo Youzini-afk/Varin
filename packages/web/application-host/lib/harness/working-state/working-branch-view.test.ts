@@ -107,17 +107,16 @@ async function fixture() {
     respond: async (_sessionId, _requestId, result) => { response = result; },
   });
   router.register("document.readSource", createDocumentReadSourceService({
-    documentReadSource: async (sessionId, _context, resourceId) => {
-      const result = await lookups.readSource(sessionId, resourceId);
-      if (!result) throw new Error("working-branch read source is unbound");
-      return result;
+    documentReadSource: async (sessionId, _context, resourceId, targetWorkspaceId) => {
+      const result = await lookups.readSource(sessionId, resourceId, targetWorkspaceId);
+      return result ?? documents.readAgentInputSnapshot(sessionId, { source: "disk" }, resourceId, targetWorkspaceId);
     },
+    readAuthorizedDiskFile: (ctx, authorized) => paths.readAuthorizedFile(ctx.actor, authorized, ctx.signal),
   }));
   router.register("document.pathOverlay", createDocumentPathOverlayService({
-    documentPathOverlay: async (sessionId, _context, resourceId) => {
-      const result = await lookups.pathOverlay(sessionId, resourceId);
-      if (!result) throw new Error("working-branch path overlay is unbound");
-      return result;
+    documentPathOverlay: async (sessionId, _context, resourceId, targetWorkspaceId) => {
+      const result = await lookups.pathOverlay(sessionId, resourceId, targetWorkspaceId);
+      return result ?? documents.overlayAgentInputSnapshot(sessionId, { source: "disk" }, resourceId, targetWorkspaceId);
     },
   }));
   const search = createHarnessSearchService({
@@ -126,7 +125,7 @@ async function fixture() {
     },
     resolveWorkspaceRoot: async () => workspace,
     pinWorkingBranchQuery: (sessionId, options) => lookups.pinQuery(sessionId, options),
-    readFile: createExploreFileReader(documents, paths, (sessionId, resourceId) => lookups.exploreFile(sessionId, resourceId)),
+    readFile: createExploreFileReader(documents, paths, (sessionId, resourceId, workspaceId) => lookups.exploreFile(sessionId, resourceId, workspaceId)),
   });
   router.register("search.content", createSearchContentService(search));
 
@@ -160,6 +159,16 @@ async function fixture() {
 }
 
 describe("WorkingState Host branch view production chain", () => {
+  it("uses the authorized external root's disk view for read and listing", async () => {
+    const f = await fixture();
+    const external = path.join(path.dirname(f.workspace), "external-view");
+    await fs.mkdir(external);
+    await fs.writeFile(path.join(external, "kept.txt"), "external body\n");
+    const read = await f.request("document.readSource", { path: path.join(external, "kept.txt") });
+    expect(read).toEqual({ ok: true, result: { source: "disk", base64: Buffer.from("external body\n").toString("base64") } });
+    expect(await f.request("document.pathOverlay", { path: external })).toEqual({ ok: true, result: { status: "disk" } });
+  });
+
   it("keeps child read/grep/find/ls on the fixed base after parent and worktree drift", async () => {
     const f = await fixture();
     await fs.writeFile(path.join(f.workspace, "kept.txt"), "parent live kept\n");
@@ -217,7 +226,7 @@ describe("WorkingState Host branch view production chain", () => {
       },
     });
     const lookups = createWorkingBranchLookups({ views: f.views, workingStates: delayed });
-    const reading = lookups.readSource(f.actor.sessionId, "kept.txt");
+    const reading = lookups.readSource(f.actor.sessionId, "kept.txt", f.workspaceId);
     await sharedWaitingP;
     const next = await f.store.putObject(Buffer.from("lease-visible body\n"));
     await f.store.commitVirtualWrite("thread-child", 0, "kept.txt", {

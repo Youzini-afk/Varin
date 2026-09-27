@@ -53,10 +53,7 @@ import { utf8Bytes } from "./output-organize/index.js";
 import { stripControlSequences, type ShellCommandCompletedEvent } from "./shell-supervisor.js";
 export { createExploreSearchService } from "./explore-service.js";
 
-const requiredWorkspaceId = (ctx: HarnessServiceContext): string => {
-  if (!ctx.workspaceId) throw new HarnessServiceError("forbidden", "Managed execution requires an owning workspace");
-  return ctx.workspaceId;
-};
+const executionScopeId = (ctx: HarnessServiceContext): string => ctx.workspaceId ?? sessionScopeId(ctx.sessionId);
 
 /**
  * Host-bound `web.fetch` execution: session binding, retrieval receipt
@@ -218,7 +215,7 @@ function createPermissionInspectService(host: HarnessServiceHost): HarnessServic
         .filter((scope) => scope.startsWith("execution-target:"))
         .map((scope) => scope.slice("execution-target:".length));
       for (const target of executionTargets) {
-        if (!host.managedRemoteTargets || !await host.managedRemoteTargets.targetFor(requiredWorkspaceId(ctx), target)) {
+        if (!host.managedRemoteTargets || !await host.managedRemoteTargets.targetFor(executionScopeId(ctx), target)) {
           throw new HarnessServiceError("forbidden", `Managed execution target is unavailable or not authorized: ${target}`);
         }
       }
@@ -257,8 +254,8 @@ export function createShellExecService(host: HarnessServiceHost): HarnessService
   return {
     handle: async (params, ctx: HarnessServiceContext) => {
       const target = params.target?.trim();
-      // Router resolved this actor before entering the service. The default
-      // shell anchor stays pinned to that same request snapshot's session cwd.
+      // Router resolved this actor before entering the service. Capture the
+      // default cwd from that same request snapshot for this command only.
       const acceptedSessionCwd = ctx.actor.cwd ?? ctx.actor.authorityRoot;
       const materializeError = target ? null : await requireMaterializedDirectory(host, ctx.sessionId, ctx.signal);
       if (materializeError) {
@@ -272,7 +269,7 @@ export function createShellExecService(host: HarnessServiceHost): HarnessService
       if (target) {
         if (!host.managedRemoteTargets) throw new Error("Managed execution targets are unavailable");
         if (!params.toolCallId) throw new Error("Managed remote shell requires the stable tool call identity");
-        const remote = await host.managedRemoteTargets.shellExec(requiredWorkspaceId(ctx), target, {
+        const remote = await host.managedRemoteTargets.shellExec(executionScopeId(ctx), target, {
           toolCallId: params.toolCallId,
           command: params.command,
           ...(params.cwd ? { cwd: params.cwd } : {}),
@@ -294,7 +291,7 @@ export function createShellExecService(host: HarnessServiceHost): HarnessService
         } else if ((remote.kind === "background" || remote.kind === "preparing") && remote.executionId) {
           watchManagedShellCompletion(host, {
             sessionId: ctx.sessionId,
-            workspaceId: requiredWorkspaceId(ctx),
+            workspaceId: executionScopeId(ctx),
             shellId: remote.id,
             command: params.command,
             ...(remote.kind === "background" ? { cwd: remote.cwd } : {}),
@@ -315,9 +312,8 @@ export function createShellExecService(host: HarnessServiceHost): HarnessService
       let defaultAnchorCwd: string | undefined;
       const sessionCwd = acceptedSessionCwd ?? undefined;
       if (params.cwd === undefined && sessionCwd !== undefined) {
-        // Pin this request's snapshot cwd; the supervisor's own anchor is the
-        // same directory at admission, but an admitted request must not pick
-        // up a later anchor change.
+        // Pin this command's snapshot cwd; an admitted request must not pick
+        // up a later session-anchor change while it is preparing.
         defaultAnchorCwd = sessionCwd;
       }
       // The router authorized params.cwd against the actor's session cwd;
@@ -380,7 +376,7 @@ export function createShellReadService(host: HarnessServiceHost): HarnessService
   return {
     handle: async (params, ctx: HarnessServiceContext) => {
       if (host.managedRemoteTargets) {
-        const remote = await host.managedRemoteTargets.shellRead(requiredWorkspaceId(ctx), params.id, params.offset, params.length, params.waitMs, ctx.signal);
+        const remote = await host.managedRemoteTargets.shellRead(executionScopeId(ctx), params.id, params.offset, params.length, params.waitMs, ctx.signal);
         if (remote) return remote;
       }
       const supervisor = host.getShellSupervisor(ctx.sessionId);
@@ -437,7 +433,7 @@ export function createShellWriteService(host: HarnessServiceHost): HarnessServic
   return {
     handle: async (params, ctx: HarnessServiceContext) => {
       if (host.managedRemoteTargets) {
-        const remote = await host.managedRemoteTargets.shellWrite(requiredWorkspaceId(ctx), params.id, params.text);
+        const remote = await host.managedRemoteTargets.shellWrite(executionScopeId(ctx), params.id, params.text);
         if (remote) return remote;
       }
       const supervisor = host.getShellSupervisor(ctx.sessionId);
@@ -452,7 +448,7 @@ export function createShellKillService(host: HarnessServiceHost): HarnessService
   return {
     handle: async (params, ctx: HarnessServiceContext) => {
       if (host.managedRemoteTargets) {
-        const remote = await host.managedRemoteTargets.shellKill(requiredWorkspaceId(ctx), params.id);
+        const remote = await host.managedRemoteTargets.shellKill(executionScopeId(ctx), params.id);
         if (remote) return remote;
       }
       const supervisor = host.getShellSupervisor(ctx.sessionId);
@@ -521,6 +517,7 @@ export function createDocumentReadSourceService(
         ctx.sessionId,
         ctx.inputContext ?? { source: "disk" },
         authorized.resourceId,
+        authorized.workspaceId,
       );
       ctx.signal.throwIfAborted();
       if (snapshot.status === "disk") {
@@ -591,6 +588,7 @@ export function createDocumentPathOverlayService(
         ctx.sessionId,
         ctx.inputContext ?? { source: "disk" },
         authorized.resourceId,
+        authorized.workspaceId,
       );
       ctx.signal.throwIfAborted();
       if (snapshot.status === "disk") return { status: "disk" };
@@ -648,6 +646,7 @@ export function createDocumentBranchWriteService(
       }
       ctx.signal.throwIfAborted();
       const mapped = changes.map((change, index) => ({
+        workspaceId: ctx.authorizedPaths[index]!.workspaceId,
         resourceId: ctx.authorizedPaths[index]!.resourceId,
         action: change.action,
         ...(change.content === undefined ? {} : { content: change.content }),
@@ -709,6 +708,7 @@ export function createDocumentWriteGuardService(
         ctx.sessionId,
         ctx.inputContext ?? { source: "disk" },
         authorized.resourceId,
+        authorized.workspaceId,
       );
     },
   };
@@ -868,14 +868,14 @@ export function createZone2AssembleService(
       });
       let threads = null;
       let pendingThreads: Awaited<ReturnType<typeof prepareZone2Threads>> | undefined;
-      if (host.threadRegistry && ctx.workspaceId) {
+      if (host.threadRegistry) {
         try {
           pendingThreads = await prepareZone2Threads({
             registry: host.threadRegistry,
             cursors: host.observationCursors,
           }, {
             sessionId: ctx.sessionId,
-            scopeId: ctx.workspaceId,
+            scopeId: ctx.workspaceId ?? sessionScopeId(ctx.sessionId),
           });
           threads = pendingThreads.result;
         } catch (error) {
@@ -961,8 +961,7 @@ export function createZone2StatusService(host: HarnessServiceHost): HarnessServi
         const binding = typeof registry.getSessionBinding === "function"
           ? await registry.getSessionBinding(ctx.sessionId)
           : null;
-        const workspaceId = binding?.owningScopeId ?? ctx.workspaceId;
-        if (!workspaceId) return { status: "unavailable", content: null, reason: "workspace unavailable" };
+        const workspaceId = binding?.owningScopeId ?? ctx.workspaceId ?? sessionScopeId(ctx.sessionId);
         const parent = binding
           ? { kind: "thread" as const, id: binding.threadId }
           : { kind: "session" as const, id: ctx.sessionId };

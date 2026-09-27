@@ -144,19 +144,19 @@ it.skipIf(!hasReleaseKernel)("release kernel owns working-state roots, pinned re
     const writes = createWorkingBranchWriteServices({ views, workingStates: access, writeGate: new VirtualWriteGate() });
 
     await fs.writeFile(path.join(workspace, "mode.txt"), "parent drift\n");
-    const fixed = await lookups.readSource(sessionId, "mode.txt");
+    const fixed = await lookups.readSource(sessionId, "mode.txt", workspaceId);
     assert.equal(fixed?.status, "working-branch");
     assert.equal(fixed && fixed.status === "working-branch" && fixed.base64
       ? Buffer.from(fixed.base64, "base64").toString("utf8")
       : null, "base body\n");
 
-    const rewritten = await writes.branchWrite(sessionId, [{ resourceId: "mode.txt", action: "write", content: "pinned body\n" }]);
+    const rewritten = await writes.branchWrite(sessionId, [{ workspaceId, resourceId: "mode.txt", action: "write", content: "pinned body\n" }]);
     assert.equal(rewritten.status, "committed");
-    const nested = await writes.branchWrite(sessionId, [{ resourceId: "new/deep/file.ts", action: "write", content: "new branch file\n" }]);
+    const nested = await writes.branchWrite(sessionId, [{ workspaceId, resourceId: "new/deep/file.ts", action: "write", content: "new branch file\n" }]);
     assert.equal(nested.status, "committed");
-    const stale = await writes.branchWrite(sessionId, [{ resourceId: "stale.ts", action: "write", content: "stale\n" }], 0);
+    const stale = await writes.branchWrite(sessionId, [{ workspaceId, resourceId: "stale.ts", action: "write", content: "stale\n" }], 0);
     assert.equal(stale.status, "conflict");
-    const blocked = await writes.branchWrite(sessionId, [{ resourceId: "mode.txt/child.ts", action: "write", content: "blocked\n" }]);
+    const blocked = await writes.branchWrite(sessionId, [{ workspaceId, resourceId: "mode.txt/child.ts", action: "write", content: "blocked\n" }]);
     assert.equal(blocked.status, "rejected");
 
     await access.withBranchStore(workspaceId, "test-invariants", async (store) => {
@@ -179,7 +179,7 @@ it.skipIf(!hasReleaseKernel)("release kernel owns working-state roots, pinned re
     assert.deepEqual((await scoped?.listFiles())?.map((file) => file.path), ["src/nested.ts"]);
     await scoped?.release();
 
-    const later = await writes.branchWrite(sessionId, [{ resourceId: "mode.txt", action: "write", content: "later body\n" }]);
+    const later = await writes.branchWrite(sessionId, [{ workspaceId, resourceId: "mode.txt", action: "write", content: "later body\n" }]);
     assert.equal(later.status, "committed");
     await access.withBranchStore(workspaceId, "test-slice-content-source", async (store) => {
       const slice = await store.readStateSlice(branchId, ["mode.txt"]);

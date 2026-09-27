@@ -1,10 +1,10 @@
 # 面向任务与资源的 Harness：工作区解耦与持续检索
 
-Status: accepted direction / design recorded / not implemented (D-337)
+Status: accepted direction / HR0–HR5 wired; corrective verification in progress (D-337)
 
 Last updated: 2026-09-27
 
-源码核查基线：`19c010d7`，Varin `0.9.19`。本文记录维护者确认的重设计方向，定义替代合同、实施顺序与验收场景；本次交付只有文档。代码仍运行现有工作区与会话工作上下文机制，实际交付统一记入 [能力状态矩阵](agent-harness-status.md)。
+设计时的源码核查基线：`19c010d7`，Varin `0.9.19`。本文记录维护者确认的重设计方向、替代合同及验收场景。HR0–HR5 已接入代码；后续验收发现的跨根草稿、检索和执行边界正在按实际行为修正。当前交付与未测范围统一记入 [能力状态矩阵](agent-harness-status.md)。
 
 ## 1. 设计判断
 
@@ -27,7 +27,7 @@ Harness 的目标是减少 Agent 为环境做的准备工作：明确目标就�
 | Documents 资源键含 workspaceId，同一实际文件可由不同目录注册得到不同键 | 项目组织方式进入文件身份、编辑协调及派生状态 | [authority](../packages/web/application-host/lib/documents/authority.ts)、[workspace-registry](../packages/web/application-host/lib/documents/workspace-registry.ts) |
 | 关键词搜索首先要求 workspaceId，再取得根目录 | 原本可直接搜索的新目录必须先被工作区系统接纳 | [search/content](../packages/web/application-host/lib/search/content.ts) |
 | 语义运行实例、扫描、配置读取及持久索引按 workspace 组织 | 会话/工作区装配影响检索初始化；重叠目录容易重复维护 | [workspace-runtime](../packages/web/application-host/lib/knowledge/semantic/workspace-runtime.ts)、[identity](../packages/web/application-host/lib/knowledge/semantic/identity.ts) |
-| Host 状态、Pi 镜像、journal、响应修订和 shell anchor 共同维护操作目录 | 一个路径默认值需要跨进程收敛，工具准备与执行还需处理状态变更 | [Pi work-context](../packages/pi-host/src/harness/work-context.ts)、[tool-execution-resources](../packages/pi-host/src/harness/tool-execution-resources.ts) |
+| Host 状态、Pi 镜像、journal、响应修订和 shell anchor 共同维护操作目录 | 一个路径默认值需要跨进程收敛，工具准备与执行还需处理状态变更 | `pi-host/src/harness/work-context.ts`（HR4 已删）、[tool-execution-resources](../packages/pi-host/src/harness/tool-execution-resources.ts) |
 
 现有实现并非全部需要重写。Documents 的内容与修订处理、Rust 文件/进程/计算能力、固定材料快照、Pi 原生历史、Thread/Run 和检索算法继续使用。已有 [向量缓存](../packages/web/application-host/lib/knowledge/semantic/vector-cache.ts) 按向量空间、用途和实际输入文本复用计算，可作为新索引复用的基础。
 

@@ -575,7 +575,7 @@ describe("thread runtime with native working-state integration", () => {
         hasBash: process.platform !== "win32",
         hasPowerShell: process.platform === "win32",
       },
-      documentReadSource: (sessionId, context, resourceId) => documents.readAgentInputSnapshot(sessionId, context, resourceId),
+      documentReadSource: (sessionId, context, resourceId, workspaceId) => documents.readAgentInputSnapshot(sessionId, context, resourceId, workspaceId),
       documentSurfaceWrite: (sessionId, id, context, changes, signal) => documents.applyAgentSurfaceWrite(sessionId, id, context, changes, signal),
       threadRegistry: registry,
       threadPrepareIsolatedBranch: (input) => runtime.prepareIsolatedBranch(input),

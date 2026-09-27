@@ -43,6 +43,7 @@ const createRuntime = () => {
       hostId: 'host-1',
       epoch: 1,
     }),
+    resolveResourceIdentity: async (resource) => ({ coordinationId: `host-1\0${keyOf(resource)}`, aliases: [resource] }),
     read: async (resource) => {
       const current = files.get(keyOf(resource));
       if (!current) return { status: 'missing', epoch: 1, resource };

@@ -151,6 +151,22 @@ describe("thread status projection", () => {
     expect(repeated).toEqual(initial);
   });
 
+  it("reports child status for a session without a project workspace", async () => {
+    const child = await registry.createThread(input({ scopeId: `session:${PARENT.id}` }));
+    const host = {
+      observationCursors: cursors,
+      threadRegistry: registry,
+      threadHistoryEntries: async () => entriesResult([]),
+    } as unknown as HarnessServiceHost;
+    const observer = ctx(PARENT.id);
+    observer.workspaceId = null;
+    observer.actor.workspaceId = null;
+
+    const status = await createZone2StatusService(host).handle({}, observer);
+    expect(status.status).toBe("ready");
+    expect(status.content).toContain(child.id);
+  });
+
   it("does not consume inbound message bodies", async () => {
     const sender = await registry.createThread(input({ brief: "sender" }));
     const target = await registry.createThread(input({ brief: "target" }));

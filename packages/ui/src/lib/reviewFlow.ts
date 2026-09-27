@@ -250,10 +250,7 @@ const sendPiMessage = async (
   const promptText = modelContext?.agent
     ? renderPiAgentInvocation(modelContext.agent, task)
     : task;
-  const workspace = usePiSessionStore.getState().records[sessionId]?.snapshot?.workspace;
-  const inputContext = workspace?.kind === 'workspace'
-    ? await captureSurfaceAgentInputContext(sessionId, workspace.authorityId ?? workspace.id)
-    : { source: 'disk' as const };
+  const inputContext = await captureSurfaceAgentInputContext(sessionId);
   let result;
   try {
     result = await client.request('agent.prompt', {

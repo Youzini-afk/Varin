@@ -52,6 +52,10 @@ class FakeDocuments {
     this.current = initial;
   }
 
+  keyFor(resource: DocumentIdentity): string {
+    return documentKey(resource);
+  }
+
   get(resource: DocumentIdentity): DocumentRecord | undefined {
     return documentKey(resource) === documentKey(this.current.identity) ? this.current : undefined;
   }

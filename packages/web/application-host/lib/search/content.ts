@@ -39,7 +39,7 @@ export interface WorkspaceContentSearchOptions {
   signal?: AbortSignal;
 }
 export interface WorkspaceContentSearchDependencies {
-  documents: { inspectWorkspace(workspaceId: string): Promise<{ root: string }> };
+  documents: { inspectWorkspace(workspaceId: string): Promise<{ root: string; kind?: 'directory' | 'file' }> };
   compute: Pick<KernelComputeService, "directory">;
   pathModule?: typeof path;
 }
@@ -65,29 +65,48 @@ export function createWorkspaceContentSearch({ documents, compute, pathModule = 
       if(!workspaceId)return {status:"failure",generation,message:"workspaceId is required"};
       if(typeof request.query!=="string"||!request.query.trim())return {status:"empty",generation};
       try {
-        const {root}=await documents.inspectWorkspace(workspaceId);
+        const {root,kind}=await documents.inspectWorkspace(workspaceId);
+        const fileRoot=kind==='file';
+        const computeRoot=fileRoot?pathModule.dirname(root):root;
+        const fileName=fileRoot?pathModule.basename(root):null;
         const relative=(input:string):string=>{
           const value=pathModule.isAbsolute(input)?pathModule.relative(root,input):input;
           const result=value.replaceAll("\\","/");
           if(pathModule.isAbsolute(value)||result.split("/").includes(".."))throw new Error("Search path is outside the workspace");
-          return result.split("/").filter(s=>s&&s!==".").join("/");
+          const resourceId=result.split("/").filter(s=>s&&s!==".").join("/");
+          if(fileRoot&&resourceId)throw new Error("Search path is outside the file resource root");
+          return resourceId;
         };
         if(request.paths!==undefined&&(!Array.isArray(request.paths)||!request.paths.length||!request.paths.every(p=>typeof p==="string"&&p.trim())))throw new Error("Search paths must be a non-empty string array");
         const hits:WorkspaceSearchHit[]=[];let count=0;
-        const result=await compute.directory(root,{operation:"search",lane:"foreground",query:request.query.trim(),
-          excludeDirectories:CONTENT_SEARCH_EXCLUDED_DIRS,excludePaths:(request.excludeResourceIds??[]).map(relative),
-          ...(request.paths?{paths:request.paths.map(relative)}:{}),...(request.glob?{globs:request.glob}:{}),
+        const excludes=(request.excludeResourceIds??[]).map(relative);
+        const requestedPaths=request.paths?.map(relative);
+        const nativeOverlays=options.overlays?.map((overlay)=>{
+          const resourceId=relative(overlay.path);
+          return {...overlay,path:fileRoot?fileName!:resourceId};
+        });
+        const result=await compute.directory(computeRoot,{operation:"search",lane:"foreground",query:request.query.trim(),
+          excludeDirectories:CONTENT_SEARCH_EXCLUDED_DIRS,excludePaths:fileRoot?excludes.map(()=>fileName!):excludes,
+          ...(fileRoot?{paths:[fileName!]}:requestedPaths?{paths:requestedPaths}:{}),...(request.glob?{globs:request.glob}:{}),
           ...(request.includeHidden===undefined?{}:{includeHidden:request.includeHidden}),
           ...(request.ignoreCase===undefined?{}:{ignoreCase:request.ignoreCase}),
           ...(request.fixedStrings===undefined?{}:{fixedStrings:request.fixedStrings}),
           ...(request.maxResults===undefined?{}:{maxResults:request.maxResults}),
           ...(request.before===undefined?{}:{before:request.before}),...(request.after===undefined?{}:{after:request.after}),
         },{signal:options.signal,collect:false,onRecords:async records=>{
-          const batch=records.map(record=>decodeNativeSearchHit(record,workspaceId)).filter((hit):hit is WorkspaceSearchHit=>hit!==null);
+          const batch=records.map(record=>{
+            const hit=decodeNativeSearchHit(record,workspaceId);
+            if(!hit)return null;
+            if(fileRoot){
+              if(hit.resource.resourceId!==fileName)throw new Error("Search escaped the file resource root");
+              return {...hit,resource:{workspaceId,resourceId:""}};
+            }
+            return hit;
+          }).filter((hit):hit is WorkspaceSearchHit=>hit!==null);
           if(!batch.length)return;
           count+=batch.length;if(options.collect!==false)hits.push(...batch);
           if(options.onBatch?.(batch)===false&&options.onDrain)await options.onDrain();
-        }},options.overlays);
+        }},nativeOverlays);
         if(result.status==="cancelled")return {status:"cancelled",generation};
         if(result.status==="failed"||(result.status==="partial"&&count===0))return {status:"failure",generation,message:result.message??"Content search coverage is incomplete"};
         if(count===0)return {status:"empty",generation,scannedFiles:result.scannedFiles};

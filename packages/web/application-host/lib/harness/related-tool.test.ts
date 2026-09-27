@@ -1,4 +1,4 @@
-import { describe, expect, it, beforeEach, afterEach } from "vitest";
+import { describe, expect, it, beforeEach, afterEach, vi } from "vitest";
 import { mkdirSync, rmSync, existsSync } from "node:fs";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
@@ -329,6 +329,40 @@ describe("related tool", () => {
 
     const dotted = await service.handle({ anchor: "explore.search" }, { ...ctx, authorizedPaths: [] });
     expect(dotted.anchor.kind).toBe("name");
+  });
+
+  it("queries an external path against that resource root graph instead of the actor graph", async () => {
+    await store.replaceFileSymbols("src/external.ts", "typescript", [
+      { name: "externalDefinition", kind: "function", range },
+    ], "external-r1");
+    const graphRecall = vi.fn(async (_sessionId: string, workspaceId: string) => ({
+      workspaceId,
+      store,
+      directFactsCompatible: true,
+    }));
+    const service = createRelatedQueryService({ graphRecall, relationCollector: null });
+    const actor: HarnessActorContext = {
+      authorityInstanceId: "host", sessionId: "session", workerId: "worker", workerGeneration: 1,
+      workspaceId: "actor-workspace", grantedCapabilities: ["read.search"], workspaceScope: ["local"],
+    };
+    const result = await service.handle({ anchor: "/external/src/external.ts" }, {
+      actor,
+      workspaceId: actor.workspaceId,
+      sessionId: actor.sessionId,
+      authorizedPaths: [{
+        authorityId: "host",
+        workspaceId: "external-workspace",
+        canonicalResourceId: "/external/src/external.ts",
+        inputPath: "/external/src/external.ts",
+        resolvedPath: "/external/src/external.ts",
+        resourceId: "src/external.ts",
+      }],
+      signal: new AbortController().signal,
+    });
+
+    expect(graphRecall).toHaveBeenCalledWith("session", "external-workspace");
+    expect(result.anchor.value).toBe("src/external.ts");
+    expect(result.definitions).toEqual([{ name: "externalDefinition", kind: "function", path: "src/external.ts" }]);
   });
 
   it("collects resolved relations for a name anchor through the wired collector", async () => {

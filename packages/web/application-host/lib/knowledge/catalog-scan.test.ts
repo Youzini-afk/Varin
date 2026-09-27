@@ -84,7 +84,6 @@ describe("cold workspace catalog scan", () => {
         resource: documents.resource("cold.ts"),
       }],
       sessionId: "catalog-session",
-      workspaceId: documents.identity.workspaceId,
     });
 
     const readDiskBody = vi.spyOn(documents.authority, "read");

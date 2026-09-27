@@ -6,7 +6,7 @@ import type { HarnessActorContext } from "@varin/protocol";
 import { createMaterialReadService } from "./material-read-service.js";
 import { isSessionScopeId } from "./owner-scope.js";
 
-/** Authenticated UI requests resolve the session's execution workspace on the Host. */
+/** Authenticated UI requests resolve a path through the Host's resource authority. */
 export function createUserMaterialReadAdapter(
   getHost: () => HarnessServiceHost,
   runtime: Pick<ThreadRuntime, "scopeForSession">,
@@ -34,7 +34,7 @@ export function createUserMaterialReadAdapter(
         return { status: "failed", url: "", reason: "A non-empty document path is required" };
       }
       const authorized = await paths.resolve(actor, request.path, { allowMissing: true });
-      if (!authorized) return { status: "failed", url: "", reason: "Document is outside the session workspace" };
+      if (!authorized) return { status: "failed", url: "", reason: "Document path is unavailable or not permitted" };
       authorizedPaths.push(authorized);
     }
     return createMaterialReadService(getHost()).handle(request, {

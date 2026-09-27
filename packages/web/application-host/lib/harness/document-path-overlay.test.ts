@@ -15,7 +15,6 @@ const actor: HarnessActorContext = {
 const contextFor = (store: ReturnType<typeof createSurfaceSnapshotStore>): AgentInputContext => store.capture({
   ownerId: "surface",
   sessionId: actor.sessionId,
-  workspaceId: actor.workspaceId!,
   resources: [
     {
       baseRevision: null,
@@ -56,7 +55,7 @@ describe("fixed surface path overlay", () => {
   it("returns dirty files, revisions, and virtual directory ancestors", () => {
     const store = createSurfaceSnapshotStore();
     const context = contextFor(store);
-    const result = store.overlay(actor.sessionId, context, "");
+    const result = store.overlay(actor.sessionId, context, "", actor.workspaceId!);
     expect(result.status).toBe("ready");
     if (result.status !== "ready") throw new Error("expected ready overlay");
     expect(result.entries).toEqual(expect.arrayContaining([
@@ -64,7 +63,7 @@ describe("fixed surface path overlay", () => {
       expect.objectContaining({ path: "src", kind: "directory" }),
       expect.objectContaining({ path: "src/deep", kind: "directory" }),
     ]));
-    const nestedRoot = store.overlay(actor.sessionId, context, "src");
+    const nestedRoot = store.overlay(actor.sessionId, context, "src", actor.workspaceId!);
     expect(nestedRoot).toEqual(expect.objectContaining({ status: "ready" }));
     if (nestedRoot.status !== "ready") throw new Error("expected nested root overlay");
     expect(nestedRoot.entries).toEqual(expect.arrayContaining([
@@ -77,17 +76,17 @@ describe("fixed surface path overlay", () => {
   it("treats an expired related snapshot as unavailable while unrelated paths stay disk backed", () => {
     const store = createSurfaceSnapshotStore();
     const context = contextFor(store);
-    expect(store.overlay(actor.sessionId, context, "unrelated")).toEqual({ status: "disk" });
+    expect(store.overlay(actor.sessionId, context, "unrelated", actor.workspaceId!)).toEqual({ status: "disk" });
     store.dropSession(actor.sessionId);
-    expect(store.overlay(actor.sessionId, context, "src")).toMatchObject({ status: "unavailable" });
-    expect(store.overlay(actor.sessionId, context, "unrelated")).toEqual({ status: "disk" });
+    expect(store.overlay(actor.sessionId, context, "src", actor.workspaceId!)).toMatchObject({ status: "unavailable" });
+    expect(store.overlay(actor.sessionId, context, "unrelated", actor.workspaceId!)).toEqual({ status: "disk" });
     store.dispose();
   });
 
   it("uses the shared basename and path-containing glob semantics", async () => {
     const store = createSurfaceSnapshotStore();
     const context = contextFor(store);
-    const host = { documentPathOverlay: (sessionId: string, input: AgentInputContext, root: string) => store.overlay(sessionId, input, root) };
+    const host = { documentPathOverlay: (sessionId: string, input: AgentInputContext, root: string, workspaceId: string) => store.overlay(sessionId, input, root, workspaceId) };
     const service = createDocumentPathOverlayService(host);
     const base = {
       actor,

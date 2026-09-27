@@ -106,6 +106,7 @@ export type ExploreSemanticHit = {
 export type ExploreSemanticSearch = {
   status: ExploreSemanticStatus;
   coverage: ExploreSemanticCoverage;
+  note?: string;
   generation?: string;
   spaceId?: string;
   scope?: { scopeKind: string; scopeId: string };
@@ -1674,6 +1675,7 @@ export function createExploreQueryRun(
     semanticReport = {
       status: result.status,
       coverage: result.coverage,
+      ...(result.note ? { note: result.note } : {}),
       ...(result.generation ? { generation: result.generation } : {}),
       ...(result.spaceId ? { spaceId: result.spaceId } : {}),
       ...(result.scope ? { scope: result.scope } : {}),
@@ -3149,6 +3151,7 @@ export type ExploreFormatInput = Pick<
   graph?: ExploreGraphDetails;
   skippedQueries?: NonNullable<WireResult["details"]["skippedQueries"]>;
   model?: ExploreModelParticipation;
+  semantic?: ExploreSemanticDetails;
   sources?: ExploreQuerySourceState[];
   /** Count/handle projection for staged model calls. Full paths stay in the output store. */
   omittedCount?: number;
@@ -3217,7 +3220,10 @@ function packExploreVisible(
   }
   if (result.graph && result.graph.status !== "not-requested" && result.graph.status !== "ready") {
     header.push(`Graph ${result.graph.status}: the symbol catalog did not contribute path candidates.`);
+  } else if (result.graph?.partial) {
+    header.push("Graph partial: one or more selected resource roots had no current symbol catalog.");
   }
+  if (result.semantic?.note) header.push(`Semantic index: ${result.semantic.note}`);
   if (result.skippedQueries?.reason === "direct-verified") {
     header.push(`Skipped ${result.skippedQueries.patterns.length} broad term(s) after a direct clue was verified.`);
   }

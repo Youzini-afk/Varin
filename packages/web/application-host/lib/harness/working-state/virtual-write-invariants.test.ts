@@ -126,8 +126,8 @@ async function fixture(options?: { attachGit?: () => Promise<void> }) {
     respond: async (_sessionId, _requestId, result) => { response = result; },
   });
   router.register("document.readSource", createDocumentReadSourceService({
-    documentReadSource: async (sessionId, _context, resourceId) => {
-      const result = await lookups.readSource(sessionId, resourceId);
+    documentReadSource: async (sessionId, _context, resourceId, targetWorkspaceId) => {
+      const result = await lookups.readSource(sessionId, resourceId, targetWorkspaceId);
       if (!result) throw new Error("working-branch read source is unbound");
       return result;
     },
@@ -335,7 +335,7 @@ describe("virtual write production invariants", () => {
     expect(pinned.view).toBe("working-state");
     expect(pinned.overlays.some((overlay) => overlay.content?.includes("branch-only pineapple"))).toBe(true);
     expect(pinned.overlays.some((overlay) => overlay.content?.includes("parent drifted"))).toBe(false);
-    const explore = await f.lookups.exploreFile("session-parent", "only-on-branch.ts");
+    const explore = await f.lookups.exploreFile("session-parent", "only-on-branch.ts", f.workspaceId);
     expect(explore).toMatchObject({
       status: "ready",
       source: "working-branch",

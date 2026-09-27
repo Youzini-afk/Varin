@@ -3,15 +3,13 @@ import { getDocumentRegistry } from '@/lib/documents/session';
 
 export const captureSurfaceAgentInputContext = async (
   sessionId: string,
-  workspaceId: string,
 ): Promise<AgentInputContext> => {
   try {
-    return await getDocumentRegistry().captureAgentInputContext(sessionId, workspaceId);
+    return await getDocumentRegistry().captureAgentInputContext(sessionId);
   } catch {
     return {
       source: 'surface',
-      workspaceId,
-      dirtyPaths: [],
+      roots: [], // Unknown dirty set; Host consumers must not infer clean disk.
       snapshot: { status: 'unavailable', reason: 'surface-unavailable' },
     };
   }

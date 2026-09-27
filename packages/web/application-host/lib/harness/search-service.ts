@@ -20,7 +20,7 @@ export interface HarnessSearchDeps {
   resolveScopeRoot?: (canonicalPath: string) => Promise<{ workspaceId: string; root: string } | null>;
   readFile?: ExploreFileReader;
   /** Dirty paths this turn's fixed source still owns (D-088). */
-  draftPaths?: (sessionId: string, context: AgentInputContext) => readonly string[];
+  draftPaths?: (sessionId: string, context: AgentInputContext, workspaceId: string) => readonly string[];
   pinWorkingBranchQuery?: (sessionId: string, options?: WorkingBranchPinOptions) => Promise<WorkingBranchQuerySnapshot | null>;
 }
 
@@ -75,6 +75,7 @@ function toSearchFile(path: string, fileHits: WorkspaceSearchHit[]): SearchConte
       text: hit.preview,
       before: hit.before ?? [],
       after: hit.after ?? [],
+      ...(hit.revision ? { revision: hit.revision } : {}),
     })),
   };
 }
@@ -195,8 +196,9 @@ const emptyResult = (): SearchContentResult => ({
 export type HarnessSearchService = ReturnType<typeof createHarnessSearchService>;
 export function createHarnessSearchService(deps: HarnessSearchDeps) {
   return {
+    resolveWorkspaceRoot: deps.resolveWorkspaceRoot,
+    resolveScopeRoot: deps.resolveScopeRoot,
     async search(params: SearchContentParams, ctx: HarnessSearchContext): Promise<SearchContentResult> {
-      if(ctx.inputContext?.source==="surface"&&ctx.inputContext.workspaceId!==ctx.workspaceId)return unavailableResult();
       if(typeof params.pattern!=="string"||!params.pattern.trim())return emptyResult();
       if(ctx.signal.aborted)return {...emptyResult(),partial:true};
       const within=(file:string,prefix:string)=>{
@@ -227,7 +229,7 @@ export function createHarnessSearchService(deps: HarnessSearchDeps) {
         const byRoot=new Map<string,Set<string>>();
         for(const entry of ctx.authorizedPaths){
           const bucket=byRoot.get(entry.workspaceId)??new Set<string>();
-          bucket.add(entry.resourceId);byRoot.set(entry.workspaceId,bucket);
+          bucket.add(entry.resourceId==="."?"":entry.resourceId);byRoot.set(entry.workspaceId,bucket);
         }
         for(const [rootWorkspaceId,resourceIds] of byRoot){
           const root=await deps.resolveWorkspaceRoot(rootWorkspaceId).catch(()=>null);
@@ -258,8 +260,10 @@ export function createHarnessSearchService(deps: HarnessSearchDeps) {
       const timeout=new AbortController();const timer=setTimeout(()=>timeout.abort(new DOMException("Search timed out","AbortError")),DEFAULT_TIMEOUT_MS);
       const signal=AbortSignal.any([ctx.signal,timeout.signal]);
       let ownedPin:WorkingBranchQuerySnapshot|null=null;
+      const currentSnapshots=new Map<string,Awaited<ReturnType<NonNullable<HarnessSearchDeps["readFile"]>>>>();
+      const snapshotKey=(workspaceId:string,resourceId:string)=>`${workspaceId}\0${resourceId}`;
       const runUnit=async(unit:SearchUnit)=>{
-        const inView=(file:string)=>unit.prefixes.some(prefix=>within(file,prefix))&&glob.matches(file);
+        const inView=(file:string)=>unit.prefixes.some(prefix=>within(file,prefix))&&glob.matches(file||path.basename(unit.root));
         // Working-branch pins and draft overlays belong to the actor's own
         // workspace surface only; external roots read committed state.
         let unitPin:WorkingBranchQuerySnapshot|null=null;
@@ -269,12 +273,14 @@ export function createHarnessSearchService(deps: HarnessSearchDeps) {
           : null;
         const overlays:KernelComputeText[]=[];
         const context=ctx.inputContext??{source:"disk" as const};
-        if(unit.actorBound&&!pinned&&context.source==="surface"&&ctx.actor){
-          const paths=deps.draftPaths?.(ctx.actor.sessionId,context)??context.dirtyPaths;
+        const surfaceRoot=context.source==="surface"?context.roots.find((root)=>root.workspaceId===unit.rootWorkspaceId):undefined;
+        if(surfaceRoot&&!pinned&&ctx.actor){
+          const paths=deps.draftPaths?.(ctx.actor.sessionId,context,unit.rootWorkspaceId)??surfaceRoot.dirtyPaths;
           for(const raw of paths){signal.throwIfAborted();const file=normalizePrefix(unit.root,raw);if(file===null||!inView(file))continue;
             if(!deps.readFile)throw new Error("unavailable");
-            const snapshot=await deps.readFile(ctx.actor,file,signal,context);
+            const snapshot=await deps.readFile(ctx.actor,path.resolve(unit.root,file),signal,context);
             if(snapshot.status!=="ready"||snapshot.source!=="surface-draft")throw new Error("unavailable");
+            currentSnapshots.set(snapshotKey(unit.rootWorkspaceId,file),snapshot);
             overlays.push({path:file,revision:snapshot.revision,text:snapshot.content});
           }
         }
@@ -283,7 +289,7 @@ export function createHarnessSearchService(deps: HarnessSearchDeps) {
           ...(backendLimit===undefined?{}:{maxResults:backendLimit}),...(glob.rgPatterns.length?{glob:glob.rgPatterns}:{}),
           ...(params.ignoreCase===undefined?{}:{ignoreCase:params.ignoreCase}),...(params.fixedStrings===undefined?{}:{fixedStrings:params.fixedStrings})};
         const result=pinned?await pinned.search(request,{signal}):await deps.search(request,{signal,...(overlays.length?{overlays}:{})});
-        return {unit,result,inView,pin:unitPin};
+        return {unit,result,inView,pin:unitPin,pinned:Boolean(pinned)};
       };
       try {
         const settled=await Promise.all(units.map((unit)=>runUnit(unit).then((ok)=>ok,()=>null)));
@@ -293,11 +299,11 @@ export function createHarnessSearchService(deps: HarnessSearchDeps) {
         // addressing resolves back to the same authorized roots.
         const multiRoot=units.length>1||units[0]!.rootWorkspaceId!==ctx.workspaceId;
         const hits:WorkspaceSearchHit[]=[];const seen=new Set<string>();
-        let scanned=0,scannedKnown=true,backendCapped=false,backendIncomplete=false;
+        let scanned=0,scannedKnown=true,backendCapped=false,backendIncomplete=false,revisionGap=false;
         let failedUnits=missingScope,succeededUnits=0,cancelledUnits=0;
         for(const entry of settled){
           if(!entry){failedUnits=true;continue;}
-          const {unit,result,inView}=entry;
+          const {unit,result,inView,pinned}=entry;
           if(result.status==="cancelled"){failedUnits=true;cancelledUnits+=1;continue;}
           if(result.status==="failure"){failedUnits=true;continue;}
           succeededUnits+=1;
@@ -309,6 +315,22 @@ export function createHarnessSearchService(deps: HarnessSearchDeps) {
             for(const hit of result.hits){
               if(!inView(hit.resource.resourceId))continue;
               const file=multiRoot?path.join(unit.root,hit.resource.resourceId):hit.resource.resourceId;
+              // Native content hits are revision-bound. Re-open through the
+              // current Documents view before presenting them as current; a
+              // changed or missing source invalidates this candidate and makes
+              // the query partial. Fixed working-branch pins already carry
+              // their own immutable revision and are verified by that view.
+              if(!pinned&&deps.readFile&&ctx.actor){
+                if(!hit.revision){revisionGap=true;continue;}
+                let snapshot=currentSnapshots.get(snapshotKey(unit.rootWorkspaceId,hit.resource.resourceId));
+                try {
+                  snapshot??=await deps.readFile(ctx.actor,path.resolve(unit.root,hit.resource.resourceId),signal,ctx.inputContext??{source:"disk"});
+                  currentSnapshots.set(snapshotKey(unit.rootWorkspaceId,hit.resource.resourceId),snapshot);
+                } catch {
+                  revisionGap=true;continue;
+                }
+                if(snapshot.status!=="ready"||snapshot.revision!==hit.revision){revisionGap=true;continue;}
+              }
               const key=`${file}\n${hit.line}\n${hit.column}\n${hit.preview}`;
               if(multiRoot&&seen.has(key))continue;
               seen.add(key);
@@ -327,7 +349,7 @@ export function createHarnessSearchService(deps: HarnessSearchDeps) {
           ...(ctx.hitsPerFile===undefined?{}:{hitsPerFile:ctx.hitsPerFile}),useFileScore:!candidateMode,breadthFirst:candidateMode,
         });
         const shown=grouped.files.reduce((sum,file)=>sum+file.hits.length,0);
-        const partial=failedUnits||backendCapped||backendIncomplete||shown<grouped.totalHits||grouped.perFileCapped||grouped.filesDropped>0||signal.aborted;
+        const partial=failedUnits||backendCapped||backendIncomplete||revisionGap||shown<grouped.totalHits||grouped.perFileCapped||grouped.filesDropped>0||signal.aborted;
         return {status:grouped.totalHits?"ready":"empty",files:grouped.files,totalHits:grouped.totalHits,totalFiles:grouped.totalFiles,
           ...(scannedKnown?{searchedFiles:scanned}:{}),partial,
           ...(candidateMode?{filesDropped:grouped.filesDropped,fileCoverage:uniqueFileCoverage({filesDropped:grouped.filesDropped,backendIncomplete:backendIncomplete||failedUnits,backendCapped})}:{})};

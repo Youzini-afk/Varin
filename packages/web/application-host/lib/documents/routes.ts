@@ -3,6 +3,7 @@ import type { Express, Request, RequestHandler, Response } from 'express';
 
 interface DocumentAuthority {
   resolveWorkspace(input: unknown): Promise<unknown>;
+  resolveResourceIdentity(resource: unknown): Promise<unknown>;
   read(resource: unknown): Promise<unknown>;
   write(request: unknown): Promise<unknown>;
   move(request: unknown): Promise<unknown>;
@@ -120,6 +121,16 @@ export const registerDocumentRoutes = (app: Express, {
   app.post('/api/documents/dirty/barrier/ack', requireAuth, async (req: Request, res: Response) => {
     try {
       return res.json(await documents.acknowledgeDirtyStateBarrier(readBody(req)));
+    } catch (error) {
+      return sendError(res, error);
+    }
+  });
+
+  app.post('/api/documents/resource/identity', requireAuth, async (req: Request, res: Response) => {
+    try {
+      const resource = readBody(req).resource;
+      if (!resource) return res.status(400).json({ error: 'Resource is required', reason: 'failed' });
+      return res.json(await documents.resolveResourceIdentity(resource));
     } catch (error) {
       return sendError(res, error);
     }

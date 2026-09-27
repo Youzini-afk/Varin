@@ -22,7 +22,7 @@ Default-on 列只记当前代码，尚未完成的正式目标单独列为待实
 
 [工作区解耦与持续检索设计](resource-oriented-harness-design.md) 定义 HR0–HR5：资源与数据归属、会话与操作、直接检索、
 持续索引、产品与旧机制收口、真实使用验收。工作区回到会话/项目组织职责，执行与查询使用明确的本次目标；
-索引按资源及内容版本复用，冷目录可直接搜索。
+索引仍按资源根分片，内容计算按版本复用；冷目录可直接搜索，未索引部分的语义覆盖会如实标注。
 下文 RR2/RR4 的目录模型记录保留为历史实现事实，其后续目标由 D-337 替代；恢复、输出和其他既有正确性成果继续保留。
 
 HR0 已接线（wired）：Thread catalog、session binding、todo/子任务与知识库的所有者统一为 scope（项目 workspaceId 或
@@ -49,8 +49,7 @@ HR2 已接线（wired）：`search.content` 改为"问题 + 本次资源范围"�
 范围在候选预算与 top-k 之前生效且只属于本次查询；无项目会话无显式范围时以 `authorityRoot` 注册为目录资源根
 作本次默认范围。覆盖诚实性：任一请求根不可解析/失败标 `partial`，全部失败返回 `unavailable`（不冒充空结果），
 `searchedFiles` 为各根真实 `scannedFiles` 之和、任一根未知则整体缺省；跨根重叠命中按键去重。
-`explore`/`related` 的结构与符号图仍绑定 actor 工作区语言服务——外部根锚点现在显式拒绝（`unavailable`），
-不再把外部根的 resourceId 静默错读为工作区相对路径；跨目录内容检索走 `search.content`/`grep`。
+补充验收后，`explore.search`、渐进式 `explore.query` 与 `related` 按实际资源根寻址；外部根没有相容图谱或语义来源时标记覆盖缺口，不能借用 actor 项目的同名路径或事实。外部单文件资源根也可搜索。
 验证：harness 目录 114 文件 1270 全绿（含新增多资源域 6 例：双目录根合并、file+dir 根去重、
 单根失效 partial、全根失效 unavailable、无项目会话 authorityRoot 默认范围、untrusted 拒绝）；
 app-host 源码与测试 typecheck 绿。未测：materials 集合作为检索范围的组合（材料集合仍走
@@ -65,8 +64,8 @@ per-root cwd，settings.get / inference.describe / embed / rerank / fastDecision
 "内容版本×解析配置×实际模型"身份，缓存键不含会话分类 workspaceId。符号图（symbol-runtime）与语义索引按
 registry 根 id 寻址，外部 file/directory 根经 `inspectWorkspace` 直接索引；`catalogScan.start` 与启动 reconcile
 循环跳过 session scope/哈希店键（session 存储无资源根可扫，此前会打一条 inspectWorkspace 失败日志）。
-增量失效沿用 `observeDocumentMutation`（事件已按资源根 id 寻址）；冷目录语义为空时探索层如实降级，
-不包装成热覆盖。验证：knowledge 目录 26 文件 193 全绿（含新增"不同根共享同一 inference cwd"用例）、
+增量失效使用 `observeDocumentMutation` 与 Documents 文件观察，并在返回旧命中前核对当前修订；观察不可用会标记覆盖缺口。观察器仍不能证明从未漏掉新文件，静默漏事件需要后续重扫。冷目录语义为空时探索层如实降级，
+不包装成热覆盖。阶段原验证：knowledge 目录 26 文件 193 全绿（含新增"不同根共享同一 inference cwd"用例）、
 harness/search 套件与 app-host typecheck 绿。未测：真实打包环境共享 worker 的凭据可见性（桌面纵切属 HR5）。
 
 HR4 已接线（wired）：RR2 的可变会话操作上下文机制整体移除——pi-host 删 `work-context.ts`/`work-context-tool.ts`/
@@ -76,7 +75,7 @@ HR4 已接线（wired）：RR2 的可变会话操作上下文机制整体移除�
 Thread manifest 的 `initialWorkContext` 收敛为冻结 `authorityRoot` 事实。
 接替语义：相对路径与 `shell.exec` 默认锚均取会话 `cwd`（注册时记录的启动目录，快照固定，actor 缺席时回落 supervisor
 注册锚）；`authorityRoot` 只做授权边界；`search.content`/explore/related 的默认范围改为会话 cwd；
-子任务派发直接用 actor 权威根校验并严格执行父 Run 冻结工具集（`work_context` 特赦删除）；Pi read/write 工具
+普通 shell 调用现在独立使用本次 cwd，载荷内的 `cd`/环境修改不污染下一次调用；持续状态由明确的进程句柄持有。子任务派发直接用 actor 权威根校验并严格执行父 Run 冻结工具集（`work_context` 特赦删除）；Pi read/write 工具
 以 cwd 锚定相对路径、绝对路径经 Host 授权。UI 的会话指示从 `workContext.operationDir` 改为显示会话 cwd
 （十个 locale 键同步改名）。目录离线只使相关操作报错，不阻塞会话注册与聊天。
 删除的测试只覆盖已删机制（work-context 双侧、journal 门闸、context 工具、scheduler 上下文切换）；其余测试改写为
@@ -108,7 +107,11 @@ HR5 已接线（wired，设计 §12 场景逐条对证据）：
 验证：web 套件 300 文件 2686 全绿（vitest.kernel 的 document-read-source 9/9 含新跨根用例）；
 session-e2e 40/40（含新跨目录读纵切）；app-host/pi-host/ui typecheck 绿。
 **未测**：真实桌面安装包的会话重开/目录离线/并发 Agent 产品化纵切与性能数字（无可复现基线前不报数）；
-父子项目同时展示同一文件的 UI 共存纵切（Documents owner 模型已就位，双视图产品路径未实测）。
+父子项目同文件的组件级共存已验证；真实桌面双视图路径未实测。
+
+**HR 补充验收与修复（2026-09-27）：** 初次 HR5 报告未覆盖跨根草稿和虚拟分支的真实目标身份。现已修复 A 分支将 B 同名文件写进 A 并报成功、B 读取串到 A 草稿、A 草稿阻断 B 普通写、父子项目同一物理文件的重复编辑缓冲/写入队列，以及无项目会话材料读取和本地 shell 句柄误需项目身份。固定草稿改为一个引用携带多个带资源根身份的文件；同一物理文件的别名共用 UI 缓冲，已观察的写入同时使这些别名的旧草稿失效。目录消失的旧 Pi 会话可从应用管理目录启动 worker，历史 cwd 仍保留为工具目标；外部目标失效只影响该操作。搜索命中按当前正文修订复核，外部目录与单文件进入直接和渐进式 Explore；所有来源失败或固定草稿缺失时不能包装成干净的零命中。
+
+定向证据：UI Document/Monaco/Workbench 44/44；Web Documents/分支定向 66/66，检索定向 81/81，真实 kernel 的材料读取与 Explore 34/34；Host 源码/测试、Pi Host、协议、客户端、Broker、Electron 与 UI 类型检查通过。独立 worktree 的固定 baseline 能去重父子项目同一实体草稿；**真正位于外部根的未保存草稿仍不能安全物化进单根隔离子任务**，当前明确返回不可用而不悄悄读取磁盘旧版。语义索引仍按资源根维护，漏掉的外部新文件需重扫；桌面安装包重开、离线和多 Agent 产品纵切未测。以上定向结果不等于全仓或安装包验收。
 
 **运行时可靠性专项 RR（2026-09-26：RR0–RR5 的代码路径与定向行为已复核；RR6 的真实安装包/外部代理平台纵切仍待验证）。**
 

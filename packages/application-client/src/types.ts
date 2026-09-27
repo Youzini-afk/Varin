@@ -1772,7 +1772,6 @@ export interface VarinAgentInputSnapshotCaptureRequest {
   ownerId: string;
   resources: VarinAgentInputSnapshotResource[];
   sessionId: string;
-  workspaceId: string;
 }
 
 export interface VarinDirtyBufferPublication {
@@ -1834,6 +1833,12 @@ export interface DocumentsAPI {
   }): Promise<VarinDocumentSurfaceOperationPayload>;
   completeSurfaceOperation?(request: VarinDocumentSurfaceOperationCompletion): Promise<{ accepted: boolean }>;
   resolveWorkspace(input: { path?: string; workspaceId?: string }): Promise<VarinWorkspaceIdentity>;
+  /** Opaque Host and canonical-target identity for coordinating aliases of one file. Never use it as an open path. */
+  resolveResourceIdentity(resource: VarinResourceReference): Promise<{
+    coordinationId: string;
+    /** Registered references to this same target, including the requested reference. */
+    aliases: VarinResourceReference[];
+  }>;
   read(resource: VarinResourceReference): Promise<VarinDocumentReadResult>;
   write(request: VarinDocumentWriteRequest): Promise<VarinDocumentWriteResult>;
   move(request: VarinDocumentMoveRequest): Promise<VarinDocumentMoveResult>;

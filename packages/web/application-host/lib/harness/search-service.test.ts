@@ -85,8 +85,7 @@ const actor: HarnessActorContext = {
 
 const surface = (dirtyPaths: string[], ref = "snapshot-1"): AgentInputContext => ({
   source: "surface",
-  workspaceId: "ws-1",
-  dirtyPaths,
+  roots: [{ workspaceId: "ws-1", dirtyPaths }],
   snapshot: { status: "ready", ref },
 });
 
@@ -125,20 +124,21 @@ describe("harness search service", () => {
     expect(readFile).not.toHaveBeenCalled();
   });
 
-  it("rejects a surface context from another workspace before searching disk", async () => {
-    const search = vi.fn();
-    const service = createHarnessSearchService({ search, resolveWorkspaceRoot: async () => "/workspace" });
+  it("does not project a foreign-root draft onto an actor root with the same path", async () => {
+    const search = nativeLikeSearch([makeHit("outside.ts", 1, "secret disk content", { revision: "disk:1" })]);
+    const readFile = vi.fn(async () => ({ status: "ready" as const, content: "secret disk content", revision: "disk:1", source: "disk" as const }));
+    const service = createHarnessSearchService({ search, readFile, resolveWorkspaceRoot: async () => "/workspace" });
     const inputContext: AgentInputContext = {
       source: "surface",
-      workspaceId: "other-workspace",
-      dirtyPaths: ["outside.ts"],
+      roots: [{ workspaceId: "other-workspace", dirtyPaths: ["outside.ts"] }],
       snapshot: { status: "ready", ref: "other" },
     };
 
-    const result = await service.search({ pattern: "secret", path: "src" }, searchContext(inputContext));
+    const result = await service.search({ pattern: "secret", path: "." }, searchContext(inputContext));
 
-    expect(result.status).toBe("unavailable");
-    expect(search).not.toHaveBeenCalled();
+    expect(result.status).toBe("ready");
+    expect(result.files[0]?.hits[0]).toMatchObject({ text: "secret disk content", revision: "disk:1" });
+    expect((search.mock.calls[0]?.[1].overlays ?? [])).toEqual([]);
   });
 
   it("returns unavailable when search fails", async () => {
@@ -235,8 +235,8 @@ describe("harness search service", () => {
 
   it("replaces dirty disk hits with the fixed editor snapshot and keeps draft-only hits", async () => {
     const search = nativeLikeSearch([makeHit("draft.ts", 1, "old disk value")]);
-    const readFile = vi.fn(async (_actor, path: string) => {
-      if (path !== "draft.ts") throw new Error(`unexpected read ${path}`);
+    const readFile = vi.fn(async (_actor, filePath: string) => {
+      if (path.basename(filePath) !== "draft.ts") throw new Error(`unexpected read ${filePath}`);
       return { status: "ready" as const, content: "new draft value\r\nsecond\rthird", revision: "surface-draft:1", source: "surface-draft" as const };
     });
     const service = createHarnessSearchService({ search, readFile, resolveWorkspaceRoot: async () => "/workspace" });
@@ -248,7 +248,7 @@ describe("harness search service", () => {
     expect(result.files.flatMap((file) => file.hits.map((hit) => [file.path, hit.line, hit.text]))).toEqual([
       ["draft.ts", 1, "new draft value"],
     ]);
-    expect(readFile).toHaveBeenCalledWith(actor, "draft.ts", expect.any(AbortSignal), surface(["draft.ts"]));
+    expect(readFile).toHaveBeenCalledWith(actor, path.resolve("/workspace", "draft.ts"), expect.any(AbortSignal), surface(["draft.ts"]));
     expect(search).toHaveBeenCalledWith(expect.objectContaining({ query: "draft" }), expect.anything());
     expect((search.mock.calls as unknown as Array<[Record<string, unknown>]>)[0]?.[0]).toMatchObject({
       maxResults: 30,
@@ -262,9 +262,9 @@ describe("harness search service", () => {
     const search = vi.fn(async (): Promise<WorkspaceContentSearchResult> => ({
       status: "ready",
       generation: 1,
-      hits: [makeHit("draft.ts", 3, "value the agent just wrote")],
+      hits: [makeHit("draft.ts", 3, "value the agent just wrote", { revision: "disk:2" })],
     }));
-    const readFile = vi.fn();
+    const readFile = vi.fn(async () => ({ status: "ready" as const, content: "value the agent just wrote", revision: "disk:2", source: "disk" as const }));
     // The turn's fixed source no longer owns draft.ts: it was written since the
     // capture, so disk holds the newer text (D-088).
     const draftPaths = vi.fn(() => [] as readonly string[]);
@@ -279,8 +279,9 @@ describe("harness search service", () => {
 
     expect(result).toMatchObject({ status: "ready", totalHits: 1 });
     expect(result.files[0]?.hits[0]?.text).toBe("value the agent just wrote");
-    expect(readFile).not.toHaveBeenCalled();
-    expect(draftPaths).toHaveBeenCalledWith(actor.sessionId, surface(["draft.ts"]));
+    expect(result.files[0]?.hits[0]?.revision).toBe("disk:2");
+    expect(readFile).toHaveBeenCalledOnce();
+    expect(draftPaths).toHaveBeenCalledWith(actor.sessionId, surface(["draft.ts"]), "ws-1");
     expect((search.mock.calls as unknown as Array<[Record<string, unknown>]>)[0]?.[0].excludeResourceIds).toBeUndefined();
   });
 
@@ -298,8 +299,8 @@ describe("harness search service", () => {
 
     expect(result).toMatchObject({ status: "ready", totalHits: 2, totalFiles: 1, partial: false });
     expect(result.files[0]?.hits).toEqual([
-      { line: 2, text: "two-2", before: [], after: [] },
-      { line: 4, text: "four-4", before: [], after: [] },
+      { line: 2, text: "two-2", before: [], after: [], revision: "surface-draft:1" },
+      { line: 4, text: "four-4", before: [], after: [], revision: "surface-draft:1" },
     ]);
   });
 
@@ -342,14 +343,14 @@ describe("harness search service", () => {
       status: "ready",
       generation: 1,
       hits: [
-        makeHit("packages/app/src/inside.ts", 1, "disk inside"),
+        makeHit("packages/app/src/inside.ts", 1, "disk inside", { revision: "surface-draft:1" }),
         makeHit("packages/app/test/outside-request.ts", 1, "disk outside request"),
         makeHit("packages/other/src/outside-scope.ts", 1, "disk outside scope"),
       ],
     }));
-    const readFile = vi.fn(async (_actor, path: string) => ({
+    const readFile = vi.fn(async (_actor, filePath: string) => ({
       status: "ready" as const,
-      content: path === "packages/app/src/inside.ts" ? "draft inside" : "wrong dirty path",
+      content: path.basename(filePath) === "inside.ts" ? "draft inside" : "wrong dirty path",
       revision: "surface-draft:1",
       source: "surface-draft" as const,
     }));
@@ -368,7 +369,7 @@ describe("harness search service", () => {
     expect(result).toMatchObject({ status: "ready", totalHits: 1, totalFiles: 1 });
     expect(result.files[0]?.path).toBe("packages/app/src/inside.ts");
     expect(readFile).toHaveBeenCalledTimes(1);
-    expect(readFile).toHaveBeenCalledWith(actor, "packages/app/src/inside.ts", expect.any(AbortSignal), context.inputContext);
+    expect(readFile).toHaveBeenCalledWith(actor, path.resolve("/workspace", "packages/app/src/inside.ts"), expect.any(AbortSignal), context.inputContext);
     expect((search.mock.calls as unknown as Array<[Record<string, unknown>]>)[0]?.[0]).toMatchObject({ paths: ["packages/app/src"] });
   });
 
@@ -378,9 +379,9 @@ describe("harness search service", () => {
       makeHit("src/a.test.ts", 1, "test match"),
       makeHit("src/a.js", 1, "js match"),
     ]);
-    const readFile = vi.fn(async (_actor, path: string) => ({
+    const readFile = vi.fn(async (_actor, filePath: string) => ({
       status: "ready" as const,
-      content: path === "src/a.ts" ? "match" : "test match",
+      content: path.basename(filePath) === "a.ts" ? "match" : "test match",
       revision: "surface-draft:1",
       source: "surface-draft" as const,
     }));
@@ -403,11 +404,11 @@ describe("harness search service", () => {
     const search = nativeLikeSearch([
       makeHit("disk.ts", 2, "disk match", { before: ["disk before"], after: ["disk after"], revision: "disk:1" }),
     ]);
-    const readFile = vi.fn(async (_actor, path: string) => ({
+    const readFile = vi.fn(async (_actor, filePath: string) => ({
       status: "ready" as const,
-      content: path === "draft.ts" ? "draft before\ndraft match\ndraft after" : "disk before\ndisk match\ndisk after",
-      revision: "surface-draft:1",
-      source: path === "draft.ts" ? "surface-draft" as const : "disk" as const,
+      content: path.basename(filePath) === "draft.ts" ? "draft before\ndraft match\ndraft after" : "disk before\ndisk match\ndisk after",
+      revision: path.basename(filePath) === "draft.ts" ? "surface-draft:1" : "disk:1",
+      source: path.basename(filePath) === "draft.ts" ? "surface-draft" as const : "disk" as const,
     }));
     const service = createHarnessSearchService({ search, readFile, resolveWorkspaceRoot: async () => "/workspace" });
 
@@ -439,13 +440,13 @@ describe("harness search service", () => {
     });
 
     expect(result.files[0]?.hits).toEqual([
-      { line: 2, text: "first match", before: ["before first"], after: ["after first"] },
-      { line: 5, text: "second match", before: ["before second"], after: ["after second"] },
+      { line: 2, text: "first match", before: ["before first"], after: ["after first"], revision: "disk:1" },
+      { line: 5, text: "second match", before: ["before second"], after: ["after second"], revision: "disk:1" },
     ]);
-    expect(readFile).not.toHaveBeenCalled();
+    expect(readFile).toHaveBeenCalledOnce();
   });
 
-  it("uses context already bound to the native hit revision without rereading newer disk text", async () => {
+  it("drops a native hit when its source revision changed before current content was read", async () => {
     const search = nativeLikeSearch([
       makeHit("disk.ts", 2, "matched old revision", { before: ["old before"], after: ["old after"], revision: "disk:1" }),
     ]);
@@ -463,18 +464,18 @@ describe("harness search service", () => {
       signal: new AbortController().signal,
     });
 
-    expect(result).toMatchObject({ status: "ready", partial: false });
-    expect(result.files[0]?.hits[0]).toMatchObject({ before: ["old before"], after: ["old after"] });
-    expect(readFile).not.toHaveBeenCalled();
+    expect(result).toMatchObject({ status: "empty", totalHits: 0, partial: true });
+    expect(result.files).toEqual([]);
+    expect(readFile).toHaveBeenCalledWith(actor, path.resolve("/workspace", "disk.ts"), expect.any(AbortSignal), { source: "disk" });
   });
 
   it("merges all disk and draft hits before sorting and applying the limit", async () => {
-    const search = nativeLikeSearch([makeHit("z-disk.ts", 1, "match")]);
-    const readFile = vi.fn(async () => ({
+    const search = nativeLikeSearch([makeHit("z-disk.ts", 1, "match", { revision: "disk:1" })]);
+    const readFile = vi.fn(async (_actor, filePath: string) => ({
       status: "ready" as const,
       content: "match",
-      revision: "surface-draft:1",
-      source: "surface-draft" as const,
+      revision: path.basename(filePath) === "a-draft.ts" ? "surface-draft:1" : "disk:1",
+      source: path.basename(filePath) === "a-draft.ts" ? "surface-draft" as const : "disk" as const,
     }));
     const service = createHarnessSearchService({ search, readFile, resolveWorkspaceRoot: async () => "/workspace" });
 
@@ -492,14 +493,14 @@ describe("harness search service", () => {
 
   it("keeps the disk over-fetch bounded while excluding dirty hits before the cap", async () => {
     const search = nativeLikeSearch([
-      ...Array.from({ length: 12 }, (_, index) => makeHit("dirty.ts", index + 1, "old disk match")),
-      ...Array.from({ length: 6 }, (_, index) => makeHit(`disk-${index}.ts`, 1, "disk match")),
+      ...Array.from({ length: 12 }, (_, index) => makeHit("dirty.ts", index + 1, "old disk match", { revision: "disk:1" })),
+      ...Array.from({ length: 6 }, (_, index) => makeHit(`disk-${index}.ts`, 1, "disk match", { revision: "disk:1" })),
     ]);
-    const readFile = vi.fn(async () => ({
+    const readFile = vi.fn(async (_actor, filePath: string) => ({
       status: "ready" as const,
       content: "draft match",
-      revision: "surface-draft:1",
-      source: "surface-draft" as const,
+      revision: path.basename(filePath) === "dirty.ts" ? "surface-draft:1" : "disk:1",
+      source: path.basename(filePath) === "dirty.ts" ? "surface-draft" as const : "disk" as const,
     }));
     const service = createHarnessSearchService({ search, readFile, resolveWorkspaceRoot: async () => "/workspace" });
 

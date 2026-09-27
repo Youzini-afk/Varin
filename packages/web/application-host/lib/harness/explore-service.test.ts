@@ -1,7 +1,7 @@
 import fs from "node:fs/promises";
 import path from "node:path";
 import { tmpdir } from "node:os";
-import { afterEach, describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import type { AgentInputContext, HarnessActorContext, HarnessServiceMap } from "@varin/protocol";
 import { createDocumentAuthority } from "../documents/authority.js";
 import { createWorkspaceContentSearch } from "../search/content.js";
@@ -35,7 +35,7 @@ async function fixture(
   const search = createWorkspaceContentSearch({ documents, pathModule: path, compute });
   const host = createHarnessServiceHost({
     search: (request, options) => search.searchContent(request, options),
-    resolveWorkspaceRoot: async () => workspace,
+    resolveWorkspaceRoot: async (workspaceId) => (await documents.inspectWorkspace(workspaceId)).root,
     discoveredShells: {},
     readExploreFile: createExploreFileReader(documents, paths),
     ...(structureSource ? { structureSource } : {}),
@@ -83,13 +83,43 @@ async function fixture(
         ownerId: "surface",
         resources: [{ baseRevision, content, localEditRevision, resource }],
         sessionId,
-        workspaceId,
       });
     },
   };
 }
 
 describe("explore through Host router, real ripgrep, and Documents", () => {
+  it("searches an external root and binds structure requests to that resource identity", async () => {
+    const outline = vi.fn(async (request: Parameters<StructureSource["outline"]>[0]) => ({
+      status: "unsupported" as const,
+      provider: "lsp" as const,
+      revision: request.revision,
+      symbols: [],
+    }));
+    const structureSource: StructureSource = {
+      outline,
+      classifyHits: async (request) => ({ status: "unsupported", provider: "lsp", revision: request.revision, hits: [] }),
+      literalCalls: async (request) => ({ status: "unsupported", provider: "lsp", revision: request.revision, calls: [] }),
+      imports: async (request) => ({ status: "unsupported", provider: "lsp", revision: request.revision, imports: [] }),
+    };
+    const f = await fixture(undefined, structureSource);
+    const external = path.join(f.root, "external");
+    const source = path.join(external, "src");
+    await fs.mkdir(source, { recursive: true });
+    await fs.writeFile(path.join(source, "outside.ts"), "export function outside() { return 'needle outside'; }\n", "utf8");
+
+    const response = await f.request({ question: "needle", paths: [source] });
+
+    expect(response.ok, JSON.stringify(response)).toBe(true);
+    if (!response.ok) throw new Error(response.error.message);
+    expect(response.result.snippets.map((snippet) => snippet.path)).toEqual([path.join(source, "outside.ts")]);
+    const externalWorkspace = await f.documents.resolveWorkspace({ path: source });
+    expect(outline).toHaveBeenCalledWith(expect.objectContaining({
+      workspaceId: externalWorkspace.workspaceId,
+      path: "outside.ts",
+    }));
+  });
+
   it("reads both requested roots, preserves literal metacharacters, and issues a scoped output ref", async () => {
     const f = await fixture();
     await fs.mkdir(path.join(f.workspace, "first"));
@@ -126,10 +156,13 @@ describe("explore through Host router, real ripgrep, and Documents", () => {
     expect(await f.request({ question: "needle", paths: ["outside.ts"] })).toMatchObject({ ok: false, error: { code: "forbidden" } });
   });
 
-  it("rejects every explicit escaped path before searching", async () => {
+  it("resolves a parent-relative path as an explicit external resource", async () => {
     const f = await fixture();
     await fs.writeFile(path.join(f.root, "outside.ts"), "needle\n");
-    expect(await f.request({ question: "needle", paths: [".", "../outside.ts"] })).toMatchObject({ ok: false, error: { code: "forbidden" } });
+    const response = await f.request({ question: "needle", paths: [".", "../outside.ts"] });
+    expect(response.ok, JSON.stringify(response)).toBe(true);
+    if (!response.ok) throw new Error(response.error.message);
+    expect(response.result.snippets.map((snippet) => snippet.path)).toContain(path.join(f.root, "outside.ts"));
   });
 
   it("normalizes session-cwd and absolute path anchors to authorized workspace resource IDs", async () => {
@@ -227,8 +260,7 @@ describe("explore through Host router, real ripgrep, and Documents", () => {
     await fs.writeFile(path.join(f.workspace, "dirty.ts"), "mustNotLeakFromDisk\n", "utf8");
     const context: AgentInputContext = {
       source: "surface",
-      workspaceId: f.actor.workspaceId!,
-      dirtyPaths: ["dirty.ts"],
+      roots: [{ workspaceId: f.actor.workspaceId!, dirtyPaths: ["dirty.ts"] }],
       snapshot: { status: "unavailable", reason: "surface-unavailable" },
     };
     const response = await f.request({ question: "mustNotLeakFromDisk" }, context);
@@ -238,15 +270,15 @@ describe("explore through Host router, real ripgrep, and Documents", () => {
     expect(response.error.message).toContain("dirty.ts (unavailable)");
   });
 
-  it("rejects a surface context for another actor workspace", async () => {
+  it("does not project a foreign surface draft onto the actor workspace", async () => {
     const f = await fixture();
+    await fs.writeFile(path.join(f.workspace, "local.ts"), "needle from disk\n", "utf8");
     const response = await f.request({ question: "needle" }, {
       source: "surface",
-      workspaceId: "another-workspace",
-      dirtyPaths: ["secret.ts"],
-      snapshot: { status: "unavailable", reason: "surface-unavailable" },
+      roots: [{ workspaceId: "another-workspace", dirtyPaths: ["local.ts"] }],
+      snapshot: { status: "ready", ref: "foreign-surface" },
     });
-    expect(response).toMatchObject({ ok: false, error: { code: "forbidden" } });
+    expect(response).toMatchObject({ ok: true, result: { snippets: [{ path: "local.ts", source: "disk" }] } });
   });
 
   it("does not read a ready snapshot owned by another session or outside actor scope", async () => {

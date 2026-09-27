@@ -136,6 +136,7 @@ export type HarnessDocumentReadSource = (
   sessionId: string,
   context: AgentInputContext,
   resourceId: string,
+  workspaceId: string,
 ) => HarnessDocumentReadLookup | Promise<HarnessDocumentReadLookup>;
 
 /** Write admission for native Pi write/edit/apply_patch wrappers (D-089). */
@@ -143,6 +144,7 @@ export type HarnessDocumentWriteGuard = (
   sessionId: string,
   context: AgentInputContext,
   resourceId: string,
+  workspaceId: string,
 ) => Promise<import("@varin/protocol").DocumentWriteGuardResult>;
 
 /** Shared surface-aware mutation plan for root-session write/edit/apply_patch (D-225). */
@@ -162,6 +164,7 @@ export type HarnessDocumentSurfaceWrite = (
 export type HarnessDocumentBranchWrite = (
   sessionId: string,
   changes: ReadonlyArray<{
+    workspaceId: string;
     resourceId: string;
     action: import("@varin/protocol").DocumentBranchWriteAction;
     content?: string;
@@ -189,6 +192,7 @@ export type HarnessDocumentPathOverlay = (
   sessionId: string,
   context: AgentInputContext,
   resourceId: string,
+  workspaceId: string,
 ) => HarnessDocumentPathOverlayLookup | Promise<HarnessDocumentPathOverlayLookup>;
 
 export interface HarnessServiceHost {
@@ -472,7 +476,7 @@ export interface HarnessServiceHost {
     authority: import("@varin/protocol").RetrievalReceiptAuthority,
   ) => Promise<void>;
   /** Dirty paths this turn's fixed source still owns (D-088). */
-  agentInputDraftPaths?: (sessionId: string, context: import("@varin/protocol").AgentInputContext) => readonly string[];
+  agentInputDraftPaths?: (sessionId: string, context: import("@varin/protocol").AgentInputContext, workspaceId: string) => readonly string[];
   agentInputSurfaceOwner?: import("../documents/authority.js").DocumentAuthority["agentInputSurfaceOwner"];
   commitAgentInputContext: (sessionId: string, context: import("@varin/protocol").AgentInputContext) => { committed: boolean };
   releaseAgentInputContext: (sessionId: string, context: import("@varin/protocol").AgentInputContext) => { released: boolean };

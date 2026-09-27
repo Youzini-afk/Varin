@@ -1,3 +1,4 @@
+import path from "node:path";
 import type {
   AgentInputContext,
   ExploreModelParticipation,
@@ -46,13 +47,27 @@ import {
 import { pathInRoots, type ExploreGraphRecall } from "./explore-graph.js";
 import type { StoredExploreQuery } from "./explore-query-store.js";
 import { actorFromHarness, exploreQueryActorsMatch } from "./explore-query-identity.js";
-import { loadSnippetRelations, resolveExploreScopeAndAnchors } from "./explore-service.js";
+import {
+  exploreResourceAtPath,
+  loadExploreGraphRecall,
+  loadSnippetRelationsAcrossRoots,
+  loadSnippetRelations,
+  resolveExploreResourceUnits,
+  resolveExploreScopeAndAnchors,
+  semanticSearchAcrossRoots,
+  type ExploreResourceUnit,
+} from "./explore-service.js";
 import {
   exploreFileFromSnapshot,
   type WorkingBranchQuerySnapshot,
 } from "./working-state/working-branch-lookups.js";
 
 type ExploreParams = HarnessServiceMap["explore.search"]["params"];
+
+const queryCoverage = new WeakMap<StoredExploreQuery, {
+  graphMissing: boolean;
+  resourceUnits: readonly ExploreResourceUnit[];
+}>();
 
 export function bindExploreGraphRecall(
   store: import("../knowledge/store.js").KnowledgeStore,
@@ -117,37 +132,65 @@ export function createExploreDeps(
   signal: AbortSignal = ctx.signal,
   roots?: readonly string[],
   snapshot: WorkingBranchQuerySnapshot | null = null,
-  graphStore: import("../knowledge/store.js").KnowledgeStore | null = null,
+  graph?: ExploreGraphRecall | null,
+  resourceUnits?: readonly ExploreResourceUnit[],
 ): ExploreDeps {
-  const workspaceId = ctx.actor.workspaceId;
   const readFile = host.readExploreFile;
-  if (!workspaceId || !readFile) throw new HarnessServiceError("unavailable", "Workspace document reading is unavailable.");
+  const workspaceId = ctx.actor.workspaceId;
+  if (!readFile || (!workspaceId && !resourceUnits?.length)) {
+    throw new HarnessServiceError("unavailable", "Workspace document reading is unavailable.");
+  }
+  const units = resourceUnits ?? [];
   const deps: ExploreDeps = {
     rgSearch: async (pattern, options) => {
-      const searchRoots: Array<string | undefined> = options.paths?.length ? [...new Set(options.paths)] : [undefined];
-      const batches = await Promise.all(searchRoots.map(async (path) => {
+      const searchRoots = options.paths?.length ? [...new Set(options.paths)] : units.map((unit) => unit.logicalPrefix);
+      const targets = new Map<string, { unit: ExploreResourceUnit; resourceId: string }>();
+      if (units.length > 0) {
+        for (const searchRoot of searchRoots) {
+          for (const unit of units) {
+            const target = exploreResourceAtPath(searchRoot, [unit]);
+            if (target) targets.set(`${target.unit.workspaceId}\0${target.resourceId}`, target);
+          }
+        }
+      } else {
+        for (const searchRoot of searchRoots.length > 0 ? searchRoots : [undefined]) {
+          const resourceId = searchRoot;
+          if (!workspaceId) continue;
+          const fallback: ExploreResourceUnit = {
+            workspaceId,
+            root: ".",
+            external: false,
+            resourcePrefix: resourceId ?? ".",
+            logicalPrefix: resourceId ?? ".",
+          };
+          targets.set(`${workspaceId}\0${resourceId ?? ""}`, { unit: fallback, resourceId: resourceId ?? "." });
+        }
+      }
+      const batches = await Promise.all([...targets.values()].map(async ({ unit, resourceId }) => {
         signal.throwIfAborted();
-        const search = await host.searchService.search({
-          pattern,
-          fixedStrings: options.fixedStrings,
-          ...(path !== undefined ? { path } : {}),
-        }, {
+        const search = await host.searchService.search({ pattern, fixedStrings: options.fixedStrings, path: resourceId }, {
           workspaceId,
           actor: ctx.actor,
+          ...(unit.authorized ? { authorizedPaths: [{ workspaceId: unit.workspaceId, resourceId }] } : {}),
           inputContext,
           candidateBudget: options.candidateBudget ?? DEFAULT_CANDIDATE_BUDGET,
           hitsPerFile: options.hitsPerFile ?? DEFAULT_HITS_PER_FILE,
           ...(ctx.actor.workspaceScope !== undefined ? { workspaceScope: ctx.actor.workspaceScope } : {}),
-          ...(snapshot ? { pinnedBranchQuery: snapshot } : {}),
+          ...(snapshot && snapshot.workspaceId === unit.workspaceId ? { pinnedBranchQuery: snapshot } : {}),
           signal,
         });
         signal.throwIfAborted();
         if (search.status === "unavailable") {
-          throw new HarnessServiceError("unavailable", "Search service is unavailable. Retry or inspect workspace availability.");
+          return { hits: [], partial: true, filesDropped: 0, fileCoverage: "unknown" as const };
         }
         const callPartial = search.partial || (search.filesDropped ?? 0) > 0;
         return {
-          hits: search.files.flatMap((file) => file.hits.map((hit) => ({ path: file.path, line: hit.line, text: hit.text }))),
+          hits: search.files.flatMap((file) => file.hits.map((hit) => ({
+            path: file.path,
+            line: hit.line,
+            text: hit.text,
+            ...(hit.revision ? { revision: hit.revision } : {}),
+          }))),
           partial: callPartial,
           filesDropped: search.filesDropped ?? 0,
           fileCoverage: search.fileCoverage
@@ -166,37 +209,54 @@ export function createExploreDeps(
       };
     },
     readFile: async (resourceId) => {
-      if (snapshot) return exploreFileFromSnapshot(snapshot, resourceId);
-      return readFile(ctx.actor, resourceId, signal, inputContext);
+      const target = units.length > 0 ? exploreResourceAtPath(resourceId, units) : null;
+      if (snapshot && (!target || target.unit.workspaceId === snapshot.workspaceId) && snapshot.workspaceId === workspaceId) {
+        const snapshotPath = target?.resourceId ?? resourceId;
+        return exploreFileFromSnapshot(snapshot, snapshotPath);
+      }
+      if (units.length > 0 && !target) throw new Error("Explore file is outside the resolved resource scope.");
+      return readFile(ctx.actor, target ? path.resolve(target.unit.root, target.resourceId) : resourceId, signal, inputContext);
     },
     ...(host.structureSource ? {
       structure: {
-        outline: (request) => host.structureSource!.outline({
-          ...request,
-          workspaceId,
-          sessionId: ctx.sessionId,
-          inputContext,
-        }),
-        classifyHits: (request) => host.structureSource!.classifyHits({
-          ...request,
-          workspaceId,
-          sessionId: ctx.sessionId,
-          inputContext,
-        }),
-        literalCalls: (request) => host.structureSource!.literalCalls({
-          ...request,
-          workspaceId,
-          sessionId: ctx.sessionId,
-          inputContext,
-        }),
+        outline: (request) => {
+          const target = units.length > 0 ? exploreResourceAtPath(request.path, units) : null;
+          if (units.length > 0 && !target) throw new Error("Structure path is outside the resolved resource scope.");
+          const targetWorkspaceId = target?.unit.workspaceId ?? workspaceId;
+          if (!targetWorkspaceId) throw new HarnessServiceError("unavailable", "Structure workspace is unavailable.");
+          return host.structureSource!.outline({ ...request, ...(target ? { path: target.resourceId } : {}), workspaceId: targetWorkspaceId, sessionId: ctx.sessionId, inputContext });
+        },
+        classifyHits: (request) => {
+          const target = units.length > 0 ? exploreResourceAtPath(request.path, units) : null;
+          if (units.length > 0 && !target) throw new Error("Structure path is outside the resolved resource scope.");
+          const targetWorkspaceId = target?.unit.workspaceId ?? workspaceId;
+          if (!targetWorkspaceId) throw new HarnessServiceError("unavailable", "Structure workspace is unavailable.");
+          return host.structureSource!.classifyHits({ ...request, ...(target ? { path: target.resourceId } : {}), workspaceId: targetWorkspaceId, sessionId: ctx.sessionId, inputContext });
+        },
+        literalCalls: (request) => {
+          const target = units.length > 0 ? exploreResourceAtPath(request.path, units) : null;
+          if (units.length > 0 && !target) throw new Error("Structure path is outside the resolved resource scope.");
+          const targetWorkspaceId = target?.unit.workspaceId ?? workspaceId;
+          if (!targetWorkspaceId) throw new HarnessServiceError("unavailable", "Structure workspace is unavailable.");
+          return host.structureSource!.literalCalls({ ...request, ...(target ? { path: target.resourceId } : {}), workspaceId: targetWorkspaceId, sessionId: ctx.sessionId, inputContext });
+        },
       },
     } : {}),
-    ...(graphStore ? { graph: bindExploreGraphRecall(graphStore, roots) } : {}),
+    ...(graph ? { graph } : {}),
     ...(host.semanticRecall ? {
       semantic: {
         search: async (question: string, limit?: number, searchSignal?: AbortSignal) => {
           const active = searchSignal ?? signal;
           active.throwIfAborted();
+          if (units.length > 0) {
+            return semanticSearchAcrossRoots(host.semanticRecall!, units, question, limit ?? DEFAULT_SEMANTIC_RECALL, {
+              signal: active,
+              sessionId: ctx.sessionId,
+              inputContext,
+              ...(snapshot ? { threadQuery: snapshot } : {}),
+            });
+          }
+          if (!workspaceId) return { status: "unavailable", coverage: "empty", lifecycle: "idle", hits: [], gaps: [] };
           return host.semanticRecall!(workspaceId, question, limit ?? DEFAULT_SEMANTIC_RECALL, {
             signal: active,
             sessionId: ctx.sessionId,
@@ -246,18 +306,29 @@ export async function packExploreSearchResult(
   host: Pick<HarnessServiceHost, "outputStore"> & Partial<Pick<HarnessServiceHost, "fileRelations">>,
   ctx: HarnessServiceContext,
   result: Awaited<ReturnType<StoredExploreQuery["run"]["finish"]>>,
-  options?: { traceWindows?: boolean; searchPartial?: boolean },
+  options?: {
+    traceWindows?: boolean;
+    searchPartial?: boolean;
+    graphMissing?: boolean;
+    resourceUnits?: readonly ExploreResourceUnit[];
+  },
 ): Promise<ExploreQueryFinishResult> {
   const incomplete = (options?.searchPartial ?? false) || result.searched.incomplete;
-  const relations = ctx.workspaceId && host.fileRelations
-    ? await loadSnippetRelations({ fileRelations: host.fileRelations }, ctx.workspaceId, result.snippets, ctx.signal)
-    : undefined;
+  const graph = result.details.graph && options?.graphMissing
+    ? { ...result.details.graph, partial: true }
+    : result.details.graph;
+  const resolvedDetails = graph ? { ...result.details, graph } : result.details;
+  const relations = options?.resourceUnits
+    ? await loadSnippetRelationsAcrossRoots(host, options.resourceUnits, result.snippets, ctx.signal)
+    : ctx.workspaceId && host.fileRelations
+      ? await loadSnippetRelations({ fileRelations: host.fileRelations }, ctx.workspaceId, result.snippets, ctx.signal)
+      : undefined;
   const formatted = {
     snippets: result.snippets,
     issues: result.issues,
     notRequested: result.notRequested,
     omitted: result.omitted,
-    partial: (options?.searchPartial ?? false) || result.partial,
+    partial: (options?.searchPartial ?? false) || options?.graphMissing === true || result.partial,
     searchIncomplete: (options?.searchPartial ?? false) || result.searchIncomplete,
     searched: {
       patterns: result.searched.patterns,
@@ -266,20 +337,21 @@ export async function packExploreSearchResult(
       incomplete,
       ...(result.searched.filesDropped !== undefined ? { filesDropped: result.searched.filesDropped } : {}),
     },
-    ...(result.details.graph ? { graph: result.details.graph } : {}),
-    ...(result.details.skippedQueries ? { skippedQueries: result.details.skippedQueries } : {}),
-    ...(result.details.model ? { model: result.details.model } : {}),
-    ...(result.details.rerank ? { rerank: result.details.rerank } : {}),
-    ...(result.details.fastDecision ? { fastDecision: result.details.fastDecision } : {}),
+    ...(resolvedDetails.graph ? { graph: resolvedDetails.graph } : {}),
+    ...(resolvedDetails.semantic ? { semantic: resolvedDetails.semantic } : {}),
+    ...(resolvedDetails.skippedQueries ? { skippedQueries: resolvedDetails.skippedQueries } : {}),
+    ...(resolvedDetails.model ? { model: resolvedDetails.model } : {}),
+    ...(resolvedDetails.rerank ? { rerank: resolvedDetails.rerank } : {}),
+    ...(resolvedDetails.fastDecision ? { fastDecision: resolvedDetails.fastDecision } : {}),
     ...(relations ? { relations } : {}),
-    ...(result.details.sources ? { sources: result.details.sources } : {}),
+    ...(resolvedDetails.sources ? { sources: resolvedDetails.sources } : {}),
   };
   const preview = formatExploreOutput(formatted, { byteBudget: DEFAULT_BYTE_BUDGET });
   const fullDetails = {
     notRequested: result.notRequested,
     omitted: result.omitted,
     packedOmitted: preview.omitted,
-    details: result.details,
+    details: resolvedDetails,
     ...(relations ? { relations } : {}),
   };
   const storedBody = `${preview.storedBody}\n\nExplore structured details (JSON):\n${JSON.stringify(fullDetails)}`;
@@ -301,30 +373,30 @@ export async function packExploreSearchResult(
     anchors: result.details.anchors,
     byteBudget: DEFAULT_BYTE_BUDGET,
     ...(result.details.structure ? { structure: summarizeStructure(result.details.structure.files) } : {}),
-    ...(result.details.graph ? { graph: result.details.graph } : {}),
-    ...(result.details.query ? {
+    ...(resolvedDetails.graph ? { graph: resolvedDetails.graph } : {}),
+    ...(resolvedDetails.query ? {
       query: {
-        objectCount: result.details.query.objects.length,
-        relation: result.details.query.relation,
-        domain: result.details.query.domain,
+        objectCount: resolvedDetails.query.objects.length,
+        relation: resolvedDetails.query.relation,
+        domain: resolvedDetails.query.domain,
       },
     } : {}),
-    ...(result.details.skippedQueries ? {
-      skippedQueries: { reason: result.details.skippedQueries.reason, patternCount: result.details.skippedQueries.patterns.length },
+    ...(resolvedDetails.skippedQueries ? {
+      skippedQueries: { reason: resolvedDetails.skippedQueries.reason, patternCount: resolvedDetails.skippedQueries.patterns.length },
     } : {}),
-    ...(result.details.distinctiveness ? {
+    ...(resolvedDetails.distinctiveness ? {
       distinctiveness: {
-        scope: result.details.distinctiveness.scope,
-        poolFiles: result.details.distinctiveness.poolFiles,
-        termCount: result.details.distinctiveness.terms.length,
+        scope: resolvedDetails.distinctiveness.scope,
+        poolFiles: resolvedDetails.distinctiveness.poolFiles,
+        termCount: resolvedDetails.distinctiveness.terms.length,
       },
     } : {}),
     ...(relations ? { relations: summarizeRelations(relations) } : {}),
-    ...(result.details.semantic ? { semantic: summarizeSemantic(result.details.semantic) } : {}),
-    ...(result.details.rerank ? { rerank: result.details.rerank } : {}),
-    ...(result.details.fastDecision ? { fastDecision: summarizeFastDecision(result.details.fastDecision) } : {}),
-    ...(result.details.model ? { model: result.details.model } : {}),
-    ...(result.details.sources ? { sources: summarizeSources(result.details.sources) } : {}),
+    ...(resolvedDetails.semantic ? { semantic: summarizeSemantic(resolvedDetails.semantic) } : {}),
+    ...(resolvedDetails.rerank ? { rerank: resolvedDetails.rerank } : {}),
+    ...(resolvedDetails.fastDecision ? { fastDecision: summarizeFastDecision(resolvedDetails.fastDecision) } : {}),
+    ...(resolvedDetails.model ? { model: resolvedDetails.model } : {}),
+    ...(resolvedDetails.sources ? { sources: summarizeSources(resolvedDetails.sources) } : {}),
   };
   return {
     text: packed.visibleText,
@@ -376,6 +448,7 @@ function summarizeSemantic(
   return {
     status: semantic.status,
     coverage: semantic.coverage,
+    ...(semantic.note ? { note: semantic.note } : {}),
     ...(semantic.generation ? { generation: semantic.generation } : {}),
     ...(semantic.spaceId ? { spaceId: semantic.spaceId } : {}),
     ...(semantic.scope ? { scope: semantic.scope } : {}),
@@ -467,6 +540,10 @@ export function createExploreQueryStartService(
         const resolvedRequest = resolveExploreScopeAndAnchors(params, ctx);
         const effectivePaths = resolvedRequest.paths;
         const effectiveAnchors = resolvedRequest.anchors;
+        const resourceUnits = await resolveExploreResourceUnits(host.searchService, ctx, params, effectivePaths);
+        if (resourceUnits.length === 0) {
+          throw new HarnessServiceError("unavailable", "No usable resource root was available for this query.");
+        }
         let rerankConfigured = false;
         let fastDecision: StoredExploreQuery["fastDecision"];
         if (ctx.workspaceId) {
@@ -488,17 +565,17 @@ export function createExploreQueryStartService(
             fastDecision = { status: "unavailable" };
           }
         }
-        const [snapshot, graph] = await Promise.all([
-          host.pinWorkingBranchQuery
+        const localUnits = resourceUnits.filter((unit) => unit.workspaceId === ctx.actor.workspaceId && !unit.external);
+        const pinRoots = [...new Set(localUnits.map((unit) => unit.resourcePrefix === "." ? "" : unit.resourcePrefix))];
+        const [snapshot, graphSources] = await Promise.all([
+          host.pinWorkingBranchQuery && localUnits.length > 0
             ? host.pinWorkingBranchQuery(ctx.sessionId, {
-              ...(effectivePaths ? { roots: effectivePaths } : {}),
+              roots: pinRoots,
               signal: queryController.signal,
               deadlineAt,
             })
             : Promise.resolve(null),
-          host.graphRecall && ctx.actor.workspaceId
-            ? host.graphRecall(ctx.sessionId, ctx.actor.workspaceId).catch(() => null)
-            : Promise.resolve(null),
+          loadExploreGraphRecall(host, ctx, resourceUnits),
         ]);
         stored = host.exploreQueryStore.start({
           actor: actorFromHarness(ctx.actor),
@@ -516,7 +593,8 @@ export function createExploreQueryStartService(
             queryController.signal,
             effectivePaths,
             snapshot,
-            graph?.store ?? null,
+            graphSources.graph,
+            resourceUnits,
           ),
           deadlineAt,
           reserveForJudgeMs: params.reserveForJudge || rerankConfigured || fastDecision?.status === "ready"
@@ -524,6 +602,7 @@ export function createExploreQueryStartService(
             : 0,
           controller: queryController,
         });
+        queryCoverage.set(stored, { graphMissing: graphSources.missing > 0, resourceUnits });
         if (fastDecision) {
           stored.fastDecision = fastDecision;
           if (fastDecision.status === "ready" && fastDecision.binding && host.fastDecision) {
@@ -675,8 +754,14 @@ export function createExploreQueryFinishService(
       const stored = requireQuery(host, ctx, params.queryId, "finish");
       const model = params.model;
       const workspaceId = ctx.workspaceId;
+      const coverage = queryCoverage.get(stored);
+      const packOptions = {
+        ...options,
+        ...(coverage?.graphMissing ? { graphMissing: true } : {}),
+        ...(coverage ? { resourceUnits: coverage.resourceUnits } : {}),
+      };
       if (stored.run.terminal() === "finished") {
-        return packExploreSearchResult(host, ctx, stored.run.finish(model), options);
+        return packExploreSearchResult(host, ctx, stored.run.finish(model), packOptions);
       }
       stored.finishing ??= (async () => {
         // Fast Decision (D-312): the progressive loop owns material relevance
@@ -779,7 +864,7 @@ export function createExploreQueryFinishService(
       if (result.snippets.length === 0 && result.issues.length > 0) {
         throw new HarnessServiceError("unavailable", `No current excerpts could be read: ${result.issues.map((issue: ExploreIssue) => `${issue.path} (${issue.status})`).join(", ")}. Search again.`);
       }
-      return packExploreSearchResult(host, ctx, result, options);
+      return packExploreSearchResult(host, ctx, result, packOptions);
     },
   };
 }
@@ -808,13 +893,16 @@ export function ownedDirtyPathsFor(
   inputContext: AgentInputContext,
   actor: HarnessServiceContext["actor"],
   params: ExploreParams,
-  authorizedPaths: ReadonlyArray<{ resourceId: string }>,
-  draftPaths?: (sessionId: string, context: AgentInputContext) => readonly string[],
-): string[] {
+  authorizedPaths: ReadonlyArray<{ workspaceId: string; resourceId: string }>,
+  draftPaths?: (sessionId: string, context: AgentInputContext, workspaceId: string) => readonly string[],
+): Array<{ workspaceId: string; resourceId: string }> {
   if (inputContext.source !== "surface") return [];
-  const owned = draftPaths ? draftPaths(actor.sessionId, inputContext) : inputContext.dirtyPaths;
-  return owned.filter((dirtyPath) => (
-    params.paths === undefined
-    || authorizedPaths.some((authorized) => pathInRoots(dirtyPath, [authorized.resourceId]))
-  ));
+  return inputContext.roots.flatMap((root) => {
+    const owned = draftPaths ? draftPaths(actor.sessionId, inputContext, root.workspaceId) : root.dirtyPaths;
+    return owned
+      .map((resourceId) => ({ workspaceId: root.workspaceId, resourceId }))
+      .filter((dirty) => params.paths === undefined
+        || authorizedPaths.some((authorized) => authorized.workspaceId === dirty.workspaceId
+          && pathInRoots(dirty.resourceId, [authorized.resourceId])));
+  });
 }

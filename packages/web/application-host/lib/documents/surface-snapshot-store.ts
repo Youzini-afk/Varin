@@ -8,6 +8,9 @@ export interface SurfaceSnapshotResource {
   content: string;
   localEditRevision: number;
   resource: { workspaceId: string; resourceId: string };
+  /** Host-resolved identity and registered aliases for the same physical target. */
+  coordinationId?: string;
+  aliases?: ReadonlyArray<{ workspaceId: string; resourceId: string }>;
   /** Editor-normalized buffer identity (`sha256-` + hex). Not a hash of serialized file text. */
   bufferHash?: string;
   lineEnding?: 'lf' | 'crlf' | 'cr';
@@ -23,7 +26,8 @@ interface StoredResource extends Omit<SurfaceSnapshotResource, 'content'> {
 }
 
 interface StoredSnapshot {
-  dirtyPaths: readonly string[];
+  aliases: Map<string, string>;
+  roots: ReadonlyArray<{ workspaceId: string; dirtyPaths: readonly string[] }>;
   ownerId: string;
   ownerGeneration: number;
   ref: string;
@@ -37,7 +41,6 @@ interface StoredSnapshot {
    */
   superseded: Set<string>;
   invalidated: Set<string>;
-  workspaceId: string;
 }
 
 export type SurfaceSnapshotReadResult =
@@ -79,8 +82,7 @@ export type SurfaceSnapshotCloneResult =
       status: 'ready';
       resources: Array<SurfaceSnapshotResource & { revision: string }>;
       /** Dirty paths a write already superseded; disk is their newer baseline. */
-      supersededPaths: string[];
-      workspaceId: string;
+      supersededResources: Array<{ workspaceId: string; resourceId: string }>;
     }
   | { status: 'unavailable'; message: string };
 
@@ -93,6 +95,7 @@ export interface SurfaceSnapshotStoreOptions {
 export const createSurfaceSnapshotStore = (options: SurfaceSnapshotStoreOptions = {}) => {
   const caseSensitive = options.caseSensitive ?? process.platform !== 'win32';
   const pathKey = (value: string): string => caseSensitive ? value : value.toLowerCase();
+  const resourceKey = (workspaceId: string, resourceId: string): string => `${workspaceId}\0${pathKey(resourceId)}`;
   const normalizeResourceId = (value: string): string => {
     const normalized = value.replace(/\\/g, '/').replace(/^\.\//, '').replace(/\/+$/, '');
     return normalized === '.' ? '' : normalized;
@@ -102,9 +105,13 @@ export const createSurfaceSnapshotStore = (options: SurfaceSnapshotStoreOptions 
     const rootKey = pathKey(normalizeResourceId(root));
     return !rootKey || resourceKey === rootKey || resourceKey.startsWith(`${rootKey}/`);
   };
-  const samePaths = (left: readonly string[], right: readonly string[]): boolean => {
-    const leftKeys = left.map(pathKey).sort();
-    const rightKeys = right.map(pathKey).sort();
+  const sameRoots = (
+    left: ReadonlyArray<{ workspaceId: string; dirtyPaths: readonly string[] }>,
+    right: ReadonlyArray<{ workspaceId: string; dirtyPaths: readonly string[] }>,
+  ): boolean => {
+    const keys = (roots: typeof left) => roots.flatMap((root) => root.dirtyPaths.map((path) => resourceKey(root.workspaceId, path))).sort();
+    const leftKeys = keys(left);
+    const rightKeys = keys(right);
     return leftKeys.length === rightKeys.length && leftKeys.every((entry, index) => entry === rightKeys[index]);
   };
   const contents = new Map<string, StoredContent>();
@@ -131,31 +138,44 @@ export const createSurfaceSnapshotStore = (options: SurfaceSnapshotStoreOptions 
     ownerGeneration?: number;
     resources: readonly SurfaceSnapshotResource[];
     sessionId: string;
-    workspaceId: string;
   }): AgentInputContext => {
     const ref = randomUUID();
     const resources = new Map<string, StoredResource>();
+    const aliases = new Map<string, string>();
+    const pathsByRoot = new Map<string, string[]>();
     for (const resource of input.resources) {
       const hash = contentHash(resource.content);
       const stored = contents.get(hash);
       if (stored) stored.references += 1;
       else contents.set(hash, { content: resource.content, references: 1 });
-      resources.set(pathKey(resource.resource.resourceId), Object.freeze({
+      resources.set(resourceKey(resource.resource.workspaceId, resource.resource.resourceId), Object.freeze({
         baseRevision: resource.baseRevision,
         encoding: resource.encoding,
         bom: resource.bom,
         contentHash: hash,
         localEditRevision: resource.localEditRevision,
         resource: Object.freeze({ ...resource.resource }),
+        ...(resource.coordinationId === undefined ? {} : { coordinationId: resource.coordinationId }),
+        ...(resource.aliases === undefined ? {} : { aliases: Object.freeze(resource.aliases.map((alias) => Object.freeze({ ...alias }))) }),
         ...(resource.bufferHash === undefined ? {} : { bufferHash: resource.bufferHash }),
         ...(resource.lineEnding === undefined ? {} : { lineEnding: resource.lineEnding }),
       }));
+      if (resource.coordinationId) {
+        for (const alias of resource.aliases ?? [resource.resource]) {
+          aliases.set(resourceKey(alias.workspaceId, alias.resourceId), resource.coordinationId);
+        }
+      }
+      const paths = pathsByRoot.get(resource.resource.workspaceId) ?? [];
+      paths.push(resource.resource.resourceId);
+      pathsByRoot.set(resource.resource.workspaceId, paths);
     }
-    const dirtyPaths = Object.freeze([...resources.values()]
-      .map((resource) => resource.resource.resourceId)
-      .sort());
+    const roots = Object.freeze([...pathsByRoot].map(([workspaceId, dirtyPaths]) => ({
+      workspaceId,
+      dirtyPaths: Object.freeze(dirtyPaths.sort()),
+    })).sort((left, right) => left.workspaceId.localeCompare(right.workspaceId)));
     const snapshot: StoredSnapshot = Object.freeze({
-      dirtyPaths,
+      aliases,
+      roots,
       ownerId: input.ownerId,
       ownerGeneration: input.ownerGeneration ?? 0,
       ref,
@@ -164,7 +184,6 @@ export const createSurfaceSnapshotStore = (options: SurfaceSnapshotStoreOptions 
       state: 'pending',
       superseded: new Set<string>(),
       invalidated: new Set<string>(),
-      workspaceId: input.workspaceId,
     });
     snapshots.set(ref, snapshot);
     const pending = pendingBySession.get(input.sessionId) ?? new Set<string>();
@@ -172,8 +191,7 @@ export const createSurfaceSnapshotStore = (options: SurfaceSnapshotStoreOptions 
     pendingBySession.set(input.sessionId, pending);
     return {
       source: 'surface',
-      workspaceId: input.workspaceId,
-      dirtyPaths: [...dirtyPaths],
+      roots: roots.map((root) => ({ workspaceId: root.workspaceId, dirtyPaths: [...root.dirtyPaths] })),
       snapshot: { status: 'ready', ref },
     };
   };
@@ -190,13 +208,13 @@ export const createSurfaceSnapshotStore = (options: SurfaceSnapshotStoreOptions 
    * same boundary the recovery journal reports.
    */
   const observeWrite = (workspaceId: string, resourceId: string): void => {
-    const written = pathKey(normalizeResourceId(resourceId));
+    const written = resourceKey(workspaceId, normalizeResourceId(resourceId));
     if (!written) return;
     for (const snapshot of snapshots.values()) {
-      if (snapshot.workspaceId !== workspaceId) continue;
+      const coordinationId = snapshot.aliases.get(written);
       for (const [key, resource] of snapshot.resources) {
         if (snapshot.superseded.has(key)) continue;
-        if (pathKey(normalizeResourceId(resource.resource.resourceId)) === written) {
+        if (key === written || (coordinationId && resource.coordinationId === coordinationId)) {
           snapshot.superseded.add(key);
         }
       }
@@ -217,36 +235,38 @@ export const createSurfaceSnapshotStore = (options: SurfaceSnapshotStoreOptions 
     bufferHash?: string;
     lineEnding?: 'lf' | 'crlf' | 'cr';
   }): void => {
-    const key = pathKey(input.resourceId);
+    const key = resourceKey(input.workspaceId, input.resourceId);
     const hash = contentHash(input.content);
     for (const snapshot of snapshots.values()) {
-      if (snapshot.ownerId !== input.ownerId || snapshot.ownerGeneration !== input.ownerGeneration
-        || snapshot.workspaceId !== input.workspaceId || snapshot.superseded.has(key)) continue;
-      const resource = snapshot.resources.get(key);
-      if (!resource) continue;
-      if (resource.baseRevision !== input.expectedBaseRevision
-        || resource.localEditRevision !== input.expectedLocalEditRevision) {
-        snapshot.invalidated.add(key);
-        continue;
+      if (snapshot.ownerId !== input.ownerId || snapshot.ownerGeneration !== input.ownerGeneration) continue;
+      const coordinationId = snapshot.aliases.get(key);
+      for (const [targetKey, resource] of snapshot.resources) {
+        if (snapshot.superseded.has(targetKey)
+          || (targetKey !== key && (!coordinationId || resource.coordinationId !== coordinationId))) continue;
+        if (resource.baseRevision !== input.expectedBaseRevision
+          || resource.localEditRevision !== input.expectedLocalEditRevision) {
+          snapshot.invalidated.add(targetKey);
+          continue;
+        }
+        const previous = contents.get(resource.contentHash);
+        if (previous) {
+          previous.references -= 1;
+          if (previous.references === 0) contents.delete(resource.contentHash);
+        }
+        const existing = contents.get(hash);
+        if (existing) existing.references += 1;
+        else contents.set(hash, { content: input.content, references: 1 });
+        snapshot.resources.set(targetKey, Object.freeze({
+          ...resource,
+          contentHash: hash,
+          localEditRevision: input.nextLocalEditRevision,
+          encoding: input.encoding,
+          bom: input.bom,
+          ...(input.bufferHash === undefined ? {} : { bufferHash: input.bufferHash }),
+          ...(input.lineEnding === undefined ? {} : { lineEnding: input.lineEnding }),
+        }));
+        snapshot.invalidated.delete(targetKey);
       }
-      const previous = contents.get(resource.contentHash);
-      if (previous) {
-        previous.references -= 1;
-        if (previous.references === 0) contents.delete(resource.contentHash);
-      }
-      const existing = contents.get(hash);
-      if (existing) existing.references += 1;
-      else contents.set(hash, { content: input.content, references: 1 });
-      snapshot.resources.set(key, Object.freeze({
-        ...resource,
-        contentHash: hash,
-        localEditRevision: input.nextLocalEditRevision,
-        encoding: input.encoding,
-        bom: input.bom,
-        ...(input.bufferHash === undefined ? {} : { bufferHash: input.bufferHash }),
-        ...(input.lineEnding === undefined ? {} : { lineEnding: input.lineEnding }),
-      }));
-      snapshot.invalidated.delete(key);
     }
   };
 
@@ -256,12 +276,13 @@ export const createSurfaceSnapshotStore = (options: SurfaceSnapshotStoreOptions 
     workspaceId: string;
     resourceIds: readonly string[];
   }): void => {
-    const keys = new Set(input.resourceIds.map(pathKey));
+    const keys = new Set(input.resourceIds.map((resourceId) => resourceKey(input.workspaceId, resourceId)));
     for (const snapshot of snapshots.values()) {
-      if (snapshot.ownerId !== input.ownerId || snapshot.ownerGeneration !== input.ownerGeneration
-        || snapshot.workspaceId !== input.workspaceId) continue;
-      for (const key of keys) {
-        if (snapshot.resources.has(key) && !snapshot.superseded.has(key)) snapshot.invalidated.add(key);
+      if (snapshot.ownerId !== input.ownerId || snapshot.ownerGeneration !== input.ownerGeneration) continue;
+      const coordinationIds = new Set([...keys].map((key) => snapshot.aliases.get(key)).filter((id): id is string => Boolean(id)));
+      for (const [key, resource] of snapshot.resources) {
+        if ((keys.has(key) || (resource.coordinationId && coordinationIds.has(resource.coordinationId)))
+          && !snapshot.superseded.has(key)) snapshot.invalidated.add(key);
       }
     }
   };
@@ -269,8 +290,8 @@ export const createSurfaceSnapshotStore = (options: SurfaceSnapshotStoreOptions 
   const resolveReady = (sessionId: string, context: AgentInputContext): StoredSnapshot | null => {
     if (context.source !== 'surface' || context.snapshot.status !== 'ready') return null;
     const snapshot = snapshots.get(context.snapshot.ref);
-    if (!snapshot || snapshot.sessionId !== sessionId || snapshot.workspaceId !== context.workspaceId) return null;
-    return samePaths(snapshot.dirtyPaths, context.dirtyPaths) ? snapshot : null;
+    if (!snapshot || snapshot.sessionId !== sessionId) return null;
+    return sameRoots(snapshot.roots, context.roots) ? snapshot : null;
   };
 
   const commit = (sessionId: string, context: AgentInputContext): { committed: boolean } => {
@@ -301,9 +322,10 @@ export const createSurfaceSnapshotStore = (options: SurfaceSnapshotStoreOptions 
     return { released: true };
   };
 
-  const read = (sessionId: string, context: AgentInputContext, resourceId: string): SurfaceSnapshotReadResult => {
+  const read = (sessionId: string, context: AgentInputContext, resourceId: string, workspaceId: string): SurfaceSnapshotReadResult => {
     if (context.source === 'disk') return { status: 'disk' };
-    const dirty = context.dirtyPaths.some((path) => pathKey(path) === pathKey(resourceId));
+    const root = context.roots.find((entry) => entry.workspaceId === workspaceId);
+    const dirty = context.roots.length === 0 || Boolean(root?.dirtyPaths.some((path) => pathKey(path) === pathKey(resourceId)));
     if (context.snapshot.status === 'unavailable') {
       return dirty
         ? { status: 'unavailable', message: 'The editor source snapshot is unavailable for this dirty document.' }
@@ -315,10 +337,11 @@ export const createSurfaceSnapshotStore = (options: SurfaceSnapshotStoreOptions 
         ? { status: 'unavailable', message: 'The editor source snapshot expired on the application host.' }
         : { status: 'disk' };
     }
-    const resource = snapshot.resources.get(pathKey(resourceId));
+    const key = resourceKey(workspaceId, resourceId);
+    const resource = snapshot.resources.get(key);
     if (!resource) return { status: 'disk' };
-    if (snapshot.superseded.has(pathKey(resourceId))) return { status: 'disk', superseded: true };
-    if (snapshot.invalidated.has(pathKey(resourceId))) {
+    if (snapshot.superseded.has(key)) return { status: 'disk', superseded: true };
+    if (snapshot.invalidated.has(key)) {
       return { status: 'unavailable', message: 'The editor source changed during a Host surface operation.' };
     }
     const content = contents.get(resource.contentHash)?.content;
@@ -339,11 +362,12 @@ export const createSurfaceSnapshotStore = (options: SurfaceSnapshotStoreOptions 
     sessionId: string,
     context: AgentInputContext,
     resourceId: string,
+    workspaceId: string,
   ): SurfaceSnapshotInspectResult => {
-    const draft = read(sessionId, context, resourceId);
+    const draft = read(sessionId, context, resourceId, workspaceId);
     if (draft.status !== 'ready') return draft;
     const snapshot = resolveReady(sessionId, context);
-    const resource = snapshot?.resources.get(pathKey(resourceId));
+    const resource = snapshot?.resources.get(resourceKey(workspaceId, resourceId));
     if (!snapshot || !resource) {
       return { status: 'unavailable', message: 'The editor source snapshot expired on the application host.' };
     }
@@ -370,18 +394,19 @@ export const createSurfaceSnapshotStore = (options: SurfaceSnapshotStoreOptions 
     const snapshot = resolveReady(sessionId, context);
     if (!snapshot) return { status: 'unavailable', message: 'The editor source snapshot expired on the application host.' };
     const resources: Array<SurfaceSnapshotResource & { revision: string }> = [];
-    const supersededPaths: string[] = [];
-    for (const resourceId of snapshot.dirtyPaths) {
+    const supersededResources: Array<{ workspaceId: string; resourceId: string }> = [];
+    for (const root of snapshot.roots) for (const resourceId of root.dirtyPaths) {
+      const key = resourceKey(root.workspaceId, resourceId);
       // A superseded path already has its newer text on disk, which the child
       // materializes anyway; overlaying the stale draft would undo the write.
-      if (snapshot.superseded.has(pathKey(resourceId))) {
-        supersededPaths.push(resourceId);
+      if (snapshot.superseded.has(key)) {
+        supersededResources.push({ workspaceId: root.workspaceId, resourceId });
         continue;
       }
-      if (snapshot.invalidated.has(pathKey(resourceId))) {
+      if (snapshot.invalidated.has(key)) {
         return { status: 'unavailable', message: 'The editor source changed during a Host surface operation.' };
       }
-      const resource = snapshot.resources.get(pathKey(resourceId));
+      const resource = snapshot.resources.get(key);
       const content = resource ? contents.get(resource.contentHash)?.content : undefined;
       if (!resource || content === undefined) {
         return { status: 'unavailable', message: 'The editor source snapshot expired on the application host.' };
@@ -394,11 +419,13 @@ export const createSurfaceSnapshotStore = (options: SurfaceSnapshotStoreOptions 
         localEditRevision: resource.localEditRevision,
         resource: { ...resource.resource },
         revision: `surface-draft:${snapshot.ref}:${resource.localEditRevision}`,
+        ...(resource.coordinationId === undefined ? {} : { coordinationId: resource.coordinationId }),
+        ...(resource.aliases === undefined ? {} : { aliases: resource.aliases.map((alias) => ({ ...alias })) }),
         ...(resource.bufferHash === undefined ? {} : { bufferHash: resource.bufferHash }),
         ...(resource.lineEnding === undefined ? {} : { lineEnding: resource.lineEnding }),
       });
     }
-    return { status: 'ready', resources, supersededPaths, workspaceId: snapshot.workspaceId };
+    return { status: 'ready', resources, supersededResources };
   };
 
   /**
@@ -407,17 +434,20 @@ export const createSurfaceSnapshotStore = (options: SurfaceSnapshotStoreOptions 
    * search and enumerate it on disk like any other file, while an expired
    * capture keeps every dirty path here and never becomes a silent disk read.
    */
-  const draftPaths = (sessionId: string, context: AgentInputContext): string[] => {
+  const draftPaths = (sessionId: string, context: AgentInputContext, workspaceId: string): string[] => {
     if (context.source === 'disk') return [];
-    if (context.snapshot.status === 'unavailable') return [...context.dirtyPaths];
+    const dirtyPaths = context.roots.find((root) => root.workspaceId === workspaceId)?.dirtyPaths ?? [];
+    if (context.snapshot.status === 'unavailable') return [...dirtyPaths];
     const snapshot = resolveReady(sessionId, context);
-    if (!snapshot) return [...context.dirtyPaths];
-    return snapshot.dirtyPaths.filter((resourceId) => !snapshot.superseded.has(pathKey(resourceId)));
+    if (!snapshot) return [...dirtyPaths];
+    return dirtyPaths.filter((resourceId) => !snapshot.superseded.has(resourceKey(workspaceId, resourceId)));
   };
 
-  const owner = (sessionId: string, context: AgentInputContext): { ownerId: string; generation: number; workspaceId: string } | null => {
+  const owner = (sessionId: string, context: AgentInputContext, workspaceId: string): { ownerId: string; generation: number; workspaceId: string } | null => {
     const snapshot = resolveReady(sessionId, context);
-    return snapshot ? { ownerId: snapshot.ownerId, generation: snapshot.ownerGeneration, workspaceId: snapshot.workspaceId } : null;
+    return snapshot?.roots.some((root) => root.workspaceId === workspaceId)
+      ? { ownerId: snapshot.ownerId, generation: snapshot.ownerGeneration, workspaceId }
+      : null;
   };
 
   /**
@@ -429,10 +459,12 @@ export const createSurfaceSnapshotStore = (options: SurfaceSnapshotStoreOptions 
     sessionId: string,
     context: AgentInputContext,
     root: string,
+    workspaceId: string,
   ): SurfaceSnapshotOverlayResult => {
     if (context.source === 'disk') return { status: 'disk' };
     const normalizedRoot = normalizeResourceId(root);
-    const contextHasRelatedDirtyPath = context.dirtyPaths.some((path) => isWithin(path, normalizedRoot));
+    const rootPaths = context.roots.find((entry) => entry.workspaceId === workspaceId)?.dirtyPaths ?? [];
+    const contextHasRelatedDirtyPath = context.roots.length === 0 || rootPaths.some((path) => isWithin(path, normalizedRoot));
     if (context.snapshot.status === 'unavailable') {
       return contextHasRelatedDirtyPath
         ? { status: 'unavailable', message: 'The editor source snapshot is unavailable.' }
@@ -444,17 +476,17 @@ export const createSurfaceSnapshotStore = (options: SurfaceSnapshotStoreOptions 
         ? { status: 'unavailable', message: 'The editor source snapshot expired on the application host.' }
         : { status: 'disk' };
     }
-    const dirtyPaths = snapshot.dirtyPaths
-      .filter((resourceId) => !snapshot.superseded.has(pathKey(resourceId)))
+    const dirtyPaths = rootPaths
+      .filter((resourceId) => !snapshot.superseded.has(resourceKey(workspaceId, resourceId)))
       .map(normalizeResourceId)
       .filter((resourceId) => isWithin(resourceId, normalizedRoot));
     if (dirtyPaths.length === 0) return { status: 'disk' };
-    if (dirtyPaths.some((resourceId) => snapshot.invalidated.has(pathKey(resourceId)))) {
+    if (dirtyPaths.some((resourceId) => snapshot.invalidated.has(resourceKey(workspaceId, resourceId)))) {
       return { status: 'unavailable', message: 'The editor source changed during a Host surface operation.' };
     }
     const files = dirtyPaths
       .map((resourceId) => {
-        const resource = snapshot.resources.get(pathKey(resourceId));
+        const resource = snapshot.resources.get(resourceKey(workspaceId, resourceId));
         const content = resource ? contents.get(resource.contentHash)?.content : undefined;
         if (!resource || content === undefined) return null;
         return {
@@ -507,7 +539,8 @@ export const createSurfaceSnapshotStore = (options: SurfaceSnapshotStoreOptions 
 
   const dropPendingOwner = (ownerId: string, workspaceId: string): void => {
     for (const snapshot of [...snapshots.values()]) {
-      if (snapshot.state === 'pending' && snapshot.ownerId === ownerId && snapshot.workspaceId === workspaceId) {
+      if (snapshot.state === 'pending' && snapshot.ownerId === ownerId
+        && snapshot.roots.some((root) => root.workspaceId === workspaceId)) {
         releaseStored(snapshot);
       }
     }

@@ -17,7 +17,7 @@ export type ExploreFileReader = (
 export function createExploreFileReader(
   documents: Pick<DocumentAuthority, "read" | "readAgentInputSnapshot">,
   paths: Pick<HarnessPathAuthority, "resolve">,
-  branchExplore?: (sessionId: string, resourceId: string) => Promise<ExploreFileSnapshot | null>,
+  branchExplore?: (sessionId: string, resourceId: string, workspaceId: string) => Promise<ExploreFileSnapshot | null>,
 ): ExploreFileReader {
   return async (actor, path, signal, inputContext = { source: "disk" }) => {
     signal.throwIfAborted();
@@ -25,7 +25,7 @@ export function createExploreFileReader(
       const before = await paths.resolve(actor, path, { allowMissing: true });
       if (!before) return { status: "forbidden", message: "Path is outside the permitted workspace scope." };
       if (branchExplore) {
-        const branch = await branchExplore(actor.sessionId, before.resourceId);
+        const branch = await branchExplore(actor.sessionId, before.resourceId, before.workspaceId);
         signal.throwIfAborted();
         if (branch) {
           const after = await paths.resolve(actor, path, { allowMissing: true });
@@ -35,7 +35,7 @@ export function createExploreFileReader(
           return branch;
         }
       }
-      const surface = documents.readAgentInputSnapshot(actor.sessionId, inputContext, before.resourceId);
+      const surface = documents.readAgentInputSnapshot(actor.sessionId, inputContext, before.resourceId, before.workspaceId);
       if (surface.status === "unavailable") return surface;
       if (surface.status === "ready") {
         const after = await paths.resolve(actor, path, { allowMissing: true });

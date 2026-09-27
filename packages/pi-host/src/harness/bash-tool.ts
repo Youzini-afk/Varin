@@ -55,10 +55,11 @@ export function createBashTool(
   return defineTool({
     name: "bash",
     label: "Bash",
-    description: "Execute a bash command and return stdout, stderr, and exit code. Long-running commands are backgrounded after waitMs. Under PTY-based shells (git-bash, wsl), stdout and stderr are merged into a single stream.",
+    description: "Execute an independent bash command and return stdout, stderr, and exit code. Each call starts in its explicit cwd or the request's frozen default cwd; cd and environment changes do not carry into another call. Long-running commands are backgrounded after waitMs. Under PTY-based shells (git-bash, wsl), stdout and stderr are merged into a single stream.",
     promptSnippet: "bash: execute shell commands (bash family)",
     promptGuidelines: [
-      "Use bash for shell commands. The tool handles timeouts and backgrounding automatically.",
+      "Use bash for independent shell commands. Each call starts in its explicit cwd or frozen default cwd; cd and environment changes do not carry into another call.",
+      "For a long-running interactive process, use its returned shell id with get_output, write_to_process, and kill_shell to observe, interact, or stop that process.",
       "A non-zero exit code is a result, not an error. Only use bash when no specialized tool fits.",
       "Prefer grep, edit, read, write, and find tools over bash equivalents.",
     ],
@@ -80,8 +81,8 @@ export function createBashTool(
           toolCallId,
           ...(params.target !== undefined ? { target: params.target } : {}),
           ...(params.cwd !== undefined ? { cwd: params.cwd } : {}),
-          // Don't pass cwd on every call — the persistent shell maintains its
-          // own cwd across commands. Passing cwd would reset it each time.
+          // Only explicit cwd is forwarded here; the Host resolves the
+          // request's frozen default cwd for this command when cwd is omitted.
           waitMs,
         }, {
           timeoutMs: requestTimeoutMs,

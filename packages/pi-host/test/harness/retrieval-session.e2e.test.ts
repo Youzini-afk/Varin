@@ -292,10 +292,10 @@ describe("retrieval thread public slice", () => {
       search: (request, options) => search.searchContent(request, options),
       resolveWorkspaceRoot: async (id) => (await documents.inspectWorkspace(id)).root,
       pathAuthority: paths,
-      readExploreFile: createExploreFileReader(documents, paths, (sessionId, resourceId) => branchLookups.exploreFile(sessionId, resourceId)),
+      readExploreFile: createExploreFileReader(documents, paths, (sessionId, resourceId, workspaceId) => branchLookups.exploreFile(sessionId, resourceId, workspaceId)),
       pinWorkingBranchQuery: (sessionId, options) => branchLookups.pinQuery(sessionId, options),
-      documentReadSource: async (sessionId, _context, resourceId) => (
-        await branchLookups.readSource(sessionId, resourceId) ?? { status: "disk" as const }
+      documentReadSource: async (sessionId, _context, resourceId, workspaceId) => (
+        await branchLookups.readSource(sessionId, resourceId, workspaceId) ?? { status: "disk" as const }
       ),
       workingBranchEnsureMaterialized: (sessionId, signal) => runtime!.materializeExecutionView(sessionId, signal),
       lspNavigationServices: {

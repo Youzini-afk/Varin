@@ -1516,8 +1516,7 @@ export class SessionHost {
       this.#inputContext = context.source === "surface"
         ? {
             source: "surface",
-            workspaceId: context.workspaceId,
-            dirtyPaths: [...context.dirtyPaths],
+            roots: context.roots.map((root) => ({ workspaceId: root.workspaceId, dirtyPaths: [...root.dirtyPaths] })),
             snapshot: { status: "unavailable", reason: "surface-unavailable" },
           }
         : { source: "disk" };

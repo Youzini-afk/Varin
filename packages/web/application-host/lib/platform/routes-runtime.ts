@@ -7,6 +7,7 @@ import type pathModule from 'node:path';
 import type { Express, Response } from 'express';
 
 import type { DocumentAuthority } from '../documents/authority.js';
+import { DocumentPathError, DocumentUntrustedError } from '../documents/errors.js';
 import { registerExternalAccessRoutes } from '../external-access/routes.js';
 import { registerExtensionRoutes } from '../extensions/routes.js';
 import { registerFsRoutes } from '../fs/routes.js';
@@ -316,6 +317,15 @@ export const createPlatformRoutesRuntime = ({
       registerDocumentRoutes(app, { documents, uiAuthController });
       registerWorkspaceSearchRoutes(app, {
         contentSearch, fileSearch, uiAuthController, path, os, normalizeDirectoryPath, resolveProjectDirectory,
+        authorizeSearchDirectory: async (directory) => {
+          try {
+            await documents.ensureResourceRoot(directory, 'directory');
+            return true;
+          } catch (error) {
+            if (error instanceof DocumentPathError || error instanceof DocumentUntrustedError) return false;
+            throw error;
+          }
+        },
       });
     }
     if (languageSupervisor) {

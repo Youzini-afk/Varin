@@ -68,7 +68,7 @@ export type SemanticSearchRequest = {
 export type SemanticSearchResult = {
   status: SemanticIndexStatus;
   hits: SemanticHit[];
-  gaps: Array<{ path: string; reason: "draft-vector-pending" | "draft-unavailable" | "thread-vector-pending" | "index-read-failed" }>;
+  gaps: Array<{ path: string; reason: "draft-vector-pending" | "draft-unavailable" | "thread-vector-pending" | "index-read-failed" | "content-changed" | "index-watch-unavailable" }>;
 };
 
 const yieldToEventLoop = (): Promise<void> => new Promise((resolve) => {
@@ -78,7 +78,7 @@ const yieldToEventLoop = (): Promise<void> => new Promise((resolve) => {
 export interface SemanticIndexRuntimeOptions {
   dataDir: string;
   hostId: string;
-  documents: Pick<DocumentAuthority, "inspectWorkspace">;
+  documents: Pick<DocumentAuthority, "inspectWorkspace" | "read">;
   structureSource: StructureSource;
   searchFilesystemFiles?: (
     rootPath: string,
@@ -696,7 +696,7 @@ export function createSemanticIndexRuntime(options: SemanticIndexRuntimeOptions)
         ...(unverifiedPaths.get(key) ?? []),
         ...(mutationPending.get(scopeId) ?? []),
       ];
-      const hits = queryVector
+      const indexedHits = queryVector
         ? await waitWithSignal(store.search(queryVector, limit, {
           maskPaths,
           extras: overlay.extras,
@@ -705,8 +705,52 @@ export function createSemanticIndexRuntime(options: SemanticIndexRuntimeOptions)
         }), signal)
         : [];
       signal?.throwIfAborted();
+      // A watcher can be delayed, overflow, or miss an event. Before exposing a
+      // disk-index hit, compare its indexed document revision with Documents.
+      // Fixed execution views and explicit overlays carry their own source
+      // revision and must not be compared with live disk.
+      const hits: SemanticHit[] = [];
+      const gaps: SemanticSearchResult["gaps"] = [...overlay.gaps, ...indexGaps];
+      const verified = new Map<string, { revision?: string; status?: string }>();
+      const overlayByPath = new Map(overlays.map((item) => [item.path, item]));
+      for (const hit of indexedHits) {
+        signal?.throwIfAborted();
+        if (searchOptions?.view === "working-state" || searchOptions?.threadQuery) {
+          hits.push(hit);
+          continue;
+        }
+        const pinnedOverlay = overlayByPath.get(hit.documentId);
+        if (pinnedOverlay) {
+          if (pinnedOverlay.content !== null && pinnedOverlay.revision === hit.revision) hits.push(hit);
+          else if (!gaps.some((gap) => gap.path === hit.documentId && gap.reason === "content-changed")) {
+            gaps.push({ path: hit.documentId, reason: "content-changed" });
+          }
+          continue;
+        }
+        let current = verified.get(hit.documentId);
+        if (!current) {
+          try {
+            const snapshot = await options.documents.read({ workspaceId: scope.scopeId, resourceId: hit.documentId });
+            current = { status: snapshot.status, ...(snapshot.status === "ready" ? { revision: snapshot.revision } : {}) };
+          } catch {
+            current = { status: "failed" };
+          }
+          verified.set(hit.documentId, current);
+        }
+        if (current.status === "ready" && current.revision === hit.revision) {
+          hits.push(hit);
+          continue;
+        }
+        const reason = current.status === "failed" ? "index-read-failed" : "content-changed";
+        if (!gaps.some((gap) => gap.path === hit.documentId && gap.reason === reason)) gaps.push({ path: hit.documentId, reason });
+        observeDocumentMutation({
+          workspaceId: scope.scopeId,
+          resourceId: hit.documentId,
+          kind: current.status === "missing" ? "deleted" : "modified",
+        });
+      }
       const incomplete = store.coverage === "partial"
-        || overlay.gaps.length > 0 || indexGaps.length > 0
+        || gaps.length > 0
         || store.lifecycle === "building"
         || store.lifecycle === "rebuilding"
         || (unverifiedPaths.get(key)?.size ?? 0) > 0
@@ -721,7 +765,7 @@ export function createSemanticIndexRuntime(options: SemanticIndexRuntimeOptions)
           spaceId: store.spaceId,
         },
         hits,
-        gaps: [...overlay.gaps, ...indexGaps],
+        gaps,
       };
     } catch (error) {
       if (error instanceof Error && error.name === "AbortError") throw error;

@@ -2875,7 +2875,7 @@ async function main(options: StartWebUiServerOptions = {}): Promise<WebUiServerC
     readExploreFile: createExploreFileReader(
       documentsAuthority,
       harnessPathAuthority,
-      (sessionId, resourceId) => workingBranchLookups.exploreFile(sessionId, resourceId),
+      (sessionId, resourceId, workspaceId) => workingBranchLookups.exploreFile(sessionId, resourceId, workspaceId),
     ),
     storeRetrievalArtifact: retrievalArtifacts.storeArtifact,
     readRetrievalArtifact: retrievalArtifacts.readArtifact,
@@ -2894,8 +2894,7 @@ async function main(options: StartWebUiServerOptions = {}): Promise<WebUiServerC
     releaseRetrievalTemporaryArtifacts: retrievalArtifacts.releaseTemporaryArtifacts,
     releaseWebFetchReceipts: async (sessionId, fallbackWorkspaceId) => {
       const binding = await threadRegistry.getSessionBinding(sessionId).catch(() => null);
-      const workspaceId = binding?.owningScopeId ?? fallbackWorkspaceId;
-      if (!workspaceId) return;
+      const workspaceId = binding?.owningScopeId ?? fallbackWorkspaceId ?? sessionScopeId(sessionId);
       await retrievalArtifacts.releaseReceiptAuthority(workspaceId, {
         owningWorkspaceId: workspaceId,
         sessionId,
@@ -2903,21 +2902,22 @@ async function main(options: StartWebUiServerOptions = {}): Promise<WebUiServerC
       });
     },
     pinWorkingBranchQuery: (sessionId, pinOptions) => workingBranchLookups.pinQuery(sessionId, pinOptions),
-    agentInputDraftPaths: (sessionId, context) => documentsAuthority.agentInputDraftPaths(sessionId, context),
-    documentReadSource: async (sessionId, context, resourceId) => {
-      const branch = await workingBranchLookups.readSource(sessionId, resourceId);
+    agentInputDraftPaths: (sessionId, context, workspaceId) => documentsAuthority.agentInputDraftPaths(sessionId, context, workspaceId),
+    documentReadSource: async (sessionId, context, resourceId, workspaceId) => {
+      const branch = await workingBranchLookups.readSource(sessionId, resourceId, workspaceId);
       if (branch) return branch;
-      return documentsAuthority.readAgentInputSnapshot(sessionId, context, resourceId);
+      return documentsAuthority.readAgentInputSnapshot(sessionId, context, resourceId, workspaceId);
     },
-    documentPathOverlay: async (sessionId, context, resourceId) => {
-      const branch = await workingBranchLookups.pathOverlay(sessionId, resourceId);
+    documentPathOverlay: async (sessionId, context, resourceId, workspaceId) => {
+      const branch = await workingBranchLookups.pathOverlay(sessionId, resourceId, workspaceId);
       if (branch) return branch;
-      return documentsAuthority.overlayAgentInputSnapshot(sessionId, context, resourceId);
+      return documentsAuthority.overlayAgentInputSnapshot(sessionId, context, resourceId, workspaceId);
     },
-    documentWriteGuard: (sessionId, context, resourceId) => documentsAuthority.inspectAgentWriteTarget(
+    documentWriteGuard: (sessionId, context, resourceId, workspaceId) => documentsAuthority.inspectAgentWriteTarget(
       sessionId,
       context,
       resourceId,
+      workspaceId,
     ),
     documentSurfaceWrite: (sessionId, workspaceId, context, changes, signal) => documentsAuthority.applyAgentSurfaceWrite(
       sessionId,
@@ -3007,6 +3007,12 @@ async function main(options: StartWebUiServerOptions = {}): Promise<WebUiServerC
     // this consults an already-open store and reports "not answered" otherwise.
     // The session's own knowledge work opens it (D-112).
     graphRecall: async (sessionId, executionWorkspaceId) => {
+      const resourceStore = knowledgeStores.get(knowledgeStoreKeyForScope(executionWorkspaceId));
+      if (resourceStore) return {
+        workspaceId: executionWorkspaceId,
+        store: resourceStore,
+        directFactsCompatible: true,
+      };
       const owningWorkspaceId = await owningKnowledgeScopeIdForSession(sessionId, executionWorkspaceId)
         ?? sessionScopeId(sessionId);
       if (!owningWorkspaceId) return null;
@@ -3096,7 +3102,7 @@ async function main(options: StartWebUiServerOptions = {}): Promise<WebUiServerC
       ctx.signal.throwIfAborted();
       const before = await harnessPathAuthority.resolve(ctx.actor, authorized.inputPath, { allowMissing: true });
       if (!before || before.canonicalResourceId !== authorized.canonicalResourceId) throw new Error('Document path changed before reading');
-      const source = await harnessServiceHost.documentReadSource!(ctx.sessionId, ctx.inputContext ?? { source: 'disk' }, authorized.resourceId);
+      const source = await harnessServiceHost.documentReadSource!(ctx.sessionId, ctx.inputContext ?? { source: 'disk' }, authorized.resourceId, authorized.workspaceId);
       let bytes: Buffer;
       if (source.status === 'working-branch') {
         if (source.message || source.missing || source.base64 === undefined) throw new Error(source.message ?? 'Document is unavailable in the working branch');

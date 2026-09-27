@@ -61,7 +61,11 @@ const createMemoryDocuments = () => {
   let revisionSeq = 1;
   let workspaceEpoch = 1;
   let watchSequence = 0;
-  const keyOf = (ref: VarinResourceReference) => `${ref.workspaceId}\0${ref.resourceId}`;
+  const coordinationOverrides = new Map<string, string>();
+  const keyOf = (ref: VarinResourceReference) => {
+    const alias = `${ref.workspaceId}\0${ref.resourceId}`;
+    return coordinationOverrides.get(alias) ?? alias;
+  };
   const nextRevision = () => `d1_${revisionSeq++}`;
   const emit = (event: VarinDocumentWatchEvent) => {
     for (const listener of listeners) listener(event);
@@ -91,7 +95,15 @@ const createMemoryDocuments = () => {
       }
       return { ...request, updatedAt: '2026-08-28T00:00:00.000Z' };
     },
-    resolveWorkspace: async () => ({ workspaceId: resource().workspaceId, hostId: 'host-1', epoch: workspaceEpoch }),
+    resolveWorkspace: async ({ workspaceId }) => ({ workspaceId: workspaceId ?? resource().workspaceId, hostId: 'host-1', epoch: workspaceEpoch }),
+    resolveResourceIdentity: async (ref) => ({
+      coordinationId: `host-1\0${keyOf(ref)}`,
+      aliases: [...coordinationOverrides.entries()].filter(([, physical]) => physical === keyOf(ref))
+        .map(([alias]) => {
+          const separator = alias.indexOf('\0');
+          return { workspaceId: alias.slice(0, separator), resourceId: alias.slice(separator + 1) };
+        }).concat(ref),
+    }),
     read: async (ref) => {
       const file = files.get(keyOf(ref));
       if (!file) return { status: 'missing', epoch: workspaceEpoch, resource: ref };
@@ -234,6 +246,7 @@ const createMemoryDocuments = () => {
 
   return {
     api,
+    coordinationOverrides,
     barrierAcknowledged,
     barrierAcknowledgements,
     dirtyPublications,
@@ -248,6 +261,365 @@ const createMemoryDocuments = () => {
 };
 
 describe('DocumentRegistry', () => {
+  test('restores a parent-project draft when the same file opens through its child project', async () => {
+    const memory = createMemoryDocuments();
+    const parent = { workspaceId: 'parent', resourceId: 'child/recovered.txt' };
+    const child = { workspaceId: 'child', resourceId: 'recovered.txt' };
+    memory.coordinationOverrides.set(`${parent.workspaceId}\0${parent.resourceId}`, 'recovered-physical-file');
+    memory.coordinationOverrides.set(`${child.workspaceId}\0${child.resourceId}`, 'recovered-physical-file');
+    memory.files.set('recovered-physical-file', { content: 'disk\n', revision: 'd1_disk' });
+    await memory.api.writeRecoveryJournal({
+      token: { workspaceId: parent.workspaceId, epoch: 1, owner: { kind: 'test', id: 'recovery' } },
+      workspaceId: parent.workspaceId,
+      recoverySessionId: 'shared-recovery',
+      resource: parent,
+      content: 'unsaved parent\n',
+      encoding: 'utf-8',
+      bom: false,
+      baseRevision: 'd1_disk',
+      expectedRevision: null,
+    });
+    const registry = new DocumentRegistry({ documents: memory.api, getGeneration: () => 1, recoverySessionId: 'shared-recovery' });
+    try {
+      const opened = await registry.open(child);
+      expect(opened.buffer).toBe('unsaved parent\n');
+      expect(opened.dirty).toBe(true);
+      expect(registry.get(parent)).toBe(registry.get(child));
+      await registry.save(child);
+      expect(memory.files.get('recovered-physical-file')?.content).toBe('unsaved parent\n');
+      expect(memory.journals.size).toBe(0);
+    } finally {
+      await registry.dispose();
+    }
+  });
+
+  test('keeps both recovery drafts when two project aliases have different unsaved bodies', async () => {
+    const memory = createMemoryDocuments();
+    const parent = { workspaceId: 'parent', resourceId: 'child/conflicted.txt' };
+    const child = { workspaceId: 'child', resourceId: 'conflicted.txt' };
+    memory.coordinationOverrides.set(`${parent.workspaceId}\0${parent.resourceId}`, 'conflicted-physical-file');
+    memory.coordinationOverrides.set(`${child.workspaceId}\0${child.resourceId}`, 'conflicted-physical-file');
+    memory.files.set('conflicted-physical-file', { content: 'disk\n', revision: 'd1_disk' });
+    for (const [resource, content] of [[parent, 'parent draft\n'], [child, 'child draft\n']] as const) {
+      await memory.api.writeRecoveryJournal({
+        token: { workspaceId: resource.workspaceId, epoch: 1, owner: { kind: 'test', id: 'recovery' } },
+        workspaceId: resource.workspaceId,
+        recoverySessionId: 'shared-conflict',
+        resource,
+        content,
+        encoding: 'utf-8',
+        bom: false,
+        baseRevision: 'd1_disk',
+        expectedRevision: null,
+      });
+    }
+    const registry = new DocumentRegistry({ documents: memory.api, getGeneration: () => 1, recoverySessionId: 'shared-conflict' });
+    try {
+      const opened = await registry.open(child);
+      expect(opened.status).toBe('error');
+      expect(opened.errorMessage).toContain('Multiple recovery drafts');
+      expect(memory.journals.size).toBe(2);
+      expect(memory.files.get('conflicted-physical-file')?.content).toBe('disk\n');
+    } finally {
+      await registry.dispose();
+    }
+  });
+
+  test('keeps a readable file available when a secondary recovery alias is offline', async () => {
+    const memory = createMemoryDocuments();
+    const primary = { workspaceId: 'primary', resourceId: 'child/offline.txt' };
+    const secondary = { workspaceId: 'secondary', resourceId: 'offline.txt' };
+    memory.coordinationOverrides.set(`${primary.workspaceId}\0${primary.resourceId}`, 'offline-physical-file');
+    memory.coordinationOverrides.set(`${secondary.workspaceId}\0${secondary.resourceId}`, 'offline-physical-file');
+    memory.files.set('offline-physical-file', { content: 'readable disk\n', revision: 'd1_disk' });
+    await memory.api.writeRecoveryJournal({
+      token: { workspaceId: secondary.workspaceId, epoch: 1, owner: { kind: 'test', id: 'recovery' } },
+      workspaceId: secondary.workspaceId,
+      recoverySessionId: 'offline-recovery',
+      resource: secondary,
+      content: 'unknown secondary draft\n',
+      encoding: 'utf-8', bom: false, baseRevision: 'd1_disk', expectedRevision: null,
+    });
+    const documents: DocumentsAPI = {
+      ...memory.api,
+      resolveWorkspace: async (input) => {
+        if (input.workspaceId === secondary.workspaceId) throw new Error('secondary root disconnected');
+        return memory.api.resolveWorkspace(input);
+      },
+    };
+    const registry = new DocumentRegistry({ documents, getGeneration: () => 1, recoverySessionId: 'offline-recovery' });
+    try {
+      const opened = await registry.open(primary);
+      expect(opened.status).toBe('ready');
+      expect(opened.buffer).toBe('readable disk\n');
+      expect(opened.errorMessage).toContain('could not be checked');
+      expect(memory.journals.size).toBe(1);
+    } finally {
+      await registry.dispose();
+    }
+  });
+
+  test('rechecks a reconnecting alias recovery draft against current disk before exposing it', async () => {
+    const memory = createMemoryDocuments();
+    const primary = { workspaceId: 'primary', resourceId: 'child/reconnect.txt' };
+    const secondary = { workspaceId: 'secondary', resourceId: 'reconnect.txt' };
+    memory.coordinationOverrides.set(`${primary.workspaceId}\0${primary.resourceId}`, 'reconnect-physical-file');
+    memory.coordinationOverrides.set(`${secondary.workspaceId}\0${secondary.resourceId}`, 'reconnect-physical-file');
+    memory.files.set('reconnect-physical-file', { content: 'original disk\n', revision: 'd1_original' });
+    await memory.api.writeRecoveryJournal({
+      token: { workspaceId: secondary.workspaceId, epoch: 1, owner: { kind: 'test', id: 'recovery' } },
+      workspaceId: secondary.workspaceId,
+      recoverySessionId: 'reconnect-recovery',
+      resource: secondary,
+      content: 'old secondary draft\n',
+      encoding: 'utf-8', bom: false, baseRevision: 'd1_original', expectedRevision: null,
+    });
+    let secondaryOnline = false;
+    const documents: DocumentsAPI = {
+      ...memory.api,
+      resolveResourceIdentity: async (resource) => {
+        const result = await memory.api.resolveResourceIdentity(resource);
+        return secondaryOnline ? result : { ...result, aliases: result.aliases.filter((alias) => alias.workspaceId !== secondary.workspaceId) };
+      },
+      resolveWorkspace: async (input) => {
+        if (!secondaryOnline && input.workspaceId === secondary.workspaceId) throw new Error('secondary root offline');
+        return memory.api.resolveWorkspace(input);
+      },
+    };
+    const registry = new DocumentRegistry({ documents, getGeneration: () => 1, recoverySessionId: 'reconnect-recovery' });
+    try {
+      const opened = await registry.open(primary);
+      expect(opened.status).toBe('ready');
+      registry.applyTransaction(primary, 'new primary edit\n', { origin: 'editor' });
+      await registry.save(primary);
+      expect(memory.files.get('reconnect-physical-file')?.content).toBe('new primary edit\n');
+      expect(memory.journals.size).toBe(1);
+
+      secondaryOnline = true;
+      const reconnected = await registry.open(secondary);
+      expect(reconnected.status).toBe('error');
+      expect(reconnected.errorMessage).toContain('older disk revision');
+      expect(reconnected.buffer).toBe('new primary edit\n');
+      expect(memory.files.get('reconnect-physical-file')?.content).toBe('new primary edit\n');
+      expect(memory.journals.size).toBe(1);
+    } finally {
+      await registry.dispose();
+    }
+  });
+
+  test('captures a dirty file through its live alias after a secondary project root goes offline', async () => {
+    const memory = createMemoryDocuments();
+    const primary = { workspaceId: 'primary', resourceId: 'child/draft.txt' };
+    const secondary = { workspaceId: 'secondary', resourceId: 'draft.txt' };
+    for (const alias of [primary, secondary]) {
+      memory.coordinationOverrides.set(`${alias.workspaceId}\0${alias.resourceId}`, 'one-physical-draft');
+    }
+    memory.files.set('one-physical-draft', { content: 'disk\n', revision: 'd1_disk' });
+    let secondaryOnline = true;
+    const captures: Array<Parameters<NonNullable<DocumentsAPI['captureAgentInputSnapshot']>>[0]> = [];
+    const documents: DocumentsAPI = {
+      ...memory.api,
+      resolveResourceIdentity: async (resource) => {
+        if (!secondaryOnline && resource.workspaceId === secondary.workspaceId) throw new Error('secondary root offline');
+        const resolved = await memory.api.resolveResourceIdentity(resource);
+        return secondaryOnline ? resolved : {
+          ...resolved,
+          aliases: resolved.aliases.filter((alias) => alias.workspaceId !== secondary.workspaceId),
+        };
+      },
+      captureAgentInputSnapshot: async (request) => {
+        captures.push(request);
+        return {
+          source: 'surface',
+          roots: [{ workspaceId: primary.workspaceId, dirtyPaths: [primary.resourceId] }],
+          snapshot: { status: 'ready', ref: 'live-alias-capture' },
+        };
+      },
+    };
+    const registry = new DocumentRegistry({ documents, getGeneration: () => 1, recoverySessionId: 'offline-alias-capture' });
+    try {
+      await registry.open(primary);
+      await registry.open(secondary);
+      registry.applyTransaction(primary, 'unsaved\n', { origin: 'editor' });
+      secondaryOnline = false;
+      const context = await registry.captureAgentInputContext('session-1');
+      expect(context).toEqual({
+        source: 'surface',
+        roots: [{ workspaceId: primary.workspaceId, dirtyPaths: [primary.resourceId] }],
+        snapshot: { status: 'ready', ref: 'live-alias-capture' },
+      });
+      expect(captures[0]?.resources.map((resource) => resource.resource)).toEqual([primary]);
+    } finally {
+      await registry.dispose();
+    }
+  });
+
+  test('rekeys a moved shared file while retaining one buffer for its new project aliases', async () => {
+    const memory = createMemoryDocuments();
+    const oldParent = { workspaceId: 'parent', resourceId: 'child/old.txt' };
+    const oldChild = { workspaceId: 'child', resourceId: 'old.txt' };
+    const newParent = { workspaceId: 'parent', resourceId: 'child/new.txt' };
+    const newChild = { workspaceId: 'child', resourceId: 'new.txt' };
+    for (const alias of [oldParent, oldChild]) memory.coordinationOverrides.set(`${alias.workspaceId}\0${alias.resourceId}`, 'old-physical');
+    for (const alias of [newParent, newChild]) memory.coordinationOverrides.set(`${alias.workspaceId}\0${alias.resourceId}`, 'new-physical');
+    memory.files.set('old-physical', { content: 'disk\n', revision: 'd1_disk' });
+    const registry = new DocumentRegistry({ documents: memory.api, getGeneration: () => 1, recoverySessionId: 'shared-move' });
+    try {
+      const first = await registry.open(oldParent);
+      await registry.open(oldChild);
+      registry.handleWatchEvent({
+        sourceId: 'test', generation: 1, kind: 'moved', sequence: 1,
+        from: oldParent, resource: newParent,
+      });
+      for (let attempt = 0; attempt < 20 && !registry.get(newChild); attempt += 1) {
+        await new Promise((resolve) => setTimeout(resolve, 0));
+      }
+      expect(registry.get(newParent)?.documentInstanceId).toBe(first.documentInstanceId);
+      expect(registry.get(newChild)).toBe(registry.get(newParent));
+      expect(registry.get(oldParent)).toBeUndefined();
+      expect(registry.get(oldChild)).toBeUndefined();
+    } finally {
+      await registry.dispose();
+    }
+  });
+
+  test('captures dirty files from distinct roots in one turn', async () => {
+    const memory = createMemoryDocuments();
+    const first = { workspaceId: 'project-a', resourceId: 'same.txt' };
+    const second = { workspaceId: 'project-b', resourceId: 'same.txt' };
+    memory.files.set(`${first.workspaceId}\0${first.resourceId}`, { content: 'A disk\n', revision: 'd1_a' });
+    memory.files.set(`${second.workspaceId}\0${second.resourceId}`, { content: 'B disk\n', revision: 'd1_b' });
+    const captures: Array<Parameters<NonNullable<DocumentsAPI['captureAgentInputSnapshot']>>[0]> = [];
+    const documents: DocumentsAPI = {
+      ...memory.api,
+      captureAgentInputSnapshot: async (request) => {
+        captures.push(request);
+        return {
+          source: 'surface',
+          roots: [
+            { workspaceId: first.workspaceId, dirtyPaths: [first.resourceId] },
+            { workspaceId: second.workspaceId, dirtyPaths: [second.resourceId] },
+          ],
+          snapshot: { status: 'ready', ref: 'two-root-ref' },
+        };
+      },
+    };
+    const registry = new DocumentRegistry({ documents, getGeneration: () => 1, recoverySessionId: 'two-root-test' });
+    try {
+      await Promise.all([registry.open(first), registry.open(second)]);
+      registry.applyTransaction(first, 'A draft\n', { origin: 'editor-a' });
+      registry.applyTransaction(second, 'B draft\n', { origin: 'editor-b' });
+      const context = await registry.captureAgentInputContext('two-root-session');
+      expect(context).toEqual({
+        source: 'surface',
+        roots: [
+          { workspaceId: first.workspaceId, dirtyPaths: [first.resourceId] },
+          { workspaceId: second.workspaceId, dirtyPaths: [second.resourceId] },
+        ],
+        snapshot: { status: 'ready', ref: 'two-root-ref' },
+      });
+      expect(captures).toHaveLength(1);
+      expect(captures[0]?.resources.map((entry) => [entry.resource.workspaceId, entry.content])).toEqual([
+        [first.workspaceId, 'A draft\n'],
+        [second.workspaceId, 'B draft\n'],
+      ]);
+    } finally {
+      await registry.dispose();
+    }
+  });
+
+  test('shares one dirty buffer across parent and child project aliases', async () => {
+    const memory = createMemoryDocuments();
+    const { api, coordinationOverrides, files, waitForDirtyPublication } = memory;
+    const parent = { workspaceId: 'parent', resourceId: 'child/shared.txt' };
+    const child = { workspaceId: 'child', resourceId: 'shared.txt' };
+    coordinationOverrides.set(`${parent.workspaceId}\0${parent.resourceId}`, 'physical-file');
+    coordinationOverrides.set(`${child.workspaceId}\0${child.resourceId}`, 'physical-file');
+    files.set('physical-file', { content: 'base\n', revision: 'd1_1' });
+    const captures: Array<Parameters<NonNullable<DocumentsAPI['captureAgentInputSnapshot']>>[0]> = [];
+    const scopedWatches = new Map<string, Set<(event: VarinDocumentWatchEvent) => void>>();
+    const surface: DocumentsAPI = {
+      ...api,
+      watch: (workspaceId, listener) => {
+        const listeners = scopedWatches.get(workspaceId) ?? new Set();
+        listeners.add(listener);
+        scopedWatches.set(workspaceId, listeners);
+        return { close: () => { listeners.delete(listener); } };
+      },
+      captureAgentInputSnapshot: async (request) => {
+        captures.push(request);
+        return {
+          source: 'surface',
+          roots: [...new Set(request.resources.map((item) => item.resource.workspaceId))].map((workspaceId) => ({
+            workspaceId,
+            dirtyPaths: request.resources.filter((item) => item.resource.workspaceId === workspaceId)
+              .map((item) => item.resource.resourceId),
+          })),
+          snapshot: { status: 'ready', ref: `alias-capture-${captures.length}` },
+        };
+      },
+    };
+    const registry = new DocumentRegistry({ documents: surface, getGeneration: () => 1, recoverySessionId: 'alias-test' });
+    try {
+      const first = await registry.open(parent);
+      const second = await registry.open(child);
+      expect(second.documentInstanceId).toBe(first.documentInstanceId);
+      expect(registry.get(parent)).toBe(registry.get(child));
+
+      registry.applyTransaction(child, 'edited\n', { origin: 'child-editor' });
+      expect(registry.get(parent)?.buffer).toBe('edited\n');
+      expect(registry.dirtyResourceIds(parent.workspaceId).has(parent.resourceId)).toBe(true);
+      expect(registry.dirtyResourceIds(child.workspaceId).has(child.resourceId)).toBe(true);
+      await waitForDirtyPublication((publication) => publication.workspaceId === child.workspaceId
+        && publication.resources[0]?.resource.resourceId === child.resourceId);
+      const childContext = await registry.captureAgentInputContext('child-session');
+      expect(childContext.source).toBe('surface');
+      if (childContext.source !== 'surface') throw new Error('Expected child draft');
+      expect(childContext.roots).toEqual([
+        { workspaceId: child.workspaceId, dirtyPaths: [child.resourceId] },
+        { workspaceId: parent.workspaceId, dirtyPaths: [parent.resourceId] },
+      ]);
+      expect(captures[0]?.resources[0]?.resource).toEqual(child);
+      const parentContext = await registry.captureAgentInputContext('parent-session');
+      expect(parentContext.source).toBe('surface');
+      if (parentContext.source !== 'surface') throw new Error('Expected parent draft');
+      expect(parentContext.roots).toEqual(childContext.roots);
+      const before = registry.get(child)!;
+      memory.setSurfaceOperation({
+        action: 'apply',
+        operationId: 'shared-surface-edit',
+        requestId: 'shared-surface-request',
+        workspaceId: child.workspaceId,
+        targets: [{
+          resource: child,
+          documentInstanceId: before.documentInstanceId,
+          baseRevision: before.baseRevision,
+          localEditRevision: before.localEditRevision,
+          bufferHash: await hashText(before.buffer),
+          encoding: before.encoding,
+          bom: before.bom,
+          lineEnding: before.lineEnding,
+          newText: 'surface-edited\n',
+        }],
+      });
+      for (const listener of scopedWatches.get(child.workspaceId) ?? []) {
+        listener({ kind: 'surface-operation', action: 'apply', operationId: 'shared-surface-edit', requestId: 'shared-surface-request', workspaceId: child.workspaceId });
+      }
+      for (let attempt = 0; attempt < 20 && memory.surfaceCompletions.length === 0; attempt += 1) {
+        await new Promise((resolve) => setTimeout(resolve, 0));
+      }
+      expect(memory.surfaceCompletions[0]?.resources[0]?.resource).toEqual(child);
+      expect(memory.surfaceCompletions[0]?.resources[0]?.status).toBe('applied');
+      expect(registry.get(parent)?.buffer).toBe('surface-edited\n');
+      await registry.save(child);
+      expect(files.get('physical-file')?.content).toBe('surface-edited\n');
+      expect(registry.dirtyResourceIds(parent.workspaceId).size).toBe(0);
+      expect(registry.dirtyResourceIds(child.workspaceId).size).toBe(0);
+    } finally {
+      await registry.dispose();
+    }
+  });
+
   test('disposal waits for the final dirty journal and owner release before Host teardown', async () => {
     const memory = createMemoryDocuments();
     let releaseJournal!: () => void;
@@ -299,8 +671,7 @@ describe('DocumentRegistry', () => {
         captures.push(request);
         return {
           source: 'surface' as const,
-          workspaceId: request.workspaceId,
-          dirtyPaths: request.resources.map((entry) => entry.resource.resourceId),
+          roots: [{ workspaceId: identity.workspaceId, dirtyPaths: request.resources.map((entry) => entry.resource.resourceId) }],
           snapshot: { status: 'ready' as const, ref: 'surface-capture' },
         };
       },
@@ -309,11 +680,10 @@ describe('DocumentRegistry', () => {
     await registry.open(identity);
     registry.applyTransaction(identity, 'edited\nnext\n', { origin: 'test' });
 
-    const captured = await registry.captureAgentInputContext('session-1', identity.workspaceId);
+    const captured = await registry.captureAgentInputContext('session-1');
     expect(captured).toEqual({
       source: 'surface',
-      workspaceId: identity.workspaceId,
-      dirtyPaths: [identity.resourceId],
+      roots: [{ workspaceId: identity.workspaceId, dirtyPaths: [identity.resourceId] }],
       snapshot: { status: 'ready', ref: 'surface-capture' },
     });
     expect(captures).toHaveLength(1);
@@ -657,14 +1027,18 @@ describe('DocumentRegistry', () => {
     await api.write({ token: mutationToken(), resource: identity, content: 'v1', encoding: 'utf-8', bom: false, expectedRevision: null, operationId: '1' });
     let generation = 1;
     let finishRead: ((value: VarinDocumentReadResult) => void) | undefined;
+    let notifyReadStarted!: () => void;
+    const readStarted = new Promise<void>((resolve) => { notifyReadStarted = resolve; });
     const gated: DocumentsAPI = {
       ...api,
       read: () => new Promise((resolve) => {
         finishRead = resolve;
+        notifyReadStarted();
       }),
     };
     const registry = new DocumentRegistry({ documents: gated, getGeneration: () => generation, recoverySessionId: 'session' });
     const pending = registry.open(identity);
+    await readStarted;
     generation = 2;
     finishRead?.({
       status: 'ready',

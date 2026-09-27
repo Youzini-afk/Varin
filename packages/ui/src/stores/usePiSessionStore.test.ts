@@ -2290,12 +2290,17 @@ describe('Pi session store', () => {
     const captures: VarinAgentInputSnapshotCaptureRequest[] = [];
     const releases: Array<{ sessionId: string; context: unknown }> = [];
     const documents = {
+      resolveResourceIdentity: async (resource: { workspaceId: string; resourceId: string }) => ({ coordinationId: `host-1\0${resource.workspaceId}\0${resource.resourceId}`, aliases: [resource] }),
       captureAgentInputSnapshot: async (request: VarinAgentInputSnapshotCaptureRequest) => {
         captures.push(request);
         return {
           source: 'surface' as const,
-          workspaceId,
-          dirtyPaths: request.resources.map((resource) => resource.resource.resourceId),
+          roots: [...new Set(request.resources.map((resource) => resource.resource.workspaceId))].map((rootId) => ({
+            workspaceId: rootId,
+            dirtyPaths: request.resources
+              .filter((resource) => resource.resource.workspaceId === rootId)
+              .map((resource) => resource.resource.resourceId),
+          })),
           snapshot: { status: 'ready' as const, ref: `opaque-snapshot-ref-${captures.length}` },
         };
       },
@@ -2356,8 +2361,7 @@ describe('Pi session store', () => {
     const runtimeParams = runtime.calls.find((call) => call.method === 'agent.prompt')?.params as Record<string, unknown>;
     expect(runtimeParams.inputContext).toEqual({
       source: 'surface',
-      workspaceId,
-      dirtyPaths: ['draft.ts'],
+      roots: [{ workspaceId, dirtyPaths: ['draft.ts'] }],
       snapshot: { status: 'ready', ref: 'opaque-snapshot-ref-1' },
     });
     expect(JSON.stringify(runtimeParams)).not.toContain('private dirty-only phrase');
@@ -2376,8 +2380,7 @@ describe('Pi session store', () => {
       sessionId: 'session-a',
       context: {
         source: 'surface',
-        workspaceId,
-        dirtyPaths: ['draft.ts'],
+        roots: [{ workspaceId, dirtyPaths: ['draft.ts'] }],
         snapshot: { status: 'ready', ref: 'opaque-snapshot-ref-2' },
       },
     });

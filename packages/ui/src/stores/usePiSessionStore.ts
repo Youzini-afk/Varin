@@ -808,11 +808,7 @@ export const createPiSessionStore = (
     );
 
     const captureInputContext = async (sessionId: string): Promise<AgentInputContext> => {
-      const state = get();
-      const workspace = state.records[sessionId]?.snapshot?.workspace
-        ?? state.summaries.find((summary) => summary.id === sessionId)?.workspace;
-      if (workspace?.kind !== 'workspace') return { source: 'disk' };
-      return captureSurfaceAgentInputContext(sessionId, workspace.authorityId ?? workspace.id);
+      return captureSurfaceAgentInputContext(sessionId);
     };
 
     const commitError = (runtimeKey: string, error: unknown): void => {

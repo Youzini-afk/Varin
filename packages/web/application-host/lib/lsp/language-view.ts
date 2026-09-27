@@ -49,7 +49,7 @@ export function createLanguageViewBinder(deps: LanguageViewBinderDeps) {
   ): Promise<{ content: string; revision: string; source: LanguageTextSource } | { status: 'unavailable'; message: string }> => {
     const resource = { workspaceId: input.workspaceId, resourceId: input.resourceId };
     if (input.text === 'input-context' && input.sessionId && input.inputContext) {
-      const draft = deps.documents.readAgentInputSnapshot(input.sessionId, input.inputContext, input.resourceId);
+      const draft = deps.documents.readAgentInputSnapshot(input.sessionId, input.inputContext, input.resourceId, input.workspaceId);
       if (draft.status === 'unavailable') return draft;
       if (draft.status === 'ready') {
         return { content: draft.content, revision: draft.revision, source: 'surface-draft' };

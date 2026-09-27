@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
+import { access, mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 import { test } from "node:test";
@@ -284,6 +284,31 @@ test("a missing child cwd leaves no failed session worker behind", async () => {
   } finally {
     await broker.dispose();
     await rm(root, { force: true, recursive: true });
+  }
+});
+
+test("an existing session opens when its historical cwd is offline", async () => {
+  const root = await mkdtemp(join(tmpdir(), "varin-worker-cwd-offline-"));
+  const catalogCwd = join(root, "catalog");
+  const sessionCwd = join(root, "removed-project");
+  await Promise.all([mkdir(catalogCwd), mkdir(sessionCwd)]);
+  const broker = createBroker({ agentDir: join(root, "agent"), catalogCwd });
+  try {
+    const created = await broker.createSession(sessionCwd);
+    assert.ok(created.sessionFile);
+    await writeSessionHeader(created.sessionFile, { cwd: sessionCwd, sessionId: created.sessionId });
+    await broker.closeSession(created.sessionId);
+    await rm(sessionCwd, { recursive: true, force: true });
+
+    const reopened = await broker.openSession({ sessionFile: created.sessionFile });
+    assert.equal(reopened.cwd, resolve(sessionCwd));
+    assert.deepEqual(broker.activeSessionIds, [created.sessionId]);
+    const snapshot = await broker.requestForSession(created.sessionId, "session.snapshot", { sessionId: created.sessionId });
+    assert.equal(snapshot.cwd, resolve(sessionCwd));
+    await assert.rejects(access(sessionCwd), { code: "ENOENT" });
+  } finally {
+    await broker.dispose();
+    await rm(root, { recursive: true, force: true });
   }
 });
 

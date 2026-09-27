@@ -145,8 +145,7 @@ describe("thread services", () => {
     } as never);
     const inputContext: AgentInputContext = {
       source: "surface",
-      workspaceId: "workspace-1",
-      dirtyPaths: ["draft.ts"],
+      roots: [{ workspaceId: "workspace-1", dirtyPaths: ["draft.ts"] }],
       snapshot: { status: "ready", ref: "snapshot-ref" },
     };
     try {
@@ -178,8 +177,7 @@ describe("thread services", () => {
     try {
       const result = await service.handle({ preset: "hard-implement", task: "Use the draft" }, serviceContext({
         source: "surface",
-        workspaceId: "workspace-1",
-        dirtyPaths: ["draft.ts"],
+        roots: [{ workspaceId: "workspace-1", dirtyPaths: ["draft.ts"] }],
         snapshot: { status: "ready", ref: "snapshot-ref" },
       }));
       await vi.waitFor(async () => {
@@ -207,8 +205,7 @@ describe("thread services", () => {
     try {
       await expect(service.handle({ preset: "hard-implement", task: "Use the draft" }, serviceContext({
         source: "surface",
-        workspaceId: "workspace-1",
-        dirtyPaths: ["draft.ts"],
+        roots: [{ workspaceId: "workspace-1", dirtyPaths: ["draft.ts"] }],
         snapshot: { status: "unavailable", reason: "surface-unavailable" },
       }))).rejects.toMatchObject({ harnessCode: "unavailable" });
       expect(await registry.listThreads("workspace-1", { kind: "session", id: "parent-1" })).toEqual([]);
@@ -235,8 +232,7 @@ describe("thread services", () => {
         model: { providerId: "anthropic", modelId: "haiku" },
       }, serviceContext({
         source: "surface",
-        workspaceId: "workspace-1",
-        dirtyPaths: [],
+        roots: [{ workspaceId: "workspace-1", dirtyPaths: [] }],
         snapshot: { status: "ready", ref: "empty-snapshot" },
       }));
       const thread = await registry.getThread("workspace-1", { kind: "session", id: "parent-1" }, result.threadId);
@@ -457,8 +453,7 @@ describe("thread services", () => {
     } as never);
     await expect(service.handle({ preset: "hard-implement", task: "Use the draft" }, serviceContext({
       source: "surface",
-      workspaceId: "workspace-1",
-      dirtyPaths: ["draft.ts"],
+      roots: [{ workspaceId: "workspace-1", dirtyPaths: ["draft.ts"] }],
       snapshot: { status: "ready", ref: "snapshot-ref" },
     }))).rejects.toThrow("catalog write failed");
     expect(cleanup).toHaveBeenCalledOnce();
@@ -705,19 +700,50 @@ describe("thread services", () => {
           workBranchId: "branch-1", worktree: null,
         }),
         getActiveRun: async () => ({ outcome: "success" }),
+        setIntegration: vi.fn(async () => undefined),
       },
       agentInputSurfaceOwner: owner,
       threadApplyWorktreeDiff: apply,
     } as never);
-    const ctx = serviceContext({ source: "surface", workspaceId: "workspace-1", dirtyPaths: ["draft.ts"], snapshot: { status: "ready", ref: "source-ref" } });
+    const ctx = serviceContext({ source: "surface", roots: [{ workspaceId: "workspace-1", dirtyPaths: ["draft.ts"] }], snapshot: { status: "ready", ref: "source-ref" } });
     const result = await service.handle({ threadId: "thread-1" }, ctx);
-    expect(owner).toHaveBeenCalledWith("parent-1", ctx.inputContext);
+    expect(owner).toHaveBeenCalledWith("parent-1", ctx.inputContext, "workspace-1");
     expect(apply).toHaveBeenCalledWith("workspace-1", { kind: "session", id: "parent-1" }, "thread-1", undefined, undefined, {
       sourceOwner: { ownerId: "originating-editor", generation: 2 }, signal: ctx.signal,
     });
     expect(result.surfaceTargetPaths).toEqual(["draft.ts"]);
     expect(result.text).toContain("Editor drafts updated without saving: draft.ts");
     expect(result.text).toContain("Disk-based commands still read the saved files");
+  });
+
+  it("does not bind an unrelated editor draft as the merge target surface", async () => {
+    const apply = vi.fn(async () => ({
+      merged: 1, conflicts: [], status: "applied", appliedPaths: ["result.ts"], changedFiles: ["result.ts"],
+      resultRevision: 1, operationId: "integration-2",
+    }));
+    const owner = vi.fn();
+    const service = createThreadMergeService({
+      threadRegistry: {
+        getThread: async () => ({
+          id: "thread-1", integration: "merge-ready", lifecycle: "settled", resultRevision: 1,
+          workBranchId: "branch-1", worktree: null,
+        }),
+        getActiveRun: async () => ({ outcome: "success" }),
+        setIntegration: vi.fn(async () => undefined),
+      },
+      agentInputSurfaceOwner: owner,
+      threadApplyWorktreeDiff: apply,
+    } as never);
+    const ctx = serviceContext({
+      source: "surface",
+      roots: [{ workspaceId: "another-project", dirtyPaths: ["draft.ts"] }],
+      snapshot: { status: "ready", ref: "external-ref" },
+    });
+    await service.handle({ threadId: "thread-1" }, ctx);
+    expect(owner).not.toHaveBeenCalled();
+    expect(apply).toHaveBeenCalledWith("workspace-1", { kind: "session", id: "parent-1" }, "thread-1", undefined, undefined, {
+      signal: ctx.signal,
+    });
   });
 
   it("accepts relative scope names that contain consecutive dots through dispatch", async () => {
@@ -805,8 +831,7 @@ describe("thread services", () => {
       }, {
         ...serviceContext({
           source: "surface",
-          workspaceId: "workspace-1",
-          dirtyPaths: ["draft.ts"],
+          roots: [{ workspaceId: "workspace-1", dirtyPaths: ["draft.ts"] }],
           snapshot: { status: "ready", ref: "snapshot-ref" },
         }),
         sessionId: "scoped-session",

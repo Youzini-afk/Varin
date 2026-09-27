@@ -116,7 +116,28 @@ describe("workspace search routes", () => {
     expect(fileSearch.searchFilesystemFiles.mock.calls[0]?.[1]).not.toHaveProperty("limit");
   });
 
-  it("rejects a directory outside the resolved workspace before native file search", async () => {
+  it("searches an explicitly selected directory outside the active project", async () => {
+    const fileSearch = { searchFilesystemFiles: vi.fn(async () => files("external.ts")) };
+    const app = express();
+    app.use(express.json());
+    registerWorkspaceSearchRoutes(app, {
+      contentSearch: { searchContent: async () => ({ status: "empty", generation: 0 }) } as never,
+      fileSearch: fileSearch as never,
+      path,
+      os,
+      resolveProjectDirectory: async () => ({ resolved: path.resolve("/workspace") }),
+      authorizeSearchDirectory: async () => true,
+    });
+
+    const found = await request(app)
+      .get("/api/find/file")
+      .query({ query: "x", directory: path.resolve("/outside") })
+      .expect(200);
+    expect(found.body).toEqual(["external.ts"]);
+    expect(fileSearch.searchFilesystemFiles).toHaveBeenCalledWith(path.resolve("/outside"), expect.objectContaining({ query: "x" }));
+  });
+
+  it("rejects directories outside the configured Host roots", async () => {
     const fileSearch = { searchFilesystemFiles: vi.fn(async () => files("should-not-run.ts")) };
     const app = express();
     app.use(express.json());
@@ -126,6 +147,7 @@ describe("workspace search routes", () => {
       path,
       os,
       resolveProjectDirectory: async () => ({ resolved: path.resolve("/workspace") }),
+      authorizeSearchDirectory: async () => false,
     });
 
     await request(app)

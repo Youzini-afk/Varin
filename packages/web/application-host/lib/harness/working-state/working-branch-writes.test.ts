@@ -156,11 +156,11 @@ async function fixture() {
     respond: async (_sessionId, _requestId, result) => { response = result; },
   });
   router.register("document.readSource", createDocumentReadSourceService({
-    documentReadSource: async (sessionId, _context, resourceId) => {
-      const result = await lookups.readSource(sessionId, resourceId);
-      if (!result) throw new Error("working-branch read source is unbound");
-      return result;
+    documentReadSource: async (sessionId, _context, resourceId, targetWorkspaceId) => {
+      const result = await lookups.readSource(sessionId, resourceId, targetWorkspaceId);
+      return result ?? documents.readAgentInputSnapshot(sessionId, { source: "disk" }, resourceId, targetWorkspaceId);
     },
+    readAuthorizedDiskFile: (ctx, authorized) => paths.readAuthorizedFile(ctx.actor, authorized, ctx.signal),
   }));
   router.register("document.branchWrite", createDocumentBranchWriteService({
     documentBranchWrite: (sessionId, changes, expectedRevision) => writes.branchWrite(sessionId, changes, expectedRevision),
@@ -215,6 +215,28 @@ async function fixture() {
 }
 
 describe("WorkingState Host virtual write production chain", () => {
+  it("does not confuse an external same-name file with the isolated branch file", async () => {
+    const f = await fixture();
+    const external = path.join(path.dirname(f.workspace), "external");
+    await fs.mkdir(external);
+    const externalFile = path.join(external, "kept.txt");
+    await fs.writeFile(externalFile, "external kept\n");
+
+    const read = await f.request("document.readSource", { path: externalFile });
+    expect(read).toEqual({ ok: true, result: { source: "disk", base64: Buffer.from("external kept\n").toString("base64") } });
+
+    const write = await f.request("document.branchWrite", {
+      path: externalFile,
+      action: "write",
+      content: "wrong target\n",
+    });
+    expect(write).toMatchObject({ ok: true, result: { status: "rejected" } });
+    expect(await fs.readFile(externalFile, "utf8")).toBe("external kept\n");
+    expect(await fs.readFile(path.join(f.workspace, "kept.txt"), "utf8")).toBe("fixed kept\n");
+    const branch = await f.writes.branchWrite("session-a", [{ workspaceId: f.workspaceId, resourceId: "kept.txt", action: "edit", edits: [{ oldText: "fixed kept", newText: "branch kept" }] }]);
+    expect(branch.status).toBe("committed");
+  });
+
   it("commits child writes without touching the parent disk and keeps sibling branches isolated", async () => {
     const f = await fixture();
     const wrote = await f.request("document.branchWrite", {
@@ -373,6 +395,7 @@ describe("WorkingState Host virtual write production chain", () => {
     const controller = new AbortController();
     await f.writeGate.beginSwitch("session-a");
     const write = f.writes.branchWrite("session-a", [{
+      workspaceId: f.workspaceId,
       resourceId: "kept.txt",
       action: "write",
       content: "after switch\n",

@@ -30,7 +30,7 @@ import {
   normalizeFrozenHarnessPermissions,
   threadIntegrationBindingFromPreview,
 } from "@varin/protocol";
-import { parseThreadScopePath, scopePathContainedBy } from "./thread-nesting.js";
+import { scopePathContainedBy } from "./thread-nesting.js";
 import { isSessionScopeId, sessionScopeId } from "./owner-scope.js";
 import {
   assembleKeepReasons,
@@ -61,6 +61,7 @@ import {
   type MaterializationSwitchJournal,
 } from "./working-state/materialization-switch.js";
 import { encodeDocumentText } from "../documents/inspect.js";
+import type { SurfaceSnapshotCloneResult } from "../documents/surface-snapshot-store.js";
 import { normalizePathIdentity } from "../workspace/path-safety.js";
 import { sameState } from "../recovery/journal-files.js";
 import type { VerificationCoordinator } from "./verification-coordinator.js";
@@ -155,23 +156,7 @@ export interface ThreadRuntimeOptions {
   workingStates?: WorkspaceWorkingStateRootAccess | undefined;
   executionViews?: ThreadExecutionViewRegistry | undefined;
   virtualWriteGate?: VirtualWriteGate | undefined;
-  cloneAgentInputSnapshot?(sessionId: string, context: AgentInputContext):
-    | { status: "disk" }
-    | { status: "unavailable"; message: string }
-    | {
-        status: "ready";
-        workspaceId: string;
-        supersededPaths: string[];
-        resources: Array<{
-          baseRevision: string | null;
-          encoding: string;
-          bom: boolean;
-          content: string;
-          localEditRevision: number;
-          resource: { workspaceId: string; resourceId: string };
-          revision: string;
-        }>;
-      };
+  cloneAgentInputSnapshot?(sessionId: string, context: AgentInputContext): SurfaceSnapshotCloneResult;
   resolveIntegrationCoordinator?(workspaceId: string): Promise<(Pick<IntegrationCoordinator, "mergeResult" | "previewResult" | "undoIntegration" | "invalidateWorkspace"> & Partial<Pick<IntegrationCoordinator, "invalidateThread">>) | null> | (Pick<IntegrationCoordinator, "mergeResult" | "previewResult" | "undoIntegration" | "invalidateWorkspace"> & Partial<Pick<IntegrationCoordinator, "invalidateThread">>) | null;
   canReclaimWorktree?(workspaceId: string, threadId: string, path: string): Promise<{ safe: boolean; reason?: string; release?: () => Promise<void> }>;
   hasActiveCommands?(directory: string): boolean | Promise<boolean>;
@@ -1645,14 +1630,8 @@ export function createThreadRuntime(options: ThreadRuntimeOptions) {
   ): Promise<CapturedThreadDraftBaseline> => {
     const empty = { draftBaselineId: null, cleanup: async () => undefined };
     if (context.source === "disk") return empty;
-    if (context.workspaceId !== workspaceId) {
-      throw new ThreadRuntimeError("unavailable", "The editor source snapshot belongs to a different workspace");
-    }
     if (context.snapshot.status === "unavailable") {
-      if (context.dirtyPaths.length > 0) {
-        throw new ThreadRuntimeError("unavailable", "The editor source snapshot is unavailable for dirty documents");
-      }
-      return empty;
+      throw new ThreadRuntimeError("unavailable", "The editor source snapshot is unavailable; dirty documents cannot be safely inherited");
     }
     if (!options.cloneAgentInputSnapshot) {
       throw new ThreadRuntimeError("unavailable", "The application host cannot clone editor source snapshots");
@@ -1663,27 +1642,40 @@ export function createThreadRuntime(options: ThreadRuntimeOptions) {
         ? cloned.message
         : "The editor source snapshot is unavailable");
     }
-    const requestedPaths = [...context.dirtyPaths].sort();
+    const targetResources = cloned.resources.filter((resource) => resource.resource.workspaceId === workspaceId);
+    const targetByCoordinationId = new Map(targetResources
+      .filter((resource) => resource.coordinationId)
+      .map((resource) => [resource.coordinationId!, resource]));
+    // Multiple project roots can name the same physical editor buffer. Only
+    // the target root is materialized in this child's worktree; other active
+    // drafts must be proven aliases of those exact bytes before we omit them.
+    const externalDraft = cloned.resources.find((resource) => {
+      if (resource.resource.workspaceId === workspaceId) return false;
+      const target = resource.coordinationId && targetByCoordinationId.get(resource.coordinationId);
+      return !target || target.content !== resource.content;
+    });
+    if (externalDraft) {
+      throw new ThreadRuntimeError("unavailable", "The editor source includes an external draft that this isolated child cannot inherit as one fixed worktree");
+    }
+    const requestedPaths = [...(context.roots.find((root) => root.workspaceId === workspaceId)?.dirtyPaths ?? [])].sort();
     // A path written during this turn is answered from disk, which the Run
     // materializes anyway; overlaying its older draft would undo that write.
     // Completeness is still verified: every requested path must be accounted
     // for as either a cloned draft or a superseded one (D-088).
     const clonedPaths = [
-      ...cloned.resources.map((resource) => resource.resource.resourceId),
-      ...cloned.supersededPaths,
+      ...targetResources.map((resource) => resource.resource.resourceId),
+      ...cloned.supersededResources.filter((resource) => resource.workspaceId === workspaceId).map((resource) => resource.resourceId),
     ].sort();
-    if (cloned.workspaceId !== workspaceId
-      || clonedPaths.length !== requestedPaths.length
-      || clonedPaths.some((file, index) => file !== requestedPaths[index])
-      || cloned.resources.some((resource) => resource.resource.workspaceId !== workspaceId)) {
+    if (clonedPaths.length !== requestedPaths.length
+      || clonedPaths.some((file, index) => file !== requestedPaths[index])) {
       throw new ThreadRuntimeError("unavailable", "The editor source snapshot no longer matches the dispatch context");
     }
-    if (cloned.resources.length === 0) return empty;
+    if (targetResources.length === 0) return empty;
     if (!options.workingStates) {
       throw new ThreadRuntimeError("unavailable", "Persistent working state is unavailable for editor drafts");
     }
     const baseline = await options.workingStates.withBranchStore(workspaceId, "thread-draft-baseline-capture", (store) => (
-      store.createDraftBaseline(workspaceId, cloned.resources.map((resource) => ({
+      store.createDraftBaseline(workspaceId, targetResources.map((resource) => ({
         path: resource.resource.resourceId,
         content: encodeDocumentText({
           content: resource.content,
@@ -2068,7 +2060,7 @@ export function createThreadRuntime(options: ThreadRuntimeOptions) {
       }
     }
     const existing = await options.registry.getThread(input.scopeId, input.parent, input.threadId);
-    let sourceRoot = input.kind === "discussion" || isSessionScopeId(input.scopeId)
+    const sourceRoot = input.kind === "discussion" || isSessionScopeId(input.scopeId)
       ? parent.cwd
       : await options.resolveWorkspaceRoot(input.scopeId);
     const effectiveSettings = await resolveEffectiveWorktreeSettings(input.scopeId, input.parent);

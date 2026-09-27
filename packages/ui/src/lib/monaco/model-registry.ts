@@ -1,7 +1,7 @@
 import type { editor } from 'monaco-editor/editor';
 
 import type { DocumentRegistry } from '@/lib/documents/registry';
-import { documentKey, type DocumentChange, type DocumentIdentity, type DocumentRecord } from '@/lib/documents/types';
+import type { DocumentChange, DocumentIdentity, DocumentRecord } from '@/lib/documents/types';
 import { markMonacoPerformance } from './performance';
 import { loadMonacoRuntime, type MonacoRuntime } from './runtime';
 
@@ -21,6 +21,8 @@ export type FileEditorModelSnapshot =
 
 type ModelEntry = {
   applyingRegistryUpdate: boolean;
+  key: string;
+  retired: boolean;
   identity: DocumentIdentity;
   documentInstanceId: string | null;
   documentSubscription: (() => void) | null;
@@ -85,10 +87,14 @@ export class FileEditorModelRegistry {
     this.runtimeKey = options.runtimeKey;
   }
 
+  private keyFor(identity: DocumentIdentity): string {
+    return this.documents.keyFor(identity);
+  }
+
   acquire(identity: DocumentIdentity, ownerId: string): void {
     this.assertActive();
     const previous = this.owners.get(ownerId);
-    if (previous && documentKey(previous.identity) === documentKey(identity)) return;
+    if (previous && this.keyFor(previous.identity) === this.keyFor(identity)) return;
     if (previous) this.release(ownerId);
     const entry = this.ensureEntry(identity);
     entry.owners.add(ownerId);
@@ -114,19 +120,20 @@ export class FileEditorModelRegistry {
   }
 
   subscribe(identity: DocumentIdentity, listener: () => void): () => void {
-    const key = documentKey(identity);
+    const key = this.keyFor(identity);
     const entry = this.entriesByIdentity.get(key);
     const listeners = entry?.listeners ?? this.pendingListeners.get(key) ?? new Set<() => void>();
     listeners.add(listener);
     if (!entry) this.pendingListeners.set(key, listeners);
     return () => {
       listeners.delete(listener);
+      this.entriesByIdentity.get(this.keyFor(identity))?.listeners.delete(listener);
       if (!entry && listeners.size === 0) this.pendingListeners.delete(key);
     };
   }
 
   getSnapshot(identity: DocumentIdentity): FileEditorModelSnapshot {
-    return this.entriesByIdentity.get(documentKey(identity))?.snapshot ?? LOADING_SNAPSHOT;
+    return this.entriesByIdentity.get(this.keyFor(identity))?.snapshot ?? LOADING_SNAPSHOT;
   }
 
   getRecordForModel(model: editor.ITextModel): DocumentRecord | undefined {
@@ -137,7 +144,7 @@ export class FileEditorModelRegistry {
   }
 
   retry(identity: DocumentIdentity): void {
-    const entry = this.entriesByIdentity.get(documentKey(identity));
+    const entry = this.entriesByIdentity.get(this.keyFor(identity));
     if (!entry || entry.model || entry.loading) return;
     this.publish(entry, LOADING_SNAPSHOT);
     this.ensureModel(entry);
@@ -154,11 +161,13 @@ export class FileEditorModelRegistry {
   }
 
   private ensureEntry(identity: DocumentIdentity): ModelEntry {
-    const key = documentKey(identity);
+    const key = this.keyFor(identity);
     const existing = this.entriesByIdentity.get(key);
     if (existing) return existing;
     const entry: ModelEntry = {
       applyingRegistryUpdate: false,
+      key,
+      retired: false,
       identity,
       documentInstanceId: null,
       documentSubscription: null,
@@ -179,12 +188,28 @@ export class FileEditorModelRegistry {
   }
 
   private handleRecord(entry: ModelEntry, record: DocumentRecord): void {
-    if (this.disposed) return;
-    const previousKey = documentKey(entry.identity);
-    const nextKey = documentKey(record.identity);
+    if (this.disposed || entry.retired) return;
+    const previousKey = entry.key;
+    const nextKey = this.keyFor(record.identity);
     if (previousKey !== nextKey) {
+      const shared = this.entriesByIdentity.get(nextKey);
+      if (shared && shared !== entry) {
+        for (const owner of entry.owners) {
+          shared.owners.add(owner);
+          this.owners.set(owner, shared);
+        }
+        entry.owners.clear();
+        for (const listener of entry.listeners) shared.listeners.add(listener);
+        entry.listeners.clear();
+        if (this.entriesByIdentity.get(previousKey) === entry) this.entriesByIdentity.delete(previousKey);
+        this.disposeEntry(entry, false);
+        this.handleRecord(shared, record);
+        for (const listener of shared.listeners) listener();
+        return;
+      }
       if (this.entriesByIdentity.get(previousKey) === entry) this.entriesByIdentity.delete(previousKey);
       this.entriesByIdentity.set(nextKey, entry);
+      entry.key = nextKey;
       entry.identity = record.identity;
     }
     entry.record = record;
@@ -241,6 +266,7 @@ export class FileEditorModelRegistry {
     entry.loading = this.loadRuntime().then((monaco) => {
       if (
         this.disposed
+        || entry.retired
         || entry.documentInstanceId !== expectedInstanceId
         || (!entry.record?.dirty && entry.owners.size === 0)
       ) return;
@@ -326,13 +352,14 @@ export class FileEditorModelRegistry {
   }
 
   private disposeEntry(entry: ModelEntry, removeFromIndex = true): void {
+    entry.retired = true;
     for (const owner of entry.owners) this.owners.delete(owner);
     entry.owners.clear();
     entry.documentSubscription?.();
     entry.documentSubscription = null;
     this.disposeModel(entry);
     if (removeFromIndex) {
-      const key = documentKey(entry.identity);
+      const key = entry.key;
       if (this.entriesByIdentity.get(key) === entry) this.entriesByIdentity.delete(key);
     }
     for (const listener of entry.listeners) listener();

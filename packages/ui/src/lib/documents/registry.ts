@@ -313,6 +313,9 @@ export class DocumentRegistry {
   private readonly records = new Map<string, DocumentRecord>();
   private readonly openOperations = new Map<string, Promise<DocumentRecord>>();
   private readonly listeners = new Map<string, Set<DocumentListener>>();
+  private readonly coordinationByAlias = new Map<string, string>();
+  private readonly aliasesByCoordination = new Map<string, Map<string, DocumentIdentity>>();
+  private readonly availableAliases = new Set<string>();
   private readonly dirtyIdsByWorkspace = new Map<string, Set<string>>();
   private readonly dirtyListenersByWorkspace = new Map<string, Set<() => void>>();
   private readonly dirtyOwnerId: string;
@@ -337,8 +340,77 @@ export class DocumentRegistry {
     this.createDocumentInstanceId = options.createDocumentInstanceId ?? (() => crypto.randomUUID());
   }
 
+  keyFor(identity: DocumentIdentity): string {
+    if (identity.coordinationId) return identity.coordinationId;
+    const alias = documentKey(identity);
+    return this.coordinationByAlias.get(alias) ?? alias;
+  }
+
+  private aliasesFor(identity: DocumentIdentity): DocumentIdentity[] {
+    return [...(this.aliasesByCoordination.get(this.keyFor(identity))?.values() ?? [identity])];
+  }
+
+  private availableAliasesFor(identity: DocumentIdentity): DocumentIdentity[] {
+    return this.aliasesFor(identity).filter((alias) => this.availableAliases.has(`${alias.workspaceId}\0${alias.resourceId}`));
+  }
+
+  private async resolveIdentity(identity: DocumentIdentity): Promise<DocumentIdentity> {
+    const alias = `${identity.workspaceId}\0${identity.resourceId}`;
+    let coordinationId: string;
+    let rootAliases: Array<{ workspaceId: string; resourceId: string }>;
+    try {
+      ({ coordinationId, aliases: rootAliases } = await this.documents.resolveResourceIdentity(identity));
+    } catch (error) {
+      const lastKnown = this.coordinationByAlias.get(alias);
+      this.availableAliases.delete(alias);
+      if (lastKnown && this.records.get(lastKnown)?.dirty) return { ...identity, coordinationId: lastKnown };
+      throw error;
+    }
+    if (typeof coordinationId !== 'string' || !coordinationId || !Array.isArray(rootAliases)) {
+      throw new DocumentsError('Document resource identity is unavailable', { reason: 'failed' });
+    }
+    const aliases = this.aliasesByCoordination.get(coordinationId) ?? new Map<string, DocumentIdentity>();
+    const targets = new Map<string, DocumentIdentity>();
+    for (const candidate of [...rootAliases, identity]) {
+      if (!candidate || typeof candidate.workspaceId !== 'string' || typeof candidate.resourceId !== 'string') continue;
+      targets.set(`${candidate.workspaceId}\0${candidate.resourceId}`, { ...candidate, coordinationId });
+    }
+    if (!targets.has(alias)) throw new DocumentsError('Document resource identity omitted its requested path', { reason: 'failed' });
+    for (const aliasKey of aliases.keys()) {
+      if (!targets.has(aliasKey)) this.availableAliases.delete(aliasKey);
+    }
+    for (const [aliasKey] of targets) {
+      const prior = this.coordinationByAlias.get(aliasKey);
+      if (prior && prior !== coordinationId && this.records.get(prior)?.dirty) {
+        throw new DocumentsError('Document location changed while it has unsaved edits', { reason: 'stale-completion' });
+      }
+    }
+    const newlyMapped = new Set<string>();
+    const newlyAvailable = new Set<string>();
+    for (const [aliasKey, resolvedAlias] of targets) {
+      const prior = this.coordinationByAlias.get(aliasKey);
+      if (!prior || prior !== coordinationId) newlyMapped.add(aliasKey);
+      if (!this.availableAliases.has(aliasKey)) newlyAvailable.add(aliasKey);
+      if (prior && prior !== coordinationId) this.aliasesByCoordination.get(prior)?.delete(aliasKey);
+      this.coordinationByAlias.set(aliasKey, coordinationId);
+      aliases.set(aliasKey, resolvedAlias);
+      this.availableAliases.add(aliasKey);
+    }
+    this.aliasesByCoordination.set(coordinationId, aliases);
+    const record = this.records.get(coordinationId);
+    for (const [aliasKey, resolvedAlias] of targets) {
+      if (record?.dirty) this.updateDirtyIndexAlias(resolvedAlias, true);
+      if (record?.dirty && newlyAvailable.has(aliasKey)) void this.publishDirtyWorkspace(resolvedAlias.workspaceId);
+      const pending = this.listeners.get(aliasKey);
+      if (newlyMapped.has(aliasKey) && pending && record) for (const listener of pending) {
+        try { listener(record); } catch (error) { this.reportJournalFailure(error); }
+      }
+    }
+    return targets.get(alias)!;
+  }
+
   get(identity: DocumentIdentity): DocumentRecord | undefined {
-    return this.records.get(documentKey(identity));
+    return this.records.get(this.keyFor(identity));
   }
 
   meta(identity: DocumentIdentity): DocumentMeta | undefined {
@@ -347,7 +419,7 @@ export class DocumentRegistry {
   }
 
   subscribe(identity: DocumentIdentity, listener: DocumentListener): () => void {
-    const key = documentKey(identity);
+    const key = `${identity.workspaceId}\0${identity.resourceId}`;
     const set = this.listeners.get(key) ?? new Set();
     set.add(listener);
     this.listeners.set(key, set);
@@ -392,22 +464,46 @@ export class DocumentRegistry {
     return { generation: this.getGeneration(), ownerId: this.dirtyOwnerId };
   }
 
-  async captureAgentInputContext(sessionId: string, workspaceId: string): Promise<AgentInputContext> {
+  async captureAgentInputContext(sessionId: string): Promise<AgentInputContext> {
     this.assertActive();
-    const dirtyRecords = [...this.records.values()]
-      .filter((record) => record.identity.workspaceId === workspaceId && record.dirty)
-      .sort((left, right) => left.identity.resourceId.localeCompare(right.identity.resourceId));
-    if (dirtyRecords.length === 0) return { source: 'disk' };
-    const dirtyPaths = dirtyRecords.map((record) => record.identity.resourceId);
-    const unavailable = (): AgentInputContext => ({
-      source: 'surface',
+    const dirtyBuffers = [...this.records.values()].filter((record) => record.dirty);
+    if (dirtyBuffers.length === 0) return { source: 'disk' };
+    const knownRecords = dirtyBuffers.flatMap((record) => this.aliasesFor(record.identity)
+      .map((alias) => ({ record, alias })));
+    const rootsOf = (entries: typeof knownRecords) => [...new Set(entries.map(({ alias }) => alias.workspaceId))].map((workspaceId) => ({
       workspaceId,
-      dirtyPaths,
+      dirtyPaths: entries.filter(({ alias }) => alias.workspaceId === workspaceId).map(({ alias }) => alias.resourceId),
+    }));
+    const unavailable = (entries: typeof knownRecords): AgentInputContext => ({
+      source: 'surface',
+      roots: rootsOf(entries),
       snapshot: { status: 'unavailable', reason: 'surface-unavailable' },
     });
-    if (!this.documents.captureAgentInputSnapshot) return unavailable();
+    // Registered aliases can go offline between editor operations. Recheck the
+    // physical identity once per dirty buffer so an unavailable secondary root
+    // neither blocks a valid source nor makes a different target inherit it.
+    const dirtyRecords: typeof knownRecords = [];
+    for (const record of dirtyBuffers) {
+      let verified: VarinResourceReference[] | null = null;
+      for (const alias of this.aliasesFor(record.identity)) {
+        try {
+          const result = await this.documents.resolveResourceIdentity(alias);
+          if (result.coordinationId === this.keyFor(record.identity)) {
+            verified = result.aliases;
+            break;
+          }
+        } catch { /* Another known alias may still address this buffer. */ }
+      }
+      if (!verified) return unavailable(knownRecords);
+      const unique = new Map(verified.map((alias) => [`${alias.workspaceId}\0${alias.resourceId}`, alias]));
+      for (const alias of unique.values()) dirtyRecords.push({ record, alias });
+    }
+    dirtyRecords.sort((left, right) => left.alias.workspaceId.localeCompare(right.alias.workspaceId)
+      || left.alias.resourceId.localeCompare(right.alias.resourceId));
+    const roots = rootsOf(dirtyRecords);
+    if (!this.documents.captureAgentInputSnapshot) return unavailable(dirtyRecords);
     const generation = this.getGeneration();
-    const resources = await Promise.all(dirtyRecords.map(async (record) => ({
+    const resources = await Promise.all(dirtyRecords.map(async ({ record, alias }) => ({
       baseRevision: record.baseRevision,
       bufferHash: await bufferHash(record.buffer),
       documentInstanceId: record.documentInstanceId,
@@ -416,25 +512,32 @@ export class DocumentRegistry {
       lineEnding: record.lineEnding,
       content: serializeEditorContent(record.buffer, record.lineEnding),
       localEditRevision: record.localEditRevision,
-      resource: { ...record.identity },
+      resource: { workspaceId: alias.workspaceId, resourceId: alias.resourceId },
     })));
     try {
-      this.ensureWatch(workspaceId);
-      await this.enqueueDirtyPublication(workspaceId, generation, resources.map(({ content: _content, ...resource }) => resource));
-      if (this.disposed || generation !== this.getGeneration()) return unavailable();
+      await Promise.all(roots.map(async ({ workspaceId }) => {
+        this.ensureWatch(workspaceId);
+        await this.enqueueDirtyPublication(workspaceId, generation, resources
+          .filter((entry) => entry.resource.workspaceId === workspaceId)
+          .map(({ content: _content, ...resource }) => resource));
+      }));
+      if (this.disposed || generation !== this.getGeneration()) return unavailable(dirtyRecords);
       const captured = parseAgentInputContext(await this.documents.captureAgentInputSnapshot({
         generation,
         ownerId: this.dirtyOwnerId,
         resources,
         sessionId,
-        workspaceId,
       }));
-      if (!captured || captured.source !== 'surface' || captured.workspaceId !== workspaceId
+      if (!captured || captured.source !== 'surface'
         || captured.snapshot.status !== 'ready'
-        || !sameResourceSet(new Set(captured.dirtyPaths), new Set(dirtyPaths))) return unavailable();
+        || captured.roots.length !== roots.length
+        || roots.some((root) => {
+          const actual = captured.roots.find((entry) => entry.workspaceId === root.workspaceId);
+          return !actual || !sameResourceSet(new Set(actual.dirtyPaths), new Set(root.dirtyPaths));
+        })) return unavailable(dirtyRecords);
       return captured;
     } catch {
-      return unavailable();
+      return unavailable(dirtyRecords);
     }
   }
 
@@ -451,8 +554,10 @@ export class DocumentRegistry {
   private isDirtyBarrierHeld(identity: DocumentIdentity): boolean {
     return [...this.dirtyBarriers.values()].some((barrier) => (
       barrier.active
-      && barrier.workspaceId === identity.workspaceId
-      && barrier.paths.has(this.barrierPath(identity.resourceId, barrier.caseSensitive))
+      && this.aliasesFor(identity).some((alias) => (
+        barrier.workspaceId === alias.workspaceId
+        && barrier.paths.has(this.barrierPath(alias.resourceId, barrier.caseSensitive))
+      ))
     ));
   }
 
@@ -464,23 +569,25 @@ export class DocumentRegistry {
   }
 
   open(identity: DocumentIdentity, options?: { reload?: boolean }): Promise<DocumentRecord> {
-    const key = documentKey(identity);
-    if (!options?.reload) {
-      const pending = this.openOperations.get(key);
-      if (pending) return pending;
-    }
-    const operation = this.performOpen(identity, options);
-    if (options?.reload) return operation;
-    this.openOperations.set(key, operation);
-    void operation.finally(() => {
-      if (this.openOperations.get(key) === operation) this.openOperations.delete(key);
-    }).catch(() => undefined);
-    return operation;
+    return this.resolveIdentity(identity).then((resolved) => {
+      const key = this.keyFor(resolved);
+      if (!options?.reload) {
+        const pending = this.openOperations.get(key);
+        if (pending) return pending;
+      }
+      const operation = this.performOpen(resolved, options);
+      if (options?.reload) return operation;
+      this.openOperations.set(key, operation);
+      void operation.finally(() => {
+        if (this.openOperations.get(key) === operation) this.openOperations.delete(key);
+      }).catch(() => undefined);
+      return operation;
+    });
   }
 
   private async performOpen(identity: DocumentIdentity, options?: { reload?: boolean }): Promise<DocumentRecord> {
     this.assertActive();
-    const key = documentKey(identity);
+    const key = this.keyFor(identity);
     const generation = this.getGeneration();
     const existing = this.records.get(key);
     if (
@@ -491,7 +598,8 @@ export class DocumentRegistry {
       && existing.status !== 'loading'
     ) {
       this.ensureWatch(identity.workspaceId);
-      return existing;
+      if (!existing.dirty) await this.restoreJournalIfNeeded(existing);
+      return this.records.get(key) ?? existing;
     }
     const capturedEdit = existing?.localEditRevision ?? 0;
     const loading: DocumentRecord = {
@@ -547,7 +655,7 @@ export class DocumentRegistry {
   ): DocumentRecord {
     this.assertActive();
     this.assertDirtyBarrierAllowsEdit(identity);
-    const current = this.records.get(documentKey(identity))
+    const current = this.records.get(this.keyFor(identity))
       ?? emptyRecord(identity, this.getGeneration(), this.createDocumentInstanceId());
     if (current.status === 'binary' || current.status === 'unsupported-encoding') return current;
     const dirty = buffer !== current.baseContent;
@@ -579,7 +687,7 @@ export class DocumentRegistry {
     },
   ): DocumentEditResult {
     this.assertActive();
-    const current = this.records.get(documentKey(identity))
+    const current = this.records.get(this.keyFor(identity))
       ?? emptyRecord(identity, this.getGeneration(), this.createDocumentInstanceId());
     if (current.status === 'binary' || current.status === 'unsupported-encoding') {
       return { status: 'unsupported', record: current };
@@ -650,8 +758,15 @@ export class DocumentRegistry {
         });
         continue;
       }
-      const key = documentKey(change.identity);
-      const item = grouped.get(key) ?? { identity: change.identity, edits: [], versions: new Set<number>() };
+      let resolved: DocumentIdentity;
+      try {
+        resolved = await this.resolveIdentity(change.identity);
+      } catch (error) {
+        failures.push({ identity: change.identity, reason: 'not-ready', message: error instanceof Error ? error.message : 'Document identity is unavailable' });
+        continue;
+      }
+      const key = this.keyFor(resolved);
+      const item = grouped.get(key) ?? { identity: resolved, edits: [], versions: new Set<number>() };
       item.edits.push(...change.edits);
       if (change.version !== null) item.versions.add(change.version);
       grouped.set(key, item);
@@ -668,7 +783,7 @@ export class DocumentRegistry {
     if (failures.length > 0) return { status: 'rejected', failures };
 
     const loaded = await Promise.all([...grouped.values()].map(async (item) => {
-      const existing = this.records.get(documentKey(item.identity));
+      const existing = this.records.get(this.keyFor(item.identity));
       if (existing) return { item, record: existing, wasOpen: true };
       try {
         const result = await this.documents.read(item.identity);
@@ -804,7 +919,7 @@ export class DocumentRegistry {
       try {
         const read = await this.documents.read(document.before.identity);
         diskSnapshots.set(
-          documentKey(document.before.identity),
+          this.keyFor(document.before.identity),
           applyRead(
             emptyRecord(document.before.identity, prepared.generation, document.before.documentInstanceId),
             read,
@@ -819,8 +934,8 @@ export class DocumentRegistry {
       }
     }));
     for (const document of prepared.documents) {
-      const current = this.records.get(documentKey(document.before.identity))
-        ?? diskSnapshots.get(documentKey(document.before.identity));
+      const current = this.records.get(this.keyFor(document.before.identity))
+        ?? diskSnapshots.get(this.keyFor(document.before.identity));
       if (!current
         || current.documentInstanceId !== document.before.documentInstanceId
         || current.connectionGeneration !== document.before.connectionGeneration
@@ -854,7 +969,7 @@ export class DocumentRegistry {
     }
 
     const records = prepared.documents.map((document) => {
-      const current = this.records.get(documentKey(document.before.identity)) ?? document.before;
+      const current = this.records.get(this.keyFor(document.before.identity)) ?? document.before;
       return {
         ...current,
         buffer: document.afterBuffer,
@@ -899,7 +1014,7 @@ export class DocumentRegistry {
         });
         continue;
       }
-      const current = this.records.get(documentKey(document.identity));
+      const current = this.records.get(this.keyFor(document.identity));
       if (!current
         || current.localEditRevision !== document.appliedRevision
         || current.buffer !== document.appliedBuffer
@@ -918,7 +1033,7 @@ export class DocumentRegistry {
     }
     this.workspaceEditUndoGroups.delete(groupId);
     const records = group.documents.map((document) => {
-      const current = this.records.get(documentKey(document.identity))!;
+      const current = this.records.get(this.keyFor(document.identity))!;
       const change = replacementBetween(current.buffer, document.beforeBuffer);
       return {
         ...current,
@@ -942,7 +1057,7 @@ export class DocumentRegistry {
     this.assertActive();
     this.assertDirtyBarrierAllowsEdit(identity);
     const generation = this.getGeneration();
-    const current = this.records.get(documentKey(identity));
+    const current = this.records.get(this.keyFor(identity));
     if (!current) throw new DocumentsError('Document is not open', { reason: 'failed' });
     if (!current.dirty) return current;
     if (current.saving) return current;
@@ -961,7 +1076,7 @@ export class DocumentRegistry {
     try {
       const result = await this.documents.write({
         token: {
-          workspaceId: identity.workspaceId,
+          workspaceId: current.identity.workspaceId,
           epoch: requireWorkspaceEpoch(current.workspaceEpoch),
           owner: {
             kind: 'document-surface',
@@ -969,7 +1084,7 @@ export class DocumentRegistry {
             generation: current.connectionGeneration,
           },
         },
-        resource: identity,
+        resource: current.identity,
         content,
         encoding: current.encoding,
         bom: current.bom,
@@ -977,7 +1092,7 @@ export class DocumentRegistry {
         operationId,
       });
       if (this.disposed || generation !== this.getGeneration()) return current;
-      const latest = this.records.get(documentKey(identity)) ?? current;
+      const latest = this.records.get(this.keyFor(identity)) ?? current;
       if (result.status === 'stale-epoch') {
         this.commit({
           ...latest,
@@ -986,10 +1101,10 @@ export class DocumentRegistry {
           saveCapturedEditRevision: null,
           errorMessage: `Workspace epoch changed to ${result.currentEpoch}; reload before saving`,
         });
-        return this.records.get(documentKey(identity)) ?? latest;
+        return this.records.get(this.keyFor(identity)) ?? latest;
       }
       if (result.status === 'conflict') {
-        const disk = await this.documents.read(identity);
+        const disk = await this.documents.read(current.identity);
         if (this.disposed || generation !== this.getGeneration()) return latest;
         const withDisk = applyRead(latest, disk);
         this.commit({
@@ -1008,7 +1123,7 @@ export class DocumentRegistry {
             diskContent: disk.status === 'ready' ? normalizeEditorLineEndings(disk.content) : '',
           },
         });
-        return this.records.get(documentKey(identity)) ?? latest;
+        return this.records.get(this.keyFor(identity)) ?? latest;
       }
       const stillDirty = latest.localEditRevision !== capturedEdit;
       const saved: DocumentRecord = {
@@ -1035,7 +1150,7 @@ export class DocumentRegistry {
       return saved;
     } catch (error) {
       if (this.disposed || generation !== this.getGeneration()) return current;
-      const latest = this.records.get(documentKey(identity)) ?? current;
+      const latest = this.records.get(this.keyFor(identity)) ?? current;
       this.commit({
         ...latest,
         saving: false,
@@ -1049,9 +1164,10 @@ export class DocumentRegistry {
 
   async create(identity: DocumentIdentity, content = ''): Promise<DocumentRecord> {
     this.assertActive();
+    identity = await this.resolveIdentity(identity);
     this.assertDirtyBarrierAllowsEdit(identity);
     const generation = this.getGeneration();
-    const current = this.records.get(documentKey(identity));
+    const current = this.records.get(this.keyFor(identity));
     const snapshot = current ?? applyRead(
       emptyRecord(identity, generation, this.createDocumentInstanceId()),
       await this.documents.read(identity),
@@ -1085,7 +1201,7 @@ export class DocumentRegistry {
 
   discard(identity: DocumentIdentity): DocumentRecord | undefined {
     this.assertDirtyBarrierAllowsEdit(identity);
-    const current = this.records.get(documentKey(identity));
+    const current = this.records.get(this.keyFor(identity));
     if (!current) return undefined;
     const next: DocumentRecord = {
       ...current,
@@ -1108,8 +1224,8 @@ export class DocumentRegistry {
 
   private async waitForDirtyBarrierSaves(barrier: DirtyBarrierHold): Promise<boolean> {
     const affected = () => [...this.records.values()].filter((record) => (
-      record.identity.workspaceId === barrier.workspaceId
-      && barrier.paths.has(this.barrierPath(record.identity.resourceId, barrier.caseSensitive))
+      this.aliasesFor(record.identity).some((alias) => alias.workspaceId === barrier.workspaceId
+        && barrier.paths.has(this.barrierPath(alias.resourceId, barrier.caseSensitive)))
     ));
     if (!affected().some((record) => record.saving)) return true;
     return new Promise((resolve) => {
@@ -1180,7 +1296,7 @@ export class DocumentRegistry {
   handleWatchEvent(event: VarinWorkspaceFileEvent, resetWorkspaceId?: string): void {
     if (event.kind === 'reset') {
       const records = [...this.records.values()].filter((record) => (
-        !resetWorkspaceId || record.identity.workspaceId === resetWorkspaceId
+        !resetWorkspaceId || this.aliasesFor(record.identity).some((alias) => alias.workspaceId === resetWorkspaceId)
       ));
       for (const record of records) {
         if (record.status === 'loading') continue;
@@ -1189,7 +1305,7 @@ export class DocumentRegistry {
       return;
     }
     const identity = event.kind === 'moved' ? event.from : event.resource;
-    const current = this.records.get(documentKey(identity));
+    const current = this.records.get(this.keyFor(identity));
     if (!current) return;
     if (event.kind === 'deleted') {
       const deleted = applyRead(current, {
@@ -1202,7 +1318,7 @@ export class DocumentRegistry {
       return;
     }
     if (event.kind === 'moved') {
-      const previousKey = documentKey(identity);
+      const previousKey = `${identity.workspaceId}\0${identity.resourceId}`;
       this.removeRecord(current);
       const moved: DocumentRecord = {
         ...current,
@@ -1212,9 +1328,15 @@ export class DocumentRegistry {
       const prevListeners = this.listeners.get(previousKey);
       if (prevListeners) {
         this.listeners.delete(previousKey);
-        this.listeners.set(documentKey(event.resource), prevListeners);
+        this.listeners.set(`${event.resource.workspaceId}\0${event.resource.resourceId}`, prevListeners);
         for (const listener of prevListeners) listener(moved);
       }
+      const movedKey = `${event.resource.workspaceId}\0${event.resource.resourceId}`;
+      void this.resolveIdentity(event.resource).then((resolved) => {
+        if (this.records.get(movedKey) !== moved) return;
+        this.records.delete(movedKey);
+        this.commit({ ...moved, identity: resolved });
+      }).catch((error) => this.reportJournalFailure(error));
       return;
     }
     if (event.kind === 'changed' || event.kind === 'created') {
@@ -1222,7 +1344,7 @@ export class DocumentRegistry {
       if (event.revision && event.revision === current.baseRevision) return;
       void this.open(current.identity, { reload: true }).then((record) => {
         if (this.disposed) return;
-        const latest = this.records.get(documentKey(record.identity));
+        const latest = this.records.get(this.keyFor(record.identity));
         if (!latest) return;
         const externalSource = peekAgentFileChangeHint(record.identity) ? 'agent' : 'disk';
         if (latest.externalSource === externalSource) return;
@@ -1235,7 +1357,7 @@ export class DocumentRegistry {
     if (this.disposed) return;
     const dirtyRecords = [...this.records.values()].filter((record) => record.dirty);
     for (const record of dirtyRecords) {
-      const key = documentKey(record.identity);
+      const key = this.keyFor(record.identity);
       const timer = this.journalTimers.get(key);
       if (timer) clearTimeout(timer);
       this.journalTimers.delete(key);
@@ -1271,6 +1393,9 @@ export class DocumentRegistry {
         .catch((error) => this.reportJournalFailure(error));
     }
     this.records.clear();
+    this.coordinationByAlias.clear();
+    this.aliasesByCoordination.clear();
+    this.availableAliases.clear();
     this.openOperations.clear();
     this.dirtyIdsByWorkspace.clear();
     this.workspaceVersions.clear();
@@ -1298,7 +1423,7 @@ export class DocumentRegistry {
   }
 
   private commit(record: DocumentRecord): void {
-    const key = documentKey(record.identity);
+    const key = this.keyFor(record.identity);
     const previous = this.records.get(key);
     if (previous && (
       previous.buffer !== record.buffer
@@ -1314,11 +1439,15 @@ export class DocumentRegistry {
     } else if (!previous && record.dirty) {
       this.updateDirtyIndex(record.identity, true);
     } else if (record.dirty && previous?.localEditRevision !== record.localEditRevision) {
-      void this.publishDirtyWorkspace(record.identity.workspaceId);
+      for (const workspaceId of new Set(this.availableAliasesFor(record.identity).map((alias) => alias.workspaceId))) {
+        void this.publishDirtyWorkspace(workspaceId);
+      }
     }
-    const set = this.listeners.get(key);
-    if (set) {
-      for (const listener of set) listener(record);
+    for (const alias of this.aliasesFor(record.identity)) {
+      const set = this.listeners.get(`${alias.workspaceId}\0${alias.resourceId}`);
+      if (set) for (const listener of set) {
+        try { listener(record); } catch (error) { this.reportJournalFailure(error); }
+      }
     }
     if (
       !previous
@@ -1330,25 +1459,35 @@ export class DocumentRegistry {
       || previous.externalSource !== record.externalSource
       || previous.conflict !== record.conflict
     ) {
-      this.notifyWorkspace(record.identity.workspaceId);
+      for (const workspaceId of new Set(this.aliasesFor(record.identity).map((alias) => alias.workspaceId))) {
+        this.notifyWorkspace(workspaceId);
+      }
     }
   }
 
   private removeRecord(record: DocumentRecord): void {
     this.invalidateWorkspaceEditUndoGroups([record.identity]);
-    this.records.delete(documentKey(record.identity));
+    this.records.delete(this.keyFor(record.identity));
     if (record.dirty) this.updateDirtyIndex(record.identity, false);
-    this.notifyWorkspace(record.identity.workspaceId);
+    for (const workspaceId of new Set(this.aliasesFor(record.identity).map((alias) => alias.workspaceId))) {
+      this.notifyWorkspace(workspaceId);
+    }
   }
 
   private updateDirtyIndex(identity: DocumentIdentity, dirty: boolean): void {
+    for (const alias of this.aliasesFor(identity)) this.updateDirtyIndexAlias(alias, dirty);
+  }
+
+  private updateDirtyIndexAlias(identity: DocumentIdentity, dirty: boolean): void {
+    const available = this.availableAliases.has(`${identity.workspaceId}\0${identity.resourceId}`);
+    if (dirty && available) this.ensureWatch(identity.workspaceId);
     const previous = this.dirtyIdsByWorkspace.get(identity.workspaceId) ?? EMPTY_RESOURCE_IDS;
     const next = new Set(previous);
     if (dirty) next.add(identity.resourceId);
     else next.delete(identity.resourceId);
     if (previous.size === next.size && [...previous].every((resourceId) => next.has(resourceId))) return;
     this.dirtyIdsByWorkspace.set(identity.workspaceId, next);
-    void this.publishDirtyWorkspace(identity.workspaceId);
+    if (available) void this.publishDirtyWorkspace(identity.workspaceId);
     const listeners = this.dirtyListenersByWorkspace.get(identity.workspaceId);
     if (listeners) {
       for (const listener of listeners) listener();
@@ -1358,8 +1497,11 @@ export class DocumentRegistry {
   private async publishDirtyWorkspace(workspaceId: string): Promise<void> {
     if (this.disposed) return Promise.resolve();
     const resources = await Promise.all([...this.records.values()]
-      .filter((record) => record.identity.workspaceId === workspaceId && record.dirty)
-      .map(async (record) => ({
+      .filter((record) => record.dirty)
+      .flatMap((record) => this.availableAliasesFor(record.identity)
+        .filter((alias) => alias.workspaceId === workspaceId)
+        .map((alias) => ({ record, alias })))
+      .map(async ({ record, alias }) => ({
         baseRevision: record.baseRevision,
         bufferHash: await bufferHash(record.buffer),
         documentInstanceId: record.documentInstanceId,
@@ -1367,7 +1509,7 @@ export class DocumentRegistry {
         bom: record.bom,
         lineEnding: record.lineEnding,
         localEditRevision: record.localEditRevision,
-        resource: record.identity,
+        resource: { workspaceId: alias.workspaceId, resourceId: alias.resourceId },
       })));
     const generation = this.getGeneration();
     return this.enqueueDirtyPublication(workspaceId, generation, resources);
@@ -1402,43 +1544,56 @@ export class DocumentRegistry {
 
   private commitAtomic(records: DocumentRecord[], workspaceId: string): void {
     if (records.length === 0) return;
-    this.ensureWatch(workspaceId);
-    const previousDirty = this.dirtyIdsByWorkspace.get(workspaceId) ?? EMPTY_RESOURCE_IDS;
-    const nextDirty = new Set(previousDirty);
+    const affected = new Map<string, Array<{ record: DocumentRecord; alias: DocumentIdentity }>>();
     for (const record of records) {
-      this.records.set(documentKey(record.identity), record);
-      if (record.dirty) nextDirty.add(record.identity.resourceId);
-      else nextDirty.delete(record.identity.resourceId);
-    }
-    this.dirtyIdsByWorkspace.set(workspaceId, nextDirty);
-    if (!sameResourceSet(previousDirty, nextDirty) || records.some((record) => record.dirty)) {
-      void this.publishDirtyWorkspace(workspaceId);
-    }
-    this.workspaceVersions.set(workspaceId, (this.workspaceVersions.get(workspaceId) ?? 0) + 1);
-    this.ensureWatch(workspaceId);
-    for (const record of records) {
-      const listeners = this.listeners.get(documentKey(record.identity));
-      if (listeners) for (const listener of listeners) {
-        try { listener(record); } catch (error) { this.reportJournalFailure(error); }
+      this.records.set(this.keyFor(record.identity), record);
+      for (const alias of this.aliasesFor(record.identity)) {
+        const rows = affected.get(alias.workspaceId) ?? [];
+        rows.push({ record, alias });
+        affected.set(alias.workspaceId, rows);
       }
     }
-    if (!sameResourceSet(previousDirty, nextDirty)) {
-      const listeners = this.dirtyListenersByWorkspace.get(workspaceId);
-      if (listeners) for (const listener of listeners) {
+    if (!affected.has(workspaceId)) affected.set(workspaceId, []);
+    for (const [id, rows] of affected) {
+      const available = rows.some(({ alias }) => this.availableAliases.has(`${alias.workspaceId}\0${alias.resourceId}`));
+      if (available) this.ensureWatch(id);
+      const previousDirty = this.dirtyIdsByWorkspace.get(id) ?? EMPTY_RESOURCE_IDS;
+      const nextDirty = new Set(previousDirty);
+      for (const { record, alias } of rows) {
+        if (record.dirty) nextDirty.add(alias.resourceId);
+        else nextDirty.delete(alias.resourceId);
+      }
+      this.dirtyIdsByWorkspace.set(id, nextDirty);
+      if (available && (!sameResourceSet(previousDirty, nextDirty) || rows.some(({ record }) => record.dirty))) {
+        void this.publishDirtyWorkspace(id);
+      }
+      this.workspaceVersions.set(id, (this.workspaceVersions.get(id) ?? 0) + 1);
+      if (!sameResourceSet(previousDirty, nextDirty)) {
+        const listeners = this.dirtyListenersByWorkspace.get(id);
+        if (listeners) for (const listener of listeners) {
+          try { listener(); } catch (error) { this.reportJournalFailure(error); }
+        }
+      }
+      const workspaceListeners = this.workspaceListeners.get(id);
+      if (workspaceListeners) for (const listener of workspaceListeners) {
         try { listener(); } catch (error) { this.reportJournalFailure(error); }
       }
     }
-    const workspaceListeners = this.workspaceListeners.get(workspaceId);
-    if (workspaceListeners) for (const listener of workspaceListeners) {
-      try { listener(); } catch (error) { this.reportJournalFailure(error); }
+    for (const record of records) {
+      for (const alias of this.aliasesFor(record.identity)) {
+        const listeners = this.listeners.get(`${alias.workspaceId}\0${alias.resourceId}`);
+        if (listeners) for (const listener of listeners) {
+          try { listener(record); } catch (error) { this.reportJournalFailure(error); }
+        }
+      }
     }
     for (const record of records) this.scheduleJournal(record);
   }
 
   private invalidateWorkspaceEditUndoGroups(identities: readonly DocumentIdentity[]): void {
-    const keys = new Set(identities.map(documentKey));
+    const keys = new Set(identities.map((identity) => this.keyFor(identity)));
     for (const [groupId, group] of this.workspaceEditUndoGroups) {
-      if (group.documents.some((document) => keys.has(documentKey(document.identity)))) {
+      if (group.documents.some((document) => keys.has(this.keyFor(document.identity)))) {
         this.workspaceEditUndoGroups.delete(groupId);
       }
     }
@@ -1512,12 +1667,12 @@ export class DocumentRegistry {
     const existingUndoGroup = payload.action === 'apply'
       ? this.workspaceEditUndoGroups.get(payload.operationId)
       : undefined;
-    const existingByPath = new Map(existingUndoGroup?.documents.map((document) => [document.identity.resourceId, document]) ?? []);
+    const existingByPath = new Map(existingUndoGroup?.documents.map((document) => [this.keyFor(document.identity), document]) ?? []);
     const records: Array<{ target: VarinDocumentSurfaceOperationPayload['targets'][number]; record: DocumentRecord; hash: string }> = [];
     for (const target of payload.targets) {
-      const record = this.records.get(documentKey(target.resource));
+      const record = this.records.get(this.keyFor(target.resource));
       const hash = record ? await bufferHash(record.buffer) : '';
-      const existingApplied = existingByPath.get(target.resource.resourceId);
+      const existingApplied = existingByPath.get(this.keyFor(target.resource));
       const expectedRevision = payload.action === 'undo'
         ? target.expectedAppliedRevision
         : existingApplied?.appliedRevision ?? target.localEditRevision;
@@ -1526,7 +1681,9 @@ export class DocumentRegistry {
         : existingApplied && target.newText !== undefined
           ? await bufferHash(target.newText)
           : target.bufferHash;
-      if (!record || record.status !== 'ready' || record.identity.workspaceId !== payload.workspaceId
+      if (!record || record.status !== 'ready'
+        || !this.aliasesFor(record.identity).some((alias) => alias.workspaceId === payload.workspaceId
+          && alias.resourceId === target.resource.resourceId)
         || record.connectionGeneration !== this.getGeneration()
         || record.documentInstanceId !== target.documentInstanceId
         || record.baseRevision !== target.baseRevision
@@ -1534,7 +1691,7 @@ export class DocumentRegistry {
         || hash !== expectedHash
         || record.encoding !== target.encoding || record.bom !== target.bom
         || record.lineEnding !== target.lineEnding
-        || this.records.get(documentKey(target.resource)) !== record) {
+        || this.records.get(this.keyFor(target.resource)) !== record) {
         return this.surfaceOperationFailures(payload, `Document surface binding changed before ${payload.action}`);
       }
       records.push({ target, record, hash });
@@ -1559,8 +1716,9 @@ export class DocumentRegistry {
           : undone.failures.map((failure) => failure.message).join('; ');
         return this.surfaceOperationFailures(payload, message);
       }
+      const targetByKey = new Map(payload.targets.map((target) => [this.keyFor(target.resource), target.resource]));
       return Promise.all(undone.records.map(async (record) => ({
-        resource: record.identity,
+        resource: targetByKey.get(this.keyFor(record.identity)) ?? record.identity,
         status: 'undone' as const,
         documentInstanceId: record.documentInstanceId,
         afterLocalEditRevision: record.localEditRevision,
@@ -1571,9 +1729,9 @@ export class DocumentRegistry {
 
     const previous = existingUndoGroup;
     if (previous) {
-      const previousByPath = new Map(previous.documents.map((document) => [document.identity.resourceId, document]));
+      const previousByPath = new Map(previous.documents.map((document) => [this.keyFor(document.identity), document]));
       const reusable = records.every(({ target, record }) => {
-        const document = previousByPath.get(target.resource.resourceId);
+        const document = previousByPath.get(this.keyFor(target.resource));
         return document && target.newText !== undefined
           && document.appliedBuffer === target.newText
           && document.appliedRevision === record.localEditRevision
@@ -1617,11 +1775,11 @@ export class DocumentRegistry {
       const message = applied.failures.map((failure) => failure.message).join('; ');
       return this.surfaceOperationFailures(payload, message);
     }
-    const beforeByPath = new Map(records.map((entry) => [entry.target.resource.resourceId, entry]));
+    const beforeByPath = new Map(records.map((entry) => [this.keyFor(entry.target.resource), entry]));
     return Promise.all(applied.records.map(async (record) => {
-      const before = beforeByPath.get(record.identity.resourceId)!;
+      const before = beforeByPath.get(this.keyFor(record.identity))!;
       return {
-        resource: record.identity,
+        resource: before.target.resource,
         status: 'applied' as const,
         documentInstanceId: record.documentInstanceId,
         beforeLocalEditRevision: before.record.localEditRevision,
@@ -1637,7 +1795,7 @@ export class DocumentRegistry {
     message: string,
   ): Promise<VarinDocumentSurfaceOperationResourceResult[]> {
     return Promise.all(payload.targets.map(async (target) => {
-      const record = this.records.get(documentKey(target.resource));
+      const record = this.records.get(this.keyFor(target.resource));
       return {
         resource: target.resource,
         status: 'failed' as const,
@@ -1652,7 +1810,7 @@ export class DocumentRegistry {
   }
 
   private scheduleJournal(record: DocumentRecord): void {
-    const key = documentKey(record.identity);
+    const key = this.keyFor(record.identity);
     const existing = this.journalTimers.get(key);
     if (existing) clearTimeout(existing);
     if (!record.dirty) {
@@ -1669,7 +1827,7 @@ export class DocumentRegistry {
 
   private async flushJournal(identity: DocumentIdentity, generation: number): Promise<void> {
     if (this.disposed || generation !== this.getGeneration()) return;
-    const record = this.records.get(documentKey(identity));
+    const record = this.records.get(this.keyFor(identity));
     if (!record?.dirty) return;
     await this.writeJournalRecord(record, true);
   }
@@ -1707,7 +1865,7 @@ export class DocumentRegistry {
       written = await this.documents.writeRecoveryJournal({ ...request, expectedRevision: null });
     }
     if (written.status !== 'written' || !updateRegistry || this.disposed) return;
-    const latest = this.records.get(documentKey(record.identity));
+    const latest = this.records.get(this.keyFor(record.identity));
     if (!latest) return;
     this.commit({
       ...latest,
@@ -1717,11 +1875,11 @@ export class DocumentRegistry {
   }
 
   private async clearJournal(record: DocumentRecord): Promise<void> {
-    const timer = this.journalTimers.get(documentKey(record.identity));
+    const timer = this.journalTimers.get(this.keyFor(record.identity));
     if (timer) clearTimeout(timer);
-    this.journalTimers.delete(documentKey(record.identity));
+    this.journalTimers.delete(this.keyFor(record.identity));
     await this.enqueueJournal(record.identity, async () => {
-      const latest = this.records.get(documentKey(record.identity));
+      const latest = this.records.get(this.keyFor(record.identity));
       if (!latest?.recoveryJournalId || latest.recoveryJournalRevision === null) return;
       const result = await this.documents.deleteRecoveryJournal({
         token: {
@@ -1736,7 +1894,7 @@ export class DocumentRegistry {
         journalId: latest.recoveryJournalId,
         expectedRevision: latest.recoveryJournalRevision,
       });
-      const current = this.records.get(documentKey(record.identity));
+      const current = this.records.get(this.keyFor(record.identity));
       if (!current) return;
       if (result.status === 'stale-epoch') {
         throw new Error(`Workspace epoch changed to ${result.currentEpoch}; recovery journal was not deleted`);
@@ -1758,7 +1916,7 @@ export class DocumentRegistry {
   }
 
   private enqueueJournal(identity: DocumentIdentity, operation: () => Promise<void>): Promise<void> {
-    const key = documentKey(identity);
+    const key = this.keyFor(identity);
     const previous = this.journalOperations.get(key) ?? Promise.resolve();
     const current = previous.catch((error) => {
       this.reportJournalFailure(error);
@@ -1778,46 +1936,70 @@ export class DocumentRegistry {
     if (record.dirty) return;
     const runtimeGeneration = this.getGeneration();
     if (runtimeGeneration !== record.connectionGeneration) return;
-    const captured = {
-      identity: { ...record.identity },
-      workspaceEpoch: record.workspaceEpoch,
-      documentInstanceId: record.documentInstanceId,
-      connectionGeneration: record.connectionGeneration,
-      runtimeGeneration,
-    };
-    const journals = await this.documents.listRecoveryJournals({
-      workspaceId: record.identity.workspaceId,
-      recoverySessionId: this.recoverySessionId,
-    });
-    const match = journals.find((journal) => (
-      journal.resource.workspaceId === record.identity.workspaceId
-      && journal.resource.resourceId === record.identity.resourceId
-      && journal.epoch === record.workspaceEpoch
-    ));
-    if (!match) return;
-    const loaded = await this.documents.readRecoveryJournal(match.journalId);
-    if (loaded.status !== 'ready') return;
-    const latest = this.records.get(documentKey(record.identity));
-    if (!latest || latest.dirty) return;
-    // Journal reads can outlive the document load that started them. A newer
-    // epoch, host generation, or document instance must never receive the old
-    // buffer; leave that journal available for explicit recovery/history.
-    if (
-      this.disposed
-      || this.getGeneration() !== captured.runtimeGeneration
-      || loaded.journal.epoch !== captured.workspaceEpoch
-      || latest.workspaceEpoch !== captured.workspaceEpoch
-      || latest.documentInstanceId !== captured.documentInstanceId
-      || latest.connectionGeneration !== captured.connectionGeneration
-      || latest.identity.workspaceId !== captured.identity.workspaceId
-      || latest.identity.resourceId !== captured.identity.resourceId
-      || loaded.journal.journalId !== match.journalId
-      || loaded.journal.resource.workspaceId !== captured.identity.workspaceId
-      || loaded.journal.resource.resourceId !== captured.identity.resourceId
-    ) return;
+    type ReadyJournal = Extract<Awaited<ReturnType<DocumentsAPI['readRecoveryJournal']>>, { status: 'ready' }>;
+    const candidates: Array<{ alias: DocumentIdentity; epoch: number; loaded: ReadyJournal }> = [];
+    const aliases = this.aliasesFor(record.identity);
+    let unavailable = false;
+    for (const workspaceId of new Set(aliases.map((alias) => alias.workspaceId))) {
+      let epoch: number;
+      let journals: Awaited<ReturnType<DocumentsAPI['listRecoveryJournals']>>;
+      try {
+        const workspace = await this.documents.resolveWorkspace({ workspaceId });
+        if (workspace.workspaceId !== workspaceId) throw new Error('Recovery workspace identity changed');
+        epoch = workspace.epoch;
+        journals = await this.documents.listRecoveryJournals({ workspaceId, recoverySessionId: this.recoverySessionId });
+      } catch {
+        unavailable = true;
+        continue;
+      }
+      for (const alias of aliases.filter((entry) => entry.workspaceId === workspaceId)) {
+        const match = journals.find((journal) => journal.resource.workspaceId === workspaceId
+          && journal.resource.resourceId === alias.resourceId && journal.epoch === epoch);
+        if (!match) continue;
+        const loaded = await this.documents.readRecoveryJournal(match.journalId).catch(() => null);
+        if (!loaded || loaded.status !== 'ready') {
+          unavailable = true;
+          continue;
+        }
+        candidates.push({ alias, epoch, loaded });
+      }
+    }
+    const latest = this.records.get(this.keyFor(record.identity));
+    if (this.disposed || this.getGeneration() !== runtimeGeneration || latest !== record || latest.dirty) return;
+    if (unavailable) {
+      this.commit({
+        ...latest,
+        errorMessage: 'Recovery drafts through another project path could not be checked. Existing journals were preserved.',
+      });
+      return;
+    }
+    if (candidates.length > 1) {
+      this.commit({
+        ...latest,
+        status: 'error',
+        errorMessage: 'Multiple recovery drafts refer to this file through different project paths. Review them in Recovery before editing.',
+      });
+      return;
+    }
+    const candidate = candidates[0];
+    if (!candidate) return;
+    const { alias, epoch, loaded } = candidate;
+    if (loaded.journal.epoch !== epoch
+      || loaded.journal.resource.workspaceId !== alias.workspaceId
+      || loaded.journal.resource.resourceId !== alias.resourceId) return;
     const buffer = normalizeEditorLineEndings(loaded.content);
+    if (buffer !== latest.baseContent && loaded.journal.baseRevision !== latest.baseRevision) {
+      this.commit({
+        ...latest,
+        status: 'error',
+        errorMessage: 'A recovery draft was based on an older disk revision. Review it in Recovery before editing.',
+      });
+      return;
+    }
     const withJournal: DocumentRecord = {
       ...latest,
+      identity: alias,
+      workspaceEpoch: epoch,
       recoveryJournalId: loaded.journal.journalId,
       recoveryJournalRevision: loaded.journal.revision,
     };

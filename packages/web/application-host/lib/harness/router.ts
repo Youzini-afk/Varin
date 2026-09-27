@@ -402,10 +402,10 @@ export const createHarnessRouter = (options: HarnessRouterOptions) => {
       const inputContext = data.inputContext === undefined
         ? { source: "disk" as const }
         : parseAgentInputContext(data.inputContext);
-      if (!inputContext || (inputContext.source === "surface" && inputContext.workspaceId !== actor.workspaceId)) {
+      if (!inputContext) {
         await respond({
           ok: false,
-          error: harnessError("forbidden", "Harness input source does not match the actor workspace"),
+          error: harnessError("invalid-params", "Harness input source is invalid"),
         });
         return;
       }

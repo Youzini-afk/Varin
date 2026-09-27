@@ -191,8 +191,7 @@ describe("workspace mutation journal", () => {
     const surfaceWrites: string[] = [];
     let inputContext: AgentInputContext = {
       source: "surface",
-      workspaceId: "workspace-1",
-      dirtyPaths: ["draft.txt"],
+      roots: [{ workspaceId: "workspace-1", dirtyPaths: ["draft.txt"] }],
       snapshot: { status: "ready", ref: "ref-1" },
     };
     const harnessRequests: HarnessRequestData[] = [];

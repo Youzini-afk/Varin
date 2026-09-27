@@ -1,10 +1,12 @@
 export type DocumentIdentity = {
   workspaceId: string;
   resourceId: string;
+  /** Host-resolved environment and actual location; never used as a display path. */
+  coordinationId?: string;
 };
 
 export const documentKey = (identity: DocumentIdentity): string => (
-  `${identity.workspaceId}\0${identity.resourceId}`
+  identity.coordinationId ?? `${identity.workspaceId}\0${identity.resourceId}`
 );
 
 export type DocumentLineEnding = 'lf' | 'crlf' | 'cr';

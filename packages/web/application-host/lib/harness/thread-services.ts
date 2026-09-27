@@ -268,11 +268,7 @@ export function createThreadDispatchService(host: HarnessServiceHost): HarnessSe
       };
       if (inputContext.source === "surface") {
         if (!host.threadCaptureDraftBaseline) {
-          if (inputContext.snapshot.status === "unavailable" && inputContext.dirtyPaths.length === 0) {
-            captured = { draftBaselineId: null, cleanup: async () => undefined };
-          } else {
-            throw new HarnessServiceError("unavailable", "Thread draft capture is not configured");
-          }
+          throw new HarnessServiceError("unavailable", "Thread draft capture is not configured");
         } else {
           try {
             captured = await host.threadCaptureDraftBaseline(ctx.sessionId, workspaceId, inputContext);
@@ -1681,8 +1677,9 @@ export function createThreadMergeService(host: HarnessServiceHost): HarnessServi
         throw new HarnessServiceError("unavailable", "Thread integration requires an active parent turn recovery binding");
       }
       let sourceOwner: { ownerId: string; generation: number } | undefined;
-      if (ctx.inputContext?.source === "surface") {
-        const resolved = host.agentInputSurfaceOwner?.(ctx.sessionId, ctx.inputContext);
+      if (ctx.inputContext?.source === "surface"
+        && ctx.inputContext.roots.some((root) => root.workspaceId === workspaceId && root.dirtyPaths.length > 0)) {
+        const resolved = host.agentInputSurfaceOwner?.(ctx.sessionId, ctx.inputContext, workspaceId);
         if (!resolved) {
           throw new HarnessServiceError("unavailable", "The originating document surface for this turn is no longer available");
         }

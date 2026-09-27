@@ -144,8 +144,7 @@ describe("3.16 vector reuse, scheduler, overlays, and remote spaces", () => {
     const view = await pinSemanticQueryView({
       inputContext: {
         source: "surface",
-        workspaceId: "ws",
-        dirtyPaths: ["missing.ts"],
+        roots: [{ workspaceId: "ws", dirtyPaths: ["missing.ts"] }],
         snapshot: { status: "unavailable", reason: "surface-unavailable" },
       },
       draftPaths: ["missing.ts"],
@@ -367,8 +366,7 @@ describe("3.16 vector reuse, scheduler, overlays, and remote spaces", () => {
     const deleted = await pinSemanticQueryView({
       inputContext: {
         source: "surface",
-        workspaceId: "ws",
-        dirtyPaths: ["gone.ts"],
+        roots: [{ workspaceId: "ws", dirtyPaths: ["gone.ts"] }],
         snapshot: { status: "ready", ref: "surface" },
       },
       draftPaths: ["gone.ts"],
@@ -380,8 +378,7 @@ describe("3.16 vector reuse, scheduler, overlays, and remote spaces", () => {
     const superseded = await pinSemanticQueryView({
       inputContext: {
         source: "surface",
-        workspaceId: "ws",
-        dirtyPaths: ["written.ts"],
+        roots: [{ workspaceId: "ws", dirtyPaths: ["written.ts"] }],
         snapshot: { status: "ready", ref: "surface" },
       },
       draftPaths: ["written.ts"],

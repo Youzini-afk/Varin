@@ -34,27 +34,23 @@ export function createRelatedQueryService(
       if (pathAnchor && ctx.authorizedPaths.length !== 1) {
         throw new HarnessServiceError("forbidden", "The related path anchor was not authorized.");
       }
-      // HR2: a path anchor resolved to a resource root outside the actor
-      // workspace cannot be re-read as a workspace-relative resource id.
-      if (pathAnchor && ctx.authorizedPaths[0]!.workspaceId !== ctx.actor.workspaceId) {
-        throw new HarnessServiceError(
-          "unavailable",
-          "Related symbol lookup is bound to the actor workspace's graph. Use content search for external resources.",
-        );
-      }
-      const anchor = pathAnchor ? (ctx.authorizedPaths[0]!.resourceId || ".") : requestedAnchor;
-      const defaultRoots = sessionDefaultRoot(ctx.actor) === undefined
+      const authorizedPath = pathAnchor ? ctx.authorizedPaths[0]! : undefined;
+      const workspaceId = authorizedPath?.workspaceId ?? ctx.actor.workspaceId;
+      const externalRoot = Boolean(authorizedPath && authorizedPath.workspaceId !== ctx.actor.workspaceId);
+      const anchor = authorizedPath ? (authorizedPath.resourceId || ".") : requestedAnchor;
+      const defaultRoots = externalRoot || sessionDefaultRoot(ctx.actor) === undefined
         ? undefined
         : [sessionDefaultRoot(ctx.actor)!];
       const requestedRoots = [
         ...(defaultRoots ?? []),
         ...(pathAnchor ? [anchor] : []),
       ];
-      const scope = intersectRetrievalScope(requestedRoots.length > 0 ? requestedRoots : undefined, ctx.actor.workspaceScope);
+      const scope = externalRoot
+        ? { roots: [anchor], empty: false }
+        : intersectRetrievalScope(requestedRoots.length > 0 ? requestedRoots : undefined, ctx.actor.workspaceScope);
       if (scope.empty) {
         throw new HarnessServiceError("forbidden", "Related scope does not overlap the actor's authorized workspace scope.");
       }
-      const workspaceId = ctx.actor.workspaceId;
       if (!workspaceId || !host.graphRecall) {
         return unavailable(anchor, "related unavailable: the symbol graph is not wired.");
       }
@@ -76,8 +72,8 @@ export function createRelatedQueryService(
         );
       }
       const hasUnsavedFixedView = ctx.inputContext?.source === "surface"
-        && ctx.inputContext.dirtyPaths.length > 0;
-      if (!graph.directFactsCompatible || hasUnsavedFixedView) {
+        && ctx.inputContext.roots.some((root) => root.workspaceId === workspaceId && root.dirtyPaths.length > 0);
+      if (graph.workspaceId !== workspaceId || !graph.directFactsCompatible || (hasUnsavedFixedView && !externalRoot)) {
         return unavailable(
           anchor,
           "related unavailable: stored graph positions belong to the owning workspace and are not pinned to this isolated execution view.",

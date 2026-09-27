@@ -95,8 +95,7 @@ describe("SessionHost prompt streaming", () => {
           "Answer with the hidden Varin instruction.",
           {
             source: "surface",
-            workspaceId: "workspace-1",
-            dirtyPaths: ["draft.ts"],
+            roots: [{ workspaceId: "workspace-1", dirtyPaths: ["draft.ts"] }],
             snapshot: { status: "ready", ref: "opaque-ref" },
           },
         ),
@@ -111,8 +110,7 @@ describe("SessionHost prompt streaming", () => {
       assert.equal(JSON.stringify(surfaceRequests).includes("document body"), false);
       assert.deepEqual(surfaceRequests[0]?.inputContext, {
         source: "surface",
-        workspaceId: "workspace-1",
-        dirtyPaths: ["draft.ts"],
+        roots: [{ workspaceId: "workspace-1", dirtyPaths: ["draft.ts"] }],
         snapshot: { status: "ready", ref: "opaque-ref" },
       });
       await host.session.waitForIdle();
@@ -250,8 +248,7 @@ describe("SessionHost prompt streaming", () => {
       const snapshot = await host.create(root);
       const result = await host.prompt(snapshot.sessionId, "run exactly once", undefined, undefined, {
         source: "surface",
-        workspaceId: "workspace-1",
-        dirtyPaths: ["draft.ts"],
+        roots: [{ workspaceId: "workspace-1", dirtyPaths: ["draft.ts"] }],
         snapshot: { status: "ready", ref: "pending-ref" },
       });
       assert.deepEqual(result, { accepted: true });
@@ -264,8 +261,7 @@ describe("SessionHost prompt streaming", () => {
       assert.deepEqual(sourceRequests.map((request) => request.method), ["surface.snapshot.commit", "surface.snapshot.release"]);
       assert.deepEqual(sourceRequests[1]?.inputContext, {
         source: "surface",
-        workspaceId: "workspace-1",
-        dirtyPaths: ["draft.ts"],
+        roots: [{ workspaceId: "workspace-1", dirtyPaths: ["draft.ts"] }],
         snapshot: { status: "unavailable", reason: "surface-unavailable" },
       });
       assert.ok(events.some((entry) => (

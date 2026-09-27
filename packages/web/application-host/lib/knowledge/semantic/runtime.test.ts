@@ -147,6 +147,32 @@ describe("semantic index runtime", () => {
     expect((await dark.search(workspaceScope(documents.identity.workspaceId), "published zebra token", 8)).hits).toEqual([]);
   });
 
+  it("omits semantic hits whose indexed document changed after the last scan", async () => {
+    const documents = await createDocumentAuthorityHarness();
+    disposes.push(() => documents.cleanup());
+    const filePath = join(documents.workspaceRoot, "changed.ts");
+    writeFileSync(filePath, 'export function changed() { return "old indexed needle"; }\n', "utf8");
+    const runtime = createSemanticIndexRuntime({
+      dataDir: documents.dataDir,
+      hostId: "semantic-hit-version",
+      documents: documents.authority,
+      structureSource: parsingSource(),
+      searchFilesystemFiles: async () => [{ name: "changed.ts", path: filePath, relativePath: "changed.ts" }],
+      embedder: createHashEmbedder(),
+    });
+    disposes.push(() => runtime.dispose());
+    const scope = workspaceScope(documents.identity.workspaceId);
+    await runtime.scanScope(scope);
+    expect((await runtime.search(scope, "old indexed needle", 8)).hits[0]?.documentId).toBe("changed.ts");
+
+    writeFileSync(filePath, 'export function changed() { return "new body"; }\n', "utf8");
+    const result = await runtime.search(scope, "old indexed needle", 8);
+
+    expect(result.hits).toEqual([]);
+    expect(result.status.status).toBe("incomplete");
+    expect(result.gaps).toContainEqual({ path: "changed.ts", reason: "content-changed" });
+  });
+
   it("increments from Documents revisions and can sit at partial coverage", async () => {
     const documents = await createDocumentAuthorityHarness();
     disposes.push(() => documents.cleanup());

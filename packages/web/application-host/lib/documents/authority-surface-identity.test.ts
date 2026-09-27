@@ -99,7 +99,6 @@ describe("surface identity and durable compensation", () => {
         generation: 1,
         ownerId: "surface-owner",
         sessionId: "session-crlf",
-        workspaceId: harness.identity.workspaceId,
         resources: [{ ...binding, content: "B\r\n" }],
       });
       harness.authority.commitAgentInputSnapshot("session-crlf", context);
@@ -128,6 +127,7 @@ describe("surface identity and durable compensation", () => {
           "session-crlf",
           context,
           "draft.ts",
+          harness.identity.workspaceId,
         ),
       ).toMatchObject({
         status: "ready",
@@ -139,6 +139,7 @@ describe("surface identity and durable compensation", () => {
           "session-crlf",
           context,
           "draft.ts",
+          harness.identity.workspaceId,
         ),
       ).toMatchObject({
         status: "ready",
@@ -166,6 +167,7 @@ describe("surface identity and durable compensation", () => {
           "session-crlf",
           context,
           "draft.ts",
+          harness.identity.workspaceId,
         ),
       ).toMatchObject({
         status: "ready",
@@ -181,6 +183,7 @@ describe("surface identity and durable compensation", () => {
         "session-crlf",
         context,
         "draft.ts",
+        harness.identity.workspaceId,
       );
       if (afterSecond.status !== "ready")
         throw new Error("Expected CRLF snapshot after the second edit");
@@ -205,6 +208,7 @@ describe("surface identity and durable compensation", () => {
           "session-crlf",
           context,
           "draft.ts",
+          harness.identity.workspaceId,
         ),
       ).toMatchObject({
         status: "ready",
@@ -279,7 +283,6 @@ describe("surface identity and durable compensation", () => {
         generation: 1,
         ownerId: "surface-owner",
         sessionId: "session-group",
-        workspaceId: harness.identity.workspaceId,
         resources: [
           { ...bindingA, content: "A\n" },
           { ...bindingB, content: "B\n" },
@@ -417,7 +420,6 @@ describe("surface identity and durable compensation", () => {
         generation: 1,
         ownerId: "surface-owner",
         sessionId: "session-utf16",
-        workspaceId: harness.identity.workspaceId,
         resources: [{ ...binding, content: "B\n" }],
       });
       harness.authority.commitAgentInputSnapshot("session-utf16", context);
@@ -517,7 +519,6 @@ describe("surface identity and durable compensation", () => {
         generation: 1,
         ownerId: "surface-owner",
         sessionId: "session-throw",
-        workspaceId: harness.identity.workspaceId,
         resources: [{ ...binding, content: "B\n" }],
       });
       harness.authority.commitAgentInputSnapshot("session-throw", context);
@@ -753,7 +754,6 @@ describe("surface identity and durable compensation", () => {
         generation: 1,
         ownerId: "surface-owner",
         sessionId: "session-stale-source",
-        workspaceId: activeHarness.identity.workspaceId,
         resources: [{ ...binding, content: "draft\n" }],
       });
       activeHarness.authority.commitAgentInputSnapshot(

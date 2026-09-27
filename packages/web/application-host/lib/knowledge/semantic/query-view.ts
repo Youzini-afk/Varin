@@ -14,6 +14,7 @@ export type SemanticQueryView = {
 
 export async function pinSemanticQueryView(input: {
   inputContext: AgentInputContext;
+  workspaceId?: string;
   draftPaths?: readonly string[];
   readDraft?: (path: string) => (
     | { status: "ready"; content: string; revision: string }
@@ -44,7 +45,11 @@ export async function pinSemanticQueryView(input: {
   if (input.inputContext.source !== "surface") {
     return { overlays, view: "disk" };
   }
-  for (const path of input.draftPaths ?? input.inputContext.dirtyPaths) {
+  const roots = input.inputContext.roots;
+  const matchingRoot = input.workspaceId
+    ? roots.find((root) => root.workspaceId === input.workspaceId)
+    : roots.length === 1 ? roots[0] : undefined;
+  for (const path of input.draftPaths ?? matchingRoot?.dirtyPaths ?? []) {
     const draft = input.readDraft?.(path);
     if (draft?.status === "disk" && draft.superseded) continue;
     if (draft?.status === "ready") {

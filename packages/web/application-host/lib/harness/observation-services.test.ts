@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 import { sliceUtf8ByBytes, type DiagnosticItem, type HarnessActorContext } from "@varin/protocol";
 import { createLspDiagnosticsSnapshotService, type DiagnosticsProvider } from "./diagnostics-service.js";
-import { createContextRetainedService, createShellExecService, createShellReadService } from "./harness-services.js";
+import { createContextRetainedService, createShellExecService, createShellKillService, createShellReadService, createShellWriteService } from "./harness-services.js";
 import { createObservationCursorStore } from "./observation-cursors.js";
 import type { HarnessServiceContext } from "./router.js";
 import type { HarnessServiceHost } from "./service-host.js";
@@ -30,6 +30,27 @@ const context = (canonicalResourceId = "src/main.ts"): HarnessServiceContext => 
 });
 
 describe("incremental shell observation", () => {
+  it("keeps local shell handles usable in a no-project session when remote routing is installed", async () => {
+    const remoteScopes: string[] = [];
+    const host = {
+      managedRemoteTargets: {
+        shellRead: async (scope: string) => { remoteScopes.push(scope); return null; },
+        shellWrite: async (scope: string) => { remoteScopes.push(scope); return null; },
+        shellKill: async (scope: string) => { remoteScopes.push(scope); return null; },
+      },
+      getShellSupervisor: () => ({
+        read: async () => ({ ...sliceUtf8ByBytes("done", 0, 4), running: false, exitCode: 0 }),
+        write: async () => true,
+        kill: async () => true,
+      }),
+    } as unknown as HarnessServiceHost;
+    const noProject = { ...context(), actor: { ...ACTOR, workspaceId: null }, workspaceId: null };
+    expect(await createShellReadService(host).handle({ id: "sh_local", offset: 0 }, noProject)).toMatchObject({ text: "done" });
+    expect(await createShellWriteService(host).handle({ id: "sh_local", text: "input" }, noProject)).toEqual({ accepted: true });
+    expect(await createShellKillService(host).handle({ id: "sh_local" }, noProject)).toEqual({ killed: true });
+    expect(remoteScopes).toEqual(["session:observer", "session:observer", "session:observer"]);
+  });
+
   it("starts after the output already returned by a backgrounded bash call", async () => {
     let output = "already shown";
     const cursors = createObservationCursorStore();

@@ -396,6 +396,67 @@ describe("thread runtime", () => {
     }
   });
 
+  it("materializes a shared parent/child project draft once but rejects an independent external draft", async () => {
+    const created = vi.fn(() => ({ id: "draft-baseline" }));
+    const removed = vi.fn();
+    const workingStates = {
+      withBranchStore: async (_workspaceId: string, _purpose: string, operation: (store: unknown) => unknown) => operation({
+        createDraftBaseline: created,
+        deleteDraftBaseline: removed,
+      }),
+    } as unknown as WorkspaceWorkingStateRootAccess;
+    const target = {
+      baseRevision: null,
+      encoding: "utf-8",
+      bom: false,
+      content: "shared draft",
+      localEditRevision: 1,
+      revision: "draft-r1",
+      coordinationId: "physical-file-1",
+      resource: { workspaceId: WORKSPACE, resourceId: "nested/draft.ts" },
+    };
+    let external = {
+      ...target,
+      resource: { workspaceId: "nested-project", resourceId: "draft.ts" },
+    };
+    const draftRuntime = createThreadRuntime({
+      registry,
+      sessions: sessionAdapter,
+      resolveWorkspaceRoot: async () => "/workspace",
+      resolveRuntimeWorkspaceId: async () => WORKSPACE,
+      workingStates,
+      cloneAgentInputSnapshot: () => ({ status: "ready", resources: [target, external], supersededResources: [] }),
+      worktrees: {
+        prepare: prepareWorktree,
+        snapshot: async (worktree) => worktree,
+        inspect: async () => ({ patch: "", untracked: [], changedFiles: [], diffStats: { files: 0, insertions: 0, deletions: 0 } }),
+        merge: async () => ({ merged: 0, conflicts: [], conflictState: "none", changedFiles: [], diffStats: { files: 0, insertions: 0, deletions: 0 } }),
+      },
+    });
+    const inputContext = {
+      source: "surface" as const,
+      roots: [
+        { workspaceId: WORKSPACE, dirtyPaths: ["nested/draft.ts"] },
+        { workspaceId: "nested-project", dirtyPaths: ["draft.ts"] },
+      ],
+      snapshot: { status: "ready" as const, ref: "shared-draft" },
+    };
+    try {
+      const baseline = await draftRuntime.captureDraftBaseline("parent-1", WORKSPACE, inputContext);
+      expect(baseline.draftBaselineId).toBe("draft-baseline");
+      expect(created).toHaveBeenCalledWith(WORKSPACE, [expect.objectContaining({ path: "nested/draft.ts" })]);
+      await baseline.cleanup();
+      expect(removed).toHaveBeenCalledWith("draft-baseline");
+
+      external = { ...external, coordinationId: "another-physical-file" };
+      await expect(draftRuntime.captureDraftBaseline("parent-1", WORKSPACE, inputContext))
+        .rejects.toMatchObject({ code: "unavailable" });
+      expect(created).toHaveBeenCalledTimes(1);
+    } finally {
+      await draftRuntime.dispose();
+    }
+  });
+
   it("spawns a queued Thread from its persistent draft baseline after the source surface snapshot is released", async () => {
     const workspace = join(dataDir, "draft-workspace");
     const recoveryRoot = join(dataDir, "draft-recovery");
@@ -472,14 +533,18 @@ describe("thread runtime", () => {
       },
     });
     try {
+      if (context.source !== "surface") throw new Error("Expected a fixed draft context");
+      await expect(draftRuntime.captureDraftBaseline("parent-1", identity.workspaceId, {
+        ...context,
+        roots: [...context.roots, { workspaceId: "external-root", dirtyPaths: ["other.ts"] }],
+      })).rejects.toMatchObject({ code: "unavailable" });
       await expect(draftRuntime.captureDraftBaseline("wrong-session", identity.workspaceId, context))
         .rejects.toMatchObject({ code: "unavailable" });
       await expect(draftRuntime.captureDraftBaseline("parent-1", "wrong-workspace", context))
         .rejects.toMatchObject({ code: "unavailable" });
       await expect(draftRuntime.captureDraftBaseline("parent-1", identity.workspaceId, {
         source: "surface",
-        workspaceId: identity.workspaceId,
-        dirtyPaths: ["draft.ts"],
+        roots: [{ workspaceId: identity.workspaceId, dirtyPaths: ["draft.ts"] }],
         snapshot: { status: "unavailable", reason: "surface-unavailable" },
       })).rejects.toMatchObject({ code: "unavailable" });
       const captured = await draftRuntime.captureDraftBaseline("parent-1", identity.workspaceId, context);

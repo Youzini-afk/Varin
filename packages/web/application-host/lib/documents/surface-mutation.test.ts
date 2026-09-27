@@ -12,8 +12,7 @@ const hash = (text: string) => `sha256-${createHash("sha256").update(text, "utf8
 
 const context = (workspaceId: string, dirtyPaths: string[]): AgentInputContext => ({
   source: "surface",
-  workspaceId,
-  dirtyPaths,
+  roots: [{ workspaceId, dirtyPaths: dirtyPaths.length ? dirtyPaths : ["unrelated.ts"] }],
   snapshot: { status: "ready", ref: "fixed" },
 });
 
@@ -48,6 +47,7 @@ describe("applyAgentSurfaceMutation", () => {
       },
     }, {
       sessionId: "s1",
+      workspaceId: "ws",
       context: context("ws", []),
       changes: [{ resourceId: "plain.ts", action: "write", content: "n" }],
     });
@@ -80,6 +80,7 @@ describe("applyAgentSurfaceMutation", () => {
       deleteDisk: async () => ({ status: "deleted" }),
     }, {
       sessionId: "s1",
+      workspaceId: "ws",
       context: context("ws", ["draft.ts"]),
       changes: [{ resourceId: "draft.ts", action: "delete" }],
     });
@@ -99,6 +100,7 @@ describe("applyAgentSurfaceMutation", () => {
       deleteDisk: async () => ({ status: "deleted" }),
     }, {
       sessionId: "s1",
+      workspaceId: "ws",
       context: context("ws", ["draft.ts"]),
       changes: [{ resourceId: "draft.ts", action: "write", content: "bin\0ary" }],
     });
@@ -184,6 +186,7 @@ describe("applyAgentSurfaceMutation", () => {
       deleteDisk: async () => ({ status: "deleted" }),
     }, {
       sessionId: "s1",
+      workspaceId: "ws",
       context: context("ws", ["draft.ts"]),
       changes: [
         { resourceId: "draft.ts", action: "edit", edits: [{ oldText: "B", newText: "C" }] },
@@ -269,6 +272,7 @@ describe("applyAgentSurfaceMutation", () => {
       deleteDisk: async () => ({ status: "deleted" }),
     }, {
       sessionId: "s1",
+      workspaceId: "ws",
       context: context("ws", ["draft.ts"]),
       changes: [
         { resourceId: "draft.ts", action: "edit", edits: [{ oldText: "B", newText: "C" }] },
@@ -349,6 +353,7 @@ describe("applyAgentSurfaceMutation", () => {
       deleteDisk: async () => ({ status: "conflict" }),
     }, {
       sessionId: "s1",
+      workspaceId: "ws",
       context: context("ws", ["draft.ts"]),
       changes: [
         { resourceId: "draft.ts", action: "edit", edits: [{ oldText: "B", newText: "C" }] },
@@ -419,6 +424,7 @@ describe("applyAgentSurfaceMutation", () => {
       deleteDisk: async () => ({ status: "deleted" }),
     }, {
       sessionId: "s1",
+      workspaceId: "ws",
       context: context("ws", ["draft.ts"]),
       changes: [{ resourceId: "draft.ts", action: "edit", edits: [{ oldText: "B\n", newText: "C\n" }] }],
     });
@@ -513,6 +519,7 @@ describe("applyAgentSurfaceMutation", () => {
       deleteDisk: async () => ({ status: "deleted" }),
     }, {
       sessionId: "s1",
+      workspaceId: "ws",
       context: context("ws", ["a.ts", "b.ts"]),
       changes: [
         { resourceId: "a.ts", action: "edit", edits: [{ oldText: "A", newText: "C" }] },
@@ -598,6 +605,7 @@ describe("applyAgentSurfaceMutation", () => {
       deleteDisk: async () => ({ status: "conflict" as const }),
     }, {
       sessionId: "s1",
+      workspaceId: "ws",
       context: context("ws", ["a.ts", "b.ts"]),
       changes: [
         { resourceId: "a.ts", action: "edit", edits: [{ oldText: "A", newText: "C" }] },
@@ -814,6 +822,7 @@ describe("durable agent mutation ordering", () => {
       durable,
     }, {
       sessionId: "s1",
+      workspaceId: "ws",
       context: context("ws", ["draft.ts"]),
       changes: [{ resourceId: "draft.ts", action: "edit", edits: [{ oldText: "B\n", newText: "C\n" }] }],
     }).then((value) => { settled = true; return value; });

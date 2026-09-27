@@ -83,6 +83,28 @@ describe("asynchronous Harness registration", () => {
     expect(host.getInterpreter(actor.sessionId)).toEqual({ unavailable: expect.objectContaining({ reason: "Shell settings are unavailable" }) });
   });
 
+  it("keeps unrelated session services available when a project directory is offline", async () => {
+    const host = createHarnessServiceHost({
+      search: async () => ({ status: "empty", generation: undefined }),
+      resolveWorkspaceRoot: async () => "D:/workspace",
+      discoveredShells: {},
+    });
+    cleanup.push(() => host.dispose());
+    const registrations = createHarnessSessionRegistration({
+      host,
+      readSettings: async () => snapshot,
+      resolveWorkspaceRoot: async () => null,
+    });
+    cleanup.push(() => registrations.dispose());
+
+    await registrations.register(context());
+    expect(host.hasActor(actor)).toBe(true);
+    expect(await registrations.resolveActor(actor)).toMatchObject({
+      workspaceId: "workspace",
+      cwd: "D:/workspace",
+    });
+  });
+
   it("cancels a caller's wait without cancelling another request's initialization", async () => {
     const settings = deferred<PiSettingsSnapshot>();
     const { registrations } = fixture(async () => settings.promise);

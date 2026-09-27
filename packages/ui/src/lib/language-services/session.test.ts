@@ -31,6 +31,7 @@ const createDocuments = (): DocumentsAPI => ({
   clearDirtyBuffers: async () => ({ cleared: true }),
   publishDirtyBuffers: async (request) => ({ ...request, updatedAt: '2026-08-28T00:00:00.000Z' }),
   resolveWorkspace: async () => ({ workspaceId: identity.workspaceId, hostId: 'host', epoch: 1 }),
+  resolveResourceIdentity: async (ref) => ({ coordinationId: `host\0${ref.workspaceId}\0${ref.resourceId}`, aliases: [ref] }),
   read: async (resource) => ({
     status: 'ready',
     epoch: 1,

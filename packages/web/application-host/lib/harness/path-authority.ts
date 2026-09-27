@@ -198,16 +198,15 @@ export function createHarnessPathAuthority({
     authorized: HarnessAuthorizedPath,
     signal?: AbortSignal,
   ): Promise<Buffer> => {
-    // `authorized.workspaceId` is the Documents root record the admission-time
-    // resolve produced; it is not the actor's session classification, so it is
-    // intentionally not compared here — the re-resolve below detects drift.
+    // The Documents root record is part of the resolved resource identity,
+    // independent of the actor's session classification.
     if (authorized.authorityId !== authorityId) {
       throw new Error("Document read authorization changed");
     }
     if (!authorized.resolvedPath) throw new Error("Authorized disk target has no resolved filesystem path");
     signal?.throwIfAborted();
     const before = await resolve(actor, authorized.inputPath, { allowMissing: false });
-    if (!before || before.canonicalResourceId !== authorized.canonicalResourceId
+    if (!before || before.workspaceId !== authorized.workspaceId || before.canonicalResourceId !== authorized.canonicalResourceId
       || before.resourceId !== authorized.resourceId || before.resolvedPath !== authorized.resolvedPath) {
       throw new Error("Document path changed before reading");
     }
@@ -228,7 +227,7 @@ export function createHarnessPathAuthority({
       signal?.throwIfAborted();
 
       const after = await resolve(actor, authorized.inputPath, { allowMissing: false });
-      if (!after || after.canonicalResourceId !== authorized.canonicalResourceId
+      if (!after || after.workspaceId !== authorized.workspaceId || after.canonicalResourceId !== authorized.canonicalResourceId
         || after.resourceId !== authorized.resourceId || after.resolvedPath !== authorized.resolvedPath) {
         throw new Error("Document path changed while reading");
       }

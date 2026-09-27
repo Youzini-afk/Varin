@@ -1,5 +1,5 @@
 import { randomUUID } from "node:crypto";
-import { lstat, realpath, rm } from "node:fs/promises";
+import { lstat, realpath, rm, stat } from "node:fs/promises";
 import { isAbsolute, relative, resolve, sep } from "node:path";
 import type {
   CompactionRunResult,
@@ -1967,7 +1967,16 @@ export class PiRuntimeBroker {
     cwd: string,
     input: HostMethodParams<"session.open">,
   ): Promise<{ snapshot: SessionSnapshot; worker: PiHostClient }> {
-    const worker = await this.#spawnWorker(cwd);
+    // A saved session can outlive the directory it originally worked in.
+    // Launch the Pi process from its managed agent directory in that case,
+    // while keeping the historical cwd as the session's declared tool target.
+    let launchCwd = cwd;
+    try {
+      if (!(await stat(cwd)).isDirectory()) launchCwd = (await this.#getCatalog()).handshake.runtime.agentDir;
+    } catch {
+      launchCwd = (await this.#getCatalog()).handshake.runtime.agentDir;
+    }
+    const worker = await this.#spawnWorker(cwd, launchCwd);
     try {
       return { snapshot: await worker.request("session.open", input), worker };
     } catch (error) {
@@ -1976,9 +1985,9 @@ export class PiRuntimeBroker {
     }
   }
 
-  async #spawnWorker(cwd: string): Promise<PiHostClient> {
+  async #spawnWorker(cwd: string, launchCwd = cwd): Promise<PiHostClient> {
     if (this.#disposed) throw new Error("Pi runtime broker is disposed");
-    const worker = this.#createClient("session", cwd);
+    const worker = this.#createClient("session", launchCwd);
     this.#workerCwds.set(worker, cwd);
     this.#clients.add(worker);
     try {
@@ -1996,9 +2005,10 @@ export class PiRuntimeBroker {
     const client = new PiHostClient({
       ...(this.#options.agentDir === undefined ? {} : { agentDir: this.#options.agentDir }),
       ...(cwd === undefined ? {} : { cwd }),
-      ...(this.#options.environment === undefined
-        ? {}
-        : { environment: this.#options.environment }),
+      environment: {
+        ...(this.#options.environment ?? {}),
+        ...(role === "session" ? { VARIN_ALLOW_MISSING_SESSION_CWD: "1" } : {}),
+      },
       ...(this.#options.execArgv === undefined ? {} : { execArgv: this.#options.execArgv }),
       handshake: this.#options.client,
       hostEntry: this.#options.hostEntry,

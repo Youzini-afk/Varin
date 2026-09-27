@@ -3,7 +3,6 @@ import type { HarnessServiceHost, HarnessSessionContext } from "./service-host.j
 import { HarnessShellSettingsError, resolveHarnessShellSetting } from "./harness-shell-settings.js";
 import { resolveHarnessWebBinding } from "./harness-web-settings.js";
 import { waitWithSignal } from "../knowledge/semantic/cancellation.js";
-import { HarnessServiceError } from "./service-error.js";
 
 const sameGeneration = (a: HarnessActorIdentity, b: HarnessActorIdentity): boolean => (
   a.authorityInstanceId === b.authorityInstanceId && a.sessionId === b.sessionId
@@ -14,7 +13,7 @@ const sameGeneration = (a: HarnessActorIdentity, b: HarnessActorIdentity): boole
 export function createHarnessSessionRegistration(options: {
   host: Pick<HarnessServiceHost, "registerSession" | "dropSession" | "hasActor" | "resolveActor" | "getInterpreter">;
   readSettings(context: HarnessSessionContext): Promise<PiSettingsSnapshot>;
-  /** Resolve the authorized workspace root for seeding the work context (RR2). */
+  /** Resolve a project resource root when available; session admission does not depend on it. */
   resolveWorkspaceRoot?: (workspaceId: string) => Promise<string | null>;
 }) {
   const pending = new Map<string, { actor: HarnessActorIdentity; controller: AbortController; promise: Promise<void> }>();
@@ -53,9 +52,6 @@ export function createHarnessSessionRegistration(options: {
       const authorityWorkspaceRoot = context.workspaceId && options.resolveWorkspaceRoot
         ? await waitWithSignal(options.resolveWorkspaceRoot(context.workspaceId), entry.controller.signal)
         : context.authorityWorkspaceRoot;
-      if (context.workspaceId && options.resolveWorkspaceRoot && !authorityWorkspaceRoot) {
-        throw new HarnessServiceError("unavailable", "Workspace authority root could not be resolved; session admission was not committed");
-      }
       if (disposed || entry.controller.signal.aborted || pending.get(context.actor.sessionId) !== entry) return;
       options.host.registerSession({
         ...context,

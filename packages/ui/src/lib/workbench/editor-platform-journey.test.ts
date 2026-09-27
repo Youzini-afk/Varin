@@ -13,7 +13,8 @@ import {
 import { attachEditorContext } from '@/lib/agent-editor/attach';
 import { projectEditorContextAttachments } from '@/lib/agent-editor/projection';
 import { bindDocumentRegistry, resetDocumentRegistry } from '@/lib/documents/session';
-import { documentKey } from '@/lib/documents/types';
+import { DocumentRegistry } from '@/lib/documents/registry';
+import { documentKey, type DocumentIdentity } from '@/lib/documents/types';
 import { FileEditorModelRegistry } from '@/lib/monaco/model-registry';
 import type { MonacoRuntime } from '@/lib/monaco/runtime';
 import { getRuntimeKey } from '@varin/application-client';
@@ -104,13 +105,18 @@ class JourneyModel {
 }
 
 const createMemoryDocuments = () => {
+  const aliases = new Map<string, string>();
+  const storageKey = (resource: VarinResourceReference): string => {
+    const alias = `${resource.workspaceId}\0${resource.resourceId}`;
+    return aliases.get(alias) ?? alias;
+  };
   let revision = 1;
   const files = new Map<string, { content: string; revision: string }>([[
-    documentKey(identity),
+    storageKey(identity),
     { content: 'const value = 1;\n', revision: 'd1_1' },
   ]]);
   const read = async (resource: VarinResourceReference): Promise<VarinDocumentReadResult> => {
-    const current = files.get(documentKey(resource));
+    const current = files.get(storageKey(resource));
     return current
       ? {
           status: 'ready',
@@ -127,10 +133,17 @@ const createMemoryDocuments = () => {
   const api: DocumentsAPI = {
     clearDirtyBuffers: async () => ({ cleared: true }),
     publishDirtyBuffers: async (request) => ({ ...request, updatedAt: '2026-08-28T00:00:00.000Z' }),
-    resolveWorkspace: async () => ({ workspaceId, hostId: 'host-1', epoch: 1 }),
+    resolveWorkspace: async (input) => ({ workspaceId: input.workspaceId ?? workspaceId, hostId: 'host-1', epoch: 1 }),
+    resolveResourceIdentity: async (resource) => ({
+      coordinationId: `host-1\0${storageKey(resource)}`,
+      aliases: [...aliases.entries()].filter(([, key]) => key === storageKey(resource)).map(([alias]) => {
+        const separator = alias.indexOf('\0');
+        return { workspaceId: alias.slice(0, separator), resourceId: alias.slice(separator + 1) };
+      }).concat(resource),
+    }),
     read,
     write: async (request) => {
-      const key = documentKey(request.resource);
+      const key = storageKey(request.resource);
       const current = files.get(key);
       if (request.expectedRevision !== (current?.revision ?? null)) {
         const currentResult = await read(request.resource);
@@ -152,7 +165,7 @@ const createMemoryDocuments = () => {
     },
     move: async (request) => ({ status: 'missing', resource: request.from }),
     delete: async (request) => {
-      files.delete(documentKey(request.resource));
+      files.delete(storageKey(request.resource));
       return { status: 'deleted', resource: request.resource };
     },
     watch: () => ({ close: () => undefined }),
@@ -163,17 +176,20 @@ const createMemoryDocuments = () => {
   };
   return {
     api,
+    aliases,
     externalWrite(content: string) {
       const nextRevision = `d1_${++revision}`;
-      files.set(documentKey(identity), { content, revision: nextRevision });
+      files.set(storageKey(identity), { content, revision: nextRevision });
     },
     files,
   };
 };
 
-const settleModel = async (): Promise<void> => {
-  await Promise.resolve();
-  await Promise.resolve();
+const settleModel = async (registry: FileEditorModelRegistry, resource: DocumentIdentity): Promise<void> => {
+  for (let attempt = 0; attempt < 20; attempt += 1) {
+    if (registry.getSnapshot(resource).status === 'ready') return;
+    await new Promise((resolve) => setTimeout(resolve, 0));
+  }
 };
 
 const switchProfile = async (fromProfileId: string, toProfileId: string): Promise<void> => {
@@ -198,6 +214,42 @@ afterEach(() => {
 });
 
 describe('unified editor cross-surface journey', () => {
+  test('parent and child project tabs share one Monaco model for the same physical file', async () => {
+    const memory = createMemoryDocuments();
+    const child: DocumentIdentity = { workspaceId: 'child-project', resourceId: 'main.ts' };
+    memory.aliases.set(`${identity.workspaceId}\0${identity.resourceId}`, 'same-physical-file');
+    memory.aliases.set(`${child.workspaceId}\0${child.resourceId}`, 'same-physical-file');
+    memory.files.clear();
+    memory.files.set('same-physical-file', { content: 'const value = 1;\n', revision: 'd1_1' });
+    const documents = new DocumentRegistry({ documents: memory.api, getGeneration: () => 1 });
+    const models: JourneyModel[] = [];
+    const monaco = {
+      Uri: { from: (value: unknown) => value },
+      editor: { createModel: (value: string, _language: string, uri: unknown) => {
+        const model = new JourneyModel(value, uri);
+        models.push(model);
+        return model;
+      } },
+    } as unknown as MonacoRuntime;
+    const modelRegistry = new FileEditorModelRegistry({ documents, loadRuntime: async () => monaco, runtimeKey: getRuntimeKey() });
+    try {
+      modelRegistry.acquire(identity, 'parent-tab');
+      modelRegistry.acquire(child, 'child-tab');
+      await settleModel(modelRegistry, identity);
+      await settleModel(modelRegistry, child);
+      const parentModel = modelRegistry.getSnapshot(identity);
+      const childModel = modelRegistry.getSnapshot(child);
+      expect(parentModel.status).toBe('ready');
+      expect(childModel.status).toBe('ready');
+      if (parentModel.status !== 'ready' || childModel.status !== 'ready') throw new Error('Shared model did not open');
+      expect(childModel.model).toBe(parentModel.model);
+      expect(models).toHaveLength(1);
+    } finally {
+      modelRegistry.dispose();
+      await documents.dispose();
+    }
+  });
+
   test('preserves one model and document authority through IDE edits, rename, Agent attachment, conflict, and Profile handoff', async () => {
     const memory = createMemoryDocuments();
     const documents = bindDocumentRegistry(memory.api);
@@ -220,7 +272,7 @@ describe('unified editor cross-surface journey', () => {
 
     const tabOwner = `tab:${workspaceId}:view-main`;
     modelRegistry.acquire(identity, tabOwner);
-    await settleModel();
+    await settleModel(modelRegistry, identity);
     const agentSnapshot = modelRegistry.getSnapshot(identity);
     expect(agentSnapshot.status).toBe('ready');
     if (agentSnapshot.status !== 'ready') throw new Error(agentSnapshot.status);
