@@ -766,9 +766,9 @@ describe("HostController", () => {
         transport.sent.filter((entry) => isEvent(entry, "project.trust.request")).length,
         1,
       );
-      // Journal calls must bypass a queued lifecycle request: during an Agent
-      // tool call the queued prompt is likewise waiting for harness.respond.
-      transport.receive(createRequest("journal-oob", "session.workContext.read", { sessionId: "not-active" }));
+      // Out-of-band calls must bypass a queued lifecycle request: during an
+      // Agent tool call the queued prompt is likewise waiting for a response.
+      transport.receive(createRequest("journal-oob", "agent.abort", { sessionId: "not-active" }));
       const journal = await transport.waitFor((entry) => isResponse(entry, "journal-oob"));
       assert.ok(journal.kind === "response" && !journal.ok);
       transport.receive(
@@ -1029,7 +1029,6 @@ describe("HostController", () => {
       transport.receive(createRequest("handshake-unbound", "host.handshake", {
         clientName: "host-test", clientVersion: "0.0.0", mode: "test",
         protocolVersions: [VARIN_PROTOCOL_VERSION],
-        capabilities: { harnessWorkContext: true },
       }));
       const handshake = await transport.waitFor((entry) => isResponse(entry, "handshake-unbound"));
       assert.ok(handshake.kind === "response" && handshake.ok);
@@ -1037,20 +1036,14 @@ describe("HostController", () => {
       const created = await transport.waitFor((entry) => isResponse(entry, "create-unbound"));
       assert.ok(created.kind === "response" && created.ok);
       const sessionId = (created.result as SessionSnapshot).sessionId;
+      assert.ok(typeof sessionId === "string" && sessionId.length > 0);
 
-      transport.receive(createRequest("sync-unbound", "session.workContext.sync", { sessionId }));
-      const request = await transport.waitFor((entry) => isEvent(entry, "harness.request"));
-      assert.ok(request.kind === "event" && request.event === "harness.request");
-      assert.equal(request.data.method, "context.get");
       transport.receive(createRequest("reject-unbound", "harness.rejectUnbound", {
-        requestId: request.data.requestId,
+        requestId: "hr_missing",
       }));
       const rejected = await transport.waitFor((entry) => isResponse(entry, "reject-unbound"));
       assert.ok(rejected.kind === "response" && rejected.ok);
-      assert.deepEqual(rejected.result, { accepted: true });
-      const sync = await transport.waitFor((entry) => isResponse(entry, "sync-unbound"));
-      assert.ok(sync.kind === "response" && !sync.ok);
-      assert.match(sync.error.message, /before the broker bound this session worker/);
+      assert.deepEqual(rejected.result, { accepted: false });
     } finally {
       await controller.dispose();
       await rm(root, { force: true, recursive: true });

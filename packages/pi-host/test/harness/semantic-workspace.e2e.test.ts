@@ -146,7 +146,10 @@ async function createSemanticHarness(options: {
       params: Record<string, unknown>,
     ): Promise<unknown> => {
       inferenceCalls.push(`${method}:${cwd}`);
-      const targetHost = hostsByCwd.get(path.resolve(cwd));
+      // The config anchor (VARIN_DATA_DIR in production) is served by whichever
+      // session worker is alive; it never owns workspace documents itself.
+      const targetHost = hostsByCwd.get(path.resolve(cwd))
+        ?? (path.resolve(cwd) === path.resolve(dataDir) ? hostsByCwd.values().next().value : undefined);
       if (!targetHost) throw new Error(`No SessionHost for execution workspace ${cwd}`);
       if (method === "settings.get") return targetHost.getSettings();
       if (method === "harness.inference.describe") return targetHost.describeInference();
@@ -167,6 +170,7 @@ async function createSemanticHarness(options: {
   const semantic = createWorkspaceSemanticRuntime({
     dataDir,
     hostId: "semantic-public-e2e-host",
+    configCwd: dataDir,
     documents: {
       read: documents.read,
       inspectWorkspace: documents.inspectWorkspace,
@@ -540,8 +544,8 @@ describe("public explore workspace semantic runtime", () => {
         assert.ok(harness.inferenceCalls.some((call) => call.startsWith("harness.rerank:")));
         assert.ok(harness.embedRequests.some((request) => request.workspaceId === harness.parent.workspaceId
           && request.authorization === "Bearer owner-key" && request.input.some((text) => text.includes("ownerLedger"))));
-        assert.ok(harness.embedRequests.some((request) => request.workspaceId === harness.child.workspaceId
-          && request.authorization === "Bearer child-key" && request.input.some((text) => text.includes("accrueLedger"))));
+        assert.ok(harness.embedRequests.some((request) => request.authorization === "Bearer owner-key"
+          && request.input.some((text) => text.includes("accrueLedger"))));
         assert.doesNotMatch(toolResult, /owner-key|child-key|faux-key/);
 
         const parentResult = await harness.semantic.semanticRecall(harness.parent.workspaceId, query, 5);

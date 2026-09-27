@@ -69,12 +69,12 @@ describe("inherit — Pi capture through Host dispatch and dequeue", () => {
     });
     try {
       const parent = await parentHost.create(workspace, "Parent");
-      sourceServices.registerSession(await sourceServices.prepareWorkContext({
+      sourceServices.registerSession({
         actor: { authorityInstanceId: "inherit-test", sessionId: parent.sessionId,
           workerId: "parent-worker", workerGeneration: 1 },
         workspaceId: "workspace", workspaceRoot: workspace,
         grantedCapabilities: ["context.session", "control.thread", "read.output"],
-      }));
+      });
       const manager = parentHost.session.sessionManager;
       manager.appendMessage({ role: "user", content: "OLD_RAW_OUTSIDE_ACTIVE_INPUT", timestamp: 1 });
       manager.appendMessage(fauxAssistantMessage("old answer"));
@@ -99,7 +99,7 @@ describe("inherit — Pi capture through Host dispatch and dequeue", () => {
       const childStarted = new Promise<void>((resolve) => { spawned = resolve; });
       const adapter: ThreadSessionAdapter = {
         create: async (input) => childHost.create(input.cwd, input.name, input.parentSession, input.tools, input.model, input.permissions,
-          undefined, 1, "branch", input.initialWorkContext),
+          undefined, 1, "branch"),
         open: async () => { throw new Error("new dispatch must not open an old child"); },
         prompt: async (sessionId, text, instructions, images) => {
           const result = await childHost.prompt(sessionId, text, images, instructions);
@@ -129,7 +129,7 @@ describe("inherit — Pi capture through Host dispatch and dequeue", () => {
           merge: async () => ({ merged: 0, conflicts: [], conflictState: "none", changedFiles: [], diffStats: { files: 0, insertions: 0, deletions: 0 } }),
         },
       });
-      const common = { workspaceId: "workspace", parent: { kind: "session" as const, id: parent.sessionId },
+      const common = { scopeId: "workspace", parent: { kind: "session" as const, id: parent.sessionId },
         brief: "block one slot", kind: "implementation" as const, createdBy: "agent" as const,
         concurrency: 1, autoRun: true, worktree: "shared" as const, tools: ["read"], permissions: {} };
       const blocker = await registry.createThread(common);
@@ -137,7 +137,6 @@ describe("inherit — Pi capture through Host dispatch and dequeue", () => {
       const dispatch = createThreadDispatchService({
         threadRegistry: registry, threadSpawnSession: (input) => runtime.spawn(input),
         threadCaptureInputContext: ({ sessionId }) => runtime.captureInputContext(sessionId),
-        workContextGet: sourceServices.workContextGet,
       } as HarnessServiceHost);
       const result = await dispatch.handle({ task: "Use the inherited evidence", input: "inherit", worktree: "shared",
         concurrency: 1, model: { providerId: model.provider, modelId: model.id }, tools: ["read"] }, {

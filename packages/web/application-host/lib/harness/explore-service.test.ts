@@ -132,7 +132,7 @@ describe("explore through Host router, real ripgrep, and Documents", () => {
     expect(await f.request({ question: "needle", paths: [".", "../outside.ts"] })).toMatchObject({ ok: false, error: { code: "forbidden" } });
   });
 
-  it("normalizes operation-dir and absolute path anchors to authorized workspace resource IDs", async () => {
+  it("normalizes session-cwd and absolute path anchors to authorized workspace resource IDs", async () => {
     const f = await fixture();
     const projectA = path.join(f.workspace, "project-a");
     const projectBSource = path.join(f.workspace, "project-b", "src");
@@ -141,7 +141,8 @@ describe("explore through Host router, real ripgrep, and Documents", () => {
     await fs.writeFile(path.join(projectA, "src", "target.ts"), "needle in project a\n", "utf8");
     await fs.writeFile(path.join(projectBSource, "target.ts"), "needle in project b\n", "utf8");
 
-    f.actor.operationDir = "project-a";
+    f.actor.cwd = path.join(f.workspace, "project-a");
+    f.actor.authorityRoot = f.workspace;
     f.actor.workspaceScope = ["project-a", "project-b"];
     const relative = await f.request({ question: "needle", anchors: ["src/target.ts"] });
     expect(relative.ok, JSON.stringify(relative)).toBe(true);

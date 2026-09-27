@@ -231,7 +231,7 @@ describe("related tool", () => {
     expect(result.text).toContain("Calls: unavailable");
   });
 
-  it("uses queryScope, then operationDir, then workspaceScope for duplicate symbol names", async () => {
+  it("uses the session cwd, then workspaceScope, for duplicate symbol names", async () => {
     for (const project of ["project-a", "project-b", "project-c"]) {
       await store.replaceFileSymbols(`${project}/shared.ts`, "typescript", [
         { name: "shared", kind: "function", range },
@@ -267,14 +267,15 @@ describe("related tool", () => {
     };
 
     const scoped = await service.handle({ anchor: "shared" }, contextFor({
-      queryScope: ["project-a"],
-      operationDir: "project-b",
+      cwd: "/ws/project-a",
+      authorityRoot: "/ws",
       workspaceScope: ["project-a", "project-b", "project-c"],
     }));
     expect(scoped.definitions.map((item) => item.path)).toEqual(["project-a/shared.ts"]);
 
     const operationDefault = await service.handle({ anchor: "shared" }, contextFor({
-      operationDir: "project-b",
+      cwd: "/ws/project-b",
+      authorityRoot: "/ws",
       workspaceScope: ["project-b", "project-c"],
     }));
     expect(operationDefault.definitions.map((item) => item.path)).toEqual(["project-b/shared.ts"]);
@@ -285,7 +286,8 @@ describe("related tool", () => {
     expect(workspaceDefault.definitions.map((item) => item.path)).toEqual(["project-c/shared.ts"]);
 
     await expect(service.handle({ anchor: "shared" }, contextFor({
-      operationDir: "project-b",
+      cwd: "/ws/project-b",
+      authorityRoot: "/ws",
       workspaceScope: ["project-c"],
     }))).rejects.toMatchObject({ harnessCode: "forbidden" });
   });
@@ -304,7 +306,8 @@ describe("related tool", () => {
       workerId: "worker",
       workerGeneration: 1,
       workspaceId: "ws",
-      queryScope: ["project-a"],
+      cwd: "/ws/project-a",
+      authorityRoot: "/ws",
       grantedCapabilities: ["read.search"],
     };
     const ctx: HarnessServiceContext = {

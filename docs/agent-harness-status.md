@@ -18,7 +18,7 @@ Last updated: 2026-09-27
 Default-on 列只记当前代码，尚未完成的正式目标单独列为待实施。
 [roadmap.md](roadmap.md) 只引用本文件，不再自述测试数。
 
-**D-337 / 阶段 HR：面向任务与资源的 Harness（2026-09-27，方向确认 / HR0–HR3 已接线，HR4–HR5 实施中）。**
+**D-337 / 阶段 HR：面向任务与资源的 Harness（2026-09-27，方向确认 / HR0–HR4 已接线，HR5 验收中）。**
 
 [工作区解耦与持续检索设计](resource-oriented-harness-design.md) 定义 HR0–HR5：资源与数据归属、会话与操作、直接检索、
 持续索引、产品与旧机制收口、真实使用验收。工作区回到会话/项目组织职责，执行与查询使用明确的本次目标；
@@ -45,7 +45,7 @@ HR1 已接线（wired）：`shell.exec` 每次执行的默认 cwd 锚定 actor `
 HR2 已接线（wired）：`search.content` 改为"问题 + 本次资源范围"的多单元模型——router `authorizedPaths`
 按各自解析出的资源根（可含外部 file/directory 根与 actor 工作区）分组，逐根独立下发 kernel 搜索后合并；
 多根结果输出绝对规范路径，经资源根寻址可直接再打开/引用；单根 actor 工作区结果保持相对 resourceId 不变。
-范围链：显式 `paths[]`（受理时逐条授权）→ 会话 `queryScope` → `operationDir` → `workspaceScope` 相交，
+范围链：显式 `paths[]`（受理时逐条授权）→ 会话 `cwd` 默认范围 → `workspaceScope` 相交，
 范围在候选预算与 top-k 之前生效且只属于本次查询；无项目会话无显式范围时以 `authorityRoot` 注册为目录资源根
 作本次默认范围。覆盖诚实性：任一请求根不可解析/失败标 `partial`，全部失败返回 `unavailable`（不冒充空结果），
 `searchedFiles` 为各根真实 `scannedFiles` 之和、任一根未知则整体缺省；跨根重叠命中按键去重。
@@ -68,6 +68,23 @@ registry 根 id 寻址，外部 file/directory 根经 `inspectWorkspace` 直接�
 增量失效沿用 `observeDocumentMutation`（事件已按资源根 id 寻址）；冷目录语义为空时探索层如实降级，
 不包装成热覆盖。验证：knowledge 目录 26 文件 193 全绿（含新增"不同根共享同一 inference cwd"用例）、
 harness/search 套件与 app-host typecheck 绿。未测：真实打包环境共享 worker 的凭据可见性（桌面纵切属 HR5）。
+
+HR4 已接线（wired）：RR2 的可变会话操作上下文机制整体移除——pi-host 删 `work-context.ts`/`work-context-tool.ts`/
+`session-work-context.ts` 与 `WorkContextMirror`，Host 删 `work-context.ts` 及 `context.discover/get/select/scope/reset`
+五个服务，`work_context` 从 Agent 工具面与能力声明（Web/Electron/presets）中移除；broker 打开会话不再等待
+`session.workContext.sync`，注册前无 journal 恢复门闸；`harness.respond` 不再 piggyback `contextEntryId`/目录修订，
+Thread manifest 的 `initialWorkContext` 收敛为冻结 `authorityRoot` 事实。
+接替语义：相对路径与 `shell.exec` 默认锚均取会话 `cwd`（注册时记录的启动目录，快照固定，actor 缺席时回落 supervisor
+注册锚）；`authorityRoot` 只做授权边界；`search.content`/explore/related 的默认范围改为会话 cwd；
+子任务派发直接用 actor 权威根校验并严格执行父 Run 冻结工具集（`work_context` 特赦删除）；Pi read/write 工具
+以 cwd 锚定相对路径、绝对路径经 Host 授权。UI 的会话指示从 `workContext.operationDir` 改为显示会话 cwd
+（十个 locale 键同步改名）。目录离线只使相关操作报错，不阻塞会话注册与聊天。
+删除的测试只覆盖已删机制（work-context 双侧、journal 门闸、context 工具、scheduler 上下文切换）；其余测试改写为
+cwd/资源根语义并新增外部锚定用例。
+验证：web 套件 300 文件 2686 全绿（shell-supervisor dispose 竞态未处理拒绝为并行运行偶发，文件未改动、
+单跑 49/49 绿）；app-host 源码+测试 typecheck、pi-host tsc、runtime-broker 86/86、electron pi-runtime 6/6、
+ui typecheck 绿；protocol/runtime-broker/extension dist 重建。
+未测：真实桌面会话重开与目录离线的产品化纵切（属 HR5 场景验收）。
 
 **运行时可靠性专项 RR（2026-09-26：RR0–RR5 的代码路径与定向行为已复核；RR6 的真实安装包/外部代理平台纵切仍待验证）。**
 

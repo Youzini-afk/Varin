@@ -545,7 +545,6 @@ export interface HostHandshakeParams {
     /** The application Host can resolve native Pi find/ls paths against editor drafts. */
     harnessDocumentPathOverlay?: boolean;
     /** Host-owned operation-directory and query-scope services. */
-    harnessWorkContext?: boolean;
     /** The application Host permits session-local reader models over its guarded web.fetch service. */
     harnessWebRead?: boolean;
     /** The application Host provides web search, including its keyless default. */
@@ -663,11 +662,6 @@ export interface SessionSnapshot extends SessionRuntimeState {
   workspacePersistence?: "pending";
   /** Applied and selected Agent work focus; independent of the active Workbench shell. */
   workFocus?: SessionWorkFocusSnapshot;
-  /**
-   * Host-pinned work context last observed by the session worker
-   * (operation dir relative to the workspace root + CAS revision).
-   */
-  workContext?: { operationDir: string; revision: number };
 }
 
 export interface SessionStats {

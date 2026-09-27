@@ -34,7 +34,7 @@ export interface HarnessSearchContext {
    * resource root it resolved against (`workspaceId`, which may be an external
    * file/directory root unrelated to the actor's workspace classification) and
    * the root-relative resource id. Multiple roots in one query are searched
-   * independently and merged; entries take precedence over queryScope defaults.
+   * independently and merged; entries take precedence over the session-cwd default scope.
    */
   authorizedPaths?: ReadonlyArray<{ workspaceId: string; resourceId: string }>;
   inputContext?: AgentInputContext;
@@ -217,9 +217,9 @@ export function createHarnessSearchService(deps: HarnessSearchDeps) {
       // several directory roots, and the actor's own workspace can combine.
       // Internal callers (explore) pass workspace-relative `path`/`paths`
       // without router authorization; their single unit is the actor workspace.
-      // With no explicit scope the actor's query scope applies, then the
-      // operation dir, and for unbound sessions the authority root registers
-      // itself as this query's directory scope.
+      // With no explicit scope the session's cwd anchors this query, and for
+      // unbound sessions the authority root registers itself as this query's
+      // directory scope.
       interface SearchUnit{rootWorkspaceId:string;root:string;prefixes:string[];actorBound:boolean;}
       const units:SearchUnit[]=[];
       let missingScope=false;
@@ -238,7 +238,7 @@ export function createHarnessSearchService(deps: HarnessSearchDeps) {
       }else if(ctx.workspaceId){
         const root=await deps.resolveWorkspaceRoot(ctx.workspaceId);if(!root)return unavailableResult();
         const explicit=params.paths!==undefined?[...params.paths]:params.path!==undefined?[params.path]:undefined;
-        const defaultScope=ctx.actor?.queryScope?.length?[...ctx.actor.queryScope]:ctx.actor?.operationDir?[ctx.actor.operationDir]:undefined;
+        const defaultScope=ctx.actor?.cwd?[ctx.actor.cwd]:undefined;
         const allowed=toPrefixes(root,ctx.workspaceScope),requested=toPrefixes(root,explicit??defaultScope);
         const prefixes=[...new Set(allowed.flatMap(a=>requested.flatMap(r=>within(r,a)?[r]:within(a,r)?[a]:[])))];
         if(!prefixes.length)return emptyResult();

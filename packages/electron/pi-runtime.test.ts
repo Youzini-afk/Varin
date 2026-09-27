@@ -147,7 +147,6 @@ test('desktop broker handshakes with the compiled Pi host', async () => {
     assert.equal(handshake.protocolVersion, VARIN_PROTOCOL_VERSION);
     assert.equal(handshake.runtime.piVersion, pinnedPiVersion());
     const session = await broker.createSession(agentDir);
-    assert.ok(session.activeTools.includes('work_context'), 'desktop sessions must receive the Host work-context capability');
     assert.ok(session.activeTools.includes('document_read'), 'desktop sessions must receive the Host document-read capability');
     assert.ok(session.activeTools.includes('settings_search'), 'desktop sessions must receive the shared Host services');
   } finally {

@@ -171,7 +171,7 @@ describe("explore query services", () => {
     >;
     const ctx: HarnessServiceContext = {
       ...context({ source: "disk" }),
-      actor: { ...actor, queryScope: ["project-a"], operationDir: "project-b" },
+      actor: { ...actor, cwd: "/workspace/project-a", authorityRoot: "/workspace" },
       authorizedPaths: [{
         authorityId: "test-host",
         workspaceId: "workspace-1",
@@ -207,7 +207,7 @@ describe("explore query services", () => {
     >;
     const ctx: HarnessServiceContext = {
       ...context({ source: "disk" }),
-      actor: { ...actor, operationDir: "parent/project", workspaceScope: ["child/project"] },
+      actor: { ...actor, cwd: "/workspace/parent/project", authorityRoot: "/workspace", workspaceScope: ["child/project"] },
     };
     await expect(createExploreQueryStartService(host).handle({ question: "NeedleSymbol" }, ctx))
       .rejects.toMatchObject({ harnessCode: "forbidden" });

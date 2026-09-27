@@ -13,7 +13,7 @@
 import assert from "node:assert/strict";
 import { describe, it } from "node:test";
 import { mkdtempSync, writeFileSync, mkdirSync, rmSync } from "node:fs";
-import { join } from "node:path";
+import { join, resolve, relative, sep } from "node:path";
 import { tmpdir } from "node:os";
 
 // Host side — these are in the web/application-host package.
@@ -58,7 +58,7 @@ async function setupE2E(options: { diagnosticsProvider?: DiagnosticsProvider } =
     search: async (request) => request.query === "hello"
       ? { status: "ready" as const, generation: undefined, hits: [{
           column: 0, line: 1, preview: "function hello() {",
-          resource: { resourceId: join(workspaceRoot, "searchable.ts"), workspaceId: request.workspaceId },
+          resource: { resourceId: "searchable.ts", workspaceId: request.workspaceId },
         }] }
       : { status: "empty" as const, generation: undefined },
     resolveWorkspaceRoot: async () => workspaceRoot,
@@ -78,13 +78,16 @@ async function setupE2E(options: { diagnosticsProvider?: DiagnosticsProvider } =
       bridge.respond(identity.sessionId, requestId, outcome);
     },
     resolveActor: (identity) => harnessServiceHost.resolveActor(identity),
-    authorizeWorkspacePath: async (actor, inputPath) => ({
-      authorityId: "test-host",
-      workspaceId: actor.workspaceId!,
-      canonicalResourceId: inputPath,
-      inputPath,
-      resourceId: inputPath,
-    }),
+    authorizeWorkspacePath: async (actor, inputPath) => {
+      const canonical = resolve(workspaceRoot, inputPath);
+      return {
+        authorityId: "test-host",
+        workspaceId: actor.workspaceId!,
+        canonicalResourceId: canonical,
+        inputPath,
+        resourceId: relative(workspaceRoot, canonical).split(sep).join("/"),
+      };
+    },
   });
   registerHarnessServices(router, harnessServiceHost);
 

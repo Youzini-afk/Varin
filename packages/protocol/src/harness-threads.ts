@@ -400,14 +400,7 @@ export interface ThreadInheritedContext {
   anchors: string[];
 }
 
-/** Host-confirmed parent work context fixed when a child Thread is dispatched. */
-export interface ThreadInitialWorkContext {
-  /** Parent authority root; never used as the child operation directory. */
-  authorityRoot: string;
-  operationDir: string;
-  queryScope: string[] | null;
-  revision: number;
-}
+
 
 export interface ThreadLaunchManifest {
   carryBlocks: boolean;
@@ -421,7 +414,8 @@ export interface ThreadLaunchManifest {
    */
   inputOrigin?: "task" | "inherit";
   inheritedContext?: ThreadInheritedContext;
-  initialWorkContext?: ThreadInitialWorkContext;
+  /** Host-confirmed parent authority root fixed when this Thread was dispatched. */
+  initialAuthorityRoot?: string;
   scope: string[];
   systemPromptFragment: string | null;
   tools: string[];

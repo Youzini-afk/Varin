@@ -56,7 +56,6 @@ import {
   isWorkFocusId,
   isWorkFocusSource,
   type WorkFocusSelection,
-  type PiWorkContextSnapshot,
 } from "@varin/protocol";
 import { CompactionWorkerRuntime } from "./compaction-worker.js";
 import { HostError, toProtocolError } from "./errors.js";
@@ -114,37 +113,6 @@ const optionalPositiveInteger = (params: Record<string, unknown>, key: string): 
   return Number(value);
 };
 
-const optionalInitialWorkContext = (
-  params: Record<string, unknown>,
-): NonNullable<PiWorkContextSnapshot["context"]> | undefined => {
-  if (params.initialWorkContext === undefined) return undefined;
-  const value = expectRecord(params.initialWorkContext, "initialWorkContext");
-  if (typeof value.workspaceId !== "string" || !value.workspaceId
-    || typeof value.authorityRoot !== "string" || !value.authorityRoot
-    || typeof value.sessionRoot !== "string" || !value.sessionRoot
-    || typeof value.operationDir !== "string"
-    || value.revision !== 1
-    || (value.queryScope !== null && (!Array.isArray(value.queryScope)
-      || !value.queryScope.every((item) => typeof item === "string")))) {
-    throw new HostError("invalid_params", "initialWorkContext is malformed");
-  }
-  return {
-    workspaceId: value.workspaceId,
-    authorityRoot: value.authorityRoot,
-    sessionRoot: value.sessionRoot,
-    operationDir: value.operationDir,
-    queryScope: value.queryScope === null ? null : [...value.queryScope] as string[],
-    revision: 1,
-  };
-};
-
-const readNonNegativeInteger = (params: Record<string, unknown>, key: string): number => {
-  const value = params[key];
-  if (!Number.isSafeInteger(value) || Number(value) < 0) {
-    throw new HostError("invalid_params", `${key} must be a non-negative safe integer`);
-  }
-  return Number(value);
-};
 
 const HOST_CAPABILITIES: HostCapabilities = {
   agentProviders: true,
@@ -167,11 +135,6 @@ const OUT_OF_BAND_METHODS = new Set([
   "extension.ui.respond",
   "harness.respond",
   "harness.rejectUnbound",
-  "session.workContext.read",
-  "session.workContext.commit",
-  // Reopen sync waits for Host registration, which first reads settings through
-  // the ordinary request queue. Keep the sync observation off that queue.
-  "session.workContext.sync",
   "harness.inference.cancel",
   "provider.auth.cancel",
   "provider.auth.respond",
@@ -901,10 +864,6 @@ export class HostController {
           clientCapabilities !== undefined
           && readBoolean(clientCapabilities, "harnessDocumentRead", { optional: true }) === true,
         );
-        this.#sessionHost.setHarnessWorkContextEnabled(
-          clientCapabilities !== undefined
-          && readBoolean(clientCapabilities, "harnessWorkContext", { optional: true }) === true,
-        );
         this.#sessionHost.setHarnessDocumentPathOverlayEnabled(
           clientCapabilities !== undefined
           && readBoolean(clientCapabilities, "harnessDocumentPathOverlay", { optional: true }) === true,
@@ -942,7 +901,6 @@ export class HostController {
           optionalWorkFocusSelection(params),
           optionalPositiveInteger(params, "workFocusGeneration"),
           optionalWorkFocusRole(params),
-          optionalInitialWorkContext(params),
         );
       case "session.open": {
         const cwd = optionalString(params, "cwd");
@@ -1084,17 +1042,6 @@ export class HostController {
           readString(params, "sessionId"),
           readSessionFeatureMutation(params.mutation),
         );
-      case "session.workContext.read":
-        return this.#sessionHost.workContextRead(readString(params, "sessionId"));
-      case "session.workContext.sync":
-        return this.#sessionHost.syncWorkContext(readString(params, "sessionId"));
-      case "session.workContext.commit":
-        return this.#sessionHost.workContextCommit({
-          sessionId: readString(params, "sessionId"),
-          expectedLeafId: readNullableString(params, "expectedLeafId"),
-          expectedRevision: readNonNegativeInteger(params, "expectedRevision"),
-          context: expectRecord(params.context, "context") as unknown as import("@varin/protocol").PiWorkContextCommit["context"],
-        });
       case "session.entry":
         return this.#sessionHost.entry(
           readString(params, "sessionId"),

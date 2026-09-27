@@ -4,14 +4,12 @@ import type { HostHandshakeParams } from '@varin/protocol';
 export function applicationHostClientCapabilities(options: {
   documentRead: boolean;
   documentPathOverlay: boolean;
-  workContext: boolean;
   webRead: boolean;
   webSearch: boolean;
 }): NonNullable<HostHandshakeParams['capabilities']> {
   return {
     harnessDocumentRead: options.documentRead,
     harnessDocumentPathOverlay: options.documentPathOverlay,
-    harnessWorkContext: options.workContext,
     harnessExperiments: true,
     harnessSettings: true,
     harnessFollowUps: true,

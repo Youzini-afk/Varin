@@ -151,7 +151,7 @@ describe("thread runtime with real Pi sessions", () => {
 
     try {
       const input = {
-        workspaceId: "workspace-1",
+        scopeId: "workspace-1",
         parent: { kind: "session" as const, id: parent.sessionId },
         brief: "Check the implementation",
         preset: "check",
@@ -442,11 +442,10 @@ describe("thread runtime with native working-state integration", () => {
         void (async () => {
           if (!harnessServiceHost.hasActor(actor)) {
             const execution = executionContexts.get(sessionId);
-            const prepared = await harnessServiceHost.prepareWorkContext({ actor,
+            harnessServiceHost.registerSession({ actor,
               workspaceId: execution?.workspaceId ?? workspaceId, workspaceRoot: execution?.root ?? workspace,
               grantedCapabilities: ["context.session", "control.thread", "read.document", "write.document", "read.search", "read.output"],
             });
-            harnessServiceHost.registerSession(prepared);
           }
           await router!.processEvent({
             actor,
@@ -505,7 +504,6 @@ describe("thread runtime with native working-state integration", () => {
         projectTrustOverride: true,
       });
       child.setHarnessThreadRuntimeEnabled(true);
-      child.setHarnessWorkContextEnabled(true);
       return child;
     };
 
@@ -515,8 +513,7 @@ describe("thread runtime with native working-state integration", () => {
         if (!targetRun) throw new Error("Native child session was created without a Run id");
         const child = createChildHost();
         const created = await child.create(input.cwd, input.name, input.parentSession, input.tools, input.model, input.permissions,
-          undefined, 1, "branch", input.initialWorkContext);
-        assert.equal(child.workContextRead(created.sessionId).context?.revision, 1);
+          undefined, 1, "branch");
         childHosts.set(created.sessionId, child);
         childRunIds.set(created.sessionId, targetRun);
         const execution = await documents.resolveWorkspace({ path: input.cwd });
@@ -574,10 +571,6 @@ describe("thread runtime with native working-state integration", () => {
       resolveWorkspaceRoot: async (id) => (await documents.inspectWorkspace(id)).root,
       pathAuthority: createHarnessPathAuthority({ authorityId: authorityInstanceId,
         documents: { inspectWorkspace: (id) => documents.inspectWorkspace(id) } }),
-      workContextJournal: {
-        read: async (actor) => hostFor(actor.sessionId).workContextRead(actor.sessionId),
-        commit: async (actor, input) => hostFor(actor.sessionId).workContextCommit(input),
-      },
       discoveredShells: {
         hasBash: process.platform !== "win32",
         hasPowerShell: process.platform === "win32",
@@ -612,7 +605,7 @@ describe("thread runtime with native working-state integration", () => {
       respond: async (identity, requestId, outcome) => {
         hostFor(identity.sessionId).respondHarness(identity.sessionId, requestId, outcome);
       },
-      resolveActor: (identity, _signal, entryId) => harnessServiceHost.resolveActor(identity, entryId),
+      resolveActor: (identity) => harnessServiceHost.resolveActor(identity),
     });
     registerHarnessServices(router, harnessServiceHost);
 
@@ -627,7 +620,6 @@ describe("thread runtime with native working-state integration", () => {
       projectTrustOverride: true,
     });
     parentHost!.setHarnessThreadRuntimeEnabled(true);
-    parentHost!.setHarnessWorkContextEnabled(true);
     await writeFile(join(workspace, "parent.txt"), "parent baseline\n", "utf8");
 
     let parentFirstRoundTools = 0;
@@ -644,7 +636,6 @@ describe("thread runtime with native working-state integration", () => {
       }
       if (serialized.includes("You are working as the teammate thread")) {
         const child = [...childHosts.values()].at(-1);
-        assert.equal(child?.snapshot().workContext?.revision, 1);
         childRoundTools += 1;
         if (childRoundTools === 1) return fauxAssistantMessage([fauxToolCall("send", {
           to: "parent", kind: "request", requestId: "native-contract-question", message: "Which filename is approved for the result?",
@@ -682,12 +673,12 @@ describe("thread runtime with native working-state integration", () => {
         workerId: "native-parent-worker",
         workerGeneration: 1,
       } as const;
-      harnessServiceHost.registerSession(await harnessServiceHost.prepareWorkContext({
+      harnessServiceHost.registerSession({
         actor: parentActor,
         grantedCapabilities: ["context.session", "control.thread", "process.shell", "read.search", "read.output", "write.document"],
         workspaceId,
         workspaceRoot: workspace,
-      }));
+      });
 
       await parentHost!.prompt(parent.sessionId, "Delegate the child result and wait for it.");
       await parentHost!.session.waitForIdle();

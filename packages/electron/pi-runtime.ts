@@ -117,7 +117,6 @@ export const createDesktopPiRuntimeBroker = ({
       capabilities: applicationHostClientCapabilities({
         documentRead: true,
         documentPathOverlay: true,
-        workContext: true,
         webRead: true,
         webSearch: true,
       }),

@@ -258,11 +258,9 @@ export function createShellExecService(host: HarnessServiceHost): HarnessService
   return {
     handle: async (params, ctx: HarnessServiceContext) => {
       const target = params.target?.trim();
-      // Router resolved this actor before entering the service. Keep the
-      // default shell anchor tied to that same request snapshot even if a
-      // concurrent context.select updates the Host's live shell anchor below.
-      const acceptedWorkspaceId = ctx.actor.workspaceId;
-      const acceptedOperationDir = ctx.actor.operationDir;
+      // Router resolved this actor before entering the service. The default
+      // shell anchor stays pinned to that same request snapshot's session cwd.
+      const acceptedSessionCwd = ctx.actor.cwd ?? ctx.actor.authorityRoot;
       const materializeError = target ? null : await requireMaterializedDirectory(host, ctx.sessionId, ctx.signal);
       if (materializeError) {
         return {
@@ -316,24 +314,14 @@ export function createShellExecService(host: HarnessServiceHost): HarnessService
         return { kind: "spawn-failed", reason, interpreter: "", hint } as ShellExecResultSpawnFailed;
       }
       let defaultAnchorCwd: string | undefined;
-      if (params.cwd === undefined && acceptedOperationDir !== undefined) {
-        // HR0: the operation dir anchors at the actor's authority root — the
-        // authorized workspace root for bound sessions, the session launch
-        // directory for unbound ones.
-        const anchorRoot = acceptedWorkspaceId
-          ? await host.resolveWorkspaceRoot?.(acceptedWorkspaceId) ?? null
-          : ctx.actor.authorityRoot ?? null;
-        if (!anchorRoot) {
-          return {
-            kind: "spawn-failed",
-            reason: "workspace-root-unavailable",
-            interpreter: "",
-            hint: "The request's authority root could not be resolved for its pinned operation directory.",
-          } as ShellExecResultSpawnFailed;
-        }
-        defaultAnchorCwd = path.resolve(anchorRoot, acceptedOperationDir ?? "");
+      const sessionCwd = acceptedSessionCwd ?? undefined;
+      if (params.cwd === undefined && sessionCwd !== undefined) {
+        // Pin this request's snapshot cwd; the supervisor's own anchor is the
+        // same directory at admission, but an admitted request must not pick
+        // up a later anchor change.
+        defaultAnchorCwd = sessionCwd;
       }
-      // The router authorized params.cwd against the actor's operation dir;
+      // The router authorized params.cwd against the actor's session cwd;
       // run against the resolved absolute, not the raw relative (which would
       // silently anchor at the Host process cwd).
       const authorizedCwd = params.cwd === undefined ? undefined : ctx.authorizedPaths[0]?.canonicalResourceId;
@@ -1137,24 +1125,7 @@ export function registerHarnessServices(
     router.register("zone2.assemble", createZone2AssembleService(host, zone2Delivery));
     router.register("zone2.delivered", createZone2DeliveredService(zone2Delivery));
   }
-  // RR2: session work context — autonomous project select/scope within the
-  // authorized workspace. Registered on every host; the service host rejects
-  // mutations when no path authority is wired.
-  router.register("context.discover", {
-    handle: (params, ctx) => host.workContextDiscover(ctx.actor, params, ctx.signal),
-  });
-  router.register("context.get", {
-    handle: (_params, ctx) => Promise.resolve(host.workContextGet(ctx.actor)),
-  });
-  router.register("context.select", {
-    handle: (params, ctx) => host.workContextSelect(ctx.actor, params),
-  });
-  router.register("context.scope", {
-    handle: (params, ctx) => host.workContextScope(ctx.actor, params),
-  });
-  router.register("context.reset", {
-    handle: (params, ctx) => Promise.resolve(host.workContextReset(ctx.actor, params)),
-  });
+
   // Every Host can acknowledge compaction and reset observer baselines.
   router.register("context.retained", createContextRetainedService(host));
   // D-314: the owning session worker submits frozen compaction tasks; the

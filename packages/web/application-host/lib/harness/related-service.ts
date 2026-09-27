@@ -4,7 +4,7 @@ import type { HarnessServiceHost } from "./service-host.js";
 import { HarnessServiceError } from "./service-error.js";
 import { executeRelated } from "./related-tool.js";
 import { looksLikePathObject } from "./explore-query.js";
-import { intersectRetrievalScope } from "./explore-service.js";
+import { intersectRetrievalScope, sessionDefaultRoot } from "./explore-service.js";
 
 type RelatedParams = HarnessServiceMap["related.query"]["params"];
 
@@ -43,9 +43,9 @@ export function createRelatedQueryService(
         );
       }
       const anchor = pathAnchor ? (ctx.authorizedPaths[0]!.resourceId || ".") : requestedAnchor;
-      const defaultRoots = ctx.actor.queryScope?.length
-        ? [...ctx.actor.queryScope]
-        : ctx.actor.operationDir ? [ctx.actor.operationDir] : undefined;
+      const defaultRoots = sessionDefaultRoot(ctx.actor) === undefined
+        ? undefined
+        : [sessionDefaultRoot(ctx.actor)!];
       const requestedRoots = [
         ...(defaultRoots ?? []),
         ...(pathAnchor ? [anchor] : []),

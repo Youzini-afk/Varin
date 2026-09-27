@@ -47,20 +47,17 @@ const pixelPng = (): Buffer => {
 };
 
 describe("surface-aware native read", () => {
-  it("reads precisely the file authorized before a concurrent operation-dir change", async () => {
+  it("anchors a relative path at the session cwd for Host authorization", async () => {
     const root = await mkdtemp(join(tmpdir(), "varin-read-admission-"));
-    const first = join(root, "first"), second = join(root, "second");
-    await mkdir(first); await mkdir(second);
+    const first = join(root, "first");
+    await mkdir(first);
     await writeFile(join(first, "same.txt"), "first");
-    await writeFile(join(second, "same.txt"), "second");
-    let operationDir = first;
     const bridge = { request: async (_method: string, params: { path: string }) => {
       assert.equal(params.path, join(first, "same.txt"));
-      operationDir = second;
       return { source: "disk" as const, base64: Buffer.from("first").toString("base64") };
     } } as unknown as HostServicesBridge;
     try {
-      const result = await createSurfaceAwareReadTool(bridge, root, { operationDir: () => operationDir })
+      const result = await createSurfaceAwareReadTool(bridge, first)
         .execute("call-frozen", { path: "same.txt" }, undefined, undefined, context);
       assert.equal((result.content[0] as { text: string }).text, "first");
     } finally { await rm(root, { recursive: true, force: true }); }

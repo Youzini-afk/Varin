@@ -175,7 +175,7 @@ describe("production shell assembly", () => {
     }
   }, 30_000);
 
-  nativeAuthorityIt("executes real heredocs and switches a persistent shell with the work context", async () => {
+  nativeAuthorityIt("executes real heredocs and keeps a persistent shell's own cwd", async () => {
     const root = mkdtempSync(join(tmpdir(), "shell-context-")); dirs.push(root);
     const first = join(root, "first"), second = join(root, "second");
     mkdirSync(first); mkdirSync(second); mkdirSync(join(second, "nested"));
@@ -191,11 +191,11 @@ describe("production shell assembly", () => {
     };
     expect(await run("export VARIN_TEST_KEEP=retained; cat <<'EOF'\nheredoc-marker\nEOF"))
       .toMatchObject({ kind: "completed", exitCode: 0, stdout: expect.stringContaining("heredoc-marker") });
-    await host.workContextSelect((await host.resolveActor(actor("session-context")))!, { path: "second", expectedRevision: 0 });
-    const retained = await run('printf "%s\\n" "$VARIN_TEST_KEEP"; pwd');
-    expect(retained).toMatchObject({ kind: "completed", exitCode: 0, stdout: expect.stringContaining("retained") });
-    expectCwd(retained, second);
-    const nested = await run("cd nested # tail comment");
+    const initial = await run('printf "%s\\n" "$VARIN_TEST_KEEP"; pwd');
+    expect(initial).toMatchObject({ kind: "completed", exitCode: 0, stdout: expect.stringContaining("retained") });
+    // The persistent shell starts at the session's launch directory.
+    expectCwd(initial, first);
+    const nested = await run("cd ../second/nested # tail comment");
     expect(nested).toMatchObject({ kind: "completed", exitCode: 0 });
     expectCwd(nested, join(second, "nested"));
     const pwd = await run("pwd");
@@ -206,62 +206,6 @@ describe("production shell assembly", () => {
     if (syntax.kind === "completed") expect(syntax.exitCode).not.toBe(0);
     expect(await run("echo after-syntax")).toMatchObject({ kind: "completed", exitCode: 0,
       stdout: expect.stringContaining("after-syntax") });
-  }, 45_000);
-
-  nativeAuthorityIt("pins the accepted default anchor across context selection without resetting persistent cd", async () => {
-    const root = mkdtempSync(join(tmpdir(), "shell-anchor-admission-")); dirs.push(root);
-    const first = join(root, "first"), second = join(root, "second");
-    mkdirSync(first); mkdirSync(second); mkdirSync(join(second, "nested"));
-    const pathAuthority = createHarnessPathAuthority({ authorityId: "host", documents: { inspectWorkspace: async () => ({ root }) } });
-    let releaseMaterialization!: () => void;
-    let announceMaterialization!: () => void;
-    const materializationEntered = new Promise<void>((resolve) => { announceMaterialization = resolve; });
-    const materializationGate = new Promise<void>((resolve) => { releaseMaterialization = resolve; });
-    let holdMaterialization = true;
-    const host = createHost({
-      search: async () => ({ status: "empty", generation: undefined }),
-      resolveWorkspaceRoot: async () => root,
-      pathAuthority,
-      workingBranchEnsureMaterialized: async () => {
-        if (holdMaterialization) {
-          announceMaterialization();
-          await materializationGate;
-          holdMaterialization = false;
-        }
-        return { status: "materialized", path: root };
-      },
-    });
-    host.registerSession({ actor: actor("session-anchor-admission"), grantedCapabilities: ["process.shell", "context.session"],
-      workspaceId: "ws-anchor-admission", workspaceRoot: first, authorityWorkspaceRoot: root, shellSetting: "auto" });
-
-    const oldActor = (await host.resolveActor(actor("session-anchor-admission")))!;
-    expect(oldActor.operationDir).toBe("first");
-    const oldContext = serviceContext("session-anchor-admission", "ws-anchor-admission");
-    oldContext.actor = oldActor;
-    const acceptedBeforeSelect = createShellExecService(host).handle({ command: "pwd", waitMs: 15_000 }, oldContext);
-
-    await materializationEntered;
-    await host.workContextSelect(oldActor, { path: "second", expectedRevision: 0 });
-    releaseMaterialization();
-
-    const beforeSelect = await acceptedBeforeSelect;
-    expect(beforeSelect).toMatchObject({ kind: "completed" });
-    expectCwd(beforeSelect, first);
-
-    const runAtCurrentContext = async (command: string) => {
-      const ctx = serviceContext("session-anchor-admission", "ws-anchor-admission");
-      ctx.actor = (await host.resolveActor(actor("session-anchor-admission")))!;
-      return createShellExecService(host).handle({ command, waitMs: 15_000 }, ctx);
-    };
-    const selected = await runAtCurrentContext("pwd");
-    expect(selected).toMatchObject({ kind: "completed" });
-    expectCwd(selected, second);
-    const nested = await runAtCurrentContext("cd nested");
-    expect(nested).toMatchObject({ kind: "completed" });
-    expectCwd(nested, join(second, "nested"));
-    const pwd = await runAtCurrentContext("pwd");
-    expect(pwd).toMatchObject({ kind: "completed" });
-    expectCwd(pwd, join(second, "nested"));
   }, 45_000);
 
   nativeAuthorityIt("executes consecutive commands and preserves non-zero exit through PowerShell", async () => {

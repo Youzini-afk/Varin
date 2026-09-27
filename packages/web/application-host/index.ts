@@ -998,7 +998,6 @@ async function main(options: StartWebUiServerOptions = {}): Promise<WebUiServerC
     // model authority rather than creating a second model stack in the Host.
     harnessDocumentRead: true,
     harnessDocumentPathOverlay: true,
-    harnessWorkContext: true,
     harnessWebRead: true,
     // Provider identity is frozen per session from Pi settings. The Host
     // service itself is always present, so changing provider does not require
@@ -2140,7 +2139,6 @@ async function main(options: StartWebUiServerOptions = {}): Promise<WebUiServerC
           tools: input.tools,
           workFocus: input.workFocus,
           workFocusRole: 'branch',
-          ...(input.initialWorkContext ? { initialWorkContext: input.initialWorkContext } : {}),
         },
       ),
       open: (input) => piRuntimeBroker.openSession({
@@ -2865,10 +2863,6 @@ async function main(options: StartWebUiServerOptions = {}): Promise<WebUiServerC
   const discoveredShells = discoverShells();
   const harnessServiceHost = createHarnessServiceHost({
     discoveredShells,
-    workContextJournal: {
-      read: (actor) => piRuntimeBroker.requestForWorker(actor.workerId, 'session.workContext.read', { sessionId: actor.sessionId }),
-      commit: (actor, input) => piRuntimeBroker.requestForWorker(actor.workerId, 'session.workContext.commit', input),
-    },
     pathLockService: kernelPathLockService,
     verification: verificationCoordinator,
     experimentService,
@@ -3293,26 +3287,13 @@ async function main(options: StartWebUiServerOptions = {}): Promise<WebUiServerC
     // Route by the requesting worker, not by session: a session's internal
     // compaction worker is pinned for identity but is not the session worker.
     respond: async (identity, requestId, outcome) => {
-      // Piggyback the branch-local context identity so the worker can detect
-      // navigation even when a sibling branch has the same numeric revision.
-      const workContextIdentity = outcome.ok
-        ? harnessServiceHost.workContextIdentity(identity.sessionId)
-        : undefined;
       await piRuntimeBroker.requestForWorker(
         identity.workerId,
         'harness.respond',
-        buildHarnessRespondParams(
-          identity.sessionId,
-          requestId,
-          outcome,
-          workContextIdentity === undefined ? undefined : {
-            workContextRevision: workContextIdentity.revision,
-            workContextEntryId: workContextIdentity.entryId,
-          },
-        ),
+        buildHarnessRespondParams(identity.sessionId, requestId, outcome),
       );
     },
-    resolveActor: (identity, signal, contextEntryId) => harnessSessionRegistration.resolveActor(identity, signal, contextEntryId),
+    resolveActor: (identity, signal) => harnessSessionRegistration.resolveActor(identity, signal),
     authorizeWorkspacePath: (actor, candidate, options) => harnessPathAuthority.resolve(actor, candidate, options),
     cancelExploreQuery: (actor, queryId) => harnessServiceHost.exploreQueryStore.cancel(actor, queryId),
   });

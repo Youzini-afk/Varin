@@ -2364,7 +2364,7 @@ export const dict: Record<I18nKey, string> = {
   'chat.connection.connecting': 'エージェントランタイムに接続しています…',
   'chat.connection.disconnected': 'エージェントランタイムから切断されました。',
   'chat.connection.reconnecting': '接続が切れました。再接続して状態を復元しています…',
-'chat.context.operationDir': '{dir} で作業中',
+'chat.context.cwd': '{dir} で作業中',
   'chat.piComposer.submission.preparing': '準備中…',
   'chat.piComposer.submission.dispatching': '送信中…',
   'chat.piComposer.submission.accepted': '送信済み',

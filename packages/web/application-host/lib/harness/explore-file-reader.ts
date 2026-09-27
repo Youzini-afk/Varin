@@ -22,16 +22,13 @@ export function createExploreFileReader(
   return async (actor, path, signal, inputContext = { source: "disk" }) => {
     signal.throwIfAborted();
     try {
-      // Search hits are workspace-relative resource IDs already. Re-anchoring
-      // them at the session operation directory would duplicate that prefix.
-      const { operationDir: _operationDir, ...workspaceActor } = actor;
-      const before = await paths.resolve(workspaceActor, path, { allowMissing: true });
+      const before = await paths.resolve(actor, path, { allowMissing: true });
       if (!before) return { status: "forbidden", message: "Path is outside the permitted workspace scope." };
       if (branchExplore) {
         const branch = await branchExplore(actor.sessionId, before.resourceId);
         signal.throwIfAborted();
         if (branch) {
-          const after = await paths.resolve(workspaceActor, path, { allowMissing: true });
+          const after = await paths.resolve(actor, path, { allowMissing: true });
           if (!after || before.canonicalResourceId !== after.canonicalResourceId) {
             return { status: "stale", message: "Path identity changed while reading. Search again." };
           }
@@ -41,7 +38,7 @@ export function createExploreFileReader(
       const surface = documents.readAgentInputSnapshot(actor.sessionId, inputContext, before.resourceId);
       if (surface.status === "unavailable") return surface;
       if (surface.status === "ready") {
-        const after = await paths.resolve(workspaceActor, path, { allowMissing: true });
+        const after = await paths.resolve(actor, path, { allowMissing: true });
         signal.throwIfAborted();
         if (!after || before.canonicalResourceId !== after.canonicalResourceId) {
           return { status: "stale", message: "Path identity changed while reading. Search again." };
@@ -53,7 +50,7 @@ export function createExploreFileReader(
       if (snapshot.status !== "ready") {
         return { status: "unavailable", message: `Document cannot be read (${snapshot.status}).` };
       }
-      const after = await paths.resolve(workspaceActor, path, { allowMissing: true });
+      const after = await paths.resolve(actor, path, { allowMissing: true });
       signal.throwIfAborted();
       if (!after || before.canonicalResourceId !== after.canonicalResourceId) {
         return { status: "stale", message: "Path identity changed while reading. Search again." };

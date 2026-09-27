@@ -12,7 +12,7 @@ const sameGeneration = (a: HarnessActorIdentity, b: HarnessActorIdentity): boole
 
 /** Shell discovery/settings may be asynchronous; actor admission must wait for that exact generation. */
 export function createHarnessSessionRegistration(options: {
-  host: Pick<HarnessServiceHost, "registerSession" | "prepareWorkContext" | "dropSession" | "hasActor" | "resolveActor" | "getInterpreter">;
+  host: Pick<HarnessServiceHost, "registerSession" | "dropSession" | "hasActor" | "resolveActor" | "getInterpreter">;
   readSettings(context: HarnessSessionContext): Promise<PiSettingsSnapshot>;
   /** Resolve the authorized workspace root for seeding the work context (RR2). */
   resolveWorkspaceRoot?: (workspaceId: string) => Promise<string | null>;
@@ -57,14 +57,12 @@ export function createHarnessSessionRegistration(options: {
         throw new HarnessServiceError("unavailable", "Workspace authority root could not be resolved; session admission was not committed");
       }
       if (disposed || entry.controller.signal.aborted || pending.get(context.actor.sessionId) !== entry) return;
-      const prepared = await options.host.prepareWorkContext({
+      options.host.registerSession({
         ...context,
         actor: entry.actor,
         ...resolved,
         ...(authorityWorkspaceRoot ? { authorityWorkspaceRoot } : {}),
       });
-      if (disposed || entry.controller.signal.aborted || pending.get(context.actor.sessionId) !== entry) return;
-      options.host.registerSession(prepared);
     })().finally(() => {
       if (pending.get(context.actor.sessionId) === entry) pending.delete(context.actor.sessionId);
     });
@@ -76,7 +74,7 @@ export function createHarnessSessionRegistration(options: {
     return !disposed && (entry ? sameGeneration(entry.actor, identity) : options.host.hasActor(identity));
   };
 
-  const resolveActor = async (identity: HarnessActorIdentity, signal?: AbortSignal, contextEntryId?: string | null) => {
+  const resolveActor = async (identity: HarnessActorIdentity, signal?: AbortSignal) => {
     if (disposed) return null;
     const entry = pending.get(identity.sessionId);
     if (entry) {
@@ -84,7 +82,7 @@ export function createHarnessSessionRegistration(options: {
       await waitWithSignal(entry.promise, signal);
     }
     if (!hasActor(identity)) return null;
-    const actor = await options.host.resolveActor(identity, contextEntryId);
+    const actor = await options.host.resolveActor(identity);
     return hasActor(identity) ? actor : null;
   };
 

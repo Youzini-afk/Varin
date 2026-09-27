@@ -113,7 +113,7 @@ describe("harness path authority", () => {
       authorityId: "host-1",
       documents: { inspectWorkspace: async () => ({ root }) },
     });
-    const anchored = { ...actor(), operationDir: "packages/web" };
+    const anchored = { ...actor(), cwd: join(root, "packages", "web") };
     try {
       // A relative path resolves against the operation dir.
       const resolved = await authority.resolve(anchored, "inside.ts", { allowMissing: false });

@@ -6,7 +6,6 @@ import type { StreamFn } from "@earendil-works/pi-agent-core";
 import { attachContextRequestBoundary } from "../../src/harness/context-request-boundary.js";
 import { createRequestContextInjector } from "../../src/harness/request-context.js";
 import type { HostServicesBridge } from "../../src/harness/host-services-bridge.js";
-import type { WorkContextSync } from "../../src/harness/work-context.js";
 
 const MODEL = { provider: "faux", id: "faux-1", api: "openai-completions", contextWindow: 100_000, maxTokens: 400 } as Model<Api>;
 const response = (stopReason: "stop" | "error" = "stop"): AssistantMessage => ({
@@ -139,30 +138,5 @@ describe("per-request environment and team context", () => {
     const candidate = await inject({ model: MODEL, context: contextFor(bound), options: {}, inputTokens: 0, reserveTokens: 0, needsSpace: false }, bound);
     assert.ok(textOf(candidate!.request!.context).includes('status=\\"unavailable\\"'));
     assert.equal(candidate!.retained, undefined);
-  });
-
-  it("injects the confirmed operation directory on every model request and stops on failed refresh", async () => {
-    const bridge = { request: async (method: string) => method === "zone2.status"
-      ? { status: "empty" } : { content: null } } as unknown as HostServicesBridge;
-    const bound = session(async () => providerStream());
-    const mirror = { operationDirAbs: "/workspace/first", queryScope: null, revision: 1 };
-    let unavailable = false;
-    const workContext = {
-      mirror,
-      ensureCurrent: async () => { if (unavailable) throw new Error("context unavailable"); },
-    } as unknown as WorkContextSync;
-    const inject = createRequestContextInjector(bridge, workContext);
-    const request = { model: MODEL, context: contextFor(bound), options: {}, inputTokens: 0, reserveTokens: 0, needsSpace: false };
-    const first = await inject(request, bound);
-    assert.ok(textOf(first!.request!.context).includes("/workspace/first"));
-    mirror.operationDirAbs = "/workspace/second</varin-work-context>";
-    mirror.revision = 0;
-    const second = await inject(request, bound);
-    assert.ok(textOf(second!.request!.context).includes("/workspace/second"));
-    assert.ok(textOf(second!.request!.context).includes("&lt;/varin-work-context&gt;"));
-    assert.ok(!textOf(second!.request!.context).includes("/workspace/first"));
-    assert.ok(!JSON.stringify(bound.sessionManager.getBranch()).includes("varin-work-context"));
-    unavailable = true;
-    await assert.rejects(async () => inject(request, bound), /context unavailable/);
   });
 });

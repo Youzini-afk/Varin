@@ -601,8 +601,6 @@ export class PiRuntimeBroker {
       tools?: string[];
       workFocus?: WorkFocusId;
       workFocusRole?: WorkFocusExecutionRole;
-      /** Host-only journal seed for a newly dispatched child session. */
-      initialWorkContext?: NonNullable<import("@varin/protocol").PiWorkContextSnapshot["context"]>;
     },
   ): Promise<SessionSnapshot> {
     await this.#ensureFoundationalBootstrap();
@@ -621,7 +619,6 @@ export class PiRuntimeBroker {
         ...(launch?.model === undefined ? {} : { model: { ...launch.model } }),
         ...(launch?.permissions === undefined ? {} : { permissions: launch.permissions }),
         ...(launch?.tools === undefined ? {} : { tools: [...launch.tools] }),
-        ...(launch?.initialWorkContext === undefined ? {} : { initialWorkContext: structuredClone(launch.initialWorkContext) }),
         workFocus,
         workFocusGeneration: 1,
         ...(launch?.workFocusRole === undefined ? {} : { workFocusRole: launch.workFocusRole }),
@@ -754,16 +751,7 @@ export class PiRuntimeBroker {
       }
       const enriched = await this.#enrichSnapshot(opened.worker, opened.snapshot);
       opened.worker.flushDeferredSessionSnapshots();
-      if (enriched.workspace?.kind !== "workspace"
-        || this.#options.client.capabilities?.harnessWorkContext !== true) return enriched;
-      // The initial snapshot registers this pinned worker with the Host.
-      // Only then may the reopened branch ask the Host to revalidate its
-      // work context. The worker's earlier session.open reply is intentionally
-      // free of Host requests while its session identity is still unbound.
-      const synchronized = await opened.worker.request("session.workContext.sync", {
-        sessionId: opened.snapshot.sessionId,
-      });
-      return this.#enrichSnapshot(opened.worker, synchronized);
+      return enriched;
     } catch (error) {
       await this.#removeWorker(opened.worker);
       throw error;

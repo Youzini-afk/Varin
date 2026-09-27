@@ -115,14 +115,13 @@ const makeOperations = (
 export function createSurfaceAwareLsTool(
   bridge: HostServicesBridge,
   cwd: string,
-  operationDir?: () => string,
 ): ToolDefinition {
   const native = createLsToolDefinition(cwd);
   const wrapped: ReturnType<typeof createLsToolDefinition> = {
     ...native,
     execute: async (toolCallId, params, signal, onUpdate, ctx) => {
       signal?.throwIfAborted();
-      const rootPath = resolveToCwd(params.path, operationDir?.() ?? cwd);
+      const rootPath = resolveToCwd(params.path, cwd);
       const anchoredParams = { ...params, path: rootPath };
       const overlay = await bridge.request(
         "document.pathOverlay",

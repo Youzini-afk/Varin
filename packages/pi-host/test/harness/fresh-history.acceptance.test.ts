@@ -117,7 +117,7 @@ describe("fresh continuation and same-Thread history", () => {
           inspect: async () => ({ patch: "", untracked: [], changedFiles: [], diffStats: { files: 0, insertions: 0, deletions: 0 } }),
           merge: async () => ({ merged: 0, conflicts: [], conflictState: "none", changedFiles: [], diffStats: { files: 0, insertions: 0, deletions: 0 } }) },
       });
-      const input = { workspaceId: "workspace", parent: { kind: "session" as const, id: parent.sessionId },
+      const input = { scopeId: "workspace", parent: { kind: "session" as const, id: parent.sessionId },
         brief: "Read evidence.txt and complete the task", kind: "implementation" as const, createdBy: "agent" as const,
         concurrency: 1, autoRun: true, worktree: "none" as const, tools: ["read", "history"],
         model: { providerId: model.provider, modelId: model.id }, permissions: {} };
@@ -128,7 +128,7 @@ describe("fresh continuation and same-Thread history", () => {
       await hosts.get(initial.sessionId)!.session.waitForIdle();
       await runtime.drain();
       assert.equal((await registry.getThreadById("workspace", thread.id))!.lifecycle, "settled");
-      const continued = await runtime.continueRun({ workspaceId: "workspace", parent: input.parent,
+      const continued = await runtime.continueRun({ scopeId: "workspace", parent: input.parent,
         threadId: thread.id, mode: "fresh", task: "Look up the exact evidence from the prior Run", requestId: "fresh-1" });
       assert.ok(continued.runId && continued.runId !== first.id);
       const active = (await registry.getActiveRun("workspace", thread.id))!;

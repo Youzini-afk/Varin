@@ -2516,7 +2516,7 @@ export const dict: Record<I18nKey, string> = {
   "chat.connection.connecting": "Підключення до середовища виконання агента…",
   "chat.connection.disconnected": "Від’єднано від середовища виконання агента.",
   "chat.connection.reconnecting": "З’єднання втрачено — повторне підключення та синхронізація…",
-"chat.context.operationDir": "Робота в {dir}",
+"chat.context.cwd": "Робота в {dir}",
   "chat.piComposer.submission.preparing": "Підготовка…",
   "chat.piComposer.submission.dispatching": "Надсилання…",
   "chat.piComposer.submission.accepted": "Надіслано",

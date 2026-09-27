@@ -26,7 +26,6 @@ import type {
   ThreadCreatedBy,
   ThreadDiffStats,
   ThreadInheritedContext,
-  ThreadInitialWorkContext,
   ThreadIntegration,
   ThreadIntegrationBinding,
   ThreadKind,
@@ -139,7 +138,7 @@ export interface CreateThreadInput {
   /** How the first Run's input is constructed; `inherit` requires inheritedContext. */
   inputOrigin?: "task" | "inherit";
   inheritedContext?: ThreadInheritedContext;
-  initialWorkContext?: ThreadInitialWorkContext;
+  initialAuthorityRoot?: string;
   scope?: string[];
   worktree: "none" | "shared" | "isolated";
   model?: { providerId: string; modelId: string };
@@ -520,13 +519,6 @@ const isInheritedContext = (value: unknown): value is ThreadInheritedContext => 
     && value.images.every((image) => isRecord(image) && isString(image.data) && isString(image.mimeType))))
 );
 
-const isInitialWorkContext = (value: unknown): value is ThreadInitialWorkContext => (
-  isRecord(value)
-  && isString(value.authorityRoot) && value.authorityRoot.length > 0
-  && isString(value.operationDir)
-  && (value.queryScope === null || (Array.isArray(value.queryScope) && value.queryScope.every(isString)))
-  && Number.isSafeInteger(value.revision) && Number(value.revision) >= 0
-);
 
 const isLaunchManifest = (value: unknown): value is ThreadLaunchManifest => (
   isRecord(value)
@@ -535,7 +527,7 @@ const isLaunchManifest = (value: unknown): value is ThreadLaunchManifest => (
   && (value.draftBaselineId === null || (isString(value.draftBaselineId) && value.draftBaselineId.length > 0))
   && (value.inputOrigin === undefined || value.inputOrigin === "task" || value.inputOrigin === "inherit")
   && (value.inheritedContext === undefined || isInheritedContext(value.inheritedContext))
-  && (value.initialWorkContext === undefined || isInitialWorkContext(value.initialWorkContext))
+  && (value.initialAuthorityRoot === undefined || isString(value.initialAuthorityRoot))
   && Array.isArray(value.scope) && value.scope.every(isString)
   && isNullableString(value.systemPromptFragment)
   && Array.isArray(value.tools) && value.tools.every(isString)
@@ -1436,7 +1428,7 @@ export function createThreadRegistry(options: ThreadRegistryOptions) {
           draftBaselineId: input.draftBaselineId ?? null,
           ...(input.inputOrigin !== undefined ? { inputOrigin: input.inputOrigin } : {}),
           ...(input.inheritedContext !== undefined ? { inheritedContext: structuredClone(input.inheritedContext) } : {}),
-          ...(input.initialWorkContext !== undefined ? { initialWorkContext: structuredClone(input.initialWorkContext) } : {}),
+          ...(input.initialAuthorityRoot !== undefined ? { initialAuthorityRoot: input.initialAuthorityRoot } : {}),
           scope: [...(input.scope ?? [])].map(normalizeThreadScopePath),
           systemPromptFragment: input.systemPromptFragment ?? null,
           tools: [...new Set(input.tools)],

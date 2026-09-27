@@ -757,28 +757,16 @@ describe("harness search service", () => {
       ...(authorizedPaths ? { authorizedPaths } : {}),
     });
 
-    it("defaults to the operation dir when no explicit path is given", async () => {
+    it("defaults to the session cwd when no explicit path is given", async () => {
       const seen: string[][] = [];
       const service = createHarnessSearchService({
         search: scopedSearch([makeHit("app/hit.ts", 1, "x"), makeHit("other/hit.ts", 1, "x")], seen),
         resolveWorkspaceRoot: async () => "/workspace",
       });
-      const result = await service.search({ pattern: "x" }, rr4Ctx({ operationDir: "app" }));
+      const result = await service.search({ pattern: "x" }, rr4Ctx({ cwd: "/workspace/app" }));
       expect(result.status).toBe("ready");
       expect(seen).toEqual([["app"]]);
       expect(result.files.map((file) => file.path)).toEqual(["app/hit.ts"]);
-    });
-
-    it("applies the session query scope when no explicit path is given", async () => {
-      const seen: string[][] = [];
-      const service = createHarnessSearchService({
-        search: scopedSearch([makeHit("a/hit.ts", 1, "x"), makeHit("b/hit.ts", 1, "x"), makeHit("c/hit.ts", 1, "x")], seen),
-        resolveWorkspaceRoot: async () => "/workspace",
-      });
-      const result = await service.search({ pattern: "x" }, rr4Ctx({ operationDir: "a", queryScope: ["a", "b"] }));
-      expect(result.status).toBe("ready");
-      expect(seen).toEqual([["a", "b"]]);
-      expect(result.files.map((file) => file.path).sort()).toEqual(["a/hit.ts", "b/hit.ts"]);
     });
 
     it("uses authorized resource ids for explicit multi-path queries", async () => {
@@ -789,7 +777,7 @@ describe("harness search service", () => {
       });
       const result = await service.search(
         { pattern: "x", paths: ["../a", "b"] },
-        rr4Ctx({ operationDir: "root/pkg" }, [{ workspaceId: "ws-1", resourceId: "a" }, { workspaceId: "ws-1", resourceId: "b" }]),
+        rr4Ctx({ cwd: "/workspace/root/pkg" }, [{ workspaceId: "ws-1", resourceId: "a" }, { workspaceId: "ws-1", resourceId: "b" }]),
       );
       expect(result.status).toBe("ready");
       expect(seen).toEqual([["a", "b"]]);
@@ -805,7 +793,7 @@ describe("harness search service", () => {
       const result = await service.search(
         { pattern: "x" },
         {
-          ...rr4Ctx({ operationDir: "" }),
+          ...rr4Ctx({ cwd: "/workspace" }),
           workspaceScope: ["allowed"],
         },
       );

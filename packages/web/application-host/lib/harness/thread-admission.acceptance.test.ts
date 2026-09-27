@@ -4,7 +4,6 @@ import { join } from "node:path";
 import { describe, expect, it, vi } from "vitest";
 import { createThreadRegistry, type CreateThreadInput } from "./thread-registry.js";
 import { createThreadDispatchService, createThreadWaitService } from "./thread-services.js";
-import { seedWorkContext } from "./work-context.js";
 import type { HarnessServiceContext } from "./router.js";
 
 const context = (): HarnessServiceContext => ({
@@ -140,8 +139,6 @@ describe("root execution admission — service/registry acceptance", () => {
     const dispatch = createThreadDispatchService({
       threadRegistry: registry,
       threadSpawnSession: spawn,
-      workContextGet: () => ({ workspaceRoot,
-        context: seedWorkContext(workspaceRoot, workspaceRoot), contextEntryId: null }),
       threadPrepareIsolatedBranch: async () => {
         captures += 1;
         if (captures === 2) release();
@@ -180,8 +177,6 @@ describe("root execution admission — service/registry acceptance", () => {
     const dispatch = createThreadDispatchService({
       threadRegistry: registry,
       threadSpawnSession: spawn,
-      workContextGet: () => ({ workspaceRoot,
-        context: seedWorkContext(workspaceRoot, workspaceRoot), contextEntryId: null }),
       threadCaptureDraftBaseline: async () => ({ draftBaselineId: "draft-owned", cleanup }),
       threadCaptureInputContext: async () => { throw new Error("parent input unavailable"); },
       threadPrepareIsolatedBranch: async () => baseline,

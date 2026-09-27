@@ -1,3 +1,4 @@
+import pathModule from "node:path";
 import type {
   AgentInputContext,
   ExploreFileRelation,
@@ -23,6 +24,20 @@ import { looksLikePathObject } from "./explore-query.js";
 type ExploreParams = HarnessServiceMap["explore.search"]["params"];
 
 /** Workspace-scope intersection shared by explore and related retrieval. */
+/**
+ * HR4: the session's cwd is the default retrieval anchor, expressed relative
+ * to its authority root (`.` for the root itself). Returns `undefined` when
+ * the cwd lies outside the authority root so callers widen to the admitted
+ * scope rather than silently dropping the default.
+ */
+export const sessionDefaultRoot = (actor: { cwd?: string | null; authorityRoot?: string | null }): string | undefined => {
+  if (!actor.cwd || !actor.authorityRoot) return undefined;
+  const rel = pathModule.relative(actor.authorityRoot, actor.cwd).replaceAll("\\", "/");
+  if (rel === "" || rel === ".") return ".";
+  if (rel === ".." || rel.startsWith("../")) return undefined;
+  return rel;
+};
+
 export function intersectRetrievalScope(
   requested: readonly string[] | undefined,
   workspaceScope: readonly string[] | undefined,
@@ -94,11 +109,7 @@ export function resolveExploreScopeAndAnchors(
 
   const defaultPaths = explicitPathCount > 0
     ? explicitPaths
-    : ctx.actor.queryScope?.length
-      ? [...ctx.actor.queryScope]
-      : ctx.actor.operationDir
-        ? [ctx.actor.operationDir]
-        : undefined;
+    : [sessionDefaultRoot(ctx.actor)].filter((root): root is string => root !== undefined);
   const requestedRoots = [
     ...(defaultPaths ?? []),
     ...authorizedAnchorPaths.map(({ resourceId }) => resourceId || "."),

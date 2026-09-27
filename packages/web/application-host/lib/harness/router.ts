@@ -56,7 +56,7 @@ export interface HarnessRouterOptions {
    * the response must route by worker identity, not by session lookup.
    */
   respond: (identity: HarnessActorIdentity, requestId: string, outcome: { ok: true; result: unknown } | { ok: false; error: HarnessError }) => Promise<void>;
-  resolveActor: (identity: HarnessActorIdentity, signal?: AbortSignal, contextEntryId?: string | null) => Promise<HarnessActorContext | null>;
+  resolveActor: (identity: HarnessActorIdentity, signal?: AbortSignal) => Promise<HarnessActorContext | null>;
   authorizeWorkspacePath?: (
     actor: HarnessActorContext,
     path: string,
@@ -391,7 +391,7 @@ export const createHarnessRouter = (options: HarnessRouterOptions) => {
     const timer = (data.method === "thread.wait" || data.method === "thread.send" || data.method === "experiment.wait" || data.method === "compaction.run" || data.method === "materials.read" || data.method === "shell.exec" || data.method === "shell.read") && data.timeoutMs === 0
       ? undefined : setTimeout(() => controller.abort(), requestTimeoutMs);
     try {
-      const actor = await options.resolveActor(identity, controller.signal, data.contextEntryId);
+      const actor = await options.resolveActor(identity, controller.signal);
       if (!actor) {
         await respond({
           ok: false,

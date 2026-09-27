@@ -4,7 +4,6 @@ import { tmpdir } from "node:os";
 import { describe, expect, it, vi } from "vitest";
 import { createThreadRegistry } from "./thread-registry.js";
 import { createThreadDispatchService, createThreadFactsSetService, createThreadReadService } from "./thread-services.js";
-import { seedWorkContext } from "./work-context.js";
 import type { HarnessActorContext } from "@varin/protocol";
 
 const parentCtx = {
@@ -28,8 +27,6 @@ const createFactsDispatch = (registry: ReturnType<typeof createThreadRegistry>, 
   return createThreadDispatchService({
     threadRegistry: registry,
     threadSpawnSession: async () => ({ sessionId: "child-1" }),
-    workContextGet: () => ({ workspaceRoot,
-      context: seedWorkContext(workspaceRoot, workspaceRoot), contextEntryId: null }),
   } as never);
 };
 

@@ -603,97 +603,6 @@ export interface ContextRetentionParams {
   retainedGit: boolean;
 }
 
-// ── Autonomous work context (RR2) ──────────────────────────────────
-
-/**
- * Host-owned per-session work context. `operationDir` is the anchor that
- * resolves every relative tool path (POSIX-style path relative to the
- * authorized workspace root; `""` addresses the root itself). `queryScope`
- * is an optional retrieval scope expressed the same way; `null` means the
- * whole authorized workspace. `revision` is a CAS token that increments on
- * every accepted mutation so an Agent never silently applies a stale view.
- */
-export interface HarnessWorkContextState {
-  operationDir: string;
-  queryScope: readonly string[] | null;
-  revision: number;
-}
-
-/** Pi's current conversation branch is the durable journal for this state. */
-export interface PiWorkContextBinding {
-  workspaceId: string;
-  authorityRoot: string;
-  sessionRoot: string;
-}
-
-export interface PiWorkContextSnapshot {
-  /** Exact active Pi leaf. A commit must match it before appending a new entry. */
-  leafId: string | null;
-  /** Last work-context custom entry on this branch; stable across ordinary messages. */
-  entryId: string | null;
-  context: (HarnessWorkContextState & PiWorkContextBinding) | null;
-}
-
-export interface PiWorkContextCommit {
-  sessionId: string;
-  expectedLeafId: string | null;
-  expectedRevision: number;
-  context: HarnessWorkContextState & PiWorkContextBinding;
-}
-
-export interface ContextDiscoverParams {
-  /** Directory to inspect, relative to the authorized workspace root or absolute. Omit for authorized roots. */
-  path?: string;
-  /** Opaque continuation of a previous discovery; cannot be combined with path. */
-  cursor?: string;
-  /** Preferred number of candidates in this response; further candidates use nextCursor. */
-  maxResults?: number;
-  /** Optional maximum depth below the selected start directory; omitted scans descendants. */
-  depth?: number;
-}
-
-export interface ContextDiscoverCandidate {
-  /** POSIX path relative to the workspace root, suitable for `context.select`. */
-  path: string;
-  label: string;
-  /** Project markers found in the directory (e.g. `.git`, `package.json`). */
-  markers: string[];
-}
-
-export interface ContextDiscoverResult {
-  candidates: ContextDiscoverCandidate[];
-  /** Authorized directories whose contents could not be read in this page. */
-  unreadablePaths?: string[];
-  truncated: boolean;
-  /** Present when discovery can continue without restarting the scan. */
-  nextCursor?: string;
-}
-
-export interface ContextGetResult {
-  context: HarnessWorkContextState;
-  /** Absolute authorized workspace root for composing/displaying paths. */
-  workspaceRoot: string;
-  /** Pi branch journal entry identity; null means launch context on this branch. */
-  contextEntryId?: string | null;
-}
-
-export interface ContextSelectParams {
-  /** Directory to make the operation dir: absolute or relative to the workspace root. */
-  path: string;
-  /** CAS guard; rejects when the stored revision no longer matches. */
-  expectedRevision?: number;
-}
-
-export interface ContextScopeParams {
-  /** Retrieval scope roots: absolute or relative to the workspace root. */
-  paths: string[];
-  expectedRevision?: number;
-}
-
-export interface ContextResetParams {
-  expectedRevision?: number;
-}
-
 /** Complete current scoped team snapshot, transient for one model request. */
 export type Zone2StatusParams = Record<string, never>;
 
@@ -1532,11 +1441,7 @@ export interface ExploreQueryFinishDetails {
 export interface HarnessServiceMap {
   "permission.inspect": { params: PermissionInspectParams; result: PermissionInspectResult };
   "permission.audit": { params: PermissionAuditRecord; result: { accepted: boolean } };
-  "context.discover": { params: ContextDiscoverParams; result: ContextDiscoverResult };
-  "context.get": { params: Record<string, never>; result: ContextGetResult };
-  "context.select": { params: ContextSelectParams; result: ContextGetResult };
-  "context.scope": { params: ContextScopeParams; result: ContextGetResult };
-  "context.reset": { params: ContextResetParams; result: ContextGetResult };
+
   /**
    * `waitMs` is the post-accept foreground observation budget, not a command
    * execution deadline: the call may still carry admission and transport time
@@ -1726,11 +1631,6 @@ export const HARNESS_METHOD_CAPABILITY = {
   "zone2.assemble": "context.session",
   "zone2.status": "context.session",
   "zone2.delivered": "context.session",
-  "context.discover": "context.session",
-  "context.get": "context.session",
-  "context.select": "context.session",
-  "context.scope": "context.session",
-  "context.reset": "context.session",
   "context.retained": "context.session",
   "todo.upsert": "context.session",
   "recall.search": "context.session",
@@ -1826,19 +1726,12 @@ export interface HarnessActorContext extends HarnessActorIdentity {
    */
   authorityRoot?: string | null;
   /**
-   * Session operation dir relative to the workspace root; relative path
-   * parameters resolve against it instead of the root. Absent/`""`/`null`
-   * means the workspace root. Pinned per request at actor resolution.
+   * Absolute session launch directory (the session's cwd). Relative tool
+   * paths anchor here rather than at the authority root; absent only when a
+   * registered session has no resolvable launch directory. Pinned per
+   * request at actor resolution.
    */
-  operationDir?: string | null;
-  /** Work-context revision the actor resolution pinned. */
-  contextRevision?: number;
-  /**
-   * RR4: workspace-relative query scope roots pinned at actor resolution.
-   * Retrieval services intersect it with explicit params and workspaceScope;
-   * `null`/absent means no additional scope restriction (defaults still apply).
-   */
-  queryScope?: readonly string[] | null;
+  cwd?: string | null;
   grantedCapabilities: readonly HarnessCapability[];
   /**
    * Internal auxiliary actors (e.g. a session's compaction worker) may carry
@@ -1875,11 +1768,6 @@ const HARNESS_METHODS: ReadonlySet<string> = new Set<string>([
   "zone2.assemble",
   "zone2.status",
   "zone2.delivered",
-  "context.discover",
-  "context.get",
-  "context.select",
-  "context.scope",
-  "context.reset",
   "context.retained",
   "todo.upsert",
   "recall.search",
@@ -1964,8 +1852,6 @@ export interface HarnessRequestData {
   params: unknown;
   /** Current immutable input source selected by SessionHost. */
   inputContext?: AgentInputContext;
-  /** Pi's current active-branch work-context entry, sampled at tool admission. */
-  contextEntryId?: string | null;
   /**
    * How long the worker is prepared to wait, in milliseconds. The router
    * uses it instead of its own default so a deliberately long call such as
@@ -1988,16 +1874,7 @@ export type HarnessRespondParams = {
   requestId: string;
   sessionId: string;
 } & (
-  | {
-      ok: true;
-      result: unknown;
-      /**
-       * Cheap host-side liveness piggyback so the worker notices a work
-       * context change without a dedicated push channel. Absent when the
-       * session has no registered work context.
-       */
-      harnessContext?: { workContextRevision: number; workContextEntryId?: string | null };
-    }
+  | { ok: true; result: unknown }
   | { ok: false; error: HarnessError }
 );
 
@@ -2010,12 +1887,7 @@ export function buildHarnessRespondParams(
   sessionId: string,
   requestId: string,
   outcome: { ok: true; result: unknown } | { ok: false; error: HarnessError },
-  harnessContext?: { workContextRevision: number; workContextEntryId?: string | null },
 ): HarnessRespondParams {
-  if (outcome.ok) {
-    return harnessContext === undefined
-      ? { requestId, sessionId, ok: true, result: outcome.result }
-      : { requestId, sessionId, ok: true, result: outcome.result, harnessContext };
-  }
+  if (outcome.ok) return { requestId, sessionId, ok: true, result: outcome.result };
   return { requestId, sessionId, ok: false, error: outcome.error };
 }

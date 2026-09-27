@@ -259,13 +259,11 @@ export function createWorkspaceMutationJournalTools(
   bridge: WorkspaceMutationJournalBridge,
   hostServicesBridge?: HostServicesBridge,
   _sessionId?: string,
-  options: { surfaceWrite?: boolean; getOperationDir?: () => string; ensureOperationContext?: () => Promise<void>; getContextRevision?: () => number | null } = {},
+  options: { surfaceWrite?: boolean } = {},
 ): ToolDefinition[] {
   const write = createWriteToolDefinition(cwd);
   const edit = createEditToolDefinition(cwd);
-  // RR2: bridge params stay as typed (the Host resolves them against the
-  // authoritative operation dir); the local disk path anchors at the mirror.
-  const anchorPath = (input: string) => resolve(options.getOperationDir?.() ?? cwd, input);
+  const anchorPath = (input: string) => resolve(cwd, input);
   const surface = options.surfaceWrite === true;
   const journaledWrite = defineTool({
     ...write,
@@ -337,11 +335,5 @@ export function createWorkspaceMutationJournalTools(
       });
     },
   });
-  return [journaledWrite, journaledEdit].map((tool) => withToolExecutionResources(
-    tool,
-    cwd,
-    options.getOperationDir,
-    options.ensureOperationContext,
-    options.getContextRevision,
-  ));
+  return [journaledWrite, journaledEdit].map((tool) => withToolExecutionResources(tool, cwd));
 }

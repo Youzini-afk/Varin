@@ -31,7 +31,7 @@ const TEST_MAIN_MODEL = { providerId: "anthropic", modelId: "claude-sonnet-4" };
 const TEST_PRESETS = resolvePresets({ check: TEST_MAIN_MODEL }, TEST_MAIN_MODEL);
 
 const threadInput = (brief: string) => ({
-  workspaceId: WORKSPACE_ID,
+  scopeId: WORKSPACE_ID,
   parent: PARENT,
   brief,
   preset: "check",
@@ -75,7 +75,7 @@ async function setup(options: { transportTimeoutMs?: number; artifactBody?: Buff
     }),
     threadSpawnSession: async (input) => {
       const sessionId = `child-session-${++sessionCounter}`;
-      await threadRegistry.markRunRunning(input.workspaceId, input.threadId, input.runId, sessionId);
+      await threadRegistry.markRunRunning(input.scopeId, input.threadId, input.runId, sessionId);
       return { sessionId };
     },
     threadKillSession: async () => {},
@@ -103,9 +103,9 @@ async function setup(options: { transportTimeoutMs?: number; artifactBody?: Buff
       },
     }),
   });
-  harnessServiceHost.registerSession(await harnessServiceHost.prepareWorkContext({
+  harnessServiceHost.registerSession({
     actor: ACTOR, grantedCapabilities: CAPABILITIES, workspaceId: WORKSPACE_ID, workspaceRoot,
-  }));
+  });
 
   const router = createHarnessRouter({
     respond: async (identity, requestId, outcome) => { bridge.respond(identity.sessionId, requestId, outcome); },

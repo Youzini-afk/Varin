@@ -97,16 +97,13 @@ const createFormattingOperations = (combined: readonly FindPath[]): FindOperatio
 export function createSurfaceAwareFindTool(
   bridge: HostServicesBridge,
   cwd: string,
-  operationDir?: () => string,
 ): ToolDefinition {
   const native = createFindToolDefinition(cwd);
   const wrapped: ReturnType<typeof createFindToolDefinition> = {
     ...native,
     execute: async (toolCallId, params, signal, onUpdate, ctx) => {
       signal?.throwIfAborted();
-      // RR2: anchor at the live operation dir; local fs and the Host overlay
-      // share this one absolute resolution.
-      const rootPath = resolveToCwd(params.path, operationDir?.() ?? cwd);
+      const rootPath = resolveToCwd(params.path, cwd);
       const anchoredParams = { ...params, path: rootPath };
       const overlay = await bridge.request(
         "document.pathOverlay",

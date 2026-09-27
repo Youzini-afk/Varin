@@ -157,14 +157,14 @@ describe("retrieval thread public slice", () => {
       if (harnessServiceHost!.hasActor(actor)) return;
       const isParent = sessionId === parentHost?.sessionId;
       const execution = executionContexts.get(sessionId);
-      harnessServiceHost!.registerSession(await harnessServiceHost!.prepareWorkContext({
+      harnessServiceHost!.registerSession({
         actor,
         grantedCapabilities: isParent
           ? ["context.session", "control.thread", "read.output", "read.lsp"]
           : ["context.session", "control.thread", "read.document", "read.search", "read.output", "read.lsp"],
         workspaceId: execution?.workspaceId ?? identity.workspaceId,
         workspaceRoot: execution?.root ?? workspace,
-      }));
+      });
     };
 
     const emitFrom = (sessionId: string, event: HostEvent, data: unknown): void => {
@@ -202,7 +202,6 @@ describe("retrieval thread public slice", () => {
       child.setHarnessDocumentReadEnabled(true);
       child.setHarnessDocumentPathOverlayEnabled(true);
       child.setHarnessLspNavigationEnabled(true);
-      child.setHarnessWorkContextEnabled(true);
       return child;
     };
 
@@ -212,7 +211,7 @@ describe("retrieval thread public slice", () => {
         childScope = input.scope;
         const child = createChildHost();
         const created = await child.create(input.cwd, input.name, input.parentSession, input.tools, input.model, input.permissions,
-          undefined, 1, "branch", input.initialWorkContext);
+          undefined, 1, "branch");
         childHosts.set(created.sessionId, child);
         childRunIds.set(created.sessionId, spawningRunId);
         executionContexts.set(created.sessionId, { workspaceId: input.workspaceId, root: input.cwd });
@@ -293,10 +292,6 @@ describe("retrieval thread public slice", () => {
       search: (request, options) => search.searchContent(request, options),
       resolveWorkspaceRoot: async (id) => (await documents.inspectWorkspace(id)).root,
       pathAuthority: paths,
-      workContextJournal: {
-        read: async (actor) => hostFor(actor.sessionId).workContextRead(actor.sessionId),
-        commit: async (actor, input) => hostFor(actor.sessionId).workContextCommit(input),
-      },
       readExploreFile: createExploreFileReader(documents, paths, (sessionId, resourceId) => branchLookups.exploreFile(sessionId, resourceId)),
       pinWorkingBranchQuery: (sessionId, options) => branchLookups.pinQuery(sessionId, options),
       documentReadSource: async (sessionId, _context, resourceId) => (
@@ -317,7 +312,7 @@ describe("retrieval thread public slice", () => {
       },
     });
     router = createHarnessRouter({
-      resolveActor: (identityActor, _signal, entryId) => harnessServiceHost!.resolveActor(identityActor, entryId),
+      resolveActor: (identity) => harnessServiceHost!.resolveActor(identity),
       respond: async (identity, requestId, outcome) => {
         hostFor(identity.sessionId).respondHarness(identity.sessionId, requestId, outcome);
       },
@@ -336,7 +331,6 @@ describe("retrieval thread public slice", () => {
       projectTrustOverride: true,
     });
     parentHost.setHarnessThreadRuntimeEnabled(true);
-    parentHost.setHarnessWorkContextEnabled(true);
 
     let parentPhase = 0;
     let childPhase = 0;
@@ -406,7 +400,7 @@ describe("retrieval thread public slice", () => {
     try {
       const parent = await parentHost.create(workspace, "Parent");
       const parentThread = await registry.createThread({
-        workspaceId: identity.workspaceId,
+        scopeId: identity.workspaceId,
         parent: { kind: "session", id: parent.sessionId },
         brief: "Parent implementation view",
         preset: "hard-implement",
@@ -511,7 +505,7 @@ describe("retrieval thread public slice", () => {
 
       const zone2 = await projectZone2Threads(
         { registry, cursors: harnessServiceHost.observationCursors },
-        { sessionId: parent.sessionId, workspaceId: identity.workspaceId },
+        { sessionId: parent.sessionId, scopeId: identity.workspaceId },
       );
       assert.equal(zone2.status, "ready");
       if (zone2.status === "ready") {

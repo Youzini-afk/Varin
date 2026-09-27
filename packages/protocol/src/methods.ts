@@ -51,7 +51,7 @@ import type {
 } from "./provider.js";
 import type { PiSessionEntry, SessionEntriesResult, SessionReconcileResult, SessionTreeResult } from "./session.js";
 import type { PiSessionFeatureMutation, PiSessionFeatureState } from "./session-features.js";
-import type { HarnessRespondParams, PiWorkContextCommit, PiWorkContextSnapshot } from "./harness.js";
+import type { HarnessRespondParams } from "./harness.js";
 import type {
   HarnessEmbedParams,
   HarnessEmbedResult,
@@ -374,8 +374,6 @@ export interface HostMethodMap {
       model?: ModelSelection;
       name?: string;
       parentSession?: string;
-      /** Host-only initial Pi journal state for a newly dispatched child. */
-      initialWorkContext?: PiWorkContextCommit["context"];
       permissions?: PermissionPolicy;
       scope?: string[];
       tools?: string[];
@@ -417,20 +415,6 @@ export interface HostMethodMap {
   "session.features.mutate": {
     params: { mutation: PiSessionFeatureMutation; sessionId: string };
     result: PiSessionFeatureState;
-  };
-  /** Host-only, out-of-band journal access while an Agent tool awaits harness.respond. */
-  "session.workContext.read": {
-    params: { sessionId: string };
-    result: PiWorkContextSnapshot;
-  };
-  /** Revalidate a reopened session after the broker has pinned its worker and published its workspace binding. */
-  "session.workContext.sync": {
-    params: { sessionId: string };
-    result: SessionSnapshot;
-  };
-  "session.workContext.commit": {
-    params: PiWorkContextCommit;
-    result: PiWorkContextSnapshot;
   };
   "session.navigate": {
     params: { sessionId: string; summarize?: boolean; targetId: string };

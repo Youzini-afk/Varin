@@ -56,7 +56,7 @@ export const EXECUTION_PRESETS: Readonly<Record<PresetId, ExecutionPreset>> = {
   "quick-implement": {
     id: "quick-implement",
     slot: "quickImplement",
-    tools: ["work_context", "read", "edit", "write", "apply_patch", "bash", "grep", "glob", "get_output", "write_to_process", "kill_shell"],
+    tools: ["read", "edit", "write", "apply_patch", "bash", "grep", "glob", "get_output", "write_to_process", "kill_shell"],
     worktree: "isolated",
     systemPromptFragment:
       "You are a quick implementation agent. Make mechanical, well-specified changes efficiently.",
@@ -66,7 +66,7 @@ export const EXECUTION_PRESETS: Readonly<Record<PresetId, ExecutionPreset>> = {
   "hard-implement": {
     id: "hard-implement",
     slot: "hardImplement",
-    tools: ["work_context", "read", "edit", "write", "apply_patch", "bash", "grep", "glob", "get_output", "write_to_process", "kill_shell", "explore", "recall", "todo", "dispatch", "threads", "wait", "send", "read_thread", "merge", "update", "kill"],
+    tools: ["read", "edit", "write", "apply_patch", "bash", "grep", "glob", "get_output", "write_to_process", "kill_shell", "explore", "recall", "todo", "dispatch", "threads", "wait", "send", "read_thread", "merge", "update", "kill"],
     worktree: "isolated",
     systemPromptFragment:
       "You are a hard implementation agent. Handle ambiguous or cross-cutting work that requires deeper reasoning.",
@@ -76,7 +76,7 @@ export const EXECUTION_PRESETS: Readonly<Record<PresetId, ExecutionPreset>> = {
   "frontend": {
     id: "frontend",
     slot: "frontend",
-    tools: ["work_context", "read", "edit", "write", "apply_patch", "bash", "grep", "glob", "get_output", "write_to_process", "kill_shell", "explore", "dispatch", "threads", "wait", "send", "read_thread", "merge", "update", "kill"],
+    tools: ["read", "edit", "write", "apply_patch", "bash", "grep", "glob", "get_output", "write_to_process", "kill_shell", "explore", "dispatch", "threads", "wait", "send", "read_thread", "merge", "update", "kill"],
     worktree: "isolated",
     systemPromptFragment:
       "You are a frontend specialist. Focus on UI components, styles, and user-facing behavior.",
@@ -86,7 +86,7 @@ export const EXECUTION_PRESETS: Readonly<Record<PresetId, ExecutionPreset>> = {
   "review": {
     id: "review",
     slot: "review",
-    tools: ["work_context", "read", "grep", "glob", "bash", "get_output", "write_to_process", "kill_shell"],
+    tools: ["read", "grep", "glob", "bash", "get_output", "write_to_process", "kill_shell"],
     worktree: "none",
     systemPromptFragment: "You have not seen the conversation; review the diff on its own merits.",
     teamDescription: "independent review of a diff",
@@ -95,7 +95,7 @@ export const EXECUTION_PRESETS: Readonly<Record<PresetId, ExecutionPreset>> = {
   "check": {
     id: "check",
     slot: "check",
-    tools: ["work_context", "read", "bash", "grep", "glob", "get_output", "write_to_process", "kill_shell"],
+    tools: ["read", "bash", "grep", "glob", "get_output", "write_to_process", "kill_shell"],
     worktree: "isolated",
     systemPromptFragment:
       "You are a check agent. Run tests and lint, report results. Do not make changes.",
@@ -106,7 +106,6 @@ export const EXECUTION_PRESETS: Readonly<Record<PresetId, ExecutionPreset>> = {
     id: "retrieval",
     slot: "retrievalAgent",
     tools: [
-      "work_context",
       "read",
       "grep",
       "find",

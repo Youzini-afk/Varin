@@ -21,15 +21,6 @@ import { createThreadWorktreeRuntime } from "./thread-worktree.js";
 const WORKSPACE = "workspace-1";
 const PARENT = { kind: "session", id: "parent-1" } as const;
 
-const expectSameDirectory = (actual: string | undefined, expected: string): void => {
-  expect(actual).toBeDefined();
-  const left = fs.statSync(actual!, { bigint: true });
-  const right = fs.statSync(expected, { bigint: true });
-  expect(left.isDirectory()).toBe(true);
-  expect(left.ino).not.toBe(0n);
-  expect([left.dev, left.ino]).toEqual([right.dev, right.ino]);
-};
-
 const createThreadRuntime = (
   options: Omit<ThreadRuntimeOptions, "workingStates"> & {
     workingStates?: TestWorkspaceWorkingStateAccess | WorkspaceWorkingStateRootAccess;
@@ -208,7 +199,7 @@ describe("thread runtime", () => {
     return { input, thread, run };
   };
 
-  it("maps a dispatched context into the child worktree before its first prompt", async () => {
+  it("carries the frozen parent authority root through spawn validation", async () => {
     const parentRoot = join(dataDir, "parent");
     const childRoot = join(dataDir, "child");
     fs.mkdirSync(join(parentRoot, "project-a", "src"), { recursive: true });
@@ -226,11 +217,6 @@ describe("thread runtime", () => {
         },
         prompt: async () => {
           ordered.push("prompt");
-          expect(created[0]?.initialWorkContext).toMatchObject({
-            operationDir: "project-a", queryScope: ["project-a/src"], revision: 1,
-          });
-          expectSameDirectory(created[0]?.initialWorkContext?.authorityRoot, childRoot);
-          expectSameDirectory(created[0]?.initialWorkContext?.sessionRoot, childRoot);
         },
       },
       resolveWorkspaceRoot: async (id) => id === WORKSPACE ? parentRoot : childRoot,
@@ -245,101 +231,31 @@ describe("thread runtime", () => {
       },
     });
     try {
+      const frozenRoot = process.platform === "win32" ? parentRoot.toUpperCase() : parentRoot;
       const input: CreateThreadInput = {
         ...createInput(), scope: ["project-a"],
-        initialWorkContext: { authorityRoot: process.platform === "win32" ? parentRoot.toUpperCase() : parentRoot,
-          operationDir: "project-a",
-          queryScope: ["project-a/src"], revision: 4 },
+        initialAuthorityRoot: frozenRoot,
       };
       const thread = await registry.createThread(input);
       const run = await registry.startRun(WORKSPACE, thread.id);
       await mappedRuntime.spawn({ ...input, threadId: thread.id, runId: run.id });
       expect(ordered).toEqual(["create", "prompt"]);
-      expect(created[0]?.initialWorkContext?.workspaceId).toBe("child-workspace");
-      expect(created[0]?.initialWorkContext?.authorityRoot).not.toBe(parentRoot);
-      input.initialWorkContext!.operationDir = "project-b";
-      expect((await registry.getThreadById(WORKSPACE, thread.id))?.manifest.initialWorkContext?.operationDir).toBe("project-a");
+      expect(created[0]?.cwd).toBe(childRoot);
+      input.initialAuthorityRoot = join(dataDir, "mutated");
+      expect((await registry.getThreadById(WORKSPACE, thread.id))?.manifest.initialAuthorityRoot)
+        .toBe(frozenRoot);
     } finally {
       await mappedRuntime.dispose();
     }
   });
 
-  it("clones a nested materialized parent's selected tree into the child", async () => {
-    const owningRoot = join(dataDir, "owning");
-    const parentWorktree = join(dataDir, "parent-worktree");
-    const childRoot = join(dataDir, "child-worktree");
-    fs.mkdirSync(join(owningRoot, "project-a"), { recursive: true });
-    fs.mkdirSync(join(parentWorktree, "project-a"), { recursive: true });
-    fs.writeFileSync(join(owningRoot, "project-a", "source.txt"), "stale owning tree");
-    fs.writeFileSync(join(parentWorktree, "project-a", "source.txt"), "current parent tree");
-    const parentInput = createInput();
-    const parentThread = await registry.createThread(parentInput);
-    const parentRun = await registry.startRun(WORKSPACE, parentThread.id);
-    await registry.setWorktree(WORKSPACE, parentThread.id, {
-      path: parentWorktree, base: "base", viewMode: "materialized", materialized: true,
-    });
-    await registry.markRunRunning(WORKSPACE, parentThread.id, parentRun.id, "parent-child-session");
-    const observedSources: string[] = [];
-    const nestedRuntime = createThreadRuntime({
-      registry,
-      sessions: {
-        ...sessionAdapter,
-        create: async (input) => {
-          expect(input.initialWorkContext).toMatchObject({ operationDir: "project-a", queryScope: ["project-a"] });
-          expectSameDirectory(input.initialWorkContext?.authorityRoot, childRoot);
-          expect(fs.readFileSync(join(input.cwd, "project-a", "source.txt"), "utf8"))
-            .toBe("current parent tree");
-          return snapshot("nested-child", input.cwd);
-        },
-      },
-      resolveWorkspaceRoot: async (id) => id === WORKSPACE ? owningRoot : childRoot,
-      resolveRuntimeWorkspaceId: async () => "child-workspace",
-      worktrees: {
-        prepare: async ({ sourceRoot }) => {
-          observedSources.push(sourceRoot);
-          fs.cpSync(sourceRoot, childRoot, { recursive: true });
-          return { cwd: childRoot, worktree: {
-            path: childRoot, base: "base", viewMode: "materialized", materialized: true,
-          } };
-        },
-        snapshot: async (worktree) => worktree,
-        inspect: async () => ({ patch: "", untracked: [], changedFiles: [], diffStats: { files: 0, insertions: 0, deletions: 0 } }),
-        merge: async () => ({ merged: 0, conflicts: [], conflictState: "none", changedFiles: [], diffStats: { files: 0, insertions: 0, deletions: 0 } }),
-      },
-    });
-    try {
-      const input: CreateThreadInput = { ...createInput(),
-        parent: { kind: "thread", id: parentThread.id }, scope: ["project-a"],
-        initialWorkContext: { authorityRoot: parentWorktree, operationDir: "project-a",
-          queryScope: ["project-a"], revision: 2 } };
-      const child = await registry.createThread(input);
-      const run = await registry.startRun(WORKSPACE, child.id);
-      await nestedRuntime.spawn({ ...input, threadId: child.id, runId: run.id });
-      expect(observedSources).toEqual([parentWorktree]);
-      const virtualRoot = join(dataDir, "virtual-parent");
-      fs.mkdirSync(virtualRoot, { recursive: true });
-      await registry.setWorktree(WORKSPACE, parentThread.id, {
-        path: virtualRoot, base: "base", viewMode: "virtual", materialized: false,
-      });
-      const invalidInput: CreateThreadInput = { ...input,
-        initialWorkContext: { ...input.initialWorkContext!, authorityRoot: virtualRoot } };
-      const invalid = await registry.createThread(invalidInput);
-      const invalidRun = await registry.startRun(WORKSPACE, invalid.id);
-      await expect(nestedRuntime.spawn({ ...invalidInput, threadId: invalid.id, runId: invalidRun.id }))
-        .rejects.toThrow(/Parent virtual work context cannot be materialized/);
-      expect(observedSources).toEqual([parentWorktree]);
-    } finally {
-      await nestedRuntime.dispose();
-    }
-  });
-
-  it("rejects inherited paths outside a narrowed child scope before creating a session", async () => {
+  it("rejects a child clone when the frozen authority root no longer maps to its source", async () => {
     const parentRoot = join(dataDir, "parent");
     const childRoot = join(dataDir, "child");
     fs.mkdirSync(join(parentRoot, "project-a"), { recursive: true });
     fs.mkdirSync(join(childRoot, "project-a"), { recursive: true });
     const create = vi.fn(async () => snapshot("should-not-create"));
-    const narrowedRuntime = createThreadRuntime({
+    const spawnRuntime = createThreadRuntime({
       registry,
       sessions: { ...sessionAdapter, create },
       resolveWorkspaceRoot: async (id) => id === WORKSPACE ? parentRoot : childRoot,
@@ -354,23 +270,22 @@ describe("thread runtime", () => {
       },
     });
     try {
-      const input: CreateThreadInput = { ...createInput(), scope: ["project-b"],
-        initialWorkContext: { authorityRoot: parentRoot, operationDir: "project-a",
-          queryScope: ["project-a"], revision: 4 } };
+      const input: CreateThreadInput = { ...createInput(), scope: ["project-a"],
+        initialAuthorityRoot: childRoot };
       const thread = await registry.createThread(input);
       const run = await registry.startRun(WORKSPACE, thread.id);
-      await expect(narrowedRuntime.spawn({ ...input, threadId: thread.id, runId: run.id }))
-        .rejects.toThrow(/outside the child scope/);
-      expect(create).not.toHaveBeenCalled();
-      const unmappableInput: CreateThreadInput = { ...input, scope: ["project-a"],
-        initialWorkContext: { ...input.initialWorkContext!, authorityRoot: childRoot } };
-      const unmappable = await registry.createThread(unmappableInput);
-      const unmappableRun = await registry.startRun(WORKSPACE, unmappable.id);
-      await expect(narrowedRuntime.spawn({ ...unmappableInput, threadId: unmappable.id, runId: unmappableRun.id }))
+      await expect(spawnRuntime.spawn({ ...input, threadId: thread.id, runId: run.id }))
         .rejects.toThrow(/cannot be mapped from the child clone source/);
       expect(create).not.toHaveBeenCalled();
+      const missingInput: CreateThreadInput = { ...input,
+        initialAuthorityRoot: join(dataDir, "vanished") };
+      const missing = await registry.createThread(missingInput);
+      const missingRun = await registry.startRun(WORKSPACE, missing.id);
+      await expect(spawnRuntime.spawn({ ...missingInput, threadId: missing.id, runId: missingRun.id }))
+        .rejects.toThrow(/missing or inaccessible/);
+      expect(create).not.toHaveBeenCalled();
     } finally {
-      await narrowedRuntime.dispose();
+      await spawnRuntime.dispose();
     }
   });
 

@@ -207,11 +207,10 @@ function applyCodexHunks(content: string, hunks: CodexHunk[]): { result: string;
 export function createApplyPatchTool(
   bridge: HostServicesBridge,
   _sessionId: string,
-  operationDir: string | (() => string),
+  cwd: string,
   _mutationJournal?: WorkspaceMutationJournalBridge,
   options: { surfaceWrite?: boolean } = {},
 ): ToolDefinition {
-  const getOperationDir = typeof operationDir === "function" ? operationDir : () => operationDir;
   return defineTool({
     name: "apply_patch",
     label: "Apply Patch",
@@ -232,9 +231,7 @@ export function createApplyPatchTool(
         };
       }
 
-      // Resolve once at execution time against the live operation dir (RR2):
-      // file bytes always come back from the authorized Host source lookup.
-      const filePaths = parsed.operations.map((operation) => resolve(getOperationDir(), operation.path));
+      const filePaths = parsed.operations.map((operation) => resolve(cwd, operation.path));
 
       const decodeSource = (source: { source: string; base64?: string }): string | null => {
         if ((source.source !== "disk" && source.source !== "working-branch" && source.source !== "surface-draft")

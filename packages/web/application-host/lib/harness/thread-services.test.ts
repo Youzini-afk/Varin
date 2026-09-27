@@ -20,6 +20,7 @@ const serviceContext = (inputContext?: AgentInputContext) => ({
     workerGeneration: 1,
     workerId: "worker-1",
     workspaceId: "workspace-1",
+    authorityRoot: process.cwd(),
   },
   authorizedPaths: [],
   sessionId: "parent-1",
@@ -28,56 +29,30 @@ const serviceContext = (inputContext?: AgentInputContext) => ({
   ...(inputContext ? { inputContext } : {}),
 });
 
-const dispatchService = (host: object) => createThreadDispatchService(Object.assign({
-  workContextGet: () => ({
-    workspaceRoot: process.cwd(),
-    context: { operationDir: "", queryScope: null, revision: 0 },
-    contextEntryId: null,
-  }),
-}, host) as never);
+const dispatchService = (host: object) => createThreadDispatchService(host as never);
 
 describe("thread services", () => {
   beforeEach(() => {
     prepareIsolatedBranch.mockClear();
   });
 
-  it("freezes the confirmed parent directory and query scope before a queued child starts", async () => {
+  it("records the admitted authority root on a queued child manifest", async () => {
     const dataDir = mkdtempSync(join(tmpdir(), "thread-context-dispatch-"));
     const registry = createThreadRegistry({ dataDir, hostId: "host-1" });
-    const parentContext = { operationDir: "project-a", queryScope: ["project-a/src"], revision: 4 };
     const spawn = vi.fn(async () => new Promise<{ sessionId: string }>(() => {}));
     const service = dispatchService({
       threadRegistry: registry,
       threadSpawnSession: spawn,
       threadPrepareIsolatedBranch: prepareIsolatedBranch,
-      workContextGet: () => ({ workspaceRoot: process.cwd(), context: parentContext }),
     });
     try {
       await service.handle({ task: "Hold the only slot", concurrency: 1,
         model: { providerId: "openai", modelId: "gpt-test" }, tools: ["read"] }, serviceContext());
-      let entered!: () => void;
-      let resume!: () => void;
-      const atRegistry = new Promise<void>((resolve) => { entered = resolve; });
-      const resumeRegistry = new Promise<void>((resolve) => { resume = resolve; });
-      vi.spyOn(registry, "getSessionBinding").mockImplementationOnce(async () => {
-        entered();
-        await resumeRegistry;
-        return null;
-      });
-      const pending = service.handle({ task: "Use the selected project", concurrency: 1,
+      const queued = await service.handle({ task: "Use the pinned root", concurrency: 1,
         model: { providerId: "openai", modelId: "gpt-test" }, tools: ["read"] }, serviceContext());
-      await atRegistry;
-      parentContext.operationDir = "project-b";
-      parentContext.queryScope = ["project-b/src"];
-      parentContext.revision = 5;
-      resume();
-      const queued = await pending;
       expect(queued.queued).toBe(true);
       const child = await registry.getThreadById("workspace-1", queued.threadId);
-      expect(child?.manifest.initialWorkContext).toEqual({
-        authorityRoot: process.cwd(), operationDir: "project-a",
-        queryScope: ["project-a/src"], revision: 4,
-      });
+      expect(child?.manifest.initialAuthorityRoot).toBe(process.cwd());
     } finally {
       await registry.dispose();
       rmSync(dataDir, { recursive: true, force: true });
@@ -334,7 +309,6 @@ describe("thread services", () => {
         },
         model: { providerId: "research-provider", modelId: "design-model" },
       });
-      expect(branch?.manifest.tools).toContain("work_context");
       expect(spawn).toHaveBeenCalledOnce();
     } finally {
       await registry.dispose();

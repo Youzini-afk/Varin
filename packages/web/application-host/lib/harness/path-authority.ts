@@ -142,9 +142,7 @@ export function createHarnessPathAuthority({
         ? await documents.inspectWorkspace(actor.workspaceId)
         : null;
       const authorityRoot = workspace?.root ?? actor.authorityRoot ?? null;
-      const baseDir = actor.operationDir && authorityRoot
-        ? pathModule.resolve(authorityRoot, actor.operationDir)
-        : authorityRoot;
+      const baseDir = actor.cwd ?? authorityRoot;
       const absolutePath = isAbsoluteInput(inputPath)
         ? inputPath
         : baseDir ? pathModule.resolve(baseDir, inputPath) : null;

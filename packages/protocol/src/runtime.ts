@@ -159,7 +159,7 @@ export type RuntimeMethodMap = Omit<Pick<HostMethodMap, DirectRuntimeMethod>, "s
       result: HostMethodMap["session.list"]["result"][number];
     };
     "session.create": {
-      params: Omit<HostMethodMap["session.create"]["params"], "initialWorkContext" | "workFocus" | "workFocusGeneration" | "workFocusRole"> & {
+      params: Omit<HostMethodMap["session.create"]["params"], "workFocus" | "workFocusGeneration" | "workFocusRole"> & {
         workspace?: SessionWorkspaceBinding;
         workFocus?: WorkFocusId;
       };

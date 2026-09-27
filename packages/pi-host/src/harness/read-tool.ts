@@ -79,7 +79,7 @@ const bytesReadOperations = (bytes: Buffer): ReadOperations => ({
 export function createSurfaceAwareReadTool(
   bridge: HostServicesBridge,
   cwd: string,
-  options: Pick<ReadToolOptions, "autoResizeImages"> & { operationDir?: () => string } = {},
+  options: Pick<ReadToolOptions, "autoResizeImages"> = {},
 ): ToolDefinition {
   const native = createReadToolDefinition(cwd, options);
   const wrapped: ReturnType<typeof createReadToolDefinition> = {
@@ -89,7 +89,7 @@ export function createSurfaceAwareReadTool(
       // bytes from the admitted canonical target so Pi never reopens the alias.
       const anchoredParams = params.path === undefined
         ? params
-        : { ...params, path: path.resolve(options.operationDir?.() ?? cwd, params.path) };
+        : { ...params, path: path.resolve(cwd, params.path) };
       const source = await bridge.request(
         "document.readSource",
         { path: anchoredParams.path },

@@ -214,17 +214,9 @@ export function createThreadDispatchService(host: HarnessServiceHost): HarnessSe
       if (!registry || !host.threadSpawnSession) {
         throw new HarnessServiceError("unavailable", "Thread runtime is not configured");
       }
-      // The request already passed Host actor admission. Read its confirmed
-      // context synchronously, before any registry or draft-capture await can
-      // interleave a parent context change.
-      const confirmedWorkContext = host.workContextGet(ctx.actor);
-      const initialWorkContext = {
-        authorityRoot: confirmedWorkContext.workspaceRoot,
-        operationDir: confirmedWorkContext.context.operationDir,
-        queryScope: confirmedWorkContext.context.queryScope === null
-          ? null : [...confirmedWorkContext.context.queryScope],
-        revision: confirmedWorkContext.context.revision,
-      };
+      // The request already passed Host actor admission; the actor's pinned
+      // authority root is the durable clone-source identity for any child.
+      const initialAuthorityRoot = ctx.actor.authorityRoot ?? undefined;
       // Task-centered dispatch (D-285): `preset` is optional. Without one the
       // child runs on the caller's model and the tools the worker resolved
       // from its own active set — clamped below to the owning Thread's frozen
@@ -305,10 +297,7 @@ export function createThreadDispatchService(host: HarnessServiceHost): HarnessSe
       // worker-resolved set is its own tools, which it already holds.
       const tools = researchDefinition?.tools ?? preset?.tools ?? params.tools ?? [];
       if (owner && !preset) {
-        // context.session is an inherent, Host-scoped session capability. An
-        // older parent Run may predate the work_context tool, but granting its
-        // child the local context handle does not enlarge the frozen path scope.
-        const denied = tools.filter((tool) => tool !== "work_context" && !owner.execution.tools.includes(tool));
+        const denied = tools.filter((tool) => !owner.execution.tools.includes(tool));
         if (denied.length > 0) {
           await captured.cleanup().catch(() => undefined);
           throw new HarnessServiceError(
@@ -359,7 +348,7 @@ export function createThreadDispatchService(host: HarnessServiceHost): HarnessSe
         ...(preset ? { preset: preset.id } : {}),
         ...(params.input === "inherit" ? { inputOrigin: "inherit" as const } : {}),
         ...(inheritedContext ? { inheritedContext } : {}),
-        initialWorkContext,
+        ...(initialAuthorityRoot !== undefined ? { initialAuthorityRoot } : {}),
         kind: "implementation" as const,
         createdBy: "agent" as const,
         concurrency,

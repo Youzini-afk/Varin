@@ -125,11 +125,7 @@ describe("harness service host authorization", () => {
         workspaceId: "workspace-1",
         workspaceScope: ["packages/web"],
         grantedCapabilities: ["read.output"],
-        // RR2: the actor carries the session work context — seeded at the
-        // launch dir ("" = workspace root) with revision 0 until first select.
-        operationDir: "",
-        contextRevision: 0,
-        queryScope: null,
+        cwd: "D:/workspace",
         authorityRoot: "D:/workspace",
       });
       await expect(host.resolveActor({ ...ACTOR, workerId: "stale-worker" })).resolves.toBeNull();
@@ -315,8 +311,7 @@ describe("HR0 unbound session admission", () => {
         sessionId: ACTOR.sessionId,
         workspaceId: null,
         authorityRoot: launch,
-        operationDir: "",
-        contextRevision: 0,
+        cwd: launch,
       });
     } finally {
       await host.dispose();
@@ -328,17 +323,15 @@ describe("HR0 unbound session admission", () => {
       search: async () => ({ status: "empty", generation: undefined }),
       resolveWorkspaceRoot: async () => { throw new Error("offline"); },
       discoveredShells: { hasBash: false },
-      workContextJournal: { read: async () => ({ context: null }) } as never,
       pathAuthority: { resolve: async () => null } as never,
     });
     try {
-      const prepared = await host.prepareWorkContext({
+      host.registerSession({
         actor: ACTOR,
         grantedCapabilities: ["read.output"],
         workspaceId: null,
         workspaceRoot: "Z:/offline/share",
       });
-      host.registerSession(prepared);
       const resolved = await host.resolveActor({ ...ACTOR, runId: "run-1" });
       expect(resolved?.workspaceId).toBeNull();
       expect(resolved?.authorityRoot).toBe("Z:/offline/share");

@@ -154,8 +154,6 @@ import {
 import {
   HostServicesBridge,
 } from "./harness/host-services-bridge.js";
-import { createWorkContextMirror, WorkContextSync, type WorkContextMirror } from "./harness/work-context.js";
-import { commitSessionWorkContext, initializeSessionWorkContext, readSessionWorkContext } from "./session-work-context.js";
 import {
   createHarnessCounterTracker,
   type HarnessCounterTracker,
@@ -673,12 +671,9 @@ export class SessionHost {
   #harnessLspNavigationEnabled = false;
   #harnessDocumentReadEnabled = false;
   #harnessDocumentPathOverlayEnabled = false;
-  #harnessWorkContextEnabled = false;
   #harnessWebReadEnabled = false;
   #harnessWebSearchEnabled = false;
   #hostServicesBridge: HostServicesBridge | undefined;
-  #workContext: WorkContextMirror | undefined;
-  #workContextSync: WorkContextSync | undefined;
   #harnessCounters: HarnessCounterTracker | undefined;
   #sessionToolAllowlist: string[] | undefined;
   #sessionModelSelection: ModelSelection | undefined;
@@ -773,9 +768,6 @@ export class SessionHost {
     this.#harnessDocumentReadEnabled = enabled;
   }
 
-  setHarnessWorkContextEnabled(enabled: boolean): void {
-    this.#harnessWorkContextEnabled = enabled;
-  }
 
   setHarnessDocumentPathOverlayEnabled(enabled: boolean): void {
     this.#harnessDocumentPathOverlayEnabled = enabled;
@@ -801,7 +793,6 @@ export class SessionHost {
       ok: boolean;
       result?: unknown;
       error?: { code: string; message: string; retryable?: boolean };
-      harnessContext?: { workContextRevision: number };
     },
   ): boolean {
     if (!this.#hostServicesBridge) return false;
@@ -809,7 +800,6 @@ export class SessionHost {
       return this.#hostServicesBridge.respond(sessionId, requestId, {
         ok: true,
         result: outcome.result,
-        ...(outcome.harnessContext !== undefined ? { harnessContext: outcome.harnessContext } : {}),
       });
     }
     if (!outcome.error) return false;
@@ -845,7 +835,6 @@ export class SessionHost {
     workFocus: WorkFocusSelection = { id: "code", source: "product-default" },
     workFocusGeneration = 1,
     workFocusRole: WorkFocusExecutionRole = "principal",
-    initialWorkContext?: NonNullable<import("@varin/protocol").PiWorkContextSnapshot["context"]>,
   ): Promise<SessionSnapshot> {
     this.#sessionToolAllowlist = tools === undefined ? undefined : [...new Set(tools)];
     this.#sessionModelSelection = model === undefined ? undefined : { ...model };
@@ -860,7 +849,6 @@ export class SessionHost {
       getSessionDir(cwd, this.#agentDir),
       parentSession === undefined ? undefined : { parentSession },
     );
-    if (initialWorkContext) initializeSessionWorkContext(manager, initialWorkContext);
     await this.#replaceWith(manager);
     if (name) this.session.setSessionName(name);
     return this.snapshot();
@@ -900,8 +888,6 @@ export class SessionHost {
     }
     const manager = SessionManager.open(sessionFile, undefined, input.cwd);
     await this.#replaceWith(manager);
-    // The broker must pin this worker and publish its workspace binding before
-    // a Host-owned context.get can be admitted. It calls syncWorkContext next.
     return this.snapshot();
   }
 
@@ -991,9 +977,6 @@ export class SessionHost {
         selected: { ...this.#workFocus },
         status: "applied",
       },
-      ...(this.#workContext !== undefined && this.#workContext.revision !== null
-        ? { workContext: { operationDir: this.#workContext.operationDir, revision: this.#workContext.revision } }
-        : {}),
     };
   }
 
@@ -1217,7 +1200,6 @@ export class SessionHost {
   ): Promise<{ cancelled: boolean; editorText?: string; snapshot: SessionSnapshot }> {
     this.assertSession(sessionId);
     const result = await this.runtime.fork(entryId, { position });
-    if (!result.cancelled && this.sessionId === sessionId) await this.#workContextSync?.refresh(true);
     return {
       cancelled: result.cancelled,
       ...(result.selectedText === undefined ? {} : { editorText: result.selectedText }),
@@ -1716,13 +1698,11 @@ export class SessionHost {
   ) {
     if (options?.summarize !== true) {
       const result = await session.navigateTree(targetId, options);
-      if (!result.cancelled && this.#runtime?.session === session) await this.#workContextSync?.refresh(true);
       return result;
     }
     const activity = this.#beginStoppableActivity(session, "branchSummary");
     try {
       const result = await session.navigateTree(targetId, options);
-      if (!result.cancelled && this.#runtime?.session === session) await this.#workContextSync?.refresh(true);
       return result;
     } finally {
       this.#finishStoppableActivity(activity);
@@ -1744,25 +1724,6 @@ export class SessionHost {
     return readSessionFeatures(this.session.sessionManager);
   }
 
-  workContextRead(sessionId: string): import("@varin/protocol").PiWorkContextSnapshot {
-    this.assertSession(sessionId);
-    return readSessionWorkContext(this.session.sessionManager);
-  }
-
-  async syncWorkContext(sessionId: string): Promise<SessionSnapshot> {
-    this.assertSession(sessionId);
-    if (this.#harnessWorkContextEnabled) await this.#workContextSync?.ensureCurrent();
-    const snapshot = this.snapshot();
-    this.#emit("session.snapshot", snapshot);
-    return snapshot;
-  }
-
-  workContextCommit(input: import("@varin/protocol").PiWorkContextCommit): import("@varin/protocol").PiWorkContextSnapshot {
-    this.assertSession(input.sessionId);
-    const snapshot = commitSessionWorkContext(this.session.sessionManager, input);
-    this.#emit("session.snapshot", this.snapshot());
-    return snapshot;
-  }
 
   mutateFeatures(
     sessionId: string,
@@ -3465,28 +3426,12 @@ export class SessionHost {
           })
         : undefined;
       this.#workspaceMutationJournal = workspaceMutationJournal;
-      const workContext = this.#harnessWorkContextEnabled ? createWorkContextMirror(cwd) : undefined;
-      let cachedWorkContextLeafId: string | null | undefined;
-      let cachedWorkContextEntryId: string | null = null;
-      const currentWorkContextEntryId = (): string | null => {
-        const leafId = sessionManager.getLeafId();
-        if (cachedWorkContextLeafId !== leafId) {
-          cachedWorkContextEntryId = readSessionWorkContext(sessionManager).entryId;
-          cachedWorkContextLeafId = leafId;
-        }
-        return cachedWorkContextEntryId;
-      };
-      this.#workContext = workContext;
       const hostServicesBridge = new HostServicesBridge({
         emit: (event, data) => this.#emit(event, data),
         getInputContext: () => this.#inputContext,
         sessionId: sessionManager.getSessionId(),
-        ...(workContext ? { getWorkContextEntryId: currentWorkContextEntryId } : {}),
-        onWorkContextRevision: (revision, entryId) => workContextSync?.noteRevision(revision, entryId),
       });
       this.#hostServicesBridge = hostServicesBridge;
-      const workContextSync = workContext ? new WorkContextSync(hostServicesBridge, workContext, currentWorkContextEntryId) : undefined;
-      this.#workContextSync = workContextSync;
       // Tool admission awaits the first read after the worker has been bound.
       // Issuing it while creating an unbound worker races Host registration.
       const harnessCounters = createHarnessCounterTracker();
@@ -3602,7 +3547,7 @@ export class SessionHost {
               factory: (() => {
                 const contextPreparation = createContextPreparationExtension({
                   getProjectTrusted: () => settingsManager.isProjectTrusted(),
-                  inject: createRequestContextInjector(hostServicesBridge, workContextSync),
+                  inject: createRequestContextInjector(hostServicesBridge),
                   runCompactionTask: (spec, signal) =>
                     hostServicesBridge.request<"compaction.run">("compaction.run", spec, {
                       signal,
@@ -3859,12 +3804,7 @@ export class SessionHost {
           sessionManager.getSessionId(),
           // The fixed-draft read override and surface writes are the two sides
           // of one source contract, so they are gated together (D-225).
-          {
-            surfaceWrite: this.#harnessDocumentReadEnabled,
-            getOperationDir: () => workContext?.operationDirAbs ?? cwd,
-            ...(workContextSync ? { ensureOperationContext: () => workContextSync!.ensureCurrent() } : {}),
-            ...(workContext ? { getContextRevision: () => workContext.revision } : {}),
-          },
+          { surfaceWrite: this.#harnessDocumentReadEnabled },
         ));
       }
       // Harness tools — gated by HarnessSettings.tools flags via selectHarnessTools.
@@ -3900,7 +3840,6 @@ export class SessionHost {
         scheduledTasksAvailable: this.#harnessScheduledTasksEnabled,
         resolvedPresets,
         resolvedResearchCapabilities,
-        ...(workContextSync !== undefined ? { workContext: workContextSync } : {}),
         getActiveToolNames: () => this.runtime?.session.getActiveToolNames() ?? [],
         ...(this.#sessionToolAllowlist ? { sessionToolAllowlist: this.#sessionToolAllowlist } : {}),
       }));
