@@ -38,11 +38,11 @@
     "type-check": "tsc --noEmit -p tsconfig.json"
   },
   "dependencies": {
-    "@clack/prompts": "^1.7.0",
+    "@clack/prompts": "^1.8.1",
     "@varin/extension-contract": "0.2.0",
     "@varin/extension-sdk": "0.2.0",
     "@varin/extension-surface": "0.2.0",
-    "esbuild": "^0.28.1"
+    "esbuild": "^0.28.2"
   },
   "engines": {
     "node": ">=22.19.0"

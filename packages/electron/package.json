@@ -15,13 +15,13 @@
     "@varin/runtime-broker": "workspace:*",
     "@varin/settings-store": "workspace:*",
     "electron-context-menu": "^5.0.0",
-    "electron-log": "^5.4.3",
+    "electron-log": "^5.4.4",
     "electron-updater": "^6.8.9"
   },
   "devDependencies": {
     "electron": "^44.4.1",
-    "electron-builder": "^26.15.7",
-    "node-abi": "^4.33.0"
+    "electron-builder": "^26.16.1",
+    "node-abi": "^4.35.0"
   },
   "trustedDependencies": [
     "electron"
