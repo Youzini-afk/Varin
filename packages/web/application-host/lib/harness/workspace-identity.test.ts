@@ -180,8 +180,9 @@ describe("owning vs execution workspace identity", () => {
     expect(parentSession.workspaceId).toBe(execution.workspaceId);
     expect(execution.workspaceId).not.toBe(owning.workspaceId);
     expect(await registry.getThreadForSession(execution.workspaceId, parentSession.sessionId)).toBeNull();
-    expect(await registry.getSessionBinding(parentSession.sessionId)).toMatchObject({
-      owningWorkspaceId: owning.workspaceId,
+    const parentBinding = await registry.getSessionBinding(parentSession.sessionId);
+    expect(parentBinding?.owningScopeId).toBe(owning.workspaceId);
+    expect(parentBinding).toMatchObject({
       threadId: parentThread.id,
       sessionId: parentSession.sessionId,
     });

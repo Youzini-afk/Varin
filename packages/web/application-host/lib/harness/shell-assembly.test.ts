@@ -1,4 +1,4 @@
-import { existsSync, mkdirSync, mkdtempSync, rmSync, statSync } from "node:fs";
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, statSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, describe, expect, it, vi } from "vitest";
@@ -221,7 +221,8 @@ describe("production shell assembly", () => {
     if (process.platform !== "win32") return;
     const discovered = discoverShells();
     expect(discovered.hasPowerShell, "PowerShell should be discovered on this Windows machine").toBe(true);
-    const workspace = mkdtempSync(join(tmpdir(), "shell-powershell-"));
+    // Keep the real path long enough to wrap a path-bearing PTY control record.
+    const workspace = mkdtempSync(join(tmpdir(), "shell-powershell-directory-long-enough-to-wrap-the-control-record-"));
     const nested = join(workspace, "nested"); mkdirSync(nested);
     const envName = `VARIN_TEST_PS_SCOPE_${process.pid}`;
     const vanished = join(workspace, "vanished"); mkdirSync(vanished);
@@ -244,7 +245,7 @@ describe("production shell assembly", () => {
     });
     const ctx = serviceContext("session-powershell", "ws-powershell");
     const first = await createShellExecService(host).handle(
-      { command: `Remove-Item Env:${envName} -ErrorAction SilentlyContinue; $env:${envName} = 'retained'; Set-Location -LiteralPath '${nested.replace(/'/g, "''")}' ; Write-Output varin-powershell-one; (Get-Location).Path`, cwd: workspace, waitMs: 15_000 },
+      { command: `Remove-Item Env:${envName} -ErrorAction SilentlyContinue; $env:${envName} = 'retained'; Set-Location -LiteralPath '${nested.replace(/'/g, "''")}' ; Set-Content -LiteralPath cwd-proof.txt -Value varin-powershell-one; Write-Output varin-powershell-one; (Get-Location).Path`, cwd: workspace, waitMs: 15_000 },
       ctx,
     );
     const second = await createShellExecService(host).handle(
@@ -272,7 +273,7 @@ describe("production shell assembly", () => {
     expect(existsSync(join(workspace, "marker.txt"))).toBe(false);
     if (first.kind === "completed") {
       expect(first.stdout).toContain("varin-powershell-one");
-      expect(first.stdout).toContain(nested);
+      expect(readFileSync(join(nested, "cwd-proof.txt"), "utf8").trim()).toBe("varin-powershell-one");
     }
     if (second.kind === "completed") expect(second.stdout).toContain("clean");
   }, 45_000);

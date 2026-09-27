@@ -219,6 +219,64 @@ describe("stripControlSequences", () => {
 });
 
 describe("background shell output", () => {
+  it.each(["foreground", "background"] as const)("waits for complete cwd and exit markers in %s output", async (mode) => {
+    const dataHandlers = new Set<(data: string) => void>();
+    const exitHandlers = new Set<(event: { exitCode: number; signal: number }) => void>();
+    const emit = (data: string) => { for (const handler of dataHandlers) handler(data); };
+    let commandWritten!: (token: string) => void;
+    const commandReady = new Promise<string>((resolve) => { commandWritten = resolve; });
+    const process: PtyProcess = {
+      kill: () => { for (const handler of exitHandlers) handler({ exitCode: 0, signal: 0 }); },
+      onData: (handler) => { dataHandlers.add(handler); return { dispose: () => dataHandlers.delete(handler) }; },
+      onExit: (handler) => { exitHandlers.add(handler); return { dispose: () => exitHandlers.delete(handler) }; },
+      resize: () => undefined,
+      write: (data) => {
+        const ready = data.match(/(__VARIN_READY_[0-9a-f]+__)/)?.[1];
+        if (ready) { queueMicrotask(() => emit(`${ready}\n`)); return; }
+        const token = data.match(/__VARIN_SENTINEL_([0-9a-f]+)/)?.[1];
+        if (token) commandWritten(token);
+      },
+    };
+    const outputStore = createOutputStore();
+    const completedEvents: ShellCommandCompletedEvent[] = [];
+    const supervisor = createShellSupervisor({
+      interpreter: { kind: "bash", command: "bash", args: [], env: {} },
+      outputStore,
+      sessionId: `split-markers-${mode}`,
+      cwd: tmpdir(),
+      ptyProvider: { backend: "fake", spawn: () => process },
+      commandLifecycle: { completed: (event) => { completedEvents.push(event); } },
+    });
+    try {
+      const execution = supervisor.exec("command", { waitMs: mode === "background" ? 0 : 10_000 });
+      const token = await commandReady;
+      if (mode === "background") {
+        const result = await execution;
+        expect(["preparing", "background"]).toContain(result.kind);
+        if (result.kind !== "preparing" && result.kind !== "background") throw new Error("expected pending execution");
+        await waitForRuntimeShellId(supervisor, result.id);
+      }
+      emit(`__VARIN_SENTINEL_${token}:B\nbody\n__VARIN_SENTINEL_${token}:C:`);
+      emit(`1\r\n__VARIN_SENTINEL_${token}:E:2`);
+      expect(completedEvents).toHaveLength(0);
+      emit("7\r");
+      expect(completedEvents).toHaveLength(0);
+      emit("\n");
+      if (mode === "foreground") {
+        expect(await execution).toMatchObject({ kind: "completed", cwd: tmpdir(), exitCode: 27 });
+      }
+      await vi.waitFor(() => expect(completedEvents).toHaveLength(1));
+      expect(completedEvents[0]).toMatchObject({ cwd: tmpdir(), exitCode: 27 });
+      const output = await supervisor.read(completedEvents[0]!.executionId);
+      expect(output).toMatchObject({ running: false, exitCode: 27 });
+      expect(output.text).toContain("body");
+      expect(output.text).not.toContain("VARIN_SENTINEL");
+    } finally {
+      await supervisor.dispose();
+      outputStore.dispose();
+    }
+  });
+
   it("keeps collecting output and observes the exit sentinel after a command backgrounds", async () => {
     const dataHandlers = new Set<(data: string) => void>();
     const exitHandlers = new Set<(event: { exitCode: number; signal: number }) => void>();
@@ -234,11 +292,11 @@ describe("background shell output", () => {
           queueMicrotask(() => { for (const handler of dataHandlers) handler(`${ready}\n`); });
           return;
         }
-        const token = data.match(/__VARIN_SENTINEL_([0-9a-f]+):B/)?.[1];
+        const token = data.match(/__VARIN_SENTINEL_([0-9a-f]+)/)?.[1];
         if (!token) return;
         queueMicrotask(() => { for (const handler of dataHandlers) handler(`__VARIN_SENTINEL_${token}:B\n${largeChunk}`); });
         setTimeout(() => {
-          for (const handler of dataHandlers) handler(` tail-marker\n__VARIN_SENTINEL_${token}:C:/workspace\n__VARIN_SENTINEL_${token}:E:0\n`);
+          for (const handler of dataHandlers) handler(` tail-marker\n__VARIN_SENTINEL_${token}:C:1\n__VARIN_SENTINEL_${token}:E:0\n`);
         }, 30);
       },
     };
@@ -320,7 +378,6 @@ describe("shell respawn working directory", () => {
   // Mimics the terminal runtime's cwd validation: spawn rejects directories
   // that do not exist.
   const controlledShell = (
-    sentinelCwd: (commandIndex: number) => string,
     shouldComplete: (commandIndex: number) => boolean = () => true,
   ): {
     provider: PtyProvider;
@@ -354,14 +411,14 @@ describe("shell respawn working directory", () => {
               queueMicrotask(() => { for (const handler of dataHandlers) handler(`${ready}\n`); });
               return;
             }
-            const token = data.match(/__VARIN_SENTINEL_([0-9a-f]+):B/)?.[1];
+            const token = data.match(/__VARIN_SENTINEL_([0-9a-f]+)/)?.[1];
             if (!token) return;
             const index = commandIndex++;
             queueMicrotask(() => {
               for (const handler of dataHandlers) {
                 handler([
                   `__VARIN_SENTINEL_${token}:B`,
-                  `__VARIN_SENTINEL_${token}:C:${sentinelCwd(index)}`,
+                  `__VARIN_SENTINEL_${token}:C:1`,
                   ...(shouldComplete(index) ? [`__VARIN_SENTINEL_${token}:E:0`] : []),
                   "",
                 ].join("\n"));
@@ -380,7 +437,7 @@ describe("shell respawn working directory", () => {
     const workspace = mkdtempSync(join(tmpdir(), "shell-cwd-"));
     const vanished = join(workspace, "vanished");
     mkdirSync(vanished);
-    const { provider, spawnCwds, processes } = controlledShell(() => vanished);
+    const { provider, spawnCwds, processes } = controlledShell();
     const outputStore = createOutputStore();
     const supervisor = createShellSupervisor({
       interpreter: { kind: "bash", command: "bash", args: [], env: {} },
@@ -390,13 +447,13 @@ describe("shell respawn working directory", () => {
       ptyProvider: provider,
     });
     try {
-      const first = await supervisor.exec("cd elsewhere", { waitMs: 1000 });
+      const first = await supervisor.exec("command in temporary directory", { waitMs: 1000, cwd: vanished });
       expect(first).toMatchObject({ kind: "completed", exitCode: 0 });
       rmSync(vanished, { recursive: true, force: true });
       processes[0]!.kill();
       const second = await supervisor.exec("echo ok", { waitMs: 1000 });
       expect(second).toMatchObject({ kind: "completed", exitCode: 0 });
-      expect(spawnCwds).toEqual([workspace, workspace]);
+      expect(spawnCwds).toEqual([vanished, workspace]);
     } finally {
       await supervisor.dispose();
       outputStore.dispose();
@@ -410,7 +467,7 @@ describe("shell respawn working directory", () => {
     const rescue = join(workspace, "rescue");
     mkdirSync(vanished);
     mkdirSync(rescue);
-    const { provider, spawnCwds, processes } = controlledShell(() => vanished);
+    const { provider, spawnCwds, processes } = controlledShell();
     const outputStore = createOutputStore();
     const supervisor = createShellSupervisor({
       interpreter: { kind: "bash", command: "bash", args: [], env: {} },
@@ -420,7 +477,7 @@ describe("shell respawn working directory", () => {
       ptyProvider: provider,
     });
     try {
-      await supervisor.exec("cd elsewhere", { waitMs: 1000 });
+      await supervisor.exec("command in temporary directory", { waitMs: 1000, cwd: vanished });
       rmSync(vanished, { recursive: true, force: true });
       processes[0]!.kill();
       const second = await supervisor.exec("echo ok", { waitMs: 1000, cwd: rescue });
@@ -453,16 +510,15 @@ describe("shell respawn working directory", () => {
           queueMicrotask(() => { for (const handler of dataHandlers) handler(`${ready}\n`); });
           return;
         }
-        const token = data.match(/__VARIN_SENTINEL_([0-9a-f]+):B/)?.[1];
+        const token = data.match(/__VARIN_SENTINEL_([0-9a-f]+)/)?.[1];
         if (!token) return;
-        const failedSwitch = data.includes(`cd -- '${selected}' &&`) && selectedCwdFailures++ === 0;
-        const reportedCwd = failedSwitch ? workspace : data.includes(`cd -- '${selected}' &&`) ? selected : workspace;
+        const failedSwitch = data.includes(`cd -- '${selected}'; then`) && selectedCwdFailures++ === 0;
         queueMicrotask(() => {
           for (const handler of dataHandlers) {
             handler([
               ...(failedSwitch ? [] : [`__VARIN_SENTINEL_${token}:B`]),
               ...(failedSwitch ? [] : ["payload-ran"]),
-              `__VARIN_SENTINEL_${token}:C:${reportedCwd}`,
+              `__VARIN_SENTINEL_${token}:C:${failedSwitch ? 0 : 1}`,
               `__VARIN_SENTINEL_${token}:E:${failedSwitch ? 1 : 0}`,
               "",
             ].join("\n"));
@@ -492,7 +548,7 @@ describe("shell respawn working directory", () => {
       const retriedSwitch = await supervisor.exec("after-retry", { waitMs: 1000 });
       expect(retriedSwitch).toMatchObject({ kind: "completed", exitCode: 0, cwd: selected });
       if (retriedSwitch.kind === "completed") expect(retriedSwitch.stdout.trim()).toBe("payload-ran");
-      expect(writes.filter((write) => write.includes(`cd -- '${selected}' &&`))).toHaveLength(2);
+      expect(writes.filter((write) => write.includes(`cd -- '${selected}'; then`))).toHaveLength(2);
     } finally {
       await supervisor.dispose();
       outputStore.dispose();
@@ -503,9 +559,9 @@ describe("shell respawn working directory", () => {
   it("normalizes git-bash cwd state and recovers after killing the background shell", async () => {
     if (process.platform !== "win32") return;
     const workspace = mkdtempSync(join(tmpdir(), "shell-cwd-"));
-    // git-bash $PWD uses /c/... mounts; the path must never reach spawn raw.
+    // A caller can supply git-bash /c/... mounts; spawn still gets a native path.
     const posixWorkspace = `/${workspace[0]!.toLowerCase()}${workspace.slice(2).replaceAll("\\", "/")}`;
-    const { provider, spawnCwds } = controlledShell(() => posixWorkspace, (index) => index !== 1);
+    const { provider, spawnCwds } = controlledShell((index) => index !== 1);
     const outputStore = createOutputStore();
     const supervisor = createShellSupervisor({
       interpreter: { kind: "git-bash", command: "bash.exe", args: ["-l"], env: {} },
@@ -515,7 +571,7 @@ describe("shell respawn working directory", () => {
       ptyProvider: provider,
     });
     try {
-      const first = await supervisor.exec("echo first", { waitMs: 1000 });
+      const first = await supervisor.exec("echo first", { waitMs: 1000, cwd: posixWorkspace });
       expect(first).toMatchObject({ kind: "completed", exitCode: 0, cwd: workspace });
 
       const background = await supervisor.exec("grep forever", { waitMs: 5 });
@@ -538,7 +594,7 @@ describe("shell respawn working directory", () => {
   it("fails an explicit missing cwd before writing a command into the live shell", async () => {
     const workspace = mkdtempSync(join(tmpdir(), "shell-cwd-"));
     const missing = join(workspace, "missing");
-    const { provider, spawnCwds } = controlledShell(() => workspace);
+    const { provider, spawnCwds } = controlledShell();
     const outputStore = createOutputStore();
     const supervisor = createShellSupervisor({
       interpreter: { kind: "bash", command: "bash", args: [], env: {} },
@@ -563,7 +619,7 @@ describe("shell respawn working directory", () => {
 
   it("does not fall back to the Host cwd when the session root no longer exists", async () => {
     const workspace = mkdtempSync(join(tmpdir(), "shell-cwd-"));
-    const { provider, processes, spawnCwds } = controlledShell(() => workspace);
+    const { provider, processes, spawnCwds } = controlledShell();
     const outputStore = createOutputStore();
     const supervisor = createShellSupervisor({
       interpreter: { kind: "bash", command: "bash", args: [], env: {} },
@@ -591,8 +647,7 @@ describe("shell respawn working directory", () => {
     const workspace = mkdtempSync(join(tmpdir(), "shell-cwd-"));
     const child = join(workspace, "child");
     mkdirSync(child);
-    const toGitBashPwd = (cwd: string): string => `/${cwd[0]!.toLowerCase()}${cwd.slice(2).replaceAll("\\", "/")}`;
-    const { provider, writes } = controlledShell((index) => toGitBashPwd(index === 0 ? workspace : child));
+    const { provider, writes } = controlledShell();
     const outputStore = createOutputStore();
     const supervisor = createShellSupervisor({
       interpreter: { kind: "git-bash", command: "bash.exe", args: ["-l"], env: {} },
@@ -605,7 +660,7 @@ describe("shell respawn working directory", () => {
       await expect(supervisor.exec("echo first", { waitMs: 1000 })).resolves.toMatchObject({ cwd: workspace });
       await expect(supervisor.exec("echo second", { waitMs: 1000, cwd: child })).resolves.toMatchObject({ cwd: child });
       const commandWrite = writes.find((write) => write.includes("echo second"));
-      expect(commandWrite).toContain(`cd -- '${child.replaceAll("\\", "/")}' &&`);
+      expect(commandWrite).toContain(`cd -- '${child.replaceAll("\\", "/")}'; then`);
     } finally {
       await supervisor.dispose();
       outputStore.dispose();
@@ -1093,7 +1148,7 @@ describe("RR3 command payload framing and execution identity", () => {
 `); });
           return;
         }
-        const token = data.match(/__VARIN_SENTINEL_([0-9a-f]+):B/)?.[1];
+        const token = data.match(/__VARIN_SENTINEL_([0-9a-f]+)/)?.[1];
         if (!token) return;
         const lines = onCommand?.(data) ?? ["payload-output", 0];
         queueMicrotask(() => {
@@ -1104,7 +1159,7 @@ describe("RR3 command payload framing and execution identity", () => {
         });
         queueMicrotask(() => {
           for (const handler of dataHandlers) {
-            handler(`__VARIN_SENTINEL_${token}:C:/workspace\n` + (lines[1] === undefined ? "" : `__VARIN_SENTINEL_${token}:E:${lines[1]}\n`));
+            handler(`__VARIN_SENTINEL_${token}:C:1\n` + (lines[1] === undefined ? "" : `__VARIN_SENTINEL_${token}:E:${lines[1]}\n`));
           }
         });
       },
@@ -1134,7 +1189,7 @@ describe("RR3 command payload framing and execution identity", () => {
       // real newline appended inside the eval string.
       expect(commandWrite).toContain("cat <<EOF\\nbody\\nEOF # done\\n");
       // Control framing lives outside the payload on the same line.
-      expect(commandWrite).toContain(":B'; eval $'");
+      expect(commandWrite).toContain(':B"; eval $\'');
       expect(commandWrite).toContain("__ec=$?");
     } finally {
       await supervisor.dispose();

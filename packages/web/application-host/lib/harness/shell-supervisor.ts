@@ -136,6 +136,13 @@ export function stripControlSequences(text: string): string {
 
 const SENTINEL = "__VARIN_SENTINEL_";
 
+// Every control record is short and newline-terminated. The cwd itself is
+// frozen at admission; C only confirms whether the shell entered that cwd.
+// Sending paths through a PTY loses data when ConPTY wraps/repaints long lines.
+const commandSentinelPattern = (token: string): RegExp => (
+  new RegExp(`${SENTINEL}${token}:(B|C:[01]|E:\\d+)(?=\\r?\\n)`, "g")
+);
+
 const quotePowerShell = (value: string): string => `'${value.replace(/'/g, "''")}'`;
 const quotePosixShell = (value: string): string => `'${value.replace(/'/g, "'\\''")}'`;
 
@@ -188,12 +195,12 @@ function buildCommandWrapper(command: string, token: string, kind: ShellInterpre
       `Remove-Variable -Scope Global -Name '__varin_${token}_success' -ErrorAction SilentlyContinue`,
       `Remove-Variable -Scope Global -Name '__varin_${token}_exit' -ErrorAction SilentlyContinue`,
     ].join("; ");
-    const execute = `try { Set-Location -LiteralPath ${quotePowerShell(cwd)} -ErrorAction Stop; $__varin_command_cwd = (Get-Location).ProviderPath; ${invoke} } catch { $__varin_success = $false; $__varin_exit = 1; Write-Output $_ }`;
+    const execute = `try { Set-Location -LiteralPath ${quotePowerShell(cwd)} -ErrorAction Stop; $__varin_cwd_entered = 1; ${invoke} } catch { $__varin_success = $false; $__varin_exit = 1; Write-Output $_ }`;
     return [
       `$__varin_payload = [System.Text.Encoding]::UTF8.GetString([System.Convert]::FromBase64String('${payload}'))`,
       // `cwd` in the result means where this invocation started. Payload
       // `Set-Location` calls remain private to this command and do not rewrite it.
-      "$__varin_original_location = (Get-Location).ProviderPath; $__varin_original_environment = [System.Environment]::GetEnvironmentVariables(); $__varin_command_cwd = $__varin_original_location",
+      "$__varin_original_location = (Get-Location).ProviderPath; $__varin_original_environment = [System.Environment]::GetEnvironmentVariables(); $__varin_cwd_entered = 0",
       "$__varin_success = $true; $__varin_exit = 0; $global:LASTEXITCODE = 0",
       `${beginMarker} = ${markerBase} + ':B'; ${cwdMarker} = ${markerBase} + ':C:'; ${endMarker} = ${markerBase} + ':E:'`,
       execute,
@@ -201,7 +208,8 @@ function buildCommandWrapper(command: string, token: string, kind: ShellInterpre
       "try { Set-Location -LiteralPath $__varin_original_location -ErrorAction Stop } catch { $__varin_success = $false; $__varin_code = 1; Write-Output $_ }",
       "$__varin_current_environment = [System.Environment]::GetEnvironmentVariables(); foreach ($__varin_name in @($__varin_current_environment.Keys)) { if (-not $__varin_original_environment.Contains($__varin_name)) { [System.Environment]::SetEnvironmentVariable([string]$__varin_name, $null) } }; foreach ($__varin_name in $__varin_original_environment.Keys) { [System.Environment]::SetEnvironmentVariable([string]$__varin_name, [string]$__varin_original_environment[$__varin_name]) }",
       "$__varin_code = if ($__varin_success) { 0 } elseif ($__varin_exit -is [int] -and $__varin_exit -ne 0) { [int]$__varin_exit } else { 1 }",
-      `Write-Output (${cwdMarker} + $__varin_command_cwd)`,
+      "Write-Output ''",
+      `Write-Output (${cwdMarker} + $__varin_cwd_entered)`,
       `Write-Output (${endMarker} + $__varin_code)`,
     ].join("; ");
   }
@@ -210,7 +218,10 @@ function buildCommandWrapper(command: string, token: string, kind: ShellInterpre
   // The payload's own trailing newline keeps heredocs and tail comments inside
   // eval, while the outer sentinels still run after the child exits.
   const payload = quoteAnsiC(`${command}\n`);
-  return `( cd -- ${quotePosixShell(cwd)} && { echo '${SENTINEL}${token}:B'; eval ${payload}; } ); __ec=$?; echo '${SENTINEL}${token}:C:'${quotePosixShell(cwd)}; echo '${SENTINEL}${token}:E:'"$__ec"`;
+  // Construct full markers only when executing, so echoed wrapper text cannot
+  // be mistaken for command output. Emit the directory result before eval:
+  // even a payload that calls exit/exec cannot suppress that confirmation.
+  return `__varin_marker='${SENTINEL}${token}'; ( if cd -- ${quotePosixShell(cwd)}; then echo "$__varin_marker:C:1"; echo "$__varin_marker:B"; eval ${payload}; else __ec=$?; echo "$__varin_marker:C:0"; exit "$__ec"; fi ); __ec=$?; printf '\\n%s\\n' "$__varin_marker:E:$__ec"`;
 }
 
 // ── PTY Provider ────────────────────────────────────────────────────
@@ -887,6 +898,9 @@ export function createShellSupervisor(deps: ShellSupervisorOptions) {
       resolveReady = resolve;
       rejectReady = reject;
     });
+    // Disposal can reject readiness while spawn preparation is still awaiting
+    // filesystem/terminal work. Observe it now; callers still receive rejection.
+    void ready.catch(() => undefined);
     shellReadyPromise = ready;
     shellReadyResolve = resolveReady;
     shellReadyReject = rejectReady;
@@ -932,7 +946,7 @@ export function createShellSupervisor(deps: ShellSupervisorOptions) {
   const parsePendingOutput = (): void => {
     if (!pendingCommand) return;
     const { token } = pendingCommand;
-    const sentinelPattern = new RegExp(`${SENTINEL}${token}:(B|C:[^\\n]*|E:\\d+)`, "g");
+    const sentinelPattern = commandSentinelPattern(token);
     let match: RegExpExecArray | null;
     sentinelPattern.lastIndex = 0;
     while ((match = sentinelPattern.exec(outputBuffer)) !== null) {
@@ -942,7 +956,7 @@ export function createShellSupervisor(deps: ShellSupervisorOptions) {
         outputBuffer = outputBuffer.slice(match.index + match[0].length);
         sentinelPattern.lastIndex = 0;
       } else if (sentinelLine?.startsWith("C:")) {
-        pendingCommand.cwd = normalizeShellCwd(sentinelLine.slice(2).trim());
+        if (sentinelLine === "C:0") pendingCommand.cwd = sessionHandle?.cwd ?? pendingCommand.cwd;
         lastCwd = pendingCommand.cwd;
         outputBuffer = outputBuffer.slice(0, match.index) + outputBuffer.slice(match.index + match[0].length);
         sentinelPattern.lastIndex = 0;
@@ -957,7 +971,7 @@ export function createShellSupervisor(deps: ShellSupervisorOptions) {
   };
 
   const parseBackgroundOutput = (background: BackgroundShell): void => {
-    const sentinelPattern = new RegExp(`${SENTINEL}${background.token}:(B|C:[^\\n]*|E:\\d+)`, "g");
+    const sentinelPattern = commandSentinelPattern(background.token);
     let match: RegExpExecArray | null;
     sentinelPattern.lastIndex = 0;
     while ((match = sentinelPattern.exec(background.output)) !== null) {
@@ -966,7 +980,7 @@ export function createShellSupervisor(deps: ShellSupervisorOptions) {
         background.output = background.output.slice(match.index + match[0].length);
         sentinelPattern.lastIndex = 0;
       } else if (sentinelLine?.startsWith("C:")) {
-        background.cwd = normalizeShellCwd(sentinelLine.slice(2).trim());
+        if (sentinelLine === "C:0") background.cwd = background.handle.cwd;
         lastCwd = background.cwd;
         background.output = background.output.slice(0, match.index) + background.output.slice(match.index + match[0].length);
         sentinelPattern.lastIndex = 0;

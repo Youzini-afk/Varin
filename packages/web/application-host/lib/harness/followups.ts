@@ -709,6 +709,8 @@ export function createFollowUpService(deps: FollowUpServiceDeps) {
   const readySettles = new Map<string, { timer: ReturnType<typeof setTimeout>; size: number | undefined; mtimeMs: number | undefined }>();
   /** machineId -> followUpId -> workspaceId for metric waits. */
   const metricWaits = new Map<string, Map<string, string>>();
+  /** Per workspace/machine sample order; metric observations persist before their serialized evaluation. */
+  const metricSampleOperations = new Map<string, Promise<void>>();
   let unsubscribeSamples: (() => void) | undefined;
   /** executionId -> followUpId -> durable owner identity. */
   const shellWaits = new Map<string, Map<string, { workspaceId: string; sessionId: string }>>();
@@ -1903,19 +1905,42 @@ export function createFollowUpService(deps: FollowUpServiceDeps) {
       byWorkspace.set(workspaceId, ids);
     }
     for (const [workspaceId, ids] of byWorkspace) {
-      void (async () => {
-        const observationRecord = await putObservation(workspaceId, "metric", metricSourceKey(sample.machineId),
-          `${sample.observedAt}:${createHash("sha256").update(JSON.stringify(sample.usage)).digest("hex")}`, {
-            machineId: sample.machineId,
-            observedAt: sample.observedAt,
-            usage: sample.usage as unknown as JsonValue,
-          });
+      // Begin the durable write immediately so samples observed while delivery
+      // is in flight remain recoverable. Evaluation itself follows callback
+      // order: otherwise two concurrent observers can read the same definition
+      // revision, and a lower sample's state write can make a later crossing's
+      // revision-guarded fire silently stale.
+      const observationWrite = putObservation(
+        workspaceId,
+        "metric",
+        metricSourceKey(sample.machineId),
+        `${sample.observedAt}:${createHash("sha256").update(JSON.stringify(sample.usage)).digest("hex")}`,
+        {
+          machineId: sample.machineId,
+          observedAt: sample.observedAt,
+          usage: sample.usage as unknown as JsonValue,
+        },
+      ).then(
+        (record) => ({ ok: true as const, record }),
+        (error: unknown) => ({ ok: false as const, error }),
+      );
+      const queueKey = `${workspaceId}\0${sample.machineId}`;
+      const prior = metricSampleOperations.get(queueKey) ?? Promise.resolve();
+      const processSample = async () => {
+        const observationResult = await observationWrite;
+        if (!observationResult.ok) throw observationResult.error;
+        const observationRecord = observationResult.record;
         for (const followUpId of ids) await handleMetricSample(workspaceId, followUpId, sample);
         const observation = payloadOf(observationRecord) as unknown as ObservationPayload;
         if (await metricObservationConsumed(workspaceId, sample.machineId, observation)) {
           await releaseObservation(workspaceId, observation);
         }
-      })().catch(reportError);
+      };
+      const next = prior.then(processSample, processSample);
+      const tracked: Promise<void> = next.catch(reportError).then(() => {
+        if (metricSampleOperations.get(queueKey) === tracked) metricSampleOperations.delete(queueKey);
+      });
+      metricSampleOperations.set(queueKey, tracked);
     }
   }
 
@@ -3908,6 +3933,7 @@ export function createFollowUpService(deps: FollowUpServiceDeps) {
       workspaceWatches.clear();
       fileWaits.clear();
       metricWaits.clear();
+      metricSampleOperations.clear();
       shellWaits.clear();
       logOffsets.clear();
     },

@@ -1084,6 +1084,62 @@ describe("follow-up service on the real kernel", () => {
     assert.equal(detail.occurrences[0]!.facts.value, 9_500);
   });
 
+  it("metric source: does not lose a crossing behind an earlier sample write", async () => {
+    const f = await fixture({ seed: (h) => h.threads.set("t-1", settledThread()) });
+    const createScoped = f.client.scoped.bind(f.client);
+    let scoped: ReturnType<typeof f.client.scoped> | undefined;
+    f.client.scoped = (grant) => {
+      scoped = createScoped(grant);
+      return scoped;
+    };
+    const registered = await f.service.register(caller(), {
+      instruction: "memory pressure",
+      source: { kind: "metric", machineId: "local", metric: "memoryMb", predicate: "above", threshold: 8_000 },
+    });
+    assert.ok(scoped);
+
+    let releaseLowUpdate!: () => void;
+    const lowUpdateGate = new Promise<void>((resolve) => { releaseLowUpdate = resolve; });
+    let lowUpdateStarted = false;
+    let highObservationWritten = false;
+    const originalPutRecord = scoped.putRecord.bind(scoped);
+    scoped.putRecord = async (params, signal) => {
+      const payload = JSON.parse(params.payloadJson) as {
+        source?: { kind?: string };
+        sourceState?: { metricObservedAt?: number };
+        facts?: { observedAt?: number };
+      };
+      if (payload.source?.kind === "metric" && payload.sourceState?.metricObservedAt === 1) {
+        lowUpdateStarted = true;
+        await lowUpdateGate;
+      }
+      const record = await originalPutRecord(params, signal);
+      if (params.recordType === "followup.observation" && payload.facts?.observedAt === 2) {
+        highObservationWritten = true;
+      }
+      return record;
+    };
+
+    try {
+      emitSample(f.harness, { machineId: "local", observedAt: 1, usage: { memoryMb: 4_000 } });
+      await until(() => lowUpdateStarted, 4_000, f.harness.errors);
+      emitSample(f.harness, { machineId: "local", observedAt: 2, usage: { memoryMb: 9_500 } });
+      await until(() => highObservationWritten, 4_000, f.harness.errors);
+      // The crossing is durably observed while the earlier sample still owns
+      // the definition's serial mutation slot.
+      await new Promise<void>((resolve) => setImmediate(resolve));
+      releaseLowUpdate();
+      await until(() => f.harness.continued.length === 1, 4_000, f.harness.errors);
+    } finally {
+      releaseLowUpdate();
+    }
+
+    const detail = await f.service.get(caller(), { id: registered.followUp.id });
+    assert.equal(detail.occurrences.length, 1);
+    assert.equal(detail.occurrences[0]!.reason, "metric-crossed");
+    assert.equal(detail.occurrences[0]!.facts.observedAt, 2);
+  });
+
   it("metric every: re-arms across crossings but never repeats on a held condition", async () => {
     const f = await fixture({ seed: (h) => h.threads.set("t-1", settledThread()) });
     const registered = await f.service.register(caller(), {

@@ -112,7 +112,7 @@ describe("explore through Host router, real ripgrep, and Documents", () => {
 
     expect(response.ok, JSON.stringify(response)).toBe(true);
     if (!response.ok) throw new Error(response.error.message);
-    expect(response.result.snippets.map((snippet) => snippet.path)).toEqual([path.join(source, "outside.ts")]);
+    expect(response.result.snippets.map((snippet) => snippet.path)).toEqual([await fs.realpath(path.join(source, "outside.ts"))]);
     const externalWorkspace = await f.documents.resolveWorkspace({ path: source });
     expect(outline).toHaveBeenCalledWith(expect.objectContaining({
       workspaceId: externalWorkspace.workspaceId,
@@ -162,7 +162,7 @@ describe("explore through Host router, real ripgrep, and Documents", () => {
     const response = await f.request({ question: "needle", paths: [".", "../outside.ts"] });
     expect(response.ok, JSON.stringify(response)).toBe(true);
     if (!response.ok) throw new Error(response.error.message);
-    expect(response.result.snippets.map((snippet) => snippet.path)).toContain(path.join(f.root, "outside.ts"));
+    expect(response.result.snippets.map((snippet) => snippet.path)).toContain(await fs.realpath(path.join(f.root, "outside.ts")));
   });
 
   it("normalizes session-cwd and absolute path anchors to authorized workspace resource IDs", async () => {
