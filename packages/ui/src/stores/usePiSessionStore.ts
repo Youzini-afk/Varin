@@ -61,6 +61,7 @@ import {
 } from '@/lib/pi-runtime/piTimelineScrollState';
 import { assistantMessageKey } from '@/lib/pi-runtime/usagePresentation';
 import { isPiAbortError } from '@/lib/pi-runtime/abort';
+import { isPiRequestOutcomeUnknown } from '@/lib/pi-runtime/request-outcome';
 
 export interface PiToolExecutionState {
   args: JsonValue;
@@ -141,7 +142,8 @@ export interface PiSessionAttentionState {
   updatedAt: number;
 }
 
-export type PiSessionRuntimeClient = Pick<PiRuntimeClient, 'request' | 'subscribe'>;
+export type PiSessionRuntimeClient = Pick<PiRuntimeClient, 'request' | 'subscribe'>
+  & Partial<Pick<PiRuntimeClient, 'invalidate'>>;
 
 export interface PiSessionRuntimeConnection {
   client: PiSessionRuntimeClient;
@@ -433,6 +435,41 @@ const snapshotIsWorking = (snapshot: SessionSnapshot | undefined): boolean => (
   || snapshot?.isCompacting === true
   || (snapshot?.retryAttempt ?? 0) > 0
 );
+
+const hasUnresolvedSubmission = (record: PiSessionViewState | undefined): boolean => (
+  record?.submission !== undefined
+  && ['dispatching', 'accepted', 'uncertain'].includes(record.submission.status)
+);
+
+/** UI and Pi stamp user messages at different times. Reconcile only an unseen,
+ * unambiguous copy of the submitted content, never a timestamp or busy flag.
+ * Transformed/ambiguous input remains unresolved; this never retries execution.
+ */
+const submittedUserEntry = (
+  submission: PiSessionSubmissionState,
+  entries: readonly PiSessionEntry[],
+): Extract<PiSessionEntry, { type: 'message' }> | undefined => {
+  if (submission.status === 'preparing' || submission.status === 'failed') return undefined;
+  const parts = typeof submission.message.content === 'string'
+    ? [{ type: 'text' as const, text: submission.message.content }]
+    : submission.message.content;
+  const content = submission.dispatchedText === undefined ? parts : [
+    { type: 'text' as const, text: submission.dispatchedText },
+    ...parts.filter((part) => part.type === 'image'),
+  ];
+  const fingerprint = (value: PiUserMessage['content']): string => JSON.stringify(
+    (typeof value === 'string' ? [{ type: 'text' as const, text: value }] : value)
+      .map((part) => part.type === 'text' ? ['text', part.text] : ['image', part.mimeType, part.data]),
+  );
+  const expected = fingerprint(content);
+  const matches = new Map<string, Extract<PiSessionEntry, { type: 'message' }>>();
+  for (const entry of entries) {
+    if (entry.type !== 'message' || entry.message.role !== 'user'
+      || submission.entryIdsAtSubmit.has(entry.id)) continue;
+    if (fingerprint(entry.message.content) === expected) matches.set(entry.id, entry);
+  }
+  return matches.size === 1 ? matches.values().next().value : undefined;
+};
 
 const preserveSnapshotWorkspace = (
   incoming: SessionSnapshot,
@@ -783,8 +820,11 @@ const initialFields = (runtimeKey: string): Pick<
 
 export const createPiSessionStore = (
   runtime: PiSessionStoreRuntime = DEFAULT_RUNTIME,
-  options: { healthProbeIntervalMs?: number } = {},
+  options: { healthProbeIntervalMs?: number; observationTimeoutMs?: number; submissionTimeoutMs?: number } = {},
 ): PiSessionStore => {
+  // Observation budgets do not cancel or repeat an accepted agent execution.
+  const observationTimeoutMs = options.observationTimeoutMs ?? 10_000;
+  const submissionTimeoutMs = options.submissionTimeoutMs ?? 30_000;
   let activeClient: PiSessionRuntimeClient | null = null;
   let unsubscribeEvents: (() => void) | null = null;
   let catalogGeneration = 0;
@@ -823,6 +863,12 @@ export const createPiSessionStore = (
 
     const commitError = (runtimeKey: string, error: unknown): void => {
       if (contextIsCurrent(runtimeKey)) set({ lastError: errorMessage(error) });
+    };
+
+    const retireUnresponsiveClient = (client: PiSessionRuntimeClient | null, error: unknown): void => {
+      if (client && activeClient === client && error instanceof PiRuntimeRequestTimeoutError) {
+        void client.invalidate?.(error).catch(() => undefined);
+      }
     };
 
     const beginSelectionIntent = (): number => {
@@ -1268,9 +1314,10 @@ export const createPiSessionStore = (
             delete next.liveUser;
           }
           if (current.submission !== undefined) {
-            if (messagePersisted(current.submission.message.timestamp)) delete next.submission;
-            else if (snapshot.busy && current.submission.status !== 'accepted') {
-              next.submission = { ...current.submission, status: 'accepted' };
+            const submitted = submittedUserEntry(current.submission, persistedMessages);
+            if (submitted) {
+              delete next.submission;
+              if (next.view?.newTurn) next.view = remapPiTimelineAnchor(next.view, persistedUserTurnId(submitted.id));
             }
           }
           return next;
@@ -1312,18 +1359,19 @@ export const createPiSessionStore = (
           syncState: 'catchingUp' as const,
         })),
       }));
+      const clientAtStart = activeClient;
       try {
         const record = get().records[sessionId];
         const scopes: Array<'branch' | 'all'> = [];
         if (record?.branchEntries !== undefined || record?.branchEntriesSource === 'live') scopes.push('branch');
         if (record?.allEntries !== undefined) scopes.push('all');
-        const { result } = await request('session.reconcile', { scopes, sessionId }, undefined, false);
+        const { result } = await request('session.reconcile', { scopes, sessionId }, runtimeKey, false, observationTimeoutMs);
         if (!contextIsCurrent(runtimeKey) || syncFlights.get(sessionId) !== flight) return;
         const entriesByScope = new Map<'branch' | 'all', SessionEntriesResult>(
           Object.entries(result.entries) as Array<['branch' | 'all', SessionEntriesResult]>,
         );
         applyResyncSnapshot(runtimeKey, sessionId, flight, result.snapshot, entriesByScope, result.stats);
-      } catch {
+      } catch (error) {
         // A failed resync must not discard real events that arrived meanwhile;
         // flush them live and mark the record stale rather than guessing state.
         const isCurrentFlight = syncFlights.get(sessionId) === flight
@@ -1336,6 +1384,7 @@ export const createPiSessionStore = (
               syncState: 'stale' as const,
             })),
           }));
+          retireUnresponsiveClient(clientAtStart, error);
         }
       } finally {
         if (syncFlights.get(sessionId) === flight) syncFlights.delete(sessionId);
@@ -1428,6 +1477,44 @@ export const createPiSessionStore = (
     const refreshCatalogAfterMutation = async (): Promise<void> => {
       const cwd = get().catalogCwd ?? undefined;
       await get().loadCatalog(cwd).catch(() => undefined);
+    };
+
+    const sendAgentInput = async (
+      method: 'agent.prompt' | 'agent.followUp' | 'agent.steer',
+      sessionId: string,
+      text: string,
+      images?: ImageAttachment[],
+      instructions?: string,
+      requestedRuntimeKey?: string,
+      onInputCaptured?: () => void,
+    ): Promise<boolean> => {
+      const runtimeKey = requestedRuntimeKey ?? runtime.currentKey();
+      const generation = storeGeneration;
+      const inputContext = await captureInputContext(sessionId);
+      const isCurrent = () => generation === storeGeneration && contextIsCurrent(runtimeKey);
+      try {
+        if (!isCurrent()) throw new Error('Pi runtime changed before input was sent');
+        onInputCaptured?.();
+        const { result } = await request(method, {
+          ...(images === undefined ? {} : { images }),
+          inputContext,
+          ...(instructions === undefined ? {} : { instructions }),
+          sessionId,
+          text,
+        }, runtimeKey, false, submissionTimeoutMs);
+        if (!result.accepted && isCurrent()) await releaseSurfaceAgentInputContext(sessionId, inputContext);
+        return result.accepted;
+      } catch (error) {
+        if (isPiRequestOutcomeUnknown(error)) {
+          // The Host may be using the captured editor view already. A lost
+          // acknowledgement is not permission to release it or resend input.
+          if (isCurrent()) void syncSessionRecord(sessionId);
+        } else if (isCurrent()) {
+          await releaseSurfaceAgentInputContext(sessionId, inputContext);
+          commitError(runtimeKey, error);
+        }
+        throw error;
+      }
     };
 
     const applyRecoveryResult = async (
@@ -1741,24 +1828,7 @@ export const createPiSessionStore = (
         return result;
       },
 
-      followUp: async (sessionId, text, images, instructions, expectedRuntimeKey, onInputCaptured) => {
-        const inputContext = await captureInputContext(sessionId);
-        try {
-          onInputCaptured?.();
-          const { result } = await request('agent.followUp', {
-            ...(images === undefined ? {} : { images }),
-            inputContext,
-            ...(instructions === undefined ? {} : { instructions }),
-            sessionId,
-            text,
-          }, expectedRuntimeKey);
-          if (!result.accepted) await releaseSurfaceAgentInputContext(sessionId, inputContext);
-          return result.accepted;
-        } catch (error) {
-          await releaseSurfaceAgentInputContext(sessionId, inputContext);
-          throw error;
-        }
-      },
+      followUp: (...args) => sendAgentInput('agent.followUp', ...args),
 
       forkSession: async (sessionId, entryId, position) => {
         const selectionIntent = beginSelectionIntent();
@@ -1960,24 +2030,7 @@ export const createPiSessionStore = (
         }
       },
 
-      prompt: async (sessionId, text, images, instructions, expectedRuntimeKey, onInputCaptured) => {
-        const inputContext = await captureInputContext(sessionId);
-        try {
-          onInputCaptured?.();
-          const { result } = await request('agent.prompt', {
-            ...(images === undefined ? {} : { images }),
-            inputContext,
-            ...(instructions === undefined ? {} : { instructions }),
-            sessionId,
-            text,
-          }, expectedRuntimeKey);
-          if (!result.accepted) await releaseSurfaceAgentInputContext(sessionId, inputContext);
-          return result.accepted;
-        } catch (error) {
-          await releaseSurfaceAgentInputContext(sessionId, inputContext);
-          throw error;
-        }
-      },
+      prompt: (...args) => sendAgentInput('agent.prompt', ...args),
 
       prefetchSession: async (sessionId, cwd) => {
         if (deletingSessionIds.has(sessionId) || deletedSessionIds.has(sessionId)) {
@@ -2206,15 +2259,18 @@ export const createPiSessionStore = (
 
       probeBusySession: async (sessionId) => {
         const initial = get().records[sessionId];
-        if (!initial?.snapshot?.busy || syncFlights.has(sessionId)) return;
+        if (!initial || (!snapshotIsWorking(initial.snapshot) && !hasUnresolvedSubmission(initial)) || syncFlights.has(sessionId)) return;
+        const generation = storeGeneration;
+        const expectedRuntimeKey = runtime.currentKey();
+        const clientAtStart = activeClient;
         try {
           const { result: authority, runtimeKey } = await request(
-            'session.snapshot', { sessionId }, undefined, false,
+            'session.snapshot', { sessionId }, expectedRuntimeKey, false, observationTimeoutMs,
           );
-          if (!contextIsCurrent(runtimeKey) || syncFlights.has(sessionId)) return;
+          if (generation !== storeGeneration || !contextIsCurrent(runtimeKey) || syncFlights.has(sessionId)) return;
           const current = get().records[sessionId];
           const known = current?.snapshot;
-          if (!known?.busy) return;
+          if (!current || !known) return;
           // A live event applied after the probe's cut is newer than this read.
           const applied = authority.eventWorkerId === undefined
             ? undefined : lastAppliedSequences.get(authority.eventWorkerId);
@@ -2232,16 +2288,18 @@ export const createPiSessionStore = (
             || JSON.stringify(authoritativeToolIds) !== JSON.stringify(runningToolIds)
             || JSON.stringify(authority.followUp) !== JSON.stringify(known.followUp)
             || JSON.stringify(authority.steering) !== JSON.stringify(known.steering);
-          if (diverged) await syncSessionRecord(sessionId);
-        } catch {
+          if (diverged || hasUnresolvedSubmission(current)) await syncSessionRecord(sessionId);
+        } catch (error) {
           // A failed read is unknown. Keep the last displayed state until the
           // next probe or connection recovery; never manufacture idle.
-          if (get().records[sessionId]?.snapshot?.busy) {
+          if (generation === storeGeneration && contextIsCurrent(expectedRuntimeKey)
+            && get().records[sessionId]) {
             set((state) => ({
               records: upsertRecord(state.records, sessionId, (current) => ({
                 ...current, syncState: 'stale' as const,
               })),
             }));
+            retireUnresponsiveClient(clientAtStart, error);
           }
         }
       },
@@ -2305,24 +2363,7 @@ export const createPiSessionStore = (
         }));
       },
 
-      steer: async (sessionId, text, images, instructions, expectedRuntimeKey, onInputCaptured) => {
-        const inputContext = await captureInputContext(sessionId);
-        try {
-          onInputCaptured?.();
-          const { result } = await request('agent.steer', {
-            ...(images === undefined ? {} : { images }),
-            inputContext,
-            ...(instructions === undefined ? {} : { instructions }),
-            sessionId,
-            text,
-          }, expectedRuntimeKey);
-          if (!result.accepted) await releaseSurfaceAgentInputContext(sessionId, inputContext);
-          return result.accepted;
-        } catch (error) {
-          await releaseSurfaceAgentInputContext(sessionId, inputContext);
-          throw error;
-        }
-      },
+      steer: (...args) => sendAgentInput('agent.steer', ...args),
 
       unarchiveSession: async (sessionId) => {
         try {
@@ -2444,7 +2485,7 @@ export const createPiSessionStore = (
     if (state.connectionPhase !== 'connected' || sessionId === null
       || (typeof document !== 'undefined' && document.visibilityState !== 'visible')) return null;
     const record = state.records[sessionId];
-    return record?.open && record.snapshot?.busy ? sessionId : null;
+    return record?.open && (snapshotIsWorking(record.snapshot) || hasUnresolvedSubmission(record)) ? sessionId : null;
   };
   const scheduleBusyProbe = (): void => {
     const sessionId = visibleBusySession();

@@ -129,6 +129,10 @@ const HOST_CAPABILITIES: HostCapabilities = {
 };
 
 const OUT_OF_BAND_METHODS = new Set([
+  // Synchronous read-only cuts must not queue behind a prompt that is waiting
+  // in preflight; otherwise the UI health check waits on the very same stall.
+  "session.snapshot",
+  "session.reconcile",
   "agent.abort",
   "agent.queue.clear",
   "config.unwatch",

@@ -3,8 +3,8 @@ import type {
   WorkspaceCombinedRecoveryOperation,
   WorkspaceCombinedRecoveryPlan,
 } from '@varin/extension-contract';
-import { PiRuntimeAmbiguousRequestError } from '@varin/runtime-client';
-import { runtimeFetch } from '@varin/application-client';
+import { isPiRequestOutcomeUnknown } from '@/lib/pi-runtime/request-outcome';
+import { getRuntimeKey, runtimeFetch } from '@varin/application-client';
 import type {
   CompactionTrace,
   ModelDescriptor,
@@ -494,7 +494,12 @@ export const PiChatView: React.FC<PiChatViewProps> = ({
       if (!accepted) throw new Error('The Pi runtime did not accept the prompt');
       updateSubmission(sessionId, submissionId, { status: 'accepted' });
     } catch (error) {
-      const ambiguous = error instanceof PiRuntimeAmbiguousRequestError;
+      // Live events/reconciliation may already have confirmed this submission,
+      // or navigation may have retired it while its RPC was still awaiting a
+      // reply. A late error must not resurrect the draft or affect a new send.
+      const owner = usePiSessionStore.getState().records[sessionId]?.submission;
+      if (getRuntimeKey() !== draftRuntimeKey || owner?.id !== submissionId) return;
+      const ambiguous = isPiRequestOutcomeUnknown(error);
       updateSubmission(sessionId, submissionId, {
         error: error instanceof Error ? error.message : String(error),
         status: ambiguous ? 'uncertain' : 'failed',
@@ -516,7 +521,7 @@ export const PiChatView: React.FC<PiChatViewProps> = ({
       }
       console.error('Failed to send Pi prompt:', error);
       toast.error(
-        error instanceof PiRuntimeAmbiguousRequestError
+        ambiguous
           ? t('chat.piComposer.sendResultUnknown')
           : error instanceof Error
             ? error.message

@@ -94,6 +94,7 @@ export class PiRuntimeClient {
   #lastSurfaceSequence: number | undefined;
   readonly #options: PiRuntimeClientOptions;
   readonly #pending = new Map<string, PendingRequest>();
+  readonly #timedOutRequests = new Set<string>();
   #closed = false;
   #connected = false;
   #connectPromise: Promise<void> | undefined;
@@ -135,13 +136,14 @@ export class PiRuntimeClient {
       throw new RangeError("timeoutMs must be positive");
     }
     const id = this.#createId();
-    if (!id || this.#pending.has(id)) throw new Error("Runtime request IDs must be unique");
+    if (!id || this.#pending.has(id) || this.#timedOutRequests.has(id)) throw new Error("Runtime request IDs must be unique");
     const envelope = createRuntimeRequest(id, method, params);
     const result = new Promise<RuntimeMethodResult<M>>((resolve, reject) => {
       const timer = timeoutMs === null
         ? undefined
         : setTimeout(() => {
             this.#pending.delete(id);
+            this.#timedOutRequests.add(id);
             reject(new PiRuntimeRequestTimeoutError(method));
           }, timeoutMs);
       this.#pending.set(id, {
@@ -152,7 +154,11 @@ export class PiRuntimeClient {
       });
     });
     try {
-      await this.#options.transport.send(encodeRuntimeEnvelope(envelope));
+      // Observe the response deadline even when the transport's async send is
+      // stuck. Otherwise the result can time out while this method still waits
+      // forever for send(), leaving the caller spinning (and a rejection unhandled).
+      void Promise.resolve(this.#options.transport.send(encodeRuntimeEnvelope(envelope)))
+        .catch((error: unknown) => this.#rejectPending(id, error));
     } catch (error) {
       this.#rejectPending(id, error);
     }
@@ -174,10 +180,22 @@ export class PiRuntimeClient {
     this.#failPending(new Error("Pi runtime client is closed"));
     this.#listeners.clear();
     this.#lastSurfaceSequence = undefined;
+    this.#timedOutRequests.clear();
+    await this.#options.transport.close();
+  }
+
+  /** Retire an unresponsive transport without cancelling server execution.
+   * Sent requests stay ambiguous, and the connection supervisor can replace
+   * the socket. Never turn a health-check timeout into a mutation retry.
+   */
+  async invalidate(error: Error): Promise<void> {
+    if (this.#closed) return;
+    this.#handleClose(error);
     await this.#options.transport.close();
   }
 
   #handleMessage(frame: string): void {
+    if (this.#closed) return;
     let envelope;
     try {
       envelope = decodeRuntimeEnvelope(frame);
@@ -188,6 +206,9 @@ export class PiRuntimeClient {
     if (envelope.kind === "response") {
       const pending = this.#pending.get(envelope.id);
       if (!pending) {
+        // Deadlines end local observation, not server execution. Late replies
+        // for known timed-out requests are expected, not corrupt event streams.
+        if (this.#timedOutRequests.delete(envelope.id)) return;
         this.#reportProtocolError(new Error(`Unexpected runtime response: ${envelope.id}`));
         return;
       }
@@ -235,6 +256,7 @@ export class PiRuntimeClient {
     this.#connected = false;
     this.#failPending(error ?? new Error("Pi runtime transport closed"), true);
     this.#listeners.clear();
+    this.#timedOutRequests.clear();
     try {
       this.#options.onConnectionLost?.(error);
     } catch (callbackError) {

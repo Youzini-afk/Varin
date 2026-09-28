@@ -60,6 +60,39 @@ afterEach(async () => {
 });
 
 describe('Pi runtime UI connection', () => {
+  test('an auth request that never answers cannot poison the shared connection attempt', async () => {
+    let release!: (token: string) => void;
+    let opened = 0;
+    const auth = new Promise<string>((resolve) => { release = resolve; });
+    const connection = createPiRuntimeConnection({
+      refreshAuth: () => auth,
+      startupTimeoutMs: 20,
+      runtimeKey: 'runtime-test',
+      resolveWebSocketUrl: () => 'ws://runtime.test',
+      openSocket: () => { opened++; return new HandshakeSocket(); },
+    });
+    await expect(connection).rejects.toThrow('timed out during authentication');
+    release('late-token');
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    expect(opened).toBe(0);
+  });
+
+  test('closes a silent handshake instead of waiting forever before dispatch', async () => {
+    let closed = false;
+    let sends = 0;
+    const connection = createPiRuntimeConnection({
+      runtimeKey: 'runtime-test', startupTimeoutMs: 20,
+      transport: {
+        start: () => undefined,
+        send: () => { sends++; },
+        close: () => { closed = true; },
+      },
+    });
+    await expect(connection).rejects.toThrow('timed out during handshake');
+    expect(closed).toBe(true);
+    expect(sends).toBe(1);
+  });
+
   test('mints URL auth before opening and handshakes over the shared socket contract', async () => {
     const order: string[] = [];
     const socket = new HandshakeSocket();
