@@ -25,7 +25,6 @@ describe('semantic index settings', () => {
     const management = createSemanticIndexManagement(dataDir, 'host');
     await management.load();
     const app = express();
-    app.use(express.json());
     registerSemanticIndexRoutes(app, {
       management,
       runtime: { indexStatuses: () => [] } as never,
@@ -48,7 +47,14 @@ describe('semantic index settings', () => {
             indexedDirectories: [path.join(dataDir, 'project')] } }),
       });
       expect(response.status).toBe(200);
-      expect((await response.json() as { restartRequired: boolean }).restartRequired).toBe(true);
+      const saved = await response.json() as { restartRequired: boolean; revision: string };
+      expect(saved.restartRequired).toBe(true);
+      const removeResponse = await fetch(`${base}/cache`, { method: 'DELETE',
+        headers: { 'x-test-auth': 'yes', 'Content-Type': 'application/json' },
+        body: JSON.stringify({ directory: management.activeDirectory(), revision: saved.revision }),
+      });
+      expect(removeResponse.status).toBe(400);
+      expect(await removeResponse.json()).toEqual({ error: 'Directory is not an inactive retained index cache' });
       const updated = await (await fetch(base, { headers: { 'x-test-auth': 'yes' } })).json() as {
         config: { indexedDirectories: string[] }; retained: Array<{ directory: string; active: boolean }>;
       };

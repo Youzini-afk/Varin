@@ -1,7 +1,7 @@
 import { createHash, randomUUID } from "node:crypto";
 import { mkdir, readdir, readFile, realpath, rename, rm, stat, writeFile } from "node:fs/promises";
 import path from "node:path";
-import type { Express, RequestHandler } from "express";
+import express, { type Express, type RequestHandler } from "express";
 import type { createWorkspaceSemanticRuntime } from "./workspace-runtime.js";
 import { semanticRootDir } from "./identity.js";
 
@@ -182,6 +182,7 @@ export function registerSemanticIndexRoutes(
   },
 ): void {
   const requireAuth: RequestHandler = options.requireAuth ?? ((_request, _response, next) => next());
+  const parseSettingsJson = express.json({ limit: '50mb' });
   app.get("/api/harness/semantic-index", requireAuth, async (_request, response, next) => {
     try {
       const saved = await options.management.read();
@@ -198,7 +199,7 @@ export function registerSemanticIndexRoutes(
         }))) });
     } catch (error) { next(error); }
   });
-  app.put("/api/harness/semantic-index", requireAuth, async (request, response) => {
+  app.put("/api/harness/semantic-index", requireAuth, parseSettingsJson, async (request, response) => {
     try {
       const revision = request.body?.revision;
       if (typeof revision !== "string") {
@@ -215,7 +216,7 @@ export function registerSemanticIndexRoutes(
       response.status(message.includes("changed elsewhere") ? 409 : 400).json({ error: message });
     }
   });
-  app.delete("/api/harness/semantic-index/cache", requireAuth, async (request, response) => {
+  app.delete("/api/harness/semantic-index/cache", requireAuth, parseSettingsJson, async (request, response) => {
     try {
       if (typeof request.body?.directory !== "string" || typeof request.body?.revision !== "string") {
         response.status(400).json({ error: "A retained directory and settings revision are required" });
