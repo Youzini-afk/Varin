@@ -547,6 +547,12 @@ impl Storage {
                 required("canonicalCwd")?;
                 state_in(&["accepted", "released"])?;
             }
+            "bot.profile" => {
+                derived("bot.profile")?;
+                required("name")?;
+                required("coordinatorHostId")?;
+                state_in(&["active", "archived"])?;
+            }
             "recovery.operation-file" => {
                 if object.get("operationId").and_then(Value::as_str).is_none()
                     || object.get("path").and_then(Value::as_str).is_none()
@@ -761,6 +767,7 @@ impl Storage {
             "followup.occurrence",
             "followup.observation",
             "settings.operation",
+            "bot.profile",
         ];
         if !KNOWN_RECORD_TYPES.contains(&record_type)
             && !(record_type.starts_with("retrieval.evidence.")

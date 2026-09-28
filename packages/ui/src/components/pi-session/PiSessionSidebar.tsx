@@ -40,6 +40,7 @@ import {
   openPiSessionFromNavigation,
   startPiSessionDraftFromNavigation,
 } from '@/lib/pi-runtime/sessionNavigation';
+import { openBotEntry } from '@/lib/bots';
 import { getRuntimeBearerTokenSync } from '@varin/application-client';
 import { getRuntimeApiBaseUrl } from '@varin/application-client';
 import { cn, formatDirectoryName, getRevealLabelKey } from '@/lib/utils';
@@ -554,6 +555,16 @@ export const PiSessionSidebar: React.FC<PiSessionSidebarProps> = ({
     onRequestClose?.();
   }, [mobileVariant, onRequestClose, setScheduledTasksDialogOpen, setSessionSwitcherOpen]);
 
+  const handleOpenBot = React.useCallback(async () => {
+    if (mobileVariant) setSessionSwitcherOpen(false);
+    onRequestClose?.();
+    try {
+      await openBotEntry();
+    } catch (error) {
+      toast.error(error instanceof Error ? error.message : String(error));
+    }
+  }, [mobileVariant, onRequestClose, setSessionSwitcherOpen]);
+
   const handleOpenMultiRun = React.useCallback(() => {
     openMultiRunLauncher();
     if (mobileVariant) setSessionSwitcherOpen(false);
@@ -928,6 +939,14 @@ export const PiSessionSidebar: React.FC<PiSessionSidebarProps> = ({
           >
             <Icon name="calendar-schedule" className="size-4 shrink-0" />
             <span className="truncate">{t('tasksHub.title')}</span>
+          </button>
+          <button
+            type="button"
+            onClick={() => void handleOpenBot()}
+            className="flex h-8 w-full items-center gap-2 rounded-md px-1.5 text-left typography-ui-label text-muted-foreground hover:bg-interactive-hover hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/50"
+          >
+            <Icon name="robot" className="size-4 shrink-0" />
+            <span className="truncate">{t('bots.sidebar.entry')}</span>
           </button>
         </div>
 

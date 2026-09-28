@@ -53,7 +53,7 @@ export async function resolveResearchCaller(
     }
   } else {
     for (const thread of await children({ kind: "session", id: input.sessionId })) {
-      if (input.user && thread.purpose === "research-root") await descendants(thread);
+      if (input.user && (thread.purpose === "research-root" || thread.purpose === "bot-root")) await descendants(thread);
       else include(thread);
     }
   }

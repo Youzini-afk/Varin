@@ -84,11 +84,14 @@ import { createThreadRegistry } from './lib/harness/thread-registry.js';
 import { createOnThreadDequeued } from './lib/harness/thread-dequeue.js';
 import { createThreadTranscriptReader } from './lib/harness/thread-transcript.js';
 import { createHarnessPathAuthority } from './lib/harness/path-authority.js';
-import { sessionScopeId, isSessionScopeId, isSessionStoreKey, knowledgeStoreKeyForScope } from './lib/harness/owner-scope.js';
+import { sessionScopeId, isSessionScopeId, isSessionStoreKey, isBotScopeId, botIdFromScopeId, botScopeId, knowledgeStoreKeyForScope } from './lib/harness/owner-scope.js';
 import { createExploreFileReader } from './lib/harness/explore-file-reader.js';
 import { createThreadWorktreeRuntime } from './lib/harness/thread-worktree.js';
 import { createThreadRuntime } from './lib/harness/thread-runtime.js';
 import { createResearchRootRuntime } from './lib/harness/research-root-runtime.js';
+import { createBotRootRuntime } from './lib/harness/bot-root-runtime.js';
+import { createBotService } from './lib/bots/bot-service.js';
+import { registerBotRoutes } from './lib/bots/bot-routes.js';
 import { createWorktreeReclaimGuard } from './lib/harness/worktree-reclaim-guard.js';
 import { resolveThreadWorktreeSettings } from './lib/harness/thread-worktree-settings.js';
 import { createKernelWorkspaceWorkingStateAccess, KernelStorageAdapter } from './lib/kernel/storage-adapter.js';
@@ -1734,6 +1737,31 @@ async function main(options: StartWebUiServerOptions = {}): Promise<WebUiServerC
   for (const failure of threadRegistryStartup.failures) {
     console.error(`[HarnessThreads] Startup reconciliation failed (${failure.code}) for ${failure.path}: ${failure.message}`);
   }
+  // BC0: durable Bot identity. The profile record lives in the kernel catalog;
+  // the Bot's work is ordinary Threads under the `bot:<id>` owner scope, and
+  // its entry chat is a real unbound Pi session anchored to a `bot-root` Thread.
+  const botService = createBotService({
+    client: kernelClient,
+    hostId,
+    dataDir: VARIN_DATA_DIR,
+    registry: threadRegistry,
+    createSession: (input) => piRuntimeBroker.createSession(
+      input.cwd,
+      input.name,
+      undefined,
+      undefined,
+      input.model ? { model: input.model } : undefined,
+    ),
+    openSession: (input) => piRuntimeBroker.openSession(input),
+    onError: (error) => {
+      console.error('[VarinBots]', errorMessage(error));
+    },
+  });
+  const botScopeRoot = async (scopeId: string): Promise<string> => {
+    const bot = await botService.get(botIdFromScopeId(scopeId));
+    if (!bot) throw new Error(`Unknown Bot scope: ${scopeId}`);
+    return bot.homeDir;
+  };
   const threadTranscriptReader = createThreadTranscriptReader({
     readSessionEntries: (sessionId) => piRuntimeBroker.previewSessionEntries(sessionId, undefined, 'all'),
   });
@@ -2081,7 +2109,11 @@ async function main(options: StartWebUiServerOptions = {}): Promise<WebUiServerC
         return `#${hit.node.id} ${title}${content ? `\n${content}` : ''}`;
       }).join('\n\n');
     },
-    resolveWorkspaceRoot: async (workspaceId) => (await documentsAuthority.inspectWorkspace(workspaceId)).root,
+    // A `bot:` scope's working root is the Bot's durable home directory —
+    // there is no registered project workspace behind it.
+    resolveWorkspaceRoot: async (workspaceId) => isBotScopeId(workspaceId)
+      ? botScopeRoot(workspaceId)
+      : (await documentsAuthority.inspectWorkspace(workspaceId)).root,
     resolveRuntimeWorkspaceId: async (cwd) => (await documentsAuthority.resolveWorkspace({ path: cwd })).workspaceId,
     beginBaselineCapture: (workspaceId) => documentsAuthority.beginCapture(workspaceId),
     completeBaselineCapture: async (capture) => {
@@ -2445,6 +2477,34 @@ async function main(options: StartWebUiServerOptions = {}): Promise<WebUiServerC
       );
     },
   });
+  // BC0: the same attached-root lifecycle, specialized for Bot entry chats —
+  // a session whose durable `bot.profile` points at it attaches a `bot-root`
+  // Thread under the `bot:<id>` scope instead of a project workspace.
+  const botRootRuntime = createBotRootRuntime({
+    botForSession: (sessionId) => botService.botForSession(sessionId),
+    registry: threadRegistry,
+    getSessionSnapshot: (sessionId) => (
+      sessionSnapshots.get(sessionId) as unknown as SessionSnapshot | undefined
+    ) ?? null,
+    sessions: {
+      snapshot: (sessionId) => piRuntimeBroker.requestForSession(sessionId, 'session.snapshot', { sessionId }),
+      stats: (sessionId) => piRuntimeBroker.requestForSession(sessionId, 'session.stats', { sessionId }),
+      entries: (sessionId, scope = 'branch') => piRuntimeBroker.requestForSession(sessionId, 'session.entries', { sessionId, scope }),
+    },
+    onError: (error) => {
+      console.error('[BotRoot] Runtime failed:', errorMessage(error));
+    },
+    rejectHarnessRequest: async (sessionId, requestId, message) => {
+      await piRuntimeBroker.requestForSession(
+        sessionId,
+        'harness.respond',
+        buildHarnessRespondParams(sessionId, requestId, {
+          ok: false,
+          error: { code: 'unavailable', message, retryable: true },
+        }),
+      );
+    },
+  });
   piRuntimeBroker.setSessionRunCoordinator(async ({ snapshot }) => {
     if (snapshot.workFocus?.active.id !== 'research' || snapshot.workspace?.kind === 'workspace') return;
     try {
@@ -2481,6 +2541,10 @@ async function main(options: StartWebUiServerOptions = {}): Promise<WebUiServerC
     runtime: threadRuntime,
     registry: threadRegistry,
     followUps: followUpService,
+    ...(uiAuthController ? { requireAuth: uiAuthController.requireAuth } : {}),
+  });
+  registerBotRoutes(app, {
+    bots: botService,
     ...(uiAuthController ? { requireAuth: uiAuthController.requireAuth } : {}),
   });
   registerManagedRemoteRoutes(app, {
@@ -2533,6 +2597,14 @@ async function main(options: StartWebUiServerOptions = {}): Promise<WebUiServerC
         await threadRuntime!.kill(researchRoot.id, false, workspaceId);
       }
     }
+    // A Bot entry chat is disposable: deleting it cancels the attached Run and
+    // releases the entry binding, but the Bot's work Threads are owned by the
+    // `bot:<id>` scope — they are never cascade-killed with the conversation.
+    const entryBot = await botService.botForSession(sessionId).catch(() => null);
+    if (entryBot) {
+      await botRootRuntime.cancelSession(sessionId, 'bot entry session deleted');
+      await botService.releaseEntry(sessionId);
+    }
     await threadRegistry.archiveThreadsForDeletedSessionAcrossWorkspaces(sessionId);
     // Session deletion is a target-gone event: every durable wait bound to the
     // session closes instead of outliving its delivery authority.
@@ -2559,8 +2631,11 @@ async function main(options: StartWebUiServerOptions = {}): Promise<WebUiServerC
   };
   async function getKnowledgeStoreForScope(scopeId: string): Promise<KnowledgeStore> {
     // HR0: scope ids are either project workspace ids or `session:<id>`; only
-    // the persisted store key differs — records keep their real scope.
-    const scope = isSessionScopeId(scopeId) ? 'session' as const : 'workspace' as const;
+    // the persisted store key differs — records keep their real scope. BC0
+    // adds `bot:<id>` scopes that resolve to the Bot's own memory store.
+    const scope = isBotScopeId(scopeId) ? 'bot' as const
+      : isSessionScopeId(scopeId) ? 'session' as const
+        : 'workspace' as const;
     const storeKey = knowledgeStoreKeyForScope(scopeId);
     const existing = knowledgeStores.get(storeKey);
     if (existing) return existing;
@@ -2834,9 +2909,9 @@ async function main(options: StartWebUiServerOptions = {}): Promise<WebUiServerC
   const knowledgeLanguageSubscriptions = new Map<string, { close(): void }>();
   const bindKnowledgeSession = (sessionId: string, scopeId: string): void => {
     knowledgeContextRuntime.bindSession(sessionId, scopeId);
-    // Language subscriptions are workspace-addressed; a session-owned scope
-    // has no workspace LSP to observe.
-    if (isSessionScopeId(scopeId) || knowledgeLanguageSubscriptions.has(scopeId)) return;
+    // Language subscriptions are workspace-addressed; session- and bot-owned
+    // scopes have no workspace LSP to observe.
+    if (isSessionScopeId(scopeId) || isBotScopeId(scopeId) || knowledgeLanguageSubscriptions.has(scopeId)) return;
     const workspaceId = scopeId;
     knowledgeLanguageSubscriptions.set(workspaceId, languageSupervisor.subscribe(workspaceId, (value) => {
       const event = recordOf(value);
@@ -3397,8 +3472,10 @@ async function main(options: StartWebUiServerOptions = {}): Promise<WebUiServerC
     void piWriterTracker.processEvent(event);
     void recoveryTurnCoordinator.processEvent(event);
     void researchRootRuntime.processEvent(event, async () => {
-      await harnessRouter.processEvent(event);
-      threadRuntime.processEvent(event);
+      await botRootRuntime.processEvent(event, async () => {
+        await harnessRouter.processEvent(event);
+        threadRuntime.processEvent(event);
+      });
     }).catch((error) => {
       console.error('[ResearchRoot] Event routing failed:', errorMessage(error));
     });
@@ -3720,7 +3797,7 @@ async function main(options: StartWebUiServerOptions = {}): Promise<WebUiServerC
       // Stop producers and drain their receipts while process grants are valid.
       // One refused exit must not prevent the other domains from shutting down.
       const processShutdown = await Promise.allSettled([
-        researchRootRuntime.dispose(), threadRuntime.dispose(), terminalRuntime?.shutdown(), languageSupervisor.dispose(), managedLanguageServers.dispose(), runRuntime.dispose(),
+        researchRootRuntime.dispose(), botRootRuntime.dispose(), threadRuntime.dispose(), terminalRuntime?.shutdown(), languageSupervisor.dispose(), managedLanguageServers.dispose(), runRuntime.dispose(),
       ]);
       const processShutdownErrors = processShutdown.flatMap((result) => result.status === 'rejected' ? [result.reason] : []);
       await languageToolProcesses.dispose().catch((error: unknown) => { processShutdownErrors.push(error); });

@@ -668,7 +668,7 @@ export interface KnowledgeSuggestResult {
     content: string;
     trigger: string;
     status: "suggested" | "accepted";
-    scope: "workspace" | "user" | "session";
+    scope: "workspace" | "user" | "session" | "bot";
   };
 }
 

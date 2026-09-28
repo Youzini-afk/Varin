@@ -2794,6 +2794,7 @@ export const dict = {
   'agentManager.sidebar.toast.deletingGroup': 'Suppression de "{group}"...',
   'agentManager.sidebar.toast.deletedGroup': '"{group}" supprimé',
   'agentManager.sidebar.toast.failedToDeleteGroup': 'Échec de la suppression complète de "{group}"',
+  'bots.sidebar.entry': 'Bots',
   'agentManager.detail.header.modelCountSingle': 'Modèle {count}',
   'agentManager.detail.header.modelCountPlural': 'Modèles {count}',
   'agentManager.detail.header.noBranch': 'Pas de branche',

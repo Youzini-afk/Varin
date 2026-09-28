@@ -4,6 +4,7 @@ import { settingsDict } from './uk.settings';
 export const dict: Record<I18nKey, string> = {
   ...enDict,
   ...settingsDict,
+  'bots.sidebar.entry': "Бот",
   'tasksHub.create': "Створити",
   'tasksHub.all': "Усі",
   'tasksHub.enabled': "Увімкнені",

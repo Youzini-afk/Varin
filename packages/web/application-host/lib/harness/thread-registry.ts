@@ -590,7 +590,7 @@ const isThread = (value: unknown): value is Thread => {
     && (value.manifest.draftBaselineId === null || value.manifest.worktree === "isolated")
     && (value.createdBy === "user" || value.createdBy === "agent")
     && (value.kind === "discussion" || value.kind === "implementation")
-    && (value.purpose === "task" || value.purpose === "research-root")
+    && (value.purpose === "task" || value.purpose === "research-root" || value.purpose === "bot-root")
     && (value.worktree === null || (isRecord(value.worktree)
       && isString(value.worktree.path)
       && (value.worktree.managedRoot === undefined || isString(value.worktree.managedRoot))

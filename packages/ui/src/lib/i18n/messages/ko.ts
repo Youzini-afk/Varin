@@ -4,6 +4,7 @@ import { settingsDict } from './ko.settings';
 export const dict: Record<I18nKey, string> = {
   ...enDict,
   ...settingsDict,
+  'bots.sidebar.entry': "봇",
   'tasksHub.create': "만들기",
   'tasksHub.all': "전체",
   'tasksHub.enabled': "활성화",

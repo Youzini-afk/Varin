@@ -26,6 +26,7 @@ import type {
 import {
   assembleFreshInput,
   HARNESS_TOOL_META,
+  isAttachedRootPurpose,
   minePiBranchEntries,
   normalizeFrozenHarnessPermissions,
   threadIntegrationBindingFromPreview,
@@ -3202,8 +3203,9 @@ export function createThreadRuntime(options: ThreadRuntimeOptions) {
     for (let thread of threads) {
       let previous = await options.registry.getActiveRun(workspaceId, thread.id);
       // Attached roots borrow user-owned sessions and resume only on the next
-      // real research prompt; spawned-child recovery must never open one.
-      if (thread.purpose === "research-root" || previous?.sessionOwner === "attached-root") continue;
+      // real prompt; spawned-child recovery must never open one. The same
+      // applies to bot entry chats — reopening the entry re-attaches.
+      if (isAttachedRootPurpose(thread.purpose) || previous?.sessionOwner === "attached-root") continue;
       if (thread.lifecycle !== "active" || previous?.outcome !== "lost") continue;
       if (resuming.has(thread.id)) continue;
       resuming.add(thread.id);

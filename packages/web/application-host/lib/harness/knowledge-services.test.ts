@@ -97,7 +97,7 @@ describe("knowledge public service wiring", () => {
       discoveredShells: {},
       knowledgeSuggestDepsProvider: async () => ({
         store,
-        settings: { autoAcceptSuggestions: { workspace: true, user: false, session: false } },
+        settings: { autoAcceptSuggestions: { workspace: true, user: false, session: false, bot: false } },
       }),
     });
     cleanup.push(() => host.dispose());

@@ -11,7 +11,11 @@ import type { WorkFocusId } from "./work-focus.js";
 import type { ResearchCapability, ResearchResourceManifest, ThreadResearchManifest } from "./research-capabilities.js";
 
 export type ThreadKind = "discussion" | "implementation";
-export type ThreadPurpose = "task" | "research-root";
+export type ThreadPurpose = "task" | "research-root" | "bot-root";
+/** Root threads bound to a user's real session via `attached-root` runs. */
+export const isAttachedRootPurpose = (purpose: ThreadPurpose | undefined | null): boolean => (
+  purpose === "research-root" || purpose === "bot-root"
+);
 export type ThreadSessionOwner = "spawned-child" | "attached-root";
 export type ThreadCreatedBy = "user" | "agent";
 export type ThreadLifecycle = "queued" | "active" | "settled" | "archived";

@@ -88,7 +88,7 @@ export class KnowledgeBlockConflictError extends Error {
   }
 }
 
-export type KnowledgeScope = "workspace" | "user" | "session";
+export type KnowledgeScope = "workspace" | "user" | "session" | "bot";
 export type KnowledgeStatus = "suggested" | "accepted" | "dismissed";
 
 /** Values that identify the revision a caller opened before a mutation. */

@@ -2962,6 +2962,7 @@ export const dict: Record<I18nKey, string> = {
   'agentManager.sidebar.toast.deletingGroup': '「{group}」を削除中...',
   'agentManager.sidebar.toast.deletedGroup': '「{group}」を削除しました',
   'agentManager.sidebar.toast.failedToDeleteGroup': '「{group}」の完全削除に失敗しました',
+  'bots.sidebar.entry': 'Bots',
   'agentManager.detail.header.modelCountSingle': '{count}モデル',
   'agentManager.detail.header.modelCountPlural': '{count}モデル',
   'agentManager.detail.header.noBranch': 'ブランチなし',

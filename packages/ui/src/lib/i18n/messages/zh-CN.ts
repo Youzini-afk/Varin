@@ -4,6 +4,7 @@ import { settingsDict } from './zh-CN.settings';
 export const dict: Record<I18nKey, string> = {
   ...enDict,
   ...settingsDict,
+  'bots.sidebar.entry': "机器人",
   'tasksHub.create': "创建",
   'tasksHub.all': "全部",
   'tasksHub.enabled': "已开启",

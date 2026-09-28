@@ -2,6 +2,7 @@ import { settingsDict } from './en.settings';
 
 export const dict = {
   ...settingsDict,
+  'bots.sidebar.entry': "Bot",
   'tasksHub.create': "Create",
   'tasksHub.all': "All",
   'tasksHub.enabled': "Enabled",

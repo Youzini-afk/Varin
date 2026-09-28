@@ -27,7 +27,7 @@ const openOptions = (value: unknown): StoreOpenOptions => {
   if (typeof input.dataDir !== "string" || typeof input.hostId !== "string"
     || typeof input.workspaceId !== "string" || (input.embedding !== null
       && (!input.embedding || !Number.isSafeInteger(input.embedding.dim) || input.embedding.dim < 1))
-    || (input.scope !== undefined && !["workspace", "user", "session"].includes(input.scope))) {
+    || (input.scope !== undefined && !["workspace", "user", "session", "bot"].includes(input.scope))) {
     throw new Error("Invalid knowledge store open request");
   }
   return input;

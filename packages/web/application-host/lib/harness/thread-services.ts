@@ -4,6 +4,7 @@ import {
   DEFAULT_HARNESS_SETTINGS,
   formatRetrievalEvidenceText,
   HARNESS_MAX_REQUEST_TIMEOUT_MS,
+  isAttachedRootPurpose,
   mergeHarnessSettings,
   normalizeFrozenHarnessPermissions,
   sliceUtf8ByBytes,
@@ -967,9 +968,9 @@ export function createThreadSendService(host: HarnessServiceHost): HarnessServic
       if (!registry || !host.threadSendToSession) throw new HarnessServiceError("unavailable", "Thread runtime is not configured");
       const { workspaceId, owner: initialOwner } = await resolveOwningContext(host, ctx);
       // Authenticated UI calls stay user-originated while the same Pi session
-      // is temporarily attached to its principal root. Worker calls still act
-      // with the root Thread's frozen authority.
-      let owner = ctx.requestSource === "user" && initialOwner?.purpose === "research-root"
+      // is temporarily attached to its principal root (research or Bot entry).
+      // Worker calls still act with the root Thread's frozen authority.
+      let owner = ctx.requestSource === "user" && isAttachedRootPurpose(initialOwner?.purpose)
         ? null
         : initialOwner;
       assertOwnerTool(owner, "send");
@@ -1039,7 +1040,7 @@ export function createThreadSendService(host: HarnessServiceHost): HarnessServic
         while (parent.kind === "thread") {
           const ancestor = await registry.getThreadById(workspaceId, parent.id);
           if (!ancestor) return false;
-          if (ancestor.purpose === "research-root") {
+          if (isAttachedRootPurpose(ancestor.purpose)) {
             return ancestor.parent.kind === "session" && ancestor.parent.id === ctx.sessionId;
           }
           parent = ancestor.parent;
@@ -1096,7 +1097,7 @@ export function createThreadSendService(host: HarnessServiceHost): HarnessServic
       // Refresh after waiting for another input operation; its Run and ledger
       // may have changed. The owning actor is rechecked, not accepted from a stale snapshot.
       const currentOwner = await resolveOwningContext(host, ctx);
-      owner = ctx.requestSource === "user" && currentOwner.owner?.purpose === "research-root"
+      owner = ctx.requestSource === "user" && isAttachedRootPurpose(currentOwner.owner?.purpose)
         ? null
         : currentOwner.owner;
       assertOwnerTool(owner, "send");
