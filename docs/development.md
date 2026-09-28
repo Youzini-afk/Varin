@@ -143,6 +143,8 @@ opens, reopens, changes head, or edits its description. It updates one report co
 ranges, upstream excerpts, and migration hints found in the text. Shared release notes are deduplicated;
 missing or truncated material is called out. The run's `dependency-report` artifact contains the report
 and original API data. Existing PRs can be covered with `gh workflow run dependency-report.yml -f pull-request=NUMBER`.
+An hourly check with no update produces no report message. Rebases, title edits, and workflow reruns
+leave the existing comment untouched when dependency versions and collected material are unchanged.
 
 This is automatic evidence collection, not model-generated compatibility analysis. When reviewing an
 upgrade, use upstream release/changelog/compare links to cover the entire current-to-target interval,

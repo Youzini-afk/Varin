@@ -70,6 +70,16 @@ function material(section) {
 
 export function renderReport(pr, files, runUrl) {
   const updates = parseUpdates(pr.body || '');
+  // Rebases and reruns change SHAs/artifact URLs without changing the material
+  // being reviewed. Only changed dependency evidence warrants editing a comment.
+  const fingerprint = createHash('sha256').update(JSON.stringify({
+    updates: updates.map(({ name, from, to, section }) => ({ name, from, to, evidence: material(section) }))
+      .sort((a, b) => a.name.localeCompare(b.name)),
+    files: files.map((file) => file.filename).sort(),
+    truncated: /Description has been truncated/i.test(pr.body || ''),
+    unparsed: updates.length ? undefined : pr.body,
+  })).digest('hex');
+  const contentMarker = `<!-- varin-dependency-content:${fingerprint} -->`;
   const groups = new Map();
   const rows = [];
   for (const update of updates) {
@@ -89,8 +99,8 @@ export function renderReport(pr, files, runUrl) {
       groups.set(key, group);
     }
   }
-  const intro = [marker, '## 依赖更新速览', '',
-    `对应 [PR #${pr.number}](${pr.html_url}) 的提交 ${code(pr.head.sha.slice(0, 12))}。`, '',
+  const intro = [marker, contentMarker, '## 依赖更新速览', '',
+    `材料采集时 [PR #${pr.number}](${pr.html_url}) 的提交为 ${code(pr.head.sha.slice(0, 12))}。`, '',
     '按 Dependabot 提供的当前版本→目标版本材料整理，相同上游说明合并展示。原文摘录保留原语言；这份自动材料不代表已完成 Varin 兼容性审查。', '',
     '| 依赖 | 当前 → 目标 | 版本变化 | 材料提示 |', '| --- | --- | --- | --- |', ...rows, '',
     ...(updates.length ? [] : ['未识别出版本区间，请查看原 PR；没有把缺少材料解释为“无变化”。', '']),
@@ -118,8 +128,12 @@ export function renderReport(pr, files, runUrl) {
     }
     comment += preview;
   }
-  if (comment.length > 64_000) comment = `${marker}\n## 依赖更新速览\n\n更新清单超过评论展示长度，全部材料已保存到附件。\n`;
-  return { comment: comment + footer, markdown: intro + details.join('\n'), updates };
+  if (comment.length > 64_000) comment = `${marker}\n${contentMarker}\n## 依赖更新速览\n\n更新清单超过评论展示长度，全部材料已保存到附件。\n`;
+  return { comment: comment + footer, markdown: intro + details.join('\n'), updates, contentMarker };
+}
+
+export function shouldPublishReport(existingBody, report) {
+  return !existingBody?.includes(report.contentMarker);
 }
 
 function api(path, { method, data } = {}) {
@@ -173,7 +187,7 @@ export function run({ repo, number, output, publish = false }) {
   }
   const existing = paginate(`${base}/issues/${number}/comments`)
     .find((comment) => comment.user.login === 'github-actions[bot]' && comment.body.startsWith(marker));
-  if (existing?.body !== report.comment) {
+  if (shouldPublishReport(existing?.body, report)) {
     api(existing ? `${base}/issues/comments/${existing.id}` : `${base}/issues/${number}/comments`, {
       method: existing ? 'PATCH' : 'POST', data: { body: report.comment },
     });
