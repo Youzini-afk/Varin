@@ -1161,6 +1161,8 @@ export interface ExploreQueryStartResult {
   vocab: ExploreQueryVocab;
   sources: ExploreQuerySourceState[];
   inputSource: AgentInputContext["source"];
+  /** Frozen user choice for the relevance/plan stage of this query. */
+  decisionMode?: import("./harness-settings.js").HarnessExploreDecisionMode;
   /**
    * The fast-decision binding frozen for this query at start (D-312). "ready"
    * means the Host runs the progressive selection/action loop inside this

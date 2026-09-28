@@ -16,7 +16,9 @@ import type {
   ExploreQueryTaskFamily,
   ExploreQueryTaskStatus,
   HarnessServiceMap,
+  HarnessExploreDecisionMode,
 } from "@varin/protocol";
+import { resolveHarnessCodeRetrievalSettings } from "@varin/protocol";
 import {
   documentsFromViews,
   exploreShouldRerank,
@@ -546,22 +548,34 @@ export function createExploreQueryStartService(
         }
         let rerankConfigured = false;
         let fastDecision: StoredExploreQuery["fastDecision"];
+        let decisionMode: HarnessExploreDecisionMode = "auto";
         if (ctx.workspaceId) {
           const snapshotSettings = await Promise.resolve(
             host.harnessSettings?.(ctx.workspaceId) ?? null,
           ).catch(() => null);
           try {
-            rerankConfigured = rerankSettingsFromSnapshot(snapshotSettings) !== undefined;
+            const rawHarness = snapshotSettings?.global?.harness;
+            decisionMode = resolveHarnessCodeRetrievalSettings(
+              rawHarness && typeof rawHarness === "object" && !Array.isArray(rawHarness)
+                ? (rawHarness as { codeRetrieval?: unknown }).codeRetrieval : undefined,
+            ).decision;
+          } catch {
+            // An invalid external edit must not silently dispatch a paid judge.
+            decisionMode = "source";
+          }
+          try {
+            rerankConfigured = (decisionMode === "auto" || decisionMode === "rerank")
+              && rerankSettingsFromSnapshot(snapshotSettings) !== undefined;
           } catch {
             rerankConfigured = false;
           }
           // Fast Decision (D-312): freeze the resolved binding — including its
           // credential-free configurationId — at query start. A settings edit
           // applies to the next query, never this one.
-          if (host.fastDecision && host.fastDecisionStatus) {
+          if ((decisionMode === "auto" || decisionMode === "fast-decision") && host.fastDecision && host.fastDecisionStatus) {
             const status = await host.fastDecisionStatus(ctx.workspaceId, "explore").catch(() => undefined);
             fastDecision = resolveExploreFastDecision(status);
-          } else {
+          } else if (decisionMode === "auto" || decisionMode === "fast-decision") {
             fastDecision = { status: "unavailable" };
           }
         }
@@ -597,11 +611,13 @@ export function createExploreQueryStartService(
             resourceUnits,
           ),
           deadlineAt,
-          reserveForJudgeMs: params.reserveForJudge || rerankConfigured || fastDecision?.status === "ready"
+          reserveForJudgeMs: ((decisionMode === "auto" || decisionMode === "llm") && params.reserveForJudge)
+            || rerankConfigured || fastDecision?.status === "ready"
             ? DEFAULT_JUDGE_RESERVE_MS
             : 0,
           controller: queryController,
         });
+        stored.decisionMode = decisionMode;
         queryCoverage.set(stored, { graphMissing: graphSources.missing > 0, resourceUnits });
         if (fastDecision) {
           stored.fastDecision = fastDecision;
@@ -661,6 +677,7 @@ export function createExploreQueryStartService(
           vocab: stored.run.vocab(),
           sources: stored.run.sourceStates(),
           inputSource: stored.inputContext.source,
+          decisionMode,
           ...(fastDecision ? { fastDecision: { status: fastDecision.status } } : {}),
         };
       } catch (error) {
@@ -796,7 +813,10 @@ export function createExploreQueryFinishService(
             model.note = `${model.note ? `${model.note} ` : ""}Fast decision is ${fastDecision.status}; source ranking was kept.`;
           }
         }
-        if (workspaceId && Date.now() < stored.deadlineAt && exploreShouldRerank(model) && host.rerankExploreViews && !fastDecisionActive) {
+        const shouldRerank = stored.decisionMode === "rerank"
+          || (stored.decisionMode !== "llm" && stored.decisionMode !== "fast-decision"
+            && stored.decisionMode !== "source" && exploreShouldRerank(model));
+        if (workspaceId && Date.now() < stored.deadlineAt && shouldRerank && host.rerankExploreViews && !fastDecisionActive) {
           let settings: ReturnType<typeof rerankSettingsFromSnapshot>;
           let settingsInvalid = false;
           try {
@@ -853,7 +873,7 @@ export function createExploreQueryFinishService(
             model.rerank = "unconfigured";
           }
         } else if (model && model.rerank === undefined) {
-          model.rerank = exploreShouldRerank(model) ? "unconfigured" : "skipped";
+          model.rerank = shouldRerank ? "unconfigured" : stored.decisionMode === "auto" ? "skipped" : "disabled";
         }
         const result = stored.run.finish(model);
         if (!stored.controller.signal.aborted) stored.controller.abort();

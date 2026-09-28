@@ -31,7 +31,7 @@ import {
 } from "@varin/protocol";
 import { HostError } from "../errors.js";
 import { ProviderConfigurationManager } from "../provider-configuration.js";
-import { requestOpenAICompatibleEmbeddings } from "./openai-embeddings.js";
+import { requestAdaptiveEmbeddings } from "./openai-embeddings.js";
 import { requestHttpRerank } from "./http-rerank.js";
 import { requestSystemone, SystemoneRequestError, SystemoneResponseError } from "./typesafe-systemone.js";
 
@@ -249,7 +249,7 @@ export class BackgroundInferenceRuntime {
         ].filter(Boolean).join(",")})`,
       );
       signal.throwIfAborted();
-      const result = await requestOpenAICompatibleEmbeddings({
+      const result = await requestAdaptiveEmbeddings({
         baseUrl: endpoint.baseUrl,
         apiKey: endpoint.apiKey!,
         ...(endpoint.headers ? { headers: endpoint.headers } : {}),

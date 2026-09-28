@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { writeFileSync, unlinkSync, statSync, utimesSync } from "node:fs";
+import { mkdirSync, writeFileSync, unlinkSync, statSync, utimesSync } from "node:fs";
 import { join } from "node:path";
 import { createDocumentAuthorityHarness } from "../../documents/contract-fixtures.js";
 import type { WorkingBranchQuerySnapshot } from "../../harness/working-state/working-branch-query.js";
@@ -26,6 +26,29 @@ const gate = () => {
 };
 
 describe("semantic index runtime", () => {
+  it("indexes a selected child directory without enumerating its multi-project parent", async () => {
+    const documents = await createDocumentAuthorityHarness();
+    disposes.push(() => documents.cleanup());
+    const child = join(documents.workspaceRoot, "selected-project");
+    mkdirSync(child);
+    writeFileSync(join(child, "entry.ts"), 'export const marker = "selected project";\n');
+    const searchedRoots: string[] = [];
+    const runtime = createSemanticIndexRuntime({
+      dataDir: documents.dataDir, hostId: "selected-subdirectory", documents: documents.authority,
+      structureSource: parsingSource(), embedder: createHashEmbedder(), indexDirectories: [child],
+      searchFilesystemFiles: async (root) => {
+        searchedRoots.push(root);
+        return [{ name: "entry.ts", path: join(child, "entry.ts"), relativePath: "entry.ts" }];
+      },
+    });
+    disposes.push(() => runtime.dispose());
+    const scope = workspaceScope(documents.identity.workspaceId);
+    await runtime.scanScope(scope);
+    const result = await runtime.search(scope, "selected project", 5);
+    expect(searchedRoots).toEqual([child]);
+    expect(result.hits.map((hit) => hit.documentId)).toContain("selected-project/entry.ts");
+  });
+
   it("does not report an aborted background update as an indexing failure", async () => {
     const documents = await createDocumentAuthorityHarness();
     disposes.push(() => documents.cleanup());

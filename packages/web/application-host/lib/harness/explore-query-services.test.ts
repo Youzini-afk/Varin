@@ -613,8 +613,38 @@ describe("explore query services", () => {
     expect(repeated.text).toBe(ranked.text);
 
     host.harnessSettings = () => ({
-      global: { harness: { rerank: { protocol: "http-rerank", providerId: "missing-model" } } },
+      global: { harness: {
+        codeRetrieval: { decision: "llm" },
+        rerank: { protocol: "http-rerank", providerId: "rerank-provider", modelId: "rerank-1" },
+      } },
       globalRevision: "2", project: {}, projectRevision: "1", projectTrusted: true,
+    }) as never;
+    const llmOnly = await createExploreQueryStartService(host).handle({ question: "llm only" }, context({ source: "disk" }));
+    expect(llmOnly.decisionMode).toBe("llm");
+    await createExploreQueryViewsService(host).handle({ queryId: llmOnly.queryId }, context({ source: "disk" }));
+    const llmFallback = await finish.handle({ queryId: llmOnly.queryId,
+      model: { plan: "unconfigured", select: "unconfigured", followup: "unconfigured" } }, context({ source: "disk" }));
+    expect(llmFallback.details.model?.rerank).toBe("disabled");
+    expect(rerankCalls).toEqual(["needle again"]);
+
+    host.harnessSettings = () => ({
+      global: { harness: {
+        codeRetrieval: { decision: "rerank" },
+        rerank: { protocol: "http-rerank", providerId: "rerank-provider", modelId: "rerank-1" },
+      } },
+      globalRevision: "3", project: {}, projectRevision: "1", projectTrusted: true,
+    }) as never;
+    const rerankOnly = await createExploreQueryStartService(host).handle({ question: "rerank only" }, context({ source: "disk" }));
+    expect(rerankOnly.decisionMode).toBe("rerank");
+    await createExploreQueryViewsService(host).handle({ queryId: rerankOnly.queryId }, context({ source: "disk" }));
+    const explicitlyRanked = await finish.handle({ queryId: rerankOnly.queryId,
+      model: { plan: "used", select: "used", followup: "skipped" } }, context({ source: "disk" }));
+    expect(explicitlyRanked.details.model?.rerank).toBe("used");
+    expect(rerankCalls).toEqual(["needle again", "rerank only"]);
+
+    host.harnessSettings = () => ({
+      global: { harness: { rerank: { protocol: "http-rerank", providerId: "missing-model" } } },
+      globalRevision: "4", project: {}, projectRevision: "1", projectTrusted: true,
     }) as never;
     const malformed = await createExploreQueryStartService(host).handle({ question: "still readable" }, context({ source: "disk" }));
     await createExploreQueryViewsService(host).handle({ queryId: malformed.queryId }, context({ source: "disk" }));
@@ -625,7 +655,7 @@ describe("explore query services", () => {
     expect(fallback.text).toContain("needle");
     expect(fallback.details.model?.rerank).toBe("failed");
     expect(fallback.details.rerank?.status).toBe("failed");
-    expect(rerankCalls).toEqual(["needle again"]);
+    expect(rerankCalls).toEqual(["needle again", "rerank only"]);
     store.dispose();
   });
 

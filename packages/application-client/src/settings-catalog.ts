@@ -281,12 +281,30 @@ export const SETTINGS_CATALOG: readonly SettingsCatalogEntry[] = [
       keywords: ['compaction', 'context'] },
   },
   {
+    id: 'harness.codeRetrieval', category: 'retrieval', owner: 'pi-settings',
+    field: { path: 'harness.codeRetrieval.decision', kind: 'enum', scope: 'user', default: 'auto',
+      options: [
+        { value: 'auto' }, { value: 'llm' }, { value: 'fast-decision' },
+        { value: 'rerank' }, { value: 'source' },
+      ], note: 'one result judgment method per explore query; configured model failures retain source ranking' },
+    apply: 'immediate',
+    ui: { page: 'harness-retrieval', titleKey: 'settings.page.harness.codeRetrieval.title',
+      keywords: ['explore', 'LLM', 'fast decision', 'rerank', 'ranking'] },
+  },
+  {
     id: 'harness.embedding', category: 'retrieval', owner: 'pi-settings',
     field: { path: 'harness.embedding', kind: 'json', scope: 'user',
       note: 'dedicated embedding backend {provider, model, endpoint?, credentialRef?}; user-owned' },
     apply: 'next-run',
-    ui: { page: 'harness-retrieval', titleKey: 'settings.page.harness.section.embedding',
+    ui: { page: 'harness-index', titleKey: 'settings.page.harness.section.embedding',
       keywords: ['embedding', 'MiniLM', 'vector'] },
+  },
+  {
+    id: 'harness.semanticIndex', category: 'retrieval', owner: 'action',
+    actionRef: { domain: 'page:ui', note: 'Host-owned index storage, request pacing and progress' },
+    apply: 'restart',
+    ui: { page: 'harness-index', titleKey: 'settings.page.harness.page.index.title',
+      keywords: ['index', 'storage', 'progress', 'concurrency', 'embedding'] },
   },
   {
     id: 'harness.rerank', category: 'retrieval', owner: 'pi-settings',

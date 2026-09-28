@@ -21,6 +21,31 @@ const finishResult = {
 };
 
 describe("Host-backed explore tool", () => {
+  it("does not call the explore LLM when the user selected dedicated rerank", async () => {
+    let completions = 0;
+    const bridge = {
+      inputContext: () => ({ source: "disk" as const }),
+      cancel: () => undefined,
+      request: async (method: string, params: Record<string, unknown>) => {
+        if (method === "explore.query.start") return {
+          queryId: "eq_rerank", question: params.question, deadlineAt: Date.now() + 5000,
+          parsed: { objects: ["service"], relation: "unknown", domain: "unknown" },
+          vocab: { objects: ["service"], anchors: [] }, sources: [], inputSource: "disk",
+          decisionMode: "rerank",
+        };
+        if (method === "explore.query.views") return { views: [{}], unevaluated: 0 };
+        if (method === "explore.query.finish") return { ...finishResult,
+          details: { ...finishResult.details, model: params.model } };
+        if (method === "explore.query.release") return { released: true };
+        throw new Error(`unexpected ${method}`);
+      },
+    } as unknown as HostServicesBridge;
+    const tool = createExploreTool(bridge, "session", { complete: async () => { completions += 1; return ""; } });
+    const result = await tool.execute("call", { question: "where is service" }, undefined, undefined, undefined as never);
+    assert.equal(completions, 0);
+    assert.equal((result.details as { model: { select: string } }).model.select, "disabled");
+  });
+
   it("T9: accepts anchors, forwards them, and describes conceptual mapping", async () => {
     const calls: Array<{ method: string; params: Record<string, unknown> }> = [];
     const bridge = {

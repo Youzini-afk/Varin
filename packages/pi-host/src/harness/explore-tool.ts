@@ -141,6 +141,13 @@ export function createExploreTool(
         queryId = started.queryId;
         deadlineAt = Math.min(deadlineAt, started.deadlineAt);
         const modelSignal = () => boundByDeadline(signal, deadlineAt);
+        const decisionMode = started.decisionMode ?? "auto";
+        const useExploreModel = decisionMode === "auto" || decisionMode === "llm";
+        if (!useExploreModel) {
+          participation.plan = "disabled";
+          participation.select = "disabled";
+          participation.followup = "disabled";
+        }
 
         // D-312: a ready fast-decision binding owns material relevance and
         // action choice inside the query; the generative model keeps only its
@@ -149,11 +156,11 @@ export function createExploreTool(
         if (started.fastDecision && started.fastDecision.status !== "ready") {
           participation.fastDecision = started.fastDecision.status === "invalid" || started.fastDecision.status === "unavailable" ? "failed" : started.fastDecision.status;
         }
-        if (!complete) {
+        if (!complete && useExploreModel) {
           participation.note = "Explore model is not configured; excerpts are from algorithm and vector sources.";
         }
 
-        const shouldPlan = Boolean(complete) && exploreShouldPlanWithModel(params.question, started.parsed.objects);
+        const shouldPlan = useExploreModel && Boolean(complete) && exploreShouldPlanWithModel(params.question, started.parsed.objects);
         if (complete && shouldPlan) {
           try {
             const planText = await complete({
@@ -178,7 +185,7 @@ export function createExploreTool(
         }
 
         const views = await request("explore.query.views", { queryId });
-        const shouldSelect = Boolean(complete)
+        const shouldSelect = useExploreModel && Boolean(complete)
           && !fastDecisionActive
           && views.views.length > 0
           && exploreShouldSelectWithModel(params.question, started.parsed.objects, participation.plan === "used");

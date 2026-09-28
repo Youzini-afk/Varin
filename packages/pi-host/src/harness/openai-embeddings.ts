@@ -40,7 +40,7 @@ const finiteVector = (value: unknown): number[] | undefined => {
 };
 
 export class EmbeddingResponseError extends Error {
-  constructor(message: string) {
+  constructor(message: string, readonly status?: number) {
     super(message);
     this.name = "EmbeddingResponseError";
   }
@@ -76,6 +76,7 @@ export async function requestOpenAICompatibleEmbeddings(
     const longestInput = request.input.reduce((longest, value) => Math.max(longest, value.length), 0);
     throw new EmbeddingResponseError(
       `Embedding HTTP ${response.status} (inputs ${request.input.length}, longest ${longestInput} chars${code ? `, code ${code}` : ""})`,
+      response.status,
     );
   }
   const payload = await response.json() as unknown;
@@ -121,4 +122,23 @@ export async function requestOpenAICompatibleEmbeddings(
     vectors,
     dim,
   };
+}
+
+/** Split only a provider-rejected batch; preserve every input/result identity. */
+export async function requestAdaptiveEmbeddings(
+  request: OpenAICompatibleEmbeddingsRequest,
+): Promise<OpenAICompatibleEmbeddingsResponse> {
+  try {
+    return await requestOpenAICompatibleEmbeddings(request);
+  } catch (error) {
+    if (!(error instanceof EmbeddingResponseError) || (error.status !== 400 && error.status !== 413)
+      || request.input.length < 2) throw error;
+    const middle = Math.floor(request.input.length / 2);
+    const left = await requestAdaptiveEmbeddings({ ...request, input: request.input.slice(0, middle) });
+    const right = await requestAdaptiveEmbeddings({ ...request, input: request.input.slice(middle) });
+    if (left.dim !== right.dim || left.model !== right.model) {
+      throw new EmbeddingResponseError('Embedding batches returned different model spaces');
+    }
+    return { model: left.model, vectors: [...left.vectors, ...right.vectors], dim: left.dim };
+  }
 }

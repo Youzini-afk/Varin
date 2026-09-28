@@ -182,6 +182,7 @@ import {
   parseHarnessFastDecisionSettings,
   parseHarnessRerankSettings,
   resolveHarnessContextSettings,
+  resolveHarnessCodeRetrievalSettings,
   resolveHarnessDocumentReadingSettings,
   resolvePresets,
   type HarnessSettingsInput,
@@ -3083,6 +3084,7 @@ export class SessionHost {
       parseHarnessEmbeddingSettings(globalHarness.embedding);
       parseHarnessRerankSettings(globalHarness.rerank);
       parseHarnessFastDecisionSettings(globalHarness.fastDecision);
+      resolveHarnessCodeRetrievalSettings(globalHarness.codeRetrieval);
       resolveHarnessDocumentReadingSettings(globalHarness.documentReading);
       if (scope === "global") {
         const candidateContext = resolveHarnessContextSettings(
