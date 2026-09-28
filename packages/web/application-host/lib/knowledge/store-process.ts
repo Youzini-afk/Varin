@@ -50,7 +50,9 @@ export class KnowledgeStoreProcess {
       execArgv: loader ? ["--import", loader] : [],
       env: { ...process.env, ELECTRON_RUN_AS_NODE: "1" },
       serialization: "advanced", // Preserve Set, Date and undefined in the existing contract.
-      stdio: ["ignore", "ignore", "ignore", "ipc"],
+      // A native addon can fail before IPC is ready. Preserve the child's error
+      // so release and installed-app logs identify the real cause of a disconnect.
+      stdio: ["ignore", "ignore", "inherit", "ipc"],
       windowsHide: true,
     };
     this.child = fork(physicalEntry, [], forkOptions);

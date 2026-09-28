@@ -5,6 +5,7 @@ import path from 'node:path';
 import { execFileSync } from 'node:child_process';
 import { createRequire } from 'node:module';
 import { fileURLToPath } from 'node:url';
+import { patchTriviumArm64Loader } from './patch-trivium-arm64-loader.mjs';
 
 const require = createRequire(import.meta.url);
 const { detectKernelBinaryIdentity, normalizeKernelArchitecture } = require('../../../scripts/kernel-binary-identity.cjs');
@@ -74,6 +75,7 @@ export function prepareTriviumRuntime() {
     fs.rmSync(temporary, { force: true });
   }
   console.log(`[electron] prepared TriviumDB ${VERSION} win32/arm64 from ${COMMIT}${cached ? ' (verified cache)' : ''}`);
+  patchTriviumArm64Loader();
 }
 
 if (process.argv[1] && path.resolve(process.argv[1]) === fileURLToPath(import.meta.url)) prepareTriviumRuntime();
