@@ -22,6 +22,26 @@ export interface ModelSelection {
   modelId: string;
 }
 
+/** One relevance judge per code-search query. Planning is part of LLM mode. */
+export type HarnessExploreDecisionMode = "auto" | "llm" | "fast-decision" | "rerank" | "source";
+
+export interface HarnessCodeRetrievalSettings {
+  decision: HarnessExploreDecisionMode;
+}
+
+export function resolveHarnessCodeRetrievalSettings(value: unknown): HarnessCodeRetrievalSettings {
+  if (value === undefined) return { decision: "auto" };
+  if (typeof value !== "object" || value === null || Array.isArray(value)) {
+    throw new HarnessSettingsValidationError("harness.codeRetrieval must be an object");
+  }
+  const decision = (value as { decision?: unknown }).decision ?? "auto";
+  if (decision !== "auto" && decision !== "llm" && decision !== "fast-decision"
+    && decision !== "rerank" && decision !== "source") {
+    throw new HarnessSettingsValidationError("harness.codeRetrieval.decision is invalid");
+  }
+  return { decision };
+}
+
 export type HarnessWebSearchProvider = "brave" | "exa" | "tavily" | "jina" | "searxng";
 
 export interface HarnessWebSearchSettings {
@@ -208,12 +228,13 @@ export function resolveHarnessContextSettings(
   };
 }
 
-export type HarnessSettingsInput = Omit<Partial<HarnessSettings>, "context" | "review" | "nextStep" | "documentReading"> & {
+export type HarnessSettingsInput = Omit<Partial<HarnessSettings>, "context" | "review" | "nextStep" | "documentReading" | "codeRetrieval"> & {
   context?: HarnessContextSettingsInput;
   memory?: HarnessMemorySettingsInput;
   review?: Partial<HarnessReviewSettings>;
   nextStep?: Partial<HarnessNextStepSettings>;
   documentReading?: HarnessDocumentReadingSettingsInput;
+  codeRetrieval?: Partial<HarnessCodeRetrievalSettings>;
 };
 
 export interface HarnessSettings {
@@ -222,6 +243,7 @@ export interface HarnessSettings {
   output: { visibleBytes: number };
   bash: { waitMs: number };
   models: Partial<Record<HarnessModelRole, ModelSelection>>;
+  codeRetrieval: HarnessCodeRetrievalSettings;
   dispatch: { concurrency: number; askBefore: Partial<Record<string, boolean>> };
   knowledge: {
     eventRetentionDays: number;
@@ -279,6 +301,7 @@ export const DEFAULT_HARNESS_SETTINGS: HarnessSettings = {
   output: { visibleBytes: 32768 },
   bash: { waitMs: 10000 },
   models: {},
+  codeRetrieval: { decision: "auto" },
   dispatch: { concurrency: 12, askBefore: {} },
   knowledge: {
     eventRetentionDays: 30,
@@ -354,6 +377,7 @@ export function mergeHarnessSettings(
     memory: _userMemory,
     rerank: userRerank,
     nextStep: userNextStep,
+    codeRetrieval: userCodeRetrieval,
     ...userRest
   } = user;
   const {
@@ -364,6 +388,7 @@ export function mergeHarnessSettings(
     memory: _workspaceMemory,
     rerank: _workspaceRerank,
     nextStep: _workspaceNextStep,
+    codeRetrieval: _workspaceCodeRetrieval,
     ...workspaceRest
   } = workspace;
   const askBeforeKeys = new Set([
@@ -404,6 +429,13 @@ export function mergeHarnessSettings(
     // Model/provider selection is user-owned. A repository cannot redirect
     // auxiliary requests to another provider.
     models: { ...DEFAULT_HARNESS_SETTINGS.models, ...user.models },
+    // An optional, externally edited judgment choice must not prevent chat
+    // creation. Its direct consumer reports the invalid choice and keeps source
+    // ranking; settings.update validates new writes separately.
+    codeRetrieval: (() => {
+      try { return resolveHarnessCodeRetrievalSettings(userCodeRetrieval); }
+      catch { return { decision: "source" as const }; }
+    })(),
     dispatch: {
       ...DEFAULT_HARNESS_SETTINGS.dispatch,
       ...user.dispatch,

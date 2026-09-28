@@ -68,6 +68,7 @@ import { createSymbolGraphRuntime } from './lib/knowledge/symbol-runtime.js';
 import { createLocalMinilmEmbedder } from './lib/knowledge/semantic/minilm.js';
 import { createLocalSemanticComponentManager } from './lib/knowledge/semantic/local-component.js';
 import { registerLocalSemanticComponentRoutes } from './lib/knowledge/semantic/local-component-routes.js';
+import { createSemanticIndexManagement, DEFAULT_SEMANTIC_INDEX_CONFIGURATION, registerSemanticIndexRoutes } from './lib/knowledge/semantic/index-management.js';
 import { createWorkspaceSemanticRuntime } from './lib/knowledge/semantic/workspace-runtime.js';
 import { createEmbedScheduler } from './lib/knowledge/semantic/embed-scheduler.js';
 import { createVectorCache } from './lib/knowledge/semantic/vector-cache.js';
@@ -2734,10 +2735,19 @@ async function main(options: StartWebUiServerOptions = {}): Promise<WebUiServerC
     onEnabled: () => semanticRuntimeHolder.current?.refreshLocalSemantic(createLocalMinilmEmbedder({ dataDir: VARIN_DATA_DIR })),
   });
   const localEmbedder = createLocalMinilmEmbedder({ dataDir: VARIN_DATA_DIR });
-  const semanticScheduler = createEmbedScheduler();
+  const semanticIndexManagement = createSemanticIndexManagement(VARIN_DATA_DIR, hostId);
+  const semanticIndexLoad = await semanticIndexManagement.load().catch((error: unknown) => ({
+    config: DEFAULT_SEMANTIC_INDEX_CONFIGURATION, error: errorMessage(error),
+  }));
+  if (semanticIndexLoad.error) console.error('[HarnessKnowledge] Index settings need repair:', semanticIndexLoad.error);
+  const semanticIndexConfig = semanticIndexLoad.config;
+  const semanticScheduler = createEmbedScheduler({
+    concurrency: semanticIndexConfig.concurrentRequests,
+    backgroundIntervalMs: semanticIndexConfig.requestIntervalMs,
+  });
   const semanticVectorCache = createVectorCache();
   const semanticRuntime = createWorkspaceSemanticRuntime({
-    dataDir: VARIN_DATA_DIR,
+    dataDir: semanticIndexConfig.storageDirectory ?? VARIN_DATA_DIR,
     hostId,
     // HR3: one shared worker serves settings/inference for every resource root;
     // indexing no longer spawns a workspace worker per directory.
@@ -2764,6 +2774,7 @@ async function main(options: StartWebUiServerOptions = {}): Promise<WebUiServerC
     embedder: localEmbedder,
     vectorCache: semanticVectorCache,
     scheduler: semanticScheduler,
+    indexDirectories: semanticIndexConfig.indexedDirectories,
     getBroker: getReadyPiRuntimeBroker,
     executionViews: threadExecutionViews,
     workingBranches: workingBranchLookups,
@@ -2775,6 +2786,11 @@ async function main(options: StartWebUiServerOptions = {}): Promise<WebUiServerC
   researchDecideDeps.fastDecision = semanticRuntime.fastDecision;
   registerLocalSemanticComponentRoutes(app, {
     manager: localSemanticComponent,
+    ...(uiAuthController ? { requireAuth: uiAuthController.requireAuth } : {}),
+  });
+  registerSemanticIndexRoutes(app, {
+    management: semanticIndexManagement,
+    runtime: semanticRuntime,
     ...(uiAuthController ? { requireAuth: uiAuthController.requireAuth } : {}),
   });
   knowledgeVectors = createKnowledgeVectorRuntime({

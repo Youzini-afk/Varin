@@ -8,14 +8,15 @@ import { PermissionsSettings } from './PermissionsSettings';
 import { ModelsSettings } from './ModelsSettings';
 import { ContextSettings } from './ContextSettings';
 import { RetrievalSettings } from './RetrievalSettings';
+import { IndexSettings } from './IndexSettings';
 import { WebSettings } from './WebSettings';
 import { KnowledgeSettings } from '../knowledge/KnowledgeSettings';
 import { useSettingsSearchTarget } from '@/lib/settings/search-target';
 import { cn } from '@/lib/utils';
 
-export type HarnessSettingsSection = 'tools' | 'permissions' | 'models' | 'context' | 'retrieval' | 'web';
+export type HarnessSettingsSection = 'tools' | 'permissions' | 'models' | 'context' | 'retrieval' | 'index' | 'web';
 const pages = { tools: ToolsSettings, permissions: PermissionsSettings, models: ModelsSettings,
-  context: ContextSettings, retrieval: RetrievalSettings, web: WebSettings };
+  context: ContextSettings, retrieval: RetrievalSettings, index: IndexSettings, web: WebSettings };
 
 export function HarnessSettingsPage({ section }: { section: HarnessSettingsSection }) {
   const { t } = useI18n();
@@ -33,6 +34,7 @@ export function HarnessSettingsPage({ section }: { section: HarnessSettingsSecti
     if (activeTab === 'knowledge') setKnowledgeVisited(true);
   }, [activeTab, searchTab]);
   const Page = pages[section];
+  const showPiSaveStatus = section !== 'index' && (!combined || activeTab === 'context');
   const content = <>
     {status === 'loading' ? <p role="status" className="typography-meta text-muted-foreground">{t('common.loading')}</p> : null}
     {error ? <div role="alert" className="mb-5 rounded-lg border border-destructive/30 bg-destructive/5 p-3">
@@ -42,8 +44,8 @@ export function HarnessSettingsPage({ section }: { section: HarnessSettingsSecti
     {harness ? <Page key={`${targetKey}:${section}`} harness={harness} update={update} /> : null}
   </>;
   return <SettingsPageLayout title={t(`settings.page.harness.page.${section}.title`)}
-    description={t(`settings.page.harness.page.${section}.description`)} showSaveStatus={!combined || activeTab === 'context'}
-    headerEnd={!combined || activeTab === 'context' ? <span className="typography-meta text-muted-foreground">{t('settings.harness.userDefaults')}</span> : undefined}
+    description={t(`settings.page.harness.page.${section}.description`)} showSaveStatus={showPiSaveStatus}
+    headerEnd={showPiSaveStatus ? <span className="typography-meta text-muted-foreground">{t('settings.harness.userDefaults')}</span> : undefined}
     className="[&>section]:py-5 [&>section]:space-y-4">
     {combined ? <>
       <div role="tablist" aria-label={t('settings.page.harness.page.context.title')} className="mb-5 flex gap-5 border-b border-border/60">

@@ -57,6 +57,7 @@ const HARNESS_SECTION_BY_SLUG: Record<string, HarnessSettingsSection> = {
   'harness-models': 'models',
   'harness-context': 'context',
   'harness-retrieval': 'retrieval',
+  'harness-index': 'index',
   'harness-web': 'web',
 };
 

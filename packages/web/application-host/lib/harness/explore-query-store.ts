@@ -3,6 +3,7 @@ import type {
   AgentInputContext,
   HarnessActorIdentity,
   HarnessResolvedFastDecisionBinding,
+  HarnessExploreDecisionMode,
 } from "@varin/protocol";
 import {
   createExploreQueryRun,
@@ -24,6 +25,7 @@ export interface StoredExploreQuery {
   paths?: string[];
   startedAt: number;
   deadlineAt: number;
+  decisionMode?: HarnessExploreDecisionMode;
   controller: AbortController;
   /** User/request cancellation and the total query deadline; sources have their own controller. */
   cancelController: AbortController;

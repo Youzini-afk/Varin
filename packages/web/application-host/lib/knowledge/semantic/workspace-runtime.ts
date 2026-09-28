@@ -12,7 +12,7 @@ import type { SemanticEmbedder } from './embedder.js';
 import { isAbortError, waitWithSignal } from './cancellation.js';
 import { workspaceScope } from './identity.js';
 import { pinSemanticQueryView, type SemanticDraftReadResult } from './query-view.js';
-import { createSemanticIndexRuntime, type SemanticIndexRuntimeOptions } from './runtime.js';
+import { createSemanticIndexRuntime, resolveSemanticScanRoots, type SemanticIndexRuntimeOptions } from './runtime.js';
 import { requestWorkspaceInference, resolveInferenceBinding } from './workspace-inference.js';
 
 type InferenceBroker = Pick<PiRuntimeBroker, 'requestForWorkspace' | 'watchConfig' | 'unwatchConfig'>;
@@ -44,6 +44,8 @@ export interface WorkspaceSemanticRuntimeOptions extends Omit<SemanticIndexRunti
 
 type WorkspaceState = {
   workspaceId: string;
+  root: string;
+  indexingEnabled: boolean;
   backend: ReturnType<typeof createSemanticBackend>;
   runtime: ReturnType<typeof createSemanticIndexRuntime>;
   binding: HarnessInferenceBindingSnapshot;
@@ -113,7 +115,8 @@ export function createWorkspaceSemanticRuntime(options: WorkspaceSemanticRuntime
   const reconcileNextRoot = async (): Promise<void> => {
     if (disposed || states.size === 0) return;
     reconcileRunning = true;
-    const workspaceIds = [...states.keys()];
+    const workspaceIds = [...states.values()].filter((state) => state.indexingEnabled).map((state) => state.workspaceId);
+    if (workspaceIds.length === 0) { reconcileRunning = false; return; }
     const workspaceId = workspaceIds[reconcileCursor % workspaceIds.length]!;
     reconcileCursor = (reconcileCursor + 1) % workspaceIds.length;
     const state = states.get(workspaceId);
@@ -189,7 +192,7 @@ export function createWorkspaceSemanticRuntime(options: WorkspaceSemanticRuntime
     if (changed) {
       try { options.onBindingChanged?.(state.workspaceId); } catch (error) { report(error); }
     }
-    if (scanWhenChanged && (changed || retrying)) track(state.runtime.scanWorkspace(state.workspaceId));
+    if (state.indexingEnabled && scanWhenChanged && (changed || retrying)) track(state.runtime.scanWorkspace(state.workspaceId));
   };
   const refresh = (state: WorkspaceState, scanWhenChanged = false): Promise<void> => {
     const task = state.refreshTail.then(() => refreshNow(state, scanWhenChanged));
@@ -276,7 +279,7 @@ export function createWorkspaceSemanticRuntime(options: WorkspaceSemanticRuntime
     if (loading) return loading;
     const existing = states.get(workspaceId);
     if (existing) {
-      await ensureDocumentWatch(existing, true);
+      if (existing.indexingEnabled) await ensureDocumentWatch(existing, true);
       await watch(existing);
       // Also wait for a refresh already queued by config.changed.
       if (existing.needsRefresh) await refresh(existing, autoScan);
@@ -287,7 +290,8 @@ export function createWorkspaceSemanticRuntime(options: WorkspaceSemanticRuntime
     const task = (async () => {
       // Resolve the resource root so missing/unavailable directories fail here,
       // not inside an inference or scan task.
-      await options.documents.inspectWorkspace(workspaceId);
+      const inspected = await options.documents.inspectWorkspace(workspaceId);
+      const indexingEnabled = resolveSemanticScanRoots(inspected.root, options.indexDirectories).length > 0;
       assertActive();
       const backend = createSemanticBackend({
         local: localEmbedder,
@@ -306,7 +310,7 @@ export function createWorkspaceSemanticRuntime(options: WorkspaceSemanticRuntime
       });
       const runtime = createSemanticIndexRuntime({ ...options, getEmbedder: () => backend.embedder });
       const state: WorkspaceState = {
-        workspaceId, backend, runtime,
+        workspaceId, root: inspected.root, indexingEnabled, backend, runtime,
         binding: {
           embedding: { status: 'unconfigured' },
           rerank: { status: 'unconfigured' },
@@ -326,12 +330,12 @@ export function createWorkspaceSemanticRuntime(options: WorkspaceSemanticRuntime
       scheduleReconcile();
       // Subscribe before the first scan so writes during enumeration are either
       // observed incrementally or cause the scope to be reconciled.
-      await ensureDocumentWatch(state, false);
+      if (indexingEnabled) await ensureDocumentWatch(state, false);
       // Register observation before reading settings, so changes made while a
       // watch is being created are included in the first binding snapshot.
       await watch(state);
       await refresh(state);
-      if (autoScan && !disposed) track(runtime.scanWorkspace(workspaceId));
+      if (autoScan && indexingEnabled && !disposed) track(runtime.scanWorkspace(workspaceId));
       await state.refreshTail;
       assertActive();
       return state;
@@ -343,6 +347,10 @@ export function createWorkspaceSemanticRuntime(options: WorkspaceSemanticRuntime
   const semanticRecall: NonNullable<HarnessServiceHost['semanticRecall']> = async (workspaceId, question, limit, searchOptions) => {
     searchOptions?.signal?.throwIfAborted();
     const state = await waitWithSignal(getWorkspace(workspaceId), searchOptions?.signal);
+    if (!state.indexingEnabled) return {
+      status: 'unavailable', coverage: 'empty', lifecycle: 'idle', hits: [],
+      note: 'This resource root is outside the selected semantic index directories.',
+    };
     const sessionId = searchOptions?.sessionId;
     const inputContext = searchOptions?.inputContext ?? { source: 'disk' as const };
     const execution = sessionId ? options.executionViews.get(sessionId) : undefined;
@@ -484,8 +492,11 @@ export function createWorkspaceSemanticRuntime(options: WorkspaceSemanticRuntime
     if (disposed) return;
     const state = states.get(event.workspaceId);
     // Mark stale vectors synchronously whenever this workspace is already open.
+    if (state && !state.indexingEnabled) return;
     if (state && !loads.has(event.workspaceId) && !state.needsRefresh) state.runtime.observeDocumentMutation(event);
-    else track(getWorkspace(event.workspaceId).then((ready) => ready.runtime.observeDocumentMutation(event)));
+    else track(getWorkspace(event.workspaceId).then((ready) => {
+      if (ready.indexingEnabled) ready.runtime.observeDocumentMutation(event);
+    }));
   };
   const observeToolWrite = async (workspaceId: string, absolutePath: string): Promise<void> => {
     const { root } = await options.documents.inspectWorkspace(workspaceId);
@@ -511,12 +522,23 @@ export function createWorkspaceSemanticRuntime(options: WorkspaceSemanticRuntime
   };
   return {
     semanticRecall, harnessSettings, rerankExploreViews, fastDecisionStatus, fastDecision, observeDocumentMutation, observeToolWrite, processEvent,
-    scanWorkspace: async (workspaceId: string) => (await getWorkspace(workspaceId, false)).runtime.scanWorkspace(workspaceId),
+    indexStatuses: () => [...states.values()].map((state) => ({
+      workspaceId: state.workspaceId,
+      root: state.root,
+      indexingEnabled: state.indexingEnabled,
+      binding: state.binding.embedding.status,
+      status: state.runtime.statusFor(workspaceScope(state.workspaceId)),
+      progress: state.runtime.scanProgress(workspaceScope(state.workspaceId)),
+    })),
+    scanWorkspace: async (workspaceId: string) => {
+      const state = await getWorkspace(workspaceId, false);
+      if (state.indexingEnabled) await state.runtime.scanWorkspace(workspaceId);
+    },
     refreshLocalSemantic: (next: SemanticEmbedder): void => {
       localEmbedder = next;
       for (const state of states.values()) {
         state.backend.replaceLocal(next);
-        if (state.backend.kind !== 'local') continue;
+        if (!state.indexingEnabled || state.backend.kind !== 'local') continue;
         state.runtime.cancelScans();
         track(state.runtime.scanWorkspace(state.workspaceId));
       }

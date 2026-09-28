@@ -554,7 +554,14 @@ gaps. OutputStore keeps the full pack plus unread-candidate refs, and the tool t
 handle only when more content remains. Symbol expansion and optional model enrichment remain
 separate planned sources.
 
-Fast Decision (D-312, `explore-fast-decision.ts`): when `explore.query.start` resolves a ready
+`harness.codeRetrieval.decision` is the user-owned choice frozen at `explore.query.start`:
+`auto` preserves the existing fast-decision → explore LLM → conditional rerank priority;
+`llm`, `fast-decision`, and `rerank` select exactly that judgment path; `source` uses source
+ranking alone. An explicitly selected path does not silently switch to another paid model
+when its binding is unavailable or its request fails. The explore LLM does planning as well as
+selection; embedding is an independent retrieval source, not another relevance judge.
+
+Fast Decision (D-312, `explore-fast-decision.ts`): when the selected path resolves a ready
 `harness.fastDecision` purpose binding, the query freezes the credential-free `configurationId` and runs a
 progressive loop inside the same query lifetime. Each round turns fresh materialized views into `m:` keep/drop
 questions and pending action candidates into `a:` execute/skip questions, sends them through

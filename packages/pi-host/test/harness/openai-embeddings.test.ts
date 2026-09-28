@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { describe, it } from "node:test";
-import { EmbeddingResponseError, requestOpenAICompatibleEmbeddings } from "../../src/harness/openai-embeddings.js";
+import { EmbeddingResponseError, requestAdaptiveEmbeddings, requestOpenAICompatibleEmbeddings } from "../../src/harness/openai-embeddings.js";
 
 const jsonResponse = (status: number, body: unknown) => (
   new Response(JSON.stringify(body), { status, headers: { "Content-Type": "application/json" } })
@@ -98,5 +98,21 @@ describe("OpenAI-compatible embeddings", () => {
         return jsonResponse(200, { data: [{ index: 0, embedding: [1] }] });
       },
     }), { name: "AbortError" });
+  });
+
+  it("splits a rejected large batch and keeps the original vector order", async () => {
+    const sizes: number[] = [];
+    const result = await requestAdaptiveEmbeddings({
+      baseUrl: "https://models.example/v1", apiKey: "secret", model: "embed-1",
+      input: ["0", "1", "2", "3", "4"],
+      fetchImpl: async (_url, init) => {
+        const body = JSON.parse(String(init?.body)) as { input: string[] };
+        sizes.push(body.input.length);
+        if (body.input.length > 2) return jsonResponse(413, { error: { code: "batch_too_large" } });
+        return jsonResponse(200, { data: body.input.map((value, index) => ({ index, embedding: [Number(value)] })) });
+      },
+    });
+    assert.deepEqual(result.vectors, [[0], [1], [2], [3], [4]]);
+    assert.deepEqual(sizes, [5, 2, 3, 1, 2]);
   });
 });

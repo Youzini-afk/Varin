@@ -38,6 +38,7 @@ async function setup(hooks: {
   structureSource?: WorkspaceSemanticRuntimeOptions['structureSource'];
   watchDocuments?: WorkspaceSemanticRuntimeOptions['documents']['watch'];
   reconcileMinimumIntervalMs?: number;
+  indexDirectories?: string[] | null;
 } = {}) {
   const documents = await createDocumentAuthorityHarness();
   disposes.push(() => documents.cleanup());
@@ -73,6 +74,7 @@ async function setup(hooks: {
     structureSource: hooks.structureSource ?? createStructureSource([]), embedder: local,
     ...(hooks.searchFilesystemFiles ? { searchFilesystemFiles: hooks.searchFilesystemFiles } : {}),
     ...(hooks.reconcileMinimumIntervalMs === undefined ? {} : { reconcileMinimumIntervalMs: hooks.reconcileMinimumIntervalMs }),
+    ...(hooks.indexDirectories === undefined ? {} : { indexDirectories: hooks.indexDirectories }),
     configCwd: documents.dataDir,
     getBroker: () => broker,
     executionViews, workingBranches: { pinQuery: hooks.pinQuery ?? (async () => null) },
@@ -83,6 +85,15 @@ async function setup(hooks: {
 }
 
 describe('production workspace semantic assembly lifecycle', () => {
+  it('keeps semantic indexing off outside selected directories without blocking other retrieval sources', async () => {
+    const inventory = vi.fn(async () => []);
+    const harness = await setup({ indexDirectories: [], searchFilesystemFiles: inventory });
+    const result = await harness.runtime.semanticRecall(harness.workspaceId, 'needle', 5);
+    expect(result.status).toBe('unavailable');
+    expect(inventory).not.toHaveBeenCalled();
+    expect(harness.embedded).not.toHaveBeenCalled();
+  });
+
   it('uses the injected asynchronous draft reader for fixed semantic overlays', async () => {
     const readDraft = vi.fn(async (_sessionId: string, _context: AgentInputContext, resourceId: string, _workspaceId: string) => ({
       status: 'ready' as const,

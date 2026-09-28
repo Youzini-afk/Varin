@@ -6,6 +6,7 @@ import {
   resolveHarnessReviewSettings,
   resolveHarnessNextStepSettings,
   resolveHarnessDocumentReadingSettings,
+  resolveHarnessCodeRetrievalSettings,
   HarnessSettingsValidationError,
   HarnessInferenceSettingsValidationError,
   parseHarnessEmbeddingSettings,
@@ -19,6 +20,17 @@ describe("harness settings", () => {
       { shell: "wsl" },
     );
     assert.equal(merged.shell, "wsl");
+  });
+
+  it("keeps the code retrieval judgment choice user-owned", () => {
+    assert.equal(mergeHarnessSettings({}, {}).codeRetrieval.decision, "auto");
+    assert.equal(mergeHarnessSettings(
+      { codeRetrieval: { decision: "llm" } },
+      { codeRetrieval: { decision: "rerank" } },
+    ).codeRetrieval.decision, "llm");
+    assert.equal(mergeHarnessSettings({ codeRetrieval: { decision: "unknown" as never } }, {}).codeRetrieval.decision,
+      "source");
+    assert.throws(() => resolveHarnessCodeRetrievalSettings({ decision: "unknown" }), HarnessSettingsValidationError);
   });
 
   it("deep-merges nested objects (depth 1)", () => {

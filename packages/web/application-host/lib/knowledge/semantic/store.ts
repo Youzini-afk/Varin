@@ -132,7 +132,7 @@ const resolveSemanticSearchOptions = (
 
 const checkpointPath = (spaceDir: string): string => join(spaceDir, "current.json");
 
-const readCheckpoint = (spaceDir: string): SemanticCheckpoint | null => {
+export const readSemanticCheckpoint = (spaceDir: string): SemanticCheckpoint | null => {
   try {
     const raw = JSON.parse(readFileSync(checkpointPath(spaceDir), "utf8")) as SemanticCheckpoint;
     if (!raw.generation || !raw.spaceId || !raw.recipeId) return null;
@@ -185,7 +185,7 @@ export function createSemanticGenerationStore(options: {
   const recipe = options.recipe ?? defaultRecipeIdentity();
   const recipeId = recipeIdOf(recipe);
   const spaceDir = semanticSpaceDir(options.dataDir, options.hostId, options.scope, spaceId);
-  let checkpoint = readCheckpoint(spaceDir);
+  let checkpoint = readSemanticCheckpoint(spaceDir);
   const generation = checkpoint?.generation ?? "g1";
   let lifecycle: SemanticIndexLifecycle = checkpoint?.lifecycle ?? "idle";
   let coverage: SemanticQueryCoverage = checkpoint?.coverage ?? "empty";

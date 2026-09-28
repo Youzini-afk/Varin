@@ -11,7 +11,9 @@ derived store (`../vectors/`); they reuse `harness.embed` but never this MiniLM 
   via workspace `harness.embed`. Configured remote never falls back to MiniLM in the same query.
 - Chunking: `chunker.ts` — tree-sitter containers, backend input length, continue-split of long lines.
 - Cache / schedule: `vector-cache.ts` (space + purpose + embedText, byte soft budget);
-  `embed-scheduler.ts` (current batch finishes, then foreground before the next background batch).
+  `embed-scheduler.ts` (configurable concurrent request slots and background start interval;
+  waiting foreground work takes the next free slot without an artificial interval). This
+  scheduler is shared with knowledge-vector embeddings, so its concurrency setting covers both.
 - Overlay: `query-view.ts` pins surface/thread drafts at query start; masked disk paths cannot leak
   old vectors. Thread view is fixed baseline + this branch’s delta.
 - Storage: `store.ts` — one TriviumDB generation per scope/space; scoped Top-K (D-189); `publishToken`.
@@ -33,6 +35,20 @@ derived store (`../vectors/`); they reuse `harness.embed` but never this MiniLM 
   native-tool journal completions notify this runtime. Open indexes mask an observed path before the tool
   is acknowledged; embedding runs in the background. Metadata resolution obeys query cancellation, and a
   retired workspace worker or closed Host cannot publish a late binding/watch as current.
+- Management: `index-management.ts` owns `semantic-index-settings.json` under the Varin data directory.
+  It exposes authenticated status and revisioned configuration routes. The settings page reports the
+  active index directory, disk bytes, active-root scan progress, and the embedding model binding.
+  The user may select child directories inside a multi-project resource root; the inventory then
+  starts at those folders rather than enumerating the entire parent. An empty selection disables
+  background semantic indexing, leaving lexical and graph search available.
+  Directory selection, storage location and request pacing are frozen when the Host starts. Editing them requires a Host
+  restart: an active TriviumDB is never moved while open. A different storage directory begins a
+  new derived index; the previous cache is preserved until explicitly cleaned up. This storage
+  choice affects the code-semantic index, not the authoritative knowledge database, symbol graph,
+  or installed local MiniLM component.
+- Remote embedding: Pi sends OpenAI-compatible requests. A provider's 400/413 response to a batch
+  causes that rejected batch to split recursively; results retain input order and vector-space
+  identity. A single rejected input remains an error and the scan reports partial/failed coverage.
 - Optional component (D-288): `local-component.ts` owns explicit download/import, manifest and file
   verification, a short native inference check process, and atomic activation under
   `dataDir/optional-components/local-semantic`. `local-component-routes.ts` exposes authenticated
