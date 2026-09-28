@@ -1,8 +1,26 @@
 # Knowledge storage
 
-The workspace/user KnowledgeStore authority remains TriviumDB 0.8.6. Its existing
+The workspace/user KnowledgeStore authority remains TriviumDB 0.8.8. Its existing
 `.tdb` files, node IDs, graph links and sidecars are unchanged. There is no migration,
 second writer, replacement database or in-main fallback.
+
+The 0.8.6 → 0.8.8 upgrade removes Varin's Windows architecture loader patch:
+upstream now chooses the native addon by platform and architecture. Windows ARM64
+still builds the missing binary from the exact 0.8.8 release commit. In 0.8.7,
+upstream changed parsed-payload cache recency from a linear scan to a logarithmic
+index and corrected composite-index `FIND LIMIT` planning. 0.8.8 restores lazy
+full-node scanning for unindexed `FIND LIMIT` while preserving residual-filter
+correctness. Varin's production graph and knowledge reads use `indexedLookup`
+and `substringLookup`, not TQL `FIND` or the new Server/edge-projection APIs.
+Those query features do not require a Varin call-site migration.
+
+The authority and derived semantic stores retain `payloadCacheMb: 0` as a memory
+and cold-scan choice, rather than as a workaround for the repaired recency bug.
+On an isolated 50,000-node Windows x64 fixture, 0.8.8 read all payloads in
+98 ms cold / 99 ms warm with no cache, versus 123 ms cold / 93 ms warm with
+16 MiB. The indexed all-row lookup took 32 ms versus 22 ms. These single-run
+figures show a workload tradeoff; they do not justify enabling a 16–64 MiB cache
+for every open store without measurements on real mixed catalogs.
 
 ## Execution ownership
 

@@ -192,7 +192,7 @@ jobs:
           path: |
             ~/.cache/varin-native/**/payload
             ~/.cache/varin-native/**/receipt.json
-          key: native-runtime-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('packages/electron/scripts/prepare-*-runtime.mjs', 'bun-patches/triviumdb+0.8.6.patch') }}
+          key: native-runtime-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('packages/electron/scripts/prepare-*-runtime.mjs') }}
 
       - name: Prepare target native libraries
         run: |

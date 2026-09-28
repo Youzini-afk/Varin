@@ -156,6 +156,8 @@ const openDb = (file: string, dim: number, accessMode: "readWrite" | "readOnly")
     dim,
     syncMode: "normal",
     loadTextIndex: false,
+    // Derived generations are scanned and replaced in batches; keep parsed
+    // payload memory out of each open generation until its workload warrants it.
     payloadCacheMb: 0,
     accessMode,
   });

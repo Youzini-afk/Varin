@@ -148,12 +148,10 @@ export async function openKnowledgeStoreEngine(deps: KnowledgeStoreEngineOptions
     dim,
     syncMode: "normal",
     loadTextIndex: true,
-    // 0.8.6's parsed-payload LRU cache makes every payload access O(store
-    // size): getPayload measured 60 µs at 50K nodes against 1.7 µs on 0.8.5,
-    // and indexedLookup/substringLookup over a large result set went
-    // quadratic (2.7 s for 50K ids). Disabling the cache restores 0.8.5
-    // behaviour (2 µs, 42 ms) — the bug is in the cache bookkeeping, not in
-    // capacity, since 1024 MB was no better than 64 MB (D-141).
+    // TriviumDB 0.8.7 fixed the parsed-cache O(N) recency bug. Keep the
+    // explicit zero-cache policy for large, mixed catalogs: it avoids keeping
+    // parsed payloads resident and remains faster for cold full-catalog reads.
+    // Revisit with representative repeated-read measurements, not the old bug.
     payloadCacheMb: 0,
   });
   let writeTail: Promise<unknown> = Promise.resolve();

@@ -360,7 +360,7 @@
         "sherpa-onnx-node": "1.12.28",
         "simple-git": "^3.28.0",
         "tar": "^7.5.13",
-        "triviumdb": "0.8.6",
+        "triviumdb": "0.8.8",
         "turndown": "7.2.4",
         "undici": "7.29.1",
         "web-push": "^3.6.7",
@@ -411,7 +411,6 @@
   "patchedDependencies": {
     "app-builder-lib@26.15.7": "bun-patches/app-builder-lib@26.15.7.patch",
     "@earendil-works/pi-coding-agent@0.85.1": "patches/@earendil-works%2Fpi-coding-agent@0.85.1.patch",
-    "triviumdb@0.8.6": "bun-patches/triviumdb+0.8.6.patch",
     "ghostty-web@0.4.0": "bun-patches/ghostty-web+0.4.0.patch",
     "@tanstack/virtual-core@3.17.3": "bun-patches/@tanstack+virtual-core+3.17.3.patch",
     "@earendil-works/pi-agent-core@0.85.1": "patches/@earendil-works%2Fpi-agent-core@0.85.1.patch",
@@ -2900,7 +2899,7 @@
 
     "trim-lines": ["trim-lines@3.0.1", "", {}, "sha512-kRj8B+YHZCc9kQYdWfJB2/oUl9rA99qbowYYBtr4ui4mZyAQ2JpvVBd/6U2YloATfqBhBTSMhTpgBHtU0Mf3Rg=="],
 
-    "triviumdb": ["triviumdb@0.8.6", "", {}, "sha512-Q5oZnSEFZSOPW+9NYyzdyr+E0k23RVoken2OBfQo5znLoTEVMYxugFkO+L4+XiNsIswx6tvyHRhcOtOb8/4a7w=="],
+    "triviumdb": ["triviumdb@0.8.8", "", {}, "sha512-zYXws1W5rsUzg/rW+sUZg7B751fqolqwlWXEXEmSEYtJrN1ti1Uj54Kemm96szDln440ZK0JOCb80ZBP6uQKfw=="],
 
     "truncate-utf8-bytes": ["truncate-utf8-bytes@1.0.2", "", { "dependencies": { "utf8-byte-length": "^1.0.1" } }, "sha512-95Pu1QXQvruGEhv62XCMO3Mm90GscOCClvrIUwCM0PYOXK3kaF3l3sIHxx71ThJfcbM2O5Au6SO3AWCSEfW4mQ=="],
 

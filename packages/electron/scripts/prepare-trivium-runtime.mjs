@@ -8,8 +8,8 @@ import { fileURLToPath } from 'node:url';
 
 const require = createRequire(import.meta.url);
 const { detectKernelBinaryIdentity, normalizeKernelArchitecture } = require('../../../scripts/kernel-binary-identity.cjs');
-const VERSION = '0.8.6';
-const COMMIT = '2b840d0a05142f91e57d46bf30ebbde143440fa4';
+const VERSION = '0.8.8';
+const COMMIT = 'f4bdfe35e9a3b7c0587da798886ce29380976cfe';
 const TARGET = 'aarch64-pc-windows-msvc';
 const BINARY = 'triviumdb.win32-arm64-msvc.node';
 const RECIPE = 1;

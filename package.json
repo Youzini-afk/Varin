@@ -190,7 +190,6 @@
     "vitest": "^5.0.0"
   },
   "patchedDependencies": {
-    "triviumdb@0.8.6": "bun-patches/triviumdb+0.8.6.patch",
     "@tanstack/virtual-core@3.17.3": "bun-patches/@tanstack+virtual-core+3.17.3.patch",
     "ghostty-web@0.4.0": "bun-patches/ghostty-web+0.4.0.patch",
     "@earendil-works/pi-agent-core@0.85.1": "patches/@earendil-works%2Fpi-agent-core@0.85.1.patch",

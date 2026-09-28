@@ -101,7 +101,7 @@
     "sherpa-onnx-node": "1.12.28",
     "simple-git": "^3.28.0",
     "tar": "^7.5.13",
-    "triviumdb": "0.8.6",
+    "triviumdb": "0.8.8",
     "turndown": "7.2.4",
     "undici": "7.29.1",
     "web-push": "^3.6.7",

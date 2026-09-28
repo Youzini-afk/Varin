@@ -184,9 +184,10 @@ the desktop smoke to additionally exercise the explicit import flow.
 
 Two native recipes supply binaries absent from the pinned npm packages:
 
-- Windows ARM64 builds TriviumDB 0.8.6 from commit
-  `2b840d0a05142f91e57d46bf30ebbde143440fa4`. The checked-in Bun patch makes its loader
-  select the actual Windows architecture. The native runner needs Rust and the ARM64 MSVC toolchain.
+- Windows ARM64 builds TriviumDB 0.8.8 from commit
+  `f4bdfe35e9a3b7c0587da798886ce29380976cfe`. Upstream's loader selects the
+  actual Windows architecture; the npm archive does not include an ARM64 binary.
+  The native runner needs Rust and the ARM64 MSVC toolchain.
 - The optional semantic component's `prepare-onnx-runtime.mjs` builds macOS Intel ONNX Runtime 1.24.3 CPU and Node-API libraries from commit
   `3a728b75062256951b6e19ce718907cf1a1d4cf0`, matching the installed JavaScript API. The
   build uses Xcode command-line tools, Python 3, CMake 3.28 or newer, and Ninja.
