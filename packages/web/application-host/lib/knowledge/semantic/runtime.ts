@@ -22,7 +22,7 @@ import {
   type SemanticOverlayBlock,
 } from "./store.js";
 import { createVectorCache, type SemanticVectorCache } from "./vector-cache.js";
-import { waitWithSignal } from "./cancellation.js";
+import { isAbortError, waitWithSignal } from "./cancellation.js";
 
 export const SEMANTIC_SCAN_LANGUAGES: ReadonlySet<string> = new Set(Object.keys(TREE_SITTER_LANGUAGE_SPECS));
 
@@ -202,6 +202,7 @@ export function createSemanticIndexRuntime(options: SemanticIndexRuntimeOptions)
   const track = (task: Promise<void>): void => {
     pending.add(task);
     void task.catch((error) => {
+      if (isAbortError(error) || lifecycleController.signal.aborted) return;
       try { options.onError?.(error); } catch { /* diagnostics cannot break observation */ }
     }).finally(() => pending.delete(task));
   };
@@ -299,6 +300,7 @@ export function createSemanticIndexRuntime(options: SemanticIndexRuntimeOptions)
 
   const indexDocument = async (scope: SemanticScopeKey, documentId: string, kind: "modified" | "deleted"): Promise<void> => {
     const signal = lifecycleController.signal;
+    signal.throwIfAborted();
     const token = nextToken(scope, documentId);
     const embedder = embedderOf();
     const excluded = kind !== "deleted" && options.isIndexablePath
@@ -533,7 +535,7 @@ export function createSemanticIndexRuntime(options: SemanticIndexRuntimeOptions)
         store.markReady(scanComplete && unverified.size === 0 && metadataUnverified.size === 0);
         deferredDimensionScans.get(embedder)?.delete(scopeScanKey);
       } catch (error) {
-        if (!signal.aborted && !disposed) {
+        if (!signal.aborted && !disposed && !isAbortError(error)) {
           store?.markReady(false);
           try { options.onError?.(error); } catch { /* observational */ }
         }

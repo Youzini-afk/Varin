@@ -9,7 +9,7 @@ import type { createWorkingBranchLookups } from '../../harness/working-state/wor
 import type { ThreadExecutionViewRegistry } from '../../harness/working-state/execution-view.js';
 import { createSemanticBackend } from './backend.js';
 import type { SemanticEmbedder } from './embedder.js';
-import { waitWithSignal } from './cancellation.js';
+import { isAbortError, waitWithSignal } from './cancellation.js';
 import { workspaceScope } from './identity.js';
 import { pinSemanticQueryView, type SemanticDraftReadResult } from './query-view.js';
 import { createSemanticIndexRuntime, type SemanticIndexRuntimeOptions } from './runtime.js';
@@ -82,7 +82,10 @@ export function createWorkspaceSemanticRuntime(options: WorkspaceSemanticRuntime
     && options.reconcileMinimumIntervalMs > 0
     ? options.reconcileMinimumIntervalMs
     : RECONCILE_MINIMUM_INTERVAL_MS;
-  const report = (error: unknown): void => { try { options.onError?.(error); } catch { /* observation only */ } };
+  const report = (error: unknown): void => {
+    if (disposed || isAbortError(error)) return;
+    try { options.onError?.(error); } catch { /* observation only */ }
+  };
   const track = (task: Promise<unknown>): void => {
     pending.add(task);
     void task.catch(report).finally(() => pending.delete(task));

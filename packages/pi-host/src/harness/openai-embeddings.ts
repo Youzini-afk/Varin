@@ -67,7 +67,16 @@ export async function requestOpenAICompatibleEmbeddings(
     ...(request.signal ? { signal: request.signal } : {}),
   });
   if (!response.ok) {
-    throw new EmbeddingResponseError(`Embedding HTTP ${response.status}`);
+    // Provider messages can echo input or credentials. Keep only a short,
+    // machine-readable code and request shape in diagnostics.
+    const payload = await response.json().catch(() => null) as unknown;
+    const providerError = isRecord(payload) && isRecord(payload.error) ? payload.error : null;
+    const rawCode = providerError?.code;
+    const code = typeof rawCode === "string" && /^[a-z0-9._-]{1,64}$/iu.test(rawCode) ? rawCode : undefined;
+    const longestInput = request.input.reduce((longest, value) => Math.max(longest, value.length), 0);
+    throw new EmbeddingResponseError(
+      `Embedding HTTP ${response.status} (inputs ${request.input.length}, longest ${longestInput} chars${code ? `, code ${code}` : ""})`,
+    );
   }
   const payload = await response.json() as unknown;
   if (!isRecord(payload) || !Array.isArray(payload.data)) {

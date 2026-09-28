@@ -3214,7 +3214,11 @@ function packExploreVisible(
     source.status === "incomplete" || source.status === "cancelled" || source.status === "failed"
   ));
   if (sourceStopped) {
-    header.push("Search incomplete: shared deadline or a source stopped before it finished.");
+    const semanticBuilding = result.semantic?.status === "incomplete"
+      && (result.semantic.index.lifecycle === "building" || result.semantic.index.lifecycle === "rebuilding");
+    header.push(semanticBuilding
+      ? "Semantic index is still building; semantic recall is incomplete. See source statuses for other gaps."
+      : "Search incomplete: one or more sources did not finish; see source statuses for details.");
   } else if ((result.searchIncomplete || result.searched.incomplete) && dropped === 0) {
     header.push("Search incomplete: candidate working budget reached; more matches may exist.");
   }

@@ -3694,6 +3694,13 @@ async function main(options: StartWebUiServerOptions = {}): Promise<WebUiServerC
       terminalCommandSubscription.dispose();
       for (const subscription of knowledgeLanguageSubscriptions.values()) subscription.close();
       knowledgeLanguageSubscriptions.clear();
+      // Semantic and graph observers still read Documents and use the kernel/Pi
+      // services. Stop them while those owners are alive; otherwise each late
+      // document event can race a disposed mutation authority during shutdown.
+      catalogScan.start = () => undefined;
+      observeKnowledgeDocumentMutation = () => undefined;
+      await semanticRuntime.dispose();
+      await symbolGraphRuntime.dispose();
       // Stop producers and drain their receipts while process grants are valid.
       // One refused exit must not prevent the other domains from shutting down.
       const processShutdown = await Promise.allSettled([
@@ -3711,14 +3718,11 @@ async function main(options: StartWebUiServerOptions = {}): Promise<WebUiServerC
       await Promise.allSettled([...workspaceRecoveryEngines.values()].map((engine) => engine.dispose()));
       workspaceRecoveryEngines.clear();
       await localSemanticComponent.dispose();
-      await semanticRuntime.dispose();
-      await symbolGraphRuntime.dispose();
       await nativeCompute.dispose();
       await kernelStorageAdapter.dispose().catch((error) => console.error('[VarinKernel] Failed to revoke storage grants:', errorMessage(error)));
       await kernelClient?.close();
       await knowledgeVectors?.close();
       if (ownsPiRuntimeBroker) await piRuntimeLifecycle.dispose();
-      observeKnowledgeDocumentMutation = () => undefined;
       await knowledgeContextRuntime.dispose();
       await Promise.allSettled([...knowledgeStoreLoads.values()]);
       const knowledgeShutdown = await Promise.allSettled([...knowledgeStores].map(async ([workspaceId, store]) => {

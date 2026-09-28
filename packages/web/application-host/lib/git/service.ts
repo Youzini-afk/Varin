@@ -3934,7 +3934,9 @@ export async function getWorktrees(directory: string) {
       path: entry.worktree,
     }));
   } catch (error) {
-    console.warn('Failed to list worktrees, returning empty list:', parseGitErrorText(error));
+    if (!isNotGitRepositoryError(error)) {
+      console.warn('Failed to list worktrees, returning empty list:', parseGitErrorText(error));
+    }
     return [];
   }
 }

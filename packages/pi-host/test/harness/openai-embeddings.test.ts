@@ -74,6 +74,14 @@ describe("OpenAI-compatible embeddings", () => {
       input: ["a"],
       fetchImpl: async () => jsonResponse(503, { error: "busy" }),
     }), /HTTP 503/);
+
+    await assert.rejects(() => requestOpenAICompatibleEmbeddings({
+      baseUrl: "https://models.example/v1", apiKey: "secret", model: "embed-1",
+      input: ["short", "longer"],
+      fetchImpl: async () => jsonResponse(400, { error: { code: "input_too_long", message: "secret and document content" } }),
+    }), (error: unknown) => error instanceof EmbeddingResponseError
+      && /HTTP 400 \(inputs 2, longest 6 chars, code input_too_long\)/u.test(error.message)
+      && !error.message.includes("secret"));
   });
 
   it("propagates cancellation", async () => {

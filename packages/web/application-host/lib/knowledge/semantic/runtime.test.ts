@@ -1,4 +1,4 @@
-import { afterEach, describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import { writeFileSync, unlinkSync, statSync, utimesSync } from "node:fs";
 import { join } from "node:path";
 import { createDocumentAuthorityHarness } from "../../documents/contract-fixtures.js";
@@ -26,6 +26,27 @@ const gate = () => {
 };
 
 describe("semantic index runtime", () => {
+  it("does not report an aborted background update as an indexing failure", async () => {
+    const documents = await createDocumentAuthorityHarness();
+    disposes.push(() => documents.cleanup());
+    const onError = vi.fn();
+    const runtime = createSemanticIndexRuntime({
+      dataDir: documents.dataDir,
+      hostId: "cancelled-index-update",
+      documents: {
+        inspectWorkspace: async () => { throw new DOMException("This operation was aborted", "AbortError"); },
+        read: documents.authority.read,
+      },
+      structureSource: parsingSource(),
+      embedder: createHashEmbedder(),
+      onError,
+    });
+    disposes.push(() => runtime.dispose());
+    runtime.observeDocumentMutation({ workspaceId: documents.identity.workspaceId, resourceId: "src/file.ts", kind: "modified" });
+    await runtime.drain();
+    expect(onError).not.toHaveBeenCalled();
+  });
+
   it("builds a virtual-thread semantic overlay from native fixed-view units without reading whole file bodies", async () => {
     const documents = await createDocumentAuthorityHarness();
     disposes.push(() => documents.cleanup());

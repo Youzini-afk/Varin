@@ -1,4 +1,8 @@
 /** Cancels a caller's wait without changing the lifetime of shared work. */
+export const isAbortError = (error: unknown): boolean => (
+  error instanceof Error && error.name === 'AbortError'
+);
+
 export function waitWithSignal<T>(promise: Promise<T>, signal?: AbortSignal): Promise<T> {
   if (!signal) return promise;
   return new Promise<T>((resolve, reject) => {

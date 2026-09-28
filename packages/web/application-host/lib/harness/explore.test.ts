@@ -330,6 +330,20 @@ describe("explore D-090 candidate ranking and materialization", () => {
     expect(packed.visibleText).not.toMatch(/candidate working budget reached/);
   });
 
+  it("identifies a building semantic index without claiming the query deadline expired", async () => {
+    const result = await explore({ question: "needle" }, {
+      rgSearch: async () => [{ path: "small.ts", line: 1, text: "needle" }],
+      readFile: async () => ready("needle"),
+    });
+    const packed = formatExploreOutput({
+      ...result,
+      semantic: { status: "incomplete", coverage: "partial", index: { lifecycle: "building" } },
+      sources: [{ id: "semantic-original", family: "semantic", status: "incomplete" }],
+    });
+    expect(packed.visibleText).toContain("Semantic index is still building");
+    expect(packed.visibleText).not.toContain("shared deadline");
+  });
+
   it("reports filesDropped as a floor instead of summing overlapping query terms", async () => {
     const dropsByPattern = new Map<string, number>();
     const result = await explore({ question: "Alpha Beta", anchors: ["myAnchor"] }, {
