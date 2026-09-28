@@ -38,6 +38,11 @@ updates:
     schedule:
       interval: weekly
     open-pull-requests-limit: 10
+    # Keep Node declarations aligned with the Node 24 runtime used by CI and packaging.
+    # Revisit this when the runtime itself moves to Node 26; security updates still run.
+    ignore:
+      - dependency-name: '@types/node'
+        update-types: ['version-update:semver-major']
     groups:
       # ESLint and its TypeScript plugins have to move together: a major on one is inconsistent with
       # the others, so separate pull requests cannot pass individually.
