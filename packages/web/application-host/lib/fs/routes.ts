@@ -34,6 +34,12 @@ const errorMessage = (error: unknown, fallback: string): string => (
   error instanceof Error && error.message ? error.message : fallback
 );
 const errorCode = (error: unknown): unknown => errorRecord(error).code;
+// Electron's asar-patched realpath throws this code-less error for a missing or
+// malformed .asar path. A stat probe must treat it as an invalid target rather
+// than logging an ordinary missing-file probe as a Host failure.
+const isInvalidAsarPackageError = (error: unknown): boolean => (
+  error instanceof Error && /^Invalid package(?:\s|$)/.test(error.message)
+);
 
 const isOsPermissionError = (error: unknown): boolean => Boolean(
   error
@@ -775,6 +781,11 @@ export const registerFsRoutes = (app: Express, dependencies: FsRouteDependencies
       }
       if (errorCode(err) === 'EACCES') {
         return res.status(403).json({ error: 'Access to file denied' });
+      }
+      if (isInvalidAsarPackageError(err)) {
+        return optional
+          ? res.json({ path: filePath, exists: false })
+          : res.status(400).json({ error: 'Invalid archive path' });
       }
       console.error('Failed to stat file:', error);
       return res.status(500).json({ error: errorMessage(error, 'Failed to stat file') });

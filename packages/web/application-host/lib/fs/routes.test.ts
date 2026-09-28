@@ -190,6 +190,23 @@ const registerRead = (fsPromises: object): RouteHandler => {
   return getRoute('GET', '/api/fs/read');
 };
 
+const registerStat = (fsPromises: object): RouteHandler => {
+  const { app, getRoute } = createRouteRegistry();
+  registerFsRoutes(app as unknown as Express, {
+    os: { homedir: () => '/home/user' },
+    path: path.posix,
+    fsPromises,
+    spawn: vi.fn(),
+    crypto: { randomUUID: () => 'job-0' },
+    normalizeDirectoryPath: (value: unknown) => typeof value === 'string' ? value : '',
+    resolveProjectDirectory: async () => ({ directory: '/repo' }),
+    buildAugmentedPath: () => '/usr/bin',
+    resolveGitBinaryForSpawn: () => 'git',
+    varinUserConfigRoot: '/home/user/.config',
+  });
+  return getRoute('GET', '/api/fs/stat');
+};
+
 const registerRaw = (fsPromises: object): RouteHandler => {
   const { app, getRoute } = createRouteRegistry();
   registerFsRoutes(app as unknown as Express, {
@@ -284,6 +301,7 @@ const callRoute = async (
 const callExec = (handler: RouteHandler, body: Record<string, unknown>) => callRoute(handler, { body });
 const callWrite = (handler: RouteHandler, body: Record<string, unknown>) => callRoute(handler, { body });
 const callRead = (handler: RouteHandler, query: Record<string, string>) => callRoute(handler, { query });
+const callStat = (handler: RouteHandler, query: Record<string, string>) => callRoute(handler, { query });
 const callRaw = (handler: RouteHandler, query: Record<string, string>) => callRoute(handler, { query });
 const callMkdir = (handler: RouteHandler, body: Record<string, unknown>) => callRoute(handler, { body });
 const callReveal = (handler: RouteHandler, body: Record<string, unknown>) => callRoute(handler, { body });
@@ -487,6 +505,25 @@ describe('fs write', () => {
     } finally {
       await harness.cleanup();
     }
+  });
+});
+
+describe('fs stat', () => {
+  it('treats Electron invalid-asar errors as a missing optional path or bad required path', async () => {
+    const logged = vi.spyOn(console, 'error').mockImplementation(() => {});
+    try {
+      const handler = registerStat({
+        realpath: vi.fn(async () => { throw new Error('Invalid package /repo/app.asar'); }),
+        stat: vi.fn(),
+      });
+      const optional = await callStat(handler, { path: '/repo/app.asar', optional: 'true' });
+      expect(optional.statusCode).toBe(200);
+      expect(optional.body).toEqual({ path: '/repo/app.asar', exists: false });
+      const required = await callStat(handler, { path: '/repo/app.asar' });
+      expect(required.statusCode).toBe(400);
+      expect(required.body).toEqual({ error: 'Invalid archive path' });
+      expect(logged).not.toHaveBeenCalled();
+    } finally { logged.mockRestore(); }
   });
 });
 

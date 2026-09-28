@@ -24,6 +24,21 @@ export const normalizeReferencePath = (value: string): string => normalizeFilePa
 
 export const isAbsoluteReferencePath = (value: string): boolean => isAbsoluteFilePath(value);
 
+/** Only complete path-like values should trigger an automatic file stat probe. */
+export const isLikelyFilePathValue = (value: string): boolean => {
+    if (!value || value.startsWith('--') || value.includes('://') || /[<>|"`]/.test(value)
+        || /:\s/.test(value) || /^[^\s/\\]+(?:\s+-[A-Za-z][\w-]*)+\s/.test(value) || /\s{2,}/.test(value)) {
+        return false;
+    }
+
+    const normalized = normalizeReferencePath(value);
+    const baseName = normalized.split('/').filter(Boolean).pop() ?? normalized;
+    if (!baseName || baseName === '.' || baseName === '..') return false;
+    const base = baseName.toLowerCase();
+    return KNOWN_FILE_BASENAMES.has(base) || (base.startsWith('.') && base.length > 1)
+        || /\.[A-Za-z0-9_-]{1,16}$/.test(baseName);
+};
+
 const trimPathCandidate = (value: string): string => {
     let next = (value || '').trim();
     if (!next) {

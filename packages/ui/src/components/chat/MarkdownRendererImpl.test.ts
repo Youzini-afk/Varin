@@ -1,6 +1,6 @@
 import { describe, expect, test } from 'bun:test';
 
-import { parseFileReference, type ParsedFileReference } from './fileReferenceParser';
+import { isLikelyFilePathValue, parseFileReference, type ParsedFileReference } from './fileReferenceParser';
 
 const parse = (value: string): ParsedFileReference | null => parseFileReference(value);
 
@@ -94,5 +94,16 @@ describe('parseFileReference', () => {
     test('range form takes precedence over line-only when suffix matches digits-dash-digits', () => {
         const result = parse('src/foo.ts:42-58');
         expect(result).toEqual({ path: 'src/foo.ts', line: 42, endLine: 58 });
+    });
+});
+
+describe('automatic file reference probes', () => {
+    test('keeps paths with spaces and rejects shell commands and error messages', () => {
+        expect(isLikelyFilePathValue(parse('C:/Program Files/Varin/app.asar')!.path)).toBe(true);
+        expect(isLikelyFilePathValue(parse('My Project/source file.ts:12')!.path)).toBe(true);
+        expect(isLikelyFilePathValue(parse("O'Connor/notes:final.md")!.path)).toBe(true);
+        expect(isLikelyFilePathValue(parse('grep -c "work_context" /d/Varin/resources/app.asar')!.path)).toBe(false);
+        expect(isLikelyFilePathValue(parse('grep -c work_context /d/Varin/resources/app.asar')!.path)).toBe(false);
+        expect(isLikelyFilePathValue(parse('Failed to stat file: Error: Invalid package D:/project/app.asar')!.path)).toBe(false);
     });
 });

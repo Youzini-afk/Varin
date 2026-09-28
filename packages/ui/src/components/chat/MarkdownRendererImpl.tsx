@@ -37,6 +37,7 @@ import { createMermaidViewerRegistry, MERMAID_BLOCK_SELECTOR, shouldRefreshMerma
 import {
   BLOCK_PATH_TOKEN_RE,
   isAbsoluteReferencePath,
+  isLikelyFilePathValue,
   normalizeReferencePath,
   parseFileReference,
   type ParsedFileReference,
@@ -196,16 +197,6 @@ const FILE_REFERENCE_STAT_CACHE = new Map<string, Promise<boolean>>();
 let activeFileReferenceStatCount = 0;
 const pendingFileReferenceStats: Array<() => void> = [];
 
-const KNOWN_FILE_BASENAMES = new Set([
-  'dockerfile',
-  'makefile',
-  'readme',
-  'license',
-  '.env',
-  '.gitignore',
-  '.npmrc',
-]);
-
 const normalizePath = (value: string): string => {
   return normalizeReferencePath(value);
 };
@@ -216,37 +207,6 @@ const isAbsolutePath = (value: string): boolean => {
 
 const toAbsolutePath = (basePath: string, targetPath: string): string => {
   return toAbsoluteFilePath(basePath, targetPath);
-};
-
-const hasFileExtension = (path: string): boolean => {
-  const base = path.split('/').filter(Boolean).pop() ?? '';
-  if (!base || base.endsWith('.')) {
-    return false;
-  }
-  return /\.[A-Za-z0-9_-]{1,16}$/.test(base);
-};
-
-const isLikelyFilePathValue = (path: string): boolean => {
-  if (!path || path.startsWith('--') || path.includes('://')) {
-    return false;
-  }
-
-  if (/[<>]/.test(path) || /\s{2,}/.test(path)) {
-    return false;
-  }
-
-  const normalized = normalizePath(path);
-  const baseName = normalized.split('/').filter(Boolean).pop() ?? normalized;
-  if (!baseName || baseName === '.' || baseName === '..') {
-    return false;
-  }
-
-  const base = baseName.toLowerCase();
-  if (KNOWN_FILE_BASENAMES.has(base) || (base.startsWith('.') && base.length > 1)) {
-    return true;
-  }
-
-  return hasFileExtension(normalized);
 };
 
 const isLikelyFilePath = (value: string): boolean => {
