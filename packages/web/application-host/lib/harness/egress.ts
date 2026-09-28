@@ -4,9 +4,8 @@
  *
  * Policy modes:
  * - `auto` (default): inspect this Host's `HTTPS_PROXY`/`HTTP_PROXY`/
- *   `ALL_PROXY` and `NO_PROXY` (lowercase accepted). A proxy-side DNS route
- *   needs an explicit Host-owned delegation; mere environment presence is
- *   not enough to prove the final target address is allowed.
+ *   `ALL_PROXY` and `NO_PROXY` (lowercase accepted). Desktop falls back to
+ *   Electron's system proxy/PAC network stack when none is configured.
  * - `direct`: never use a proxy.
  * - explicit proxy: caller-supplied proxy URL.
  *
@@ -16,13 +15,13 @@
  *   `proxy-config-invalid`.
  * - Each request freezes its own policy version; env edits apply to the next
  *   resolution, never mid-request.
- * - SSRF enforcement happens inside the connector lookup so the classified
- *   answer is the address actually dialed (no check-then-fetch gap), and
- *   through the proxy's CONNECT semantics the proxy resolves the target
- *   itself — diagnostics label that `proxy-side` honestly.
+ * - Non-desktop private-address enforcement happens inside the connector
+ *   lookup so the classified answer is the address actually dialed. A proxy
+ *   resolves the target itself; diagnostics label that `proxy-side` honestly.
  * - Proxy endpoint hosts may be loopback/LAN (that is the whole point of a
- *   local proxy). The target's static URL rules always run; final resolved
- *   address policy is delegated only when the executing Host says so.
+ *   local proxy). Every route checks the URL scheme. Desktop requests may
+ *   intentionally reach local resources; the configured proxy owns final DNS
+ *   and routing, which the Host cannot independently verify.
  * - Credentials embedded in a proxy URL are used for CONNECT auth and are
  *   never copied into errors, logs, or diagnostics.
  */
@@ -41,7 +40,6 @@ export type EgressErrorKind =
   | "proxy-unavailable"
   | "proxy-auth"
   | "proxy-config-invalid"
-  | "proxy-policy-unverified"
   | "tls"
   | "connect"
   | "timeout"
@@ -71,8 +69,6 @@ export interface EgressOverride {
 /** Stored by the executing Application Host, never inherited from a client device or project. */
 export interface EgressHostConfiguration extends EgressOverride {
   mode: EgressMode;
-  /** Explicit operator delegation to a proxy that enforces final-address policy. */
-  trustedProxy?: boolean;
   /** Secret used only by the Host's CONNECT dispatcher. */
   proxyAuth?: { username: string; password: string };
   invalid?: string;
@@ -81,14 +77,13 @@ export interface EgressHostConfiguration extends EgressOverride {
 export interface EgressPolicy {
   /** Frozen policy revision; every resolution stamps a new version. */
   version: number;
-  mode: "direct" | "proxy";
+  mode: "direct" | "proxy" | "system";
   /** Sanitized proxy origin (scheme://host:port) — never carries credentials. */
   proxyOrigin?: string;
   /** Proxy has CONNECT credentials configured (type only, never the secret). */
   proxyAuth?: "basic";
   noProxy: string[];
   source: "env" | "override" | "app" | "none";
-  trust: "direct" | "unverified-proxy" | "delegated-proxy";
   /** Stable digest of the complete frozen route, including secret rotation. */
   fingerprint: string;
   /** Non-empty when configuration is malformed — requests must fail, not go direct. */
@@ -129,13 +124,13 @@ export interface EgressRuntime {
 export interface NetworkDiagnosis {
   url: string;
   policy: Omit<EgressPolicy, "fingerprint">;
-  /** Static URL/scheme/literal/configuration decision, before DNS. */
+  /** Current diagnostic decision, including locally sampled DNS when applicable. */
   decision: "allowed" | "blocked";
   reason?: string;
   /** Diagnostic address sample, never a guarantee about a later connection. */
-  addressCheck: "not-run" | "public" | "blocked" | "dns-error" | "proxy-side-unverified" | "proxy-policy-incompatible";
+  addressCheck: "not-run" | "public" | "blocked" | "dns-error" | "proxy-side-unverified" | "system-managed";
   /** How the target gets resolved for this request. */
-  resolution: "not-run" | "local" | "proxy-side" | "static-literal";
+  resolution: "not-run" | "local" | "proxy-side" | "static-literal" | "system";
   /** Locally resolved addresses with their classes (diagnostic only). */
   addresses?: Array<{ address: string; class: EgressAddressClass }>;
   lookupError?: string;
@@ -197,6 +192,7 @@ export const resolveEgressPolicy = (
   protocol: "http:" | "https:" = "https:",
   version = ++policyVersionCounter,
   hostConfiguration?: EgressHostConfiguration,
+  systemNetworkAvailable = false,
 ): EgressPolicy => {
   const selected = override ?? hostConfiguration;
   const isHostSelection = !override && hostConfiguration !== undefined;
@@ -213,14 +209,13 @@ export const resolveEgressPolicy = (
       envProxyCandidate(env, "http:")?.raw, envProxyCandidate(env, "https:")?.raw,
     ],
     auth: isHostSelection ? hostConfiguration?.proxyAuth : undefined,
-    trust: isHostSelection && hostConfiguration?.trustedProxy === true,
+    systemNetworkAvailable,
   })).digest("hex").slice(0, 24);
   const base: Omit<EgressPolicy, "mode"> & { mode: EgressPolicy["mode"] } = {
     version,
     mode: "direct",
     noProxy,
     source,
-    trust: "direct",
     fingerprint,
   };
   if (isHostSelection && hostConfiguration.invalid) return { ...base, invalid: hostConfiguration.invalid };
@@ -231,7 +226,8 @@ export const resolveEgressPolicy = (
     if (selected?.mode === "proxy") {
       return { ...base, source, invalid: "proxy mode requires a proxy URL" };
     }
-    return { ...base, source };
+    const anyEnvProxy = Boolean(envProxyCandidate(env, "http:") || envProxyCandidate(env, "https:"));
+    return { ...base, mode: systemNetworkAvailable && !anyEnvProxy ? "system" : "direct", source };
   }
 
   const parsed = parseProxyUrl(proxyRaw);
@@ -243,8 +239,6 @@ export const resolveEgressPolicy = (
     mode: "proxy",
     proxyOrigin: parsed.origin,
     ...(parsed.auth || (isHostSelection && hostConfiguration?.proxyAuth) ? { proxyAuth: "basic" as const } : {}),
-    trust: isHostSelection && hostConfiguration?.mode === "proxy" && hostConfiguration.trustedProxy === true
-      ? "delegated-proxy" : "unverified-proxy",
     source,
   };
 };
@@ -354,6 +348,10 @@ export const EGRESS_TIMEOUT = "egress-timeout";
 
 export const createEgressRuntime = (options: {
   env?: NodeJS.ProcessEnv;
+  /** Desktop may address local services. Remote server deployments keep connect-time address checks. */
+  allowLocalTargets?: boolean;
+  /** Desktop transport backed by Electron's system proxy/PAC network stack. */
+  systemFetch?: (url: string, init: RequestInit) => Promise<Response>;
   /** Live serialized settings owned by this executing Host. */
   getHostConfiguration?: () => Promise<EgressHostConfiguration | undefined>;
   /** DNS resolver override — tests only; production uses `dns.promises.lookup`. */
@@ -363,6 +361,7 @@ export const createEgressRuntime = (options: {
 } = {}): EgressRuntime => {
   const env = options.env ?? process.env;
   const getHostConfiguration = options.getHostConfiguration ?? (async () => undefined);
+  const allowLocalTargets = options.allowLocalTargets === true;
   const resolveAll = options.resolveAll ?? ((hostname: string) => lookup(hostname, { all: true, verbatim: true }));
   const resolveProxyAll = options.resolveProxyAll ?? ((hostname: string) => lookup(hostname, { all: true, verbatim: true }));
 
@@ -401,9 +400,7 @@ export const createEgressRuntime = (options: {
     );
   };
 
-  const directDispatcher = new Agent({
-    connect: { lookup: secureLookup as never },
-  });
+  const directDispatcher = new Agent(allowLocalTargets ? {} : { connect: { lookup: secureLookup as never } });
 
   const proxyDispatchers = new Map<string, Dispatcher>();
   // A fetch can use either protocol after redirects. Lease both candidate
@@ -486,11 +483,11 @@ export const createEgressRuntime = (options: {
     try {
       url = new URL(targetUrl);
     } catch {
-      const policy = resolveEgressPolicy(override, requestEnv, "https:", version, hostConfig);
+      const policy = resolveEgressPolicy(override, requestEnv, "https:", version, hostConfig, Boolean(options.systemFetch));
       return { policy, failure: new EgressError("scheme-denied", "unparseable URL") };
     }
     const protocol = url.protocol === "http:" ? "http:" : "https:";
-    const policy = resolveEgressPolicy(override, requestEnv, protocol, version, hostConfig);
+    const policy = resolveEgressPolicy(override, requestEnv, protocol, version, hostConfig, Boolean(options.systemFetch));
     const failure = (kind: EgressErrorKind, message: string): EgressResolution => ({
       policy,
       failure: new EgressError(kind, message),
@@ -501,21 +498,19 @@ export const createEgressRuntime = (options: {
     }
     // Static hostname screening applies in every mode — literal/private
     // targets are refused before any socket opens.
-    const staticClass = classifyHostname(url.hostname);
+    const staticClass = allowLocalTargets ? null : classifyHostname(url.hostname);
     if (staticClass) return failure(staticClass === "scheme" ? "scheme-denied" : staticClass, `hostname is ${staticClass}`);
 
     if (policy.invalid) {
       return failure("proxy-config-invalid", `proxy configuration invalid: ${policy.invalid}`);
     }
     if (closed) return failure("connect", "egress runtime is closed");
+    if (policy.mode === "system") return { policy };
     if (policy.mode !== "proxy") {
       return { policy, ...(allocateDispatcher ? { dispatcher: directDispatcher } : {}) };
     }
     if (matchesNoProxy(url, policy.noProxy)) {
       return { policy, ...(allocateDispatcher ? { dispatcher: directDispatcher } : {}), bypassedProxy: true };
-    }
-    if (policy.trust !== "delegated-proxy") {
-      return failure("proxy-policy-unverified", "proxy-side target DNS is not verifiable by this Host; configure an explicitly trusted proxy on the executing Host");
     }
     if (!allocateDispatcher) return { policy };
     // NOTE: explicit proxy URI keeps credentials — dispatcher cache is
@@ -532,6 +527,47 @@ export const createEgressRuntime = (options: {
     const requestEnv = { ...env };
     const hostConfig = await getHostConfiguration();
     return resolveWithEnv(targetUrl, undefined, requestEnv, undefined, false, hostConfig).policy;
+  };
+
+  const fetchThroughSystem = async (
+    targetUrl: string,
+    init: RequestInit,
+    override: EgressOverride | undefined,
+    requestEnv: NodeJS.ProcessEnv,
+    hostConfig: EgressHostConfiguration | undefined,
+    version: number,
+  ): Promise<Response> => {
+    const systemFetch = options.systemFetch!;
+    const { body: _originalBody, ...otherInit } = init;
+    const headers = new Headers(init.headers);
+    let method = (init.method ?? "GET").toUpperCase();
+    let body = init.body;
+    let url = targetUrl;
+    for (let redirects = 0; ; redirects += 1) {
+      const hop = resolveWithEnv(url, override, requestEnv, version, false, hostConfig);
+      if (hop.failure) throw hop.failure;
+      if (hop.policy.mode !== "system") throw new EgressError("connect", "network route changed during redirect");
+      const response = await systemFetch(url, { ...otherInit, method, ...(body === undefined ? {} : { body }), headers, redirect: "manual" });
+      const location = response.headers.get("location");
+      if (![301, 302, 303, 307, 308].includes(response.status) || !location || init.redirect === "manual") return response;
+      if (init.redirect === "error") throw new EgressError("connect", "redirect was disallowed by the caller");
+      if (redirects >= 20) throw new EgressError("connect", "too many redirects");
+      const next = new URL(location, url).href;
+      // Do not forward origin credentials across a redirect. A later hop is
+      // checked before Electron opens a socket, including its URL scheme.
+      if (new URL(next).origin !== new URL(url).origin) {
+        headers.delete("authorization");
+        headers.delete("cookie");
+      }
+      if (response.status === 303 && method !== "HEAD" || [301, 302].includes(response.status) && method === "POST") {
+        method = "GET";
+        body = undefined;
+        headers.delete("content-type");
+        headers.delete("content-length");
+      }
+      await response.body?.cancel();
+      url = next;
+    }
   };
 
   const fetchWithSnapshot = async (
@@ -567,6 +603,9 @@ export const createEgressRuntime = (options: {
         : new EgressError("cancelled", "request aborted");
     }
     try {
+      if (resolved.policy.mode === "system") {
+        return await fetchThroughSystem(targetUrl, init, override, requestEnv, hostConfig, version);
+      }
       // undici's fetch follows redirects internally. Its dispatcher receives
       // every hop's origin, so screen each new literal and select its route
       // before undici can open a socket. undici retains its normal redirect
@@ -574,8 +613,8 @@ export const createEgressRuntime = (options: {
       const redirectDispatcher = {
         dispatch: (opts: Dispatcher.DispatchOptions, handler: Dispatcher.DispatchHandler): boolean => {
           const hop = resolveWithEnv(String(opts.origin ?? targetUrl), override, requestEnv, resolved.policy.version, true, hostConfig);
-          if (hop.failure) {
-            queueMicrotask(() => handler.onError?.(hop.failure!));
+          if (hop.failure || hop.policy.mode === "system") {
+            queueMicrotask(() => handler.onError?.(hop.failure ?? new EgressError("connect", "network route changed during redirect")));
             return true;
           }
           return hop.dispatcher!.dispatch(opts, handler);
@@ -590,9 +629,9 @@ export const createEgressRuntime = (options: {
       if (signal?.aborted) {
         throw signal.reason === EGRESS_TIMEOUT
           ? new EgressError("timeout", "request timed out")
-          : classifyEgressError(signal.reason ?? error, resolved.policy.mode);
+          : classifyEgressError(signal.reason ?? error, resolved.policy.mode === "proxy" ? "proxy" : "direct");
       }
-      const classified = classifyEgressError(error, resolved.policy.mode);
+      const classified = classifyEgressError(error, resolved.policy.mode === "proxy" ? "proxy" : "direct");
       // A 407 surfaced by the proxy CONNECT handshake is proxy auth.
       if (classified.kind === "unknown" && /407/.test(classified.message)) {
         throw new EgressError("proxy-auth", "proxy authentication failed (407)", { cause: error });
@@ -634,8 +673,7 @@ export const createEgressRuntime = (options: {
         decision: "blocked",
         reason: `${resolved.failure.kind}: ${resolved.failure.message}`,
         resolution: literal ? "static-literal" : "not-run",
-        addressCheck: resolved.failure.kind === "proxy-policy-unverified" ? "proxy-policy-incompatible"
-          : literal && (resolved.failure.kind === "private-network" || resolved.failure.kind === "special-purpose") ? "blocked" : "not-run",
+        addressCheck: literal && (resolved.failure.kind === "private-network" || resolved.failure.kind === "special-purpose") ? "blocked" : "not-run",
       };
     }
     let parsed: URL;
@@ -651,9 +689,12 @@ export const createEgressRuntime = (options: {
         policy,
         decision: "allowed",
         resolution: "static-literal",
-        addressCheck: "public",
+        addressCheck: classifyIp(host) === "public" ? "public" : "system-managed",
         addresses: [{ address: host, class: classifyIp(host) }],
       };
+    }
+    if (policy.mode === "system") {
+      return { url: targetUrl, policy, decision: "allowed", resolution: "system", addressCheck: "system-managed" };
     }
     if (policy.mode === "proxy" && !resolved.bypassedProxy) {
       // Target DNS happens inside the proxy — report that honestly instead of
@@ -668,12 +709,17 @@ export const createEgressRuntime = (options: {
     }
     try {
       const addresses = await resolveAll(host);
+      const blockedAddress = allowLocalTargets ? undefined : addresses.find((address) => classifyIp(address.address) !== "public");
       return {
         url: targetUrl,
         policy,
-        decision: "allowed",
+        decision: addresses.length > 0 && !blockedAddress ? "allowed" : "blocked",
+        ...(blockedAddress ? { reason: `target resolves to a ${classifyIp(blockedAddress.address)} address (${blockedAddress.address})` }
+          : addresses.length === 0 ? { reason: "DNS resolution returned no addresses" } : {}),
         resolution: "local",
-        addressCheck: addresses.length === 0 ? "dns-error" : addresses.some((a) => classifyIp(a.address) !== "public") ? "blocked" : "public",
+        addressCheck: addresses.length === 0 ? "dns-error"
+          : blockedAddress ? "blocked"
+            : addresses.some((a) => classifyIp(a.address) !== "public") ? "system-managed" : "public",
         addresses: addresses.map((a) => ({ address: a.address, class: classifyIp(a.address) })),
         ...(addresses.length === 0 ? { lookupError: "DNS resolution returned no addresses" } : {}),
       };
@@ -682,7 +728,8 @@ export const createEgressRuntime = (options: {
       return {
         url: targetUrl,
         policy,
-        decision: "allowed",
+        decision: "blocked",
+        reason: knownDnsCode ? `DNS resolution failed (${knownDnsCode})` : "DNS resolution failed",
         resolution: "local",
         addressCheck: "dns-error",
         lookupError: knownDnsCode ? `DNS resolution failed (${knownDnsCode})` : "DNS resolution failed",
@@ -705,5 +752,5 @@ export const createEgressRuntime = (options: {
     return closePromise;
   };
 
-  return { resolvePolicy: (override) => resolveEgressPolicy(override, env), policySnapshot, prepare, resolve, fetch, diagnose, close };
+  return { resolvePolicy: (override) => resolveEgressPolicy(override, env, "https:", undefined, undefined, Boolean(options.systemFetch)), policySnapshot, prepare, resolve, fetch, diagnose, close };
 };

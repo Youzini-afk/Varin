@@ -14,9 +14,9 @@ describe('Host outbound settings and credential binding', () => {
   it('keeps a credential bound to the exact endpoint and setting generation', async () => {
     const key = encodeOutboundProxyAuth('generation-a', 'http://proxy-a.test:8080', 'user', 'secret');
     const auth = { [OUTBOUND_PROXY_CREDENTIAL_REF]: { type: 'api_key', key } };
-    const a = { outboundNetwork: { mode: 'proxy', proxyUrl: 'http://proxy-a.test:8080', credentialRef: 'generation-a', trustedProxy: true } };
-    const b = { outboundNetwork: { mode: 'proxy', proxyUrl: 'http://proxy-b.test:8080', credentialRef: 'generation-b', trustedProxy: true } };
-    const returned = { outboundNetwork: { mode: 'proxy', proxyUrl: 'http://proxy-a.test:8080', credentialRef: 'generation-c', trustedProxy: true } };
+    const a = { outboundNetwork: { mode: 'proxy', proxyUrl: 'http://proxy-a.test:8080', credentialRef: 'generation-a' } };
+    const b = { outboundNetwork: { mode: 'proxy', proxyUrl: 'http://proxy-b.test:8080', credentialRef: 'generation-b' } };
+    const returned = { outboundNetwork: { mode: 'proxy', proxyUrl: 'http://proxy-a.test:8080', credentialRef: 'generation-c' } };
     expect(readEgressHostConfiguration(a, auth)?.proxyAuth).toEqual({ username: 'user', password: 'secret' });
     expect(readEgressHostConfiguration(b, auth)?.proxyAuth).toBeUndefined();
     expect(readEgressHostConfiguration(returned, auth)?.proxyAuth).toBeUndefined();

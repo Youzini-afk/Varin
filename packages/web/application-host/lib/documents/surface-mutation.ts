@@ -485,6 +485,7 @@ export async function applyAgentSurfaceMutation(
   > = [];
   let durable: PersistedAgentMutationData | null = null;
   let surfaceDispatched = false;
+  let preparationError: string | null = null;
 
   const persistIntent = async (): Promise<PersistedAgentMutationData | null> => {
     if (!deps.durable) return durable;
@@ -834,6 +835,7 @@ export async function applyAgentSurfaceMutation(
   } catch (error) {
     failed = true;
     const message = error instanceof Error ? error.message : String(error);
+    preparationError = message;
     for (const item of toApplySurface) {
       if (!item.result) {
         item.result = pathResult({
@@ -1084,8 +1086,8 @@ export async function applyAgentSurfaceMutation(
         item.result = {
           path: item.change.resourceId,
           target: "disk",
-          status: "conflict",
-          message: `${item.change.resourceId} was not written because an earlier path in this mutation failed.`,
+          status: preparationError ? "unavailable" : "conflict",
+          message: preparationError ?? `${item.change.resourceId} was not written because an earlier path in this mutation failed.`,
         };
       }
     }

@@ -101,7 +101,7 @@ describe('settings runtime', () => {
 
   it('rotates a proxy credential binding whenever the endpoint changes', async () => {
     const { runtime, cleanup } = await createRuntime(async () => {}, (current, changes) => ({ ...current, ...changes }));
-    const network = (proxyUrl: string) => ({ mode: 'proxy', proxyUrl, noProxy: '', trustedProxy: true });
+    const network = (proxyUrl: string) => ({ mode: 'proxy', proxyUrl, noProxy: '' });
     try {
       const a = await runtime.persistSettings({ outboundNetwork: network('http://proxy-a.test:8080') });
       const refA = (a.outboundNetwork as { credentialRef: string }).credentialRef;

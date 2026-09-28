@@ -135,12 +135,13 @@ references, collection-scoped keyword search, `persisted` workspace-readable set
 receiver reread under its own session/thread authority; they never transfer the sender's receipts.
 
 `egress.ts` is the executing Host's shared outbound path for `web.fetch`, Web search and scholarly
-search. Harness → Web exposes this Host's `outboundNetwork` setting: `auto` reads that Host's
-environment, `direct` checks the DNS answer on the actual connection, and an explicit HTTP(S)
-proxy can be entrusted by the deployment owner with final-address policy after proxy-side DNS.
-An environment proxy alone is not that delegation; an unverified proxy route reports
-`proxy-policy-unverified` instead of silently connecting directly. The proxy origin and trust
-choice live in Host settings; authentication lives separately in the Host's Pi auth owner and is
+search. Harness → Web exposes this Host's `outboundNetwork` setting. Desktop `auto` uses an
+isolated Electron network session when no Host environment proxy is configured, so the operating
+system owns proxy/PAC, DNS, and virtual-network routing. An explicit HTTP(S) proxy or Host
+environment proxy uses the shared CONNECT path; `direct` bypasses proxies. Desktop requests may
+intentionally reach local services, while non-desktop Hosts retain connect-time private-address
+checks. This boundary depends on the executing Host, never on a machine-specific fake-IP range.
+The proxy origin lives in Host settings; authentication lives separately in the Host's Pi auth owner and is
 bound to the selected endpoint. Requests freeze their configuration, inspect redirect targets on
 every hop, and report whether DNS was local or proxy-side without exposing credentials.
 
@@ -523,8 +524,14 @@ native disk, and tombstones hide files plus virtual ancestors.
 
 ### Explore (`explore-service.ts`, `explore.ts`, `explore-file-reader.ts`)
 
-The Pi tool sends the question, optional literal `anchors`, and optional roots through the
-normal actor-scoped router. `limit` is the excerpt count only. Candidate fetch uses a separate
+The Pi tool sends the question, optional literal `anchors`, and optional `paths` through the
+normal actor-scoped router. `paths` accepts absolute or session-cwd-relative files/directories;
+when present it confines the whole query, including anchor follow-ups. The visible result names
+the resolved search scope. Without `paths`, an unbound session searches its cwd. `budgetMs`
+controls the shared Host/Pi query deadline (default 120 seconds); expiry returns completed
+material with an explicit budget note. `limit` is the excerpt count only, and the selection
+model sees that limit before choosing groups. Rejected groups report the Host's reason.
+Candidate fetch uses a separate
 working budget (and an independent budget for anchors). Candidate mode assigns that budget
 breadth-first: one hit per matching file, then another round, until `hitsPerFile` or the budget
 is exhausted. A file with hits keeps at least one hit unless the file count itself exceeds the

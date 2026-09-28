@@ -3,11 +3,11 @@ import { getRuntimeApiBaseUrl, getRuntimeKey, runtimeFetch } from '@varin/applic
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
-import { SettingsCheckboxRow, SettingsFieldRow, SettingsSection } from '@/components/sections/shared/SettingsSection';
+import { SettingsFieldRow, SettingsSection } from '@/components/sections/shared/SettingsSection';
 import { useI18n } from '@/lib/i18n';
 
-type NetworkSetting = { mode: 'auto' | 'direct' | 'proxy'; proxyUrl: string; noProxy: string; trustedProxy: boolean; credentialRef?: string };
-const DEFAULT: NetworkSetting = { mode: 'auto', proxyUrl: '', noProxy: '', trustedProxy: false };
+type NetworkSetting = { mode: 'auto' | 'direct' | 'proxy'; proxyUrl: string; noProxy: string; credentialRef?: string };
+const DEFAULT: NetworkSetting = { mode: 'auto', proxyUrl: '', noProxy: '' };
 
 export function OutboundNetworkSettings() {
   const { t } = useI18n();
@@ -122,10 +122,10 @@ export function OutboundNetworkSettings() {
       const response = await runtimeFetch('/api/harness/egress/verify', {
         method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ url: testUrl }),
       });
-      const value = await response.json() as { ok?: boolean; status?: number; errorClass?: string; error?: string; policy?: { mode: string; source: string; trust: string; proxyOrigin?: string } };
+      const value = await response.json() as { ok?: boolean; status?: number; errorClass?: string; error?: string; policy?: { mode: string; source: string; proxyOrigin?: string } };
       if (!response.ok) throw new Error(value.error ?? t('settings.page.harness.network.verifyFailed'));
       setResult(value.ok
-        ? `${t('settings.page.harness.network.verifyOk')} HTTP ${value.status} · ${value.policy?.mode ?? '?'} · ${value.policy?.trust ?? '?'}`
+        ? `${t('settings.page.harness.network.verifyOk')} HTTP ${value.status} · ${value.policy?.mode ?? '?'} · ${value.policy?.proxyOrigin ?? value.policy?.source ?? '?'}`
         : `${t('settings.page.harness.network.verifyFailed')} ${value.errorClass ?? 'http'}${value.status ? ` ${value.status}` : ''}: ${value.error ?? ''}`);
     } catch (cause) { setError(cause instanceof Error ? cause.message : String(cause)); }
     finally { setVerifying(false); }
@@ -157,9 +157,6 @@ export function OutboundNetworkSettings() {
         <Input type="password" value={password} autoComplete="new-password" onChange={(event) => setPassword(event.target.value)} disabled={loading || saving} />
       </SettingsFieldRow>
       {hasAuth ? <Button size="sm" variant="ghost" disabled={loading || saving} onClick={() => void clearAuth()}>{t('settings.page.harness.network.clearAuth')}</Button> : null}
-      <SettingsCheckboxRow checked={draft.trustedProxy} onChange={(trustedProxy) => setDraft((current) => ({ ...current, trustedProxy }))}
-        disabled={loading || saving} label={t('settings.page.harness.network.trust')} description={t('settings.page.harness.network.trustHint')}
-        ariaLabel={t('settings.page.harness.network.trust')} />
     </> : null}
     <Button size="sm" disabled={loading || saving || !dirty} onClick={() => void save()}>{saving ? t('settings.common.actions.saving') : t('settings.page.harness.network.save')}</Button>
     <SettingsFieldRow label={t('settings.page.harness.network.testUrl')} controlClassName="@xl:flex-1 @xl:max-w-80">

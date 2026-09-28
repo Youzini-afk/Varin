@@ -59,7 +59,7 @@ export function registerEgressRoutes(app: Express, options: {
       const response = await outbound.fetch(url, { signal: controller.signal });
       await response.body?.cancel();
       return res.json({ ok: response.ok, status: response.status, policy: {
-        mode: outbound.policy.mode, source: outbound.policy.source, trust: outbound.policy.trust,
+        mode: outbound.policy.mode, source: outbound.policy.source,
         ...(outbound.policy.proxyOrigin ? { proxyOrigin: outbound.policy.proxyOrigin } : {}),
       } });
     } catch (error) {

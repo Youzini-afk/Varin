@@ -18,6 +18,7 @@ import type { DurableFileOperationContext } from '../recovery/durable-file-opera
 import {
   canonicalizePathIdentity,
   normalizePathIdentity,
+  normalizeWorkspaceRelativePath,
   resolveWorkspacePath,
   WorkspacePathError,
 } from '../workspace/path-safety.js';
@@ -555,6 +556,18 @@ export const createDocumentAuthority = (options: DocumentAuthorityOptions) => {
   const resolveResourcePath = async (resource: DocumentResource, allowMissing = false): Promise<ResolveResourceResult> => {
     const workspace = await loadWorkspace(resource.workspaceId);
     try {
+      if (workspace.kind === 'file') {
+        if (normalizeWorkspaceRelativePath(resource.resourceId) !== '') {
+          throw new DocumentPathError('A file resource root addresses only that file');
+        }
+        // A new file has no existing ancestor inside its own file root. Resolve
+        // through its actual parent rather than applying directory containment.
+        const realPath = await canonicalizePathIdentity(workspace.root, { allowMissing, fsPromises, pathModule });
+        if (normalizePathIdentity(realPath, { pathModule, platform }) !== normalizePathIdentity(workspace.root, { pathModule, platform })) {
+          throw new DocumentPathError('File resource identity changed');
+        }
+        return { workspace, resolved: { relativePath: '', absolutePath: realPath } };
+      }
       const resolved = await resolveWorkspacePath(resource.resourceId, {
         root: workspace.root,
         fsPromises,
@@ -787,7 +800,7 @@ export const createDocumentAuthority = (options: DocumentAuthorityOptions) => {
         throw new DocumentPathError('Workspace path is not a directory', 400);
       }
       if (!await isAllowedRoot(canonicalPath)) {
-        throw new DocumentPathError('Workspace root is not allowed');
+        throw new DocumentPathError(`Workspace path is outside the Host deployment boundary: ${canonicalPath}`);
       }
       const mapping = await registry.resolve({ canonicalPath, create: true });
       if (!mapping) throw new DocumentAuthorityError('Workspace resolution failed', { code: 'failed', statusCode: 500 });
@@ -831,8 +844,8 @@ export const createDocumentAuthority = (options: DocumentAuthorityOptions) => {
    * workspace. A `file` root addresses exactly one canonical file; a
    * `directory` root addresses a subtree. These records are backend addressing
    * details — they carry no project identity, no session lifecycle, and no
-   * classification role. The existing trusted-root gate applies on
-   * registration and on every loadWorkspace.
+   * classification role. Registration observes the explicit Host deployment
+   * boundary; local project/navigation settings do not decide file access.
    */
   const findContainingResourceRoot = async (canonicalPath: string): Promise<WorkspaceMapping | null> => (
     registry.findContaining(canonicalPath)
@@ -848,7 +861,7 @@ export const createDocumentAuthority = (options: DocumentAuthorityOptions) => {
     kind: 'directory' | 'file',
   ): Promise<WorkspaceMapping> => {
     if (!await isAllowedRoot(canonicalPath)) {
-      throw new DocumentPathError('Resource root is not allowed');
+      throw new DocumentPathError(`Resource path is outside the Host deployment boundary: ${canonicalPath}`);
     }
     const mapping = await registry.resolve({ canonicalPath, create: true, kind });
     if (!mapping) {

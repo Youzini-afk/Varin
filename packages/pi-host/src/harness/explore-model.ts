@@ -199,6 +199,7 @@ export function renderExploreSelectPrompt(
   extras?: {
     newViews?: readonly ExploreQueryView[];
     selectedViews?: readonly ExploreQueryView[];
+    excerptLimit?: number;
   },
 ): string {
   const selected = extras?.selectedViews ?? [];
@@ -207,6 +208,10 @@ export function renderExploreSelectPrompt(
     "User request:",
     question,
     "",
+    ...(extras?.excerptLimit !== undefined ? [
+      `Output excerpt limit: ${extras.excerptLimit}. Each selected range consumes one excerpt. A group requiring more excerpts than this limit will be rejected. Choose complete smaller groups and mark supplementary ranges required:false.`,
+      "",
+    ] : []),
     "Query-phase hypotheses (may be wrong):",
     JSON.stringify(views.hypotheses ?? {}),
     "",

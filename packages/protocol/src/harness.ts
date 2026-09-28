@@ -376,7 +376,6 @@ export type FetchErrorClass =
   | "proxy-unavailable"
   | "proxy-auth"
   | "proxy-config-invalid"
-  | "proxy-policy-unverified"
   | "tls"
   | "connect"
   | "http"
@@ -396,22 +395,20 @@ export interface NetworkDiagnosisResult {
   /** Static URL/scheme/literal/configuration check; does not include DNS. */
   decision: "allowed" | "blocked";
   reason?: string;
-  /** Read-only address sample. A later fetch checks again at connection time. */
-  addressCheck: "not-run" | "public" | "blocked" | "dns-error" | "proxy-side-unverified" | "proxy-policy-incompatible";
+  /** Read-only address sample. A later fetch may resolve and route differently. */
+  addressCheck: "not-run" | "public" | "blocked" | "dns-error" | "proxy-side-unverified" | "system-managed";
   policy: {
     version: number;
-    mode: "direct" | "proxy";
+    mode: "direct" | "proxy" | "system";
     /** Sanitized origin only — credentials are never exposed. */
     proxyOrigin?: string;
     proxyAuth?: "basic";
     noProxy: string[];
     source: "app" | "env" | "override" | "none";
-    /** Proxy-side target policy is only delegated by explicit Host configuration. */
-    trust: "direct" | "unverified-proxy" | "delegated-proxy";
     invalid?: string;
   };
   /** Where the target name would resolve. Proxy-side results are unverified here. */
-  resolution: "not-run" | "local" | "proxy-side" | "static-literal";
+  resolution: "not-run" | "local" | "proxy-side" | "static-literal" | "system";
   addresses?: Array<{ address: string; class: "public" | "private" | "special-purpose" }>;
   lookupError?: string;
 }

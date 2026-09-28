@@ -33,6 +33,8 @@ export interface StartWebUiServerOptions {
   apiOnly?: boolean | undefined;
   attachSignals?: boolean | undefined;
   createPiRuntimeBroker?: ((options: HostPiRuntimeBrokerFactoryOptions) => PiRuntimeBroker) | undefined;
+  /** Electron system-network transport for desktop outbound HTTP(S). */
+  desktopNetworkFetch?: ((url: string, init: RequestInit) => Promise<Response>) | undefined;
   exitOnShutdown?: boolean | undefined;
   extensionCatalog?: ApplicationExtensionCatalog | undefined;
   extensionPackages?: ExtensionPackageManager | undefined;

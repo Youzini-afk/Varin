@@ -176,6 +176,17 @@ export const checkSsrf = async (url: string): Promise<SsrfCheckResult> => {
   return { blocked: false };
 };
 
+/** A local desktop request uses the user's network and may intentionally reach
+ * LAN/loopback services. The scheme boundary still excludes file/data URLs. */
+export const checkDesktopHttpUrl = async (url: string): Promise<SsrfCheckResult> => {
+  try {
+    const protocol = new URL(url).protocol;
+    return protocol === "http:" || protocol === "https:" ? { blocked: false } : { blocked: true, reason: "scheme" };
+  } catch {
+    return { blocked: true, reason: "scheme" };
+  }
+};
+
 /**
  * Check if a URL's hostname matches the same origin as another URL.
  * Used for redirect following — only same-hostname redirects are auto-followed.

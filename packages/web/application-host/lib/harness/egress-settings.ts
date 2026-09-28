@@ -12,7 +12,6 @@ export function normalizeOutboundNetwork(value: unknown): RecordValue {
   const mode = value.mode as 'auto' | 'direct' | 'proxy';
   if (value.proxyUrl !== undefined && typeof value.proxyUrl !== 'string') throw new Error('Proxy URL must be a string');
   if (value.noProxy !== undefined && typeof value.noProxy !== 'string') throw new Error('NO_PROXY must be a string');
-  if (value.trustedProxy !== undefined && typeof value.trustedProxy !== 'boolean') throw new Error('Proxy delegation must be a boolean');
   if (value.credentialRef !== undefined && typeof value.credentialRef !== 'string') throw new Error('Proxy credential binding must be a string');
   const proxyUrl = typeof value.proxyUrl === 'string' ? value.proxyUrl.trim() : '';
   if (mode === 'proxy') {
@@ -23,7 +22,6 @@ export function normalizeOutboundNetwork(value: unknown): RecordValue {
     }
   }
   return { mode, proxyUrl, noProxy: typeof value.noProxy === 'string' ? value.noProxy.trim() : '',
-    trustedProxy: value.trustedProxy === true,
     ...(typeof value.credentialRef === 'string' ? { credentialRef: value.credentialRef } : {}) };
 }
 
@@ -70,7 +68,6 @@ export function readEgressHostConfiguration(document: RecordValue, auth: RecordV
       mode: setting.mode as EgressHostConfiguration['mode'],
       proxyUrl: setting.proxyUrl as string,
       noProxy: setting.noProxy as string,
-      trustedProxy: setting.trustedProxy === true,
       ...(proxyAuth ? { proxyAuth } : {}),
     };
   } catch (error) {

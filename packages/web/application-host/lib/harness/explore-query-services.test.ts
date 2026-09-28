@@ -11,7 +11,7 @@ import {
 import { createExploreQueryStore } from "./explore-query-store.js";
 import { createOutputStore } from "./output-store.js";
 import type { ExploreResult } from "./explore.js";
-import { createExploreSearchService } from "./explore-service.js";
+import { createExploreSearchService, resolveExploreScopeAndAnchors, resolveExploreResourceUnits } from "./explore-service.js";
 import type { HarnessServiceContext } from "./router.js";
 import type { HarnessServiceHost } from "./service-host.js";
 
@@ -42,6 +42,58 @@ function context(inputContext: AgentInputContext, signal = new AbortController()
 }
 
 describe("explore query services", () => {
+  it("does not expand explicit directories when a path anchor points elsewhere", async () => {
+    const ctx = {
+      ...context({ source: "disk" }),
+      authorizedPaths: [
+        { authorityId: "test-host", workspaceId: actor.workspaceId!, canonicalResourceId: "/workspace/src", resourceId: "src", inputPath: "src" },
+        { authorityId: "test-host", workspaceId: actor.workspaceId!, canonicalResourceId: "/workspace/other/ref.ts", resourceId: "other/ref.ts", inputPath: "other/ref.ts" },
+      ],
+    };
+    const params = { question: "needle", paths: ["src"], anchors: ["other/ref.ts"] };
+    const scoped = resolveExploreScopeAndAnchors(params, ctx);
+    expect(scoped.paths).toEqual(["src"]);
+    const units = await resolveExploreResourceUnits({ resolveWorkspaceRoot: async () => "/workspace", resolveScopeRoot: undefined }, ctx, params, scoped.paths);
+    expect(units.map((unit) => unit.resourcePrefix)).toEqual(["src"]);
+  });
+
+  it("uses the session cwd as the default for a session without a project binding", async () => {
+    const cwd = resolve("workspace/project");
+    const resolveScopeRoot = vi.fn(async () => ({ workspaceId: "directory-root", root: cwd }));
+    const ctx = {
+      ...context({ source: "disk" }),
+      workspaceId: null,
+      actor: { ...actor, workspaceId: null, cwd, authorityRoot: resolve("workspace") },
+    };
+    const units = await resolveExploreResourceUnits({ resolveScopeRoot, resolveWorkspaceRoot: async () => cwd }, ctx, { question: "needle" }, undefined);
+    expect(resolveScopeRoot).toHaveBeenCalledWith(cwd);
+    expect(units.map((unit) => unit.root)).toEqual([cwd]);
+  });
+
+  it("returns completed excerpts after the deadline without starting another model stage", async () => {
+    const store = createExploreQueryStore();
+    const outputStore = createOutputStore();
+    const rerankExploreViews = vi.fn();
+    const host = {
+      exploreQueryStore: store, outputStore, rerankExploreViews,
+      searchService: { search: async () => ({ status: "ready", files: [{ path: "a.ts", hits: [{ line: 1, text: "needle" }] }], partial: false }) },
+      readExploreFile: async () => ({ status: "ready" as const, content: "needle", revision: "r1", source: "disk" as const }),
+    } as unknown as HarnessServiceHost;
+    try {
+      const ctx = context({ source: "disk" });
+      const started = await createExploreQueryStartService(host).handle({ question: "needle", budgetMs: 300_000 }, ctx);
+      expect(started.deadlineAt - Date.now()).toBeGreaterThan(290_000);
+      await createExploreQueryViewsService(host).handle({ queryId: started.queryId }, ctx);
+      const stored = store.get(actor.sessionId, started.queryId)!;
+      stored.deadlineAt = Date.now() - 1;
+      stored.cancelController.abort();
+      const result = await createExploreQueryFinishService(host).handle({ queryId: started.queryId }, ctx);
+      expect(result.snippets[0]?.text).toContain("needle");
+      expect(result.text).toContain("Search scope:");
+      expect(rerankExploreViews).not.toHaveBeenCalled();
+    } finally { store.dispose(); outputStore.dispose(); }
+  });
+
   it("keeps the direct explore.search contract full while query.finish uses summaries", async () => {
     const outputStore = createOutputStore();
     const paths = Array.from({ length: 9 }, (_, index) => `candidate-${index}.ts`);

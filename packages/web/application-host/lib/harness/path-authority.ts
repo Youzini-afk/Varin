@@ -25,11 +25,6 @@ export interface HarnessPathAuthorityOptions {
       canonicalPath: string;
       kind: "directory" | "file";
     } | null>;
-    /** Exact registered root for this canonical path, optionally by kind. */
-    findExactResourceRoot?(
-      canonicalPath: string,
-      kind?: "directory" | "file",
-    ): Promise<{ workspaceId: string; canonicalPath: string; kind: "directory" | "file" } | null>;
     /**
      * Register a resource root for an external target. `file` roots address
      * exactly one canonical file; `directory` roots address a subtree. These
@@ -87,26 +82,15 @@ export function createHarnessPathAuthority({
   };
 
   /**
-   * Address a resolved canonical target through a resource root: an existing
-   * file root wins exactly, then the longest containing directory root, then a
-   * freshly registered root matching the target kind.
+   * Path-authorized reads and writes use the same directory identity. The
+   * native mutation journal requires a non-empty path below its root, and
+   * rereads must not switch to a legacy exact-file root midway through a call.
    */
   const resolveResourceRooted = async (
     inputPath: string,
     canonical: string,
     stat: { isDirectory(): boolean } | null,
   ): Promise<HarnessAuthorizedPath | null> => {
-    const fileRoot = await documents.findExactResourceRoot?.(canonical, "file");
-    if (fileRoot) {
-      return {
-        authorityId,
-        workspaceId: fileRoot.workspaceId,
-        canonicalResourceId: normalizePathIdentity(canonical, { pathModule, platform }),
-        resolvedPath: canonical,
-        inputPath,
-        resourceId: "",
-      };
-    }
     const containing = await documents.findContainingResourceRoot?.(canonical);
     if (containing) {
       const relative = pathModule.relative(containing.canonicalPath, canonical);
@@ -120,16 +104,29 @@ export function createHarnessPathAuthority({
       };
     }
     if (!documents.ensureResourceRoot) return null;
-    // A missing target registers a file root (write destinations); callers
-    // that required existence already failed on the stat above.
-    const created = await documents.ensureResourceRoot(canonical, stat?.isDirectory() ? "directory" : "file");
+    let rootPath = canonical;
+    if (!stat?.isDirectory()) {
+      rootPath = pathModule.dirname(canonical);
+      for (;;) {
+        try {
+          if ((await fsPromises.stat(rootPath)).isDirectory()) break;
+          throw new WorkspacePathError(`Resource parent is not a directory: ${rootPath}`);
+        } catch (error) {
+          if ((error as NodeJS.ErrnoException)?.code !== "ENOENT") throw error;
+          const parent = pathModule.dirname(rootPath);
+          if (parent === rootPath) throw error;
+          rootPath = parent;
+        }
+      }
+    }
+    const created = await documents.ensureResourceRoot(rootPath, "directory");
     return {
       authorityId,
       workspaceId: created.workspaceId,
       canonicalResourceId: normalizePathIdentity(canonical, { pathModule, platform }),
       resolvedPath: canonical,
       inputPath,
-      resourceId: "",
+      resourceId: pathModule.relative(created.canonicalPath, canonical).split(pathModule.sep).join("/"),
     };
   };
 

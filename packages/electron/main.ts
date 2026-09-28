@@ -47,6 +47,7 @@ import {
 } from '@varin/application-client/desktop';
 import type { WebUiServerController } from '@varin/web/server/index.js';
 import { ElectronSshManager } from './ssh-manager.js';
+import { createDesktopNetworkFetch } from './harness-network-fetch.js';
 import { createTray, createTrayController, type TrayAction } from './tray.js';
 import { NotificationListener } from './notification-listener.js';
 import {
@@ -1775,8 +1776,10 @@ const spawnLocalServer = async () => {
 
   const { startWebUiServer } = await import('@varin/web/server/index.js');
   const hostEntry = getDesktopPiHostEntry();
+  const outboundSession = session.fromPartition('varin-harness-egress', { cache: false });
 
   const handle = await startWebUiServer({
+    desktopNetworkFetch: createDesktopNetworkFetch(outboundSession),
     port: chosenPort,
     host: bindHost,
     uiPassword: desktopUiPassword || null,

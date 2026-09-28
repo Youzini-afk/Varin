@@ -147,7 +147,7 @@ import { createWebSearchService, resolveConfiguredSearchProvider } from './lib/h
 import { createResearchSearchService } from './lib/harness/research-search.js';
 import { registerWebSearchCredentialRoutes } from './lib/harness/web-search-routes.js';
 import { registerPdfMaterialRoutes } from './lib/harness/pdf-material-routes.js';
-import { checkSsrf, isSameHost } from './lib/harness/ssrf-policy.js';
+import { checkDesktopHttpUrl, checkSsrf, isSameHost } from './lib/harness/ssrf-policy.js';
 import { createEgressRuntime } from './lib/harness/egress.js';
 import { readEgressHostConfiguration } from './lib/harness/egress-settings.js';
 import { registerEgressRoutes } from './lib/harness/egress-routes.js';
@@ -1189,8 +1189,7 @@ async function main(options: StartWebUiServerOptions = {}): Promise<WebUiServerC
   const workspaceRootGuard = createDocumentRootGuard({
     fsPromises,
     pathModule: path,
-    readSettings: readSettingsFromDisk,
-    getWorkspaceRoot: () => workspaceConfig.root,
+    workspace: workspaceConfig,
   });
   const configuredDirtyBarrierTimeout = process.env.VARIN_DIRTY_BARRIER_TIMEOUT_MS?.trim() ?? '';
   const dirtyBarrierTimeoutMs = /^\d+$/.test(configuredDirtyBarrierTimeout)
@@ -1203,6 +1202,7 @@ async function main(options: StartWebUiServerOptions = {}): Promise<WebUiServerC
     dataDir: VARIN_DATA_DIR,
     maxReadBytes: workspaceConfig.maxReadBytes,
     isAllowedRoot: workspaceRootGuard,
+    isTrusted: workspaceRootGuard,
     onMutation: (event) => observeKnowledgeDocumentMutation(event),
     onIntegrationParentChanged: (workspaceId, resourceIds) => observeThreadIntegrationParentChange(workspaceId, resourceIds),
     ...(dirtyBarrierTimeoutMs !== undefined ? { dirtyBarrierTimeoutMs } : {}),
@@ -1572,10 +1572,12 @@ async function main(options: StartWebUiServerOptions = {}): Promise<WebUiServerC
   // coordinator.
 
   // Web fetch service — SSRF-guarded, domain policy from workspace config
-  const ssrfPolicy: SsrfPolicy = { check: checkSsrf, isSameHost };
+  const ssrfPolicy: SsrfPolicy = { check: options.desktopNetworkFetch ? checkDesktopHttpUrl : checkSsrf, isSameHost };
   // Single outbound egress authority: proxy/NO_PROXY policy + connect-path
   // SSRF classification shared by web.fetch and web.search providers.
   const egressRuntime = createEgressRuntime({
+    allowLocalTargets: Boolean(options.desktopNetworkFetch),
+    ...(options.desktopNetworkFetch ? { systemFetch: options.desktopNetworkFetch } : {}),
     getHostConfiguration: async () => {
       const document = await readSettingsFromDisk();
       const network = document.outboundNetwork as { mode?: unknown } | undefined;

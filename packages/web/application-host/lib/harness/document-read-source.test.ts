@@ -474,6 +474,18 @@ describe("native read source through Host router and Documents", () => {
     expect(outsideMapping.workspaceId).not.toBe(f.actor.workspaceId);
   });
 
+  it("creates and rereads an external file without registering its directory", async () => {
+    const f = await fixture();
+    const target = path.join(path.dirname(f.workspace), "unregistered", "new.txt");
+    const written = await f.write({ path: target, action: "write", content: "external payload\n" }, { source: "disk" });
+    expect(written, JSON.stringify(written)).toMatchObject({ ok: true, result: { status: "applied" } });
+    expect(await fs.readFile(target, "utf8")).toBe("external payload\n");
+    const response = await f.request(target, { source: "disk" });
+    expect(response).toMatchObject({ ok: true, result: { source: "disk" } });
+    if (!response.ok || response.result.source !== "disk") throw new Error("Expected disk bytes");
+    expect(Buffer.from(response.result.base64, "base64").toString("utf8")).toBe("external payload\n");
+  });
+
   it("writes an external root while preserving an unrelated same-name draft", async () => {
     const f = await fixture();
     const local = path.join(f.workspace, "same.txt");

@@ -6,7 +6,7 @@ import { registerEgressRoutes } from './egress-routes.js';
 import { OUTBOUND_PROXY_CREDENTIAL_REF, readOutboundProxyAuth } from './egress-settings.js';
 
 const setting = (proxyUrl = 'http://proxy-a.test:8080', credentialRef = 'generation-a') => ({
-  outboundNetwork: { mode: 'proxy', proxyUrl, credentialRef, trustedProxy: true },
+  outboundNetwork: { mode: 'proxy', proxyUrl, credentialRef },
 });
 
 describe('Host egress routes', () => {

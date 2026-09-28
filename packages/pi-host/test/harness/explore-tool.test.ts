@@ -66,7 +66,7 @@ describe("Host-backed explore tool", () => {
 
     await tool.execute(
       "call",
-      { question: "where is the factory", anchors: ["createMemoryAgentExtension"], limit: 3 },
+      { question: "where is the factory", anchors: ["createMemoryAgentExtension"], paths: ["../project-a", "D:/project/project-b"], budgetMs: 300_000, limit: 3 },
       undefined,
       undefined,
       undefined as never,
@@ -76,6 +76,8 @@ describe("Host-backed explore tool", () => {
     assert.equal(calls[0]?.params.question, "where is the factory");
     assert.deepEqual(calls[0]?.params.anchors, ["createMemoryAgentExtension"]);
     assert.equal(calls[0]?.params.limit, 3);
+    assert.deepEqual(calls[0]?.params.paths, ["../project-a", "D:/project/project-b"]);
+    assert.ok(Number(calls[0]?.params.budgetMs) > 290_000);
     assert.ok(calls.some((call) => call.method === "explore.query.views"));
     assert.ok(calls.some((call) => call.method === "explore.query.finish"));
     assert.ok(calls.some((call) => call.method === "explore.query.release"));
@@ -88,6 +90,42 @@ describe("Host-backed explore tool", () => {
     assert.equal(Value.Check(tool.parameters, { question: "needle", anchors: ["foo", ""] }), true);
     assert.equal(Value.Check(tool.parameters, { question: "needle", anchors: ["foo", "  "] }), true);
     assert.equal(Value.Check(tool.parameters, { question: "needle", anchors: [7] }), false);
+  });
+
+  it("collects completed material after the search budget expires without issuing a 1ms RPC", async (t) => {
+    let now = 10_000;
+    t.mock.method(Date, "now", () => now);
+    const calls: Array<{ method: string; timeoutMs: number | undefined }> = [];
+    const bridge = {
+      inputContext: () => ({ source: "disk" }),
+      cancel: () => assert.fail("budget expiration must not cancel completed query material"),
+      request: async (method: string, params: Record<string, unknown>, options: { timeoutMs?: number }) => {
+        calls.push({ method, timeoutMs: options.timeoutMs });
+        if (method === "explore.query.start") return {
+          queryId: "eq_budget", deadlineAt: now + 500,
+          parsed: { objects: [] }, vocab: {}, sources: [],
+        };
+        if (method === "explore.query.finish") return {
+          ...finishResult, details: { ...finishResult.details, model: params.model },
+        };
+        if (method === "explore.query.release") return { released: true };
+        assert.fail(`expired query must not launch ${method}`);
+      },
+    } as unknown as HostServicesBridge;
+    const tool = createExploreTool(bridge, "session", {
+      complete: async () => {
+        now += 501;
+        return JSON.stringify({ groups: [{ expressions: ["needle"] }] });
+      },
+    });
+    const result = await tool.execute("call", { question: "how does it work", budgetMs: 500 }, undefined, undefined, undefined as never);
+    assert.equal((result as { isError?: boolean }).isError, undefined);
+    assert.equal(result.content[0]?.type, "text");
+    assert.equal((result.details as { handle: string }).handle, finishResult.handle);
+    assert.equal((result.details as { partial: boolean }).partial, true);
+    assert.match((result.details as { model: { note: string } }).model.note, /budget exhausted \(500ms\)/);
+    assert.deepEqual(calls.map((call) => call.method), ["explore.query.start", "explore.query.finish", "explore.query.release"]);
+    assert.ok(calls.every((call) => call.timeoutMs !== undefined && call.timeoutMs > 1));
   });
 
   it("keeps large omitted and unread lists behind the output reference", async () => {
@@ -187,7 +225,7 @@ describe("Host-backed explore tool", () => {
           };
         }
         if (method === "explore.query.select") {
-          return { queryId: "eq_test", accepted: [], rejected: [{ viewId: "v1", reason: "unknown" }], gaps: [] };
+          return { queryId: "eq_test", accepted: [], rejected: [{ viewId: "v1", reason: "required group exceeds excerpt limit" }], gaps: [] };
         }
         if (method === "explore.query.finish") {
           return {
@@ -203,13 +241,16 @@ describe("Host-backed explore tool", () => {
       },
     } as unknown as HostServicesBridge;
     const tool = createExploreTool(bridge, "session", {
-      complete: async () => JSON.stringify({
+      complete: async ({ systemPrompt, user }) => {
+        if (systemPrompt.includes("select complementary")) assert.match(user, /Output excerpt limit: 2/);
+        return JSON.stringify({
         groups: [{ id: "sel1", purpose: "x", views: [{ viewId: "v1", rangeIds: ["v1:full"], required: true }] }],
-      }),
+        });
+      },
     });
     const result = await tool.execute(
       "call",
-      { question: "how does reclaim work" },
+      { question: "how does reclaim work", limit: 2 },
       undefined,
       undefined,
       undefined as never,
@@ -217,6 +258,7 @@ describe("Host-backed explore tool", () => {
     const finish = calls.find((call) => call.method === "explore.query.finish");
     assert.equal((finish?.params.model as { select?: string } | undefined)?.select, "skipped");
     assert.equal((result.details as { model?: { select?: string } }).model?.select, "skipped");
+    assert.match((result.details as { model: { note: string } }).model.note, /required group exceeds excerpt limit/);
   });
 
   it("keeps an accepted selection when the optional incremental follow-up fails", async () => {

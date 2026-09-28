@@ -100,7 +100,7 @@ function formatFetchResult(result: FetchResult, hasPrompt: boolean): { text: str
     }
     case "blocked": {
       const hint = result.reason === "special-purpose"
-        ? " — the address is a special-purpose range (e.g. fake-IP mapping from a fake-ip resolver); a working HTTP(S) proxy is required for this target"
+        ? " — the URL uses a reserved address; use the original hostname for a proxy/TUN fake-IP mapping"
         : result.reason === "private-network"
           ? " — the target resolves inside a private/loopback range and is refused"
           : "";

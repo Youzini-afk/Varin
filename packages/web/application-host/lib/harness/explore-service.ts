@@ -108,10 +108,10 @@ export function resolveExploreScopeAndAnchors(
   const defaultPaths = explicitPathCount > 0
     ? explicitPaths.filter((_path, index) => ctx.authorizedPaths[index]?.workspaceId === ctx.actor.workspaceId)
     : [sessionDefaultRoot(ctx.actor)].filter((root): root is string => root !== undefined);
-  const localAnchorPaths = authorizedAnchorPaths
+  const localAnchorPaths = (explicitPathCount > 0 ? [] : authorizedAnchorPaths)
     .filter((authorized) => authorized.workspaceId === ctx.actor.workspaceId)
     .map(logicalPath);
-  const externalRoots = ctx.authorizedPaths
+  const externalRoots = (explicitPathCount > 0 ? ctx.authorizedPaths.slice(0, explicitPathCount) : ctx.authorizedPaths)
     .filter((authorized) => authorized.workspaceId !== ctx.actor.workspaceId)
     .map(logicalPath);
   const localRequested = [...defaultPaths, ...localAnchorPaths];
@@ -225,8 +225,8 @@ export async function resolveExploreResourceUnits(
     for (const root of allowed.roots ?? [defaultRoot]) {
       await add({ workspaceId: ctx.actor.workspaceId, resourcePrefix: root || "." });
     }
-  } else if (!explicitPaths && !ctx.actor.workspaceId && ctx.actor.authorityRoot && searchService.resolveScopeRoot) {
-    const scope = await searchService.resolveScopeRoot(ctx.actor.authorityRoot).catch(() => null);
+  } else if (!explicitPaths && !ctx.actor.workspaceId && (ctx.actor.cwd || ctx.actor.authorityRoot) && searchService.resolveScopeRoot) {
+    const scope = await searchService.resolveScopeRoot((ctx.actor.cwd || ctx.actor.authorityRoot)!).catch(() => null);
     if (scope) await add({ workspaceId: scope.workspaceId, resourcePrefix: ".", logicalPrefix: scope.root, root: scope.root });
   }
 

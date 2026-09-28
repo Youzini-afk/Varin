@@ -185,7 +185,7 @@ describe("harness path authority", () => {
       grantedCapabilities: ["write.document"],
     });
 
-    it("addresses an external file through an admitted file root for a no-project session", async () => {
+    it("reads an external file through one stable directory root for a no-project session", async () => {
       const launch = mkdtempSync(join(tmpdir(), "harness-launch-"));
       const external = mkdtempSync(join(tmpdir(), "harness-external-"));
       const target = join(external, "paper.pdf");
@@ -194,7 +194,7 @@ describe("harness path authority", () => {
       const authority = createHarnessPathAuthority({ authorityId: "host-1", documents });
       try {
         const resolved = await authority.resolve(unbound(launch), target, { allowMissing: false });
-        expect(resolved).toMatchObject({ workspaceId: "root-0", resourceId: "", resolvedPath: path.resolve(target) });
+        expect(resolved).toMatchObject({ workspaceId: "root-1", resourceId: "paper.pdf", resolvedPath: path.resolve(target) });
         expect(await authority.readAuthorizedFile(unbound(launch), resolved!)).toEqual(Buffer.from("bytes"));
       } finally {
         rmSync(launch, { recursive: true, force: true });
@@ -228,6 +228,28 @@ describe("harness path authority", () => {
           .rejects.toMatchObject({ code: "ENOENT" });
       } finally {
         rmSync(launch, { recursive: true, force: true });
+      }
+    });
+
+    it("addresses external writes below an existing directory, including files with an older exact root", async () => {
+      const launch = mkdtempSync(join(tmpdir(), "harness-launch-"));
+      const external = mkdtempSync(join(tmpdir(), "harness-external-"));
+      const existing = join(external, "existing.txt");
+      const nested = join(external, "new", "note.txt");
+      writeFileSync(existing, "old");
+      const documents = resourceRoots([{ canonicalPath: existing, kind: "file" }]);
+      const authority = createHarnessPathAuthority({ authorityId: "host-1", documents });
+      try {
+        expect(await authority.resolve(unbound(launch), existing, { allowMissing: false }))
+          .toMatchObject({ workspaceId: "root-1", resourceId: "existing.txt" });
+        expect(await authority.resolve(unbound(launch), existing, { allowMissing: true }))
+          .toMatchObject({ workspaceId: "root-1", resourceId: "existing.txt" });
+        expect(await authority.resolve(unbound(launch), nested, { allowMissing: true }))
+          .toMatchObject({ workspaceId: "root-1", resourceId: "new/note.txt" });
+        expect(documents.registered).toEqual([{ canonicalPath: path.resolve(external), kind: "directory" }]);
+      } finally {
+        rmSync(launch, { recursive: true, force: true });
+        rmSync(external, { recursive: true, force: true });
       }
     });
 

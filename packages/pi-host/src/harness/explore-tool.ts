@@ -1,6 +1,7 @@
 import { Type } from "typebox";
 import { defineTool, type ToolDefinition } from "@earendil-works/pi-coding-agent";
 import type { AgentInputContext, ExploreModelParticipation, ExploreModelStageStatus } from "@varin/protocol";
+import { HARNESS_MAX_REQUEST_TIMEOUT_MS } from "@varin/protocol";
 import type { HostServicesBridge } from "./host-services-bridge.js";
 import {
   EXPLORE_PLAN_SYSTEM,
@@ -18,15 +19,23 @@ const ExploreParams = Type.Object({
   anchors: Type.Optional(Type.Array(Type.String(), {
     description: "Known symbols, method names, error text, or path fragments. Matched literally and prioritized; not a hard filter.",
   })),
-  paths: Type.Optional(Type.Array(Type.String(), { description: "Optional subpaths or directories to restrict search to" })),
+  paths: Type.Optional(Type.Array(Type.String(), { description: "Search only these files/directories. Accepts absolute paths or paths relative to the session cwd, including ../ and multiple projects. Omit to search the session cwd." })),
+  budgetMs: Type.Optional(Type.Integer({ minimum: 1, maximum: HARNESS_MAX_REQUEST_TIMEOUT_MS, description: "Time budget for search and model work in milliseconds (default 120000). Increase for deeper searches; completed material is returned when the budget expires." })),
   limit: Type.Optional(Type.Integer({ minimum: 1, description: "Maximum number of excerpts to return (default 20)" })),
 });
 
 /** Public remaining wait shared across stages. Not a calibrated SLO. */
 export const EXPLORE_PUBLIC_BUDGET_MS = 120_000;
 
+class ExploreBudgetExhausted extends Error {
+  constructor() {
+    super("Explore search budget exhausted");
+  }
+}
+
 function boundByDeadline(signal: AbortSignal | undefined, deadlineAt: number): AbortSignal {
-  const remaining = Math.max(1, deadlineAt - Date.now());
+  const remaining = deadlineAt - Date.now();
+  if (remaining <= 0) throw new ExploreBudgetExhausted();
   const timeout = AbortSignal.timeout(remaining);
   return signal ? AbortSignal.any([signal, timeout]) : timeout;
 }
@@ -56,24 +65,55 @@ export function createExploreTool(
       "Use explore to locate code and read the related context (definitions, registration sites, callers, and excerpts needed to judge) in one call.",
       "Use grep when you only need exact matches.",
       "Put known symbols, method names, error text, and path fragments in anchors.",
+      "Use paths to choose one or more search directories, especially when cwd contains multiple projects. Absolute and cwd-relative paths are supported; anchors do not widen explicit paths.",
+      "Set budgetMs to adjust search time and limit to adjust the number of returned excerpts. Inspect reported scope and incomplete coverage before widening a search.",
       "Explore can bridge a conceptual question and repository identifiers when an explore model is configured. It still returns current source excerpts, not a substitute analysis.",
     ],
     parameters: ExploreParams,
     executionMode: "parallel",
     execute: async (_toolCallId, params, signal, _onUpdate, _ctx) => {
       const pinned: AgentInputContext = structuredClone(bridge.inputContext() ?? { source: "disk" });
-      const startedAt = Date.now();
-      const remaining = (): number => Math.max(1, EXPLORE_PUBLIC_BUDGET_MS - (Date.now() - startedAt));
+      const budgetMs = params.budgetMs ?? EXPLORE_PUBLIC_BUDGET_MS;
+      let deadlineAt = Date.now() + budgetMs;
+      const remaining = (): number => Math.max(0, deadlineAt - Date.now());
+      const participation: ExploreModelParticipation = {
+        plan: options?.complete ? "skipped" : "unconfigured",
+        select: options?.complete ? "skipped" : "unconfigured",
+        followup: options?.complete ? "skipped" : "unconfigured",
+      };
       let queryId = "";
       const request = async <M extends "explore.query.start" | "explore.query.plan" | "explore.query.views" | "explore.query.select" | "explore.query.followup" | "explore.query.finish" | "explore.query.release" | "explore.query.cancel">(
         method: M,
         methodParams: Parameters<HostServicesBridge["request"]>[1],
-        timeoutMs = remaining(),
-      ) => bridge.request(method, methodParams as never, {
-        ...(signal ? { signal } : {}),
-        timeoutMs,
-        inputContext: pinned,
-      });
+      ) => {
+        // Search owns its work deadline; transport needs time to deliver the
+        // partial result after sources stop. Never cancel that result at 1ms.
+        const collecting = method === "explore.query.finish" || method === "explore.query.release" || method === "explore.query.cancel";
+        if (!collecting && remaining() <= 0) throw new ExploreBudgetExhausted();
+        return bridge.request(method, methodParams as never, {
+          ...(signal ? { signal } : {}),
+          timeoutMs: collecting ? 30_000 : Math.min(HARNESS_MAX_REQUEST_TIMEOUT_MS, remaining() + 30_000),
+          inputContext: pinned,
+        });
+      };
+
+      const finish = async () => {
+        const exhausted = remaining() <= 0;
+        if (exhausted) participation.note = [participation.note, `Explore search budget exhausted (${budgetMs}ms); returning completed material. Increase budgetMs or narrow paths to continue.`].filter(Boolean).join(" ");
+        const result = await request("explore.query.finish", { queryId, model: participation });
+        return {
+          content: [{ type: "text" as const, text: result.text }],
+          details: {
+            snippets: result.snippets, searched: result.searched, handle: result.handle,
+            snippetCount: result.snippets.length, issueCount: result.issueCount,
+            partial: result.partial || exhausted, notRequestedCount: result.notRequestedCount,
+            omittedCount: result.omittedCount, provenance: result.details,
+            provenanceCounts: result.details.provenance.statusCounts,
+            model: result.details.model ?? participation,
+            budgetMs, budgetExhausted: exhausted,
+          },
+        };
+      };
 
       const cancelQuery = (): void => {
         if (!queryId) return;
@@ -99,21 +139,16 @@ export function createExploreTool(
           reserveForJudge: Boolean(complete),
         });
         queryId = started.queryId;
-        const deadlineAt = started.deadlineAt;
+        deadlineAt = Math.min(deadlineAt, started.deadlineAt);
         const modelSignal = () => boundByDeadline(signal, deadlineAt);
 
         // D-312: a ready fast-decision binding owns material relevance and
         // action choice inside the query; the generative model keeps only its
         // plan stage — the same judgment is not stacked twice (design §4.4).
         const fastDecisionActive = started.fastDecision?.status === "ready";
-        const participation: ExploreModelParticipation = {
-          plan: complete ? "skipped" : "unconfigured",
-          select: complete ? "skipped" : "unconfigured",
-          followup: complete ? "skipped" : "unconfigured",
-          ...(started.fastDecision && started.fastDecision.status !== "ready"
-            ? { fastDecision: started.fastDecision.status === "invalid" || started.fastDecision.status === "unavailable" ? "failed" as const : started.fastDecision.status }
-            : {}),
-        };
+        if (started.fastDecision && started.fastDecision.status !== "ready") {
+          participation.fastDecision = started.fastDecision.status === "invalid" || started.fastDecision.status === "unavailable" ? "failed" : started.fastDecision.status;
+        }
         if (!complete) {
           participation.note = "Explore model is not configured; excerpts are from algorithm and vector sources.";
         }
@@ -152,7 +187,7 @@ export function createExploreTool(
           try {
             const selectText = await complete({
               systemPrompt: EXPLORE_SELECT_SYSTEM,
-              user: renderExploreSelectPrompt(params.question, views, "full"),
+              user: renderExploreSelectPrompt(params.question, views, "full", { excerptLimit: params.limit ?? 20 }),
               signal: modelSignal(),
             });
             const selected = parseExploreSelection(selectText);
@@ -163,8 +198,7 @@ export function createExploreTool(
                 participation.note = `Explore model plan ${participation.plan}; model selection used the candidates that were available.`;
               }
               if (applied.accepted.length === 0 && applied.rejected.length > 0) {
-                participation.note = participation.note
-                  ?? "Explore model selection was rejected; excerpts are from algorithm and vector sources.";
+                participation.note = `Explore model selection was rejected: ${[...new Set(applied.rejected.map((entry) => entry.reason))].join("; ")}. Source ranking was kept.`;
               }
               if (selected.followup && Date.now() < deadlineAt) {
                 activeStage = "followup";
@@ -187,6 +221,7 @@ export function createExploreTool(
                     user: renderExploreSelectPrompt(params.question, views, "incremental", {
                       selectedViews,
                       newViews: followup.newViews,
+                      excerptLimit: params.limit ?? 20,
                     }),
                     signal: modelSignal(),
                   });
@@ -198,6 +233,8 @@ export function createExploreTool(
                       if (participation.plan === "failed" || participation.plan === "cancelled") {
                         participation.note = `Explore model plan ${participation.plan}; model selection used the candidates that were available.`;
                       }
+                    } else if (incrementallyApplied.rejected.length > 0) {
+                      participation.note = `Explore follow-up selection was rejected: ${[...new Set(incrementallyApplied.rejected.map((entry) => entry.reason))].join("; ")}. Earlier material was kept.`;
                     }
                   }
                 }
@@ -227,26 +264,14 @@ export function createExploreTool(
           }
         }
 
-        const result = await request("explore.query.finish", { queryId, model: participation });
-        const provenanceCounts = result.details.provenance.statusCounts;
-        return {
-          content: [{ type: "text", text: result.text }],
-          details: {
-            snippets: result.snippets,
-            searched: result.searched,
-            handle: result.handle,
-            snippetCount: result.snippets.length,
-            issueCount: result.issueCount,
-            partial: result.partial,
-            notRequestedCount: result.notRequestedCount,
-            omittedCount: result.omittedCount,
-            provenance: result.details,
-            provenanceCounts,
-            model: result.details.model ?? participation,
-          },
-        };
-      } catch (error) {
+        return await finish();
+      } catch (caught) {
+        let error: unknown = caught;
         signal?.throwIfAborted();
+        if (queryId && error instanceof ExploreBudgetExhausted) {
+          try { return await finish(); }
+          catch (finishError) { signal?.throwIfAborted(); error = finishError; }
+        }
         const message = error instanceof Error ? error.message : String(error);
         return {
           content: [{ type: "text", text: `explore failed: ${message}` }],
@@ -254,6 +279,7 @@ export function createExploreTool(
           isError: true,
         };
       } finally {
+        signal?.removeEventListener("abort", cancelQuery);
         if (queryId) {
           try {
             await bridge.request("explore.query.release", { queryId }, {

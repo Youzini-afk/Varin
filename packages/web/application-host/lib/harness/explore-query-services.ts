@@ -399,7 +399,7 @@ export async function packExploreSearchResult(
     ...(resolvedDetails.sources ? { sources: summarizeSources(resolvedDetails.sources) } : {}),
   };
   return {
-    text: packed.visibleText,
+    text: `${options?.resourceUnits?.length ? `Search scope: ${[...new Set(options.resourceUnits.map((unit) => path.resolve(unit.root, unit.resourcePrefix)))].join(", ")}\n` : ""}${packed.visibleText}`,
     snippets: result.snippets,
     issueCount: result.issues.length,
     notRequestedCount: result.notRequested.count,
@@ -796,7 +796,7 @@ export function createExploreQueryFinishService(
             model.note = `${model.note ? `${model.note} ` : ""}Fast decision is ${fastDecision.status}; source ranking was kept.`;
           }
         }
-        if (workspaceId && exploreShouldRerank(model) && host.rerankExploreViews && !fastDecisionActive) {
+        if (workspaceId && Date.now() < stored.deadlineAt && exploreShouldRerank(model) && host.rerankExploreViews && !fastDecisionActive) {
           let settings: ReturnType<typeof rerankSettingsFromSnapshot>;
           let settingsInvalid = false;
           try {
