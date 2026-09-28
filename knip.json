@@ -3,7 +3,6 @@
   "workspaces": {
     ".": {
       "entry": [
-        "postcss.config.js",
         "scripts/**/*.{js,cjs,mjs,ts}"
       ],
       "project": [
@@ -25,6 +24,7 @@
     },
     "packages/web": {
       "entry": [
+        "postcss.config.js",
         "src/main.tsx",
         "src/mobile-main.tsx",
         "src/mini-chat-main.tsx",
