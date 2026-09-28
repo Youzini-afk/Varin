@@ -1,7 +1,7 @@
 # Documentation index
 
 Status: navigation index — keep current as documents move or change role.
-Last updated: 2026-09-27
+Last updated: 2026-09-28
 
 `docs/` 按角色分目录。文档与代码冲突时以代码与测试为准，并在同一改动里修正失效的一侧。
 
@@ -33,6 +33,7 @@ Harness 总体与模块专卷：
 - [design/context-compaction-agent-design.md](design/context-compaction-agent-design.md) / [design/fast-decision-model-design.md](design/fast-decision-model-design.md) — 压缩 Agent 与快速决策模型
 - [design/native-workspace-recovery-design.md](design/native-workspace-recovery-design.md) / [design/recovery.md](design/recovery.md) — 恢复模型
 - [design/office-work-continuity-design.md](design/office-work-continuity-design.md) — 阶段 O 办公连续性（设计已接受，未实施）
+- [design/bot-operated-workbench-design.md](design/bot-operated-workbench-design.md) — 单 Bot 操作工作台、主动/自动记忆、TDB 与快速决策分工、执行者咨询和缓存（讨论草案，未实施）
 - [design/composable-workbench.md](design/composable-workbench.md) — 工作台 profile 与扩展组合
 - [design/plugin-gui-design.md](design/plugin-gui-design.md) / [design/varin-extension-platform.md](design/varin-extension-platform.md) — 插件 GUI 与扩展平台
 - [design/unified-file-editor-platform.md](design/unified-file-editor-platform.md) — 统一文件编辑器平台
