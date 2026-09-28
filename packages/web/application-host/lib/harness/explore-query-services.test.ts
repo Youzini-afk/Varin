@@ -1,4 +1,4 @@
-import { resolve } from "node:path";
+import { isAbsolute, relative, resolve } from "node:path";
 import { describe, expect, it, vi } from "vitest";
 import type { AgentInputContext, HarnessActorContext } from "@varin/protocol";
 import {
@@ -395,7 +395,13 @@ describe("explore query services", () => {
 
   it("uses the actor scope for graph, semantic, vocabulary, and follow-up paths", async () => {
     const store = createExploreQueryStore();
-    const scopedActor: HarnessActorContext = { ...actor, workspaceScope: ["packages/allowed"] };
+    const workspaceRoot = resolve("explore-scoped-workspace");
+    const scopedActor: HarnessActorContext = {
+      ...actor,
+      authorityRoot: workspaceRoot,
+      cwd: workspaceRoot,
+      workspaceScope: ["packages/allowed"],
+    };
     const readPaths: string[] = [];
     const graphRoots: string[][] = [];
     const semanticRoots: string[][] = [];
@@ -472,8 +478,10 @@ describe("explore query services", () => {
     expect(started.vocab.entries).toEqual(["packages/allowed/src/index.ts"]);
     const views = await createExploreQueryViewsService(host).handle({ queryId: started.queryId }, scopedContext);
     const result = store.get(actor.sessionId, started.queryId)!.run.finish();
-    expect(readPaths).toContain("packages/allowed/src/index.ts");
-    expect(readPaths.every((path) => path.startsWith("packages/allowed/"))).toBe(true);
+    expect(readPaths.every(isAbsolute)).toBe(true);
+    expect(readPaths.map((path) => relative(workspaceRoot, path).replaceAll("\\", "/")))
+      .toContain("packages/allowed/src/index.ts");
+    expect(readPaths.every((path) => relative(workspaceRoot, path).replaceAll("\\", "/").startsWith("packages/allowed/"))).toBe(true);
     expect(graphRoots).toEqual([["packages/allowed"]]);
     expect(semanticRoots).toEqual([["packages/allowed"]]);
     expect(JSON.stringify({ started, views, result })).not.toContain("packages/secret");
