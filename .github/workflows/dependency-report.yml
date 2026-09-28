@@ -1,0 +1,49 @@
+name: Dependency change report
+
+on:
+  pull_request_target:
+    types: [opened, reopened, synchronize, edited]
+  workflow_dispatch:
+    inputs:
+      pull-request:
+        description: Dependabot pull request number
+        required: true
+        type: string
+
+permissions:
+  contents: read
+  pull-requests: write
+
+concurrency:
+  group: dependency-report-${{ github.event.pull_request.number || inputs.pull-request }}
+  cancel-in-progress: false
+
+jobs:
+  report:
+    if: github.event_name == 'workflow_dispatch' || github.event.pull_request.user.login == 'dependabot[bot]'
+    runs-on: ubuntu-latest
+    steps:
+      # Only the trusted default-branch script runs. PR code and dependencies are
+      # never checked out, installed, or executed in this write-capable job.
+      - uses: actions/checkout@v7
+        with:
+          ref: ${{ github.event.repository.default_branch }}
+          persist-credentials: false
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 24
+      - name: Collect version changes and upstream notes
+        env:
+          GH_TOKEN: ${{ github.token }}
+          PR_NUMBER: ${{ github.event.pull_request.number || inputs.pull-request }}
+        run: node scripts/dependabot-report.mjs
+      - uses: actions/upload-artifact@v7
+        with:
+          name: dependency-report
+          path: artifacts/dependency-report/
+          if-no-files-found: ignore
+      - name: Update the report comment
+        env:
+          GH_TOKEN: ${{ github.token }}
+          PR_NUMBER: ${{ github.event.pull_request.number || inputs.pull-request }}
+        run: node scripts/dependabot-report.mjs --publish

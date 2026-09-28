@@ -1,9 +1,14 @@
 version: 2
+# Discover releases hourly, including weekends. Proposing an update does not approve it:
+# keep major upgrades visible and review their migration notes before merging.
 updates:
   - package-ecosystem: cargo
     directory: /kernel
     schedule:
-      interval: weekly
+      interval: cron
+      cronjob: '0 * * * *'
+    cooldown:
+      default-days: 0
     groups:
       tree-sitter-wasm:
         patterns:
@@ -16,7 +21,10 @@ updates:
   - package-ecosystem: github-actions
     directory: /
     schedule:
-      interval: weekly
+      interval: cron
+      cronjob: '0 * * * *'
+    cooldown:
+      default-days: 0
     groups:
       # The artifact actions must carry matching major versions, and the download action's v8 is the
       # counterpart to the newer non-zipped upload behavior. Proposing one side alone is half a
@@ -36,13 +44,11 @@ updates:
   - package-ecosystem: bun
     directory: /
     schedule:
-      interval: weekly
+      interval: cron
+      cronjob: '0 * * * *'
+    cooldown:
+      default-days: 0
     open-pull-requests-limit: 10
-    # Keep Node declarations aligned with the Node 24 runtime used by CI and packaging.
-    # Revisit this when the runtime itself moves to Node 26; security updates still run.
-    ignore:
-      - dependency-name: '@types/node'
-        update-types: ['version-update:semver-major']
     groups:
       # ESLint and its TypeScript plugins have to move together: a major on one is inconsistent with
       # the others, so separate pull requests cannot pass individually.
