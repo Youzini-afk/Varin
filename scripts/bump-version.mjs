@@ -2,6 +2,7 @@
 import fs from 'fs';
 import path from 'path';
 import { fileURLToPath } from 'url';
+import { syncWorkspaceLockVersions } from './sync-workspace-lock-versions.mjs';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const ROOT = path.resolve(__dirname, '..');
@@ -31,5 +32,15 @@ for (const pkgPath of PACKAGES) {
   fs.writeFileSync(fullPath, JSON.stringify(pkg, null, 2) + '\n');
   console.log(`  ${pkgPath}: ${oldVersion} -> ${newVersion}`);
 }
+
+const workspace = (directory) => {
+  const manifest = JSON.parse(fs.readFileSync(path.join(ROOT, directory, 'package.json'), 'utf8'));
+  return { directory, name: manifest.name, version: manifest.version };
+};
+syncWorkspaceLockVersions(path.join(ROOT, 'bun.lock'), [
+  workspace('packages/electron'), workspace('packages/ui'), workspace('packages/web'),
+]);
+syncWorkspaceLockVersions(path.join(ROOT, 'scripts/cloud-runtime.bun.lock'), [workspace('packages/web')]);
+console.log('  bun.lock and scripts/cloud-runtime.bun.lock: workspace versions synchronized');
 
 console.log('\nVersion bump complete. Review changes, then commit and tag.');

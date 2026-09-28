@@ -14,6 +14,7 @@ import {
 import path from 'node:path';
 import { spawnSync } from 'node:child_process';
 import { fileURLToPath, pathToFileURL } from 'node:url';
+import { syncWorkspaceLockVersions } from './sync-workspace-lock-versions.mjs';
 
 const scriptPath = fileURLToPath(import.meta.url);
 const repoRoot = path.resolve(path.dirname(scriptPath), '..');
@@ -522,6 +523,12 @@ export const buildCloudRuntime = ({
       cpSync(canonicalLockPath, path.join(resolvedOutput, 'bun.lock'), { force: true });
     } else if (!updateLock) {
       throw new Error(`Canonical cloud runtime lockfile is missing: ${canonicalLockPath}`);
+    }
+    if (updateLock) {
+      syncWorkspaceLockVersions(path.join(resolvedOutput, 'bun.lock'), CLOUD_RUNTIME_PACKAGE_DIRS.map((directory) => {
+        const manifest = readJson(path.join(resolvedOutput, 'packages', directory, 'package.json'));
+        return { directory: `packages/${directory}`, name: manifest.name, version: manifest.version };
+      }));
     }
     run('bun', [
       'install',
