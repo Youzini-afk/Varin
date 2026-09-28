@@ -132,7 +132,7 @@ async function executeTool(
 let toolCallSequence = 0;
 
 describe("harness e2e integration", () => {
-  it("bash starts at the workspace and retains cwd across calls", async () => {
+  it("bash starts at the workspace and resets each call to its requested cwd", async () => {
     const { workspaceRoot, bridge, dispose } = await setupE2E();
     try {
       const bashTool = createBashTool(bridge, SESSION_ID, workspaceRoot);
@@ -140,14 +140,13 @@ describe("harness e2e integration", () => {
       const dirName = workspaceRoot.split(/[\\/]/).pop();
       assert.ok(text.includes(dirName!), `bash pwd output should contain workspace dir name "${dirName}": got "${text}"`);
       mkdirSync(join(workspaceRoot, "packages"));
-      // First call: cd packages
-      await executeTool(bashTool, { command: "cd packages" });
-      // Second call: pwd — output should contain the packages path
+      // A child-shell cd must not silently change the next call's default.
+      const changed = await executeTool(bashTool, { command: "cd packages" });
+      assert.match(changed, /\[exit 0\]/);
       const afterCd = await executeTool(bashTool, { command: "pwd" });
-      // The output includes the path plus [exit N] suffix; extract the path line
-      const pwdLine = afterCd.split("\n").find((l) => l.includes("packages"));
-      assert.ok(pwdLine, `pwd output should contain a line with "packages": got "${afterCd}"`);
-      assert.ok(pwdLine!.trim().endsWith("packages"), `pwd path should end with "packages": got "${pwdLine!.trim()}"`);
+      assert.ok(afterCd.split("\n").some((line) => line.trim().endsWith(dirName!)), `cwd must reset to the workspace: ${afterCd}`);
+      const explicit = await executeTool(bashTool, { command: "pwd", cwd: join(workspaceRoot, "packages") });
+      assert.ok(explicit.split("\n").some((line) => line.trim().endsWith("packages")), `explicit cwd must be honored: ${explicit}`);
     } finally {
       await dispose();
       try { rmSync(workspaceRoot, { recursive: true, force: true }); } catch { /* Windows */ }

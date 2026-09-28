@@ -469,6 +469,30 @@ describe("harness search service", () => {
     expect(readFile).toHaveBeenCalledWith(actor, path.resolve("/workspace", "disk.ts"), expect.any(AbortSignal), { source: "disk" });
   });
 
+  it("passes revision-bound candidates to Explore for source-gap reporting", async () => {
+    const search = nativeLikeSearch([
+      makeHit("changed.ts", 1, "matched old revision", { revision: "disk:1" }),
+    ]);
+    const readFile = vi.fn(async () => ({
+      status: "ready" as const,
+      content: "changed after search",
+      revision: "disk:2",
+      source: "disk" as const,
+    }));
+    const service = createHarnessSearchService({ search, readFile, resolveWorkspaceRoot: async () => "/workspace" });
+
+    const result = await service.search({ pattern: "matched" }, {
+      actor,
+      workspaceId: "ws-1",
+      signal: new AbortController().signal,
+      candidateBudget: 200,
+    });
+
+    expect(result).toMatchObject({ status: "ready", totalHits: 1, partial: false });
+    expect(result.files[0]?.hits[0]).toMatchObject({ text: "matched old revision", revision: "disk:1" });
+    expect(readFile).not.toHaveBeenCalled();
+  });
+
   it("merges all disk and draft hits before sorting and applying the limit", async () => {
     const search = nativeLikeSearch([makeHit("z-disk.ts", 1, "match", { revision: "disk:1" })]);
     const readFile = vi.fn(async (_actor, filePath: string) => ({

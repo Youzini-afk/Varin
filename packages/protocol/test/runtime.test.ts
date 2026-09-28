@@ -20,20 +20,25 @@ describe("surface runtime protocol", () => {
   it("parses only content-free input source fields", () => {
     assert.deepEqual(parseAgentInputContext({
       source: "surface",
-      workspaceId: "workspace-1",
-      dirtyPaths: ["draft.ts"],
+      roots: [{ workspaceId: "workspace-1", dirtyPaths: ["draft.ts"] }],
       snapshot: { status: "ready", ref: "opaque-ref" },
       content: "must not cross the runtime boundary",
     }), {
       source: "surface",
-      workspaceId: "workspace-1",
-      dirtyPaths: ["draft.ts"],
+      roots: [{ workspaceId: "workspace-1", dirtyPaths: ["draft.ts"] }],
       snapshot: { status: "ready", ref: "opaque-ref" },
     });
     assert.equal(parseAgentInputContext({
       source: "surface",
-      workspaceId: "workspace-1",
-      dirtyPaths: ["draft.ts", "draft.ts"],
+      roots: [{ workspaceId: "workspace-1", dirtyPaths: ["draft.ts", "draft.ts"] }],
+      snapshot: { status: "ready", ref: "opaque-ref" },
+    }), null);
+    assert.equal(parseAgentInputContext({
+      source: "surface",
+      roots: [
+        { workspaceId: "workspace-1", dirtyPaths: ["draft.ts"] },
+        { workspaceId: "workspace-1", dirtyPaths: ["other.ts"] },
+      ],
       snapshot: { status: "ready", ref: "opaque-ref" },
     }), null);
   });

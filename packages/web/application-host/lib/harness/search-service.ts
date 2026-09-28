@@ -315,12 +315,12 @@ export function createHarnessSearchService(deps: HarnessSearchDeps) {
             for(const hit of result.hits){
               if(!inView(hit.resource.resourceId))continue;
               const file=multiRoot?path.join(unit.root,hit.resource.resourceId):hit.resource.resourceId;
-              // Native content hits are revision-bound. Re-open through the
-              // current Documents view before presenting them as current; a
-              // changed or missing source invalidates this candidate and makes
-              // the query partial. Fixed working-branch pins already carry
-              // their own immutable revision and are verified by that view.
-              if(!pinned&&deps.readFile&&ctx.actor){
+              // Ordinary search presents hits directly, so verify their
+              // revision here. Explore's candidate mode reopens every source
+              // during excerpt preparation; retain stale candidates so it can
+              // report the specific changed or missing path as a source gap.
+              // Fixed working-branch pins already carry an immutable view.
+              if(!candidateMode&&!pinned&&deps.readFile&&ctx.actor){
                 if(!hit.revision){revisionGap=true;continue;}
                 let snapshot=currentSnapshots.get(snapshotKey(unit.rootWorkspaceId,hit.resource.resourceId));
                 try {
