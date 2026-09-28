@@ -150,14 +150,17 @@ describe("harness settings", () => {
     assert.deepEqual(mergeHarnessSettings({}, {}).context, {
       backgroundPreparation: true,
       preparationWaterline: 0.75,
+      compactionRecovery: { enabled: true, streamIdleMs: 120_000, responseWaitMs: 300_000, maxRetries: 1 },
     });
     assert.deepEqual(resolveHarnessContextSettings(undefined, { mode: "off" }), {
       backgroundPreparation: false,
       preparationWaterline: 0.75,
+      compactionRecovery: { enabled: true, streamIdleMs: 120_000, responseWaitMs: 300_000, maxRetries: 1 },
     });
     assert.deepEqual(resolveHarnessContextSettings(undefined, { shadowMode: false }), {
       backgroundPreparation: false,
       preparationWaterline: 0.75,
+      compactionRecovery: { enabled: true, streamIdleMs: 120_000, responseWaitMs: 300_000, maxRetries: 1 },
     });
     // A retired mode that kept background work on does not disable preparation.
     assert.equal(
@@ -273,6 +276,18 @@ describe("harness settings", () => {
       /between 0 and 1/,
     );
     assert.throws(() => resolveHarnessContextSettings(false, undefined), /must be an object/);
+    assert.throws(() => resolveHarnessContextSettings({ compactionRecovery: { streamIdleMs: 0 } }, undefined), /streamIdleMs/);
+    assert.throws(() => resolveHarnessContextSettings({ compactionRecovery: { responseWaitMs: -1 } }, undefined), /responseWaitMs/);
+    assert.throws(() => resolveHarnessContextSettings({ compactionRecovery: { maxRetries: 1.5 } }, undefined), /maxRetries/);
+  });
+
+  it("keeps compaction stall recovery user-owned and fills omitted settings", () => {
+    const merged = mergeHarnessSettings({ context: { compactionRecovery: {
+      enabled: false, streamIdleMs: 90_000,
+    } } }, { context: { compactionRecovery: { enabled: true, maxRetries: 9 } } });
+    assert.deepEqual(merged.context.compactionRecovery, {
+      enabled: false, streamIdleMs: 90_000, responseWaitMs: 300_000, maxRetries: 1,
+    });
   });
 
   it("keeps web search provider, credential, and renderer selection user-owned", () => {

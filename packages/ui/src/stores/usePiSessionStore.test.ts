@@ -1753,6 +1753,37 @@ describe('Pi session store', () => {
     expect(store.getState().records['session-a']?.liveAssistant).toBeUndefined();
   });
 
+  test('shows a compaction retry and ignores late output from its retired worker', async () => {
+    const runtime = new FakeRuntime();
+    runtime.handler = (method) => {
+      if (method === 'agent.compact') return { taskId: 'task-a', status: 'preparing' };
+      throw new Error(`Unexpected ${method}`);
+    };
+    const store = createPiSessionStore(runtime);
+    await store.getState().compactSession('session-a');
+    const emitTrace = (workerId: string, seq: number, data: Record<string, unknown>) => runtime.emit({
+      kind: 'event', event: 'compaction.trace', seq,
+      data: { sessionId: 'session-a', taskId: 'task-a', ...data },
+      source: { role: workerId === 'session-worker' ? 'session' : 'compaction',
+        runtimeGeneration: 1, sessionId: 'session-a', workerId },
+      v: VARIN_PROTOCOL_VERSION,
+    } as RuntimeEventEnvelope);
+
+    emitTrace('old-worker', 1, { type: 'started', attempt: 1 });
+    emitTrace('old-worker', 2, { type: 'delta', attempt: 1, channel: 'text', delta: 'old partial' });
+    emitTrace('session-worker', 1, { type: 'retrying', attempt: 2, maxAttempts: 2, reason: 'stalled' });
+    expect(store.getState().records['session-a']?.compactionTraces?.['task-a']?.status).toBe('retrying');
+    expect(store.getState().records['session-a']?.compactionTraces?.['task-a']?.attempt).toBe(2);
+    expect(store.getState().records['session-a']?.compactionTraces?.['task-a']?.partial).toEqual({ text: '', thinking: '' });
+    emitTrace('old-worker', 3, { type: 'delta', attempt: 1, channel: 'text', delta: 'late old output' });
+    emitTrace('new-worker', 1, { type: 'started', attempt: 2 });
+    emitTrace('new-worker', 2, { type: 'delta', attempt: 2, channel: 'text', delta: 'new summary' });
+    emitTrace('session-worker', 2, { type: 'retrying', attempt: 2, maxAttempts: 2, reason: 'late retry notice' });
+    expect(store.getState().records['session-a']?.compactionTraces?.['task-a']?.status).toBe('running');
+    expect(store.getState().records['session-a']?.compactionTraces?.['task-a']?.attempt).toBe(2);
+    expect(store.getState().records['session-a']?.compactionTraces?.['task-a']?.partial).toEqual({ text: 'new summary', thinking: '' });
+  });
+
   test('loads the authoritative Pi session tree', async () => {
     const runtime = new FakeRuntime();
     const tree = {

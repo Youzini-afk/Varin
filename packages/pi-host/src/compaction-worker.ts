@@ -10,6 +10,7 @@ import {
 import type { AssistantMessage, ThinkingBudgets, ThinkingLevel, Transport, Usage } from "@earendil-works/pi-ai";
 import {
   readCompactionTaskSpec,
+  resolveCompactionRecoverySettings,
   type CompactionRunResult,
   type CompactionTrace,
   type CompactionTraceEntry,
@@ -32,6 +33,7 @@ import {
 } from "./harness/context-request-boundary.js";
 import { HostServicesBridge } from "./harness/host-services-bridge.js";
 import { ProviderConfigurationManager } from "./provider-configuration.js";
+import { createCompactionWatchdog } from "./compaction-watchdog.js";
 
 function addUsage(total: Usage | undefined, next: Usage | undefined): Usage | undefined {
   if (next === undefined) return total;
@@ -77,6 +79,7 @@ export class CompactionWorkerRuntime {
   #agent: Agent | undefined;
   #abortController = new AbortController();
   #aborted = false;
+  #stalled = false;
   #queries = 0;
 
   constructor(options: {
@@ -116,9 +119,21 @@ export class CompactionWorkerRuntime {
   async run(params: unknown): Promise<CompactionRunResult> {
     this.#throwIfAborted();
     const spec: CompactionTaskSpec = readCompactionTaskSpec(params);
+    this.#stalled = false;
+    const watchdog = createCompactionWatchdog(spec.recovery ?? resolveCompactionRecoverySettings(undefined), () => {
+      this.#stalled = true;
+      this.abort();
+    });
+    watchdog.start();
+    try { return await watchdog.race(this.#runTask(spec, watchdog)); }
+    finally { watchdog.dispose(); }
+  }
+
+  async #runTask(spec: CompactionTaskSpec, watchdog: ReturnType<typeof createCompactionWatchdog>): Promise<CompactionRunResult> {
     const trace: CompactionTrace = { taskId: spec.taskId ?? randomUUID(), entries: [] };
     const progress = (update: { type: "started" | "finished" } | { type: "delta"; channel: "text" | "thinking"; delta: string } | { type: "entry"; entry: CompactionTraceEntry } | { type: "failed"; message: string }) => {
-      try { this.#emit("compaction.trace", { sessionId: spec.sessionId, taskId: trace.taskId, ...update }); }
+      try { this.#emit("compaction.trace", { sessionId: spec.sessionId, taskId: trace.taskId,
+        ...(spec.attempt === undefined ? {} : { attempt: spec.attempt }), ...update }); }
       catch { /* The summary remains authoritative when a viewer disconnects. */ }
     };
     progress({ type: "started" });
@@ -281,11 +296,15 @@ export class CompactionWorkerRuntime {
       const unsubscribe = agent.subscribe(async (event) => {
         if (event.type === "message_update") {
           const delta = event.assistantMessageEvent;
+          if (delta.type === "text_delta" || delta.type === "thinking_delta" || delta.type === "toolcall_delta") {
+            watchdog.streamed();
+          }
           if (delta.type === "text_delta" || delta.type === "thinking_delta") {
             progress({ type: "delta", channel: delta.type === "text_delta" ? "text" : "thinking", delta: delta.delta });
           }
         }
         if (event.type === "message_end" && event.message.role === "assistant") {
+          watchdog.waiting();
           lastAssistant = event.message as AssistantMessage;
           totalUsage = addUsage(totalUsage, lastAssistant.usage);
           const text = lastAssistant.content.filter((block) => block.type === "text").map((block) => block.text).join("\n");
@@ -296,6 +315,7 @@ export class CompactionWorkerRuntime {
             progress({ type: "entry", entry });
           }
         } else if (event.type === "tool_execution_start") {
+          watchdog.waiting();
           const entry: CompactionTraceEntry = {
             kind: "tool-call", at: Date.now(), toolCallId: event.toolCallId, toolName: event.toolName,
             args: JSON.parse(JSON.stringify(event.args ?? null)) as JsonValue,
@@ -303,6 +323,7 @@ export class CompactionWorkerRuntime {
           trace.entries.push(entry);
           progress({ type: "entry", entry });
         } else if (event.type === "tool_execution_end") {
+          watchdog.waiting();
           const entry: CompactionTraceEntry = {
             kind: "tool-result", at: Date.now(), toolCallId: event.toolCallId, toolName: event.toolName,
             isError: event.isError,
@@ -313,6 +334,7 @@ export class CompactionWorkerRuntime {
         }
       });
       try {
+        watchdog.waiting();
         await agent.prompt(compactionInstruction(spec));
         await agent.waitForIdle();
         this.#throwIfAborted();
@@ -350,7 +372,7 @@ export class CompactionWorkerRuntime {
           : { usage: JSON.parse(JSON.stringify(totalUsage)) }),
       };
     } catch (error) {
-      progress({ type: "failed", message: error instanceof Error ? error.message : String(error) });
+      if (!this.#stalled) progress({ type: "failed", message: error instanceof Error ? error.message : String(error) });
       throw error;
     } finally {
       this.#agent = undefined;

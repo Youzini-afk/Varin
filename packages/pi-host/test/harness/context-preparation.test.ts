@@ -101,8 +101,10 @@ interface Harness {
   manualReady: string[];
   manualCommitted: string[];
   manualFailed: Array<{ taskId: string; message: string }>;
+  taskFailed: Array<{ taskId: string; message: string }>;
+  retries: Array<{ taskId: string; attempt: number; maxAttempts: number }>;
   compactions: import("@varin/protocol").ContextRetentionParams[];
-  config: { enabled: boolean; waterline: number };
+  config: import("../../src/harness/context-preparation.js").ContextPreparationConfig;
   entries: SessionEntry[];
   extension: ReturnType<typeof createContextPreparationExtension>;
   ctx: {
@@ -124,8 +126,11 @@ const createHarness = (entries: SessionEntry[], tokensNow: number): Harness => {
     manualReady: [],
     manualCommitted: [],
     manualFailed: [],
+    taskFailed: [],
+    retries: [],
     compactions: [],
-    config: { enabled: true, waterline: 0.75 },
+    config: { enabled: true, waterline: 0.75,
+      recovery: { enabled: true, streamIdleMs: 120_000, responseWaitMs: 300_000, maxRetries: 1 } },
     entries,
     ctx: {
       model: MODEL,
@@ -152,6 +157,8 @@ const createHarness = (entries: SessionEntry[], tokensNow: number): Harness => {
     onManualReady: (taskId) => harness.manualReady.push(taskId),
     onManualCommitted: (taskId) => harness.manualCommitted.push(taskId),
     onManualFailed: (taskId, message) => harness.manualFailed.push({ taskId, message }),
+    onRetry: (taskId, attempt, maxAttempts) => harness.retries.push({ taskId, attempt, maxAttempts }),
+    onTaskFailed: (taskId, message) => harness.taskFailed.push({ taskId, message }),
   });
   harness.extension({
     on: (event: string, handler: (event: never, ctx: never) => unknown) => handlers.set(event, handler),
@@ -549,6 +556,23 @@ describe("context preparation extension", () => {
     // Next context event retries preparation rather than staying stuck.
     fireContext(harness, 12_020);
     assert.equal(harness.calls.length, 2);
+  });
+
+  it("retries only a confirmed stall with the same frozen source and stops after the configured attempts", async () => {
+    const harness = createHarness(branchEntries(1_300), 12_000);
+    fireContext(harness, 12_000);
+    const stall = () => Object.assign(new Error("Compaction stalled: no response"), { code: "compaction-stalled" });
+    harness.calls[0]!.reject(stall());
+    await waitFor(() => harness.calls.length === 2);
+    assert.equal(harness.calls[0]!.spec.attempt, 1);
+    assert.equal(harness.calls[1]!.spec.attempt, 2);
+    assert.deepEqual({ ...harness.calls[1]!.spec, attempt: 1 }, harness.calls[0]!.spec);
+    assert.deepEqual(harness.retries, [{ taskId: harness.calls[0]!.spec.taskId, attempt: 2, maxAttempts: 2 }]);
+    harness.calls[1]!.reject(stall());
+    await waitFor(() => harness.failures.length === 1);
+    assert.equal(harness.calls.length, 2);
+    assert.deepEqual(harness.taskFailed, [{ taskId: harness.calls[0]!.spec.taskId, message: "Compaction stalled: no response" }]);
+    assert.equal(harness.extension.status().candidate, "none");
   });
 
   it("rejects an empty worker result instead of committing it", async () => {

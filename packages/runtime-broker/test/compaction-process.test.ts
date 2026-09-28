@@ -111,6 +111,18 @@ test("compaction runs and queries in its own process, cancels, and rejects an ex
     await cancelledResult;
     assert.equal(broker.workerCount, 1);
 
+    const stalledRequest = new Promise<void>((resolveHeld) => { onHeld = resolveHeld; });
+    const stalled = broker.runCompactionTask(session.sessionId, {
+      ...spec,
+      recovery: { enabled: true, responseWaitMs: 1_000, streamIdleMs: 100, maxRetries: 1 },
+    }, callbacks);
+    const stalledResult = assert.rejects(stalled, (error: { code?: string }) =>
+      error.code === "compaction_stalled");
+    await stalledRequest;
+    await stalledResult;
+    assert.equal(droppedWorker, registeredWorker);
+    assert.equal(broker.workerCount, 1, "the stalled worker is retired before another attempt");
+
     await assert.rejects(broker.runCompactionTask(session.sessionId, spec, {
       ...callbacks,
       registerWorker: async (id) => {

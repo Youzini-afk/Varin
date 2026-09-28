@@ -80,6 +80,17 @@ export interface HarnessContextSettings {
   backgroundPreparation: boolean;
   /** Fraction of usable input where preparation starts (0-1, default 0.75). */
   preparationWaterline: number;
+  compactionRecovery: CompactionRecoverySettings;
+}
+
+export interface CompactionRecoverySettings {
+  enabled: boolean;
+  /** Silence after a streamed model update before treating the request as stalled. */
+  streamIdleMs: number;
+  /** Wait for the first model update or a non-streaming completion. */
+  responseWaitMs: number;
+  /** Fresh worker attempts after a confirmed stall; the frozen input is reused. */
+  maxRetries: number;
 }
 
 export interface HarnessReviewSettings {
@@ -156,6 +167,7 @@ export function resolveHarnessNextStepSettings(value: unknown): HarnessNextStepS
 export interface HarnessContextSettingsInput {
   backgroundPreparation?: unknown;
   preparationWaterline?: unknown;
+  compactionRecovery?: unknown;
 }
 
 export interface HarnessMemorySettingsInput {
@@ -193,7 +205,32 @@ export function resolveHarnessReviewSettings(value: unknown): HarnessReviewSetti
 const DEFAULT_HARNESS_CONTEXT_SETTINGS: HarnessContextSettings = {
   backgroundPreparation: true,
   preparationWaterline: 0.75,
+  compactionRecovery: { enabled: true, streamIdleMs: 120_000, responseWaitMs: 300_000, maxRetries: 1 },
 };
+
+export function resolveCompactionRecoverySettings(value: unknown): CompactionRecoverySettings {
+  if (value === undefined) return { ...DEFAULT_HARNESS_CONTEXT_SETTINGS.compactionRecovery };
+  if (typeof value !== "object" || value === null || Array.isArray(value)) {
+    throw new HarnessSettingsValidationError("harness.context.compactionRecovery must be an object");
+  }
+  const input = value as Record<string, unknown>;
+  if (input.enabled !== undefined && typeof input.enabled !== "boolean") {
+    throw new HarnessSettingsValidationError("harness.context.compactionRecovery.enabled must be a boolean");
+  }
+  const timer = (key: "streamIdleMs" | "responseWaitMs"): number => {
+    const setting = input[key] ?? DEFAULT_HARNESS_CONTEXT_SETTINGS.compactionRecovery[key];
+    if (!Number.isSafeInteger(setting) || Number(setting) < 1 || Number(setting) > 2_147_483_647) {
+      throw new HarnessSettingsValidationError(`harness.context.compactionRecovery.${key} must be a positive timer duration`);
+    }
+    return Number(setting);
+  };
+  const maxRetries = input.maxRetries ?? DEFAULT_HARNESS_CONTEXT_SETTINGS.compactionRecovery.maxRetries;
+  if (!Number.isSafeInteger(maxRetries) || Number(maxRetries) < 0) {
+    throw new HarnessSettingsValidationError("harness.context.compactionRecovery.maxRetries must be a non-negative integer");
+  }
+  return { enabled: input.enabled ?? DEFAULT_HARNESS_CONTEXT_SETTINGS.compactionRecovery.enabled,
+    streamIdleMs: timer("streamIdleMs"), responseWaitMs: timer("responseWaitMs"), maxRetries: Number(maxRetries) };
+}
 
 export function resolveHarnessContextSettings(
   context: unknown,
@@ -225,6 +262,7 @@ export function resolveHarnessContextSettings(
   return {
     backgroundPreparation: input.backgroundPreparation ?? !legacyOff,
     preparationWaterline: input.preparationWaterline ?? DEFAULT_HARNESS_CONTEXT_SETTINGS.preparationWaterline,
+    compactionRecovery: resolveCompactionRecoverySettings(input.compactionRecovery),
   };
 }
 
@@ -307,7 +345,8 @@ export const DEFAULT_HARNESS_SETTINGS: HarnessSettings = {
     eventRetentionDays: 30,
     autoAcceptSuggestions: { workspace: false, user: false },
   },
-  context: { backgroundPreparation: true, preparationWaterline: 0.75 },
+  context: { backgroundPreparation: true, preparationWaterline: 0.75,
+    compactionRecovery: { ...DEFAULT_HARNESS_CONTEXT_SETTINGS.compactionRecovery } },
   review: { enabled: false, gate: false },
   nextStep: { enabled: false },
   documentReading: { ...DEFAULT_HARNESS_DOCUMENT_READING_SETTINGS },

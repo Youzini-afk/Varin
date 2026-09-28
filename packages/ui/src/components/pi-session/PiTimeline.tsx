@@ -557,9 +557,10 @@ export const PiTimeline: React.FC<PiTimelineProps> = (props) => {
           <button type="button" className="flex w-full items-center gap-2 rounded-lg border border-border/60 bg-muted/20 px-3 py-2 text-left typography-meta hover:bg-interactive-hover" onClick={props.onOpenCompaction}>
             <Icon name={props.compactionStatus === 'failed' ? 'error-warning'
               : props.compactionStatus === 'ready' ? 'check' : 'loader-4'}
-              className={cn('size-3.5', (props.compactionStatus === 'requested' || props.compactionStatus === 'running') && 'animate-spin')} />
+              className={cn('size-3.5', (props.compactionStatus === 'requested' || props.compactionStatus === 'running' || props.compactionStatus === 'retrying') && 'animate-spin')} />
             {props.compactionStatus === 'failed' ? t('chat.compaction.failed')
-              : props.compactionStatus === 'ready' ? t('chat.compaction.ready') : t('chat.compaction.inProgress')}
+              : props.compactionStatus === 'ready' ? t('chat.compaction.ready')
+                : props.compactionStatus === 'retrying' ? t('chat.compaction.retrying') : t('chat.compaction.inProgress')}
             <span className="ml-auto text-primary">{t('harness.threads.transcript')}</span>
           </button>
         </div>

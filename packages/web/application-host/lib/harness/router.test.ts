@@ -99,6 +99,23 @@ describe("harness router", () => {
     router.dispose();
   });
 
+  it("preserves a compaction stall across the Host bridge for the session retry policy", async () => {
+    const responses: Array<{ code?: string; retryable?: boolean }> = [];
+    const router = createHarnessRouter({
+      respond: async (_identity, _requestId, outcome) => {
+        if (!outcome.ok) responses.push({ code: outcome.error.code,
+          ...(outcome.error.retryable === undefined ? {} : { retryable: outcome.error.retryable }) });
+      },
+      resolveActor: async () => resolvedActor(["context.session"]),
+    });
+    router.register("compaction.run", { handle: async () => {
+      throw Object.assign(new Error("no response"), { code: "compaction_stalled" });
+    } });
+    await router.processEvent(harnessEvent("compaction.run", {}, { timeoutMs: 0 }));
+    expect(responses).toEqual([{ code: "compaction-stalled", retryable: true }]);
+    router.dispose();
+  });
+
   it("rejects a method whose static capability was not granted", async () => {
     const responses: Array<{ ok: boolean; code?: string }> = [];
     const router = createHarnessRouter({

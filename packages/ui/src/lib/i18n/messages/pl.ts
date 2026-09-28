@@ -1113,6 +1113,7 @@ export const dict: Record<I18nKey, string> = {
   'chat.piComposer.submission.failed': 'Nie wysłano',
   'chat.piAssistant.working': 'Przetwarzanie',
   'chat.compaction.inProgress': 'Kompresowanie kontekstu…',
+  'chat.compaction.retrying': 'Compaction stalled; retrying…',
   'chat.compaction.ready': 'Podsumowanie gotowe; zostanie użyte, gdy zabraknie miejsca w kontekście',
   'chat.compaction.failed': 'Nie udało się skompresować kontekstu',
   'chat.compaction.thinking': 'Rozumowanie',

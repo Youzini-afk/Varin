@@ -3101,7 +3101,8 @@ export class SessionHost {
         }
         globalContextSettingChanged = currentContext === undefined
           || currentContext.backgroundPreparation !== candidateContext.backgroundPreparation
-          || currentContext.preparationWaterline !== candidateContext.preparationWaterline;
+          || currentContext.preparationWaterline !== candidateContext.preparationWaterline
+          || JSON.stringify(currentContext.compactionRecovery) !== JSON.stringify(candidateContext.compactionRecovery);
       }
     } catch (error) {
       if (
@@ -3575,6 +3576,7 @@ export class SessionHost {
                     return {
                       enabled: resolved.backgroundPreparation,
                       waterline: resolved.preparationWaterline,
+                      recovery: resolved.compactionRecovery,
                     };
                   },
                   onRetention: (params) => {
@@ -3609,6 +3611,16 @@ export class SessionHost {
                   },
                   onManualFailed: (taskId, message) => {
                     if (this.sessionId) this.#emit("compaction.trace", {
+                      sessionId: this.sessionId, taskId, type: "failed", message,
+                    });
+                  },
+                  onRetry: (taskId, attempt, maxAttempts, reason) => {
+                    if (this.sessionId && taskId) this.#emit("compaction.trace", {
+                      sessionId: this.sessionId, taskId, type: "retrying", attempt, maxAttempts, reason,
+                    });
+                  },
+                  onTaskFailed: (taskId, message) => {
+                    if (this.sessionId && taskId) this.#emit("compaction.trace", {
                       sessionId: this.sessionId, taskId, type: "failed", message,
                     });
                   },

@@ -484,6 +484,11 @@ export const createHarnessRouter = (options: HarnessRouterOptions) => {
         code = error.harnessCode;
         message = error.message;
         retryable = error.harnessRetryable;
+      } else if (method === "compaction.run" && error instanceof Error
+        && "code" in error && error.code === "compaction_stalled") {
+        code = "compaction-stalled";
+        message = error.message;
+        retryable = true;
       } else if (error instanceof Error && error.name === "AbortError") {
         code = "timeout";
         message = error.message;

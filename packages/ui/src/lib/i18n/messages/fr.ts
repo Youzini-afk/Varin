@@ -2259,6 +2259,7 @@ export const dict = {
   'chat.piComposer.submission.failed': 'Non envoyé',
   'chat.piAssistant.working': 'Traitement',
   'chat.compaction.inProgress': 'Compression du contexte…',
+  'chat.compaction.retrying': 'Compaction stalled; retrying…',
   'chat.compaction.ready': 'Résumé prêt ; appliqué quand le contexte aura besoin de place',
   'chat.compaction.failed': 'Échec de la compression du contexte',
   'chat.compaction.thinking': 'Réflexion',

@@ -7,6 +7,7 @@
 
 import type { JsonValue } from "./types.js";
 import type { HistoryReadParams, HistoryReadResult } from "./harness-history.js";
+import { resolveCompactionRecoverySettings, type CompactionRecoverySettings } from "./harness-settings.js";
 
 /**
  * Serialized Pi model descriptor. `Model<Api>` is a plain data interface; the
@@ -27,6 +28,8 @@ export type CompactionModelSpec = JsonValue;
 export interface CompactionTaskSpec {
   /** Stable id shared by preparation, live progress, and the eventual commit. */
   taskId?: string;
+  /** Fresh worker attempt for this task, starting at one. */
+  attempt?: number;
   /** Owning session id; must equal the requesting actor's session. */
   sessionId: string;
   /** Resolved parent trust, including a one-session grant not saved on disk. */
@@ -57,6 +60,8 @@ export interface CompactionTaskSpec {
   previousSummary?: string;
   /** Session's resolved model at freeze time. */
   model: CompactionModelSpec;
+  /** Frozen stall and retry policy for this preparation. */
+  recovery?: CompactionRecoverySettings;
   /** Serialized subset of the parent request's stream options. */
   options: {
     cacheRetention?: string;
@@ -104,12 +109,13 @@ export type CompactionTraceUpdate = {
 } & (
   | { type: "requested"; manual: true; phase: "preparing" | "ready" }
   | { type: "started" }
+  | { type: "retrying"; attempt: number; maxAttempts: number; reason: string }
   | { type: "delta"; channel: "text" | "thinking"; delta: string }
   | { type: "entry"; entry: CompactionTraceEntry }
   | { type: "finished" }
   | { type: "committed" }
   | { type: "failed"; message: string }
-);
+) & { attempt?: number };
 
 export type CompactionHistoryParams = HistoryReadParams;
 export type CompactionHistoryResult = HistoryReadResult;
@@ -198,6 +204,12 @@ export function readCompactionTaskSpec(value: unknown): CompactionTaskSpec {
   if (!isRecord(value.model)) throw new Error("compaction task requires a model spec");
   return {
     ...(value.taskId === undefined ? {} : { taskId: readString(value, "taskId") }),
+    ...(value.attempt === undefined ? {} : { attempt: (() => {
+      if (!Number.isSafeInteger(value.attempt) || Number(value.attempt) < 1) {
+        throw new Error("compaction task attempt must be a positive integer");
+      }
+      return Number(value.attempt);
+    })() }),
     sessionId: readString(value, "sessionId"),
     projectTrusted: value.projectTrusted,
     boundaryCompactionId: readNullableString(value, "boundaryCompactionId"),
@@ -219,6 +231,7 @@ export function readCompactionTaskSpec(value: unknown): CompactionTaskSpec {
       ? {}
       : { previousSummary: readString(value, "previousSummary") }),
     model: value.model as CompactionModelSpec,
+    ...(value.recovery === undefined ? {} : { recovery: resolveCompactionRecoverySettings(value.recovery) }),
     options: {
       maxTokens,
       ...(options.reasoning === undefined ? {} : { reasoning: String(options.reasoning) }),

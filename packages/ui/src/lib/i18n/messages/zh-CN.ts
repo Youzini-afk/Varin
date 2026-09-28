@@ -2508,6 +2508,7 @@ export const dict: Record<I18nKey, string> = {
   'chat.piComposer.submission.failed': '未发送',
   'chat.piAssistant.working': '处理中',
   'chat.compaction.inProgress': '上下文压缩中…',
+  'chat.compaction.retrying': '压缩停滞，正在重试…',
   'chat.compaction.ready': '摘要已准备，将在上下文需要空间时应用',
   'chat.compaction.failed': '上下文压缩失败',
   'chat.compaction.thinking': '思考过程',

@@ -2372,6 +2372,7 @@ export const dict: Record<I18nKey, string> = {
   'chat.piComposer.submission.failed': '未送信',
   'chat.piAssistant.working': '処理中',
   'chat.compaction.inProgress': 'コンテキストを圧縮中…',
+  'chat.compaction.retrying': 'Compaction stalled; retrying…',
   'chat.compaction.ready': '要約の準備完了。コンテキストに空きが必要になったとき適用します',
   'chat.compaction.failed': 'コンテキストの圧縮に失敗しました',
   'chat.compaction.thinking': '思考過程',

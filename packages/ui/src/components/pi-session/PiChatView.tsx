@@ -1207,6 +1207,7 @@ export const PiChatView: React.FC<PiChatViewProps> = ({
         onOpenChange={setCompactionTraceOpen}
         trace={visibleCompactionTrace ?? null}
         partial={selectedCompactionTrace ? undefined : currentCompactionTraces?.[selectedCompactionTaskId ?? '']?.partial}
+        retry={selectedCompactionTrace ? undefined : currentCompactionTraces?.[selectedCompactionTaskId ?? '']?.retry}
         status={selectedCompactionTrace ? 'committed' : currentCompactionTraces?.[selectedCompactionTaskId ?? '']?.status
           ?? (compactionViewError ? 'failed' : 'requested')}
         {...(currentCompactionTraces?.[selectedCompactionTaskId ?? '']?.error

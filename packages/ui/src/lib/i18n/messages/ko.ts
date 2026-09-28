@@ -2444,6 +2444,7 @@ export const dict: Record<I18nKey, string> = {
   'chat.piComposer.submission.failed': '전송되지 않음',
   'chat.piAssistant.working': '처리 중',
   'chat.compaction.inProgress': '컨텍스트 압축 중…',
+  'chat.compaction.retrying': 'Compaction stalled; retrying…',
   'chat.compaction.ready': '요약 준비 완료, 컨텍스트 공간이 필요할 때 적용',
   'chat.compaction.failed': '컨텍스트 압축 실패',
   'chat.compaction.thinking': '사고 과정',

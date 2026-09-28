@@ -1846,7 +1846,7 @@ export function isHarnessMethod(value: unknown): value is HarnessMethod {
 }
 
 export type HarnessError = {
-  code: "unavailable" | "timeout" | "invalid-params" | "not-found" | "expired" | "denied" | "forbidden" | "failed" | "ambiguous";
+  code: "unavailable" | "timeout" | "compaction-stalled" | "invalid-params" | "not-found" | "expired" | "denied" | "forbidden" | "failed" | "ambiguous";
   message: string;
   retryable?: boolean;
 };

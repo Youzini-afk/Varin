@@ -17,7 +17,7 @@ import {
 } from "@earendil-works/pi-coding-agent";
 import type { AgentMessage } from "@earendil-works/pi-agent-core";
 import type { Api, Model, Usage } from "@earendil-works/pi-ai";
-import type { CompactionRunResult, CompactionTaskSpec, CompactionTrace, JsonValue } from "@varin/protocol";
+import type { CompactionRecoverySettings, CompactionRunResult, CompactionTaskSpec, CompactionTrace, JsonValue } from "@varin/protocol";
 import { retainedContextState } from "./retained-context.js";
 import { activeCompactionMessages } from "./compaction-context.js";
 import {
@@ -62,6 +62,7 @@ export interface ContextPreparationConfig {
   enabled: boolean;
   /** Fraction of usable input where preparation starts (default 0.75). */
   waterline: number;
+  recovery: CompactionRecoverySettings;
 }
 
 export interface ContextPreparationStatus {
@@ -135,6 +136,8 @@ export interface ContextPreparationOptions {
   onManualReady?: (taskId: string) => void;
   onManualCommitted?: (taskId: string) => void;
   onManualFailed?: (taskId: string, message: string) => void;
+  onRetry?: (taskId: string, attempt: number, maxAttempts: number, reason: string) => void;
+  onTaskFailed?: (taskId: string, message: string) => void;
   now?: () => number;
 }
 
@@ -480,6 +483,26 @@ export function createContextPreparationExtension(
   let lastAt = 0;
   const now = options.now ?? (() => Date.now());
 
+  const isCompactionStall = (error: unknown): boolean => error !== null && typeof error === "object"
+    && "code" in error && error.code === "compaction-stalled";
+
+  const runWithRecovery = async (spec: CompactionTaskSpec, signal: AbortSignal): Promise<CompactionRunResult> => {
+    const recovery = options.getPreparationConfig().recovery;
+    const frozenSpec = { ...spec, recovery };
+    const maxAttempts = recovery.enabled ? recovery.maxRetries + 1 : 1;
+    for (let attempt = 1; ; attempt += 1) {
+      signal.throwIfAborted();
+      try {
+        return await options.runCompactionTask({ ...frozenSpec, attempt }, signal);
+      } catch (error) {
+        if (signal.aborted || !isCompactionStall(error) || attempt >= maxAttempts) throw error;
+        try { options.onRetry?.(spec.taskId ?? "", attempt + 1, maxAttempts,
+          error instanceof Error ? error.message : String(error)); }
+        catch { /* Progress observers cannot prevent a safe retry. */ }
+      }
+    }
+  };
+
   // A candidate freezes its source prefix. Later append-only turns do not
   // invalidate that prefix, so the key must not include request messages.
   const modelKey = (model: Model<Api> | undefined): string =>
@@ -610,7 +633,7 @@ export function createContextPreparationExtension(
       try {
         // The spec was frozen with the candidate; rebuilding it here would
         // let a newer request shape drift into an already-fixed task.
-        const result = await options.runCompactionTask(cand.spec, cand.abort.signal);
+        const result = await runWithRecovery(cand.spec, cand.abort.signal);
         cand.abort.signal.throwIfAborted();
         if (candidate !== cand) return;
         if (!candidateValid(cand, ctx, ctx.sessionManager.getBranch())) {
@@ -634,6 +657,7 @@ export function createContextPreparationExtension(
         cand.status = "failed";
         cand.error = error instanceof Error ? error.message : String(error);
         options.onFailure?.("prepare", cand.error);
+        if (!cand.manualRequested && isCompactionStall(error)) options.onTaskFailed?.(cand.id, cand.error);
         failManual(cand, cand.error);
       } finally {
         sourceSignal?.removeEventListener("abort", cancel);
@@ -702,6 +726,7 @@ export function createContextPreparationExtension(
       options.onFailure?.("commit", "The compaction boundary is not on the active branch");
       return undefined;
     }
+    let taskId: string | undefined;
     try {
       // Reconstruct the frozen material from this branch, including the last
       // native compaction boundary. A Pi event can use a different cut, but
@@ -718,10 +743,11 @@ export function createContextPreparationExtension(
         throw new ContextCapacityError("No complete source prefix fits the summary request with query capacity; original history was retained");
       }
       const { spec, preparation: fixed } = fitted;
+      taskId = spec.taskId;
       const sourceEpoch = epoch;
       const sourceModelKey = modelKey(model);
       const sourceIds = event.branchEntries.map((entry) => entry.id);
-      const result = await options.runCompactionTask(spec, event.signal);
+      const result = await runWithRecovery(spec, event.signal);
       event.signal.throwIfAborted();
       if (typeof result.summary !== "string" || result.summary.trim().length === 0) {
         throw new Error("Compaction returned no summary text");
@@ -741,7 +767,9 @@ export function createContextPreparationExtension(
         ...(result.trace === undefined ? {} : { details: { varinCompactionTrace: result.trace } }),
       };
     } catch (error) {
-      options.onFailure?.("commit", error instanceof Error ? error.message : String(error));
+      const message = error instanceof Error ? error.message : String(error);
+      options.onFailure?.("commit", message);
+      if (taskId && isCompactionStall(error)) options.onTaskFailed?.(taskId, message);
       return undefined;
     }
   };

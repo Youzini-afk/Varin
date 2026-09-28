@@ -65,7 +65,7 @@ import { HarnessThreadMarkers } from './HarnessThreadMarkers';
 import { parseCompactionTraceDetails, PI_COMPACTION_TRACE_OPEN_EVENT } from '@/lib/pi-runtime/compactionTrace';
 
 export interface PiTimelineProps {
-  compactionStatus?: 'requested' | 'running' | 'ready' | 'failed';
+  compactionStatus?: 'requested' | 'running' | 'retrying' | 'ready' | 'failed';
   assistantWaiting?: PiAssistantWaitingPresentation;
   cwd: string;
   entries: PiSessionEntry[];

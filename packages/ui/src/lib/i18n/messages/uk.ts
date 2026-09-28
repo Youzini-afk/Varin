@@ -2524,6 +2524,7 @@ export const dict: Record<I18nKey, string> = {
   "chat.piComposer.submission.failed": "Не надіслано",
   "chat.piAssistant.working": "Опрацювання",
   "chat.compaction.inProgress": "Стискання контексту…",
+  'chat.compaction.retrying': 'Стискання зупинилося; повторна спроба…',
   "chat.compaction.ready": "Підсумок готовий; його буде застосовано, коли контексту знадобиться місце",
   "chat.compaction.failed": "Не вдалося стиснути контекст",
   "chat.compaction.thinking": "Міркування",

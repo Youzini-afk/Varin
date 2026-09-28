@@ -253,4 +253,27 @@ describe("compaction worker", () => {
       faux.unregister();
     }
   });
+
+  it("reports a stalled non-streaming provider request so the caller can retry", async () => {
+    const faux = registerFauxProvider({ models: [{ id: "faux-1", contextWindow: 8_000, maxTokens: 512 }] });
+    let release!: () => void;
+    const held = new Promise<void>((resolve) => { release = resolve; });
+    faux.setResponses([async () => {
+      await held;
+      return fauxAssistantMessage("late summary");
+    }]);
+    const { worker, root } = await createWorker(faux);
+    try {
+      await assert.rejects(
+        worker.run(makeSpec(faux.getModel(), {
+          recovery: { enabled: true, responseWaitMs: 80, streamIdleMs: 20, maxRetries: 1 },
+        })),
+        (error: { code?: string }) => error.code === "compaction_stalled",
+      );
+    } finally {
+      release();
+      await rm(root, { recursive: true, force: true });
+      faux.unregister();
+    }
+  });
 });
