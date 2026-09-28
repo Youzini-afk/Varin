@@ -17,6 +17,9 @@ for local or remote graphical applications, live viewing, and human takeover.
 Users can still work directly with documents and tasks in the workbench. Neither
 office work nor Computer Use requires a separate Agent loop or a scenario-only
 prototype implementation.
+The shared implementation work is organized in the
+[BC0–BC9 plan](../plan/bot-computer-use-plan.md); office-specific file-format and
+connector stages continue to consume those capabilities without duplicating them.
 
 ## 1. Product thesis
 

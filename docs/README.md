@@ -48,6 +48,7 @@ Harness 总体与模块专卷：
 
 - [plan/agent-harness-plan.md](plan/agent-harness-plan.md) — Harness 阶段骨架（锚点稳定；已收口阶段细节在 archive）
 - [plan/agent-runtime-reliability-plan.md](plan/agent-runtime-reliability-plan.md) — RR0–RR6（RR6 平台纵切未测）
+- [plan/bot-computer-use-plan.md](plan/bot-computer-use-plan.md) — BC0–BC9：单 Bot、主动/自动记忆、Computer Use 与持久电脑正式实施计划（未开始）
 - [plan/rust-kernel-audit.md](plan/rust-kernel-audit.md) — Rust 内核审计（进行中）
 
 ## [decisions/](decisions/) — 决策日志

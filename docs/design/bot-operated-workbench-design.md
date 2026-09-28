@@ -9,6 +9,7 @@ Last updated: 2026-09-28
 记忆由后台自动处理与 Bot 主动使用共同维持，复用 TDB 底座，并引入快速决策模型参与局部语义判断。
 文中的对象划分与运行方式是设计方向，不代表已经确定接口、物理存储结构或实施计划。
 图形操作、持久电脑环境、实时观看与人工接管的共享设计见 [Computer Use](computer-use-design.md)。
+实施顺序、源码基线与改动归属见 [BC0–BC9 实施计划](../plan/bot-computer-use-plan.md)，当前尚未实施。
 
 现有系统的交付事实以 [architecture.md](../architecture.md)、[status.md](../status.md) 和代码为准。
 本文不修改现有权限、知识写入或工作台契约；需要改变的部分应在后续设计中明确替代关系。
@@ -225,7 +226,8 @@ Jev 类模型适合参与下列判断，具体模型通过通用快速决策能�
 未配置快速决策时已有存储与检索仍可用；调用失败不伪装成无相关记忆，也不据此作失效或删除判断。
 
 通用合同与配置沿 [fast-decision-model-design.md](fast-decision-model-design.md) 扩展真实记忆消费者。
-该文记录的交付范围是 `explore`；本设计不据此宣称记忆消费者或 Jev provider 已接线。
+2026-09-28 源码核查确认 TypeSafe/Jev adapter 已存在，用途已注册 `explore/web/scholarly`；
+记忆消费者尚未接入，具体增量按 BC 计划完成，不重复实现供应商 adapter。
 模型输出结构合法不证明判断正确，效果应看实际经历能否被找回并改善工作，不预先承诺普遍优于现有算法或固定延迟。
 
 ### 5.8 记忆演变与上下文缓存分别处理

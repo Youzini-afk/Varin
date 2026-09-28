@@ -1,19 +1,22 @@
 # 快速决策模型与渐进检索
 
-Status: implemented and wired for the `explore` consumer (D-312, F0–F4); provider-call quality and cross-platform evidence not yet collected
+Status: implemented/wired for `explore` (D-312, F0–F4) and `web`/`scholarly` (D-315, L5); TypeSafe/Jev adapter exists; paid-provider quality and cross-platform evidence remain separate
 
-Last updated: 2026-09-21
+Last updated: 2026-09-28
 
 本设计由 [Agent Harness](agent-harness.md) 第 6.1、8.5 节引用，实施顺序见
 [阶段 F](../plan/agent-harness-plan.md#阶段-f快速决策模型与渐进检索d-312)，实际交付只记入
-[能力状态](../status.md)。本文定义通用能力与首个检索消费者，不代表 Jev 已接入。
+[能力状态](../status.md)。本文定义通用能力与首个检索消费者。2026-09-28 源码核查确认
+[TypeSafe/Jev adapter](../../packages/pi-host/src/harness/typesafe-systemone.ts) 已实现；
+[用途合同](../../packages/protocol/src/harness-fast-decision.ts) 已注册 `explore/web/scholarly`。
+记忆消费者按 [BC 实施计划](../plan/bot-computer-use-plan.md) 增加，当前未接入。
 
 D-313 的 [Varin 全面更名](varin-rebrand-design.md) 阶段 B 优先实施；阶段 F 随后采用新产品命名。
 更名不改变本设计的能力合同、Pi 推理归属与检索目标。
 
-后续消费者见 [Web 与科研检索](web-research-search-design.md)（D-315 / 阶段 L，待实施）。
+后续已接入的消费者见 [Web 与科研检索](web-research-search-design.md)（D-315 / 阶段 L5）。
 它复用本设计的判断/绑定通路，新增 Web/学术候选与动作选择，生成新查询仍由主 Agent 或检索线程承担。
-目前已注册的用途仍只有 `explore`，不能把后续设计列为已支持能力，也不将其扩入已交付 F0–F4 的验收范围。
+这些消费者不追溯扩入原 F0–F4 的验收范围；代码接线也不代表真实付费模型质量已经验证。
 
 ## 1. 产品决定
 
@@ -21,8 +24,8 @@ D-313 的 [Varin 全面更名](varin-rebrand-design.md) 阶段 B 优先实施；
 下一步动作选择等工作。名称体现产品用途，不承诺任何供应商或负载下的固定响应时间。
 
 这是跨功能的模型能力类别，不是检索专用角色，也不叫 Jev 模型、重排模型或某供应商的 System One。
-Jev 是首个适配目标。以后 Computer Use、搜索结果判断、工具/技能选择和上下文材料选择可以复用同一能力；
-本阶段只交付通用调用、配置与 `explore` 消费者，不借此建设尚无真实调用方的其他功能。
+Jev 是首个适配器。Computer Use、工具/技能选择和上下文材料选择可以复用同一能力；
+原阶段 F 交付通用调用、配置与 `explore`，阶段 L5 扩展 Web/学术消费者；记忆沿 BC 计划增加真实调用方。
 
 目标是让原本昂贵的局部语义判断能参与日常执行：看到真实材料后决定读什么、追哪里、保留什么。
 原有文字搜索、结构关系、向量召回继续提供候选；生成式模型继续负责需要产生新表达、复杂解释与开放推理的工作。

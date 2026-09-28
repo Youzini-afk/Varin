@@ -5,7 +5,7 @@ Status: living document — 项目阶段进度与当前缺口的权威入口。H
 阶段合同在 [plan/](plan)，设计边界在 [design/](design)，逐阶段交付叙述已归档至 [archive/](archive) 不再更新。
 本文件不追加工作日志：新阶段交付事实更新下表与矩阵，历史叙述进归档。
 
-Last updated: 2026-09-27
+Last updated: 2026-09-28
 
 ## 阶段进度
 
@@ -18,6 +18,7 @@ Last updated: 2026-09-27
 | 阶段 7 AI4S 科研集群（7A–7I） | 主体已交付为 Partial（D-298/D-303/D-305）；D-300 修订的 7C–7E 远程执行与资源管理部分仍未作为产品代码交付，Slurm 延后 | [design/research-cluster-design.md](design/research-cluster-design.md) |
 | 阶段 S / W / B / F / C / L / N | 已接线；逐能力证据在矩阵 | [plan/agent-harness-plan.md](plan/agent-harness-plan.md) 同名节 |
 | 阶段 O 办公连续性 | 设计已接受（D-327），O0–O4 未实施 | [design/office-work-continuity-design.md](design/office-work-continuity-design.md) |
+| 阶段 BC Bot、记忆与 Computer Use | 设计方向与 BC0–BC9 计划已记录，尚未实施；源码核查不作为运行交付证据 | [plan/bot-computer-use-plan.md](plan/bot-computer-use-plan.md)、[Bot 设计](design/bot-operated-workbench-design.md)、[Computer Use 设计](design/computer-use-design.md) |
 | 阶段 HR 面向任务与资源的 Harness | D-337，HR0–HR5 已接线并收口（2026-09-27）：资源根寻址、会话 cwd 锚定、多资源检索、持续索引、可变 work-context 移除、§12 场景证据 | [design/resource-oriented-harness-design.md](design/resource-oriented-harness-design.md)；交付叙述在归档日志 |
 | Phase 0–10、D-296 companion 退役 | 完成 | [archive/roadmap-history.md](archive/roadmap-history.md) |
 
@@ -27,6 +28,7 @@ Last updated: 2026-09-27
 | --- | --- |
 | AI4S 7C–7E 剩余合同 | 远程执行与资源管理部分未交付为产品代码；Slurm/原生集群后端延后 |
 | 阶段 O | O0–O4 未实施 |
+| 阶段 BC | Bot 长期身份与新记忆消费者、共享电脑控制、实时桌面、远端持久桌面和虚拟机生命周期均待按 BC 计划实施；复用已有 TDB、TypeSafe/Jev adapter、Thread/Run 与受管远程路径 |
 | 平台与真实环境验收 | 打包桌面端的会话重开、目录离线、并发 Agent、跨根草稿完整 Agent 交互纵切；真实代理/fake-IP/远端 CI；macOS/Linux 真机；真实付费模型质量与延迟——均未测，不以源码测试宣称 |
 | HR 已知边界 | 外部根未保存草稿不能安全物化进单根隔离子任务（明确返回不可用而非读旧盘）；语义索引仍可能静默漏外部新文件需重扫，大目录资源成本未测；混合 A 虚拟分支+B 独立编辑器的单补丁需拆两次提交；结果不明的编辑器操作需人工处理，无自动跨提交域回滚或完整桌面重启证明 |
 | 性能数字 | 无测量不写提升倍数或毫秒承诺 |
