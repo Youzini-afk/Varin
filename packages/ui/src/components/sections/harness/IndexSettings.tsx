@@ -21,7 +21,7 @@ const bytesLabel = (bytes: number): string => {
   return `${value.toFixed(unit === 0 ? 0 : 1)} ${units[unit]}`;
 };
 
-export function IndexSettings(props: HarnessSettingsPageProps) {
+export function IndexSettings(props: Partial<HarnessSettingsPageProps>) {
   const { t } = useI18n();
   const phaseLabel = (phase: string): string => {
     if (phase === 'enumerating') return t('settings.page.harness.index.phase.enumerating');
@@ -212,7 +212,8 @@ export function IndexSettings(props: HarnessSettingsPageProps) {
       </div>) : <p className="typography-meta text-muted-foreground">{t('settings.page.harness.index.progress.empty')}</p>}
     </SettingsSection>
     <LocalSemanticSettings state={localSemantic} />
-    <InferenceSettings {...props} kind="embedding" localSemanticStatus={localSemantic.status} />
+    {props.harness && props.update ? <InferenceSettings harness={props.harness} update={props.update}
+      kind="embedding" localSemanticStatus={localSemantic.status} /> : null}
     <DirectoryExplorerDialog open={pickerTarget !== null} onOpenChange={(open) => { if (!open) setPickerTarget(null); }} mode="select-directory"
       initialPath={pickerTarget === 'storage' ? draft?.storageDirectory ?? '' : scopePath} title={t('settings.page.harness.index.chooseFolder')}
       description={t(pickerTarget === 'scope'

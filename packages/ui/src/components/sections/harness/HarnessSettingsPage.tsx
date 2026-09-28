@@ -41,7 +41,9 @@ export function HarnessSettingsPage({ section }: { section: HarnessSettingsSecti
       <p className="typography-meta text-destructive">{error}</p>
       <Button variant="outline" size="sm" className="mt-2" onClick={() => { void retry(); }}>{t('settings.harness.retry')}</Button>
     </div> : null}
-    {harness ? <Page key={`${targetKey}:${section}`} harness={harness} update={update} /> : null}
+    {section === 'index'
+      ? <IndexSettings key={`${targetKey}:${section}`} {...(harness ? { harness, update } : {})} />
+      : harness ? <Page key={`${targetKey}:${section}`} harness={harness} update={update} /> : null}
   </>;
   return <SettingsPageLayout title={t(`settings.page.harness.page.${section}.title`)}
     description={t(`settings.page.harness.page.${section}.description`)} showSaveStatus={showPiSaveStatus}
