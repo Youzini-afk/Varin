@@ -39,6 +39,41 @@ class MemoryTransport implements RuntimeTransport {
 }
 
 describe("PiRuntimeClient", () => {
+  it("observes a response deadline even when async transport send never settles", async () => {
+    const transport = new MemoryTransport();
+    const errors: Error[] = [];
+    transport.send = () => new Promise<void>(() => {});
+    const client = new PiRuntimeClient({ createId: () => "slow-send", transport, onProtocolError: (error) => errors.push(error) });
+    await client.connect();
+    try {
+      await assert.rejects(client.request("agent.prompt", { sessionId: "s", text: "once" }, 20), PiRuntimeRequestTimeoutError);
+      transport.receive(encodeRuntimeEnvelope(createRuntimeSuccessResponse<"agent.prompt">("slow-send", { accepted: true })));
+      assert.deepEqual(errors, []);
+    } finally {
+      await client.close();
+    }
+  });
+
+  it("retires a half-open connection without retrying a sent mutation or declaring it failed", async () => {
+    const transport = new MemoryTransport();
+    let closes = 0;
+    let losses = 0;
+    transport.close = () => { closes++; };
+    const client = new PiRuntimeClient({ transport, onConnectionLost: () => { losses++; } });
+    await client.connect();
+    const pending = client.request("agent.prompt", { sessionId: "session-1", text: "run once" });
+    const outcome = assert.rejects(pending, PiRuntimeAmbiguousRequestError);
+    await client.invalidate(new Error("Read-only health probe timed out"));
+    await outcome;
+    assert.equal(client.connected, false);
+    assert.equal(transport.sent.length, 1);
+    assert.equal(losses, 1);
+    assert.equal(closes, 1);
+    await client.invalidate(new Error("late duplicate health failure"));
+    assert.equal(losses, 1);
+    assert.equal(closes, 1);
+  });
+
   it("correlates responses without depending on response order", async () => {
     const transport = new MemoryTransport();
     let nextId = 0;

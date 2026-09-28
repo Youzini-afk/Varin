@@ -42,6 +42,8 @@ export interface CreatePiRuntimeConnectionOptions {
   refreshAuth?: (apiBaseUrl?: string | null) => Promise<string>;
   resolveWebSocketUrl?: () => string;
   runtimeKey?: string;
+  /** Deadline for auth, socket open and handshake; no agent work has been sent yet. */
+  startupTimeoutMs?: number;
   transport?: RuntimeTransport;
 }
 
@@ -56,44 +58,55 @@ const defaultMode = (): HostMode => {
 export const createPiRuntimeConnection = async (
   options: CreatePiRuntimeConnectionOptions = {},
 ): Promise<PiRuntimeConnection> => {
-  let transport = options.transport;
-  if (!transport) {
-    const refreshAuth = options.refreshAuth ?? refreshRuntimeUrlAuthToken;
-    await refreshAuth(getRuntimeApiBaseUrl() || undefined);
-    const url = options.resolveWebSocketUrl?.()
-      ?? getRuntimeUrlResolver().websocket('/api/varin/runtime/ws');
-    transport = new WebSocketRuntimeTransport({
-      url,
-      webSocketFactory: options.openSocket ?? ((socketUrl, protocols) =>
-        openRuntimeWebSocket(socketUrl, protocols) as unknown as RuntimeWebSocket),
-    });
-  }
-  let connection: PiRuntimeConnection | null = null;
-  const client = new PiRuntimeClient({
-    onConnectionLost: (error) => {
-      if (connection) options.onConnectionLost?.(connection, error);
-    },
-    ...(options.onProtocolError ? { onProtocolError: options.onProtocolError } : {}),
-    ...(options.onSequenceGap ? { onSequenceGap: options.onSequenceGap } : {}),
-    transport,
+  const timeoutMs = options.startupTimeoutMs ?? 15_000;
+  if (!Number.isFinite(timeoutMs) || timeoutMs <= 0) throw new RangeError('startupTimeoutMs must be positive');
+  let stage = 'authentication';
+  let timer: ReturnType<typeof setTimeout>;
+  const deadline = new Promise<never>((_resolve, reject) => {
+    timer = setTimeout(() => reject(new Error(`Pi runtime connection timed out during ${stage}`)), timeoutMs);
   });
+  const observe = <T,>(operation: Promise<T>): Promise<T> => Promise.race([operation, deadline]);
+  let connection: PiRuntimeConnection | null = null;
+  let client: PiRuntimeClient | undefined;
   try {
-    await client.connect();
-    const handshake = await client.handshake({
+    let transport = options.transport;
+    if (!transport) {
+      const refreshAuth = options.refreshAuth ?? refreshRuntimeUrlAuthToken;
+      await observe(refreshAuth(getRuntimeApiBaseUrl() || undefined));
+      const url = options.resolveWebSocketUrl?.()
+        ?? getRuntimeUrlResolver().websocket('/api/varin/runtime/ws');
+      transport = new WebSocketRuntimeTransport({
+        url,
+        webSocketFactory: options.openSocket ?? ((socketUrl, protocols) =>
+          openRuntimeWebSocket(socketUrl, protocols) as unknown as RuntimeWebSocket),
+      });
+    }
+    client = new PiRuntimeClient({
+      onConnectionLost: (error) => {
+        if (connection) options.onConnectionLost?.(connection, error);
+      },
+      ...(options.onProtocolError ? { onProtocolError: options.onProtocolError } : {}),
+      ...(options.onSequenceGap ? { onSequenceGap: options.onSequenceGap } : {}),
+      transport,
+    });
+    stage = 'socket open';
+    await observe(client.connect());
+    stage = 'handshake';
+    const handshake = await observe(client.handshake({
       clientName: options.clientName ?? 'varin-ui',
       clientVersion: options.clientVersion ?? '0.1.0',
       mode: options.mode ?? defaultMode(),
       protocolVersions: [VARIN_PROTOCOL_VERSION],
-    });
-    connection = {
-      client,
-      handshake,
-      runtimeKey: options.runtimeKey ?? getRuntimeKey(),
-    };
+    }));
+    connection = { client, handshake, runtimeKey: options.runtimeKey ?? getRuntimeKey() };
     return connection;
   } catch (error) {
-    await client.close();
+    // Close synchronously invalidates pending RPCs before awaiting transport
+    // cleanup. Late auth/handshake completion cannot publish this candidate.
+    if (client) void client.close().catch(() => undefined);
     throw error;
+  } finally {
+    clearTimeout(timer!);
   }
 };
 
@@ -257,6 +270,11 @@ export const getPiRuntimeConnection = (): Promise<PiRuntimeConnection> => {
     setConnectionPhase('connected');
     if (hadConnection) notifyReconnected(connection);
     return connection;
+  }).catch((error: unknown) => {
+    if (generation === connectionGeneration && !activeConnection && !reconnectArmed) {
+      setConnectionPhase('disconnected');
+    }
+    throw error;
   }).finally(() => {
     if (activeConnectionPromise === promise) activeConnectionPromise = null;
   });

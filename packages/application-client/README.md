@@ -38,6 +38,20 @@ All three product consumers import contracts and transport primitives directly f
 through `registerRelayTunnelProvider` and `registerRelayTunnelLifecycle`, so this package never imports
 the UI tunnel implementation. Selecting Relay without a registered lifecycle fails explicitly.
 
+## URL-auth mint lifetime
+
+`transport/runtime-auth.ts` owns the shared in-flight URL-token mint, including its 10-second
+deadline across credential lookup, HTTP/relay fetch and response-body parsing. Concurrent consumers
+share that operation; a stalled mint must release its shared promise so a later connection can retry
+without restarting the application. Fetch receives the owner's abort signal and late completion is
+checked before token publication, even when a transport ignores cancellation. Runtime/origin generation
+checks still prevent an old authority from overwriting a new token. Token values are never logged.
+
+The UI connection candidate separately bounds authentication, socket open and handshake as one startup
+attempt. A startup timeout means no agent input was dispatched by that candidate; a timeout after a
+prompt was sent has different, ambiguous execution semantics. `test/runtime-auth-timeout.test.ts`
+exercises a stalled response body, concurrent mint sharing, retry and late-publication rejection.
+
 ## History
 
 This package was extracted from the former UI-owned API and transport modules to clarify the boundary

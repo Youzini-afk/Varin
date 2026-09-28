@@ -25,6 +25,53 @@ function isEvent(envelope: WireEnvelope, event: string): envelope is EventEnvelo
 }
 
 describe("HostController", () => {
+  it("serves authoritative health reads while a prompt is waiting in an input hook", async () => {
+    const root = await mkdtemp(join(tmpdir(), "varin-prompt-preflight-"));
+    const cwd = join(root, "workspace");
+    await mkdir(join(cwd, ".pi", "extensions"), { recursive: true });
+    await writeFile(join(cwd, ".pi", "extensions", "hold-input.ts"), `
+      export default function extension(pi: any) {
+        pi.on("input", async (_event: any, ctx: any) => {
+          await ctx.ui.confirm("Preflight fixture", "Wait for the test to release input");
+          return { action: "handled" };
+        });
+      }
+    `);
+    const transport = new MemoryHostTransport();
+    const controller = new HostController({ agentDir: join(root, "agent"), transport, projectTrustOverride: true });
+    let questionId: string | undefined;
+    controller.start();
+    try {
+      transport.receive(createRequest("hello", "host.handshake", {
+        clientName: "preflight-test", clientVersion: "0.0.0", mode: "test", protocolVersions: [VARIN_PROTOCOL_VERSION],
+      }));
+      await transport.waitFor((entry) => isResponse(entry, "hello"));
+      transport.receive(createRequest("create", "session.create", { cwd }));
+      const created = await transport.waitFor((entry) => isResponse(entry, "create"), 15_000);
+      assert.ok(created.kind === "response" && created.ok);
+      const { sessionId } = created.result as SessionSnapshot;
+      transport.receive(createRequest("held-prompt", "agent.prompt", { sessionId, text: "inspect fixture" }));
+      const question = await transport.waitFor((entry) => isEvent(entry, "extension.ui.request"));
+      assert.ok(question.kind === "event" && question.event === "extension.ui.request");
+      questionId = question.data.id;
+      transport.receive(createRequest("probe", "session.snapshot", { sessionId }));
+      transport.receive(createRequest("reconcile", "session.reconcile", { sessionId, scopes: ["branch"] }));
+      const probe = await transport.waitFor((entry) => isResponse(entry, "probe"), 1000);
+      const cut = await transport.waitFor((entry) => isResponse(entry, "reconcile"), 1000);
+      assert.ok(probe.kind === "response" && probe.ok);
+      assert.ok(cut.kind === "response" && cut.ok);
+      // The read must not invent an executing model or repeat the pending prompt.
+      assert.equal((probe.result as SessionSnapshot).isStreaming, false);
+    } finally {
+      if (questionId) {
+        transport.receive(createRequest("answer", "extension.ui.respond", { requestId: questionId, value: false }));
+        await transport.waitFor((entry) => isResponse(entry, "held-prompt"), 5000).catch(() => undefined);
+      }
+      await controller.dispose();
+      await rm(root, { recursive: true, force: true });
+    }
+  });
+
   it("handshakes, trusts a project, loads an extension, and bridges its UI", async () => {
     const root = await mkdtemp(join(tmpdir(), "varin-host-"));
     const cwd = join(root, "workspace");

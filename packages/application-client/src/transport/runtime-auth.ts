@@ -21,6 +21,24 @@ let localRuntimeUrlAuthGeneration = 0;
 let runtimeAuthGeneration = 0;
 
 const URL_AUTH_REFRESH_SKEW_MS = 10_000;
+const URL_AUTH_MINT_TIMEOUT_MS = 10_000;
+
+/** The shared mint owns its deadline, not an individual caller. Without this,
+ * one stalled credential/fetch/body read poisons every future connection via
+ * runtimeUrlAuthRefreshPromise until the application is restarted.
+ */
+const withMintDeadline = (mint: (signal: AbortSignal) => Promise<string>): Promise<string> => {
+  const controller = new AbortController();
+  let timer: ReturnType<typeof setTimeout>;
+  const deadline = new Promise<never>((_resolve, reject) => {
+    timer = setTimeout(() => {
+      const error = new Error('Runtime URL authentication timed out');
+      controller.abort(error);
+      reject(error);
+    }, URL_AUTH_MINT_TIMEOUT_MS);
+  });
+  return Promise.race([mint(controller.signal), deadline]).finally(() => clearTimeout(timer!));
+};
 
 const isReservedRuntimeExtraHeaderName = (name: string): boolean => name.toLowerCase() === 'authorization';
 
@@ -221,8 +239,10 @@ const mintRuntimeUrlAuthToken = (apiBaseUrl?: string | null): Promise<string> =>
   if (runtimeUrlAuthRefreshPromise) return runtimeUrlAuthRefreshPromise;
   const generation = runtimeAuthGeneration;
 
-  const refreshPromise = (async () => {
+  const refreshPromise = withMintDeadline(async (signal) => {
     const credential = await getRuntimeAuthCredential();
+    signal.throwIfAborted();
+    if (generation !== runtimeAuthGeneration) throw new Error('Runtime URL auth request is stale');
     const headers = new Headers();
     for (const [key, value] of Object.entries(getRuntimeExtraHeadersSync())) {
       headers.set(key, value);
@@ -234,12 +254,14 @@ const mintRuntimeUrlAuthToken = (apiBaseUrl?: string | null): Promise<string> =>
     // reachable network base URL. Same auth headers, same route, tunneled.
     const relay = getActiveRelayTunnel();
     const response = relay
-      ? await relay.fetch('/auth/url-token', { method: 'POST', headers })
+      ? await relay.fetch('/auth/url-token', { method: 'POST', headers, signal })
       : await fetch(buildAuthUrl(apiBaseUrl, '/auth/url-token'), {
           method: 'POST',
           headers,
           credentials: 'include',
+          signal,
         });
+    signal.throwIfAborted();
     if (!response.ok) {
       if (generation === runtimeAuthGeneration) {
         clearRuntimeUrlAuthToken();
@@ -249,6 +271,7 @@ const mintRuntimeUrlAuthToken = (apiBaseUrl?: string | null): Promise<string> =>
     const payload = await response.json().catch(() => null) as { token?: unknown; expiresAt?: unknown } | null;
     const token = typeof payload?.token === 'string' ? payload.token.trim() : '';
     const expiresAt = typeof payload?.expiresAt === 'number' ? payload.expiresAt : 0;
+    signal.throwIfAborted();
     if (generation !== runtimeAuthGeneration) {
       throw new Error('Runtime URL auth token response is stale');
     }
@@ -257,7 +280,7 @@ const mintRuntimeUrlAuthToken = (apiBaseUrl?: string | null): Promise<string> =>
       throw new Error('Runtime URL auth token response was invalid');
     }
     return runtimeUrlAuthToken;
-  })();
+  });
   const trackedPromise = refreshPromise.finally(() => {
     if (runtimeUrlAuthRefreshPromise === trackedPromise) {
       runtimeUrlAuthRefreshPromise = null;
@@ -275,11 +298,13 @@ const mintLocalRuntimeUrlAuthToken = (localOrigin: string): Promise<string> => {
     return localRuntimeUrlAuthRefreshPromise;
   }
   const generation = localRuntimeUrlAuthGeneration;
-  const refreshPromise = (async () => {
+  const refreshPromise = withMintDeadline(async (signal) => {
     const response = await fetch(buildAuthUrl(origin, '/auth/url-token'), {
       method: 'POST',
       credentials: 'include',
+      signal,
     });
+    signal.throwIfAborted();
     if (!response.ok) {
       if (generation === localRuntimeUrlAuthGeneration && origin === localRuntimeUrlAuthRefreshOrigin) {
         localRuntimeUrlAuthToken = '';
@@ -291,6 +316,7 @@ const mintLocalRuntimeUrlAuthToken = (localOrigin: string): Promise<string> => {
     const payload = await response.json().catch(() => null) as { token?: unknown; expiresAt?: unknown } | null;
     const token = typeof payload?.token === 'string' ? payload.token.trim() : '';
     const expiresAt = typeof payload?.expiresAt === 'number' ? payload.expiresAt : 0;
+    signal.throwIfAborted();
     if (!token || !Number.isFinite(expiresAt)) {
       throw new Error('Local runtime URL auth token response was invalid');
     }
@@ -301,7 +327,7 @@ const mintLocalRuntimeUrlAuthToken = (localOrigin: string): Promise<string> => {
     localRuntimeUrlAuthTokenExpiresAt = expiresAt;
     localRuntimeUrlAuthOrigin = origin;
     return token;
-  })();
+  });
   const trackedPromise = refreshPromise.finally(() => {
     if (localRuntimeUrlAuthRefreshPromise === trackedPromise) {
       localRuntimeUrlAuthRefreshPromise = null;

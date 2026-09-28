@@ -522,6 +522,62 @@ describe('Pi session store', () => {
     registerRuntimeAPIs(null);
     resetDocumentRegistry();
   });
+
+  test('recovers a sending prompt while the last local snapshot is idle and its acceptance events were lost', async () => {
+    const runtime = new FakeRuntime();
+    const sessionId = 'session-lost-send';
+    const user: PiSessionEntry = {
+      id: 'accepted-user', parentId: null, type: 'message',
+      timestamp: '2026-09-28T10:00:01.000Z',
+      // Pi timestamps its own accepted message, not the UI's optimistic copy.
+      message: { role: 'user', content: [{ type: 'text', text: 'check the project' }], timestamp: 2000 },
+    };
+    const reply: PiSessionEntry = {
+      id: 'completed-reply', parentId: user.id, type: 'message',
+      timestamp: '2026-09-28T10:00:02.000Z', message: assistant('finished'),
+    };
+    runtime.handler = (method) => {
+      if (method === 'session.snapshot') return { ...snapshot(sessionId), leafId: reply.id };
+      if (method === 'session.reconcile') return reconciled(sessionId,
+        { ...snapshot(sessionId), leafId: reply.id }, branch(sessionId, [user, reply]));
+      throw new Error(`Unexpected ${method}`);
+    };
+    const store = createPiSessionStore(runtime);
+    store.setState({ records: { [sessionId]: {
+      extensionStates: {}, open: true, sessionId, snapshot: snapshot(sessionId),
+      branchEntries: branch(sessionId), branchEntriesSource: 'live', toolExecutions: {},
+    } } });
+    const id = store.getState().beginSubmission(sessionId,
+      { role: 'user', content: 'check the project', timestamp: 1000 }, 'prompt');
+    store.getState().updateSubmission(sessionId, id, { dispatchedText: 'check the project', status: 'dispatching' });
+    await store.getState().probeBusySession(sessionId);
+    expect(runtime.calls.map((call) => call.method)).toEqual(['session.snapshot', 'session.reconcile']);
+    expect(store.getState().records[sessionId]?.submission).toBeUndefined();
+    expect(store.getState().records[sessionId]?.branchEntries?.entries).toEqual([user, reply]);
+    expect(store.getState().records[sessionId]?.snapshot?.busy).toBe(false);
+    expect(runtime.calls.some((call) => call.method === 'agent.prompt')).toBe(false);
+  });
+
+  test('a busy snapshot does not falsely acknowledge a pending message it has not received', async () => {
+    const runtime = new FakeRuntime();
+    const sessionId = 'session-unrelated-busy';
+    runtime.handler = (method) => {
+      if (method === 'session.list') return [];
+      if (method === 'session.reconcile') return reconciled(sessionId,
+        { ...snapshot(sessionId), busy: true }, branch(sessionId));
+      throw new Error(`Unexpected ${method}`);
+    };
+    const store = createPiSessionStore(runtime);
+    store.setState({ records: { [sessionId]: {
+      extensionStates: {}, open: true, sessionId, snapshot: snapshot(sessionId),
+      branchEntries: branch(sessionId), branchEntriesSource: 'live', toolExecutions: {},
+    } } });
+    const id = store.getState().beginSubmission(sessionId,
+      { role: 'user', content: 'new message', timestamp: 1000 }, 'prompt');
+    store.getState().updateSubmission(sessionId, id, { status: 'dispatching' });
+    await store.getState().resyncSessions();
+    expect(store.getState().records[sessionId]?.submission?.status).toBe('dispatching');
+  });
   test('owns recoverable submission state per Pi session', () => {
     const store = createPiSessionStore(new FakeRuntime());
     store.setState({

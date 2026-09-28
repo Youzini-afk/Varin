@@ -170,6 +170,27 @@ Important properties:
 - runtime reset disposes timers, watchers, API references, and request ownership while inert namespaced snapshots remain isolated
 - persisted cache is versioned, TTL-filtered, and bounded for page refresh continuity, not broad background syncing
 
+### `usePiSessionStore.ts`: submission and connection recovery
+
+The selected visible session is observed while either its authoritative snapshot is busy or it
+has a dispatched/unresolved submission. An idle cached snapshot cannot disable recovery of a
+message whose acknowledgement and first events were lost. Observation requests have their own
+bounded deadlines; a read timeout can retire only the captured active client and reconnect the
+transport. It must not stop the worker, replay a prompt, or manufacture an idle result.
+
+Prompt/steer/follow-up acknowledgement deadlines describe an unknown outcome, not a failed
+execution. Preserve the captured editor view and submission while reconciling through the owning
+Host. UI and Pi independently timestamp user messages: missed-event reconciliation uses an unseen,
+unique matching user entry, not timestamp equality or a generic busy flag. Ambiguous or transformed
+input stays unresolved instead of being automatically retried. Late failures cannot restore a draft
+after its submission was reconciled, replaced or retired by a runtime change.
+
+`HostController` handles synchronous `session.snapshot`/`session.reconcile` cuts outside its mutation
+queue so an input/preflight hook cannot block the very reads used to diagnose it. Source-level
+coverage includes `submission-recovery.test.ts`, `usePiSessionStore.test.ts`, the runtime-client wire
+tests and the real Pi preflight fixture in `packages/pi-host/test/host-controller.test.ts`. These
+fixtures do not by themselves establish a packaged-desktop reproduction of every send stall.
+
 ## Ownership Rules
 
 These rules are important. Breaking them tends to reintroduce idle CPU churn, stale UI, or rerender fanout.
