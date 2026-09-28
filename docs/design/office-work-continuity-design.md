@@ -2,13 +2,21 @@
 
 Status: accepted design / not implemented
 
-Last updated: 2026-09-24
+Last updated: 2026-09-28
 
 This document defines the product direction for the future office and daily-work
 profile. It is a design boundary, not a delivery claim. Current implementation
 status remains in [status.md](../status.md), and the
 shared workbench contract remains in [architecture.md](../architecture.md) and
 [composable-workbench.md](composable-workbench.md).
+
+The [Bot-operated workbench](bot-operated-workbench-design.md) now defines the
+shared direction for long-running coordination and memory. Office work consumes
+that foundation and the shared [Computer Use capability](computer-use-design.md)
+for local or remote graphical applications, live viewing, and human takeover.
+Users can still work directly with documents and tasks in the workbench. Neither
+office work nor Computer Use requires a separate Agent loop or a scenario-only
+prototype implementation.
 
 ## 1. Product thesis
 
@@ -312,6 +320,7 @@ office-specific loop:
 | Deterministic validators | Check arithmetic, dates, file structure, citations, required fields, and external response state. |
 | Host and Rust kernel | Own paths, files, revisions, records, processes, credentials, permissions, and durable lifecycle. |
 | Follow-up/scheduler | Observe reliable events and deliver a continuation only when the definition says it should. |
+| Computer Use and desktop environments | Operate the selected local or independent computer; expose the same live desktop to the user, coordinate takeover, and return artifacts through existing resource services. |
 
 Background work must not call a model merely because a conversation changed. A
 model runs when the user asks, when a confirmed workflow reaches a model step,
@@ -374,10 +383,13 @@ The following rules are product invariants:
 
 The office stage should be delivered as complete user outcomes rather than a
 catalog of unconnected tools.
+Development extends the shared product architecture directly. Task examples and
+focused checks guide integration; they do not require a separate prototype,
+parallel backend, or validation-only execution path.
 
 | Stage | Outcome | Gate |
 | --- | --- | --- |
-| O0: task research and prototype | Validate two or three real knowledge-work journeys and choose the first file/ecosystem focus | Compare current manual work, a competitor, and a Varin prototype; record preparation, repair, and resume costs |
+| O0: shared foundation and integration design | Map real office needs onto Bot coordination, Computer Use, resources, and workbench capabilities; choose concrete format and connector work | Identify missing production capabilities and their owners without creating a separate prototype system |
 | O1: file knowledge-work loop | Materials, editable deliverables, citations, local edits, save/reopen, and revision conflict handling | A second and third edit preserve accepted changes; final files open and validate |
 | O2: work continuity | Today, 正在办, 资料, 成果, capture, reminders, and cross-day continuation | A user can resume without repeating the full context; waiting and unavailable states remain truthful |
 | O3: one external ecosystem | Read, draft, approve, execute, reconcile, and follow up for one mail/calendar/meeting ecosystem | Wrong account, stale data, timeout, duplicate action, and revoked access are handled explicitly |
@@ -399,8 +411,8 @@ useful study asks for recent work, not imagined feature wishes:
   passed?
 - How much time went into checking and repairing an AI result?
 
-Compare the current manual path, the existing tools, and a Varin prototype on
-the same task. The primary measure should be accepted deliverables or closed
+Use real work on the integrated product to judge whether preparation, repair,
+and continuation improve. The primary measure should be accepted deliverables or closed
 commitments per week, with preparation time, repair time, interruptions, cost,
 and incorrect-action risk recorded alongside it. Message count, tool-call
 count, and number of agents are not product outcomes.

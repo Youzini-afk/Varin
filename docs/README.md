@@ -34,6 +34,7 @@ Harness 总体与模块专卷：
 - [design/native-workspace-recovery-design.md](design/native-workspace-recovery-design.md) / [design/recovery.md](design/recovery.md) — 恢复模型
 - [design/office-work-continuity-design.md](design/office-work-continuity-design.md) — 阶段 O 办公连续性（设计已接受，未实施）
 - [design/bot-operated-workbench-design.md](design/bot-operated-workbench-design.md) — 单 Bot 操作工作台、主动/自动记忆、TDB 与快速决策分工、执行者咨询和缓存（讨论草案，未实施）
+- [design/computer-use-design.md](design/computer-use-design.md) — 共享电脑控制、本机/远程持久桌面、实时观看与人工接管（设计方向已接受，未实施）
 - [design/composable-workbench.md](design/composable-workbench.md) — 工作台 profile 与扩展组合
 - [design/plugin-gui-design.md](design/plugin-gui-design.md) / [design/varin-extension-platform.md](design/varin-extension-platform.md) — 插件 GUI 与扩展平台
 - [design/unified-file-editor-platform.md](design/unified-file-editor-platform.md) — 统一文件编辑器平台
