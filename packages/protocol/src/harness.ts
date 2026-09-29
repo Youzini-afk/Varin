@@ -51,6 +51,20 @@ import type {
   WebSnapshotRef,
   WebSnapshotStructure,
 } from "./harness-web.js";
+import type {
+  ComputerActParams,
+  ComputerActResult,
+  ComputerAppsParams,
+  ComputerAppsResult,
+  ComputerCancelParams,
+  ComputerCancelResult,
+  ComputerListParams,
+  ComputerListResult,
+  ComputerObserveParams,
+  ComputerObserveResult,
+  ComputerReleaseParams,
+  ComputerReleaseResult,
+} from "./harness-computer.js";
 import type { AgentInputContext, JsonValue } from "./types.js";
 
 export interface OutputSlice {
@@ -1569,6 +1583,12 @@ export interface HarnessServiceMap {
   "memory.forget": { params: MemoryForgetParams; result: MemoryForgetResult };
   "memory.get": { params: MemoryGetParams; result: MemoryGetResult };
   "memory.search": { params: MemorySearchParams; result: MemorySearchResult };
+  "computer.list": { params: ComputerListParams; result: ComputerListResult };
+  "computer.apps": { params: ComputerAppsParams; result: ComputerAppsResult };
+  "computer.observe": { params: ComputerObserveParams; result: ComputerObserveResult };
+  "computer.act": { params: ComputerActParams; result: ComputerActResult };
+  "computer.cancel": { params: ComputerCancelParams; result: ComputerCancelResult };
+  "computer.release": { params: ComputerReleaseParams; result: ComputerReleaseResult };
   // Phase 3: Thread operations
   "thread.dispatch": { params: ThreadDispatchParams; result: ThreadDispatchResult };
   "thread.facts.set": { params: ThreadFactsSetParams; result: ThreadFactsSetResult };
@@ -1695,6 +1715,8 @@ export type HarnessCapability =
   | "control.followup"
   | "read.schedule"
   | "control.schedule"
+  | "read.computer"
+  | "control.computer"
   | "write.document";
 
 export const HARNESS_METHOD_CAPABILITY = {
@@ -1733,6 +1755,12 @@ export const HARNESS_METHOD_CAPABILITY = {
   "memory.forget": "context.session",
   "memory.get": "context.session",
   "memory.search": "context.session",
+  "computer.list": "read.computer",
+  "computer.apps": "read.computer",
+  "computer.observe": "read.computer",
+  "computer.act": "control.computer",
+  "computer.cancel": "control.computer",
+  "computer.release": "control.computer",
   "thread.dispatch": "control.thread",
   "thread.facts.set": "control.thread",
   "thread.list": "control.thread",
@@ -1875,6 +1903,12 @@ const HARNESS_METHODS: ReadonlySet<string> = new Set<string>([
   "memory.forget",
   "memory.get",
   "memory.search",
+  "computer.list",
+  "computer.apps",
+  "computer.observe",
+  "computer.act",
+  "computer.cancel",
+  "computer.release",
   "thread.dispatch",
   "thread.facts.set",
   "thread.list",

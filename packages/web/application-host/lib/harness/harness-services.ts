@@ -29,6 +29,7 @@ import { executeTodoTool } from "./todo-tool.js";
 import { executeRecall } from "./recall-tool.js";
 import { proposeUserMessageSuggestion } from "./knowledge-suggestions.js";
 import { registerMemoryServices } from "./memory-services.js";
+import { registerComputerServices } from "./computer-services.js";
 import { createZone2DeliveryService, prepareZone2Threads } from "./zone2-threads.js";
 import { selectNewZone2Material, zone2MaterialRevision } from "./zone2-material.js";
 import { formatZone2ThreadMaterial } from "./zone2.js";
@@ -1201,6 +1202,8 @@ export function registerHarnessServices(
   }
   // BC1 unified memory — remember/correct/forget/get share one write path.
   registerMemoryServices(router, host);
+  // BC4 Computer Use — observe/act/cancel share the catalog + driver service.
+  registerComputerServices(router, host);
   // Phase 3 thread services — registered only when thread registry is available
   if (host.threadRegistry && host.threadSpawnSession) {
     router.register("thread.dispatch", createThreadDispatchService(host));

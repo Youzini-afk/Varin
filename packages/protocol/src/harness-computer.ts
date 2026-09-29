@@ -1,0 +1,219 @@
+/**
+ * BC4 Computer Use: machine/desktop catalog, observation, action, and
+ * cancellation contracts shared by the Host computer service, the Pi
+ * `computer` tool, and the settings surfaces.
+ *
+ * Ownership: a machine is a real computer (local host, remote machine, or a
+ * VM record managed elsewhere); a desktop is one graphical session on that
+ * machine. Neither is a Varin session, Thread, or Run — actions reference
+ * desktops and element indexes that are valid only for the observation that
+ * produced them.
+ */
+
+export type ComputerPlatform = "windows" | "macos" | "linux";
+
+/** How the machine is reached. `remote`/`virtual` arrive with BC6/BC7. */
+export type ComputerProviderKind = "local" | "remote" | "virtual";
+
+export interface ComputerMachine {
+  id: string;
+  name: string;
+  provider: ComputerProviderKind;
+  platform: ComputerPlatform;
+  /** Application Host that owns this machine's driver connection. */
+  coordinatorHostId: string;
+  status: "active" | "unavailable" | "archived";
+  statusDetail?: string;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface ComputerDesktop {
+  id: string;
+  machineId: string;
+  label: string;
+  /** What kind of graphical session this desktop is. */
+  kind: "console" | "virtual-display" | "remote-session";
+  status: "available" | "unavailable" | "stopped";
+  statusDetail?: string;
+  /** Last probed driver capabilities; absent until the first successful probe. */
+  capabilities?: ComputerCapabilities;
+}
+
+/** What the resident platform driver can actually do right now. */
+export interface ComputerCapabilities {
+  platform: ComputerPlatform;
+  /** Driver implementation identity, e.g. `windows-uia`, `linux-atspi`. */
+  driver: string;
+  driverVersion?: string;
+  /** Accessibility/UIA tree reading. */
+  observeTree: boolean;
+  /** Window/desktop image capture. */
+  screenshot: boolean;
+  /** Semantic pattern actions (Invoke/Select/SetValue/...). */
+  elementAction: boolean;
+  /** Real global pointer/keyboard injection (SendInput/XTest/...). */
+  coordinateInput: boolean;
+  /** Text entry (background messages or synthesized keys). */
+  textInput: boolean;
+  /** Pointer drag support. */
+  drag: boolean;
+  /** Screen geometry for interpreting coordinates (physical pixels). */
+  displays?: Array<{ x: number; y: number; width: number; height: number; primary?: boolean }>;
+  dpiAware?: boolean;
+  status: "ready" | "unavailable" | "unprobed";
+  /** Honest reason when a capability is missing or the driver failed. */
+  detail?: string;
+}
+
+export interface ComputerFrame {
+  x: number;
+  y: number;
+  width: number;
+  height: number;
+}
+
+/** One accessibility-tree node from an observation, addressed by `index`. */
+export interface ComputerElement {
+  index: number;
+  runtimeId?: number[];
+  automationId?: string;
+  name?: string;
+  controlType?: string;
+  localizedControlType?: string;
+  className?: string;
+  value?: string;
+  nativeWindowHandle?: number;
+  /** Element bounds, relative to the window when `windowBounds` is present. */
+  frame?: ComputerFrame;
+  /** Semantic actions the element advertises (Invoke, Toggle, ...). */
+  actions?: string[];
+}
+
+export interface ComputerAppDescriptor {
+  name: string;
+  pid: number;
+  windowTitle?: string;
+}
+
+/**
+ * A point-in-time read of one app window on one desktop. Element indexes are
+ * only valid against the observation that produced them.
+ */
+export interface ComputerObservation {
+  id: string;
+  desktopId: string;
+  machineId: string;
+  app: ComputerAppDescriptor;
+  windowTitle?: string;
+  windowBounds?: ComputerFrame;
+  treeLines: string[];
+  elements: ComputerElement[];
+  focusedSummary?: string;
+  selectedText?: string;
+  screenshot?: { mime: "image/png"; base64: string; width?: number; height?: number };
+  capturedAt: string;
+}
+
+/** Structured action against one observed app on a desktop. */
+export interface ComputerAction {
+  kind: "click" | "type" | "key" | "scroll" | "drag" | "set_value" | "secondary";
+  /** App selector: process name, window title substring, or pid. */
+  app: string;
+  /**
+   * Observation whose element indexes this action may reference. When the
+   * desktop's latest observation for the app is newer, the Host rejects the
+   * action so stale coordinates/indexes cannot fire blindly.
+   */
+  observationId?: string;
+  /** Element index from the referenced observation. */
+  elementIndex?: number;
+  /** Window-relative coordinates for pointer actions. */
+  x?: number;
+  y?: number;
+  fromX?: number;
+  fromY?: number;
+  toX?: number;
+  toY?: number;
+  clickCount?: number;
+  mouseButton?: "left" | "right" | "middle";
+  /** `auto` prefers semantic patterns; `global` forces real pointer input. */
+  clickMethod?: "auto" | "accessibility" | "app_post" | "global";
+  direction?: "up" | "down" | "left" | "right";
+  pages?: number;
+  text?: string;
+  /** Key chord, e.g. `enter`, `ctrl+s`, `f5`. */
+  key?: string;
+  value?: string;
+  /** Secondary action name from the element's `actions` list. */
+  action?: string;
+}
+
+export interface ComputerActionResult {
+  /** The driver accepted and dispatched the input — NOT a claim of app effect. */
+  accepted: boolean;
+  /** True when a cancel superseded this action before/while it ran. */
+  cancelled?: boolean;
+  /** Driver-reported detail (pattern used, input path taken). */
+  detail?: string;
+  /** Post-action observation when the driver returned one. */
+  observation?: ComputerObservation;
+}
+
+export interface ComputerListParams {
+  machineId?: string;
+}
+
+export interface ComputerListResult {
+  machines: ComputerMachine[];
+  desktops: ComputerDesktop[];
+}
+
+export interface ComputerObserveParams {
+  /** Absent = the caller's default desktop target. */
+  desktopId?: string;
+  app: string;
+  includeScreenshot?: boolean;
+  textLimit?: number | "max";
+  maxTreeNodes?: number;
+  maxTreeDepth?: number;
+}
+
+export interface ComputerObserveResult {
+  observation: ComputerObservation;
+}
+
+export interface ComputerAppsParams {
+  /** Absent = the caller's default desktop target. */
+  desktopId?: string;
+}
+
+export interface ComputerAppsResult {
+  apps: ComputerAppDescriptor[];
+}
+
+export interface ComputerActParams {
+  desktopId?: string;
+  action: ComputerAction;
+}
+
+export interface ComputerActResult {
+  result: ComputerActionResult;
+}
+
+export interface ComputerCancelParams {
+  desktopId?: string;
+}
+
+export interface ComputerCancelResult {
+  /** Queued actions dropped; in-flight ops still settle but report cancelled. */
+  cancelled: number;
+}
+
+export interface ComputerReleaseParams {
+  desktopId?: string;
+}
+
+export interface ComputerReleaseResult {
+  released: boolean;
+}

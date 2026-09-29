@@ -59,6 +59,7 @@ const HARNESS_SECTION_BY_SLUG: Record<string, HarnessSettingsSection> = {
   'harness-retrieval': 'retrieval',
   'harness-index': 'index',
   'harness-web': 'web',
+  'harness-computers': 'computers',
 };
 
 const pageImplementation = (

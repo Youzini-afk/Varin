@@ -353,6 +353,17 @@ export const VARIN_BUILTIN_HARNESS_EXTENSION = definition({
       title: "Web Access",
       titleKey: "settings.page.harness.page.web.title",
     }),
+    pageContribution({
+      group: "harness",
+      icon: "computer",
+      id: "varin.builtin.pi-harness.page.computers",
+      keywords: ["computer", "desktop", "computer use", "gui", "automation", "screen"],
+      kind: "single",
+      order: 7,
+      slug: "harness-computers",
+      title: "Computers",
+      titleKey: "settings.page.harness.page.computers.title",
+    }),
   ],
 });
 

@@ -553,6 +553,20 @@ impl Storage {
                 required("coordinatorHostId")?;
                 state_in(&["active", "archived"])?;
             }
+            "computer.machine" => {
+                derived("computer.machine")?;
+                required("name")?;
+                required("coordinatorHostId")?;
+                required("provider")?;
+                required("platform")?;
+                state_in(&["active", "unavailable", "archived"])?;
+            }
+            "computer.desktop" => {
+                derived("computer.desktop")?;
+                required("machineId")?;
+                required("label")?;
+                state_in(&["available", "unavailable", "stopped"])?;
+            }
             "recovery.operation-file" => {
                 if object.get("operationId").and_then(Value::as_str).is_none()
                     || object.get("path").and_then(Value::as_str).is_none()
@@ -768,6 +782,8 @@ impl Storage {
             "followup.observation",
             "settings.operation",
             "bot.profile",
+            "computer.machine",
+            "computer.desktop",
         ];
         if !KNOWN_RECORD_TYPES.contains(&record_type)
             && !(record_type.starts_with("retrieval.evidence.")

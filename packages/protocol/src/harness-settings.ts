@@ -308,6 +308,11 @@ export interface HarnessSettings {
   /** Dedicated rerank backend. Not a chat completion or embeddings alias. */
   rerank?: HarnessRerankSettings;
   /**
+   * Computer Use (BC4): the desktop work targets by default. User-owned —
+   * a project cannot redirect agent input to a machine the user did not pick.
+   */
+  computer?: { defaultDesktop: string | null };
+  /**
    * Fast Decision Model binding: default slot plus per-purpose override or
    * `"off"`. User-owned; not a chat model slot (D-312).
    */
@@ -427,6 +432,7 @@ export function mergeHarnessSettings(
     rerank: userRerank,
     nextStep: userNextStep,
     codeRetrieval: userCodeRetrieval,
+    computer: userComputer,
     ...userRest
   } = user;
   const {
@@ -438,6 +444,7 @@ export function mergeHarnessSettings(
     rerank: _workspaceRerank,
     nextStep: _workspaceNextStep,
     codeRetrieval: _workspaceCodeRetrieval,
+    computer: _workspaceComputer,
     ...workspaceRest
   } = workspace;
   const askBeforeKeys = new Set([
@@ -556,6 +563,10 @@ export function mergeHarnessSettings(
           },
         }
       : {}),
+    // The default Computer Use target is user-owned, like model selection.
+    computer: {
+      defaultDesktop: userComputer?.defaultDesktop ?? null,
+    },
     worktree: {
       ...DEFAULT_HARNESS_SETTINGS.worktree,
       ...user.worktree,

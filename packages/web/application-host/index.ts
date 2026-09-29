@@ -95,6 +95,8 @@ import { createResearchRootRuntime } from './lib/harness/research-root-runtime.j
 import { createBotRootRuntime } from './lib/harness/bot-root-runtime.js';
 import { createBotService } from './lib/bots/bot-service.js';
 import { registerBotRoutes } from './lib/bots/bot-routes.js';
+import { createComputerService } from './lib/computer/computer-service.js';
+import { registerComputerRoutes } from './lib/computer/computer-routes.js';
 import { createWorktreeReclaimGuard } from './lib/harness/worktree-reclaim-guard.js';
 import { resolveThreadWorktreeSettings } from './lib/harness/thread-worktree-settings.js';
 import { createKernelWorkspaceWorkingStateAccess, KernelStorageAdapter } from './lib/kernel/storage-adapter.js';
@@ -1766,6 +1768,15 @@ async function main(options: StartWebUiServerOptions = {}): Promise<WebUiServerC
     if (!bot) throw new Error(`Unknown Bot scope: ${scopeId}`);
     return bot.homeDir;
   };
+  // BC4: Computer Use catalog + supervised native drivers. Observation and
+  // input run through one service shared by Bots, ordinary workbench agents,
+  // and the settings surface; the persisted default target lives under the
+  // Host data dir.
+  const computerService = createComputerService({
+    client: kernelClient,
+    hostId,
+    dataDir: VARIN_DATA_DIR,
+  });
   // BC1: unified memory domain. The same service backs the harness memory.*
   // methods, the UI routes, and later the background organizer — one writer
   // semantics for accepted/suggested, dedupe, correction, and forgetting.
@@ -2658,6 +2669,10 @@ async function main(options: StartWebUiServerOptions = {}): Promise<WebUiServerC
     bots: botService,
     ...(uiAuthController ? { requireAuth: uiAuthController.requireAuth } : {}),
   });
+  registerComputerRoutes(app, {
+    computers: computerService,
+    ...(uiAuthController ? { requireAuth: uiAuthController.requireAuth } : {}),
+  });
   registerManagedRemoteRoutes(app, {
     service: managedRemoteExecution,
     ...(uiAuthController ? { requireAuth: uiAuthController.requireAuth } : {}),
@@ -3149,6 +3164,7 @@ async function main(options: StartWebUiServerOptions = {}): Promise<WebUiServerC
   const harnessServiceHost = createHarnessServiceHost({
     discoveredShells,
     memoryService,
+    computerService,
     pathLockService: kernelPathLockService,
     verification: verificationCoordinator,
     experimentService,
@@ -3723,6 +3739,7 @@ async function main(options: StartWebUiServerOptions = {}): Promise<WebUiServerC
               experiments: Boolean(harnessServiceHost.experimentService),
               settings: Boolean(harnessServiceHost.settingsService),
               followUps: Boolean(harnessServiceHost.followUpService),
+              computer: Boolean(harnessServiceHost.computerService),
             }),
           }).catch((error) => {
             console.error('[Harness] Failed to register session shell:', errorMessage(error));
@@ -3967,6 +3984,9 @@ async function main(options: StartWebUiServerOptions = {}): Promise<WebUiServerC
       // One refused exit must not prevent the other domains from shutting down.
       const processShutdown = await Promise.allSettled([
         researchRootRuntime.dispose(), botRootRuntime.dispose(), threadRuntime.dispose(), terminalRuntime?.shutdown(), languageSupervisor.dispose(), managedLanguageServers.dispose(), runRuntime.dispose(),
+        // Release every supervised native driver so no synthesized input is
+        // left held down when the Host exits.
+        computerService.dispose(),
       ]);
       const processShutdownErrors = processShutdown.flatMap((result) => result.status === 'rejected' ? [result.reason] : []);
       await languageToolProcesses.dispose().catch((error: unknown) => { processShutdownErrors.push(error); });

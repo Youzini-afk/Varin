@@ -73,7 +73,7 @@ interface SessionEntry {
 
 export function deriveHarnessCapabilities(
   activeTools: readonly string[],
-  availability: { documentRead?: boolean; documentPathOverlay?: boolean; threadRuntime: boolean; experiments?: boolean; settings?: boolean; followUps?: boolean },
+  availability: { documentRead?: boolean; documentPathOverlay?: boolean; threadRuntime: boolean; experiments?: boolean; settings?: boolean; followUps?: boolean; computer?: boolean },
 ): readonly HarnessCapability[] {
   const tools = new Set(activeTools);
   const capabilities = new Set<HarnessCapability>([
@@ -116,6 +116,10 @@ export function deriveHarnessCapabilities(
   ) {
     capabilities.add("read.followup");
     capabilities.add("control.followup");
+  }
+  if (availability.computer && tools.has("computer")) {
+    capabilities.add("read.computer");
+    capabilities.add("control.computer");
   }
   return [...capabilities];
 }
@@ -328,6 +332,8 @@ export interface HarnessServiceHost {
   todoDepsProvider: ((sessionId: string) => Promise<TodoToolDeps>) | null;
   /** BC1 unified memory service shared by harness methods, routes, and UI. */
   memoryService?: import("../memory/memory-service.js").MemoryService | null;
+  /** BC4 Computer Use service: catalog, observations, actions, cancellation. */
+  computerService?: import("../computer/computer-service.js").ComputerService | null;
   // Phase 3: Thread registry
   threadRegistry: ThreadRegistry | null;
   threadCaptureDraftBaseline: ((sessionId: string, workspaceId: string, context: import("@varin/protocol").AgentInputContext) => Promise<CapturedThreadDraftBaseline>) | null;
@@ -586,6 +592,7 @@ export interface HarnessServiceHostOptions {
   knowledgeSuggestDepsProvider?: HarnessServiceHost["knowledgeSuggestDepsProvider"];
   todoDepsProvider?: (sessionId: string) => Promise<TodoToolDeps>;
   memoryService?: NonNullable<HarnessServiceHost["memoryService"]>;
+  computerService?: NonNullable<HarnessServiceHost["computerService"]>;
   // Phase 3 options
   threadRegistry?: ThreadRegistry;
   threadCaptureDraftBaseline?: HarnessServiceHost["threadCaptureDraftBaseline"];
@@ -1058,6 +1065,7 @@ export function createHarnessServiceHost(options: HarnessServiceHostOptions): Ha
     knowledgeSuggestDepsProvider,
     todoDepsProvider,
     memoryService: options.memoryService ?? null,
+    computerService: options.computerService ?? null,
     threadRegistry,
     threadCaptureDraftBaseline,
     threadPrepareIsolatedBranch,
