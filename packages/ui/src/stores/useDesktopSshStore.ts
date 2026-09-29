@@ -1,4 +1,6 @@
 import { create } from 'zustand';
+import { subscribeRuntimeEndpointChanged } from '@varin/application-client';
+import { hasDesktopInvoke } from '@/lib/desktop';
 import {
   createDesktopSshInstance,
   desktopSshConnect,
@@ -40,6 +42,8 @@ type DesktopSshState = {
 const byUpdatedAt = (a: DesktopSshInstanceStatus, b: DesktopSshInstanceStatus) => {
   return b.updatedAtMs - a.updatedAtMs;
 };
+let ownerGeneration = 0;
+let stopStatusListener: (() => Promise<void>) | undefined;
 
 export const useDesktopSshStore = create<DesktopSshState>((set, get) => ({
   instances: [],
@@ -54,16 +58,19 @@ export const useDesktopSshStore = create<DesktopSshState>((set, get) => ({
 
   load: async () => {
     if (get().isLoading) return;
+    const generation = ownerGeneration;
     set({ isLoading: true, error: null });
     try {
       const [config, statuses] = await Promise.all([desktopSshInstancesGet(), desktopSshStatus()]);
+      if (generation !== ownerGeneration) return;
       const statusMap: Record<string, DesktopSshInstanceStatus> = {};
       for (const status of statuses.sort(byUpdatedAt)) {
         statusMap[status.id] = status;
       }
 
       if (!get().listenerReady) {
-        await listenDesktopSshStatus((status) => {
+        const stop = await listenDesktopSshStatus((status) => {
+          if (generation !== ownerGeneration) return;
           set((state) => ({
             statusesById: {
               ...state.statusesById,
@@ -71,6 +78,8 @@ export const useDesktopSshStore = create<DesktopSshState>((set, get) => ({
             },
           }));
         });
+        if (generation !== ownerGeneration) { await stop(); return; }
+        stopStatusListener = stop;
       }
 
       set({
@@ -81,6 +90,7 @@ export const useDesktopSshStore = create<DesktopSshState>((set, get) => ({
         listenerReady: true,
       });
     } catch (error) {
+      if (generation !== ownerGeneration) return;
       set({
         isLoading: false,
         error: error instanceof Error ? error.message : String(error),
@@ -90,11 +100,14 @@ export const useDesktopSshStore = create<DesktopSshState>((set, get) => ({
 
   loadImports: async () => {
     if (get().isImportsLoading) return;
+    const generation = ownerGeneration;
     set({ isImportsLoading: true, error: null });
     try {
       const importCandidates = await desktopSshImportHosts();
+      if (generation !== ownerGeneration) return;
       set({ importCandidates, isImportsLoading: false });
     } catch (error) {
+      if (generation !== ownerGeneration) return;
       set({
         isImportsLoading: false,
         error: error instanceof Error ? error.message : String(error),
@@ -103,25 +116,31 @@ export const useDesktopSshStore = create<DesktopSshState>((set, get) => ({
   },
 
   refreshStatuses: async () => {
+    const generation = ownerGeneration;
     try {
       const statuses = await desktopSshStatus();
+      if (generation !== ownerGeneration) return;
       const statusMap: Record<string, DesktopSshInstanceStatus> = {};
       for (const status of statuses.sort(byUpdatedAt)) {
         statusMap[status.id] = status;
       }
       set({ statusesById: statusMap });
     } catch (error) {
+      if (generation !== ownerGeneration) return;
       set({ error: error instanceof Error ? error.message : String(error) });
     }
   },
 
   setInstances: async (instances) => {
+    const generation = ownerGeneration;
     set({ isSaving: true, error: null });
     try {
       await desktopSshInstancesSet({ instances });
+      if (generation !== ownerGeneration) return;
       set({ instances, isSaving: false });
       await get().refreshStatuses();
     } catch (error) {
+      if (generation !== ownerGeneration) throw error;
       set({
         isSaving: false,
         error: error instanceof Error ? error.message : String(error),
@@ -147,9 +166,12 @@ export const useDesktopSshStore = create<DesktopSshState>((set, get) => ({
   },
 
   removeInstance: async (id) => {
+    const generation = ownerGeneration;
     await desktopSshDisconnect(id).catch(() => undefined);
+    if (generation !== ownerGeneration) return;
     const next = get().instances.filter((item) => item.id !== id);
     await get().setInstances(next);
+    if (generation !== ownerGeneration) return;
     set((state) => {
       const statusesById = { ...state.statusesById };
       delete statusesById[id];
@@ -158,22 +180,28 @@ export const useDesktopSshStore = create<DesktopSshState>((set, get) => ({
   },
 
   connect: async (id) => {
+    const generation = ownerGeneration;
     set({ error: null });
     try {
       await desktopSshConnect(id);
+      if (generation !== ownerGeneration) return;
       await get().refreshStatuses();
     } catch (error) {
+      if (generation !== ownerGeneration) throw error;
       set({ error: error instanceof Error ? error.message : String(error) });
       throw error;
     }
   },
 
   disconnect: async (id) => {
+    const generation = ownerGeneration;
     set({ error: null });
     try {
       await desktopSshDisconnect(id);
+      if (generation !== ownerGeneration) return;
       await get().refreshStatuses();
     } catch (error) {
+      if (generation !== ownerGeneration) throw error;
       set({ error: error instanceof Error ? error.message : String(error) });
       throw error;
     }
@@ -189,3 +217,14 @@ export const useDesktopSshStore = create<DesktopSshState>((set, get) => ({
 
   clearError: () => set({ error: null }),
 }));
+
+subscribeRuntimeEndpointChanged(() => {
+  if (hasDesktopInvoke()) return;
+  ownerGeneration += 1;
+  void stopStatusListener?.();
+  stopStatusListener = undefined;
+  useDesktopSshStore.setState({ instances: [], statusesById: {}, importCandidates: [], initialized: false,
+    listenerReady: false, isLoading: false, isImportsLoading: false, isSaving: false, error: null });
+  void useDesktopSshStore.getState().load();
+  void useDesktopSshStore.getState().loadImports();
+});

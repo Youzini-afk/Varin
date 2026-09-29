@@ -46,7 +46,8 @@ import {
   type VarinDesktopEventArguments,
 } from '@varin/application-client/desktop';
 import type { WebUiServerController } from '@varin/web/server/index.js';
-import { ElectronSshManager } from './ssh-manager.js';
+import type { HostSshManager } from '@varin/web/server/lib/connections/ssh-manager.js';
+import { readHostConnections, writeHostConnections } from '@varin/web/server/lib/connections/hosts.js';
 import { createDesktopNetworkFetch } from './harness-network-fetch.js';
 import { createTray, createTrayController, type TrayAction } from './tray.js';
 import { NotificationListener } from './notification-listener.js';
@@ -628,7 +629,7 @@ const shutdownSshSessions = async () => {
     return;
   }
 
-  state.sshShutdownPromise = sshManager.shutdownAll().catch((error) => {
+  state.sshShutdownPromise = (state.serverHandle?.connections.shutdownAll() ?? Promise.resolve()).catch((error) => {
     log.warn('[electron] failed to stop SSH sessions:', error);
   }).finally(() => {
     state.sshShutdownPromise = null;
@@ -810,11 +811,10 @@ const refreshQuitRiskFlags = async () => {
 const settingsFilePath = (): string => path.join(resolveVarinDataDir(process), 'settings.json');
 const settingsStore = createSettingsFileStore({ filePath: settingsFilePath() });
 
-const sshManager = new ElectronSshManager({
-  settingsFilePath: settingsFilePath(),
-  appVersion: APP_VERSION,
-  emit: (event, detail) => emitToAllWindows(event, detail),
-});
+const hostConnections = (): HostSshManager => {
+  if (!state.serverHandle) throw new Error('Application Host is not ready');
+  return state.serverHandle.connections;
+};
 
 const readSettingsRoot = (): VarinSettingsDocument => settingsStore.readSync();
 const mutateSettingsRoot = (mutator: Parameters<typeof settingsStore.update>[0]) => settingsStore.update(mutator);
@@ -867,7 +867,6 @@ const normalizeHostUrl = (raw: unknown): string | null => {
   }
 };
 
-const sanitizeHostUrlForStorage = (raw: unknown): string | null => normalizeHostUrl(raw);
 const sanitizeClientTokenForStorage = (raw: unknown): string | null => {
   const token = typeof raw === 'string' ? raw.trim() : '';
   return token.length > 0 ? token : null;
@@ -948,121 +947,11 @@ const isLocalRuntimeUrl = (targetUrl: unknown): boolean => {
   }
 };
 
-// A relay host is reached over the E2EE tunnel: it has no http(s) apiUrl, only a
-// { relayUrl (ws/wss), serverId, hostEncPubJwk } descriptor. The relay grant is a
-// one-time pairing artifact and is never persisted.
-interface StoredHostRelay {
-  hostEncPubJwk: JsonWebKey;
-  relayUrl: string;
-  serverId: string;
-}
-
-interface StoredDesktopHost {
-  apiUrl?: string;
-  clientToken?: string;
-  id: string;
-  label: string;
-  password?: string;
-  relay?: StoredHostRelay;
-  requestHeaders?: Record<string, string>;
-  url: string;
-}
-
-interface DesktopHostsConfig {
-  defaultHostId: string | null;
-  hosts: StoredDesktopHost[];
-  initialHostChoiceCompleted: boolean;
-}
-
-const sanitizeHostRelayForStorage = (value: unknown): StoredHostRelay | null => {
-  if (!value || typeof value !== 'object') return null;
-  const candidate = recordOf(value);
-  const relayUrl = typeof candidate.relayUrl === 'string' ? candidate.relayUrl.trim() : '';
-  const serverId = typeof candidate.serverId === 'string' ? candidate.serverId.trim() : '';
-  const jwk = recordOf(candidate.hostEncPubJwk);
-  if (!relayUrl || !serverId || !jwk || typeof jwk !== 'object' || Array.isArray(jwk)) return null;
-  // Minimal EC public JWK shape check so a malformed descriptor is rejected at
-  // storage time instead of surfacing later as a tunnel handshake failure.
-  if (typeof jwk.kty !== 'string' || typeof jwk.crv !== 'string' || typeof jwk.x !== 'string') return null;
-  try {
-    const parsed = new URL(relayUrl);
-    if (parsed.protocol !== 'ws:' && parsed.protocol !== 'wss:') return null;
-  } catch {
-    return null;
-  }
-  return { relayUrl, serverId, hostEncPubJwk: jwk as JsonWebKey };
-};
-
-// Shared storage shape for a persisted host. A host may carry a direct HTTP
-// transport, a relay transport, or BOTH (a multi-transport device: direct on
-// the home network, relay away — mirrors the mobile connection model). Returns
-// null for entries that can't be stored (missing id, reserved 'local', or no
-// usable transport at all).
-const buildStoredHostEntry = (entry: unknown): StoredDesktopHost | null => {
-  const candidate = recordOf(entry);
-  const id = typeof candidate.id === 'string' ? candidate.id.trim() : '';
-  if (!id || id === LOCAL_HOST_ID) return null;
-  const clientToken = sanitizeClientTokenForStorage(candidate.clientToken);
-  const requestHeaders = sanitizeRuntimeRequestHeaders(candidate.requestHeaders);
-  const headerFields = Object.keys(requestHeaders).length > 0 ? { requestHeaders } : {};
-  const tokenField = clientToken ? { clientToken } : {};
-  const labelRaw = typeof candidate.label === 'string' && candidate.label.trim() ? candidate.label.trim() : '';
-
-  const relay = sanitizeHostRelayForStorage(candidate.relay);
-  const relayField = relay ? { relay } : {};
-  const directUrl = sanitizeHostUrlForStorage(candidate.url);
-
-  if (directUrl) {
-    const apiUrl = sanitizeHostUrlForStorage(candidate.apiUrl) || directUrl;
-    return { id, label: labelRaw || directUrl, url: directUrl, apiUrl, ...tokenField, ...headerFields, ...relayField };
-  }
-  if (relay) {
-    const url = `relay://${relay.serverId}`;
-    return { id, label: labelRaw || url, url, ...tokenField, ...headerFields, relay };
-  }
-  return null;
-};
-
-const readDesktopHostsConfig = (): DesktopHostsConfig => {
-  const root = readSettingsRoot();
-  const hostsRaw = Array.isArray(root.desktopHosts) ? root.desktopHosts : [];
-  const hosts = hostsRaw
-    .map(buildStoredHostEntry)
-    .filter((entry): entry is StoredDesktopHost => Boolean(entry));
-
-  return {
-    hosts,
-    defaultHostId: typeof root.desktopDefaultHostId === 'string' && root.desktopDefaultHostId.trim()
-      ? root.desktopDefaultHostId.trim()
-      : null,
-    initialHostChoiceCompleted: root.desktopInitialHostChoiceCompleted === true,
-  };
-};
-
-const writeDesktopHostsConfig = async (input: unknown): Promise<void> => {
-  const config = recordOf(input);
-  await mutateSettingsRoot((root) => {
-    root.desktopHosts = Array.isArray(config?.hosts)
-      ? config.hosts
-          .map(buildStoredHostEntry)
-          .filter((entry): entry is StoredDesktopHost => Boolean(entry))
-      : [];
-    root.desktopDefaultHostId = typeof config?.defaultHostId === 'string' && config.defaultHostId.trim()
-      ? config.defaultHostId.trim()
-      : null;
-    if (typeof config?.initialHostChoiceCompleted === 'boolean') {
-      root.desktopInitialHostChoiceCompleted = config.initialHostChoiceCompleted;
-    }
-    if (Object.prototype.hasOwnProperty.call(config || {}, 'localClientToken')) {
-      const localClientToken = sanitizeClientTokenForStorage(config.localClientToken);
-      if (localClientToken) {
-        root.desktopLocalClientToken = localClientToken;
-      } else {
-        delete root.desktopLocalClientToken;
-      }
-    }
-  });
-};
+type DesktopHostsConfig = import('@varin/application-client').DesktopHostsConfig;
+const readDesktopHostsConfig = (): DesktopHostsConfig => readHostConnections(settingsStore);
+const writeDesktopHostsConfig = (input: unknown): Promise<void> => writeHostConnections(
+  settingsStore, input as import('@varin/application-client').DesktopHostsConfigInput,
+);
 
 interface StoredWindowState extends Rectangle {
   fullscreen?: boolean | undefined;
@@ -1817,6 +1706,7 @@ const spawnLocalServer = async () => {
       if (errorMessage) throw new Error(errorMessage);
     },
     onDesktopNotification: (payload) => maybeShowNativeNotification(payload),
+    onConnectionStatus: (status) => emitToAllWindows('varin:ssh-instance-status', status),
     getIsWindowFocused: isAnyWindowFocused,
     getDesktopRuntimeConfig: () => ({
       apiBaseUrl: state.apiBaseUrl || '',
@@ -3382,14 +3272,12 @@ const setupTrayAndListener = (bootOutcome: BootOutcome | null): void => {
   const serverUrl = bootOutcome.url || host?.url;
   if (!serverUrl) return;
 
-  // Resolve password: try host-level password from hosts config, then fall
-  // back to any UI password stored in settings (desktopHosts entries don't
-  // currently persist passwords, but the app may set VARIN_UI_PASSWORD).
+  // Remote hosts carry their own client token; the local UI password belongs
+  // only to this Host and must not be sent to another configured connection.
   const settingsPassword = readSettingsRoot().uiPassword;
-  const password = host?.password
-    || (typeof settingsPassword === 'string' ? settingsPassword : '')
+  const password = isLocalRuntimeUrl(serverUrl) ? (typeof settingsPassword === 'string' ? settingsPassword : '')
     || process.env.VARIN_UI_PASSWORD
-    || '';
+    || '' : '';
   const clientToken = host?.clientToken
     || resolveStoredClientTokenForUrl(serverUrl, config)
     || state.clientToken
@@ -4969,37 +4857,37 @@ const handleInvoke = async (
     }
 
     case 'desktop_ssh_instances_get':
-      return sshManager.readInstances();
+      return hostConnections().readInstances();
 
     case 'desktop_ssh_instances_set':
-      await sshManager.setInstances(args.config || {});
+      await hostConnections().setInstances(args.config || {});
       return null;
 
     case 'desktop_ssh_import_hosts':
-      return await sshManager.importHosts();
+      return await hostConnections().importHosts();
 
     case 'desktop_ssh_connect': {
       const id = String(args.id || '').trim();
-      await sshManager.connect(id);
+      await hostConnections().connect(id);
       return null;
     }
 
     case 'desktop_ssh_disconnect': {
       const id = String(args.id || '').trim();
-      await sshManager.disconnect(id);
+      await hostConnections().disconnect(id);
       return null;
     }
 
     case 'desktop_ssh_status': {
       const id = String(args.id || '').trim();
-      return await sshManager.statusesWithDefaults(id || undefined);
+      return await hostConnections().statusesWithDefaults(id || undefined);
     }
 
     case 'desktop_ssh_logs':
-      return sshManager.logsForInstance(String(args.id || '').trim(), Number(args.limit) || 200);
+      return hostConnections().logsForInstance(String(args.id || '').trim(), Number(args.limit) || 200);
 
     case 'desktop_ssh_logs_clear':
-      sshManager.clearLogsForInstance(String(args.id || '').trim());
+      hostConnections().clearLogsForInstance(String(args.id || '').trim());
       return null;
 
     case 'desktop_web_render': {

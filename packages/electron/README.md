@@ -40,7 +40,7 @@ The `preload.ts` bridge exposes desktop-only APIs to the web UI through `window.
 | `main.ts` | Electron main process, app lifecycle, windows, menus, deep links, native IPC handlers, updates, local server startup |
 | `startup-url-selection.ts` | Pure bundled/HMR startup probe policy used by main-process URL resolution |
 | `preload.ts` | Safe bridge from the rendered UI to Electron IPC |
-| `ssh-manager.ts` | SSH host import, connection lifecycle, tunnel/port forwarding helpers |
+| Application Host `lib/connections` | Shared SSH import, connection lifecycle and forwarding; Electron delegates through its embedded Host |
 | `renderer-security-policy.ts` | Trusted-origin policy and remote-safe command gate for the preload bridge |
 | `scripts/electron-dev.mjs` | Desktop dev launcher with Vite HMR support |
 | `scripts/build-web-assets.mjs` | Builds `packages/web` and stages UI assets into `resources/web-dist` |

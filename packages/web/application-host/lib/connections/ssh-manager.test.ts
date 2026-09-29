@@ -8,7 +8,7 @@ import { EventEmitter } from 'node:events';
 import { PassThrough, type Readable, type Writable } from 'node:stream';
 import type { SpawnOptions } from 'node:child_process';
 
-import { ElectronSshManager, type SshChildProcess, type SshInstance, type ParsedSshCommand } from './ssh-manager.js';
+import { HostSshManager, type SshChildProcess, type SshInstance, type ParsedSshCommand } from './ssh-manager.js';
 
 interface TestSshChildProcess extends EventEmitter {
   stdin: PassThrough;
@@ -95,10 +95,46 @@ afterEach(async () => {
   }
 });
 
-describe('ElectronSshManager', () => {
+describe('HostSshManager', () => {
+  test('disconnecting while configuration resolves prevents late connection startup and persists the intent', async () => {
+    const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), 'varin-ssh-cancel-'));
+    tempDirs.push(tempDir);
+    const manager = new HostSshManager({ settingsFilePath: path.join(tempDir, 'settings.json'), appVersion: 'test', emit: () => {},
+      spawn: () => { throw new Error('Cancelled connection must not start a process'); } });
+    await manager.setInstances({ instances: [{ id: 'remote', sshCommand: 'ssh user@example.test' }] });
+    let release!: () => void;
+    let entered!: () => void;
+    const started = new Promise<void>((resolve) => { entered = resolve; });
+    manager.resolveSshConfig = async () => { entered(); await new Promise<void>((resolve) => { release = resolve; }); return new Map(); };
+    const connecting = manager.connect('remote');
+    const rejected = expect(connecting).rejects.toThrow('cancelled');
+    await started;
+    const disconnecting = manager.disconnect('remote');
+    release();
+    await Promise.all([rejected, disconnecting]);
+    expect(manager.settingsStore.readSync().hostSshConnections).toEqual([]);
+    expect((await manager.statusesWithDefaults('remote'))[0]?.phase).toBe('idle');
+    await manager.shutdownAll();
+    await expect(manager.connect('remote')).rejects.toThrow('stopped');
+  });
+
+  test('restores explicitly connected targets in the Host without a renderer', async () => {
+    const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), 'varin-ssh-restore-'));
+    tempDirs.push(tempDir);
+    const manager = new HostSshManager({ settingsFilePath: path.join(tempDir, 'settings.json'), appVersion: 'test', emit: () => {} });
+    await manager.setInstances({ instances: [{ id: 'remote', sshCommand: 'ssh user@example.test' }] });
+    await manager.settingsStore.update((root) => { root.hostSshConnections = ['remote', 'removed']; });
+    const restored: string[] = [];
+    manager.connectBlocking = async (instance) => { restored.push(instance.id); };
+    await manager.restore();
+    expect(restored).toEqual(['remote']);
+    await manager.shutdownAll();
+    expect(manager.settingsStore.readSync().hostSshConnections).toContain('remote');
+  });
+
   test('runs Windows SSH commands without ControlMaster and hides the process window', async () => {
     const calls: SpawnCall[] = [];
-    const manager = new ElectronSshManager({
+    const manager = new HostSshManager({
       settingsFilePath: path.join(os.tmpdir(), 'unused-settings.json'),
       appVersion: '0.0.0-test',
       emit: () => undefined,
@@ -132,7 +168,7 @@ describe('ElectronSshManager', () => {
   test('creates a PowerShell-backed askpass helper on Windows', async () => {
     const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), 'varin-ssh-askpass-test-'));
     tempDirs.push(tempDir);
-    const manager = new ElectronSshManager({
+    const manager = new HostSshManager({
       settingsFilePath: path.join(tempDir, 'settings.json'),
       appVersion: '0.0.0-test',
       emit: () => undefined,
@@ -149,7 +185,7 @@ describe('ElectronSshManager', () => {
 
   test('runs each Windows port forward as an independent hidden SSH process', async () => {
     const calls: SpawnCall[] = [];
-    const manager = new ElectronSshManager({
+    const manager = new HostSshManager({
       settingsFilePath: path.join(os.tmpdir(), 'unused-settings.json'),
       appVersion: '0.0.0-test',
       emit: () => undefined,
@@ -194,7 +230,7 @@ describe('ElectronSshManager', () => {
 
   test('keeps ControlMaster-backed forwarding on non-Windows platforms', async () => {
     const calls: SpawnCall[] = [];
-    const manager = new ElectronSshManager({
+    const manager = new HostSshManager({
       settingsFilePath: path.join(os.tmpdir(), 'unused-settings.json'),
       appVersion: '0.0.0-test',
       emit: () => undefined,
@@ -219,7 +255,7 @@ describe('ElectronSshManager', () => {
   test('stops in-flight commands and forwards when disconnecting Windows SSH', async () => {
     const killedChildren: TestSshChildProcess[] = [];
     const spawnedChildren: TestSshChildProcess[] = [];
-    const manager = new ElectronSshManager({
+    const manager = new HostSshManager({
       settingsFilePath: path.join(os.tmpdir(), 'unused-settings.json'),
       appVersion: '0.0.0-test',
       emit: () => undefined,
@@ -292,7 +328,7 @@ describe('ElectronSshManager', () => {
   });
 
   test('reports bounded, sanitized, and redacted SSH master stderr when startup fails', async () => {
-    const manager = new ElectronSshManager({
+    const manager = new HostSshManager({
       settingsFilePath: path.join(os.tmpdir(), 'unused-settings.json'),
       appVersion: '0.0.0-test',
       emit: () => undefined,
@@ -344,7 +380,7 @@ describe('ElectronSshManager', () => {
     const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), 'varin-ssh-manager-test-'));
     tempDirs.push(tempDir);
     const settingsFilePath = path.join(tempDir, 'settings.json');
-    const manager = new ElectronSshManager({
+    const manager = new HostSshManager({
       settingsFilePath,
       appVersion: '0.0.0-test',
       emit: () => undefined,

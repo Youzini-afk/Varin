@@ -1,4 +1,6 @@
 import { hasDesktopInvoke, invokeDesktop } from '@/lib/desktop';
+import { hostConnectionRequest } from './hostConnections';
+import { subscribeVarinEvents } from './varinEvents';
 import type {
   DesktopSshImportCandidate,
   DesktopSshInstance,
@@ -62,7 +64,20 @@ const asStringArray = (value: unknown): string[] => {
 };
 
 const getInvoke = (): DesktopInvoke | null => {
-  if (!hasDesktopInvoke()) return null;
+  if (!hasDesktopInvoke()) return async <K extends VarinDesktopCommand>(command: K, ...invocation: VarinDesktopCommandInvocation<K>) => {
+    const args = (invocation[0] ?? {}) as Record<string, unknown>;
+    const id = encodeURIComponent(String(args.id ?? ''));
+    const requests: Partial<Record<VarinDesktopCommand, [string, string, unknown?]>> = {
+      desktop_ssh_instances_get: ['/ssh', 'GET'], desktop_ssh_instances_set: ['/ssh', 'PUT', args.config],
+      desktop_ssh_import_hosts: ['/ssh/import', 'GET'], desktop_ssh_connect: [`/ssh/${id}/connect`, 'POST'],
+      desktop_ssh_disconnect: [`/ssh/${id}/disconnect`, 'POST'], desktop_ssh_status: [`/ssh/status${id ? `?id=${id}` : ''}`, 'GET'],
+      desktop_ssh_logs: [`/ssh/${id}/logs${typeof args.limit === 'number' ? `?limit=${args.limit}` : ''}`, 'GET'],
+      desktop_ssh_logs_clear: [`/ssh/${id}/logs`, 'DELETE'],
+    };
+    const request = requests[command];
+    if (!request) throw new Error(`Unsupported connection operation: ${command}`);
+    return hostConnectionRequest<VarinDesktopCommandResult<K>>(request[0], request[1], request[2]);
+  };
   return (command, ...invocation) => invokeDesktop(command, ...invocation);
 };
 
@@ -364,7 +379,12 @@ export const listenDesktopSshStatus = async (
   listener: (status: DesktopSshInstanceStatus) => void,
 ): Promise<() => Promise<void>> => {
   if (!hasDesktopInvoke()) {
-    return async () => {};
+    const unsubscribe = subscribeVarinEvents((event) => {
+      if (event.type !== 'ssh-instance-status') return;
+      const status = parseStatus(event.status);
+      if (status) listener(status);
+    });
+    return async () => unsubscribe();
   }
 
   const desktop = (window as unknown as { __VARIN_DESKTOP__?: DesktopBridgeGlobal }).__VARIN_DESKTOP__;

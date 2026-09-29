@@ -64,7 +64,8 @@ type SessionCreatedEvent = {
   dispatchedAsCommand: boolean;
 };
 
-export type VarinEvent = StreamReadyEvent | ScheduledTaskRanEvent | SessionCreatedEvent | HarnessThreadChangedEvent | HarnessBlocksChangedEvent | HarnessKnowledgeChangedEvent | HarnessExperimentChangedEvent | SettingsChangedEvent;
+export type VarinEvent = StreamReadyEvent | ScheduledTaskRanEvent | SessionCreatedEvent | HarnessThreadChangedEvent | HarnessBlocksChangedEvent | HarnessKnowledgeChangedEvent | HarnessExperimentChangedEvent | SettingsChangedEvent
+  | { type: 'ssh-instance-status'; status: unknown };
 type Listener = (event: VarinEvent) => void;
 
 let eventSource: EventSource | null = null;
@@ -177,6 +178,10 @@ const parseHarnessThreadChanged = (properties: unknown): HarnessThreadChangedEve
 };
 
 const dispatchFromEnvelope = (envelope: { type: string; properties: unknown }) => {
+  if (envelope.type === 'varin:ssh-instance-status') {
+    for (const listener of listeners) listener({ type: 'ssh-instance-status', status: envelope.properties });
+    return;
+  }
   if (envelope.type === 'varin:event-stream-ready') {
     reconnectAttempt = 0;
     for (const listener of listeners) listener({ type: 'stream-ready' });

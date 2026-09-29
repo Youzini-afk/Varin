@@ -96,6 +96,9 @@ import { createBotRootRuntime } from './lib/harness/bot-root-runtime.js';
 import { createBotService } from './lib/bots/bot-service.js';
 import { registerBotRoutes } from './lib/bots/bot-routes.js';
 import { createComputerService } from './lib/computer/computer-service.js';
+import { HostSshManager } from './lib/connections/ssh-manager.js';
+import { registerConnectionRoutes } from './lib/connections/connection-routes.js';
+import { attachConnectionProxy } from './lib/connections/host-proxy.js';
 import { configuredVmProviders } from './lib/computer/vm-provider.js';
 import { registerComputerRoutes } from './lib/computer/computer-routes.js';
 import { createWorktreeReclaimGuard } from './lib/harness/worktree-reclaim-guard.js';
@@ -1787,6 +1790,14 @@ async function main(options: StartWebUiServerOptions = {}): Promise<WebUiServerC
   // input run through one service shared by Bots, ordinary workbench agents,
   // and the settings surface; the persisted default target lives under the
   // Host data dir.
+  const connections = new HostSshManager({
+    settingsFilePath: path.join(VARIN_DATA_DIR, 'settings.json'),
+    appVersion: VARIN_VERSION,
+    emit: (event, detail) => {
+      broadcastGlobalUiEvent?.({ type: event, properties: { ...detail } });
+      options.onConnectionStatus?.(detail);
+    },
+  });
   const computerService = createComputerService({
     client: kernelClient,
     hostId,
@@ -2719,6 +2730,14 @@ async function main(options: StartWebUiServerOptions = {}): Promise<WebUiServerC
     hostId,
     ...(uiAuthController ? { requireAuth: uiAuthController.requireAuth } : {}),
   });
+  registerConnectionRoutes(app, connections, uiAuthController?.requireAuth ?? ((_request, _response, next) => next()));
+  const connectionProxy = attachConnectionProxy({
+    app, server, settings: connections.settingsStore,
+    requireAuth: uiAuthController?.requireAuth ?? ((_request, _response, next) => next()),
+    authenticateUpgrade: async (request) => Boolean(await uiAuthController?.ensureSessionToken(request, { setHeader: () => undefined })),
+    originAllowed: isRequestOriginAllowed,
+  });
+  void connections.restore().catch((error) => console.error('[HostConnections]', errorMessage(error)));
   registerManagedRemoteRoutes(app, {
     service: managedRemoteExecution,
     ...(uiAuthController ? { requireAuth: uiAuthController.requireAuth } : {}),
@@ -4042,6 +4061,7 @@ async function main(options: StartWebUiServerOptions = {}): Promise<WebUiServerC
 
   return {
     expressApp: app,
+    connections,
     httpServer: server,
     getPort: () => tunnelRuntimeContext.getActivePort(),
     getTunnelUrl: () => tunnelService.getPublicUrl(),
@@ -4087,6 +4107,7 @@ async function main(options: StartWebUiServerOptions = {}): Promise<WebUiServerC
         // Release every supervised native driver so no synthesized input is
         // left held down when the Host exits.
         computerService.dispose(),
+        connections.shutdownAll(),
       ]);
       const processShutdownErrors = processShutdown.flatMap((result) => result.status === 'rejected' ? [result.reason] : []);
       await languageToolProcesses.dispose().catch((error: unknown) => { processShutdownErrors.push(error); });
@@ -4136,6 +4157,7 @@ async function main(options: StartWebUiServerOptions = {}): Promise<WebUiServerC
       }
       await threadRegistry.dispose();
       realtimeProxyRuntime.stop();
+      connectionProxy.stop();
       clearInterval(relayReconcileTimer);
       relayService.stop();
       dictationRuntime?.stop?.();

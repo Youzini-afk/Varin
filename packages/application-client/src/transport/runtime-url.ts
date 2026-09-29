@@ -90,7 +90,7 @@ const buildHttpUrl = (baseUrl: string, path: string, query?: RuntimeUrlQuery): s
     return appendRelativeQuery(normalizedPath, query);
   }
 
-  const url = new URL(normalizedPath, `${baseUrl}/`);
+  const url = new URL(normalizedPath.slice(1), `${baseUrl}/`);
   appendQuery(url, query);
   return url.toString();
 };

@@ -8,7 +8,8 @@ import type { SpawnOptions } from 'node:child_process';
 import type { Writable, Readable } from 'node:stream';
 import { createSettingsFileStore } from '@varin/settings-store';
 import type { DesktopSshInstanceStatus, DesktopSshPhase } from '@varin/application-client/desktop';
-import { recordOf } from './runtime-types.js';
+const recordOf = (value: unknown): Record<string, unknown> => value && typeof value === 'object' && !Array.isArray(value)
+  ? value as Record<string, unknown> : {};
 
 const LOCAL_HOST_ID = 'local';
 const DEFAULT_CONNECTION_TIMEOUT_SEC = 60;
@@ -471,7 +472,7 @@ const parseProbeStatusLine = (line: string | undefined, prefix: string): number 
 const isAuthHttpStatus = (status: number): boolean => status === 401 || status === 403;
 const isLivenessHttpStatus = (status: number): boolean => (status >= 200 && status <= 299) || isAuthHttpStatus(status);
 
-export class ElectronSshManager {
+export class HostSshManager {
   readonly settingsFilePath: string;
   readonly settingsStore: SettingsStore;
   readonly appVersion: string;
@@ -486,6 +487,8 @@ export class ElectronSshManager {
   readonly connectAttempts: Map<string, number>;
   readonly connecting: Map<string, Promise<void>>;
   readonly sshAuth: WeakMap<ParsedSshCommand, SshAuthRecord>;
+  readonly wanted = new Set<string>();
+  private disposed = false;
 
   constructor(options: {
     appVersion: string;
@@ -867,6 +870,34 @@ export class ElectronSshManager {
       }
       return root;
     });
+    const retained = new Set(instances.map((instance) => instance.id));
+    await Promise.all([...this.wanted].filter((id) => !retained.has(id)).map((id) => this.disconnect(id)));
+  }
+
+  private async persistWanted(id: string, wanted: boolean): Promise<void> {
+    await this.settingsStore.update((root) => {
+      const ids = new Set(Array.isArray(root.hostSshConnections) ? root.hostSshConnections.filter((id): id is string => typeof id === 'string') : []);
+      if (wanted) ids.add(id); else ids.delete(id);
+      root.hostSshConnections = [...ids];
+    });
+  }
+
+  async restore(): Promise<void> {
+    const root = this.settingsStore.readSync();
+    const configured = new Set(this.readInstances().instances.map((entry) => recordOf(entry).id));
+    const ids = Array.isArray(root.hostSshConnections) ? root.hostSshConnections : [];
+    await Promise.allSettled(ids.filter((id): id is string => typeof id === 'string' && configured.has(id)).map((id) => this.connect(id)));
+  }
+
+  private assertCurrent(session: SshSession): void {
+    if (this.disposed || !this.wanted.has(session.instance.id) || this.sessions.get(session.instance.id) !== session) {
+      throw new Error('SSH connection was cancelled');
+    }
+  }
+
+  private adoptChild(session: SshSession, child: SshChildProcess): SshChildProcess {
+    try { this.assertCurrent(session); return child; }
+    catch (error) { child.kill('SIGTERM'); throw error; }
   }
 
   sanitizeStoredSecret(secret: unknown): StoredSecret | undefined {
@@ -1021,7 +1052,7 @@ export class ElectronSshManager {
         throw new Error(`Configured Varin UI password was rejected by forwarded server (status ${loginResponse.status})`);
       }
 
-      const payload = await loginResponse.json().catch(() => null);
+      const payload = recordOf(await loginResponse.json().catch(() => null));
       const token = typeof payload?.clientToken === 'string' ? payload.clientToken.trim() : '';
       if (token) return token;
       cookie = this.extractCookieHeader(loginResponse);
@@ -1044,7 +1075,7 @@ export class ElectronSshManager {
       }),
     });
     if (!tokenResponse.ok) return '';
-    const tokenPayload = await tokenResponse.json().catch(() => null);
+    const tokenPayload = recordOf(await tokenResponse.json().catch(() => null));
     return typeof tokenPayload?.token === 'string' ? tokenPayload.token.trim() : '';
   }
 
@@ -1058,8 +1089,8 @@ export class ElectronSshManager {
         },
       });
       if (!response.ok) return null;
-      const body = await response.json().catch(() => null);
-      if (!body || typeof body !== 'object' || !Number.isSafeInteger(body.activeJobs) || body.activeJobs < 0) return null;
+      const body = recordOf(await response.json().catch(() => null));
+      if (typeof body.activeJobs !== 'number' || !Number.isSafeInteger(body.activeJobs) || body.activeJobs < 0) return null;
       return { activeJobs: body.activeJobs, keepAliveRequired: body.keepAliveRequired === true };
     } catch {
       return null;
@@ -1412,7 +1443,7 @@ export class ElectronSshManager {
       this.sshAuth.delete(session.parsed);
     }
 
-    this.clearRetryAttempt(id);
+    if (reportIdle) this.clearRetryAttempt(id);
     if (reportIdle) {
       this.setStatus(id, 'idle', null, null, null, null, false, 0, false);
     }
@@ -1423,12 +1454,17 @@ export class ElectronSshManager {
     this.setStatus(id, 'config_resolved', 'Resolving SSH command');
     const parsed = instance.sshParsed || parseSshCommand(instance.sshCommand);
     await this.resolveSshConfig(parsed);
+    if (this.disposed || !this.wanted.has(id)) throw new Error('SSH connection was cancelled');
 
     this.setStatus(id, 'auth_check', 'Checking SSH connectivity');
     const sessionDir = this.ensureSessionDir(id);
     const controlPath = this.controlPathForInstance(id);
     try { await fsp.rm(controlPath, { force: true }); } catch { /* best-effort cleanup; stale socket may not exist */ }
     const { askpassPath, cleanupPaths: askpassCleanupPaths } = await this.writeAskpassFiles(sessionDir);
+    if (this.disposed || !this.wanted.has(id)) {
+      await Promise.all(askpassCleanupPaths.map((file) => fsp.rm(file, { force: true })));
+      throw new Error('SSH connection was cancelled');
+    }
     const sshPassword = instance.auth?.sshPassword?.enabled ? instance.auth.sshPassword.value?.trim() ?? null : null;
     this.sshAuth.set(parsed, { askpassPath, sshPassword, children: new Set() });
     const session: SshSession = {
@@ -1450,18 +1486,21 @@ export class ElectronSshManager {
 
     this.setStatus(id, 'master_connecting', this.usesControlMaster() ? 'Establishing SSH ControlMaster' : 'Checking SSH connectivity');
     if (this.usesControlMaster()) {
-      const master = await this.spawnMasterProcess(parsed, controlPath);
+      const master = this.adoptChild(session, await this.spawnMasterProcess(parsed, controlPath));
       session.master = master;
       await this.waitForMasterReady(parsed, controlPath, instance.connectionTimeoutSec || DEFAULT_CONNECTION_TIMEOUT_SEC, master);
+      this.assertCurrent(session);
     }
 
     this.setStatus(id, 'remote_probe', 'Probing remote platform');
     const remoteOs = (await this.runRemoteCommand(parsed, controlPath, 'uname -s', instance.connectionTimeoutSec || DEFAULT_CONNECTION_TIMEOUT_SEC)).trim().toLowerCase();
+    this.assertCurrent(session);
     if (!['linux', 'darwin'].includes(remoteOs)) {
       throw new Error(`Unsupported remote OS: ${remoteOs}`);
     }
 
     const { remotePort, startedByUs } = await this.ensureRemoteServer(instance, parsed, controlPath);
+    this.assertCurrent(session);
     session.remotePort = remotePort;
     session.startedByUs = startedByUs;
     this.setStatus(id, 'forwarding', 'Setting up port forwards', null, null, remotePort, startedByUs, 0, false);
@@ -1475,10 +1514,11 @@ export class ElectronSshManager {
       localPort = await pickUnusedLocalPort();
     }
 
-    const mainForward = await this.spawnMainForward(parsed, controlPath, bindHost, localPort, remotePort);
+    const mainForward = this.adoptChild(session, await this.spawnMainForward(parsed, controlPath, bindHost, localPort, remotePort));
     session.mainForward = mainForward;
     let mainForwardDetached = false;
     await new Promise((resolve) => setTimeout(resolve, 250));
+    this.assertCurrent(session);
     if (typeof mainForward.exitCode === 'number' || childProcessDiagnostics.get(mainForward)?.error) {
       if (this.usesControlMaster() && mainForward.exitCode === 0) {
         mainForwardDetached = true;
@@ -1491,9 +1531,10 @@ export class ElectronSshManager {
 
     const extraErrors = [];
     for (const forward of instance.portForwards.filter((item) => item.enabled)) {
+      this.assertCurrent(session);
       try {
         const extraForward = await this.spawnExtraForward(parsed, controlPath, forward);
-        if (extraForward) session.extraForwards.push({ id: forward.id, child: extraForward });
+        if (extraForward) session.extraForwards.push({ id: forward.id, child: this.adoptChild(session, extraForward) });
         if (forward.type === 'local' && forward.localPort) {
           await new Promise((resolve) => setTimeout(resolve, 100));
           if (!(await isLocalTunnelReachable(forward.localPort))) {
@@ -1506,10 +1547,12 @@ export class ElectronSshManager {
     }
 
     await waitLocalForwardReady(localPort);
+    this.assertCurrent(session);
 
     const localUrl = `http://127.0.0.1:${localPort}`;
     const label = instance.nickname?.trim() || parsed.destination || id;
     const clientToken = await this.issueClientToken(localUrl, this.configuredVarinPassword(instance), instance.id);
+    this.assertCurrent(session);
     session.clientToken = clientToken;
     await this.updateHostRuntime(id, label, localUrl, clientToken);
     if (instance.localForward?.preferredLocalPort !== localPort) {
@@ -1517,6 +1560,7 @@ export class ElectronSshManager {
     }
 
     session.localPort = localPort;
+    this.assertCurrent(session);
 
     this.clearRetryAttempt(id);
     this.setStatus(
@@ -1538,6 +1582,7 @@ export class ElectronSshManager {
     if (existing) clearTimeout(existing);
     let healthyTicks = 0;
     const tick = async () => {
+      if (this.disposed || !this.wanted.has(id)) return;
       const session = this.sessions.get(id);
       if (!session) {
         this.monitorTimers.delete(id);
@@ -1609,6 +1654,7 @@ export class ElectronSshManager {
       this.setStatus(id, 'degraded', `${droppedReason}. Reconnecting`, null, null, null, false, attempt, false);
       const delayMs = Math.min((2 ** Math.max(attempt - 1, 0)) * 1000 + (nowMillis() % 700) + 100, 30000);
       await new Promise((resolve) => setTimeout(resolve, delayMs));
+      if (this.disposed || !this.wanted.has(id)) return;
       try {
         await this.connect(id);
       } catch (error) {
@@ -1619,6 +1665,7 @@ export class ElectronSshManager {
   }
 
   async connect(id: unknown): Promise<void> {
+    if (this.disposed) throw new Error('Connection owner has stopped');
     const trimmed = String(id || '').trim();
     if (!trimmed || trimmed === LOCAL_HOST_ID) {
       throw new Error('SSH instance id is required');
@@ -1638,9 +1685,14 @@ export class ElectronSshManager {
     const connectAttempt = this.nextConnectAttempt(trimmed);
     this.appendAttemptSeparator(trimmed, connectAttempt, retryAttempt);
     this.appendLog(trimmed, 'Starting SSH connection');
-    await this.disconnectInternal(trimmed, false);
-
-    const task = this.connectBlocking(this.sanitizeInstance(instance))
+    this.wanted.add(trimmed);
+    const task = (async () => {
+      await this.persistWanted(trimmed, true);
+      if (this.disposed || !this.wanted.has(trimmed)) return;
+      await this.disconnectInternal(trimmed, false);
+      if (this.disposed || !this.wanted.has(trimmed)) return;
+      await this.connectBlocking(this.sanitizeInstance(instance));
+    })()
       .catch(async (error) => {
         this.setStatus(trimmed, 'error', error instanceof Error ? error.message : String(error), null, null, null, false, 0, true);
         await this.disconnectInternal(trimmed, false);
@@ -1658,6 +1710,10 @@ export class ElectronSshManager {
     if (!trimmed || trimmed === LOCAL_HOST_ID) {
       throw new Error('SSH instance id is required');
     }
+    this.wanted.delete(trimmed);
+    await this.persistWanted(trimmed, false);
+    await this.disconnectInternal(trimmed, true);
+    await this.connecting.get(trimmed)?.catch(() => {});
     await this.disconnectInternal(trimmed, true);
   }
 
@@ -1672,9 +1728,12 @@ export class ElectronSshManager {
   }
 
   async shutdownAll(): Promise<void> {
+    this.disposed = true;
+    this.wanted.clear();
     const ids = [...new Set([...this.sessions.keys(), ...this.connecting.keys(), ...this.monitorTimers.keys()])];
     for (const id of ids) {
       await this.disconnectInternal(id, false);
     }
+    await Promise.allSettled([...this.connecting.values()]);
   }
 }

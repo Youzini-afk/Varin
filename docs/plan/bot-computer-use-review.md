@@ -10,6 +10,8 @@ Status: current acceptance — BC0–BC9 remain Partial.
 
 验证：Host 记忆/来源/catalog/context 定向 **47 项通过**，包括真实 TDB 关闭重开、主动遗忘后的其他句子、分支变化、原文修订、迟到提案和中断恢复；Pi memory **8 项通过**；UI knowledge/i18n **8 项通过**；protocol 构建、Host 产品/测试类型、Pi/UI 类型及变更文件 lint 通过。此批没有调用真实模型，不能据此判断提炼质量或缓存命中。电脑、远端、VM 与分发继续进行。
 
+第二批把 SSH 生命周期和连接设置移入共享 Host，Electron 只保留调用与原生事件适配。Web 设置接同一 Host 路由；实际 HTTP/WebSocket 网关让浏览器使用服务器侧 SSH 隧道，局部凭据不转交远端，运行时 URL 保留连接路径。已加入 Host 启动恢复连接意图、断开/关闭时阻断迟到启动，以及切换 Host 后的界面归属清理。Host 连接测试 **10 项通过**（含真实 HTTP/WebSocket 端口），UI 运行时/事件 **9 项通过**，Host/UI/Electron 类型与 lint 通过。真实 SSH/Linux 桌面尚未运行。
+
 **结论：不能接受“BC0–BC9 全部完成”。** Bot、记忆、Computer Use、桌面视图、远端转发与 libvirt 的生产路径确实存在；但基线有控制交接、磁盘归属、配置保存、入口生命周期等实际错误，且 BC6–BC9 的若干交付条件根本尚未实现。功能存在、行为正确和安装后可用是不同证据。下文是本次验收结论；[旧验收记录](bot-computer-use-acceptance.md)保留历史，不覆盖本报告。
 
 ## 分阶段判断
@@ -22,7 +24,7 @@ Status: current acceptance — BC0–BC9 remain Partial.
 | BC3 召回与咨询 | 生产路径已接线 | 工作关联、文本/向量、快速判断、增量材料、只读咨询和原始来源追读均有消费者；真实模型选材质量和缓存命中未验证。 |
 | BC4 本机 Computer Use | Windows 有有限运行证据；平台合同未完整完成 | 原生观察/输入与持久 REPL 已接线。本次修复脚本代次、截图输出、进程退出等待和跨请求拖拽。Linux/macOS 没有实际图形会话运行证据；Wayland 只实现 Screenshot portal 路径，未实现正式 RemoteDesktop 输入会话；macOS 仍为 JXA/旧捕获 API 路线。 |
 | BC5 实时桌面与交接 | 基础功能已接线并修复，未满足完整媒体路径合同 | 已有独立于 Agent 观察的 SSE 帧流。控制交接现在先阻断输入、等待释放、校验代次并保留重启后的人工归属。但帧采集仍与原生动作共用串行 driver，长动作会冻结画面；没有独立 Linux Xvnc/noVNC 媒体通路。 |
-| BC6 远端常驻 | 部分完成 | 已有鉴权 HTTP 镜像/操作/流转发。本次补了拥有者身份、取消、未知回执、镜像去递归和流断开处理。共享 SSH 连接管理仍有 Electron 专属入口；Linux 持久桌面准备、启动、组件部署与观看隧道尚未交付。直接在远端 Host 创建 Bot 与关闭客户端后持续运行的整条场景未实测。 |
+| BC6 远端常驻 | 连接 owner 已补，桌面准备继续进行 | 共享 Host 已拥有 SSH 生命周期、恢复意图与 Web HTTP/WS 网关；电脑镜像/操作/流转发已有生产路径。Linux 持久桌面准备、组件部署尚未交付；远端 Bot 完整常驻场景未实测。 |
 | BC7 虚拟机 | 生命周期子集已实现，创建可用电脑的合同未完成 | libvirt 真实 CLI 路径存在；本次修复了已有盘误删、按名字接管外部域、固定 UUID、分步回执、删除重试、provider 改绑与设置保存。创建仍只定义机器/磁盘；guest OS、桌面、浏览器、Host 安装、注册与自动进入共享桌面的流程尚未实现。 |
 | BC8 工作台整合 | 部分完成 | 已有共享桌面页签、Settings 入口、默认目标和最近会话链接。本次修复坐标、快捷键、拖拽、文本输入和切换目标后的旧画面。`desktop.usage` 仅是最近会话投影，尚不等于工作—电脑—成果闭环；远端成果引用/取得、人工交还事件对执行续接的集成仍不完整。 |
 | BC9 分发 | 资产构建路径已修复，整体未完成 | 驱动已改为随同一 Host generation 原子发布，编译产物可独立于 checkout 解析。原生依赖安装、Linux 桌面组件、macOS bundle/权限身份及完整安装包操作验证仍未交付或未验证。复制几份脚本不能代表这些部分已完成。 |
@@ -53,7 +55,7 @@ Status: current acceptance — BC0–BC9 remain Partial.
 
 这些是源码中的功能缺口，不是因缺少真机而暂缓作结论：
 
-4. **远端桌面准备与 Host 连接 owner。** `desktopHosts.ts` 仍依赖 desktop invoke；现有镜像不提供 Linux 桌面环境安装、Xvnc 启动、浏览器/数据目录和观看隧道的完整入口。
+4. **远端桌面准备。** 共享连接 owner 已补；Linux 桌面环境安装、Xvnc 启动、浏览器/数据目录及桌面媒体仍需接入。
 5. **创建到可用 VM 桌面。** libvirt define/start 与 guest 系统、桌面、Host 引导/注册之间缺少产品实现。手工 baseImage 配方不能算自动准备；provider 不可用时只能如实报错。
 6. **工作、成果和交还续接。** 最近 session 指针不能表达多工作关联、远端成果版本和可用回执；控制交还目前也没有完整接入已有工作事件/继续执行通路。
 7. **正式平台组件。** Linux 依赖 Python/GI/AT-SPI/Gdk 和实际图形会话；安装/升级路径未提供这些依赖。macOS JXA 不等同于计划中的稳定 bundle/ScreenCaptureKit 组件，能力声明和权限检查还需实际平台实现与运行验证。

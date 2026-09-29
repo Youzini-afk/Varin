@@ -1,4 +1,5 @@
 import { hasDesktopInvoke, invokeDesktop } from '@/lib/desktop';
+import { hostConnectionRequest } from './hostConnections';
 import { createRelayTunnelClient } from '@/lib/relay/tunnel-client';
 import { parsePairingConnectionPayload, type PairingEndpointCandidate } from '@/lib/connectionPayload';
 import type {
@@ -328,7 +329,7 @@ const getInvoke = (): DesktopInvoke | null => {
 export const desktopHostsGet = async (): Promise<DesktopHostsConfig> => {
   const invoke = getInvoke();
   if (!invoke) {
-    return { hosts: [], defaultHostId: 'local', initialHostChoiceCompleted: false };
+    return hostConnectionRequest<DesktopHostsConfig>('/hosts');
   }
 
   const result: unknown = await invoke('desktop_hosts_get');
@@ -356,7 +357,7 @@ export const desktopHostsGet = async (): Promise<DesktopHostsConfig> => {
 
 export const desktopHostsSet = async (config: DesktopHostsConfigInput): Promise<void> => {
   const invoke = getInvoke();
-  if (!invoke) return;
+  if (!invoke) { await hostConnectionRequest('/hosts', 'PUT', config); return; }
   const input: DesktopHostsConfigInput = {
     hosts: config.hosts,
     defaultHostId: config.defaultHostId,
@@ -456,7 +457,7 @@ export const probeRelayDesktopHost = async (
 export const desktopHostProbe = async (url: string, options?: { clientToken?: string | null; requestHeaders?: Record<string, string> | null; expectedServerId?: string | null }): Promise<HostProbeResult> => {
   const invoke = getInvoke();
   if (!invoke) {
-    return { status: 'unreachable', latencyMs: 0 };
+    return hostConnectionRequest('/hosts/probe', 'POST', { url, ...options });
   }
 
   // `expectedServerId` makes the main-process probe verify the address's

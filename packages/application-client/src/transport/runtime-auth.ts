@@ -81,7 +81,7 @@ const buildAuthUrl = (apiBaseUrl: string | null | undefined, path: string): stri
     : readInjectedApiBaseUrl();
   if (!base) return path;
   try {
-    return new URL(path, `${base.replace(/\/+$/, '')}/`).toString();
+    return new URL(path.replace(/^\//u, ''), `${base.replace(/\/+$/, '')}/`).toString();
   } catch {
     return path;
   }

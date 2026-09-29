@@ -67,7 +67,7 @@ import {
 import { createRelayTunnelClient } from '@/lib/relay/tunnel-client';
 import { getDesktopLanAddress, isDesktopLocalOriginActive, isDesktopShell } from '@/lib/desktop';
 import { runtimeFetch } from '@varin/application-client';
-import { getRuntimeApiBaseUrl, switchRuntimeEndpointSafely } from '@varin/application-client';
+import { getRuntimeApiBaseUrl, getRuntimeBearerTokenSync, getRuntimeExtraHeadersSync, getRuntimeKey, subscribeRuntimeEndpointChanged, switchRuntimeEndpointSafely } from '@varin/application-client';
 
 const randomPort = (): number => {
   return Math.floor(20000 + Math.random() * 30000);
@@ -380,10 +380,16 @@ const normalizeForSave = (instance: DesktopSshInstance): DesktopSshInstance => {
 };
 
 export const RemoteInstancesPage: React.FC = () => {
+  const runtimeKey = React.useSyncExternalStore((notify) => subscribeRuntimeEndpointChanged(() => notify()), getRuntimeKey, getRuntimeKey);
+  return <RemoteInstancesContent key={runtimeKey} />;
+};
+
+const RemoteInstancesContent: React.FC = () => {
+  const ownerKey = getRuntimeKey();
   const { t } = useI18n();
   const timeFormatPreference = useUIStore((state) => state.timeFormatPreference);
   const { clientAuth } = useRuntimeAPIs();
-  const showInstanceManagement = isDesktopShell();
+  const showInstanceManagement = true;
   const instances = useDesktopSshStore((state) => state.instances);
   const statusesById = useDesktopSshStore((state) => state.statusesById);
   const importCandidates = useDesktopSshStore((state) => state.importCandidates);
@@ -489,6 +495,7 @@ export const RemoteInstancesPage: React.FC = () => {
   }, [loadDirectHosts]);
 
   const persistDirectHosts = React.useCallback(async (hosts: DesktopHost[], defaultHostId: string | null = directDefaultHostId) => {
+    if (!isDesktopShell() && ownerKey !== getRuntimeKey()) throw new Error('Connection owner changed');
     setDirectSaving(true);
     setDirectError(null);
     try {
@@ -500,7 +507,7 @@ export const RemoteInstancesPage: React.FC = () => {
     } finally {
       setDirectSaving(false);
     }
-  }, [directDefaultHostId]);
+  }, [directDefaultHostId, ownerKey]);
 
   const handleAddDirectHost = React.useCallback(async () => {
     const resolved = resolveDesktopHostUrl(directUrl);
@@ -1302,6 +1309,13 @@ export const RemoteInstancesPage: React.FC = () => {
   }, [draft, t]);
 
   const handleOpenCurrentInstance = React.useCallback(async () => {
+    if (!isDesktopShell() && draft) {
+      const gateway = (getRuntimeApiBaseUrl() || window.location.origin).replace(/\/$/u, '');
+      await switchRuntimeEndpointSafely({ apiBaseUrl: `${gateway}/api/connections/hosts/${encodeURIComponent(draft.id)}/proxy`,
+        clientToken: getRuntimeBearerTokenSync(), requestHeaders: getRuntimeExtraHeadersSync(), runtimeKey: `connection:${gateway}:${draft.id}` });
+      setSelectedId(null);
+      return;
+    }
     if (!status?.localUrl) {
       toast.error(t('settings.remoteInstances.page.toast.instanceUrlUnavailable'));
       return;
@@ -1314,7 +1328,7 @@ export const RemoteInstancesPage: React.FC = () => {
     }
 
     navigateToUrl(target);
-  }, [status?.localUrl, t]);
+  }, [draft, setSelectedId, status?.localUrl, t]);
 
   const handlePrimaryConnectionAction = React.useCallback(() => {
     if (!draft) {

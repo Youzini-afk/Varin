@@ -16,6 +16,7 @@
       "@varin/runtime-broker": ["./node_modules/@varin/runtime-broker/dist/index.d.ts"],
       "@varin/settings-store": ["./node_modules/@varin/settings-store/dist/index.d.ts"],
       "@varin/web/server/index.js": ["./packages/web/.application-host-types/index.d.ts"],
+      "@varin/web/server/*": ["./packages/web/.application-host-types/*"],
       "@varin/web": ["./node_modules/@varin/web/server/index.d.ts"],
       "@varin/web/*": ["./node_modules/@varin/web/*"]
     }

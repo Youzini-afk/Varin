@@ -44,6 +44,7 @@ export interface StartWebUiServerOptions {
   host?: string | undefined;
   hostEntry?: string | undefined;
   onDesktopNotification?: ((payload: DesktopNotificationPayload) => void) | undefined;
+  onConnectionStatus?: ((status: import('@varin/application-client').DesktopSshInstanceStatus) => void) | undefined;
   onTunnelReady?: ((publicUrl: string, connectUrl: string | null) => void) | undefined;
   openFilesystemPath?: ((targetPath: string) => void | Promise<void>) | undefined;
   piRuntimeBroker?: PiRuntimeBroker | undefined;
@@ -69,6 +70,7 @@ export interface QuitRiskStatus {
 }
 
 export interface WebUiServerController {
+  connections: import('./lib/connections/ssh-manager.js').HostSshManager;
   expressApp: Express;
   getPort(): number;
   getQuitRiskStatus(): QuitRiskStatus;
