@@ -2258,6 +2258,26 @@ export class SessionHost {
     return this.snapshot();
   }
 
+  /** Reuse Pi's actual fresh-session resolver, including its implicit provider
+   * ordering when no explicit default is configured. The preview has an
+   * in-memory journal and never sends a model request. */
+  async resetModelToNewSessionDefault(sessionId: string): Promise<SessionSnapshot> {
+    this.assertSession(sessionId);
+    const preview = await createAgentSessionFromServices({
+      services: this.runtime.services,
+      sessionManager: SessionManager.inMemory(this.runtime.cwd),
+      noTools: "all",
+    });
+    try {
+      const model = preview.session.model;
+      if (!model) throw new HostError("model_not_found", "Pi has no available default model for a new session");
+      await this.session.setModel(model);
+      return this.snapshot();
+    } finally {
+      preview.session.dispose();
+    }
+  }
+
   selectThinkingLevel(sessionId: string, level: ThinkingLevel): SessionSnapshot {
     this.assertSession(sessionId);
     this.session.setThinkingLevel(level);

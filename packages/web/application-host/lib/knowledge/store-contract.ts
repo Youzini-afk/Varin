@@ -110,6 +110,8 @@ export interface KnowledgeSource {
   kind: string;
   /** Stable source-range identity for automatic retries and forgetting. */
   key?: string;
+  /** Stable identity of one prepared proposal within that source range. */
+  proposalKey?: string;
   sessionId?: string;
   threadId?: string;
   runId?: string;
@@ -214,6 +216,8 @@ export interface OrganizerPreparedProposal {
   content: string;
   trigger?: string;
   target?: number;
+  /** Revision of the target actually shown to the model, retained for replay. */
+  expectedTarget?: KnowledgeExpectedRevision;
 }
 
 export interface OrganizerProgress {
@@ -227,8 +231,14 @@ export interface OrganizerProgress {
   sourceKey?: string;
   /** Last processed store event id for session sources. */
   eventCursor?: number;
+  /** A prefix of the next event was covered; its id stays fixed across retries. */
+  eventPartial?: { id: number; offset: number };
   /** Last processed Pi entry id for session sources. */
   entryCursor?: string;
+  /** A prefix of the next Pi message was covered. */
+  entryPartial?: { id: string; offset: number };
+  /** End offset of this Run-report part; fixes its boundary across retries. */
+  runEndOffset?: number;
   /** Knowledge ids this source produced, for audit and late-result checks. */
   produced?: number[];
   /**
@@ -237,9 +247,16 @@ export interface OrganizerProgress {
    * ones. Cleared when the row reaches a terminal status.
    */
   proposals?: OrganizerPreparedProposal[];
+  /** Source identity frozen alongside proposals for crash reconciliation. */
+  preparedSource?: KnowledgeSource;
   /** Frozen end cursors for a prepared session range. Appended turns cannot
    * change the proposal set that must be replayed before new material. */
-  preparedRange?: { eventCursor?: number; entryCursor?: string };
+  preparedRange?: {
+    eventCursor?: number;
+    eventPartial?: { id: number; offset: number };
+    entryCursor?: string;
+    entryPartial?: { id: string; offset: number };
+  };
   updatedAt: number;
   lastError?: string;
 }

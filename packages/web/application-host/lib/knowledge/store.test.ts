@@ -559,8 +559,10 @@ describe("KnowledgeStore", () => {
         status: "prepared",
         sourceKey: "fp-1",
         eventCursor: 7,
+        eventPartial: { id: 8, offset: 1024 },
+        runEndOffset: 4096,
         produced: [3],
-        preparedRange: { eventCursor: 7 },
+        preparedRange: { eventCursor: 7, eventPartial: { id: 8, offset: 2048 } },
         proposals: [{
           action: "supplement", scope: "workspace", nature: "decision",
           content: "Thursday releases this quarter.", trigger: "release", target: 42,
@@ -580,7 +582,9 @@ describe("KnowledgeStore", () => {
         status: "prepared",
         sourceKey: "fp-1",
         eventCursor: 7,
-        preparedRange: { eventCursor: 7 },
+        eventPartial: { id: 8, offset: 1024 },
+        runEndOffset: 4096,
+        preparedRange: { eventCursor: 7, eventPartial: { id: 8, offset: 2048 } },
         produced: [3],
         lastError: "commit boom",
       });
@@ -594,6 +598,7 @@ describe("KnowledgeStore", () => {
         status: "formed",
         sourceKey: "fp-1",
         eventCursor: 7,
+        eventPartial: { id: 8, offset: 2048 },
         produced: [9],
         updatedAt: 200,
       });
@@ -601,6 +606,7 @@ describe("KnowledgeStore", () => {
       expect(terminal?.status).toBe("formed");
       expect(terminal?.proposals).toBeUndefined();
       expect(terminal?.preparedRange).toBeUndefined();
+      expect(terminal?.eventPartial).toEqual({ id: 8, offset: 2048 });
       expect(terminal?.lastError).toBeUndefined();
       expect(terminal?.produced).toEqual([9]);
       await second.close();

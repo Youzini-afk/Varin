@@ -9,6 +9,8 @@ import { ModelRuntime, SettingsManager } from "@earendil-works/pi-coding-agent";
 import {
   FAST_DECISION_PURPOSES,
   HarnessInferenceSettingsValidationError,
+  estimateMemoryOrganizerInputTokens,
+  memoryOrganizerOutputReservation,
   parseHarnessEmbeddingSettings,
   parseHarnessFastDecisionSettings,
   parseHarnessRerankSettings,
@@ -404,10 +406,11 @@ export class BackgroundInferenceRuntime {
       await this.reload();
       signal.throwIfAborted();
       const configured = harnessFromSettings(this.#settings).models?.memoryOrganizer;
-      if (!configured) {
+      if (!configured && params.modelSource !== "bot") {
         throw new HostError("memory_organizer_unconfigured", "Memory organizer model is not configured");
       }
-      if (configured.providerId !== params.providerId || configured.modelId !== params.modelId) {
+      if (configured && (configured.providerId !== params.providerId || configured.modelId !== params.modelId
+        || params.modelSource === "bot")) {
         throw new HostError(
           "memory_organizer_binding_mismatch",
           "Memory organize request does not match the current model binding",
@@ -424,10 +427,18 @@ export class BackgroundInferenceRuntime {
           `Memory organizer model is unavailable: ${params.providerId}/${params.modelId}`,
         );
       }
+      const maxOutputTokens = params.maxOutputTokens
+        ?? memoryOrganizerOutputReservation(model.contextWindow, model.maxTokens);
+      const estimatedInputTokens = estimateMemoryOrganizerInputTokens(params.system, params.prompt);
+      if (!Number.isSafeInteger(maxOutputTokens) || maxOutputTokens <= 0 || maxOutputTokens > model.maxTokens
+        || estimatedInputTokens + maxOutputTokens > model.contextWindow) {
+        throw new HostError("memory_organizer_capacity",
+          `Memory organizer request needs about ${estimatedInputTokens} input tokens plus ${maxOutputTokens} output tokens; model context is ${model.contextWindow}`);
+      }
       const response = await runtime.completeSimple(model, {
         systemPrompt: params.system,
         messages: [{ role: "user", content: params.prompt, timestamp: Date.now() }],
-      }, { reasoning: "minimal", toolChoice: "none", signal });
+      }, { reasoning: "minimal", toolChoice: "none", signal, maxTokens: maxOutputTokens });
       signal.throwIfAborted();
       if (response.stopReason === "error" || response.stopReason === "aborted" || response.stopReason === "length") {
         throw new HostError("memory_organizer_incomplete", `Memory organizer completion ended with ${response.stopReason}`);

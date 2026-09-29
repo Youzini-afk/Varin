@@ -6,6 +6,8 @@ import { openKnowledgeStoreEngine } from "../knowledge/store-engine.js";
 import type { KnowledgeScope, KnowledgeStore, OrganizerProgress } from "../knowledge/store-contract.js";
 import { createMemoryService, type MemoryOwner, type MemoryService } from "./memory-service.js";
 import { createMemoryOrganizer, type MemoryOrganizerBroker, type OrganizerRunSource } from "./memory-organizer.js";
+import type { PiSessionEntry } from "@varin/protocol";
+import { estimateMemoryOrganizerInputTokens } from "@varin/protocol";
 
 // Scratch stores live in the OS temp dir; see harness/recall-tool.test.ts.
 const TEST_DIR = join(tmpdir(), "varin-test-memory-organizer");
@@ -48,6 +50,7 @@ describe("memory organizer (BC2)", () => {
   let scopeForSession: (sessionId: string) => string | null;
   let autoOrganize: { workspace: boolean; user: boolean; bot: boolean };
   let contextWindow: number | null;
+  let organizerConfigured: boolean;
 
   const memory = (): MemoryService => createMemoryService({
     storeForScopeId: async (scopeId) => {
@@ -68,7 +71,7 @@ describe("memory organizer (BC2)", () => {
         return {
           global: {
             harness: {
-              models: { memoryOrganizer: { providerId: "test-provider", modelId: "test-model" } },
+              ...(organizerConfigured ? { models: { memoryOrganizer: { providerId: "test-provider", modelId: "test-model" } } } : {}),
               knowledge: { autoOrganize },
             },
           },
@@ -76,7 +79,7 @@ describe("memory organizer (BC2)", () => {
       }
       if (method === "model.list") {
         return (contextWindow === null ? [] : [{
-          id: "test-model", provider: "test-provider", contextWindow,
+          id: "test-model", provider: "test-provider", contextWindow, maxTokens: 4_096,
         }]) as unknown;
       }
       if (method === "harness.inference.describe") {
@@ -142,6 +145,7 @@ describe("memory organizer (BC2)", () => {
     scopeForSession = () => null;
     autoOrganize = { workspace: true, user: true, bot: true };
     contextWindow = 200_000;
+    organizerConfigured = true;
   });
 
   afterEach(async () => {
@@ -215,6 +219,72 @@ describe("memory organizer (BC2)", () => {
     const rows = await ws.listKnowledge({ scope: "workspace", activeOnly: true });
     expect(rows).toHaveLength(2);
     expect((await ws.getOrganizerProgress("session:s1"))?.produced?.sort()).toEqual(rows.map((row) => row.id).sort());
+    await org.dispose();
+  });
+
+  it("replays a cross-store user proposal after a crash between durable memory and source progress", async () => {
+    const ws = await openStore("workspace", "ws-cross-store");
+    stores.set("ws-cross-store", ws);
+    runSources = [{ threadId: "t1", threadTitle: "Summary task", runId: "r1", sessionId: null,
+      reportText: "The user prefers short summaries.", endedAt: null }];
+    organizeText = JSON.stringify({ memories: [{ action: "new", scope: "user",
+      content: "User prefers short summaries.", source: "u0" }] });
+    const putProgress = ws.putOrganizerProgress.bind(ws);
+    let interrupted = false;
+    (ws as { putOrganizerProgress: typeof putProgress }).putOrganizerProgress = async (row) => {
+      if (!interrupted && row.status === "formed") {
+        interrupted = true;
+        throw new Error("source progress unavailable");
+      }
+      return putProgress(row);
+    };
+    const first = organizer(memory());
+    first.noteScope("ws-cross-store");
+    await wait(async () => (await ws.getOrganizerProgress("run:r1"))?.lastError === "source progress unavailable");
+    const [saved] = await userStore.listKnowledge({ scope: "user" });
+    expect(saved?.content).toBe("User prefers short summaries.");
+    const narrations = calls.filter((call) => call.method === "harness.memoryOrganize").length;
+    await first.dispose();
+    await ws.close();
+    await userStore.close();
+    const reopenedWs = await openStore("workspace", "ws-cross-store");
+    stores.set("ws-cross-store", reopenedWs);
+    userStore = await openStore("user", "user-store");
+    expect((await reopenedWs.getOrganizerProgress("run:r1"))?.status).toBe("prepared");
+    expect((await userStore.listKnowledge({ scope: "user" })).map((item) => item.id)).toEqual([saved!.id]);
+    await userStore.updateAcceptedKnowledge(saved!.id, { content: "Human-edited summary preference.", trigger: "" }, "user", {
+      content: saved!.content, trigger: saved!.trigger, status: "accepted", invalidAt: null,
+    });
+    // The original Pi/Thread source is unavailable after restart. The durable
+    // proposal and memory provenance still establish that the write committed.
+    runSources = [];
+    autoOrganize.workspace = false;
+    const resumed = organizer(memory());
+    resumed.noteScope("ws-cross-store");
+    await wait(async () => (await reopenedWs.getOrganizerProgress("run:r1"))?.status === "formed");
+    expect(calls.filter((call) => call.method === "harness.memoryOrganize").length).toBe(narrations);
+    expect((await reopenedWs.getOrganizerProgress("run:r1"))?.produced).toEqual([saved!.id]);
+    expect((await userStore.listKnowledge({ scope: "user" })).map((item) => item.content)).toEqual(["Human-edited summary preference."]);
+    await resumed.dispose();
+  });
+
+  it("keeps an uncommitted prepared proposal pending if its source disappears", async () => {
+    const ws = await openStore("workspace", "ws-missing-prepared-source");
+    stores.set("ws-missing-prepared-source", ws);
+    runSources = [{ threadId: "t1", threadTitle: "Task", runId: "r1", sessionId: null,
+      reportText: "A proposed decision.", endedAt: null }];
+    organizeText = JSON.stringify({ memories: [{ action: "new", scope: "workspace",
+      content: "The decision is pending.", source: "u0" }] });
+    const service = memory();
+    (service as { remember: MemoryService["remember"] }).remember = async () => { throw new Error("write unavailable"); };
+    const org = organizer(service);
+    org.noteScope("ws-missing-prepared-source");
+    await wait(async () => (await ws.getOrganizerProgress("run:r1"))?.lastError === "write unavailable");
+    runSources = [];
+    org.retryScope("ws-missing-prepared-source");
+    await wait(async () => (await ws.getOrganizerProgress("run:r1"))?.lastError?.includes("not all proposals were committed") === true);
+    expect((await ws.getOrganizerProgress("run:r1"))?.status).toBe("prepared");
+    expect(await ws.listKnowledge({ scope: "workspace" })).toEqual([]);
     await org.dispose();
   });
 
@@ -339,6 +409,21 @@ describe("memory organizer (BC2)", () => {
     org.dispose();
   });
 
+  it("uses the Bot profile model when the organizer slot is unset", async () => {
+    organizerConfigured = false;
+    const bot = await openStore("bot", "bot-inherited-model");
+    stores.set("bot:b-1", bot);
+    await bot.putEvent({ kind: "turn", at: 1, sessionId: "s-bot", text: "A durable Bot decision.", source: "user" });
+    scopeSessions.set("bot:b-1", ["s-bot"]);
+    const org = organizer(memory(), {
+      organizerModelForScope: async () => ({ providerId: "test-provider", modelId: "test-model" }),
+    });
+    org.noteScope("bot:b-1");
+    await wait(async () => (await bot.getOrganizerProgress("session:s-bot"))?.status === "reviewed-empty");
+    expect(calls.find((call) => call.method === "harness.memoryOrganize")?.params.modelSource).toBe("bot");
+    await org.dispose();
+  });
+
   it("correct supersedes the existing revision instead of duplicating it", async () => {
     const ws = await openStore("workspace", "ws-6");
     stores.set("ws-6", ws);
@@ -367,6 +452,35 @@ describe("memory organizer (BC2)", () => {
     const previous = rows.find((row) => row.id === existing.item.id);
     expect(previous?.invalidAt).not.toBeUndefined();
     org.dispose();
+  });
+
+  it("replaying a prepared correction cannot overwrite a newer human edit", async () => {
+    const ws = await openStore("workspace", "ws-prepared-correction");
+    stores.set("ws-prepared-correction", ws);
+    const service = memory();
+    const owner: MemoryOwner = { scope: "workspace", ownerId: "ws-prepared-correction" };
+    const original = await service.remember(owner, { content: "Catalog uses SQLite.", trigger: "catalog" });
+    await ws.putEvent({ kind: "turn", at: 1, sessionId: "s1", text: "The catalog changed to Postgres.", source: "user" });
+    scopeSessions.set("ws-prepared-correction", ["s1"]);
+    organizeText = JSON.stringify({ memories: [{ action: "correct", scope: "workspace",
+      target: `k:${original.item.id}`, content: "Catalog uses Postgres.", source: "u0" }] });
+    const correct = service.correct.bind(service);
+    let failed = false;
+    (service as { correct: typeof correct }).correct = async (...args) => {
+      if (!failed) { failed = true; throw new Error("commit interrupted"); }
+      return correct(...args);
+    };
+    const org = organizer(service);
+    org.noteScope("ws-prepared-correction");
+    await wait(async () => (await ws.getOrganizerProgress("session:s1"))?.lastError === "commit interrupted");
+    expect((await ws.getOrganizerProgress("session:s1"))?.proposals?.[0]?.expectedTarget?.content).toBe("Catalog uses SQLite.");
+    await correct(owner, original.item.id, { content: "User chose DuckDB.", expected: {
+      content: original.item.content, trigger: original.item.trigger, status: "accepted", invalidAt: null,
+    } });
+    org.retryScope("ws-prepared-correction");
+    await wait(async () => (await ws.getOrganizerProgress("session:s1"))?.status === "reviewed-empty");
+    expect((await service.list(owner, { activeOnly: true })).map((item) => item.content)).toEqual(["User chose DuckDB."]);
+    await org.dispose();
   });
 
   it("does not acknowledge unreadable sources or invalid proposal rows as empty successes", async () => {
@@ -538,7 +652,7 @@ describe("memory organizer (BC2)", () => {
   });
 
   it("subdivides an oversized run report into per-part coverage rows", async () => {
-    contextWindow = 8_000; // → unitChars floor 4k, batch ~12.8k
+    contextWindow = 8_000;
     const ws = await openStore("workspace", "ws-chunk");
     stores.set("ws-chunk", ws);
     runSources.push({
@@ -556,7 +670,32 @@ describe("memory organizer (BC2)", () => {
     await org.dispose();
   });
 
-  it("keeps a multi-source model request within the selected model's source budget", async () => {
+  it("keeps Run-report part boundaries stable after an adaptive budget retry", async () => {
+    contextWindow = 8_000;
+    const ws = await openStore("workspace", "ws-run-boundary");
+    stores.set("ws-run-boundary", ws);
+    const reportText = "决".repeat(3_000);
+    runSources = [{ threadId: "t1", threadTitle: "Task", runId: "r1", sessionId: null,
+      reportText, endedAt: null }];
+    const first = organizer(memory());
+    first.noteScope("ws-run-boundary");
+    await wait(async () => {
+      const rows = (await ws.listOrganizerProgress()).filter((row) => row.key.startsWith("run:r1"));
+      return rows.length > 1 && rows.every((row) => row.status === "reviewed-empty")
+        && rows.some((row) => row.runEndOffset === reportText.length);
+    }, 15_000);
+    await first.dispose();
+    const narrations = calls.filter((call) => call.method === "harness.memoryOrganize").length;
+    const settingsReads = calls.filter((call) => call.method === "settings.get").length;
+    const resumed = organizer(memory());
+    resumed.noteScope("ws-run-boundary");
+    await wait(() => calls.filter((call) => call.method === "settings.get").length > settingsReads);
+    await wait(() => resumed.pending === 0);
+    expect(calls.filter((call) => call.method === "harness.memoryOrganize")).toHaveLength(narrations);
+    await resumed.dispose();
+  });
+
+  it("keeps the full source-and-memory prompt plus reserved output within model context", async () => {
     contextWindow = 8_000;
     const ws = await openStore("workspace", "ws-batch-capacity");
     stores.set("ws-batch-capacity", ws);
@@ -568,9 +707,93 @@ describe("memory organizer (BC2)", () => {
     org.noteScope("ws-batch-capacity");
     await wait(() => calls.some((call) => call.method === "harness.memoryOrganize"));
     const first = calls.find((call) => call.method === "harness.memoryOrganize")!;
-    expect(String(first.params.prompt).length).toBeLessThanOrEqual(12_800);
+    expect(estimateMemoryOrganizerInputTokens(String(first.params.system), String(first.params.prompt))
+      + Number(first.params.maxOutputTokens)).toBeLessThanOrEqual(8_000);
     await wait(async () => (await ws.listOrganizerProgress()).filter((row) => row.status === "reviewed-empty").length === 8, 15_000);
     expect(calls.filter((call) => call.method === "harness.memoryOrganize").length).toBeGreaterThan(1);
+    await org.dispose();
+  });
+
+  it("accounts for existing memory text instead of overflowing a small model", async () => {
+    contextWindow = 8_000;
+    const ws = await openStore("workspace", "ws-existing-capacity");
+    stores.set("ws-existing-capacity", ws);
+    const service = memory();
+    const owner: MemoryOwner = { scope: "workspace", ownerId: "ws-existing-capacity" };
+    await service.remember(owner, { content: "HUGE-MEMORY " + "x".repeat(30_000) });
+    await service.remember(owner, { content: "Prefer concise reports." });
+    await ws.putEvent({ kind: "turn", at: 1, sessionId: "s1", text: "A new long-term decision.", source: "user" });
+    scopeSessions.set("ws-existing-capacity", ["s1"]);
+    const org = organizer(service);
+    org.noteScope("ws-existing-capacity");
+    await wait(() => calls.some((call) => call.method === "harness.memoryOrganize"));
+    const request = calls.find((call) => call.method === "harness.memoryOrganize")!;
+    expect(estimateMemoryOrganizerInputTokens(String(request.params.system), String(request.params.prompt))
+      + Number(request.params.maxOutputTokens)).toBeLessThanOrEqual(8_000);
+    expect(String(request.params.prompt)).not.toContain("HUGE-MEMORY");
+    expect(String(request.params.prompt)).toContain("Prefer concise reports.");
+    await org.dispose();
+  });
+
+  it("covers a long event in durable segments without losing text or splitting a surrogate pair", async () => {
+    contextWindow = 8_000;
+    const ws = await openStore("workspace", "ws-long-event");
+    stores.set("ws-long-event", ws);
+    const source = "A".repeat(3_980) + "😀" + "B".repeat(4_200) + "LAST-EVENT";
+    const event = await ws.putEvent({ kind: "turn", at: 1, sessionId: "s1", text: source, source: "user" });
+    scopeSessions.set("ws-long-event", ["s1"]);
+    const first = organizer(memory());
+    first.noteScope("ws-long-event");
+    await wait(async () => (await ws.getOrganizerProgress("session:s1"))?.eventPartial !== undefined);
+    const partial = await ws.getOrganizerProgress("session:s1");
+    expect(partial?.eventCursor).toBeUndefined();
+    expect(partial?.eventPartial?.id).toBe(event.id);
+    await first.dispose();
+    const resumed = organizer(memory());
+    resumed.noteScope("ws-long-event");
+    await wait(async () => (await ws.getOrganizerProgress("session:s1"))?.eventCursor === event.id, 15_000);
+    const complete = await ws.getOrganizerProgress("session:s1");
+    expect(complete?.eventPartial).toBeUndefined();
+    const pieces = calls.filter((call) => call.method === "harness.memoryOrganize")
+      .map((call) => String(call.params.prompt).split("[turn] ")[1] ?? "");
+    expect(pieces.join("")).toBe(source);
+    expect(pieces.join("")).not.toContain("�");
+    await resumed.dispose();
+  });
+
+  it("advances a long Pi message only after every segment has been covered", async () => {
+    contextWindow = 8_000;
+    const ws = await openStore("workspace", "ws-long-entry");
+    stores.set("ws-long-entry", ws);
+    const source = "A".repeat(8_100) + "LAST-ENTRY";
+    const entry: PiSessionEntry = {
+      type: "message", id: "entry-1", parentId: null, timestamp: new Date(0).toISOString(),
+      message: { role: "user", content: source, timestamp: 0 },
+    };
+    scopeSessions.set("ws-long-entry", ["s1"]);
+    const org = organizer(memory(), { readEntries: async () => [entry] });
+    org.noteScope("ws-long-entry");
+    await wait(async () => (await ws.getOrganizerProgress("session:s1"))?.entryCursor === entry.id, 15_000);
+    expect((await ws.getOrganizerProgress("session:s1"))?.entryPartial).toBeUndefined();
+    const pieces = calls.filter((call) => call.method === "harness.memoryOrganize")
+      .map((call) => String(call.params.prompt).split("[user] ")[1] ?? "");
+    expect(pieces.join("")).toBe(source);
+    await org.dispose();
+  });
+
+  it("continues past the per-pass event scan without waiting for the periodic sweep", async () => {
+    const ws = await openStore("workspace", "ws-many-events");
+    stores.set("ws-many-events", ws);
+    let lastId = 0;
+    for (let index = 0; index < 121; index += 1) {
+      lastId = (await ws.putEvent({ kind: "turn", at: index, sessionId: "s1",
+        text: `Decision ${index}.`, source: "user" })).id;
+    }
+    scopeSessions.set("ws-many-events", ["s1"]);
+    const org = organizer(memory());
+    org.noteScope("ws-many-events");
+    await wait(async () => (await ws.getOrganizerProgress("session:s1"))?.eventCursor === lastId, 10_000);
+    expect(calls.filter((call) => call.method === "harness.memoryOrganize")).toHaveLength(2);
     await org.dispose();
   });
 

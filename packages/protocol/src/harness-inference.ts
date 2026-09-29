@@ -141,6 +141,10 @@ export interface HarnessMemoryOrganizeParams {
   batchId: string;
   providerId: string;
   modelId: string;
+  /** A Bot profile supplied this model because the global organizer slot is unset. */
+  modelSource?: "bot";
+  /** Output reservation used by both the Host planner and the Pi provider call. */
+  maxOutputTokens?: number;
   /** System prompt — organizer contract and output schema. */
   system: string;
   /** User prompt — the source material and candidate memories to judge. */
@@ -154,6 +158,25 @@ export interface HarnessMemoryOrganizeResult {
   /** Raw model text. The Host parses and validates proposals before commit. */
   text: string;
   usage?: { inputTokens?: number; outputTokens?: number };
+}
+
+/**
+ * The organizer has no provider-independent exact tokenizer. Count the entire
+ * UTF-8 bytes as a conservative upper estimate for byte-level tokenizers,
+ * including the system contract and chat framing. Host planning and Pi
+ * admission use this same estimate; providers with additional hidden framing
+ * can still reject the request, which remains a visible retryable failure.
+ */
+export function estimateMemoryOrganizerInputTokens(system: string, prompt: string): number {
+  return new TextEncoder().encode(system).length + new TextEncoder().encode(prompt).length + 64;
+}
+
+export function memoryOrganizerOutputReservation(contextWindow: number, maxTokens: number): number {
+  if (!Number.isSafeInteger(contextWindow) || contextWindow <= 0
+    || !Number.isSafeInteger(maxTokens) || maxTokens <= 0) {
+    throw new Error("Memory organizer model has no usable context/output capacity");
+  }
+  return Math.min(maxTokens, Math.max(512, Math.floor(contextWindow / 4)));
 }
 
 const isRecord = (value: unknown): value is Record<string, unknown> => (

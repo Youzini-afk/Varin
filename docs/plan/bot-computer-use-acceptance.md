@@ -17,8 +17,7 @@ does not treat missing BC0–BC4 features as merely untested platforms.
 ## BC0–BC2 follow-up review (2026-09-29)
 
 The execution-agent additions at `7e17bd77` and `51b2bdd6` connect real Bot
-management and a durable organizer journal. They improve the baseline, but
-**BC0–BC2 are not yet fully accepted**. The follow-up found defects in the
+management and a durable organizer journal. The review found defects in the
 actual write and recovery path; focused reproductions preceded these repairs:
 
 | Area | Observed failure | Follow-up correction |
@@ -33,18 +32,35 @@ actual write and recovery path; focused reproductions preceded these repairs:
 | Bot entry and UI | Reopening a live worker ignored the profile model; Bot memory change events missed the selected scope; work-list read errors appeared as an empty list | Reconcile the worker model, use one `bot:<id>` event identity, and surface work-list errors. |
 | Bot persona | Every send queried the Host, and a process-local receipt survived branch navigation/compaction after the hidden instruction disappeared | Push profile edits to the live worker, cache a direct-open recovery lookup, and deduplicate against the active Pi context. Clearing the persona appends a revocation. |
 
-The remaining acceptance gaps are concrete. A single very large conversation
-event/entry is still one unit: it is reported as too large instead of being
-advanced in durable segments. A missing model context descriptor uses a fixed
-fallback budget, and the existing-memory list plus the model's answer still
-need explicit capacity accounting. A prepared journal plus idempotent writes
-recovers partial commits, but Pi source history and TDB are separate owners;
-there is no atomic transaction across them. When no Pi default model is
-configured, clearing a Bot model preference leaves the existing session's
-model selected. Directly reopened Bot sessions may make one Host persona lookup
-before the first turn. The user scope remains a proposal target, not an
-organizer source. These are product/implementation gaps, not a request for
-another verification framework.
+### Follow-up closure of four BC0–BC2 gaps
+
+- Long conversation events and Pi messages now advance with durable source
+  offsets. A terminal row covers only the prefix actually sent; reopening the
+  organizer continues the remainder without splitting UTF-16 surrogate pairs.
+  Run-report part endpoints are persisted too, so an adaptive model-budget
+  retry cannot silently change already covered part boundaries.
+- The Host resolves the selected model's real context and output limits. It
+  admits the **whole** system/source/existing-memory prompt with an output
+  reservation; Pi repeats the same check before provider dispatch. A missing
+  model descriptor raises a Host diagnostic rather than using an invented fallback.
+  UTF-8 byte accounting is conservative across ordinary byte-level tokenizers,
+  but providers with additional hidden framing may still reject a request;
+  that rejection remains a retryable failure, never empty coverage.
+- Prepared proposals carry a frozen source range, target revision and
+  per-proposal identity. A memory write is durable before terminal source
+  progress; restart reconciles already committed proposals from their durable
+  provenance, including writes to the separate user store and human-edited
+  content. If a source disappears before all proposals commit, the prepared
+  receipt remains unresolved and visible. This is a recoverable commit
+  protocol across Pi history and TDB stores, **not** an atomic transaction
+  spanning them.
+- Clearing a Bot's model preference asks Pi to perform its fresh-session model
+  selection again, including the case with no explicit default; it does not
+  leave the prior Bot model stuck on an already open entry session.
+
+Directly reopened Bot sessions may still make one Host persona lookup before
+the first turn. The user scope remains a proposal target, not an organizer
+source. BC3–BC4 gaps below remain separate from this closure.
 
 ## Defects corrected in this review
 
@@ -87,7 +103,8 @@ These are implementation gaps, not approvals or a request to add another audit f
   persona, which matches the product boundary.
 - Model updates take effect: `update()` applies `model.select` to the live
   entry worker when one exists, `ensureEntry`/reopen passes the stored model,
-  and clearing the preference applies from the next open.
+  and clearing the preference reselects Pi's fresh-session default for the
+  live entry as well as later opens.
 - Bot management UI exists: the harness "Bots" settings page lists, creates,
   edits name/instructions/model, archives, opens the entry conversation, and
   navigates to real work items (`sessionId` of each item's latest Run).
@@ -120,10 +137,10 @@ Implemented behavior covered by focused tests (`memory-organizer.test.ts`,
   same-scope existing memory (invalid/cross-scope/self targets rejected);
   `correct` supersedes with an expected-revision check against the presented
   revision.
-- Batching is capacity-aware: the narrating model's `contextWindow`
-  (via `model.list`) sizes the per-batch and per-unit character budgets;
-  session event/entry cursors only advance over material actually included,
-  and oversized run reports subdivide into per-part progress rows.
+- Batching is capacity-aware: `contextWindow` and `maxTokens` (via `model.list`)
+  bound the complete prompt and reserved answer. Session event/entry cursors
+  advance only over material actually included, and oversized run reports
+  subdivide into parts with durable endpoints.
 - Model resolution honors `models.memoryOrganizer`, and a `bot:<id>` scope
   inherits the Bot's own model when the slot is unset. The narrate→commit
   window is guarded by a revision compare, and forgetting an organizer-derived

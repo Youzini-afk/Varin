@@ -223,6 +223,11 @@ export interface HostMethodMap {
     params: { modelId: string; provider: string; sessionId: string };
     result: SessionSnapshot;
   };
+  /** Select what Pi would choose for a fresh session with current settings/auth. */
+  "model.resetDefault": {
+    params: { sessionId: string };
+    result: SessionSnapshot;
+  };
   "mcp.config.snapshot": {
     params: Record<string, never>;
     result: PiMcpConfigSnapshot;

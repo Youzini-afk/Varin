@@ -4,6 +4,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, describe, it } from "node:test";
 import { ModelRuntime } from "@earendil-works/pi-coding-agent";
+import { registerFauxProvider } from "@earendil-works/pi-ai/compat";
 import { ProviderConfigurationManager } from "../../src/provider-configuration.js";
 import {
   createBackgroundInferenceRuntime,
@@ -483,6 +484,15 @@ describe("BackgroundInferenceRuntime", () => {
       }),
       (error: unknown) => (error as { code?: string }).code === "memory_organizer_unconfigured",
     );
+    // A Bot-owned scope may inherit its profile model without a second global
+    // organizer slot; model availability is still checked before transport.
+    await assert.rejects(
+      unconfigured.memoryOrganize({
+        batchId: "mo-bot", providerId: "embed-provider", modelId: "chat-1",
+        modelSource: "bot", system: "s", prompt: "p",
+      }),
+      (error: unknown) => (error as { code?: string }).code === "memory_organizer_unavailable",
+    );
 
     await writeFile(join(agentDir, "settings.json"), JSON.stringify({
       harness: {
@@ -516,5 +526,26 @@ describe("BackgroundInferenceRuntime", () => {
       (error: unknown) => (error as { code?: string }).code === "memory_organizer_unavailable",
     );
     assert.equal(requests.length, 0);
+  });
+
+  it("rejects the complete organizer request when input plus reserved output exceeds context", async () => {
+    const { agentDir, cwd, runtime } = await setupBinding();
+    const faux = registerFauxProvider();
+    const model = faux.getModel();
+    try {
+      runtime.registerProvider(model.provider, { api: model.api, baseUrl: model.baseUrl, models: [model] });
+      await runtime.setRuntimeApiKey(model.provider, "faux-key");
+      await writeFile(join(agentDir, "settings.json"), JSON.stringify({
+        harness: { models: { memoryOrganizer: { providerId: model.provider, modelId: model.id } } },
+      }));
+      const inference = createBackgroundInferenceRuntime({ agentDir, cwd, modelRuntime: runtime });
+      await assert.rejects(inference.memoryOrganize({
+        batchId: "mo-capacity", providerId: model.provider, modelId: model.id,
+        system: "organize", prompt: "汉".repeat(model.contextWindow * 2), maxOutputTokens: 1_024,
+      }), (error: unknown) => (error as { code?: string }).code === "memory_organizer_capacity");
+      assert.equal(faux.state.callCount, 0);
+    } finally {
+      faux.unregister();
+    }
   });
 });

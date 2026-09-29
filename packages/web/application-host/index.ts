@@ -1760,19 +1760,14 @@ async function main(options: StartWebUiServerOptions = {}): Promise<WebUiServerC
     ),
     openSession: (input) => piRuntimeBroker.openSession(input),
     applyModel: async (input) => {
-      let model = input.model;
-      if (!model) {
-        const settings = await piRuntimeBroker.requestForSession(input.sessionId, 'settings.get', {});
-        const effective = { ...settings.global, ...settings.project };
-        model = typeof effective.defaultProvider === 'string' && typeof effective.defaultModel === 'string'
-          ? { providerId: effective.defaultProvider, modelId: effective.defaultModel }
-          : null;
+      if (!input.model) {
+        await piRuntimeBroker.requestForSession(input.sessionId, 'model.resetDefault', { sessionId: input.sessionId });
+        return;
       }
-      if (!model) return;
       await piRuntimeBroker.requestForSession(input.sessionId, 'model.select', {
         sessionId: input.sessionId,
-        provider: model.providerId,
-        modelId: model.modelId,
+        provider: input.model.providerId,
+        modelId: input.model.modelId,
       });
     },
     applyInstructions: async (input) => {

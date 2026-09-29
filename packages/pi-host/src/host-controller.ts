@@ -1226,6 +1226,8 @@ export class HostController {
           readString(params, "provider"),
           readString(params, "modelId"),
         );
+      case "model.resetDefault":
+        return this.#sessionHost.resetModelToNewSessionDefault(readString(params, "sessionId"));
       case "thinking.select": {
         const level = readString(params, "level");
         if (!THINKING_LEVELS.includes(level as ThinkingLevel)) {

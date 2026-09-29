@@ -269,6 +269,7 @@ export async function openKnowledgeStoreEngine(deps: KnowledgeStoreEngineOptions
       return {
         kind: source["kind"] as string,
         ...(pick("key") ? { key: pick("key")! } : {}),
+        ...(pick("proposalKey") ? { proposalKey: pick("proposalKey")! } : {}),
         ...(pick("sessionId") ? { sessionId: pick("sessionId")! } : {}),
         ...(pick("threadId") ? { threadId: pick("threadId")! } : {}),
         ...(pick("runId") ? { runId: pick("runId")! } : {}),
@@ -340,6 +341,12 @@ export async function openKnowledgeStoreEngine(deps: KnowledgeStoreEngineOptions
       const nature = p["nature"];
       const trigger = p["trigger"];
       const target = p["target"];
+      const expected = p["expectedTarget"] && typeof p["expectedTarget"] === "object" && !Array.isArray(p["expectedTarget"])
+        ? p["expectedTarget"] as Record<string, unknown> : null;
+      if (p["expectedTarget"] !== undefined && (!expected || typeof expected["content"] !== "string"
+        || typeof expected["trigger"] !== "string"
+        || (expected["status"] !== "accepted" && expected["status"] !== "suggested" && expected["status"] !== "dismissed")
+        || (expected["invalidAt"] !== null && typeof expected["invalidAt"] !== "number"))) return null;
       return {
         action,
         scope,
@@ -347,7 +354,33 @@ export async function openKnowledgeStoreEngine(deps: KnowledgeStoreEngineOptions
         content,
         ...(typeof trigger === "string" && trigger ? { trigger } : {}),
         ...(Number.isSafeInteger(target) ? { target: target as number } : {}),
+        ...(expected ? { expectedTarget: {
+          content: expected["content"] as string,
+          trigger: expected["trigger"] as string,
+          status: expected["status"] as KnowledgeStatus,
+          invalidAt: expected["invalidAt"] as number | null,
+        } } : {}),
       };
+    };
+    const organizerEventPartial = (value: unknown, key: string): { id: number; offset: number } | undefined => {
+      if (value === undefined) return undefined;
+      const row = value && typeof value === "object" && !Array.isArray(value)
+        ? value as Record<string, unknown> : null;
+      if (!row || !Number.isSafeInteger(row["id"]) || !Number.isSafeInteger(row["offset"])
+        || (row["offset"] as number) <= 0) {
+        throw new KnowledgeMutationError("invalid", `Invalid event segment in organizer row ${key}`);
+      }
+      return { id: row["id"] as number, offset: row["offset"] as number };
+    };
+    const organizerEntryPartial = (value: unknown, key: string): { id: string; offset: number } | undefined => {
+      if (value === undefined) return undefined;
+      const row = value && typeof value === "object" && !Array.isArray(value)
+        ? value as Record<string, unknown> : null;
+      if (!row || typeof row["id"] !== "string" || !row["id"]
+        || !Number.isSafeInteger(row["offset"]) || (row["offset"] as number) <= 0) {
+        throw new KnowledgeMutationError("invalid", `Invalid entry segment in organizer row ${key}`);
+      }
+      return { id: row["id"], offset: row["offset"] as number };
     };
     const organizerProgressFromPayload = (p: Record<string, unknown>): OrganizerProgress | null => {
       if (p["type"] !== "organizer" || typeof p["key"] !== "string" || !p["key"]) return null;
@@ -365,17 +398,33 @@ export async function openKnowledgeStoreEngine(deps: KnowledgeStoreEngineOptions
       }
       const preparedRange = p["preparedRange"] && typeof p["preparedRange"] === "object" && !Array.isArray(p["preparedRange"])
         ? p["preparedRange"] as Record<string, unknown> : null;
+      const preparedSource = p["preparedSource"] !== undefined
+        ? knowledgeSourceFromPayload(p["preparedSource"]) : undefined;
+      if (p["preparedSource"] !== undefined && !preparedSource) {
+        throw new KnowledgeMutationError("invalid", `Prepared organizer row ${p["key"]} has invalid source identity`);
+      }
+      const eventPartial = organizerEventPartial(p["eventPartial"], p["key"]);
+      const entryPartial = organizerEntryPartial(p["entryPartial"], p["key"]);
+      const preparedEventPartial = preparedRange ? organizerEventPartial(preparedRange["eventPartial"], p["key"]) : undefined;
+      const preparedEntryPartial = preparedRange ? organizerEntryPartial(preparedRange["entryPartial"], p["key"]) : undefined;
       return {
         key: p["key"],
         status: status as OrganizerProgressStatus,
         ...(typeof p["sourceKey"] === "string" && p["sourceKey"] ? { sourceKey: p["sourceKey"] as string } : {}),
         ...(Number.isSafeInteger(p["eventCursor"]) ? { eventCursor: p["eventCursor"] as number } : {}),
+        ...(eventPartial ? { eventPartial } : {}),
         ...(typeof p["entryCursor"] === "string" && p["entryCursor"] ? { entryCursor: p["entryCursor"] as string } : {}),
+        ...(entryPartial ? { entryPartial } : {}),
+        ...(Number.isSafeInteger(p["runEndOffset"]) && (p["runEndOffset"] as number) >= 0
+          ? { runEndOffset: p["runEndOffset"] as number } : {}),
         ...(Array.isArray(produced) && produced.every(Number.isSafeInteger) ? { produced: produced as number[] } : {}),
         ...(parsedProposals ? { proposals: parsedProposals as OrganizerPreparedProposal[] } : {}),
+        ...(preparedSource ? { preparedSource } : {}),
         ...(preparedRange ? { preparedRange: {
           ...(Number.isSafeInteger(preparedRange["eventCursor"]) ? { eventCursor: preparedRange["eventCursor"] as number } : {}),
+          ...(preparedEventPartial ? { eventPartial: preparedEventPartial } : {}),
           ...(typeof preparedRange["entryCursor"] === "string" ? { entryCursor: preparedRange["entryCursor"] as string } : {}),
+          ...(preparedEntryPartial ? { entryPartial: preparedEntryPartial } : {}),
         } } : {}),
         updatedAt: p["updatedAt"],
         ...(typeof p["lastError"] === "string" && p["lastError"] ? { lastError: p["lastError"] as string } : {}),
@@ -729,9 +778,13 @@ export async function openKnowledgeStoreEngine(deps: KnowledgeStoreEngineOptions
             status: progress.status,
             ...(progress.sourceKey !== undefined ? { sourceKey: progress.sourceKey } : {}),
             ...(progress.eventCursor !== undefined ? { eventCursor: progress.eventCursor } : {}),
+            ...(progress.eventPartial !== undefined ? { eventPartial: { ...progress.eventPartial } } : {}),
             ...(progress.entryCursor !== undefined ? { entryCursor: progress.entryCursor } : {}),
+            ...(progress.entryPartial !== undefined ? { entryPartial: { ...progress.entryPartial } } : {}),
+            ...(progress.runEndOffset !== undefined ? { runEndOffset: progress.runEndOffset } : {}),
             ...(progress.produced !== undefined ? { produced: [...progress.produced] } : {}),
             ...(progress.proposals !== undefined ? { proposals: progress.proposals.map((p) => ({ ...p })) } : {}),
+            ...(progress.preparedSource !== undefined ? { preparedSource: { ...progress.preparedSource } } : {}),
             ...(progress.preparedRange !== undefined ? { preparedRange: { ...progress.preparedRange } } : {}),
             updatedAt: progress.updatedAt,
             ...(progress.lastError ? { lastError: progress.lastError } : {}),
@@ -741,9 +794,13 @@ export async function openKnowledgeStoreEngine(deps: KnowledgeStoreEngineOptions
           const unset: Record<string, boolean> = {};
           if (progress.sourceKey === undefined) unset.sourceKey = true;
           if (progress.eventCursor === undefined) unset.eventCursor = true;
+          if (progress.eventPartial === undefined) unset.eventPartial = true;
           if (progress.entryCursor === undefined) unset.entryCursor = true;
+          if (progress.entryPartial === undefined) unset.entryPartial = true;
+          if (progress.runEndOffset === undefined) unset.runEndOffset = true;
           if (progress.produced === undefined) unset.produced = true;
           if (progress.proposals === undefined) unset.proposals = true;
+          if (progress.preparedSource === undefined) unset.preparedSource = true;
           if (progress.preparedRange === undefined) unset.preparedRange = true;
           if (!progress.lastError) unset.lastError = true;
           const existing = lookup({ type: "organizer" }).filter(({ payload: p }) => p["key"] === progress.key);
@@ -973,6 +1030,9 @@ export async function openKnowledgeStoreEngine(deps: KnowledgeStoreEngineOptions
             && (!explicitRemember || (payload["invalidAt"] === undefined && payload["status"] !== "dismissed"))
             && ((typeof payload["content"] === "string"
               && normalizeKnowledgeContent(payload["content"] as string) === identity)
+              || (k.source?.kind === "memory-organizer"
+                && k.source.proposalKey !== undefined
+                && knowledgeSourceFromPayload(payload["source"])?.proposalKey === k.source.proposalKey)
               || (k.source?.kind === "memory-organizer"
                 && (payload["invalidAt"] !== undefined || payload["status"] === "dismissed")
                 && (() => {
