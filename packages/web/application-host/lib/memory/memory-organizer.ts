@@ -14,7 +14,7 @@
  * they never commit empty successes.
  */
 
-import { randomUUID } from "node:crypto";
+import { createHash, randomUUID } from "node:crypto";
 import {
   mergeHarnessSettings,
   resolveFastDecisionPurpose,
@@ -49,10 +49,7 @@ import type { MemoryOwner, MemoryService } from "./memory-service.js";
 const MAX_UNITS_PER_RUN = 8;
 const MAX_EVENTS_PER_SESSION = 120;
 const MAX_ENTRIES_PER_SESSION = 60;
-const MAX_MATERIAL_CHARS = 4000;
-const MAX_PROMPT_CHARS = 48000;
 const MAX_EXISTING_MATERIALS = 60;
-const MAX_PROPOSALS = 8;
 const FAILED_RETRY_MS = 5 * 60_000;
 const SETTLE_DEBOUNCE_MS = 2_000;
 const SWEEP_INTERVAL_MS = 10 * 60_000;
@@ -167,9 +164,6 @@ const record = (value: unknown): Record<string, unknown> => (
 const scopeKind = (scopeId: string): "workspace" | "bot" =>
   (isBotScopeId(scopeId) ? "bot" : "workspace");
 
-const clip = (text: string, max = MAX_MATERIAL_CHARS): string =>
-  (text.length <= max ? text : `${text.slice(0, max)}\n…`);
-
 const messageText = (entry: PiSessionMessageEntry): string => {
   const message = entry.message;
   if (message.role === "user" || message.role === "custom") {
@@ -216,14 +210,14 @@ const parseProposals = (text: string): OrganizerProposal[] | null => {
   const memories = record(parsed)["memories"];
   if (!Array.isArray(memories)) return null;
   const proposals: OrganizerProposal[] = [];
-  for (const raw of memories.slice(0, MAX_PROPOSALS)) {
+  for (const raw of memories) {
     const item = record(raw);
     const action = item["action"];
     const scope = item["scope"];
     const content = typeof item["content"] === "string" ? item["content"].trim() : "";
-    if (!content) continue;
-    if (action !== "new" && action !== "supplement" && action !== "correct") continue;
-    if (scope !== "workspace" && scope !== "user" && scope !== "bot") continue;
+    if (!content) return null;
+    if (action !== "new" && action !== "supplement" && action !== "correct") return null;
+    if (scope !== "workspace" && scope !== "user" && scope !== "bot") return null;
     const nature = typeof item["nature"] === "string" && (MEMORY_NATURES as readonly string[]).includes(item["nature"])
       ? item["nature"] as MemoryNature
       : undefined;
@@ -232,6 +226,7 @@ const parseProposals = (text: string): OrganizerProposal[] | null => {
       ? Number(item["target"].slice(2))
       : undefined;
     const source = typeof item["source"] === "string" ? item["source"] : undefined;
+    if (!source || !/^u\d+$/.test(source) || (action !== "new" && target === undefined)) return null;
     proposals.push({
       action,
       scope,
@@ -268,7 +263,6 @@ export function createMemoryOrganizer(deps: MemoryOrganizerDeps) {
 
   interface ResolvedOrganizerSettings {
     autoOrganize: { workspace: boolean; user: boolean; bot: boolean };
-    autoAccept: { workspace: boolean; user: boolean };
     model: ModelSelection | null;
     /** Resolved (configurationId-bearing) fast-decision status for this run. */
     fastDecision: HarnessFastDecisionPurposeStatus | null;
@@ -278,7 +272,6 @@ export function createMemoryOrganizer(deps: MemoryOrganizerDeps) {
     const broker = deps.getBroker();
     const empty: ResolvedOrganizerSettings = {
       autoOrganize: { workspace: false, user: false, bot: false },
-      autoAccept: { workspace: false, user: false },
       model: null,
       fastDecision: null,
     };
@@ -298,7 +291,6 @@ export function createMemoryOrganizer(deps: MemoryOrganizerDeps) {
     } catch { fastDecision = null; }
     return {
       autoOrganize: settings.knowledge.autoOrganize,
-      autoAccept: settings.knowledge.autoAcceptSuggestions,
       model: settings.models.memoryOrganizer ?? null,
       fastDecision,
     };
@@ -319,7 +311,7 @@ export function createMemoryOrganizer(deps: MemoryOrganizerDeps) {
     status: OrganizerProgressStatus,
     patch: Partial<Pick<OrganizerProgress, "eventCursor" | "entryCursor" | "produced" | "lastError">> = {},
   ): Promise<void> => {
-    const existing = await store.getOrganizerProgress(key).catch(() => null);
+    const existing = await store.getOrganizerProgress(key);
     await store.putOrganizerProgress({
       key,
       status,
@@ -339,7 +331,9 @@ export function createMemoryOrganizer(deps: MemoryOrganizerDeps) {
     progress: OrganizerProgress | undefined,
     timestamp: number,
   ): Promise<OrganizerUnit | null> => {
-    if (!retryable(progress, timestamp)) return null;
+    // A session continues after its previous range was committed. Terminal
+    // progress closes that range, never the conversation's future material.
+    if (progress?.status === "failed" && !retryable(progress, timestamp)) return null;
     const key = progressKeyForSession(sessionId);
     const texts: string[] = [];
     let eventCursor = progress?.eventCursor;
@@ -350,20 +344,20 @@ export function createMemoryOrganizer(deps: MemoryOrganizerDeps) {
       ...(progress?.eventCursor !== undefined ? { afterId: progress.eventCursor } : {}),
     })).slice(0, MAX_EVENTS_PER_SESSION);
     for (const event of events) {
-      const text = clip(event.text, 800);
+      const text = event.text;
       if (text) texts.push(`[${event.kind}] ${text}`);
     }
     if (events.length > 0) eventCursor = events[events.length - 1]!.id;
 
-    const entries = await deps.readEntries(sessionId).catch(() => null);
+    const entries = await deps.readEntries(sessionId);
     if (entries) {
       const from = entryCursor ? entries.findIndex((entry) => entry.id === entryCursor) : -1;
-      const fresh = (from >= 0 ? entries.slice(from + 1) : entries.slice(-MAX_ENTRIES_PER_SESSION))
+      const fresh = (from >= 0 ? entries.slice(from + 1) : entries)
         .slice(0, MAX_ENTRIES_PER_SESSION);
       for (const entry of fresh) {
         if (entry.type !== "message") continue;
         const text = messageText(entry);
-        if (text) texts.push(`[${entry.message.role}] ${clip(text, 800)}`);
+        if (text) texts.push(`[${entry.message.role}] ${text}`);
       }
       const lastEntry = fresh.at(-1);
       if (lastEntry) entryCursor = lastEntry.id;
@@ -372,8 +366,11 @@ export function createMemoryOrganizer(deps: MemoryOrganizerDeps) {
     if (texts.length === 0) {
       // Revisited with nothing new: still record coverage when a stale
       // failed/processing row exists so the sweep stops claiming it.
-      if (progress && progress.status !== "formed" && progress.status !== "reviewed-empty") {
-        await putProgress(store, key, "reviewed-empty");
+      if (entryCursor !== progress?.entryCursor || eventCursor !== progress?.eventCursor) {
+        await putProgress(store, key, "reviewed-empty", {
+          ...(entryCursor !== undefined ? { entryCursor } : {}),
+          ...(eventCursor !== undefined ? { eventCursor } : {}),
+        });
       }
       return null;
     }
@@ -381,7 +378,7 @@ export function createMemoryOrganizer(deps: MemoryOrganizerDeps) {
       key,
       label: `session ${sessionId}`,
       texts,
-      source: { kind: "memory-organizer", sessionId },
+      source: { kind: "memory-organizer", sessionId, ...(entryCursor ? { entryId: entryCursor } : {}) },
       ...(eventCursor !== undefined ? { eventCursor } : {}),
       ...(entryCursor !== undefined ? { entryCursor } : {}),
     };
@@ -396,7 +393,7 @@ export function createMemoryOrganizer(deps: MemoryOrganizerDeps) {
     if (!retryable(progress, timestamp)) return null;
     const texts = [
       `Task report for "${source.threadTitle}":`,
-      clip(source.reportText),
+      source.reportText,
     ];
     return {
       key: progressKeyForRun(source.runId),
@@ -416,19 +413,19 @@ export function createMemoryOrganizer(deps: MemoryOrganizerDeps) {
     scopeId: string,
   ): Promise<OrganizerUnit[]> => {
     const timestamp = now();
-    const rows = await store.listOrganizerProgress().catch(() => []);
+    const rows = await store.listOrganizerProgress();
     const progress = new Map(rows.map((row) => [row.key, row]));
     const units: OrganizerUnit[] = [];
 
-    for (const source of await deps.listRunSources(scopeId).catch(() => [])) {
+    for (const source of await deps.listRunSources(scopeId)) {
       if (units.length >= MAX_UNITS_PER_RUN) break;
       const unit = await collectRunUnit(store, source, progress.get(progressKeyForRun(source.runId)), timestamp);
       if (unit) units.push(unit);
     }
 
     const sessionIds = new Set<string>([
-      ...(await store.listEventSessionIds().catch(() => [])),
-      ...(await deps.listScopeSessions(scopeId).catch(() => [])),
+      ...(await store.listEventSessionIds()),
+      ...(await deps.listScopeSessions(scopeId)),
     ]);
     for (const sessionId of [...sessionIds].sort()) {
       if (units.length >= MAX_UNITS_PER_RUN) break;
@@ -449,7 +446,7 @@ export function createMemoryOrganizer(deps: MemoryOrganizerDeps) {
     const materials: FastDecisionMaterial[] = units.map((unit, index) => ({
       id: `u${index}`,
       label: unit.label,
-      text: clip(unit.texts.join("\n"), MAX_MATERIAL_CHARS),
+      text: unit.texts.join("\n"),
     }));
     const questions: FastDecisionQuestion[] = units.map((unit, index) => ({
       id: `u${index}`,
@@ -494,17 +491,14 @@ export function createMemoryOrganizer(deps: MemoryOrganizerDeps) {
     const broker = deps.getBroker();
     if (!broker) throw new Error("Pi workspace binding is unavailable");
     const sections: string[] = ["# Source fragments"];
-    let budget = MAX_PROMPT_CHARS;
     for (const [index, unit] of units.entries()) {
-      const block = `## u${index} — ${unit.label}\n${clip(unit.texts.join("\n"), MAX_MATERIAL_CHARS)}`;
-      if (block.length > budget) break;
+      const block = `## u${index} — ${unit.label}\n${unit.texts.join("\n")}`;
       sections.push(block);
-      budget -= block.length;
     }
     if (existing.length > 0) {
       sections.push("# Existing memories");
       for (const item of existing.slice(0, MAX_EXISTING_MATERIALS)) {
-        sections.push(`- k:${item.id} [${item.status}${item.nature ? `/${item.nature}` : ""}] ${clip(item.content, 400)}`);
+        sections.push(`- k:${item.id} [${item.status}${item.nature ? `/${item.nature}` : ""}] ${item.content}`);
       }
     }
     const batchId = randomUUID();
@@ -537,14 +531,17 @@ export function createMemoryOrganizer(deps: MemoryOrganizerDeps) {
     proposal: OrganizerProposal,
     settings: ResolvedOrganizerSettings,
     source: KnowledgeSource,
+    existingMemories: readonly Knowledge[],
+    expectedRevision: string,
   ): Promise<number | null> => {
     const owner = ownerFor(proposal.scope, scopeId);
     if (!owner) return null;
     // A source-scope switch does not authorize the user store — inferred
     // proposals may only land there when organizing user memory is enabled.
     if (owner.scope === "user" && !settings.autoOrganize.user) return null;
-    const commitStatus = (owner.scope === "user" ? settings.autoAccept.user : settings.autoAccept.workspace)
-      ? "accepted" : "suggested";
+    // The automatic-memory switch authorizes forming effective memories.
+    // Claim nature/provenance carries inference; review status is not authority.
+    const commitStatus = "accepted";
     if (proposal.action === "new" || proposal.action === "supplement") {
       const result = await deps.memory.remember(owner, {
         content: proposal.content,
@@ -552,30 +549,18 @@ export function createMemoryOrganizer(deps: MemoryOrganizerDeps) {
         ...(proposal.nature ? { nature: proposal.nature } : {}),
         source,
         commit: commitStatus,
+        expectedRevision,
       });
       return result.created ? result.item.id : null;
     }
-    // correct: CAS the revision the model judged so a concurrent user edit or
-    // forget is a conflict, never a resurrection. Targets came from the source
-    // scope's memory list — a cross-scope target is a different store's id.
-    // supersedeKnowledge always writes `accepted`, so without auto-accept the
-    // correction lands as a suggested sibling instead of silently retiring a
-    // row the owner has not reviewed.
-    if (commitStatus !== "accepted") {
-      const fallback = await deps.memory.remember(owner, {
-        content: proposal.content,
-        ...(proposal.trigger ? { trigger: proposal.trigger } : {}),
-        ...(proposal.nature ? { nature: proposal.nature } : {}),
-        source,
-        commit: commitStatus,
-      });
-      return fallback.created ? fallback.item.id : null;
-    }
+    // Targets came from the source scope's memory list; a cross-scope numeric
+    // id must never address an unrelated row in another store.
     if (proposal.target === undefined || proposal.scope !== scopeKind(scopeId)) return null;
     const targetOwner = owner;
-    const existing = await deps.memory.get(targetOwner, proposal.target).catch(() => null);
-    const item = existing?.item;
-    if (!item || item.invalidAt !== undefined || (item.status !== "accepted" && item.status !== "suggested")) {
+    // Compare against the revision shown to the model, not a fresh read taken
+    // after it answered (which would authorize overwriting intervening edits).
+    const item = existingMemories.find((memory) => memory.id === proposal.target);
+    if (!item || item.invalidAt !== undefined || item.status !== "accepted") {
       return null;
     }
     const corrected = await deps.memory.correct(targetOwner, item.id, {
@@ -615,11 +600,15 @@ export function createMemoryOrganizer(deps: MemoryOrganizerDeps) {
       const units = await collectUnits(store, scopeId);
       if (units.length === 0) return;
       for (const unit of units) {
+        unit.source.key = createHash("sha256").update(JSON.stringify([scopeId, unit.key, unit.eventCursor, unit.entryCursor, unit.texts])).digest("hex");
+      }
+      for (const unit of units) {
         await putProgress(store, unit.key, "processing");
       }
 
       try {
         const judged = await filterUnitsByFastDecision(settings.fastDecision, units);
+        if (disposed) return;
         const rejected = units.filter((unit) => !judged.includes(unit));
         for (const unit of rejected) {
           await putProgress(store, unit.key, "reviewed-empty", {
@@ -630,15 +619,38 @@ export function createMemoryOrganizer(deps: MemoryOrganizerDeps) {
         if (judged.length === 0) return;
 
         const owner = ownerFor(scopeKind(scopeId), scopeId)!;
-        const existing = await deps.memory.list(owner, { activeOnly: true }).catch(() => []);
+        let revision = store.knowledgeRevision();
+        const userOwner: MemoryOwner = { scope: "user", ownerId: null };
+        let userRevision = settings.autoOrganize.user ? await deps.memory.revision(userOwner) : "";
+        const existing = await deps.memory.list(owner, { activeOnly: true });
         const proposals = await narrateProposals(settings.model, judged, existing);
+        if (disposed) return;
+        const currentSettings = await readHarnessSettings();
+        if (!currentSettings.autoOrganize[scopeKind(scopeId)]) return;
+        if (scopeKind(scopeId) === "workspace" && await deps.autoOrganizeForScope?.(scopeId) === false) return;
+        // Reject invalid provenance before any proposal from this response is
+        // written. A missing source is not permission to attach the first one.
+        for (const proposal of proposals) {
+          if (!judged[Number(proposal.source!.slice(1))]) throw new Error("Memory organizer referenced an unknown source");
+          if (!ownerFor(proposal.scope, scopeId)) throw new Error("Memory organizer referenced an unrelated owner scope");
+          if (proposal.action !== "new" && (proposal.scope !== scopeKind(scopeId)
+            || !existing.slice(0, MAX_EXISTING_MATERIALS).some((item) => item.id === proposal.target))) {
+            throw new Error("Memory organizer referenced a target outside its presented candidates");
+          }
+        }
 
         const produced: number[] = [];
         for (const proposal of proposals) {
+          if (proposal.scope === "user" && !currentSettings.autoOrganize.user) continue;
           const sourceUnit = judged.find((_, index) => proposal.source === `u${index}`);
-          const source = sourceUnit?.source ?? judged[0]?.source ?? { kind: "memory-organizer" as const };
-          const id = await commitProposal(scopeId, proposal, settings, source);
+          if (disposed) return;
+          if (revision !== store.knowledgeRevision()) throw new KnowledgeMutationError("conflict", "Memory changed while the organizer was preparing proposals");
+          const source = sourceUnit!.source;
+          const id = await commitProposal(scopeId, proposal, settings, source, existing,
+            proposal.scope === "user" ? userRevision : revision);
           if (id !== null) produced.push(id);
+          revision = store.knowledgeRevision();
+          if (proposal.scope === "user" && settings.autoOrganize.user) userRevision = await deps.memory.revision(userOwner);
         }
         for (const unit of judged) {
           await putProgress(store, unit.key, produced.length > 0 ? "formed" : "reviewed-empty", {
@@ -725,17 +737,17 @@ export function createMemoryOrganizer(deps: MemoryOrganizerDeps) {
       schedule(scopeId);
     },
     /** Disable switched off / shutting down: stop scheduling, cancel in-flight batches. */
-    dispose(): void {
-      if (disposed) return;
+    async dispose(): Promise<void> {
+      if (disposed) { await Promise.allSettled([...pendingTasks]); return; }
       disposed = true;
       for (const timer of timers.values()) clearTimeout(timer);
       timers.clear();
       if (sweepTimer) { clearTimeout(sweepTimer); sweepTimer = null; }
       const broker = deps.getBroker();
-      for (const batchId of activeBatches.keys()) {
-        void broker?.requestForWorkspace(deps.configCwd, "harness.inference.cancel", { batchId }).catch(() => undefined);
-      }
+      await Promise.allSettled([...activeBatches.keys()].map((batchId) =>
+        broker?.requestForWorkspace(deps.configCwd, "harness.inference.cancel", { batchId })));
       activeBatches.clear();
+      await Promise.allSettled([...pendingTasks]);
     },
     /** Pending task count for tests/diagnostics. */
     get pending(): number { return pendingTasks.size; },

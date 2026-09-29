@@ -1,7 +1,11 @@
 import { createHash } from "node:crypto";
-import { formatZone2Knowledge, formatZone2KnowledgeCorrection, type Zone2Material } from "./zone2.js";
+import { formatZone2Knowledge, formatZone2KnowledgeCorrection, type Zone2Material, type Zone2Knowledge } from "./zone2.js";
 
 export const zone2MaterialRevision = (value: unknown): string => createHash("sha256").update(JSON.stringify(value)).digest("hex");
+const knowledgeRevision = (item: Zone2Knowledge) => zone2MaterialRevision({
+  id: item.id, scope: item.scope ?? "workspace", title: item.title, trigger: item.trigger,
+  ...(item.nature ? { nature: item.nature } : {}), ...(item.sourceKind ? { sourceKind: item.sourceKind } : {}),
+});
 
 /** Compare with material present in retained Pi messages, never a second memory store. */
 export function selectNewZone2Material(material: Zone2Material, known: Record<string, string> = {}) {
@@ -23,30 +27,32 @@ export function selectNewZone2Material(material: Zone2Material, known: Record<st
     receipts.push({ key, revision: removedRevision, text: `[${block.label}] ${block.content}` });
   }
   const knowledge = material.knowledge.filter((item) => {
+    if (material.knowledgeCorrections?.some((correction) => correction.id === item.id && correction.scope === item.scope)) return false;
     const key = `knowledge:${item.scope ?? "workspace"}:${item.id}`;
-    const hash = zone2MaterialRevision(item);
+    const hash = knowledgeRevision(item);
     if (known[key] === hash) return false;
     receipts.push({ key, revision: hash, text: formatZone2Knowledge(item) });
     return true;
   });
   const invalidationRevision = zone2MaterialRevision({ invalid: true });
-  for (const invalidation of material.knowledgeInvalidations ?? []) {
+  const knowledgeInvalidations = (material.knowledgeInvalidations ?? []).filter((invalidation) => {
     const key = `knowledge:${invalidation.scope}:${invalidation.id}`;
     const text = `#${invalidation.id} (scope:${invalidation.scope}) is no longer available`;
-    if (known[key] === invalidationRevision) continue;
+    if (known[key] === invalidationRevision) return false;
     receipts.push({ key, revision: invalidationRevision, text });
-  }
+    return true;
+  });
   // A correction is the successor row entering the request: it claims that
   // row's ordinary receipt key so later recall does not deliver it twice.
   const knowledgeCorrections = (material.knowledgeCorrections ?? []).filter((item) => {
     const key = `knowledge:${item.scope}:${item.id}`;
-    const hash = zone2MaterialRevision({ correction: item });
+    const hash = knowledgeRevision(item);
     if (known[key] === hash) return false;
     receipts.push({ key, revision: hash, text: formatZone2KnowledgeCorrection(item) });
     return true;
   });
   return {
-    material: { ...material, blocks, knowledge, contextUsage: null, knowledgeInvalidations: material.knowledgeInvalidations ?? [], knowledgeCorrections },
+    material: { ...material, blocks, knowledge, contextUsage: null, knowledgeInvalidations, knowledgeCorrections },
     // Budget-folded material is not acknowledged as if it had been shown whole.
     // The next request can still select it; history owns already delivered bytes.
     receiptsFor(content: string | null): Record<string, string> {

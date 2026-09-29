@@ -76,6 +76,11 @@ const explicitOwnerFor = async (
   scope: MemoryScope | undefined,
 ): Promise<MemoryOwner> => {
   if (!scope) return defaultOwnerFor(service, ctx);
+  if (scope === "bot") {
+    const owner = await defaultOwnerFor(service, ctx);
+    if (owner.scope !== "bot") throw new HarnessServiceError("unavailable", "This session is not associated with a Bot");
+    return owner;
+  }
   return ownerForExplicitScope(scope, ctx);
 };
 
@@ -194,7 +199,7 @@ export function createMemorySearchService(host: HarnessServiceHost): HarnessServ
       }
       const owner = await explicitOwnerFor(service, ctx, params.scope);
       const k = typeof params.k === "number" && Number.isSafeInteger(params.k) && params.k > 0
-        ? Math.min(params.k, 50) : 8;
+        ? params.k : 8;
       const results = await service.search(owner, query, k);
       const items: Array<{ item: MemoryItem; score: number }> = [];
       for (const result of results) {

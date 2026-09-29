@@ -10,8 +10,8 @@
 # background-capable window-message input, and adds:
 #   - SendInput/SetCursorPos global pointer, key, and Unicode text input
 #     (click_method "global", drag input "global", text/key input "global").
-#   - PrintWindow-based window capture so occluded windows still produce
-#     correct screenshots (CopyFromScreen kept as the fallback).
+#   - PrintWindow-based window capture with CopyFromScreen fallback; fidelity
+#     still depends on the application's rendering/capture support.
 #   - release_input, which lifts any held buttons/keys after a cancel.
 #   - capabilities, reporting the honest driver feature table.
 #
@@ -118,6 +118,12 @@ public static class VarinWin32 {
 
     [DllImport("user32.dll")]
     public static extern bool SetCursorPos(int x, int y);
+
+    [DllImport("user32.dll")]
+    public static extern bool SetForegroundWindow(IntPtr hWnd);
+
+    [DllImport("user32.dll")]
+    public static extern IntPtr GetForegroundWindow();
 
     [DllImport("user32.dll", SetLastError = true)]
     public static extern uint SendInput(uint nInputs, INPUT[] pInputs, int cbSize);
@@ -346,15 +352,44 @@ function Send-TextToEditHandle([IntPtr]$hwnd, [string]$text, $element) {
 # when the caller explicitly requests the `global` input path.
 # ---------------------------------------------------------------------------
 
+$script:HeldInputs = @{}
+$script:InputWindow = [IntPtr]::Zero
+
+function Send-ManagedInput($input) {
+    $release = $null
+    $key = $null
+    $isUp = $false
+    if ($input.type -eq [VarinWin32]::INPUT_KEYBOARD) {
+        $keyboard = $input.union.ki
+        $key = "key:$($keyboard.wVk):$($keyboard.wScan)"
+        $isUp = ($keyboard.dwFlags -band [VarinWin32]::KEYEVENTF_KEYUP) -ne 0
+        $release = [VarinWin32]::KeyInput($keyboard.wVk, $keyboard.wScan, ($keyboard.dwFlags -bor [VarinWin32]::KEYEVENTF_KEYUP))
+    } else {
+        foreach ($pair in @(@(2, 4), @(8, 16), @(32, 64))) {
+            if (($input.union.mi.dwFlags -band ($pair[0] -bor $pair[1])) -ne 0) {
+                $key = "mouse:$($pair[0])"
+                $isUp = ($input.union.mi.dwFlags -band $pair[1]) -ne 0
+                $release = [VarinWin32]::MouseInput(0, 0, $pair[1], 0)
+            }
+        }
+    }
+    if (-not $isUp -and $script:InputWindow -ne [IntPtr]::Zero -and [VarinWin32]::GetForegroundWindow() -ne $script:InputWindow) {
+        throw "The target window lost foreground focus; input was stopped"
+    }
+    $sent = [VarinWin32]::SendInput(1, @($input), [System.Runtime.InteropServices.Marshal]::SizeOf([type][VarinWin32+INPUT]))
+    if ($sent -ne 1) { throw "Windows did not accept the input event" }
+    if ($key) {
+        if ($isUp) { $script:HeldInputs.Remove($key) }
+        else { $script:HeldInputs[$key] = $release }
+    }
+}
+
 function Send-GlobalMouseInput([int]$screenX, [int]$screenY, [uint[]]$flags) {
     [void][VarinWin32]::SetCursorPos($screenX, $screenY)
     Start-Sleep -Milliseconds 15
     foreach ($flag in $flags) {
         $input = [VarinWin32]::MouseInput($screenX, $screenY, $flag, 0)
-        $sent = [VarinWin32]::SendInput(1, @($input), [System.Runtime.InteropServices.Marshal]::SizeOf([type][VarinWin32+INPUT]))
-        if ($sent -lt 1) {
-            throw "SendInput did not accept the mouse event"
-        }
+        Send-ManagedInput $input
         Start-Sleep -Milliseconds 40
     }
 }
@@ -377,11 +412,10 @@ function Send-GlobalMouseClick([int]$screenX, [int]$screenY, [string]$button, [i
 }
 
 function Send-GlobalDrag([int]$fromX, [int]$fromY, [int]$toX, [int]$toY) {
-    $inputSize = [System.Runtime.InteropServices.Marshal]::SizeOf([type][VarinWin32+INPUT])
     [void][VarinWin32]::SetCursorPos($fromX, $fromY)
     Start-Sleep -Milliseconds 30
     $down = [VarinWin32]::MouseInput($fromX, $fromY, [VarinWin32]::MOUSEEVENTF_LEFTDOWN, 0)
-    [void][VarinWin32]::SendInput(1, @($down), $inputSize)
+    Send-ManagedInput $down
     $steps = 12
     for ($i = 1; $i -le $steps; $i++) {
         $x = [int][math]::Round($fromX + (($toX - $fromX) * $i / $steps))
@@ -392,37 +426,36 @@ function Send-GlobalDrag([int]$fromX, [int]$fromY, [int]$toX, [int]$toY) {
         Start-Sleep -Milliseconds 20
     }
     $up = [VarinWin32]::MouseInput($toX, $toY, [VarinWin32]::MOUSEEVENTF_LEFTUP, 0)
-    [void][VarinWin32]::SendInput(1, @($up), $inputSize)
+    Send-ManagedInput $up
 }
 
 function Send-GlobalScroll([int]$screenX, [int]$screenY, [string]$direction, [double]$pages) {
     [void][VarinWin32]::SetCursorPos($screenX, $screenY)
     $delta = [int][math]::Round(120 * $pages)
     $flag = [VarinWin32]::MOUSEEVENTF_WHEEL
-    if ($direction -eq "down" -or $direction -eq "right") {
+    if ($direction -eq "down" -or $direction -eq "left") {
         $delta = -1 * $delta
     }
     if ($direction -eq "left" -or $direction -eq "right") {
         $flag = [VarinWin32]::MOUSEEVENTF_HWHEEL
     }
-    $input = [VarinWin32]::MouseInput($screenX, $screenY, $flag, [uint32]$delta)
-    [void][VarinWin32]::SendInput(1, @($input), [System.Runtime.InteropServices.Marshal]::SizeOf([type][VarinWin32+INPUT]))
+    $data = [BitConverter]::ToUInt32([BitConverter]::GetBytes([int]$delta), 0)
+    $input = [VarinWin32]::MouseInput($screenX, $screenY, $flag, $data)
+    Send-ManagedInput $input
 }
 
 function Send-GlobalText([string]$text) {
-    $inputSize = [System.Runtime.InteropServices.Marshal]::SizeOf([type][VarinWin32+INPUT])
     foreach ($char in $text.ToCharArray()) {
         $code = [uint16][char]$char
         $down = [VarinWin32]::KeyInput(0, $code, [VarinWin32]::KEYEVENTF_UNICODE)
         $up = [VarinWin32]::KeyInput(0, $code, ([VarinWin32]::KEYEVENTF_UNICODE -bor [VarinWin32]::KEYEVENTF_KEYUP))
-        [void][VarinWin32]::SendInput(1, @($down), $inputSize)
-        [void][VarinWin32]::SendInput(1, @($up), $inputSize)
+        Send-ManagedInput $down
+        Send-ManagedInput $up
         Start-Sleep -Milliseconds 8
     }
 }
 
 function Send-GlobalKey([string]$key) {
-    $inputSize = [System.Runtime.InteropServices.Marshal]::SizeOf([type][VarinWin32+INPUT])
     $parts = $key -split "\+"
     $main = $parts[$parts.Length - 1]
     $modifiers = @()
@@ -439,32 +472,25 @@ function Send-GlobalKey([string]$key) {
     }
     foreach ($modifier in $modifiers) {
         $down = [VarinWin32]::KeyInput([uint16]$modifier, 0, 0)
-        [void][VarinWin32]::SendInput(1, @($down), $inputSize)
+        Send-ManagedInput $down
     }
     $vk = Get-VirtualKey $main
-    [void][VarinWin32]::SendInput(1, @([VarinWin32]::KeyInput([uint16]$vk, 0, 0)), $inputSize)
+    Send-ManagedInput ([VarinWin32]::KeyInput([uint16]$vk, 0, 0))
     Start-Sleep -Milliseconds 30
-    [void][VarinWin32]::SendInput(1, @([VarinWin32]::KeyInput([uint16]$vk, 0, [VarinWin32]::KEYEVENTF_KEYUP)), $inputSize)
+    Send-ManagedInput ([VarinWin32]::KeyInput([uint16]$vk, 0, [VarinWin32]::KEYEVENTF_KEYUP))
     [array]::Reverse($modifiers)
     foreach ($modifier in $modifiers) {
-        [void][VarinWin32]::SendInput(1, @([VarinWin32]::KeyInput([uint16]$modifier, 0, [VarinWin32]::KEYEVENTF_KEYUP)), $inputSize)
+        Send-ManagedInput ([VarinWin32]::KeyInput([uint16]$modifier, 0, [VarinWin32]::KEYEVENTF_KEYUP))
     }
 }
 
 function Send-ReleaseInput {
-    # Lift every button/modifier a managed batch could have left held. Real
-    # keyboard state the user holds is untouched — these are key-up events,
-    # which are harmless for keys that are not actually down.
-    $inputSize = [System.Runtime.InteropServices.Marshal]::SizeOf([type][VarinWin32+INPUT])
-    foreach ($flag in @(
-        [VarinWin32]::MOUSEEVENTF_LEFTUP,
-        [VarinWin32]::MOUSEEVENTF_RIGHTUP,
-        [VarinWin32]::MOUSEEVENTF_MIDDLEUP)) {
-        [void][VarinWin32]::SendInput(1, @([VarinWin32]::MouseInput(0, 0, $flag, 0)), $inputSize)
+    # Release only inputs this driver pressed, not every modifier on the desktop.
+    $failed = 0
+    foreach ($key in @($script:HeldInputs.Keys)) {
+        try { Send-ManagedInput $script:HeldInputs[$key] } catch { $failed++ }
     }
-    foreach ($vk in @(0x11, 0x10, 0x12, 0x5B, 0x5C)) {
-        [void][VarinWin32]::SendInput(1, @([VarinWin32]::KeyInput([uint16]$vk, 0, [VarinWin32]::KEYEVENTF_KEYUP)), $inputSize)
-    }
+    if ($failed -gt 0) { throw "Windows did not confirm release of $failed managed inputs" }
 }
 
 function Get-VirtualKey([string]$key) {
@@ -1241,14 +1267,19 @@ function Invoke-ComputerOperation($operation) {
 
     $process = Resolve-App $operation.app
     $hwnd = [IntPtr]$process.MainWindowHandle
-    $windowBounds = $operation.windowBounds
-    if ($null -eq $windowBounds) {
-        $windowBounds = Get-WindowBounds $process (Get-MainElement $process)
-    }
+    $windowBounds = Get-WindowBounds $process (Get-MainElement $process)
     $element = Find-Element $process $operation.element
+    if ($null -ne $operation.element -and $null -eq $element) { throw "Observed element no longer exists; observe again" }
+    if ($null -ne $element) { $operation.element.frame = Get-ElementFrame $element $windowBounds }
     $inputPath = [string]$operation.input
     if ([string]::IsNullOrWhiteSpace($inputPath)) { $inputPath = "auto" }
+    if ($inputPath -eq "global" -or $operation.click_method -eq "global") {
+        if ([VarinWin32]::GetForegroundWindow() -ne $hwnd) { [void][VarinWin32]::SetForegroundWindow($hwnd) }
+        if ([VarinWin32]::GetForegroundWindow() -ne $hwnd) { throw "Windows could not activate the target window for global input" }
+        $script:InputWindow = $hwnd
+    }
 
+    try {
     switch ($tool) {
         "click" {
             $clickMethod = [string]$operation.click_method
@@ -1360,7 +1391,15 @@ function Invoke-ComputerOperation($operation) {
             throw "unsupportedTool(`"$tool`")"
         }
     }
+    } finally {
+        Send-ReleaseInput
+        $script:InputWindow = [IntPtr]::Zero
+    }
 
     Start-Sleep -Milliseconds 120
-    return [pscustomobject]@{ ok = $true; snapshot = (Build-Snapshot $operation.app) }
+    try {
+        return [pscustomobject]@{ ok = $true; snapshot = (Build-Snapshot $operation.app) }
+    } catch {
+        return [pscustomobject]@{ ok = $true; text = "Input was dispatched; post-action observation failed. Observe again before deciding another action." }
+    }
 }

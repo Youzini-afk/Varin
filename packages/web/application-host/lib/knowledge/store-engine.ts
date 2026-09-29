@@ -180,7 +180,11 @@ export async function openKnowledgeStoreEngine(deps: KnowledgeStoreEngineOptions
   try {
     const knowledgeInstanceId = randomUUID();
     let knowledgeEpoch = 0;
-    const bumpKnowledgeEpoch = (): void => persistence.afterCommit(() => { knowledgeEpoch += 1; });
+    let knowledgeMutationEpoch = 0;
+    const bumpKnowledgeEpoch = (): void => {
+      knowledgeMutationEpoch += 1;
+      persistence.afterCommit(() => { knowledgeEpoch += 1; });
+    };
     const knowledgeRevision = (): string => `${knowledgeInstanceId}:${knowledgeEpoch}`;
 
     // Property indexes. All are persistent and idempotent to create, and
@@ -263,6 +267,7 @@ export async function openKnowledgeStoreEngine(deps: KnowledgeStoreEngineOptions
       const pick = (key: string) => typeof source[key] === "string" && source[key] ? source[key] as string : undefined;
       return {
         kind: source["kind"] as string,
+        ...(pick("key") ? { key: pick("key")! } : {}),
         ...(pick("sessionId") ? { sessionId: pick("sessionId")! } : {}),
         ...(pick("threadId") ? { threadId: pick("threadId")! } : {}),
         ...(pick("runId") ? { runId: pick("runId")! } : {}),
@@ -886,23 +891,41 @@ export async function openKnowledgeStoreEngine(deps: KnowledgeStoreEngineOptions
         });
       },
 
-      async createKnowledgeIfAbsent(k: KnowledgeInput): Promise<KnowledgeCreateIfAbsentResult> {
+      async createKnowledgeIfAbsent(k: KnowledgeInput, options?: { expectedRevision?: string; explicit?: boolean }): Promise<KnowledgeCreateIfAbsentResult> {
         return enqueueWrite(() => {
+          if (options?.expectedRevision !== undefined
+            && (knowledgeRevision() !== options.expectedRevision || knowledgeMutationEpoch !== knowledgeEpoch)) {
+            throw new KnowledgeMutationError("conflict", "Memory changed while the proposal was being prepared");
+          }
           if (recallScope === "user" && k.scope !== "user") {
             throw new KnowledgeMutationError("invalid", "User knowledge store rejects non-user scope writes");
           }
           const identity = normalizeKnowledgeContent(k.content);
           if (!identity) throw new KnowledgeMutationError("invalid", "Knowledge content is required");
+          const explicitRemember = options?.explicit === true && k.status === "accepted";
           // This lookup intentionally stays inside the single writer queue. It
           // covers every status and retired row so concurrent model proposals
           // cannot insert two identities or resurrect dismissed history.
           const duplicate = lookup({ type: "knowledge", scope: k.scope }).filter(({ payload }) => (
             payload["type"] === "knowledge"
             && payload["scope"] === k.scope
-            && typeof payload["content"] === "string"
-            && normalizeKnowledgeContent(payload["content"] as string) === identity
+            && (!explicitRemember || (payload["invalidAt"] === undefined && payload["status"] !== "dismissed"))
+            && ((typeof payload["content"] === "string"
+              && normalizeKnowledgeContent(payload["content"] as string) === identity)
+              || (k.source?.kind === "memory-organizer" && k.source.key !== undefined
+                && knowledgeSourceFromPayload(payload["source"])?.key === k.source.key
+                && (payload["invalidAt"] !== undefined || payload["status"] === "dismissed")))
           ))[0];
           if (duplicate) {
+            if (explicitRemember && duplicate.payload["status"] === "suggested") {
+              db.patchPayload(duplicate.id, { $set: {
+                status: "accepted", ...(k.nature ? { nature: k.nature } : {}), ...(k.source ? { source: k.source } : {}),
+              } });
+              duplicate.payload = { ...duplicate.payload, status: "accepted", ...(k.nature ? { nature: k.nature } : {}), ...(k.source ? { source: k.source } : {}) };
+              persistence.commit();
+              bumpKnowledgeEpoch();
+              notifyKnowledge([duplicate.id]);
+            }
             const knowledge = knowledgeFromPayload(duplicate.id, duplicate.payload);
             if (!knowledge) throw new KnowledgeMutationError("invalid", `Invalid knowledge row: ${duplicate.id}`);
             return { created: false, duplicate: true, knowledge };

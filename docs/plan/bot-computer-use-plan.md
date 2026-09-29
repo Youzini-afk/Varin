@@ -1,15 +1,15 @@
 # Bot、长期记忆与 Computer Use 实施计划
 
-Status: planned / not started；实施任务与依赖已定义，本轮仅编写计划
+Status: partially implemented；BC0–BC4 已有实现，但尚未通过完整交付验收；BC5–BC9 未实施。缺口与修复见 [验收记录](bot-computer-use-acceptance.md)。
 
-Last updated: 2026-09-28
+Last updated: 2026-09-29
 
 源码核查基线：`3dbbc6e7`。本计划落实 [Bot 工作台设计](../design/bot-operated-workbench-design.md)
 和 [Computer Use 设计](../design/computer-use-design.md)，同时承接 [办公连续性](../design/office-work-continuity-design.md)
 需要的共享基础。使用阶段前缀 **BC**，与已有 B（更名）、C（压缩）和其他 Harness 阶段分开。
 
 本文件负责实施顺序、职责、替换范围与交付条件；实际进度和未完成项更新 [status.md](../status.md)。
-开始执行时核对受影响源码的新变化，不把本文的基线事实当作永久现状。当前请求不启动产品实现或创建真实电脑资源。
+开始执行时核对受影响源码的新变化，不把本文的基线事实当作永久现状。最初编写本计划时未启动产品实现或创建真实电脑资源；后续实施事实以状态与验收记录为准。
 
 ## 1. 最终交付与范围
 

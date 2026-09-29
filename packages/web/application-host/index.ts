@@ -1684,6 +1684,7 @@ async function main(options: StartWebUiServerOptions = {}): Promise<WebUiServerC
     closeSessionShell: async (_sessionId: string): Promise<void> => {},
   };
   const sessionSnapshots = new Map<string, Record<string, unknown>>();
+  const memoryOrganizerRef: { current?: ReturnType<typeof createMemoryOrganizer> } = {};
   const threadRegistry = createThreadRegistry({
     dataDir: VARIN_DATA_DIR,
     hostId,
@@ -1713,7 +1714,7 @@ async function main(options: StartWebUiServerOptions = {}): Promise<WebUiServerC
         type: 'varin:harness-thread-done',
         properties: { workspaceId, parent, threadId, report },
       });
-      memoryOrganizer.noteScope(workspaceId);
+      memoryOrganizerRef.current?.noteScope(workspaceId);
     },
 
     onThreadDequeued: createOnThreadDequeued({
@@ -1781,11 +1782,10 @@ async function main(options: StartWebUiServerOptions = {}): Promise<WebUiServerC
   // methods, the UI routes, and later the background organizer — one writer
   // semantics for accepted/suggested, dedupe, correction, and forgetting.
   const memoryService = createMemoryService({
-    storeForScopeId: (scopeId) => getKnowledgeStoreForScope(scopeId).catch(() => null),
-    userStore: () => getUserKnowledgeStore().catch(() => null),
+    storeForScopeId: getKnowledgeStoreForScope,
+    userStore: getUserKnowledgeStore,
     ownerForSession: async (sessionId) => {
-      const binding = await threadRegistry.getSessionBinding(sessionId).catch(() => null);
-      const scopeId = binding?.owningScopeId ?? sessionScopeId(sessionId);
+      const scopeId = await owningKnowledgeScopeIdForSession(sessionId) ?? sessionScopeId(sessionId);
       if (isBotScopeId(scopeId)) return { scope: 'bot', ownerId: botIdFromScopeId(scopeId) };
       if (isSessionScopeId(scopeId)) return { scope: 'session', ownerId: sessionIdFromScopeId(scopeId) };
       return { scope: 'workspace', ownerId: scopeId };
@@ -1811,7 +1811,7 @@ async function main(options: StartWebUiServerOptions = {}): Promise<WebUiServerC
   const memoryOrganizer = createMemoryOrganizer({
     configCwd: VARIN_DATA_DIR,
     getBroker: getReadyPiRuntimeBroker,
-    storeForScopeId: (scopeId) => getKnowledgeStoreForScope(scopeId).catch(() => null),
+    storeForScopeId: getKnowledgeStoreForScope,
     hasStoreForScope: async (scopeId) => {
       const storePath = path.join(VARIN_DATA_DIR, 'knowledge', hostId, `${knowledgeStoreKeyForScope(scopeId)}.tdb`);
       return fsPromises.access(storePath).then(() => true, () => false);
@@ -1883,7 +1883,7 @@ async function main(options: StartWebUiServerOptions = {}): Promise<WebUiServerC
     memory: memoryService,
     onError: (error) => console.error('[VarinMemoryOrganizer]', errorMessage(error)),
   });
-  memoryOrganizer.start();
+  memoryOrganizerRef.current = memoryOrganizer;
   const threadTranscriptReader = createThreadTranscriptReader({
     readSessionEntries: (sessionId) => piRuntimeBroker.previewSessionEntries(sessionId, undefined, 'all'),
   });
@@ -2811,6 +2811,8 @@ async function main(options: StartWebUiServerOptions = {}): Promise<WebUiServerC
     sessionId: string,
     fallback: string | null = null,
   ): Promise<string | null> {
+    const bot = await botService.botForSession(sessionId);
+    if (bot) return `bot:${bot.id}`;
     // RR4/E07: durable owner resolution. The active-run binding only exists
     // while the run is live; the catalog scan still answers after the run
     // settled or the Host restarted, without guessing from UI snapshots.
@@ -2865,6 +2867,9 @@ async function main(options: StartWebUiServerOptions = {}): Promise<WebUiServerC
   const knowledgeContextRuntime = createKnowledgeContextRuntime({
     getStore: getKnowledgeStoreForScope,
     getUserStore: getUserKnowledgeStore,
+    resolveScope: async (sessionId) => await owningKnowledgeScopeIdForSession(sessionId) ?? sessionScopeId(sessionId),
+    getSessionStore: async (sessionId) => await knowledgeStoreExistsForScope(sessionScopeId(sessionId))
+      ? getKnowledgeStoreForScope(sessionScopeId(sessionId)) : null,
     goalForSession: async (sessionId) => {
       const binding = await threadRegistry.getSessionBinding(sessionId).catch(() => null);
       if (!binding) return undefined;
@@ -3045,7 +3050,8 @@ async function main(options: StartWebUiServerOptions = {}): Promise<WebUiServerC
   catalogScan.start = (workspaceId: string): void => {
     // Session-owned stores have no resource root to index; callers pass either
     // the scope id or its hashed store key depending on the loop they run in.
-    if (isSessionScopeId(workspaceId) || isSessionStoreKey(workspaceId)) return;
+    if (isSessionScopeId(workspaceId) || isSessionStoreKey(workspaceId)
+      || isBotScopeId(workspaceId) || isBotStoreKey(workspaceId)) return;
     queueMicrotask(() => {
       void symbolGraphRuntime.scanWorkspace(workspaceId).catch((error) => {
         console.error('[HarnessKnowledge] Catalog scan failed:', errorMessage(error));
@@ -3058,7 +3064,7 @@ async function main(options: StartWebUiServerOptions = {}): Promise<WebUiServerC
   };
   for (const [storeKey, store] of knowledgeStores) {
     // Store keys may be hashed session scopes — only real resource roots index.
-    if (isSessionStoreKey(storeKey)) continue;
+    if (isSessionStoreKey(storeKey) || isBotStoreKey(storeKey)) continue;
     catalogScan.start(storeKey);
     knowledgeVectors.scheduleReconcile(store, 'workspace', storeKey, storeKey);
     if (userKnowledgeStore) knowledgeVectors.scheduleReconcile(userKnowledgeStore, 'user', 'user', storeKey);
@@ -3644,6 +3650,9 @@ async function main(options: StartWebUiServerOptions = {}): Promise<WebUiServerC
       });
     },
   });
+  // Recovery can open stores and inference consumers, so start only after
+  // their owners and catalog observers have been assembled.
+  memoryOrganizer.start();
   const brokerUnsubscribe = piRuntimeBroker.subscribe((event) => {
     semanticRuntime.processEvent(event);
     piSessionAutomation.processBrokerEvent(event);
@@ -3651,8 +3660,8 @@ async function main(options: StartWebUiServerOptions = {}): Promise<WebUiServerC
     sessionSettleTracker.processEvent(event);
     void piWriterTracker.processEvent(event);
     void recoveryTurnCoordinator.processEvent(event);
-    void researchRootRuntime.processEvent(event, async () => {
-      await botRootRuntime.processEvent(event, async () => {
+    void botRootRuntime.processEvent(event, async () => {
+      await researchRootRuntime.processEvent(event, async () => {
         await harnessRouter.processEvent(event);
         threadRuntime.processEvent(event);
       });
@@ -3716,10 +3725,10 @@ async function main(options: StartWebUiServerOptions = {}): Promise<WebUiServerC
             : ''
         : '';
       if (event.actor && typeof envelopeData.cwd === 'string' && envelopeData.cwd) {
-        void threadRegistry.getSessionBinding(sessionId).then((binding) => {
+        void owningKnowledgeScopeIdForSession(sessionId, harnessWorkspaceId || null).then((scopeId) => {
           bindKnowledgeSession(
             sessionId,
-            binding?.owningScopeId ?? harnessWorkspaceId ?? sessionScopeId(sessionId),
+            scopeId ?? sessionScopeId(sessionId),
           );
         }).catch((error) => {
           console.error('[HarnessKnowledge] Session knowledge bind failed:', errorMessage(error));
@@ -3982,6 +3991,7 @@ async function main(options: StartWebUiServerOptions = {}): Promise<WebUiServerC
       await symbolGraphRuntime.dispose();
       // Stop producers and drain their receipts while process grants are valid.
       // One refused exit must not prevent the other domains from shutting down.
+      await memoryOrganizer.dispose();
       const processShutdown = await Promise.allSettled([
         researchRootRuntime.dispose(), botRootRuntime.dispose(), threadRuntime.dispose(), terminalRuntime?.shutdown(), languageSupervisor.dispose(), managedLanguageServers.dispose(), runRuntime.dispose(),
         // Release every supervised native driver so no synthesized input is
@@ -4005,7 +4015,6 @@ async function main(options: StartWebUiServerOptions = {}): Promise<WebUiServerC
       await kernelClient?.close();
       await knowledgeVectors?.close();
       if (ownsPiRuntimeBroker) await piRuntimeLifecycle.dispose();
-      memoryOrganizer.dispose();
       await knowledgeContextRuntime.dispose();
       await Promise.allSettled([...knowledgeStoreLoads.values()]);
       const knowledgeShutdown = await Promise.allSettled([...knowledgeStores].map(async ([workspaceId, store]) => {

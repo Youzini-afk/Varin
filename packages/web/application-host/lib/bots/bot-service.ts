@@ -118,6 +118,13 @@ export interface BotService {
 }
 
 export function createBotService(options: BotServiceOptions): BotService {
+  const mutations = new Map<string, Promise<unknown>>();
+  const serialize = <T>(botId: string, operation: () => Promise<T>): Promise<T> => {
+    const previous = mutations.get(botId) ?? Promise.resolve();
+    const task = previous.catch(() => undefined).then(operation);
+    mutations.set(botId, task);
+    return task.finally(() => { if (mutations.get(botId) === task) mutations.delete(botId); });
+  };
   let scopedClient: Promise<KernelScopedClient> | null = null;
   const scoped = (): Promise<KernelScopedClient> => {
     if (scopedClient) return scopedClient;
@@ -135,10 +142,6 @@ export function createBotService(options: BotServiceOptions): BotService {
     void creating.catch(() => { if (scopedClient === creating) scopedClient = null; });
     return creating;
   };
-  const reportError = (error: unknown) => {
-    try { options.onError?.(error); } catch { /* ignore reporting failures */ }
-  };
-
   const toSummary = (record: KernelRecordResult): BotSummary | null => {
     const profile = parseProfile(record);
     return profile ? { ...profile, archived: record.state === "archived" } : null;
@@ -148,8 +151,8 @@ export function createBotService(options: BotServiceOptions): BotService {
    * session→bot index consulted on every `agent_start` through the bot-root
    * runtime; populated on the first lookup and invalidated on each write.
    */
-  const sessionIndex = new Map<string, string>();
-  let sessionIndexReady = false;
+  let sessionIndex: Map<string, string> | null = null;
+  let catalogGeneration = 0;
 
   const recordFor = async (botId: string): Promise<KernelRecordResult | null> => {
     const client = await scoped();
@@ -199,14 +202,8 @@ export function createBotService(options: BotServiceOptions): BotService {
     const summary = toSummary(result) ?? { ...next, archived: state === "archived" };
     // Rebuild the session index from the authoritative write so a moved or
     // cleared entry binding cannot keep an old sessionId mapped.
-    if (sessionIndexReady) {
-      for (const [sid, id] of [...sessionIndex]) {
-        if (id === botId) sessionIndex.delete(sid);
-      }
-      if (!summary.archived && summary.entrySessionId) {
-        sessionIndex.set(summary.entrySessionId, botId);
-      }
-    }
+    catalogGeneration += 1;
+    sessionIndex = null;
     return summary;
   };
 
@@ -250,7 +247,7 @@ export function createBotService(options: BotServiceOptions): BotService {
     });
   };
 
-  const update: BotService["update"] = async (botId, patch) => {
+  const update: BotService["update"] = (botId, patch) => serialize(botId, async () => {
     const existing = await recordFor(botId);
     if (!existing || existing.state === "archived") return null;
     const updates: Partial<BotProfile> = {};
@@ -266,15 +263,15 @@ export function createBotService(options: BotServiceOptions): BotService {
     }
     if (patch.model !== undefined) updates.model = patch.model;
     return write(botId, "active", updates, existing.recordRevision);
-  };
+  });
 
-  const archive: BotService["archive"] = async (botId) => {
+  const archive: BotService["archive"] = (botId) => serialize(botId, async () => {
     const existing = await recordFor(botId);
     if (!existing || existing.state === "archived") return null;
     return write(botId, "archived", {}, existing.recordRevision);
-  };
+  });
 
-  const ensureEntry: BotService["ensureEntry"] = async (botId) => {
+  const ensureEntry: BotService["ensureEntry"] = (botId) => serialize(botId, async () => {
     const bot = await get(botId);
     if (!bot) throw new HarnessServiceError("not-found", `Unknown Bot "${botId}"`);
     if (bot.archived) throw new HarnessServiceError("invalid-params", `Bot "${botId}" is archived`);
@@ -282,7 +279,8 @@ export function createBotService(options: BotServiceOptions): BotService {
       try {
         const session = await options.openSession({ sessionId: bot.entrySessionId, cwd: bot.homeDir });
         return { bot, sessionId: session.sessionId };
-      } catch {
+      } catch (error) {
+        if (!isObject(error) || error.code !== "session_not_found") throw error;
         // The persisted entry session is gone (deleted or never materialized
         // on this Host). Clear it and create a fresh entry below — the Bot's
         // work lives on its Thread scope, not on this one conversation.
@@ -294,23 +292,21 @@ export function createBotService(options: BotServiceOptions): BotService {
       name: bot.name,
       ...(bot.model ? { model: bot.model } : {}),
     });
-    let updated = bot;
-    try {
-      updated = await write(botId, "active", { entrySessionId: session.sessionId });
-    } catch (error) {
-      reportError(error);
-    }
+    // Return the session only once the durable owner binding was committed.
+    // An IPC/storage failure is not a successful entry without Bot identity.
+    const updated = await write(botId, "active", { entrySessionId: session.sessionId });
     return { bot: updated, sessionId: session.sessionId };
-  };
+  });
 
   const botForSession: BotService["botForSession"] = async (sessionId) => {
     if (!sessionId) return null;
-    if (!sessionIndexReady) {
-      sessionIndex.clear();
-      for (const bot of await list()) {
-        if (!bot.archived && bot.entrySessionId) sessionIndex.set(bot.entrySessionId, bot.id);
-      }
-      sessionIndexReady = true;
+    while (!sessionIndex) {
+      const generation = catalogGeneration;
+      const bots = await list();
+      if (generation !== catalogGeneration) continue;
+      sessionIndex = new Map(bots.flatMap((bot) => (
+        !bot.archived && bot.entrySessionId ? [[bot.entrySessionId, bot.id] as const] : []
+      )));
     }
     const botId = sessionIndex.get(sessionId);
     return botId ? get(botId) : null;
@@ -325,15 +321,13 @@ export function createBotService(options: BotServiceOptions): BotService {
     const bots = await list();
     for (const bot of bots) {
       if (bot.entrySessionId !== sessionId || bot.archived) continue;
-      const existing = await recordFor(bot.id);
-      if (!existing) continue;
-      const profile = parseProfile(existing);
-      if (profile?.entrySessionId !== sessionId) continue;
-      try {
+      await serialize(bot.id, async () => {
+        const existing = await recordFor(bot.id);
+        if (!existing) return;
+        const profile = parseProfile(existing);
+        if (profile?.entrySessionId !== sessionId) return;
         await write(bot.id, "active", { entrySessionId: null }, existing.recordRevision);
-      } catch (error) {
-        reportError(error);
-      }
+      });
     }
   };
 

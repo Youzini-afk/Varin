@@ -160,6 +160,10 @@ export function createAttachedRootRuntime(options: AttachedRootRuntimeOptions) {
     const existingBinding = await options.registry.getSessionBinding(sessionId);
     if (existingBinding?.owner === "spawned-child") return;
     if (existingBinding?.owner === "attached-root") {
+      const boundThread = await options.registry.getThreadById(existingBinding.owningScopeId, existingBinding.threadId);
+      // A Bot entry using research focus must not be adopted and settled by
+      // two attached-root runtimes.
+      if (boundThread?.purpose !== purpose) return;
       const run = await options.registry.getActiveRun(existingBinding.owningScopeId, existingBinding.threadId);
       if (run?.id === existingBinding.runId && run.outcome === null) {
         const entries = await options.sessions.entries(sessionId, "branch").catch(() => null);

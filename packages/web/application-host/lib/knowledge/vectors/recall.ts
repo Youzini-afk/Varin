@@ -43,6 +43,7 @@ const nodeOf = (current: Knowledge): RecallResult["node"] => ({
     status: current.status,
     content: current.content,
     trigger: current.trigger,
+    ...(current.nature ? { nature: current.nature } : {}),
     createdAt: current.createdAt,
     recallCount: current.recallCount,
     ...(current.source ? { source: current.source } : {}),
@@ -118,6 +119,7 @@ async function recallCandidates(input: {
   signal?: AbortSignal;
 }): Promise<{ results: RecallResult[]; details: KnowledgeRecallDetails }> {
   input.signal?.throwIfAborted();
+  if (input.k <= 0) return { results: [], details: { vector: "unconfigured" } };
   const textRanks = rankText(input.candidates, input.query);
   const vectorRanks = new Map<string, number>();
   let vectorStatus: KnowledgeVectorStatus = input.vectors ? "unavailable" : "unconfigured";

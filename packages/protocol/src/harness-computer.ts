@@ -152,6 +152,8 @@ export interface ComputerAction {
 export interface ComputerActionResult {
   /** The driver accepted and dispatched the input — NOT a claim of app effect. */
   accepted: boolean;
+  /** Transport/driver failure after submission cannot prove that input did not occur. */
+  outcome?: "unknown";
   /** True when a cancel superseded this action before/while it ran. */
   cancelled?: boolean;
   /** Driver-reported detail (pattern used, input path taken). */
@@ -167,6 +169,7 @@ export interface ComputerListParams {
 export interface ComputerListResult {
   machines: ComputerMachine[];
   desktops: ComputerDesktop[];
+  defaultDesktopId?: string | null;
 }
 
 export interface ComputerObserveParams {
@@ -208,6 +211,8 @@ export interface ComputerCancelParams {
 export interface ComputerCancelResult {
   /** Queued actions dropped; in-flight ops still settle but report cancelled. */
   cancelled: number;
+  /** False when a lost driver cannot confirm cleanup of its in-flight input. */
+  released?: boolean;
 }
 
 export interface ComputerReleaseParams {

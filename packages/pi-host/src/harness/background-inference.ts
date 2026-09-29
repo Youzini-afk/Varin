@@ -429,6 +429,9 @@ export class BackgroundInferenceRuntime {
         messages: [{ role: "user", content: params.prompt, timestamp: Date.now() }],
       }, { reasoning: "minimal", toolChoice: "none", signal });
       signal.throwIfAborted();
+      if (response.stopReason === "error" || response.stopReason === "aborted" || response.stopReason === "length") {
+        throw new HostError("memory_organizer_incomplete", `Memory organizer completion ended with ${response.stopReason}`);
+      }
       const text = response.content
         .filter((part) => part.type === "text")
         .map((part) => part.text)

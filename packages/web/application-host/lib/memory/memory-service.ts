@@ -17,10 +17,9 @@ import { botScopeId, sessionScopeId } from "../harness/owner-scope.js";
 /**
  * Unified memory domain (BC1). One service backs every writer — the user's
  * explicit remember action, an agent's memory tools, the Bot's own recording,
- * and later the background organizer (BC2). "Received" vs "committed" is the
- * `commit` argument: direct user/agent statements persist as `accepted`;
- * model-inferred proposals commit as `suggested` and keep their inferred
- * nature — they are never silently promoted to user instructions.
+ * and the background organizer (BC2). Accepted/suggested describes effective
+ * recall eligibility, not durability or user authority. Every successful write
+ * awaits the storage receipt; nature and provenance describe the claim.
  */
 
 /** The store-level owner a memory row belongs to. */
@@ -67,6 +66,7 @@ export interface MemoryRecordInput {
   source?: KnowledgeSource;
   /** `accepted` persists immediately; `suggested` is a reviewable proposal. */
   commit?: KnowledgeStatus;
+  expectedRevision?: string;
 }
 
 export interface MemoryRecordResult {
@@ -113,8 +113,8 @@ export function createMemoryService(deps: MemoryServiceDeps) {
   /**
    * Persist one memory row. Direct user/agent statements default to
    * `accepted` — the per-row review tray is no longer the gate for something
-   * a caller explicitly asked to remember. Identity dedupe covers dismissed
-   * and retired rows so a restated memory never resurrects forgotten history.
+   * a caller explicitly asked to remember. Automatic source retries respect
+   * forgetting; a new explicit instruction can intentionally remember it again.
    */
   const remember = async (owner: MemoryOwner, input: MemoryRecordInput): Promise<MemoryRecordResult> => {
     const store = await storeFor(owner);
@@ -127,7 +127,7 @@ export function createMemoryService(deps: MemoryServiceDeps) {
       trigger: input.trigger?.trim() ?? "",
       ...(input.nature ? { nature: input.nature } : {}),
       ...(input.source ? { source: input.source } : {}),
-    });
+    }, { explicit: input.source?.kind !== "memory-organizer", ...(input.expectedRevision !== undefined ? { expectedRevision: input.expectedRevision } : {}) });
     if (result.created) notify(owner, [result.knowledge.id]);
     return { created: result.created, duplicate: result.duplicate, item: result.knowledge };
   };
@@ -202,6 +202,7 @@ export function createMemoryService(deps: MemoryServiceDeps) {
     get,
     list,
     search,
+    revision: async (owner: MemoryOwner) => (await storeFor(owner)).knowledgeRevision(),
     ownerForSession: deps.ownerForSession,
   };
 }

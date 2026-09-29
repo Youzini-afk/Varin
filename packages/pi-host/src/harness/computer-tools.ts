@@ -1,4 +1,4 @@
-import vm from "node:vm";
+import { ComputerRepl } from "./computer-repl.js";
 import { Type } from "typebox";
 import { defineTool, type ToolDefinition } from "@earendil-works/pi-coding-agent";
 import type { HostServicesBridge } from "./host-services-bridge.js";
@@ -19,10 +19,9 @@ import type {
  * JavaScript REPL for multi-step orchestration. Both paths go through the
  * Host's ComputerService — the REPL adds no second authority.
  *
- * The REPL runs inside this Pi host process in a `node:vm` context (one per
- * session, so sequential script calls share bindings). It exposes only the
- * whitelisted `computer` API and `console` capture — no `process`, `require`,
- * or filesystem. Model-authored scripts never reach a renderer.
+ * The Node REPL runs in a separate worker with persistent bindings. Aborting
+ * an evaluation terminates that worker and cancels its bridge requests.
+ * It is an execution facility, not an operating-system security sandbox.
  */
 
 const ComputerParams = Type.Object({
@@ -48,7 +47,7 @@ const ComputerParams = Type.Object({
   operation: Type.Optional(Type.Object({}, { additionalProperties: true })),
   /** run: JavaScript evaluated in the session-persistent context. */
   script: Type.Optional(Type.String()),
-  /** run: evaluation timeout in ms (default 30000, capped at 120000). */
+  /** run: optional evaluation budget; cancellation is always supported. */
   timeoutMs: Type.Optional(Type.Integer({ minimum: 1 })),
 });
 
@@ -76,58 +75,9 @@ const summarizeObservation = (observation: ComputerObservation): string => {
   return lines.join("\n");
 };
 
-/** One persistent REPL context per session — the tool closure owns it. */
-interface SessionRepl {
-  context: vm.Context;
-  computer: Record<string, unknown>;
-}
-
-const createReplContext = (bridge: HostServicesBridge, defaultDesktopId?: string): SessionRepl => {
-  const desktopField = (desktopId?: string): { desktopId: string } | Record<string, never> => {
-    const id = desktopId ?? defaultDesktopId;
-    return id ? { desktopId: id } : {};
-  };
-  const computer = {
-    list: () => bridge.request<"computer.list">("computer.list", {}) as Promise<ComputerListResult>,
-    apps: (desktopId?: string) =>
-      bridge.request<"computer.apps">("computer.apps", desktopField(desktopId))
-        .then((r) => (r as ComputerAppsResult).apps),
-    observe: (app: string, opts?: { desktopId?: string; includeScreenshot?: boolean; textLimit?: number | "max" }) =>
-      bridge.request<"computer.observe">("computer.observe", {
-        app,
-        ...desktopField(opts?.desktopId),
-        ...(opts?.includeScreenshot !== undefined ? { includeScreenshot: opts.includeScreenshot } : {}),
-        ...(opts?.textLimit !== undefined ? { textLimit: opts.textLimit } : {}),
-      }).then((r) => (r as ComputerObserveResult).observation),
-    act: (action: ComputerAction, opts?: { desktopId?: string }) =>
-      bridge.request<"computer.act">("computer.act", {
-        action,
-        ...desktopField(opts?.desktopId),
-      }).then((r) => (r as ComputerActResult).result),
-    cancel: (desktopId?: string) =>
-      bridge.request<"computer.cancel">("computer.cancel", desktopField(desktopId)) as Promise<ComputerCancelResult>,
-    release: (desktopId?: string) =>
-      bridge.request<"computer.release">("computer.release", desktopField(desktopId)) as Promise<ComputerReleaseResult>,
-    sleep: (ms: number) => new Promise<void>((resolve) => setTimeout(resolve, Math.min(Math.max(ms, 0), 60000))),
-  };
-  const logs: string[] = [];
-  const console_ = {
-    log: (...args: unknown[]) => { logs.push(args.map((a) => typeof a === "string" ? a : JSON.stringify(a)).join(" ")); },
-    warn: (...args: unknown[]) => { logs.push(`[warn] ${args.map(String).join(" ")}`); },
-    error: (...args: unknown[]) => { logs.push(`[error] ${args.map(String).join(" ")}`); },
-  };
-  const context = vm.createContext(
-    { computer, console: console_, sleep: computer.sleep },
-    { name: "varin-computer-repl" },
-  );
-  // Expose the log buffer for the caller to drain after each evaluation.
-  Object.defineProperty(computer, "__drainLogs", { value: () => logs.splice(0, logs.length), enumerable: false });
-  return { context, computer };
-};
-
 export function createComputerTool(bridge: HostServicesBridge, _sessionId: string): ToolDefinition {
-  let repl: SessionRepl | null = null;
-  const replFor = () => (repl ??= createReplContext(bridge));
+  const repl = new ComputerRepl();
+  const evaluations = new Set<AbortController>();
 
   return defineTool({
     name: "computer",
@@ -138,12 +88,12 @@ export function createComputerTool(bridge: HostServicesBridge, _sessionId: strin
       "Always observe before acting: element indexes are only valid for the observation that produced them — pass that observationId to act.",
       "act reports driver acceptance, not business completion; observe again to verify the UI changed.",
       "For sequences (fill a form, navigate a wizard) prefer action=run with a script over many round trips; bindings persist across run calls.",
-      "In run scripts, top-level await works; use `return` to surface a value (e.g. `return obs.id`) and console.log for progress.",
+      "In run scripts, top-level await and lexical declarations work; the last expression is the result (e.g. `const obs = await computer.observe('app'); obs.id`). Cancellation clears the script bindings.",
       "cancel drops queued input; release frees held keys/buttons. Use them when a gesture must not continue.",
       "If the tool reports the desktop unavailable or unprobed, report that honestly — never claim a GUI action happened.",
     ],
     parameters: ComputerParams,
-    execute: async (_toolCallId, params, _signal, _onUpdate, _ctx) => {
+    execute: async (_toolCallId, params, signal, _onUpdate, _ctx) => {
       try {
         const desktop = params.desktopId?.trim() || undefined;
         switch (params.action) {
@@ -198,10 +148,12 @@ export function createComputerTool(bridge: HostServicesBridge, _sessionId: strin
             const result = await bridge.request<"computer.act">("computer.act", {
               action: operation,
               ...(desktop ? { desktopId: desktop } : {}),
-            }) as ComputerActResult;
+            }, signal ? { signal } : undefined) as ComputerActResult;
             const r = result.result;
-            const text = r.cancelled
-              ? `action cancelled before/while running${r.detail ? `: ${r.detail}` : ""}`
+            const text = r.outcome === "unknown"
+              ? `action outcome unknown: ${r.detail ?? "driver response lost"}. Observe the actual state before deciding whether to retry.`
+              : r.cancelled
+              ? `${r.accepted ? "input was dispatched before cancellation; observe its effect" : "action cancelled before dispatch"}${r.detail ? `: ${r.detail}` : ""}`
               : r.accepted
                 ? `action dispatched${r.detail ? ` (${r.detail})` : ""} — observe to verify the effect`
                 : `action rejected${r.detail ? `: ${r.detail}` : ""}`;
@@ -218,12 +170,13 @@ export function createComputerTool(bridge: HostServicesBridge, _sessionId: strin
             };
           }
           case "cancel": {
+            for (const evaluation of evaluations) evaluation.abort(new Error("Computer evaluation cancelled"));
             const result = await bridge.request<"computer.cancel">("computer.cancel", {
               ...(desktop ? { desktopId: desktop } : {}),
             }) as ComputerCancelResult;
             return {
-              content: [{ type: "text", text: result.cancelled > 0 ? `dropped ${result.cancelled} queued action(s); held input released` : "nothing queued; held input released" }],
-              details: { cancelled: result.cancelled },
+              content: [{ type: "text", text: `dropped ${result.cancelled} queued action(s); ${result.released ? "held input released" : "input release was not confirmed; inspect the desktop"}` }],
+              details: { cancelled: result.cancelled, released: result.released },
             };
           }
           case "release": {
@@ -239,63 +192,54 @@ export function createComputerTool(bridge: HostServicesBridge, _sessionId: strin
             if (!params.script?.trim()) {
               return errorResult(new HarnessRequestError("invalid-params", "run requires script"));
             }
-            const session = replFor();
-            const timeout = Math.min(params.timeoutMs ?? 30000, 120000);
-            let value: unknown;
+            const controller = new AbortController();
+            evaluations.add(controller);
+            const abort = () => controller.abort(signal?.reason ?? new Error("Computer script cancelled"));
+            signal?.addEventListener("abort", abort, { once: true });
+            if (signal?.aborted) abort();
+            const timer = params.timeoutMs === undefined ? undefined : setTimeout(() =>
+              controller.abort(new Error(`Computer script budget exhausted after ${params.timeoutMs}ms; bindings cleared`)), params.timeoutMs);
             try {
-              // Classic-script eval first: the completion value is the last
-              // expression. `await` is a SyntaxError there — retry wrapped in
-              // an async body where `return` surfaces the value.
-              let evaluated: unknown;
-              try {
-                evaluated = vm.runInContext(params.script, session.context, { timeout, displayErrors: true });
-              } catch (syntax) {
-                // vm raises the *context's* SyntaxError — instanceof against
-                // the host realm fails, so match by name.
-                if ((syntax as Error)?.name !== "SyntaxError") throw syntax;
-                // Async fallback: wrap in an async body for top-level await,
-                // and hoist `const`/`let`/`var` declarations to context-global
-                // assignments so bindings persist across `run` calls (the same
-                // trick REPLs use). Functions must be assigned (`f = () =>…`)
-                // or defined in a non-async classic eval to persist.
-                const hoisted = params.script.replace(
-                  /(^|\n)(\s*)(?:const|let|var)\s+([A-Za-z_$][\w$]*)\s*=(?!=)/g,
-                  "$1$2$3 =",
-                );
-                evaluated = vm.runInContext(
-                  `(async () => {\n${hoisted}\n})()`,
-                  session.context,
-                  { timeout, displayErrors: true },
-                );
-              }
-              // vm's own timeout only bounds synchronous evaluation; scripts
-              // await driver calls, so race the returned promise too.
-              value = await Promise.race([
-                Promise.resolve(evaluated),
-                new Promise<never>((_resolve, reject) => setTimeout(
-                  () => reject(new Error(`script timed out after ${timeout}ms`)), timeout,
-                )),
-              ]);
-            } catch (error) {
-              const drained = (session.computer.__drainLogs as () => string[])();
-              const text = [`script error: ${error instanceof Error ? error.message : String(error)}`];
-              if (drained.length) text.push("", "console:", ...drained.map((l) => `  ${l}`));
-              return { content: [{ type: "text", text: text.join("\n") }], isError: true as const, details: { code: "failed" } };
+              // Snapshot the configured target once per evaluation. A settings
+              // change while the script awaits must not redirect its next click.
+              const requestOptions = { signal: controller.signal };
+              let target: Promise<string | undefined> | undefined;
+              const field = async (requested?: string) => {
+                if (requested ?? desktop) return { desktopId: (requested ?? desktop)! };
+                target ??= bridge.request("computer.list", {}, requestOptions).then((catalog) =>
+                  catalog.defaultDesktopId ?? (catalog.desktops.length === 1 ? catalog.desktops[0]?.id : undefined));
+                const id = await target;
+                if (!id) throw new Error("Select a desktop or pass desktopId to the computer call");
+                return { desktopId: id };
+              };
+              const api = {
+                list: () => bridge.request("computer.list", {}, requestOptions),
+                apps: async (id?: string) => bridge.request("computer.apps", await field(id), requestOptions).then((r) => r.apps),
+                observe: async (app: string, opts?: { desktopId?: string; includeScreenshot?: boolean; textLimit?: number | "max" }) =>
+                  bridge.request("computer.observe", { ...opts, ...await field(opts?.desktopId), app }, requestOptions).then((r) => r.observation),
+                act: async (action: ComputerAction, opts?: { desktopId?: string }) =>
+                  bridge.request("computer.act", { ...await field(opts?.desktopId), action }, requestOptions).then((r) => r.result),
+                cancel: async (id?: string) => bridge.request("computer.cancel", await field(id), requestOptions),
+                release: async (id?: string) => bridge.request("computer.release", await field(id), requestOptions),
+              };
+              const result = await repl.run(params.script, async (method, args) => {
+                controller.signal.throwIfAborted();
+                const fn = api[method as keyof typeof api] as (...values: unknown[]) => Promise<unknown>;
+                if (!fn) throw new Error(`Unknown computer method: ${method}`);
+                return fn(...args);
+              }, controller.signal);
+              const lines = [...result.logs, ...(result.value !== undefined ? [`⇒ ${result.value}`] : [])];
+              return { content: [{ type: "text", text: lines.join("\n") || "(no output)" }], details: { logs: result.logs } };
+            } finally {
+              clearTimeout(timer);
+              signal?.removeEventListener("abort", abort);
+              controller.abort(new Error("Computer evaluation ended"));
+              evaluations.delete(controller);
             }
-            const drained = (session.computer.__drainLogs as () => string[])();
-            const lines: string[] = [];
-            if (drained.length) lines.push("console:", ...drained.map((l) => `  ${l}`));
-            if (value !== undefined) {
-              const rendered = typeof value === "string" ? value : JSON.stringify(value, null, 2);
-              lines.push(`⇒ ${rendered?.slice(0, 8000) ?? "undefined"}`);
-            }
-            return {
-              content: [{ type: "text", text: lines.length ? lines.join("\n") : "(no output)" }],
-              details: { logs: drained },
-            };
           }
           case "reset": {
-            repl = null;
+            for (const evaluation of evaluations) evaluation.abort(new Error("Computer REPL reset"));
+            repl.reset();
             return { content: [{ type: "text", text: "REPL context reset; bindings cleared" }], details: { reset: true } };
           }
         }

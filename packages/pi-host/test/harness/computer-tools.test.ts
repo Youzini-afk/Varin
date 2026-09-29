@@ -85,13 +85,15 @@ describe("computer tool", () => {
     const tool = createComputerTool(bridge, SESSION);
     const first = await execute(tool, {
       action: "run",
-      script: "const obs = await computer.observe('notepad'); return obs.id;",
+      desktopId: "local-console",
+      script: "const obs = await computer.observe('notepad'); obs.id",
     });
     assert.match((first.content[0] as { text: string }).text, /obs-9/);
     // Second call reuses the context: `obs` is still bound.
     const second = await execute(tool, {
       action: "run",
-      script: "await computer.act({ kind: 'click', app: 'notepad', elementIndex: 0, observationId: obs.id }); return obs.id;",
+      desktopId: "local-console",
+      script: "await computer.act({ kind: 'click', app: 'notepad', elementIndex: 0, observationId: obs.id }); obs.id",
     });
     assert.match((second.content[0] as { text: string }).text, /obs-9/);
     assert.equal(requests.map((r) => r.method).join(","), "computer.observe,computer.act");
@@ -106,11 +108,20 @@ describe("computer tool", () => {
     assert.match((result.content[0] as { text: string }).text, /undefined/);
   });
 
-  it("the sandbox exposes no process or require", async () => {
-    const { bridge } = scriptedBridge({});
+  it("terminates timed-out scripts before delayed input and survives loops after await", async () => {
+    const { bridge, requests } = scriptedBridge({ "computer.act": () => ({ result: { accepted: true } }) });
     const tool = createComputerTool(bridge, SESSION);
-    const result = await execute(tool, { action: "run", script: "[typeof process, typeof require, typeof fetch].join(',')" });
-    assert.match((result.content[0] as { text: string }).text, /undefined,undefined/);
+    await execute(tool, { action: "run", script: "const ready = 1" });
+    const result = await execute(tool, { action: "run", desktopId: "local-console", timeoutMs: 100,
+      script: "await sleep(300); await computer.act({kind:'key',app:'notepad',key:'enter'})" });
+    assert.equal(isError(result), true);
+    await new Promise((resolve) => setTimeout(resolve, 400));
+    assert.equal(requests.length, 0);
+    const loop = await execute(tool, { action: "run", timeoutMs: 150, script: "await Promise.resolve(); while (true) {}" });
+    assert.equal(isError(loop), true);
+    const recovered = await execute(tool, { action: "run", script: "const {value} = await Promise.resolve({value: 8}); value" });
+    assert.match((recovered.content[0] as { text: string }).text, /8/);
+    await execute(tool, { action: "reset" });
   });
 
   it("host errors surface as structured tool errors", async () => {

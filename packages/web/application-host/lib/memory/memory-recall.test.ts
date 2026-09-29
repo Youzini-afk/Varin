@@ -64,6 +64,11 @@ describe("recallSources — scope-generalized candidate selection (BC3)", () => 
     expect(results[0]?.node.id).toBe(bound.id);
     expect(results[0]?.via).toBe("associated");
     expect(results.map((r) => r.node.id)).toHaveLength(2);
+    const one = await recallSources({
+      sources: [{ authority: store, scope: "workspace", scopeId: "ws" }],
+      query: "text match terms", k: 1, associated: { threadIds: ["thr-1"] },
+    });
+    expect(one.results.map((hit) => hit.node.id)).toEqual([bound.id]);
   });
 });
 
@@ -71,6 +76,24 @@ describe("recallMemories — memory-recall judging (BC3)", () => {
   const judge = (impl: Partial<MemoryRecallFastDecision>): MemoryRecallFastDecision => ({
     status: impl.status ?? (async () => ({ status: "ready" as const, binding: { protocol: "typesafe-systemone" as const, providerId: "p", modelId: "m", configurationId: "c" } })),
     decide: impl.decide ?? (async () => ({ batchId: "b", providerId: "p", modelId: "m", answers: [], missing: [] })),
+  });
+
+  it("retains a directly associated decision but drops a memory forgotten during judging", async () => {
+    const store = await openStore("workspace");
+    try {
+      const bound = await remember(store, "mandatory decision", { threadId: "thread" });
+      const other = await remember(store, "goal matching memory");
+      const result = await recallMemories({
+        sources: [{ authority: store, scope: "workspace", scopeId: "ws" }], query: "goal", k: 5,
+        associated: { threadIds: ["thread"] }, judgeWorkspaceId: "ws",
+        fastDecision: judge({ decide: async ({ materials }) => {
+          expect(materials.map((item) => item.text)).not.toContain(expect.stringContaining("mandatory decision"));
+          await store.retireKnowledge(other.id, "workspace");
+          return { batchId: "b", providerId: "p", modelId: "m", answers: [{ id: "m0", kind: "judge", value: 1 }], missing: [] };
+        } }),
+      });
+      expect(result.results.map((hit) => hit.node.id)).toEqual([bound.id]);
+    } finally { await store.close(); }
   });
 
   it("drops candidates the fast decision judges non-contributing, keeps unanswered ones", async () => {

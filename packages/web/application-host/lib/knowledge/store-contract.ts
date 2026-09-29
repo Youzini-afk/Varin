@@ -108,6 +108,8 @@ export const MEMORY_NATURES: readonly MemoryNature[] = ["experience", "decision"
  */
 export interface KnowledgeSource {
   kind: string;
+  /** Stable source-range identity for automatic retries and forgetting. */
+  key?: string;
   sessionId?: string;
   threadId?: string;
   runId?: string;
@@ -441,7 +443,7 @@ export interface KnowledgeStore {
    * Atomically create one knowledge row unless the same normalized content
    * already exists in this scope, including dismissed and retired history.
    */
-  createKnowledgeIfAbsent(k: KnowledgeInput): Promise<KnowledgeCreateIfAbsentResult>;
+  createKnowledgeIfAbsent(k: KnowledgeInput, options?: { expectedRevision?: string; explicit?: boolean }): Promise<KnowledgeCreateIfAbsentResult>;
   updateSuggestedKnowledge(
     id: NodeId,
     patch: { content: string; trigger: string },

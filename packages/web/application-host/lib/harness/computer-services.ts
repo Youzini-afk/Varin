@@ -34,13 +34,14 @@ export function createComputerAppsService(host: HarnessServiceHost): HarnessServ
 
 export function createComputerObserveService(host: HarnessServiceHost): HarnessService<"computer.observe"> {
   return {
-    handle: async (params, _ctx: HarnessServiceContext) => {
+    handle: async (params, ctx: HarnessServiceContext) => {
       const app = typeof params.app === "string" ? params.app.trim() : "";
       if (!app) throw new HarnessServiceError("invalid-params", "computer.observe requires app");
       const desktopId = desktopIdParam(params);
       const observation = await requireService(host).observe({
         ...(desktopId ? { desktopId } : {}),
         app,
+        signal: ctx.signal,
         ...(params.includeScreenshot !== undefined ? { includeScreenshot: params.includeScreenshot } : {}),
         ...(params.textLimit !== undefined ? { textLimit: params.textLimit } : {}),
         ...(params.maxTreeNodes !== undefined ? { maxTreeNodes: params.maxTreeNodes } : {}),
@@ -53,7 +54,7 @@ export function createComputerObserveService(host: HarnessServiceHost): HarnessS
 
 export function createComputerActService(host: HarnessServiceHost): HarnessService<"computer.act"> {
   return {
-    handle: async (params) => {
+    handle: async (params, ctx) => {
       if (!params.action || typeof params.action !== "object") {
         throw new HarnessServiceError("invalid-params", "computer.act requires an action");
       }
@@ -61,6 +62,7 @@ export function createComputerActService(host: HarnessServiceHost): HarnessServi
       const result = await requireService(host).act({
         ...(desktopId ? { desktopId } : {}),
         action: params.action,
+        signal: ctx.signal,
       });
       return { result };
     },

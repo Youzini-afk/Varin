@@ -64,6 +64,8 @@ export interface Zone2Knowledge {
   title: string;
   trigger: string;
   scope?: "workspace" | "user" | "bot" | "session";
+  nature?: string;
+  sourceKind?: string;
 }
 
 export interface Zone2KnowledgeInvalidation {
@@ -75,7 +77,7 @@ export interface Zone2KnowledgeInvalidation {
  * An explicit correction (BC3): a previously delivered row was superseded and
  * its accepted successor enters the request as an update, not a fresh recall.
  */
-export interface Zone2KnowledgeCorrection {
+export interface Zone2KnowledgeCorrection extends Zone2Knowledge {
   id: number;
   scope: "workspace" | "user" | "bot" | "session";
   supersedes: number;
@@ -292,11 +294,12 @@ export function formatZone2ThreadMaterial(thread: Zone2Thread): string | null {
 
 export function formatZone2Knowledge(item: Zone2Knowledge): string {
   const scope = item.scope ? ` (scope:${item.scope})` : "";
-  return `#${item.id} ${item.title} — trigger: ${item.trigger}${scope}`;
+  const provenance = item.nature || item.sourceKind ? ` [${[item.nature, item.sourceKind].filter(Boolean).join("; ")}]` : "";
+  return `#${item.id} ${item.title} — trigger: ${item.trigger}${scope}${provenance}`;
 }
 
 export function formatZone2KnowledgeCorrection(item: Zone2KnowledgeCorrection): string {
-  return `#${item.id} (scope:${item.scope}) replaces #${item.supersedes} — ${item.title} — trigger: ${item.trigger}`;
+  return `#${item.id} (scope:${item.scope}) replaces #${item.supersedes} — ${formatZone2Knowledge(item)}`;
 }
 
 /**

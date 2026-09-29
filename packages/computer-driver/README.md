@@ -19,7 +19,7 @@ Operations:
 | `list_apps` | running top-level apps on this desktop |
 | `get_app_state` | snapshot: window bounds, UIA/AT-SPI tree lines + element records, optional screenshot |
 | `click`, `perform_secondary_action`, `scroll`, `drag`, `type_text`, `press_key`, `set_value` | actions; return a fresh snapshot after the input settles |
-| `release_input` | lift held buttons/keys — used on cancel and control handoff |
+| `release_input` | release the synthetic buttons/keys this driver pressed, rather than every desktop modifier |
 
 Action params mirror the Open Computer Use schema (`app`, `element`,
 `x`/`y`, `from_x`/`from_y`/`to_x`/`to_y`, `click_count`, `mouse_button`,
@@ -50,3 +50,14 @@ adapted from [open-codex-computer-use](https://github.com/iFurySt/open-codex-com
 MIT License (baseline `51f3a59`, 2026-09-28). Changes: persistent host loop,
 global SendInput paths, `PrintWindow` capture, `release_input`,
 `capabilities`, Varin flag names.
+
+The complete upstream notice is retained in
+[THIRD_PARTY_NOTICES.md](../../THIRD_PARTY_NOTICES.md).
+
+Host cancellation drops queued input and awaits the driver's release receipt.
+The helper currently finishes its synchronous native operation before servicing
+another request; this is not yet immediate interruption of a long native call.
+Post-action capture failure preserves the input acceptance, while a lost driver
+response yields an unknown action effect. Inspect the desktop before retrying.
+See the [BC acceptance record](../../docs/plan/bot-computer-use-acceptance.md)
+for remaining native platform and packaging work.

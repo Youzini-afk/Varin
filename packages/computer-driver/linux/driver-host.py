@@ -41,7 +41,11 @@ def main():
         try:
             operation = json.loads(line)
             request_id = operation.get("id")
-            write_response(request_id, runtime.perform_operation(operation))
+            try:
+                response = runtime.perform_operation(operation)
+            finally:
+                runtime.release_input()
+            write_response(request_id, response)
         except Exception as exc:
             write_response(request_id, {"ok": False, "error": str(exc)})
 

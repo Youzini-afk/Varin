@@ -73,13 +73,37 @@ describe("memory service (BC1)", () => {
     expect(hits.some((hit) => hit.node.id === result.item.id)).toBe(true);
   });
 
-  it("dedupes a restated memory instead of resurrecting a forgotten row", async () => {
+  it("dedupes a restated active memory", async () => {
     const svc = service();
     const first = await svc.remember(workspaceOwner, { content: "Pinned dependency versions", trigger: "deps" });
     const second = await svc.remember(workspaceOwner, { content: "Pinned dependency versions", trigger: "deps" });
     expect(second.created).toBe(false);
     expect(second.duplicate).toBe(true);
     expect(second.item.id).toBe(first.item.id);
+  });
+
+  it("suppresses rephrased automatic retries of forgotten sources but permits an explicit new remember", async () => {
+    const svc = service();
+    const source = { kind: "memory-organizer", key: "source-range-1" };
+    const first = await svc.remember(workspaceOwner, { content: "Prefer brief updates", source });
+    const revision = await svc.revision(workspaceOwner);
+    await svc.forget(workspaceOwner, first.item.id);
+    await expect(svc.remember(workspaceOwner, { content: "Late inference", source, expectedRevision: revision })).rejects.toMatchObject({ code: "conflict" });
+    const retry = await svc.remember(workspaceOwner, { content: "The user prefers concise reports", source });
+    expect(retry.created).toBe(false);
+    expect(await svc.list(workspaceOwner, { activeOnly: true })).toEqual([]);
+    const explicit = await svc.remember(workspaceOwner, { content: "Prefer brief updates", source: { kind: "user-mark" } });
+    expect(explicit.created).toBe(true);
+    expect(explicit.item.invalidAt).toBeUndefined();
+  });
+
+  it("explicit remembering accepts an existing proposal instead of returning an inactive duplicate", async () => {
+    const svc = service();
+    const proposed = await svc.remember(workspaceOwner, { content: "Use the release branch", commit: "suggested" });
+    const accepted = await svc.remember(workspaceOwner, { content: "Use the release branch", source: { kind: "user-mark" } });
+    expect(accepted.item.id).toBe(proposed.item.id);
+    expect(accepted.item.status).toBe("accepted");
+    expect((await svc.search(workspaceOwner, "release branch")).map((hit) => hit.node.id)).toContain(accepted.item.id);
   });
 
   it("a correction retires the old row and leaves a readable revision chain", async () => {

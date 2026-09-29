@@ -68,13 +68,6 @@ export interface MemoryRecallOutput {
   judge?: "used" | "unavailable";
 }
 
-const MAX_JUDGED_CANDIDATES = 12;
-const MAX_MATERIAL_CHARS = 1600;
-
-const clip = (text: string, max: number): string => (
-  text.length <= max ? text : `${text.slice(0, max)}…`
-);
-
 export async function recallMemories(input: MemoryRecallInput): Promise<MemoryRecallOutput> {
   input.signal?.throwIfAborted();
   const recalled = await recallSources({
@@ -87,7 +80,16 @@ export async function recallMemories(input: MemoryRecallInput): Promise<MemoryRe
     ...(input.signal ? { signal: input.signal } : {}),
   });
   const judged = await judgeCandidates(input, recalled.results);
-  return { results: judged.results, details: recalled.details, ...(judged.judge ? { judge: judged.judge } : {}) };
+  // A human can correct/forget while the advisory model is in flight.
+  const results: RecallResult[] = [];
+  for (const result of judged.results) {
+    input.signal?.throwIfAborted();
+    const source = input.sources.find((candidate) => candidate.scope === result.node.payload.scope);
+    const current = await source?.authority.getKnowledge(result.node.id);
+    if (current?.status === "accepted" && current.invalidAt === undefined
+      && current.content === result.node.payload.content && current.trigger === result.node.payload.trigger) results.push(result);
+  }
+  return { results, details: recalled.details, ...(judged.judge ? { judge: judged.judge } : {}) };
 }
 
 const judgeCandidates = async (
@@ -105,13 +107,16 @@ const judgeCandidates = async (
     return { results, judge: "unavailable" };
   }
   if (status.status !== "ready") return { results, judge: "unavailable" };
-  const candidates = results.slice(0, MAX_JUDGED_CANDIDATES);
+  // Explicit work associations are obligations, not similarity candidates for
+  // an advisory judge to discard. Index answers against this exact subset.
+  const candidates = results.filter((result) => result.via !== "associated");
+  if (candidates.length === 0) return { results };
   const materials: FastDecisionMaterial[] = candidates.map((result, index) => {
     const payload = result.node.payload;
     return {
       id: `m${index}`,
       label: `[${payload.scope ?? "workspace"}] #${result.node.id}`,
-      text: clip(`${payload.content}\ntrigger: ${payload.trigger}`, MAX_MATERIAL_CHARS),
+      text: `${payload.content}\ntrigger: ${payload.trigger}`,
     };
   });
   const questions: FastDecisionQuestion[] = candidates.map((_result, index) => ({
@@ -138,13 +143,13 @@ const judgeCandidates = async (
     // Judging is advisory: a provider failure must not hide real recall hits.
     return { results, judge: "unavailable" };
   }
-  const keep = new Set<string>();
+  const keep = new Set(candidates.map((_candidate, index) => `m${index}`));
   for (const answer of decided.answers) {
-    if (answer.kind === "judge" && answer.value >= 0.5) keep.add(answer.id);
+    if (answer.kind === "judge" && answer.value < 0.5) keep.delete(answer.id);
   }
   for (const id of decided.missing) keep.add(id);
   return {
-    results: results.filter((_result, index) => index >= candidates.length || keep.has(`m${index}`)),
+    results: results.filter((result) => result.via === "associated" || keep.has(`m${candidates.indexOf(result)}`)),
     judge: "used",
   };
 };

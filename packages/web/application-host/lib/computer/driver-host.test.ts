@@ -24,6 +24,7 @@ process.stdin.on("data", (chunk) => {
     const message = JSON.parse(line);
     if (message.tool === "hang") continue;
     if (message.tool === "exit") process.exit(3);
+    if (message.tool === "slow") { setTimeout(() => process.stdout.write(JSON.stringify({id:message.id,ok:true}) + "\\n"), 120); continue; }
     process.stdout.write(JSON.stringify({ id: message.id, ok: message.tool !== "fail", text: "did:" + message.tool, error: message.tool === "fail" ? "op failed" : undefined }) + "\\n");
   }
 });
@@ -94,10 +95,24 @@ describe("computer driver host (BC4)", () => {
   it("dispose fails pending work and refuses new requests", async () => {
     const driver = createDriverSession(echoSpec());
     const wedged = driver.request({ tool: "hang" });
+    const queued = driver.request({ tool: "click" });
+    const rejected = Promise.allSettled([wedged, queued]);
     driver.dispose();
-    await expect(wedged).rejects.toThrow(/disposed/);
+    expect((await rejected).every((result) => result.status === "rejected")).toBe(true);
     await expect(driver.request({ tool: "ping" })).rejects.toThrow(/disposed/);
     expect(driver.alive()).toBe(false);
+  });
+
+  it("starts each request budget at dispatch rather than timing out queued input that later executes", async () => {
+    const driver = createDriverSession(echoSpec());
+    try {
+      await driver.request({ tool: "ping" });
+      const [slow, next] = await Promise.all([
+        driver.request({ tool: "slow" }), driver.request({ tool: "click" }, { timeoutMs: 60 }),
+      ]);
+      expect(slow.ok).toBe(true);
+      expect(next.text).toBe("did:click");
+    } finally { driver.dispose(); }
   });
 
   it("ignores malformed lines on stdout without breaking correlation", async () => {

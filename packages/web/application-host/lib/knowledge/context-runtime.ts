@@ -16,6 +16,7 @@ interface SessionBinding {
     query: string;
     workspaceRevision: string;
     userRevision: string | null;
+    sessionRevision: string | null;
     results: RecallResult[];
   } | null;
 }
@@ -24,6 +25,8 @@ export interface KnowledgeContextRuntimeOptions {
   getStore(workspaceId: string): Promise<KnowledgeStore | null>;
   /** Optional user store used by cross-scope recall (owner and user IDs overlap). */
   getUserStore?: () => Promise<KnowledgeStore | null>;
+  getSessionStore?: (sessionId: string) => Promise<KnowledgeStore | null>;
+  resolveScope?: (sessionId: string) => Promise<string>;
   /**
    * BC3: the goal the session is working toward (owning thread brief). When
    * present it joins the latest user message as the recall query, so a
@@ -120,7 +123,7 @@ export function createKnowledgeContextRuntime(options: KnowledgeContextRuntimeOp
       tail: current?.tail ?? Promise.resolve(),
       turnIndex: current?.turnIndex ?? 0,
       workspaceId,
-      recallCache: current?.recallCache ?? null,
+      recallCache: null,
     });
   };
 
@@ -368,6 +371,7 @@ export function createKnowledgeContextRuntime(options: KnowledgeContextRuntimeOp
 
   const zone2Material = async (request: Zone2MaterialRequest): Promise<Zone2MaterialResult> => {
     request.signal?.throwIfAborted();
+    if (options.resolveScope) bindSession(request.sessionId, await options.resolveScope(request.sessionId));
     const binding = sessions.get(request.sessionId);
     if (!binding) {
       return { eventCursor: request.afterEventId ?? 0, material: emptyMaterial(request.contextUsage) };
@@ -473,13 +477,15 @@ export function createKnowledgeContextRuntime(options: KnowledgeContextRuntimeOp
       : null;
     // Owner-scope rows (workspace/bot/session) live in `store`; only `user`
     // rows resolve against the user store.
-    const storeForScope = (scope: KnowledgeScope) => scope === "user" ? userStore : store;
+    const sessionStore = options.getSessionStore ? await options.getSessionStore(request.sessionId) : null;
+    const storeForScope = (scope: KnowledgeScope) => scope === "user" ? userStore
+      : scope === "session" && sessionStore ? sessionStore : store;
     if (retainedKnowledge.length > 0) {
       const invalidations = (await Promise.all(retainedKnowledge.map(async ({ scope, id }) => {
         const source = storeForScope(scope);
         if (!source) return [];
         const current = await source.getKnowledge(id);
-        return !current || current.invalidAt !== undefined || current.status !== "accepted"
+        return !current || current.scope !== scope || current.invalidAt !== undefined || current.status !== "accepted"
           ? [{ id, scope }]
           : [];
       }))).flat();
@@ -494,11 +500,12 @@ export function createKnowledgeContextRuntime(options: KnowledgeContextRuntimeOp
       // stores may legally reuse numeric node IDs).
       const workspaceRevision = store.knowledgeRevision();
       const userRevision = userStore ? userStore.knowledgeRevision() : null;
+      const sessionRevision = sessionStore ? sessionStore.knowledgeRevision() : null;
       const cached = binding.recallCache;
       const sameQuery = cached?.query === recallQuery;
       const revisionsChanged = !cached
         || cached.workspaceRevision !== workspaceRevision
-        || cached.userRevision !== userRevision;
+        || cached.userRevision !== userRevision || cached.sessionRevision !== sessionRevision;
       if (sameQuery && revisionsChanged) {
         const invalidations = (await Promise.all(cached.results.flatMap(async (result) => {
           if (result.node.type !== "knowledge") return [];
@@ -521,7 +528,7 @@ export function createKnowledgeContextRuntime(options: KnowledgeContextRuntimeOp
       let recalled: RecallResult[];
       if (cached?.query === recallQuery
         && cached.workspaceRevision === workspaceRevision
-        && cached.userRevision === userRevision) {
+        && cached.userRevision === userRevision && cached.sessionRevision === sessionRevision) {
         recalled = cached.results;
       } else {
         recalled = options.recall
@@ -535,7 +542,7 @@ export function createKnowledgeContextRuntime(options: KnowledgeContextRuntimeOp
             })
           : await store.recall(recallQuery, 5);
         request.signal?.throwIfAborted();
-        binding.recallCache = { query: recallQuery, workspaceRevision, userRevision, results: recalled };
+        binding.recallCache = { query: recallQuery, workspaceRevision, userRevision, sessionRevision, results: recalled };
       }
       material.knowledge = recalled.flatMap((result) => {
         if (result.node.type !== "knowledge") return [];
@@ -546,6 +553,9 @@ export function createKnowledgeContextRuntime(options: KnowledgeContextRuntimeOp
               id: result.node.id,
               title: content,
               trigger,
+              ...(typeof result.node.payload.nature === "string" ? { nature: result.node.payload.nature } : {}),
+              ...(result.node.payload.source && typeof result.node.payload.source === "object"
+                ? { sourceKind: String((result.node.payload.source as { kind?: string }).kind ?? "") } : {}),
               ...(typeof result.node.payload.scope === "string"
                 ? { scope: result.node.payload.scope as NonNullable<Zone2Knowledge["scope"]> }
                 : {}),
@@ -565,7 +575,8 @@ export function createKnowledgeContextRuntime(options: KnowledgeContextRuntimeOp
         const successor = chain?.successors
           .filter((item) => item.status === "accepted" && item.invalidAt === undefined)
           .at(-1);
-        return successor ? [{ id: successor.id, scope, supersedes: id, title: successor.content, trigger: successor.trigger }] : [];
+        return successor ? [{ id: successor.id, scope, supersedes: id, title: successor.content, trigger: successor.trigger,
+          ...(successor.nature ? { nature: successor.nature } : {}), ...(successor.source ? { sourceKind: successor.source.kind } : {}) }] : [];
       }))).flat();
       if (corrections.length > 0) material.knowledgeCorrections = corrections;
     }

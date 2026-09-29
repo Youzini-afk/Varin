@@ -91,9 +91,12 @@ export function localDriverSpawnSpec(platform: ComputerPlatform, driverDir = com
 }
 
 interface PendingDriverRequest {
+  id: string;
+  op: Omit<DriverRequest, "id">;
+  timeoutMs: number;
   resolve(response: DriverResponse): void;
   reject(error: Error): void;
-  timeout: ReturnType<typeof setTimeout>;
+  timeout?: ReturnType<typeof setTimeout>;
 }
 
 export interface ComputerDriverSession {
@@ -108,25 +111,18 @@ export interface ComputerDriverSession {
 export function createDriverSession(spec: DriverSpawnSpec): ComputerDriverSession {
   let child: ChildProcess | null = null;
   let buffer = "";
-  const pending = new Map<string, PendingDriverRequest>();
-  const queue: Array<() => void> = [];
-  let inFlight = false;
+  let active: PendingDriverRequest | null = null;
+  const queue: PendingDriverRequest[] = [];
   let stderrTail = "";
   let caps: ComputerCapabilities | null = null;
-  let intentionalClose = false;
   let disposed = false;
 
   const isAlive = () => child !== null && !child.killed && child.exitCode === null;
 
   const failAll = (error: Error) => {
-    for (const [, p] of pending) {
-      clearTimeout(p.timeout);
-      p.reject(error);
-    }
-    pending.clear();
-    inFlight = false;
-    // Queued ops retry on a fresh spawn through the normal pump path.
-    pump();
+    if (active) { clearTimeout(active.timeout); active.reject(error); active = null; }
+    for (const queued of queue.splice(0)) queued.reject(error);
+    caps = null;
   };
 
   const onLine = (line: string) => {
@@ -137,31 +133,45 @@ export function createDriverSession(spec: DriverSpawnSpec): ComputerDriverSessio
       return;
     }
     if (typeof message.id !== "string" || message.id === null) return;
-    const p = pending.get(message.id);
-    if (!p) return;
-    pending.delete(message.id);
+    const p = active;
+    if (!p || message.id !== p.id) return;
+    if (typeof message.ok !== "boolean") {
+      stop(new Error("Computer driver returned a malformed response"));
+      return;
+    }
+    active = null;
     clearTimeout(p.timeout);
-    inFlight = false;
     p.resolve(message);
     pump();
   };
 
-  const sendNext = (run: () => void) => {
-    queue.push(run);
-    pump();
+  const pump = () => {
+    if (disposed || active || queue.length === 0) return;
+    const next = queue.shift()!;
+    active = next;
+    try {
+      const target = ensureChild();
+      // Waiting in the queue must never expire and later send a rejected op.
+      next.timeout = setTimeout(() => stop(new Error(
+        `Computer driver request timed out: ${next.op.tool}; its effect is unknown`,
+      )), next.timeoutMs);
+      target.stdin!.write(JSON.stringify({ ...next.op, id: next.id }) + "\n", (error) => {
+        if (error && child === target) stop(error);
+      });
+    } catch (error) {
+      stop(error instanceof Error ? error : new Error(String(error)));
+    }
   };
 
-  const pump = () => {
-    if (inFlight || queue.length === 0) return;
-    const run = queue.shift();
-    if (!run) return;
-    inFlight = true;
-    run();
+  const stop = (error: Error): void => {
+    const target = child;
+    child = null;
+    failAll(error);
+    target?.kill();
   };
 
   const ensureChild = (): ChildProcess => {
     if (isAlive() && child) return child;
-    intentionalClose = false;
     buffer = "";
     stderrTail = "";
     const spawned = spawn(spec.command, spec.args, {
@@ -174,11 +184,11 @@ export function createDriverSession(spec: DriverSpawnSpec): ComputerDriverSessio
     spawned.stdout?.setEncoding("utf8");
     spawned.stderr?.setEncoding("utf8");
     spawned.stdout?.on("data", (chunk: string) => {
+      if (child !== spawned) return;
       buffer += chunk;
       if (Buffer.byteLength(buffer, "utf8") > MAX_FRAME_BYTES) {
         buffer = "";
-        failAll(new Error("Computer driver response exceeded the frame limit"));
-        spawned.kill();
+        stop(new Error("Computer driver response exceeded the frame limit; its effect is unknown"));
         return;
       }
       for (;;) {
@@ -193,13 +203,12 @@ export function createDriverSession(spec: DriverSpawnSpec): ComputerDriverSessio
       stderrTail = (stderrTail + chunk).slice(-STDERR_TAIL_MAX_CHARS);
     });
     spawned.on("error", () => {
-      if (child === spawned) child = null;
-      failAll(new Error(`Computer driver failed to start: ${spec.command}`));
+      if (child !== spawned) return;
+      stop(new Error(`Computer driver failed to start: ${spec.command}`));
     });
     spawned.on("exit", (code, signal) => {
       if (child !== spawned) return;
       child = null;
-      if (intentionalClose) return;
       const tail = stderrTail.trim();
       failAll(new Error(
         `Computer driver exited (code ${code ?? "null"}${signal ? `, signal ${signal}` : ''})`
@@ -214,41 +223,8 @@ export function createDriverSession(spec: DriverSpawnSpec): ComputerDriverSessio
       reject(new Error("Computer driver session is disposed"));
       return;
     }
-    const id = randomUUID();
-    const timeout = setTimeout(() => {
-      pending.delete(id);
-      inFlight = false;
-      // A wedged driver is replaced: a stuck op cannot hold the desktop's
-      // input queue hostage.
-      if (child && !intentionalClose) {
-        try { child.kill(); } catch { /* ignore */ }
-      }
-      reject(new Error(`Computer driver request timed out: ${op.tool}`));
-      pump();
-    }, options.timeoutMs ?? DEFAULT_REQUEST_TIMEOUT_MS);
-
-    sendNext(() => {
-      let target: ChildProcess;
-      try {
-        target = ensureChild();
-      } catch (error) {
-        clearTimeout(timeout);
-        inFlight = false;
-        reject(error instanceof Error ? error : new Error(String(error)));
-        pump();
-        return;
-      }
-      pending.set(id, { resolve, reject, timeout });
-      try {
-        target.stdin?.write(JSON.stringify({ ...op, id }) + "\n");
-      } catch (error) {
-        pending.delete(id);
-        clearTimeout(timeout);
-        inFlight = false;
-        reject(error instanceof Error ? error : new Error(String(error)));
-        pump();
-      }
-    });
+    queue.push({ id: randomUUID(), op: structuredClone(op), timeoutMs: options.timeoutMs ?? DEFAULT_REQUEST_TIMEOUT_MS, resolve, reject });
+    pump();
   });
 
   // Wrap: cache the capabilities probe per session lifetime.
@@ -264,12 +240,7 @@ export function createDriverSession(spec: DriverSpawnSpec): ComputerDriverSessio
     alive: isAlive,
     dispose: () => {
       disposed = true;
-      intentionalClose = true;
-      failAll(new Error("Computer driver disposed"));
-      if (child) {
-        try { child.kill(); } catch { /* ignore */ }
-        child = null;
-      }
+      stop(new Error("Computer driver disposed"));
     },
   };
   return wrapped;

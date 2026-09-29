@@ -18,7 +18,7 @@ Last updated: 2026-09-28
 | 阶段 7 AI4S 科研集群（7A–7I） | 主体已交付为 Partial（D-298/D-303/D-305）；D-300 修订的 7C–7E 远程执行与资源管理部分仍未作为产品代码交付，Slurm 延后 | [design/research-cluster-design.md](design/research-cluster-design.md) |
 | 阶段 S / W / B / F / C / L / N | 已接线；逐能力证据在矩阵 | [plan/agent-harness-plan.md](plan/agent-harness-plan.md) 同名节 |
 | 阶段 O 办公连续性 | 设计已接受（D-327），O0–O4 未实施 | [design/office-work-continuity-design.md](design/office-work-continuity-design.md) |
-| 阶段 BC Bot、记忆与 Computer Use | 实施中：BC0 Bot 身份/kernel 目录、`bot:` owner scope、`bot-root` 附着会话、Host 路由与侧边栏入口已接线；BC1 统一记忆域（`memory.*` harness 方法、统一写入服务、nature/来源/修订链、Bot scope 目录与设置界面）已接线；BC2 后台记忆整理已接线（durable organizer 进度、`memory-organization` 快速决策、`models.memoryOrganizer` 生成槽、settle/sweep 触发、scope 门控与可重试失败）；BC3 记忆召回已接线（`recallSources` 统一选择服务覆盖 workspace/bot/session/user scope、工作关联优先、`memory-recall` 快速决策候选判断与缺失回退、目标+新事实组合查询、supersede 纠正显式更新、`thread.dispatch kind:"discussion"` 咨询线程）；BC4 已接线（`computer.machine`/`computer.desktop` kernel 记录、`computer.list/apps/observe/act/cancel/release` 桥方法、Host computer-service 串行化动作队列与观察新鲜度拒绝、常驻 Windows UIA/SendInput 驱动与 Linux AT-SPI 驱动、Pi `computer` 工具与持久 JS REPL、设置页 Computers 段与默认目标持久化；Windows 驱动已在真实桌面冒烟验证，Linux 驱动仅过语法检查未真机验证，macOS 驱动未打包并按实报不可用）；BC5–BC9 未实施 | [plan/bot-computer-use-plan.md](plan/bot-computer-use-plan.md)、[Bot 设计](design/bot-operated-workbench-design.md)、[Computer Use 设计](design/computer-use-design.md) |
+| 阶段 BC Bot、记忆与 Computer Use | 部分实施，BC0–BC4 尚未通过完整交付验收。2026-09-29 复核修复了 Bot 入口并发/失败归属、记忆续处理/迟到写入/上下文回执、Computer Use 本机注册、驱动队列与脚本取消等缺陷；仍缺 Bot 配置与完整工作入口、统一来源覆盖事务、无目录模型/向量绑定、真正 Bot 咨询、macOS 驱动与 Wayland portal。BC5–BC9 未实施 | [实施计划](plan/bot-computer-use-plan.md)、[本轮验收与剩余项](plan/bot-computer-use-acceptance.md) |
 | 阶段 HR 面向任务与资源的 Harness | D-337，HR0–HR5 已接线并收口（2026-09-27）：资源根寻址、会话 cwd 锚定、多资源检索、持续索引、可变 work-context 移除、§12 场景证据 | [design/resource-oriented-harness-design.md](design/resource-oriented-harness-design.md)；交付叙述在归档日志 |
 | Phase 0–10、D-296 companion 退役 | 完成 | [archive/roadmap-history.md](archive/roadmap-history.md) |
 
@@ -28,7 +28,7 @@ Last updated: 2026-09-28
 | --- | --- |
 | AI4S 7C–7E 剩余合同 | 远程执行与资源管理部分未交付为产品代码；Slurm/原生集群后端延后 |
 | 阶段 O | O0–O4 未实施 |
-| 阶段 BC | BC0 已接线（Bot profile kernel 记录、`bot:` scope 知识库、bot-root Thread、入口会话重开与删除协调）；BC1 已接线（`memory` 工具、`memory.remember/correct/forget/get` 服务、直写记忆取代逐条审阅默认流程、Bot 记忆目录）；BC2 已接线（`harness.memoryOrganize` 生成调用、`organizer` 进度行、`autoOrganize` 设置与模型槽、事件/会话条目/Run 报告来源、失败重试与重启恢复）；BC3 已接线（工作关联召回钉选、`memory-recall` 目的、bot/session scope 增量交付与纠正更新、discussion 咨询线程、无死锁等待路径）；BC4 已接线（电脑/桌面 kernel 目录、驱动宿主进程与取消/释放输入边界、computer.* 服务与路由、Pi computer 工具 + 持久 REPL、Computers 设置段；Linux 驱动未真机验证、macOS 助手未打包）；实时桌面、远端持久桌面和虚拟机生命周期仍待实施 |
+| 阶段 BC | BC0–BC4 的具体未完成合同与本轮修复见[验收记录](plan/bot-computer-use-acceptance.md)。已接线不等于阶段完成；macOS 驱动和 Wayland portal 属于尚未实现，Linux 原生输入/捕获与安装包能力属于未验证。实时桌面、远端常驻与虚拟机生命周期属于后续 BC5–BC9。 |
 | 平台与真实环境验收 | 打包桌面端的会话重开、目录离线、并发 Agent、跨根草稿完整 Agent 交互纵切；真实代理/fake-IP/远端 CI；macOS/Linux 真机；真实付费模型质量与延迟——均未测，不以源码测试宣称 |
 | HR 已知边界 | 外部根未保存草稿不能安全物化进单根隔离子任务（明确返回不可用而非读旧盘）；语义索引仍可能静默漏外部新文件需重扫，大目录资源成本未测；混合 A 虚拟分支+B 独立编辑器的单补丁需拆两次提交；结果不明的编辑器操作需人工处理，无自动跨提交域回滚或完整桌面重启证明 |
 | 性能数字 | 无测量不写提升倍数或毫秒承诺 |

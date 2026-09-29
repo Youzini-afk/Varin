@@ -77,6 +77,24 @@ is now off-thread, nor does it reduce the cost of one full TriviumDB snapshot to
 
 ## Build and verification
 
+### Bot memory implementation boundary
+
+Bot and session scopes use hashed filename-safe keys through `owner-scope.ts`;
+these identities are not document workspace roots. They share this storage worker,
+not a new database owner. Automatic memory enabled by the user commits effective
+`accepted` rows; claim nature and source still distinguish inference from explicit
+user requirements. Acceptance is not a persistence receipt or an authority level.
+
+New organizer proposals can supply the knowledge revision they observed. The
+single writer checks both committed and pending mutations before inserting them.
+Retired automatic source ranges suppress rephrased retries; explicit remembering
+can intentionally create a new active row. Organizer proposal/progress writes do
+not yet constitute one recoverable batch transaction. Complete source revision
+coverage and producer unification remain in the
+[BC acceptance record](../../../../../docs/plan/bot-computer-use-acceptance.md).
+
+### Runtime build
+
 The production Host TypeScript build emits `store-worker.js` next to its facade.
 The literal worker URL participates in `scripts/host-production-boundary.mjs`'s
 runtime graph. Desktop resolves the physical `app.asar.unpacked` Host entry;

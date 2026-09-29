@@ -535,7 +535,9 @@ def find_element(app, record):
     if not record:
         return None
     node = resolve_path(app, record.get("runtimeId") or [])
-    if node is not None:
+    if node is not None and node_role(node) == record.get("controlType") and (
+        accessible_id(node) == record.get("automationId") if record.get("automationId") else node_name(node) == record.get("name")
+    ):
         return node
 
     _, window = main_window(app)
@@ -543,15 +545,13 @@ def find_element(app, record):
     target_id = str(record.get("automationId") or "")
     target_role = str(record.get("controlType") or "")
     window_bounds = extents(window)
+    matches = []
     for candidate in iter_all(window):
         if target_id and accessible_id(candidate) == target_id:
-            return candidate
-        if target_name and node_name(candidate) == target_name and node_role(candidate) == target_role:
-            return candidate
-        if target_role and node_role(candidate) == target_role:
-            if same_frame(record.get("frame"), relative_frame(candidate, window_bounds)):
-                return candidate
-    return None
+            matches.append(candidate)
+        elif target_name and node_name(candidate) == target_name and node_role(candidate) == target_role:
+            matches.append(candidate)
+    return matches[0] if len(matches) == 1 else None
 
 
 def preferred_action_index(node):
@@ -612,23 +612,23 @@ def send_mouse_click(x, y, button, count):
     down, up = mouse_button_events(button)
     repeat = max(1, int(count or 1))
     for _ in range(repeat):
-        Atspi.generate_mouse_event(int(round(x)), int(round(y)), "abs")
-        Atspi.generate_mouse_event(int(round(x)), int(round(y)), down)
+        emit_mouse(int(round(x)), int(round(y)), "abs")
+        emit_mouse(int(round(x)), int(round(y)), down)
         time.sleep(0.035)
-        Atspi.generate_mouse_event(int(round(x)), int(round(y)), up)
+        emit_mouse(int(round(x)), int(round(y)), up)
         time.sleep(0.05)
 
 
 def send_drag(from_x, from_y, to_x, to_y):
-    Atspi.generate_mouse_event(int(round(from_x)), int(round(from_y)), "abs")
-    Atspi.generate_mouse_event(int(round(from_x)), int(round(from_y)), "b1p")
+    emit_mouse(int(round(from_x)), int(round(from_y)), "abs")
+    emit_mouse(int(round(from_x)), int(round(from_y)), "b1p")
     steps = 12
     for step in range(1, steps + 1):
         x = from_x + ((to_x - from_x) * step / steps)
         y = from_y + ((to_y - from_y) * step / steps)
-        Atspi.generate_mouse_event(int(round(x)), int(round(y)), "abs")
+        emit_mouse(int(round(x)), int(round(y)), "abs")
         time.sleep(0.02)
-    Atspi.generate_mouse_event(int(round(to_x)), int(round(to_y)), "b1r")
+    emit_mouse(int(round(to_x)), int(round(to_y)), "b1r")
 
 
 KEY_ALIASES = {
@@ -686,21 +686,21 @@ def send_key(key):
         if name is None:
             continue
         value = keyval(name)
-        Atspi.generate_keyboard_event(value, None, Atspi.KeySynthType.PRESS)
+        emit_key(value, None, Atspi.KeySynthType.PRESS)
         pressed.append(value)
     normalized = KEY_ALIASES.get(main.lower(), main)
     if len(normalized) == 1:
-        Atspi.generate_keyboard_event(0, normalized, Atspi.KeySynthType.STRING)
+        emit_key(0, normalized, Atspi.KeySynthType.STRING)
     else:
-        Atspi.generate_keyboard_event(
+        emit_key(
             keyval(normalized), None, Atspi.KeySynthType.PRESSRELEASE
         )
     for value in reversed(pressed):
-        Atspi.generate_keyboard_event(value, None, Atspi.KeySynthType.RELEASE)
+        emit_key(value, None, Atspi.KeySynthType.RELEASE)
 
 
 def send_text(text):
-    Atspi.generate_keyboard_event(0, str(text), Atspi.KeySynthType.STRING)
+    emit_key(0, str(text), Atspi.KeySynthType.STRING)
 
 
 def find_editable_text(root):
@@ -713,7 +713,8 @@ def find_editable_text(root):
 
 
 def insert_text(root, text):
-    node = find_editable_text(root)
+    node = find_first(root, lambda candidate: state_contains(candidate, Atspi.StateType.FOCUSED)
+                      and supports_interface(candidate, "EditableText"))
     if node is None:
         return False
     editable = safe(node.get_editable_text_iface)
@@ -781,6 +782,35 @@ def scroll_element(direction, pages):
 
 DRIVER_VERSION = "0.1.0"
 
+held_buttons = set()
+held_keys = set()
+
+
+def emit_mouse(x, y, event):
+    if not Atspi.generate_mouse_event(x, y, event):
+        raise RuntimeError("Desktop did not accept pointer input")
+    if event in ("b1p", "b2p", "b3p"):
+        held_buttons.add(event[:2])
+    elif event in ("b1r", "b2r", "b3r"):
+        held_buttons.discard(event[:2])
+
+
+def emit_key(value, text, kind):
+    if not Atspi.generate_keyboard_event(value, text, kind):
+        raise RuntimeError("Desktop did not accept keyboard input")
+    if kind == Atspi.KeySynthType.PRESS:
+        held_keys.add(value)
+    elif kind == Atspi.KeySynthType.RELEASE:
+        held_keys.discard(value)
+
+
+def focus_window(window):
+    if state_contains(window, Atspi.StateType.ACTIVE):
+        return
+    component = window.get_component_iface()
+    if not component or not component.grab_focus() or not state_contains(window, Atspi.StateType.ACTIVE):
+        raise RuntimeError("Could not activate the requested window for keyboard input")
+
 
 def driver_capabilities():
     displays = []
@@ -805,9 +835,7 @@ def driver_capabilities():
                     )
         except Exception:
             pass
-    wayland = bool(os.environ.get("WAYLAND_DISPLAY")) and not os.environ.get(
-        "DISPLAY"
-    )
+    wayland = os.environ.get("XDG_SESSION_TYPE") == "wayland" or bool(os.environ.get("WAYLAND_DISPLAY"))
     detail = None
     if wayland:
         detail = (
@@ -819,11 +847,11 @@ def driver_capabilities():
         "driver": "linux-atspi",
         "driverVersion": DRIVER_VERSION,
         "observeTree": True,
-        "screenshot": Gdk is not None,
+        "screenshot": Gdk is not None and not wayland,
         "elementAction": True,
-        "coordinateInput": True,
+        "coordinateInput": not wayland,
         "textInput": True,
-        "drag": True,
+        "drag": not wayland,
         "displays": displays,
         "status": "ready",
         "detail": detail,
@@ -831,18 +859,19 @@ def driver_capabilities():
 
 
 def release_input():
-    # Lift every button/modifier a managed batch could have left held; key-up
-    # events are harmless for keys that are not actually down.
-    for button in ("b1r", "b2r", "b3r"):
-        safe(lambda b=button: Atspi.generate_mouse_event(0, 0, b))
-    for name in ("Control_L", "Shift_L", "Alt_L", "Super_L", "Super_R"):
-        value = keyval(name)
-        if value:
-            safe(
-                lambda v=value: Atspi.generate_keyboard_event(
-                    v, None, Atspi.KeySynthType.RELEASE
-                )
-            )
+    failed = 0
+    for button in list(held_buttons):
+        try:
+            emit_mouse(0, 0, button + "r")
+        except Exception:
+            failed += 1
+    for value in list(held_keys):
+        try:
+            emit_key(value, None, Atspi.KeySynthType.RELEASE)
+        except Exception:
+            failed += 1
+    if failed:
+        raise RuntimeError("Desktop did not confirm release of {} managed inputs".format(failed))
 
 
 def perform_operation(operation):
@@ -855,7 +884,10 @@ def perform_operation(operation):
         release_input()
         return {"ok": True}
     if tool == "list_apps":
-        return {"ok": True, "text": list_apps_text()}
+        return {"ok": True, "apps": [
+            {"name": node_name(app), "pid": node_pid(app), "windowTitle": node_name(app_windows(app)[0][1])}
+            for app in iter_apps() if app_windows(app)
+        ]}
     if tool == "get_app_state":
         return {
             "ok": True,
@@ -870,9 +902,13 @@ def perform_operation(operation):
 
     app = resolve_app(operation.get("app", ""))
     _, window = main_window(app)
-    bounds = operation.get("windowBounds") or extents(window)
+    bounds = extents(window)
     element_record = operation.get("element")
     element = find_element(app, element_record)
+    if element_record and element is None:
+        raise RuntimeError("Observed element no longer exists or is ambiguous; observe again")
+    if element is not None:
+        element_record = {**element_record, "frame": relative_frame(element, bounds)}
 
     if tool == "click":
         click_method = (operation.get("click_method") or "auto").lower()
@@ -923,6 +959,7 @@ def perform_operation(operation):
     elif tool == "perform_secondary_action":
         invoke_secondary_action(element, operation.get("action", ""))
     elif tool == "scroll":
+        focus_window(window)
         scroll_element(operation.get("direction", "down"), operation.get("pages", 1))
     elif tool == "drag":
         from_x, from_y = screen_point(
@@ -932,8 +969,10 @@ def perform_operation(operation):
         send_drag(from_x, from_y, to_x, to_y)
     elif tool == "type_text":
         if not insert_text(window, operation.get("text", "")):
+            focus_window(window)
             send_text(operation.get("text", ""))
     elif tool == "press_key":
+        focus_window(window)
         send_key(operation.get("key", ""))
     elif tool == "set_value":
         if element is None:
@@ -944,10 +983,13 @@ def perform_operation(operation):
         raise RuntimeError('unsupportedTool("{}")'.format(tool))
 
     time.sleep(0.12)
-    return {
-        "ok": True,
-        "snapshot": build_snapshot(
-            operation.get("app", ""),
-            screenshot=bool(operation.get("screenshot", True)),
-        ),
-    }
+    try:
+        return {
+            "ok": True,
+            "snapshot": build_snapshot(
+                operation.get("app", ""),
+                screenshot=bool(operation.get("screenshot", True)),
+            ),
+        }
+    except Exception:
+        return {"ok": True, "text": "Input was dispatched; post-action observation failed. Observe again before deciding another action."}

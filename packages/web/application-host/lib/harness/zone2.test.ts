@@ -13,6 +13,22 @@ const emptyMaterial: Zone2Material = {
 };
 
 describe("assembleZone2Content", () => {
+  it("acknowledges a correction with the ordinary memory revision and does not repeat its invalidation", () => {
+    const corrected = { id: 2, scope: "bot" as const, title: "Use the new decision", trigger: "release", nature: "decision" };
+    const material = {
+      ...emptyMaterial, knowledge: [corrected],
+      knowledgeInvalidations: [{ id: 1, scope: "bot" as const }],
+      knowledgeCorrections: [{ ...corrected, supersedes: 1 }],
+    };
+    const first = selectNewZone2Material(material);
+    expect(first.material.knowledge).toEqual([]);
+    const receipts = first.receiptsFor(assembleZone2Content(first.material));
+    expect(receipts["knowledge:bot:2"]).toBeDefined();
+    const second = selectNewZone2Material(material, receipts);
+    expect(assembleZone2Content(second.material)).toBeNull();
+    const recalled = selectNewZone2Material({ ...emptyMaterial, knowledge: [corrected] }, receipts);
+    expect(recalled.material.knowledge).toEqual([]);
+  });
   it("returns null when all sections empty", () => {
     expect(assembleZone2Content(emptyMaterial)).toBeNull();
   });

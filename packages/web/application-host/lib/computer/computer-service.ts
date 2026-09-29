@@ -227,11 +227,12 @@ export interface ComputerService {
     textLimit?: number | "max";
     maxTreeNodes?: number;
     maxTreeDepth?: number;
+    signal?: AbortSignal;
   }): Promise<ComputerObservation>;
-  act(params: { desktopId?: string; action: ComputerAction }): Promise<ComputerActionResult>;
-  cancel(desktopId?: string): Promise<{ cancelled: number }>;
+  act(params: { desktopId?: string; action: ComputerAction; signal?: AbortSignal }): Promise<ComputerActionResult>;
+  cancel(desktopId?: string): Promise<{ cancelled: number; released: boolean }>;
   release(desktopId?: string): Promise<{ released: boolean }>;
-  dispose(): void;
+  dispose(): Promise<void>;
 }
 
 export function createComputerService(options: ComputerServiceOptions): ComputerService {
@@ -240,6 +241,9 @@ export function createComputerService(options: ComputerServiceOptions): Computer
   let scopedClient: Promise<KernelScopedClient> | null = null;
   const drivers = new Map<string, ComputerDriverSession>();
   const lanes = new Map<string, DesktopLane>();
+  let disposed = false;
+  let localReady: Promise<{ machine: ComputerMachine; desktop: ComputerDesktop }> | null = null;
+  let localProbe: Promise<ComputerDesktop> | null = null;
   /** Latest observation per desktop+app — the reference frame for element indexes. */
   const observations = new Map<string, Map<string, ComputerObservation>>();
 
@@ -284,7 +288,7 @@ export function createComputerService(options: ComputerServiceOptions): Computer
     payload: Record<string, unknown>,
   ): Promise<KernelRecordResult> => {
     const client = await scoped();
-    const existing = await client.getRecord(COMPUTER_CATALOG_WORKSPACE_ID, recordId).catch(() => null);
+    const existing = await client.getRecord(COMPUTER_CATALOG_WORKSPACE_ID, recordId);
     return client.putRecord({
       operationId: `${recordType}:${randomUUID()}`,
       workspaceId: COMPUTER_CATALOG_WORKSPACE_ID,
@@ -366,6 +370,8 @@ export function createComputerService(options: ComputerServiceOptions): Computer
   const laneGeneration = (desktopId: string) => laneFor(desktopId).generation;
 
   const driverFor = async (desktopId: string): Promise<{ driver: ComputerDriverSession; desktop: ComputerDesktop }> => {
+    if (disposed) throw new HarnessServiceError("unavailable", "Computer service is closed");
+    await ensureLocal();
     const { desktop } = await desktopRecord(desktopId);
     if (desktop.status === "stopped") {
       throw new HarnessServiceError("unavailable", `Desktop "${desktopId}" is stopped`);
@@ -386,12 +392,18 @@ export function createComputerService(options: ComputerServiceOptions): Computer
     const existing = drivers.get(desktopId);
     if (existing?.alive()) return { driver: existing, desktop };
     existing?.dispose();
+    observations.delete(desktopId);
     const driver = newDriver(spec);
     drivers.set(desktopId, driver);
     return { driver, desktop };
   };
 
   const list: ComputerService["list"] = async () => {
+    await ensureLocal();
+    localProbe ??= probe(LOCAL_DESKTOP_ID);
+    // Probe failures are stored in the catalog and presented as unavailable.
+    // Reading a catalog does not require the user to visit Settings first.
+    await localProbe.catch(() => undefined);
     const [machines, desktops] = await Promise.all([
       listRecords("computer.machine"),
       listRecords("computer.desktop"),
@@ -399,6 +411,7 @@ export function createComputerService(options: ComputerServiceOptions): Computer
     return {
       machines: machines.map(parseMachine).filter((m): m is ComputerMachine => m !== null),
       desktops: desktops.map(parseDesktop).filter((d): d is ComputerDesktop => d !== null),
+      defaultDesktopId: await defaultDesktop(),
     };
   };
 
@@ -408,8 +421,9 @@ export function createComputerService(options: ComputerServiceOptions): Computer
     try {
       const raw = JSON.parse(await readFile(targetFile, "utf8")) as unknown;
       return isObject(raw) && typeof raw.desktopId === "string" && raw.desktopId ? raw.desktopId : null;
-    } catch {
-      return null;
+    } catch (error) {
+      if ((error as NodeJS.ErrnoException).code === "ENOENT") return null;
+      throw error;
     }
   };
   const setDefaultDesktop: ComputerService["setDefaultDesktop"] = async (desktopId) => {
@@ -418,7 +432,7 @@ export function createComputerService(options: ComputerServiceOptions): Computer
       await desktopRecord(desktopId); // never persist a target that doesn't exist
     }
     await mkdir(options.dataDir as string, { recursive: true });
-    const temp = `${targetFile}.${process.pid}.tmp`;
+    const temp = `${targetFile}.${randomUUID()}.tmp`;
     await writeFile(temp, JSON.stringify({ desktopId: desktopId ?? null }), "utf8");
     await rename(temp, targetFile);
   };
@@ -437,7 +451,7 @@ export function createComputerService(options: ComputerServiceOptions): Computer
     throw new HarnessServiceError("invalid-params", "Multiple desktops are available; pass desktopId");
   };
 
-  const ensureLocal: ComputerService["ensureLocal"] = async () => {
+  const initializeLocal = async () => {
     const now = new Date().toISOString();
     const driverAvailable = localDriverSpawnSpec(platform, options.driverDir ?? computerDriverDir()) !== null;
     await putRecord(`computer.machine:${LOCAL_MACHINE_ID}`, "computer.machine", "active", {
@@ -448,9 +462,9 @@ export function createComputerService(options: ComputerServiceOptions): Computer
       platform,
       createdAt: now,
     });
-    const desktopState = driverAvailable ? "available" : "unavailable";
+    const desktopState = "unavailable";
     const detail = driverAvailable
-      ? undefined
+      ? "Desktop capabilities have not been probed in this Host process."
       : platform === "macos"
         ? "The macOS driver helper is not packaged yet; this desktop reports its real state instead of pretending to be operable."
         : "No platform driver found for this machine.";
@@ -465,6 +479,15 @@ export function createComputerService(options: ComputerServiceOptions): Computer
     const machine = machineRecord ? parseMachine(machineRecord) : null;
     if (!machine) throw new HarnessServiceError("failed", "Local machine record could not be read back");
     return { machine, desktop: parseDesktop(desktopResult)! };
+  };
+  const ensureLocal: ComputerService["ensureLocal"] = () => {
+    if (disposed) return Promise.reject(new HarnessServiceError("unavailable", "Computer service is closed"));
+    if (!localReady) {
+      const loading = initializeLocal();
+      localReady = loading;
+      void loading.catch(() => { if (localReady === loading) localReady = null; });
+    }
+    return localReady;
   };
 
   const probe: ComputerService["probe"] = async (desktopId) => {
@@ -518,15 +541,13 @@ export function createComputerService(options: ComputerServiceOptions): Computer
   };
 
   const rememberObservation = (observation: ComputerObservation) => {
-    const key = observation.app.name.toLowerCase();
     const map = observations.get(observation.desktopId) ?? new Map<string, ComputerObservation>();
-    map.set(key, observation);
+    for (const [key, previous] of map) {
+      if (previous.app.pid === observation.app.pid) map.delete(key);
+    }
+    map.set(observation.id, observation);
     observations.set(observation.desktopId, map);
   };
-
-  const latestObservation = (desktopId: string, app: string): ComputerObservation | null => (
-    observations.get(desktopId)?.get(app.toLowerCase()) ?? null
-  );
 
   const elementRecordFor = (observation: ComputerObservation, index: number): Record<string, unknown> => {
     const element = observation.elements.find((entry) => entry.index === index);
@@ -540,22 +561,25 @@ export function createComputerService(options: ComputerServiceOptions): Computer
   };
 
   const observe: ComputerService["observe"] = async (params) => {
+    params.signal?.throwIfAborted();
     const id = await resolveDesktopId(params.desktopId);
-    const { driver, desktop } = await driverFor(id);
-    const response = await enqueue(id, "observe", () => driver.request({
-      tool: "get_app_state",
-      app: params.app,
-      screenshot: params.includeScreenshot !== false,
-      ...(params.textLimit !== undefined ? { text_limit: params.textLimit } : {}),
-      ...(params.maxTreeNodes !== undefined ? { max_tree_nodes: params.maxTreeNodes } : {}),
-      ...(params.maxTreeDepth !== undefined ? { max_tree_depth: params.maxTreeDepth } : {}),
-    }));
-    if (!response.ok || !response.snapshot) {
-      throw new HarnessServiceError("unavailable", response.error ?? "Observe failed");
-    }
-    const observation = observationOf(response.snapshot, desktop);
-    rememberObservation(observation);
-    return observation;
+    return enqueue(id, "observe", async () => {
+      params.signal?.throwIfAborted();
+      const { driver, desktop } = await driverFor(id);
+      const response = await driver.request({
+        tool: "get_app_state",
+        app: params.app,
+        screenshot: params.includeScreenshot !== false,
+        ...(params.textLimit !== undefined ? { text_limit: params.textLimit } : {}),
+        ...(params.maxTreeNodes !== undefined ? { max_tree_nodes: params.maxTreeNodes } : {}),
+        ...(params.maxTreeDepth !== undefined ? { max_tree_depth: params.maxTreeDepth } : {}),
+      });
+      params.signal?.throwIfAborted();
+      if (!response.ok || !response.snapshot) throw new HarnessServiceError("unavailable", response.error ?? "Observe failed");
+      const observation = observationOf(response.snapshot, desktop);
+      rememberObservation(observation);
+      return observation;
+    });
   };
 
   /**
@@ -563,30 +587,30 @@ export function createComputerService(options: ComputerServiceOptions): Computer
    * for that app — indexes and frames from a stale read would click blind.
    */
   const assertObservationFresh = (desktopId: string, action: ComputerAction) => {
-    if (action.elementIndex === undefined) return;
-    const latest = latestObservation(desktopId, action.app);
-    if (!latest) {
+    const requiresObservation = action.elementIndex !== undefined || action.x !== undefined || action.kind === "drag";
+    if (!requiresObservation && !action.observationId) return undefined;
+    const observation = action.observationId ? observations.get(desktopId)?.get(action.observationId) : undefined;
+    if (!observation) {
       throw new HarnessServiceError(
         "invalid-params",
-        `No observation of "${action.app}" on desktop "${desktopId}" — observe the app before element actions`,
+        "Pass a current observationId from this desktop before using element indexes or window-relative coordinates",
       );
     }
-    if (action.observationId && action.observationId !== latest.id) {
-      throw new HarnessServiceError(
-        "invalid-params",
-        `Observation ${action.observationId} is stale for "${action.app}" (current: ${latest.id}); observe again`,
-      );
+    if (![observation.app.name.toLowerCase(), String(observation.app.pid), observation.app.windowTitle?.toLowerCase(), observation.windowTitle?.toLowerCase()]
+      .some((selector) => selector === action.app.toLowerCase())) {
+      throw new HarnessServiceError("invalid-params", "Action app does not match its observation target; use the observed PID");
     }
+    return observation;
   };
 
   const toDriverOp = (desktopId: string, action: ComputerAction): Record<string, unknown> => {
-    const latest = latestObservation(desktopId, action.app);
+    const latest = assertObservationFresh(desktopId, action);
     const windowBounds = latest?.windowBounds;
     const element = action.elementIndex !== undefined && latest
       ? elementRecordFor(latest, action.elementIndex)
       : undefined;
     const base = {
-      app: action.app,
+      app: latest ? String(latest.app.pid) : action.app,
       ...(element ? { element } : {}),
       ...(windowBounds ? { windowBounds } : {}),
     };
@@ -608,7 +632,10 @@ export function createComputerService(options: ComputerServiceOptions): Computer
           ...base,
           tool: "scroll" as const,
           direction: action.direction ?? "down",
-          ...(action.pages !== undefined ? { pages: action.pages } : {}),
+          pages: action.pages ?? 1,
+          input: action.clickMethod === "global" ? "global" : "auto",
+          ...(action.x !== undefined ? { x: action.x } : {}),
+          ...(action.y !== undefined ? { y: action.y } : {}),
         };
       case "drag":
         return {
@@ -679,20 +706,28 @@ export function createComputerService(options: ComputerServiceOptions): Computer
   };
 
   const act: ComputerService["act"] = async (params) => {
+    params.signal?.throwIfAborted();
+    const action = structuredClone(params.action);
     const id = await resolveDesktopId(params.desktopId);
-    validateAction(params.action);
-    assertObservationFresh(id, params.action);
+    validateAction(action);
     // Stamp the caller-side generation before any further await: a cancel
     // issued while this call resolves its driver still drops the action.
     const generation = laneGeneration(id);
-    const { driver, desktop } = await driverFor(id);
-    const op = toDriverOp(id, params.action);
+    let submitted = false;
     try {
-      const response = await enqueue(id, "action", () => driver.request(op as Omit<typeof op & { id: string }, "id">), generation);
+      const { response, desktop } = await enqueue(id, "action", async () => {
+        params.signal?.throwIfAborted();
+        const { driver, desktop } = await driverFor(id);
+        params.signal?.throwIfAborted();
+        const op = toDriverOp(id, action);
+        submitted = true;
+        const response = await driver.request(op as Omit<typeof op & { id: string }, "id">);
+        return { response, desktop };
+      }, generation);
       if (!response.ok) {
         throw new HarnessServiceError("failed", response.error ?? `Action ${params.action.kind} failed`);
       }
-      const result: ComputerActionResult = { accepted: true };
+      const result: ComputerActionResult = { accepted: true, ...(response.text ? { detail: response.text } : {}) };
       if (laneGeneration(id) !== generation) result.cancelled = true;
       if (response.snapshot) {
         const observation = observationOf(response.snapshot, desktop);
@@ -703,6 +738,10 @@ export function createComputerService(options: ComputerServiceOptions): Computer
     } catch (error) {
       if (error instanceof CancelledActionError) {
         return { accepted: false, cancelled: true };
+      }
+      if (submitted) {
+        observations.delete(id);
+        return { accepted: false, outcome: "unknown", detail: error instanceof Error ? error.message : String(error) };
       }
       throw error;
     }
@@ -719,13 +758,14 @@ export function createComputerService(options: ComputerServiceOptions): Computer
     lane.queue = lane.queue.filter((entry) => entry.kind !== "action");
     for (const entry of dropped) entry.cancel();
     const driver = drivers.get(id);
+    let released = driver === undefined;
     if (driver?.alive()) {
-      // Fire-and-forget: the driver serializes ops, so release_input lands
-      // after the in-flight burst anyway — awaiting it here would make a
-      // wedged action block the cancel response itself.
-      void enqueue(id, "observe", () => driver.request({ tool: "release_input" })).catch(() => undefined);
+      const response = await enqueue(id, "observe", () => driver.request({ tool: "release_input" }));
+      if (!response.ok) throw new HarnessServiceError("failed", response.error ?? "Input release failed");
+      released = true;
     }
-    return { cancelled: dropped.length };
+    observations.delete(id);
+    return { cancelled: dropped.length, released };
   };
 
   const release: ComputerService["release"] = async (desktopId) => {
@@ -746,7 +786,17 @@ export function createComputerService(options: ComputerServiceOptions): Computer
     release,
     defaultDesktop,
     setDefaultDesktop,
-    dispose: () => {
+    dispose: async () => {
+      if (disposed) return;
+      disposed = true;
+      for (const lane of lanes.values()) {
+        lane.generation += 1;
+        for (const entry of lane.queue.splice(0)) entry.cancel();
+      }
+      await Promise.allSettled([...drivers.values()].map(async (driver) => {
+        try { if (driver.alive()) await driver.request({ tool: "release_input" }); }
+        finally { driver.dispose(); }
+      }));
       for (const driver of drivers.values()) driver.dispose();
       drivers.clear();
       lanes.clear();

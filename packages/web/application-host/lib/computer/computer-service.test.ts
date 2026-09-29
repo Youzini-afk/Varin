@@ -202,6 +202,15 @@ describe("computer service (BC4)", () => {
     })).rejects.toMatchObject({ harnessCode: "invalid-params" });
   });
 
+  it("reports a lost action response as unknown and does not replay the input", async () => {
+    const driver = makeDriver(async () => { throw new Error("driver connection lost"); });
+    const { service } = makeService(driver);
+    await service.ensureLocal();
+    const result = await service.act({ desktopId: "local-console", action: { kind: "type", app: "x", text: "hello" } });
+    expect(result).toMatchObject({ accepted: false, outcome: "unknown" });
+    expect(driver.calls.filter((op) => op.tool === "type_text")).toHaveLength(1);
+  });
+
   it("cancel drops queued actions and releases held input after the in-flight op", async () => {
     let releaseResolve: (r: DriverResponse) => void = () => undefined;
     const order: string[] = [];
@@ -218,10 +227,12 @@ describe("computer service (BC4)", () => {
     const queued = service.act({ desktopId: "local-console", action: { kind: "key", app: "x", key: "enter" } });
     // Let the second act finish its driver resolution and land on the lane.
     await new Promise((resolve) => setTimeout(resolve, 0));
-    const cancelled = await service.cancel("local-console");
-    expect(cancelled.cancelled).toBe(1);
+    let cancelFinished = false;
+    const cancellation = service.cancel("local-console").then((result) => { cancelFinished = true; return result; });
     expect(await queued).toMatchObject({ accepted: false, cancelled: true });
+    expect(cancelFinished).toBe(false);
     releaseResolve(okResponse());
+    expect((await cancellation).cancelled).toBe(1);
     const slowResult = await slow;
     expect(slowResult.cancelled).toBe(true);
     // release_input is issued on the lane so interrupted input cannot linger.
@@ -255,7 +266,7 @@ describe("computer service (BC4)", () => {
     const driver = makeDriver(async (op) =>
       op.tool === "get_app_state" ? okResponse({ snapshot: appSnapshot() }) : okResponse());
     const { service } = makeService(driver);
-    await service.ensureLocal();
+    expect((await service.list()).desktops.map((desktop) => desktop.id)).toEqual(["local-console"]);
     const observation = await service.observe({ app: "notepad" });
     expect(observation.desktopId).toBe("local-console");
     expect(observation.elements).toHaveLength(2);
