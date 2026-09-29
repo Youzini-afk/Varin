@@ -4,6 +4,7 @@ import { Button } from '@/components/ui/button';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { useI18n } from '@/lib/i18n';
 import { listComputers, probeComputerDesktop, setDefaultComputerTarget, type ComputerCatalog } from '@/lib/computers';
+import { ComputerDesktopView } from '@/components/sections/computers/ComputerDesktopView';
 import type { ComputerDesktop } from '@varin/protocol';
 
 /**
@@ -17,6 +18,7 @@ export function ComputerSettings() {
   const [error, setError] = React.useState<string | null>(null);
   const [probing, setProbing] = React.useState<string | null>(null);
   const [saving, setSaving] = React.useState(false);
+  const [viewing, setViewing] = React.useState<ComputerDesktop | null>(null);
 
   const refresh = React.useCallback(async () => {
     try {
@@ -116,6 +118,10 @@ export function ComputerSettings() {
                   onClick={() => { void probe(desktop.id); }}>
                   {probing === desktop.id ? t('settings.computers.probing') : t('settings.computers.probe')}
                 </Button>
+                <Button variant="outline" size="sm" disabled={desktop.status !== 'available'}
+                  onClick={() => setViewing(desktop)}>
+                  {t('settings.computers.view.open')}
+                </Button>
               </div>
             </div>
             {desktop.statusDetail ? <p className="typography-meta text-muted-foreground">{desktop.statusDetail}</p> : null}
@@ -125,6 +131,9 @@ export function ComputerSettings() {
           </div>;
         })}
       </SettingsSection>
+      {viewing ? (
+        <ComputerDesktopView desktop={viewing} open={viewing !== null} onOpenChange={(open) => { if (!open) setViewing(null); }} />
+      ) : null}
     </> : null}
   </>;
 }

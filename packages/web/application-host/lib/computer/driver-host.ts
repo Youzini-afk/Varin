@@ -36,7 +36,11 @@ export interface DriverRequest {
     | "type_text"
     | "press_key"
     | "set_value"
-    | "release_input";
+    | "release_input"
+    /** Whole-desktop frame capture for view subscribers (BC5.B). */
+    | "capture_frame"
+    /** Absolute-coordinate human input through the control lane (BC5.C). */
+    | "inject_input";
   [key: string]: unknown;
 }
 
@@ -55,6 +59,13 @@ export interface DriverResponse {
   }>;
   snapshot?: Record<string, unknown>;
   capabilities?: Record<string, unknown>;
+  /** Whole-desktop frame returned by `capture_frame` (BC5.B). */
+  frame?: {
+    mime?: string;
+    base64?: string;
+    bounds?: Record<string, unknown>;
+    capturedAt?: string;
+  };
 }
 
 export interface DriverSpawnSpec {

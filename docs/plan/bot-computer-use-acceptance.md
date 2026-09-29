@@ -11,8 +11,11 @@ the original focused tests did not establish the complete product contract.
 
 This review follows the actual Bot entry, durable owner, memory writer,
 organizer, recall/context, computer tool, driver queue, and platform input paths.
-It repairs concrete defects in those paths. It does not implement BC5–BC9, and
-does not treat missing BC0–BC4 features as merely untested platforms.
+It repairs concrete defects in those paths. BC5 (server-side control
+ownership, real desktop frame stream, takeover/handback) is implemented in
+the Host service and drivers — see its section below. It does not implement
+BC6–BC9 (remote hosts, VMs, product integration, packaging), and does not
+treat missing BC0–BC4 features as merely untested platforms.
 
 ## BC0–BC2 follow-up review (2026-09-29)
 
@@ -305,6 +308,67 @@ Remaining honest limits:
 - Packaging/driver assets in the installed distribution still belong to BC9;
   this review cannot describe an installed BC4 feature as verified.
 
+### BC5: server-side control ownership and a real desktop frame stream — implemented
+
+The shared desktop view now exists inside the existing Computer Use service,
+not as a separate demo path:
+
+- **Control ownership lives on the desktop lane** (`computer-service.ts`):
+  every lane carries `{ owner: "agent" | "human", holderId?, reachable, since }`.
+  `takeover` reuses the cancel interlock — it bumps the lane generation (so
+  queued automation and any stale script batch can never run), calls the
+  driver's checkpoint-cancel side-channel, serializes `release_input` behind
+  the in-flight op, deletes the desktop's observations, and only then marks
+  `owner: "human"`. `handback` verifies the holder, releases input again,
+  flips `owner` back to `agent`, and invalidates observations so the next
+  automated step re-reads the scene the human left behind (`requiresObservation`).
+- **`act` is forbidden while a human owns the desktop** — the rejection is a
+  Host-level `forbidden` error, so a script that resumes mid-takeover fails
+  instead of typing into a user's session. The same check re-runs at
+  execution time for human input queued in the lane.
+- **Human input goes through the same lane** as `inject_input`: absolute
+  screen coordinates, no app/window binding, rejected (`forbidden`) unless a
+  subscribed viewer holds control, and re-validated at execution so a queued
+  input cannot fire after a handback.
+- **Viewer disconnect ≠ handback**: when the holder's stream closes, control
+  stays `human` with `reachable: false` — a recoverable pending owner. Input
+  attributed to a disconnected holder is rejected; reconnecting with the same
+  viewer id restores reachability. A different viewer can still force a new
+  `takeover`.
+- **Frame service** (`subscribeFrames`): the Host polls the driver's new
+  `capture_frame` op at ~4 fps while at least one viewer is attached —
+  frames never travel on agent observation calls. Multiple viewers each get
+  the same frame stream; the last unsubscribe stops polling and never cancels
+  work. Capture failures surface as `error` events, not fake black frames.
+- **Transport**: `GET /api/computers/desktops/:id/stream?viewer=<id>` is a
+  dedicated SSE channel carrying `{type:"frame"|"control"|"error"}` — big
+  image payloads stay off the global event bus. `GET/POST control`,
+  `takeover`, `handback`, `input` complete the control plane; `forbidden`
+  maps to HTTP 409.
+- **Drivers**: all three drivers grew `capture_frame` (Windows: full virtual
+  screen union → JPEG via `CopyFromScreen`; Linux: X11 root-window pixbuf or
+  the Wayland portal for a whole-screen image; macOS: `CGWindowListCreateImage`
+  over `kCGNullWindowID`) and `inject_input` (absolute-coordinate
+  SendInput / AT-SPI `generate_mouse_event`+`generate_keyboard_event` /
+  CGEvent). Windows is smoke-verified (2560×1440 JPEG frame, `inject_input`
+  move, `release_input`); Linux/macOS remain syntax-verified only.
+- **Workbench surface**: the Computers settings page gained a Watch button
+  opening `ComputerDesktopView` — an `<img>` fed by the SSE stream, control
+  status line, takeover/handback buttons, and click/key/wheel forwarding that
+  maps image coordinates to desktop pixels. Closing the dialog unsubscribes
+  only.
+
+Honest limits that remain:
+
+- Frames share the serialized driver lane — a long automation op pauses the
+  viewer's frame cadence for its duration (input still lands correctly).
+- `inject_input` supports click/down/up/move/scroll/key/text; drag-as-human
+  composes from move+down/up like a real user would.
+- The view is reachable from Computers settings today; embedding the same
+  component as a first-class Workbench tab surface belongs to BC8.
+- Linux Xvnc/noVNC transport for *independent* remote desktops is BC6's lane;
+  this Host-driven poll is the shared contract for local desktops now.
+
 ## Verification boundary
 
 Focused checks cover the changed Host services, storage-backed memory behavior,
@@ -317,14 +381,23 @@ coverage, not proof of the missing product paths listed above.
 
 Windows gained real-machine evidence beyond parsing: the resident driver's
 `list_apps` enumerated 62 processes with per-window hwnd inventories (53
-multi-window), `observe` bound an explicit hwnd selector, and a planted cancel
-flag aborted an operation checkpoint with progress detail. No input was
+multi-window), `observe` bound an explicit hwnd selector, a planted cancel
+flag aborted an operation checkpoint with progress detail, and the BC5 ops
+`capture_frame` (2560×1440 JPEG full-screen frame) and `inject_input`
+(pointer move) completed through the live resident driver. No input was
 injected into the user's working desktop. Linux scripts were compiled with
 Python but never ran on a Linux desktop; the Wayland portal path is
 source-verified only. macOS JXA was `node --check` parsed but never executed
 under osascript. Actual model quality/cache hits, remote machines, VMs,
 installed packages, and end-to-end Bot task continuity are not established by
 these checks.
+
+BC5 focused coverage: 39 computer-suite tests pass, including takeover
+dropping queued actions, mid-flight ops reporting cancelled across the
+generation bump, human input gated by ownership and holder identity,
+disconnect marking the holder pending-recovery (reachable=false) without
+handing back, reconnect restoring it, and independent multi-viewer frame
+subscriptions that stop when the last viewer leaves.
 
 Windows target/input handling follows the official contracts for
 [SetForegroundWindow](https://learn.microsoft.com/en-us/windows/win32/api/winuser/nf-winuser-setforegroundwindow)

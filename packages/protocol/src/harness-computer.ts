@@ -260,3 +260,112 @@ export interface ComputerReleaseParams {
 export interface ComputerReleaseResult {
   released: boolean;
 }
+
+// ---------------------------------------------------------------------------
+// BC5 — shared desktop view + control ownership
+// ---------------------------------------------------------------------------
+
+/**
+ * Who may emit input on a desktop. `agent` = the serialized automation lane;
+ * `human` = a viewer that took over through `computer.takeover`.
+ */
+export type ComputerControlOwner = "agent" | "human";
+
+/**
+ * Server-side control record for one desktop (BC5). Ownership is independent
+ * of viewer connections: when the holder's view channel drops, the record
+ * stays `human` with `reachable=false` — a recoverable pending owner, not an
+ * automatic handback — until the same viewer reconnects or a takeover
+ * transfers control again.
+ */
+export interface ComputerControlState {
+  desktopId: string;
+  owner: ComputerControlOwner;
+  /** Viewer id holding human control; absent while the agent owns it. */
+  holderId?: string;
+  /** False when the holder's view channel is lost — control stays reserved. */
+  reachable: boolean;
+  /** ISO time of the last ownership transition. */
+  since: string;
+}
+
+/**
+ * One piece of human input routed through the same desktop lane (BC5.C).
+ * Coordinates are absolute desktop pixels; ownership is validated by the
+ * Host — a viewer cannot write while `owner` is `agent`.
+ */
+export interface ComputerHumanInput {
+  kind: "click" | "down" | "up" | "move" | "scroll" | "key" | "text";
+  x?: number;
+  y?: number;
+  button?: "left" | "right" | "middle";
+  count?: number;
+  direction?: "up" | "down" | "left" | "right";
+  pages?: number;
+  key?: string;
+  text?: string;
+}
+
+/** One captured desktop frame for view subscribers (BC5.B). */
+export interface ComputerDesktopFrame {
+  mime: "image/png" | "image/jpeg";
+  base64: string;
+  /** Physical pixel bounds the frame covers. */
+  bounds: ComputerFrame;
+  capturedAt: string;
+}
+
+export interface ComputerControlParams {
+  desktopId?: string;
+}
+
+export interface ComputerControlResult {
+  control: ComputerControlState;
+}
+
+export interface ComputerTakeoverParams {
+  desktopId?: string;
+  /** Viewer identity that will hold human control. */
+  holderId?: string;
+}
+
+export interface ComputerTakeoverResult {
+  control: ComputerControlState;
+  /** Queued automated actions dropped by the takeover. */
+  cancelled: number;
+  /** False when the driver could not confirm held input was released. */
+  released: boolean;
+}
+
+export interface ComputerHandbackParams {
+  desktopId?: string;
+  /** Must match the current holder when one was recorded. */
+  holderId?: string;
+}
+
+export interface ComputerHandbackResult {
+  control: ComputerControlState;
+  /** Fresh observation state is required — stale indexes were invalidated. */
+  requiresObservation: true;
+}
+
+export interface ComputerInputParams {
+  desktopId?: string;
+  holderId?: string;
+  input: ComputerHumanInput;
+}
+
+export interface ComputerInputResult {
+  accepted: boolean;
+  detail?: string;
+}
+
+export interface ComputerCaptureFrameParams {
+  desktopId?: string;
+  /** JPEG quality hint for drivers that encode lossy frames. */
+  quality?: number;
+}
+
+export interface ComputerCaptureFrameResult {
+  frame: ComputerDesktopFrame;
+}

@@ -520,6 +520,74 @@ function releaseInput() {
 }
 
 // ---------------------------------------------------------------------------
+// Viewer frame + human input (BC5) — whole-screen CGWindowList capture and
+// raw CGEvent posting at absolute screen coordinates. Ownership checks are
+// the Host's job; the driver only emits input. UNVERIFIED like the rest.
+// ---------------------------------------------------------------------------
+
+function captureDesktopFrame() {
+    try {
+        var image = $.CGWindowListCreateImage(
+            $.CGRectNull,
+            $.kCGWindowListOptionOnScreenOnly,
+            $.kCGNullWindowID,
+            $.kCGWindowImageDefault
+        );
+        if (!image) return null;
+        var rep = $.NSBitmapImageRep.alloc.initWithCGImage(image);
+        var data = rep.representationUsingTypeProperties($.NSBitmapImageFileTypePNG, $());
+        if (!data) return null;
+        return {
+            mime: "image/png",
+            base64: ObjC.unwrap(data.base64EncodedStringWithOptions(0)),
+            bounds: {
+                x: 0, y: 0,
+                width: $.CGImageGetWidth(image),
+                height: $.CGImageGetHeight(image),
+            },
+            capturedAt: (new Date()).toISOString(),
+        };
+    } catch (e) {
+        return null;
+    }
+}
+
+function injectHumanInput(operation) {
+    var kind = String(operation.kind || "");
+    var x = Number(operation.x) || 0;
+    var y = Number(operation.y) || 0;
+    var button = String(operation.button || "left");
+    var types = MOUSE_TYPES[button] || MOUSE_TYPES.left;
+    switch (kind) {
+        case "click":
+            sendMouseClick(x, y, button, operation.count || 1);
+            break;
+        case "down":
+            postMouse(types.down, x, y, types.button);
+            heldButtons[types.button] = true;
+            break;
+        case "up":
+            postMouse(types.up, x, y, types.button);
+            delete heldButtons[types.button];
+            break;
+        case "move":
+            postMouse($.kCGEventMouseMoved, x, y, $.kCGMouseButtonLeft);
+            break;
+        case "scroll":
+            sendScroll(x, y, String(operation.direction || "down"), operation.pages || 1);
+            break;
+        case "key":
+            sendKey(String(operation.key || ""));
+            break;
+        case "text":
+            sendText(String(operation.text || ""));
+            break;
+        default:
+            throw new Error('unsupportedHumanInput("' + kind + '")');
+    }
+}
+
+// ---------------------------------------------------------------------------
 // Element resolution — records carry a `path` of child indexes so an action
 // can re-resolve the same node in a fresh AX walk (indexes are not stable
 // across observations on every app, so mismatches fail closed).
@@ -674,6 +742,15 @@ function performOperation(operation) {
     if (tool === "ping") return { ok: true };
     if (tool === "capabilities") return { ok: true, capabilities: driverCapabilities() };
     if (tool === "release_input") { releaseInput(); return { ok: true }; }
+    if (tool === "capture_frame") {
+        var frame = captureDesktopFrame();
+        if (!frame) return { ok: false, error: "desktop capture produced no frame" };
+        return { ok: true, frame: frame };
+    }
+    if (tool === "inject_input") {
+        injectHumanInput(operation);
+        return { ok: true };
+    }
     if (tool === "list_apps") {
         var byPid = windowsByPid();
         var apps = [];

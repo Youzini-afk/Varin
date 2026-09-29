@@ -385,3 +385,136 @@ describe("computer service (BC4)", () => {
     expect(observation.elements).toHaveLength(2);
   });
 });
+
+describe("computer service (BC5 control + view)", () => {
+  const desktopId = "local-console";
+
+  it("defaults to agent control and exposes the control record", async () => {
+    const { service } = makeService();
+    await service.ensureLocal();
+    const control = await service.control(desktopId);
+    expect(control).toMatchObject({ desktopId, owner: "agent", reachable: true });
+  });
+
+  it("takeover drops queued actions, releases input, and blocks new automation", async () => {
+    let releaseResolve: (r: DriverResponse) => void = () => undefined;
+    let cancelled = false;
+    const order: string[] = [];
+    const driver = makeDriver(async (op) => {
+      order.push(op.tool as string);
+      if (op.tool === "type_text") {
+        return new Promise<DriverResponse>((resolve) => { releaseResolve = resolve; });
+      }
+      return okResponse();
+    });
+    const { service } = makeService(driver);
+    await service.ensureLocal();
+    const slow = service.act({ desktopId, action: { kind: "type", app: "x", text: "hello" } });
+    const queued = service.act({ desktopId, action: { kind: "key", app: "x", key: "enter" } });
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    // The takeover's release_input serializes behind the in-flight type op —
+    // resolve the takeover only after letting the slow op finish.
+    const takeoverPromise = service.takeover({ desktopId, holderId: "viewer-1" });
+    expect((await queued).cancelled).toBe(true);
+    releaseResolve(okResponse());
+    const takeover = await takeoverPromise;
+    expect(takeover.control.owner).toBe("human");
+    expect(takeover.control.holderId).toBe("viewer-1");
+    expect(takeover.cancelled).toBe(1);
+    expect((await queued).cancelled).toBe(true);
+    const slowResult = await slow;
+    // The in-flight op settled after the takeover — stamped with the old
+    // generation it reports cancelled rather than resuming under human control.
+    expect(slowResult.cancelled).toBe(true);
+    cancelled = true;
+    await expect(service.act({ desktopId, action: { kind: "key", app: "x", key: "enter" } }))
+      .rejects.toMatchObject({ harnessCode: "forbidden" });
+    expect(order.lastIndexOf("release_input")).toBeGreaterThan(-1);
+    expect(cancelled).toBe(true);
+  });
+
+  it("human input passes only while the viewer holds control", async () => {
+    const driver = makeDriver(async () => okResponse());
+    const { service } = makeService(driver);
+    await service.ensureLocal();
+    await expect(service.input({ desktopId, holderId: "v1", input: { kind: "click", x: 5, y: 6 } }))
+      .rejects.toMatchObject({ harnessCode: "forbidden" });
+    await service.takeover({ desktopId, holderId: "v1" });
+    const result = await service.input({ desktopId, holderId: "v1", input: { kind: "click", x: 5, y: 6 } });
+    expect(result.accepted).toBe(true);
+    const injected = driver.calls.find((call) => call.tool === "inject_input");
+    expect(injected).toMatchObject({ kind: "click", x: 5, y: 6 });
+    // Another viewer may not write while v1 holds.
+    await expect(service.input({ desktopId, holderId: "v2", input: { kind: "key", key: "enter" } }))
+      .rejects.toMatchObject({ harnessCode: "forbidden" });
+  });
+
+  it("handback returns control to the agent and invalidates stale observations", async () => {
+    const driver = makeDriver(async (op) =>
+      op.tool === "get_app_state" ? okResponse({ snapshot: appSnapshot() }) : okResponse());
+    const { service } = makeService(driver);
+    await service.ensureLocal();
+    const observation = await service.observe({ desktopId, app: "notepad" });
+    await service.takeover({ desktopId, holderId: "v1" });
+    const back = await service.handback({ desktopId, holderId: "v1" });
+    expect(back.control.owner).toBe("agent");
+    expect(back.requiresObservation).toBe(true);
+    // The pre-takeover observation is dead — indexes from it must not fire.
+    await expect(service.act({
+      desktopId,
+      action: { kind: "click", app: "notepad", observationId: observation.id, elementIndex: 1 },
+    })).rejects.toMatchObject({ harnessCode: "invalid-params" });
+    await service.observe({ desktopId, app: "notepad" });
+    const result = await service.act({ desktopId, action: { kind: "key", app: "notepad", key: "enter" } });
+    expect(result.accepted).toBe(true);
+  });
+
+  it("holder disconnect keeps control human-owned and unreachable until reconnect", async () => {
+    const driver = makeDriver(async (op) =>
+      op.tool === "capture_frame"
+        ? okResponse({ frame: { mime: "image/png", base64: "AA==", bounds: { x: 0, y: 0, width: 8, height: 8 } } })
+        : okResponse());
+    const { service } = makeService(driver);
+    await service.ensureLocal();
+    const events: string[] = [];
+    const unsubscribe = await service.subscribeFrames(desktopId, "v1", (event) => events.push(event.type));
+    await service.takeover({ desktopId, holderId: "v1" });
+    unsubscribe();
+    let control = await service.control(desktopId);
+    // Viewer closed — control stays human-owned but pending recovery.
+    expect(control).toMatchObject({ owner: "human", holderId: "v1", reachable: false });
+    await expect(service.input({ desktopId, holderId: "v1", input: { kind: "key", key: "enter" } }))
+      .rejects.toMatchObject({ harnessCode: "forbidden" });
+    // Reconnect with the same viewer id restores reachability — not ownership.
+    await service.subscribeFrames(desktopId, "v1", () => undefined);
+    control = await service.control(desktopId);
+    expect(control.reachable).toBe(true);
+    expect(events).toContain("control");
+  });
+
+  it("frame subscribers get frames without touching the action lane", async () => {
+    const driver = makeDriver(async (op) =>
+      op.tool === "capture_frame"
+        ? okResponse({ frame: { mime: "image/jpeg", base64: "QUJD", bounds: { x: 0, y: 0, width: 64, height: 48 }, capturedAt: "t0" } })
+        : okResponse());
+    const { service } = makeService(driver);
+    await service.ensureLocal();
+    const seenA: string[] = [];
+    const seenB: string[] = [];
+    const unsubA = await service.subscribeFrames(desktopId, "a", (e) => { if (e.type === "frame") seenA.push(e.frame.mime); });
+    const unsubB = await service.subscribeFrames(desktopId, "b", (e) => { if (e.type === "frame") seenB.push(e.frame.mime); });
+    await new Promise((resolve) => setTimeout(resolve, 600));
+    unsubA();
+    expect(seenA.length).toBeGreaterThan(0);
+    expect(seenB.length).toBeGreaterThan(0);
+    expect(seenA[0]).toBe("image/jpeg");
+    // One viewer leaving keeps the other subscribed and the task untouched.
+    await new Promise((resolve) => setTimeout(resolve, 300));
+    const after = seenB.length;
+    unsubB();
+    await new Promise((resolve) => setTimeout(resolve, 300));
+    expect(seenB.length).toBe(after); // no frames after the last unsubscribe
+    const frames = driver.calls.filter((call) => call.tool === "capture_frame").length;
+    expect(frames).toBeGreaterThan(0);
+  });
+});

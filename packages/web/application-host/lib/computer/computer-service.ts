@@ -16,8 +16,12 @@ import type {
   ComputerActionResult,
   ComputerAppDescriptor,
   ComputerCapabilities,
+  ComputerControlState,
   ComputerDesktop,
+  ComputerDesktopFrame,
   ComputerElement,
+  ComputerHumanInput,
+  ComputerInputResult,
   ComputerListResult,
   ComputerMachine,
   ComputerObservation,
@@ -212,11 +216,42 @@ class CancelledActionError extends Error {
 }
 
 interface QueuedOp {
-  kind: "observe" | "action";
+  /**
+   * `action` ops are automated script work — cancelled generations drop them.
+   * `input` ops are human control input — validated against the live control
+   * owner at execution time instead of a generation stamp, because the human
+   * stream continues across agent-side cancels while they still hold control.
+   */
+  kind: "observe" | "action" | "input";
   generation: number;
   run(): Promise<void>;
   /** Called when the entry is dropped before reaching the driver. */
   cancel(): void;
+}
+
+/** Server-side control ownership for one desktop (BC5). */
+interface DesktopControl {
+  owner: "agent" | "human";
+  /** Viewer id that holds human control; undefined while the agent owns it. */
+  holderId?: string;
+  /** False when the holder's view channel is lost — pending recovery. */
+  reachable: boolean;
+  since: string;
+}
+
+/** A viewer's frame/control subscription callback (BC5.B). */
+export type DesktopViewEvent =
+  | { type: "control"; control: ComputerControlState }
+  | { type: "frame"; frame: ComputerDesktopFrame }
+  | { type: "error"; error: string };
+
+interface DesktopViewers {
+  viewers: Map<string, (event: DesktopViewEvent) => void>;
+  timer: NodeJS.Timeout | null;
+  /** A frame capture is in flight inside the lane. */
+  polling: boolean;
+  /** Consecutive capture failures before viewers get an error event. */
+  failures: number;
 }
 
 interface DesktopLane {
@@ -224,6 +259,8 @@ interface DesktopLane {
   running: boolean;
   /** Bumped on cancel; actions stamped with an older generation report cancelled. */
   generation: number;
+  /** Input ownership — BC5 takeover/handback state machine. */
+  control: DesktopControl;
 }
 
 export interface ComputerServiceOptions {
@@ -262,6 +299,28 @@ export interface ComputerService {
   act(params: { desktopId?: string; action: ComputerAction; signal?: AbortSignal }): Promise<ComputerActionResult>;
   cancel(desktopId?: string): Promise<{ cancelled: number; released: boolean }>;
   release(desktopId?: string): Promise<{ released: boolean }>;
+  // --- BC5: control ownership + desktop view --------------------------------
+  /** Current control owner record for a desktop. */
+  control(desktopId?: string): Promise<ComputerControlState>;
+  /**
+   * Take human control: drop queued automation, cancel the in-flight op at a
+   * driver checkpoint, release held input, then confirm the transfer. Only
+   * after this resolves may a viewer send `input`.
+   */
+  takeover(params: { desktopId?: string; holderId?: string }): Promise<{ control: ComputerControlState; cancelled: number; released: boolean }>;
+  /**
+   * Return control to the agent. Stale observations are invalidated so the
+   * next automated step re-observes the desktop the human left behind.
+   */
+  handback(params: { desktopId?: string; holderId?: string }): Promise<{ control: ComputerControlState; requiresObservation: true }>;
+  /** Human input through the same lane — only while `owner === "human"`. */
+  input(params: { desktopId?: string; holderId?: string; input: ComputerHumanInput }): Promise<ComputerInputResult>;
+  /**
+   * Subscribe a viewer to desktop frames + control changes. Closing the view
+   * unsubscribes without cancelling work; when the holder's subscription
+   * drops, control stays human-owned but unreachable until it reconnects.
+   */
+  subscribeFrames(desktopId: string, viewerId: string, listener: (event: DesktopViewEvent) => void): Promise<() => void>;
   dispose(): Promise<void>;
 }
 
@@ -351,9 +410,36 @@ export function createComputerService(options: ComputerServiceOptions): Computer
   const laneFor = (desktopId: string): DesktopLane => {
     const existing = lanes.get(desktopId);
     if (existing) return existing;
-    const lane: DesktopLane = { queue: [], running: false, generation: 0 };
+    const lane: DesktopLane = {
+      queue: [],
+      running: false,
+      generation: 0,
+      control: { owner: "agent", reachable: true, since: new Date().toISOString() },
+    };
     lanes.set(desktopId, lane);
     return lane;
+  };
+
+  const controlState = (desktopId: string): ComputerControlState => {
+    const control = laneFor(desktopId).control;
+    return {
+      desktopId,
+      owner: control.owner,
+      ...(control.holderId ? { holderId: control.holderId } : {}),
+      reachable: control.reachable,
+      since: control.since,
+    };
+  };
+
+  /** Broadcast the control record to every subscribed viewer (BC5.B). */
+  const viewers = new Map<string, DesktopViewers>();
+  const broadcastControl = (desktopId: string) => {
+    const entry = viewers.get(desktopId);
+    if (!entry) return;
+    const event: DesktopViewEvent = { type: "control", control: controlState(desktopId) };
+    for (const listener of entry.viewers.values()) {
+      try { listener(event); } catch { /* a broken viewer must not block others */ }
+    }
   };
 
   const pump = (lane: DesktopLane) => {
@@ -788,6 +874,11 @@ export function createComputerService(options: ComputerServiceOptions): Computer
     const action = structuredClone(params.action);
     const id = await resolveDesktopId(params.desktopId);
     validateAction(action);
+    // A desktop under human control rejects automated input outright — the
+    // stale script must not resume after the takeover (BC5.A).
+    if (laneFor(id).control.owner === "human") {
+      throw new HarnessServiceError("forbidden", `Desktop "${id}" is under human control`);
+    }
     // Stamp the caller-side generation before any further await: a cancel
     // issued while this call resolves its driver still drops the action.
     const generation = laneGeneration(id);
@@ -862,6 +953,213 @@ export function createComputerService(options: ComputerServiceOptions): Computer
     return { released: response.ok };
   };
 
+  // --- BC5: control ownership ---------------------------------------------
+
+  const control: ComputerService["control"] = async (desktopId) => {
+    const id = await resolveDesktopId(desktopId);
+    await desktopRecord(id); // control state exists only for real desktops
+    return controlState(id);
+  };
+
+  const takeover: ComputerService["takeover"] = async (params) => {
+    const id = await resolveDesktopId(params.desktopId);
+    await desktopRecord(id);
+    const lane = laneFor(id);
+    // Same interlock as cancel(): bump the generation so queued automation and
+    // any stale script batch can never run under human control.
+    lane.generation += 1;
+    const dropped = lane.queue.filter((entry) => entry.kind === "action");
+    lane.queue = lane.queue.filter((entry) => entry.kind !== "action");
+    for (const entry of dropped) entry.cancel();
+    let released = true;
+    const driver = drivers.get(id);
+    if (driver?.alive()) {
+      // Interrupt the in-flight native op at its next checkpoint before the
+      // release sweep — a held key left down would corrupt human input.
+      driver.cancel();
+      const response = await enqueue(id, "observe", () => driver.request({ tool: "release_input" }));
+      released = response.ok;
+    }
+    // Stale observations must not fire after handback — the human will have
+    // changed the scene, so indexes from before the takeover are dead.
+    observations.delete(id);
+    lane.control = {
+      owner: "human",
+      ...(params.holderId ? { holderId: params.holderId } : {}),
+      reachable: true,
+      since: new Date().toISOString(),
+    };
+    broadcastControl(id);
+    return { control: controlState(id), cancelled: dropped.length, released };
+  };
+
+  const handback: ComputerService["handback"] = async (params) => {
+    const id = await resolveDesktopId(params.desktopId);
+    const lane = laneFor(id);
+    if (lane.control.owner !== "human") {
+      throw new HarnessServiceError("invalid-params", `Desktop "${id}" is not under human control`);
+    }
+    if (lane.control.holderId && params.holderId && lane.control.holderId !== params.holderId) {
+      throw new HarnessServiceError("forbidden", `Desktop "${id}" is held by another viewer`);
+    }
+    // Lift whatever the human left held before automation may resume.
+    const driver = drivers.get(id);
+    if (driver?.alive()) {
+      await enqueue(id, "observe", () => driver.request({ tool: "release_input" }));
+    }
+    lane.control = { owner: "agent", reachable: true, since: new Date().toISOString() };
+    // Drop every observation — the next automated step must re-read the
+    // desktop the human left behind rather than replay pre-takeover indexes.
+    observations.delete(id);
+    broadcastControl(id);
+    return { control: controlState(id), requiresObservation: true };
+  };
+
+  const validateHumanInput = (input: ComputerHumanInput): void => {
+    if (!isObject(input)) throw new HarnessServiceError("invalid-params", "computer.input requires input");
+    switch (input.kind) {
+      case "click": case "down": case "up": case "move":
+        if (input.x === undefined || input.y === undefined) {
+          throw new HarnessServiceError("invalid-params", `${input.kind} requires x/y`);
+        }
+        break;
+      case "scroll":
+        if (input.x === undefined || input.y === undefined || !input.direction) {
+          throw new HarnessServiceError("invalid-params", "scroll requires x/y and direction");
+        }
+        break;
+      case "key":
+        if (!input.key) throw new HarnessServiceError("invalid-params", "key requires a key chord");
+        break;
+      case "text":
+        if (typeof input.text !== "string") throw new HarnessServiceError("invalid-params", "text requires text");
+        break;
+      default:
+        throw new HarnessServiceError("invalid-params", `Unknown human input kind: ${String(input.kind)}`);
+    }
+  };
+
+  const input: ComputerService["input"] = async (params) => {
+    const id = await resolveDesktopId(params.desktopId);
+    validateHumanInput(params.input);
+    const lane = laneFor(id);
+    if (lane.control.owner !== "human") {
+      throw new HarnessServiceError("forbidden", `Desktop "${id}" is not under human control`);
+    }
+    if (lane.control.holderId && params.holderId && lane.control.holderId !== params.holderId) {
+      throw new HarnessServiceError("forbidden", `Desktop "${id}" is held by another viewer`);
+    }
+    if (lane.control.reachable === false) {
+      // The holder's view channel dropped — do not trust input attributed to
+      // it until it reconnects through subscribeFrames.
+      throw new HarnessServiceError("forbidden", `Desktop "${id}" control holder is disconnected`);
+    }
+    return enqueue(id, "input", async () => {
+      // Re-check at execution: ownership may have flipped while queued.
+      const control = laneFor(id).control;
+      if (control.owner !== "human" || (control.holderId && params.holderId && control.holderId !== params.holderId)) {
+        return { accepted: false, detail: "control changed before the input ran" };
+      }
+      const { driver } = await driverFor(id);
+      const response = await driver.request({
+        tool: "inject_input",
+        kind: params.input.kind,
+        ...(params.input.x !== undefined ? { x: params.input.x } : {}),
+        ...(params.input.y !== undefined ? { y: params.input.y } : {}),
+        ...(params.input.button ? { button: params.input.button } : {}),
+        ...(params.input.count !== undefined ? { count: params.input.count } : {}),
+        ...(params.input.direction ? { direction: params.input.direction } : {}),
+        ...(params.input.pages !== undefined ? { pages: params.input.pages } : {}),
+        ...(params.input.key ? { key: params.input.key } : {}),
+        ...(params.input.text !== undefined ? { text: params.input.text } : {}),
+      });
+      if (!response.ok) {
+        return { accepted: false, ...(response.error ? { detail: response.error } : {}) };
+      }
+      return { accepted: true };
+    });
+  };
+
+  // --- BC5: frame subscription --------------------------------------------
+
+  const FRAME_INTERVAL_MS = 250;
+  const pollFrame = async (desktopId: string): Promise<void> => {
+    const entry = viewers.get(desktopId);
+    if (!entry || entry.viewers.size === 0 || entry.polling) return;
+    entry.polling = true;
+    try {
+      const frame = await enqueue(desktopId, "observe", async () => {
+        const { driver } = await driverFor(desktopId);
+        const response = await driver.request({ tool: "capture_frame" });
+        if (!response.ok || !response.frame) {
+          throw new Error(response.error ?? "desktop capture produced no frame");
+        }
+        const raw = response.frame;
+        const bounds = frameOf(raw.bounds) ?? { x: 0, y: 0, width: 0, height: 0 };
+        const mime = raw.mime === "image/jpeg" ? "image/jpeg" : "image/png";
+        if (!raw.base64) throw new Error("desktop capture produced no frame");
+        return { mime, base64: raw.base64, bounds, capturedAt: raw.capturedAt ?? new Date().toISOString() } satisfies ComputerDesktopFrame;
+      }).catch((error: unknown): Error => (error instanceof Error ? error : new Error(String(error))));
+      const current = viewers.get(desktopId);
+      if (!current) return;
+      if (frame instanceof Error) {
+        entry.failures += 1;
+        if (entry.failures >= 2) {
+          const event: DesktopViewEvent = { type: "error", error: frame.message };
+          for (const listener of current.viewers.values()) {
+            try { listener(event); } catch { /* broken viewer */ }
+          }
+        }
+        return;
+      }
+      entry.failures = 0;
+      const event: DesktopViewEvent = { type: "frame", frame };
+      for (const listener of current.viewers.values()) {
+        try { listener(event); } catch { /* broken viewer */ }
+      }
+    } finally {
+      entry.polling = false;
+    }
+  };
+
+  const subscribeFrames: ComputerService["subscribeFrames"] = async (desktopId, viewerId, listener) => {
+    const id = await resolveDesktopId(desktopId);
+    await desktopRecord(id);
+    const lane = laneFor(id);
+    // A reconnecting holder gets its control marked reachable again.
+    if (lane.control.owner === "human" && lane.control.holderId === viewerId && !lane.control.reachable) {
+      lane.control.reachable = true;
+    }
+    let entry = viewers.get(id);
+    if (!entry) {
+      entry = { viewers: new Map(), timer: null, polling: false, failures: 0 };
+      viewers.set(id, entry);
+    }
+    entry.viewers.set(viewerId, listener);
+    try { listener({ type: "control", control: controlState(id) }); } catch { /* */ }
+    if (!entry.timer) {
+      entry.timer = setInterval(() => { void pollFrame(id); }, FRAME_INTERVAL_MS);
+      void pollFrame(id);
+    }
+    broadcastControl(id);
+    return () => {
+      const current = viewers.get(id);
+      if (!current) return;
+      current.viewers.delete(viewerId);
+      const laneControl = laneFor(id).control;
+      if (laneControl.owner === "human" && laneControl.holderId === viewerId) {
+        // The disconnecting viewer held control — mark it pending-recovery
+        // rather than silently handing back while its input may be mid-flight.
+        laneControl.reachable = false;
+      }
+      if (current.viewers.size === 0) {
+        if (current.timer) clearInterval(current.timer);
+        current.timer = null;
+      }
+      broadcastControl(id);
+    };
+  };
+
   return {
     list,
     ensureLocal,
@@ -871,11 +1169,22 @@ export function createComputerService(options: ComputerServiceOptions): Computer
     act,
     cancel,
     release,
+    control,
+    takeover,
+    handback,
+    input,
+    subscribeFrames,
     defaultDesktop,
     setDefaultDesktop,
     dispose: async () => {
       if (disposed) return;
       disposed = true;
+      for (const entry of viewers.values()) {
+        if (entry.timer) clearInterval(entry.timer);
+        entry.timer = null;
+        entry.viewers.clear();
+      }
+      viewers.clear();
       for (const lane of lanes.values()) {
         lane.generation += 1;
         for (const entry of lane.queue.splice(0)) entry.cancel();

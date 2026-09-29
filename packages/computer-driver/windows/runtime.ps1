@@ -1082,6 +1082,79 @@ function Capture-WindowPngBase64([IntPtr]$hwnd, $bounds) {
     }
 }
 
+function Capture-DesktopFrame([double]$Quality = 65) {
+    # The viewer contract (BC5) needs the whole desktop, not one window: the
+    # union of every screen at physical-pixel scale. JPEG keeps a 4fps stream
+    # small enough for a local SSE channel.
+    $left = 0; $top = 0; $right = 0; $bottom = 0
+    foreach ($screen in [System.Windows.Forms.Screen]::AllScreens) {
+        $left = [math]::Min($left, $screen.Bounds.Left)
+        $top = [math]::Min($top, $screen.Bounds.Top)
+        $right = [math]::Max($right, $screen.Bounds.Right)
+        $bottom = [math]::Max($bottom, $screen.Bounds.Bottom)
+    }
+    $width = $right - $left
+    $height = $bottom - $top
+    if ($width -le 0 -or $height -le 0) { return $null }
+    $bitmap = New-Object System.Drawing.Bitmap $width, $height
+    $graphics = [System.Drawing.Graphics]::FromImage($bitmap)
+    try {
+        $graphics.CopyFromScreen($left, $top, 0, 0, $bitmap.Size)
+        $jpeg = [System.Drawing.Imaging.ImageCodecInfo]::GetImageEncoders() | Where-Object { $_.MimeType -eq "image/jpeg" } | Select-Object -First 1
+        $stream = New-Object System.IO.MemoryStream
+        if ($null -ne $jpeg) {
+            $params = New-Object System.Drawing.Imaging.EncoderParameters 1
+            $params.Param[0] = New-Object System.Drawing.Imaging.EncoderParameter ([System.Drawing.Imaging.Encoder]::Quality, ([int64][math]::Round($Quality)))
+            $bitmap.Save($stream, $jpeg, $params)
+            $params.Dispose()
+            $mime = "image/jpeg"
+        } else {
+            $bitmap.Save($stream, [System.Drawing.Imaging.ImageFormat]::Png)
+            $mime = "image/png"
+        }
+        $bytes = $stream.ToArray()
+        $stream.Dispose()
+        return [pscustomobject]@{
+            mime = $mime
+            base64 = [Convert]::ToBase64String($bytes)
+            bounds = (New-Frame $left $top $width $height)
+            capturedAt = (Get-Date).ToUniversalTime().ToString("o")
+        }
+    } catch {
+        return $null
+    } finally {
+        $graphics.Dispose()
+        $bitmap.Dispose()
+    }
+}
+
+function Invoke-HumanInput($operation) {
+    # Human-control input (BC5): absolute screen coordinates straight to the
+    # desktop session — no app/window binding, no observation needed. The
+    # control owner check is the Host's job; the driver just emits input.
+    $kind = [string]$operation.kind
+    switch ($kind) {
+        "click" { Send-GlobalMouseClick ([int]$operation.x) ([int]$operation.y) ([string]$operation.button) ([int]$operation.count) }
+        "down"  {
+            $flag = [VarinWin32]::MOUSEEVENTF_LEFTDOWN
+            if ($operation.button -eq "right") { $flag = [VarinWin32]::MOUSEEVENTF_RIGHTDOWN }
+            elseif ($operation.button -eq "middle") { $flag = [VarinWin32]::MOUSEEVENTF_MIDDLEDOWN }
+            Send-GlobalMouseInput ([int]$operation.x) ([int]$operation.y) @($flag)
+        }
+        "up"    {
+            $flag = [VarinWin32]::MOUSEEVENTF_LEFTUP
+            if ($operation.button -eq "right") { $flag = [VarinWin32]::MOUSEEVENTF_RIGHTUP }
+            elseif ($operation.button -eq "middle") { $flag = [VarinWin32]::MOUSEEVENTF_MIDDLEUP }
+            Send-GlobalMouseInput ([int]$operation.x) ([int]$operation.y) @($flag)
+        }
+        "move"  { [void][VarinWin32]::SetCursorPos([int]$operation.x, [int]$operation.y) }
+        "scroll" { Send-GlobalScroll ([int]$operation.x) ([int]$operation.y) ([string]$operation.direction) ([double]$operation.pages) }
+        "key"   { Send-GlobalKey ([string]$operation.key) }
+        "text"  { Send-GlobalText ([string]$operation.text) }
+        default { throw "unsupportedHumanInput(`"$kind`")" }
+    }
+}
+
 function Get-FocusedSummary($processId, $TextLimit = $script:DefaultTextLimit) {
     try {
         $focused = [Windows.Automation.AutomationElement]::FocusedElement
@@ -1474,6 +1547,17 @@ function Invoke-ComputerOperation($operation) {
     if ($tool -eq "list_apps") {
         $listed = List-Apps
         return [pscustomobject]@{ ok = $true; text = $listed.text; apps = $listed.apps }
+    }
+    if ($tool -eq "capture_frame") {
+        $quality = 65
+        if ($null -ne $operation.quality) { $quality = [double]$operation.quality }
+        $frame = Capture-DesktopFrame $quality
+        if ($null -eq $frame) { return [pscustomobject]@{ ok = $false; error = "desktop capture produced no frame" } }
+        return [pscustomobject]@{ ok = $true; frame = $frame }
+    }
+    if ($tool -eq "inject_input") {
+        Invoke-HumanInput $operation
+        return [pscustomobject]@{ ok = $true }
     }
     if ($tool -eq "get_app_state") {
         $includeScreenshot = $true

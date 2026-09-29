@@ -17,6 +17,7 @@ import sys
 import time
 import traceback
 import warnings
+from datetime import datetime, timezone
 
 warnings.filterwarnings("ignore", category=DeprecationWarning)
 
@@ -564,6 +565,11 @@ def capture_portal_png(bounds, timeout_seconds=6):
                 pass
         if pixbuf is None:
             return None
+        if bounds is None:
+            ok, data = pixbuf.save_to_bufferv("png", [], [])
+            if not ok:
+                return None
+            return base64.b64encode(bytes(data)).decode("ascii")
         x = max(0, int(round(bounds["x"])))
         y = max(0, int(round(bounds["y"])))
         width = min(int(round(bounds["width"])), pixbuf.get_width() - x)
@@ -1126,6 +1132,106 @@ def release_input():
         raise RuntimeError("Desktop did not confirm release of {} managed inputs".format(failed))
 
 
+def capture_desktop_frame():
+    """Whole-screen frame for the viewer contract (BC5). X11 reads the root
+    window; Wayland goes through the portal path (full image, no crop)."""
+    if on_wayland():
+        data = capture_portal_png(None)
+        if data is None:
+            return None
+        return {
+            "mime": "image/png",
+            "base64": data,
+            "bounds": screen_geometry() or {"x": 0, "y": 0, "width": 0, "height": 0},
+            "capturedAt": datetime.now(timezone.utc).isoformat(),
+        }
+    if Gdk is None:
+        return None
+    try:
+        screen = Gdk.Screen.get_default()
+        if screen is None:
+            return None
+        root = screen.get_root_window()
+        width = int(screen.get_width())
+        height = int(screen.get_height())
+        pixbuf = Gdk.pixbuf_get_from_window(root, 0, 0, width, height)
+        if pixbuf is None or pixbuf_looks_black(pixbuf):
+            return None
+        ok, data = pixbuf.save_to_bufferv("png", [], [])
+        if not ok:
+            return None
+        return {
+            "mime": "image/png",
+            "base64": base64.b64encode(bytes(data)).decode("ascii"),
+            "bounds": {"x": 0.0, "y": 0.0, "width": float(width), "height": float(height)},
+            "capturedAt": datetime.now(timezone.utc).isoformat(),
+        }
+    except Exception:
+        return None
+
+
+def screen_geometry():
+    if Gdk is None:
+        return None
+    try:
+        screen = Gdk.Screen.get_default()
+        if screen is None:
+            return None
+        return {
+            "x": 0.0,
+            "y": 0.0,
+            "width": float(screen.get_width()),
+            "height": float(screen.get_height()),
+        }
+    except Exception:
+        return None
+
+
+def inject_human_input(operation):
+    """Human-control input (BC5): absolute screen coordinates, no app/window
+    binding. Ownership is enforced by the Host; the driver emits the input."""
+    kind = str(operation.get("kind") or "")
+    x = int(round(float(operation.get("x") or 0)))
+    y = int(round(float(operation.get("y") or 0)))
+    button = str(operation.get("button") or "left")
+    if kind == "click":
+        send_mouse_click(x, y, button, int(operation.get("count") or 1))
+    elif kind == "down":
+        down, _up = mouse_button_events(button)
+        emit_mouse(x, y, "abs")
+        emit_mouse(x, y, down)
+    elif kind == "up":
+        _down, up = mouse_button_events(button)
+        emit_mouse(x, y, "abs")
+        emit_mouse(x, y, up)
+    elif kind == "move":
+        emit_mouse(x, y, "abs")
+    elif kind == "scroll":
+        direction = str(operation.get("direction") or "down")
+        steps = max(1, int(round(float(operation.get("pages") or 1) * 3)))
+        horizontal = direction in ("left", "right")
+        if horizontal:
+            shift = keyval(MODIFIER_KEYS["shift"])
+            emit_key(shift, None, Atspi.KeySynthType.PRESS)
+        try:
+            wheel = "b4p" if direction in ("up", "left") else "b5p"
+            release = "b4r" if wheel == "b4p" else "b5r"
+            for _ in range(steps):
+                check_cancel("scrolled")
+                emit_mouse(x, y, "abs")
+                emit_mouse(x, y, wheel)
+                emit_mouse(x, y, release)
+        finally:
+            if horizontal:
+                emit_key(shift, None, Atspi.KeySynthType.RELEASE)
+    elif kind == "key":
+        send_key(str(operation.get("key") or ""))
+    elif kind == "text":
+        send_text(str(operation.get("text") or ""))
+    else:
+        raise RuntimeError('unsupportedHumanInput("{}")'.format(kind))
+
+
 def perform_operation(operation):
     tool = operation.get("tool")
     if tool == "ping":
@@ -1134,6 +1240,14 @@ def perform_operation(operation):
         return {"ok": True, "capabilities": driver_capabilities()}
     if tool == "release_input":
         release_input()
+        return {"ok": True}
+    if tool == "capture_frame":
+        frame = capture_desktop_frame()
+        if frame is None:
+            return {"ok": False, "error": "desktop capture produced no frame"}
+        return {"ok": True, "frame": frame}
+    if tool == "inject_input":
+        inject_human_input(operation)
         return {"ok": True}
     if tool == "list_apps":
         apps = []

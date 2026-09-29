@@ -92,3 +92,68 @@ describe("computer routes (BC4)", () => {
     expect(computers.setDefaultDesktop).toHaveBeenCalledWith(null);
   });
 });
+
+describe("computer routes (BC5 control + view)", () => {
+  const fixture5 = () => {
+    const { app, computers } = fixture();
+    const control = {
+      desktopId: "local-console",
+      owner: "agent" as const,
+      reachable: true,
+      since: "2026-01-01T00:00:00Z",
+    };
+    Object.assign(computers, {
+      control: vi.fn(async () => control),
+      takeover: vi.fn(async (params: { desktopId: string; holderId?: string }) => ({
+        control: { ...control, owner: "human" as const, holderId: params.holderId },
+        cancelled: 0,
+        released: true,
+      })),
+      handback: vi.fn(async () => ({ control, requiresObservation: true as const })),
+      input: vi.fn(async () => ({ accepted: true })),
+      subscribeFrames: vi.fn(async () => () => undefined),
+    });
+    return { app, computers };
+  };
+
+  it("GET control returns the owner record", async () => {
+    const { app, computers } = fixture5();
+    const response = await request(app).get("/api/computers/desktops/local-console/control");
+    expect(response.status).toBe(200);
+    expect(response.body.control.owner).toBe("agent");
+    expect(computers.control).toHaveBeenCalledWith("local-console");
+  });
+
+  it("POST takeover passes the holder id and returns the transfer result", async () => {
+    const { app, computers } = fixture5();
+    const response = await request(app)
+      .post("/api/computers/desktops/local-console/takeover")
+      .send({ holderId: "viewer-9" });
+    expect(response.status).toBe(200);
+    expect(response.body.control.owner).toBe("human");
+    expect(response.body.control.holderId).toBe("viewer-9");
+    expect(computers.takeover).toHaveBeenCalledWith({ desktopId: "local-console", holderId: "viewer-9" });
+  });
+
+  it("input while the agent owns the desktop maps forbidden to 409", async () => {
+    const { app, computers } = fixture5();
+    (computers.input as ReturnType<typeof vi.fn>).mockRejectedValue(
+      new HarnessServiceError("forbidden", "Desktop is not under human control"),
+    );
+    const response = await request(app)
+      .post("/api/computers/desktops/local-console/input")
+      .send({ holderId: "v1", input: { kind: "click", x: 1, y: 2 } });
+    expect(response.status).toBe(409);
+    expect(response.body.code).toBe("forbidden");
+  });
+
+  it("handback returns the agent-control record", async () => {
+    const { app } = fixture5();
+    const response = await request(app)
+      .post("/api/computers/desktops/local-console/handback")
+      .send({ holderId: "v1" });
+    expect(response.status).toBe(200);
+    expect(response.body.control.owner).toBe("agent");
+    expect(response.body.requiresObservation).toBe(true);
+  });
+});
