@@ -633,3 +633,169 @@ describe("computer service (BC6 remote hosts)", () => {
     expect(result.detail).toContain("socket hang up");
   });
 });
+
+// --- BC7: virtual machine lifecycle -----------------------------------------
+
+import type { VmExec } from "./vm-provider.js";
+
+describe("computer service (BC7 virtual machines)", () => {
+  const vmProviderConfig = {
+    id: "hv1",
+    kind: "libvirt" as const,
+    uri: "qemu:///system",
+  };
+
+  const fakeVirsh = (
+    script: (args: string[]) => { code?: number; stdout?: string; stderr?: string },
+  ) => {
+    const calls: string[][] = [];
+    const exec: VmExec = async (_command, args, options) => {
+      void options;
+      const scriptArgs = args.slice(2); // strip `-c uri`
+      calls.push(scriptArgs);
+      const reply = script(scriptArgs);
+      return { code: reply.code ?? 0, stdout: reply.stdout ?? "", stderr: reply.stderr ?? "" };
+    };
+    return { exec, calls };
+  };
+
+  const makeVmService = (exec: VmExec) => {
+    const kernel = fakeKernel();
+    const service = createComputerService({
+      client: kernel.client as never,
+      hostId: "host-1",
+      platform: "windows",
+      dataDir: newDataDir(),
+      createDriver: () => makeDriver(async () => okResponse()),
+      vmProviders: async () => [vmProviderConfig],
+      vmExec: exec,
+    });
+    return { service, kernel };
+  };
+
+  it("create records provider identity, domain UUID, volumes, and the step journal", async () => {
+    let domuuidCalls = 0;
+    const { exec, calls } = fakeVirsh((args) => {
+      if (args[0] === "domuuid") {
+        domuuidCalls += 1;
+        return domuuidCalls === 1
+          ? { code: 1, stderr: "error: failed to get domain 'devbox'" }
+          : { stdout: "1111aaaa-2222-3333-4444-555566667777\n" };
+      }
+      if (args[0] === "vol-create-as") return { stdout: "Vol devbox.qcow2 created\n" };
+      if (args[0] === "define") return { stdout: "Domain devbox defined\n" };
+      if (args[0] === "domstate") return { stdout: "shut off\n" };
+      throw new Error(`unexpected virsh call: ${args.join(" ")}`);
+    });
+    const { service, kernel } = makeVmService(exec);
+
+    const { machine, created } = await service.createVm({
+      providerId: "hv1",
+      name: "devbox",
+      memoryMiB: 2048,
+      vcpus: 2,
+      diskGiB: 20,
+    });
+    expect(created).toBe(true);
+    expect(machine.provider).toBe("virtual");
+    expect(machine.vm).toMatchObject({
+      providerId: "hv1",
+      kind: "libvirt",
+      uri: "qemu:///system",
+      domainUuid: "1111aaaa-2222-3333-4444-555566667777",
+      volumePaths: ["devbox.qcow2"],
+    });
+    expect(machine.vm!.steps.map((s) => `${s.step}:${s.status}`)).toEqual([
+      "resolve:done", "volume:done", "define:done",
+    ]);
+    // A shutoff domain is not an active machine.
+    expect(machine.status).toBe("unavailable");
+    expect(machine.statusDetail).toContain("shut off");
+
+    // The record persists in the catalog — durable journal, not memory.
+    const stored = await kernel.client.scoped()
+      .getRecord("__varin_computers__", `computer.machine:${machine.id}`);
+    expect(JSON.parse(stored!.payloadJson).vm.domainUuid).toBe("1111aaaa-2222-3333-4444-555566667777");
+    expect(calls.some((args) => args[0] === "define")).toBe(true);
+  });
+
+  it("a retried create adopts the existing domain — no duplicate volume/define", async () => {
+    const { exec, calls } = fakeVirsh((args) => {
+      if (args[0] === "domuuid") return { stdout: "1111aaaa-2222-3333-4444-555566667777\n" };
+      if (args[0] === "domblklist") return { stdout: " vda   default/devbox.qcow2\n" };
+      if (args[0] === "domstate") return { stdout: "running\n" };
+      throw new Error(`unexpected virsh call: ${args.join(" ")}`);
+    });
+    const { service } = makeVmService(exec);
+
+    const { machine, created } = await service.createVm({ providerId: "hv1", name: "devbox" });
+    expect(created).toBe(false);
+    expect(machine.vm!.domainUuid).toBe("1111aaaa-2222-3333-4444-555566667777");
+    expect(machine.status).toBe("active"); // real domstate: running
+    expect(calls.some((args) => args[0] === "vol-create-as")).toBe(false);
+    expect(calls.some((args) => args[0] === "define")).toBe(false);
+  });
+
+  it("start/shutdown key on the recorded domain UUID and sync status", async () => {
+    let state = "shut off";
+    const { exec, calls } = fakeVirsh((args) => {
+      if (args[0] === "domuuid") return { stdout: "1111aaaa-2222-3333-4444-555566667777\n" };
+      if (args[0] === "domblklist") return { stdout: " vda   default/devbox.qcow2\n" };
+      if (args[0] === "domstate") return { stdout: `${state}\n` };
+      if (args[0] === "start") { state = "running"; return { stdout: "started\n" }; }
+      if (args[0] === "shutdown") { state = "shut off"; return { stdout: "shutting down\n" }; }
+      throw new Error(`unexpected virsh call: ${args.join(" ")}`);
+    });
+    const { service } = makeVmService(exec);
+
+    // Seed the machine record via an adoption create.
+    await service.createVm({ providerId: "hv1", name: "devbox" });
+
+    const started = await service.vmAction({ machineId: "vm:hv1:devbox", action: "start" });
+    expect(started.state).toBe("running");
+    expect(calls.some((args) => args[0] === "start" && args[1] === "1111aaaa-2222-3333-4444-555566667777")).toBe(true);
+
+    const stopped = await service.vmAction({ machineId: "vm:hv1:devbox", action: "shutdown" });
+    expect(stopped.state).toBe("shutoff");
+    expect(calls.some((args) => args[0] === "shutdown" && args[1] === "1111aaaa-2222-3333-4444-555566667777")).toBe(true);
+  });
+
+  it("delete archives the record and only removes disks when asked", async () => {
+    const deleted: string[] = [];
+    const { exec } = fakeVirsh((args) => {
+      if (args[0] === "domuuid") return { stdout: "1111aaaa-2222-3333-4444-555566667777\n" };
+      if (args[0] === "domblklist") return { stdout: " vda   default/devbox.qcow2\n" };
+      if (args[0] === "domstate") return { stdout: "shut off\n" };
+      if (args[0] === "undefine") return { stdout: "undefined\n" };
+      if (args[0] === "vol-delete") { deleted.push(args[args.length - 1]!); return { stdout: "deleted\n" }; }
+      throw new Error(`unexpected virsh call: ${args.join(" ")}`);
+    });
+    const { service } = makeVmService(exec);
+    const { machine } = await service.createVm({ providerId: "hv1", name: "devbox" });
+
+    // Default delete: persistent disk survives.
+    await service.deleteVm(machine.id, false);
+    expect(deleted).toEqual([]);
+
+    const vms = await service.listVms();
+    expect(vms).toEqual([]); // archived machines leave the VM list
+  });
+
+  it("a failed create persists the journal on an unavailable machine record", async () => {
+    const { exec } = fakeVirsh((args) => {
+      if (args[0] === "domuuid") return { code: 1, stderr: "no domain" };
+      if (args[0] === "vol-create-as") return { stdout: "created\n" };
+      if (args[0] === "define") return { code: 1, stderr: "invalid domain XML" };
+      if (args[0] === "vol-delete") return { stdout: "deleted\n" };
+      throw new Error(`unexpected virsh call: ${args.join(" ")}`);
+    });
+    const { service } = makeVmService(exec);
+    await expect(service.createVm({ providerId: "hv1", name: "broken" })).rejects.toThrow(/define/);
+    const catalog = await service.list();
+    const machine = catalog.machines.find((m) => m.name === "broken");
+    expect(machine).toBeDefined();
+    expect(machine!.status).toBe("unavailable");
+    expect(machine!.vm!.steps.map((s) => `${s.step}:${s.status}`)).toContain("define:failed");
+    expect(machine!.vm!.steps.map((s) => `${s.step}:${s.status}`)).toContain("cleanup:done");
+  });
+});

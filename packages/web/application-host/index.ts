@@ -96,6 +96,7 @@ import { createBotRootRuntime } from './lib/harness/bot-root-runtime.js';
 import { createBotService } from './lib/bots/bot-service.js';
 import { registerBotRoutes } from './lib/bots/bot-routes.js';
 import { createComputerService } from './lib/computer/computer-service.js';
+import { configuredVmProviders } from './lib/computer/vm-provider.js';
 import { registerComputerRoutes } from './lib/computer/computer-routes.js';
 import { createWorktreeReclaimGuard } from './lib/harness/worktree-reclaim-guard.js';
 import { resolveThreadWorktreeSettings } from './lib/harness/thread-worktree-settings.js';
@@ -1794,6 +1795,9 @@ async function main(options: StartWebUiServerOptions = {}): Promise<WebUiServerC
     // settings managed-remote resolves — apiUrl + clientToken authenticate
     // Host-to-Host computer calls; no local credentials cross the wire.
     remoteHosts: async () => configuredHosts(await readSettingsFromDisk() as unknown as Record<string, unknown>),
+    // BC7: `computerVmProviders` settings entries configure libvirt targets
+    // (qemu:///system or qemu+ssh://…); virsh auth stays in the environment.
+    vmProviders: async () => configuredVmProviders(await readSettingsFromDisk() as unknown as Record<string, unknown>),
   });
   // BC1: unified memory domain. The same service backs the harness memory.*
   // methods, the UI routes, and later the background organizer — one writer

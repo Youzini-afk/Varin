@@ -9,6 +9,7 @@
  */
 
 import { randomUUID } from "node:crypto";
+import { spawn } from "node:child_process";
 import { mkdir, readFile, rename, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import type {
@@ -26,6 +27,12 @@ import type {
   ComputerMachine,
   ComputerObservation,
   ComputerPlatform,
+  ComputerVmBinding,
+  ComputerVmCreateParams,
+  ComputerVmDescriptor,
+  ComputerVmProviderConfig,
+  ComputerVmState,
+  ComputerVmStep,
 } from "@varin/protocol";
 import type { KernelClient, KernelScopedClient } from "../kernel/kernel-client.js";
 import type { KernelRecordResult } from "../kernel/protocol.generated.js";
@@ -39,6 +46,8 @@ import {
   type DriverResponse,
   type DriverSpawnSpec,
 } from "./driver-host.js";
+import { createLibvirtProvider } from "./libvirt-provider.js";
+import type { VmExec, VmProvider } from "./vm-provider.js";
 
 /** Kernel workspace under which computer catalog records live. */
 export const COMPUTER_CATALOG_WORKSPACE_ID = "__varin_computers__";
@@ -86,6 +95,22 @@ const parseMachine = (record: KernelRecordResult): ComputerMachine | null => {
       coordinatorHostId: raw.coordinatorHostId as string,
       status: (record.state === "active" || record.state === "archived" ? record.state : "unavailable") as ComputerMachine["status"],
       ...(asString(raw.statusDetail) ? { statusDetail: raw.statusDetail as string } : {}),
+      // A failed create may have no domainUuid yet — the binding still
+      // carries the journal and provider identity for the retry path.
+      ...(isObject(raw.vm) && asString(raw.vm.providerId)
+        ? {
+            vm: {
+              providerId: asString(raw.vm.providerId)!,
+              kind: "libvirt" as const,
+              uri: asString(raw.vm.uri) ?? "",
+              domainUuid: asString(raw.vm.domainUuid) ?? "",
+              volumePaths: Array.isArray(raw.vm.volumePaths)
+                ? raw.vm.volumePaths.filter((v): v is string => typeof v === "string")
+                : [],
+              steps: Array.isArray(raw.vm.steps) ? raw.vm.steps as ComputerVmStep[] : [],
+            },
+          }
+        : {}),
       createdAt: asString(raw.createdAt) ?? new Date(record.createdAt).toISOString(),
       updatedAt: new Date(record.updatedAt).toISOString(),
     };
@@ -310,6 +335,16 @@ export interface ComputerServiceOptions {
   remoteHosts?: () => Promise<ComputerRemoteHost[]>;
   /** Test seam: override fetch for remote Host calls. */
   fetch?: typeof fetch;
+  /**
+   * Configured virtualization providers (BC7) — `computerVmProviders` in the
+   * Host settings file. Each entry is a libvirt connection URI; credentials
+   * stay in the environment (ssh agent), never in settings.
+   */
+  vmProviders?: () => Promise<ComputerVmProviderConfig[]>;
+  /** Test seam: scripted provider-CLI invocations. */
+  vmExec?: VmExec;
+  /** Test seam: substitute provider implementation entirely. */
+  vmProviderFactory?: (config: ComputerVmProviderConfig, exec: VmExec) => VmProvider;
 }
 
 export interface ComputerService {
@@ -359,6 +394,19 @@ export interface ComputerService {
    * drops, control stays human-owned but unreachable until it reconnects.
    */
   subscribeFrames(desktopId: string, viewerId: string, listener: (event: DesktopViewEvent) => void): Promise<() => void>;
+  // --- BC7: virtual machine lifecycle ----------------------------------------
+  /** Virtual machines on configured providers, with live domain state. */
+  listVms(): Promise<ComputerVmDescriptor[]>;
+  /**
+   * Create a VM on a configured provider. Idempotent by name: a retried call
+   * adopts the existing domain instead of duplicating it. The create journal
+   * is persisted on the machine record even when the create fails.
+   */
+  createVm(params: ComputerVmCreateParams): Promise<{ machine: ComputerMachine; created: boolean }>;
+  /** Lifecycle on a VM machine's real domain UUID. */
+  vmAction(params: { machineId: string; action: "start" | "shutdown" | "reboot" }): Promise<ComputerVmDescriptor>;
+  /** Undefine the domain. `deleteDisks` also removes the recorded volumes. */
+  deleteVm(machineId: string, deleteDisks?: boolean): Promise<void>;
   dispose(): Promise<void>;
 }
 
@@ -1519,6 +1567,212 @@ export function createComputerService(options: ComputerServiceOptions): Computer
     };
   };
 
+  // --- BC7: virtual machine lifecycle ----------------------------------------
+
+  const vmExec: VmExec = options.vmExec ?? ((command, args, execOptions) => new Promise((resolve, reject) => {
+    const child = spawn(command, args, { stdio: [execOptions?.stdin !== undefined ? "pipe" : "ignore", "pipe", "pipe"], windowsHide: true });
+    const timer = setTimeout(() => { child.kill(); }, 60_000);
+    let stdout = "";
+    let stderr = "";
+    child.stdout?.on("data", (chunk) => { stdout += chunk; });
+    child.stderr?.on("data", (chunk) => { stderr += chunk; });
+    child.on("error", (error) => { clearTimeout(timer); reject(error); });
+    child.on("close", (code) => {
+      clearTimeout(timer);
+      resolve({ code: code ?? 1, stdout, stderr });
+    });
+    if (execOptions?.stdin !== undefined) {
+      child.stdin?.end(execOptions.stdin);
+    }
+  }));
+
+  const vmProviderCache = new Map<string, VmProvider>();
+  const vmProviderFactory = options.vmProviderFactory ?? ((config: ComputerVmProviderConfig, exec: VmExec) =>
+    createLibvirtProvider(config, exec));
+
+  const vmProviderFor = async (providerId: string): Promise<{ config: ComputerVmProviderConfig; provider: VmProvider }> => {
+    const configs = options.vmProviders ? await options.vmProviders().catch(() => []) : [];
+    const config = configs.find((entry) => entry.id === providerId);
+    if (!config) {
+      throw new HarnessServiceError("not-found", `Unknown VM provider "${providerId}"`);
+    }
+    let provider = vmProviderCache.get(providerId);
+    if (!provider || provider.config.uri !== config.uri) {
+      provider = vmProviderFactory(config, vmExec);
+      vmProviderCache.set(providerId, provider);
+    }
+    return { config, provider };
+  };
+
+  const vmMachineFor = async (machineId: string): Promise<{ record: KernelRecordResult; machine: ComputerMachine }> => {
+    const record = await (await scoped()).getRecord(COMPUTER_CATALOG_WORKSPACE_ID, `computer.machine:${machineId}`)
+      .catch(() => null);
+    const machine = record ? parseMachine(record) : null;
+    if (!record || !machine || machine.provider !== "virtual" || !machine.vm) {
+      throw new HarnessServiceError("not-found", `Unknown virtual machine "${machineId}"`);
+    }
+    if (!machine.vm.domainUuid) {
+      throw new HarnessServiceError(
+        "invalid-params",
+        `Virtual machine "${machineId}" was never defined — retry createVm`,
+      );
+    }
+    return { record, machine };
+  };
+
+  const statusForVmState = (state: ComputerVmState): { status: ComputerMachine["status"]; detail?: string } => {
+    switch (state) {
+      case "running": return { status: "active" };
+      case "paused": return { status: "unavailable", detail: "domain paused" };
+      case "shutoff": return { status: "unavailable", detail: "domain shut off" };
+      case "crashed": return { status: "unavailable", detail: "domain crashed" };
+      default: return { status: "unavailable", detail: "provider state unknown" };
+    }
+  };
+
+  const describeVm = async (machine: ComputerMachine): Promise<ComputerVmDescriptor> => {
+    const binding = machine.vm!;
+    let state: ComputerVmState = "unknown";
+    let statusDetail: string | undefined;
+    try {
+      const { provider } = await vmProviderFor(binding.providerId);
+      state = await provider.domainState(binding.domainUuid);
+    } catch (error) {
+      statusDetail = error instanceof Error ? error.message : String(error);
+    }
+    const mapped = statusForVmState(state);
+    const detail = statusDetail ?? mapped.detail;
+    return {
+      machineId: machine.id,
+      name: machine.name,
+      binding,
+      state,
+      ...(detail ? { statusDetail: detail } : {}),
+      createdAt: machine.createdAt,
+      updatedAt: machine.updatedAt,
+    };
+  };
+
+  const listVms = async (): Promise<ComputerVmDescriptor[]> => {
+    const machines = (await listRecords("computer.machine"))
+      .map(parseMachine)
+      .filter((m): m is ComputerMachine => m !== null && m.provider === "virtual" && !!m.vm && m.status !== "archived");
+    const descriptors: ComputerVmDescriptor[] = [];
+    for (const machine of machines) {
+      const descriptor = await describeVm(machine);
+      // Keep the catalog record aligned with real provider state.
+      const mapped = statusForVmState(descriptor.state);
+      if (machine.status !== mapped.status && machine.status !== "archived") {
+        await putRecord(`computer.machine:${machine.id}`, "computer.machine", mapped.status, {
+          id: machine.id,
+          name: machine.name,
+          provider: "virtual",
+          platform: machine.platform,
+          coordinatorHostId: machine.coordinatorHostId,
+          statusDetail: descriptor.statusDetail ?? mapped.detail,
+          vm: machine.vm,
+          createdAt: machine.createdAt,
+        }).catch(() => null);
+      }
+      descriptors.push(descriptor);
+    }
+    return descriptors;
+  };
+
+  const createVm = async (params: ComputerVmCreateParams): Promise<{ machine: ComputerMachine; created: boolean }> => {
+    if (disposed) throw new HarnessServiceError("unavailable", "Computer service is closed");
+    const providerId = asString(params.providerId);
+    const name = asString(params.name);
+    if (!providerId || !name) {
+      throw new HarnessServiceError("invalid-params", "providerId and name are required");
+    }
+    const { provider } = await vmProviderFor(providerId);
+    const outcome = await provider.create({
+      name,
+      memoryMiB: params.memoryMiB ?? 4096,
+      vcpus: params.vcpus ?? 4,
+      diskGiB: params.diskGiB ?? 40,
+      ...(asString(params.baseImage) ? { baseImage: asString(params.baseImage)! } : {}),
+    });
+    const now = new Date().toISOString();
+    const machineId = `vm:${providerId}:${name}`;
+    const binding: ComputerVmBinding = {
+      providerId,
+      kind: "libvirt",
+      uri: provider.config.uri,
+      domainUuid: outcome.domainUuid ?? "",
+      volumePaths: outcome.volumePaths,
+      steps: outcome.steps.map((entry) => ({ ...entry, at: now })),
+    };
+    if (!outcome.ok) {
+      await putRecord(`computer.machine:${machineId}`, "computer.machine", "unavailable", {
+        id: machineId,
+        name,
+        provider: "virtual",
+        platform: "linux",
+        coordinatorHostId: options.hostId,
+        statusDetail: outcome.error ?? "create failed",
+        vm: binding,
+        createdAt: now,
+      });
+      throw new HarnessServiceError("failed", outcome.error ?? "VM create failed");
+    }
+    const state = await provider.domainState(binding.domainUuid).catch((): ComputerVmState => "unknown");
+    const mapped = statusForVmState(state);
+    await putRecord(`computer.machine:${machineId}`, "computer.machine", mapped.status, {
+      id: machineId,
+      name,
+      provider: "virtual",
+      platform: "linux",
+      coordinatorHostId: options.hostId,
+      statusDetail: mapped.detail,
+      vm: binding,
+      createdAt: now,
+    });
+    const record = await (await scoped()).getRecord(COMPUTER_CATALOG_WORKSPACE_ID, `computer.machine:${machineId}`);
+    return { machine: parseMachine(record!)!, created: outcome.adopted !== true };
+  };
+
+  const vmAction = async (params: { machineId: string; action: "start" | "shutdown" | "reboot" }): Promise<ComputerVmDescriptor> => {
+    const { machine } = await vmMachineFor(params.machineId);
+    const { provider } = await vmProviderFor(machine.vm!.providerId);
+    const uuid = machine.vm!.domainUuid;
+    if (params.action === "start") await provider.start(uuid);
+    else if (params.action === "shutdown") await provider.shutdown(uuid);
+    else await provider.reboot(uuid);
+    const state = await provider.domainState(uuid).catch((): ComputerVmState => "unknown");
+    const mapped = statusForVmState(state);
+    await putRecord(`computer.machine:${machine.id}`, "computer.machine", mapped.status, {
+      id: machine.id,
+      name: machine.name,
+      provider: "virtual",
+      platform: machine.platform,
+      coordinatorHostId: machine.coordinatorHostId,
+      statusDetail: mapped.detail,
+      vm: machine.vm,
+      createdAt: machine.createdAt,
+    });
+    return describeVm(machine);
+  };
+
+  const deleteVm = async (machineId: string, deleteDisks = false): Promise<void> => {
+    const { machine } = await vmMachineFor(machineId);
+    const { provider } = await vmProviderFor(machine.vm!.providerId);
+    await provider.delete(machine.vm!.domainUuid, machine.vm!.volumePaths, deleteDisks);
+    // The record is archived, not erased — the create journal stays evidence
+    // of what this Host once owned; archived machines leave `listVms`.
+    await putRecord(`computer.machine:${machine.id}`, "computer.machine", "archived", {
+      id: machine.id,
+      name: machine.name,
+      provider: "virtual",
+      platform: machine.platform,
+      coordinatorHostId: machine.coordinatorHostId,
+      statusDetail: deleteDisks ? "domain and volumes removed" : "domain removed; volumes retained",
+      vm: machine.vm,
+      createdAt: machine.createdAt,
+    });
+  };
+
   return {
     list,
     ensureLocal,
@@ -1535,6 +1789,10 @@ export function createComputerService(options: ComputerServiceOptions): Computer
     subscribeFrames,
     defaultDesktop,
     setDefaultDesktop,
+    listVms,
+    createVm,
+    vmAction,
+    deleteVm,
     dispose: async () => {
       if (disposed) return;
       disposed = true;

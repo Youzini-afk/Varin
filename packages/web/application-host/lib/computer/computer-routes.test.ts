@@ -157,3 +157,94 @@ describe("computer routes (BC5 control + view)", () => {
     expect(response.body.requiresObservation).toBe(true);
   });
 });
+
+describe("computer routes (BC7 virtual machines)", () => {
+  const vmDescriptor = {
+    machineId: "vm:hv1:devbox",
+    name: "devbox",
+    binding: {
+      providerId: "hv1",
+      kind: "libvirt" as const,
+      uri: "qemu:///system",
+      domainUuid: "1111aaaa-2222-3333-4444-555566667777",
+      volumePaths: ["devbox.qcow2"],
+      steps: [],
+    },
+    state: "running" as const,
+    createdAt: "2026-01-01T00:00:00Z",
+    updatedAt: "2026-01-01T00:00:00Z",
+  };
+  const vmMachine: ComputerMachine = {
+    id: "vm:hv1:devbox",
+    name: "devbox",
+    provider: "virtual",
+    platform: "linux",
+    coordinatorHostId: "host-1",
+    status: "active",
+    createdAt: "2026-01-01T00:00:00Z",
+    updatedAt: "2026-01-01T00:00:00Z",
+    vm: vmDescriptor.binding,
+  };
+
+  const fixture7 = () => {
+    const { app, computers } = fixture();
+    Object.assign(computers, {
+      listVms: vi.fn(async () => [vmDescriptor]),
+      createVm: vi.fn(async () => ({ machine: vmMachine, created: true })),
+      vmAction: vi.fn(async () => vmDescriptor),
+      deleteVm: vi.fn(async () => undefined),
+    });
+    return { app, computers };
+  };
+
+  it("GET /api/computers/vms returns live descriptors", async () => {
+    const { app, computers } = fixture7();
+    const response = await request(app).get("/api/computers/vms");
+    expect(response.status).toBe(200);
+    expect(response.body.vms[0].binding.domainUuid).toBe("1111aaaa-2222-3333-4444-555566667777");
+    expect(computers.listVms).toHaveBeenCalled();
+  });
+
+  it("POST create returns 201 for a new domain and forwards the spec", async () => {
+    const { app, computers } = fixture7();
+    const response = await request(app)
+      .post("/api/computers/vms")
+      .send({ providerId: "hv1", name: "devbox", memoryMiB: 4096, diskGiB: 40 });
+    expect(response.status).toBe(201);
+    expect(computers.createVm).toHaveBeenCalledWith(expect.objectContaining({
+      providerId: "hv1",
+      name: "devbox",
+      memoryMiB: 4096,
+      diskGiB: 40,
+    }));
+  });
+
+  it("an adopted domain returns 200, not 201", async () => {
+    const { app, computers } = fixture7();
+    computers.createVm!.mockResolvedValue({ machine: vmMachine, created: false });
+    const response = await request(app)
+      .post("/api/computers/vms")
+      .send({ providerId: "hv1", name: "devbox" });
+    expect(response.status).toBe(200);
+  });
+
+  it("lifecycle actions route by machine id; delete forwards deleteDisks", async () => {
+    const { app, computers } = fixture7();
+    const response = await request(app).post("/api/computers/vms/vm:hv1:devbox/start");
+    expect(response.status).toBe(200);
+    expect(computers.vmAction).toHaveBeenCalledWith({ machineId: "vm:hv1:devbox", action: "start" });
+
+    const del = await request(app)
+      .post("/api/computers/vms/vm:hv1:devbox/delete")
+      .send({ deleteDisks: true });
+    expect(del.status).toBe(200);
+    expect(computers.deleteVm).toHaveBeenCalledWith("vm:hv1:devbox", true);
+  });
+
+  it("an unknown action is a 400, not a provider call", async () => {
+    const { app, computers } = fixture7();
+    const response = await request(app).post("/api/computers/vms/vm:hv1:devbox/explode");
+    expect(response.status).toBe(400);
+    expect(computers.vmAction).not.toHaveBeenCalled();
+  });
+});

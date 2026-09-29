@@ -12,10 +12,10 @@ the original focused tests did not establish the complete product contract.
 This review follows the actual Bot entry, durable owner, memory writer,
 organizer, recall/context, computer tool, driver queue, and platform input paths.
 It repairs concrete defects in those paths. BC5 (server-side control
-ownership, real desktop frame stream, takeover/handback) and BC6 (remote
-Host catalog mirroring with authenticated operation forwarding) are
-implemented in the Host service and drivers — see their sections below.
-It does not implement BC7–BC9 (VMs, product integration, packaging), and
+ownership, real desktop frame stream, takeover/handback), BC6 (remote
+Host catalog mirroring with authenticated operation forwarding), and BC7
+(libvirt VM lifecycle) are implemented — see their sections below.
+It does not implement BC8–BC9 (product integration, packaging), and
 does not treat missing BC0–BC4 features as merely untested platforms.
 
 ## BC0–BC2 follow-up review (2026-09-29)
@@ -418,6 +418,63 @@ Honest limits that remain:
   second Host has answered yet — a live Host↔Host integration run is still
   owed.
 
+## BC7 virtual machines (implemented, provider-verified pending)
+
+A real libvirt backend — not a provider interface stub.
+
+- **Provider layer**: `vm-provider.ts` defines the `VmProvider` contract and
+  parses `computerVmProviders` entries from Host settings
+  (`{ id, kind: "libvirt", uri, storagePool?, network? }`). The URI carries
+  the target — `qemu:///system` local, `qemu+ssh://user@server/system` for a
+  libvirt daemon on the user's own server; credentials stay in ssh/agent,
+  never in settings.
+- **virsh implementation** (`libvirt-provider.ts`): every operation is a real
+  CLI invocation (`virsh -c <uri> …`). Identity is the domain UUID; state is
+  `domstate` truth, never assumed.
+- **Idempotent create**: `domuuid <name>` resolves first — a retried call
+  after a lost response adopts the existing domain (returns `created:false`)
+  instead of duplicating it. Fresh creates allocate a qcow2 volume
+  (`vol-create-as`, or `vol-clone` from a `baseImage` so user data never
+  lands on the template) then `define /dev/stdin` with generated domain XML
+  (virtio disk/net, VNC console, guest-agent channel).
+- **Failure journal**: every create writes `resolve/volume/define/cleanup`
+  steps to the machine record — including on failure. A failed define cleans
+  up only the volume this call allocated; when define ran but the UUID could
+  not be resolved the volume is retained (the domain may exist). Volume
+  allocation failure attempts cleanup and records the real result.
+- **Lifecycle**: `start` / ACPI `shutdown` / `reboot` (shutoff → start, since
+  reboot errors on stopped domains) / `delete` — `destroy` first when still
+  running, then `undefine`; recorded volumes are deleted only when
+  `deleteDisks` is true, and a failed `vol-delete` surfaces instead of
+  pretending.
+- **Catalog**: `computer.machine` records with `provider:"virtual"` carry the
+  `vm` binding (providerId, URI, domainUuid, volumePaths, journal). Domain
+  state maps to machine status (`running`→active, paused/shutoff/crashed→
+  unavailable with detail). Deleted domains archive the record — the journal
+  stays as evidence.
+- **Surface**: `GET/POST /api/computers/vms`, `POST …/vms/:id/(start|shutdown|
+  reboot|delete)`; the Computers settings page gained provider management and
+  a create/lifecycle section (28 keys × 10 locales).
+
+Honest limits that remain:
+
+- A created VM is a *machine*; its desktop appears in the BC4/BC5/BC6 paths
+  only once a Varin Host runs inside the guest and is reachable as a remote
+  Host. Guest bootstrap (OS install, desktop, browser, guest agent, Host
+  registration) requires a prepared `baseImage` — the recipe is documented
+  below but not automated by this change.
+- Base image recipe (manual, repeatable): install a desktop Linux on a
+  qcow2 volume with cloud-init or a console installer; inside the guest,
+  install `varin` (Host + computer driver), enable it on boot, then shut
+  down and use the volume path as `baseImage` for clones.
+- No libvirt hosts the test environment — every check runs against a
+  scripted `virsh` seam. Real `vol-create-as`/`define`/`domstate` behavior,
+  VNC reachability, and guest-Host registration are unverified and marked
+  as such.
+- A server without virtualization still serves real remote desktops via
+  BC6 — the provider list just stays empty and `probe()` reports the real
+  `virsh` error.
+
 ## Verification boundary
 
 Focused checks cover the changed Host services, storage-backed memory behavior,
@@ -455,6 +512,15 @@ transport detail, observe/act forwarding that preserves the remote
 observation id verbatim, and a transport failure on `act` reporting
 `outcome: "unknown"` without replay. All BC6 coverage runs against a fake
 `fetch`; live Host↔Host integration remains unverified.
+
+BC7 focused coverage: 61 computer-suite tests pass across 4 files — the
+provider layer proves `virsh version` probing, real idempotent create
+(domuuid resolve → volume → stdin-XML define → UUID), adoption instead of
+duplication, scoped cleanup of only this call's volume, and delete-keep-
+disks vs delete-with-disks. The service layer proves journal persistence on
+failed creates, UUID-keyed lifecycle with status sync, and record archival.
+No real hypervisor was reached — all virsh calls are scripted; live libvirt
+verification remains owed.
 
 Windows target/input handling follows the official contracts for
 [SetForegroundWindow](https://learn.microsoft.com/en-us/windows/win32/api/winuser/nf-winuser-setforegroundwindow)

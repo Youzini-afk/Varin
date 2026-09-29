@@ -5,6 +5,7 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@
 import { useI18n } from '@/lib/i18n';
 import { listComputers, probeComputerDesktop, setDefaultComputerTarget, type ComputerCatalog } from '@/lib/computers';
 import { ComputerDesktopView } from '@/components/sections/computers/ComputerDesktopView';
+import { ComputerVmSection } from '@/components/sections/computers/ComputerVmSection';
 import type { ComputerDesktop } from '@varin/protocol';
 
 /**
@@ -131,6 +132,7 @@ export function ComputerSettings() {
           </div>;
         })}
       </SettingsSection>
+      <ComputerVmSection />
       {viewing ? (
         <ComputerDesktopView desktop={viewing} open={viewing !== null} onOpenChange={(open) => { if (!open) setViewing(null); }} />
       ) : null}

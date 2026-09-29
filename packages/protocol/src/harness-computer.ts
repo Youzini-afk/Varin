@@ -26,6 +26,13 @@ export interface ComputerMachine {
   statusDetail?: string;
   createdAt: string;
   updatedAt: string;
+  /**
+   * Virtual-machine binding (BC7): this machine IS a domain on a VM provider.
+   * Lifecycle calls (start/shutdown/reboot/delete) operate on the recorded
+   * domain UUID; `volumePaths` are the provider storage volumes this Host
+   * created — they are what `deleteDisks` is allowed to remove.
+   */
+  vm?: ComputerVmBinding;
 }
 
 export interface ComputerDesktop {
@@ -374,4 +381,100 @@ export interface ComputerCaptureFrameParams {
 
 export interface ComputerCaptureFrameResult {
   frame: ComputerDesktopFrame;
+}
+
+// ---------------------------------------------------------------------------
+// BC7 — virtual machine lifecycle (libvirt backend)
+// ---------------------------------------------------------------------------
+
+/** Configured virtualization provider entry (stored in Host settings). */
+export interface ComputerVmProviderConfig {
+  id: string;
+  label?: string;
+  kind: "libvirt";
+  /**
+   * libvirt connection URI — `qemu:///system` local, `qemu+ssh://…` remote.
+   * Credentials never live here; ssh/agent auth belongs to the environment.
+   */
+  uri: string;
+  /** Storage pool new volumes are allocated in (default `default`). */
+  storagePool?: string;
+  /** Virtual network the guest NIC attaches to (default `default`). */
+  network?: string;
+}
+
+/** One recorded step of a VM create/cleanup journal. */
+export interface ComputerVmStep {
+  /** Step identity, e.g. `resolve`, `volume`, `define`, `cleanup`. */
+  step: string;
+  status: "done" | "failed";
+  detail?: string;
+  at: string;
+}
+
+/** Provider-side identity of a virtual machine (recorded on the machine). */
+export interface ComputerVmBinding {
+  /** Provider entry id this Host used — matches `ComputerVmProviderConfig.id`. */
+  providerId: string;
+  kind: "libvirt";
+  uri: string;
+  /** Actual domain UUID — the identity all lifecycle calls key on. */
+  domainUuid: string;
+  /** Storage volumes this Host allocated for the domain. */
+  volumePaths: string[];
+  /** Create/cleanup journal — replay evidence of what actually completed. */
+  steps: ComputerVmStep[];
+}
+
+/** Live provider-side domain state. */
+export type ComputerVmState =
+  | "running"
+  | "paused"
+  | "shutoff"
+  | "crashed"
+  | "unknown";
+
+export interface ComputerVmDescriptor {
+  /** Local machine record id (`computer.machine:<id>`). */
+  machineId: string;
+  name: string;
+  binding: ComputerVmBinding;
+  /** Last known domain state; `unknown` when the provider cannot be read. */
+  state: ComputerVmState;
+  statusDetail?: string;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface ComputerVmCreateParams {
+  /** Which configured provider to create on. */
+  providerId: string;
+  /** Guest/domain name; also the volume name prefix. */
+  name: string;
+  memoryMiB?: number;
+  vcpus?: number;
+  diskGiB?: number;
+  /** Absolute path of a backing image/template the new volume clones. */
+  baseImage?: string;
+}
+
+export interface ComputerVmCreateResult {
+  machine: ComputerMachine;
+  /** False when create reused an already-existing domain of the same name. */
+  created: boolean;
+}
+
+export interface ComputerVmActionParams {
+  machineId: string;
+  action: "start" | "shutdown" | "reboot";
+}
+
+export interface ComputerVmDeleteParams {
+  machineId: string;
+  /** True removes the recorded data volumes; false keeps persistent disks. */
+  deleteDisks?: boolean;
+}
+
+export interface ComputerVmListResult {
+  vms: ComputerVmDescriptor[];
 }

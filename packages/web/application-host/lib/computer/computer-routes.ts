@@ -235,4 +235,71 @@ export function registerComputerRoutes(app: Express, { computers, requireAuth = 
       unsubscribe?.();
     });
   });
+
+  // --- BC7: virtual machine lifecycle ---------------------------------------
+  // Real provider-backed VMs (libvirt today). Machine records keep the domain
+  // UUID + volume journal; delete keeps persistent disks unless asked.
+
+  /** Virtual machines on configured providers, with live domain state. */
+  app.get("/api/computers/vms", requireAuth, async (_request: Request, response: Response) => {
+    response.setHeader("Cache-Control", "no-store");
+    try {
+      response.json({ vms: await computers.listVms() });
+    } catch (error) {
+      sendError(response, error, "Unable to list virtual machines");
+    }
+  });
+
+  /**
+   * Create a VM on a configured provider. Idempotent by name — a retried call
+   * after a lost response adopts the existing domain instead of duplicating.
+   */
+  app.post("/api/computers/vms", requireAuth, async (request: Request, response: Response) => {
+    response.setHeader("Cache-Control", "no-store");
+    try {
+      const body = request.body ?? {};
+      const result = await computers.createVm({
+        providerId: String(body.providerId ?? ""),
+        name: String(body.name ?? ""),
+        ...(typeof body.memoryMiB === "number" ? { memoryMiB: body.memoryMiB } : {}),
+        ...(typeof body.vcpus === "number" ? { vcpus: body.vcpus } : {}),
+        ...(typeof body.diskGiB === "number" ? { diskGiB: body.diskGiB } : {}),
+        ...(typeof body.baseImage === "string" ? { baseImage: body.baseImage } : {}),
+      });
+      response.status(result.created ? 201 : 200).json(result);
+    } catch (error) {
+      sendError(response, error, "Unable to create the virtual machine");
+    }
+  });
+
+  /** Start / graceful shutdown / reboot — keyed on the recorded domain UUID. */
+  app.post("/api/computers/vms/:machineId/:action", requireAuth, async (request: Request, response: Response) => {
+    response.setHeader("Cache-Control", "no-store");
+    const action = String(request.params.action ?? "");
+    if (action === "delete") {
+      try {
+        await computers.deleteVm(
+          String(request.params.machineId ?? ""),
+          request.body?.deleteDisks === true,
+        );
+        response.json({ ok: true });
+      } catch (error) {
+        sendError(response, error, "Unable to delete the virtual machine");
+      }
+      return;
+    }
+    if (action !== "start" && action !== "shutdown" && action !== "reboot") {
+      sendError(response, new HarnessServiceError("invalid-params", `Unknown VM action "${action}"`), "Unknown VM action");
+      return;
+    }
+    try {
+      const vm = await computers.vmAction({
+        machineId: String(request.params.machineId ?? ""),
+        action,
+      });
+      response.json({ vm });
+    } catch (error) {
+      sendError(response, error, "Unable to run the VM action");
+    }
+  });
 }
