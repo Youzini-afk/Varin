@@ -168,7 +168,6 @@ import {
   createContextPreparationExtension,
   type ContextPreparationExtension,
 } from "./harness/context-preparation.js";
-import { createKnowledgeSuggestionExtension } from "./harness/knowledge-suggestion-extension.js";
 import { createPermissionGateExtension, buildPermissionPolicy } from "./harness/permission-gate-extension.js";
 import { createWorkFocusExtension } from "./harness/work-focus-extension.js";
 import type { ToolDefinition } from "@earendil-works/pi-coding-agent";
@@ -3519,7 +3518,6 @@ export class SessionHost {
       };
       this.#contextConfigReader = contextConfigReader;
       let permissionJudge: ((toolName: string, params: Record<string, unknown>) => Promise<"allow" | "ask">) | undefined;
-      let draftUserMessageSuggestion: ((prompt: string) => Promise<string>) | undefined;
       const serviceRef: { current?: AgentSessionServices } = {};
       const agentProviders = new AgentProviderBridge();
       this.#agentProviders = agentProviders;
@@ -3668,20 +3666,6 @@ export class SessionHost {
               name: "varin-context-preparation",
             },
             {
-              factory: createKnowledgeSuggestionExtension({
-                bridge: hostServicesBridge,
-                getDraftWithModel: () => draftUserMessageSuggestion,
-                onError: (error) => {
-                  this.#emit("host.log", {
-                    level: "warn",
-                    message: `Knowledge suggestion from user message failed: ${error instanceof Error ? error.message : String(error)}`,
-                  });
-                },
-              }),
-              hidden: true,
-              name: "varin-knowledge-suggestions",
-            },
-            {
               factory: createPermissionGateExtension({
                 sessionId: sessionManager.getSessionId(),
                 cwd,
@@ -3764,33 +3748,6 @@ export class SessionHost {
           type: "warning",
           message: `Reader model is unavailable: ${readerSelection.providerId}/${readerSelection.modelId}`,
         });
-      }
-      const suggestionsSelection = harnessSettings.models.knowledgeSuggestions;
-      const suggestionsModel = suggestionsSelection
-        ? services.modelRuntime.getModel(suggestionsSelection.providerId, suggestionsSelection.modelId)
-        : undefined;
-      if (suggestionsSelection && !suggestionsModel) {
-        services.diagnostics.push({
-          type: "warning",
-          message: `Suggestions model is unavailable: ${suggestionsSelection.providerId}/${suggestionsSelection.modelId}`,
-        });
-      }
-      if (suggestionsModel) {
-        draftUserMessageSuggestion = async (prompt) => {
-          const response = await services.modelRuntime.completeSimple(suggestionsModel, {
-            systemPrompt: "Return JSON only.",
-            messages: [{
-              role: "user",
-              content: prompt,
-              timestamp: Date.now(),
-            }],
-          }, { reasoning: "minimal", toolChoice: "none" });
-          return response.content
-            .filter((part) => part.type === "text")
-            .map((part) => part.text)
-            .join("\n")
-            .trim();
-        };
       }
       const exploreSelection = harnessSettings.models.explore;
       const exploreModel = exploreSelection

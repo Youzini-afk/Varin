@@ -544,6 +544,97 @@ describe("KnowledgeStore", () => {
       expect(await second.recall("Old effective rule", 5)).toEqual([]);
       await second.close();
     });
+
+    it("keeps prepared organizer progress and its proposals across reopen, then clears them on the terminal write", async () => {
+      const dir = join(TEST_DIR, "organizer-progress-reopen");
+      mkdirSync(dir, { recursive: true });
+      const first = await openWorkspaceKnowledge({
+        dataDir: dir,
+        hostId: "test-host",
+        workspaceId: "ws-progress",
+        embedding: null,
+      });
+      await first.putOrganizerProgress({
+        key: "session:s1",
+        status: "prepared",
+        sourceKey: "fp-1",
+        eventCursor: 7,
+        produced: [3],
+        proposals: [{
+          action: "supplement", scope: "workspace", nature: "decision",
+          content: "Thursday releases this quarter.", trigger: "release", target: 42,
+        }],
+        updatedAt: 100,
+        lastError: "commit boom",
+      });
+      await first.close();
+      const second = await openWorkspaceKnowledge({
+        dataDir: dir,
+        hostId: "test-host",
+        workspaceId: "ws-progress",
+        embedding: null,
+      });
+      const reopened = await second.getOrganizerProgress("session:s1");
+      expect(reopened).toMatchObject({
+        status: "prepared",
+        sourceKey: "fp-1",
+        eventCursor: 7,
+        produced: [3],
+        lastError: "commit boom",
+      });
+      expect(reopened?.proposals).toEqual([expect.objectContaining({
+        action: "supplement", content: "Thursday releases this quarter.", target: 42,
+      })]);
+      // The terminal write drops prepared-only fields rather than leaving a
+      // stale proposal attached to a finished row.
+      await second.putOrganizerProgress({
+        key: "session:s1",
+        status: "formed",
+        sourceKey: "fp-1",
+        eventCursor: 7,
+        produced: [9],
+        updatedAt: 200,
+      });
+      const terminal = await second.getOrganizerProgress("session:s1");
+      expect(terminal?.status).toBe("formed");
+      expect(terminal?.proposals).toBeUndefined();
+      expect(terminal?.lastError).toBeUndefined();
+      expect(terminal?.produced).toEqual([9]);
+      await second.close();
+    });
+
+    it("persists supplements edges and rejects unknown, cross-scope, and self targets", async () => {
+      const dir = join(TEST_DIR, "supplements-edge");
+      mkdirSync(dir, { recursive: true });
+      const first = await openWorkspaceKnowledge({
+        dataDir: dir,
+        hostId: "test-host",
+        workspaceId: "ws-supp",
+        embedding: null,
+      });
+      const target = await first.putKnowledge({
+        scope: "workspace", status: "accepted", content: "Deploys run on Friday.", trigger: "release",
+      });
+      await expect(first.createKnowledgeIfAbsent({
+        scope: "workspace", status: "accepted", content: "X", trigger: "", supplements: 999999,
+      })).rejects.toMatchObject({ code: "invalid" });
+      const created = await first.createKnowledgeIfAbsent({
+        scope: "workspace", status: "accepted",
+        content: "This quarter releases happen on Thursday.", trigger: "release",
+        supplements: target,
+      });
+      expect(created.created).toBe(true);
+      await first.close();
+      const second = await openWorkspaceKnowledge({
+        dataDir: dir,
+        hostId: "test-host",
+        workspaceId: "ws-supp",
+        embedding: null,
+      });
+      expect((await second.getKnowledge(created.knowledge.id))?.supplements).toBe(target);
+      expect((await second.getKnowledge(target))?.invalidAt).toBeUndefined();
+      await second.close();
+    });
   });
 
   describe("file and symbol graph", () => {

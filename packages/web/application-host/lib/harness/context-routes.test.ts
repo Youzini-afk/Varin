@@ -184,8 +184,8 @@ describe("harness context routes", () => {
         else res.status(401).json({ error: "auth required" });
       },
     });
-    // Inferred suggestions arrive through the agent's knowledge.suggest bridge
-    // method; the route test seeds them directly at the store layer.
+    // Suggested rows normally arrive through the background memory organizer;
+    // the route test seeds them directly at the store layer.
     const workspaceId = await store.putKnowledge({
       scope: "workspace",
       status: "suggested",

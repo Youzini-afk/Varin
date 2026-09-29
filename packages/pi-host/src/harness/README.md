@@ -99,10 +99,10 @@ const customTools = selectHarnessTools(settings, {
   An allowed call also returns the Host-canonical path/thread effects discovered
   by `permission.inspect`; Pi merges them with the owned tool's effect declaration
   before scheduling. Denied calls never run the tool's resource-preparation hook.
-- `createKnowledgeSuggestionExtension` — when `models.suggestions` is configured,
-  drafts a workspace knowledge proposal from the current user message and stores
-  it through Host `knowledge.suggest`. Unconfigured sessions retain user-marked
-  knowledge and never borrow the main model for suggestions.
+- Automatic memory formation runs exclusively through the Host-side background
+  organizer (`harness.memoryOrganize`) over durable session/run source material.
+  There is no per-message suggestion extension; explicit user marks still write
+  through `memory.remember`/`context.putKnowledge`.
 - `createContextGuidanceExtension` — adds stable source and collaboration guidance
   to the system prompt. It does not fetch dynamic material at turn start.
 - `createRequestContextInjector` — prepares environment deltas and a complete

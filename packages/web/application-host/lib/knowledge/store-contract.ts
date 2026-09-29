@@ -133,6 +133,12 @@ export interface KnowledgeInput {
   trigger: string;
   nature?: MemoryNature;
   source?: KnowledgeSource;
+  /**
+   * `supplements` records a `supplements` edge to an existing memory in the
+   * same scope — the organizer's "refine an existing memory" relation. The
+   * target must be an existing knowledge row in the same store.
+   */
+  supplements?: NodeId;
 }
 
 export interface Knowledge {
@@ -143,6 +149,8 @@ export interface Knowledge {
   trigger: string;
   nature?: MemoryNature;
   source?: KnowledgeSource;
+  /** Existing memory this row refines (`supplements` edge target), if any. */
+  supplements?: NodeId;
   createdAt: number;
   invalidAt?: number;
   recallCount: number;
@@ -181,26 +189,54 @@ export interface KnowledgeOrEvent {
 /**
  * Durable background-organizer coverage (BC2). One row per source key inside
  * the store it covers — `session:<id>` for session sources (event + entry
- * cursors), `run:<runId>` for thread-run reports. `pending`/`processing` rows
- * are unfinished work a restarted Host must resume; `failed` keeps the cursor
- * where the failure left it so the range retries instead of silently passing.
+ * cursors), `run:<runId>` for thread-run reports. `pending`/`processing`/
+ * `prepared` rows are unfinished work a restarted Host must resume; `failed`
+ * keeps the cursor where the failure left it so the range retries instead of
+ * silently passing.
  */
 export type OrganizerProgressStatus =
   | "pending"
   | "processing"
+  | "prepared"
   | "formed"
   | "reviewed-empty"
   | "failed";
 
+/**
+ * A memory proposal durably stored between prepare and commit. Proposals
+ * carry no batch-local source index — attribution lives on the progress row's
+ * `key`, which names the source range the proposal was distilled from.
+ */
+export interface OrganizerPreparedProposal {
+  action: "new" | "supplement" | "correct";
+  scope: "workspace" | "user" | "bot";
+  nature?: string;
+  content: string;
+  trigger?: string;
+  target?: number;
+}
+
 export interface OrganizerProgress {
   key: string;
   status: OrganizerProgressStatus;
+  /**
+   * Content fingerprint of the covered source range. Coverage only counts
+   * when the row is terminal (`formed`/`reviewed-empty`) AND the fingerprint
+   * matches the range's current content — a changed source reopens coverage.
+   */
+  sourceKey?: string;
   /** Last processed store event id for session sources. */
   eventCursor?: number;
   /** Last processed Pi entry id for session sources. */
   entryCursor?: string;
   /** Knowledge ids this source produced, for audit and late-result checks. */
   produced?: number[];
+  /**
+   * `prepared` rows hold their proposals here so a crash between prepare and
+   * commit replays exactly these proposals instead of re-narrating divergent
+   * ones. Cleared when the row reaches a terminal status.
+   */
+  proposals?: OrganizerPreparedProposal[];
   updatedAt: number;
   lastError?: string;
 }

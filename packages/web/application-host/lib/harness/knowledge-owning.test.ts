@@ -5,8 +5,8 @@ import { afterEach, describe, expect, it } from "vitest";
 import type { HarnessActorContext } from "@varin/protocol";
 import { openWorkspaceKnowledge } from "../knowledge/store.js";
 import { createKnowledgeContextRuntime } from "../knowledge/context-runtime.js";
-import { createKnowledgeSuggestService, createRecallSearchService } from "./harness-services.js";
-import { DEFAULT_SUGGESTIONS_SETTINGS } from "./knowledge-suggestions.js";
+import { createRecallSearchService } from "./harness-services.js";
+import { createMemoryService } from "../memory/memory-service.js";
 import { createHarnessServiceHost } from "./service-host.js";
 import type { HarnessServiceContext } from "./router.js";
 import { createThreadRegistry } from "./thread-registry.js";
@@ -93,13 +93,6 @@ describe("thread knowledge owning workspace", () => {
         if (!workspaceStore) throw new Error(`Missing knowledge store: ${owningWorkspaceId}`);
         return { workspaceStore, userStore: null, workspaceId: owningWorkspaceId };
       },
-      knowledgeSuggestDepsProvider: async (sessionId, workspaceId) => {
-        const owningWorkspaceId = await owningKnowledgeWorkspaceIdForSession(sessionId, workspaceId);
-        if (!owningWorkspaceId || owningWorkspaceId === "user") return null;
-        const store = stores.get(owningWorkspaceId);
-        if (!store) return null;
-        return { store, settings: DEFAULT_SUGGESTIONS_SETTINGS };
-      },
     });
     cleanup.push(() => host.dispose());
 
@@ -136,28 +129,30 @@ describe("thread knowledge owning workspace", () => {
     );
     expect(recalled.results.map((item) => item.title)).toEqual(["Owning workspace fact"]);
 
-    const suggestedStores: string[] = [];
-    const suggestingHost = createHarnessServiceHost({
-      search: async () => ({ status: "empty", generation: undefined }),
-      resolveWorkspaceRoot: async () => null,
-      discoveredShells: {},
-      threadRegistry: registry,
-      knowledgeSuggestDepsProvider: async (sessionId, workspaceId) => {
-        const owningWorkspaceId = await owningKnowledgeWorkspaceIdForSession(sessionId, workspaceId);
-        if (!owningWorkspaceId || owningWorkspaceId === "user") return null;
-        suggestedStores.push(owningWorkspaceId);
-        const store = stores.get(owningWorkspaceId);
-        if (!store) return null;
-        return { store, settings: DEFAULT_SUGGESTIONS_SETTINGS };
+    const memoryOwners: string[] = [];
+    const ownerForSession = async (sessionId: string) => {
+      const owningWorkspaceId = await owningKnowledgeWorkspaceIdForSession(sessionId, "execution-ws");
+      if (!owningWorkspaceId) throw new Error("No knowledge owner for session");
+      memoryOwners.push(owningWorkspaceId);
+      return { scope: "workspace" as const, ownerId: owningWorkspaceId };
+    };
+    const memory = createMemoryService({
+      storeForScopeId: async (scopeId) => {
+        const store = stores.get(scopeId);
+        if (!store) throw new Error(`Missing knowledge store: ${scopeId}`);
+        return store;
       },
+      userStore: async () => null,
+      ownerForSession,
     });
-    cleanup.push(() => suggestingHost.dispose());
-    const suggested = await createKnowledgeSuggestService(suggestingHost).handle({
+    const written = await memory.remember(await ownerForSession("child-session"), {
       content: "Remember owning convention",
       trigger: "owning",
-    }, ctx(new AbortController().signal));
-    expect(suggested.created).toBe(true);
-    expect(suggestedStores).toEqual(["owning-ws"]);
+    });
+    expect(written.created).toBe(true);
+    expect(memoryOwners).toEqual(["owning-ws"]);
+    expect((await owningStore.listKnowledge({ scope: "workspace" }))
+      .some((row) => row.content === "Remember owning convention")).toBe(true);
 
     const afterRebind = await runtime.zone2Material({
       sessionId: "child-session",

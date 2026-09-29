@@ -53,26 +53,29 @@ describe("harness settings", () => {
     assert.equal(merged.dispatch.askBefore.write, true);
   });
 
-  it("keeps user-memory auto-accept user-owned while workspace memory remains overridable", () => {
+  it("keeps user-owned autoOrganize switches while workspace memory remains overridable", () => {
     const merged = mergeHarnessSettings(
-      { knowledge: { eventRetentionDays: 30, autoAcceptSuggestions: { workspace: true, user: false },
+      { knowledge: { eventRetentionDays: 30,
         autoOrganize: { workspace: true, user: true, bot: true } } },
-      { knowledge: { eventRetentionDays: 30, autoAcceptSuggestions: { workspace: false, user: true },
-        autoOrganize: { workspace: true, user: true, bot: true } } },
+      { knowledge: { eventRetentionDays: 30,
+        autoOrganize: { workspace: false, user: false, bot: false } } },
     );
-    // A workspace must be able to turn off auto-accept that the user enabled globally.
-    assert.equal(merged.knowledge.autoAcceptSuggestions.workspace, false);
-    assert.equal(merged.knowledge.autoAcceptSuggestions.user, false);
+    // A workspace may turn off organizing for itself; the user/bot switches
+    // are user-owned and cannot be re-disabled or re-enabled by a project.
+    assert.equal(merged.knowledge.autoOrganize.workspace, false);
+    assert.equal(merged.knowledge.autoOrganize.user, true);
+    assert.equal(merged.knowledge.autoOrganize.bot, true);
   });
 
-  it("keeps user autoAcceptSuggestions when the workspace does not set them", () => {
+  it("keeps user autoOrganize when the workspace does not set it", () => {
     const merged = mergeHarnessSettings(
-      { knowledge: { eventRetentionDays: 30, autoAcceptSuggestions: { workspace: true, user: false },
-        autoOrganize: { workspace: true, user: true, bot: true } } },
+      { knowledge: { eventRetentionDays: 30,
+        autoOrganize: { workspace: false, user: true, bot: false } } },
       {},
     );
-    assert.equal(merged.knowledge.autoAcceptSuggestions.workspace, true);
-    assert.equal(merged.knowledge.autoAcceptSuggestions.user, false);
+    assert.equal(merged.knowledge.autoOrganize.workspace, false);
+    assert.equal(merged.knowledge.autoOrganize.user, true);
+    assert.equal(merged.knowledge.autoOrganize.bot, false);
   });
 
   it("workspace tools override user tools", () => {
@@ -193,11 +196,11 @@ describe("harness settings", () => {
     ).review, { enabled: false, gate: false });
   });
 
-  it("keeps next-step selection user-owned, disabled by default, and separate from knowledge suggestions", () => {
+  it("keeps next-step selection user-owned, disabled by default, and separate from the memory organizer", () => {
     assert.deepEqual(mergeHarnessSettings({}, {}).nextStep, { enabled: false });
     assert.equal(mergeHarnessSettings({}, { nextStep: { enabled: true } }).nextStep.enabled, false);
     assert.equal(mergeHarnessSettings({ nextStep: { enabled: true } }, {}).nextStep.enabled, true);
-    assert.equal(mergeHarnessSettings({ models: { knowledgeSuggestions: { providerId: "p", modelId: "knowledge" } } }, {}).models.knowledgeSuggestions?.modelId, "knowledge");
+    assert.equal(mergeHarnessSettings({ models: { memoryOrganizer: { providerId: "p", modelId: "memory" } } }, {}).models.memoryOrganizer?.modelId, "memory");
   });
 
   it("rejects malformed next-step settings", () => {

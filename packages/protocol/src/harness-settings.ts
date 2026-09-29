@@ -285,7 +285,6 @@ export interface HarnessSettings {
   dispatch: { concurrency: number; askBefore: Partial<Record<string, boolean>> };
   knowledge: {
     eventRetentionDays: number;
-    autoAcceptSuggestions: { workspace: boolean; user: boolean };
     /**
      * Background memory organization (BC2): which source scopes the organizer
      * may process (`workspace`/`bot`), and whether inferred proposals may land
@@ -338,7 +337,6 @@ export type HarnessModelRole =
   | "review"
   | "check"
   | "reader"
-  | "knowledgeSuggestions"
   | "nextStep"
   | "permissionJudge"
   | "researchInvestigation"
@@ -357,7 +355,6 @@ export const DEFAULT_HARNESS_SETTINGS: HarnessSettings = {
   dispatch: { concurrency: 12, askBefore: {} },
   knowledge: {
     eventRetentionDays: 30,
-    autoAcceptSuggestions: { workspace: false, user: false },
     autoOrganize: { workspace: true, user: true, bot: true },
   },
   context: { backgroundPreparation: true, preparationWaterline: 0.75,
@@ -502,13 +499,6 @@ export function mergeHarnessSettings(
       ...DEFAULT_HARNESS_SETTINGS.knowledge,
       ...user.knowledge,
       ...workspace.knowledge,
-      autoAcceptSuggestions: {
-        user: user.knowledge?.autoAcceptSuggestions?.user
-          ?? DEFAULT_HARNESS_SETTINGS.knowledge.autoAcceptSuggestions.user,
-        workspace: workspace.knowledge?.autoAcceptSuggestions?.workspace
-          ?? user.knowledge?.autoAcceptSuggestions?.workspace
-          ?? DEFAULT_HARNESS_SETTINGS.knowledge.autoAcceptSuggestions.workspace,
-      },
       // Background organization is user-owned. The workspace layer may disable
       // organizing for its own scope but cannot touch the user/bot switches.
       autoOrganize: {

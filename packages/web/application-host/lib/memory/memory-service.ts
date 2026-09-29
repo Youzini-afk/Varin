@@ -67,6 +67,8 @@ export interface MemoryRecordInput {
   /** `accepted` persists immediately; `suggested` is a reviewable proposal. */
   commit?: KnowledgeStatus;
   expectedRevision?: string;
+  /** Existing memory in the same scope this row refines (supplements edge). */
+  supplements?: NodeId;
 }
 
 export interface MemoryRecordResult {
@@ -127,6 +129,7 @@ export function createMemoryService(deps: MemoryServiceDeps) {
       trigger: input.trigger?.trim() ?? "",
       ...(input.nature ? { nature: input.nature } : {}),
       ...(input.source ? { source: input.source } : {}),
+      ...(input.supplements !== undefined ? { supplements: input.supplements } : {}),
     }, { explicit: input.source?.kind !== "memory-organizer", ...(input.expectedRevision !== undefined ? { expectedRevision: input.expectedRevision } : {}) });
     if (result.created) notify(owner, [result.knowledge.id]);
     return { created: result.created, duplicate: result.duplicate, item: result.knowledge };

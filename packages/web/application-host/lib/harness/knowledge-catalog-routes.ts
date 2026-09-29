@@ -7,17 +7,19 @@ import {
   type KnowledgeStore,
 } from "../knowledge/store.js";
 import {
-  DEFAULT_SUGGESTIONS_SETTINGS,
   acceptSuggestion,
   dismissSuggestion,
 } from "./knowledge-suggestions.js";
 import { botScopeId, isBotScopeId } from "./owner-scope.js";
+import type { MemoryOrganizer } from "../memory/memory-organizer.js";
 
 export interface KnowledgeCatalogRoutesOptions {
   resolveWorkspace(input: { workspaceId: string }): Promise<{ workspaceId: string }>;
   getWorkspaceStore(workspaceId: string): Promise<KnowledgeStore>;
   getUserStore(): Promise<KnowledgeStore>;
   onKnowledgeChanged?: (change: { scope: KnowledgeScope; workspaceId?: string }) => void;
+  /** Background organizer — powers the progress surface and manual retry. */
+  organizer?: Pick<MemoryOrganizer, "describe" | "noteScope">;
   requireAuth?: RequestHandler;
 }
 
@@ -51,6 +53,7 @@ export function registerHarnessKnowledgeCatalogRoutes(
     getWorkspaceStore,
     getUserStore,
     onKnowledgeChanged,
+    organizer,
     requireAuth = noAuth,
   }: KnowledgeCatalogRoutesOptions,
 ): void {
@@ -97,6 +100,66 @@ export function registerHarnessKnowledgeCatalogRoutes(
     const resolved = await resolveWorkspace({ workspaceId });
     return { store: await getWorkspaceStore(resolved.workspaceId), workspaceId: resolved.workspaceId };
   };
+
+  /**
+   * Organizer progress for a source scope (`workspace` or `bot`). Rows carry
+   * pending/prepared/failed state with errors; `enabled`/`model` report
+   * whether organizing can actually run so the UI can show "not configured"
+   * instead of silently empty coverage.
+   */
+  const organizerScopeId = async (request: Request): Promise<string | null> => {
+    const scope = scopeOf(request.query.scope ?? request.body?.scope);
+    if (scope === "bot") {
+      const rawId = typeof request.query.botId === "string" ? request.query.botId.trim()
+        : typeof request.body?.botId === "string" ? request.body.botId.trim() : "";
+      const candidate = isBotScopeId(request.query.workspaceId ?? request.body?.workspaceId)
+        ? String(request.query.workspaceId ?? request.body?.workspaceId)
+        : rawId ? botScopeId(rawId) : "";
+      return candidate || null;
+    }
+    if (scope !== "workspace") return null;
+    const workspaceId = typeof request.query.workspaceId === "string"
+      ? request.query.workspaceId.trim()
+      : typeof request.body?.workspaceId === "string" ? request.body.workspaceId.trim() : "";
+    if (!workspaceId) return null;
+    return (await resolveWorkspace({ workspaceId })).workspaceId;
+  };
+
+  app.get("/api/harness/knowledge/organizer", requireAuth, async (request: Request, response: Response) => {
+    response.setHeader("Cache-Control", "no-store");
+    if (!organizer) {
+      response.status(503).json({ error: "Memory organizer is not configured" });
+      return;
+    }
+    try {
+      const scopeId = await organizerScopeId(request);
+      if (!scopeId) {
+        response.status(400).json({ error: "scope must be workspace or bot with workspaceId/botId" });
+        return;
+      }
+      response.json({ scopeId, ...(await organizer.describe(scopeId)) });
+    } catch (error) {
+      sendKnowledgeError(response, error);
+    }
+  });
+
+  app.post("/api/harness/knowledge/organizer/retry", requireAuth, async (request: Request, response: Response) => {
+    if (!organizer) {
+      response.status(503).json({ error: "Memory organizer is not configured" });
+      return;
+    }
+    try {
+      const scopeId = await organizerScopeId(request);
+      if (!scopeId) {
+        response.status(400).json({ error: "scope must be workspace or bot with workspaceId/botId" });
+        return;
+      }
+      organizer.noteScope(scopeId);
+      response.json({ scopeId, scheduled: true });
+    } catch (error) {
+      sendKnowledgeError(response, error);
+    }
+  });
 
   app.get("/api/harness/knowledge", requireAuth, async (request: Request, response: Response) => {
     response.setHeader("Cache-Control", "no-store");
@@ -272,7 +335,7 @@ export function registerHarnessKnowledgeCatalogRoutes(
     }
     try {
       const { store, workspaceId } = await catalogStore(request, scope);
-      const deps = { store, settings: DEFAULT_SUGGESTIONS_SETTINGS };
+      const deps = { store };
       if (action === "accept") {
         await acceptSuggestion(id, deps, {
           supersedes,

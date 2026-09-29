@@ -14,7 +14,6 @@ import type { KnowledgeStore } from "../knowledge/store.js";
 import type { Zone2MaterialRequest, Zone2MaterialResult } from "../knowledge/context-runtime.js";
 import type { TodoToolDeps } from "./todo-tool.js";
 import type { RecallToolDeps } from "./recall-tool.js";
-import type { KnowledgeSuggestionsSettings } from "./knowledge-suggestions.js";
 import type { createLspNavigationServices } from "./lsp-nav.js";
 import type { StructureSource } from "../structure/types.js";
 import type { ThreadRegistry } from "./thread-registry.js";
@@ -325,10 +324,6 @@ export interface HarnessServiceHost {
   zone2Delivery: ReturnType<typeof createZone2DeliveryService>;
   onSessionCompacted: ((sessionId: string) => void) | null;
   recallDepsProvider: ((sessionId: string, workspaceId: string | null) => Promise<RecallToolDeps>) | null;
-  knowledgeSuggestDepsProvider: ((
-    sessionId: string,
-    workspaceId: string | null,
-  ) => Promise<{ store: KnowledgeStore; settings: KnowledgeSuggestionsSettings; onChanged?: () => void } | null>) | null;
   todoDepsProvider: ((sessionId: string) => Promise<TodoToolDeps>) | null;
   /** BC1 unified memory service shared by harness methods, routes, and UI. */
   memoryService?: import("../memory/memory-service.js").MemoryService | null;
@@ -591,7 +586,6 @@ export interface HarnessServiceHostOptions {
   zone2Provider?: (request: Zone2MaterialRequest) => Promise<Zone2MaterialResult>;
   onSessionCompacted?: (sessionId: string) => void;
   recallDepsProvider?: (sessionId: string, workspaceId: string | null) => Promise<RecallToolDeps>;
-  knowledgeSuggestDepsProvider?: HarnessServiceHost["knowledgeSuggestDepsProvider"];
   todoDepsProvider?: (sessionId: string) => Promise<TodoToolDeps>;
   memoryService?: NonNullable<HarnessServiceHost["memoryService"]>;
   computerService?: NonNullable<HarnessServiceHost["computerService"]>;
@@ -673,7 +667,6 @@ export function createHarnessServiceHost(options: HarnessServiceHostOptions): Ha
   const zone2Delivery = createZone2DeliveryService();
   const onSessionCompacted = options.onSessionCompacted ?? null;
   const recallDepsProvider = options.recallDepsProvider ?? null;
-  const knowledgeSuggestDepsProvider = options.knowledgeSuggestDepsProvider ?? null;
   const todoDepsProvider = options.todoDepsProvider ?? null;
   // Phase 3
   const threadRegistry = options.threadRegistry ?? null;
@@ -1065,7 +1058,6 @@ export function createHarnessServiceHost(options: HarnessServiceHostOptions): Ha
     zone2Delivery,
     onSessionCompacted,
     recallDepsProvider,
-    knowledgeSuggestDepsProvider,
     todoDepsProvider,
     memoryService: options.memoryService ?? null,
     computerService: options.computerService ?? null,

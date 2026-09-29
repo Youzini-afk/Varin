@@ -6,7 +6,6 @@ import {
   type KnowledgeStore,
 } from "../knowledge/store.js";
 import {
-  DEFAULT_SUGGESTIONS_SETTINGS,
   acceptSuggestion,
   dismissSuggestion,
   suggestSupersedes,
@@ -159,10 +158,7 @@ export function registerHarnessContextRoutes(
           store.listKnowledge({ scope, status: "accepted", activeOnly: true }),
         ]);
         return Promise.all(pending.map(async (suggestion) => {
-          const candidateIds = await suggestSupersedes(suggestion.id, suggestion.trigger, {
-            store,
-            settings: DEFAULT_SUGGESTIONS_SETTINGS,
-          }, scope);
+          const candidateIds = await suggestSupersedes(suggestion.id, suggestion.trigger, { store }, scope);
           return {
             ...suggestion,
             supersedesCandidates: accepted.filter((candidate) => candidateIds.includes(candidate.id)),
@@ -286,7 +282,7 @@ export function registerHarnessContextRoutes(
         response.status(404).json({ error: `${scope} knowledge store is unavailable` });
         return;
       }
-      const deps = { store, settings: DEFAULT_SUGGESTIONS_SETTINGS };
+      const deps = { store };
       if (action === "accept") await acceptSuggestion(id, deps, {
         supersedes,
         scope,

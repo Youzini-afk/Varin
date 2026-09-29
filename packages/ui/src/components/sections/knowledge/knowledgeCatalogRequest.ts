@@ -234,3 +234,78 @@ export async function reviewKnowledgeCatalogItem(
   if (response.status === 409) throw Object.assign(new Error('conflict'), { code: 'conflict' });
   if (!response.ok) throw new Error(await readError(response));
 }
+
+// ── Background organizer status (BC2) ──────────────────────────────
+
+export type OrganizerProgressStatus = 'pending' | 'processing' | 'prepared' | 'formed' | 'reviewed-empty' | 'failed';
+
+export interface OrganizerProgressRow {
+  key: string;
+  status: OrganizerProgressStatus;
+  produced?: number[];
+  updatedAt: number;
+  lastError?: string;
+}
+
+export interface OrganizerStatus {
+  enabled: boolean;
+  model: { providerId: string; modelId: string } | null;
+  rows: OrganizerProgressRow[];
+}
+
+const ORGANIZER_STATUSES: readonly OrganizerProgressStatus[] = [
+  'pending', 'processing', 'prepared', 'formed', 'reviewed-empty', 'failed',
+];
+
+export const parseOrganizerStatus = (value: unknown): OrganizerStatus => {
+  const response = recordOf(value);
+  if (!response || typeof response.enabled !== 'boolean' || !Array.isArray(response.rows)) {
+    throw new Error('Malformed organizer status');
+  }
+  const model = recordOf(response.model);
+  return {
+    enabled: response.enabled,
+    model: model && typeof model.providerId === 'string' && typeof model.modelId === 'string'
+      ? { providerId: model.providerId, modelId: model.modelId }
+      : null,
+    rows: response.rows.flatMap((raw) => {
+      const row = recordOf(raw);
+      const status = ORGANIZER_STATUSES.find((candidate) => candidate === row?.status);
+      if (!row || typeof row.key !== 'string' || !status || typeof row.updatedAt !== 'number') return [];
+      return [{
+        key: row.key,
+        status,
+        ...(Array.isArray(row.produced) ? { produced: row.produced.filter(Number.isSafeInteger) as number[] } : {}),
+        updatedAt: row.updatedAt,
+        ...(typeof row.lastError === 'string' ? { lastError: row.lastError } : {}),
+      }];
+    }),
+  };
+};
+
+export async function loadOrganizerStatus(
+  scope: KnowledgeCatalogScope,
+  workspaceId?: string,
+  signal?: AbortSignal,
+): Promise<OrganizerStatus> {
+  const response = await runtimeFetch(`/api/harness/knowledge/organizer?${workspaceQuery(scope, workspaceId)}`, {
+    cache: 'no-store',
+    ...(signal ? { signal } : {}),
+  });
+  if (!response.ok) throw new Error(await readError(response));
+  return parseOrganizerStatus(await response.json());
+}
+
+export async function retryOrganizerScope(
+  scope: KnowledgeCatalogScope,
+  workspaceId?: string,
+  signal?: AbortSignal,
+): Promise<void> {
+  const response = await runtimeFetch('/api/harness/knowledge/organizer/retry', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ scope, ...workspaceBody(scope, workspaceId) }),
+    ...(signal ? { signal } : {}),
+  });
+  if (!response.ok) throw new Error(await readError(response));
+}

@@ -27,7 +27,6 @@ import { createLspDiagnosticsService, createLspDiagnosticsSnapshotService } from
 import { assembleZone2Content } from "./zone2.js";
 import { executeTodoTool } from "./todo-tool.js";
 import { executeRecall } from "./recall-tool.js";
-import { proposeUserMessageSuggestion } from "./knowledge-suggestions.js";
 import { registerMemoryServices } from "./memory-services.js";
 import { registerComputerServices } from "./computer-services.js";
 import { createZone2DeliveryService, prepareZone2Threads } from "./zone2-threads.js";
@@ -1029,40 +1028,6 @@ export function createTodoUpsertService(host: HarnessServiceHost): HarnessServic
   };
 }
 
-export function createKnowledgeSuggestService(host: HarnessServiceHost): HarnessService<"knowledge.suggest"> {
-  return {
-    handle: async (params, ctx: HarnessServiceContext) => {
-      if (!host.knowledgeSuggestDepsProvider) {
-        throw new HarnessServiceError("unavailable", "Knowledge suggestion deps not configured");
-      }
-      // `knowledge.suggest` is an internal worker entry point for user-message
-      // proposals. Its authority is always the actor's workspace; scope and
-      // source kind are deliberately not worker-controlled. Keep rejecting
-      // forged legacy fields at runtime even though the public protocol type
-      // no longer exposes them.
-      const rawParams = params as unknown as Record<string, unknown>;
-      if (rawParams.scope !== undefined || rawParams.kind !== undefined) {
-        throw new HarnessServiceError("invalid-params", "knowledge.suggest accepts no scope or source kind");
-      }
-      const content = typeof params.content === "string" ? params.content : "";
-      if (!content.trim()) return { created: false, skippedReason: "empty" };
-      if (!ctx.workspaceId || ctx.workspaceId === "user") return { created: false, skippedReason: "no-workspace" };
-      const deps = await host.knowledgeSuggestDepsProvider(ctx.sessionId, ctx.workspaceId);
-      if (!deps) return { created: false, skippedReason: "no-workspace" };
-      const result = await proposeUserMessageSuggestion({
-        trigger: "user-message",
-        content,
-        recallTrigger: typeof params.trigger === "string" ? params.trigger : "",
-        sessionId: ctx.sessionId,
-        kind: "user-message",
-        scope: "workspace",
-      }, deps);
-      if (result.created) deps.onChanged?.();
-      return result;
-    },
-  };
-}
-
 export function createRecallSearchService(host: HarnessServiceHost): HarnessService<"recall.search"> {
   return {
     handle: async (params, ctx: HarnessServiceContext) => {
@@ -1196,9 +1161,6 @@ export function registerHarnessServices(
   }
   if (host.recallDepsProvider) {
     router.register("recall.search", createRecallSearchService(host));
-  }
-  if (host.knowledgeSuggestDepsProvider) {
-    router.register("knowledge.suggest", createKnowledgeSuggestService(host));
   }
   // BC1 unified memory — remember/correct/forget/get share one write path.
   registerMemoryServices(router, host);

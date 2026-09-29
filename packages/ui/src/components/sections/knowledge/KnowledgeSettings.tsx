@@ -14,12 +14,15 @@ import { useSettingsSearchTarget } from '@/lib/settings/search-target';
 import {
   loadKnowledgeCatalog,
   loadKnowledgeChain,
+  loadOrganizerStatus,
   retireKnowledgeCatalogItem,
+  retryOrganizerScope,
   reviewKnowledgeCatalogItem,
   saveKnowledgeCatalogItem,
   type KnowledgeCatalogChain,
   type KnowledgeCatalogItem,
   type KnowledgeCatalogScope,
+  type OrganizerStatus,
 } from './knowledgeCatalogRequest';
 import { listBots } from '@/lib/bots';
 import { openPiSessionFromNavigation } from '@/lib/pi-runtime/sessionNavigation';
@@ -227,9 +230,33 @@ export const KnowledgeSettings: React.FC = () => {
     if (searchTarget === 'knowledge.workspace') changeScope('workspace');
   }, [searchTarget, changeScope]);
 
-  const automation = harness.harness?.knowledge.autoAcceptSuggestions;
   const autoOrganize = harness.harness?.knowledge.autoOrganize;
-  const suggestionModel = harness.harness?.models?.knowledgeSuggestions;
+  const [organizer, setOrganizer] = React.useState<OrganizerStatus | null>(null);
+  const [organizerBusy, setOrganizerBusy] = React.useState(false);
+
+  // Organizer progress belongs to the source scope's own store — workspace or
+  // `bot:<id>`. The user scope is a proposal target, never a source, so it
+  // has no organizer view.
+  React.useEffect(() => {
+    if (scope === 'user' || !workspaceId) {
+      setOrganizer(null);
+      return;
+    }
+    const controller = new AbortController();
+    void loadOrganizerStatus(scope, workspaceId, controller.signal)
+      .then((status) => { if (!controller.signal.aborted) setOrganizer(status); })
+      .catch(() => { if (!controller.signal.aborted) setOrganizer(null); });
+    return () => controller.abort();
+  }, [scope, workspaceId]);
+
+  const reloadOrganizer = React.useCallback(async () => {
+    if (scope === 'user' || !workspaceId) return;
+    try {
+      setOrganizer(await loadOrganizerStatus(scope, workspaceId));
+    } catch {
+      setOrganizer(null);
+    }
+  }, [scope, workspaceId]);
 
   return (
     <>
@@ -422,32 +449,10 @@ export const KnowledgeSettings: React.FC = () => {
         contentClassName="space-y-2"
       >
         <p className={SETTINGS_HELPER_CLASS}>
-          {t('settings.knowledge.automation.model')}: {suggestionModel
-            ? `${suggestionModel.providerId} / ${suggestionModel.modelId}`
+          {t('settings.knowledge.automation.model')}: {organizer?.model
+            ? `${organizer.model.providerId} / ${organizer.model.modelId}`
             : t('settings.knowledge.automation.modelUnset')}
         </p>
-        <label className="flex items-center gap-2 typography-ui">
-          <input
-            type="checkbox"
-            checked={automation?.workspace === true}
-            disabled={!automation}
-            onChange={(event) => harness.update({
-              knowledge: { autoAcceptSuggestions: { workspace: event.target.checked } },
-            })}
-          />
-          {t('settings.knowledge.automation.autoAcceptWorkspace')}
-        </label>
-        <label className="flex items-center gap-2 typography-ui">
-          <input
-            type="checkbox"
-            checked={automation?.user === true}
-            disabled={!automation}
-            onChange={(event) => harness.update({
-              knowledge: { autoAcceptSuggestions: { user: event.target.checked } },
-            })}
-          />
-          {t('settings.knowledge.automation.autoAcceptUser')}
-        </label>
         {(['workspace', 'user', 'bot'] as const).map((scope) => (
           <label key={scope} className="flex items-center gap-2 typography-ui">
             <input
@@ -461,6 +466,46 @@ export const KnowledgeSettings: React.FC = () => {
             {t(`settings.knowledge.automation.autoOrganize.${scope}`)}
           </label>
         ))}
+        {scope !== 'user' && workspaceId ? (
+          <div className="space-y-2 pt-2">
+            <div className="flex items-center justify-between gap-2">
+              <h4 className="typography-ui-label text-muted-foreground">{t('settings.knowledge.organizer.title')}</h4>
+              <Button
+                variant="outline"
+                size="sm"
+                disabled={organizerBusy || !organizer?.enabled}
+                onClick={() => {
+                  setOrganizerBusy(true);
+                  void retryOrganizerScope(scope, workspaceId)
+                    .then(() => {
+                      // The run settles after a debounce — refresh again once
+                      // it has had time to move rows out of failed/prepared.
+                      void reloadOrganizer();
+                      setTimeout(() => void reloadOrganizer(), 3_000);
+                    })
+                    .catch((error) => toast.error(error instanceof Error ? error.message : t('settings.knowledge.organizer.title')))
+                    .finally(() => setOrganizerBusy(false));
+                }}
+              >
+                {t('settings.knowledge.organizer.retry')}
+              </Button>
+            </div>
+            {!organizer ? null : organizer.rows.length === 0 ? (
+              <p className={SETTINGS_HELPER_CLASS}>{t('settings.knowledge.organizer.empty')}</p>
+            ) : (
+              <ul className="space-y-1">
+                {organizer.rows.map((row) => (
+                  <li key={row.key} className={SETTINGS_HELPER_CLASS}>
+                    <span className="font-medium">{row.key}</span>
+                    {` · ${t(`settings.knowledge.organizer.status.${row.status}` as I18nKey)}`}
+                    {row.produced && row.produced.length > 0 ? ` · ${row.produced.map((id) => `#${id}`).join(', ')}` : ''}
+                    {row.lastError ? ` — ${row.lastError}` : ''}
+                  </li>
+                ))}
+              </ul>
+            )}
+          </div>
+        ) : null}
       </SettingsSection>
     </>
   );

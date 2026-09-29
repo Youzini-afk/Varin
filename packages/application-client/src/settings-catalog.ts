@@ -245,10 +245,10 @@ export const SETTINGS_CATALOG: readonly SettingsCatalogEntry[] = [
   {
     id: 'harness.models.assistance', category: 'harness', owner: 'pi-settings',
     field: { path: 'harness.models', kind: 'json', scope: 'user',
-      note: 'role → {providerId, modelId}; assistance roles: review, check, reader, knowledgeSuggestions, permissionJudge, nextStep' },
+      note: 'role → {providerId, modelId}; assistance roles: review, check, reader, memoryOrganizer, permissionJudge, nextStep' },
     apply: 'next-run',
     ui: { page: 'harness-models', titleKey: 'settings.harness.models.assistance',
-      keywords: ['review', 'check', 'reader', 'knowledge suggestions', 'permissionJudge', 'next step', 'model'] },
+      keywords: ['review', 'check', 'reader', 'memory organizer', 'permissionJudge', 'next step', 'model'] },
   },
   {
     id: 'harness.next-step', category: 'harness', owner: 'pi-settings',
@@ -376,7 +376,7 @@ export const SETTINGS_CATALOG: readonly SettingsCatalogEntry[] = [
   {
     id: 'harness.knowledge.retention', category: 'harness', owner: 'pi-settings',
     field: { path: 'harness.knowledge', kind: 'json', scope: 'user-or-project',
-      note: '{eventRetentionDays: number, autoAcceptSuggestions: {workspace, user}}' },
+      note: '{eventRetentionDays: number, autoOrganize: {workspace, user, bot}}' },
     apply: 'next-run',
     ui: { page: 'harness-context', titleKey: 'settings.knowledge.section.workspace',
       keywords: ['knowledge', 'retention', 'suggestions'] },

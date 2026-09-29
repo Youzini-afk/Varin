@@ -669,23 +669,6 @@ export interface RecallSearchResult {
   };
 }
 
-export interface KnowledgeSuggestParams {
-  content: string;
-  trigger?: string;
-}
-
-export interface KnowledgeSuggestResult {
-  created: boolean;
-  skippedReason?: "empty" | "duplicate" | "no-workspace";
-  suggestion?: {
-    id: number;
-    content: string;
-    trigger: string;
-    status: "suggested" | "accepted";
-    scope: "workspace" | "user" | "session" | "bot";
-  };
-}
-
 // ── Unified memory (BC1) ───────────────────────────────────────────
 
 /** What kind of durable claim a memory row carries. */
@@ -1577,7 +1560,6 @@ export interface HarnessServiceMap {
   "context.retained": { params: ContextRetentionParams; result: ContextRetentionResult };
   "todo.upsert": { params: TodoUpsertParams; result: TodoUpsertResult };
   "recall.search": { params: RecallSearchParams; result: RecallSearchResult };
-  "knowledge.suggest": { params: KnowledgeSuggestParams; result: KnowledgeSuggestResult };
   "memory.remember": { params: MemoryRememberParams; result: MemoryRememberResult };
   "memory.correct": { params: MemoryCorrectParams; result: MemoryCorrectResult };
   "memory.forget": { params: MemoryForgetParams; result: MemoryForgetResult };
@@ -1755,7 +1737,6 @@ export const HARNESS_METHOD_CAPABILITY = {
   "context.retained": "context.session",
   "todo.upsert": "context.session",
   "recall.search": "context.session",
-  "knowledge.suggest": "context.session",
   "memory.remember": "context.session",
   "memory.correct": "context.session",
   "memory.forget": "context.session",
@@ -1904,7 +1885,6 @@ const HARNESS_METHODS: ReadonlySet<string> = new Set<string>([
   "context.retained",
   "todo.upsert",
   "recall.search",
-  "knowledge.suggest",
   "memory.remember",
   "memory.correct",
   "memory.forget",
@@ -1959,6 +1939,7 @@ const HARNESS_METHODS: ReadonlySet<string> = new Set<string>([
   "settings.read",
   "settings.update",
   "settings.action",
+  "session.instructions",
   "followup.register",
   "followup.list",
   "followup.get",

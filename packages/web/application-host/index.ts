@@ -85,7 +85,7 @@ import { createThreadRegistry } from './lib/harness/thread-registry.js';
 import { createOnThreadDequeued } from './lib/harness/thread-dequeue.js';
 import { createThreadTranscriptReader } from './lib/harness/thread-transcript.js';
 import { createHarnessPathAuthority } from './lib/harness/path-authority.js';
-import { sessionScopeId, isSessionScopeId, sessionIdFromScopeId, isSessionStoreKey, isBotStoreKey, isBotScopeId, botIdFromScopeId, knowledgeStoreKeyForScope, scopeOfScopeId } from './lib/harness/owner-scope.js';
+import { sessionScopeId, isSessionScopeId, sessionIdFromScopeId, isSessionStoreKey, isBotStoreKey, isBotScopeId, botIdFromScopeId, botScopeId, knowledgeStoreKeyForScope, scopeOfScopeId } from './lib/harness/owner-scope.js';
 import { createMemoryService } from './lib/memory/memory-service.js';
 import { createMemoryOrganizer, type OrganizerRunSource } from './lib/memory/memory-organizer.js';
 import { createExploreFileReader } from './lib/harness/explore-file-reader.js';
@@ -133,7 +133,6 @@ import { registerHarnessFollowUpRoutes } from './lib/harness/follow-up-routes.js
 import { registerHarnessThreadRoutes } from './lib/harness/thread-routes.js';
 import { registerHarnessContextRoutes } from './lib/harness/context-routes.js';
 import { registerHarnessKnowledgeCatalogRoutes } from './lib/harness/knowledge-catalog-routes.js';
-import { DEFAULT_SUGGESTIONS_SETTINGS, suggestionSettingsFromSnapshot } from './lib/harness/knowledge-suggestions.js';
 import { createLanguageSupervisorDiagnosticsProvider } from './lib/harness/diagnostics-adapter.js';
 import { createLspNavigationServices } from './lib/harness/lsp-nav.js';
 import { createRelationCollector } from './lib/knowledge/relations.js';
@@ -1832,7 +1831,11 @@ async function main(options: StartWebUiServerOptions = {}): Promise<WebUiServerC
         .filter((file) => file.endsWith('.tdb'))
         .map((file) => file.slice(0, -'.tdb'.length))
         .filter((key) => !isSessionStoreKey(key) && !isBotStoreKey(key));
-      return [...new Set([...fromRegistry, ...fromDisk])].sort();
+      // Bot store files are hashed and cannot be reversed — enumerate the bot
+      // registry so `bot:<id>` scopes are swept like workspaces.
+      const fromBots = (await botService.list().catch(() => []))
+        .map((bot) => botScopeId(bot.id));
+      return [...new Set([...fromRegistry, ...fromDisk, ...fromBots])].sort();
     },
     listScopeSessions: async (scopeId) => {
       const threads = await threadRegistry.listWorkspaceThreads(scopeId);
@@ -1865,6 +1868,13 @@ async function main(options: StartWebUiServerOptions = {}): Promise<WebUiServerC
       return sources;
     },
     scopeForSession: (sessionId) => owningKnowledgeScopeIdForSession(sessionId),
+    // A Bot scope with no dedicated organizer slot inherits the Bot's own
+    // model — Bot memory keeps organizing without a second configuration.
+    organizerModelForScope: async (scopeId) => {
+      if (!isBotScopeId(scopeId)) return null;
+      const bot = await botService.get(botIdFromScopeId(scopeId)).catch(() => null);
+      return bot?.model ?? null;
+    },
     autoOrganizeForScope: async (scopeId) => {
       const runtime = semanticRuntimeHolder.current;
       if (!runtime) return null;
@@ -1980,15 +1990,6 @@ async function main(options: StartWebUiServerOptions = {}): Promise<WebUiServerC
       scope: 'branch',
     });
     return branch.entries.map((entry) => entry.id);
-  };
-  const knowledgeSuggestionSettingsForSession = async (sessionId: string) => {
-    try {
-      const snapshot = await piRuntimeBroker.requestForSession(sessionId, 'settings.get', {});
-      return suggestionSettingsFromSnapshot(snapshot);
-    } catch (error) {
-      console.error(`[HarnessKnowledge] Unable to read suggestion settings for ${sessionId}:`, errorMessage(error));
-      return DEFAULT_SUGGESTIONS_SETTINGS;
-    }
   };
   const harnessWorkingStates = createKernelWorkspaceWorkingStateAccess(kernelStorageAdapter, foundationalRecoveryEngine, kernelRecoveryStore);
   const sourceViews = createSourceViewStore(harnessWorkingStates);
@@ -2709,6 +2710,7 @@ async function main(options: StartWebUiServerOptions = {}): Promise<WebUiServerC
         properties: { scope, ...(workspaceId ? { workspaceId } : {}) },
       });
     },
+    organizer: memoryOrganizer,
     ...(uiAuthController ? { requireAuth: uiAuthController.requireAuth } : {}),
   });
   registerWebSearchCredentialRoutes(app, {
@@ -3438,23 +3440,6 @@ async function main(options: StartWebUiServerOptions = {}): Promise<WebUiServerC
     onSessionCompacted: (sessionId) => knowledgeContextRuntime.resetSessionObservationBaselines(sessionId),
     todoDepsProvider,
     recallDepsProvider,
-    knowledgeSuggestDepsProvider: async (sessionId, workspaceId) => {
-      const owningWorkspaceId = await owningKnowledgeScopeIdForSession(sessionId, workspaceId);
-      const store = owningWorkspaceId && owningWorkspaceId !== 'user'
-        ? await getKnowledgeStoreForScope(owningWorkspaceId)
-        : null;
-      if (!store) return null;
-      return {
-        store,
-        settings: await knowledgeSuggestionSettingsForSession(sessionId),
-        onChanged: () => {
-          broadcastGlobalUiEvent?.({
-            type: 'varin:harness-knowledge-changed',
-            properties: { sessionId, scope: 'workspace', ...(owningWorkspaceId ? { workspaceId: owningWorkspaceId } : {}) },
-          });
-        },
-      };
-    },
     threadRegistry,
     threadCaptureDraftBaseline: (sessionId, workspaceId, context) => threadRuntime!.captureDraftBaseline(sessionId, workspaceId, context),
     threadPrepareIsolatedBranch: (input) => threadRuntime!.prepareIsolatedBranch(input),

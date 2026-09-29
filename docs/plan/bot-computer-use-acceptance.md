@@ -67,30 +67,50 @@ These are implementation gaps, not approvals or a request to add another audit f
 - Bot profile/work DTOs live in `packages/application-client/src/bots.ts` and
   are consumed by the Host service, routes, and UI.
 
-### BC1–BC2: source coverage is not yet one recoverable memory transaction
+### BC1–BC2: one recoverable coverage transaction, single producer
 
-- Active tools and the old `knowledge-suggestion-extension` do not share the
-  organizer's source-range coverage. Exact-content deduplication cannot prove
-  that a paraphrased fragment was already handled. Both automatic producers
-  still exist.
-- Knowledge commits and progress commits remain separate. Failure between them
-  can cause the next model attempt to generate a different proposal for the
-  same range. The source guard repaired here protects a forgotten range, but
-  is not a durable proposal/commit receipt for an entire batch.
-- Session progress is still cursor-based. Branch changes, changes to covered
-  source content, and revised Run reports require source-revision reconciliation.
-- `supplement` still writes another row without persisting the promised relation.
-  Claims about graph organization therefore exceed this implementation.
-- Missing organizer-model configuration quietly returns. There is no implemented
-  “inherit this Bot's main model” binding or complete pending/failure progress UI.
-- Source batching still uses fixed counts, and the source-unit abstraction needs
-  model-capacity-aware subdivision rather than silent clipping or perpetual
-  oversized retries. This review removes dishonest coverage, not that remaining
-  scheduling work.
+Implemented and verified by focused tests (`memory-organizer.test.ts`,
+`store.test.ts`, `knowledge-catalog-routes.test.ts`):
 
-Complete the durable source/revision → prepared proposal → committed result and
-coverage contract inside the existing memory/storage owner, then converge the
-old suggestion producer. Do not layer another independent scheduler database on it.
+- The background organizer is the only automatic memory producer. The
+  `knowledge-suggestion-extension`, Host `knowledge.suggest` service,
+  `knowledgeSuggestions` model slot, and `autoAcceptSuggestions` settings are
+  removed; `knowledge-suggestions.ts` retains only review-tray helpers
+  (accept/dismiss/supersede candidates) for rows callers wrote as `suggested`.
+- Coverage is a durable transaction: units are claimed `processing`, narrated
+  proposals persist on a `prepared` row (with the source fingerprint) before
+  any memory commit, and a crash/commit failure replays exactly those
+  proposals instead of re-narrating. Terminal writes clear prepared fields.
+- Coverage binds to content, not just cursors: every unit carries a `sourceKey`
+  fingerprint; a terminal row whose source changed (revised run report,
+  extended session range) reopens for reprocessing.
+- `supplement` proposals persist a real `supplements` graph edge to a
+  same-scope existing memory (invalid/cross-scope/self targets rejected);
+  `correct` supersedes with an expected-revision check against the presented
+  revision.
+- Batching is capacity-aware: the narrating model's `contextWindow`
+  (via `model.list`) sizes the per-batch and per-unit character budgets;
+  session event/entry cursors only advance over material actually included,
+  and oversized run reports subdivide into per-part progress rows.
+- Model resolution honors `models.memoryOrganizer`, and a `bot:<id>` scope
+  inherits the Bot's own model when the slot is unset. The narrate→commit
+  window is guarded by a revision compare, and forgetting an organizer-derived
+  row suppresses re-derivation from the same session/run source.
+- Progress is visible: `GET /api/harness/knowledge/organizer` and
+  `POST .../organizer/retry` back a Knowledge Settings surface that shows the
+  organizer model, per-source status (pending/processing/prepared/formed/
+  reviewed-empty/failed with errors), and a retry action. Bot scopes are
+  swept via the bot registry (hashed store keys cannot be reversed).
+
+Remaining gaps (not falsely complete):
+
+- The user scope is a proposal target, not a source scope — organizer source
+  enumeration covers workspace and `bot:<id>` stores only.
+- Prepared replays re-validate proposals through dedupe and target checks,
+  not by re-narration; a heavily changed memory landscape drops stale
+  proposals rather than regenerating better ones for that run.
+- The fast-decision filter is per-batch all-or-nothing; unanswered materials
+  fall through to the generative pass.
 
 ### BC3: unbound inference and Bot consultation are incomplete
 

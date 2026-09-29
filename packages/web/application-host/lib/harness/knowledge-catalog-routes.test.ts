@@ -73,6 +73,55 @@ describe("harness knowledge catalog routes", () => {
     return { app, changed };
   };
 
+  it("exposes organizer progress and schedules a retry per scope", async () => {
+    await store.putOrganizerProgress({
+      key: "session:s1", status: "failed", sourceKey: "fp", eventCursor: 3,
+      updatedAt: 10, lastError: "model offline",
+    });
+    const retried: string[] = [];
+    const app2 = express();
+    app2.use(express.json());
+    registerHarnessKnowledgeCatalogRoutes(app2, {
+      resolveWorkspace: async ({ workspaceId }) => ({ workspaceId }),
+      getWorkspaceStore: async () => store,
+      getUserStore: async () => userStore,
+      organizer: {
+        describe: async (scopeId) => ({
+          enabled: true,
+          model: { providerId: "p", modelId: "m" },
+          rows: scopeId === "workspace-1" ? await store.listOrganizerProgress() : [],
+        }),
+        noteScope: (scopeId) => { retried.push(scopeId); },
+      },
+      requireAuth: (req, res, next) => {
+        if (req.header("x-test-auth") === "yes") next();
+        else res.status(401).json({ error: "auth required" });
+      },
+    });
+
+    await request(app2).get("/api/harness/knowledge/organizer?scope=workspace&workspaceId=workspace-1").expect(401);
+    const status = await request(app2)
+      .get("/api/harness/knowledge/organizer?scope=workspace&workspaceId=workspace-1")
+      .set("x-test-auth", "yes")
+      .expect(200);
+    expect(status.body.enabled).toBe(true);
+    expect(status.body.model).toEqual({ providerId: "p", modelId: "m" });
+    expect(status.body.rows).toEqual([expect.objectContaining({
+      key: "session:s1", status: "failed", lastError: "model offline",
+    })]);
+    await request(app2)
+      .get("/api/harness/knowledge/organizer?scope=workspace")
+      .set("x-test-auth", "yes")
+      .expect(400);
+    await request(app2)
+      .post("/api/harness/knowledge/organizer/retry")
+      .set("x-test-auth", "yes")
+      .send({ scope: "workspace", workspaceId: "workspace-1" })
+      .expect(200)
+      .expect(({ body }) => expect(body).toMatchObject({ scopeId: "workspace-1", scheduled: true }));
+    expect(retried).toEqual(["workspace-1"]);
+  });
+
   it("requires auth and a registered Documents workspace before opening a store", async () => {
     const { app } = appFor();
     await request(app).get("/api/harness/knowledge?scope=workspace&workspaceId=workspace-1").expect(401);
