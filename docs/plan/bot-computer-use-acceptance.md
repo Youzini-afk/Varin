@@ -177,9 +177,10 @@ Implemented behavior covered by focused tests (`workspace-runtime.test.ts`,
   reconfigured embedder rebuilds Bot/session indexes too.
 - `memory.search`, automatic Zone 2 recall, and the `recall` tool share
   `recallSources`. `memory.search` now passes the hybrid vector runtime, the
-  owning scope id, and the calling session's work association — the same
-  inputs automatic recall uses. Sources keep their true scope labels, and
-  final rows are revalidated against their authority store.
+  owning scope id, and the calling session's work association. A default
+  active search also includes available user/session memory, matching automatic
+  recall; an explicit scope stays narrow. Sources keep their true scope labels,
+  and final rows are revalidated against their authority store.
 - Work association is durable, not textual: the association is the session's
   bound Thread, its ancestor chain, and its descendant follow-up Threads,
   expanded with every Run and session id those Threads produced. Associated
@@ -198,9 +199,19 @@ Implemented behavior covered by focused tests (`workspace-runtime.test.ts`,
   both survive worker restart. Pi's tool schema exposes the same parameter
   and leaves the model to Host resolution when a Bot is consulted.
 - Consult tool gating is unchanged: a `discussion` Thread receives only the
-  read-only `DISCUSSION_TOOLS` set. The stale e2e assertion that enumerated
-  the pre-BC3 tool list now checks membership against `DISCUSSION_TOOLS`
-  itself.
+  read-only `DISCUSSION_TOOLS` set. Follow-up review found that the combined
+  `memory` tool in that set also exposed remember/correct/forget. It is now
+  excluded; `recall` remains available for read-only memory lookup. The stale
+  e2e assertion that enumerated the pre-BC3 tool list checks membership against
+  `DISCUSSION_TOOLS` itself.
+- A consulted Bot's configured model takes precedence; when that preference is
+  empty, Pi passes the caller's current model as the explicit fallback rather
+  than failing a valid consult after Bot model clearing.
+- Consult identity, work association, and goal lookup now use the durable
+  session owner resolver. The active-only binding expires when a Run settles;
+  using it made reopened consults silently lose their Bot memory/persona or
+  treat a settled child as an unbound session. Catalog read failures surface
+  instead of being converted to empty associations.
 
 Remaining gaps (not falsely complete):
 
@@ -212,7 +223,7 @@ Remaining gaps (not falsely complete):
 - Vector and fast-decision enrichment still require a configured inference
   binding; unconfigured deployments fall back to text retrieval by design.
 
-### BC4: native drivers now interruptible and multi-window; platform depth still uneven
+### BC4: native drivers have checkpoint cancellation and multi-window inventory; platform depth still uneven
 
 Follow-up work (this change) closed the main seams that remained after
 `eb14dea3`:
@@ -227,11 +238,12 @@ Follow-up work (this change) closed the main seams that remained after
   the caller-visible tool text says so. `driver.cancel()` is wired into the
   service's `computer.cancel` ahead of `release_input`; a real child-process
   test proves the flag lands where a driver polls it.
-- **Generation recovery**: every spawned helper sweeps held input at startup
-  (Windows: `Send-ReleaseInput -Sweep`; Linux/macOS: `release_input()`), and
-  the Host additionally issues `release_input` once after each respawn before
-  the driver serves work — a resurrected desktop never inherits a held button
-  from a crashed predecessor.
+- **Input release**: active helpers release only synthetic input they tracked.
+  A predecessor killed between a key/button down and up loses that ownership;
+  no replacement can distinguish the injected state from human-held input.
+  The previous Windows startup sweep sent key-up events for every modifier and
+  mouse button, including ones the user held, so this review removed it.
+  A lost-driver action remains `unknown` and requires a fresh observation.
 - **Windows multi-window identity** is implemented and smoke-verified on a
   live desktop: `EnumWindows` builds a per-process window map once per call;
   `list_apps` and snapshots return the full `windows[]` inventory with hwnd,
@@ -262,6 +274,29 @@ Remaining honest limits:
   compositor-dependent.
 - `interruptibleInput` means checkpoint interruption — a single native call
   (one SendInput batch, one UIA pattern invoke) still runs to completion.
+- The macOS snapshot's AX child-index path is now preserved through the Host
+  observation and replayed at action time. Missing paths and ambiguous
+  CGWindow/AX window matches fail rather than choosing a same-named control.
+  This is source-level correction; it still needs a macOS machine run.
+- Host actions cannot override an observed window with another window selector;
+  the second window requires its own observation.
+- Linux AT-SPI window handles are zero-based child indexes. Host observation
+  and app inventory now retain handle `0`; previously they silently dropped
+  the first (often only) Linux window and lost action/window binding.
+- The Wayland portal screenshot wait now has a working timeout callback and
+  accounts for a Response arriving before the request path is returned. It
+  remains unverified on a compositor with an actual portal dialog.
+- A Pi script timeout/client abort now reaches the Host's driver cancellation
+  flag for an in-flight action or observation. Previously the bridge stopped
+  waiting while the native helper could keep typing. This is checkpoint-based
+  cancellation, with partial GUI effects still reported honestly.
+- Windows posted input now checks `PostMessage` acceptance. A cancelled
+  app-bound drag posts its button-up in `finally`, and a failed key chord
+  attempts to release every modifier it posted; the old global-input cleanup
+  did not own those window-message states.
+- A crash during held input is not automatically repaired; driver-owned input
+  is released during orderly cancel/failure, but a new helper cannot safely
+  reconstruct the prior helper's ownership from OS key state.
 - DPI *transitions* (window dragged across mixed-DPI monitors mid-session)
   are reported per-observation via `dpiScale`, but no live monitor-topology
   event handling exists.
@@ -295,3 +330,10 @@ Windows target/input handling follows the official contracts for
 [SetForegroundWindow](https://learn.microsoft.com/en-us/windows/win32/api/winuser/nf-winuser-setforegroundwindow)
 and [SendInput](https://learn.microsoft.com/en-us/windows/win32/api/winuser/nf-winuser-sendinput):
 activation can fail, and successful insertion of input is not proof of the application's business result.
+
+This follow-up ran the focused Host computer/thread/memory/inference tests,
+Pi's targeted consult-tool test, TypeScript checks, native-source syntax checks,
+and a Windows driver ping/release protocol smoke. The broader real-Pi session
+e2e made no progress output after roughly 90 seconds and was stopped; it is
+**not** counted as passing evidence. Native Linux/macOS desktop behavior and
+the installed distribution remain unverified.

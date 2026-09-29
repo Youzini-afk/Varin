@@ -493,12 +493,18 @@ def capture_portal_png(bounds, timeout_seconds=6):
         return None
     loop = GLib.MainLoop()
     bus = None
-    state = {"done": False, "uri": None, "sub": None, "request": None}
+    state = {"done": False, "uri": None, "sub": None, "request": None, "early": {}, "timed_out": False}
+    timeout_source = None
     try:
         bus = Gio.bus_get_sync(Gio.BusType.SESSION, None)
 
         def on_response(_conn, _sender, path, _iface, _signal, params):
-            if state["request"] is None or path != state["request"]:
+            if state["request"] is None:
+                # A portal can respond before the synchronous Screenshot call
+                # returns its request path. Keep that response until matched.
+                state["early"][path] = params.unpack()
+                return
+            if path != state["request"]:
                 return
             status, results = params.unpack()
             if status == 0 and "uri" in results:
@@ -531,8 +537,20 @@ def capture_portal_png(bounds, timeout_seconds=6):
         )
         # The Response arrives on the request object path the portal returns.
         state["request"] = str(reply.unpack()[0])
-        GLib.timeout_add_seconds(timeout_seconds, lambda: (setattr(state, "done", True) or loop.quit() or False))
-        loop.run()
+        if state["request"] in state["early"]:
+            status, results = state["early"][state["request"]]
+            if status == 0 and "uri" in results:
+                state["uri"] = str(results["uri"])
+            state["done"] = True
+        else:
+            def on_timeout():
+                state["done"] = True
+                state["timed_out"] = True
+                loop.quit()
+                return False
+
+            timeout_source = GLib.timeout_add_seconds(max(1, int(timeout_seconds)), on_timeout)
+            loop.run()
         uri = state["uri"]
         if not uri or not uri.startswith("file://"):
             return None
@@ -561,6 +579,8 @@ def capture_portal_png(bounds, timeout_seconds=6):
         return None
     finally:
         try:
+            if timeout_source is not None and not state["timed_out"]:
+                GLib.source_remove(timeout_source)
             if bus is not None and state["sub"] is not None:
                 bus.signal_unsubscribe(state["sub"])
         except Exception:

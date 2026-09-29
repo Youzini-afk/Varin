@@ -56,8 +56,11 @@ const ComputerParams = Type.Object({
 const errorResult = (error: unknown) => {
   const message = error instanceof Error ? error.message : String(error);
   const code = (error as { code?: string }).code ?? "failed";
+  const uncertainEffect = code === "timeout" || /abort|budget exhausted/i.test(message);
   return {
-    content: [{ type: "text" as const, text: `computer failed (${code}): ${message}` }],
+    content: [{ type: "text" as const, text: `computer failed (${code}): ${message}${uncertainEffect
+      ? ". A submitted GUI action may have partly reached the desktop; observe before retrying."
+      : ""}` }],
     isError: true as const,
     details: { code },
   };
@@ -136,7 +139,7 @@ export function createComputerTool(bridge: HostServicesBridge, _sessionId: strin
               ...(params.window !== undefined ? { window: params.window } : {}),
               ...(params.includeScreenshot !== undefined ? { includeScreenshot: params.includeScreenshot } : {}),
               ...(params.textLimit !== undefined ? { textLimit: params.textLimit } : {}),
-            }) as ComputerObserveResult;
+            }, signal ? { signal } : undefined) as ComputerObserveResult;
             const observation = result.observation;
             const blocks: Array<{ type: "text"; text: string } | { type: "image"; data: string; mimeType: string }> = [
               { type: "text", text: summarizeObservation(observation) },

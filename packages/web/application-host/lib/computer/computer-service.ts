@@ -31,6 +31,8 @@ import {
   createDriverSession,
   localDriverSpawnSpec,
   type ComputerDriverSession,
+  type DriverRequest,
+  type DriverResponse,
   type DriverSpawnSpec,
 } from "./driver-host.js";
 
@@ -121,6 +123,9 @@ const elementOf = (value: unknown): ComputerElement | null => {
   const index = asNumber(value.index);
   if (index === undefined) return null;
   const element: ComputerElement = { index };
+  if (Array.isArray(value.path) && value.path.every((v) => Number.isSafeInteger(v) && v >= 0)) {
+    element.path = value.path as number[];
+  }
   if (Array.isArray(value.runtimeId)) element.runtimeId = value.runtimeId.filter((v): v is number => typeof v === "number");
   if (asString(value.automationId)) element.automationId = value.automationId as string;
   if (asString(value.name)) element.name = value.name as string;
@@ -162,7 +167,8 @@ const observationOf = (
   };
   if (asString(snapshot.windowTitle)) observation.windowTitle = snapshot.windowTitle as string;
   const handle = asNumber(snapshot.windowHandle);
-  if (handle !== undefined && handle > 0) observation.windowHandle = handle;
+  // Linux AT-SPI uses a zero-based child index as the window handle.
+  if (handle !== undefined && handle >= 0) observation.windowHandle = handle;
   const dpi = asNumber(snapshot.dpiScale);
   if (dpi !== undefined && dpi > 0) observation.dpiScale = dpi;
   if (Array.isArray(snapshot.windows)) {
@@ -170,7 +176,7 @@ const observationOf = (
       .map((window): import("@varin/protocol").ComputerWindowDescriptor | null => {
         if (!isObject(window)) return null;
         const wh = asNumber(window.handle);
-        if (wh === undefined || wh <= 0) return null;
+        if (wh === undefined || wh < 0) return null;
         const bounds = frameOf(window.bounds);
         return {
           handle: wh,
@@ -393,6 +399,24 @@ export function createComputerService(options: ComputerServiceOptions): Computer
   /** Stamp the lane's generation; compare after await to detect a mid-flight cancel. */
   const laneGeneration = (desktopId: string) => laneFor(desktopId).generation;
 
+  const requestWithAbort = async (
+    driver: ComputerDriverSession,
+    op: Omit<DriverRequest, "id">,
+    signal?: AbortSignal,
+  ): Promise<DriverResponse> => {
+    signal?.throwIfAborted();
+    const pending = driver.request(op);
+    if (!signal) return pending;
+    // The bridge/router aborts its wait on script timeout or client cancel.
+    // Interrupt the native operation too; otherwise it could keep typing after
+    // the caller has already received a cancellation result.
+    const onAbort = () => { driver.cancel(); };
+    signal.addEventListener("abort", onAbort, { once: true });
+    if (signal.aborted) onAbort();
+    try { return await pending; }
+    finally { signal.removeEventListener("abort", onAbort); }
+  };
+
   const driverFor = async (desktopId: string): Promise<{ driver: ComputerDriverSession; desktop: ComputerDesktop }> => {
     if (disposed) throw new HarnessServiceError("unavailable", "Computer service is closed");
     await ensureLocal();
@@ -419,11 +443,10 @@ export function createComputerService(options: ComputerServiceOptions): Computer
     observations.delete(desktopId);
     const driver = newDriver(spec);
     drivers.set(desktopId, driver);
-    // Generation recovery (BC4.C): a driver that died mid-action could have
-    // left injected input held at the OS level. Sweep it before the fresh
-    // driver serves real work so a resurrected desktop never inherits a held
-    // button or modifier.
-    await driver.request({ tool: "release_input", sweep: true }).catch(() => undefined);
+    // A new helper can release only input it actually owns. A previous helper
+    // killed mid-input leaves an unknown OS state; a blanket key-up sweep here
+    // would also release keys/buttons the human is holding.
+    await driver.request({ tool: "release_input" }).catch(() => undefined);
     return { driver, desktop };
   };
 
@@ -566,7 +589,7 @@ export function createComputerService(options: ComputerServiceOptions): Computer
           ...(Array.isArray(app.windows)
             ? { windows: app.windows.map((window): import("@varin/protocol").ComputerWindowDescriptor | null => {
                 const handle = asNumber(window.handle);
-                if (handle === undefined || handle <= 0) return null;
+                if (handle === undefined || handle < 0) return null;
                 const bounds = frameOf(window.bounds);
                 return {
                   handle,
@@ -608,7 +631,7 @@ export function createComputerService(options: ComputerServiceOptions): Computer
     return enqueue(id, "observe", async () => {
       params.signal?.throwIfAborted();
       const { driver, desktop } = await driverFor(id);
-      const response = await driver.request({
+      const response = await requestWithAbort(driver, {
         tool: "get_app_state",
         app: params.app,
         screenshot: params.includeScreenshot !== false,
@@ -616,7 +639,7 @@ export function createComputerService(options: ComputerServiceOptions): Computer
         ...(params.textLimit !== undefined ? { text_limit: params.textLimit } : {}),
         ...(params.maxTreeNodes !== undefined ? { max_tree_nodes: params.maxTreeNodes } : {}),
         ...(params.maxTreeDepth !== undefined ? { max_tree_depth: params.maxTreeDepth } : {}),
-      });
+      }, params.signal);
       params.signal?.throwIfAborted();
       if (!response.ok || !response.snapshot) throw new HarnessServiceError("unavailable", response.error ?? "Observe failed");
       const observation = observationOf(response.snapshot, desktop);
@@ -643,6 +666,14 @@ export function createComputerService(options: ComputerServiceOptions): Computer
       .some((selector) => selector === action.app.toLowerCase())) {
       throw new HarnessServiceError("invalid-params", "Action app does not match its observation target; use the observed PID");
     }
+    if (action.window !== undefined) {
+      const selectedWindow = typeof action.window === "number"
+        ? observation.windowHandle === action.window
+        : observation.windowTitle?.toLowerCase() === action.window.toLowerCase();
+      if (!selectedWindow) {
+        throw new HarnessServiceError("invalid-params", "Action window differs from its observation; observe that window first");
+      }
+    }
     return observation;
   };
 
@@ -654,10 +685,10 @@ export function createComputerService(options: ComputerServiceOptions): Computer
       : undefined;
     const base = {
       app: latest ? String(latest.app.pid) : action.app,
-      // The observed window binds the action to the same hwnd it was read
-      // from; an explicit action selector overrides for unobserved calls.
-      ...(latest?.windowHandle !== undefined ? { window: latest.windowHandle } : {}),
-      ...(action.window !== undefined ? { window: action.window } : {}),
+      // An observation pins the window too. Never let an explicit selector
+      // redirect observed element indexes or coordinates into another window.
+      ...(latest?.windowHandle !== undefined ? { window: latest.windowHandle }
+        : action.window !== undefined ? { window: action.window } : {}),
       ...(element ? { element } : {}),
       ...(windowBounds ? { windowBounds } : {}),
     };
@@ -768,7 +799,7 @@ export function createComputerService(options: ComputerServiceOptions): Computer
         params.signal?.throwIfAborted();
         const op = toDriverOp(id, action);
         submitted = true;
-        const response = await driver.request(op as Omit<typeof op & { id: string }, "id">);
+        const response = await requestWithAbort(driver, op, params.signal);
         return { response, desktop };
       }, generation);
       if (!response.ok) {

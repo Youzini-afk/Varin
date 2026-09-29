@@ -68,10 +68,11 @@ The complete upstream notice is retained in
 
 Host cancellation drops queued input, signals the in-flight op through the
 cancel-flag side-channel, and follows with `release_input` so an interrupted
-gesture cannot leave keys or buttons held. A spawned driver also sweeps held
-input once at startup so a respawned helper never inherits a predecessor's
-state. Post-action capture failure preserves the input acceptance, while a
-lost driver response yields an unknown action effect. Inspect the desktop
-before retrying.
+gesture releases input tracked by that helper. A crashed helper loses its
+tracking state; a replacement cannot safely send blanket key-up events because
+they could release a person's held keys or mouse buttons. A lost driver response
+therefore leaves the action effect and any held-input state unknown. Post-action
+capture failure preserves the input acceptance. Inspect the desktop before
+retrying.
 See the [BC acceptance record](../../docs/plan/bot-computer-use-acceptance.md)
 for remaining native platform and packaging work.

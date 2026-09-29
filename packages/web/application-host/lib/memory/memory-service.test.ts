@@ -43,6 +43,7 @@ describe("memory service (BC1)", () => {
       return opened;
     },
     userStore: async () => userStore,
+    sessionStoreIfPresent: async (sessionId) => stores.get(`session:${sessionId}`) ?? null,
     ownerForSession: async (sessionId) => ({ scope: "workspace", ownerId: sessionId }),
   });
   const workspaceOwner: MemoryOwner = { scope: "workspace", ownerId: "ws-test" };
@@ -141,6 +142,17 @@ describe("memory service (BC1)", () => {
     expect(hits.some((hit) => hit.node.id === remembered.item.id)).toBe(true);
     // The workspace owner must not see Bot memory.
     expect(await svc.search(workspaceOwner, "status reports")).toEqual([]);
+  });
+
+  it("default active search includes owner, user, and existing session memory", async () => {
+    const svc = service();
+    await svc.remember(botOwner, { content: "Handoff decision from the Bot" });
+    await svc.remember({ scope: "user", ownerId: null }, { content: "Handoff preference from the user" });
+    await svc.remember({ scope: "session", ownerId: "s-1" }, { content: "Handoff note from this session" });
+    const hits = await svc.search(botOwner, "Handoff", 8, { sessionId: "s-1", includeShared: true });
+    expect(hits.map((hit) => hit.node.payload.scope)).toEqual(expect.arrayContaining(["bot", "user", "session"]));
+    const narrow = await svc.search(botOwner, "Handoff", 8, { sessionId: "s-1" });
+    expect(narrow.map((hit) => hit.node.payload.scope)).toEqual(["bot"]);
   });
 
   it("an inferred proposal stays suggested rather than becoming a user instruction", async () => {

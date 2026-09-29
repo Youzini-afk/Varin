@@ -1797,6 +1797,8 @@ async function main(options: StartWebUiServerOptions = {}): Promise<WebUiServerC
   const memoryService = createMemoryService({
     storeForScopeId: getKnowledgeStoreForScope,
     userStore: getUserKnowledgeStore,
+    sessionStoreIfPresent: async (sessionId) => await knowledgeStoreExistsForScope(sessionScopeId(sessionId))
+      ? getKnowledgeStoreForScope(sessionScopeId(sessionId)) : null,
     ownerForSession: async (sessionId) => {
       const scopeId = await owningKnowledgeScopeIdForSession(sessionId) ?? sessionScopeId(sessionId);
       if (isBotScopeId(scopeId)) return { scope: 'bot', ownerId: botIdFromScopeId(scopeId) };
@@ -2881,16 +2883,21 @@ async function main(options: StartWebUiServerOptions = {}): Promise<WebUiServerC
   // — persona instructions and the `bot:<id>` memory scope resolve through the
   // Thread record, not the session's owning catalog scope.
   const consultBotForSession = async (sessionId: string) => {
-    const binding = await threadRegistry.getSessionBinding(sessionId).catch(() => null);
+    const binding = await threadRegistry.resolveSessionOwner(sessionId);
     if (!binding) return null;
-    const thread = await threadRegistry.getThreadById(binding.owningScopeId, binding.threadId).catch(() => null);
+    const thread = await threadRegistry.getThreadById(binding.owningScopeId, binding.threadId);
     if (!thread?.consultBotId) return null;
-    return botService.get(thread.consultBotId).catch(() => null);
+    const bot = await botService.get(thread.consultBotId);
+    if (!bot) throw new Error(`Consulted Bot is missing: ${thread.consultBotId}`);
+    return bot;
   };
 
   const knowledgeStoreExistsForScope = (scopeId: string): Promise<boolean> => (
     fsPromises.access(path.join(VARIN_DATA_DIR, 'knowledge', hostId, `${knowledgeStoreKeyForScope(scopeId)}.tdb`))
-      .then(() => true, () => false)
+      .then(() => true, (error: NodeJS.ErrnoException) => {
+        if (error.code === 'ENOENT') return false;
+        throw error;
+      })
   );
 
   // BC3: a memory's work association is the session's bound Thread plus its
@@ -2901,28 +2908,28 @@ async function main(options: StartWebUiServerOptions = {}): Promise<WebUiServerC
     const sessionIds = new Set<string>([sessionId]);
     const threadIds = new Set<string>();
     const runIds = new Set<string>();
-    const binding = await threadRegistry.getSessionBinding(sessionId).catch(() => null);
+    const binding = await threadRegistry.resolveSessionOwner(sessionId);
     if (!binding) return { sessionIds: [...sessionIds] };
     const scopeId = binding.owningScopeId;
     const includeThread = async (threadId: string): Promise<void> => {
       if (threadIds.has(threadId)) return;
       threadIds.add(threadId);
-      for (const run of await threadRegistry.listRuns(scopeId, threadId).catch(() => [] as import('@varin/protocol').ThreadRun[])) {
+      for (const run of await threadRegistry.listRuns(scopeId, threadId)) {
         runIds.add(run.id);
         if (run.sessionId) sessionIds.add(run.sessionId);
       }
     };
     await includeThread(binding.threadId);
-    let cursor = await threadRegistry.getThreadById(scopeId, binding.threadId).catch(() => null);
+    let cursor = await threadRegistry.getThreadById(scopeId, binding.threadId);
     while (cursor?.parent.kind === 'thread' && !threadIds.has(cursor.parent.id)) {
       const ancestorId = cursor.parent.id;
       await includeThread(ancestorId);
-      cursor = await threadRegistry.getThreadById(scopeId, ancestorId).catch(() => null);
+      cursor = await threadRegistry.getThreadById(scopeId, ancestorId);
     }
     const pending = [binding.threadId];
     while (pending.length > 0) {
       const current = pending.pop()!;
-      for (const child of await threadRegistry.listThreads(scopeId, { kind: 'thread', id: current }, true).catch(() => [] as import('@varin/protocol').Thread[])) {
+      for (const child of await threadRegistry.listThreads(scopeId, { kind: 'thread', id: current }, true)) {
         if (threadIds.has(child.id)) continue;
         await includeThread(child.id);
         pending.push(child.id);
@@ -2938,9 +2945,9 @@ async function main(options: StartWebUiServerOptions = {}): Promise<WebUiServerC
     getSessionStore: async (sessionId) => await knowledgeStoreExistsForScope(sessionScopeId(sessionId))
       ? getKnowledgeStoreForScope(sessionScopeId(sessionId)) : null,
     goalForSession: async (sessionId) => {
-      const binding = await threadRegistry.getSessionBinding(sessionId).catch(() => null);
+      const binding = await threadRegistry.resolveSessionOwner(sessionId);
       if (!binding) return undefined;
-      const thread = await threadRegistry.getThread(binding.owningScopeId, binding.parent, binding.threadId).catch(() => null);
+      const thread = await threadRegistry.getThreadById(binding.owningScopeId, binding.threadId);
       return thread?.brief.trim() || undefined;
     },
     // BC3: one selection service backs automatic recall and the `recall`
@@ -2956,10 +2963,10 @@ async function main(options: StartWebUiServerOptions = {}): Promise<WebUiServerC
       }];
       const ownScopeId = sessionScopeId(sessionId);
       if (ownScopeId !== workspaceId && await knowledgeStoreExistsForScope(ownScopeId)) {
-        const sessionStore = await getKnowledgeStoreForScope(ownScopeId).catch(() => null);
+        const sessionStore = await getKnowledgeStoreForScope(ownScopeId);
         if (sessionStore) sources.push({ authority: sessionStore, scope: 'session', scopeId: ownScopeId });
       }
-      const userStore = await getUserKnowledgeStore().catch(() => null);
+      const userStore = await getUserKnowledgeStore();
       if (userStore) sources.push({ authority: userStore, scope: 'user', scopeId: 'user' });
       const semantic = semanticRuntimeHolder.current;
       const executionWorkspaceId = snapshotKnowledgeWorkspaceId(sessionId);
@@ -3212,7 +3219,7 @@ async function main(options: StartWebUiServerOptions = {}): Promise<WebUiServerC
     const workspaceStore = await getKnowledgeStoreForScope(owningWorkspaceId);
     const ownScopeId = sessionScopeId(sessionId);
     const sessionStore = ownScopeId !== owningWorkspaceId && await knowledgeStoreExistsForScope(ownScopeId)
-      ? await getKnowledgeStoreForScope(ownScopeId).catch(() => null)
+      ? await getKnowledgeStoreForScope(ownScopeId)
       : null;
     return {
       workspaceStore,

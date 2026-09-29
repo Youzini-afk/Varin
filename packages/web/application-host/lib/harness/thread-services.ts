@@ -324,7 +324,7 @@ export function createThreadDispatchService(host: HarnessServiceHost): HarnessSe
       }
       // A consult inherits the consulted Bot's model when the caller does not
       // pin one — the answer should come from the Bot's configured identity.
-      const dispatchModel = params.model ?? consultBot?.model ?? undefined;
+      const dispatchModel = consultBot?.model ?? params.model ?? undefined;
       if (!preset && !dispatchModel) {
         throw new HarnessServiceError("invalid-params", "A preset-less dispatch must resolve the caller's current model");
       }

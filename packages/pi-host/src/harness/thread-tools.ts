@@ -259,8 +259,17 @@ export function createDispatchTool(
         }
         model = preset.model;
       } else if (params.capability === undefined && params.bot !== undefined) {
-        // Bot consult: the Host resolves the consulted Bot's model default;
-        // the caller's active tools still bound the consult's read-only set.
+        // The Host prefers the consulted Bot's model. If that Bot has no model
+        // preference, the caller's current model is the explicit fallback.
+        const current = ctx?.model;
+        if (!current) {
+          return {
+            content: [{ type: 'text' as const, text: 'dispatch failed: no current model is selected for this session' }],
+            isError: true,
+            details: { code: 'unavailable' },
+          };
+        }
+        model = { providerId: current.provider, modelId: current.id };
         tools = options.getActiveToolNames?.();
       } else if (params.capability === undefined) {
         const current = ctx?.model;

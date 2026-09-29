@@ -283,6 +283,12 @@ function ConvertTo-WheelWParam([int]$delta) {
     [IntPtr]$packed
 }
 
+function Send-PostedMessage([IntPtr]$hwnd, [uint32]$message, [IntPtr]$wParam, [IntPtr]$lParam) {
+    if (-not [VarinWin32]::PostMessage($hwnd, $message, $wParam, $lParam)) {
+        throw "Windows did not accept the window input message"
+    }
+}
+
 function Get-WindowRectFrame([IntPtr]$hwnd) {
     $rect = New-Object VarinWin32+RECT
     if ([VarinWin32]::GetWindowRect($hwnd, [ref]$rect)) {
@@ -339,10 +345,10 @@ function Send-MouseClick([IntPtr]$hwnd, [int]$screenX, [int]$screenY, [string]$b
     $repeat = [math]::Max(1, $count)
     for ($i = 0; $i -lt $repeat; $i++) {
         Assert-NotCancelled ("sent $i of $repeat clicks")
-        [void][VarinWin32]::PostMessage($hwnd, $WM_MOUSEMOVE, [IntPtr]::Zero, $lParam)
-        [void][VarinWin32]::PostMessage($hwnd, $down, [IntPtr]$downFlag, $lParam)
+        Send-PostedMessage $hwnd $WM_MOUSEMOVE ([IntPtr]::Zero) $lParam
+        Send-PostedMessage $hwnd $down ([IntPtr]$downFlag) $lParam
         Start-Sleep -Milliseconds 35
-        [void][VarinWin32]::PostMessage($hwnd, $up, [IntPtr]::Zero, $lParam)
+        Send-PostedMessage $hwnd $up ([IntPtr]::Zero) $lParam
         Start-Sleep -Milliseconds 50
     }
 }
@@ -359,16 +365,20 @@ function Send-Drag([IntPtr]$hwnd, [int]$fromX, [int]$fromY, [int]$toX, [int]$toY
 
     $steps = 12
     $startParam = ConvertTo-LParam $start.X $start.Y
-    [void][VarinWin32]::PostMessage($hwnd, $WM_MOUSEMOVE, [IntPtr]::Zero, $startParam)
-    [void][VarinWin32]::PostMessage($hwnd, $WM_LBUTTONDOWN, [IntPtr]1, $startParam)
-    for ($i = 1; $i -le $steps; $i++) {
-        Assert-NotCancelled ("dragged $i of $steps steps; the button may still be held")
-        $x = [int][math]::Round($start.X + (($end.X - $start.X) * $i / $steps))
-        $y = [int][math]::Round($start.Y + (($end.Y - $start.Y) * $i / $steps))
-        [void][VarinWin32]::PostMessage($hwnd, $WM_MOUSEMOVE, [IntPtr]1, (ConvertTo-LParam $x $y))
-        Start-Sleep -Milliseconds 20
+    Send-PostedMessage $hwnd $WM_MOUSEMOVE ([IntPtr]::Zero) $startParam
+    Send-PostedMessage $hwnd $WM_LBUTTONDOWN ([IntPtr]1) $startParam
+    try {
+        for ($i = 1; $i -le $steps; $i++) {
+            Assert-NotCancelled ("dragged $i of $steps steps; the button may still be held")
+            $x = [int][math]::Round($start.X + (($end.X - $start.X) * $i / $steps))
+            $y = [int][math]::Round($start.Y + (($end.Y - $start.Y) * $i / $steps))
+            Send-PostedMessage $hwnd $WM_MOUSEMOVE ([IntPtr]1) (ConvertTo-LParam $x $y)
+            Start-Sleep -Milliseconds 20
+        }
+    } finally {
+        # The posted button is not part of SendInput's held-input table.
+        Send-PostedMessage $hwnd $WM_LBUTTONUP ([IntPtr]::Zero) (ConvertTo-LParam $end.X $end.Y)
     }
-    [void][VarinWin32]::PostMessage($hwnd, $WM_LBUTTONUP, [IntPtr]::Zero, (ConvertTo-LParam $end.X $end.Y))
 }
 
 function Send-Scroll([IntPtr]$hwnd, [int]$screenX, [int]$screenY, [string]$direction, [double]$pages) {
@@ -385,14 +395,14 @@ function Send-Scroll([IntPtr]$hwnd, [int]$screenX, [int]$screenY, [string]$direc
     if ($direction -eq "left" -or $direction -eq "right") {
         $message = $WM_MOUSEHWHEEL
     }
-    [void][VarinWin32]::PostMessage($hwnd, $message, (ConvertTo-WheelWParam $delta), $lParam)
+    Send-PostedMessage $hwnd $message (ConvertTo-WheelWParam $delta) $lParam
 }
 
 function Send-Text([IntPtr]$hwnd, [string]$text) {
     $sent = 0
     foreach ($char in $text.ToCharArray()) {
         Assert-NotCancelled ("typed $sent of $($text.Length) characters")
-        [void][VarinWin32]::PostMessage($hwnd, $WM_CHAR, [IntPtr][int][char]$char, [IntPtr]::Zero)
+        Send-PostedMessage $hwnd $WM_CHAR ([IntPtr][int][char]$char) ([IntPtr]::Zero)
         $sent++
         Start-Sleep -Milliseconds 8
     }
@@ -566,22 +576,12 @@ function Send-GlobalKey([string]$key) {
     }
 }
 
-function Send-ReleaseInput([switch]$Sweep) {
-    # Release inputs this driver pressed. With -Sweep (post-respawn recovery)
-    # also emit the up-events for every button/modifier SendInput may have
-    # left held 鈥?input injected by a crashed driver keeps its pressed state
-    # at the OS level even though this process forgot its tracking table.
+function Send-ReleaseInput {
+    # Release only inputs tracked by this driver. After a crash there is no
+    # reliable way to distinguish old injected state from human-held input.
     $failed = 0
     foreach ($key in @($script:HeldInputs.Keys)) {
         try { Send-ManagedInput $script:HeldInputs[$key] } catch { $failed++ }
-    }
-    if ($Sweep) {
-        foreach ($flag in @([VarinWin32]::MOUSEEVENTF_LEFTUP, [VarinWin32]::MOUSEEVENTF_RIGHTUP, [VarinWin32]::MOUSEEVENTF_MIDDLEUP)) {
-            try { [void][VarinWin32]::SendInput(1, @([VarinWin32]::MouseInput(0, 0, $flag, 0)), [System.Runtime.InteropServices.Marshal]::SizeOf([type][VarinWin32+INPUT])) } catch { $failed++ }
-        }
-        foreach ($vk in @(0x10, 0x11, 0x12, 0x5B, 0x5C)) {
-            try { [void][VarinWin32]::SendInput(1, @([VarinWin32]::KeyInput([uint16]$vk, 0, [VarinWin32]::KEYEVENTF_KEYUP)), [System.Runtime.InteropServices.Marshal]::SizeOf([type][VarinWin32+INPUT])) } catch { $failed++ }
-        }
     }
     if ($failed -gt 0) { throw "Windows did not confirm release of $failed managed inputs" }
 }
@@ -628,16 +628,29 @@ function Send-Key([IntPtr]$hwnd, [string]$key) {
             "cmd" { $modifiers += 0x5B }
         }
     }
-    foreach ($modifier in $modifiers) {
-        [void][VarinWin32]::PostMessage($hwnd, $WM_KEYDOWN, [IntPtr]$modifier, [IntPtr]::Zero)
-    }
+    $postedModifiers = @()
+    $mainDown = $false
     $vk = Get-VirtualKey $main
-    [void][VarinWin32]::PostMessage($hwnd, $WM_KEYDOWN, [IntPtr]$vk, [IntPtr]::Zero)
-    Start-Sleep -Milliseconds 25
-    [void][VarinWin32]::PostMessage($hwnd, $WM_KEYUP, [IntPtr]$vk, [IntPtr]::Zero)
-    [array]::Reverse($modifiers)
-    foreach ($modifier in $modifiers) {
-        [void][VarinWin32]::PostMessage($hwnd, $WM_KEYUP, [IntPtr]$modifier, [IntPtr]::Zero)
+    try {
+        foreach ($modifier in $modifiers) {
+            Send-PostedMessage $hwnd $WM_KEYDOWN ([IntPtr]$modifier) ([IntPtr]::Zero)
+            $postedModifiers += $modifier
+        }
+        Send-PostedMessage $hwnd $WM_KEYDOWN ([IntPtr]$vk) ([IntPtr]::Zero)
+        $mainDown = $true
+        Start-Sleep -Milliseconds 25
+    } finally {
+        $releaseError = $null
+        if ($mainDown) {
+            try { Send-PostedMessage $hwnd $WM_KEYUP ([IntPtr]$vk) ([IntPtr]::Zero) }
+            catch { $releaseError = $_ }
+        }
+        [array]::Reverse($postedModifiers)
+        foreach ($modifier in $postedModifiers) {
+            try { Send-PostedMessage $hwnd $WM_KEYUP ([IntPtr]$modifier) ([IntPtr]::Zero) }
+            catch { if ($null -eq $releaseError) { $releaseError = $_ } }
+        }
+        if ($null -ne $releaseError) { throw $releaseError }
     }
 }
 
@@ -1455,7 +1468,7 @@ function Invoke-ComputerOperation($operation) {
         return [pscustomobject]@{ ok = $true; capabilities = (Get-DriverCapabilities) }
     }
     if ($tool -eq "release_input") {
-        Send-ReleaseInput -Sweep:([bool]$operation.sweep)
+        Send-ReleaseInput
         return [pscustomobject]@{ ok = $true }
     }
     if ($tool -eq "list_apps") {

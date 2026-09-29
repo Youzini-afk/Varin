@@ -8,8 +8,8 @@
 // Cancellation is out-of-band: while a request executes the Host writes
 // "$VARIN_DRIVER_CANCEL_DIR/<requestId>.cancel"; long operations poll it at
 // their internal checkpoints and abort with {ok:false, cancelled:true}.
-// A crashed predecessor may have left synthesized input held, so a release
-// sweep runs once at startup.
+// A fresh process can release only input it has tracked itself. It cannot
+// safely distinguish a crashed predecessor's input from human-held input.
 //
 // Managed by the Varin Host computer service — do not run interactively.
 
@@ -40,7 +40,7 @@ if (!runtimeSource) {
 }
 eval(ObjC.unwrap(runtimeSource));
 
-// Startup sweep: release any synthesized input a crashed predecessor left held.
+// Startup cleanup is limited to this process's tracked input.
 try { releaseInput(); } catch (e) { /* best effort */ }
 
 var pending = $.NSMutableString.alloc.init;
@@ -69,7 +69,10 @@ for (;;) {
                     throw e;
                 }
             } finally {
-                try { releaseInput(); } catch (e2) { /* best effort */ }
+                try { releaseInput(); }
+                catch (releaseError) {
+                    response = { ok: false, error: "Input release failed after the operation; its effect is unknown: " + releaseError };
+                }
                 ACTIVE_REQUEST_ID = null;
             }
             writeResponse(requestId, response);

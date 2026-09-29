@@ -13,8 +13,8 @@
 # Cancellation is out-of-band: while a request executes the Host writes
 # "$VARIN_DRIVER_CANCEL_DIR/<requestId>.cancel"; long operations poll it at
 # their internal checkpoints and abort with {ok:false, cancelled:true}.
-# A crashed predecessor may have left synthesized input held at the desktop
-# level, so a release sweep runs once at startup.
+# Startup releases only input tracked by this process. Input injected by a
+# crashed predecessor cannot be attributed reliably to it after restart.
 
 import json
 import sys

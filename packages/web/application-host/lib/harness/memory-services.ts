@@ -200,7 +200,10 @@ export function createMemorySearchService(host: HarnessServiceHost): HarnessServ
       const owner = await explicitOwnerFor(service, ctx, params.scope);
       const k = typeof params.k === "number" && Number.isSafeInteger(params.k) && params.k > 0
         ? params.k : 8;
-      const results = await service.search(owner, query, k, { sessionId: ctx.sessionId });
+      const results = await service.search(owner, query, k, {
+        sessionId: ctx.sessionId,
+        includeShared: params.scope === undefined,
+      });
       const items: Array<{ item: MemoryItem; score: number }> = [];
       for (const result of results) {
         if (result.node.type !== "knowledge") continue;

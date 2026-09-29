@@ -49,6 +49,8 @@ export interface MemoryServiceDeps {
   storeForScopeId(scopeId: string): Promise<KnowledgeStore | null>;
   /** The single user store. */
   userStore(): Promise<KnowledgeStore | null>;
+  /** Existing session memory, if any; lookup must not create an empty store. */
+  sessionStoreIfPresent?(sessionId: string): Promise<KnowledgeStore | null>;
   /**
    * Resolve the memory owner a session acts as: a session bound under a
    * `bot:<id>` scope writes Bot memory; an ordinary bound session writes its
@@ -199,18 +201,28 @@ export function createMemoryService(deps: MemoryServiceDeps) {
     owner: MemoryOwner,
     query: string,
     k = 8,
-    context?: { sessionId?: string },
+    context?: { sessionId?: string; includeShared?: boolean },
   ): Promise<RecallResult[]> => {
     const store = await storeFor(owner);
     const scopeId = memoryOwnerScopeId(owner) ?? owner.scope;
     const associated = context?.sessionId
-      ? await deps.associationForSession?.(context.sessionId).catch(() => undefined)
+      ? await deps.associationForSession?.(context.sessionId)
       : undefined;
     const vectors = deps.vectors?.() ?? undefined;
-    // The same selection service backs automatic Zone 2 recall (BC3):
-    // work-associated rows pinned, then hybrid text/vector candidates.
+    const sources = [{ authority: store, scope: owner.scope, scopeId }];
+    if (context?.includeShared && owner.scope !== "user") {
+      const userStore = await deps.userStore();
+      if (!userStore) throw new MemoryOwnerUnavailableError("User memory store is unavailable");
+      sources.push({ authority: userStore, scope: "user", scopeId: "user" });
+    }
+    if (context?.includeShared && context.sessionId && owner.scope !== "session") {
+      const sessionStore = await deps.sessionStoreIfPresent?.(context.sessionId);
+      if (sessionStore) sources.push({ authority: sessionStore, scope: "session", scopeId: sessionScopeId(context.sessionId) });
+    }
+    // Active default-scope lookup and automatic Zone 2 recall now use the
+    // same sources and selection service. Explicit scope searches stay narrow.
     const { results } = await recallSources({
-      sources: [{ authority: store, scope: owner.scope, scopeId }],
+      sources,
       query,
       k,
       ...(vectors ? { vectors } : {}),

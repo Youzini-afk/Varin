@@ -1,4 +1,4 @@
-import { describe, it, expect, beforeEach, afterEach } from "vitest";
+import { describe, it, expect, beforeEach, afterEach, vi } from "vitest";
 import { mkdtempSync, rmSync, existsSync, readFileSync } from "node:fs";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
@@ -259,9 +259,33 @@ describe("computer service (BC4)", () => {
     expect(result.detail).toContain("12 of 40");
   });
 
+  it("forwards an aborted action request to the in-flight native driver", async () => {
+    let finish!: (response: DriverResponse) => void;
+    let cancelCalls = 0;
+    const driver = makeDriver(async (op) => op.tool === "type_text"
+      ? new Promise<DriverResponse>((resolve) => { finish = resolve; })
+      : okResponse());
+    driver.cancel = () => {
+      cancelCalls += 1;
+      finish({ id: "x", ok: false, cancelled: true, error: "cancelled (typed 2 of 5 characters)" });
+      return true;
+    };
+    const { service } = makeService(driver);
+    const controller = new AbortController();
+    const pending = service.act({
+      desktopId: "local-console", action: { kind: "type", app: "notepad", text: "hello" },
+      signal: controller.signal,
+    });
+    await vi.waitFor(() => expect(driver.calls.some((call) => call.tool === "type_text")).toBe(true));
+    controller.abort();
+    expect(await pending).toMatchObject({ accepted: false, cancelled: true, outcome: "partial" });
+    expect(cancelCalls).toBe(1);
+  });
+
   it("observe passes the window selector through and binds actions to the observed hwnd", async () => {
     const snapshot = {
       ...appSnapshot(),
+      elements: appSnapshot().elements.map((element) => element.index === 1 ? { ...element, path: [3, 1] } : element),
       windowHandle: 778812,
       windows: [
         { handle: 778811, title: "Document A", main: false },
@@ -286,6 +310,12 @@ describe("computer service (BC4)", () => {
     });
     const click = driver.calls.find((c) => c.tool === "click");
     expect(click?.window).toBe(778812);
+    expect(click?.element).toMatchObject({ path: [3, 1] });
+    await expect(service.act({
+      desktopId: "local-console",
+      action: { kind: "click", app: "notepad", window: 778811, elementIndex: 1, observationId: observation.id },
+    })).rejects.toMatchObject({ harnessCode: "invalid-params" });
+    expect(driver.calls.filter((c) => c.tool === "click")).toHaveLength(1);
   });
 
   it("listApps reports the driver's per-process window inventory", async () => {
@@ -293,7 +323,7 @@ describe("computer service (BC4)", () => {
       ? okResponse({ apps: [{
           name: "notepad", pid: 42, windowTitle: "Document B",
           windows: [
-            { handle: 101, title: "Document A" },
+            { handle: 0, title: "Document A" },
             { handle: 102, title: "Document B", main: true },
           ],
         }] })
@@ -301,8 +331,26 @@ describe("computer service (BC4)", () => {
     const { service } = makeService(driver);
     await service.ensureLocal();
     const apps = await service.listApps("local-console");
-    expect(apps[0]?.windows?.map((w) => w.handle)).toEqual([101, 102]);
+    expect(apps[0]?.windows?.map((w) => w.handle)).toEqual([0, 102]);
     expect(apps[0]?.windows?.[1]?.main).toBe(true);
+  });
+
+  it("retains a zero-based Linux window selector through observation and action", async () => {
+    const driver = makeDriver(async (op) => op.tool === "get_app_state"
+      ? okResponse({ snapshot: {
+          ...appSnapshot(), windowHandle: 0,
+          windows: [{ handle: 0, title: "Document A", main: true }],
+        } })
+      : okResponse());
+    const { service } = makeService(driver);
+    const observation = await service.observe({ desktopId: "local-console", app: "notepad", window: 0 });
+    expect(observation.windowHandle).toBe(0);
+    expect(observation.windows?.[0]?.handle).toBe(0);
+    await service.act({
+      desktopId: "local-console",
+      action: { kind: "click", app: "notepad", elementIndex: 1, observationId: observation.id },
+    });
+    expect(driver.calls.find((call) => call.tool === "click")?.window).toBe(0);
   });
 
   it("default target persists under the host data dir and validates existence", async () => {

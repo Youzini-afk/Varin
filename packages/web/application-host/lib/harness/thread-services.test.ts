@@ -2085,6 +2085,7 @@ describe("thread services", () => {
         model: { providerId: "bot-provider", modelId: "bot-model" },
         manifest: { worktree: "none" },
       });
+      expect(thread?.manifest.tools).toEqual(["read"]);
       // The durable record must carry the binding — reload the catalog.
       const reopened = createThreadRegistry({ dataDir, hostId: "host-1" });
       try {
@@ -2124,6 +2125,29 @@ describe("thread services", () => {
       await expect(service.handle({
         task: "x", kind: "discussion", bot: "archived-bot",
       }, serviceContext())).rejects.toMatchObject({ harnessCode: "unavailable" });
+    } finally {
+      await registry.dispose();
+      rmSync(dataDir, { force: true, recursive: true });
+    }
+  });
+
+  it("uses the caller model when the consulted Bot has no model preference", async () => {
+    const dataDir = mkdtempSync(join(tmpdir(), "thread-consult-inherit-"));
+    const registry = createThreadRegistry({ dataDir, hostId: "host-1" });
+    const service = dispatchService({
+      threadRegistry: registry,
+      threadSpawnSession: vi.fn(async () => ({ sessionId: "consult-child" })),
+      bots: { get: async () => ({ id: "bot-default", archived: false, model: null }) },
+    });
+    try {
+      const result = await service.handle({
+        task: "Compare the options", kind: "discussion", bot: "bot-default",
+        model: { providerId: "caller-provider", modelId: "caller-model" },
+        tools: ["recall", "memory", "read"],
+      }, serviceContext());
+      const thread = await registry.getThreadById("workspace-1", result.threadId);
+      expect(thread?.model).toEqual({ providerId: "caller-provider", modelId: "caller-model" });
+      expect(thread?.manifest.tools).toEqual(["recall", "read"]);
     } finally {
       await registry.dispose();
       rmSync(dataDir, { force: true, recursive: true });

@@ -271,9 +271,8 @@ export const DISCUSSION_TOOLS = new Set([
   "recall",
   "webfetch",
   "websearch",
-  // A consult thread can inspect memory and report back to its parent; it
-  // never gains write, shell, or dispatch authority (BC3).
-  "memory",
+  // `memory` also exposes remember/correct/forget. A read-only consult uses
+  // `recall` for memory lookup; it must not receive the combined writer tool.
   "send",
   "wait",
   "threads",

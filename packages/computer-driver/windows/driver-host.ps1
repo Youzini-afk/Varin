@@ -21,9 +21,9 @@ $DriverDir = Split-Path -Parent $MyInvocation.MyCommand.Path
 # display grid regardless of the user's DPI scale.
 try { [void][VarinWin32]::SetProcessDPIAware() } catch {}
 
-# A crashed predecessor may have left synthesized input held at the OS level
-# (SendInput state outlives the process that sent it). Sweep once at startup.
-try { Send-ReleaseInput -Sweep } catch {}
+# Release only this helper's tracked input. Another helper's injected state
+# cannot be distinguished from a person's held keys after a crash.
+try { Send-ReleaseInput } catch {}
 
 $writeResponse = {
     param($id, $response)

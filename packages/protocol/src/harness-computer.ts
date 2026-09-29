@@ -84,6 +84,8 @@ export interface ComputerFrame {
 /** One accessibility-tree node from an observation, addressed by `index`. */
 export interface ComputerElement {
   index: number;
+  /** Driver-private child-index path captured with this observation (macOS AX). */
+  path?: number[];
   runtimeId?: number[];
   automationId?: string;
   name?: string;
@@ -100,7 +102,7 @@ export interface ComputerElement {
 
 /** One top-level window a process owns (BC4.B multi-window identity). */
 export interface ComputerWindowDescriptor {
-  /** Native window handle (HWND on Windows, window number on macOS, XID/Wayland id on Linux). */
+  /** Window selector (HWND on Windows, CGWindowNumber on macOS, zero-based AT-SPI child index on Linux). */
   handle: number;
   title?: string;
   bounds?: ComputerFrame;

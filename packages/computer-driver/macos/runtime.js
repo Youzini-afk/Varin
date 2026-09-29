@@ -197,6 +197,28 @@ function axWindowElements(process) {
     }
 }
 
+function axWindowIndexFor(axWindows, windowInfo) {
+    // CGWindowNumber has no direct System Events window identifier. Require a
+    // unique title/geometry match; identical titles are common in editors and
+    // choosing the first one would bind an element path to another document.
+    var matches = [];
+    for (var i = 0; i < axWindows.length; i++) {
+        var title = "";
+        try { title = String(axWindows[i].title() || ""); } catch (e) {}
+        if (windowInfo.title && title !== windowInfo.title) continue;
+        var frame = axFrame(axWindows[i]);
+        var target = windowInfo.bounds;
+        if (target && frame) {
+            if (Math.abs(frame.x - target.x) > 16 || Math.abs(frame.y - target.y) > 16
+                || Math.abs(frame.width - target.width) > 16 || Math.abs(frame.height - target.height) > 16) continue;
+        } else if (!windowInfo.title) {
+            continue;
+        }
+        matches.push(i);
+    }
+    return matches.length === 1 ? matches[0] : -1;
+}
+
 function axFrame(element) {
     try {
         var pos = element.position();
@@ -517,40 +539,21 @@ function findAxElement(process, windowIndex, record) {
     if (!windows.length) return null;
     var root = windows[Math.min(windowIndex || 0, windows.length - 1)];
     var path = record && record.path;
-    if (path && path.length) {
-        var node = root;
-        for (var i = 0; i < path.length; i++) {
-            node = axChild(node, path[i]);
-            if (node === null) return null;
-        }
-        // Verify the re-resolved node still looks like the observed record —
-        // a shifted tree must fail closed, not act on a stranger.
-        var role = "", name = "";
-        try { role = String(node.role() || "").replace(/^AX/, ""); } catch (e) {}
-        try { name = String(node.title() || node.description() || ""); } catch (e) {}
-        if (role && record.controlType && role !== record.controlType) return null;
-        if (record.name && name && name !== record.name) return null;
-        return node;
-    }
-    // Fallback: name+role match within the window's tree.
-    var wantName = String(record && record.name || "");
-    var wantRole = String(record && record.controlType || "");
-    var found = null, count = 0;
-    (function walk(node, depth) {
-        if (found || node === null || depth > MAX_DEPTH) return;
+    // An observed element always has a path, including [] for the window root.
+    // A name/role fallback can silently select a different duplicate control.
+    if (!Array.isArray(path)) return null;
+    var node = root;
+    for (var i = 0; i < path.length; i++) {
         checkCancel();
-        var role = "", name = "";
-        try { role = String(node.role() || "").replace(/^AX/, ""); } catch (e) {}
-        try { name = String(node.title() || node.description() || ""); } catch (e) {}
-        if (name === wantName && (!wantRole || role === wantRole)) {
-            found = node; count++;
-            return;
-        }
-        var children = [];
-        try { children = node.uiElements() || []; } catch (e) {}
-        for (var c = 0; c < children.length; c++) walk(children[c], depth + 1);
-    })(root, 0);
-    return count === 1 ? found : null;
+        node = axChild(node, path[i]);
+        if (node === null) return null;
+    }
+    var role = "", name = "";
+    try { role = String(node.role() || "").replace(/^AX/, ""); } catch (e) {}
+    try { name = String(node.title() || node.description() || ""); } catch (e) {}
+    if (record.controlType && role !== record.controlType) return null;
+    if (record.name && name !== record.name) return null;
+    return node;
 }
 
 function axPress(element) {
@@ -592,16 +595,8 @@ function buildSnapshot(query, textLimit, maxNodes, maxDepth, screenshot, windowS
     checkCancel("resolved the target window");
     var process = seProcess(app.pid);
     var axWindows = axWindowElements(process);
-    // Match the CGWindowList z-order choice to the AX window list by title;
-    // when titles are ambiguous the first AX window is used (AX order is
-    // not guaranteed to match z-order — noted in capabilities detail).
-    var axIndex = 0;
-    for (var i = 0; i < axWindows.length; i++) {
-        var axTitle = "";
-        try { axTitle = String(axWindows[i].title() || ""); } catch (e) {}
-        if (axTitle && axTitle === windowInfo.title) { axIndex = i; break; }
-    }
-    var rendered = axWindows.length
+    var axIndex = axWindowIndexFor(axWindows, windowInfo);
+    var rendered = axIndex >= 0
         ? renderTree(axWindows[axIndex], windowInfo.bounds, textLimit, maxNodes, maxDepth)
         : { records: [], lines: [] };
     checkCancel("rendered the accessibility tree");
@@ -724,11 +719,9 @@ function performOperation(operation) {
     if (elementRecord) {
         var process = seProcess(app.pid);
         var axWindows = axWindowElements(process);
-        var axIndex = 0;
-        for (var wi = 0; wi < axWindows.length; wi++) {
-            var wt = "";
-            try { wt = String(axWindows[wi].title() || ""); } catch (e) {}
-            if (wt && wt === windowInfo.title) { axIndex = wi; break; }
+        var axIndex = axWindowIndexFor(axWindows, windowInfo);
+        if (axIndex < 0) {
+            throw new Error("Selected window has no unique accessibility match; observe again");
         }
         element = findAxElement(process, axIndex, elementRecord);
         if (element === null) {
