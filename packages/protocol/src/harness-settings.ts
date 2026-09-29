@@ -286,6 +286,14 @@ export interface HarnessSettings {
   knowledge: {
     eventRetentionDays: number;
     autoAcceptSuggestions: { workspace: boolean; user: boolean };
+    /**
+     * Background memory organization (BC2): which source scopes the organizer
+     * may process (`workspace`/`bot`), and whether inferred proposals may land
+     * in the `user` scope. Explicit memory actions are never gated by this.
+     * All three switches are user-owned; a project cannot re-enable organizing
+     * the user turned off.
+     */
+    autoOrganize: { workspace: boolean; user: boolean; bot: boolean };
   };
   /** Context-management settings (background compaction preparation). */
   context: HarnessContextSettings;
@@ -331,7 +339,8 @@ export type HarnessModelRole =
   | "researchInvestigation"
   | "researchExperimentalDesign"
   | "researchFastExploration"
-  | "researchHighThroughputExecution";
+  | "researchHighThroughputExecution"
+  | "memoryOrganizer";
 
 export const DEFAULT_HARNESS_SETTINGS: HarnessSettings = {
   tools: {},
@@ -344,6 +353,7 @@ export const DEFAULT_HARNESS_SETTINGS: HarnessSettings = {
   knowledge: {
     eventRetentionDays: 30,
     autoAcceptSuggestions: { workspace: false, user: false },
+    autoOrganize: { workspace: true, user: true, bot: true },
   },
   context: { backgroundPreparation: true, preparationWaterline: 0.75,
     compactionRecovery: { ...DEFAULT_HARNESS_CONTEXT_SETTINGS.compactionRecovery } },
@@ -491,6 +501,17 @@ export function mergeHarnessSettings(
         workspace: workspace.knowledge?.autoAcceptSuggestions?.workspace
           ?? user.knowledge?.autoAcceptSuggestions?.workspace
           ?? DEFAULT_HARNESS_SETTINGS.knowledge.autoAcceptSuggestions.workspace,
+      },
+      // Background organization is user-owned. The workspace layer may disable
+      // organizing for its own scope but cannot touch the user/bot switches.
+      autoOrganize: {
+        workspace: workspace.knowledge?.autoOrganize?.workspace
+          ?? user.knowledge?.autoOrganize?.workspace
+          ?? DEFAULT_HARNESS_SETTINGS.knowledge.autoOrganize.workspace,
+        user: user.knowledge?.autoOrganize?.user
+          ?? DEFAULT_HARNESS_SETTINGS.knowledge.autoOrganize.user,
+        bot: user.knowledge?.autoOrganize?.bot
+          ?? DEFAULT_HARNESS_SETTINGS.knowledge.autoOrganize.bot,
       },
     },
     // Background preparation is user-owned. A repository cannot enable

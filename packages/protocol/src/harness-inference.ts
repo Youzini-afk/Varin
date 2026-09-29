@@ -130,6 +130,32 @@ export interface HarnessRerankResult {
   scores: HarnessRerankScore[];
 }
 
+/**
+ * `harness.memoryOrganize` — one generative narration batch for the BC2
+ * background organizer (Host -> Pi workspace worker). Unlike embed/rerank/
+ * fastDecision this is a chat-model completion against the configured
+ * `models.memoryOrganizer` slot; the worker resolves provider/auth and
+ * rejects a request whose frozen binding no longer matches live settings.
+ */
+export interface HarnessMemoryOrganizeParams {
+  batchId: string;
+  providerId: string;
+  modelId: string;
+  /** System prompt — organizer contract and output schema. */
+  system: string;
+  /** User prompt — the source material and candidate memories to judge. */
+  prompt: string;
+}
+
+export interface HarnessMemoryOrganizeResult {
+  batchId: string;
+  providerId: string;
+  modelId: string;
+  /** Raw model text. The Host parses and validates proposals before commit. */
+  text: string;
+  usage?: { inputTokens?: number; outputTokens?: number };
+}
+
 const isRecord = (value: unknown): value is Record<string, unknown> => (
   typeof value === "object" && value !== null && !Array.isArray(value)
 );

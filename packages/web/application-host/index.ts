@@ -84,8 +84,9 @@ import { createThreadRegistry } from './lib/harness/thread-registry.js';
 import { createOnThreadDequeued } from './lib/harness/thread-dequeue.js';
 import { createThreadTranscriptReader } from './lib/harness/thread-transcript.js';
 import { createHarnessPathAuthority } from './lib/harness/path-authority.js';
-import { sessionScopeId, isSessionScopeId, sessionIdFromScopeId, isSessionStoreKey, isBotScopeId, botIdFromScopeId, botScopeId, knowledgeStoreKeyForScope } from './lib/harness/owner-scope.js';
+import { sessionScopeId, isSessionScopeId, sessionIdFromScopeId, isSessionStoreKey, isBotStoreKey, isBotScopeId, botIdFromScopeId, knowledgeStoreKeyForScope } from './lib/harness/owner-scope.js';
 import { createMemoryService } from './lib/memory/memory-service.js';
+import { createMemoryOrganizer, type OrganizerRunSource } from './lib/memory/memory-organizer.js';
 import { createExploreFileReader } from './lib/harness/explore-file-reader.js';
 import { createThreadWorktreeRuntime } from './lib/harness/thread-worktree.js';
 import { createThreadRuntime } from './lib/harness/thread-runtime.js';
@@ -109,7 +110,7 @@ import { createWorkingBranchWriteServices } from './lib/harness/working-state/wo
 import { acquireVirtualWriteTicket, VirtualWriteGate } from './lib/harness/working-state/virtual-write-gate.js';
 import { IntegrationCoordinator } from './lib/harness/working-state/integration-coordinator.js';
 import { reconcileInterruptedKernelBranchIntegrations } from './lib/recovery/durable-file-operation.js';
-import { DEFAULT_HARNESS_SETTINGS, mergeHarnessSettings, resolveHarnessDocumentReadingSettings, resolvePresets, THINKING_LEVELS, type SessionSnapshot } from '@varin/protocol';
+import { DEFAULT_HARNESS_SETTINGS, mergeHarnessSettings, resolveHarnessDocumentReadingSettings, resolvePresets, THINKING_LEVELS, type HarnessSettingsInput, type SessionSnapshot } from '@varin/protocol';
 import { createSettingsService, settingsDocumentRevision } from './lib/harness/settings-service.js';
 import { createFollowUpService } from './lib/harness/followups.js';
 import { createFollowUpThreadSender } from './lib/harness/followup-delivery.js';
@@ -1709,6 +1710,7 @@ async function main(options: StartWebUiServerOptions = {}): Promise<WebUiServerC
         type: 'varin:harness-thread-done',
         properties: { workspaceId, parent, threadId, report },
       });
+      memoryOrganizer.noteScope(workspaceId);
     },
 
     onThreadDequeued: createOnThreadDequeued({
@@ -1788,6 +1790,88 @@ async function main(options: StartWebUiServerOptions = {}): Promise<WebUiServerC
     },
     onError: (error) => console.error('[VarinMemory]', errorMessage(error)),
   });
+  // BC2: background memory organizer. Reads durable sources under each
+  // workspace/bot scope (session events, Pi entries, settled run reports),
+  // filters them with the memory-organization fast decision when bound, and
+  // narrates proposals through the models.memoryOrganizer slot on the shared
+  // workspace worker. All commits go through memoryService, so inferred output
+  // keeps suggested/accepted semantics, dedupe, and correction CAS.
+  const memoryOrganizer = createMemoryOrganizer({
+    configCwd: VARIN_DATA_DIR,
+    getBroker: getReadyPiRuntimeBroker,
+    storeForScopeId: (scopeId) => getKnowledgeStoreForScope(scopeId).catch(() => null),
+    hasStoreForScope: async (scopeId) => {
+      const storePath = path.join(VARIN_DATA_DIR, 'knowledge', hostId, `${knowledgeStoreKeyForScope(scopeId)}.tdb`);
+      return fsPromises.access(storePath).then(() => true, () => false);
+    },
+    listScopeIds: async () => {
+      const fromRegistry = await threadRegistry.listWorkspaceIds().catch(() => [] as string[]);
+      // Interactive sessions can write events into a workspace store without
+      // ever owning a Thread — the on-disk store set is the second enumerator.
+      const storeDir = path.join(VARIN_DATA_DIR, 'knowledge', hostId);
+      const fromDisk = (await fsPromises.readdir(storeDir).catch(() => [] as string[]))
+        .filter((file) => file.endsWith('.tdb'))
+        .map((file) => file.slice(0, -'.tdb'.length))
+        .filter((key) => !isSessionStoreKey(key) && !isBotStoreKey(key));
+      return [...new Set([...fromRegistry, ...fromDisk])].sort();
+    },
+    listScopeSessions: async (scopeId) => {
+      const threads = await threadRegistry.listWorkspaceThreads(scopeId);
+      const ids = new Set<string>();
+      for (const thread of threads) {
+        for (const run of await threadRegistry.listRuns(scopeId, thread.id)) {
+          if (run.sessionId) ids.add(run.sessionId);
+        }
+      }
+      return [...ids];
+    },
+    listRunSources: async (scopeId) => {
+      const threads = await threadRegistry.listWorkspaceThreads(scopeId);
+      const sources: OrganizerRunSource[] = [];
+      for (const thread of threads) {
+        for (const run of await threadRegistry.listRuns(scopeId, thread.id)) {
+          if (!run.report) continue;
+          const report = run.report;
+          const unresolved = report.unresolved.length > 0 ? `Unresolved: ${report.unresolved.join('; ')}` : '';
+          sources.push({
+            threadId: thread.id,
+            threadTitle: thread.brief || thread.id,
+            runId: run.id,
+            sessionId: run.sessionId,
+            reportText: [report.conclusion, unresolved].filter(Boolean).join('\n\n'),
+            endedAt: run.endedAt,
+          });
+        }
+      }
+      return sources;
+    },
+    scopeForSession: (sessionId) => owningKnowledgeScopeIdForSession(sessionId),
+    autoOrganizeForScope: async (scopeId) => {
+      const runtime = semanticRuntimeHolder.current;
+      if (!runtime) return null;
+      try {
+        const snapshot = await runtime.harnessSettings(scopeId);
+        if (!snapshot) return null;
+        const globalHarness = recordOf(recordOf(snapshot).global).harness;
+        const projectHarness = snapshot.projectTrusted ? recordOf(recordOf(snapshot).project).harness : undefined;
+        const merged = mergeHarnessSettings(
+          globalHarness && typeof globalHarness === 'object' && !Array.isArray(globalHarness)
+            ? globalHarness as HarnessSettingsInput : {},
+          projectHarness && typeof projectHarness === 'object' && !Array.isArray(projectHarness)
+            ? projectHarness as HarnessSettingsInput : {},
+        );
+        return merged.knowledge.autoOrganize.workspace;
+      } catch {
+        return null;
+      }
+    },
+    readEntries: async (sessionId) => (
+      (await piRuntimeBroker.previewSessionEntries(sessionId, undefined, 'branch')).entries
+    ),
+    memory: memoryService,
+    onError: (error) => console.error('[VarinMemoryOrganizer]', errorMessage(error)),
+  });
+  memoryOrganizer.start();
   const threadTranscriptReader = createThreadTranscriptReader({
     readSessionEntries: (sessionId) => piRuntimeBroker.previewSessionEntries(sessionId, undefined, 'all'),
   });
@@ -3517,6 +3601,9 @@ async function main(options: StartWebUiServerOptions = {}): Promise<WebUiServerC
         harnessSessionRegistration.dropSession(event.sessionId, event.actor);
         void kernelStorageAdapter.revokeSession(event.sessionId);
         kernelSessionActors.delete(event.sessionId);
+        // A worker exit still leaves durable source material behind — let the
+        // organizer cover whatever the session wrote before it went away.
+        memoryOrganizer.noteSessionSettled(event.sessionId);
         if (ownsRegisteredSession) {
           clientSurfaceBridge.dropSession(event.sessionId);
           sessionSnapshots.delete(event.sessionId);
@@ -3535,6 +3622,7 @@ async function main(options: StartWebUiServerOptions = {}): Promise<WebUiServerC
       harnessSessionRegistration.dropSession(sessionId, event.actor);
       void kernelStorageAdapter.revokeSession(sessionId);
       kernelSessionActors.delete(sessionId);
+      memoryOrganizer.noteSessionSettled(sessionId);
       if (ownsRegisteredSession) {
         clientSurfaceBridge.dropSession(sessionId);
         knowledgeContextRuntime.dropSession(sessionId);
@@ -3607,6 +3695,7 @@ async function main(options: StartWebUiServerOptions = {}): Promise<WebUiServerC
     const agentEvent = recordOf(envelopeData.event);
     if (agentEvent?.type === 'agent_settled') return;
     if (agentEvent?.type !== 'agent_end' || agentEvent.willRetry === true) return;
+    memoryOrganizer.noteSessionSettled(sessionId);
     void (async () => {
       const features = recordOf(sessionSnapshots.get(sessionId)?.features);
       const goal = recordOf(features.goal);
@@ -3844,6 +3933,7 @@ async function main(options: StartWebUiServerOptions = {}): Promise<WebUiServerC
       await kernelClient?.close();
       await knowledgeVectors?.close();
       if (ownsPiRuntimeBroker) await piRuntimeLifecycle.dispose();
+      memoryOrganizer.dispose();
       await knowledgeContextRuntime.dispose();
       await Promise.allSettled([...knowledgeStoreLoads.values()]);
       const knowledgeShutdown = await Promise.allSettled([...knowledgeStores].map(async ([workspaceId, store]) => {

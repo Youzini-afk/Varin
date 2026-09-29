@@ -19,6 +19,7 @@ export const HARNESS_MODEL_ROLES: readonly HarnessModelRole[] = [
   "researchExperimentalDesign",
   "researchFastExploration",
   "researchHighThroughputExecution",
+  "memoryOrganizer",
 ];
 
 const DEFAULTING_TO_MAIN = new Set<HarnessModelRole>(["hardImplement", "review"]);
@@ -44,6 +45,7 @@ const PRESET_SLOTS: readonly HarnessModelRole[] = [
   "reader",
   "knowledgeSuggestions",
   "permissionJudge",
+  "memoryOrganizer",
   "researchInvestigation",
   "researchExperimentalDesign",
   "researchFastExploration",

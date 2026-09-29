@@ -228,6 +228,7 @@ export const KnowledgeSettings: React.FC = () => {
   }, [searchTarget, changeScope]);
 
   const automation = harness.harness?.knowledge.autoAcceptSuggestions;
+  const autoOrganize = harness.harness?.knowledge.autoOrganize;
   const suggestionModel = harness.harness?.models?.knowledgeSuggestions;
 
   return (
@@ -447,6 +448,19 @@ export const KnowledgeSettings: React.FC = () => {
           />
           {t('settings.knowledge.automation.autoAcceptUser')}
         </label>
+        {(['workspace', 'user', 'bot'] as const).map((scope) => (
+          <label key={scope} className="flex items-center gap-2 typography-ui">
+            <input
+              type="checkbox"
+              checked={autoOrganize?.[scope] === true}
+              disabled={!autoOrganize}
+              onChange={(event) => harness.update({
+                knowledge: { autoOrganize: { [scope]: event.target.checked } },
+              })}
+            />
+            {t(`settings.knowledge.automation.autoOrganize.${scope}`)}
+          </label>
+        ))}
       </SettingsSection>
     </>
   );

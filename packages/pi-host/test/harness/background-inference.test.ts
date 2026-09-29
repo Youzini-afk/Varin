@@ -470,4 +470,51 @@ describe("BackgroundInferenceRuntime", () => {
     }));
     assert.match(urls[0] ?? "", /^https:\/\/model\.example\/v2\/embeddings$/);
   });
+
+  it("rejects memory-organize requests before transport on binding mismatch", async () => {
+    const { agentDir, cwd, runtime } = await setupBinding();
+    // No models.memoryOrganizer slot yet — unconfigured is a settings fact,
+    // not a transport failure.
+    const unconfigured = createBackgroundInferenceRuntime({ agentDir, cwd, modelRuntime: runtime });
+    await assert.rejects(
+      unconfigured.memoryOrganize({
+        batchId: "mo-0", providerId: "embed-provider", modelId: "chat-1",
+        system: "s", prompt: "p",
+      }),
+      (error: unknown) => (error as { code?: string }).code === "memory_organizer_unconfigured",
+    );
+
+    await writeFile(join(agentDir, "settings.json"), JSON.stringify({
+      harness: {
+        models: { memoryOrganizer: { providerId: "embed-provider", modelId: "chat-1" } },
+      },
+    }));
+    const requests: string[] = [];
+    const inference = createBackgroundInferenceRuntime({
+      agentDir, cwd, modelRuntime: runtime,
+      fetchImpl: async (url) => {
+        requests.push(String(url));
+        return jsonResponse({});
+      },
+    });
+    const base = {
+      batchId: "mo-1", providerId: "embed-provider", modelId: "chat-1",
+      system: "organize", prompt: "fragments",
+    };
+    // Stale frozen bindings are rejected before any provider request.
+    await assert.rejects(
+      inference.memoryOrganize({ ...base, batchId: "mo-2", modelId: "chat-2" }),
+      (error: unknown) => (error as { code?: string }).code === "memory_organizer_binding_mismatch",
+    );
+    await assert.rejects(
+      inference.memoryOrganize({ ...base, batchId: "mo-3", providerId: "other-provider" }),
+      (error: unknown) => (error as { code?: string }).code === "memory_organizer_binding_mismatch",
+    );
+    // The slot's model is not in models.json — resolution fails before HTTP.
+    await assert.rejects(
+      inference.memoryOrganize(base),
+      (error: unknown) => (error as { code?: string }).code === "memory_organizer_unavailable",
+    );
+    assert.equal(requests.length, 0);
+  });
 });

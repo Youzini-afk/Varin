@@ -6,7 +6,9 @@ import {
 export type StoreMethod = Exclude<keyof KnowledgeStore, "dim" | "knowledgeRevision">;
 // Exhaustive at compile time, and a runtime allowlist on the private child pipe.
 export const STORE_METHODS: Record<StoreMethod, true> = {
-  putEvent: true, listEvents: true, putSession: true, getBlocks: true,
+  putEvent: true, listEvents: true, listEventSessionIds: true, putSession: true,
+  getOrganizerProgress: true, putOrganizerProgress: true,
+  listOrganizerProgress: true, getBlocks: true,
   upsertBlock: true, deleteBlock: true, putKnowledge: true,
   createKnowledgeIfAbsent: true, updateSuggestedKnowledge: true,
   updateAcceptedKnowledge: true, supersedeKnowledge: true,

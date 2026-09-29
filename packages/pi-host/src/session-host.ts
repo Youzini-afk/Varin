@@ -90,6 +90,8 @@ import type {
   HarnessEmbedResult,
   HarnessFastDecisionParams,
   HarnessFastDecisionResult,
+  HarnessMemoryOrganizeParams,
+  HarnessMemoryOrganizeResult,
   HarnessRerankParams,
   HarnessRerankResult,
   WorkFocusId,
@@ -2681,6 +2683,13 @@ export class SessionHost {
     requestId?: string,
   ): Promise<HarnessFastDecisionResult> {
     return this.#inferenceRuntime().fastDecision(params, requestId);
+  }
+
+  async memoryOrganize(
+    params: HarnessMemoryOrganizeParams,
+    requestId?: string,
+  ): Promise<HarnessMemoryOrganizeResult> {
+    return this.#inferenceRuntime().memoryOrganize(params, requestId);
   }
 
   async describeInference() {

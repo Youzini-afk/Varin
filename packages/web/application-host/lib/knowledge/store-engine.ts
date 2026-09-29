@@ -4,7 +4,7 @@
  * Design: design/harness-knowledge.md §7.1, §7.2, §7.2.1
  * Plan: plan/agent-harness-plan.md §2.1
  *
- * Node types: event, session, block, knowledge, file, symbol, link.
+ * Node types: event, session, block, knowledge, organizer, file, symbol, link.
  * Edges: supersedes (knowledge → knowledge), defines (file → symbol),
  * imports / connects / associates (file → link). Additive link kinds share the
  * file generation; gated association candidates are compact metadata on the
@@ -56,6 +56,8 @@ import {
   type KnowledgeSupersedeChain,
   type KnowledgeCreateIfAbsentResult,
   KnowledgeMutationError,
+  type OrganizerProgress,
+  type OrganizerProgressStatus,
   type RecallResult,
   type SymbolGraphRange,
   type SymbolMatchTier,
@@ -301,6 +303,25 @@ export async function openKnowledgeStoreEngine(deps: KnowledgeStoreEngineOptions
     const notifyKnowledge = (ids: readonly NodeId[]): void => {
       if (ids.length === 0 || !deps.onKnowledgeChanged) return;
       persistence.afterCommit(() => deps.onKnowledgeChanged?.(ids));
+    };
+    const ORGANIZER_STATUSES: readonly string[] = [
+      "pending", "processing", "formed", "reviewed-empty", "failed",
+    ];
+    const organizerProgressFromPayload = (p: Record<string, unknown>): OrganizerProgress | null => {
+      if (p["type"] !== "organizer" || typeof p["key"] !== "string" || !p["key"]) return null;
+      const status = p["status"];
+      if (typeof status !== "string" || !ORGANIZER_STATUSES.includes(status)) return null;
+      if (typeof p["updatedAt"] !== "number") return null;
+      const produced = p["produced"];
+      return {
+        key: p["key"],
+        status: status as OrganizerProgressStatus,
+        ...(Number.isSafeInteger(p["eventCursor"]) ? { eventCursor: p["eventCursor"] as number } : {}),
+        ...(typeof p["entryCursor"] === "string" && p["entryCursor"] ? { entryCursor: p["entryCursor"] as string } : {}),
+        ...(Array.isArray(produced) && produced.every(Number.isSafeInteger) ? { produced: produced as number[] } : {}),
+        updatedAt: p["updatedAt"],
+        ...(typeof p["lastError"] === "string" && p["lastError"] ? { lastError: p["lastError"] as string } : {}),
+      };
     };
     const normalizeKnowledgeContent = (value: string): string => value.replace(/\s+/g, " ").trim().toLowerCase();
     const matchesExpectedRevision = (
@@ -622,6 +643,62 @@ export async function openKnowledgeStoreEngine(deps: KnowledgeStoreEngineOptions
           ...(typeof payload["dedupeKey"] === "string" ? { dedupeKey: payload["dedupeKey"] as string } : {}),
           source: payload["source"] as EventSource,
         })).sort((left, right) => left.id - right.id);
+      },
+
+      async listEventSessionIds(): Promise<string[]> {
+        const ids = new Set<string>();
+        for (const { payload } of lookup({ type: "event" })) {
+          if (payload["type"] !== "event") continue;
+          const sessionId = payload["sessionId"];
+          if (typeof sessionId === "string" && sessionId) ids.add(sessionId);
+        }
+        return [...ids].sort();
+      },
+
+      async getOrganizerProgress(key: string): Promise<OrganizerProgress | null> {
+        for (const { payload } of lookup({ type: "organizer" })) {
+          if (payload["key"] !== key) continue;
+          return organizerProgressFromPayload(payload);
+        }
+        return null;
+      },
+
+      async putOrganizerProgress(progress: OrganizerProgress): Promise<void> {
+        return enqueueWrite(() => {
+          const payload: Record<string, unknown> = {
+            type: "organizer",
+            key: progress.key,
+            status: progress.status,
+            ...(progress.eventCursor !== undefined ? { eventCursor: progress.eventCursor } : {}),
+            ...(progress.entryCursor !== undefined ? { entryCursor: progress.entryCursor } : {}),
+            ...(progress.produced !== undefined ? { produced: [...progress.produced] } : {}),
+            updatedAt: progress.updatedAt,
+            ...(progress.lastError ? { lastError: progress.lastError } : {}),
+          };
+          // Fields this row no longer carries must actually disappear — a
+          // stale lastError or cursor would misreport the committed coverage.
+          const unset: Record<string, boolean> = {};
+          if (progress.eventCursor === undefined) unset.eventCursor = true;
+          if (progress.entryCursor === undefined) unset.entryCursor = true;
+          if (progress.produced === undefined) unset.produced = true;
+          if (!progress.lastError) unset.lastError = true;
+          const existing = lookup({ type: "organizer" }).filter(({ payload: p }) => p["key"] === progress.key);
+          const [first, ...rest] = existing;
+          if (first) {
+            db.patchPayload(first.id, { $set: payload, ...(Object.keys(unset).length > 0 ? { $unset: unset } : {}) });
+            for (const duplicate of rest) db.delete(duplicate.id);
+          } else {
+            db.insert(placeholderVec, payload);
+          }
+          persistence.commit();
+        });
+      },
+
+      async listOrganizerProgress(): Promise<OrganizerProgress[]> {
+        return lookup({ type: "organizer" })
+          .map(({ payload }) => organizerProgressFromPayload(payload))
+          .filter((row): row is OrganizerProgress => row !== null)
+          .sort((a, b) => a.key.localeCompare(b.key));
       },
 
       async putSession(s: SessionInput): Promise<NodeId> {

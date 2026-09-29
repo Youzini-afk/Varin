@@ -170,7 +170,7 @@ function FastDecisionSettings({ harness, update }: HarnessSettingsPageProps) {
       ...(next.endpoint.trim() ? { endpoint: next.endpoint.trim() } : {}),
     } } });
   };
-  const purposeOverrideValue = (purpose: 'explore' | 'web' | 'scholarly') => {
+  const purposeOverrideValue = (purpose: 'explore' | 'web' | 'scholarly' | 'memory-organization') => {
     const override = purposes?.[purpose];
     return override === 'off' ? 'off' : override === undefined ? 'default' : 'custom';
   };
@@ -210,7 +210,7 @@ function FastDecisionSettings({ harness, update }: HarnessSettingsPageProps) {
         <AutoSaveInput value={fields.endpoint} onCommit={(endpoint) => commit({ endpoint })} placeholder="/v1/systemone" aria-label={t('settings.page.harness.fastDecision.endpoint')}
           validate={(value) => !value || value.startsWith('/') ? null : t('settings.page.harness.fastDecision.endpoint.description')} />
       </SettingsFieldRow>
-      {(['explore', 'web', 'scholarly'] as const).map((purpose) => {
+      {(['explore', 'web', 'scholarly', 'memory-organization'] as const).map((purpose) => {
         const overrideValue = purposeOverrideValue(purpose);
         return <SettingsFieldRow key={purpose} label={t(`settings.page.harness.fastDecision.${purpose}`)} description={t(`settings.page.harness.fastDecision.${purpose}.description`)}>
           <Select value={overrideValue} onValueChange={(value) => {

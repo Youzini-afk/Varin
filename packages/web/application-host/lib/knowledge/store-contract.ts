@@ -176,6 +176,33 @@ export interface KnowledgeOrEvent {
   payload: Record<string, unknown>;
 }
 
+/**
+ * Durable background-organizer coverage (BC2). One row per source key inside
+ * the store it covers — `session:<id>` for session sources (event + entry
+ * cursors), `run:<runId>` for thread-run reports. `pending`/`processing` rows
+ * are unfinished work a restarted Host must resume; `failed` keeps the cursor
+ * where the failure left it so the range retries instead of silently passing.
+ */
+export type OrganizerProgressStatus =
+  | "pending"
+  | "processing"
+  | "formed"
+  | "reviewed-empty"
+  | "failed";
+
+export interface OrganizerProgress {
+  key: string;
+  status: OrganizerProgressStatus;
+  /** Last processed store event id for session sources. */
+  eventCursor?: number;
+  /** Last processed Pi entry id for session sources. */
+  entryCursor?: string;
+  /** Knowledge ids this source produced, for audit and late-result checks. */
+  produced?: number[];
+  updatedAt: number;
+  lastError?: string;
+}
+
 export interface RecallResult {
   node: KnowledgeOrEvent;
   score: number;
@@ -375,6 +402,14 @@ export interface KnowledgeStore {
   knowledgeRevision(): string;
   putEvent(e: EventInput): Promise<PutEventResult>;
   listEvents(filter: { sessionId: string; afterId?: NodeId; minTurnIndex?: number }): Promise<StoredEvent[]>;
+  /** Distinct session ids that have written events into this store. */
+  listEventSessionIds(): Promise<string[]>;
+  /** Read one organizer coverage row, or null when the source is untouched. */
+  getOrganizerProgress(key: string): Promise<OrganizerProgress | null>;
+  /** Upsert one organizer coverage row by key. */
+  putOrganizerProgress(progress: OrganizerProgress): Promise<void>;
+  /** All organizer coverage rows in this store (reconcile/status surface). */
+  listOrganizerProgress(): Promise<OrganizerProgress[]>;
   putSession(s: SessionInput): Promise<NodeId>;
   /**
    * Read blocks for a session. If `branchEntryIds` is provided, only blocks

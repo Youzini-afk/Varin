@@ -56,6 +56,8 @@ import type {
   HarnessEmbedParams,
   HarnessEmbedResult,
   HarnessInferenceBindingSnapshot,
+  HarnessMemoryOrganizeParams,
+  HarnessMemoryOrganizeResult,
   HarnessRerankParams,
   HarnessRerankResult,
 } from "./harness-inference.js";
@@ -533,6 +535,16 @@ export interface HostMethodMap {
   "harness.fastDecision": {
     params: HarnessFastDecisionParams;
     result: HarnessFastDecisionResult;
+  };
+  /**
+   * Background memory organization (BC2): one generative narration batch over
+   * durable source fragments, executed by the workspace worker against the
+   * `models.memoryOrganizer` slot. Internal Host -> worker authority; the Host
+   * owns proposal validation and commit.
+   */
+  "harness.memoryOrganize": {
+    params: HarnessMemoryOrganizeParams;
+    result: HarnessMemoryOrganizeResult;
   };
   /** Internal Application Host -> Pi workspace-worker inference authority. */
   "harness.inference.describe": {

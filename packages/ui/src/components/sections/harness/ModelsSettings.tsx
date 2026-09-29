@@ -10,7 +10,7 @@ import type { HarnessSettingsPageProps } from './harness-settings-state';
 const groups = [
   { key: 'retrieval', slots: ['explore', 'retrievalAgent'] },
   { key: 'execution', slots: ['quickImplement', 'hardImplement', 'frontend'] },
-  { key: 'assistance', slots: ['review', 'check', 'reader', 'knowledgeSuggestions', 'permissionJudge', 'nextStep'] },
+  { key: 'assistance', slots: ['review', 'check', 'reader', 'knowledgeSuggestions', 'permissionJudge', 'nextStep', 'memoryOrganizer'] },
   { key: 'research', slots: ['researchInvestigation', 'researchExperimentalDesign', 'researchFastExploration', 'researchHighThroughputExecution'] },
 ] as const satisfies readonly { key: string; slots: readonly HarnessModelRole[] }[];
 

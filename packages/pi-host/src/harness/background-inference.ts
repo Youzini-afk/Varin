@@ -23,6 +23,8 @@ import {
   type HarnessFastDecisionResult,
   type HarnessFastDecisionSettings,
   type HarnessInferenceBindingSnapshot,
+  type HarnessMemoryOrganizeParams,
+  type HarnessMemoryOrganizeResult,
   type HarnessRerankParams,
   type HarnessRerankResult,
   type HarnessRerankSettings,
@@ -380,6 +382,68 @@ export class BackgroundInferenceRuntime {
         answers: result.answers,
         missing: result.missing,
         ...(result.usage ? { usage: result.usage } : {}),
+      };
+    } finally {
+      this.#finish(params.batchId, requestId);
+    }
+  }
+
+  /**
+   * Generative memory-organizing completion (BC2). Unlike embed/rerank/
+   * fastDecision this uses the real chat model slot `models.memoryOrganizer`
+   * through ModelRuntime so provider protocols stay uniform; the Host supplies
+   * the frozen selection and this side re-reads settings so a mid-flight
+   * settings change is a mismatch, not a silent redirect.
+   */
+  async memoryOrganize(
+    params: HarnessMemoryOrganizeParams & { signal?: AbortSignal },
+    requestId?: string,
+  ): Promise<HarnessMemoryOrganizeResult> {
+    const signal = this.#begin(params.batchId, params.signal, requestId);
+    try {
+      await this.reload();
+      signal.throwIfAborted();
+      const configured = harnessFromSettings(this.#settings).models?.memoryOrganizer;
+      if (!configured) {
+        throw new HostError("memory_organizer_unconfigured", "Memory organizer model is not configured");
+      }
+      if (configured.providerId !== params.providerId || configured.modelId !== params.modelId) {
+        throw new HostError(
+          "memory_organizer_binding_mismatch",
+          "Memory organize request does not match the current model binding",
+        );
+      }
+      const runtime = this.#authRuntime;
+      if (!runtime) {
+        throw new HostError("memory_organizer_unavailable", "Memory organizer model runtime is unavailable");
+      }
+      const model = runtime.getModel(params.providerId, params.modelId);
+      if (!model) {
+        throw new HostError(
+          "memory_organizer_unavailable",
+          `Memory organizer model is unavailable: ${params.providerId}/${params.modelId}`,
+        );
+      }
+      const response = await runtime.completeSimple(model, {
+        systemPrompt: params.system,
+        messages: [{ role: "user", content: params.prompt, timestamp: Date.now() }],
+      }, { reasoning: "minimal", toolChoice: "none", signal });
+      signal.throwIfAborted();
+      const text = response.content
+        .filter((part) => part.type === "text")
+        .map((part) => part.text)
+        .join("\n")
+        .trim();
+      if (!text) {
+        throw new HostError("memory_organizer_empty", "Memory organizer returned no content");
+      }
+      const usage = response.usage;
+      return {
+        batchId: params.batchId,
+        providerId: params.providerId,
+        modelId: params.modelId,
+        text,
+        ...(usage ? { usage: { inputTokens: usage.input, outputTokens: usage.output } } : {}),
       };
     } finally {
       this.#finish(params.batchId, requestId);

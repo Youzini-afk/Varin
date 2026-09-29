@@ -52,6 +52,7 @@ import {
   type FastDecisionMaterial,
   type FastDecisionQuestion,
   type HarnessFastDecisionParams,
+  type HarnessMemoryOrganizeParams,
   type HarnessError,
   isWorkFocusId,
   isWorkFocusSource,
@@ -507,6 +508,16 @@ function readFastDecisionParams(params: Record<string, unknown>): HarnessFastDec
   };
 }
 
+function readMemoryOrganizeParams(params: Record<string, unknown>): HarnessMemoryOrganizeParams {
+  return {
+    batchId: readString(params, "batchId"),
+    providerId: readString(params, "providerId"),
+    modelId: readString(params, "modelId"),
+    system: readString(params, "system"),
+    prompt: readString(params, "prompt"),
+  };
+}
+
 function readProviderConfig(value: unknown): ProviderConfigInput {
   try {
     return parseProviderConfigInput(value);
@@ -679,6 +690,7 @@ export class HostController {
             envelope.method === "harness.embed"
             || envelope.method === "harness.rerank"
             || envelope.method === "harness.fastDecision"
+            || envelope.method === "harness.memoryOrganize"
           )
           && envelope.params
           && typeof envelope.params === "object"
@@ -1414,6 +1426,8 @@ export class HostController {
         return this.#sessionHost.rerank(readRerankParams(params), request.id);
       case "harness.fastDecision":
         return this.#sessionHost.fastDecision(readFastDecisionParams(params), request.id);
+      case "harness.memoryOrganize":
+        return this.#sessionHost.memoryOrganize(readMemoryOrganizeParams(params), request.id);
       case "harness.inference.describe":
         return this.#sessionHost.describeInference();
       case "harness.inference.cancel":
