@@ -6,8 +6,9 @@ stdin/stdout:
 
 ```
 in : {"id":"<request>","tool":"<op>", ...params}
-out: {"id":"<request>","ok":true|false, "error"?:string, "snapshot"?:{...},
-      "text"?:string, "apps"?:[{name,pid,windowTitle}], "capabilities"?:{...}}
+out: {"id":"<request>","ok":true|false, "error"?:string, "cancelled"?:bool,
+      "snapshot"?:{...}, "text"?:string,
+      "apps"?:[{name,pid,windowTitle,windows}], "capabilities"?:{...}}
 ```
 
 Operations:
@@ -26,16 +27,27 @@ Action params mirror the Open Computer Use schema (`app`, `element`,
 `click_method`, `direction`, `pages`, `text`, `key`, `value`, `action`,
 `windowBounds`, `text_limit`, `max_tree_nodes`, `max_tree_depth`). Two Varin
 additions: `input: "global"` selects real session input (SendInput / AT-SPI
-synthesis) where the backend message path cannot reach, and `screenshot:
-false` skips image capture on an observation.
+synthesis / CGEvent) where the backend message path cannot reach, `screenshot:
+false` skips image capture on an observation, and `window` selects one of the
+app's windows by handle or title (see `windows` in `list_apps`/snapshots;
+the handle is HWND on Windows, CGWindowNumber on macOS, and the AT-SPI child
+index on Linux).
+
+Cancellation (BC4.A): stdin stays sequential, so the Host cannot interrupt a
+running op through it. Instead it writes
+`$VARIN_DRIVER_CANCEL_DIR/<requestId>.cancel`; long operations (tree walks,
+multi-click, drags, scrolls, key chords, type bursts) poll the flag at their
+internal checkpoints and abort with `{ok:false, cancelled:true, error}` whose
+message reports how much input already reached the desktop. A `cancelled`
+response is a partial outcome, not a clean rejection.
 
 ## Platform hosts
 
 | platform | host entry | backend |
 | --- | --- | --- |
-| Windows | `windows/driver-host.ps1` (powershell.exe, stdin loop) | UIA tree/patterns + Win32 window messages; `SendInput` for `global`; `PrintWindow` capture with screen-copy fallback |
-| Linux | `linux/driver-host.py` (python3, stdin loop) | AT-SPI tree/actions + `Atspi.generate_*` input; Gdk pixbuf capture (X11 sessions; Wayland needs a portal path and reports its limitation in `capabilities.detail`) |
-| macOS | not yet packaged | The OCU Swift helper (`packages/OpenComputerUseKit`) is the intended source; until a bundled helper exists the service reports the desktop unavailable rather than pretending |
+| Windows | `windows/driver-host.ps1` (powershell.exe, stdin loop) | UIA tree/patterns + Win32 window messages; `SendInput` for `global`; `PrintWindow` capture with screen-copy fallback; per-process `EnumWindows` inventory |
+| Linux | `linux/driver-host.py` (python3, stdin loop) | AT-SPI tree/actions + `Atspi.generate_*` input; Gdk pixbuf capture on X11; under Wayland capture goes through `org.freedesktop.portal.Screenshot` and input depends on the compositor accepting AT-SPI synthesis — `capabilities.detail` says which |
+| macOS | `macos/driver-host.js` (osascript -l JavaScript, stdin loop) | JXA driver: CGWindowList windows + System Events AX tree + CGEvent input + `CGWindowListCreateImage` capture. **Unverified** — no real-machine evidence yet; `capabilities.detail` says so |
 
 Windows background-capable actions avoid stealing foreground focus by
 default; the escape hatches `VARIN_COMPUTER_ALLOW_FOCUS_ACTIONS`,
@@ -54,10 +66,12 @@ global SendInput paths, `PrintWindow` capture, `release_input`,
 The complete upstream notice is retained in
 [THIRD_PARTY_NOTICES.md](../../THIRD_PARTY_NOTICES.md).
 
-Host cancellation drops queued input and awaits the driver's release receipt.
-The helper currently finishes its synchronous native operation before servicing
-another request; this is not yet immediate interruption of a long native call.
-Post-action capture failure preserves the input acceptance, while a lost driver
-response yields an unknown action effect. Inspect the desktop before retrying.
+Host cancellation drops queued input, signals the in-flight op through the
+cancel-flag side-channel, and follows with `release_input` so an interrupted
+gesture cannot leave keys or buttons held. A spawned driver also sweeps held
+input once at startup so a respawned helper never inherits a predecessor's
+state. Post-action capture failure preserves the input acceptance, while a
+lost driver response yields an unknown action effect. Inspect the desktop
+before retrying.
 See the [BC acceptance record](../../docs/plan/bot-computer-use-acceptance.md)
 for remaining native platform and packaging work.

@@ -42,6 +42,7 @@ export function createComputerObserveService(host: HarnessServiceHost): HarnessS
         ...(desktopId ? { desktopId } : {}),
         app,
         signal: ctx.signal,
+        ...(params.window !== undefined ? { window: params.window } : {}),
         ...(params.includeScreenshot !== undefined ? { includeScreenshot: params.includeScreenshot } : {}),
         ...(params.textLimit !== undefined ? { textLimit: params.textLimit } : {}),
         ...(params.maxTreeNodes !== undefined ? { maxTreeNodes: params.maxTreeNodes } : {}),

@@ -61,6 +61,14 @@ export interface ComputerCapabilities {
   /** Screen geometry for interpreting coordinates (physical pixels). */
   displays?: Array<{ x: number; y: number; width: number; height: number; primary?: boolean }>;
   dpiAware?: boolean;
+  /** Display/session kind, e.g. `windows-console`, `x11`, `wayland`, `aqua`. */
+  sessionType?: string;
+  /** The driver enumerates all top-level windows and can target one by handle/title. */
+  multiWindow?: boolean;
+  /** A cancel reaches an in-flight native operation at its internal checkpoints. */
+  interruptibleInput?: boolean;
+  /** Occluded/offscreen window content capture (not just the screen grid). */
+  occludedCapture?: boolean;
   status: "ready" | "unavailable" | "unprobed";
   /** Honest reason when a capability is missing or the driver failed. */
   detail?: string;
@@ -90,10 +98,24 @@ export interface ComputerElement {
   actions?: string[];
 }
 
+/** One top-level window a process owns (BC4.B multi-window identity). */
+export interface ComputerWindowDescriptor {
+  /** Native window handle (HWND on Windows, window number on macOS, XID/Wayland id on Linux). */
+  handle: number;
+  title?: string;
+  bounds?: ComputerFrame;
+  visible?: boolean;
+  minimized?: boolean;
+  /** True for the process's designated main window. */
+  main?: boolean;
+}
+
 export interface ComputerAppDescriptor {
   name: string;
   pid: number;
   windowTitle?: string;
+  /** Every top-level window the process owns, when the driver can enumerate them. */
+  windows?: ComputerWindowDescriptor[];
 }
 
 /**
@@ -106,6 +128,12 @@ export interface ComputerObservation {
   machineId: string;
   app: ComputerAppDescriptor;
   windowTitle?: string;
+  /** The window this observation bound to, when the driver resolved one. */
+  windowHandle?: number;
+  /** Window DPI scale (physical px per logical px) at capture time. */
+  dpiScale?: number;
+  /** All top-level windows the observed process owned at capture time. */
+  windows?: ComputerWindowDescriptor[];
   windowBounds?: ComputerFrame;
   treeLines: string[];
   elements: ComputerElement[];
@@ -120,6 +148,8 @@ export interface ComputerAction {
   kind: "click" | "type" | "key" | "scroll" | "drag" | "set_value" | "secondary";
   /** App selector: process name, window title substring, or pid. */
   app: string;
+  /** Window selector within the app: native handle number or window title. */
+  window?: number | string;
   /**
    * Observation whose element indexes this action may reference. When the
    * desktop's latest observation for the app is newer, the Host rejects the
@@ -152,8 +182,12 @@ export interface ComputerAction {
 export interface ComputerActionResult {
   /** The driver accepted and dispatched the input — NOT a claim of app effect. */
   accepted: boolean;
-  /** Transport/driver failure after submission cannot prove that input did not occur. */
-  outcome?: "unknown";
+  /**
+   * `unknown`: transport/driver failure after submission cannot prove that
+   * input did not occur. `partial`: a mid-operation cancel aborted the action
+   * after some of its input already reached the desktop.
+   */
+  outcome?: "unknown" | "partial";
   /** True when a cancel superseded this action before/while it ran. */
   cancelled?: boolean;
   /** Driver-reported detail (pattern used, input path taken). */
@@ -176,6 +210,8 @@ export interface ComputerObserveParams {
   /** Absent = the caller's default desktop target. */
   desktopId?: string;
   app: string;
+  /** Window selector within the app: native handle number or window title. */
+  window?: number | string;
   includeScreenshot?: boolean;
   textLimit?: number | "max";
   maxTreeNodes?: number;

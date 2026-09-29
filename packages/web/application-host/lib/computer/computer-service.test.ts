@@ -83,6 +83,7 @@ const makeDriver = (handler: FakeDriver["handler"]): FakeDriver => {
     capabilities: null,
     alive: () => true,
     dispose: () => undefined,
+    cancel: () => true,
     request: async (op) => {
       driver.calls.push(op as Record<string, unknown>);
       return driver.handler(op as Record<string, unknown>);
@@ -236,8 +237,72 @@ describe("computer service (BC4)", () => {
     const slowResult = await slow;
     expect(slowResult.cancelled).toBe(true);
     // release_input is issued on the lane so interrupted input cannot linger.
+    // (index 0 is the driver-generation sweep issued when the driver spawned —
+    // the cancel cleanup is the release that follows the in-flight type_text.)
     expect(order).toContain("release_input");
-    expect(order.indexOf("release_input")).toBeGreaterThan(order.indexOf("type_text"));
+    expect(order.lastIndexOf("release_input")).toBeGreaterThan(order.indexOf("type_text"));
+  });
+
+  it("a driver-side mid-operation cancel reports a partial outcome, not failure", async () => {
+    const driver = makeDriver(async (op) => op.tool === "type_text"
+      ? { id: "x", ok: false, cancelled: true, error: "cancelled (typed 12 of 40 characters)" }
+      : okResponse());
+    const { service } = makeService(driver);
+    await service.ensureLocal();
+    const result = await service.act({
+      desktopId: "local-console",
+      action: { kind: "type", app: "x", text: "x".repeat(40) },
+    });
+    expect(result.accepted).toBe(false);
+    expect(result.cancelled).toBe(true);
+    expect(result.outcome).toBe("partial");
+    expect(result.detail).toContain("12 of 40");
+  });
+
+  it("observe passes the window selector through and binds actions to the observed hwnd", async () => {
+    const snapshot = {
+      ...appSnapshot(),
+      windowHandle: 778812,
+      windows: [
+        { handle: 778811, title: "Document A", main: false },
+        { handle: 778812, title: "Document B", main: true, bounds: { x: 0, y: 0, width: 800, height: 600 } },
+      ],
+    };
+    const driver = makeDriver(async (op) =>
+      op.tool === "get_app_state" ? okResponse({ snapshot }) : okResponse());
+    const { service } = makeService(driver);
+    await service.ensureLocal();
+    const observation = await service.observe({
+      desktopId: "local-console", app: "notepad", includeScreenshot: false, window: 778812,
+    });
+    expect(observation.windowHandle).toBe(778812);
+    expect(observation.windows).toHaveLength(2);
+    const observeOp = driver.calls.find((c) => c.tool === "get_app_state");
+    expect(observeOp?.window).toBe(778812);
+    // The action binds the observed hwnd even without an explicit selector.
+    await service.act({
+      desktopId: "local-console",
+      action: { kind: "click", app: "notepad", elementIndex: 1, observationId: observation.id },
+    });
+    const click = driver.calls.find((c) => c.tool === "click");
+    expect(click?.window).toBe(778812);
+  });
+
+  it("listApps reports the driver's per-process window inventory", async () => {
+    const driver = makeDriver(async (op) => op.tool === "list_apps"
+      ? okResponse({ apps: [{
+          name: "notepad", pid: 42, windowTitle: "Document B",
+          windows: [
+            { handle: 101, title: "Document A" },
+            { handle: 102, title: "Document B", main: true },
+          ],
+        }] })
+      : okResponse());
+    const { service } = makeService(driver);
+    await service.ensureLocal();
+    const apps = await service.listApps("local-console");
+    expect(apps[0]?.windows?.map((w) => w.handle)).toEqual([101, 102]);
+    expect(apps[0]?.windows?.[1]?.main).toBe(true);
   });
 
   it("default target persists under the host data dir and validates existence", async () => {

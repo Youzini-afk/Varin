@@ -30,12 +30,50 @@ try:
 except (ImportError, ValueError):
     Gdk = None
 
+try:
+    from gi.repository import Gio, GLib, GdkPixbuf
+except (ImportError, ValueError):
+    Gio = None
+    GLib = None
+    GdkPixbuf = None
+
 from gi.repository import Atspi
 
 
 MAX_ELEMENTS = 1200
 MAX_DEPTH = 64
 DEFAULT_TEXT_LIMIT = 500
+
+# ---------------------------------------------------------------------------
+# Cancellation (BC4.A): stdin is serialized, so a cancel request cannot be
+# read while a long operation runs. The Host writes
+# "$VARIN_DRIVER_CANCEL_DIR/<requestId>.cancel" instead; long loops poll that
+# file at their checkpoints. driver-host.py sets ACTIVE_REQUEST_ID around
+# each request.
+# ---------------------------------------------------------------------------
+
+CANCEL_DIR = os.environ.get("VARIN_DRIVER_CANCEL_DIR") or None
+ACTIVE_REQUEST_ID = None
+
+
+class CancelledError(Exception):
+    """Raised at an operation checkpoint when the Host wrote a cancel flag."""
+
+
+def cancel_requested():
+    if not CANCEL_DIR or not ACTIVE_REQUEST_ID:
+        return False
+    return os.path.exists(os.path.join(CANCEL_DIR, "{}.cancel".format(ACTIVE_REQUEST_ID)))
+
+
+def check_cancel(progress=""):
+    if cancel_requested():
+        detail = "cancelled" + (" ({})".format(progress) if progress else "")
+        raise CancelledError(detail)
+
+
+def on_wayland():
+    return os.environ.get("XDG_SESSION_TYPE") == "wayland" or bool(os.environ.get("WAYLAND_DISPLAY"))
 
 
 def frame(x, y, width, height):
@@ -190,6 +228,54 @@ def main_window(app):
     return windows[0]
 
 
+def select_window(app, selector):
+    """Pick one of the app's top-level windows (BC4.B). selector is the
+    AT-SPI child index the windows list reports as `handle`, or a window
+    title; absent → the active/showing heuristic."""
+    windows = app_windows(app)
+    if not windows:
+        raise RuntimeError(
+            "No top-level AT-SPI window is available for " + node_name(app)
+        )
+    if selector is None:
+        return main_window(app)
+    if isinstance(selector, bool):
+        raise RuntimeError("Invalid window selector")
+    if isinstance(selector, (int, float)):
+        wanted = int(selector)
+        for index, window in windows:
+            if index == wanted:
+                return index, window
+        raise RuntimeError(
+            "Window {} is not one of the app's windows; list them again".format(wanted)
+        )
+    title = str(selector).strip().lower()
+    for index, window in windows:
+        if node_name(window).strip().lower() == title:
+            return index, window
+    for index, window in windows:
+        if title and title in node_name(window).lower():
+            return index, window
+    raise RuntimeError('windowNotFound("{}")'.format(selector))
+
+
+def window_descriptors(app, selected_index=None):
+    """The app's top-level windows as reported windows; `handle` is the
+    AT-SPI child index — Linux has no stable cross-process window id."""
+    descriptors = []
+    for index, window in app_windows(app):
+        bounds = extents(window)
+        descriptors.append({
+            "handle": int(index),
+            "title": node_name(window) or None,
+            "bounds": bounds,
+            "visible": state_contains(window, Atspi.StateType.SHOWING),
+            "minimized": state_contains(window, Atspi.StateType.ICONIFIED),
+            "main": index == selected_index if selected_index is not None else False,
+        })
+    return descriptors
+
+
 def matches_query(app, query):
     normalized = query.strip().lower()
     if not normalized:
@@ -302,6 +388,7 @@ def render_tree(root, window_bounds, root_path, text_limit=DEFAULT_TEXT_LIMIT, m
     def visit(node, depth, path):
         if len(records) >= max_tree_nodes or depth > max_tree_depth or node is None:
             return
+        check_cancel("walked {} of up to {} tree nodes".format(len(records), max_tree_nodes))
         index = len(records)
         record = record_for(node, index, path, window_bounds, text_limit=text_limit)
         records.append(record)
@@ -340,7 +427,15 @@ def render_tree(root, window_bounds, root_path, text_limit=DEFAULT_TEXT_LIMIT, m
 
 
 def capture_window_png(bounds):
-    if Gdk is None or bounds is None:
+    if bounds is None:
+        return None
+    if on_wayland():
+        # Gdk.pixbuf_get_from_window reads the X11 root window; under Wayland
+        # it returns nothing. The xdg-desktop-portal Screenshot interface is
+        # the session-permitted path — non-interactive capture is allowed on
+        # compositors that trust it, denied elsewhere (returns None).
+        return capture_portal_png(bounds)
+    if Gdk is None:
         return None
     try:
         screen = Gdk.Screen.get_default()
@@ -364,6 +459,112 @@ def capture_window_png(bounds):
         return base64.b64encode(bytes(data)).decode("ascii")
     except Exception:
         return None
+
+
+def portal_desktop_available():
+    if Gio is None:
+        return False
+    try:
+        bus = Gio.bus_get_sync(Gio.BusType.SESSION, None)
+        return bool(
+            bus.call_sync(
+                "org.freedesktop.DBus",
+                "/org/freedesktop/DBus",
+                "org.freedesktop.DBus",
+                "NameHasOwner",
+                GLib.Variant("(s)", ("org.freedesktop.portal.Desktop",)),
+                GLib.VariantType.new("(b)"),
+                Gio.DBusCallFlags.NONE,
+                2000,
+                None,
+            ).unpack()[0]
+        )
+    except Exception:
+        return False
+
+
+def capture_portal_png(bounds, timeout_seconds=6):
+    """Capture via the xdg-desktop-portal Screenshot interface and crop to the
+    window bounds. The portal screenshots the whole screen when it honours
+    `interactive=false`; compositors that require user consent answer an
+    error or a dialog we cannot dismiss, so failure returns None — the
+    observation simply carries no screenshot rather than a fake one."""
+    if Gio is None or GLib is None or GdkPixbuf is None:
+        return None
+    loop = GLib.MainLoop()
+    bus = None
+    state = {"done": False, "uri": None, "sub": None, "request": None}
+    try:
+        bus = Gio.bus_get_sync(Gio.BusType.SESSION, None)
+
+        def on_response(_conn, _sender, path, _iface, _signal, params):
+            if state["request"] is None or path != state["request"]:
+                return
+            status, results = params.unpack()
+            if status == 0 and "uri" in results:
+                state["uri"] = str(results["uri"])
+            state["done"] = True
+            loop.quit()
+
+        state["sub"] = bus.signal_subscribe(
+            "org.freedesktop.portal.Desktop",
+            "org.freedesktop.portal.Request",
+            "Response",
+            None,
+            None,
+            Gio.DBusSignalFlags.NONE,
+            on_response,
+        )
+        reply = bus.call_sync(
+            "org.freedesktop.portal.Desktop",
+            "/org/freedesktop/portal/desktop",
+            "org.freedesktop.portal.Screenshot",
+            "Screenshot",
+            GLib.Variant(
+                "(sa{sv})",
+                ("", {"interactive": GLib.Variant("b", False)}),
+            ),
+            GLib.VariantType.new("(o)"),
+            Gio.DBusCallFlags.NONE,
+            int(timeout_seconds * 1000),
+            None,
+        )
+        # The Response arrives on the request object path the portal returns.
+        state["request"] = str(reply.unpack()[0])
+        GLib.timeout_add_seconds(timeout_seconds, lambda: (setattr(state, "done", True) or loop.quit() or False))
+        loop.run()
+        uri = state["uri"]
+        if not uri or not uri.startswith("file://"):
+            return None
+        path = GLib.filename_from_uri(uri)[0]
+        try:
+            pixbuf = GdkPixbuf.Pixbuf.new_from_file(path)
+        finally:
+            try:
+                os.unlink(path)
+            except OSError:
+                pass
+        if pixbuf is None:
+            return None
+        x = max(0, int(round(bounds["x"])))
+        y = max(0, int(round(bounds["y"])))
+        width = min(int(round(bounds["width"])), pixbuf.get_width() - x)
+        height = min(int(round(bounds["height"])), pixbuf.get_height() - y)
+        if width <= 0 or height <= 0:
+            return None
+        cropped = pixbuf.new_subpixbuf(x, y, width, height)
+        ok, data = cropped.save_to_bufferv("png", [], [])
+        if not ok:
+            return None
+        return base64.b64encode(bytes(data)).decode("ascii")
+    except Exception:
+        return None
+    finally:
+        try:
+            if bus is not None and state["sub"] is not None:
+                bus.signal_unsubscribe(state["sub"])
+        except Exception:
+            pass
 
 
 def pixbuf_looks_black(pixbuf):
@@ -409,6 +610,8 @@ def focused_summary(app_pid, text_limit=DEFAULT_TEXT_LIMIT):
             role = node_role(focused)
             name = limit_text(node_name(focused), text_limit=text_limit)
             return (role + " " + name).strip()
+    except CancelledError:
+        raise
     except Exception:
         return None
 
@@ -435,23 +638,27 @@ def selected_text(app_pid, text_limit=DEFAULT_TEXT_LIMIT):
                     text_iface, selection.start_offset, end_offset
                 )
                 return limit_text(value, text_limit=text_limit)
+    except CancelledError:
+        raise
     except Exception:
         return None
     return None
 
 
-def build_snapshot(query, text_limit=DEFAULT_TEXT_LIMIT, max_tree_nodes=MAX_ELEMENTS, max_tree_depth=MAX_DEPTH, screenshot=True):
+def build_snapshot(query, text_limit=DEFAULT_TEXT_LIMIT, max_tree_nodes=MAX_ELEMENTS, max_tree_depth=MAX_DEPTH, screenshot=True, window=None):
     app = resolve_app(query)
-    window_index, window = main_window(app)
-    bounds = extents(window)
+    window_index, window_node = select_window(app, window)
+    check_cancel("resolved the target window")
+    bounds = extents(window_node)
     records, lines = render_tree(
-        window,
+        window_node,
         bounds,
         [window_index],
         text_limit=text_limit,
         max_tree_nodes=max_tree_nodes,
         max_tree_depth=max_tree_depth,
     )
+    check_cancel("rendered the accessibility tree")
     pid = node_pid(app)
     return {
         "app": {
@@ -459,7 +666,11 @@ def build_snapshot(query, text_limit=DEFAULT_TEXT_LIMIT, max_tree_nodes=MAX_ELEM
             "bundleIdentifier": node_name(app),
             "pid": pid,
         },
-        "windowTitle": limit_text(node_name(window), text_limit=text_limit),
+        "windowTitle": limit_text(node_name(window_node), text_limit=text_limit),
+        # The AT-SPI child index is this platform's window handle (no stable
+        # cross-process id exists); it is valid until the window set changes.
+        "windowHandle": int(window_index),
+        "windows": window_descriptors(app, window_index),
         "windowBounds": bounds,
         "screenshotPngBase64": capture_window_png(bounds) if screenshot else None,
         "treeLines": lines,
@@ -503,6 +714,7 @@ def iter_all(root):
     def visit(node):
         if node is None or len(items) >= MAX_ELEMENTS:
             return
+        check_cancel("walked {} tree nodes".format(len(items)))
         items.append(node)
         for index in range(child_count(node)):
             visit(child_at(node, index))
@@ -531,7 +743,7 @@ def same_frame(record_frame, node_frame):
     return True
 
 
-def find_element(app, record):
+def find_element(app, record, window_selector=None):
     if not record:
         return None
     node = resolve_path(app, record.get("runtimeId") or [])
@@ -540,7 +752,7 @@ def find_element(app, record):
     ):
         return node
 
-    _, window = main_window(app)
+    _, window = select_window(app, window_selector)
     target_name = str(record.get("name") or "")
     target_id = str(record.get("automationId") or "")
     target_role = str(record.get("controlType") or "")
@@ -611,7 +823,8 @@ def mouse_button_events(button):
 def send_mouse_click(x, y, button, count):
     down, up = mouse_button_events(button)
     repeat = max(1, int(count or 1))
-    for _ in range(repeat):
+    for i in range(repeat):
+        check_cancel("sent {} of {} clicks".format(i, repeat))
         emit_mouse(int(round(x)), int(round(y)), "abs")
         emit_mouse(int(round(x)), int(round(y)), down)
         time.sleep(0.035)
@@ -624,6 +837,7 @@ def send_drag(from_x, from_y, to_x, to_y):
     emit_mouse(int(round(from_x)), int(round(from_y)), "b1p")
     steps = 12
     for step in range(1, steps + 1):
+        check_cancel("dragged {} of {} steps; the button is still held".format(step, steps))
         x = from_x + ((to_x - from_x) * step / steps)
         y = from_y + ((to_y - from_y) * step / steps)
         emit_mouse(int(round(x)), int(round(y)), "abs")
@@ -775,7 +989,8 @@ def scroll_element(direction, pages):
     elif direction == "right":
         key = "Right"
     repeat = max(1, int(math.ceil(float(pages or 1))))
-    for _ in range(repeat):
+    for i in range(repeat):
+        check_cancel("scrolled {} of {} steps".format(i, repeat))
         send_key(key)
         time.sleep(0.04)
 
@@ -835,23 +1050,40 @@ def driver_capabilities():
                     )
         except Exception:
             pass
-    wayland = os.environ.get("XDG_SESSION_TYPE") == "wayland" or bool(os.environ.get("WAYLAND_DISPLAY"))
+    wayland = on_wayland()
+    portal = portal_desktop_available() if wayland else False
     detail = None
-    if wayland:
+    if wayland and not portal:
         detail = (
-            "Wayland session detected without X11 fallback; AT-SPI input and "
-            "screen capture depend on the compositor and may be unavailable."
+            "Wayland session and no reachable xdg-desktop-portal; screen "
+            "capture is unavailable and synthetic input depends on the "
+            "compositor accepting AT-SPI events."
+        )
+    elif wayland:
+        detail = (
+            "Wayland session; capture goes through xdg-desktop-portal and "
+            "synthetic input depends on the compositor accepting AT-SPI events."
         )
     return {
         "platform": "linux",
         "driver": "linux-atspi",
         "driverVersion": DRIVER_VERSION,
         "observeTree": True,
-        "screenshot": Gdk is not None and not wayland,
+        "screenshot": (not wayland and Gdk is not None) or portal,
         "elementAction": True,
         "coordinateInput": not wayland,
         "textInput": True,
         "drag": not wayland,
+        # AT-SPI enumerates each app's top-level windows; the handle is the
+        # app's child index since Linux has no cross-process window id.
+        "multiWindow": True,
+        # Long operations poll the cancel side-channel at internal
+        # checkpoints; a cancel lands mid-operation, not after it.
+        "interruptibleInput": True,
+        # Neither X11 root reads nor the portal produce occluded-window
+        # content.
+        "occludedCapture": False,
+        "sessionType": "wayland" if wayland else ("x11" if os.environ.get("DISPLAY") else "headless"),
         "displays": displays,
         "status": "ready",
         "detail": detail,
@@ -884,10 +1116,18 @@ def perform_operation(operation):
         release_input()
         return {"ok": True}
     if tool == "list_apps":
-        return {"ok": True, "apps": [
-            {"name": node_name(app), "pid": node_pid(app), "windowTitle": node_name(app_windows(app)[0][1])}
-            for app in iter_apps() if app_windows(app)
-        ]}
+        apps = []
+        for app in iter_apps():
+            windows = app_windows(app)
+            if not windows:
+                continue
+            apps.append({
+                "name": node_name(app),
+                "pid": node_pid(app),
+                "windowTitle": node_name(windows[0][1]),
+                "windows": window_descriptors(app),
+            })
+        return {"ok": True, "apps": apps}
     if tool == "get_app_state":
         return {
             "ok": True,
@@ -897,14 +1137,16 @@ def perform_operation(operation):
                 max_tree_nodes=positive_int(operation.get("max_tree_nodes"), MAX_ELEMENTS),
                 max_tree_depth=positive_int(operation.get("max_tree_depth"), MAX_DEPTH),
                 screenshot=bool(operation.get("screenshot", True)),
+                window=operation.get("window"),
             ),
         }
 
     app = resolve_app(operation.get("app", ""))
-    _, window = main_window(app)
+    window_index, window = select_window(app, operation.get("window"))
+    check_cancel("resolved the target window")
     bounds = extents(window)
     element_record = operation.get("element")
-    element = find_element(app, element_record)
+    element = find_element(app, element_record, operation.get("window"))
     if element_record and element is None:
         raise RuntimeError("Observed element no longer exists or is ambiguous; observe again")
     if element is not None:
@@ -989,6 +1231,7 @@ def perform_operation(operation):
             "snapshot": build_snapshot(
                 operation.get("app", ""),
                 screenshot=bool(operation.get("screenshot", True)),
+                window=operation.get("window"),
             ),
         }
     except Exception:

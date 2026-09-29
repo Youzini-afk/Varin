@@ -39,6 +39,8 @@ const ComputerParams = Type.Object({
   desktopId: Type.Optional(Type.String()),
   /** observe/act/apps: app selector (process name, window title, or pid). */
   app: Type.Optional(Type.String()),
+  /** observe: which of the app's windows to bind — hwnd number or title (multi-window apps). */
+  window: Type.Optional(Type.Union([Type.Integer(), Type.String()])),
   /** observe: include a PNG screenshot of the window. */
   includeScreenshot: Type.Optional(Type.Boolean()),
   /** observe: cap the textual tree dump (number of lines, or "max"). */
@@ -67,7 +69,10 @@ const summarizeObservation = (observation: ComputerObservation): string => {
   ];
   if (observation.windowBounds) {
     const b = observation.windowBounds;
-    lines.push(`window: ${b.width}×${b.height} @ (${b.x}, ${b.y})`);
+    lines.push(`window: ${b.width}×${b.height} @ (${b.x}, ${b.y})${observation.windowHandle !== undefined ? ` · hwnd ${observation.windowHandle}` : ""}${observation.dpiScale !== undefined ? ` · dpi ×${observation.dpiScale}` : ""}`);
+  }
+  if (observation.windows && observation.windows.length > 1) {
+    lines.push(`windows: ${observation.windows.map((w) => `${w.handle}${w.main ? "*" : ""}${w.title ? ` "${w.title}"` : ""}`).join(", ")}`);
   }
   if (observation.focusedSummary) lines.push(`focused: ${observation.focusedSummary}`);
   if (observation.treeLines.length) lines.push(...observation.treeLines);
@@ -112,7 +117,10 @@ export function createComputerTool(bridge: HostServicesBridge, _sessionId: strin
             const result = await bridge.request<"computer.apps">("computer.apps", {
               ...(desktop ? { desktopId: desktop } : {}),
             }) as ComputerAppsResult;
-            const lines = result.apps.map((a) => `${a.name} (pid ${a.pid})${a.windowTitle ? ` — ${a.windowTitle}` : ""}`);
+            const lines = result.apps.map((a) => {
+              const windows = a.windows?.length ? ` · windows: ${a.windows.map((w) => `${w.handle}${w.main ? "*" : ""}${w.title ? ` "${w.title}"` : ""}`).join(", ")}` : "";
+              return `${a.name} (pid ${a.pid})${a.windowTitle ? ` — ${a.windowTitle}` : ""}${windows}`;
+            });
             return {
               content: [{ type: "text", text: lines.length ? lines.join("\n") : "no windows visible on this desktop" }],
               details: result as unknown as Record<string, unknown>,
@@ -125,6 +133,7 @@ export function createComputerTool(bridge: HostServicesBridge, _sessionId: strin
             const result = await bridge.request<"computer.observe">("computer.observe", {
               app: params.app,
               ...(desktop ? { desktopId: desktop } : {}),
+              ...(params.window !== undefined ? { window: params.window } : {}),
               ...(params.includeScreenshot !== undefined ? { includeScreenshot: params.includeScreenshot } : {}),
               ...(params.textLimit !== undefined ? { textLimit: params.textLimit } : {}),
             }) as ComputerObserveResult;
@@ -152,7 +161,9 @@ export function createComputerTool(bridge: HostServicesBridge, _sessionId: strin
             const r = result.result;
             const text = r.outcome === "unknown"
               ? `action outcome unknown: ${r.detail ?? "driver response lost"}. Observe the actual state before deciding whether to retry.`
-              : r.cancelled
+              : r.outcome === "partial"
+                ? `action cancelled mid-operation: ${r.detail ?? "part of the input already reached the desktop"}. Observe before continuing.`
+                : r.cancelled
               ? `${r.accepted ? "input was dispatched before cancellation; observe its effect" : "action cancelled before dispatch"}${r.detail ? `: ${r.detail}` : ""}`
               : r.accepted
                 ? `action dispatched${r.detail ? ` (${r.detail})` : ""} — observe to verify the effect`
@@ -215,7 +226,7 @@ export function createComputerTool(bridge: HostServicesBridge, _sessionId: strin
               const api = {
                 list: () => bridge.request("computer.list", {}, requestOptions),
                 apps: async (id?: string) => bridge.request("computer.apps", await field(id), requestOptions).then((r) => r.apps),
-                observe: async (app: string, opts?: { desktopId?: string; includeScreenshot?: boolean; textLimit?: number | "max" }) =>
+                observe: async (app: string, opts?: { desktopId?: string; window?: number | string; includeScreenshot?: boolean; textLimit?: number | "max" }) =>
                   bridge.request("computer.observe", { ...opts, ...await field(opts?.desktopId), app }, requestOptions).then((r) => r.observation),
                 act: async (action: ComputerAction, opts?: { desktopId?: string }) =>
                   bridge.request("computer.act", { ...await field(opts?.desktopId), action }, requestOptions).then((r) => r.result),

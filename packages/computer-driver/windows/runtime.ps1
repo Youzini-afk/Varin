@@ -1,4 +1,4 @@
-# Varin Computer Use — Windows driver runtime library.
+# Varin Computer Use 鈥?Windows driver runtime library.
 #
 # Dot-sourced by driver-host.ps1, which keeps this code resident in the
 # interactive desktop session and feeds it one JSON operation per request.
@@ -131,6 +131,35 @@ public static class VarinWin32 {
     [DllImport("user32.dll")]
     public static extern bool PrintWindow(IntPtr hWnd, IntPtr hdcBlt, uint nFlags);
 
+    public delegate bool EnumWindowsProc(IntPtr hWnd, IntPtr lParam);
+
+    [DllImport("user32.dll")]
+    public static extern bool EnumWindows(EnumWindowsProc lpEnumFunc, IntPtr lParam);
+
+    [DllImport("user32.dll")]
+    public static extern uint GetWindowThreadProcessId(IntPtr hWnd, out uint lpdwProcessId);
+
+    [DllImport("user32.dll")]
+    public static extern bool IsWindowVisible(IntPtr hWnd);
+
+    [DllImport("user32.dll")]
+    public static extern bool IsIconic(IntPtr hWnd);
+
+    [DllImport("user32.dll")]
+    public static extern bool IsWindow(IntPtr hWnd);
+
+    [DllImport("user32.dll", CharSet = CharSet.Unicode)]
+    public static extern int GetWindowText(IntPtr hWnd, System.Text.StringBuilder lpString, int nMaxCount);
+
+    [DllImport("user32.dll")]
+    public static extern int GetWindowTextLength(IntPtr hWnd);
+
+    [DllImport("user32.dll")]
+    public static extern IntPtr GetAncestor(IntPtr hWnd, uint gaFlags);
+
+    [DllImport("user32.dll")]
+    public static extern uint GetDpiForWindow(IntPtr hWnd);
+
     [DllImport("user32.dll")]
     public static extern bool SetProcessDPIAware();
 
@@ -188,6 +217,48 @@ function Test-EnvFlagEnabled([string]$name) {
     }
     $normalized = $value.Trim().ToLowerInvariant()
     return @("1", "true", "yes", "on") -contains $normalized
+}
+
+# ---------------------------------------------------------------------------
+# Out-of-band cancellation. The stdin protocol is strictly sequential, so a
+# long native operation (multi-line typing, tree walks, drag paths) cannot be
+# interrupted by a cancel request arriving on stdin 鈥?it would only be read
+# after the operation finished. Instead the Host writes
+# "$VARIN_DRIVER_CANCEL_DIR/<requestId>.cancel", and long loops poll that file
+# at operation checkpoints. driver-host.ps1 sets $script:ActiveRequestId
+# around each request.
+# ---------------------------------------------------------------------------
+
+$script:CancelDirectory = $env:VARIN_DRIVER_CANCEL_DIR
+$script:ActiveRequestId = $null
+
+function Test-CancelRequested {
+    if ([string]::IsNullOrWhiteSpace($script:CancelDirectory) -or [string]::IsNullOrWhiteSpace($script:ActiveRequestId)) {
+        return $false
+    }
+    return [System.IO.File]::Exists([System.IO.Path]::Combine($script:CancelDirectory, "$($script:ActiveRequestId).cancel"))
+}
+
+# $progress describes how far the operation got, e.g. "typed 12 of 40
+# characters"; it becomes the caller-visible detail so a cancelled action can
+# honestly report its partial effect. Call sites in tight loops (per
+# character, per tree node) may pass an empty string.
+function Assert-NotCancelled([string]$progress = "") {
+    if (Test-CancelRequested) {
+        $detail = "cancelled"
+        if (-not [string]::IsNullOrWhiteSpace($progress)) { $detail = "cancelled ($progress)" }
+        throw (New-Object System.OperationCanceledException $detail)
+    }
+}
+
+# PS 5.1 throws "参数类型不匹配" (ArgumentException) when @() wraps a
+# Generic.List, at statement level and inside hashtable literals alike.
+# Generic.List enumerates everywhere else, so only normalize to object[] at
+# boundaries that need a real array.
+function ConvertTo-ObjectArray($value) {
+    if ($null -eq $value) { return @() }
+    if ($value -is [System.Collections.IList]) { return $value.ToArray() }
+    return @($value)
 }
 
 function New-Frame($x, $y, $width, $height) {
@@ -267,6 +338,7 @@ function Send-MouseClick([IntPtr]$hwnd, [int]$screenX, [int]$screenY, [string]$b
 
     $repeat = [math]::Max(1, $count)
     for ($i = 0; $i -lt $repeat; $i++) {
+        Assert-NotCancelled ("sent $i of $repeat clicks")
         [void][VarinWin32]::PostMessage($hwnd, $WM_MOUSEMOVE, [IntPtr]::Zero, $lParam)
         [void][VarinWin32]::PostMessage($hwnd, $down, [IntPtr]$downFlag, $lParam)
         Start-Sleep -Milliseconds 35
@@ -290,6 +362,7 @@ function Send-Drag([IntPtr]$hwnd, [int]$fromX, [int]$fromY, [int]$toX, [int]$toY
     [void][VarinWin32]::PostMessage($hwnd, $WM_MOUSEMOVE, [IntPtr]::Zero, $startParam)
     [void][VarinWin32]::PostMessage($hwnd, $WM_LBUTTONDOWN, [IntPtr]1, $startParam)
     for ($i = 1; $i -le $steps; $i++) {
+        Assert-NotCancelled ("dragged $i of $steps steps; the button may still be held")
         $x = [int][math]::Round($start.X + (($end.X - $start.X) * $i / $steps))
         $y = [int][math]::Round($start.Y + (($end.Y - $start.Y) * $i / $steps))
         [void][VarinWin32]::PostMessage($hwnd, $WM_MOUSEMOVE, [IntPtr]1, (ConvertTo-LParam $x $y))
@@ -316,8 +389,11 @@ function Send-Scroll([IntPtr]$hwnd, [int]$screenX, [int]$screenY, [string]$direc
 }
 
 function Send-Text([IntPtr]$hwnd, [string]$text) {
+    $sent = 0
     foreach ($char in $text.ToCharArray()) {
+        Assert-NotCancelled ("typed $sent of $($text.Length) characters")
         [void][VarinWin32]::PostMessage($hwnd, $WM_CHAR, [IntPtr][int][char]$char, [IntPtr]::Zero)
+        $sent++
         Start-Sleep -Milliseconds 8
     }
 }
@@ -406,6 +482,7 @@ function Send-GlobalMouseClick([int]$screenX, [int]$screenY, [string]$button, [i
     }
     $repeat = [math]::Max(1, $count)
     for ($i = 0; $i -lt $repeat; $i++) {
+        Assert-NotCancelled ("sent $i of $repeat clicks")
         Send-GlobalMouseInput $screenX $screenY @($downFlag, $upFlag)
         Start-Sleep -Milliseconds 40
     }
@@ -418,6 +495,7 @@ function Send-GlobalDrag([int]$fromX, [int]$fromY, [int]$toX, [int]$toY) {
     Send-ManagedInput $down
     $steps = 12
     for ($i = 1; $i -le $steps; $i++) {
+        Assert-NotCancelled ("dragged $i of $steps steps; the button is still held")
         $x = [int][math]::Round($fromX + (($toX - $fromX) * $i / $steps))
         $y = [int][math]::Round($fromY + (($toY - $fromY) * $i / $steps))
         $move = [VarinWin32]::MouseInput($x, $y, ([VarinWin32]::MOUSEEVENTF_MOVE -bor [VarinWin32]::MOUSEEVENTF_ABSOLUTE), 0)
@@ -445,17 +523,21 @@ function Send-GlobalScroll([int]$screenX, [int]$screenY, [string]$direction, [do
 }
 
 function Send-GlobalText([string]$text) {
+    $sent = 0
     foreach ($char in $text.ToCharArray()) {
+        Assert-NotCancelled ("typed $sent of $($text.Length) characters")
         $code = [uint16][char]$char
         $down = [VarinWin32]::KeyInput(0, $code, [VarinWin32]::KEYEVENTF_UNICODE)
         $up = [VarinWin32]::KeyInput(0, $code, ([VarinWin32]::KEYEVENTF_UNICODE -bor [VarinWin32]::KEYEVENTF_KEYUP))
         Send-ManagedInput $down
         Send-ManagedInput $up
+        $sent++
         Start-Sleep -Milliseconds 8
     }
 }
 
 function Send-GlobalKey([string]$key) {
+    Assert-NotCancelled "before key chord $key"
     $parts = $key -split "\+"
     $main = $parts[$parts.Length - 1]
     $modifiers = @()
@@ -484,11 +566,22 @@ function Send-GlobalKey([string]$key) {
     }
 }
 
-function Send-ReleaseInput {
-    # Release only inputs this driver pressed, not every modifier on the desktop.
+function Send-ReleaseInput([switch]$Sweep) {
+    # Release inputs this driver pressed. With -Sweep (post-respawn recovery)
+    # also emit the up-events for every button/modifier SendInput may have
+    # left held 鈥?input injected by a crashed driver keeps its pressed state
+    # at the OS level even though this process forgot its tracking table.
     $failed = 0
     foreach ($key in @($script:HeldInputs.Keys)) {
         try { Send-ManagedInput $script:HeldInputs[$key] } catch { $failed++ }
+    }
+    if ($Sweep) {
+        foreach ($flag in @([VarinWin32]::MOUSEEVENTF_LEFTUP, [VarinWin32]::MOUSEEVENTF_RIGHTUP, [VarinWin32]::MOUSEEVENTF_MIDDLEUP)) {
+            try { [void][VarinWin32]::SendInput(1, @([VarinWin32]::MouseInput(0, 0, $flag, 0)), [System.Runtime.InteropServices.Marshal]::SizeOf([type][VarinWin32+INPUT])) } catch { $failed++ }
+        }
+        foreach ($vk in @(0x10, 0x11, 0x12, 0x5B, 0x5C)) {
+            try { [void][VarinWin32]::SendInput(1, @([VarinWin32]::KeyInput([uint16]$vk, 0, [VarinWin32]::KEYEVENTF_KEYUP)), [System.Runtime.InteropServices.Marshal]::SizeOf([type][VarinWin32+INPUT])) } catch { $failed++ }
+        }
     }
     if ($failed -gt 0) { throw "Windows did not confirm release of $failed managed inputs" }
 }
@@ -520,6 +613,7 @@ function Get-VirtualKey([string]$key) {
 }
 
 function Send-Key([IntPtr]$hwnd, [string]$key) {
+    Assert-NotCancelled "before key chord $key"
     $parts = $key -split "\+"
     $main = $parts[$parts.Length - 1]
     $modifiers = @()
@@ -547,13 +641,60 @@ function Send-Key([IntPtr]$hwnd, [string]$key) {
     }
 }
 
+# One EnumWindows pass over every top-level handle, grouped by owning pid 鈥?# not just MainWindowHandle, which is a single heuristic value and misses
+# secondary documents, palettes, and borderless windows.
+function Get-WindowProcessMap {
+    $map = @{}
+    $callback = [VarinWin32+EnumWindowsProc]{
+        param($callbackHwnd, $lParam)
+        $procId = 0
+        [void][VarinWin32]::GetWindowThreadProcessId($callbackHwnd, [ref]$procId)
+        if ($procId -ne 0) {
+            $titleLength = [VarinWin32]::GetWindowTextLength($callbackHwnd)
+            $builder = New-Object System.Text.StringBuilder ([math]::Max(1, $titleLength + 1))
+            [void][VarinWin32]::GetWindowText($callbackHwnd, $builder, $builder.Capacity)
+            if (-not $map.ContainsKey([int]$procId)) {
+                $map[[int]$procId] = New-Object System.Collections.Generic.List[object]
+            }
+            $map[[int]$procId].Add([pscustomobject]@{
+                handle = [int64]$callbackHwnd
+                title = $builder.ToString()
+                bounds = (Get-WindowRectFrame $callbackHwnd)
+                visible = [bool][VarinWin32]::IsWindowVisible($callbackHwnd)
+                minimized = [bool][VarinWin32]::IsIconic($callbackHwnd)
+            })
+        }
+        return $true
+    }
+    [void][VarinWin32]::EnumWindows($callback, [IntPtr]::Zero)
+    return $map
+}
+
+function Get-ProcessWindows([int]$processId) {
+    $map = Get-WindowProcessMap
+    if ($map.ContainsKey($processId)) { return ConvertTo-ObjectArray $map[$processId] }
+    return @()
+}
+
+function Get-WindowDpiScale([IntPtr]$hwnd) {
+    try {
+        $dpi = [VarinWin32]::GetDpiForWindow($hwnd)
+        if ($dpi -gt 0) { return [double]$dpi / 96.0 }
+    } catch {
+    }
+    return $null
+}
+
 function Resolve-App([string]$query) {
     $normalized = $query.Trim()
     $processQuery = $normalized
     if ($processQuery.EndsWith(".exe", [System.StringComparison]::OrdinalIgnoreCase)) {
         $processQuery = $processQuery.Substring(0, $processQuery.Length - 4)
     }
-    $processes = @(Get-Process | Where-Object { $_.MainWindowHandle -ne 0 })
+    # A process has UI when it owns any top-level window 鈥?the processes list
+    # is no longer filtered by MainWindowHandle alone.
+    $script:ProcessWindows = Get-WindowProcessMap
+    $processes = @(Get-Process | Where-Object { $script:ProcessWindows.ContainsKey([int]$_.Id) })
     $pidValue = 0
     if ([int]::TryParse($normalized, [ref]$pidValue)) {
         $match = $processes | Where-Object { $_.Id -eq $pidValue } | Select-Object -First 1
@@ -563,10 +704,12 @@ function Resolve-App([string]$query) {
     }
 
     $match = $processes | Where-Object {
+        $candidate = $_
         $_.ProcessName -ieq $processQuery -or
         "$($_.ProcessName).exe" -ieq $normalized -or
         $_.MainWindowTitle -ieq $normalized -or
-        $_.MainWindowTitle -ilike "*$normalized*"
+        $_.MainWindowTitle -ilike "*$normalized*" -or
+        (@($script:ProcessWindows[[int]$candidate.Id] | Where-Object { $_.title -ieq $normalized -or $_.title -ilike "*$normalized*" }).Count) -gt 0
     } | Select-Object -First 1
     if ($null -ne $match) {
         return $match
@@ -576,12 +719,15 @@ function Resolve-App([string]$query) {
         try {
             $started = Start-Process -FilePath $normalized -PassThru
             for ($i = 0; $i -lt 20; $i++) {
+                Assert-NotCancelled "waiting for $normalized to open a window"
                 Start-Sleep -Milliseconds 250
                 $candidate = Get-Process -Id $started.Id -ErrorAction SilentlyContinue
                 if ($null -ne $candidate -and $candidate.MainWindowHandle -ne 0) {
                     return $candidate
                 }
             }
+        } catch [System.OperationCanceledException] {
+            throw
         } catch {
         }
     }
@@ -589,7 +735,36 @@ function Resolve-App([string]$query) {
     throw "appNotFound(`"$query`")"
 }
 
-function Get-MainElement($process) {
+# Resolve which of the process's top-level windows an operation targets:
+# a hwnd number, a window title (exact then contains), or absent = the main
+# window when it exists, else the first visible window.
+function Resolve-AppWindow($process, $selector) {
+    $windows = ConvertTo-ObjectArray $script:ProcessWindows[[int]$process.Id]
+    if ($windows.Count -eq 0) { $windows = ConvertTo-ObjectArray (Get-ProcessWindows ([int]$process.Id)) }
+    $handle = [int64]0
+    if ($null -ne $selector -and "$selector" -ne "") {
+        if ([int64]::TryParse("$selector", [ref]$handle)) {
+            $match = $windows | Where-Object { $_.handle -eq $handle } | Select-Object -First 1
+            if ($null -eq $match) { throw "window handle $handle does not belong to $($process.ProcessName); observe again" }
+            return [IntPtr]$match.handle
+        }
+        $title = "$selector"
+        $match = $windows | Where-Object { $_.title -ieq $title } | Select-Object -First 1
+        if ($null -eq $match) { $match = $windows | Where-Object { $_.title -ilike "*$title*" } | Select-Object -First 1 }
+        if ($null -eq $match) { throw "no window of $($process.ProcessName) matches title `"$title`"" }
+        return [IntPtr]$match.handle
+    }
+    if ($process.MainWindowHandle -ne 0) { return [IntPtr]$process.MainWindowHandle }
+    $visible = $windows | Where-Object { $_.visible -and -not $_.minimized } | Select-Object -First 1
+    if ($null -ne $visible) { return [IntPtr]$visible.handle }
+    if ($windows.Count -gt 0) { return [IntPtr]$windows[0].handle }
+    return [IntPtr]::Zero
+}
+
+function Get-MainElement($process, [IntPtr]$hwnd = [IntPtr]::Zero) {
+    if ($hwnd -ne [IntPtr]::Zero -and [VarinWin32]::IsWindow($hwnd)) {
+        return [Windows.Automation.AutomationElement]::FromHandle($hwnd)
+    }
     if ($process.MainWindowHandle -ne 0) {
         return [Windows.Automation.AutomationElement]::FromHandle([IntPtr]$process.MainWindowHandle)
     }
@@ -601,8 +776,8 @@ function Get-MainElement($process) {
     throw "No top-level UI Automation window is available for $($process.ProcessName). Run the Windows driver in the signed-in desktop session."
 }
 
-function Get-WindowBounds($process, $element) {
-    $hwnd = [IntPtr]$process.MainWindowHandle
+function Get-WindowBounds($process, $element, [IntPtr]$hwnd = [IntPtr]::Zero) {
+    if ($hwnd -eq [IntPtr]::Zero) { $hwnd = [IntPtr]$process.MainWindowHandle }
     if ($hwnd -ne [IntPtr]::Zero) {
         $fromWin32 = Get-WindowRectFrame $hwnd
         if ($null -ne $fromWin32) {
@@ -764,6 +939,7 @@ function Render-Tree($element, $windowBounds, $TextLimit = $script:DefaultTextLi
     $effectiveMaxTreeDepth = if ($MaxTreeDepth -gt 0) { $MaxTreeDepth } else { $script:AccessibilityTreeMaxDepth }
 
     function Visit($node, [int]$depth) {
+        Assert-NotCancelled ("walked $($script:nextIndex) of up to $($script:MaxTreeNodes) tree nodes")
         if ($script:nextIndex -ge $script:MaxTreeNodes -or $depth -gt $script:MaxTreeDepth) {
             return
         }
@@ -926,20 +1102,32 @@ function Get-SelectedText($processId, $TextLimit = $script:DefaultTextLimit) {
     return $null
 }
 
-function Build-Snapshot([string]$query, $TextLimit = $script:DefaultTextLimit, [int]$MaxTreeNodes = $script:AccessibilityTreeMaxNodeCount, [int]$MaxTreeDepth = $script:AccessibilityTreeMaxDepth, [bool]$Screenshot = $true) {
+function Build-Snapshot([string]$query, $TextLimit = $script:DefaultTextLimit, [int]$MaxTreeNodes = $script:AccessibilityTreeMaxNodeCount, [int]$MaxTreeDepth = $script:AccessibilityTreeMaxDepth, [bool]$Screenshot = $true, $WindowSelector = $null) {
     $process = Resolve-App $query
-    $element = Get-MainElement $process
-    $bounds = Get-WindowBounds $process $element
+    $hwnd = Resolve-AppWindow $process $WindowSelector
+    $element = Get-MainElement $process $hwnd
+    $bounds = Get-WindowBounds $process $element $hwnd
+    Assert-NotCancelled "resolved the target window"
     $rendered = Render-Tree $element $bounds $TextLimit $MaxTreeNodes $MaxTreeDepth
+    Assert-NotCancelled "rendered the accessibility tree"
+    $windows = ConvertTo-ObjectArray $script:ProcessWindows[[int]$process.Id]
+    $selectedTitle = ""
+    foreach ($window in $windows) {
+        $window | Add-Member -NotePropertyName "main" -NotePropertyValue ($window.handle -eq [int64]$process.MainWindowHandle) -Force
+        if ($window.handle -eq [int64]$hwnd) { $selectedTitle = $window.title }
+    }
     [pscustomobject]@{
         app = [pscustomobject]@{
             name = $process.ProcessName
             bundleIdentifier = $process.ProcessName
             pid = [int]$process.Id
         }
-        windowTitle = Limit-Text $process.MainWindowTitle $TextLimit
+        windowTitle = $(if ([string]::IsNullOrWhiteSpace($selectedTitle)) { Limit-Text $process.MainWindowTitle $TextLimit } else { Limit-Text $selectedTitle $TextLimit })
+        windowHandle = [int64]$hwnd
         windowBounds = $bounds
-        screenshotPngBase64 = $(if ($Screenshot) { Capture-WindowPngBase64 ([IntPtr]$process.MainWindowHandle) $bounds } else { $null })
+        dpiScale = Get-WindowDpiScale $hwnd
+        windows = @($windows)
+        screenshotPngBase64 = $(if ($Screenshot) { Capture-WindowPngBase64 $hwnd $bounds } else { $null })
         treeLines = @($rendered.lines)
         focusedSummary = Get-FocusedSummary $process.Id $TextLimit
         selectedText = Get-SelectedText $process.Id $TextLimit
@@ -950,13 +1138,19 @@ function Build-Snapshot([string]$query, $TextLimit = $script:DefaultTextLimit, [
 function List-Apps {
     $lines = New-Object System.Collections.Generic.List[string]
     $apps = New-Object System.Collections.Generic.List[object]
-    foreach ($process in (Get-Process | Where-Object { $_.MainWindowHandle -ne 0 } | Sort-Object ProcessName, Id)) {
+    $map = Get-WindowProcessMap
+    foreach ($process in (Get-Process | Where-Object { $map.ContainsKey([int]$_.Id) } | Sort-Object ProcessName, Id)) {
+        $windows = ConvertTo-ObjectArray $map[[int]$process.Id]
         $title = $process.MainWindowTitle
         if ([string]::IsNullOrWhiteSpace($title)) {
-            $title = "untitled"
+            $visible = $windows | Where-Object { $_.visible -and -not [string]::IsNullOrWhiteSpace($_.title) } | Select-Object -First 1
+            $title = if ($null -ne $visible) { $visible.title } else { "untitled" }
+        }
+        foreach ($window in $windows) {
+            $window | Add-Member -NotePropertyName "main" -NotePropertyValue ($window.handle -eq [int64]$process.MainWindowHandle) -Force
         }
         $lines.Add(("{0} -- {1} [running, pid={2}, window={3}]" -f $process.ProcessName, $process.ProcessName, $process.Id, $title))
-        $apps.Add([pscustomobject]@{ name = $process.ProcessName; pid = [int]$process.Id; windowTitle = $title })
+        $apps.Add([pscustomobject]@{ name = $process.ProcessName; pid = [int]$process.Id; windowTitle = $title; windows = @($windows) })
     }
     return [pscustomobject]@{ text = ($lines -join "`n"); apps = $apps.ToArray() }
 }
@@ -987,6 +1181,15 @@ function Get-DriverCapabilities {
         drag = $true
         dpiAware = $true
         displays = $displays.ToArray()
+        # The driver enumerates every top-level window per process, binds
+        # observation/input to a chosen hwnd, and renders occluded windows
+        # through PrintWindow before falling back to the screen grid.
+        multiWindow = $true
+        occludedCapture = $true
+        # Long operations poll the cancel side-channel at their internal
+        # checkpoints; a cancel lands mid-operation, not after it.
+        interruptibleInput = $true
+        sessionType = "windows-console"
         status = "ready"
     }
 }
@@ -1016,12 +1219,13 @@ function Get-AllElements($root) {
     return $items.ToArray()
 }
 
-function Find-Element($process, $record) {
+function Find-Element($process, $record, $rootOverride = $null) {
     if ($null -eq $record) {
         return $null
     }
-    $root = Get-MainElement $process
+    $root = if ($null -ne $rootOverride) { $rootOverride } else { Get-MainElement $process }
     foreach ($element in (Get-AllElements $root)) {
+        Assert-NotCancelled "matching the observed element in the live tree"
         try {
             if (Same-RuntimeId @($element.GetRuntimeId()) @($record.runtimeId)) {
                 return $element
@@ -1120,6 +1324,7 @@ function Invoke-Scroll($element, [string]$direction, [double]$pages) {
     elseif ($direction -eq "right") { $horizontal = [Windows.Automation.ScrollAmount]::LargeIncrement }
     $repeat = [math]::Max(1, [int][math]::Ceiling($pages))
     for ($i = 0; $i -lt $repeat; $i++) {
+        Assert-NotCancelled ("scrolled $i of $repeat steps")
         $scroll.Scroll($horizontal, $vertical)
         Start-Sleep -Milliseconds 40
     }
@@ -1235,7 +1440,7 @@ function Invoke-TypeText($process, [string]$text) {
 }
 
 # ---------------------------------------------------------------------------
-# Operation dispatcher — one JSON op in, one response object out. The host
+# Operation dispatcher 鈥?one JSON op in, one response object out. The host
 # loop keeps this resident, so observations and actions never restart the
 # interpreter.
 # ---------------------------------------------------------------------------
@@ -1250,7 +1455,7 @@ function Invoke-ComputerOperation($operation) {
         return [pscustomobject]@{ ok = $true; capabilities = (Get-DriverCapabilities) }
     }
     if ($tool -eq "release_input") {
-        Send-ReleaseInput
+        Send-ReleaseInput -Sweep:([bool]$operation.sweep)
         return [pscustomobject]@{ ok = $true }
     }
     if ($tool -eq "list_apps") {
@@ -1262,15 +1467,25 @@ function Invoke-ComputerOperation($operation) {
         if ($null -ne $operation.screenshot) {
             $includeScreenshot = [bool]$operation.screenshot
         }
-        return [pscustomobject]@{ ok = $true; snapshot = (Build-Snapshot $operation.app (Resolve-TextLimit $operation.text_limit) ([int]$operation.max_tree_nodes) ([int]$operation.max_tree_depth) $includeScreenshot) }
+        return [pscustomobject]@{ ok = $true; snapshot = (Build-Snapshot $operation.app (Resolve-TextLimit $operation.text_limit) ([int]$operation.max_tree_nodes) ([int]$operation.max_tree_depth) $includeScreenshot $operation.window) }
     }
 
     $process = Resolve-App $operation.app
-    $hwnd = [IntPtr]$process.MainWindowHandle
-    $windowBounds = Get-WindowBounds $process (Get-MainElement $process)
-    $element = Find-Element $process $operation.element
+    # The window a caller selected (hwnd or title); absent = the main window
+    # or the process's first visible top-level window.
+    $hwnd = Resolve-AppWindow $process $operation.window
+    $rootElement = Get-MainElement $process $hwnd
+    $windowBounds = Get-WindowBounds $process $rootElement $hwnd
+    $element = Find-Element $process $operation.element $rootElement
     if ($null -ne $operation.element -and $null -eq $element) { throw "Observed element no longer exists; observe again" }
     if ($null -ne $element) { $operation.element.frame = Get-ElementFrame $element $windowBounds }
+    # PostMessage paths target the element's own HWND when the UIA record
+    # carries one 鈥?child-window controls receive their own messages.
+    $postHwnd = $hwnd
+    if ($null -ne $element) {
+        $elementHwnd = Get-NativeWindowHandle $element
+        if ($elementHwnd -ne [IntPtr]::Zero) { $postHwnd = $elementHwnd }
+    }
     $inputPath = [string]$operation.input
     if ([string]::IsNullOrWhiteSpace($inputPath)) { $inputPath = "auto" }
     if ($inputPath -eq "global" -or $operation.click_method -eq "global") {
@@ -1317,7 +1532,7 @@ function Invoke-ComputerOperation($operation) {
                             y = [int][math]::Round($windowBounds.y + [double]$operation.y)
                         }
                     }
-                    Send-MouseClick $hwnd $point.x $point.y $operation.mouse_button ([int]$operation.click_count)
+                    Send-MouseClick $postHwnd $point.x $point.y $operation.mouse_button ([int]$operation.click_count)
                 }
             } else {
                 throw "Invalid click_method '$clickMethod'"
@@ -1350,7 +1565,7 @@ function Invoke-ComputerOperation($operation) {
                             y = [int][math]::Round($windowBounds.y + [double]$operation.y)
                         }
                     }
-                    Send-Scroll $hwnd $point.x $point.y $operation.direction ([double]$operation.pages)
+                    Send-Scroll $postHwnd $point.x $point.y $operation.direction ([double]$operation.pages)
                 }
             }
         }
@@ -1362,21 +1577,21 @@ function Invoke-ComputerOperation($operation) {
             if ($inputPath -eq "global") {
                 Send-GlobalDrag $fromX $fromY $toX $toY
             } else {
-                Send-Drag $hwnd $fromX $fromY $toX $toY
+                Send-Drag $postHwnd $fromX $fromY $toX $toY
             }
         }
         "type_text" {
             if ($inputPath -eq "global") {
                 Send-GlobalText $operation.text
             } elseif (-not (Invoke-TypeText $process $operation.text)) {
-                Send-Text $hwnd $operation.text
+                Send-Text $postHwnd $operation.text
             }
         }
         "press_key" {
             if ($inputPath -eq "global") {
                 Send-GlobalKey $operation.key
             } else {
-                Send-Key $hwnd $operation.key
+                Send-Key $postHwnd $operation.key
             }
         }
         "set_value" {
@@ -1391,6 +1606,11 @@ function Invoke-ComputerOperation($operation) {
             throw "unsupportedTool(`"$tool`")"
         }
     }
+    } catch [System.OperationCanceledException] {
+        # The cancel side-channel fired mid-operation. The finally below still
+        # releases any input this driver had pressed; the message carries how
+        # much of the action already reached the desktop.
+        return [pscustomobject]@{ ok = $false; cancelled = $true; error = $_.Exception.Message }
     } finally {
         Send-ReleaseInput
         $script:InputWindow = [IntPtr]::Zero
@@ -1398,7 +1618,7 @@ function Invoke-ComputerOperation($operation) {
 
     Start-Sleep -Milliseconds 120
     try {
-        return [pscustomobject]@{ ok = $true; snapshot = (Build-Snapshot $operation.app) }
+        return [pscustomobject]@{ ok = $true; snapshot = (Build-Snapshot $operation.app (Resolve-TextLimit $null) 0 0 $true $operation.window) }
     } catch {
         return [pscustomobject]@{ ok = $true; text = "Input was dispatched; post-action observation failed. Observe again before deciding another action." }
     }

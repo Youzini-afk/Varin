@@ -23,6 +23,20 @@ process.stdin.on("data", (chunk) => {
     if (!line) continue;
     const message = JSON.parse(line);
     if (message.tool === "hang") continue;
+    if (message.tool === "awaitflag") {
+      // Polls its own cancel flag file — proves cancel() writes where the
+      // driver actually looks, at the same path shape real drivers poll.
+      const fs = require("fs");
+      const path = require("path");
+      const flag = path.join(process.env.VARIN_DRIVER_CANCEL_DIR || "", message.id + ".cancel");
+      const poll = setInterval(() => {
+        if (fs.existsSync(flag)) {
+          clearInterval(poll);
+          process.stdout.write(JSON.stringify({ id: message.id, ok: false, cancelled: true, error: "cancelled" }) + "\\n");
+        }
+      }, 5);
+      continue;
+    }
     if (message.tool === "exit") process.exit(3);
     if (message.tool === "slow") { setTimeout(() => process.stdout.write(JSON.stringify({id:message.id,ok:true}) + "\\n"), 120); continue; }
     process.stdout.write(JSON.stringify({ id: message.id, ok: message.tool !== "fail", text: "did:" + message.tool, error: message.tool === "fail" ? "op failed" : undefined }) + "\\n");
@@ -87,6 +101,21 @@ describe("computer driver host (BC4)", () => {
         .rejects.toThrow(/timed out/);
       const recovered = await driver.request({ tool: "ping" });
       expect(recovered.ok).toBe(true);
+    } finally {
+      driver.dispose();
+    }
+  });
+
+  it("cancel() writes the in-flight request's flag file on the side-channel", async () => {
+    const driver = createDriverSession(echoSpec());
+    try {
+      expect(driver.cancel()).toBe(false);
+      const inFlight = driver.request({ tool: "awaitflag" });
+      await new Promise((resolve) => setTimeout(resolve, 50));
+      expect(driver.cancel()).toBe(true);
+      const response = await inFlight;
+      expect(response.ok).toBe(false);
+      expect(response.cancelled).toBe(true);
     } finally {
       driver.dispose();
     }

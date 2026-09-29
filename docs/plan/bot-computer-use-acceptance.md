@@ -212,40 +212,84 @@ Remaining gaps (not falsely complete):
 - Vector and fast-decision enrichment still require a configured inference
   binding; unconfigured deployments fall back to text retrieval by design.
 
-### BC4: native coverage and interrupted actions remain partial
+### BC4: native drivers now interruptible and multi-window; platform depth still uneven
 
-- No macOS driver exists. This is missing implementation, not just missing
-  packaging. The Linux Wayland portal path is also absent.
-- A resident helper processes one native operation synchronously. Cancellation
-  can prevent queued input and terminate JavaScript, and release follows the
-  current native operation, but long native typing/tree/capture calls cannot yet
-  be interrupted within that operation. Do not claim immediate takeover; BC5
-  must consume a real driver cancellation/control boundary.
-- The Windows driver is still primarily process/main-window oriented. Full
-  multi-window identity, DPI/display transitions, occluded/GPU window capture and
-  native input interruption need real platform behavior evidence.
-- Unknown-effect results are now explicit, but desktop restart/control-generation
-  recovery still belongs to the complete native action/control lifecycle. No
-  generic GUI transaction guarantee is possible.
-- Driver assets and OS dependencies are not yet in the installed distribution.
-  This belongs to BC9, but means this review cannot describe an installed BC4
-  feature as verified.
+Follow-up work (this change) closed the main seams that remained after
+`eb14dea3`:
+
+- **In-operation cancellation is real now** — stdin stays sequential, so a
+  cancel travels on a side-channel: the Host writes
+  `$VARIN_DRIVER_CANCEL_DIR/<requestId>.cancel` and the drivers poll it at
+  internal checkpoints (per tree node, per click repeat, per drag step, per
+  scroll, per key chord, per typed-character batch). The aborted op returns
+  `{ok:false, cancelled:true}` with its progress detail; the Host maps it to
+  `outcome:"partial"` — part of the input already reached the desktop — and
+  the caller-visible tool text says so. `driver.cancel()` is wired into the
+  service's `computer.cancel` ahead of `release_input`; a real child-process
+  test proves the flag lands where a driver polls it.
+- **Generation recovery**: every spawned helper sweeps held input at startup
+  (Windows: `Send-ReleaseInput -Sweep`; Linux/macOS: `release_input()`), and
+  the Host additionally issues `release_input` once after each respawn before
+  the driver serves work — a resurrected desktop never inherits a held button
+  from a crashed predecessor.
+- **Windows multi-window identity** is implemented and smoke-verified on a
+  live desktop: `EnumWindows` builds a per-process window map once per call;
+  `list_apps` and snapshots return the full `windows[]` inventory with hwnd,
+  title, bounds, visibility, minimized and `main` flags (62 apps / 53
+  multi-window observed); `observe`/`act` accept a `window` selector
+  (hwnd number or title) and actions bind the observed hwnd automatically;
+  PostMessage paths target the element's own hwnd rather than the process
+  main window; `GetDpiForWindow` reports `dpiScale` per observation; occluded
+  capture still uses `PrintWindow` with a screen-grid fallback.
+- **Linux**: AT-SPI window enumeration produces the same `windows[]`
+  inventory (handle = AT-SPI child index — Linux has no cross-process window
+  id); `window` selectors work by index or title; cancel checkpoints are in
+  the same loops; under Wayland, screen capture goes through the
+  `org.freedesktop.portal.Screenshot` interface (non-interactive; denied
+  compositors honestly report no screenshot) and synthetic input depends on
+  compositor acceptance — `capabilities.detail` says which state applies.
+- **macOS driver exists now** (`macos/driver-host.js` + `runtime.js`, JXA
+  under osascript): CGWindowList window inventory, System Events AX tree,
+  CGEvent input, `CGWindowListCreateImage` capture, same op vocabulary and
+  cancel side-channel. **It has never run on a real machine** — the
+  capability table marks it `UNVERIFIED` and AX permission failure degrades
+  to `unavailable` rather than pretending.
+
+Remaining honest limits:
+
+- Linux/macOS drivers are syntax-checked only (`py_compile`, `node --check`);
+  neither ran on a real desktop. Portal screenshot timing/dialog behavior is
+  compositor-dependent.
+- `interruptibleInput` means checkpoint interruption — a single native call
+  (one SendInput batch, one UIA pattern invoke) still runs to completion.
+- DPI *transitions* (window dragged across mixed-DPI monitors mid-session)
+  are reported per-observation via `dpiScale`, but no live monitor-topology
+  event handling exists.
+- GPU-exclusive windows (some games/secure surfaces) remain a capture gap the
+  fallback only papers over.
+- Packaging/driver assets in the installed distribution still belong to BC9;
+  this review cannot describe an installed BC4 feature as verified.
 
 ## Verification boundary
 
 Focused checks cover the changed Host services, storage-backed memory behavior,
-context receipts, existing research roots, real child-process driver supervision,
-and the Pi tool/REPL. The affected Host checks passed (93 cases across 12 files,
-including two final recall/receipt regressions); Pi tool/inference checks passed
-(24 cases). Host production/test TypeScript checks, Pi TypeScript checks,
-protocol build, and changed-source ESLint passed. These counts describe focused
-behavior coverage, not proof of the missing product paths listed above.
+context receipts, existing research roots, real child-process driver supervision
+(including an end-to-end cancel-flag write into a live child), and the Pi
+tool/REPL. The affected Host checks passed; Pi tool/inference checks passed.
+Host production/test TypeScript checks, Pi TypeScript checks, protocol build,
+and changed-source ESLint passed. These counts describe focused behavior
+coverage, not proof of the missing product paths listed above.
 
-Windows PowerShell parsing, native helper loading, and read-only capability
-discovery were exercised. No input was injected into the user's working desktop.
-Linux scripts were parsed with Python, not run on a Linux desktop. macOS,
-Wayland portal, actual model quality/cache hits, remote machines, VMs, installed
-packages, and end-to-end Bot task continuity are not established by these checks.
+Windows gained real-machine evidence beyond parsing: the resident driver's
+`list_apps` enumerated 62 processes with per-window hwnd inventories (53
+multi-window), `observe` bound an explicit hwnd selector, and a planted cancel
+flag aborted an operation checkpoint with progress detail. No input was
+injected into the user's working desktop. Linux scripts were compiled with
+Python but never ran on a Linux desktop; the Wayland portal path is
+source-verified only. macOS JXA was `node --check` parsed but never executed
+under osascript. Actual model quality/cache hits, remote machines, VMs,
+installed packages, and end-to-end Bot task continuity are not established by
+these checks.
 
 Windows target/input handling follows the official contracts for
 [SetForegroundWindow](https://learn.microsoft.com/en-us/windows/win32/api/winuser/nf-winuser-setforegroundwindow)

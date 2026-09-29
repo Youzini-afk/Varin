@@ -161,6 +161,28 @@ const observationOf = (
     capturedAt: new Date().toISOString(),
   };
   if (asString(snapshot.windowTitle)) observation.windowTitle = snapshot.windowTitle as string;
+  const handle = asNumber(snapshot.windowHandle);
+  if (handle !== undefined && handle > 0) observation.windowHandle = handle;
+  const dpi = asNumber(snapshot.dpiScale);
+  if (dpi !== undefined && dpi > 0) observation.dpiScale = dpi;
+  if (Array.isArray(snapshot.windows)) {
+    observation.windows = snapshot.windows
+      .map((window): import("@varin/protocol").ComputerWindowDescriptor | null => {
+        if (!isObject(window)) return null;
+        const wh = asNumber(window.handle);
+        if (wh === undefined || wh <= 0) return null;
+        const bounds = frameOf(window.bounds);
+        return {
+          handle: wh,
+          ...(asString(window.title) ? { title: window.title as string } : {}),
+          ...(bounds ? { bounds } : {}),
+          ...(typeof window.visible === "boolean" ? { visible: window.visible } : {}),
+          ...(typeof window.minimized === "boolean" ? { minimized: window.minimized } : {}),
+          ...(typeof window.main === "boolean" ? { main: window.main } : {}),
+        };
+      })
+      .filter((w): w is NonNullable<typeof w> => w !== null);
+  }
   const bounds = frameOf(snapshot.windowBounds);
   if (bounds) observation.windowBounds = bounds;
   if (asString(snapshot.focusedSummary)) observation.focusedSummary = snapshot.focusedSummary as string;
@@ -223,6 +245,8 @@ export interface ComputerService {
   observe(params: {
     desktopId?: string;
     app: string;
+    /** Select one of the app's windows: hwnd number or title (BC4.B). */
+    window?: number | string;
     includeScreenshot?: boolean;
     textLimit?: number | "max";
     maxTreeNodes?: number;
@@ -395,6 +419,11 @@ export function createComputerService(options: ComputerServiceOptions): Computer
     observations.delete(desktopId);
     const driver = newDriver(spec);
     drivers.set(desktopId, driver);
+    // Generation recovery (BC4.C): a driver that died mid-action could have
+    // left injected input held at the OS level. Sweep it before the fresh
+    // driver serves real work so a resurrected desktop never inherits a held
+    // button or modifier.
+    await driver.request({ tool: "release_input", sweep: true }).catch(() => undefined);
     return { driver, desktop };
   };
 
@@ -465,9 +494,7 @@ export function createComputerService(options: ComputerServiceOptions): Computer
     const desktopState = "unavailable";
     const detail = driverAvailable
       ? "Desktop capabilities have not been probed in this Host process."
-      : platform === "macos"
-        ? "The macOS driver helper is not packaged yet; this desktop reports its real state instead of pretending to be operable."
-        : "No platform driver found for this machine.";
+      : "No platform driver found for this machine.";
     const desktopResult = await putRecord(`computer.desktop:${LOCAL_DESKTOP_ID}`, "computer.desktop", desktopState, {
       id: LOCAL_DESKTOP_ID,
       machineId: LOCAL_MACHINE_ID,
@@ -536,6 +563,21 @@ export function createComputerService(options: ComputerServiceOptions): Computer
           name: String(app.name ?? ""),
           pid: typeof app.pid === "number" ? app.pid : 0,
           ...(asString(app.windowTitle) ? { windowTitle: app.windowTitle as string } : {}),
+          ...(Array.isArray(app.windows)
+            ? { windows: app.windows.map((window): import("@varin/protocol").ComputerWindowDescriptor | null => {
+                const handle = asNumber(window.handle);
+                if (handle === undefined || handle <= 0) return null;
+                const bounds = frameOf(window.bounds);
+                return {
+                  handle,
+                  ...(asString(window.title) ? { title: window.title as string } : {}),
+                  ...(bounds ? { bounds } : {}),
+                  ...(typeof window.visible === "boolean" ? { visible: window.visible } : {}),
+                  ...(typeof window.minimized === "boolean" ? { minimized: window.minimized } : {}),
+                  ...(typeof window.main === "boolean" ? { main: window.main } : {}),
+                };
+              }).filter((w): w is NonNullable<typeof w> => w !== null) }
+            : {}),
         }))
       : [];
   };
@@ -570,6 +612,7 @@ export function createComputerService(options: ComputerServiceOptions): Computer
         tool: "get_app_state",
         app: params.app,
         screenshot: params.includeScreenshot !== false,
+        ...(params.window !== undefined ? { window: params.window } : {}),
         ...(params.textLimit !== undefined ? { text_limit: params.textLimit } : {}),
         ...(params.maxTreeNodes !== undefined ? { max_tree_nodes: params.maxTreeNodes } : {}),
         ...(params.maxTreeDepth !== undefined ? { max_tree_depth: params.maxTreeDepth } : {}),
@@ -611,6 +654,10 @@ export function createComputerService(options: ComputerServiceOptions): Computer
       : undefined;
     const base = {
       app: latest ? String(latest.app.pid) : action.app,
+      // The observed window binds the action to the same hwnd it was read
+      // from; an explicit action selector overrides for unobserved calls.
+      ...(latest?.windowHandle !== undefined ? { window: latest.windowHandle } : {}),
+      ...(action.window !== undefined ? { window: action.window } : {}),
       ...(element ? { element } : {}),
       ...(windowBounds ? { windowBounds } : {}),
     };
@@ -725,6 +772,11 @@ export function createComputerService(options: ComputerServiceOptions): Computer
         return { response, desktop };
       }, generation);
       if (!response.ok) {
+        if (response.cancelled) {
+          // Mid-operation cancel: part of the input may already have reached
+          // the desktop — report the driver's progress detail, not a failure.
+          return { accepted: false, cancelled: true, outcome: "partial", ...(response.error ? { detail: response.error } : {}) };
+        }
         throw new HarnessServiceError("failed", response.error ?? `Action ${params.action.kind} failed`);
       }
       const result: ComputerActionResult = { accepted: true, ...(response.text ? { detail: response.text } : {}) };
@@ -760,6 +812,10 @@ export function createComputerService(options: ComputerServiceOptions): Computer
     const driver = drivers.get(id);
     let released = driver === undefined;
     if (driver?.alive()) {
+      // Signal the in-flight native operation through the driver's cancel
+      // side-channel first — a long type/drag aborts at its next checkpoint
+      // instead of running to completion before the release (BC4.A).
+      driver.cancel();
       const response = await enqueue(id, "observe", () => driver.request({ tool: "release_input" }));
       if (!response.ok) throw new HarnessServiceError("failed", response.error ?? "Input release failed");
       released = true;

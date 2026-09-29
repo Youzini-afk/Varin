@@ -12,7 +12,8 @@
 import { spawn, type ChildProcess } from "node:child_process";
 import { randomUUID } from "node:crypto";
 import { fileURLToPath } from "node:url";
-import { existsSync } from "node:fs";
+import { existsSync, mkdirSync, rmSync, writeFileSync } from "node:fs";
+import os from "node:os";
 import path from "node:path";
 import type { ComputerCapabilities, ComputerPlatform } from "@varin/protocol";
 
@@ -42,9 +43,16 @@ export interface DriverRequest {
 export interface DriverResponse {
   id: string | null;
   ok: boolean;
+  /** The driver aborted the operation at an internal checkpoint (BC4.A). */
+  cancelled?: boolean;
   error?: string;
   text?: string;
-  apps?: Array<{ name: string; pid: number; windowTitle?: string }>;
+  apps?: Array<{
+    name: string;
+    pid: number;
+    windowTitle?: string;
+    windows?: Array<Record<string, unknown>>;
+  }>;
   snapshot?: Record<string, unknown>;
   capabilities?: Record<string, unknown>;
 }
@@ -85,8 +93,17 @@ export function localDriverSpawnSpec(platform: ComputerPlatform, driverDir = com
       cwd: path.dirname(script),
     };
   }
-  // macOS: the OCU Swift helper is the intended source; until a bundled
-  // helper exists there is no local driver (reported honestly upstream).
+  if (platform === "macos") {
+    const script = path.join(driverDir, "macos", "driver-host.js");
+    if (!existsSync(script)) return null;
+    // JXA driver: CGWindowList + System Events + CGEvent via osascript.
+    // Unverified platform — the driver reports conservative capabilities.
+    return {
+      command: "osascript",
+      args: ["-l", "JavaScript", script],
+      cwd: path.dirname(script),
+    };
+  }
   return null;
 }
 
@@ -102,6 +119,12 @@ interface PendingDriverRequest {
 export interface ComputerDriverSession {
   /** Serialize ops: one request in flight at a time — the desktop input stream is inherently ordered. */
   request(op: Omit<DriverRequest, "id">, options?: { timeoutMs?: number }): Promise<DriverResponse>;
+  /**
+   * Interrupt the in-flight request at the driver's next internal checkpoint
+   * (BC4.A). stdin stays sequential, so cancellation travels through a flag
+   * file the long operations poll; returns false when nothing is in flight.
+   */
+  cancel(): boolean;
   /** The last successful capabilities probe, if any. */
   readonly capabilities: ComputerCapabilities | null;
   alive(): boolean;
@@ -116,6 +139,12 @@ export function createDriverSession(spec: DriverSpawnSpec): ComputerDriverSessio
   let stderrTail = "";
   let caps: ComputerCapabilities | null = null;
   let disposed = false;
+  // Side-channel cancellation: long native ops poll <dir>/<id>.cancel so a
+  // cancel lands mid-operation even while stdin is unread.
+  const cancelDir = path.join(os.tmpdir(), `varin-computer-driver-${process.pid}-${randomUUID()}`);
+  const clearCancelDir = () => {
+    try { rmSync(cancelDir, { recursive: true, force: true }); } catch { /* best effort */ }
+  };
 
   const isAlive = () => child !== null && !child.killed && child.exitCode === null;
 
@@ -174,9 +203,10 @@ export function createDriverSession(spec: DriverSpawnSpec): ComputerDriverSessio
     if (isAlive() && child) return child;
     buffer = "";
     stderrTail = "";
+    mkdirSync(cancelDir, { recursive: true });
     const spawned = spawn(spec.command, spec.args, {
       cwd: spec.cwd,
-      env: spec.env ?? process.env,
+      env: { ...(spec.env ?? process.env), VARIN_DRIVER_CANCEL_DIR: cancelDir },
       stdio: ["pipe", "pipe", "pipe"],
       windowsHide: true,
     });
@@ -227,6 +257,18 @@ export function createDriverSession(spec: DriverSpawnSpec): ComputerDriverSessio
     pump();
   });
 
+  const cancel: ComputerDriverSession["cancel"] = () => {
+    const inFlight = active;
+    if (!inFlight) return false;
+    try {
+      mkdirSync(cancelDir, { recursive: true });
+      writeFileSync(path.join(cancelDir, `${inFlight.id}.cancel`), "cancel\n");
+      return true;
+    } catch {
+      return false;
+    }
+  };
+
   // Wrap: cache the capabilities probe per session lifetime.
   const wrapped: ComputerDriverSession = {
     request: async (op, options) => {
@@ -236,11 +278,13 @@ export function createDriverSession(spec: DriverSpawnSpec): ComputerDriverSessio
       }
       return response;
     },
+    cancel,
     get capabilities() { return caps; },
     alive: isAlive,
     dispose: () => {
       disposed = true;
       stop(new Error("Computer driver disposed"));
+      clearCancelDir();
     },
   };
   return wrapped;

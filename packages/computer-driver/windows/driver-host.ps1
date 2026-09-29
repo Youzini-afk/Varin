@@ -8,6 +8,10 @@
 # One line in, one line out; the UIA assemblies and Win32 bindings are loaded
 # once, so actions never pay interpreter startup. Managed by the Varin Host
 # computer service — do not run interactively.
+#
+# Cancellation is out-of-band: while a request executes the Host writes
+# "$VARIN_DRIVER_CANCEL_DIR/<requestId>.cancel"; long operations poll it at
+# their internal checkpoints and abort with {ok:false, cancelled:true}.
 
 $ErrorActionPreference = "Stop"
 $DriverDir = Split-Path -Parent $MyInvocation.MyCommand.Path
@@ -16,6 +20,10 @@ $DriverDir = Split-Path -Parent $MyInvocation.MyCommand.Path
 # Report coordinates in physical pixels so Host-side frame math matches the
 # display grid regardless of the user's DPI scale.
 try { [void][VarinWin32]::SetProcessDPIAware() } catch {}
+
+# A crashed predecessor may have left synthesized input held at the OS level
+# (SendInput state outlives the process that sent it). Sweep once at startup.
+try { Send-ReleaseInput -Sweep } catch {}
 
 $writeResponse = {
     param($id, $response)
@@ -37,13 +45,18 @@ while ($true) {
     try {
         $operation = $line | ConvertFrom-Json
         $requestId = [string]$operation.id
+        $script:ActiveRequestId = $requestId
         $response = Invoke-ComputerOperation $operation
         & $writeResponse $requestId $response
+    } catch [System.OperationCanceledException] {
+        & $writeResponse $requestId ([pscustomobject]@{ ok = $false; cancelled = $true; error = $_.Exception.Message })
     } catch {
         $message = $_.Exception.Message
         if (-not [string]::IsNullOrWhiteSpace($_.ScriptStackTrace)) {
             $message = "$message at $($_.ScriptStackTrace)"
         }
         & $writeResponse $requestId ([pscustomobject]@{ ok = $false; error = $message })
+    } finally {
+        $script:ActiveRequestId = $null
     }
 }

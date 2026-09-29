@@ -9,6 +9,12 @@
 # AT-SPI is initialized once at startup; operations never restart the
 # interpreter. Managed by the Varin Host computer service — do not run
 # interactively.
+#
+# Cancellation is out-of-band: while a request executes the Host writes
+# "$VARIN_DRIVER_CANCEL_DIR/<requestId>.cancel"; long operations poll it at
+# their internal checkpoints and abort with {ok:false, cancelled:true}.
+# A crashed predecessor may have left synthesized input held at the desktop
+# level, so a release sweep runs once at startup.
 
 import json
 import sys
@@ -33,6 +39,10 @@ except Exception as exc:
 def main():
     runtime.require_desktop_session()
     runtime.Atspi.init()
+    try:
+        runtime.release_input()
+    except Exception:
+        pass
     for line in sys.stdin:
         line = line.strip()
         if not line:
@@ -41,10 +51,14 @@ def main():
         try:
             operation = json.loads(line)
             request_id = operation.get("id")
+            runtime.ACTIVE_REQUEST_ID = request_id
             try:
                 response = runtime.perform_operation(operation)
+            except runtime.CancelledError as exc:
+                response = {"ok": False, "cancelled": True, "error": str(exc)}
             finally:
                 runtime.release_input()
+                runtime.ACTIVE_REQUEST_ID = None
             write_response(request_id, response)
         except Exception as exc:
             write_response(request_id, {"ok": False, "error": str(exc)})
