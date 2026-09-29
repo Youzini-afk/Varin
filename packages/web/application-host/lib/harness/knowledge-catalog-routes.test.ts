@@ -12,6 +12,7 @@ const TEST_DIR = join(tmpdir(), "varin-harness-knowledge-catalog");
 describe("harness knowledge catalog routes", () => {
   let store: KnowledgeStore;
   let userStore: KnowledgeStore;
+  let botStore: KnowledgeStore;
 
   beforeEach(async () => {
     if (existsSync(TEST_DIR)) rmSync(TEST_DIR, { recursive: true, force: true });
@@ -28,11 +29,19 @@ describe("harness knowledge catalog routes", () => {
       workspaceId: "user",
       embedding: null,
     });
+    botStore = await openWorkspaceKnowledge({
+      dataDir: TEST_DIR,
+      hostId: "host-1",
+      workspaceId: "bot-1",
+      scope: "bot",
+      embedding: null,
+    });
   });
 
   afterEach(async () => {
     await store.close();
     await userStore.close();
+    await botStore.close();
     if (existsSync(TEST_DIR)) rmSync(TEST_DIR, { recursive: true, force: true });
   });
 
@@ -50,8 +59,9 @@ describe("harness knowledge catalog routes", () => {
         return { workspaceId };
       },
       getWorkspaceStore: async (workspaceId) => {
-        if (workspaceId !== "workspace-1") throw new Error("unexpected store open");
-        return store;
+        if (workspaceId === "workspace-1") return store;
+        if (workspaceId === "bot:bot-1") return botStore;
+        throw new Error("unexpected store open");
       },
       getUserStore: async () => userStore,
       onKnowledgeChanged: (change) => { changed.push(change); },
@@ -235,5 +245,62 @@ describe("harness knowledge catalog routes", () => {
       .set("x-test-auth", "yes")
       .send({ ...opened, expectedContent: "retire me" })
       .expect(409);
+  });
+
+  it("resolves bot scope through the bot id to the Bot's own store", async () => {
+    const botId = await botStore.putKnowledge({
+      scope: "bot", status: "accepted", content: "Prefers terse reports", trigger: "status",
+      nature: "preference",
+    });
+    const workspaceOnly = await store.putKnowledge({
+      scope: "workspace", status: "accepted", content: "Workspace-only memory", trigger: "status",
+    });
+    const { app } = appFor();
+
+    // `botId` selects the Bot store; `workspaceId=bot:<id>` is also accepted.
+    await request(app)
+      .get("/api/harness/knowledge?scope=bot")
+      .set("x-test-auth", "yes")
+      .expect(400);
+    const listed = await request(app)
+      .get("/api/harness/knowledge?scope=bot&botId=bot-1")
+      .set("x-test-auth", "yes")
+      .expect(200);
+    expect(listed.body.items.map((item: { id: number }) => item.id)).toEqual([botId]);
+    expect(listed.body.items[0].nature).toBe("preference");
+    await request(app)
+      .get("/api/harness/knowledge?scope=bot&workspaceId=bot:bot-1")
+      .set("x-test-auth", "yes")
+      .expect(200)
+      .expect(({ body }) => expect(body.items).toHaveLength(1));
+
+    // Bot edits and retires land in the Bot store only.
+    await request(app)
+      .put(`/api/harness/knowledge/bot/${botId}`)
+      .set("x-test-auth", "yes")
+      .send({
+        workspaceId: "bot:bot-1",
+        content: "Prefers verbose reports",
+        trigger: "status",
+        expectedContent: "Prefers terse reports",
+        expectedTrigger: "status",
+        expectedStatus: "accepted",
+        expectedInvalidAt: null,
+      })
+      .expect(200);
+    expect((await botStore.getKnowledge(botId))?.content).toBe("Prefers verbose reports");
+    expect((await store.getKnowledge(workspaceOnly))?.content).toBe("Workspace-only memory");
+    await request(app)
+      .delete(`/api/harness/knowledge/bot/${botId}`)
+      .set("x-test-auth", "yes")
+      .send({
+        workspaceId: "bot:bot-1",
+        expectedContent: "Prefers verbose reports",
+        expectedTrigger: "status",
+        expectedStatus: "accepted",
+        expectedInvalidAt: null,
+      })
+      .expect(200);
+    expect(await botStore.recall("verbose reports", 5)).toEqual([]);
   });
 });

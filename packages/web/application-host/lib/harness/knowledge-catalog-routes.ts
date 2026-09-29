@@ -11,6 +11,7 @@ import {
   acceptSuggestion,
   dismissSuggestion,
 } from "./knowledge-suggestions.js";
+import { botScopeId, isBotScopeId } from "./owner-scope.js";
 
 export interface KnowledgeCatalogRoutesOptions {
   resolveWorkspace(input: { workspaceId: string }): Promise<{ workspaceId: string }>;
@@ -21,7 +22,9 @@ export interface KnowledgeCatalogRoutesOptions {
 }
 
 const noAuth: RequestHandler = (_request, _response, next) => next();
-const scopeOf = (value: unknown): KnowledgeScope | null => value === "workspace" || value === "user" ? value : null;
+const scopeOf = (value: unknown): KnowledgeScope | null => (
+  value === "workspace" || value === "user" || value === "bot" ? value : null
+);
 const idOf = (value: unknown): number | null => {
   const id = typeof value === "number" ? value : Number(value);
   return Number.isSafeInteger(id) && id > 0 ? id : null;
@@ -65,6 +68,22 @@ export function registerHarnessKnowledgeCatalogRoutes(
   };
   const catalogStore = async (request: Request, scope: KnowledgeScope): Promise<{ store: KnowledgeStore; workspaceId?: string }> => {
     if (scope === "user") return { store: await getUserStore() };
+    if (scope === "bot") {
+      // A Bot's memory lives in its own `bot:<id>` store; `botId` selects it.
+      // `workspaceId=bot:<id>` is also accepted for internal callers.
+      const rawId = typeof request.query.botId === "string" ? request.query.botId.trim()
+        : typeof request.body?.botId === "string" ? request.body.botId.trim()
+          : "";
+      const scopeId = isBotScopeId(request.query.workspaceId ?? request.body?.workspaceId)
+        ? String(request.query.workspaceId ?? request.body?.workspaceId)
+        : rawId ? botScopeId(rawId) : "";
+      if (!scopeId) {
+        const error = new Error("botId is required for bot knowledge");
+        (error as { statusCode?: number }).statusCode = 400;
+        throw error;
+      }
+      return { store: await getWorkspaceStore(scopeId), workspaceId: scopeId };
+    }
     const workspaceId = typeof request.query.workspaceId === "string"
       ? request.query.workspaceId.trim()
       : typeof request.body?.workspaceId === "string"
@@ -83,7 +102,7 @@ export function registerHarnessKnowledgeCatalogRoutes(
     response.setHeader("Cache-Control", "no-store");
     const scope = scopeOf(request.query.scope);
     if (!scope) {
-      response.status(400).json({ error: "scope must be workspace or user" });
+      response.status(400).json({ error: "scope must be workspace, user, or bot" });
       return;
     }
     try {

@@ -8,16 +8,18 @@ import {
 import {
   DEFAULT_SUGGESTIONS_SETTINGS,
   acceptSuggestion,
-  createSuggestion,
   dismissSuggestion,
   suggestSupersedes,
-  type KnowledgeSuggestionsSettings,
 } from "./knowledge-suggestions.js";
+import type { MemoryService } from "../memory/memory-service.js";
+import type { MemoryNature } from "@varin/protocol";
 export interface HarnessContextRoutesOptions {
   getStore(sessionId: string): Promise<KnowledgeStore | null>;
   getBranchEntryIds(sessionId: string): Promise<string[]>;
   getUserStore?: () => Promise<KnowledgeStore>;
-  getSuggestionSettings?: (sessionId: string) => Promise<KnowledgeSuggestionsSettings>;
+  /** BC1: unified memory writer for direct user remember actions. */
+  memoryService?: MemoryService;
+  memoryOwnerForSession?: (sessionId: string) => Promise<import("../memory/memory-service.js").MemoryOwner>;
   onKnowledgeChanged?: (sessionId: string, scope: KnowledgeScope) => void;
   requireAuth?: RequestHandler;
 }
@@ -39,7 +41,8 @@ export function registerHarnessContextRoutes(
     getStore,
     getBranchEntryIds,
     getUserStore,
-    getSuggestionSettings,
+    memoryService,
+    memoryOwnerForSession,
     onKnowledgeChanged,
     requireAuth = noAuth,
   }: HarnessContextRoutesOptions,
@@ -172,39 +175,46 @@ export function registerHarnessContextRoutes(
     }
   });
 
-  app.post("/api/harness/sessions/:sessionId/knowledge/suggestions", requireAuth, async (request: Request, response: Response) => {
+  // BC1: an explicit user "remember this" commits immediately through the
+  // unified memory service — no per-row review gate. `scope` selects the
+  // user store; omitting it writes the session's owning scope (Bot memory for
+  // Bot-owned entry chats, workspace memory for bound sessions).
+  app.post("/api/harness/sessions/:sessionId/knowledge/remember", requireAuth, async (request: Request, response: Response) => {
     const sessionId = sessionIdOf(request);
-    const scope = scopeOf(request.body?.scope);
     const content = typeof request.body?.content === "string" ? request.body.content.trim() : "";
-    const recallTrigger = typeof request.body?.trigger === "string" ? request.body.trigger.trim() : "";
-    const kind = typeof request.body?.kind === "string" && request.body.kind.trim() ? request.body.kind.trim() : "user-mark";
-    if (!sessionId || !scope || !content) {
-      response.status(400).json({ error: "sessionId, scope, and content are required" });
+    const trigger = typeof request.body?.trigger === "string" ? request.body.trigger.trim() : "";
+    const nature = typeof request.body?.nature === "string" ? request.body.nature : undefined;
+    const scope = request.body?.scope === "user" ? "user" as const : null;
+    const kind = typeof request.body?.kind === "string" && request.body.kind.trim()
+      ? request.body.kind.trim() : "user-mark";
+    if (!sessionId || !content || !memoryService || !memoryOwnerForSession) {
+      response.status(!memoryService ? 503 : 400).json({ error: "sessionId, content, and the memory service are required" });
       return;
     }
     try {
-      const store = await suggestionStore(sessionId, scope);
-      if (!store) {
-        response.status(404).json({ error: `${scope} knowledge store is unavailable` });
-        return;
-      }
-      const settings = getSuggestionSettings
-        ? await getSuggestionSettings(sessionId)
-        : DEFAULT_SUGGESTIONS_SETTINGS;
-      const suggestion = await createSuggestion({
-        trigger: "user-mark",
+      const owner = scope === "user"
+        ? { scope: "user" as const, ownerId: null }
+        : await memoryOwnerForSession(sessionId);
+      const result = await memoryService.remember(owner, {
         content,
-        recallTrigger,
+        ...(trigger ? { trigger } : {}),
+        ...(nature === "experience" || nature === "decision" || nature === "preference" || nature === "judgment" || nature === "instruction"
+          ? { nature: nature as MemoryNature } : {}),
+        source: { kind, sessionId },
+      });
+      onKnowledgeChanged?.(sessionId, owner.scope);
+      response.status(result.created ? 201 : 200).json({
         sessionId,
-        kind,
-        scope,
-      }, { store, settings });
-      onKnowledgeChanged?.(sessionId, scope);
-      response.status(201).json({ sessionId, suggestion });
+        created: result.created,
+        duplicate: result.duplicate,
+        item: result.item,
+      });
     } catch (error) {
       sendKnowledgeError(response, error);
     }
   });
+
+
 
   app.put("/api/harness/sessions/:sessionId/knowledge/suggestions/:scope/:id", requireAuth, async (request: Request, response: Response) => {
     const sessionId = sessionIdOf(request);

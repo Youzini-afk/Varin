@@ -84,7 +84,8 @@ import { createThreadRegistry } from './lib/harness/thread-registry.js';
 import { createOnThreadDequeued } from './lib/harness/thread-dequeue.js';
 import { createThreadTranscriptReader } from './lib/harness/thread-transcript.js';
 import { createHarnessPathAuthority } from './lib/harness/path-authority.js';
-import { sessionScopeId, isSessionScopeId, isSessionStoreKey, isBotScopeId, botIdFromScopeId, botScopeId, knowledgeStoreKeyForScope } from './lib/harness/owner-scope.js';
+import { sessionScopeId, isSessionScopeId, sessionIdFromScopeId, isSessionStoreKey, isBotScopeId, botIdFromScopeId, botScopeId, knowledgeStoreKeyForScope } from './lib/harness/owner-scope.js';
+import { createMemoryService } from './lib/memory/memory-service.js';
 import { createExploreFileReader } from './lib/harness/explore-file-reader.js';
 import { createThreadWorktreeRuntime } from './lib/harness/thread-worktree.js';
 import { createThreadRuntime } from './lib/harness/thread-runtime.js';
@@ -1762,6 +1763,31 @@ async function main(options: StartWebUiServerOptions = {}): Promise<WebUiServerC
     if (!bot) throw new Error(`Unknown Bot scope: ${scopeId}`);
     return bot.homeDir;
   };
+  // BC1: unified memory domain. The same service backs the harness memory.*
+  // methods, the UI routes, and later the background organizer — one writer
+  // semantics for accepted/suggested, dedupe, correction, and forgetting.
+  const memoryService = createMemoryService({
+    storeForScopeId: (scopeId) => getKnowledgeStoreForScope(scopeId).catch(() => null),
+    userStore: () => getUserKnowledgeStore().catch(() => null),
+    ownerForSession: async (sessionId) => {
+      const binding = await threadRegistry.getSessionBinding(sessionId).catch(() => null);
+      const scopeId = binding?.owningScopeId ?? sessionScopeId(sessionId);
+      if (isBotScopeId(scopeId)) return { scope: 'bot', ownerId: botIdFromScopeId(scopeId) };
+      if (isSessionScopeId(scopeId)) return { scope: 'session', ownerId: sessionIdFromScopeId(scopeId) };
+      return { scope: 'workspace', ownerId: scopeId };
+    },
+    onChanged: (owner, ids) => {
+      broadcastGlobalUiEvent?.({
+        type: 'varin:harness-knowledge-changed',
+        properties: {
+          scope: owner.scope,
+          ...(owner.ownerId ? { workspaceId: owner.ownerId } : {}),
+          ids: [...ids],
+        },
+      });
+    },
+    onError: (error) => console.error('[VarinMemory]', errorMessage(error)),
+  });
   const threadTranscriptReader = createThreadTranscriptReader({
     readSessionEntries: (sessionId) => piRuntimeBroker.previewSessionEntries(sessionId, undefined, 'all'),
   });
@@ -2556,7 +2582,8 @@ async function main(options: StartWebUiServerOptions = {}): Promise<WebUiServerC
     getStore: getKnowledgeStoreForSession,
     getBranchEntryIds: branchEntryIdsForSession,
     getUserStore: getUserKnowledgeStore,
-    getSuggestionSettings: knowledgeSuggestionSettingsForSession,
+    memoryService,
+    memoryOwnerForSession: (sessionId) => memoryService.ownerForSession(sessionId),
     onKnowledgeChanged: (sessionId, scope) => {
       broadcastGlobalUiEvent?.({
         type: 'varin:harness-knowledge-changed',
@@ -2985,6 +3012,7 @@ async function main(options: StartWebUiServerOptions = {}): Promise<WebUiServerC
   const discoveredShells = discoverShells();
   const harnessServiceHost = createHarnessServiceHost({
     discoveredShells,
+    memoryService,
     pathLockService: kernelPathLockService,
     verification: verificationCoordinator,
     experimentService,

@@ -91,6 +91,29 @@ export class KnowledgeBlockConflictError extends Error {
 export type KnowledgeScope = "workspace" | "user" | "session" | "bot";
 export type KnowledgeStatus = "suggested" | "accepted" | "dismissed";
 
+/**
+ * What kind of durable claim a knowledge row carries (BC1). `experience` is an
+ * observed episode; `decision`/`preference`/`judgment` are agent- or
+ * user-authored conclusions; `instruction` is an explicit user requirement —
+ * the only nature that speaks with user authority.
+ */
+export type MemoryNature = "experience" | "decision" | "preference" | "judgment" | "instruction";
+export const MEMORY_NATURES: readonly MemoryNature[] = ["experience", "decision", "preference", "judgment", "instruction"];
+
+/**
+ * Where a memory came from. `kind` names the producer path (`user-mark`,
+ * `user-message`, `memory.remember`, `memory-organizer`, …); the optional refs
+ * bind the row to the work that produced it — a session, thread, run, or
+ * session entry — so a memory stays reachable from its real provenance.
+ */
+export interface KnowledgeSource {
+  kind: string;
+  sessionId?: string;
+  threadId?: string;
+  runId?: string;
+  entryId?: string;
+}
+
 /** Values that identify the revision a caller opened before a mutation. */
 export interface KnowledgeExpectedRevision {
   content: string;
@@ -106,7 +129,8 @@ export interface KnowledgeInput {
   status: KnowledgeStatus;
   content: string;
   trigger: string;
-  source?: { sessionId: string; kind: string };
+  nature?: MemoryNature;
+  source?: KnowledgeSource;
 }
 
 export interface Knowledge {
@@ -115,7 +139,8 @@ export interface Knowledge {
   status: KnowledgeStatus;
   content: string;
   trigger: string;
-  source?: { sessionId: string; kind: string };
+  nature?: MemoryNature;
+  source?: KnowledgeSource;
   createdAt: number;
   invalidAt?: number;
   recallCount: number;
@@ -394,6 +419,18 @@ export interface KnowledgeStore {
     expectedScope?: KnowledgeScope,
     expected?: KnowledgeExpectedRevision,
   ): Promise<void>;
+  /**
+   * Atomic correction (BC1): insert a new accepted row carrying `input` and
+   * retire `id` behind a `supersedes` edge in the same writer transaction.
+   * The predecessor keeps its provenance; derived recall drops it through
+   * `invalidAt` immediately.
+   */
+  supersedeKnowledge(
+    id: NodeId,
+    input: KnowledgeInput,
+    expectedScope?: KnowledgeScope,
+    expected?: KnowledgeExpectedRevision,
+  ): Promise<{ id: NodeId; previous: Knowledge }>;
   /**
    * Hide one knowledge row from current-effective queries by setting `invalidAt`.
    * Does not delete the node, other scopes, or supersede neighbors (D-208).

@@ -21,6 +21,9 @@ import {
   type KnowledgeCatalogItem,
   type KnowledgeCatalogScope,
 } from './knowledgeCatalogRequest';
+import { listBots } from '@/lib/bots';
+import { openPiSessionFromNavigation } from '@/lib/pi-runtime/sessionNavigation';
+import { useHarnessSettings } from '../harness/useHarnessSettings';
 
 const statusKey = (item: KnowledgeCatalogItem): I18nKey => (
   item.invalidAt !== undefined
@@ -28,12 +31,20 @@ const statusKey = (item: KnowledgeCatalogItem): I18nKey => (
     : `settings.knowledge.status.${item.status}`
 );
 
+const natureKey = (item: KnowledgeCatalogItem): I18nKey => (
+  `settings.knowledge.nature.${item.nature ?? 'experience'}`
+);
+
 export const KnowledgeSettings: React.FC = () => {
   const { t } = useI18n();
   const workspace = useWorkbenchWorkspace();
   const searchTarget = useSettingsSearchTarget();
   const [scope, setScope] = React.useState<KnowledgeCatalogScope>(searchTarget === 'knowledge.user' ? 'user' : 'workspace');
+  const [bots, setBots] = React.useState<Array<{ id: string; name: string }>>([]);
+  const [botId, setBotId] = React.useState<string | null>(null);
+  const [query, setQuery] = React.useState('');
   const [showRetired, setShowRetired] = React.useState(false);
+  const harness = useHarnessSettings();
   const [items, setItems] = React.useState<KnowledgeCatalogItem[]>([]);
   const [selectedId, setSelectedId] = React.useState<number | null>(null);
   const [chain, setChain] = React.useState<KnowledgeCatalogChain | null>(null);
@@ -41,7 +52,11 @@ export const KnowledgeSettings: React.FC = () => {
   const [busy, setBusy] = React.useState(false);
   const [loading, setLoading] = React.useState(false);
 
-  const workspaceId = workspace.status === 'ready' ? workspace.workspaceId : undefined;
+  // The catalog request carries the owner in the workspaceId slot; a Bot's
+  // store is addressed by its `bot:<id>` scope id.
+  const workspaceId = scope === 'bot'
+    ? (botId ? `bot:${botId}` : undefined)
+    : workspace.status === 'ready' ? workspace.workspaceId : undefined;
   const contextKey = `${scope}:${workspaceId ?? ''}`;
   const currentContextKey = React.useRef(contextKey);
   currentContextKey.current = contextKey;
@@ -66,9 +81,27 @@ export const KnowledgeSettings: React.FC = () => {
   const selected = loadedContextKey.current === contextKey
     ? items.find((item) => item.id === selectedId) ?? null
     : null;
+  const queryNeedle = query.trim().toLowerCase();
   const visible = loadedContextKey.current === contextKey
-    ? items.filter((item) => showRetired || item.invalidAt === undefined)
+    ? items.filter((item) => (showRetired || item.invalidAt === undefined)
+      && (!queryNeedle
+        || item.content.toLowerCase().includes(queryNeedle)
+        || item.trigger.toLowerCase().includes(queryNeedle)
+        || (item.source?.kind ?? '').toLowerCase().includes(queryNeedle)))
     : [];
+
+  React.useEffect(() => {
+    let cancelled = false;
+    void listBots().then((rows) => {
+      if (cancelled) return;
+      const active = rows.filter((bot) => !bot.archived);
+      setBots(active.map((bot) => ({ id: bot.id, name: bot.name })));
+      setBotId((current) => current && active.some((bot) => bot.id === current) ? current : active[0]?.id ?? null);
+    }).catch(() => {
+      if (!cancelled) setBots([]);
+    });
+    return () => { cancelled = true; };
+  }, []);
 
   const refresh = React.useCallback(async () => {
     const requestId = ++requestGeneration.current;
@@ -76,7 +109,7 @@ export const KnowledgeSettings: React.FC = () => {
     refreshController.current?.abort();
     const controller = new AbortController();
     refreshController.current = controller;
-    if (scope === 'workspace' && workspace.status !== 'ready') {
+    if ((scope === 'workspace' && workspace.status !== 'ready') || (scope === 'bot' && !workspaceId)) {
       if (
         generation === contextGeneration.current
         && requestId === requestGeneration.current
@@ -128,6 +161,8 @@ export const KnowledgeSettings: React.FC = () => {
       if (event.type !== 'harness-knowledge-changed') return;
       if (event.scope !== scope) return;
       if (scope === 'workspace' && event.workspaceId && workspaceId && event.workspaceId !== workspaceId) return;
+      // For bot scope the event's workspaceId slot carries the bot id.
+      if (scope === 'bot' && event.workspaceId && botId && event.workspaceId !== botId) return;
       void refresh();
     });
     return () => {
@@ -137,7 +172,7 @@ export const KnowledgeSettings: React.FC = () => {
       actionController.current?.abort();
       unsubscribe();
     };
-  }, [refresh, resetContext, scope, workspaceId]);
+  }, [refresh, resetContext, scope, workspaceId, botId]);
 
   React.useEffect(() => {
     if (!selected) {
@@ -192,12 +227,17 @@ export const KnowledgeSettings: React.FC = () => {
     if (searchTarget === 'knowledge.workspace') changeScope('workspace');
   }, [searchTarget, changeScope]);
 
+  const automation = harness.harness?.knowledge.autoAcceptSuggestions;
+  const suggestionModel = harness.harness?.models?.knowledgeSuggestions;
+
   return (
     <>
       <SettingsSection
-        title={t(scope === 'workspace' ? 'settings.knowledge.section.workspace' : 'settings.knowledge.section.user')}
+        title={t(scope === 'workspace'
+          ? 'settings.knowledge.section.workspace'
+          : scope === 'bot' ? 'settings.knowledge.section.bot' : 'settings.knowledge.section.user')}
         divider={false}
-        settingsItem={scope === 'workspace' ? 'knowledge.workspace' : 'knowledge.user'}
+        settingsItem={scope === 'workspace' ? 'knowledge.workspace' : scope === 'bot' ? 'knowledge.bot' : 'knowledge.user'}
         headerAction={(
           <div className="flex flex-wrap items-center gap-2">
             <Button type="button" variant={scope === 'workspace' ? 'secondary' : 'ghost'} size="xs" className="!font-normal" onClick={() => changeScope('workspace')}>
@@ -206,6 +246,30 @@ export const KnowledgeSettings: React.FC = () => {
             <Button type="button" variant={scope === 'user' ? 'secondary' : 'ghost'} size="xs" className="!font-normal" onClick={() => changeScope('user')}>
               {t('harness.knowledge.scope.user')}
             </Button>
+            <Button type="button" variant={scope === 'bot' ? 'secondary' : 'ghost'} size="xs" className="!font-normal" onClick={() => changeScope('bot')} disabled={bots.length === 0}>
+              {t('harness.knowledge.scope.bot')}
+            </Button>
+            {scope === 'bot' && bots.length > 1 ? (
+              <select
+                value={botId ?? ''}
+                aria-label={t('harness.knowledge.scope.bot')}
+                onChange={(event) => {
+                  setBotId(event.target.value || null);
+                  currentContextKey.current = `bot:${event.target.value || ''}`;
+                  resetContext();
+                }}
+                className="rounded-md border border-border bg-background px-1.5 py-0.5 typography-micro"
+              >
+                {bots.map((bot) => <option key={bot.id} value={bot.id}>{bot.name}</option>)}
+              </select>
+            ) : null}
+            <input
+              value={query}
+              aria-label={t('settings.knowledge.search')}
+              placeholder={t('settings.knowledge.search')}
+              onChange={(event) => setQuery(event.target.value)}
+              className="w-40 rounded-md border border-border bg-background px-2 py-0.5 typography-micro"
+            />
             <Button type="button" variant="ghost" size="xs" className="!font-normal" onClick={() => setShowRetired((value) => !value)}>
               {t(showRetired ? 'settings.knowledge.filter.all' : 'settings.knowledge.filter.current')}
             </Button>
@@ -222,7 +286,10 @@ export const KnowledgeSettings: React.FC = () => {
         {scope === 'workspace' && workspace.status === 'error' ? (
           <p className="typography-micro text-[var(--status-error)]">{workspace.errorMessage}</p>
         ) : null}
-        {visible.length === 0 && (scope === 'user' || workspace.status === 'ready') ? (
+        {scope === 'bot' && bots.length === 0 ? (
+          <p className={SETTINGS_HELPER_CLASS}>{t('settings.knowledge.empty.noBot')}</p>
+        ) : null}
+        {visible.length === 0 && (scope === 'user' || workspace.status === 'ready' || (scope === 'bot' && botId)) ? (
           <p className={SETTINGS_HELPER_CLASS}>{t('settings.knowledge.empty.none')}</p>
         ) : null}
         <div className="grid gap-3 @xl:grid-cols-[minmax(0,16rem)_minmax(0,1fr)]">
@@ -235,7 +302,9 @@ export const KnowledgeSettings: React.FC = () => {
                 className={`w-full rounded-lg border px-3 py-2 text-left ${selectedId === item.id ? 'border-primary bg-primary/5' : 'border-border/60'}`}
               >
                 <div className="flex items-center justify-between gap-2">
-                  <span className="typography-micro text-muted-foreground">#{item.id}</span>
+                  <span className="typography-micro text-muted-foreground">
+                    #{item.id}{item.nature ? ` · ${t(natureKey(item))}` : ''}
+                  </span>
                   <span className="typography-micro text-muted-foreground">{t(statusKey(item))}</span>
                 </div>
                 <p className="mt-1 line-clamp-2 typography-ui text-foreground">{item.content}</p>
@@ -264,8 +333,21 @@ export const KnowledgeSettings: React.FC = () => {
               </SettingsFieldRow>
               <p className={SETTINGS_HELPER_CLASS}>
                 {t('settings.knowledge.source')}: {selected.source
-                  ? `${selected.source.kind} · ${selected.source.sessionId}`
+                  ? [selected.source.kind, selected.source.sessionId, selected.source.threadId].filter(Boolean).join(' · ')
                   : t('settings.knowledge.source.none')}
+                {selected.source?.sessionId ? (
+                  <Button
+                    type="button"
+                    variant="ghost"
+                    size="xs"
+                    className="!font-normal ml-1"
+                    onClick={() => void openPiSessionFromNavigation({ sessionId: selected.source!.sessionId! }).catch((error) => {
+                      toast.error(error instanceof Error ? error.message : String(error));
+                    })}
+                  >
+                    {t('settings.knowledge.source.open')}
+                  </Button>
+                ) : null}
               </p>
               <p className={SETTINGS_HELPER_CLASS}>
                 {t('settings.knowledge.recallCount', { count: selected.recallCount })}
@@ -332,6 +414,39 @@ export const KnowledgeSettings: React.FC = () => {
             </div>
           ) : null}
         </div>
+      </SettingsSection>
+      <SettingsSection
+        title={t('settings.knowledge.automation.title')}
+        settingsItem="knowledge.automation"
+        contentClassName="space-y-2"
+      >
+        <p className={SETTINGS_HELPER_CLASS}>
+          {t('settings.knowledge.automation.model')}: {suggestionModel
+            ? `${suggestionModel.providerId} / ${suggestionModel.modelId}`
+            : t('settings.knowledge.automation.modelUnset')}
+        </p>
+        <label className="flex items-center gap-2 typography-ui">
+          <input
+            type="checkbox"
+            checked={automation?.workspace === true}
+            disabled={!automation}
+            onChange={(event) => harness.update({
+              knowledge: { autoAcceptSuggestions: { workspace: event.target.checked } },
+            })}
+          />
+          {t('settings.knowledge.automation.autoAcceptWorkspace')}
+        </label>
+        <label className="flex items-center gap-2 typography-ui">
+          <input
+            type="checkbox"
+            checked={automation?.user === true}
+            disabled={!automation}
+            onChange={(event) => harness.update({
+              knowledge: { autoAcceptSuggestions: { user: event.target.checked } },
+            })}
+          />
+          {t('settings.knowledge.automation.autoAcceptUser')}
+        </label>
       </SettingsSection>
     </>
   );

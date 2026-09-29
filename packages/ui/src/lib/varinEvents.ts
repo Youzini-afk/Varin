@@ -25,8 +25,9 @@ export type HarnessBlocksChangedEvent = {
 export type HarnessKnowledgeChangedEvent = {
   type: 'harness-knowledge-changed';
   sessionId?: string;
+  /** Owner address — workspace id for `workspace`, bot id for `bot`. */
   workspaceId?: string;
-  scope: 'workspace' | 'user';
+  scope: 'workspace' | 'user' | 'session' | 'bot';
 };
 
 export type HarnessExperimentChangedEvent = {
@@ -266,7 +267,7 @@ const dispatchFromEnvelope = (envelope: { type: string; properties: unknown }) =
     const sessionId = typeof properties?.sessionId === 'string' ? properties.sessionId : '';
     const workspaceId = typeof properties?.workspaceId === 'string' ? properties.workspaceId : '';
     const scope = properties?.scope;
-    if (scope === 'workspace' || scope === 'user') {
+    if (scope === 'workspace' || scope === 'user' || scope === 'session' || scope === 'bot') {
       for (const listener of listeners) listener({
         type: 'harness-knowledge-changed',
         scope,

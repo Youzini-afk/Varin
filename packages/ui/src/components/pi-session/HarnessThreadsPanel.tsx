@@ -382,12 +382,19 @@ export const HarnessThreadsPanel: React.FC<{
     if (knowledgeBusy) return;
     setKnowledgeBusy(busyKey);
     try {
-      const response = await runtimeFetch(`/api/harness/sessions/${encodeURIComponent(parentSessionId)}/knowledge/suggestions`, {
+      // BC1: an explicit user remember commits through the unified memory
+      // service — no per-row review gate for direct marks.
+      const response = await runtimeFetch(`/api/harness/sessions/${encodeURIComponent(parentSessionId)}/knowledge/remember`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ scope, content: block.content, trigger: '', kind: `block:${block.label}` }),
+        body: JSON.stringify({
+          content: block.content,
+          trigger: '',
+          kind: `block:${block.label}`,
+          ...(scope === 'user' ? { scope: 'user' } : {}),
+        }),
       });
-      if (!response.ok) throw new Error(`Unable to create knowledge suggestion (${response.status})`);
+      if (!response.ok) throw new Error(`Unable to save memory (${response.status})`);
       await reloadKnowledge();
       toast.success(t('harness.knowledge.created'));
     } catch (error) {

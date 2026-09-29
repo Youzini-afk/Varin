@@ -672,6 +672,89 @@ export interface KnowledgeSuggestResult {
   };
 }
 
+// ── Unified memory (BC1) ───────────────────────────────────────────
+
+/** What kind of durable claim a memory row carries. */
+export type MemoryNature = "experience" | "decision" | "preference" | "judgment" | "instruction";
+
+/** The store-level owner a memory row belongs to. */
+export type MemoryScope = "workspace" | "user" | "session" | "bot";
+
+export interface MemoryItem {
+  id: number;
+  scope: MemoryScope;
+  status: "suggested" | "accepted" | "dismissed";
+  content: string;
+  trigger: string;
+  nature?: MemoryNature;
+  source?: { kind: string; sessionId?: string; threadId?: string; runId?: string; entryId?: string };
+  createdAt: number;
+  invalidAt?: number;
+  recallCount: number;
+  recalledAt?: number;
+}
+
+export interface MemoryRememberParams {
+  content: string;
+  trigger?: string;
+  nature?: MemoryNature;
+  /**
+   * Defaults to the calling session's owning memory scope. `bot` is not a
+   * worker-selectable scope — Bot memory is reached through the owning-scope
+   * default on Bot-owned sessions.
+   */
+  scope?: "workspace" | "user" | "session";
+}
+
+export interface MemoryRememberResult {
+  created: boolean;
+  duplicate?: boolean;
+  item?: MemoryItem;
+}
+
+export interface MemoryCorrectParams {
+  id: number;
+  content: string;
+  trigger?: string;
+  nature?: MemoryNature;
+  scope?: MemoryScope;
+}
+
+export interface MemoryCorrectResult {
+  corrected: boolean;
+  /** Id of the new accepted revision. */
+  id?: number;
+}
+
+export interface MemoryForgetParams {
+  id: number;
+  scope?: MemoryScope;
+}
+
+export interface MemoryForgetResult {
+  forgotten: boolean;
+}
+
+export interface MemoryGetParams {
+  id: number;
+  scope?: MemoryScope;
+}
+
+export interface MemoryGetResult {
+  item?: MemoryItem;
+  chain?: MemoryItem[];
+}
+
+export interface MemorySearchParams {
+  query: string;
+  k?: number;
+  scope?: MemoryScope;
+}
+
+export interface MemorySearchResult {
+  results: Array<{ item: MemoryItem; score: number }>;
+}
+
 export interface RelatedQueryParams {
   /** Workspace path or symbol / connection-literal name. */
   anchor: string;
@@ -1481,6 +1564,11 @@ export interface HarnessServiceMap {
   "todo.upsert": { params: TodoUpsertParams; result: TodoUpsertResult };
   "recall.search": { params: RecallSearchParams; result: RecallSearchResult };
   "knowledge.suggest": { params: KnowledgeSuggestParams; result: KnowledgeSuggestResult };
+  "memory.remember": { params: MemoryRememberParams; result: MemoryRememberResult };
+  "memory.correct": { params: MemoryCorrectParams; result: MemoryCorrectResult };
+  "memory.forget": { params: MemoryForgetParams; result: MemoryForgetResult };
+  "memory.get": { params: MemoryGetParams; result: MemoryGetResult };
+  "memory.search": { params: MemorySearchParams; result: MemorySearchResult };
   // Phase 3: Thread operations
   "thread.dispatch": { params: ThreadDispatchParams; result: ThreadDispatchResult };
   "thread.facts.set": { params: ThreadFactsSetParams; result: ThreadFactsSetResult };
@@ -1640,6 +1728,11 @@ export const HARNESS_METHOD_CAPABILITY = {
   "todo.upsert": "context.session",
   "recall.search": "context.session",
   "knowledge.suggest": "context.session",
+  "memory.remember": "context.session",
+  "memory.correct": "context.session",
+  "memory.forget": "context.session",
+  "memory.get": "context.session",
+  "memory.search": "context.session",
   "thread.dispatch": "control.thread",
   "thread.facts.set": "control.thread",
   "thread.list": "control.thread",
@@ -1777,6 +1870,11 @@ const HARNESS_METHODS: ReadonlySet<string> = new Set<string>([
   "todo.upsert",
   "recall.search",
   "knowledge.suggest",
+  "memory.remember",
+  "memory.correct",
+  "memory.forget",
+  "memory.get",
+  "memory.search",
   "thread.dispatch",
   "thread.facts.set",
   "thread.list",

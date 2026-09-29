@@ -1,7 +1,17 @@
 import { runtimeFetch } from '@varin/application-client';
 
-export type KnowledgeCatalogScope = 'workspace' | 'user';
+export type KnowledgeCatalogScope = 'workspace' | 'user' | 'bot';
 export type KnowledgeCatalogStatus = 'suggested' | 'accepted' | 'dismissed';
+export type KnowledgeCatalogNature = 'experience' | 'decision' | 'preference' | 'judgment' | 'instruction';
+const KNOWLEDGE_NATURES: readonly KnowledgeCatalogNature[] = ['experience', 'decision', 'preference', 'judgment', 'instruction'];
+
+export interface KnowledgeCatalogSource {
+  kind: string;
+  sessionId?: string;
+  threadId?: string;
+  runId?: string;
+  entryId?: string;
+}
 
 export interface KnowledgeCatalogItem {
   id: number;
@@ -9,11 +19,12 @@ export interface KnowledgeCatalogItem {
   status: KnowledgeCatalogStatus;
   content: string;
   trigger: string;
+  nature?: KnowledgeCatalogNature;
   createdAt: number;
   invalidAt?: number;
   recallCount: number;
   recalledAt?: number;
-  source?: { sessionId: string; kind: string };
+  source?: KnowledgeCatalogSource;
 }
 
 export interface KnowledgeCatalogChain {
@@ -28,7 +39,7 @@ const recordOf = (value: unknown): Record<string, unknown> | null => (
 );
 
 const scopeOf = (value: unknown): KnowledgeCatalogScope | null => (
-  value === 'workspace' || value === 'user' ? value : null
+  value === 'workspace' || value === 'user' || value === 'bot' ? value : null
 );
 
 const statusOf = (value: unknown): KnowledgeCatalogStatus | null => (
@@ -53,19 +64,32 @@ export const parseKnowledgeCatalogItem = (value: unknown): KnowledgeCatalogItem 
     || typeof item.recallCount !== 'number'
     || (item.invalidAt !== undefined && (typeof item.invalidAt !== 'number' || !Number.isFinite(item.invalidAt)))
     || (item.recalledAt !== undefined && (typeof item.recalledAt !== 'number' || !Number.isFinite(item.recalledAt)))
-    || (source !== null && (typeof source.sessionId !== 'string' || typeof source.kind !== 'string'))
+    || (source !== null && typeof source.kind !== 'string')
   ) throw new Error('Malformed knowledge catalog item');
+  const nature = typeof item.nature === 'string' && (KNOWLEDGE_NATURES as readonly string[]).includes(item.nature)
+    ? item.nature as KnowledgeCatalogNature
+    : undefined;
+  const pickSourceField = (key: string) => typeof source?.[key] === 'string' && source[key] ? source[key] as string : undefined;
   return {
     id: Number(item.id),
     scope,
     status,
     content: item.content,
     trigger: item.trigger,
+    ...(nature ? { nature } : {}),
     createdAt: item.createdAt,
     recallCount: item.recallCount,
     ...(typeof item.invalidAt === 'number' ? { invalidAt: item.invalidAt } : {}),
     ...(typeof item.recalledAt === 'number' ? { recalledAt: item.recalledAt } : {}),
-    ...(source ? { source: { sessionId: source.sessionId as string, kind: source.kind as string } } : {}),
+    ...(source ? {
+      source: {
+        kind: source.kind as string,
+        ...(pickSourceField('sessionId') ? { sessionId: pickSourceField('sessionId')! } : {}),
+        ...(pickSourceField('threadId') ? { threadId: pickSourceField('threadId')! } : {}),
+        ...(pickSourceField('runId') ? { runId: pickSourceField('runId')! } : {}),
+        ...(pickSourceField('entryId') ? { entryId: pickSourceField('entryId')! } : {}),
+      },
+    } : {}),
   };
 };
 
@@ -94,12 +118,14 @@ export const parseKnowledgeCatalogChain = (value: unknown): KnowledgeCatalogChai
 
 const workspaceQuery = (scope: KnowledgeCatalogScope, workspaceId?: string): string => {
   const params = new URLSearchParams({ scope });
-  if (scope === 'workspace' && workspaceId) params.set('workspaceId', workspaceId);
+  // workspaceId carries the owner address for scoped stores: the workspace id
+  // for `workspace`, and `bot:<id>` for `bot`.
+  if ((scope === 'workspace' || scope === 'bot') && workspaceId) params.set('workspaceId', workspaceId);
   return params.toString();
 };
 
 const workspaceBody = (scope: KnowledgeCatalogScope, workspaceId?: string): Record<string, string> => (
-  scope === 'workspace' && workspaceId ? { workspaceId } : {}
+  (scope === 'workspace' || scope === 'bot') && workspaceId ? { workspaceId } : {}
 );
 
 const readError = async (response: Response): Promise<string> => {

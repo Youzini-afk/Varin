@@ -50,6 +50,9 @@ import {
   type KnowledgeExpectedRevision,
   type KnowledgeInput,
   type Knowledge,
+  type KnowledgeSource,
+  type MemoryNature,
+  MEMORY_NATURES,
   type KnowledgeSupersedeChain,
   type KnowledgeCreateIfAbsentResult,
   KnowledgeMutationError,
@@ -251,22 +254,50 @@ export async function openKnowledgeStoreEngine(deps: KnowledgeStoreEngineOptions
       })
     );
 
+    const knowledgeSourceFromPayload = (value: unknown): KnowledgeSource | undefined => {
+      if (!value || typeof value !== "object" || Array.isArray(value)) return undefined;
+      const source = value as Record<string, unknown>;
+      if (typeof source["kind"] !== "string" || !source["kind"]) return undefined;
+      const pick = (key: string) => typeof source[key] === "string" && source[key] ? source[key] as string : undefined;
+      return {
+        kind: source["kind"] as string,
+        ...(pick("sessionId") ? { sessionId: pick("sessionId")! } : {}),
+        ...(pick("threadId") ? { threadId: pick("threadId")! } : {}),
+        ...(pick("runId") ? { runId: pick("runId")! } : {}),
+        ...(pick("entryId") ? { entryId: pick("entryId")! } : {}),
+      };
+    };
     const knowledgeFromPayload = (id: NodeId, p: Record<string, unknown>): Knowledge | null => {
       if (p["type"] !== "knowledge") return null;
       const invalidAt = p["invalidAt"] as number | undefined;
+      const nature = p["nature"];
+      const source = p["source"] !== undefined ? knowledgeSourceFromPayload(p["source"]) : undefined;
       return {
         id,
         scope: p["scope"] as KnowledgeScope,
         status: p["status"] as KnowledgeStatus,
         content: p["content"] as string,
         trigger: p["trigger"] as string,
-        ...(p["source"] ? { source: p["source"] as { sessionId: string; kind: string } } : {}),
+        ...(typeof nature === "string" && (MEMORY_NATURES as readonly string[]).includes(nature)
+          ? { nature: nature as MemoryNature } : {}),
+        ...(source ? { source } : {}),
         createdAt: p["createdAt"] as number,
         ...(invalidAt !== undefined ? { invalidAt } : {}),
         recallCount: (p["recallCount"] as number) ?? 0,
         ...(p["recalledAt"] !== undefined ? { recalledAt: p["recalledAt"] as number } : {}),
       };
     };
+    const knowledgeInsertPayload = (k: KnowledgeInput, now: number): Record<string, unknown> => ({
+      type: "knowledge",
+      scope: k.scope,
+      status: k.status,
+      content: k.content,
+      trigger: k.trigger,
+      ...(k.nature ? { nature: k.nature } : {}),
+      ...(k.source ? { source: k.source } : {}),
+      createdAt: now,
+      recallCount: 0,
+    });
     const notifyKnowledge = (ids: readonly NodeId[]): void => {
       if (ids.length === 0 || !deps.onKnowledgeChanged) return;
       persistence.afterCommit(() => deps.onKnowledgeChanged?.(ids));
@@ -767,17 +798,7 @@ export async function openKnowledgeStoreEngine(deps: KnowledgeStoreEngineOptions
           if (recallScope === "user" && k.scope !== "user") {
             throw new KnowledgeMutationError("invalid", "User knowledge store rejects non-user scope writes");
           }
-          const now = Date.now();
-          const payload = {
-            type: "knowledge",
-            scope: k.scope,
-            status: k.status,
-            content: k.content,
-            trigger: k.trigger,
-            ...(k.source ? { source: k.source } : {}),
-            createdAt: now,
-            recallCount: 0,
-          };
+          const payload = knowledgeInsertPayload(k, Date.now());
           const id = db.insert(placeholderVec, payload);
           db.indexText(id, k.content);
           if (k.trigger) db.indexKeyword(id, k.trigger);
@@ -809,17 +830,7 @@ export async function openKnowledgeStoreEngine(deps: KnowledgeStoreEngineOptions
             if (!knowledge) throw new KnowledgeMutationError("invalid", `Invalid knowledge row: ${duplicate.id}`);
             return { created: false, duplicate: true, knowledge };
           }
-          const now = Date.now();
-          const payload = {
-            type: "knowledge",
-            scope: k.scope,
-            status: k.status,
-            content: k.content,
-            trigger: k.trigger,
-            ...(k.source ? { source: k.source } : {}),
-            createdAt: now,
-            recallCount: 0,
-          };
+          const payload = knowledgeInsertPayload(k, Date.now());
           const id = db.insert(placeholderVec, payload);
           db.indexText(id, k.content);
           if (k.trigger) db.indexKeyword(id, k.trigger);
@@ -911,6 +922,49 @@ export async function openKnowledgeStoreEngine(deps: KnowledgeStoreEngineOptions
           persistence.commit();
           bumpKnowledgeEpoch();
           notifyKnowledge([id]);
+        });
+      },
+
+      async supersedeKnowledge(id, input, expectedScope, expected): Promise<{ id: NodeId; previous: Knowledge }> {
+        return enqueueWrite(() => {
+          const payload = db.getPayload(id) as Record<string, unknown> | null;
+          if (!payload || payload["type"] !== "knowledge") {
+            throw new KnowledgeMutationError("not-found", `Knowledge not found: ${id}`);
+          }
+          const scope = payload["scope"] as KnowledgeScope;
+          if (expectedScope && scope !== expectedScope) {
+            throw new KnowledgeMutationError("not-found", `Knowledge not found in ${expectedScope} scope: ${id}`);
+          }
+          if (payload["status"] !== "accepted" || payload["invalidAt"] !== undefined) {
+            throw new KnowledgeMutationError("conflict", `Knowledge ${id} is not current accepted knowledge`);
+          }
+          if (expected && !matchesExpectedRevision(payload, expected)) {
+            throw new KnowledgeMutationError("conflict", `Knowledge ${id} changed after it was opened`);
+          }
+          if (!input.content.trim()) throw new KnowledgeMutationError("invalid", "Knowledge content is required");
+          const previous = knowledgeFromPayload(id, payload);
+          if (!previous) throw new KnowledgeMutationError("invalid", `Invalid knowledge row: ${id}`);
+          const now = Date.now();
+          const inheritedNature = input.nature ?? previous.nature;
+          const inheritedSource = input.source ?? previous.source;
+          const nextPayload = knowledgeInsertPayload({
+            ...input,
+            scope,
+            status: "accepted",
+            // A correction inherits the predecessor's provenance class when the
+            // caller does not restate one; `nature` defaults the same way.
+            ...(inheritedNature ? { nature: inheritedNature } : {}),
+            ...(inheritedSource ? { source: inheritedSource } : {}),
+          }, now);
+          const nextId = db.insert(placeholderVec, nextPayload);
+          db.indexText(nextId, input.content);
+          if (input.trigger) db.indexKeyword(nextId, input.trigger);
+          db.patchPayload(id, { $set: { invalidAt: now } });
+          db.link(nextId, id, "supersedes", 1);
+          persistence.commit();
+          bumpKnowledgeEpoch();
+          notifyKnowledge([nextId, id]);
+          return { id: nextId, previous };
         });
       },
 

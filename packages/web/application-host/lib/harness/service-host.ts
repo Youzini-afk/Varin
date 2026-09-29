@@ -326,6 +326,8 @@ export interface HarnessServiceHost {
     workspaceId: string | null,
   ) => Promise<{ store: KnowledgeStore; settings: KnowledgeSuggestionsSettings; onChanged?: () => void } | null>) | null;
   todoDepsProvider: ((sessionId: string) => Promise<TodoToolDeps>) | null;
+  /** BC1 unified memory service shared by harness methods, routes, and UI. */
+  memoryService?: import("../memory/memory-service.js").MemoryService | null;
   // Phase 3: Thread registry
   threadRegistry: ThreadRegistry | null;
   threadCaptureDraftBaseline: ((sessionId: string, workspaceId: string, context: import("@varin/protocol").AgentInputContext) => Promise<CapturedThreadDraftBaseline>) | null;
@@ -583,6 +585,7 @@ export interface HarnessServiceHostOptions {
   recallDepsProvider?: (sessionId: string, workspaceId: string | null) => Promise<RecallToolDeps>;
   knowledgeSuggestDepsProvider?: HarnessServiceHost["knowledgeSuggestDepsProvider"];
   todoDepsProvider?: (sessionId: string) => Promise<TodoToolDeps>;
+  memoryService?: NonNullable<HarnessServiceHost["memoryService"]>;
   // Phase 3 options
   threadRegistry?: ThreadRegistry;
   threadCaptureDraftBaseline?: HarnessServiceHost["threadCaptureDraftBaseline"];
@@ -1054,6 +1057,7 @@ export function createHarnessServiceHost(options: HarnessServiceHostOptions): Ha
     recallDepsProvider,
     knowledgeSuggestDepsProvider,
     todoDepsProvider,
+    memoryService: options.memoryService ?? null,
     threadRegistry,
     threadCaptureDraftBaseline,
     threadPrepareIsolatedBranch,

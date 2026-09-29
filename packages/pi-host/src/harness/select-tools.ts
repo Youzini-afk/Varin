@@ -17,6 +17,7 @@ import { createMaterialsTool } from "./materials-tool.js";
 import { createResearchDecideTool } from "./research-decide-tool.js";
 import { createTodoTool } from "./todo-tool.js";
 import { createRecallTool } from "./recall-tool.js";
+import { createMemoryTool } from "./memory-tools.js";
 import { createExploreTool } from "./explore-tool.js";
 import { createHistoryTool } from "./history-tool.js";
 import { createRelatedTool } from "./related-tool.js";
@@ -220,6 +221,9 @@ export function selectHarnessTools(
   }
   if (tools.recall !== false) {
     result.push(createRecallTool(bridge, sessionId));
+  }
+  if (tools.memory !== false) {
+    result.push(createMemoryTool(bridge, sessionId));
   }
   if (tools.explore !== false) {
     result.push(createExploreTool(bridge, sessionId, deps.completeExplore ? { complete: deps.completeExplore } : undefined));

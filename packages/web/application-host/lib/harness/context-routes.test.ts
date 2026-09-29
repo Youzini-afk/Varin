@@ -6,6 +6,7 @@ import request from "supertest";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { openWorkspaceKnowledge, type KnowledgeStore } from "../knowledge/store.js";
 import { registerHarnessContextRoutes } from "./context-routes.js";
+import { createMemoryService } from "../memory/memory-service.js";
 
 const TEST_DIR = join(tmpdir(), "varin-harness-context-routes");
 
@@ -122,24 +123,45 @@ describe("harness context routes", () => {
       .expect(({ body }) => expect(body.code).toBe("branch-conflict"));
   });
 
-  it("uses the session's effective auto-accept policy for explicit suggestions", async () => {
+  it("commits an explicit user remember immediately through the unified memory service", async () => {
+    const memoryService = createMemoryService({
+      storeForScopeId: async (scopeId) => scopeId === "workspace-1" ? store : null,
+      userStore: async () => userStore,
+      ownerForSession: async (sessionId) => sessionId === "session-1"
+        ? { scope: "workspace", ownerId: "workspace-1" }
+        : { scope: "session", ownerId: sessionId },
+    });
     const app = express();
     app.use(express.json());
     registerHarnessContextRoutes(app, {
       getStore: async () => store,
       getBranchEntryIds: async () => [],
-      getSuggestionSettings: async () => ({
-        autoAcceptSuggestions: { workspace: true, user: false, session: false, bot: false },
-      }),
+      memoryService,
+      memoryOwnerForSession: (sessionId) => memoryService.ownerForSession(sessionId),
     });
 
+    // Direct remember persists as accepted — the auto-accept review policy no
+    // longer gates an explicit user mark.
     await request(app)
-      .post("/api/harness/sessions/session-1/knowledge/suggestions")
-      .send({ scope: "workspace", content: "Keep this policy" })
+      .post("/api/harness/sessions/session-1/knowledge/remember")
+      .send({ content: "Keep this policy", nature: "decision", kind: "message:user" })
       .expect(201)
-      .expect(({ body }) => expect(body.suggestion.status).toBe("accepted"));
+      .expect(({ body }) => {
+        expect(body.created).toBe(true);
+        expect(body.item.status).toBe("accepted");
+        expect(body.item.nature).toBe("decision");
+        expect(body.item.source).toMatchObject({ kind: "message:user", sessionId: "session-1" });
+      });
     await expect(store.listKnowledge({ scope: "workspace", status: "accepted" }))
       .resolves.toEqual([expect.objectContaining({ content: "Keep this policy" })]);
+
+    // `scope: "user"` writes the user store.
+    await request(app)
+      .post("/api/harness/sessions/session-1/knowledge/remember")
+      .send({ scope: "user", content: "Prefer concise replies" })
+      .expect(201);
+    await expect(userStore.listKnowledge({ scope: "user", status: "accepted" }))
+      .resolves.toEqual([expect.objectContaining({ content: "Prefer concise replies" })]);
   });
 
   it("reviews workspace and user suggestions through authenticated scoped actions", async () => {
@@ -162,27 +184,25 @@ describe("harness context routes", () => {
         else res.status(401).json({ error: "auth required" });
       },
     });
+    // Inferred suggestions arrive through the agent's knowledge.suggest bridge
+    // method; the route test seeds them directly at the store layer.
+    const workspaceId = await store.putKnowledge({
+      scope: "workspace",
+      status: "suggested",
+      content: "Use bun",
+      trigger: "package management",
+      source: { sessionId: "session-1", kind: "block" },
+    });
+    const userId = await userStore.putKnowledge({
+      scope: "user",
+      status: "suggested",
+      content: "Prefer concise replies",
+      trigger: "response style",
+      source: { sessionId: "session-1", kind: "block" },
+    });
     const base = "/api/harness/sessions/session-1/knowledge/suggestions";
     await request(app).get(base).expect(401);
     await request(app).get("/api/harness/sessions/missing/knowledge/suggestions").set("x-test-auth", "yes").expect(404);
-    await request(app)
-      .post("/api/harness/sessions/missing/knowledge/suggestions")
-      .set("x-test-auth", "yes")
-      .send({ scope: "user", content: "forged source" })
-      .expect(404);
-    expect(await userStore.listKnowledge({ status: "suggested" })).toEqual([]);
-    const workspaceCreate = await request(app)
-      .post(base)
-      .set("x-test-auth", "yes")
-      .send({ scope: "workspace", content: "Use bun", trigger: "package management", kind: "block" })
-      .expect(201);
-    const userCreate = await request(app)
-      .post(base)
-      .set("x-test-auth", "yes")
-      .send({ scope: "user", content: "Prefer concise replies", trigger: "response style", kind: "block" })
-      .expect(201);
-    const workspaceId = workspaceCreate.body.suggestion.id as number;
-    const userId = userCreate.body.suggestion.id as number;
 
     await request(app)
       .get(base)
@@ -261,6 +281,6 @@ describe("harness context routes", () => {
       .toEqual([expect.objectContaining({ id: workspaceId, content: "Always use Bun for package management" })]);
     expect(await userStore.listKnowledge({ scope: "user", status: "dismissed" }))
       .toEqual([expect.objectContaining({ id: userId })]);
-    expect(changed).toEqual(["session-1", "session-1", "session-1", "session-1", "session-1"]);
+    expect(changed).toEqual(["session-1", "session-1", "session-1"]);
   });
 });

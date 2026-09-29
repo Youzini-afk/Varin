@@ -12,7 +12,7 @@ import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip
 import { useI18n } from '@/lib/i18n';
 import { usePiSessionStore } from '@/stores/usePiSessionStore';
 import type { HarnessKnowledgeScope } from './harnessKnowledgePresentation';
-import { knowledgeSuggestionEndpoint, knowledgeSuggestionPayload } from './knowledgeSuggestionRequest';
+import { knowledgeRememberEndpoint, knowledgeRememberPayload } from './knowledgeSuggestionRequest';
 
 export const RememberKnowledgeButton: React.FC<{
   content: string;
@@ -22,16 +22,19 @@ export const RememberKnowledgeButton: React.FC<{
   const { t } = useI18n();
   const sessionId = usePiSessionStore((state) => state.currentSessionId);
   const [busy, setBusy] = React.useState(false);
+  // BC1: an explicit user remember commits immediately; "workspace" means the
+  // session's owning scope (Bot memory on Bot entry chats, workspace memory
+  // for bound sessions), "user" is the cross-workspace user store.
   const remember = React.useCallback(async (scope: HarnessKnowledgeScope) => {
     if (!sessionId || !content.trim() || busy) return;
     setBusy(true);
     try {
-      const response = await runtimeFetch(knowledgeSuggestionEndpoint(sessionId), {
+      const response = await runtimeFetch(knowledgeRememberEndpoint(sessionId), {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(knowledgeSuggestionPayload(scope, content.trim(), kind)),
+        body: JSON.stringify(knowledgeRememberPayload(scope, content.trim(), kind)),
       });
-      if (!response.ok) throw new Error(`Unable to create knowledge suggestion (${response.status})`);
+      if (!response.ok) throw new Error(`Unable to save memory (${response.status})`);
       toast.success(t('harness.knowledge.created'));
     } catch (error) {
       toast.error(error instanceof Error ? error.message : String(error));

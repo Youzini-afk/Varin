@@ -28,6 +28,7 @@ import { assembleZone2Content } from "./zone2.js";
 import { executeTodoTool } from "./todo-tool.js";
 import { executeRecall } from "./recall-tool.js";
 import { proposeUserMessageSuggestion } from "./knowledge-suggestions.js";
+import { registerMemoryServices } from "./memory-services.js";
 import { createZone2DeliveryService, prepareZone2Threads } from "./zone2-threads.js";
 import { selectNewZone2Material, zone2MaterialRevision } from "./zone2-material.js";
 import { formatZone2ThreadMaterial } from "./zone2.js";
@@ -1198,6 +1199,8 @@ export function registerHarnessServices(
   if (host.knowledgeSuggestDepsProvider) {
     router.register("knowledge.suggest", createKnowledgeSuggestService(host));
   }
+  // BC1 unified memory — remember/correct/forget/get share one write path.
+  registerMemoryServices(router, host);
   // Phase 3 thread services — registered only when thread registry is available
   if (host.threadRegistry && host.threadSpawnSession) {
     router.register("thread.dispatch", createThreadDispatchService(host));
