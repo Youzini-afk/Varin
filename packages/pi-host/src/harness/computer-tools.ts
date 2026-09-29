@@ -27,6 +27,9 @@ import type {
 const ComputerParams = Type.Object({
   action: Type.Union([
     Type.Literal("list"),
+    Type.Literal("prepare"),
+    Type.Literal("start"),
+    Type.Literal("stop"),
     Type.Literal("apps"),
     Type.Literal("observe"),
     Type.Literal("act"),
@@ -37,6 +40,9 @@ const ComputerParams = Type.Object({
   ]),
   /** Target desktop; omit for the configured default. */
   desktopId: Type.Optional(Type.String()),
+  connectionId: Type.Optional(Type.String({ description: "prepare: saved Host connection id; omit for this Host." })),
+  width: Type.Optional(Type.Integer({ minimum: 1 })),
+  height: Type.Optional(Type.Integer({ minimum: 1 })),
   /** observe/act/apps: app selector (process name, window title, or pid). */
   app: Type.Optional(Type.String()),
   /** observe: which of the app's windows to bind — hwnd number or title (multi-window apps). */
@@ -100,12 +106,27 @@ export function createComputerTool(bridge: HostServicesBridge, _sessionId: strin
       "Use await computer.emitImage(obs) to show an observation screenshot to the model. A script batch is invalidated by desktop cancellation or human handoff; start a new run after observing the current scene.",
       "cancel drops queued input; release frees held keys/buttons. Use them when a gesture must not continue.",
       "If the tool reports the desktop unavailable or unprobed, report that honestly — never claim a GUI action happened.",
+      "prepare installs a persistent Linux desktop and browser on this Host or a saved connection. Use it when an independent desktop is needed. start/stop require its desktopId; stopping closes applications but retains their saved files and browser profile.",
     ],
     parameters: ComputerParams,
     execute: async (_toolCallId, params, signal, _onUpdate, _ctx) => {
       try {
         const desktop = params.desktopId?.trim() || undefined;
         switch (params.action) {
+          case "prepare": {
+            const result = await bridge.request("computer.prepare", {
+              ...(params.connectionId ? { connectionId: params.connectionId } : {}),
+              ...(params.width !== undefined ? { width: params.width } : {}),
+              ...(params.height !== undefined ? { height: params.height } : {}),
+            });
+            return { content: [{ type: "text", text: JSON.stringify(result) }], details: result };
+          }
+          case "start":
+          case "stop": {
+            if (!desktop) throw new HarnessRequestError("invalid-params", "Desktop lifecycle requires desktopId");
+            const result = await bridge.request("computer.desktopLifecycle", { desktopId: desktop, action: params.action });
+            return { content: [{ type: "text", text: JSON.stringify(result) }], details: result };
+          }
           case "list": {
             const result = await bridge.request<"computer.list">("computer.list", {}) as ComputerListResult;
             const lines = [

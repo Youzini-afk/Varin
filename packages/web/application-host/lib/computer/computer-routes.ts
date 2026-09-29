@@ -50,6 +50,15 @@ export function registerComputerRoutes(app: Express, { computers, requireAuth = 
   });
 
   /** Re-probe a desktop's driver and persist the real capability table. */
+  app.post("/api/computers/desktops/prepare", requireAuth, async (request, response) => {
+    try { response.json({ desktop: await computers.prepareDesktop(request.body ?? {}, request.body?.automation === true) }); }
+    catch (error) { sendError(response, error, "Unable to prepare desktop"); }
+  });
+  app.post("/api/computers/desktops/:desktopId/lifecycle", requireAuth, async (request, response) => {
+    try { response.json({ desktop: await computers.desktopLifecycle(String(request.params.desktopId), request.body?.action, request.body?.automation === true) }); }
+    catch (error) { sendError(response, error, "Unable to change desktop lifecycle"); }
+  });
+
   app.post("/api/computers/desktops/:desktopId/probe", requireAuth, async (request: Request, response: Response) => {
     response.setHeader("Cache-Control", "no-store");
     try {
@@ -249,7 +258,7 @@ export function registerComputerRoutes(app: Express, { computers, requireAuth = 
         if (event.type === "frame" && response.writableNeedDrain) return;
         response.write(`data: ${JSON.stringify(event)}\n\n`);
         if (event.type === "error" && event.terminal) response.end();
-      });
+      }, { frames: request.query.frames !== "0" });
     } catch (error) {
       response.write(`data: ${JSON.stringify({ type: "error", error: error instanceof Error ? error.message : "subscribe failed" })}\n\n`);
       response.end();

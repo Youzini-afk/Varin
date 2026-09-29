@@ -91,11 +91,21 @@ export type DesktopStreamEvent =
  * this view — closing it unsubscribes the viewer without touching the task
  * or the desktop itself.
  */
-export const subscribeDesktopStream = (desktopId: string, viewerId: string): EventSource => (
+export const subscribeDesktopStream = (desktopId: string, viewerId: string, frames = true): EventSource => (
   new EventSource(getRuntimeUrlResolver().sse(
     `/api/computers/desktops/${encodeURIComponent(desktopId)}/stream`,
-    { viewer: viewerId },
+    { viewer: viewerId, ...(frames ? {} : { frames: '0' }) },
   ))
+);
+
+export const prepareComputerDesktop = async (input: import('@varin/protocol').ComputerDesktopPrepareParams): Promise<ComputerDesktop> => (
+  (await readJson<{ desktop: ComputerDesktop }>(await runtimeFetch('/api/computers/desktops/prepare', {
+    method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(input),
+  }), 'Unable to prepare desktop')).desktop
+);
+
+export const changeComputerDesktop = async (desktopId: string, action: 'start' | 'stop'): Promise<ComputerDesktop> => (
+  (await desktopPost<{ desktop: ComputerDesktop }>(desktopId, 'lifecycle', { action }, 'Unable to change desktop lifecycle')).desktop
 );
 
 // --- BC7: virtual machines ---------------------------------------------------

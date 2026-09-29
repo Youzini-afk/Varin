@@ -11,6 +11,7 @@ import {
 } from '@/lib/computers';
 import type { ComputerControlState, ComputerDesktop, ComputerDesktopFrame } from '@varin/protocol';
 import { desktopKey, desktopPoint } from '@/lib/computerInput';
+import { VncDesktop } from './VncDesktop';
 
 const newViewerId = () => `viewer-${Math.random().toString(36).slice(2)}-${Date.now().toString(36)}`;
 
@@ -31,6 +32,13 @@ export function ComputerDesktopPane({ desktop }: { desktop: ComputerDesktop }) {
   const [busy, setBusy] = React.useState(false);
   const [textDraft, setTextDraft] = React.useState('');
   const frameRef = React.useRef<HTMLImageElement | null>(null);
+  const vncRef = React.useRef<HTMLDivElement | null>(null);
+  const useVnc = desktop.media?.kind === 'vnc';
+  const [vncStatus, setVncStatus] = React.useState<'connecting' | 'connected' | 'disconnected'>('connecting');
+  const vncGeometry = React.useCallback((width: number, height: number) => {
+    setFrame({ mime: 'image/png', base64: '', capturedAt: '', bounds: { x: 0, y: 0, width, height } });
+  }, []);
+  const vncConnected = React.useCallback((connected: boolean) => setVncStatus(connected ? 'connected' : 'disconnected'), []);
   const inputTail = React.useRef<Promise<unknown>>(Promise.resolve());
   const inputGeneration = React.useRef(0);
   const composing = React.useRef(false);
@@ -42,7 +50,7 @@ export function ComputerDesktopPane({ desktop }: { desktop: ComputerDesktop }) {
     setControl(null);
     setStreamError(null);
     setInputError(null);
-    const source = subscribeDesktopStream(desktop.id, viewerId);
+    const source = subscribeDesktopStream(desktop.id, viewerId, !useVnc);
     source.onmessage = (message) => {
       try {
         const event = JSON.parse(message.data as string) as DesktopStreamEvent;
@@ -65,11 +73,11 @@ export function ComputerDesktopPane({ desktop }: { desktop: ComputerDesktop }) {
       // Closing the page closes only this subscription — never the task.
       source.close();
     };
-  }, [desktop.id, viewerId, t]);
+  }, [desktop.id, viewerId, t, useVnc]);
 
   const weHoldControl = control?.owner === 'human' && control.holderId === viewerId;
   const mayRelease = weHoldControl && control.reachable && !control.transitioning;
-  const canInput = mayRelease && !streamError;
+  const canInput = mayRelease && !streamError && (!useVnc || vncStatus === 'connected');
   React.useEffect(() => { inputGeneration.current += 1; }, [control?.automationEpoch, canInput]);
   React.useEffect(() => { pointers.current.clear(); }, [control?.automationEpoch]);
   const controlPending = control?.owner === 'human' && control.holderId !== viewerId;
@@ -103,12 +111,12 @@ export function ComputerDesktopPane({ desktop }: { desktop: ComputerDesktop }) {
 
   /** Translate a pointer event on the image into absolute desktop pixels. */
   const pointFor = (event: React.MouseEvent): { x: number; y: number } | null => {
-    const img = frameRef.current;
+    const img = useVnc ? vncRef.current?.querySelector('canvas') : frameRef.current;
     if (!img || !frame) return null;
     return desktopPoint(frame.bounds, img.getBoundingClientRect(), event.clientX, event.clientY);
   };
 
-  const emitInput = (input: Parameters<typeof sendDesktopInput>[2]) => {
+  const emitInput = React.useCallback((input: Parameters<typeof sendDesktopInput>[2]) => {
     if (!canInput && !(mayRelease && input.kind === 'up')) return Promise.resolve(false);
     const generation = inputGeneration.current;
     // Preserve key/drag ordering even if the browser opens concurrent HTTP requests.
@@ -123,13 +131,21 @@ export function ComputerDesktopPane({ desktop }: { desktop: ComputerDesktop }) {
     });
     inputTail.current = pending;
     return pending;
-  };
+  }, [canInput, mayRelease, desktop.id, viewerId, control?.automationEpoch]);
 
-  const onPointer = (event: React.PointerEvent<HTMLImageElement>) => {
+  React.useEffect(() => {
+    if (!useVnc || vncStatus === 'connected' || !mayRelease) return;
+    // The RFB viewer can disconnect during a drag. Release only input owned by
+    // this viewer through the normal, epoch-checked Host lane.
+    for (const held of pointers.current.values()) void emitInput({ kind: 'up', ...held });
+    pointers.current.clear();
+  }, [useVnc, vncStatus, mayRelease, emitInput]);
+
+  const onPointer = (event: React.PointerEvent<HTMLElement>) => {
     const releasing = ['pointerup', 'pointercancel', 'lostpointercapture'].includes(event.type);
     if (!canInput && !(releasing && mayRelease)) return;
     const held = pointers.current.get(event.pointerId);
-    if (event.type !== 'pointerdown' && !held) return;
+    if (event.type !== 'pointerdown' && event.type !== 'pointermove' && !held) return;
     const point = event.type === 'lostpointercapture' ? held : pointFor(event);
     if (!point) return;
     const button = held?.button ?? (event.button === 2 ? 'right' : event.button === 1 ? 'middle' : 'left');
@@ -138,7 +154,7 @@ export function ComputerDesktopPane({ desktop }: { desktop: ComputerDesktop }) {
       event.currentTarget.focus();
       event.currentTarget.setPointerCapture(event.pointerId);
     }
-    if (event.type === 'pointerdown' || event.type === 'pointermove') pointers.current.set(event.pointerId, { ...point, button });
+    if (event.type === 'pointerdown' || (event.type === 'pointermove' && held)) pointers.current.set(event.pointerId, { ...point, button });
     else pointers.current.delete(event.pointerId);
     emitInput({
       kind: event.type === 'pointerdown' ? 'down' : event.type === 'pointermove' ? 'move' : 'up',
@@ -170,13 +186,22 @@ export function ComputerDesktopPane({ desktop }: { desktop: ComputerDesktop }) {
       : weHoldControl ? t('settings.computers.view.control.you')
         : control.reachable ? t('settings.computers.view.control.otherHuman')
           : t('settings.computers.view.control.pendingHuman');
+  const inputHandlers: React.HTMLAttributes<HTMLElement> = {
+    tabIndex: canInput ? 0 : -1, onKeyDown: onKey,
+    onPointerDown: onPointer, onPointerUp: onPointer, onPointerCancel: onPointer, onLostPointerCapture: onPointer,
+    onPointerMove: onPointer,
+    onCompositionStart: () => { composing.current = true; },
+    onCompositionEnd: (event) => { composing.current = false; if (event.data) emitInput({ kind: 'text', text: event.data }); },
+    onPaste: (event) => { if (canInput) { event.preventDefault(); emitInput({ kind: 'text', text: event.clipboardData.getData('text/plain') }); } },
+    onWheel, onContextMenu: (event) => event.preventDefault(),
+  };
 
   return (
     <div className="flex flex-col gap-3 min-h-0">
       <div className="flex items-center justify-between gap-3">
         <span className="typography-meta text-muted-foreground" data-control={control?.owner ?? 'unknown'}>
           {controlLabel}
-          {frame ? <time className="ml-2" dateTime={frame.capturedAt}>{new Date(frame.capturedAt).toLocaleTimeString()}</time> : null}
+          {frame?.capturedAt ? <time className="ml-2" dateTime={frame.capturedAt}>{new Date(frame.capturedAt).toLocaleTimeString()}</time> : null}
           {control && control.owner === 'human' && !control.reachable ? ` — ${t('settings.computers.view.control.reconnecting')}` : ''}
         </span>
         <div className="flex items-center gap-2">
@@ -198,27 +223,19 @@ export function ComputerDesktopPane({ desktop }: { desktop: ComputerDesktop }) {
         </div>
       </div>
       {streamError ? <p role="alert" className="typography-meta text-destructive">{streamError}</p> : null}
+      {useVnc && vncStatus === 'disconnected' ? <p role="alert" className="typography-meta text-destructive">{t('settings.computers.view.streamLost')}</p> : null}
       {inputError ? <p role="alert" className="typography-meta text-destructive">{inputError}</p> : null}
       <div className="rounded-lg border border-border/60 bg-black/80 overflow-hidden flex items-center justify-center min-h-[240px]">
-        {frameUrl ? (
+        {useVnc ? <div {...inputHandlers} className="h-[60vh] w-full select-none touch-none" aria-label={desktop.label}>
+          <VncDesktop ref={vncRef} desktopId={desktop.id} onGeometry={vncGeometry} onConnected={vncConnected} />
+        </div> : frameUrl ? (
           <img
             ref={frameRef}
             src={frameUrl}
             alt={desktop.label}
             draggable={false}
             className="max-h-[70vh] max-w-full w-auto select-none touch-none"
-            tabIndex={canInput ? 0 : -1}
-            onKeyDown={onKey}
-            onPointerDown={onPointer}
-            onPointerUp={onPointer}
-            onPointerCancel={onPointer}
-            onLostPointerCapture={onPointer}
-            onPointerMove={(event) => { if (event.buttons) onPointer(event); }}
-            onCompositionStart={() => { composing.current = true; }}
-            onCompositionEnd={(event) => { composing.current = false; if (event.data) emitInput({ kind: 'text', text: event.data }); }}
-            onPaste={(event) => { if (canInput) { event.preventDefault(); emitInput({ kind: 'text', text: event.clipboardData.getData('text/plain') }); } }}
-            onWheel={onWheel}
-            onContextMenu={(event) => event.preventDefault()}
+            {...inputHandlers}
           />
         ) : (
           <p role="status" className="typography-meta text-muted-foreground p-8">{t('settings.computers.view.waiting')}</p>

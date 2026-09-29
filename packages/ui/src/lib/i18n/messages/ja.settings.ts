@@ -3,6 +3,10 @@
 export const settingsDict = {
   ...englishSettingsDict,
   'settings.knowledge.source.passages': '元の文章を表示',
+  'settings.computers.setup.title': "永続的な Linux デスクトップ",
+  'settings.computers.setup.description': "選択した Linux ホストにデスクトップとブラウザーをインストールします。ビューを閉じてもアプリは動作し、再起動後も保存済みファイルとブラウザーデータは残ります。",
+  'settings.computers.setup.prepare': "デスクトップを準備",
+  'settings.computers.setup.preparing': "準備中…",
   'settings.knowledge.source.changed': '出典が変更されたため、参照した版を読み取れません。',
   'settings.knowledge.source.unavailable': '元の出典を読み取れません。',
   'settings.page.harness.network.title': '実行ホストの送信ネットワーク',

@@ -4,6 +4,11 @@ Resident platform helpers for Computer Use (BC4). A driver runs inside the
 target desktop session and speaks a line-delimited JSON protocol on
 stdin/stdout:
 
+Each desktop has one ordered input/observation helper and a separate read-only
+capture helper for live viewers. Long native actions cannot queue-block the
+viewer. The Host coalesces concurrent startup of each helper; the capture helper
+never changes the Agent's stored observations or input ownership.
+
 ```
 in : {"id":"<request>","tool":"<op>", ...params}
 out: {"id":"<request>","ok":true|false, "error"?:string, "cancelled"?:bool,
@@ -50,6 +55,21 @@ response is a partial outcome, not a clean rejection.
 | Linux | `linux/driver-host.py` (python3, stdin loop) | AT-SPI tree/actions + `Atspi.generate_*` input; Gdk pixbuf capture on X11; under Wayland capture goes through `org.freedesktop.portal.Screenshot` and input depends on the compositor accepting AT-SPI synthesis — `capabilities.detail` says which |
 | macOS | `macos/driver-host.js` (osascript -l JavaScript, stdin loop) | JXA driver: CGWindowList windows + System Events AX tree + CGEvent input + `CGWindowListCreateImage` capture. **Unverified** — no real-machine evidence yet; `capabilities.detail` says so |
 
+The **Prepare Desktop** action on a Debian or Ubuntu Linux Host installs its
+native graphical dependencies and creates a systemd-managed Xvnc session.
+Package installation requires root or non-interactive sudo on that Host. A root
+Host creates a dedicated desktop account; a regular Host creates a lingering
+user service. The user profile, downloads and browser state live under the
+desktop account and survive Host or viewer restarts. RFB listens on a private
+Unix socket with server-side input disabled; noVNC uses the authenticated Host
+media route for viewing. Human input remains in the existing control lane.
+
+Preparation is explicit and can be repeated to upgrade the component at its
+next session start. A running session is left running so applications and edits
+are not interrupted. Stop and Start in Computer settings apply the new
+component. Only Debian and Ubuntu apt preparation is implemented; the service
+reports a clear error on unsupported distributions.
+
 Windows background-capable actions avoid stealing foreground focus by
 default; the escape hatches `VARIN_COMPUTER_ALLOW_FOCUS_ACTIONS`,
 `VARIN_COMPUTER_ALLOW_APP_LAUNCH`, and
@@ -75,7 +95,7 @@ they could release a person's held keys or mouse buttons. A lost driver response
 therefore leaves the action effect and any held-input state unknown. Post-action
 capture failure preserves the input acceptance. Inspect the desktop before
 retrying.
-Drivers are staged inside the compiled Application Host generation at `server/computer-driver`, so publication replaces code and scripts together. Environment overrides remain explicit. Linux still requires its native Python/GI/AT-SPI/Gdk dependencies and an actual graphical session; script inclusion alone does not install those components.
+Drivers are staged inside the compiled Application Host generation at `server/computer-driver`, so publication replaces code and scripts together. Environment overrides remain explicit. On Debian and Ubuntu, the explicit Prepare Desktop operation installs the graphical session and its native packages. Existing local console desktops still require their own graphical session and platform packages.
 
 See the [BC acceptance record](../../docs/plan/bot-computer-use-review.md)
 for remaining native platform and packaging work.

@@ -3,6 +3,10 @@
 export const settingsDict = {
   ...englishSettingsDict,
   'settings.knowledge.source.passages': 'Passages originaux',
+  'settings.computers.setup.title': "Bureau Linux persistant",
+  'settings.computers.setup.description': "Installez un bureau et un navigateur sur l’hôte Linux choisi. Les applications continuent après fermeture de la vue ; les fichiers enregistrés et les données du navigateur restent après un redémarrage.",
+  'settings.computers.setup.prepare': "Préparer le bureau",
+  'settings.computers.setup.preparing': "Préparation…",
   'settings.knowledge.source.changed': 'La source a changé ; la version citée n’est plus disponible.',
   'settings.knowledge.source.unavailable': 'La source originale est indisponible.',
   'settings.page.harness.network.title': 'Réseau sortant de l’hôte',

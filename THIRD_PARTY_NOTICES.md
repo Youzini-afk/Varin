@@ -61,6 +61,14 @@ LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
 OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 SOFTWARE.
 
+## noVNC desktop viewer
+
+The browser desktop viewer bundles noVNC 1.7.0 core JavaScript, Copyright
+(C) 2022 the noVNC authors, under MPL-2.0. Its upstream notice is distributed
+at `packages/web/public/licenses/novnc-LICENSE.txt`; the corresponding source is
+available from the pinned `@novnc/novnc` dependency and
+[noVNC upstream](https://github.com/novnc/noVNC/tree/v1.7.0).
+
 ## TypeScript language service
 
 Varin's first-party TypeScript/JavaScript language extension distributes

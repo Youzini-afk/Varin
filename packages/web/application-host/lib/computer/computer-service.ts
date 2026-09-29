@@ -20,6 +20,7 @@ import type {
   ComputerControlState,
   ComputerDesktop,
   ComputerDesktopFrame,
+  ComputerDesktopPrepareParams,
   ComputerElement,
   ComputerHumanInput,
   ComputerInputResult,
@@ -39,7 +40,6 @@ import type { KernelRecordResult } from "../kernel/protocol.generated.js";
 import { HarnessServiceError } from "../harness/service-error.js";
 import {
   computerDriverDir,
-  createDriverSession,
   localDriverSpawnSpec,
   type ComputerDriverSession,
   type DriverRequest,
@@ -47,6 +47,8 @@ import {
   type DriverSpawnSpec,
 } from "./driver-host.js";
 import { createLibvirtProvider } from "./libvirt-provider.js";
+import { createDesktopDriverPool } from "./desktop-drivers.js";
+import { createLinuxDesktop, type LinuxDesktopState } from "./linux-desktop.js";
 import type { VmExec, VmProvider } from "./vm-provider.js";
 
 /** Kernel workspace under which computer catalog records live. */
@@ -141,6 +143,11 @@ const parseDesktop = (record: KernelRecordResult): ComputerDesktop | null => {
       ...(isObject(raw.usage) && asString(raw.usage.sessionId) && asString(raw.usage.at)
         ? { usage: { sessionId: raw.usage.sessionId as string, at: raw.usage.at as string } }
         : {}),
+      ...(raw.managed === "linux-xvnc" ? { managed: "linux-xvnc" as const } : {}),
+      ...(isObject(raw.media) && raw.media.kind === "vnc"
+        && Number.isSafeInteger(raw.media.width) && (raw.media.width as number) > 0
+        && Number.isSafeInteger(raw.media.height) && (raw.media.height as number) > 0
+        ? { media: { kind: "vnc" as const, width: raw.media.width as number, height: raw.media.height as number } } : {}),
     };
   } catch {
     return null;
@@ -298,6 +305,7 @@ export type DesktopViewEvent =
 
 interface DesktopViewers {
   viewers: Map<string, (event: DesktopViewEvent) => void>;
+  frameViewers: Set<string>;
   timer: NodeJS.Timeout | null;
   /** A frame capture is in flight inside the lane. */
   polling: boolean;
@@ -358,6 +366,9 @@ export interface ComputerServiceOptions {
 }
 
 export interface ComputerService {
+  prepareDesktop(params: ComputerDesktopPrepareParams, automation?: boolean): Promise<ComputerDesktop>;
+  desktopLifecycle(desktopId: string, action: "start" | "stop", automation?: boolean): Promise<ComputerDesktop>;
+  mediaTarget(desktopId: string): Promise<{ socketPath: string } | { url: string; headers: Record<string, string> }>;
   list(options?: { localOnly?: boolean }): Promise<ComputerListResult>;
   /** Ensure the local machine/console desktop records exist. */
   ensureLocal(): Promise<{ machine: ComputerMachine; desktop: ComputerDesktop }>;
@@ -405,7 +416,7 @@ export interface ComputerService {
    * unsubscribes without cancelling work; when the holder's subscription
    * drops, control stays human-owned but unreachable until it reconnects.
    */
-  subscribeFrames(desktopId: string, viewerId: string, listener: (event: DesktopViewEvent) => void): Promise<() => void>;
+  subscribeFrames(desktopId: string, viewerId: string, listener: (event: DesktopViewEvent) => void, options?: { frames?: boolean }): Promise<() => void>;
   // --- BC7: virtual machine lifecycle ----------------------------------------
   /** Virtual machines on configured providers, with live domain state. */
   listVms(): Promise<ComputerVmDescriptor[]>;
@@ -423,9 +434,7 @@ export interface ComputerService {
 
 export function createComputerService(options: ComputerServiceOptions): ComputerService {
   const platform = options.platform ?? localPlatform();
-  const newDriver = options.createDriver ?? createDriverSession;
   let scopedClient: Promise<KernelScopedClient> | null = null;
-  const drivers = new Map<string, ComputerDriverSession>();
   const lanes = new Map<string, DesktopLane>();
   const controlEpoch = randomUUID();
   let disposed = false;
@@ -433,6 +442,8 @@ export function createComputerService(options: ComputerServiceOptions): Computer
   let localProbe: Promise<ComputerDesktop> | null = null;
   /** Latest observation per desktop+app — the reference frame for element indexes. */
   const observations = new Map<string, Map<string, ComputerObservation>>();
+  const linuxDesktop = createLinuxDesktop({ dataDir: options.dataDir ?? process.cwd(),
+    driverDir: options.driverDir ?? computerDriverDir(), platform });
 
   const scoped = (): Promise<KernelScopedClient> => {
     if (scopedClient) return scopedClient;
@@ -538,6 +549,15 @@ export function createComputerService(options: ComputerServiceOptions): Computer
     const desktop = record ? parseDesktop(record) : null;
     if (!record || !desktop) {
       throw new HarnessServiceError("not-found", `Unknown computer desktop "${desktopId}"`);
+    }
+    if (!desktop.remote && !lanes.has(desktopId)) {
+      const stored = JSON.parse(record.payloadJson) as Record<string, unknown>;
+      if (isObject(stored.control) && stored.control.owner === "human") {
+        const lane = laneFor(desktopId);
+        lane.control = { owner: "human", reachable: false,
+          since: asString(stored.control.since) ?? new Date().toISOString(),
+          ...(asString(stored.control.holderId) ? { holderId: stored.control.holderId as string } : {}) };
+      }
     }
     return { record, desktop };
   };
@@ -680,10 +700,13 @@ export function createComputerService(options: ComputerServiceOptions): Computer
    */
   let remoteSyncAt = 0;
   let remoteSync: Promise<void> | null = null;
-  const syncRemote = async (): Promise<void> => {
+  const syncRemote = async (force = false): Promise<void> => {
     if (!options.remoteHosts) return;
-    if (remoteSync) return remoteSync;
-    if (Date.now() - remoteSyncAt < 10_000) return;
+    if (remoteSync) {
+      await remoteSync;
+      if (!force) return;
+    }
+    if (!force && Date.now() - remoteSyncAt < 10_000) return;
     const task = syncRemoteCatalog();
     remoteSync = task;
     try { await task; } finally { if (remoteSync === task) remoteSync = null; }
@@ -750,6 +773,8 @@ export function createComputerService(options: ComputerServiceOptions): Computer
               ...(remoteDesktop.capabilities ? { capabilities: remoteDesktop.capabilities as unknown as Record<string, unknown> } : {}),
               remote: { connectionId: host.id, desktopId: remoteDesktop.id, hostId: primary.coordinatorHostId },
               ...(mirroredUsage ? { usage: mirroredUsage } : {}),
+              ...(remoteDesktop.managed ? { managed: remoteDesktop.managed } : {}),
+              ...(remoteDesktop.media ? { media: remoteDesktop.media } : {}),
             });
           }
           const retained = new Set(remoteDesktops.map((desktop) => `remote:${host.id}:${primary.coordinatorHostId}:${desktop.id}`));
@@ -852,7 +877,7 @@ export function createComputerService(options: ComputerServiceOptions): Computer
     finally { signal.removeEventListener("abort", onAbort); }
   };
 
-  const driverFor = async (desktopId: string): Promise<{ driver: ComputerDriverSession; desktop: ComputerDesktop }> => {
+  const resolveDriver = async (desktopId: string): Promise<{ spec: DriverSpawnSpec; desktop: ComputerDesktop }> => {
     if (disposed) throw new HarnessServiceError("unavailable", "Computer service is closed");
     await ensureLocal();
     const { desktop } = await desktopRecord(desktopId);
@@ -868,25 +893,21 @@ export function createComputerService(options: ComputerServiceOptions): Computer
       // only drivers on this Host's own machine can be opened.
       throw new HarnessServiceError("unavailable", `Desktop "${desktopId}" is hosted by another coordinator`);
     }
-    const spec = localDriverSpawnSpec(machine.platform, options.driverDir ?? computerDriverDir());
+    const spec = desktop.managed === "linux-xvnc" ? await linuxDesktop.driverSpec()
+      : localDriverSpawnSpec(machine.platform, options.driverDir ?? computerDriverDir());
     if (!spec) {
       throw new HarnessServiceError("unavailable", `No ${machine.platform} driver is packaged for desktop "${desktopId}"`);
     }
-    const existing = drivers.get(desktopId);
-    if (existing?.alive()) return { driver: existing, desktop };
-    await existing?.dispose();
-    observations.delete(desktopId);
-    const driver = newDriver(spec);
-    drivers.set(desktopId, driver);
-    // A new helper can release only input it actually owns. A previous helper
-    // killed mid-input leaves an unknown OS state; a blanket key-up sweep here
-    // would also release keys/buttons the human is holding.
-    await driver.request({ tool: "release_input" }).catch(() => undefined);
-    return { driver, desktop };
+    return { spec, desktop };
   };
+  const driverPool = createDesktopDriverPool({ resolve: resolveDriver, onInputReset: (id) => observations.delete(id),
+    ...(options.createDriver ? { createDriver: options.createDriver } : {}) });
+  const drivers = driverPool.inputs;
+  const driverFor = driverPool.acquire;
 
   const list: ComputerService["list"] = async (listOptions) => {
     await ensureLocal();
+    await refreshManagedDesktop();
     // Refresh remote mirrors before reading the catalog — remote truth wins
     // status, and an unreachable Host leaves an unavailable mirror (BC6).
     if (!listOptions?.localOnly) await syncRemote();
@@ -1014,8 +1035,9 @@ export function createComputerService(options: ComputerServiceOptions): Computer
         });
       return parseDesktop(record)!;
     }
-    const { driver, desktop } = await driverFor(id);
+    const { desktop } = await desktopRecord(id);
     try {
+      const { driver } = await driverFor(id);
       const response = await enqueue(id, "observe", () => driver.request({ tool: "capabilities" }));
       if (!response.ok || !response.capabilities) {
         throw new HarnessServiceError("unavailable", response.error ?? "Driver did not report capabilities");
@@ -1030,6 +1052,8 @@ export function createComputerService(options: ComputerServiceOptions): Computer
           capabilities: capabilities as unknown as Record<string, unknown>,
           ...(capabilities.detail ? { statusDetail: capabilities.detail } : {}),
           ...(desktop.usage ? { usage: desktop.usage } : {}),
+          ...(desktop.managed ? { managed: desktop.managed } : {}),
+          ...(desktop.media ? { media: desktop.media } : {}),
         });
       return parseDesktop(result)!;
     } catch (error) {
@@ -1042,6 +1066,8 @@ export function createComputerService(options: ComputerServiceOptions): Computer
         kind: desktop.kind,
         statusDetail: message,
         ...(desktop.usage ? { usage: desktop.usage } : {}),
+        ...(desktop.managed ? { managed: desktop.managed } : {}),
+        ...(desktop.media ? { media: desktop.media } : {}),
       }).catch(() => undefined);
       if (error instanceof HarnessServiceError) throw error;
       throw new HarnessServiceError("unavailable", message);
@@ -1395,6 +1421,7 @@ export function createComputerService(options: ComputerServiceOptions): Computer
       );
     }
     const lane = laneFor(id);
+    if (lane.control.owner === "human" && !lane.transitioning) return { cancelled: 0, released: false };
     lane.generation += 1;
     // Drop queued actions (their callers get cancelled results); a cancel can
     // never preempt a burst already inside the driver, so release_input runs
@@ -1426,7 +1453,11 @@ export function createComputerService(options: ComputerServiceOptions): Computer
       );
     }
     const { driver } = await driverFor(id);
-    const response = await enqueue(id, "observe", () => driver.request({ tool: "release_input" }));
+    const response = await enqueue(id, "observe", () => {
+      const lane = laneFor(id);
+      if (lane.control.owner !== "agent" || lane.transitioning) throw new HarnessServiceError("forbidden", "Human control owns the held input");
+      return driver.request({ tool: "release_input" });
+    });
     return { released: response.ok };
   };
 
@@ -1633,11 +1664,11 @@ export function createComputerService(options: ComputerServiceOptions): Computer
   const FRAME_INTERVAL_MS = 250;
   const pollFrame = async (desktopId: string): Promise<void> => {
     const entry = viewers.get(desktopId);
-    if (!entry || entry.viewers.size === 0 || entry.polling) return;
+    if (!entry || entry.frameViewers.size === 0 || entry.polling) return;
     entry.polling = true;
     try {
-      const frame = await enqueue(desktopId, "observe", async () => {
-        const { driver } = await driverFor(desktopId);
+      const frame = await (async () => {
+        const { driver } = await driverFor(desktopId, "capture");
         const response = await driver.request({ tool: "capture_frame" });
         if (!response.ok || !response.frame) {
           throw new Error(response.error ?? "desktop capture produced no frame");
@@ -1647,37 +1678,37 @@ export function createComputerService(options: ComputerServiceOptions): Computer
         const mime = raw.mime === "image/jpeg" ? "image/jpeg" : "image/png";
         if (!raw.base64) throw new Error("desktop capture produced no frame");
         return { mime, base64: raw.base64, bounds, capturedAt: raw.capturedAt ?? new Date().toISOString() } satisfies ComputerDesktopFrame;
-      }).catch((error: unknown): Error => (error instanceof Error ? error : new Error(String(error))));
+      })().catch((error: unknown): Error => (error instanceof Error ? error : new Error(String(error))));
       const current = viewers.get(desktopId);
       if (!current) return;
       if (frame instanceof Error) {
         entry.failures += 1;
         if (entry.failures >= 2) {
           const event: DesktopViewEvent = { type: "error", error: frame.message };
-          for (const listener of current.viewers.values()) {
-            try { listener(event); } catch { /* broken viewer */ }
+          for (const [viewerId, listener] of current.viewers) {
+            if (current.frameViewers.has(viewerId)) try { listener(event); } catch { /* broken viewer */ }
           }
         }
         return;
       }
       entry.failures = 0;
       const event: DesktopViewEvent = { type: "frame", frame };
-      for (const listener of current.viewers.values()) {
-        try { listener(event); } catch { /* broken viewer */ }
+      for (const [viewerId, listener] of current.viewers) {
+        if (current.frameViewers.has(viewerId)) try { listener(event); } catch { /* broken viewer */ }
       }
     } finally {
       entry.polling = false;
     }
   };
 
-  const subscribeFrames: ComputerService["subscribeFrames"] = async (desktopId, viewerId, listener) => {
+  const subscribeFrames: ComputerService["subscribeFrames"] = async (desktopId, viewerId, listener, subscription) => {
     const id = await resolveDesktopId(desktopId);
     const remote = await remoteTargetFor(id);
     if (remote) {
       // Frames for a remote desktop come off the remote Host's own stream —
       // the same authenticated Host-to-Host connection carries them (BC6).
       const controller = new AbortController();
-      const path = `/api/computers/desktops/${encodeURIComponent(remote.remoteId)}/stream?viewer=${encodeURIComponent(viewerId)}`;
+      const path = `/api/computers/desktops/${encodeURIComponent(remote.remoteId)}/stream?viewer=${encodeURIComponent(viewerId)}${subscription?.frames === false ? "&frames=0" : ""}`;
       const response = await remoteFetch(remote.connection, "GET", path, undefined, controller.signal);
       if (!response.ok) {
         const payload = await response.json().catch(() => null) as { error?: string } | null;
@@ -1730,12 +1761,15 @@ export function createComputerService(options: ComputerServiceOptions): Computer
     }
     let entry = viewers.get(id);
     if (!entry) {
-      entry = { viewers: new Map(), timer: null, polling: false, failures: 0 };
+      entry = { viewers: new Map(), frameViewers: new Set(), timer: null, polling: false, failures: 0 };
       viewers.set(id, entry);
     }
     entry.viewers.set(viewerId, listener);
+    if (subscription?.frames !== false) entry.frameViewers.add(viewerId);
+    else entry.frameViewers.delete(viewerId);
     try { listener({ type: "control", control: controlState(id) }); } catch { /* */ }
-    if (!entry.timer) {
+    if (entry.timer && entry.frameViewers.size === 0) { clearInterval(entry.timer); entry.timer = null; }
+    if (!entry.timer && entry.frameViewers.size > 0) {
       entry.timer = setInterval(() => { void pollFrame(id); }, FRAME_INTERVAL_MS);
       void pollFrame(id);
     }
@@ -1745,6 +1779,7 @@ export function createComputerService(options: ComputerServiceOptions): Computer
       if (!current) return;
       if (current.viewers.get(viewerId) !== listener) return;
       current.viewers.delete(viewerId);
+      current.frameViewers.delete(viewerId);
       const laneControl = laneFor(id).control;
       if (laneControl.owner === "human" && laneControl.holderId === viewerId) {
         // The disconnecting viewer held control — mark it pending-recovery
@@ -1761,12 +1796,93 @@ export function createComputerService(options: ComputerServiceOptions): Computer
           void enqueue(id, "observe", () => driver.request({ tool: "release_input" })).catch(() => undefined);
         }
       }
-      if (current.viewers.size === 0) {
+      if (current.frameViewers.size === 0) {
         if (current.timer) clearInterval(current.timer);
         current.timer = null;
       }
       broadcastControl(id);
     };
+  };
+
+  const refreshManagedDesktop = async (state?: LinuxDesktopState): Promise<ComputerDesktop | null> => {
+    const current = state ?? await linuxDesktop.status();
+    if (current.state === "unprepared") return null;
+    await ensureLocal();
+    const id = "managed-linux";
+    const previous = await (await scoped()).getRecord(COMPUTER_CATALOG_WORKSPACE_ID, `computer.desktop:${id}`);
+    const payload = previous ? JSON.parse(previous.payloadJson) as Record<string, unknown> : {};
+    const probeFailed = current.state === "running" && previous?.state === "unavailable";
+    const record = await putRecord(`computer.desktop:${id}`, "computer.desktop",
+      current.state === "running" && !probeFailed ? "available" : current.state === "stopped" ? "stopped" : "unavailable", {
+        ...payload, id, machineId: LOCAL_MACHINE_ID, label: "Persistent Linux desktop", kind: "virtual-display", managed: "linux-xvnc",
+        statusDetail: probeFailed ? payload.statusDetail : current.detail ?? current.state,
+        ...(current.state === "running" ? { media: { kind: "vnc", width: current.width, height: current.height } } : {}),
+      });
+    return parseDesktop(record)!;
+  };
+  const prepareDesktop: ComputerService["prepareDesktop"] = async (params, automation = false) => {
+    if (params.connectionId) {
+      const connection = (await remoteConnections()).find((connection) => connection.id === params.connectionId);
+      if (!connection) throw new HarnessServiceError("not-found", "Unknown Host connection");
+      const result = await remoteJson<{ desktop: ComputerDesktop }>(connection, "POST", "/api/computers/desktops/prepare", {
+        automation,
+        ...(params.width !== undefined ? { width: params.width } : {}), ...(params.height !== undefined ? { height: params.height } : {}),
+      });
+      await syncRemote(true);
+      const mirrored = (await listRecords("computer.desktop")).map(parseDesktop).find((desktop) =>
+        desktop?.remote?.connectionId === params.connectionId && desktop?.remote?.desktopId === result.desktop.id);
+      if (!mirrored) throw new HarnessServiceError("unavailable", "Prepared desktop could not be rediscovered");
+      return mirrored;
+    }
+    const desktop = await refreshManagedDesktop(await linuxDesktop.change("prepare", params));
+    if (!desktop) throw new HarnessServiceError("unavailable", "Desktop preparation did not finish");
+    await replaceDesktopRuntime(desktop.id, async () => {}, automation);
+    return probe(desktop.id);
+  };
+  const replaceDesktopRuntime = async (id: string, change: () => Promise<void>, automation = false) => {
+    await desktopRecord(id);
+    const lane = laneFor(id);
+    if (automation && lane.control.owner === "human") throw new HarnessServiceError("forbidden", "A human currently controls this desktop");
+    if (lane.transitioning) throw new HarnessServiceError("forbidden", "Desktop control is already changing");
+    lane.transitioning = true; lane.generation += 1; lane.needsObservation = true;
+    const pending = lane.queue.filter((op) => op.kind !== "observe");
+    lane.queue = lane.queue.filter((op) => op.kind === "observe");
+    for (const op of pending) op.cancel();
+    observations.delete(id); broadcastControl(id);
+    try {
+      await cancel(id);
+      await change();
+      await driverPool.reset(id);
+    } finally { lane.transitioning = false; broadcastControl(id); }
+  };
+  const desktopLifecycle: ComputerService["desktopLifecycle"] = async (id, action, automation = false) => {
+    if (action !== "start" && action !== "stop") throw new HarnessServiceError("invalid-params", "Unknown desktop lifecycle action");
+    const remote = await remoteTargetFor(id);
+    if (remote) {
+      await remoteJson(remote.connection, "POST", `/api/computers/desktops/${encodeURIComponent(remote.remoteId)}/lifecycle`, { action, automation });
+      await syncRemote(true); return (await desktopRecord(id)).desktop;
+    }
+    const { desktop } = await desktopRecord(id);
+    if (desktop.managed !== "linux-xvnc") throw new HarnessServiceError("invalid-params", "This desktop is not a managed graphical session");
+    let updated: ComputerDesktop | null = null;
+    await replaceDesktopRuntime(id, async () => { updated = await refreshManagedDesktop(await linuxDesktop.change(action)); }, automation);
+    if (!updated) throw new HarnessServiceError("unavailable", "Desktop configuration is unavailable");
+    return action === "start" ? probe(id) : updated;
+  };
+  const mediaTarget: ComputerService["mediaTarget"] = async (id) => {
+    const remote = await remoteTargetFor(id);
+    if (remote) {
+      const url = new URL(`${remote.connection.apiUrl.replace(/\/$/u, "")}/api/computers/desktops/${encodeURIComponent(remote.remoteId)}/vnc`);
+      url.protocol = url.protocol === "https:" ? "wss:" : "ws:";
+      return { url: url.href, headers: { ...remote.connection.requestHeaders,
+        ...(remote.connection.clientToken ? { Authorization: `Bearer ${remote.connection.clientToken}` } : {}),
+        "X-Varin-Computer-Host": remote.desktop.remote!.hostId } };
+    }
+    const { desktop } = await desktopRecord(id);
+    if (desktop.managed !== "linux-xvnc") throw new HarnessServiceError("unavailable", "Desktop does not provide VNC media");
+    const current = await linuxDesktop.status();
+    if (current.state !== "running" || !current.socket) throw new HarnessServiceError("unavailable", "Desktop media is unavailable");
+    return { socketPath: current.socket };
   };
 
   // --- BC7: virtual machine lifecycle ----------------------------------------
@@ -1985,6 +2101,7 @@ export function createComputerService(options: ComputerServiceOptions): Computer
   });
 
   return {
+    prepareDesktop, desktopLifecycle, mediaTarget,
     list,
     ensureLocal,
     probe,
@@ -2017,11 +2134,8 @@ export function createComputerService(options: ComputerServiceOptions): Computer
         lane.generation += 1;
         for (const entry of lane.queue.splice(0)) entry.cancel();
       }
-      await Promise.allSettled([...drivers.values()].map(async (driver) => {
-        try { if (driver.alive()) await driver.request({ tool: "release_input" }); }
-        finally { await driver.dispose(); }
-      }));
-      drivers.clear();
+      await driverPool.dispose();
+      await linuxDesktop.dispose();
       lanes.clear();
       observations.clear();
     },

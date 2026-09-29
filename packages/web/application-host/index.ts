@@ -101,6 +101,7 @@ import { registerConnectionRoutes } from './lib/connections/connection-routes.js
 import { attachConnectionProxy } from './lib/connections/host-proxy.js';
 import { configuredVmProviders } from './lib/computer/vm-provider.js';
 import { registerComputerRoutes } from './lib/computer/computer-routes.js';
+import { attachDesktopMedia } from './lib/computer/desktop-media.js';
 import { createWorktreeReclaimGuard } from './lib/harness/worktree-reclaim-guard.js';
 import { resolveThreadWorktreeSettings } from './lib/harness/thread-worktree-settings.js';
 import { createKernelWorkspaceWorkingStateAccess, KernelStorageAdapter } from './lib/kernel/storage-adapter.js';
@@ -2730,6 +2731,10 @@ async function main(options: StartWebUiServerOptions = {}): Promise<WebUiServerC
     hostId,
     ...(uiAuthController ? { requireAuth: uiAuthController.requireAuth } : {}),
   });
+  const desktopMedia = attachDesktopMedia({ server, hostId, computers: computerService,
+    authenticate: async (request) => Boolean(await uiAuthController?.ensureSessionToken(request, { setHeader: () => undefined })),
+    originAllowed: isRequestOriginAllowed,
+  });
   registerConnectionRoutes(app, connections, uiAuthController?.requireAuth ?? ((_request, _response, next) => next()));
   const connectionProxy = attachConnectionProxy({
     app, server, settings: connections.settingsStore,
@@ -4158,6 +4163,7 @@ async function main(options: StartWebUiServerOptions = {}): Promise<WebUiServerC
       await threadRegistry.dispose();
       realtimeProxyRuntime.stop();
       connectionProxy.stop();
+      desktopMedia.stop();
       clearInterval(relayReconcileTimer);
       relayService.stop();
       dictationRuntime?.stop?.();

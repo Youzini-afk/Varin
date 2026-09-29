@@ -58,6 +58,17 @@ export interface ComputerDesktop {
    * Host's record.
    */
   usage?: { sessionId: string; at: string };
+  /** A Host-managed persistent Linux graphical session, independent of a VM. */
+  managed?: "linux-xvnc";
+  /** Live framebuffer transport; input still uses the same Host control lane. */
+  media?: { kind: "vnc"; width: number; height: number };
+}
+
+export interface ComputerDesktopPrepareParams {
+  /** Omit to prepare this Host. A saved connection prepares its own Host. */
+  connectionId?: string;
+  width?: number;
+  height?: number;
 }
 
 /** What the resident platform driver can actually do right now. */

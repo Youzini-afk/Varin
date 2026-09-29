@@ -5,10 +5,12 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@
 import { useI18n } from '@/lib/i18n';
 import { useEffectiveDirectory } from '@/hooks/useEffectiveDirectory';
 import { useUIStore } from '@/stores/useUIStore';
-import { listComputers, probeComputerDesktop, setDefaultComputerTarget, type ComputerCatalog } from '@/lib/computers';
+import { changeComputerDesktop, listComputers, probeComputerDesktop, setDefaultComputerTarget, type ComputerCatalog } from '@/lib/computers';
 import { ComputerDesktopView } from '@/components/sections/computers/ComputerDesktopView';
 import { ComputerVmSection } from '@/components/sections/computers/ComputerVmSection';
 import type { ComputerDesktop } from '@varin/protocol';
+import { ComputerDesktopSetup } from './ComputerDesktopSetup';
+import { getRuntimeKey, subscribeRuntimeEndpointChanged } from '@varin/application-client';
 
 /**
  * Computers settings (BC4): the machine/desktop catalog with real probed
@@ -16,6 +18,11 @@ import type { ComputerDesktop } from '@varin/protocol';
  * Host service — an unprobed or driverless desktop shows its honest state.
  */
 export function ComputerSettings() {
+  const runtimeKey = React.useSyncExternalStore((notify) => subscribeRuntimeEndpointChanged(() => notify()), getRuntimeKey, getRuntimeKey);
+  return <ComputerSettingsContent key={runtimeKey} />;
+}
+
+function ComputerSettingsContent() {
   const { t } = useI18n();
   const [catalog, setCatalog] = React.useState<ComputerCatalog | null>(null);
   const [error, setError] = React.useState<string | null>(null);
@@ -124,6 +131,11 @@ export function ComputerSettings() {
                 </p>
               </div>
               <div className="flex items-center gap-3 shrink-0">
+                {desktop.managed ? <Button variant="outline" size="sm" disabled={probing === desktop.id} onClick={() => {
+                  setProbing(desktop.id);
+                  void changeComputerDesktop(desktop.id, desktop.status === 'stopped' ? 'start' : 'stop').then(refresh)
+                    .catch((cause) => setError(cause instanceof Error ? cause.message : String(cause))).finally(() => setProbing(null));
+                }}>{t(desktop.status === 'stopped' ? 'settings.computers.vm.action.start' : 'settings.computers.vm.action.shutdown')}</Button> : null}
                 <span data-status={desktop.status}
                   className={`typography-meta ${desktop.status === 'available' ? 'text-foreground' : 'text-muted-foreground'}`}>
                   {t(desktop.status === 'available' ? 'settings.computers.status.available'
@@ -153,6 +165,7 @@ export function ComputerSettings() {
         })}
       </SettingsSection>
       <ComputerVmSection />
+      <ComputerDesktopSetup catalog={catalog} onPrepared={refresh} />
       {viewing ? (
         <ComputerDesktopView desktop={viewing} open={viewing !== null} onOpenChange={(open) => { if (!open) setViewing(null); }} />
       ) : null}

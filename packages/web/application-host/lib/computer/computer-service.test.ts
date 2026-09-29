@@ -130,6 +130,57 @@ const makeService = (driver?: FakeDriver) => {
 };
 
 describe("computer service (BC4)", () => {
+  it("automation cancel/release cannot lift buttons owned by a human viewer", async () => {
+    const driver = makeDriver(async () => okResponse());
+    const { service } = makeService(driver);
+    await service.ensureLocal();
+    const unsubscribe = await service.subscribeFrames("local-console", "human", () => {}, { frames: false });
+    await service.takeover({ desktopId: "local-console", holderId: "human" });
+    const control = await service.control("local-console");
+    await service.input({ desktopId: "local-console", holderId: "human", controlEpoch: control.automationEpoch, input: { kind: "down", x: 1, y: 2, button: "left" } });
+    const before = driver.calls.length;
+    expect(await service.cancel("local-console")).toEqual({ cancelled: 0, released: false });
+    await expect(service.release("local-console")).rejects.toMatchObject({ harnessCode: "forbidden" });
+    expect(driver.calls.slice(before)).toEqual([]);
+    expect((await service.control("local-console")).automationEpoch).toBe(control.automationEpoch);
+    expect(await service.input({ desktopId: "local-console", holderId: "human", controlEpoch: control.automationEpoch, input: { kind: "up", x: 1, y: 2, button: "left" } })).toMatchObject({ accepted: true });
+    unsubscribe(); await service.dispose();
+  });
+
+  it("keeps live frames flowing on a separate helper while native input is still running", async () => {
+    const kernel = fakeKernel();
+    let finishAction!: () => void;
+    let started!: () => void;
+    const actionStarted = new Promise<void>((resolve) => { started = resolve; });
+    const roles: string[] = [];
+    const service = createComputerService({ client: kernel.client as never, hostId: "host-1", platform: "windows", dataDir: newDataDir(),
+      createDriver: (spec) => {
+        const role = spec.env?.VARIN_DRIVER_ROLE ?? "";
+        roles.push(role);
+        return makeDriver(async (op) => {
+          if (op.tool === "type_text") {
+            expect(role).toBe("input");
+            started(); await new Promise<void>((resolve) => { finishAction = resolve; });
+          }
+          if (op.tool === "capture_frame") {
+            expect(role).toBe("capture");
+            return okResponse({ frame: { base64: "frame", bounds: { x: 0, y: 0, width: 800, height: 600 } } });
+          }
+          return okResponse();
+        });
+      },
+    });
+    const action = service.act({ desktopId: "local-console", action: { kind: "type", app: "notepad", text: "long input" } });
+    await actionStarted;
+    let sawFrame!: () => void;
+    const frame = new Promise<void>((resolve) => { sawFrame = resolve; });
+    const unsubscribe = await service.subscribeFrames("local-console", "viewer", (event) => { if (event.type === "frame") sawFrame(); });
+    try {
+      await frame;
+      expect(roles).toEqual(["input", "capture"]);
+    } finally { finishAction(); await action; unsubscribe(); await service.dispose(); }
+  });
+
   it("ensureLocal writes durable machine and desktop records", async () => {
     const { service } = makeService();
     await service.ensureLocal();
@@ -204,7 +255,10 @@ describe("computer service (BC4)", () => {
   });
 
   it("reports a lost action response as unknown and does not replay the input", async () => {
-    const driver = makeDriver(async () => { throw new Error("driver connection lost"); });
+    const driver = makeDriver(async (op) => {
+      if (op.tool === "type_text") throw new Error("driver connection lost");
+      return okResponse();
+    });
     const { service } = makeService(driver);
     await service.ensureLocal();
     const result = await service.act({ desktopId: "local-console", action: { kind: "type", app: "x", text: "hello" } });
@@ -614,6 +668,29 @@ describe("computer service (BC6 remote hosts)", () => {
     const mirrored = catalog.desktops.find((d) => d.id === "remote:r1:remote-h:d0");
     expect(mirrored?.remote).toEqual({ connectionId: "r1", desktopId: "d0", hostId: "remote-h" });
     expect(mirrored?.status).toBe("available");
+  });
+
+  it("rediscovers a just-prepared remote desktop despite the catalog refresh interval", async () => {
+    let prepared = false;
+    const service = createComputerService({
+      client: fakeKernel().client as never, hostId: "h", platform: "windows", dataDir: newDataDir(),
+      createDriver: () => makeDriver(async () => okResponse()), remoteHosts: async () => [remoteHost],
+      fetch: remoteFetch((url) => {
+        if (url.endsWith("/api/computers/desktops/prepare")) {
+          prepared = true;
+          return jsonResponse({ desktop: { id: "managed-linux" } });
+        }
+        if (url.endsWith("/api/computers?local=1")) return jsonResponse({ ...remoteCatalog,
+          desktops: prepared ? [...remoteCatalog.desktops, { id: "managed-linux", machineId: "local", label: "Persistent Linux desktop",
+            kind: "virtual-display", status: "available", managed: "linux-xvnc", media: { kind: "vnc", width: 1280, height: 800 } }] : remoteCatalog.desktops });
+        return jsonResponse({});
+      }),
+    });
+    await service.list();
+    const desktop = await service.prepareDesktop({ connectionId: "r1" });
+    expect(desktop.remote?.desktopId).toBe("managed-linux");
+    expect(desktop.media).toEqual({ kind: "vnc", width: 1280, height: 800 });
+    await service.dispose();
   });
 
   it("marks an unreachable remote Host's mirror unavailable with the real error", async () => {
