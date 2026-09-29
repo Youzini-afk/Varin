@@ -9,6 +9,7 @@ import type { ComputerService } from "./computer-service.js";
 export interface ComputerRoutesOptions {
   computers: ComputerService;
   requireAuth?: RequestHandler;
+  hostId?: string;
 }
 
 const noAuth: RequestHandler = (_request, _response, next) => next();
@@ -25,11 +26,20 @@ const sendError = (response: Response, error: unknown, fallback: string): void =
   response.status(500).json({ error: error instanceof Error ? error.message : fallback });
 };
 
-export function registerComputerRoutes(app: Express, { computers, requireAuth = noAuth }: ComputerRoutesOptions): void {
-  app.get("/api/computers", requireAuth, async (_request: Request, response: Response) => {
+export function registerComputerRoutes(app: Express, { computers, requireAuth = noAuth, hostId }: ComputerRoutesOptions): void {
+  if (hostId) app.use('/api/computers', requireAuth, (request, response, next) => {
+    response.setHeader('X-Varin-Computer-Host', hostId);
+    const expected = request.get('X-Varin-Computer-Host');
+    if (expected && expected !== hostId) {
+      response.status(409).json({ code: 'forbidden', error: 'This connection reaches a different computer Host' });
+      return;
+    }
+    next();
+  });
+  app.get("/api/computers", requireAuth, async (request: Request, response: Response) => {
     response.setHeader("Cache-Control", "no-store");
     try {
-      const catalog = await computers.list();
+      const catalog = await computers.list(request.query.local === "1" ? { localOnly: true } : undefined);
       response.json({
         ...catalog,
         defaultDesktopId: await computers.defaultDesktop(),
@@ -77,11 +87,14 @@ export function registerComputerRoutes(app: Express, { computers, requireAuth = 
   /** One structured observation of an app window on this desktop. */
   app.post("/api/computers/desktops/:desktopId/observe", requireAuth, async (request: Request, response: Response) => {
     response.setHeader("Cache-Control", "no-store");
+    const controller = new AbortController();
+    response.once("close", () => { if (!response.writableEnded) controller.abort(); });
     try {
       const body = request.body ?? {};
       const observation = await computers.observe({
         desktopId: String(request.params.desktopId ?? ""),
         app: typeof body.app === "string" ? body.app : "",
+        signal: controller.signal,
         ...(body.window !== undefined && (typeof body.window === "number" || typeof body.window === "string")
           ? { window: body.window } : {}),
         ...(typeof body.includeScreenshot === "boolean" ? { includeScreenshot: body.includeScreenshot } : {}),
@@ -98,10 +111,14 @@ export function registerComputerRoutes(app: Express, { computers, requireAuth = 
   /** One structured automated action against an app on this desktop. */
   app.post("/api/computers/desktops/:desktopId/act", requireAuth, async (request: Request, response: Response) => {
     response.setHeader("Cache-Control", "no-store");
+    const controller = new AbortController();
+    response.once("close", () => { if (!response.writableEnded) controller.abort(); });
     try {
       const result = await computers.act({
         desktopId: String(request.params.desktopId ?? ""),
         action: request.body?.action,
+        signal: controller.signal,
+        ...(typeof request.body?.automationEpoch === "string" ? { automationEpoch: request.body.automationEpoch } : {}),
       });
       response.json({ result });
     } catch (error) {
@@ -195,6 +212,7 @@ export function registerComputerRoutes(app: Express, { computers, requireAuth = 
         desktopId: String(request.params.desktopId ?? ""),
         ...(holderId ? { holderId } : {}),
         input: request.body?.input,
+        ...(typeof request.body?.controlEpoch === "string" ? { controlEpoch: request.body.controlEpoch } : {}),
       });
       response.json(result);
     } catch (error) {
@@ -221,19 +239,23 @@ export function registerComputerRoutes(app: Express, { computers, requireAuth = 
     response.setHeader("Connection", "keep-alive");
     response.flushHeaders();
     let unsubscribe: (() => void) | null = null;
+    let closed = false;
+    response.on("close", () => { closed = true; unsubscribe?.(); });
     try {
       unsubscribe = await computers.subscribeFrames(desktopId, viewerId, (event) => {
-        if (response.writableEnded) return;
+        if (closed || response.writableEnded) return;
+        // A slow viewer needs the next current frame, not an ever-growing
+        // backlog of obsolete screenshots. Control receipts are still sent.
+        if (event.type === "frame" && response.writableNeedDrain) return;
         response.write(`data: ${JSON.stringify(event)}\n\n`);
+        if (event.type === "error" && event.terminal) response.end();
       });
     } catch (error) {
       response.write(`data: ${JSON.stringify({ type: "error", error: error instanceof Error ? error.message : "subscribe failed" })}\n\n`);
       response.end();
       return;
     }
-    request.on("close", () => {
-      unsubscribe?.();
-    });
+    if (closed) unsubscribe();
   });
 
   // --- BC7: virtual machine lifecycle ---------------------------------------
@@ -251,8 +273,8 @@ export function registerComputerRoutes(app: Express, { computers, requireAuth = 
   });
 
   /**
-   * Create a VM on a configured provider. Idempotent by name — a retried call
-   * after a lost response adopts the existing domain instead of duplicating.
+   * Create/resume a VM on a configured provider using its durable creation
+   * identity. A matching external domain name is rejected, never adopted.
    */
   app.post("/api/computers/vms", requireAuth, async (request: Request, response: Response) => {
     response.setHeader("Cache-Control", "no-store");

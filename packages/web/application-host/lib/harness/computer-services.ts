@@ -64,6 +64,7 @@ export function createComputerActService(host: HarnessServiceHost): HarnessServi
       const result = await requireService(host).act({
         ...(desktopId ? { desktopId } : {}),
         action: params.action,
+        ...(params.automationEpoch !== undefined ? { automationEpoch: params.automationEpoch } : {}),
         signal: ctx.signal,
         sessionId: ctx.sessionId,
       });
@@ -90,6 +91,7 @@ export function registerComputerServices(
 ): void {
   if (!host.computerService) return;
   router.register("computer.list", createComputerListService(host));
+  router.register("computer.control", { handle: async (params) => ({ control: await requireService(host).control(desktopIdParam(params)) }) });
   router.register("computer.apps", createComputerAppsService(host));
   router.register("computer.observe", createComputerObserveService(host));
   router.register("computer.act", createComputerActService(host));

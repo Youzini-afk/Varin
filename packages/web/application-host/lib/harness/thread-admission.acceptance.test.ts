@@ -188,7 +188,8 @@ describe("root execution admission — service/registry acceptance", () => {
       expect(thread).toMatchObject({ kind: "discussion", lifecycle: "active" });
       expect(thread?.worktree ?? "none").toBe("none");
       // Write-capable and shell tools are clamped out of a consult Run.
-      expect(thread?.manifest.tools ?? []).toEqual(expect.arrayContaining(["read", "memory"]));
+      expect(thread?.manifest.tools ?? []).toContain("read");
+      expect(thread?.manifest.tools ?? []).not.toContain("memory");
       expect(thread?.manifest.tools ?? []).not.toContain("edit");
       expect(thread?.manifest.tools ?? []).not.toContain("bash");
       expect(prepare).not.toHaveBeenCalled();
@@ -217,6 +218,23 @@ describe("root execution admission — service/registry acceptance", () => {
         model: { providerId: "faux", modelId: "faux-model" },
       }, context())).rejects.toMatchObject({ harnessCode: "invalid-params" });
       expect(await registry.listWorkspaceThreads("workspace")).toEqual([]);
+    } finally {
+      await registry.dispose();
+      await rm(dataDir, { recursive: true, force: true });
+    }
+  });
+
+  it("deleting a Bot entry preserves admission for its independent work", async () => {
+    const dataDir = await mkdtemp(join(tmpdir(), "varin-bot-entry-lifecycle-"));
+    const registry = createThreadRegistry({ dataDir, hostId: "audit" });
+    try {
+      const root = await registry.createThread({ ...input("discussion"), purpose: "bot-root" });
+      const rootRun = await registry.startRun("workspace", root.id);
+      await registry.markRunRunning("workspace", root.id, rootRun.id, "old-bot-entry");
+      const work = await registry.createThread({ ...input(), parent: { kind: "thread", id: root.id } });
+      await registry.archiveThreadsForDeletedSessionAcrossWorkspaces("old-bot-entry");
+      expect((await registry.getThreadById("workspace", root.id))?.lifecycle).toBe("settled");
+      await expect(registry.startRun("workspace", work.id)).resolves.toMatchObject({ threadId: work.id });
     } finally {
       await registry.dispose();
       await rm(dataDir, { recursive: true, force: true });

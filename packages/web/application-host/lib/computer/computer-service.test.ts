@@ -439,6 +439,7 @@ describe("computer service (BC5 control + view)", () => {
     await service.ensureLocal();
     await expect(service.input({ desktopId, holderId: "v1", input: { kind: "click", x: 5, y: 6 } }))
       .rejects.toMatchObject({ harnessCode: "forbidden" });
+    const unsubscribe = await service.subscribeFrames(desktopId, "v1", () => undefined);
     await service.takeover({ desktopId, holderId: "v1" });
     const result = await service.input({ desktopId, holderId: "v1", input: { kind: "click", x: 5, y: 6 } });
     expect(result.accepted).toBe(true);
@@ -447,6 +448,63 @@ describe("computer service (BC5 control + view)", () => {
     // Another viewer may not write while v1 holds.
     await expect(service.input({ desktopId, holderId: "v2", input: { kind: "key", key: "enter" } }))
       .rejects.toMatchObject({ harnessCode: "forbidden" });
+    await expect(service.input({ desktopId, input: { kind: "key", key: "enter" } }))
+      .rejects.toMatchObject({ harnessCode: "forbidden" });
+    await expect(service.handback({ desktopId })).rejects.toMatchObject({ harnessCode: "forbidden" });
+    unsubscribe();
+    await service.dispose();
+  });
+
+  it("fences automation during release and rejects a pre-handoff script after handback", async () => {
+    let finishRelease: ((value: DriverResponse) => void) | undefined;
+    let holdRelease = false;
+    const driver = makeDriver(async (op) => {
+      if (op.tool === "release_input" && holdRelease) return new Promise<DriverResponse>((resolve) => { finishRelease = resolve; });
+      return op.tool === "get_app_state" ? okResponse({ snapshot: appSnapshot() }) : okResponse();
+    });
+    const { service } = makeService(driver);
+    await service.observe({ desktopId, app: "notepad" });
+    const oldEpoch = (await service.control(desktopId)).automationEpoch;
+    holdRelease = true;
+    const taking = service.takeover({ desktopId, holderId: "v1" });
+    await vi.waitFor(() => expect(finishRelease).toBeDefined());
+    await expect(service.act({ desktopId, action: { kind: "key", app: "notepad", key: "enter" } })).rejects.toMatchObject({ harnessCode: "forbidden" });
+    finishRelease!(okResponse());
+    await taking;
+    holdRelease = false;
+    await service.handback({ desktopId, holderId: "v1" });
+    await service.observe({ desktopId, app: "notepad" });
+    await expect(service.act({ desktopId, automationEpoch: oldEpoch, action: { kind: "key", app: "notepad", key: "enter" } })).rejects.toMatchObject({ harnessCode: "forbidden" });
+    expect(driver.calls.some((call) => call.tool === "press_key")).toBe(false);
+    await service.dispose();
+  });
+
+  it("retains human ownership across Host restart and refuses handback when release fails", async () => {
+    const kernel = fakeKernel();
+    const driver = makeDriver(async () => okResponse());
+    const options = { client: kernel.client as never, hostId: "h", platform: "windows" as const, dataDir: newDataDir(), createDriver: () => driver };
+    const first = createComputerService(options);
+    await first.observe({ desktopId, app: "notepad" }).catch(() => undefined);
+    await first.takeover({ desktopId, holderId: "v1" });
+    driver.handler = async () => ({ id: "x", ok: false, error: "release failed" });
+    await expect(first.handback({ desktopId, holderId: "v1" })).rejects.toThrow(/release/i);
+    await first.dispose();
+    const restarted = createComputerService(options);
+    expect(await restarted.control(desktopId)).toMatchObject({ owner: "human", holderId: "v1", reachable: false });
+    await expect(restarted.act({ desktopId, action: { kind: "key", app: "notepad", key: "enter" } })).rejects.toMatchObject({ harnessCode: "forbidden" });
+    await restarted.dispose();
+  });
+
+  it("an old subscription closing does not disconnect its replacement", async () => {
+    const { service } = makeService();
+    const old = await service.subscribeFrames(desktopId, "v1", () => undefined);
+    const current = await service.subscribeFrames(desktopId, "v1", () => undefined);
+    await service.takeover({ desktopId, holderId: "v1" });
+    old();
+    expect((await service.control(desktopId)).reachable).toBe(true);
+    current();
+    expect((await service.control(desktopId)).reachable).toBe(false);
+    await service.dispose();
   });
 
   it("handback returns control to the agent and invalidates stale observations", async () => {
@@ -533,7 +591,7 @@ describe("computer service (BC6 remote hosts)", () => {
 
   const jsonResponse = (body: unknown, status = 200) => new Response(JSON.stringify(body), {
     status,
-    headers: { "Content-Type": "application/json" },
+    headers: { "Content-Type": "application/json", "X-Varin-Computer-Host": "remote-h" },
   });
 
   it("mirrors a configured remote Host's desktops into the local catalog", async () => {
@@ -553,8 +611,8 @@ describe("computer service (BC6 remote hosts)", () => {
     const remoteMachine = catalog.machines.find((m) => m.id === "remote:r1");
     expect(remoteMachine?.provider).toBe("remote");
     expect(remoteMachine?.platform).toBe("linux");
-    const mirrored = catalog.desktops.find((d) => d.id === "remote:r1:d0");
-    expect(mirrored?.remote).toEqual({ connectionId: "r1", desktopId: "d0" });
+    const mirrored = catalog.desktops.find((d) => d.id === "remote:r1:remote-h:d0");
+    expect(mirrored?.remote).toEqual({ connectionId: "r1", desktopId: "d0", hostId: "remote-h" });
     expect(mirrored?.status).toBe("available");
   });
 
@@ -586,7 +644,7 @@ describe("computer service (BC6 remote hosts)", () => {
       fetch: remoteFetch(async (url, init) => {
         const body = init.body ? JSON.parse(String(init.body)) as Record<string, unknown> : {};
         seen.push({ url, body });
-        if (url.endsWith("/api/computers")) return jsonResponse(remoteCatalog);
+        if (url.endsWith("/api/computers?local=1")) return jsonResponse(remoteCatalog);
         if (url.endsWith("/observe")) {
           return jsonResponse({ observation: {
             id: "remote-obs-9", desktopId: "d0", machineId: "local",
@@ -600,10 +658,10 @@ describe("computer service (BC6 remote hosts)", () => {
       }),
     });
     await service.list(); // mirrors the catalog
-    const observation = await service.observe({ desktopId: "remote:r1:d0", app: "term" });
+    const observation = await service.observe({ desktopId: "remote:r1:remote-h:d0", app: "term" });
     expect(observation.id).toBe("remote-obs-9"); // remote freshness id preserved
     const result = await service.act({
-      desktopId: "remote:r1:d0",
+      desktopId: "remote:r1:remote-h:d0",
       action: { kind: "click", app: "term", observationId: observation.id, elementIndex: 0 },
     });
     expect(result.accepted).toBe(true);
@@ -622,41 +680,45 @@ describe("computer service (BC6 remote hosts)", () => {
       createDriver: () => makeDriver(async () => okResponse()),
       remoteHosts: async () => [remoteHost],
       fetch: remoteFetch((url) => {
-        if (url.endsWith("/api/computers")) return jsonResponse(remoteCatalog);
+        if (url.endsWith("/api/computers?local=1")) return jsonResponse(remoteCatalog);
         if (url.endsWith("/act")) throw new Error("socket hang up");
         return jsonResponse({});
       }),
     });
     await service.list();
-    const result = await service.act({ desktopId: "remote:r1:d0", action: { kind: "key", app: "term", key: "enter" } });
+    const result = await service.act({ desktopId: "remote:r1:remote-h:d0", action: { kind: "key", app: "term", key: "enter" } });
     expect(result).toMatchObject({ accepted: false, outcome: "unknown" });
     expect(result.detail).toContain("socket hang up");
+  });
+
+  it("a lost response body or changed Host identity never becomes an ordinary rejected action", async () => {
+    const replies = [new Response('{', { headers: { 'X-Varin-Computer-Host': 'remote-h' } }),
+      new Response(JSON.stringify({ result: { accepted: true } }), { headers: { 'X-Varin-Computer-Host': 'another-host' } })];
+    const service = createComputerService({
+      client: fakeKernel().client as never, hostId: 'h', platform: 'windows', dataDir: newDataDir(),
+      createDriver: () => makeDriver(async () => okResponse()), remoteHosts: async () => [remoteHost],
+      fetch: remoteFetch((url, init) => {
+        if (url.endsWith('/api/computers?local=1')) return jsonResponse(remoteCatalog);
+        expect(new Headers(init.headers).get('X-Varin-Computer-Host')).toBe('remote-h');
+        return replies.shift()!;
+      }),
+    });
+    await service.list();
+    for (let index = 0; index < 2; index++) expect(await service.act({ desktopId: 'remote:r1:remote-h:d0', action: { kind: 'key', app: 'term', key: 'enter' } })).toMatchObject({ outcome: 'unknown', accepted: false });
+    await service.dispose();
   });
 });
 
 // --- BC7: virtual machine lifecycle -----------------------------------------
 
 import type { VmExec } from "./vm-provider.js";
+import { libvirtFixture } from "./libvirt.test-helper.js";
 
 describe("computer service (BC7 virtual machines)", () => {
   const vmProviderConfig = {
     id: "hv1",
     kind: "libvirt" as const,
     uri: "qemu:///system",
-  };
-
-  const fakeVirsh = (
-    script: (args: string[]) => { code?: number; stdout?: string; stderr?: string },
-  ) => {
-    const calls: string[][] = [];
-    const exec: VmExec = async (_command, args, options) => {
-      void options;
-      const scriptArgs = args.slice(2); // strip `-c uri`
-      calls.push(scriptArgs);
-      const reply = script(scriptArgs);
-      return { code: reply.code ?? 0, stdout: reply.stdout ?? "", stderr: reply.stderr ?? "" };
-    };
-    return { exec, calls };
   };
 
   const makeVmService = (exec: VmExec) => {
@@ -674,19 +736,7 @@ describe("computer service (BC7 virtual machines)", () => {
   };
 
   it("create records provider identity, domain UUID, volumes, and the step journal", async () => {
-    let domuuidCalls = 0;
-    const { exec, calls } = fakeVirsh((args) => {
-      if (args[0] === "domuuid") {
-        domuuidCalls += 1;
-        return domuuidCalls === 1
-          ? { code: 1, stderr: "error: failed to get domain 'devbox'" }
-          : { stdout: "1111aaaa-2222-3333-4444-555566667777\n" };
-      }
-      if (args[0] === "vol-create-as") return { stdout: "Vol devbox.qcow2 created\n" };
-      if (args[0] === "define") return { stdout: "Domain devbox defined\n" };
-      if (args[0] === "domstate") return { stdout: "shut off\n" };
-      throw new Error(`unexpected virsh call: ${args.join(" ")}`);
-    });
+    const { exec, calls, domains } = libvirtFixture();
     const { service, kernel } = makeVmService(exec);
 
     const { machine, created } = await service.createVm({
@@ -702,8 +752,8 @@ describe("computer service (BC7 virtual machines)", () => {
       providerId: "hv1",
       kind: "libvirt",
       uri: "qemu:///system",
-      domainUuid: "1111aaaa-2222-3333-4444-555566667777",
-      volumePaths: ["devbox.qcow2"],
+      domainUuid: expect.any(String),
+      volumePaths: [`varin-${machine.vm!.domainUuid}.qcow2`],
     });
     expect(machine.vm!.steps.map((s) => `${s.step}:${s.status}`)).toEqual([
       "resolve:done", "volume:done", "define:done",
@@ -715,80 +765,50 @@ describe("computer service (BC7 virtual machines)", () => {
     // The record persists in the catalog — durable journal, not memory.
     const stored = await kernel.client.scoped()
       .getRecord("__varin_computers__", `computer.machine:${machine.id}`);
-    expect(JSON.parse(stored!.payloadJson).vm.domainUuid).toBe("1111aaaa-2222-3333-4444-555566667777");
-    expect(calls.some((args) => args[0] === "define")).toBe(true);
+    expect(JSON.parse(stored!.payloadJson).vm.domainUuid).toBe(machine.vm!.domainUuid);
+    expect(domains.get(machine.vm!.domainUuid)?.name).toBe("devbox");
+    expect(calls.some(({ args }) => args[0] === "define")).toBe(true);
   });
 
   it("a retried create adopts the existing domain — no duplicate volume/define", async () => {
-    const { exec, calls } = fakeVirsh((args) => {
-      if (args[0] === "domuuid") return { stdout: "1111aaaa-2222-3333-4444-555566667777\n" };
-      if (args[0] === "domblklist") return { stdout: " vda   default/devbox.qcow2\n" };
-      if (args[0] === "domstate") return { stdout: "running\n" };
-      throw new Error(`unexpected virsh call: ${args.join(" ")}`);
-    });
+    const { exec, calls } = libvirtFixture();
     const { service } = makeVmService(exec);
-
+    const first = await service.createVm({ providerId: "hv1", name: "devbox" });
     const { machine, created } = await service.createVm({ providerId: "hv1", name: "devbox" });
     expect(created).toBe(false);
-    expect(machine.vm!.domainUuid).toBe("1111aaaa-2222-3333-4444-555566667777");
-    expect(machine.status).toBe("active"); // real domstate: running
-    expect(calls.some((args) => args[0] === "vol-create-as")).toBe(false);
-    expect(calls.some((args) => args[0] === "define")).toBe(false);
+    expect(machine.vm!.domainUuid).toBe(first.machine.vm!.domainUuid);
+    expect(calls.filter(({ args }) => args[0] === "vol-create-as")).toHaveLength(1);
+    expect(calls.filter(({ args }) => args[0] === "define")).toHaveLength(1);
   });
 
   it("start/shutdown key on the recorded domain UUID and sync status", async () => {
-    let state = "shut off";
-    const { exec, calls } = fakeVirsh((args) => {
-      if (args[0] === "domuuid") return { stdout: "1111aaaa-2222-3333-4444-555566667777\n" };
-      if (args[0] === "domblklist") return { stdout: " vda   default/devbox.qcow2\n" };
-      if (args[0] === "domstate") return { stdout: `${state}\n` };
-      if (args[0] === "start") { state = "running"; return { stdout: "started\n" }; }
-      if (args[0] === "shutdown") { state = "shut off"; return { stdout: "shutting down\n" }; }
-      throw new Error(`unexpected virsh call: ${args.join(" ")}`);
-    });
+    const { exec, calls } = libvirtFixture();
     const { service } = makeVmService(exec);
-
-    // Seed the machine record via an adoption create.
-    await service.createVm({ providerId: "hv1", name: "devbox" });
-
-    const started = await service.vmAction({ machineId: "vm:hv1:devbox", action: "start" });
+    const { machine } = await service.createVm({ providerId: "hv1", name: "devbox" });
+    const started = await service.vmAction({ machineId: machine.id, action: "start" });
     expect(started.state).toBe("running");
-    expect(calls.some((args) => args[0] === "start" && args[1] === "1111aaaa-2222-3333-4444-555566667777")).toBe(true);
-
-    const stopped = await service.vmAction({ machineId: "vm:hv1:devbox", action: "shutdown" });
+    expect(calls.some(({ args }) => args[0] === "start" && args[1] === machine.vm!.domainUuid)).toBe(true);
+    const stopped = await service.vmAction({ machineId: machine.id, action: "shutdown" });
     expect(stopped.state).toBe("shutoff");
-    expect(calls.some((args) => args[0] === "shutdown" && args[1] === "1111aaaa-2222-3333-4444-555566667777")).toBe(true);
+    expect(calls.some(({ args }) => args[0] === "shutdown" && args[1] === machine.vm!.domainUuid)).toBe(true);
   });
 
   it("delete archives the record and only removes disks when asked", async () => {
-    const deleted: string[] = [];
-    const { exec } = fakeVirsh((args) => {
-      if (args[0] === "domuuid") return { stdout: "1111aaaa-2222-3333-4444-555566667777\n" };
-      if (args[0] === "domblklist") return { stdout: " vda   default/devbox.qcow2\n" };
-      if (args[0] === "domstate") return { stdout: "shut off\n" };
-      if (args[0] === "undefine") return { stdout: "undefined\n" };
-      if (args[0] === "vol-delete") { deleted.push(args[args.length - 1]!); return { stdout: "deleted\n" }; }
-      throw new Error(`unexpected virsh call: ${args.join(" ")}`);
-    });
+    const { exec, volumes } = libvirtFixture();
     const { service } = makeVmService(exec);
     const { machine } = await service.createVm({ providerId: "hv1", name: "devbox" });
 
     // Default delete: persistent disk survives.
     await service.deleteVm(machine.id, false);
-    expect(deleted).toEqual([]);
+    expect(volumes.has(machine.vm!.volumePaths[0]!)).toBe(true);
 
     const vms = await service.listVms();
     expect(vms).toEqual([]); // archived machines leave the VM list
   });
 
   it("a failed create persists the journal on an unavailable machine record", async () => {
-    const { exec } = fakeVirsh((args) => {
-      if (args[0] === "domuuid") return { code: 1, stderr: "no domain" };
-      if (args[0] === "vol-create-as") return { stdout: "created\n" };
-      if (args[0] === "define") return { code: 1, stderr: "invalid domain XML" };
-      if (args[0] === "vol-delete") return { stdout: "deleted\n" };
-      throw new Error(`unexpected virsh call: ${args.join(" ")}`);
-    });
+    const { exec, faults, volumes } = libvirtFixture();
+    faults.set("define", "before");
     const { service } = makeVmService(exec);
     await expect(service.createVm({ providerId: "hv1", name: "broken" })).rejects.toThrow(/define/);
     const catalog = await service.list();
@@ -796,7 +816,11 @@ describe("computer service (BC7 virtual machines)", () => {
     expect(machine).toBeDefined();
     expect(machine!.status).toBe("unavailable");
     expect(machine!.vm!.steps.map((s) => `${s.step}:${s.status}`)).toContain("define:failed");
-    expect(machine!.vm!.steps.map((s) => `${s.step}:${s.status}`)).toContain("cleanup:done");
+    expect(machine!.vm!.volumePaths).toHaveLength(1);
+    expect(volumes.has(machine!.vm!.volumePaths[0]!)).toBe(true);
+    faults.delete("define");
+    const retried = await service.createVm({ providerId: "hv1", name: "broken" });
+    expect(retried.machine.vm!.domainUuid).toBe(machine!.vm!.domainUuid);
   });
 });
 

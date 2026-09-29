@@ -33,7 +33,7 @@ const setup = async () => {
     client: { issueGrant: async () => ({}), scoped: () => catalog } as unknown as BotServiceOptions["client"],
     dataDir, hostId: "test", registry: { listWorkspaceThreadSnapshots: async () => [], listRuns: async () => [] }, createSession, openSession, applyModel, applyInstructions,
   });
-  return { service, createSession, openSession, applyModel, applyInstructions, failWrite: () => { failWrite = true; } };
+  return { service, records, createSession, openSession, applyModel, applyInstructions, failWrite: () => { failWrite = true; } };
 };
 
 it("concurrent entry opens share one durably bound session", async () => {
@@ -43,6 +43,18 @@ it("concurrent entry opens share one durably bound session", async () => {
   expect(createSession).toHaveBeenCalledTimes(1);
   expect(entries.map((entry) => entry.sessionId)).toEqual(["session-1", "session-1"]);
   expect((await service.botForSession("session-1"))?.id).toBe(bot.id);
+});
+
+it('does not replace malformed durable Bot identity with an empty profile', async () => {
+  const { service, records, createSession } = await setup();
+  const bot = await service.create();
+  const row = records.get(`bot.profile:${bot.id}`)!;
+  row.payloadJson = '{broken';
+  await expect(service.list()).rejects.toThrow(/malformed/);
+  await expect(service.ensureEntry(bot.id)).rejects.toThrow(/malformed/);
+  await expect(service.update(bot.id, { name: 'replacement' })).rejects.toThrow(/malformed/);
+  expect(row.payloadJson).toBe('{broken');
+  expect(createSession).not.toHaveBeenCalled();
 });
 
 it("does not replace an entry on transport failure or return an unbound entry on storage failure", async () => {

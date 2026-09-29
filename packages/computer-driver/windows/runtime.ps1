@@ -1556,7 +1556,8 @@ function Invoke-ComputerOperation($operation) {
         return [pscustomobject]@{ ok = $true; frame = $frame }
     }
     if ($tool -eq "inject_input") {
-        Invoke-HumanInput $operation
+        try { Invoke-HumanInput $operation }
+        catch { Send-ReleaseInput; throw }
         return [pscustomobject]@{ ok = $true }
     }
     if ($tool -eq "get_app_state") {

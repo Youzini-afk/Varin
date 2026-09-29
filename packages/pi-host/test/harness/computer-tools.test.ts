@@ -15,7 +15,7 @@ function scriptedBridge(handlers: Record<string, (params: never) => unknown>) {
       const request = data as HarnessRequestData;
       requests.push(request);
       queueMicrotask(() => {
-        const handler = handlers[request.method];
+        const handler = handlers[request.method] ?? (request.method === "computer.control" ? () => ({ control: { desktopId: "local-console", automationEpoch: "epoch-1", owner: "agent", reachable: true, since: "now" } }) : undefined);
         if (!handler) {
           bridge.respond(SESSION, request.requestId, {
             ok: false,
@@ -96,7 +96,8 @@ describe("computer tool", () => {
       script: "await computer.act({ kind: 'click', app: 'notepad', elementIndex: 0, observationId: obs.id }); obs.id",
     });
     assert.match((second.content[0] as { text: string }).text, /obs-9/);
-    assert.equal(requests.map((r) => r.method).join(","), "computer.observe,computer.act");
+    assert.equal(requests.filter((r) => r.method !== "computer.control").map((r) => r.method).join(","), "computer.observe,computer.act");
+    assert.equal((requests.find((r) => r.method === "computer.act")!.params as { automationEpoch: string }).automationEpoch, "epoch-1");
   });
 
   it("reset clears REPL bindings", async () => {
@@ -116,7 +117,7 @@ describe("computer tool", () => {
       script: "await sleep(300); await computer.act({kind:'key',app:'notepad',key:'enter'})" });
     assert.equal(isError(result), true);
     await new Promise((resolve) => setTimeout(resolve, 400));
-    assert.equal(requests.length, 0);
+    assert.equal(requests.filter((r) => r.method !== "computer.control").length, 0);
     const loop = await execute(tool, { action: "run", timeoutMs: 150, script: "await Promise.resolve(); while (true) {}" });
     assert.equal(isError(loop), true);
     const recovered = await execute(tool, { action: "run", script: "const {value} = await Promise.resolve({value: 8}); value" });
@@ -130,6 +131,25 @@ describe("computer tool", () => {
     const result = await execute(tool, { action: "observe", app: "notepad" });
     assert.equal(isError(result), true);
     assert.match((result.content[0] as { text: string }).text, /unavailable/);
+  });
+
+  it("scripts emit real image blocks and stop on an uncertain action receipt", { timeout: 5_000 }, async () => {
+    const { bridge, requests } = scriptedBridge({
+      "computer.observe": () => ({ observation: { ...observation("image-1").observation, screenshot: { mime: "image/png", base64: "AA==" } } }),
+      "computer.act": () => ({ result: { accepted: false, outcome: "unknown", detail: "connection lost" } }),
+    });
+    const tool = createComputerTool(bridge, SESSION);
+    const imageResult = await execute(tool, { action: "run", script: "await computer.emitImage(await computer.observe('notepad')); 'captured'" });
+    assert.ok(imageResult.content.some((part) => part.type === "image" && part.data === "AA=="));
+    const stopped = await execute(tool, { action: "run", script: "await computer.act({kind:'key',app:'notepad',key:'enter'}); await computer.act({kind:'key',app:'notepad',key:'enter'});" });
+    assert.equal(isError(stopped), true);
+    assert.equal(requests.filter((request) => request.method === "computer.act").length, 1);
+    const syncError = await execute(tool, { action: "run", script: "throw new Error('sync failure')" });
+    assert.equal(isError(syncError), true);
+    assert.match((syncError.content[0] as { text: string }).text, /sync failure/);
+    const continued = await execute(tool, { action: "run", script: "21 * 2" });
+    assert.match((continued.content[0] as { text: string }).text, /42/);
+    await execute(tool, { action: "reset" });
   });
 });
 

@@ -34,7 +34,7 @@ authoritative record of delivery, and each phase names the design document that 
 | C | Background compaction Agent and semantic continuation | Implemented/wired (D-314): dedicated `compaction` worker process, scoped read-only history/output/record queries, S0/A/B frozen material with pagination, capacity waiting on the in-flight task and session-owned native commit |
 | L | Web and scholarly search, reading and material reuse | Implemented/wired (D-315): L0–L6 all wired; evidence and boundaries in harness status |
 | O | Office and daily work continuity | Design accepted (D-327); O0–O4 are planned and not implemented. The design starts with a materials-to-editable-deliverable loop and reuses existing authorities. |
-| BC | Bot identity, active/background memory, Computer Use, and persistent computers | Planned, not started. [BC0–BC9](plan/bot-computer-use-plan.md) extends shared production owners; office work consumes this foundation. No separate prototype runtime. |
+| BC | Bot identity, active/background memory, Computer Use, and persistent computers | Partially implemented; BC0–BC9 have production paths, but the complete contracts are not accepted. [Deep review](plan/bot-computer-use-review.md) records repairs and the missing shared memory coverage, desktop/guest preparation, work integration and platform distribution. |
 | HR | Task/resource Harness: workspace decoupling, resource identity, continuous retrieval | Implemented (D-337, HR0–HR5 wired): scope-owned threads/knowledge, session-cwd path anchoring, per-request multi-root scopes, resource/version-driven indexes, mutable work-context removed; per-scenario evidence in harness status |
 
 Stage R completed the [Rust kernel design](design/rust-kernel-design.md) and R0–R6 in the

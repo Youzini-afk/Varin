@@ -59,7 +59,7 @@ for (;;) {
             var operation = JSON.parse(line);
             requestId = operation.id;
             ACTIVE_REQUEST_ID = requestId;
-            var response;
+            var response = null;
             try {
                 response = performOperation(operation);
             } catch (e) {
@@ -69,7 +69,9 @@ for (;;) {
                     throw e;
                 }
             } finally {
-                try { releaseInput(); }
+                try {
+                    if (!response || !response.ok || ["inject_input", "capture_frame", "get_app_state", "list_apps", "capabilities", "ping"].indexOf(operation.tool) < 0) releaseInput();
+                }
                 catch (releaseError) {
                     response = { ok: false, error: "Input release failed after the operation; its effect is unknown: " + releaseError };
                 }
@@ -81,3 +83,4 @@ for (;;) {
         }
     }
 }
+try { releaseInput(); } catch (e) { /* EOF cleanup */ }

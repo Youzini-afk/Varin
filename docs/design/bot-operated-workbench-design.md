@@ -1,6 +1,6 @@
 # Varin Bot 操作工作台：长期记忆与人机共同工作环境
 
-Status: discussion draft / design-only；记录产品方向与待深化问题，尚未实施
+Status: accepted design direction；BC0–BC9 部分实现，实际交付及未完成合同见[当前验收](../plan/bot-computer-use-review.md)。本文保留设计依据，不以设计条目代表已交付。
 
 Last updated: 2026-09-28
 
@@ -9,7 +9,7 @@ Last updated: 2026-09-28
 记忆由后台自动处理与 Bot 主动使用共同维持，复用 TDB 底座，并引入快速决策模型参与局部语义判断。
 文中的对象划分与运行方式是设计方向，不代表已经确定接口、物理存储结构或实施计划。
 图形操作、持久电脑环境、实时观看与人工接管的共享设计见 [Computer Use](computer-use-design.md)。
-实施顺序、源码基线与改动归属见 [BC0–BC9 实施计划](../plan/bot-computer-use-plan.md)，当前尚未实施。
+实施顺序、源码基线与改动归属见 [BC0–BC9 实施计划](../plan/bot-computer-use-plan.md)。
 
 现有系统的交付事实以 [architecture.md](../architecture.md)、[status.md](../status.md) 和代码为准。
 本文不修改现有权限、知识写入或工作台契约；需要改变的部分应在后续设计中明确替代关系。

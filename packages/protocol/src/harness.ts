@@ -53,6 +53,8 @@ import type {
 } from "./harness-web.js";
 import type {
   ComputerActParams,
+  ComputerControlParams,
+  ComputerControlResult,
   ComputerActResult,
   ComputerAppsParams,
   ComputerAppsResult,
@@ -696,11 +698,10 @@ export interface MemoryRememberParams {
   trigger?: string;
   nature?: MemoryNature;
   /**
-   * Defaults to the calling session's owning memory scope. `bot` is not a
-   * worker-selectable scope — Bot memory is reached through the owning-scope
-   * default on Bot-owned sessions.
+   * Defaults to the calling session's owning memory scope. Explicit `bot`
+   * resolves only the caller's own Bot; it never selects another Bot identity.
    */
-  scope?: "workspace" | "user" | "session";
+  scope?: MemoryScope;
 }
 
 export interface MemoryRememberResult {
@@ -1566,6 +1567,7 @@ export interface HarnessServiceMap {
   "memory.get": { params: MemoryGetParams; result: MemoryGetResult };
   "memory.search": { params: MemorySearchParams; result: MemorySearchResult };
   "computer.list": { params: ComputerListParams; result: ComputerListResult };
+  "computer.control": { params: ComputerControlParams; result: ComputerControlResult };
   "computer.apps": { params: ComputerAppsParams; result: ComputerAppsResult };
   "computer.observe": { params: ComputerObserveParams; result: ComputerObserveResult };
   "computer.act": { params: ComputerActParams; result: ComputerActResult };
@@ -1743,6 +1745,7 @@ export const HARNESS_METHOD_CAPABILITY = {
   "memory.get": "context.session",
   "memory.search": "context.session",
   "computer.list": "read.computer",
+  "computer.control": "read.computer",
   "computer.apps": "read.computer",
   "computer.observe": "read.computer",
   "computer.act": "control.computer",
@@ -1891,6 +1894,7 @@ const HARNESS_METHODS: ReadonlySet<string> = new Set<string>([
   "memory.get",
   "memory.search",
   "computer.list",
+  "computer.control",
   "computer.apps",
   "computer.observe",
   "computer.act",

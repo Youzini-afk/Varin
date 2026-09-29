@@ -4019,6 +4019,8 @@ export const settingsDict = {
   'settings.computers.view.panelNoDirectory': 'No active workspace — open a project first',
   'settings.computers.coordinator': 'Coordinator',
   'settings.computers.view.waiting': "Waiting for frames…",
+  'settings.computers.view.textInput': 'Text to type on the remote desktop',
+  'settings.computers.view.sendText': 'Send text',
   'settings.computers.view.takeover': "Take control",
   'settings.computers.view.handback': "Return control",
   'settings.computers.view.reclaim': "Take over",

@@ -3596,6 +3596,8 @@ export const settingsDict = {
   'settings.computers.view.panelNoDirectory': 'アクティブなワークスペースがありません — 先にプロジェクトを開いてください',
   'settings.computers.coordinator': 'コーディネーター',
   'settings.computers.view.waiting': "フレームを待機中…",
+  'settings.computers.view.textInput': 'デスクトップに入力するテキスト',
+  'settings.computers.view.sendText': 'テキストを送信',
   'settings.computers.view.takeover': "制御を取得",
   'settings.computers.view.handback': "制御を返す",
   'settings.computers.view.reclaim': "制御を取得",

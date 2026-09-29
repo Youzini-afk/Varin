@@ -143,12 +143,11 @@ try {
   copyAssets(sourceDir, buildDir);
 
   // ── Step 2b: Stage Computer Use driver assets ─────────────────────────
-  // Compiled code lives at <gen>/lib/computer/driver-host.js; its driver-dir
-  // resolution walks up four levels to <webRoot>/computer-driver. Stage the
-  // real driver scripts there so dev generations, production server/, and
-  // packaged installs all resolve the same layout — not the source checkout.
+  // Keep drivers inside the compiled generation: validation/build failure must
+  // leave the running Host's assets intact, and publication swaps code+drivers
+  // together. Private dev generations likewise own their immutable scripts.
   const driverSource = path.join(repoRoot, 'packages', 'computer-driver');
-  const driverDest = path.join(webRoot, 'computer-driver');
+  const driverDest = path.join(buildDir, 'computer-driver');
   const copyDriverAssets = (srcDir, destDir) => {
     for (const entry of fs.readdirSync(srcDir, { withFileTypes: true })) {
       if (entry.name === '__pycache__' || entry.name === 'node_modules') continue;
@@ -165,7 +164,6 @@ try {
     }
   };
   if (fs.existsSync(driverSource)) {
-    fs.rmSync(driverDest, { recursive: true, force: true });
     fs.mkdirSync(driverDest, { recursive: true });
     copyDriverAssets(driverSource, driverDest);
     log('Staged computer-driver assets.');

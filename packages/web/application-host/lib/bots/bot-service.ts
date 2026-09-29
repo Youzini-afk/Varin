@@ -147,7 +147,10 @@ export function createBotService(options: BotServiceOptions): BotService {
   const recordFor = async (botId: string): Promise<KernelRecordResult | null> => {
     const client = await scoped();
     const record = await client.getRecord(BOT_CATALOG_WORKSPACE_ID, `bot.profile:${botId}`);
-    return record && record.recordType === "bot.profile" ? record : null;
+    if (record && (record.recordType !== "bot.profile" || !parseProfile(record))) {
+      throw new HarnessServiceError("failed", `Bot profile is malformed: ${botId}`);
+    }
+    return record;
   };
 
   const write = async (
@@ -212,8 +215,11 @@ export function createBotService(options: BotServiceOptions): BotService {
       cursor = page.nextCursor === null ? undefined : page.nextCursor;
     } while (cursor !== undefined);
     return records
-      .map(toSummary)
-      .filter((bot): bot is BotSummary => bot !== null)
+      .map((record) => {
+        const bot = toSummary(record);
+        if (!bot) throw new HarnessServiceError("failed", `Bot profile is malformed: ${record.recordId}`);
+        return bot;
+      })
       .sort((a, b) => a.createdAt.localeCompare(b.createdAt));
   };
 

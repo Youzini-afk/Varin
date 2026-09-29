@@ -1,11 +1,11 @@
 /**
  * libvirt provider for BC7 — drives `virsh` against a configured connection
  * URI (`qemu:///system`, `qemu+ssh://user@host/system`, …). All domain
- * identity is keyed on the real domain UUID; a create is idempotent — an
- * existing domain of the same name is adopted, never duplicated, and a lost
- * response is resolved by querying the hypervisor rather than re-creating.
+ * identity is keyed on the Host's durable domain UUID. A lost response is
+ * reconciled with that identity; names never authorize adoption of user assets.
  */
 import { HarnessServiceError } from "../harness/service-error.js";
+import { randomUUID } from "node:crypto";
 import type {
   ComputerVmProviderConfig,
   ComputerVmState,
@@ -31,9 +31,9 @@ const STATE_MAP: Record<string, ComputerVmState> = {
 };
 
 const xmlEscape = (value: string): string =>
-  value.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/"/g, "&quot;");
+  value.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/"/g, "&quot;").replace(/'/g, "&apos;");
 
-const namePattern = /^[A-Za-z0-9][A-Za-z0-9._-]{0,63}$/;
+const namePattern = /^[A-Za-z0-9][A-Za-z0-9._-]*$/;
 
 export function createLibvirtProvider(
   config: ComputerVmProviderConfig,
@@ -65,10 +65,15 @@ export function createLibvirtProvider(
   };
 
   /** Resolve a domain name to its UUID, or null when it does not exist. */
-  const domainUuidFor = async (name: string): Promise<string | null> => {
-    const out = await virsh(["domuuid", name], false);
-    const uuid = out.trim();
-    return /^[0-9a-fA-F-]{32,36}$/.test(uuid) ? uuid : null;
+  const domainUuidFor = async (name: string): Promise<string | null> =>
+    (await listDomains()).find((domain) => domain.name === name)?.domainUuid ?? null;
+
+  const volumeNames = async (): Promise<Set<string>> => {
+    const out = await virsh(["vol-list", "--pool", pool]);
+    const rows = out.split(/\r?\n/);
+    const separator = rows.findIndex((line) => /^\s*-+\s*$/.test(line));
+    if (separator < 0) throw new HarnessServiceError("unavailable", "virsh returned an unreadable volume inventory");
+    return new Set(rows.slice(separator + 1).flatMap((line) => line.trim() ? [line.trim().split(/\s+/)[0]!] : []));
   };
 
   const domainState = async (domainUuid: string): Promise<ComputerVmState> => {
@@ -92,9 +97,10 @@ export function createLibvirtProvider(
     return [
       `<domain type='kvm'>`,
       `  <name>${name}</name>`,
+      `  <uuid>${spec.domainUuid}</uuid>`,
       `  <memory unit='MiB'>${spec.memoryMiB}</memory>`,
       `  <vcpu>${spec.vcpus}</vcpu>`,
-      `  <os><type arch='x86_64' machine='pc-q35-8.2'>hvm</type></os>`,
+      `  <os><type>hvm</type></os>`,
       `  <devices>`,
       `    <disk type='volume' device='disk'>`,
       `      <driver name='qemu' type='qcow2'/>`,
@@ -141,22 +147,27 @@ export function createLibvirtProvider(
       }
       const steps: VmProvisionJournalEntry[] = [];
       const step = (entry: VmProvisionJournalEntry) => steps.push(entry);
-
-      // Idempotency: resolve the name first — a lost response must not
-      // duplicate a domain.
-      const existing = await domainUuidFor(spec.name);
+      if (![spec.memoryMiB, spec.vcpus, spec.diskGiB].every((value) => Number.isSafeInteger(value) && value > 0)) {
+        throw new HarnessServiceError("invalid-params", "VM memory, vCPUs and disk size must be positive integers");
+      }
+      const domainUuid = spec.domainUuid ?? randomUUID();
+      const volumeName = `varin-${domainUuid}.qcow2`;
+      let volumePaths = [...(spec.volumePaths ?? [])];
+      const checkpoint = async () => spec.checkpoint?.({ ok: false, domainUuid, volumePaths: [...volumePaths], steps: [...steps] });
+      let existing: string | null;
+      try { existing = await domainUuidFor(spec.name); }
+      catch (error) { return { ok: false, domainUuid, volumePaths, steps, error: String(error) }; }
       if (existing) {
+        if (existing !== domainUuid) throw new HarnessServiceError("invalid-params", "A different domain already has this name; it is not owned by this creation request");
         step({ step: "resolve", status: "done", detail: `existing domain ${existing}` });
-        const volOut = await virsh(["domblklist", existing], false);
-        const volumePaths = [...volOut.matchAll(/\S+\.qcow2/g)].map((m) => m[0]);
         return { ok: true, domainUuid: existing, volumePaths, steps, adopted: true };
       }
       step({ step: "resolve", status: "done", detail: "no existing domain" });
-
-      const volumeName = `${spec.name}.qcow2`;
-      const volumePaths = [volumeName];
       try {
-        if (spec.baseImage) {
+        const existingVolumes = await volumeNames();
+        if (existingVolumes.has(volumeName)) {
+          if (!volumePaths.includes(volumeName)) throw new Error("The creation volume exists without a confirmed allocation receipt; it was retained for inspection");
+        } else if (spec.baseImage) {
           // Clone the prepared base image so user data never lands on it.
           await virsh(["vol-clone", spec.baseImage, volumeName, "--pool", pool]);
           step({ step: "volume", status: "done", detail: `${pool}/${volumeName} cloned from ${spec.baseImage}` });
@@ -165,34 +176,26 @@ export function createLibvirtProvider(
             "vol-create-as", pool, volumeName, `${spec.diskGiB}G`,
             "--format", "qcow2",
           ]);
-          step({ step: "volume", status: "done", detail: `${pool}/${volumeName}` });
         }
+        volumePaths = [volumeName];
+        step({ step: "volume", status: "done", detail: `${pool}/${volumeName}` });
+        await checkpoint();
       } catch (error) {
         step({
           step: "volume",
           status: "failed",
           detail: error instanceof Error ? error.message : String(error),
         });
-        // A failed allocation may still leave a partial volume behind —
-        // attempt removal of OUR named volume and record the real result.
-        try {
-          await virsh(["vol-delete", "--pool", pool, volumeName]);
-          step({ step: "cleanup", status: "done", detail: `${pool}/${volumeName}` });
-        } catch (cleanupError) {
-          step({
-            step: "cleanup",
-            status: "failed",
-            detail: cleanupError instanceof Error ? cleanupError.message : String(cleanupError),
-          });
-        }
-        return { ok: false, volumePaths: [], steps, error: `VM create failed at volume: ${steps.find((entry) => entry.step === "volume" && entry.status === "failed")?.detail}` };
+        // A failed command/response is not proof of allocation ownership. Never
+        // delete a possibly pre-existing volume to clean up an uncertain call.
+        return { ok: false, domainUuid, volumePaths, steps, error: `VM create failed at volume: ${steps.find((entry) => entry.step === "volume" && entry.status === "failed")?.detail}` };
       }
 
       // Domain XML rides stdin via virsh's `/dev/stdin` convention — no
       // host-side temp file is needed.
       let defined = false;
       try {
-        await virsh(["define", "/dev/stdin"], true, domainXml(spec, volumeName));
+        await virsh(["define", "/dev/stdin"], true, domainXml({ ...spec, domainUuid }, volumeName));
         defined = true;
       } catch (error) {
         step({
@@ -202,21 +205,16 @@ export function createLibvirtProvider(
         });
       }
       if (!defined) {
-        // Define never ran — the volume we allocated is safe to remove.
+        // A lost define response may have created the domain. Reconcile its
+        // fixed UUID; preserve the allocation on failed/unknown observation.
         try {
-          await virsh(["vol-delete", "--pool", pool, volumeName]);
-          step({ step: "cleanup", status: "done", detail: `${pool}/${volumeName}` });
-        } catch (cleanupError) {
-          step({
-            step: "cleanup",
-            status: "failed",
-            detail: cleanupError instanceof Error ? cleanupError.message : String(cleanupError),
-          });
-        }
-        return { ok: false, volumePaths: [], steps, error: `VM create failed at define: ${steps.find((entry) => entry.status === "failed")?.detail}` };
+          defined = (await domainUuidFor(spec.name)) === domainUuid;
+        } catch { /* retain unknown resources */ }
+        if (!defined) return { ok: false, domainUuid, volumePaths, steps, error: `VM create failed at define; allocated disk retained: ${steps.find((entry) => entry.status === "failed")?.detail}` };
       }
-      const uuid = await domainUuidFor(spec.name);
-      if (!uuid) {
+      let uuid: string | null = null;
+      try { uuid = await domainUuidFor(spec.name); } catch { /* preserve journal */ }
+      if (uuid !== domainUuid) {
         // The domain may be defined — its disk is NOT garbage. Report the
         // ambiguity honestly; the next create will adopt by name.
         step({
@@ -224,7 +222,7 @@ export function createLibvirtProvider(
           status: "failed",
           detail: "define returned but domuuid lookup failed — domain may exist; volume retained",
         });
-        return { ok: false, volumePaths, steps, error: "VM create failed at define: UUID unresolved" };
+        return { ok: false, domainUuid, volumePaths, steps, error: "VM create failed at define: UUID unresolved" };
       }
       step({ step: "define", status: "done", detail: uuid });
       return { ok: true, domainUuid: uuid, volumePaths, steps };
@@ -252,16 +250,21 @@ export function createLibvirtProvider(
     },
 
     async delete(domainUuid: string, volumePaths: string[], deleteDisks: boolean) {
-      const state = await domainState(domainUuid);
-      if (state === "running" || state === "paused") {
-        await virsh(["destroy", domainUuid]);
+      if (deleteDisks && volumePaths.some((volume) => volume !== `varin-${domainUuid}.qcow2`)) {
+        throw new HarnessServiceError("invalid-params", "Disk deletion requires this creation's recorded allocation identity");
       }
-      await virsh(["undefine", domainUuid]);
+      if ((await listDomains()).some((domain) => domain.domainUuid === domainUuid)) {
+        const state = await domainState(domainUuid);
+        if (state === "unknown") throw new HarnessServiceError("unavailable", "Cannot delete a domain whose state is unknown");
+        if (state === "running" || state === "paused") await virsh(["destroy", domainUuid]);
+        await virsh(["undefine", domainUuid]);
+      }
       if (deleteDisks) {
+        const remaining = await volumeNames();
         for (const volumePath of volumePaths) {
           // Strict: a failed disk removal must surface, not masquerade as a
           // complete delete — the caller can retry with the same record.
-          await virsh(["vol-delete", "--pool", pool, volumePath]);
+          if (remaining.has(volumePath)) await virsh(["vol-delete", "--pool", pool, volumePath]);
         }
       }
     },

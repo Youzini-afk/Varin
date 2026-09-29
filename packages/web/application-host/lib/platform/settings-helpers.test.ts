@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest';
 
 import { createSettingsHelpers } from './settings-helpers.js';
 import { createSettingsNormalizationRuntime } from './settings-normalization-runtime.js';
+import { configuredVmProviders } from '../computer/vm-provider.js';
 
 const createTestHelpers = () => createSettingsHelpers({
   normalizePathForPersistence: (value) => value,
@@ -62,6 +63,14 @@ const createTestHelpersWithRealSanitizers = () => {
 };
 
 describe('settings helpers', () => {
+  it('keeps VM configuration usable through the same write/read path as Settings', () => {
+    const helpers = createTestHelpers();
+    const update = helpers.sanitizeSettingsUpdate({ computerVmProviders: [{ id: 'hv1', kind: 'libvirt', uri: 'qemu+ssh://host/system', storagePool: 'data' }] });
+    const saved = helpers.mergePersistedSettings({ themeId: 'existing' }, update);
+    const response = helpers.formatSettingsResponse(saved);
+    expect(configuredVmProviders(response)).toEqual([{ id: 'hv1', kind: 'libvirt', uri: 'qemu+ssh://host/system', storagePool: 'data' }]);
+    expect(helpers.sanitizeSettingsUpdate({ computerVmProviders: [] })).toEqual({ computerVmProviders: [] });
+  });
   it('preserves an explicit no-workspace selection', () => {
     const helpers = createTestHelpers();
 

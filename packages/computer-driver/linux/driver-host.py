@@ -52,16 +52,21 @@ def main():
             operation = json.loads(line)
             request_id = operation.get("id")
             runtime.ACTIVE_REQUEST_ID = request_id
+            response = None
             try:
                 response = runtime.perform_operation(operation)
             except runtime.CancelledError as exc:
                 response = {"ok": False, "cancelled": True, "error": str(exc)}
             finally:
-                runtime.release_input()
+                # Human down/move/up requests form one gesture across frames.
+                # Successful observation/stream reads must not release it.
+                if response is None or not response.get("ok") or operation.get("tool") not in ("inject_input", "capture_frame", "get_app_state", "list_apps", "capabilities", "ping"):
+                    runtime.release_input()
                 runtime.ACTIVE_REQUEST_ID = None
             write_response(request_id, response)
         except Exception as exc:
             write_response(request_id, {"ok": False, "error": str(exc)})
+    runtime.release_input()
 
 
 if __name__ == "__main__":

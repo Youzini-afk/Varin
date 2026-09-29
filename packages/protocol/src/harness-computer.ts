@@ -50,7 +50,7 @@ export interface ComputerDesktop {
    * another Host reached through `connectionId`. Calls route to that Host —
    * control state and the driver live there, not here.
    */
-  remote?: { connectionId: string; desktopId: string };
+  remote?: { connectionId: string; desktopId: string; hostId: string };
   /**
    * Work association (BC8): the most recent agent session that operated this
    * desktop through the shared service. Projection material only — work state
@@ -256,6 +256,8 @@ export interface ComputerAppsResult {
 export interface ComputerActParams {
   desktopId?: string;
   action: ComputerAction;
+  /** Frozen by a script before execution; control changes invalidate the batch. */
+  automationEpoch?: string;
 }
 
 export interface ComputerActResult {
@@ -307,6 +309,10 @@ export interface ComputerControlState {
   reachable: boolean;
   /** ISO time of the last ownership transition. */
   since: string;
+  /** Opaque Host lifetime + input generation. Never reuse after a handoff. */
+  automationEpoch: string;
+  /** Input is fenced while an ownership transfer drains and releases it. */
+  transitioning?: boolean;
 }
 
 /**
@@ -372,6 +378,7 @@ export interface ComputerHandbackResult {
 export interface ComputerInputParams {
   desktopId?: string;
   holderId?: string;
+  controlEpoch?: string;
   input: ComputerHumanInput;
 }
 
@@ -425,6 +432,8 @@ export interface ComputerVmBinding {
   providerId: string;
   kind: "libvirt";
   uri: string;
+  /** Frozen pool identity; editing provider defaults cannot redirect deletion. */
+  storagePool?: string;
   /** Actual domain UUID — the identity all lifecycle calls key on. */
   domainUuid: string;
   /** Storage volumes this Host allocated for the domain. */
@@ -467,7 +476,7 @@ export interface ComputerVmCreateParams {
 
 export interface ComputerVmCreateResult {
   machine: ComputerMachine;
-  /** False when create reused an already-existing domain of the same name. */
+  /** False when create reconciled the domain from this durable creation. */
   created: boolean;
 }
 

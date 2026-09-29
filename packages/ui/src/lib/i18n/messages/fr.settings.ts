@@ -3802,6 +3802,8 @@ export const settingsDict = {
   'settings.computers.view.panelNoDirectory': 'Aucun espace de travail actif — ouvrez d’abord un projet',
   'settings.computers.coordinator': 'Coordinateur',
   'settings.computers.view.waiting': "En attente des images…",
+  'settings.computers.view.textInput': 'Texte à saisir sur le bureau',
+  'settings.computers.view.sendText': 'Envoyer le texte',
   'settings.computers.view.takeover': "Prendre le contrôle",
   'settings.computers.view.handback': "Rendre le contrôle",
   'settings.computers.view.reclaim': "Prendre le contrôle",

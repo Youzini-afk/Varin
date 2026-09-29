@@ -4018,6 +4018,8 @@
   'settings.computers.view.panelNoDirectory': '활성 작업 영역이 없습니다 — 먼저 프로젝트를 여세요',
   'settings.computers.coordinator': '코디네이터',
   'settings.computers.view.waiting': "프레임 대기 중…",
+  'settings.computers.view.textInput': '데스크톱에 입력할 텍스트',
+  'settings.computers.view.sendText': '텍스트 보내기',
   'settings.computers.view.takeover': "제어권 가져오기",
   'settings.computers.view.handback': "제어권 반환",
   'settings.computers.view.reclaim': "제어권 가져오기",

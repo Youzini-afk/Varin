@@ -15,6 +15,7 @@
 
 ObjC.import("Quartz");
 ObjC.import("AppKit");
+ObjC.import("ApplicationServices");
 ObjC.import("stdlib");
 
 var DRIVER_VERSION = "0.1.0";
@@ -331,15 +332,8 @@ function captureWindowPngBase64(windowInfo) {
             windowInfo.handle,
             $.kCGWindowImageDefault
         );
-        if (!image || image.js === undefined) {
-            // CGRectNull captures nothing — fall back to a bounds-keyed grab.
-            image = $.CGWindowListCreateImage(
-                $.CGRectNull,
-                $.kCGWindowListOptionOnScreenOnly,
-                $.kCGNullWindowID,
-                $.kCGWindowImageDefault
-            );
-        }
+        // Never label a whole-desktop fallback as this window's image: its
+        // origin and scale would make every subsequent coordinate ambiguous.
         if (!image) return null;
         var rep = $.NSBitmapImageRep.alloc.initWithCGImage(image);
         var data = rep.representationUsingTypeProperties($.NSBitmapImageFileTypePNG, $());
@@ -507,12 +501,11 @@ function releaseInput() {
             if (String(button) === String($.kCGMouseButtonRight)) types = MOUSE_TYPES.right;
             else if (String(button) === String($.kCGMouseButtonCenter)) types = MOUSE_TYPES.middle;
             postMouse(types.up, 0, 0, Number(button));
+            delete heldButtons[button];
         } catch (e) { failed++; }
-        delete heldButtons[button];
     }
     for (var code in heldKeys) {
-        try { postKey(Number(code), false); } catch (e) { failed++; }
-        delete heldKeys[code];
+        try { postKey(Number(code), false); delete heldKeys[code]; } catch (e) { failed++; }
     }
     if (failed) {
         throw new Error("Desktop did not confirm release of " + failed + " managed inputs");
@@ -571,7 +564,9 @@ function injectHumanInput(operation) {
             delete heldButtons[types.button];
             break;
         case "move":
-            postMouse($.kCGEventMouseMoved, x, y, $.kCGMouseButtonLeft);
+            var held = Object.keys(heldButtons)[0];
+            var dragType = held === undefined ? null : Object.keys(MOUSE_TYPES).map(function (name) { return MOUSE_TYPES[name]; }).filter(function (entry) { return String(entry.button) === held; })[0];
+            postMouse(dragType ? dragType.drag : $.kCGEventMouseMoved, x, y, dragType ? dragType.button : $.kCGMouseButtonLeft);
             break;
         case "scroll":
             sendScroll(x, y, String(operation.direction || "down"), operation.pages || 1);
@@ -692,18 +687,21 @@ function buildSnapshot(query, textLimit, maxNodes, maxDepth, screenshot, windowS
 }
 
 function driverCapabilities() {
-    var axOk = true;
+    var axOk = false;
+    var captureOk = false;
     var detail = null;
     try {
         // Accessibility permission: AXIsProcessTrusted — exposed via ObjC
         // bridge; without it the System Events tree is empty.
-        if ($.AXIsProcessTrusted && !$.AXIsProcessTrusted()) {
-            axOk = false;
+        axOk = Boolean($.AXIsProcessTrusted());
+        if (!axOk) {
             detail = "Accessibility permission is not granted to the driver host; grant it in System Settings > Privacy & Security > Accessibility";
         }
     } catch (e) {
         detail = "Accessibility permission could not be verified (" + e + ")";
     }
+    try { captureOk = Boolean($.CGPreflightScreenCaptureAccess()) && Boolean($.CGWindowListCreateImage); }
+    catch (e) { captureOk = false; }
     var displays = [];
     try {
         var screens = $.NSScreen.screens;
@@ -721,20 +719,41 @@ function driverCapabilities() {
         driver: "macos-jxa",
         driverVersion: DRIVER_VERSION,
         observeTree: axOk,
-        screenshot: true,
+        screenshot: captureOk,
         elementAction: axOk,
-        coordinateInput: true,
-        textInput: true,
-        drag: true,
+        coordinateInput: axOk,
+        textInput: axOk,
+        drag: axOk,
         dpiAware: true,
         multiWindow: true,
         interruptibleInput: true,
-        occludedCapture: true,
+        occludedCapture: captureOk,
         sessionType: "aqua",
         displays: displays,
-        status: axOk ? "ready" : "unavailable",
+        status: axOk || captureOk ? "ready" : "unavailable",
         detail: detail || "UNVERIFIED driver — no real-machine evidence yet; report failures honestly",
     };
+}
+
+function activateObservedWindow(app, windowInfo) {
+    var process = seProcess(app.pid);
+    process.frontmost = true;
+    var front = $.NSWorkspace.sharedWorkspace.frontmostApplication;
+    if (!front || front.processIdentifier !== app.pid) throw new Error("Could not activate the observed application; input was not sent");
+    var windows = windowsForPid(app.pid);
+    if (!windows.length || windows[0].handle !== windowInfo.handle) {
+        var axWindows = axWindowElements(process);
+        var index = axWindowIndexFor(axWindows, windowInfo);
+        if (index < 0) throw new Error("Could not identify the observed window for activation");
+        var actions = axWindows[index].actions();
+        var raised = false;
+        for (var i = 0; i < actions.length; i++) {
+            if (String(actions[i].name()) === "AXRaise") { actions[i].perform(); raised = true; break; }
+        }
+        if (!raised) throw new Error("The observed window cannot be raised for input");
+        windows = windowsForPid(app.pid);
+    }
+    if (!windows.length || windows[0].handle !== windowInfo.handle) throw new Error("The observed window is not active; input was not sent");
 }
 
 function performOperation(operation) {
@@ -804,6 +823,8 @@ function performOperation(operation) {
         if (element === null) {
             throw new Error("Observed element no longer exists or is ambiguous; observe again");
         }
+        var currentFrame = axFrame(element);
+        if (currentFrame) elementRecord.frame = { x: currentFrame.x - bounds.x, y: currentFrame.y - bounds.y, width: currentFrame.width, height: currentFrame.height };
     }
 
     var inputPath = operation.input || "auto";
@@ -821,7 +842,7 @@ function performOperation(operation) {
             }
             var point = screenPoint(bounds, elementRecord, operation.x, operation.y);
             // Focus the window first so a click on a background app is real.
-            try { seProcess(app.pid).frontmost = true; } catch (e) {}
+            activateObservedWindow(app, windowInfo);
             sendMouseClick(point.x, point.y, operation.mouse_button || "left", operation.click_count || 1);
             break;
         }
@@ -844,23 +865,25 @@ function performOperation(operation) {
             break;
         }
         case "scroll": {
+            activateObservedWindow(app, windowInfo);
             var sp = screenPoint(bounds, elementRecord, operation.x, operation.y);
             sendScroll(sp.x, sp.y, operation.direction || "down", operation.pages || 1);
             break;
         }
         case "drag": {
+            activateObservedWindow(app, windowInfo);
             var from = screenPoint(bounds, null, operation.from_x, operation.from_y);
             var to = screenPoint(bounds, null, operation.to_x, operation.to_y);
             sendDrag(from.x, from.y, to.x, to.y);
             break;
         }
         case "type_text": {
-            try { seProcess(app.pid).frontmost = true; } catch (e) {}
+            activateObservedWindow(app, windowInfo);
             sendText(operation.text || "");
             break;
         }
         case "press_key": {
-            try { seProcess(app.pid).frontmost = true; } catch (e) {}
+            activateObservedWindow(app, windowInfo);
             sendKey(operation.key || "");
             break;
         }

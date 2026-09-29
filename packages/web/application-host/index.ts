@@ -1892,7 +1892,19 @@ async function main(options: StartWebUiServerOptions = {}): Promise<WebUiServerC
     organizerModelForScope: async (scopeId) => {
       if (!isBotScopeId(scopeId)) return null;
       const bot = await botService.get(botIdFromScopeId(scopeId));
-      return bot?.model ?? null;
+      if (!bot || bot.archived) return null;
+      if (bot.model) return bot.model;
+      if (!bot.entrySessionId) return null;
+      // An unset preference inherits the Bot entry's actual Pi selection,
+      // including Pi's default. It must not disable background memory or borrow
+      // whichever unrelated chat happens to be live.
+      const liveModel = recordOf(sessionSnapshots.get(bot.entrySessionId)?.model);
+      if (typeof liveModel.provider === 'string' && typeof liveModel.id === 'string') {
+        return { providerId: liveModel.provider, modelId: liveModel.id };
+      }
+      const entries = (await piRuntimeBroker.previewSessionEntries(bot.entrySessionId, bot.homeDir, 'branch')).entries;
+      const selected = entries.findLast((entry) => entry.type === 'model_change');
+      return selected?.type === 'model_change' ? { providerId: selected.provider, modelId: selected.modelId } : null;
     },
     autoOrganizeForScope: async (scopeId) => {
       const runtime = semanticRuntimeHolder.current;
@@ -2698,6 +2710,7 @@ async function main(options: StartWebUiServerOptions = {}): Promise<WebUiServerC
   });
   registerComputerRoutes(app, {
     computers: computerService,
+    hostId,
     ...(uiAuthController ? { requireAuth: uiAuthController.requireAuth } : {}),
   });
   registerManagedRemoteRoutes(app, {

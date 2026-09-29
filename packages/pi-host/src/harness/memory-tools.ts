@@ -32,7 +32,7 @@ const MemoryParams = Type.Object({
   content: Type.Optional(Type.String()),
   /** search: natural-language query against durable memory. */
   query: Type.Optional(Type.String()),
-  /** search: max results (default 8, capped at 50). */
+  /** search: requested result count (default 8). */
   k: Type.Optional(Type.Integer({ minimum: 1 })),
   /** remember/correct: when this memory applies. */
   trigger: Type.Optional(Type.String()),
@@ -48,6 +48,7 @@ const MemoryParams = Type.Object({
   id: Type.Optional(Type.Integer({ minimum: 1 })),
   /** Omit for the owning scope; "user" writes the user-level store. */
   scope: Type.Optional(Type.Union([
+    Type.Literal("bot"),
     Type.Literal("workspace"),
     Type.Literal("user"),
     Type.Literal("session"),

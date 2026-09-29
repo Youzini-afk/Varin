@@ -4018,6 +4018,8 @@
   'settings.computers.view.panelNoDirectory': 'Brak aktywnego obszaru roboczego — najpierw otwórz projekt',
   'settings.computers.coordinator': 'Koordynator',
   'settings.computers.view.waiting': "Oczekiwanie na klatki…",
+  'settings.computers.view.textInput': 'Tekst do wpisania na pulpicie',
+  'settings.computers.view.sendText': 'Wyślij tekst',
   'settings.computers.view.takeover': "Przejmij sterowanie",
   'settings.computers.view.handback': "Oddaj sterowanie",
   'settings.computers.view.reclaim': "Przejmij",

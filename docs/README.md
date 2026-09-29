@@ -33,8 +33,8 @@ Harness 总体与模块专卷：
 - [design/context-compaction-agent-design.md](design/context-compaction-agent-design.md) / [design/fast-decision-model-design.md](design/fast-decision-model-design.md) — 压缩 Agent 与快速决策模型
 - [design/native-workspace-recovery-design.md](design/native-workspace-recovery-design.md) / [design/recovery.md](design/recovery.md) — 恢复模型
 - [design/office-work-continuity-design.md](design/office-work-continuity-design.md) — 阶段 O 办公连续性（设计已接受，未实施）
-- [design/bot-operated-workbench-design.md](design/bot-operated-workbench-design.md) — 单 Bot 操作工作台、主动/自动记忆、TDB 与快速决策分工、执行者咨询和缓存（讨论草案，未实施）
-- [design/computer-use-design.md](design/computer-use-design.md) — 共享电脑控制、本机/远程持久桌面、实时观看与人工接管（设计方向已接受，未实施）
+- [design/bot-operated-workbench-design.md](design/bot-operated-workbench-design.md) — 单 Bot、主动/自动记忆、咨询与缓存的设计依据；BC 部分实现，进度见当前验收
+- [design/computer-use-design.md](design/computer-use-design.md) — 共享电脑控制与持久桌面设计；BC 部分实现，不能等同于全部阶段已交付
 - [design/composable-workbench.md](design/composable-workbench.md) — 工作台 profile 与扩展组合
 - [design/plugin-gui-design.md](design/plugin-gui-design.md) / [design/varin-extension-platform.md](design/varin-extension-platform.md) — 插件 GUI 与扩展平台
 - [design/unified-file-editor-platform.md](design/unified-file-editor-platform.md) — 统一文件编辑器平台
@@ -48,7 +48,7 @@ Harness 总体与模块专卷：
 
 - [plan/agent-harness-plan.md](plan/agent-harness-plan.md) — Harness 阶段骨架（锚点稳定；已收口阶段细节在 archive）
 - [plan/agent-runtime-reliability-plan.md](plan/agent-runtime-reliability-plan.md) — RR0–RR6（RR6 平台纵切未测）
-- [plan/bot-computer-use-plan.md](plan/bot-computer-use-plan.md) — BC0–BC9：单 Bot、主动/自动记忆、Computer Use 与持久电脑正式实施计划（未开始）
+- [plan/bot-computer-use-plan.md](plan/bot-computer-use-plan.md) — BC0–BC9 实施合同；[深入验收](plan/bot-computer-use-review.md)记录当前 Partial 判断、修复和剩余项
 - [plan/rust-kernel-audit.md](plan/rust-kernel-audit.md) — Rust 内核审计（进行中）
 
 ## [decisions/](decisions/) — 决策日志

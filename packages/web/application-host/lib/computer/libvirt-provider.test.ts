@@ -1,168 +1,76 @@
-import { describe, expect, it } from "vitest";
-import { createLibvirtProvider } from "./libvirt-provider.js";
-import type { ComputerVmProviderConfig } from "@varin/protocol";
-import type { VmExec } from "./vm-provider.js";
+import { describe, expect, it } from 'vitest';
+import { createLibvirtProvider } from './libvirt-provider.js';
+import { libvirtFixture } from './libvirt.test-helper.js';
 
-const config: ComputerVmProviderConfig = {
-  id: "hv1",
-  kind: "libvirt",
-  uri: "qemu:///system",
-};
+const config = { id: 'hv1', kind: 'libvirt' as const, uri: 'qemu:///system' };
+const spec = { name: 'alpha', memoryMiB: 2048, vcpus: 2, diskGiB: 20, domainUuid: '9f8e7d6c-1111-2222-3333-444455556666' };
+const volume = `varin-${spec.domainUuid}.qcow2`;
 
-interface Call {
-  command: string;
-  args: string[];
-  stdin?: string;
-}
-
-const fakeExec = (
-  handler: (args: string[]) => { code?: number; stdout?: string; stderr?: string } | string
-    | Promise<{ code?: number; stdout?: string; stderr?: string }>,
-) => {
-  const calls: Call[] = [];
-  const exec: VmExec = async (command, args, options) => {
-    calls.push({ command, args, ...(options?.stdin !== undefined ? { stdin: options.stdin } : {}) });
-    // Strip the `-c <uri>` prefix for script matching.
-    const scriptArgs = args.slice(2);
-    const reply = await handler(scriptArgs);
-    const shaped = typeof reply === "string" ? { stdout: reply } : reply;
-    return { code: shaped.code ?? 0, stdout: shaped.stdout ?? "", stderr: shaped.stderr ?? "" };
-  };
-  return { exec, calls };
-};
-
-const scriptFor = (table: Record<string, { code?: number; stdout?: string; stderr?: string }>) =>
-  (args: string[]) => {
-    const key = args[0] ?? "";
-    const entry = table[key];
-    if (!entry) throw new Error(`unexpected virsh call: ${args.join(" ")}`);
-    return entry;
-  };
-
-describe("libvirt provider (BC7)", () => {
-  it("reports availability from a real `virsh version` probe", async () => {
-    const { exec, calls } = fakeExec(scriptFor({
-      version: { stdout: "Compiled against library: libvirt 10.0.0\nUsing library: libvirt 10.0.0\nUsing API: QEMU 10.0.0\nRunning hypervisor: QEMU 8.2.2\n" },
-    }));
-    const provider = createLibvirtProvider(config, exec);
-    const probe = await provider.probe();
-    expect(probe.available).toBe(true);
-    expect(probe.detail).toContain("QEMU");
-    expect(calls[0]).toMatchObject({ command: "virsh", args: ["-c", "qemu:///system", "version"] });
-  });
-
-  it("reports unavailable with the real error when virsh cannot connect", async () => {
-    const { exec } = fakeExec(() => { throw new Error("spawn virsh ENOENT"); });
-    const provider = createLibvirtProvider(config, exec);
-    const probe = await provider.probe();
-    expect(probe.available).toBe(false);
-    expect(probe.detail).toContain("ENOENT");
-  });
-
-  it("creates a domain: volume, define via stdin XML, UUID identity", async () => {
-    // domuuid is called twice: first lookup fails, post-define resolves.
-    let domuuidCalls = 0;
-    const { exec, calls } = fakeExec((scriptArgs) => {
-      if (scriptArgs[0] === "domuuid") {
-        domuuidCalls += 1;
-        return domuuidCalls === 1
-          ? { code: 1, stdout: "", stderr: "error: failed to get domain 'alpha'" }
-          : { code: 0, stdout: "9f8e7d6c-1111-2222-3333-444455556666\n", stderr: "" };
-      }
-      return scriptFor({
-        "vol-create-as": { stdout: "Vol alpha.qcow2 created\n" },
-        define: { stdout: "Domain alpha defined from /dev/stdin\n" },
-      })(scriptArgs);
-    });
-    const provider = createLibvirtProvider(config, exec);
-    const outcome = await provider.create({ name: "alpha", memoryMiB: 2048, vcpus: 2, diskGiB: 20 });
+describe('libvirt creation authority', () => {
+  it('defines the persisted UUID and reconciles a lost define response', async () => {
+    const fixture = libvirtFixture();
+    fixture.faults.set('define', 'after');
+    const receipts: string[][] = [];
+    const outcome = await createLibvirtProvider(config, fixture.exec).create({ ...spec, checkpoint: async (receipt) => { receipts.push([...receipt.volumePaths]); } });
     expect(outcome.ok).toBe(true);
-    expect(outcome.domainUuid).toBe("9f8e7d6c-1111-2222-3333-444455556666");
-    expect(outcome.volumePaths).toEqual(["alpha.qcow2"]);
-    expect(outcome.steps.map((s) => `${s.step}:${s.status}`)).toEqual([
-      "resolve:done", "volume:done", "define:done",
-    ]);
-    const defineCall = calls.find((c) => c.args.includes("define"));
-    expect(defineCall?.stdin).toContain("<name>alpha</name>");
-    expect(defineCall?.stdin).toContain("vol"); // disk source references the created volume
+    expect(fixture.domains.get(spec.domainUuid)?.name).toBe('alpha');
+    expect(receipts).toEqual([[volume]]);
+    expect(fixture.calls.find((call) => call.args[0] === 'define')?.stdin).toContain(`<uuid>${spec.domainUuid}</uuid>`);
+    expect(fixture.volumes.has(volume)).toBe(true);
+    expect(fixture.calls.some((call) => call.args[0] === 'vol-delete')).toBe(false);
   });
-
-  it("adopts an existing domain by name instead of duplicating it", async () => {
-    const { exec, calls } = fakeExec(scriptFor({
-      domuuid: { stdout: "aaaa0000-0000-0000-0000-0000000000aa\n" },
-      domblklist: { stdout: " Target   Source\n--------------------\n vda      default/alpha.qcow2\n" },
-    }));
-    const provider = createLibvirtProvider(config, exec);
-    const outcome = await provider.create({ name: "alpha", memoryMiB: 2048, vcpus: 2, diskGiB: 20 });
-    expect(outcome.ok).toBe(true);
-    expect(outcome.adopted).toBe(true);
-    expect(outcome.domainUuid).toBe("aaaa0000-0000-0000-0000-0000000000aa");
-    expect(calls.some((c) => c.args.includes("vol-create-as"))).toBe(false);
-    expect(calls.some((c) => c.args.includes("define"))).toBe(false);
+  it('never adopts another user domain with the same name', async () => {
+    const fixture = libvirtFixture();
+    fixture.domains.set('aaaa0000-0000-0000-0000-0000000000aa', { name: 'alpha', state: 'running' });
+    await expect(createLibvirtProvider(config, fixture.exec).create(spec)).rejects.toThrow(/different domain/);
+    expect(fixture.calls.map((call) => call.args[0])).toEqual(['list']);
   });
-
-  it("a failed define cleans up only the volume this call created", async () => {
-    const { exec, calls } = fakeExec((scriptArgs) => {
-      switch (scriptArgs[0]) {
-        case "domuuid": return { code: 1, stdout: "", stderr: "no domain" };
-        case "vol-create-as": return { code: 0, stdout: "Vol beta.qcow2 created\n", stderr: "" };
-        case "define": return { code: 1, stdout: "", stderr: "invalid XML" };
-        case "vol-delete": return { code: 0, stdout: "Vol beta.qcow2 deleted\n", stderr: "" };
-        default: throw new Error(`unexpected ${scriptArgs.join(" ")}`);
-      }
-    });
-    const provider = createLibvirtProvider(config, exec);
-    const outcome = await provider.create({ name: "beta", memoryMiB: 2048, vcpus: 2, diskGiB: 20 });
+  it('never deletes a pre-existing or uncertain allocation on create failure', async () => {
+    const fixture = libvirtFixture();
+    fixture.volumes.add(volume);
+    const outcome = await createLibvirtProvider(config, fixture.exec).create(spec);
     expect(outcome.ok).toBe(false);
-    expect(outcome.error).toContain("define");
-    const steps = outcome.steps.map((s) => `${s.step}:${s.status}`);
-    expect(steps).toContain("volume:done");
-    expect(steps).toContain("define:failed");
-    expect(steps).toContain("cleanup:done");
-    expect(calls.some((c) => c.args.includes("vol-delete") && c.args.includes("beta.qcow2"))).toBe(true);
+    expect(fixture.volumes.has(volume)).toBe(true);
+    expect(fixture.calls.some((call) => ['vol-create-as', 'vol-delete', 'define'].includes(call.args[0]!))).toBe(false);
   });
-
-  it("keeps the volume when define ran but the UUID could not be resolved", async () => {
-    const { exec, calls } = fakeExec((scriptArgs) => {
-      switch (scriptArgs[0]) {
-        case "domuuid": return { code: 1, stdout: "", stderr: "no domain" };
-        case "vol-create-as": return { code: 0, stdout: "Vol gamma.qcow2 created\n", stderr: "" };
-        case "define": return { code: 0, stdout: "Domain gamma defined\n", stderr: "" };
-        default: throw new Error(`unexpected ${scriptArgs.join(" ")}`);
-      }
-    });
-    const provider = createLibvirtProvider(config, exec);
-    const outcome = await provider.create({ name: "gamma", memoryMiB: 2048, vcpus: 2, diskGiB: 20 });
-    expect(outcome.ok).toBe(false);
-    // The domain may exist — deleting its disk would be destructive.
-    expect(calls.some((c) => c.args.includes("vol-delete"))).toBe(false);
-    expect(outcome.steps.some((s) => s.detail?.includes("volume retained"))).toBe(true);
+  it('a transport failure is not a missing domain', async () => {
+    const fixture = libvirtFixture();
+    fixture.faults.set('list', 'before');
+    expect((await createLibvirtProvider(config, fixture.exec).create(spec)).ok).toBe(false);
+    expect(fixture.volumes.size).toBe(0);
   });
-
-  it("shutdown is graceful ACPI and delete keeps disks by default", async () => {
-    const { exec, calls } = fakeExec(scriptFor({
-      domstate: { stdout: "running\n" },
-      shutdown: { stdout: "Domain d is being shutdown\n" },
-      destroy: { stdout: "Domain d destroyed\n" },
-      undefine: { stdout: "Domain d has been undefined\n" },
-    }));
-    const provider = createLibvirtProvider(config, exec);
-    await provider.shutdown("d");
-    await provider.delete("d", ["x.qcow2"], false);
-    expect(calls.some((c) => c.args.includes("destroy"))).toBe(true); // running → force off first
-    expect(calls.some((c) => c.args.includes("vol-delete"))).toBe(false); // disks survive
+  it('resumes a confirmed volume without reallocation after failed define', async () => {
+    const fixture = libvirtFixture();
+    fixture.faults.set('define', 'before');
+    const provider = createLibvirtProvider(config, fixture.exec);
+    const first = await provider.create(spec);
+    expect(first.ok).toBe(false);
+    expect(first.volumePaths).toEqual([volume]);
+    fixture.faults.delete('define');
+    expect((await provider.create({ ...spec, volumePaths: first.volumePaths })).ok).toBe(true);
+    expect(fixture.calls.filter((call) => call.args[0] === 'vol-create-as')).toHaveLength(1);
   });
-
-  it("delete with deleteDisks removes exactly the recorded volumes", async () => {
-    const { exec, calls } = fakeExec(scriptFor({
-      domstate: { stdout: "shut off\n" },
-      undefine: { stdout: "undefined\n" },
-      "vol-delete": { stdout: "deleted\n" },
-    }));
-    const provider = createLibvirtProvider(config, exec);
-    await provider.delete("d", ["a.qcow2", "b.qcow2"], true);
-    const deletes = calls.filter((c) => c.args.includes("vol-delete"));
-    expect(deletes.map((c) => c.args[c.args.length - 1])).toEqual(["a.qcow2", "b.qcow2"]);
-    expect(calls.some((c) => c.args.includes("destroy"))).toBe(false); // already off
+  it('retries disk deletion after undefine without touching foreign volumes', async () => {
+    const fixture = libvirtFixture();
+    const provider = createLibvirtProvider(config, fixture.exec);
+    await provider.create(spec);
+    fixture.volumes.add('user.qcow2');
+    fixture.faults.set('vol-delete', 'before');
+    await expect(provider.delete(spec.domainUuid, [volume], true)).rejects.toThrow();
+    expect(fixture.domains.size).toBe(0);
+    fixture.faults.delete('vol-delete');
+    await provider.delete(spec.domainUuid, [volume], true);
+    expect([...fixture.volumes]).toEqual(['user.qcow2']);
+    await expect(provider.delete(spec.domainUuid, ['user.qcow2'], true)).rejects.toThrow(/allocation identity/);
+  });
+  it('graceful shutdown and default deletion retain the allocated disk', async () => {
+    const fixture = libvirtFixture();
+    const provider = createLibvirtProvider(config, fixture.exec);
+    await provider.create(spec);
+    await provider.start(spec.domainUuid);
+    await provider.shutdown(spec.domainUuid);
+    expect(await provider.domainState(spec.domainUuid)).toBe('shutoff');
+    await provider.delete(spec.domainUuid, [volume], false);
+    expect(fixture.volumes.has(volume)).toBe(true);
   });
 });

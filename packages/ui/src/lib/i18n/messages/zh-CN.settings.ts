@@ -4018,6 +4018,8 @@
   'settings.computers.view.panelNoDirectory': '没有活动工作区 — 请先打开一个项目',
   'settings.computers.coordinator': '协调者',
   'settings.computers.view.waiting': "等待画面…",
+  'settings.computers.view.textInput': '输入要发送到桌面的文字',
+  'settings.computers.view.sendText': '发送文字',
   'settings.computers.view.takeover': "接管控制",
   'settings.computers.view.handback': "交还控制",
   'settings.computers.view.reclaim': "接管",

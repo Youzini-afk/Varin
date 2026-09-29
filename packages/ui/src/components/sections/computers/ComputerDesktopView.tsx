@@ -9,7 +9,8 @@ import {
   takeoverDesktop,
   type DesktopStreamEvent,
 } from '@/lib/computers';
-import type { ComputerControlState, ComputerDesktop } from '@varin/protocol';
+import type { ComputerControlState, ComputerDesktop, ComputerDesktopFrame } from '@varin/protocol';
+import { desktopKey, desktopPoint } from '@/lib/computerInput';
 
 const newViewerId = () => `viewer-${Math.random().toString(36).slice(2)}-${Date.now().toString(36)}`;
 
@@ -23,17 +24,30 @@ export function ComputerDesktopPane({ desktop }: { desktop: ComputerDesktop }) {
   const { t } = useI18n();
   const [viewerId] = React.useState(newViewerId);
   const [frameUrl, setFrameUrl] = React.useState<string | null>(null);
+  const [frame, setFrame] = React.useState<ComputerDesktopFrame | null>(null);
   const [control, setControl] = React.useState<ComputerControlState | null>(null);
   const [streamError, setStreamError] = React.useState<string | null>(null);
+  const [inputError, setInputError] = React.useState<string | null>(null);
   const [busy, setBusy] = React.useState(false);
+  const [textDraft, setTextDraft] = React.useState('');
   const frameRef = React.useRef<HTMLImageElement | null>(null);
+  const inputTail = React.useRef<Promise<unknown>>(Promise.resolve());
+  const inputGeneration = React.useRef(0);
+  const composing = React.useRef(false);
+  const pointers = React.useRef(new Map<number, { x: number; y: number; button: 'left' | 'right' | 'middle' }>());
 
   React.useEffect(() => {
+    setFrameUrl(null);
+    setFrame(null);
+    setControl(null);
+    setStreamError(null);
+    setInputError(null);
     const source = subscribeDesktopStream(desktop.id, viewerId);
     source.onmessage = (message) => {
       try {
         const event = JSON.parse(message.data as string) as DesktopStreamEvent;
         if (event.type === 'frame') {
+          setFrame(event.frame);
           setFrameUrl(`data:${event.frame.mime};base64,${event.frame.base64}`);
           setStreamError(null);
         } else if (event.type === 'control') {
@@ -47,22 +61,28 @@ export function ComputerDesktopPane({ desktop }: { desktop: ComputerDesktop }) {
     };
     source.onerror = () => setStreamError(t('settings.computers.view.streamLost'));
     return () => {
+      inputGeneration.current += 1;
       // Closing the page closes only this subscription — never the task.
       source.close();
     };
   }, [desktop.id, viewerId, t]);
 
   const weHoldControl = control?.owner === 'human' && control.holderId === viewerId;
+  const mayRelease = weHoldControl && control.reachable && !control.transitioning;
+  const canInput = mayRelease && !streamError;
+  React.useEffect(() => { inputGeneration.current += 1; }, [control?.automationEpoch, canInput]);
+  React.useEffect(() => { pointers.current.clear(); }, [control?.automationEpoch]);
   const controlPending = control?.owner === 'human' && control.holderId !== viewerId;
 
   const takeover = async () => {
     setBusy(true);
+    setInputError(null);
     try {
       const result = await takeoverDesktop(desktop.id, viewerId);
       setControl(result.control);
       setStreamError(null);
     } catch (cause) {
-      setStreamError(cause instanceof Error ? cause.message : String(cause));
+      setInputError(cause instanceof Error ? cause.message : String(cause));
     } finally {
       setBusy(false);
     }
@@ -70,72 +90,79 @@ export function ComputerDesktopPane({ desktop }: { desktop: ComputerDesktop }) {
 
   const handback = async () => {
     setBusy(true);
+    setInputError(null);
     try {
       const result = await handbackDesktop(desktop.id, viewerId);
       setControl(result.control);
     } catch (cause) {
-      setStreamError(cause instanceof Error ? cause.message : String(cause));
+      setInputError(cause instanceof Error ? cause.message : String(cause));
     } finally {
       setBusy(false);
     }
   };
 
   /** Translate a pointer event on the image into absolute desktop pixels. */
-  const desktopPoint = (event: React.MouseEvent): { x: number; y: number } | null => {
+  const pointFor = (event: React.MouseEvent): { x: number; y: number } | null => {
     const img = frameRef.current;
-    if (!img || !img.naturalWidth || !img.naturalHeight) return null;
-    const rect = img.getBoundingClientRect();
-    const scaleX = img.naturalWidth / rect.width;
-    const scaleY = img.naturalHeight / rect.height;
-    return {
-      x: Math.round((event.clientX - rect.left) * scaleX),
-      y: Math.round((event.clientY - rect.top) * scaleY),
-    };
+    if (!img || !frame) return null;
+    return desktopPoint(frame.bounds, img.getBoundingClientRect(), event.clientX, event.clientY);
   };
 
   const emitInput = (input: Parameters<typeof sendDesktopInput>[2]) => {
-    if (!weHoldControl) return;
-    void sendDesktopInput(desktop.id, viewerId, input).catch((cause) => {
-      setStreamError(cause instanceof Error ? cause.message : String(cause));
+    if (!canInput && !(mayRelease && input.kind === 'up')) return Promise.resolve(false);
+    const generation = inputGeneration.current;
+    // Preserve key/drag ordering even if the browser opens concurrent HTTP requests.
+    const pending = inputTail.current.then(async () => {
+      if (generation !== inputGeneration.current) return false;
+      const result = await sendDesktopInput(desktop.id, viewerId, input, control.automationEpoch);
+      if (!result.accepted) throw new Error(result.detail ?? 'Desktop input was not accepted');
+      return true;
+    }).catch((cause) => {
+      setInputError(cause instanceof Error ? cause.message : String(cause));
+      return false;
     });
+    inputTail.current = pending;
+    return pending;
   };
 
-  const onMouse = (event: React.MouseEvent) => {
-    if (!weHoldControl) return;
-    const point = desktopPoint(event);
+  const onPointer = (event: React.PointerEvent<HTMLImageElement>) => {
+    const releasing = ['pointerup', 'pointercancel', 'lostpointercapture'].includes(event.type);
+    if (!canInput && !(releasing && mayRelease)) return;
+    const held = pointers.current.get(event.pointerId);
+    if (event.type !== 'pointerdown' && !held) return;
+    const point = event.type === 'lostpointercapture' ? held : pointFor(event);
     if (!point) return;
+    const button = held?.button ?? (event.button === 2 ? 'right' : event.button === 1 ? 'middle' : 'left');
     event.preventDefault();
+    if (event.type === 'pointerdown') {
+      event.currentTarget.focus();
+      event.currentTarget.setPointerCapture(event.pointerId);
+    }
+    if (event.type === 'pointerdown' || event.type === 'pointermove') pointers.current.set(event.pointerId, { ...point, button });
+    else pointers.current.delete(event.pointerId);
     emitInput({
-      kind: event.type === 'mousedown' ? 'down' : 'up',
+      kind: event.type === 'pointerdown' ? 'down' : event.type === 'pointermove' ? 'move' : 'up',
       ...point,
-      button: event.button === 2 ? 'right' : event.button === 1 ? 'middle' : 'left',
+      button,
     });
   };
 
   const onWheel = (event: React.WheelEvent) => {
-    if (!weHoldControl) return;
-    const point = desktopPoint(event as unknown as React.MouseEvent);
+    if (!canInput) return;
+    const point = pointFor(event);
     if (!point) return;
     const direction = Math.abs(event.deltaX) > Math.abs(event.deltaY)
       ? (event.deltaX > 0 ? 'right' : 'left')
       : (event.deltaY > 0 ? 'down' : 'up');
-    emitInput({ kind: 'scroll', ...point, direction, pages: Math.max(0.2, Math.min(3, Math.abs(event.deltaY + event.deltaX) / 120)) });
+    emitInput({ kind: 'scroll', ...point, direction, pages: Math.abs(Math.abs(event.deltaX) > Math.abs(event.deltaY) ? event.deltaX : event.deltaY) / 120 });
   };
 
   const onKey = (event: React.KeyboardEvent) => {
-    if (!weHoldControl) return;
+    if (!canInput || composing.current || event.nativeEvent.isComposing) return;
+    const input = desktopKey(event);
+    if (!input) return;
     event.preventDefault();
-    const modifiers: string[] = [];
-    if (event.ctrlKey) modifiers.push('ctrl');
-    if (event.altKey) modifiers.push('alt');
-    if (event.shiftKey) modifiers.push('shift');
-    if (event.metaKey) modifiers.push('cmd');
-    const key = event.key === ' ' ? 'space' : event.key;
-    if (key.length === 1) {
-      emitInput({ kind: 'text', text: key });
-      return;
-    }
-    emitInput({ kind: 'key', key: [...modifiers, key.toLowerCase()].join('+') });
+    emitInput(input);
   };
 
   const controlLabel = !control ? t('settings.computers.view.control.unknown')
@@ -145,31 +172,33 @@ export function ComputerDesktopPane({ desktop }: { desktop: ComputerDesktop }) {
           : t('settings.computers.view.control.pendingHuman');
 
   return (
-    <div className="flex flex-col gap-3 min-h-0" onKeyDown={weHoldControl ? onKey : undefined} tabIndex={-1}>
+    <div className="flex flex-col gap-3 min-h-0">
       <div className="flex items-center justify-between gap-3">
         <span className="typography-meta text-muted-foreground" data-control={control?.owner ?? 'unknown'}>
           {controlLabel}
+          {frame ? <time className="ml-2" dateTime={frame.capturedAt}>{new Date(frame.capturedAt).toLocaleTimeString()}</time> : null}
           {control && control.owner === 'human' && !control.reachable ? ` — ${t('settings.computers.view.control.reconnecting')}` : ''}
         </span>
         <div className="flex items-center gap-2">
           {control?.owner === 'agent' ? (
-            <Button size="sm" disabled={busy} onClick={() => { void takeover(); }}>
+            <Button size="sm" disabled={busy || control.transitioning} onClick={() => { void takeover(); }}>
               {t('settings.computers.view.takeover')}
             </Button>
           ) : null}
           {weHoldControl ? (
-            <Button size="sm" variant="outline" disabled={busy} onClick={() => { void handback(); }}>
+            <Button size="sm" variant="outline" disabled={busy || control?.transitioning} onClick={() => { void handback(); }}>
               {t('settings.computers.view.handback')}
             </Button>
           ) : null}
           {controlPending ? (
-            <Button size="sm" disabled={busy} onClick={() => { void takeover(); }}>
+            <Button size="sm" disabled={busy || control?.transitioning} onClick={() => { void takeover(); }}>
               {t('settings.computers.view.reclaim')}
             </Button>
           ) : null}
         </div>
       </div>
       {streamError ? <p role="alert" className="typography-meta text-destructive">{streamError}</p> : null}
+      {inputError ? <p role="alert" className="typography-meta text-destructive">{inputError}</p> : null}
       <div className="rounded-lg border border-border/60 bg-black/80 overflow-hidden flex items-center justify-center min-h-[240px]">
         {frameUrl ? (
           <img
@@ -177,9 +206,17 @@ export function ComputerDesktopPane({ desktop }: { desktop: ComputerDesktop }) {
             src={frameUrl}
             alt={desktop.label}
             draggable={false}
-            className="max-h-[70vh] w-auto select-none"
-            onMouseDown={onMouse}
-            onMouseUp={onMouse}
+            className="max-h-[70vh] max-w-full w-auto select-none touch-none"
+            tabIndex={canInput ? 0 : -1}
+            onKeyDown={onKey}
+            onPointerDown={onPointer}
+            onPointerUp={onPointer}
+            onPointerCancel={onPointer}
+            onLostPointerCapture={onPointer}
+            onPointerMove={(event) => { if (event.buttons) onPointer(event); }}
+            onCompositionStart={() => { composing.current = true; }}
+            onCompositionEnd={(event) => { composing.current = false; if (event.data) emitInput({ kind: 'text', text: event.data }); }}
+            onPaste={(event) => { if (canInput) { event.preventDefault(); emitInput({ kind: 'text', text: event.clipboardData.getData('text/plain') }); } }}
             onWheel={onWheel}
             onContextMenu={(event) => event.preventDefault()}
           />
@@ -187,6 +224,21 @@ export function ComputerDesktopPane({ desktop }: { desktop: ComputerDesktop }) {
           <p role="status" className="typography-meta text-muted-foreground p-8">{t('settings.computers.view.waiting')}</p>
         )}
       </div>
+      {weHoldControl ? (
+        <form className="flex gap-2" onSubmit={(event) => {
+          event.preventDefault();
+          if (!textDraft || !canInput) return;
+          const submitted = textDraft;
+          void emitInput({ kind: 'text', text: submitted }).then((accepted) => {
+            if (accepted) setTextDraft((current) => current === submitted ? '' : current);
+          });
+        }}>
+          <textarea className="min-w-0 flex-1 rounded border bg-background p-2" rows={2}
+            value={textDraft} onChange={(event) => setTextDraft(event.target.value)}
+            aria-label={t('settings.computers.view.textInput')} placeholder={t('settings.computers.view.textInput')} />
+          <Button type="submit" disabled={!canInput || !textDraft}>{t('settings.computers.view.sendText')}</Button>
+        </form>
+      ) : null}
     </div>
   );
 }
@@ -203,7 +255,7 @@ export function ComputerDesktopView({ desktop, open, onOpenChange }: {
         <DialogHeader>
           <DialogTitle>{desktop.label}</DialogTitle>
         </DialogHeader>
-        {open ? <ComputerDesktopPane desktop={desktop} /> : null}
+        {open ? <ComputerDesktopPane key={desktop.id} desktop={desktop} /> : null}
       </DialogContent>
     </Dialog>
   );

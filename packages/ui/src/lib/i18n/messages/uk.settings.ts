@@ -4017,6 +4017,8 @@
   'settings.computers.view.panelNoDirectory': 'Немає активного робочого простору — спершу відкрийте проєкт',
   'settings.computers.coordinator': 'Координатор',
   'settings.computers.view.waiting': "Очікування кадрів…",
+  'settings.computers.view.textInput': 'Текст для введення на робочому столі',
+  'settings.computers.view.sendText': 'Надіслати текст',
   'settings.computers.view.takeover': "Перехопити керування",
   'settings.computers.view.handback': "Повернути керування",
   'settings.computers.view.reclaim': "Перехопити",

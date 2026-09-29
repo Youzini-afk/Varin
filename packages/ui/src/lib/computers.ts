@@ -74,9 +74,9 @@ export const handbackDesktop = (desktopId: string, holderId: string) => (
   )
 );
 
-export const sendDesktopInput = (desktopId: string, holderId: string, input: ComputerHumanInput) => (
+export const sendDesktopInput = (desktopId: string, holderId: string, input: ComputerHumanInput, controlEpoch: string) => (
   desktopPost<{ accepted: boolean; detail?: string }>(
-    desktopId, 'input', { holderId, input }, 'Unable to deliver desktop input',
+    desktopId, 'input', { holderId, input, controlEpoch }, 'Unable to deliver desktop input',
   )
 );
 

@@ -2562,7 +2562,9 @@ export function createThreadRegistry(options: ThreadRegistryOptions) {
         activeRun.endedAt = timestamp;
         activeRun.lastActivityAt = timestamp;
       }
-      thread.lifecycle = "archived";
+      // A Bot entry is replaceable; its durable root remains an ancestor of
+      // independent work. Archiving it would make every child unresumable.
+      thread.lifecycle = thread.purpose === "bot-root" ? "settled" : "archived";
       thread.attention = "none";
       thread.waitingFor = null;
       // The report's TranscriptRef points at the file being deleted. Retaining

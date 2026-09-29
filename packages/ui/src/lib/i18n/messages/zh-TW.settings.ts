@@ -4018,6 +4018,8 @@
   'settings.computers.view.panelNoDirectory': '沒有活動工作區 — 請先開啟專案',
   'settings.computers.coordinator': '協調者',
   'settings.computers.view.waiting': "等待畫面…",
+  'settings.computers.view.textInput': '輸入要傳送到桌面的文字',
+  'settings.computers.view.sendText': '傳送文字',
   'settings.computers.view.takeover': "接管控制",
   'settings.computers.view.handback': "交還控制",
   'settings.computers.view.reclaim': "接管",

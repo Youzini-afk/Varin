@@ -1,6 +1,6 @@
 # Bot、长期记忆与 Computer Use 实施计划
 
-Status: partially implemented；BC0–BC4 已接入生产路径，BC0–BC2 的来源分段、容量与模型继承缺口已补齐；BC3–BC4 的源码补齐仍有原生平台、安装包与崩溃输入归属的验收边界；BC5–BC9 未实施。缺口与修复见 [验收记录](bot-computer-use-acceptance.md)。
+Status: partially implemented；BC0–BC9 均有生产实现，但尚未满足全部阶段交付条件。2026-09-29 深入验收修复了身份、控制、输入、远端、VM 和分发缺陷；共同记忆覆盖、独立桌面准备、guest 引导、成果/续接整合及完整平台组件仍未完成。以[当前验收](bot-computer-use-review.md)为准；[旧记录](bot-computer-use-acceptance.md)保留实施历史。
 
 Last updated: 2026-09-29
 

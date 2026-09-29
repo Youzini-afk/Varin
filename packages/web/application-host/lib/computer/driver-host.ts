@@ -76,18 +76,17 @@ export interface DriverSpawnSpec {
 }
 
 /**
- * Driver assets resolve in this order: an explicit VARIN_COMPUTER_DRIVER_DIR,
- * the repository's `packages/computer-driver` checkout (development — four
- * levels above this source file), then the staged `computer-driver/` inside
- * the Web package that build-application-host produces and packaged installs
- * ship (three levels above `server/lib/computer/`). Packaged layouts must
- * never depend on a source checkout.
+ * Explicit override, immutable assets in this compiled Host generation, then
+ * the source checkout for uncompiled development. Packaged code and drivers
+ * are published together and do not depend on a source checkout.
  */
 export function computerDriverDir(): string {
   if (process.env.VARIN_COMPUTER_DRIVER_DIR) return process.env.VARIN_COMPUTER_DRIVER_DIR;
+  const generationAssets = fileURLToPath(new URL("../../computer-driver", import.meta.url));
+  if (existsSync(generationAssets)) return generationAssets;
   const sourceCheckout = fileURLToPath(new URL("../../../../computer-driver", import.meta.url));
   if (existsSync(sourceCheckout)) return sourceCheckout;
-  return fileURLToPath(new URL("../../../computer-driver", import.meta.url));
+  return generationAssets;
 }
 
 /** Spawn spec for this platform's resident driver, or null when unsupported. */
@@ -144,7 +143,7 @@ export interface ComputerDriverSession {
   /** The last successful capabilities probe, if any. */
   readonly capabilities: ComputerCapabilities | null;
   alive(): boolean;
-  dispose(): void;
+  dispose(): void | Promise<void>;
 }
 
 export function createDriverSession(spec: DriverSpawnSpec): ComputerDriverSession {
@@ -155,6 +154,7 @@ export function createDriverSession(spec: DriverSpawnSpec): ComputerDriverSessio
   let stderrTail = "";
   let caps: ComputerCapabilities | null = null;
   let disposed = false;
+  const retiring = new Set<Promise<unknown>>();
   // Side-channel cancellation: long native ops poll <dir>/<id>.cancel so a
   // cancel lands mid-operation even while stdin is unread.
   const cancelDir = path.join(os.tmpdir(), `varin-computer-driver-${process.pid}-${randomUUID()}`);
@@ -212,7 +212,14 @@ export function createDriverSession(spec: DriverSpawnSpec): ComputerDriverSessio
     const target = child;
     child = null;
     failAll(error);
-    target?.kill();
+    if (target) {
+      // A failed caller wait does not prove the native helper stopped emitting
+      // input. Replacement/disposal must await actual process closure.
+      const closed = new Promise<void>((resolve) => target.once("close", () => resolve()));
+      retiring.add(closed);
+      void closed.finally(() => retiring.delete(closed));
+      target.kill();
+    }
   };
 
   const ensureChild = (): ChildProcess => {
@@ -297,9 +304,10 @@ export function createDriverSession(spec: DriverSpawnSpec): ComputerDriverSessio
     cancel,
     get capabilities() { return caps; },
     alive: isAlive,
-    dispose: () => {
+    dispose: async () => {
       disposed = true;
       stop(new Error("Computer driver disposed"));
+      await Promise.allSettled([...retiring]);
       clearCancelDir();
     },
   };

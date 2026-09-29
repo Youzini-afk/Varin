@@ -4,6 +4,8 @@ import request from "supertest";
 import { registerComputerRoutes } from "./computer-routes.js";
 import { HarnessServiceError } from "../harness/service-error.js";
 import type { ComputerDesktop, ComputerMachine } from "@varin/protocol";
+import { once } from "node:events";
+import type { AddressInfo } from "node:net";
 
 const machine: ComputerMachine = {
   id: "local",
@@ -33,11 +35,19 @@ const fixture = () => {
   };
   const app = express();
   app.use(express.json());
-  registerComputerRoutes(app, { computers: computers as never });
+  registerComputerRoutes(app, { computers: computers as never, hostId: 'host-1' });
   return { app, computers };
 };
 
 describe("computer routes (BC4)", () => {
+  it('rejects input at a connection whose owning Host identity changed', async () => {
+    const { app, computers } = fixture();
+    computers.act = vi.fn();
+    const response = await request(app).post('/api/computers/desktops/local-console/act')
+      .set('X-Varin-Computer-Host', 'previous-host').send({ action: { kind: 'key', app: 'editor', key: 'enter' } });
+    expect(response.status).toBe(409);
+    expect(computers.act).not.toHaveBeenCalled();
+  });
   it("GET /api/computers returns the catalog with the persisted default", async () => {
     const { app, computers } = fixture();
     const response = await request(app).get("/api/computers");
@@ -94,6 +104,27 @@ describe("computer routes (BC4)", () => {
 });
 
 describe("computer routes (BC5 control + view)", () => {
+  it('unsubscribes if the real HTTP viewer closes while subscription setup is pending', async () => {
+    const { app, computers } = fixture();
+    let finish!: (unsubscribe: () => void) => void;
+    computers.subscribeFrames = vi.fn(() => new Promise<() => void>((resolve) => { finish = resolve; }));
+    const server = app.listen(0, '127.0.0.1');
+    await once(server, 'listening');
+    const controller = new AbortController();
+    const unsubscribe = vi.fn();
+    try {
+      const response = await fetch(`http://127.0.0.1:${(server.address() as AddressInfo).port}/api/computers/desktops/local-console/stream?viewer=v`, { signal: controller.signal });
+      expect(response.status).toBe(200);
+      controller.abort();
+      await new Promise((resolve) => setTimeout(resolve, 20));
+      finish(unsubscribe);
+      await vi.waitFor(() => expect(unsubscribe).toHaveBeenCalledOnce());
+    } finally {
+      controller.abort();
+      server.closeAllConnections();
+      await new Promise<void>((resolve) => server.close(() => resolve()));
+    }
+  });
   const fixture5 = () => {
     const { app, computers } = fixture();
     const control = {

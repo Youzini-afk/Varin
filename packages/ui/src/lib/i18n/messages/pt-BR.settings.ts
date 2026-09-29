@@ -4017,6 +4017,8 @@
   'settings.computers.view.panelNoDirectory': 'Nenhum espaço de trabalho ativo — abra um projeto primeiro',
   'settings.computers.coordinator': 'Coordenador',
   'settings.computers.view.waiting': "Aguardando quadros…",
+  'settings.computers.view.textInput': 'Texto para digitar na área de trabalho',
+  'settings.computers.view.sendText': 'Enviar texto',
   'settings.computers.view.takeover': "Assumir o controle",
   'settings.computers.view.handback': "Devolver o controle",
   'settings.computers.view.reclaim': "Assumir",

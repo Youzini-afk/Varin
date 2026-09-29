@@ -103,6 +103,7 @@ const parseMachine = (record: KernelRecordResult): ComputerMachine | null => {
               providerId: asString(raw.vm.providerId)!,
               kind: "libvirt" as const,
               uri: asString(raw.vm.uri) ?? "",
+              ...(asString(raw.vm.storagePool) ? { storagePool: raw.vm.storagePool as string } : {}),
               domainUuid: asString(raw.vm.domainUuid) ?? "",
               volumePaths: Array.isArray(raw.vm.volumePaths)
                 ? raw.vm.volumePaths.filter((v): v is string => typeof v === "string")
@@ -134,8 +135,8 @@ const parseDesktop = (record: KernelRecordResult): ComputerDesktop | null => {
       ...(asString(raw.statusDetail) ? { statusDetail: raw.statusDetail as string } : {}),
       ...(isObject(raw.capabilities) ? { capabilities: raw.capabilities as unknown as ComputerCapabilities } : {}),
       // Remote mirror (BC6): calls route to the owning Host, never a local driver.
-      ...(isObject(raw.remote) && asString(raw.remote.connectionId) && asString(raw.remote.desktopId)
-        ? { remote: { connectionId: raw.remote.connectionId as string, desktopId: raw.remote.desktopId as string } }
+      ...(isObject(raw.remote) && asString(raw.remote.connectionId) && asString(raw.remote.desktopId) && asString(raw.remote.hostId)
+        ? { remote: { connectionId: raw.remote.connectionId as string, desktopId: raw.remote.desktopId as string, hostId: raw.remote.hostId as string } }
         : {}),
       ...(isObject(raw.usage) && asString(raw.usage.sessionId) && asString(raw.usage.at)
         ? { usage: { sessionId: raw.usage.sessionId as string, at: raw.usage.at as string } }
@@ -237,10 +238,13 @@ const observationOf = (
   if (asString(snapshot.focusedSummary)) observation.focusedSummary = snapshot.focusedSummary as string;
   if (asString(snapshot.selectedText)) observation.selectedText = snapshot.selectedText as string;
   if (asString(snapshot.screenshotPngBase64)) {
+    const png = Buffer.from(snapshot.screenshotPngBase64 as string, "base64");
+    const dimensions = png.length >= 24 && png.subarray(0, 8).equals(Buffer.from([137, 80, 78, 71, 13, 10, 26, 10]))
+      ? { width: png.readUInt32BE(16), height: png.readUInt32BE(20) } : {};
     observation.screenshot = {
       mime: "image/png",
       base64: snapshot.screenshotPngBase64 as string,
-      ...(bounds ? { width: Math.round(bounds.width), height: Math.round(bounds.height) } : {}),
+      ...dimensions,
     };
   }
   return observation;
@@ -266,9 +270,8 @@ class RemoteTransportError extends HarnessServiceError {
 interface QueuedOp {
   /**
    * `action` ops are automated script work — cancelled generations drop them.
-   * `input` ops are human control input — validated against the live control
-   * owner at execution time instead of a generation stamp, because the human
-   * stream continues across agent-side cancels while they still hold control.
+   * `input` ops are human control input — their owner, connection and captured
+   * control generation are checked again at dispatch.
    */
   kind: "observe" | "action" | "input";
   generation: number;
@@ -291,7 +294,7 @@ interface DesktopControl {
 export type DesktopViewEvent =
   | { type: "control"; control: ComputerControlState }
   | { type: "frame"; frame: ComputerDesktopFrame }
-  | { type: "error"; error: string };
+  | { type: "error"; error: string; terminal?: boolean };
 
 interface DesktopViewers {
   viewers: Map<string, (event: DesktopViewEvent) => void>;
@@ -309,6 +312,8 @@ interface DesktopLane {
   generation: number;
   /** Input ownership — BC5 takeover/handback state machine. */
   control: DesktopControl;
+  transitioning: boolean;
+  needsObservation: boolean;
 }
 
 /** A configured remote Host a `remote` desktop's calls route to (BC6). */
@@ -319,6 +324,8 @@ export interface ComputerRemoteHost {
   apiUrl: string;
   clientToken?: string;
   requestHeaders?: Record<string, string>;
+  /** Pinned when a desktop is discovered; connection edits cannot retarget it. */
+  expectedHostId?: string;
 }
 
 export interface ComputerServiceOptions {
@@ -351,7 +358,7 @@ export interface ComputerServiceOptions {
 }
 
 export interface ComputerService {
-  list(): Promise<ComputerListResult>;
+  list(options?: { localOnly?: boolean }): Promise<ComputerListResult>;
   /** Ensure the local machine/console desktop records exist. */
   ensureLocal(): Promise<{ machine: ComputerMachine; desktop: ComputerDesktop }>;
   /** Re-probe driver capabilities into the desktop record. */
@@ -374,7 +381,7 @@ export interface ComputerService {
     /** Harness session that issued the call — recorded as work association (BC8). */
     sessionId?: string;
   }): Promise<ComputerObservation>;
-  act(params: { desktopId?: string; action: ComputerAction; signal?: AbortSignal; sessionId?: string }): Promise<ComputerActionResult>;
+  act(params: { desktopId?: string; action: ComputerAction; automationEpoch?: string; signal?: AbortSignal; sessionId?: string }): Promise<ComputerActionResult>;
   cancel(desktopId?: string): Promise<{ cancelled: number; released: boolean }>;
   release(desktopId?: string): Promise<{ released: boolean }>;
   // --- BC5: control ownership + desktop view --------------------------------
@@ -392,7 +399,7 @@ export interface ComputerService {
    */
   handback(params: { desktopId?: string; holderId?: string }): Promise<{ control: ComputerControlState; requiresObservation: true }>;
   /** Human input through the same lane — only while `owner === "human"`. */
-  input(params: { desktopId?: string; holderId?: string; input: ComputerHumanInput }): Promise<ComputerInputResult>;
+  input(params: { desktopId?: string; holderId?: string; controlEpoch?: string; input: ComputerHumanInput }): Promise<ComputerInputResult>;
   /**
    * Subscribe a viewer to desktop frames + control changes. Closing the view
    * unsubscribes without cancelling work; when the holder's subscription
@@ -403,9 +410,8 @@ export interface ComputerService {
   /** Virtual machines on configured providers, with live domain state. */
   listVms(): Promise<ComputerVmDescriptor[]>;
   /**
-   * Create a VM on a configured provider. Idempotent by name: a retried call
-   * adopts the existing domain instead of duplicating it. The create journal
-   * is persisted on the machine record even when the create fails.
+   * Create a VM with a durable, preallocated UUID. A retry resumes only that
+   * identity; a coincidentally matching external domain name grants no ownership.
    */
   createVm(params: ComputerVmCreateParams): Promise<{ machine: ComputerMachine; created: boolean }>;
   /** Lifecycle on a VM machine's real domain UUID. */
@@ -421,6 +427,7 @@ export function createComputerService(options: ComputerServiceOptions): Computer
   let scopedClient: Promise<KernelScopedClient> | null = null;
   const drivers = new Map<string, ComputerDriverSession>();
   const lanes = new Map<string, DesktopLane>();
+  const controlEpoch = randomUUID();
   let disposed = false;
   let localReady: Promise<{ machine: ComputerMachine; desktop: ComputerDesktop }> | null = null;
   let localProbe: Promise<ComputerDesktop> | null = null;
@@ -469,6 +476,13 @@ export function createComputerService(options: ComputerServiceOptions): Computer
   ): Promise<KernelRecordResult> => {
     const client = await scoped();
     const existing = await client.getRecord(COMPUTER_CATALOG_WORKSPACE_ID, recordId);
+    // Catalog refresh must preserve the local control receipt. In particular a
+    // Host restart must not silently hand a human-owned desktop to automation.
+    if (recordType === "computer.desktop" && existing) {
+      const prior = JSON.parse(existing.payloadJson) as Record<string, unknown>;
+      if (payload.control === undefined && prior.control !== undefined) payload = { ...payload, control: prior.control };
+      if (payload.usage === undefined && prior.usage !== undefined) payload = { ...payload, usage: prior.usage };
+    }
     return client.putRecord({
       operationId: `${recordType}:${randomUUID()}`,
       workspaceId: COMPUTER_CATALOG_WORKSPACE_ID,
@@ -542,6 +556,8 @@ export function createComputerService(options: ComputerServiceOptions): Computer
       running: false,
       generation: 0,
       control: { owner: "agent", reachable: true, since: new Date().toISOString() },
+      transitioning: false,
+      needsObservation: false,
     };
     lanes.set(desktopId, lane);
     return lane;
@@ -555,7 +571,17 @@ export function createComputerService(options: ComputerServiceOptions): Computer
       ...(control.holderId ? { holderId: control.holderId } : {}),
       reachable: control.reachable,
       since: control.since,
+      automationEpoch: `${controlEpoch}:${laneFor(desktopId).generation}`,
+      ...(laneFor(desktopId).transitioning ? { transitioning: true } : {}),
     };
+  };
+
+  const persistControl = async (desktopId: string): Promise<void> => {
+    const { record } = await desktopRecord(desktopId);
+    await putRecord(record.recordId, "computer.desktop", record.state, {
+      ...JSON.parse(record.payloadJson) as Record<string, unknown>,
+      control: { ...laneFor(desktopId).control },
+    });
   };
 
   /** Broadcast the control record to every subscribed viewer (BC5.B). */
@@ -577,12 +603,13 @@ export function createComputerService(options: ComputerServiceOptions): Computer
   const fetchImpl = options.fetch ?? fetch;
 
   const remoteConnections = async (): Promise<ComputerRemoteHost[]> => (
-    options.remoteHosts ? (await options.remoteHosts().catch(() => [])) : []
+    options.remoteHosts ? await options.remoteHosts() : []
   );
 
   const remoteHeaders = (connection: ComputerRemoteHost, extra?: Record<string, string>): Headers => {
     const headers = new Headers(connection.requestHeaders ?? {});
     if (connection.clientToken) headers.set("Authorization", `Bearer ${connection.clientToken}`);
+    if (connection.expectedHostId) headers.set("X-Varin-Computer-Host", connection.expectedHostId);
     if (extra) for (const [name, value] of Object.entries(extra)) headers.set(name, value);
     return headers;
   };
@@ -601,19 +628,27 @@ export function createComputerService(options: ComputerServiceOptions): Computer
         method,
         headers: remoteHeaders(connection, body === undefined ? { Accept: "application/json" } : { Accept: "application/json", "Content-Type": "application/json" }),
         ...(body !== undefined ? { body: JSON.stringify(body) } : {}),
-        signal: signal ?? AbortSignal.timeout(45_000),
+        ...(signal ? { signal } : {}),
+        redirect: "error",
       });
     } catch (error) {
       throw new RemoteTransportError(
         `Remote Host "${connection.label}" is unreachable: ${error instanceof Error ? error.message : String(error)}`,
       );
     }
+    if (connection.expectedHostId && response.headers.get("x-varin-computer-host") !== connection.expectedHostId) {
+      await response.body?.cancel();
+      throw new RemoteTransportError("Remote computer Host identity changed; rediscover the actual target before operating it");
+    }
     return response;
   };
 
-  const remoteJson = async <T>(connection: ComputerRemoteHost, method: string, path: string, body?: unknown): Promise<T> => {
-    const response = await remoteFetch(connection, method, path, body);
-    const payload = await response.json().catch(() => null) as (T & { code?: string; error?: string }) | null;
+  const remoteJson = async <T>(connection: ComputerRemoteHost, method: string, path: string, body?: unknown, signal?: AbortSignal): Promise<T> => {
+    const response = await remoteFetch(connection, method, path, body, signal);
+    let payload: (T & { code?: string; error?: string }) | null;
+    try { payload = await response.json() as typeof payload; }
+    catch { throw new RemoteTransportError("Remote Host response was lost or malformed; submitted input may have executed"); }
+    if (!isObject(payload)) throw new RemoteTransportError("Remote Host returned no usable response");
     if (!response.ok) {
       const code = payload && typeof payload.code === "string" && ["invalid-params", "not-found", "forbidden", "denied", "unavailable"].includes(payload.code)
         ? payload.code as HarnessServiceError["harnessCode"]
@@ -635,7 +670,7 @@ export function createComputerService(options: ComputerServiceOptions): Computer
     if (!connection) {
       throw new HarnessServiceError("unavailable", `Remote Host "${desktop.remote.connectionId}" is no longer configured`);
     }
-    return { connection, remoteId: desktop.remote.desktopId, desktop };
+    return { connection: { ...connection, expectedHostId: desktop.remote.hostId }, remoteId: desktop.remote.desktopId, desktop };
   };
 
   /**
@@ -644,9 +679,16 @@ export function createComputerService(options: ComputerServiceOptions): Computer
    * unavailable with the real error instead of leaving a stale "available".
    */
   let remoteSyncAt = 0;
+  let remoteSync: Promise<void> | null = null;
   const syncRemote = async (): Promise<void> => {
     if (!options.remoteHosts) return;
+    if (remoteSync) return remoteSync;
     if (Date.now() - remoteSyncAt < 10_000) return;
+    const task = syncRemoteCatalog();
+    remoteSync = task;
+    try { await task; } finally { if (remoteSync === task) remoteSync = null; }
+  };
+  const syncRemoteCatalog = async (): Promise<void> => {
     remoteSyncAt = Date.now();
     const hosts = await remoteConnections();
     const liveIds = new Set(hosts.map((host) => `remote:${host.id}`));
@@ -667,10 +709,14 @@ export function createComputerService(options: ComputerServiceOptions): Computer
       ...hosts.map(async (host) => {
         const machineId = `remote:${host.id}`;
         try {
-          const catalog = await remoteJson<{ machines?: ComputerMachine[]; desktops?: ComputerDesktop[] }>(host, "GET", "/api/computers");
-          const remoteMachines = catalog.machines ?? [];
-          const remoteDesktops = catalog.desktops ?? [];
+          // Ask only for resources owned there. Federating already mirrored
+          // entries recursively creates an expanding A→B→A catalog.
+          const catalog = await remoteJson<ComputerListResult>(host, "GET", "/api/computers?local=1");
+          if (!Array.isArray(catalog.machines) || !Array.isArray(catalog.desktops)) throw new Error("Remote Host returned a malformed computer catalog");
+          const remoteMachines = catalog.machines.filter((machine) => machine.provider !== "remote");
+          const remoteDesktops = catalog.desktops.filter((desktop) => !desktop.remote && remoteMachines.some((machine) => machine.id === desktop.machineId));
           const primary = remoteMachines[0];
+          if (!primary?.coordinatorHostId) throw new Error("Remote computer catalog has no owning Host identity");
           await putRecord(`computer.machine:${machineId}`, "computer.machine", "active", {
             id: machineId,
             name: host.label,
@@ -693,7 +739,7 @@ export function createComputerService(options: ComputerServiceOptions): Computer
                 createdAt: now,
               });
             }
-            const mirrorDesktopId = `remote:${host.id}:${remoteDesktop.id}`;
+            const mirrorDesktopId = `remote:${host.id}:${primary.coordinatorHostId}:${remoteDesktop.id}`;
             const mirroredUsage = usageByDesktop.get(mirrorDesktopId);
             await putRecord(`computer.desktop:${mirrorDesktopId}`, "computer.desktop", remoteDesktop.status, {
               id: mirrorDesktopId,
@@ -702,12 +748,15 @@ export function createComputerService(options: ComputerServiceOptions): Computer
               kind: "remote-session",
               ...(remoteDesktop.statusDetail ? { statusDetail: remoteDesktop.statusDetail } : {}),
               ...(remoteDesktop.capabilities ? { capabilities: remoteDesktop.capabilities as unknown as Record<string, unknown> } : {}),
-              remote: { connectionId: host.id, desktopId: remoteDesktop.id },
+              remote: { connectionId: host.id, desktopId: remoteDesktop.id, hostId: primary.coordinatorHostId },
               ...(mirroredUsage ? { usage: mirroredUsage } : {}),
             });
           }
+          const retained = new Set(remoteDesktops.map((desktop) => `remote:${host.id}:${primary.coordinatorHostId}:${desktop.id}`));
+          await markRemoteDesktopsUnavailable(host.id, "Desktop is no longer advertised by its owning Host", retained);
         } catch (error) {
           const detail = error instanceof Error ? error.message : String(error);
+          await markRemoteDesktopsUnavailable(host.id, detail);
           await putRecord(`computer.machine:${machineId}`, "computer.machine", "unavailable", {
             id: machineId,
             name: host.label,
@@ -721,6 +770,7 @@ export function createComputerService(options: ComputerServiceOptions): Computer
         }
       }),
       ...known.filter((machine) => !liveIds.has(machine.id)).map(async (machine) => {
+        await markRemoteDesktopsUnavailable(machine.id.slice("remote:".length), "Host is no longer configured");
         await putRecord(`computer.machine:${machine.id}`, "computer.machine", "unavailable", {
           id: machine.id,
           name: machine.name,
@@ -732,6 +782,13 @@ export function createComputerService(options: ComputerServiceOptions): Computer
         }).catch(() => undefined);
       }),
     ]);
+  };
+  const markRemoteDesktopsUnavailable = async (connectionId: string, detail: string, keep = new Set<string>()) => {
+    for (const record of await listRecords("computer.desktop")) {
+      const desktop = parseDesktop(record);
+      if (desktop?.remote?.connectionId !== connectionId || keep.has(desktop.id)) continue;
+      await putRecord(record.recordId, "computer.desktop", "unavailable", { ...JSON.parse(record.payloadJson) as Record<string, unknown>, statusDetail: detail });
+    }
   };
 
   const pump = (lane: DesktopLane) => {
@@ -817,7 +874,7 @@ export function createComputerService(options: ComputerServiceOptions): Computer
     }
     const existing = drivers.get(desktopId);
     if (existing?.alive()) return { driver: existing, desktop };
-    existing?.dispose();
+    await existing?.dispose();
     observations.delete(desktopId);
     const driver = newDriver(spec);
     drivers.set(desktopId, driver);
@@ -828,11 +885,11 @@ export function createComputerService(options: ComputerServiceOptions): Computer
     return { driver, desktop };
   };
 
-  const list: ComputerService["list"] = async () => {
+  const list: ComputerService["list"] = async (listOptions) => {
     await ensureLocal();
     // Refresh remote mirrors before reading the catalog — remote truth wins
     // status, and an unreachable Host leaves an unavailable mirror (BC6).
-    await syncRemote().catch(() => undefined);
+    if (!listOptions?.localOnly) await syncRemote();
     localProbe ??= probe(LOCAL_DESKTOP_ID);
     // Probe failures are stored in the catalog and presented as unavailable.
     // Reading a catalog does not require the user to visit Settings first.
@@ -842,8 +899,8 @@ export function createComputerService(options: ComputerServiceOptions): Computer
       listRecords("computer.desktop"),
     ]);
     return {
-      machines: machines.map(parseMachine).filter((m): m is ComputerMachine => m !== null),
-      desktops: desktops.map(parseDesktop).filter((d): d is ComputerDesktop => d !== null),
+      machines: machines.map(parseMachine).filter((m): m is ComputerMachine => m !== null && (!listOptions?.localOnly || m.provider !== "remote")),
+      desktops: desktops.map(parseDesktop).filter((d): d is ComputerDesktop => d !== null && (!listOptions?.localOnly || !d.remote)),
       defaultDesktopId: await defaultDesktop(),
     };
   };
@@ -903,6 +960,16 @@ export function createComputerService(options: ComputerServiceOptions): Computer
       .getRecord(COMPUTER_CATALOG_WORKSPACE_ID, `computer.desktop:${LOCAL_DESKTOP_ID}`)
       .catch(() => null);
     const priorUsage = priorDesktop ? parseDesktop(priorDesktop)?.usage : undefined;
+    if (priorDesktop) {
+      const raw = JSON.parse(priorDesktop.payloadJson) as Record<string, unknown>;
+      if (isObject(raw.control) && raw.control.owner === "human") {
+        laneFor(LOCAL_DESKTOP_ID).control = {
+          owner: "human", reachable: false,
+          ...(asString(raw.control.holderId) ? { holderId: raw.control.holderId as string } : {}),
+          since: asString(raw.control.since) ?? now,
+        };
+      }
+    }
     const desktopResult = await putRecord(`computer.desktop:${LOCAL_DESKTOP_ID}`, "computer.desktop", desktopState, {
       id: LOCAL_DESKTOP_ID,
       machineId: LOCAL_MACHINE_ID,
@@ -940,7 +1007,7 @@ export function createComputerService(options: ComputerServiceOptions): Computer
           machineId: remote.desktop.machineId,
           label: remote.desktop.label,
           kind: remote.desktop.kind,
-          remote: { connectionId: remote.connection.id, desktopId: remote.remoteId },
+          remote: { connectionId: remote.connection.id, desktopId: remote.remoteId, hostId: remote.desktop.remote!.hostId },
           ...(remoteDesktop?.statusDetail ? { statusDetail: remoteDesktop.statusDetail } : {}),
           ...(remoteDesktop?.capabilities ? { capabilities: remoteDesktop.capabilities as unknown as Record<string, unknown> } : {}),
           ...(remote.desktop.usage ? { usage: remote.desktop.usage } : {}),
@@ -1052,7 +1119,7 @@ export function createComputerService(options: ComputerServiceOptions): Computer
           ...(params.textLimit !== undefined ? { textLimit: params.textLimit } : {}),
           ...(params.maxTreeNodes !== undefined ? { maxTreeNodes: params.maxTreeNodes } : {}),
           ...(params.maxTreeDepth !== undefined ? { maxTreeDepth: params.maxTreeDepth } : {}),
-        },
+        }, params.signal,
       );
       if (!result.observation) throw new HarnessServiceError("unavailable", "Remote Host returned no observation");
       // Keep the remote observation id — a later remote act must reference
@@ -1060,9 +1127,10 @@ export function createComputerService(options: ComputerServiceOptions): Computer
       // binding is mirrored locally.
       const observation = { ...result.observation, desktopId: id, machineId: remote.desktop.machineId };
       rememberObservation(observation);
-      await recordUsage(id, params.sessionId);
+      await recordUsage(id, params.sessionId).catch(() => undefined);
       return observation;
     }
+    const generation = laneGeneration(id);
     return enqueue(id, "observe", async () => {
       params.signal?.throwIfAborted();
       const { driver, desktop } = await driverFor(id);
@@ -1078,8 +1146,11 @@ export function createComputerService(options: ComputerServiceOptions): Computer
       params.signal?.throwIfAborted();
       if (!response.ok || !response.snapshot) throw new HarnessServiceError("unavailable", response.error ?? "Observe failed");
       const observation = observationOf(response.snapshot, desktop);
-      rememberObservation(observation);
-      await recordUsage(id, params.sessionId);
+      if (generation === laneGeneration(id) && !laneFor(id).transitioning) {
+        rememberObservation(observation);
+        if (laneFor(id).control.owner === "agent") laneFor(id).needsObservation = false;
+      }
+      await recordUsage(id, params.sessionId).catch(() => undefined);
       return observation;
     });
   };
@@ -1184,6 +1255,18 @@ export function createComputerService(options: ComputerServiceOptions): Computer
     if (!isObject(action) || !asString(action.app)) {
       throw new HarnessServiceError("invalid-params", "computer.act requires action.app");
     }
+    for (const key of ["x", "y", "fromX", "fromY", "toX", "toY", "pages", "elementIndex", "clickCount"] as const) {
+      if (action[key] !== undefined && asNumber(action[key]) === undefined) throw new HarnessServiceError("invalid-params", `${key} must be a finite number`);
+    }
+    if (action.elementIndex !== undefined && (!Number.isSafeInteger(action.elementIndex) || action.elementIndex < 0)) throw new HarnessServiceError("invalid-params", "elementIndex must be a nonnegative integer");
+    if (action.clickCount !== undefined && (!Number.isSafeInteger(action.clickCount) || action.clickCount <= 0)) throw new HarnessServiceError("invalid-params", "clickCount must be a positive integer");
+    if (action.pages !== undefined && action.pages <= 0) throw new HarnessServiceError("invalid-params", "pages must be positive");
+    if (action.mouseButton !== undefined && !["left", "right", "middle"].includes(action.mouseButton)) throw new HarnessServiceError("invalid-params", "Unknown mouse button");
+    if (action.clickMethod !== undefined && !["auto", "accessibility", "app_post", "global"].includes(action.clickMethod)) throw new HarnessServiceError("invalid-params", "Unknown input method");
+    if (action.direction !== undefined && !["up", "down", "left", "right"].includes(action.direction)) throw new HarnessServiceError("invalid-params", "Unknown scroll direction");
+    for (const key of ["text", "key", "value", "action", "observationId"] as const) {
+      if (action[key] !== undefined && typeof action[key] !== "string") throw new HarnessServiceError("invalid-params", `${key} must be a string`);
+    }
     switch (action.kind) {
       case "click":
         if (action.elementIndex === undefined && (action.x === undefined || action.y === undefined)) {
@@ -1224,16 +1307,17 @@ export function createComputerService(options: ComputerServiceOptions): Computer
     const action = structuredClone(params.action);
     const id = await resolveDesktopId(params.desktopId);
     validateAction(action);
+    const generation = laneGeneration(id);
     const remote = await remoteTargetFor(id);
     if (remote) {
       // The remote Host owns its lane and control state — forward the action
       // verbatim; element indexes resolve against its own observation record.
       try {
         const payload = await remoteJson<{ result?: ComputerActionResult }>(
-          remote.connection, "POST", `/api/computers/desktops/${encodeURIComponent(remote.remoteId)}/act`, { action },
+          remote.connection, "POST", `/api/computers/desktops/${encodeURIComponent(remote.remoteId)}/act`, { action, automationEpoch: params.automationEpoch }, params.signal,
         );
-        if (!payload.result) throw new HarnessServiceError("unavailable", "Remote Host returned no action result");
-        await recordUsage(id, params.sessionId);
+        if (!payload.result || typeof payload.result.accepted !== "boolean") throw new RemoteTransportError("Remote Host returned no valid action receipt");
+        await recordUsage(id, params.sessionId).catch(() => undefined);
         return payload.result;
       } catch (error) {
         if (error instanceof RemoteTransportError) {
@@ -1251,13 +1335,23 @@ export function createComputerService(options: ComputerServiceOptions): Computer
     }
     // Stamp the caller-side generation before any further await: a cancel
     // issued while this call resolves its driver still drops the action.
-    const generation = laneGeneration(id);
+    const assertAdmission = () => {
+      const lane = laneFor(id);
+      if (generation !== lane.generation) throw new CancelledActionError();
+      if (lane.control.owner !== "agent" || lane.transitioning) throw new HarnessServiceError("forbidden", "Desktop control is changing or held by a human");
+      if (lane.needsObservation) throw new HarnessServiceError("invalid-params", "Observe the desktop after handback before resuming input");
+      if (params.automationEpoch !== undefined && params.automationEpoch !== controlState(id).automationEpoch) {
+        throw new HarnessServiceError("forbidden", "This computer script was invalidated by a control change; start a new evaluation from the current scene");
+      }
+    };
+    assertAdmission();
     let submitted = false;
     try {
       const { response, desktop } = await enqueue(id, "action", async () => {
         params.signal?.throwIfAborted();
         const { driver, desktop } = await driverFor(id);
         params.signal?.throwIfAborted();
+        assertAdmission();
         const op = toDriverOp(id, action);
         submitted = true;
         const response = await requestWithAbort(driver, op, params.signal);
@@ -1273,12 +1367,12 @@ export function createComputerService(options: ComputerServiceOptions): Computer
       }
       const result: ComputerActionResult = { accepted: true, ...(response.text ? { detail: response.text } : {}) };
       if (laneGeneration(id) !== generation) result.cancelled = true;
-      if (response.snapshot) {
+      if (response.snapshot && laneGeneration(id) === generation) {
         const observation = observationOf(response.snapshot, desktop);
         rememberObservation(observation);
         result.observation = observation;
       }
-      await recordUsage(id, params.sessionId);
+      await recordUsage(id, params.sessionId).catch(() => undefined);
       return result;
     } catch (error) {
       if (error instanceof CancelledActionError) {
@@ -1369,32 +1463,39 @@ export function createComputerService(options: ComputerServiceOptions): Computer
     }
     await desktopRecord(id);
     const lane = laneFor(id);
-    // Same interlock as cancel(): bump the generation so queued automation and
-    // any stale script batch can never run under human control.
+    if (!params.holderId?.trim()) throw new HarnessServiceError("invalid-params", "A viewer identity is required for takeover");
+    if (lane.transitioning) throw new HarnessServiceError("forbidden", "Desktop control is already changing");
+    // Fence input before the first await. The previous implementation left
+    // owner=agent while draining, admitting fresh automation into the handoff.
+    lane.transitioning = true;
     lane.generation += 1;
-    const dropped = lane.queue.filter((entry) => entry.kind === "action");
-    lane.queue = lane.queue.filter((entry) => entry.kind !== "action");
+    lane.needsObservation = true;
+    const dropped = lane.queue.filter((entry) => entry.kind !== "observe");
+    lane.queue = lane.queue.filter((entry) => entry.kind === "observe");
     for (const entry of dropped) entry.cancel();
-    let released = true;
-    const driver = drivers.get(id);
-    if (driver?.alive()) {
-      // Interrupt the in-flight native op at its next checkpoint before the
-      // release sweep — a held key left down would corrupt human input.
-      driver.cancel();
-      const response = await enqueue(id, "observe", () => driver.request({ tool: "release_input" }));
-      released = response.ok;
-    }
-    // Stale observations must not fire after handback — the human will have
-    // changed the scene, so indexes from before the takeover are dead.
-    observations.delete(id);
     lane.control = {
       owner: "human",
-      ...(params.holderId ? { holderId: params.holderId } : {}),
-      reachable: true,
+      holderId: params.holderId,
+      reachable: false,
       since: new Date().toISOString(),
     };
+    observations.delete(id);
     broadcastControl(id);
-    return { control: controlState(id), cancelled: dropped.length, released };
+    drivers.get(id)?.cancel();
+    try {
+      await persistControl(id);
+      await enqueue(id, "observe", async () => {
+        const driver = drivers.get(id);
+        if (driver && (!driver.alive() || !(await driver.request({ tool: "release_input" })).ok)) {
+          throw new HarnessServiceError("unavailable", "Input release was not confirmed; desktop remains reserved for human recovery");
+        }
+      });
+      lane.control.reachable = viewers.get(id)?.viewers.has(params.holderId) ?? false;
+      return { control: { ...controlState(id), transitioning: false }, cancelled: dropped.filter((entry) => entry.kind === "action").length, released: true };
+    } finally {
+      lane.transitioning = false;
+      broadcastControl(id);
+    }
   };
 
   const handback: ComputerService["handback"] = async (params) => {
@@ -1412,24 +1513,47 @@ export function createComputerService(options: ComputerServiceOptions): Computer
     if (lane.control.owner !== "human") {
       throw new HarnessServiceError("invalid-params", `Desktop "${id}" is not under human control`);
     }
-    if (lane.control.holderId && params.holderId && lane.control.holderId !== params.holderId) {
+    if (!params.holderId || lane.control.holderId !== params.holderId) {
       throw new HarnessServiceError("forbidden", `Desktop "${id}" is held by another viewer`);
     }
-    // Lift whatever the human left held before automation may resume.
-    const driver = drivers.get(id);
-    if (driver?.alive()) {
-      await enqueue(id, "observe", () => driver.request({ tool: "release_input" }));
-    }
-    lane.control = { owner: "agent", reachable: true, since: new Date().toISOString() };
-    // Drop every observation — the next automated step must re-read the
-    // desktop the human left behind rather than replay pre-takeover indexes.
+    if (lane.transitioning) throw new HarnessServiceError("forbidden", "Desktop control is already changing");
+    lane.transitioning = true;
+    lane.generation += 1;
+    lane.needsObservation = true;
+    const dropped = lane.queue.filter((entry) => entry.kind !== "observe");
+    lane.queue = lane.queue.filter((entry) => entry.kind === "observe");
+    for (const entry of dropped) entry.cancel();
     observations.delete(id);
+    drivers.get(id)?.cancel();
     broadcastControl(id);
-    return { control: controlState(id), requiresObservation: true };
+    const previous = lane.control;
+    try {
+      await enqueue(id, "observe", async () => {
+        const driver = drivers.get(id);
+        if (driver && (!driver.alive() || !(await driver.request({ tool: "release_input" })).ok)) {
+          throw new HarnessServiceError("unavailable", "Input release was not confirmed; control remains human-owned");
+        }
+        lane.control = { owner: "agent", reachable: true, since: new Date().toISOString() };
+        try { await persistControl(id); }
+        catch (error) { lane.control = previous; throw error; }
+      });
+      return { control: { ...controlState(id), transitioning: false }, requiresObservation: true };
+    } finally {
+      lane.transitioning = false;
+      broadcastControl(id);
+    }
   };
 
   const validateHumanInput = (input: ComputerHumanInput): void => {
     if (!isObject(input)) throw new HarnessServiceError("invalid-params", "computer.input requires input");
+    for (const key of ["x", "y", "count", "pages"] as const) {
+      if (input[key] !== undefined && asNumber(input[key]) === undefined) throw new HarnessServiceError("invalid-params", `${key} must be a finite number`);
+    }
+    if (input.count !== undefined && (!Number.isSafeInteger(input.count) || input.count <= 0)) throw new HarnessServiceError("invalid-params", "count must be a positive integer");
+    if (input.pages !== undefined && input.pages <= 0) throw new HarnessServiceError("invalid-params", "pages must be positive");
+    if (input.button !== undefined && !["left", "right", "middle"].includes(input.button)) throw new HarnessServiceError("invalid-params", "Unknown mouse button");
+    if (input.direction !== undefined && !["up", "down", "left", "right"].includes(input.direction)) throw new HarnessServiceError("invalid-params", "Unknown scroll direction");
+    if (input.key !== undefined && typeof input.key !== "string") throw new HarnessServiceError("invalid-params", "key must be a string");
     switch (input.kind) {
       case "click": case "down": case "up": case "move":
         if (input.x === undefined || input.y === undefined) {
@@ -1460,28 +1584,31 @@ export function createComputerService(options: ComputerServiceOptions): Computer
       // The remote Host enforces ownership; the local check is only a mirror.
       return remoteJson<ComputerInputResult>(
         remote.connection, "POST", `/api/computers/desktops/${encodeURIComponent(remote.remoteId)}/input`,
-        { ...(params.holderId ? { holderId: params.holderId } : {}), input: params.input },
+        { ...(params.holderId ? { holderId: params.holderId } : {}), controlEpoch: params.controlEpoch, input: params.input },
       );
     }
     const lane = laneFor(id);
+    if (params.controlEpoch !== undefined && params.controlEpoch !== controlState(id).automationEpoch) throw new HarnessServiceError("forbidden", "Human input belongs to an earlier control generation");
     if (lane.control.owner !== "human") {
       throw new HarnessServiceError("forbidden", `Desktop "${id}" is not under human control`);
     }
-    if (lane.control.holderId && params.holderId && lane.control.holderId !== params.holderId) {
+    if (!params.holderId || lane.control.holderId !== params.holderId) {
       throw new HarnessServiceError("forbidden", `Desktop "${id}" is held by another viewer`);
     }
-    if (lane.control.reachable === false) {
+    if (lane.control.reachable === false || lane.transitioning) {
       // The holder's view channel dropped — do not trust input attributed to
       // it until it reconnects through subscribeFrames.
       throw new HarnessServiceError("forbidden", `Desktop "${id}" control holder is disconnected`);
     }
+    const generation = lane.generation;
     return enqueue(id, "input", async () => {
       // Re-check at execution: ownership may have flipped while queued.
       const control = laneFor(id).control;
-      if (control.owner !== "human" || (control.holderId && params.holderId && control.holderId !== params.holderId)) {
+      if (control.owner !== "human" || control.holderId !== params.holderId || !control.reachable || lane.transitioning || generation !== lane.generation) {
         return { accepted: false, detail: "control changed before the input ran" };
       }
       const { driver } = await driverFor(id);
+      if (lane.transitioning || generation !== lane.generation || !lane.control.reachable) return { accepted: false, detail: "control changed before dispatch" };
       const response = await driver.request({
         tool: "inject_input",
         kind: params.input.kind,
@@ -1562,7 +1689,7 @@ export function createComputerService(options: ComputerServiceOptions): Computer
       void (async () => {
         try {
           const reader = response.body?.getReader();
-          if (!reader) return;
+          if (!reader) throw new Error("Remote desktop stream has no body");
           const decoder = new TextDecoder();
           let buffer = "";
           for (;;) {
@@ -1586,10 +1713,10 @@ export function createComputerService(options: ComputerServiceOptions): Computer
             }
           }
           // The remote stream ended — tell the viewer, don't fake a frame.
-          listener({ type: "error", error: "Remote desktop stream ended" });
+          listener({ type: "error", error: "Remote desktop stream ended", terminal: true });
         } catch (error) {
           if (!controller.signal.aborted) {
-            try { listener({ type: "error", error: error instanceof Error ? error.message : String(error) }); } catch { /* */ }
+            try { listener({ type: "error", error: error instanceof Error ? error.message : String(error), terminal: true }); } catch { /* */ }
           }
         }
       })();
@@ -1616,12 +1743,23 @@ export function createComputerService(options: ComputerServiceOptions): Computer
     return () => {
       const current = viewers.get(id);
       if (!current) return;
+      if (current.viewers.get(viewerId) !== listener) return;
       current.viewers.delete(viewerId);
       const laneControl = laneFor(id).control;
       if (laneControl.owner === "human" && laneControl.holderId === viewerId) {
         // The disconnecting viewer held control — mark it pending-recovery
         // rather than silently handing back while its input may be mid-flight.
         laneControl.reachable = false;
+        const lane = laneFor(id);
+        lane.generation += 1;
+        const pendingInput = lane.queue.filter((op) => op.kind === "input");
+        lane.queue = lane.queue.filter((op) => op.kind !== "input");
+        for (const op of pendingInput) op.cancel();
+        const driver = drivers.get(id);
+        if (driver?.alive()) {
+          driver.cancel();
+          void enqueue(id, "observe", () => driver.request({ tool: "release_input" })).catch(() => undefined);
+        }
       }
       if (current.viewers.size === 0) {
         if (current.timer) clearInterval(current.timer);
@@ -1634,7 +1772,7 @@ export function createComputerService(options: ComputerServiceOptions): Computer
   // --- BC7: virtual machine lifecycle ----------------------------------------
 
   const vmExec: VmExec = options.vmExec ?? ((command, args, execOptions) => new Promise((resolve, reject) => {
-    const child = spawn(command, args, { stdio: [execOptions?.stdin !== undefined ? "pipe" : "ignore", "pipe", "pipe"], windowsHide: true });
+    const child = spawn(command, args, { stdio: [execOptions?.stdin !== undefined ? "pipe" : "ignore", "pipe", "pipe"], windowsHide: true, env: { ...process.env, LC_ALL: "C" } });
     const timer = setTimeout(() => { child.kill(); }, 60_000);
     let stdout = "";
     let stderr = "";
@@ -1651,21 +1789,35 @@ export function createComputerService(options: ComputerServiceOptions): Computer
   }));
 
   const vmProviderCache = new Map<string, VmProvider>();
+  const vmMutations = new Map<string, Promise<unknown>>();
+  const serializeVm = <T>(machineId: string, operation: () => Promise<T>): Promise<T> => {
+    const task = (vmMutations.get(machineId) ?? Promise.resolve()).catch(() => undefined).then(operation);
+    vmMutations.set(machineId, task);
+    return task.finally(() => { if (vmMutations.get(machineId) === task) vmMutations.delete(machineId); });
+  };
   const vmProviderFactory = options.vmProviderFactory ?? ((config: ComputerVmProviderConfig, exec: VmExec) =>
     createLibvirtProvider(config, exec));
 
   const vmProviderFor = async (providerId: string): Promise<{ config: ComputerVmProviderConfig; provider: VmProvider }> => {
-    const configs = options.vmProviders ? await options.vmProviders().catch(() => []) : [];
+    const configs = options.vmProviders ? await options.vmProviders() : [];
     const config = configs.find((entry) => entry.id === providerId);
     if (!config) {
       throw new HarnessServiceError("not-found", `Unknown VM provider "${providerId}"`);
     }
     let provider = vmProviderCache.get(providerId);
-    if (!provider || provider.config.uri !== config.uri) {
+    if (!provider || JSON.stringify(provider.config) !== JSON.stringify(config)) {
       provider = vmProviderFactory(config, vmExec);
       vmProviderCache.set(providerId, provider);
     }
     return { config, provider };
+  };
+
+  const boundVmProvider = async (binding: ComputerVmBinding): Promise<VmProvider> => {
+    const { provider } = await vmProviderFor(binding.providerId);
+    if (provider.config.uri !== binding.uri || (provider.config.storagePool || "default") !== (binding.storagePool || "default")) {
+      throw new HarnessServiceError("unavailable", "VM provider target or storage pool changed; restore its recorded connection before operating this machine");
+    }
+    return provider;
   };
 
   const vmMachineFor = async (machineId: string): Promise<{ record: KernelRecordResult; machine: ComputerMachine }> => {
@@ -1699,7 +1851,7 @@ export function createComputerService(options: ComputerServiceOptions): Computer
     let state: ComputerVmState = "unknown";
     let statusDetail: string | undefined;
     try {
-      const { provider } = await vmProviderFor(binding.providerId);
+      const provider = await boundVmProvider(binding);
       state = await provider.domainState(binding.domainUuid);
     } catch (error) {
       statusDetail = error instanceof Error ? error.message : String(error);
@@ -1724,26 +1876,14 @@ export function createComputerService(options: ComputerServiceOptions): Computer
     const descriptors: ComputerVmDescriptor[] = [];
     for (const machine of machines) {
       const descriptor = await describeVm(machine);
-      // Keep the catalog record aligned with real provider state.
-      const mapped = statusForVmState(descriptor.state);
-      if (machine.status !== mapped.status && machine.status !== "archived") {
-        await putRecord(`computer.machine:${machine.id}`, "computer.machine", mapped.status, {
-          id: machine.id,
-          name: machine.name,
-          provider: "virtual",
-          platform: machine.platform,
-          coordinatorHostId: machine.coordinatorHostId,
-          statusDetail: descriptor.statusDetail ?? mapped.detail,
-          vm: machine.vm,
-          createdAt: machine.createdAt,
-        }).catch(() => null);
-      }
+      // Listing is a projection. A stale read must not resurrect a machine
+      // archived by a concurrent delete.
       descriptors.push(descriptor);
     }
     return descriptors;
   };
 
-  const createVm = async (params: ComputerVmCreateParams): Promise<{ machine: ComputerMachine; created: boolean }> => {
+  const createVm = async (params: ComputerVmCreateParams): Promise<{ machine: ComputerMachine; created: boolean }> => serializeVm(`vm:${params.providerId}:${params.name}`, async () => {
     if (disposed) throw new HarnessServiceError("unavailable", "Computer service is closed");
     const providerId = asString(params.providerId);
     const name = asString(params.name);
@@ -1751,55 +1891,63 @@ export function createComputerService(options: ComputerServiceOptions): Computer
       throw new HarnessServiceError("invalid-params", "providerId and name are required");
     }
     const { provider } = await vmProviderFor(providerId);
+    const existing = (await listRecords("computer.machine")).map(parseMachine)
+      .find((machine) => machine?.provider === "virtual" && machine.vm?.providerId === providerId && machine.name === name && machine.status !== "archived") ?? null;
+    const machineId = existing?.id ?? `vm:${providerId}:${randomUUID()}`;
+    if (existing?.vm) await boundVmProvider(existing.vm);
+    const now = new Date().toISOString();
+    const binding: ComputerVmBinding = existing?.vm ?? {
+      providerId, kind: "libvirt", uri: provider.config.uri,
+      storagePool: provider.config.storagePool || "default",
+      domainUuid: randomUUID(), volumePaths: [], steps: [],
+    };
+    const priorSteps = [...binding.steps];
+    const persist = async (status: ComputerMachine["status"], detail?: string) => putRecord(`computer.machine:${machineId}`, "computer.machine", status, {
+      id: machineId, name, provider: "virtual", platform: "linux", coordinatorHostId: options.hostId,
+      vm: binding, createdAt: existing?.createdAt ?? now, ...(detail ? { statusDetail: detail } : {}),
+    });
+    // The UUID is durable before any provider side effect. A matching name
+    // alone never grants authority over an existing domain or its disks.
+    await persist("unavailable", "Creation is being reconciled with the provider");
     const outcome = await provider.create({
       name,
       memoryMiB: params.memoryMiB ?? 4096,
       vcpus: params.vcpus ?? 4,
       diskGiB: params.diskGiB ?? 40,
       ...(asString(params.baseImage) ? { baseImage: asString(params.baseImage)! } : {}),
+      domainUuid: binding.domainUuid,
+      volumePaths: binding.volumePaths,
+      checkpoint: async (progress) => {
+        binding.volumePaths = progress.volumePaths;
+        binding.steps = [...priorSteps, ...progress.steps.map((entry) => ({ ...entry, at: new Date().toISOString() }))];
+        await persist("unavailable", "Creation in progress; allocation receipt committed");
+      },
+    }).catch(async (error: unknown) => {
+      await persist("unavailable", error instanceof Error ? error.message : String(error));
+      throw error;
     });
-    const now = new Date().toISOString();
-    const machineId = `vm:${providerId}:${name}`;
-    const binding: ComputerVmBinding = {
-      providerId,
-      kind: "libvirt",
-      uri: provider.config.uri,
-      domainUuid: outcome.domainUuid ?? "",
-      volumePaths: outcome.volumePaths,
-      steps: outcome.steps.map((entry) => ({ ...entry, at: now })),
-    };
+    if (outcome.domainUuid && outcome.domainUuid !== binding.domainUuid) throw new HarnessServiceError("failed", "Provider returned another domain's identity");
+    binding.volumePaths = outcome.volumePaths;
+    binding.steps = [...priorSteps, ...outcome.steps.map((entry) => ({ ...entry, at: new Date().toISOString() }))];
     if (!outcome.ok) {
-      await putRecord(`computer.machine:${machineId}`, "computer.machine", "unavailable", {
-        id: machineId,
-        name,
-        provider: "virtual",
-        platform: "linux",
-        coordinatorHostId: options.hostId,
-        statusDetail: outcome.error ?? "create failed",
-        vm: binding,
-        createdAt: now,
-      });
+      await persist("unavailable", outcome.error ?? "create failed");
       throw new HarnessServiceError("failed", outcome.error ?? "VM create failed");
     }
     const state = await provider.domainState(binding.domainUuid).catch((): ComputerVmState => "unknown");
     const mapped = statusForVmState(state);
-    await putRecord(`computer.machine:${machineId}`, "computer.machine", mapped.status, {
-      id: machineId,
-      name,
-      provider: "virtual",
-      platform: "linux",
-      coordinatorHostId: options.hostId,
-      statusDetail: mapped.detail,
-      vm: binding,
-      createdAt: now,
-    });
+    await persist(mapped.status, mapped.detail);
     const record = await (await scoped()).getRecord(COMPUTER_CATALOG_WORKSPACE_ID, `computer.machine:${machineId}`);
     return { machine: parseMachine(record!)!, created: outcome.adopted !== true };
+  });
+
+  const withVmMachine = async <T>(machineId: string, operation: (machine: ComputerMachine) => Promise<T>): Promise<T> => {
+    const initial = (await vmMachineFor(machineId)).machine;
+    return serializeVm(`vm:${initial.vm!.providerId}:${initial.name}`, async () => operation((await vmMachineFor(machineId)).machine));
   };
 
-  const vmAction = async (params: { machineId: string; action: "start" | "shutdown" | "reboot" }): Promise<ComputerVmDescriptor> => {
-    const { machine } = await vmMachineFor(params.machineId);
-    const { provider } = await vmProviderFor(machine.vm!.providerId);
+  const vmAction = async (params: { machineId: string; action: "start" | "shutdown" | "reboot" }): Promise<ComputerVmDescriptor> => withVmMachine(params.machineId, async (machine) => {
+    if (machine.status === "archived") throw new HarnessServiceError("invalid-params", "This virtual machine was deleted");
+    const provider = await boundVmProvider(machine.vm!);
     const uuid = machine.vm!.domainUuid;
     if (params.action === "start") await provider.start(uuid);
     else if (params.action === "shutdown") await provider.shutdown(uuid);
@@ -1817,11 +1965,10 @@ export function createComputerService(options: ComputerServiceOptions): Computer
       createdAt: machine.createdAt,
     });
     return describeVm(machine);
-  };
+  });
 
-  const deleteVm = async (machineId: string, deleteDisks = false): Promise<void> => {
-    const { machine } = await vmMachineFor(machineId);
-    const { provider } = await vmProviderFor(machine.vm!.providerId);
+  const deleteVm = async (machineId: string, deleteDisks = false): Promise<void> => withVmMachine(machineId, async (machine) => {
+    const provider = await boundVmProvider(machine.vm!);
     await provider.delete(machine.vm!.domainUuid, machine.vm!.volumePaths, deleteDisks);
     // The record is archived, not erased — the create journal stays evidence
     // of what this Host once owned; archived machines leave `listVms`.
@@ -1835,7 +1982,7 @@ export function createComputerService(options: ComputerServiceOptions): Computer
       vm: machine.vm,
       createdAt: machine.createdAt,
     });
-  };
+  });
 
   return {
     list,
@@ -1872,9 +2019,8 @@ export function createComputerService(options: ComputerServiceOptions): Computer
       }
       await Promise.allSettled([...drivers.values()].map(async (driver) => {
         try { if (driver.alive()) await driver.request({ tool: "release_input" }); }
-        finally { driver.dispose(); }
+        finally { await driver.dispose(); }
       }));
-      for (const driver of drivers.values()) driver.dispose();
       drivers.clear();
       lanes.clear();
       observations.clear();

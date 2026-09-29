@@ -21,6 +21,7 @@ Operations:
 | `get_app_state` | snapshot: window bounds, UIA/AT-SPI tree lines + element records, optional screenshot |
 | `click`, `perform_secondary_action`, `scroll`, `drag`, `type_text`, `press_key`, `set_value` | actions; return a fresh snapshot after the input settles |
 | `release_input` | release the synthetic buttons/keys this driver pressed, rather than every desktop modifier |
+| `capture_frame` / `inject_input` | viewer frames and human input; successful down/move/up requests preserve a gesture across frame requests until explicit release, cancellation, failure or EOF |
 
 Action params mirror the Open Computer Use schema (`app`, `element`,
 `x`/`y`, `from_x`/`from_y`/`to_x`/`to_y`, `click_count`, `mouse_button`,
@@ -74,5 +75,7 @@ they could release a person's held keys or mouse buttons. A lost driver response
 therefore leaves the action effect and any held-input state unknown. Post-action
 capture failure preserves the input acceptance. Inspect the desktop before
 retrying.
-See the [BC acceptance record](../../docs/plan/bot-computer-use-acceptance.md)
+Drivers are staged inside the compiled Application Host generation at `server/computer-driver`, so publication replaces code and scripts together. Environment overrides remain explicit. Linux still requires its native Python/GI/AT-SPI/Gdk dependencies and an actual graphical session; script inclusion alone does not install those components.
+
+See the [BC acceptance record](../../docs/plan/bot-computer-use-review.md)
 for remaining native platform and packaging work.

@@ -1,0 +1,79 @@
+# BC0–BC9 深入验收
+
+Status: current acceptance — BC0–BC9 remain Partial.
+
+日期：2026-09-29。审查基线：`a4aae30d`；本报告包含随后直接修复的结果。
+
+**结论：不能接受“BC0–BC9 全部完成”。** Bot、记忆、Computer Use、桌面视图、远端转发与 libvirt 的生产路径确实存在；但基线有控制交接、磁盘归属、配置保存、入口生命周期等实际错误，且 BC6–BC9 的若干交付条件根本尚未实现。功能存在、行为正确和安装后可用是不同证据。下文是本次验收结论；[旧验收记录](bot-computer-use-acceptance.md)保留历史，不覆盖本报告。
+
+## 分阶段判断
+
+| 阶段 | 当前判断 | 决定性依据与剩余项 |
+| --- | --- | --- |
+| BC0 Bot | 核心身份与工作路径已接线，关键生命周期错误已修复 | Bot catalog、入口、人格、模型、根任务和工作列表有实际消费者。删除入口后的子任务准入现已保留。真实模型下跨日恢复与完整界面操作未验证。 |
+| BC1 统一记忆 | 部分完成 | 主动记忆和设置共用 TDB 写入/纠正/遗忘，存储测试覆盖耐久回执。但主动记忆只有会话来源，未与后台来源范围形成完整的共同覆盖；读取原始来源仍不是完整产品入口。 |
+| BC2 后台整理 | 部分完成 | 有真实后台推理、prepared 回执、分段、修订检查、取消和恢复。Bot 未显式设置模型时的继承已修复。主动写入与后台整理仍主要通过内容去重衔接；跨分支来源进度仍有缺口。 |
+| BC3 召回与咨询 | 核心路径已接线，整体仍为 Partial | 工作关联、文本/向量、快速判断、增量材料、Bot discussion 均有消费者。咨询保持只读。原始来源追读与主动/自动共同覆盖没有完整闭环；真实模型选材质量和缓存命中未验证。 |
+| BC4 本机 Computer Use | Windows 有有限运行证据；平台合同未完整完成 | 原生观察/输入与持久 REPL 已接线。本次修复脚本代次、截图输出、进程退出等待和跨请求拖拽。Linux/macOS 没有实际图形会话运行证据；Wayland 只实现 Screenshot portal 路径，未实现正式 RemoteDesktop 输入会话；macOS 仍为 JXA/旧捕获 API 路线。 |
+| BC5 实时桌面与交接 | 基础功能已接线并修复，未满足完整媒体路径合同 | 已有独立于 Agent 观察的 SSE 帧流。控制交接现在先阻断输入、等待释放、校验代次并保留重启后的人工归属。但帧采集仍与原生动作共用串行 driver，长动作会冻结画面；没有独立 Linux Xvnc/noVNC 媒体通路。 |
+| BC6 远端常驻 | 部分完成 | 已有鉴权 HTTP 镜像/操作/流转发。本次补了拥有者身份、取消、未知回执、镜像去递归和流断开处理。共享 SSH 连接管理仍有 Electron 专属入口；Linux 持久桌面准备、启动、组件部署与观看隧道尚未交付。直接在远端 Host 创建 Bot 与关闭客户端后持续运行的整条场景未实测。 |
+| BC7 虚拟机 | 生命周期子集已实现，创建可用电脑的合同未完成 | libvirt 真实 CLI 路径存在；本次修复了已有盘误删、按名字接管外部域、固定 UUID、分步回执、删除重试、provider 改绑与设置保存。创建仍只定义机器/磁盘；guest OS、桌面、浏览器、Host 安装、注册与自动进入共享桌面的流程尚未实现。 |
+| BC8 工作台整合 | 部分完成 | 已有共享桌面页签、Settings 入口、默认目标和最近会话链接。本次修复坐标、快捷键、拖拽、文本输入和切换目标后的旧画面。`desktop.usage` 仅是最近会话投影，尚不等于工作—电脑—成果闭环；远端成果引用/取得、人工交还事件对执行续接的集成仍不完整。 |
+| BC9 分发 | 资产构建路径已修复，整体未完成 | 驱动已改为随同一 Host generation 原子发布，编译产物可独立于 checkout 解析。原生依赖安装、Linux 桌面组件、macOS bundle/权限身份及完整安装包操作验证仍未交付或未验证。复制几份脚本不能代表这些部分已完成。 |
+
+## 本次直接修复
+
+| 问题 | 基线行为 | 修复与证据 |
+| --- | --- | --- |
+| Bot 入口删除 | 根任务被归档，现存子任务受到祖先归档限制而无法继续 | `thread-registry.ts` 保留 settled 的 Bot 根身份，清除已删除聊天的报告引用；`thread-admission.acceptance.test.ts` 通过真实 Registry 重新准入子任务。 |
+| Bot 损坏记录 | 损坏 profile 可能被当作不存在或从列表消失 | `bot-service.ts` 对已存在的坏记录报错，不以默认 profile 覆盖。 |
+| 整理模型继承 | Bot 模型偏好为空时，后台整理没有模型，即使入口已在使用 Pi 默认模型 | Host 读取该 Bot 入口的真实模型选择，冷态从其原生 model-change 历史解析；不借用其他聊天。 |
+| 接管竞态 | 等待 release 时仍为 agent owner，新输入能进入队列 | 接管在第一次等待前阻断输入，执行前再次检查 owner/代次；交还失败不会放行自动输入。 |
+| 旧脚本恢复 | 接管前的脚本睡眠后可在交还后继续输入 | 新增只读 `computer.control`；REPL 固定目标及 automation epoch，Host 对每次动作校验。未知/部分动作回执让普通脚本序列失败，避免不知情地继续。 |
+| REPL 异常挂起 | Node 原生 REPL 把同步异常和 await 拒绝送入 domain，默认 eval 回调不会完成；Agent 一直等待 | 接通该错误路径，并保留异常后的独立新求值；真实 Node worker 回归覆盖同步异常、远端动作未知、错误后继续和截图输出。 |
+| 人工归属 | 省略 holderId 可绕过检查；Host 重启默认切回 agent；旧连接关闭可误删新订阅 | 强制匹配持有者，执行时复查可达性和代次，持久保留人工归属，按具体订阅实例退订；断开时清理受管输入并保持人工归属。 |
+| 原生进程终止 | kill 发出后即可启动替代 driver，未等旧进程真正退出 | supervisor 追踪 close，替换和 dispose 等待实际退出。 |
+| 人工输入界面 | 丢弃画面负坐标原点；Ctrl+C 变成 c；没有 pointer move，拖拽松手可能丢失；切目标短暂沿用旧状态 | 按 frame bounds 缩放，保留组合键，pointer capture + move，HTTP 输入顺序化和代次校验；目标切换重建 pane；增加可用 IME/移动输入的文本入口，失败保留草稿。 |
+| Linux/macOS 拖拽 | 每次成功请求后的 release_input 会立刻松开人工按下的鼠标，连观看采集也会结束拖拽 | 成功的人工作用/只读请求保留持有状态，异常、明确释放和 EOF 清理。Linux 常驻循环用注入的 runtime 做了实际请求序列验证；不冒称 Linux 原生输入验证。 |
+| 脚本图像与 macOS 目标图 | REPL 只能返回 inspect 文本；macOS 窗口捕获失败可能以整桌图冒充原窗口 | 增加 `computer.emitImage`，输出真实 image block；删除坐标身份错误的整桌图回退，保留失败。 |
+| 远端转发 | 未传 abort；坏/丢失响应正文可能算普通失败；双向镜像递归扩张；掉线仍留下 available desktop | 贯通取消，失去有效回执报告 unknown，不重放；拉取仅由目标 Host 拥有的资源，按 Host 身份固定桌面引用，掉线/移除更新桌面状态。 |
+| 观看连接 | 在 subscribe 完成前关闭页面会泄漏订阅；远端流结束后本地流悬挂；慢客户端积累旧帧 | 提前登记 close，迟到完成立即退订；远端终止关闭 SSE 以便客户端重连；网络背压期间丢弃过时帧。 |
+| VM 磁盘与域归属 | 分配失败直接 vol-delete 同名盘；已有同名域被接管，domblklist 里的盘被当成自身资产 | 在变更前耐久保存随机 UUID；仅恢复同一身份；失败不盲删盘；已确认分配先持久化再 define。未知结果先查询，保留无法证明的状态。 |
+| VM 删除与 provider | undefine 成功后磁盘删除失败不能正常重试；provider URI/pool 改动会把旧身份送到新后端 | 删除支持域已经不存在的重试，仅删除匹配创建身份的记录盘；provider 改绑必须先恢复原连接才能操作旧机器；列表不再用旧状态覆盖并发删除。 |
+| VM 设置入口 | 通用 settings sanitizer 丢弃 computerVmProviders，保存后无法发现 provider | 接通同一设置读写和校验；测试覆盖保存、格式化响应、真实 configuredVmProviders 消费。 |
+| 构建原子性 | 编译完但验证前删除并重拷全局 driver 目录，旧 Host 可遇到缺失或混合版本 | 把 driver 放进 server/private-dev generation，同一次 rename 发布代码与资产；已做真实 Host 构建。 |
+
+## 仍须实现的合同
+
+这些是源码中的功能缺口，不是因缺少真机而暂缓作结论：
+
+1. **主动/自动记忆的共同来源覆盖。** `memory-services.ts` 的主动 remember 只记录 sessionId；`memory-organizer.ts` 以自身范围键推进覆盖；store 的稳定范围抑制主要识别 memory-organizer 来源。主动记忆被遗忘后，后台仍可能从同一交流形成改写版本。不能用字面去重或把整段会话永久屏蔽代替来源范围模型。
+2. **分支切换后的后台来源进度。** Host 提供 active branch；`collectSessionUnit` 在已覆盖 entry 不属于当前分支时直接报错。需要基于 Pi 原生分支来源重建未覆盖范围，保留有效处理回执，不能把旧游标失败写成完整恢复。
+3. **原始来源的可达操作。** memory get 返回条目和取代链、来源 ID；并未提供完整的授权来源读取/定位路径。简单地在文本里打印 sessionId 不满足“打开来源/沿来源追查”。
+4. **远端桌面准备与 Host 连接 owner。** `desktopHosts.ts` 仍依赖 desktop invoke；现有镜像不提供 Linux 桌面环境安装、Xvnc 启动、浏览器/数据目录和观看隧道的完整入口。
+5. **创建到可用 VM 桌面。** libvirt define/start 与 guest 系统、桌面、Host 引导/注册之间缺少产品实现。手工 baseImage 配方不能算自动准备；provider 不可用时只能如实报错。
+6. **工作、成果和交还续接。** 最近 session 指针不能表达多工作关联、远端成果版本和可用回执；控制交还目前也没有完整接入已有工作事件/继续执行通路。
+7. **正式平台组件。** Linux 依赖 Python/GI/AT-SPI/Gdk 和实际图形会话；安装/升级路径未提供这些依赖。macOS JXA 不等同于计划中的稳定 bundle/ScreenCaptureKit 组件，能力声明和权限检查还需实际平台实现与运行验证。
+
+## 工程判断
+
+保留现有 Pi、Host、TDB、Rust 的职责划分是合适的。Bot 和记忆大体沿既有 owner 扩展，prepared 记录比仅保存模型结果可靠。ComputerService 把 catalog、driver、控制、媒体、remote 和 VM 装配集中在一个大文件，后续补齐远端/VM 时应按这些实际职责拆开，继续由同一 Host 统一授权；不应再增加一套电脑或 Bot 后端。
+
+目前的完成报告把“文件存在/函数已接线”提升成了完整阶段交付，尤其掩盖了 BC6–BC9 的缺失消费者。应按上表验收，不沿旧标题宣布完成，也不把模拟 virsh 或静态 JXA 检查解释为真实平台通过。
+
+## 验证
+
+本次使用现有定向行为测试、必要回归、TypeScript、真实 Application Host 构建和隔离驱动检查；没有调用付费模型、创建真实 VM、修改用户桌面内容或发布安装包。
+
+- Host：Bot、记忆整理/召回、上下文、computer、线程准入、设置消费者测试。
+- Pi：computer 工具、持久 REPL、取消、图像输出、未知回执停止；memory 工具。
+- UI：坐标/快捷键映射、上下文面板与 i18n；UI 类型检查。
+- 协议与运行时：protocol build、Host 产品/测试类型、Pi 类型、变更文件 lint。
+- 分发：真实 `build:application-host:raw`；在临时安装布局中验证构建后的 driver 解析和 Windows ping，再删除本次临时目录。
+- 原生：Windows PowerShell 解析与常驻 helper ping；Linux AST 与注入 runtime 的常驻请求循环；macOS JS 语法。
+
+实际结果：Host 综合定向运行 **179 项通过**；后续修改只复验受影响的 computer/Bot/线程准入/settings 范围，**121 项通过**（与前一组重叠，不能相加）。Pi computer/memory **16 项通过**；UI 映射/面板/i18n **23 项通过**；文档工具 **9 项通过**。protocol 构建、Host 产品/测试类型、Pi/UI 类型和变更 TS/TSX lint 通过。真实 Host 构建的发布边界包含 449 个可达运行模块，排除了 52 个旧实现/测试产物；临时安装布局验证了六个驱动文件、代次内路径解析、测试 helper 排除及 Windows ping。
+
+VM 命令及 XML 语义另按 [libvirt virsh](https://libvirt.org/manpages/virsh.html) 与 [Domain XML](https://libvirt.org/formatdomain.html) 核对；这些资料不构成真实 hypervisor 的运行证据。
+
+真实 Linux/macOS 桌面、真实 libvirt、完整 Host↔Host 图形操作、正式安装包、付费模型效果与服务端缓存命中仍未验证。本报告不将上述空缺计为通过。

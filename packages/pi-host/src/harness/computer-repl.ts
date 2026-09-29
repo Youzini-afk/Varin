@@ -13,6 +13,20 @@ const context = new AsyncLocalStorage();
 const pending = new Map();
 let nextId = 0;
 const server = new REPLServer({ input: new PassThrough(), output: new PassThrough(), terminal: false });
+const finish = (run, error, value) => {
+  if (!run || run.closed) return;
+  let result;
+  try {
+    result = error ? { error: error.message || String(error) }
+      : { value: value === undefined ? undefined : typeof value === 'string' ? value : inspect(value, { depth: 6 }) };
+  } catch (failure) { result = { error: failure.message || String(failure) }; }
+  run.closed = true;
+  parentPort.postMessage({ type: 'result', id: run.id, logs: run.logs, ...result });
+};
+// Node's default REPL evaluator routes thrown/rejected evaluations through
+// its domain instead of invoking eval's callback. Consume that path as well;
+// AsyncLocalStorage keeps a late error attached to its original evaluation.
+server._domain.on('error', error => finish(context.getStore(), error));
 const call = (method, args) => {
   const run = context.getStore();
   if (!run || run.closed) return Promise.reject(new Error('Computer evaluation has ended'));
@@ -22,7 +36,7 @@ const call = (method, args) => {
     parentPort.postMessage({ type: 'call', runId: run.id, id, method, args });
   });
 };
-server.context.computer = Object.fromEntries(['list','apps','observe','act','cancel','release'].map(method => [method, (...args) => call(method, args)]));
+server.context.computer = Object.fromEntries(['list','apps','observe','act','cancel','release','emitImage'].map(method => [method, (...args) => call(method, args)]));
 server.context.sleep = server.context.computer.sleep = ms => new Promise(resolve => setTimeout(resolve, ms));
 server.context.console = Object.fromEntries(['log','warn','error'].map(method => [method, (...args) => {
   const run = context.getStore();
@@ -39,9 +53,7 @@ parentPort.on('message', message => {
   }
   const run = { id: message.id, closed: false, logs: [] };
   context.run(run, () => server.eval(message.script + '\n', server.context, 'computer-repl', (error, value) => {
-    run.closed = true;
-    parentPort.postMessage({ type: 'result', id: run.id, logs: run.logs,
-      ...(error ? { error: error.message } : { value: value === undefined ? undefined : typeof value === 'string' ? value : inspect(value, { depth: 6 }) }) });
+    finish(run, error, value);
   }));
 });
 `;

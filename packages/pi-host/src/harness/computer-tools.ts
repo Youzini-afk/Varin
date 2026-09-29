@@ -97,6 +97,7 @@ export function createComputerTool(bridge: HostServicesBridge, _sessionId: strin
       "act reports driver acceptance, not business completion; observe again to verify the UI changed.",
       "For sequences (fill a form, navigate a wizard) prefer action=run with a script over many round trips; bindings persist across run calls.",
       "In run scripts, top-level await and lexical declarations work; the last expression is the result (e.g. `const obs = await computer.observe('app'); obs.id`). Cancellation clears the script bindings.",
+      "Use await computer.emitImage(obs) to show an observation screenshot to the model. A script batch is invalidated by desktop cancellation or human handoff; start a new run after observing the current scene.",
       "cancel drops queued input; release frees held keys/buttons. Use them when a gesture must not continue.",
       "If the tool reports the desktop unavailable or unprobed, report that honestly — never claim a GUI action happened.",
     ],
@@ -217,13 +218,15 @@ export function createComputerTool(bridge: HostServicesBridge, _sessionId: strin
               // Snapshot the configured target once per evaluation. A settings
               // change while the script awaits must not redirect its next click.
               const requestOptions = { signal: controller.signal };
-              let target: Promise<string | undefined> | undefined;
+              const initial = (await bridge.request("computer.control", desktop ? { desktopId: desktop } : {}, requestOptions)).control;
+              const epochs = new Map([[initial.desktopId, initial.automationEpoch]]);
+              const images: Array<{ type: "image"; data: string; mimeType: string }> = [];
               const field = async (requested?: string) => {
-                if (requested ?? desktop) return { desktopId: (requested ?? desktop)! };
-                target ??= bridge.request("computer.list", {}, requestOptions).then((catalog) =>
-                  catalog.defaultDesktopId ?? (catalog.desktops.length === 1 ? catalog.desktops[0]?.id : undefined));
-                const id = await target;
-                if (!id) throw new Error("Select a desktop or pass desktopId to the computer call");
+                const id = requested ?? initial.desktopId;
+                if (!epochs.has(id)) {
+                  const control = (await bridge.request("computer.control", { desktopId: id }, requestOptions)).control;
+                  epochs.set(id, control.automationEpoch);
+                }
                 return { desktopId: id };
               };
               const api = {
@@ -231,10 +234,21 @@ export function createComputerTool(bridge: HostServicesBridge, _sessionId: strin
                 apps: async (id?: string) => bridge.request("computer.apps", await field(id), requestOptions).then((r) => r.apps),
                 observe: async (app: string, opts?: { desktopId?: string; window?: number | string; includeScreenshot?: boolean; textLimit?: number | "max" }) =>
                   bridge.request("computer.observe", { ...opts, ...await field(opts?.desktopId), app }, requestOptions).then((r) => r.observation),
-                act: async (action: ComputerAction, opts?: { desktopId?: string }) =>
-                  bridge.request("computer.act", { ...await field(opts?.desktopId), action }, requestOptions).then((r) => r.result),
+                act: async (action: ComputerAction, opts?: { desktopId?: string }) => {
+                  const target = await field(opts?.desktopId);
+                  const result = (await bridge.request("computer.act", { ...target, action, automationEpoch: epochs.get(target.desktopId)! }, requestOptions)).result;
+                  if (!result.accepted || result.cancelled || result.outcome) {
+                    throw new Error(`Computer action did not complete normally (${result.outcome ?? (result.cancelled ? "cancelled" : "rejected")}): ${result.detail ?? "observe the desktop before continuing"}`);
+                  }
+                  return result;
+                },
                 cancel: async (id?: string) => bridge.request("computer.cancel", await field(id), requestOptions),
                 release: async (id?: string) => bridge.request("computer.release", await field(id), requestOptions),
+                emitImage: async (observation: ComputerObservation) => {
+                  const screenshot = observation?.screenshot;
+                  if (!screenshot || screenshot.mime !== "image/png" || typeof screenshot.base64 !== "string") throw new Error("emitImage requires an observation with a screenshot");
+                  images.push({ type: "image", data: screenshot.base64, mimeType: screenshot.mime });
+                },
               };
               const result = await repl.run(params.script, async (method, args) => {
                 controller.signal.throwIfAborted();
@@ -243,7 +257,7 @@ export function createComputerTool(bridge: HostServicesBridge, _sessionId: strin
                 return fn(...args);
               }, controller.signal);
               const lines = [...result.logs, ...(result.value !== undefined ? [`⇒ ${result.value}`] : [])];
-              return { content: [{ type: "text", text: lines.join("\n") || "(no output)" }], details: { logs: result.logs } };
+              return { content: [{ type: "text", text: lines.join("\n") || "(no output)" }, ...images], details: { logs: result.logs } };
             } finally {
               clearTimeout(timer);
               signal?.removeEventListener("abort", abort);

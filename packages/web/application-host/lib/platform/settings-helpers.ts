@@ -148,6 +148,25 @@ export const createSettingsHelpers = (dependencies: SettingsHelpersDependencies)
     const candidate = payload as SettingsRecord;
     const result: SettingsRecord = {};
 
+    if (candidate.computerVmProviders !== undefined) {
+      if (!Array.isArray(candidate.computerVmProviders)) throw new Error('computerVmProviders must be an array');
+      const ids = new Set<string>();
+      result.computerVmProviders = candidate.computerVmProviders.map((value) => {
+        if (!value || typeof value !== 'object') throw new Error('Invalid computer VM provider');
+        const provider = value as Record<string, unknown>;
+        if (typeof provider.id !== 'string' || !provider.id.trim() || provider.kind !== 'libvirt'
+          || typeof provider.uri !== 'string' || !provider.uri.trim() || ids.has(provider.id.trim())) {
+          throw new Error('VM providers require a unique id, libvirt kind and connection URI');
+        }
+        ids.add(provider.id.trim());
+        return {
+          id: provider.id.trim(), kind: 'libvirt', uri: provider.uri.trim(),
+          ...Object.fromEntries(['label', 'storagePool', 'network'].flatMap((key) =>
+            typeof provider[key] === 'string' && provider[key].trim() ? [[key, provider[key].trim()]] : [])),
+        };
+      });
+    }
+
     if (typeof candidate.themeId === 'string' && candidate.themeId.length > 0) {
       result.themeId = candidate.themeId;
     }

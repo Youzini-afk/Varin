@@ -23,6 +23,11 @@ export interface VmCreateSpec {
   vcpus: number;
   diskGiB: number;
   baseImage?: string;
+  /** Host-persisted creation identity, established before any provider mutation. */
+  domainUuid?: string;
+  /** Previously confirmed allocation, never inferred from a matching VM name. */
+  volumePaths?: string[];
+  checkpoint?: (outcome: VmCreateOutcome) => Promise<void>;
 }
 
 /**
@@ -63,9 +68,9 @@ export interface VmProvider {
   /** State of one domain; throws not-found when the UUID is gone. */
   domainState(domainUuid: string): Promise<ComputerVmState>;
   /**
-   * Create a domain. MUST be idempotent: a prior call's recorded domain UUID,
-   * or an existing domain of the same name, is adopted rather than
-   * re-created. Returns the step journal even on failure — the caller
+   * Create a domain. Retries reconcile the caller's recorded UUID and confirmed
+   * allocations. Same-name domains with another UUID remain foreign resources.
+   * Returns the step journal even on failure — the caller
    * persists it before surfacing the error. Throws only for malformed
    * params, never for provider-side failure.
    */

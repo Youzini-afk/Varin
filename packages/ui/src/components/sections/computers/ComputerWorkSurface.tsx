@@ -93,7 +93,7 @@ export function ComputerWorkSurface({ directory, tabID }: { directory: string; t
         </button>
       ) : null}
       {selected ? (
-        <ComputerDesktopPane desktop={selected} />
+        <ComputerDesktopPane key={selected.id} desktop={selected} />
       ) : catalog ? (
         <div className="flex h-full items-center justify-center">
           <p className="typography-meta text-muted-foreground max-w-sm text-center">
