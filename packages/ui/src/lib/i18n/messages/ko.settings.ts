@@ -381,6 +381,8 @@
 'settings.page.harness.fastDecision.scholarly.description': '학술 논문, 관계, 인용 후보 판단에 빠른 판단 모델을 사용합니다.',
   'settings.page.harness.fastDecision.memory-organization': '메모리 정리',
   'settings.page.harness.fastDecision.memory-organization.description': '백그라운드 메모리 관계 판단에 빠른 결정 모델을 사용합니다.',
+  'settings.page.harness.fastDecision.memory-recall': '메모리 리콜',
+  'settings.page.harness.fastDecision.memory-recall.description': '요청 시 회수된 메모리가 목표에 기여하는지 빠른 결정 모델로 판단합니다.',
 'settings.page.harness.section.review': '자동 검토',
 'settings.page.harness.section.review.description': '자식 스레드가 비어 있지 않은 결과를 게시하면 해당 개정을 독립적으로 검토합니다. 완료 게이트를 켜지 않으면 일반 작업을 차단하지 않습니다.',
 'settings.page.harness.review.enabled': '게시된 결과 검토',

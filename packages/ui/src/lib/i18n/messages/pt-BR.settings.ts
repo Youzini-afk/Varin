@@ -3884,6 +3884,8 @@
   'settings.page.harness.fastDecision.scholarly.description': 'Usa o modelo de decisão rápida para julgar artigos acadêmicos, relações e candidatos de citações.',
   'settings.page.harness.fastDecision.memory-organization': 'Organização de memória',
   'settings.page.harness.fastDecision.memory-organization.description': 'Use o modelo de decisão rápida para julgamentos de relações de memória em segundo plano.',
+  'settings.page.harness.fastDecision.memory-recall': 'Recuperação de memória',
+  'settings.page.harness.fastDecision.memory-recall.description': 'Use o modelo de decisão rápida para julgar se as memórias recuperadas servem ao objetivo.',
   'settings.page.harness.section.review': 'Revisão automática',
   'settings.page.harness.section.review.description': 'Depois que um fio filho publica um resultado não vazio, revisa essa revisão de forma independente. Não bloqueia o trabalho comum, a menos que você ative o portão de conclusão.',
   'settings.page.harness.review.enabled': 'Revisar resultados publicados',

@@ -381,6 +381,8 @@
 'settings.page.harness.fastDecision.scholarly.description': 'Usa el modelo de decisión rápida para juzgar artículos académicos, relaciones y candidatos de citas.',
   'settings.page.harness.fastDecision.memory-organization': 'Organización de memoria',
   'settings.page.harness.fastDecision.memory-organization.description': 'Usa el modelo de decisión rápida para juicios de relaciones de memoria en segundo plano.',
+  'settings.page.harness.fastDecision.memory-recall': 'Recuperación de memoria',
+  'settings.page.harness.fastDecision.memory-recall.description': 'Usa el modelo de decisión rápida para juzgar si las memorias recuperadas sirven al objetivo.',
 'settings.page.harness.section.review': 'Revisión automática',
 'settings.page.harness.section.review.description': 'Tras publicar un resultado no vacío, revisa esa revisión de forma independiente. No bloquea el trabajo normal salvo que actives la puerta de finalización.',
 'settings.page.harness.review.enabled': 'Revisar resultados publicados',

@@ -381,6 +381,8 @@ export const settingsDict = {
   'settings.page.harness.fastDecision.scholarly.description': 'Use the fast decision model to judge scholarly papers, relations, and citation candidates.',
   "settings.page.harness.fastDecision.memory-organization": "Memory organization",
   "settings.page.harness.fastDecision.memory-organization.description": "Use the fast decision model for background memory relation judgments.",
+  "settings.page.harness.fastDecision.memory-recall": "Memory recall",
+  "settings.page.harness.fastDecision.memory-recall.description": "Use the fast decision model to judge which recalled memories contribute to the goal.",
   'settings.page.harness.section.review': 'Automatic review',
   'settings.page.harness.section.review.description': 'After a child thread publishes a non-empty result, run an independent review of that revision. This does not block ordinary work unless you turn on the completion gate.',
   'settings.page.harness.review.enabled': 'Review published results',

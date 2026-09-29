@@ -14,9 +14,11 @@ import { HarnessInferenceSettingsValidationError } from "./harness-inference.js"
  * Web and scholarly candidates; they reuse the same binding/override/cancel
  * machinery as `explore`. `memory-organization` is the BC2 consumer that
  * judges whether durable source fragments carry memory-worthy content before
- * a generative pass narrates proposals.
+ * a generative pass narrates proposals. `memory-recall` is the BC3 consumer
+ * that judges whether recalled memory candidates contribute to the current
+ * goal before they enter a model request.
  */
-export const FAST_DECISION_PURPOSES = ["explore", "web", "scholarly", "memory-organization"] as const;
+export const FAST_DECISION_PURPOSES = ["explore", "web", "scholarly", "memory-organization", "memory-recall"] as const;
 export type HarnessFastDecisionPurpose = (typeof FAST_DECISION_PURPOSES)[number];
 
 export type HarnessFastDecisionProtocol = "typesafe-systemone";

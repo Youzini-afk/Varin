@@ -60,12 +60,53 @@ const combineStatus = (statuses: readonly KnowledgeVectorStatus[]): KnowledgeVec
   return "unconfigured";
 };
 
+/**
+ * One authority store queried at its real scope (BC3): the owner store may be
+ * a workspace, bot, or session store; rows keep their own scope label.
+ */
+export interface MemoryRecallSource {
+  authority: KnowledgeStore;
+  scope: KnowledgeScope;
+  scopeId: string;
+}
+
+/**
+ * Durable keys of the work issuing a recall (BC3): memories whose provenance
+ * intersects these keys are bound to the current work item and are delivered
+ * ahead of generic text/vector hits.
+ */
+export interface MemoryRecallAssociation {
+  sessionIds?: readonly string[];
+  threadIds?: readonly string[];
+  runIds?: readonly string[];
+}
+
+const isAssociated = (candidate: Candidate, associated: MemoryRecallAssociation | undefined): boolean => {
+  const source = candidate.item.source;
+  if (!associated || !source) return false;
+  return (source.sessionId !== undefined && associated.sessionIds?.includes(source.sessionId) === true)
+    || (source.threadId !== undefined && associated.threadIds?.includes(source.threadId) === true)
+    || (source.runId !== undefined && associated.runIds?.includes(source.runId) === true);
+};
+
 const acceptedCandidates = async (
   authority: KnowledgeStore,
   scope: KnowledgeScope,
 ): Promise<Candidate[]> => (await authority.listKnowledge({ status: "accepted", activeOnly: true }))
   .filter((item) => item.scope === scope)
   .map((item) => ({ key: candidateKey(scope, item.id), item, authority }));
+
+/** Re-read a candidate through its authority so stale list snapshots never deliver dropped rows. */
+const revalidate = async (candidate: Candidate, signal?: AbortSignal): Promise<Knowledge | null> => {
+  signal?.throwIfAborted();
+  const current = await candidate.authority.getKnowledge(candidate.item.id);
+  if (!current || current.scope !== candidate.item.scope
+    || current.status !== "accepted" || current.invalidAt !== undefined
+    || current.content !== candidate.item.content || current.trigger !== candidate.item.trigger) {
+    return null;
+  }
+  return current;
+};
 
 async function recallCandidates(input: {
   candidates: Candidate[];
@@ -120,11 +161,8 @@ async function recallCandidates(input: {
 
   const results: RecallResult[] = [];
   for (const row of merged) {
-    input.signal?.throwIfAborted();
-    const current = await row.candidate.authority.getKnowledge(row.candidate.item.id);
-    if (!current || current.scope !== row.candidate.item.scope
-      || current.status !== "accepted" || current.invalidAt !== undefined
-      || current.content !== row.candidate.item.content || current.trigger !== row.candidate.item.trigger) continue;
+    const current = await revalidate(row.candidate, input.signal);
+    if (!current) continue;
     results.push({ node: nodeOf(current), score: row.score, via: row.via });
     if (results.length >= input.k) break;
   }
@@ -147,53 +185,54 @@ async function recallCandidates(input: {
   };
 }
 
-export async function recallKnowledge(input: {
-  authority: KnowledgeStore;
-  scope: KnowledgeScope;
-  scopeId: string;
-  workspaceId?: string;
+/**
+ * The shared memory-selection service for automatic Zone 2 recall and active
+ * `recall` reads (BC3): one candidate set across the calling scope's own store
+ * plus the user store, work-associated rows pinned ahead of ranked hits, and
+ * every delivered row re-read through its authority before it leaves.
+ */
+export async function recallSources(input: {
+  sources: readonly MemoryRecallSource[];
   query: string;
   k: number;
   vectors?: KnowledgeVectorRuntime;
+  /** Vector search is keyed by the caller's execution workspace when present. */
+  workspaceId?: string;
+  associated?: MemoryRecallAssociation;
   signal?: AbortSignal;
 }): Promise<{ results: RecallResult[]; details: KnowledgeRecallDetails }> {
-  const candidates = await acceptedCandidates(input.authority, input.scope);
-  return recallCandidates({
-    candidates,
+  const candidates = (await Promise.all(input.sources.map((source) => (
+    acceptedCandidates(source.authority, source.scope)
+  )))).flat();
+  const pinned = candidates
+    .filter((candidate) => isAssociated(candidate, input.associated))
+    .sort((left, right) => right.item.createdAt - left.item.createdAt || left.key.localeCompare(right.key));
+  const pinnedKeys = new Set(pinned.map((candidate) => candidate.key));
+  const pinnedResults: RecallResult[] = [];
+  const pinnedByAuthority = new Map<KnowledgeStore, number[]>();
+  for (const candidate of pinned) {
+    const current = await revalidate(candidate, input.signal);
+    if (!current || pinnedResults.length >= input.k) continue;
+    pinnedResults.push({ node: nodeOf(current), score: 0, via: "associated" });
+    const ids = pinnedByAuthority.get(candidate.authority) ?? [];
+    ids.push(current.id);
+    pinnedByAuthority.set(candidate.authority, ids);
+  }
+  await Promise.all([...pinnedByAuthority.entries()].map(([authority, ids]) => authority.recordRecall(ids)));
+  const ranked = await recallCandidates({
+    candidates: candidates.filter((candidate) => !pinnedKeys.has(candidate.key)),
     query: input.query,
-    k: input.k,
+    k: Math.max(input.k - pinnedResults.length, 0),
     ...(input.vectors ? { vectors: input.vectors } : {}),
     ...(input.vectors && input.workspaceId ? {
-      vectorScopes: [{ authority: input.authority, scope: input.scope, scopeId: input.scopeId }],
+      vectorScopes: input.sources.map((source) => ({
+        authority: source.authority,
+        scope: source.scope,
+        scopeId: source.scopeId,
+      })),
       workspaceId: input.workspaceId,
     } : {}),
     ...(input.signal ? { signal: input.signal } : {}),
   });
-}
-
-export async function recallWorkspaceAndUser(input: {
-  workspaceStore: KnowledgeStore;
-  userStore: KnowledgeStore | null;
-  workspaceId?: string;
-  query: string;
-  k: number;
-  vectors?: KnowledgeVectorRuntime;
-  signal?: AbortSignal;
-}): Promise<{ results: RecallResult[]; details: KnowledgeRecallDetails }> {
-  const workspace = await acceptedCandidates(input.workspaceStore, "workspace");
-  const user = input.userStore ? await acceptedCandidates(input.userStore, "user") : [];
-  return recallCandidates({
-    candidates: [...workspace, ...user],
-    query: input.query,
-    k: input.k,
-    ...(input.vectors ? { vectors: input.vectors } : {}),
-    ...(input.vectors && input.workspaceId ? {
-      vectorScopes: [
-        { authority: input.workspaceStore, scope: "workspace" as const, scopeId: input.workspaceId },
-        ...(input.userStore ? [{ authority: input.userStore, scope: "user" as const, scopeId: "user" }] : []),
-      ],
-      workspaceId: input.workspaceId,
-    } : {}),
-    ...(input.signal ? { signal: input.signal } : {}),
-  });
+  return { results: [...pinnedResults, ...ranked.results], details: ranked.details };
 }

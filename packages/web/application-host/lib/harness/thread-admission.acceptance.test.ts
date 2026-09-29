@@ -167,6 +167,62 @@ describe("root execution admission — service/registry acceptance", () => {
     }
   });
 
+  it("kind:discussion dispatches a read-only consult thread with no worktree or baseline", async () => {
+    const dataDir = await mkdtemp(join(tmpdir(), "varin-consult-dispatch-"));
+    const registry = createThreadRegistry({ dataDir, hostId: "audit" });
+    const spawn = vi.fn(async () => ({ sessionId: "consult" }));
+    const prepare = vi.fn(async () => baseline);
+    const dispatch = createThreadDispatchService({
+      threadRegistry: registry,
+      threadSpawnSession: spawn,
+      threadPrepareIsolatedBranch: prepare,
+    } as never);
+    try {
+      const result = await dispatch.handle({
+        task: "does the existing schema cover audit rows?",
+        kind: "discussion",
+        model: { providerId: "faux", modelId: "faux-model" },
+        tools: ["read", "edit", "memory", "bash"],
+      }, context());
+      const thread = await registry.getThread("workspace", { kind: "session", id: "parent" }, result.threadId);
+      expect(thread).toMatchObject({ kind: "discussion", lifecycle: "active" });
+      expect(thread?.worktree ?? "none").toBe("none");
+      // Write-capable and shell tools are clamped out of a consult Run.
+      expect(thread?.manifest.tools ?? []).toEqual(expect.arrayContaining(["read", "memory"]));
+      expect(thread?.manifest.tools ?? []).not.toContain("edit");
+      expect(thread?.manifest.tools ?? []).not.toContain("bash");
+      expect(prepare).not.toHaveBeenCalled();
+      expect(spawn).toHaveBeenCalledOnce();
+    } finally {
+      await registry.dispose();
+      await rm(dataDir, { recursive: true, force: true });
+    }
+  });
+
+  it("kind:discussion rejects preset, capability, and worktree combinations", async () => {
+    const dataDir = await mkdtemp(join(tmpdir(), "varin-consult-reject-"));
+    const registry = createThreadRegistry({ dataDir, hostId: "audit" });
+    const dispatch = createThreadDispatchService({
+      threadRegistry: registry,
+      threadSpawnSession: vi.fn(),
+      threadPrepareIsolatedBranch: async () => baseline,
+    } as never);
+    try {
+      await expect(dispatch.handle({
+        task: "x", kind: "discussion", worktree: "shared",
+        model: { providerId: "faux", modelId: "faux-model" },
+      }, context())).rejects.toMatchObject({ harnessCode: "invalid-params" });
+      await expect(dispatch.handle({
+        task: "x", kind: "invalid" as never,
+        model: { providerId: "faux", modelId: "faux-model" },
+      }, context())).rejects.toMatchObject({ harnessCode: "invalid-params" });
+      expect(await registry.listWorkspaceThreads("workspace")).toEqual([]);
+    } finally {
+      await registry.dispose();
+      await rm(dataDir, { recursive: true, force: true });
+    }
+  });
+
   it("releases a captured draft when inherit input capture fails", async () => {
     const dataDir = await mkdtemp(join(tmpdir(), "varin-inherit-cleanup-"));
     const workspaceRoot = join(dataDir, "workspace");

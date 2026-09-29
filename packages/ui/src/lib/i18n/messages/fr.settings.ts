@@ -280,6 +280,8 @@ export const settingsDict = {
 'settings.page.harness.fastDecision.scholarly.description': 'Utilise le modèle de décision rapide pour juger les articles académiques, les relations et les candidats de citations.',
   'settings.page.harness.fastDecision.memory-organization': 'Organisation de la mémoire',
   'settings.page.harness.fastDecision.memory-organization.description': 'Utiliser le modèle de décision rapide pour les jugements de relations de mémoire en arrière-plan.',
+  'settings.page.harness.fastDecision.memory-recall': 'Rappel de la mémoire',
+  'settings.page.harness.fastDecision.memory-recall.description': 'Utiliser le modèle de décision rapide pour juger si les mémoires rappelées servent l’objectif.',
   'settings.knowledge.automation.autoOrganize.workspace': 'Organiser la mémoire du workspace en arrière-plan',
   'settings.knowledge.automation.autoOrganize.user': 'Organiser la mémoire utilisateur en arrière-plan',
   'settings.knowledge.automation.autoOrganize.bot': 'Organiser la mémoire des bots en arrière-plan',

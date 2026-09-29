@@ -383,6 +383,8 @@
 'settings.page.harness.fastDecision.scholarly.description': '对学术论文、关系与引文候选用快速决策模型判断。',
   'settings.page.harness.fastDecision.memory-organization': '记忆整理',
   'settings.page.harness.fastDecision.memory-organization.description': '对后台记忆关系判断使用快速决策模型。',
+  'settings.page.harness.fastDecision.memory-recall': '记忆召回',
+  'settings.page.harness.fastDecision.memory-recall.description': '对请求时召回的记忆候选使用快速决策模型判断其与目标的贡献。',
 'settings.page.harness.section.review': '自动审阅',
 'settings.page.harness.section.review.description': '子线程发布非空结果后，对该修订做一次独立审阅。默认不阻断普通工作，除非打开完成门。',
 'settings.page.harness.review.enabled': '审阅已发布结果',

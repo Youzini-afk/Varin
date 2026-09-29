@@ -290,6 +290,8 @@ export const settingsDict = {
 'settings.page.harness.fastDecision.scholarly.description': '学術論文、関係、引用候補の判定に高速判定モデルを使います。',
   'settings.page.harness.fastDecision.memory-organization': 'メモリ整理',
   'settings.page.harness.fastDecision.memory-organization.description': 'バックグラウンドの記憶関係判定に高速判定モデルを使います。',
+  'settings.page.harness.fastDecision.memory-recall': 'メモリ呼び出し',
+  'settings.page.harness.fastDecision.memory-recall.description': '要求時に呼び出された記憶が目標に寄与するかを高速判定モデルで判断します。',
   'settings.knowledge.automation.autoOrganize.workspace': 'ワークスペース記憶をバックグラウンドで整理',
   'settings.knowledge.automation.autoOrganize.user': 'ユーザー記憶をバックグラウンドで整理',
   'settings.knowledge.automation.autoOrganize.bot': 'Bot 記憶をバックグラウンドで整理',

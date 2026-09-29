@@ -442,7 +442,7 @@ describe("production settings bind to public recall", () => {
     expect(calls).toContain("query");
     const zone = createKnowledgeContextRuntime({
       getStore: async () => store,
-      recall: async (workspaceId, authority, query) => {
+      recall: async ({ workspaceId, store: authority, query }) => {
         const { results } = await executeRecall(query, 5, {
           workspaceStore: authority,
           userStore: null,

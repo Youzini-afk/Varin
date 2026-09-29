@@ -166,7 +166,7 @@ describe("knowledge public service wiring", () => {
     const deps = { workspaceStore: store, userStore: null, workspaceId: "authority-workspace", vectors };
     const zone = createKnowledgeContextRuntime({
       getStore: async () => store,
-      recall: async (_workspaceId, _store, query, signal) => (await executeRecall(query, 5, deps, signal)).results,
+      recall: async ({ query, signal }) => (await executeRecall(query, 5, deps, signal)).results,
     });
     cleanup.push(() => zone.dispose());
     zone.bindSession(actor.sessionId, "authority-workspace");

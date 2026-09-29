@@ -381,6 +381,8 @@
 'settings.page.harness.fastDecision.scholarly.description': 'Використовує модель швидких рішень для оцінки наукових праць, зв’язків і кандидатів цитувань.',
   "settings.page.harness.fastDecision.memory-organization": "Організація пам'яті",
   "settings.page.harness.fastDecision.memory-organization.description": "Використовувати модель швидких рішень для оцінок зв'язків пам'яті у фоні.",
+  "settings.page.harness.fastDecision.memory-recall": "Пам'ять під час запиту",
+  "settings.page.harness.fastDecision.memory-recall.description": "Використовувати модель швидких рішень для оцінки того, чи згадана пам'ять допомагає цілі.",
 'settings.page.harness.section.review': 'Автоматичний огляд',
 'settings.page.harness.section.review.description': 'Після публікації непорожнього результату незалежно переглядає цю ревізію. Не блокує звичайну роботу, якщо не ввімкнути браму завершення.',
 'settings.page.harness.review.enabled': 'Переглядати опубліковані результати',

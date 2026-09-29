@@ -72,8 +72,9 @@ import { createSemanticIndexManagement, DEFAULT_SEMANTIC_INDEX_CONFIGURATION, re
 import { createWorkspaceSemanticRuntime } from './lib/knowledge/semantic/workspace-runtime.js';
 import { createEmbedScheduler } from './lib/knowledge/semantic/embed-scheduler.js';
 import { createVectorCache } from './lib/knowledge/semantic/vector-cache.js';
-import { createKnowledgeVectorRuntime, recallWorkspaceAndUser } from './lib/knowledge/vectors/index.js';
-import type { KnowledgeVectorRuntime } from './lib/knowledge/vectors/index.js';
+import { createKnowledgeVectorRuntime } from './lib/knowledge/vectors/index.js';
+import type { KnowledgeVectorRuntime, MemoryRecallSource } from './lib/knowledge/vectors/index.js';
+import { recallMemories } from './lib/memory/memory-recall.js';
 
 
 
@@ -84,7 +85,7 @@ import { createThreadRegistry } from './lib/harness/thread-registry.js';
 import { createOnThreadDequeued } from './lib/harness/thread-dequeue.js';
 import { createThreadTranscriptReader } from './lib/harness/thread-transcript.js';
 import { createHarnessPathAuthority } from './lib/harness/path-authority.js';
-import { sessionScopeId, isSessionScopeId, sessionIdFromScopeId, isSessionStoreKey, isBotStoreKey, isBotScopeId, botIdFromScopeId, knowledgeStoreKeyForScope } from './lib/harness/owner-scope.js';
+import { sessionScopeId, isSessionScopeId, sessionIdFromScopeId, isSessionStoreKey, isBotStoreKey, isBotScopeId, botIdFromScopeId, knowledgeStoreKeyForScope, scopeOfScopeId } from './lib/harness/owner-scope.js';
 import { createMemoryService } from './lib/memory/memory-service.js';
 import { createMemoryOrganizer, type OrganizerRunSource } from './lib/memory/memory-organizer.js';
 import { createExploreFileReader } from './lib/harness/explore-file-reader.js';
@@ -2841,18 +2842,58 @@ async function main(options: StartWebUiServerOptions = {}): Promise<WebUiServerC
     }
   }
 
+  const knowledgeStoreExistsForScope = (scopeId: string): Promise<boolean> => (
+    fsPromises.access(path.join(VARIN_DATA_DIR, 'knowledge', hostId, `${knowledgeStoreKeyForScope(scopeId)}.tdb`))
+      .then(() => true, () => false)
+  );
+
   const knowledgeContextRuntime = createKnowledgeContextRuntime({
     getStore: getKnowledgeStoreForScope,
     getUserStore: getUserKnowledgeStore,
-    recall: async (workspaceId, store, query, signal) => {
-      if (!knowledgeVectors) return store.recall(query, 5);
-      const { results } = await recallWorkspaceAndUser({
-        workspaceStore: store,
-        userStore: await getUserKnowledgeStore(),
-        workspaceId,
+    goalForSession: async (sessionId) => {
+      const binding = await threadRegistry.getSessionBinding(sessionId).catch(() => null);
+      if (!binding) return undefined;
+      const thread = await threadRegistry.getThread(binding.owningScopeId, binding.parent, binding.threadId).catch(() => null);
+      return thread?.brief.trim() || undefined;
+    },
+    // BC3: one selection service backs automatic recall and the `recall`
+    // tool — work-associated rows first, then scope-labeled text/vector hits,
+    // finally an optional memory-recall fast-decision pass. Retrieval never
+    // depends on the fast decision being configured or reachable.
+    recall: async ({ workspaceId, store, sessionId, query, goal, signal }) => {
+      const binding = await threadRegistry.getSessionBinding(sessionId).catch(() => null);
+      const sources: MemoryRecallSource[] = [{
+        authority: store,
+        scope: scopeOfScopeId(workspaceId),
+        scopeId: workspaceId,
+      }];
+      const ownScopeId = sessionScopeId(sessionId);
+      if (ownScopeId !== workspaceId && await knowledgeStoreExistsForScope(ownScopeId)) {
+        const sessionStore = await getKnowledgeStoreForScope(ownScopeId).catch(() => null);
+        if (sessionStore) sources.push({ authority: sessionStore, scope: 'session', scopeId: ownScopeId });
+      }
+      const userStore = await getUserKnowledgeStore().catch(() => null);
+      if (userStore) sources.push({ authority: userStore, scope: 'user', scopeId: 'user' });
+      const semantic = semanticRuntimeHolder.current;
+      const executionWorkspaceId = snapshotKnowledgeWorkspaceId(sessionId);
+      const { results } = await recallMemories({
+        sources,
         query,
         k: 5,
-        vectors: knowledgeVectors,
+        ...(knowledgeVectors ? { vectors: knowledgeVectors } : {}),
+        workspaceId,
+        ...(executionWorkspaceId ? { judgeWorkspaceId: executionWorkspaceId } : {}),
+        associated: {
+          sessionIds: [sessionId],
+          ...(binding ? { threadIds: [binding.threadId], runIds: [binding.runId] } : {}),
+        },
+        ...(goal !== undefined ? { goal } : {}),
+        ...(semantic && executionWorkspaceId ? {
+          fastDecision: {
+            status: semantic.fastDecisionStatus,
+            decide: semantic.fastDecision,
+          },
+        } : {}),
         ...(signal ? { signal } : {}),
       });
       return results;
@@ -3076,10 +3117,21 @@ async function main(options: StartWebUiServerOptions = {}): Promise<WebUiServerC
     const owningWorkspaceId = await owningKnowledgeScopeIdForSession(sessionId, workspaceId)
       ?? sessionScopeId(sessionId);
     const workspaceStore = await getKnowledgeStoreForScope(owningWorkspaceId);
+    const ownScopeId = sessionScopeId(sessionId);
+    const sessionStore = ownScopeId !== owningWorkspaceId && await knowledgeStoreExistsForScope(ownScopeId)
+      ? await getKnowledgeStoreForScope(ownScopeId).catch(() => null)
+      : null;
+    const binding = await threadRegistry.getSessionBinding(sessionId).catch(() => null);
     return {
       workspaceStore,
       userStore: await getUserKnowledgeStore(),
+      ...(sessionStore ? { sessionStore } : {}),
+      sessionId,
       workspaceId: owningWorkspaceId,
+      associated: {
+        sessionIds: [sessionId],
+        ...(binding ? { threadIds: [binding.threadId], runIds: [binding.runId] } : {}),
+      },
       ...(knowledgeVectors ? { vectors: knowledgeVectors } : {}),
     };
   }

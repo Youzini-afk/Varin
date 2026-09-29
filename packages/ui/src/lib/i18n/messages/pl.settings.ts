@@ -1155,6 +1155,8 @@
 'settings.page.harness.fastDecision.scholarly.description': 'Używa modelu szybkich decyzji do oceny prac naukowych, relacji i kandydatów cytowań.',
   'settings.page.harness.fastDecision.memory-organization': 'Organizacja pamięci',
   'settings.page.harness.fastDecision.memory-organization.description': 'Używaj modelu szybkich decyzji do ocen relacji pamięci w tle.',
+  'settings.page.harness.fastDecision.memory-recall': 'Przywoływanie pamięci',
+  'settings.page.harness.fastDecision.memory-recall.description': 'Używaj modelu szybkich decyzji do oceny, czy przywołane wspomnienia wspierają cel.',
 'settings.page.harness.section.review': 'Automatyczny przegląd',
 'settings.page.harness.section.review.description': 'Po opublikowaniu niepustego wyniku niezależnie przegląda tę rewizję. Nie blokuje zwykłej pracy, chyba że włączysz bramkę ukończenia.',
 'settings.page.harness.review.enabled': 'Przeglądaj opublikowane wyniki',

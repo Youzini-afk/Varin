@@ -12,10 +12,13 @@
  */
 
 import type { KnowledgeStore, RecallResult } from "../knowledge/store.js";
+import { scopeOfScopeId } from "./owner-scope.js";
 import {
-  recallWorkspaceAndUser,
+  recallSources,
   type KnowledgeRecallDetails,
   type KnowledgeVectorRuntime,
+  type MemoryRecallAssociation,
+  type MemoryRecallSource,
 } from "../knowledge/vectors/index.js";
 
 // ── Types ──────────────────────────────────────────────────────────
@@ -27,9 +30,15 @@ export interface RecallToolResult {
 }
 
 export interface RecallToolDeps {
+  /** The session's owning-scope store — workspace, bot, or session (BC3). */
   workspaceStore: KnowledgeStore;
   userStore: KnowledgeStore | null;
+  /** The session's own session-scope store, when one exists. */
+  sessionStore?: KnowledgeStore | null;
   workspaceId?: string;
+  sessionId?: string;
+  /** Durable work keys whose produced memories are delivered first. */
+  associated?: MemoryRecallAssociation;
   vectors?: KnowledgeVectorRuntime;
 }
 
@@ -42,13 +51,21 @@ export async function executeRecall(
   signal?: AbortSignal,
 ): Promise<RecallToolResult> {
   signal?.throwIfAborted();
-  const { workspaceStore, userStore } = deps;
-  const recalled = await recallWorkspaceAndUser({
-    workspaceStore,
-    userStore,
-    ...(deps.workspaceId === undefined ? {} : { workspaceId: deps.workspaceId }),
+  const sources: MemoryRecallSource[] = [{
+    authority: deps.workspaceStore,
+    scope: deps.workspaceId === undefined ? "workspace" : scopeOfScopeId(deps.workspaceId),
+    scopeId: deps.workspaceId ?? "workspace",
+  }];
+  if (deps.sessionStore && deps.sessionId) {
+    sources.push({ authority: deps.sessionStore, scope: "session", scopeId: `session:${deps.sessionId}` });
+  }
+  if (deps.userStore) sources.push({ authority: deps.userStore, scope: "user", scopeId: "user" });
+  const recalled = await recallSources({
+    sources,
     query,
     k,
+    ...(deps.workspaceId === undefined ? {} : { workspaceId: deps.workspaceId }),
+    ...(deps.associated ? { associated: deps.associated } : {}),
     ...(deps.vectors ? { vectors: deps.vectors } : {}),
     ...(signal ? { signal } : {}),
   });

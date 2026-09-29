@@ -63,12 +63,24 @@ export interface Zone2Knowledge {
   id: number;
   title: string;
   trigger: string;
-  scope?: "workspace" | "user";
+  scope?: "workspace" | "user" | "bot" | "session";
 }
 
 export interface Zone2KnowledgeInvalidation {
   id: number;
-  scope: "workspace" | "user";
+  scope: "workspace" | "user" | "bot" | "session";
+}
+
+/**
+ * An explicit correction (BC3): a previously delivered row was superseded and
+ * its accepted successor enters the request as an update, not a fresh recall.
+ */
+export interface Zone2KnowledgeCorrection {
+  id: number;
+  scope: "workspace" | "user" | "bot" | "session";
+  supersedes: number;
+  title: string;
+  trigger: string;
 }
 
 export interface Zone2Block {
@@ -138,6 +150,7 @@ export interface Zone2Material {
   git: Zone2Git | null;
   knowledge: Zone2Knowledge[];
   knowledgeInvalidations?: Zone2KnowledgeInvalidation[];
+  knowledgeCorrections?: Zone2KnowledgeCorrection[];
   blocks: Zone2Block[];
   /** Only a successful complete block read can establish a deletion. */
   blocksComplete?: boolean;
@@ -282,6 +295,10 @@ export function formatZone2Knowledge(item: Zone2Knowledge): string {
   return `#${item.id} ${item.title} — trigger: ${item.trigger}${scope}`;
 }
 
+export function formatZone2KnowledgeCorrection(item: Zone2KnowledgeCorrection): string {
+  return `#${item.id} (scope:${item.scope}) replaces #${item.supersedes} — ${item.title} — trigger: ${item.trigger}`;
+}
+
 /**
  * Assemble the varin-context message content from Zone 2 material.
  * Returns null if all sections are empty (no message should be sent).
@@ -298,6 +315,7 @@ export function assembleZone2Content(
   let newDiagnostics = material.newDiagnostics;
   let knowledge = material.knowledge;
   const knowledgeInvalidations = material.knowledgeInvalidations ?? [];
+  const knowledgeCorrections = material.knowledgeCorrections ?? [];
   const blocks = material.blocks;
   const git = material.git;
   const threads = material.threads ?? null;
@@ -316,6 +334,7 @@ export function assembleZone2Content(
     (!git || (!git.branch && !git.changed && !git.note)) &&
     knowledge.length === 0 &&
     knowledgeInvalidations.length === 0 &&
+    knowledgeCorrections.length === 0 &&
     blocks.length === 0 &&
     threadMaterial.length === 0 &&
     shellCompletions.length === 0 &&
@@ -407,6 +426,10 @@ export function assembleZone2Content(
   if (knowledgeInvalidations.length > 0) {
     const lines = knowledgeInvalidations.map((item) => `#${item.id} (scope:${item.scope}) is no longer available`);
     sections.push(`<knowledge-invalidations>\n${lines.join("\n")}\n</knowledge-invalidations>`);
+  }
+  if (knowledgeCorrections.length > 0) {
+    const lines = knowledgeCorrections.map(formatZone2KnowledgeCorrection);
+    sections.push(`<knowledge-corrections>\n${lines.join("\n")}\n</knowledge-corrections>`);
   }
 
   // Plan (blocks)

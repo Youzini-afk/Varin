@@ -1075,6 +1075,13 @@ export interface ThreadDispatchParams {
   concurrency?: number;
   task: string;
   /**
+   * Thread kind. Default `implementation` — a work-producing child Thread.
+   * `discussion` spawns a read-only consult Thread bound to the same owning
+   * scope: it answers questions against durable memory and workspace material
+   * and reports back through its result, without claiming worktree ownership.
+   */
+  kind?: "implementation" | "discussion";
+  /**
    * Optional execution preset id. Absent = normal dispatch on the caller's
    * current model and authorized tools (D-285).
    */

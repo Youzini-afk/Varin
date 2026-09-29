@@ -260,7 +260,7 @@ const recordOf = (value: unknown): Record<string, unknown> => (
 
 const LOOP_WINDOW = 6;
 const DEFAULT_STALLED_AFTER_MS = 300_000;
-const DISCUSSION_TOOLS = new Set([
+export const DISCUSSION_TOOLS = new Set([
   "read",
   "grep",
   "find",
@@ -271,6 +271,13 @@ const DISCUSSION_TOOLS = new Set([
   "recall",
   "webfetch",
   "websearch",
+  // A consult thread can inspect memory and report back to its parent; it
+  // never gains write, shell, or dispatch authority (BC3).
+  "memory",
+  "send",
+  "wait",
+  "threads",
+  "read_thread",
 ]);
 const THREAD_CONTROL_TOOLS = new Set(["dispatch", "threads", "wait", "send", "read_thread", "merge", "kill", "update"]);
 

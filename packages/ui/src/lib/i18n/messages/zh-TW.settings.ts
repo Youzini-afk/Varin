@@ -378,6 +378,8 @@
 'settings.page.harness.fastDecision.scholarly.description': '對學術論文、關係與引文候選用快速決策模型判斷。',
   'settings.page.harness.fastDecision.memory-organization': '記憶整理',
   'settings.page.harness.fastDecision.memory-organization.description': '對後台記憶關係判斷使用快速決策模型。',
+  'settings.page.harness.fastDecision.memory-recall': '記憶召回',
+  'settings.page.harness.fastDecision.memory-recall.description': '對請求時召回的記憶候選使用快速決策模型判斷其與目標的貢獻。',
 'settings.page.harness.section.review': '自動審閱',
 'settings.page.harness.section.review.description': '子執行緒發布非空結果後，對該修訂做一次獨立審閱。預設不阻斷普通工作，除非打開完成門。',
 'settings.page.harness.review.enabled': '審閱已發布結果',

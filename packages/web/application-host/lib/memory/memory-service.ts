@@ -11,6 +11,7 @@ import type {
   RecallResult,
 } from "../knowledge/store.js";
 import { KnowledgeMutationError } from "../knowledge/store.js";
+import { recallSources } from "../knowledge/vectors/index.js";
 import { botScopeId, sessionScopeId } from "../harness/owner-scope.js";
 
 /**
@@ -185,7 +186,13 @@ export function createMemoryService(deps: MemoryServiceDeps) {
     k = 8,
   ): Promise<RecallResult[]> => {
     const store = await storeFor(owner);
-    return store.recall(query, k);
+    // The same selection service backs automatic Zone 2 recall (BC3).
+    const { results } = await recallSources({
+      sources: [{ authority: store, scope: owner.scope, scopeId: memoryOwnerScopeId(owner) ?? owner.scope }],
+      query,
+      k,
+    });
+    return results;
   };
 
   return {

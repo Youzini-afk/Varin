@@ -98,7 +98,7 @@ describe("knowledge context runtime", () => {
     let recalls = 0;
     const runtime = createKnowledgeContextRuntime({
       getStore: async () => store,
-      recall: async (_workspaceId, current, query) => {
+      recall: async ({ store: current, query }) => {
         recalls += 1;
         return current.recall(query, 5);
       },
@@ -180,6 +180,93 @@ describe("knowledge context runtime", () => {
     });
     expect(retired.material.knowledgeInvalidations).toEqual([{ id, scope: "workspace" }]);
     await rebuilt.dispose();
+  });
+
+  it("delivers a superseding row as an explicit correction beside the invalidation", async () => {
+    const id = await store.putKnowledge({
+      scope: "workspace",
+      status: "accepted",
+      content: "The deadline is Friday",
+      trigger: "release deadline",
+    });
+    const superseded = await store.supersedeKnowledge(id, {
+      scope: "workspace",
+      status: "accepted",
+      content: "The deadline moved to Monday",
+      trigger: "release deadline",
+    });
+    const runtime = createKnowledgeContextRuntime({ getStore: async () => store });
+    runtime.bindSession("session-a", "workspace-1");
+    const result = await runtime.zone2Material({
+      sessionId: "session-a",
+      sinceTurn: 0,
+      query: "release deadline",
+      knownMaterial: {
+        [`knowledge:workspace:${id}`]: zone2MaterialRevision({ id, scope: "workspace", title: "The deadline is Friday", trigger: "release deadline" }),
+      },
+      contextUsage: null,
+    });
+    expect(result.material.knowledgeInvalidations).toEqual([{ id, scope: "workspace" }]);
+    expect(result.material.knowledgeCorrections).toEqual([{
+      id: superseded.id,
+      scope: "workspace",
+      supersedes: id,
+      title: "The deadline moved to Monday",
+      trigger: "release deadline",
+    }]);
+    await runtime.dispose();
+  });
+
+  it("recognizes retained bot- and session-scope rows for invalidation", async () => {
+    const id = await store.putKnowledge({
+      scope: "bot",
+      status: "accepted",
+      content: "Bot-owned fact",
+      trigger: "bot fact",
+    });
+    await store.retireKnowledge(id, "bot", {
+      content: "Bot-owned fact",
+      trigger: "bot fact",
+      status: "accepted",
+      invalidAt: null,
+    });
+    const runtime = createKnowledgeContextRuntime({ getStore: async () => store });
+    runtime.bindSession("session-a", "workspace-1");
+    const result = await runtime.zone2Material({
+      sessionId: "session-a",
+      sinceTurn: 0,
+      knownMaterial: { [`knowledge:bot:${id}`]: "whatever-was-delivered" },
+      contextUsage: null,
+    });
+    expect(result.material.knowledgeInvalidations).toEqual([{ id, scope: "bot" }]);
+    await runtime.dispose();
+  });
+
+  it("composes the recall query from the owning work's goal plus the latest message", async () => {
+    await store.putKnowledge({
+      scope: "workspace",
+      status: "accepted",
+      content: "Store layer migration decisions",
+      trigger: "migration runbook",
+    });
+    const queries: string[] = [];
+    const runtime = createKnowledgeContextRuntime({
+      getStore: async () => store,
+      goalForSession: async () => "migrate the store layer",
+      recall: async ({ query }) => { queries.push(query); return store.recall(query, 5); },
+    });
+    runtime.bindSession("session-a", "workspace-1");
+    const result = await runtime.zone2Material({
+      sessionId: "session-a",
+      sinceTurn: 0,
+      query: "keep going",
+      contextUsage: null,
+    });
+    expect(queries).toHaveLength(1);
+    expect(queries[0]).toContain("migrate the store layer");
+    expect(queries[0]).toContain("keep going");
+    expect(result.material.knowledge[0]?.title).toContain("Store layer migration");
+    await runtime.dispose();
   });
 
   it("keeps agent-authored events out of Zone 2 while preserving current blocks", async () => {

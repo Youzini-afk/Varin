@@ -27,7 +27,7 @@ import { RESEARCH_CAPABILITY_DEFINITIONS, isResearchCapability, type ResearchRes
 import { resolveNestedThreadScope, type ThreadControlToolName } from "./thread-nesting.js";
 import { sessionScopeId } from "./owner-scope.js";
 import { sameFrozenRunConfig, ThreadAdmissionError, ThreadRegistryError, type ThreadRegistry } from "./thread-registry.js";
-import { ThreadRuntimeError } from "./thread-runtime.js";
+import { DISCUSSION_TOOLS, ThreadRuntimeError } from "./thread-runtime.js";
 
 interface ThreadSnapshot {
   thread: Thread;
@@ -232,6 +232,12 @@ export function createThreadDispatchService(host: HarnessServiceHost): HarnessSe
       if (preset?.id === "retrieval" && !params.model) {
         throw new HarnessServiceError("unavailable", "retrieval is not configured; models.retrievalAgent is empty");
       }
+      if (params.kind !== undefined && params.kind !== "implementation" && params.kind !== "discussion") {
+        throw new HarnessServiceError("invalid-params", `Unknown thread kind: ${params.kind}`);
+      }
+      if (params.kind === "discussion" && (params.preset !== undefined || params.research !== undefined || params.worktree !== undefined)) {
+        throw new HarnessServiceError("invalid-params", "A discussion consult cannot carry a preset, research capability, or worktree");
+      }
       const research = params.research;
       if (research !== undefined && (!isResearchCapability(research.capability)
         || !research.resources
@@ -293,7 +299,10 @@ export function createThreadDispatchService(host: HarnessServiceHost): HarnessSe
       // inherits the caller's ordinary capabilities, so its claimed set must
       // stay inside the owning Run's frozen allowlist; a root session's
       // worker-resolved set is its own tools, which it already holds.
-      const tools = researchDefinition?.tools ?? preset?.tools ?? params.tools ?? [];
+      // A `discussion` consult never receives write-capable tools: it reads
+      // memory and workspace material and answers through its Run result.
+      const tools = (researchDefinition?.tools ?? preset?.tools ?? params.tools ?? [])
+        .filter((tool) => params.kind === "discussion" ? DISCUSSION_TOOLS.has(tool) : true);
       if (owner && !preset) {
         const denied = tools.filter((tool) => !owner.execution.tools.includes(tool));
         if (denied.length > 0) {
@@ -347,13 +356,13 @@ export function createThreadDispatchService(host: HarnessServiceHost): HarnessSe
         ...(params.input === "inherit" ? { inputOrigin: "inherit" as const } : {}),
         ...(inheritedContext ? { inheritedContext } : {}),
         ...(initialAuthorityRoot !== undefined ? { initialAuthorityRoot } : {}),
-        kind: "implementation" as const,
+        kind: params.kind === "discussion" ? "discussion" as const : "implementation" as const,
         createdBy: "agent" as const,
         concurrency,
         autoRun: true,
-        worktree,
-        ...(captured.draftBaselineId ? { draftBaselineId: captured.draftBaselineId } : {}),
-        ...(captured.sourceViewId ? { sourceViewId: captured.sourceViewId } : {}),
+        worktree: params.kind === "discussion" ? "none" as const : worktree,
+        ...(captured.draftBaselineId && params.kind !== "discussion" ? { draftBaselineId: captured.draftBaselineId } : {}),
+        ...(captured.sourceViewId && params.kind !== "discussion" ? { sourceViewId: captured.sourceViewId } : {}),
         tools,
         permissions: normalizeFrozenHarnessPermissions(owner?.execution.permissions),
         ...(params.model ? { model: params.model } : {}),

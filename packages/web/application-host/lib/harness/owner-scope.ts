@@ -51,3 +51,8 @@ export const isSessionStoreKey = (value: unknown): value is string => (
 export const isBotStoreKey = (value: unknown): value is string => (
   typeof value === "string" && /^bot-[0-9a-f]{32}$/.test(value)
 );
+
+/** The KnowledgeScope an owning scope id addresses: bot:/session: prefixes, `user`, else a workspace. */
+export const scopeOfScopeId = (scopeId: string): "workspace" | "user" | "session" | "bot" => (
+  isBotScopeId(scopeId) ? "bot" : isSessionScopeId(scopeId) ? "session" : scopeId === "user" ? "user" : "workspace"
+);

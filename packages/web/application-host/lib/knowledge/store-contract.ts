@@ -206,7 +206,7 @@ export interface OrganizerProgress {
 export interface RecallResult {
   node: KnowledgeOrEvent;
   score: number;
-  via: "text" | "vector" | "graph";
+  via: "text" | "vector" | "graph" | "associated";
 }
 
 export interface EmbeddingProvider {

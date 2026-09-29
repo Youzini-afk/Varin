@@ -1,8 +1,8 @@
 import type { DocumentMutationObservation } from "../documents/authority.js";
-import type { Zone2ContextUsage, Zone2Material, Zone2ShellCompletion } from "../harness/zone2.js";
+import type { Zone2ContextUsage, Zone2Knowledge, Zone2Material, Zone2ShellCompletion } from "../harness/zone2.js";
 import type { ShellCommandCompletedEvent, ShellCommandOutputEvent, ShellCommandStartedEvent } from "../harness/shell-supervisor.js";
 import { createObservers, type DiagnosticEvent, type GitStatusEvent, type Observers, type TerminalCommandEvent, type TerminalExitEvent } from "./observers.js";
-import { terminalCommandDedupeKey, type KnowledgeStore, type RecallResult, type StoredEvent } from "./store.js";
+import { terminalCommandDedupeKey, type KnowledgeScope, type KnowledgeStore, type RecallResult, type StoredEvent } from "./store.js";
 
 interface SessionBinding {
   gitFingerprint: string | null;
@@ -22,9 +22,22 @@ interface SessionBinding {
 
 export interface KnowledgeContextRuntimeOptions {
   getStore(workspaceId: string): Promise<KnowledgeStore | null>;
-  /** Optional user store used by cross-scope recall (workspace and user IDs overlap). */
+  /** Optional user store used by cross-scope recall (owner and user IDs overlap). */
   getUserStore?: () => Promise<KnowledgeStore | null>;
-  recall?: (workspaceId: string, store: KnowledgeStore, query: string, signal?: AbortSignal) => Promise<RecallResult[]>;
+  /**
+   * BC3: the goal the session is working toward (owning thread brief). When
+   * present it joins the latest user message as the recall query, so a
+   * continuation like "keep going" still retrieves the work's memories.
+   */
+  goalForSession?: (sessionId: string) => Promise<string | undefined>;
+  recall?: (input: {
+    workspaceId: string;
+    store: KnowledgeStore;
+    sessionId: string;
+    query: string;
+    goal?: string;
+    signal?: AbortSignal;
+  }) => Promise<RecallResult[]>;
   onError?: (error: unknown) => void;
 }
 
@@ -444,17 +457,26 @@ export function createKnowledgeContextRuntime(options: KnowledgeContextRuntimeOp
     }));
     material.blocksComplete = true;
     const query = request.query?.trim();
+    const goal = options.goalForSession
+      ? await options.goalForSession(request.sessionId).catch(() => undefined)
+      : undefined;
+    // BC3: the recall query carries the owning work's goal plus the latest
+    // message, so "continue" still reaches the memories bound to that work.
+    const recallQuery = [goal, query].filter((part) => part !== undefined && part.length > 0).join("\n") || undefined;
     const retainedKnowledge = Object.keys(request.knownMaterial ?? {}).flatMap((key) => {
-      const match = /^knowledge:(workspace|user):(\d+)$/.exec(key);
+      const match = /^knowledge:(workspace|user|bot|session):(\d+)$/.exec(key);
       if (!match) return [];
-      return [{ scope: match[1] as "workspace" | "user", id: Number(match[2]) }];
+      return [{ scope: match[1] as KnowledgeScope, id: Number(match[2]) }];
     });
-    const userStore = (query || retainedKnowledge.length > 0) && options.getUserStore
+    const userStore = (recallQuery || retainedKnowledge.length > 0) && options.getUserStore
       ? await options.getUserStore()
       : null;
+    // Owner-scope rows (workspace/bot/session) live in `store`; only `user`
+    // rows resolve against the user store.
+    const storeForScope = (scope: KnowledgeScope) => scope === "user" ? userStore : store;
     if (retainedKnowledge.length > 0) {
       const invalidations = (await Promise.all(retainedKnowledge.map(async ({ scope, id }) => {
-        const source = scope === "user" ? userStore : store;
+        const source = storeForScope(scope);
         if (!source) return [];
         const current = await source.getKnowledge(id);
         return !current || current.invalidAt !== undefined || current.status !== "accepted"
@@ -465,7 +487,7 @@ export function createKnowledgeContextRuntime(options: KnowledgeContextRuntimeOp
         (material as Zone2Material & { knowledgeInvalidations: typeof invalidations }).knowledgeInvalidations = invalidations;
       }
     }
-    if (query) {
+    if (recallQuery) {
       // Recall is a query operation, not a per-request poll. Store-owned
       // knowledge revisions invalidate the cache in O(1), while the cached
       // RecallResult retains its source scope/payload (workspace and user
@@ -473,7 +495,7 @@ export function createKnowledgeContextRuntime(options: KnowledgeContextRuntimeOp
       const workspaceRevision = store.knowledgeRevision();
       const userRevision = userStore ? userStore.knowledgeRevision() : null;
       const cached = binding.recallCache;
-      const sameQuery = cached?.query === query;
+      const sameQuery = cached?.query === recallQuery;
       const revisionsChanged = !cached
         || cached.workspaceRevision !== workspaceRevision
         || cached.userRevision !== userRevision;
@@ -481,8 +503,8 @@ export function createKnowledgeContextRuntime(options: KnowledgeContextRuntimeOp
         const invalidations = (await Promise.all(cached.results.flatMap(async (result) => {
           if (result.node.type !== "knowledge") return [];
           const payload = result.node.payload;
-          const scope: "user" | "workspace" = payload.scope === "user" ? "user" : "workspace";
-          const source = scope === "user" ? userStore : store;
+          const scope = payload.scope as KnowledgeScope;
+          const source = storeForScope(scope);
           if (!source) return [];
           const current = await source.getKnowledge(result.node.id);
           return !current || current.invalidAt !== undefined || current.status !== "accepted"
@@ -497,16 +519,23 @@ export function createKnowledgeContextRuntime(options: KnowledgeContextRuntimeOp
         }
       }
       let recalled: RecallResult[];
-      if (cached?.query === query
+      if (cached?.query === recallQuery
         && cached.workspaceRevision === workspaceRevision
         && cached.userRevision === userRevision) {
         recalled = cached.results;
       } else {
         recalled = options.recall
-          ? await options.recall(binding.workspaceId, store, query, request.signal)
-          : await store.recall(query, 5);
+          ? await options.recall({
+              workspaceId: binding.workspaceId,
+              store,
+              sessionId: request.sessionId,
+              query: recallQuery,
+              ...(goal !== undefined ? { goal } : {}),
+              ...(request.signal ? { signal: request.signal } : {}),
+            })
+          : await store.recall(recallQuery, 5);
         request.signal?.throwIfAborted();
-        binding.recallCache = { query, workspaceRevision, userRevision, results: recalled };
+        binding.recallCache = { query: recallQuery, workspaceRevision, userRevision, results: recalled };
       }
       material.knowledge = recalled.flatMap((result) => {
         if (result.node.type !== "knowledge") return [];
@@ -517,12 +546,28 @@ export function createKnowledgeContextRuntime(options: KnowledgeContextRuntimeOp
               id: result.node.id,
               title: content,
               trigger,
-              ...(result.node.payload.scope === "user" || result.node.payload.scope === "workspace"
-                ? { scope: result.node.payload.scope }
+              ...(typeof result.node.payload.scope === "string"
+                ? { scope: result.node.payload.scope as NonNullable<Zone2Knowledge["scope"]> }
                 : {}),
             }]
           : [];
       });
+    }
+    // A human-corrected or organizer-superseded row reaches the request as an
+    // explicit update, not as another invalidation (BC3): the accepted
+    // successor is delivered beside the removal.
+    const deliveredInvalidations = material.knowledgeInvalidations ?? [];
+    if (deliveredInvalidations.length > 0) {
+      const corrections = (await Promise.all(deliveredInvalidations.map(async ({ scope, id }) => {
+        const source = storeForScope(scope);
+        if (!source) return [];
+        const chain = await source.getSupersedeChain(id, scope).catch(() => null);
+        const successor = chain?.successors
+          .filter((item) => item.status === "accepted" && item.invalidAt === undefined)
+          .at(-1);
+        return successor ? [{ id: successor.id, scope, supersedes: id, title: successor.content, trigger: successor.trigger }] : [];
+      }))).flat();
+      if (corrections.length > 0) material.knowledgeCorrections = corrections;
     }
     return { eventCursor, material, ...(shellCompletions.length > 0 ? { shellCompletions } : {}) };
   };

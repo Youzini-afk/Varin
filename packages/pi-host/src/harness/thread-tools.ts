@@ -36,6 +36,10 @@ function threadErrorResult(toolName: string, error: unknown): { content: Array<{
 
 const DispatchParams = Type.Object({
   task: Type.String(),
+  kind: Type.Optional(Type.Union([
+    Type.Literal("implementation"),
+    Type.Literal("discussion"),
+  ], { description: "implementation (default) produces work; discussion starts a read-only consult thread that answers against memory and material, then reports back" })),
   preset: Type.Optional(Type.String()),
   input: Type.Optional(Type.Union([
     Type.Literal("task"),
@@ -171,7 +175,7 @@ export function createDispatchTool(
   return defineTool({
     name: "dispatch",
     label: "Dispatch",
-    description: "Dispatch a sub-agent thread for a task. Optional preset picks a fixed execution configuration. Asynchronous — returns immediately, never blocks.",
+    description: "Dispatch a sub-agent thread for a task. kind:\"discussion\" starts a read-only consult thread that answers against memory and reports back. Optional preset picks a fixed execution configuration. Asynchronous — returns immediately, never blocks.",
     promptSnippet: "dispatch: spawn a sub-agent thread for a task",
     promptGuidelines: [
       "Dispatch is asynchronous. Use wait to block until something changes; threads is a quick non-blocking glance — do not call it in a loop.",
@@ -185,6 +189,13 @@ export function createDispatchTool(
         let model: { providerId: string; modelId: string } | undefined;
         let tools: string[] | undefined;
         let research: { capability: ResearchCapability; resources: ResearchResourceManifest } | undefined;
+        if (params.kind === "discussion" && (params.preset !== undefined || params.capability !== undefined)) {
+          return {
+            content: [{ type: 'text' as const, text: 'dispatch failed: discussion consult cannot be combined with a preset or capability' }],
+            isError: true,
+            details: { code: 'invalid-params' },
+          };
+        }
         if (params.capability !== undefined) {
           const resolved = researchCapabilities.find((entry) => entry.capability === params.capability);
           const definition = RESEARCH_CAPABILITY_DEFINITIONS[params.capability];
@@ -261,6 +272,7 @@ export function createDispatchTool(
         const result = await bridge.request<"thread.dispatch">("thread.dispatch", {
           ...(options.concurrency === undefined ? {} : { concurrency: options.concurrency }),
           task: params.task,
+          ...(params.kind !== undefined ? { kind: params.kind } : {}),
           ...(params.preset !== undefined ? { preset: params.preset } : {}),
           ...(params.input !== undefined ? { input: params.input } : {}),
           ...(params.worktree !== undefined ? { worktree: params.worktree } : {}),
