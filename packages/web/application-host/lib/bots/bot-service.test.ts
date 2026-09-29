@@ -27,11 +27,12 @@ const setup = async () => {
   };
   const createSession = vi.fn(async () => ({ sessionId: "session-1" }));
   const openSession = vi.fn(async ({ sessionId }: { sessionId: string }) => ({ sessionId }));
+  const applyModel = vi.fn(async () => {});
   const service = createBotService({
     client: { issueGrant: async () => ({}), scoped: () => catalog } as unknown as BotServiceOptions["client"],
-    dataDir, hostId: "test", registry: { listWorkspaceThreadSnapshots: async () => [] }, createSession, openSession,
+    dataDir, hostId: "test", registry: { listWorkspaceThreadSnapshots: async () => [], listRuns: async () => [] }, createSession, openSession, applyModel,
   });
-  return { service, createSession, openSession, failWrite: () => { failWrite = true; } };
+  return { service, createSession, openSession, applyModel, failWrite: () => { failWrite = true; } };
 };
 
 it("concurrent entry opens share one durably bound session", async () => {
@@ -75,4 +76,57 @@ it("keeps an archived Bot archived when entry creation races with archive", asyn
   await archived;
   expect((await service.get(bot.id))?.archived).toBe(true);
   expect(await service.botForSession("session-1")).toBeNull();
+});
+
+it("persists instructions and applies a stored model to reopened and live entry sessions", async () => {
+  const { service, openSession, applyModel } = await setup();
+  const bot = await service.create({ instructions: "Be terse." });
+  expect((await service.get(bot.id))?.instructions).toBe("Be terse.");
+  await service.update(bot.id, { model: { providerId: "acme", modelId: "m-2" } });
+  // No live entry yet — a model update must not fabricate one.
+  expect(applyModel).not.toHaveBeenCalled();
+  await service.ensureEntry(bot.id);
+  // Reopen: the open path carries the stored model.
+  await service.ensureEntry(bot.id);
+  expect(openSession).toHaveBeenLastCalledWith(expect.objectContaining({
+    sessionId: "session-1",
+    model: { providerId: "acme", modelId: "m-2" },
+  }));
+  // Live update: the running worker is told immediately.
+  await service.update(bot.id, { model: { providerId: "acme", modelId: "m-3" } });
+  expect(applyModel).toHaveBeenCalledWith({ sessionId: "session-1", model: { providerId: "acme", modelId: "m-3" } });
+});
+
+it("reports the latest run session as a work item's navigation target", async () => {
+  const dataDir = await mkdtemp(join(tmpdir(), "varin-bot-work-"));
+  dirs.push(dataDir);
+  const records = new Map<string, KernelRecordResult>();
+  const catalog = {
+    getRecord: async (_workspace: string, id: string) => records.get(id) ?? null,
+    putRecord: async (input: Record<string, unknown>) => {
+      const row = { ...input, recordRevision: (records.get(String(input.recordId))?.recordRevision ?? 0) + 1 } as unknown as KernelRecordResult;
+      records.set(row.recordId, row);
+      return row;
+    },
+    listRecords: async () => ({ records: [...records.values()], nextCursor: null }),
+  };
+  const workThread = { id: "thread-1", purpose: "task", brief: "child work", parent: { kind: "thread", id: "root" } };
+  const rootThread = { id: "root", purpose: "bot-root", brief: "root", hidden: true };
+  const service = createBotService({
+    client: { issueGrant: async () => ({}), scoped: () => catalog } as unknown as BotServiceOptions["client"],
+    dataDir, hostId: "test",
+    registry: {
+      listWorkspaceThreadSnapshots: async () => [
+        { thread: rootThread, activeRun: null },
+        { thread: workThread, activeRun: null },
+      ] as never,
+      listRuns: async () => [{ sessionId: "older" }, { sessionId: "worker-9" }] as never,
+    },
+    createSession: async () => ({ sessionId: "session-1" }),
+    openSession: async ({ sessionId }: { sessionId: string }) => ({ sessionId }),
+  });
+  const bot = await service.create();
+  const work = await service.listWork(bot.id);
+  expect(work.map((item) => item.thread.id)).toEqual(["thread-1"]);
+  expect(work[0]?.sessionId).toBe("worker-9");
 });

@@ -1760,6 +1760,13 @@ async function main(options: StartWebUiServerOptions = {}): Promise<WebUiServerC
       input.model ? { model: input.model } : undefined,
     ),
     openSession: (input) => piRuntimeBroker.openSession(input),
+    applyModel: async (input) => {
+      await piRuntimeBroker.requestForSession(input.sessionId, 'model.select', {
+        sessionId: input.sessionId,
+        provider: input.model.providerId,
+        modelId: input.model.modelId,
+      });
+    },
     onError: (error) => {
       console.error('[VarinBots]', errorMessage(error));
     },
@@ -3171,6 +3178,8 @@ async function main(options: StartWebUiServerOptions = {}): Promise<WebUiServerC
     discoveredShells,
     memoryService,
     computerService,
+    sessionInstructionsFor: async (sessionId) =>
+      (await botService.botForSession(sessionId))?.instructions ?? null,
     pathLockService: kernelPathLockService,
     verification: verificationCoordinator,
     experimentService,

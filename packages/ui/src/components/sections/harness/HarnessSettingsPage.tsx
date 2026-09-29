@@ -13,16 +13,17 @@ import { IndexSettings } from './IndexSettings';
 import { WebSettings } from './WebSettings';
 import { KnowledgeSettings } from '../knowledge/KnowledgeSettings';
 import { ComputerSettings } from '../computers/ComputerSettings';
+import { BotSettings } from '../bots/BotSettings';
 import { useSettingsSearchTarget } from '@/lib/settings/search-target';
 import { cn } from '@/lib/utils';
 
-export type HarnessSettingsSection = 'tools' | 'permissions' | 'models' | 'context' | 'retrieval' | 'index' | 'web' | 'computers';
+export type HarnessSettingsSection = 'tools' | 'permissions' | 'models' | 'context' | 'retrieval' | 'index' | 'web' | 'computers' | 'bots';
 const pages: Record<HarnessSettingsSection, React.ComponentType<HarnessSettingsPageProps>> = {
   tools: ToolsSettings, permissions: PermissionsSettings, models: ModelsSettings,
   context: ContextSettings, retrieval: RetrievalSettings, index: IndexSettings, web: WebSettings,
-  // Self-fetching: the computer catalog comes from the Host service, not
-  // harness settings — extra props are ignored.
-  computers: ComputerSettings };
+  // Self-fetching: the computer and bot catalogs come from the Host service,
+  // not harness settings — extra props are ignored.
+  computers: ComputerSettings, bots: BotSettings };
 
 export function HarnessSettingsPage({ section }: { section: HarnessSettingsSection }) {
   const { t } = useI18n();
@@ -40,10 +41,11 @@ export function HarnessSettingsPage({ section }: { section: HarnessSettingsSecti
     if (activeTab === 'knowledge') setKnowledgeVisited(true);
   }, [activeTab, searchTab]);
   const Page = pages[section];
-  const showPiSaveStatus = section !== 'index' && section !== 'computers' && (!combined || activeTab === 'context');
+  const selfFetching = section === 'computers' || section === 'bots';
+  const showPiSaveStatus = section !== 'index' && !selfFetching && (!combined || activeTab === 'context');
   const content = <>
-    {status === 'loading' && section !== 'computers' ? <p role="status" className="typography-meta text-muted-foreground">{t('common.loading')}</p> : null}
-    {error && section !== 'computers' ? <div role="alert" className="mb-5 rounded-lg border border-destructive/30 bg-destructive/5 p-3">
+    {status === 'loading' && !selfFetching ? <p role="status" className="typography-meta text-muted-foreground">{t('common.loading')}</p> : null}
+    {error && !selfFetching ? <div role="alert" className="mb-5 rounded-lg border border-destructive/30 bg-destructive/5 p-3">
       <p className="typography-meta text-destructive">{error}</p>
       <Button variant="outline" size="sm" className="mt-2" onClick={() => { void retry(); }}>{t('settings.harness.retry')}</Button>
     </div> : null}
@@ -51,7 +53,9 @@ export function HarnessSettingsPage({ section }: { section: HarnessSettingsSecti
       ? <IndexSettings key={`${targetKey}:${section}`} {...(harness ? { harness, update } : {})} />
       : section === 'computers'
         ? <ComputerSettings />
-        : harness ? <Page key={`${targetKey}:${section}`} harness={harness} update={update} /> : null}
+        : section === 'bots'
+          ? <BotSettings />
+          : harness ? <Page key={`${targetKey}:${section}`} harness={harness} update={update} /> : null}
   </>;
   return <SettingsPageLayout title={t(`settings.page.harness.page.${section}.title`)}
     description={t(`settings.page.harness.page.${section}.description`)} showSaveStatus={showPiSaveStatus}

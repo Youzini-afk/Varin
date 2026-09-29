@@ -3,7 +3,7 @@ import { join } from "node:path";
 import { tmpdir } from "node:os";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { createThreadRegistry } from "./thread-registry.js";
-import { createThreadDispatchService, createThreadKillService, createThreadMergeService, createThreadSendService, createThreadWaitService } from "./thread-services.js";
+import { createThreadDispatchService, createThreadKillService, createThreadListService, createThreadMergeService, createThreadReadService, createThreadSendService, createThreadWaitService } from "./thread-services.js";
 import { createThreadRuntime, ThreadRuntimeError } from "./thread-runtime.js";
 import type { AgentInputContext, SessionEntriesResult, SessionSnapshot, SessionStats, SessionSummary } from "@varin/protocol";
 
@@ -2051,6 +2051,141 @@ describe("thread services", () => {
       const result = await waiting;
       expect(result.timedOut).toBe(false);
       expect((await registry.getThreadById("workspace-1", asker.thread.id))?.waitingFor).toBeNull();
+    } finally {
+      await registry.dispose();
+      rmSync(dataDir, { force: true, recursive: true });
+    }
+  });
+});
+
+describe("bot-root family visibility (BC0)", () => {
+  const BOT_SCOPE = "bot:bot-1";
+  const OTHER_SCOPE = "bot:bot-2";
+  const ROOT_TOOLS = ["threads", "read_thread", "dispatch", "send", "wait", "kill"];
+
+  const botRoot = async (
+    registry: ReturnType<typeof createThreadRegistry>,
+    scopeId: string,
+    sessionId: string,
+  ) => {
+    const thread = await registry.createThread({
+      scopeId,
+      parent: { kind: "session", id: sessionId },
+      brief: `bot root ${sessionId}`,
+      kind: "discussion" as const,
+      createdBy: "agent" as const,
+      purpose: "bot-root" as const,
+      concurrency: 4,
+      autoRun: false,
+      worktree: "none" as const,
+      tools: ROOT_TOOLS,
+      permissions: {},
+      hidden: true,
+    });
+    const { run } = await registry.admitRun(scopeId, thread.id, "pi", { sessionOwner: "attached-root" });
+    await registry.markRunRunning(scopeId, thread.id, run.id, sessionId);
+    return thread;
+  };
+
+  const botChild = (
+    registry: ReturnType<typeof createThreadRegistry>,
+    scopeId: string,
+    parentThreadId: string,
+    brief: string,
+  ) => registry.createThread({
+    scopeId,
+    parent: { kind: "thread", id: parentThreadId },
+    brief,
+    kind: "implementation" as const,
+    createdBy: "agent" as const,
+    concurrency: 1,
+    autoRun: true,
+    worktree: "shared" as const,
+    tools: ["read"],
+    permissions: {},
+  });
+
+  const entryCtx = (sessionId: string) => ({
+    ...serviceContext(),
+    sessionId,
+    actor: { ...serviceContext().actor, sessionId },
+  });
+
+  it("a replaced entry session sees and reads work dispatched under its predecessor root", async () => {
+    const dataDir = mkdtempSync(join(tmpdir(), "thread-bot-family-"));
+    const registry = createThreadRegistry({ dataDir, hostId: "host-1" });
+    try {
+      const rootA = await botRoot(registry, BOT_SCOPE, "entry-A");
+      const child = await botChild(registry, BOT_SCOPE, rootA.id, "background work");
+      // The entry session is replaced: a fresh root owns the new session.
+      await botRoot(registry, BOT_SCOPE, "entry-B");
+      const list = createThreadListService({ threadRegistry: registry } as never);
+      const read = createThreadReadService({ threadRegistry: registry } as never);
+      const ctx = entryCtx("entry-B");
+      const listed = await list.handle({ full: true }, ctx);
+      expect(listed.threads.map((entry) => entry.id)).toContain(child.id);
+      const detail = await read.handle({ threadId: child.id }, ctx);
+      expect(detail.text).toContain(child.id);
+    } finally {
+      await registry.dispose();
+      rmSync(dataDir, { force: true, recursive: true });
+    }
+  });
+
+  it("family visibility stops at the owner scope boundary", async () => {
+    const dataDir = mkdtempSync(join(tmpdir(), "thread-bot-isolation-"));
+    const registry = createThreadRegistry({ dataDir, hostId: "host-1" });
+    try {
+      const ownRoot = await botRoot(registry, BOT_SCOPE, "entry-B");
+      const ownChild = await botChild(registry, BOT_SCOPE, ownRoot.id, "own work");
+      const foreignRoot = await botRoot(registry, OTHER_SCOPE, "other-entry");
+      const foreignChild = await botChild(registry, OTHER_SCOPE, foreignRoot.id, "foreign work");
+      const list = createThreadListService({ threadRegistry: registry } as never);
+      const read = createThreadReadService({ threadRegistry: registry } as never);
+      const ctx = entryCtx("entry-B");
+      const listed = await list.handle({ full: true }, ctx);
+      expect(listed.threads.map((entry) => entry.id)).toEqual([ownChild.id]);
+      await expect(read.handle({ threadId: foreignChild.id }, ctx))
+        .rejects.toMatchObject({ harnessCode: "not-found" });
+    } finally {
+      await registry.dispose();
+      rmSync(dataDir, { force: true, recursive: true });
+    }
+  });
+
+  it("research roots keep strict per-root visibility", async () => {
+    const dataDir = mkdtempSync(join(tmpdir(), "thread-research-roots-"));
+    const registry = createThreadRegistry({ dataDir, hostId: "host-1" });
+    try {
+      const researchRoot = async (sessionId: string) => {
+        const thread = await registry.createThread({
+          scopeId: "workspace-1",
+          parent: { kind: "session", id: sessionId },
+          brief: `research ${sessionId}`,
+          kind: "discussion" as const,
+          createdBy: "agent" as const,
+          purpose: "research-root" as const,
+          concurrency: 4,
+          autoRun: false,
+          worktree: "none" as const,
+          tools: ROOT_TOOLS,
+          permissions: {},
+          hidden: true,
+        });
+        const { run } = await registry.admitRun("workspace-1", thread.id, "pi", { sessionOwner: "attached-root" });
+        await registry.markRunRunning("workspace-1", thread.id, run.id, sessionId);
+        return thread;
+      };
+      const rootA = await researchRoot("research-entry-A");
+      const childA = await botChild(registry, "workspace-1", rootA.id, "old research branch");
+      await researchRoot("research-entry-B");
+      const list = createThreadListService({ threadRegistry: registry } as never);
+      const read = createThreadReadService({ threadRegistry: registry } as never);
+      const ctx = entryCtx("research-entry-B");
+      const listed = await list.handle({ full: true }, ctx);
+      expect(listed.threads.map((entry) => entry.id)).not.toContain(childA.id);
+      await expect(read.handle({ threadId: childA.id }, ctx))
+        .rejects.toMatchObject({ harnessCode: "not-found" });
     } finally {
       await registry.dispose();
       rmSync(dataDir, { force: true, recursive: true });

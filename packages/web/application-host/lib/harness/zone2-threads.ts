@@ -195,8 +195,17 @@ const zone2ThreadTask = (
   parent: ThreadParent,
   prepared?: (cursor: Zone2ThreadCursor, previous: Zone2ThreadCursor | undefined) => void,
   materialOnly = false,
+  family?: { rootIds: Set<string>; sessionParent: ThreadParent },
 ) => async (previous: ObservationCursorEntry<Zone2ThreadCursor> | null): Promise<{ cursor: Zone2ThreadCursor; result: Zone2Threads }> => {
-  const snapshots = await options.registry.listThreadSnapshots(workspaceId, parent);
+  // BC0: every bot-root in the scope shares one family — a replaced entry
+  // session must still see work dispatched under its predecessor.
+  const snapshots = family
+    ? (await options.registry.listWorkspaceThreadSnapshots(workspaceId)).filter(({ thread }) => (
+      !thread.hidden
+      && ((thread.parent.kind === "thread" && family.rootIds.has(thread.parent.id))
+        || (thread.parent.kind === family.sessionParent.kind && thread.parent.id === family.sessionParent.id))
+    ))
+    : await options.registry.listThreadSnapshots(workspaceId, parent);
   const eventSeqByThread = Object.fromEntries(snapshots.map(({ thread }) => [thread.id, thread.eventSeq]));
   const materialByThread = Object.fromEntries(snapshots.map(({ thread }) => [thread.id, materialIdentity(thread)]));
   const messageIdsByThread = Object.fromEntries(snapshots.map(({ thread }) => [
@@ -249,12 +258,30 @@ const zone2ThreadTask = (
 const zone2Scope = async (
   options: Zone2ThreadProjectionOptions,
   input: { sessionId: string; scopeId: string },
-): Promise<{ objectId: string; parent: ThreadParent; scopeId: string }> => {
+): Promise<{
+  objectId: string;
+  parent: ThreadParent;
+  scopeId: string;
+  family?: { rootIds: Set<string>; sessionParent: ThreadParent };
+}> => {
   const binding = typeof options.registry.getSessionBinding === "function"
     ? await options.registry.getSessionBinding(input.sessionId)
     : null;
   if (binding) {
     const parent: ThreadParent = { kind: "thread", id: binding.threadId };
+    const owner = await options.registry.getThreadById(binding.owningScopeId, binding.threadId);
+    if (owner?.purpose === "bot-root") {
+      const snapshots = await options.registry.listWorkspaceThreadSnapshots(binding.owningScopeId);
+      const rootIds = new Set(snapshots
+        .filter(({ thread }) => thread.purpose === "bot-root")
+        .map(({ thread }) => thread.id));
+      return {
+        objectId: `${binding.owningScopeId}\0bot-root-family`,
+        parent,
+        scopeId: binding.owningScopeId,
+        family: { rootIds, sessionParent: owner.parent },
+      };
+    }
     return {
       objectId: `${binding.owningScopeId}\0${parent.kind}\0${parent.id}`,
       parent,
@@ -274,7 +301,7 @@ export async function projectZone2Threads(
     input.sessionId,
     "zone2-threads",
     scope.objectId,
-    zone2ThreadTask(options, scope.scopeId, scope.parent),
+    zone2ThreadTask(options, scope.scopeId, scope.parent, undefined, false, scope.family),
   );
 }
 
@@ -294,7 +321,7 @@ export async function prepareZone2Threads(
     zone2ThreadTask(options, scope.scopeId, scope.parent, (cursor, baseline) => {
       next = cursor;
       previous = baseline;
-    }, true),
+    }, true, scope.family),
   );
   return {
     ...pending,

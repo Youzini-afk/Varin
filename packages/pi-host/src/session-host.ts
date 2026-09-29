@@ -694,6 +694,8 @@ export class SessionHost {
   #pendingContextSettings: HarnessContextSettings | undefined;
   #disposed = false;
   #inputContext: AgentInputContext = { source: "disk" };
+  /** Hidden instructions already persisted into this session's history. */
+  #deliveredInstructions: string | null = null;
   #backgroundInference: BackgroundInferenceRuntime | undefined;
   #inferenceCwd: string | undefined;
   #workFocus: WorkFocusSelection = { id: "code", source: "product-default" };
@@ -1540,19 +1542,44 @@ export class SessionHost {
     await this.#hostServicesBridge?.request("surface.snapshot.release", { context });
   }
 
+  /**
+   * Durable session instructions owned by the Host — the Bot persona for Bot
+   * entry sessions (BC0). A lookup failure degrades to the request's own
+   * instructions instead of failing the turn.
+   */
+  async #sessionInstructions(): Promise<string | undefined> {
+    try {
+      const result = await this.#hostServicesBridge?.request("session.instructions", {});
+      return typeof result?.instructions === "string" && result.instructions.trim()
+        ? result.instructions
+        : undefined;
+    } catch (error) {
+      this.#emit("host.log", {
+        level: "warn",
+        message: `Session instructions lookup failed: ${error instanceof Error ? error.message : String(error)}`,
+      });
+      return undefined;
+    }
+  }
+
   async #queueInstructions(
     instructions: string | undefined,
     deliverAs: "followUp" | "nextTurn" | "steer",
   ): Promise<void> {
-    if (!instructions?.trim()) return;
+    const sessionInstructions = await this.#sessionInstructions();
+    const combined = [sessionInstructions, instructions]
+      .filter((part) => part?.trim())
+      .join("\n\n");
+    if (!combined || combined === this.#deliveredInstructions) return;
     await this.session.sendCustomMessage(
       {
-        content: instructions,
+        content: combined,
         customType: VARIN_INSTRUCTIONS_MESSAGE_TYPE,
         display: false,
       },
       { deliverAs },
     );
+    this.#deliveredInstructions = combined;
   }
 
   /**

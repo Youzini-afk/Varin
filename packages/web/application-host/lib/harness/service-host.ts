@@ -334,6 +334,8 @@ export interface HarnessServiceHost {
   memoryService?: import("../memory/memory-service.js").MemoryService | null;
   /** BC4 Computer Use service: catalog, observations, actions, cancellation. */
   computerService?: import("../computer/computer-service.js").ComputerService | null;
+  /** BC0 durable session instructions — the Bot persona for Bot entry sessions. */
+  sessionInstructionsFor?: ((sessionId: string) => Promise<string | null>) | null;
   // Phase 3: Thread registry
   threadRegistry: ThreadRegistry | null;
   threadCaptureDraftBaseline: ((sessionId: string, workspaceId: string, context: import("@varin/protocol").AgentInputContext) => Promise<CapturedThreadDraftBaseline>) | null;
@@ -593,6 +595,7 @@ export interface HarnessServiceHostOptions {
   todoDepsProvider?: (sessionId: string) => Promise<TodoToolDeps>;
   memoryService?: NonNullable<HarnessServiceHost["memoryService"]>;
   computerService?: NonNullable<HarnessServiceHost["computerService"]>;
+  sessionInstructionsFor?: NonNullable<HarnessServiceHost["sessionInstructionsFor"]>;
   // Phase 3 options
   threadRegistry?: ThreadRegistry;
   threadCaptureDraftBaseline?: HarnessServiceHost["threadCaptureDraftBaseline"];
@@ -1066,6 +1069,7 @@ export function createHarnessServiceHost(options: HarnessServiceHostOptions): Ha
     todoDepsProvider,
     memoryService: options.memoryService ?? null,
     computerService: options.computerService ?? null,
+    sessionInstructionsFor: options.sessionInstructionsFor ?? null,
     threadRegistry,
     threadCaptureDraftBaseline,
     threadPrepareIsolatedBranch,

@@ -364,6 +364,17 @@ export const VARIN_BUILTIN_HARNESS_EXTENSION = definition({
       title: "Computers",
       titleKey: "settings.page.harness.page.computers.title",
     }),
+    pageContribution({
+      group: "harness",
+      icon: "robot",
+      id: "varin.builtin.pi-harness.page.bots",
+      keywords: ["bot", "bots", "assistant", "persona", "durable agent"],
+      kind: "single",
+      order: 8,
+      slug: "harness-bots",
+      title: "Bots",
+      titleKey: "settings.page.harness.page.bots.title",
+    }),
   ],
 });
 

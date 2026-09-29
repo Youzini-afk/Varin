@@ -38,10 +38,46 @@ type ExecutingThread = Thread & { execution: NonNullable<ThreadRun["frozen"]> };
 
 const parentFor = (ctx: HarnessServiceContext): ThreadParent => ({ kind: "session", id: ctx.sessionId });
 
+const parentEquals = (left: ThreadParent, right: ThreadParent): boolean => (
+  left.kind === right.kind && left.id === right.id
+);
+
+/**
+ * BC0: a replaced Bot entry session produces a fresh `bot-root` Thread in the
+ * same owner scope. The new root manages the whole family's direct children —
+ * threads dispatched under an earlier root stay visible and reachable instead
+ * of becoming orphans the Bot can no longer read, message, or wait on.
+ */
+const botRootFamily = async (
+  registry: NonNullable<HarnessServiceHost["threadRegistry"]>,
+  scopeId: string,
+): Promise<Set<string>> => {
+  const snapshots = await registry.listWorkspaceThreadSnapshots(scopeId);
+  return new Set(snapshots
+    .filter(({ thread }) => thread.purpose === "bot-root")
+    .map(({ thread }) => thread.id));
+};
+
+interface OwningContext {
+  workspaceId: string;
+  parent: ThreadParent;
+  owner: ExecutingThread | null;
+  /** Non-null only for a `bot-root` owner: ids of every bot-root in this scope. */
+  family: Set<string> | null;
+}
+
+/** The parents whose direct children the caller may see and control. */
+const parentVisible = (owning: OwningContext, candidate: ThreadParent): boolean => (
+  owning.family
+    ? (candidate.kind === "thread" && owning.family.has(candidate.id))
+      || (owning.owner !== null && parentEquals(candidate, owning.owner.parent))
+    : parentEquals(candidate, owning.parent)
+);
+
 const resolveOwningContext = async (
   host: HarnessServiceHost,
   ctx: HarnessServiceContext,
-): Promise<{ workspaceId: string; parent: ThreadParent; owner: ExecutingThread | null }> => {
+): Promise<OwningContext> => {
   const registry = host.threadRegistry;
   let binding = null;
   try {
@@ -69,11 +105,14 @@ const resolveOwningContext = async (
       workspaceId: binding.owningScopeId,
       parent: { kind: "thread", id: binding.threadId },
       owner: { ...owner, execution: run.frozen },
+      family: owner.purpose === "bot-root"
+        ? await botRootFamily(registry!, binding.owningScopeId)
+        : null,
     };
   }
   // HR0: an unbound chat is its own durable owner scope; Thread operations do
   // not require a directory classification.
-  return { workspaceId: ctx.workspaceId ?? sessionScopeId(ctx.sessionId), parent: parentFor(ctx), owner: null };
+  return { workspaceId: ctx.workspaceId ?? sessionScopeId(ctx.sessionId), parent: parentFor(ctx), owner: null, family: null };
 };
 
 const assertOwnerTool = (owner: ExecutingThread | null, tool: ThreadControlToolName): void => {
@@ -200,12 +239,29 @@ const deferCursorAdvancement = (
 
 const snapshotsFor = async (
   host: HarnessServiceHost,
-  workspaceId: string,
-  parent: ThreadParent,
+  owning: OwningContext,
   includeHidden = false,
 ): Promise<ThreadSnapshot[]> => {
   const registry = host.threadRegistry!;
-  return registry.listThreadSnapshots(workspaceId, parent, includeHidden);
+  if (!owning.family) {
+    return registry.listThreadSnapshots(owning.workspaceId, owning.parent, includeHidden);
+  }
+  const all = await registry.listWorkspaceThreadSnapshots(owning.workspaceId);
+  return all.filter(({ thread }) => (
+    (includeHidden || !thread.hidden) && parentVisible(owning, thread.parent)
+  ));
+};
+
+/** A Thread the caller may address — child of its parent, or of its bot-root family. */
+const visibleThread = async (
+  host: HarnessServiceHost,
+  owning: OwningContext,
+  threadId: string,
+): Promise<Thread | null> => {
+  const registry = host.threadRegistry!;
+  if (!owning.family) return registry.getThread(owning.workspaceId, owning.parent, threadId);
+  const thread = await registry.getThreadById(owning.workspaceId, threadId);
+  return thread && parentVisible(owning, thread.parent) ? thread : null;
 };
 
 export function createThreadDispatchService(host: HarnessServiceHost): HarnessService<"thread.dispatch"> {
@@ -562,10 +618,11 @@ export function createThreadListService(host: HarnessServiceHost): HarnessServic
     handle: async (params, ctx) => {
       const registry = host.threadRegistry;
       if (!registry) throw new HarnessServiceError("unavailable", "Thread registry not configured");
-      const { workspaceId, parent, owner } = await resolveOwningContext(host, ctx);
+      const owning = await resolveOwningContext(host, ctx);
+      const { owner } = owning;
       assertOwnerTool(owner, "threads");
       const observer = ctx.sessionId;
-      let snapshots = await snapshotsFor(host, workspaceId, parent);
+      let snapshots = await snapshotsFor(host, owning);
       if (params.ids) snapshots = snapshots.filter(({ thread }) => params.ids!.includes(thread.id));
       const full = params.full ?? false;
       let changed = 0;
@@ -610,7 +667,8 @@ export function createThreadWaitService(host: HarnessServiceHost): HarnessServic
     handle: async (params, ctx) => {
       const registry = host.threadRegistry;
       if (!registry) throw new HarnessServiceError("unavailable", "Thread registry not configured");
-      const { workspaceId, parent, owner } = await resolveOwningContext(host, ctx);
+      const owning = await resolveOwningContext(host, ctx);
+      const { workspaceId, parent, owner } = owning;
       assertOwnerTool(owner, "wait");
       const observer = ctx.sessionId;
       const timeoutMs = Math.min(
@@ -633,10 +691,14 @@ export function createThreadWaitService(host: HarnessServiceHost): HarnessServic
       const actionable = new Set(["user", "permission", "stalled", "looping"]);
       // Progress counters/eventSeq are display cursors, not model wakeups.
       // A dependency wakes on a result, failure/loss, or actionable attention.
+      const addressedToCaller = (peer: ThreadMessagePeer): boolean => owning.family
+        ? (peer.kind === "thread" && owning.family.has(peer.id))
+          || (owner !== null && peerEquals(peer, owner.parent))
+        : peerEquals(peer, parent);
       const relevantChildChange = ({ thread, activeRun }: ThreadSnapshot): boolean => {
         const cursor = registry.getCursor(observer, thread.id);
         if (thread.messages?.some((message) => message.direction === "out" && message.kind === "request"
-          && message.status === "delivered" && message.to.kind === parent.kind && message.to.id === parent.id
+          && message.status === "delivered" && addressedToCaller(message.to)
           && !cursor?.requestIds?.includes(message.id))) return true;
         if (thread.resultRevision !== undefined && thread.resultRevision !== cursor?.resultRevision) return true;
         if (actionable.has(thread.attention) && thread.attention !== cursor?.attention) return true;
@@ -648,7 +710,7 @@ export function createThreadWaitService(host: HarnessServiceHost): HarnessServic
       };
       const hasChanges = async (): Promise<boolean> => {
         ctx.signal.throwIfAborted();
-        const snapshots = await snapshotsFor(host, workspaceId, parent, true);
+        const snapshots = await snapshotsFor(host, owning, true);
         if (snapshots.some((snapshot) => (!params.ids || params.ids.includes(snapshot.thread.id))
           && relevantChildChange(snapshot))) return true;
         const self = await selfSnapshot();
@@ -680,7 +742,10 @@ export function createThreadWaitService(host: HarnessServiceHost): HarnessServic
           const notification = new Promise<"change" | "timeout" | "abort">((resolve) => { wake = resolve; });
           // Registry listeners are one-shot. Resubscribe before rechecking,
           // keeping the original deadline even when routine activity arrives.
-          const unsubscribe = [registry.subscribeToChanges(workspaceId, parent, () => wake("change"))];
+          const watchedParents: ThreadParent[] = owning.family
+            ? [...owning.family].map((id) => ({ kind: "thread" as const, id }))
+            : [parent];
+          const unsubscribe = watchedParents.map((watched) => registry.subscribeToChanges(workspaceId, watched, () => wake("change")));
           if (owner) unsubscribe.push(registry.subscribeToChanges(workspaceId, owner.parent, () => wake("change")));
           const abort = () => wake("abort");
           ctx.signal.addEventListener("abort", abort, { once: true });
@@ -715,7 +780,7 @@ export function createThreadWaitService(host: HarnessServiceHost): HarnessServic
           await registry.acknowledgeThreadMessages(workspaceId, owner.id, [heldMessage.id], owner.activeRunId ?? undefined);
         }
       }
-      const all = await snapshotsFor(host, workspaceId, parent, true);
+      const all = await snapshotsFor(host, owning, true);
       const ids = params.ids ?? all.map(({ thread }) => thread.id);
       const targets = all.filter(({ thread }) => ids.includes(thread.id));
       const self = await selfSnapshot();
@@ -975,7 +1040,9 @@ export function createThreadSendService(host: HarnessServiceHost): HarnessServic
     handle: async (params, ctx) => {
       const registry = host.threadRegistry;
       if (!registry || !host.threadSendToSession) throw new HarnessServiceError("unavailable", "Thread runtime is not configured");
-      const { workspaceId, owner: initialOwner } = await resolveOwningContext(host, ctx);
+      const owning = await resolveOwningContext(host, ctx);
+      const { workspaceId, family } = owning;
+      const initialOwner = owning.owner;
       // Authenticated UI calls stay user-originated while the same Pi session
       // is temporarily attached to its principal root (research or Bot entry).
       // Worker calls still act with the root Thread's frozen authority.
@@ -1077,6 +1144,7 @@ export function createThreadSendService(host: HarnessServiceHost): HarnessServic
           ? (candidate.parent.kind === "thread" && candidate.parent.id === owner.id)
             || (owner.parent.kind === "thread" && owner.parent.id === candidate.id)
             || peerEquals(candidate.parent, owner.parent)
+            || (family !== null && candidate.parent.kind === "thread" && family.has(candidate.parent.id))
           : (candidate.parent.kind === "session" && candidate.parent.id === ctx.sessionId)
             || await isUserResearchBranch(candidate);
         if (!related) {
@@ -1490,9 +1558,10 @@ export function createThreadReadService(host: HarnessServiceHost): HarnessServic
     handle: async (params, ctx) => {
       const registry = host.threadRegistry;
       if (!registry) throw new HarnessServiceError("unavailable", "Thread registry not configured");
-      const { workspaceId, parent, owner } = await resolveOwningContext(host, ctx);
+      const owning = await resolveOwningContext(host, ctx);
+      const { workspaceId, owner } = owning;
       assertOwnerTool(owner, "read_thread");
-      const thread = await registry.getThread(workspaceId, parent, params.threadId);
+      const thread = await visibleThread(host, owning, params.threadId);
       if (!thread) throw new HarnessServiceError("not-found", `Thread not found: ${params.threadId}`);
       let run = await registry.getActiveRun(workspaceId, thread.id);
       let delivery = thread.report;
@@ -1658,9 +1727,10 @@ export function createThreadMergeService(host: HarnessServiceHost): HarnessServi
     handle: async (params, ctx) => {
       const registry = host.threadRegistry;
       if (!registry || !host.threadApplyWorktreeDiff) throw new HarnessServiceError("unavailable", "Thread runtime is not configured");
-      const { workspaceId, parent, owner } = await resolveOwningContext(host, ctx);
+      const owning = await resolveOwningContext(host, ctx);
+      const { workspaceId, owner } = owning;
       assertOwnerTool(owner, "merge");
-      const thread = await registry.getThread(workspaceId, parent, params.threadId);
+      const thread = await visibleThread(host, owning, params.threadId);
       if (!thread) throw new HarnessServiceError("not-found", `Thread not found: ${params.threadId}`);
       const selectedRevision = params.resultRevision ?? thread.resultRevision;
       const alreadyMerged = selectedRevision !== undefined
@@ -1699,7 +1769,9 @@ export function createThreadMergeService(host: HarnessServiceHost): HarnessServi
       }
       const result = await host.threadApplyWorktreeDiff(
         workspaceId,
-        parent,
+        // The merge lands on the caller's receiving surface — under a bot-root
+        // family the current root, not the thread's original parent record.
+        owning.parent,
         thread.id,
         params.resultRevision,
         ctx.actor.runId,
@@ -1795,13 +1867,14 @@ export function createThreadUpdateService(host: HarnessServiceHost): HarnessServ
     handle: async (params, ctx) => {
       const registry = host.threadRegistry;
       if (!registry || !host.threadUpdateBaseline) throw new HarnessServiceError("unavailable", "Thread runtime is not configured");
-      const { workspaceId, parent, owner } = await resolveOwningContext(host, ctx);
+      const owning = await resolveOwningContext(host, ctx);
+      const { workspaceId, owner } = owning;
       assertOwnerTool(owner, "update");
-      const thread = await registry.getThread(workspaceId, parent, params.threadId);
+      const thread = await visibleThread(host, owning, params.threadId);
       if (!thread) throw new HarnessServiceError("not-found", `Thread not found: ${params.threadId}`);
       const result = await host.threadUpdateBaseline(
         workspaceId,
-        parent,
+        thread.parent,
         thread.id,
         params.resultRevision,
         { signal: ctx.signal },
@@ -1960,9 +2033,10 @@ export function createThreadKillService(host: HarnessServiceHost): HarnessServic
     handle: async (params, ctx) => {
       const registry = host.threadRegistry;
       if (!registry) throw new HarnessServiceError("unavailable", "Thread registry not configured");
-      const { workspaceId, parent, owner } = await resolveOwningContext(host, ctx);
+      const owning = await resolveOwningContext(host, ctx);
+      const { workspaceId, owner } = owning;
       assertOwnerTool(owner, "kill");
-      const thread = await registry.getThread(workspaceId, parent, params.threadId);
+      const thread = await visibleThread(host, owning, params.threadId);
       if (!thread) return { text: `unknown thread: ${params.threadId}` };
       const keepWorktree = params.keepWorktree ?? false;
       const releaseCascade = !host.threadKillSession && typeof registry.beginCascade === "function"

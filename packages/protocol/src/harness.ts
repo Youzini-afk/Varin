@@ -1648,6 +1648,12 @@ export interface HarnessServiceMap {
   "workingBranch.ensureMaterialized": { params: Record<string, never>; result: WorkingBranchEnsureMaterializedResult };
   "surface.snapshot.commit": { params: { context: AgentInputContext }; result: { committed: boolean } };
   "surface.snapshot.release": { params: { context: AgentInputContext }; result: { released: boolean } };
+  /**
+   * Durable session-level instructions the Host owns for this caller — the
+   * Bot persona for Bot entry sessions, null otherwise. The worker merges
+   * them ahead of per-request `instructions` on prompt/steer/followUp.
+   */
+  "session.instructions": { params: Record<string, never>; result: { instructions: string | null } };
   // Phase 7C/7D: experiment execution and resource facts (D-300)
   "experiment.submit": { params: import("./harness-experiments.js").ExperimentSubmitParams; result: import("./harness-experiments.js").ExperimentSubmitResult };
   "experiment.list": { params: import("./harness-experiments.js").ExperimentListParams; result: import("./harness-experiments.js").ExperimentListResult };
@@ -1789,6 +1795,7 @@ export const HARNESS_METHOD_CAPABILITY = {
   "workingBranch.ensureMaterialized": "write.document",
   "surface.snapshot.commit": "context.session",
   "surface.snapshot.release": "context.session",
+  "session.instructions": "context.session",
   "experiment.submit": "control.experiment",
   "experiment.list": "read.experiment",
   "experiment.get": "read.experiment",

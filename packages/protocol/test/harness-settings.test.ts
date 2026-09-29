@@ -55,8 +55,10 @@ describe("harness settings", () => {
 
   it("keeps user-memory auto-accept user-owned while workspace memory remains overridable", () => {
     const merged = mergeHarnessSettings(
-      { knowledge: { eventRetentionDays: 30, autoAcceptSuggestions: { workspace: true, user: false } } },
-      { knowledge: { eventRetentionDays: 30, autoAcceptSuggestions: { workspace: false, user: true } } },
+      { knowledge: { eventRetentionDays: 30, autoAcceptSuggestions: { workspace: true, user: false },
+        autoOrganize: { workspace: true, user: true, bot: true } } },
+      { knowledge: { eventRetentionDays: 30, autoAcceptSuggestions: { workspace: false, user: true },
+        autoOrganize: { workspace: true, user: true, bot: true } } },
     );
     // A workspace must be able to turn off auto-accept that the user enabled globally.
     assert.equal(merged.knowledge.autoAcceptSuggestions.workspace, false);
@@ -65,7 +67,8 @@ describe("harness settings", () => {
 
   it("keeps user autoAcceptSuggestions when the workspace does not set them", () => {
     const merged = mergeHarnessSettings(
-      { knowledge: { eventRetentionDays: 30, autoAcceptSuggestions: { workspace: true, user: false } } },
+      { knowledge: { eventRetentionDays: 30, autoAcceptSuggestions: { workspace: true, user: false },
+        autoOrganize: { workspace: true, user: true, bot: true } } },
       {},
     );
     assert.equal(merged.knowledge.autoAcceptSuggestions.workspace, true);

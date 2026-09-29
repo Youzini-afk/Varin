@@ -43,19 +43,29 @@ Paths in the table refer to modules below
 
 These are implementation gaps, not approvals or a request to add another audit framework.
 
-### BC0: the long-lived Bot still lacks its complete product path
+### BC0: durable Bot identity, entry, and work path — completed 2026-09-29
 
-- `bot-service.ts` persists `instructions`, but no model-input consumer reads
-  them. Updating the stored model does not update an already-open entry worker.
-- The sidebar opens the first active Bot. Profile editing and the durable
-  `listBotWork` result have no complete user-facing management/navigation
-  consumer. Replacing an entry does not by itself let the new root manage every
-  old root's children through the parent-based thread tool hierarchy.
-- Bot profile DTOs are duplicated between Host and UI instead of having the
-  shared application-client owner required by the plan.
-
-The next implementation should finish identity/configuration and work routing
-through existing owners; adding another Bot Job table would not resolve these gaps.
+- `instructions` now enter model input: the Pi worker resolves the Host-owned
+  `session.instructions` (the Bot persona for entry sessions) on every
+  `agent.prompt`/`steer`/`followUp` and queues them through the established
+  hidden `varin.instructions` custom-message channel ahead of per-request
+  instructions. Identical content is not re-injected; a changed persona is
+  delivered on the next turn. Persona applies to the Bot's own entry
+  conversation — dispatched child Threads receive their task briefs, not the
+  persona, which matches the product boundary.
+- Model updates take effect: `update()` applies `model.select` to the live
+  entry worker when one exists, `ensureEntry`/reopen passes the stored model,
+  and clearing the preference applies from the next open.
+- Bot management UI exists: the harness "Bots" settings page lists, creates,
+  edits name/instructions/model, archives, opens the entry conversation, and
+  navigates to real work items (`sessionId` of each item's latest Run).
+- Cross-entry work visibility: `bot-root` Threads in one owner scope form a
+  family — a replaced entry's new root sees, reads, messages, waits on,
+  merges, updates, and kills children dispatched under predecessor roots,
+  while unrelated scopes and research roots keep strict per-parent isolation.
+  Zone 2 thread material follows the same family rule.
+- Bot profile/work DTOs live in `packages/application-client/src/bots.ts` and
+  are consumed by the Host service, routes, and UI.
 
 ### BC1–BC2: source coverage is not yet one recoverable memory transaction
 

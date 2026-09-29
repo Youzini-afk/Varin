@@ -1,20 +1,9 @@
 import { runtimeFetch } from '@varin/application-client';
-import type { SessionSnapshot, Thread, ThreadRun } from '@varin/protocol';
+import type { BotModelSelection, BotSummary, BotWorkItem } from '@varin/application-client';
+import type { SessionSnapshot } from '@varin/protocol';
 import { openPiSessionFromNavigation } from '@/lib/pi-runtime/sessionNavigation';
 
-/** Durable Bot profile served by the Host bot catalog (BC0). */
-export interface BotSummary {
-  id: string;
-  name: string;
-  instructions: string | null;
-  model: { providerId: string; modelId: string } | null;
-  coordinatorHostId: string;
-  homeDir: string;
-  entrySessionId: string | null;
-  createdAt: string;
-  updatedAt: string;
-  archived: boolean;
-}
+export type { BotModelSelection, BotSummary, BotWorkItem } from '@varin/application-client';
 
 const readJson = async <T>(response: Response, fallback: string): Promise<T> => {
   if (!response.ok) {
@@ -33,7 +22,19 @@ export const listBots = async (): Promise<BotSummary[]> => {
   return result.bots;
 };
 
-export const createBot = async (input: { name?: string; instructions?: string } = {}): Promise<BotSummary> => {
+export const getBot = async (botId: string): Promise<BotSummary | null> => {
+  const result = await readJson<{ bot: BotSummary | null }>(
+    await runtimeFetch(`/api/harness/bots/${encodeURIComponent(botId)}`),
+    'Unable to load the bot',
+  );
+  return result.bot;
+};
+
+export const createBot = async (input: {
+  name?: string;
+  instructions?: string;
+  model?: BotModelSelection;
+} = {}): Promise<BotSummary> => {
   const result = await readJson<{ bot: BotSummary }>(
     await runtimeFetch('/api/harness/bots', {
       method: 'POST',
@@ -41,6 +42,30 @@ export const createBot = async (input: { name?: string; instructions?: string } 
       body: JSON.stringify(input),
     }),
     'Unable to create the bot',
+  );
+  return result.bot;
+};
+
+export const updateBot = async (botId: string, patch: {
+  name?: string;
+  instructions?: string | null;
+  model?: BotModelSelection | null;
+}): Promise<BotSummary> => {
+  const result = await readJson<{ bot: BotSummary }>(
+    await runtimeFetch(`/api/harness/bots/${encodeURIComponent(botId)}/update`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(patch),
+    }),
+    'Unable to update the bot',
+  );
+  return result.bot;
+};
+
+export const archiveBot = async (botId: string): Promise<BotSummary> => {
+  const result = await readJson<{ bot: BotSummary }>(
+    await runtimeFetch(`/api/harness/bots/${encodeURIComponent(botId)}/archive`, { method: 'POST' }),
+    'Unable to archive the bot',
   );
   return result.bot;
 };
@@ -53,12 +78,18 @@ export const ensureBotEntry = async (botId: string): Promise<{ bot: BotSummary; 
   )
 );
 
-export const listBotWork = async (botId: string): Promise<Array<{ thread: Thread; activeRun: ThreadRun | null }>> => {
-  const result = await readJson<{ threads: Array<{ thread: Thread; activeRun: ThreadRun | null }> }>(
+export const listBotWork = async (botId: string): Promise<BotWorkItem[]> => {
+  const result = await readJson<{ threads: BotWorkItem[] }>(
     await runtimeFetch(`/api/harness/bots/${encodeURIComponent(botId)}/work`),
     'Unable to list bot work',
   );
   return result.threads;
+};
+
+/** Open the Bot's durable entry conversation for this specific Bot. */
+export const openBotEntryFor = async (botId: string): Promise<SessionSnapshot> => {
+  const { bot, sessionId } = await ensureBotEntry(botId);
+  return openPiSessionFromNavigation({ sessionId, directory: bot.homeDir });
 };
 
 /**

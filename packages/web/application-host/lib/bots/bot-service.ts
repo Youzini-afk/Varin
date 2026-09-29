@@ -6,43 +6,24 @@ import type { KernelRecordResult } from "../kernel/protocol.generated.js";
 import { HarnessServiceError } from "../harness/service-error.js";
 import { botScopeId } from "../harness/owner-scope.js";
 import type { ThreadRegistry } from "../harness/thread-registry.js";
-import type { Thread, ThreadRun } from "@varin/protocol";
+import type {
+  BotModelSelection,
+  BotProfile,
+  BotSummary,
+  BotWorkItem,
+} from "@varin/application-client";
+
+export type { BotModelSelection, BotProfile, BotSummary, BotWorkItem } from "@varin/application-client";
 
 /** Kernel workspace under which durable `bot.profile` records are cataloged. */
 export const BOT_CATALOG_WORKSPACE_ID = "__varin_bots__";
-
-export interface BotModelSelection {
-  providerId: string;
-  modelId: string;
-}
-
-export interface BotProfile {
-  id: string;
-  name: string;
-  /** Persona/collaboration guidance owned by the user-facing Bot record. */
-  instructions: string | null;
-  /** Preferred model for the Bot's own entry work; null inherits Host defaults. */
-  model: BotModelSelection | null;
-  /** The Application Host that coordinates this Bot's lifecycle. */
-  coordinatorHostId: string;
-  /** Durable per-Bot working directory for the entry session's cwd. */
-  homeDir: string;
-  /** The Bot's long-lived conversation session; survives entry reopen. */
-  entrySessionId: string | null;
-  createdAt: string;
-  updatedAt: string;
-}
-
-export interface BotSummary extends BotProfile {
-  archived: boolean;
-}
 
 export interface BotServiceOptions {
   client: KernelClient;
   hostId: string;
   /** Directory containing Host-owned data; Bot home directories live below it. */
   dataDir: string;
-  registry: Pick<ThreadRegistry, "listWorkspaceThreadSnapshots">;
+  registry: Pick<ThreadRegistry, "listRuns" | "listWorkspaceThreadSnapshots">;
   /** Create a fresh Pi session bound to the Bot's home directory. */
   createSession(input: {
     cwd: string;
@@ -50,7 +31,12 @@ export interface BotServiceOptions {
     model?: BotModelSelection;
   }): Promise<{ sessionId: string }>;
   /** Reopen a persisted Pi session (or return the live one). */
-  openSession(input: { sessionId: string; cwd?: string }): Promise<{ sessionId: string }>;
+  openSession(input: { sessionId: string; cwd?: string; model?: BotModelSelection }): Promise<{ sessionId: string }>;
+  /**
+   * Apply a profile model change to an already-running entry worker. Absent
+   * or failing workers keep the durable write; the next open re-applies.
+   */
+  applyModel?: (input: { sessionId: string; model: BotModelSelection }) => Promise<void>;
   onError?(error: unknown): void;
 }
 
@@ -108,7 +94,7 @@ export interface BotService {
   /** Which Bot (if any) owns this session as its entry conversation. */
   botForSession(sessionId: string): Promise<BotSummary | null>;
   /** Threads owned by the Bot's owner scope — its real associated work. */
-  listWork(botId: string): Promise<Array<{ thread: Thread; activeRun: ThreadRun | null }>>;
+  listWork(botId: string): Promise<BotWorkItem[]>;
   /**
    * Called when a session is deleted: clears a stale entry binding so the next
    * entry resolution creates a fresh conversation instead of re-anchoring a
@@ -262,7 +248,18 @@ export function createBotService(options: BotServiceOptions): BotService {
         : null;
     }
     if (patch.model !== undefined) updates.model = patch.model;
-    return write(botId, "active", updates, existing.recordRevision);
+    const summary = await write(botId, "active", updates, existing.recordRevision);
+    // Keep a live entry worker on the profile's current model. A closed or
+    // unreachable worker is retried by the model passed on the next open;
+    // clearing the preference likewise applies from the next open.
+    if (patch.model && summary.entrySessionId && options.applyModel) {
+      try {
+        await options.applyModel({ sessionId: summary.entrySessionId, model: patch.model });
+      } catch (error) {
+        options.onError?.(error);
+      }
+    }
+    return summary;
   });
 
   const archive: BotService["archive"] = (botId) => serialize(botId, async () => {
@@ -277,7 +274,11 @@ export function createBotService(options: BotServiceOptions): BotService {
     if (bot.archived) throw new HarnessServiceError("invalid-params", `Bot "${botId}" is archived`);
     if (bot.entrySessionId) {
       try {
-        const session = await options.openSession({ sessionId: bot.entrySessionId, cwd: bot.homeDir });
+        const session = await options.openSession({
+          sessionId: bot.entrySessionId,
+          cwd: bot.homeDir,
+          ...(bot.model ? { model: bot.model } : {}),
+        });
         return { bot, sessionId: session.sessionId };
       } catch (error) {
         if (!isObject(error) || error.code !== "session_not_found") throw error;
@@ -314,7 +315,15 @@ export function createBotService(options: BotServiceOptions): BotService {
 
   const listWork: BotService["listWork"] = async (botId) => {
     const snapshots = await options.registry.listWorkspaceThreadSnapshots(botScopeId(botId));
-    return snapshots.filter(({ thread }) => thread.purpose !== "bot-root");
+    const items: BotWorkItem[] = [];
+    for (const { thread, activeRun } of snapshots) {
+      if (thread.purpose === "bot-root") continue;
+      // The latest Run's session is the reopenable surface for this work.
+      const runs = await options.registry.listRuns(botScopeId(botId), thread.id).catch(() => []);
+      const sessionId = activeRun?.sessionId ?? runs.at(-1)?.sessionId ?? null;
+      items.push({ thread, activeRun, sessionId });
+    }
+    return items;
   };
 
   const releaseEntry: BotService["releaseEntry"] = async (sessionId) => {

@@ -1493,6 +1493,13 @@ export function registerHarnessServices(
   router.register("surface.snapshot.release", {
     handle: async (params, ctx) => host.releaseAgentInputContext(ctx.sessionId, params.context),
   });
+  if (host.sessionInstructionsFor) {
+    router.register("session.instructions", {
+      handle: async (_params, ctx) => ({
+        instructions: await host.sessionInstructionsFor!(ctx.sessionId),
+      }),
+    });
+  }
 }
 
 

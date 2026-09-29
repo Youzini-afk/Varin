@@ -1,0 +1,177 @@
+import React from 'react';
+import { SettingsSection, SettingsFieldRow } from '@/components/sections/shared/SettingsSection';
+import { Button } from '@/components/ui/button';
+import { Input } from '@/components/ui/input';
+import { Textarea } from '@/components/ui/textarea';
+import { useI18n } from '@/lib/i18n';
+import { ModelSelector } from '@/components/sections/agents/ModelSelector';
+import { openPiSessionFromNavigation } from '@/lib/pi-runtime/sessionNavigation';
+import {
+  archiveBot, createBot, listBots, listBotWork, openBotEntryFor, updateBot,
+  type BotSummary, type BotWorkItem,
+} from '@/lib/bots';
+import { cn } from '@/lib/utils';
+
+/**
+ * Bots settings (BC0): the durable Bot catalog — identity, persona
+ * instructions, preferred model, and the real work items in the Bot's owner
+ * scope. Profiles are Host records; edits apply to the live entry worker.
+ */
+export function BotSettings() {
+  const { t } = useI18n();
+  const [bots, setBots] = React.useState<BotSummary[] | null>(null);
+  const [selectedId, setSelectedId] = React.useState<string | null>(null);
+  const [work, setWork] = React.useState<BotWorkItem[] | null>(null);
+  const [error, setError] = React.useState<string | null>(null);
+  const [busy, setBusy] = React.useState<string | null>(null);
+  const [name, setName] = React.useState('');
+  const [instructions, setInstructions] = React.useState('');
+
+  const selected = bots?.find((bot) => bot.id === selectedId) ?? null;
+
+  const refresh = React.useCallback(async () => {
+    try {
+      const list = await listBots();
+      setBots(list);
+      setError(null);
+      setSelectedId((current) => current ?? list.find((bot) => !bot.archived)?.id ?? list[0]?.id ?? null);
+    } catch (cause) {
+      setError(cause instanceof Error ? cause.message : String(cause));
+    }
+  }, []);
+
+  React.useEffect(() => { void refresh(); }, [refresh]);
+
+  React.useEffect(() => {
+    setName(selected?.name ?? '');
+    setInstructions(selected?.instructions ?? '');
+    if (!selected) { setWork(null); return; }
+    let cancelled = false;
+    void listBotWork(selected.id)
+      .then((items) => { if (!cancelled) setWork(items); })
+      .catch(() => { if (!cancelled) setWork([]); });
+    return () => { cancelled = true; };
+  }, [selected]);
+
+  const run = async (key: string, task: () => Promise<void>) => {
+    setBusy(key);
+    try {
+      await task();
+      setError(null);
+    } catch (cause) {
+      setError(cause instanceof Error ? cause.message : String(cause));
+    } finally {
+      setBusy(null);
+    }
+  };
+
+  const save = () => {
+    if (!selected) return;
+    void run('save', async () => {
+      await updateBot(selected.id, {
+        ...(name.trim() && name.trim() !== selected.name ? { name } : {}),
+        instructions: instructions.trim() ? instructions : null,
+      });
+      await refresh();
+    });
+  };
+
+  const selectModel = (providerId: string, modelId: string) => {
+    if (!selected) return Promise.resolve();
+    return run('model', async () => {
+      await updateBot(selected.id, {
+        model: providerId && modelId ? { providerId, modelId } : null,
+      });
+      await refresh();
+    });
+  };
+
+  const workStateLabel = (item: BotWorkItem): string => {
+    const { thread, activeRun } = item;
+    if (activeRun?.workerState === 'running' || activeRun?.workerState === 'starting') return activeRun.workerState;
+    if (thread.attention !== 'none') return `attention:${thread.attention}`;
+    return thread.lifecycle;
+  };
+
+  return <>
+    {error ? <div role="alert" className="mb-5 rounded-lg border border-destructive/30 bg-destructive/5 p-3">
+      <p className="typography-meta text-destructive">{error}</p>
+      <Button variant="outline" size="sm" className="mt-2" onClick={() => { void refresh(); }}>{t('settings.harness.retry')}</Button>
+    </div> : null}
+    {!bots && !error ? <p role="status" className="typography-meta text-muted-foreground">{t('common.loading')}</p> : null}
+    {bots ? <>
+      <SettingsSection title={t('settings.bots.section.list')} contentClassName="space-y-3">
+        {bots.length === 0 ? <p className="typography-meta text-muted-foreground">{t('settings.bots.empty')}</p> : null}
+        <ul className="space-y-1">
+          {bots.map((bot) => <li key={bot.id}>
+            <button type="button" onClick={() => setSelectedId(bot.id)}
+              className={cn('flex w-full items-center gap-2 rounded-md px-2 py-1.5 text-left typography-ui-label transition-colors',
+                bot.id === selectedId ? 'bg-accent text-foreground' : 'text-muted-foreground hover:bg-accent/50 hover:text-foreground')}>
+              <span className="min-w-0 flex-1 truncate">{bot.name}</span>
+              {bot.archived ? <span className="typography-meta text-muted-foreground">{t('settings.bots.archived')}</span> : null}
+            </button>
+          </li>)}
+        </ul>
+        <div>
+          <Button variant="outline" size="sm" disabled={busy === 'create'} onClick={() => {
+            void run('create', async () => {
+              const created = await createBot();
+              await refresh();
+              setSelectedId(created.id);
+            });
+          }}>{busy === 'create' ? t('settings.bots.creating') : t('settings.bots.create')}</Button>
+        </div>
+      </SettingsSection>
+
+      {selected ? <SettingsSection title={t('settings.bots.section.profile')} contentClassName="space-y-5">
+        <SettingsFieldRow label={t('settings.bots.name.label')}>
+          <Input value={name} disabled={selected.archived} onChange={(event) => setName(event.target.value)} />
+        </SettingsFieldRow>
+        <SettingsFieldRow label={t('settings.bots.instructions.label')} description={t('settings.bots.instructions.description')}>
+          <Textarea value={instructions} disabled={selected.archived} rows={5}
+            placeholder={t('settings.bots.instructions.placeholder')}
+            onChange={(event) => setInstructions(event.target.value)} />
+        </SettingsFieldRow>
+        <SettingsFieldRow label={t('settings.bots.model.label')} description={t('settings.bots.model.description')}>
+          <ModelSelector
+            providerId={selected.model?.providerId ?? ''}
+            modelId={selected.model?.modelId ?? ''}
+            allowNone
+            defaultSelectionLabel={t('settings.bots.model.inherit')}
+            disabled={selected.archived}
+            onChange={selectModel}
+          />
+        </SettingsFieldRow>
+        <div className="flex flex-wrap gap-2">
+          <Button size="sm" disabled={selected.archived || busy === 'save'
+            || (name.trim() === selected.name && instructions.trim() === (selected.instructions ?? ''))}
+            onClick={save}>{busy === 'save' ? t('settings.bots.saving') : t('settings.bots.save')}</Button>
+          <Button variant="outline" size="sm" disabled={selected.archived || busy === 'entry'} onClick={() => {
+            void run('entry', async () => { await openBotEntryFor(selected.id); });
+          }}>{t('settings.bots.openEntry')}</Button>
+          {!selected.archived ? <Button variant="outline" size="sm" disabled={busy === 'archive'} onClick={() => {
+            void run('archive', async () => { await archiveBot(selected.id); await refresh(); });
+          }}>{busy === 'archive' ? t('settings.bots.archiving') : t('settings.bots.archive')}</Button> : null}
+        </div>
+      </SettingsSection> : null}
+
+      {selected && !selected.archived ? <SettingsSection title={t('settings.bots.section.work')} contentClassName="space-y-2">
+        {work === null ? <p role="status" className="typography-meta text-muted-foreground">{t('common.loading')}</p> : null}
+        {work !== null && work.length === 0
+          ? <p className="typography-meta text-muted-foreground">{t('settings.bots.work.empty')}</p> : null}
+        <ul className="space-y-1">
+          {(work ?? []).map((item) => <li key={item.thread.id}
+            className="flex items-center gap-3 rounded-md border border-border/60 px-3 py-2">
+            <div className="min-w-0 flex-1">
+              <p className="typography-ui-label truncate text-foreground">{item.thread.brief || item.thread.id}</p>
+              <p className="typography-meta text-muted-foreground">{workStateLabel(item)}</p>
+            </div>
+            {item.sessionId ? <Button variant="outline" size="sm" onClick={() => {
+              void openPiSessionFromNavigation({ sessionId: item.sessionId! });
+            }}>{t('settings.bots.work.open')}</Button> : null}
+          </li>)}
+        </ul>
+      </SettingsSection> : null}
+    </> : null}
+  </>;
+}

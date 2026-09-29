@@ -1,4 +1,5 @@
 export * from "./types.js";
+export * from "./bots.js";
 export * from "./ui-dto.js";
 export * from "./settings-catalog.js";
 export * from "./thread-history.js";

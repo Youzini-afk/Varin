@@ -60,6 +60,7 @@ const HARNESS_SECTION_BY_SLUG: Record<string, HarnessSettingsSection> = {
   'harness-index': 'index',
   'harness-web': 'web',
   'harness-computers': 'computers',
+  'harness-bots': 'bots',
 };
 
 const pageImplementation = (
