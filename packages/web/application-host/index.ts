@@ -1815,6 +1815,12 @@ async function main(options: StartWebUiServerOptions = {}): Promise<WebUiServerC
     },
     vectors: () => knowledgeVectors,
     associationForSession: (sessionId) => workAssociationForSession(sessionId),
+    readSessionEntries: async (sessionId, scope) => (await piRuntimeBroker.previewSessionEntries(sessionId, undefined, scope)).entries,
+    readRunReport: async (scopeId, threadId, runId) => {
+      const run = (await threadRegistry.listRuns(scopeId, threadId)).find((run) => run.id === runId);
+      if (!run?.report) return null;
+      return [run.report.conclusion, run.report.unresolved.length ? `Unresolved: ${run.report.unresolved.join('; ')}` : ''].filter(Boolean).join('\n\n');
+    },
     onChanged: (owner, ids) => {
       broadcastGlobalUiEvent?.({
         type: 'varin:harness-knowledge-changed',
@@ -1926,7 +1932,7 @@ async function main(options: StartWebUiServerOptions = {}): Promise<WebUiServerC
       }
     },
     readEntries: async (sessionId) => (
-      (await piRuntimeBroker.previewSessionEntries(sessionId, undefined, 'branch')).entries
+      (await piRuntimeBroker.previewSessionEntries(sessionId, undefined, 'all')).entries
     ),
     memory: memoryService,
     onError: (error) => console.error('[VarinMemoryOrganizer]', errorMessage(error)),
@@ -2743,6 +2749,7 @@ async function main(options: StartWebUiServerOptions = {}): Promise<WebUiServerC
       });
     },
     organizer: memoryOrganizer,
+    memory: memoryService,
     ...(uiAuthController ? { requireAuth: uiAuthController.requireAuth } : {}),
   });
   registerWebSearchCredentialRoutes(app, {

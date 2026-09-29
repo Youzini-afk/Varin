@@ -1,4 +1,5 @@
 import { runtimeFetch } from '@varin/application-client';
+import type { MemorySourceExcerpt } from '@varin/protocol';
 
 export type KnowledgeCatalogScope = 'workspace' | 'user' | 'bot';
 export type KnowledgeCatalogStatus = 'suggested' | 'accepted' | 'dismissed';
@@ -164,6 +165,14 @@ export async function loadKnowledgeChain(
   });
   if (!response.ok) throw new Error(await readError(response));
   return parseKnowledgeCatalogChain(await response.json());
+}
+
+export async function loadKnowledgeSources(scope: KnowledgeCatalogScope, id: number, workspaceId?: string, signal?: AbortSignal): Promise<MemorySourceExcerpt[]> {
+  const response = await runtimeFetch(`/api/harness/knowledge/${scope}/${id}/sources?${workspaceQuery(scope, workspaceId)}`, { cache: 'no-store', signal });
+  if (!response.ok) throw new Error(await readError(response));
+  const body = await response.json() as { sources?: MemorySourceExcerpt[] };
+  if (!Array.isArray(body.sources)) throw new Error('Malformed memory source response');
+  return body.sources;
 }
 
 export async function saveKnowledgeCatalogItem(

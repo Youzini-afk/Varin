@@ -13,6 +13,8 @@ import type {
 import { KnowledgeMutationError } from "../knowledge/store.js";
 import { recallSources, type KnowledgeVectorRuntime, type MemoryRecallAssociation } from "../knowledge/vectors/index.js";
 import { botScopeId, sessionScopeId } from "../harness/owner-scope.js";
+import type { MemorySourceExcerpt, MemorySourceSpan, PiSessionEntry } from "@varin/protocol";
+import { entrySourceText, sourceRevision } from "./memory-sources.js";
 
 /**
  * Unified memory domain (BC1). One service backs every writer — the user's
@@ -69,6 +71,8 @@ export interface MemoryServiceDeps {
    * automatic recall closure builds.
    */
   associationForSession?(sessionId: string): Promise<MemoryRecallAssociation | undefined>;
+  readSessionEntries?(sessionId: string, scope: "branch" | "all"): Promise<PiSessionEntry[]>;
+  readRunReport?(scopeId: string, threadId: string, runId: string): Promise<string | null>;
   onChanged?(owner: MemoryOwner, ids: readonly NodeId[]): void;
   onError?(error: unknown): void;
 }
@@ -78,6 +82,8 @@ export interface MemoryRecordInput {
   trigger?: string;
   nature?: MemoryNature;
   source?: KnowledgeSource;
+  sourceText?: string;
+  sourceEntryId?: string;
   /** `accepted` persists immediately; `suggested` is a reviewable proposal. */
   commit?: KnowledgeStatus;
   expectedRevision?: string;
@@ -126,6 +132,54 @@ export function createMemoryService(deps: MemoryServiceDeps) {
     return item;
   };
 
+  const captureSource = async (input: Pick<MemoryRecordInput, "content" | "source" | "sourceText" | "sourceEntryId">): Promise<KnowledgeSource | undefined> => {
+    const source = input.source;
+    if (!source?.sessionId || source.kind === "memory-organizer" || source.spans || !deps.readSessionEntries) return source;
+    const entries = await deps.readSessionEntries(source.sessionId, "branch");
+    const quote = input.sourceText ?? input.content;
+    if (!quote.trim()) throw new KnowledgeMutationError("invalid", "Memory source passage is empty");
+    const candidates = entries.filter((entry) => !input.sourceEntryId || entry.id === input.sourceEntryId)
+      .flatMap((entry) => {
+        const text = entrySourceText(entry);
+        const start = text.indexOf(quote);
+        return start < 0 ? [] : [{ entry, text, start }];
+      });
+    // No transcript means a standalone explicit note, with no historical
+    // passage for the organizer to replay. Otherwise require real evidence.
+    if (!candidates.length) {
+      if (!entries.length && !input.sourceText && !input.sourceEntryId) return source;
+      throw new KnowledgeMutationError("invalid", "Provide sourceText as an exact passage from this conversation (and sourceEntryId if needed)");
+    }
+    const { entry, text, start } = candidates.at(-1)!;
+    return { ...source, entryId: entry.id, spans: [{
+      kind: "pi-entry", id: entry.id, sessionId: source.sessionId,
+      revision: sourceRevision(text), start, end: start + quote.length,
+    }] };
+  };
+
+  const readSource = async (owner: MemoryOwner, id: NodeId): Promise<MemorySourceExcerpt[]> => {
+    // Authorization is the memory owner lookup. Only its persisted ranges are
+    // readable; callers cannot substitute another session or request its history.
+    const item = await requireRow(await storeFor(owner), owner, id);
+    return Promise.all((item.source?.spans ?? []).map(async (span: MemorySourceSpan): Promise<MemorySourceExcerpt> => {
+      let text: string | undefined;
+      try {
+        if (span.kind === "pi-entry" && span.sessionId && deps.readSessionEntries) {
+          const entry = (await deps.readSessionEntries(span.sessionId, "all")).find((entry) => entry.id === span.id);
+          if (entry) text = entrySourceText(entry);
+        } else if (span.kind === "event" && span.scopeId && span.sessionId) {
+          const sourceStore = await deps.storeForScopeId(span.scopeId);
+          text = (await sourceStore?.listEvents({ sessionId: span.sessionId }))?.find((event) => String(event.id) === span.id)?.text;
+        } else if (span.kind === "run-report" && span.scopeId && span.threadId) {
+          text = await deps.readRunReport?.(span.scopeId, span.threadId, span.id) ?? undefined;
+        }
+      } catch { return { span, status: "unavailable" }; }
+      if (text === undefined) return { span, status: "unavailable" };
+      if (sourceRevision(text) !== span.revision || span.end > text.length) return { span, status: "changed" };
+      return { span, status: "available", text: text.slice(span.start, span.end) };
+    }));
+  };
+
   /**
    * Persist one memory row. Direct user/agent statements default to
    * `accepted` — the per-row review tray is no longer the gate for something
@@ -136,13 +190,14 @@ export function createMemoryService(deps: MemoryServiceDeps) {
     const store = await storeFor(owner);
     const content = input.content.trim();
     if (!content) throw new KnowledgeMutationError("invalid", "Memory content is required");
+    const source = await captureSource(input);
     const result = await store.createKnowledgeIfAbsent({
       scope: owner.scope,
       status: input.commit ?? "accepted",
       content,
       trigger: input.trigger?.trim() ?? "",
       ...(input.nature ? { nature: input.nature } : {}),
-      ...(input.source ? { source: input.source } : {}),
+      ...(source ? { source } : {}),
       ...(input.supplements !== undefined ? { supplements: input.supplements } : {}),
     }, { explicit: input.source?.kind !== "memory-organizer", ...(input.expectedRevision !== undefined ? { expectedRevision: input.expectedRevision } : {}) });
     if (result.created) notify(owner, [result.knowledge.id]);
@@ -153,16 +208,17 @@ export function createMemoryService(deps: MemoryServiceDeps) {
   const correct = async (
     owner: MemoryOwner,
     id: NodeId,
-    patch: { content: string; trigger?: string; nature?: MemoryNature; source?: KnowledgeSource; expected?: KnowledgeExpectedRevision },
+    patch: { content: string; trigger?: string; nature?: MemoryNature; source?: KnowledgeSource; sourceText?: string; sourceEntryId?: string; expected?: KnowledgeExpectedRevision },
   ): Promise<{ id: NodeId; previous: Knowledge }> => {
     const store = await storeFor(owner);
+    const source = await captureSource(patch);
     const result = await store.supersedeKnowledge(id, {
       scope: owner.scope,
       status: "accepted",
       content: patch.content,
       trigger: patch.trigger?.trim() ?? "",
       ...(patch.nature ? { nature: patch.nature } : {}),
-      ...(patch.source ? { source: patch.source } : {}),
+      ...(source ? { source } : {}),
     }, owner.scope, patch.expected);
     notify(owner, [result.id, id]);
     return result;
@@ -239,6 +295,7 @@ export function createMemoryService(deps: MemoryServiceDeps) {
     get,
     list,
     search,
+    readSource,
     revision: async (owner: MemoryOwner) => (await storeFor(owner)).knowledgeRevision(),
     ownerForSession: deps.ownerForSession,
   };

@@ -2,6 +2,9 @@
 
 export const settingsDict = {
   ...englishSettingsDict,
+  'settings.knowledge.source.passages': 'Passages originaux',
+  'settings.knowledge.source.changed': 'La source a changé ; la version citée n’est plus disponible.',
+  'settings.knowledge.source.unavailable': 'La source originale est indisponible.',
   'settings.page.harness.network.title': 'Réseau sortant de l’hôte',
   'settings.page.harness.network.host': 'Hôte d’exécution :',
   'settings.page.harness.network.mode': 'Mode de sortie',

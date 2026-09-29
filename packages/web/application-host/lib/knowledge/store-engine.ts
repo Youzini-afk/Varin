@@ -31,6 +31,7 @@ const { TriviumDB } = require("triviumdb") as typeof import("triviumdb");
 type Vector = import("triviumdb").Vector;
 type TransactionOperation = import("triviumdb").TransactionOperation;
 
+import { mergeSourceSpans, overlappingSource, parseSourceSpans } from "../memory/memory-sources.js";
 import {
   type EmbeddingProvider,
   type NodeId,
@@ -274,6 +275,7 @@ export async function openKnowledgeStoreEngine(deps: KnowledgeStoreEngineOptions
         ...(pick("threadId") ? { threadId: pick("threadId")! } : {}),
         ...(pick("runId") ? { runId: pick("runId")! } : {}),
         ...(pick("entryId") ? { entryId: pick("entryId")! } : {}),
+        ...(Array.isArray(source["spans"]) ? { spans: parseSourceSpans(source["spans"]) } : {}),
       };
     };
     const knowledgeFromPayload = (id: NodeId, p: Record<string, unknown>): Knowledge | null => {
@@ -352,6 +354,7 @@ export async function openKnowledgeStoreEngine(deps: KnowledgeStoreEngineOptions
         scope,
         ...(typeof nature === "string" && nature ? { nature } : {}),
         content,
+        ...(Array.isArray(p["spans"]) ? { spans: parseSourceSpans(p["spans"]) } : {}),
         ...(typeof trigger === "string" && trigger ? { trigger } : {}),
         ...(Number.isSafeInteger(target) ? { target: target as number } : {}),
         ...(expected ? { expectedTarget: {
@@ -410,6 +413,7 @@ export async function openKnowledgeStoreEngine(deps: KnowledgeStoreEngineOptions
       return {
         key: p["key"],
         status: status as OrganizerProgressStatus,
+        ...(Array.isArray(p["coveredSources"]) ? { coveredSources: parseSourceSpans(p["coveredSources"]) } : {}),
         ...(typeof p["sourceKey"] === "string" && p["sourceKey"] ? { sourceKey: p["sourceKey"] as string } : {}),
         ...(Number.isSafeInteger(p["eventCursor"]) ? { eventCursor: p["eventCursor"] as number } : {}),
         ...(eventPartial ? { eventPartial } : {}),
@@ -776,6 +780,7 @@ export async function openKnowledgeStoreEngine(deps: KnowledgeStoreEngineOptions
             type: "organizer",
             key: progress.key,
             status: progress.status,
+            ...(progress.coveredSources ? { coveredSources: progress.coveredSources } : {}),
             ...(progress.sourceKey !== undefined ? { sourceKey: progress.sourceKey } : {}),
             ...(progress.eventCursor !== undefined ? { eventCursor: progress.eventCursor } : {}),
             ...(progress.eventPartial !== undefined ? { eventPartial: { ...progress.eventPartial } } : {}),
@@ -793,6 +798,7 @@ export async function openKnowledgeStoreEngine(deps: KnowledgeStoreEngineOptions
           // stale lastError or cursor would misreport the committed coverage.
           const unset: Record<string, boolean> = {};
           if (progress.sourceKey === undefined) unset.sourceKey = true;
+          if (progress.coveredSources === undefined) unset.coveredSources = true;
           if (progress.eventCursor === undefined) unset.eventCursor = true;
           if (progress.eventPartial === undefined) unset.eventPartial = true;
           if (progress.entryCursor === undefined) unset.entryCursor = true;
@@ -1034,26 +1040,33 @@ export async function openKnowledgeStoreEngine(deps: KnowledgeStoreEngineOptions
                 && k.source.proposalKey !== undefined
                 && knowledgeSourceFromPayload(payload["source"])?.proposalKey === k.source.proposalKey)
               || (k.source?.kind === "memory-organizer"
-                && (payload["invalidAt"] !== undefined || payload["status"] === "dismissed")
                 && (() => {
                   const previous = knowledgeSourceFromPayload(payload["source"]);
-                  // A keyed organizer source identifies one covered range.
-                  // Suppressing an entire session would also discard unrelated
-                  // decisions made in its later turns. Keyless historical rows
-                  // can only fall back to their broader session/run identity.
-                  return previous?.kind === "memory-organizer"
-                    && (previous.key !== undefined
-                      ? k.source!.key !== undefined && previous.key === k.source!.key
-                      : (k.source!.sessionId !== undefined && previous.sessionId === k.source!.sessionId)
-                        || (k.source!.runId !== undefined && previous.runId === k.source!.runId));
+                  if (previous?.kind === "memory-organizer" && payload["invalidAt"] === undefined && payload["status"] !== "dismissed") return false;
+                  // Explicit records and retired inference both claim their
+                  // exact evidence, including rephrased late model results.
+                  return previous?.spans?.some((old) => k.source?.spans?.some((next) => overlappingSource(old, next)))
+                    || (!previous?.spans?.length && !k.source?.spans?.length && previous?.key !== undefined && previous.key === k.source!.key);
                 })()))
           ))[0];
           if (duplicate) {
+            // A repeated explicit statement can bring new original evidence.
+            // Keep all of it so forgetting also suppresses the new source.
+            if (explicitRemember && k.source?.spans?.length) {
+              const previous = knowledgeSourceFromPayload(duplicate.payload["source"]);
+              const source = { ...previous, ...k.source, spans: mergeSourceSpans([...(previous?.spans ?? []), ...k.source.spans]) };
+              db.patchPayload(duplicate.id, { $set: { source } });
+              duplicate.payload = { ...duplicate.payload, source };
+              persistence.commit();
+              bumpKnowledgeEpoch();
+              notifyKnowledge([duplicate.id]);
+            }
             if (explicitRemember && duplicate.payload["status"] === "suggested") {
+              const source = knowledgeSourceFromPayload(duplicate.payload["source"]) ?? k.source;
               db.patchPayload(duplicate.id, { $set: {
-                status: "accepted", ...(k.nature ? { nature: k.nature } : {}), ...(k.source ? { source: k.source } : {}),
+                status: "accepted", ...(k.nature ? { nature: k.nature } : {}), ...(source ? { source } : {}),
               } });
-              duplicate.payload = { ...duplicate.payload, status: "accepted", ...(k.nature ? { nature: k.nature } : {}), ...(k.source ? { source: k.source } : {}) };
+              duplicate.payload = { ...duplicate.payload, status: "accepted", ...(k.nature ? { nature: k.nature } : {}), ...(source ? { source } : {}) };
               persistence.commit();
               bumpKnowledgeEpoch();
               notifyKnowledge([duplicate.id]);

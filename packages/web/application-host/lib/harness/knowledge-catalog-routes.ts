@@ -10,7 +10,8 @@ import {
   acceptSuggestion,
   dismissSuggestion,
 } from "./knowledge-suggestions.js";
-import { botScopeId, isBotScopeId } from "./owner-scope.js";
+import { botScopeId, botIdFromScopeId, isBotScopeId } from "./owner-scope.js";
+import type { MemoryService } from "../memory/memory-service.js";
 import type { MemoryOrganizer } from "../memory/memory-organizer.js";
 
 export interface KnowledgeCatalogRoutesOptions {
@@ -20,6 +21,7 @@ export interface KnowledgeCatalogRoutesOptions {
   onKnowledgeChanged?: (change: { scope: KnowledgeScope; workspaceId?: string }) => void;
   /** Background organizer — powers the progress surface and manual retry. */
   organizer?: Pick<MemoryOrganizer, "describe" | "retryScope">;
+  memory?: Pick<MemoryService, "readSource">;
   requireAuth?: RequestHandler;
 }
 
@@ -54,6 +56,7 @@ export function registerHarnessKnowledgeCatalogRoutes(
     getUserStore,
     onKnowledgeChanged,
     organizer,
+    memory,
     requireAuth = noAuth,
   }: KnowledgeCatalogRoutesOptions,
 ): void {
@@ -218,6 +221,20 @@ export function registerHarnessKnowledgeCatalogRoutes(
     } catch (error) {
       sendKnowledgeError(response, error);
     }
+  });
+
+  app.get("/api/harness/knowledge/:scope/:id/sources", requireAuth, async (request: Request, response: Response) => {
+    response.setHeader("Cache-Control", "no-store");
+    const scope = scopeOf(request.params.scope);
+    const id = idOf(request.params.id);
+    if (!scope || id === null) { response.status(400).json({ error: "scope and id are required" }); return; }
+    if (!memory) { response.status(503).json({ error: "Memory source reader is unavailable" }); return; }
+    try {
+      const { workspaceId } = await catalogStore(request, scope);
+      const sources = await memory.readSource({ scope, ownerId: scope === "user" ? null
+        : scope === "bot" ? botIdFromScopeId(workspaceId!) : workspaceId! }, id);
+      response.json({ sources });
+    } catch (error) { sendKnowledgeError(response, error); }
   });
 
   app.put("/api/harness/knowledge/:scope/:id", requireAuth, async (request: Request, response: Response) => {

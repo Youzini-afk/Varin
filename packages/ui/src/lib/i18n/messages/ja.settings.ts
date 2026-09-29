@@ -2,6 +2,9 @@
 
 export const settingsDict = {
   ...englishSettingsDict,
+  'settings.knowledge.source.passages': '元の文章を表示',
+  'settings.knowledge.source.changed': '出典が変更されたため、参照した版を読み取れません。',
+  'settings.knowledge.source.unavailable': '元の出典を読み取れません。',
   'settings.page.harness.network.title': '実行ホストの送信ネットワーク',
   'settings.page.harness.network.host': '実行ホスト：',
   'settings.page.harness.network.mode': '接続モード',

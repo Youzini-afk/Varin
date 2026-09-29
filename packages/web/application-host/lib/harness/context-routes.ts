@@ -197,6 +197,8 @@ export function registerHarnessContextRoutes(
         ...(nature === "experience" || nature === "decision" || nature === "preference" || nature === "judgment" || nature === "instruction"
           ? { nature: nature as MemoryNature } : {}),
         source: { kind, sessionId },
+        ...(typeof request.body?.sourceText === "string" ? { sourceText: request.body.sourceText } : {}),
+        ...(typeof request.body?.sourceEntryId === "string" ? { sourceEntryId: request.body.sourceEntryId } : {}),
       });
       onKnowledgeChanged?.(sessionId, owner.scope);
       response.status(result.created ? 201 : 200).json({

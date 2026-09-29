@@ -97,6 +97,8 @@ export function createMemoryRememberService(host: HarnessServiceHost): HarnessSe
       const nature = natureOf(params.nature);
       const result = await service.remember(owner, {
         content,
+        ...(typeof params.sourceText === "string" ? { sourceText: params.sourceText } : {}),
+        ...(typeof params.sourceEntryId === "string" ? { sourceEntryId: params.sourceEntryId } : {}),
         ...(typeof params.trigger === "string" ? { trigger: params.trigger } : {}),
         ...(nature ? { nature } : {}),
         source: {
@@ -127,6 +129,8 @@ export function createMemoryCorrectService(host: HarnessServiceHost): HarnessSer
       try {
         const result = await service.correct(owner, id, {
           content,
+          ...(typeof params.sourceText === "string" ? { sourceText: params.sourceText } : {}),
+          ...(typeof params.sourceEntryId === "string" ? { sourceEntryId: params.sourceEntryId } : {}),
           ...(typeof params.trigger === "string" ? { trigger: params.trigger } : {}),
           ...(nature ? { nature } : {}),
           source: {
@@ -179,6 +183,7 @@ export function createMemoryGetService(host: HarnessServiceHost): HarnessService
         return {
           item: toMemoryItem(item),
           ...(chain ? { chain: chain.chain.map(toMemoryItem) } : {}),
+          ...(params.includeSource ? { sources: await service.readSource(owner, id) } : {}),
         };
       } catch (error) {
         if (error instanceof KnowledgeMutationError) throw mutationError(error);

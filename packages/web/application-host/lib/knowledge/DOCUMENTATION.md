@@ -87,11 +87,25 @@ user requirements. Acceptance is not a persistence receipt or an authority level
 
 New organizer proposals can supply the knowledge revision they observed. The
 single writer checks both committed and pending mutations before inserting them.
-Retired automatic source ranges suppress rephrased retries; explicit remembering
-can intentionally create a new active row. Organizer proposal/progress writes do
-not yet constitute one recoverable batch transaction. Complete source revision
-coverage and producer unification remain in the
-[BC acceptance record](../../../../../docs/plan/bot-computer-use-acceptance.md).
+Explicit and automatic memories carry the same original-source ranges (native Pi
+entry, event or Run report, revision and text offsets). A paraphrased explicit
+record cites `sourceText`; the Host resolves that exact passage on the caller's
+branch. Automatic proposals also cite a narrow quote. Covered and retired ranges
+are excluded before narration, and the storage writer checks late inferred
+proposals against explicit/forgotten evidence. Explicit remembering can
+intentionally create a new active row.
+
+Organizer progress retains reviewed ranges, including empty judgments, across all
+native Pi branches. List cursors are presentation only; changed source revisions
+reopen their ranges. Prepared proposals and their source ranges survive restart;
+committed provenance reconciles a crash between memory and coverage writes. This
+is recoverable progress, not a cross-store rollback transaction.
+
+`memory get` with `includeSource` and the settings original-passages view read only
+the persisted ranges authorized by the selected memory. They report changed or
+missing originals instead of presenting another revision as the cited evidence.
+Current delivery evidence is in the
+[BC acceptance record](../../../../../docs/plan/bot-computer-use-review.md).
 
 ### Runtime build
 

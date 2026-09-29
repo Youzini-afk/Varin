@@ -30,6 +30,9 @@ const MemoryParams = Type.Object({
   ]),
   /** remember/correct: the durable statement. */
   content: Type.Optional(Type.String()),
+  sourceText: Type.Optional(Type.String({ description: "Exact source passage supporting remember/correct; omit when content is already a verbatim quote." })),
+  sourceEntryId: Type.Optional(Type.String({ description: "Native conversation entry containing sourceText, when needed to disambiguate." })),
+  includeSource: Type.Optional(Type.Boolean({ description: "get: read the original passages behind this memory." })),
   /** search: natural-language query against durable memory. */
   query: Type.Optional(Type.String()),
   /** search: requested result count (default 8). */
@@ -80,6 +83,7 @@ export function createMemoryTool(bridge: HostServicesBridge, _sessionId: string)
     promptGuidelines: [
       "Use memory remember when the user states a durable preference, a decision is made, or an outcome is worth keeping for future sessions.",
       "Use memory search for a natural-language lookup over durable memory; use memory get to inspect one id and its revision chain.",
+      "For remember/correct, cite the exact supporting passage in sourceText when paraphrasing. This shares source coverage with background memory and makes forgetting effective. Use get with includeSource to read original evidence, including other native branches.",
       "Use memory correct to replace a memory that is wrong or stale; use memory forget when it should no longer apply.",
       "memory remember persists immediately — do not also call recall or wait for a review step.",
     ],
@@ -93,6 +97,8 @@ export function createMemoryTool(bridge: HostServicesBridge, _sessionId: string)
             }
             const result = await bridge.request<"memory.remember">("memory.remember", {
               content: params.content,
+              ...(params.sourceText !== undefined ? { sourceText: params.sourceText } : {}),
+              ...(params.sourceEntryId !== undefined ? { sourceEntryId: params.sourceEntryId } : {}),
               ...(params.trigger !== undefined ? { trigger: params.trigger } : {}),
               ...(params.nature !== undefined ? { nature: params.nature } : {}),
               ...(params.scope !== undefined ? { scope: params.scope } : {}),
@@ -111,6 +117,7 @@ export function createMemoryTool(bridge: HostServicesBridge, _sessionId: string)
             }
             const result = await bridge.request<"memory.get">("memory.get", {
               id: params.id,
+              ...(params.includeSource ? { includeSource: true } : {}),
               ...(params.scope !== undefined ? { scope: params.scope } : {}),
             }) as MemoryGetResult;
             if (!result.item) {
@@ -125,9 +132,12 @@ export function createMemoryTool(bridge: HostServicesBridge, _sessionId: string)
               lines.push("", "revision chain:");
               for (const row of result.chain) lines.push(`  ${describeItem(row)}`);
             }
+            for (const source of result.sources ?? []) {
+              lines.push(`\nOriginal ${source.span.kind} ${source.span.id} (${source.status}):`, source.text ?? "Original source is no longer available at this revision.");
+            }
             return {
               content: [{ type: "text", text: lines.join("\n") }],
-              details: { item: result.item, chain: result.chain ?? [] },
+              details: { item: result.item, chain: result.chain ?? [], ...(result.sources ? { sources: result.sources } : {}) },
             };
           }
           case "search": {
@@ -157,6 +167,8 @@ export function createMemoryTool(bridge: HostServicesBridge, _sessionId: string)
             const result = await bridge.request<"memory.correct">("memory.correct", {
               id: params.id,
               content: params.content,
+              ...(params.sourceText !== undefined ? { sourceText: params.sourceText } : {}),
+              ...(params.sourceEntryId !== undefined ? { sourceEntryId: params.sourceEntryId } : {}),
               ...(params.trigger !== undefined ? { trigger: params.trigger } : {}),
               ...(params.nature !== undefined ? { nature: params.nature } : {}),
               ...(params.scope !== undefined ? { scope: params.scope } : {}),

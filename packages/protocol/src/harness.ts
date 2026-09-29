@@ -679,6 +679,24 @@ export type MemoryNature = "experience" | "decision" | "preference" | "judgment"
 /** The store-level owner a memory row belongs to. */
 export type MemoryScope = "workspace" | "user" | "session" | "bot";
 
+/** A range in an original source, with UTF-16 offsets into its text projection. */
+export interface MemorySourceSpan {
+  kind: "pi-entry" | "event" | "run-report";
+  id: string;
+  sessionId?: string;
+  scopeId?: string;
+  threadId?: string;
+  revision: string;
+  start: number;
+  end: number;
+}
+
+export interface MemorySourceExcerpt {
+  span: MemorySourceSpan;
+  status: "available" | "changed" | "unavailable";
+  text?: string;
+}
+
 export interface MemoryItem {
   id: number;
   scope: MemoryScope;
@@ -686,7 +704,7 @@ export interface MemoryItem {
   content: string;
   trigger: string;
   nature?: MemoryNature;
-  source?: { kind: string; sessionId?: string; threadId?: string; runId?: string; entryId?: string };
+  source?: { kind: string; sessionId?: string; threadId?: string; runId?: string; entryId?: string; spans?: MemorySourceSpan[] };
   createdAt: number;
   invalidAt?: number;
   recallCount: number;
@@ -695,6 +713,9 @@ export interface MemoryItem {
 
 export interface MemoryRememberParams {
   content: string;
+  /** Exact passage supporting this statement; defaults to content when quoted verbatim. */
+  sourceText?: string;
+  sourceEntryId?: string;
   trigger?: string;
   nature?: MemoryNature;
   /**
@@ -713,6 +734,8 @@ export interface MemoryRememberResult {
 export interface MemoryCorrectParams {
   id: number;
   content: string;
+  sourceText?: string;
+  sourceEntryId?: string;
   trigger?: string;
   nature?: MemoryNature;
   scope?: MemoryScope;
@@ -736,11 +759,13 @@ export interface MemoryForgetResult {
 export interface MemoryGetParams {
   id: number;
   scope?: MemoryScope;
+  includeSource?: boolean;
 }
 
 export interface MemoryGetResult {
   item?: MemoryItem;
   chain?: MemoryItem[];
+  sources?: MemorySourceExcerpt[];
 }
 
 export interface MemorySearchParams {

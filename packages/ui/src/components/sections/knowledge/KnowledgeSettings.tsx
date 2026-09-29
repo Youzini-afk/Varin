@@ -27,6 +27,7 @@ import {
 import { listBots } from '@/lib/bots';
 import { openPiSessionFromNavigation } from '@/lib/pi-runtime/sessionNavigation';
 import { useHarnessSettings } from '../harness/useHarnessSettings';
+import { MemorySources } from './MemorySources';
 
 const statusKey = (item: KnowledgeCatalogItem): I18nKey => (
   item.invalidAt !== undefined
@@ -396,6 +397,7 @@ export const KnowledgeSettings: React.FC = () => {
                   </Button>
                 ) : null}
               </p>
+              <MemorySources key={`${contextKey}:${selected.id}`} scope={selected.scope} id={selected.id} workspaceId={workspaceId} />
               <p className={SETTINGS_HELPER_CLASS}>
                 {t('settings.knowledge.recallCount', { count: selected.recallCount })}
                 {' · '}

@@ -116,6 +116,7 @@ export interface KnowledgeSource {
   threadId?: string;
   runId?: string;
   entryId?: string;
+  spans?: import("@varin/protocol").MemorySourceSpan[];
 }
 
 /** Values that identify the revision a caller opened before a mutation. */
@@ -214,6 +215,7 @@ export interface OrganizerPreparedProposal {
   scope: "workspace" | "user" | "bot";
   nature?: string;
   content: string;
+  spans?: import("@varin/protocol").MemorySourceSpan[];
   trigger?: string;
   target?: number;
   /** Revision of the target actually shown to the model, retained for replay. */
@@ -229,6 +231,8 @@ export interface OrganizerProgress {
    * matches the range's current content — a changed source reopens coverage.
    */
   sourceKey?: string;
+  /** Reviewed source ranges across every native Pi branch. Cursors are projections only. */
+  coveredSources?: import("@varin/protocol").MemorySourceSpan[];
   /** Last processed store event id for session sources. */
   eventCursor?: number;
   /** A prefix of the next event was covered; its id stays fixed across retries. */

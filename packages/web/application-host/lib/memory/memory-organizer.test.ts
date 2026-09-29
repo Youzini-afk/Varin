@@ -8,6 +8,7 @@ import { createMemoryService, type MemoryOwner, type MemoryService } from "./mem
 import { createMemoryOrganizer, type MemoryOrganizerBroker, type OrganizerRunSource } from "./memory-organizer.js";
 import type { PiSessionEntry } from "@varin/protocol";
 import { estimateMemoryOrganizerInputTokens } from "@varin/protocol";
+import { sourceRevision } from "./memory-sources.js";
 
 // Scratch stores live in the OS temp dir; see harness/recall-tool.test.ts.
 const TEST_DIR = join(tmpdir(), "varin-test-memory-organizer");
@@ -52,7 +53,7 @@ describe("memory organizer (BC2)", () => {
   let contextWindow: number | null;
   let organizerConfigured: boolean;
 
-  const memory = (): MemoryService => createMemoryService({
+  const memory = (overrides: Partial<Parameters<typeof createMemoryService>[0]> = {}): MemoryService => createMemoryService({
     storeForScopeId: async (scopeId) => {
       const existing = stores.get(scopeId);
       if (existing) return existing;
@@ -62,6 +63,7 @@ describe("memory organizer (BC2)", () => {
     },
     userStore: async () => userStore,
     ownerForSession: async (sessionId) => ({ scope: "workspace", ownerId: sessionId }),
+    ...overrides,
   });
 
   const broker = (): MemoryOrganizerBroker => ({
@@ -161,7 +163,7 @@ describe("memory organizer (BC2)", () => {
     organizeText = JSON.stringify({
       memories: [{
         action: "new", scope: "workspace", nature: "decision",
-        content: "Catalog store uses Postgres.", trigger: "database schema questions", source: "u0",
+        content: "Catalog store uses Postgres.", trigger: "database schema questions", source: "u0", quote: "We decided to use Postgres for the catalog store.",
       }],
     });
     const org = organizer(memory());
@@ -183,8 +185,8 @@ describe("memory organizer (BC2)", () => {
     await ws.putEvent({ kind: "turn", at: 1, sessionId: "s1", text: "Use Postgres and release on Thursday.", source: "user" });
     scopeSessions.set("ws-two-proposals", ["s1"]);
     organizeText = JSON.stringify({ memories: [
-      { action: "new", scope: "workspace", content: "Catalog uses Postgres.", source: "u0" },
-      { action: "new", scope: "workspace", content: "Release day is Thursday.", source: "u0" },
+      { action: "new", scope: "workspace", content: "Catalog uses Postgres.", source: "u0", quote: "Use Postgres" },
+      { action: "new", scope: "workspace", content: "Release day is Thursday.", source: "u0", quote: "release on Thursday." },
     ] });
     const org = organizer(memory());
     org.noteScope("ws-two-proposals");
@@ -208,8 +210,8 @@ describe("memory organizer (BC2)", () => {
     await ws.putEvent({ kind: "turn", at: 1, sessionId: "s1", text: "Two decisions.", source: "user" });
     scopeSessions.set("ws-partial-commit", ["s1"]);
     organizeText = JSON.stringify({ memories: [
-      { action: "new", scope: "workspace", content: "Decision A.", source: "u0" },
-      { action: "new", scope: "workspace", content: "Decision B.", source: "u0" },
+      { action: "new", scope: "workspace", content: "Decision A.", source: "u0", quote: "Two decisions." },
+      { action: "new", scope: "workspace", content: "Decision B.", source: "u0", quote: "Two decisions." },
     ] });
     const org = organizer(service);
     org.noteScope("ws-partial-commit");
@@ -228,7 +230,7 @@ describe("memory organizer (BC2)", () => {
     runSources = [{ threadId: "t1", threadTitle: "Summary task", runId: "r1", sessionId: null,
       reportText: "The user prefers short summaries.", endedAt: null }];
     organizeText = JSON.stringify({ memories: [{ action: "new", scope: "user",
-      content: "User prefers short summaries.", source: "u0" }] });
+      content: "User prefers short summaries.", source: "u0", quote: "The user prefers short summaries." }] });
     const putProgress = ws.putOrganizerProgress.bind(ws);
     let interrupted = false;
     (ws as { putOrganizerProgress: typeof putProgress }).putOrganizerProgress = async (row) => {
@@ -274,7 +276,7 @@ describe("memory organizer (BC2)", () => {
     runSources = [{ threadId: "t1", threadTitle: "Task", runId: "r1", sessionId: null,
       reportText: "A proposed decision.", endedAt: null }];
     organizeText = JSON.stringify({ memories: [{ action: "new", scope: "workspace",
-      content: "The decision is pending.", source: "u0" }] });
+      content: "The decision is pending.", source: "u0", quote: "A proposed decision." }] });
     const service = memory();
     (service as { remember: MemoryService["remember"] }).remember = async () => { throw new Error("write unavailable"); };
     const org = organizer(service);
@@ -320,6 +322,7 @@ describe("memory organizer (BC2)", () => {
     organizeText = () => JSON.stringify({ memories: [{
       action: "new", scope: "workspace", source: "u0",
       content: ++narrative === 1 ? "Local state uses SQLite." : "Backups run every Thursday.",
+      quote: narrative === 1 ? "Use SQLite for local state." : "Backups are every Thursday.",
     }] });
     const org = organizer(service);
     org.noteScope("ws-forgotten-range");
@@ -341,7 +344,7 @@ describe("memory organizer (BC2)", () => {
     scopeSessions.set("ws-3", ["s1"]);
     let attempts = 0;
     organizeText = () => { attempts += 1; if (attempts === 1) throw new Error("transport down"); return JSON.stringify({
-      memories: [{ action: "new", scope: "workspace", content: "Persisted fact.", source: "u0" }],
+      memories: [{ action: "new", scope: "workspace", content: "Persisted fact.", source: "u0", quote: "Something worth keeping." }],
     }); };
     const service = memory();
     const org = organizer(service);
@@ -396,8 +399,8 @@ describe("memory organizer (BC2)", () => {
     scopeSessions.set("bot:b-1", ["s-bot"]);
     organizeText = JSON.stringify({
       memories: [
-        { action: "new", scope: "bot", nature: "preference", content: "Owner prefers terse updates.", trigger: "status updates", source: "u0" },
-        { action: "new", scope: "user", content: "User-level fact should not land.", source: "u0" },
+        { action: "new", scope: "bot", nature: "preference", content: "Owner prefers terse updates.", trigger: "status updates", source: "u0", quote: "The bot learned its owner prefers terse updates." },
+        { action: "new", scope: "user", content: "User-level fact should not land.", source: "u0", quote: "The bot learned its owner prefers terse updates." },
       ],
     });
     autoOrganize = { workspace: true, user: false, bot: true };
@@ -440,6 +443,7 @@ describe("memory organizer (BC2)", () => {
         action: "correct", scope: "workspace", nature: "decision",
         content: "Catalog uses Postgres.", trigger: "db questions",
         target: `k:${existing.item.id}`, source: "u0",
+        quote: "Correction: catalog moved to Postgres.",
       }],
     });
     const org = organizer(service);
@@ -463,7 +467,7 @@ describe("memory organizer (BC2)", () => {
     await ws.putEvent({ kind: "turn", at: 1, sessionId: "s1", text: "The catalog changed to Postgres.", source: "user" });
     scopeSessions.set("ws-prepared-correction", ["s1"]);
     organizeText = JSON.stringify({ memories: [{ action: "correct", scope: "workspace",
-      target: `k:${original.item.id}`, content: "Catalog uses Postgres.", source: "u0" }] });
+      target: `k:${original.item.id}`, content: "Catalog uses Postgres.", source: "u0", quote: "The catalog changed to Postgres." }] });
     const correct = service.correct.bind(service);
     let failed = false;
     (service as { correct: typeof correct }).correct = async (...args) => {
@@ -514,19 +518,23 @@ describe("memory organizer (BC2)", () => {
       content: "Old preference.", source: { kind: "memory-organizer", sessionId: "s1" },
     });
     const source = "Long source: " + "material ".repeat(900) + "last-material-marker";
-    await store.putEvent({ kind: "turn", at: 1, sessionId: "s1", text: source, source: "user" });
+    const event = await store.putEvent({ kind: "turn", at: 1, sessionId: "s1", text: source, source: "user" });
     let finish!: () => void;
     let began!: () => void;
     const started = new Promise<void>((resolve) => { began = resolve; });
     organizeText = async () => {
       began();
       await new Promise<void>((resolve) => { finish = resolve; });
-      return JSON.stringify({ memories: [{ action: "new", scope: "workspace", content: "A paraphrase of the forgotten preference.", source: "u0" }] });
+      return JSON.stringify({ memories: [{ action: "new", scope: "workspace", content: "A paraphrase of the forgotten preference.", source: "u0", quote: "last-material-marker" }] });
     };
     const org = organizer(service);
     org.noteScope("ws");
     await started;
     expect(calls.find((call) => call.method === "harness.memoryOrganize")?.params.prompt).toContain("last-material-marker");
+    await service.remember(owner, { content: "Old preference.", source: { kind: "user-mark", sessionId: "s1", spans: [{
+      kind: "event", id: String(event.id), scopeId: "ws", sessionId: "s1", revision: sourceRevision(source),
+      start: source.indexOf("last-material-marker"), end: source.length,
+    }] } });
     await service.forget(owner, saved.item.id);
     finish();
     // The forget bumps the revision between narrate and commit — the unit is
@@ -554,6 +562,7 @@ describe("memory organizer (BC2)", () => {
       memories: [{
         action: "supplement", scope: "workspace", nature: "decision",
         content: "This quarter releases happen on Thursday.", trigger: "release cadence",
+        quote: "Releases moved to Thursday this quarter.",
         target: `k:${existing.item.id}`, source: "u0",
       }],
     });
@@ -581,7 +590,7 @@ describe("memory organizer (BC2)", () => {
     await ws.putEvent({ kind: "turn", at: 1, sessionId: "s1", text: "The catalog store uses Postgres.", source: "agent" });
     scopeSessions.set("ws-prepared", ["s1"]);
     organizeText = JSON.stringify({
-      memories: [{ action: "new", scope: "workspace", content: "Catalog uses Postgres.", trigger: "db", source: "u0" }],
+      memories: [{ action: "new", scope: "workspace", content: "Catalog uses Postgres.", trigger: "db", source: "u0", quote: "The catalog store uses Postgres." }],
     });
     const org = organizer(service);
     org.noteScope("ws-prepared");
@@ -637,7 +646,7 @@ describe("memory organizer (BC2)", () => {
       if (++requests === 1) {
         began();
         await new Promise<void>((resolve) => { finish = resolve; });
-        return JSON.stringify({ memories: [{ action: "new", scope: "workspace", content: "Release v1 shipped.", source: "u0" }] });
+        return JSON.stringify({ memories: [{ action: "new", scope: "workspace", content: "Release v1 shipped.", source: "u0", quote: "Release v1." }] });
       }
       return JSON.stringify({ memories: [] });
     };
@@ -794,6 +803,47 @@ describe("memory organizer (BC2)", () => {
     org.noteScope("ws-many-events");
     await wait(async () => (await ws.getOrganizerProgress("session:s1"))?.eventCursor === lastId, 10_000);
     expect(calls.filter((call) => call.method === "harness.memoryOrganize")).toHaveLength(2);
+    await org.dispose();
+  });
+
+  it("shares precise explicit coverage, preserves unrelated text, and recovers native branch revisions", async () => {
+    const ws = await openStore("workspace", "ws-shared-source");
+    stores.set("ws-shared-source", ws);
+    const owner: MemoryOwner = { scope: "workspace", ownerId: "ws-shared-source" };
+    const entry = (id: string, content: string, parentId: string | null = null): PiSessionEntry => ({
+      type: "message", id, parentId, timestamp: new Date(0).toISOString(), message: { role: "user", content, timestamp: 0 },
+    });
+    let entries = [entry("a", "Use SQLite. Backups run Thursday.")];
+    const service = memory({ readSessionEntries: async () => entries });
+    const saved = await service.remember(owner, { content: "Local data uses SQLite.", sourceText: "Use SQLite.", source: { kind: "memory.remember", sessionId: "s1" } });
+    await service.forget(owner, saved.item.id);
+    scopeSessions.set("ws-shared-source", ["s1"]);
+    let org = organizer(service, { readEntries: async () => entries });
+    org.noteScope("ws-shared-source");
+    await wait(async () => (await ws.getOrganizerProgress("session:s1"))?.status === "reviewed-empty");
+    const first = String(calls.find((call) => call.method === "harness.memoryOrganize")!.params.prompt);
+    expect(first).not.toContain("Use SQLite.");
+    expect(first).toContain("Backups run Thursday.");
+    expect(await service.readSource(owner, saved.item.id)).toMatchObject([{ status: "available", text: "Use SQLite." }]);
+    await org.dispose();
+    await ws.close();
+    stores.set("ws-shared-source", await openStore("workspace", "ws-shared-source"));
+    // The new active branch has a different leaf; prior native entries remain
+    // original evidence. Reorder the tree to prove coverage is not a list cursor.
+    entries = [entry("b", "New branch uses DuckDB.", "a"), ...entries];
+    org = organizer(memory(), { readEntries: async () => entries });
+    org.noteScope("ws-shared-source");
+    await wait(() => calls.filter((call) => call.method === "harness.memoryOrganize").length === 2);
+    await wait(() => org.pending === 0);
+    const second = String(calls.filter((call) => call.method === "harness.memoryOrganize")[1]!.params.prompt);
+    expect(second).toContain("New branch uses DuckDB.");
+    expect(second).not.toContain("Backups run Thursday.");
+    entries = [entries[0]!, entry("a", "Use Postgres. Backups run Thursday.")];
+    org.noteScope("ws-shared-source");
+    await wait(() => calls.filter((call) => call.method === "harness.memoryOrganize").length === 3);
+    expect(String(calls.filter((call) => call.method === "harness.memoryOrganize")[2]!.params.prompt)).toContain("Use Postgres.");
+    expect(await service.readSource(owner, saved.item.id)).toMatchObject([{ status: "changed" }]);
+    await expect(service.readSource({ scope: "workspace", ownerId: "unrelated" }, saved.item.id)).rejects.toMatchObject({ code: "not-found" });
     await org.dispose();
   });
 

@@ -30,7 +30,7 @@ import {
   type HarnessSettingsInput,
   type ModelSelection,
   type PiSessionEntry,
-  type PiSessionMessageEntry,
+  type MemorySourceSpan,
   type PiSettingsSnapshot,
 } from "@varin/protocol";
 import { botIdFromScopeId, isBotScopeId, isSessionScopeId } from "../harness/owner-scope.js";
@@ -46,6 +46,7 @@ import {
   type OrganizerPreparedProposal,
 } from "../knowledge/store.js";
 import type { MemoryOwner, MemoryService } from "./memory-service.js";
+import { entrySourceText, mergeSourceSpans, sourceRevision, uncoveredSourceSpans } from "./memory-sources.js";
 
 // ── Boundaries ─────────────────────────────────────────────────────
 
@@ -67,7 +68,7 @@ const MEMORY_ORGANIZER_SYSTEM = [
   "\"instruction\" is reserved for explicit user directives; never infer one.",
   "\"correct\" replaces an existing memory (target required); \"supplement\" adds a memory that refines or relates to an existing one (target required); \"new\" stands alone.",
   "content is one or two sentences preserving concrete facts (names, ids, dates); trigger is a short recall cue naming the situation this memory applies to.",
-  "source is the material id the memory was distilled from. Emit {\"memories\":[]} when nothing is worth persisting.",
+  "source is the material id the memory was distilled from. Each memory must also supply quote: the exact, narrow source passage supporting that claim. Do not cite an entire conversation or unrelated decisions. Emit {\"memories\":[]} when nothing is worth persisting.",
 ].join("\n");
 
 // ── Deps and source shapes ─────────────────────────────────────────
@@ -133,7 +134,7 @@ export interface MemoryOrganizerDeps {
   autoOrganizeForScope?(scopeId: string): Promise<boolean | null>;
   /** Durable owner resolution for a session (`workspaceId`, `bot:<id>`, `session:<id>`). */
   scopeForSession(sessionId: string): Promise<string | null>;
-  /** Branch entries for a session; never wakes a live worker (catalog path). */
+  /** All native entries, including inactive branches; never wakes a live worker. */
   readEntries(sessionId: string): Promise<PiSessionEntry[]>;
   /**
    * Scope-level inference binding: when the `models.memoryOrganizer` slot is
@@ -180,6 +181,7 @@ interface OrganizerProposal {
   trigger?: string;
   target?: number;
   source?: string;
+  quote: string;
 }
 
 // ── Helpers ────────────────────────────────────────────────────────
@@ -190,27 +192,6 @@ const record = (value: unknown): Record<string, unknown> => (
 
 const scopeKind = (scopeId: string): "workspace" | "bot" =>
   (isBotScopeId(scopeId) ? "bot" : "workspace");
-
-const messageText = (entry: PiSessionMessageEntry): string => {
-  const message = entry.message;
-  if (message.role === "user" || message.role === "custom") {
-    const content = message.content;
-    if (typeof content === "string") return content.trim();
-    return content
-      .filter((part) => part.type === "text")
-      .map((part) => part.text.trim())
-      .filter(Boolean)
-      .join("\n");
-  }
-  if (message.role === "assistant") {
-    return message.content
-      .filter((part) => part.type === "text")
-      .map((part) => part.text.trim())
-      .filter(Boolean)
-      .join("\n");
-  }
-  return "";
-};
 
 const progressKeyForSession = (sessionId: string): string => `session:${sessionId}`;
 const progressKeyForRun = (runId: string, part: number): string =>
@@ -223,7 +204,7 @@ const progressKeyForRun = (runId: string, part: number): string =>
  */
 const unitSourceKey = (scopeId: string, unit: OrganizerUnit | Omit<OrganizerUnit, "sourceKey" | "rangeKey">): string =>
   createHash("sha256").update(JSON.stringify([
-    scopeId, unit.key, unit.eventCursor, unit.eventPartial, unit.entryCursor, unit.entryPartial, unit.texts,
+    scopeId, unit.key, unit.source.spans?.map((span) => [span.kind, span.id, span.sessionId, span.scopeId, span.threadId, span.revision, span.start, span.end]), unit.texts,
     ...(unit.runStartOffset === undefined ? [] : [unit.runStartOffset, unit.runEndOffset]),
   ])).digest("hex");
 const unitRangeKey = (scopeId: string, key: string, start: unknown, end: unknown): string =>
@@ -231,6 +212,7 @@ const unitRangeKey = (scopeId: string, key: string, start: unknown, end: unknown
 const preparedProposalKey = (source: KnowledgeSource, proposal: OrganizerPreparedProposal): string | undefined =>
   source.key ? createHash("sha256").update(JSON.stringify([
     source.key, proposal.action, proposal.scope, proposal.content, proposal.trigger, proposal.target,
+    proposal.spans?.map((span) => [span.kind, span.id, span.sessionId, span.scopeId, span.threadId, span.revision, span.start, span.end]),
   ])).digest("hex") : undefined;
 
 /** Terminal coverage for this exact source content — the transaction is done. */
@@ -245,11 +227,6 @@ const retryable = (progress: OrganizerProgress | undefined, now: number, force =
   // "processing"/"prepared" rows are unfinished claims — a restart must resume them.
   return progress.status !== "formed" && progress.status !== "reviewed-empty";
 };
-
-const samePartial = <T extends string | number>(
-  left: { id: T; offset: number } | undefined,
-  right: { id: T; offset: number } | undefined,
-): boolean => left?.id === right?.id && left?.offset === right?.offset;
 
 /** Keep UTF-16 surrogate pairs intact while advancing a durable text offset. */
 const takePrefix = (text: string, start: number, capacity: number): number => {
@@ -291,8 +268,10 @@ const parseProposals = (text: string): OrganizerProposal[] | null => {
       ? Number(item["target"].slice(2))
       : undefined;
     const source = typeof item["source"] === "string" ? item["source"] : undefined;
-    if (!source || !/^u\d+$/.test(source) || (action !== "new" && target === undefined)) return null;
+    const quote = typeof item["quote"] === "string" ? item["quote"] : "";
+    if (!quote.trim() || !source || !/^u\d+$/.test(source) || (action !== "new" && target === undefined)) return null;
     proposals.push({
+      quote,
       action,
       scope,
       ...(nature ? { nature } : {}),
@@ -372,6 +351,7 @@ export function createMemoryOrganizer(deps: MemoryOrganizerDeps) {
   };
 
   interface ProgressPatch {
+    coveredSources?: MemorySourceSpan[];
     eventCursor?: number;
     eventPartial?: OrganizerProgress["eventPartial"] | null;
     entryCursor?: string;
@@ -410,6 +390,8 @@ export function createMemoryOrganizer(deps: MemoryOrganizerDeps) {
     await store.putOrganizerProgress({
       key,
       status,
+      coveredSources: mergeSourceSpans([...(existing?.coveredSources ?? []), ...(patch.coveredSources ?? []),
+        ...((status === "formed" || status === "reviewed-empty") ? existing?.preparedSource?.spans ?? [] : [])]),
       ...(sourceKey !== null ? { sourceKey } : {}),
       ...(patch.eventCursor !== undefined ? { eventCursor: patch.eventCursor } : existing?.eventCursor !== undefined ? { eventCursor: existing.eventCursor } : {}),
       ...(eventPartial !== null ? { eventPartial } : {}),
@@ -438,146 +420,78 @@ export function createMemoryOrganizer(deps: MemoryOrganizerDeps) {
     force: boolean,
     recordEmpty = true,
   ): Promise<OrganizerUnit | null> => {
-    // A session continues after its previous range was committed. Terminal
-    // progress closes that range, never the conversation's future material.
     if (progress?.status === "failed" && !retryable(progress, timestamp, force)) return null;
     const key = progressKeyForSession(sessionId);
-    const start = [progress?.eventCursor, progress?.eventPartial, progress?.entryCursor, progress?.entryPartial];
     const texts: string[] = [];
+    const spans: MemorySourceSpan[] = [];
     let eventCursor = progress?.eventCursor;
-    let eventPartial = progress?.eventPartial;
+    let eventPartial: OrganizerProgress["eventPartial"];
     let entryCursor = progress?.entryCursor;
-    let entryPartial = progress?.entryPartial;
-    const preparedRange = progress?.status === "prepared" ? progress.preparedRange : undefined;
-    const capacity = preparedRange ? Number.MAX_SAFE_INTEGER : unitChars;
-    // Capacity-aware accumulation: a unit stops at its character share and the
-    // cursors only advance over material actually included — the remainder
-    // stays pending for the next run instead of being silently clipped.
+    let entryPartial: OrganizerProgress["entryPartial"];
+    const frozen = progress?.status === "prepared" ? progress.preparedSource?.spans : undefined;
+    const capacity = frozen ? Number.MAX_SAFE_INTEGER : unitChars;
     let chars = 0;
-
-    const pendingEvents = await store.listEvents({
-      sessionId,
-      ...(progress?.eventCursor !== undefined ? { afterId: progress.eventCursor } : {}),
-    });
-    const events = pendingEvents.slice(0, MAX_EVENTS_PER_SESSION);
-    let hasMoreSource = pendingEvents.length > events.length;
-    if (eventPartial && events[0]?.id !== eventPartial.id) {
-      throw new Error(`Partially covered event is unavailable: ${eventPartial.id}`);
-    }
-    for (const event of events) {
-      if (preparedRange && !(preparedRange.eventCursor !== undefined && event.id <= preparedRange.eventCursor)
-        && preparedRange.eventPartial?.id !== event.id) break;
-      const text = event.text;
-      const offset = eventPartial?.id === event.id ? eventPartial.offset : 0;
-      const end = preparedRange?.eventPartial?.id === event.id ? preparedRange.eventPartial.offset : text.length;
-      if (offset > text.length || end > text.length || end < offset) {
-        throw new Error(`Covered event text changed before ${event.id}:${offset}`);
+    const [events, entries, localMemories, userMemories] = await Promise.all([
+      store.listEvents({ sessionId }), deps.readEntries(sessionId),
+      store.listKnowledge({}), deps.memory.list({ scope: "user", ownerId: null }),
+    ]);
+    const covered = [...(progress?.coveredSources ?? []), ...[...localMemories, ...userMemories]
+      .flatMap((item) => item.source?.spans ?? [])];
+    const materials = [
+      ...events.map((event) => ({ span: { kind: "event" as const, id: String(event.id), scopeId, sessionId,
+        revision: sourceRevision(event.text), start: 0, end: event.text.length }, text: event.text, label: event.kind })),
+      ...entries.filter((entry) => entry.type === "message" && entry.message.role !== "toolResult").map((entry) => {
+        const text = entrySourceText(entry);
+        return { span: { kind: "pi-entry" as const, id: entry.id, sessionId,
+          revision: sourceRevision(text), start: 0, end: text.length }, text,
+        label: entry.type === "message" ? entry.message.role : entry.type };
+      }),
+    ];
+    const pending = frozen ? frozen.map((span) => {
+      const material = materials.find((row) => row.span.kind === span.kind && row.span.id === span.id);
+      if (!material) throw new Error(`Prepared source is unavailable: ${span.kind} ${span.id}`);
+      if (material.span.revision !== span.revision || span.end > material.text.length) {
+        throw new SourceChangedError(`Prepared source changed: ${span.kind} ${span.id}`);
       }
-      if (end > offset) {
-        const prefix = `[${event.kind}] `;
-        const available = capacity - chars - prefix.length;
-        if (available <= 0) {
-          if (chars > 0) break;
-          throw new Error(`Organizer model cannot fit the event prefix for ${event.id}`);
-        }
-        const taken = takePrefix(text, offset, Math.min(available, end - offset));
-        if (taken <= 0) {
-          if (chars > 0) break;
-          throw new Error(`Organizer model cannot fit one character from event ${event.id}`);
-        }
-        texts.push(prefix + text.slice(offset, offset + taken));
-        chars += prefix.length + taken;
-        if (offset + taken < text.length) {
-          eventPartial = { id: event.id, offset: offset + taken };
-          break;
-        }
+      return { ...material, span };
+    }) : materials.flatMap((material) => uncoveredSourceSpans(material.span, covered)
+      .filter((span) => span.end > span.start).map((span) => ({ ...material, span })));
+    let hasMoreSource = false;
+    let eventCount = 0;
+    let entryCount = 0;
+    for (const [index, material] of pending.entries()) {
+      const { span, text, label } = material;
+      const prefix = `[${label}] `;
+      const available = capacity - chars - prefix.length;
+      const taken = available > 0 ? takePrefix(text, span.start, Math.min(available, span.end - span.start)) : 0;
+      if (taken <= 0) {
+        if (chars === 0) throw new Error(`Organizer model cannot fit source ${span.id}`);
+        hasMoreSource = true;
+        break;
       }
-      eventCursor = event.id;
-      eventPartial = undefined;
-      if (chars >= capacity) break;
-    }
-    if (preparedRange && (eventCursor !== preparedRange.eventCursor
-      || !samePartial(eventPartial, preparedRange.eventPartial))) {
-      throw new Error(`Prepared event range is unavailable for session ${sessionId}`);
-    }
-
-    if (!eventPartial && chars < capacity) {
-      let entries: PiSessionEntry[];
-      try {
-        entries = await deps.readEntries(sessionId);
-      } catch (error) {
-        await putProgress(store, key, progress?.status === "prepared" ? "prepared" : "failed", {
-          lastError: error instanceof Error ? error.message : String(error),
-        });
-        throw error;
+      texts.push(prefix + text.slice(span.start, span.start + taken));
+      spans.push({ ...span, end: span.start + taken });
+      chars += prefix.length + taken;
+      if (span.kind === "event") {
+        eventCount += 1;
+        if (span.start + taken < text.length) eventPartial = { id: Number(span.id), offset: span.start + taken };
+        else { eventCursor = Number(span.id); eventPartial = undefined; }
+      } else {
+        entryCount += 1;
+        if (span.start + taken < text.length) entryPartial = { id: span.id, offset: span.start + taken };
+        else { entryCursor = span.id; entryPartial = undefined; }
       }
-      if (entries) {
-        const from = entryCursor ? entries.findIndex((entry) => entry.id === entryCursor) : -1;
-        if (entryCursor && from < 0) throw new Error(`Covered Pi entry is unavailable: ${entryCursor}`);
-        const pendingEntries = from >= 0 ? entries.slice(from + 1) : entries;
-        const fresh = pendingEntries.slice(0, MAX_ENTRIES_PER_SESSION);
-        hasMoreSource ||= pendingEntries.length > fresh.length;
-        if (entryPartial && fresh[0]?.id !== entryPartial.id) {
-          throw new Error(`Partially covered Pi entry is unavailable: ${entryPartial.id}`);
-        }
-        const noPreparedEntries = preparedRange !== undefined
-          && preparedRange.entryCursor === entryCursor && !preparedRange.entryPartial;
-        const endId = preparedRange?.entryPartial?.id ?? preparedRange?.entryCursor;
-        const endIndex = preparedRange && !noPreparedEntries && endId
-          ? fresh.findIndex((entry) => entry.id === endId) : -1;
-        if (preparedRange && !noPreparedEntries && endIndex < 0) {
-          throw new Error(`Prepared Pi entry endpoint is unavailable: ${endId ?? sessionId}`);
-        }
-        const bounded = preparedRange === undefined ? fresh
-          : noPreparedEntries ? [] : fresh.slice(0, endIndex + 1);
-        for (const entry of bounded) {
-          if (entry.type !== "message") { entryCursor = entry.id; entryPartial = undefined; continue; }
-          const text = messageText(entry);
-          const offset = entryPartial?.id === entry.id ? entryPartial.offset : 0;
-          const end = preparedRange?.entryPartial?.id === entry.id ? preparedRange.entryPartial.offset : text.length;
-          if (offset > text.length || end > text.length || end < offset) {
-            throw new Error(`Covered Pi entry text changed before ${entry.id}:${offset}`);
-          }
-          if (end > offset) {
-            const prefix = `[${entry.message.role}] `;
-            const available = capacity - chars - prefix.length;
-            if (available <= 0) {
-              if (chars > 0) break;
-              throw new Error(`Organizer model cannot fit the Pi entry prefix for ${entry.id}`);
-            }
-            const taken = takePrefix(text, offset, Math.min(available, end - offset));
-            if (taken <= 0) {
-              if (chars > 0) break;
-              throw new Error(`Organizer model cannot fit one character from Pi entry ${entry.id}`);
-            }
-            texts.push(prefix + text.slice(offset, offset + taken));
-            chars += prefix.length + taken;
-            if (offset + taken < text.length) {
-              entryPartial = { id: entry.id, offset: offset + taken };
-              break;
-            }
-          }
-          entryCursor = entry.id;
-          entryPartial = undefined;
-          if (chars >= capacity) break;
-        }
+      if (taken < span.end - span.start || (!frozen && (eventCount >= MAX_EVENTS_PER_SESSION || entryCount >= MAX_ENTRIES_PER_SESSION))) {
+        hasMoreSource = taken < span.end - span.start || index < pending.length - 1;
+        break;
       }
     }
-    if (preparedRange && (entryCursor !== preparedRange.entryCursor
-      || !samePartial(entryPartial, preparedRange.entryPartial))) {
-      throw new Error(`Prepared Pi entry range is unavailable for session ${sessionId}`);
-    }
-
     if (texts.length === 0) {
       if (progress?.status === "prepared") {
         throw new Error(`Prepared source content is unavailable for session ${sessionId}`);
       }
-      // Revisited with nothing new: still record coverage when a stale
-      // failed/processing row exists so the sweep stops claiming it.
-      if (recordEmpty && (entryCursor !== progress?.entryCursor || eventCursor !== progress?.eventCursor)) {
+      if (recordEmpty && (!progress || progress.status === "failed" || progress.status === "processing")) {
         await putProgress(store, key, "reviewed-empty", {
-          ...(entryCursor !== undefined ? { entryCursor } : {}),
-          ...(eventCursor !== undefined ? { eventCursor } : {}),
           eventPartial: null,
           entryPartial: null,
           sourceKey: null,
@@ -586,7 +500,6 @@ export function createMemoryOrganizer(deps: MemoryOrganizerDeps) {
           preparedRange: null,
         });
       }
-      if (recordEmpty && hasMoreSource) queued.add(scopeId);
       return null;
     }
     const sourceEntryId = entryPartial?.id ?? entryCursor;
@@ -594,7 +507,7 @@ export function createMemoryOrganizer(deps: MemoryOrganizerDeps) {
       key,
       label: `session ${sessionId}`,
       texts,
-      source: { kind: "memory-organizer", sessionId,
+      source: { kind: "memory-organizer", sessionId, spans,
         ...(sourceEntryId ? { entryId: sourceEntryId } : {}) },
       ...(progress?.eventCursor !== undefined ? { startEventCursor: progress.eventCursor } : {}),
       ...(progress?.eventPartial !== undefined ? { startEventPartial: progress.eventPartial } : {}),
@@ -609,7 +522,7 @@ export function createMemoryOrganizer(deps: MemoryOrganizerDeps) {
     return {
       ...unit,
       sourceKey: unitSourceKey(scopeId, unit),
-      rangeKey: unitRangeKey(scopeId, key, start, [eventCursor, eventPartial, entryCursor, entryPartial]),
+      rangeKey: unitRangeKey(scopeId, key, spans.map((span) => [span.kind, span.id, span.sessionId, span.scopeId, span.threadId, span.start, span.end]), null),
     };
   };
 
@@ -662,6 +575,8 @@ export function createMemoryOrganizer(deps: MemoryOrganizerDeps) {
           threadId: source.threadId,
           runId: source.runId,
           ...(source.sessionId ? { sessionId: source.sessionId } : {}),
+          spans: [{ kind: "run-report" as const, id: source.runId, scopeId, threadId: source.threadId,
+            revision: sourceRevision(source.reportText), start: chunk.start, end: chunk.end }],
         },
         runStartOffset: chunk.start,
         runEndOffset: chunk.end,
@@ -705,10 +620,15 @@ export function createMemoryOrganizer(deps: MemoryOrganizerDeps) {
         const unit = await collectSessionUnit(store, scopeId, sessionId, row, timestamp, unitChars, force);
         if (unit) units.push(unit);
       } catch (error) {
-        if (row?.status !== "prepared") throw error;
-        await putProgress(store, row.key, "prepared", {
+        if (row?.status !== "prepared") {
+          await putProgress(store, progressKeyForSession(sessionId), "failed", { lastError: error instanceof Error ? error.message : String(error) });
+          throw error;
+        }
+        await putProgress(store, row.key, error instanceof SourceChangedError ? "pending" : "prepared", {
+          ...(error instanceof SourceChangedError ? { proposals: null, preparedSource: null, preparedRange: null, sourceKey: null } : {}),
           lastError: error instanceof Error ? error.message : String(error),
         });
+        if (error instanceof SourceChangedError) queued.add(scopeId);
       }
     }
     return units.slice(0, MAX_UNITS_PER_RUN);
@@ -887,7 +807,8 @@ export function createMemoryOrganizer(deps: MemoryOrganizerDeps) {
     const owner = ownerFor(proposal.scope, scopeId);
     if (!owner) return null;
     const proposalKey = preparedProposalKey(source, proposal);
-    const proposalSource: KnowledgeSource = { ...source, ...(proposalKey ? { proposalKey } : {}) };
+    const proposalSource: KnowledgeSource = { ...source, ...(proposalKey ? { proposalKey } : {}),
+      ...(proposal.spans ? { spans: proposal.spans } : {}) };
     // A source-scope switch does not authorize the user store — inferred
     // proposals may only land there when organizing user memory is enabled.
     if (owner.scope === "user" && !settings.autoOrganize.user) return null;
@@ -977,6 +898,7 @@ export function createMemoryOrganizer(deps: MemoryOrganizerDeps) {
         key: unit.key,
         status: "prepared",
         updatedAt: now(),
+        preparedSource: unit.source,
         ...(unit.startEventCursor !== undefined ? { eventCursor: unit.startEventCursor } : {}),
         ...(unit.startEventPartial !== undefined ? { eventPartial: unit.startEventPartial } : {}),
         ...(unit.startEntryCursor !== undefined ? { entryCursor: unit.startEntryCursor } : {}),
@@ -1157,6 +1079,7 @@ export function createMemoryOrganizer(deps: MemoryOrganizerDeps) {
         if (disposed) return;
         for (const unit of freshUnits.filter((candidate) => !judged.includes(candidate))) {
           await putProgress(store, unit.key, "reviewed-empty", {
+            coveredSources: unit.source.spans ?? [],
             ...(unit.eventCursor !== undefined ? { eventCursor: unit.eventCursor } : {}),
             eventPartial: unit.eventPartial ?? null,
             ...(unit.entryCursor !== undefined ? { entryCursor: unit.entryCursor } : {}),
@@ -1196,11 +1119,18 @@ export function createMemoryOrganizer(deps: MemoryOrganizerDeps) {
             const list = byUnit.get(unit.key) ?? [];
             const target = proposal.target === undefined ? undefined
               : selected.presented.find((item) => item.id === proposal.target);
+            const spans = (unit.source.spans ?? []).flatMap((span, index) => {
+              const text = unit.source.runId ? unit.texts.at(-1)! : unit.texts[index]!.replace(/^\[[^\]]*\] /u, "");
+              const offset = text.indexOf(proposal.quote);
+              return offset < 0 ? [] : [{ ...span, start: span.start + offset, end: span.start + offset + proposal.quote.length }];
+            });
+            if (spans.length !== 1) throw new Error("Memory organizer quote must identify one exact source passage");
             list.push({
               action: proposal.action,
               scope: proposal.scope,
               ...(proposal.nature ? { nature: proposal.nature } : {}),
               content: proposal.content,
+              spans,
               ...(proposal.trigger ? { trigger: proposal.trigger } : {}),
               ...(proposal.target !== undefined ? { target: proposal.target } : {}),
               ...(target ? { expectedTarget: {
