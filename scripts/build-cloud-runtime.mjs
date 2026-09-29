@@ -20,6 +20,23 @@ const scriptPath = fileURLToPath(import.meta.url);
 const repoRoot = path.resolve(path.dirname(scriptPath), '..');
 const canonicalLockPath = path.join(repoRoot, 'scripts', 'cloud-runtime.bun.lock');
 
+// Bun 1.3 resolves dependencies before applying patchedDependencies, so a
+// patch that changes Pi's package.json does not update its resolved lock row.
+// The source workspace lock already carries the tested patched dependency;
+// carry those exact rows into the production-only cloud lock on regeneration.
+const syncPatchedPiLockRows = (cloudLockPath) => {
+  const source = readFileSync(path.join(repoRoot, 'bun.lock'), 'utf8').split(/\r?\n/);
+  const staged = readFileSync(cloudLockPath, 'utf8').split(/\r?\n/);
+  for (const name of ['@earendil-works/pi-coding-agent', '@earendil-works/pi-coding-agent/undici']) {
+    const prefix = `    ${JSON.stringify(name)}: [`;
+    const sourceRow = source.find((line) => line.startsWith(prefix));
+    const stagedIndex = staged.findIndex((line) => line.startsWith(prefix));
+    if (!sourceRow || stagedIndex < 0) throw new Error(`Cloud runtime cannot reconcile patched Pi lock row: ${name}`);
+    staged[stagedIndex] = sourceRow;
+  }
+  writeFileSync(cloudLockPath, staged.join('\n'));
+};
+
 export const CLOUD_RUNTIME_SCHEMA_VERSION = 2;
 export const CLOUD_RUNTIME_PACKAGE_DIRS = Object.freeze([
   'extension-contract',
@@ -35,6 +52,24 @@ export const CLOUD_RUNTIME_PACKAGE_DIRS = Object.freeze([
 
 // All shipped native authorities use verified prebuilt binaries. No PTY source rebuild fallback.
 export const CLOUD_RUNTIME_TRUSTED_DEPENDENCIES = Object.freeze([]);
+const CLOUD_RUNTIME_PATCHED_PACKAGES = Object.freeze([
+  '@earendil-works/pi-agent-core',
+  '@earendil-works/pi-coding-agent',
+]);
+
+const cloudRuntimePatches = (rootPackage) => {
+  const patches = rootPackage.patchedDependencies ?? {};
+  const piHost = readJson(path.join(repoRoot, 'packages', 'pi-host', 'package.json'));
+  return Object.fromEntries(CLOUD_RUNTIME_PATCHED_PACKAGES.map((name) => {
+    const version = piHost.dependencies?.[name];
+    const key = `${name}@${version}`;
+    const relative = patches[key];
+    if (typeof relative !== 'string' || !relative.startsWith('patches/')) {
+      throw new Error(`Cloud runtime is missing its pinned Pi patch: ${key}`);
+    }
+    return [key, relative];
+  }));
+};
 
 export const CLOUD_RUNTIME_FORBIDDEN_UPDATE_IDENTITIES = Object.freeze([
   'api.openchamber.dev/v1/update/check',
@@ -183,6 +218,7 @@ const createRuntimeRootPackage = (rootPackage) => ({
   },
   trustedDependencies: [...CLOUD_RUNTIME_TRUSTED_DEPENDENCIES],
   overrides: rootPackage.overrides,
+  patchedDependencies: cloudRuntimePatches(rootPackage),
 });
 
 const collectPackageMetadata = (root = repoRoot) => Object.fromEntries(
@@ -260,6 +296,11 @@ export const verifyCloudRuntimeLayout = (outputDir, { requireLock = true, requir
   }
   if (rootManifest.license !== 'AGPL-3.0-only') {
     throw new Error(`Unexpected cloud runtime license: ${rootManifest.license || '(missing)'}`);
+  }
+  for (const relative of Object.values(rootManifest.patchedDependencies ?? {})) {
+    if (typeof relative !== 'string' || !relative.startsWith('patches/') || !existsSync(path.join(outputDir, relative))) {
+      throw new Error(`Cloud runtime Pi patch is missing: ${String(relative)}`);
+    }
   }
   if (
     !Array.isArray(rootManifest.workspaces)
@@ -428,10 +469,14 @@ const stageRuntimeTree = (outputDir) => {
   mkdirSync(path.join(outputDir, 'packages'), { recursive: true });
 
   const rootPackage = readJson(path.join(repoRoot, 'package.json'));
+  const piPatches = cloudRuntimePatches(rootPackage);
   writeFileSync(
     path.join(outputDir, 'package.json'),
     `${JSON.stringify(createRuntimeRootPackage(rootPackage), null, 2)}\n`,
   );
+  for (const relative of Object.values(piPatches)) {
+    copyEntry(path.join(repoRoot, relative), path.join(outputDir, relative), true);
+  }
   copyEntry(path.join(repoRoot, 'scripts/smoke-kernel-release.mjs'), path.join(outputDir, 'verify-kernel.mjs'), true);
   copyEntry(path.join(repoRoot, 'kernel/THIRD_PARTY_NOTICES.md'), path.join(outputDir, 'KERNEL_THIRD_PARTY_NOTICES.md'), true);
   copyEntry(path.join(repoRoot, 'LICENSE'), path.join(outputDir, 'LICENSE'), true);
@@ -545,6 +590,12 @@ export const buildCloudRuntime = ({
         : 'Cloud runtime lockfile verification',
     });
     if (updateLock) {
+      syncPatchedPiLockRows(path.join(resolvedOutput, 'bun.lock'));
+      run('bun', ['install', '--lockfile-only', '--production', '--frozen-lockfile', '--ignore-scripts'], {
+        cwd: resolvedOutput,
+        json,
+        label: 'Cloud runtime patched Pi lock verification',
+      });
       cpSync(path.join(resolvedOutput, 'bun.lock'), canonicalLockPath, { force: true });
     }
   }

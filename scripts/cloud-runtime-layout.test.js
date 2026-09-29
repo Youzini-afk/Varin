@@ -175,6 +175,20 @@ describe('Varin cloud runtime layout', () => {
     });
   });
 
+  it('requires the Pi SDK patches named by the deployable manifest', () => {
+    const fixture = createFixture();
+    const manifestPath = path.join(fixture, 'package.json');
+    const manifest = readJson(manifestPath);
+    manifest.patchedDependencies = {
+      '@earendil-works/pi-coding-agent@0.85.1': 'patches/pi-coding-agent.patch',
+    };
+    writeJson(manifestPath, manifest);
+    expect(() => verifyCloudRuntimeLayout(fixture)).toThrow('Cloud runtime Pi patch is missing');
+    fs.mkdirSync(path.join(fixture, 'patches'));
+    fs.writeFileSync(path.join(fixture, 'patches', 'pi-coding-agent.patch'), 'fixture patch\n');
+    expect(() => verifyCloudRuntimeLayout(fixture)).not.toThrow();
+  });
+
   it('rejects workspace dependencies that are not shipped in the runtime', () => {
     const fixture = createFixture();
     const webManifestPath = path.join(fixture, 'packages', 'web', 'package.json');
