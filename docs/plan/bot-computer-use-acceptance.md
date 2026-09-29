@@ -15,7 +15,7 @@ It repairs concrete defects in those paths. BC5 (server-side control
 ownership, real desktop frame stream, takeover/handback), BC6 (remote
 Host catalog mirroring with authenticated operation forwarding), and BC7
 (libvirt VM lifecycle) are implemented — see their sections below.
-It does not implement BC8–BC9 (product integration, packaging), and
+It does not implement BC9 (packaging and distribution), and
 does not treat missing BC0–BC4 features as merely untested platforms.
 
 ## BC0–BC2 follow-up review (2026-09-29)
@@ -365,8 +365,8 @@ Honest limits that remain:
   viewer's frame cadence for its duration (input still lands correctly).
 - `inject_input` supports click/down/up/move/scroll/key/text; drag-as-human
   composes from move+down/up like a real user would.
-- The view is reachable from Computers settings today; embedding the same
-  component as a first-class Workbench tab surface belongs to BC8.
+- The view landed as a first-class Workbench tab surface in BC8 (see below);
+  the settings dialog remains as the quick-look entry.
 - Linux Xvnc/noVNC transport for *independent* remote desktops is BC6's lane;
   this Host-driven poll is the shared contract for local desktops now.
 
@@ -409,8 +409,9 @@ rather than introducing a parallel connection system.
 
 Honest limits that remain:
 
-- Only the computer surface forwards today — Bot threads/tasks still execute
-  where their pi-host lives; remote session continuity is BC8 scope.
+- Bot threads/tasks still execute where their pi-host lives; remote session
+  continuity (a Bot driving a remote desktop from a remote pi-host) remains
+  open — BC8 integrated the viewing/control surface, not remote execution.
 - Linux Xvnc/noVNC provisioning of an *independent* desktop on a headless
   remote remains unimplemented; BC6 assumes the remote Host already owns a
   reachable desktop.
@@ -474,6 +475,58 @@ Honest limits that remain:
 - A server without virtualization still serves real remote desktops via
   BC6 — the provider list just stays empty and `probe()` reports the real
   `virsh` error.
+
+## BC8 shared product integration (implemented)
+
+The desktop view is now a first-class Workbench surface — not a second
+state machine. Everything below reuses the same `ComputerService`,
+`computer` tool, desktop ids, and control semantics built in BC4–BC7.
+
+- **Context surface**: `'computer'` is a real `ContextPanelMode` and a
+  registered `CONTEXT_SURFACES` rail entry (icon `computer`, label
+  `contextPanel.mode.computer`, `availability: 'always'`). Clicking it opens
+  a singleton computer tab; `openContextPanelTab` with
+  `dedupeKey: 'desktop:<id>'` opens a per-desktop tab, so several machines'
+  desktops coexist and each tab keeps its bound desktop across reloads via
+  the persisted `targetPath`.
+- **`ComputerWorkSurface`**: desktop catalog picker (with default-target and
+  sole-desktop fallback), refresh, and the same `ComputerDesktopPane` the
+  settings dialog wraps — identical frame stream, ownership, takeover/
+  handback, and human-input path; closing the tab unsubscribes only.
+- **Work association**: `observe`/`act` accept the caller's harness
+  `sessionId` and stamp `desktop.usage = { sessionId, at }` on the desktop
+  record (one revision-retry, projection-only — a usage write failure never
+  flips a dispatched GUI op). Remote mirrors keep the local usage field
+  across `syncRemote` rewrites; `ensureLocal`/`probe` body rewrites carry it
+  forward. The surface renders the association as a session link that opens
+  the owning conversation — the Thread/Run records stay authoritative.
+- **Settings**: Computers page gained an "Open in panel" action per desktop
+  (bound to `useEffectiveDirectory`), the catalog line now shows the
+  machine's `coordinatorHostId`, and Bot model/persona/work items plus the
+  fast-decision bindings remain in their existing settings sections — no
+  hidden JSON or source edits required for any of it.
+- **Ordinary sessions select a computer without Bot mode**: the `computer`
+  tool's `desktopId` parameter and the configured default target are
+  unchanged and work in any session; the rail surface is available in the
+  same window so a human can watch or take over while a normal task drives
+  the desktop.
+
+What BC8 deliberately did not add:
+
+- No desktop-state copy into Thread/Bot records — the association is the
+  `usage` pointer on the real desktop record plus the UI projection, per
+  the replacement table.
+- No Office editor claims — no purpose-built office editor exists, and no
+  Computer Use demo masquerades as one. File-type handling stays with the
+  existing Documents pipeline, which already reflects external application
+  edits through disk revisions/conflicts without overwriting dirty buffers.
+- No new machine for "one lucky web flow" — the delivery condition is the
+  shared surface, not a per-page state machine.
+
+Focused evidence: `computer-service.test.ts` gained two usage-association
+cases (stamp on observe/act; preserved across probe rewrites) — suite 32/32;
+`useUIStore.contextPanel.test.ts` gained computer-surface tab semantics —
+suite 17/17; i18n parity 4/4 across all ten locales.
 
 ## Verification boundary
 

@@ -166,6 +166,43 @@ describe('useUIStore closeContextPanelTab surface stability', () => {
   });
 });
 
+describe('useUIStore computer surface (BC8)', () => {
+  const directory = '/repo';
+
+  test('opens a singleton computer tab and persists a per-desktop tab by dedupe key', () => {
+    useUIStore.getState().openContextSurface(directory, 'computer');
+    let state = useUIStore.getState().contextPanelByDirectory[directory];
+    expect(state?.isOpen).toBe(true);
+    expect(state?.tabs.map((tab) => tab.mode)).toEqual(['computer']);
+
+    // A desktop-targeted tab reuses its dedupe key instead of duplicating.
+    useUIStore.getState().openContextPanelTab(directory, {
+      mode: 'computer',
+      dedupeKey: 'desktop:local-console',
+      targetPath: 'local-console',
+      label: 'Console session',
+    });
+    useUIStore.getState().openContextPanelTab(directory, {
+      mode: 'computer',
+      dedupeKey: 'desktop:local-console',
+      targetPath: 'local-console',
+      label: 'Console session',
+    });
+    state = useUIStore.getState().contextPanelByDirectory[directory];
+    const computerTabs = state?.tabs.filter((tab) => tab.mode === 'computer') ?? [];
+    expect(computerTabs).toHaveLength(2);
+    expect(computerTabs.find((tab) => tab.targetPath === 'local-console')).toBeDefined();
+  });
+
+  test('setContextPanelTabTargetPath rebinds the desktop on the tab', () => {
+    useUIStore.getState().openContextPanelTab(directory, { mode: 'computer' });
+    const tabId = useUIStore.getState().contextPanelByDirectory[directory]?.tabs[0]?.id as string;
+    useUIStore.getState().setContextPanelTabTargetPath(directory, tabId, 'remote:r1:d0');
+    const tab = useUIStore.getState().contextPanelByDirectory[directory]?.tabs[0];
+    expect(tab?.targetPath).toBe('remote:r1:d0');
+  });
+});
+
 describe('useUIStore per-surface panel widths', () => {
   const directory = '/repo';
 

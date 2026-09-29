@@ -14,16 +14,12 @@ import type { ComputerControlState, ComputerDesktop } from '@varin/protocol';
 const newViewerId = () => `viewer-${Math.random().toString(36).slice(2)}-${Date.now().toString(36)}`;
 
 /**
- * Shared desktop view (BC5). Subscribing mounts an EventSource on the Host
- * frame service; unmounting closes it — the task and desktop keep running.
- * Taking over flips the Host-side control owner to this viewer; every click
- * and keypress then travels through the same serialized lane the agent uses.
+ * The desktop view surface (BC5/BC8): one EventSource subscription feeding
+ * frames + control events, pointer/key forwarding while this viewer holds
+ * control. Works inline (workbench tab) or inside `ComputerDesktopView`'s
+ * dialog. Unmounting closes only this subscription — never the task.
  */
-export function ComputerDesktopView({ desktop, open, onOpenChange }: {
-  desktop: ComputerDesktop;
-  open: boolean;
-  onOpenChange: (open: boolean) => void;
-}) {
+export function ComputerDesktopPane({ desktop }: { desktop: ComputerDesktop }) {
   const { t } = useI18n();
   const [viewerId] = React.useState(newViewerId);
   const [frameUrl, setFrameUrl] = React.useState<string | null>(null);
@@ -33,7 +29,6 @@ export function ComputerDesktopView({ desktop, open, onOpenChange }: {
   const frameRef = React.useRef<HTMLImageElement | null>(null);
 
   React.useEffect(() => {
-    if (!open) return;
     const source = subscribeDesktopStream(desktop.id, viewerId);
     source.onmessage = (message) => {
       try {
@@ -55,7 +50,7 @@ export function ComputerDesktopView({ desktop, open, onOpenChange }: {
       // Closing the page closes only this subscription — never the task.
       source.close();
     };
-  }, [open, desktop.id, viewerId, t]);
+  }, [desktop.id, viewerId, t]);
 
   const weHoldControl = control?.owner === 'human' && control.holderId === viewerId;
   const controlPending = control?.owner === 'human' && control.holderId !== viewerId;
@@ -150,52 +145,65 @@ export function ComputerDesktopView({ desktop, open, onOpenChange }: {
           : t('settings.computers.view.control.pendingHuman');
 
   return (
+    <div className="flex flex-col gap-3 min-h-0" onKeyDown={weHoldControl ? onKey : undefined} tabIndex={-1}>
+      <div className="flex items-center justify-between gap-3">
+        <span className="typography-meta text-muted-foreground" data-control={control?.owner ?? 'unknown'}>
+          {controlLabel}
+          {control && control.owner === 'human' && !control.reachable ? ` — ${t('settings.computers.view.control.reconnecting')}` : ''}
+        </span>
+        <div className="flex items-center gap-2">
+          {control?.owner === 'agent' ? (
+            <Button size="sm" disabled={busy} onClick={() => { void takeover(); }}>
+              {t('settings.computers.view.takeover')}
+            </Button>
+          ) : null}
+          {weHoldControl ? (
+            <Button size="sm" variant="outline" disabled={busy} onClick={() => { void handback(); }}>
+              {t('settings.computers.view.handback')}
+            </Button>
+          ) : null}
+          {controlPending ? (
+            <Button size="sm" disabled={busy} onClick={() => { void takeover(); }}>
+              {t('settings.computers.view.reclaim')}
+            </Button>
+          ) : null}
+        </div>
+      </div>
+      {streamError ? <p role="alert" className="typography-meta text-destructive">{streamError}</p> : null}
+      <div className="rounded-lg border border-border/60 bg-black/80 overflow-hidden flex items-center justify-center min-h-[240px]">
+        {frameUrl ? (
+          <img
+            ref={frameRef}
+            src={frameUrl}
+            alt={desktop.label}
+            draggable={false}
+            className="max-h-[70vh] w-auto select-none"
+            onMouseDown={onMouse}
+            onMouseUp={onMouse}
+            onWheel={onWheel}
+            onContextMenu={(event) => event.preventDefault()}
+          />
+        ) : (
+          <p role="status" className="typography-meta text-muted-foreground p-8">{t('settings.computers.view.waiting')}</p>
+        )}
+      </div>
+    </div>
+  );
+}
+
+/** Dialog wrapper for the settings surface (BC5 entry). */
+export function ComputerDesktopView({ desktop, open, onOpenChange }: {
+  desktop: ComputerDesktop;
+  open: boolean;
+  onOpenChange: (open: boolean) => void;
+}) {
+  return (
     <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent className="max-w-5xl" onKeyDown={weHoldControl ? onKey : undefined} tabIndex={-1}>
+      <DialogContent className="max-w-5xl" tabIndex={-1}>
         <DialogHeader>
           <DialogTitle>{desktop.label}</DialogTitle>
         </DialogHeader>
-        <div className="flex items-center justify-between gap-3">
-          <span className="typography-meta text-muted-foreground" data-control={control?.owner ?? 'unknown'}>
-            {controlLabel}
-            {control && control.owner === 'human' && !control.reachable ? ` — ${t('settings.computers.view.control.reconnecting')}` : ''}
-          </span>
-          <div className="flex items-center gap-2">
-            {control?.owner === 'agent' ? (
-              <Button size="sm" disabled={busy} onClick={() => { void takeover(); }}>
-                {t('settings.computers.view.takeover')}
-              </Button>
-            ) : null}
-            {weHoldControl ? (
-              <Button size="sm" variant="outline" disabled={busy} onClick={() => { void handback(); }}>
-                {t('settings.computers.view.handback')}
-              </Button>
-            ) : null}
-            {controlPending ? (
-              <Button size="sm" disabled={busy} onClick={() => { void takeover(); }}>
-                {t('settings.computers.view.reclaim')}
-              </Button>
-            ) : null}
-          </div>
-        </div>
-        {streamError ? <p role="alert" className="typography-meta text-destructive">{streamError}</p> : null}
-        <div className="rounded-lg border border-border/60 bg-black/80 overflow-hidden flex items-center justify-center min-h-[240px]">
-          {frameUrl ? (
-            <img
-              ref={frameRef}
-              src={frameUrl}
-              alt={desktop.label}
-              draggable={false}
-              className="max-h-[70vh] w-auto select-none"
-              onMouseDown={onMouse}
-              onMouseUp={onMouse}
-              onWheel={onWheel}
-              onContextMenu={(event) => event.preventDefault()}
-            />
-          ) : (
-            <p role="status" className="typography-meta text-muted-foreground p-8">{t('settings.computers.view.waiting')}</p>
-          )}
-        </div>
+        {open ? <ComputerDesktopPane desktop={desktop} /> : null}
       </DialogContent>
     </Dialog>
   );

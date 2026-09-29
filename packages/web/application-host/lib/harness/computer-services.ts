@@ -47,6 +47,7 @@ export function createComputerObserveService(host: HarnessServiceHost): HarnessS
         ...(params.textLimit !== undefined ? { textLimit: params.textLimit } : {}),
         ...(params.maxTreeNodes !== undefined ? { maxTreeNodes: params.maxTreeNodes } : {}),
         ...(params.maxTreeDepth !== undefined ? { maxTreeDepth: params.maxTreeDepth } : {}),
+        sessionId: ctx.sessionId,
       });
       return { observation };
     },
@@ -64,6 +65,7 @@ export function createComputerActService(host: HarnessServiceHost): HarnessServi
         ...(desktopId ? { desktopId } : {}),
         action: params.action,
         signal: ctx.signal,
+        sessionId: ctx.sessionId,
       });
       return { result };
     },

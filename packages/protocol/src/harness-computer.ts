@@ -51,6 +51,13 @@ export interface ComputerDesktop {
    * control state and the driver live there, not here.
    */
   remote?: { connectionId: string; desktopId: string };
+  /**
+   * Work association (BC8): the most recent agent session that operated this
+   * desktop through the shared service. Projection material only — work state
+   * stays authoritative on Thread/Run records; remote mirrors keep their own
+   * Host's record.
+   */
+  usage?: { sessionId: string; at: string };
 }
 
 /** What the resident platform driver can actually do right now. */

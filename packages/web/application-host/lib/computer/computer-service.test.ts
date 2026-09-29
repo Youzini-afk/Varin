@@ -799,3 +799,45 @@ describe("computer service (BC7 virtual machines)", () => {
     expect(machine!.vm!.steps.map((s) => `${s.step}:${s.status}`)).toContain("cleanup:done");
   });
 });
+
+describe("computer service work association (BC8)", () => {
+  it("observe/act stamp the calling session on the desktop record", async () => {
+    const driver = makeDriver(async (op) => {
+      if (op.tool === "get_app_state") return okResponse({ snapshot: appSnapshot() });
+      return okResponse();
+    });
+    const { service } = makeService(driver);
+    await service.ensureLocal();
+
+    let catalog = await service.list();
+    expect(catalog.desktops[0]?.usage).toBeUndefined();
+
+    await service.observe({ desktopId: "local-console", app: "notepad", includeScreenshot: false, sessionId: "ses_work-1" });
+    catalog = await service.list();
+    expect(catalog.desktops[0]?.usage?.sessionId).toBe("ses_work-1");
+
+    const observation = catalog.desktops[0] && (await service.observe({ desktopId: "local-console", app: "notepad", includeScreenshot: false }));
+    await service.act({
+      desktopId: "local-console",
+      action: { kind: "key", app: "notepad", key: "enter" },
+      sessionId: "ses_work-2",
+    });
+    catalog = await service.list();
+    expect(catalog.desktops[0]?.usage?.sessionId).toBe("ses_work-2");
+    expect(observation).toBeDefined();
+  });
+
+  it("a probe rewrite preserves the recorded usage association", async () => {
+    const driver = makeDriver(async (op) => {
+      if (op.tool === "get_app_state") return okResponse({ snapshot: appSnapshot() });
+      if (op.tool === "capabilities") return okResponse({ capabilities: { platform: "windows", driver: "windows-uia", observeTree: true, status: "ready" } });
+      return okResponse();
+    });
+    const { service } = makeService(driver);
+    await service.ensureLocal();
+    await service.observe({ desktopId: "local-console", app: "notepad", includeScreenshot: false, sessionId: "ses_keep" });
+    await service.probe("local-console");
+    const catalog = await service.list();
+    expect(catalog.desktops[0]?.usage?.sessionId).toBe("ses_keep");
+  });
+});

@@ -15,6 +15,7 @@ export type ContextSurfaceId =
   | 'recovery'
   | 'browser'
   | 'preview'
+  | 'computer'
   | 'chat';
 
 export type ContextSurfaceDescriptor = {
@@ -146,6 +147,15 @@ export const CONTEXT_SURFACES: readonly ContextSurfaceDescriptor[] = [
     mode: 'preview',
     icon: 'window',
     labelKey: 'contextPanel.mode.preview',
+    availability: 'always',
+  },
+  {
+    id: 'computer',
+    descriptionKey: 'contextRail.surface.computer.description',
+    defaultWidthFraction: 0.55,
+    mode: 'computer',
+    icon: 'computer',
+    labelKey: 'contextPanel.mode.computer',
     availability: 'always',
   },
   {

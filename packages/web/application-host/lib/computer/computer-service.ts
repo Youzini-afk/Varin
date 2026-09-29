@@ -137,6 +137,9 @@ const parseDesktop = (record: KernelRecordResult): ComputerDesktop | null => {
       ...(isObject(raw.remote) && asString(raw.remote.connectionId) && asString(raw.remote.desktopId)
         ? { remote: { connectionId: raw.remote.connectionId as string, desktopId: raw.remote.desktopId as string } }
         : {}),
+      ...(isObject(raw.usage) && asString(raw.usage.sessionId) && asString(raw.usage.at)
+        ? { usage: { sessionId: raw.usage.sessionId as string, at: raw.usage.at as string } }
+        : {}),
     };
   } catch {
     return null;
@@ -368,8 +371,10 @@ export interface ComputerService {
     maxTreeNodes?: number;
     maxTreeDepth?: number;
     signal?: AbortSignal;
+    /** Harness session that issued the call — recorded as work association (BC8). */
+    sessionId?: string;
   }): Promise<ComputerObservation>;
-  act(params: { desktopId?: string; action: ComputerAction; signal?: AbortSignal }): Promise<ComputerActionResult>;
+  act(params: { desktopId?: string; action: ComputerAction; signal?: AbortSignal; sessionId?: string }): Promise<ComputerActionResult>;
   cancel(desktopId?: string): Promise<{ cancelled: number; released: boolean }>;
   release(desktopId?: string): Promise<{ released: boolean }>;
   // --- BC5: control ownership + desktop view --------------------------------
@@ -475,6 +480,42 @@ export function createComputerService(options: ComputerServiceOptions): Computer
       references: [],
       ...(existing ? { expectedRecordRevision: existing.recordRevision } : {}),
     });
+  };
+
+  /**
+   * Stamp the desktop's work association (BC8): which agent session last
+   * operated it. Projection metadata — a failed write must not flip an
+   * already-dispatched GUI op into a reported failure, so conflicts retry
+   * once on the fresh revision and storage errors are dropped.
+   */
+  const recordUsage = async (desktopId: string, sessionId: string | undefined): Promise<void> => {
+    if (!sessionId) return;
+    const client = await scoped();
+    const recordId = `computer.desktop:${desktopId}`;
+    for (let attempt = 0; attempt < 2; attempt += 1) {
+      const record = await client.getRecord(COMPUTER_CATALOG_WORKSPACE_ID, recordId);
+      if (!record) return;
+      let body: unknown;
+      try { body = JSON.parse(record.payloadJson); } catch { return; }
+      if (!isObject(body)) return;
+      body.usage = { sessionId, at: new Date().toISOString() };
+      try {
+        await client.putRecord({
+          operationId: `computer.desktop:usage:${randomUUID()}`,
+          workspaceId: COMPUTER_CATALOG_WORKSPACE_ID,
+          recordId,
+          recordType: "computer.desktop",
+          state: record.state,
+          payloadJson: JSON.stringify(body),
+          ownerIds: [],
+          references: [],
+          expectedRecordRevision: record.recordRevision,
+        });
+        return;
+      } catch {
+        if (attempt === 1) return;
+      }
+    }
   };
 
   const desktopRecord = async (desktopId: string): Promise<{ record: KernelRecordResult; desktop: ComputerDesktop }> => {
@@ -613,6 +654,14 @@ export function createComputerService(options: ComputerServiceOptions): Computer
     const known = (await listRecords("computer.machine"))
       .map(parseMachine)
       .filter((m): m is ComputerMachine => m !== null && m.provider === "remote");
+    // Mirror rewrites must not erase local work associations (BC8) — the
+    // remote Host owns driver state, not which local session used the mirror.
+    const usageByDesktop = new Map(
+      (await listRecords("computer.desktop"))
+        .map(parseDesktop)
+        .filter((d): d is ComputerDesktop => d !== null && d.usage !== undefined)
+        .map((d) => [d.id, d.usage!]),
+    );
     const now = new Date().toISOString();
     await Promise.allSettled([
       ...hosts.map(async (host) => {
@@ -644,14 +693,17 @@ export function createComputerService(options: ComputerServiceOptions): Computer
                 createdAt: now,
               });
             }
-            await putRecord(`computer.desktop:remote:${host.id}:${remoteDesktop.id}`, "computer.desktop", remoteDesktop.status, {
-              id: `remote:${host.id}:${remoteDesktop.id}`,
+            const mirrorDesktopId = `remote:${host.id}:${remoteDesktop.id}`;
+            const mirroredUsage = usageByDesktop.get(mirrorDesktopId);
+            await putRecord(`computer.desktop:${mirrorDesktopId}`, "computer.desktop", remoteDesktop.status, {
+              id: mirrorDesktopId,
               machineId,
               label: `${host.label} · ${remoteDesktop.label}`,
               kind: "remote-session",
               ...(remoteDesktop.statusDetail ? { statusDetail: remoteDesktop.statusDetail } : {}),
               ...(remoteDesktop.capabilities ? { capabilities: remoteDesktop.capabilities as unknown as Record<string, unknown> } : {}),
               remote: { connectionId: host.id, desktopId: remoteDesktop.id },
+              ...(mirroredUsage ? { usage: mirroredUsage } : {}),
             });
           }
         } catch (error) {
@@ -847,11 +899,16 @@ export function createComputerService(options: ComputerServiceOptions): Computer
     const detail = driverAvailable
       ? "Desktop capabilities have not been probed in this Host process."
       : "No platform driver found for this machine.";
+    const priorDesktop = await (await scoped())
+      .getRecord(COMPUTER_CATALOG_WORKSPACE_ID, `computer.desktop:${LOCAL_DESKTOP_ID}`)
+      .catch(() => null);
+    const priorUsage = priorDesktop ? parseDesktop(priorDesktop)?.usage : undefined;
     const desktopResult = await putRecord(`computer.desktop:${LOCAL_DESKTOP_ID}`, "computer.desktop", desktopState, {
       id: LOCAL_DESKTOP_ID,
       machineId: LOCAL_MACHINE_ID,
       label: "Console session",
       kind: "console",
+      ...(priorUsage ? { usage: priorUsage } : {}),
       ...(detail ? { statusDetail: detail } : {}),
     });
     const machineRecord = await (await scoped()).getRecord(COMPUTER_CATALOG_WORKSPACE_ID, `computer.machine:${LOCAL_MACHINE_ID}`);
@@ -886,6 +943,7 @@ export function createComputerService(options: ComputerServiceOptions): Computer
           remote: { connectionId: remote.connection.id, desktopId: remote.remoteId },
           ...(remoteDesktop?.statusDetail ? { statusDetail: remoteDesktop.statusDetail } : {}),
           ...(remoteDesktop?.capabilities ? { capabilities: remoteDesktop.capabilities as unknown as Record<string, unknown> } : {}),
+          ...(remote.desktop.usage ? { usage: remote.desktop.usage } : {}),
         });
       return parseDesktop(record)!;
     }
@@ -904,6 +962,7 @@ export function createComputerService(options: ComputerServiceOptions): Computer
           kind: desktop.kind,
           capabilities: capabilities as unknown as Record<string, unknown>,
           ...(capabilities.detail ? { statusDetail: capabilities.detail } : {}),
+          ...(desktop.usage ? { usage: desktop.usage } : {}),
         });
       return parseDesktop(result)!;
     } catch (error) {
@@ -915,6 +974,7 @@ export function createComputerService(options: ComputerServiceOptions): Computer
         label: desktop.label,
         kind: desktop.kind,
         statusDetail: message,
+        ...(desktop.usage ? { usage: desktop.usage } : {}),
       }).catch(() => undefined);
       if (error instanceof HarnessServiceError) throw error;
       throw new HarnessServiceError("unavailable", message);
@@ -1000,6 +1060,7 @@ export function createComputerService(options: ComputerServiceOptions): Computer
       // binding is mirrored locally.
       const observation = { ...result.observation, desktopId: id, machineId: remote.desktop.machineId };
       rememberObservation(observation);
+      await recordUsage(id, params.sessionId);
       return observation;
     }
     return enqueue(id, "observe", async () => {
@@ -1018,6 +1079,7 @@ export function createComputerService(options: ComputerServiceOptions): Computer
       if (!response.ok || !response.snapshot) throw new HarnessServiceError("unavailable", response.error ?? "Observe failed");
       const observation = observationOf(response.snapshot, desktop);
       rememberObservation(observation);
+      await recordUsage(id, params.sessionId);
       return observation;
     });
   };
@@ -1171,6 +1233,7 @@ export function createComputerService(options: ComputerServiceOptions): Computer
           remote.connection, "POST", `/api/computers/desktops/${encodeURIComponent(remote.remoteId)}/act`, { action },
         );
         if (!payload.result) throw new HarnessServiceError("unavailable", "Remote Host returned no action result");
+        await recordUsage(id, params.sessionId);
         return payload.result;
       } catch (error) {
         if (error instanceof RemoteTransportError) {
@@ -1215,6 +1278,7 @@ export function createComputerService(options: ComputerServiceOptions): Computer
         rememberObservation(observation);
         result.observation = observation;
       }
+      await recordUsage(id, params.sessionId);
       return result;
     } catch (error) {
       if (error instanceof CancelledActionError) {

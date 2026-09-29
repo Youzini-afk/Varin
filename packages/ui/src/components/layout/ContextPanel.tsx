@@ -61,6 +61,7 @@ const ContextResourceEditor = lazyWithChunkRecovery(() => import('@/components/w
 const GitView = lazyWithChunkRecovery(() => import('@/components/views/GitView').then((module) => ({ default: module.GitView })));
 const PullRequestView = lazyWithChunkRecovery(() => import('@/components/views/PullRequestView').then((module) => ({ default: module.PullRequestView })));
 const PlanView = lazyWithChunkRecovery(() => import('@/components/views/PlanView').then((module) => ({ default: module.PlanView })));
+const ComputerWorkSurface = lazyWithChunkRecovery(() => import('@/components/sections/computers/ComputerWorkSurface').then((module) => ({ default: module.ComputerWorkSurface })));
 
 const CONTEXT_PANEL_MIN_WIDTH = 380;
 const CONTEXT_PANEL_MAX_WIDTH = 1400;
@@ -174,6 +175,7 @@ const getModeLabel = (
   if (mode === 'pr') return t('contextPanel.mode.pr');
   if (mode === 'notes') return t('contextRail.surface.notes');
   if (mode === 'terminal') return t('layout.mainTab.terminal');
+  if (mode === 'computer') return t('contextPanel.mode.computer');
   if (mode === 'recovery') return t('contextPanel.mode.recovery');
   return t('contextPanel.mode.context');
 };
@@ -299,6 +301,10 @@ const getTabIcon = (tab: { mode: ContextPanelMode; targetPath: string | null }):
 
   if (tab.mode === 'browser') {
     return <Icon name="global" className="h-3.5 w-3.5" />;
+  }
+
+  if (tab.mode === 'computer') {
+    return <Icon name="computer" className="h-3.5 w-3.5" />;
   }
 
   return undefined;
@@ -2673,6 +2679,8 @@ export const ContextPanel: React.FC = () => {
                 ? <PullRequestView />
             : activeTab?.mode === 'notes'
                 ? <ProjectContextPanel />
+        : activeTab?.mode === 'computer'
+            ? <ComputerWorkSurface directory={effectiveDirectory} tabID={activeTab.id} />
         : activeTab?.mode === 'plan'
             ? <PlanView targetPath={activeTab.targetPath} />
             : activeTab?.mode === 'preview' && activeTab.targetPath

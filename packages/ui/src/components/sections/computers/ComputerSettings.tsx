@@ -3,6 +3,8 @@ import { SettingsSection, SettingsFieldRow } from '@/components/sections/shared/
 import { Button } from '@/components/ui/button';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { useI18n } from '@/lib/i18n';
+import { useEffectiveDirectory } from '@/hooks/useEffectiveDirectory';
+import { useUIStore } from '@/stores/useUIStore';
 import { listComputers, probeComputerDesktop, setDefaultComputerTarget, type ComputerCatalog } from '@/lib/computers';
 import { ComputerDesktopView } from '@/components/sections/computers/ComputerDesktopView';
 import { ComputerVmSection } from '@/components/sections/computers/ComputerVmSection';
@@ -20,6 +22,18 @@ export function ComputerSettings() {
   const [probing, setProbing] = React.useState<string | null>(null);
   const [saving, setSaving] = React.useState(false);
   const [viewing, setViewing] = React.useState<ComputerDesktop | null>(null);
+  const directory = useEffectiveDirectory();
+  const openContextPanelTab = useUIStore((state) => state.openContextPanelTab);
+
+  const openDesktopInPanel = (desktop: ComputerDesktop) => {
+    if (!directory) return;
+    openContextPanelTab(directory, {
+      mode: 'computer',
+      dedupeKey: `desktop:${desktop.id}`,
+      targetPath: desktop.id,
+      label: desktop.label,
+    });
+  };
 
   const refresh = React.useCallback(async () => {
     try {
@@ -106,6 +120,7 @@ export function ComputerSettings() {
                 <p className="typography-ui-label text-foreground truncate">{desktop.label}</p>
                 <p className="typography-meta text-muted-foreground">
                   {machine ? `${machine.name} · ${machine.platform}` : desktop.machineId} · {desktop.kind}
+                  {machine ? ` · ${t('settings.computers.coordinator')}: ${machine.coordinatorHostId}` : ''}
                 </p>
               </div>
               <div className="flex items-center gap-3 shrink-0">
@@ -122,6 +137,11 @@ export function ComputerSettings() {
                 <Button variant="outline" size="sm" disabled={desktop.status !== 'available'}
                   onClick={() => setViewing(desktop)}>
                   {t('settings.computers.view.open')}
+                </Button>
+                <Button variant="outline" size="sm" disabled={!directory || desktop.status !== 'available'}
+                  title={directory ? undefined : t('settings.computers.view.panelNoDirectory')}
+                  onClick={() => openDesktopInPanel(desktop)}>
+                  {t('settings.computers.view.panel')}
                 </Button>
               </div>
             </div>
