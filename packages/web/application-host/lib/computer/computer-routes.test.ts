@@ -251,13 +251,14 @@ describe("computer routes (BC7 virtual machines)", () => {
     const { app, computers } = fixture7();
     const response = await request(app)
       .post("/api/computers/vms")
-      .send({ providerId: "hv1", name: "devbox", memoryMiB: 4096, diskGiB: 40 });
+      .send({ providerId: "hv1", name: "devbox", memoryMiB: 4096, diskGiB: 40, managed: true });
     expect(response.status).toBe(201);
     expect(computers.createVm).toHaveBeenCalledWith(expect.objectContaining({
       providerId: "hv1",
       name: "devbox",
       memoryMiB: 4096,
       diskGiB: 40,
+      managed: true,
     }));
   });
 
@@ -275,6 +276,10 @@ describe("computer routes (BC7 virtual machines)", () => {
     const response = await request(app).post("/api/computers/vms/vm:hv1:devbox/start");
     expect(response.status).toBe(200);
     expect(computers.vmAction).toHaveBeenCalledWith({ machineId: "vm:hv1:devbox", action: "start" });
+
+    const upgrade = await request(app).post("/api/computers/vms/vm:hv1:devbox/upgrade");
+    expect(upgrade.status).toBe(200);
+    expect(computers.vmAction).toHaveBeenCalledWith({ machineId: "vm:hv1:devbox", action: "upgrade" });
 
     const del = await request(app)
       .post("/api/computers/vms/vm:hv1:devbox/delete")

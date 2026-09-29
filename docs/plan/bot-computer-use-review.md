@@ -16,6 +16,8 @@ Status: current acceptance — BC0–BC9 remain Partial.
 
 第四批把电脑使用记录关联到真实 Thread，保留同一桌面的多个工作关系；Bot 工作列表能回到关联桌面。人工交还把事件先持久记录，再用现有 Thread 消息账本续接，失败后保持相同事件 ID 恢复。Agent 可将受管桌面用户目录里的成果文件登记为 SHA-256 版本引用，远端 Host 按其桌面用户身份读取，Bot 工作列表提供下载；旧文件修订不被当成原版本，浏览器复核实际下载字节。Host 定向 computer/routes/Bot **68 项通过**，Pi computer **9 项通过**；Python 文件检查/读取/版本改变序列在本机 Python 运行。远端真实桌面与大文件传输仍未实测，成果引用依赖原远端在线，不是本地复制。
 
+第五批补上托管 libvirt guest 配方：Linux x64 本地 libvirt Host 从 Debian 官方目录锁定日期镜像并核验 SHA-512，准备带版本/散列校验的 NoCloud 配置盘及发行包内的 Node/Bun/Host runtime，在 guest 内安装持久 Xvnc 桌面和 Host。Host 等待 guest 身份、版本与桌面能力成立后，才把它登记到原有远端电脑目录。创建步骤、域 UUID、卷归属和 guest 状态持久化；Host 重启继续协调。受管 VM 关机后可替换配置盘，guest 在下次启动前验证并安装新运行组件，用户文件、浏览器 profile 与 Bot 数据位于独立的持久目录。界面默认选择自动准备，Host 路由现传递该选项；失联或版本不匹配不再维持虚假的 ready 状态。Host VM/路由/guest 定向 **76 项通过**，Host/UI 类型及 shell 语法通过。当前 Windows 环境没有 KVM/libvirt，真实镜像上传、NoCloud 启动、Xvnc 与升级仍未实机验证。
+
 **结论：不能接受“BC0–BC9 全部完成”。** Bot、记忆、Computer Use、桌面视图、远端转发与 libvirt 的生产路径确实存在；但基线有控制交接、磁盘归属、配置保存、入口生命周期等实际错误，且 BC6–BC9 的若干交付条件根本尚未实现。功能存在、行为正确和安装后可用是不同证据。下文是本次验收结论；[旧验收记录](bot-computer-use-acceptance.md)保留历史，不覆盖本报告。
 
 ## 分阶段判断
@@ -29,9 +31,9 @@ Status: current acceptance — BC0–BC9 remain Partial.
 | BC4 本机 Computer Use | Windows 有有限运行证据；平台合同未完整完成 | 原生观察/输入与持久 REPL 已接线。本次修复脚本代次、截图输出、进程退出等待和跨请求拖拽。Linux/macOS 没有实际图形会话运行证据；Wayland 只实现 Screenshot portal 路径，未实现正式 RemoteDesktop 输入会话；macOS 仍为 JXA/旧捕获 API 路线。 |
 | BC5 实时桌面与交接 | 媒体和输入分离已实现；原生运行待验证 | 控制交接、代次与重启后的人工归属已有回归。独立 capture helper 消除长动作阻塞；Linux Xvnc/noVNC 走只读 RFB 媒体，输入仍走 Host。真实图形会话尚未运行。 |
 | BC6 远端常驻 | 连接和桌面准备路径已接通；远端实测待验证 | 共享 Host 拥有 SSH 生命周期、恢复意图与 Web HTTP/WS 网关；可对已连接 Linux Host 显式准备持久桌面，远端桌面镜像含 VNC 媒体。远端组件部署和完整 Bot 常驻尚未实测。 |
-| BC7 虚拟机 | 生命周期子集已实现，创建可用电脑的合同未完成 | libvirt 真实 CLI 路径存在；本次修复了已有盘误删、按名字接管外部域、固定 UUID、分步回执、删除重试、provider 改绑与设置保存。创建仍只定义机器/磁盘；guest OS、桌面、浏览器、Host 安装、注册与自动进入共享桌面的流程尚未实现。 |
+| BC7 虚拟机 | 可用 guest 配方和共享桌面接线已实现，真实运行待验证 | libvirt UUID/卷归属、官方 Debian 镜像核验、NoCloud、guest Host/Xvnc、注册与恢复、关机后运行组件升级均有源码与定向行为验证。当前环境没有真实 KVM/libvirt/guest 图形会话，不能宣称创建出的电脑已经实际可用；托管配方限 Linux x64 本地 libvirt。 |
 | BC8 工作台整合 | 工作、桌面、成果与交还已接通；实际办公流程待验 | 电脑操作记录真实 Thread 关系，保留多工作；Bot 工作列表可进关联桌面与下载登记成果。人工交还以耐久事件续接对应 Thread；版本改变阻止旧成果下载。外部应用修改与编辑器草稿的完整办公流程及远端实机仍待验证。 |
-| BC9 分发 | 资产构建路径已修复，整体未完成 | 驱动已改为随同一 Host generation 原子发布，编译产物可独立于 checkout 解析。原生依赖安装、Linux 桌面组件、macOS bundle/权限身份及完整安装包操作验证仍未交付或未验证。复制几份脚本不能代表这些部分已完成。 |
+| BC9 分发 | Linux x64 guest 构建/升级路径已接线，整体仍未完成 | 驱动随同一 Host generation 原子发布，Linux 发行包构建时加入经散列核验的 guest runtime；用户数据与可替换 runtime 分开。真实 Linux 安装/升级、macOS 稳定 bundle/权限身份及完整安装包操作仍未验证或实现。 |
 
 ## 本次直接修复
 
@@ -59,7 +61,7 @@ Status: current acceptance — BC0–BC9 remain Partial.
 
 这些是源码中的功能缺口，不是因缺少真机而暂缓作结论：
 
-5. **创建到可用 VM 桌面。** libvirt define/start 与 guest 系统、桌面、Host 引导/注册之间缺少产品实现。手工 baseImage 配方不能算自动准备；provider 不可用时只能如实报错。
+5. **真实 VM 验收。** 自动创建、guest 引导、桌面操作、观看和关机后升级已有产品链路，但当前环境没有 KVM/libvirt，尚无真实虚拟机运行证据。托管配方目前要求 Linux x64 Host 与本地 `qemu:///system`；远端已有 VM 可按 BC6 接入，不能把这等同于托管生命周期。
 7. **正式平台组件。** Debian/Ubuntu 的显式准备已提供 Python/GI/AT-SPI/Gdk、Xvnc、xfce4 与浏览器安装路径，仍需 Linux 实机运行及其他发行版选择。macOS JXA 不等同于计划中的稳定 bundle/ScreenCaptureKit 组件，能力声明和权限检查还需实际平台实现与运行验证；Wayland 正式输入会话也未实现。
 
 ## 工程判断

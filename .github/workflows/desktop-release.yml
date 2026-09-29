@@ -50,6 +50,17 @@ jobs:
       - run: bun run test:pi
       - run: bun run test:cloud
 
+      - name: Build Linux x64 VM guest runtime
+        if: hashFiles('scripts/build-vm-guest-bundle.mjs') != ''
+        run: node scripts/build-vm-guest-bundle.mjs
+
+      - uses: actions/upload-artifact@v7
+        if: hashFiles('scripts/build-vm-guest-bundle.mjs') != ''
+        with:
+          name: varin-vm-guest-x64
+          if-no-files-found: error
+          path: packages/computer-driver/linux/guest-bundle-x64/
+
   release-targets:
     name: Select release targets
     needs: release-quality
@@ -183,6 +194,13 @@ jobs:
 
       - name: Install dependencies
         run: bun install --frozen-lockfile
+
+      - name: Attach Linux x64 VM guest runtime
+        if: matrix.platform == 'linux' && matrix.architecture == 'x64' && hashFiles('scripts/build-vm-guest-bundle.mjs') != ''
+        uses: actions/download-artifact@v8
+        with:
+          name: varin-vm-guest-x64
+          path: packages/computer-driver/linux/guest-bundle-x64
 
       - name: Restore source-built native libraries
         if: (matrix.platform == 'windows' && matrix.architecture == 'arm64') || (matrix.platform == 'macos' && matrix.architecture == 'x64')

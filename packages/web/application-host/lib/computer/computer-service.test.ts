@@ -1,5 +1,6 @@
 import { describe, it, expect, beforeEach, afterEach, vi } from "vitest";
-import { mkdtempSync, rmSync, existsSync, readFileSync } from "node:fs";
+import { mkdtempSync, rmSync, existsSync, readFileSync, mkdirSync, writeFileSync } from "node:fs";
+import { createHash } from "node:crypto";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
 import { createComputerService } from "./computer-service.js";
@@ -845,6 +846,101 @@ describe("computer service (BC7 virtual machines)", () => {
     });
     return { service, kernel };
   };
+
+  it("creates a bootable Debian guest, registers its Host, and exposes the same managed desktop", async () => {
+    const driverDir = newDataDir();
+    const bundle = join(driverDir, "linux", "guest-bundle-x64");
+    mkdirSync(bundle, { recursive: true });
+    writeFileSync(join(driverDir, "linux", "guest-init.sh"), "#!/bin/bash\n");
+    writeFileSync(join(driverDir, "linux", "guest-upgrade.sh"), "#!/bin/bash\n");
+    const digests: Record<string, string> = {};
+    for (const [name, file] of [["runtime", "runtime.tgz"], ["node", "node"], ["bun", "bun"]] as const) {
+      const bytes = Buffer.from(name);
+      writeFileSync(join(bundle, file), bytes);
+      digests[name] = createHash("sha256").update(bytes).digest("hex");
+    }
+    writeFileSync(join(bundle, "manifest.json"), JSON.stringify({ schemaVersion: 1, architecture: "x64",
+      version: "0.9.21", sourceRevision: "test", digests }));
+    const imageBytes = Buffer.alloc(64);
+    imageBytes.write("QFI", 0, "ascii"); imageBytes[3] = 0xfb;
+    imageBytes.writeBigUInt64BE(2n * 1024n * 1024n * 1024n, 24);
+    const imageDigest = createHash("sha512").update(imageBytes).digest();
+    const ref = "trixie/20260914-2601/debian-13-generic-amd64-20260914-2601.qcow2";
+    let guestHealthy = true;
+    let guestHostId = "guest-h";
+    const dataDir = newDataDir();
+    const fixture = libvirtFixture();
+    const exec: VmExec = async (command, args, input) => {
+      if (command === "sh") return { code: 0, stdout: "", stderr: "" };
+      if (command === "genisoimage") {
+        writeFileSync(args[args.indexOf("-output") + 1]!, "seed fixture");
+        return { code: 0, stdout: "", stderr: "" };
+      }
+      if (command === "virsh" && args[2] === "domifaddr") return { code: 0,
+        stdout: " Name  MAC  Protocol  Address\nvnet0  52:54:00:aa:bb:cc  ipv4  192.168.122.51/24\n", stderr: "" };
+      return fixture.exec(command, args, input);
+    };
+    let connections: Array<{ id: string; label: string; apiUrl: string; clientToken: string; expectedHostId: string }> = [];
+    const reply = (body: unknown) => new Response(JSON.stringify(body), { headers: {
+      "Content-Type": "application/json", "X-Varin-Computer-Host": "guest-h",
+    } });
+    const service = createComputerService({ client: fakeKernel().client as never, hostId: "coordinator",
+      platform: "linux", dataDir, driverDir, appVersion: "0.9.21", vmExec: exec,
+      createDriver: () => makeDriver(async () => okResponse()), vmProviders: async () => [vmProviderConfig],
+      vmGuestFetch: (async (url: string) => {
+        if (url.endsWith(".json")) return Response.json({ items: [{ kind: "Upload", data: { ref },
+          metadata: { annotations: { "cloud.debian.org/digest": `sha512:${imageDigest.toString("base64")}` } } }] });
+        if (url.endsWith(".qcow2")) return new Response(imageBytes);
+        if (url.endsWith("/health")) return guestHealthy
+          ? Response.json({ status: "ok", varinVersion: "0.9.21", serverId: guestHostId })
+          : Response.json({ status: "ok", varinVersion: "0.9.20", serverId: guestHostId });
+        throw new Error(`Unexpected guest fetch: ${url}`);
+      }) as typeof fetch,
+      registerVmGuest: async (input) => { connections = [{ id: input.connectionId, label: input.label,
+        apiUrl: input.apiUrl, clientToken: "token", expectedHostId: input.hostId }]; },
+      removeVmGuest: async () => { connections = []; },
+      remoteHosts: async () => connections,
+      fetch: (async (input: unknown) => {
+        const url = String(input);
+        if (url.endsWith("/api/computers?local=1")) return reply({ machines: [{ id: "local", provider: "local",
+          platform: "linux", coordinatorHostId: "guest-h", name: "guest", status: "active", createdAt: "t", updatedAt: "t" }],
+          desktops: [{ id: "managed-linux", machineId: "local", label: "Persistent Linux desktop", kind: "virtual-display",
+            status: "available", managed: "linux-xvnc", media: { kind: "vnc", width: 1280, height: 800 } }] });
+        if (url.endsWith("/probe")) return reply({ desktop: { id: "managed-linux", machineId: "local",
+          status: "available", managed: "linux-xvnc", media: { kind: "vnc", width: 1280, height: 800 },
+          capabilities: { platform: "linux", driver: "linux-atspi", status: "ready" } } });
+        return reply({});
+      }) as typeof fetch,
+    });
+    const created = await service.createVm({ providerId: "hv1", name: "office", managed: true });
+    expect(created.machine.vm?.volumePaths).toEqual([
+      `varin-${created.machine.vm!.domainUuid}.qcow2`,
+      `varin-${created.machine.vm!.domainUuid}-base.qcow2`,
+      `varin-${created.machine.vm!.domainUuid}-seed.iso`,
+    ]);
+    await service.reconcileVmGuests();
+    const vm = (await service.listVms())[0]!;
+    expect(vm.binding.guest?.state).toBe("ready");
+    expect(connections[0]?.id).toBe(`vm:${vm.binding.domainUuid}`);
+    const desktop = (await service.list()).desktops.find((item) => item.remote?.connectionId === connections[0]?.id);
+    expect(desktop?.media?.kind).toBe("vnc");
+    guestHealthy = false;
+    await service.reconcileVmGuests();
+    expect((await service.listVms())[0]?.binding.guest?.state).toBe("preparing");
+    await service.vmAction({ machineId: vm.machineId, action: "shutdown" });
+    await service.vmAction({ machineId: vm.machineId, action: "upgrade" });
+    expect((await service.listVms())[0]?.binding.guest?.runtimeSha256).toBe(digests.runtime);
+    guestHealthy = true;
+    await service.vmAction({ machineId: vm.machineId, action: "start" });
+    await service.reconcileVmGuests();
+    expect((await service.listVms())[0]?.binding.guest?.state).toBe("ready");
+    guestHostId = "replacement-host";
+    await service.reconcileVmGuests();
+    expect((await service.listVms())[0]?.binding.guest?.state).toBe("failed");
+    await service.deleteVm(vm.machineId, false);
+    expect(existsSync(join(dataDir, "computer-vms", `${vm.binding.domainUuid}.json`))).toBe(true);
+    await service.dispose();
+  });
 
   it("create records provider identity, domain UUID, volumes, and the step journal", async () => {
     const { exec, calls, domains } = libvirtFixture();

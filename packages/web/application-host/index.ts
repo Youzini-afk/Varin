@@ -102,6 +102,7 @@ import { attachConnectionProxy } from './lib/connections/host-proxy.js';
 import { configuredVmProviders } from './lib/computer/vm-provider.js';
 import { registerComputerRoutes } from './lib/computer/computer-routes.js';
 import { attachDesktopMedia } from './lib/computer/desktop-media.js';
+import { createVmGuestRegistration } from './lib/computer/vm-guest-register.js';
 import { createWorktreeReclaimGuard } from './lib/harness/worktree-reclaim-guard.js';
 import { resolveThreadWorktreeSettings } from './lib/harness/thread-worktree-settings.js';
 import { createKernelWorkspaceWorkingStateAccess, KernelStorageAdapter } from './lib/kernel/storage-adapter.js';
@@ -1799,10 +1800,17 @@ async function main(options: StartWebUiServerOptions = {}): Promise<WebUiServerC
       options.onConnectionStatus?.(detail);
     },
   });
+  const vmGuestRegistration = createVmGuestRegistration({
+    readSettings: async () => await readSettingsFromDisk() as Record<string, unknown>,
+    updateSettings: (mutator) => updateSettingsOnDisk((current) => mutator(current as Record<string, unknown>) as typeof current),
+  });
   const computerService = createComputerService({
     client: kernelClient,
     hostId,
     dataDir: VARIN_DATA_DIR,
+    appVersion: VARIN_VERSION,
+    registerVmGuest: vmGuestRegistration.register,
+    removeVmGuest: vmGuestRegistration.remove,
     resolveWork: async (sessionId) => {
       const owner = await threadRegistry.resolveSessionOwner(sessionId);
       return owner ? { scopeId: owner.owningScopeId, threadId: owner.threadId } : null;

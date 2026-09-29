@@ -333,6 +333,7 @@ export function registerComputerRoutes(app: Express, { computers, requireAuth = 
         ...(typeof body.memoryMiB === "number" ? { memoryMiB: body.memoryMiB } : {}),
         ...(typeof body.vcpus === "number" ? { vcpus: body.vcpus } : {}),
         ...(typeof body.diskGiB === "number" ? { diskGiB: body.diskGiB } : {}),
+        ...(typeof body.managed === "boolean" ? { managed: body.managed } : {}),
         ...(typeof body.baseImage === "string" ? { baseImage: body.baseImage } : {}),
       });
       response.status(result.created ? 201 : 200).json(result);
@@ -357,7 +358,7 @@ export function registerComputerRoutes(app: Express, { computers, requireAuth = 
       }
       return;
     }
-    if (action !== "start" && action !== "shutdown" && action !== "reboot") {
+    if (action !== "start" && action !== "shutdown" && action !== "reboot" && action !== "upgrade") {
       sendError(response, new HarnessServiceError("invalid-params", `Unknown VM action "${action}"`), "Unknown VM action");
       return;
     }

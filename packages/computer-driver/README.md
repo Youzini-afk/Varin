@@ -70,6 +70,32 @@ are not interrupted. Stop and Start in Computer settings apply the new
 component. Only Debian and Ubuntu apt preparation is implemented; the service
 reports a clear error on unsupported distributions.
 
+## Managed libvirt guest
+
+On a Linux x64 Host with local `qemu:///system`, Create VM can prepare a Debian
+13 guest automatically. The Host resolves an official dated generic cloud
+image, verifies its SHA-512 digest, creates a UUID-owned disk and read-only
+NoCloud seed, boots the domain, and waits for the guest Host and Xvnc desktop
+to become usable. The release build supplies a version-matched Linux x64
+runtime bundle with Node, Bun, and verified SHA-256 asset digests. Guest
+bootstrap installs native dependencies and a systemd Host service. The
+coordinator registers this Host through the existing desktop connection
+settings and shows its desktop in the normal Computer catalog.
+
+The VM disk keeps `/var/lib/varin`, the dedicated desktop account, browser
+profile, and downloads. The Host runtime lives under `/opt/varin/runtime`.
+To update it, shut down the VM, select **Upgrade runtime** in Computer
+settings, then start it. This replaces the recorded seed ISO while the VM is
+off; the guest verifies and installs the new runtime before its Host starts.
+An interrupted ISO upload can be retried against the same recorded volume.
+Deleting the VM retains its volumes unless **Delete disks** is selected.
+
+This recipe requires local libvirt, an apt-based guest, and network access to
+Debian and package repositories. Other machines can still be connected as
+remote Hosts. Native KVM boot, desktop operation, and installer behavior must
+be checked on an actual Linux hypervisor; scripted provider tests do not
+establish those results.
+
 The `computer` tool's `artifact` action registers a file beneath that desktop
 user's home on the calling Thread. The dedicated account reads and hashes the
 file; the coordinator saves only its version and location in the kernel

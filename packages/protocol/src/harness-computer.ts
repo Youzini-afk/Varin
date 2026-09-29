@@ -474,6 +474,17 @@ export interface ComputerVmBinding {
   volumePaths: string[];
   /** Create/cleanup journal — replay evidence of what actually completed. */
   steps: ComputerVmStep[];
+  guest?: {
+    recipe: "debian13-xvnc";
+    image?: { ref: string; version: string; sha512: string };
+    runtimeSha256?: string;
+    imageUploaded?: boolean;
+    state: "preparing" | "ready" | "failed" | "stopped";
+    detail?: string;
+    connectionId?: string;
+    hostId?: string;
+    apiUrl?: string;
+  };
 }
 
 /** Live provider-side domain state. */
@@ -506,6 +517,8 @@ export interface ComputerVmCreateParams {
   diskGiB?: number;
   /** Absolute path of a backing image/template the new volume clones. */
   baseImage?: string;
+  /** Prepare a Debian guest Host and persistent graphical desktop automatically. */
+  managed?: boolean;
 }
 
 export interface ComputerVmCreateResult {

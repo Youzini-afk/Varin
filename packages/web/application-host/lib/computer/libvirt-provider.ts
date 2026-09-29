@@ -6,6 +6,7 @@
  */
 import { HarnessServiceError } from "../harness/service-error.js";
 import { randomUUID } from "node:crypto";
+import { open, stat } from "node:fs/promises";
 import type {
   ComputerVmProviderConfig,
   ComputerVmState,
@@ -107,6 +108,14 @@ export function createLibvirtProvider(
       `      <source pool='${xmlEscape(pool)}' volume='${xmlEscape(volumePath)}'/>`,
       `      <target dev='vda' bus='virtio'/>`,
       `    </disk>`,
+      ...(spec.seedIsoFile ? [
+        `    <disk type='volume' device='cdrom'>`,
+        `      <driver name='qemu' type='raw'/>`,
+        `      <source pool='${xmlEscape(pool)}' volume='${xmlEscape(`varin-${spec.domainUuid}-seed.iso`)}'/>`,
+        `      <target dev='sda' bus='sata'/>`,
+        `      <readonly/>`,
+        `    </disk>`,
+      ] : []),
       `    <interface type='network'>`,
       `      <source network='${xmlEscape(network)}'/>`,
       `      <model type='virtio'/>`,
@@ -138,6 +147,48 @@ export function createLibvirtProvider(
     listDomains,
     domainState,
 
+    async stageBaseImage(input) {
+      const name = `varin-${input.domainUuid}-base.qcow2`;
+      const present = await volumeNames();
+      if (present.has(name) && !input.volumePaths.includes(name)) {
+        throw new HarnessServiceError("unavailable", "Cloud image volume exists without this creation's allocation receipt");
+      }
+      if (!present.has(name)) {
+        const bytes = (await stat(input.file)).size;
+        if (!Number.isSafeInteger(bytes) || bytes <= 0) throw new HarnessServiceError("unavailable", "Cloud image file is empty or unreadable");
+        const file = await open(input.file, "r");
+        const header = Buffer.alloc(32);
+        try { await file.read(header, 0, header.length, 0); } finally { await file.close(); }
+        if (header.toString("ascii", 0, 3) !== "QFI" || header[3] !== 0xfb || header.readBigUInt64BE(24) <= 0n) {
+          throw new HarnessServiceError("unavailable", "Verified Debian image is not a valid qcow2 volume");
+        }
+        await virsh(["vol-create-as", pool, name, `${header.readBigUInt64BE(24)}B`, "--format", "qcow2"]);
+        await input.checkpoint(input.volumePaths.includes(name) ? [...input.volumePaths] : [...input.volumePaths, name]);
+      }
+      if (!input.uploaded || !present.has(name)) {
+        await virsh(["vol-upload", name, input.file, "--pool", pool]);
+      }
+      return name;
+    },
+
+    async upgradeSeed(input) {
+      const seedName = `varin-${input.domainUuid}-seed.iso`;
+      if (!input.volumePaths.includes(seedName) || !(await volumeNames()).has(seedName)) {
+        throw new HarnessServiceError("unavailable", "This VM has no recorded managed guest seed volume");
+      }
+      const state = await domainState(input.domainUuid);
+      if (state !== "shutoff") throw new HarnessServiceError("invalid-params", "Shut down the VM before upgrading its guest runtime");
+      const bytes = (await stat(input.isoFile)).size;
+      if (!Number.isSafeInteger(bytes) || bytes <= 0) throw new HarnessServiceError("unavailable", "New guest seed ISO is empty or unreadable");
+      const info = await virsh(["vol-info", seedName, "--pool", pool, "--bytes"]);
+      const capacity = info.match(/^Capacity:\s*(\d+)/imu)?.[1];
+      if (!capacity) throw new HarnessServiceError("unavailable", "Managed guest seed capacity could not be read");
+      if (BigInt(capacity) < BigInt(bytes)) await virsh(["vol-resize", seedName, `${bytes}B`, "--pool", pool]);
+      // Repeating an interrupted upload writes the same verified ISO to the
+      // same UUID-owned volume. The VM remains shut off until it succeeds.
+      await virsh(["vol-upload", seedName, input.isoFile, "--pool", pool]);
+    },
+
     async create(spec: VmCreateSpec): Promise<VmCreateOutcome> {
       if (!namePattern.test(spec.name)) {
         throw new HarnessServiceError(
@@ -152,6 +203,8 @@ export function createLibvirtProvider(
       }
       const domainUuid = spec.domainUuid ?? randomUUID();
       const volumeName = `varin-${domainUuid}.qcow2`;
+      const seedName = `varin-${domainUuid}-seed.iso`;
+      const baseName = `varin-${domainUuid}-base.qcow2`;
       let volumePaths = [...(spec.volumePaths ?? [])];
       const checkpoint = async () => spec.checkpoint?.({ ok: false, domainUuid, volumePaths: [...volumePaths], steps: [...steps] });
       let existing: string | null;
@@ -177,9 +230,36 @@ export function createLibvirtProvider(
             "--format", "qcow2",
           ]);
         }
-        volumePaths = [volumeName];
+        volumePaths = [volumeName, ...volumePaths.filter((volume) => volume === seedName || volume === baseName)];
         step({ step: "volume", status: "done", detail: `${pool}/${volumeName}` });
         await checkpoint();
+        if (spec.baseImage) {
+          const info = await virsh(["vol-info", volumeName, "--pool", pool, "--bytes"]);
+          const capacity = info.match(/^Capacity:\s*(\d+)/imu)?.[1];
+          if (!capacity) throw new Error("Cloned cloud disk capacity could not be read");
+          if (BigInt(capacity) < BigInt(spec.diskGiB) * 1024n * 1024n * 1024n) {
+            await virsh(["vol-resize", volumeName, `${spec.diskGiB}G`, "--pool", pool]);
+          }
+          step({ step: "disk-size", status: "done", detail: `at least ${spec.diskGiB} GiB` });
+          await checkpoint();
+        }
+        if (spec.seedIsoFile) {
+          const seedBytes = (await stat(spec.seedIsoFile)).size;
+          if (!Number.isSafeInteger(seedBytes) || seedBytes <= 0) throw new Error("NoCloud seed ISO is empty or unreadable");
+          const present = await volumeNames();
+          if (present.has(seedName)) {
+            if (!volumePaths.includes(seedName)) throw new Error("NoCloud seed volume exists without an allocation receipt; retained for inspection");
+          } else {
+            await virsh(["vol-create-as", pool, seedName, `${seedBytes}B`, "--format", "raw"]);
+            volumePaths.push(seedName);
+            step({ step: "seed-volume", status: "done", detail: `${pool}/${seedName}` });
+            await checkpoint();
+          }
+          // An interrupted upload is safely resumed into the same owned seed.
+          await virsh(["vol-upload", seedName, spec.seedIsoFile, "--pool", pool]);
+          step({ step: "seed-upload", status: "done", detail: `${seedBytes} bytes` });
+          await checkpoint();
+        }
       } catch (error) {
         step({
           step: "volume",
@@ -250,7 +330,8 @@ export function createLibvirtProvider(
     },
 
     async delete(domainUuid: string, volumePaths: string[], deleteDisks: boolean) {
-      if (deleteDisks && volumePaths.some((volume) => volume !== `varin-${domainUuid}.qcow2`)) {
+      if (deleteDisks && volumePaths.some((volume) => volume !== `varin-${domainUuid}.qcow2`
+        && volume !== `varin-${domainUuid}-seed.iso` && volume !== `varin-${domainUuid}-base.qcow2`)) {
         throw new HarnessServiceError("invalid-params", "Disk deletion requires this creation's recorded allocation identity");
       }
       if ((await listDomains()).some((domain) => domain.domainUuid === domainUuid)) {

@@ -164,7 +164,7 @@ function ComputerSettingsContent() {
           </div>;
         })}
       </SettingsSection>
-      <ComputerVmSection />
+      <ComputerVmSection onCatalogChanged={refresh} />
       <ComputerDesktopSetup catalog={catalog} onPrepared={refresh} />
       {viewing ? (
         <ComputerDesktopView desktop={viewing} open={viewing !== null} onOpenChange={(open) => { if (!open) setViewing(null); }} />

@@ -23,6 +23,8 @@ export interface VmCreateSpec {
   vcpus: number;
   diskGiB: number;
   baseImage?: string;
+  /** A NoCloud seed ISO generated from this exact guest runtime recipe. */
+  seedIsoFile?: string;
   /** Host-persisted creation identity, established before any provider mutation. */
   domainUuid?: string;
   /** Previously confirmed allocation, never inferred from a matching VM name. */
@@ -67,6 +69,11 @@ export interface VmProvider {
   listDomains(): Promise<VmProviderDomain[]>;
   /** State of one domain; throws not-found when the UUID is gone. */
   domainState(domainUuid: string): Promise<ComputerVmState>;
+  /** Stage a verified official cloud image into this creation's owned volume. */
+  stageBaseImage?(input: { domainUuid: string; file: string; volumePaths: string[]; uploaded: boolean;
+    checkpoint(volumePaths: string[]): Promise<void> }): Promise<string>;
+  /** Replace this stopped domain's recorded NoCloud volume for a runtime upgrade. */
+  upgradeSeed?(input: { domainUuid: string; isoFile: string; volumePaths: string[] }): Promise<void>;
   /**
    * Create a domain. Retries reconcile the caller's recorded UUID and confirmed
    * allocations. Same-name domains with another UUID remain foreign resources.

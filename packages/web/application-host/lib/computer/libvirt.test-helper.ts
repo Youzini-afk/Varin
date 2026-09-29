@@ -21,6 +21,9 @@ export function libvirtFixture() {
         if (volumes.has(name)) return { code: 1, stdout: '', stderr: 'volume already exists' };
         volumes.add(name); break;
       }
+      case 'vol-upload': break;
+      case 'vol-info': stdout = 'Name: fixture\nType: file\nCapacity: 2147483648\nAllocation: 100000000\n'; break;
+      case 'vol-resize': break;
       case 'define': {
         const name = options!.stdin!.match(/<name>(.*?)<\/name>/)![1]!;
         const id = options!.stdin!.match(/<uuid>(.*?)<\/uuid>/)![1]!;

@@ -21,7 +21,7 @@ import type { ComputerVmDescriptor, ComputerVmProviderConfig } from '@varin/prot
  * reachability and domain state come from the Host — nothing here simulates
  * a hypervisor.
  */
-export function ComputerVmSection() {
+export function ComputerVmSection({ onCatalogChanged }: { onCatalogChanged?: () => Promise<void> }) {
   const { t } = useI18n();
   const [providers, setProviders] = React.useState<ComputerVmProviderConfig[] | null>(null);
   const [vms, setVms] = React.useState<ComputerVmDescriptor[] | null>(null);
@@ -38,22 +38,33 @@ export function ComputerVmSection() {
   const [vmCpus, setVmCpus] = React.useState('4');
   const [vmDisk, setVmDisk] = React.useState('40');
   const [vmBaseImage, setVmBaseImage] = React.useState('');
+  const [vmManaged, setVmManaged] = React.useState(true);
   const [deleteDisks, setDeleteDisks] = React.useState(false);
+  const readyGuests = React.useRef<string | null>(null);
 
   const refresh = React.useCallback(async () => {
     try {
       const [providerList, vmList] = await Promise.all([listVmProviderConfigs(), listVirtualMachines()]);
       setProviders(providerList);
       setVms(vmList);
-      if (!vmProviderId && providerList.length > 0) setVmProviderId(providerList[0]!.id);
+      setVmProviderId((current) => current || providerList[0]?.id || '');
+      const ready = vmList.filter((vm) => vm.binding.guest?.state === 'ready').map((vm) => vm.machineId).sort().join(',');
+      if (readyGuests.current !== ready) {
+        readyGuests.current = ready;
+        void onCatalogChanged?.();
+      }
       setError(null);
     } catch (cause) {
       setError(cause instanceof Error ? cause.message : String(cause));
     }
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
+  }, [onCatalogChanged]);
 
   React.useEffect(() => { void refresh(); }, [refresh]);
+  React.useEffect(() => {
+    if (!vms?.some((vm) => vm.binding.guest && (vm.binding.guest.state === 'preparing' || vm.binding.guest.state === 'failed'))) return;
+    const timer = setInterval(() => { void refresh(); }, 10_000);
+    return () => clearInterval(timer);
+  }, [vms, refresh]);
 
   const addProvider = async () => {
     const id = providerId.trim();
@@ -98,7 +109,8 @@ export function ComputerVmSection() {
         memoryMiB: Number(vmMemory) || 4096,
         vcpus: Number(vmCpus) || 4,
         diskGiB: Number(vmDisk) || 40,
-        ...(vmBaseImage.trim() ? { baseImage: vmBaseImage.trim() } : {}),
+        managed: vmManaged,
+        ...(!vmManaged && vmBaseImage.trim() ? { baseImage: vmBaseImage.trim() } : {}),
       });
       setVmName('');
       await refresh();
@@ -109,7 +121,7 @@ export function ComputerVmSection() {
     }
   };
 
-  const vmAction = async (machineId: string, action: 'start' | 'shutdown' | 'reboot') => {
+  const vmAction = async (machineId: string, action: 'start' | 'shutdown' | 'reboot' | 'upgrade') => {
     setBusy(`${action}:${machineId}`);
     try {
       await runVmAction(machineId, action);
@@ -140,6 +152,15 @@ export function ComputerVmSection() {
       case 'shutoff': return t('settings.computers.vm.state.shutoff');
       case 'crashed': return t('settings.computers.vm.state.crashed');
       default: return t('settings.computers.vm.state.unknown');
+    }
+  };
+
+  const guestStateLabel = (state: NonNullable<ComputerVmDescriptor['binding']['guest']>['state']): string => {
+    switch (state) {
+      case 'preparing': return t('settings.computers.setup.preparing');
+      case 'ready': return t('settings.computers.status.available');
+      case 'failed': return t('settings.computers.status.unavailable');
+      case 'stopped': return t('settings.computers.status.stopped');
     }
   };
 
@@ -196,9 +217,13 @@ export function ComputerVmSection() {
               placeholder={t('settings.computers.vm.create.vcpus')} inputMode="numeric" />
             <Input value={vmDisk} onChange={(event) => setVmDisk(event.target.value)}
               placeholder={t('settings.computers.vm.create.disk')} inputMode="numeric" />
-            <Input value={vmBaseImage} onChange={(event) => setVmBaseImage(event.target.value)}
-              placeholder={t('settings.computers.vm.create.baseImage')} />
+            {!vmManaged ? <Input value={vmBaseImage} onChange={(event) => setVmBaseImage(event.target.value)}
+              placeholder={t('settings.computers.vm.create.baseImage')} /> : null}
           </div>
+          <label className="flex items-center gap-2 typography-meta text-muted-foreground">
+            <Checkbox checked={vmManaged} onChange={setVmManaged} ariaLabel={t('settings.computers.vm.create.managed')} />
+            {t('settings.computers.vm.create.managed')}
+          </label>
           <Button variant="outline" size="sm" disabled={busy === 'create' || !vmName.trim() || !vmProviderId}
             onClick={() => { void createVm(); }}>
             {busy === 'create' ? t('settings.computers.vm.create.creating') : t('settings.computers.vm.create.submit')}
@@ -233,6 +258,10 @@ export function ComputerVmSection() {
                   onClick={() => { void vmAction(vm.machineId, 'reboot'); }}>
                   {t('settings.computers.vm.action.reboot')}
                 </Button>
+                {vm.binding.guest ? <Button variant="outline" size="sm" disabled={busy !== null || vm.state !== 'shutoff'}
+                  onClick={() => { void vmAction(vm.machineId, 'upgrade'); }}>
+                  {t('settings.computers.vm.action.upgrade')}
+                </Button> : null}
                 <Button variant="outline" size="sm" disabled={busy !== null}
                   onClick={() => { void removeVm(vm.machineId); }}>
                   {t('settings.computers.vm.action.delete')}
@@ -240,6 +269,10 @@ export function ComputerVmSection() {
               </div>
             </div>
             {vm.statusDetail ? <p className="typography-meta text-muted-foreground">{vm.statusDetail}</p> : null}
+            {vm.binding.guest ? <p className="typography-meta text-muted-foreground">
+              {t('settings.computers.vm.create.managed')}: {guestStateLabel(vm.binding.guest.state)}
+              {vm.binding.guest.detail ? ` · ${vm.binding.guest.detail}` : ''}
+            </p> : null}
             <label className="flex items-center gap-2 typography-meta text-muted-foreground">
               <Checkbox checked={deleteDisks} onChange={setDeleteDisks} ariaLabel={t('settings.computers.vm.deleteDisks')} />
               {t('settings.computers.vm.deleteDisks')}

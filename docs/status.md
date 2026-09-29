@@ -18,7 +18,7 @@ Last updated: 2026-09-29
 | 阶段 7 AI4S 科研集群（7A–7I） | 主体已交付为 Partial（D-298/D-303/D-305）；D-300 修订的 7C–7E 远程执行与资源管理部分仍未作为产品代码交付，Slurm 延后 | [design/research-cluster-design.md](design/research-cluster-design.md) |
 | 阶段 S / W / B / F / C / L / N | 已接线；逐能力证据在矩阵 | [plan/agent-harness-plan.md](plan/agent-harness-plan.md) 同名节 |
 | 阶段 O 办公连续性 | 设计已接受（D-327），O0–O4 未实施 | [design/office-work-continuity-design.md](design/office-work-continuity-design.md) |
-| 阶段 BC Bot、记忆与 Computer Use | BC0–BC9 均有生产实现，深入验收结论仍为 Partial。2026-09-29 已修复 Bot 入口生命周期、整理模型继承、控制交接/旧脚本/重启归属、真实输入映射、远端取消/身份/流生命周期、VM 磁盘归属/耐久创建/设置以及 Host 驱动原子打包。共同记忆覆盖、独立 Linux 桌面准备、VM guest 引导/接入、成果和交还续接整合及完整原生分发仍未完成；不能接受“全部落地”。 | [实施计划](plan/bot-computer-use-plan.md)、[当前深入验收](plan/bot-computer-use-review.md) |
+| 阶段 BC Bot、记忆与 Computer Use | BC0–BC9 均有生产路径，深入验收结论仍为 Partial。已修复 Bot 生命周期、记忆来源/分支恢复、控制交接、远端 Host/桌面与成果续接；Linux 持久桌面及 Debian/libvirt 托管 guest 的创建、注册、关机升级路径已接线。真实 KVM/Linux 图形会话、macOS 稳定原生组件、Wayland 正式输入会话和发行包实装仍缺证据或实现，不能接受“全部落地”。 | [实施计划](plan/bot-computer-use-plan.md)、[当前深入验收](plan/bot-computer-use-review.md) |
 | 阶段 HR 面向任务与资源的 Harness | D-337，HR0–HR5 已接线并收口（2026-09-27）：资源根寻址、会话 cwd 锚定、多资源检索、持续索引、可变 work-context 移除、§12 场景证据 | [design/resource-oriented-harness-design.md](design/resource-oriented-harness-design.md)；交付叙述在归档日志 |
 | Phase 0–10、D-296 companion 退役 | 完成 | [archive/roadmap-history.md](archive/roadmap-history.md) |
 

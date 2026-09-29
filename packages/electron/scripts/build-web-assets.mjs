@@ -79,6 +79,23 @@ const copyDir = async (src, dst) => {
 
 const bunExe = resolveBun();
 
+// A local Linux package must carry the same managed VM guest assets as a
+// release workflow package. Release jobs attach the already verified bundle;
+// a source checkout builds it here when absent or stale.
+if (process.platform === 'linux' && process.arch === 'x64') {
+  const manifestPath = path.join(repoRoot, 'packages', 'computer-driver', 'linux', 'guest-bundle-x64', 'manifest.json');
+  const version = JSON.parse(await fs.readFile(path.join(repoRoot, 'package.json'), 'utf8')).version;
+  const revision = spawnSync('git', ['rev-parse', 'HEAD'], { cwd: repoRoot, encoding: 'utf8' });
+  const dirty = spawnSync('git', ['status', '--porcelain', '--untracked-files=no'], { cwd: repoRoot, encoding: 'utf8' });
+  let bundled;
+  try { bundled = JSON.parse(await fs.readFile(manifestPath, 'utf8')); } catch { /* bundle absent */ }
+  if (!bundled || bundled.version !== version || bundled.sourceRevision !== revision.stdout?.trim()
+    || dirty.status !== 0 || Boolean(dirty.stdout?.trim()) || bundled.sourceDirty === true) {
+    console.log('[electron] building Linux x64 VM guest runtime...');
+    run(process.execPath, ['scripts/build-vm-guest-bundle.mjs'], repoRoot);
+  }
+}
+
 console.log('[electron] building web UI dist...');
 run(bunExe, ['run', 'build:web'], repoRoot);
 

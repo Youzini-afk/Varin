@@ -53,6 +53,9 @@ import { createLibvirtProvider } from "./libvirt-provider.js";
 import { createDesktopDriverPool } from "./desktop-drivers.js";
 import { createLinuxDesktop, type LinuxDesktopState } from "./linux-desktop.js";
 import { inspectDesktopFile, openDesktopFile, type DesktopArtifactVersion } from "./desktop-artifact-files.js";
+import { prepareVmGuestSeed } from "./vm-guest-seed.js";
+import { resolveDebianCloudImage, downloadDebianCloudImage } from "./vm-guest-image.js";
+import { forgetVmGuestPassword, probeVmGuest, vmGuestBootstrapStatus, vmGuestIpv4, vmGuestPassword } from "./vm-guest-connection.js";
 import type { VmExec, VmProvider } from "./vm-provider.js";
 
 /** Kernel workspace under which computer catalog records live. */
@@ -115,6 +118,22 @@ const parseMachine = (record: KernelRecordResult): ComputerMachine | null => {
                 ? raw.vm.volumePaths.filter((v): v is string => typeof v === "string")
                 : [],
               steps: Array.isArray(raw.vm.steps) ? raw.vm.steps as ComputerVmStep[] : [],
+              ...(isObject(raw.vm.guest) && raw.vm.guest.recipe === "debian13-xvnc"
+                ? { guest: {
+                  recipe: "debian13-xvnc" as const,
+                  ...(isObject(raw.vm.guest.image) && asString(raw.vm.guest.image.ref)
+                    && asString(raw.vm.guest.image.version) && asString(raw.vm.guest.image.sha512)
+                    ? { image: { ref: raw.vm.guest.image.ref as string, version: raw.vm.guest.image.version as string,
+                      sha512: raw.vm.guest.image.sha512 as string } } : {}),
+                  ...(asString(raw.vm.guest.runtimeSha256) ? { runtimeSha256: raw.vm.guest.runtimeSha256 as string } : {}),
+                  ...(raw.vm.guest.imageUploaded === true ? { imageUploaded: true } : {}),
+                  state: (["preparing", "ready", "failed", "stopped"].includes(String(raw.vm.guest.state))
+                    ? raw.vm.guest.state : "failed") as NonNullable<ComputerVmBinding["guest"]>["state"],
+                  ...(asString(raw.vm.guest.detail) ? { detail: raw.vm.guest.detail as string } : {}),
+                  ...(asString(raw.vm.guest.connectionId) ? { connectionId: raw.vm.guest.connectionId as string } : {}),
+                  ...(asString(raw.vm.guest.hostId) ? { hostId: raw.vm.guest.hostId as string } : {}),
+                  ...(asString(raw.vm.guest.apiUrl) ? { apiUrl: raw.vm.guest.apiUrl as string } : {}),
+                } } : {}),
             },
           }
         : {}),
@@ -399,6 +418,11 @@ export interface ComputerServiceOptions {
   vmExec?: VmExec;
   /** Test seam: substitute provider implementation entirely. */
   vmProviderFactory?: (config: ComputerVmProviderConfig, exec: VmExec) => VmProvider;
+  appVersion?: string;
+  vmGuestFetch?: typeof fetch;
+  registerVmGuest?: (input: { connectionId: string; label: string; apiUrl: string; password: string;
+    hostId: string }) => Promise<void>;
+  removeVmGuest?: (connectionId: string) => Promise<void>;
   /** Resolve the real durable work owning a Pi session. */
   resolveWork?: (sessionId: string) => Promise<{ scopeId: string; threadId: string } | null>;
   /** Deliver an idempotent work continuation through the existing Thread ledger. */
@@ -467,13 +491,14 @@ export interface ComputerService {
   // --- BC7: virtual machine lifecycle ----------------------------------------
   /** Virtual machines on configured providers, with live domain state. */
   listVms(): Promise<ComputerVmDescriptor[]>;
+  reconcileVmGuests(): Promise<void>;
   /**
    * Create a VM with a durable, preallocated UUID. A retry resumes only that
    * identity; a coincidentally matching external domain name grants no ownership.
    */
   createVm(params: ComputerVmCreateParams): Promise<{ machine: ComputerMachine; created: boolean }>;
   /** Lifecycle on a VM machine's real domain UUID. */
-  vmAction(params: { machineId: string; action: "start" | "shutdown" | "reboot" }): Promise<ComputerVmDescriptor>;
+  vmAction(params: { machineId: string; action: "start" | "shutdown" | "reboot" | "upgrade" }): Promise<ComputerVmDescriptor>;
   /** Undefine the domain. `deleteDisks` also removes the recorded volumes. */
   deleteVm(machineId: string, deleteDisks?: boolean): Promise<void>;
   dispose(): Promise<void>;
@@ -922,6 +947,7 @@ export function createComputerService(options: ComputerServiceOptions): Computer
     for (const record of await listRecords("computer.desktop")) {
       const desktop = parseDesktop(record);
       if (desktop?.remote?.connectionId !== connectionId || keep.has(desktop.id)) continue;
+      if (desktop.status === "unavailable" && desktop.statusDetail === detail) continue;
       await putRecord(record.recordId, "computer.desktop", "unavailable", { ...JSON.parse(record.payloadJson) as Record<string, unknown>, statusDetail: detail });
     }
   };
@@ -1155,6 +1181,8 @@ export function createComputerService(options: ComputerServiceOptions): Computer
           ...(remoteDesktop?.statusDetail ? { statusDetail: remoteDesktop.statusDetail } : {}),
           ...(remoteDesktop?.capabilities ? { capabilities: remoteDesktop.capabilities as unknown as Record<string, unknown> } : {}),
           ...(remote.desktop.usage ? { usage: remote.desktop.usage } : {}),
+          ...((remoteDesktop?.managed ?? remote.desktop.managed) ? { managed: remoteDesktop?.managed ?? remote.desktop.managed } : {}),
+          ...((remoteDesktop?.media ?? remote.desktop.media) ? { media: remoteDesktop?.media ?? remote.desktop.media } : {}),
         });
       return parseDesktop(record)!;
     }
@@ -2092,14 +2120,12 @@ export function createComputerService(options: ComputerServiceOptions): Computer
 
   const vmExec: VmExec = options.vmExec ?? ((command, args, execOptions) => new Promise((resolve, reject) => {
     const child = spawn(command, args, { stdio: [execOptions?.stdin !== undefined ? "pipe" : "ignore", "pipe", "pipe"], windowsHide: true, env: { ...process.env, LC_ALL: "C" } });
-    const timer = setTimeout(() => { child.kill(); }, 60_000);
     let stdout = "";
     let stderr = "";
     child.stdout?.on("data", (chunk) => { stdout += chunk; });
     child.stderr?.on("data", (chunk) => { stderr += chunk; });
-    child.on("error", (error) => { clearTimeout(timer); reject(error); });
+    child.on("error", reject);
     child.on("close", (code) => {
-      clearTimeout(timer);
       resolve({ code: code ?? 1, stdout, stderr });
     });
     if (execOptions?.stdin !== undefined) {
@@ -2188,7 +2214,116 @@ export function createComputerService(options: ComputerServiceOptions): Computer
     };
   };
 
+  const vmGuestReconciling = new Map<string, Promise<void>>();
+  const reconcileVmGuests = async (): Promise<void> => {
+    if (!options.registerVmGuest || disposed) return;
+    const machines = (await listRecords("computer.machine")).map(parseMachine)
+      .filter((machine): machine is ComputerMachine => machine !== null && machine.status !== "archived"
+        && !!machine.vm?.guest);
+    await Promise.allSettled(machines.map((machine) => {
+      const pending = vmGuestReconciling.get(machine.id);
+      if (pending) return pending;
+      const task = serializeVm(`vm:${machine.vm!.providerId}:${machine.name}`, async () => {
+        const fresh = (await vmMachineFor(machine.id)).machine;
+        const binding = fresh.vm!;
+        const guest = binding.guest;
+        if (!guest) return;
+        const provider = await boundVmProvider(binding);
+        const state = await provider.domainState(binding.domainUuid).catch((): ComputerVmState => "unknown");
+        if (state === "shutoff" || state === "crashed") {
+          await markRemoteDesktopsUnavailable(`vm:${binding.domainUuid}`, `Guest domain is ${state}`);
+          if (guest.state === "stopped") return;
+          guest.state = "stopped";
+          guest.detail = `Guest domain is ${state}`;
+        } else if (state === "running") {
+          if (guest.state === "ready" && guest.apiUrl && guest.hostId) {
+            const liveHostId = await probeVmGuest(guest.apiUrl, options.appVersion!, options.vmGuestFetch).catch(() => null);
+            const connection = (await remoteConnections()).find((entry) => entry.id === `vm:${binding.domainUuid}`);
+            if (liveHostId === guest.hostId && connection?.apiUrl === guest.apiUrl && connection.clientToken) return;
+            if (liveHostId === guest.hostId) {
+              guest.state = "preparing";
+              guest.detail = "Restoring the guest Host connection";
+            } else {
+            // A running domain does not imply its Host is still usable. In
+            // particular a Host upgrade can leave an older guest runtime here.
+              guest.state = "preparing";
+              guest.detail = "Guest Host is unavailable or its version differs from this Host";
+            }
+            await putRecord(`computer.machine:${fresh.id}`, "computer.machine", "unavailable", {
+              id: fresh.id, name: fresh.name, provider: "virtual", platform: "linux", coordinatorHostId: options.hostId,
+              vm: binding, createdAt: fresh.createdAt, statusDetail: guest.detail,
+            });
+            if (liveHostId !== guest.hostId) {
+              await options.removeVmGuest?.(`vm:${binding.domainUuid}`);
+              await syncRemote(true);
+            }
+          }
+          const noteBootstrapFailure = async () => {
+            const status = await vmGuestBootstrapStatus(vmExec, binding.uri, binding.domainUuid);
+            if (!status?.startsWith("failed:") || guest.detail === `Guest bootstrap ${status}`) return;
+            guest.state = "failed";
+            guest.detail = `Guest bootstrap ${status}`;
+            await putRecord(`computer.machine:${fresh.id}`, "computer.machine", "unavailable", {
+              id: fresh.id, name: fresh.name, provider: "virtual", platform: "linux", coordinatorHostId: options.hostId,
+              vm: binding, createdAt: fresh.createdAt, statusDetail: guest.detail,
+            });
+          };
+          const ip = await vmGuestIpv4(vmExec, binding.uri, binding.domainUuid);
+          if (!ip) { await noteBootstrapFailure(); return; }
+          const apiUrl = `http://${ip}:8765`;
+          const hostId = await probeVmGuest(apiUrl, options.appVersion!, options.vmGuestFetch).catch(() => null);
+          if (!hostId) { await noteBootstrapFailure(); return; }
+          if (guest.hostId && guest.hostId !== hostId) {
+            if (guest.state === "failed" && guest.detail === "Guest Host identity changed; the recorded desktop cannot be rebound to another Host") return;
+            guest.state = "failed";
+            guest.detail = "Guest Host identity changed; the recorded desktop cannot be rebound to another Host";
+            await putRecord(`computer.machine:${fresh.id}`, "computer.machine", "unavailable", {
+              id: fresh.id, name: fresh.name, provider: "virtual", platform: "linux", coordinatorHostId: options.hostId,
+              vm: binding, createdAt: fresh.createdAt, statusDetail: guest.detail,
+            });
+            return;
+          }
+          const connectionId = `vm:${binding.domainUuid}`;
+          const password = await vmGuestPassword(options.dataDir!, binding.domainUuid);
+          await options.registerVmGuest!({ connectionId, label: fresh.name, apiUrl, password,
+            hostId });
+          await syncRemote(true);
+          const mirror = (await listRecords("computer.desktop")).map(parseDesktop)
+            .find((desktop) => desktop?.remote?.connectionId === connectionId
+              && desktop.remote.hostId === hostId && desktop.remote.desktopId === "managed-linux");
+          if (!mirror) return;
+          try {
+            const ready = await probe(mirror.id);
+            if (ready.status !== "available" || ready.capabilities?.status !== "ready") return;
+          } catch { return; }
+          guest.connectionId = connectionId;
+          guest.hostId = hostId;
+          guest.apiUrl = apiUrl;
+          guest.state = "ready";
+          delete guest.detail;
+        } else return;
+        await putRecord(`computer.machine:${fresh.id}`, "computer.machine", guest.state === "ready" ? "active" : "unavailable", {
+          id: fresh.id, name: fresh.name, provider: "virtual", platform: "linux", coordinatorHostId: options.hostId,
+          vm: binding, createdAt: fresh.createdAt,
+          statusDetail: guest.state === "ready" ? "Guest Host and desktop are ready" : guest.detail,
+        });
+      }).catch(async (error) => {
+        const fresh = (await vmMachineFor(machine.id)).machine;
+        if (fresh.status === "archived" || !fresh.vm?.guest || fresh.vm.guest.state === "ready") return;
+        fresh.vm.guest.detail = error instanceof Error ? error.message : String(error);
+        await putRecord(`computer.machine:${fresh.id}`, "computer.machine", "unavailable", {
+          id: fresh.id, name: fresh.name, provider: "virtual", platform: "linux", coordinatorHostId: options.hostId,
+          vm: fresh.vm, createdAt: fresh.createdAt, statusDetail: fresh.vm.guest.detail,
+        });
+      });
+      vmGuestReconciling.set(machine.id, task);
+      void task.finally(() => { if (vmGuestReconciling.get(machine.id) === task) vmGuestReconciling.delete(machine.id); }).catch(() => {});
+      return task;
+    }));
+  };
+
   const listVms = async (): Promise<ComputerVmDescriptor[]> => {
+    void reconcileVmGuests().catch(() => undefined);
     const machines = (await listRecords("computer.machine"))
       .map(parseMachine)
       .filter((m): m is ComputerMachine => m !== null && m.provider === "virtual" && !!m.vm && m.status !== "archived");
@@ -2220,7 +2355,20 @@ export function createComputerService(options: ComputerServiceOptions): Computer
       storagePool: provider.config.storagePool || "default",
       domainUuid: randomUUID(), volumePaths: [], steps: [],
     };
-    const priorSteps = [...binding.steps];
+    const managed = params.managed === true || Boolean(binding.guest);
+    if (managed && existing && !binding.guest) throw new HarnessServiceError("invalid-params", "This existing VM was created without a managed guest recipe");
+    if (managed && (platform !== "linux" || process.arch !== "x64" || provider.config.uri !== "qemu:///system")) {
+      throw new HarnessServiceError("unavailable", "Managed VM preparation requires a Linux x64 Host on the configured local libvirt server");
+    }
+    if (managed && (!options.appVersion || !options.registerVmGuest || !options.dataDir)) {
+      throw new HarnessServiceError("unavailable", "Managed VM guest registration is not configured on this Host");
+    }
+    if (managed && params.baseImage) throw new HarnessServiceError("invalid-params", "The managed Debian recipe selects its own verified cloud image");
+    if (managed && !binding.guest) binding.guest = { recipe: "debian13-xvnc", state: "preparing" };
+    if (managed && existing?.vm?.guest?.state === "ready") {
+      const state = await provider.domainState(binding.domainUuid).catch((): ComputerVmState => "unknown");
+      if (state !== "unknown") return { machine: existing, created: false };
+    }
     const persist = async (status: ComputerMachine["status"], detail?: string) => putRecord(`computer.machine:${machineId}`, "computer.machine", status, {
       id: machineId, name, provider: "virtual", platform: "linux", coordinatorHostId: options.hostId,
       vm: binding, createdAt: existing?.createdAt ?? now, ...(detail ? { statusDetail: detail } : {}),
@@ -2228,35 +2376,70 @@ export function createComputerService(options: ComputerServiceOptions): Computer
     // The UUID is durable before any provider side effect. A matching name
     // alone never grants authority over an existing domain or its disks.
     await persist("unavailable", "Creation is being reconciled with the provider");
-    const outcome = await provider.create({
-      name,
-      memoryMiB: params.memoryMiB ?? 4096,
-      vcpus: params.vcpus ?? 4,
-      diskGiB: params.diskGiB ?? 40,
-      ...(asString(params.baseImage) ? { baseImage: asString(params.baseImage)! } : {}),
-      domainUuid: binding.domainUuid,
-      volumePaths: binding.volumePaths,
-      checkpoint: async (progress) => {
-        binding.volumePaths = progress.volumePaths;
-        binding.steps = [...priorSteps, ...progress.steps.map((entry) => ({ ...entry, at: new Date().toISOString() }))];
-        await persist("unavailable", "Creation in progress; allocation receipt committed");
-      },
-    }).catch(async (error: unknown) => {
+    let seed: Awaited<ReturnType<typeof prepareVmGuestSeed>> | undefined;
+    let imageDownload: Awaited<ReturnType<typeof downloadDebianCloudImage>> | undefined;
+    try {
+      let baseImage = asString(params.baseImage);
+      if (managed) {
+        const guest = binding.guest!;
+        guest.state = "preparing";
+        const tool = await vmExec("sh", [join(options.driverDir ?? computerDriverDir(), "linux", "prepare-vm.sh")]);
+        if (tool.code !== 0) throw new HarnessServiceError("unavailable", tool.stderr.trim() || "NoCloud seed tooling is unavailable");
+        const password = await vmGuestPassword(options.dataDir!, binding.domainUuid);
+        seed = await prepareVmGuestSeed({ driverDir: options.driverDir ?? computerDriverDir(), domainUuid: binding.domainUuid,
+          password, expectedVersion: options.appVersion!, exec: vmExec });
+        guest.runtimeSha256 = seed.runtimeSha256;
+        await persist("unavailable", "Guest runtime and NoCloud seed verified");
+        const image = guest.image ?? await resolveDebianCloudImage(options.vmGuestFetch);
+        guest.image = image;
+        await persist("unavailable", `Debian image ${image.version} selected`);
+        imageDownload = await downloadDebianCloudImage(image, options.vmGuestFetch);
+        if (!provider.stageBaseImage) throw new HarnessServiceError("unavailable", "This provider cannot stage a managed cloud image");
+        baseImage = await provider.stageBaseImage({ domainUuid: binding.domainUuid, file: imageDownload.file,
+          volumePaths: binding.volumePaths, uploaded: guest.imageUploaded === true,
+          checkpoint: async (paths) => { binding.volumePaths = paths; await persist("unavailable", "Cloud image allocation receipt committed"); } });
+        guest.imageUploaded = true;
+        binding.steps.push({ step: "guest-image", status: "done", detail: `${image.ref} sha512:${image.sha512}`, at: new Date().toISOString() });
+        await persist("unavailable", "Verified Debian cloud image uploaded");
+      }
+      const priorSteps = [...binding.steps];
+      const outcome = await provider.create({
+        name,
+        memoryMiB: params.memoryMiB ?? 4096,
+        vcpus: params.vcpus ?? 4,
+        diskGiB: params.diskGiB ?? 40,
+        ...(baseImage ? { baseImage } : {}),
+        ...(seed ? { seedIsoFile: seed.isoFile } : {}),
+        domainUuid: binding.domainUuid,
+        volumePaths: binding.volumePaths,
+        checkpoint: async (progress) => {
+          binding.volumePaths = progress.volumePaths;
+          binding.steps = [...priorSteps, ...progress.steps.map((entry) => ({ ...entry, at: new Date().toISOString() }))];
+          await persist("unavailable", "Creation in progress; allocation receipt committed");
+        },
+      });
+      if (outcome.domainUuid && outcome.domainUuid !== binding.domainUuid) throw new HarnessServiceError("failed", "Provider returned another domain's identity");
+      binding.volumePaths = outcome.volumePaths;
+      binding.steps = [...priorSteps, ...outcome.steps.map((entry) => ({ ...entry, at: new Date().toISOString() }))];
+      if (!outcome.ok) throw new HarnessServiceError("failed", outcome.error ?? "VM create failed");
+      let state = await provider.domainState(binding.domainUuid).catch((): ComputerVmState => "unknown");
+      if (managed && state === "shutoff") {
+        await provider.start(binding.domainUuid);
+        state = await provider.domainState(binding.domainUuid).catch((): ComputerVmState => "unknown");
+      }
+      const mapped = statusForVmState(state);
+      if (managed && state !== "running") throw new HarnessServiceError("unavailable", `Guest domain did not start: ${state}`);
+      await persist(mapped.status, managed ? "Guest Host is bootstrapping" : mapped.detail);
+      if (managed) void reconcileVmGuests().catch(() => undefined);
+      const record = await (await scoped()).getRecord(COMPUTER_CATALOG_WORKSPACE_ID, `computer.machine:${machineId}`);
+      return { machine: parseMachine(record!)!, created: outcome.adopted !== true };
+    } catch (error) {
+      if (binding.guest) { binding.guest.state = "failed"; binding.guest.detail = error instanceof Error ? error.message : String(error); }
       await persist("unavailable", error instanceof Error ? error.message : String(error));
       throw error;
-    });
-    if (outcome.domainUuid && outcome.domainUuid !== binding.domainUuid) throw new HarnessServiceError("failed", "Provider returned another domain's identity");
-    binding.volumePaths = outcome.volumePaths;
-    binding.steps = [...priorSteps, ...outcome.steps.map((entry) => ({ ...entry, at: new Date().toISOString() }))];
-    if (!outcome.ok) {
-      await persist("unavailable", outcome.error ?? "create failed");
-      throw new HarnessServiceError("failed", outcome.error ?? "VM create failed");
+    } finally {
+      await Promise.allSettled([seed?.cleanup(), imageDownload?.cleanup()]);
     }
-    const state = await provider.domainState(binding.domainUuid).catch((): ComputerVmState => "unknown");
-    const mapped = statusForVmState(state);
-    await persist(mapped.status, mapped.detail);
-    const record = await (await scoped()).getRecord(COMPUTER_CATALOG_WORKSPACE_ID, `computer.machine:${machineId}`);
-    return { machine: parseMachine(record!)!, created: outcome.adopted !== true };
   });
 
   const withVmMachine = async <T>(machineId: string, operation: (machine: ComputerMachine) => Promise<T>): Promise<T> => {
@@ -2264,15 +2447,50 @@ export function createComputerService(options: ComputerServiceOptions): Computer
     return serializeVm(`vm:${initial.vm!.providerId}:${initial.name}`, async () => operation((await vmMachineFor(machineId)).machine));
   };
 
-  const vmAction = async (params: { machineId: string; action: "start" | "shutdown" | "reboot" }): Promise<ComputerVmDescriptor> => withVmMachine(params.machineId, async (machine) => {
+  const vmAction = async (params: { machineId: string; action: "start" | "shutdown" | "reboot" | "upgrade" }): Promise<ComputerVmDescriptor> => withVmMachine(params.machineId, async (machine) => {
     if (machine.status === "archived") throw new HarnessServiceError("invalid-params", "This virtual machine was deleted");
     const provider = await boundVmProvider(machine.vm!);
     const uuid = machine.vm!.domainUuid;
+    if (params.action === "upgrade") {
+      if (!machine.vm?.guest || !options.dataDir || !options.appVersion || !provider.upgradeSeed) {
+        throw new HarnessServiceError("unavailable", "This VM has no supported managed guest upgrade path");
+      }
+      if (await provider.domainState(uuid) !== "shutoff") {
+        throw new HarnessServiceError("invalid-params", "Shut down the VM before upgrading its guest runtime");
+      }
+      const tool = await vmExec("sh", [join(options.driverDir ?? computerDriverDir(), "linux", "prepare-vm.sh")]);
+      if (tool.code !== 0) throw new HarnessServiceError("unavailable", tool.stderr.trim() || "NoCloud seed tooling is unavailable");
+      const password = await vmGuestPassword(options.dataDir, uuid);
+      const seed = await prepareVmGuestSeed({ driverDir: options.driverDir ?? computerDriverDir(), domainUuid: uuid,
+        password, expectedVersion: options.appVersion, exec: vmExec });
+      try { await provider.upgradeSeed({ domainUuid: uuid, isoFile: seed.isoFile, volumePaths: machine.vm.volumePaths }); }
+      finally { await seed.cleanup(); }
+      machine.vm.guest.runtimeSha256 = seed.runtimeSha256;
+      machine.vm.guest.state = "stopped";
+      machine.vm.guest.detail = "Guest runtime staged; start the VM to install it";
+      machine.vm.steps.push({ step: "guest-upgrade", status: "done", detail: `sha256:${seed.runtimeSha256}`, at: new Date().toISOString() });
+      await putRecord(`computer.machine:${machine.id}`, "computer.machine", "unavailable", {
+        id: machine.id, name: machine.name, provider: "virtual", platform: machine.platform,
+        coordinatorHostId: machine.coordinatorHostId, statusDetail: machine.vm.guest.detail,
+        vm: machine.vm, createdAt: machine.createdAt,
+      });
+      await markRemoteDesktopsUnavailable(`vm:${uuid}`, "Guest runtime staged; VM is shut off");
+      return describeVm(machine);
+    }
     if (params.action === "start") await provider.start(uuid);
     else if (params.action === "shutdown") await provider.shutdown(uuid);
     else await provider.reboot(uuid);
     const state = await provider.domainState(uuid).catch((): ComputerVmState => "unknown");
     const mapped = statusForVmState(state);
+    if (machine.vm?.guest) {
+      if (state === "shutoff" || state === "crashed") {
+        machine.vm.guest.state = "stopped";
+        machine.vm.guest.detail = `Guest domain is ${state}`;
+      } else if (params.action !== "shutdown") {
+        machine.vm.guest.state = "preparing";
+        machine.vm.guest.detail = "Guest Host is restarting";
+      }
+    }
     await putRecord(`computer.machine:${machine.id}`, "computer.machine", mapped.status, {
       id: machine.id,
       name: machine.name,
@@ -2283,12 +2501,20 @@ export function createComputerService(options: ComputerServiceOptions): Computer
       vm: machine.vm,
       createdAt: machine.createdAt,
     });
+    if (machine.vm?.guest?.state === "stopped") {
+      await markRemoteDesktopsUnavailable(`vm:${uuid}`, `Guest domain is ${state}`);
+    }
+    if (machine.vm?.guest?.state === "preparing") void reconcileVmGuests().catch(() => undefined);
     return describeVm(machine);
   });
 
   const deleteVm = async (machineId: string, deleteDisks = false): Promise<void> => withVmMachine(machineId, async (machine) => {
     const provider = await boundVmProvider(machine.vm!);
     await provider.delete(machine.vm!.domainUuid, machine.vm!.volumePaths, deleteDisks);
+    if (machine.vm?.guest) {
+      await options.removeVmGuest?.(`vm:${machine.vm.domainUuid}`);
+      await syncRemote(true);
+    }
     // The record is archived, not erased — the create journal stays evidence
     // of what this Host once owned; archived machines leave `listVms`.
     await putRecord(`computer.machine:${machine.id}`, "computer.machine", "archived", {
@@ -2301,7 +2527,19 @@ export function createComputerService(options: ComputerServiceOptions): Computer
       vm: machine.vm,
       createdAt: machine.createdAt,
     });
+    // Retained disks still contain the guest Host and its password. Keep the
+    // coordinator's recovery credential with them; erase it only when those
+    // UUID-owned disks were actually removed.
+    if (deleteDisks && machine.vm?.guest && options.dataDir) {
+      await forgetVmGuestPassword(options.dataDir, machine.vm.domainUuid);
+    }
   });
+
+  const guestReconcileTimer = options.registerVmGuest ? setInterval(() => {
+    void reconcileVmGuests().catch(() => undefined);
+  }, 10_000) : null;
+  guestReconcileTimer?.unref();
+  if (guestReconcileTimer) void reconcileVmGuests().catch(() => undefined);
 
   return {
     prepareDesktop, desktopLifecycle, mediaTarget,
@@ -2322,12 +2560,14 @@ export function createComputerService(options: ComputerServiceOptions): Computer
     defaultDesktop,
     setDefaultDesktop,
     listVms,
+    reconcileVmGuests,
     createVm,
     vmAction,
     deleteVm,
     dispose: async () => {
       if (disposed) return;
       disposed = true;
+      if (guestReconcileTimer) clearInterval(guestReconcileTimer);
       for (const entry of viewers.values()) {
         if (entry.timer) clearInterval(entry.timer);
         entry.timer = null;
@@ -2341,6 +2581,7 @@ export function createComputerService(options: ComputerServiceOptions): Computer
       await driverPool.dispose();
       await linuxDesktop.dispose();
       await Promise.allSettled([...handbackDeliveries.values()]);
+      await Promise.allSettled([...vmGuestReconciling.values()]);
       lanes.clear();
       observations.clear();
     },

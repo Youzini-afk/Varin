@@ -151,6 +151,7 @@ interface VmCreateInput {
   vcpus?: number;
   diskGiB?: number;
   baseImage?: string;
+  managed?: boolean;
 }
 
 export const createVirtualMachine = async (input: VmCreateInput): Promise<{ machine: ComputerMachine; created: boolean }> => (
@@ -166,7 +167,7 @@ export const createVirtualMachine = async (input: VmCreateInput): Promise<{ mach
 
 export const runVmAction = async (
   machineId: string,
-  action: 'start' | 'shutdown' | 'reboot',
+  action: 'start' | 'shutdown' | 'reboot' | 'upgrade',
 ): Promise<ComputerVmDescriptor> => (
   (await readJson<{ vm: ComputerVmDescriptor }>(
     await runtimeFetch(`/api/computers/vms/${encodeURIComponent(machineId)}/${action}`, { method: 'POST' }),

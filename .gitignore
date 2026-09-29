@@ -61,3 +61,4 @@ packages/intellij/
 src/main/resources/webview/
 
 .observe/
+packages/computer-driver/linux/guest-bundle-x64/

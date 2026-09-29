@@ -1,8 +1,8 @@
 # Bot、长期记忆与 Computer Use 实施计划
 
-Status: partially implemented；BC0–BC9 均有生产实现，但尚未满足全部阶段交付条件。2026-09-29 深入验收修复了身份、控制、输入、远端、VM 和分发缺陷；共同记忆覆盖、独立桌面准备、guest 引导、成果/续接整合及完整平台组件仍未完成。以[当前验收](bot-computer-use-review.md)为准；[旧记录](bot-computer-use-acceptance.md)保留实施历史。
+Status: partially implemented；BC0–BC9 均有生产实现，但尚未满足全部阶段交付条件。深入验收已补记忆来源覆盖、远端 Host 连接、独立 Linux 桌面、托管 VM guest 配方及工作成果/续接整合；真实 Linux KVM/桌面运行、macOS 稳定组件、Wayland 正式输入会话和发行包实装仍未验收或实现。以[当前验收](bot-computer-use-review.md)为准；[旧记录](bot-computer-use-acceptance.md)保留实施历史。
 
-Last updated: 2026-09-29
+Last updated: 2026-09-30
 
 源码核查基线：`3dbbc6e7`。本计划落实 [Bot 工作台设计](../design/bot-operated-workbench-design.md)
 和 [Computer Use 设计](../design/computer-use-design.md)，同时承接 [办公连续性](../design/office-work-continuity-design.md)
@@ -51,7 +51,7 @@ Last updated: 2026-09-29
 | Thread/Run | [harness-threads.ts](../../packages/protocol/src/harness-threads.ts) 区分耐久 Thread、单次 Run、attached-root / spawned-child；[research-root-runtime.ts](../../packages/web/application-host/lib/harness/research-root-runtime.ts) 只在 research work focus 且 workspace 绑定时附着用户根会话 | 增加 Bot 身份与工作关联；抽取通用根会话附着，解除 Bot 对 research/项目目录的依赖 |
 | 无目录 owner | [owner-scope.ts](../../packages/web/application-host/lib/harness/owner-scope.ts) 已有 session scope；[Host 装配](../../packages/web/application-host/index.ts) 按 scope 打开知识存储 | 增加 Bot 长期 scope，统一存储键与调用身份解析，不制造假项目 |
 | TDB | [Knowledge 模块](../../packages/web/application-host/lib/knowledge/DOCUMENTATION.md) 与 [store-contract.ts](../../packages/web/application-host/lib/knowledge/store-contract.ts)：私有 Node 存储进程、单写入路径、事件/知识/关系与提交回执 | 扩展记忆来源、性质、关系、修订与处理覆盖；复用同一存储 facade/worker，不能在主 Host 新开原生 TDB 句柄 |
-| 现有知识写入 | [knowledge-suggestion-extension.ts](../../packages/pi-host/src/harness/knowledge-suggestion-extension.ts) 在用户输入时异步生成建议；[knowledge-suggestions.ts](../../packages/web/application-host/lib/harness/knowledge-suggestions.ts) 默认人工接受 | 改为统一主动/自动记忆流程；取消日常连续性依赖逐条审阅的旧默认路径 |
+| 原知识写入 | 已移除的 `knowledge-suggestion-extension.ts` 曾在用户输入时异步生成建议；[knowledge-suggestions.ts](../../packages/web/application-host/lib/harness/knowledge-suggestions.ts) 保留旧建议记录的读取/操作 | 已改为统一主动/自动记忆流程；日常连续性不再依赖逐条审阅的旧默认路径 |
 | 上下文与召回 | [context-runtime.ts](../../packages/web/application-host/lib/knowledge/context-runtime.ts) 已有事件与召回缓存；[context-preparation.ts](../../packages/pi-host/src/harness/context-preparation.ts) 接现有请求前边界及独立压缩 worker | 结合 Bot/工作关系召回，按有效修订增量交付；保持原生历史及现有压缩语义 |
 | 快速决策 | [typesafe-systemone.ts](../../packages/pi-host/src/harness/typesafe-systemone.ts) 已实现 Jev wire adapter；[harness-fast-decision.ts](../../packages/protocol/src/harness-fast-decision.ts) 已注册 `explore/web/scholarly` | 新增记忆实际消费者与设置；不重复开发 Jev 适配器，不把记忆生成塞进选择接口 |
 | 后台推理 | [background-inference.ts](../../packages/pi-host/src/harness/background-inference.ts) 已支持独立于前台聊天的 embedding/rerank/fastDecision；[workspace-inference.ts](../../packages/web/application-host/lib/knowledge/semantic/workspace-inference.ts) 仍通过 cwd 请求 | 增加 Bot owner 的解析和生成式记忆任务入口；不能声称已有接口已经能生成事件叙事 |

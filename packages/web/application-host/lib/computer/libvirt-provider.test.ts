@@ -1,12 +1,102 @@
 import { describe, expect, it } from 'vitest';
 import { createLibvirtProvider } from './libvirt-provider.js';
 import { libvirtFixture } from './libvirt.test-helper.js';
+import { mkdtemp, rm, writeFile } from 'node:fs/promises';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
 
 const config = { id: 'hv1', kind: 'libvirt' as const, uri: 'qemu:///system' };
 const spec = { name: 'alpha', memoryMiB: 2048, vcpus: 2, diskGiB: 20, domainUuid: '9f8e7d6c-1111-2222-3333-444455556666' };
 const volume = `varin-${spec.domainUuid}.qcow2`;
 
 describe('libvirt creation authority', () => {
+  it('stages a verified cloud image only under this VM UUID with a durable allocation receipt', async () => {
+    const folder = await mkdtemp(join(tmpdir(), 'varin-base-'));
+    try {
+      const file = join(folder, 'base.qcow2');
+      const qcow = Buffer.alloc(64);
+      qcow.write('QFI', 0, 'ascii'); qcow[3] = 0xfb;
+      qcow.writeBigUInt64BE(2n * 1024n * 1024n * 1024n, 24);
+      await writeFile(file, qcow);
+      const fixture = libvirtFixture();
+      const provider = createLibvirtProvider(config, fixture.exec);
+      const volumePaths: string[] = [];
+      const name = await provider.stageBaseImage!({ domainUuid: spec.domainUuid, file, volumePaths, uploaded: false,
+        checkpoint: async (paths) => { volumePaths.splice(0, volumePaths.length, ...paths); } });
+      expect(name).toBe(`varin-${spec.domainUuid}-base.qcow2`);
+      expect(volumePaths).toEqual([name]);
+      expect(fixture.calls.map((call) => call.args[0])).toContain('vol-upload');
+      await provider.stageBaseImage!({ domainUuid: spec.domainUuid, file, volumePaths, uploaded: true, checkpoint: async () => {} });
+      expect(fixture.calls.filter((call) => call.args[0] === 'vol-upload')).toHaveLength(1);
+    } finally { await rm(folder, { recursive: true, force: true }); }
+  });
+  it('reuses a receipted image volume and uploads again after an uncertain upload response', async () => {
+    const folder = await mkdtemp(join(tmpdir(), 'varin-base-retry-'));
+    try {
+      const file = join(folder, 'base.qcow2');
+      const qcow = Buffer.alloc(64);
+      qcow.write('QFI', 0, 'ascii'); qcow[3] = 0xfb;
+      qcow.writeBigUInt64BE(2n * 1024n * 1024n * 1024n, 24);
+      await writeFile(file, qcow);
+      const fixture = libvirtFixture();
+      fixture.faults.set('vol-upload', 'after');
+      const provider = createLibvirtProvider(config, fixture.exec);
+      let receipt: string[] = [];
+      await expect(provider.stageBaseImage!({ domainUuid: spec.domainUuid, file, volumePaths: receipt,
+        uploaded: false, checkpoint: async (paths) => { receipt = paths; } })).rejects.toThrow();
+      expect(receipt).toEqual([`varin-${spec.domainUuid}-base.qcow2`]);
+      fixture.faults.delete('vol-upload');
+      await provider.stageBaseImage!({ domainUuid: spec.domainUuid, file, volumePaths: receipt,
+        uploaded: false, checkpoint: async (paths) => { receipt = paths; } });
+      expect(fixture.calls.filter((call) => call.args[0] === 'vol-create-as')).toHaveLength(1);
+      expect(fixture.calls.filter((call) => call.args[0] === 'vol-upload')).toHaveLength(2);
+    } finally { await rm(folder, { recursive: true, force: true }); }
+  });
+  it('attaches an owned NoCloud seed as a read-only CD-ROM and journals its upload', async () => {
+    const folder = await mkdtemp(join(tmpdir(), 'varin-seed-'));
+    try {
+      const seedIsoFile = join(folder, 'seed.iso');
+      await writeFile(seedIsoFile, Buffer.from('seed fixture'));
+      const fixture = libvirtFixture();
+      const receipts: string[][] = [];
+      const provider = createLibvirtProvider(config, fixture.exec);
+      const outcome = await provider.create({ ...spec, seedIsoFile, checkpoint: async (receipt) => { receipts.push([...receipt.volumePaths]); } });
+      const seedVolume = `varin-${spec.domainUuid}-seed.iso`;
+      expect(outcome.ok).toBe(true);
+      expect(outcome.volumePaths).toEqual([volume, seedVolume]);
+      expect(receipts).toEqual([[volume], [volume, seedVolume], [volume, seedVolume]]);
+      expect(fixture.calls.find((call) => call.args[0] === 'define')?.stdin).toContain(`<readonly/>`);
+      expect(fixture.calls.find((call) => call.args[0] === 'vol-upload')?.args).toEqual(['vol-upload', seedVolume, seedIsoFile, '--pool', 'default']);
+      await provider.delete(spec.domainUuid, outcome.volumePaths, true);
+      expect(fixture.volumes.size).toBe(0);
+    } finally { await rm(folder, { recursive: true, force: true }); }
+  });
+  it('upgrades only a stopped guest seed and can retry a lost upload response', async () => {
+    const folder = await mkdtemp(join(tmpdir(), 'varin-seed-upgrade-'));
+    try {
+      const seedIsoFile = join(folder, 'seed.iso');
+      await writeFile(seedIsoFile, Buffer.from('new seed fixture'));
+      const fixture = libvirtFixture();
+      const exec = async (...args: Parameters<typeof fixture.exec>) => {
+        if (args[1][2] === 'vol-info') return { code: 0, stdout: 'Capacity: 2\n', stderr: '' };
+        return fixture.exec(...args);
+      };
+      const provider = createLibvirtProvider(config, exec);
+      const outcome = await provider.create({ ...spec, seedIsoFile });
+      await provider.start(spec.domainUuid);
+      await expect(provider.upgradeSeed!({ domainUuid: spec.domainUuid, isoFile: seedIsoFile,
+        volumePaths: outcome.volumePaths })).rejects.toThrow(/Shut down/);
+      await provider.shutdown(spec.domainUuid);
+      fixture.faults.set('vol-upload', 'after');
+      await expect(provider.upgradeSeed!({ domainUuid: spec.domainUuid, isoFile: seedIsoFile,
+        volumePaths: outcome.volumePaths })).rejects.toThrow();
+      fixture.faults.delete('vol-upload');
+      await provider.upgradeSeed!({ domainUuid: spec.domainUuid, isoFile: seedIsoFile,
+        volumePaths: outcome.volumePaths });
+      expect(fixture.calls.filter((call) => call.args[0] === 'vol-resize')).toHaveLength(2);
+      expect(fixture.calls.filter((call) => call.args[0] === 'vol-upload')).toHaveLength(3);
+    } finally { await rm(folder, { recursive: true, force: true }); }
+  });
   it('defines the persisted UUID and reconciles a lost define response', async () => {
     const fixture = libvirtFixture();
     fixture.faults.set('define', 'after');

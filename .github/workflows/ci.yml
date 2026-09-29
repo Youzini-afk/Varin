@@ -119,6 +119,8 @@ jobs:
       - name: Smoke built server artifact under Node
         run: node --test packages/web/application-host/lib/knowledge/store.smoke.test.ts
       - run: bun run build:cloud-runtime -- --skip-build --no-archive --output artifacts/cloud-runtime-ci
+      - name: Verify Linux x64 VM guest bundle
+        run: node scripts/build-vm-guest-bundle.mjs --skip-build
       - name: Smoke atomic cloud deployment and rollback
         shell: bash
         run: |
