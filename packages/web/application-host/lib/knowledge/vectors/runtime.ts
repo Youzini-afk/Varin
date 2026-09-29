@@ -643,6 +643,18 @@ export function createKnowledgeVectorRuntime(options: {
     }
   };
 
+  // The embedding binding is global: a change under the shared inference scope
+  // invalidates every registration, regardless of its owning scope.
+  const refreshAll = (): void => {
+    if (disposed) return;
+    for (const registration of registrations.values()) {
+      registration.pendingFull = true;
+      registration.dirtyIds.clear();
+      registration.workVersion += 1;
+      kick(registration);
+    }
+  };
+
   const waitForBuild = (scope: KnowledgeScope, scopeId: string, workspaceId: string): Promise<void> => (
     builds.get(registrationKey(scope, scopeId, workspaceId)) ?? Promise.resolve()
   );
@@ -669,6 +681,7 @@ export function createKnowledgeVectorRuntime(options: {
     scheduleReconcile,
     notify,
     refreshWorkspace,
+    refreshAll,
     search,
     searchScopes,
     waitForBuild,

@@ -11,7 +11,7 @@ import { createHarnessPathAuthority } from "../../../web/application-host/lib/ha
 import { createHarnessRouter } from "../../../web/application-host/lib/harness/router.js";
 import { registerHarnessServices } from "../../../web/application-host/lib/harness/harness-services.js";
 import { createThreadRegistry } from "../../../web/application-host/lib/harness/thread-registry.js";
-import { createThreadRuntime, type ThreadSessionAdapter } from "../../../web/application-host/lib/harness/thread-runtime.js";
+import { createThreadRuntime, DISCUSSION_TOOLS, type ThreadSessionAdapter } from "../../../web/application-host/lib/harness/thread-runtime.js";
 import { createThreadWorktreeRuntime } from "../../../web/application-host/lib/harness/thread-worktree.js";
 import { ThreadExecutionViewRegistry } from "../../../web/application-host/lib/harness/working-state/execution-view.js";
 import { IntegrationCoordinator } from "../../../web/application-host/lib/harness/working-state/integration-coordinator.js";
@@ -209,9 +209,7 @@ describe("thread runtime with real Pi sessions", () => {
       assert.equal(discussion.thread.manifest.carryBlocks, true);
       assert.ok(discussion.activeRun.sessionId);
       assert.equal(hostFor(discussion.activeRun.sessionId).header(discussion.activeRun.sessionId)?.parentSession, parent.sessionFile);
-      assert.ok(hostFor(discussion.activeRun.sessionId).snapshot().activeTools.every((tool) => (
-        ["read", "grep", "find", "ls", "glob", "explore", "related", "recall", "webfetch", "websearch"].includes(tool)
-      )));
+      assert.ok(hostFor(discussion.activeRun.sessionId).snapshot().activeTools.every((tool) => DISCUSSION_TOOLS.has(tool)));
       await hostFor(discussion.activeRun.sessionId).session.waitForIdle();
       await runtime.drain();
       const retainedDiscussion = await registry.getThread(

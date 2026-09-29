@@ -294,6 +294,23 @@ export function createThreadDispatchService(host: HarnessServiceHost): HarnessSe
       if (params.kind === "discussion" && (params.preset !== undefined || params.research !== undefined || params.worktree !== undefined)) {
         throw new HarnessServiceError("invalid-params", "A discussion consult cannot carry a preset, research capability, or worktree");
       }
+      // BC3 Bot consultation: the Thread stays under the requesting work's
+      // catalog and parent, but its Run is bound to the named Bot — Bot
+      // persona, Bot model default, and the Bot's memory scope. The Bot must
+      // exist and be live; consulting an archived Bot is a stale reference.
+      let consultBot: { id: string; model: { providerId: string; modelId: string } | null } | null = null;
+      if (params.bot !== undefined) {
+        if (params.kind !== "discussion") {
+          throw new HarnessServiceError("invalid-params", "Bot consultation requires kind: \"discussion\"");
+        }
+        const found = typeof params.bot === "string" && params.bot.length > 0
+          ? await host.bots?.get(params.bot).catch(() => null) ?? null
+          : null;
+        if (!found || found.archived) {
+          throw new HarnessServiceError("unavailable", `Bot is not available for consultation: ${String(params.bot)}`);
+        }
+        consultBot = found;
+      }
       const research = params.research;
       if (research !== undefined && (!isResearchCapability(research.capability)
         || !research.resources
@@ -305,7 +322,10 @@ export function createThreadDispatchService(host: HarnessServiceHost): HarnessSe
       if (research !== undefined && params.preset !== undefined) {
         throw new HarnessServiceError("invalid-params", "research capability cannot be combined with a preset");
       }
-      if (!preset && !params.model) {
+      // A consult inherits the consulted Bot's model when the caller does not
+      // pin one — the answer should come from the Bot's configured identity.
+      const dispatchModel = params.model ?? consultBot?.model ?? undefined;
+      if (!preset && !dispatchModel) {
         throw new HarnessServiceError("invalid-params", "A preset-less dispatch must resolve the caller's current model");
       }
       const { workspaceId, parent, owner } = await resolveOwningContext(host, ctx);
@@ -421,7 +441,8 @@ export function createThreadDispatchService(host: HarnessServiceHost): HarnessSe
         ...(captured.sourceViewId && params.kind !== "discussion" ? { sourceViewId: captured.sourceViewId } : {}),
         tools,
         permissions: normalizeFrozenHarnessPermissions(owner?.execution.permissions),
-        ...(params.model ? { model: params.model } : {}),
+        ...(consultBot ? { consultBotId: consultBot.id } : {}),
+        ...(dispatchModel ? { model: dispatchModel } : {}),
         ...(preset?.systemPromptFragment ? { systemPromptFragment: preset.systemPromptFragment } : {}),
         ...(researchDefinition ? {
           research: {

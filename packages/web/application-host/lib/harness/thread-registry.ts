@@ -153,6 +153,8 @@ export interface CreateThreadInput {
   autoRun: boolean;
   hidden?: boolean;
   reviewOf?: ThreadReviewOf;
+  /** BC3: a discussion Thread bound to consult this Bot. */
+  consultBotId?: string;
 }
 
 export interface ThreadRegistryOptions {
@@ -623,6 +625,7 @@ const isThread = (value: unknown): value is Thread => {
     && (value.integrationBinding === undefined || isIntegrationBinding(value.integrationBinding))
     && (value.verification === undefined || isVerificationProjection(value.verification))
     && (value.reviewOf === undefined || isReviewOf(value.reviewOf))
+    && (value.consultBotId === undefined || isString(value.consultBotId))
     && (value.messages === undefined || (Array.isArray(value.messages) && value.messages.every(isMessageRecord)))
     && !("pendingContinuation" in value)
     && (value.pendingContinuations === undefined || (Array.isArray(value.pendingContinuations) && value.pendingContinuations.every(isPendingContinuation)))
@@ -1459,6 +1462,7 @@ export function createThreadRegistry(options: ThreadRegistryOptions) {
         eventSeq: nextEventSeq(catalog),
         hidden: input.hidden ?? false,
         ...(input.reviewOf ? { reviewOf: structuredClone(input.reviewOf) } : {}),
+        ...(input.consultBotId ? { consultBotId: input.consultBotId } : {}),
       };
       catalog.threads.push(thread);
       return { value: thread, changed: [thread] };

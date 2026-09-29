@@ -11,7 +11,7 @@ import type {
   RecallResult,
 } from "../knowledge/store.js";
 import { KnowledgeMutationError } from "../knowledge/store.js";
-import { recallSources } from "../knowledge/vectors/index.js";
+import { recallSources, type KnowledgeVectorRuntime, type MemoryRecallAssociation } from "../knowledge/vectors/index.js";
 import { botScopeId, sessionScopeId } from "../harness/owner-scope.js";
 
 /**
@@ -55,6 +55,18 @@ export interface MemoryServiceDeps {
    * workspace; an unbound session writes its own session store.
    */
   ownerForSession(sessionId: string): Promise<MemoryOwner>;
+  /**
+   * Hybrid vector runtime shared with automatic recall (BC3). Resolved lazily —
+   * the service is created before the runtime is ready, and a direct search
+   * must remain useful with text retrieval alone.
+   */
+  vectors?(): KnowledgeVectorRuntime | null;
+  /**
+   * Work/follow-up keys for the calling session (BC3): the bound thread, its
+   * ancestor chain, and its follow-up threads/runs — the same association the
+   * automatic recall closure builds.
+   */
+  associationForSession?(sessionId: string): Promise<MemoryRecallAssociation | undefined>;
   onChanged?(owner: MemoryOwner, ids: readonly NodeId[]): void;
   onError?(error: unknown): void;
 }
@@ -187,13 +199,23 @@ export function createMemoryService(deps: MemoryServiceDeps) {
     owner: MemoryOwner,
     query: string,
     k = 8,
+    context?: { sessionId?: string },
   ): Promise<RecallResult[]> => {
     const store = await storeFor(owner);
-    // The same selection service backs automatic Zone 2 recall (BC3).
+    const scopeId = memoryOwnerScopeId(owner) ?? owner.scope;
+    const associated = context?.sessionId
+      ? await deps.associationForSession?.(context.sessionId).catch(() => undefined)
+      : undefined;
+    const vectors = deps.vectors?.() ?? undefined;
+    // The same selection service backs automatic Zone 2 recall (BC3):
+    // work-associated rows pinned, then hybrid text/vector candidates.
     const { results } = await recallSources({
-      sources: [{ authority: store, scope: owner.scope, scopeId: memoryOwnerScopeId(owner) ?? owner.scope }],
+      sources: [{ authority: store, scope: owner.scope, scopeId }],
       query,
       k,
+      ...(vectors ? { vectors } : {}),
+      workspaceId: scopeId,
+      ...(associated ? { associated } : {}),
     });
     return results;
   };

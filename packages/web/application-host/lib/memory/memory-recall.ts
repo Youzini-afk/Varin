@@ -47,8 +47,10 @@ export interface MemoryRecallInput {
   /** The owning scope id — keys vector search (indexes are built per scope). */
   workspaceId?: string;
   /**
-   * The caller's execution workspace id — resolves the fast-decision binding.
-   * A bot-root session without a workspace simply skips judging.
+   * The scope id the fast-decision binding resolves under — the caller's
+   * execution workspace when present, else its owning scope. Bot/session/user
+   * scopes share the global inference binding, so judging is never skipped
+   * merely because no document workspace exists.
    */
   judgeWorkspaceId?: string;
   associated?: MemoryRecallAssociation;

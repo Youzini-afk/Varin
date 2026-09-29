@@ -14,9 +14,22 @@ import { workspaceScope } from './identity.js';
 import { pinSemanticQueryView, type SemanticDraftReadResult } from './query-view.js';
 import { createSemanticIndexRuntime, resolveSemanticScanRoots, type SemanticIndexRuntimeOptions } from './runtime.js';
 import { requestWorkspaceInference, resolveInferenceBinding } from './workspace-inference.js';
+import { isBotScopeId, isSessionScopeId } from '../../harness/owner-scope.js';
 
 type InferenceBroker = Pick<PiRuntimeBroker, 'requestForWorkspace' | 'watchConfig' | 'unwatchConfig'>;
 type PathMutation = Pick<DocumentMutationObservation, 'workspaceId' | 'resourceId' | 'kind'>;
+
+/**
+ * Embedding/rerank/fast-decision bindings live in global configuration and are
+ * resolved through `configCwd`; which resource root is being indexed is a
+ * separate concern. Bot, session, and user knowledge scopes own no document
+ * workspace, so they share this internal state: it keeps the same watch and
+ * binding-refresh lifecycle but never inspects a root or scans files.
+ */
+export const GLOBAL_INFERENCE_SCOPE = 'inference:global';
+const inferenceScopeId = (scopeId: string): string => (
+  isBotScopeId(scopeId) || isSessionScopeId(scopeId) || scopeId === 'user' ? GLOBAL_INFERENCE_SCOPE : scopeId
+);
 
 export interface WorkspaceSemanticRuntimeOptions extends Omit<SemanticIndexRuntimeOptions, 'getEmbedder' | 'documents'> {
   /** Override the quiet first/retry interval in hosts that need different pacing. */
@@ -289,9 +302,13 @@ export function createWorkspaceSemanticRuntime(options: WorkspaceSemanticRuntime
     }
     const task = (async () => {
       // Resolve the resource root so missing/unavailable directories fail here,
-      // not inside an inference or scan task.
-      const inspected = await options.documents.inspectWorkspace(workspaceId);
-      const indexingEnabled = resolveSemanticScanRoots(inspected.root, options.indexDirectories).length > 0;
+      // not inside an inference or scan task. The shared inference state has no
+      // resource root at all — bindings resolve global configuration only.
+      const inspected = workspaceId === GLOBAL_INFERENCE_SCOPE
+        ? { root: '' }
+        : await options.documents.inspectWorkspace(workspaceId);
+      const indexingEnabled = workspaceId !== GLOBAL_INFERENCE_SCOPE
+        && resolveSemanticScanRoots(inspected.root, options.indexDirectories).length > 0;
       assertActive();
       const backend = createSemanticBackend({
         local: localEmbedder,
@@ -408,7 +425,9 @@ export function createWorkspaceSemanticRuntime(options: WorkspaceSemanticRuntime
       await threadSnapshot?.release();
     }
   };
-  const harnessSettings: NonNullable<HarnessServiceHost['harnessSettings']> = async (workspaceId) => (await getWorkspace(workspaceId)).snapshot;
+  const harnessSettings: NonNullable<HarnessServiceHost['harnessSettings']> = async (workspaceId) => (
+    await getWorkspace(inferenceScopeId(workspaceId))
+  ).snapshot;
   const rerankExploreViews: NonNullable<HarnessServiceHost['rerankExploreViews']> = async (input) => {
     input.signal?.throwIfAborted();
     const state = await waitWithSignal(getWorkspace(input.workspaceId), input.signal);
@@ -446,12 +465,12 @@ export function createWorkspaceSemanticRuntime(options: WorkspaceSemanticRuntime
     workspaceId,
     purpose,
   ) => {
-    const state = await getWorkspace(workspaceId);
+    const state = await getWorkspace(inferenceScopeId(workspaceId));
     return state.binding.fastDecision?.purposes?.[purpose] ?? { status: 'unavailable' as const };
   };
   const fastDecision: NonNullable<HarnessServiceHost['fastDecision']> = async (input) => {
     input.signal?.throwIfAborted();
-    const state = await waitWithSignal(getWorkspace(input.workspaceId), input.signal);
+    const state = await waitWithSignal(getWorkspace(inferenceScopeId(input.workspaceId)), input.signal);
     const broker = options.getBroker();
     if (!broker) throw new Error('Pi workspace binding is unavailable');
     const purposeStatus = state.binding.fastDecision?.purposes?.[input.purpose];
@@ -522,7 +541,9 @@ export function createWorkspaceSemanticRuntime(options: WorkspaceSemanticRuntime
   };
   return {
     semanticRecall, harnessSettings, rerankExploreViews, fastDecisionStatus, fastDecision, observeDocumentMutation, observeToolWrite, processEvent,
-    indexStatuses: () => [...states.values()].map((state) => ({
+    indexStatuses: () => [...states.values()]
+      .filter((state) => state.workspaceId !== GLOBAL_INFERENCE_SCOPE)
+      .map((state) => ({
       workspaceId: state.workspaceId,
       root: state.root,
       indexingEnabled: state.indexingEnabled,
@@ -543,8 +564,8 @@ export function createWorkspaceSemanticRuntime(options: WorkspaceSemanticRuntime
         track(state.runtime.scanWorkspace(state.workspaceId));
       }
     },
-    resolveKnowledgeEmbedder: async (workspaceId: string) => {
-      const state = await getWorkspace(workspaceId);
+    resolveKnowledgeEmbedder: async (scopeId: string) => {
+      const state = await getWorkspace(inferenceScopeId(scopeId));
       if (state.binding.embedding.status === 'ready') return { status: 'ready' as const, embedder: state.backend.embedder };
       if (state.binding.embedding.status === 'unconfigured') return { status: 'unconfigured' as const };
       return { status: state.binding.embedding.status === 'invalid' ? 'invalid' as const : 'unavailable' as const,

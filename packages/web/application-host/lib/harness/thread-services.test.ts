@@ -2056,6 +2056,79 @@ describe("thread services", () => {
       rmSync(dataDir, { force: true, recursive: true });
     }
   });
+
+  it("binds a Bot consult to the Bot's model and records consultBotId durably", async () => {
+    const dataDir = mkdtempSync(join(tmpdir(), "thread-consult-"));
+    const registry = createThreadRegistry({ dataDir, hostId: "host-1" });
+    const spawn = vi.fn(async () => ({ sessionId: "consult-child" }));
+    const bots = {
+      get: async (id: string) => id === "bot-9"
+        ? { id: "bot-9", archived: false, model: { providerId: "bot-provider", modelId: "bot-model" } }
+        : null,
+    };
+    const service = dispatchService({
+      threadRegistry: registry,
+      threadSpawnSession: spawn,
+      bots,
+    });
+    try {
+      const result = await service.handle({
+        task: "Trade off cache vs recompute",
+        kind: "discussion",
+        bot: "bot-9",
+        tools: ["read", "memory"],
+      }, serviceContext());
+      const thread = await registry.getThreadById("workspace-1", result.threadId);
+      expect(thread).toMatchObject({
+        kind: "discussion",
+        consultBotId: "bot-9",
+        model: { providerId: "bot-provider", modelId: "bot-model" },
+        manifest: { worktree: "none" },
+      });
+      // The durable record must carry the binding — reload the catalog.
+      const reopened = createThreadRegistry({ dataDir, hostId: "host-1" });
+      try {
+        const reloaded = await reopened.getThreadById("workspace-1", result.threadId);
+        expect(reloaded?.consultBotId).toBe("bot-9");
+      } finally {
+        await reopened.dispose();
+      }
+    } finally {
+      await registry.dispose();
+      rmSync(dataDir, { force: true, recursive: true });
+    }
+  });
+
+  it("rejects a Bot consult that is not a discussion, missing, or archived", async () => {
+    const dataDir = mkdtempSync(join(tmpdir(), "thread-consult-reject-"));
+    const registry = createThreadRegistry({ dataDir, hostId: "host-1" });
+    const bots = {
+      get: async (id: string) => id === "archived-bot"
+        ? { id, archived: true, model: null }
+        : id === "live-bot"
+          ? { id, archived: false, model: { providerId: "p", modelId: "m" } }
+          : null,
+    };
+    const service = dispatchService({
+      threadRegistry: registry,
+      threadSpawnSession: vi.fn(async () => ({ sessionId: "child" })),
+      bots,
+    });
+    try {
+      await expect(service.handle({
+        task: "x", kind: "implementation", bot: "live-bot",
+      }, serviceContext())).rejects.toMatchObject({ harnessCode: "invalid-params" });
+      await expect(service.handle({
+        task: "x", kind: "discussion", bot: "missing-bot",
+      }, serviceContext())).rejects.toMatchObject({ harnessCode: "unavailable" });
+      await expect(service.handle({
+        task: "x", kind: "discussion", bot: "archived-bot",
+      }, serviceContext())).rejects.toMatchObject({ harnessCode: "unavailable" });
+    } finally {
+      await registry.dispose();
+      rmSync(dataDir, { force: true, recursive: true });
+    }
+  });
 });
 
 describe("bot-root family visibility (BC0)", () => {

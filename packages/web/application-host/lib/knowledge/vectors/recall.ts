@@ -198,7 +198,7 @@ export async function recallSources(input: {
   query: string;
   k: number;
   vectors?: KnowledgeVectorRuntime;
-  /** Vector search is keyed by the caller's execution workspace when present. */
+  /** The owning scope id the vector indexes are built and resolved under. */
   workspaceId?: string;
   associated?: MemoryRecallAssociation;
   signal?: AbortSignal;
@@ -224,7 +224,9 @@ export async function recallSources(input: {
   const ranked = await recallCandidates({
     candidates: candidates.filter((candidate) => !pinnedKeys.has(candidate.key)),
     query: input.query,
-    k: Math.max(input.k - pinnedResults.length, 0),
+    // Work-associated obligations get their own budget of k: an obligation
+    // must be delivered even when it crowds out every ranked hit (BC3).
+    k: input.k,
     ...(input.vectors ? { vectors: input.vectors } : {}),
     ...(input.vectors && input.workspaceId ? {
       vectorScopes: input.sources.map((source) => ({

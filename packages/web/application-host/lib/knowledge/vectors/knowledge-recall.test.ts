@@ -14,6 +14,7 @@ import { createKnowledgeContextRuntime } from "../context-runtime.js";
 import { executeRecall } from "../../harness/recall-tool.js";
 import { createRecallSearchService } from "../../harness/harness-services.js";
 import { createKnowledgeVectorRuntime } from "./runtime.js";
+import { recallSources } from "./recall.js";
 import { knowledgeEmbedText } from "./identity.js";
 import { REMOTE_EMBEDDING_DEFAULT_MAX_TOKENS } from "@varin/protocol";
 import type { HarnessEmbedResult, HarnessResolvedEmbeddingBinding, PiSettingsSnapshot } from "@varin/protocol";
@@ -460,5 +461,38 @@ describe("production settings bind to public recall", () => {
       contextUsage: null,
     });
     expect(material.material.knowledge.some((item) => item.title.includes("unique-token pineapple"))).toBe(true);
+  });
+
+  it("pins work-associated rows on their own budget, not against ranked hits", async () => {
+    const dir = tempDir();
+    const store = await openAuthority(dir, "ws");
+    for (const [index, id] of [1, 2].entries()) {
+      await store.putKnowledge({
+        scope: "workspace",
+        status: "accepted",
+        content: `obligation-${index} the work must respect`,
+        trigger: "follow-up",
+        source: { kind: "run-report", threadId: "work-thread", runId: `run-${id}` },
+      });
+    }
+    for (const index of [1, 2, 3]) {
+      await store.putKnowledge({
+        scope: "workspace",
+        status: "accepted",
+        content: `ranked-${index} pineapple candidate`,
+        trigger: "pineapple",
+      });
+    }
+    const { results } = await recallSources({
+      sources: [{ authority: store, scope: "workspace", scopeId: "ws" }],
+      query: "pineapple",
+      k: 2,
+      associated: { threadIds: ["work-thread"] },
+    });
+    // Two obligations on their own budget, then two ranked text hits — a small
+    // shared budget must not squeeze the obligations into the ranked pool.
+    expect(results).toHaveLength(4);
+    expect(results.slice(0, 2).every((row) => row.via === "associated")).toBe(true);
+    expect(results.slice(2).every((row) => row.via === "text")).toBe(true);
   });
 });

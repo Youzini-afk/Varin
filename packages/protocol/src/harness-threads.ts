@@ -548,6 +548,13 @@ export interface Thread {
   /** Hidden auto-review thread bound to one published source revision. */
   reviewOf?: ThreadReviewOf;
   /**
+   * BC3 Bot consultation: this discussion Thread was dispatched to consult a
+   * Bot. Its session runs with the Bot's persona and model default and
+   * reads/writes the Bot's memory scope, while the record and the response
+   * path stay in the requesting work's catalog.
+   */
+  consultBotId?: string;
+  /**
    * Directed message ledger (inbound queue plus sender-side outstanding
    * requests). Inbound `pending`/`held` records flush into the next normal
    * input boundary; they never start execution by themselves.
@@ -1081,6 +1088,14 @@ export interface ThreadDispatchParams {
    * and reports back through its result, without claiming worktree ownership.
    */
   kind?: "implementation" | "discussion";
+  /**
+   * BC3 Bot consultation — valid only with kind:"discussion". The consult
+   * Thread stays under the requesting work's catalog and parent (the existing
+   * send/wait/report path carries the answer back), while its session is bound
+   * to the named Bot: Bot persona instructions, Bot model default, and the
+   * `bot:<id>` memory scope.
+   */
+  bot?: string;
   /**
    * Optional execution preset id. Absent = normal dispatch on the caller's
    * current model and authorized tools (D-285).

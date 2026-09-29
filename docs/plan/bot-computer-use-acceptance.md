@@ -161,22 +161,56 @@ Remaining gaps (not falsely complete):
 - The fast-decision filter is per-batch all-or-nothing; unanswered materials
   fall through to the generative pass.
 
-### BC3: unbound inference and Bot consultation are incomplete
+### BC3: inference binding separated from indexing; Bot consultation bound — implemented, follow-up gaps above
 
-- Knowledge vector binding calls `resolveKnowledgeEmbedder(scopeId)`, whose
-  `getWorkspace()` first resolves a document workspace. A `bot:` scope is not
-  a document workspace. Automatic quick decision is also skipped when the Bot
-  has no execution workspace. Text retrieval working does not prove either path.
-- `memory.search` currently has a narrower retrieval path than automatic recall.
-  Work-associated material is still selected under a small shared result budget;
-  obligations need their actual work/follow-up association, beyond provenance ranking.
-- `dispatch kind: discussion` creates another child using ordinary dispatch
-  configuration. This is not the specified correlated consultation with the Bot,
-  its decision context and shared work updates. Merely being asynchronous does
-  not demonstrate the complete consultation/wait behavior.
+Implemented behavior covered by focused tests (`workspace-runtime.test.ts`,
+`memory-recall.test.ts`, `knowledge-recall.test.ts`,
+`thread-services.test.ts`, `thread-runtime-session.e2e.test.ts`):
 
-Separate inference binding from resource indexing, retain the existing global
-configuration owner, and finish consultation on the existing message/follow-up path.
+- Inference binding no longer depends on a resource workspace. `bot:`,
+  `session:`, and `user` scopes resolve embedding, rerank, and fast-decision
+  bindings through a shared global inference state (`GLOBAL_INFERENCE_SCOPE`)
+  that watches the same `configCwd` configuration but never inspects a
+  document root or scans files. `indexStatuses` still reports only real
+  resource workspaces. A global binding change refreshes every knowledge
+  vector registration (`refreshAll`), not just indexed workspaces, so a
+  reconfigured embedder rebuilds Bot/session indexes too.
+- `memory.search`, automatic Zone 2 recall, and the `recall` tool share
+  `recallSources`. `memory.search` now passes the hybrid vector runtime, the
+  owning scope id, and the calling session's work association — the same
+  inputs automatic recall uses. Sources keep their true scope labels, and
+  final rows are revalidated against their authority store.
+- Work association is durable, not textual: the association is the session's
+  bound Thread, its ancestor chain, and its descendant follow-up Threads,
+  expanded with every Run and session id those Threads produced. Associated
+  memories are pinned ahead of ranked hits under their own budget of `k` —
+  an obligation is delivered even when it crowds out every generic hit —
+  and are never removed by the advisory fast-decision pass. When no
+  execution workspace exists, judging resolves through the shared global
+  binding instead of being skipped.
+- `dispatch kind: "discussion"` accepts a `bot` parameter. The Host resolves
+  the Bot, rejects archived/missing Bots and `bot` combined with `preset`,
+  `research`, or `worktree`, binds the Run to `params.model ?? bot.model`,
+  and persists `consultBotId` on the Thread record. The consult Thread stays
+  in the requesting work's catalog and parent — the ordinary
+  send/wait/report path carries the answer — while its session resolves the
+  Bot persona and the `bot:<id>` memory scope through the Thread record, so
+  both survive worker restart. Pi's tool schema exposes the same parameter
+  and leaves the model to Host resolution when a Bot is consulted.
+- Consult tool gating is unchanged: a `discussion` Thread receives only the
+  read-only `DISCUSSION_TOOLS` set. The stale e2e assertion that enumerated
+  the pre-BC3 tool list now checks membership against `DISCUSSION_TOOLS`
+  itself.
+
+Remaining gaps (not falsely complete):
+
+- The consult session binds the Bot's persona/model/memory at spawn through
+  the Thread record; an in-flight consult keeps its frozen Run model even if
+  the Bot's configured default changes mid-run.
+- Work association traversal stays within the Thread's owning scope —
+  ancestors and descendants in another catalog scope are not followed.
+- Vector and fast-decision enrichment still require a configured inference
+  binding; unconfigured deployments fall back to text retrieval by design.
 
 ### BC4: native coverage and interrupted actions remain partial
 

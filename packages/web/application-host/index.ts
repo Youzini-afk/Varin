@@ -69,11 +69,11 @@ import { createLocalMinilmEmbedder } from './lib/knowledge/semantic/minilm.js';
 import { createLocalSemanticComponentManager } from './lib/knowledge/semantic/local-component.js';
 import { registerLocalSemanticComponentRoutes } from './lib/knowledge/semantic/local-component-routes.js';
 import { createSemanticIndexManagement, DEFAULT_SEMANTIC_INDEX_CONFIGURATION, registerSemanticIndexRoutes } from './lib/knowledge/semantic/index-management.js';
-import { createWorkspaceSemanticRuntime } from './lib/knowledge/semantic/workspace-runtime.js';
+import { createWorkspaceSemanticRuntime, GLOBAL_INFERENCE_SCOPE } from './lib/knowledge/semantic/workspace-runtime.js';
 import { createEmbedScheduler } from './lib/knowledge/semantic/embed-scheduler.js';
 import { createVectorCache } from './lib/knowledge/semantic/vector-cache.js';
 import { createKnowledgeVectorRuntime } from './lib/knowledge/vectors/index.js';
-import type { KnowledgeVectorRuntime, MemoryRecallSource } from './lib/knowledge/vectors/index.js';
+import type { KnowledgeVectorRuntime, MemoryRecallAssociation, MemoryRecallSource } from './lib/knowledge/vectors/index.js';
 import { recallMemories } from './lib/memory/memory-recall.js';
 
 
@@ -1803,6 +1803,8 @@ async function main(options: StartWebUiServerOptions = {}): Promise<WebUiServerC
       if (isSessionScopeId(scopeId)) return { scope: 'session', ownerId: sessionIdFromScopeId(scopeId) };
       return { scope: 'workspace', ownerId: scopeId };
     },
+    vectors: () => knowledgeVectors,
+    associationForSession: (sessionId) => workAssociationForSession(sessionId),
     onChanged: (owner, ids) => {
       broadcastGlobalUiEvent?.({
         type: 'varin:harness-knowledge-changed',
@@ -2827,7 +2829,7 @@ async function main(options: StartWebUiServerOptions = {}): Promise<WebUiServerC
     sessionId: string,
     fallback: string | null = null,
   ): Promise<string | null> {
-    const bot = await botService.botForSession(sessionId);
+    const bot = await botService.botForSession(sessionId) ?? await consultBotForSession(sessionId);
     if (bot) return `bot:${bot.id}`;
     // RR4/E07: durable owner resolution. The active-run binding only exists
     // while the run is live; the catalog scan still answers after the run
@@ -2875,10 +2877,59 @@ async function main(options: StartWebUiServerOptions = {}): Promise<WebUiServerC
     }
   }
 
+  // BC3: a consult session (kind:"discussion" + bot) belongs to the named Bot
+  // — persona instructions and the `bot:<id>` memory scope resolve through the
+  // Thread record, not the session's owning catalog scope.
+  const consultBotForSession = async (sessionId: string) => {
+    const binding = await threadRegistry.getSessionBinding(sessionId).catch(() => null);
+    if (!binding) return null;
+    const thread = await threadRegistry.getThreadById(binding.owningScopeId, binding.threadId).catch(() => null);
+    if (!thread?.consultBotId) return null;
+    return botService.get(thread.consultBotId).catch(() => null);
+  };
+
   const knowledgeStoreExistsForScope = (scopeId: string): Promise<boolean> => (
     fsPromises.access(path.join(VARIN_DATA_DIR, 'knowledge', hostId, `${knowledgeStoreKeyForScope(scopeId)}.tdb`))
       .then(() => true, () => false)
   );
+
+  // BC3: a memory's work association is the session's bound Thread plus its
+  // ancestor chain (obligations the work inherited) and its follow-up
+  // Threads/Runs (obligations the work produced) — not merely the one
+  // threadId/runId of the current session binding.
+  const workAssociationForSession = async (sessionId: string): Promise<MemoryRecallAssociation> => {
+    const sessionIds = new Set<string>([sessionId]);
+    const threadIds = new Set<string>();
+    const runIds = new Set<string>();
+    const binding = await threadRegistry.getSessionBinding(sessionId).catch(() => null);
+    if (!binding) return { sessionIds: [...sessionIds] };
+    const scopeId = binding.owningScopeId;
+    const includeThread = async (threadId: string): Promise<void> => {
+      if (threadIds.has(threadId)) return;
+      threadIds.add(threadId);
+      for (const run of await threadRegistry.listRuns(scopeId, threadId).catch(() => [] as import('@varin/protocol').ThreadRun[])) {
+        runIds.add(run.id);
+        if (run.sessionId) sessionIds.add(run.sessionId);
+      }
+    };
+    await includeThread(binding.threadId);
+    let cursor = await threadRegistry.getThreadById(scopeId, binding.threadId).catch(() => null);
+    while (cursor?.parent.kind === 'thread' && !threadIds.has(cursor.parent.id)) {
+      const ancestorId = cursor.parent.id;
+      await includeThread(ancestorId);
+      cursor = await threadRegistry.getThreadById(scopeId, ancestorId).catch(() => null);
+    }
+    const pending = [binding.threadId];
+    while (pending.length > 0) {
+      const current = pending.pop()!;
+      for (const child of await threadRegistry.listThreads(scopeId, { kind: 'thread', id: current }, true).catch(() => [] as import('@varin/protocol').Thread[])) {
+        if (threadIds.has(child.id)) continue;
+        await includeThread(child.id);
+        pending.push(child.id);
+      }
+    }
+    return { sessionIds: [...sessionIds], threadIds: [...threadIds], runIds: [...runIds] };
+  };
 
   const knowledgeContextRuntime = createKnowledgeContextRuntime({
     getStore: getKnowledgeStoreForScope,
@@ -2897,7 +2948,7 @@ async function main(options: StartWebUiServerOptions = {}): Promise<WebUiServerC
     // finally an optional memory-recall fast-decision pass. Retrieval never
     // depends on the fast decision being configured or reachable.
     recall: async ({ workspaceId, store, sessionId, query, goal, signal }) => {
-      const binding = await threadRegistry.getSessionBinding(sessionId).catch(() => null);
+      const associated = await workAssociationForSession(sessionId);
       const sources: MemoryRecallSource[] = [{
         authority: store,
         scope: scopeOfScopeId(workspaceId),
@@ -2918,13 +2969,13 @@ async function main(options: StartWebUiServerOptions = {}): Promise<WebUiServerC
         k: 5,
         ...(knowledgeVectors ? { vectors: knowledgeVectors } : {}),
         workspaceId,
-        ...(executionWorkspaceId ? { judgeWorkspaceId: executionWorkspaceId } : {}),
-        associated: {
-          sessionIds: [sessionId],
-          ...(binding ? { threadIds: [binding.threadId], runIds: [binding.runId] } : {}),
-        },
+        // A Bot or session scope without an execution workspace still judges
+        // through the shared global inference binding — recall never depends
+        // on a document workspace existing.
+        judgeWorkspaceId: executionWorkspaceId ?? workspaceId,
+        associated,
         ...(goal !== undefined ? { goal } : {}),
-        ...(semantic && executionWorkspaceId ? {
+        ...(semantic ? {
           fastDecision: {
             status: semantic.fastDecisionStatus,
             decide: semantic.fastDecision,
@@ -3041,7 +3092,12 @@ async function main(options: StartWebUiServerOptions = {}): Promise<WebUiServerC
     getBroker: getReadyPiRuntimeBroker,
     executionViews: threadExecutionViews,
     workingBranches: workingBranchLookups,
-    onBindingChanged: (workspaceId) => queueMicrotask(() => knowledgeVectors?.refreshWorkspace(workspaceId)),
+    onBindingChanged: (workspaceId) => queueMicrotask(() => {
+      // The shared inference state publishes global binding changes; every
+      // knowledge scope resolves its embedder through it, so refresh all.
+      if (workspaceId === GLOBAL_INFERENCE_SCOPE) knowledgeVectors?.refreshAll();
+      else knowledgeVectors?.refreshWorkspace(workspaceId);
+    }),
     onError: (error) => console.error('[HarnessKnowledge] Semantic runtime failed:', errorMessage(error)),
   });
   semanticRuntimeHolder.current = semanticRuntime;
@@ -3158,17 +3214,13 @@ async function main(options: StartWebUiServerOptions = {}): Promise<WebUiServerC
     const sessionStore = ownScopeId !== owningWorkspaceId && await knowledgeStoreExistsForScope(ownScopeId)
       ? await getKnowledgeStoreForScope(ownScopeId).catch(() => null)
       : null;
-    const binding = await threadRegistry.getSessionBinding(sessionId).catch(() => null);
     return {
       workspaceStore,
       userStore: await getUserKnowledgeStore(),
       ...(sessionStore ? { sessionStore } : {}),
       sessionId,
       workspaceId: owningWorkspaceId,
-      associated: {
-        sessionIds: [sessionId],
-        ...(binding ? { threadIds: [binding.threadId], runIds: [binding.runId] } : {}),
-      },
+      associated: await workAssociationForSession(sessionId),
       ...(knowledgeVectors ? { vectors: knowledgeVectors } : {}),
     };
   }
@@ -3187,8 +3239,10 @@ async function main(options: StartWebUiServerOptions = {}): Promise<WebUiServerC
     discoveredShells,
     memoryService,
     computerService,
-    sessionInstructionsFor: async (sessionId) =>
-      (await botService.botForSession(sessionId))?.instructions ?? null,
+    sessionInstructionsFor: async (sessionId) => (
+      (await botService.botForSession(sessionId) ?? await consultBotForSession(sessionId))?.instructions ?? null
+    ),
+    bots: { get: (botId) => botService.get(botId) },
     pathLockService: kernelPathLockService,
     verification: verificationCoordinator,
     experimentService,

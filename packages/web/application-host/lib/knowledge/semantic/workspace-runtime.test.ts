@@ -243,6 +243,33 @@ describe('production workspace semantic assembly lifecycle', () => {
     await expect(harness.runtime.harnessSettings(harness.workspaceId)).rejects.toThrow('closed');
   });
 
+  it('resolves inference bindings for bot/session scopes without a resource workspace', async () => {
+    const harness = await setup({
+      describe: async () => ({
+        embedding: { status: 'unconfigured' },
+        rerank: { status: 'unconfigured' },
+        fastDecision: {
+          purposes: {
+            'memory-recall': {
+              status: 'ready' as const,
+              binding: { protocol: 'typesafe-systemone' as const, providerId: 'remote', modelId: 'fast', configurationId: 'fd' },
+            },
+          },
+        },
+      }),
+    });
+    const inspect = vi.spyOn(harness.documents.authority, 'inspectWorkspace');
+    const embedder = await harness.runtime.resolveKnowledgeEmbedder('bot:beta');
+    expect(embedder.status).toBe('unconfigured');
+    const status = await harness.runtime.fastDecisionStatus('session:s-1', 'memory-recall');
+    expect(status).toMatchObject({ status: 'ready', binding: { modelId: 'fast' } });
+    expect(await harness.runtime.harnessSettings('bot:beta')).not.toBeNull();
+    expect(inspect).not.toHaveBeenCalledWith('bot:beta');
+    expect(inspect).not.toHaveBeenCalledWith('session:s-1');
+    // The internal inference state must not surface as an indexable workspace.
+    expect(harness.runtime.indexStatuses().map((s) => s.workspaceId)).not.toContain('inference:global');
+  });
+
   it('serves distinct resource roots through one shared inference worker', async () => {
     const harness = await setup();
     const nested = path.join(harness.documents.workspaceRoot, 'nested-root');

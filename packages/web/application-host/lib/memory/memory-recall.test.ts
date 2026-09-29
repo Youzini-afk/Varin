@@ -64,11 +64,15 @@ describe("recallSources — scope-generalized candidate selection (BC3)", () => 
     expect(results[0]?.node.id).toBe(bound.id);
     expect(results[0]?.via).toBe("associated");
     expect(results.map((r) => r.node.id)).toHaveLength(2);
+    // Obligations carry their own budget: a minimal k still delivers the
+    // associated row plus the best ranked hit, instead of starving either side.
     const one = await recallSources({
       sources: [{ authority: store, scope: "workspace", scopeId: "ws" }],
       query: "text match terms", k: 1, associated: { threadIds: ["thr-1"] },
     });
-    expect(one.results.map((hit) => hit.node.id)).toEqual([bound.id]);
+    expect(one.results.map((hit) => hit.node.id)).toHaveLength(2);
+    expect(one.results[0]?.node.id).toBe(bound.id);
+    expect(one.results[0]?.via).toBe("associated");
   });
 });
 

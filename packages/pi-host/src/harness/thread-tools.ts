@@ -40,6 +40,7 @@ const DispatchParams = Type.Object({
     Type.Literal("implementation"),
     Type.Literal("discussion"),
   ], { description: "implementation (default) produces work; discussion starts a read-only consult thread that answers against memory and material, then reports back" })),
+  bot: Type.Optional(Type.String({ description: "With kind:discussion — consult a specific Bot: the thread runs with that Bot's persona, model default, and memory scope, and reports back through the normal response path" })),
   preset: Type.Optional(Type.String()),
   input: Type.Optional(Type.Union([
     Type.Literal("task"),
@@ -196,6 +197,13 @@ export function createDispatchTool(
             details: { code: 'invalid-params' },
           };
         }
+        if (params.bot !== undefined && params.kind !== "discussion") {
+          return {
+            content: [{ type: 'text' as const, text: 'dispatch failed: bot consultation requires kind:"discussion"' }],
+            isError: true,
+            details: { code: 'invalid-params' },
+          };
+        }
         if (params.capability !== undefined) {
           const resolved = researchCapabilities.find((entry) => entry.capability === params.capability);
           const definition = RESEARCH_CAPABILITY_DEFINITIONS[params.capability];
@@ -250,6 +258,10 @@ export function createDispatchTool(
           };
         }
         model = preset.model;
+      } else if (params.capability === undefined && params.bot !== undefined) {
+        // Bot consult: the Host resolves the consulted Bot's model default;
+        // the caller's active tools still bound the consult's read-only set.
+        tools = options.getActiveToolNames?.();
       } else if (params.capability === undefined) {
         const current = ctx?.model;
         if (!current) {
@@ -273,6 +285,7 @@ export function createDispatchTool(
           ...(options.concurrency === undefined ? {} : { concurrency: options.concurrency }),
           task: params.task,
           ...(params.kind !== undefined ? { kind: params.kind } : {}),
+          ...(params.bot !== undefined ? { bot: params.bot } : {}),
           ...(params.preset !== undefined ? { preset: params.preset } : {}),
           ...(params.input !== undefined ? { input: params.input } : {}),
           ...(params.worktree !== undefined ? { worktree: params.worktree } : {}),

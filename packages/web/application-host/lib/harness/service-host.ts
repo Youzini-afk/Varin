@@ -331,6 +331,13 @@ export interface HarnessServiceHost {
   computerService?: import("../computer/computer-service.js").ComputerService | null;
   /** BC0 durable session instructions — the Bot persona for Bot entry sessions. */
   sessionInstructionsFor?: ((sessionId: string) => Promise<string | null>) | null;
+  /**
+   * BC3 Bot consultation target lookup — dispatch validates the Bot exists and
+   * is not archived before binding a discussion Thread to it.
+   */
+  bots?: {
+    get(botId: string): Promise<{ id: string; archived: boolean; model: { providerId: string; modelId: string } | null } | null>;
+  } | null;
   // Phase 3: Thread registry
   threadRegistry: ThreadRegistry | null;
   threadCaptureDraftBaseline: ((sessionId: string, workspaceId: string, context: import("@varin/protocol").AgentInputContext) => Promise<CapturedThreadDraftBaseline>) | null;
@@ -590,6 +597,7 @@ export interface HarnessServiceHostOptions {
   memoryService?: NonNullable<HarnessServiceHost["memoryService"]>;
   computerService?: NonNullable<HarnessServiceHost["computerService"]>;
   sessionInstructionsFor?: NonNullable<HarnessServiceHost["sessionInstructionsFor"]>;
+  bots?: NonNullable<HarnessServiceHost["bots"]>;
   // Phase 3 options
   threadRegistry?: ThreadRegistry;
   threadCaptureDraftBaseline?: HarnessServiceHost["threadCaptureDraftBaseline"];
@@ -1062,6 +1070,7 @@ export function createHarnessServiceHost(options: HarnessServiceHostOptions): Ha
     memoryService: options.memoryService ?? null,
     computerService: options.computerService ?? null,
     sessionInstructionsFor: options.sessionInstructionsFor ?? null,
+    bots: options.bots ?? null,
     threadRegistry,
     threadCaptureDraftBaseline,
     threadPrepareIsolatedBranch,
