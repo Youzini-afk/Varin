@@ -64,11 +64,18 @@ export const localPlatform = (): ComputerPlatform => (
 // Catalog record <-> DTO
 // ---------------------------------------------------------------------------
 
+const recordIdSuffix = (record: KernelRecordResult): string | undefined =>
+  record.recordId.startsWith("computer.machine:")
+    ? record.recordId.slice("computer.machine:".length)
+    : record.recordId.startsWith("computer.desktop:")
+      ? record.recordId.slice("computer.desktop:".length)
+      : undefined;
+
 const parseMachine = (record: KernelRecordResult): ComputerMachine | null => {
   try {
     const raw = JSON.parse(record.payloadJson) as unknown;
     if (!isObject(raw)) return null;
-    const id = record.recordId.split(":")[1];
+    const id = recordIdSuffix(record);
     if (!id || raw.id !== id) return null;
     if (!asString(raw.name) || !asString(raw.coordinatorHostId)) return null;
     return {
@@ -91,7 +98,7 @@ const parseDesktop = (record: KernelRecordResult): ComputerDesktop | null => {
   try {
     const raw = JSON.parse(record.payloadJson) as unknown;
     if (!isObject(raw)) return null;
-    const id = record.recordId.split(":")[1];
+    const id = recordIdSuffix(record);
     if (!id || raw.id !== id || !asString(raw.machineId) || !asString(raw.label)) return null;
     return {
       id,
@@ -101,6 +108,10 @@ const parseDesktop = (record: KernelRecordResult): ComputerDesktop | null => {
       status: (["available", "unavailable", "stopped"].includes(record.state) ? record.state : "unavailable") as ComputerDesktop["status"],
       ...(asString(raw.statusDetail) ? { statusDetail: raw.statusDetail as string } : {}),
       ...(isObject(raw.capabilities) ? { capabilities: raw.capabilities as unknown as ComputerCapabilities } : {}),
+      // Remote mirror (BC6): calls route to the owning Host, never a local driver.
+      ...(isObject(raw.remote) && asString(raw.remote.connectionId) && asString(raw.remote.desktopId)
+        ? { remote: { connectionId: raw.remote.connectionId as string, desktopId: raw.remote.desktopId as string } }
+        : {}),
     };
   } catch {
     return null;
@@ -215,6 +226,15 @@ class CancelledActionError extends Error {
   constructor() { super("Computer action cancelled before it reached the driver"); }
 }
 
+/**
+ * The HTTP request to the remote Host never produced a usable response —
+ * the action may or may not have reached the desktop (BC6: report, never
+ * replay). Distinct from a structured remote rejection.
+ */
+class RemoteTransportError extends HarnessServiceError {
+  constructor(message: string) { super("unavailable", message); }
+}
+
 interface QueuedOp {
   /**
    * `action` ops are automated script work — cancelled generations drop them.
@@ -263,6 +283,16 @@ interface DesktopLane {
   control: DesktopControl;
 }
 
+/** A configured remote Host a `remote` desktop's calls route to (BC6). */
+export interface ComputerRemoteHost {
+  /** Settings connection id — also the remote machine's catalog prefix. */
+  id: string;
+  label: string;
+  apiUrl: string;
+  clientToken?: string;
+  requestHeaders?: Record<string, string>;
+}
+
 export interface ComputerServiceOptions {
   client: KernelClient;
   hostId: string;
@@ -272,6 +302,14 @@ export interface ComputerServiceOptions {
   driverDir?: string;
   /** Test seam: inject a fake driver factory. */
   createDriver?: (spec: DriverSpawnSpec) => ComputerDriverSession;
+  /**
+   * Configured remote Hosts (BC6) — the same `desktopHosts` settings surface
+   * managed-remote resolves. Each entry's apiUrl+token authenticates
+   * Host-to-Host computer calls; local SSH credentials are never copied.
+   */
+  remoteHosts?: () => Promise<ComputerRemoteHost[]>;
+  /** Test seam: override fetch for remote Host calls. */
+  fetch?: typeof fetch;
 }
 
 export interface ComputerService {
@@ -442,6 +480,160 @@ export function createComputerService(options: ComputerServiceOptions): Computer
     }
   };
 
+  // --- BC6: remote Host routing --------------------------------------------
+  // `provider:"remote"` machines are mirrors: their desktops live on another
+  // Host's service. Control state, lanes, drivers, and frame polls all run
+  // there; this service only carries authenticated calls across.
+
+  const fetchImpl = options.fetch ?? fetch;
+
+  const remoteConnections = async (): Promise<ComputerRemoteHost[]> => (
+    options.remoteHosts ? (await options.remoteHosts().catch(() => [])) : []
+  );
+
+  const remoteHeaders = (connection: ComputerRemoteHost, extra?: Record<string, string>): Headers => {
+    const headers = new Headers(connection.requestHeaders ?? {});
+    if (connection.clientToken) headers.set("Authorization", `Bearer ${connection.clientToken}`);
+    if (extra) for (const [name, value] of Object.entries(extra)) headers.set(name, value);
+    return headers;
+  };
+
+  const remoteFetch = async (
+    connection: ComputerRemoteHost,
+    method: string,
+    path: string,
+    body?: unknown,
+    signal?: AbortSignal,
+  ): Promise<Response> => {
+    const url = `${connection.apiUrl.replace(/\/$/, "")}${path}`;
+    let response: Response;
+    try {
+      response = await fetchImpl(url, {
+        method,
+        headers: remoteHeaders(connection, body === undefined ? { Accept: "application/json" } : { Accept: "application/json", "Content-Type": "application/json" }),
+        ...(body !== undefined ? { body: JSON.stringify(body) } : {}),
+        signal: signal ?? AbortSignal.timeout(45_000),
+      });
+    } catch (error) {
+      throw new RemoteTransportError(
+        `Remote Host "${connection.label}" is unreachable: ${error instanceof Error ? error.message : String(error)}`,
+      );
+    }
+    return response;
+  };
+
+  const remoteJson = async <T>(connection: ComputerRemoteHost, method: string, path: string, body?: unknown): Promise<T> => {
+    const response = await remoteFetch(connection, method, path, body);
+    const payload = await response.json().catch(() => null) as (T & { code?: string; error?: string }) | null;
+    if (!response.ok) {
+      const code = payload && typeof payload.code === "string" && ["invalid-params", "not-found", "forbidden", "denied", "unavailable"].includes(payload.code)
+        ? payload.code as HarnessServiceError["harnessCode"]
+        : "failed";
+      throw new HarnessServiceError(
+        code,
+        payload && typeof payload.error === "string" ? payload.error : `Remote computer request failed (${response.status})`,
+      );
+    }
+    return payload as T;
+  };
+
+  /** The connection + remote id behind a catalog desktop, or null for local. */
+  const remoteTargetFor = async (desktopId: string): Promise<{ connection: ComputerRemoteHost; remoteId: string; desktop: ComputerDesktop } | null> => {
+    await ensureLocal(); // catalog records may not exist until first init
+    const { desktop } = await desktopRecord(desktopId);
+    if (!desktop.remote) return null;
+    const connection = (await remoteConnections()).find((entry) => entry.id === desktop.remote!.connectionId);
+    if (!connection) {
+      throw new HarnessServiceError("unavailable", `Remote Host "${desktop.remote.connectionId}" is no longer configured`);
+    }
+    return { connection, remoteId: desktop.remote.desktopId, desktop };
+  };
+
+  /**
+   * Mirror remote Host catalogs into local machine/desktop records (BC6).
+   * Remote truth wins status; an unreachable Host marks its mirror
+   * unavailable with the real error instead of leaving a stale "available".
+   */
+  let remoteSyncAt = 0;
+  const syncRemote = async (): Promise<void> => {
+    if (!options.remoteHosts) return;
+    if (Date.now() - remoteSyncAt < 10_000) return;
+    remoteSyncAt = Date.now();
+    const hosts = await remoteConnections();
+    const liveIds = new Set(hosts.map((host) => `remote:${host.id}`));
+    // Hosts removed from settings keep their mirrors but report unconfigured.
+    const known = (await listRecords("computer.machine"))
+      .map(parseMachine)
+      .filter((m): m is ComputerMachine => m !== null && m.provider === "remote");
+    const now = new Date().toISOString();
+    await Promise.allSettled([
+      ...hosts.map(async (host) => {
+        const machineId = `remote:${host.id}`;
+        try {
+          const catalog = await remoteJson<{ machines?: ComputerMachine[]; desktops?: ComputerDesktop[] }>(host, "GET", "/api/computers");
+          const remoteMachines = catalog.machines ?? [];
+          const remoteDesktops = catalog.desktops ?? [];
+          const primary = remoteMachines[0];
+          await putRecord(`computer.machine:${machineId}`, "computer.machine", "active", {
+            id: machineId,
+            name: host.label,
+            provider: "remote",
+            platform: primary?.platform ?? "linux",
+            coordinatorHostId: `remote:${host.id}`,
+            remoteConnectionId: host.id,
+            createdAt: now,
+          });
+          for (const remoteDesktop of remoteDesktops) {
+            const remoteMachine = remoteMachines.find((m) => m.id === remoteDesktop.machineId);
+            if (remoteMachine?.platform) {
+              await putRecord(`computer.machine:${machineId}`, "computer.machine", "active", {
+                id: machineId,
+                name: host.label,
+                provider: "remote",
+                platform: remoteMachine.platform,
+                coordinatorHostId: `remote:${host.id}`,
+                remoteConnectionId: host.id,
+                createdAt: now,
+              });
+            }
+            await putRecord(`computer.desktop:remote:${host.id}:${remoteDesktop.id}`, "computer.desktop", remoteDesktop.status, {
+              id: `remote:${host.id}:${remoteDesktop.id}`,
+              machineId,
+              label: `${host.label} · ${remoteDesktop.label}`,
+              kind: "remote-session",
+              ...(remoteDesktop.statusDetail ? { statusDetail: remoteDesktop.statusDetail } : {}),
+              ...(remoteDesktop.capabilities ? { capabilities: remoteDesktop.capabilities as unknown as Record<string, unknown> } : {}),
+              remote: { connectionId: host.id, desktopId: remoteDesktop.id },
+            });
+          }
+        } catch (error) {
+          const detail = error instanceof Error ? error.message : String(error);
+          await putRecord(`computer.machine:${machineId}`, "computer.machine", "unavailable", {
+            id: machineId,
+            name: host.label,
+            provider: "remote",
+            platform: "linux",
+            coordinatorHostId: `remote:${host.id}`,
+            remoteConnectionId: host.id,
+            statusDetail: detail,
+            createdAt: now,
+          }).catch(() => undefined);
+        }
+      }),
+      ...known.filter((machine) => !liveIds.has(machine.id)).map(async (machine) => {
+        await putRecord(`computer.machine:${machine.id}`, "computer.machine", "unavailable", {
+          id: machine.id,
+          name: machine.name,
+          provider: "remote",
+          platform: machine.platform,
+          coordinatorHostId: machine.coordinatorHostId,
+          statusDetail: "Host is no longer configured.",
+          createdAt: machine.createdAt,
+        }).catch(() => undefined);
+      }),
+    ]);
+  };
+
   const pump = (lane: DesktopLane) => {
     for (;;) {
       if (lane.running) return;
@@ -538,6 +730,9 @@ export function createComputerService(options: ComputerServiceOptions): Computer
 
   const list: ComputerService["list"] = async () => {
     await ensureLocal();
+    // Refresh remote mirrors before reading the catalog — remote truth wins
+    // status, and an unreachable Host leaves an unavailable mirror (BC6).
+    await syncRemote().catch(() => undefined);
     localProbe ??= probe(LOCAL_DESKTOP_ID);
     // Probe failures are stored in the catalog and presented as unavailable.
     // Reading a catalog does not require the user to visit Settings first.
@@ -628,6 +823,24 @@ export function createComputerService(options: ComputerServiceOptions): Computer
 
   const probe: ComputerService["probe"] = async (desktopId) => {
     const id = await resolveDesktopId(desktopId);
+    const remote = await remoteTargetFor(id);
+    if (remote) {
+      const result = await remoteJson<{ desktop?: ComputerDesktop }>(
+        remote.connection, "POST", `/api/computers/desktops/${encodeURIComponent(remote.remoteId)}/probe`,
+      );
+      const remoteDesktop = result.desktop;
+      const record = await putRecord(`computer.desktop:${id}`, "computer.desktop",
+        remoteDesktop?.status ?? "unavailable", {
+          id,
+          machineId: remote.desktop.machineId,
+          label: remote.desktop.label,
+          kind: remote.desktop.kind,
+          remote: { connectionId: remote.connection.id, desktopId: remote.remoteId },
+          ...(remoteDesktop?.statusDetail ? { statusDetail: remoteDesktop.statusDetail } : {}),
+          ...(remoteDesktop?.capabilities ? { capabilities: remoteDesktop.capabilities as unknown as Record<string, unknown> } : {}),
+        });
+      return parseDesktop(record)!;
+    }
     const { driver, desktop } = await driverFor(id);
     try {
       const response = await enqueue(id, "observe", () => driver.request({ tool: "capabilities" }));
@@ -662,6 +875,13 @@ export function createComputerService(options: ComputerServiceOptions): Computer
 
   const listApps: ComputerService["listApps"] = async (desktopId) => {
     const id = await resolveDesktopId(desktopId);
+    const remote = await remoteTargetFor(id);
+    if (remote) {
+      const result = await remoteJson<{ apps?: ComputerAppDescriptor[] }>(
+        remote.connection, "GET", `/api/computers/desktops/${encodeURIComponent(remote.remoteId)}/apps`,
+      );
+      return result.apps ?? [];
+    }
     const { driver } = await driverFor(id);
     const response = await enqueue(id, "observe", () => driver.request({ tool: "list_apps" }));
     if (!response.ok) {
@@ -714,6 +934,26 @@ export function createComputerService(options: ComputerServiceOptions): Computer
   const observe: ComputerService["observe"] = async (params) => {
     params.signal?.throwIfAborted();
     const id = await resolveDesktopId(params.desktopId);
+    const remote = await remoteTargetFor(id);
+    if (remote) {
+      const result = await remoteJson<{ observation?: ComputerObservation }>(
+        remote.connection, "POST", `/api/computers/desktops/${encodeURIComponent(remote.remoteId)}/observe`, {
+          app: params.app,
+          ...(params.window !== undefined ? { window: params.window } : {}),
+          ...(params.includeScreenshot !== undefined ? { includeScreenshot: params.includeScreenshot } : {}),
+          ...(params.textLimit !== undefined ? { textLimit: params.textLimit } : {}),
+          ...(params.maxTreeNodes !== undefined ? { maxTreeNodes: params.maxTreeNodes } : {}),
+          ...(params.maxTreeDepth !== undefined ? { maxTreeDepth: params.maxTreeDepth } : {}),
+        },
+      );
+      if (!result.observation) throw new HarnessServiceError("unavailable", "Remote Host returned no observation");
+      // Keep the remote observation id — a later remote act must reference
+      // the remote service's own freshness record. Only the desktop/machine
+      // binding is mirrored locally.
+      const observation = { ...result.observation, desktopId: id, machineId: remote.desktop.machineId };
+      rememberObservation(observation);
+      return observation;
+    }
     return enqueue(id, "observe", async () => {
       params.signal?.throwIfAborted();
       const { driver, desktop } = await driverFor(id);
@@ -874,6 +1114,25 @@ export function createComputerService(options: ComputerServiceOptions): Computer
     const action = structuredClone(params.action);
     const id = await resolveDesktopId(params.desktopId);
     validateAction(action);
+    const remote = await remoteTargetFor(id);
+    if (remote) {
+      // The remote Host owns its lane and control state — forward the action
+      // verbatim; element indexes resolve against its own observation record.
+      try {
+        const payload = await remoteJson<{ result?: ComputerActionResult }>(
+          remote.connection, "POST", `/api/computers/desktops/${encodeURIComponent(remote.remoteId)}/act`, { action },
+        );
+        if (!payload.result) throw new HarnessServiceError("unavailable", "Remote Host returned no action result");
+        return payload.result;
+      } catch (error) {
+        if (error instanceof RemoteTransportError) {
+          // The request may have crossed the wire — never replay; report the
+          // effect as unknown and let the caller re-observe (BC6 contract).
+          return { accepted: false, outcome: "unknown", detail: error.message };
+        }
+        throw error;
+      }
+    }
     // A desktop under human control rejects automated input outright — the
     // stale script must not resume after the takeover (BC5.A).
     if (laneFor(id).control.owner === "human") {
@@ -923,6 +1182,12 @@ export function createComputerService(options: ComputerServiceOptions): Computer
 
   const cancel: ComputerService["cancel"] = async (desktopId) => {
     const id = await resolveDesktopId(desktopId);
+    const remote = await remoteTargetFor(id);
+    if (remote) {
+      return remoteJson<{ cancelled: number; released: boolean }>(
+        remote.connection, "POST", `/api/computers/desktops/${encodeURIComponent(remote.remoteId)}/cancel`,
+      );
+    }
     const lane = laneFor(id);
     lane.generation += 1;
     // Drop queued actions (their callers get cancelled results); a cancel can
@@ -948,6 +1213,12 @@ export function createComputerService(options: ComputerServiceOptions): Computer
 
   const release: ComputerService["release"] = async (desktopId) => {
     const id = await resolveDesktopId(desktopId);
+    const remote = await remoteTargetFor(id);
+    if (remote) {
+      return remoteJson<{ released: boolean }>(
+        remote.connection, "POST", `/api/computers/desktops/${encodeURIComponent(remote.remoteId)}/release`,
+      );
+    }
     const { driver } = await driverFor(id);
     const response = await enqueue(id, "observe", () => driver.request({ tool: "release_input" }));
     return { released: response.ok };
@@ -957,12 +1228,33 @@ export function createComputerService(options: ComputerServiceOptions): Computer
 
   const control: ComputerService["control"] = async (desktopId) => {
     const id = await resolveDesktopId(desktopId);
+    const remote = await remoteTargetFor(id);
+    if (remote) {
+      const result = await remoteJson<{ control?: ComputerControlState }>(
+        remote.connection, "GET", `/api/computers/desktops/${encodeURIComponent(remote.remoteId)}/control`,
+      );
+      if (!result.control) throw new HarnessServiceError("unavailable", "Remote Host returned no control state");
+      return { ...result.control, desktopId: id };
+    }
     await desktopRecord(id); // control state exists only for real desktops
     return controlState(id);
   };
 
   const takeover: ComputerService["takeover"] = async (params) => {
     const id = await resolveDesktopId(params.desktopId);
+    const remote = await remoteTargetFor(id);
+    if (remote) {
+      const result = await remoteJson<{ control?: ComputerControlState; cancelled: number; released: boolean }>(
+        remote.connection, "POST", `/api/computers/desktops/${encodeURIComponent(remote.remoteId)}/takeover`,
+        { ...(params.holderId ? { holderId: params.holderId } : {}) },
+      );
+      if (!result.control) throw new HarnessServiceError("unavailable", "Remote Host returned no control state");
+      return {
+        control: { ...result.control, desktopId: id },
+        cancelled: result.cancelled ?? 0,
+        released: result.released ?? false,
+      };
+    }
     await desktopRecord(id);
     const lane = laneFor(id);
     // Same interlock as cancel(): bump the generation so queued automation and
@@ -995,6 +1287,15 @@ export function createComputerService(options: ComputerServiceOptions): Computer
 
   const handback: ComputerService["handback"] = async (params) => {
     const id = await resolveDesktopId(params.desktopId);
+    const remote = await remoteTargetFor(id);
+    if (remote) {
+      const result = await remoteJson<{ control?: ComputerControlState; requiresObservation?: boolean }>(
+        remote.connection, "POST", `/api/computers/desktops/${encodeURIComponent(remote.remoteId)}/handback`,
+        { ...(params.holderId ? { holderId: params.holderId } : {}) },
+      );
+      if (!result.control) throw new HarnessServiceError("unavailable", "Remote Host returned no control state");
+      return { control: { ...result.control, desktopId: id }, requiresObservation: true };
+    }
     const lane = laneFor(id);
     if (lane.control.owner !== "human") {
       throw new HarnessServiceError("invalid-params", `Desktop "${id}" is not under human control`);
@@ -1042,6 +1343,14 @@ export function createComputerService(options: ComputerServiceOptions): Computer
   const input: ComputerService["input"] = async (params) => {
     const id = await resolveDesktopId(params.desktopId);
     validateHumanInput(params.input);
+    const remote = await remoteTargetFor(id);
+    if (remote) {
+      // The remote Host enforces ownership; the local check is only a mirror.
+      return remoteJson<ComputerInputResult>(
+        remote.connection, "POST", `/api/computers/desktops/${encodeURIComponent(remote.remoteId)}/input`,
+        { ...(params.holderId ? { holderId: params.holderId } : {}), input: params.input },
+      );
+    }
     const lane = laneFor(id);
     if (lane.control.owner !== "human") {
       throw new HarnessServiceError("forbidden", `Desktop "${id}" is not under human control`);
@@ -1124,6 +1433,56 @@ export function createComputerService(options: ComputerServiceOptions): Computer
 
   const subscribeFrames: ComputerService["subscribeFrames"] = async (desktopId, viewerId, listener) => {
     const id = await resolveDesktopId(desktopId);
+    const remote = await remoteTargetFor(id);
+    if (remote) {
+      // Frames for a remote desktop come off the remote Host's own stream —
+      // the same authenticated Host-to-Host connection carries them (BC6).
+      const controller = new AbortController();
+      const path = `/api/computers/desktops/${encodeURIComponent(remote.remoteId)}/stream?viewer=${encodeURIComponent(viewerId)}`;
+      const response = await remoteFetch(remote.connection, "GET", path, undefined, controller.signal);
+      if (!response.ok) {
+        const payload = await response.json().catch(() => null) as { error?: string } | null;
+        throw new HarnessServiceError(
+          "unavailable",
+          payload?.error ?? `Remote desktop stream failed (${response.status})`,
+        );
+      }
+      void (async () => {
+        try {
+          const reader = response.body?.getReader();
+          if (!reader) return;
+          const decoder = new TextDecoder();
+          let buffer = "";
+          for (;;) {
+            const { done, value } = await reader.read();
+            if (done) break;
+            buffer += decoder.decode(value, { stream: true });
+            let boundary: number;
+            while ((boundary = buffer.indexOf("\n\n")) >= 0) {
+              const chunk = buffer.slice(0, boundary);
+              buffer = buffer.slice(boundary + 2);
+              const dataLine = chunk.split("\n").find((line) => line.startsWith("data:"));
+              if (!dataLine) continue;
+              try {
+                const event = JSON.parse(dataLine.slice(5).trim()) as DesktopViewEvent;
+                if (event.type === "control") {
+                  listener({ ...event, control: { ...event.control, desktopId: id } });
+                } else {
+                  listener(event);
+                }
+              } catch { /* malformed stream chunk is dropped */ }
+            }
+          }
+          // The remote stream ended — tell the viewer, don't fake a frame.
+          listener({ type: "error", error: "Remote desktop stream ended" });
+        } catch (error) {
+          if (!controller.signal.aborted) {
+            try { listener({ type: "error", error: error instanceof Error ? error.message : String(error) }); } catch { /* */ }
+          }
+        }
+      })();
+      return () => { controller.abort(); };
+    }
     await desktopRecord(id);
     const lane = laneFor(id);
     // A reconnecting holder gets its control marked reachable again.

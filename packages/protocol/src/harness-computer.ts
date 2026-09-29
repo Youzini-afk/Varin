@@ -38,6 +38,12 @@ export interface ComputerDesktop {
   statusDetail?: string;
   /** Last probed driver capabilities; absent until the first successful probe. */
   capabilities?: ComputerCapabilities;
+  /**
+   * Remote binding (BC6): this catalog entry mirrors a desktop owned by
+   * another Host reached through `connectionId`. Calls route to that Host —
+   * control state and the driver live there, not here.
+   */
+  remote?: { connectionId: string; desktopId: string };
 }
 
 /** What the resident platform driver can actually do right now. */

@@ -70,6 +70,75 @@ export function registerComputerRoutes(app: Express, { computers, requireAuth = 
     }
   });
 
+  // --- Host-to-Host computer API (BC6) ---------------------------------------
+  // The same endpoints a remote coordinator Host calls to operate this
+  // machine's desktops; they are also how authenticated remote clients drive.
+
+  /** One structured observation of an app window on this desktop. */
+  app.post("/api/computers/desktops/:desktopId/observe", requireAuth, async (request: Request, response: Response) => {
+    response.setHeader("Cache-Control", "no-store");
+    try {
+      const body = request.body ?? {};
+      const observation = await computers.observe({
+        desktopId: String(request.params.desktopId ?? ""),
+        app: typeof body.app === "string" ? body.app : "",
+        ...(body.window !== undefined && (typeof body.window === "number" || typeof body.window === "string")
+          ? { window: body.window } : {}),
+        ...(typeof body.includeScreenshot === "boolean" ? { includeScreenshot: body.includeScreenshot } : {}),
+        ...(typeof body.textLimit === "number" || body.textLimit === "max" ? { textLimit: body.textLimit } : {}),
+        ...(typeof body.maxTreeNodes === "number" ? { maxTreeNodes: body.maxTreeNodes } : {}),
+        ...(typeof body.maxTreeDepth === "number" ? { maxTreeDepth: body.maxTreeDepth } : {}),
+      });
+      response.json({ observation });
+    } catch (error) {
+      sendError(response, error, "Unable to observe the desktop");
+    }
+  });
+
+  /** One structured automated action against an app on this desktop. */
+  app.post("/api/computers/desktops/:desktopId/act", requireAuth, async (request: Request, response: Response) => {
+    response.setHeader("Cache-Control", "no-store");
+    try {
+      const result = await computers.act({
+        desktopId: String(request.params.desktopId ?? ""),
+        action: request.body?.action,
+      });
+      response.json({ result });
+    } catch (error) {
+      sendError(response, error, "Unable to run the computer action");
+    }
+  });
+
+  /** App inventory on this desktop. */
+  app.get("/api/computers/desktops/:desktopId/apps", requireAuth, async (request: Request, response: Response) => {
+    response.setHeader("Cache-Control", "no-store");
+    try {
+      response.json({ apps: await computers.listApps(String(request.params.desktopId ?? "")) });
+    } catch (error) {
+      sendError(response, error, "Unable to list desktop apps");
+    }
+  });
+
+  /** Cancel queued automation and release held input on this desktop. */
+  app.post("/api/computers/desktops/:desktopId/cancel", requireAuth, async (request: Request, response: Response) => {
+    response.setHeader("Cache-Control", "no-store");
+    try {
+      response.json(await computers.cancel(String(request.params.desktopId ?? "")));
+    } catch (error) {
+      sendError(response, error, "Unable to cancel desktop actions");
+    }
+  });
+
+  /** Release held synthetic input on this desktop. */
+  app.post("/api/computers/desktops/:desktopId/release", requireAuth, async (request: Request, response: Response) => {
+    response.setHeader("Cache-Control", "no-store");
+    try {
+      response.json(await computers.release(String(request.params.desktopId ?? "")));
+    } catch (error) {
+      sendError(response, error, "Unable to release desktop input");
+    }
+  });
+
   // --- BC5: control ownership + desktop view --------------------------------
 
   /** Who currently owns input on this desktop (agent or a human viewer). */

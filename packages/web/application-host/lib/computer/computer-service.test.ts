@@ -518,3 +518,118 @@ describe("computer service (BC5 control + view)", () => {
     expect(frames).toBeGreaterThan(0);
   });
 });
+
+describe("computer service (BC6 remote hosts)", () => {
+  const remoteHost = { id: "r1", label: "Office PC", apiUrl: "http://10.0.0.5:8765", clientToken: "tok-1" };
+  const remoteCatalog = {
+    machines: [{ id: "local", name: "Office PC", provider: "local", platform: "linux", coordinatorHostId: "remote-h", status: "active", createdAt: "t", updatedAt: "t" }],
+    desktops: [{ id: "d0", machineId: "local", label: "Console session", kind: "console", status: "available" }],
+    defaultDesktopId: "d0",
+  };
+
+  const remoteFetch = (handler: (url: string, init: RequestInit) => Response | Promise<Response>) => (
+    (async (input: unknown, init?: RequestInit) => handler(String(input), init ?? {})) as unknown as typeof fetch
+  );
+
+  const jsonResponse = (body: unknown, status = 200) => new Response(JSON.stringify(body), {
+    status,
+    headers: { "Content-Type": "application/json" },
+  });
+
+  it("mirrors a configured remote Host's desktops into the local catalog", async () => {
+    const withRemote = createComputerService({
+      client: fakeKernel().client as never,
+      hostId: "host-1",
+      platform: "windows",
+      dataDir: newDataDir(),
+      createDriver: () => makeDriver(async () => okResponse()),
+      remoteHosts: async () => [remoteHost],
+      fetch: remoteFetch((url) => {
+        expect(String(url)).toContain("10.0.0.5");
+        return jsonResponse(remoteCatalog);
+      }),
+    });
+    const catalog = await withRemote.list();
+    const remoteMachine = catalog.machines.find((m) => m.id === "remote:r1");
+    expect(remoteMachine?.provider).toBe("remote");
+    expect(remoteMachine?.platform).toBe("linux");
+    const mirrored = catalog.desktops.find((d) => d.id === "remote:r1:d0");
+    expect(mirrored?.remote).toEqual({ connectionId: "r1", desktopId: "d0" });
+    expect(mirrored?.status).toBe("available");
+  });
+
+  it("marks an unreachable remote Host's mirror unavailable with the real error", async () => {
+    const service = createComputerService({
+      client: fakeKernel().client as never,
+      hostId: "host-1",
+      platform: "windows",
+      dataDir: newDataDir(),
+      createDriver: () => makeDriver(async () => okResponse()),
+      remoteHosts: async () => [remoteHost],
+      fetch: remoteFetch(() => { throw new Error("connect ECONNREFUSED"); }),
+    });
+    const catalog = await service.list();
+    const remoteMachine = catalog.machines.find((m) => m.id === "remote:r1");
+    expect(remoteMachine?.status).toBe("unavailable");
+    expect(remoteMachine?.statusDetail).toContain("ECONNREFUSED");
+  });
+
+  it("routes observe/act to the remote desktop and keeps the remote observation id", async () => {
+    const seen: Array<{ url: string; body: Record<string, unknown> }> = [];
+    const service = createComputerService({
+      client: fakeKernel().client as never,
+      hostId: "host-1",
+      platform: "windows",
+      dataDir: newDataDir(),
+      createDriver: () => makeDriver(async () => okResponse()),
+      remoteHosts: async () => [remoteHost],
+      fetch: remoteFetch(async (url, init) => {
+        const body = init.body ? JSON.parse(String(init.body)) as Record<string, unknown> : {};
+        seen.push({ url, body });
+        if (url.endsWith("/api/computers")) return jsonResponse(remoteCatalog);
+        if (url.endsWith("/observe")) {
+          return jsonResponse({ observation: {
+            id: "remote-obs-9", desktopId: "d0", machineId: "local",
+            app: { name: "term", pid: 7 }, treeLines: [], elements: [{ index: 0, name: "ok" }], capturedAt: "t",
+          } });
+        }
+        if (url.endsWith("/act")) {
+          return jsonResponse({ result: { accepted: true, detail: "done" } });
+        }
+        return jsonResponse({ error: "unexpected" }, 404);
+      }),
+    });
+    await service.list(); // mirrors the catalog
+    const observation = await service.observe({ desktopId: "remote:r1:d0", app: "term" });
+    expect(observation.id).toBe("remote-obs-9"); // remote freshness id preserved
+    const result = await service.act({
+      desktopId: "remote:r1:d0",
+      action: { kind: "click", app: "term", observationId: observation.id, elementIndex: 0 },
+    });
+    expect(result.accepted).toBe(true);
+    // The remote Host validates the element index against ITS observation —
+    // the forwarded action must carry the remote observation id verbatim.
+    const actCall = seen.find((entry) => entry.url.endsWith("/act"));
+    expect(actCall?.body.action).toMatchObject({ kind: "click", observationId: "remote-obs-9", elementIndex: 0 });
+  });
+
+  it("a transport failure on remote act reports unknown — never a replay", async () => {
+    const service = createComputerService({
+      client: fakeKernel().client as never,
+      hostId: "host-1",
+      platform: "windows",
+      dataDir: newDataDir(),
+      createDriver: () => makeDriver(async () => okResponse()),
+      remoteHosts: async () => [remoteHost],
+      fetch: remoteFetch((url) => {
+        if (url.endsWith("/api/computers")) return jsonResponse(remoteCatalog);
+        if (url.endsWith("/act")) throw new Error("socket hang up");
+        return jsonResponse({});
+      }),
+    });
+    await service.list();
+    const result = await service.act({ desktopId: "remote:r1:d0", action: { kind: "key", app: "term", key: "enter" } });
+    expect(result).toMatchObject({ accepted: false, outcome: "unknown" });
+    expect(result.detail).toContain("socket hang up");
+  });
+});

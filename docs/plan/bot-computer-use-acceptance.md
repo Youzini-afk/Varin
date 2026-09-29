@@ -12,10 +12,11 @@ the original focused tests did not establish the complete product contract.
 This review follows the actual Bot entry, durable owner, memory writer,
 organizer, recall/context, computer tool, driver queue, and platform input paths.
 It repairs concrete defects in those paths. BC5 (server-side control
-ownership, real desktop frame stream, takeover/handback) is implemented in
-the Host service and drivers — see its section below. It does not implement
-BC6–BC9 (remote hosts, VMs, product integration, packaging), and does not
-treat missing BC0–BC4 features as merely untested platforms.
+ownership, real desktop frame stream, takeover/handback) and BC6 (remote
+Host catalog mirroring with authenticated operation forwarding) are
+implemented in the Host service and drivers — see their sections below.
+It does not implement BC7–BC9 (VMs, product integration, packaging), and
+does not treat missing BC0–BC4 features as merely untested platforms.
 
 ## BC0–BC2 follow-up review (2026-09-29)
 
@@ -369,6 +370,54 @@ Honest limits that remain:
 - Linux Xvnc/noVNC transport for *independent* remote desktops is BC6's lane;
   this Host-driven poll is the shared contract for local desktops now.
 
+## BC6 remote Hosts (implemented)
+
+Remote Computer Use reuses the configured `desktopHosts` entries — the same
+authenticated Host↔Host client settings managed-remote already consumes —
+rather than introducing a parallel connection system.
+
+- **Catalog mirror**: `createComputerService` accepts a `remoteHosts` resolver
+  (wired in `index.ts` from `configuredHosts(readSettingsFromDisk())`). Each
+  `list()` triggers a debounced `syncRemote`: a `GET /api/computers` against
+  the remote Host rewrites that Host's `computer.machine`/`computer.desktop`
+  records (`remote:r<index>:…` ids) into the local catalog. A Host that
+  cannot be reached leaves its previous mirror with `unavailable` + the real
+  transport detail instead of silently vanishing.
+- **Remote authority stays remote**: `ComputerDesktop.remote` binds each
+  mirrored desktop to its apiUrl/token/hostId. `observe`, `act`, `listApps`,
+  `cancel`, `release`, `control`, `takeover`, `handback`, `input`, and frame
+  subscriptions resolve the binding and forward over authenticated HTTP to
+  new Host↔Host routes (`…/observe`, `…/act`, `…/apps`, `…/cancel`,
+  `…/release`) plus the existing BC5 control endpoints. Observation freshness,
+  control ownership, action serialization, cancellation, and input release
+  all execute on the remote Host's own service.
+- **Remote observation ids are preserved**: `observe` re-binds only the
+  returned desktop id to the local mirror key; `observation.id` stays the
+  remote value because the remote store validates freshness against it.
+- **Failure honesty**: a private `RemoteTransportError` separates transport
+  loss from structured remote rejection. A transport failure on `act`
+  resolves `{ accepted: true, outcome: "unknown" }` — input may already have
+  landed and is never replayed — while a remote `HarnessServiceError` keeps
+  its code (forbidden/stale/not-found).
+- **Streams**: remote frame subscriptions open an upstream SSE connection to
+  the remote `…/stream` endpoint and forward `frame`/`control`/`error`
+  events; upstream loss surfaces as a terminal error event.
+- **Persistence boundary**: the remote Host is the process that must stay
+  alive — the local catalog mirror is rebuildable state, so a local client
+  closing loses nothing except cached records. The desktop Hosts
+  themselves already run independently of this UI.
+
+Honest limits that remain:
+
+- Only the computer surface forwards today — Bot threads/tasks still execute
+  where their pi-host lives; remote session continuity is BC8 scope.
+- Linux Xvnc/noVNC provisioning of an *independent* desktop on a headless
+  remote remains unimplemented; BC6 assumes the remote Host already owns a
+  reachable desktop.
+- Remote paths are covered by focused tests with a fake `fetch`; no real
+  second Host has answered yet — a live Host↔Host integration run is still
+  owed.
+
 ## Verification boundary
 
 Focused checks cover the changed Host services, storage-backed memory behavior,
@@ -398,6 +447,14 @@ generation bump, human input gated by ownership and holder identity,
 disconnect marking the holder pending-recovery (reachable=false) without
 handing back, reconnect restoring it, and independent multi-viewer frame
 subscriptions that stop when the last viewer leaves.
+
+BC6 focused coverage: 43 computer-suite tests pass, adding catalog mirroring
+from a configured remote Host (remote desktops carry the `remote` binding),
+an unreachable Host degrading its mirror to `unavailable` with the real
+transport detail, observe/act forwarding that preserves the remote
+observation id verbatim, and a transport failure on `act` reporting
+`outcome: "unknown"` without replay. All BC6 coverage runs against a fake
+`fetch`; live Host↔Host integration remains unverified.
 
 Windows target/input handling follows the official contracts for
 [SetForegroundWindow](https://learn.microsoft.com/en-us/windows/win32/api/winuser/nf-winuser-setforegroundwindow)

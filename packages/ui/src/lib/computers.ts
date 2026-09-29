@@ -60,14 +60,6 @@ const desktopPost = async <T>(desktopId: string, action: string, body: unknown, 
   )
 );
 
-export const computerControl = async (desktopId: string): Promise<ComputerControlState> => {
-  const result = await readJson<{ control: ComputerControlState }>(
-    await runtimeFetch(`/api/computers/desktops/${encodeURIComponent(desktopId)}/control`),
-    'Unable to read desktop control',
-  );
-  return result.control;
-};
-
 export const takeoverDesktop = (desktopId: string, holderId: string) => (
   desktopPost<{ control: ComputerControlState; cancelled: number; released: boolean }>(
     desktopId, 'takeover', { holderId }, 'Unable to take over the desktop',

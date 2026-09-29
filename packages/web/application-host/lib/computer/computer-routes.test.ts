@@ -25,7 +25,7 @@ const desktop: ComputerDesktop = {
 };
 
 const fixture = () => {
-  const computers = {
+  const computers: Record<string, ReturnType<typeof vi.fn>> = {
     list: vi.fn(async () => ({ machines: [machine], desktops: [desktop] })),
     probe: vi.fn(async () => ({ ...desktop, capabilities: { platform: "windows", driver: "windows-uia", observeTree: true, screenshot: true, elementAction: true, coordinateInput: true, textInput: true, drag: true, status: "ready" as const } })),
     defaultDesktop: vi.fn(async () => "local-console"),
@@ -53,12 +53,12 @@ describe("computer routes (BC4)", () => {
     const response = await request(app).post("/api/computers/desktops/local-console/probe");
     expect(response.status).toBe(200);
     expect(response.body.desktop.capabilities.driver).toBe("windows-uia");
-    expect(computers.probe).toHaveBeenCalledWith("local-console");
+    expect(computers.probe!).toHaveBeenCalledWith("local-console");
   });
 
   it("a probe failure maps to an HTTP error, not a fake success", async () => {
     const { app, computers } = fixture();
-    computers.probe.mockRejectedValue(new HarnessServiceError("unavailable", "no desktop session"));
+    computers.probe!.mockRejectedValue(new HarnessServiceError("unavailable", "no desktop session"));
     const response = await request(app).post("/api/computers/desktops/local-console/probe");
     expect(response.status).toBe(500);
     expect(response.body.code).toBe("unavailable");
@@ -137,7 +137,7 @@ describe("computer routes (BC5 control + view)", () => {
 
   it("input while the agent owns the desktop maps forbidden to 409", async () => {
     const { app, computers } = fixture5();
-    (computers.input as ReturnType<typeof vi.fn>).mockRejectedValue(
+    computers.input!.mockRejectedValue(
       new HarnessServiceError("forbidden", "Desktop is not under human control"),
     );
     const response = await request(app)

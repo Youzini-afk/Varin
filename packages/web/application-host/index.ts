@@ -4,7 +4,7 @@ import { createExperimentService } from './lib/harness/experiments.js';
 import { createResourceService } from './lib/harness/resources.js';
 import { createSourceService } from './lib/harness/sources.js';
 import { createManagedRemoteExecutionService } from './lib/harness/managed-remote-service.js';
-import { createManagedRemoteTargetRegistry, type ManagedRemoteTargetRegistry } from './lib/harness/managed-remote-client.js';
+import { createManagedRemoteTargetRegistry, configuredHosts, type ManagedRemoteTargetRegistry } from './lib/harness/managed-remote-client.js';
 import { registerManagedRemoteRoutes } from './lib/harness/managed-remote-routes.js';
 import compression from 'compression';
 import crypto from 'crypto';
@@ -1790,6 +1790,10 @@ async function main(options: StartWebUiServerOptions = {}): Promise<WebUiServerC
     client: kernelClient,
     hostId,
     dataDir: VARIN_DATA_DIR,
+    // BC6: remote desktops are served by the same `desktopHosts` connection
+    // settings managed-remote resolves — apiUrl + clientToken authenticate
+    // Host-to-Host computer calls; no local credentials cross the wire.
+    remoteHosts: async () => configuredHosts(await readSettingsFromDisk() as unknown as Record<string, unknown>),
   });
   // BC1: unified memory domain. The same service backs the harness memory.*
   // methods, the UI routes, and later the background organizer — one writer

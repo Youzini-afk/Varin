@@ -33,7 +33,7 @@ const payloadOf = (record: KernelRecordResult): Record<string, unknown> => {
 };
 const stringValue = (value: unknown): string | undefined => typeof value === "string" && value.trim() ? value.trim() : undefined;
 
-interface ConfiguredHost {
+export interface ConfiguredHost {
   id: string;
   label: string;
   apiUrl: string;
@@ -111,7 +111,7 @@ class ManagedTargetClient {
   }
 }
 
-const configuredHosts = (settings: Record<string, unknown>): ConfiguredHost[] => {
+export const configuredHosts = (settings: Record<string, unknown>): ConfiguredHost[] => {
   const sshIds = new Set((Array.isArray(settings.desktopSshInstances) ? settings.desktopSshInstances : [])
     .flatMap((entry) => entry && typeof entry === "object" && stringValue((entry as Record<string, unknown>).id)
       ? [stringValue((entry as Record<string, unknown>).id)!] : []));
