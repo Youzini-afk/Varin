@@ -29,10 +29,11 @@ describe("SessionHost prompt streaming", () => {
     const events: Array<{ data: unknown; event: string }> = [];
     const faux = registerFauxProvider();
     let observedContext: unknown;
-    faux.setResponses([(context) => {
+    const answer = (context: unknown) => {
       observedContext = context;
       return fauxAssistantMessage("hello from Varin");
-    }]);
+    };
+    faux.setResponses([answer, answer]);
     const model = faux.getModel();
     const configureServices = async (services: AgentSessionServices) => {
       services.modelRuntime.registerProvider(model.provider, {
@@ -55,15 +56,19 @@ describe("SessionHost prompt streaming", () => {
       await services.modelRuntime.setRuntimeApiKey(model.provider, "faux-key");
       return { model };
     };
-    let host!: SessionHost;
     const surfaceRequests: Array<Record<string, unknown>> = [];
-    host = new SessionHost({
+    const host = new SessionHost({
       agentDir,
       configureServices,
       emit: <E extends HostEvent>(event: E, data: HostEventData<E>) => {
         events.push({ data, event });
         if (event === "harness.request" && data && typeof data === "object") {
           const request = data as unknown as Record<string, unknown>;
+          if (request.method === "session.instructions") {
+            queueMicrotask(() => host.respondHarness(host.sessionId ?? "", String(request.requestId), {
+              ok: true, result: { instructions: null },
+            }));
+          }
           if (request.method === "surface.snapshot.commit" || request.method === "surface.snapshot.release") {
             surfaceRequests.push(request);
             queueMicrotask(() => host.respondHarness(
@@ -73,6 +78,10 @@ describe("SessionHost prompt streaming", () => {
                 ? { ok: true, result: { committed: true } }
                 : { ok: true, result: { released: true } },
             ));
+          } else if (request.method !== "session.instructions") {
+            queueMicrotask(() => host.respondHarness(host.sessionId ?? "", String(request.requestId), {
+              ok: false, error: { code: "unavailable", message: "No harness service in this prompt fixture" },
+            }));
           }
         }
       },
@@ -189,6 +198,18 @@ describe("SessionHost prompt streaming", () => {
         ),
         false,
       );
+      host.applySessionInstructions(snapshot.sessionId, "Bot persona after the profile changed.");
+      await host.prompt(snapshot.sessionId, "say again", undefined, "Answer with the hidden Varin instruction.");
+      await host.session.waitForIdle();
+      assert.match(JSON.stringify(observedContext), /Bot persona after the profile changed/);
+      assert.equal(events.filter((entry) => entry.event === "harness.request"
+        && (entry.data as { method?: string }).method === "session.instructions").length, 1);
+      assert.equal(
+        host.entries(snapshot.sessionId, "branch").entries.some(
+          (entry) => entry.type === "custom_message" && entry.customType === "varin.instructions",
+        ),
+        true,
+      );
       const forked = await host.fork(snapshot.sessionId, userEntryId, "at");
       assert.equal(forked.cancelled, false);
       assert.notEqual(forked.snapshot.sessionId, snapshot.sessionId);
@@ -225,8 +246,7 @@ describe("SessionHost prompt streaming", () => {
       await services.modelRuntime.setRuntimeApiKey(model.provider, "faux-key");
       return { model };
     };
-    let host!: SessionHost;
-    host = new SessionHost({
+    const host = new SessionHost({
       agentDir,
       configureServices,
       emit: <E extends HostEvent>(event: E, data: HostEventData<E>) => {

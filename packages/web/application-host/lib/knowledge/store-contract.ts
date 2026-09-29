@@ -237,6 +237,9 @@ export interface OrganizerProgress {
    * ones. Cleared when the row reaches a terminal status.
    */
   proposals?: OrganizerPreparedProposal[];
+  /** Frozen end cursors for a prepared session range. Appended turns cannot
+   * change the proposal set that must be replayed before new material. */
+  preparedRange?: { eventCursor?: number; entryCursor?: string };
   updatedAt: number;
   lastError?: string;
 }

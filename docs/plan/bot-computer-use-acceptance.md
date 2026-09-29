@@ -14,6 +14,38 @@ organizer, recall/context, computer tool, driver queue, and platform input paths
 It repairs concrete defects in those paths. It does not implement BC5–BC9, and
 does not treat missing BC0–BC4 features as merely untested platforms.
 
+## BC0–BC2 follow-up review (2026-09-29)
+
+The execution-agent additions at `7e17bd77` and `51b2bdd6` connect real Bot
+management and a durable organizer journal. They improve the baseline, but
+**BC0–BC2 are not yet fully accepted**. The follow-up found defects in the
+actual write and recovery path; focused reproductions preceded these repairs:
+
+| Area | Observed failure | Follow-up correction |
+| --- | --- | --- |
+| Supplement write | An invalid target was rejected after TDB had inserted the new row; the rejected content was visible in the live store | Validate the target inside the writer queue before any insert or retirement. A rejected write leaves the store unchanged. |
+| Forgotten source | Forgetting one memory suppressed all later decisions from the same conversation | Use a stable covered-range key for new organizer memories; source-content fingerprints remain separate. Later ranges in the same session can form memories. |
+| Prepared replay | A new turn appended after preparation changed the reconstructed fingerprint, causing re-narration instead of replay | Persist prepared end cursors and replay that frozen range before covering appended material. Malformed stored proposals now fail visibly. |
+| Partial commit | If proposal 1 committed and proposal 2 failed, replay recovered the content but terminal `produced` omitted proposal 1 | Recover the earlier row's ID from its source-range provenance. |
+| Source changed mid-inference | A revised Run report could still commit the old conclusion | Re-read the bounded source before preparation and commit. A changed source stays pending for fresh inference. |
+| Model capacity | Eight 3 KB sources were sent together as a 24,986-character prompt despite a 12,800-character source budget | Bound the aggregate source batch and drain the remainder in later passes. An individual source beyond the model budget is now a visible failed row. |
+| Retry and failure visibility | Manual retry still obeyed the five-minute automatic backoff; source read failures had no progress row; a broken Bot catalog silently became an empty sweep | Manual retry bypasses backoff, source errors persist, and catalog/sweep errors reach Host diagnostics. |
+| Bot entry and UI | Reopening a live worker ignored the profile model; Bot memory change events missed the selected scope; work-list read errors appeared as an empty list | Reconcile the worker model, use one `bot:<id>` event identity, and surface work-list errors. |
+| Bot persona | Every send queried the Host, and a process-local receipt survived branch navigation/compaction after the hidden instruction disappeared | Push profile edits to the live worker, cache a direct-open recovery lookup, and deduplicate against the active Pi context. Clearing the persona appends a revocation. |
+
+The remaining acceptance gaps are concrete. A single very large conversation
+event/entry is still one unit: it is reported as too large instead of being
+advanced in durable segments. A missing model context descriptor uses a fixed
+fallback budget, and the existing-memory list plus the model's answer still
+need explicit capacity accounting. A prepared journal plus idempotent writes
+recovers partial commits, but Pi source history and TDB are separate owners;
+there is no atomic transaction across them. When no Pi default model is
+configured, clearing a Bot model preference leaves the existing session's
+model selected. Directly reopened Bot sessions may make one Host persona lookup
+before the first turn. The user scope remains a proposal target, not an
+organizer source. These are product/implementation gaps, not a request for
+another verification framework.
+
 ## Defects corrected in this review
 
 | Area | Baseline defect | Correction and evidence |
@@ -43,7 +75,7 @@ Paths in the table refer to modules below
 
 These are implementation gaps, not approvals or a request to add another audit framework.
 
-### BC0: durable Bot identity, entry, and work path — completed 2026-09-29
+### BC0: durable Bot identity, entry, and work path — implemented, follow-up gaps above
 
 - `instructions` now enter model input: the Pi worker resolves the Host-owned
   `session.instructions` (the Bot persona for entry sessions) on every
@@ -69,7 +101,7 @@ These are implementation gaps, not approvals or a request to add another audit f
 
 ### BC1–BC2: one recoverable coverage transaction, single producer
 
-Implemented and verified by focused tests (`memory-organizer.test.ts`,
+Implemented behavior covered by focused tests (`memory-organizer.test.ts`,
 `store.test.ts`, `knowledge-catalog-routes.test.ts`):
 
 - The background organizer is the only automatic memory producer. The

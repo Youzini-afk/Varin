@@ -560,6 +560,7 @@ describe("KnowledgeStore", () => {
         sourceKey: "fp-1",
         eventCursor: 7,
         produced: [3],
+        preparedRange: { eventCursor: 7 },
         proposals: [{
           action: "supplement", scope: "workspace", nature: "decision",
           content: "Thursday releases this quarter.", trigger: "release", target: 42,
@@ -579,6 +580,7 @@ describe("KnowledgeStore", () => {
         status: "prepared",
         sourceKey: "fp-1",
         eventCursor: 7,
+        preparedRange: { eventCursor: 7 },
         produced: [3],
         lastError: "commit boom",
       });
@@ -598,6 +600,7 @@ describe("KnowledgeStore", () => {
       const terminal = await second.getOrganizerProgress("session:s1");
       expect(terminal?.status).toBe("formed");
       expect(terminal?.proposals).toBeUndefined();
+      expect(terminal?.preparedRange).toBeUndefined();
       expect(terminal?.lastError).toBeUndefined();
       expect(terminal?.produced).toEqual([9]);
       await second.close();
@@ -618,6 +621,7 @@ describe("KnowledgeStore", () => {
       await expect(first.createKnowledgeIfAbsent({
         scope: "workspace", status: "accepted", content: "X", trigger: "", supplements: 999999,
       })).rejects.toMatchObject({ code: "invalid" });
+      expect((await first.listKnowledge({ scope: "workspace" })).map((row) => row.content)).toEqual(["Deploys run on Friday."]);
       const created = await first.createKnowledgeIfAbsent({
         scope: "workspace", status: "accepted",
         content: "This quarter releases happen on Thursday.", trigger: "release",

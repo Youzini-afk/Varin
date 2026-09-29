@@ -28,6 +28,7 @@ export function BotSettings() {
   const [instructions, setInstructions] = React.useState('');
 
   const selected = bots?.find((bot) => bot.id === selectedId) ?? null;
+  const workBotId = selected?.id;
 
   const refresh = React.useCallback(async () => {
     try {
@@ -45,13 +46,22 @@ export function BotSettings() {
   React.useEffect(() => {
     setName(selected?.name ?? '');
     setInstructions(selected?.instructions ?? '');
-    if (!selected) { setWork(null); return; }
+  }, [selected?.id, selected?.name, selected?.instructions]);
+
+  React.useEffect(() => {
+    if (!workBotId) { setWork(null); return; }
+    setWork(null);
     let cancelled = false;
-    void listBotWork(selected.id)
+    void listBotWork(workBotId)
       .then((items) => { if (!cancelled) setWork(items); })
-      .catch(() => { if (!cancelled) setWork([]); });
+      .catch((cause) => {
+        if (!cancelled) {
+          setWork(null);
+          setError(cause instanceof Error ? cause.message : String(cause));
+        }
+      });
     return () => { cancelled = true; };
-  }, [selected]);
+  }, [workBotId]);
 
   const run = async (key: string, task: () => Promise<void>) => {
     setBusy(key);

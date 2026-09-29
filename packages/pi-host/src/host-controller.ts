@@ -953,6 +953,13 @@ export class HostController {
           ),
         };
       }
+      case "session.instructions.apply":
+        return {
+          applied: this.#sessionHost.applySessionInstructions(
+            readString(params, "sessionId"),
+            readNullableString(params, "instructions"),
+          ),
+        };
       case "session.workFocus.publish":
         return {
           published: this.#sessionHost.publishWorkFocus(readString(params, "sessionId")),

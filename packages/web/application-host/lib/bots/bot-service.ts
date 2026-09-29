@@ -31,12 +31,16 @@ export interface BotServiceOptions {
     model?: BotModelSelection;
   }): Promise<{ sessionId: string }>;
   /** Reopen a persisted Pi session (or return the live one). */
-  openSession(input: { sessionId: string; cwd?: string; model?: BotModelSelection }): Promise<{ sessionId: string }>;
+  openSession(input: { sessionId: string; cwd?: string; model?: BotModelSelection }): Promise<{
+    sessionId: string;
+    model?: { provider: string; id: string };
+  }>;
   /**
    * Apply a profile model change to an already-running entry worker. Absent
    * or failing workers keep the durable write; the next open re-applies.
    */
-  applyModel?: (input: { sessionId: string; model: BotModelSelection }) => Promise<void>;
+  applyModel?: (input: { sessionId: string; model: BotModelSelection | null }) => Promise<void>;
+  applyInstructions?: (input: { sessionId: string; instructions: string | null }) => Promise<void>;
   onError?(error: unknown): void;
 }
 
@@ -252,11 +256,17 @@ export function createBotService(options: BotServiceOptions): BotService {
     // Keep a live entry worker on the profile's current model. A closed or
     // unreachable worker is retried by the model passed on the next open;
     // clearing the preference likewise applies from the next open.
-    if (patch.model && summary.entrySessionId && options.applyModel) {
+    if (summary.entrySessionId && (patch.model !== undefined || patch.instructions !== undefined)) {
       try {
-        await options.applyModel({ sessionId: summary.entrySessionId, model: patch.model });
+        if (patch.model !== undefined) await options.applyModel?.({ sessionId: summary.entrySessionId, model: patch.model });
+        if (patch.instructions !== undefined) await options.applyInstructions?.({
+          sessionId: summary.entrySessionId, instructions: summary.instructions,
+        });
       } catch (error) {
         options.onError?.(error);
+        if (!isObject(error) || error.code !== "session_not_found") {
+          throw new HarnessServiceError("unavailable", "Bot profile was saved, but the live entry could not apply it. Reopen the entry conversation.");
+        }
       }
     }
     return summary;
@@ -279,6 +289,15 @@ export function createBotService(options: BotServiceOptions): BotService {
           cwd: bot.homeDir,
           ...(bot.model ? { model: bot.model } : {}),
         });
+        // The broker returns an existing live worker without applying the
+        // `openSession` model argument. Reconcile that worker before exposing
+        // the entry as ready; a closed worker already opened on the preference.
+        if (bot.model && options.applyModel && (session.model?.provider !== bot.model.providerId
+          || session.model.id !== bot.model.modelId)) {
+          await options.applyModel({ sessionId: session.sessionId, model: bot.model });
+        }
+        if (!bot.model) await options.applyModel?.({ sessionId: session.sessionId, model: null });
+        await options.applyInstructions?.({ sessionId: session.sessionId, instructions: bot.instructions });
         return { bot, sessionId: session.sessionId };
       } catch (error) {
         if (!isObject(error) || error.code !== "session_not_found") throw error;
@@ -296,6 +315,7 @@ export function createBotService(options: BotServiceOptions): BotService {
     // Return the session only once the durable owner binding was committed.
     // An IPC/storage failure is not a successful entry without Bot identity.
     const updated = await write(botId, "active", { entrySessionId: session.sessionId });
+    await options.applyInstructions?.({ sessionId: session.sessionId, instructions: updated.instructions });
     return { bot: updated, sessionId: session.sessionId };
   });
 
@@ -319,7 +339,7 @@ export function createBotService(options: BotServiceOptions): BotService {
     for (const { thread, activeRun } of snapshots) {
       if (thread.purpose === "bot-root") continue;
       // The latest Run's session is the reopenable surface for this work.
-      const runs = await options.registry.listRuns(botScopeId(botId), thread.id).catch(() => []);
+      const runs = await options.registry.listRuns(botScopeId(botId), thread.id);
       const sessionId = activeRun?.sessionId ?? runs.at(-1)?.sessionId ?? null;
       items.push({ thread, activeRun, sessionId });
     }

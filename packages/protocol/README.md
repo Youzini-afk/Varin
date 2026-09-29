@@ -133,7 +133,7 @@ interface HarnessSettings {
   dispatch: { concurrency: number; askBefore: Partial<Record<string, boolean>> };
   knowledge: {
     eventRetentionDays: number;
-    autoAcceptSuggestions: { workspace: boolean; user: boolean };
+    autoOrganize: { workspace: boolean; user: boolean; bot: boolean };
   };
   context: { backgroundPreparation: boolean; preparationWaterline: number }; // user-only
   review: { enabled: boolean; gate: boolean }; // automatic review, default off (D-285)

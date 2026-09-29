@@ -91,7 +91,7 @@ describe("harness knowledge catalog routes", () => {
           model: { providerId: "p", modelId: "m" },
           rows: scopeId === "workspace-1" ? await store.listOrganizerProgress() : [],
         }),
-        noteScope: (scopeId) => { retried.push(scopeId); },
+        retryScope: (scopeId) => { retried.push(scopeId); },
       },
       requireAuth: (req, res, next) => {
         if (req.header("x-test-auth") === "yes") next();

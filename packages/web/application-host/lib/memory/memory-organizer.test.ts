@@ -173,6 +173,51 @@ describe("memory organizer (BC2)", () => {
     await org.dispose();
   });
 
+  it("commits two distinct proposals from one source without self-conflicting", async () => {
+    const ws = await openStore("workspace", "ws-two-proposals");
+    stores.set("ws-two-proposals", ws);
+    await ws.putEvent({ kind: "turn", at: 1, sessionId: "s1", text: "Use Postgres and release on Thursday.", source: "user" });
+    scopeSessions.set("ws-two-proposals", ["s1"]);
+    organizeText = JSON.stringify({ memories: [
+      { action: "new", scope: "workspace", content: "Catalog uses Postgres.", source: "u0" },
+      { action: "new", scope: "workspace", content: "Release day is Thursday.", source: "u0" },
+    ] });
+    const org = organizer(memory());
+    org.noteScope("ws-two-proposals");
+    await wait(async () => (await ws.getOrganizerProgress("session:s1"))?.status === "formed");
+    expect((await ws.listKnowledge({ scope: "workspace", activeOnly: true })).map((item) => item.content).sort()).toEqual([
+      "Catalog uses Postgres.", "Release day is Thursday.",
+    ]);
+    await org.dispose();
+  });
+
+  it("recovers all produced ids after the second proposal fails mid-commit", async () => {
+    const ws = await openStore("workspace", "ws-partial-commit");
+    stores.set("ws-partial-commit", ws);
+    const service = memory();
+    const original = service.remember.bind(service);
+    let writes = 0;
+    (service as { remember: typeof original }).remember = async (...args) => {
+      if (++writes === 2) throw new Error("second write unavailable");
+      return original(...args);
+    };
+    await ws.putEvent({ kind: "turn", at: 1, sessionId: "s1", text: "Two decisions.", source: "user" });
+    scopeSessions.set("ws-partial-commit", ["s1"]);
+    organizeText = JSON.stringify({ memories: [
+      { action: "new", scope: "workspace", content: "Decision A.", source: "u0" },
+      { action: "new", scope: "workspace", content: "Decision B.", source: "u0" },
+    ] });
+    const org = organizer(service);
+    org.noteScope("ws-partial-commit");
+    await wait(async () => (await ws.getOrganizerProgress("session:s1"))?.lastError === "second write unavailable");
+    org.retryScope("ws-partial-commit");
+    await wait(async () => (await ws.getOrganizerProgress("session:s1"))?.status === "formed");
+    const rows = await ws.listKnowledge({ scope: "workspace", activeOnly: true });
+    expect(rows).toHaveLength(2);
+    expect((await ws.getOrganizerProgress("session:s1"))?.produced?.sort()).toEqual(rows.map((row) => row.id).sort());
+    await org.dispose();
+  });
+
   it("does not reprocess covered events after progress commits", async () => {
     const ws = await openStore("workspace", "ws-2");
     stores.set("ws-2", ws);
@@ -194,6 +239,31 @@ describe("memory organizer (BC2)", () => {
     await org.dispose();
   });
 
+  it("forgetting one source range does not suppress a later decision in the same session", async () => {
+    const ws = await openStore("workspace", "ws-forgotten-range");
+    stores.set("ws-forgotten-range", ws);
+    const service = memory();
+    const owner: MemoryOwner = { scope: "workspace", ownerId: "ws-forgotten-range" };
+    await ws.putEvent({ kind: "turn", at: 1, sessionId: "s1", text: "Use SQLite for local state.", source: "user" });
+    scopeSessions.set("ws-forgotten-range", ["s1"]);
+    let narrative = 0;
+    organizeText = () => JSON.stringify({ memories: [{
+      action: "new", scope: "workspace", source: "u0",
+      content: ++narrative === 1 ? "Local state uses SQLite." : "Backups run every Thursday.",
+    }] });
+    const org = organizer(service);
+    org.noteScope("ws-forgotten-range");
+    await wait(async () => (await ws.getOrganizerProgress("session:s1"))?.status === "formed");
+    const [first] = await service.list(owner, { activeOnly: true });
+    expect(first?.source?.key).toBeTruthy();
+    await service.forget(owner, first!.id);
+    const later = await ws.putEvent({ kind: "turn", at: 2, sessionId: "s1", text: "Backups are every Thursday.", source: "user" });
+    org.noteScope("ws-forgotten-range");
+    await wait(async () => (await ws.getOrganizerProgress("session:s1"))?.eventCursor === later.id);
+    expect((await service.list(owner, { activeOnly: true })).map((item) => item.content)).toEqual(["Backups run every Thursday."]);
+    await org.dispose();
+  });
+
   it("marks the range failed when the model errors and retries after backoff", async () => {
     const ws = await openStore("workspace", "ws-3");
     stores.set("ws-3", ws);
@@ -212,8 +282,8 @@ describe("memory organizer (BC2)", () => {
     org.noteScope("ws-3");
     await new Promise((resolve) => setTimeout(resolve, 300));
     expect(attempts).toBe(1);
-    nowMs += 6 * 60_000;
-    org.noteScope("ws-3");
+    // A deliberate user retry bypasses the automatic backoff immediately.
+    org.retryScope("ws-3");
     await wait(async () => (await progressFor("ws-3", "session:s1"))?.status === "formed");
     expect(attempts).toBe(2);
     expect((await ws.listKnowledge({ scope: "workspace" })).map((k) => k.content)).toEqual(["Persisted fact."]);
@@ -306,13 +376,15 @@ describe("memory organizer (BC2)", () => {
     const org = organizer(memory(), { readEntries: async () => { throw new Error("session read failed"); } });
     org.noteScope("ws");
     await new Promise((resolve) => setTimeout(resolve, 2200));
-    expect(await store.getOrganizerProgress("session:s1")).toBeNull();
+    expect(await store.getOrganizerProgress("session:s1")).toMatchObject({
+      status: "failed", lastError: "session read failed",
+    });
     expect(calls.some((call) => call.method === "harness.memoryOrganize")).toBe(false);
     await org.dispose();
     organizeText = JSON.stringify({ memories: [{}] });
     const retry = organizer(memory());
-    retry.noteScope("ws");
-    await wait(async () => (await store.getOrganizerProgress("session:s1"))?.status === "failed");
+    retry.retryScope("ws");
+    await wait(async () => (await store.getOrganizerProgress("session:s1"))?.lastError?.includes("parseable proposals envelope") === true);
     expect((await store.getOrganizerProgress("session:s1"))?.eventCursor).toBeUndefined();
     await retry.dispose();
   });
@@ -405,10 +477,13 @@ describe("memory organizer (BC2)", () => {
     expect(prepared?.proposals?.length).toBe(1);
     expect(prepared?.proposals?.[0]?.content).toBe("Catalog uses Postgres.");
     expect(prepared?.lastError).toContain("commit boom");
-    // The retry replays the stored proposals — no new narrate call.
+    const later = await ws.putEvent({ kind: "turn", at: 2, sessionId: "s1", text: "New work arrived while the first proposal was prepared.", source: "user" });
+    // The retry first replays the frozen range. The appended turn remains
+    // uncovered until the prepared proposal has committed.
     org.noteScope("ws-prepared");
     await wait(async () => (await progressFor("ws-prepared", "session:s1"))?.status === "formed");
     expect(calls.filter((call) => call.method === "harness.memoryOrganize").length).toBe(narrations);
+    expect((await progressFor("ws-prepared", "session:s1"))?.eventCursor).not.toBe(later.id);
     const rows = await ws.listKnowledge({ scope: "workspace" });
     expect(rows.map((row) => row.content)).toEqual(["Catalog uses Postgres."]);
     expect((await progressFor("ws-prepared", "session:s1"))?.proposals).toBeUndefined();
@@ -435,6 +510,33 @@ describe("memory organizer (BC2)", () => {
     await org.dispose();
   });
 
+  it("does not commit a report that changed while the model was narrating", async () => {
+    const ws = await openStore("workspace", "ws-live-report-change");
+    stores.set("ws-live-report-change", ws);
+    runSources = [{ threadId: "t1", threadTitle: "Job", runId: "r1", sessionId: null,
+      reportText: "Release v1.", endedAt: null }];
+    let finish!: () => void;
+    let began!: () => void;
+    const started = new Promise<void>((resolve) => { began = resolve; });
+    let requests = 0;
+    organizeText = async () => {
+      if (++requests === 1) {
+        began();
+        await new Promise<void>((resolve) => { finish = resolve; });
+        return JSON.stringify({ memories: [{ action: "new", scope: "workspace", content: "Release v1 shipped.", source: "u0" }] });
+      }
+      return JSON.stringify({ memories: [] });
+    };
+    const org = organizer(memory());
+    org.noteScope("ws-live-report-change");
+    await started;
+    runSources = [{ ...runSources[0]!, reportText: "Release v2 after rollback." }];
+    finish();
+    await wait(async () => (await ws.getOrganizerProgress("run:r1"))?.lastError?.includes("source changed") === true);
+    expect(await ws.listKnowledge({ scope: "workspace" })).toEqual([]);
+    await org.dispose();
+  });
+
   it("subdivides an oversized run report into per-part coverage rows", async () => {
     contextWindow = 8_000; // → unitChars floor 4k, batch ~12.8k
     const ws = await openStore("workspace", "ws-chunk");
@@ -451,6 +553,24 @@ describe("memory organizer (BC2)", () => {
     const rows = (await ws.listOrganizerProgress()).filter((row) => row.key.startsWith("run:r9"));
     expect(rows.length).toBeGreaterThan(1);
     expect(rows.every((row) => row.status === "reviewed-empty" || row.status === "formed")).toBe(true);
+    await org.dispose();
+  });
+
+  it("keeps a multi-source model request within the selected model's source budget", async () => {
+    contextWindow = 8_000;
+    const ws = await openStore("workspace", "ws-batch-capacity");
+    stores.set("ws-batch-capacity", ws);
+    runSources = Array.from({ length: 8 }, (_, index) => ({
+      threadId: `t${index}`, threadTitle: `Job ${index}`, runId: `r${index}`,
+      sessionId: null, reportText: `Finding ${index}: ${"important detail ".repeat(180)}`, endedAt: null,
+    }));
+    const org = organizer(memory());
+    org.noteScope("ws-batch-capacity");
+    await wait(() => calls.some((call) => call.method === "harness.memoryOrganize"));
+    const first = calls.find((call) => call.method === "harness.memoryOrganize")!;
+    expect(String(first.params.prompt).length).toBeLessThanOrEqual(12_800);
+    await wait(async () => (await ws.listOrganizerProgress()).filter((row) => row.status === "reviewed-empty").length === 8, 15_000);
+    expect(calls.filter((call) => call.method === "harness.memoryOrganize").length).toBeGreaterThan(1);
     await org.dispose();
   });
 

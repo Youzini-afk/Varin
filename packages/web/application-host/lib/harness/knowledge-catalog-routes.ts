@@ -19,7 +19,7 @@ export interface KnowledgeCatalogRoutesOptions {
   getUserStore(): Promise<KnowledgeStore>;
   onKnowledgeChanged?: (change: { scope: KnowledgeScope; workspaceId?: string }) => void;
   /** Background organizer — powers the progress surface and manual retry. */
-  organizer?: Pick<MemoryOrganizer, "describe" | "noteScope">;
+  organizer?: Pick<MemoryOrganizer, "describe" | "retryScope">;
   requireAuth?: RequestHandler;
 }
 
@@ -154,7 +154,7 @@ export function registerHarnessKnowledgeCatalogRoutes(
         response.status(400).json({ error: "scope must be workspace or bot with workspaceId/botId" });
         return;
       }
-      organizer.noteScope(scopeId);
+      organizer.retryScope(scopeId);
       response.json({ scopeId, scheduled: true });
     } catch (error) {
       sendKnowledgeError(response, error);

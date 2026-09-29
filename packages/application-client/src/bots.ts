@@ -12,7 +12,7 @@ export interface BotProfile {
   name: string;
   /** Persona/collaboration guidance owned by the user-facing Bot record. */
   instructions: string | null;
-  /** Preferred model for the Bot's own entry work; null inherits Host defaults. */
+  /** Preferred model for the Bot's entry; null follows effective Pi defaults when configured. */
   model: BotModelSelection | null;
   /** The Application Host that coordinates this Bot's lifecycle. */
   coordinatorHostId: string;

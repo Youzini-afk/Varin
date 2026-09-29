@@ -160,6 +160,10 @@ interface OrganizerUnit {
   source: KnowledgeSource;
   /** Coverage fingerprint for this exact source range+content. */
   sourceKey: string;
+  /** Stable range identity for forgetting, independent of source text edits. */
+  rangeKey: string;
+  startEventCursor?: number;
+  startEntryCursor?: string;
   /** Next event cursor when this unit is covered. */
   eventCursor?: number;
   /** Next entry cursor when this unit is covered. */
@@ -217,6 +221,8 @@ const progressKeyForRun = (runId: string, part: number): string =>
  */
 const unitSourceKey = (scopeId: string, unit: { key: string; eventCursor?: number; entryCursor?: string; texts: string[] }): string =>
   createHash("sha256").update(JSON.stringify([scopeId, unit.key, unit.eventCursor, unit.entryCursor, unit.texts])).digest("hex");
+const unitRangeKey = (scopeId: string, key: string, start: unknown, end: unknown): string =>
+  createHash("sha256").update(JSON.stringify([scopeId, key, start, end])).digest("hex");
 
 /** Terminal coverage for this exact source content — the transaction is done. */
 const isCovered = (progress: OrganizerProgress | undefined, sourceKey: string): boolean =>
@@ -224,9 +230,9 @@ const isCovered = (progress: OrganizerProgress | undefined, sourceKey: string): 
   && (progress.status === "formed" || progress.status === "reviewed-empty")
   && progress.sourceKey === sourceKey;
 
-const retryable = (progress: OrganizerProgress | undefined, now: number): boolean => {
+const retryable = (progress: OrganizerProgress | undefined, now: number, force = false): boolean => {
   if (!progress) return true;
-  if (progress.status === "failed") return now - progress.updatedAt >= FAILED_RETRY_MS;
+  if (progress.status === "failed") return force || now - progress.updatedAt >= FAILED_RETRY_MS;
   // "processing"/"prepared" rows are unfinished claims — a restart must resume them.
   return progress.status !== "formed" && progress.status !== "reviewed-empty";
 };
@@ -296,6 +302,7 @@ const parseProposals = (text: string): OrganizerProposal[] | null => {
 export function createMemoryOrganizer(deps: MemoryOrganizerDeps) {
   const now = () => deps.now?.() ?? Date.now();
   const queued = new Set<string>();
+  const forced = new Set<string>();
   const running = new Set<string>();
   const timers = new Map<string, ReturnType<typeof setTimeout>>();
   const activeBatches = new Map<string, string>();
@@ -365,6 +372,8 @@ export function createMemoryOrganizer(deps: MemoryOrganizerDeps) {
     sourceKey?: string | null;
     /** Set durable prepared proposals; `null` clears them (terminal rows). */
     proposals?: OrganizerPreparedProposal[] | null;
+    /** Frozen end cursors for a prepared session range. */
+    preparedRange?: OrganizerProgress["preparedRange"] | null;
   }
 
   const putProgress = async (
@@ -378,6 +387,8 @@ export function createMemoryOrganizer(deps: MemoryOrganizerDeps) {
       : existing?.sourceKey !== undefined ? existing.sourceKey : null;
     const proposals = patch.proposals !== undefined ? patch.proposals
       : existing?.proposals !== undefined ? existing.proposals : null;
+    const preparedRange = patch.preparedRange !== undefined ? patch.preparedRange
+      : existing?.preparedRange !== undefined ? existing.preparedRange : null;
     await store.putOrganizerProgress({
       key,
       status,
@@ -386,6 +397,7 @@ export function createMemoryOrganizer(deps: MemoryOrganizerDeps) {
       ...(patch.entryCursor !== undefined ? { entryCursor: patch.entryCursor } : existing?.entryCursor ? { entryCursor: existing.entryCursor } : {}),
       ...(patch.produced !== undefined ? { produced: patch.produced } : existing?.produced ? { produced: existing.produced } : {}),
       ...(proposals !== null ? { proposals } : {}),
+      ...(preparedRange !== null ? { preparedRange } : {}),
       updatedAt: now(),
       ...(patch.lastError !== undefined ? { lastError: patch.lastError } : {}),
     });
@@ -400,14 +412,18 @@ export function createMemoryOrganizer(deps: MemoryOrganizerDeps) {
     progress: OrganizerProgress | undefined,
     timestamp: number,
     unitChars: number,
+    force: boolean,
+    recordEmpty = true,
   ): Promise<OrganizerUnit | null> => {
     // A session continues after its previous range was committed. Terminal
     // progress closes that range, never the conversation's future material.
-    if (progress?.status === "failed" && !retryable(progress, timestamp)) return null;
+    if (progress?.status === "failed" && !retryable(progress, timestamp, force)) return null;
     const key = progressKeyForSession(sessionId);
+    const start = [progress?.eventCursor, progress?.entryCursor];
     const texts: string[] = [];
     let eventCursor = progress?.eventCursor;
     let entryCursor = progress?.entryCursor;
+    const preparedRange = progress?.status === "prepared" ? progress.preparedRange : undefined;
     // Capacity-aware accumulation: a unit stops at its character share and the
     // cursors only advance over material actually included — the remainder
     // stays pending for the next run instead of being silently clipped.
@@ -416,7 +432,9 @@ export function createMemoryOrganizer(deps: MemoryOrganizerDeps) {
     const events = (await store.listEvents({
       sessionId,
       ...(progress?.eventCursor !== undefined ? { afterId: progress.eventCursor } : {}),
-    })).slice(0, MAX_EVENTS_PER_SESSION);
+    })).slice(0, MAX_EVENTS_PER_SESSION)
+      .filter((event) => preparedRange === undefined
+        || (preparedRange.eventCursor !== undefined && event.id <= preparedRange.eventCursor));
     for (const event of events) {
       const text = event.text;
       // Empty events carry nothing to narrate — they are covered, not pending.
@@ -429,12 +447,28 @@ export function createMemoryOrganizer(deps: MemoryOrganizerDeps) {
     }
 
     if (chars < unitChars) {
-      const entries = await deps.readEntries(sessionId);
+      let entries: PiSessionEntry[];
+      try {
+        entries = await deps.readEntries(sessionId);
+      } catch (error) {
+        await putProgress(store, key, "failed", {
+          lastError: error instanceof Error ? error.message : String(error),
+        });
+        throw error;
+      }
       if (entries) {
         const from = entryCursor ? entries.findIndex((entry) => entry.id === entryCursor) : -1;
         const fresh = (from >= 0 ? entries.slice(from + 1) : entries)
           .slice(0, MAX_ENTRIES_PER_SESSION);
-        for (const entry of fresh) {
+        const endIndex = preparedRange?.entryCursor
+          ? fresh.findIndex((entry) => entry.id === preparedRange.entryCursor)
+          : -1;
+        if (preparedRange?.entryCursor && endIndex < 0) {
+          throw new Error(`Prepared session range endpoint is unavailable: ${preparedRange.entryCursor}`);
+        }
+        const bounded = preparedRange === undefined ? fresh
+          : preparedRange.entryCursor === undefined ? [] : fresh.slice(0, endIndex + 1);
+        for (const entry of bounded) {
           if (entry.type !== "message") { entryCursor = entry.id; continue; }
           const text = messageText(entry);
           if (!text) { entryCursor = entry.id; continue; }
@@ -454,7 +488,7 @@ export function createMemoryOrganizer(deps: MemoryOrganizerDeps) {
     if (texts.length === 0) {
       // Revisited with nothing new: still record coverage when a stale
       // failed/processing row exists so the sweep stops claiming it.
-      if (entryCursor !== progress?.entryCursor || eventCursor !== progress?.eventCursor) {
+      if (recordEmpty && (entryCursor !== progress?.entryCursor || eventCursor !== progress?.eventCursor)) {
         await putProgress(store, key, "reviewed-empty", {
           ...(entryCursor !== undefined ? { entryCursor } : {}),
           ...(eventCursor !== undefined ? { eventCursor } : {}),
@@ -469,10 +503,16 @@ export function createMemoryOrganizer(deps: MemoryOrganizerDeps) {
       label: `session ${sessionId}`,
       texts,
       source: { kind: "memory-organizer", sessionId, ...(entryCursor ? { entryId: entryCursor } : {}) },
+      ...(progress?.eventCursor !== undefined ? { startEventCursor: progress.eventCursor } : {}),
+      ...(progress?.entryCursor !== undefined ? { startEntryCursor: progress.entryCursor } : {}),
       ...(eventCursor !== undefined ? { eventCursor } : {}),
       ...(entryCursor !== undefined ? { entryCursor } : {}),
     };
-    return { ...unit, sourceKey: unitSourceKey(scopeId, unit) };
+    return {
+      ...unit,
+      sourceKey: unitSourceKey(scopeId, unit),
+      rangeKey: unitRangeKey(scopeId, key, start, [eventCursor, entryCursor]),
+    };
   };
 
   const collectRunUnits = async (
@@ -482,6 +522,7 @@ export function createMemoryOrganizer(deps: MemoryOrganizerDeps) {
     timestamp: number,
     progress: Map<string, OrganizerProgress>,
     unitChars: number,
+    force: boolean,
   ): Promise<OrganizerUnit[]> => {
     // Oversized reports subdivide into per-chunk units; each part carries its
     // own progress row so coverage survives a restart mid-report.
@@ -510,8 +551,8 @@ export function createMemoryOrganizer(deps: MemoryOrganizerDeps) {
       // rewritten under the same run id reopens the range. Failed rows wait
       // out their backoff before reclaiming.
       if (isCovered(row, sourceKey)) continue;
-      if (row?.status === "failed" && !retryable(row, timestamp)) continue;
-      units.push({ ...unit, sourceKey });
+      if (row?.status === "failed" && !retryable(row, timestamp, force)) continue;
+      units.push({ ...unit, sourceKey, rangeKey: unitRangeKey(scopeId, key, part, part) });
     }
     return units;
   };
@@ -520,6 +561,7 @@ export function createMemoryOrganizer(deps: MemoryOrganizerDeps) {
     store: KnowledgeStore,
     scopeId: string,
     unitChars: number,
+    force: boolean,
   ): Promise<OrganizerUnit[]> => {
     const timestamp = now();
     const rows = await store.listOrganizerProgress();
@@ -528,7 +570,7 @@ export function createMemoryOrganizer(deps: MemoryOrganizerDeps) {
 
     for (const source of await deps.listRunSources(scopeId)) {
       if (units.length >= MAX_UNITS_PER_RUN) break;
-      units.push(...await collectRunUnits(store, scopeId, source, timestamp, progress, unitChars));
+      units.push(...await collectRunUnits(store, scopeId, source, timestamp, progress, unitChars, force));
     }
 
     const sessionIds = new Set<string>([
@@ -537,7 +579,7 @@ export function createMemoryOrganizer(deps: MemoryOrganizerDeps) {
     ]);
     for (const sessionId of [...sessionIds].sort()) {
       if (units.length >= MAX_UNITS_PER_RUN) break;
-      const unit = await collectSessionUnit(store, scopeId, sessionId, progress.get(progressKeyForSession(sessionId)), timestamp, unitChars);
+      const unit = await collectSessionUnit(store, scopeId, sessionId, progress.get(progressKeyForSession(sessionId)), timestamp, unitChars, force);
       if (unit) units.push(unit);
     }
     return units.slice(0, MAX_UNITS_PER_RUN);
@@ -581,11 +623,22 @@ export function createMemoryOrganizer(deps: MemoryOrganizerDeps) {
         ...(status.binding.endpoint ? { endpoint: status.binding.endpoint } : {}),
       });
       const keep = new Set<string>();
+      const answered = new Set<string>();
       for (const answer of result.answers) {
-        if (answer.kind === "judge" && answer.value >= 0.5) keep.add(answer.id);
+        if (answer.kind !== "judge") continue;
+        answered.add(answer.id);
+        if (answer.value >= 0.5) keep.add(answer.id);
       }
       for (const id of result.missing) keep.add(id); // unanswered → keep for the generative pass
+      for (const material of materials) {
+        if (!answered.has(material.id)) keep.add(material.id);
+      }
       return units.filter((_, index) => keep.has(`u${index}`));
+    } catch (error) {
+      // This is an advisory filter. A failed quick decision must not turn
+      // unjudged source material into completed empty coverage.
+      report(error);
+      return units;
     } finally {
       activeBatches.delete(batchId);
     }
@@ -665,7 +718,7 @@ export function createMemoryOrganizer(deps: MemoryOrganizerDeps) {
    */
   const modelForScope = async (settings: ResolvedOrganizerSettings, scopeId: string): Promise<ModelSelection | null> => {
     if (settings.model) return settings.model;
-    return await deps.organizerModelForScope?.(scopeId).catch(() => null) ?? null;
+    return await deps.organizerModelForScope?.(scopeId) ?? null;
   };
 
   // ── Commit ───────────────────────────────────────────────────────
@@ -683,6 +736,15 @@ export function createMemoryOrganizer(deps: MemoryOrganizerDeps) {
     // A source-scope switch does not authorize the user store — inferred
     // proposals may only land there when organizing user memory is enabled.
     if (owner.scope === "user" && !settings.autoOrganize.user) return null;
+    // A previous attempt may have committed this proposal before crashing or
+    // failing on a later row. Recover its durable receipt from provenance so
+    // terminal progress lists every memory formed by the source range.
+    const alreadyCommitted = existingMemories.find((item) => item.status === "accepted"
+      && item.invalidAt === undefined
+      && item.source?.kind === "memory-organizer"
+      && source.key !== undefined && item.source.key === source.key
+      && item.content.trim() === proposal.content.trim());
+    if (alreadyCommitted && alreadyCommitted.scope === owner.scope) return alreadyCommitted.id;
     const nature = proposal.nature !== undefined && (MEMORY_NATURES as readonly string[]).includes(proposal.nature)
       ? proposal.nature as MemoryNature
       : undefined;
@@ -695,7 +757,8 @@ export function createMemoryOrganizer(deps: MemoryOrganizerDeps) {
         commit: "accepted",
         expectedRevision,
       });
-      return result.created ? result.item.id : null;
+      return result.created || (result.item.source?.key === source.key && source.key !== undefined)
+        ? result.item.id : null;
     }
     // supplement/correct: targets came from the source scope's presented
     // memory list; a cross-scope numeric id must never address an unrelated
@@ -713,7 +776,8 @@ export function createMemoryOrganizer(deps: MemoryOrganizerDeps) {
         commit: "accepted",
         expectedRevision,
       });
-      return result.created ? result.item.id : null;
+      return result.created || (result.item.source?.key === source.key && source.key !== undefined)
+        ? result.item.id : null;
     }
     // Compare against the revision shown to the model, not a fresh read taken
     // after it answered (which would authorize overwriting intervening edits).
@@ -736,16 +800,51 @@ export function createMemoryOrganizer(deps: MemoryOrganizerDeps) {
     return corrected?.id ?? null;
   };
 
+  class SourceChangedError extends Error {}
+
+  const assertSourceCurrent = async (
+    store: KnowledgeStore,
+    scopeId: string,
+    unit: OrganizerUnit,
+    unitChars: number,
+  ): Promise<void> => {
+    let current: OrganizerUnit | undefined | null;
+    if (unit.source.runId) {
+      const run = (await deps.listRunSources(scopeId)).find((row) => row.runId === unit.source.runId);
+      current = run
+        ? (await collectRunUnits(store, scopeId, run, now(), new Map(), unitChars, true))
+          .find((row) => row.key === unit.key)
+        : null;
+    } else if (unit.source.sessionId) {
+      current = await collectSessionUnit(store, scopeId, unit.source.sessionId, {
+        key: unit.key,
+        status: "prepared",
+        updatedAt: now(),
+        ...(unit.startEventCursor !== undefined ? { eventCursor: unit.startEventCursor } : {}),
+        ...(unit.startEntryCursor !== undefined ? { entryCursor: unit.startEntryCursor } : {}),
+        preparedRange: {
+          ...(unit.eventCursor !== undefined ? { eventCursor: unit.eventCursor } : {}),
+          ...(unit.entryCursor !== undefined ? { entryCursor: unit.entryCursor } : {}),
+        },
+      }, now(), unitChars, true, false);
+    }
+    if (!current) throw new Error(`Organizer source is unavailable: ${unit.key}`);
+    if (current.sourceKey !== unit.sourceKey) {
+      throw new SourceChangedError(`Organizer source changed while preparing ${unit.key}`);
+    }
+  };
+
   // ── Scope run ────────────────────────────────────────────────────
 
   const runScope = async (scopeId: string): Promise<void> => {
     if (disposed || isSessionScopeId(scopeId)) return;
     running.add(scopeId);
+    const force = forced.delete(scopeId);
     try {
       const settings = await readHarnessSettings();
       if (!settings.autoOrganize[scopeKind(scopeId)]) return;
       const scopeGate = scopeKind(scopeId) === "workspace"
-        ? await deps.autoOrganizeForScope?.(scopeId).catch(() => null)
+        ? await deps.autoOrganizeForScope?.(scopeId)
         : null;
       if (scopeGate === false) return;
       const model = await modelForScope(settings, scopeId);
@@ -754,7 +853,27 @@ export function createMemoryOrganizer(deps: MemoryOrganizerDeps) {
       if (!store) return;
 
       const budget = await resolveBudget(model);
-      const collected = await collectUnits(store, scopeId, budget.unitChars);
+      const candidates = await collectUnits(store, scopeId, budget.unitChars, force);
+      const collected: OrganizerUnit[] = [];
+      let sourceChars = "# Source fragments".length + 2;
+      for (const unit of candidates) {
+        const blockChars = `## u${collected.length} — ${unit.label}\n${unit.texts.join("\n")}`.length + 2;
+        if (blockChars + "# Source fragments".length + 2 > budget.batchChars) {
+          await putProgress(store, unit.key, "failed", {
+            sourceKey: unit.sourceKey,
+            lastError: `Source range needs ${blockChars} characters; organizer model source budget is ${budget.batchChars}. Choose a larger-context model.`,
+          });
+          continue;
+        }
+        if (sourceChars + blockChars > budget.batchChars) break;
+        collected.push(unit);
+        sourceChars += blockChars;
+      }
+      // A batch can fill before all pending ranges are selected. Drain the
+      // remainder on the next pass without requiring another user turn.
+      if (collected.length > 0 && (collected.length < candidates.length || candidates.length === MAX_UNITS_PER_RUN)) {
+        queued.add(scopeId);
+      }
       if (collected.length === 0) return;
       const rows = await store.listOrganizerProgress();
       const progress = new Map(rows.map((row) => [row.key, row]));
@@ -769,7 +888,7 @@ export function createMemoryOrganizer(deps: MemoryOrganizerDeps) {
         if (isCovered(row, unit.sourceKey)) continue;
         // Provenance stays bound to the exact range the row covers — commit
         // receipts and automatic forgetting reference the same fingerprint.
-        unit.source.key = unit.sourceKey;
+        unit.source.key = unit.rangeKey;
         if (row?.status === "prepared" && row.sourceKey === unit.sourceKey && row.proposals !== undefined) {
           preparedUnits.push({ unit, proposals: row.proposals });
           continue;
@@ -784,7 +903,7 @@ export function createMemoryOrganizer(deps: MemoryOrganizerDeps) {
       const pendingPrepared = new Set(preparedUnits.map(({ unit }) => unit.key));
       try {
         for (const unit of freshUnits) {
-          await putProgress(store, unit.key, "processing", { sourceKey: unit.sourceKey, proposals: null });
+          await putProgress(store, unit.key, "processing", { sourceKey: unit.sourceKey, proposals: null, preparedRange: null });
         }
 
         const judged = await filterUnitsByFastDecision(settings.fastDecision, freshUnits);
@@ -794,6 +913,7 @@ export function createMemoryOrganizer(deps: MemoryOrganizerDeps) {
             ...(unit.eventCursor !== undefined ? { eventCursor: unit.eventCursor } : {}),
             ...(unit.entryCursor !== undefined ? { entryCursor: unit.entryCursor } : {}),
             proposals: null,
+            preparedRange: null,
           });
           pendingFresh.delete(unit.key);
         }
@@ -809,6 +929,7 @@ export function createMemoryOrganizer(deps: MemoryOrganizerDeps) {
           narratedRevision = store.knowledgeRevision();
           const narrated = await narrateProposals(model, judged, existing);
           if (disposed) return;
+          for (const unit of judged) await assertSourceCurrent(store, scopeId, unit, budget.unitChars);
           // Validate provenance/targets before anything from this response is
           // durably held. A missing source is not permission to attach one.
           const byUnit = new Map<string, OrganizerPreparedProposal[]>();
@@ -833,7 +954,14 @@ export function createMemoryOrganizer(deps: MemoryOrganizerDeps) {
           }
           for (const unit of judged) {
             const proposals = byUnit.get(unit.key) ?? [];
-            await putProgress(store, unit.key, "prepared", { sourceKey: unit.sourceKey, proposals });
+            await putProgress(store, unit.key, "prepared", {
+              sourceKey: unit.sourceKey,
+              proposals,
+              ...(unit.key.startsWith("session:") ? { preparedRange: {
+                ...(unit.eventCursor !== undefined ? { eventCursor: unit.eventCursor } : {}),
+                ...(unit.entryCursor !== undefined ? { entryCursor: unit.entryCursor } : {}),
+              } } : {}),
+            });
             preparedUnits.push({ unit, proposals });
             pendingFresh.delete(unit.key);
             pendingPrepared.add(unit.key);
@@ -853,6 +981,7 @@ export function createMemoryOrganizer(deps: MemoryOrganizerDeps) {
         const userOwner: MemoryOwner = { scope: "user", ownerId: null };
         let userRevision = currentSettings.autoOrganize.user ? await deps.memory.revision(userOwner) : "";
         for (const { unit, proposals } of preparedUnits) {
+          await assertSourceCurrent(store, scopeId, unit, budget.unitChars);
           const produced: number[] = [];
           for (const proposal of proposals) {
             if (proposal.scope === "user" && !currentSettings.autoOrganize.user) continue;
@@ -874,19 +1003,22 @@ export function createMemoryOrganizer(deps: MemoryOrganizerDeps) {
             produced,
             sourceKey: unit.sourceKey,
             proposals: null,
+            preparedRange: null,
           });
           pendingPrepared.delete(unit.key);
         }
       } catch (error) {
         const message = error instanceof Error ? error.message : String(error);
+        const sourceChanged = error instanceof SourceChangedError;
         for (const unit of freshUnits) {
           if (!pendingFresh.has(unit.key)) continue;
-          await putProgress(store, unit.key, "failed", { lastError: message }).catch(report);
+          await putProgress(store, unit.key, sourceChanged ? "pending" : "failed", { lastError: message }).catch(report);
         }
         for (const { unit } of preparedUnits) {
           if (!pendingPrepared.has(unit.key)) continue;
-          await putProgress(store, unit.key, "prepared", { lastError: message }).catch(report);
+          await putProgress(store, unit.key, sourceChanged ? "pending" : "prepared", { lastError: message }).catch(report);
         }
+        if (sourceChanged) queued.add(scopeId);
         throw error;
       }
     } finally {
@@ -909,25 +1041,28 @@ export function createMemoryOrganizer(deps: MemoryOrganizerDeps) {
 
   const sweep = async (): Promise<void> => {
     if (disposed) return;
-    for (const scopeId of await deps.listScopeIds().catch(() => [] as string[])) {
+    for (const scopeId of await deps.listScopeIds()) {
       if (disposed || isSessionScopeId(scopeId)) continue;
-      // Cheap sources first: the registry catalog answers without opening a
-      // store, so a scope with no threads and no store file never gets an
-      // empty .tdb created just by sweeping.
-      const runs = await deps.listRunSources(scopeId).catch(() => [] as OrganizerRunSource[]);
-      const sessions = await deps.listScopeSessions(scopeId).catch(() => [] as string[]);
-      const storeExists = await Promise.resolve(deps.hasStoreForScope(scopeId)).catch(() => false);
-      if (runs.length === 0 && sessions.length === 0 && !storeExists) continue;
-      const store = await deps.storeForScopeId(scopeId).catch(() => null);
-      if (!store) continue;
-      const timestamp = now();
-      const rows = await store.listOrganizerProgress().catch(() => []);
-      const hasWork = rows.some((row) => retryable(row, timestamp));
-      const hasSources = hasWork
-        || runs.length > 0
-        || sessions.length > 0
-        || (await store.listEventSessionIds().catch(() => [])).length > 0;
-      if (hasWork || hasSources) schedule(scopeId);
+      try {
+        // Cheap sources first: a scope with no threads and no store file does
+        // not get an empty .tdb created by a background sweep.
+        const runs = await deps.listRunSources(scopeId);
+        const sessions = await deps.listScopeSessions(scopeId);
+        const storeExists = await deps.hasStoreForScope(scopeId);
+        if (runs.length === 0 && sessions.length === 0 && !storeExists) continue;
+        const store = await deps.storeForScopeId(scopeId);
+        if (!store) continue;
+        const timestamp = now();
+        const rows = await store.listOrganizerProgress();
+        const hasWork = rows.some((row) => retryable(row, timestamp));
+        const hasSources = hasWork
+          || runs.length > 0
+          || sessions.length > 0
+          || (await store.listEventSessionIds()).length > 0;
+        if (hasWork || hasSources) schedule(scopeId);
+      } catch (error) {
+        report(error);
+      }
     }
   };
 
@@ -959,12 +1094,19 @@ export function createMemoryOrganizer(deps: MemoryOrganizerDeps) {
       if (disposed || isSessionScopeId(scopeId)) return;
       schedule(scopeId);
     },
+    /** User-requested retry bypasses only the automatic failure backoff. */
+    retryScope(scopeId: string): void {
+      if (disposed || isSessionScopeId(scopeId)) return;
+      forced.add(scopeId);
+      schedule(scopeId);
+    },
     /** Disable switched off / shutting down: stop scheduling, cancel in-flight batches. */
     async dispose(): Promise<void> {
       if (disposed) { await Promise.allSettled([...pendingTasks]); return; }
       disposed = true;
       for (const timer of timers.values()) clearTimeout(timer);
       timers.clear();
+      forced.clear();
       if (sweepTimer) { clearTimeout(sweepTimer); sweepTimer = null; }
       const broker = deps.getBroker();
       await Promise.allSettled([...activeBatches.keys()].map((batchId) =>
@@ -993,7 +1135,7 @@ export function createMemoryOrganizer(deps: MemoryOrganizerDeps) {
       const store = storeExists ? await deps.storeForScopeId(scopeId).catch(() => null) : null;
       const rows = store ? await store.listOrganizerProgress().catch(() => [] as OrganizerProgress[]) : [];
       return {
-        enabled: settings !== null && settings.autoOrganize[kind] && scopeGate !== false,
+        enabled: settings !== null && settings.autoOrganize[kind] && scopeGate !== false && model !== null,
         model: model ?? null,
         rows,
       };

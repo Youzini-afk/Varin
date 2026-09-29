@@ -24,7 +24,7 @@ broker event stream ──→ HarnessRouter.processEvent()
                            ├── fs.lock      → Rust kernel file-resource lease + Documents identity
                            ├── lsp.diagnostics → LspDiagnosticsService
                            ├── lsp.diagnosticsSnapshot → LspDiagnosticsService
-                           ├── knowledge.suggest → workspace/user .tdb via existing suggestion accept policy
+                           ├── memory.* → shared MemoryService + scoped KnowledgeStore
                            ├── zone2.assemble → Knowledge material + ThreadRegistry projection + source-thread <review>
                            └── thread.*     → ThreadRegistry + ThreadRuntime + native working state + verification bind / auto review / retrieval facts
 ```
@@ -760,21 +760,16 @@ Settings catalog routes list/edit/retire the same workspace and user `.tdb`
 rows after Documents workspace resolution. Delete sets `invalidAt` on one id;
 it does not cascade to other scopes or supersede neighbors. Derived vectors
 are notified through the existing knowledge-change hook.
-Committed `memory-agent` changes to a `decisions` block also feed a mechanical
-suggestion runtime: only new structured list entries are proposed, and any
-content previously suggested, accepted, or dismissed for that session is not
-proposed again. This path never invokes a model or auto-accepts.
-When `models.suggestions` is configured, pi-host drafts from the current user
-message and Host `knowledge.suggest` stores the proposal in the authenticated
-actor's workspace with source `user-message`; scope and source kind are not
-worker inputs. Normalized-content lookup and insert share the store write queue
-and cover dismissed/retired history. Catalog mutations send the complete opened
-content/trigger/status/invalidAt revision; workspace/scope changes retire the UI
-request generation so late responses cannot replace the active catalog.
-User-mark, memory-decision, and model proposal creation all resolve the session's
-effective auto-accept setting; an unreadable setting keeps the new row suggested.
-Unconfigured sessions do not borrow the main model. Suggested, dismissed, and
-superseded identities do not enter public recall.
+`memory.remember` and the background organizer write effective memory through
+the shared MemoryService and scoped KnowledgeStore. The organizer is the sole
+automatic producer: it persists prepared proposals and source coverage before
+advancing a cursor, and replays a prepared range after interruption. Existing
+`suggested` rows retain their explicit review actions; ordinary conversation
+does not invoke the retired `knowledge.suggest` model path. Catalog mutations
+send the complete opened content/trigger/status/invalidAt revision;
+workspace/scope changes retire the UI request generation so late responses
+cannot replace the active catalog. Suggested, dismissed, and superseded
+identities do not enter public recall.
 
 Interactive UI inputs carry a content-free `AgentInputContext`. The Documents
 authority has already validated and frozen any dirty buffers behind its opaque

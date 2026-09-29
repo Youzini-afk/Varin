@@ -163,6 +163,7 @@ import {
 import { selectHarnessTools } from "./harness/select-tools.js";
 import { createToolResultTruncationExtension } from "./harness/tool-result-truncation.js";
 import { createContextGuidanceExtension } from "./harness/context-guidance.js";
+import { activeCompactionMessages } from "./harness/compaction-context.js";
 import { createRequestContextInjector } from "./harness/request-context.js";
 import {
   createContextPreparationExtension,
@@ -693,8 +694,8 @@ export class SessionHost {
   #pendingContextSettings: HarnessContextSettings | undefined;
   #disposed = false;
   #inputContext: AgentInputContext = { source: "disk" };
-  /** Hidden instructions already persisted into this session's history. */
-  #deliveredInstructions: string | null = null;
+  /** Undefined needs a Host lookup; null means this worker has no Bot persona. */
+  #sessionInstructionsCache: string | null | undefined;
   #backgroundInference: BackgroundInferenceRuntime | undefined;
   #inferenceCwd: string | undefined;
   #workFocus: WorkFocusSelection = { id: "code", source: "product-default" };
@@ -1547,11 +1548,13 @@ export class SessionHost {
    * instructions instead of failing the turn.
    */
   async #sessionInstructions(): Promise<string | undefined> {
+    if (this.#sessionInstructionsCache !== undefined) return this.#sessionInstructionsCache ?? undefined;
     try {
       const result = await this.#hostServicesBridge?.request("session.instructions", {});
-      return typeof result?.instructions === "string" && result.instructions.trim()
+      this.#sessionInstructionsCache = typeof result?.instructions === "string" && result.instructions.trim()
         ? result.instructions
-        : undefined;
+        : null;
+      return this.#sessionInstructionsCache ?? undefined;
     } catch (error) {
       this.#emit("host.log", {
         level: "warn",
@@ -1559,6 +1562,12 @@ export class SessionHost {
       });
       return undefined;
     }
+  }
+
+  applySessionInstructions(sessionId: string, instructions: string | null): boolean {
+    this.assertSession(sessionId);
+    this.#sessionInstructionsCache = instructions?.trim() || null;
+    return true;
   }
 
   async #queueInstructions(
@@ -1569,16 +1578,23 @@ export class SessionHost {
     const combined = [sessionInstructions, instructions]
       .filter((part) => part?.trim())
       .join("\n\n");
-    if (!combined || combined === this.#deliveredInstructions) return;
+    // Branch navigation and compaction can remove an earlier hidden message
+    // from the active model context. Deduplicate against that context rather
+    // than a process-local string that outlives the message it describes.
+    const active = activeCompactionMessages(this.session.sessionManager.buildSessionContext().messages);
+    const last = [...active].reverse().find((message) =>
+      message.role === "custom" && message.customType === VARIN_INSTRUCTIONS_MESSAGE_TYPE);
+    if (!combined && !last) return;
+    const desired = combined || "Session instructions were cleared. Ignore earlier varin.instructions messages for this session.";
+    if (last && "content" in last && last.content === desired) return;
     await this.session.sendCustomMessage(
       {
-        content: combined,
+        content: desired,
         customType: VARIN_INSTRUCTIONS_MESSAGE_TYPE,
         display: false,
       },
       { deliverAs },
     );
-    this.#deliveredInstructions = combined;
   }
 
   /**
@@ -3440,6 +3456,9 @@ export class SessionHost {
 
   async #replaceWith(manager: SessionManager): Promise<void> {
     if (this.#disposed) throw new HostError("host_disposed", "Pi session host is disposed");
+    if (this.#runtime?.session.sessionId !== manager.getSessionId()) {
+      this.#sessionInstructionsCache = undefined;
+    }
     this.#contextLastFailure = undefined;
     await this.#disposeRuntime();
     const cwd = manager.getCwd();

@@ -308,18 +308,17 @@ export async function openKnowledgeStoreEngine(deps: KnowledgeStoreEngineOptions
       createdAt: now,
       recallCount: 0,
     });
-    /**
-     * Record a `supplements` edge from a knowledge row to an existing memory
-     * in the same scope. The check runs inside the writer queue, so the edge
-     * and its row commit together.
-     */
-    const linkSupplements = (id: NodeId, target: NodeId | undefined, scope: KnowledgeScope): void => {
+    /** Validate before inserting or retiring any row: a rejected edge must not
+     * leave an uncommitted mutation in the live TDB handle. */
+    const assertSupplementsTarget = (target: NodeId | undefined, scope: KnowledgeScope): void => {
       if (target === undefined) return;
       const targetPayload = db.getPayload(target) as Record<string, unknown> | null;
-      if (target === id || !targetPayload || targetPayload["type"] !== "knowledge" || targetPayload["scope"] !== scope) {
+      if (!targetPayload || targetPayload["type"] !== "knowledge" || targetPayload["scope"] !== scope) {
         throw new KnowledgeMutationError("invalid", `Supplements target ${target} is not a knowledge row in scope ${scope}`);
       }
-      db.link(id, target, "supplements", 1);
+    };
+    const linkSupplements = (id: NodeId, target: NodeId | undefined): void => {
+      if (target !== undefined) db.link(id, target, "supplements", 1);
     };
     const notifyKnowledge = (ids: readonly NodeId[]): void => {
       if (ids.length === 0 || !deps.onKnowledgeChanged) return;
@@ -357,6 +356,15 @@ export async function openKnowledgeStoreEngine(deps: KnowledgeStoreEngineOptions
       if (typeof p["updatedAt"] !== "number") return null;
       const produced = p["produced"];
       const proposals = p["proposals"];
+      if (status === "prepared" && !Array.isArray(proposals)) {
+        throw new KnowledgeMutationError("invalid", `Prepared organizer row ${p["key"]} has no proposals`);
+      }
+      const parsedProposals = Array.isArray(proposals) ? proposals.map(organizerProposalFromPayload) : undefined;
+      if (parsedProposals?.some((row) => row === null)) {
+        throw new KnowledgeMutationError("invalid", `Prepared organizer row ${p["key"]} has an invalid proposal`);
+      }
+      const preparedRange = p["preparedRange"] && typeof p["preparedRange"] === "object" && !Array.isArray(p["preparedRange"])
+        ? p["preparedRange"] as Record<string, unknown> : null;
       return {
         key: p["key"],
         status: status as OrganizerProgressStatus,
@@ -364,9 +372,11 @@ export async function openKnowledgeStoreEngine(deps: KnowledgeStoreEngineOptions
         ...(Number.isSafeInteger(p["eventCursor"]) ? { eventCursor: p["eventCursor"] as number } : {}),
         ...(typeof p["entryCursor"] === "string" && p["entryCursor"] ? { entryCursor: p["entryCursor"] as string } : {}),
         ...(Array.isArray(produced) && produced.every(Number.isSafeInteger) ? { produced: produced as number[] } : {}),
-        ...(Array.isArray(proposals)
-          ? { proposals: proposals.map(organizerProposalFromPayload).filter((row): row is OrganizerPreparedProposal => row !== null) }
-          : {}),
+        ...(parsedProposals ? { proposals: parsedProposals as OrganizerPreparedProposal[] } : {}),
+        ...(preparedRange ? { preparedRange: {
+          ...(Number.isSafeInteger(preparedRange["eventCursor"]) ? { eventCursor: preparedRange["eventCursor"] as number } : {}),
+          ...(typeof preparedRange["entryCursor"] === "string" ? { entryCursor: preparedRange["entryCursor"] as string } : {}),
+        } } : {}),
         updatedAt: p["updatedAt"],
         ...(typeof p["lastError"] === "string" && p["lastError"] ? { lastError: p["lastError"] as string } : {}),
       };
@@ -722,6 +732,7 @@ export async function openKnowledgeStoreEngine(deps: KnowledgeStoreEngineOptions
             ...(progress.entryCursor !== undefined ? { entryCursor: progress.entryCursor } : {}),
             ...(progress.produced !== undefined ? { produced: [...progress.produced] } : {}),
             ...(progress.proposals !== undefined ? { proposals: progress.proposals.map((p) => ({ ...p })) } : {}),
+            ...(progress.preparedRange !== undefined ? { preparedRange: { ...progress.preparedRange } } : {}),
             updatedAt: progress.updatedAt,
             ...(progress.lastError ? { lastError: progress.lastError } : {}),
           };
@@ -733,6 +744,7 @@ export async function openKnowledgeStoreEngine(deps: KnowledgeStoreEngineOptions
           if (progress.entryCursor === undefined) unset.entryCursor = true;
           if (progress.produced === undefined) unset.produced = true;
           if (progress.proposals === undefined) unset.proposals = true;
+          if (progress.preparedRange === undefined) unset.preparedRange = true;
           if (!progress.lastError) unset.lastError = true;
           const existing = lookup({ type: "organizer" }).filter(({ payload: p }) => p["key"] === progress.key);
           const [first, ...rest] = existing;
@@ -927,11 +939,12 @@ export async function openKnowledgeStoreEngine(deps: KnowledgeStoreEngineOptions
           if (recallScope === "user" && k.scope !== "user") {
             throw new KnowledgeMutationError("invalid", "User knowledge store rejects non-user scope writes");
           }
+          assertSupplementsTarget(k.supplements, k.scope);
           const payload = knowledgeInsertPayload(k, Date.now());
           const id = db.insert(placeholderVec, payload);
           db.indexText(id, k.content);
           if (k.trigger) db.indexKeyword(id, k.trigger);
-          linkSupplements(id, k.supplements, k.scope);
+          linkSupplements(id, k.supplements);
           persistence.commit();
           bumpKnowledgeEpoch();
           notifyKnowledge([id]);
@@ -964,13 +977,15 @@ export async function openKnowledgeStoreEngine(deps: KnowledgeStoreEngineOptions
                 && (payload["invalidAt"] !== undefined || payload["status"] === "dismissed")
                 && (() => {
                   const previous = knowledgeSourceFromPayload(payload["source"]);
-                  // Forgetting an organizer-derived memory suppresses re-mining
-                  // the same logical source — fingerprints churn as sessions
-                  // grow, so match the stable session/run identity too.
+                  // A keyed organizer source identifies one covered range.
+                  // Suppressing an entire session would also discard unrelated
+                  // decisions made in its later turns. Keyless historical rows
+                  // can only fall back to their broader session/run identity.
                   return previous?.kind === "memory-organizer"
-                    && ((k.source!.key !== undefined && previous.key === k.source!.key)
-                      || (k.source!.sessionId !== undefined && previous.sessionId === k.source!.sessionId)
-                      || (k.source!.runId !== undefined && previous.runId === k.source!.runId));
+                    && (previous.key !== undefined
+                      ? k.source!.key !== undefined && previous.key === k.source!.key
+                      : (k.source!.sessionId !== undefined && previous.sessionId === k.source!.sessionId)
+                        || (k.source!.runId !== undefined && previous.runId === k.source!.runId));
                 })()))
           ))[0];
           if (duplicate) {
@@ -987,11 +1002,12 @@ export async function openKnowledgeStoreEngine(deps: KnowledgeStoreEngineOptions
             if (!knowledge) throw new KnowledgeMutationError("invalid", `Invalid knowledge row: ${duplicate.id}`);
             return { created: false, duplicate: true, knowledge };
           }
+          assertSupplementsTarget(k.supplements, k.scope);
           const payload = knowledgeInsertPayload(k, Date.now());
           const id = db.insert(placeholderVec, payload);
           db.indexText(id, k.content);
           if (k.trigger) db.indexKeyword(id, k.trigger);
-          linkSupplements(id, k.supplements, k.scope);
+          linkSupplements(id, k.supplements);
           persistence.commit();
           bumpKnowledgeEpoch();
           notifyKnowledge([id]);
@@ -1102,6 +1118,7 @@ export async function openKnowledgeStoreEngine(deps: KnowledgeStoreEngineOptions
           if (!input.content.trim()) throw new KnowledgeMutationError("invalid", "Knowledge content is required");
           const previous = knowledgeFromPayload(id, payload);
           if (!previous) throw new KnowledgeMutationError("invalid", `Invalid knowledge row: ${id}`);
+          assertSupplementsTarget(input.supplements ?? previous.supplements, scope);
           const now = Date.now();
           const inheritedNature = input.nature ?? previous.nature;
           const inheritedSource = input.source ?? previous.source;
@@ -1121,7 +1138,7 @@ export async function openKnowledgeStoreEngine(deps: KnowledgeStoreEngineOptions
           db.link(nextId, id, "supersedes", 1);
           // A correction keeps the predecessor's supplements relation unless
           // the caller restates one.
-          linkSupplements(nextId, input.supplements ?? previous.supplements, scope);
+          linkSupplements(nextId, input.supplements ?? previous.supplements);
           persistence.commit();
           bumpKnowledgeEpoch();
           notifyKnowledge([nextId, id]);

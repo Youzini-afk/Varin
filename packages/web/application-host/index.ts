@@ -1760,11 +1760,23 @@ async function main(options: StartWebUiServerOptions = {}): Promise<WebUiServerC
     ),
     openSession: (input) => piRuntimeBroker.openSession(input),
     applyModel: async (input) => {
+      let model = input.model;
+      if (!model) {
+        const settings = await piRuntimeBroker.requestForSession(input.sessionId, 'settings.get', {});
+        const effective = { ...settings.global, ...settings.project };
+        model = typeof effective.defaultProvider === 'string' && typeof effective.defaultModel === 'string'
+          ? { providerId: effective.defaultProvider, modelId: effective.defaultModel }
+          : null;
+      }
+      if (!model) return;
       await piRuntimeBroker.requestForSession(input.sessionId, 'model.select', {
         sessionId: input.sessionId,
-        provider: input.model.providerId,
-        modelId: input.model.modelId,
+        provider: model.providerId,
+        modelId: model.modelId,
       });
+    },
+    applyInstructions: async (input) => {
+      await piRuntimeBroker.requestForSession(input.sessionId, 'session.instructions.apply', input);
     },
     onError: (error) => {
       console.error('[VarinBots]', errorMessage(error));
@@ -1801,7 +1813,7 @@ async function main(options: StartWebUiServerOptions = {}): Promise<WebUiServerC
         type: 'varin:harness-knowledge-changed',
         properties: {
           scope: owner.scope,
-          ...(owner.ownerId ? { workspaceId: owner.ownerId } : {}),
+          ...(owner.ownerId ? { workspaceId: owner.scope === 'bot' ? botScopeId(owner.ownerId) : owner.ownerId } : {}),
           ids: [...ids],
         },
       });
@@ -1833,7 +1845,7 @@ async function main(options: StartWebUiServerOptions = {}): Promise<WebUiServerC
         .filter((key) => !isSessionStoreKey(key) && !isBotStoreKey(key));
       // Bot store files are hashed and cannot be reversed — enumerate the bot
       // registry so `bot:<id>` scopes are swept like workspaces.
-      const fromBots = (await botService.list().catch(() => []))
+      const fromBots = (await botService.list())
         .map((bot) => botScopeId(bot.id));
       return [...new Set([...fromRegistry, ...fromDisk, ...fromBots])].sort();
     },
@@ -1872,7 +1884,7 @@ async function main(options: StartWebUiServerOptions = {}): Promise<WebUiServerC
     // model — Bot memory keeps organizing without a second configuration.
     organizerModelForScope: async (scopeId) => {
       if (!isBotScopeId(scopeId)) return null;
-      const bot = await botService.get(botIdFromScopeId(scopeId)).catch(() => null);
+      const bot = await botService.get(botIdFromScopeId(scopeId));
       return bot?.model ?? null;
     },
     autoOrganizeForScope: async (scopeId) => {

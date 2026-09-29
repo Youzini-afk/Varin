@@ -163,6 +163,11 @@ export interface HostMethodMap {
     params: { generation: number; sessionId: string; selection: WorkFocusSelection };
     result: { applied: boolean };
   };
+  /** Broker-owned Bot persona update; the worker applies it on its next turn. */
+  "session.instructions.apply": {
+    params: { sessionId: string; instructions: string | null };
+    result: { applied: boolean };
+  };
   /** Broker-only publication after the durable selection commit succeeds. */
   "session.workFocus.publish": {
     params: { sessionId: string };

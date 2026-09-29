@@ -44,6 +44,7 @@ export const KnowledgeSettings: React.FC = () => {
   const searchTarget = useSettingsSearchTarget();
   const [scope, setScope] = React.useState<KnowledgeCatalogScope>(searchTarget === 'knowledge.user' ? 'user' : 'workspace');
   const [bots, setBots] = React.useState<Array<{ id: string; name: string }>>([]);
+  const [botsError, setBotsError] = React.useState<string | null>(null);
   const [botId, setBotId] = React.useState<string | null>(null);
   const [query, setQuery] = React.useState('');
   const [showRetired, setShowRetired] = React.useState(false);
@@ -99,9 +100,13 @@ export const KnowledgeSettings: React.FC = () => {
       if (cancelled) return;
       const active = rows.filter((bot) => !bot.archived);
       setBots(active.map((bot) => ({ id: bot.id, name: bot.name })));
+      setBotsError(null);
       setBotId((current) => current && active.some((bot) => bot.id === current) ? current : active[0]?.id ?? null);
-    }).catch(() => {
-      if (!cancelled) setBots([]);
+    }).catch((error) => {
+      if (!cancelled) {
+        setBots([]);
+        setBotsError(error instanceof Error ? error.message : String(error));
+      }
     });
     return () => { cancelled = true; };
   }, []);
@@ -165,7 +170,7 @@ export const KnowledgeSettings: React.FC = () => {
       if (event.scope !== scope) return;
       if (scope === 'workspace' && event.workspaceId && workspaceId && event.workspaceId !== workspaceId) return;
       // For bot scope the event's workspaceId slot carries the bot id.
-      if (scope === 'bot' && event.workspaceId && botId && event.workspaceId !== botId) return;
+      if (scope === 'bot' && event.workspaceId && workspaceId && event.workspaceId !== workspaceId) return;
       void refresh();
     });
     return () => {
@@ -232,6 +237,7 @@ export const KnowledgeSettings: React.FC = () => {
 
   const autoOrganize = harness.harness?.knowledge.autoOrganize;
   const [organizer, setOrganizer] = React.useState<OrganizerStatus | null>(null);
+  const [organizerError, setOrganizerError] = React.useState<string | null>(null);
   const [organizerBusy, setOrganizerBusy] = React.useState(false);
 
   // Organizer progress belongs to the source scope's own store — workspace or
@@ -240,12 +246,20 @@ export const KnowledgeSettings: React.FC = () => {
   React.useEffect(() => {
     if (scope === 'user' || !workspaceId) {
       setOrganizer(null);
+      setOrganizerError(null);
       return;
     }
     const controller = new AbortController();
     void loadOrganizerStatus(scope, workspaceId, controller.signal)
-      .then((status) => { if (!controller.signal.aborted) setOrganizer(status); })
-      .catch(() => { if (!controller.signal.aborted) setOrganizer(null); });
+      .then((status) => {
+        if (!controller.signal.aborted) { setOrganizer(status); setOrganizerError(null); }
+      })
+      .catch((error) => {
+        if (!controller.signal.aborted) {
+          setOrganizer(null);
+          setOrganizerError(error instanceof Error ? error.message : String(error));
+        }
+      });
     return () => controller.abort();
   }, [scope, workspaceId]);
 
@@ -253,8 +267,10 @@ export const KnowledgeSettings: React.FC = () => {
     if (scope === 'user' || !workspaceId) return;
     try {
       setOrganizer(await loadOrganizerStatus(scope, workspaceId));
-    } catch {
+      setOrganizerError(null);
+    } catch (error) {
       setOrganizer(null);
+      setOrganizerError(error instanceof Error ? error.message : String(error));
     }
   }, [scope, workspaceId]);
 
@@ -314,7 +330,10 @@ export const KnowledgeSettings: React.FC = () => {
         {scope === 'workspace' && workspace.status === 'error' ? (
           <p className="typography-micro text-[var(--status-error)]">{workspace.errorMessage}</p>
         ) : null}
-        {scope === 'bot' && bots.length === 0 ? (
+        {scope === 'bot' && botsError ? (
+          <p role="alert" className="typography-micro text-[var(--status-error)]">{botsError}</p>
+        ) : null}
+        {scope === 'bot' && bots.length === 0 && !botsError ? (
           <p className={SETTINGS_HELPER_CLASS}>{t('settings.knowledge.empty.noBot')}</p>
         ) : null}
         {visible.length === 0 && (scope === 'user' || workspace.status === 'ready' || (scope === 'bot' && botId)) ? (
@@ -468,6 +487,7 @@ export const KnowledgeSettings: React.FC = () => {
         ))}
         {scope !== 'user' && workspaceId ? (
           <div className="space-y-2 pt-2">
+            {organizerError ? <p role="alert" className="typography-micro text-[var(--status-error)]">{organizerError}</p> : null}
             <div className="flex items-center justify-between gap-2">
               <h4 className="typography-ui-label text-muted-foreground">{t('settings.knowledge.organizer.title')}</h4>
               <Button
