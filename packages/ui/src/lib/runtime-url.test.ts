@@ -32,9 +32,9 @@ describe('createRuntimeUrlResolver', () => {
   test('builds absolute API URLs when an API base URL is configured', () => {
     const urls = createRuntimeUrlResolver({ apiBaseUrl: 'https://server.example/base/' });
 
-    expect(urls.api('/api/config/settings')).toBe('https://server.example/api/config/settings');
-    expect(urls.auth('/auth/device', { next: '/app' })).toBe('https://server.example/auth/device?next=%2Fapp');
-    expect(urls.health({ probe: true })).toBe('https://server.example/health?probe=true');
+    expect(urls.api('/api/config/settings')).toBe('https://server.example/base/api/config/settings');
+    expect(urls.auth('/auth/device', { next: '/app' })).toBe('https://server.example/base/auth/device?next=%2Fapp');
+    expect(urls.health({ probe: true })).toBe('https://server.example/base/health?probe=true');
   });
 
   test('uses realtime base URL for SSE and WebSocket URLs', () => {
@@ -43,9 +43,9 @@ describe('createRuntimeUrlResolver', () => {
       realtimeBaseUrl: 'https://realtime.example/root',
     });
 
-    expect(urls.sse('/api/varin/events')).toBe('https://realtime.example/api/varin/events');
+    expect(urls.sse('/api/varin/events')).toBe('https://realtime.example/root/api/varin/events');
     expect(urls.websocket('/api/global/event/ws', { lastEventId: 'evt-1' })).toBe(
-      'wss://realtime.example/api/global/event/ws?lastEventId=evt-1',
+      'wss://realtime.example/root/api/global/event/ws?lastEventId=evt-1',
     );
   });
 

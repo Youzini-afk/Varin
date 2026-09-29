@@ -90,3 +90,9 @@ diff --git a/dist/core/agent-session.js b/dist/core/agent-session.js
 +                }
              }
              // Build messages array (custom message if any, then user message)
+diff --git a/package.json b/package.json
+--- a/package.json
++++ b/package.json
+@@ -69 +69 @@
+-		"undici": "8.9.0",
++		"undici": "8.10.2",

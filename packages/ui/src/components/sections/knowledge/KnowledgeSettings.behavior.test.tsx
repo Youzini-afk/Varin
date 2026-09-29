@@ -18,7 +18,10 @@ const mocks = vi.hoisted(() => ({
   translate: (key: string) => key,
 }));
 
-vi.mock('@varin/application-client', () => ({ runtimeFetch: vi.fn() }));
+vi.mock('@varin/application-client', async (importOriginal) => ({
+  ...await importOriginal<typeof import('@varin/application-client')>(),
+  runtimeFetch: vi.fn(),
+}));
 vi.mock('@/components/icon/Icon', () => ({ Icon: () => null }));
 vi.mock('@/components/sections/shared/SettingsSection', () => ({
   SETTINGS_HELPER_CLASS: '',
@@ -67,6 +70,7 @@ const findPending = (needle: string): PendingRequest => {
 beforeEach(() => {
   const dom = parseHTML('<!doctype html><html><body></body></html>');
   vi.stubGlobal('window', dom.window);
+  vi.stubGlobal('CustomEvent', dom.window.CustomEvent);
   vi.stubGlobal('document', dom.document);
   vi.stubGlobal('HTMLElement', dom.HTMLElement);
   vi.stubGlobal('Node', dom.Node);

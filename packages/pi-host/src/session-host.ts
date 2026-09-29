@@ -696,6 +696,7 @@ export class SessionHost {
   #inputContext: AgentInputContext = { source: "disk" };
   /** Undefined needs a Host lookup; null means this worker has no Bot persona. */
   #sessionInstructionsCache: string | null | undefined;
+  #sessionInstructionsAvailable = false;
   #backgroundInference: BackgroundInferenceRuntime | undefined;
   #inferenceCwd: string | undefined;
   #workFocus: WorkFocusSelection = { id: "code", source: "product-default" };
@@ -743,6 +744,10 @@ export class SessionHost {
 
   setHarnessThreadRuntimeEnabled(enabled: boolean): void {
     this.#harnessThreadRuntimeEnabled = enabled;
+  }
+
+  setSessionInstructionsAvailable(enabled: boolean): void {
+    this.#sessionInstructionsAvailable = enabled;
   }
 
   setHarnessExperimentsEnabled(enabled: boolean): void {
@@ -1549,6 +1554,10 @@ export class SessionHost {
    */
   async #sessionInstructions(): Promise<string | undefined> {
     if (this.#sessionInstructionsCache !== undefined) return this.#sessionInstructionsCache ?? undefined;
+    if (!this.#sessionInstructionsAvailable) {
+      this.#sessionInstructionsCache = null;
+      return undefined;
+    }
     try {
       const result = await this.#hostServicesBridge?.request("session.instructions", {});
       this.#sessionInstructionsCache = typeof result?.instructions === "string" && result.instructions.trim()

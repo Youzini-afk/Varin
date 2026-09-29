@@ -91,7 +91,7 @@
     "jsonc-parser": "^3.3.1",
     "linkedom": "0.18.13",
     "luxon": "^3.5.0",
-    "multer": "^2.3.0",
+    "multer": "^2.4.0",
     "openai": "^7.18.0",
     "pdfjs-dist": "4.10.38",
     "picomatch": "4.0.7",

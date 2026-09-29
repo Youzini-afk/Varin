@@ -87,6 +87,7 @@ describe("SessionHost prompt streaming", () => {
       },
       projectTrustOverride: true,
     });
+    host.setSessionInstructionsAvailable(true);
 
     try {
       const snapshot = await host.create(root);

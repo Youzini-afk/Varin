@@ -52,7 +52,7 @@ response is a partial outcome, not a clean rejection.
 | platform | host entry | backend |
 | --- | --- | --- |
 | Windows | `windows/driver-host.ps1` (powershell.exe, stdin loop) | UIA tree/patterns + Win32 window messages; `SendInput` for `global`; `PrintWindow` capture with screen-copy fallback; per-process `EnumWindows` inventory |
-| Linux | `linux/driver-host.py` (python3, stdin loop) | AT-SPI tree/actions + `Atspi.generate_*` input; Gdk pixbuf capture on X11; under Wayland capture goes through `org.freedesktop.portal.Screenshot` and input depends on the compositor accepting AT-SPI synthesis — `capabilities.detail` says which |
+| Linux | `linux/driver-host.py` (python3, stdin loop) | AT-SPI tree/actions + `Atspi.generate_*` input; Gdk pixbuf capture on X11. Wayland reports no reliable screenshot/coordinate input until a consented RemoteDesktop/ScreenCast session exists; element actions may still work. |
 | macOS | `macos/driver-host.js` (osascript -l JavaScript, stdin loop) | JXA driver: CGWindowList windows + System Events AX tree + CGEvent input + `CGWindowListCreateImage` capture. **Unverified** — no real-machine evidence yet; `capabilities.detail` says so |
 
 The **Prepare Desktop** action on a Debian or Ubuntu Linux Host installs its

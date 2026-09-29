@@ -17,6 +17,7 @@ export function applicationHostClientCapabilities(options: {
     harnessLspNavigation: true,
     harnessMaterials: true,
     harnessThreads: true,
+    sessionInstructions: true,
     harnessWebRead: options.webRead,
     harnessWebSearch: options.webSearch,
     workspaceMutationJournal: true,

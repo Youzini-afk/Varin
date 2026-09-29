@@ -856,6 +856,10 @@ export class HostController {
           clientCapabilities !== undefined
           && readBoolean(clientCapabilities, "harnessThreads", { optional: true }) === true,
         );
+        this.#sessionHost.setSessionInstructionsAvailable(
+          clientCapabilities !== undefined
+          && readBoolean(clientCapabilities, "sessionInstructions", { optional: true }) === true,
+        );
         this.#sessionHost.setHarnessExperimentsEnabled(
           clientCapabilities !== undefined
           && readBoolean(clientCapabilities, "harnessExperiments", { optional: true }) === true,

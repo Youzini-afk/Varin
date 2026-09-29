@@ -540,6 +540,8 @@ export interface HostHandshakeParams {
   capabilities?: {
     /** The application Host can execute and observe durable child threads. */
     harnessThreads?: boolean;
+    /** The application Host answers durable session instruction lookups. */
+    sessionInstructions?: boolean;
     /** The application Host registered the experiment/resource/source services (7C/7D). */
     harnessExperiments?: boolean;
     /** The application Host registered the shared settings catalog service (D-306). */

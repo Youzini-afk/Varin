@@ -31,13 +31,6 @@ try:
 except (ImportError, ValueError):
     Gdk = None
 
-try:
-    from gi.repository import Gio, GLib, GdkPixbuf
-except (ImportError, ValueError):
-    Gio = None
-    GLib = None
-    GdkPixbuf = None
-
 from gi.repository import Atspi
 
 
@@ -431,11 +424,9 @@ def capture_window_png(bounds):
     if bounds is None:
         return None
     if on_wayland():
-        # Gdk.pixbuf_get_from_window reads the X11 root window; under Wayland
-        # it returns nothing. The xdg-desktop-portal Screenshot interface is
-        # the session-permitted path — non-interactive capture is allowed on
-        # compositors that trust it, denied elsewhere (returns None).
-        return capture_portal_png(bounds)
+        # Screenshot portal chooses its own screen/window/area. Cropping that
+        # image with AT-SPI window coordinates could silently show another app.
+        return None
     if Gdk is None:
         return None
     try:
@@ -460,137 +451,6 @@ def capture_window_png(bounds):
         return base64.b64encode(bytes(data)).decode("ascii")
     except Exception:
         return None
-
-
-def portal_desktop_available():
-    if Gio is None:
-        return False
-    try:
-        bus = Gio.bus_get_sync(Gio.BusType.SESSION, None)
-        return bool(
-            bus.call_sync(
-                "org.freedesktop.DBus",
-                "/org/freedesktop/DBus",
-                "org.freedesktop.DBus",
-                "NameHasOwner",
-                GLib.Variant("(s)", ("org.freedesktop.portal.Desktop",)),
-                GLib.VariantType.new("(b)"),
-                Gio.DBusCallFlags.NONE,
-                2000,
-                None,
-            ).unpack()[0]
-        )
-    except Exception:
-        return False
-
-
-def capture_portal_png(bounds, timeout_seconds=6):
-    """Capture via the xdg-desktop-portal Screenshot interface and crop to the
-    window bounds. The portal screenshots the whole screen when it honours
-    `interactive=false`; compositors that require user consent answer an
-    error or a dialog we cannot dismiss, so failure returns None — the
-    observation simply carries no screenshot rather than a fake one."""
-    if Gio is None or GLib is None or GdkPixbuf is None:
-        return None
-    loop = GLib.MainLoop()
-    bus = None
-    state = {"done": False, "uri": None, "sub": None, "request": None, "early": {}, "timed_out": False}
-    timeout_source = None
-    try:
-        bus = Gio.bus_get_sync(Gio.BusType.SESSION, None)
-
-        def on_response(_conn, _sender, path, _iface, _signal, params):
-            if state["request"] is None:
-                # A portal can respond before the synchronous Screenshot call
-                # returns its request path. Keep that response until matched.
-                state["early"][path] = params.unpack()
-                return
-            if path != state["request"]:
-                return
-            status, results = params.unpack()
-            if status == 0 and "uri" in results:
-                state["uri"] = str(results["uri"])
-            state["done"] = True
-            loop.quit()
-
-        state["sub"] = bus.signal_subscribe(
-            "org.freedesktop.portal.Desktop",
-            "org.freedesktop.portal.Request",
-            "Response",
-            None,
-            None,
-            Gio.DBusSignalFlags.NONE,
-            on_response,
-        )
-        reply = bus.call_sync(
-            "org.freedesktop.portal.Desktop",
-            "/org/freedesktop/portal/desktop",
-            "org.freedesktop.portal.Screenshot",
-            "Screenshot",
-            GLib.Variant(
-                "(sa{sv})",
-                ("", {"interactive": GLib.Variant("b", False)}),
-            ),
-            GLib.VariantType.new("(o)"),
-            Gio.DBusCallFlags.NONE,
-            int(timeout_seconds * 1000),
-            None,
-        )
-        # The Response arrives on the request object path the portal returns.
-        state["request"] = str(reply.unpack()[0])
-        if state["request"] in state["early"]:
-            status, results = state["early"][state["request"]]
-            if status == 0 and "uri" in results:
-                state["uri"] = str(results["uri"])
-            state["done"] = True
-        else:
-            def on_timeout():
-                state["done"] = True
-                state["timed_out"] = True
-                loop.quit()
-                return False
-
-            timeout_source = GLib.timeout_add_seconds(max(1, int(timeout_seconds)), on_timeout)
-            loop.run()
-        uri = state["uri"]
-        if not uri or not uri.startswith("file://"):
-            return None
-        path = GLib.filename_from_uri(uri)[0]
-        try:
-            pixbuf = GdkPixbuf.Pixbuf.new_from_file(path)
-        finally:
-            try:
-                os.unlink(path)
-            except OSError:
-                pass
-        if pixbuf is None:
-            return None
-        if bounds is None:
-            ok, data = pixbuf.save_to_bufferv("png", [], [])
-            if not ok:
-                return None
-            return base64.b64encode(bytes(data)).decode("ascii")
-        x = max(0, int(round(bounds["x"])))
-        y = max(0, int(round(bounds["y"])))
-        width = min(int(round(bounds["width"])), pixbuf.get_width() - x)
-        height = min(int(round(bounds["height"])), pixbuf.get_height() - y)
-        if width <= 0 or height <= 0:
-            return None
-        cropped = pixbuf.new_subpixbuf(x, y, width, height)
-        ok, data = cropped.save_to_bufferv("png", [], [])
-        if not ok:
-            return None
-        return base64.b64encode(bytes(data)).decode("ascii")
-    except Exception:
-        return None
-    finally:
-        try:
-            if timeout_source is not None and not state["timed_out"]:
-                GLib.source_remove(timeout_source)
-            if bus is not None and state["sub"] is not None:
-                bus.signal_unsubscribe(state["sub"])
-        except Exception:
-            pass
 
 
 def pixbuf_looks_black(pixbuf):
@@ -1077,25 +937,17 @@ def driver_capabilities():
         except Exception:
             pass
     wayland = on_wayland()
-    portal = portal_desktop_available() if wayland else False
-    detail = None
-    if wayland and not portal:
-        detail = (
-            "Wayland session and no reachable xdg-desktop-portal; screen "
-            "capture is unavailable and synthetic input depends on the "
-            "compositor accepting AT-SPI events."
-        )
-    elif wayland:
-        detail = (
-            "Wayland session; capture goes through xdg-desktop-portal and "
-            "synthetic input depends on the compositor accepting AT-SPI events."
-        )
+    detail = (
+        "Wayland needs a consented RemoteDesktop/ScreenCast session for reliable "
+        "capture and pointer input; AT-SPI element actions may still work."
+        if wayland else None
+    )
     return {
         "platform": "linux",
         "driver": "linux-atspi",
         "driverVersion": DRIVER_VERSION,
         "observeTree": True,
-        "screenshot": (not wayland and Gdk is not None) or portal,
+        "screenshot": not wayland and Gdk is not None,
         "elementAction": True,
         "coordinateInput": not wayland,
         "textInput": True,
@@ -1106,8 +958,7 @@ def driver_capabilities():
         # Long operations poll the cancel side-channel at internal
         # checkpoints; a cancel lands mid-operation, not after it.
         "interruptibleInput": True,
-        # Neither X11 root reads nor the portal produce occluded-window
-        # content.
+        # X11 root reads do not produce occluded-window content.
         "occludedCapture": False,
         "sessionType": "wayland" if wayland else ("x11" if os.environ.get("DISPLAY") else "headless"),
         "displays": displays,
@@ -1133,18 +984,9 @@ def release_input():
 
 
 def capture_desktop_frame():
-    """Whole-screen frame for the viewer contract (BC5). X11 reads the root
-    window; Wayland goes through the portal path (full image, no crop)."""
+    """Whole-screen X11 frame for the viewer contract (BC5)."""
     if on_wayland():
-        data = capture_portal_png(None)
-        if data is None:
-            return None
-        return {
-            "mime": "image/png",
-            "base64": data,
-            "bounds": screen_geometry() or {"x": 0, "y": 0, "width": 0, "height": 0},
-            "capturedAt": datetime.now(timezone.utc).isoformat(),
-        }
+        return None
     if Gdk is None:
         return None
     try:
@@ -1165,23 +1007,6 @@ def capture_desktop_frame():
             "base64": base64.b64encode(bytes(data)).decode("ascii"),
             "bounds": {"x": 0.0, "y": 0.0, "width": float(width), "height": float(height)},
             "capturedAt": datetime.now(timezone.utc).isoformat(),
-        }
-    except Exception:
-        return None
-
-
-def screen_geometry():
-    if Gdk is None:
-        return None
-    try:
-        screen = Gdk.Screen.get_default()
-        if screen is None:
-            return None
-        return {
-            "x": 0.0,
-            "y": 0.0,
-            "width": float(screen.get_width()),
-            "height": float(screen.get_height()),
         }
     except Exception:
         return None

@@ -16,7 +16,9 @@ Status: current acceptance — BC0–BC9 remain Partial.
 
 第四批把电脑使用记录关联到真实 Thread，保留同一桌面的多个工作关系；Bot 工作列表能回到关联桌面。人工交还把事件先持久记录，再用现有 Thread 消息账本续接，失败后保持相同事件 ID 恢复。Agent 可将受管桌面用户目录里的成果文件登记为 SHA-256 版本引用，远端 Host 按其桌面用户身份读取，Bot 工作列表提供下载；旧文件修订不被当成原版本，浏览器复核实际下载字节。Host 定向 computer/routes/Bot **68 项通过**，Pi computer **9 项通过**；Python 文件检查/读取/版本改变序列在本机 Python 运行。远端真实桌面与大文件传输仍未实测，成果引用依赖原远端在线，不是本地复制。
 
-第五批补上托管 libvirt guest 配方：Linux x64 本地 libvirt Host 从 Debian 官方目录锁定日期镜像并核验 SHA-512，准备带版本/散列校验的 NoCloud 配置盘及发行包内的 Node/Bun/Host runtime，在 guest 内安装持久 Xvnc 桌面和 Host。Host 等待 guest 身份、版本与桌面能力成立后，才把它登记到原有远端电脑目录。创建步骤、域 UUID、卷归属和 guest 状态持久化；Host 重启继续协调。受管 VM 关机后可替换配置盘，guest 在下次启动前验证并安装新运行组件，用户文件、浏览器 profile 与 Bot 数据位于独立的持久目录。界面默认选择自动准备，Host 路由现传递该选项；失联或版本不匹配不再维持虚假的 ready 状态。Host VM/路由/guest 定向 **76 项通过**，Host/UI 类型及 shell 语法通过。当前 Windows 环境没有 KVM/libvirt，真实镜像上传、NoCloud 启动、Xvnc 与升级仍未实机验证。
+第五批补上托管 libvirt guest 配方：Linux x64 本地 libvirt Host 从 Debian 官方目录锁定日期镜像并核验 SHA-512，准备带版本/散列校验的 NoCloud 配置盘及发行包内的 Node/Bun/Host runtime，在 guest 内安装持久 Xvnc 桌面和 Host。Host 等待 guest 身份、版本与桌面能力成立后，才把它登记到原有远端电脑目录。创建步骤、域 UUID、卷归属和 guest 状态持久化；Host 重启继续协调。受管 VM 关机后可替换配置盘，guest 在下次启动前验证并安装新运行组件，用户文件、浏览器 profile 与 Bot 数据位于独立的持久目录。界面默认选择自动准备，Host 路由现传递该选项；失联或版本不匹配不再维持虚假的 ready 状态。Host VM/路由/guest 定向 **76 项通过**，Host/UI 类型及 shell 语法通过。提交 `4894f7cb` 的 [Linux CI 生产构建](https://github.com/Youzini-afk/Varin/actions/runs/36631489354)成功，包含 guest bundle 构建；这只验证打包，不验证 KVM 启动。当前 Windows 环境没有 KVM/libvirt，真实镜像上传、NoCloud 启动、Xvnc 与升级仍未实机验证。
+
+第六批核对平台接口与全量回归：Wayland 的单次 Screenshot portal 结果无法证明与 AT-SPI 请求窗口相同，且逐帧调用不是持续授权会话，故撤下自动窗口图与观看帧的错误能力声明；正式 RemoteDesktop/ScreenCast 会话仍需实现。远端 URL 保留代理前缀后，修正运行时鉴权必须同时匹配 origin 与挂载路径，避免漏发凭据或将凭据发给同源其他服务。Pi 握手明确声明 Host 是否提供会话指令，未声明时不再等待无人处理的可选请求。首次全套测试揭示上述接口旧断言与两项 Pi 超时；修复后 UI **2,050 项通过**、Pi 受影响 **16 项通过**、Application Client **7 项通过**，Web 全套 **2,901 项通过、5 项跳过**。全仓类型和 lint、Host 构建、文档校验通过。CI 安全审计发现的既有依赖版本已定向更新；本地 `bun audit` 为零项。Pi 全套未在这些修复后再跑一遍，不能将首次失败记成全量通过。
 
 **结论：不能接受“BC0–BC9 全部完成”。** Bot、记忆、Computer Use、桌面视图、远端转发与 libvirt 的生产路径确实存在；但基线有控制交接、磁盘归属、配置保存、入口生命周期等实际错误，且 BC6–BC9 的若干交付条件根本尚未实现。功能存在、行为正确和安装后可用是不同证据。下文是本次验收结论；[旧验收记录](bot-computer-use-acceptance.md)保留历史，不覆盖本报告。
 
@@ -28,7 +30,7 @@ Status: current acceptance — BC0–BC9 remain Partial.
 | BC1 统一记忆 | 源码缺口已补，定向验证通过 | 共用 TDB 写入/纠正/遗忘及来源范围；主动与后台共享覆盖，工具与设置均能读取原始片段。 |
 | BC2 后台整理 | 源码缺口已补，定向验证通过 | prepared 回执、分段、来源修订、取消和跨分支恢复已接线；主动来源不会再仅凭正文去重。真实模型效果未验证。 |
 | BC3 召回与咨询 | 生产路径已接线 | 工作关联、文本/向量、快速判断、增量材料、只读咨询和原始来源追读均有消费者；真实模型选材质量和缓存命中未验证。 |
-| BC4 本机 Computer Use | Windows 有有限运行证据；平台合同未完整完成 | 原生观察/输入与持久 REPL 已接线。本次修复脚本代次、截图输出、进程退出等待和跨请求拖拽。Linux/macOS 没有实际图形会话运行证据；Wayland 只实现 Screenshot portal 路径，未实现正式 RemoteDesktop 输入会话；macOS 仍为 JXA/旧捕获 API 路线。 |
+| BC4 本机 Computer Use | Windows 有有限运行证据；平台合同未完整完成 | 原生观察/输入与持久 REPL 已接线。本次修复脚本代次、截图输出、进程退出等待和跨请求拖拽。Linux/macOS 没有实际图形会话运行证据；Wayland 已移除会误归属窗口的单次 Screenshot portal 自动截图，正式 RemoteDesktop/ScreenCast 会话未实现；macOS 仍为 JXA/旧捕获 API 路线。 |
 | BC5 实时桌面与交接 | 媒体和输入分离已实现；原生运行待验证 | 控制交接、代次与重启后的人工归属已有回归。独立 capture helper 消除长动作阻塞；Linux Xvnc/noVNC 走只读 RFB 媒体，输入仍走 Host。真实图形会话尚未运行。 |
 | BC6 远端常驻 | 连接和桌面准备路径已接通；远端实测待验证 | 共享 Host 拥有 SSH 生命周期、恢复意图与 Web HTTP/WS 网关；可对已连接 Linux Host 显式准备持久桌面，远端桌面镜像含 VNC 媒体。远端组件部署和完整 Bot 常驻尚未实测。 |
 | BC7 虚拟机 | 可用 guest 配方和共享桌面接线已实现，真实运行待验证 | libvirt UUID/卷归属、官方 Debian 镜像核验、NoCloud、guest Host/Xvnc、注册与恢复、关机后运行组件升级均有源码与定向行为验证。当前环境没有真实 KVM/libvirt/guest 图形会话，不能宣称创建出的电脑已经实际可用；托管配方限 Linux x64 本地 libvirt。 |
@@ -62,7 +64,7 @@ Status: current acceptance — BC0–BC9 remain Partial.
 这些是源码中的功能缺口，不是因缺少真机而暂缓作结论：
 
 5. **真实 VM 验收。** 自动创建、guest 引导、桌面操作、观看和关机后升级已有产品链路，但当前环境没有 KVM/libvirt，尚无真实虚拟机运行证据。托管配方目前要求 Linux x64 Host 与本地 `qemu:///system`；远端已有 VM 可按 BC6 接入，不能把这等同于托管生命周期。
-7. **正式平台组件。** Debian/Ubuntu 的显式准备已提供 Python/GI/AT-SPI/Gdk、Xvnc、xfce4 与浏览器安装路径，仍需 Linux 实机运行及其他发行版选择。macOS JXA 不等同于计划中的稳定 bundle/ScreenCaptureKit 组件，能力声明和权限检查还需实际平台实现与运行验证；Wayland 正式输入会话也未实现。
+7. **正式平台组件。** Debian/Ubuntu 的显式准备已提供 Python/GI/AT-SPI/Gdk、Xvnc、xfce4 与浏览器安装路径，仍需 Linux 实机运行及其他发行版选择。macOS JXA 不等同于计划中的稳定 bundle/ScreenCaptureKit 组件，能力声明和权限检查还需实际平台实现与运行验证；Wayland 正式 RemoteDesktop/ScreenCast 会话也未实现。Screenshot portal 的单次结果无法证明与请求窗口或连续观看画面同一目标，已停止在自动路径使用。
 
 ## 工程判断
 
@@ -84,5 +86,7 @@ Status: current acceptance — BC0–BC9 remain Partial.
 实际结果：Host 综合定向运行 **179 项通过**；后续修改只复验受影响的 computer/Bot/线程准入/settings 范围，**121 项通过**（与前一组重叠，不能相加）。Pi computer/memory **16 项通过**；UI 映射/面板/i18n **23 项通过**；文档工具 **9 项通过**。protocol 构建、Host 产品/测试类型、Pi/UI 类型和变更 TS/TSX lint 通过。真实 Host 构建的发布边界包含 449 个可达运行模块，排除了 52 个旧实现/测试产物；临时安装布局验证了六个驱动文件、代次内路径解析、测试 helper 排除及 Windows ping。
 
 VM 命令及 XML 语义另按 [libvirt virsh](https://libvirt.org/manpages/virsh.html) 与 [Domain XML](https://libvirt.org/formatdomain.html) 核对；这些资料不构成真实 hypervisor 的运行证据。
+
+平台接口判断另核对了 [XDG Screenshot](https://flatpak.github.io/xdg-desktop-portal/docs/doc-org.freedesktop.portal.Screenshot.html)、[XDG RemoteDesktop](https://flatpak.github.io/xdg-desktop-portal/docs/doc-org.freedesktop.portal.RemoteDesktop.html)、[XDG ScreenCast](https://flatpak.github.io/xdg-desktop-portal/docs/doc-org.freedesktop.portal.ScreenCast.html) 与 [Apple ScreenCaptureKit](https://developer.apple.com/documentation/screencapturekit/capturing-screen-content-in-macos)。单次截图请求没有长期会话的源身份和持续输入语义；Apple 已将现用的 [CGWindowListCreateImage](https://developer.apple.com/documentation/coregraphics/cgwindowlistcreateimage) 标记为废弃。这些文档支持接口取舍，不等于相应平台实机通过。
 
 真实 Linux/macOS 桌面、真实 libvirt、完整 Host↔Host 图形操作、正式安装包、付费模型效果与服务端缓存命中仍未验证。本报告不将上述空缺计为通过。

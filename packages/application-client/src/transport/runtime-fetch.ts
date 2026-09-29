@@ -61,7 +61,12 @@ const isActiveRuntimeServiceUrl = (url: URL): boolean => {
     if (!/^[a-z][a-z\d+.-]*:\/\//i.test(apiBase)) return false;
     const base = new URL(apiBase);
     if (url.origin !== base.origin) return false;
-    return shouldResolveApiPath(url.pathname);
+    // The runtime may be mounted below a reverse-proxy prefix. Compare the
+    // complete mount path, otherwise `/base/api` loses auth while a different
+    // service at the same origin's `/api` could receive our bearer token.
+    const mountPath = base.pathname.slice(0, -'/api'.length);
+    if (mountPath && !url.pathname.startsWith(`${mountPath}/`)) return false;
+    return shouldResolveApiPath(url.pathname.slice(mountPath.length));
   } catch {
     return false;
   }

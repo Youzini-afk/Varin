@@ -82,7 +82,7 @@ describe('runtimeFetch transport contract', () => {
 
       expect(calls).toHaveLength(1);
       const captured = calls[0].input;
-      expect(captured.url).toBe('https://runtime.example/api/session/abc/prompt_async?directory=%2Frepo&workspace=main');
+      expect(captured.url).toBe('https://runtime.example/base/api/session/abc/prompt_async?directory=%2Frepo&workspace=main');
       expect(captured.method).toBe('POST');
       expect(captured.signal.aborted).toBe(false);
       controller.abort('test cancellation');
@@ -170,6 +170,25 @@ describe('runtimeFetch transport contract', () => {
       await runtimeFetch('https://old-runtime.example/api/config/settings');
 
       expect(String(calls[0].input)).toBe('https://old-runtime.example/api/config/settings');
+      expect(new Headers(calls[0].init?.headers).has('authorization')).toBe(false);
+    } finally {
+      setRuntimeUrlResolver(previous);
+      globalThis.fetch = originalFetch;
+      clearRuntimeAuthCredentialProvider();
+    }
+  });
+
+  test('does not attach auth to the same origin outside the configured runtime mount', async () => {
+    const previous = getRuntimeUrlResolver();
+    const calls: Array<{ init?: RequestInit }> = [];
+    try {
+      configureRuntimeUrlResolver({ apiBaseUrl: 'https://runtime.example/base' });
+      setRuntimeBearerToken('runtime-token');
+      globalThis.fetch = (async (_input: RequestInfo | URL, init?: RequestInit) => {
+        calls.push({ init });
+        return new Response(null, { status: 204 });
+      }) as typeof fetch;
+      await runtimeFetch('https://runtime.example/api/config/settings');
       expect(new Headers(calls[0].init?.headers).has('authorization')).toBe(false);
     } finally {
       setRuntimeUrlResolver(previous);
