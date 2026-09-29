@@ -77,6 +77,17 @@ describe("computer tool", () => {
     assert.match((result.content[0] as { text: string }).text, /observe to verify/);
   });
 
+  it("registers a saved desktop file with the current work through the Host", async () => {
+    const { bridge, requests } = scriptedBridge({
+      "computer.artifact": () => ({ artifact: { id: "a1", relativePath: "Downloads/report.pdf", sha256: "abc" } }),
+    });
+    const tool = createComputerTool(bridge, SESSION);
+    const result = await execute(tool, { action: "artifact", desktopId: "managed-linux", relativePath: "Downloads/report.pdf" });
+    assert.equal(isError(result), undefined);
+    assert.equal(requests[0]!.method, "computer.artifact");
+    assert.deepEqual(requests[0]!.params, { desktopId: "managed-linux", relativePath: "Downloads/report.pdf" });
+  });
+
   it("the persistent REPL shares bindings across run calls and routes through the bridge", async () => {
     const { bridge, requests } = scriptedBridge({
       "computer.observe": () => observation("obs-9"),

@@ -1594,6 +1594,7 @@ export interface HarnessServiceMap {
   "computer.list": { params: ComputerListParams; result: ComputerListResult };
   "computer.prepare": { params: import('./harness-computer.js').ComputerDesktopPrepareParams; result: { desktop: import('./harness-computer.js').ComputerDesktop } };
   "computer.desktopLifecycle": { params: { desktopId: string; action: "start" | "stop" }; result: { desktop: import('./harness-computer.js').ComputerDesktop } };
+  "computer.artifact": { params: { desktopId?: string; relativePath: string }; result: { artifact: import('./harness-computer.js').ComputerArtifact } };
   "computer.control": { params: ComputerControlParams; result: ComputerControlResult };
   "computer.apps": { params: ComputerAppsParams; result: ComputerAppsResult };
   "computer.observe": { params: ComputerObserveParams; result: ComputerObserveResult };
@@ -1774,6 +1775,7 @@ export const HARNESS_METHOD_CAPABILITY = {
   "computer.list": "read.computer",
   "computer.prepare": "control.computer",
   "computer.desktopLifecycle": "control.computer",
+  "computer.artifact": "control.computer",
   "computer.control": "read.computer",
   "computer.apps": "read.computer",
   "computer.observe": "read.computer",
@@ -1925,6 +1927,7 @@ const HARNESS_METHODS: ReadonlySet<string> = new Set<string>([
   "computer.list",
   "computer.prepare",
   "computer.desktopLifecycle",
+  "computer.artifact",
   "computer.control",
   "computer.apps",
   "computer.observe",

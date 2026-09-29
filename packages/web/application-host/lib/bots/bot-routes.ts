@@ -1,6 +1,8 @@
 import type { Express, Request, RequestHandler, Response } from "express";
 import { HarnessServiceError } from "../harness/service-error.js";
 import type { BotModelSelection, BotService } from "./bot-service.js";
+import type { ComputerService } from "../computer/computer-service.js";
+import { botScopeId } from "../harness/owner-scope.js";
 
 /**
  * Bot routes (BC0): the durable Bot catalog plus entry/work resolution. These
@@ -9,6 +11,7 @@ import type { BotModelSelection, BotService } from "./bot-service.js";
  */
 export interface BotRoutesOptions {
   bots: BotService;
+  computers?: Pick<ComputerService, "workDesktops" | "listArtifacts">;
   requireAuth?: RequestHandler;
 }
 
@@ -42,7 +45,7 @@ const sendError = (response: Response, error: unknown, fallback: string): void =
   response.status(500).json({ error: error instanceof Error ? error.message : fallback });
 };
 
-export function registerBotRoutes(app: Express, { bots, requireAuth = noAuth }: BotRoutesOptions): void {
+export function registerBotRoutes(app: Express, { bots, computers, requireAuth = noAuth }: BotRoutesOptions): void {
   app.get("/api/harness/bots", requireAuth, async (_request: Request, response: Response) => {
     response.setHeader("Cache-Control", "no-store");
     try {
@@ -132,7 +135,15 @@ export function registerBotRoutes(app: Express, { bots, requireAuth = noAuth }: 
     try {
       const bot = await bots.get(botIdOf(request));
       if (!bot) throw new HarnessServiceError("not-found", "Unknown bot");
-      response.json({ threads: await bots.listWork(bot.id) });
+      const work = await bots.listWork(bot.id, true);
+      const scopeId = botScopeId(bot.id);
+      const [desktops, artifacts] = computers ? await Promise.all([
+        computers.workDesktops(scopeId), computers.listArtifacts(scopeId),
+      ]) : [[], []];
+      response.json({ threads: work.map((item) => ({ ...item,
+        desktops: desktops.filter((desktop) => desktop.work?.some((association) => association.threadId === item.thread.id)),
+        artifacts: artifacts.filter((artifact) => artifact.threadId === item.thread.id) }))
+        .filter((item) => item.thread.purpose !== 'bot-root' || item.desktops.length > 0 || item.artifacts.length > 0) });
     } catch (error) {
       sendError(response, error, "Unable to list bot work");
     }

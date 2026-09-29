@@ -1,6 +1,8 @@
 import { getRuntimeUrlResolver, runtimeFetch } from '@varin/application-client';
+import { sha256 } from '@noble/hashes/sha2.js';
 import type {
   ComputerControlState,
+  ComputerArtifact,
   ComputerDesktop,
   ComputerDesktopFrame,
   ComputerHumanInput,
@@ -107,6 +109,31 @@ export const prepareComputerDesktop = async (input: import('@varin/protocol').Co
 export const changeComputerDesktop = async (desktopId: string, action: 'start' | 'stop'): Promise<ComputerDesktop> => (
   (await desktopPost<{ desktop: ComputerDesktop }>(desktopId, 'lifecycle', { action }, 'Unable to change desktop lifecycle')).desktop
 );
+
+export const downloadComputerArtifact = async (artifact: ComputerArtifact): Promise<void> => {
+  const response = await runtimeFetch(`/api/computers/artifacts/${encodeURIComponent(artifact.id)}/content`);
+  if (!response.ok) {
+    const result = await response.json().catch(() => null);
+    throw new Error(typeof result?.error === 'string' ? result.error : 'Unable to download desktop artifact');
+  }
+  if (response.headers.get('x-varin-artifact-sha256') !== artifact.sha256) {
+    throw new Error('The downloaded artifact revision did not match the work record');
+  }
+  const bytes = new Uint8Array(await response.arrayBuffer());
+  const receivedHash = Array.from(sha256(bytes), (byte) => byte.toString(16).padStart(2, '0')).join('');
+  if (receivedHash !== artifact.sha256 || bytes.byteLength !== artifact.byteLength) {
+    throw new Error('The downloaded file changed after its work revision was recorded');
+  }
+  const file = new Blob([bytes]);
+  const href = URL.createObjectURL(file);
+  const anchor = document.createElement('a');
+  anchor.href = href;
+  anchor.download = artifact.relativePath.split('/').at(-1) || 'artifact';
+  document.body.append(anchor);
+  anchor.click();
+  anchor.remove();
+  setTimeout(() => URL.revokeObjectURL(href), 0);
+};
 
 // --- BC7: virtual machines ---------------------------------------------------
 

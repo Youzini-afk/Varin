@@ -10,10 +10,12 @@
 
 import { randomUUID } from "node:crypto";
 import { spawn } from "node:child_process";
+import { Readable } from "node:stream";
 import { mkdir, readFile, rename, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import type {
   ComputerAction,
+  ComputerArtifact,
   ComputerActionResult,
   ComputerAppDescriptor,
   ComputerCapabilities,
@@ -34,6 +36,7 @@ import type {
   ComputerVmProviderConfig,
   ComputerVmState,
   ComputerVmStep,
+  ComputerWorkAssociation,
 } from "@varin/protocol";
 import type { KernelClient, KernelScopedClient } from "../kernel/kernel-client.js";
 import type { KernelRecordResult } from "../kernel/protocol.generated.js";
@@ -49,6 +52,7 @@ import {
 import { createLibvirtProvider } from "./libvirt-provider.js";
 import { createDesktopDriverPool } from "./desktop-drivers.js";
 import { createLinuxDesktop, type LinuxDesktopState } from "./linux-desktop.js";
+import { inspectDesktopFile, openDesktopFile, type DesktopArtifactVersion } from "./desktop-artifact-files.js";
 import type { VmExec, VmProvider } from "./vm-provider.js";
 
 /** Kernel workspace under which computer catalog records live. */
@@ -143,6 +147,10 @@ const parseDesktop = (record: KernelRecordResult): ComputerDesktop | null => {
       ...(isObject(raw.usage) && asString(raw.usage.sessionId) && asString(raw.usage.at)
         ? { usage: { sessionId: raw.usage.sessionId as string, at: raw.usage.at as string } }
         : {}),
+      ...(Array.isArray(raw.work) ? { work: raw.work.flatMap((entry): ComputerWorkAssociation[] =>
+        isObject(entry) && asString(entry.scopeId) && asString(entry.threadId) && asString(entry.sessionId) && asString(entry.at)
+          ? [{ scopeId: entry.scopeId as string, threadId: entry.threadId as string,
+            sessionId: entry.sessionId as string, at: entry.at as string }] : []) } : {}),
       ...(raw.managed === "linux-xvnc" ? { managed: "linux-xvnc" as const } : {}),
       ...(isObject(raw.media) && raw.media.kind === "vnc"
         && Number.isSafeInteger(raw.media.width) && (raw.media.width as number) > 0
@@ -152,6 +160,19 @@ const parseDesktop = (record: KernelRecordResult): ComputerDesktop | null => {
   } catch {
     return null;
   }
+};
+
+const parseArtifact = (record: KernelRecordResult): ComputerArtifact | null => {
+  if (!record.recordId.startsWith("computer.artifact:")) return null;
+  try {
+    const raw = JSON.parse(record.payloadJson) as unknown;
+    if (!isObject(raw) || raw.id !== record.recordId.slice("computer.artifact:".length)
+      || ![raw.desktopId, raw.sourceHostId, raw.scopeId, raw.threadId, raw.relativePath, raw.sha256,
+        raw.modifiedAt, raw.registeredAt].every(asString)
+      || !/^[0-9a-f]{64}$/u.test(raw.sha256 as string)
+      || !Number.isSafeInteger(raw.byteLength) || (raw.byteLength as number) < 0) return null;
+    return raw as unknown as ComputerArtifact;
+  } catch { return null; }
 };
 
 // ---------------------------------------------------------------------------
@@ -324,6 +345,21 @@ interface DesktopLane {
   needsObservation: boolean;
 }
 
+interface PendingHandback {
+  id: string;
+  scopeId: string;
+  threadId: string;
+  desktopId: string;
+  label: string;
+  at: string;
+}
+
+const handbackEvents = (value: unknown): PendingHandback[] => Array.isArray(value) ? value.flatMap((entry): PendingHandback[] =>
+  isObject(entry) && asString(entry.id) && asString(entry.scopeId) && asString(entry.threadId)
+    && asString(entry.desktopId) && asString(entry.label) && asString(entry.at)
+    ? [{ id: entry.id as string, scopeId: entry.scopeId as string, threadId: entry.threadId as string,
+      desktopId: entry.desktopId as string, label: entry.label as string, at: entry.at as string }] : []) : [];
+
 /** A configured remote Host a `remote` desktop's calls route to (BC6). */
 export interface ComputerRemoteHost {
   /** Settings connection id — also the remote machine's catalog prefix. */
@@ -363,6 +399,10 @@ export interface ComputerServiceOptions {
   vmExec?: VmExec;
   /** Test seam: substitute provider implementation entirely. */
   vmProviderFactory?: (config: ComputerVmProviderConfig, exec: VmExec) => VmProvider;
+  /** Resolve the real durable work owning a Pi session. */
+  resolveWork?: (sessionId: string) => Promise<{ scopeId: string; threadId: string } | null>;
+  /** Deliver an idempotent work continuation through the existing Thread ledger. */
+  onHandback?: (event: PendingHandback) => Promise<void>;
 }
 
 export interface ComputerService {
@@ -370,6 +410,13 @@ export interface ComputerService {
   desktopLifecycle(desktopId: string, action: "start" | "stop", automation?: boolean): Promise<ComputerDesktop>;
   mediaTarget(desktopId: string): Promise<{ socketPath: string } | { url: string; headers: Record<string, string> }>;
   list(options?: { localOnly?: boolean }): Promise<ComputerListResult>;
+  workDesktops(scopeId: string): Promise<ComputerDesktop[]>;
+  reconcileHandbacks(): Promise<void>;
+  inspectArtifact(desktopId: string, relativePath: string): Promise<DesktopArtifactVersion>;
+  registerArtifact(sessionId: string, desktopId: string | undefined, relativePath: string): Promise<ComputerArtifact>;
+  listArtifacts(scopeId: string): Promise<ComputerArtifact[]>;
+  openDesktopArtifact(desktopId: string, relativePath: string, sha256: string): Promise<{ stream: Readable; cancel(): void }>;
+  openArtifact(id: string): Promise<{ artifact: ComputerArtifact; stream: Readable; cancel(): void }>;
   /** Ensure the local machine/console desktop records exist. */
   ensureLocal(): Promise<{ machine: ComputerMachine; desktop: ComputerDesktop }>;
   /** Re-probe driver capabilities into the desktop record. */
@@ -493,6 +540,8 @@ export function createComputerService(options: ComputerServiceOptions): Computer
       const prior = JSON.parse(existing.payloadJson) as Record<string, unknown>;
       if (payload.control === undefined && prior.control !== undefined) payload = { ...payload, control: prior.control };
       if (payload.usage === undefined && prior.usage !== undefined) payload = { ...payload, usage: prior.usage };
+      if (payload.work === undefined && prior.work !== undefined) payload = { ...payload, work: prior.work };
+      if (payload.handbackEvents === undefined && prior.handbackEvents !== undefined) payload = { ...payload, handbackEvents: prior.handbackEvents };
     }
     return client.putRecord({
       operationId: `${recordType}:${randomUUID()}`,
@@ -515,6 +564,7 @@ export function createComputerService(options: ComputerServiceOptions): Computer
    */
   const recordUsage = async (desktopId: string, sessionId: string | undefined): Promise<void> => {
     if (!sessionId) return;
+    const work = await options.resolveWork?.(sessionId);
     const client = await scoped();
     const recordId = `computer.desktop:${desktopId}`;
     for (let attempt = 0; attempt < 2; attempt += 1) {
@@ -523,7 +573,16 @@ export function createComputerService(options: ComputerServiceOptions): Computer
       let body: unknown;
       try { body = JSON.parse(record.payloadJson); } catch { return; }
       if (!isObject(body)) return;
-      body.usage = { sessionId, at: new Date().toISOString() };
+      const at = new Date().toISOString();
+      body.usage = { sessionId, at };
+      if (work) {
+        const previous = Array.isArray(body.work) ? body.work.flatMap((item): ComputerWorkAssociation[] =>
+          isObject(item) && asString(item.scopeId) && asString(item.threadId) && asString(item.sessionId) && asString(item.at)
+            ? [{ scopeId: item.scopeId as string, threadId: item.threadId as string,
+              sessionId: item.sessionId as string, at: item.at as string }] : []) : [];
+        body.work = [...previous.filter((item) => item.scopeId !== work.scopeId || item.threadId !== work.threadId),
+          { ...work, sessionId, at }];
+      }
       try {
         await client.putRecord({
           operationId: `computer.desktop:usage:${randomUUID()}`,
@@ -596,12 +655,58 @@ export function createComputerService(options: ComputerServiceOptions): Computer
     };
   };
 
-  const persistControl = async (desktopId: string): Promise<void> => {
-    const { record } = await desktopRecord(desktopId);
+  const persistControl = async (desktopId: string, handback = false, localControl = true): Promise<void> => {
+    const { record, desktop } = await desktopRecord(desktopId);
+    const body = JSON.parse(record.payloadJson) as Record<string, unknown>;
+    const latest = desktop.work?.find((item) => item.sessionId === desktop.usage?.sessionId);
+    const event = handback && latest && options.onHandback
+      ? { id: randomUUID(), scopeId: latest.scopeId, threadId: latest.threadId,
+        desktopId, label: desktop.label, at: new Date().toISOString() } satisfies PendingHandback : null;
     await putRecord(record.recordId, "computer.desktop", record.state, {
-      ...JSON.parse(record.payloadJson) as Record<string, unknown>,
-      control: { ...laneFor(desktopId).control },
+      ...body,
+      ...(localControl ? { control: { ...laneFor(desktopId).control } } : {}),
+      ...(event ? { handbackEvents: [...handbackEvents(body.handbackEvents), event] } : {}),
     });
+  };
+
+  const handbackDeliveries = new Map<string, Promise<void>>();
+  const deliverHandbacks = (desktopId: string): Promise<void> => {
+    const ongoing = handbackDeliveries.get(desktopId);
+    if (ongoing) return ongoing;
+    const task = (async () => {
+      if (!options.onHandback) return;
+      const client = await scoped();
+      for (;;) {
+        const recordId = `computer.desktop:${desktopId}`;
+        const record = await client.getRecord(COMPUTER_CATALOG_WORKSPACE_ID, recordId);
+        if (!record) return;
+        const body = JSON.parse(record.payloadJson) as Record<string, unknown>;
+        const event = handbackEvents(body.handbackEvents)[0];
+        if (!event) return;
+        await options.onHandback(event);
+        // A successful Thread-ledger receipt is idempotent by event.id. If this
+        // catalog write conflicts or the Host stops, replay is harmless.
+        const updated = await client.getRecord(COMPUTER_CATALOG_WORKSPACE_ID, recordId);
+        if (!updated) return;
+        const next = JSON.parse(updated.payloadJson) as Record<string, unknown>;
+        next.handbackEvents = handbackEvents(next.handbackEvents).filter((item) => item.id !== event.id);
+        try {
+          await client.putRecord({ operationId: `computer.desktop:handback:${randomUUID()}`,
+            workspaceId: COMPUTER_CATALOG_WORKSPACE_ID, recordId, recordType: "computer.desktop",
+            state: updated.state, payloadJson: JSON.stringify(next), ownerIds: [], references: [],
+            expectedRecordRevision: updated.recordRevision });
+        } catch { /* re-read and retry the idempotent delivery */ }
+      }
+    })();
+    handbackDeliveries.set(desktopId, task);
+    void task.finally(() => { if (handbackDeliveries.get(desktopId) === task) handbackDeliveries.delete(desktopId); }).catch(() => {});
+    return task;
+  };
+
+  const reconcileHandbacks: ComputerService["reconcileHandbacks"] = async () => {
+    if (!options.onHandback) return;
+    const desktops = (await listRecords("computer.desktop")).map(parseDesktop).filter((item): item is ComputerDesktop => item !== null);
+    await Promise.all(desktops.map((desktop) => deliverHandbacks(desktop.id)));
   };
 
   /** Broadcast the control record to every subscribed viewer (BC5.B). */
@@ -727,6 +832,9 @@ export function createComputerService(options: ComputerServiceOptions): Computer
         .filter((d): d is ComputerDesktop => d !== null && d.usage !== undefined)
         .map((d) => [d.id, d.usage!]),
     );
+    const workByDesktop = new Map((await listRecords("computer.desktop"))
+      .map(parseDesktop).filter((d): d is ComputerDesktop => d !== null && d.work !== undefined)
+      .map((d) => [d.id, d.work!]));
     const now = new Date().toISOString();
     await Promise.allSettled([
       ...hosts.map(async (host) => {
@@ -764,6 +872,7 @@ export function createComputerService(options: ComputerServiceOptions): Computer
             }
             const mirrorDesktopId = `remote:${host.id}:${primary.coordinatorHostId}:${remoteDesktop.id}`;
             const mirroredUsage = usageByDesktop.get(mirrorDesktopId);
+            const mirroredWork = workByDesktop.get(mirrorDesktopId);
             await putRecord(`computer.desktop:${mirrorDesktopId}`, "computer.desktop", remoteDesktop.status, {
               id: mirrorDesktopId,
               machineId,
@@ -773,6 +882,7 @@ export function createComputerService(options: ComputerServiceOptions): Computer
               ...(remoteDesktop.capabilities ? { capabilities: remoteDesktop.capabilities as unknown as Record<string, unknown> } : {}),
               remote: { connectionId: host.id, desktopId: remoteDesktop.id, hostId: primary.coordinatorHostId },
               ...(mirroredUsage ? { usage: mirroredUsage } : {}),
+              ...(mirroredWork ? { work: mirroredWork } : {}),
               ...(remoteDesktop.managed ? { managed: remoteDesktop.managed } : {}),
               ...(remoteDesktop.media ? { media: remoteDesktop.media } : {}),
             });
@@ -919,11 +1029,24 @@ export function createComputerService(options: ComputerServiceOptions): Computer
       listRecords("computer.machine"),
       listRecords("computer.desktop"),
     ]);
+    if (options.onHandback) for (const record of desktops) {
+      const body = JSON.parse(record.payloadJson) as Record<string, unknown>;
+      if (handbackEvents(body.handbackEvents).length > 0) {
+        const id = recordIdSuffix(record);
+        if (id) void deliverHandbacks(id).catch(() => undefined);
+      }
+    }
     return {
       machines: machines.map(parseMachine).filter((m): m is ComputerMachine => m !== null && (!listOptions?.localOnly || m.provider !== "remote")),
       desktops: desktops.map(parseDesktop).filter((d): d is ComputerDesktop => d !== null && (!listOptions?.localOnly || !d.remote)),
       defaultDesktopId: await defaultDesktop(),
     };
+  };
+
+  const workDesktops: ComputerService["workDesktops"] = async (scopeId) => {
+    await ensureLocal();
+    return (await listRecords("computer.desktop")).map(parseDesktop)
+      .filter((desktop): desktop is ComputerDesktop => desktop !== null && desktop.work?.some((work) => work.scopeId === scopeId) === true);
   };
 
   const targetFile = options.dataDir ? join(options.dataDir, "computer-target.json") : null;
@@ -1538,6 +1661,8 @@ export function createComputerService(options: ComputerServiceOptions): Computer
         { ...(params.holderId ? { holderId: params.holderId } : {}) },
       );
       if (!result.control) throw new HarnessServiceError("unavailable", "Remote Host returned no control state");
+      await persistControl(id, true, false);
+      void deliverHandbacks(id).catch(() => undefined);
       return { control: { ...result.control, desktopId: id }, requiresObservation: true };
     }
     const lane = laneFor(id);
@@ -1558,6 +1683,7 @@ export function createComputerService(options: ComputerServiceOptions): Computer
     drivers.get(id)?.cancel();
     broadcastControl(id);
     const previous = lane.control;
+    let result: Awaited<ReturnType<ComputerService["handback"]>>;
     try {
       await enqueue(id, "observe", async () => {
         const driver = drivers.get(id);
@@ -1565,14 +1691,16 @@ export function createComputerService(options: ComputerServiceOptions): Computer
           throw new HarnessServiceError("unavailable", "Input release was not confirmed; control remains human-owned");
         }
         lane.control = { owner: "agent", reachable: true, since: new Date().toISOString() };
-        try { await persistControl(id); }
+        try { await persistControl(id, true); }
         catch (error) { lane.control = previous; throw error; }
       });
-      return { control: { ...controlState(id), transitioning: false }, requiresObservation: true };
+      result = { control: { ...controlState(id), transitioning: false }, requiresObservation: true };
     } finally {
       lane.transitioning = false;
       broadcastControl(id);
     }
+    void deliverHandbacks(id).catch(() => undefined);
+    return result;
   };
 
   const validateHumanInput = (input: ComputerHumanInput): void => {
@@ -1885,6 +2013,81 @@ export function createComputerService(options: ComputerServiceOptions): Computer
     return { socketPath: current.socket };
   };
 
+  const validateArtifactPath = (relativePath: string): void => {
+    if (typeof relativePath !== "string" || !relativePath.trim() || relativePath.startsWith("/")
+      || relativePath.includes("\\") || relativePath.split("/").includes("..")) {
+      throw new HarnessServiceError("invalid-params", "Artifact path must be relative to the managed desktop user's home");
+    }
+  };
+  const artifactVersion = (value: unknown): DesktopArtifactVersion => {
+    if (!isObject(value) || typeof value.sha256 !== "string" || !/^[0-9a-f]{64}$/u.test(value.sha256)
+      || !Number.isSafeInteger(value.byteLength) || (value.byteLength as number) < 0
+      || typeof value.modifiedAt !== "string" || !/^[0-9]+$/u.test(value.modifiedAt)) {
+      throw new RemoteTransportError("Remote desktop returned invalid artifact metadata");
+    }
+    return { sha256: value.sha256 as string, byteLength: value.byteLength as number, modifiedAt: value.modifiedAt };
+  };
+  const inspectArtifact: ComputerService["inspectArtifact"] = async (id, relativePath) => {
+    validateArtifactPath(relativePath);
+    const remote = await remoteTargetFor(id);
+    if (remote) {
+      const result = await remoteJson<{ version?: DesktopArtifactVersion }>(remote.connection, "POST",
+        `/api/computers/desktops/${encodeURIComponent(remote.remoteId)}/artifacts/inspect`, { relativePath });
+      return artifactVersion(result.version);
+    }
+    const { desktop } = await desktopRecord(id);
+    if (desktop.managed !== "linux-xvnc") throw new HarnessServiceError("unavailable", "Artifact access requires a managed Linux desktop");
+    return inspectDesktopFile(await linuxDesktop.status(), relativePath);
+  };
+  const registerArtifact: ComputerService["registerArtifact"] = async (sessionId, desktopId, relativePath) => {
+    if (!sessionId) throw new HarnessServiceError("forbidden", "Artifact registration requires an active work session");
+    const work = await options.resolveWork?.(sessionId);
+    if (!work) throw new HarnessServiceError("forbidden", "Artifact registration requires a durable Thread work owner");
+    const id = await resolveDesktopId(desktopId);
+    const remote = await remoteTargetFor(id);
+    const version = await inspectArtifact(id, relativePath);
+    const artifact: ComputerArtifact = { id: randomUUID(), desktopId: id,
+      sourceHostId: remote?.desktop.remote?.hostId ?? options.hostId, scopeId: work.scopeId, threadId: work.threadId,
+      relativePath, ...version, registeredAt: new Date().toISOString() };
+    const client = await scoped();
+    await client.putRecord({ operationId: `computer.artifact:${randomUUID()}`,
+      workspaceId: COMPUTER_CATALOG_WORKSPACE_ID, recordId: `computer.artifact:${artifact.id}`,
+      recordType: "computer.artifact", state: "active", payloadJson: JSON.stringify(artifact), ownerIds: [], references: [] });
+    return artifact;
+  };
+  const listArtifacts: ComputerService["listArtifacts"] = async (scopeId) =>
+    (await listRecords("computer.artifact")).map(parseArtifact)
+      .filter((artifact): artifact is ComputerArtifact => artifact !== null && artifact.scopeId === scopeId);
+  const openDesktopArtifact: ComputerService["openDesktopArtifact"] = async (id, relativePath, sha256) => {
+    validateArtifactPath(relativePath);
+    if (!/^[0-9a-f]{64}$/u.test(sha256)) throw new HarnessServiceError("invalid-params", "Invalid artifact revision");
+    const { desktop } = await desktopRecord(id);
+    if (desktop.remote || desktop.managed !== "linux-xvnc") throw new HarnessServiceError("unavailable", "Artifact access requires a local managed Linux desktop");
+    const current = await linuxDesktop.status();
+    return openDesktopFile(current, relativePath, sha256);
+  };
+  const openArtifact: ComputerService["openArtifact"] = async (id) => {
+    const record = await (await scoped()).getRecord(COMPUTER_CATALOG_WORKSPACE_ID, `computer.artifact:${id}`);
+    const artifact = record ? parseArtifact(record) : null;
+    if (!artifact) throw new HarnessServiceError("not-found", "Unknown computer artifact");
+    const version = await inspectArtifact(artifact.desktopId, artifact.relativePath);
+    if (version.sha256 !== artifact.sha256) throw new HarnessServiceError("unavailable", "Artifact version changed; register its current revision");
+    const remote = await remoteTargetFor(artifact.desktopId);
+    if (remote) {
+      if (remote.desktop.remote?.hostId !== artifact.sourceHostId) throw new HarnessServiceError("forbidden", "Artifact Host identity changed");
+      const path = `/api/computers/desktops/${encodeURIComponent(remote.remoteId)}/artifacts/read?path=${encodeURIComponent(artifact.relativePath)}&sha256=${artifact.sha256}`;
+      const response = await remoteFetch(remote.connection, "GET", path);
+      if (!response.ok || response.headers.get("x-varin-artifact-sha256") !== artifact.sha256 || !response.body) {
+        await response.body?.cancel();
+        throw new RemoteTransportError("Remote desktop did not return the recorded artifact revision");
+      }
+      const stream = Readable.fromWeb(response.body as import("node:stream/web").ReadableStream);
+      return { artifact, stream, cancel: () => stream.destroy() };
+    }
+    if (artifact.sourceHostId !== options.hostId) throw new HarnessServiceError("forbidden", "Artifact Host identity changed");
+    return { artifact, ...await openDesktopArtifact(artifact.desktopId, artifact.relativePath, artifact.sha256) };
+  };
+
   // --- BC7: virtual machine lifecycle ----------------------------------------
 
   const vmExec: VmExec = options.vmExec ?? ((command, args, execOptions) => new Promise((resolve, reject) => {
@@ -2102,7 +2305,8 @@ export function createComputerService(options: ComputerServiceOptions): Computer
 
   return {
     prepareDesktop, desktopLifecycle, mediaTarget,
-    list,
+    inspectArtifact, registerArtifact, listArtifacts, openDesktopArtifact, openArtifact,
+    list, workDesktops, reconcileHandbacks,
     ensureLocal,
     probe,
     listApps,
@@ -2136,6 +2340,7 @@ export function createComputerService(options: ComputerServiceOptions): Computer
       }
       await driverPool.dispose();
       await linuxDesktop.dispose();
+      await Promise.allSettled([...handbackDeliveries.values()]);
       lanes.clear();
       observations.clear();
     },

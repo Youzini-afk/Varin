@@ -30,6 +30,7 @@ const ComputerParams = Type.Object({
     Type.Literal("prepare"),
     Type.Literal("start"),
     Type.Literal("stop"),
+    Type.Literal("artifact"),
     Type.Literal("apps"),
     Type.Literal("observe"),
     Type.Literal("act"),
@@ -43,6 +44,7 @@ const ComputerParams = Type.Object({
   connectionId: Type.Optional(Type.String({ description: "prepare: saved Host connection id; omit for this Host." })),
   width: Type.Optional(Type.Integer({ minimum: 1 })),
   height: Type.Optional(Type.Integer({ minimum: 1 })),
+  relativePath: Type.Optional(Type.String({ description: "artifact: file path relative to the managed desktop user's home." })),
   /** observe/act/apps: app selector (process name, window title, or pid). */
   app: Type.Optional(Type.String()),
   /** observe: which of the app's windows to bind — hwnd number or title (multi-window apps). */
@@ -107,6 +109,7 @@ export function createComputerTool(bridge: HostServicesBridge, _sessionId: strin
       "cancel drops queued input; release frees held keys/buttons. Use them when a gesture must not continue.",
       "If the tool reports the desktop unavailable or unprobed, report that honestly — never claim a GUI action happened.",
       "prepare installs a persistent Linux desktop and browser on this Host or a saved connection. Use it when an independent desktop is needed. start/stop require its desktopId; stopping closes applications but retains their saved files and browser profile.",
+      "After saving a file in a managed desktop, action=artifact with its path relative to that desktop user's home records the exact file revision on the current work. The work view provides a download; a changed file must be registered again.",
     ],
     parameters: ComputerParams,
     execute: async (_toolCallId, params, signal, _onUpdate, _ctx) => {
@@ -127,10 +130,16 @@ export function createComputerTool(bridge: HostServicesBridge, _sessionId: strin
             const result = await bridge.request("computer.desktopLifecycle", { desktopId: desktop, action: params.action });
             return { content: [{ type: "text", text: JSON.stringify(result) }], details: result };
           }
+          case "artifact": {
+            if (!params.relativePath?.trim()) throw new HarnessRequestError("invalid-params", "artifact requires relativePath");
+            const result = await bridge.request("computer.artifact", { relativePath: params.relativePath,
+              ...(desktop ? { desktopId: desktop } : {}) });
+            return { content: [{ type: "text", text: JSON.stringify(result) }], details: result };
+          }
           case "list": {
             const result = await bridge.request<"computer.list">("computer.list", {}) as ComputerListResult;
             const lines = [
-              ...result.machines.map((m) => `machine ${m.id} "${m.name}" (${m.platform}, ${m.status})`),
+              ...result.machines.map((m) => `machine ${m.id} "${m.name}" (${m.platform}, ${m.status})${m.provider === "remote" ? ` · prepare connectionId ${m.id.slice("remote:".length)}` : ""}`),
               ...result.desktops.map((d) => `desktop ${d.id} "${d.label}" on ${d.machineId} (${d.status}${d.statusDetail ? `: ${d.statusDetail}` : ""})`),
             ];
             return {

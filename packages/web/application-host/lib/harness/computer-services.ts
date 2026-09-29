@@ -93,6 +93,7 @@ export function registerComputerServices(
   router.register("computer.list", createComputerListService(host));
   router.register("computer.prepare", { handle: async (params) => ({ desktop: await requireService(host).prepareDesktop(params, true) }) });
   router.register("computer.desktopLifecycle", { handle: async (params) => ({ desktop: await requireService(host).desktopLifecycle(params.desktopId, params.action, true) }) });
+  router.register("computer.artifact", { handle: async (params, ctx) => ({ artifact: await requireService(host).registerArtifact(ctx.sessionId, desktopIdParam(params), params.relativePath) }) });
   router.register("computer.control", { handle: async (params) => ({ control: await requireService(host).control(desktopIdParam(params)) }) });
   router.register("computer.apps", createComputerAppsService(host));
   router.register("computer.observe", createComputerObserveService(host));

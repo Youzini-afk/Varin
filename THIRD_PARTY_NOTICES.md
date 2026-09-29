@@ -69,6 +69,10 @@ at `packages/web/public/licenses/novnc-LICENSE.txt`; the corresponding source is
 available from the pinned `@novnc/novnc` dependency and
 [noVNC upstream](https://github.com/novnc/noVNC/tree/v1.7.0).
 
+Desktop artifact downloads use `@noble/hashes` 2.4.0 to verify SHA-256
+before saving. Its MIT license is distributed at
+`packages/web/public/licenses/noble-hashes-LICENSE.txt`.
+
 ## TypeScript language service
 
 Varin's first-party TypeScript/JavaScript language extension distributes

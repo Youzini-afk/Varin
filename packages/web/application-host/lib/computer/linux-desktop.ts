@@ -14,6 +14,8 @@ export interface LinuxDesktopState {
   user?: string;
   uid?: number;
   driver?: string;
+  artifact?: string;
+  home?: string;
   environment?: Record<string, string>;
 }
 

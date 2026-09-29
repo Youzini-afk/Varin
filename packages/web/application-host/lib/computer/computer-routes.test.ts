@@ -6,6 +6,7 @@ import { HarnessServiceError } from "../harness/service-error.js";
 import type { ComputerDesktop, ComputerMachine } from "@varin/protocol";
 import { once } from "node:events";
 import type { AddressInfo } from "node:net";
+import { Readable } from "node:stream";
 
 const machine: ComputerMachine = {
   id: "local",
@@ -40,6 +41,16 @@ const fixture = () => {
 };
 
 describe("computer routes (BC4)", () => {
+  it("streams the registered artifact revision with its exact file identity", async () => {
+    const { app, computers } = fixture();
+    computers.openArtifact = vi.fn(async () => ({ artifact: { relativePath: "Downloads/report.pdf", sha256: "a".repeat(64), byteLength: 3 },
+      stream: Readable.from(Buffer.from("abc")), cancel: () => {} }));
+    const response = await request(app).get("/api/computers/artifacts/a1/content").buffer(true);
+    expect(response.status).toBe(200);
+    expect(response.headers["x-varin-artifact-sha256"]).toBe("a".repeat(64));
+    expect(response.headers["content-disposition"]).toContain("report.pdf");
+    expect(response.body).toEqual(Buffer.from("abc"));
+  });
   it('rejects input at a connection whose owning Host identity changed', async () => {
     const { app, computers } = fixture();
     computers.act = vi.fn();

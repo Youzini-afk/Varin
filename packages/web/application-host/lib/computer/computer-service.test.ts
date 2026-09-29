@@ -693,6 +693,40 @@ describe("computer service (BC6 remote hosts)", () => {
     await service.dispose();
   });
 
+  it("records a remote desktop file revision on its Thread and streams only that revision", async () => {
+    const bytes = Buffer.from("artifact content");
+    const sha256 = "42bd420cc2f99e68e60005fa7c28fc2f60e4e04ee160d9dd3b98e72fc2954f98";
+    let changed = false;
+    const service = createComputerService({
+      client: fakeKernel().client as never, hostId: "h", platform: "windows", dataDir: newDataDir(),
+      createDriver: () => makeDriver(async () => okResponse()), remoteHosts: async () => [remoteHost],
+      resolveWork: async () => ({ scopeId: "bot:b", threadId: "t1" }),
+      fetch: remoteFetch((url) => {
+        if (url.endsWith("/api/computers?local=1")) return jsonResponse({ ...remoteCatalog,
+          desktops: [{ id: "managed-linux", machineId: "local", label: "Desktop", kind: "virtual-display",
+            status: "available", managed: "linux-xvnc" }] });
+        if (url.endsWith("/artifacts/inspect")) return jsonResponse({ version: {
+          sha256: changed ? "0".repeat(64) : sha256, byteLength: bytes.length, modifiedAt: "1790712000000000000",
+        } });
+        if (url.includes("/artifacts/read?")) return new Response(bytes, { headers: {
+          "X-Varin-Computer-Host": "remote-h", "X-Varin-Artifact-Sha256": sha256,
+        } });
+        return jsonResponse({});
+      }),
+    });
+    await service.list();
+    const artifact = await service.registerArtifact("s1", "remote:r1:remote-h:managed-linux", "Downloads/report.pdf");
+    expect(artifact).toMatchObject({ sourceHostId: "remote-h", scopeId: "bot:b", threadId: "t1", sha256 });
+    expect(await service.listArtifacts("bot:b")).toEqual([artifact]);
+    const opened = await service.openArtifact(artifact.id);
+    const chunks: Buffer[] = [];
+    for await (const chunk of opened.stream) chunks.push(Buffer.from(chunk));
+    expect(Buffer.concat(chunks)).toEqual(bytes);
+    changed = true;
+    await expect(service.openArtifact(artifact.id)).rejects.toThrow("version changed");
+    await service.dispose();
+  });
+
   it("marks an unreachable remote Host's mirror unavailable with the real error", async () => {
     const service = createComputerService({
       client: fakeKernel().client as never,
@@ -902,6 +936,53 @@ describe("computer service (BC7 virtual machines)", () => {
 });
 
 describe("computer service work association (BC8)", () => {
+  it("replays a returned-control event after delivery failure without losing its identity", async () => {
+    const kernel = fakeKernel();
+    const delivered: string[] = [];
+    const options = { client: kernel.client as never, hostId: "h", platform: "windows" as const, dataDir: newDataDir(),
+      createDriver: () => makeDriver(async (op) => op.tool === "get_app_state" ? okResponse({ snapshot: appSnapshot() }) : okResponse()),
+      resolveWork: async () => ({ scopeId: "bot:b", threadId: "t1" }) };
+    const first = createComputerService({ ...options, onHandback: async (event) => { delivered.push(event.id); throw new Error("Thread unavailable"); } });
+    await first.ensureLocal();
+    await first.observe({ desktopId: "local-console", app: "notepad", sessionId: "s1" });
+    const unsubscribe = await first.subscribeFrames("local-console", "viewer", () => {}, { frames: false });
+    await first.takeover({ desktopId: "local-console", holderId: "viewer" });
+    await first.handback({ desktopId: "local-console", holderId: "viewer" });
+    await first.reconcileHandbacks().catch(() => undefined);
+    unsubscribe();
+    await first.dispose();
+    const resumed = createComputerService({ ...options, onHandback: async (event) => { delivered.push(event.id); } });
+    await resumed.reconcileHandbacks();
+    await resumed.reconcileHandbacks();
+    expect(delivered.length).toBeGreaterThanOrEqual(2);
+    expect(new Set(delivered).size).toBe(1);
+    const record = kernel.records.get("__varin_computers__:computer.desktop:local-console");
+    expect(JSON.parse(record!.payloadJson).handbackEvents).toEqual([]);
+    await resumed.dispose();
+  });
+
+  it("keeps every actual Thread association across later work, probes, and Host restart", async () => {
+    const kernel = fakeKernel();
+    const options = { client: kernel.client as never, hostId: "h", platform: "windows" as const, dataDir: newDataDir(),
+      createDriver: () => makeDriver(async (op) => op.tool === "get_app_state" ? okResponse({ snapshot: appSnapshot() })
+        : op.tool === "capabilities" ? okResponse({ capabilities: { platform: "windows", driver: "windows-uia", status: "ready" } }) : okResponse()),
+      resolveWork: async (sessionId: string) => ({ scopeId: "bot:b", threadId: sessionId === "s2" ? "t2" : "t1" }) };
+    const service = createComputerService(options);
+    await service.ensureLocal();
+    for (const sessionId of ["s1", "s2", "s3"]) {
+      await service.observe({ desktopId: "local-console", app: "notepad", includeScreenshot: false, sessionId });
+    }
+    await service.probe("local-console");
+    const association = (await service.workDesktops("bot:b"))[0]?.work;
+    expect(association).toHaveLength(2);
+    expect(association?.find((item) => item.threadId === "t1")?.sessionId).toBe("s3");
+    expect(association?.find((item) => item.threadId === "t2")?.sessionId).toBe("s2");
+    await service.dispose();
+    const reopened = createComputerService(options);
+    expect((await reopened.workDesktops("bot:b"))[0]?.work).toEqual(association);
+    await reopened.dispose();
+  });
+
   it("observe/act stamp the calling session on the desktop record", async () => {
     const driver = makeDriver(async (op) => {
       if (op.tool === "get_app_state") return okResponse({ snapshot: appSnapshot() });

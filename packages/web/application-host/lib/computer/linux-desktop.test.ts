@@ -22,7 +22,7 @@ it('keeps an unprepared Host read only and coalesces concurrent explicit prepara
   const first = desktop.change('prepare', { width: 1440, height: 900 });
   const second = desktop.change('prepare', { width: 1440, height: 900 });
   expect(commands).toEqual([{ command: 'sh', args: [join('/drivers', 'linux', 'prepare-desktop.sh'), '--data-dir', join(dataDir, 'computer-desktop'), '--width', '1440', '--height', '900'] }]);
-  complete({ code: 0, stdout: '{"state":"running","socket":"/run/view.sock","driver":"/driver.py","user":"desktop","uid":1001,"environment":{},"width":1440,"height":900}\n', stderr: '' });
+  complete({ code: 0, stdout: '{"state":"running","socket":"/run/view.sock","driver":"/driver.py","artifact":"/artifact.py","home":"/home/desktop","user":"desktop","uid":1001,"environment":{},"width":1440,"height":900}\n', stderr: '' });
   expect(await first).toEqual(await second);
   await desktop.dispose();
 });

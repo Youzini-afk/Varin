@@ -49,6 +49,44 @@ export function registerComputerRoutes(app: Express, { computers, requireAuth = 
     }
   });
 
+  const sendArtifact = (response: Response, source: Awaited<ReturnType<ComputerService["openDesktopArtifact"]>>) => {
+    response.setHeader("Cache-Control", "no-store");
+    response.setHeader("Content-Type", "application/octet-stream");
+    response.once("close", source.cancel);
+    source.stream.once("error", (error) => {
+      if (response.headersSent) response.destroy(error);
+      else {
+        response.removeHeader("Content-Disposition");
+        response.removeHeader("Content-Length");
+        sendError(response, error, "Unable to read desktop artifact");
+      }
+    });
+    source.stream.pipe(response);
+  };
+
+  app.post("/api/computers/desktops/:desktopId/artifacts/inspect", requireAuth, async (request, response) => {
+    try { response.json({ version: await computers.inspectArtifact(String(request.params.desktopId), request.body?.relativePath) }); }
+    catch (error) { sendError(response, error, "Unable to inspect desktop artifact"); }
+  });
+  app.get("/api/computers/desktops/:desktopId/artifacts/read", requireAuth, async (request, response) => {
+    try {
+      const path = typeof request.query.path === "string" ? request.query.path : "";
+      const sha256 = typeof request.query.sha256 === "string" ? request.query.sha256 : "";
+      const source = await computers.openDesktopArtifact(String(request.params.desktopId), path, sha256);
+      response.setHeader("X-Varin-Artifact-Sha256", sha256);
+      sendArtifact(response, source);
+    } catch (error) { sendError(response, error, "Unable to read desktop artifact"); }
+  });
+  app.get("/api/computers/artifacts/:artifactId/content", requireAuth, async (request, response) => {
+    try {
+      const source = await computers.openArtifact(String(request.params.artifactId));
+      response.attachment(source.artifact.relativePath.split("/").at(-1) || "artifact");
+      response.setHeader("X-Varin-Artifact-Sha256", source.artifact.sha256);
+      response.setHeader("Content-Length", String(source.artifact.byteLength));
+      sendArtifact(response, source);
+    } catch (error) { sendError(response, error, "Unable to download computer artifact"); }
+  });
+
   /** Re-probe a desktop's driver and persist the real capability table. */
   app.post("/api/computers/desktops/prepare", requireAuth, async (request, response) => {
     try { response.json({ desktop: await computers.prepareDesktop(request.body ?? {}, request.body?.automation === true) }); }

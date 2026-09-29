@@ -1,4 +1,4 @@
-import type { Thread, ThreadRun } from "@varin/protocol";
+import type { ComputerArtifact, ComputerDesktop, Thread, ThreadRun } from "@varin/protocol";
 
 /** Durable Bot catalog contracts shared by the Application Host, routes, and UI (BC0). */
 
@@ -36,4 +36,6 @@ export interface BotWorkItem {
   thread: Thread;
   activeRun: ThreadRun | null;
   sessionId: string | null;
+  desktops?: ComputerDesktop[];
+  artifacts?: ComputerArtifact[];
 }

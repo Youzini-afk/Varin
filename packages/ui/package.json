@@ -41,6 +41,7 @@
     "@dnd-kit/utilities": "^3.2.2",
     "@legendapp/list": "3.3.8",
     "@lezer/highlight": "^1.2.3",
+    "@noble/hashes": "2.4.0",
     "@novnc/novnc": "1.7.0",
     "@pierre/diffs": "1.4.2",
     "@remixicon/react": "^4.7.0",

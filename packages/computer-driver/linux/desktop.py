@@ -102,7 +102,8 @@ def prepare(data, width, height):
         os.chmod(session_dir, 0o700)
     # Keep an executable component accessible to the desktop account even when
     # the coordinating Host is installed beneath /root. Publish by content hash.
-    files = [Path(__file__), Path(__file__).with_name("driver-host.py"), Path(__file__).with_name("runtime.py")]
+    files = [Path(__file__), Path(__file__).with_name("driver-host.py"), Path(__file__).with_name("runtime.py"),
+             Path(__file__).with_name("artifact.py")]
     component_id = hashlib.sha256(b"".join(file.read_bytes() for file in files)).hexdigest()
     component = session_dir / "components" / component_id
     component.mkdir(parents=True, exist_ok=True)
@@ -117,7 +118,7 @@ def prepare(data, width, height):
     config = {"user": account.pw_name, "uid": account.pw_uid, "gid": account.pw_gid, "owner": owner,
               "home": account.pw_dir, "userUnit": user_unit, "width": width, "height": height,
               "xvnc": xvnc, "browser": browser, "sessionDir": str(session_dir), "runtimeDir": str(runtime_dir),
-              "driver": str(component / "driver-host.py")}
+              "driver": str(component / "driver-host.py"), "artifact": str(component / "artifact.py")}
     write_json(config_path, config)
     write_json(session_dir / "config.json", config)
     if not user_unit:
@@ -158,6 +159,7 @@ def status(data):
         return {"state": "starting"}
     return {"state": "running", "environment": runtime["environment"], "socket": expected_socket,
             "user": config["user"], "uid": config["uid"], "driver": config["driver"],
+            **({"artifact": config["artifact"]} if config.get("artifact") else {}), "home": config["home"],
             "width": runtime["width"], "height": runtime["height"]}
 
 

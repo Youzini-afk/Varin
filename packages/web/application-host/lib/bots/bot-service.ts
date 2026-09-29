@@ -98,7 +98,7 @@ export interface BotService {
   /** Which Bot (if any) owns this session as its entry conversation. */
   botForSession(sessionId: string): Promise<BotSummary | null>;
   /** Threads owned by the Bot's owner scope — its real associated work. */
-  listWork(botId: string): Promise<BotWorkItem[]>;
+  listWork(botId: string, includeEntry?: boolean): Promise<BotWorkItem[]>;
   /**
    * Called when a session is deleted: clears a stale entry binding so the next
    * entry resolution creates a fresh conversation instead of re-anchoring a
@@ -339,11 +339,11 @@ export function createBotService(options: BotServiceOptions): BotService {
     return botId ? get(botId) : null;
   };
 
-  const listWork: BotService["listWork"] = async (botId) => {
+  const listWork: BotService["listWork"] = async (botId, includeEntry = false) => {
     const snapshots = await options.registry.listWorkspaceThreadSnapshots(botScopeId(botId));
     const items: BotWorkItem[] = [];
     for (const { thread, activeRun } of snapshots) {
-      if (thread.purpose === "bot-root") continue;
+      if (thread.purpose === "bot-root" && !includeEntry) continue;
       // The latest Run's session is the reopenable surface for this work.
       const runs = await options.registry.listRuns(botScopeId(botId), thread.id);
       const sessionId = activeRun?.sessionId ?? runs.at(-1)?.sessionId ?? null;

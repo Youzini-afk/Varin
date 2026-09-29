@@ -70,6 +70,13 @@ are not interrupted. Stop and Start in Computer settings apply the new
 component. Only Debian and Ubuntu apt preparation is implemented; the service
 reports a clear error on unsupported distributions.
 
+The `computer` tool's `artifact` action registers a file beneath that desktop
+user's home on the calling Thread. The dedicated account reads and hashes the
+file; the coordinator saves only its version and location in the kernel
+catalog. Bot work can download the recorded revision while the source Host is
+reachable. A changed file needs a new registration. The browser verifies the
+received bytes before offering the download.
+
 Windows background-capable actions avoid stealing foreground focus by
 default; the escape hatches `VARIN_COMPUTER_ALLOW_FOCUS_ACTIONS`,
 `VARIN_COMPUTER_ALLOW_APP_LAUNCH`, and

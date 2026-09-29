@@ -11,6 +11,9 @@ import {
   type BotSummary, type BotWorkItem,
 } from '@/lib/bots';
 import { cn } from '@/lib/utils';
+import type { ComputerDesktop } from '@varin/protocol';
+import { ComputerDesktopView } from '@/components/sections/computers/ComputerDesktopView';
+import { downloadComputerArtifact } from '@/lib/computers';
 
 /**
  * Bots settings (BC0): the durable Bot catalog — identity, persona
@@ -22,6 +25,7 @@ export function BotSettings() {
   const [bots, setBots] = React.useState<BotSummary[] | null>(null);
   const [selectedId, setSelectedId] = React.useState<string | null>(null);
   const [work, setWork] = React.useState<BotWorkItem[] | null>(null);
+  const [viewingDesktop, setViewingDesktop] = React.useState<ComputerDesktop | null>(null);
   const [error, setError] = React.useState<string | null>(null);
   const [busy, setBusy] = React.useState<string | null>(null);
   const [name, setName] = React.useState('');
@@ -165,7 +169,7 @@ export function BotSettings() {
         </div>
       </SettingsSection> : null}
 
-      {selected && !selected.archived ? <SettingsSection title={t('settings.bots.section.work')} contentClassName="space-y-2">
+      {selected ? <SettingsSection title={t('settings.bots.section.work')} contentClassName="space-y-2">
         {work === null ? <p role="status" className="typography-meta text-muted-foreground">{t('common.loading')}</p> : null}
         {work !== null && work.length === 0
           ? <p className="typography-meta text-muted-foreground">{t('settings.bots.work.empty')}</p> : null}
@@ -179,9 +183,17 @@ export function BotSettings() {
             {item.sessionId ? <Button variant="outline" size="sm" onClick={() => {
               void openPiSessionFromNavigation({ sessionId: item.sessionId! });
             }}>{t('settings.bots.work.open')}</Button> : null}
+            {item.desktops?.map((desktop) => <Button key={desktop.id} variant="outline" size="sm"
+              disabled={desktop.status !== 'available'} onClick={() => setViewingDesktop(desktop)}
+              title={desktop.label}>{t('settings.computers.view.open')}</Button>)}
+            {item.artifacts?.map((artifact) => <Button key={artifact.id} variant="outline" size="sm"
+              disabled={busy === `artifact:${artifact.id}`} title={artifact.relativePath} onClick={() => {
+                void run(`artifact:${artifact.id}`, () => downloadComputerArtifact(artifact));
+              }}>{artifact.relativePath.split('/').at(-1)}</Button>)}
           </li>)}
         </ul>
       </SettingsSection> : null}
     </> : null}
+    {viewingDesktop ? <ComputerDesktopView desktop={viewingDesktop} open onOpenChange={(open) => { if (!open) setViewingDesktop(null); }} /> : null}
   </>;
 }

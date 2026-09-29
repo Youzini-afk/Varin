@@ -58,10 +58,33 @@ export interface ComputerDesktop {
    * Host's record.
    */
   usage?: { sessionId: string; at: string };
+  /** Durable links to works that used this desktop; Thread/Run remain the work authority. */
+  work?: ComputerWorkAssociation[];
   /** A Host-managed persistent Linux graphical session, independent of a VM. */
   managed?: "linux-xvnc";
   /** Live framebuffer transport; input still uses the same Host control lane. */
   media?: { kind: "vnc"; width: number; height: number };
+}
+
+export interface ComputerWorkAssociation {
+  scopeId: string;
+  threadId: string;
+  sessionId: string;
+  at: string;
+}
+
+/** A versioned reference to a file in a managed desktop user's home. */
+export interface ComputerArtifact {
+  id: string;
+  desktopId: string;
+  sourceHostId: string;
+  scopeId: string;
+  threadId: string;
+  relativePath: string;
+  sha256: string;
+  byteLength: number;
+  modifiedAt: string;
+  registeredAt: string;
 }
 
 export interface ComputerDesktopPrepareParams {

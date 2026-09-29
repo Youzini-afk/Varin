@@ -1803,6 +1803,21 @@ async function main(options: StartWebUiServerOptions = {}): Promise<WebUiServerC
     client: kernelClient,
     hostId,
     dataDir: VARIN_DATA_DIR,
+    resolveWork: async (sessionId) => {
+      const owner = await threadRegistry.resolveSessionOwner(sessionId);
+      return owner ? { scopeId: owner.owningScopeId, threadId: owner.threadId } : null;
+    },
+    onHandback: async (event) => {
+      await createFollowUpThreadSender({
+        registry: threadRegistry,
+        continueRun: (input) => threadRuntime!.continueRun(input),
+        sendToSession: (sessionId, message, meta) => threadRuntime!.send(sessionId, message, meta),
+      })({
+        scopeId: event.scopeId, threadId: event.threadId,
+        requestId: event.id, from: { kind: 'user', id: `desktop:${event.desktopId}` },
+        text: `Human returned control of desktop "${event.label}" (${event.desktopId}) at ${event.at}. Inspect the current desktop state before continuing; the human may have changed files or applications while holding control.`,
+      });
+    },
     // BC6: remote desktops are served by the same `desktopHosts` connection
     // settings managed-remote resolves — apiUrl + clientToken authenticate
     // Host-to-Host computer calls; no local credentials cross the wire.
@@ -2627,6 +2642,9 @@ async function main(options: StartWebUiServerOptions = {}): Promise<WebUiServerC
       });
     }
   })().catch((error) => console.error('[VarinFollowUp] Reconcile failed:', errorMessage(error)));
+  void computerService.reconcileHandbacks().catch((error) => {
+    console.error('[Computer] Handback delivery will retry:', errorMessage(error));
+  });
   observeThreadIntegrationParentChange = (workspaceId, resourceIds) => {
     void threadRuntime!.invalidateIntegrationPreviews(workspaceId, resourceIds).catch((error: unknown) => {
       console.error('[HarnessThreads] Integration preview invalidation failed:', errorMessage(error));
@@ -2724,6 +2742,7 @@ async function main(options: StartWebUiServerOptions = {}): Promise<WebUiServerC
   });
   registerBotRoutes(app, {
     bots: botService,
+    computers: computerService,
     ...(uiAuthController ? { requireAuth: uiAuthController.requireAuth } : {}),
   });
   registerComputerRoutes(app, {
