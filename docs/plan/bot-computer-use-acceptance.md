@@ -13,10 +13,13 @@ This review follows the actual Bot entry, durable owner, memory writer,
 organizer, recall/context, computer tool, driver queue, and platform input paths.
 It repairs concrete defects in those paths. BC5 (server-side control
 ownership, real desktop frame stream, takeover/handback), BC6 (remote
-Host catalog mirroring with authenticated operation forwarding), and BC7
-(libvirt VM lifecycle) are implemented — see their sections below.
-It does not implement BC9 (packaging and distribution), and
-does not treat missing BC0–BC4 features as merely untested platforms.
+Host catalog mirroring with authenticated operation forwarding), BC7
+(libvirt VM lifecycle), BC8 (shared Workbench/Settings product integration
+with work associations), and BC9 (driver assets on the packaging path with
+checkout-independent resolution) are implemented — see their sections below.
+What remains unverified is live-environment evidence, not wiring: a real
+second Host, a real hypervisor, real Linux/macOS desktops, and a produced
+installer have not been exercised in this environment.
 
 ## BC0–BC2 follow-up review (2026-09-29)
 
@@ -527,6 +530,51 @@ Focused evidence: `computer-service.test.ts` gained two usage-association
 cases (stamp on observe/act; preserved across probe rewrites) — suite 32/32;
 `useUIStore.contextPanel.test.ts` gained computer-surface tab semantics —
 suite 17/17; i18n parity 4/4 across all ten locales.
+
+## BC9 distribution and cleanup (implemented, installer run pending)
+
+Driver assets now travel with the package instead of the source checkout.
+
+- **Staging**: `build-application-host.mjs` copies `packages/computer-driver`
+  into `packages/web/computer-driver/` on every build (dev generations and
+  production `server/` alike), excluding dev-only helpers
+  (`check-syntax.ps1`, `smoke.ps1`, `__pycache__`). The directory is a
+  generated artifact — gitignored, removed by `--clean`, and listed in
+  `@varin/web`'s `files` so the npm package ships it.
+- **Resolution**: `computerDriverDir()` now resolves
+  `VARIN_COMPUTER_DRIVER_DIR` → the repository checkout (dev/live edits) →
+  the staged package copy. Verified layouts: dev source, compiled `server/`
+  (`server/lib/computer/driver-host.js` → `packages/computer-driver` while
+  the checkout exists, otherwise the staged dir), and an installed
+  `node_modules/@varin/web/` tree (`…/@varin/web/computer-driver`). Electron
+  packages reach the same copy through `asarUnpack`'d `node_modules` — no
+  extra resource entry or parallel backend.
+- **Upgrade boundary**: the atomic `server/` + `computer-driver/` swap only
+  replaces Varin's own runtime assets — user workspaces, browser profiles,
+  Pi session data, Bot memory, and `desktopHosts`/`computerVmProviders`
+  settings are untouched. User-managed remote Hosts upgrade on their own
+  schedule (their machines/desktops stay authoritative there); Varin-managed
+  VMs keep their recorded volumes across upgrades since lifecycle keys on
+  the persisted domain UUID.
+- **Cleanup**: no `knowledgeSuggestions`/`review-only` write path survives;
+  no new Electron-side business entry was added — the shell only sets env
+  before importing the Host module, as it already does for the kernel.
+
+Honest limits that remain:
+
+- No installer was produced in this run — the extraResources/files claims
+  are verified by the real `build:application-host` staging output plus the
+  resolution test, not by a packed app smoke. `package`/`package:win:x64`
+  still owes a real run on a packaging runner.
+- Platform coverage is still asymmetric: Windows driver is the only one
+  smoke-tested on real hardware; Linux (Wayland portal) and the unverified
+  macOS JXA driver ship with honest capability/status reporting.
+- libvirt stays unverified without a hypervisor; macOS signing/notarization
+  and per-arch Linux packages were not exercised here.
+
+Focused evidence: `driver-host.test.ts` gained the resolution-order case —
+suite 9/9; the real `build:application-host` run staged all six driver
+files and reported `Staged computer-driver assets.`
 
 ## Verification boundary
 

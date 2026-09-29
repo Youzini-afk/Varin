@@ -1,5 +1,7 @@
 import { describe, it, expect } from "vitest";
-import { createDriverSession } from "./driver-host.js";
+import { existsSync } from "node:fs";
+import { join } from "node:path";
+import { createDriverSession, computerDriverDir } from "./driver-host.js";
 
 /**
  * Driver supervisor tests run against a real child process speaking the
@@ -171,6 +173,24 @@ describe("computer driver host (BC4)", () => {
       expect(response.ok).toBe(true);
     } finally {
       driver.dispose();
+    }
+  });
+});
+
+describe("computerDriverDir (BC9 packaging)", () => {
+  it("env override wins and the fallback resolves real driver assets", () => {
+    const original = process.env.VARIN_COMPUTER_DRIVER_DIR;
+    try {
+      process.env.VARIN_COMPUTER_DRIVER_DIR = "/override/dir";
+      expect(computerDriverDir()).toBe("/override/dir");
+      delete process.env.VARIN_COMPUTER_DRIVER_DIR;
+      const resolved = computerDriverDir();
+      // Source checkout or staged package copy — either way the Windows
+      // driver script must exist at the resolved location.
+      expect(existsSync(join(resolved, "windows", "driver-host.ps1"))).toBe(true);
+    } finally {
+      if (original === undefined) delete process.env.VARIN_COMPUTER_DRIVER_DIR;
+      else process.env.VARIN_COMPUTER_DRIVER_DIR = original;
     }
   });
 });

@@ -38,6 +38,8 @@ const removeGeneratedOutputs = () => {
     outputDir,
     path.join(webRoot, '.application-host-build'),
     path.join(webRoot, '.application-host-types'),
+    // Staged Computer Use driver assets (BC9) — copied from packages/computer-driver.
+    path.join(webRoot, 'computer-driver'),
   ];
   for (const entry of fs.readdirSync(webRoot, { withFileTypes: true })) {
     if (
@@ -139,6 +141,35 @@ try {
     }
   };
   copyAssets(sourceDir, buildDir);
+
+  // ── Step 2b: Stage Computer Use driver assets ─────────────────────────
+  // Compiled code lives at <gen>/lib/computer/driver-host.js; its driver-dir
+  // resolution walks up four levels to <webRoot>/computer-driver. Stage the
+  // real driver scripts there so dev generations, production server/, and
+  // packaged installs all resolve the same layout — not the source checkout.
+  const driverSource = path.join(repoRoot, 'packages', 'computer-driver');
+  const driverDest = path.join(webRoot, 'computer-driver');
+  const copyDriverAssets = (srcDir, destDir) => {
+    for (const entry of fs.readdirSync(srcDir, { withFileTypes: true })) {
+      if (entry.name === '__pycache__' || entry.name === 'node_modules') continue;
+      // Development-only helpers never ship to a runtime/driver install.
+      if (entry.name === 'check-syntax.ps1' || entry.name === 'smoke.ps1') continue;
+      const srcPath = path.join(srcDir, entry.name);
+      const destPath = path.join(destDir, entry.name);
+      if (entry.isDirectory()) {
+        fs.mkdirSync(destPath, { recursive: true });
+        copyDriverAssets(srcPath, destPath);
+      } else {
+        fs.copyFileSync(srcPath, destPath);
+      }
+    }
+  };
+  if (fs.existsSync(driverSource)) {
+    fs.rmSync(driverDest, { recursive: true, force: true });
+    fs.mkdirSync(driverDest, { recursive: true });
+    copyDriverAssets(driverSource, driverDest);
+    log('Staged computer-driver assets.');
+  }
 
   // ── Step 3: Validate staging ───────────────────────────────────────────
   const indexJs = path.join(buildDir, 'index.js');

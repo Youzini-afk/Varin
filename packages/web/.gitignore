@@ -4,6 +4,8 @@ prompt-enhancer-config.json
 test-results/
 # Generated Application Host runtime output (built from application-host/)
 server/
+# Staged Computer Use driver assets (copied from ../computer-driver at build time)
+computer-driver/
 .application-host-build/
 .application-host-staging-*
 .application-host-types/

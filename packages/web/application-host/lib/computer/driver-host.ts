@@ -76,13 +76,18 @@ export interface DriverSpawnSpec {
 }
 
 /**
- * Driver assets live beside the packages layout in development and in the
- * compiled `server/` tree (same relative depth). Packaged installs may
- * redirect this via VARIN_COMPUTER_DRIVER_DIR.
+ * Driver assets resolve in this order: an explicit VARIN_COMPUTER_DRIVER_DIR,
+ * the repository's `packages/computer-driver` checkout (development — four
+ * levels above this source file), then the staged `computer-driver/` inside
+ * the Web package that build-application-host produces and packaged installs
+ * ship (three levels above `server/lib/computer/`). Packaged layouts must
+ * never depend on a source checkout.
  */
 export function computerDriverDir(): string {
   if (process.env.VARIN_COMPUTER_DRIVER_DIR) return process.env.VARIN_COMPUTER_DRIVER_DIR;
-  return fileURLToPath(new URL("../../../../computer-driver", import.meta.url));
+  const sourceCheckout = fileURLToPath(new URL("../../../../computer-driver", import.meta.url));
+  if (existsSync(sourceCheckout)) return sourceCheckout;
+  return fileURLToPath(new URL("../../../computer-driver", import.meta.url));
 }
 
 /** Spawn spec for this platform's resident driver, or null when unsupported. */
