@@ -4,7 +4,6 @@ import { settingsDict } from './uk.settings';
 export const dict: Record<I18nKey, string> = {
   ...enDict,
   ...settingsDict,
-  'bots.sidebar.entry': "Бот",
   'tasksHub.create': "Створити",
   'tasksHub.all': "Усі",
   'tasksHub.enabled': "Увімкнені",
@@ -50,7 +49,7 @@ export const dict: Record<I18nKey, string> = {
   'tasksHub.openSession': "Відкрити розмову",
   'tasksHub.lastTriggered': "Останнє спрацювання",
   'tasksHub.noMatches': "Немає відповідних завдань.",
-  'workbench.switcher.presentation': 'Вигляд',
+  'workbench.switcher.presentation': 'Режим',
   'workbench.switcher.workspace': 'Робочий простір',
   'workbench.switcher.general': 'Загальний',
   'research-workbench.profile.label': "Дослідження",

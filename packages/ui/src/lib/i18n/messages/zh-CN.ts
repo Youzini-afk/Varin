@@ -4,7 +4,6 @@ import { settingsDict } from './zh-CN.settings';
 export const dict: Record<I18nKey, string> = {
   ...enDict,
   ...settingsDict,
-  'bots.sidebar.entry': "机器人",
   'tasksHub.create': "创建",
   'tasksHub.all': "全部",
   'tasksHub.enabled': "已开启",
@@ -50,7 +49,7 @@ export const dict: Record<I18nKey, string> = {
   'tasksHub.openSession': "返回对话",
   'tasksHub.lastTriggered': "最近触发",
   'tasksHub.noMatches': "没有匹配的任务。",
-  'workbench.switcher.presentation': '界面形态',
+  'workbench.switcher.presentation': '模式',
   'workbench.switcher.workspace': '工作台',
   'workbench.switcher.general': '通用',
   'research-workbench.profile.label': "科研",

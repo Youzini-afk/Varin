@@ -49,9 +49,11 @@ const SettingsWindow = lazyWithChunkRecovery(() => import('@/components/views/Se
 
 interface MainLayoutProps {
     renderConversation?: (active: boolean) => React.ReactNode;
+    renderNavigator?: (isVisible: boolean) => React.ReactNode;
+    navigationTitle?: string;
 }
 
-export const MainLayout: React.FC<MainLayoutProps> = ({ renderConversation }) => {
+export const MainLayout: React.FC<MainLayoutProps> = ({ renderConversation, renderNavigator, navigationTitle }) => {
     const isSidebarOpen = useUIStore((state) => state.isSidebarOpen);
     const isContextRailOpen = useUIStore((state) => state.isContextRailOpen);
     const activeMainTab = useUIStore((state) => state.activeMainTab);
@@ -301,6 +303,7 @@ export const MainLayout: React.FC<MainLayoutProps> = ({ renderConversation }) =>
                 }}>
                     {/* Mobile: header + drawer mode */}
                     {!isSettingsDialogOpen && <Header
+                        navigationTitle={navigationTitle}
                         onToggleLeftDrawer={() => {
                             const nextOpen = !mobileLeftDrawerOpen;
                             if (mobileRightSidebarOpen) {
@@ -369,7 +372,7 @@ export const MainLayout: React.FC<MainLayoutProps> = ({ renderConversation }) =>
                                 <ErrorBoundary>
                                     <WorkbenchReplacement
                                         target={WORKBENCH_REPLACEMENT_TARGETS.sessionNavigator}
-                                        fallback={<PiSessionSidebar mobileVariant isVisible={mobileLeftDrawerVisible} />}
+                                        fallback={renderNavigator ? renderNavigator(mobileLeftDrawerVisible) : <PiSessionSidebar mobileVariant isVisible={mobileLeftDrawerVisible} />}
                                     />
                                 </ErrorBoundary>
                             </motion.div>
@@ -404,7 +407,7 @@ export const MainLayout: React.FC<MainLayoutProps> = ({ renderConversation }) =>
                 </DrawerProvider>
             ) : (
                 <>
-                    <Header />
+                    <Header navigationTitle={navigationTitle} />
                     {/* Desktop navigation and work area share the row below the titlebar. */}
                     <div className="flex min-h-0 min-w-0 flex-1 overflow-hidden" data-page-scroll-lock="true">
                         <Sidebar
@@ -414,7 +417,7 @@ export const MainLayout: React.FC<MainLayoutProps> = ({ renderConversation }) =>
                         >
                             <WorkbenchReplacement
                                 target={WORKBENCH_REPLACEMENT_TARGETS.sessionNavigator}
-                                fallback={<PiSessionSidebar isVisible={isSidebarOpen} />}
+                                fallback={renderNavigator ? renderNavigator(isSidebarOpen) : <PiSessionSidebar isVisible={isSidebarOpen} />}
                             />
                         </Sidebar>
                         <div className="relative flex flex-1 min-w-0 flex-col overflow-hidden bg-background" data-page-scroll-lock="true">

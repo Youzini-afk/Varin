@@ -20,6 +20,11 @@ export const VARIN_WORKBENCH_IDE_PROFILE_ID = "varin.ide";
 export const VARIN_WORKBENCH_IDE_PROFILE_LABEL = "IDE";
 export const VARIN_WORKBENCH_RESEARCH_PROFILE_ID = "varin.research";
 export const VARIN_WORKBENCH_RESEARCH_PROFILE_LABEL = "Research";
+export const VARIN_WORKBENCH_BOT_PROFILE_ID = "varin.bot";
+export const VARIN_WORKBENCH_BOT_PROFILE_LABEL = "Varin bot";
+export const VARIN_BUILTIN_BOT_WORKSPACE_EXTENSION_ID = "varin.builtin.bot-workspace";
+export const VARIN_BUILTIN_BOT_WORKSPACE_SHELL_CONTRIBUTION_ID = "varin.builtin.bot-workspace.shell";
+export const VARIN_BUILTIN_BOT_WORKSPACE_SURFACES: VarinApplicationSurface[] = ["web", "desktop", "mobile"];
 export const VARIN_BUILTIN_AGENT_WORKSPACE_EXTENSION_ID = "varin.builtin.agent-workspace";
 export const VARIN_BUILTIN_AGENT_WORKSPACE_SHELL_CONTRIBUTION_ID = "varin.builtin.agent-workspace.shell";
 export const VARIN_BUILTIN_AGENT_WORKSPACE_SURFACES: VarinApplicationSurface[] = ["web", "desktop", "mobile"];
@@ -665,12 +670,16 @@ export const defaultVarinWorkbenchProfileDocument = (): VarinWorkbenchProfileDoc
         VARIN_BUILTIN_RESEARCH_WORKBENCH_SHELL_CONTRIBUTION_ID,
       )
     )),
+    ...VARIN_BUILTIN_BOT_WORKSPACE_SURFACES.map((surface) => (
+      distributionShellLayer(VARIN_WORKBENCH_BOT_PROFILE_ID, surface, VARIN_BUILTIN_BOT_WORKSPACE_SHELL_CONTRIBUTION_ID)
+    )),
   ],
   profileSelections: { users: {} },
   profiles: [
     { id: VARIN_WORKBENCH_DEFAULT_PROFILE_ID, label: VARIN_WORKBENCH_DEFAULT_PROFILE_LABEL },
     { id: VARIN_WORKBENCH_IDE_PROFILE_ID, label: VARIN_WORKBENCH_IDE_PROFILE_LABEL },
     { id: VARIN_WORKBENCH_RESEARCH_PROFILE_ID, label: VARIN_WORKBENCH_RESEARCH_PROFILE_LABEL },
+    { id: VARIN_WORKBENCH_BOT_PROFILE_ID, label: VARIN_WORKBENCH_BOT_PROFILE_LABEL },
   ],
   revision: 0,
   schemaVersion: VARIN_WORKBENCH_PROFILE_SCHEMA_VERSION,
@@ -694,6 +703,10 @@ export const migrateVarinWorkbenchProfileDocument = (
     document.profiles.push({ id: VARIN_WORKBENCH_RESEARCH_PROFILE_ID, label: VARIN_WORKBENCH_RESEARCH_PROFILE_LABEL });
     changed = true;
   }
+  if (!document.profiles.some((candidate) => candidate.id === VARIN_WORKBENCH_BOT_PROFILE_ID)) {
+    document.profiles.push({ id: VARIN_WORKBENCH_BOT_PROFILE_ID, label: VARIN_WORKBENCH_BOT_PROFILE_LABEL });
+    changed = true;
+  }
   changed = ensureDistributionShellLayouts(
     document,
     VARIN_WORKBENCH_DEFAULT_PROFILE_ID,
@@ -711,6 +724,12 @@ export const migrateVarinWorkbenchProfileDocument = (
     VARIN_WORKBENCH_RESEARCH_PROFILE_ID,
     VARIN_BUILTIN_RESEARCH_WORKBENCH_SURFACES,
     VARIN_BUILTIN_RESEARCH_WORKBENCH_SHELL_CONTRIBUTION_ID,
+  ) || changed;
+  changed = ensureDistributionShellLayouts(
+    document,
+    VARIN_WORKBENCH_BOT_PROFILE_ID,
+    VARIN_BUILTIN_BOT_WORKSPACE_SURFACES,
+    VARIN_BUILTIN_BOT_WORKSPACE_SHELL_CONTRIBUTION_ID,
   ) || changed;
   return changed;
 };

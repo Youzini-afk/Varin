@@ -4,7 +4,6 @@ import { settingsDict } from './ko.settings';
 export const dict: Record<I18nKey, string> = {
   ...enDict,
   ...settingsDict,
-  'bots.sidebar.entry': "봇",
   'tasksHub.create': "만들기",
   'tasksHub.all': "전체",
   'tasksHub.enabled': "활성화",
@@ -50,7 +49,7 @@ export const dict: Record<I18nKey, string> = {
   'tasksHub.openSession': "대화 열기",
   'tasksHub.lastTriggered': "최근 실행",
   'tasksHub.noMatches': "일치하는 작업이 없습니다.",
-  'workbench.switcher.presentation': '화면 구성',
+  'workbench.switcher.presentation': '모드',
   'workbench.switcher.workspace': '작업 공간',
   'workbench.switcher.general': '일반',
   'research-workbench.profile.label': "연구",

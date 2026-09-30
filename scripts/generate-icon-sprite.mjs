@@ -11,10 +11,12 @@
 import { readFileSync, writeFileSync, readdirSync, statSync } from "node:fs"
 import { resolve, dirname } from "node:path"
 import { fileURLToPath } from "node:url"
+import { createRequire } from "node:module"
 
 const __dirname = dirname(fileURLToPath(import.meta.url))
 const repoRoot = resolve(__dirname, "..")
-const remixPath = resolve(repoRoot, "node_modules/@remixicon/react/index.mjs")
+const uiRequire = createRequire(resolve(repoRoot, "packages/ui/package.json"))
+const remixPath = resolve(dirname(uiRequire.resolve("@remixicon/react")), "index.mjs")
 const outPath = resolve(repoRoot, "packages/ui/src/components/icon/sprite.ts")
 
 const customIconData = new Map([

@@ -2,7 +2,6 @@ import { settingsDict } from './en.settings';
 
 export const dict = {
   ...settingsDict,
-  'bots.sidebar.entry': "Bot",
   'tasksHub.create': "Create",
   'tasksHub.all': "All",
   'tasksHub.enabled': "Enabled",
@@ -48,7 +47,7 @@ export const dict = {
   'tasksHub.openSession': "Open conversation",
   'tasksHub.lastTriggered': "Last triggered",
   'tasksHub.noMatches': "No matching tasks.",
-  'workbench.switcher.presentation': 'Presentation',
+  'workbench.switcher.presentation': 'Mode',
   'workbench.switcher.workspace': 'Workspace',
   'workbench.switcher.general': 'General',
   'research-workbench.profile.label': "Research",

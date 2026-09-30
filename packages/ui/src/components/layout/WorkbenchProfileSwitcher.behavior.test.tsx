@@ -65,8 +65,9 @@ describe('independent workbench presentation controls', () => {
     expect(button).not.toBeNull();
     await act(async () => { button!.click(); });
   };
-  const agentButton = '[role="group"] button:first-child';
-  const ideButton = '[role="group"] button:last-child';
+  const agentButton = '[data-profile="workbench"]';
+  const ideButton = '[data-profile="ide"]';
+  const botButton = '[data-profile="bot"]';
   const researchItem = '[data-profile="varin.research"]';
 
   beforeEach(() => {
@@ -90,12 +91,14 @@ describe('independent workbench presentation controls', () => {
     vi.unstubAllGlobals();
   });
 
-  it('selects Research within Agent, with IDE outside the workspace menu', async () => {
+  it('selects Research within Workbench while offering three top-level modes', async () => {
     await render();
     expect(container.querySelector('[data-profile="varin.ide"]')).toBeNull();
+    expect(container.querySelector(ideButton)).not.toBeNull();
+    expect(container.querySelector(botButton)).not.toBeNull();
     await click(researchItem);
     expect(state.selectProfile).toHaveBeenLastCalledWith('varin.research', undefined, { enableShell: true });
-    expect(container.querySelector(agentButton)?.getAttribute('aria-pressed')).toBe('true');
+    expect(container.querySelector(agentButton)?.getAttribute('aria-checked')).toBe('true');
     expect(container.querySelector(researchItem)?.getAttribute('aria-checked')).toBe('true');
   });
 
@@ -107,19 +110,21 @@ describe('independent workbench presentation controls', () => {
     act(() => root.unmount());
     root = createRoot(container);
     await render();
-    expect(container.querySelector(researchItem)?.getAttribute('aria-checked')).toBe('true');
+    expect(container.querySelector(researchItem)).toBeNull();
     await click(agentButton);
     expect(state.activeProfileId).toBe('varin.research');
     const persisted = useUIStore.persist.getOptions().partialize!(useUIStore.getState()) as { agentWorkbenchProfileByHost: Record<string, string> };
     expect(persisted.agentWorkbenchProfileByHost['host-a']).toBe('varin.research');
   });
 
-  it('changes the workspace return choice in IDE without exiting IDE', async () => {
-    state.activeProfileId = 'varin.ide';
+  it('returns from Bot to the remembered workspace without treating Bot as a workspace', async () => {
+    state.activeProfileId = 'varin.research';
     await render();
-    await click(researchItem);
-    expect(state.selectProfile).not.toHaveBeenCalled();
-    expect(container.querySelector(ideButton)?.getAttribute('aria-pressed')).toBe('true');
+    await click(botButton);
+    expect(state.activeProfileId).toBe('varin.bot');
+    expect(container.querySelector(botButton)?.getAttribute('aria-checked')).toBe('true');
+    expect(container.querySelector(researchItem)).toBeNull();
+    expect(useUIStore.getState().agentWorkbenchProfileByHost['host-a']).toBe('varin.research');
     await click(agentButton);
     expect(state.activeProfileId).toBe('varin.research');
   });

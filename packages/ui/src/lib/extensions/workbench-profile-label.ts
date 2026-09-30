@@ -39,7 +39,7 @@ export const workbenchProfileLabel = (
   return profile.label;
 };
 
-/** The default profile is the general workspace; Agent names the presentation toggle. */
+/** General and Research are workspaces within Workbench mode. */
 export const workbenchWorkspaceLabel = (
   profile: { id: string; label: string },
   t: (key: I18nKey) => string,

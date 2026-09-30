@@ -4,7 +4,6 @@ import { settingsDict } from './es.settings';
 export const dict: Record<I18nKey, string> = {
   ...enDict,
   ...settingsDict,
-  'bots.sidebar.entry': "Bot",
   'tasksHub.create': "Crear",
   'tasksHub.all': "Todas",
   'tasksHub.enabled': "Activadas",
@@ -50,7 +49,7 @@ export const dict: Record<I18nKey, string> = {
   'tasksHub.openSession': "Abrir conversación",
   'tasksHub.lastTriggered': "Última activación",
   'tasksHub.noMatches': "No hay tareas coincidentes.",
-  'workbench.switcher.presentation': 'Presentación',
+  'workbench.switcher.presentation': 'Modo',
   'workbench.switcher.workspace': 'Espacio de trabajo',
   'workbench.switcher.general': 'General',
   'research-workbench.profile.label': "Investigación",

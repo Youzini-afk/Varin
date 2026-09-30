@@ -3,7 +3,6 @@ import { settingsDict } from './pt-BR.settings';
 
 export const dict: Record<I18nKey, string> = {
   ...settingsDict,
-  'bots.sidebar.entry': "Bot",
   'tasksHub.create': "Criar",
   'tasksHub.all': "Todas",
   'tasksHub.enabled': "Ativadas",
@@ -49,7 +48,7 @@ export const dict: Record<I18nKey, string> = {
   'tasksHub.openSession': "Abrir conversa",
   'tasksHub.lastTriggered': "Último acionamento",
   'tasksHub.noMatches': "Nenhuma tarefa correspondente.",
-  'workbench.switcher.presentation': 'Apresentação',
+  'workbench.switcher.presentation': 'Modo',
   'workbench.switcher.workspace': 'Espaço de trabalho',
   'workbench.switcher.general': 'Geral',
   'research-workbench.profile.label': "Pesquisa",

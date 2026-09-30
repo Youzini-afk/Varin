@@ -2,6 +2,9 @@ import { runtimeFetch } from '@varin/application-client';
 import type { BotModelSelection, BotSummary, BotWorkItem } from '@varin/application-client';
 import type { SessionSnapshot } from '@varin/protocol';
 import { openPiSessionFromNavigation } from '@/lib/pi-runtime/sessionNavigation';
+import { selectActiveWorkbenchProfile } from '@/lib/extensions/workbench-shell-transition';
+import { VARIN_WORKBENCH_BOT_PROFILE_ID } from '@varin/extension-contract';
+import { useUIStore } from '@/stores/useUIStore';
 
 export type { BotModelSelection, BotSummary, BotWorkItem } from '@varin/application-client';
 
@@ -14,9 +17,9 @@ const readJson = async <T>(response: Response, fallback: string): Promise<T> => 
   return response.json() as Promise<T>;
 };
 
-export const listBots = async (): Promise<BotSummary[]> => {
+export const listBots = async (signal?: AbortSignal): Promise<BotSummary[]> => {
   const result = await readJson<{ bots: BotSummary[] }>(
-    await runtimeFetch('/api/harness/bots'),
+    await runtimeFetch('/api/harness/bots', { signal }),
     'Unable to list bots',
   );
   return result.bots;
@@ -71,16 +74,16 @@ export const archiveBot = async (botId: string): Promise<BotSummary> => {
 };
 
 /** Resolve (creating when necessary) the Bot's durable entry session id. */
-export const ensureBotEntry = async (botId: string): Promise<{ bot: BotSummary; sessionId: string }> => (
+export const ensureBotEntry = async (botId: string, signal?: AbortSignal): Promise<{ bot: BotSummary; sessionId: string }> => (
   readJson<{ bot: BotSummary; sessionId: string }>(
-    await runtimeFetch(`/api/harness/bots/${encodeURIComponent(botId)}/entry`, { method: 'POST' }),
+    await runtimeFetch(`/api/harness/bots/${encodeURIComponent(botId)}/entry`, { method: 'POST', signal }),
     'Unable to open the bot entry',
   )
 );
 
-export const listBotWork = async (botId: string): Promise<BotWorkItem[]> => {
+export const listBotWork = async (botId: string, signal?: AbortSignal): Promise<BotWorkItem[]> => {
   const result = await readJson<{ threads: BotWorkItem[] }>(
-    await runtimeFetch(`/api/harness/bots/${encodeURIComponent(botId)}/work`),
+    await runtimeFetch(`/api/harness/bots/${encodeURIComponent(botId)}/work`, { signal }),
     'Unable to list bot work',
   );
   return result.threads;
@@ -89,18 +92,7 @@ export const listBotWork = async (botId: string): Promise<BotWorkItem[]> => {
 /** Open the Bot's durable entry conversation for this specific Bot. */
 export const openBotEntryFor = async (botId: string): Promise<SessionSnapshot> => {
   const { bot, sessionId } = await ensureBotEntry(botId);
-  return openPiSessionFromNavigation({ sessionId, directory: bot.homeDir });
-};
-
-/**
- * The Bot entry point: resolve the first active Bot (creating one on first
- * use), open its durable entry session, and navigate to it. Reopening always
- * lands on the same conversation — the Bot's work association lives on its
- * scope, not on the session lifecycle.
- */
-export const openBotEntry = async (): Promise<SessionSnapshot> => {
-  const bots = await listBots();
-  const existing = bots.find((candidate) => !candidate.archived);
-  const { bot, sessionId } = await ensureBotEntry((existing ?? await createBot()).id);
+  await selectActiveWorkbenchProfile(VARIN_WORKBENCH_BOT_PROFILE_ID, undefined, { enableShell: true });
+  useUIStore.getState().setSettingsDialogOpen(false);
   return openPiSessionFromNavigation({ sessionId, directory: bot.homeDir });
 };

@@ -12,6 +12,7 @@
 
 import {
   VARIN_BUILTIN_AGENT_WORKSPACE_EXTENSION_ID,
+  VARIN_BUILTIN_BOT_WORKSPACE_EXTENSION_ID,
   VARIN_BUILTIN_IDE_WORKBENCH_EXTENSION_ID,
   VARIN_BUILTIN_RESEARCH_WORKBENCH_EXTENSION_ID,
   type VarinApplicationSurface,
@@ -22,6 +23,7 @@ import { registerBuiltinSettingsWorkbench } from './settings/register';
 let agentRegistration: Promise<void> | null = null;
 let ideRegistration: Promise<void> | null = null;
 let researchRegistration: Promise<void> | null = null;
+let botRegistration: Promise<void> | null = null;
 
 const registerAgentShell = (): Promise<void> => {
   if (agentRegistration) return agentRegistration;
@@ -59,11 +61,24 @@ const registerResearchShell = (): Promise<void> => {
   return pending;
 };
 
+const registerBotShell = (): Promise<void> => {
+  if (botRegistration) return botRegistration;
+  const pending = import('./bot/BotWorkspaceShell').then(({ BotWorkspaceShell }) => {
+    registerWorkbenchShellComponent(VARIN_BUILTIN_BOT_WORKSPACE_EXTENSION_ID, BotWorkspaceShell);
+  });
+  botRegistration = pending;
+  void pending.catch(() => {
+    if (botRegistration === pending) botRegistration = null;
+  });
+  return pending;
+};
+
 export const registerWorkbenchShells = async (surface: VarinApplicationSurface): Promise<void> => {
   registerBuiltinSettingsWorkbench();
   const registrations: Promise<void>[] = [];
   if (surface === 'web' || surface === 'desktop' || surface === 'mobile') {
     registrations.push(registerAgentShell());
+    registrations.push(registerBotShell());
   }
   if (surface === 'web' || surface === 'desktop') {
     registrations.push(registerIdeShell());

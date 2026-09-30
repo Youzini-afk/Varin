@@ -530,9 +530,10 @@ The capability matrix records the remaining implementation boundaries.
 
 The product UI is not a fixed shell. A Workbench Profile selects which extension provides
 `workbench.shell` and which contributions fill the activity bar, sidebars, editor area, panel, and
-status bar. Three profiles ship: `default` (general Agent Workspace), `varin.ide` (IDE Workbench),
-and `varin.research` (Research Workbench). Their shells are ordinary built-in Varin extensions —
-`varin.builtin.agent-workspace`, `varin.builtin.ide-workbench`, and `varin.builtin.research-workbench` — so a community extension can
+status bar. Four profiles ship: `default` (general Workbench), `varin.ide` (IDE Workbench),
+`varin.research` (Research Workbench), and `varin.bot` (Varin bot). Their shells are ordinary built-in Varin extensions —
+`varin.builtin.agent-workspace`, `varin.builtin.ide-workbench`, `varin.builtin.research-workbench`,
+and `varin.builtin.bot-workspace` — so a community extension can
 replace any shell, or any individual seam, without a product build. There is no global `ideMode`
 branch. `@varin/extension-contract` is the single owner of the target, slot, and context-key
 constants, and the profile document is revisioned so every mutation is expected-revision checked.
@@ -574,10 +575,10 @@ and workspace-scoped extension storage; missing and empty documents fall back to
 default without writing it, while malformed or failed reads keep the last valid in-memory document
 and raise a diagnostic rather than overwriting host state.
 
-D-298 implements the first D-297 slice (7A). The titlebar exposes separate Agent/IDE and General/Research
-controls, using the existing Profile and Motion transition transaction for shell changes. The UI remembers
-the Agent return profile per Host while IDE is open; choosing a workspace in IDE updates only that return
-destination. This preference survives reloads and never overrides the Host's active Profile. The Research
+D-298 implements the first D-297 slice (7A). The titlebar now exposes a Workbench/IDE/Varin bot mode
+dropdown with icons; General/Research stays inside Workbench mode. Shell changes use the existing Profile
+and Motion transition transaction. The UI remembers the Workbench return profile per Host while IDE or
+Bot is open. This preference survives reloads and never overrides the Host's active Profile. The Research
 shell composes shared application chrome and resource panels around
 the actual research-root and branch projection. Work focus lives independently in broker-owned session
 metadata. Creation resolves explicit selection, then the project default, then general/code. Later project

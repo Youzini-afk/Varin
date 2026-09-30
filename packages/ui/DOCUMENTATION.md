@@ -16,7 +16,7 @@ contracts without hardcoding an origin, port, desktop IPC channel, or local path
   refresh behavior.
 - `src/components/sections/shared/DOCUMENTATION.md`: Settings layout, controls, save feedback, and
   search integration.
-- `src/workbenches`: official Agent/IDE/Research Shells and Settings React composition. Lower `lib` modules do
+- `src/workbenches`: official Workbench/IDE/Research/Bot shells and Settings React composition. Lower `lib` modules do
   not import this layer.
 - `src/features`: narrow React/store integrations, such as adapting the active-editor Store to the
   framework-neutral Agent/editor kernel.
@@ -70,13 +70,19 @@ Creation does not pause the current conversation. Conditions already met may inv
 Editing only the instruction retains advanced sources, and editing a supported source retains its
 unexposed options (such as fallback deadlines). Calendar task creation keeps its existing editor.
 
-`WorkbenchProfileSwitcher` exposes two adjacent presentation controls: Agent/IDE and a General/Research
-workspace menu (plus installed custom profiles). IDE never appears as an item in that workspace menu.
-`useUIStore.agentWorkbenchProfileByHost` remembers the Agent return destination per Host across shell
-remounts and app restarts. Choosing a workspace while in IDE updates that return destination and keeps
-IDE open. The Host profile document remains the sole active-shell authority; committed Agent profiles
-refresh the return preference, while failed switches preserve it. Both controls leave work focus alone
-and actual shell changes use the existing staged transition and animation.
+`WorkbenchProfileSwitcher` exposes one icon-labelled mode menu: Workbench, IDE and Varin bot.
+General/Research (plus installed custom profiles) remain a separate workspace menu visible only in
+Workbench mode. `useUIStore.agentWorkbenchProfileByHost` remembers the Workbench return destination
+per Host across shell remounts and app restarts. The Host profile document remains the sole active-shell
+authority; committed Workbench profiles refresh the return preference, while failed switches preserve
+it. Both controls leave work focus alone and shell changes use the existing staged transition.
+
+`varin.bot` selects the built-in Bot shell. It uses shared window/settings/resource chrome with its own
+Bot identity and work navigator, rather than a shortcut in the ordinary session sidebar. The shell
+opens the selected Bot's durable entry through the existing Host API and shows only that Bot's entry
+or work conversations. An empty catalog offers explicit creation; failed reads stay errors. Candidate
+shell staging never creates Bots or navigates sessions. Unmount/runtime changes cancel stale reads and
+entry resolution. Mobile exposes the same mode control in its navigation drawer (IDE remains desktop/Web).
 
 Varin themes expose semantic surface, interactive, status, primary, syntax, and feature tokens.
 Components use those roles rather than embedding palette colors: selection describes current state,

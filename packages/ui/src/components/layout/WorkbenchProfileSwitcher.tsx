@@ -1,5 +1,6 @@
 import React from 'react';
 import { Icon } from '@/components/icon/Icon';
+import type { IconName } from '@/components/icon/icons';
 import { Button } from '@/components/ui/button';
 import {
   DropdownMenu,
@@ -18,6 +19,7 @@ import { varinSurfaceRuntime } from '@/lib/extensions/surface-runtime';
 import { useUIStore } from '@/stores/useUIStore';
 import {
   VARIN_WORKBENCH_DEFAULT_PROFILE_ID,
+  VARIN_WORKBENCH_BOT_PROFILE_ID,
   VARIN_WORKBENCH_IDE_PROFILE_ID,
   VARIN_WORKBENCH_RESEARCH_PROFILE_ID,
   resolveVarinWorkbenchLayout,
@@ -47,20 +49,31 @@ export const WorkbenchProfileSwitcher: React.FC<{ className?: string }> = ({ cla
   }) : null;
   const activeProfileId = resolved?.profileId;
   const isIde = activeProfileId === VARIN_WORKBENCH_IDE_PROFILE_ID;
+  const isBot = activeProfileId === VARIN_WORKBENCH_BOT_PROFILE_ID;
+  const isWorkbench = !isIde && !isBot;
 
-  // Remember committed Agent workspaces across shell remounts and app restarts. This is
-  // only the IDE return destination; the Host profile remains the active-shell authority.
+  // Remember the workspace to return to from IDE or Bot. The Host profile
+  // remains the only authority for the selected mode.
   React.useEffect(() => {
-    if (hostId && activeProfileId && !isIde) rememberProfile(hostId, activeProfileId);
-  }, [hostId, activeProfileId, isIde, rememberProfile]);
+    if (hostId && activeProfileId && isWorkbench) rememberProfile(hostId, activeProfileId);
+  }, [hostId, activeProfileId, isWorkbench, rememberProfile]);
 
   if (!workbench?.authoritative || !resolved || !hostId) return null;
-  const agentProfiles = workbench.document.profiles.filter((profile) => profile.id !== VARIN_WORKBENCH_IDE_PROFILE_ID);
-  const agentProfile = agentProfiles.find((profile) => profile.id === (isIde ? rememberedProfileId : activeProfileId))
+  const agentProfiles = workbench.document.profiles.filter((profile) => (
+    profile.id !== VARIN_WORKBENCH_IDE_PROFILE_ID && profile.id !== VARIN_WORKBENCH_BOT_PROFILE_ID
+  ));
+  const agentProfile = agentProfiles.find((profile) => profile.id === (isWorkbench ? activeProfileId : rememberedProfileId))
     ?? agentProfiles.find((profile) => profile.id === VARIN_WORKBENCH_DEFAULT_PROFILE_ID)
     ?? agentProfiles[0];
   if (!agentProfile) return null;
-  const hasIde = workbench.document.profiles.some((profile) => profile.id === VARIN_WORKBENCH_IDE_PROFILE_ID);
+  const modes = ([
+    { id: 'workbench', label: t('settings.varin.extensions.workbench.profile.agent'), icon: 'layout-grid', profileId: agentProfile.id },
+    { id: 'ide', label: t('settings.varin.extensions.workbench.profile.ide'), icon: 'code-box', profileId: VARIN_WORKBENCH_IDE_PROFILE_ID },
+    { id: 'bot', label: 'Varin bot', icon: 'robot', profileId: VARIN_WORKBENCH_BOT_PROFILE_ID },
+  ] satisfies { id: string; label: string; icon: IconName; profileId: string }[])
+    .filter((mode) => workbench.document.profiles.some((profile) => profile.id === mode.profileId)
+      && (mode.id !== 'ide' || varinSurfaceRuntime.surface !== 'mobile'));
+  const selectedMode = modes.find((mode) => mode.id === (isBot ? 'bot' : isIde ? 'ide' : 'workbench')) ?? modes[0];
 
   const switchProfile = async (profileId: string): Promise<void> => {
     if (profileId === resolved.profileId || busy) return;
@@ -76,29 +89,36 @@ export const WorkbenchProfileSwitcher: React.FC<{ className?: string }> = ({ cla
 
   return (
     <div className="app-region-no-drag flex min-w-0 items-center gap-1.5" aria-busy={busy}>
-      {hasIde ? (
-        <div role="group" aria-label={t('workbench.switcher.presentation')} className={cn('flex shrink-0 items-center rounded-md bg-interactive-hover p-0.5', className)}>
-          {([
-            { id: 'agent', label: t('settings.varin.extensions.workbench.profile.agent'), selected: !isIde, profileId: agentProfile.id },
-            { id: 'ide', label: t('settings.varin.extensions.workbench.profile.ide'), selected: isIde, profileId: VARIN_WORKBENCH_IDE_PROFILE_ID },
-          ]).map((view) => (
-            <button
-              key={view.id}
-              type="button"
-              aria-pressed={view.selected}
-              disabled={busy}
-              onClick={() => { void switchProfile(view.profileId); }}
-              className={cn(
-                'h-6 rounded px-2 typography-meta font-medium transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary disabled:opacity-50',
-                view.selected ? 'bg-interactive-selection text-foreground' : 'text-muted-foreground hover:text-foreground',
-              )}
-            >
-              {view.label}
-            </button>
-          ))}
-        </div>
-      ) : null}
-      {agentProfiles.length > 1 ? (
+      <DropdownMenu>
+        <DropdownMenuTrigger asChild>
+          <Button
+            type="button"
+            variant="ghost"
+            size="sm"
+            disabled={busy}
+            aria-label={`${t('workbench.switcher.presentation')}: ${selectedMode.label}`}
+            className={cn('h-7 shrink-0 gap-1.5 rounded-md bg-interactive-hover px-2 typography-meta font-medium', className)}
+          >
+            <Icon name={selectedMode.icon} className="size-3.5 shrink-0" />
+            <span>{selectedMode.label}</span>
+            <Icon name="arrow-down-s" className="size-3.5 shrink-0 opacity-60" />
+          </Button>
+        </DropdownMenuTrigger>
+        <DropdownMenuContent align="start" className="min-w-44">
+          <DropdownMenuRadioGroup value={selectedMode.id} onValueChange={(value) => {
+            const mode = modes.find((candidate) => candidate.id === value);
+            if (mode) void switchProfile(mode.profileId);
+          }}>
+            {modes.map((mode) => (
+              <DropdownMenuRadioItem key={mode.id} value={mode.id} disabled={busy} className="gap-2.5">
+                <Icon name={mode.icon} className="size-4 shrink-0 text-muted-foreground" />
+                {mode.label}
+              </DropdownMenuRadioItem>
+            ))}
+          </DropdownMenuRadioGroup>
+        </DropdownMenuContent>
+      </DropdownMenu>
+      {isWorkbench && agentProfiles.length > 1 ? (
         <DropdownMenu>
           <DropdownMenuTrigger asChild>
             <Button
@@ -120,12 +140,12 @@ export const WorkbenchProfileSwitcher: React.FC<{ className?: string }> = ({ cla
               value={agentProfile.id}
               onValueChange={(profileId) => {
                 if (busy) return;
-                if (isIde) rememberProfile(hostId, profileId);
-                else void switchProfile(profileId);
+                void switchProfile(profileId);
               }}
             >
               {agentProfiles.map((profile) => (
-                <DropdownMenuRadioItem key={profile.id} value={profile.id} disabled={busy}>
+                <DropdownMenuRadioItem key={profile.id} value={profile.id} disabled={busy} className="gap-2.5">
+                  <Icon name={profile.id === VARIN_WORKBENCH_RESEARCH_PROFILE_ID ? 'flask' : 'layout-column'} className="size-4 shrink-0 text-muted-foreground" />
                   {workbenchWorkspaceLabel(profile, t)}
                 </DropdownMenuRadioItem>
               ))}

@@ -636,6 +636,7 @@ interface RateLimitGroup {
 }
 
 interface HeaderProps {
+  navigationTitle?: string;
   onToggleLeftDrawer?: () => void;
   onToggleRightDrawer?: () => void;
   leftDrawerOpen?: boolean;
@@ -643,6 +644,7 @@ interface HeaderProps {
 }
 
 export const Header: React.FC<HeaderProps> = ({
+  navigationTitle,
   onToggleLeftDrawer,
   onToggleRightDrawer,
   leftDrawerOpen,
@@ -1918,6 +1920,8 @@ export const Header: React.FC<HeaderProps> = ({
               </span>
             ) : null}
           </div>
+        ) : navigationTitle !== undefined ? (
+          <span className="mr-3 truncate typography-ui-label text-foreground">{navigationTitle}</span>
         ) : (
           <div className="app-region-no-drag mr-3 flex min-w-0 max-w-full items-center gap-0.5 py-0.5 -my-0.5 text-left">
             {!isSidebarOpen ? (
