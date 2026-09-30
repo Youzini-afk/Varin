@@ -508,6 +508,42 @@ export interface ThreadDiffStats {
   deletions: number;
 }
 
+/**
+ * Durable execution-environment binding for the Thread's work: which managed
+ * execution target runs its shell/process operations and which computer
+ * desktop its GUI operations address. This is a placement default resolved
+ * when each operation is admitted — an operation already accepted keeps the
+ * target snapshot it was pinned with, so later edits never redirect
+ * in-flight work. It is not a migration claim: files, shells and desktops
+ * stay where their owning Host runs them.
+ */
+export interface ThreadEnvironment {
+  /** Managed execution target id for shell/process ops; absent = this Host. */
+  workTarget?: string;
+  /** Computer desktop id for GUI ops; absent = the configured default resolution. */
+  desktopId?: string;
+  updatedAt: string;
+}
+
+export interface EnvironmentGetResult {
+  /** Thread the calling session resolves to; null when it carries none. */
+  threadId: string | null;
+  environment: ThreadEnvironment | null;
+}
+
+export interface EnvironmentSetParams {
+  /** Set the work target; `null` clears it back to this Host. */
+  workTarget?: string | null;
+  /** Set the computer desktop; `null` clears it back to the default resolution. */
+  desktopId?: string | null;
+}
+
+export interface EnvironmentSetResult extends EnvironmentGetResult {
+  previous: ThreadEnvironment | null;
+  /** The real effect of the change; never reports resource migration. */
+  handoff: string | null;
+}
+
 export interface Thread {
   id: string;
   parent: ThreadParent;
@@ -562,6 +598,11 @@ export interface Thread {
   messages?: ThreadMessageRecord[];
   /** Request parked behind a full shared execution budget (3.18C). */
   pendingContinuations?: ThreadPendingContinuation[];
+  /**
+   * Execution-environment placement binding for later-accepted operations.
+   * Absent = Host defaults. Never mutated by an admitted operation.
+   */
+  environment?: ThreadEnvironment;
   activeRunId: string | null;
   createdAt: string;
   updatedAt: string;
@@ -1127,6 +1168,11 @@ export interface ThreadDispatchParams {
   input?: "task" | "inherit";
   /** Research capability is explicit and only available when its model slot is configured. */
   research?: ThreadResearchManifest;
+  /**
+   * Initial execution-environment binding for the new Thread. Absent =
+   * inherit the parent Thread's binding, or Host defaults at the root.
+   */
+  environment?: { workTarget?: string; desktopId?: string };
 }
 
 export interface ThreadFactsSetParams {

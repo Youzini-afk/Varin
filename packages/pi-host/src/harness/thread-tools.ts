@@ -61,6 +61,10 @@ const DispatchParams = Type.Object({
     network: Type.Optional(Type.Boolean()),
     longRunning: Type.Optional(Type.Boolean()),
   })),
+  environment: Type.Optional(Type.Object({
+    workTarget: Type.Optional(Type.String({ description: "Managed execution target for the child's shell/process ops; omitted fields inherit this work's environment binding" })),
+    desktopId: Type.Optional(Type.String({ description: "Computer desktop the child's GUI ops target by default" })),
+  }, { description: "Initial execution-environment binding; absent inherits this work's binding" })),
 });
 
 const ThreadListParams = Type.Object({
@@ -301,6 +305,7 @@ export function createDispatchTool(
           ...(model === undefined ? {} : { model }),
           ...(tools !== undefined ? { tools } : {}),
           ...(params.scope !== undefined ? { scope: params.scope } : {}),
+          ...(params.environment !== undefined ? { environment: params.environment } : {}),
           ...(research === undefined ? {} : { research }),
         });
         const typed = result as ThreadDispatchResult;

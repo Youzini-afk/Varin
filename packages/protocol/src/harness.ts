@@ -1601,6 +1601,13 @@ export interface HarnessServiceMap {
   "computer.act": { params: ComputerActParams; result: ComputerActResult };
   "computer.cancel": { params: ComputerCancelParams; result: ComputerCancelResult };
   "computer.release": { params: ComputerReleaseParams; result: ComputerReleaseResult };
+  /**
+   * Execution-environment binding of the calling work's Thread. `set`
+   * re-binds placement for operations admitted after the call — accepted
+   * operations keep their target snapshot; nothing is migrated.
+   */
+  "environment.get": { params: Record<string, never>; result: import("./harness-threads.js").EnvironmentGetResult };
+  "environment.set": { params: import("./harness-threads.js").EnvironmentSetParams; result: import("./harness-threads.js").EnvironmentSetResult };
   // Phase 3: Thread operations
   "thread.dispatch": { params: ThreadDispatchParams; result: ThreadDispatchResult };
   "thread.facts.set": { params: ThreadFactsSetParams; result: ThreadFactsSetResult };
@@ -1782,6 +1789,8 @@ export const HARNESS_METHOD_CAPABILITY = {
   "computer.act": "control.computer",
   "computer.cancel": "control.computer",
   "computer.release": "control.computer",
+  "environment.get": "context.session",
+  "environment.set": "control.thread",
   "thread.dispatch": "control.thread",
   "thread.facts.set": "control.thread",
   "thread.list": "control.thread",
@@ -1934,6 +1943,8 @@ const HARNESS_METHODS: ReadonlySet<string> = new Set<string>([
   "computer.act",
   "computer.cancel",
   "computer.release",
+  "environment.get",
+  "environment.set",
   "thread.dispatch",
   "thread.facts.set",
   "thread.list",

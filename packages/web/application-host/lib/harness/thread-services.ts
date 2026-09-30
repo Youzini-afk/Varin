@@ -443,6 +443,7 @@ export function createThreadDispatchService(host: HarnessServiceHost): HarnessSe
         permissions: normalizeFrozenHarnessPermissions(owner?.execution.permissions),
         ...(consultBot ? { consultBotId: consultBot.id } : {}),
         ...(dispatchModel ? { model: dispatchModel } : {}),
+        ...(params.environment ? { environment: params.environment } : {}),
         ...(preset?.systemPromptFragment ? { systemPromptFragment: preset.systemPromptFragment } : {}),
         ...(researchDefinition ? {
           research: {

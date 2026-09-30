@@ -38,9 +38,14 @@ const ComputerParams = Type.Object({
     Type.Literal("release"),
     Type.Literal("run"),
     Type.Literal("reset"),
+    Type.Literal("environment"),
   ]),
-  /** Target desktop; omit for the configured default. */
+  /** Target desktop; omit for the work's environment binding or the configured default. */
   desktopId: Type.Optional(Type.String()),
+  /** environment: managed execution target for this work's shell/process ops; "" or null clears back to this Host. */
+  workTarget: Type.Optional(Type.String()),
+  /** environment: also clear the work's desktop binding when true. */
+  clear: Type.Optional(Type.Boolean()),
   connectionId: Type.Optional(Type.String({ description: "prepare: saved Host connection id; omit for this Host." })),
   width: Type.Optional(Type.Integer({ minimum: 1 })),
   height: Type.Optional(Type.Integer({ minimum: 1 })),
@@ -110,6 +115,7 @@ export function createComputerTool(bridge: HostServicesBridge, _sessionId: strin
       "If the tool reports the desktop unavailable or unprobed, report that honestly — never claim a GUI action happened.",
       "prepare installs a persistent Linux desktop and browser on this Host or a saved connection. Use it when an independent desktop is needed. start/stop require its desktopId; stopping closes applications but retains their saved files and browser profile.",
       "After saving a file in a managed desktop, action=artifact with its path relative to that desktop user's home records the exact file revision on the current work. The work view provides a download; a changed file must be registered again.",
+      "action=environment reads or rebinds this work's execution environment (work target for shell ops, desktop for GUI ops). Operations already accepted keep their target; a rebind is never a file or session migration.",
     ],
     parameters: ComputerParams,
     execute: async (_toolCallId, params, signal, _onUpdate, _ctx) => {
@@ -294,6 +300,30 @@ export function createComputerTool(bridge: HostServicesBridge, _sessionId: strin
               controller.abort(new Error("Computer evaluation ended"));
               evaluations.delete(controller);
             }
+          }
+          case "environment": {
+            // get when nothing is provided; otherwise update this work's
+            // placement binding. Accepted operations keep their target —
+            // the change only affects ops admitted afterwards.
+            const hasUpdate = params.workTarget !== undefined || params.desktopId !== undefined || params.clear === true;
+            const result = hasUpdate
+              ? await bridge.request("environment.set", {
+                  ...(params.clear === true ? { workTarget: null, desktopId: null }
+                    : {
+                        ...(params.workTarget !== undefined ? { workTarget: params.workTarget || null } : {}),
+                        ...(params.desktopId !== undefined ? { desktopId: params.desktopId || null } : {}),
+                      }),
+                })
+              : await bridge.request("environment.get", {});
+            const env = result.environment;
+            const lines = [
+              env
+                ? `environment: work target ${env.workTarget ?? "this Host"} · desktop ${env.desktopId ?? "(configured default)"}`
+                : "environment: no Thread binding — ops use Host defaults",
+            ];
+            const handoff = (result as { handoff?: string | null }).handoff;
+            if (handoff) lines.push(handoff);
+            return { content: [{ type: "text", text: lines.join("\n") }], details: result as unknown as Record<string, unknown> };
           }
           case "reset": {
             for (const evaluation of evaluations) evaluation.abort(new Error("Computer REPL reset"));

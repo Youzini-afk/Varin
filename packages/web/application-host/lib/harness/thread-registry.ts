@@ -25,6 +25,7 @@ import type {
   ThreadAttention,
   ThreadCreatedBy,
   ThreadDiffStats,
+  ThreadEnvironment,
   ThreadInheritedContext,
   ThreadIntegration,
   ThreadIntegrationBinding,
@@ -155,6 +156,11 @@ export interface CreateThreadInput {
   reviewOf?: ThreadReviewOf;
   /** BC3: a discussion Thread bound to consult this Bot. */
   consultBotId?: string;
+  /**
+   * Initial execution-environment binding; absent = inherit the parent
+   * Thread's binding, or Host defaults at the root.
+   */
+  environment?: { workTarget?: string; desktopId?: string };
 }
 
 export interface ThreadRegistryOptions {
@@ -1427,6 +1433,10 @@ export function createThreadRegistry(options: ThreadRegistryOptions) {
       const inheritedResearch = input.parent.kind === "thread"
         ? findThread(catalog, input.parent.id)?.manifest.research
         : undefined;
+      const inheritedEnvironment = input.parent.kind === "thread"
+        ? findThread(catalog, input.parent.id)?.environment
+        : undefined;
+      const environment = input.environment ?? inheritedEnvironment;
       const thread: Thread = {
         id: `thread-${randomUUID().slice(0, 8)}`,
         parent: structuredClone(input.parent),
@@ -1471,6 +1481,9 @@ export function createThreadRegistry(options: ThreadRegistryOptions) {
         hidden: input.hidden ?? false,
         ...(input.reviewOf ? { reviewOf: structuredClone(input.reviewOf) } : {}),
         ...(input.consultBotId ? { consultBotId: input.consultBotId } : {}),
+        ...(environment && (environment.workTarget !== undefined || environment.desktopId !== undefined)
+          ? { environment: { ...environment, updatedAt: timestamp } }
+          : {}),
       };
       catalog.threads.push(thread);
       return { value: thread, changed: [thread] };
@@ -1509,6 +1522,54 @@ export function createThreadRegistry(options: ThreadRegistryOptions) {
     touchThread(catalog, thread);
     return { value: thread, changed: [thread] };
   });
+
+  /**
+   * Rebind a Thread's execution environment (EE stage 1). This is a placement
+   * default for operations admitted after the write; accepted operations keep
+   * the target snapshot they were pinned with. The registry records the
+   * intent only — target verification lives in the environment service.
+   */
+  const setThreadEnvironment = async (
+    scopeId: string,
+    threadId: string,
+    patch: { workTarget?: string | null; desktopId?: string | null },
+  ): Promise<{ environment: ThreadEnvironment | null; previous: ThreadEnvironment | null }> => (
+    mutateWorkspace(scopeId, (catalog) => {
+      const thread = findThread(catalog, threadId);
+      if (!thread) throw new Error(`Unknown thread: ${threadId}`);
+      const previous = thread.environment ? structuredClone(thread.environment) : null;
+      const next: ThreadEnvironment = { updatedAt: nowISO() };
+      const resolveField = (value: string | null | undefined, old: string | undefined): string | undefined => (
+        value === undefined ? old : (value === null ? undefined : value)
+      );
+      const workTarget = resolveField(patch.workTarget, previous?.workTarget);
+      const desktopId = resolveField(patch.desktopId, previous?.desktopId);
+      if (workTarget !== undefined) next.workTarget = workTarget;
+      if (desktopId !== undefined) next.desktopId = desktopId;
+      if (workTarget === undefined && desktopId === undefined) delete thread.environment;
+      else thread.environment = next;
+      touchThread(catalog, thread);
+      return {
+        value: { environment: thread.environment ? structuredClone(thread.environment) : null, previous },
+        changed: [thread],
+      };
+    })
+  );
+
+  /**
+   * Durable environment resolution for a session: binding → owning Thread →
+   * its placement record. Returns null when the session carries no Thread.
+   */
+  const threadEnvironmentForSession = async (
+    sessionId: string,
+  ): Promise<{ threadId: string; environment: ThreadEnvironment | null } | null> => {
+    const owner = await resolveSessionOwner(sessionId);
+    if (!owner) return null;
+    const catalog = await readExistingCatalog(owner.owningScopeId);
+    const thread = catalog ? findThread(catalog, owner.threadId) : null;
+    if (!thread) return null;
+    return { threadId: thread.id, environment: thread.environment ? structuredClone(thread.environment) : null };
+  };
 
   const listWorkspaceThreads = async (scopeId: string): Promise<Thread[]> => {
     const catalog = await loadWorkspace(scopeId);
@@ -2994,6 +3055,8 @@ export function createThreadRegistry(options: ThreadRegistryOptions) {
     getThreadForSession,
     getSessionBinding,
     resolveSessionOwner,
+    setThreadEnvironment,
+    threadEnvironmentForSession,
     bindRunSession,
     unbindRunSession,
     countActiveInRoot,

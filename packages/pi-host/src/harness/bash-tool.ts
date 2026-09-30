@@ -7,7 +7,7 @@ const BashParams = Type.Object({
   command: Type.String(),
   waitMs: Type.Optional(Type.Integer({ minimum: 0 })),
   description: Type.Optional(Type.String()),
-  target: Type.Optional(Type.String({ description: "Stable managed execution target from resources; omit for this Host" })),
+  target: Type.Optional(Type.String({ description: "Stable managed execution target from resources; omit for the work's environment binding or this Host" })),
   cwd: Type.Optional(Type.String({ description: "Absolute working directory on the selected target; remote targets never reuse the local workspace path" })),
 });
 

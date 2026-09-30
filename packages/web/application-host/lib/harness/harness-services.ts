@@ -29,6 +29,7 @@ import { executeTodoTool } from "./todo-tool.js";
 import { executeRecall } from "./recall-tool.js";
 import { registerMemoryServices } from "./memory-services.js";
 import { registerComputerServices } from "./computer-services.js";
+import { registerEnvironmentServices, sessionEnvironment } from "./environment-services.js";
 import { createZone2DeliveryService, prepareZone2Threads } from "./zone2-threads.js";
 import { selectNewZone2Material, zone2MaterialRevision } from "./zone2-material.js";
 import { formatZone2ThreadMaterial } from "./zone2.js";
@@ -254,7 +255,11 @@ function createPermissionAuditService(host: HarnessServiceHost): HarnessService<
 export function createShellExecService(host: HarnessServiceHost): HarnessService<"shell.exec"> {
   return {
     handle: async (params, ctx: HarnessServiceContext) => {
-      const target = params.target?.trim();
+      // Placement for this one accepted call: an explicit target wins,
+      // otherwise the work Thread's durable environment binding applies.
+      // The resolved value is pinned here — a later environment change
+      // cannot redirect this already-admitted command.
+      const target = params.target?.trim() || (await sessionEnvironment(host, ctx.sessionId))?.environment?.workTarget || undefined;
       // Router resolved this actor before entering the service. Capture the
       // default cwd from that same request snapshot for this command only.
       const acceptedSessionCwd = ctx.actor.cwd ?? ctx.actor.authorityRoot;
@@ -1166,6 +1171,8 @@ export function registerHarnessServices(
   }
   // BC1 unified memory — remember/correct/forget/get share one write path.
   registerMemoryServices(router, host);
+  // EE: durable execution-environment binding on the work Thread.
+  registerEnvironmentServices(router, host);
   // BC4 Computer Use — observe/act/cancel share the catalog + driver service.
   registerComputerServices(router, host);
   // Phase 3 thread services — registered only when thread registry is available
