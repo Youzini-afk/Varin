@@ -1605,6 +1605,7 @@ export interface HarnessServiceMap {
   "computer.fileWrite": { params: import('./harness-computer.js').ComputerFileWriteParams; result: import('./harness-computer.js').ComputerFileWriteResult };
   "computer.installSoftware": { params: import('./harness-computer.js').ComputerInstallSoftwareParams; result: import('./harness-computer.js').ComputerInstallSoftwareResult };
   "computer.browser": { params: import('./harness-computer.js').ComputerBrowserParams; result: import('./harness-computer.js').ComputerBrowserResult };
+  "computer.office": { params: import('./harness-computer.js').ComputerOfficeParams; result: import('./harness-computer.js').ComputerOfficeResult };
   /**
    * Execution-environment binding of the calling work's Thread. `set`
    * re-binds placement for operations admitted after the call — accepted
@@ -1803,6 +1804,7 @@ export const HARNESS_METHOD_CAPABILITY = {
   "computer.fileWrite": "control.computer",
   "computer.installSoftware": "control.computer",
   "computer.browser": "control.computer",
+  "computer.office": "control.computer",
   "environment.get": "context.session",
   "environment.set": "control.thread",
   "environment.forward": "control.thread",
@@ -1964,6 +1966,7 @@ const HARNESS_METHODS: ReadonlySet<string> = new Set<string>([
   "computer.fileWrite",
   "computer.installSoftware",
   "computer.browser",
+  "computer.office",
   "environment.get",
   "environment.set",
   "environment.forward",

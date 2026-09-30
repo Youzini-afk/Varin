@@ -45,6 +45,7 @@
         "libreoffice-writer",
         "libreoffice-calc",
         "libreoffice-impress",
+        "python3-uno",
         "evince",
         "python3-numpy",
         "python3-pandas",

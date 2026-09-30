@@ -1114,6 +1114,11 @@ def perform_operation(operation):
         # serialization, the same agent-vs-human control gate.
         import browser_bridge
         return browser_bridge.perform(operation)
+    if tool == "office":
+        # LibreOffice ops attach to the user's live soffice process on this
+        # same scene — open documents, unsaved state and all.
+        import office_bridge
+        return office_bridge.perform(operation)
     if tool == "list_apps":
         apps = []
         for app in iter_apps():

@@ -282,6 +282,26 @@ export function registerComputerRoutes(app: Express, { computers, requireAuth = 
     }
   });
 
+  app.post("/api/computers/desktops/:desktopId/office", requireAuth, async (request: Request, response: Response) => {
+    response.setHeader("Cache-Control", "no-store");
+    const controller = new AbortController();
+    response.once("close", () => { if (!response.writableEnded) controller.abort(); });
+    try {
+      const body = request.body ?? {};
+      const result = await computers.office({
+        desktopId: String(request.params.desktopId ?? ""),
+        op: typeof body.op === "string" ? body.op as never : "status",
+        signal: controller.signal,
+        ...(typeof body.path === "string" ? { path: body.path } : {}),
+        ...(typeof body.url === "string" ? { url: body.url } : {}),
+        ...(body.act !== null && typeof body.act === "object" ? { act: body.act } : {}),
+      });
+      response.json(result);
+    } catch (error) {
+      sendError(response, error, "Unable to reach the LibreOffice bridge");
+    }
+  });
+
   // --- BC5: control ownership + desktop view --------------------------------
 
   /** Who currently owns input on this desktop (agent or a human viewer). */

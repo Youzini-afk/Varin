@@ -181,6 +181,35 @@ Chromium 行为）；Page.navigate 返回即发不代表加载完成（事实边
 映射尚未提供（click 仍需坐标来源）；Windows/macOS 桌面暂无桥
 （managed linux only，与驱动同一边界）。
 
+### 第五批补：LibreOffice 桥——同一实例与未保存状态（EE5b，§7.2，§13 收敛）
+
+§13"LibreOffice/办公桥"收敛：**python3-uno + UNO socket attach**。
+soffice 以 `--accept=socket,host=127.0.0.1,port=2002;urp;` 常驻单实例
+（其 profile 单例语义使后续人工打开的文件仍进入同一进程与 accept
+socket）；若用户已自行运行无 accept 的实例，桥如实不可连接，不另起
+隐藏 profile 冒充同一现场。
+
+- `office_bridge.py`：UNO 桥，ops `status`（连接探活+文档枚举）、
+  `launch`（带 accept 启动+30s 等待）、`docs`（title/kind/url/
+  **modified**——未保存状态是协议字段而非推断）、`open`
+  （loadComponentFromURL 进同一实例，文件在人工视野内可见）、
+  `act`：read/write（Sheet 单元格范围，write 强制 values 形状与
+  range 完全匹配）、insert（Writer 文末插入）、save（无位置文档如实
+  拒绝而非静默另存）。uno 缺失（python3-uno 未装）→诚实
+  `{ok:false}`。python3-uno 已入 docs 配方组。
+- `runtime.py` `tool:"office"` 分发到同一 lane；`computer.office`
+  服务方法/status·docs 走 observe lane、launch·open·act 与人工控制门
+  互斥；远端认证转发+传输丢失 `outcome:"unknown"`；路由
+  `POST …/office`、Harness `computer.office`、Pi `action=office`。
+
+验证：79/79 service+routes 测试全绿；`office_bridge` 无 uno 环境下
+状态诚实（status→not running、其余→unavailable 而非异常）；
+类型/ESLint/py_compile 全绿。
+
+未验证边界：真实 LibreOffice 会话未跑过——UNO 服务名/接口语义来自
+官方组件模型但未经原生实例验证（Calc/Writer/Presentation 分支、
+modified 标志、shape 校验行为）；Windows/macOS 无桥。
+
 ## 待交付
 
 按 §11 顺序：环境接入与联动剩余项（服务访问/事件回源）、默认模板与持久、

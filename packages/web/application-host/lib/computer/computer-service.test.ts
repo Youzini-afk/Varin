@@ -93,7 +93,7 @@ const makeDriver = (handler: FakeDriver["handler"]): FakeDriver => {
   return driver;
 };
 
-const okResponse = (extra: Partial<DriverResponse> = {}): DriverResponse => ({ id: "x", ok: true, ...extra });
+const okResponse = (extra: Record<string, unknown> = {}): DriverResponse => ({ id: "x", ok: true, ...extra });
 
 const appSnapshot = () => ({
   app: { name: "notepad", pid: 42, windowTitle: "Untitled - Notepad" },

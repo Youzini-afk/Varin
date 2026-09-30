@@ -32,6 +32,8 @@ import type {
   ComputerOpenResult,
   ComputerBrowserParams,
   ComputerBrowserResult,
+  ComputerOfficeParams,
+  ComputerOfficeResult,
   ComputerPlatform,
   ComputerSoftwareResult,
   ComputerVmBinding,
@@ -501,6 +503,11 @@ export interface ComputerService {
    * gate as `open`/`act`.
    */
   browser(params: ComputerBrowserParams & { signal?: AbortSignal; sessionId?: string }): Promise<ComputerBrowserResult>;
+  /**
+   * EE §7.2: LibreOffice bridge — attach to the live soffice instance on the
+   * same desktop scene (open documents carry their unsaved state).
+   */
+  office(params: ComputerOfficeParams & { signal?: AbortSignal; sessionId?: string }): Promise<ComputerOfficeResult>;
   // --- BC5: control ownership + desktop view --------------------------------
   /** Current control owner record for a desktop. */
   control(desktopId?: string): Promise<ComputerControlState>;
@@ -1897,6 +1904,63 @@ export function createComputerService(options: ComputerServiceOptions): Computer
     return { ok: true, ...restFields };
   };
 
+  // EE §7.2 office bridge — same lane, same live soffice instance with its
+  // unsaved state. status/docs observe; launch/open/act hold the write gate.
+  const office: ComputerService["office"] = async (params) => {
+    const OPS = new Set(["status", "launch", "docs", "open", "act"]);
+    if (!OPS.has(params.op)) throw new HarnessServiceError("invalid-params", "computer.office requires a valid op");
+    const writes = params.op === "launch" || params.op === "open" || params.op === "act";
+    params.signal?.throwIfAborted();
+    const id = await resolveDesktopId(params.desktopId);
+    const remote = await remoteTargetFor(id);
+    if (remote) {
+      try {
+        const payload = await remoteJson<ComputerOfficeResult>(remote.connection, "POST",
+          `/api/computers/desktops/${encodeURIComponent(remote.remoteId)}/office`,
+          { op: params.op,
+            ...(params.path !== undefined ? { path: params.path } : {}),
+            ...(params.url !== undefined ? { url: params.url } : {}),
+            ...(params.act !== undefined ? { act: params.act } : {}) }, params.signal);
+        if (typeof payload?.ok !== "boolean") throw new RemoteTransportError("Remote Host returned no valid office receipt");
+        if (writes) await recordUsage(id, params.sessionId).catch(() => undefined);
+        return payload;
+      } catch (error) {
+        if (error instanceof RemoteTransportError) {
+          return { ok: false, outcome: "unknown", error: error instanceof Error ? error.message : String(error) };
+        }
+        throw error;
+      }
+    }
+    if (writes && laneFor(id).control.owner === "human") {
+      throw new HarnessServiceError("forbidden", `Desktop "${id}" is under human control`);
+    }
+    const generation = laneGeneration(id);
+    const assertAdmission = () => {
+      const lane = laneFor(id);
+      if (writes && lane.generation !== generation) throw new CancelledActionError();
+      if (writes && (lane.control.owner !== "agent" || lane.transitioning)) {
+        throw new HarnessServiceError("forbidden", "Desktop control is changing or held by a human");
+      }
+    };
+    assertAdmission();
+    const response = await enqueue(id, writes ? "action" : "observe", async () => {
+      const { driver } = await driverFor(id);
+      assertAdmission();
+      return requestWithAbort(driver, {
+        tool: "office",
+        op: params.op,
+        ...(params.path !== undefined ? { path: params.path } : {}),
+        ...(params.url !== undefined ? { url: params.url } : {}),
+        ...(params.act !== undefined ? { act: params.act } : {}),
+      }, params.signal);
+    });
+    const { id: _rid, ok, cancelled, error, ...rest } = response as DriverResponse & Record<string, unknown>;
+    const restFields = rest as unknown as Omit<ComputerOfficeResult, "ok">;
+    if (!ok) return { ok: false, error: error ?? (cancelled ? "cancelled" : "office op failed"), ...restFields };
+    if (writes) await recordUsage(id, params.sessionId).catch(() => undefined);
+    return { ok: true, ...restFields };
+  };
+
   // --- BC5: control ownership ---------------------------------------------
 
   const control: ComputerService["control"] = async (desktopId) => {
@@ -2841,6 +2905,7 @@ export function createComputerService(options: ComputerServiceOptions): Computer
     fileWrite,
     installSoftware,
     browser,
+    office,
     control,
     takeover,
     handback,

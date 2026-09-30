@@ -437,6 +437,57 @@ export interface ComputerBrowserResult {
 }
 
 // ---------------------------------------------------------------------------
+// EE5b — LibreOffice bridge (UNO, same live instance)
+// ---------------------------------------------------------------------------
+
+export type ComputerOfficeOp = "status" | "launch" | "docs" | "open" | "act";
+
+export interface ComputerOfficeAct {
+  kind: "read" | "write" | "insert" | "save";
+  /** Open document to target: its title or file URL (default: first open doc). */
+  doc?: string;
+  /** read/write: sheet name (default first sheet). */
+  sheet?: string;
+  /** read/write: cell range, e.g. "A1:B4". */
+  range?: string;
+  /** write: 2-D values matching the range exactly. */
+  values?: unknown[][];
+  /** insert: text appended at the end of a Writer document. */
+  text?: string;
+}
+
+export interface ComputerOfficeDoc {
+  title: string;
+  url?: string | null;
+  kind?: string;
+  modified?: boolean;
+}
+
+export interface ComputerOfficeParams {
+  desktopId?: string;
+  op: ComputerOfficeOp;
+  /** open: file path or URL to load into the live instance. */
+  path?: string;
+  url?: string;
+  act?: ComputerOfficeAct;
+}
+
+export interface ComputerOfficeResult {
+  ok: boolean;
+  /** Transport-loss semantics: the op may have reached the target. */
+  outcome?: "unknown";
+  status?: { running: boolean };
+  alreadyRunning?: boolean;
+  docs?: ComputerOfficeDoc[];
+  doc?: ComputerOfficeDoc;
+  sheet?: string;
+  range?: string;
+  values?: unknown[][];
+  modified?: boolean;
+  error?: string;
+}
+
+// ---------------------------------------------------------------------------
 // BC5 — shared desktop view + control ownership
 // ---------------------------------------------------------------------------
 

@@ -46,6 +46,7 @@ const ComputerParams = Type.Object({
     Type.Literal("forwardClose"),
     Type.Literal("install"),
     Type.Literal("browser"),
+    Type.Literal("office"),
   ]),
   /** Target desktop; omit for the work's environment binding or the configured default. */
   desktopId: Type.Optional(Type.String()),
@@ -80,6 +81,12 @@ const ComputerParams = Type.Object({
   tabId: Type.Optional(Type.String()),
   /** browser act: navigate(url) | evaluate(expression) | click(x,y) | type(text) | screenshot — viewport coords come from the snapshot/observe bounds. */
   browserAct: Type.Optional(Type.Object({}, { additionalProperties: true })),
+  /** office: status | launch | docs | open | act — ops on the live LibreOffice instance (UNO attach; open docs keep unsaved state). */
+  officeOp: Type.Optional(Type.String()),
+  /** office open: file path on the target machine. */
+  officePath: Type.Optional(Type.String()),
+  /** office act: read/write {doc,sheet,range,values} | insert {doc,text} | save {doc}. */
+  officeAct: Type.Optional(Type.Object({}, { additionalProperties: true })),
   connectionId: Type.Optional(Type.String({ description: "prepare: saved Host connection id; omit for this Host." })),
   width: Type.Optional(Type.Integer({ minimum: 1 })),
   height: Type.Optional(Type.Integer({ minimum: 1 })),
@@ -154,6 +161,7 @@ export function createComputerTool(bridge: HostServicesBridge, _sessionId: strin
       "action=forward opens a live service access path: for a managed remote target it returns a loopback URL valid ONLY on this Host (a forward dies with it, close it with action=forwardClose); for the local target it returns the service's own address. forwards lists live handles. A remote service's localhost is never your localhost.",
       "action=install adds software to the environment owning the bound desktop — recipe groups (`dev`, `docs`) or explicit package names. It reports the package layer's real result: `installed` means packages landed, not that a control interface exists.",
       "action=browser attaches the visible Chromium session on the target machine (CDP): browserOp=launch starts it on the persistent profile, tabs lists real tabs, snapshot returns the page accessibility tree, browserAct runs navigate/evaluate/click(x,y viewport)/type/screenshot in that same session — the tabs and login state a human sees are the ones you operate.",
+      "action=office attaches the live LibreOffice instance on the target machine (UNO): officeOp=launch starts it, docs lists open documents with their modified state, officePath opens a file into that instance, officeAct does read/write (sheet,range,values)/insert(text)/save on an open document — the same document a human is editing, unsaved state included.",
     ],
     parameters: ComputerParams,
     execute: async (_toolCallId, params, signal, _onUpdate, _ctx) => {
@@ -439,6 +447,32 @@ export function createComputerTool(bridge: HostServicesBridge, _sessionId: strin
                   : op === "act" && (params.browserAct as { kind?: string })?.kind === "screenshot"
                     ? "frame captured (see details.image)"
                     : r.error ?? (r.result !== undefined ? JSON.stringify(r.result) : "ok");
+            return { content: [{ type: "text", text }], ...(r.ok === false ? { isError: true as const } : {}), details: result as unknown as Record<string, unknown> };
+          }
+          case "office": {
+            const op = (params.officeOp ?? "status").trim() as import("@varin/protocol").ComputerOfficeOp;
+            const result = await bridge.request("computer.office", {
+              op,
+              ...(desktop ? { desktopId: desktop } : {}),
+              ...(params.officePath ? { path: params.officePath } : {}),
+              ...(params.officeAct !== undefined ? { act: params.officeAct as import("@varin/protocol").ComputerOfficeAct } : {}),
+            });
+            const r = result as { ok?: boolean; outcome?: string; status?: { running?: boolean };
+              docs?: Array<{ title?: string; kind?: string; modified?: boolean; url?: string | null }>;
+              doc?: { title?: string; url?: string | null; modified?: boolean };
+              sheet?: string; range?: string; values?: unknown[][]; modified?: boolean; error?: string };
+            if (r.outcome === "unknown") {
+              return errorResult(new HarnessRequestError("unavailable", `office op may have reached the target — verify document state before retrying (${r.error ?? "response lost"})`));
+            }
+            const text = op === "status" || op === "launch"
+              ? (r.status?.running ? "LibreOffice running" : "LibreOffice not running")
+              : op === "docs"
+                ? (r.docs ?? []).map((d) => `${d.title ?? "(untitled)"} [${d.kind ?? "doc"}]${d.modified ? " (modified)" : ""} ${d.url ?? ""}`).join("\n") || "no open documents"
+                : op === "open"
+                  ? `opened ${r.doc?.title ?? ""}${r.doc?.url ? ` ${r.doc.url}` : ""}`
+                  : op === "act" && (params.officeAct as { kind?: string })?.kind === "read"
+                    ? JSON.stringify(r.values ?? [])
+                    : r.error ?? `ok${r.modified === true ? " (modified)" : ""}`;
             return { content: [{ type: "text", text }], ...(r.ok === false ? { isError: true as const } : {}), details: result as unknown as Record<string, unknown> };
           }
           case "environment": {

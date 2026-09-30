@@ -44,7 +44,8 @@ export interface DriverRequest {
     /** Open a URL/path/application on the desktop's own machine (EE). */
     | "open"
     /** CDP attach to the visible Chromium session (EE §7.2). */
-    | "browser";
+    | "browser"
+    | "office";
   [key: string]: unknown;
 }
 

@@ -172,4 +172,19 @@ export function registerComputerServices(
       });
     },
   });
+  // EE §7.2: LibreOffice bridge — same live instance, same ownership gate.
+  router.register("computer.office", {
+    handle: async (params, ctx) => {
+      const desktopId = await desktopIdFor(host, ctx, params);
+      return requireService(host).office({
+        ...(desktopId !== undefined ? { desktopId } : {}),
+        op: params.op,
+        ...(params.path !== undefined ? { path: params.path } : {}),
+        ...(params.url !== undefined ? { url: params.url } : {}),
+        ...(params.act !== undefined ? { act: params.act } : {}),
+        signal: ctx.signal,
+        sessionId: ctx.sessionId,
+      });
+    },
+  });
 }
