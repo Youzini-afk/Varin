@@ -1,0 +1,55 @@
+{
+  "comment": "Default Debian/Ubuntu component recipe for Varin environments (execution-environment-design §6.2). Package names are Debian 13; each entry is a separately installable component so a pure work environment can skip the desktop group. Image/video/engineering/game software is deliberately absent — users or authorized agents install those per task.",
+  "components": [
+    {
+      "id": "desktop",
+      "title": "Lightweight desktop, browser control surface",
+      "packages": [
+        "python3",
+        "python3-gi",
+        "gir1.2-atspi-2.0",
+        "gir1.2-gtk-3.0",
+        "at-spi2-core",
+        "libatk-adaptor",
+        "tigervnc-standalone-server",
+        "xfce4",
+        "dbus-x11",
+        "xauth",
+        "fonts-noto-cjk"
+      ],
+      "notes": "The browser itself is firefox-esr with a Mozilla-repo fallback handled by prepare-desktop.sh, whose first run also installs this group."
+    },
+    {
+      "id": "dev",
+      "title": "Development and scripting",
+      "packages": [
+        "git",
+        "curl",
+        "ca-certificates",
+        "jq",
+        "ripgrep",
+        "unzip",
+        "zip",
+        "xz-utils",
+        "python3-pip",
+        "python3-venv",
+        "nodejs",
+        "npm"
+      ]
+    },
+    {
+      "id": "docs",
+      "title": "Documents and common data processing",
+      "packages": [
+        "libreoffice-writer",
+        "libreoffice-calc",
+        "libreoffice-impress",
+        "evince",
+        "python3-numpy",
+        "python3-pandas",
+        "python3-matplotlib"
+      ],
+      "notes": "Office suite limited to the document trio plus a PDF renderer; scipy/sklearn, Java, LaTeX and OCR language packs stay per-task additions."
+    }
+  ]
+}

@@ -35,6 +35,14 @@ export interface ComputerMachine {
   vm?: ComputerVmBinding;
 }
 
+/** EE §6.2: per-component install outcome for an environment's software recipe. */
+export interface ComputerSoftwareResult {
+  id: string;
+  state: "installed" | "failed";
+  detail?: string;
+  packages?: string[];
+}
+
 export interface ComputerDesktop {
   id: string;
   machineId: string;
@@ -64,6 +72,13 @@ export interface ComputerDesktop {
   managed?: "linux-xvnc";
   /** Live framebuffer transport; input still uses the same Host control lane. */
   media?: { kind: "vnc"; width: number; height: number };
+  /**
+   * Component recipe state (EE §6.2): what the environment's install path
+   * last reported per component id or ad-hoc package set. `installed` means
+   * the package layer succeeded — control-interface usability stays in
+   * `status`/`capabilities`, never inferred from this map.
+   */
+  software?: Record<string, { state: "installed" | "failed"; at: number; detail?: string }>;
 }
 
 export interface ComputerWorkAssociation {
@@ -360,6 +375,17 @@ export interface ComputerFileWriteParams {
 
 export interface ComputerFileWriteResult {
   version: { sha256: string; byteLength: number; modifiedAt: string };
+}
+
+/** EE §6.2: component recipe install. At least one of groups/packages required. */
+export interface ComputerInstallSoftwareParams {
+  desktopId?: string;
+  groups?: string[];
+  packages?: string[];
+}
+
+export interface ComputerInstallSoftwareResult {
+  results: ComputerSoftwareResult[];
 }
 
 // ---------------------------------------------------------------------------

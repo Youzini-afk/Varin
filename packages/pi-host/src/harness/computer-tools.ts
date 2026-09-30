@@ -44,6 +44,7 @@ const ComputerParams = Type.Object({
     Type.Literal("forward"),
     Type.Literal("forwards"),
     Type.Literal("forwardClose"),
+    Type.Literal("install"),
   ]),
   /** Target desktop; omit for the work's environment binding or the configured default. */
   desktopId: Type.Optional(Type.String()),
@@ -68,6 +69,10 @@ const ComputerParams = Type.Object({
   target: Type.Optional(Type.String()),
   /** forwardClose: access id returned by forward/forwards. */
   forwardId: Type.Optional(Type.String()),
+  /** install: recipe component groups from the environment manifest (e.g. "dev", "docs"). */
+  groups: Type.Optional(Type.Array(Type.String())),
+  /** install: explicit package names on top of any groups. */
+  packages: Type.Optional(Type.Array(Type.String())),
   connectionId: Type.Optional(Type.String({ description: "prepare: saved Host connection id; omit for this Host." })),
   width: Type.Optional(Type.Integer({ minimum: 1 })),
   height: Type.Optional(Type.Integer({ minimum: 1 })),
@@ -140,6 +145,7 @@ export function createComputerTool(bridge: HostServicesBridge, _sessionId: strin
       "action=environment reads or rebinds this work's execution environment (work target for shell ops, desktop for GUI ops). Operations already accepted keep their target; a rebind is never a file or session migration.",
       "action=open starts a URL/path/app on the desktop's own machine — `localhost` URLs and file paths resolve on that machine, not yours. action=put writes one file into the managed desktop user's home and returns its revision; it is a one-shot copy, not a sync.",
       "action=forward opens a live service access path: for a managed remote target it returns a loopback URL valid ONLY on this Host (a forward dies with it, close it with action=forwardClose); for the local target it returns the service's own address. forwards lists live handles. A remote service's localhost is never your localhost.",
+      "action=install adds software to the environment owning the bound desktop — recipe groups (`dev`, `docs`) or explicit package names. It reports the package layer's real result: `installed` means packages landed, not that a control interface exists.",
     ],
     parameters: ComputerParams,
     execute: async (_toolCallId, params, signal, _onUpdate, _ctx) => {
@@ -384,6 +390,23 @@ export function createComputerTool(bridge: HostServicesBridge, _sessionId: strin
             if (!params.forwardId?.trim()) return errorResult(new HarnessRequestError("invalid-params", "forwardClose requires forwardId"));
             const result = await bridge.request("environment.forwardClose", { id: params.forwardId });
             return { content: [{ type: "text", text: result.closed ? "forward closed" : "no live forward with that id" }], details: result as unknown as Record<string, unknown> };
+          }
+          case "install": {
+            const groups = params.groups?.filter((g) => g.trim()) ?? [];
+            const packages = params.packages?.filter((p) => p.trim()) ?? [];
+            if (groups.length === 0 && packages.length === 0) {
+              return errorResult(new HarnessRequestError("invalid-params", "install requires groups or packages"));
+            }
+            const result = await bridge.request("computer.installSoftware", {
+              ...(groups.length ? { groups } : {}),
+              ...(packages.length ? { packages } : {}),
+              ...(desktop ? { desktopId: desktop } : {}),
+            });
+            const results = result.results as Array<{ id: string; state: string; detail?: string }>;
+            const failed = results.filter((r) => r.state !== "installed");
+            const text = results.map((r) => `${r.id}: ${r.state}${r.detail ? ` (${r.detail})` : ""}`).join("; ")
+              + (failed.length ? " — failed entries stay on the desktop's software record" : " — persisted on the desktop's software record");
+            return { content: [{ type: "text", text }], ...(failed.length ? { isError: true as const } : {}), details: result as unknown as Record<string, unknown> };
           }
           case "environment": {
             // get when nothing is provided; otherwise update this work's

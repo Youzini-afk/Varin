@@ -1235,3 +1235,94 @@ describe("computer service (EE open + file write)", () => {
     await service.dispose();
   });
 });
+
+describe("software install (EE §6.2)", () => {
+  const remoteHost = { id: "r1", label: "Office PC", apiUrl: "http://10.0.0.5:8765", clientToken: "tok-1" };
+  const remoteCatalog = {
+    machines: [{ id: "local", name: "Office PC", provider: "local", platform: "linux", coordinatorHostId: "remote-h", status: "active", createdAt: "t", updatedAt: "t" }],
+    desktops: [{ id: "d0", machineId: "local", label: "Console", kind: "console", status: "available", managed: "linux-xvnc" }],
+    defaultDesktopId: "d0",
+  };
+  const remoteFetch = (handler: (url: string, init: RequestInit) => Response | Promise<Response>) => (
+    (async (input: unknown, init?: RequestInit) => handler(String(input), init ?? {})) as unknown as typeof fetch
+  );
+  const jsonResponse = (body: unknown, status = 200) => new Response(JSON.stringify(body), {
+    status, headers: { "Content-Type": "application/json", "X-Varin-Computer-Host": "remote-h" },
+  });
+  const seedManagedDesktop = (records: Map<string, StoredRecord>) => {
+    records.set(`__varin_computers__:computer.desktop:managed-linux`, {
+      recordId: "computer.desktop:managed-linux",
+      recordType: "computer.desktop",
+      state: "available",
+      payloadJson: JSON.stringify({ id: "managed-linux", machineId: "m-1", label: "Managed Linux", managed: "linux-xvnc" }),
+      recordRevision: 1, createdAt: 0, updatedAt: 0,
+    });
+  };
+
+  it("installs a recipe group on the managed desktop and records per-component state", async () => {
+    const kernel = fakeKernel();
+    seedManagedDesktop(kernel.records);
+    const calls: string[][] = [];
+    const service = createComputerService({
+      client: kernel.client as never, hostId: "h", platform: "linux", dataDir: newDataDir(),
+      createDriver: () => makeDriver(async () => okResponse()),
+      vmExec: async (command, args) => {
+        calls.push([command, ...args]);
+        return { code: 0, stdout: JSON.stringify({ ok: true, results: [{ id: "dev", state: "installed", packages: ["git", "jq"] }] }), stderr: "" };
+      },
+    });
+    const result = await service.installSoftware({ desktopId: "managed-linux", groups: ["dev"] });
+    expect(result.results).toEqual([{ id: "dev", state: "installed", packages: ["git", "jq"] }]);
+    const record = kernel.records.get("__varin_computers__:computer.desktop:managed-linux")!;
+    const software = (JSON.parse(record.payloadJson) as { software: Record<string, { state: string }> }).software;
+    expect(software.dev?.state).toBe("installed");
+    await service.dispose();
+  });
+
+  it("a failed component stays visible on the record — not collapsed into success", async () => {
+    const kernel = fakeKernel();
+    seedManagedDesktop(kernel.records);
+    const service = createComputerService({
+      client: kernel.client as never, hostId: "h", platform: "linux", dataDir: newDataDir(),
+      createDriver: () => makeDriver(async () => okResponse()),
+      vmExec: async () => ({ code: 1, stdout: JSON.stringify({ ok: false, results: [{ id: "docs", state: "failed", detail: "E: package not found" }] }), stderr: "" }),
+    });
+    const result = await service.installSoftware({ desktopId: "managed-linux", groups: ["docs"] });
+    expect(result.results[0]?.state).toBe("failed");
+    const record = kernel.records.get("__varin_computers__:computer.desktop:managed-linux")!;
+    const software = (JSON.parse(record.payloadJson) as { software: Record<string, { state: string; detail?: string }> }).software;
+    expect(software.docs?.state).toBe("failed");
+    expect(software.docs?.detail).toContain("package not found");
+    await service.dispose();
+  });
+
+  it("forwards install requests to the remote Host that owns the desktop", async () => {
+    const service = createComputerService({
+      client: fakeKernel().client as never, hostId: "h", platform: "windows", dataDir: newDataDir(),
+      createDriver: () => makeDriver(async () => okResponse()), remoteHosts: async () => [remoteHost],
+      fetch: remoteFetch((url, init) => {
+        if (url.endsWith("/api/computers?local=1")) return jsonResponse(remoteCatalog);
+        if (url.endsWith("/software")) {
+          const body = JSON.parse(String(init.body)) as { groups?: string[] };
+          expect(body.groups).toEqual(["dev"]);
+          return jsonResponse({ results: [{ id: "dev", state: "installed" }] });
+        }
+        return jsonResponse({});
+      }),
+    });
+    await service.list();
+    const result = await service.installSoftware({ desktopId: "remote:r1:remote-h:d0", groups: ["dev"] });
+    expect(result.results[0]?.state).toBe("installed");
+    await service.dispose();
+  });
+
+  it("refuses unmanaged targets and empty requests instead of pretending", async () => {
+    const { service } = makeService();
+    await service.ensureLocal();
+    await expect(service.installSoftware({ desktopId: "local-console", groups: ["dev"] }))
+      .rejects.toMatchObject({ harnessCode: "unavailable" });
+    await expect(service.installSoftware({ desktopId: "managed-linux" }))
+      .rejects.toMatchObject({ harnessCode: "invalid-params" });
+    await service.dispose();
+  });
+});

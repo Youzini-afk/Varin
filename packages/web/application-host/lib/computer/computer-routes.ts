@@ -241,6 +241,23 @@ export function registerComputerRoutes(app: Express, { computers, requireAuth = 
     }
   });
 
+  /** Install recipe component groups or explicit packages into the
+   * environment owning this desktop (EE §6.2). */
+  app.post("/api/computers/desktops/:desktopId/software", requireAuth, async (request: Request, response: Response) => {
+    response.setHeader("Cache-Control", "no-store");
+    try {
+      const body = request.body ?? {};
+      const result = await computers.installSoftware({
+        desktopId: String(request.params.desktopId ?? ""),
+        ...(Array.isArray(body.groups) ? { groups: body.groups.filter((g: unknown): g is string => typeof g === "string") } : {}),
+        ...(Array.isArray(body.packages) ? { packages: body.packages.filter((p: unknown): p is string => typeof p === "string") } : {}),
+      });
+      response.json(result);
+    } catch (error) {
+      sendError(response, error, "Unable to install software on the desktop's environment");
+    }
+  });
+
   // --- BC5: control ownership + desktop view --------------------------------
 
   /** Who currently owns input on this desktop (agent or a human viewer). */

@@ -19,10 +19,19 @@ export interface LinuxDesktopState {
   environment?: Record<string, string>;
 }
 
+export interface LinuxSoftwareResult {
+  id: string;
+  state: 'installed' | 'failed';
+  detail?: string;
+  packages?: string[];
+}
+
 export function createLinuxDesktop(options: { dataDir: string; driverDir: string; platform: string; exec?: VmExec }) {
   const data = join(options.dataDir, 'computer-desktop');
   const script = join(options.driverDir, 'linux', 'desktop.py');
+  const installer = join(options.driverDir, 'linux', 'install-components.py');
   let operation: Promise<LinuxDesktopState> | undefined;
+  let installOperation: Promise<LinuxSoftwareResult[]> | undefined;
   const execute: VmExec = options.exec ?? ((command, args) => new Promise((resolve, reject) => {
     const child = spawn(command, args, { stdio: ['ignore', 'pipe', 'pipe'], windowsHide: true });
     let stdout = ''; let stderr = '';
@@ -72,6 +81,36 @@ export function createLinuxDesktop(options: { dataDir: string; driverDir: string
       const pending = invoke(action, dimensions);
       operation = pending;
       try { return await pending; } finally { if (operation === pending) operation = undefined; }
+    },
+    async install(spec: { groups?: string[]; packages?: string[] }): Promise<LinuxSoftwareResult[]> {
+      if (options.platform !== 'linux') throw new HarnessServiceError('unavailable', 'Component install requires a Linux environment');
+      const groups = spec.groups ?? [];
+      const packages = spec.packages ?? [];
+      if (groups.length === 0 && packages.length === 0) {
+        throw new HarnessServiceError('invalid-params', 'install requires at least one component group or package');
+      }
+      for (const value of [...groups, ...packages]) {
+        if (typeof value !== 'string' || !/^[a-z0-9][a-z0-9+._:-]*$/u.test(value)) {
+          throw new HarnessServiceError('invalid-params', `invalid component or package name: ${String(value)}`);
+        }
+      }
+      // One apt pipeline at a time — concurrent requests share it.
+      if (installOperation) return installOperation;
+      const pending = (async (): Promise<LinuxSoftwareResult[]> => {
+        const args = [installer, '--data-dir', data,
+          ...groups.flatMap((group) => ['--group', group]),
+          ...packages.flatMap((pkg) => ['--package', pkg])];
+        const result = await execute('/usr/bin/python3', args);
+        const lastLine = result.stdout.trim().split(/\r?\n/u).at(-1);
+        let payload: { ok?: boolean; error?: string; results?: LinuxSoftwareResult[] } | undefined;
+        try { payload = JSON.parse(lastLine ?? '') as typeof payload; } catch { /* detail below */ }
+        if (!payload?.results?.length) {
+          throw new HarnessServiceError('unavailable', payload?.error || result.stderr.trim() || 'Component installer returned no result');
+        }
+        return payload.results;
+      })();
+      installOperation = pending;
+      try { return await pending; } finally { if (installOperation === pending) installOperation = undefined; }
     },
     async driverSpec(): Promise<DriverSpawnSpec> {
       const current = await status();

@@ -31,6 +31,7 @@ import type {
   ComputerObservation,
   ComputerOpenResult,
   ComputerPlatform,
+  ComputerSoftwareResult,
   ComputerVmBinding,
   ComputerVmCreateParams,
   ComputerVmDescriptor,
@@ -52,7 +53,7 @@ import {
 } from "./driver-host.js";
 import { createLibvirtProvider } from "./libvirt-provider.js";
 import { createDesktopDriverPool } from "./desktop-drivers.js";
-import { createLinuxDesktop, type LinuxDesktopState } from "./linux-desktop.js";
+import { createLinuxDesktop, type LinuxDesktopState, type LinuxSoftwareResult } from "./linux-desktop.js";
 import { inspectDesktopFile, openDesktopFile, writeDesktopFile, type DesktopArtifactVersion } from "./desktop-artifact-files.js";
 import { prepareVmGuestSeed } from "./vm-guest-seed.js";
 import { resolveDebianCloudImage, downloadDebianCloudImage } from "./vm-guest-image.js";
@@ -176,6 +177,13 @@ const parseDesktop = (record: KernelRecordResult): ComputerDesktop | null => {
         && Number.isSafeInteger(raw.media.width) && (raw.media.width as number) > 0
         && Number.isSafeInteger(raw.media.height) && (raw.media.height as number) > 0
         ? { media: { kind: "vnc" as const, width: raw.media.width as number, height: raw.media.height as number } } : {}),
+      ...(isObject(raw.software)
+        ? { software: Object.fromEntries(Object.entries(raw.software).flatMap(([key, value]) =>
+            isObject(value) && (value.state === "installed" || value.state === "failed") && Number.isSafeInteger(value.at)
+              ? [[key, { state: value.state, at: value.at as number,
+                  ...(asString(value.detail) ? { detail: value.detail as string } : {}) }]]
+              : [])) }
+        : {}),
     };
   } catch {
     return null;
@@ -478,6 +486,12 @@ export interface ComputerService {
    * stored revision. No sync relationship is created.
    */
   fileWrite(params: { desktopId?: string; relativePath: string; contentBase64: string; sessionId?: string }): Promise<{ version: DesktopArtifactVersion }>;
+  /**
+   * EE §6.2: install recipe component groups or explicit packages into the
+   * environment this desktop belongs to. `installed` means the package layer
+   * succeeded; interface usability is reported only by `status`/`capabilities`.
+   */
+  installSoftware(params: { desktopId?: string; groups?: string[]; packages?: string[] }): Promise<{ results: ComputerSoftwareResult[] }>;
   // --- BC5: control ownership + desktop view --------------------------------
   /** Current control owner record for a desktop. */
   control(desktopId?: string): Promise<ComputerControlState>;
@@ -527,7 +541,8 @@ export function createComputerService(options: ComputerServiceOptions): Computer
   /** Latest observation per desktop+app — the reference frame for element indexes. */
   const observations = new Map<string, Map<string, ComputerObservation>>();
   const linuxDesktop = createLinuxDesktop({ dataDir: options.dataDir ?? process.cwd(),
-    driverDir: options.driverDir ?? computerDriverDir(), platform });
+    driverDir: options.driverDir ?? computerDriverDir(), platform,
+    ...(options.vmExec ? { exec: options.vmExec } : {}) });
 
   const scoped = (): Promise<KernelScopedClient> => {
     if (scopedClient) return scopedClient;
@@ -579,6 +594,7 @@ export function createComputerService(options: ComputerServiceOptions): Computer
       if (payload.usage === undefined && prior.usage !== undefined) payload = { ...payload, usage: prior.usage };
       if (payload.work === undefined && prior.work !== undefined) payload = { ...payload, work: prior.work };
       if (payload.handbackEvents === undefined && prior.handbackEvents !== undefined) payload = { ...payload, handbackEvents: prior.handbackEvents };
+      if (payload.software === undefined && prior.software !== undefined) payload = { ...payload, software: prior.software };
     }
     return client.putRecord({
       operationId: `${recordType}:${randomUUID()}`,
@@ -1741,6 +1757,72 @@ export function createComputerService(options: ComputerServiceOptions): Computer
     return { version };
   };
 
+  // --- EE §6.2/6.3: component recipe + install -------------------------------
+
+  /** Merge install results into the desktop record's `software` map. */
+  const recordSoftware = async (desktopId: string, results: LinuxSoftwareResult[]): Promise<void> => {
+    const client = await scoped();
+    const recordId = `computer.desktop:${desktopId}`;
+    for (let attempt = 0; attempt < 2; attempt += 1) {
+      const record = await client.getRecord(COMPUTER_CATALOG_WORKSPACE_ID, recordId);
+      if (!record) return;
+      let body: unknown;
+      try { body = JSON.parse(record.payloadJson); } catch { return; }
+      if (!isObject(body)) return;
+      const software = isObject(body.software) ? { ...body.software } : {};
+      const at = Date.now();
+      for (const item of results) {
+        software[item.id] = { state: item.state, at,
+          ...(item.detail ? { detail: item.detail } : {}) };
+      }
+      body.software = software;
+      try {
+        await client.putRecord({
+          operationId: `computer.desktop:software:${randomUUID()}`,
+          workspaceId: COMPUTER_CATALOG_WORKSPACE_ID,
+          recordId,
+          recordType: "computer.desktop",
+          state: record.state,
+          payloadJson: JSON.stringify(body),
+          ownerIds: [],
+          references: [],
+          expectedRecordRevision: record.recordRevision,
+        });
+        return;
+      } catch {
+        if (attempt === 1) return;
+      }
+    }
+  };
+
+  const installSoftware: ComputerService["installSoftware"] = async (params) => {
+    const groups = params.groups ?? [];
+    const packages = params.packages ?? [];
+    if (groups.length === 0 && packages.length === 0) {
+      throw new HarnessServiceError("invalid-params", "installSoftware requires at least one component group or package");
+    }
+    const id = await resolveDesktopId(params.desktopId);
+    const remote = await remoteTargetFor(id);
+    if (remote) {
+      const result = await remoteJson<{ results?: ComputerSoftwareResult[] }>(remote.connection, "POST",
+        `/api/computers/desktops/${encodeURIComponent(remote.remoteId)}/software`,
+        { groups, packages });
+      if (!Array.isArray(result.results)) {
+        throw new HarnessServiceError("unavailable", "Remote Host returned no install results");
+      }
+      return { results: result.results };
+    }
+    const { desktop } = await desktopRecord(id);
+    if (desktop.managed !== "linux-xvnc") {
+      throw new HarnessServiceError("unavailable", "Software install requires a managed Linux environment — other desktops keep their own administration");
+    }
+    const results = await linuxDesktop.install({ groups, packages });
+    // The reported state is the install's real outcome — failed entries stay
+    // visible instead of collapsing into success.
+    await recordSoftware(id, results).catch(() => undefined);
+    return { results };
+  };
+
   // --- BC5: control ownership ---------------------------------------------
 
   const control: ComputerService["control"] = async (desktopId) => {
@@ -2683,6 +2765,7 @@ export function createComputerService(options: ComputerServiceOptions): Computer
     release,
     open,
     fileWrite,
+    installSoftware,
     control,
     takeover,
     handback,

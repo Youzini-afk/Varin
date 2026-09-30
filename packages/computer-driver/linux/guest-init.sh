@@ -31,6 +31,11 @@ systemctl enable --now qemu-guest-agent
 sh /opt/varin/runtime/packages/web/server/computer-driver/linux/prepare-desktop.sh \
   --data-dir /var/lib/varin/computer-desktop
 
+# The general template preselects the dev + docs component groups (§6.2);
+# heavier software stays a per-task install through the same entry point.
+/usr/bin/python3 /opt/varin/runtime/packages/web/server/computer-driver/linux/install-components.py \
+  --data-dir /var/lib/varin/computer-desktop --group dev --group docs || true
+
 cat > /etc/systemd/system/varin-guest.service <<'UNIT'
 [Unit]
 Description=Varin guest Host

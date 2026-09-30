@@ -142,4 +142,16 @@ export function registerComputerServices(
       });
     },
   });
+  // EE §6.2: recipe component install — the environment owning the bound
+  // desktop receives the request (remote targets forward to their own Host).
+  router.register("computer.installSoftware", {
+    handle: async (params, ctx) => {
+      const desktopId = await desktopIdFor(host, ctx, params);
+      return requireService(host).installSoftware({
+        ...(desktopId !== undefined ? { desktopId } : {}),
+        ...(params.groups !== undefined ? { groups: params.groups } : {}),
+        ...(params.packages !== undefined ? { packages: params.packages } : {}),
+      });
+    },
+  });
 }

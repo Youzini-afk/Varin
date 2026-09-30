@@ -335,4 +335,18 @@ describe("computer routes (EE open + file write)", () => {
       contentBase64: "aGk=",
     });
   });
+
+  it("POST software forwards component groups and packages to the service", async () => {
+    const { app, computers } = fixture();
+    computers.installSoftware = vi.fn(async () => ({ results: [{ id: "dev", state: "installed" }] }));
+    const response = await request(app)
+      .post("/api/computers/desktops/local-console/software")
+      .send({ groups: ["dev"], packages: ["mypkg"] });
+    expect(response.status).toBe(200);
+    expect(computers.installSoftware).toHaveBeenCalledWith({
+      desktopId: "local-console",
+      groups: ["dev"],
+      packages: ["mypkg"],
+    });
+  });
 });

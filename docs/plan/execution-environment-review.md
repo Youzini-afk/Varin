@@ -114,6 +114,37 @@ protocol/pi-host/application-host 类型与变更文件 ESLint 全绿。
 远端桌面状态的新鲜度受镜像同步节流约束（文档已声明），桌面原生推流
 （替代轮询）留待后续。
 
+### 第四批：默认组件配方与安装入口（EE4，§6.2/6.3）
+
+- `linux/components.json`：声明式组件配方（desktop/dev/docs 三组），
+  对应 §6.2 默认组合；图像视频与工程游戏软件按合同不在配方内，
+  仍可经显式 `packages` 逐任务安装。
+- `linux/install-components.py`：目标机本地安装器——manifest 组校验、
+  包名注入校验、`sudo -n` apt 执行、逐组件真实结果（installed/failed+detail），
+  结果原子落 `<data-dir>/software.status.json`；无 apt 环境如实报错。
+- `linuxDesktop.install`：命令经注入 exec 通道执行，串行化单条 apt 流水线，
+  参数白名单先行，脚本无结果如实 unavailable。
+- `computer.installSoftware`：绑定解析同 observe/act（显式 > 绑定 > 默认）；
+  远端目标经认证 HTTP 转发到拥有 Host 自身执行；本地仅 `linux-xvnc` 受管
+  环境（其他桌面如实 unavailable，各管各的软件栈）。结果按组件并入桌面
+  记录 `software` 字段——installed/failed 状态与 `status`/`capabilities`
+  严格分开，catalog 重写时保留（与 usage/work 同一保护）。
+- 路由 `POST …/desktops/:id/software`（Host↔Host 同端点）、Harness 方法
+  `computer.installSoftware`（control.computer 权限）、Pi 工具 `action=install`。
+- VM 通用模板：`guest-init.sh` 在桌面准备后预装 dev+docs（`|| true`——apt 级
+  失败已记入 software.status.json，阻断云初始化不应因可选组失败而宣告
+  整机失败）；运行时升级仍走既有 guest-upgrade.sh，机器删除/磁盘删除
+  已由 `deleteVm(deleteDisks)` 分开。
+
+验证：computer-service 54/54（新增 4：组安装并入记录、失败状态可见、
+远端转发、非受管/空参拒绝）；computer-routes 22/22（新增 1）；
+install-components.py 真机执行验证校验路径（未知组/注入包名拒绝、
+无 apt 如实报错）；`py_compile`/`sh -n` 通过；类型/ESLint 全绿。
+
+未验证边界：真实 Linux 环境的 apt 安装未跑（开发机无 apt）；包名清单
+对 Debian 13 的解析正确性待首个真实 guest 验证；guest-init 的 dev/docs
+预装路径同样未在真实 cloud-init 下执行；`software` 字段暂无 UI 消费面。
+
 ## 待交付
 
 按 §11 顺序：环境接入与联动剩余项（服务访问/事件回源）、默认模板与持久、
