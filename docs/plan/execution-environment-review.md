@@ -278,3 +278,17 @@ forward 由 Harness Host 持有，查询与关闭按请求会话隔离；会话�
 
 验证：环境/转发/Router/Host 聚焦测试通过（50 项），Thread 服务回归 58 项、Pi 权限测试 9 项通过；
 Host 源码类型、变更文件 ESLint 通过。测试含真实 TCP listener 的会话隔离与关闭；没有真实跨机或 VM 证明。
+
+### 桌面发布与软件配方
+
+修复了受管桌面发布遗漏应用桥的断路。发布生成完整 Python 组件集合，内容摘要也包含文件名；从发布目录独立加载
+浏览器与办公模块已验证。桌面准备正式消费 desktop 配方，新建桌面使用一个持久 Chromium，URL handler 和 CDP
+共用 profile，端口取 profile 的 `DevToolsActivePort` 并校验浏览器身份。保留用户既有 Firefox 数据与安装。
+CDP 并非控制可见浏览器的唯一协议；原报告的排他选型依据不成立。
+
+不同安装请求排队执行，结束当前请求后才运行下一个；结果按组件合并到耐久状态，Host 会导入 bootstrap 结果，
+保留实际包名。默认文档组合补齐 docx/openpyxl/pypdf/reportlab 和 Poppler；包名依据 Debian trixie 官方清单，
+PPT 脚本库不臆造 apt 包名，仍可按任务安装。使用 `--no-install-recommends` 保持显式配方范围。
+
+验证：desktop 发布目录独立导入测试、CDP 假端点往返通过；Linux 组件与 computer service 65 项通过。
+未执行 apt 安装、systemd/Xvnc、真实 Chromium。开发机无已安装 WSL/Linux 环境。

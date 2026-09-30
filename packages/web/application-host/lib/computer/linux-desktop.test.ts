@@ -36,3 +36,39 @@ it('reports an unreadable component result and does not erase a corrupt saved se
   const desktop = createLinuxDesktop({ dataDir, driverDir: '/drivers', platform: 'linux', exec: async () => ({ code: 1, stdout: '{"state":"failed","detail":"invalid saved configuration"}\n', stderr: '' }) });
   await expect(desktop.status()).rejects.toThrow('invalid saved configuration');
 });
+
+it('serializes different component requests without substituting the first result', async () => {
+  const dataDir = await mkdtemp(join(tmpdir(), 'varin-install-'));
+  temporary.push(dataDir);
+  let finish!: () => void;
+  const gate = new Promise<void>((resolve) => { finish = resolve; });
+  const installed: string[] = [];
+  const desktop = createLinuxDesktop({ dataDir, driverDir: '/drivers', platform: 'linux', exec: async (_command, args) => {
+    const group = args[args.indexOf('--group') + 1]!;
+    installed.push(group);
+    if (group === 'dev') await gate;
+    return { code: 0, stdout: JSON.stringify({ results: [{ id: group, state: 'installed' }] }), stderr: '' };
+  } });
+  const first = desktop.install({ groups: ['dev'] });
+  const second = desktop.install({ groups: ['docs'] });
+  await Promise.resolve();
+  expect(installed).toEqual(['dev']);
+  finish();
+  expect((await first)[0]?.id).toBe('dev');
+  expect((await second)[0]?.id).toBe('docs');
+  expect(installed).toEqual(['dev', 'docs']);
+  await desktop.dispose();
+});
+
+it('projects bootstrap software state while distinguishing malformed state', async () => {
+  const dataDir = await mkdtemp(join(tmpdir(), 'varin-software-state-'));
+  temporary.push(dataDir);
+  const data = join(dataDir, 'computer-desktop');
+  await mkdir(data);
+  await writeFile(join(data, 'config.json'), '{}');
+  await writeFile(join(data, 'software.status.json'), JSON.stringify({ results: [{ id: 'docs', state: 'installed', at: 10, packages: ['libreoffice-calc'] }] }));
+  const desktop = createLinuxDesktop({ dataDir, driverDir: '/drivers', platform: 'linux', exec: async () => ({ code: 0, stdout: '{"state":"stopped"}', stderr: '' }) });
+  expect((await desktop.status()).software).toEqual({ docs: { state: 'installed', at: 10, packages: ['libreoffice-calc'] } });
+  await writeFile(join(data, 'software.status.json'), '{broken');
+  await expect(desktop.status()).rejects.toThrow();
+});

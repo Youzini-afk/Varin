@@ -14,6 +14,7 @@ import re
 import subprocess
 import sys
 import time
+import tempfile
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 PACKAGE_RE = re.compile(r"^[a-z0-9][a-z0-9+._:-]*$")
@@ -72,7 +73,7 @@ def main():
             detail = (update.stderr or update.stdout).strip().splitlines()[-1][:400] if (update.stderr or update.stdout).strip() else "apt-get update failed"
             results.append({"id": component_id, "state": "failed", "detail": detail})
             continue
-        install = apt(["install", "-y", *packages])
+        install = apt(["install", "-y", "--no-install-recommends", *packages])
         if install.returncode == 0:
             results.append({"id": component_id, "state": "installed", "packages": packages})
         else:
@@ -84,10 +85,24 @@ def main():
                "results": results, "at": int(time.time() * 1000)}
     os.makedirs(args.data_dir, exist_ok=True)
     status_path = os.path.join(args.data_dir, "software.status.json")
-    tmp = status_path + ".tmp"
-    with open(tmp, "w", encoding="utf-8") as handle:
-        json.dump(payload, handle)
-    os.replace(tmp, status_path)
+    prior = {}
+    if os.path.exists(status_path):
+        with open(status_path, "r", encoding="utf-8") as handle:
+            prior = json.load(handle)
+    merged = {item["id"]: item for item in prior.get("results", [])}
+    for item in results:
+        item["at"] = payload["at"]
+        merged[item["id"]] = item
+    fd, tmp = tempfile.mkstemp(prefix=".software-", dir=args.data_dir)
+    try:
+        with os.fdopen(fd, "w", encoding="utf-8") as handle:
+            json.dump({"results": list(merged.values()), "at": payload["at"]}, handle)
+            handle.flush()
+            os.fsync(handle.fileno())
+        os.replace(tmp, status_path)
+    finally:
+        if os.path.exists(tmp):
+            os.unlink(tmp)
     print(json.dumps(payload))
     return 0 if payload["ok"] else 1
 

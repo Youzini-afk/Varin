@@ -188,6 +188,7 @@ const parseDesktop = (record: KernelRecordResult): ComputerDesktop | null => {
         ? { software: Object.fromEntries(Object.entries(raw.software).flatMap(([key, value]) =>
             isObject(value) && (value.state === "installed" || value.state === "failed") && Number.isSafeInteger(value.at)
               ? [[key, { state: value.state, at: value.at as number,
+                ...(Array.isArray(value.packages) && value.packages.every((pkg) => typeof pkg === "string") ? { packages: value.packages as string[] } : {}),
                   ...(asString(value.detail) ? { detail: value.detail as string } : {}) }]]
               : [])) }
         : {}),
@@ -1902,6 +1903,7 @@ export function createComputerService(options: ComputerServiceOptions): Computer
       const at = Date.now();
       for (const item of results) {
         software[item.id] = { state: item.state, at,
+          ...(item.packages ? { packages: item.packages } : {}),
           ...(item.detail ? { detail: item.detail } : {}) };
       }
       body.software = software;
@@ -2433,6 +2435,7 @@ export function createComputerService(options: ComputerServiceOptions): Computer
     const record = await putRecord(`computer.desktop:${id}`, "computer.desktop",
       current.state === "running" && !probeFailed ? "available" : current.state === "stopped" ? "stopped" : "unavailable", {
         ...payload, id, machineId: LOCAL_MACHINE_ID, label: "Persistent Linux desktop", kind: "virtual-display", managed: "linux-xvnc",
+        ...(current.software ? { software: { ...(isObject(payload.software) ? payload.software : {}), ...current.software } } : {}),
         statusDetail: probeFailed ? payload.statusDetail : current.detail ?? current.state,
         ...(current.state === "running" ? { media: { kind: "vnc", width: current.width, height: current.height } } : {}),
       });

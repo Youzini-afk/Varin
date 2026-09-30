@@ -12,6 +12,7 @@ build/
 .gradle/
 .*.bun-build
 .bun-cache/
+__pycache__/
 
 .env
 .env.*

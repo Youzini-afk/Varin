@@ -78,7 +78,7 @@ export interface ComputerDesktop {
    * the package layer succeeded — control-interface usability stays in
    * `status`/`capabilities`, never inferred from this map.
    */
-  software?: Record<string, { state: "installed" | "failed"; at: number; detail?: string }>;
+  software?: Record<string, { state: "installed" | "failed"; at: number; detail?: string; packages?: string[] }>;
 }
 
 export interface ComputerWorkAssociation {

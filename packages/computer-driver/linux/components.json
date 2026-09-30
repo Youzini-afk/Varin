@@ -15,10 +15,13 @@
         "xfce4",
         "dbus-x11",
         "xauth",
+        "xdg-utils",
+        "xfce4-terminal",
+        "thunar",
         "fonts-noto-cjk",
         "chromium"
       ],
-      "notes": "Two browsers serve different roles: firefox-esr stays the user-facing default (Mozilla repo fallback in prepare-desktop.sh); chromium is the agent-controllable browser — the bridge attaches its live session over CDP. Selected per §13 browser choice: CDP attach is the only protocol that binds the same visible persistent session."
+      "notes": "One default browser: visible persistent Chromium, shared by users, URL handlers and the CDP bridge. Existing Firefox installations and profiles are retained; users can install another browser."
     },
     {
       "id": "dev",
@@ -47,6 +50,11 @@
         "libreoffice-impress",
         "python3-uno",
         "evince",
+        "poppler-utils",
+        "python3-docx",
+        "python3-openpyxl",
+        "python3-pypdf",
+        "python3-reportlab",
         "python3-numpy",
         "python3-pandas",
         "python3-matplotlib"

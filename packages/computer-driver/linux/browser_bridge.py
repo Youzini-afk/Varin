@@ -25,6 +25,7 @@ import socket
 import struct
 import subprocess
 import time
+from browser_session import endpoint_for, launch_args, profile_for
 
 CDP_PORT = 9222
 WS_GUID = "258EAFA5-E914-47DA-95CA-C5AB0DC85B11"
@@ -181,12 +182,20 @@ def _browser_binary():
     return None
 
 
-def _status(port):
+def _endpoint(operation):
+    port, browser_path = endpoint_for(operation)
+    version = _http(port, "/json/version")
+    if browser_path and not (version.get("webSocketDebuggerUrl") or "").endswith(browser_path):
+        raise RuntimeError("The profile's browser endpoint no longer identifies this session")
+    return port, version
+
+
+def _status(operation):
     try:
-        version = _http(port, "/json/version")
+        _, version = _endpoint(operation)
         return {"running": True, "browser": version.get("Browser"), "wsUrl": version.get("webSocketDebuggerUrl")}
-    except Exception:
-        return {"running": False}
+    except Exception as exc:
+        return {"running": False, "detail": str(exc)}
 
 
 def _default_tab(port):
@@ -222,32 +231,32 @@ def perform(operation):
 
 
 def _perform(operation):
-    port = int(operation.get("cdp_port") or CDP_PORT)
     op = operation.get("op") or "status"
 
     if op == "status":
-        return {"ok": True, "status": _status(port)}
+        return {"ok": True, "status": _status(operation)}
 
     if op == "launch":
-        if _status(port)["running"]:
-            return {"ok": True, "status": _status(port), "alreadyRunning": True}
+        current = _status(operation)
+        if current["running"]:
+            return {"ok": True, "status": current, "alreadyRunning": True}
         binary = operation.get("binary") or _browser_binary()
         if not binary:
             return {"ok": False, "error": "no Chromium-family browser on this machine (firefox cannot attach CDP)"}
-        profile = operation.get("profile") or os.path.join(os.path.expanduser("~"), ".varin-browser-profile")
+        profile = profile_for(operation)
         os.makedirs(profile, exist_ok=True)
         subprocess.Popen(
-            [binary, f"--remote-debugging-port={port}", f"--user-data-dir={profile}",
-             "--no-first-run", "--disable-session-crashed-bubble", "--start-maximized",
-             "about:blank"],
+            launch_args(binary, profile, operation.get("cdp_port") or 0),
             stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, start_new_session=True)
         deadline = time.monotonic() + 20
         while time.monotonic() < deadline:
-            status = _status(port)
+            status = _status(operation)
             if status["running"]:
                 return {"ok": True, "status": status}
             time.sleep(0.4)
         return {"ok": False, "error": "browser did not expose CDP within 20s"}
+
+    port, _ = _endpoint(operation)
 
     if op == "tabs":
         tabs = [{"id": t.get("id"), "title": t.get("title"), "url": t.get("url"),

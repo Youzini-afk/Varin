@@ -17,6 +17,8 @@ import socket as unix_socket
 import subprocess
 import sys
 import tempfile
+from browser_session import launch_args
+from desktop_components import publish
 
 
 def write_json(path, value):
@@ -63,11 +65,13 @@ def unit_quote(value):
 def prepare(data, width, height):
     if width <= 0 or height <= 0:
         raise ValueError("Desktop dimensions must be positive")
+    run([sys.executable, str(Path(__file__).with_name("install-components.py")),
+         "--data-dir", str(data), "--group", "desktop"])
     # Dependencies are installed by the packaged shell entry before Python is
     # started, including on a server that initially has no Python/GI runtime.
     xvnc = shutil.which("Xtigervnc") or shutil.which("Xvnc")
-    browser = shutil.which("firefox-esr") or shutil.which("firefox")
-    for name, executable in [("Xvnc", xvnc), ("Firefox", browser), ("xfce4-session", shutil.which("xfce4-session")),
+    browser = shutil.which("chromium") or shutil.which("chromium-browser")
+    for name, executable in [("Xvnc", xvnc), ("Chromium", browser), ("xfce4-session", shutil.which("xfce4-session")),
                              ("dbus-run-session", shutil.which("dbus-run-session")), ("xauth", shutil.which("xauth"))]:
         if not executable:
             raise RuntimeError(f"Desktop component is missing: {name}")
@@ -102,18 +106,7 @@ def prepare(data, width, height):
         os.chmod(session_dir, 0o700)
     # Keep an executable component accessible to the desktop account even when
     # the coordinating Host is installed beneath /root. Publish by content hash.
-    files = [Path(__file__), Path(__file__).with_name("driver-host.py"), Path(__file__).with_name("runtime.py"),
-             Path(__file__).with_name("artifact.py")]
-    component_id = hashlib.sha256(b"".join(file.read_bytes() for file in files)).hexdigest()
-    component = session_dir / "components" / component_id
-    component.mkdir(parents=True, exist_ok=True)
-    os.chmod(component.parent, 0o755)
-    os.chmod(component, 0o755)
-    for file in files:
-        destination = component / file.name
-        if not destination.exists():
-            destination.write_bytes(file.read_bytes())
-        os.chmod(destination, 0o644)
+    component = publish(session_dir, Path(__file__).parent)
     runtime_dir = (Path(f"/run/user/{account.pw_uid}") if user_unit else Path("/run")) / name
     config = {"user": account.pw_name, "uid": account.pw_uid, "gid": account.pw_gid, "owner": owner,
               "home": account.pw_dir, "userUnit": user_unit, "width": width, "height": height,
@@ -201,17 +194,24 @@ def desktop_session(data):
         environment = {**os.environ, "DISPLAY": display, "XAUTHORITY": str(authority), "XDG_SESSION_TYPE": "x11",
                        "NO_AT_BRIDGE": "0", "GTK_MODULES": "gail:atk-bridge", "HOME": config["home"]}
         persistent = data / "persistent"
-        profile = persistent / "firefox"
+        profile = persistent / "chromium"
         profile.mkdir(parents=True, exist_ok=True)
-        # Preserve all user preferences; this file is only seeded for a new profile.
-        user_js = profile / "user.js"
-        if not user_js.exists():
-            user_js.write_text('user_pref("accessibility.force_disabled", 0);\n')
+        environment["VARIN_BROWSER_PROFILE"] = str(profile)
+        # Seed a user-visible handler using the same profile as the bridge.
+        # Later user choices are retained; Prepare does not reset defaults.
+        handler = Path(config["home"]) / ".local/share/applications/varin-browser.desktop"
+        if not handler.exists():
+            handler.parent.mkdir(parents=True, exist_ok=True)
+            arguments = launch_args(config["browser"], str(profile))
+            escaped = ['"' + arg.replace('\\', '\\\\').replace('"', '\\"').replace('`', '\\`').replace('$', '\\$').replace('%', '%%') + '"' for arg in arguments]
+            handler.write_text("[Desktop Entry]\nType=Application\nName=Chromium\nExec="
+                + " ".join(escaped) + " %u\nMimeType=text/html;x-scheme-handler/http;x-scheme-handler/https;\n")
+            run(["xdg-mime", "default", handler.name, "text/html", "x-scheme-handler/http", "x-scheme-handler/https"], env=environment)
         processes.append(subprocess.Popen(["xfce4-session"], env=environment))
-        processes.append(subprocess.Popen([config["browser"], "--no-remote", "--profile", str(profile)], env=environment))
+        processes.append(subprocess.Popen(launch_args(config["browser"], str(profile)), env=environment))
         write_json(data / "runtime.json", {"user": config["user"], "uid": config["uid"], "socket": str(socket),
             "width": config["width"], "height": config["height"], "pid": os.getpid(),
-            "environment": {name: environment[name] for name in ["DISPLAY", "XAUTHORITY", "DBUS_SESSION_BUS_ADDRESS", "XDG_SESSION_TYPE", "NO_AT_BRIDGE", "GTK_MODULES", "HOME"]}})
+            "environment": {name: environment[name] for name in ["DISPLAY", "XAUTHORITY", "DBUS_SESSION_BUS_ADDRESS", "XDG_SESSION_TYPE", "NO_AT_BRIDGE", "GTK_MODULES", "HOME", "VARIN_BROWSER_PROFILE"]}})
         notify_address = os.environ.get("NOTIFY_SOCKET")
         if notify_address:
             if notify_address.startswith("@"):

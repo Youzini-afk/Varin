@@ -96,6 +96,26 @@ remote Hosts. Native KVM boot, desktop operation, and installer behavior must
 be checked on an actual Linux hypervisor; scripted provider tests do not
 establish those results.
 
+## Composable environment additions
+
+The desktop component publishes all production Python modules together; app
+bridges must remain importable from the generation accessible to its dedicated
+account, including when the Host lives under `/root`.
+
+The default desktop has one visible persistent Chromium profile. Its URL
+handler and CDP bridge use that same profile; the bridge resolves the actual
+endpoint from `DevToolsActivePort` and checks the browser identity. An explicit
+port selects a caller-provided endpoint. Existing installed browsers and their
+profiles are retained. `components.json` is the recipe used by both preparation
+and additional software installation. The general guest also requests dev/docs;
+failed optional groups remain visible in the persisted software status.
+
+Software installation results are separate from desktop and bridge readiness.
+The Host imports bootstrap results and reports the packages for each component.
+Concurrent install requests serialize and retain their own requested groups.
+LibreOffice/UNO and Chromium/CDP native session behavior still require Linux
+validation; import and protocol tests alone do not establish desktop operation.
+
 The `computer` tool's `artifact` action registers a file beneath that desktop
 user's home on the calling Thread. The dedicated account reads and hashes the
 file; the coordinator saves only its version and location in the kernel

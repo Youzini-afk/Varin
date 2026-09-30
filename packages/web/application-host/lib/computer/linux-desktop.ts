@@ -17,6 +17,7 @@ export interface LinuxDesktopState {
   artifact?: string;
   home?: string;
   environment?: Record<string, string>;
+  software?: Record<string, { state: 'installed' | 'failed'; at: number; detail?: string; packages?: string[] }>;
 }
 
 export interface LinuxSoftwareResult {
@@ -32,6 +33,25 @@ export function createLinuxDesktop(options: { dataDir: string; driverDir: string
   const installer = join(options.driverDir, 'linux', 'install-components.py');
   let operation: Promise<LinuxDesktopState> | undefined;
   let installOperation: Promise<LinuxSoftwareResult[]> | undefined;
+  const software = async (): Promise<NonNullable<LinuxDesktopState['software']>> => {
+    let text: string;
+    try { text = await readFile(join(data, 'software.status.json'), 'utf8'); }
+    catch (error) { if ((error as NodeJS.ErrnoException).code === 'ENOENT') return {}; throw error; }
+    const body = JSON.parse(text) as { results?: unknown };
+    if (!Array.isArray(body.results)) throw new HarnessServiceError('unavailable', 'Software install state is malformed');
+    const result: NonNullable<LinuxDesktopState['software']> = {};
+    for (const entry of body.results) {
+      if (!entry || typeof entry !== 'object' || typeof entry.id !== 'string'
+        || !['installed', 'failed'].includes(entry.state) || !Number.isSafeInteger(entry.at)
+        || (entry.packages !== undefined && (!Array.isArray(entry.packages) || !entry.packages.every((pkg: unknown) => typeof pkg === 'string')))) {
+        throw new HarnessServiceError('unavailable', 'Software install state contains an invalid component');
+      }
+      result[entry.id] = { state: entry.state, at: entry.at,
+        ...(typeof entry.detail === 'string' ? { detail: entry.detail } : {}),
+        ...(entry.packages ? { packages: entry.packages } : {}) };
+    }
+    return result;
+  };
   const execute: VmExec = options.exec ?? ((command, args) => new Promise((resolve, reject) => {
     const child = spawn(command, args, { stdio: ['ignore', 'pipe', 'pipe'], windowsHide: true });
     let stdout = ''; let stderr = '';
@@ -64,7 +84,7 @@ export function createLinuxDesktop(options: { dataDir: string; driverDir: string
       || !Number.isSafeInteger(state.width) || !Number.isSafeInteger(state.height))) {
       throw new HarnessServiceError('unavailable', 'Desktop component returned incomplete session identity');
     }
-    return state;
+    return { ...state, software: await software() };
   };
   const status = async (): Promise<LinuxDesktopState> => {
     if (options.platform !== 'linux') return { state: 'unprepared' };
@@ -94,9 +114,10 @@ export function createLinuxDesktop(options: { dataDir: string; driverDir: string
           throw new HarnessServiceError('invalid-params', `invalid component or package name: ${String(value)}`);
         }
       }
-      // One apt pipeline at a time — concurrent requests share it.
-      if (installOperation) return installOperation;
+      // Serialize apt, but each request installs its own components.
+      const previous = installOperation;
       const pending = (async (): Promise<LinuxSoftwareResult[]> => {
+        await previous?.catch(() => undefined);
         const args = [installer, '--data-dir', data,
           ...groups.flatMap((group) => ['--group', group]),
           ...packages.flatMap((pkg) => ['--package', pkg])];
@@ -104,7 +125,8 @@ export function createLinuxDesktop(options: { dataDir: string; driverDir: string
         const lastLine = result.stdout.trim().split(/\r?\n/u).at(-1);
         let payload: { ok?: boolean; error?: string; results?: LinuxSoftwareResult[] } | undefined;
         try { payload = JSON.parse(lastLine ?? '') as typeof payload; } catch { /* detail below */ }
-        if (!payload?.results?.length) {
+        if (!payload?.results?.length || !payload.results.every((entry) => typeof entry.id === 'string'
+          && ['installed', 'failed'].includes(entry.state))) {
           throw new HarnessServiceError('unavailable', payload?.error || result.stderr.trim() || 'Component installer returned no result');
         }
         return payload.results;
@@ -119,6 +141,6 @@ export function createLinuxDesktop(options: { dataDir: string; driverDir: string
       return { command: asUser ? 'runuser' : '/usr/bin/python3', args: asUser ? ['-u', current.user!, '--', '/usr/bin/python3', current.driver!] : [current.driver!],
         env: { ...process.env, ...current.environment } };
     },
-    async dispose() { await operation?.catch(() => {}); },
+    async dispose() { await Promise.allSettled([operation, installOperation]); },
   };
 }
