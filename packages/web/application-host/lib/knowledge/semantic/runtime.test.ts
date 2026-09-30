@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { mkdirSync, writeFileSync, unlinkSync, statSync, utimesSync } from "node:fs";
+import { mkdirSync, writeFileSync, unlinkSync, statSync, utimesSync, promises as fsPromises } from "node:fs";
 import { join } from "node:path";
 import { createDocumentAuthorityHarness } from "../../documents/contract-fixtures.js";
 import type { WorkingBranchQuerySnapshot } from "../../harness/working-state/working-branch-query.js";
@@ -45,7 +45,7 @@ describe("semantic index runtime", () => {
     const scope = workspaceScope(documents.identity.workspaceId);
     await runtime.scanScope(scope);
     const result = await runtime.search(scope, "selected project", 5);
-    expect(searchedRoots).toEqual([child]);
+    expect(searchedRoots).toEqual([await fsPromises.realpath(child)]);
     expect(result.hits.map((hit) => hit.documentId)).toContain("selected-project/entry.ts");
   });
 

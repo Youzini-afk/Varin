@@ -141,11 +141,11 @@ describe("harness path authority", () => {
   });
 
   describe("HR0 resource roots", () => {
-    const resourceRoots = (entries: Array<{ canonicalPath: string; kind: "directory" | "file" }>) => {
-      const roots = new Map<string, { workspaceId: string; canonicalPath: string; kind: "directory" | "file" }>(entries.map((entry, index) => {
-        const canonicalPath = fs.realpathSync(entry.canonicalPath);
+    const resourceRoots = async (entries: Array<{ canonicalPath: string; kind: "directory" | "file" }>) => {
+      const roots = new Map<string, { workspaceId: string; canonicalPath: string; kind: "directory" | "file" }>(await Promise.all(entries.map(async (entry, index) => {
+        const canonicalPath = await fs.promises.realpath(entry.canonicalPath);
         return [canonicalPath, { workspaceId: `root-${index}`, canonicalPath, kind: entry.kind }] as const;
-      }));
+      })));
       const registered: Array<{ canonicalPath: string; kind: string }> = [];
       const norm = (value: string) => path.resolve(value);
       return {
@@ -190,11 +190,11 @@ describe("harness path authority", () => {
       const external = mkdtempSync(join(tmpdir(), "harness-external-"));
       const target = join(external, "paper.pdf");
       writeFileSync(target, "bytes");
-      const documents = resourceRoots([{ canonicalPath: target, kind: "file" }]);
+      const documents = await resourceRoots([{ canonicalPath: target, kind: "file" }]);
       const authority = createHarnessPathAuthority({ authorityId: "host-1", documents });
       try {
         const resolved = await authority.resolve(unbound(launch), target, { allowMissing: false });
-        expect(resolved).toMatchObject({ workspaceId: "root-1", resourceId: "paper.pdf", resolvedPath: fs.realpathSync(target) });
+        expect(resolved).toMatchObject({ workspaceId: "root-1", resourceId: "paper.pdf", resolvedPath: await fs.promises.realpath(target) });
         expect(await authority.readAuthorizedFile(unbound(launch), resolved!)).toEqual(Buffer.from("bytes"));
       } finally {
         rmSync(launch, { recursive: true, force: true });
@@ -205,7 +205,7 @@ describe("harness path authority", () => {
     it("resolves a relative path through the session authority root under a directory resource root", async () => {
       const launch = mkdtempSync(join(tmpdir(), "harness-launch-"));
       writeFileSync(join(launch, "notes.md"), "note");
-      const documents = resourceRoots([{ canonicalPath: launch, kind: "directory" }]);
+      const documents = await resourceRoots([{ canonicalPath: launch, kind: "directory" }]);
       const authority = createHarnessPathAuthority({ authorityId: "host-1", documents });
       try {
         const resolved = await authority.resolve(unbound(launch), "notes.md", { allowMissing: false });
@@ -218,7 +218,7 @@ describe("harness path authority", () => {
     it("resolves a missing write target inside an admitted directory root without registering anything", async () => {
       const launch = mkdtempSync(join(tmpdir(), "harness-launch-"));
       const target = join(launch, "out", "result.txt");
-      const documents = resourceRoots([{ canonicalPath: launch, kind: "directory" }]);
+      const documents = await resourceRoots([{ canonicalPath: launch, kind: "directory" }]);
       const authority = createHarnessPathAuthority({ authorityId: "host-1", documents });
       try {
         const write = await authority.resolve(unbound(launch), target, { allowMissing: true });
@@ -237,7 +237,7 @@ describe("harness path authority", () => {
       const existing = join(external, "existing.txt");
       const nested = join(external, "new", "note.txt");
       writeFileSync(existing, "old");
-      const documents = resourceRoots([{ canonicalPath: existing, kind: "file" }]);
+      const documents = await resourceRoots([{ canonicalPath: existing, kind: "file" }]);
       const authority = createHarnessPathAuthority({ authorityId: "host-1", documents });
       try {
         expect(await authority.resolve(unbound(launch), existing, { allowMissing: false }))
@@ -246,7 +246,7 @@ describe("harness path authority", () => {
           .toMatchObject({ workspaceId: "root-1", resourceId: "existing.txt" });
         expect(await authority.resolve(unbound(launch), nested, { allowMissing: true }))
           .toMatchObject({ workspaceId: "root-1", resourceId: "new/note.txt" });
-        expect(documents.registered).toEqual([{ canonicalPath: fs.realpathSync(external), kind: "directory" }]);
+        expect(documents.registered).toEqual([{ canonicalPath: await fs.promises.realpath(external), kind: "directory" }]);
       } finally {
         rmSync(launch, { recursive: true, force: true });
         rmSync(external, { recursive: true, force: true });
@@ -276,7 +276,7 @@ describe("harness path authority", () => {
       const outside = join(external, "outside.txt");
       writeFileSync(inside, "in");
       writeFileSync(outside, "out");
-      const documents = resourceRoots([
+      const documents = await resourceRoots([
         { canonicalPath: launch, kind: "directory" },
         { canonicalPath: external, kind: "directory" },
       ]);

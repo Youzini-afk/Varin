@@ -4,7 +4,7 @@
  */
 
 import type { DocumentAuthority, DocumentMutationObservation } from "../../documents/authority.js";
-import { realpathSync } from "node:fs";
+import { realpath } from "node:fs/promises";
 import path from "node:path";
 import type { FileSearchEnumerationStatus, FileSearchItem } from "../../fs/types.js";
 import { languageIdForPath } from "../../harness/language-id.js";
@@ -35,18 +35,20 @@ const insideDirectory = (parent: string, child: string): boolean => {
 };
 
 /** Resolve user-selected folders into non-overlapping scan roots inside one resource root. */
-export function resolveSemanticScanRoots(root: string, selected: readonly string[] | null | undefined): string[] {
+export async function resolveSemanticScanRoots(root: string, selected: readonly string[] | null | undefined): Promise<string[]> {
   if (selected === null || selected === undefined) return [root];
-  const candidates = selected.flatMap((directory) => {
+  const canonicalDirectories = await Promise.all(selected.map(async (directory) => {
     // Documents stores a real path, while a saved selection may use another
     // spelling of the same directory (including Windows 8.3 path aliases).
-    let canonical = directory;
-    try { canonical = realpathSync(directory); }
+    try { return await realpath(directory); }
     catch (error) {
       if ((error as NodeJS.ErrnoException).code !== "ENOENT") throw error;
+      return directory;
     }
-    if (insideDirectory(canonical, root)) return [root];
-    return insideDirectory(root, canonical) ? [canonical] : [];
+  }));
+  const candidates = canonicalDirectories.flatMap((directory) => {
+    if (insideDirectory(directory, root)) return [root];
+    return insideDirectory(root, directory) ? [directory] : [];
   }).sort((left, right) => left.length - right.length);
   return candidates.filter((directory, index) => !candidates.slice(0, index).some((earlier) => insideDirectory(earlier, directory)));
 }
@@ -338,7 +340,7 @@ export function createSemanticIndexRuntime(options: SemanticIndexRuntimeOptions)
     const token = nextToken(scope, documentId);
     const embedder = embedderOf();
     const root = kind === "deleted" ? undefined : (await options.documents.inspectWorkspace(scope.scopeId)).root;
-    const included = root !== undefined && resolveSemanticScanRoots(root, options.indexDirectories)
+    const included = root !== undefined && (await resolveSemanticScanRoots(root, options.indexDirectories))
       .some((directory) => insideDirectory(directory, path.resolve(root, documentId)));
     const excluded = kind !== "deleted" && (!included || Boolean(options.isIndexablePath
       && !await options.isIndexablePath(scope.scopeId, documentId, signal)));
@@ -433,7 +435,7 @@ export function createSemanticIndexRuntime(options: SemanticIndexRuntimeOptions)
       try {
         const root = (await options.documents.inspectWorkspace(scope.scopeId)).root;
         const scanToken = ++revisionClock;
-        const selectedRoots = resolveSemanticScanRoots(root, options.indexDirectories);
+        const selectedRoots = await resolveSemanticScanRoots(root, options.indexDirectories);
         const inventories = await Promise.all(selectedRoots.map((directory) => options.searchFilesystemFiles!(directory, {
           query: "", respectGitignore: true, signal,
         })));

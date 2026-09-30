@@ -308,7 +308,7 @@ export function createWorkspaceSemanticRuntime(options: WorkspaceSemanticRuntime
         ? { root: '' }
         : await options.documents.inspectWorkspace(workspaceId);
       const indexingEnabled = workspaceId !== GLOBAL_INFERENCE_SCOPE
-        && resolveSemanticScanRoots(inspected.root, options.indexDirectories).length > 0;
+        && (await resolveSemanticScanRoots(inspected.root, options.indexDirectories)).length > 0;
       assertActive();
       const backend = createSemanticBackend({
         local: localEmbedder,
