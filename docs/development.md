@@ -32,6 +32,7 @@ or implementation in the same coherent change.
 | Background compaction Agent (D-314, wired) | [context-compaction-agent-design.md](design/context-compaction-agent-design.md); Stage C in the harness plan |
 | Web and scholarly search (D-315, L0/L2 initial slices wired) | [web-research-search-design.md](design/web-research-search-design.md); Stage L in the harness plan; reuses existing retrieval/investigation threads |
 | Office and daily work continuity (D-327, design accepted / not implemented) | [office-work-continuity-design.md](design/office-work-continuity-design.md); future O0–O4 delivery stages; reuses existing workbench, Thread/Run, materials, artifacts, follow-up, and Rust authorities |
+| Composable execution environments (D-338, accepted direction / incremental implementation pending) | [execution-environment-design.md](design/execution-environment-design.md): independent frontend/Harness/work/computer placement, component recipes, application interfaces, cross-environment links, and lifecycle; distinguishes current foundations from new work |
 | Rust system kernel | [rust-kernel-design.md](design/rust-kernel-design.md), [rust-kernel-audit.md](plan/rust-kernel-audit.md), [kernel/README.md](../kernel/README.md) |
 | OpenChamber source and non-regression boundary | [openchamber-pi-migration.md](ops/openchamber-pi-migration.md) |
 | Workbench profiles and extension composition | [composable-workbench.md](design/composable-workbench.md) |

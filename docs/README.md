@@ -1,7 +1,7 @@
 # Documentation index
 
 Status: navigation index — keep current as documents move or change role.
-Last updated: 2026-09-28
+Last updated: 2026-09-30
 
 `docs/` 按角色分目录。文档与代码冲突时以代码与测试为准，并在同一改动里修正失效的一侧。
 
@@ -35,6 +35,7 @@ Harness 总体与模块专卷：
 - [design/office-work-continuity-design.md](design/office-work-continuity-design.md) — 阶段 O 办公连续性（设计已接受，未实施）
 - [design/bot-operated-workbench-design.md](design/bot-operated-workbench-design.md) — 单 Bot、主动/自动记忆、咨询与缓存的设计依据；BC 部分实现，进度见当前验收
 - [design/computer-use-design.md](design/computer-use-design.md) — 共享电脑控制与持久桌面设计；BC 部分实现，不能等同于全部阶段已交付
+- [design/execution-environment-design.md](design/execution-environment-design.md) — D-338 可组合执行环境：独立部署、精简镜像、应用接口、跨环境联动与生命周期（设计已确认，增量实现待完成）
 - [design/composable-workbench.md](design/composable-workbench.md) — 工作台 profile 与扩展组合
 - [design/plugin-gui-design.md](design/plugin-gui-design.md) / [design/varin-extension-platform.md](design/varin-extension-platform.md) — 插件 GUI 与扩展平台
 - [design/unified-file-editor-platform.md](design/unified-file-editor-platform.md) — 统一文件编辑器平台

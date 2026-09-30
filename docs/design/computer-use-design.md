@@ -2,7 +2,7 @@
 
 Status: accepted direction；BC0–BC9 部分实现，实际交付及未完成合同见[当前验收](../plan/bot-computer-use-review.md)。本文定义产品合同，不以设计条目代表已交付。
 
-Last updated: 2026-09-28
+Last updated: 2026-09-30
 
 本文定义 Computer Use 在 Varin 中的职责，以及本机、独立虚拟机、远程电脑、实时观看和人工接管的统一设计。
 它与 [Bot 操作工作台](bot-operated-workbench-design.md)、[办公连续性](office-work-continuity-design.md)
@@ -11,6 +11,9 @@ Last updated: 2026-09-28
 本文是后续正式实现的设计依据，不代表平台驱动、远程桌面或虚拟机管理已经交付。
 当前实现事实仍以代码、模块文档和 [status.md](../status.md) 为准。
 具体阶段、平台工作与环境后端选择见 [BC0–BC9 实施计划](../plan/bot-computer-use-plan.md)。
+
+[可组合执行环境设计](execution-environment-design.md)进一步定义前端、Harness、工作环境和操作电脑的独立部署，
+以及精简镜像、应用接口与跨环境联动；本文继续负责桌面观察、动作、观看与人工接管合同。
 
 ## 1. 产品定位与实施原则
 
@@ -308,6 +311,7 @@ Xvnc 的虚拟显示不等于虚拟机本身。虚拟机创建、持久磁盘和
 - [可组合工作台](composable-workbench.md)：共享状态与不同呈现形态。
 - [任务与资源 Harness](resource-oriented-harness-design.md)：资源寻址、执行目标与跨目录工作。
 - [科研集群与受管远程](research-cluster-design.md)：远端作业、协调者与恢复职责。
+- [可组合执行环境](execution-environment-design.md)：目标选择、环境组件、同应用接口、生命周期与纠错研究。
 - [快速决策模型](fast-decision-model-design.md)：局部选择与真实模态能力。
 - [Open Computer Use](https://github.com/iFurySt/open-codex-computer-use)：本次使用本地检出的上述基线作为源码依据。
 - [Xvnc](https://tigervnc.org/doc/Xvnc.html)、[noVNC](https://github.com/novnc/noVNC)：2026-09-28 查阅的虚拟显示与浏览器远程桌面客户端资料。

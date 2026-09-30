@@ -8,7 +8,7 @@ product surfaces. The cleanup and root build were locally verified; packaged, cr
 remote-CI evidence remains owned by their respective release checks. Historical Stage R and migration
 evidence may still name that surface where it records work completed before retirement.
 
-Last updated: 2026-09-27
+Last updated: 2026-09-30
 
 Design direction (D-337, implemented HR0–HR5): [task/resource Harness and continuous retrieval](design/resource-oriented-harness-design.md)
 separates project grouping from session/task ownership, resource identity, execution directories and indexes.
@@ -17,6 +17,11 @@ against the session cwd and resource roots at admission, retrieval scopes are pe
 on resource/content version/model. Per-scenario evidence and remaining untested boundaries are recorded in
 [status.md](status.md); the process and workspace descriptions below describe
 current implementation.
+
+Accepted direction (D-338, incremental implementation pending): [composable execution environments](design/execution-environment-design.md)
+defines independent frontend, Harness, work-environment and computer placement, environment preparation, application interfaces,
+and cross-environment coordination. Its current-foundation section distinguishes existing code from the proposed combinations;
+the process model below remains the implemented architecture.
 
 ## 1. Context
 

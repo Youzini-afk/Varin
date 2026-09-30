@@ -2,13 +2,15 @@
 
 Status: accepted design direction；BC0–BC9 部分实现，实际交付及未完成合同见[当前验收](../plan/bot-computer-use-review.md)。本文保留设计依据，不以设计条目代表已交付。
 
-Last updated: 2026-09-28
+Last updated: 2026-09-30
 
 本文整理关于 Bot 形态及其记忆系统的设计讨论。已明确的方向是：让一个长期存在的 Bot 操作 Varin 工作台，
 用户主要向 Bot 表达意图，随时可以进入同一工作台查看、修改和参与工作。第一阶段聚焦单 Bot。
 记忆由后台自动处理与 Bot 主动使用共同维持，复用 TDB 底座，并引入快速决策模型参与局部语义判断。
 文中的对象划分与运行方式是设计方向，不代表已经确定接口、物理存储结构或实施计划。
 图形操作、持久电脑环境、实时观看与人工接管的共享设计见 [Computer Use](computer-use-design.md)。
+Harness 运行位置、工作环境和操作电脑的独立选择、精简模板与休眠联动见
+[可组合执行环境设计](execution-environment-design.md)；这些选择沿用本文的 Bot、任务与记忆关系。
 实施顺序、源码基线与改动归属见 [BC0–BC9 实施计划](../plan/bot-computer-use-plan.md)。
 
 现有系统的交付事实以 [architecture.md](../architecture.md)、[status.md](../status.md) 和代码为准。
