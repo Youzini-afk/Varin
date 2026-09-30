@@ -302,6 +302,25 @@ export function registerComputerRoutes(app: Express, { computers, requireAuth = 
     }
   });
 
+  app.post("/api/computers/desktops/:desktopId/evidence", requireAuth, async (request: Request, response: Response) => {
+    response.setHeader("Cache-Control", "no-store");
+    const controller = new AbortController();
+    response.once("close", () => { if (!response.writableEnded) controller.abort(); });
+    try {
+      const body = request.body ?? {};
+      const result = await computers.evidence({
+        desktopId: String(request.params.desktopId ?? ""),
+        signal: controller.signal,
+        ...(typeof body.sessionId === "string" ? { sessionId: body.sessionId } : {}),
+        ...(typeof body.since === "number" ? { since: body.since } : {}),
+        ...(typeof body.limit === "number" ? { limit: body.limit } : {}),
+      });
+      response.json(result);
+    } catch (error) {
+      sendError(response, error, "Unable to read the desktop evidence journal");
+    }
+  });
+
   // --- BC5: control ownership + desktop view --------------------------------
 
   /** Who currently owns input on this desktop (agent or a human viewer). */

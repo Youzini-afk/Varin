@@ -1391,3 +1391,82 @@ describe("browser bridge (EE §7.2)", () => {
     await service.dispose();
   });
 });
+
+describe("evidence journal (EE6, §10)", () => {
+  it("journals executed steps with identifiers — typed text never enters", async () => {
+    const driver = makeDriver(async (op) =>
+      op.tool === "get_app_state" ? okResponse({ snapshot: appSnapshot() }) : okResponse());
+    const { service } = makeService(driver);
+    await service.ensureLocal();
+    await service.observe({ desktopId: "local-console", app: "notepad", includeScreenshot: false, sessionId: "s1" });
+    await service.act({ desktopId: "local-console", sessionId: "s1",
+      action: { kind: "type", app: "notepad", text: "hunter2 secret" } });
+    const { entries } = await service.evidence({ desktopId: "local-console" });
+    expect(entries.length).toBe(2);
+    expect(entries[0]).toMatchObject({ tool: "observe", op: "observe", target: "notepad", outcome: "ok", lane: "observe", sessionId: "s1" });
+    expect(entries[1]).toMatchObject({ tool: "act", op: "type", target: "notepad", outcome: "ok", lane: "action", sessionId: "s1" });
+    expect(JSON.stringify(entries)).not.toContain("hunter2");
+    await service.dispose();
+  });
+
+  it("journals a refused op as rejected and a human takeover as a control step", async () => {
+    const driver = makeDriver(async () => okResponse());
+    const { service } = makeService(driver);
+    await service.ensureLocal();
+    const unsubscribe = await service.subscribeFrames("local-console", "human", () => {}, { frames: false });
+    await service.takeover({ desktopId: "local-console", holderId: "human" });
+    await expect(service.act({ desktopId: "local-console", action: { kind: "type", app: "notepad", text: "x" } }))
+      .rejects.toMatchObject({ harnessCode: "forbidden" });
+    const { entries } = await service.evidence({ desktopId: "local-console" });
+    const takeover = entries.find((e) => e.op === "takeover");
+    const refused = entries.find((e) => e.tool === "act");
+    expect(takeover).toMatchObject({ tool: "control", outcome: "ok" });
+    expect(refused).toMatchObject({ outcome: "rejected" });
+    unsubscribe(); await service.dispose();
+  });
+
+  it("evidence filters by sessionId and since without fabricating gaps", async () => {
+    const driver = makeDriver(async () => okResponse());
+    const { service } = makeService(driver);
+    await service.ensureLocal();
+    await service.open({ desktopId: "local-console", path: "C:/tmp/a.txt", sessionId: "s1" });
+    await service.open({ desktopId: "local-console", path: "C:/tmp/b.txt", sessionId: "s2" });
+    const mine = await service.evidence({ desktopId: "local-console", sessionId: "s2" });
+    expect(mine.entries.length).toBe(1);
+    expect(mine.entries[0]?.target).toContain("b.txt");
+    const seen = mine.entries[0]!.seq;
+    const resumed = await service.evidence({ desktopId: "local-console", since: seen });
+    expect(resumed.entries.length).toBe(0);
+    await service.dispose();
+  });
+
+  it("evidence for a remote desktop is answered by its owning Host", async () => {
+    const remoteHost = { id: "r1", label: "Office PC", apiUrl: "http://10.0.0.5:8765", clientToken: "tok-1" };
+    const remoteCatalog = {
+      machines: [{ id: "local", name: "Office PC", provider: "local", platform: "linux", coordinatorHostId: "remote-h", status: "active", createdAt: "t", updatedAt: "t" }],
+      desktops: [{ id: "d0", machineId: "local", label: "Console", kind: "console", status: "available", managed: "linux-xvnc" }],
+      defaultDesktopId: "d0",
+    };
+    const service = createComputerService({
+      client: fakeKernel().client as never, hostId: "h", platform: "windows", dataDir: newDataDir(),
+      createDriver: () => makeDriver(async () => okResponse()), remoteHosts: async () => [remoteHost],
+      fetch: (async (input: unknown, init?: RequestInit) => {
+        const url = String(input);
+        if (url.endsWith("/api/computers?local=1")) {
+          return new Response(JSON.stringify(remoteCatalog), { status: 200, headers: { "Content-Type": "application/json", "X-Varin-Computer-Host": "remote-h" } });
+        }
+        if (url.endsWith("/evidence") && init?.method === "POST") {
+          return new Response(JSON.stringify({ desktopId: "d0", entries: [
+            { seq: 7, at: "t", lane: "action", tool: "browser", op: "act", outcome: "unknown", error: "response lost" }] }),
+            { status: 200, headers: { "Content-Type": "application/json", "X-Varin-Computer-Host": "remote-h" } });
+        }
+        return new Response(JSON.stringify({}), { status: 200, headers: { "Content-Type": "application/json", "X-Varin-Computer-Host": "remote-h" } });
+      }) as unknown as typeof fetch,
+    });
+    await service.list();
+    const { entries } = await service.evidence({ desktopId: "remote:r1:remote-h:d0" });
+    expect(entries[0]).toMatchObject({ seq: 7, tool: "browser", outcome: "unknown" });
+    // The coordinator did not fabricate a local journal for the remote step.
+    await service.dispose();
+  });
+});

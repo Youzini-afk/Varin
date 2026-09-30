@@ -187,4 +187,17 @@ export function registerComputerServices(
       });
     },
   });
+  // EE6 (§10): evidence journal — read-only review of executed steps.
+  router.register("computer.evidence", {
+    handle: async (params, ctx) => {
+      const desktopId = await desktopIdFor(host, ctx, params);
+      return requireService(host).evidence({
+        ...(desktopId !== undefined ? { desktopId } : {}),
+        ...(params.sessionId !== undefined ? { sessionId: params.sessionId } : {}),
+        ...(params.since !== undefined ? { since: params.since } : {}),
+        ...(params.limit !== undefined ? { limit: params.limit } : {}),
+        signal: ctx.signal,
+      });
+    },
+  });
 }

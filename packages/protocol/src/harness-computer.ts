@@ -488,6 +488,48 @@ export interface ComputerOfficeResult {
 }
 
 // ---------------------------------------------------------------------------
+// EE6 — operation evidence journal (§10 diagnostics)
+// ---------------------------------------------------------------------------
+
+/**
+ * One durable step on a desktop: who asked, what was attempted on which
+ * target, and what came back. Content discipline per §10 — identifiers and
+ * status only; never typed text, expressions, file bytes, or credentials.
+ */
+export interface ComputerEvidenceEntry {
+  /** Per-desktop sequence; `since` resumes after a previously seen seq. */
+  seq: number;
+  at: string;
+  /** Session that issued the step, when known. */
+  sessionId?: string;
+  lane: "observe" | "action";
+  /** Service funnel: observe | act | open | fileWrite | browser | office | control. */
+  tool: string;
+  /** Sub-operation: action kind, browser op, control transition… */
+  op?: string;
+  /** Target identifier: app selector, tab/doc title, cell range, path, URL origin. */
+  target?: string;
+  outcome: "ok" | "error" | "cancelled" | "unknown" | "rejected";
+  error?: string;
+  observationId?: string;
+}
+
+export interface ComputerEvidenceParams {
+  desktopId?: string;
+  /** Restrict to steps issued by one session. */
+  sessionId?: string;
+  /** Return only entries with seq > since. */
+  since?: number;
+  /** Tail limit (default 50, max 200). */
+  limit?: number;
+}
+
+export interface ComputerEvidenceResult {
+  desktopId: string;
+  entries: ComputerEvidenceEntry[];
+}
+
+// ---------------------------------------------------------------------------
 // BC5 — shared desktop view + control ownership
 // ---------------------------------------------------------------------------
 

@@ -210,6 +210,43 @@ socket）；若用户已自行运行无 accept 的实例，桥如实不可连接
 官方组件模型但未经原生实例验证（Calc/Writer/Presentation 分支、
 modified 标志、shape 校验行为）；Windows/macOS 无桥。
 
+### 第六批：操作证据与诊断入口（EE6，§10）
+
+设计要点是"可回看的证据 + 现有 Agent 的诊断入口"，不引入诊断 Agent、
+外部框架或每个动作固定加一轮诊断。沿此落地：
+
+- **`computer.evidence` 证据日志**：每台桌面一条内核记录
+  `computer.evidence:<id>`（recordType `computer.evidence`，环形 400 条
+  上限），条目含 seq/at/sessionId/lane/tool/op/target/outcome(ok|error|
+  cancelled|unknown|rejected)/error/observationId。全部 op funnel
+  （observe/act/open/fileWrite/installSoftware/browser/office）与
+  控制转移（takeover/handback/cancel/release）经 `journaledOp` 包装——
+  日志随 op 写入，永不门控、延迟或翻转操作本身（全部失败吞掉）。
+- **内容纪律（§10）**：只记标识符——tool/op/目标选择器/标签页 id/
+  文档标题/单元格范围/路径/URL 去 query+fragment 后的 origin+path；
+  **键入文本、JS 表达式、单元格值、文件字节、凭据永不入日志**。
+- **权威侧归属**：本地 op 记本地 journal；远端 op 由拥有 Host 自己记，
+  协调端 `evidence` 查询转发到拥有者——不双写、不冒名。
+- **拒绝也记**：forbidden/invalid-params → `rejected`；取消 →
+  `cancelled`；响应丢失 → `unknown`——诊断能区分"没跑"、"被拒"、
+  "可能已生效"。
+- **诊断入口**：路由 `POST …/evidence`、Harness `computer.evidence`
+  （read.computer）、Pi `action=evidence`（evidenceSince/evidenceLimit/
+  evidenceSession 续读过滤）。工具描述明确诊断回路：查证据→提出带证据
+  的假设→以后续真实 op 结果验证→`memory remember`（nature:experience +
+  trigger）固化已验证修正——经验记忆机制已存在，不另造。
+- **明确不做**：无检查点/回放/自动恢复承诺（§10 历史回看与状态恢复
+  分别实现）；无每动作强制诊断轮；无全量截图留存。
+
+验证：61/61 service 测试（新增 4：标识符入日志+键入文本不入、拒绝/
+接管分类、sessionId/since 过滤、远端转发的拥有者权威）；类型/ESLint
+全绿。
+
+未验证边界：journal 在真实多 op 并发下的 revision 冲突重试只测了
+单写者路径；远端 evidence 经假 fetch 验证转发形状，未跨真机；条目
+target 为 app 选择器原样——agent 选择器可能含用户键入文本边界上
+（app 名字段是目标选择器不是自由文本，纪律保持）。
+
 ## 待交付
 
 按 §11 顺序：环境接入与联动剩余项（服务访问/事件回源）、默认模板与持久、

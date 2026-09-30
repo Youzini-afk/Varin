@@ -32,6 +32,9 @@ import type {
   ComputerOpenResult,
   ComputerBrowserParams,
   ComputerBrowserResult,
+  ComputerEvidenceEntry,
+  ComputerEvidenceParams,
+  ComputerEvidenceResult,
   ComputerOfficeParams,
   ComputerOfficeResult,
   ComputerPlatform,
@@ -508,6 +511,12 @@ export interface ComputerService {
    * same desktop scene (open documents carry their unsaved state).
    */
   office(params: ComputerOfficeParams & { signal?: AbortSignal; sessionId?: string }): Promise<ComputerOfficeResult>;
+  /**
+   * EE6 (§10): durable review of the steps this Host executed on a desktop —
+   * who issued them, the target, and the real outcome. Remote desktops are
+   * answered by their owning Host's own journal.
+   */
+  evidence(params: ComputerEvidenceParams & { signal?: AbortSignal }): Promise<ComputerEvidenceResult>;
   // --- BC5: control ownership + desktop view --------------------------------
   /** Current control owner record for a desktop. */
   control(desktopId?: string): Promise<ComputerControlState>;
@@ -669,6 +678,110 @@ export function createComputerService(options: ComputerServiceOptions): Computer
         if (attempt === 1) return;
       }
     }
+  };
+
+  /**
+   * EE6 (§10): durable per-desktop operation journal. Diagnostics ride beside
+   * the op — the journal never gates, delays, or flips the operation itself.
+   * Only locally-executed steps are recorded here; a remote Host journals its
+   * own execution and answers evidence queries for its desktops.
+   */
+  const EVIDENCE_CAP = 400;
+  const recordEvidence = async (desktopId: string, entry: Omit<ComputerEvidenceEntry, "seq" | "at">): Promise<void> => {
+    const client = await scoped();
+    // A remote desktop's execution is journaled by its owning Host — the
+    // coordinator forwards evidence queries there instead of double-writing.
+    const owner = await client.getRecord(COMPUTER_CATALOG_WORKSPACE_ID, `computer.desktop:${desktopId}`);
+    if (!owner) return;
+    const ownerDesktop = parseDesktop(owner);
+    if (ownerDesktop?.remote) return;
+    const recordId = `computer.evidence:${desktopId}`;
+    for (let attempt = 0; attempt < 2; attempt += 1) {
+      const record = await client.getRecord(COMPUTER_CATALOG_WORKSPACE_ID, recordId);
+      let entries: ComputerEvidenceEntry[] = [];
+      if (record) {
+        let body: unknown;
+        try { body = JSON.parse(record.payloadJson); } catch { body = undefined; }
+        if (isObject(body) && Array.isArray(body.entries)) {
+          entries = body.entries.filter((e): e is ComputerEvidenceEntry =>
+            isObject(e) && typeof e.seq === "number" && typeof e.at === "string" && typeof e.outcome === "string");
+        }
+      }
+      const seq = entries.length ? entries[entries.length - 1]!.seq + 1 : 1;
+      const next = [...entries, { ...entry, seq, at: new Date().toISOString() }].slice(-EVIDENCE_CAP);
+      try {
+        await client.putRecord({
+          operationId: `computer.evidence:${randomUUID()}`,
+          workspaceId: COMPUTER_CATALOG_WORKSPACE_ID,
+          recordId,
+          recordType: "computer.evidence",
+          state: "active",
+          payloadJson: JSON.stringify({ entries: next }),
+          ownerIds: [],
+          references: [],
+          ...(record ? { expectedRecordRevision: record.recordRevision } : {}),
+        });
+        return;
+      } catch {
+        if (attempt === 1) return;
+      }
+    }
+  };
+
+  const journalOutcomeOf = (result: unknown): ComputerEvidenceEntry["outcome"] => {
+    if (isObject(result)) {
+      if (result.outcome === "unknown") return "unknown";
+      if (result.cancelled === true) return "cancelled";
+      if (result.ok === false || result.accepted === false) return "error";
+    }
+    return "ok";
+  };
+
+  const journalErrorOutcome = (error: unknown): ComputerEvidenceEntry["outcome"] => {
+    if (error instanceof CancelledActionError) return "cancelled";
+    if (error instanceof HarnessServiceError && (error.harnessCode === "forbidden" || error.harnessCode === "invalid-params")) return "rejected";
+    return "error";
+  };
+
+  /**
+   * Journal one executed step. `summary` carries identifiers only — typed
+   * text, expressions and file bytes never enter the journal (§10). Remote
+   * desktops are skipped inside recordEvidence (owner journals there). An
+   * unresolvable target means the op itself never ran — nothing to journal.
+   */
+  const journaledOp = async <P extends { desktopId?: string | undefined }, R>(params: P, sessionId: string | undefined,
+    summary: Pick<ComputerEvidenceEntry, "lane" | "tool"> & { op?: string | undefined; target?: string | undefined },
+    run: (p: P) => Promise<R>): Promise<R> => {
+    let id: string;
+    try { id = await resolveDesktopId(params.desktopId); } catch { return run(params); }
+    const entry = {
+      lane: summary.lane, tool: summary.tool,
+      ...(summary.op !== undefined ? { op: summary.op } : {}),
+      ...(summary.target !== undefined ? { target: summary.target } : {}),
+      ...(sessionId ? { sessionId } : {}),
+    };
+    try {
+      const result = await run(params);
+      const nested = (result as { observation?: { id?: unknown } } | null)?.observation?.id;
+      const top = (result as { id?: unknown } | null)?.id;
+      const observationId = typeof nested === "string" ? nested : typeof top === "string" ? top : undefined;
+      await recordEvidence(id, { ...entry, outcome: journalOutcomeOf(result), ...(observationId ? { observationId } : {}) }).catch(() => undefined);
+      return result;
+    } catch (error) {
+      await recordEvidence(id, { ...entry, outcome: journalErrorOutcome(error),
+        ...(error instanceof Error ? { error: error.message.slice(0, 300) } : {}) }).catch(() => undefined);
+      throw error;
+    }
+  };
+
+  // URL targets enter the journal as origin+path only — query strings and
+  // fragments can carry tokens and never belong in a durable log (§10).
+  const urlEvidenceTarget = (raw: string | undefined): string | undefined => {
+    if (!raw) return undefined;
+    try {
+      const url = new URL(raw);
+      return url.origin === "null" ? undefined : url.origin + url.pathname;
+    } catch { return undefined; }
   };
 
   const desktopRecord = async (desktopId: string): Promise<{ record: KernelRecordResult; desktop: ComputerDesktop }> => {
@@ -1327,7 +1440,7 @@ export function createComputerService(options: ComputerServiceOptions): Computer
     return element as unknown as Record<string, unknown>;
   };
 
-  const observe: ComputerService["observe"] = async (params) => {
+  const observeImpl: ComputerService["observe"] = async (params) => {
     params.signal?.throwIfAborted();
     const id = await resolveDesktopId(params.desktopId);
     const remote = await remoteTargetFor(id);
@@ -1523,7 +1636,7 @@ export function createComputerService(options: ComputerServiceOptions): Computer
     }
   };
 
-  const act: ComputerService["act"] = async (params) => {
+  const actImpl: ComputerService["act"] = async (params) => {
     params.signal?.throwIfAborted();
     const action = structuredClone(params.action);
     const id = await resolveDesktopId(params.desktopId);
@@ -1607,7 +1720,7 @@ export function createComputerService(options: ComputerServiceOptions): Computer
     }
   };
 
-  const cancel: ComputerService["cancel"] = async (desktopId) => {
+  const cancelImpl: ComputerService["cancel"] = async (desktopId) => {
     const id = await resolveDesktopId(desktopId);
     const remote = await remoteTargetFor(id);
     if (remote) {
@@ -1639,7 +1752,7 @@ export function createComputerService(options: ComputerServiceOptions): Computer
     return { cancelled: dropped.length, released };
   };
 
-  const release: ComputerService["release"] = async (desktopId) => {
+  const releaseImpl: ComputerService["release"] = async (desktopId) => {
     const id = await resolveDesktopId(desktopId);
     const remote = await remoteTargetFor(id);
     if (remote) {
@@ -1656,7 +1769,7 @@ export function createComputerService(options: ComputerServiceOptions): Computer
     return { released: response.ok };
   };
 
-  const open: ComputerService["open"] = async (params) => {
+  const openImpl: ComputerService["open"] = async (params) => {
     params.signal?.throwIfAborted();
     const provided = [params.url, params.path, params.command].filter((value) => typeof value === "string" && value.trim());
     if (provided.length !== 1) {
@@ -1745,7 +1858,7 @@ export function createComputerService(options: ComputerServiceOptions): Computer
     }
   };
 
-  const fileWrite: ComputerService["fileWrite"] = async (params) => {
+  const fileWriteImpl: ComputerService["fileWrite"] = async (params) => {
     validateArtifactPath(params.relativePath);
     if (typeof params.contentBase64 !== "string") throw new HarnessServiceError("invalid-params", "computer.fileWrite requires contentBase64");
     const content = Buffer.from(params.contentBase64, "base64");
@@ -1811,7 +1924,7 @@ export function createComputerService(options: ComputerServiceOptions): Computer
     }
   };
 
-  const installSoftware: ComputerService["installSoftware"] = async (params) => {
+  const installSoftwareImpl: ComputerService["installSoftware"] = async (params) => {
     const groups = params.groups ?? [];
     const packages = params.packages ?? [];
     if (groups.length === 0 && packages.length === 0) {
@@ -1841,7 +1954,7 @@ export function createComputerService(options: ComputerServiceOptions): Computer
 
   // --- EE §7.2: browser bridge (CDP attach to the visible session) -----------
 
-  const browser: ComputerService["browser"] = async (params) => {
+  const browserImpl: ComputerService["browser"] = async (params) => {
     const OPS = new Set(["status", "launch", "tabs", "snapshot", "act"]);
     if (!OPS.has(params.op)) throw new HarnessServiceError("invalid-params", "computer.browser requires a valid op");
     const writes = params.op === "launch" || params.op === "act";
@@ -1906,7 +2019,7 @@ export function createComputerService(options: ComputerServiceOptions): Computer
 
   // EE §7.2 office bridge — same lane, same live soffice instance with its
   // unsaved state. status/docs observe; launch/open/act hold the write gate.
-  const office: ComputerService["office"] = async (params) => {
+  const officeImpl: ComputerService["office"] = async (params) => {
     const OPS = new Set(["status", "launch", "docs", "open", "act"]);
     if (!OPS.has(params.op)) throw new HarnessServiceError("invalid-params", "computer.office requires a valid op");
     const writes = params.op === "launch" || params.op === "open" || params.op === "act";
@@ -1977,7 +2090,7 @@ export function createComputerService(options: ComputerServiceOptions): Computer
     return controlState(id);
   };
 
-  const takeover: ComputerService["takeover"] = async (params) => {
+  const takeoverImpl: ComputerService["takeover"] = async (params) => {
     const id = await resolveDesktopId(params.desktopId);
     const remote = await remoteTargetFor(id);
     if (remote) {
@@ -2029,7 +2142,7 @@ export function createComputerService(options: ComputerServiceOptions): Computer
     }
   };
 
-  const handback: ComputerService["handback"] = async (params) => {
+  const handbackImpl: ComputerService["handback"] = async (params) => {
     const id = await resolveDesktopId(params.desktopId);
     const remote = await remoteTargetFor(id);
     if (remote) {
@@ -2890,6 +3003,70 @@ export function createComputerService(options: ComputerServiceOptions): Computer
   guestReconcileTimer?.unref();
   if (guestReconcileTimer) void reconcileVmGuests().catch(() => undefined);
 
+  // EE6 (§10): the journaled service surface — every entry point records one
+  // durable step beside its execution, identifiers only. Remote desktops are
+  // journaled by their owning Host; evidence queries forward there.
+  const observe: ComputerService["observe"] = (params) =>
+    journaledOp(params, params.sessionId, { lane: "observe", tool: "observe", op: "observe", target: params.app }, observeImpl);
+  const act: ComputerService["act"] = (params) =>
+    journaledOp(params, params.sessionId, { lane: "action", tool: "act", op: params.action.kind, target: params.action.app }, actImpl);
+  const open: ComputerService["open"] = (params) =>
+    journaledOp(params, params.sessionId, { lane: "action", tool: "open", op: "open",
+      target: params.path ?? urlEvidenceTarget(params.url) ?? params.command }, openImpl);
+  const fileWrite: ComputerService["fileWrite"] = (params) =>
+    journaledOp(params, params.sessionId, { lane: "action", tool: "fileWrite", op: "fileWrite", target: params.relativePath }, fileWriteImpl);
+  const installSoftware: ComputerService["installSoftware"] = (params) =>
+    journaledOp(params, undefined, { lane: "action", tool: "installSoftware", op: "install",
+      target: [...(params.groups ?? []), ...(params.packages ?? [])].join(",") || undefined }, installSoftwareImpl);
+  const browser: ComputerService["browser"] = (params) =>
+    journaledOp(params, params.sessionId, { lane: params.op === "status" || params.op === "tabs" || params.op === "snapshot" ? "observe" : "action",
+      tool: "browser", op: params.op,
+      target: params.tabId ?? (params.act ? [params.act.kind, urlEvidenceTarget(params.act.url)].filter(Boolean).join(" ") : undefined) }, browserImpl);
+  const office: ComputerService["office"] = (params) =>
+    journaledOp(params, params.sessionId, { lane: params.op === "status" || params.op === "docs" ? "observe" : "action",
+      tool: "office", op: params.op,
+      target: params.act?.doc ?? params.path ?? params.act?.range ?? params.url }, officeImpl);
+  const takeover: ComputerService["takeover"] = (params) =>
+    journaledOp(params, undefined, { lane: "action", tool: "control", op: "takeover", target: params.holderId }, takeoverImpl);
+  const handback: ComputerService["handback"] = (params) =>
+    journaledOp(params, undefined, { lane: "action", tool: "control", op: "handback", target: params.holderId }, handbackImpl);
+  const cancel: ComputerService["cancel"] = (desktopId) =>
+    journaledOp({ desktopId }, undefined, { lane: "action", tool: "control", op: "cancel" }, () => cancelImpl(desktopId));
+  const release: ComputerService["release"] = (desktopId) =>
+    journaledOp({ desktopId }, undefined, { lane: "action", tool: "control", op: "release" }, () => releaseImpl(desktopId));
+
+  // EE6 (§10): reviewable evidence for the same steps — a read, never a gate.
+  const evidence: ComputerService["evidence"] = async (params) => {
+    params.signal?.throwIfAborted();
+    const id = await resolveDesktopId(params.desktopId);
+    const remote = await remoteTargetFor(id);
+    if (remote) {
+      const payload = await remoteJson<ComputerEvidenceResult>(remote.connection, "POST",
+        `/api/computers/desktops/${encodeURIComponent(remote.remoteId)}/evidence`,
+        { ...(params.sessionId !== undefined ? { sessionId: params.sessionId } : {}),
+          ...(params.since !== undefined ? { since: params.since } : {}),
+          ...(params.limit !== undefined ? { limit: params.limit } : {}) }, params.signal);
+      if (!payload || !Array.isArray(payload.entries)) throw new RemoteTransportError("Remote Host returned no valid evidence");
+      return { desktopId: id, entries: payload.entries };
+    }
+    const client = await scoped();
+    const record = await client.getRecord(COMPUTER_CATALOG_WORKSPACE_ID, `computer.evidence:${id}`);
+    let entries: ComputerEvidenceEntry[] = [];
+    if (record) {
+      try {
+        const body = JSON.parse(record.payloadJson) as { entries?: unknown };
+        if (Array.isArray(body.entries)) {
+          entries = body.entries.filter((e): e is ComputerEvidenceEntry =>
+            isObject(e) && typeof e.seq === "number" && typeof e.at === "string" && typeof e.outcome === "string");
+        }
+      } catch { /* a malformed journal is empty evidence, never fabricated */ }
+    }
+    if (params.sessionId !== undefined) entries = entries.filter((e) => e.sessionId === params.sessionId);
+    if (params.since !== undefined) entries = entries.filter((e) => e.seq > (params.since ?? 0));
+    const limit = Math.min(Math.max(1, params.limit ?? 50), 200);
+    return { desktopId: id, entries: entries.slice(-limit) };
+  };
+
   return {
     prepareDesktop, desktopLifecycle, mediaTarget,
     inspectArtifact, registerArtifact, listArtifacts, openDesktopArtifact, openArtifact,
@@ -2906,6 +3083,7 @@ export function createComputerService(options: ComputerServiceOptions): Computer
     installSoftware,
     browser,
     office,
+    evidence,
     control,
     takeover,
     handback,

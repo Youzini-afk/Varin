@@ -47,6 +47,7 @@ const ComputerParams = Type.Object({
     Type.Literal("install"),
     Type.Literal("browser"),
     Type.Literal("office"),
+    Type.Literal("evidence"),
   ]),
   /** Target desktop; omit for the work's environment binding or the configured default. */
   desktopId: Type.Optional(Type.String()),
@@ -87,6 +88,10 @@ const ComputerParams = Type.Object({
   officePath: Type.Optional(Type.String()),
   /** office act: read/write {doc,sheet,range,values} | insert {doc,text} | save {doc}. */
   officeAct: Type.Optional(Type.Object({}, { additionalProperties: true })),
+  /** evidence: review the durable step journal — seq/at/sessionId/lane/tool/op/target/outcome for each executed operation (identifiers only). */
+  evidenceSince: Type.Optional(Type.Number()),
+  evidenceLimit: Type.Optional(Type.Number()),
+  evidenceSession: Type.Optional(Type.String()),
   connectionId: Type.Optional(Type.String({ description: "prepare: saved Host connection id; omit for this Host." })),
   width: Type.Optional(Type.Integer({ minimum: 1 })),
   height: Type.Optional(Type.Integer({ minimum: 1 })),
@@ -162,6 +167,7 @@ export function createComputerTool(bridge: HostServicesBridge, _sessionId: strin
       "action=install adds software to the environment owning the bound desktop — recipe groups (`dev`, `docs`) or explicit package names. It reports the package layer's real result: `installed` means packages landed, not that a control interface exists.",
       "action=browser attaches the visible Chromium session on the target machine (CDP): browserOp=launch starts it on the persistent profile, tabs lists real tabs, snapshot returns the page accessibility tree, browserAct runs navigate/evaluate/click(x,y viewport)/type/screenshot in that same session — the tabs and login state a human sees are the ones you operate.",
       "action=office attaches the live LibreOffice instance on the target machine (UNO): officeOp=launch starts it, docs lists open documents with their modified state, officePath opens a file into that instance, officeAct does read/write (sheet,range,values)/insert(text)/save on an open document — the same document a human is editing, unsaved state included.",
+      "action=evidence reviews the desktop's durable operation journal (seq/at/sessionId/tool/op/target/outcome, identifiers only) — use it when a result mismatches, an action may have failed, or a response was lost, before deciding what actually happened. Diagnosis is a hypothesis until a later op confirms it; once a fix is verified against the real scene, memory remember can keep it as an experience with its trigger condition.",
     ],
     parameters: ComputerParams,
     execute: async (_toolCallId, params, signal, _onUpdate, _ctx) => {
@@ -474,6 +480,19 @@ export function createComputerTool(bridge: HostServicesBridge, _sessionId: strin
                     ? JSON.stringify(r.values ?? [])
                     : r.error ?? `ok${r.modified === true ? " (modified)" : ""}`;
             return { content: [{ type: "text", text }], ...(r.ok === false ? { isError: true as const } : {}), details: result as unknown as Record<string, unknown> };
+          }
+          case "evidence": {
+            const result = await bridge.request("computer.evidence", {
+              ...(desktop ? { desktopId: desktop } : {}),
+              ...(params.evidenceSession !== undefined ? { sessionId: params.evidenceSession } : {}),
+              ...(params.evidenceSince !== undefined ? { since: params.evidenceSince } : {}),
+              ...(params.evidenceLimit !== undefined ? { limit: params.evidenceLimit } : {}),
+            });
+            const r = result as { entries?: Array<{ seq?: number; at?: string; sessionId?: string; lane?: string;
+              tool?: string; op?: string; target?: string; outcome?: string; error?: string; observationId?: string }> };
+            const lines = (r.entries ?? []).map((e) =>
+              `#${e.seq ?? "?"} ${e.at ?? ""} ${e.tool ?? ""}${e.op ? `/${e.op}` : ""}${e.target ? ` ${e.target}` : ""} → ${e.outcome ?? "?"}${e.error ? ` (${e.error})` : ""}${e.sessionId ? ` [session ${e.sessionId}]` : ""}`);
+            return { content: [{ type: "text", text: lines.join("\n") || "no recorded steps" }], details: result as unknown as Record<string, unknown> };
           }
           case "environment": {
             // get when nothing is provided; otherwise update this work's
