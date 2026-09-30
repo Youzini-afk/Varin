@@ -343,6 +343,7 @@ export interface ComputerReleaseResult {
  */
 export interface ComputerOpenParams {
   desktopId?: string;
+  automationEpoch?: string;
   /** Any well-formed URL the target's handlers accept (http(s), file:, app schemes). */
   url?: string;
   /** Absolute path on the target machine, opened with its default handler. */
@@ -406,13 +407,14 @@ export interface ComputerBrowserAct {
 export interface ComputerBrowserParams {
   desktopId?: string;
   op: ComputerBrowserOp;
-  /** Tab to attach for snapshot/act; defaults to the first page target. */
+  automationEpoch?: string;
+  /** Tab to attach for snapshot/act; optional only when exactly one page is open. */
   tabId?: string;
   /** launch: explicit browser binary on the target machine. */
   binary?: string;
   /** launch: profile directory on the target machine (persistent session). */
   profile?: string;
-  /** launch: CDP port on the target machine (default 9222). */
+  /** Explicit CDP port on the target machine; default profile uses DevToolsActivePort. */
   port?: number;
   act?: ComputerBrowserAct;
   /** snapshot: accessibility-tree line cap (default 600). */
@@ -422,12 +424,16 @@ export interface ComputerBrowserParams {
 export interface ComputerBrowserResult {
   ok: boolean;
   /** Transport-loss semantics: the op may have reached the target. */
-  outcome?: "unknown";
-  status?: { running: boolean; browser?: string; wsUrl?: string };
+  outcome?: "unknown" | "partial";
+  cancelled?: boolean;
+  automationEpoch?: string;
+  status?: { running: boolean; browser?: string; wsUrl?: string; detail?: string };
   alreadyRunning?: boolean;
-  tabs?: Array<{ id: string; title?: string; url?: string; attached?: boolean }>;
+  tabs?: Array<{ id: string; title?: string; url?: string }>;
   tab?: string;
   lines?: string[];
+  /** AX tree had additional visible nodes beyond the requested limit. */
+  truncated?: boolean;
   frameId?: string;
   result?: unknown;
   type?: string;
@@ -443,8 +449,8 @@ export interface ComputerBrowserResult {
 export type ComputerOfficeOp = "status" | "launch" | "docs" | "open" | "act";
 
 export interface ComputerOfficeAct {
-  kind: "read" | "write" | "insert" | "save";
-  /** Open document to target: its title or file URL (default: first open doc). */
+  kind: "read" | "write" | "insert" | "save" | "export";
+  /** Open document id, unique title or URL; omitted = current active document. */
   doc?: string;
   /** read/write: sheet name (default first sheet). */
   sheet?: string;
@@ -454,9 +460,15 @@ export interface ComputerOfficeAct {
   values?: unknown[][];
   /** insert: text appended at the end of a Writer document. */
   text?: string;
+  /** save-as/export destination on the target machine. */
+  path?: string;
+  url?: string;
+  /** export: native filter name; omitted = this document kind's PDF filter. */
+  filter?: string;
 }
 
 export interface ComputerOfficeDoc {
+  id?: string;
   title: string;
   url?: string | null;
   kind?: string;
@@ -466,6 +478,7 @@ export interface ComputerOfficeDoc {
 export interface ComputerOfficeParams {
   desktopId?: string;
   op: ComputerOfficeOp;
+  automationEpoch?: string;
   /** open: file path or URL to load into the live instance. */
   path?: string;
   url?: string;
@@ -475,14 +488,18 @@ export interface ComputerOfficeParams {
 export interface ComputerOfficeResult {
   ok: boolean;
   /** Transport-loss semantics: the op may have reached the target. */
-  outcome?: "unknown";
-  status?: { running: boolean };
+  outcome?: "unknown" | "partial";
+  cancelled?: boolean;
+  automationEpoch?: string;
+  status?: { running: boolean; detail?: string };
   alreadyRunning?: boolean;
   docs?: ComputerOfficeDoc[];
   doc?: ComputerOfficeDoc;
   sheet?: string;
   range?: string;
   values?: unknown[][];
+  text?: string;
+  target?: string;
   modified?: boolean;
   error?: string;
 }
@@ -507,7 +524,7 @@ export interface ComputerEvidenceEntry {
   tool: string;
   /** Sub-operation: action kind, browser op, control transition… */
   op?: string;
-  /** Target identifier: app selector, tab/doc title, cell range, path, URL origin. */
+  /** Hash of the selector; raw titles, URLs and paths may contain private content. */
   target?: string;
   outcome: "ok" | "error" | "cancelled" | "unknown" | "rejected";
   error?: string;
@@ -520,13 +537,15 @@ export interface ComputerEvidenceParams {
   sessionId?: string;
   /** Return only entries with seq > since. */
   since?: number;
-  /** Tail limit (default 50, max 200). */
+  /** Page size (default 50); with since, read oldest unseen steps first. */
   limit?: number;
 }
 
 export interface ComputerEvidenceResult {
   desktopId: string;
   entries: ComputerEvidenceEntry[];
+  nextSince: number;
+  hasMore: boolean;
 }
 
 // ---------------------------------------------------------------------------

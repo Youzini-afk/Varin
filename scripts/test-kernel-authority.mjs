@@ -4,9 +4,10 @@ import { spawnSync } from 'node:child_process';
 
 const root = path.resolve(import.meta.dirname, '..');
 const args = process.argv.slice(2);
-if (args.some((arg) => arg !== '--build')) {
-  throw new Error('Usage: node scripts/test-kernel-authority.mjs [--build]');
+if (args.some((arg) => arg !== '--build' && !arg.startsWith('--vitest-file='))) {
+  throw new Error('Usage: node scripts/test-kernel-authority.mjs [--build] [--vitest-file=<path>]');
 }
+const vitestFiles = args.filter((arg) => arg.startsWith('--vitest-file=')).map((arg) => arg.slice('--vitest-file='.length));
 const env = { ...process.env, VARIN_REQUIRE_RELEASE_KERNEL: '1' };
 
 function run(command, arguments_) {
@@ -51,5 +52,6 @@ run(process.execPath, ['--import', 'tsx', '--test',
 // native resources, so serialize files on every runner; concurrency within
 // each test remains exercised without coupling teardown to another fixture.
 run(process.execPath, ['node_modules/vitest/vitest.mjs', 'run', '--config', 'packages/web/vitest.kernel.config.ts',
+  ...vitestFiles,
   '--no-file-parallelism',
 ]);

@@ -121,6 +121,7 @@ export function deriveHarnessCapabilities(
     capabilities.add("read.computer");
     capabilities.add("control.computer");
   }
+  if (tools.has('computer') || tools.has('bash')) capabilities.add('control.environment');
   return [...capabilities];
 }
 

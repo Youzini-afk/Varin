@@ -36,7 +36,7 @@ const call = (method, args) => {
     parentPort.postMessage({ type: 'call', runId: run.id, id, method, args });
   });
 };
-server.context.computer = Object.fromEntries(['list','apps','observe','act','cancel','release','emitImage'].map(method => [method, (...args) => call(method, args)]));
+server.context.computer = Object.fromEntries(['list','apps','observe','act','open','browser','office','evidence','cancel','release','emitImage'].map(method => [method, (...args) => call(method, args)]));
 server.context.sleep = server.context.computer.sleep = ms => new Promise(resolve => setTimeout(resolve, ms));
 server.context.console = Object.fromEntries(['log','warn','error'].map(method => [method, (...args) => {
   const run = context.getStore();

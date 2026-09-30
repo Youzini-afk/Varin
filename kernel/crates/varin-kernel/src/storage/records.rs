@@ -799,6 +799,8 @@ impl Storage {
             "bot.profile",
             "computer.machine",
             "computer.desktop",
+            "computer.evidence.cursor",
+            "computer.evidence.step",
         ];
         if !KNOWN_RECORD_TYPES.contains(&record_type)
             && !(record_type.starts_with("retrieval.evidence.")

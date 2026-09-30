@@ -43,15 +43,17 @@ it('serializes different component requests without substituting the first resul
   let finish!: () => void;
   const gate = new Promise<void>((resolve) => { finish = resolve; });
   const installed: string[] = [];
+  let started!: () => void;
+  const starting = new Promise<void>((resolve) => { started = resolve; });
   const desktop = createLinuxDesktop({ dataDir, driverDir: '/drivers', platform: 'linux', exec: async (_command, args) => {
     const group = args[args.indexOf('--group') + 1]!;
     installed.push(group);
-    if (group === 'dev') await gate;
+    if (group === 'dev') { started(); await gate; }
     return { code: 0, stdout: JSON.stringify({ results: [{ id: group, state: 'installed' }] }), stderr: '' };
   } });
   const first = desktop.install({ groups: ['dev'] });
   const second = desktop.install({ groups: ['docs'] });
-  await Promise.resolve();
+  await starting;
   expect(installed).toEqual(['dev']);
   finish();
   expect((await first)[0]?.id).toBe('dev');

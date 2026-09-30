@@ -1403,8 +1403,8 @@ describe("evidence journal (EE6, §10)", () => {
       action: { kind: "type", app: "notepad", text: "hunter2 secret" } });
     const { entries } = await service.evidence({ desktopId: "local-console" });
     expect(entries.length).toBe(2);
-    expect(entries[0]).toMatchObject({ tool: "observe", op: "observe", target: "notepad", outcome: "ok", lane: "observe", sessionId: "s1" });
-    expect(entries[1]).toMatchObject({ tool: "act", op: "type", target: "notepad", outcome: "ok", lane: "action", sessionId: "s1" });
+    expect(entries[0]).toMatchObject({ tool: "observe", op: "observe", target: expect.stringMatching(/^sha256:/u), outcome: "ok", lane: "observe", sessionId: "s1" });
+    expect(entries[1]).toMatchObject({ tool: "act", op: "type", target: entries[0]?.target, outcome: "ok", lane: "action", sessionId: "s1" });
     expect(JSON.stringify(entries)).not.toContain("hunter2");
     await service.dispose();
   });
@@ -1433,7 +1433,7 @@ describe("evidence journal (EE6, §10)", () => {
     await service.open({ desktopId: "local-console", path: "C:/tmp/b.txt", sessionId: "s2" });
     const mine = await service.evidence({ desktopId: "local-console", sessionId: "s2" });
     expect(mine.entries.length).toBe(1);
-    expect(mine.entries[0]?.target).toContain("b.txt");
+    expect(mine.entries[0]?.target).toBe(`sha256:${createHash('sha256').update('C:/tmp/b.txt').digest('hex')}`);
     const seen = mine.entries[0]!.seq;
     const resumed = await service.evidence({ desktopId: "local-console", since: seen });
     expect(resumed.entries.length).toBe(0);
@@ -1456,7 +1456,7 @@ describe("evidence journal (EE6, §10)", () => {
           return new Response(JSON.stringify(remoteCatalog), { status: 200, headers: { "Content-Type": "application/json", "X-Varin-Computer-Host": "remote-h" } });
         }
         if (url.endsWith("/evidence") && init?.method === "POST") {
-          return new Response(JSON.stringify({ desktopId: "d0", entries: [
+          return new Response(JSON.stringify({ desktopId: "d0", nextSince: 7, hasMore: false, entries: [
             { seq: 7, at: "t", lane: "action", tool: "browser", op: "act", outcome: "unknown", error: "response lost" }] }),
             { status: 200, headers: { "Content-Type": "application/json", "X-Varin-Computer-Host": "remote-h" } });
         }

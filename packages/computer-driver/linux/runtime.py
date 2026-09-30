@@ -20,6 +20,8 @@ import traceback
 import warnings
 from datetime import datetime, timezone
 
+PENDING_BROWSER_RELEASE = None
+
 warnings.filterwarnings("ignore", category=DeprecationWarning)
 
 import gi
@@ -1091,6 +1093,7 @@ def open_target(operation):
 
 
 def perform_operation(operation):
+    global PENDING_BROWSER_RELEASE
     tool = operation.get("tool")
     if tool == "ping":
         return {"ok": True}
@@ -1100,6 +1103,12 @@ def perform_operation(operation):
         return {"ok": True, "capabilities": driver_capabilities()}
     if tool == "release_input":
         release_input()
+        if PENDING_BROWSER_RELEASE:
+            import bridge_worker
+            result = bridge_worker.run("browser", PENDING_BROWSER_RELEASE, lambda _progress: None)
+            if not result.get("ok"):
+                return {"ok": False, "error": "Browser button release was not confirmed; input state remains unknown"}
+            PENDING_BROWSER_RELEASE = None
         return {"ok": True}
     if tool == "capture_frame":
         frame = capture_desktop_frame()
@@ -1109,16 +1118,19 @@ def perform_operation(operation):
     if tool == "inject_input":
         inject_human_input(operation)
         return {"ok": True}
-    if tool == "browser":
-        # Browser ops share this lane: the same visible scene, the same
-        # serialization, the same agent-vs-human control gate.
-        import browser_bridge
-        return browser_bridge.perform(operation)
-    if tool == "office":
-        # LibreOffice ops attach to the user's live soffice process on this
-        # same scene — open documents, unsaved state and all.
-        import office_bridge
-        return office_bridge.perform(operation)
+    if tool in ("browser", "office"):
+        import bridge_worker
+        act = operation.get("act") or {}
+        if tool == "browser" and operation.get("op") == "act" and act.get("kind") == "click":
+            PENDING_BROWSER_RELEASE = {key: operation[key] for key in ("tab", "profile", "cdp_port") if key in operation}
+            PENDING_BROWSER_RELEASE.update({"op": "act", "act": {"kind": "release", "x": act.get("x", 0), "y": act.get("y", 0)}})
+        try:
+            result = bridge_worker.run(tool, operation, check_cancel)
+            if tool == "browser" and result.get("ok") and act.get("kind") == "click":
+                PENDING_BROWSER_RELEASE = None
+            return result
+        except CancelledError as exc:
+            return {"ok": False, "cancelled": True, "outcome": "unknown", "error": str(exc)}
     if tool == "list_apps":
         apps = []
         for app in iter_apps():

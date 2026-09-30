@@ -41,6 +41,17 @@ const fixture = () => {
 };
 
 describe("computer routes (BC4)", () => {
+  it('preserves the originating session on remote observation and action requests', async () => {
+    const { app, computers } = fixture();
+    computers.observe = vi.fn(async () => ({ id: 'observation' }));
+    computers.act = vi.fn(async () => ({ accepted: true }));
+    expect((await request(app).post('/api/computers/desktops/local-console/observe')
+      .send({ app: 'editor', sessionId: 'origin' })).status).toBe(200);
+    expect((await request(app).post('/api/computers/desktops/local-console/act')
+      .send({ action: { kind: 'key', app: 'editor', key: 'enter' }, sessionId: 'origin' })).status).toBe(200);
+    expect(computers.observe).toHaveBeenCalledWith(expect.objectContaining({ sessionId: 'origin' }));
+    expect(computers.act).toHaveBeenCalledWith(expect.objectContaining({ sessionId: 'origin' }));
+  });
   it("streams the registered artifact revision with its exact file identity", async () => {
     const { app, computers } = fixture();
     computers.openArtifact = vi.fn(async () => ({ artifact: { relativePath: "Downloads/report.pdf", sha256: "a".repeat(64), byteLength: 3 },
@@ -330,6 +341,7 @@ describe("computer routes (EE open + file write)", () => {
     expect(response.status).toBe(200);
     expect(response.body.version.sha256).toBe("b".repeat(64));
     expect(computers.fileWrite).toHaveBeenCalledWith({
+      signal: expect.any(AbortSignal),
       desktopId: "local-console",
       relativePath: "Downloads/in.csv",
       contentBase64: "aGk=",
@@ -344,6 +356,7 @@ describe("computer routes (EE open + file write)", () => {
       .send({ groups: ["dev"], packages: ["mypkg"] });
     expect(response.status).toBe(200);
     expect(computers.installSoftware).toHaveBeenCalledWith({
+      signal: expect.any(AbortSignal),
       desktopId: "local-console",
       groups: ["dev"],
       packages: ["mypkg"],

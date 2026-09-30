@@ -15,6 +15,7 @@ import subprocess
 import sys
 import time
 import tempfile
+import signal
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 PACKAGE_RE = re.compile(r"^[a-z0-9][a-z0-9+._:-]*$")
@@ -29,16 +30,38 @@ def privilege_prefix():
     return [] if os.geteuid() == 0 else ["sudo", "-n"]
 
 
-def apt(args):
-    return subprocess.run(
+def apt(args, cancel_file=None):
+    if cancel_file and os.path.exists(cancel_file):
+        raise InterruptedError("Installation cancelled before package manager dispatch")
+    process = subprocess.Popen(
         privilege_prefix() + ["apt-get", *args],
-        stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True, timeout=None,
+        stdin=subprocess.DEVNULL, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True,
+        start_new_session=True,
         env={**os.environ, "DEBIAN_FRONTEND": "noninteractive"})
+    try:
+        while True:
+            if cancel_file and os.path.exists(cancel_file):
+                raise InterruptedError("Installation cancelled; some packages may already have changed")
+            try:
+                stdout, stderr = process.communicate(timeout=0.1)
+                return subprocess.CompletedProcess(process.args, process.returncode, stdout, stderr)
+            except subprocess.TimeoutExpired:
+                continue
+    except BaseException:
+        # sudo forwards termination to its command; root can terminate every
+        # descendant directly. Do not acknowledge cancellation before exit.
+        try:
+            os.killpg(process.pid, signal.SIGTERM)
+        except ProcessLookupError:
+            pass
+        process.communicate()
+        raise
 
 
 def main():
     parser = argparse.ArgumentParser(description="Install Varin environment components")
     parser.add_argument("--data-dir", required=True)
+    parser.add_argument("--cancel-file")
     parser.add_argument("--group", action="append", default=[], dest="groups")
     parser.add_argument("--package", action="append", default=[], dest="packages")
     args = parser.parse_args()
@@ -66,20 +89,28 @@ def main():
         print(json.dumps({"ok": False, "error": "component install currently supports apt (Debian/Ubuntu) targets"}))
         return 1
 
-    update = apt(["update"])
+    update_error = None
+    try:
+        update = apt(["update"], args.cancel_file)
+        if update.returncode:
+            update_error = f"apt-get update exited with status {update.returncode}"
+    except Exception as exc:
+        update_error = str(exc)
     results = []
     for component_id, packages in requests:
-        if update.returncode != 0:
-            detail = (update.stderr or update.stdout).strip().splitlines()[-1][:400] if (update.stderr or update.stdout).strip() else "apt-get update failed"
-            results.append({"id": component_id, "state": "failed", "detail": detail})
+        if update_error:
+            results.append({"id": component_id, "state": "failed", "detail": update_error, "packages": packages})
             continue
-        install = apt(["install", "-y", "--no-install-recommends", *packages])
+        try:
+            install = apt(["install", "-y", "--no-install-recommends", *packages], args.cancel_file)
+        except Exception as exc:
+            results.append({"id": component_id, "state": "failed", "detail": str(exc), "packages": packages})
+            continue
         if install.returncode == 0:
             results.append({"id": component_id, "state": "installed", "packages": packages})
         else:
-            detail = install.stderr.strip().splitlines()
             results.append({"id": component_id, "state": "failed",
-                            "detail": (detail[-1][:400] if detail else "apt-get install failed")})
+                            "detail": f"apt-get install exited with status {install.returncode}", "packages": packages})
 
     payload = {"ok": all(item["state"] == "installed" for item in results),
                "results": results, "at": int(time.time() * 1000)}

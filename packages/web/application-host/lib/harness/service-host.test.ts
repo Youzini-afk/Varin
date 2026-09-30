@@ -80,6 +80,7 @@ describe("harness service host authorization", () => {
       "read.web",
       "process.shell",
       "write.document",
+      "control.environment",
     ]);
     expect(deriveHarnessCapabilities(["dispatch"], { threadRuntime: false })).not.toContain("control.thread");
     expect(deriveHarnessCapabilities(["dispatch"], { threadRuntime: true })).toContain("control.thread");

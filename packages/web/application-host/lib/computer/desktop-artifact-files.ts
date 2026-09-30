@@ -51,15 +51,19 @@ export const writeDesktopFile = async (
   desktop: LinuxDesktopState,
   relativePath: string,
   content: Buffer,
+  signal?: AbortSignal,
 ): Promise<DesktopArtifactVersion> => {
+  signal?.throwIfAborted();
   const { command, args } = commandFor(desktop, 'write', relativePath);
   const result = await new Promise<{ code: number; stdout: string; stderr: string }>((resolve, reject) => {
-    const child = spawn(command, args, { stdio: ['pipe', 'pipe', 'pipe'], windowsHide: true });
+    const child = spawn(command, args, { stdio: ['pipe', 'pipe', 'pipe'], windowsHide: true, ...(signal ? { signal } : {}) });
     let stdout = ''; let stderr = '';
+    let abortError: Error | undefined;
     child.stdout.on('data', (data) => { stdout += data; });
     child.stderr.on('data', (data) => { stderr += data; });
-    child.once('error', reject);
-    child.once('close', (code) => resolve({ code: code ?? 1, stdout, stderr }));
+    child.once('error', (error) => { if (error.name === 'AbortError') abortError = error; else reject(error); });
+    child.once('close', (code) => { if (abortError) reject(abortError); else resolve({ code: code ?? 1, stdout, stderr }); });
+    child.stdin.on('error', () => { /* Exit/error receipt owns a closed stdin. */ });
     child.stdin.end(content);
   });
   if (result.code !== 0) throw new HarnessServiceError('unavailable', result.stderr.trim() || 'Desktop file write failed');

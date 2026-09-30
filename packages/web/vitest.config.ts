@@ -24,6 +24,7 @@ export const COMMON_TEST_EXCLUDE = [
 ];
 
 export const KERNEL_VITEST_FILES = [
+  'application-host/lib/computer/computer-evidence.acceptance.test.ts',
   'application-host/lib/kernel/file-resource-audit.test.ts',
   'application-host/lib/kernel/kernel-compute.test.ts',
   'application-host/lib/kernel/kernel-process.test.ts',

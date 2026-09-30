@@ -55,6 +55,16 @@ it('only plans automatic shutdown for exclusive Bot VMs and retains shared or co
   ]);
 });
 
+it('does not cancel a shared desktop lane when a Bot sleeps', async () => {
+  const { runtime, computers, setDesktops } = setup();
+  const owned = { ...desktop('owned'), usage: { sessionId: 's', at: '' } };
+  const shared = { ...desktop('shared'), usage: { sessionId: 's', at: '' } };
+  shared.work!.push({ scopeId: 'bot:other', threadId: 'other', sessionId: 'other', at: '' });
+  setDesktops([owned, shared]);
+  await runtime.stopScope(bot);
+  expect(computers.cancel).toHaveBeenCalledExactlyOnceWith(owned.id);
+});
+
 it('waits for actual shutdown and guest readiness, retaining a VM taken over by a human', async () => {
   const { runtime, computers, setMachines } = setup();
   const machine = { machineId: 'owned', label: 'VM', state: 'pending' as const };

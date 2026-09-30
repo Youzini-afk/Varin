@@ -1703,6 +1703,33 @@ describe("follow-up service on the real kernel", () => {
 });
 
 describe("desktop source follow-ups (EE)", () => {
+  it("repeats status transitions without waking again for a stable matching state", async () => {
+    const f = await fixture({ seed: (h) => { h.threads.set('t-1', settledThread()); h.desktopStatuses.set('d', 'unavailable'); } });
+    const wait = await f.service.register(caller(), { instruction: 'ready',
+      source: { kind: 'desktop', desktopId: 'd', condition: 'status', states: ['available'], every: true } });
+    f.harness.desktopStatuses.set('d', 'available');
+    await f.service.check(caller(), { id: wait.followUp.id });
+    assert.equal(f.harness.continued.length, 1);
+    await f.service.check(caller(), { id: wait.followUp.id });
+    assert.equal(f.harness.continued.length, 1);
+    f.harness.desktopStatuses.set('d', 'unavailable');
+    await f.service.check(caller(), { id: wait.followUp.id });
+    f.harness.desktopStatuses.set('d', 'available');
+    await f.service.check(caller(), { id: wait.followUp.id });
+    assert.equal(f.harness.continued.length, 2);
+  });
+
+  it("does not lose an artifact revision that appears again in a later change cycle", async () => {
+    const f = await fixture({ seed: (h) => { h.threads.set('t-1', settledThread()); h.desktopFiles.set('d:out', 'a'.repeat(64)); } });
+    const wait = await f.service.register(caller(), { instruction: 'changed',
+      source: { kind: 'desktop', desktopId: 'd', condition: 'artifact', path: 'out', sha256: 'a'.repeat(64), every: true } });
+    for (const revision of ['b', 'a', 'b']) {
+      f.harness.desktopFiles.set('d:out', revision.repeat(64));
+      await f.service.check(caller(), { id: wait.followUp.id });
+    }
+    assert.equal(f.harness.continued.length, 3);
+    assert.equal(new Set(f.harness.continued.map((entry) => entry.requestId)).size, 3);
+  });
   it("fires when the desktop's catalog status transitions into a matching state", async () => {
     const f = await fixture({ seed: (h) => {
       h.threads.set("t-1", settledThread());

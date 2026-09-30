@@ -80,13 +80,23 @@ const ComputerParams = Type.Object({
   browserOp: Type.Optional(Type.String()),
   /** browser: tab to attach for snapshot/act (default first page). */
   tabId: Type.Optional(Type.String()),
-  /** browser act: navigate(url) | evaluate(expression) | click(x,y) | type(text) | screenshot — viewport coords come from the snapshot/observe bounds. */
+  /** browser launch: browser executable on the target machine. */
+  browserBinary: Type.Optional(Type.String()),
+  /** browser launch: persistent profile directory on the target machine. */
+  browserProfile: Type.Optional(Type.String()),
+  /** browser: explicit CDP port on the target machine. */
+  browserPort: Type.Optional(Type.Integer({ minimum: 1, maximum: 65535 })),
+  /** browser snapshot: number of accessibility lines to return. */
+  browserLimit: Type.Optional(Type.Integer({ minimum: 1 })),
+  /** browser act: navigate(url) | evaluate(expression) | click(x,y) | type(text) | screenshot; click uses CSS viewport coords, not desktop/window coords. */
   browserAct: Type.Optional(Type.Object({}, { additionalProperties: true })),
   /** office: status | launch | docs | open | act — ops on the live LibreOffice instance (UNO attach; open docs keep unsaved state). */
   officeOp: Type.Optional(Type.String()),
   /** office open: file path on the target machine. */
   officePath: Type.Optional(Type.String()),
-  /** office act: read/write {doc,sheet,range,values} | insert {doc,text} | save {doc}. */
+  /** office open: URL on the target machine. */
+  officeUrl: Type.Optional(Type.String()),
+  /** office act: read/write {doc,sheet,range,values} | insert {doc,text} | save/export {doc,path,filter}. */
   officeAct: Type.Optional(Type.Object({}, { additionalProperties: true })),
   /** evidence: review the durable step journal — seq/at/sessionId/lane/tool/op/target/outcome for each executed operation (identifiers only). */
   evidenceSince: Type.Optional(Type.Number()),
@@ -166,16 +176,23 @@ export function createComputerTool(bridge: HostServicesBridge, _sessionId: strin
       "action=forward opens a live service access path: for a managed remote target it returns a loopback URL valid ONLY on this Host (a forward dies with it, close it with action=forwardClose); for the local target it returns the service's own address. forwards lists live handles. A remote service's localhost is never your localhost.",
       "action=install adds software to the environment owning the bound desktop — recipe groups (`dev`, `docs`) or explicit package names. It reports the package layer's real result: `installed` means packages landed, not that a control interface exists.",
       "action=browser attaches the visible Chromium session on the target machine (CDP): browserOp=launch starts it on the persistent profile, tabs lists real tabs, snapshot returns the page accessibility tree, browserAct runs navigate/evaluate/click(x,y viewport)/type/screenshot in that same session — the tabs and login state a human sees are the ones you operate.",
-      "action=office attaches the live LibreOffice instance on the target machine (UNO): officeOp=launch starts it, docs lists open documents with their modified state, officePath opens a file into that instance, officeAct does read/write (sheet,range,values)/insert(text)/save on an open document — the same document a human is editing, unsaved state included.",
+      "action=office attaches the live LibreOffice instance on the target machine (UNO): officeOp=launch starts it, docs lists open documents with their modified state, officePath/officeUrl opens a resource, officeAct does read/write (sheet,range,values), insert(text), save, and export on an open document — the same document a human is editing, unsaved state included.",
       "action=evidence reviews the desktop's durable operation journal (seq/at/sessionId/tool/op/target/outcome, identifiers only) — use it when a result mismatches, an action may have failed, or a response was lost, before deciding what actually happened. Diagnosis is a hypothesis until a later op confirms it; once a fix is verified against the real scene, memory remember can keep it as an experience with its trigger condition.",
     ],
     parameters: ComputerParams,
     execute: async (_toolCallId, params, signal, _onUpdate, _ctx) => {
+      const request: HostServicesBridge["request"] = (method, values, options) => {
+        const operationSignal = options?.signal ?? signal;
+        return bridge.request(method, values, {
+          ...(method === "computer.installSoftware" ? { timeoutMs: 0 } : {}), ...options,
+          ...(operationSignal ? { signal: operationSignal } : {}),
+        });
+      };
       try {
         const desktop = params.desktopId?.trim() || undefined;
         switch (params.action) {
           case "prepare": {
-            const result = await bridge.request("computer.prepare", {
+            const result = await request("computer.prepare", {
               ...(params.connectionId ? { connectionId: params.connectionId } : {}),
               ...(params.width !== undefined ? { width: params.width } : {}),
               ...(params.height !== undefined ? { height: params.height } : {}),
@@ -185,17 +202,17 @@ export function createComputerTool(bridge: HostServicesBridge, _sessionId: strin
           case "start":
           case "stop": {
             if (!desktop) throw new HarnessRequestError("invalid-params", "Desktop lifecycle requires desktopId");
-            const result = await bridge.request("computer.desktopLifecycle", { desktopId: desktop, action: params.action });
+            const result = await request("computer.desktopLifecycle", { desktopId: desktop, action: params.action });
             return { content: [{ type: "text", text: JSON.stringify(result) }], details: result };
           }
           case "artifact": {
             if (!params.relativePath?.trim()) throw new HarnessRequestError("invalid-params", "artifact requires relativePath");
-            const result = await bridge.request("computer.artifact", { relativePath: params.relativePath,
+            const result = await request("computer.artifact", { relativePath: params.relativePath,
               ...(desktop ? { desktopId: desktop } : {}) });
             return { content: [{ type: "text", text: JSON.stringify(result) }], details: result };
           }
           case "list": {
-            const result = await bridge.request<"computer.list">("computer.list", {}) as ComputerListResult;
+            const result = await request<"computer.list">("computer.list", {}) as ComputerListResult;
             const lines = [
               ...result.machines.map((m) => `machine ${m.id} "${m.name}" (${m.platform}, ${m.status})${m.provider === "remote" ? ` · prepare connectionId ${m.id.slice("remote:".length)}` : ""}`),
               ...result.desktops.map((d) => `desktop ${d.id} "${d.label}" on ${d.machineId} (${d.status}${d.statusDetail ? `: ${d.statusDetail}` : ""})`),
@@ -206,7 +223,7 @@ export function createComputerTool(bridge: HostServicesBridge, _sessionId: strin
             };
           }
           case "apps": {
-            const result = await bridge.request<"computer.apps">("computer.apps", {
+            const result = await request<"computer.apps">("computer.apps", {
               ...(desktop ? { desktopId: desktop } : {}),
             }) as ComputerAppsResult;
             const lines = result.apps.map((a) => {
@@ -222,7 +239,7 @@ export function createComputerTool(bridge: HostServicesBridge, _sessionId: strin
             if (!params.app?.trim()) {
               return errorResult(new HarnessRequestError("invalid-params", "observe requires app (process name, window title, or pid)"));
             }
-            const result = await bridge.request<"computer.observe">("computer.observe", {
+            const result = await request<"computer.observe">("computer.observe", {
               app: params.app,
               ...(desktop ? { desktopId: desktop } : {}),
               ...(params.window !== undefined ? { window: params.window } : {}),
@@ -246,7 +263,7 @@ export function createComputerTool(bridge: HostServicesBridge, _sessionId: strin
             if (!operation?.kind || !operation.app) {
               return errorResult(new HarnessRequestError("invalid-params", "act requires operation.kind and operation.app"));
             }
-            const result = await bridge.request<"computer.act">("computer.act", {
+            const result = await request<"computer.act">("computer.act", {
               action: operation,
               ...(desktop ? { desktopId: desktop } : {}),
             }, signal ? { signal } : undefined) as ComputerActResult;
@@ -274,7 +291,7 @@ export function createComputerTool(bridge: HostServicesBridge, _sessionId: strin
           }
           case "cancel": {
             for (const evaluation of evaluations) evaluation.abort(new Error("Computer evaluation cancelled"));
-            const result = await bridge.request<"computer.cancel">("computer.cancel", {
+            const result = await request<"computer.cancel">("computer.cancel", {
               ...(desktop ? { desktopId: desktop } : {}),
             }) as ComputerCancelResult;
             return {
@@ -283,7 +300,7 @@ export function createComputerTool(bridge: HostServicesBridge, _sessionId: strin
             };
           }
           case "release": {
-            const result = await bridge.request<"computer.release">("computer.release", {
+            const result = await request<"computer.release">("computer.release", {
               ...(desktop ? { desktopId: desktop } : {}),
             }) as ComputerReleaseResult;
             return {
@@ -306,13 +323,13 @@ export function createComputerTool(bridge: HostServicesBridge, _sessionId: strin
               // Snapshot the configured target once per evaluation. A settings
               // change while the script awaits must not redirect its next click.
               const requestOptions = { signal: controller.signal };
-              const initial = (await bridge.request("computer.control", desktop ? { desktopId: desktop } : {}, requestOptions)).control;
+              const initial = (await request("computer.control", desktop ? { desktopId: desktop } : {}, requestOptions)).control;
               const epochs = new Map([[initial.desktopId, initial.automationEpoch]]);
               const images: Array<{ type: "image"; data: string; mimeType: string }> = [];
               const field = async (requested?: string) => {
                 const id = requested ?? initial.desktopId;
                 if (!epochs.has(id)) {
-                  const control = (await bridge.request("computer.control", { desktopId: id }, requestOptions)).control;
+                  const control = (await request("computer.control", { desktopId: id }, requestOptions)).control;
                   epochs.set(id, control.automationEpoch);
                 }
                 return { desktopId: id };
@@ -324,7 +341,7 @@ export function createComputerTool(bridge: HostServicesBridge, _sessionId: strin
                   bridge.request("computer.observe", { ...opts, ...await field(opts?.desktopId), app }, requestOptions).then((r) => r.observation),
                 act: async (action: ComputerAction, opts?: { desktopId?: string }) => {
                   const target = await field(opts?.desktopId);
-                  const result = (await bridge.request("computer.act", { ...target, action, automationEpoch: epochs.get(target.desktopId)! }, requestOptions)).result;
+                  const result = (await request("computer.act", { ...target, action, automationEpoch: epochs.get(target.desktopId)! }, requestOptions)).result;
                   if (!result.accepted || result.cancelled || result.outcome) {
                     throw new Error(`Computer action did not complete normally (${result.outcome ?? (result.cancelled ? "cancelled" : "rejected")}): ${result.detail ?? "observe the desktop before continuing"}`);
                   }
@@ -335,7 +352,7 @@ export function createComputerTool(bridge: HostServicesBridge, _sessionId: strin
                 open: async (opts: { url?: string; path?: string; command?: string; args?: string[]; desktopId?: string }) => {
                   const { desktopId, ...rest } = opts;
                   const target = await field(desktopId);
-                  const result = (await bridge.request("computer.open", { ...rest, ...target }, requestOptions)) as { accepted?: boolean; cancelled?: boolean; outcome?: string; detail?: string; pid?: number };
+                  const result = (await request("computer.open", { ...rest, ...target, automationEpoch: epochs.get(target.desktopId)! }, requestOptions)) as { accepted?: boolean; cancelled?: boolean; outcome?: string; detail?: string; pid?: number };
                   if (!result.accepted || result.cancelled || result.outcome) {
                     throw new Error(`Computer open did not complete normally (${result.outcome ?? (result.cancelled ? "cancelled" : "rejected")}): ${result.detail ?? "check the desktop"}`);
                   }
@@ -346,6 +363,20 @@ export function createComputerTool(bridge: HostServicesBridge, _sessionId: strin
                   if (!screenshot || screenshot.mime !== "image/png" || typeof screenshot.base64 !== "string") throw new Error("emitImage requires an observation with a screenshot");
                   images.push({ type: "image", data: screenshot.base64, mimeType: screenshot.mime });
                 },
+                browser: async (opts: import('@varin/protocol').ComputerBrowserParams) => {
+                  const target = await field(opts.desktopId);
+                  const result = await request('computer.browser', { ...opts, ...target, automationEpoch: epochs.get(target.desktopId)! }, requestOptions);
+                  if (!result.ok || result.cancelled || result.outcome) throw new Error(`Browser operation did not complete normally: ${result.error ?? result.outcome ?? 'cancelled'}`);
+                  return result;
+                },
+                office: async (opts: import('@varin/protocol').ComputerOfficeParams) => {
+                  const target = await field(opts.desktopId);
+                  const result = await request('computer.office', { ...opts, ...target, automationEpoch: epochs.get(target.desktopId)! }, requestOptions);
+                  if (!result.ok || result.cancelled || result.outcome) throw new Error(`Office operation did not complete normally: ${result.error ?? result.outcome ?? 'cancelled'}`);
+                  return result;
+                },
+                evidence: async (opts: import('@varin/protocol').ComputerEvidenceParams = {}) =>
+                  request('computer.evidence', { ...opts, ...await field(opts.desktopId) }, requestOptions),
               };
               const result = await repl.run(params.script, async (method, args) => {
                 controller.signal.throwIfAborted();
@@ -363,7 +394,7 @@ export function createComputerTool(bridge: HostServicesBridge, _sessionId: strin
             }
           }
           case "open": {
-            const result = await bridge.request("computer.open", {
+            const result = await request("computer.open", {
               ...(desktop ? { desktopId: desktop } : {}),
               ...(params.url !== undefined ? { url: params.url } : {}),
               ...(params.path !== undefined ? { path: params.path } : {}),
@@ -381,7 +412,7 @@ export function createComputerTool(bridge: HostServicesBridge, _sessionId: strin
           case "put": {
             if (!params.relativePath?.trim()) return errorResult(new HarnessRequestError("invalid-params", "put requires relativePath"));
             if (typeof params.contentBase64 !== "string") return errorResult(new HarnessRequestError("invalid-params", "put requires contentBase64"));
-            const result = await bridge.request("computer.fileWrite", {
+            const result = await request("computer.fileWrite", {
               relativePath: params.relativePath,
               contentBase64: params.contentBase64,
               ...(desktop ? { desktopId: desktop } : {}),
@@ -393,7 +424,7 @@ export function createComputerTool(bridge: HostServicesBridge, _sessionId: strin
             if (!Number.isSafeInteger(params.port) || params.port! < 1 || params.port! > 65535) {
               return errorResult(new HarnessRequestError("invalid-params", "forward requires port (1-65535)"));
             }
-            const result = await bridge.request("environment.forward", {
+            const result = await request("environment.forward", {
               port: params.port!,
               ...(params.host !== undefined ? { host: params.host } : {}),
               ...(params.target !== undefined ? { target: params.target } : {}),
@@ -405,12 +436,12 @@ export function createComputerTool(bridge: HostServicesBridge, _sessionId: strin
             return { content: [{ type: "text", text: `service on ${a.service.machineId} ${a.service.host}:${a.service.port} — ${where}` }], details: result as unknown as Record<string, unknown> };
           }
           case "forwards": {
-            const result = await bridge.request("environment.forwards", {});
+            const result = await request("environment.forwards", {});
             return { content: [{ type: "text", text: JSON.stringify(result.accesses, null, 2) }], details: result as unknown as Record<string, unknown> };
           }
           case "forwardClose": {
             if (!params.forwardId?.trim()) return errorResult(new HarnessRequestError("invalid-params", "forwardClose requires forwardId"));
-            const result = await bridge.request("environment.forwardClose", { id: params.forwardId });
+            const result = await request("environment.forwardClose", { id: params.forwardId });
             return { content: [{ type: "text", text: result.closed ? "forward closed" : "no live forward with that id" }], details: result as unknown as Record<string, unknown> };
           }
           case "install": {
@@ -419,7 +450,7 @@ export function createComputerTool(bridge: HostServicesBridge, _sessionId: strin
             if (groups.length === 0 && packages.length === 0) {
               return errorResult(new HarnessRequestError("invalid-params", "install requires groups or packages"));
             }
-            const result = await bridge.request("computer.installSoftware", {
+            const result = await request("computer.installSoftware", {
               ...(groups.length ? { groups } : {}),
               ...(packages.length ? { packages } : {}),
               ...(desktop ? { desktopId: desktop } : {}),
@@ -432,57 +463,60 @@ export function createComputerTool(bridge: HostServicesBridge, _sessionId: strin
           }
           case "browser": {
             const op = (params.browserOp ?? "status").trim() as import("@varin/protocol").ComputerBrowserOp;
-            const result = await bridge.request("computer.browser", {
+            const result = await request("computer.browser", {
               op,
               ...(desktop ? { desktopId: desktop } : {}),
               ...(params.tabId ? { tabId: params.tabId } : {}),
+              ...(params.browserBinary ? { binary: params.browserBinary } : {}),
+              ...(params.browserProfile ? { profile: params.browserProfile } : {}),
+              ...(params.browserPort !== undefined ? { port: params.browserPort } : {}),
+              ...(params.browserLimit !== undefined ? { limit: params.browserLimit } : {}),
               ...(params.browserAct !== undefined ? { act: params.browserAct as import("@varin/protocol").ComputerBrowserAct } : {}),
             });
-            const r = result as { ok?: boolean; outcome?: string; status?: { running?: boolean; browser?: string };
-              tabs?: Array<{ id: string; title?: string; url?: string }>; lines?: string[];
-              result?: unknown; error?: string; image?: string };
+            const r = result;
             if (r.outcome === "unknown") {
               return errorResult(new HarnessRequestError("unavailable", `browser op may have reached the target — verify page state before retrying (${r.error ?? "response lost"})`));
             }
             const text = op === "status" || op === "launch"
-              ? (r.status?.running ? `browser running${r.status.browser ? `: ${r.status.browser}` : ""}` : "browser not running")
+              ? (r.status?.running ? `browser interface connected${r.status.browser ? `: ${r.status.browser}` : ""}` : `browser interface unavailable${r.status?.detail ? `: ${r.status.detail}` : ""}`)
               : op === "tabs"
                 ? (r.tabs ?? []).map((t) => `${t.id} ${t.title ?? ""} ${t.url ?? ""}`).join("\n") || "no tabs"
                 : op === "snapshot"
-                  ? (r.lines ?? []).slice(0, 200).join("\n") || "empty snapshot"
+                  ? `${(r.lines ?? []).join("\n") || "empty snapshot"}${r.truncated ? "\n[more AX nodes omitted; request a larger limit or inspect a specific tab]" : ""}`
                   : op === "act" && (params.browserAct as { kind?: string })?.kind === "screenshot"
                     ? "frame captured (see details.image)"
                     : r.error ?? (r.result !== undefined ? JSON.stringify(r.result) : "ok");
-            return { content: [{ type: "text", text }], ...(r.ok === false ? { isError: true as const } : {}), details: result as unknown as Record<string, unknown> };
+            const blocks: Array<{ type: 'text'; text: string } | { type: 'image'; data: string; mimeType: string }> = [{ type: 'text', text: r.ok === false ? r.error ?? text : text }];
+            const frame = r.image?.match(/^data:(image\/[^;]+);base64,(.+)$/u);
+            if (frame) blocks.push({ type: 'image', data: frame[2]!, mimeType: frame[1]! });
+            return { content: blocks, ...(r.ok === false || r.cancelled ? { isError: true as const } : {}), details: result as unknown as Record<string, unknown> };
           }
           case "office": {
             const op = (params.officeOp ?? "status").trim() as import("@varin/protocol").ComputerOfficeOp;
-            const result = await bridge.request("computer.office", {
+            const result = await request("computer.office", {
               op,
               ...(desktop ? { desktopId: desktop } : {}),
               ...(params.officePath ? { path: params.officePath } : {}),
+              ...(params.officeUrl ? { url: params.officeUrl } : {}),
               ...(params.officeAct !== undefined ? { act: params.officeAct as import("@varin/protocol").ComputerOfficeAct } : {}),
             });
-            const r = result as { ok?: boolean; outcome?: string; status?: { running?: boolean };
-              docs?: Array<{ title?: string; kind?: string; modified?: boolean; url?: string | null }>;
-              doc?: { title?: string; url?: string | null; modified?: boolean };
-              sheet?: string; range?: string; values?: unknown[][]; modified?: boolean; error?: string };
+            const r = result;
             if (r.outcome === "unknown") {
               return errorResult(new HarnessRequestError("unavailable", `office op may have reached the target — verify document state before retrying (${r.error ?? "response lost"})`));
             }
             const text = op === "status" || op === "launch"
-              ? (r.status?.running ? "LibreOffice running" : "LibreOffice not running")
+              ? (r.status?.running ? "LibreOffice interface connected" : `LibreOffice interface unavailable${r.status?.detail ? `: ${r.status.detail}` : ""}`)
               : op === "docs"
-                ? (r.docs ?? []).map((d) => `${d.title ?? "(untitled)"} [${d.kind ?? "doc"}]${d.modified ? " (modified)" : ""} ${d.url ?? ""}`).join("\n") || "no open documents"
+                ? (r.docs ?? []).map((d) => `${d.id ?? ""} ${d.title ?? "(untitled)"} [${d.kind ?? "doc"}]${d.modified ? " (modified)" : ""} ${d.url ?? ""}`).join("\n") || "no open documents"
                 : op === "open"
                   ? `opened ${r.doc?.title ?? ""}${r.doc?.url ? ` ${r.doc.url}` : ""}`
                   : op === "act" && (params.officeAct as { kind?: string })?.kind === "read"
-                    ? JSON.stringify(r.values ?? [])
+                    ? r.text ?? JSON.stringify(r.values ?? [])
                     : r.error ?? `ok${r.modified === true ? " (modified)" : ""}`;
-            return { content: [{ type: "text", text }], ...(r.ok === false ? { isError: true as const } : {}), details: result as unknown as Record<string, unknown> };
+            return { content: [{ type: "text", text: r.ok === false ? r.error ?? text : text }], ...(r.ok === false || r.cancelled ? { isError: true as const } : {}), details: result as unknown as Record<string, unknown> };
           }
           case "evidence": {
-            const result = await bridge.request("computer.evidence", {
+            const result = await request("computer.evidence", {
               ...(desktop ? { desktopId: desktop } : {}),
               ...(params.evidenceSession !== undefined ? { sessionId: params.evidenceSession } : {}),
               ...(params.evidenceSince !== undefined ? { since: params.evidenceSince } : {}),
@@ -500,14 +534,14 @@ export function createComputerTool(bridge: HostServicesBridge, _sessionId: strin
             // the change only affects ops admitted afterwards.
             const hasUpdate = params.workTarget !== undefined || params.desktopId !== undefined || params.clear === true;
             const result = hasUpdate
-              ? await bridge.request("environment.set", {
+              ? await request("environment.set", {
                   ...(params.clear === true ? { workTarget: null, desktopId: null }
                     : {
                         ...(params.workTarget !== undefined ? { workTarget: params.workTarget || null } : {}),
                         ...(params.desktopId !== undefined ? { desktopId: params.desktopId || null } : {}),
                       }),
                 })
-              : await bridge.request("environment.get", {});
+              : await request("environment.get", {});
             const env = result.environment;
             const lines = [
               env

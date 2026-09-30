@@ -1,5 +1,6 @@
 import { spawn } from 'node:child_process';
-import { readFile } from 'node:fs/promises';
+import { mkdir, readFile, rm, writeFile } from 'node:fs/promises';
+import { randomUUID } from 'node:crypto';
 import { join } from 'node:path';
 import type { DriverSpawnSpec } from './driver-host.js';
 import { HarnessServiceError } from '../harness/service-error.js';
@@ -102,7 +103,7 @@ export function createLinuxDesktop(options: { dataDir: string; driverDir: string
       operation = pending;
       try { return await pending; } finally { if (operation === pending) operation = undefined; }
     },
-    async install(spec: { groups?: string[]; packages?: string[] }): Promise<LinuxSoftwareResult[]> {
+    async install(spec: { groups?: string[]; packages?: string[]; signal?: AbortSignal }): Promise<LinuxSoftwareResult[]> {
       if (options.platform !== 'linux') throw new HarnessServiceError('unavailable', 'Component install requires a Linux environment');
       const groups = spec.groups ?? [];
       const packages = spec.packages ?? [];
@@ -118,10 +119,22 @@ export function createLinuxDesktop(options: { dataDir: string; driverDir: string
       const previous = installOperation;
       const pending = (async (): Promise<LinuxSoftwareResult[]> => {
         await previous?.catch(() => undefined);
+        spec.signal?.throwIfAborted();
+        const cancelDir = join(data, 'installation-cancel');
+        await mkdir(cancelDir, { recursive: true });
+        const cancelFile = join(cancelDir, randomUUID());
+        let cancellation: Promise<void> | undefined;
+        const abort = () => { cancellation ??= writeFile(cancelFile, '').catch(() => undefined); };
+        spec.signal?.addEventListener('abort', abort, { once: true });
+        if (spec.signal?.aborted) abort();
+        try {
         const args = [installer, '--data-dir', data,
+          '--cancel-file', cancelFile,
           ...groups.flatMap((group) => ['--group', group]),
           ...packages.flatMap((pkg) => ['--package', pkg])];
         const result = await execute('/usr/bin/python3', args);
+        // The script acknowledges exit only after its apt subprocess stops.
+        spec.signal?.throwIfAborted();
         const lastLine = result.stdout.trim().split(/\r?\n/u).at(-1);
         let payload: { ok?: boolean; error?: string; results?: LinuxSoftwareResult[] } | undefined;
         try { payload = JSON.parse(lastLine ?? '') as typeof payload; } catch { /* detail below */ }
@@ -130,6 +143,11 @@ export function createLinuxDesktop(options: { dataDir: string; driverDir: string
           throw new HarnessServiceError('unavailable', payload?.error || result.stderr.trim() || 'Component installer returned no result');
         }
         return payload.results;
+        } finally {
+          spec.signal?.removeEventListener('abort', abort);
+          await cancellation;
+          await rm(cancelFile, { force: true });
+        }
       })();
       installOperation = pending;
       try { return await pending; } finally { if (installOperation === pending) installOperation = undefined; }

@@ -2468,8 +2468,10 @@ export function createFollowUpService(deps: FollowUpServiceDeps) {
   // channel, and a fallbackAt scheduled there would clobber the tick (the tick
   // guard then aborts every subsequent evaluation).
   const desktopTimers = new Map<string, ReturnType<typeof setTimeout>>();
+  let desktopDisposed = false;
 
   const evaluateDesktopWait = async (workspaceId: string, followUpId: string, via: string): Promise<void> => {
+    if (desktopDisposed) return;
     const record = await getDefinitionRecord(workspaceId, followUpId);
     if (!record || record.state !== "waiting") return;
     const payload = payloadOf(record) as unknown as DefinitionPayload;
@@ -2486,7 +2488,7 @@ export function createFollowUpService(deps: FollowUpServiceDeps) {
         reportError(error);
         return undefined;
       });
-      if (observed === undefined) return; // transient miss — the next tick retries
+      if (observed === undefined || desktopDisposed) return;
       const status = observed.status;
       const matched = status !== null && (source.states ?? []).includes(status);
       const previous = payload.sourceState?.desktopStatus;
@@ -2495,7 +2497,7 @@ export function createFollowUpService(deps: FollowUpServiceDeps) {
         desktopId: source.desktopId, status, observedAt: now(), via,
         ...(previous !== undefined ? { previousStatus: previous } : {}),
       };
-      if (!matched) {
+      if (!matched || source.every === true && previous === status) {
         // The baseline updates on every observation so a later transition
         // into a matching state reports what it left.
         await updateSourceState(workspaceId, followUpId, patch, sourceJson).catch(reportError);
@@ -2505,10 +2507,10 @@ export function createFollowUpService(deps: FollowUpServiceDeps) {
       // update would bump recordRevision and trip fire()'s stale-revision
       // guard, and could never land once the wait turns "triggered".
       await fire(workspaceId, followUpId, "desktop-status", facts,
-        `desktop-status:${String(previous)}->${status}`, {
+        `desktop-status:${String(previous)}->${status}:${record.recordRevision}`, {
           recordRevision: record.recordRevision,
           sourceIdentity: sourceIdentityFor(source, "desktop-status"),
-        }, { sourceStatePatch: patch });
+        }, { rearm: source.every === true, sourceStatePatch: patch });
       return;
     }
 
@@ -2520,7 +2522,7 @@ export function createFollowUpService(deps: FollowUpServiceDeps) {
       reportError(error);
       return undefined;
     });
-    if (found === undefined) return;
+    if (found === undefined || desktopDisposed) return;
     const sha256 = found?.sha256 ?? null;
     const baseline = payload.sourceState?.desktopArtifactSha ?? source.sha256;
     const satisfied = sha256 !== null && sha256 !== baseline;
@@ -2540,10 +2542,10 @@ export function createFollowUpService(deps: FollowUpServiceDeps) {
       ...(baseline !== undefined ? { previousSha256: baseline } : {}),
       observedAt: now(),
       via,
-    }, `desktop-artifact-${sha256}`, {
+    }, `desktop-artifact-${sha256}-${record.recordRevision}`, {
       recordRevision: record.recordRevision,
       sourceIdentity: sourceIdentityFor(source, "desktop-artifact"),
-    }, { sourceStatePatch: { desktopArtifactSha: sha256, desktopObservedAt: now() } });
+    }, { rearm: source.every === true, sourceStatePatch: { desktopArtifactSha: sha256, desktopObservedAt: now() } });
   };
 
   const clearDesktopTimer = (followUpId: string) => {
@@ -2560,11 +2562,11 @@ export function createFollowUpService(deps: FollowUpServiceDeps) {
       const workspaceId = desktopWaits.get(followUpId);
       if (!workspaceId) return;
       void (async () => {
-        await evaluateDesktopWait(workspaceId, followUpId, "poll");
-        const record = await getDefinitionRecord(workspaceId, followUpId).catch(() => null);
+        await evaluateDesktopWait(workspaceId, followUpId, "poll").catch(reportError);
+        const record = await getDefinitionRecord(workspaceId, followUpId).catch((error) => { reportError(error); return undefined; });
         // Re-arm the next tick only while the wait is still live — a fired
         // or cancelled definition stops polling.
-        if (record?.state === "waiting" && desktopWaits.has(followUpId)) scheduleDesktopPoll(followUpId);
+        if (!desktopDisposed && (record === undefined || record?.state === "waiting") && desktopWaits.has(followUpId)) scheduleDesktopPoll(followUpId);
       })().catch(reportError);
     }, DESKTOP_POLL_MS);
     desktopTimers.set(followUpId, timer);
@@ -4125,6 +4127,9 @@ export function createFollowUpService(deps: FollowUpServiceDeps) {
     definitionWorkspaces,
     settleTarget,
     dispose: () => {
+      desktopDisposed = true;
+      for (const id of [...desktopTimers.keys()]) clearDesktopTimer(id);
+      desktopWaits.clear();
       unsubscribeAttempts?.();
       unsubscribeSamples?.();
       unsubscribeShellEvents?.();

@@ -1,8 +1,11 @@
 # 可组合执行环境：实施与验收记录
 
-Status: independent acceptance in progress — 已有 EE1–EE6 候选实现，正在逐项核对真实消费者、生命周期和部署链。
+Status: independent acceptance complete for available local evidence — EE1–EE6 是底层候选实现；设计中的任意部署组合尚未验收通过。
 基线：设计提交 `7e3baa14` 之上的当前 main。BC0–BC9 既有覆盖与原生证据缺口仍以
 [bot-computer-use-review.md](bot-computer-use-review.md) 为准，本文件只记录执行环境新增交付。
+
+前六批保留执行代理交付时的检查口径；末尾「独立验收修复」和「剩余产品缺口」覆盖其中后来证伪的结论。
+定向测试证明相应代码路径；没有真实 Linux 桌面、跨机或 guest VM 的证据时，不把它们写成已经跑通。
 
 ## 交付批次
 
@@ -11,7 +14,7 @@ Status: independent acceptance in progress — 已有 EE1–EE6 候选实现，�
 Thread 获得耐久 `environment` 绑定 `{workTarget?, desktopId?, updatedAt}`：
 
 - 存放于 Thread catalog（`thread-registry.ts`），子 Thread 默认继承父绑定，`thread.dispatch` 可显式覆盖。
-- `environment.get` / `environment.set` Harness 方法（`context.session` / `control.thread`）。
+- `environment.get` / `environment.set` Harness 方法（`context.session` / `control.environment`）。
   `set` 在写入前验证目标真实存在（受管执行目标经 `managedRemoteTargets.targetFor`，桌面经 computer 目录），
   返回 `handoff` 说明真实效果：此后受理的操作使用新位置，已受理操作保留其固定目标，不发生资源迁移。
 - 消费方每次受理时解析一次并固定：`shell.exec` 的 `target`（显式参数 > 绑定 > 本机），
@@ -147,12 +150,11 @@ install-components.py 真机执行验证校验路径（未知组/注入包名拒
 
 ### 第五批：浏览器桥——同一真实现场（EE5a，§7.2，§13 收敛）
 
-§13"默认浏览器和连接协议"收敛：**Chromium + CDP**。选型依据：CDP 附着是
-唯一能把 Agent 操作绑定到人工可见的同一持久会话的协议路径；Playwright
+§13"默认浏览器和连接协议"收敛：**Chromium + CDP**。CDP 能把 Agent 操作绑定到
+人工可见的同一持久会话；Playwright
 的 `connectOverCDP` 复用同一协议但其 Python wheel 需联网获取且对纯 CDP
 附着为过重依赖，故桥体以 Python 标准库直接实现 RFC6455/CDP 客户端，
-零新增依赖；firefox-esr 保留为用户默认浏览器（Debian 基线），chromium
-加入配方承担可控浏览器角色。
+零新增依赖；firefox-esr 保留既有安装和数据，chromium 成为受管桌面的默认浏览器。
 
 - `browser_bridge.py`：stdlib CDP 桥（_CdpSocket 手写握手/帧掩码/请求关联）。
   ops：`status`（/json/version 探活）、`launch`（chromium
@@ -183,10 +185,9 @@ Chromium 行为）；Page.navigate 返回即发不代表加载完成（事实边
 
 ### 第五批补：LibreOffice 桥——同一实例与未保存状态（EE5b，§7.2，§13 收敛）
 
-§13"LibreOffice/办公桥"收敛：**python3-uno + UNO socket attach**。
-soffice 以 `--accept=socket,host=127.0.0.1,port=2002;urp;` 常驻单实例
-（其 profile 单例语义使后续人工打开的文件仍进入同一进程与 accept
-socket）；若用户已自行运行无 accept 的实例，桥如实不可连接，不另起
+§13"LibreOffice/办公桥"收敛：**python3-uno + 同用户命名 pipe attach**。
+soffice 以 `--accept=pipe,name=varin-office-<uid>;urp;` 常驻，沿用户默认 profile；
+若用户已自行运行无 accept 的实例，桥如实不可连接，不另起
 隐藏 profile 冒充同一现场。
 
 - `office_bridge.py`：UNO 桥，ops `status`（连接探活+文档枚举）、
@@ -215,15 +216,16 @@ modified 标志、shape 校验行为）；Windows/macOS 无桥。
 设计要点是"可回看的证据 + 现有 Agent 的诊断入口"，不引入诊断 Agent、
 外部框架或每个动作固定加一轮诊断。沿此落地：
 
-- **`computer.evidence` 证据日志**：每台桌面一条内核记录
-  `computer.evidence:<id>`（recordType `computer.evidence`，环形 400 条
-  上限），条目含 seq/at/sessionId/lane/tool/op/target/outcome(ok|error|
+- **`computer.evidence` 证据日志**：原候选 recordType `computer.evidence`
+  未进入 Rust 内核允许列表，实际写入失败；独立验收改为每桌面 cursor 记录
+  与逐条不可变 step 记录（`computer.evidence.cursor` / `computer.evidence.step`）。
+  条目含 seq/at/sessionId/lane/tool/op/target/outcome(ok|error|
   cancelled|unknown|rejected)/error/observationId。全部 op funnel
   （observe/act/open/fileWrite/installSoftware/browser/office）与
   控制转移（takeover/handback/cancel/release）经 `journaledOp` 包装——
-  日志随 op 写入，永不门控、延迟或翻转操作本身（全部失败吞掉）。
-- **内容纪律（§10）**：只记标识符——tool/op/目标选择器/标签页 id/
-  文档标题/单元格范围/路径/URL 去 query+fragment 后的 origin+path；
+  日志随 op 写入，持久化会增加响应等待；日志失败不翻转操作结果。
+- **内容纪律（§10）**：只记标识符——固定词汇的 tool/op、目标选择器的
+  SHA-256 摘要；
   **键入文本、JS 表达式、单元格值、文件字节、凭据永不入日志**。
 - **权威侧归属**：本地 op 记本地 journal；远端 op 由拥有 Host 自己记，
   协调端 `evidence` 查询转发到拥有者——不双写、不冒名。
@@ -238,25 +240,29 @@ modified 标志、shape 校验行为）；Windows/macOS 无桥。
 - **明确不做**：无检查点/回放/自动恢复承诺（§10 历史回看与状态恢复
   分别实现）；无每动作强制诊断轮；无全量截图留存。
 
-验证：61/61 service 测试（新增 4：标识符入日志+键入文本不入、拒绝/
-接管分类、sessionId/since 过滤、远端转发的拥有者权威）；类型/ESLint
-全绿。
+验证：原 61 项是假内核测试，不能证明持久写入。独立验收新增真实 Rust
+kernel 的并发写入、分页、重启续写与敏感字段测试，已通过。
 
-未验证边界：journal 在真实多 op 并发下的 revision 冲突重试只测了
-单写者路径；远端 evidence 经假 fetch 验证转发形状，未跨真机；条目
-target 为 app 选择器原样——agent 选择器可能含用户键入文本边界上
-（app 名字段是目标选择器不是自由文本，纪律保持）。
+未验证边界：远端 evidence 经假 fetch 验证转发形状，未跨真机；日志目前仅存
+操作元数据与关联 observation id，没有自动保存动作前后截图、DOM/AX 状态或完整轨迹。
 
-## 待交付
+## 剩余产品缺口与原生验证
 
-EE1–EE6 已提交候选实现。2026-10-01 独立验收发现实际接线和行为缺陷，不能将剩余工作全部归为原生验证：
+独立验收已修正本文件末尾列出的底层缺陷。以下仍是**功能范围或接口缺口**，不能写成「只缺真机测试」：
 
-- 环境读取错误退回本机；默认目标未贯通权限检查；子 Thread 的局部覆盖丢失另一项继承。
-- forward 运行时未由 Host 持有和销毁，list/close 未按会话隔离，Bot 停止未关闭其监听。
-- 桌面组件发布遗漏浏览器/办公桥，guest 默认未安装 Chromium；安装并发误合并不同请求。
-- 新入口的取消、人工接管、文件写入及证据分页仍需修正。
+- `environment.set` 依附有 Thread 的会话；普通工作台根会话尚无完整的环境配置入口。
+  现有 workTarget 主要用于 shell/process；读写、搜索等文件工具尚未统一按环境资源定位。
+- forward 的监听在协调 Harness 所在机，返回的 loopback URL 也只在该机有效。
+  所选操作电脑若在另一台机器，尚不能直接用该 URL 打开跨机器服务。
+- Bot 休眠会停止自身工作并关闭所属会话、forward；共享桌面不能整条 lane 取消，当前采取
+  保守保留以保护其他工作。按 Bot scope 精确取消已受理的远端 GUI/安装操作仍需协议和准入实现。
+- 浏览器显式指定 CDP port 或 profile、办公通过用户默认 profile 连接时，尚无对「当前可见
+  桌面中的那个进程」的原生身份核验。协议桥已有同一 profile/UNO 连接方式，但同现场承诺仍要实机确认。
+- EE6 是可分页的元数据日志；动作前后画面和应用状态没有随步骤持久关联。记忆经验使用现有入口，
+  尚无自动诊断或可靠的失败重演。
+- 默认配方是软件清单与安装入口，尚非带版本/能力声明和升级迁移合同的完整镜像模板。
 
-以下原生边界也仍待验证：
+以下**原生边界**也仍待验证：
 
 - 真实 Linux 桌面上的端到端纵切：Chromium 真实会话的 CDP 附着/持久
   profile/下载即桌面可见、LibreOffice live 实例的 UNO 附着与未保存状态、
@@ -292,3 +298,27 @@ PPT 脚本库不臆造 apt 包名，仍可按任务安装。使用 `--no-install
 
 验证：desktop 发布目录独立导入测试、CDP 假端点往返通过；Linux 组件与 computer service 65 项通过。
 未执行 apt 安装、systemd/Xvnc、真实 Chromium。开发机无已安装 WSL/Linux 环境。
+
+### 操作接线、取消和真实内核日志
+
+- `computer.open/fileWrite/installSoftware/browser/office` 现在贯通 HTTP 断开、工具取消和桌面代际；
+  文件写入与 apt 安装在子进程退出后才确认取消。浏览器/办公阻塞调用放到可取消 helper，helper
+  绑定驱动父进程生命期；取消后的应用效果仍按 `unknown/partial` 表达，不假称回滚。
+- 只读浏览器/办公查询不会触发驱动的 `release_input`，避免松开人工保持的键鼠手势。
+  Browser 点击尝试在失败路径释放鼠标；真实应用效果需重观测。
+- 证据日志的 Rust recordType 已接入内核：每桌面 cursor 分配序号，独立 step 持久化；
+  并发序号、跨重启续写、`since` 正向分页与无截断读取通过真核测试。保留可能的预留空洞；
+  目标摘要和固定 op 名称避免把 URL、标题、路径或任意异常文本当作日志内容。
+- CDP 无障碍树按 `nodeId/childIds` 还原层级并标记截断；WS 升级后紧邻的数据帧不再遗失。
+  办公桥使用同用户命名 pipe、活文档 `RuntimeUID`，支持 Writer 读取与指定路径另存/PDF 导出。
+  工具直达入口提供浏览器 profile/port/limit 和办公 URL。
+- follow-up 的重复 desktop 源按变化重新武装，ABA 循环使用源 revision 去重；释放 timer、
+  短暂探测错误继续轮询。`control.environment` 权限给能操作 computer/bash 的 worker，
+  不再误要求完整 Thread 控制权。
+- 远端 observe/act 透传原会话标识；桌面最近使用记录在发给驱动前写入，避免旧动作晚完成
+  覆盖新工作的归属。共享桌面上的 Bot 休眠不再调用整个桌面的 cancel。
+
+证据：真实 Rust kernel 测试 26 项 + evidence 接受测试 1 项通过；Node runner 下 follow-up
+真核套件 53 项通过；当前 computer/routes/linux-desktop/Host/Bot 定向测试与 TypeScript 类型检查通过。
+Python 假 CDP、发布目录独立导入、人工手势模拟测试通过。开发机无可运行的 Linux 桌面、
+真实 Chromium/UNO、apt 或双机/VM 环境，因此这些结果不证明实际应用与跨机链路。

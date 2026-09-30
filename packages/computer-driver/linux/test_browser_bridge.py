@@ -24,7 +24,7 @@ class FakeCdpWs:
         self.commands = []
 
     def recv_frame(self):
-        first, second = self.sock.recv(2)
+        first, second = self._exact(2)
         masked = second & 0x80
         length = second & 0x7F
         if length == 126:
@@ -40,7 +40,10 @@ class FakeCdpWs:
     def _exact(self, n):
         data = b""
         while len(data) < n:
-            data += self.sock.recv(n - len(data))
+            chunk = self.sock.recv(n - len(data))
+            if not chunk:
+                raise EOFError()
+            data += chunk
         return data
 
     def send_text(self, text):
@@ -60,7 +63,8 @@ class FakeCdpWs:
             buf += self.sock.recv(4096)
         key = next(line.split(":", 1)[1].strip() for line in buf.decode("latin1").split("\r\n") if line.lower().startswith("sec-websocket-key"))
         accept = base64.b64encode(hashlib.sha1((key + REAL_GUID).encode()).digest()).decode()
-        self.sock.sendall(f"HTTP/1.1 101 Switching Protocols\r\nUpgrade: websocket\r\nConnection: Upgrade\r\nSec-WebSocket-Accept: {accept}\r\n\r\n".encode())
+        event = json.dumps({"method": "Test.initialEvent"}).encode()
+        self.sock.sendall(f"HTTP/1.1 101 Switching Protocols\r\nUpgrade: websocket\r\nConnection: Upgrade\r\nSec-WebSocket-Accept: {accept}\r\n\r\n".encode() + bytes([0x81, len(event)]) + event)
         while True:
             opcode, payload = self.recv_frame()
             if opcode == 0x8:
@@ -72,8 +76,8 @@ class FakeCdpWs:
             if request["method"] == "Runtime.evaluate":
                 result = {"result": {"type": "string", "value": "hello page"}}
             elif request["method"] == "Accessibility.getFullAXTree":
-                result = {"nodes": [{"role": {"value": "RootWebArea"}, "name": {"value": "T"},
-                                    "children": [{"role": {"value": "button"}, "name": {"value": "OK"}}]}]}
+                result = {"nodes": [{"nodeId": "1", "childIds": ["2"], "role": {"value": "RootWebArea"}, "name": {"value": "T"}},
+                                    {"nodeId": "2", "parentId": "1", "role": {"value": "button"}, "name": {"value": "OK"}}]}
             elif request["method"] == "Input.dispatchMouseEvent":
                 result = {}
             elif request["method"] == "Input.insertText":
@@ -100,10 +104,14 @@ def ws_loop():
         conn, _ = ws_server.accept()
         session = FakeCdpWs(conn)
         ws_sessions.append(session)
-        try:
-            session.serve()
-        except Exception:
-            return
+        def serve_session(session):
+            try:
+                session.serve()
+            except (EOFError, OSError):
+                pass
+            finally:
+                session.sock.close()
+        threading.Thread(target=serve_session, args=(session,), daemon=True).start()
 
 
 threading.Thread(target=ws_loop, daemon=True).start()
@@ -154,7 +162,10 @@ tabs = browser_bridge.perform({"op": "tabs", "cdp_port": PORT})
 check("tabs lists only page targets", tabs["ok"] and len(tabs["tabs"]) == 1 and tabs["tabs"][0]["id"] == "tab-1")
 
 snapshot = browser_bridge.perform({"op": "snapshot", "tab": "tab-1", "cdp_port": PORT})
-check("snapshot flattens the AX tree", snapshot["ok"] and any("button OK" in line for line in snapshot["lines"]))
+check("snapshot follows CDP childIds", snapshot["ok"] and snapshot["lines"] == ["RootWebArea T", "  button OK"]
+      and snapshot["truncated"] is False)
+short_snapshot = browser_bridge.perform({"op": "snapshot", "tab": "tab-1", "cdp_port": PORT, "limit": 1})
+check("snapshot reports truncation", short_snapshot["lines"] == ["RootWebArea T"] and short_snapshot["truncated"] is True)
 
 nav = browser_bridge.perform({"op": "act", "tab": "tab-1", "cdp_port": PORT, "act": {"kind": "navigate", "url": "https://x/"}})
 check("navigate returns the frame id", nav["ok"] and nav["frameId"] == "f1")

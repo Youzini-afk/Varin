@@ -1754,6 +1754,7 @@ export type HarnessCapability =
   | "control.schedule"
   | "read.computer"
   | "control.computer"
+  | "control.environment"
   | "write.document";
 
 export const HARNESS_METHOD_CAPABILITY = {
@@ -1808,10 +1809,10 @@ export const HARNESS_METHOD_CAPABILITY = {
   "computer.office": "control.computer",
   "computer.evidence": "read.computer",
   "environment.get": "context.session",
-  "environment.set": "control.thread",
-  "environment.forward": "control.thread",
+  "environment.set": "control.environment",
+  "environment.forward": "control.environment",
   "environment.forwards": "context.session",
-  "environment.forwardClose": "control.thread",
+  "environment.forwardClose": "control.environment",
   "thread.dispatch": "control.thread",
   "thread.facts.set": "control.thread",
   "thread.list": "control.thread",

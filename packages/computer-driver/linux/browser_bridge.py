@@ -25,6 +25,7 @@ import socket
 import struct
 import subprocess
 import time
+from urllib.parse import urlsplit
 from browser_session import endpoint_for, launch_args, profile_for
 
 CDP_PORT = 9222
@@ -49,14 +50,14 @@ class _CdpSocket:
     """Minimal RFC6455 client for loopback CDP sessions."""
 
     def __init__(self, ws_url):
-        # ws://127.0.0.1:PORT/path
-        rest = ws_url.split("://", 1)[1]
-        hostport, _, path = rest.partition("/")
-        host, _, port = hostport.partition(":")
-        self.sock = socket.create_connection((host, int(port or 80)), timeout=15)
+        url = urlsplit(ws_url)
+        if url.scheme != "ws" or not url.hostname:
+            raise ValueError("Invalid CDP WebSocket endpoint")
+        self.sock = socket.create_connection((url.hostname, url.port or 80), timeout=15)
+        self._buffer = b""
         key = base64.b64encode(secrets.token_bytes(16)).decode("ascii")
         request = (
-            f"GET /{path} HTTP/1.1\r\nHost: {hostport}\r\nUpgrade: websocket\r\n"
+            f"GET {url.path or '/'}{('?' + url.query) if url.query else ''} HTTP/1.1\r\nHost: {url.netloc}\r\nUpgrade: websocket\r\n"
             f"Connection: Upgrade\r\nSec-WebSocket-Key: {key}\r\nSec-WebSocket-Version: 13\r\n\r\n"
         )
         self.sock.sendall(request.encode("ascii"))
@@ -65,10 +66,12 @@ class _CdpSocket:
         if " 101 " not in head.split("\r\n", 1)[0] + " ":
             raise RuntimeError("CDP websocket upgrade refused")
         accept = base64.b64encode(hashlib.sha1((key + WS_GUID).encode("ascii")).digest()).decode("ascii")
-        if accept not in head:
+        headers = dict(line.split(":", 1) for line in head.split("\r\n")[1:] if ":" in line)
+        headers = {name.lower(): value.strip() for name, value in headers.items()}
+        if headers.get("sec-websocket-accept") != accept:
+            self.sock.close()
             raise RuntimeError("CDP websocket handshake integrity failed")
         self._next_id = 0
-        self.events = []
 
     def _read_until(self, marker):
         data = b""
@@ -77,10 +80,13 @@ class _CdpSocket:
             if not chunk:
                 raise RuntimeError("CDP websocket closed")
             data += chunk
-        return data
+        end = data.index(marker) + len(marker)
+        self._buffer = data[end:]
+        return data[:end]
 
     def _recv_exact(self, n):
-        data = b""
+        data = self._buffer[:n]
+        self._buffer = self._buffer[n:]
         while len(data) < n:
             chunk = self.sock.recv(n - len(data))
             if not chunk:
@@ -106,6 +112,7 @@ class _CdpSocket:
 
     def _recv_message(self):
         message = b""
+        started = False
         while True:
             first, second = self._recv_exact(2)
             fin = first & 0x80
@@ -121,6 +128,8 @@ class _CdpSocket:
             if masked:
                 payload = bytes(b ^ mask[i % 4] for i, b in enumerate(payload))
             if opcode == 0x9:  # ping — answer, keep reading
+                if not fin or length > 125:
+                    raise RuntimeError("Invalid WebSocket control frame")
                 pong = bytearray([0x8A])
                 pong.append(0x80 | len(payload))
                 key2 = secrets.token_bytes(4)
@@ -130,6 +139,12 @@ class _CdpSocket:
                 continue
             if opcode == 0x8:
                 raise RuntimeError("CDP websocket closed by browser")
+            if opcode == 0xA:
+                continue
+            if opcode == 1 and not started:
+                started = True
+            elif opcode != 0 or not started:
+                raise RuntimeError("Unexpected CDP WebSocket frame")
             message += payload
             if fin:
                 return json.loads(message.decode("utf-8"))
@@ -147,7 +162,8 @@ class _CdpSocket:
                 if "error" in message:
                     raise RuntimeError(f"CDP {method}: {message['error'].get('message', 'error')}")
                 return message.get("result", {})
-            self.events.append(message)
+            # Unrelated events do not belong to this command's receipt. Keeping
+            # every event in a resident helper would retain page data forever.
         raise RuntimeError(f"CDP {method} timed out")
 
     def close(self):
@@ -199,35 +215,57 @@ def _status(operation):
 
 
 def _default_tab(port):
-    for target in _http(port, "/json/list"):
-        if target.get("type") == "page" and target.get("webSocketDebuggerUrl"):
-            return target["id"]
-    raise RuntimeError("no browser tab to attach")
+    pages = [target for target in _http(port, "/json/list")
+             if target.get("type") == "page" and target.get("webSocketDebuggerUrl")]
+    if len(pages) != 1:
+        raise RuntimeError("Select a tab id from tabs; there is not exactly one page")
+    return pages[0]["id"]
 
 
-def _flatten_ax(nodes, depth=0, limit=600, out=None):
-    if out is None:
-        out = []
-    if len(out) >= limit:
-        return out
-    for node in nodes:
-        if len(out) >= limit:
-            break
-        role = next((p.get("value", {}).get("value") for p in node.get("properties", []) if p.get("name") == "role"), None)
-        role = role or (node.get("role") or {}).get("value", "")
+def _flatten_ax(nodes, limit=600):
+    # CDP getFullAXTree returns a flat array. Hierarchy is encoded by
+    # nodeId/childIds (and sometimes parentId), not nested children.
+    by_id = {node["nodeId"]: node for node in nodes if node.get("nodeId")}
+    roots = [node for node in nodes if not node.get("parentId") or node["parentId"] not in by_id]
+    stack = [(node, 0) for node in reversed(roots)]
+    seen = set()
+    lines = []
+    while stack:
+        node, depth = stack.pop()
+        key = node.get("nodeId") or id(node)
+        if key in seen:
+            continue
+        seen.add(key)
+        role = (node.get("role") or {}).get("value", "")
         name = (node.get("name") or {}).get("value", "")
-        ignored = node.get("ignored")
-        if not ignored and (role or name):
-            out.append(f"{'  ' * min(depth, 8)}{role or 'node'} {name}".rstrip())
-        _flatten_ax(node.get("children") or [], depth + 1, limit, out)
-    return out
+        if not node.get("ignored") and (role or name):
+            if len(lines) >= limit:
+                return lines, True
+            lines.append(f"{'  ' * min(depth, 8)}{role or 'node'} {name}".rstrip())
+        children = [by_id[child] for child in node.get("childIds", []) if child in by_id]
+        stack.extend((child, depth + 1) for child in reversed(children))
+    # Preserve nodes not connected to any declared root, such as a partial
+    # CDP tree. They remain visible, without inventing a parent relation.
+    for node in nodes:
+        key = node.get("nodeId") or id(node)
+        if key not in seen and not node.get("ignored"):
+            if len(lines) >= limit:
+                return lines, True
+            lines.append(f"{(node.get('role') or {}).get('value', 'node')} {(node.get('name') or {}).get('value', '')}".rstrip())
+    return lines, False
 
 
 def perform(operation):
     try:
         return _perform(operation)
     except Exception as exc:
-        return {"ok": False, "error": str(exc)}
+        writes = operation.get("op") == "launch" or (operation.get("op") == "act"
+                 and (operation.get("act") or {}).get("kind") != "screenshot")
+        return {"ok": False, "error": str(exc), **({"outcome": "unknown"} if writes else {})}
+    finally:
+        for session in _sessions.values():
+            session.close()
+        _sessions.clear()
 
 
 def _perform(operation):
@@ -259,8 +297,7 @@ def _perform(operation):
     port, _ = _endpoint(operation)
 
     if op == "tabs":
-        tabs = [{"id": t.get("id"), "title": t.get("title"), "url": t.get("url"),
-                 "attached": f"{port}:{t.get('id')}" in _sessions}
+        tabs = [{"id": t.get("id"), "title": t.get("title"), "url": t.get("url")}
                 for t in _http(port, "/json/list") if t.get("type") == "page"]
         return {"ok": True, "tabs": tabs}
 
@@ -269,8 +306,8 @@ def _perform(operation):
         ws = _target_ws(tab, port)
         ws.command("Accessibility.enable")
         result = ws.command("Accessibility.getFullAXTree")
-        lines = _flatten_ax(result.get("nodes", []), limit=int(operation.get("limit") or 600))
-        return {"ok": True, "tab": tab, "lines": lines}
+        lines, truncated = _flatten_ax(result.get("nodes", []), limit=int(operation.get("limit") or 600))
+        return {"ok": True, "tab": tab, "lines": lines, "truncated": truncated}
 
     if op == "act":
         tab = operation.get("tab") or _default_tab(port)
@@ -278,27 +315,34 @@ def _perform(operation):
         ws.command("Page.enable")
         act = operation.get("act") or {}
         kind = act.get("kind")
+        if kind == "release":
+            ws.command("Input.dispatchMouseEvent", {"type": "mouseReleased", "x": act.get("x", 0), "y": act.get("y", 0), "button": "left", "clickCount": 1})
+            return {"ok": True, "tab": tab}
         if kind == "navigate":
             url = act.get("url")
             if not isinstance(url, str) or not url:
                 return {"ok": False, "error": "navigate requires url"}
             result = ws.command("Page.navigate", {"url": url})
+            if result.get("errorText"):
+                return {"ok": False, "tab": tab, "error": result["errorText"]}
             return {"ok": True, "tab": tab, "frameId": result.get("frameId")}
         if kind == "evaluate":
             expression = act.get("expression")
             if not isinstance(expression, str) or not expression:
                 return {"ok": False, "error": "evaluate requires expression"}
-            result = ws.command("Runtime.evaluate", {"expression": expression, "returnByValue": True})
+            result = ws.command("Runtime.evaluate", {"expression": expression, "returnByValue": True, "awaitPromise": True})
             value = result.get("result", {})
-            return {"ok": True, "tab": tab, "result": value.get("value"), "type": value.get("type"),
+            return {"ok": not bool(result.get("exceptionDetails")), "tab": tab, "result": value.get("value"), "type": value.get("type"),
+                    **({"error": "Page evaluation raised an exception; inspect its state", "outcome": "unknown"} if result.get("exceptionDetails") else {}),
                     "exception": bool(result.get("exceptionDetails"))}
         if kind == "click":
             x, y = act.get("x"), act.get("y")
             if not (isinstance(x, (int, float)) and isinstance(y, (int, float))):
                 return {"ok": False, "error": "click requires viewport x/y (use snapshot bounds or observe)"}
-            for event_type, extra in (("mousePressed", {"button": "left", "clickCount": 1}),
-                                      ("mouseReleased", {"button": "left", "clickCount": 1})):
-                ws.command("Input.dispatchMouseEvent", {"type": event_type, "x": x, "y": y, **extra})
+            try:
+                ws.command("Input.dispatchMouseEvent", {"type": "mousePressed", "x": x, "y": y, "button": "left", "clickCount": 1})
+            finally:
+                ws.command("Input.dispatchMouseEvent", {"type": "mouseReleased", "x": x, "y": y, "button": "left", "clickCount": 1})
             return {"ok": True, "tab": tab}
         if kind == "type":
             text = act.get("text")

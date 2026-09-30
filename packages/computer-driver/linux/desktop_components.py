@@ -5,8 +5,8 @@ from pathlib import Path
 
 
 def publish(session_dir, source_dir):
-    files = sorted(path for path in Path(source_dir).glob("*.py")
-                   if not path.name.startswith("test_"))
+    files = sorted(path for path in Path(source_dir).iterdir()
+                   if path.is_file() and path.suffix in (".py", ".json") and not path.name.startswith("test_"))
     digest = hashlib.sha256()
     for path in files:
         digest.update(path.name.encode())

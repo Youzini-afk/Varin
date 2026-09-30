@@ -27,6 +27,17 @@ def write_response(request_id, response):
     sys.stdout.flush()
 
 
+def observation_only(operation):
+    tool = operation.get("tool")
+    if tool in ("capture_frame", "get_app_state", "list_apps", "capabilities", "ping"):
+        return True
+    if tool == "browser":
+        return operation.get("op") in ("status", "tabs", "snapshot") or (operation.get("op") == "act" and (operation.get("act") or {}).get("kind") == "screenshot")
+    if tool == "office":
+        return operation.get("op") in ("status", "docs") or (operation.get("op") == "act" and (operation.get("act") or {}).get("kind") == "read")
+    return False
+
+
 try:
     import runtime
 except Exception as exc:
@@ -60,7 +71,7 @@ def main():
             finally:
                 # Human down/move/up requests form one gesture across frames.
                 # Successful observation/stream reads must not release it.
-                if response is None or not response.get("ok") or operation.get("tool") not in ("inject_input", "capture_frame", "get_app_state", "list_apps", "capabilities", "ping"):
+                if not observation_only(operation) and (response is None or not response.get("ok") or operation.get("tool") != "inject_input"):
                     runtime.release_input()
                 runtime.ACTIVE_REQUEST_ID = None
             write_response(request_id, response)

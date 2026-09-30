@@ -142,6 +142,7 @@ export function registerComputerRoutes(app: Express, { computers, requireAuth = 
         desktopId: String(request.params.desktopId ?? ""),
         app: typeof body.app === "string" ? body.app : "",
         signal: controller.signal,
+        ...(typeof body.sessionId === "string" ? { sessionId: body.sessionId } : {}),
         ...(body.window !== undefined && (typeof body.window === "number" || typeof body.window === "string")
           ? { window: body.window } : {}),
         ...(typeof body.includeScreenshot === "boolean" ? { includeScreenshot: body.includeScreenshot } : {}),
@@ -165,6 +166,7 @@ export function registerComputerRoutes(app: Express, { computers, requireAuth = 
         desktopId: String(request.params.desktopId ?? ""),
         action: request.body?.action,
         signal: controller.signal,
+        ...(typeof request.body?.sessionId === "string" ? { sessionId: request.body.sessionId } : {}),
         ...(typeof request.body?.automationEpoch === "string" ? { automationEpoch: request.body.automationEpoch } : {}),
       });
       response.json({ result });
@@ -217,7 +219,9 @@ export function registerComputerRoutes(app: Express, { computers, requireAuth = 
         ...(typeof body.url === "string" ? { url: body.url } : {}),
         ...(typeof body.path === "string" ? { path: body.path } : {}),
         ...(typeof body.command === "string" ? { command: body.command } : {}),
-        ...(Array.isArray(body.args) ? { args: body.args.filter((arg: unknown): arg is string => typeof arg === "string") } : {}),
+        ...(body.args !== undefined ? { args: body.args } : {}),
+        ...(typeof body.automationEpoch === "string" ? { automationEpoch: body.automationEpoch } : {}),
+        ...(typeof body.sessionId === "string" ? { sessionId: body.sessionId } : {}),
       });
       response.json({ result });
     } catch (error) {
@@ -228,12 +232,16 @@ export function registerComputerRoutes(app: Express, { computers, requireAuth = 
   /** One-shot file write into the managed desktop user's home (EE). */
   app.post("/api/computers/desktops/:desktopId/artifacts/write", requireAuth, async (request: Request, response: Response) => {
     response.setHeader("Cache-Control", "no-store");
+    const controller = new AbortController();
+    response.once("close", () => { if (!response.writableEnded) controller.abort(); });
     try {
       const body = request.body ?? {};
       const result = await computers.fileWrite({
         desktopId: String(request.params.desktopId ?? ""),
         relativePath: typeof body.relativePath === "string" ? body.relativePath : "",
-        contentBase64: typeof body.contentBase64 === "string" ? body.contentBase64 : "",
+        contentBase64: body.contentBase64,
+        signal: controller.signal,
+        ...(typeof body.sessionId === "string" ? { sessionId: body.sessionId } : {}),
       });
       response.json(result);
     } catch (error) {
@@ -245,12 +253,16 @@ export function registerComputerRoutes(app: Express, { computers, requireAuth = 
    * environment owning this desktop (EE §6.2). */
   app.post("/api/computers/desktops/:desktopId/software", requireAuth, async (request: Request, response: Response) => {
     response.setHeader("Cache-Control", "no-store");
+    const controller = new AbortController();
+    response.once("close", () => { if (!response.writableEnded) controller.abort(); });
     try {
       const body = request.body ?? {};
       const result = await computers.installSoftware({
         desktopId: String(request.params.desktopId ?? ""),
-        ...(Array.isArray(body.groups) ? { groups: body.groups.filter((g: unknown): g is string => typeof g === "string") } : {}),
-        ...(Array.isArray(body.packages) ? { packages: body.packages.filter((p: unknown): p is string => typeof p === "string") } : {}),
+        ...(body.groups !== undefined ? { groups: body.groups } : {}),
+        ...(body.packages !== undefined ? { packages: body.packages } : {}),
+        signal: controller.signal,
+        ...(typeof body.sessionId === "string" ? { sessionId: body.sessionId } : {}),
       });
       response.json(result);
     } catch (error) {
@@ -267,8 +279,10 @@ export function registerComputerRoutes(app: Express, { computers, requireAuth = 
       const body = request.body ?? {};
       const result = await computers.browser({
         desktopId: String(request.params.desktopId ?? ""),
-        op: typeof body.op === "string" ? body.op as never : "status",
+        op: body.op,
         signal: controller.signal,
+        ...(typeof body.automationEpoch === "string" ? { automationEpoch: body.automationEpoch } : {}),
+        ...(typeof body.sessionId === "string" ? { sessionId: body.sessionId } : {}),
         ...(typeof body.tabId === "string" ? { tabId: body.tabId } : {}),
         ...(typeof body.binary === "string" ? { binary: body.binary } : {}),
         ...(typeof body.profile === "string" ? { profile: body.profile } : {}),
@@ -290,8 +304,10 @@ export function registerComputerRoutes(app: Express, { computers, requireAuth = 
       const body = request.body ?? {};
       const result = await computers.office({
         desktopId: String(request.params.desktopId ?? ""),
-        op: typeof body.op === "string" ? body.op as never : "status",
+        op: body.op,
         signal: controller.signal,
+        ...(typeof body.automationEpoch === "string" ? { automationEpoch: body.automationEpoch } : {}),
+        ...(typeof body.sessionId === "string" ? { sessionId: body.sessionId } : {}),
         ...(typeof body.path === "string" ? { path: body.path } : {}),
         ...(typeof body.url === "string" ? { url: body.url } : {}),
         ...(body.act !== null && typeof body.act === "object" ? { act: body.act } : {}),

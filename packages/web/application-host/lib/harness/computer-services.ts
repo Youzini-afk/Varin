@@ -125,6 +125,7 @@ export function registerComputerServices(
         ...(params.url !== undefined ? { url: params.url } : {}),
         ...(params.path !== undefined ? { path: params.path } : {}),
         ...(params.command !== undefined ? { command: params.command } : {}),
+        ...(params.automationEpoch !== undefined ? { automationEpoch: params.automationEpoch } : {}),
         ...(params.args !== undefined ? { args: params.args } : {}),
         signal: ctx.signal,
         sessionId: ctx.sessionId,
@@ -139,6 +140,7 @@ export function registerComputerServices(
         relativePath: params.relativePath,
         contentBase64: params.contentBase64,
         sessionId: ctx.sessionId,
+        signal: ctx.signal,
       });
     },
   });
@@ -151,6 +153,8 @@ export function registerComputerServices(
         ...(desktopId !== undefined ? { desktopId } : {}),
         ...(params.groups !== undefined ? { groups: params.groups } : {}),
         ...(params.packages !== undefined ? { packages: params.packages } : {}),
+        sessionId: ctx.sessionId,
+        signal: ctx.signal,
       });
     },
   });
@@ -161,6 +165,7 @@ export function registerComputerServices(
       return requireService(host).browser({
         ...(desktopId !== undefined ? { desktopId } : {}),
         op: params.op,
+        ...(params.automationEpoch !== undefined ? { automationEpoch: params.automationEpoch } : {}),
         ...(params.tabId !== undefined ? { tabId: params.tabId } : {}),
         ...(params.binary !== undefined ? { binary: params.binary } : {}),
         ...(params.profile !== undefined ? { profile: params.profile } : {}),
@@ -179,6 +184,7 @@ export function registerComputerServices(
       return requireService(host).office({
         ...(desktopId !== undefined ? { desktopId } : {}),
         op: params.op,
+        ...(params.automationEpoch !== undefined ? { automationEpoch: params.automationEpoch } : {}),
         ...(params.path !== undefined ? { path: params.path } : {}),
         ...(params.url !== undefined ? { url: params.url } : {}),
         ...(params.act !== undefined ? { act: params.act } : {}),

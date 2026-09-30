@@ -348,11 +348,11 @@ Agent 遇到结果不符、重复失败或需要追查时，可以查询有关�
 | --- | --- |
 | Windows 本地虚拟机后端及其他平台优先顺序 | 先交付 Linux `qemu:///system`（libvirt provider，BC7/EE4）；Windows 本地虚拟化（Hyper-V）保留为开放后端——本机/远端 Windows 桌面已由直接驱动与 Host 连接覆盖，不由 VM 后端阻塞。 |
 | 默认浏览器和连接协议 | **Chromium + CDP 附着同一可见持久会话**。2026-10-01 验收将默认桌面、URL handler 与桥统一到同一持久 profile，按 profile 的实际端口和浏览器身份连接；用户既有 Firefox 安装与数据保留。CDP 是本次选型，不能据此宣称其他协议无法控制可见会话。桥体仍需真实 Chromium 验证。 |
-| LibreOffice 等应用桥的范围 | **python3-uno + UNO socket attach 同一 live 实例**（`office_bridge.py`）：status/launch/docs/open/act(read·write·insert·save)，含 `modified` 未保存状态；Calc/Writer 结构化操作交付，Impress 枚举可见但无结构化写入。 |
+| LibreOffice 等应用桥的范围 | **python3-uno + 同用户命名 pipe attach 到 live 实例**（`office_bridge.py`）：status/launch/docs/open/act(read·write·insert·save·export)，含 `modified` 未保存状态；Calc/Writer 结构化接口已接线，Impress 枚举可见但无结构化写入。真实 UNO 实例仍待验证。 |
 | 精确软件清单与组件发布方式 | `components.json` 分组配方（desktop/dev/docs）由桌面准备与安装入口共同消费；新增 Office 文件库和 PDF 工具，guest-init 请求 dev+docs。安装结果从 bootstrap 状态投影到 `software`，保留实际包名；接口就绪另行查询。 |
 | guest Host 的模块装配 | **guest 即标准 Varin Host**：guest-init 以 `cli.js serve` 常驻，经受管连接注册为远端 Host——desktop 镜像、服务转发、浏览器/办公桥、证据日志全部沿既有 remote 路径到达，不新增平行装配。 |
 | 已有工作跨 Harness 迁移 | **诚实交接而非假迁移**：`environment.set` 改变后续受理操作的目标，已受理操作保持绑定并可按 id 寻址，返回 `handoff` 说明实际效果；会话本身仍在原 Host 运行，不把重连当迁移。 |
-| 调试框架的借鉴或集成深度 | **证据日志 + 现有 Agent 诊断入口 + 条件化经验**（EE6）：`computer.evidence` 持久步骤日志、Pi `action=evidence` 回看、`memory remember`(nature:experience, trigger)固化已验证修正；CUADebug/AgentDebugX 的证据关联与验证思想已吸收，整套框架不预装不接入。 |
+| 调试框架的借鉴或集成深度 | **元数据证据日志 + 现有 Agent 诊断入口 + 条件化经验**（EE6）：`computer.evidence` 在真实 Rust kernel 持久记录步骤元数据、Pi `action=evidence` 回看、`memory remember`(nature:experience, trigger) 可存已验证修正；动作前后画面/状态尚未随步骤持久保存，整套 CUADebug/AgentDebugX 框架不预装不接入。 |
 
 这些选择不影响已确认的独立部署、用户经 Harness 发出操作、共享真实现场和精简默认环境方向。
 

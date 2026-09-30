@@ -128,6 +128,9 @@ export function createBotLifecycleRuntime(options: BotLifecycleRuntimeOptions): 
       if (failures.length) throw new Error(failures.map((result) => String(result.reason)).join('\n'));
       for (const desktop of await options.computers.workDesktops(scope)) {
         if (!desktop.usage || !desktop.work?.some((work) => work.scopeId === scope && work.sessionId === desktop.usage!.sessionId)) continue;
+        // cancel() invalidates the entire desktop lane. On a shared desktop
+        // that would also stop another Bot or a user's queued operations.
+        if (desktop.work.some((work) => work.scopeId !== scope)) continue;
         try {
           if ((await options.computers.control(desktop.id)).owner !== "human") await options.computers.cancel(desktop.id);
         } catch (error) {
