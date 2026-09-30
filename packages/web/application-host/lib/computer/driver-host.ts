@@ -40,7 +40,9 @@ export interface DriverRequest {
     /** Whole-desktop frame capture for view subscribers (BC5.B). */
     | "capture_frame"
     /** Absolute-coordinate human input through the control lane (BC5.C). */
-    | "inject_input";
+    | "inject_input"
+    /** Open a URL/path/application on the desktop's own machine (EE). */
+    | "open";
   [key: string]: unknown;
 }
 
@@ -66,6 +68,8 @@ export interface DriverResponse {
     bounds?: Record<string, unknown>;
     capturedAt?: string;
   };
+  /** Launched process id returned by `open` (EE). */
+  pid?: number;
 }
 
 export interface DriverSpawnSpec {

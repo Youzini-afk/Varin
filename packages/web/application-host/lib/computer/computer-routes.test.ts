@@ -295,3 +295,44 @@ describe("computer routes (BC7 virtual machines)", () => {
     expect(computers.vmAction).not.toHaveBeenCalled();
   });
 });
+
+describe("computer routes (EE open + file write)", () => {
+  it("POST open forwards the target fields and returns the service result", async () => {
+    const { app, computers } = fixture();
+    computers.open = vi.fn(async () => ({ accepted: true, pid: 5 }));
+    const response = await request(app)
+      .post("/api/computers/desktops/local-console/open")
+      .send({ url: "http://localhost:3000/", args: ["--new-window"] });
+    expect(response.status).toBe(200);
+    expect(response.body.result).toEqual({ accepted: true, pid: 5 });
+    expect(computers.open).toHaveBeenCalledWith(expect.objectContaining({
+      desktopId: "local-console",
+      url: "http://localhost:3000/",
+      args: ["--new-window"],
+    }));
+  });
+
+  it("a service rejection on open maps to an HTTP error", async () => {
+    const { app, computers } = fixture();
+    computers.open = vi.fn(async () => { throw new HarnessServiceError("forbidden", "under human control"); });
+    const response = await request(app)
+      .post("/api/computers/desktops/local-console/open")
+      .send({ url: "http://x/" });
+    expect(response.status).toBe(409);
+  });
+
+  it("POST artifacts/write forwards path and bytes and returns the stored revision", async () => {
+    const { app, computers } = fixture();
+    computers.fileWrite = vi.fn(async () => ({ version: { sha256: "b".repeat(64), byteLength: 2, modifiedAt: "1" } }));
+    const response = await request(app)
+      .post("/api/computers/desktops/local-console/artifacts/write")
+      .send({ relativePath: "Downloads/in.csv", contentBase64: "aGk=" });
+    expect(response.status).toBe(200);
+    expect(response.body.version.sha256).toBe("b".repeat(64));
+    expect(computers.fileWrite).toHaveBeenCalledWith({
+      desktopId: "local-console",
+      relativePath: "Downloads/in.csv",
+      contentBase64: "aGk=",
+    });
+  });
+});

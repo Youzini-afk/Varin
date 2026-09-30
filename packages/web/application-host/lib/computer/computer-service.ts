@@ -29,6 +29,7 @@ import type {
   ComputerListResult,
   ComputerMachine,
   ComputerObservation,
+  ComputerOpenResult,
   ComputerPlatform,
   ComputerVmBinding,
   ComputerVmCreateParams,
@@ -52,7 +53,7 @@ import {
 import { createLibvirtProvider } from "./libvirt-provider.js";
 import { createDesktopDriverPool } from "./desktop-drivers.js";
 import { createLinuxDesktop, type LinuxDesktopState } from "./linux-desktop.js";
-import { inspectDesktopFile, openDesktopFile, type DesktopArtifactVersion } from "./desktop-artifact-files.js";
+import { inspectDesktopFile, openDesktopFile, writeDesktopFile, type DesktopArtifactVersion } from "./desktop-artifact-files.js";
 import { prepareVmGuestSeed } from "./vm-guest-seed.js";
 import { resolveDebianCloudImage, downloadDebianCloudImage } from "./vm-guest-image.js";
 import { forgetVmGuestPassword, probeVmGuest, vmGuestBootstrapStatus, vmGuestIpv4, vmGuestPassword } from "./vm-guest-connection.js";
@@ -466,6 +467,17 @@ export interface ComputerService {
   act(params: { desktopId?: string; action: ComputerAction; automationEpoch?: string; signal?: AbortSignal; sessionId?: string }): Promise<ComputerActionResult>;
   cancel(desktopId?: string): Promise<{ cancelled: number; released: boolean }>;
   release(desktopId?: string): Promise<{ released: boolean }>;
+  /**
+   * EE: open a URL/path/application on the desktop's own machine. The target
+   * resolves where the desktop runs — `localhost` and file paths mean that
+   * machine, never the caller's. Same control gate as `act`.
+   */
+  open(params: { desktopId?: string; url?: string; path?: string; command?: string; args?: string[]; signal?: AbortSignal; sessionId?: string }): Promise<ComputerOpenResult>;
+  /**
+   * EE: one-shot file write into a managed desktop user's home, returning the
+   * stored revision. No sync relationship is created.
+   */
+  fileWrite(params: { desktopId?: string; relativePath: string; contentBase64: string; sessionId?: string }): Promise<{ version: DesktopArtifactVersion }>;
   // --- BC5: control ownership + desktop view --------------------------------
   /** Current control owner record for a desktop. */
   control(desktopId?: string): Promise<ComputerControlState>;
@@ -1612,6 +1624,123 @@ export function createComputerService(options: ComputerServiceOptions): Computer
     return { released: response.ok };
   };
 
+  const open: ComputerService["open"] = async (params) => {
+    params.signal?.throwIfAborted();
+    const provided = [params.url, params.path, params.command].filter((value) => typeof value === "string" && value.trim());
+    if (provided.length !== 1) {
+      throw new HarnessServiceError("invalid-params", "computer.open requires exactly one of url, path or command");
+    }
+    if (params.url !== undefined) {
+      let scheme: string;
+      try { scheme = new URL(params.url).protocol.toLowerCase(); }
+      catch { throw new HarnessServiceError("invalid-params", "computer.open url is not a well-formed URL"); }
+      // Handler schemes that execute attacker-controlled text instead of
+      // opening a resource are rejected; everything else is the target's own
+      // registered handler set.
+      if (["javascript:", "data:", "vbscript:"].includes(scheme)) {
+        throw new HarnessServiceError("invalid-params", `computer.open does not open ${scheme} URLs`);
+      }
+    }
+    if (params.args !== undefined && !Array.isArray(params.args)) {
+      throw new HarnessServiceError("invalid-params", "computer.open args must be a list of strings");
+    }
+    const id = await resolveDesktopId(params.desktopId);
+    const generation = laneGeneration(id);
+    const remote = await remoteTargetFor(id);
+    if (remote) {
+      try {
+        const payload = await remoteJson<{ result?: ComputerOpenResult }>(
+          remote.connection, "POST", `/api/computers/desktops/${encodeURIComponent(remote.remoteId)}/open`,
+          { ...(params.url !== undefined ? { url: params.url } : {}),
+            ...(params.path !== undefined ? { path: params.path } : {}),
+            ...(params.command !== undefined ? { command: params.command } : {}),
+            ...(params.args !== undefined ? { args: params.args } : {}) }, params.signal,
+        );
+        if (!payload.result || typeof payload.result.accepted !== "boolean") throw new RemoteTransportError("Remote Host returned no valid open receipt");
+        await recordUsage(id, params.sessionId).catch(() => undefined);
+        return payload.result;
+      } catch (error) {
+        if (error instanceof RemoteTransportError) {
+          // The open may have crossed the wire — never replay; report the
+          // effect as unknown and let the caller verify on the desktop.
+          return { accepted: false, outcome: "unknown", detail: error instanceof Error ? error.message : String(error) };
+        }
+        throw error;
+      }
+    }
+    // A desktop under human control rejects automated opens — same gate as
+    // `act`; the human opens things through their own session.
+    if (laneFor(id).control.owner === "human") {
+      throw new HarnessServiceError("forbidden", `Desktop "${id}" is under human control`);
+    }
+    const assertAdmission = () => {
+      const lane = laneFor(id);
+      if (generation !== lane.generation) throw new CancelledActionError();
+      if (lane.control.owner !== "agent" || lane.transitioning) throw new HarnessServiceError("forbidden", "Desktop control is changing or held by a human");
+    };
+    assertAdmission();
+    let submitted = false;
+    try {
+      const response = await enqueue(id, "action", async () => {
+        params.signal?.throwIfAborted();
+        const { driver } = await driverFor(id);
+        params.signal?.throwIfAborted();
+        assertAdmission();
+        submitted = true;
+        return requestWithAbort(driver, {
+          tool: "open",
+          ...(params.url !== undefined ? { url: params.url } : {}),
+          ...(params.path !== undefined ? { path: params.path } : {}),
+          ...(params.command !== undefined ? { command: params.command } : {}),
+          ...(params.args !== undefined ? { args: params.args } : {}),
+        }, params.signal);
+      }, generation);
+      if (!response.ok) {
+        if (response.cancelled) return { accepted: false, cancelled: true };
+        throw new HarnessServiceError("failed", response.error ?? "Open failed");
+      }
+      await recordUsage(id, params.sessionId).catch(() => undefined);
+      const result: ComputerOpenResult = { accepted: true };
+      if (typeof response.pid === "number" && Number.isSafeInteger(response.pid) && response.pid > 0) result.pid = response.pid;
+      if (laneGeneration(id) !== generation) result.cancelled = true;
+      return result;
+    } catch (error) {
+      if (error instanceof CancelledActionError) return { accepted: false, cancelled: true };
+      if (submitted) {
+        return { accepted: false, outcome: "unknown", detail: error instanceof Error ? error.message : String(error) };
+      }
+      throw error;
+    }
+  };
+
+  const fileWrite: ComputerService["fileWrite"] = async (params) => {
+    validateArtifactPath(params.relativePath);
+    if (typeof params.contentBase64 !== "string") throw new HarnessServiceError("invalid-params", "computer.fileWrite requires contentBase64");
+    const content = Buffer.from(params.contentBase64, "base64");
+    const id = await resolveDesktopId(params.desktopId);
+    const remote = await remoteTargetFor(id);
+    if (remote) {
+      try {
+        const result = await remoteJson<{ version?: DesktopArtifactVersion }>(remote.connection, "POST",
+          `/api/computers/desktops/${encodeURIComponent(remote.remoteId)}/artifacts/write`,
+          { relativePath: params.relativePath, contentBase64: params.contentBase64 });
+        return { version: artifactVersion(result.version) };
+      } catch (error) {
+        if (error instanceof RemoteTransportError) {
+          // The bytes may already have landed on the target — the caller must
+          // re-inspect the stored revision instead of re-sending blindly.
+          throw new HarnessServiceError("unavailable", `${error.message} — re-inspect the target file before retrying`);
+        }
+        throw error;
+      }
+    }
+    const { desktop } = await desktopRecord(id);
+    if (desktop.managed !== "linux-xvnc") throw new HarnessServiceError("unavailable", "File transfer requires a managed Linux desktop");
+    const version = await writeDesktopFile(await linuxDesktop.status(), params.relativePath, content);
+    await recordUsage(id, params.sessionId).catch(() => undefined);
+    return { version };
+  };
+
   // --- BC5: control ownership ---------------------------------------------
 
   const control: ComputerService["control"] = async (desktopId) => {
@@ -2552,6 +2681,8 @@ export function createComputerService(options: ComputerServiceOptions): Computer
     act,
     cancel,
     release,
+    open,
+    fileWrite,
     control,
     takeover,
     handback,

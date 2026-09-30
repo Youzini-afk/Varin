@@ -10,7 +10,7 @@ export interface DesktopArtifactVersion {
   modifiedAt: string;
 }
 
-const commandFor = (desktop: LinuxDesktopState, operation: 'info' | 'read', relativePath: string, sha256?: string) => {
+const commandFor = (desktop: LinuxDesktopState, operation: 'info' | 'read' | 'write', relativePath: string, sha256?: string) => {
   if (desktop.state !== 'running' || !desktop.artifact || !desktop.home || !desktop.user || !Number.isSafeInteger(desktop.uid)) {
     throw new HarnessServiceError('unavailable', 'Managed desktop file access is unavailable');
   }
@@ -38,6 +38,37 @@ export const inspectDesktopFile = async (desktop: LinuxDesktopState, relativePat
   if (!/^[0-9a-f]{64}$/u.test(version.sha256) || !Number.isSafeInteger(version.byteLength)
     || version.byteLength < 0 || !/^[0-9]+$/u.test(version.modifiedAt)) {
     throw new HarnessServiceError('unavailable', 'Desktop artifact returned invalid file metadata');
+  }
+  return version;
+};
+
+/**
+ * Atomically replace one file inside the managed desktop user's home with
+ * the supplied bytes, returning the stored revision. One-shot copy — this
+ * creates no continuous sync with the caller's filesystem.
+ */
+export const writeDesktopFile = async (
+  desktop: LinuxDesktopState,
+  relativePath: string,
+  content: Buffer,
+): Promise<DesktopArtifactVersion> => {
+  const { command, args } = commandFor(desktop, 'write', relativePath);
+  const result = await new Promise<{ code: number; stdout: string; stderr: string }>((resolve, reject) => {
+    const child = spawn(command, args, { stdio: ['pipe', 'pipe', 'pipe'], windowsHide: true });
+    let stdout = ''; let stderr = '';
+    child.stdout.on('data', (data) => { stdout += data; });
+    child.stderr.on('data', (data) => { stderr += data; });
+    child.once('error', reject);
+    child.once('close', (code) => resolve({ code: code ?? 1, stdout, stderr }));
+    child.stdin.end(content);
+  });
+  if (result.code !== 0) throw new HarnessServiceError('unavailable', result.stderr.trim() || 'Desktop file write failed');
+  let version: DesktopArtifactVersion;
+  try { version = JSON.parse(result.stdout) as DesktopArtifactVersion; }
+  catch { throw new HarnessServiceError('unavailable', 'Desktop file write returned malformed metadata'); }
+  if (!/^[0-9a-f]{64}$/u.test(version.sha256) || !Number.isSafeInteger(version.byteLength)
+    || version.byteLength < 0 || !/^[0-9]+$/u.test(version.modifiedAt)) {
+    throw new HarnessServiceError('unavailable', 'Desktop file write returned invalid metadata');
   }
   return version;
 };

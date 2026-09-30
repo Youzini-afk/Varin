@@ -318,6 +318,51 @@ export interface ComputerReleaseResult {
 }
 
 // ---------------------------------------------------------------------------
+// EE — cross-environment open / file transfer (design §5.6)
+// ---------------------------------------------------------------------------
+
+/**
+ * Open a URL, file or application on a desktop's own machine. The target is
+ * resolved where the desktop runs: `localhost` and `file:` paths mean the
+ * target machine's own filesystem and loopback — never the caller's.
+ */
+export interface ComputerOpenParams {
+  desktopId?: string;
+  /** Any well-formed URL the target's handlers accept (http(s), file:, app schemes). */
+  url?: string;
+  /** Absolute path on the target machine, opened with its default handler. */
+  path?: string;
+  /** Application/binary resolved on the target machine. */
+  command?: string;
+  args?: string[];
+}
+
+export interface ComputerOpenResult {
+  accepted: boolean;
+  /** Process id on the target machine when the launcher reports one. */
+  pid?: number;
+  detail?: string;
+  /** The dispatch was cancelled after queue admission — the open may still have launched. */
+  cancelled?: boolean;
+  /** A response lost in transit — the open may still have happened. */
+  outcome?: "unknown";
+}
+
+/**
+ * Write one file into the managed desktop user's home, returning its stored
+ * revision. A one-shot copy — it does not create any continuous sync.
+ */
+export interface ComputerFileWriteParams {
+  desktopId?: string;
+  relativePath: string;
+  contentBase64: string;
+}
+
+export interface ComputerFileWriteResult {
+  version: { sha256: string; byteLength: number; modifiedAt: string };
+}
+
+// ---------------------------------------------------------------------------
 // BC5 — shared desktop view + control ownership
 // ---------------------------------------------------------------------------
 

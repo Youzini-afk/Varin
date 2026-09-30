@@ -13,6 +13,7 @@ import base64
 import json
 import math
 import os
+import subprocess
 import sys
 import time
 import traceback
@@ -1057,10 +1058,44 @@ def inject_human_input(operation):
         raise RuntimeError('unsupportedHumanInput("{}")'.format(kind))
 
 
+def open_target(operation):
+    """Open a URL, file path or application inside this desktop session.
+
+    The request targets this machine only: xdg-open and the spawned command
+    resolve localhost and filesystem paths on the desktop, never on the
+    caller's Host. The child is detached from the driver — it must outlive
+    individual requests and belong to the user's session like any app they
+    started themselves.
+    """
+    url = operation.get("url")
+    path = operation.get("path")
+    command = operation.get("command")
+    provided = [value for value in (url, path, command) if value]
+    if len(provided) != 1:
+        raise RuntimeError('open requires exactly one of "url", "path" or "command"')
+    args = operation.get("args")
+    if args is not None and (not isinstance(args, list) or not all(isinstance(item, str) for item in args)):
+        raise RuntimeError('"args" must be a list of strings')
+    if command:
+        argv = [str(command)] + [str(item) for item in (args or [])]
+    else:
+        argv = ["xdg-open", str(url or path)]
+    proc = subprocess.Popen(
+        argv,
+        stdin=subprocess.DEVNULL,
+        stdout=subprocess.DEVNULL,
+        stderr=subprocess.DEVNULL,
+        start_new_session=True,
+    )
+    return {"ok": True, "pid": proc.pid}
+
+
 def perform_operation(operation):
     tool = operation.get("tool")
     if tool == "ping":
         return {"ok": True}
+    if tool == "open":
+        return open_target(operation)
     if tool == "capabilities":
         return {"ok": True, "capabilities": driver_capabilities()}
     if tool == "release_input":

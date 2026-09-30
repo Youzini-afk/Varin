@@ -1119,3 +1119,119 @@ describe("computer service work association (BC8)", () => {
     expect(catalog.desktops[0]?.usage?.sessionId).toBe("ses_keep");
   });
 });
+
+// --- EE: cross-environment open + one-shot file write -----------------------
+
+describe("computer service (EE open + file write)", () => {
+  it("open dispatches the driver op and returns the launched pid", async () => {
+    const driver = makeDriver(async (op) => op.tool === "open" ? okResponse({ pid: 4711 }) : okResponse());
+    const { service } = makeService(driver);
+    await service.ensureLocal();
+    const result = await service.open({ desktopId: "local-console", url: "http://localhost:3000/" });
+    expect(result).toEqual({ accepted: true, pid: 4711 });
+    expect(driver.calls).toContainEqual(expect.objectContaining({ tool: "open", url: "http://localhost:3000/" }));
+    await service.dispose();
+  });
+
+  it("open requires exactly one target and refuses script-injected schemes", async () => {
+    const { service } = makeService();
+    await service.ensureLocal();
+    await expect(service.open({ desktopId: "local-console" })).rejects.toMatchObject({ harnessCode: "invalid-params" });
+    await expect(service.open({ desktopId: "local-console", url: "http://x", path: "c:\f" })).rejects.toMatchObject({ harnessCode: "invalid-params" });
+    await expect(service.open({ desktopId: "local-console", url: "javascript:alert(1)" })).rejects.toMatchObject({ harnessCode: "invalid-params" });
+    await expect(service.open({ desktopId: "local-console", url: "not a url" })).rejects.toMatchObject({ harnessCode: "invalid-params" });
+    await service.dispose();
+  });
+
+  it("open is rejected while a human viewer owns the desktop", async () => {
+    const driver = makeDriver(async () => okResponse());
+    const { service } = makeService(driver);
+    await service.ensureLocal();
+    const unsubscribe = await service.subscribeFrames("local-console", "human", () => {}, { frames: false });
+    await service.takeover({ desktopId: "local-console", holderId: "human" });
+    await expect(service.open({ desktopId: "local-console", url: "http://localhost/" })).rejects.toMatchObject({ harnessCode: "forbidden" });
+    expect(driver.calls.filter((op) => op.tool === "open")).toEqual([]);
+    unsubscribe();
+    await service.dispose();
+  });
+
+  const remoteHost = { id: "r1", label: "Office PC", apiUrl: "http://10.0.0.5:8765", clientToken: "tok-1" };
+  const remoteCatalog = {
+    machines: [{ id: "local", name: "Office PC", provider: "local", platform: "linux", coordinatorHostId: "remote-h", status: "active", createdAt: "t", updatedAt: "t" }],
+    desktops: [{ id: "d0", machineId: "local", label: "Console", kind: "console", status: "available" }],
+    defaultDesktopId: "d0",
+  };
+  const remoteFetch = (handler: (url: string, init: RequestInit) => Response | Promise<Response>) => (
+    (async (input: unknown, init?: RequestInit) => handler(String(input), init ?? {})) as unknown as typeof fetch
+  );
+  const jsonResponse = (body: unknown, status = 200) => new Response(JSON.stringify(body), {
+    status, headers: { "Content-Type": "application/json", "X-Varin-Computer-Host": "remote-h" },
+  });
+
+  it("remote open forwards the target verbatim and reports unknown on transport loss", async () => {
+    const seen: Record<string, unknown> = {};
+    const service = createComputerService({
+      client: fakeKernel().client as never, hostId: "h", platform: "windows", dataDir: newDataDir(),
+      createDriver: () => makeDriver(async () => okResponse()), remoteHosts: async () => [remoteHost],
+      fetch: remoteFetch((url, init) => {
+        if (url.endsWith("/api/computers?local=1")) return jsonResponse(remoteCatalog);
+        if (url.endsWith("/open")) { seen.body = JSON.parse(String(init.body)); return jsonResponse({ result: { accepted: true, pid: 99 } }); }
+        return jsonResponse({ error: "unexpected" }, 404);
+      }),
+    });
+    await service.list();
+    const result = await service.open({ desktopId: "remote:r1:remote-h:d0", url: "http://localhost:8080/app" });
+    expect(result).toEqual({ accepted: true, pid: 99 });
+    // localhost must reach the remote Host untouched — rewriting it here
+    // would silently point at the coordinator's own loopback.
+    expect(seen.body).toEqual({ url: "http://localhost:8080/app" });
+    await service.dispose();
+  });
+
+  it("remote open transport failure reports outcome unknown rather than replaying", async () => {
+    const service = createComputerService({
+      client: fakeKernel().client as never, hostId: "h", platform: "windows", dataDir: newDataDir(),
+      createDriver: () => makeDriver(async () => okResponse()), remoteHosts: async () => [remoteHost],
+      fetch: remoteFetch((url) => {
+        if (url.endsWith("/api/computers?local=1")) return jsonResponse(remoteCatalog);
+        if (url.endsWith("/open")) throw new Error("socket hang up");
+        return jsonResponse({});
+      }),
+    });
+    await service.list();
+    const result = await service.open({ desktopId: "remote:r1:remote-h:d0", command: "code" });
+    expect(result).toMatchObject({ accepted: false, outcome: "unknown" });
+    await service.dispose();
+  });
+
+  it("fileWrite forwards bytes to the remote Host and returns its stored revision", async () => {
+    const service = createComputerService({
+      client: fakeKernel().client as never, hostId: "h", platform: "windows", dataDir: newDataDir(),
+      createDriver: () => makeDriver(async () => okResponse()), remoteHosts: async () => [remoteHost],
+      fetch: remoteFetch((url, init) => {
+        if (url.endsWith("/api/computers?local=1")) return jsonResponse(remoteCatalog);
+        if (url.endsWith("/artifacts/write")) {
+          const body = JSON.parse(String(init.body)) as { relativePath: string; contentBase64: string };
+          const bytes = Buffer.from(body.contentBase64, "base64");
+          return jsonResponse({ version: { sha256: "a".repeat(64), byteLength: bytes.length, modifiedAt: "1790712000000000000" } });
+        }
+        return jsonResponse({});
+      }),
+    });
+    await service.list();
+    const content = Buffer.from("payload");
+    const result = await service.fileWrite({ desktopId: "remote:r1:remote-h:d0", relativePath: "Downloads/in.csv", contentBase64: content.toString("base64") });
+    expect(result.version.byteLength).toBe(content.length);
+    await service.dispose();
+  });
+
+  it("fileWrite against a non-managed local desktop is unavailable, not faked", async () => {
+    const { service } = makeService();
+    await service.ensureLocal();
+    await expect(service.fileWrite({ desktopId: "local-console", relativePath: "x.txt", contentBase64: "eA==" }))
+      .rejects.toMatchObject({ harnessCode: "unavailable" });
+    await expect(service.fileWrite({ desktopId: "local-console", relativePath: "..\\evil", contentBase64: "eA==" }))
+      .rejects.toMatchObject({ harnessCode: "invalid-params" });
+    await service.dispose();
+  });
+});

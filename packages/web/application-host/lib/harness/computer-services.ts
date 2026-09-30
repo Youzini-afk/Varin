@@ -115,4 +115,31 @@ export function registerComputerServices(
   router.register("computer.act", createComputerActService(host));
   router.register("computer.cancel", createComputerCancelService(host));
   router.register("computer.release", createComputerReleaseService(host));
+  // EE: cross-environment open + one-shot file write resolve the bound
+  // desktop the same way as observe/act.
+  router.register("computer.open", {
+    handle: async (params, ctx) => {
+      const desktopId = await desktopIdFor(host, ctx, params);
+      return requireService(host).open({
+        ...(desktopId !== undefined ? { desktopId } : {}),
+        ...(params.url !== undefined ? { url: params.url } : {}),
+        ...(params.path !== undefined ? { path: params.path } : {}),
+        ...(params.command !== undefined ? { command: params.command } : {}),
+        ...(params.args !== undefined ? { args: params.args } : {}),
+        signal: ctx.signal,
+        sessionId: ctx.sessionId,
+      });
+    },
+  });
+  router.register("computer.fileWrite", {
+    handle: async (params, ctx) => {
+      const desktopId = await desktopIdFor(host, ctx, params);
+      return requireService(host).fileWrite({
+        ...(desktopId !== undefined ? { desktopId } : {}),
+        relativePath: params.relativePath,
+        contentBase64: params.contentBase64,
+        sessionId: ctx.sessionId,
+      });
+    },
+  });
 }

@@ -759,6 +759,23 @@ function activateObservedWindow(app, windowInfo) {
 function performOperation(operation) {
     var tool = operation.tool;
     if (tool === "ping") return { ok: true };
+    if (tool === "open") {
+        // Open a URL, path or app on this machine via LaunchServices or a
+        // detached spawn. `localhost`/paths resolve on this machine only;
+        // the child must outlive the request, so never wait for it here.
+        const provided = [operation.url, operation.path, operation.command].filter((value) => value);
+        if (provided.length !== 1) throw new Error('open requires exactly one of "url", "path" or "command"');
+        const task = $.NSTask.alloc.init;
+        if (operation.command) {
+            task.launchPath = String(operation.command);
+            task.arguments = Array.isArray(operation.args) ? operation.args.map(String) : [];
+        } else {
+            task.launchPath = "/usr/bin/open";
+            task.arguments = [String(operation.url || operation.path)];
+        }
+        task.launch;
+        return { ok: true, pid: task.processIdentifier };
+    }
     if (tool === "capabilities") return { ok: true, capabilities: driverCapabilities() };
     if (tool === "release_input") { releaseInput(); return { ok: true }; }
     if (tool === "capture_frame") {

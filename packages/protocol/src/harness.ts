@@ -1601,6 +1601,8 @@ export interface HarnessServiceMap {
   "computer.act": { params: ComputerActParams; result: ComputerActResult };
   "computer.cancel": { params: ComputerCancelParams; result: ComputerCancelResult };
   "computer.release": { params: ComputerReleaseParams; result: ComputerReleaseResult };
+  "computer.open": { params: import('./harness-computer.js').ComputerOpenParams; result: import('./harness-computer.js').ComputerOpenResult };
+  "computer.fileWrite": { params: import('./harness-computer.js').ComputerFileWriteParams; result: import('./harness-computer.js').ComputerFileWriteResult };
   /**
    * Execution-environment binding of the calling work's Thread. `set`
    * re-binds placement for operations admitted after the call — accepted
@@ -1789,6 +1791,8 @@ export const HARNESS_METHOD_CAPABILITY = {
   "computer.act": "control.computer",
   "computer.cancel": "control.computer",
   "computer.release": "control.computer",
+  "computer.open": "control.computer",
+  "computer.fileWrite": "control.computer",
   "environment.get": "context.session",
   "environment.set": "control.thread",
   "thread.dispatch": "control.thread",
@@ -1943,6 +1947,8 @@ const HARNESS_METHODS: ReadonlySet<string> = new Set<string>([
   "computer.act",
   "computer.cancel",
   "computer.release",
+  "computer.open",
+  "computer.fileWrite",
   "environment.get",
   "environment.set",
   "thread.dispatch",

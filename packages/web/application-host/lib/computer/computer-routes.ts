@@ -203,6 +203,44 @@ export function registerComputerRoutes(app: Express, { computers, requireAuth = 
     }
   });
 
+  /** Open a URL/path/application on this machine (EE) — the open resolves
+   * here: `localhost` and file paths are this machine's own. */
+  app.post("/api/computers/desktops/:desktopId/open", requireAuth, async (request: Request, response: Response) => {
+    response.setHeader("Cache-Control", "no-store");
+    const controller = new AbortController();
+    response.once("close", () => { if (!response.writableEnded) controller.abort(); });
+    try {
+      const body = request.body ?? {};
+      const result = await computers.open({
+        desktopId: String(request.params.desktopId ?? ""),
+        signal: controller.signal,
+        ...(typeof body.url === "string" ? { url: body.url } : {}),
+        ...(typeof body.path === "string" ? { path: body.path } : {}),
+        ...(typeof body.command === "string" ? { command: body.command } : {}),
+        ...(Array.isArray(body.args) ? { args: body.args.filter((arg: unknown): arg is string => typeof arg === "string") } : {}),
+      });
+      response.json({ result });
+    } catch (error) {
+      sendError(response, error, "Unable to open the target on the desktop");
+    }
+  });
+
+  /** One-shot file write into the managed desktop user's home (EE). */
+  app.post("/api/computers/desktops/:desktopId/artifacts/write", requireAuth, async (request: Request, response: Response) => {
+    response.setHeader("Cache-Control", "no-store");
+    try {
+      const body = request.body ?? {};
+      const result = await computers.fileWrite({
+        desktopId: String(request.params.desktopId ?? ""),
+        relativePath: typeof body.relativePath === "string" ? body.relativePath : "",
+        contentBase64: typeof body.contentBase64 === "string" ? body.contentBase64 : "",
+      });
+      response.json(result);
+    } catch (error) {
+      sendError(response, error, "Unable to write the desktop file");
+    }
+  });
+
   // --- BC5: control ownership + desktop view --------------------------------
 
   /** Who currently owns input on this desktop (agent or a human viewer). */

@@ -1560,6 +1560,23 @@ function Invoke-ComputerOperation($operation) {
         catch { Send-ReleaseInput; throw }
         return [pscustomobject]@{ ok = $true }
     }
+    if ($tool -eq "open") {
+        # Open a URL, path or application on this machine. Start-Process
+        # resolves handlers on the desktop's own filesystem — localhost and
+        # file paths mean this machine, never the caller's Host.
+        $provided = @($operation.url, $operation.path, $operation.command) | Where-Object { -not [string]::IsNullOrEmpty($_) }
+        if (@($provided).Count -ne 1) { throw 'open requires exactly one of "url", "path" or "command"' }
+        if ($operation.command) {
+            $argv = @()
+            if ($null -ne $operation.args) { $argv = @($operation.args | ForEach-Object { [string]$_ }) }
+            $launched = Start-Process -FilePath ([string]$operation.command) -ArgumentList $argv -PassThru
+        } else {
+            $openTarget = $operation.url
+            if ([string]::IsNullOrEmpty($openTarget)) { $openTarget = $operation.path }
+            $launched = Start-Process -FilePath ([string]$openTarget) -PassThru
+        }
+        return [pscustomobject]@{ ok = $true; pid = $launched.Id }
+    }
     if ($tool -eq "get_app_state") {
         $includeScreenshot = $true
         if ($null -ne $operation.screenshot) {

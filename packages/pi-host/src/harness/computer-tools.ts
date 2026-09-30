@@ -39,6 +39,8 @@ const ComputerParams = Type.Object({
     Type.Literal("run"),
     Type.Literal("reset"),
     Type.Literal("environment"),
+    Type.Literal("open"),
+    Type.Literal("put"),
   ]),
   /** Target desktop; omit for the work's environment binding or the configured default. */
   desktopId: Type.Optional(Type.String()),
@@ -46,6 +48,15 @@ const ComputerParams = Type.Object({
   workTarget: Type.Optional(Type.String()),
   /** environment: also clear the work's desktop binding when true. */
   clear: Type.Optional(Type.Boolean()),
+  /** open: URL opened by the target machine's handlers (localhost is the target's own loopback). */
+  url: Type.Optional(Type.String()),
+  /** open: absolute path on the target machine opened with its default app. */
+  path: Type.Optional(Type.String()),
+  /** open: application/binary resolved on the target machine. */
+  command: Type.Optional(Type.String()),
+  args: Type.Optional(Type.Array(Type.String())),
+  /** put: file bytes (base64) written atomically into the managed desktop user's home. */
+  contentBase64: Type.Optional(Type.String()),
   connectionId: Type.Optional(Type.String({ description: "prepare: saved Host connection id; omit for this Host." })),
   width: Type.Optional(Type.Integer({ minimum: 1 })),
   height: Type.Optional(Type.Integer({ minimum: 1 })),
@@ -116,6 +127,7 @@ export function createComputerTool(bridge: HostServicesBridge, _sessionId: strin
       "prepare installs a persistent Linux desktop and browser on this Host or a saved connection. Use it when an independent desktop is needed. start/stop require its desktopId; stopping closes applications but retains their saved files and browser profile.",
       "After saving a file in a managed desktop, action=artifact with its path relative to that desktop user's home records the exact file revision on the current work. The work view provides a download; a changed file must be registered again.",
       "action=environment reads or rebinds this work's execution environment (work target for shell ops, desktop for GUI ops). Operations already accepted keep their target; a rebind is never a file or session migration.",
+      "action=open starts a URL/path/app on the desktop's own machine — `localhost` URLs and file paths resolve on that machine, not yours. action=put writes one file into the managed desktop user's home and returns its revision; it is a one-shot copy, not a sync.",
     ],
     parameters: ComputerParams,
     execute: async (_toolCallId, params, signal, _onUpdate, _ctx) => {
@@ -280,6 +292,15 @@ export function createComputerTool(bridge: HostServicesBridge, _sessionId: strin
                 },
                 cancel: async (id?: string) => bridge.request("computer.cancel", await field(id), requestOptions),
                 release: async (id?: string) => bridge.request("computer.release", await field(id), requestOptions),
+                open: async (opts: { url?: string; path?: string; command?: string; args?: string[]; desktopId?: string }) => {
+                  const { desktopId, ...rest } = opts;
+                  const target = await field(desktopId);
+                  const result = (await bridge.request("computer.open", { ...rest, ...target }, requestOptions)) as { accepted?: boolean; cancelled?: boolean; outcome?: string; detail?: string; pid?: number };
+                  if (!result.accepted || result.cancelled || result.outcome) {
+                    throw new Error(`Computer open did not complete normally (${result.outcome ?? (result.cancelled ? "cancelled" : "rejected")}): ${result.detail ?? "check the desktop"}`);
+                  }
+                  return result;
+                },
                 emitImage: async (observation: ComputerObservation) => {
                   const screenshot = observation?.screenshot;
                   if (!screenshot || screenshot.mime !== "image/png" || typeof screenshot.base64 !== "string") throw new Error("emitImage requires an observation with a screenshot");
@@ -300,6 +321,33 @@ export function createComputerTool(bridge: HostServicesBridge, _sessionId: strin
               controller.abort(new Error("Computer evaluation ended"));
               evaluations.delete(controller);
             }
+          }
+          case "open": {
+            const result = await bridge.request("computer.open", {
+              ...(desktop ? { desktopId: desktop } : {}),
+              ...(params.url !== undefined ? { url: params.url } : {}),
+              ...(params.path !== undefined ? { path: params.path } : {}),
+              ...(params.command !== undefined ? { command: params.command } : {}),
+              ...(params.args !== undefined ? { args: params.args } : {}),
+            });
+            const r = result as { accepted?: boolean; pid?: number; detail?: string; outcome?: string; cancelled?: boolean };
+            const text = r.outcome === "unknown"
+              ? `open outcome unknown: ${r.detail ?? "response lost"}. Check the desktop before retrying.`
+              : r.accepted
+                ? `opened on the desktop${r.pid !== undefined ? ` (pid ${r.pid})` : ""}${r.cancelled ? " — cancelled after dispatch; verify what launched" : ""}`
+                : `open rejected${r.detail ? `: ${r.detail}` : ""}`;
+            return { content: [{ type: "text", text }], ...(r.accepted ? {} : { isError: true as const }), details: r as Record<string, unknown> };
+          }
+          case "put": {
+            if (!params.relativePath?.trim()) return errorResult(new HarnessRequestError("invalid-params", "put requires relativePath"));
+            if (typeof params.contentBase64 !== "string") return errorResult(new HarnessRequestError("invalid-params", "put requires contentBase64"));
+            const result = await bridge.request("computer.fileWrite", {
+              relativePath: params.relativePath,
+              contentBase64: params.contentBase64,
+              ...(desktop ? { desktopId: desktop } : {}),
+            });
+            const v = result.version as { sha256: string; byteLength: number };
+            return { content: [{ type: "text", text: `wrote ${v.byteLength} bytes (sha256 ${v.sha256.slice(0, 12)}…) — one-shot copy, not a sync` }], details: result as unknown as Record<string, unknown> };
           }
           case "environment": {
             // get when nothing is provided; otherwise update this work's
