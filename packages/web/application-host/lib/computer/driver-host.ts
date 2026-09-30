@@ -42,7 +42,9 @@ export interface DriverRequest {
     /** Absolute-coordinate human input through the control lane (BC5.C). */
     | "inject_input"
     /** Open a URL/path/application on the desktop's own machine (EE). */
-    | "open";
+    | "open"
+    /** CDP attach to the visible Chromium session (EE §7.2). */
+    | "browser";
   [key: string]: unknown;
 }
 

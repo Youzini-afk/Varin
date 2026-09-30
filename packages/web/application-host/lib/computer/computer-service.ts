@@ -30,6 +30,8 @@ import type {
   ComputerMachine,
   ComputerObservation,
   ComputerOpenResult,
+  ComputerBrowserParams,
+  ComputerBrowserResult,
   ComputerPlatform,
   ComputerSoftwareResult,
   ComputerVmBinding,
@@ -492,6 +494,13 @@ export interface ComputerService {
    * succeeded; interface usability is reported only by `status`/`capabilities`.
    */
   installSoftware(params: { desktopId?: string; groups?: string[]; packages?: string[] }): Promise<{ results: ComputerSoftwareResult[] }>;
+  /**
+   * EE §7.2: browser bridge — attach to the visible Chromium session on the
+   * target machine. status/tabs/snapshot are reads through the observe lane;
+   * launch/act write to the same real scene and hold the same human-control
+   * gate as `open`/`act`.
+   */
+  browser(params: ComputerBrowserParams & { signal?: AbortSignal; sessionId?: string }): Promise<ComputerBrowserResult>;
   // --- BC5: control ownership + desktop view --------------------------------
   /** Current control owner record for a desktop. */
   control(desktopId?: string): Promise<ComputerControlState>;
@@ -1823,6 +1832,71 @@ export function createComputerService(options: ComputerServiceOptions): Computer
     return { results };
   };
 
+  // --- EE §7.2: browser bridge (CDP attach to the visible session) -----------
+
+  const browser: ComputerService["browser"] = async (params) => {
+    const OPS = new Set(["status", "launch", "tabs", "snapshot", "act"]);
+    if (!OPS.has(params.op)) throw new HarnessServiceError("invalid-params", "computer.browser requires a valid op");
+    const writes = params.op === "launch" || params.op === "act";
+    params.signal?.throwIfAborted();
+    const id = await resolveDesktopId(params.desktopId);
+    const remote = await remoteTargetFor(id);
+    if (remote) {
+      try {
+        const payload = await remoteJson<ComputerBrowserResult>(remote.connection, "POST",
+          `/api/computers/desktops/${encodeURIComponent(remote.remoteId)}/browser`,
+          { op: params.op,
+            ...(params.tabId !== undefined ? { tabId: params.tabId } : {}),
+            ...(params.binary !== undefined ? { binary: params.binary } : {}),
+            ...(params.profile !== undefined ? { profile: params.profile } : {}),
+            ...(params.port !== undefined ? { port: params.port } : {}),
+            ...(params.act !== undefined ? { act: params.act } : {}),
+            ...(params.limit !== undefined ? { limit: params.limit } : {}) }, params.signal);
+        if (typeof payload?.ok !== "boolean") throw new RemoteTransportError("Remote Host returned no valid browser receipt");
+        if (writes) await recordUsage(id, params.sessionId).catch(() => undefined);
+        return payload;
+      } catch (error) {
+        if (error instanceof RemoteTransportError) {
+          // The op may have crossed the wire — never replay; the caller
+          // verifies actual page state before deciding.
+          return { ok: false, outcome: "unknown", error: error instanceof Error ? error.message : String(error) };
+        }
+        throw error;
+      }
+    }
+    if (writes && laneFor(id).control.owner === "human") {
+      throw new HarnessServiceError("forbidden", `Desktop "${id}" is under human control`);
+    }
+    const generation = laneGeneration(id);
+    const assertAdmission = () => {
+      const lane = laneFor(id);
+      if (writes && lane.generation !== generation) throw new CancelledActionError();
+      if (writes && (lane.control.owner !== "agent" || lane.transitioning)) {
+        throw new HarnessServiceError("forbidden", "Desktop control is changing or held by a human");
+      }
+    };
+    assertAdmission();
+    const response = await enqueue(id, writes ? "action" : "observe", async () => {
+      const { driver } = await driverFor(id);
+      assertAdmission();
+      return requestWithAbort(driver, {
+        tool: "browser",
+        op: params.op,
+        ...(params.tabId !== undefined ? { tab: params.tabId } : {}),
+        ...(params.binary !== undefined ? { binary: params.binary } : {}),
+        ...(params.profile !== undefined ? { profile: params.profile } : {}),
+        ...(params.port !== undefined ? { cdp_port: params.port } : {}),
+        ...(params.act !== undefined ? { act: params.act } : {}),
+        ...(params.limit !== undefined ? { limit: params.limit } : {}),
+      }, params.signal);
+    });
+    const { id: _rid, ok, cancelled, error, ...rest } = response as DriverResponse & Record<string, unknown>;
+    const restFields = rest as unknown as Omit<ComputerBrowserResult, "ok">;
+    if (!ok) return { ok: false, error: error ?? (cancelled ? "cancelled" : "browser op failed"), ...restFields };
+    if (writes) await recordUsage(id, params.sessionId).catch(() => undefined);
+    return { ok: true, ...restFields };
+  };
+
   // --- BC5: control ownership ---------------------------------------------
 
   const control: ComputerService["control"] = async (desktopId) => {
@@ -2766,6 +2840,7 @@ export function createComputerService(options: ComputerServiceOptions): Computer
     open,
     fileWrite,
     installSoftware,
+    browser,
     control,
     takeover,
     handback,

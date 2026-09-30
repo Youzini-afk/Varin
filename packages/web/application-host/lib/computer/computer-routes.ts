@@ -258,6 +258,30 @@ export function registerComputerRoutes(app: Express, { computers, requireAuth = 
     }
   });
 
+  /** Browser bridge: CDP ops against the visible Chromium session (EE §7.2). */
+  app.post("/api/computers/desktops/:desktopId/browser", requireAuth, async (request: Request, response: Response) => {
+    response.setHeader("Cache-Control", "no-store");
+    const controller = new AbortController();
+    response.once("close", () => { if (!response.writableEnded) controller.abort(); });
+    try {
+      const body = request.body ?? {};
+      const result = await computers.browser({
+        desktopId: String(request.params.desktopId ?? ""),
+        op: typeof body.op === "string" ? body.op as never : "status",
+        signal: controller.signal,
+        ...(typeof body.tabId === "string" ? { tabId: body.tabId } : {}),
+        ...(typeof body.binary === "string" ? { binary: body.binary } : {}),
+        ...(typeof body.profile === "string" ? { profile: body.profile } : {}),
+        ...(typeof body.port === "number" ? { port: body.port } : {}),
+        ...(body.act !== null && typeof body.act === "object" ? { act: body.act } : {}),
+        ...(typeof body.limit === "number" ? { limit: body.limit } : {}),
+      });
+      response.json(result);
+    } catch (error) {
+      sendError(response, error, "Unable to reach the browser bridge");
+    }
+  });
+
   // --- BC5: control ownership + desktop view --------------------------------
 
   /** Who currently owns input on this desktop (agent or a human viewer). */

@@ -1326,3 +1326,68 @@ describe("software install (EE §6.2)", () => {
     await service.dispose();
   });
 });
+
+describe("browser bridge (EE §7.2)", () => {
+  const remoteHost = { id: "r1", label: "Office PC", apiUrl: "http://10.0.0.5:8765", clientToken: "tok-1" };
+  const remoteCatalog = {
+    machines: [{ id: "local", name: "Office PC", provider: "local", platform: "linux", coordinatorHostId: "remote-h", status: "active", createdAt: "t", updatedAt: "t" }],
+    desktops: [{ id: "d0", machineId: "local", label: "Console", kind: "console", status: "available", managed: "linux-xvnc" }],
+    defaultDesktopId: "d0",
+  };
+  const remoteFetch = (handler: (url: string, init: RequestInit) => Response | Promise<Response>) => (
+    (async (input: unknown, init?: RequestInit) => handler(String(input), init ?? {})) as unknown as typeof fetch
+  );
+  const jsonResponse = (body: unknown, status = 200) => new Response(JSON.stringify(body), {
+    status, headers: { "Content-Type": "application/json", "X-Varin-Computer-Host": "remote-h" },
+  });
+  it("dispatches browser ops to the desktop's driver on the same lane", async () => {
+    const driver = makeDriver(async (op) => {
+      if (op.tool === "browser") return okResponse({ status: { running: true, browser: "Chromium/1" } });
+      return okResponse();
+    });
+    const { service } = makeService(driver);
+    await service.ensureLocal();
+    const result = await service.browser({ desktopId: "local-console", op: "status" });
+    expect(result.ok).toBe(true);
+    expect(result.status?.running).toBe(true);
+    expect(driver.calls.at(-1)).toMatchObject({ tool: "browser", op: "status" });
+    await service.dispose();
+  });
+
+  it("write ops hold the human-control gate while reads stay observable", async () => {
+    const driver = makeDriver(async (op) => op.tool === "browser" ? okResponse({ tabs: [] }) : okResponse());
+    const { service } = makeService(driver);
+    await service.ensureLocal();
+    const unsubscribe = await service.subscribeFrames("local-console", "human", () => {}, { frames: false });
+    await service.takeover({ desktopId: "local-console", holderId: "human" });
+    await expect(service.browser({ desktopId: "local-console", op: "act", act: { kind: "navigate", url: "https://x/" } }))
+      .rejects.toMatchObject({ harnessCode: "forbidden" });
+    // A human-owned desktop can still be observed — reads are not input.
+    const status = await service.browser({ desktopId: "local-console", op: "tabs" });
+    expect(status.ok).toBe(true);
+    unsubscribe(); await service.dispose();
+  });
+
+  it("forwards browser ops to the remote Host and reports unknown on transport loss", async () => {
+    const service = createComputerService({
+      client: fakeKernel().client as never, hostId: "h", platform: "windows", dataDir: newDataDir(),
+      createDriver: () => makeDriver(async () => okResponse()), remoteHosts: async () => [remoteHost],
+      fetch: remoteFetch((url, init) => {
+        if (url.endsWith("/api/computers?local=1")) return jsonResponse(remoteCatalog);
+        if (url.endsWith("/browser") && init.method === "POST") {
+          const body = JSON.parse(String(init.body)) as { op: string };
+          if (body.op === "act") throw new TypeError("fetch failed");
+          return jsonResponse({ ok: true, tabs: [{ id: "t1", title: "Doc", url: "https://d/" }] });
+        }
+        return jsonResponse({});
+      }),
+    });
+    await service.list();
+    const tabs = await service.browser({ desktopId: "remote:r1:remote-h:d0", op: "tabs" });
+    expect(tabs.tabs?.[0]?.id).toBe("t1");
+    const lost = await service.browser({ desktopId: "remote:r1:remote-h:d0", op: "act", act: { kind: "evaluate", expression: "1" } });
+    expect(lost.ok).toBe(false);
+    expect(lost.outcome).toBe("unknown");
+    await service.dispose();
+  });
+});

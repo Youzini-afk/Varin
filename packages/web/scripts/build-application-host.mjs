@@ -152,7 +152,7 @@ try {
     for (const entry of fs.readdirSync(srcDir, { withFileTypes: true })) {
       if (entry.name === '__pycache__' || entry.name === 'node_modules') continue;
       // Development-only helpers never ship to a runtime/driver install.
-      if (entry.name === 'check-syntax.ps1' || entry.name === 'smoke.ps1') continue;
+      if (entry.name === 'check-syntax.ps1' || entry.name === 'smoke.ps1' || entry.name.startsWith('test_')) continue;
       const srcPath = path.join(srcDir, entry.name);
       const destPath = path.join(destDir, entry.name);
       if (entry.isDirectory()) {

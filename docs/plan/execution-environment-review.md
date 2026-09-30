@@ -145,6 +145,42 @@ install-components.py 真机执行验证校验路径（未知组/注入包名拒
 对 Debian 13 的解析正确性待首个真实 guest 验证；guest-init 的 dev/docs
 预装路径同样未在真实 cloud-init 下执行；`software` 字段暂无 UI 消费面。
 
+### 第五批：浏览器桥——同一真实现场（EE5a，§7.2，§13 收敛）
+
+§13"默认浏览器和连接协议"收敛：**Chromium + CDP**。选型依据：CDP 附着是
+唯一能把 Agent 操作绑定到人工可见的同一持久会话的协议路径；Playwright
+的 `connectOverCDP` 复用同一协议但其 Python wheel 需联网获取且对纯 CDP
+附着为过重依赖，故桥体以 Python 标准库直接实现 RFC6455/CDP 客户端，
+零新增依赖；firefox-esr 保留为用户默认浏览器（Debian 基线），chromium
+加入配方承担可控浏览器角色。
+
+- `browser_bridge.py`：stdlib CDP 桥（_CdpSocket 手写握手/帧掩码/请求关联）。
+  ops：`status`（/json/version 探活）、`launch`（chromium
+  `--remote-debugging-port` + 托管 `--user-data-dir`——登录态/标签页随
+  profile 持久，§6.3）、`tabs`、`snapshot`（Accessibility.getFullAXTree
+  扁平化）、`act`（navigate/evaluate/click 视口坐标/type/screenshot）。
+  所有异常收敛为 `{ok:false}`——驱动协议不允许裸异常。
+- `runtime.py` `tool:"browser"` 分发到桥——**同一 lane**：串行化、取消
+  检查点、agent-vs-human 控制门全部继承；写 op（launch/act）与 `open`/`act`
+  同一 forbidden 门，读 op（status/tabs/snapshot）走 observe lane，
+  人工持有期间仍可观（读≠输入）。
+- `computer.browser`：显式 > 绑定 > 默认解析；远端经认证 HTTP 转发到
+  拥有 Host 自身执行；传输丢失如实 `outcome:"unknown"`（op 可能已过线，
+  绝不重放——先查页面状态再决定）。路由 `POST …/desktops/:id/browser`、
+  Harness `computer.browser`（control.computer）、Pi `action=browser`
+  （browserOp/browserAct）。
+
+验证：computer-service 57/57（新增 3：driver 分发同 lane、人工控制写门/
+读通行、远端转发+传输 unknown）；`test_browser_bridge.py` 对假 CDP 端点
+全过——真实验证 HTTP/WS 握手、帧掩码、命令/响应关联、tabs/snapshot/
+navigate/evaluate/click/缺参拒/未知 tab 拒；类型/ESLint/py_compile 全绿。
+
+未验证边界：真实 Chromium 会话未跑过（假服务器验证协议层，不证明
+Chromium 行为）；Page.navigate 返回即发不代表加载完成（事实边界，
+等待语义由 followup/观察承担）；AX 树扁平化为行文本，元素↔视口坐标
+映射尚未提供（click 仍需坐标来源）；Windows/macOS 桌面暂无桥
+（managed linux only，与驱动同一边界）。
+
 ## 待交付
 
 按 §11 顺序：环境接入与联动剩余项（服务访问/事件回源）、默认模板与持久、

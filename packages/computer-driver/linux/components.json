@@ -15,9 +15,10 @@
         "xfce4",
         "dbus-x11",
         "xauth",
-        "fonts-noto-cjk"
+        "fonts-noto-cjk",
+        "chromium"
       ],
-      "notes": "The browser itself is firefox-esr with a Mozilla-repo fallback handled by prepare-desktop.sh, whose first run also installs this group."
+      "notes": "Two browsers serve different roles: firefox-esr stays the user-facing default (Mozilla repo fallback in prepare-desktop.sh); chromium is the agent-controllable browser — the bridge attaches its live session over CDP. Selected per §13 browser choice: CDP attach is the only protocol that binds the same visible persistent session."
     },
     {
       "id": "dev",

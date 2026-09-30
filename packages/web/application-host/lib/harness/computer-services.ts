@@ -154,4 +154,22 @@ export function registerComputerServices(
       });
     },
   });
+  // EE §7.2: browser bridge — same lane/ownership gate as observe/act.
+  router.register("computer.browser", {
+    handle: async (params, ctx) => {
+      const desktopId = await desktopIdFor(host, ctx, params);
+      return requireService(host).browser({
+        ...(desktopId !== undefined ? { desktopId } : {}),
+        op: params.op,
+        ...(params.tabId !== undefined ? { tabId: params.tabId } : {}),
+        ...(params.binary !== undefined ? { binary: params.binary } : {}),
+        ...(params.profile !== undefined ? { profile: params.profile } : {}),
+        ...(params.port !== undefined ? { port: params.port } : {}),
+        ...(params.act !== undefined ? { act: params.act } : {}),
+        ...(params.limit !== undefined ? { limit: params.limit } : {}),
+        signal: ctx.signal,
+        sessionId: ctx.sessionId,
+      });
+    },
+  });
 }

@@ -45,6 +45,7 @@ const ComputerParams = Type.Object({
     Type.Literal("forwards"),
     Type.Literal("forwardClose"),
     Type.Literal("install"),
+    Type.Literal("browser"),
   ]),
   /** Target desktop; omit for the work's environment binding or the configured default. */
   desktopId: Type.Optional(Type.String()),
@@ -73,6 +74,12 @@ const ComputerParams = Type.Object({
   groups: Type.Optional(Type.Array(Type.String())),
   /** install: explicit package names on top of any groups. */
   packages: Type.Optional(Type.Array(Type.String())),
+  /** browser: status | launch | tabs | snapshot | act — ops on the visible Chromium session (CDP attach). */
+  browserOp: Type.Optional(Type.String()),
+  /** browser: tab to attach for snapshot/act (default first page). */
+  tabId: Type.Optional(Type.String()),
+  /** browser act: navigate(url) | evaluate(expression) | click(x,y) | type(text) | screenshot — viewport coords come from the snapshot/observe bounds. */
+  browserAct: Type.Optional(Type.Object({}, { additionalProperties: true })),
   connectionId: Type.Optional(Type.String({ description: "prepare: saved Host connection id; omit for this Host." })),
   width: Type.Optional(Type.Integer({ minimum: 1 })),
   height: Type.Optional(Type.Integer({ minimum: 1 })),
@@ -146,6 +153,7 @@ export function createComputerTool(bridge: HostServicesBridge, _sessionId: strin
       "action=open starts a URL/path/app on the desktop's own machine — `localhost` URLs and file paths resolve on that machine, not yours. action=put writes one file into the managed desktop user's home and returns its revision; it is a one-shot copy, not a sync.",
       "action=forward opens a live service access path: for a managed remote target it returns a loopback URL valid ONLY on this Host (a forward dies with it, close it with action=forwardClose); for the local target it returns the service's own address. forwards lists live handles. A remote service's localhost is never your localhost.",
       "action=install adds software to the environment owning the bound desktop — recipe groups (`dev`, `docs`) or explicit package names. It reports the package layer's real result: `installed` means packages landed, not that a control interface exists.",
+      "action=browser attaches the visible Chromium session on the target machine (CDP): browserOp=launch starts it on the persistent profile, tabs lists real tabs, snapshot returns the page accessibility tree, browserAct runs navigate/evaluate/click(x,y viewport)/type/screenshot in that same session — the tabs and login state a human sees are the ones you operate.",
     ],
     parameters: ComputerParams,
     execute: async (_toolCallId, params, signal, _onUpdate, _ctx) => {
@@ -407,6 +415,31 @@ export function createComputerTool(bridge: HostServicesBridge, _sessionId: strin
             const text = results.map((r) => `${r.id}: ${r.state}${r.detail ? ` (${r.detail})` : ""}`).join("; ")
               + (failed.length ? " — failed entries stay on the desktop's software record" : " — persisted on the desktop's software record");
             return { content: [{ type: "text", text }], ...(failed.length ? { isError: true as const } : {}), details: result as unknown as Record<string, unknown> };
+          }
+          case "browser": {
+            const op = (params.browserOp ?? "status").trim() as import("@varin/protocol").ComputerBrowserOp;
+            const result = await bridge.request("computer.browser", {
+              op,
+              ...(desktop ? { desktopId: desktop } : {}),
+              ...(params.tabId ? { tabId: params.tabId } : {}),
+              ...(params.browserAct !== undefined ? { act: params.browserAct as import("@varin/protocol").ComputerBrowserAct } : {}),
+            });
+            const r = result as { ok?: boolean; outcome?: string; status?: { running?: boolean; browser?: string };
+              tabs?: Array<{ id: string; title?: string; url?: string }>; lines?: string[];
+              result?: unknown; error?: string; image?: string };
+            if (r.outcome === "unknown") {
+              return errorResult(new HarnessRequestError("unavailable", `browser op may have reached the target — verify page state before retrying (${r.error ?? "response lost"})`));
+            }
+            const text = op === "status" || op === "launch"
+              ? (r.status?.running ? `browser running${r.status.browser ? `: ${r.status.browser}` : ""}` : "browser not running")
+              : op === "tabs"
+                ? (r.tabs ?? []).map((t) => `${t.id} ${t.title ?? ""} ${t.url ?? ""}`).join("\n") || "no tabs"
+                : op === "snapshot"
+                  ? (r.lines ?? []).slice(0, 200).join("\n") || "empty snapshot"
+                  : op === "act" && (params.browserAct as { kind?: string })?.kind === "screenshot"
+                    ? "frame captured (see details.image)"
+                    : r.error ?? (r.result !== undefined ? JSON.stringify(r.result) : "ok");
+            return { content: [{ type: "text", text }], ...(r.ok === false ? { isError: true as const } : {}), details: result as unknown as Record<string, unknown> };
           }
           case "environment": {
             // get when nothing is provided; otherwise update this work's

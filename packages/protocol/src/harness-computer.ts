@@ -389,6 +389,54 @@ export interface ComputerInstallSoftwareResult {
 }
 
 // ---------------------------------------------------------------------------
+// EE §7.2 — browser bridge: CDP attach to the SAME visible browser session
+// ---------------------------------------------------------------------------
+
+export type ComputerBrowserOp = "status" | "launch" | "tabs" | "snapshot" | "act";
+
+export interface ComputerBrowserAct {
+  kind: "navigate" | "evaluate" | "click" | "type" | "screenshot";
+  url?: string;
+  expression?: string;
+  x?: number;
+  y?: number;
+  text?: string;
+}
+
+export interface ComputerBrowserParams {
+  desktopId?: string;
+  op: ComputerBrowserOp;
+  /** Tab to attach for snapshot/act; defaults to the first page target. */
+  tabId?: string;
+  /** launch: explicit browser binary on the target machine. */
+  binary?: string;
+  /** launch: profile directory on the target machine (persistent session). */
+  profile?: string;
+  /** launch: CDP port on the target machine (default 9222). */
+  port?: number;
+  act?: ComputerBrowserAct;
+  /** snapshot: accessibility-tree line cap (default 600). */
+  limit?: number;
+}
+
+export interface ComputerBrowserResult {
+  ok: boolean;
+  /** Transport-loss semantics: the op may have reached the target. */
+  outcome?: "unknown";
+  status?: { running: boolean; browser?: string; wsUrl?: string };
+  alreadyRunning?: boolean;
+  tabs?: Array<{ id: string; title?: string; url?: string; attached?: boolean }>;
+  tab?: string;
+  lines?: string[];
+  frameId?: string;
+  result?: unknown;
+  type?: string;
+  exception?: boolean;
+  image?: string;
+  error?: string;
+}
+
+// ---------------------------------------------------------------------------
 // BC5 — shared desktop view + control ownership
 // ---------------------------------------------------------------------------
 

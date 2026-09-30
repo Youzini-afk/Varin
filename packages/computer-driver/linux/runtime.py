@@ -1109,6 +1109,11 @@ def perform_operation(operation):
     if tool == "inject_input":
         inject_human_input(operation)
         return {"ok": True}
+    if tool == "browser":
+        # Browser ops share this lane: the same visible scene, the same
+        # serialization, the same agent-vs-human control gate.
+        import browser_bridge
+        return browser_bridge.perform(operation)
     if tool == "list_apps":
         apps = []
         for app in iter_apps():
