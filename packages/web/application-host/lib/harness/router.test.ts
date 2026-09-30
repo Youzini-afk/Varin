@@ -32,7 +32,7 @@ const harnessEvent = (method: string, params: unknown, data: Record<string, unkn
 describe("harness router", () => {
   it("pins inherited shell placement before authorizing paths on the correct machine", async () => {
     const authorizeWorkspacePath = vi.fn(async () => null);
-    const handle = vi.fn(async () => ({ kind: "spawn-failed" as const, reason: "fixture", interpreter: "" }));
+    const handle = vi.fn(async () => ({ kind: "spawn-failed" as const, reason: "fixture", interpreter: "", hint: "fixture" }));
     const respond = vi.fn(async () => undefined);
     const router = createHarnessRouter({ respond, resolveActor: async () => resolvedActor(["process.shell"]),
       authorizeWorkspacePath, resolveWorkTarget: async () => "managed:cloud" });
