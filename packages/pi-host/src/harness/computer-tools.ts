@@ -41,6 +41,9 @@ const ComputerParams = Type.Object({
     Type.Literal("environment"),
     Type.Literal("open"),
     Type.Literal("put"),
+    Type.Literal("forward"),
+    Type.Literal("forwards"),
+    Type.Literal("forwardClose"),
   ]),
   /** Target desktop; omit for the work's environment binding or the configured default. */
   desktopId: Type.Optional(Type.String()),
@@ -57,6 +60,14 @@ const ComputerParams = Type.Object({
   args: Type.Optional(Type.Array(Type.String())),
   /** put: file bytes (base64) written atomically into the managed desktop user's home. */
   contentBase64: Type.Optional(Type.String()),
+  /** forward: port the service listens on at the target machine. */
+  port: Type.Optional(Type.Number()),
+  /** forward: address on the target machine (default its loopback); also the managed target id when set. */
+  host: Type.Optional(Type.String()),
+  /** forward: managed target the service runs on (default this work's workTarget or this Host). */
+  target: Type.Optional(Type.String()),
+  /** forwardClose: access id returned by forward/forwards. */
+  forwardId: Type.Optional(Type.String()),
   connectionId: Type.Optional(Type.String({ description: "prepare: saved Host connection id; omit for this Host." })),
   width: Type.Optional(Type.Integer({ minimum: 1 })),
   height: Type.Optional(Type.Integer({ minimum: 1 })),
@@ -128,6 +139,7 @@ export function createComputerTool(bridge: HostServicesBridge, _sessionId: strin
       "After saving a file in a managed desktop, action=artifact with its path relative to that desktop user's home records the exact file revision on the current work. The work view provides a download; a changed file must be registered again.",
       "action=environment reads or rebinds this work's execution environment (work target for shell ops, desktop for GUI ops). Operations already accepted keep their target; a rebind is never a file or session migration.",
       "action=open starts a URL/path/app on the desktop's own machine — `localhost` URLs and file paths resolve on that machine, not yours. action=put writes one file into the managed desktop user's home and returns its revision; it is a one-shot copy, not a sync.",
+      "action=forward opens a live service access path: for a managed remote target it returns a loopback URL valid ONLY on this Host (a forward dies with it, close it with action=forwardClose); for the local target it returns the service's own address. forwards lists live handles. A remote service's localhost is never your localhost.",
     ],
     parameters: ComputerParams,
     execute: async (_toolCallId, params, signal, _onUpdate, _ctx) => {
@@ -348,6 +360,30 @@ export function createComputerTool(bridge: HostServicesBridge, _sessionId: strin
             });
             const v = result.version as { sha256: string; byteLength: number };
             return { content: [{ type: "text", text: `wrote ${v.byteLength} bytes (sha256 ${v.sha256.slice(0, 12)}…) — one-shot copy, not a sync` }], details: result as unknown as Record<string, unknown> };
+          }
+          case "forward": {
+            if (!Number.isSafeInteger(params.port) || params.port! < 1 || params.port! > 65535) {
+              return errorResult(new HarnessRequestError("invalid-params", "forward requires port (1-65535)"));
+            }
+            const result = await bridge.request("environment.forward", {
+              port: params.port!,
+              ...(params.host !== undefined ? { host: params.host } : {}),
+              ...(params.target !== undefined ? { target: params.target } : {}),
+            });
+            const a = result.access;
+            const where = a.access.kind === "forward"
+              ? `reachable ONLY on this Host at ${a.access.url} (forward ${a.id}, live handle — dies with the Host)`
+              : `reachable directly at ${a.access.url} on ${a.access.machineId}`;
+            return { content: [{ type: "text", text: `service on ${a.service.machineId} ${a.service.host}:${a.service.port} — ${where}` }], details: result as unknown as Record<string, unknown> };
+          }
+          case "forwards": {
+            const result = await bridge.request("environment.forwards", {});
+            return { content: [{ type: "text", text: JSON.stringify(result.accesses, null, 2) }], details: result as unknown as Record<string, unknown> };
+          }
+          case "forwardClose": {
+            if (!params.forwardId?.trim()) return errorResult(new HarnessRequestError("invalid-params", "forwardClose requires forwardId"));
+            const result = await bridge.request("environment.forwardClose", { id: params.forwardId });
+            return { content: [{ type: "text", text: result.closed ? "forward closed" : "no live forward with that id" }], details: result as unknown as Record<string, unknown> };
           }
           case "environment": {
             // get when nothing is provided; otherwise update this work's

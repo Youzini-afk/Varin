@@ -1,11 +1,16 @@
 import type {
+  EnvironmentForwardCloseResult,
+  EnvironmentForwardListResult,
+  EnvironmentForwardResult,
   EnvironmentGetResult,
+  EnvironmentServiceAccess,
   EnvironmentSetResult,
   ThreadEnvironment,
 } from "@varin/protocol";
 import type { HarnessService, HarnessServiceContext } from "./router.js";
 import type { HarnessServiceHost } from "./service-host.js";
 import { HarnessServiceError } from "./service-error.js";
+import { createEnvironmentForwardRuntime, type EnvironmentForwardRuntime } from "./environment-forwards.js";
 
 /**
  * Execution-environment binding services (execution-environment design §5).
@@ -119,11 +124,92 @@ export function createEnvironmentSetService(host: HarnessServiceHost): HarnessSe
   };
 }
 
+/**
+ * Resolve the service's target machine for `environment.forward`: an
+ * explicit param wins, then the calling work's bound workTarget, then this
+ * Host itself.
+ */
+const forwardTargetId = async (
+  host: HarnessServiceHost,
+  ctx: HarnessServiceContext,
+  explicit: unknown,
+): Promise<string> => {
+  if (explicit !== undefined && explicit !== null) {
+    if (typeof explicit !== "string" || !explicit.trim()) {
+      throw new HarnessServiceError("invalid-params", "environment.forward target must be a machine id");
+    }
+    return explicit.trim();
+  }
+  const bound = await sessionEnvironment(host, ctx.sessionId);
+  return bound?.environment?.workTarget ?? "local";
+};
+
+export function createEnvironmentForwardServices(
+  host: HarnessServiceHost,
+  runtime: EnvironmentForwardRuntime = createEnvironmentForwardRuntime(),
+): { forward: HarnessService<"environment.forward">; forwards: HarnessService<"environment.forwards">; forwardClose: HarnessService<"environment.forwardClose">; runtime: EnvironmentForwardRuntime } {
+  const forward: HarnessService<"environment.forward"> = {
+    handle: async (params, ctx) => {
+      const port = Number(params.port);
+      if (!Number.isSafeInteger(port) || port < 1 || port > 65535) {
+        throw new HarnessServiceError("invalid-params", "environment.forward requires a port between 1 and 65535");
+      }
+      let serviceHost = "127.0.0.1";
+      if (params.host !== undefined && params.host !== null) {
+        if (typeof params.host !== "string" || !params.host.trim()) {
+          throw new HarnessServiceError("invalid-params", "environment.forward host must be a non-empty address");
+        }
+        serviceHost = params.host.trim();
+      }
+      const targetId = await forwardTargetId(host, ctx, params.target);
+      const bound = await sessionEnvironment(host, ctx.sessionId);
+      if (targetId === "local") {
+        // The service's own address is already reachable — report it without
+        // manufacturing a relay.
+        const access: EnvironmentServiceAccess = {
+          id: `envsvc:${Date.now()}:${Math.random().toString(36).slice(2)}`,
+          service: { machineId: "local", host: serviceHost, port },
+          access: { kind: "direct", machineId: "local", host: serviceHost, port, url: `http://${serviceHost}:${port}` },
+          threadId: bound?.threadId ?? null,
+          createdAt: new Date().toISOString(),
+        };
+        return { access } satisfies EnvironmentForwardResult;
+      }
+      if (!host.managedRemoteTargets) throw new HarnessServiceError("unavailable", "No managed execution targets are configured");
+      const target = await host.managedRemoteTargets.targetFor(scopeOf(ctx), targetId);
+      if (!target) {
+        throw new HarnessServiceError("unavailable", `No managed execution target is reachable as ${targetId}`);
+      }
+      // VM guests have no network path through this channel; desktops reached
+      // over the computer API expose their services through their owning
+      // Host's managed target instead.
+      const access = await runtime.open({ target, host: serviceHost, port, threadId: bound?.threadId ?? null });
+      return { access } satisfies EnvironmentForwardResult;
+    },
+  };
+  const forwards: HarnessService<"environment.forwards"> = {
+    handle: async () => ({ accesses: runtime.list() }) satisfies EnvironmentForwardListResult,
+  };
+  const forwardClose: HarnessService<"environment.forwardClose"> = {
+    handle: async (params) => {
+      if (typeof params.id !== "string" || !params.id) throw new HarnessServiceError("invalid-params", "environment.forwardClose requires an access id");
+      const closed = await runtime.close(params.id);
+      return { closed } satisfies EnvironmentForwardCloseResult;
+    },
+  };
+  return { forward, forwards, forwardClose, runtime };
+}
+
 export function registerEnvironmentServices(
   router: { register: <M extends keyof import("@varin/protocol").HarnessServiceMap>(method: M, service: HarnessService<M>) => void },
   host: HarnessServiceHost,
+  forwardRuntime?: EnvironmentForwardRuntime,
 ): void {
   if (!host.threadRegistry) return;
   router.register("environment.get", createEnvironmentGetService(host));
   router.register("environment.set", createEnvironmentSetService(host));
+  const forwardServices = createEnvironmentForwardServices(host, forwardRuntime);
+  router.register("environment.forward", forwardServices.forward);
+  router.register("environment.forwards", forwardServices.forwards);
+  router.register("environment.forwardClose", forwardServices.forwardClose);
 }

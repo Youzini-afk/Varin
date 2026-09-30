@@ -544,6 +544,57 @@ export interface EnvironmentSetResult extends EnvironmentGetResult {
   handoff: string | null;
 }
 
+/**
+ * A service access entry (execution-environment design §8.2). Keeps the
+ * service's real location separate from the access path: a `forward` access
+ * is a loopback listener on this Host that expires with it — never presented
+ * as the service's own address or as a durable tunnel.
+ */
+export interface EnvironmentServiceAccess {
+  id: string;
+  /** Where the service actually listens. */
+  service: { machineId: string; host: string; port: number };
+  /** How to reach it. `direct` = the service's own address (no relay);
+   * `forward` = an ephemeral loopback listener on this Host forwarding over
+   * the authenticated Host↔Host channel. */
+  access: {
+    kind: "forward" | "direct";
+    /** Machine the access address is valid on. */
+    machineId: string;
+    host: string;
+    port: number;
+    url: string;
+  };
+  /** Work Thread that owns this access (forwards are released with the Host). */
+  threadId: string | null;
+  createdAt: string;
+}
+
+export interface EnvironmentForwardParams {
+  /** Managed execution target id; absent = the work's bound workTarget, else this Host. */
+  target?: string;
+  /** Port the service listens on at the target machine. */
+  port: number;
+  /** Address on the target machine; default the target's own loopback. */
+  host?: string;
+}
+
+export interface EnvironmentForwardResult {
+  access: EnvironmentServiceAccess;
+}
+
+export interface EnvironmentForwardListResult {
+  accesses: EnvironmentServiceAccess[];
+}
+
+export interface EnvironmentForwardCloseParams {
+  id: string;
+}
+
+export interface EnvironmentForwardCloseResult {
+  closed: boolean;
+}
+
 export interface Thread {
   id: string;
   parent: ThreadParent;

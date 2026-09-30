@@ -244,3 +244,86 @@ describe("execution environment binding", () => {
     }
   });
 });
+
+import { createEnvironmentForwardServices } from "./environment-services.js";
+import { createEnvironmentForwardRuntime } from "./environment-forwards.js";
+
+describe("environment service access (forward)", () => {
+  it("returns the service's own address for the local target — no invented relay", async () => {
+    const registry = createThreadRegistry({ dataDir: dataDir(), hostId: "host-1" });
+    try {
+      const thread = await registry.createThread(createInput());
+      await bindSession(registry, thread.id, "session-1");
+      const { forward } = createEnvironmentForwardServices({ threadRegistry: registry } as never);
+      const result = await forward.handle({ port: 3000 }, ctx("session-1"));
+      expect(result.access.access).toMatchObject({ kind: "direct", host: "127.0.0.1", port: 3000, url: "http://127.0.0.1:3000" });
+      expect(result.access.service).toMatchObject({ machineId: "local", port: 3000 });
+      expect(result.access.threadId).toBe(thread.id);
+    } finally {
+      await registry.dispose();
+    }
+  });
+
+  it("opens a live forward on the bound managed target and closes it on request", async () => {
+    const registry = createThreadRegistry({ dataDir: dataDir(), hostId: "host-1" });
+    try {
+      const thread = await registry.createThread(createInput());
+      await bindSession(registry, thread.id, "session-1");
+      const opened: Array<{ machineId: string; host: string; port: number; threadId: string | null }> = [];
+      const runtime = {
+        open: async (input: { target: { machineId: string }; host: string; port: number; threadId: string | null }) => {
+          opened.push({ machineId: input.target.machineId, host: input.host, port: input.port, threadId: input.threadId });
+          return {
+            id: "envfwd:1",
+            service: { machineId: input.target.machineId, host: input.host, port: input.port },
+            access: { kind: "forward" as const, machineId: "local", host: "127.0.0.1", port: 51000, url: "http://127.0.0.1:51000" },
+            threadId: input.threadId,
+            createdAt: new Date().toISOString(),
+          };
+        },
+        list: () => [{
+          id: "envfwd:1",
+          service: { machineId: "managed:h", host: "127.0.0.1", port: 3000 },
+          access: { kind: "forward" as const, machineId: "local", host: "127.0.0.1", port: 51000, url: "http://127.0.0.1:51000" },
+          threadId: thread.id,
+          createdAt: "t",
+        }],
+        close: async (id: string) => id === "envfwd:1",
+        dispose: async () => undefined,
+      };
+      const host = {
+        threadRegistry: registry,
+        managedRemoteTargets: { targetFor: async (_scope: string, id: string) => ({ machineId: id }) },
+      };
+      const { forward, forwards, forwardClose } = createEnvironmentForwardServices(host as never, runtime);
+      const set = createEnvironmentSetService(host as never);
+      await set.handle({ workTarget: "managed:h" }, ctx("session-1"));
+      // The bound workTarget is used without a param.
+      const result = await forward.handle({ port: 3000 }, ctx("session-1"));
+      expect(opened).toEqual([{ machineId: "managed:h", host: "127.0.0.1", port: 3000, threadId: thread.id }]);
+      expect(result.access.access).toMatchObject({ kind: "forward", machineId: "local", url: "http://127.0.0.1:51000" });
+      expect((await forwards.handle({}, ctx("session-1"))).accesses).toHaveLength(1);
+      expect(await forwardClose.handle({ id: "envfwd:1" }, ctx("session-1"))).toEqual({ closed: true });
+      expect(await forwardClose.handle({ id: "gone" }, ctx("session-1"))).toEqual({ closed: false });
+    } finally {
+      await registry.dispose();
+    }
+  });
+
+  it("fails a forward to an unreachable target instead of reporting a dead entry", async () => {
+    const registry = createThreadRegistry({ dataDir: dataDir(), hostId: "host-1" });
+    try {
+      const thread = await registry.createThread(createInput());
+      await bindSession(registry, thread.id, "session-1");
+      const { forward } = createEnvironmentForwardServices({
+        threadRegistry: registry,
+        managedRemoteTargets: { targetFor: async () => null },
+      } as never, createEnvironmentForwardRuntime());
+      await expect(forward.handle({ target: "managed:down", port: 3000 }, ctx("session-1")))
+        .rejects.toMatchObject({ harnessCode: "unavailable" });
+      await expect(forward.handle({ port: 0 }, ctx("session-1"))).rejects.toMatchObject({ harnessCode: "invalid-params" });
+    } finally {
+      await registry.dispose();
+    }
+  });
+});

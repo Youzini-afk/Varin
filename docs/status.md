@@ -20,6 +20,7 @@ Last updated: 2026-09-29
 | 阶段 O 办公连续性 | 设计已接受（D-327），O0–O4 未实施 | [design/office-work-continuity-design.md](design/office-work-continuity-design.md) |
 | 阶段 BC Bot、记忆与 Computer Use | BC0–BC9 均有生产路径，深入验收结论仍为 Partial。已修复 Bot 生命周期、记忆来源/分支恢复、控制交接、远端 Host/桌面与成果续接；Linux 持久桌面及 Debian/libvirt 托管 guest 的创建、注册、关机升级路径已接线。真实 KVM/Linux 图形会话、macOS 稳定原生组件、Wayland 正式输入会话和发行包实装仍缺证据或实现，不能接受“全部落地”。 | [实施计划](plan/bot-computer-use-plan.md)、[当前深入验收](plan/bot-computer-use-review.md) |
 | 阶段 HR 面向任务与资源的 Harness | D-337，HR0–HR5 已接线并收口（2026-09-27）：资源根寻址、会话 cwd 锚定、多资源检索、持续索引、可变 work-context 移除、§12 场景证据 | [design/resource-oriented-harness-design.md](design/resource-oriented-harness-design.md)；交付叙述在归档日志 |
+| 可组合执行环境（EE） | 实施中。已交付：Thread 环境绑定与工作目标固定（EE1）、跨环境 open/受管文件写入与 artifact 修订（EE2）、服务访问 forward/list/close 经 Host↔Host 字节桥（EE3a）、`desktop` 持久 follow-up 源回源事件（EE3b）。未交付：默认环境模板与持久、浏览器/办公应用桥、诊断与经验、VM/Guest Host 组成实测 | [design/execution-environment-design.md](design/execution-environment-design.md)、[验收记录](plan/execution-environment-review.md) |
 | Phase 0–10、D-296 companion 退役 | 完成 | [archive/roadmap-history.md](archive/roadmap-history.md) |
 
 ## 当前缺口
@@ -29,6 +30,7 @@ Last updated: 2026-09-29
 | AI4S 7C–7E 剩余合同 | 远程执行与资源管理部分未交付为产品代码；Slurm/原生集群后端延后 |
 | 阶段 O | O0–O4 未实施 |
 | 阶段 BC | 实现缺口与环境证据分别见[当前验收](plan/bot-computer-use-review.md)。BC1–BC3 尚缺主动/自动共同来源覆盖、分支来源恢复与完整来源追读；BC6–BC9 尚缺独立桌面准备、VM guest 引导、成果/续接整合和正式平台依赖。Linux/macOS 真机、真实 libvirt、完整远端图形操作及正式安装包未验证。 |
+| 可组合执行环境 | 未交付批次与未验证边界见[验收记录](plan/execution-environment-review.md)：双机 Host↔Host 联调、真机桌面事件到 Thread 续行纵切、Linux/macOS `open` op 与符号链接封堵原生证据、forward 跨机字节桥、默认模板/应用桥/诊断批次未实施。 |
 | 平台与真实环境验收 | 打包桌面端的会话重开、目录离线、并发 Agent、跨根草稿完整 Agent 交互纵切；真实代理/fake-IP/远端 CI；macOS/Linux 真机；真实付费模型质量与延迟——均未测，不以源码测试宣称 |
 | HR 已知边界 | 外部根未保存草稿不能安全物化进单根隔离子任务（明确返回不可用而非读旧盘）；语义索引仍可能静默漏外部新文件需重扫，大目录资源成本未测；混合 A 虚拟分支+B 独立编辑器的单补丁需拆两次提交；结果不明的编辑器操作需人工处理，无自动跨提交域回滚或完整桌面重启证明 |
 | 性能数字 | 无测量不写提升倍数或毫秒承诺 |

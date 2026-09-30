@@ -62,6 +62,8 @@ interface Harness {
   shellListeners: Array<(event: FollowUpShellEvent) => void>;
   shellRuntime: Map<string, { running: boolean; exitCode?: number }>;
   shellOutput: Map<string, { text: string; running: boolean; exitCode?: number }>;
+  desktopStatuses: Map<string, string | null>;
+  desktopFiles: Map<string, string>;
   errors: Error[];
 }
 
@@ -133,6 +135,8 @@ async function fixture(options: {
     shellListeners: [],
     shellRuntime: new Map(),
     shellOutput: new Map(),
+    desktopStatuses: new Map(),
+    desktopFiles: new Map(),
     errors: [],
   };
   options.seed?.(harness);
@@ -236,6 +240,11 @@ async function fixture(options: {
       };
     },
     getResourceSample: async (machineId) => harness.samples.get(machineId) ?? null,
+    observeDesktop: async (desktopId) => ({ status: harness.desktopStatuses.has(desktopId) ? harness.desktopStatuses.get(desktopId)! : null }),
+    inspectDesktopArtifact: async (desktopId, relativePath) => {
+      const sha = harness.desktopFiles.get(`${desktopId}:${relativePath}`);
+      return sha ? { sha256: sha } : null;
+    },
     externalSource: (provider) => harness.external.get(provider) ?? null,
     getShellEvents: async (_workspaceId, sessionId, executionId, afterId = 0) => (
       (harness.shellEvents.get(`${sessionId}:${executionId}`) ?? []).filter((event) => event.id > afterId)
@@ -1690,5 +1699,91 @@ describe("follow-up service on the real kernel", () => {
     f.harness.threads.get("t-1")!.lifecycle = "archived";
     await f.service.reconcile("ws");
     assert.equal((await f.service.get(caller(), { id: wait.followUp.id })).followUp.status, "cancelled");
+  });
+});
+
+describe("desktop source follow-ups (EE)", () => {
+  it("fires when the desktop's catalog status transitions into a matching state", async () => {
+    const f = await fixture({ seed: (h) => {
+      h.threads.set("t-1", settledThread());
+      h.desktopStatuses.set("managed-linux", "starting");
+    } });
+    const wait = await f.service.register(caller(), {
+      instruction: "the desktop is ready — open the app",
+      source: { kind: "desktop", desktopId: "managed-linux", condition: "status", states: ["available"] },
+    });
+    assert.equal(wait.firedImmediately, false);
+    f.harness.desktopStatuses.set("managed-linux", "available");
+    await until(() => f.harness.continued.length === 1, 6_000, f.harness.errors);
+    assert.equal(f.harness.continued[0]?.threadId, "t-1");
+    assert.match(f.harness.continued[0]?.task ?? "", /desktop/);
+    const view = (await f.service.get(caller(), { id: wait.followUp.id }));
+    assert.equal(view.occurrences[0]?.reason, "desktop-status");
+    assert.equal(view.occurrences[0]?.facts.status, "available");
+  });
+
+  it("a status poll observes the real transition, never a guessed state", async () => {
+    const f = await fixture({ seed: (h) => {
+      h.threads.set("t-1", settledThread());
+      // Absent from the catalog → status null → never satisfies.
+    } });
+    const wait = await f.service.register(caller(), {
+      instruction: "report when reachable",
+      source: { kind: "desktop", desktopId: "remote:r1:h:d0", condition: "status", states: ["available"] },
+    });
+    assert.equal(wait.firedImmediately, false);
+    const check = await f.service.check(caller(), { id: wait.followUp.id });
+    assert.equal(check.fired, false);
+    assert.equal((check.observed as Record<string, unknown> | undefined)?.status, null);
+  });
+
+  it("fires on a new managed-desktop file revision and keeps the revision as provenance", async () => {
+    const sha256 = "b".repeat(64);
+    const f = await fixture({ seed: (h) => {
+      h.threads.set("t-1", settledThread());
+      h.desktopFiles.set("managed-linux:Downloads/report.csv", sha256);
+    } });
+    const wait = await f.service.register(caller(), {
+      instruction: "the export landed — collect it",
+      source: { kind: "desktop", desktopId: "managed-linux", condition: "artifact", path: "Downloads/report.csv" },
+    });
+    // Present at registration → the prime check fires immediately.
+    assert.equal(wait.firedImmediately, true);
+    await until(() => f.harness.continued.length === 1, 6_000, f.harness.errors);
+    const view = await f.service.get(caller(), { id: wait.followUp.id });
+    assert.equal(view.occurrences[0]?.facts.sha256, sha256);
+    assert.equal(view.occurrences[0]?.facts.path, "Downloads/report.csv");
+  });
+
+  it("waits for a different revision when a baseline sha256 is bound", async () => {
+    const f = await fixture({ seed: (h) => {
+      h.threads.set("t-1", settledThread());
+      h.desktopFiles.set("managed-linux:out.json", "a".repeat(64));
+    } });
+    const wait = await f.service.register(caller(), {
+      instruction: "content moved past the registered revision",
+      source: { kind: "desktop", desktopId: "managed-linux", condition: "artifact", path: "out.json", sha256: "a".repeat(64) },
+    });
+    assert.equal(wait.firedImmediately, false);
+    f.harness.desktopFiles.set("managed-linux:out.json", "c".repeat(64));
+    await until(() => f.harness.continued.length === 1, 6_000, f.harness.errors);
+    const view = await f.service.get(caller(), { id: wait.followUp.id });
+    assert.equal(view.occurrences[0]?.facts.previousSha256, "a".repeat(64));
+  });
+
+  it("rejects malformed desktop sources instead of arming a dead wait", async () => {
+    const f = await fixture({ seed: (h) => h.threads.set("t-1", settledThread()) });
+    await assert.rejects(() => f.service.register(caller(), {
+      instruction: "x", source: { kind: "desktop", desktopId: "", condition: "status", states: ["available"] },
+    }), /desktopId/);
+    await assert.rejects(() => f.service.register(caller(), {
+      instruction: "x", source: { kind: "desktop", desktopId: "d", condition: "status" },
+    }), /states/);
+    await assert.rejects(() => f.service.register(caller(), {
+      instruction: "x", source: { kind: "desktop", desktopId: "d", condition: "artifact", path: "../escape" },
+    }), /relative/);
+    await assert.rejects(() => f.service.register(caller(), {
+      instruction: "x", source: { kind: "desktop", desktopId: "d", condition: "artifact", path: "p", sha256: "zz" },
+    }), /sha256/);
   });
 });

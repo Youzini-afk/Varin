@@ -320,6 +320,7 @@ impl Storage {
                     "metric",
                     "external",
                     "shell",
+                    "desktop",
                     "manual",
                     "any",
                     "all",
@@ -344,7 +345,7 @@ impl Storage {
                             .as_object()
                             .and_then(|item| item.get("kind"))
                             .and_then(Value::as_str)
-                            .is_none_or(|kind| !source_kinds[..9].contains(&kind))
+                            .is_none_or(|kind| !source_kinds[..10].contains(&kind))
                     }) {
                         return Err(KernelError::Operation(
                             "followup composite child source is invalid".to_string(),

@@ -1610,6 +1610,12 @@ export interface HarnessServiceMap {
    */
   "environment.get": { params: Record<string, never>; result: import("./harness-threads.js").EnvironmentGetResult };
   "environment.set": { params: import("./harness-threads.js").EnvironmentSetParams; result: import("./harness-threads.js").EnvironmentSetResult };
+  /** Open a service access path: a direct address on the target, or a
+   * coordinator-loopback TCP forward over the authenticated Host channel.
+   * Forwards are live handles — never persisted or implied durable. */
+  "environment.forward": { params: import("./harness-threads.js").EnvironmentForwardParams; result: import("./harness-threads.js").EnvironmentForwardResult };
+  "environment.forwards": { params: Record<string, never>; result: import("./harness-threads.js").EnvironmentForwardListResult };
+  "environment.forwardClose": { params: import("./harness-threads.js").EnvironmentForwardCloseParams; result: import("./harness-threads.js").EnvironmentForwardCloseResult };
   // Phase 3: Thread operations
   "thread.dispatch": { params: ThreadDispatchParams; result: ThreadDispatchResult };
   "thread.facts.set": { params: ThreadFactsSetParams; result: ThreadFactsSetResult };
@@ -1795,6 +1801,9 @@ export const HARNESS_METHOD_CAPABILITY = {
   "computer.fileWrite": "control.computer",
   "environment.get": "context.session",
   "environment.set": "control.thread",
+  "environment.forward": "control.thread",
+  "environment.forwards": "context.session",
+  "environment.forwardClose": "control.thread",
   "thread.dispatch": "control.thread",
   "thread.facts.set": "control.thread",
   "thread.list": "control.thread",
@@ -1951,6 +1960,9 @@ const HARNESS_METHODS: ReadonlySet<string> = new Set<string>([
   "computer.fileWrite",
   "environment.get",
   "environment.set",
+  "environment.forward",
+  "environment.forwards",
+  "environment.forwardClose",
   "thread.dispatch",
   "thread.facts.set",
   "thread.list",

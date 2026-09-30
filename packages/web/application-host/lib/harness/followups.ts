@@ -124,6 +124,10 @@ interface DefinitionPayload {
     shellOutputOffset?: number;
     shellOutputTail?: string;
     shellMatchOffset?: number;
+    /** Last observed desktop status / artifact revision (desktop source). */
+    desktopStatus?: string | null;
+    desktopArtifactSha?: string;
+    desktopObservedAt?: number;
   };
 }
 
@@ -267,6 +271,14 @@ export interface FollowUpServiceDeps {
   getResourceSample?(machineId: string): Promise<FollowUpResourceSample | null>;
   /** Registered external-source adapters by provider id ("github-pr"). */
   externalSource?(provider: string): FollowUpExternalSource | null;
+  /**
+   * Poll a computer desktop's catalog status — local, managed or remote
+   * mirror. `null` means no desktop source is observable here; a desktop
+   * absent from the catalog reports `status: null`, never a guessed state.
+   */
+  observeDesktop?(desktopId: string): Promise<{ status: string | null }>;
+  /** Poll a managed-desktop file revision; `null` = absent or not inspectable on this Host. */
+  inspectDesktopArtifact?(desktopId: string, relativePath: string): Promise<{ sha256: string } | null>;
   /** Durable Knowledge events produced by the shell owner before notification. */
   getShellEvents?(workspaceId: string, sessionId: string, executionId: string, afterId?: number): Promise<FollowUpShellEvent[]>;
   subscribeShellEvents?(listener: (event: FollowUpShellEvent) => void | Promise<void>): () => void;
@@ -402,6 +414,7 @@ const isRepeatableLeaf = (source: FollowUpLeafSource): boolean => (
   || source.kind === "log" && source.every === true
   || source.kind === "metric" && source.every === true
   || source.kind === "shell" && source.condition === "output" && source.every === true
+  || source.kind === "desktop" && source.every === true
 );
 
 /** Validate and normalize the untrusted wire value at the service boundary. */
@@ -409,7 +422,7 @@ const validateSource = (value: unknown): FollowUpSource => {
   if (!isRecord(value) || typeof value.kind !== "string") {
     throw new HarnessServiceError(
       "invalid-params",
-      "source.kind is required (time | experiment | artifact | file | log | metric | external | shell | manual | any | all)",
+      "source.kind is required (time | experiment | artifact | file | log | metric | external | shell | desktop | manual | any | all)",
     );
   }
   if (value.kind === "any" || value.kind === "all") {
@@ -619,6 +632,46 @@ const validateSource = (value: unknown): FollowUpSource => {
       ...(optionalEpoch(value, "fallbackAt", "shell source") !== undefined ? { fallbackAt: value.fallbackAt as number } : {}),
     };
   }
+  if (value.kind === "desktop") {
+    assertOnlyKeys(value, new Set(["kind", "desktopId", "condition", "states", "path", "sha256", "every", "fallbackAt"]), "desktop source");
+    const desktopId = optionalNonEmptyString(value, "desktopId", "desktop source");
+    if (!desktopId) throw new HarnessServiceError("invalid-params", "desktop source requires a non-empty desktopId");
+    if (value.condition !== "status" && value.condition !== "artifact") {
+      throw new HarnessServiceError("invalid-params", "desktop source condition must be status | artifact");
+    }
+    const states = value.states !== undefined
+      ? (Array.isArray(value.states) && value.states.length > 0 && value.states.every((state) => typeof state === "string" && state.trim())
+        ? (value.states as string[]).map((state) => state.trim())
+        : (() => { throw new HarnessServiceError("invalid-params", "desktop source states must be a non-empty list of statuses"); })())
+      : undefined;
+    if (value.condition === "status" && !states) {
+      throw new HarnessServiceError("invalid-params", "desktop status source requires states");
+    }
+    const path = optionalNonEmptyString(value, "path", "desktop source");
+    if (value.condition === "artifact" && !path) {
+      throw new HarnessServiceError("invalid-params", "desktop artifact source requires a relative path");
+    }
+    if (path && (path.startsWith("/") || path.includes("\\") || path.split("/").includes(".."))) {
+      throw new HarnessServiceError("invalid-params", "desktop artifact path must be relative to the managed desktop user's home");
+    }
+    const sha256 = optionalNonEmptyString(value, "sha256", "desktop source");
+    if (sha256 !== undefined && !/^[0-9a-f]{64}$/u.test(sha256)) {
+      throw new HarnessServiceError("invalid-params", "desktop source sha256 must be a stored artifact revision");
+    }
+    if (value.condition === "status" && (path || sha256)) {
+      throw new HarnessServiceError("invalid-params", "desktop status source takes no path/sha256");
+    }
+    return {
+      kind: "desktop",
+      desktopId,
+      condition: value.condition,
+      ...(states ? { states } : {}),
+      ...(path ? { path } : {}),
+      ...(sha256 ? { sha256 } : {}),
+      ...(optionalBoolean(value, "every", "desktop source") !== undefined ? { every: value.every as boolean } : {}),
+      ...(optionalEpoch(value, "fallbackAt", "desktop source") !== undefined ? { fallbackAt: value.fallbackAt as number } : {}),
+    };
+  }
   if (value.kind === "manual") {
     assertOnlyKeys(value, new Set(["kind", "note"]), "manual source");
     if (value.note !== undefined && typeof value.note !== "string") {
@@ -669,6 +722,10 @@ const summarizeSource = (source: FollowUpSource): string => {
         : source.condition === "status"
           ? `shell ${source.executionId} status ${(source.states ?? []).join("/")}`
           : `shell ${source.executionId} to exit`;
+    case "desktop":
+      return source.condition === "status"
+        ? `desktop ${source.desktopId} status ${(source.states ?? []).join("/")}${source.every === true ? " (each)" : ""}`
+        : `desktop ${source.desktopId} file ${source.path ?? ""}${source.sha256 ? ` different from ${source.sha256.slice(0, 12)}…` : " to appear"}${source.every === true ? " (each revision)" : ""}`;
     case "manual":
       return source.note ?? "explicit trigger only";
     case "any":
@@ -1106,6 +1163,7 @@ export function createFollowUpService(deps: FollowUpServiceDeps) {
       watchShell(source.executionId, id, payload.workspaceId, payload.sessionId);
     }
     if (source.kind === "external") watchExternal(payload.workspaceId, id, source);
+    if (source.kind === "desktop") watchDesktop(payload.workspaceId, id);
     const fallbackAt = "fallbackAt" in source ? source.fallbackAt : undefined;
     if (typeof fallbackAt === "number") {
       scheduleAt(id, fallbackAt, () => fire(
@@ -1157,6 +1215,7 @@ export function createFollowUpService(deps: FollowUpServiceDeps) {
       ).catch(reportError);
     }
     if (source.kind === "external") unwatchExternal(payload.workspaceId, payload.id, source);
+    if (source.kind === "desktop") unwatchDesktop(payload.id);
     shellStreamState.delete(payload.id);
 
     if (source.kind === "log") logOffsets.delete(payload.id);
@@ -2397,6 +2456,130 @@ export function createFollowUpService(deps: FollowUpServiceDeps) {
     await runExternalGroup(externalGroupKey(workspaceId, payload.source), via);
   };
 
+  // ---------- desktop source (EE §8.3) ----------
+  // Polled like `external`: no push channel exists for catalog status or
+  // managed-home file revisions, and a remote desktop is only as fresh as
+  // the last successful observation anyway.
+
+  const DESKTOP_POLL_MS = 2_000;
+  /** followUpId → owning workspace (the poll tick needs it to re-read state). */
+  const desktopWaits = new Map<string, string>();
+  // Poll ticks live in their own map — `timers` is the one-shot time/deadline
+  // channel, and a fallbackAt scheduled there would clobber the tick (the tick
+  // guard then aborts every subsequent evaluation).
+  const desktopTimers = new Map<string, ReturnType<typeof setTimeout>>();
+
+  const evaluateDesktopWait = async (workspaceId: string, followUpId: string, via: string): Promise<void> => {
+    const record = await getDefinitionRecord(workspaceId, followUpId);
+    if (!record || record.state !== "waiting") return;
+    const payload = payloadOf(record) as unknown as DefinitionPayload;
+    if (payload.source.kind !== "desktop") return;
+    const source = payload.source;
+    const sourceJson = JSON.stringify(source);
+
+    if (source.condition === "status") {
+      if (!deps.observeDesktop) {
+        await markUnavailable(workspaceId, followUpId);
+        return;
+      }
+      const observed = await deps.observeDesktop(source.desktopId).catch((error) => {
+        reportError(error);
+        return undefined;
+      });
+      if (observed === undefined) return; // transient miss — the next tick retries
+      const status = observed.status;
+      const matched = status !== null && (source.states ?? []).includes(status);
+      const previous = payload.sourceState?.desktopStatus;
+      const patch = { desktopStatus: status, desktopObservedAt: now() };
+      const facts: Record<string, JsonValue> = {
+        desktopId: source.desktopId, status, observedAt: now(), via,
+        ...(previous !== undefined ? { previousStatus: previous } : {}),
+      };
+      if (!matched) {
+        // The baseline updates on every observation so a later transition
+        // into a matching state reports what it left.
+        await updateSourceState(workspaceId, followUpId, patch, sourceJson).catch(reportError);
+        return;
+      }
+      // The baseline rides the same write as the occurrence — a separate
+      // update would bump recordRevision and trip fire()'s stale-revision
+      // guard, and could never land once the wait turns "triggered".
+      await fire(workspaceId, followUpId, "desktop-status", facts,
+        `desktop-status:${String(previous)}->${status}`, {
+          recordRevision: record.recordRevision,
+          sourceIdentity: sourceIdentityFor(source, "desktop-status"),
+        }, { sourceStatePatch: patch });
+      return;
+    }
+
+    if (!deps.inspectDesktopArtifact) {
+      await markUnavailable(workspaceId, followUpId);
+      return;
+    }
+    const found = await deps.inspectDesktopArtifact(source.desktopId, source.path!).catch((error) => {
+      reportError(error);
+      return undefined;
+    });
+    if (found === undefined) return;
+    const sha256 = found?.sha256 ?? null;
+    const baseline = payload.sourceState?.desktopArtifactSha ?? source.sha256;
+    const satisfied = sha256 !== null && sha256 !== baseline;
+    if (!satisfied) {
+      // An absent file, or the same revision the caller already knows.
+      await updateSourceState(workspaceId, followUpId, { desktopObservedAt: now() }, sourceJson).catch(reportError);
+      return;
+    }
+    // The new baseline is committed in the occurrence write itself — after
+    // delivery the definition is no longer "waiting", so a trailing update
+    // would silently drop it and the next evaluation would fire the same
+    // revision a second time.
+    await fire(workspaceId, followUpId, "desktop-artifact", {
+      desktopId: source.desktopId,
+      path: source.path!,
+      sha256,
+      ...(baseline !== undefined ? { previousSha256: baseline } : {}),
+      observedAt: now(),
+      via,
+    }, `desktop-artifact-${sha256}`, {
+      recordRevision: record.recordRevision,
+      sourceIdentity: sourceIdentityFor(source, "desktop-artifact"),
+    }, { sourceStatePatch: { desktopArtifactSha: sha256, desktopObservedAt: now() } });
+  };
+
+  const clearDesktopTimer = (followUpId: string) => {
+    const timer = desktopTimers.get(followUpId);
+    if (timer) clearTimeout(timer);
+    desktopTimers.delete(followUpId);
+  };
+
+  const scheduleDesktopPoll = (followUpId: string) => {
+    clearDesktopTimer(followUpId);
+    const timer = setTimeout(() => {
+      if (desktopTimers.get(followUpId) !== timer) return;
+      desktopTimers.delete(followUpId);
+      const workspaceId = desktopWaits.get(followUpId);
+      if (!workspaceId) return;
+      void (async () => {
+        await evaluateDesktopWait(workspaceId, followUpId, "poll");
+        const record = await getDefinitionRecord(workspaceId, followUpId).catch(() => null);
+        // Re-arm the next tick only while the wait is still live — a fired
+        // or cancelled definition stops polling.
+        if (record?.state === "waiting" && desktopWaits.has(followUpId)) scheduleDesktopPoll(followUpId);
+      })().catch(reportError);
+    }, DESKTOP_POLL_MS);
+    desktopTimers.set(followUpId, timer);
+  };
+
+  const watchDesktop = (workspaceId: string, followUpId: string): void => {
+    desktopWaits.set(followUpId, workspaceId);
+    scheduleDesktopPoll(followUpId);
+  };
+
+  const unwatchDesktop = (followUpId: string): void => {
+    desktopWaits.delete(followUpId);
+    clearDesktopTimer(followUpId);
+  };
+
   /** Registration/reconcile snapshot: fire if the condition already holds. */
   const primeSource = async (workspaceId: string, followUpId: string, via: string): Promise<void> => {
     const record = await getDefinitionRecord(workspaceId, followUpId);
@@ -2428,6 +2611,8 @@ export function createFollowUpService(deps: FollowUpServiceDeps) {
       await runExternalQuery(workspaceId, followUpId, via);
     } else if (source.kind === "shell") {
       await evaluateShellWait(workspaceId, followUpId, via);
+    } else if (source.kind === "desktop") {
+      await evaluateDesktopWait(workspaceId, followUpId, via);
     }
   };
 
@@ -2446,7 +2631,8 @@ export function createFollowUpService(deps: FollowUpServiceDeps) {
       return;
     }
     if (payload.source.kind === "artifact" || payload.source.kind === "log"
-      || payload.source.kind === "metric" || payload.source.kind === "file" || payload.source.kind === "shell") {
+      || payload.source.kind === "metric" || payload.source.kind === "file" || payload.source.kind === "shell"
+      || payload.source.kind === "desktop") {
       await primeSource(workspaceId, followUpId, "delivery-reprime");
     }
   };
@@ -3437,10 +3623,23 @@ export function createFollowUpService(deps: FollowUpServiceDeps) {
         outputOffset: payload.sourceState?.shellOutputOffset ?? 0,
       };
     }
+    if (source.kind === "desktop") {
+      const observed = deps.observeDesktop
+        ? await deps.observeDesktop(source.desktopId).catch(() => undefined)
+        : undefined;
+      return {
+        kind: "desktop",
+        desktopId: source.desktopId,
+        condition: source.condition,
+        ...(observed !== undefined
+          ? { status: observed.status, baselineSha256: payload.sourceState?.desktopArtifactSha ?? source.sha256 ?? null, observedAt: payload.sourceState?.desktopObservedAt ?? null }
+          : { observed: "unavailable" }),
+      };
+    }
     return { kind: source.kind };
   };
 
-  const OBSERVED_KINDS: ReadonlySet<string> = new Set(["artifact", "file", "log", "metric", "external", "shell"]);
+  const OBSERVED_KINDS: ReadonlySet<string> = new Set(["artifact", "file", "log", "metric", "external", "shell", "desktop"]);
 
   /** Program-side evaluation of the source — "check now", never a model call. */
   const evaluate = async (

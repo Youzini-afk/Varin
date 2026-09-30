@@ -60,6 +60,60 @@ Host↔Host open/write 为假 fetch 聚焦测试，非真实双机联调；
 （Linux 目标平台上 `resolve()` 语义成立）；文件写入尚无版本前置条件
 （`--sha256` 仅 read 支持），并发覆盖靠原子 rename 保证最后写入者可见。
 
+### 第三批：服务访问与事件回源（EE3a/EE3b）
+
+EE3a——跨环境"服务访问"落成正式能力，沿既有 Host↔Host 通道，没有新增生命周期概念：
+
+- 协议：`environment.forward / forward.list / forward.close`（harness-forwards），
+  返回 forwardId 与实际监听地址；协调端 `localhost:PORT` 即目标机服务，
+  调用方拿到的永远是本机回环地址，远端 `localhost` 不再被误递给本地浏览器。
+- 传输：协调端 `environment-forwards.ts` 开本地 TCP 监听，按连接经认证
+  WebSocket 升级到目标 Host；目标侧 `environment-forward-server.ts` 校验
+  Bearer（`ensureSessionToken`）、Origin 与升级回执中的 Host 身份
+  （`X-Varin-Host`），把字节桥到目标机解析的地址。本地目标走同一入口的
+  进程内直连（无环回 WS）。
+- 语义：forward 与 Thread/调用方绑定并随 disarm/会话收尾关闭；升级回执
+  Host 身份不符即拒绝桥接；`list`/`close` 如实反映协调端在管转发。
+- Pi 工具：`computer` `action=forward|forwardList|forwardClose`，可选端口收窄；
+  转发结果经 `unknown` 安全收窄进 detail。
+
+EE3b——"事件回源"复用持久 follow-up 体系（拒绝另立事件台账）：
+
+- 新 `desktop` 叶源（协议 + 内核 `source_kinds` + 组合子校验均扩展）：
+  `condition: "status"` 观察桌面 catalog 状态（含远端镜像，随最后一次
+  可达同步的真实新鲜度），`states` 必填；`condition: "artifact"` 观察受管
+  桌面 home 文件——`path` 必填（拒绝绝对/逃逸/反斜杠），可绑 `sha256`
+  基线，`exists`/`changed` 复用既有 file 语义（出现即触发；修订不同于
+  基线即触发）。
+- 观察走 ComputerService（`observeDesktop` → catalog `list()`，远端桌面即
+  其镜像状态；`inspectDesktopArtifact` → EE2 的受管 artifact 读取），不越层
+  直读驱动/文件系统；依赖缺失如实 `unavailable`。
+- 轮询 2s 独立 timer map——不与 time/deadline 共用 `timers`（修掉
+  `fallbackAt` 覆盖 poll tick 的死轮询缺陷）；基线（上次状态/sha）随
+  `fire()` 的 `sourceStatePatch` 与 occurrence **同一事务**写入——修掉
+  "先提 revision 再 fire 被守卫拒"与"fire 后补基线被 state 门挡、重启后
+  同修订重复投递"两个缺陷。
+- 事件固定回原 `workspace/session/thread`：触发即 `fire()` →
+  `deliverRecordedOccurrence`，settled Thread 续行、活跃会话 inform、
+  queued 排队，全部既有投递语义；`followup.check` 返回观察事实
+  （status/baselineSha256/observedAt 或 `observed:"unavailable"`）。
+- Pi `followup` 工具：desktop 源 schema、摘要渲染与说明同步更新；
+  校验先行（空 desktopId / 缺 states / 逃逸 path / 非 sha256 一律拒绝，
+  不武装死等）。
+
+验证：followups 真核套件 49/51——5 个新 desktop 用例全过（状态迁移触发、
+null 状态不臆造、artifact 到达即触发且 sha256 入事实、基线 sha 等修订、
+非法源拒绝）；2 个失败为 `vi.advanceTimersByTimeAsync` 在 bun 下不存在的
+既有环境失败（干净 HEAD 同现，非本次引入）。environment-forwards 3 项
+（真实 TCP 字节贯通、Host 身份不符拒绝、目标端鉴权）+ environment-services
+10 项 vitest 全过；内核 release 二进制已按新校验重建；
+protocol/pi-host/application-host 类型与变更文件 ESLint 全绿。
+
+未验证边界：端到端"桌面真实变化 → Bot Thread 续行"未在真机跑通
+（poll 路径为聚焦测试）；forward 字节桥为单机真实 TCP 自环，跨机联调未测；
+远端桌面状态的新鲜度受镜像同步节流约束（文档已声明），桌面原生推流
+（替代轮询）留待后续。
+
 ## 待交付
 
 按 §11 顺序：环境接入与联动剩余项（服务访问/事件回源）、默认模板与持久、

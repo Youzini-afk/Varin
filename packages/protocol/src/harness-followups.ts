@@ -104,6 +104,31 @@ export type FollowUpLeafSource =
       note?: string;
     }
   | {
+      /**
+       * Watches a computer desktop through the catalog — local, managed or
+       * remote mirror (execution-environment §8.3). The Host polls the real
+       * state; `observedAt` facts keep provenance of each check.
+       */
+      kind: "desktop";
+      /** Catalog desktop id (local-console, managed-linux, remote:r*:…). */
+      desktopId: string;
+      /**
+       * status   — the desktop's catalog status becomes one of `states`.
+       * artifact — a file in the managed desktop user's home exists, or its
+       *            stored revision differs from `sha256`.
+       */
+      condition: "status" | "artifact";
+      /** status only: the statuses that satisfy the wait. */
+      states?: string[];
+      /** artifact only: path relative to the managed desktop user's home. */
+      path?: string;
+      /** artifact only: fire when the stored revision differs from this revision. */
+      sha256?: string;
+      /** status: fire on each new matching state; artifact: fire on each new revision. */
+      every?: boolean;
+      fallbackAt?: number;
+    }
+  | {
       /** Watches an ordinary Harness shell execution owned by this session. */
       kind: "shell";
       /** Stable execution identity returned by bash/powershell. */

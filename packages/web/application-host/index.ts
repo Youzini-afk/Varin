@@ -103,6 +103,7 @@ import { attachConnectionProxy } from './lib/connections/host-proxy.js';
 import { configuredVmProviders } from './lib/computer/vm-provider.js';
 import { registerComputerRoutes } from './lib/computer/computer-routes.js';
 import { attachDesktopMedia } from './lib/computer/desktop-media.js';
+import { attachServiceForward } from './lib/harness/environment-forward-server.js';
 import { createVmGuestRegistration } from './lib/computer/vm-guest-register.js';
 import { createWorktreeReclaimGuard } from './lib/harness/worktree-reclaim-guard.js';
 import { resolveThreadWorktreeSettings } from './lib/harness/thread-worktree-settings.js';
@@ -2649,6 +2650,22 @@ async function main(options: StartWebUiServerOptions = {}): Promise<WebUiServerC
     },
     subscribeResourceSamples: (listener) => resourceService.subscribeSamples(listener),
     getResourceSample: (machineId) => resourceService.getMachineSample(machineId),
+    // Desktop source (EE §8.3): the computer catalog is authoritative for
+    // status (remote mirrors included); file revision checks delegate to the
+    // managed-desktop artifact reader. Missing deps mean "not observable".
+    observeDesktop: async (desktopId) => {
+      const catalog = await computerService.list();
+      const desktop = catalog.desktops.find((entry) => entry.id === desktopId);
+      return { status: desktop?.status ?? null };
+    },
+    inspectDesktopArtifact: async (desktopId, relativePath) => {
+      try {
+        const version = await computerService.inspectArtifact(desktopId, relativePath);
+        return { sha256: version.sha256 };
+      } catch {
+        return null;
+      }
+    },
     externalSource: (provider) => provider === 'github-pr' ? followUpExternalSources.githubPr : null,
     getShellEvents: (workspaceId, sessionId, executionId, afterId) => (
       knowledgeContextRuntime.shellEvents(workspaceId, sessionId, executionId, afterId)
@@ -2788,6 +2805,12 @@ async function main(options: StartWebUiServerOptions = {}): Promise<WebUiServerC
     ...(uiAuthController ? { requireAuth: uiAuthController.requireAuth } : {}),
   });
   const desktopMedia = attachDesktopMedia({ server, hostId, computers: computerService,
+    authenticate: async (request) => Boolean(await uiAuthController?.ensureSessionToken(request, { setHeader: () => undefined })),
+    originAllowed: isRequestOriginAllowed,
+  });
+  // Target side of `environment.forward`: authenticated coordinator Hosts
+  // bridge a WebSocket onto a TCP address resolved on THIS machine.
+  const serviceForward = attachServiceForward({ server, hostId,
     authenticate: async (request) => Boolean(await uiAuthController?.ensureSessionToken(request, { setHeader: () => undefined })),
     originAllowed: isRequestOriginAllowed,
   });
@@ -4234,6 +4257,7 @@ async function main(options: StartWebUiServerOptions = {}): Promise<WebUiServerC
       realtimeProxyRuntime.stop();
       connectionProxy.stop();
       desktopMedia.stop();
+      serviceForward.stop();
       clearInterval(relayReconcileTimer);
       relayService.stop();
       dictationRuntime?.stop?.();

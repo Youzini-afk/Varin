@@ -67,6 +67,10 @@ const describeSource = (source: Record<string, unknown>): string => {
     case "any":
     case "all":
       return `${source.kind} of ${((source.sources as Record<string, unknown>[] | undefined) ?? []).map(describeSource).join("; ")}${source.every === true ? " (repeatable edges)" : ""}`;
+    case "desktop":
+      return source.condition === "status"
+        ? `desktop ${source.desktopId} status ${(source.states as string[] | undefined)?.join("/") ?? ""}${source.every === true ? " (each)" : ""}`
+        : `desktop ${source.desktopId} file ${source.path ?? ""}${typeof source.sha256 === "string" ? ` different from ${source.sha256.slice(0, 12)}…` : " to appear"}${source.every === true ? " (each revision)" : ""}`;
     case "manual":
       return typeof source.note === "string" ? source.note : "explicit trigger only";
     default:
@@ -145,6 +149,18 @@ const leafSourceSchema = Type.Union([
     fallbackAt: Type.Optional(Type.Number({ description: "Epoch ms deadline backstop" })),
   }, { description: "Fire from an ordinary background shell's durable lifecycle or streamed output match" }),
   Type.Object({
+    kind: Type.Literal("desktop"),
+    desktopId: Type.String({ description: "Catalog desktop id (local-console, managed-linux, remote:r*:…) — the machine the watched state lives on" }),
+    condition: Type.Union([Type.Literal("status"), Type.Literal("artifact")], {
+      description: "status: catalog status becomes one of `states`; artifact: file in the managed desktop home exists or its stored revision differs from `sha256`",
+    }),
+    states: Type.Optional(Type.Array(Type.String(), { description: "status only: statuses that satisfy the wait (e.g. available, unavailable)" })),
+    path: Type.Optional(Type.String({ description: "artifact only: path relative to the managed desktop user's home" })),
+    sha256: Type.Optional(Type.String({ description: "artifact only: fire when the stored revision differs from this registered revision" })),
+    every: Type.Optional(Type.Boolean({ description: "status: fire on each new matching state; artifact: fire on each new revision" })),
+    fallbackAt: Type.Optional(Type.Number({ description: "Epoch ms deadline backstop" })),
+  }, { description: "Fire on a desktop's real state — catalog status or a managed-home file revision (polled; a remote desktop is only as fresh as its last successful observation)" }),
+  Type.Object({
     kind: Type.Literal("manual"),
     note: Type.Optional(Type.String({ description: "What is being awaited, for the audit trail" })),
   }, { description: "Fire only via check/fire — e.g. a signal the program cannot observe" }),
@@ -171,12 +187,13 @@ export function createFollowUpTool(bridge: HostServicesBridge): ToolDefinition {
     name: "follow_up",
     label: "Follow-up",
     description:
-      "Register a durable follow-up on this conversation: what to wait for and what to do when it happens. Sources: time, experiment terminal, artifact collection, workspace file, log pattern, machine metric crossing, ordinary background shell, external GitHub PR state, manual, or an any/all combination of these. The host watches the source — you do not poll. When it fires, this thread resumes with the trigger facts. Actions: register, list, get, update, cancel, check, fire.",
+      "Register a durable follow-up on this conversation: what to wait for and what to do when it happens. Sources: time, experiment terminal, artifact collection, workspace file, log pattern, machine metric crossing, ordinary background shell, desktop status/file revision, external GitHub PR state, manual, or an any/all combination of these. The host watches the source — you do not poll. When it fires, this thread resumes with the trigger facts. Actions: register, list, get, update, cancel, check, fire.",
     promptSnippet: "follow_up: durable wait + continuation (register/list/get/update/cancel/check/fire)",
     promptGuidelines: [
       "Register AFTER the work exists: an experiment/artifact/log source needs the real attemptId from experiment submit, a file source needs a workspace-relative path, a metric source needs a machineId from the resources overview, a time source needs a concrete epoch-ms instant you computed.",
       "Sources bind real events: artifact fires when collection makes the artifact available (or reports missing/failed); file 'ready' requires no active writer plus a stable stat — a bare file appearing is never 'ready'; metric fires only on threshold crossings, never on a steady-true stream; log matches incrementally by byte cursor.",
       "A shell source uses the executionId returned by bash/powershell. It does not turn the command into an experiment: completion is durable, output matching stores only compact match/cursor facts, and a still-running local process becomes unavailable after a Host restart when it cannot be reattached.",
+      "A desktop source watches the computer catalog: `status` fires when the desktop reports one of `states` (available/unavailable/busy — take IDs from the computer list), `artifact` fires when a file exists in the managed desktop user's home or its stored revision differs from `sha256`. Desktop observation is polled — the facts carry each check's observedAt; a remote desktop is only as fresh as its last reachable sync.",
       "Use {kind:'any', sources:[...]} for the first matching source or {kind:'all', sources:[...]} to latch each source. Combinations are one-shot unless every=true; later cycles require new repeatable edges, so a due time or already-completed attempt does not manufacture repeated wakeups.",
       "Registration is non-blocking — keep working unless the user asked you to wait. With pause=true the thread is marked waiting, the goal pauses, and the trigger resumes the run; without it the trigger arrives as a message while you work.",
       "check is a program-side evaluation of the source (is the attempt done yet?) — it fires the follow-up if satisfied but never calls the model. fire invokes you now.",

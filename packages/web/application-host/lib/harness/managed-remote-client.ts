@@ -42,7 +42,7 @@ export interface ConfiguredHost {
   source: "desktop-host" | "ssh-instance" | "configured-host";
 }
 
-interface ManagedTarget {
+export interface ManagedTarget {
   machineId: string;
   hostId: string;
   connection: ConfiguredHost;
