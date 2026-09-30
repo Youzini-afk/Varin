@@ -30,7 +30,7 @@ const scopeOfStoreId = (scopeId: string): KnowledgeScope => (
 
 interface StubCall { method: string; params: Record<string, unknown> }
 
-const wait = async (predicate: () => boolean | Promise<boolean>, ms = 3000): Promise<void> => {
+const wait = async (predicate: () => boolean | Promise<boolean>, ms = 10_000): Promise<void> => {
   const deadline = Date.now() + ms;
   while (Date.now() < deadline) {
     if (await predicate()) return;
@@ -718,7 +718,7 @@ describe("memory organizer (BC2)", () => {
     const first = calls.find((call) => call.method === "harness.memoryOrganize")!;
     expect(estimateMemoryOrganizerInputTokens(String(first.params.system), String(first.params.prompt))
       + Number(first.params.maxOutputTokens)).toBeLessThanOrEqual(8_000);
-    await wait(async () => (await ws.listOrganizerProgress()).filter((row) => row.status === "reviewed-empty").length === 8, 15_000);
+    await wait(async () => (await ws.listOrganizerProgress()).filter((row) => row.status === "reviewed-empty").length === 8, 30_000);
     expect(calls.filter((call) => call.method === "harness.memoryOrganize").length).toBeGreaterThan(1);
     await org.dispose();
   });

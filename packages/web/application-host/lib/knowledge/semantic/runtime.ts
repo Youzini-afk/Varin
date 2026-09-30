@@ -4,6 +4,7 @@
  */
 
 import type { DocumentAuthority, DocumentMutationObservation } from "../../documents/authority.js";
+import { realpathSync } from "node:fs";
 import path from "node:path";
 import type { FileSearchEnumerationStatus, FileSearchItem } from "../../fs/types.js";
 import { languageIdForPath } from "../../harness/language-id.js";
@@ -37,8 +38,15 @@ const insideDirectory = (parent: string, child: string): boolean => {
 export function resolveSemanticScanRoots(root: string, selected: readonly string[] | null | undefined): string[] {
   if (selected === null || selected === undefined) return [root];
   const candidates = selected.flatMap((directory) => {
-    if (insideDirectory(directory, root)) return [root];
-    return insideDirectory(root, directory) ? [directory] : [];
+    // Documents stores a real path, while a saved selection may use another
+    // spelling of the same directory (including Windows 8.3 path aliases).
+    let canonical = directory;
+    try { canonical = realpathSync(directory); }
+    catch (error) {
+      if ((error as NodeJS.ErrnoException).code !== "ENOENT") throw error;
+    }
+    if (insideDirectory(canonical, root)) return [root];
+    return insideDirectory(root, canonical) ? [canonical] : [];
   }).sort((left, right) => left.length - right.length);
   return candidates.filter((directory, index) => !candidates.slice(0, index).some((earlier) => insideDirectory(earlier, directory)));
 }

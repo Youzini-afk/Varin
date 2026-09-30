@@ -142,10 +142,10 @@ describe("harness path authority", () => {
 
   describe("HR0 resource roots", () => {
     const resourceRoots = (entries: Array<{ canonicalPath: string; kind: "directory" | "file" }>) => {
-      const roots = new Map(entries.map((entry, index) => [
-        path.resolve(entry.canonicalPath),
-        { workspaceId: `root-${index}`, canonicalPath: path.resolve(entry.canonicalPath), kind: entry.kind },
-      ]));
+      const roots = new Map<string, { workspaceId: string; canonicalPath: string; kind: "directory" | "file" }>(entries.map((entry, index) => {
+        const canonicalPath = fs.realpathSync(entry.canonicalPath);
+        return [canonicalPath, { workspaceId: `root-${index}`, canonicalPath, kind: entry.kind }] as const;
+      }));
       const registered: Array<{ canonicalPath: string; kind: string }> = [];
       const norm = (value: string) => path.resolve(value);
       return {
@@ -194,7 +194,7 @@ describe("harness path authority", () => {
       const authority = createHarnessPathAuthority({ authorityId: "host-1", documents });
       try {
         const resolved = await authority.resolve(unbound(launch), target, { allowMissing: false });
-        expect(resolved).toMatchObject({ workspaceId: "root-1", resourceId: "paper.pdf", resolvedPath: path.resolve(target) });
+        expect(resolved).toMatchObject({ workspaceId: "root-1", resourceId: "paper.pdf", resolvedPath: fs.realpathSync(target) });
         expect(await authority.readAuthorizedFile(unbound(launch), resolved!)).toEqual(Buffer.from("bytes"));
       } finally {
         rmSync(launch, { recursive: true, force: true });
@@ -246,7 +246,7 @@ describe("harness path authority", () => {
           .toMatchObject({ workspaceId: "root-1", resourceId: "existing.txt" });
         expect(await authority.resolve(unbound(launch), nested, { allowMissing: true }))
           .toMatchObject({ workspaceId: "root-1", resourceId: "new/note.txt" });
-        expect(documents.registered).toEqual([{ canonicalPath: path.resolve(external), kind: "directory" }]);
+        expect(documents.registered).toEqual([{ canonicalPath: fs.realpathSync(external), kind: "directory" }]);
       } finally {
         rmSync(launch, { recursive: true, force: true });
         rmSync(external, { recursive: true, force: true });
