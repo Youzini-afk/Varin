@@ -217,13 +217,6 @@ jobs:
           node packages/electron/scripts/prepare-native-runtime.mjs
           node packages/electron/scripts/prepare-onnx-runtime.mjs
 
-      # v0.9.21 was tagged before the TriviumDB ARM64 loader repair. Apply the
-      # current release automation to its installed dependency without changing
-      # the tagged application source. Later tags already do this in prepare.
-      - name: Repair TriviumDB Windows ARM64 loader
-        if: inputs.release_ref == 'v0.9.21' && matrix.platform == 'windows' && matrix.architecture == 'arm64'
-        run: node .release-automation/packages/electron/scripts/patch-trivium-arm64-loader.mjs packages/web/package.json
-
       - name: Cache verified native libraries
         if: steps.native-cache.outcome == 'success' && steps.native-cache.outputs.cache-hit != 'true'
         uses: actions/cache/save@v6
