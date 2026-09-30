@@ -340,15 +340,19 @@ Agent 遇到结果不符、重复失败或需要追查时，可以查询有关�
 
 ## 13. 后续需要收敛的选择
 
-| 选择 | 判断依据 |
+以下选择在实施中已逐项收敛（交付证据见
+[验收记录](../plan/execution-environment-review.md)；未验证的原生边界在各批
+"未验证边界"段如实保留）：
+
+| 选择 | 收敛结果 |
 | --- | --- |
-| Windows 本地虚拟机后端及其他平台优先顺序 | 用户宿主条件、可用虚拟化能力、打包部署与实际桌面兼容性 |
-| 默认浏览器和连接协议 | 同一持久用户会话、可见桌面、稳定控制、下载及版本匹配 |
-| LibreOffice 等应用桥的范围 | 真实打开文档、未保存状态、重算/排版、视觉检查和外部编辑协调 |
-| 精确软件清单与组件发布方式 | 代表任务覆盖、依赖体积、准备耗时、升级与持续使用成本 |
-| guest Host 的模块装配 | 在既有 Host/Kernel 边界内按角色提供能力，避免重复调度与存储 |
-| 已有工作跨 Harness 迁移 | 会话、记忆、待处理动作及恢复通路的真实交接能力 |
-| 调试框架的借鉴或集成深度 | 与现有证据/记忆/执行机制的衔接及实际纠错收益 |
+| Windows 本地虚拟机后端及其他平台优先顺序 | 先交付 Linux `qemu:///system`（libvirt provider，BC7/EE4）；Windows 本地虚拟化（Hyper-V）保留为开放后端——本机/远端 Windows 桌面已由直接驱动与 Host 连接覆盖，不由 VM 后端阻塞。 |
+| 默认浏览器和连接协议 | **Chromium + CDP 附着同一可见持久会话**（`browser_bridge.py`，Python 标准库零依赖实现 RFC6455/CDP）；firefox-esr 保留为用户默认浏览器。Playwright 未选：`connectOverCDP` 复用同一协议且对纯 CDP 附着为过重依赖。 |
+| LibreOffice 等应用桥的范围 | **python3-uno + UNO socket attach 同一 live 实例**（`office_bridge.py`）：status/launch/docs/open/act(read·write·insert·save)，含 `modified` 未保存状态；Calc/Writer 结构化操作交付，Impress 枚举可见但无结构化写入。 |
+| 精确软件清单与组件发布方式 | `components.json` 分组配方（dev/docs/browsers）+ `install-components.py` apt 安装器 + `software` 记录字段分离"安装态/接口可用态"；guest-init 预装 dev+docs。 |
+| guest Host 的模块装配 | **guest 即标准 Varin Host**：guest-init 以 `cli.js serve` 常驻，经受管连接注册为远端 Host——desktop 镜像、服务转发、浏览器/办公桥、证据日志全部沿既有 remote 路径到达，不新增平行装配。 |
+| 已有工作跨 Harness 迁移 | **诚实交接而非假迁移**：`environment.set` 改变后续受理操作的目标，已受理操作保持绑定并可按 id 寻址，返回 `handoff` 说明实际效果；会话本身仍在原 Host 运行，不把重连当迁移。 |
+| 调试框架的借鉴或集成深度 | **证据日志 + 现有 Agent 诊断入口 + 条件化经验**（EE6）：`computer.evidence` 持久步骤日志、Pi `action=evidence` 回看、`memory remember`(nature:experience, trigger)固化已验证修正；CUADebug/AgentDebugX 的证据关联与验证思想已吸收，整套框架不预装不接入。 |
 
 这些选择不影响已确认的独立部署、用户经 Harness 发出操作、共享真实现场和精简默认环境方向。
 
