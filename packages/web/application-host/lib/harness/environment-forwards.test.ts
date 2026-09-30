@@ -28,6 +28,22 @@ const targetFor = (port: number, hostId = "target-h"): ManagedTarget => ({
 });
 
 describe("environment service forwards (real TCP over the Host↔Host channel)", () => {
+  it("isolates sessions and closes only the sleeping session's listeners", async () => {
+    const runtime = createEnvironmentForwardRuntime();
+    try {
+      const first = await runtime.open({ target: targetFor(1), host: "127.0.0.1", port: 3000, threadId: "t1", sessionId: "one" });
+      const second = await runtime.open({ target: targetFor(1), host: "127.0.0.1", port: 3000, threadId: "t2", sessionId: "two" });
+      expect(runtime.list("one").map((entry) => entry.id)).toEqual([first.id]);
+      expect(await runtime.close(second.id, "one")).toBe(false);
+      await runtime.closeSession("one");
+      expect(runtime.list().map((entry) => entry.id)).toEqual([second.id]);
+      const dead = new Socket();
+      const failed = new Promise<string>((resolve) => dead.once("error", (error: NodeJS.ErrnoException) => resolve(error.code!)));
+      dead.connect(first.access.port, "127.0.0.1");
+      expect(await failed).toBe("ECONNREFUSED");
+      dead.destroy();
+    } finally { await runtime.dispose(); }
+  });
   it("pipes bytes from a coordinator-loopback port onto the target machine's service", async () => {
     const echo = createTcpServer((socket: Socket) => {
       socket.on("data", (chunk) => socket.write(`echo:${chunk}`));

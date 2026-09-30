@@ -58,6 +58,18 @@ const bindSession = async (
 };
 
 describe("execution environment binding", () => {
+  it("does not fall back to local execution when the binding cannot be read", async () => {
+    const shellExec = vi.fn();
+    const observe = vi.fn();
+    const host = {
+      threadRegistry: { threadEnvironmentForSession: async () => { throw new Error("catalog unavailable"); } },
+      managedRemoteTargets: { shellExec }, computerService: { observe },
+    };
+    await expect(createShellExecService(host as never).handle({ command: "echo wrong machine" }, ctx("s"))).rejects.toThrow("catalog unavailable");
+    await expect(createComputerObserveService(host as never).handle({ app: "Editor" }, ctx("s"))).rejects.toThrow("catalog unavailable");
+    expect(shellExec).not.toHaveBeenCalled();
+    expect(observe).not.toHaveBeenCalled();
+  });
   it("sets, persists and resolves the Thread environment for its session", async () => {
     const dir = dataDir();
     const registry = createThreadRegistry({ dataDir: dir, hostId: "host-1" });
@@ -238,7 +250,7 @@ describe("execution environment binding", () => {
         environment: { workTarget: "machine-other" },
       });
       expect(other.environment).toMatchObject({ workTarget: "machine-other" });
-      expect(other.environment).not.toHaveProperty("desktopId");
+      expect(other.environment).toMatchObject({ desktopId: "desk-p" });
     } finally {
       await registry.dispose();
     }
@@ -290,6 +302,7 @@ describe("environment service access (forward)", () => {
         }],
         close: async (id: string) => id === "envfwd:1",
         dispose: async () => undefined,
+        closeSession: async () => undefined,
       };
       const host = {
         threadRegistry: registry,

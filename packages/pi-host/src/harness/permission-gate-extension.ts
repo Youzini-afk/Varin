@@ -137,6 +137,17 @@ export function createPermissionGateExtension(options: PermissionGateOptions): E
     pi.on("tool_call", async (event, ctx) => {
       const toolName = event.toolName;
       const params = event.input as Record<string, unknown>;
+      // Pi passes this validated input object to execute. Pin placement before
+      // permission inspection and scheduling so an approval names the actual
+      // machine, and a later environment change cannot retarget the command.
+      if (toolName === "bash" && params.target === undefined) {
+        try {
+          const binding = await options.bridge.request("environment.get", {}, ctx.signal ? { signal: ctx.signal } : undefined);
+          params.target = binding.environment?.workTarget ?? "local";
+        } catch (error) {
+          return { block: true, reason: `Cannot resolve command environment: ${error instanceof Error ? error.message : String(error)}` };
+        }
+      }
       const tool = pi.getAllTools().find((candidate) => candidate.name === toolName) as PiToolInfoLike | undefined;
       const candidate = buildPermissionInspection({
         cwd: ctx.cwd || options.cwd,

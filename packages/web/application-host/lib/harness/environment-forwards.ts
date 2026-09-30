@@ -20,10 +20,13 @@ export interface EnvironmentForwardRuntime {
     host: string;
     port: number;
     threadId: string | null;
+    sessionId?: string;
+    signal?: AbortSignal;
     webSocket?: typeof WebSocket;
   }): Promise<EnvironmentServiceAccess>;
-  list(): EnvironmentServiceAccess[];
-  close(id: string): Promise<boolean>;
+  list(sessionId?: string): EnvironmentServiceAccess[];
+  close(id: string, sessionId?: string): Promise<boolean>;
+  closeSession(sessionId: string): Promise<void>;
   dispose(): Promise<void>;
 }
 
@@ -31,6 +34,8 @@ interface LiveForward {
   access: EnvironmentServiceAccess;
   listener: Server;
   sockets: Set<Duplex>;
+  channels: Set<WebSocket>;
+  sessionId: string;
 }
 
 const wsUrlFor = (target: ManagedTarget, host: string, port: number): string => {
@@ -44,10 +49,27 @@ const wsUrlFor = (target: ManagedTarget, host: string, port: number): string => 
 
 export function createEnvironmentForwardRuntime(): EnvironmentForwardRuntime {
   const live = new Map<string, LiveForward>();
+  const generations = new Map<string, number>();
+  let disposed = false;
 
-  const open: EnvironmentForwardRuntime["open"] = async ({ target, host, port, threadId, webSocket }) => {
+  const stop = async (entry: LiveForward): Promise<void> => {
+    for (const channel of entry.channels) channel.terminate();
+    for (const socket of entry.sockets) socket.destroy();
+    entry.channels.clear();
+    entry.sockets.clear();
+    await new Promise<void>((resolve) => {
+      if (!entry.listener.listening) { resolve(); return; }
+      entry.listener.close(() => resolve());
+    });
+  };
+
+  const open: EnvironmentForwardRuntime["open"] = async ({ target, host, port, threadId, sessionId = "", signal, webSocket }) => {
+    signal?.throwIfAborted();
+    if (disposed) throw new HarnessServiceError("unavailable", "Environment forwarding is closed");
+    const generation = generations.get(sessionId) ?? 0;
     const SocketImpl = webSocket ?? WebSocket;
     const sockets = new Set<Duplex>();
+    const channels = new Set<WebSocket>();
     const listener = createServer((socket) => {
       const channel = new SocketImpl(wsUrlFor(target, host, port), {
         headers: {
@@ -58,15 +80,18 @@ export function createEnvironmentForwardRuntime(): EnvironmentForwardRuntime {
         maxPayload: 0,
         perMessageDeflate: false,
       });
-      const drop = () => { socket.destroy(); channel.close(); };
+      channels.add(channel);
+      channel.once("close", () => { channels.delete(channel); socket.destroy(); });
+      const drop = () => { socket.destroy(); channel.terminate(); };
+      socket.once("close", () => { channels.delete(channel); channel.terminate(); });
       socket.once("error", drop);
       channel.once("error", drop);
-      channel.once("unexpected-response", () => socket.destroy());
+      channel.once("unexpected-response", (request, response) => { response.resume(); request.destroy(); drop(); });
       // Trust only the target Host this forward was created for: the upgrade
       // receipt carries its managed-host identity before any byte is bridged.
       channel.once("upgrade", (response) => {
         if (response.headers["x-varin-managed-host"] !== target.hostId) {
-          channel.close();
+          channel.terminate();
           socket.destroy();
           return;
         }
@@ -97,6 +122,12 @@ export function createEnvironmentForwardRuntime(): EnvironmentForwardRuntime {
         resolve();
       });
     });
+    if (disposed || signal?.aborted || (generations.get(sessionId) ?? 0) !== generation) {
+      for (const channel of channels) channel.terminate();
+      await close();
+      signal?.throwIfAborted();
+      throw new HarnessServiceError("unavailable", "The session closed while opening its service forward");
+    }
     const address = listener.address();
     if (!address || typeof address === "string") {
       await close();
@@ -109,34 +140,32 @@ export function createEnvironmentForwardRuntime(): EnvironmentForwardRuntime {
       threadId,
       createdAt: new Date().toISOString(),
     };
-    live.set(access.id, { access, listener, sockets });
+    live.set(access.id, { access, listener, sockets, channels, sessionId });
     listener.once("close", () => { if (live.get(access.id)?.listener === listener) live.delete(access.id); });
     return access;
   };
 
   return {
     open,
-    list: () => [...live.values()].map((entry) => entry.access),
-    close: async (id) => {
+    list: (sessionId) => [...live.values()].filter((entry) => sessionId === undefined || entry.sessionId === sessionId).map((entry) => entry.access),
+    close: async (id, sessionId) => {
       const entry = live.get(id);
-      if (!entry) return false;
+      if (!entry || (sessionId !== undefined && entry.sessionId !== sessionId)) return false;
       live.delete(id);
-      for (const socket of entry.sockets) socket.destroy();
-      entry.sockets.clear();
-      await new Promise<void>((resolve) => entry.listener.close(() => resolve()));
+      await stop(entry);
       return true;
     },
+    closeSession: async (sessionId) => {
+      generations.set(sessionId, (generations.get(sessionId) ?? 0) + 1);
+      const entries = [...live.entries()].filter(([, entry]) => entry.sessionId === sessionId);
+      for (const [id] of entries) live.delete(id);
+      await Promise.all(entries.map(([, entry]) => stop(entry)));
+    },
     dispose: async () => {
+      disposed = true;
       const entries = [...live.values()];
       live.clear();
-      await Promise.all(entries.map(async (entry) => {
-        for (const socket of entry.sockets) socket.destroy();
-        entry.sockets.clear();
-        await new Promise<void>((resolve) => {
-          if (!entry.listener.listening) { resolve(); return; }
-          entry.listener.close(() => resolve());
-        });
-      }));
+      await Promise.all(entries.map(stop));
     },
   };
 }

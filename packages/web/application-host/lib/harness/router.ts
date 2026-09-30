@@ -58,6 +58,7 @@ export interface HarnessRouterOptions {
   respond: (identity: HarnessActorIdentity, requestId: string, outcome: { ok: true; result: unknown } | { ok: false; error: HarnessError }) => Promise<void>;
   resolveActor: (identity: HarnessActorIdentity, signal?: AbortSignal) => Promise<HarnessActorContext | null>;
   assertExecution?(sessionId: string): Promise<void>;
+  resolveWorkTarget?(sessionId: string): Promise<string | undefined>;
   authorizeWorkspacePath?: (
     actor: HarnessActorContext,
     path: string,
@@ -207,6 +208,8 @@ const requestPaths = (
       : "invalid";
   }
   if (method === "shell.exec") {
+    // A managed target owns its cwd; it is not a path on this Host.
+    if (typeof record.target === "string" && record.target.trim() && record.target !== "local") return [];
     if (record.cwd === undefined) return [];
     return typeof record.cwd === "string" && record.cwd.trim()
       ? [{ allowMissing: false, path: record.cwd }]
@@ -425,7 +428,14 @@ export const createHarnessRouter = (options: HarnessRouterOptions) => {
         });
         return;
       }
-      const scopedPaths = requestPaths(method, data.params);
+      let operationParams = data.params;
+      if (method === "shell.exec" && operationParams && typeof operationParams === "object" && !Array.isArray(operationParams)) {
+        const shell = operationParams as Record<string, unknown>;
+        if (shell.target === undefined && options.resolveWorkTarget) {
+          operationParams = { ...shell, target: await options.resolveWorkTarget(actor.sessionId) ?? "local" };
+        }
+      }
+      const scopedPaths = requestPaths(method, operationParams);
       if (scopedPaths === "invalid") {
         await respond({
           ok: false,
@@ -458,7 +468,7 @@ export const createHarnessRouter = (options: HarnessRouterOptions) => {
         return;
       }
       await options.assertExecution?.(actor.sessionId);
-      const result = await service.handle(data.params as never, {
+      const result = await service.handle(operationParams as never, {
         actor,
         authorizedPaths,
         sessionId: actor.sessionId,

@@ -1436,7 +1436,8 @@ export function createThreadRegistry(options: ThreadRegistryOptions) {
       const inheritedEnvironment = input.parent.kind === "thread"
         ? findThread(catalog, input.parent.id)?.environment
         : undefined;
-      const environment = input.environment ?? inheritedEnvironment;
+      const environment = input.environment === undefined ? inheritedEnvironment
+        : { ...inheritedEnvironment, ...input.environment };
       const thread: Thread = {
         id: `thread-${randomUUID().slice(0, 8)}`,
         parent: structuredClone(input.parent),
@@ -1567,7 +1568,7 @@ export function createThreadRegistry(options: ThreadRegistryOptions) {
     if (!owner) return null;
     const catalog = await readExistingCatalog(owner.owningScopeId);
     const thread = catalog ? findThread(catalog, owner.threadId) : null;
-    if (!thread) return null;
+    if (!thread) throw new ThreadRegistryError("stale-binding", "Environment binding does not match a catalog Thread", owner.owningScopeId);
     return { threadId: thread.id, environment: thread.environment ? structuredClone(thread.environment) : null };
   };
 

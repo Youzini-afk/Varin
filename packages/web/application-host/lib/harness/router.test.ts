@@ -30,6 +30,19 @@ const harnessEvent = (method: string, params: unknown, data: Record<string, unkn
 });
 
 describe("harness router", () => {
+  it("pins inherited shell placement before authorizing paths on the correct machine", async () => {
+    const authorizeWorkspacePath = vi.fn(async () => null);
+    const handle = vi.fn(async () => ({ kind: "spawn-failed" as const, reason: "fixture", interpreter: "" }));
+    const respond = vi.fn(async () => undefined);
+    const router = createHarnessRouter({ respond, resolveActor: async () => resolvedActor(["process.shell"]),
+      authorizeWorkspacePath, resolveWorkTarget: async () => "managed:cloud" });
+    router.register("shell.exec", { handle });
+    await router.processEvent(harnessEvent("shell.exec", { command: "pwd", cwd: "/remote" }));
+    expect(authorizeWorkspacePath).not.toHaveBeenCalled();
+    expect(handle).toHaveBeenCalledWith(expect.objectContaining({ target: "managed:cloud", cwd: "/remote" }), expect.anything());
+    expect(respond).toHaveBeenCalledWith(ACTOR, "req-1", expect.objectContaining({ ok: true }));
+    router.dispose();
+  });
   it("cancels a retired worker's in-flight query after actor registration is gone", async () => {
     let registered = true;
     let entered!: () => void;

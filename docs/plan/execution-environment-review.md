@@ -1,6 +1,6 @@
 # 可组合执行环境：实施与验收记录
 
-Status: in progress — 按 [execution-environment-design.md](../design/execution-environment-design.md) §11 顺序逐段交付。
+Status: independent acceptance in progress — 已有 EE1–EE6 候选实现，正在逐项核对真实消费者、生命周期和部署链。
 基线：设计提交 `7e3baa14` 之上的当前 main。BC0–BC9 既有覆盖与原生证据缺口仍以
 [bot-computer-use-review.md](bot-computer-use-review.md) 为准，本文件只记录执行环境新增交付。
 
@@ -249,8 +249,14 @@ target 为 app 选择器原样——agent 选择器可能含用户键入文本�
 
 ## 待交付
 
-§11 五个阶段全部落地为正式产品接线（EE1–EE6），§13 各选择已收敛。
-剩余工作全部是**原生验证边界**，不是缺失接线：
+EE1–EE6 已提交候选实现。2026-10-01 独立验收发现实际接线和行为缺陷，不能将剩余工作全部归为原生验证：
+
+- 环境读取错误退回本机；默认目标未贯通权限检查；子 Thread 的局部覆盖丢失另一项继承。
+- forward 运行时未由 Host 持有和销毁，list/close 未按会话隔离，Bot 停止未关闭其监听。
+- 桌面组件发布遗漏浏览器/办公桥，guest 默认未安装 Chromium；安装并发误合并不同请求。
+- 新入口的取消、人工接管、文件写入及证据分页仍需修正。
+
+以下原生边界也仍待验证：
 
 - 真实 Linux 桌面上的端到端纵切：Chromium 真实会话的 CDP 附着/持久
   profile/下载即桌面可见、LibreOffice live 实例的 UNO 附着与未保存状态、
@@ -260,3 +266,15 @@ target 为 app 选择器原样——agent 选择器可能含用户键入文本�
 - Windows/macOS 平台的浏览器/办公桥与本地 VM 后端（当前边界如实保留）。
 - Bot 休眠/唤醒对新入口（浏览器/办公/forward）的覆盖在真机验收——
   接线复用同一车道与取消语义，断电窗口下的实际行为待原生验证。
+
+## 独立验收修复（2026-10-01）
+
+### 目标准入与 forward 生命周期
+
+环境读取失败现在阻止依赖操作；子 Thread 按字段继承并验证显式配置。`local` 是可显式选择的本机目标。
+Pi 在权限检查与调度前固定 bash 的目标，Host Router 对直接请求也固定目标后再决定由哪台机器校验 cwd。
+forward 由 Harness Host 持有，查询与关闭按请求会话隔离；会话退休、Bot 停止和 Host 关闭销毁相关监听与连接，
+准备中的 listener 也受取消及会话关闭代际检查，避免关闭后晚到的操作重新开口。
+
+验证：环境/转发/Router/Host 聚焦测试通过（50 项），Thread 服务回归 58 项、Pi 权限测试 9 项通过；
+Host 源码类型、变更文件 ESLint 通过。测试含真实 TCP listener 的会话隔离与关闭；没有真实跨机或 VM 证明。

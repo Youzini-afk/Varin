@@ -35,7 +35,7 @@ const NETWORK_TOOLS = new Set(["webfetch", "websearch", "research_search"]);
 
 function routedExecutionTarget(params: Record<string, unknown>): string {
   const explicit = typeof params.target === "string" ? params.target.trim() : "";
-  if (explicit) return explicit;
+  if (explicit) return explicit === "local" ? "" : explicit;
   const handle = [params.handle, params.shellId]
     .find((value): value is string => typeof value === "string" && value.startsWith("mrsh:"));
   if (!handle) return "";

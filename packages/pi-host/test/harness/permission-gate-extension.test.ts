@@ -27,12 +27,16 @@ const inspect = (params: PermissionInspectParams) => ({
   evidenceComplete: params.evidenceComplete,
 });
 
-const makeBridge = (options: { failInspect?: boolean } = {}) => {
+const makeBridge = (options: { failInspect?: boolean; workTarget?: string; failEnvironment?: boolean } = {}) => {
   const audits: PermissionAuditRecord[] = [];
   return {
     audits,
     bridge: {
       request: async (method: string, params: unknown) => {
+        if (method === "environment.get") {
+          if (options.failEnvironment) throw new Error("binding is unreadable");
+          return { threadId: "thread-1", environment: options.workTarget ? { workTarget: options.workTarget, updatedAt: "now" } : null };
+        }
         if (method === "permission.inspect") {
           if (options.failInspect) throw new Error("outside workspace");
           return inspect(params as PermissionInspectParams);
@@ -97,6 +101,23 @@ const mcpTool = (name: string) => ({
 const normal = () => ({ mode: "normal" as const, rules: defaultRules("normal") });
 
 describe("native permission gate integration", () => {
+  it("pins an inherited shell target before permission inspection", async () => {
+    const { bridge, audits } = makeBridge({ workTarget: "managed:cloud" });
+    const call = harness({ policy: normal(), sessionId: "s", cwd: workspaceRoot, bridge }, [builtin("bash")]);
+    const input = { command: "cat /remote/file", cwd: "/remote", target: undefined as string | undefined };
+    await call({ toolName: "bash", input }, ui().context as never);
+    assert.equal(input.target, "managed:cloud");
+    assert.deepEqual(audits[0]?.target.threadScopes, ["execution-target:managed:cloud"]);
+    assert.deepEqual(audits[0]?.target.paths, []);
+  });
+
+  it("blocks an unreadable environment rather than approving local execution", async () => {
+    const { bridge, audits } = makeBridge({ failEnvironment: true });
+    const call = harness({ policy: { mode: "bypass", rules: defaultRules("bypass") }, sessionId: "s", cwd: workspaceRoot, bridge }, [builtin("bash")]);
+    const result = await call({ toolName: "bash", input: { command: "echo ok" } }, ui().context as never);
+    assert.equal((result as { block: boolean }).block, true);
+    assert.equal(audits.length, 0);
+  });
   it("recognizes native research queries and keeps experiment control grants bound to the target", async () => {
     const { bridge, audits } = makeBridge();
     const sourceInfo = { path: "<sdk>", source: "sdk", scope: "temporary", origin: "top-level" };

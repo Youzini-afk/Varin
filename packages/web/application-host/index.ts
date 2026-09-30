@@ -3781,6 +3781,7 @@ async function main(options: StartWebUiServerOptions = {}): Promise<WebUiServerC
   // registered harness services.
   const harnessRouter = createHarnessRouter({
     assertExecution: assertBotSessionExecution,
+    resolveWorkTarget: async (sessionId) => (await threadRegistry.threadEnvironmentForSession(sessionId))?.environment?.workTarget,
     // Route by the requesting worker, not by session: a session's internal
     // compaction worker is pinned for identity but is not the session worker.
     respond: async (identity, requestId, outcome) => {

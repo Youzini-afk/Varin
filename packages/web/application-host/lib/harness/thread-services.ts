@@ -22,6 +22,7 @@ import { validateRetrievalEvidence } from "./retrieval-evidence.js";
 import type { HarnessService, HarnessServiceContext } from "./router.js";
 import type { HarnessServiceHost } from "./service-host.js";
 import { HarnessServiceError } from "./service-error.js";
+import { validateEnvironment } from "./environment-services.js";
 import { EXECUTION_PRESETS } from "./presets.js";
 import { RESEARCH_CAPABILITY_DEFINITIONS, isResearchCapability, type ResearchResourceManifest } from "@varin/protocol";
 import { resolveNestedThreadScope, type ThreadControlToolName } from "./thread-nesting.js";
@@ -329,6 +330,8 @@ export function createThreadDispatchService(host: HarnessServiceHost): HarnessSe
         throw new HarnessServiceError("invalid-params", "A preset-less dispatch must resolve the caller's current model");
       }
       const { workspaceId, parent, owner } = await resolveOwningContext(host, ctx);
+      const environment = params.environment === undefined ? undefined
+        : await validateEnvironment(host, workspaceId, params.environment);
       assertOwnerTool(owner, "dispatch");
       if (research !== undefined && owner?.execution.workFocus !== "research") {
         throw new HarnessServiceError("denied", "Research capabilities require a research work focus");
@@ -443,7 +446,7 @@ export function createThreadDispatchService(host: HarnessServiceHost): HarnessSe
         permissions: normalizeFrozenHarnessPermissions(owner?.execution.permissions),
         ...(consultBot ? { consultBotId: consultBot.id } : {}),
         ...(dispatchModel ? { model: dispatchModel } : {}),
-        ...(params.environment ? { environment: params.environment } : {}),
+        ...(environment ? { environment } : {}),
         ...(preset?.systemPromptFragment ? { systemPromptFragment: preset.systemPromptFragment } : {}),
         ...(researchDefinition ? {
           research: {

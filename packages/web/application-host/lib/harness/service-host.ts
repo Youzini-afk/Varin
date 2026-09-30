@@ -24,6 +24,7 @@ import { createObservationCursorStore, type ObservationCursorStore } from "./obs
 import { createZone2DeliveryService } from "./zone2-threads.js";
 import { clearManagedShellCompletionWatches } from "./harness-services.js";
 import { HarnessServiceError } from "./service-error.js";
+import { createEnvironmentForwardRuntime, type EnvironmentForwardRuntime } from "./environment-forwards.js";
 import type { HarnessPathAuthority } from "./path-authority.js";
 import { readHistoryPage } from "@varin/protocol";
 import {
@@ -329,6 +330,7 @@ export interface HarnessServiceHost {
   memoryService?: import("../memory/memory-service.js").MemoryService | null;
   /** BC4 Computer Use service: catalog, observations, actions, cancellation. */
   computerService?: import("../computer/computer-service.js").ComputerService | null;
+  environmentForwards: EnvironmentForwardRuntime;
   /** BC0 durable session instructions — the Bot persona for Bot entry sessions. */
   sessionInstructionsFor?: ((sessionId: string) => Promise<string | null>) | null;
   /**
@@ -633,6 +635,7 @@ export interface HarnessServiceHostOptions {
 }
 
 export function createHarnessServiceHost(options: HarnessServiceHostOptions): HarnessServiceHost {
+  const environmentForwards = createEnvironmentForwardRuntime();
   const outputStore = createOutputStore();
   const observationCursors = createObservationCursorStore();
   const pathLockService = options.pathLockService ?? createPathLockService();
@@ -830,6 +833,9 @@ export function createHarnessServiceHost(options: HarnessServiceHostOptions): Ha
       || entry.actor.workerId !== actor.workerId
       || entry.actor.workerGeneration !== actor.workerGeneration)) return;
     clearManagedShellCompletionWatches(host, sessionId);
+    void environmentForwards.closeSession(sessionId).catch((error: unknown) => {
+      console.error('[HarnessEnvironment] Service forward shutdown failed:', sessionId, error);
+    });
     if (entry) {
       void options.releaseWebFetchReceipts?.(sessionId, entry.workspaceId).catch((error: unknown) => {
         console.error('[HarnessWebFetch] Temporary receipt release failed:', error);
@@ -863,6 +869,7 @@ export function createHarnessServiceHost(options: HarnessServiceHostOptions): Ha
   };
 
   const closeSessionShell = async (sessionId: string): Promise<void> => {
+    await environmentForwards.closeSession(sessionId);
     const supervisors = new Set<ShellSupervisor>();
     const current = sessions.get(sessionId)?.shellSupervisor;
     if (current) supervisors.add(current);
@@ -1011,6 +1018,7 @@ export function createHarnessServiceHost(options: HarnessServiceHostOptions): Ha
   };
 
   const dispose = async (): Promise<void> => {
+    await environmentForwards.dispose();
     clearManagedShellCompletionWatches(host);
     const disposes: Promise<void>[] = [];
     const sessionIds = new Set([...sessions.keys(), ...[...retiringShells.values()].map((entry) => entry.sessionId)]);
@@ -1027,6 +1035,7 @@ export function createHarnessServiceHost(options: HarnessServiceHostOptions): Ha
   };
 
   const host: HarnessServiceHost = {
+    environmentForwards,
     outputStore,
     exploreQueryStore,
     observationCursors,

@@ -26,9 +26,8 @@ const scopeOf = (ctx: HarnessServiceContext): string => ctx.workspaceId ?? `sess
 
 /**
  * Resolve the calling session's Thread environment. Returns null when the
- * session carries no Thread; binding inconsistencies also yield null so a
- * damaged binding cannot silently break every operation — the set path
- * surfaces the same registry error to the caller instead.
+ * session carries no Thread. A failed binding read must fail the operation:
+ * falling back could execute a remote command on this Host instead.
  */
 export const sessionEnvironment = async (
   host: HarnessServiceHost,
@@ -36,8 +35,34 @@ export const sessionEnvironment = async (
 ): Promise<{ threadId: string; environment: ThreadEnvironment | null } | null> => {
   const registry = host.threadRegistry;
   if (!registry) return null;
-  try { return await registry.threadEnvironmentForSession(sessionId); }
-  catch { return null; }
+  return registry.threadEnvironmentForSession(sessionId);
+};
+
+export const validateEnvironment = async (
+  host: HarnessServiceHost,
+  scopeId: string,
+  value: unknown,
+): Promise<{ workTarget?: string; desktopId?: string }> => {
+  if (!value || typeof value !== "object" || Array.isArray(value)) {
+    throw new HarnessServiceError("invalid-params", "environment must be an object");
+  }
+  const result: { workTarget?: string; desktopId?: string } = {};
+  for (const [key, field] of Object.entries(value)) {
+    if (key !== "workTarget" && key !== "desktopId") throw new HarnessServiceError("invalid-params", `Unknown environment field: ${key}`);
+    if (typeof field !== "string" || !field.trim()) throw new HarnessServiceError("invalid-params", `environment.${key} must be a non-empty string`);
+    result[key] = field.trim();
+  }
+  if (result.workTarget && result.workTarget !== "local") {
+    if (!await host.managedRemoteTargets?.targetFor(scopeId, result.workTarget)) {
+      throw new HarnessServiceError("unavailable", `No managed execution target is registered for ${result.workTarget}`);
+    }
+  }
+  if (result.desktopId) {
+    if (!host.computerService) throw new HarnessServiceError("unavailable", "Computer service is not configured");
+    const { desktops } = await host.computerService.list();
+    if (!desktops.some((desktop) => desktop.id === result.desktopId)) throw new HarnessServiceError("invalid-params", `Unknown computer desktop: ${result.desktopId}`);
+  }
+  return result;
 };
 
 export function createEnvironmentGetService(host: HarnessServiceHost): HarnessService<"environment.get"> {
@@ -78,7 +103,7 @@ export function createEnvironmentSetService(host: HarnessServiceHost): HarnessSe
       // Placement must be verifiably real before it is recorded: an unknown
       // machine or desktop id would only fail later at each accepted
       // operation, hiding the configuration error.
-      if (patch.workTarget !== undefined && patch.workTarget !== null) {
+      if (patch.workTarget !== undefined && patch.workTarget !== null && patch.workTarget !== "local") {
         const target = host.managedRemoteTargets
           ? await host.managedRemoteTargets.targetFor(scopeOf(ctx), patch.workTarget)
           : null;
@@ -146,7 +171,7 @@ const forwardTargetId = async (
 
 export function createEnvironmentForwardServices(
   host: HarnessServiceHost,
-  runtime: EnvironmentForwardRuntime = createEnvironmentForwardRuntime(),
+  runtime: EnvironmentForwardRuntime = host.environmentForwards ?? createEnvironmentForwardRuntime(),
 ): { forward: HarnessService<"environment.forward">; forwards: HarnessService<"environment.forwards">; forwardClose: HarnessService<"environment.forwardClose">; runtime: EnvironmentForwardRuntime } {
   const forward: HarnessService<"environment.forward"> = {
     handle: async (params, ctx) => {
@@ -183,17 +208,18 @@ export function createEnvironmentForwardServices(
       // VM guests have no network path through this channel; desktops reached
       // over the computer API expose their services through their owning
       // Host's managed target instead.
-      const access = await runtime.open({ target, host: serviceHost, port, threadId: bound?.threadId ?? null });
+      const access = await runtime.open({ target, host: serviceHost, port, threadId: bound?.threadId ?? null,
+        sessionId: ctx.sessionId, signal: ctx.signal });
       return { access } satisfies EnvironmentForwardResult;
     },
   };
   const forwards: HarnessService<"environment.forwards"> = {
-    handle: async () => ({ accesses: runtime.list() }) satisfies EnvironmentForwardListResult,
+    handle: async (_params, ctx) => ({ accesses: runtime.list(ctx.sessionId) }) satisfies EnvironmentForwardListResult,
   };
   const forwardClose: HarnessService<"environment.forwardClose"> = {
-    handle: async (params) => {
+    handle: async (params, ctx) => {
       if (typeof params.id !== "string" || !params.id) throw new HarnessServiceError("invalid-params", "environment.forwardClose requires an access id");
-      const closed = await runtime.close(params.id);
+      const closed = await runtime.close(params.id, ctx.sessionId);
       return { closed } satisfies EnvironmentForwardCloseResult;
     },
   };

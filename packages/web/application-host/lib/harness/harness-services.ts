@@ -259,7 +259,11 @@ export function createShellExecService(host: HarnessServiceHost): HarnessService
       // otherwise the work Thread's durable environment binding applies.
       // The resolved value is pinned here — a later environment change
       // cannot redirect this already-admitted command.
-      const target = params.target?.trim() || (await sessionEnvironment(host, ctx.sessionId))?.environment?.workTarget || undefined;
+      if (params.target !== undefined && (typeof params.target !== "string" || !params.target.trim())) {
+        throw new HarnessServiceError("invalid-params", "shell target must be a non-empty machine id");
+      }
+      const placement = params.target?.trim() ?? (await sessionEnvironment(host, ctx.sessionId))?.environment?.workTarget;
+      const target = placement === "local" ? undefined : placement;
       // Router resolved this actor before entering the service. Capture the
       // default cwd from that same request snapshot for this command only.
       const acceptedSessionCwd = ctx.actor.cwd ?? ctx.actor.authorityRoot;
