@@ -5,10 +5,11 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { runtimeFetch } from '@varin/application-client';
 import type { FollowUpDefinitionView } from '@varin/protocol';
 import { FollowUpEditorDialog } from './FollowUpEditorDialog';
+import { useBotSessionIndex } from '@/stores/useBotSessionIndex';
 
 const mocks = vi.hoisted(() => ({
   saved: vi.fn(), close: vi.fn(),
-  state: { catalogLoaded: true, currentSessionId: 's-1', summaries: [{ id: 's-1', name: 'Experiment', firstMessage: '', cwd: '/repo', workspace: { kind: 'workspace', id: 'project' } }] },
+  state: { catalogLoaded: true, currentSessionId: 's-1', runtimeKey: 'test', summaries: [{ id: 's-1', name: 'Experiment', firstMessage: '', cwd: '/repo', workspace: { kind: 'workspace', id: 'project' } }] },
 }));
 vi.mock('@varin/application-client', () => ({ runtimeFetch: vi.fn() }));
 vi.mock('@/lib/i18n', () => ({ useI18n: () => ({ t: (key: string) => key, locale: 'en' }) }));
@@ -45,6 +46,7 @@ describe('manual follow-up editor', () => {
   };
   const submit = async () => { await act(async () => { container.querySelector('form')!.dispatchEvent(new window.Event('submit', { bubbles: true, cancelable: true })); }); };
   beforeEach(() => {
+    useBotSessionIndex.setState({ runtimeKey: 'test', ids: new Set(), loading: false, error: null });
     const { document, window } = parseHTML('<!doctype html><html><body></body></html>');
     vi.stubGlobal('document', document);
     vi.stubGlobal('window', window);
@@ -56,7 +58,7 @@ describe('manual follow-up editor', () => {
     mocks.saved.mockReset();
     mocks.close.mockReset();
   });
-  afterEach(() => { act(() => root.unmount()); container.remove(); vi.unstubAllGlobals(); });
+  afterEach(() => { act(() => root.unmount()); container.remove(); useBotSessionIndex.setState({ runtimeKey: null, ids: null, loading: false, error: null }); vi.unstubAllGlobals(); });
 
   it('creates a timed continuation in the selected conversation without pausing it', async () => {
     await render();

@@ -10,9 +10,11 @@ import {
 } from "../src/index.js";
 import {
   VARIN_BUILTIN_AGENT_WORKSPACE_SHELL_CONTRIBUTION_ID,
+  VARIN_BUILTIN_BOT_WORKSPACE_SHELL_CONTRIBUTION_ID,
   VARIN_BUILTIN_IDE_WORKBENCH_SHELL_CONTRIBUTION_ID,
   VARIN_BUILTIN_RESEARCH_WORKBENCH_SHELL_CONTRIBUTION_ID,
   VARIN_WORKBENCH_RESEARCH_PROFILE_ID,
+  VARIN_WORKBENCH_BOT_PROFILE_ID,
 } from "@varin/extension-contract";
 
 const directories: string[] = [];
@@ -84,7 +86,7 @@ test("migrates raw filesystem workspace layout ids while rejecting workspace pro
   );
 });
 
-test("missing storage seeds Agent, IDE, and Research bindings without persisting a migration", async () => {
+test("missing storage seeds Agent, IDE, Research, and Bot bindings without persisting a migration", async () => {
   const dataDir = await mkdtemp(join(tmpdir(), "varin-workbench-agent-default-"));
   directories.push(dataDir);
   const store = new WorkbenchProfileStore({
@@ -99,14 +101,16 @@ test("missing storage seeds Agent, IDE, and Research bindings without persisting
     "default",
     "varin.ide",
     VARIN_WORKBENCH_RESEARCH_PROFILE_ID,
+    VARIN_WORKBENCH_BOT_PROFILE_ID,
   ]);
-  assert.equal(missing.document.layouts.length, 8);
+  assert.equal(missing.document.layouts.length, 11);
   const shellByProfileSurface = Object.fromEntries(missing.document.layouts.map((layer) => (
     [`${layer.profileId}:${layer.surface}`, layer.replacementSelections["workbench.shell"]]
   )));
   assert.equal(shellByProfileSurface["default:web"], VARIN_BUILTIN_AGENT_WORKSPACE_SHELL_CONTRIBUTION_ID);
   assert.equal(shellByProfileSurface["varin.ide:web"], VARIN_BUILTIN_IDE_WORKBENCH_SHELL_CONTRIBUTION_ID);
   assert.equal(shellByProfileSurface[`${VARIN_WORKBENCH_RESEARCH_PROFILE_ID}:web`], VARIN_BUILTIN_RESEARCH_WORKBENCH_SHELL_CONTRIBUTION_ID);
+  assert.equal(shellByProfileSurface[`${VARIN_WORKBENCH_BOT_PROFILE_ID}:web`], VARIN_BUILTIN_BOT_WORKSPACE_SHELL_CONTRIBUTION_ID);
   const again = await store.read();
   assert.equal(again.storageState, "missing");
   assert.equal(again.document.revision, 0);
