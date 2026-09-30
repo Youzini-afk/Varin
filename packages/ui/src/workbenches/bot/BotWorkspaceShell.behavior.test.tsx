@@ -9,7 +9,7 @@ import type { BotSummary } from '@/lib/bots';
 
 const state = vi.hoisted(() => ({
   profileId: 'varin.bot',
-  list: vi.fn(), ensure: vi.fn(), work: vi.fn(), create: vi.fn(), update: vi.fn(), archive: vi.fn(), open: vi.fn(),
+  list: vi.fn(), ensure: vi.fn(), work: vi.fn(), create: vi.fn(), update: vi.fn(), archive: vi.fn(), open: vi.fn(), change: vi.fn(),
 }));
 vi.mock('@/lib/bots', () => ({
   listBots: state.list,
@@ -18,6 +18,7 @@ vi.mock('@/lib/bots', () => ({
   createBot: state.create,
   updateBot: state.update,
   archiveBot: state.archive,
+  changeBotState: state.change,
 }));
 vi.mock('@/lib/pi-runtime/sessionNavigation', () => ({ openPiSessionFromNavigation: state.open }));
 vi.mock('@/lib/workbench/profile-context', () => ({ useWorkbenchProfileId: () => state.profileId }));
@@ -25,7 +26,12 @@ vi.mock('@/lib/device', () => ({ useDeviceInfo: () => ({ isMobile: false }) }));
 vi.mock('@/lib/i18n', () => ({ useI18n: () => ({ t: (key: string) => key }) }));
 vi.mock('@/components/icon/Icon', () => ({ Icon: () => null }));
 vi.mock('@/components/layout/WorkbenchProfileSwitcher', () => ({ WorkbenchProfileSwitcher: () => null }));
-vi.mock('@/components/views/ChatView', () => ({ ChatView: () => <div data-chat="true" /> }));
+vi.mock('@/components/views/ChatView', () => ({ ChatView: ({ readOnly }: { readOnly: boolean }) => <div data-chat="true" data-readonly={String(readOnly)} /> }));
+vi.mock('@/components/sections/bots/BotDetailsDialog', () => ({ BotDetailsDialog: ({ bot }: { bot: { id: string; tab: string } | null }) => bot ? <div data-details={bot.id}>{bot.tab}</div> : null }));
+vi.mock('@/components/sections/bots/BotMenu', () => ({ BotMenu: ({ bot, onAction, children }: { bot: BotSummary; onAction(action: string): void; children: React.ReactNode }) => <div>{children}
+  <button onClick={() => onAction('profile')}>profile-{bot.id}</button>
+  <button onClick={() => onAction('sleep')}>sleep-{bot.id}</button>
+</div> }));
 vi.mock('@/components/sections/bots/BotNameDialog', () => ({
   BotNameDialog: ({ open, name, onNameChange, onSubmit }: {
     open: boolean;
@@ -73,6 +79,7 @@ describe('Bot mode navigation', () => {
     state.create.mockReset().mockResolvedValue(bot('new'));
     state.update.mockReset().mockResolvedValue(bot('a'));
     state.archive.mockReset().mockResolvedValue(bot('a'));
+    state.change.mockReset().mockResolvedValue(bot('a'));
     state.open.mockReset().mockImplementation(async ({ sessionId }: { sessionId: string }) => {
       usePiSessionStore.setState({ currentSessionId: sessionId });
     });
@@ -123,6 +130,33 @@ describe('Bot mode navigation', () => {
     expect(state.create).toHaveBeenCalledTimes(1);
     expect(state.create).toHaveBeenCalledWith({ name: 'Named bot' });
     expect(state.open).toHaveBeenLastCalledWith({ sessionId: 'entry-new', directory: '/bots/new' });
+  });
+
+  it('opens the right-clicked Bot profile without switching the conversation', async () => {
+    await render();
+    await click('profile-b');
+    expect(container.querySelector('[data-details]')?.getAttribute('data-details')).toBe('b');
+    expect(usePiSessionStore.getState().currentSessionId).toBe('entry-a');
+    expect(state.open).toHaveBeenCalledTimes(1);
+  });
+
+  it('views a sleeping Bot read-only without waking it', async () => {
+    const sleeping = { ...bot('a'), activity: { state: 'asleep' as const, operationId: 'sleep-a', planned: true, work: [], machines: [], error: null } };
+    state.list.mockResolvedValue([sleeping]);
+    state.ensure.mockResolvedValue({ bot: sleeping, sessionId: 'entry-a' });
+    await render();
+    expect(container.querySelector('[data-chat]')?.getAttribute('data-readonly')).toBe('true');
+    expect(state.change).not.toHaveBeenCalled();
+    await click('settings.bots.wakeContinue');
+    expect(state.change).toHaveBeenCalledWith('a', 'wake');
+  });
+
+  it('sleeps the clicked Bot without changing the selected Bot', async () => {
+    await render();
+    state.change.mockResolvedValue(bot('b'));
+    await click('sleep-b');
+    expect(state.change).toHaveBeenCalledWith('b', 'sleep');
+    expect(usePiSessionStore.getState().currentSessionId).toBe('entry-a');
   });
 
   it('discards a pending entry after the shell unmounts', async () => {

@@ -7,7 +7,7 @@ import { useI18n } from '@/lib/i18n';
 import { ModelSelector } from '@/components/sections/agents/ModelSelector';
 import { openPiSessionFromNavigation } from '@/lib/pi-runtime/sessionNavigation';
 import {
-  archiveBot, createBot, listBots, listBotWork, openBotEntryFor, updateBot,
+  archiveBot, changeBotState, createBot, listBots, listBotWork, openBotEntryFor, updateBot,
   type BotSummary, type BotWorkItem,
 } from '@/lib/bots';
 import { cn } from '@/lib/utils';
@@ -15,16 +15,17 @@ import type { ComputerDesktop } from '@varin/protocol';
 import { ComputerDesktopView } from '@/components/sections/computers/ComputerDesktopView';
 import { downloadComputerArtifact } from '@/lib/computers';
 import { BotNameDialog } from './BotNameDialog';
+import { subscribeVarinEvents } from '@/lib/varinEvents';
 
 /**
  * Bots settings (BC0): the durable Bot catalog — identity, persona
  * instructions, preferred model, and the real work items in the Bot's owner
  * scope. Profiles are Host records; edits apply to the live entry worker.
  */
-export function BotSettings() {
+export function BotSettings({ initialBotId }: { initialBotId?: string } = {}) {
   const { t } = useI18n();
   const [bots, setBots] = React.useState<BotSummary[] | null>(null);
-  const [selectedId, setSelectedId] = React.useState<string | null>(null);
+  const [selectedId, setSelectedId] = React.useState<string | null>(initialBotId ?? null);
   const [work, setWork] = React.useState<BotWorkItem[] | null>(null);
   const [viewingDesktop, setViewingDesktop] = React.useState<ComputerDesktop | null>(null);
   const [error, setError] = React.useState<string | null>(null);
@@ -33,22 +34,32 @@ export function BotSettings() {
   const [instructions, setInstructions] = React.useState('');
   const [createDialogOpen, setCreateDialogOpen] = React.useState(false);
   const [createName, setCreateName] = React.useState('');
+  const loading = React.useRef({ version: 0 });
 
   const selected = bots?.find((bot) => bot.id === selectedId) ?? null;
   const workBotId = selected?.id;
 
   const refresh = React.useCallback(async () => {
+    const version = ++loading.current.version;
     try {
       const list = await listBots();
+      if (loading.current.version !== version) return;
       setBots(list);
       setError(null);
       setSelectedId((current) => current ?? list.find((bot) => !bot.archived)?.id ?? list[0]?.id ?? null);
     } catch (cause) {
-      setError(cause instanceof Error ? cause.message : String(cause));
+      if (loading.current.version === version) setError(cause instanceof Error ? cause.message : String(cause));
     }
   }, []);
 
-  React.useEffect(() => { void refresh(); }, [refresh]);
+  React.useEffect(() => {
+    const generation = loading.current;
+    void refresh();
+    return () => { generation.version++; };
+  }, [refresh]);
+  React.useEffect(() => subscribeVarinEvents((event) => {
+    if (event.type === 'bot-changed' || event.type === 'stream-ready') void refresh();
+  }), [refresh]);
 
   React.useEffect(() => {
     setName(selected?.name ?? '');
@@ -129,7 +140,7 @@ export function BotSettings() {
     </div> : null}
     {!bots && !error ? <p role="status" className="typography-meta text-muted-foreground">{t('common.loading')}</p> : null}
     {bots ? <>
-      <SettingsSection title={t('settings.bots.section.list')} contentClassName="space-y-3">
+      {!initialBotId ? <SettingsSection title={t('settings.bots.section.list')} contentClassName="space-y-3">
         {bots.length === 0 ? <p className="typography-meta text-muted-foreground">{t('settings.bots.empty')}</p> : null}
         <ul className="space-y-1">
           {bots.map((bot) => <li key={bot.id}>
@@ -147,7 +158,7 @@ export function BotSettings() {
             setCreateDialogOpen(true);
           }}>{busy === 'create' ? t('settings.bots.creating') : t('settings.bots.create')}</Button>
         </div>
-      </SettingsSection>
+      </SettingsSection> : null}
 
       {selected ? <SettingsSection title={t('settings.bots.section.profile')} contentClassName="space-y-5">
         <SettingsFieldRow label={t('settings.bots.name.label')}>
@@ -178,6 +189,9 @@ export function BotSettings() {
           {!selected.archived ? <Button variant="outline" size="sm" disabled={busy === 'archive'} onClick={() => {
             void run('archive', async () => { await archiveBot(selected.id); await refresh(); });
           }}>{busy === 'archive' ? t('settings.bots.archiving') : t('settings.bots.archive')}</Button> : null}
+          {selected.archived ? <Button variant="outline" size="sm" disabled={busy !== null} onClick={() => {
+            void run('restore', async () => { await changeBotState(selected.id, 'restore'); await refresh(); });
+          }}>{t('settings.bots.restore')}</Button> : null}
         </div>
       </SettingsSection> : null}
 

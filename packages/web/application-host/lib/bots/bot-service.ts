@@ -7,11 +7,25 @@ import { HarnessServiceError } from "../harness/service-error.js";
 import { botScopeId } from "../harness/owner-scope.js";
 import type { ThreadRegistry } from "../harness/thread-registry.js";
 import type {
+  BotActivity,
+  BotSleepWork,
+  BotSleepMachine,
   BotModelSelection,
   BotProfile,
   BotSummary,
   BotWorkItem,
 } from "@varin/application-client";
+
+export interface BotLifecycleRuntime {
+  planWork(bot: BotSummary): Promise<BotSleepWork[]>;
+  planMachines(bot: BotSummary): Promise<BotSleepMachine[]>;
+  stop(bot: BotSummary, work: BotSleepWork): Promise<void>;
+  stopScope(bot: BotSummary): Promise<void>;
+  machine(bot: BotSummary, machine: BotSleepMachine, waking: boolean): Promise<BotSleepMachine>;
+  prepareWake(bot: BotSummary): Promise<void>;
+  resume(bot: BotSummary, work: BotSleepWork): Promise<void>;
+  awakened(bot: BotSummary): Promise<void>;
+}
 
 export type { BotModelSelection, BotProfile, BotSummary, BotWorkItem } from "@varin/application-client";
 
@@ -42,6 +56,8 @@ export interface BotServiceOptions {
   applyModel?: (input: { sessionId: string; model: BotModelSelection | null }) => Promise<void>;
   applyInstructions?: (input: { sessionId: string; instructions: string | null }) => Promise<void>;
   onError?(error: unknown): void;
+  lifecycle?(): BotLifecycleRuntime;
+  onChange?(bot: BotSummary): void;
 }
 
 const isObject = (value: unknown): value is Record<string, unknown> =>
@@ -70,12 +86,34 @@ const parseProfile = (record: KernelRecordResult): BotProfile | null => {
       coordinatorHostId: raw.coordinatorHostId,
       homeDir: typeof raw.homeDir === "string" ? raw.homeDir : "",
       entrySessionId: typeof raw.entrySessionId === "string" ? raw.entrySessionId : null,
+      pinnedAt: typeof raw.pinnedAt === "string" ? raw.pinnedAt : null,
+      archiveRequested: raw.archiveRequested === true,
+      ...(raw.activity === undefined ? {} : { activity: parseActivity(raw.activity) }),
       createdAt: typeof raw.createdAt === "string" ? raw.createdAt : new Date(record.createdAt).toISOString(),
       updatedAt: new Date(record.updatedAt).toISOString(),
     };
   } catch {
     return null;
   }
+};
+
+const parseActivity = (value: unknown): BotActivity => {
+  if (!isObject(value) || !["awake", "sleeping", "asleep", "waking", "sleep-failed", "wake-failed"].includes(String(value.state))
+    || typeof value.operationId !== "string" || typeof value.planned !== "boolean"
+    || (value.readyToResume !== undefined && typeof value.readyToResume !== 'boolean')
+    || (value.machinesPlanned !== undefined && typeof value.machinesPlanned !== 'boolean')
+    || (value.wakeAttempt !== undefined && (!Number.isSafeInteger(value.wakeAttempt) || Number(value.wakeAttempt) < 0))
+    || !Array.isArray(value.work) || !Array.isArray(value.machines)
+    || (value.error !== null && typeof value.error !== "string")
+    || !value.work.every((item) => isObject(item) && typeof item.threadId === "string"
+      && (item.sessionId === null || typeof item.sessionId === "string")
+      && (item.runId === null || typeof item.runId === "string")
+      && [item.resume, item.stopped, item.resumed].every((flag) => typeof flag === "boolean"))
+    || !value.machines.every((item) => isObject(item) && typeof item.machineId === "string" && typeof item.label === "string"
+      && ["pending", "stopping", "stopped", "starting", "ready", "kept-running"].includes(String(item.state)))) {
+    throw new Error("Malformed Bot activity record");
+  }
+  return value as unknown as BotActivity;
 };
 
 export interface BotService {
@@ -86,8 +124,16 @@ export interface BotService {
     name?: string;
     instructions?: string | null;
     model?: BotModelSelection | null;
+    pinned?: boolean;
   }): Promise<BotSummary | null>;
   archive(botId: string): Promise<BotSummary | null>;
+  restore(botId: string): Promise<BotSummary | null>;
+  sleep(botId: string): Promise<BotSummary>;
+  wake(botId: string): Promise<BotSummary>;
+  retry(botId: string): Promise<BotSummary>;
+  canExecute(botId: string): Promise<boolean>;
+  reconcile(): Promise<void>;
+  dispose(): Promise<void>;
   /**
    * Resolve (creating if necessary) the Bot's long-lived entry session. A
    * persisted session that no longer exists is cleared and a fresh entry is
@@ -199,6 +245,7 @@ export function createBotService(options: BotServiceOptions): BotService {
     // cleared entry binding cannot keep an old sessionId mapped.
     catalogGeneration += 1;
     sessionIndex = null;
+    options.onChange?.(summary);
     return summary;
   };
 
@@ -222,7 +269,8 @@ export function createBotService(options: BotServiceOptions): BotService {
         if (!bot) throw new HarnessServiceError("failed", `Bot profile is malformed: ${record.recordId}`);
         return bot;
       })
-      .sort((a, b) => a.createdAt.localeCompare(b.createdAt));
+      .sort((a, b) => a.pinnedAt && b.pinnedAt ? a.pinnedAt.localeCompare(b.pinnedAt)
+        : a.pinnedAt ? -1 : b.pinnedAt ? 1 : a.createdAt.localeCompare(b.createdAt));
   };
 
   const get: BotService["get"] = async (botId) => {
@@ -260,11 +308,12 @@ export function createBotService(options: BotServiceOptions): BotService {
         : null;
     }
     if (patch.model !== undefined) updates.model = patch.model;
+    if (patch.pinned !== undefined) updates.pinnedAt = patch.pinned ? (toSummary(existing)?.pinnedAt ?? new Date().toISOString()) : null;
     const summary = await write(botId, "active", updates, existing.recordRevision);
     // Keep a live entry worker on the profile's current model. A closed or
     // unreachable worker is retried by the model passed on the next open;
     // clearing the preference likewise applies from the next open.
-    if (summary.entrySessionId && (patch.model !== undefined || patch.instructions !== undefined)) {
+    if (summary.entrySessionId && await canExecute(botId) && (patch.model !== undefined || patch.instructions !== undefined)) {
       try {
         if (patch.model !== undefined) await options.applyModel?.({ sessionId: summary.entrySessionId, model: patch.model });
         if (patch.instructions !== undefined) await options.applyInstructions?.({
@@ -280,16 +329,173 @@ export function createBotService(options: BotServiceOptions): BotService {
     return summary;
   });
 
-  const archive: BotService["archive"] = (botId) => serialize(botId, async () => {
+  const archive: BotService["archive"] = async (botId) => {
+    const bot = await get(botId);
+    if (!bot || bot.archived) return null;
+    await transition(botId, false);
+    return serialize(botId, async () => {
+      const current = await get(botId);
+      const asleep = current?.activity?.state === "asleep";
+      return write(botId, asleep ? "archived" : "active", { archiveRequested: !asleep });
+    });
+  };
+
+  const restore: BotService["restore"] = (botId) => serialize(botId, async () => {
     const existing = await recordFor(botId);
-    if (!existing || existing.state === "archived") return null;
-    return write(botId, "archived", {}, existing.recordRevision);
+    return existing ? write(botId, "active", { archiveRequested: false }, existing.recordRevision) : null;
   });
+
+  let disposed = false;
+  const operations = new Map<string, Promise<void>>();
+  const timers = new Map<string, ReturnType<typeof setTimeout>>();
+  const canExecute = async (botId: string): Promise<boolean> => {
+    const bot = await get(botId);
+    return Boolean(bot && !bot.archived && (!bot.activity || bot.activity.state === "awake"
+      || (bot.activity.state === "waking" && bot.activity.readyToResume === true && operations.has(botId))));
+  };
+  const checkpoint = (botId: string, activity: BotActivity) => serialize(botId, async () => {
+    const current = await get(botId);
+    if (!current || current.activity?.operationId !== activity.operationId) throw new Error("Bot lifecycle operation was superseded");
+    const archive = current.archiveRequested && activity.state === "asleep";
+    return write(botId, current.archived || archive ? "archived" : "active", {
+      activity, ...(archive ? { archiveRequested: false } : {}),
+    });
+  });
+  const runLifecycle = async (botId: string): Promise<void> => {
+    let bot = await get(botId);
+    if (!bot?.activity || !["sleeping", "waking"].includes(bot.activity.state) || disposed) return;
+    const activity = structuredClone(bot.activity);
+    const waking = activity.state === "waking";
+    try {
+      const runtime = options.lifecycle?.();
+      if (!runtime) throw new Error("Bot lifecycle runtime is unavailable");
+      if (!activity.planned) {
+        activity.work = await runtime.planWork(bot);
+        activity.planned = true;
+        bot = await checkpoint(botId, activity);
+      }
+      if (!waking) {
+        // Close every worker even if one target cannot stop. Preserve successful
+        // checkpoints so retries never restart completed work or hide failures.
+        const failures: string[] = [];
+        for (const work of activity.work) {
+          if (disposed) return;
+          if (work.stopped) continue;
+          try { await runtime.stop(bot, work); work.stopped = true; }
+          catch (error) { failures.push(`${work.threadId || work.sessionId}: ${error instanceof Error ? error.message : String(error)}`); }
+          bot = await checkpoint(botId, activity);
+        }
+        try { await runtime.stopScope(bot); }
+        catch (error) { failures.push(error instanceof Error ? error.message : String(error)); }
+        if (failures.length) throw new Error(failures.join("\n"));
+        if (!activity.machinesPlanned) {
+          activity.machines = await runtime.planMachines(bot);
+          activity.machinesPlanned = true;
+          bot = await checkpoint(botId, activity);
+        }
+      }
+      for (let index = 0; index < activity.machines.length; index++) {
+        if (disposed) return;
+        const machine = activity.machines[index]!;
+        if (machine.state === "kept-running" || (!waking && machine.state === "stopped") || (waking && machine.state === "ready")) continue;
+        // Record request intent before crossing the provider boundary.
+        const observed = await runtime.machine(bot, machine, waking);
+        if (JSON.stringify(observed) !== JSON.stringify(machine)) {
+          activity.machines[index] = observed;
+          bot = await checkpoint(botId, activity);
+        }
+      }
+      const pending = activity.machines.some((machine) => waking
+        ? machine.state !== "ready" && machine.state !== "kept-running"
+        : machine.state !== "stopped" && machine.state !== "kept-running");
+      if (pending) {
+        if (!disposed) {
+          const timer = setTimeout(() => { timers.delete(botId); launch(botId); }, 2_000);
+          timer.unref?.();
+          timers.set(botId, timer);
+        }
+        return;
+      }
+      if (waking) {
+        await runtime.prepareWake(bot);
+        activity.readyToResume = true;
+        bot = await checkpoint(botId, activity);
+        for (const work of [...activity.work.filter((item) => item.threadId), ...activity.work.filter((item) => !item.threadId)]) {
+          if (disposed) return;
+          if (!work.resume || work.resumed) continue;
+          await runtime.resume(bot, work);
+          work.resumed = true;
+          bot = await checkpoint(botId, activity);
+        }
+      }
+      if (disposed) return;
+      activity.state = waking ? "awake" : "asleep";
+      activity.error = null;
+      bot = await checkpoint(botId, activity);
+      if (waking) await runtime.awakened(bot);
+    } catch (error) {
+      if (disposed) return;
+      activity.state = waking ? "wake-failed" : "sleep-failed";
+      activity.error = error instanceof Error ? error.message : String(error);
+      await checkpoint(botId, activity);
+    }
+  };
+  const launch = (botId: string): void => {
+    if (disposed) return;
+    const prior = operations.get(botId);
+    if (prior) { void prior.then(() => launch(botId)); return; }
+    const operation = runLifecycle(botId).catch((error) => options.onError?.(error))
+      .finally(() => { operations.delete(botId); });
+    operations.set(botId, operation);
+  };
+  const transition = async (botId: string, waking: boolean): Promise<BotSummary> => {
+    const bot = await serialize(botId, async () => {
+      const current = await get(botId);
+      if (!current || current.archived) throw new HarnessServiceError("not-found", "Unknown or archived Bot");
+      const state = current.activity?.state ?? "awake";
+      if (state === (waking ? "awake" : "asleep") || state === (waking ? "waking" : "sleeping")) return current;
+      if (state === "sleeping" || state === "waking" || (waking && state === "sleep-failed")) {
+        throw new HarnessServiceError("invalid-params", "Finish the current Bot lifecycle operation before switching state");
+      }
+      const activity: BotActivity = (waking || state === "sleep-failed") && current.activity
+        ? { ...structuredClone(current.activity), state: waking ? "waking" : "sleeping", error: null }
+        : { state: "sleeping", operationId: randomUUID(), planned: false, work: [], machines: [], error: null };
+      if (waking && state === "wake-failed") activity.wakeAttempt = (activity.wakeAttempt ?? 0) + 1;
+      return write(botId, "active", { activity, ...(waking ? { archiveRequested: false } : {}) });
+    });
+    launch(botId);
+    return bot;
+  };
+  const retry = async (botId: string): Promise<BotSummary> => {
+    const bot = await serialize(botId, async () => {
+      const current = await get(botId);
+      if (!current || current.archived) throw new HarnessServiceError("not-found", "Unknown Bot");
+      if (!current.activity || ["awake", "asleep"].includes(current.activity.state) || operations.has(botId)) return current;
+      const timer = timers.get(botId);
+      if (timer) clearTimeout(timer);
+      timers.delete(botId);
+      const activity = structuredClone(current.activity);
+      if (activity.state === "wake-failed") activity.wakeAttempt = (activity.wakeAttempt ?? 0) + 1;
+      activity.state = activity.state.startsWith("wake") || activity.state === "waking" ? "waking" : "sleeping";
+      activity.error = null;
+      for (const machine of activity.machines) {
+        if (machine.state === "stopping") machine.state = "pending";
+        if (machine.state === "starting") machine.state = "stopped";
+      }
+      return write(botId, "active", { activity });
+    });
+    launch(botId);
+    return bot;
+  };
 
   const ensureEntry: BotService["ensureEntry"] = (botId) => serialize(botId, async () => {
     const bot = await get(botId);
     if (!bot) throw new HarnessServiceError("not-found", `Unknown Bot "${botId}"`);
     if (bot.archived) throw new HarnessServiceError("invalid-params", `Bot "${botId}" is archived`);
+    if (bot.activity && bot.activity.state !== "awake") {
+      if (!bot.entrySessionId) throw new HarnessServiceError("unavailable", "Wake this Bot to start its first conversation");
+      return { bot, sessionId: bot.entrySessionId };
+    }
     if (bot.entrySessionId) {
       try {
         const session = await options.openSession({
@@ -334,7 +540,7 @@ export function createBotService(options: BotServiceOptions): BotService {
       const bots = await list();
       if (generation !== catalogGeneration) continue;
       sessionIndex = new Map(bots.flatMap((bot) => (
-        !bot.archived && bot.entrySessionId ? [[bot.entrySessionId, bot.id] as const] : []
+        bot.entrySessionId ? [[bot.entrySessionId, bot.id] as const] : []
       )));
     }
     const botId = sessionIndex.get(sessionId);
@@ -385,6 +591,32 @@ export function createBotService(options: BotServiceOptions): BotService {
     create,
     update,
     archive,
+    restore,
+    sleep: (botId) => transition(botId, false),
+    wake: (botId) => transition(botId, true),
+    retry,
+    canExecute,
+    reconcile: async () => {
+      for (const bot of await list()) {
+        if (bot.activity?.state === 'waking' && !operations.has(bot.id)) {
+          const activity = structuredClone(bot.activity);
+          activity.readyToResume = false;
+          // A saved readiness receipt predates this Host restart. Reinspect the
+          // real guest before admitting any continuation in the new process.
+          for (const machine of activity.machines) {
+            if (machine.state === 'ready' || machine.state === 'starting') machine.state = 'stopped';
+          }
+          await checkpoint(bot.id, activity);
+        }
+        launch(bot.id);
+      }
+    },
+    dispose: async () => {
+      disposed = true;
+      for (const timer of timers.values()) clearTimeout(timer);
+      timers.clear();
+      await Promise.allSettled(operations.values());
+    },
     ensureEntry,
     botForSession,
     listWork,

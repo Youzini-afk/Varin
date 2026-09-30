@@ -31,6 +31,36 @@ broker event stream ──→ HarnessRouter.processEvent()
 
 ## Components
 
+### Bot sleep and wake
+
+`bots/bot-service.ts` stores sleep intent, interrupted Run identities, confirmed stop/resume steps,
+remote machine progress and errors in the kernel-owned Bot profile. API calls return after intent
+is durable; Host-owned work continues independently of an open renderer. Startup resumes unfinished
+operations. An unsuccessful stop keeps execution admission closed and exposes its actual error.
+Archive uses this operation and only hides the Bot after it is asleep; restore preserves sleep.
+
+The registry gates creation, Run admission, worker publication, dequeue and lost-Run recovery by
+the owning Bot scope. Broker execution leases recheck Bot state on every request, including reused
+leases; the harness router rejects further tool calls. Due follow-ups retain their definitions while
+asleep and reconcile on wake. Project-owned calendar schedules retain their project ownership.
+Background memory inference is cancelled by scope and remains suspended until wake.
+
+`bots/bot-lifecycle-runtime.ts` closes the entry and delegated workers, their local supervised shells,
+and experiment attempts, retaining worktrees, transcripts and completed results. Managed remote shells
+carry Host-derived owner scopes. The target persists its scope admission gate and confirms process-tree
+termination through Rust before reporting success. Coordinator-side target receipts survive restart;
+an unreachable target is an incomplete stop, never proof of termination.
+
+VM shutdown follows confirmed work termination. It applies only to associated managed VMs without
+other recorded work owners or human desktop control, and excludes the coordinator's own guest.
+Both desktop associations and remote shell/experiment ownership participate in the sharing check.
+ACPI request acceptance is distinct from observed `shutoff`; asynchronous polling has no invented
+shutdown deadline and the UI offers explicit retry. This is graceful power-off with disks retained,
+not an in-memory VM snapshot. Wake starts only VMs this operation stopped, waits for guest readiness,
+then admits continuation. The saved operation/attempt identity deduplicates retries and restart;
+completed work and independent user continuations are not replayed. Interrupted external side effects
+are not undone: the continuation explicitly inspects current state before acting.
+
 The authenticated UI can read `/api/harness/follow-ups` for the current Host's follow-up overview.
 `FollowUpService.listForHost` enumerates the owning workspaces from the kernel and projects visible
 definitions; internal composite leaves stay hidden. This read-only management method is not registered

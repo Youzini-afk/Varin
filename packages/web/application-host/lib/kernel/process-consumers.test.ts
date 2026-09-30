@@ -14,6 +14,8 @@ import { createDebugSupervisor } from "../run/debug-supervisor.js";
 import { createTestSupervisor } from "../run/test-supervisor.js";
 import { createWorkspaceTaskRunner } from "../run/tasks.js";
 import { VARIN_DAP_FIXTURE_ADAPTER_ARGS, VARIN_TEST_FIXTURE_PROVIDER_ARGS } from "../run/servers.js";
+import { createManagedRemoteExecutionService } from '../harness/managed-remote-service.js';
+import type { ResourceService } from '../harness/resources.js';
 
 if (!hasNativeProcessKernel && process.env.VARIN_REQUIRE_RELEASE_KERNEL === "1") throw new Error("Native consumer acceptance requires the release kernel");
 const wait = (ms=10) => new Promise<void>((resolve) => setTimeout(resolve,ms));
@@ -24,11 +26,37 @@ async function until(probe: () => boolean | Promise<boolean>) {
 async function fixture() {
   const docs = await createDocumentAuthorityHarness();
   const native = createNativeProcessTestHarness(docs.authority);
-  const { service } = await native.get();
-  return { docs, service, cleanup: async () => { await native.dispose(); await docs.cleanup(); } };
+  const { service, client } = await native.get();
+  return { docs, service, client, cleanup: async () => { await native.dispose(); await docs.cleanup(); } };
 }
 
 describe.skipIf(!hasNativeProcessKernel)("production consumers over Rust process pipes",()=>{
+  it('Bot sleep stops only its own remote process trees and persists remote admission across restart', async () => {
+    const f = await fixture();
+    const client = f.client;
+    const options = { client, hostId: 'remote-sleep-test', resources: {} as ResourceService };
+    const remote = createManagedRemoteExecutionService(options);
+    let otherProcess: string | undefined;
+    try {
+      const script = path.join(f.docs.workspaceRoot, 'remote-bot-work.cjs');
+      await fs.writeFile(script, 'setInterval(() => {}, 1000)');
+      const input = { coordinatorHostId: 'coordinator', command: `"${process.execPath}" "${script}"`, cwd: f.docs.workspaceRoot, waitMs: 0 };
+      const first = await remote.shellExec('principal', { ...input, toolCallId: 'a', ownerScopeId: 'bot:a' });
+      const second = await remote.shellExec('principal', { ...input, toolCallId: 'b', ownerScopeId: 'bot:b' });
+      expect(first.kind).toBe('background'); expect(second.kind).toBe('background');
+      if (first.kind !== 'background' || second.kind !== 'background') throw new Error('Expected running workers');
+      otherProcess = second.id;
+      await remote.setShellScopeSleeping('principal', 'coordinator', 'bot:a', true);
+      expect((await remote.shellRead('principal', 'coordinator', first.id, 0, 0)).running).toBe(false);
+      expect((await remote.shellRead('principal', 'coordinator', second.id, 0, 0)).running).toBe(true);
+      const reopened = createManagedRemoteExecutionService(options);
+      await expect(reopened.shellExec('principal', { ...input, toolCallId: 'c', ownerScopeId: 'bot:a' })).rejects.toThrow(/asleep/);
+      await reopened.setShellScopeSleeping('principal', 'coordinator', 'bot:a', false);
+    } finally {
+      if (otherProcess) await remote.shellKill('principal', 'coordinator', otherProcess);
+      await f.cleanup();
+    }
+  });
   it("LSP initializes, completes and closes its native language server",async()=>{
     const f=await fixture();
     const language=createLanguageSupervisor({ documents:f.docs.authority, spawn:f.service.spawn,isTrusted:async()=>true });

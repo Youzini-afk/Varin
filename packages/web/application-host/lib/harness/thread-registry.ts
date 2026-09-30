@@ -160,6 +160,7 @@ export interface CreateThreadInput {
 export interface ThreadRegistryOptions {
   dataDir: string;
   hostId: string;
+  canExecuteScope?(scopeId: string): Promise<boolean>;
   onThreadChanged?: (scopeId: string, parent: ThreadParent, thread: Thread, activeRun: ThreadRun | null) => void;
   onThreadDone?: (scopeId: string, parent: ThreadParent, threadId: string, report: ThreadReport) => void;
   /** A report newly persisted by this completed Run, including failure/cancellation. */
@@ -1316,14 +1317,14 @@ export function createThreadRegistry(options: ThreadRegistryOptions) {
 
   const mutateWorkspace = async <T>(
     scopeId: string,
-    mutate: (catalog: ThreadCatalogDocument) => MutationResult<T>,
+    mutate: (catalog: ThreadCatalogDocument) => MutationResult<T> | Promise<MutationResult<T>>,
   ): Promise<T> => {
     const previous = mutationTails.get(scopeId) ?? Promise.resolve();
     let value!: T;
     const operation = previous.then(async () => {
       const current = await loadWorkspace(scopeId);
       const draft = structuredClone(current);
-      const mutation = mutate(draft);
+      const mutation = await mutate(draft);
       value = mutation.value;
       if (mutation.write !== false) {
         await writeCatalog(draft);
@@ -1400,6 +1401,12 @@ export function createThreadRegistry(options: ThreadRegistryOptions) {
     thread.eventSeq = nextEventSeq(catalog);
   };
 
+  const assertScopeExecution = async (scopeId: string): Promise<void> => {
+    if (options.canExecuteScope && !await options.canExecuteScope(scopeId)) {
+      throw new Error("This Bot is asleep or changing state; wake it before starting work");
+    }
+  };
+
   const createThread = async (input: CreateThreadInput): Promise<Thread> => {
     if (input.draftBaselineId !== undefined && (!input.draftBaselineId || input.worktree !== "isolated")) {
       throw new Error("A Thread draft baseline requires a non-empty id and an isolated worktree");
@@ -1408,7 +1415,8 @@ export function createThreadRegistry(options: ThreadRegistryOptions) {
     if (draining.has(key) || retiredParents.has(key)) {
       throw new Error("Cannot create a thread while its parent is being deleted");
     }
-    return mutateWorkspace(input.scopeId, (catalog) => {
+    return mutateWorkspace(input.scopeId, async (catalog) => {
+      await assertScopeExecution(input.scopeId);
       if (draining.has(key) || retiredParents.has(key) || cascadeBlocksParent(input.scopeId, catalog, input.parent)) {
         throw new Error("Cannot create a thread while its parent is archived or being cascaded");
       }
@@ -1470,7 +1478,8 @@ export function createThreadRegistry(options: ThreadRegistryOptions) {
   };
 
   const assertDispatchAllowed = async (scopeId: string, threadId: string): Promise<void> => {
-    await mutateWorkspace(scopeId, (catalog) => {
+    await mutateWorkspace(scopeId, async (catalog) => {
+      await assertScopeExecution(scopeId);
       const thread = findThread(catalog, threadId);
       if (!thread) throw new Error(`Unknown thread: ${threadId}`);
       if (thread.lifecycle === "archived" || thread.lifecycle === "settled" || cascadeBlocksThread(scopeId, catalog, thread)) {
@@ -1729,7 +1738,8 @@ export function createThreadRegistry(options: ThreadRegistryOptions) {
       sessionOwner?: ThreadSessionOwner;
     } = {},
   ): Promise<{ run: ThreadRun; started: boolean }> => (
-    mutateWorkspace<{ run: ThreadRun; started: boolean }>(scopeId, (catalog) => {
+    mutateWorkspace<{ run: ThreadRun; started: boolean }>(scopeId, async (catalog) => {
+      await assertScopeExecution(scopeId);
       const thread = findThread(catalog, threadId);
       if (!thread) throw new Error(`Unknown thread: ${threadId}`);
       const parentKey = scopeKey(scopeId, thread.parent);
@@ -1846,7 +1856,8 @@ export function createThreadRegistry(options: ThreadRegistryOptions) {
     runId: string,
     sessionId: string,
   ): Promise<ThreadRun> => {
-    const run = await mutateWorkspace(scopeId, (catalog) => {
+    const run = await mutateWorkspace(scopeId, async (catalog) => {
+      await assertScopeExecution(scopeId);
       const thread = findThread(catalog, threadId);
       const candidate = catalog.runs.find((entry) => entry.id === runId && entry.threadId === threadId);
       if (!thread || !candidate || thread.activeRunId !== runId) throw new Error(`Unknown active run: ${runId}`);
@@ -2826,6 +2837,7 @@ export function createThreadRegistry(options: ThreadRegistryOptions) {
   };
 
   async function tryDequeue(scopeId: string, parent: ThreadParent): Promise<Thread | null> {
+    if (options.canExecuteScope && !await options.canExecuteScope(scopeId)) return null;
     const catalog = await catalogForScope(scopeId, parent);
     const root = rootSessionFor(catalog, parent);
     // Dequeue and admission are root-wide: the oldest candidate anywhere under
@@ -2962,6 +2974,8 @@ export function createThreadRegistry(options: ThreadRegistryOptions) {
   };
 
   return {
+    canExecuteScope: async (scopeId: string) => options.canExecuteScope ? options.canExecuteScope(scopeId) : true,
+    flushScope: async (scopeId: string) => { await mutationTails.get(scopeId); },
     createThread,
     assertDispatchAllowed,
     getThread,

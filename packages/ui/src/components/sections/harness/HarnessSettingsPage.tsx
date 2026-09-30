@@ -23,7 +23,7 @@ const pages: Record<HarnessSettingsSection, React.ComponentType<HarnessSettingsP
   context: ContextSettings, retrieval: RetrievalSettings, index: IndexSettings, web: WebSettings,
   // Self-fetching: the computer and bot catalogs come from the Host service,
   // not harness settings — extra props are ignored.
-  computers: ComputerSettings, bots: BotSettings };
+  computers: ComputerSettings, bots: () => <BotSettings /> };
 
 export function HarnessSettingsPage({ section }: { section: HarnessSettingsSection }) {
   const { t } = useI18n();

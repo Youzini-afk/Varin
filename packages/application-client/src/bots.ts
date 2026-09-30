@@ -7,6 +7,35 @@ export interface BotModelSelection {
   modelId: string;
 }
 
+export interface BotSleepWork {
+  threadId: string;
+  sessionId: string | null;
+  runId: string | null;
+  resume: boolean;
+  stopped: boolean;
+  resumed: boolean;
+}
+
+export interface BotSleepMachine {
+  machineId: string;
+  label: string;
+  state: "pending" | "stopping" | "stopped" | "starting" | "ready" | "kept-running";
+  detail?: string | undefined;
+}
+
+/** Durable intent and progress. A failed stop continues to block execution. */
+export interface BotActivity {
+  state: "awake" | "sleeping" | "asleep" | "waking" | "sleep-failed" | "wake-failed";
+  operationId: string;
+  planned: boolean;
+  machinesPlanned?: boolean;
+  readyToResume?: boolean;
+  wakeAttempt?: number;
+  work: BotSleepWork[];
+  machines: BotSleepMachine[];
+  error: string | null;
+}
+
 export interface BotProfile {
   id: string;
   name: string;
@@ -20,6 +49,9 @@ export interface BotProfile {
   homeDir: string;
   /** The Bot's long-lived conversation session; survives entry reopen. */
   entrySessionId: string | null;
+  pinnedAt?: string | null;
+  activity?: BotActivity;
+  archiveRequested?: boolean;
   createdAt: string;
   updatedAt: string;
 }
@@ -38,4 +70,13 @@ export interface BotWorkItem {
   sessionId: string | null;
   desktops?: ComputerDesktop[];
   artifacts?: ComputerArtifact[];
+}
+
+export interface BotMemoryItem {
+  id: number;
+  content: string;
+  trigger: string;
+  createdAt: number;
+  revision: string;
+  sourceKind: string | null;
 }

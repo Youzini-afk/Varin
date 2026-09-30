@@ -201,6 +201,7 @@ export interface FollowUpExternalSource {
 
 export interface FollowUpServiceDeps {
   client: KernelClient;
+  canExecuteScope?(scopeId: string): Promise<boolean>;
   /** Look up a thread + parent for delivery decisions. */
   getThread(workspaceId: string, threadId: string): Promise<{
     id: string;
@@ -2592,6 +2593,7 @@ export function createFollowUpService(deps: FollowUpServiceDeps) {
     followUpId: string,
     occurrenceRecord: KernelRecordResult,
   ): Promise<boolean> => {
+    if (deps.canExecuteScope && !await deps.canExecuteScope(workspaceId)) return false;
     const occurrence = payloadOf(occurrenceRecord) as unknown as OccurrencePayload;
     let outcome: { delivery: FollowUpOccurrenceDelivery; runId?: string } | null = null;
     if (occurrenceRecord.state === "delivered" || occurrenceRecord.state === "dropped") {
@@ -2761,6 +2763,7 @@ export function createFollowUpService(deps: FollowUpServiceDeps) {
     guard?: FireGuard,
     opts?: { rearm?: boolean; sourceStatePatch?: DefinitionPayload["sourceState"] },
   ): Promise<boolean> => withDefinition(followUpId, async () => {
+      if (deps.canExecuteScope && !await deps.canExecuteScope(workspaceId)) return false;
       const record = await getDefinitionRecord(workspaceId, followUpId);
       if (!record) return false;
       const payload = payloadOf(record) as unknown as DefinitionPayload;
@@ -3915,6 +3918,11 @@ export function createFollowUpService(deps: FollowUpServiceDeps) {
     check,
     fire: fireNow,
     reconcile,
+    resumeScope: async (scopeId: string) => {
+      await reconcileOperations.get(scopeId);
+      reconciledWorkspaces.delete(scopeId);
+      await reconcile(scopeId);
+    },
     definitionWorkspaces,
     settleTarget,
     dispose: () => {

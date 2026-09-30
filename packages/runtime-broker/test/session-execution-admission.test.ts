@@ -36,6 +36,7 @@ test("session execution admission precedes worker and agent execution and owns c
   );
 
   let deny = true;
+  let botSleeping = false;
   let throwOnClose = false;
   let activeLeases = 0;
   const admissions: PiSessionExecutionAdmissionRequest[] = [];
@@ -60,6 +61,9 @@ test("session execution admission precedes worker and agent execution and owns c
     activeLeases += 1;
     let closed = false;
     return {
+      async assertCanExecute() {
+        if (botSleeping) throw new Error('Bot sleeping');
+      },
       close() {
         if (closed) return;
         closed = true;
@@ -100,6 +104,22 @@ test("session execution admission precedes worker and agent execution and owns c
       "agent-run",
     ]);
     assert.equal(admissions.at(-1)?.sessionId, created.sessionId);
+
+    const before = await readFile(commandMarker, 'utf8');
+    const runningCommand = broker.requestForSession(created.sessionId, 'command.execute', {
+      command: '/admission-write', sessionId: created.sessionId,
+    });
+    while ((await readFile(commandMarker, 'utf8')).length === before.length) {
+      await new Promise((resolveDelay) => setTimeout(resolveDelay, 5));
+    }
+    botSleeping = true;
+    await assert.rejects(broker.requestForSession(created.sessionId, 'command.execute', {
+      command: '/admission-write', sessionId: created.sessionId,
+    }), /Bot sleeping/);
+    assert.equal(activeLeases, 1, 'rejecting a cached admission must not release the running command lease');
+    await runningCommand;
+    botSleeping = false;
+    assert.equal((await readFile(commandMarker, 'utf8')).slice(before.length), 'began\nexecuted\n');
 
     const invalidCommand = broker.requestForSession(created.sessionId, "command.execute", {
       command: "not-a-command",

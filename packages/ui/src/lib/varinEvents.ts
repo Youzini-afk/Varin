@@ -65,7 +65,8 @@ type SessionCreatedEvent = {
 };
 
 export type VarinEvent = StreamReadyEvent | ScheduledTaskRanEvent | SessionCreatedEvent | HarnessThreadChangedEvent | HarnessBlocksChangedEvent | HarnessKnowledgeChangedEvent | HarnessExperimentChangedEvent | SettingsChangedEvent
-  | { type: 'ssh-instance-status'; status: unknown };
+  | { type: 'ssh-instance-status'; status: unknown }
+  | { type: 'bot-changed'; botId: string };
 type Listener = (event: VarinEvent) => void;
 
 let eventSource: EventSource | null = null;
@@ -226,6 +227,12 @@ const dispatchFromEnvelope = (envelope: { type: string; properties: unknown }) =
   if (envelope.type === 'varin:harness-thread-changed') {
     const nextEvent = parseHarnessThreadChanged(envelope.properties);
     if (nextEvent) for (const listener of listeners) listener(nextEvent);
+    return;
+  }
+
+  if (envelope.type === 'varin:bot-changed') {
+    const properties = getEventProperties(envelope.properties);
+    if (typeof properties?.botId === 'string') for (const listener of listeners) listener({ type: 'bot-changed', botId: properties.botId });
     return;
   }
 

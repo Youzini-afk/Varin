@@ -132,6 +132,7 @@ export interface MemoryOrganizerDeps {
    * unavailable — the user-level `autoOrganize` stays the gate.
    */
   autoOrganizeForScope?(scopeId: string): Promise<boolean | null>;
+  canExecuteScope?(scopeId: string): Promise<boolean>;
   /** Durable owner resolution for a session (`workspaceId`, `bot:<id>`, `session:<id>`). */
   scopeForSession(sessionId: string): Promise<string | null>;
   /** All native entries, including inactive branches; never wakes a live worker. */
@@ -293,6 +294,8 @@ export function createMemoryOrganizer(deps: MemoryOrganizerDeps) {
   const running = new Set<string>();
   const timers = new Map<string, ReturnType<typeof setTimeout>>();
   const activeBatches = new Map<string, string>();
+  const suspendedScopes = new Set<string>();
+  const idleWaiters = new Map<string, Set<() => void>>();
   const pendingTasks = new Set<Promise<unknown>>();
   let disposed = false;
   let sweepTimer: ReturnType<typeof setTimeout> | null = null;
@@ -637,6 +640,7 @@ export function createMemoryOrganizer(deps: MemoryOrganizerDeps) {
   // ── Judgment + narration ─────────────────────────────────────────
 
   const filterUnitsByFastDecision = async (
+    scopeId: string,
     status: HarnessFastDecisionPurposeStatus | null,
     units: OrganizerUnit[],
   ): Promise<OrganizerUnit[]> => {
@@ -657,7 +661,9 @@ export function createMemoryOrganizer(deps: MemoryOrganizerDeps) {
       },
     }));
     const batchId = randomUUID();
-    activeBatches.set(batchId, "fast-decision");
+    if (suspendedScopes.has(scopeId) || (deps.canExecuteScope && !await deps.canExecuteScope(scopeId))) throw new Error("Bot sleeping");
+    if (suspendedScopes.has(scopeId)) throw new Error("Bot sleeping");
+    activeBatches.set(batchId, scopeId);
     try {
       const result = await broker.requestForWorkspace(deps.configCwd, "harness.fastDecision", {
         configurationId: status.binding.configurationId,
@@ -708,6 +714,7 @@ export function createMemoryOrganizer(deps: MemoryOrganizerDeps) {
   };
 
   const narrateProposals = async (
+    scopeId: string,
     model: ModelSelection,
     modelSource: "configured" | "bot",
     prompt: string,
@@ -716,7 +723,9 @@ export function createMemoryOrganizer(deps: MemoryOrganizerDeps) {
     const broker = deps.getBroker();
     if (!broker) throw new Error("Pi workspace binding is unavailable");
     const batchId = randomUUID();
-    activeBatches.set(batchId, "organize");
+    if (suspendedScopes.has(scopeId) || (deps.canExecuteScope && !await deps.canExecuteScope(scopeId))) throw new Error("Bot sleeping");
+    if (suspendedScopes.has(scopeId)) throw new Error("Bot sleeping");
+    activeBatches.set(batchId, scopeId);
     try {
       const result = await broker.requestForWorkspace(deps.configCwd, "harness.memoryOrganize", {
         batchId,
@@ -970,6 +979,7 @@ export function createMemoryOrganizer(deps: MemoryOrganizerDeps) {
     running.add(scopeId);
     const force = forced.delete(scopeId);
     try {
+      if (suspendedScopes.has(scopeId) || (deps.canExecuteScope && !await deps.canExecuteScope(scopeId))) return;
       // Reconcile writes that were already durable before considering current
       // enable/model settings. Turning organization off cannot strand a
       // committed cross-store receipt after a crash.
@@ -1075,7 +1085,7 @@ export function createMemoryOrganizer(deps: MemoryOrganizerDeps) {
           });
         }
 
-        const judged = await filterUnitsByFastDecision(settings.fastDecision, freshUnits);
+        const judged = await filterUnitsByFastDecision(scopeId, settings.fastDecision, freshUnits);
         if (disposed) return;
         for (const unit of freshUnits.filter((candidate) => !judged.includes(candidate))) {
           await putProgress(store, unit.key, "reviewed-empty", {
@@ -1102,7 +1112,7 @@ export function createMemoryOrganizer(deps: MemoryOrganizerDeps) {
           const selected = selectPrompt(judged, existing, budget.inputTokens);
           if (!selected) throw new Error("Memory organizer prompt exceeded the selected model's context after source selection");
           narratedRevision = store.knowledgeRevision();
-          const narrated = await narrateProposals(model, binding.source, selected.prompt, budget.maxOutputTokens);
+          const narrated = await narrateProposals(scopeId, model, binding.source, selected.prompt, budget.maxOutputTokens);
           if (disposed) return;
           for (const unit of judged) await assertSourceCurrent(store, scopeId, unit, unitChars);
           // Validate provenance/targets before anything from this response is
@@ -1163,6 +1173,7 @@ export function createMemoryOrganizer(deps: MemoryOrganizerDeps) {
 
         // Commit phase. Settings re-read: a switch flipped mid-run still gates.
         const currentSettings = await readHarnessSettings();
+        if (suspendedScopes.has(scopeId) || (deps.canExecuteScope && !await deps.canExecuteScope(scopeId))) return;
         if (!currentSettings.autoOrganize[scopeKind(scopeId)]) return;
         if (scopeKind(scopeId) === "workspace" && await deps.autoOrganizeForScope?.(scopeId) === false) return;
         if (narratedRevision !== null && narratedRevision !== store.knowledgeRevision()) {
@@ -1219,12 +1230,14 @@ export function createMemoryOrganizer(deps: MemoryOrganizerDeps) {
       }
     } finally {
       running.delete(scopeId);
+      for (const resolve of idleWaiters.get(scopeId) ?? []) resolve();
+      idleWaiters.delete(scopeId);
       if (queued.delete(scopeId)) schedule(scopeId);
     }
   };
 
   const schedule = (scopeId: string): void => {
-    if (disposed) return;
+    if (disposed || suspendedScopes.has(scopeId)) return;
     queued.add(scopeId);
     if (running.has(scopeId) || timers.has(scopeId)) return;
     timers.set(scopeId, setTimeout(() => {
@@ -1271,6 +1284,24 @@ export function createMemoryOrganizer(deps: MemoryOrganizerDeps) {
   };
 
   return {
+    async suspendScope(scopeId: string): Promise<void> {
+      suspendedScopes.add(scopeId);
+      const timer = timers.get(scopeId);
+      if (timer) clearTimeout(timer);
+      timers.delete(scopeId);
+      queued.delete(scopeId);
+      forced.delete(scopeId);
+      const broker = deps.getBroker();
+      const cancellations = [...activeBatches.entries()].filter(([, owner]) => owner === scopeId);
+      if (cancellations.length && !broker) throw new Error("Memory organizer worker is unavailable to stop");
+      await Promise.all(cancellations.map(([batchId]) => broker!.requestForWorkspace(deps.configCwd, "harness.inference.cancel", { batchId })));
+      if (running.has(scopeId)) await new Promise<void>((resolve) => {
+        const waiters = idleWaiters.get(scopeId) ?? new Set();
+        waiters.add(resolve);
+        idleWaiters.set(scopeId, waiters);
+      });
+    },
+    resumeScope(scopeId: string): void { suspendedScopes.delete(scopeId); schedule(scopeId); },
     /** First-run reconcile: pick up progress and sources left before shutdown. */
     start(): void {
       if (disposed) return;

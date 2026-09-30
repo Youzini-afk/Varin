@@ -1,5 +1,6 @@
 import { runtimeFetch } from '@varin/application-client';
-import type { BotModelSelection, BotSummary, BotWorkItem } from '@varin/application-client';
+import type { BotModelSelection, BotSummary, BotWorkItem, BotMemoryItem } from '@varin/application-client';
+import type { MemorySourceExcerpt } from '@varin/protocol';
 import type { SessionSnapshot } from '@varin/protocol';
 import { openPiSessionFromNavigation } from '@/lib/pi-runtime/sessionNavigation';
 import { selectActiveWorkbenchProfile } from '@/lib/extensions/workbench-shell-transition';
@@ -53,6 +54,7 @@ export const updateBot = async (botId: string, patch: {
   name?: string;
   instructions?: string | null;
   model?: BotModelSelection | null;
+  pinned?: boolean;
 }): Promise<BotSummary> => {
   const result = await readJson<{ bot: BotSummary }>(
     await runtimeFetch(`/api/harness/bots/${encodeURIComponent(botId)}/update`, {
@@ -71,6 +73,22 @@ export const archiveBot = async (botId: string): Promise<BotSummary> => {
     'Unable to archive the bot',
   );
   return result.bot;
+};
+
+export const changeBotState = async (botId: string, action: 'sleep' | 'wake' | 'restore' | 'retry'): Promise<BotSummary> => {
+  const result = await readJson<{ bot: BotSummary }>(await runtimeFetch(`/api/harness/bots/${encodeURIComponent(botId)}/${action}`, { method: 'POST' }), 'Unable to change Bot state');
+  return result.bot;
+};
+export const listBotMemory = async (botId: string, signal?: AbortSignal): Promise<BotMemoryItem[]> => (
+  await readJson<{ items: BotMemoryItem[] }>(await runtimeFetch(`/api/harness/bots/${encodeURIComponent(botId)}/memory`, { signal }), 'Unable to read Bot memory')
+).items;
+export const readBotMemorySource = async (botId: string, id: number): Promise<MemorySourceExcerpt[]> => (
+  await readJson<{ sources: MemorySourceExcerpt[] }>(await runtimeFetch(`/api/harness/bots/${encodeURIComponent(botId)}/memory/${id}/source`), 'Unable to read memory sources')
+).sources;
+export const updateBotMemory = async (botId: string, item: BotMemoryItem, action: 'correct' | 'forget', content?: string): Promise<void> => {
+  await readJson(await runtimeFetch(`/api/harness/bots/${encodeURIComponent(botId)}/memory/${item.id}`, {
+    method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ action, revision: item.revision, content }),
+  }), 'Unable to update Bot memory');
 };
 
 /** Resolve (creating when necessary) the Bot's durable entry session id. */

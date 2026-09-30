@@ -639,7 +639,8 @@ export function createManagedRemoteExecutionService(options: ManagedRemoteExecut
     const processId = text(payload.processId);
     if (!processId) throw new Error("Managed remote job has no process identity");
     if (ACTIVE_JOB_STATES.has(record.state)) await updateJob(record, "stopping", { cancelRequested: true });
-    const snapshot = await scoped.processKill({ workspaceId: WORKSPACE_ID, processId, force: true });
+    await scoped.processKill({ workspaceId: WORKSPACE_ID, processId, force: true });
+    const snapshot = await scoped.processInspect({ workspaceId: WORKSPACE_ID, processId });
     const observation = observationOf(snapshot as unknown as Record<string, unknown>);
     monitor(principalId, coordinatorHostId, backendJobId);
     return observation;
@@ -737,7 +738,17 @@ export function createManagedRemoteExecutionService(options: ManagedRemoteExecut
     return { scoped, record, payload };
   };
 
-  const shellExec = async (principalId: string, input: { coordinatorHostId: string; toolCallId: string; command: string; cwd?: string; waitMs: number }, signal?: AbortSignal): Promise<ShellExecResult> => {
+  const shellScopeTails = new Map<string, Promise<unknown>>();
+  const withShellScope = async <T>(key: string, operation: () => Promise<T>): Promise<T> => {
+    const pending = (shellScopeTails.get(key) ?? Promise.resolve()).catch(() => undefined).then(operation);
+    shellScopeTails.set(key, pending);
+    try { return await pending; }
+    finally { if (shellScopeTails.get(key) === pending) shellScopeTails.delete(key); }
+  };
+  const scopeRecordId = (principalId: string, coordinatorHostId: string, scopeId: string) =>
+    `managed.remote.scope:${digest(principalId, coordinatorHostId, scopeId)}`;
+  const shellExec = async (principalId: string, input: { coordinatorHostId: string; toolCallId: string; command: string; cwd?: string; waitMs: number; ownerScopeId?: string }, signal?: AbortSignal): Promise<ShellExecResult> => withShellScope(
+    scopeRecordId(principalId, input.coordinatorHostId, input.ownerScopeId ?? input.toolCallId), async () => {
     signal?.throwIfAborted();
     const coordinatorHostId = input.coordinatorHostId.trim();
     const toolCallId = input.toolCallId.trim();
@@ -745,23 +756,31 @@ export function createManagedRemoteExecutionService(options: ManagedRemoteExecut
     if (!coordinatorHostId || !toolCallId || !command) throw new Error("Managed remote shell identity and command are required");
     const canonicalCwd = await canonicalizePathIdentity(input.cwd?.trim() || os.homedir());
     const scoped = await context();
+    if (input.ownerScopeId) {
+      const scope = await scoped.getRecord(WORKSPACE_ID, scopeRecordId(principalId, coordinatorHostId, input.ownerScopeId));
+      if (scope?.state === "sleeping") throw new Error("The owning Bot is asleep");
+    }
     const recordId = shellRecordId(principalId, coordinatorHostId, toolCallId);
     const processId = `managed-shell-${recordId.slice(SHELL_PREFIX.length)}`;
     let record = await scoped.getRecord(WORKSPACE_ID, recordId);
     if (record) {
       const payload = recordPayload(record);
       if (text(payload.command) !== command || text(payload.canonicalCwd) !== canonicalCwd) throw new Error("Remote shell tool call is already bound to another command or cwd");
+      if ((text(payload.ownerScopeId) ?? null) !== (input.ownerScopeId ?? null)) throw new Error("Remote shell tool call belongs to another work owner");
     } else {
       signal?.throwIfAborted();
       record = await putRecord({
         recordId, recordType: "managed.remote.shell", state: "accepted",
-        payload: { id: recordId.slice(SHELL_PREFIX.length), principalId, coordinatorHostId, toolCallId, processId, command, canonicalCwd, createdAt: now() },
+        payload: { id: recordId.slice(SHELL_PREFIX.length), principalId, coordinatorHostId, toolCallId, processId, command, canonicalCwd,
+          ...(input.ownerScopeId ? { ownerScopeId: input.ownerScopeId } : {}), createdAt: now() },
       });
     }
     signal?.throwIfAborted();
     const root = await scoped.fileRootRegister({ workspaceId: WORKSPACE_ID, executionWorkspaceId: WORKSPACE_ID, canonicalRoot: canonicalCwd });
     const rootId = text(root.rootId);
     if (!rootId) throw new Error("Managed remote shell cwd has no root identity");
+    record = await putRecord({ recordId, recordType: "managed.remote.shell", state: "accepted",
+      payload: { ...recordPayload(record), rootId }, expectedRecordRevision: record.recordRevision });
     const windows = process.platform === "win32";
     const executable = windows ? (process.env.ComSpec || "cmd.exe") : "/bin/sh";
     const args = windows ? ["/d", "/s", "/c", command] : ["-lc", command];
@@ -789,6 +808,52 @@ export function createManagedRemoteExecutionService(options: ManagedRemoteExecut
       };
     }
     return { kind: "background", id: processId, waitedMs: Math.max(0, now() - startedAt), cwd: canonicalCwd, outputSoFar: snapshot.stdout, command, toolCallId, executionId: processId };
+  });
+
+  const setShellScopeSleeping = async (principalId: string, coordinatorHostId: string, scopeId: string, sleeping: boolean) => {
+    const recordId = scopeRecordId(principalId, coordinatorHostId, scopeId);
+    return withShellScope(recordId, async () => {
+      const scoped = await context();
+      const previous = await scoped.getRecord(WORKSPACE_ID, recordId);
+      await putRecord({ recordId, recordType: "managed.remote.scope", state: sleeping ? "sleeping" : "awake",
+        payload: { id: recordId.slice('managed.remote.scope:'.length), principalId, coordinatorHostId, scopeId }, ...(previous ? { expectedRecordRevision: previous.recordRevision } : {}) });
+      if (!sleeping) return { sleeping };
+      const failures: unknown[] = [];
+      for (const record of await listRecords("managed.remote.shell")) {
+        const payload = recordPayload(record);
+        if (payload.principalId !== principalId || payload.coordinatorHostId !== coordinatorHostId || payload.ownerScopeId !== scopeId) continue;
+        try {
+          const processId = text(payload.processId)!;
+          const rootId = text(payload.rootId);
+          // Scope serialization means a missing process cannot start after this
+          // scan. No root receipt means admission never reached process.spawn.
+          if (!rootId) continue;
+          let cursor: number | undefined;
+          let found = false;
+          do {
+            const page = await scoped.processList({ workspaceId: WORKSPACE_ID, rootId, ...(cursor === undefined ? {} : { cursor }) });
+            found ||= page.processes.some((process) => process.processId === processId);
+            cursor = page.nextCursor ?? undefined;
+          } while (!found && cursor !== undefined);
+          if (!found) continue;
+          const state = observationOf(await scoped.processInspect({ workspaceId: WORKSPACE_ID, processId }) as unknown as Record<string, unknown>);
+          if (!state.writerActive && state.status !== "unknown") continue;
+          await scoped.processKill({ workspaceId: WORKSPACE_ID, processId, force: true });
+          let stopped = await scoped.processInspect({ workspaceId: WORKSPACE_ID, processId });
+          // process.kill acknowledges the signal; the OS process tree may take
+          // another turn to release its writers. Await that observed fact.
+          while (stopped.writerActive) {
+            await new Promise((resolve) => setTimeout(resolve, 25));
+            stopped = await scoped.processInspect({ workspaceId: WORKSPACE_ID, processId });
+          }
+          if (observationOf(stopped as unknown as Record<string, unknown>).status === 'unknown') {
+            throw new Error(`Remote process termination is unknown: ${processId}`);
+          }
+        } catch (error) { failures.push(error); }
+      }
+      if (failures.length) throw new AggregateError(failures, "Some remote processes could not be stopped");
+      return { sleeping };
+    });
   };
 
   const shellRead = async (principalId: string, coordinatorHostId: string, processId: string, offset: number, length: number, waitMs = 0, signal?: AbortSignal): Promise<ShellReadResult> => {
@@ -827,8 +892,9 @@ export function createManagedRemoteExecutionService(options: ManagedRemoteExecut
 
   const shellKill = async (principalId: string, coordinatorHostId: string, processId: string) => {
     const { scoped } = await shellRecord(principalId, coordinatorHostId, processId);
-    const result = await scoped.processKill({ workspaceId: WORKSPACE_ID, processId, force: true });
-    return { killed: result.writerActive !== true };
+    await scoped.processKill({ workspaceId: WORKSPACE_ID, processId, force: true });
+    const result = await scoped.processInspect({ workspaceId: WORKSPACE_ID, processId });
+    return { killed: result.writerActive === false && result.status !== 'unknown' };
   };
 
   const reconcile = async (): Promise<void> => {
@@ -848,7 +914,7 @@ export function createManagedRemoteExecutionService(options: ManagedRemoteExecut
     admit, releaseAdmission,
     submitJob, inspectJob, readJob, killJob, releaseJob,
     collectOutput, readOutput,
-    shellExec, shellRead, shellWrite, shellKill,
+    shellExec, shellRead, shellWrite, shellKill, setShellScopeSleeping,
     reconcile,
   };
 }

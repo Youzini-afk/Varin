@@ -2,11 +2,15 @@ import { afterEach, expect, it, vi } from "vitest";
 import { mkdtemp, rm } from "node:fs/promises";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
-import { createBotService, type BotServiceOptions } from "./bot-service.js";
+import { createBotService, type BotServiceOptions, type BotService, type BotLifecycleRuntime } from "./bot-service.js";
 import type { KernelRecordResult } from "../kernel/protocol.generated.js";
 
 const dirs: string[] = [];
-afterEach(async () => { for (const dir of dirs.splice(0)) await rm(dir, { recursive: true, force: true }); });
+const services: BotService[] = [];
+afterEach(async () => {
+  for (const service of services.splice(0)) await service.dispose();
+  for (const dir of dirs.splice(0)) await rm(dir, { recursive: true, force: true });
+});
 
 const setup = async () => {
   const dataDir = await mkdtemp(join(tmpdir(), "varin-bot-entry-"));
@@ -29,13 +33,23 @@ const setup = async () => {
   const openSession = vi.fn(async ({ sessionId }: { sessionId: string }) => ({ sessionId }));
   const applyModel = vi.fn(async () => {});
   const applyInstructions = vi.fn(async () => {});
-  const service = createBotService({
+  const lifecycle = {
+    planWork: vi.fn<BotLifecycleRuntime['planWork']>(async () => []),
+    planMachines: vi.fn<BotLifecycleRuntime['planMachines']>(async () => []),
+    stop: vi.fn<BotLifecycleRuntime['stop']>(async () => {}), stopScope: vi.fn(async () => {}),
+    machine: vi.fn<BotLifecycleRuntime['machine']>(async (_bot, machine, waking) => ({ ...machine, state: waking ? 'ready' : 'stopped' })),
+    resume: vi.fn<BotLifecycleRuntime['resume']>(async () => {}), awakened: vi.fn(async () => {}),
+    prepareWake: vi.fn(async () => {}),
+  };
+  const options: BotServiceOptions = {
     client: { issueGrant: async () => ({}), scoped: () => catalog } as unknown as BotServiceOptions["client"],
     dataDir, hostId: "test", registry: {
       listWorkspaceThreadSnapshots: async () => [], listRuns: async () => [], listWorkspaceRunSessionIds: async () => [],
-    }, createSession, openSession, applyModel, applyInstructions,
-  });
-  return { service, records, createSession, openSession, applyModel, applyInstructions, failWrite: () => { failWrite = true; } };
+    }, createSession, openSession, applyModel, applyInstructions, lifecycle: () => lifecycle,
+  };
+  const recreate = () => { const service = createBotService(options); services.push(service); return service; };
+  const service = recreate();
+  return { service, recreate, lifecycle, records, createSession, openSession, applyModel, applyInstructions, failWrite: () => { failWrite = true; } };
 };
 
 it("concurrent entry opens share one durably bound session", async () => {
@@ -45,6 +59,84 @@ it("concurrent entry opens share one durably bound session", async () => {
   expect(createSession).toHaveBeenCalledTimes(1);
   expect(entries.map((entry) => entry.sessionId)).toEqual(["session-1", "session-1"]);
   expect((await service.botForSession("session-1"))?.id).toBe(bot.id);
+});
+
+it('closes admission before stopping work, retains failures, and retries only unfinished stops', async () => {
+  const { service, lifecycle } = await setup();
+  const bot = await service.create();
+  lifecycle.planWork.mockResolvedValue(['a', 'b'].map((threadId) => ({ threadId, sessionId: threadId,
+    runId: `run-${threadId}`, resume: true, stopped: false, resumed: false })));
+  lifecycle.stop.mockImplementation(async (_bot, work) => {
+    expect(await service.canExecute(bot.id)).toBe(false);
+    if (work.threadId === 'a') throw new Error('remote host unavailable');
+  });
+  await service.sleep(bot.id);
+  await vi.waitFor(async () => expect((await service.get(bot.id))?.activity?.state).toBe('sleep-failed'));
+  expect(lifecycle.stop.mock.calls.map(([, work]) => work.threadId)).toEqual(['a', 'b']);
+  expect(await service.canExecute(bot.id)).toBe(false);
+  await expect(service.wake(bot.id)).rejects.toThrow(/Finish/);
+  lifecycle.stop.mockResolvedValue();
+  await service.sleep(bot.id);
+  await vi.waitFor(async () => expect((await service.get(bot.id))?.activity?.state).toBe('asleep'));
+  expect(lifecycle.stop.mock.calls.map(([, work]) => work.threadId)).toEqual(['a', 'b', 'a']);
+  await service.wake(bot.id);
+  await vi.waitFor(async () => expect((await service.get(bot.id))?.activity?.state).toBe('awake'));
+  expect(lifecycle.resume).toHaveBeenCalledTimes(2);
+  await service.wake(bot.id);
+  expect(lifecycle.resume).toHaveBeenCalledTimes(2);
+});
+
+it('recovers an unfinished VM shutdown after restart and only wakes work after the VM is ready', async () => {
+  const { service, lifecycle, recreate } = await setup();
+  const bot = await service.create();
+  lifecycle.planWork.mockResolvedValue([{ threadId: 'a', sessionId: 'a', runId: 'r', resume: true, stopped: false, resumed: false }]);
+  lifecycle.planMachines.mockResolvedValue([{ machineId: 'vm', label: 'VM', state: 'pending' }]);
+  lifecycle.machine.mockImplementation(async (_bot, machine) => ({ ...machine, state: 'stopping' }));
+  await service.archive(bot.id);
+  await vi.waitFor(async () => expect((await service.get(bot.id))?.activity?.machines[0]?.state).toBe('stopping'));
+  expect((await service.get(bot.id))?.archived).toBe(false);
+  await service.dispose();
+  const recovered = recreate();
+  lifecycle.machine.mockImplementation(async (_bot, machine, waking) => ({ ...machine, state: waking ? 'ready' : 'stopped' }));
+  await recovered.reconcile();
+  await vi.waitFor(async () => expect((await recovered.get(bot.id))?.archived).toBe(true));
+  expect(lifecycle.stop).toHaveBeenCalledTimes(1);
+  await recovered.restore(bot.id);
+  expect(await recovered.canExecute(bot.id)).toBe(false);
+  lifecycle.resume.mockImplementation(async () => {
+    expect((await recovered.get(bot.id))?.activity?.machines[0]?.state).toBe('ready');
+  });
+  await recovered.wake(bot.id);
+  await vi.waitFor(async () => expect((await recovered.get(bot.id))?.activity?.state).toBe('awake'));
+  expect(lifecycle.resume).toHaveBeenCalledTimes(1);
+});
+
+it('reading a sleeping entry does not open or configure a worker and does not wake it', async () => {
+  const { service, openSession, applyInstructions } = await setup();
+  const bot = await service.create();
+  await service.ensureEntry(bot.id);
+  await service.sleep(bot.id);
+  await vi.waitFor(async () => expect((await service.get(bot.id))?.activity?.state).toBe('asleep'));
+  openSession.mockClear(); applyInstructions.mockClear();
+  expect((await service.ensureEntry(bot.id)).sessionId).toBe('session-1');
+  await service.update(bot.id, { instructions: 'New instructions', pinned: true });
+  expect(openSession).not.toHaveBeenCalled();
+  expect(applyInstructions).not.toHaveBeenCalled();
+  expect(await service.canExecute(bot.id)).toBe(false);
+});
+
+it('stops work even when the VM inventory is unavailable, and retains that progress on retry', async () => {
+  const { service, lifecycle } = await setup();
+  const bot = await service.create();
+  lifecycle.planWork.mockResolvedValue([{ threadId: 'a', sessionId: 'a', runId: 'r', resume: true, stopped: false, resumed: false }]);
+  lifecycle.planMachines.mockRejectedValueOnce(new Error('VM inventory offline'));
+  await service.sleep(bot.id);
+  await vi.waitFor(async () => expect((await service.get(bot.id))?.activity?.state).toBe('sleep-failed'));
+  expect(lifecycle.stop).toHaveBeenCalledTimes(1);
+  expect((await service.get(bot.id))?.activity?.work[0]?.stopped).toBe(true);
+  await service.retry(bot.id);
+  await vi.waitFor(async () => expect((await service.get(bot.id))?.activity?.state).toBe('asleep'));
+  expect(lifecycle.stop).toHaveBeenCalledTimes(1);
 });
 
 it('does not replace malformed durable Bot identity with an empty profile', async () => {
@@ -89,8 +181,9 @@ it("keeps an archived Bot archived when entry creation races with archive", asyn
   resume();
   await entry;
   await archived;
-  expect((await service.get(bot.id))?.archived).toBe(true);
-  expect(await service.botForSession("session-1")).toBeNull();
+  await vi.waitFor(async () => expect((await service.get(bot.id))?.archived).toBe(true));
+  expect((await service.botForSession("session-1"))?.archived).toBe(true);
+  expect(await service.canExecute(bot.id)).toBe(false);
 });
 
 it("persists instructions and applies a stored model to reopened and live entry sessions", async () => {

@@ -87,6 +87,7 @@ const attemptView = (overrides: Partial<ExperimentAttemptView> = {}): Experiment
 });
 
 async function fixture(options: {
+  canExecuteScope?: (scopeId: string) => Promise<boolean>;
   seed?: (harness: Harness) => void;
   afterNotify?: (harness: Harness) => void;
   getAttempt?: (harness: Harness, attemptId: string, caller: FollowUpCaller) => Promise<ExperimentAttemptView | null>;
@@ -138,6 +139,7 @@ async function fixture(options: {
 
   const deps: FollowUpServiceDeps = {
     client,
+    ...(options.canExecuteScope ? { canExecuteScope: options.canExecuteScope } : {}),
     getThread: async (_ws, threadId) => harness.threads.get(threadId) ?? null,
     notifySession: async (sessionId, text, messageId) => {
       harness.informs.push({ messageId, sessionId, text });
@@ -297,6 +299,23 @@ const until = async (check: () => boolean | Promise<boolean>, ms = 4_000, errors
 };
 
 describe("follow-up service on the real kernel", () => {
+  it('Bot sleep retains a due follow-up and wakes it once without replaying missed triggers', async () => {
+    let sleeping = true;
+    const f = await fixture({ canExecuteScope: async () => !sleeping, seed: (h) => h.threads.set('t-1', settledThread()) });
+    try {
+      const registered = await f.service.register(caller(), {
+        instruction: 'continue the saved work', source: { kind: 'time', at: Date.now() + 50 },
+      });
+      await pause(100);
+      assert.equal(f.harness.continued.length, 0);
+      assert.equal((await f.service.get(caller(), { id: registered.followUp.id })).followUp.status, 'waiting');
+      sleeping = false;
+      await f.service.resumeScope('ws');
+      await until(() => f.harness.continued.length === 1);
+      await f.service.resumeScope('ws');
+      assert.equal(f.harness.continued.length, 1);
+    } finally { f.service.dispose(); }
+  });
   it("registers a durable wait, lists it, and fires a due time source on check", async () => {
     const f = await fixture({ seed: (h) => h.threads.set("t-1", settledThread()) });
     const registered = await f.service.register(caller(), {

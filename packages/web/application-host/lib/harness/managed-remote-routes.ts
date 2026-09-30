@@ -203,6 +203,7 @@ export function registerManagedRemoteRoutes(
     const result = await whileResponseOpen(response, (signal) => service.shellExec(owner.principalId, {
       coordinatorHostId: owner.coordinatorHostId,
       toolCallId: asString(body.toolCallId, "Tool call identity"),
+      ...(body.ownerScopeId === undefined ? {} : { ownerScopeId: asString(body.ownerScopeId, "Work owner scope") }),
       command: asString(body.command, "Command"),
       ...(typeof body.cwd === "string" && body.cwd.trim() ? { cwd: body.cwd.trim() } : {}),
       waitMs: body.waitMs === undefined ? 10_000 : asNonNegativeInteger(body.waitMs, "waitMs"),
@@ -220,6 +221,14 @@ export function registerManagedRemoteRoutes(
       signal,
     ));
     if (!response.destroyed) response.json(result);
+  }));
+
+  app.post(`${base}/shell/scope-state`, requireAuth, requireManagedAuth, route(async (request, response) => {
+    const body = value(request.body);
+    const owner = authorize(request, body.coordinatorHostId);
+    if (typeof body.sleeping !== "boolean") throw new Error("sleeping must be a boolean");
+    response.json(await service.setShellScopeSleeping(owner.principalId, owner.coordinatorHostId,
+      asString(body.scopeId, "Work owner scope"), body.sleeping));
   }));
 
   app.post(`${base}/shell/:coordinatorHostId/:processId/write`, requireAuth, requireManagedAuth, route(async (request, response) => {

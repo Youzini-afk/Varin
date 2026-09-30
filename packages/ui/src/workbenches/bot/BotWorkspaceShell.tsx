@@ -7,19 +7,18 @@ import { Icon } from '@/components/icon/Icon';
 import { Button } from '@/components/ui/button';
 import { useI18n } from '@/lib/i18n';
 import { cn } from '@/lib/utils';
-import { archiveBot, createBot, ensureBotEntry, listBots, listBotWork, updateBot, type BotSummary, type BotWorkItem } from '@/lib/bots';
+import { archiveBot, changeBotState, createBot, ensureBotEntry, listBots, listBotWork, updateBot, type BotSummary, type BotWorkItem } from '@/lib/bots';
 import { useWorkbenchProfileId } from '@/lib/workbench/profile-context';
 import { openPiSessionFromNavigation } from '@/lib/pi-runtime/sessionNavigation';
 import { usePiSessionStore } from '@/stores/usePiSessionStore';
 import { useUIStore } from '@/stores/useUIStore';
 import { useDeviceInfo } from '@/lib/device';
 import { BotNameDialog } from '@/components/sections/bots/BotNameDialog';
-import {
-  ContextMenu,
-  ContextMenuContent,
-  ContextMenuItem,
-  ContextMenuTrigger,
-} from '@/components/ui/context-menu';
+import { BotMenu, type BotMenuAction } from '@/components/sections/bots/BotMenu';
+import { BotActivityBanner } from '@/components/sections/bots/BotActivityBanner';
+import { subscribeVarinEvents } from '@/lib/varinEvents';
+
+const BotDetailsDialog = React.lazy(() => import('@/components/sections/bots/BotDetailsDialog').then((module) => ({ default: module.BotDetailsDialog })));
 
 const openBotSettings = () => {
   useUIStore.getState().setSettingsPage('harness-bots');
@@ -41,6 +40,8 @@ const BotWorkspace: React.FC<{ committed: boolean }> = ({ committed }) => {
   const currentSessionId = usePiSessionStore((state) => state.currentSessionId);
   const settingsOpen = useUIStore((state) => state.isSettingsDialogOpen);
   const [bots, setBots] = React.useState<BotSummary[] | null>(null);
+  const [showArchived, setShowArchived] = React.useState(false);
+  const [details, setDetails] = React.useState<{ id: string; name: string; tab: 'profile' | 'memory' } | null>(null);
   const [selectedId, setSelectedId] = React.useState<string | null>(null);
   const [workResult, setWorkResult] = React.useState<{ botId: string; items: BotWorkItem[] } | null>(null);
   const [error, setError] = React.useState<string | null>(null);
@@ -51,20 +52,28 @@ const BotWorkspace: React.FC<{ committed: boolean }> = ({ committed }) => {
   const [revision, refresh] = React.useReducer((value: number) => value + 1, 0);
   const opening = React.useRef<AbortController | null>(null);
   const selected = bots?.find((bot) => bot.id === selectedId);
+  const readOnly = Boolean(selected?.archived || (selected?.activity && selected.activity.state !== 'awake'));
+  const visibleBots = bots?.filter((bot) => bot.archived === showArchived);
+  const botsRef = React.useRef(bots);
+  botsRef.current = bots;
+  const alive = React.useRef(true);
   const work = workResult?.botId === selectedId ? workResult.items : null;
   const entryStreaming = usePiSessionStore((state) => (
     selected?.entrySessionId ? state.records[selected.entrySessionId]?.snapshot?.isStreaming === true : false
   ));
 
-  React.useEffect(() => () => { opening.current?.abort(); }, []);
+  React.useEffect(() => { alive.current = true; return () => { alive.current = false; opening.current?.abort(); }; }, []);
+  React.useEffect(() => committed ? subscribeVarinEvents((event) => {
+    if (event.type === 'bot-changed' || event.type === 'stream-ready') refresh();
+  }) : undefined, [committed]);
 
   React.useEffect(() => {
     if (!committed || settingsOpen) return;
     const controller = new AbortController();
     void listBots(controller.signal).then((list) => {
       if (controller.signal.aborted) return;
-      const active = list.filter((bot) => !bot.archived);
-      setBots(active);
+      const active = list.filter((bot) => bot.archived === showArchived);
+      setBots(list);
       setError(null);
       setSelectedId((previous) => active.find((bot) => bot.id === previous)?.id
         ?? active.find((bot) => bot.entrySessionId === usePiSessionStore.getState().currentSessionId)?.id
@@ -73,7 +82,7 @@ const BotWorkspace: React.FC<{ committed: boolean }> = ({ committed }) => {
       if (!controller.signal.aborted) setError(cause instanceof Error ? cause.message : String(cause));
     });
     return () => controller.abort();
-  }, [committed, settingsOpen, revision]);
+  }, [committed, settingsOpen, revision, showArchived]);
 
   const openEntry = React.useCallback(async (botId: string) => {
     opening.current?.abort();
@@ -83,7 +92,11 @@ const BotWorkspace: React.FC<{ committed: boolean }> = ({ committed }) => {
     setBusy(true);
     setError(null);
     try {
-      const { bot, sessionId } = await ensureBotEntry(botId, controller.signal);
+      const known = botsRef.current?.find((bot) => bot.id === botId);
+      if (known && (known.archived || (known.activity && known.activity.state !== 'awake')) && !known.entrySessionId) return;
+      const { bot, sessionId } = known?.archived && known.entrySessionId
+        ? { bot: known, sessionId: known.entrySessionId }
+        : await ensureBotEntry(botId, controller.signal);
       if (controller.signal.aborted || usePiSessionStore.getState().runtimeKey !== runtimeKey) return;
       setBots((list) => list?.map((item) => item.id === bot.id ? bot : item) ?? [bot]);
       await openPiSessionFromNavigation({ sessionId, directory: bot.homeDir });
@@ -98,7 +111,7 @@ const BotWorkspace: React.FC<{ committed: boolean }> = ({ committed }) => {
     if (!committed || !selectedId) return;
     void openEntry(selectedId);
     return () => opening.current?.abort();
-  }, [committed, selectedId, openEntry]);
+  }, [committed, selectedId, openEntry, readOnly]);
 
   React.useEffect(() => {
     if (!committed || !selectedId || settingsOpen) return;
@@ -138,7 +151,7 @@ const BotWorkspace: React.FC<{ committed: boolean }> = ({ committed }) => {
       setBots((list) => dialog.mode === 'create'
         ? [...(list ?? []), bot]
         : list?.map((item) => item.id === bot.id ? bot : item) ?? [bot]);
-      setSelectedId(bot.id);
+      if (dialog.mode === 'create') { setShowArchived(false); setSelectedId(bot.id); }
       setNameDialog(null);
     } catch (cause) {
       setError(cause instanceof Error ? cause.message : String(cause));
@@ -147,19 +160,22 @@ const BotWorkspace: React.FC<{ committed: boolean }> = ({ committed }) => {
     }
   };
 
-  const archive = async (bot: BotSummary) => {
-    opening.current?.abort();
-    setActionBusy(`archive:${bot.id}`);
+  const mutateBot = async (bot: BotSummary, action: BotMenuAction) => {
+    if (action === 'rename') { openRenameDialog(bot); return; }
+    if (action === 'profile' || action === 'memory') { setDetails({ id: bot.id, name: bot.name, tab: action }); return; }
+    setActionBusy(`${action}:${bot.id}`);
     setError(null);
+    const runtimeKey = usePiSessionStore.getState().runtimeKey;
     try {
-      await archiveBot(bot.id);
-      const remaining = (bots ?? []).filter((item) => item.id !== bot.id);
-      setBots(remaining);
-      setSelectedId((current) => current === bot.id ? (remaining[0]?.id ?? null) : current);
+      const updated = action === 'pin' ? await updateBot(bot.id, { pinned: !bot.pinnedAt })
+        : action === 'archive' ? await archiveBot(bot.id) : await changeBotState(bot.id, action);
+      if (!alive.current || usePiSessionStore.getState().runtimeKey !== runtimeKey) return;
+      setBots((list) => list?.map((item) => item.id === updated.id ? updated : item) ?? [updated]);
+      refresh();
     } catch (cause) {
-      setError(cause instanceof Error ? cause.message : String(cause));
+      if (alive.current && usePiSessionStore.getState().runtimeKey === runtimeKey) setError(cause instanceof Error ? cause.message : String(cause));
     } finally {
-      setActionBusy(null);
+      if (alive.current) setActionBusy(null);
     }
   };
 
@@ -182,23 +198,14 @@ const BotWorkspace: React.FC<{ committed: boolean }> = ({ committed }) => {
         </Button>
       </div>
       <div className="min-h-0 flex-1 overflow-y-auto px-2.5">
-        {bots?.map((bot) => <ContextMenu key={bot.id}>
-          <ContextMenuTrigger asChild>
+        {visibleBots?.map((bot) => <BotMenu key={bot.id} bot={bot} disabled={actionBusy !== null} onAction={(action) => { void mutateBot(bot, action); }}>
             <button type="button" disabled={busy || actionBusy !== null} onClick={() => selectBot(bot.id)}
               aria-current={bot.id === selectedId ? 'page' : undefined}
-              className={cn(rowClass, bot.id === selectedId ? 'bg-interactive-selection text-foreground' : 'text-muted-foreground hover:bg-interactive-hover hover:text-foreground')}>
-              <Icon name="robot" className="size-4 shrink-0" /><span className="truncate">{bot.name}</span>
+              className={cn(rowClass, 'min-w-0', bot.id === selectedId ? 'bg-interactive-selection text-foreground' : 'text-muted-foreground hover:bg-interactive-hover hover:text-foreground')}>
+              <Icon name={bot.activity && bot.activity.state !== 'awake' ? 'moon' : 'robot'} className="size-4 shrink-0" /><span className="truncate">{bot.name}</span>
+              {bot.pinnedAt ? <Icon name="pushpin" className="ml-auto size-3 shrink-0 text-muted-foreground" /> : null}
             </button>
-          </ContextMenuTrigger>
-          <ContextMenuContent>
-            <ContextMenuItem onClick={() => openRenameDialog(bot)}>
-              <Icon name="edit" className="size-4" />{t('settings.bots.rename')}
-            </ContextMenuItem>
-            <ContextMenuItem disabled={actionBusy !== null} onClick={() => { void archive(bot); }}>
-              <Icon name="archive" className="size-4" />{t('settings.bots.archive')}
-            </ContextMenuItem>
-          </ContextMenuContent>
-        </ContextMenu>)}
+        </BotMenu>)}
         <button type="button" disabled={busy || actionBusy !== null || !bots} onClick={openCreateDialog} className={cn(rowClass, 'text-muted-foreground hover:bg-interactive-hover hover:text-foreground disabled:opacity-50')}>
           <Icon name="add" className="size-4 shrink-0" />{t('settings.bots.create')}
         </button>
@@ -219,10 +226,13 @@ const BotWorkspace: React.FC<{ committed: boolean }> = ({ committed }) => {
         </> : null}
       </div>
       <div className="border-t border-border px-2.5 py-2">
+        <button type="button" onClick={() => setShowArchived((value) => !value)} className={cn(rowClass, 'text-muted-foreground hover:bg-interactive-hover hover:text-foreground')}>
+          <Icon name={showArchived ? 'robot' : 'archive'} className="size-4 shrink-0" />{t(showArchived ? 'settings.bots.activeList' : 'settings.bots.archivedList')}
+        </button>
         <button type="button" onClick={() => useUIStore.getState().setScheduledTasksDialogOpen(true)} className={cn(rowClass, 'text-muted-foreground hover:bg-interactive-hover hover:text-foreground')}>
           <Icon name="calendar-schedule" className="size-4 shrink-0" />{t('tasksHub.title')}
         </button>
-        <button type="button" onClick={openBotSettings} className={cn(rowClass, 'text-muted-foreground hover:bg-interactive-hover hover:text-foreground')}>
+        <button type="button" onClick={() => selected ? setDetails({ id: selected.id, name: selected.name, tab: 'profile' }) : openBotSettings()} className={cn(rowClass, 'text-muted-foreground hover:bg-interactive-hover hover:text-foreground')}>
           <Icon name="settings-3" className="size-4 shrink-0" />{t('settings.bots.section.profile')}
         </button>
       </div>
@@ -230,19 +240,20 @@ const BotWorkspace: React.FC<{ committed: boolean }> = ({ committed }) => {
   );
 
   const conversation = (active: boolean) => <div className="flex h-full min-h-0 flex-col">
+    {selected ? <BotActivityBanner bot={selected} busy={actionBusy !== null} onAction={(action) => { void mutateBot(selected, action); }} /> : null}
     {error ? <div role="alert" className="flex items-center gap-3 border-b border-border px-4 py-3 typography-meta">
       <span className="flex-1 text-destructive">{error}</span>
       <Button variant="ghost" size="sm" onClick={() => { refresh(); if (selectedId) void openEntry(selectedId); }}>{t('research-workbench.retry')}</Button>
     </div> : null}
-    {ownsConversation && !busy ? <div className="min-h-0 flex-1"><ChatView active={active} showWorkingDirectory={false} /></div> : (
+    {ownsConversation && !busy ? <div className="min-h-0 flex-1"><ChatView active={active} readOnly={readOnly} autoOpenDraft={false} showWorkingDirectory={false} /></div> : (
       <div className="flex flex-1 flex-col items-center justify-center gap-4 px-6 text-center">
         <Icon name="robot" className="size-9 text-muted-foreground" />
         <h1 className="typography-title">Varin bot</h1>
         {busy || (!bots && !error) ? <p role="status" className="typography-meta text-muted-foreground">{t('common.loading')}</p> : null}
-        {bots?.length === 0 ? <>
-          <p className="typography-body text-muted-foreground">{t('settings.bots.empty')}</p>
-          <Button disabled={busy || actionBusy !== null} onClick={openCreateDialog}>{t('settings.bots.create')}</Button>
-        </> : selected && !busy ? <Button onClick={() => { void openEntry(selected.id); }}>{t('settings.bots.openEntry')}</Button> : null}
+        {visibleBots?.length === 0 ? <>
+          <p className="typography-body text-muted-foreground">{t(showArchived ? 'settings.bots.archivedEmpty' : 'settings.bots.empty')}</p>
+          {!showArchived ? <Button disabled={busy || actionBusy !== null} onClick={openCreateDialog}>{t('settings.bots.create')}</Button> : null}
+        </> : selected && !busy && (!readOnly || selected.entrySessionId) ? <Button onClick={() => { void openEntry(selected.id); }}>{t('settings.bots.openEntry')}</Button> : null}
       </div>
     )}
     <BotNameDialog
@@ -254,6 +265,7 @@ const BotWorkspace: React.FC<{ committed: boolean }> = ({ committed }) => {
       onOpenChange={(open) => { if (!open && actionBusy === null) setNameDialog(null); }}
       onSubmit={(event) => { void saveName(event); }}
     />
+    {details ? <React.Suspense fallback={null}><BotDetailsDialog bot={details} onClose={() => { setDetails(null); refresh(); }} /></React.Suspense> : null}
   </div>;
 
   return <MainLayout renderNavigator={navigator} renderConversation={conversation} navigationTitle={selected?.name ?? 'Varin bot'} />;

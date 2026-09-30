@@ -270,7 +270,9 @@ export function createShellExecService(host: HarnessServiceHost): HarnessService
       if (target) {
         if (!host.managedRemoteTargets) throw new Error("Managed execution targets are unavailable");
         if (!params.toolCallId) throw new Error("Managed remote shell requires the stable tool call identity");
+        const owner = await host.threadRegistry?.resolveSessionOwner(ctx.sessionId);
         const remote = await host.managedRemoteTargets.shellExec(executionScopeId(ctx), target, {
+          ownerScopeId: owner?.owningScopeId ?? executionScopeId(ctx),
           toolCallId: params.toolCallId,
           command: params.command,
           ...(params.cwd ? { cwd: params.cwd } : {}),

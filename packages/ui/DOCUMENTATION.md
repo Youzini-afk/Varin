@@ -86,6 +86,20 @@ entry resolution. Ordinary Workbench and IDE navigation exclude sessions owned b
 records, and returning from Bot restores the prior ordinary session and location. Mobile exposes the
 same mode control in its navigation drawer (IDE remains desktop/Web).
 
+Bot rows expose the same actions through right-click and their visible-on-hover `…` button:
+pin/unpin, rename, the targeted Bot profile, scoped memory, sleep/wake, and archive.
+Opening another Bot's profile or memory never selects its conversation. The memory panel uses the
+Host's existing MemoryService to show source excerpts, supersede a corrected memory, or forget it;
+revision checks prevent overwriting concurrent organizer/user edits. Archived Bots have a separate
+list with restore; restoration keeps them asleep until explicitly woken.
+
+The Host owns durable Bot sleep progress. The shell subscribes to `varin:bot-changed` and refreshes
+on event-stream reconnection; it does not drive background lifecycle work. Sleeping and archived
+conversations are read-only. Their banner distinguishes stopping, asleep, waking and partial failures,
+exposes explicit retry, and displays the observed remote computer states. Opening history never wakes
+a Bot. Archive requests first finish the same sleep operation, so unfinished work remains visible if
+stopping or remote shutdown fails.
+
 Varin themes expose semantic surface, interactive, status, primary, syntax, and feature tokens.
 Components use those roles rather than embedding palette colors: selection describes current state,
 primary describes an action, status colors describe feedback, and syntax colors remain code-specific.

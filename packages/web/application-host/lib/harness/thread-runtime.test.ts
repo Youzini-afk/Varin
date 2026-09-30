@@ -199,6 +199,23 @@ describe("thread runtime", () => {
     return { input, thread, run };
   };
 
+  it('Bot sleep confirms worker closure, preserves the worktree, and continues the retained session once', async () => {
+    const { thread, run } = await start();
+    vi.mocked(sessionAdapter.close).mockRejectedValueOnce(new Error('worker still alive'));
+    await expect(runtime.suspendForBot(WORKSPACE, thread.id)).rejects.toThrow(/Unable to close/);
+    expect((await registry.getActiveRun(WORKSPACE, thread.id))?.outcome).toBeNull();
+    await runtime.suspendForBot(WORKSPACE, thread.id);
+    expect((await registry.getActiveRun(WORKSPACE, thread.id))?.exitReason).toBe('Bot sleeping');
+    expect((await registry.getThreadById(WORKSPACE, thread.id))?.worktree).toBeTruthy();
+    const continuation = { scopeId: WORKSPACE, parent: PARENT, threadId: thread.id, mode: 'continue' as const,
+      task: 'Continue after sleep', requestId: 'wake-test' };
+    await runtime.continueRun(continuation);
+    await runtime.continueRun(continuation);
+    expect(sessionAdapter.open).toHaveBeenCalledWith(expect.objectContaining({ sessionId: 'child-1' }));
+    expect((await registry.listRuns(WORKSPACE, thread.id)).filter((item) => item.id !== run.id)).toHaveLength(1);
+    expect(sent.filter((text) => text === continuation.task)).toHaveLength(1);
+  });
+
   it("passes the immutable external source view into the child's first prompt", async () => {
     const fixedContext = {
       source: "surface" as const,

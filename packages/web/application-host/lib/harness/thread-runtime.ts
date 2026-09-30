@@ -2053,6 +2053,7 @@ export function createThreadRuntime(options: ThreadRuntimeOptions) {
   );
 
   const spawn = async (input: SpawnThreadRunInput): Promise<{ sessionId: string }> => {
+    if (!await options.registry.canExecuteScope(input.scopeId)) throw new ThreadRuntimeError("unavailable", "Bot is asleep");
     const thread = await options.registry.getThread(input.scopeId, input.parent, input.threadId);
     const run = await options.registry.getActiveRun(input.scopeId, input.threadId);
     if (!thread || run?.id !== input.runId || !run.frozen) {
@@ -3205,6 +3206,7 @@ export function createThreadRuntime(options: ThreadRuntimeOptions) {
   };
 
   const resumeLostForParent = async (workspaceId: string, parent: ThreadParent): Promise<void> => {
+    if (!await options.registry.canExecuteScope(workspaceId)) return;
     const threads = await options.registry.listThreads(workspaceId, parent, true);
     for (let thread of threads) {
       let previous = await options.registry.getActiveRun(workspaceId, thread.id);
@@ -4397,6 +4399,17 @@ export function createThreadRuntime(options: ThreadRuntimeOptions) {
     }
     stalledThreads.delete(`${workspaceId}\0${threadId}`);
     await releasePendingMaterializeReservation(threadId);
+  };
+
+  const suspendForBot = async (workspaceId: string, threadId: string): Promise<void> => {
+    preparations.get(threadId)?.controller.abort();
+    await withThreadLifecycle(workspaceId, threadId, async () => {
+      preparations.get(threadId)?.controller.abort();
+      const thread = await options.registry.getThreadById(workspaceId, threadId);
+      if (!thread) return;
+      await stopRunForArchive(workspaceId, thread.parent, threadId, { reason: "Bot sleeping" });
+      await options.stopExperimentsForThread?.(workspaceId, threadId);
+    });
   };
 
   const archiveOneNode = async (
@@ -5648,6 +5661,8 @@ export function createThreadRuntime(options: ThreadRuntimeOptions) {
     mode: "continue" | "fresh";
     task: string;
     requestId?: string;
+    /** Host-only restoration of a discussion worker interrupted by Bot sleep. */
+    resumeSuspended?: boolean;
     /** Skips the shared-budget admission check (dequeue path already gated). */
     admitted?: boolean;
     from?: import("@varin/protocol").ThreadMessagePeer;
@@ -5657,6 +5672,7 @@ export function createThreadRuntime(options: ThreadRuntimeOptions) {
      */
     frozen?: import("@varin/protocol").ThreadRunFrozenConfig;
   }): Promise<{ runId?: string }> => {
+    if (!await options.registry.canExecuteScope(input.scopeId)) throw new ThreadRuntimeError("unavailable", "Bot is asleep");
     const requestId = input.requestId ?? `continuation-${randomUUID()}`;
     const from = input.from ?? { kind: "user" as const, id: "host" };
     const thread = await options.registry.getThread(input.scopeId, input.parent, input.threadId);
@@ -5692,7 +5708,7 @@ export function createThreadRuntime(options: ThreadRuntimeOptions) {
       }
       return { runId: priorRun.id };
     }
-    if (thread.kind !== "implementation") {
+    if (thread.kind !== "implementation" && !input.resumeSuspended) {
       throw new ThreadRuntimeError("invalid-request", "Execution requests apply to implementation threads");
     }
     if (thread.worktree?.baselineUpdate) throw new ThreadRuntimeError("unavailable", `Finish baseline update ${thread.worktree.baselineUpdate.operationId} before continuing execution`);
@@ -5714,7 +5730,7 @@ export function createThreadRuntime(options: ThreadRuntimeOptions) {
         at: new Date().toISOString(),
       });
     };
-    if (!input.admitted && await options.registry.countActiveInRoot(input.scopeId, input.parent) >= thread.manifest.concurrency) {
+    if (thread.kind === 'implementation' && !input.admitted && await options.registry.countActiveInRoot(input.scopeId, input.parent) >= thread.manifest.concurrency) {
       await park();
       return {};
     }
@@ -5865,6 +5881,9 @@ export function createThreadRuntime(options: ThreadRuntimeOptions) {
       return { runId: run.id };
     } catch (error) {
       const message = error instanceof Error ? error.message : String(error);
+      const failedSession = sessionByThread.get(thread.id);
+      const failedBinding = failedSession ? bindingsBySession.get(failedSession) : undefined;
+      if (failedBinding?.runId === run.id) await closeBinding(failedBinding, true).catch(reportError);
       await options.registry.failRunRequest(input.scopeId, thread.id, run.id, message);
       await options.registry.endRun(input.scopeId, thread.id, run.id, "failure", message).catch(reportError);
       throw error;
@@ -5872,6 +5891,7 @@ export function createThreadRuntime(options: ThreadRuntimeOptions) {
   };
 
   return {
+    suspendForBot,
     spawn,
     captureInputContext,
     continueRun,

@@ -94,6 +94,7 @@ import { createThreadRuntime } from './lib/harness/thread-runtime.js';
 import { createResearchRootRuntime } from './lib/harness/research-root-runtime.js';
 import { createBotRootRuntime } from './lib/harness/bot-root-runtime.js';
 import { createBotService } from './lib/bots/bot-service.js';
+import { createBotLifecycleRuntime } from './lib/bots/bot-lifecycle-runtime.js';
 import { registerBotRoutes } from './lib/bots/bot-routes.js';
 import { createComputerService } from './lib/computer/computer-service.js';
 import { HostSshManager } from './lib/connections/ssh-manager.js';
@@ -995,7 +996,8 @@ async function main(options: StartWebUiServerOptions = {}): Promise<WebUiServerC
   type PiAdmissionRequest = Parameters<NonNullable<HostPiRuntimeBrokerFactoryOptions['admitSessionExecution']>>[0];
   let piWriterTracker: PiWriterTracker | null = null;
   let recoveryTurnCoordinator: RecoveryTurnCoordinator | null = null;
-  const admitPiSessionExecution = (request: PiAdmissionRequest) => {
+  let assertBotSessionExecution = async (_sessionId: string): Promise<void> => {};
+  const admitPiSessionExecution = async (request: PiAdmissionRequest) => {
     if (!piWriterTracker) {
       throw new PiRuntimeBrokerError(
         'runtime_not_ready',
@@ -1003,7 +1005,12 @@ async function main(options: StartWebUiServerOptions = {}): Promise<WebUiServerC
         { retryable: true },
       );
     }
-    return recoveryTurnCoordinator?.admit(request) ?? piWriterTracker.admit(request);
+    const assertCanExecute = async () => {
+      if (request.sessionId && request.phase !== 'worker-start') await assertBotSessionExecution(request.sessionId);
+    };
+    await assertCanExecute();
+    const lease = await (recoveryTurnCoordinator?.admit(request) ?? piWriterTracker.admit(request));
+    return { close: () => lease?.close(), assertCanExecute };
   };
   const piRuntimeBrokerFactory = options.createPiRuntimeBroker || ((brokerOptions: HostPiRuntimeBrokerFactoryOptions) => createWebPiRuntimeBroker({
     agentDir: process.env.VARIN_AGENT_DIR,
@@ -1690,9 +1697,14 @@ async function main(options: StartWebUiServerOptions = {}): Promise<WebUiServerC
   };
   const sessionSnapshots = new Map<string, Record<string, unknown>>();
   const memoryOrganizerRef: { current?: ReturnType<typeof createMemoryOrganizer> } = {};
+  let botAdmissionReady = false;
+  let botLifecycleRuntime: ReturnType<typeof createBotLifecycleRuntime> | null = null;
+  const canExecuteBotScope = async (scopeId: string): Promise<boolean> => !isBotScopeId(scopeId)
+    || (botAdmissionReady && await botService.canExecute(botIdFromScopeId(scopeId)));
   const threadRegistry = createThreadRegistry({
     dataDir: VARIN_DATA_DIR,
     hostId,
+    canExecuteScope: canExecuteBotScope,
     onObserverError: (error) => {
       console.error('[HarnessThreads] Observer failed:', errorMessage(error));
     },
@@ -1757,6 +1769,11 @@ async function main(options: StartWebUiServerOptions = {}): Promise<WebUiServerC
     hostId,
     dataDir: VARIN_DATA_DIR,
     registry: threadRegistry,
+    lifecycle: () => {
+      if (!botLifecycleRuntime) throw new Error('Bot lifecycle is not ready');
+      return botLifecycleRuntime;
+    },
+    onChange: (bot) => broadcastGlobalUiEvent?.({ type: 'varin:bot-changed', properties: { botId: bot.id } }),
     createSession: (input) => piRuntimeBroker.createSession(
       input.cwd,
       input.name,
@@ -1783,6 +1800,14 @@ async function main(options: StartWebUiServerOptions = {}): Promise<WebUiServerC
       console.error('[VarinBots]', errorMessage(error));
     },
   });
+  botAdmissionReady = true;
+  assertBotSessionExecution = async (sessionId) => {
+    const entry = await botService.botForSession(sessionId);
+    const owner = entry ? null : await threadRegistry.resolveSessionOwner(sessionId);
+    if ((entry && !await botService.canExecute(entry.id)) || (owner && !await canExecuteBotScope(owner.owningScopeId))) {
+      throw new PiRuntimeBrokerError('runtime_not_ready', 'This Bot is asleep or changing state. Wake it before continuing.', { retryable: true });
+    }
+  };
   const botScopeRoot = async (scopeId: string): Promise<string> => {
     const bot = await botService.get(botIdFromScopeId(scopeId));
     if (!bot) throw new Error(`Unknown Bot scope: ${scopeId}`);
@@ -1928,6 +1953,7 @@ async function main(options: StartWebUiServerOptions = {}): Promise<WebUiServerC
       return sources;
     },
     scopeForSession: (sessionId) => owningKnowledgeScopeIdForSession(sessionId),
+    canExecuteScope: canExecuteBotScope,
     // A Bot scope with no dedicated organizer slot inherits the Bot's own
     // model — Bot memory keeps organizing without a second configuration.
     organizerModelForScope: async (scopeId) => {
@@ -1948,6 +1974,7 @@ async function main(options: StartWebUiServerOptions = {}): Promise<WebUiServerC
       return selected?.type === 'model_change' ? { providerId: selected.provider, modelId: selected.modelId } : null;
     },
     autoOrganizeForScope: async (scopeId) => {
+      if (!await canExecuteBotScope(scopeId)) return false;
       const runtime = semanticRuntimeHolder.current;
       if (!runtime) return null;
       try {
@@ -2533,6 +2560,7 @@ async function main(options: StartWebUiServerOptions = {}): Promise<WebUiServerC
 
   const followUpService = createFollowUpService({
     client: kernelClient,
+    canExecuteScope: canExecuteBotScope,
     getThread: (workspaceId, threadId) => threadRegistry.getThreadById(workspaceId, threadId),
     notifySession: async (sessionId, text, messageId) => {
       const result = await piRuntimeBroker.requestForSession(sessionId, 'agent.notify', { sessionId, text, messageId });
@@ -2750,6 +2778,7 @@ async function main(options: StartWebUiServerOptions = {}): Promise<WebUiServerC
   });
   registerBotRoutes(app, {
     bots: botService,
+    memory: memoryService,
     computers: computerService,
     ...(uiAuthController ? { requireAuth: uiAuthController.requireAuth } : {}),
   });
@@ -3728,6 +3757,7 @@ async function main(options: StartWebUiServerOptions = {}): Promise<WebUiServerC
   // subscription as recovery turn coordinator) and dispatches to the
   // registered harness services.
   const harnessRouter = createHarnessRouter({
+    assertExecution: assertBotSessionExecution,
     // Route by the requesting worker, not by session: a session's internal
     // compaction worker is pinned for identity but is not the session worker.
     respond: async (identity, requestId, outcome) => {
@@ -3742,6 +3772,17 @@ async function main(options: StartWebUiServerOptions = {}): Promise<WebUiServerC
     cancelExploreQuery: (actor, queryId) => harnessServiceHost.exploreQueryStore.cancel(actor, queryId),
   });
   registerHarnessServices(harnessRouter, harnessServiceHost);
+  botLifecycleRuntime = createBotLifecycleRuntime({
+    hostId, registry: threadRegistry, runtime: threadRuntime, broker: piRuntimeBroker, computers: computerService,
+    stopSessionProcesses: harnessServiceHost.closeSessionShell,
+    stopRoot: (sessionId) => botRootRuntime.cancelSession(sessionId, 'Bot sleeping'),
+    stopMemory: (scopeId) => memoryOrganizer.suspendScope(scopeId),
+    resumeMemory: (scopeId) => memoryOrganizer.resumeScope(scopeId),
+    stopRemoteScope: (scopeId) => managedRemoteTargets.setScopeSleeping(scopeId, true),
+    resumeRemoteScope: (scopeId) => managedRemoteTargets.setScopeSleeping(scopeId, false),
+    remoteMachineOwners: (hostId) => managedRemoteTargets.ownersForMachine(`managed:${hostId}`),
+    wakeFollowUps: (scopeId) => followUpService.resumeScope(scopeId),
+  });
   interface SessionNotificationRequest extends DesktopNotificationPayload {
     body: string;
     kind: 'completion' | 'error';
@@ -4080,6 +4121,7 @@ async function main(options: StartWebUiServerOptions = {}): Promise<WebUiServerC
     documents: documentsAuthority,
   });
   terminalRuntime = startupResult.terminalRuntime;
+  await botService.reconcile();
   const terminalCommandSubscription = terminalRuntime.subscribeCommands((record) => {
     void terminalCommandProjector.project(record);
   });
@@ -4106,6 +4148,7 @@ async function main(options: StartWebUiServerOptions = {}): Promise<WebUiServerC
       // Stop timer/watcher producers before their runtime and storage
       // dependencies begin shutting down.
       scheduledTasksRuntime.stop();
+      await botService.dispose();
       followUpService.dispose();
       piSessionAutomation.stop();
       experimentService.detachObservers();

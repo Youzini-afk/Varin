@@ -1,4 +1,4 @@
-import { createHash } from "node:crypto";
+import { createHash, randomUUID } from "node:crypto";
 import type { KernelClient } from "../kernel/kernel-client.js";
 import type { KernelRecordResult } from "../kernel/protocol.generated.js";
 import type { ExperimentCaller, ExperimentContext } from "./experiments.js";
@@ -269,10 +269,87 @@ export function createManagedRemoteTargetRegistry(options: ManagedRemoteTargetRe
     } catch { return null; }
   };
 
-  const shellExec = async (workspaceId: string, machineId: string, input: { toolCallId: string; command: string; cwd?: string; waitMs: number }, signal?: AbortSignal) => {
+  const scopeTargets = async (scopeId: string, machineId?: string): Promise<string[]> => {
+    const grant = await options.kernel.issueGrant({ grantId: `remote-scope:${randomUUID()}`, owningWorkspace: scopeId,
+      executionWorkspace: scopeId, capabilities: ["storage.read", "storage.write", "storage.maintenance"], pathScopes: [""] });
+    const scoped = options.kernel.scoped(grant);
+    try {
+      if (machineId) {
+        const recordId = `managed.shell.target:${machineId}`;
+        if (!await scoped.getRecord(scopeId, recordId)) {
+          try {
+            await scoped.putRecord({ operationId: randomUUID(), workspaceId: scopeId,
+              recordId, recordType: "managed.shell.target", state: "used",
+              payloadJson: JSON.stringify({ id: machineId, machineId }), ownerIds: [], references: [] });
+          } catch (error) {
+            const concurrent = await scoped.getRecord(scopeId, recordId);
+            if (!concurrent || payloadOf(concurrent).machineId !== machineId) throw error;
+          }
+        }
+      }
+      const ids: string[] = [];
+      let cursor: number | undefined;
+      do {
+        const page = await scoped.listRecords({ workspaceId: scopeId, recordType: "managed.shell.target", pageSize: 100,
+          ...(cursor === undefined ? {} : { cursor }) });
+        for (const record of page.records) {
+          const id = stringValue(payloadOf(record).machineId);
+          if (!id) throw new Error("Malformed managed shell target record");
+          ids.push(id);
+        }
+        cursor = page.nextCursor ?? undefined;
+      } while (cursor !== undefined);
+      return ids;
+    } finally { await options.kernel.revokeGrant(grant.grantId); }
+  };
+
+  const setScopeSleeping = async (scopeId: string, sleeping: boolean): Promise<void> => {
+    const results = await Promise.allSettled((await scopeTargets(scopeId)).map(async (machineId) => {
+      const target = await targetFor(scopeId, machineId);
+      if (!target) throw new Error(`Managed target ${machineId} is unavailable`);
+      await new ManagedTargetClient(target, fetchImpl).json("/shell/scope-state", {
+        coordinatorHostId: options.coordinatorHostId, scopeId, sleeping,
+      });
+    }));
+    const failed = results.filter((result): result is PromiseRejectedResult => result.status === "rejected");
+    if (failed.length) throw new Error(failed.map((result) => String(result.reason)).join("\n"));
+  };
+
+  const ownersForMachine = async (machineId: string): Promise<string[]> => {
+    const grantId = `remote-owners:${randomUUID()}`;
+    const grant = await options.kernel.issueGrant({ grantId, owningWorkspace: null, executionWorkspace: null,
+      capabilities: ["storage.read", "storage.maintenance"], pathScopes: [] });
+    try {
+      const owners = new Set<string>();
+      for (const recordType of ["managed.shell.target", "experiment.attempt"]) {
+        const { workspaceIds } = await options.kernel.recordWorkspaces({ recordType }, grant);
+        for (const scopeId of workspaceIds) {
+          const ownerGrantId = `remote-owner:${randomUUID()}`;
+          const ownerGrant = await options.kernel.issueGrant({ grantId: ownerGrantId, owningWorkspace: scopeId, executionWorkspace: scopeId,
+            capabilities: ["storage.read"], pathScopes: [] });
+          try {
+            let cursor: number | undefined;
+            do {
+              const page = await options.kernel.scoped(ownerGrant).listRecords({ workspaceId: scopeId, recordType,
+                ...(cursor === undefined ? {} : { cursor }) });
+              for (const record of page.records) {
+                if (payloadOf(record).machineId === machineId
+                  && (recordType === "managed.shell.target" || !["completed", "failed", "cancelled", "lost"].includes(record.state))) owners.add(scopeId);
+              }
+              cursor = page.nextCursor ?? undefined;
+            } while (cursor !== undefined);
+          } finally { await options.kernel.revokeGrant(ownerGrantId); }
+        }
+      }
+      return [...owners];
+    } finally { await options.kernel.revokeGrant(grantId); }
+  };
+
+  const shellExec = async (workspaceId: string, machineId: string, input: { toolCallId: string; command: string; cwd?: string; waitMs: number; ownerScopeId?: string }, signal?: AbortSignal) => {
     const target = await targetFor(workspaceId, machineId);
     if (!target) throw new Error(`Managed target ${machineId} is unavailable`);
     const client = new ManagedTargetClient(target, fetchImpl);
+    if (input.ownerScopeId) await scopeTargets(input.ownerScopeId, machineId);
     const result = await client.json<import("@varin/protocol").ShellExecResult>("/shell/exec", {
       coordinatorHostId: options.coordinatorHostId,
       ...input,
@@ -460,7 +537,7 @@ export function createManagedRemoteTargetRegistry(options: ManagedRemoteTargetRe
     };
   };
 
-  return { refresh, resolveBackend, externalAuthority, targetFor, shellExec, shellRead, shellWrite, shellKill };
+  return { refresh, resolveBackend, externalAuthority, targetFor, shellExec, shellRead, shellWrite, shellKill, setScopeSleeping, ownersForMachine };
 }
 
 export type ManagedRemoteTargetRegistry = ReturnType<typeof createManagedRemoteTargetRegistry>;

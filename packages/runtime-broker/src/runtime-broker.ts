@@ -79,6 +79,8 @@ export interface PiSessionExecutionAdmissionRequest {
 
 export interface PiSessionExecutionLease {
   close(): Promise<void> | void;
+  /** Recheck dynamic owner state even when a running turn reuses this lease. */
+  assertCanExecute?(): Promise<void>;
 }
 
 export type PiSessionExecutionAdmission = (
@@ -1086,12 +1088,16 @@ export class PiRuntimeBroker {
     params: HostMethodParams<M>,
     phase: PiSessionExecutionAdmissionRequest["phase"],
   ): Promise<HostMethodResult<M>> {
+    const wasRunning = this.#sessionExecutionAdmissions.get(worker)?.running === true;
     const admission = await this.#ensureSessionExecutionAdmission(worker, cwd, {
       method,
       phase,
       ...(sessionId === undefined ? {} : { sessionId }),
     });
+    let dispatched = false;
     try {
+      await admission.lease?.assertCanExecute?.();
+      dispatched = true;
       const result = await worker.request(method, params);
       if (
         admission.awaitsAgentSettlement
@@ -1104,7 +1110,7 @@ export class PiRuntimeBroker {
       }
       return result;
     } catch (error) {
-      admission.running = false;
+      if (dispatched || !wasRunning) admission.running = false;
       throw error;
     } finally {
       await this.#finishSessionExecutionAdmission(admission);

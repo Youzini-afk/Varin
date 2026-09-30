@@ -57,6 +57,7 @@ export interface HarnessRouterOptions {
    */
   respond: (identity: HarnessActorIdentity, requestId: string, outcome: { ok: true; result: unknown } | { ok: false; error: HarnessError }) => Promise<void>;
   resolveActor: (identity: HarnessActorIdentity, signal?: AbortSignal) => Promise<HarnessActorContext | null>;
+  assertExecution?(sessionId: string): Promise<void>;
   authorizeWorkspacePath?: (
     actor: HarnessActorContext,
     path: string,
@@ -456,6 +457,7 @@ export const createHarnessRouter = (options: HarnessRouterOptions) => {
         });
         return;
       }
+      await options.assertExecution?.(actor.sessionId);
       const result = await service.handle(data.params as never, {
         actor,
         authorizedPaths,

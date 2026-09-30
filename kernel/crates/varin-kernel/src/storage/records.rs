@@ -547,6 +547,18 @@ impl Storage {
                 required("canonicalCwd")?;
                 state_in(&["accepted", "released"])?;
             }
+            "managed.remote.scope" => {
+                derived("managed.remote.scope")?;
+                required("principalId")?;
+                required("coordinatorHostId")?;
+                required("scopeId")?;
+                state_in(&["awake", "sleeping"])?;
+            }
+            "managed.shell.target" => {
+                derived("managed.shell.target")?;
+                required("machineId")?;
+                state_in(&["used"])?;
+            }
             "bot.profile" => {
                 derived("bot.profile")?;
                 required("name")?;
@@ -777,6 +789,8 @@ impl Storage {
             "managed.remote.job",
             "managed.remote.output",
             "managed.remote.shell",
+            "managed.remote.scope",
+            "managed.shell.target",
             "followup.definition",
             "followup.occurrence",
             "followup.observation",
