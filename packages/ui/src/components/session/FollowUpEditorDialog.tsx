@@ -10,6 +10,7 @@ import { Icon } from '@/components/icon/Icon';
 import { useI18n } from '@/lib/i18n';
 import { saveFollowUp } from '@/lib/followUpsApi';
 import { selectActivePiSessions, usePiSessionStore } from '@/stores/usePiSessionStore';
+import { regularPiSessions, useBotSessionIndex } from '@/stores/useBotSessionIndex';
 import { piSessionTitle } from '@/components/pi-session/sessionPresentation';
 
 type EditableKind = 'time' | 'file' | 'experiment' | 'external' | 'manual';
@@ -41,7 +42,13 @@ export function FollowUpEditorDialog(props: Props) {
 
 function FollowUpForm({ entry, onSaved, onOpenChange, saving, setSaving }: Props & { saving: boolean; setSaving(value: boolean): void }) {
   const { t, locale } = useI18n();
-  const sessions = usePiSessionStore(selectActivePiSessions);
+  const allSessions = usePiSessionStore(selectActivePiSessions);
+  const runtimeKey = usePiSessionStore((state) => state.runtimeKey);
+  const botSessionIndex = useBotSessionIndex();
+  const sessions = React.useMemo(
+    () => regularPiSessions(allSessions, botSessionIndex, runtimeKey),
+    [allSessions, botSessionIndex, runtimeKey],
+  );
   const currentSessionId = usePiSessionStore((state) => state.currentSessionId);
   const defaultSession = sessions.find((session) => session.id === currentSessionId && session.workspace?.kind !== 'unbound')
     ?? sessions.find((session) => session.workspace?.kind !== 'unbound');

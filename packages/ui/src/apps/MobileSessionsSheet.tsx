@@ -51,6 +51,7 @@ import { useDirectoryStore } from '@/stores/useDirectoryStore';
 import { useMobileSessionExpansionStore } from '@/stores/useMobileSessionExpansionStore';
 import { useMobileSessionTreeStore } from '@/stores/useMobileSessionTreeStore';
 import { selectActivePiSessions, usePiSessionStore } from '@/stores/usePiSessionStore';
+import { refreshBotSessionIndex, regularPiSessions, useBotSessionIndex } from '@/stores/useBotSessionIndex';
 import { useProjectsStore } from '@/stores/useProjectsStore';
 import { isSessionPinned, useSessionPinnedStore } from '@/stores/useSessionPinnedStore';
 import { orderWorktrees, useWorktreeOrderStore } from '@/stores/useWorktreeOrderStore';
@@ -550,7 +551,13 @@ const SortableProjectRow: React.FC<{
 export const MobileSessionsSheet: React.FC<MobileSessionsSheetProps> = ({ open, onOpenChange, variant = 'sheet' }) => {
   const { t } = useI18n();
   const { git } = useRuntimeAPIs();
-  const sessions = usePiSessionStore(selectActivePiSessions);
+  const allSessions = usePiSessionStore(selectActivePiSessions);
+  const runtimeKey = usePiSessionStore((state) => state.runtimeKey);
+  const botSessionIndex = useBotSessionIndex();
+  const sessions = React.useMemo(
+    () => regularPiSessions(allSessions, botSessionIndex, runtimeKey),
+    [allSessions, botSessionIndex, runtimeKey],
+  );
   const loadCatalog = usePiSessionStore((state) => state.loadCatalog);
   const currentSessionId = usePiSessionStore((state) => state.currentSessionId);
   const archiveSession = usePiSessionStore((state) => state.archiveSession);
@@ -601,7 +608,8 @@ export const MobileSessionsSheet: React.FC<MobileSessionsSheetProps> = ({ open, 
       return;
     }
     void loadCatalog().catch(() => undefined);
-  }, [loadCatalog, open]);
+    void refreshBotSessionIndex(runtimeKey, true);
+  }, [loadCatalog, open, runtimeKey]);
 
   React.useEffect(() => {
     if (!editingOrder) setConfirmingDeleteId(null);
@@ -1083,7 +1091,14 @@ export const MobileSessionsSheet: React.FC<MobileSessionsSheetProps> = ({ open, 
         </div>
 
         <ScrollShadow className="min-h-0 flex-1 overflow-y-auto pb-4">
-          {projectsMeta.length === 0 && sessions.length === 0 ? (
+          {botSessionIndex.runtimeKey !== runtimeKey || botSessionIndex.loading || (botSessionIndex.ids === null && !botSessionIndex.error) ? (
+            <p role="status" className="px-4 py-8 text-center typography-meta text-muted-foreground">{t('common.loading')}</p>
+          ) : botSessionIndex.error ? (
+            <button type="button" onClick={() => void refreshBotSessionIndex(runtimeKey, true)}
+              className="w-full px-4 py-8 text-center typography-meta text-destructive">
+              {t('sessions.sidebar.group.empty.loadFailed')}: {botSessionIndex.error}
+            </button>
+          ) : projectsMeta.length === 0 && sessions.length === 0 ? (
             <MobileSessionsEmpty
               title={t('sessions.sidebar.empty.noSessions.title')}
               description={t('sessions.sidebar.empty.noSessions.description')}

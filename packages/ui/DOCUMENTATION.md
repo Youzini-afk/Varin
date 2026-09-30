@@ -82,7 +82,9 @@ Bot identity and work navigator, rather than a shortcut in the ordinary session 
 opens the selected Bot's durable entry through the existing Host API and shows only that Bot's entry
 or work conversations. An empty catalog offers explicit creation; failed reads stay errors. Candidate
 shell staging never creates Bots or navigates sessions. Unmount/runtime changes cancel stale reads and
-entry resolution. Mobile exposes the same mode control in its navigation drawer (IDE remains desktop/Web).
+entry resolution. Ordinary Workbench and IDE navigation exclude sessions owned by Bot entry or Run
+records, and returning from Bot restores the prior ordinary session and location. Mobile exposes the
+same mode control in its navigation drawer (IDE remains desktop/Web).
 
 Varin themes expose semantic surface, interactive, status, primary, syntax, and feature tokens.
 Components use those roles rather than embedding palette colors: selection describes current state,

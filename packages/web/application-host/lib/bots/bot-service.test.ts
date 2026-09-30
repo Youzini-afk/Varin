@@ -31,7 +31,9 @@ const setup = async () => {
   const applyInstructions = vi.fn(async () => {});
   const service = createBotService({
     client: { issueGrant: async () => ({}), scoped: () => catalog } as unknown as BotServiceOptions["client"],
-    dataDir, hostId: "test", registry: { listWorkspaceThreadSnapshots: async () => [], listRuns: async () => [] }, createSession, openSession, applyModel, applyInstructions,
+    dataDir, hostId: "test", registry: {
+      listWorkspaceThreadSnapshots: async () => [], listRuns: async () => [], listWorkspaceRunSessionIds: async () => [],
+    }, createSession, openSession, applyModel, applyInstructions,
   });
   return { service, records, createSession, openSession, applyModel, applyInstructions, failWrite: () => { failWrite = true; } };
 };
@@ -125,7 +127,12 @@ it("reports the latest run session as a work item's navigation target", async ()
   const catalog = {
     getRecord: async (_workspace: string, id: string) => records.get(id) ?? null,
     putRecord: async (input: Record<string, unknown>) => {
-      const row = { ...input, recordRevision: (records.get(String(input.recordId))?.recordRevision ?? 0) + 1 } as unknown as KernelRecordResult;
+      const row = {
+        ...input,
+        recordRevision: (records.get(String(input.recordId))?.recordRevision ?? 0) + 1,
+        createdAt: Date.now(),
+        updatedAt: Date.now(),
+      } as unknown as KernelRecordResult;
       records.set(row.recordId, row);
       return row;
     },
@@ -142,6 +149,7 @@ it("reports the latest run session as a work item's navigation target", async ()
         { thread: workThread, activeRun: null },
       ] as never,
       listRuns: async () => [{ sessionId: "older" }, { sessionId: "worker-9" }] as never,
+      listWorkspaceRunSessionIds: async () => ["older", "worker-9"],
     },
     createSession: async () => ({ sessionId: "session-1" }),
     openSession: async ({ sessionId }: { sessionId: string }) => ({ sessionId }),
@@ -150,4 +158,7 @@ it("reports the latest run session as a work item's navigation target", async ()
   const work = await service.listWork(bot.id);
   expect(work.map((item) => item.thread.id)).toEqual(["thread-1"]);
   expect(work[0]?.sessionId).toBe("worker-9");
+  await service.ensureEntry(bot.id);
+  await service.archive(bot.id);
+  expect(new Set(await service.listSessionIds())).toEqual(new Set(["session-1", "older", "worker-9"]));
 });

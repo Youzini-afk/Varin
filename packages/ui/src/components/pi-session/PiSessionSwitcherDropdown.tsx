@@ -22,6 +22,7 @@ import {
   usePiSessionStore,
 } from '@/stores/usePiSessionStore';
 import { useProjectsStore } from '@/stores/useProjectsStore';
+import { regularPiSessions, useBotSessionIndex } from '@/stores/useBotSessionIndex';
 import { useSessionPinnedStore, isSessionPinned } from '@/stores/useSessionPinnedStore';
 import { formatSessionCompactDateLabel } from '@/lib/sessionDateLabels';
 import {
@@ -98,7 +99,13 @@ export const PiSessionSwitcherDropdown: React.FC<PiSessionSwitcherDropdownProps>
   children,
 }) => {
   const { t } = useI18n();
-  const sessions = usePiSessionStore(selectActivePiSessions);
+  const allSessions = usePiSessionStore(selectActivePiSessions);
+  const runtimeKey = usePiSessionStore((state) => state.runtimeKey);
+  const botSessionIndex = useBotSessionIndex();
+  const sessions = React.useMemo(
+    () => regularPiSessions(allSessions, botSessionIndex, runtimeKey),
+    [allSessions, botSessionIndex, runtimeKey],
+  );
   const currentSessionId = usePiSessionStore((state) => state.currentSessionId);
   const attentionBySession = usePiSessionStore((state) => state.attentionBySession);
   const records = usePiSessionStore((state) => state.records);

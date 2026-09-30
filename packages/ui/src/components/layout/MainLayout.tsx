@@ -33,7 +33,7 @@ import { cn } from '@/lib/utils';
 import { lazyWithChunkRecovery } from '@/lib/chunkLoadRecovery';
 import { workspaceEvents } from '@/lib/workspaceEvents';
 
-import { ChatView } from '@/components/views/ChatView';
+import { RegularChatView } from '@/components/views/RegularChatView';
 
 // Keep TerminalView eager: the bottom dock reserves its height immediately, so
 // suspending here leaves a large blank panel on slower machines.
@@ -260,7 +260,7 @@ export const MainLayout: React.FC<MainLayoutProps> = ({ renderConversation, rend
     const conversationActive = isChatActive && !isSettingsDialogOpen && !isSurfacePageOpen;
     const conversation = renderConversation
         ? renderConversation(conversationActive)
-        : <ChatView active={conversationActive} />;
+        : <RegularChatView active={conversationActive} />;
 
     return (
         <DiffWorkerProvider>

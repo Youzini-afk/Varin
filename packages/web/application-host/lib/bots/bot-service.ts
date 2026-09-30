@@ -23,7 +23,7 @@ export interface BotServiceOptions {
   hostId: string;
   /** Directory containing Host-owned data; Bot home directories live below it. */
   dataDir: string;
-  registry: Pick<ThreadRegistry, "listRuns" | "listWorkspaceThreadSnapshots">;
+  registry: Pick<ThreadRegistry, "listRuns" | "listWorkspaceThreadSnapshots" | "listWorkspaceRunSessionIds">;
   /** Create a fresh Pi session bound to the Bot's home directory. */
   createSession(input: {
     cwd: string;
@@ -99,6 +99,8 @@ export interface BotService {
   botForSession(sessionId: string): Promise<BotSummary | null>;
   /** Threads owned by the Bot's owner scope — its real associated work. */
   listWork(botId: string, includeEntry?: boolean): Promise<BotWorkItem[]>;
+  /** Every Pi conversation owned by a Bot, including older Runs and archived Bots. */
+  listSessionIds(): Promise<string[]>;
   /**
    * Called when a session is deleted: clears a stale entry binding so the next
    * entry resolution creates a fresh conversation instead of re-anchoring a
@@ -352,6 +354,17 @@ export function createBotService(options: BotServiceOptions): BotService {
     return items;
   };
 
+  const listSessionIds: BotService["listSessionIds"] = async () => {
+    const bots = await list();
+    const runIds = await Promise.all(bots.map((bot) => options.registry.listWorkspaceRunSessionIds(botScopeId(bot.id))));
+    const ids = new Set<string>();
+    for (const [index, bot] of bots.entries()) {
+      if (bot.entrySessionId) ids.add(bot.entrySessionId);
+      for (const sessionId of runIds[index] ?? []) ids.add(sessionId);
+    }
+    return [...ids];
+  };
+
   const releaseEntry: BotService["releaseEntry"] = async (sessionId) => {
     const bots = await list();
     for (const bot of bots) {
@@ -375,6 +388,7 @@ export function createBotService(options: BotServiceOptions): BotService {
     ensureEntry,
     botForSession,
     listWork,
+    listSessionIds,
     releaseEntry,
   };
 }

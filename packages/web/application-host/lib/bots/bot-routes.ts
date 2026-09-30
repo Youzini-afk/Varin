@@ -55,6 +55,15 @@ export function registerBotRoutes(app: Express, { bots, computers, requireAuth =
     }
   });
 
+  app.get("/api/harness/bots/session-ids", requireAuth, async (_request: Request, response: Response) => {
+    response.setHeader("Cache-Control", "no-store");
+    try {
+      response.json({ sessionIds: await bots.listSessionIds() });
+    } catch (error) {
+      sendError(response, error, "Unable to list Bot conversations");
+    }
+  });
+
   app.post("/api/harness/bots", requireAuth, async (request: Request, response: Response) => {
     response.setHeader("Cache-Control", "no-store");
     try {

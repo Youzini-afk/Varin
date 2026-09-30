@@ -2,6 +2,7 @@ import type { ProjectEntry } from '@varin/application-client';
 import { normalizePath } from '@/lib/pathNormalization';
 import { useDirectoryStore } from '@/stores/useDirectoryStore';
 import { usePiSessionStore, selectActivePiSessions } from '@/stores/usePiSessionStore';
+import { refreshBotSessionIndex, regularPiSessions, useBotSessionIndex } from '@/stores/useBotSessionIndex';
 import { useProjectsStore } from '@/stores/useProjectsStore';
 import { useUIStore } from '@/stores/useUIStore';
 import type {
@@ -236,8 +237,9 @@ export const navigateRelativePiSession = async (offset: number): Promise<Session
     await state.loadCatalog();
     state = usePiSessionStore.getState();
   }
+  await refreshBotSessionIndex(state.runtimeKey);
   const target = resolveRelativePiSession(
-    selectActivePiSessions(state),
+    regularPiSessions(selectActivePiSessions(state), useBotSessionIndex.getState(), state.runtimeKey),
     state.currentSessionId,
     offset,
   );

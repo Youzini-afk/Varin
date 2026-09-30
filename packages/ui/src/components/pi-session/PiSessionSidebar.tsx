@@ -51,6 +51,7 @@ import {
   usePiSessionStore,
 } from '@/stores/usePiSessionStore';
 import { useProjectsStore } from '@/stores/useProjectsStore';
+import { refreshBotSessionIndex, regularPiSessions, useBotSessionIndex } from '@/stores/useBotSessionIndex';
 import {
   isSessionPinned,
   useSessionPinnedStore,
@@ -365,14 +366,23 @@ export const PiSessionSidebar: React.FC<PiSessionSidebarProps> = ({
 }) => {
   const { t } = useI18n();
   const { files } = useRuntimeAPIs();
-  const summaries = usePiSessionStore((state) => state.summaries);
-  const activeSessions = usePiSessionStore(selectActivePiSessions);
+  const allSummaries = usePiSessionStore((state) => state.summaries);
+  const allActiveSessions = usePiSessionStore(selectActivePiSessions);
   const currentSessionId = usePiSessionStore((state) => state.currentSessionId);
   const attentionBySession = usePiSessionStore((state) => state.attentionBySession);
   const catalogLoaded = usePiSessionStore((state) => state.catalogLoaded);
   const catalogLoading = usePiSessionStore((state) => state.catalogLoading);
   const lastError = usePiSessionStore((state) => state.lastError);
   const runtimeKey = usePiSessionStore((state) => state.runtimeKey);
+  const botSessionIndex = useBotSessionIndex();
+  const activeSessions = React.useMemo(
+    () => regularPiSessions(allActiveSessions, botSessionIndex, runtimeKey),
+    [allActiveSessions, botSessionIndex, runtimeKey],
+  );
+  const summaries = React.useMemo(
+    () => regularPiSessions(allSummaries, botSessionIndex, runtimeKey),
+    [allSummaries, botSessionIndex, runtimeKey],
+  );
   const loadCatalog = usePiSessionStore((state) => state.loadCatalog);
   const prefetchSession = usePiSessionStore((state) => state.prefetchSession);
   const renameSession = usePiSessionStore((state) => state.renameSession);
@@ -428,6 +438,10 @@ export const PiSessionSidebar: React.FC<PiSessionSidebarProps> = ({
   React.useEffect(() => {
     void loadCatalog();
   }, [loadCatalog, runtimeKey]);
+
+  React.useEffect(() => {
+    void refreshBotSessionIndex(runtimeKey);
+  }, [runtimeKey]);
 
   React.useEffect(() => {
     if (!searchOpen) return;
@@ -975,11 +989,17 @@ export const PiSessionSidebar: React.FC<PiSessionSidebarProps> = ({
         ) : null}
 
         <div className="min-h-0 flex-1 overflow-y-auto px-2 pb-3">
-          {catalogLoading && summaries.length === 0 ? (
+          {(catalogLoading && allSummaries.length === 0) || botSessionIndex.loading || botSessionIndex.runtimeKey !== runtimeKey || (botSessionIndex.ids === null && !botSessionIndex.error) ? (
             <div className="flex items-center gap-2 px-2 py-6 typography-ui-label text-muted-foreground">
               <Icon name="loader-4" className="size-4 animate-spin" />
               {t('sessions.sidebar.group.empty.loadingSessions')}
             </div>
+          ) : botSessionIndex.error ? (
+            <button type="button" onClick={() => void refreshBotSessionIndex(runtimeKey, true)}
+              className="w-full rounded-md px-2 py-6 text-left typography-ui-label text-[var(--status-error)] hover:bg-[var(--status-error)]/5">
+              <span className="block">{t('sessions.sidebar.group.empty.loadFailed')}</span>
+              <span className="mt-1 block typography-micro opacity-80">{botSessionIndex.error}</span>
+            </button>
           ) : lastError && !catalogLoaded ? (
             <button
               type="button"

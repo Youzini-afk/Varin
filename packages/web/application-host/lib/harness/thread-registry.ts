@@ -1511,6 +1511,11 @@ export function createThreadRegistry(options: ThreadRegistryOptions) {
     return structuredClone(catalog.threads.map((thread) => ({ thread, activeRun: activeRunFor(catalog, thread) })));
   };
 
+  const listWorkspaceRunSessionIds = async (scopeId: string): Promise<string[]> => {
+    const catalog = await loadWorkspace(scopeId);
+    return [...new Set(catalog.runs.flatMap((run) => run.sessionId ? [run.sessionId] : []))];
+  };
+
   /**
    * The caller already holds the owning storage lease. Keep release validation
    * and its metadata commit ahead of subsequent Run/review mutations. The
@@ -2966,6 +2971,7 @@ export function createThreadRegistry(options: ThreadRegistryOptions) {
     listThreads,
     listWorkspaceThreads,
     listWorkspaceThreadSnapshots,
+    listWorkspaceRunSessionIds,
     withThreadRetentionSnapshot,
     listWorkspaceIds,
     listThreadSnapshots,

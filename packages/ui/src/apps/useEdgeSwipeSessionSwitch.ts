@@ -4,6 +4,7 @@ import type { SessionSummary } from '@varin/protocol';
 import { comparePiSessions } from '@/components/pi-session/sessionPresentation';
 import { openPiSessionFromNavigation } from '@/lib/pi-runtime/sessionNavigation';
 import { selectActivePiSessions, usePiSessionStore } from '@/stores/usePiSessionStore';
+import { regularPiSessions, useBotSessionIndex } from '@/stores/useBotSessionIndex';
 import { isSessionPinned, useSessionPinnedStore } from '@/stores/useSessionPinnedStore';
 
 /**
@@ -31,7 +32,8 @@ const MAX_OFF_AXIS_RATIO = 0.7; // |dy| must stay below |dx| * this (keep it hor
 /** Top-level sessions across all projects in shared display order. */
 const orderedTopLevelSessions = (): SessionSummary[] => {
   const pinnedSessionIds = useSessionPinnedStore.getState().ids;
-  return selectActivePiSessions(usePiSessionStore.getState())
+  const sessionState = usePiSessionStore.getState();
+  return regularPiSessions(selectActivePiSessions(sessionState), useBotSessionIndex.getState(), sessionState.runtimeKey)
     .filter((session) => session.parentId === undefined)
     .slice()
     .sort((left, right) => comparePiSessions(

@@ -23,6 +23,7 @@ import { normalizePath } from '@/lib/pathNormalization';
 import { openPiSessionFromNavigation } from '@/lib/pi-runtime/sessionNavigation';
 import { cn, formatDirectoryName } from '@/lib/utils';
 import { useDirectoryStore } from '@/stores/useDirectoryStore';
+import { refreshBotSessionIndex, regularPiSessions, useBotSessionIndex } from '@/stores/useBotSessionIndex';
 import {
   selectArchivedPiSessions,
   usePiSessionStore,
@@ -66,12 +67,17 @@ export function ArchiveView(): React.ReactNode {
   const open = useUIStore((state) => state.isArchivePageOpen);
   const setOpen = useUIStore((state) => state.setArchivePageOpen);
   const homeDirectory = useDirectoryStore((state) => state.homeDirectory);
-  const archivedSessions = usePiSessionStore(selectArchivedPiSessions);
+  const allArchivedSessions = usePiSessionStore(selectArchivedPiSessions);
   const projects = useProjectsStore((state) => state.projects);
   const loadCatalog = usePiSessionStore((state) => state.loadCatalog);
   const unarchiveSession = usePiSessionStore((state) => state.unarchiveSession);
   const deleteSession = usePiSessionStore((state) => state.deleteSession);
   const runtimeKey = usePiSessionStore((state) => state.runtimeKey);
+  const botSessionIndex = useBotSessionIndex();
+  const archivedSessions = React.useMemo(
+    () => regularPiSessions(allArchivedSessions, botSessionIndex, runtimeKey),
+    [allArchivedSessions, botSessionIndex, runtimeKey],
+  );
   const prefetchSession = usePiSessionStore((state) => state.prefetchSession);
   const clearPinnedSession = useSessionPinnedStore((state) => state.clearPinnedSession);
   const [query, setQuery] = React.useState('');
@@ -82,7 +88,10 @@ export function ArchiveView(): React.ReactNode {
   const untitled = t('sessions.sidebar.session.untitled');
 
   React.useEffect(() => {
-    if (open) void loadCatalog();
+    if (open) {
+      void loadCatalog();
+      void refreshBotSessionIndex(runtimeKey, true);
+    }
   }, [loadCatalog, open, runtimeKey]);
 
   const normalizedQuery = query.trim().toLocaleLowerCase();
@@ -264,7 +273,14 @@ export function ArchiveView(): React.ReactNode {
 
           <div className="min-h-0 flex-1 overflow-y-auto px-6 py-3">
             <div className="mx-auto w-full max-w-3xl space-y-0.5">
-              {visibleSessions.length === 0 ? (
+              {botSessionIndex.runtimeKey !== runtimeKey || botSessionIndex.loading || (botSessionIndex.ids === null && !botSessionIndex.error) ? (
+                <p role="status" className="py-10 text-center typography-meta text-muted-foreground">{t('common.loading')}</p>
+              ) : botSessionIndex.error ? (
+                <button type="button" onClick={() => void refreshBotSessionIndex(runtimeKey, true)}
+                  className="w-full py-10 text-center typography-meta text-destructive">
+                  {t('sessions.sidebar.group.empty.loadFailed')}: {botSessionIndex.error}
+                </button>
+              ) : visibleSessions.length === 0 ? (
                 <div className="py-10 text-center text-muted-foreground">
                   <p className="typography-ui-label font-semibold">
                     {normalizedQuery ? t('sessions.archivePage.empty.noMatches') : t('sessions.archivePage.empty.noArchived')}

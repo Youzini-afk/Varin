@@ -20,7 +20,7 @@ import { ProjectActionsButton } from '@/components/layout/ProjectActionsButton';
 import { WorkbenchProfileSwitcher } from '@/components/layout/WorkbenchProfileSwitcher';
 import { McpQuickPopover } from '@/components/sections/mcp/McpQuickPopover';
 import { SidebarFilesTree } from '@/components/layout/SidebarFilesTree';
-import { ChatView } from '@/components/views/ChatView';
+import { RegularChatView } from '@/components/views/RegularChatView';
 import { PiInteractionHost } from '@/components/pi-session/PiInteractionHost';
 import { PiSessionSidebar } from '@/components/pi-session/PiSessionSidebar';
 import { ScheduledTasksDialog } from '@/components/session/ScheduledTasksDialog';
@@ -915,7 +915,7 @@ export const IdeWorkbenchShell: React.FC<Record<string, unknown>> = () => {
                         ) : null}
                         <div className="h-full min-h-0">
                           <ErrorBoundary>
-                            <ChatView active />
+                            <RegularChatView active />
                           </ErrorBoundary>
                         </div>
                       </>
