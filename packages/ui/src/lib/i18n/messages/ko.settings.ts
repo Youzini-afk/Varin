@@ -4071,6 +4071,7 @@
   'settings.bots.section.profile': '봇 프로필',
   'settings.bots.section.work': '봇 작업',
   'settings.bots.create': '새 봇',
+  'settings.bots.rename': '봇 이름 변경',
   'settings.bots.creating': '생성 중…',
   'settings.bots.save': '저장',
   'settings.bots.saving': '저장 중…',

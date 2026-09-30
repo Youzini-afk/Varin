@@ -12,8 +12,9 @@ function ContextMenu({ ...props }: React.ComponentProps<typeof BaseContextMenu.R
   return <BaseContextMenu.Root {...props} />;
 }
 
-function ContextMenuTrigger({ ...props }: React.ComponentProps<typeof BaseContextMenu.Trigger>) {
-  return <BaseContextMenu.Trigger {...props} />;
+function ContextMenuTrigger({ asChild, children, ...props }: React.ComponentProps<typeof BaseContextMenu.Trigger> & { asChild?: boolean }) {
+  const render = asChild && React.isValidElement(children) ? { render: children as React.ReactElement } : { children };
+  return <BaseContextMenu.Trigger {...props} {...render} />;
 }
 
 type ContentProps = {

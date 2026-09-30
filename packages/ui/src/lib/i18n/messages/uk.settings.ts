@@ -4070,6 +4070,7 @@
   'settings.bots.section.profile': 'Профіль бота',
   'settings.bots.section.work': 'Робота бота',
   'settings.bots.create': 'Новий бот',
+  'settings.bots.rename': 'Перейменувати бота',
   'settings.bots.creating': 'Створення…',
   'settings.bots.save': 'Зберегти',
   'settings.bots.saving': 'Збереження…',

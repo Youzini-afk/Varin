@@ -4071,6 +4071,7 @@
   'settings.bots.section.profile': 'Profil bota',
   'settings.bots.section.work': 'Praca bota',
   'settings.bots.create': 'Nowy bot',
+  'settings.bots.rename': 'Zmień nazwę bota',
   'settings.bots.creating': 'Tworzenie…',
   'settings.bots.save': 'Zapisz',
   'settings.bots.saving': 'Zapisywanie…',

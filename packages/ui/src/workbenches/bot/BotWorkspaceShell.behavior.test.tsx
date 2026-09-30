@@ -9,9 +9,16 @@ import type { BotSummary } from '@/lib/bots';
 
 const state = vi.hoisted(() => ({
   profileId: 'varin.bot',
-  list: vi.fn(), ensure: vi.fn(), work: vi.fn(), create: vi.fn(), open: vi.fn(),
+  list: vi.fn(), ensure: vi.fn(), work: vi.fn(), create: vi.fn(), update: vi.fn(), archive: vi.fn(), open: vi.fn(),
 }));
-vi.mock('@/lib/bots', () => ({ listBots: state.list, ensureBotEntry: state.ensure, listBotWork: state.work, createBot: state.create }));
+vi.mock('@/lib/bots', () => ({
+  listBots: state.list,
+  ensureBotEntry: state.ensure,
+  listBotWork: state.work,
+  createBot: state.create,
+  updateBot: state.update,
+  archiveBot: state.archive,
+}));
 vi.mock('@/lib/pi-runtime/sessionNavigation', () => ({ openPiSessionFromNavigation: state.open }));
 vi.mock('@/lib/workbench/profile-context', () => ({ useWorkbenchProfileId: () => state.profileId }));
 vi.mock('@/lib/device', () => ({ useDeviceInfo: () => ({ isMobile: false }) }));
@@ -19,6 +26,18 @@ vi.mock('@/lib/i18n', () => ({ useI18n: () => ({ t: (key: string) => key }) }));
 vi.mock('@/components/icon/Icon', () => ({ Icon: () => null }));
 vi.mock('@/components/layout/WorkbenchProfileSwitcher', () => ({ WorkbenchProfileSwitcher: () => null }));
 vi.mock('@/components/views/ChatView', () => ({ ChatView: () => <div data-chat="true" /> }));
+vi.mock('@/components/sections/bots/BotNameDialog', () => ({
+  BotNameDialog: ({ open, name, onNameChange, onSubmit }: {
+    open: boolean;
+    name: string;
+    onNameChange: (value: string) => void;
+    onSubmit: (event: React.FormEvent<HTMLFormElement>) => void;
+  }) => open ? <form onSubmit={onSubmit}>
+    <input value={name} onChange={(event) => onNameChange(event.target.value)} />
+    <button type="button" onClick={() => onNameChange('Named bot')}>set-name</button>
+    <button type="submit">settings.bots.save</button>
+  </form> : null,
+}));
 vi.mock('@/components/layout/MainLayout', () => ({
   MainLayout: ({ renderNavigator, renderConversation }: { renderNavigator(visible: boolean): React.ReactNode; renderConversation(active: boolean): React.ReactNode }) => <>{renderNavigator(true)}{renderConversation(true)}</>,
 }));
@@ -34,7 +53,7 @@ describe('Bot mode navigation', () => {
   let root: Root;
   const render = async () => { await act(async () => { root.render(<BotWorkspaceShell />); }); };
   const click = async (text: string) => {
-    const button = [...container.querySelectorAll('button')].find((item) => item.textContent === text);
+    const button = [...document.querySelectorAll('button')].find((item) => item.textContent === text);
     expect(button).toBeTruthy();
     await act(async () => { button!.click(); });
   };
@@ -52,6 +71,8 @@ describe('Bot mode navigation', () => {
     state.ensure.mockReset().mockImplementation(async (id: string) => ({ bot: bot(id), sessionId: `entry-${id}` }));
     state.work.mockReset().mockResolvedValue([]);
     state.create.mockReset().mockResolvedValue(bot('new'));
+    state.update.mockReset().mockResolvedValue(bot('a'));
+    state.archive.mockReset().mockResolvedValue(bot('a'));
     state.open.mockReset().mockImplementation(async ({ sessionId }: { sessionId: string }) => {
       usePiSessionStore.setState({ currentSessionId: sessionId });
     });
@@ -91,7 +112,16 @@ describe('Bot mode navigation', () => {
     expect(state.create).not.toHaveBeenCalled();
     expect(container.textContent).toContain('settings.bots.empty');
     await click('settings.bots.create');
+    const input = document.querySelector('input');
+    expect(input).not.toBeNull();
+    await click('set-name');
+    const form = document.querySelector('form');
+    expect(form).not.toBeNull();
+    await act(async () => {
+      form!.dispatchEvent(new window.Event('submit', { bubbles: true, cancelable: true }));
+    });
     expect(state.create).toHaveBeenCalledTimes(1);
+    expect(state.create).toHaveBeenCalledWith({ name: 'Named bot' });
     expect(state.open).toHaveBeenLastCalledWith({ sessionId: 'entry-new', directory: '/bots/new' });
   });
 

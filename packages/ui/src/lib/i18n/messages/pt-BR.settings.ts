@@ -4070,6 +4070,7 @@
   'settings.bots.section.profile': 'Perfil do bot',
   'settings.bots.section.work': 'Trabalho do bot',
   'settings.bots.create': 'Novo bot',
+  'settings.bots.rename': 'Renomear bot',
   'settings.bots.creating': 'Criando…',
   'settings.bots.save': 'Salvar',
   'settings.bots.saving': 'Salvando…',

@@ -3649,6 +3649,7 @@ export const settingsDict = {
   'settings.bots.section.profile': 'Bot プロフィール',
   'settings.bots.section.work': 'Bot の作業',
   'settings.bots.create': '新規 Bot',
+  'settings.bots.rename': 'Bot 名を変更',
   'settings.bots.creating': '作成中…',
   'settings.bots.save': '保存',
   'settings.bots.saving': '保存中…',

@@ -14,6 +14,7 @@ import { cn } from '@/lib/utils';
 import type { ComputerDesktop } from '@varin/protocol';
 import { ComputerDesktopView } from '@/components/sections/computers/ComputerDesktopView';
 import { downloadComputerArtifact } from '@/lib/computers';
+import { BotNameDialog } from './BotNameDialog';
 
 /**
  * Bots settings (BC0): the durable Bot catalog — identity, persona
@@ -30,6 +31,8 @@ export function BotSettings() {
   const [busy, setBusy] = React.useState<string | null>(null);
   const [name, setName] = React.useState('');
   const [instructions, setInstructions] = React.useState('');
+  const [createDialogOpen, setCreateDialogOpen] = React.useState(false);
+  const [createName, setCreateName] = React.useState('');
 
   const selected = bots?.find((bot) => bot.id === selectedId) ?? null;
   const workBotId = selected?.id;
@@ -90,6 +93,18 @@ export function BotSettings() {
     });
   };
 
+  const submitCreate = (event: React.FormEvent<HTMLFormElement>) => {
+    event.preventDefault();
+    const trimmed = createName.trim();
+    if (!trimmed) return;
+    void run('create', async () => {
+      const created = await createBot({ name: trimmed });
+      await refresh();
+      setSelectedId(created.id);
+      setCreateDialogOpen(false);
+    });
+  };
+
   const selectModel = (providerId: string, modelId: string) => {
     if (!selected) return Promise.resolve();
     return run('model', async () => {
@@ -128,11 +143,8 @@ export function BotSettings() {
         </ul>
         <div>
           <Button variant="outline" size="sm" disabled={busy === 'create'} onClick={() => {
-            void run('create', async () => {
-              const created = await createBot();
-              await refresh();
-              setSelectedId(created.id);
-            });
+            setCreateName('');
+            setCreateDialogOpen(true);
           }}>{busy === 'create' ? t('settings.bots.creating') : t('settings.bots.create')}</Button>
         </div>
       </SettingsSection>
@@ -195,5 +207,14 @@ export function BotSettings() {
       </SettingsSection> : null}
     </> : null}
     {viewingDesktop ? <ComputerDesktopView desktop={viewingDesktop} open onOpenChange={(open) => { if (!open) setViewingDesktop(null); }} /> : null}
+    <BotNameDialog
+      open={createDialogOpen}
+      title={t('settings.bots.create')}
+      name={createName}
+      busy={busy === 'create'}
+      onNameChange={setCreateName}
+      onOpenChange={(open) => { if (busy !== 'create') setCreateDialogOpen(open); }}
+      onSubmit={submitCreate}
+    />
   </>;
 }

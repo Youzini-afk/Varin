@@ -7,12 +7,19 @@ import { Icon } from '@/components/icon/Icon';
 import { Button } from '@/components/ui/button';
 import { useI18n } from '@/lib/i18n';
 import { cn } from '@/lib/utils';
-import { createBot, ensureBotEntry, listBots, listBotWork, type BotSummary, type BotWorkItem } from '@/lib/bots';
+import { archiveBot, createBot, ensureBotEntry, listBots, listBotWork, updateBot, type BotSummary, type BotWorkItem } from '@/lib/bots';
 import { useWorkbenchProfileId } from '@/lib/workbench/profile-context';
 import { openPiSessionFromNavigation } from '@/lib/pi-runtime/sessionNavigation';
 import { usePiSessionStore } from '@/stores/usePiSessionStore';
 import { useUIStore } from '@/stores/useUIStore';
 import { useDeviceInfo } from '@/lib/device';
+import { BotNameDialog } from '@/components/sections/bots/BotNameDialog';
+import {
+  ContextMenu,
+  ContextMenuContent,
+  ContextMenuItem,
+  ContextMenuTrigger,
+} from '@/components/ui/context-menu';
 
 const openBotSettings = () => {
   useUIStore.getState().setSettingsPage('harness-bots');
@@ -38,6 +45,9 @@ const BotWorkspace: React.FC<{ committed: boolean }> = ({ committed }) => {
   const [workResult, setWorkResult] = React.useState<{ botId: string; items: BotWorkItem[] } | null>(null);
   const [error, setError] = React.useState<string | null>(null);
   const [busy, setBusy] = React.useState(false);
+  const [actionBusy, setActionBusy] = React.useState<string | null>(null);
+  const [nameDialog, setNameDialog] = React.useState<{ mode: 'create' } | { mode: 'rename'; bot: BotSummary } | null>(null);
+  const [nameDraft, setNameDraft] = React.useState('');
   const [revision, refresh] = React.useReducer((value: number) => value + 1, 0);
   const opening = React.useRef<AbortController | null>(null);
   const selected = bots?.find((bot) => bot.id === selectedId);
@@ -101,21 +111,55 @@ const BotWorkspace: React.FC<{ committed: boolean }> = ({ committed }) => {
     return () => controller.abort();
   }, [committed, selectedId, settingsOpen, revision, entryStreaming]);
 
-  const create = async () => {
-    opening.current?.abort();
-    const controller = new AbortController();
-    opening.current = controller;
-    setBusy(true);
+  const openCreateDialog = () => {
+    setError(null);
+    setNameDraft('');
+    setNameDialog({ mode: 'create' });
+  };
+
+  const openRenameDialog = (bot: BotSummary) => {
+    setError(null);
+    setNameDraft(bot.name);
+    setNameDialog({ mode: 'rename', bot });
+  };
+
+  const saveName = async (event: React.FormEvent<HTMLFormElement>) => {
+    event.preventDefault();
+    const dialog = nameDialog;
+    const trimmed = nameDraft.trim();
+    if (!dialog || !trimmed) return;
+    const action = dialog.mode === 'create' ? 'create' : `rename:${dialog.bot.id}`;
+    setActionBusy(action);
     setError(null);
     try {
-      const bot = await createBot();
-      if (controller.signal.aborted) return;
-      setBots((list) => [...(list ?? []), bot]);
+      const bot = dialog.mode === 'create'
+        ? await createBot({ name: trimmed })
+        : await updateBot(dialog.bot.id, { name: trimmed });
+      setBots((list) => dialog.mode === 'create'
+        ? [...(list ?? []), bot]
+        : list?.map((item) => item.id === bot.id ? bot : item) ?? [bot]);
       setSelectedId(bot.id);
+      setNameDialog(null);
     } catch (cause) {
-      if (!controller.signal.aborted) setError(cause instanceof Error ? cause.message : String(cause));
+      setError(cause instanceof Error ? cause.message : String(cause));
     } finally {
-      if (!controller.signal.aborted) setBusy(false);
+      setActionBusy(null);
+    }
+  };
+
+  const archive = async (bot: BotSummary) => {
+    opening.current?.abort();
+    setActionBusy(`archive:${bot.id}`);
+    setError(null);
+    try {
+      await archiveBot(bot.id);
+      const remaining = (bots ?? []).filter((item) => item.id !== bot.id);
+      setBots(remaining);
+      setSelectedId((current) => current === bot.id ? (remaining[0]?.id ?? null) : current);
+    } catch (cause) {
+      setError(cause instanceof Error ? cause.message : String(cause));
+    } finally {
+      setActionBusy(null);
     }
   };
 
@@ -138,12 +182,24 @@ const BotWorkspace: React.FC<{ committed: boolean }> = ({ committed }) => {
         </Button>
       </div>
       <div className="min-h-0 flex-1 overflow-y-auto px-2.5">
-        {bots?.map((bot) => <button key={bot.id} type="button" disabled={busy} onClick={() => selectBot(bot.id)}
-          aria-current={bot.id === selectedId ? 'page' : undefined}
-          className={cn(rowClass, bot.id === selectedId ? 'bg-interactive-selection text-foreground' : 'text-muted-foreground hover:bg-interactive-hover hover:text-foreground')}>
-          <Icon name="robot" className="size-4 shrink-0" /><span className="truncate">{bot.name}</span>
-        </button>)}
-        <button type="button" disabled={busy || !bots} onClick={() => { void create(); }} className={cn(rowClass, 'text-muted-foreground hover:bg-interactive-hover hover:text-foreground disabled:opacity-50')}>
+        {bots?.map((bot) => <ContextMenu key={bot.id}>
+          <ContextMenuTrigger asChild>
+            <button type="button" disabled={busy || actionBusy !== null} onClick={() => selectBot(bot.id)}
+              aria-current={bot.id === selectedId ? 'page' : undefined}
+              className={cn(rowClass, bot.id === selectedId ? 'bg-interactive-selection text-foreground' : 'text-muted-foreground hover:bg-interactive-hover hover:text-foreground')}>
+              <Icon name="robot" className="size-4 shrink-0" /><span className="truncate">{bot.name}</span>
+            </button>
+          </ContextMenuTrigger>
+          <ContextMenuContent>
+            <ContextMenuItem onClick={() => openRenameDialog(bot)}>
+              <Icon name="edit" className="size-4" />{t('settings.bots.rename')}
+            </ContextMenuItem>
+            <ContextMenuItem disabled={actionBusy !== null} onClick={() => { void archive(bot); }}>
+              <Icon name="archive" className="size-4" />{t('settings.bots.archive')}
+            </ContextMenuItem>
+          </ContextMenuContent>
+        </ContextMenu>)}
+        <button type="button" disabled={busy || actionBusy !== null || !bots} onClick={openCreateDialog} className={cn(rowClass, 'text-muted-foreground hover:bg-interactive-hover hover:text-foreground disabled:opacity-50')}>
           <Icon name="add" className="size-4 shrink-0" />{t('settings.bots.create')}
         </button>
         {selected ? <>
@@ -185,10 +241,19 @@ const BotWorkspace: React.FC<{ committed: boolean }> = ({ committed }) => {
         {busy || (!bots && !error) ? <p role="status" className="typography-meta text-muted-foreground">{t('common.loading')}</p> : null}
         {bots?.length === 0 ? <>
           <p className="typography-body text-muted-foreground">{t('settings.bots.empty')}</p>
-          <Button disabled={busy} onClick={() => { void create(); }}>{t('settings.bots.create')}</Button>
+          <Button disabled={busy || actionBusy !== null} onClick={openCreateDialog}>{t('settings.bots.create')}</Button>
         </> : selected && !busy ? <Button onClick={() => { void openEntry(selected.id); }}>{t('settings.bots.openEntry')}</Button> : null}
       </div>
     )}
+    <BotNameDialog
+      open={nameDialog !== null}
+      title={nameDialog?.mode === 'rename' ? t('settings.bots.rename') : t('settings.bots.create')}
+      name={nameDraft}
+      busy={actionBusy !== null}
+      onNameChange={setNameDraft}
+      onOpenChange={(open) => { if (!open && actionBusy === null) setNameDialog(null); }}
+      onSubmit={(event) => { void saveName(event); }}
+    />
   </div>;
 
   return <MainLayout renderNavigator={navigator} renderConversation={conversation} navigationTitle={selected?.name ?? 'Varin bot'} />;

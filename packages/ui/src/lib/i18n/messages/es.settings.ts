@@ -4070,6 +4070,7 @@
   'settings.bots.section.profile': 'Perfil del bot',
   'settings.bots.section.work': 'Trabajo del bot',
   'settings.bots.create': 'Nuevo bot',
+  'settings.bots.rename': 'Renombrar bot',
   'settings.bots.creating': 'Creando…',
   'settings.bots.save': 'Guardar',
   'settings.bots.saving': 'Guardando…',

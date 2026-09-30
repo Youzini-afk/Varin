@@ -3855,6 +3855,7 @@ export const settingsDict = {
   'settings.bots.section.profile': 'Profil du bot',
   'settings.bots.section.work': 'Travail du bot',
   'settings.bots.create': 'Nouveau bot',
+  'settings.bots.rename': 'Renommer le bot',
   'settings.bots.creating': 'Création…',
   'settings.bots.save': 'Enregistrer',
   'settings.bots.saving': 'Enregistrement…',

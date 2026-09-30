@@ -4071,6 +4071,7 @@
   'settings.bots.section.profile': 'Bot 檔案',
   'settings.bots.section.work': 'Bot 工作',
   'settings.bots.create': '新增 Bot',
+  'settings.bots.rename': '重新命名 Bot',
   'settings.bots.creating': '建立中…',
   'settings.bots.save': '儲存',
   'settings.bots.saving': '儲存中…',
