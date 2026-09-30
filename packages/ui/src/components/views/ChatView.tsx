@@ -10,6 +10,7 @@ type ChatViewProps = {
     conversationHeader?: React.ReactNode;
     threadPanelMode?: 'sidebar' | 'inline';
     threadPanelTitle?: string;
+    showWorkingDirectory?: boolean;
 };
 
 export const ChatView: React.FC<ChatViewProps> = ({
@@ -19,13 +20,15 @@ export const ChatView: React.FC<ChatViewProps> = ({
     conversationHeader,
     threadPanelMode,
     threadPanelTitle,
+    showWorkingDirectory,
 }) => {
     const currentSessionId = usePiSessionStore((state) => state.currentSessionId);
 
     return (
         <ChatErrorBoundary sessionId={currentSessionId || undefined}>
             <PiChatView active={active} readOnly={readOnly} autoOpenDraft={autoOpenDraft}
-                conversationHeader={conversationHeader} threadPanelMode={threadPanelMode} threadPanelTitle={threadPanelTitle} />
+                conversationHeader={conversationHeader} threadPanelMode={threadPanelMode} threadPanelTitle={threadPanelTitle}
+                showWorkingDirectory={showWorkingDirectory} />
         </ChatErrorBoundary>
     );
 };

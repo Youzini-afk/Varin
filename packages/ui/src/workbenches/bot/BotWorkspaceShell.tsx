@@ -178,7 +178,7 @@ const BotWorkspace: React.FC<{ committed: boolean }> = ({ committed }) => {
       <span className="flex-1 text-destructive">{error}</span>
       <Button variant="ghost" size="sm" onClick={() => { refresh(); if (selectedId) void openEntry(selectedId); }}>{t('research-workbench.retry')}</Button>
     </div> : null}
-    {ownsConversation && !busy ? <div className="min-h-0 flex-1"><ChatView active={active} /></div> : (
+    {ownsConversation && !busy ? <div className="min-h-0 flex-1"><ChatView active={active} showWorkingDirectory={false} /></div> : (
       <div className="flex flex-1 flex-col items-center justify-center gap-4 px-6 text-center">
         <Icon name="robot" className="size-9 text-muted-foreground" />
         <h1 className="typography-title">Varin bot</h1>
