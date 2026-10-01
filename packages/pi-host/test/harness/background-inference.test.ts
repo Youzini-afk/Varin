@@ -1,10 +1,10 @@
+import { fauxProvider } from "@earendil-works/pi-ai";
 import assert from "node:assert/strict";
 import { mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, describe, it } from "node:test";
 import { ModelRuntime } from "@earendil-works/pi-coding-agent";
-import { registerFauxProvider } from "@earendil-works/pi-ai/compat";
 import { ProviderConfigurationManager } from "../../src/provider-configuration.js";
 import {
   createBackgroundInferenceRuntime,
@@ -112,7 +112,7 @@ describe("BackgroundInferenceRuntime", () => {
         chat: false,
         embedding: { protocol: "openai-compatible", baseUrl: "https://vectors.example", endpoint: "/encode", models: [{ id: "embed-1" }] },
         rerank: { protocol: "http-rerank", baseUrl: "https://rank.example", endpoint: "/score", credentialRef: "credential-owner", models: [{ id: "rerank-1" }] },
-        decision: { protocol: "typesafe-systemone", endpoint: "/decision", models: [{ id: "jev-1.13" }] },
+        decision: { protocol: "pi-classifier", baseUrl: "https://decision.example/v2", models: [{ id: "jev-1.13" }] },
       },
     }, false);
     assert.equal(runtime.getModels("embed-provider").length, 0);
@@ -122,7 +122,7 @@ describe("BackgroundInferenceRuntime", () => {
     await writeFile(join(agentDir, "settings.json"), JSON.stringify({ harness: {
       embedding: { protocol: "openai-compatible", providerId: "embed-provider", modelId: "embed-1", dimensions: 2 },
       rerank: { protocol: "http-rerank", providerId: "embed-provider", modelId: "rerank-1" },
-      fastDecision: { default: { protocol: "typesafe-systemone", providerId: "embed-provider", modelId: "jev-1.13" } },
+      fastDecision: { default: { protocol: "pi-classifier", providerId: "embed-provider", modelId: "jev-1.13" } },
     } }));
     // A trusted project cannot replace a user-owned inference endpoint or credential reference.
     await mkdir(join(cwd, ".pi"), { recursive: true });
@@ -151,7 +151,7 @@ describe("BackgroundInferenceRuntime", () => {
       assert.deepEqual(requests, [
         { url: "https://vectors.example/encode", auth: "Bearer key-one" },
         { url: "https://rank.example/score", auth: "Bearer rerank-key" },
-        { url: "https://shared.example/decision", auth: "Bearer key-one" },
+        { url: "https://decision.example/v2/systemone", auth: "Bearer key-one" },
       ]);
       assert.doesNotMatch(JSON.stringify(snapshot), /key-one|rerank-key/);
       if (snapshot.embedding.status !== 'ready') throw new Error('expected embedding binding');
@@ -439,7 +439,7 @@ describe("BackgroundInferenceRuntime", () => {
       harness: {
         fastDecision: {
           default: {
-            protocol: "typesafe-systemone",
+            protocol: "pi-classifier",
             providerId: "embed-provider",
             modelId: "jev-1.13",
             endpoint: "/systemone",
@@ -473,7 +473,7 @@ describe("BackgroundInferenceRuntime", () => {
       configurationId: purpose.binding.configurationId,
       providerId: "embed-provider",
       modelId: "jev-1.13",
-      protocol: "typesafe-systemone" as const,
+      protocol: "pi-classifier" as const,
       purpose: "explore" as const,
       goal: "keep relevant material",
       materials: [{ id: "v1", text: "body" }],
@@ -506,7 +506,7 @@ describe("BackgroundInferenceRuntime", () => {
     await writeFile(join(agentDir, "settings.json"), JSON.stringify({
       harness: {
         fastDecision: {
-          default: { protocol: "typesafe-systemone", providerId: "embed-provider", modelId: "jev-1.13" },
+          default: { protocol: "pi-classifier", providerId: "embed-provider", modelId: "jev-1.13" },
           purposes: { explore: "off" },
         },
       },
@@ -524,6 +524,40 @@ describe("BackgroundInferenceRuntime", () => {
     }));
     const invalid = await inference.describe();
     assert.equal(invalid.fastDecision?.purposes?.explore?.status, "invalid");
+  });
+
+  it("uses the explicit decision API and connection with an existing typed native model", async () => {
+    const { agentDir, cwd, runtime } = await setupBinding();
+    await writeFile(join(agentDir, "models.json"), JSON.stringify({ providers: {
+      "embed-provider": { baseUrl: "https://typesafe.example", models: [
+        { id: "decision", type: "classifier", api: "typesafe-system-one" },
+      ], capabilities: { decision: { protocol: "pi-classifier", models: [
+        { id: "decision", api: "cloudflare-workers-ai-system-one", baseUrl: "https://workers.example/account/ai" },
+      ] } } },
+    } }));
+    await writeFile(join(agentDir, "settings.json"), JSON.stringify({ harness: {
+      fastDecision: { default: { protocol: "pi-classifier", providerId: "embed-provider", modelId: "decision" } },
+    } }));
+    const urls: string[] = [];
+    const inference = createBackgroundInferenceRuntime({ agentDir, cwd, modelRuntime: runtime,
+      fetchImpl: async (url, init) => {
+        urls.push(String(url));
+        const body = JSON.parse(String(init?.body)) as { input?: { questions?: unknown } };
+        assert.ok(body.input?.questions, "the selected native API owns the request envelope");
+        return jsonResponse({ success: true, result: { state: "Completed", result: {
+          answers: { keep: { type: "noul", noul: 0.9 } },
+        } } });
+      },
+    });
+    const purpose = (await inference.describe()).fastDecision?.purposes?.explore;
+    assert.equal(purpose?.status, "ready");
+    if (purpose?.status !== "ready") throw new Error("decision binding unavailable");
+    const result = await inference.fastDecision({ ...purpose.binding, batchId: "native-api-override",
+      purpose: "explore", goal: "find implementation", materials: [],
+      questions: [{ id: "keep", kind: "judge", instructions: "keep?" }],
+    });
+    assert.deepEqual(urls, ["https://workers.example/account/ai/run"]);
+    assert.deepEqual(result.answers, [{ id: "keep", kind: "judge", value: 0.9 }]);
   });
 
   it("uses the selected model's endpoint ahead of the provider default", async () => {
@@ -610,10 +644,11 @@ describe("BackgroundInferenceRuntime", () => {
 
   it("rejects the complete organizer request when input plus reserved output exceeds context", async () => {
     const { agentDir, cwd, runtime } = await setupBinding();
-    const faux = registerFauxProvider();
+    const faux = fauxProvider();
     const model = faux.getModel();
     try {
-      runtime.registerProvider(model.provider, { api: model.api, baseUrl: model.baseUrl, models: [model] });
+      runtime.registerProvider(model.provider, {
+          streamSimple: faux.provider.streamSimple, api: model.api, baseUrl: model.baseUrl, models: [model] });
       await runtime.setRuntimeApiKey(model.provider, "faux-key");
       await writeFile(join(agentDir, "settings.json"), JSON.stringify({
         harness: { models: { memoryOrganizer: { providerId: model.provider, modelId: model.id } } },
@@ -625,7 +660,7 @@ describe("BackgroundInferenceRuntime", () => {
       }), (error: unknown) => (error as { code?: string }).code === "memory_organizer_capacity");
       assert.equal(faux.state.callCount, 0);
     } finally {
-      faux.unregister();
+      runtime.unregisterProvider(model.provider);
     }
   });
 });

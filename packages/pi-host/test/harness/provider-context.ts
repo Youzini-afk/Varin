@@ -1,4 +1,8 @@
-import type { Context } from "@earendil-works/pi-ai";
+import { getCurrentSystemPrompt, normalizeContext, type Context } from "@earendil-works/pi-ai";
+
+export function providerSystemPrompt(context: Context | undefined): string {
+  return context ? getCurrentSystemPrompt(normalizeContext(context).messages) : "";
+}
 
 type ProviderMessage = Context["messages"][number];
 

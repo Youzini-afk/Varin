@@ -108,6 +108,7 @@ function projectAssistantMessage(message: AssistantMessage): PiAssistantMessage 
     provider: message.provider,
     ...(message.rawStopReason === undefined ? {} : { rawStopReason: message.rawStopReason }),
     ...(message.responseModel === undefined ? {} : { responseModel: message.responseModel }),
+    ...(message.thinkingLevel === undefined ? {} : { thinkingLevel: message.thinkingLevel }),
     role: "assistant",
     stopReason: message.stopReason,
     timestamp: message.timestamp,
@@ -117,9 +118,7 @@ function projectAssistantMessage(message: AssistantMessage): PiAssistantMessage 
 
 function projectToolResult(message: ToolResultMessage): PiToolResultMessage {
   return {
-    ...(message.addedToolNames === undefined
-      ? {}
-      : { addedToolNames: [...message.addedToolNames] }),
+    ...(message.nestedCalls === undefined ? {} : { nestedCalls: toJsonValue(message.nestedCalls) }),
     content: message.content.map(projectUserContent),
     ...optionalJson(message.details),
     isError: message.isError,
@@ -133,6 +132,13 @@ function projectToolResult(message: ToolResultMessage): PiToolResultMessage {
 
 export function projectMessage(message: AgentMessage): PiMessage {
   switch (message.role) {
+    case "system":
+      return {
+        role: "system", content: message.content, timestamp: message.timestamp,
+        ...(message.sections === undefined ? {} : { sections: { ...message.sections } }),
+        ...(message.toolsAdded === undefined ? {} : { toolsAdded: toJsonValue(message.toolsAdded) }),
+        ...(message.toolsRemoved === undefined ? {} : { toolsRemoved: message.toolsRemoved.map(tool => ({ name: tool.name })) }),
+      };
     case "user":
       return {
         content: projectUserContents(message.content),
@@ -207,6 +213,12 @@ export function projectSessionEntry(entry: SessionEntry): PiSessionEntry {
       return { ...base, message: projectMessage(entry.message), type: "message" };
     case "thinking_level_change":
       return { ...base, thinkingLevel: entry.thinkingLevel, type: "thinking_level_change" };
+    case "context_edit":
+      return { ...base, type: "context_edit", targetId: entry.targetId,
+        replacement: entry.replacement === null ? null : { content: toJsonValue(entry.replacement.content) } };
+    case "usage":
+      return { ...base, type: "usage", kind: entry.kind, provider: entry.provider, model: entry.model,
+        usage: projectUsage(entry.usage), ...(entry.note === undefined ? {} : { note: entry.note }) };
     case "model_change":
       return {
         ...base,
@@ -364,6 +376,7 @@ export function projectAgentEvent(
       };
     case "tool_execution_start":
       return {
+        ...(event.parentToolCallId === undefined ? {} : { parentToolCallId: event.parentToolCallId }),
         args: toJsonValue(event.args),
         toolCallId: event.toolCallId,
         toolName: event.toolName,
@@ -371,6 +384,7 @@ export function projectAgentEvent(
       };
     case "tool_execution_update":
       return {
+        ...(event.parentToolCallId === undefined ? {} : { parentToolCallId: event.parentToolCallId }),
         args: toJsonValue(event.args),
         partialResult: toJsonValue(event.partialResult),
         toolCallId: event.toolCallId,
@@ -379,6 +393,7 @@ export function projectAgentEvent(
       };
     case "tool_execution_end":
       return {
+        ...(event.parentToolCallId === undefined ? {} : { parentToolCallId: event.parentToolCallId }),
         isError: event.isError,
         result: toJsonValue(event.result),
         toolCallId: event.toolCallId,

@@ -11,6 +11,7 @@ import {
   createAssistantMessageEventStream,
   type AssistantMessage,
   type AssistantMessageEventStream,
+  type JsonValue,
 } from "@earendil-works/pi-ai";
 import { Type } from "typebox";
 import type { ToolDefinition } from "@earendil-works/pi-coding-agent";
@@ -52,11 +53,11 @@ const responseStream = (message: AssistantMessage): AssistantMessageEventStream 
 
 const runBatch = async (
   tools: AgentTool[],
-  calls: Array<{ id: string; name: string; arguments: Record<string, unknown> }>,
+  calls: Array<{ id: string; name: string; arguments: Record<string, JsonValue> }>,
   config: Partial<AgentLoopConfig> = {},
 ) => {
   let request = 0;
-  const context: AgentContext = { systemPrompt: "test", messages: [], tools };
+  const context: AgentContext = { messages: [{ role: "system", content: "test", timestamp: 0 }], tools };
   const events: unknown[] = [];
   const messages = await runAgentLoop(
     [{ role: "user", content: "run", timestamp: Date.now() }],

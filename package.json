@@ -192,8 +192,8 @@
   "patchedDependencies": {
     "@tanstack/virtual-core@3.17.3": "bun-patches/@tanstack+virtual-core+3.17.3.patch",
     "ghostty-web@0.4.0": "bun-patches/ghostty-web+0.4.0.patch",
-    "@earendil-works/pi-agent-core@0.85.1": "patches/@earendil-works%2Fpi-agent-core@0.85.1.patch",
-    "@earendil-works/pi-coding-agent@0.85.1": "patches/@earendil-works%2Fpi-coding-agent@0.85.1.patch",
+    "@earendil-works/pi-agent-core@0.99.2": "packages/pi-host/patches/@earendil-works%2Fpi-agent-core@0.99.2.patch",
+    "@earendil-works/pi-coding-agent@0.99.2": "packages/pi-host/patches/@earendil-works%2Fpi-coding-agent@0.99.2.patch",
     "app-builder-lib@26.15.7": "bun-patches/app-builder-lib@26.15.7.patch"
   }
 }

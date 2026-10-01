@@ -263,7 +263,7 @@ describe('production workspace semantic assembly lifecycle', () => {
           purposes: {
             'memory-recall': {
               status: 'ready' as const,
-              binding: { protocol: 'typesafe-systemone' as const, providerId: 'remote', modelId: 'fast', configurationId: 'fd' },
+              binding: { protocol: 'pi-classifier' as const, providerId: 'remote', modelId: 'fast', configurationId: 'fd' },
             },
           },
         },

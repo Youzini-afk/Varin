@@ -9,6 +9,7 @@ export type PiMcpConfigProviderState =
   | "unavailable";
 
 export interface PiMcpConfigProviderSnapshot {
+  owner?: "native" | "extension";
   bridgeVersion?: number;
   issue?: string;
   state: PiMcpConfigProviderState;

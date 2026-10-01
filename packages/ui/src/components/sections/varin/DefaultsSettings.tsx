@@ -360,6 +360,38 @@ export const DefaultsSettings: React.FC = () => {
               </SelectContent>
             </Select>
           </SettingsFieldRow>
+          {scope === 'global' ? <SettingsFieldRow settingsItem="pi.cache-warming"
+            label={t('settings.pi.cacheWarming.title')} description={t('settings.pi.cacheWarming.description')}>
+            <Select value={readString(scopedSettings.cacheWarming) ?? DEFAULT_VALUE}
+              disabled={isSaving || snapshot === null}
+              onValueChange={(value) => void savePiDefaults(value === DEFAULT_VALUE
+                ? { remove: ['cacheWarming'], set: {} } : { remove: [], set: { cacheWarming: value } })}>
+              <SelectTrigger size={SETTINGS_SELECT_SIZE} className={SETTINGS_SELECT_ROW_TRIGGER_CLASS}><SelectValue /></SelectTrigger>
+              <SelectContent>
+                <SelectItem value={DEFAULT_VALUE}>{defaultPlaceholder}</SelectItem>
+                {['off', 'streaming', 'idle'].map(value => <SelectItem key={value} value={value}>{t(`settings.pi.cacheWarming.${value}` as never)}</SelectItem>)}
+              </SelectContent>
+            </Select>
+          </SettingsFieldRow> : null}
+          <SettingsFieldRow settingsItem="pi.codemode"
+            label={t('settings.pi.codemode.title')} description={t('settings.pi.codemode.description')}>
+            <Select value={typeof scopedSettings.codemode === 'object' && scopedSettings.codemode !== null && !Array.isArray(scopedSettings.codemode)
+              ? readString(scopedSettings.codemode.mode) ?? DEFAULT_VALUE : DEFAULT_VALUE}
+              disabled={isSaving || snapshot === null}
+              onValueChange={(value) => {
+                const config = typeof scopedSettings.codemode === 'object' && scopedSettings.codemode !== null && !Array.isArray(scopedSettings.codemode)
+                  ? { ...scopedSettings.codemode } : {};
+                if (value === DEFAULT_VALUE) delete config.mode; else config.mode = value;
+                void savePiDefaults(Object.keys(config).length ? { remove: [], set: { codemode: config } } : { remove: ['codemode'], set: {} });
+              }}>
+              <SelectTrigger size={SETTINGS_SELECT_SIZE} className={SETTINGS_SELECT_ROW_TRIGGER_CLASS}><SelectValue /></SelectTrigger>
+              <SelectContent>
+                <SelectItem value={DEFAULT_VALUE}>{defaultPlaceholder}</SelectItem>
+                <SelectItem value="on">{t('settings.pi.codemode.on')}</SelectItem>
+                <SelectItem value="only">{t('settings.pi.codemode.only')}</SelectItem>
+              </SelectContent>
+            </Select>
+          </SettingsFieldRow>
         </div>
 
         {settingsError ? (

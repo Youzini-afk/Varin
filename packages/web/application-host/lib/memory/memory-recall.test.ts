@@ -78,7 +78,7 @@ describe("recallSources — scope-generalized candidate selection (BC3)", () => 
 
 describe("recallMemories — memory-recall judging (BC3)", () => {
   const judge = (impl: Partial<MemoryRecallFastDecision>): MemoryRecallFastDecision => ({
-    status: impl.status ?? (async () => ({ status: "ready" as const, binding: { protocol: "typesafe-systemone" as const, providerId: "p", modelId: "m", configurationId: "c" } })),
+    status: impl.status ?? (async () => ({ status: "ready" as const, binding: { protocol: "pi-classifier" as const, providerId: "p", modelId: "m", configurationId: "c" } })),
     decide: impl.decide ?? (async () => ({ batchId: "b", providerId: "p", modelId: "m", answers: [], missing: [] })),
   });
 

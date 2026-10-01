@@ -69,13 +69,14 @@ const transportLabelKey = (kind: PiMcpConfigServer['transport']['kind']): string
 );
 
 const McpConfigEditor: React.FC<{
+  native: boolean;
   mode: 'new' | 'server' | 'settings';
   preferredServerName?: string;
   runtimeTarget: RuntimeContextTarget;
   sources: PiMcpConfigSource[];
   targetKey: string;
   refreshRevision: number;
-}> = ({ mode, preferredServerName, runtimeTarget, sources, targetKey, refreshRevision }) => {
+}> = ({ native, mode, preferredServerName, runtimeTarget, sources, targetKey, refreshRevision }) => {
   const { t } = useI18n();
   const text = (key: string, params?: I18nParams): string => t(key as never, params);
   const [sourceId, setSourceId] = React.useState('');
@@ -176,8 +177,8 @@ const McpConfigEditor: React.FC<{
   const parsed = React.useMemo(() => {
     const errors: ParseError[] = [];
     const document = parse(draft.replace(/^\uFEFF/, ''), errors, {
-      allowTrailingComma: true,
-      disallowComments: false,
+      allowTrailingComma: !native,
+      disallowComments: native,
     });
     if (errors.length > 0) {
       const first = errors[0];
@@ -192,7 +193,7 @@ const McpConfigEditor: React.FC<{
       return { error: 'Configuration root must be an object', valid: false };
     }
     return { error: null, valid: true };
-  }, [draft]);
+  }, [draft, native]);
   const activeSnapshot = mcpSourceBoundSnapshot(snapshot, snapshotSourceKey, sourceKey);
   const dirty = activeSnapshot !== null && draft !== activeSnapshot.content;
   dirtyRef.current = dirty;
@@ -203,7 +204,7 @@ const McpConfigEditor: React.FC<{
   const newServerReady = mode !== 'new'
     || (createdServerName !== null && selectedTransport !== 'unconfigured');
   const contentToSave = activeSnapshot && parsed.valid
-    ? prepareMcpConfigForSave(activeSnapshot.content, draft)
+    ? native ? draft : prepareMcpConfigForSave(activeSnapshot.content, draft)
     : draft;
   const saveWillClearUrlCredentials = Boolean(activeSnapshot && contentToSave !== draft);
 
@@ -324,6 +325,8 @@ const McpConfigEditor: React.FC<{
 
             {activeSnapshot && parsed.valid ? (
               <McpStructuredConfigEditor
+                native={native}
+                project={source.scope === 'project'}
                 content={draft}
                 disabled={loading || saving || projectBlocked}
                 mode={mode}
@@ -401,10 +404,11 @@ const McpConfigEditor: React.FC<{
 };
 
 const ServerActions: React.FC<{
+  native: boolean;
   busy: string | null;
   onCommand: (action: string, command: string, reload?: boolean) => void;
   server: McpAdapterServerSnapshot;
-}> = ({ busy, onCommand, server }) => {
+}> = ({ native, busy, onCommand, server }) => {
   const { t } = useI18n();
   const argument = mcpServerCommandArgument(server.name);
   const commandUnsupported = argument === null;
@@ -417,7 +421,7 @@ const ServerActions: React.FC<{
           </Button>
         ) : null}
         {server.status === 'needs-auth' ? (
-          <Button type="button" size="xs" disabled={busy !== null || commandUnsupported} onClick={() => onCommand('authorize', `/mcp-auth ${argument}`)} className="!font-normal">
+          <Button type="button" size="xs" disabled={busy !== null || commandUnsupported} onClick={() => onCommand('authorize', native ? `/mcp login ${argument}` : `/mcp-auth ${argument}`)} className="!font-normal">
             {t('settings.varin.mcp.actions.authorize')}
           </Button>
         ) : null}
@@ -426,7 +430,7 @@ const ServerActions: React.FC<{
             {t('settings.varin.mcp.actions.logout')}
           </Button>
         ) : null}
-        <Button type="button" variant="ghost" size="xs" disabled={busy !== null || commandUnsupported} onClick={() => onCommand(server.disabled ? 'enable' : 'disable', `/mcp ${server.disabled ? 'enable' : 'disable'} ${argument}`, true)} className="!font-normal text-muted-foreground">
+        <Button type="button" variant="ghost" size="xs" disabled={busy !== null || commandUnsupported} onClick={() => onCommand(server.disabled ? 'enable' : 'disable', `/mcp ${server.disabled ? 'enable' : 'disable'} ${argument}`, !native)} className="!font-normal text-muted-foreground">
           {server.disabled
             ? t('settings.varin.mcp.actions.enable')
             : t('settings.varin.mcp.actions.disable')}
@@ -546,13 +550,14 @@ export const McpPage: React.FC = () => {
                   {liveServer ? <p>{t('settings.varin.mcp.runtime.serverCounts', { tools: liveServer.toolCount, resources: liveServer.resourceCount ?? 0 })}</p> : null}
                 </div>
                 {liveServer && currentSessionId ? (
-                  <ServerActions busy={commandAction} onCommand={(action, command, reload) => void runCommand(`${action}:${liveServer.name}`, command, reload)} server={liveServer} />
+                  <ServerActions native={snapshot?.provider.owner === 'native'} busy={commandAction} onCommand={(action, command, reload) => void runCommand(`${action}:${liveServer.name}`, command, reload)} server={liveServer} />
                 ) : null}
               </div>
             </SettingsSection>
           ) : null}
 
           <McpConfigEditor
+            native={snapshot?.provider.owner === 'native'}
             mode={catalogState.selection.kind}
             runtimeTarget={runtimeTarget}
             targetKey={targetKey}

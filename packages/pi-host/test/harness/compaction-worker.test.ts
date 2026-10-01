@@ -1,16 +1,17 @@
+import { fauxProvider, getCurrentSystemPrompt, getCurrentTools } from "@earendil-works/pi-ai";
 import assert from "node:assert/strict";
 import { mkdtemp, mkdir, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { describe, it } from "node:test";
-import { fauxAssistantMessage, fauxToolCall, registerFauxProvider } from "@earendil-works/pi-ai/compat";
+import { fauxAssistantMessage, fauxToolCall } from "@earendil-works/pi-ai/compat";
 import type { ModelRuntime } from "@earendil-works/pi-coding-agent";
 import type { Context } from "@earendil-works/pi-ai";
 import type { CompactionTaskSpec, JsonValue } from "@varin/protocol";
 import { CompactionWorkerRuntime } from "../../src/compaction-worker.js";
 
 const makeSpec = (
-  model: ReturnType<ReturnType<typeof registerFauxProvider>["getModel"]>,
+  model: ReturnType<ReturnType<typeof fauxProvider>["getModel"]>,
   overrides: Partial<CompactionTaskSpec> = {},
 ): CompactionTaskSpec => ({
   sessionId: "worker-session",
@@ -30,7 +31,7 @@ const makeSpec = (
 });
 
 const createWorker = async (
-  faux: ReturnType<typeof registerFauxProvider>,
+  faux: ReturnType<typeof fauxProvider>,
   onRequest?: (requestId: string, worker: CompactionWorkerRuntime) => void,
   options: { configureModelRuntime?: boolean } = {},
 ): Promise<{ worker: CompactionWorkerRuntime; root: string }> => {
@@ -47,6 +48,7 @@ const createWorker = async (
     ...(options.configureModelRuntime === false ? {} : {
       configureModelRuntime: async (runtime: ModelRuntime) => {
         runtime.registerProvider(model.provider, {
+          streamSimple: faux.provider.streamSimple,
           api: model.api,
           baseUrl: model.baseUrl,
           models: [{
@@ -71,15 +73,11 @@ const createWorker = async (
 
 describe("compaction worker", () => {
   it("converts S0 and custom history messages before the provider request", async () => {
-    const faux = registerFauxProvider({ models: [{ id: "faux-1", contextWindow: 8_000, maxTokens: 512 }] });
+    const faux = fauxProvider({ models: [{ id: "faux-1", contextWindow: 8_000, maxTokens: 512 }] });
     const requests: Context[] = [];
     faux.setResponses([(context) => {
       requests.push({
-        ...(context.systemPrompt === undefined ? {} : { systemPrompt: context.systemPrompt }),
         messages: structuredClone(context.messages),
-        ...(context.tools === undefined ? {} : {
-          tools: context.tools.map(({ name, description, parameters }) => ({ name, description, parameters })),
-        }),
       });
       return fauxAssistantMessage("summary");
     }]);
@@ -87,7 +85,9 @@ describe("compaction worker", () => {
     try {
       const result = await worker.run(makeSpec(faux.getModel(), {
         previousSummary: "S0-KEEP-ME",
-        summarizedMessages: [{
+        summarizedMessages: [{ role: "system", content: "PARENT-LIVE-INSTRUCTIONS",
+          timestamp: 0, toolsAdded: [{ name: "write", description: "parent writer", parameters: { type: "object" } }],
+        }, {
           role: "custom",
           customType: "note",
           content: "CUSTOM-HISTORY-KEEP-ME",
@@ -100,24 +100,23 @@ describe("compaction worker", () => {
       const text = JSON.stringify(requests[0]!.messages);
       assert.match(text, /S0-KEEP-ME/);
       assert.match(text, /CUSTOM-HISTORY-KEEP-ME/);
+      assert.match(text, /PARENT-LIVE-INSTRUCTIONS/);
+      assert.doesNotMatch(getCurrentSystemPrompt(requests[0]!.messages), /PARENT-LIVE-INSTRUCTIONS/);
+      assert.match(getCurrentSystemPrompt(requests[0]!.messages), /background compaction agent/);
+      assert.deepEqual(getCurrentTools(requests[0]!.messages).map(tool => tool.name), ["history", "output", "records"]);
       assert.match(text, /conversation history before this point was compacted/);
     } finally {
       await rm(root, { recursive: true, force: true });
-      faux.unregister();
     }
   });
 
   it("refuses a provider request after a query makes the full context exceed capacity", async () => {
-    const faux = registerFauxProvider({ models: [{ id: "faux-1", contextWindow: 4_000, maxTokens: 512 }] });
+    const faux = fauxProvider({ models: [{ id: "faux-1", contextWindow: 4_000, maxTokens: 512 }] });
     const requests: Context[] = [];
     faux.setResponses([
       (context) => {
         requests.push({
-          ...(context.systemPrompt === undefined ? {} : { systemPrompt: context.systemPrompt }),
           messages: structuredClone(context.messages),
-          ...(context.tools === undefined ? {} : {
-            tools: context.tools.map(({ name, description, parameters }) => ({ name, description, parameters })),
-          }),
         });
         return fauxAssistantMessage([fauxToolCall("history", { query: "missing" })]);
       },
@@ -141,12 +140,11 @@ describe("compaction worker", () => {
       assert.equal(faux.state.callCount, 1, "capacity admission happens before the second provider call");
     } finally {
       await rm(root, { recursive: true, force: true });
-      faux.unregister();
     }
   });
 
   it("returns usage accumulated across every assistant provider request", async () => {
-    const faux = registerFauxProvider({ models: [{ id: "faux-1", contextWindow: 8_000, maxTokens: 512 }] });
+    const faux = fauxProvider({ models: [{ id: "faux-1", contextWindow: 8_000, maxTokens: 512 }] });
     faux.setResponses([
       () => fauxAssistantMessage([fauxToolCall("history", { query: "known" })]),
       () => fauxAssistantMessage("final summary with enough output to measure"),
@@ -166,32 +164,34 @@ describe("compaction worker", () => {
       assert.ok((usage.output ?? 0) > Math.ceil("final summary with enough output to measure".length / 4));
     } finally {
       await rm(root, { recursive: true, force: true });
-      faux.unregister();
     }
   });
 
   it("rejects a non-final stop reason even when text is present", async () => {
-    const faux = registerFauxProvider({ models: [{ id: "faux-1", contextWindow: 8_000, maxTokens: 512 }] });
+    const faux = fauxProvider({ models: [{ id: "faux-1", contextWindow: 8_000, maxTokens: 512 }] });
     faux.setResponses([() => fauxAssistantMessage("partial summary", { stopReason: "toolUse" })]);
     const { worker, root } = await createWorker(faux);
     try {
       await assert.rejects(worker.run(makeSpec(faux.getModel())), /did not complete: toolUse/i);
     } finally {
       await rm(root, { recursive: true, force: true });
-      faux.unregister();
     }
   });
 
   it("loads a static Pi extension provider before running the worker", async () => {
-    const faux = registerFauxProvider({ models: [{ id: "faux-1", contextWindow: 8_000, maxTokens: 512 }] });
+    const faux = fauxProvider({ models: [{ id: "faux-1", contextWindow: 8_000, maxTokens: 512 }] });
     faux.setResponses([() => fauxAssistantMessage("extension summary")]);
     const model = faux.getModel();
     const { worker, root } = await createWorker(faux, undefined, { configureModelRuntime: false });
     try {
       await mkdir(join(root, "extensions"), { recursive: true });
-      await writeFile(join(root, "extensions", "worker-provider.ts"), `export default function (pi: any) {
+      await writeFile(join(root, "extensions", "worker-provider.ts"), `import { fauxProvider, fauxAssistantMessage } from "@earendil-works/pi-ai";
+      export default function (pi: any) {
+        const fake = fauxProvider({ api: ${JSON.stringify(model.api)} });
+        fake.setResponses([fauxAssistantMessage("extension summary")]);
         pi.registerProvider("worker-extension", {
-          api: "faux",
+          api: ${JSON.stringify(model.api)},
+          streamSimple: fake.provider.streamSimple,
           apiKey: "faux-key",
           baseUrl: ${JSON.stringify(model.baseUrl)},
           models: [${JSON.stringify({
@@ -213,12 +213,11 @@ describe("compaction worker", () => {
       assert.equal(result.summary, "extension summary");
     } finally {
       await rm(root, { recursive: true, force: true });
-      faux.unregister();
     }
   });
 
   it("does not block a usable model on an unrelated extension load error", async () => {
-    const faux = registerFauxProvider({ models: [{ id: "faux-1", contextWindow: 8_000, maxTokens: 512 }] });
+    const faux = fauxProvider({ models: [{ id: "faux-1", contextWindow: 8_000, maxTokens: 512 }] });
     faux.setResponses([() => fauxAssistantMessage("usable despite diagnostic")]);
     const { worker, root } = await createWorker(faux);
     try {
@@ -228,12 +227,11 @@ describe("compaction worker", () => {
       assert.equal(result.summary, "usable despite diagnostic");
     } finally {
       await rm(root, { recursive: true, force: true });
-      faux.unregister();
     }
   });
 
   it("aborts the agent and in-flight bridge work", async () => {
-    const faux = registerFauxProvider({ models: [{ id: "faux-1", contextWindow: 8_000, maxTokens: 512 }] });
+    const faux = fauxProvider({ models: [{ id: "faux-1", contextWindow: 8_000, maxTokens: 512 }] });
     let release!: () => void;
     const held = new Promise<void>((resolve) => { release = resolve; });
     faux.setResponses([async () => {
@@ -250,12 +248,11 @@ describe("compaction worker", () => {
     } finally {
       release();
       await rm(root, { recursive: true, force: true });
-      faux.unregister();
     }
   });
 
   it("reports a stalled non-streaming provider request so the caller can retry", async () => {
-    const faux = registerFauxProvider({ models: [{ id: "faux-1", contextWindow: 8_000, maxTokens: 512 }] });
+    const faux = fauxProvider({ models: [{ id: "faux-1", contextWindow: 8_000, maxTokens: 512 }] });
     let release!: () => void;
     const held = new Promise<void>((resolve) => { release = resolve; });
     faux.setResponses([async () => {
@@ -266,14 +263,16 @@ describe("compaction worker", () => {
     try {
       await assert.rejects(
         worker.run(makeSpec(faux.getModel(), {
-          recovery: { enabled: true, responseWaitMs: 80, streamIdleMs: 20, maxRetries: 1 },
+          // Leave room for native SDK/auth initialization; this case exercises
+          // a provider that has started and then never produces a response.
+          recovery: { enabled: true, responseWaitMs: 1_000, streamIdleMs: 20, maxRetries: 1 },
         })),
         (error: { code?: string }) => error.code === "compaction_stalled",
       );
+      assert.equal(faux.state.callCount, 1, "the stall must occur after the provider request starts");
     } finally {
       release();
       await rm(root, { recursive: true, force: true });
-      faux.unregister();
     }
   });
 });

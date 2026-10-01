@@ -1,9 +1,10 @@
+import { fauxProvider } from "@earendil-works/pi-ai";
 import assert from "node:assert/strict";
 import { mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { describe, it } from "node:test";
-import { fauxAssistantMessage, fauxToolCall, registerFauxProvider } from "@earendil-works/pi-ai/compat";
+import { fauxAssistantMessage, fauxToolCall } from "@earendil-works/pi-ai/compat";
 import type {
   AgentSessionServices,
   BeforeAgentStartEvent,
@@ -110,7 +111,7 @@ void (null as unknown as ToolDefinitionShape satisfies {
 // agent loop.
 // ---------------------------------------------------------------------------
 
-describe("Pi hooks contract (0.84.3)", () => {
+describe("Pi hooks contract (0.99.2)", () => {
   it("before_agent_start message is appended and system prompt is stable across steps", async () => {
     const root = await mkdtemp(join(tmpdir(), "varin-hooks-"));
     const agentDir = join(root, "agent");
@@ -138,7 +139,7 @@ describe("Pi hooks contract (0.84.3)", () => {
     // Create a file for the read tool to succeed in step 1.
     await writeFile(join(root, "test.txt"), "hello world\n", "utf8");
 
-    const faux = registerFauxProvider();
+    const faux = fauxProvider();
     const capturedContexts: Context[] = [];
 
     faux.setResponses([
@@ -157,6 +158,7 @@ describe("Pi hooks contract (0.84.3)", () => {
     const model = faux.getModel();
     const configureServices = async (services: AgentSessionServices) => {
       services.modelRuntime.registerProvider(model.provider, {
+          streamSimple: faux.provider.streamSimple,
         api: model.api,
         baseUrl: model.baseUrl,
         models: [
@@ -240,7 +242,6 @@ describe("Pi hooks contract (0.84.3)", () => {
       }
     } finally {
       await host.dispose();
-      faux.unregister();
       await rm(root, { force: true, recursive: true });
     }
   });

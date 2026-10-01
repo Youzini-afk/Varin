@@ -369,6 +369,18 @@ const ToolResultContent: React.FC<{
   return (
     <div className="space-y-2">
       <PiUserContentView content={result.content} messageId={messageId} variant="tool" />
+      {result.usage && result.usage.totalTokens > 0 ? <p className="typography-meta text-muted-foreground">
+        {result.usage.totalTokens} tokens · ${result.usage.cost.total.toFixed(4)}
+      </p> : null}
+      {result.nestedCalls ? <details className="typography-meta text-muted-foreground">
+        <summary className="cursor-pointer">{result.nestedCalls.calls.length} nested calls{result.nestedCalls.complete ? '' : ' · incomplete record'}</summary>
+        <div className="mt-2 space-y-1 border-l border-border/60 pl-3">
+          {result.nestedCalls.calls.map(call => <div key={call.id}>
+            <span className="font-mono">{call.name}</span> · {call.status}{call.durationMs === undefined ? '' : ` · ${call.durationMs} ms`}
+            {call.error ? <p className="break-words text-[var(--status-error)]">{call.error}</p> : null}
+          </div>)}
+        </div>
+      </details> : null}
       {subagentRun ? (
         <SubagentRunView messageId={messageId} presentation={subagentRun} />
       ) : result.details !== undefined ? (
@@ -382,8 +394,9 @@ const PiToolCard: React.FC<{
   call: PiToolCall;
   cwd: string;
   execution?: PiToolExecutionState;
+  executionById?: Record<string, PiToolExecutionState>;
   result?: PiToolResultMessage;
-}> = ({ call, cwd, execution, result }) => {
+}> = ({ call, cwd, execution, executionById, result }) => {
   const { t } = useI18n();
   const toolRenderers = useWorkbenchMatchRenderers<{
     call: PiToolCall;
@@ -395,6 +408,7 @@ const PiToolCard: React.FC<{
   const sessionId = usePiSessionStore((state) => state.currentSessionId);
   const extensionRendered = renderFirstWorkbenchMatch(toolRenderers, { call, cwd, execution, result });
   const resultText = result ? piContentText(result.content).trim() : '';
+  const nested = Object.values(executionById ?? {}).filter(child => child.parentToolCallId === call.id);
   if (extensionRendered !== undefined) return (
     <>
       {extensionRendered}
@@ -463,6 +477,9 @@ const PiToolCard: React.FC<{
         <Icon name="arrow-down-s" className="size-3.5 text-muted-foreground transition-transform group-open:rotate-180" />
       </summary>
       <div className="ml-2 space-y-3 border-l border-border/60 py-2 pl-3">
+        {!result && nested.length ? <div className="space-y-1 typography-meta text-muted-foreground" aria-live="polite">
+          {nested.map(child => <div key={child.toolCallId}><span className="font-mono">{child.name}</span> · {child.status}</div>)}
+        </div> : null}
         <div>
           <p className="mb-1 typography-micro font-medium text-muted-foreground">arguments</p>
           <pre className="overflow-x-auto whitespace-pre-wrap break-words rounded-md bg-background/70 p-2 font-mono typography-micro text-foreground">
@@ -581,6 +598,7 @@ const PiReadOnlyToolGroup: React.FC<{
             call={call}
             cwd={cwd}
             execution={executionById[call.id]}
+            executionById={executionById}
             result={resultByCallId.get(call.id)}
           />
         ))}
@@ -649,6 +667,7 @@ const AssistantMessage: React.FC<{
               call={call}
               cwd={cwd}
               execution={executionById[call.id]}
+              executionById={executionById}
               result={resultByCallId.get(call.id)}
             />,
           );
@@ -784,6 +803,7 @@ const PiSortedActivityGroup: React.FC<{
                     call={item.call}
                     cwd={cwd}
                     execution={executionById[item.call.id]}
+                    executionById={executionById}
                     result={resultByCallId.get(item.call.id)}
                   />
                 ) : item.kind === 'thinking' ? (
@@ -1143,6 +1163,7 @@ export const PiTimelineEntryList: React.FC<Omit<
                 </article>
               );
             }
+            if (message.role === 'system') return null;
             if (message.role === 'bashExecution') {
               const renderedOutput = renderTerminalOutput(message.output);
               const outputText = renderedOutput.trim();
@@ -1282,6 +1303,12 @@ export const PiTimelineEntryList: React.FC<Omit<
           }
           if (entry.type === 'label') {
             return <MetaEntry key={entry.id} icon="target">{entry.label ?? 'Label'} → {entry.targetId}</MetaEntry>;
+          }
+          if (entry.type === 'context_edit') {
+            return <MetaEntry key={entry.id} icon="file-edit">Model context {entry.replacement === null ? 'omitted' : 'edited'} · {entry.targetId}</MetaEntry>;
+          }
+          if (entry.type === 'usage') {
+            return <MetaEntry key={entry.id} icon="pie-chart">{entry.kind} · {entry.provider}/{entry.model} · {entry.usage.totalTokens} tokens · ${entry.usage.cost.total.toFixed(4)}</MetaEntry>;
           }
           if (entry.type === 'custom') {
             const extensionStatus = parseExtensionStatus(entry.customType, entry.data);

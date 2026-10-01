@@ -1,10 +1,11 @@
+import { fauxProvider } from "@earendil-works/pi-ai";
 import assert from "node:assert/strict";
 import { mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
 import { describe, it } from "node:test";
 import type { Context } from "@earendil-works/pi-ai";
-import { fauxAssistantMessage, fauxToolCall, registerFauxProvider } from "@earendil-works/pi-ai/compat";
+import { fauxAssistantMessage, fauxToolCall } from "@earendil-works/pi-ai/compat";
 import type { AgentSessionServices } from "@earendil-works/pi-coding-agent";
 import type { HostEvent, HostEventData } from "@varin/protocol";
 import { SessionHost } from "../../src/session-host.js";
@@ -22,7 +23,7 @@ describe("fresh continuation and same-Thread history", () => {
     const workspace = join(root, "workspace");
     await mkdir(workspace, { recursive: true });
     await writeFile(join(workspace, "evidence.txt"), "ORIGINAL_RAW_TOOL_DETAIL_739\nsecond exact line", "utf8");
-    const faux = registerFauxProvider();
+    const faux = fauxProvider();
     const outgoing: Context[] = [];
     let originalRunId = "";
     faux.setResponses([
@@ -34,6 +35,7 @@ describe("fresh continuation and same-Thread history", () => {
     const model = faux.getModel();
     const configureServices = async (services: AgentSessionServices) => {
       services.modelRuntime.registerProvider(model.provider, {
+          streamSimple: faux.provider.streamSimple,
         api: model.api, baseUrl: model.baseUrl,
         models: [{ api: model.api, baseUrl: model.baseUrl, contextWindow: model.contextWindow,
           cost: model.cost, id: model.id, input: model.input, maxTokens: model.maxTokens,
@@ -154,7 +156,7 @@ describe("fresh continuation and same-Thread history", () => {
       await runtime?.dispose();
       for (const host of allHosts) await host.dispose();
       await parentHost.dispose(); router.dispose(); await serviceHost.dispose(); await registry.dispose();
-      faux.unregister(); await rm(root, { recursive: true, force: true });
+       await rm(root, { recursive: true, force: true });
     }
   });
 });

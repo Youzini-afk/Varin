@@ -11,11 +11,15 @@ import {
   stat,
 } from "node:fs/promises";
 import { isAbsolute, join, relative, resolve, sep } from "node:path";
-import type {
+import {
   ModelRuntime,
-  ProviderConfig,
-  ProviderModelConfig,
+  type ProviderConfig,
+  type ProviderModelConfig,
 } from "@earendil-works/pi-coding-agent";
+import * as systemOne from "@earendil-works/pi-ai/api/typesafe-system-one";
+import * as cloudflareSystemOne from "@earendil-works/pi-ai/api/cloudflare-workers-ai-system-one";
+import * as llamaClassify from "@earendil-works/pi-ai/api/llama-cpp-classify";
+import type { Api, Model } from "@earendil-works/pi-ai";
 import {
   type ProviderConfigDetails,
   type ProviderConfigInput,
@@ -36,6 +40,7 @@ import {
 import { HostError } from "./errors.js";
 
 type JsonObject = Record<string, unknown>;
+type ChatModelConfig = Extract<ProviderModelConfig, { type?: "chat" }>;
 
 interface ConfigDocument {
   content: string;
@@ -112,19 +117,19 @@ function stringRecord(value: unknown): Record<string, string> | undefined {
 }
 
 function mergeCompat(
-  base: ProviderModelConfig["compat"],
+  base: ChatModelConfig["compat"],
   override: unknown,
-): ProviderModelConfig["compat"] {
+): ChatModelConfig["compat"] {
   if (!isObject(override)) return base;
-  return { ...(isObject(base) ? base : {}), ...override } as ProviderModelConfig["compat"];
+  return { ...(isObject(base) ? base : {}), ...override } as ChatModelConfig["compat"];
 }
 
 function normalizeThinkingLevelMap(
   value: unknown,
-  fallback: ProviderModelConfig["thinkingLevelMap"],
-): ProviderModelConfig["thinkingLevelMap"] {
+  fallback: ChatModelConfig["thinkingLevelMap"],
+): ChatModelConfig["thinkingLevelMap"] {
   if (!isObject(value)) return fallback;
-  const result: NonNullable<ProviderModelConfig["thinkingLevelMap"]> = {};
+  const result: NonNullable<ChatModelConfig["thinkingLevelMap"]> = {};
   for (const level of ["off", "minimal", "low", "medium", "high", "xhigh", "max"] as const) {
     const entry = value[level];
     if (entry === null || typeof entry === "string") {
@@ -132,6 +137,46 @@ function normalizeThinkingLevelMap(
     }
   }
   return Object.keys(result).length > 0 ? result : fallback;
+}
+
+function nativePromptCache(value: unknown, fallback?: Model<Api>["promptCache"]): Model<Api>["promptCache"] {
+  if (value === undefined) return fallback;
+  if (!isObject(value)) throw new HostError("provider_config_invalid", "promptCache must be an object");
+  const result: NonNullable<Model<Api>["promptCache"]> = {};
+  for (const tier of ["short", "long"] as const) {
+    if (value[tier] === undefined) continue;
+    const lifetime = finitePositive(value[tier]);
+    if (lifetime === undefined) throw new HostError("provider_config_invalid", `promptCache.${tier} must be positive`);
+    result[tier] = lifetime;
+  }
+  return result;
+}
+
+function nativeCostTiers(value: unknown, fallback?: Model<Api>["cost"]["tiers"]): Model<Api>["cost"]["tiers"] {
+  if (value === undefined) return fallback;
+  if (!Array.isArray(value)) throw new HostError("provider_config_invalid", "cost.tiers must be an array");
+  const fields = ["inputTokensAbove", "input", "output", "cacheRead", "cacheWrite"] as const;
+  return value.map(entry => {
+    if (!isObject(entry) || fields.some(field => typeof entry[field] !== "number" || !Number.isFinite(entry[field]))) {
+      throw new HostError("provider_config_invalid", "cost.tiers entries must contain finite thresholds and rates");
+    }
+    return Object.fromEntries(fields.map(field => [field, entry[field]])) as unknown as NonNullable<Model<Api>["cost"]["tiers"]>[number];
+  });
+}
+
+function nativeSamplingParams(value: unknown, fallback?: Record<string, unknown>): Record<string, unknown> | undefined {
+  if (value === undefined) return fallback;
+  if (!isObject(value)) throw new HostError("provider_config_invalid", "samplingParams must be an object");
+  return { ...fallback, ...value };
+}
+
+function nativeInputLimits(value: unknown, fallback?: Model<Api>["inputLimits"]): Model<Api>["inputLimits"] {
+  if (value === undefined) return fallback;
+  if (!isObject(value)) throw new HostError("provider_config_invalid", "inputLimits must be an object");
+  const images = isObject(value.images) ? value.images : undefined;
+  return { ...fallback, ...value, ...(images ? { images: { ...fallback?.images, ...images,
+    ...(isObject(images.resize) ? { resize: { ...fallback?.images?.resize, ...images.resize } } : {}),
+  } } : {}) } as Model<Api>["inputLimits"];
 }
 
 function modelFromLayer(
@@ -159,47 +204,97 @@ function modelFromLayer(
   }
   const rawCost = isObject(raw.cost) ? raw.cost : {};
   const fallbackCost = fallback?.cost ?? { cacheRead: 0, cacheWrite: 0, input: 0, output: 0 };
+  const tiers = nativeCostTiers(rawCost.tiers, fallbackCost.tiers);
   const modelInput = Array.isArray(raw.input)
     ? [...new Set(raw.input.filter((entry): entry is "text" | "image" => entry === "text" || entry === "image"))]
     : undefined;
+  const type = raw.type ?? fallback?.type ?? "chat";
+  if (type !== "chat" && type !== "image" && type !== "classifier") {
+    throw new HostError("provider_config_invalid", `Provider ${providerId}, model ${id} has an unsupported model type`);
+  }
+  const sharedHeaders = stringRecord(raw.headers) ?? fallback?.headers;
+  const shared = {
+    api, baseUrl, id, name: safeString(raw.name) ?? fallback?.name ?? id,
+    input: modelInput && modelInput.length > 0 ? modelInput : (fallback?.input ?? ["text"]),
+    cost: {
+      ...fallbackCost,
+      ...(tiers === undefined ? {} : { tiers }),
+      cacheRead: finiteNonNegative(rawCost.cacheRead) ?? fallbackCost.cacheRead,
+      cacheWrite: finiteNonNegative(rawCost.cacheWrite) ?? fallbackCost.cacheWrite,
+      input: finiteNonNegative(rawCost.input) ?? fallbackCost.input,
+      output: finiteNonNegative(rawCost.output) ?? fallbackCost.output,
+    },
+    ...(sharedHeaders ? { headers: sharedHeaders } : {}),
+    ...(isObject(raw.inputLimits) ? { inputLimits: raw.inputLimits } : fallback?.inputLimits ? { inputLimits: fallback.inputLimits } : {}),
+  };
+  if (type === "image") return {
+    ...shared, type, output: Array.isArray(raw.output) ? raw.output as Array<"text" | "image">
+      : fallback?.type === "image" ? fallback.output : ["image"],
+  } as ProviderModelConfig;
+  if (type === "classifier") return {
+    ...shared, type, contextWindow: finitePositive(raw.contextWindow)
+      ?? (fallback?.type === "classifier" ? fallback.contextWindow : undefined) ?? 0,
+  } as ProviderModelConfig;
+  const chatFallback = fallback?.type === "image" || fallback?.type === "classifier" ? undefined : fallback;
+  const promptCache = nativePromptCache(raw.promptCache, chatFallback?.id === id ? chatFallback.promptCache : undefined);
+  const samplingParams = nativeSamplingParams(raw.samplingParams, chatFallback?.id === id ? chatFallback.samplingParams : undefined);
   const providerCompat = mergeCompat(undefined, provider.compat);
-  const compat = mergeCompat(mergeCompat(fallback?.compat, providerCompat), raw.compat);
+  const compat = mergeCompat(mergeCompat(chatFallback?.compat, providerCompat), raw.compat);
   const headers = stringRecord(raw.headers) ?? fallback?.headers;
   const thinkingLevelMap = normalizeThinkingLevelMap(
     raw.thinkingLevelMap,
-    fallback?.thinkingLevelMap,
+    chatFallback?.thinkingLevelMap,
   );
   return {
-    api,
-    baseUrl,
+    ...shared,
+    type: "chat",
     ...(compat === undefined ? {} : { compat }),
-    contextWindow: finitePositive(raw.contextWindow) ?? fallback?.contextWindow ?? 128_000,
+    contextWindow: finitePositive(raw.contextWindow) ?? chatFallback?.contextWindow ?? 128_000,
     cost: {
       cacheRead: finiteNonNegative(rawCost.cacheRead) ?? fallbackCost.cacheRead,
       cacheWrite: finiteNonNegative(rawCost.cacheWrite) ?? fallbackCost.cacheWrite,
       input: finiteNonNegative(rawCost.input) ?? fallbackCost.input,
       output: finiteNonNegative(rawCost.output) ?? fallbackCost.output,
-      ...(fallbackCost.tiers === undefined ? {} : { tiers: fallbackCost.tiers }),
+      ...(shared.cost.tiers === undefined ? {} : { tiers: shared.cost.tiers }),
     },
     ...(headers === undefined ? {} : { headers }),
     id,
     input: modelInput && modelInput.length > 0 ? modelInput : (fallback?.input ?? ["text"]),
-    maxTokens: finitePositive(raw.maxTokens) ?? fallback?.maxTokens ?? 16_384,
+    maxTokens: finitePositive(raw.maxTokens) ?? chatFallback?.maxTokens ?? 16_384,
     name: safeString(raw.name) ?? fallback?.name ?? id,
-    reasoning: typeof raw.reasoning === "boolean" ? raw.reasoning : (fallback?.reasoning ?? false),
+    reasoning: typeof raw.reasoning === "boolean" ? raw.reasoning : (chatFallback?.reasoning ?? false),
     ...(thinkingLevelMap === undefined ? {} : { thinkingLevelMap }),
+    ...(promptCache === undefined ? {} : { promptCache }),
+    ...(samplingParams === undefined ? {} : { samplingParams }),
   };
 }
 
 function applyModelOverride(model: ProviderModelConfig, value: unknown): ProviderModelConfig {
   if (!isObject(value)) return model;
   const cost = isObject(value.cost) ? value.cost : {};
+  const tiers = nativeCostTiers(cost.tiers, model.cost.tiers);
+  const inputLimits = nativeInputLimits(value.inputLimits, model.inputLimits);
   const modelInput = Array.isArray(value.input)
     ? [...new Set(value.input.filter((entry): entry is "text" | "image" => entry === "text" || entry === "image"))]
     : undefined;
+  if (model.type === "image" || model.type === "classifier") return {
+    ...model,
+    ...(safeString(value.name) ? { name: safeString(value.name)! } : {}),
+    input: modelInput && modelInput.length > 0 ? modelInput : model.input,
+    ...(inputLimits === undefined ? {} : { inputLimits }),
+    cost: { ...model.cost, ...cost,
+      ...(tiers === undefined ? {} : { tiers }) },
+    ...(model.type === "classifier" && finitePositive(value.contextWindow) ? { contextWindow: finitePositive(value.contextWindow)! } : {}),
+  } as ProviderModelConfig;
+  const promptCache = value.promptCache === undefined ? model.promptCache
+    : { ...model.promptCache, ...nativePromptCache(value.promptCache) };
+  const samplingParams = nativeSamplingParams(value.samplingParams, model.samplingParams);
   return {
     ...model,
     compat: mergeCompat(model.compat, value.compat),
+    ...(inputLimits === undefined ? {} : { inputLimits }),
+    ...(promptCache === undefined ? {} : { promptCache }),
+    ...(samplingParams === undefined ? {} : { samplingParams }),
     contextWindow: finitePositive(value.contextWindow) ?? model.contextWindow,
     cost: {
       ...model.cost,
@@ -207,6 +302,7 @@ function applyModelOverride(model: ProviderModelConfig, value: unknown): Provide
       cacheWrite: finiteNonNegative(cost.cacheWrite) ?? model.cost.cacheWrite,
       input: finiteNonNegative(cost.input) ?? model.cost.input,
       output: finiteNonNegative(cost.output) ?? model.cost.output,
+      ...(tiers === undefined ? {} : { tiers }),
     },
     input: modelInput && modelInput.length > 0 ? modelInput : model.input,
     maxTokens: finitePositive(value.maxTokens) ?? model.maxTokens,
@@ -224,7 +320,7 @@ function runtimeProviderConfig(
   if (!isObject(value)) {
     throw new HostError("provider_config_invalid", `Provider ${providerId} must be an object`);
   }
-  const currentModels = runtime.getModels(providerId).map((model) => ({ ...model }));
+  const currentModels = runtime.getAllModels(providerId).map((model) => ({ ...model })) as ProviderModelConfig[];
   parseProviderCapabilities(value.capabilities);
   let models: ProviderModelConfig[] | undefined;
   if (Array.isArray(value.models) || isObject(value.modelOverrides)) {
@@ -237,8 +333,9 @@ function runtimeProviderConfig(
         );
       }
       const id = safeString(rawModel.id);
-      const existingIndex = id === undefined ? -1 : models.findIndex((model) => model.id === id);
-      const fallback = existingIndex >= 0 ? models[existingIndex] : models[0];
+      const type = rawModel.type ?? "chat";
+      const existingIndex = id === undefined ? -1 : models.findIndex((model) => model.id === id && (model.type ?? "chat") === type);
+      const fallback = existingIndex >= 0 ? models[existingIndex] : models.find(model => (model.type ?? "chat") === type);
       const normalized = modelFromLayer(providerId, rawModel, value, fallback);
       if (existingIndex >= 0) models[existingIndex] = normalized;
       else models.push(normalized);
@@ -287,6 +384,8 @@ function browserSafeConfig(providerId: string, value: JsonObject): ProviderConfi
     ? value.models.filter(isObject).map((model) => {
         const cost = isObject(model.cost) ? model.cost : undefined;
         return {
+          ...(model.type === undefined ? {} : { type: model.type }),
+          ...(Array.isArray(model.output) ? { output: model.output } : {}),
           ...(safeString(model.api) === undefined ? {} : { api: safeString(model.api) }),
           ...(safeString(model.baseUrl) === undefined
             ? {}
@@ -482,6 +581,21 @@ async function updateProviderEntry(
     }
     const current = providerRecord(document, providerId);
     if (value && current) {
+      // The form edits a credential-blind subset. Keep native fields it cannot
+      // edit (headers, inputLimits, compatibility, cache metadata) on matching
+      // model types; removal and replacement of the editable fields still work.
+      if (Array.isArray(value.models) && Array.isArray(current.models)) {
+        const currentModels = current.models;
+        const editable = ["api", "baseUrl", "contextWindow", "cost", "id", "input", "maxTokens", "name", "reasoning", "thinkingLevelMap", "type", "output"];
+        value = { ...value, models: value.models.map(model => {
+          if (!isObject(model)) return model;
+          const prior = currentModels.find((entry: unknown) => isObject(entry) && entry.id === model.id && (entry.type ?? "chat") === (model.type ?? "chat"));
+          if (!isObject(prior)) return model;
+          const merged = { ...prior };
+          for (const key of editable) delete merged[key];
+          return { ...merged, ...model, ...(isObject(prior.cost) && isObject(model.cost) ? { cost: { ...prior.cost, ...model.cost } } : {}) };
+        }) };
+      }
       for (const key of replaceKeys) {
         if (Object.prototype.hasOwnProperty.call(value, key) || !Object.prototype.hasOwnProperty.call(current, key)) {
           continue;
@@ -525,6 +639,7 @@ export class ProviderConfigurationManager {
   readonly #agentDir: string;
   readonly #customPath: string | undefined;
   readonly #runtimeStates = new WeakMap<ModelRuntime, RuntimeConfigurationState>();
+  #inferenceCatalog: { key: string; runtime: Promise<ModelRuntime> } | undefined;
 
   constructor(options: ProviderConfigurationManagerOptions) {
     this.#agentDir = resolve(options.agentDir);
@@ -604,9 +719,30 @@ export class ProviderConfigurationManager {
     const configuredIds = new Set(Object.values(documents).flatMap(document => Object.keys(isObject(document.data.providers) ? document.data.providers : {})));
     for (const providerId of configuredIds) {
       try {
-        if (capabilitiesFromDocuments(documents, providerId)?.chat !== false) continue;
-        runtime.registerProvider(providerId, { models: [] });
-        state.appliedIds.add(providerId);
+        const capabilities = capabilitiesFromDocuments(documents, providerId);
+        const models = runtime.getAllModels(providerId).map(model => ({ ...model })) as ProviderModelConfig[];
+        for (const entry of capabilities?.decision?.enabled === false ? [] : capabilities?.decision?.models ?? []) {
+          if (models.some(model => model.type === "classifier" && model.id === entry.id)) continue;
+          const baseUrl = entry.baseUrl ?? capabilities?.decision?.baseUrl ?? runtime.getProvider(providerId)?.baseUrl;
+          models.push({ ...entry, type: "classifier", api: entry.api ?? "typesafe-system-one",
+            name: entry.name ?? entry.id, contextWindow: entry.contextWindow ?? 0, input: entry.input ?? ["text"],
+            cost: { cacheRead: 0, cacheWrite: 0, input: 0, output: 0, ...entry.cost },
+            ...(baseUrl ? { baseUrl } : {}),
+          } as ProviderModelConfig);
+        }
+        const classifiers = models.some(model => model.type === "classifier") ? {
+          "typesafe-system-one": systemOne,
+          "cloudflare-workers-ai-system-one": cloudflareSystemOne,
+          "llama-cpp-classify": llamaClassify,
+          ...runtime.getRegisteredProviderConfig(providerId)?.classifiers,
+        } : undefined;
+        if (classifiers || capabilities?.chat === false) {
+          runtime.registerProvider(providerId, {
+            ...(classifiers ? { classifiers } : {}),
+            models: capabilities?.chat === false ? models.filter(model => model.type === "image" || model.type === "classifier") : models,
+          });
+          state.appliedIds.add(providerId);
+        }
       } catch (error) {
         warnings.push(`Failed to apply provider capabilities for ${providerId}: ${error instanceof Error ? error.message : String(error)}`);
       }
@@ -640,7 +776,31 @@ export class ProviderConfigurationManager {
     const config = effective ? browserSafeConfig(normalizedId, effective) : undefined;
     const backgroundDocuments = { ...documents };
     delete backgroundDocuments.project;
-    const capabilities = capabilitiesFromDocuments(backgroundDocuments, normalizedId);
+    let capabilities = capabilitiesFromDocuments(backgroundDocuments, normalizedId);
+    // Use the native typed catalog, composed without project input. A project
+    // provider override must not redirect background inference suggestions.
+    const key = JSON.stringify([backgroundDocuments.user?.data, backgroundDocuments.custom?.data]);
+    if (this.#inferenceCatalog?.key !== key) {
+      const catalog = ModelRuntime.create({
+        allowModelNetwork: false,
+        authPath: join(this.#agentDir, "auth.json"),
+        modelsPath: join(this.#agentDir, "models.json"),
+      }).then(async native => { await this.apply(native, cwd, false); return native; });
+      this.#inferenceCatalog = { key, runtime: catalog };
+    }
+    const catalog = await this.#inferenceCatalog.runtime;
+    const classifiers = catalog.getModelsOfType("classifier", normalizedId);
+    if (classifiers.length) {
+      const declared = capabilities?.decision;
+      const models = [...(declared?.models ?? [])];
+      for (const model of classifiers) {
+        if (!models.some(entry => entry.id === model.id)) models.push({
+          id: model.id, name: model.name, api: model.api,
+          contextWindow: model.contextWindow,
+        });
+      }
+      capabilities = { ...capabilities, decision: { protocol: "pi-classifier", ...declared, models } };
+    }
     return {
       auth: {
         configured: status.configured,

@@ -1,6 +1,6 @@
 import type { PackageDescriptor } from "./types.js";
 
-export const FOUNDATIONAL_PI_PACKAGE_MANIFEST_REVISION = 3 as const;
+export const FOUNDATIONAL_PI_PACKAGE_MANIFEST_REVISION = 4 as const;
 
 export const FOUNDATIONAL_PI_PACKAGE_IDS = [
   "mcp",
@@ -9,6 +9,8 @@ export const FOUNDATIONAL_PI_PACKAGE_IDS = [
 export type FoundationalPiPackageId = (typeof FOUNDATIONAL_PI_PACKAGE_IDS)[number];
 
 export interface FoundationalPiPackageManifestEntry {
+  /** Optional external integration; only an explicit restore installs it. */
+  defaultProvision?: boolean;
   /** Stable Varin integration identity. It is not a package-source allowlist. */
   id: FoundationalPiPackageId;
   introducedRevision: number;
@@ -41,6 +43,7 @@ export const FOUNDATIONAL_PI_PACKAGE_MANIFEST = {
   integrations: [
     {
       id: "mcp",
+      defaultProvision: false,
       introducedRevision: 1,
       packageAliases: ["@varin/pi-mcp-adapter", "pi-mcp-adapter"],
       packageName: "@varin/pi-mcp-adapter",

@@ -235,6 +235,13 @@ export async function reconcileFoundationalPackages(
         });
         continue;
       }
+      if (entry.defaultProvision === false && !restored.has(entry.id)) {
+        statuses.set(entry.id, {
+          id: entry.id, intent: "policy_skipped", observed: "missing", operation: "idle",
+          provenance: prior?.provenance ?? "none", source: prior?.source ?? entry.source,
+        });
+        continue;
+      }
       if (
         prior === undefined
         && !current.autoInstallNew

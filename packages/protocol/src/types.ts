@@ -660,6 +660,16 @@ export interface SessionSnapshot extends SessionRuntimeState {
   /** Host-assigned identity of the active or most recently settled agent run. */
   runId?: string;
   model?: ModelDescriptor;
+  /** Native virtual selection remains in model; this is the latest physical response target. */
+  routedModel?: { model: ModelDescriptor; thinkingLevel?: ThinkingLevel };
+  cacheWarming?: {
+    state: "inactive" | "scheduled" | "refreshing";
+    reason?: string;
+    nextWarmAt?: number;
+    decision?: { phase: "streaming" | "idle"; warmCost: number; missCost: number;
+      continuationProbability: number; expectedSavings: number; economicsAvailable: boolean; action: "warm" | "stop" };
+    extensionOverride?: boolean;
+  };
   name?: string;
   /** Tool call identifiers still executing on the session worker. */
   pendingToolCallIds?: string[];

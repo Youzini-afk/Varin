@@ -1,6 +1,6 @@
 import type { JsonValue } from '@varin/protocol';
 
-export const MCP_ADAPTER_STATUS_CHANNEL = 'pi-mcp-adapter/status/v1';
+export const MCP_ADAPTER_STATUS_CHANNEL = 'varin.mcp/status/v1';
 
 export type McpAdapterServerStatus =
   | 'connected'
@@ -20,6 +20,7 @@ export interface McpAdapterServerSnapshot {
 }
 
 export interface McpAdapterStatusSnapshot {
+  owner?: 'native' | 'extension';
   connectedCount: number;
   disabledCount: number;
   servers: McpAdapterServerSnapshot[];
@@ -85,6 +86,7 @@ export function parseMcpAdapterStatus(value: JsonValue | undefined): McpAdapterS
   }
 
   return {
+    ...(value.owner === 'native' || value.owner === 'extension' ? { owner: value.owner } : {}),
     connectedCount: value.connectedCount,
     disabledCount: value.disabledCount,
     servers,

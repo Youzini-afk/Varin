@@ -64,6 +64,7 @@ import { isPiAbortError } from '@/lib/pi-runtime/abort';
 import { isPiRequestOutcomeUnknown } from '@/lib/pi-runtime/request-outcome';
 
 export interface PiToolExecutionState {
+  parentToolCallId?: string;
   args: JsonValue;
   isError?: boolean;
   name: string;
@@ -708,6 +709,7 @@ export const reducePiAgentEvent = (
           args: event.args,
           name: event.toolName,
           status: 'running',
+          ...(event.parentToolCallId ? { parentToolCallId: event.parentToolCallId } : {}),
           toolCallId: event.toolCallId,
         },
       };
@@ -725,6 +727,7 @@ export const reducePiAgentEvent = (
           args: event.args,
           name: event.toolName,
           partialResult: event.partialResult,
+          ...(event.parentToolCallId ? { parentToolCallId: event.parentToolCallId } : {}),
           status: 'running',
         },
       };
@@ -739,6 +742,7 @@ export const reducePiAgentEvent = (
             toolCallId: event.toolCallId,
           }),
           isError: event.isError,
+          ...(event.parentToolCallId ? { parentToolCallId: event.parentToolCallId } : {}),
           name: event.toolName,
           result: event.result,
           status: event.isError ? 'error' : 'success',

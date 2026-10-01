@@ -1,9 +1,10 @@
+import { fauxProvider } from "@earendil-works/pi-ai";
 import { mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
 import assert from "node:assert/strict";
 import { describe, it } from "node:test";
-import { fauxAssistantMessage, fauxToolCall, registerFauxProvider } from "@earendil-works/pi-ai/compat";
+import { fauxAssistantMessage, fauxToolCall } from "@earendil-works/pi-ai/compat";
 import type { AgentSessionServices } from "@earendil-works/pi-coding-agent";
 import type { HostEvent, HostEventData } from "@varin/protocol";
 import { createHarnessServiceHost } from "../../../web/application-host/lib/harness/service-host.js";
@@ -28,7 +29,7 @@ describe("thread runtime with real Pi sessions", () => {
     const agentDir = join(root, "agent");
     await mkdir(workspace, { recursive: true });
     await mkdir(agentDir, { recursive: true });
-    const faux = registerFauxProvider();
+    const faux = fauxProvider();
     faux.setResponses([
       () => fauxAssistantMessage("Child session completed the assigned check."),
       () => fauxAssistantMessage("The parent agrees that the existing seam should stay."),
@@ -38,6 +39,7 @@ describe("thread runtime with real Pi sessions", () => {
     const model = faux.getModel();
     const configureServices = async (services: AgentSessionServices) => {
       services.modelRuntime.registerProvider(model.provider, {
+          streamSimple: faux.provider.streamSimple,
         api: model.api,
         baseUrl: model.baseUrl,
         models: [{
@@ -267,7 +269,6 @@ describe("thread runtime with real Pi sessions", () => {
       for (const child of childHosts.values()) await child.dispose();
       await parentHost.dispose();
       await registry.dispose();
-      faux.unregister();
       await rm(root, { recursive: true, force: true });
     }
   });
@@ -289,7 +290,7 @@ describe("thread runtime with native working-state integration", () => {
       "utf8",
     );
 
-    const faux = registerFauxProvider();
+    const faux = fauxProvider();
     let parentHost: SessionHost | null = null;
     let router: ReturnType<typeof createHarnessRouter> | null = null;
     let parentExecutionId: string | undefined;
@@ -312,6 +313,7 @@ describe("thread runtime with native working-state integration", () => {
     const model = faux.getModel();
     const configureServices = async (services: AgentSessionServices) => {
       services.modelRuntime.registerProvider(model.provider, {
+          streamSimple: faux.provider.streamSimple,
         api: model.api,
         baseUrl: model.baseUrl,
         models: [{
@@ -633,7 +635,6 @@ describe("thread runtime with native working-state integration", () => {
         return fauxAssistantMessage("Fixture stopped after the failed tool result.");
       }
       if (serialized.includes("You are working as the teammate thread")) {
-        const child = [...childHosts.values()].at(-1);
         childRoundTools += 1;
         if (childRoundTools === 1) return fauxAssistantMessage([fauxToolCall("send", {
           to: "parent", kind: "request", requestId: "native-contract-question", message: "Which filename is approved for the result?",
@@ -653,7 +654,7 @@ describe("thread runtime with native working-state integration", () => {
       }
       if (!answeredDependency && serialized.includes("native-contract-question")) {
         answeredDependency = true;
-        return fauxAssistantMessage([fauxToolCall("send", { threadId: dispatchedThreadId,
+        return fauxAssistantMessage([fauxToolCall("send", { threadId: dispatchedThreadId!,
           kind: "inform", replyTo: "native-contract-question", message: "APPROVED_NAME child-result.txt" })]);
       }
       if (/"done":1/.test(serialized)) {
@@ -818,7 +819,6 @@ describe("thread runtime with native working-state integration", () => {
       await registry.dispose();
       await native.dispose();
       await documents.dispose();
-      faux.unregister();
       await rm(root, { recursive: true, force: true }).catch(() => undefined);
     }
   });

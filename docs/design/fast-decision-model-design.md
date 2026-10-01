@@ -7,7 +7,7 @@ Last updated: 2026-10-01
 本设计由 [Agent Harness](agent-harness.md) 第 6.1、8.5 节引用，实施顺序见
 [阶段 F](../plan/agent-harness-plan.md#阶段-f快速决策模型与渐进检索d-312)，实际交付只记入
 [能力状态](../status.md)。本文定义通用能力与首个检索消费者。2026-09-28 源码核查确认
-[TypeSafe/Jev adapter](../../packages/pi-host/src/harness/typesafe-systemone.ts) 已实现；
+[Pi 原生分类适配](../../packages/pi-host/src/harness/native-classifier.ts) 已实现；
 [用途合同](../../packages/protocol/src/harness-fast-decision.ts) 已注册 `explore/web/scholarly`。
 记忆消费者的当前状态见 [BC 实施计划](../plan/bot-computer-use-plan.md)，不由原 F0–F4 的交付范围推断。
 
@@ -94,7 +94,9 @@ Host 只持有去凭据绑定和已授权材料，通过 broker/Pi inference 请
 
 ### 3.3 Jev 首个适配器
 
-调用 TypeSafe 的 `systemone` 接口，将通用选择/判断/评分映射为它当前支持的 Choice、Noul、Score。
+当前通过 Pi 0.99.2 原生 classifier API 调用 TypeSafe、Cloudflare System One 或 llama.cpp，
+保留通用判断、选择、评分及部分回答语义。传输、认证、重试和供应商限制归原生 API；
+不把某个 TypeSafe 模型的容量固化到通用协议。嵌入和 HTTP 重排继续使用现有独立请求协议。
 由 adapter 处理版本、API 身份、真实输入约束、取消和返回映射；不从聊天模型列表猜测兼容。
 合法的 typed 输出只保证结构与候选范围合法，不证明语义判断正确。
 

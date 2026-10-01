@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import { describe, it } from "node:test";
 import { SessionManager, convertToLlm, type AgentSession } from "@earendil-works/pi-coding-agent";
-import { createAssistantMessageEventStream, type AssistantMessage, type Context, type Model, type Api } from "@earendil-works/pi-ai";
+import { createAssistantMessageEventStream, normalizeContext, type AssistantMessage, type Context, type Model, type Api } from "@earendil-works/pi-ai";
 import type { StreamFn } from "@earendil-works/pi-agent-core";
 import { attachContextRequestBoundary } from "../../src/harness/context-request-boundary.js";
 import { createRequestContextInjector } from "../../src/harness/request-context.js";
@@ -28,12 +28,15 @@ const session = (stream: StreamFn, model = MODEL, initial = "Investigate this ta
   manager.appendMessage({ role: "user", content: initial, timestamp: Date.now() });
   return {
     model, sessionId: manager.getSessionId(), sessionManager: manager,
+    systemPrompt: "stable",
+    refreshContext: () => {},
+      cancelCacheWarming: () => {},
     agent: { streamFunction: stream, convertToLlm, state: {
       systemPrompt: "stable", tools: [], thinkingLevel: "off", messages: manager.buildSessionContext().messages,
     } },
   } as unknown as AgentSession;
 };
-const contextFor = (bound: AgentSession): Context => ({
+const contextFor = (bound: AgentSession) => normalizeContext({
   systemPrompt: "stable", messages: convertToLlm(bound.sessionManager.buildSessionContext().messages),
 });
 const textOf = (context: Context) => JSON.stringify(context.messages);

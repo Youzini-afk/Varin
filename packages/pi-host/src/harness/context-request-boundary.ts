@@ -8,7 +8,7 @@ import {
   type CompactionSettings,
 } from "@earendil-works/pi-coding-agent";
 import type { StreamFn } from "@earendil-works/pi-agent-core";
-import { createAssistantMessageEventStream, type Api, type AssistantMessage, type Context, type Model, type SimpleStreamOptions } from "@earendil-works/pi-ai";
+import { createAssistantMessageEventStream, getCurrentSystemMessage, getCurrentSystemPrompt, getCurrentTools, normalizeContext, type Api, type AssistantMessage, type Context, type Model, type SimpleStreamOptions } from "@earendil-works/pi-ai";
 import { activeCompactionMessages } from "./compaction-context.js";
 
 /** A logical model request after Pi's context hooks and convertToLlm. */
@@ -30,10 +30,7 @@ export class ContextCapacityError extends Error {
 
 /** Estimate the entire request, not usage embedded in an older transcript. */
 export function estimateModelInputTokens(context: Context): number {
-  const prefix = (context.systemPrompt?.length ?? 0)
-    + (context.tools?.length ? JSON.stringify(context.tools).length : 0);
-  return Math.ceil(prefix / 4)
-    + context.messages.reduce((tokens, message) => tokens + estimateTokens(message), 0);
+  return normalizeContext(context).messages.reduce((tokens, message) => tokens + estimateTokens(message), 0);
 }
 
 function sameMessage(left: Context["messages"][number], right: Context["messages"][number]): boolean {
@@ -73,8 +70,8 @@ export class RequestBudgetObservation {
 // particular, a derived summary must never carry a tool executor or drain queues.
 const LOOP_OPTIONS = new Set([
   "model", "convertToLlm", "transformContext", "getApiKey", "getSteeringMessages",
-  "getFollowUpMessages", "beforeToolCall", "afterToolCall", "shouldStopAfterTurn",
-  "prepareNextTurn", "toolExecution",
+  "getFollowUpMessages", "beforeToolCall", "afterToolCall", "finishTurn",
+  "prepareNextTurn", "prepareNextTurnWithContext", "resolveModel", "toolExecution",
 ]);
 
 export function modelRequestOptions(options: SimpleStreamOptions | undefined): SimpleStreamOptions {
@@ -86,8 +83,8 @@ export function contextRequestKey(model: Model<Api>, context: Context, options: 
   return JSON.stringify({
     model: { provider: model.provider, id: model.id, api: model.api, baseUrl: model.baseUrl,
       contextWindow: model.contextWindow, maxTokens: model.maxTokens, samplingParams: model.samplingParams },
-    systemPrompt: context.systemPrompt,
-    tools: context.tools?.map(({ name, description, parameters }) => ({ name, description, parameters })),
+    systemPrompt: getCurrentSystemPrompt(normalizeContext(context).messages),
+    tools: getCurrentTools(normalizeContext(context).messages),
     reasoning: options.reasoning,
     thinkingBudgets: options.thinkingBudgets,
     temperature: options.temperature,
@@ -138,30 +135,32 @@ export function attachContextRequestBoundary(session: AgentSession, options: Con
   let disposed = false;
 
   const request = (model: Model<Api>, context: Context, rawOptions?: SimpleStreamOptions): ContextModelRequest => {
-    context = { ...context, ...(context.tools ? { tools: context.tools.map(({ name, description, parameters }) => ({ name, description, parameters })) } : {}) };
+    const transcript = normalizeContext(context);
     const modelOptions = modelRequestOptions(rawOptions);
     const settings = options.getCompactionSettings();
     // An explicit request output reservation is respected. A model's advertised
     // maximum output is a ceiling, not a new Harness-sized input window.
     const reserveTokens = Math.max(settings.reserveTokens, modelOptions.maxTokens ?? 0);
-    const inputTokens = budget.estimate(contextRequestKey(model, context, modelOptions), context);
-    return { model, context, options: modelOptions, inputTokens, reserveTokens,
+    const inputTokens = budget.estimate(contextRequestKey(model, transcript, modelOptions), transcript);
+    return { model, context: transcript, options: modelOptions, inputTokens, reserveTokens,
       needsSpace: model.contextWindow > 0 && inputTokens + reserveTokens > model.contextWindow };
   };
 
-  const currentRequest = async (signal?: AbortSignal): Promise<ContextModelRequest> => {
-    const model = session.model;
+  const currentRequest = async (signal?: AbortSignal, physicalModel?: Model<Api>): Promise<ContextModelRequest> => {
+    const model = physicalModel ?? session.routedModel?.model ?? session.model;
     if (!model) throw new ContextCapacityError("The session has no model for context preparation");
-    const { reasoning: _reasoning, ...inheritedOptions } = latestOptions;
+    const inheritedOptions = latestOptions;
     const raw = activeCompactionMessages(session.sessionManager.buildSessionContext().messages);
     const messages = agent.transformContext ? await agent.transformContext(raw, signal) : raw;
     return request(model, {
-      systemPrompt: agent.state.systemPrompt,
-      tools: agent.state.tools.map(({ name, description, parameters }) => ({ name, description, parameters })),
+      ...(!raw.some(message => message.role === "system") ? {
+        systemPrompt: session.systemPrompt,
+        tools: agent.state.tools.map(({ name, description, parameters }) => ({ name, description, parameters })),
+      } : {}),
       messages: await agent.convertToLlm(messages),
     }, {
       ...inheritedOptions,
-      ...(agent.state.thinkingLevel === "off" ? {} : { reasoning: agent.state.thinkingLevel }),
+      ...(inheritedOptions.reasoning === undefined && agent.state.thinkingLevel !== "off" ? { reasoning: agent.state.thinkingLevel } : {}),
       ...(signal ? { signal } : {}),
       sessionId: session.sessionId,
       transport: agent.transport,
@@ -201,10 +200,12 @@ export function attachContextRequestBoundary(session: AgentSession, options: Con
         if (!branch.some((entry) => entry.id === result.firstKeptEntryId)) {
           throw new ContextCapacityError("The prepared context boundary no longer belongs to the active branch");
         }
+        const systemMessage = getCurrentSystemMessage(normalizeContext(next.context).messages);
         const preview = buildSessionContext([...branch, {
           type: "compaction", id: "varin-context-preview", parentId: session.sessionManager.getLeafId(),
           timestamp: new Date().toISOString(), summary: result.summary,
           firstKeptEntryId: result.firstKeptEntryId, tokensBefore: before,
+          ...(systemMessage ? { systemMessage } : {}),
         }]);
         const previewTokens = estimateModelInputTokens({ ...next.context,
           messages: await agent.convertToLlm(activeCompactionMessages(preview.messages)) });
@@ -217,13 +218,14 @@ export function attachContextRequestBoundary(session: AgentSession, options: Con
           before, result.details, true, result.usage);
         const entry = session.sessionManager.getEntry(id);
         if (!entry || entry.type !== "compaction") throw new Error("Pi did not publish the compaction entry");
-        agent.state.messages = activeCompactionMessages(session.sessionManager.buildSessionContext().messages);
+        session.refreshContext();
+        session.cancelCacheWarming();
         generation += 1;
         budget.clear();
         options.onEvent?.({ type: "entry_appended", entry });
         await session.extensionRunner?.emit({ type: "session_compact", compactionEntry: entry,
           fromExtension: true, reason: "threshold", willRetry: false });
-        next = await currentRequest(signal);
+        next = await currentRequest(signal, next.model);
         await prepare();
         options.onEvent?.({ type: "compaction_end", reason: "threshold", aborted: false, willRetry: false,
           result: { ...result, tokensBefore: before, estimatedTokensAfter: next.inputTokens } });
@@ -239,7 +241,7 @@ export function attachContextRequestBoundary(session: AgentSession, options: Con
       const outgoing = structuredClone(next.context);
       const key = contextRequestKey(next.model, outgoing, next.options);
       const sentGeneration = generation;
-      const result = await stream(next.model, next.context, { ...rawOptions, ...next.options, signal });
+      const result = await stream(next.model, normalizeContext(next.context), { ...rawOptions, ...next.options, signal });
       void result.result().then((response) => {
         if (!disposed && generation === sentGeneration) budget.record(key, outgoing, response);
       }).catch(() => undefined);
@@ -260,7 +262,7 @@ export function attachContextRequestBoundary(session: AgentSession, options: Con
                 );
                 const entry = session.sessionManager.getEntry(id);
                 if (!entry) throw new Error("Pi did not retain the delivered environment observations");
-                agent.state.messages = activeCompactionMessages(session.sessionManager.buildSessionContext().messages);
+                session.refreshContext();
                 generation += 1;
                 options.onEvent?.({ type: "entry_appended", entry });
               }
@@ -298,7 +300,7 @@ export function attachContextRequestBoundary(session: AgentSession, options: Con
     if (generation === refreshedGeneration) return update;
     refreshedGeneration = generation;
     const messages = activeCompactionMessages(session.sessionManager.buildSessionContext().messages);
-    agent.state.messages = messages;
+    session.refreshContext();
     return { ...update, context: { ...context.context, ...update?.context, messages } };
   };
   agent.streamFunction = wrapper;

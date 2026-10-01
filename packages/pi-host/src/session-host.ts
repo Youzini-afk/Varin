@@ -2,7 +2,7 @@ import { createHash, randomUUID } from "node:crypto";
 import { existsSync, type Dirent } from "node:fs";
 import { copyFile, lstat, mkdir, readdir, rm, stat } from "node:fs/promises";
 import { homedir } from "node:os";
-import { basename, dirname, extname, isAbsolute, join, relative, resolve, sep } from "node:path";
+import { basename, dirname, isAbsolute, join, relative, resolve, sep } from "node:path";
 import {
   type AgentSession,
   type AgentSessionRuntime,
@@ -11,6 +11,9 @@ import {
   createAgentSessionFromServices,
   createAgentSessionRuntime,
   createAgentSessionServices,
+  createMcpExtension,
+  createCodemodeExtension,
+  createToolSearchExtension,
   DefaultPackageManager,
   type PackageSource,
   hasTrustRequiringProjectResources,
@@ -115,7 +118,7 @@ import {
 } from "./agent-providers/bridge.js";
 import { AgentProviderRegistry } from "./agent-providers/registry.js";
 import { findPiSubagentsTool } from "./agent-providers/pi-subagents-provider.js";
-import { ConfigTextFileEditor } from "./config-text-file-editor.js";
+import { ConfigTextFileEditor, resolveConfigDocumentPath } from "./config-text-file-editor.js";
 import { resolveConfigTextAuthority } from "./config-text-authority-resolver.js";
 import { ConfigWatchManager } from "./config-watch-manager.js";
 import { createExtensionStateBridgeExtension } from "./extension-state-bridge.js";
@@ -485,63 +488,6 @@ function isMissingPathError(error: unknown): boolean {
   );
 }
 
-async function resolveConfigDocumentPath(
-  base: string,
-  requestedPath: string,
-  options: {
-    extensions?: readonly string[];
-    reservedPaths?: readonly string[];
-  } = {},
-): Promise<{ path: string; relativePath: string }> {
-  if (requestedPath.length === 0 || requestedPath.includes("\0")) {
-    throw new HostError("invalid_config_path", "Configuration path must be non-empty");
-  }
-  const extensions = options.extensions ?? [".json"];
-  if (!extensions.includes(extname(requestedPath).toLowerCase())) {
-    throw new HostError(
-      "invalid_config_path",
-      `Configuration path must use one of: ${extensions.join(", ")}`,
-    );
-  }
-  const root = resolve(base);
-  const path = resolve(root, requestedPath);
-  const relativePath = relative(root, path);
-  if (
-    relativePath.length === 0 ||
-    relativePath === ".." ||
-    relativePath.startsWith(`..${sep}`) ||
-    isAbsolute(relativePath)
-  ) {
-    throw new HostError(
-      "invalid_config_path",
-      "Configuration path must stay inside its configuration root",
-    );
-  }
-  const normalizedPath = relativePath.replaceAll("\\", "/");
-  const reservedPaths = options.reservedPaths ?? ["settings.json"];
-  if (reservedPaths.some((entry) => normalizedPath.toLowerCase() === entry.toLowerCase())) {
-    throw new HostError(
-      "invalid_config_path",
-      "Configuration path is owned by a dedicated Varin settings API",
-    );
-  }
-  let current = root;
-  for (const segment of relativePath.split(sep)) {
-    current = join(current, segment);
-    try {
-      if ((await lstat(current)).isSymbolicLink()) {
-        throw new HostError(
-          "invalid_config_path",
-          "Configuration path cannot traverse a symbolic link",
-        );
-      }
-    } catch (error) {
-      if (isMissingPathError(error)) break;
-      throw error;
-    }
-  }
-  return { path, relativePath: normalizedPath };
-}
 
 function homeRoot(): string {
   const configuredHome = process.env.HOME?.trim();
@@ -973,6 +919,12 @@ export class SessionHost {
       ...(liveAssistant?.role === "assistant" ? { liveAssistant } : {}),
       ...(this.#runId === undefined ? {} : { runId: this.#runId }),
       ...(model === undefined ? {} : { model }),
+      ...(session.routedModel ? { routedModel: {
+        model: toModelDescriptor(session.routedModel.model, availableModels.some(candidate =>
+          candidate.provider === session.routedModel!.model.provider && candidate.id === session.routedModel!.model.id))!,
+        ...(session.routedModel.thinkingLevel === undefined ? {} : { thinkingLevel: session.routedModel.thinkingLevel }),
+      } } : {}),
+      ...(session.cacheWarmingStatus ? { cacheWarming: structuredClone(session.cacheWarmingStatus) } : {}),
       ...(name === undefined ? {} : { name }),
       pendingMessageCount: session.pendingMessageCount,
       pendingToolCallIds: [...session.agent.state.pendingToolCalls],
@@ -1417,9 +1369,9 @@ export class SessionHost {
     let unsubscribeStarted = () => {};
     try {
       await this.#queueInstructions(instructions, "nextTurn");
-      let accept: (accepted: boolean) => void = () => {};
+      let accept: (disposition: "handled" | "queued" | "started") => void = () => {};
       const preflight = new Promise<boolean>((resolvePreflight) => {
-        accept = resolvePreflight;
+        accept = disposition => resolvePreflight(disposition === "started");
       });
       let markAgentStarted: () => void = () => {};
       const agentStarted = new Promise<void>((resolveStarted) => {
@@ -1708,6 +1660,7 @@ export class SessionHost {
     this.session.abortCompaction();
     this.session.abortBranchSummary();
     this.session.agent.abort();
+    this.session.cancelCacheWarming();
     const goal = readSessionFeatures(this.session.sessionManager).goal;
     if (wasBusy && goal?.status === "active") {
       this.mutateFeatures(sessionId, {
@@ -3584,6 +3537,14 @@ export class SessionHost {
         cwd,
         resourceLoaderOptions: {
           extensionFactories: [
+            { builtin: true, replaceable: true, factory: createCodemodeExtension(), name: "codemode" },
+            { builtin: true, replaceable: true, factory: createToolSearchExtension(), name: "tool-search" },
+            {
+              builtin: true,
+              replaceable: true,
+              factory: createMcpExtension(mcpConfig.nativeOptions(agentDir, this.#emit)),
+              name: "mcp",
+            },
             {
               factory: createSessionFeaturesExtension(),
               hidden: true,
@@ -3715,6 +3676,7 @@ export class SessionHost {
             },
             {
               factory: createPermissionGateExtension({
+                allowedTools: () => this.#sessionToolAllowlist,
                 sessionId: sessionManager.getSessionId(),
                 cwd,
                 bridge: hostServicesBridge,

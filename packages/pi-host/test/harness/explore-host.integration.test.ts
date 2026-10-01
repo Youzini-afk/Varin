@@ -35,7 +35,7 @@ for (let configuration = 0; configuration < 16; configuration++) it(`executes op
       ...(embedding ? { semanticRecall: semantic } : {}),
       harnessSettings: async () => ({ global: { harness: rerank ? { rerank: { protocol: 'http-rerank', providerId: 'rank', modelId: 'model' } } : {} } }),
       rerankExploreViews: ranking,
-      fastDecisionStatus: async () => decision ? { status: 'ready', binding: { protocol: 'typesafe-systemone', providerId: 'decision', modelId: 'test', configurationId: 'fixed' } } : { status: 'unconfigured' },
+      fastDecisionStatus: async () => decision ? { status: 'ready', binding: { protocol: 'pi-classifier', providerId: 'decision', modelId: 'test', configurationId: 'fixed' } } : { status: 'unconfigured' },
       fastDecision: async (input: { questions: { id: string }[] }) => {
         // A real provider responds after the initial reads have settled. The
         // public tool must still let its selected operation run before finish.

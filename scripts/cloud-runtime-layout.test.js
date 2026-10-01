@@ -81,6 +81,7 @@ const createFixture = () => {
     const packageRoot = path.join(root, 'packages', directory);
     writeJson(path.join(packageRoot, 'package.json'), manifests[directory]);
     fs.mkdirSync(path.join(packageRoot, 'dist'), { recursive: true });
+    if (directory === 'pi-host') fs.mkdirSync(path.join(packageRoot, 'patches'));
     if (directory === 'web') {
       fs.mkdirSync(path.join(packageRoot, 'bin'), { recursive: true });
       fs.mkdirSync(path.join(packageRoot, 'server'), { recursive: true });
@@ -180,12 +181,11 @@ describe('Varin cloud runtime layout', () => {
     const manifestPath = path.join(fixture, 'package.json');
     const manifest = readJson(manifestPath);
     manifest.patchedDependencies = {
-      '@earendil-works/pi-coding-agent@0.85.1': 'patches/pi-coding-agent.patch',
+      '@earendil-works/pi-coding-agent@0.99.2': 'packages/pi-host/patches/pi-coding-agent.patch',
     };
     writeJson(manifestPath, manifest);
     expect(() => verifyCloudRuntimeLayout(fixture)).toThrow('Cloud runtime Pi patch is missing');
-    fs.mkdirSync(path.join(fixture, 'patches'));
-    fs.writeFileSync(path.join(fixture, 'patches', 'pi-coding-agent.patch'), 'fixture patch\n');
+    fs.writeFileSync(path.join(fixture, 'packages', 'pi-host', 'patches', 'pi-coding-agent.patch'), 'fixture patch\n');
     expect(() => verifyCloudRuntimeLayout(fixture)).not.toThrow();
   });
 

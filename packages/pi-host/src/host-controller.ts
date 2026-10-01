@@ -412,8 +412,8 @@ function readFastDecisionInstructions(value: unknown, path: string): FastDecisio
 }
 
 function readFastDecisionParams(params: Record<string, unknown>): HarnessFastDecisionParams {
-  if (readString(params, "protocol") !== "typesafe-systemone") {
-    throw new HostError("invalid_params", "fast decision protocol must be typesafe-systemone");
+  if (readString(params, "protocol") !== "pi-classifier") {
+    throw new HostError("invalid_params", "fast decision protocol must be pi-classifier");
   }
   const purpose = readString(params, "purpose");
   if (!FAST_DECISION_PURPOSES.includes(purpose as HarnessFastDecisionPurpose)) {
@@ -498,7 +498,7 @@ function readFastDecisionParams(params: Record<string, unknown>): HarnessFastDec
     configurationId: readString(params, "configurationId"),
     providerId: readString(params, "providerId"),
     modelId: readString(params, "modelId"),
-    protocol: "typesafe-systemone",
+    protocol: "pi-classifier",
     purpose: purpose as HarnessFastDecisionPurpose,
     goal: readString(params, "goal", { allowEmpty: true }),
     materials,

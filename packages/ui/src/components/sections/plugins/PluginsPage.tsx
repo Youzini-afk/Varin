@@ -126,8 +126,16 @@ const FoundationalIntegrationSection: React.FC<FoundationalIntegrationSectionPro
   status,
 }) => {
   const { t } = useI18n();
-  const canRestore = hasFoundationalPackageRestoreAction(status);
+  const integrations = FOUNDATIONAL_PI_PACKAGE_MANIFEST.integrations.filter(integration => {
+    const entry = status?.entries.find(candidate => candidate.id === integration.id);
+    return integration.defaultProvision !== false || (entry && (entry.observed !== 'missing'
+      || entry.provenance !== 'none' || entry.operation !== 'idle'));
+  });
+  const canRestore = hasFoundationalPackageRestoreAction(status ? {
+    ...status, entries: status.entries.filter(entry => integrations.some(integration => integration.id === entry.id)),
+  } : undefined);
   const restoreAllBusy = busyAction?.action === 'restore' && busyAction.id === undefined;
+  if (!integrations.length && !error && busyAction === null) return null;
   return (
     <SettingsSection
       settingsItem="plugins.foundation"
@@ -160,7 +168,7 @@ const FoundationalIntegrationSection: React.FC<FoundationalIntegrationSectionPro
           />
         </div>
 
-        {FOUNDATIONAL_PI_PACKAGE_MANIFEST.integrations.map((integration) => {
+        {integrations.map((integration) => {
           const entry = status?.entries.find((candidate) => candidate.id === integration.id);
           const presentation = projectFoundationalPackageStatus(entry);
           const rowBusy = busyAction?.action === 'restore' && busyAction.id === integration.id;

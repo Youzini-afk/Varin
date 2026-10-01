@@ -1,14 +1,15 @@
+import { fauxProvider, getCurrentTools, normalizeContext } from "@earendil-works/pi-ai";
 import assert from "node:assert/strict";
 import { mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { describe, it } from "node:test";
-import { fauxAssistantMessage, fauxToolCall, registerFauxProvider } from "@earendil-works/pi-ai/compat";
+import { fauxAssistantMessage, fauxToolCall } from "@earendil-works/pi-ai/compat";
 import type { AgentSessionServices } from "@earendil-works/pi-coding-agent";
 import type { Context } from "@earendil-works/pi-ai";
 import { SessionHost } from "../src/session-host.js";
 import { createHarnessEmit, permissionInspectResult } from "./harness-emit.js";
-import { persistentProviderMessages, providerRosterMessages } from "./harness/provider-context.js";
+import { persistentProviderMessages, providerRosterMessages, providerSystemPrompt } from "./harness/provider-context.js";
 
 export interface CapturedPayload {
   system: string;
@@ -19,17 +20,17 @@ export interface CapturedPayload {
 /**
  * Capture provider payloads by intercepting the faux provider's response
  * callbacks. Each callback receives the full provider `Context` which
- * contains `systemPrompt`, `tools`, and `messages`.
+ * carries prompt and tool changes as native system messages.
  *
- * Usage: call `registerFauxProvider()`, set responses via `faux.setResponses()`
+ * Usage: call `fauxProvider()`, set responses via `faux.setResponses()`
  * with callbacks that push to `capturedContexts`, then run the session.
  * After the session, call `extractPayloads(capturedContexts)` to get
  * the normalized payloads.
  */
 export function extractPayloads(contexts: Context[]): CapturedPayload[] {
   return contexts.map((ctx) => ({
-    system: ctx.systemPrompt ?? "",
-    tools: ctx.tools,
+    system: providerSystemPrompt(ctx),
+    tools: getCurrentTools(normalizeContext(ctx).messages),
     messages: ctx.messages,
   }));
 }
@@ -68,7 +69,7 @@ describe("Zone 0 stability contract (1.2)", () => {
     // Create a file for the read tool to succeed in tool-call steps
     await writeFile(join(root, "test.txt"), "hello world\n", "utf8");
 
-    const faux = registerFauxProvider();
+    const faux = fauxProvider();
     const capturedContexts: Context[] = [];
     const capture = (reply: Parameters<typeof fauxAssistantMessage>[0]) => (context: Context) => {
       capturedContexts.push(context);
@@ -92,6 +93,7 @@ describe("Zone 0 stability contract (1.2)", () => {
     const model = faux.getModel();
     const configureServices = async (services: AgentSessionServices) => {
       services.modelRuntime.registerProvider(model.provider, {
+          streamSimple: faux.provider.streamSimple,
         api: model.api,
         baseUrl: model.baseUrl,
         models: [
@@ -188,7 +190,6 @@ describe("Zone 0 stability contract (1.2)", () => {
       }
     } finally {
       await host.dispose();
-      faux.unregister();
       await rm(root, { recursive: true, force: true });
     }
   });

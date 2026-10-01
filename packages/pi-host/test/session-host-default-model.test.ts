@@ -1,14 +1,14 @@
+import { fauxProvider } from "@earendil-works/pi-ai";
 import assert from "node:assert/strict";
 import { mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { it } from "node:test";
-import { registerFauxProvider } from "@earendil-works/pi-ai/compat";
 import { SessionHost } from "../src/session-host.js";
 
 it("clearing a Bot override restores Pi's fresh-session choice without an explicit default", async () => {
   const root = await mkdtemp(join(tmpdir(), "varin-bot-model-inherit-"));
-  const faux = registerFauxProvider();
+  const faux = fauxProvider();
   const base = faux.getModel();
   const alternate = { ...base, id: `${base.id}-alternate`, name: "Alternate" };
   const host = new SessionHost({
@@ -17,6 +17,7 @@ it("clearing a Bot override restores Pi's fresh-session choice without an explic
     projectTrustOverride: true,
     configureServices: async (services) => {
       services.modelRuntime.registerProvider(base.provider, {
+          streamSimple: faux.provider.streamSimple,
         api: base.api,
         baseUrl: base.baseUrl,
         models: [base, alternate],
@@ -37,7 +38,6 @@ it("clearing a Bot override restores Pi's fresh-session choice without an explic
     assert.equal(reset.model?.id, initial.id);
   } finally {
     await host.dispose();
-    faux.unregister();
     await rm(root, { recursive: true, force: true });
   }
 });

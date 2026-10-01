@@ -230,12 +230,11 @@ export const VARIN_BUILTIN_FLEET_EXTENSION = definition({
 export const VARIN_BUILTIN_MCP_EXTENSION = definition({
   id: "varin.builtin.pi-mcp",
   displayName: "Pi MCP Workbench",
-  piPackages: ["pi-mcp-adapter"],
   contributions: [pageContribution({
     group: "pi",
     icon: "mcp",
     id: "varin.builtin.pi-mcp.page.mcp",
-    keywords: ["mcp", "model context protocol", "pi-mcp-adapter", "servers", "tools", "oauth"],
+    keywords: ["mcp", "model context protocol", "servers", "tools", "oauth"],
     kind: "split",
     order: 46,
     slug: "mcp",

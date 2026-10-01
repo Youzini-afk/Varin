@@ -1,0 +1,487 @@
+--- a/dist/core/extensions/types.d.ts
++++ b/dist/core/extensions/types.d.ts
+@@ -7,7 +7,7 @@
+  * - Register commands, keyboard shortcuts, and CLI flags
+  * - Interact with the user via UI primitives
+  */
+-import type { AgentMessage, AgentTool, AgentToolCallOutcome, AgentToolResult, AgentToolUpdateCallback, ThinkingLevel, ToolExecutionMode } from "@earendil-works/pi-agent-core";
++import type { AgentMessage, AgentTool, AgentToolCallOutcome, AgentToolResult, AgentToolUpdateCallback, ThinkingLevel, ToolExecutionMode, ToolExecutionPlan } from "@earendil-works/pi-agent-core";
+ import type { AnyModel, Api, AssistantMessageEvent, AssistantMessageEventStream, ClassifierApi, ConstrainedSamplingConfig, ImageApi, ImageContent, JsonValue, Message, Model, OAuthCredentials, OAuthLoginCallbacks, Provider, ProviderClassifier, ProviderHeaders, ProviderId, ProviderImages, RefreshModelsContext, SimpleStreamOptions, TextContent, ToolResultMessage, TranscriptContext, Usage } from "@earendil-works/pi-ai";
+ import type { AutocompleteItem, AutocompleteProvider, Component, EditorComponent, EditorTheme, KeyId, OverlayHandle, OverlayOptions, TUI } from "@earendil-works/pi-tui";
+ import type { Static, TSchema } from "typebox";
+@@ -455,6 +455,7 @@
+     renderShell?: "default" | "self";
+     /** Optional compatibility shim to prepare raw tool call arguments before schema validation. Must return an object conforming to TParams. */
+     prepareArguments?: (args: unknown) => Static<TParams>;
++    prepareExecution?: (args: Static<TParams>) => ToolExecutionPlan | Promise<ToolExecutionPlan>;
+     /**
+      * JSON Schema of `structuredContent` in successful results. Tools that declare it should always
+      * set `structuredContent`; codemode scripts then receive it instead of the text content.
+@@ -1044,6 +1045,7 @@
+ export type BeforeProviderRequestEventResult = unknown;
+ export type { CacheWarmingDecisionEvent, CacheWarmingDecisionEventResult } from "../cache-warmer.ts";
+ export interface ToolCallEventResult {
++    executionPlan?: ToolExecutionPlan;
+     /** Block tool execution. To modify arguments, mutate `event.input` in place instead. */
+     block?: boolean;
+     reason?: string;
+--- a/dist/core/tools/tool-definition-wrapper.js
++++ b/dist/core/tools/tool-definition-wrapper.js
+@@ -8,6 +8,7 @@
+         outputSchema: definition.outputSchema,
+         constrainedSampling: definition.constrainedSampling,
+         prepareArguments: definition.prepareArguments,
++        prepareExecution: definition.prepareExecution,
+         executionMode: definition.executionMode,
+         execute: (toolCallId, params, signal, onUpdate, ctx) => definition.execute(toolCallId, params, signal, onUpdate, ctx ?? ctxFactory?.(toolCallId, signal)),
+     };
+@@ -31,6 +32,7 @@
+         outputSchema: tool.outputSchema,
+         constrainedSampling: tool.constrainedSampling,
+         prepareArguments: tool.prepareArguments,
++        prepareExecution: tool.prepareExecution,
+         executionMode: tool.executionMode,
+         execute: async (toolCallId, params, signal, onUpdate) => tool.execute(toolCallId, params, signal, onUpdate),
+     };
+--- a/dist/core/session-cwd.js
++++ b/dist/core/session-cwd.js
+@@ -30,6 +30,7 @@
+     }
+ }
+ export function assertSessionCwdExists(sessionManager, fallbackCwd) {
++    if (process.env.VARIN_ALLOW_MISSING_SESSION_CWD === "1") return;
+     const issue = getMissingSessionCwdIssue(sessionManager, fallbackCwd);
+     if (issue) {
+         throw new MissingSessionCwdError(issue);
+--- a/dist/core/agent-session.d.ts
++++ b/dist/core/agent-session.d.ts
+@@ -173,6 +173,7 @@
+     source?: InputSource;
+     /** Internal hook used by RPC mode to observe how an accepted prompt was dispatched. Not called if the prompt is rejected. */
+     preflightResult?: (disposition: PromptDisposition) => void;
++    skipPrePromptCompaction?: boolean;
+ }
+ /** Options for model/thinking mutations. */
+ export interface ModelMutationOptions {
+@@ -367,6 +368,7 @@
+     /** Current cache-warming state and the policy inputs that produced it. */
+     get cacheWarmingStatus(): CacheWarmingStatus | undefined;
+     /** Persist the cache-warming mode and immediately reconcile active warming. */
++    cancelCacheWarming(): void;
+     setCacheWarmingMode(mode: CacheWarmingMode): void;
+     /** Current model (may be undefined if not yet selected) */
+     get model(): Model<any> | undefined;
+--- a/dist/core/agent-session.js
++++ b/dist/core/agent-session.js
+@@ -370,7 +370,7 @@
+         this._nestedToolCalls ??= new NestedToolCallRunner({
+             getTools: () => this._getCallableTools(),
+             isSequential: () => this.agent.toolExecution === "sequential",
+-            runToolCall: (toolCall, parentId, signal, onUpdate) => {
++            runToolCall: (toolCall, parentId, signal, onUpdate, executionOptions) => {
+                 const assistantMessage = this._findLastAssistantMessage();
+                 if (!assistantMessage) {
+                     return Promise.resolve({
+@@ -387,6 +387,7 @@
+                     afterToolCall: (context) => this._afterToolCall(context, parentId),
+                     signal,
+                     onUpdate,
++                    ...executionOptions,
+                 });
+             },
+             emit: async (event) => {
+@@ -1004,6 +1005,9 @@
+         return this._cacheWarmer?.status;
+     }
+     /** Persist the cache-warming mode and immediately reconcile active warming. */
++    cancelCacheWarming() {
++        this._cacheWarmer?.cancel();
++    }
+     setCacheWarmingMode(mode) {
+         this.settingsManager.setCacheWarmingMode(mode);
+         this._cacheWarmer?.onModeChanged();
+@@ -1519,9 +1523,9 @@
+         }
+         // Check if we need to compact before sending (catches aborted responses).
+         // The user's new prompt is sent below, so do not call agent.continue() here.
+-        const lastAssistant = this._findLastAssistantMessage();
+-        if (lastAssistant) {
+-            await this._checkCompaction(lastAssistant, false);
++        if (!options?.skipPrePromptCompaction) {
++            const lastAssistant = this._findLastAssistantMessage();
++            if (lastAssistant) await this._checkCompaction(lastAssistant, false);
+         }
+         // Emit before_agent_start before normalizing images so extension-driven model
+         // selection determines the resize profile used for the request and history.
+@@ -1845,6 +1849,7 @@
+      * Abort current operation and wait for agent to become idle.
+      */
+     async abort() {
++        this.cancelCacheWarming();
+         if (this._isAgentRunActive) {
+             this._agentRunAbortRequested = true;
+         }
+@@ -1882,6 +1887,7 @@
+      * @throws Error if no auth is configured for the model
+      */
+     async setModel(model, options = {}) {
++        this.cancelCacheWarming();
+         if (!(await this._modelRuntime.checkAuth(model.provider))) {
+             throw new Error(`No API key for ${model.provider}/${model.id}`);
+         }
+--- a/dist/core/nested-tool-calls.js
++++ b/dist/core/nested-tool-calls.js
+@@ -1,3 +1,4 @@
++import { ToolExecutionScheduler } from "@earendil-works/pi-agent-core";
+ /**
+  * Tool calls that a tool makes while it runs (`ctx.executeTool()`), for example from codemode
+  * scripts. The agent loop does not know about them: the session runs each one through the agent's
+@@ -87,7 +88,6 @@
+     /** Scopes by the id of the calling tool call. */
+     scopes = new Map();
+     /** Serializes nested calls that must not run concurrently. */
+-    queueTail = Promise.resolve();
+     constructor(host) {
+         this.host = host;
+     }
+@@ -98,7 +98,7 @@
+     async execute(callerId, name, args, options = {}) {
+         let scope = this.scopes.get(callerId);
+         if (!scope) {
+-            scope = { recorder: new NestedCallRecorder(), nextId: 1, holdsQueue: false };
++            scope = { recorder: new NestedCallRecorder(), nextId: 1, scheduler: new ToolExecutionScheduler() };
+             this.scopes.set(callerId, scope);
+         }
+         const toolCall = {
+@@ -115,21 +115,8 @@
+             args: toolCall.arguments,
+             parentToolCallId: callerId,
+         });
+-        const exclusive = !scope.holdsQueue &&
+-            (this.host.isSequential() ||
+-                this.host.getTools().find((tool) => tool.name === name)?.executionMode === "sequential");
+-        let release;
+-        if (exclusive) {
+-            const previous = this.queueTail;
+-            this.queueTail = new Promise((resolve) => {
+-                release = resolve;
+-            });
+-            await previous;
+-        }
+         this.scopes.set(toolCall.id, {
+-            recorder: scope.recorder,
+-            nextId: 1,
+-            holdsQueue: scope.holdsQueue || exclusive,
++            recorder: scope.recorder, nextId: 1, scheduler: new ToolExecutionScheduler(),
+         });
+         let outcome;
+         try {
+@@ -143,11 +130,10 @@
+                     partialResult,
+                     parentToolCallId: callerId,
+                 });
+-            });
++            }, { executionScheduler: scope.scheduler, forceSequential: this.host.isSequential() });
+         }
+         finally {
+             this.scopes.delete(toolCall.id);
+-            release?.();
+         }
+         scope.recorder.finish(record, outcome.isError, textOf(outcome.result));
+         // Nested results are not persisted, so their usage is only counted through the recorder.
+--- a/dist/core/nested-tool-calls.d.ts
++++ b/dist/core/nested-tool-calls.d.ts
+@@ -1,3 +1,4 @@
++import type { RunToolCallOptions } from "@earendil-works/pi-agent-core";
+ /**
+  * Tool calls that a tool makes while it runs (`ctx.executeTool()`), for example from codemode
+  * scripts. The agent loop does not know about them: the session runs each one through the agent's
+@@ -80,7 +81,7 @@
+     /** Whether every nested call runs exclusively, as when the agent executes tool calls sequentially. */
+     isSequential(): boolean;
+     /** Run the call through the tool pipeline, with hooks that report `parentToolCallId`. */
+-    runToolCall(toolCall: AgentToolCall, parentToolCallId: string, signal: AbortSignal | undefined, onUpdate: (partialResult: AgentToolResult<unknown>) => Promise<void>): Promise<AgentToolCallOutcome>;
++    runToolCall(toolCall: AgentToolCall, parentToolCallId: string, signal: AbortSignal | undefined, onUpdate: (partialResult: AgentToolResult<unknown>) => Promise<void>, executionOptions: Pick<RunToolCallOptions, "executionScheduler" | "forceSequential">): Promise<AgentToolCallOutcome>;
+     emit(event: NestedToolExecutionEvent): Promise<void>;
+ }
+ export declare class NestedToolCallRunner {
+@@ -88,7 +89,6 @@
+     /** Scopes by the id of the calling tool call. */
+     private readonly scopes;
+     /** Serializes nested calls that must not run concurrently. */
+-    private queueTail;
+     constructor(host: NestedToolCallHost);
+     /**
+      * Run `name` on behalf of the call `callerId`. The nested call gets the id `<callerId>/<n>`.
+--- a/dist/core/extensions/runner.js
++++ b/dist/core/extensions/runner.js
+@@ -955,7 +955,11 @@
+             for (const handler of handlers) {
+                 const handlerResult = await handler(event, ctx);
+                 if (handlerResult) {
+-                    result = handlerResult;
++                    const plans = [result?.executionPlan, handlerResult.executionPlan].filter(Boolean);
++                    result = { ...result, ...handlerResult, ...(plans.length ? { executionPlan: {
++                        barrier: plans.some(plan => plan.barrier),
++                        resources: plans.flatMap(plan => plan.resources ?? []),
++                    } } : {}) };
+                     if (result.block) {
+                         return result;
+                     }
+--- a/dist/core/provider-composer.js
++++ b/dist/core/provider-composer.js
+@@ -69,6 +69,15 @@
+     };
+ }
+ function modelFromJson(providerId, definition, providerConfig, defaults) {
++    if (definition.type === "image" || definition.type === "classifier") {
++        return extensionModelFromDefinition(providerId, defaults ? [defaults] : [], providerConfig, {
++            ...definition, name: definition.name ?? defaults?.name ?? definition.id,
++            input: definition.input ?? defaults?.input ?? ["text"],
++            cost: definition.cost ?? defaults?.cost ?? { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 },
++            ...(definition.type === "image" ? { output: definition.output ?? defaults?.output ?? ["image"] }
++                : { contextWindow: definition.contextWindow ?? defaults?.contextWindow ?? 0 }),
++        });
++    }
+     const api = definition.api ?? providerConfig.api ?? defaults?.api;
+     if (!api) {
+         throw new Error(`Provider ${providerId}, model ${definition.id}: no "api" specified. Set at provider or model level.`);
+@@ -158,8 +167,9 @@
+             : { ...model, baseUrl };
+     });
+     for (const definition of config.models ?? []) {
+-        const existingIndex = models.findIndex((model) => isModelType(model, "chat") && model.id === definition.id);
+-        const defaults = findModelDefaults(models, definition.id, definition.api ?? config.api);
++        const existingIndex = models.findIndex((model) => isModelType(model, definition.type ?? "chat") && model.id === definition.id);
++        const defaults = definition.type === "image" || definition.type === "classifier"
++            ? findExtensionModelDefaults(models, definition) : findModelDefaults(models, definition.id, definition.api ?? config.api);
+         const model = modelFromJson(providerId, definition, config, defaults);
+         if (existingIndex >= 0)
+             models[existingIndex] = model;
+--- a/dist/core/model-config.js
++++ b/dist/core/model-config.js
+@@ -156,6 +156,8 @@
+     AnthropicMessagesCompatSchema,
+ ]);
+ const ModelDefinitionSchema = Type.Object({
++    type: Type.Optional(Type.Union([Type.Literal("chat"), Type.Literal("image"), Type.Literal("classifier")])),
++    output: Type.Optional(Type.Array(Type.Union([Type.Literal("text"), Type.Literal("image")]))),
+     id: Type.String({ minLength: 1 }),
+     name: Type.Optional(Type.String({ minLength: 1 })),
+     api: Type.Optional(Type.String({ minLength: 1 })),
+--- a/dist/core/model-config.d.ts
++++ b/dist/core/model-config.d.ts
+@@ -1,6 +1,8 @@
+ /** Immutable, credential-blind models.json snapshot. */
+ import { type Static, Type } from "typebox";
+ declare const ModelDefinitionSchema: Type.TObject<{
++    type: Type.TOptional<Type.TUnion<[Type.TLiteral<"chat">, Type.TLiteral<"image">, Type.TLiteral<"classifier">]>>;
++    output: Type.TOptional<Type.TArray<Type.TUnion<[Type.TLiteral<"text">, Type.TLiteral<"image">]>>>;
+     id: Type.TString;
+     name: Type.TOptional<Type.TString>;
+     api: Type.TOptional<Type.TString>;
+@@ -408,7 +410,9 @@
+     }>]>>;
+     authHeader: Type.TOptional<Type.TBoolean>;
+     models: Type.TOptional<Type.TArray<Type.TObject<{
+-        id: Type.TString;
++        type: Type.TOptional<Type.TUnion<[Type.TLiteral<"chat">, Type.TLiteral<"image">, Type.TLiteral<"classifier">]>>;
++    output: Type.TOptional<Type.TArray<Type.TUnion<[Type.TLiteral<"text">, Type.TLiteral<"image">]>>>;
++    id: Type.TString;
+         name: Type.TOptional<Type.TString>;
+         api: Type.TOptional<Type.TString>;
+         baseUrl: Type.TOptional<Type.TString>;
+--- a/dist/index.js
++++ b/dist/index.js
+@@ -34,6 +34,9 @@
+ export { createCodemodeExtension } from "./extensions/codemode/index.js";
+ export { createMcpExtension } from "./extensions/mcp/index.js";
+ export { createToolSearchExtension } from "./extensions/tool-search/index.js";
++export { loadMcpConfig, updateMcpServerConfig } from "./extensions/mcp/config.js";
++export { McpOAuthCredentialStore } from "./extensions/mcp/oauth.js";
++export { FileAuthStorageBackend } from "./core/auth-storage.js";
+ // Main entry point
+ export { main } from "./main.js";
+ // Run modes for programmatic SDK usage
+--- a/dist/index.d.ts
++++ b/dist/index.d.ts
+@@ -30,6 +30,10 @@
+ export type { CodemodeStoreEntryData, CodemodeToolDetails } from "./extensions/codemode/tool.ts";
+ export type { LoadedMcpConfig, McpExposure, McpServerConfig, McpServerEntry } from "./extensions/mcp/config.ts";
+ export { createMcpExtension, type McpExtensionOptions, type McpTransportFactory } from "./extensions/mcp/index.ts";
++export { loadMcpConfig, updateMcpServerConfig } from "./extensions/mcp/config.js";
++export { McpOAuthCredentialStore } from "./extensions/mcp/oauth.js";
++export { FileAuthStorageBackend } from "./core/auth-storage.js";
++export type { McpStateSnapshot } from "./extensions/mcp/index.js";
+ export { createToolSearchExtension } from "./extensions/tool-search/index.ts";
+ export { type MainOptions, main } from "./main.ts";
+ export { InteractiveMode, type InteractiveModeOptions, type JsonAgentSessionEvent, type ModelInfo, type PrintModeOptions, RpcClient, type RpcClientOptions, type RpcCommand, type RpcEventListener, type RpcExtensionUIRequest, type RpcExtensionUIResponse, type RpcResponse, type RpcSessionState, runPrintMode, runRpcMode, } from "./modes/index.ts";
+--- a/dist/extensions/mcp/index.d.ts
++++ b/dist/extensions/mcp/index.d.ts
+@@ -30,7 +30,26 @@
+ import type { McpOAuthCredentialStore } from "./oauth.ts";
+ import type { McpTransportFactory } from "./runtime.ts";
+ export type { McpTransportFactory } from "./runtime.ts";
++export interface McpStateSnapshot {
++    sessionId: string;
++    cwd: string;
++    active: boolean;
++    configErrorCount: number;
++    servers: {
++        name: string;
++        source: string;
++        scope?: "global" | "project" | "extension";
++        disabled: boolean;
++        transport: { kind: "http" | "stdio"; url?: string; command?: string };
++        exposure: string;
++        status: "connecting" | "connected" | "disconnected" | "needs-auth" | "failed" | "closed" | "disabled";
++        toolCount: number;
++        resourceCount: number;
++    }[];
++}
+ export interface McpExtensionOptions {
++    /** Read-only, credential-free projection of this extension's live connections. */
++    onState?: (snapshot: McpStateSnapshot) => void;
+     /** Defaults to reading `mcp.json` from the agent directory and the trusted project. */
+     loadConfig?: (ctx: ExtensionContext) => LoadedMcpConfig;
+     /** Defaults to stdio and streamable HTTP transports built from the server config. */
+@@ -42,7 +61,7 @@
+     /** Opens the OAuth authorization URL. Defaults to the platform browser. */
+     openUrl?: (url: string) => void;
+     /** Saves `/mcp` changes to the server's config file. Defaults to editing its `mcp.json`. */
+-    updateConfig?: (entry: McpServerEntry, patch: McpServerConfigPatch) => void;
++    updateConfig?: (entry: McpServerEntry, patch: McpServerConfigPatch) => void | Promise<void>;
+     /**
+      * How long the first prompt waits for servers with `direct` tools that are still connecting at
+      * startup, in milliseconds. Their tools become available when they connect. Other servers are
+--- a/dist/extensions/mcp/index.js
++++ b/dist/extensions/mcp/index.js
+@@ -176,11 +176,14 @@
+ }
+ function describeTransport(entry) {
+     const { config } = entry;
+-    if ("url" in config)
+-        return config.url;
+-    return [config.command, ...(config.args ?? [])].join(" ");
+-}
+-const MCP_USAGE = "Usage: /mcp, /mcp login [server], /mcp logout [server], /mcp reconnect [server]";
++    if ("url" in config) {
++        const url = new URL(config.url);
++        url.username = ""; url.password = ""; url.search = ""; url.hash = "";
++        return url.toString();
++    }
++    return config.command;
++}
++const MCP_USAGE = "Usage: /mcp, /mcp login [server], /mcp logout [server], /mcp reconnect [server], /mcp enable <server>, /mcp disable <server>";
+ export function createMcpExtension(options = {}) {
+     return (pi) => {
+         let servers = [];
+@@ -202,6 +205,7 @@
+         let generation = 0;
+         /** Working directory of the session, for stdio servers. */
+         let sessionCwd = process.cwd();
++        let sessionId = "";
+         let credentials = options.credentials;
+         /** The session's model registry, which resolves `auth.provider` tokens. */
+         let modelRegistry;
+@@ -210,6 +214,21 @@
+         const updateConfig = options.updateConfig ?? ((entry, patch) => updateMcpServerConfig(entry.source, entry.name, patch));
+         const listeners = new Set();
+         const emitChange = () => {
++            if (sessionId) options.onState?.({
++                sessionId, cwd: sessionCwd, active: sessionActive, configErrorCount: configErrors.length,
++                servers: servers.map(({ entry, connection }) => {
++                    let transport;
++                    if ("url" in entry.config) {
++                        const url = new URL(entry.config.url);
++                        url.username = ""; url.password = ""; url.search = ""; url.hash = "";
++                        transport = { kind: "http", url: url.toString() };
++                    } else transport = { kind: "stdio", command: entry.config.command };
++                    return { name: entry.name, source: entry.source, scope: entry.scope,
++                        disabled: entry.config.enabled === false, transport,
++                        exposure: exposureOf(entry), status: entry.config.enabled === false ? "disabled" : connection?.state ?? "connecting",
++                        toolCount: connection?.tools.length ?? 0, resourceCount: connection?.resources.length ?? 0 };
++                }),
++            });
+             for (const listener of listeners)
+                 listener();
+         };
+@@ -476,10 +495,10 @@
+          * Save a config change; returns an error message when the file could not be updated. Changes to
+          * registered servers only apply to the current session.
+          */
+-        const saveConfig = (server, patch) => {
++        const saveConfig = async (server, patch) => {
+             if (server.entry.scope !== "extension") {
+                 try {
+-                    updateConfig(server.entry, patch);
++                    await await updateConfig(server.entry, patch);
+                 }
+                 catch (error) {
+                     return `Could not update ${server.entry.source}: ${errorMessage(error)}`;
+@@ -541,7 +560,9 @@
+         };
+         /** Returns an error message when the config could not be saved; connection errors show in the state. */
+         const setEnabled = async (server, enabled) => {
+-            const failed = saveConfig(server, { enabled });
++            const current = generation;
++            const failed = await saveConfig(server, { enabled });
++            if (current !== generation || !sessionActive) return "MCP configuration saved; session changed.";
+             if (failed)
+                 return failed;
+             if (!enabled) {
+@@ -555,8 +576,10 @@
+             await startConnection(server, () => true);
+             return undefined;
+         };
+-        const setExposure = (server, exposure) => {
+-            const failed = saveConfig(server, { exposure });
++        const setExposure = async (server, exposure) => {
++            const current = generation;
++            const failed = await saveConfig(server, { exposure });
++            if (current !== generation || !sessionActive) return "MCP configuration saved; session changed.";
+             if (failed)
+                 return failed;
+             if (server.connection?.state === "connected")
+@@ -833,6 +856,7 @@
+             warnedUnreachable = false;
+             waitedForStartup = false;
+             sessionCwd = ctx.cwd;
++            sessionId = ctx.sessionManager.getSessionId();
+             modelRegistry = ctx.modelRegistry;
+             const current = ++generation;
+             sessionActive = true;
+@@ -977,14 +1001,14 @@
+                 if (rest.length > 0)
+                     return null;
+                 if (server === undefined) {
+-                    return ["login", "logout", "reconnect"]
++                    return ["login", "logout", "reconnect", "enable", "disable"]
+                         .filter((item) => item.startsWith(action ?? ""))
+                         .map((item) => ({ value: `${item} `, label: item }));
+                 }
+-                if (action !== "login" && action !== "logout" && action !== "reconnect")
++                if (!["login", "logout", "reconnect", "enable", "disable"].includes(action))
+                     return null;
+                 const items = servers
+-                    .filter((candidate) => action === "reconnect" ? candidate.connection !== undefined : usesOAuth(candidate))
++                    .filter((candidate) => action === "enable" || action === "disable" || (action === "reconnect" ? candidate.connection !== undefined : usesOAuth(candidate)))
+                     .filter((candidate) => candidate.entry.name.startsWith(server))
+                     .map((candidate) => ({
+                     value: `${action} ${candidate.entry.name}`,
+@@ -1008,6 +1032,15 @@
+                     return;
+                 }
+                 switch (action) {
++                    case "enable":
++                    case "disable": {
++                        const server = name ? findServer(name) : undefined;
++                        if (!server) { ctx.ui.notify(name ? `Unknown MCP server "${name}".` : MCP_USAGE, "warning"); return; }
++                        const failure = await setEnabled(server, action === "enable");
++                        if (failure) ctx.ui.notify(failure, "error");
++                        else { ensureDiscoveryActive(ctx); emitChange(); ctx.ui.notify(`MCP server "${name}" ${action}d.`, "info"); }
++                        return;
++                    }
+                     case "login": {
+                         const server = await pickServer(name, ctx, oauthPick);
+                         if (server)

@@ -3,8 +3,14 @@ import type {
   ExtensionContext,
   ExtensionFactory,
 } from "@earendil-works/pi-coding-agent";
+import { FileAuthStorageBackend, loadMcpConfig, McpOAuthCredentialStore,
+  type McpExtensionOptions, type McpStateSnapshot } from "@earendil-works/pi-coding-agent";
+import { join } from "node:path";
+import { applyEdits, modify } from "jsonc-parser";
+import { ConfigTextFileEditor, resolveConfigDocumentPath } from "./config-text-file-editor.js";
 import {
   parsePiMcpConfigCatalog,
+  type HostEvent, type HostEventData, type PiMcpConfigSource,
   type PiMcpConfigSnapshot,
 } from "@varin/protocol";
 
@@ -12,6 +18,7 @@ export const PI_MCP_RPC_VERSION = 1 as const;
 export const PI_MCP_RPC_READY_EVENT = "pi-mcp-adapter:rpc:v1:ready";
 export const PI_MCP_RPC_REQUEST_EVENT = "pi-mcp-adapter:rpc:v1:request";
 export const PI_MCP_RPC_REPLY_PREFIX = "pi-mcp-adapter:rpc:v1:reply:";
+export const MCP_STATUS_CHANNEL = "varin.mcp/status/v1";
 
 type ExtensionEventBus = ExtensionAPI["events"];
 
@@ -114,14 +121,14 @@ const parseReply = (
   }
   return {
     catalog: parsePiMcpConfigCatalog(value.data.catalog),
-    provider: { bridgeVersion, state: "active" },
+    provider: { owner: "extension", bridgeVersion, state: "active" },
   };
 };
 
 /**
- * Session-owned bridge for the adapter's public Pi event RPC. All event names,
- * handshake assumptions, and reply validation live here so the plugin contract
- * can be updated without spreading transport knowledge through the host or UI.
+ * Session-owned observation of native MCP or a user's replacement extension.
+ * Native options and the extension's public RPC contract stay here; neither
+ * path creates another MCP connection or credential authority.
  */
 export class PiMcpConfigBridge {
   #cwd: string | undefined;
@@ -132,6 +139,70 @@ export class PiMcpConfigBridge {
   #pendingReady: unknown;
   #ready: ReadyState | undefined;
   #sessionId: string | undefined;
+  #native: { state: McpStateSnapshot; snapshot: PiMcpConfigSnapshot } | undefined;
+
+  /** Observe the native owner; no additional MCP clients or connection state. */
+  nativeOptions(agentDir: string, emit: <E extends HostEvent>(event: E, data: HostEventData<E>) => void): McpExtensionOptions {
+    let sources: PiMcpConfigSource[] = [];
+    return {
+      credentials: new McpOAuthCredentialStore(new FileAuthStorageBackend(join(agentDir, "mcp-auth.json")), agentDir),
+      logPath: join(agentDir, "mcp.log"),
+      updateConfig: async (entry, patch) => {
+        const source = sources.find(candidate => candidate.displayPath === entry.source);
+        if (!source) throw new Error("MCP configuration source is no longer active");
+        const location = await resolveConfigDocumentPath(source.scope === "user" ? agentDir : this.#cwd!, source.target.path, { extensions: [".json"] });
+        const editor = new ConfigTextFileEditor(location.path, "json");
+        const current = await editor.read();
+        let content = current.content;
+        for (const [key, value] of Object.entries(patch)) {
+          content = applyEdits(content, modify(content, ["mcpServers", entry.name, key],
+            key === "enabled" && value === true || key === "exposure" && value === "codemode" ? undefined : value,
+            { formattingOptions: { insertSpaces: true, tabSize: 2 } }));
+        }
+        await editor.update(content, current.revision);
+      },
+      loadConfig: ctx => {
+        const globalConfig = loadMcpConfig({ agentDir, cwd: ctx.cwd, projectTrusted: false });
+        const loaded = ctx.isProjectTrusted()
+          ? loadMcpConfig({ agentDir, cwd: ctx.cwd, projectTrusted: true }) : globalConfig;
+        sources = [
+          { id: "native:user", displayPath: join(agentDir, "mcp.json"), order: 0, scope: "user",
+            serverNames: globalConfig.servers.map(entry => entry.name), target: { root: "agent", path: "mcp.json", format: "json" } },
+          { id: "native:project", displayPath: join(ctx.cwd, ".pi", "mcp.json"), order: 1, scope: "project",
+            serverNames: loaded.servers.filter(entry => entry.scope === "project").map(entry => entry.name),
+            target: { root: "project", path: ".pi/mcp.json", format: "json" } },
+        ];
+        return loaded;
+      },
+      onState: state => {
+        if (!state.active) {
+          this.#native = undefined;
+          emit("extension.state", { channel: MCP_STATUS_CHANNEL, sessionId: state.sessionId, value: null });
+          return;
+        }
+        const catalog = parsePiMcpConfigCatalog({ version: 1, sources, servers: state.servers.map(server => ({
+          disabled: server.disabled, name: server.name, transport: server.transport,
+          sourceIds: sources.filter(source => source.serverNames.includes(server.name)).map(source => source.id),
+        })) });
+        this.#native = { state, snapshot: { catalog, provider: { owner: "native",
+          state: state.configErrorCount ? "degraded" : "active",
+          ...(state.configErrorCount ? { issue: `${state.configErrorCount} MCP configuration error(s); inspect mcp.json` } : {}),
+        } } };
+        const servers = state.servers.map(server => ({ name: server.name, disabled: server.disabled,
+          toolCount: server.toolCount, resourceCount: server.resourceCount,
+          status: server.status === "disconnected" || server.status === "closed" || server.status === "connecting"
+            ? "not-connected" : server.status,
+        }));
+        emit("extension.state", { channel: MCP_STATUS_CHANNEL, sessionId: state.sessionId, value: {
+          version: 1, owner: "native", servers,
+          connectedCount: servers.filter(server => server.status === "connected").length,
+          disabledCount: servers.filter(server => server.disabled).length,
+          totalTools: servers.reduce((sum, server) => sum + server.toolCount, 0),
+          totalResources: servers.reduce((sum, server) => sum + server.resourceCount, 0),
+        } });
+      },
+    };
+  }
 
   attach(events: ExtensionEventBus): () => void {
     this.#events = events;
@@ -151,9 +222,11 @@ export class PiMcpConfigBridge {
 
   startSession(sessionId: string, cwd: string): void {
     const pendingReady = this.#pendingReady;
+    const native = this.#native;
     this.#endSession("Pi session changed while reading MCP configuration");
     this.#sessionId = sessionId;
     this.#cwd = cwd;
+    if (native?.state.sessionId === sessionId && native.state.cwd === cwd) this.#native = native;
     if (pendingReady !== undefined) this.#ready = parseReady(pendingReady, sessionId, cwd);
   }
 
@@ -165,8 +238,9 @@ export class PiMcpConfigBridge {
     if (this.#sessionId !== sessionId || !this.#events) {
       return unavailable("Open a Pi session or workspace context to inspect MCP configuration");
     }
+    if (this.#native?.state.sessionId === sessionId && this.#native.state.cwd === this.#cwd) return this.#native.snapshot;
     if (!this.#ready) {
-      return unavailable("pi-mcp-adapter config catalog is not active in this session");
+      return unavailable("No native MCP or replacement extension config catalog is active in this session");
     }
     if (!this.#ready.compatible) return incompatible(this.#ready);
     const bridgeVersion = this.#ready.version;
@@ -237,6 +311,7 @@ export class PiMcpConfigBridge {
   }
 
   #endSession(message: string): void {
+    this.#native = undefined;
     this.#generation += 1;
     this.#cwd = undefined;
     this.#ready = undefined;

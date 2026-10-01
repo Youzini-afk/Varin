@@ -4,10 +4,10 @@ import {
   computeFixedPreparation,
   createContextPreparationExtension,
 } from "../../src/harness/context-preparation.js";
-import { buildSessionContext, convertToLlm, type SessionEntry, type SessionMessageEntry } from "@earendil-works/pi-coding-agent";
+import { buildSessionContext, convertToLlm, SessionManager, type SessionEntry, type SessionMessageEntry } from "@earendil-works/pi-coding-agent";
 import type { AgentMessage } from "@earendil-works/pi-agent-core";
 import { RequestBudgetObservation } from "../../src/harness/context-request-boundary.js";
-import type { Usage } from "@earendil-works/pi-ai";
+import type { Usage, UserMessage } from "@earendil-works/pi-ai";
 import type { CompactionRunResult, CompactionTaskSpec } from "@varin/protocol";
 
 // ---------------------------------------------------------------------------
@@ -27,11 +27,11 @@ const usage = (total: number): Usage => ({
 
 const pad = (text: string, size: number): string => text + " " + "detail ".repeat(Math.ceil(size / 7)).slice(0, size);
 
-const userMessage = (text: string): AgentMessage => ({
+const userMessage = (text: string): UserMessage => ({
   role: "user",
   content: text,
   timestamp: Date.now(),
-} as AgentMessage);
+});
 
 const assistantMessage = (text: string, tokens: number): AgentMessage => ({
   role: "assistant",
@@ -171,7 +171,7 @@ const createHarness = (entries: SessionEntry[], tokensNow: number): Harness => {
   return harness;
 };
 
-const fireContext = (harness: Harness, tokens: number, messages?: AgentMessage[]): void => {
+const fireContext = (harness: Harness, tokens: number, messages?: AgentMessage[], model = harness.ctx.model): void => {
   harness.ctx.getContextUsage = () => ({ tokens, contextWindow: 16_000 });
   const handler = harness.handlers.get("context")!;
   handler({
@@ -179,7 +179,7 @@ const fireContext = (harness: Harness, tokens: number, messages?: AgentMessage[]
     messages: messages ?? harness.entries.flatMap((e) => e.type === "message" ? [e.message] : []),
   } as never, harness.ctx as never);
   harness.extension.observeRequest({
-    model: harness.ctx.model as never,
+    model: model as never,
     context: { systemPrompt: harness.ctx.getSystemPrompt(),
       tools: ["bash", "read"].map((name) => ({ name, description: name === "bash" ? "run a command" : "read a file", parameters: { type: "object" } as never })),
       messages: convertToLlm(messages ?? harness.entries.flatMap((e) => e.type === "message" ? [e.message] : [])),
@@ -220,6 +220,48 @@ const waitFor = async (predicate: () => boolean): Promise<void> => {
 // ---------------------------------------------------------------------------
 
 describe("context preparation extension", () => {
+  it("uses the physical request model under a virtual selection and discards a changed route", async () => {
+    const harness = createHarness(branchEntries(13_000), 13_000);
+    harness.ctx.model = { ...MODEL, provider: "routing", id: "adaptive", contextWindow: 0, maxTokens: 0 };
+    fireContext(harness, 13_000, undefined, MODEL);
+    assert.equal(harness.calls.length, 1);
+    assert.equal((harness.calls[0]!.spec.model as { id: string }).id, MODEL.id);
+    harness.calls[0]!.resolve(okResult("physical model summary"));
+    await waitFor(() => harness.extension.status().candidate === "ready");
+    fireContext(harness, 13_000, undefined, { ...MODEL, id: "different-physical" });
+    assert.equal(harness.calls.length, 2);
+    assert.equal((harness.calls[1]!.spec.model as { id: string }).id, "different-physical");
+  });
+
+  it("invalidates a frozen candidate when a later native context edit changes its source", () => {
+    const harness = createHarness(branchEntries(13_000), 13_000);
+    fireContext(harness, 13_000);
+    const first = harness.calls[0]!;
+    harness.entries.push({ type: "context_edit", id: "edit-source", parentId: harness.entries.at(-1)!.id,
+      timestamp: new Date().toISOString(), targetId: "e1", replacement: { content: pad("CORRECTED", 1_000) } });
+    fireContext(harness, 13_000);
+    assert.equal(first.signal.aborted, true);
+    assert.equal(harness.calls.length, 2);
+    assert.match(JSON.stringify(harness.calls[1]!.spec.summarizedMessages), /CORRECTED/);
+  });
+  it("cuts the native edited conversation without counting system state as reclaimable history", () => {
+    const manager = SessionManager.inMemory("/workspace");
+    manager.appendMessage({ role: "system", content: "CONTROL ".repeat(2_000), timestamp: 0 });
+    const original = manager.appendMessage(userMessage("ORIGINAL " + "old ".repeat(1_000)));
+    const omitted = manager.appendMessage(userMessage("OMITTED " + "bad ".repeat(1_000)));
+    const kept = manager.appendMessage(userMessage("KEPT"));
+    manager.appendContextEdit(original, { content: "REPLACEMENT " + "correct ".repeat(1_000) });
+    manager.appendContextEdit(omitted, null);
+    const fixed = computeFixedPreparation(manager.getBranch(), 1);
+    assert.equal(fixed?.firstKeptEntryId, kept);
+    assert.match(JSON.stringify(fixed?.messagesToSummarize), /REPLACEMENT/);
+    assert.doesNotMatch(JSON.stringify(fixed?.messagesToSummarize), /ORIGINAL|OMITTED|CONTROL/);
+    assert.match(JSON.stringify(manager.getEntry(original)), /ORIGINAL/);
+    const onlyControls = SessionManager.inMemory("/workspace");
+    onlyControls.appendMessage({ role: "system", content: "CONTROL ".repeat(2_000), timestamp: 0 });
+    onlyControls.appendMessage(userMessage("KEPT"));
+    assert.equal(computeFixedPreparation(onlyControls.getBranch(), 1), undefined);
+  });
   it("starts a fixed background candidate over the waterline while the foreground turn keeps running", async () => {
     const harness = createHarness(branchEntries(1_300), 12_000);
     // context hook returns synchronously — the model request is not blocked.
@@ -536,7 +578,7 @@ describe("context preparation extension", () => {
     const harness = createHarness([...base, c1, c2], 12_000);
     const native = buildSessionContext(harness.entries).messages;
     assert.deepEqual(native.flatMap((message) => message.role === "compactionSummary" ? [message.summary] : []),
-      ["Current S1", "Old S0"]);
+      ["Current S1"]);
     const projected = harness.handlers.get("context")!({ type: "context", messages: native } as never,
       harness.ctx as never) as { messages: AgentMessage[] };
     assert.deepEqual(projected.messages.flatMap((message) => message.role === "compactionSummary" ? [message.summary] : []),

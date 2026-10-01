@@ -41,11 +41,11 @@ describe("discoverPiRuntimes", () => {
       await mkdir(custom, { recursive: true });
       await writeFile(
         join(source, "packages", "coding-agent", "package.json"),
-        JSON.stringify({ name: "@earendil-works/pi-coding-agent", version: "0.83.0" }),
+        JSON.stringify({ name: "@earendil-works/pi-coding-agent", version: "0.99.3" }),
       );
       await writeFile(
         join(custom, "package.json"),
-        JSON.stringify({ name: "@earendil-works/pi-coding-agent", version: "0.83.0" }),
+        JSON.stringify({ name: "@earendil-works/pi-coding-agent", version: "0.99.3" }),
       );
       await writeFile(customNode, "");
       const commandRunner = async (command: string): Promise<CommandResult> => {
@@ -59,7 +59,7 @@ describe("discoverPiRuntimes", () => {
             stdout: "C:\\tools\\pi\r\nC:\\tools\\pi.ps1\r\nC:\\tools\\pi.cmd\r\n",
           };
         }
-        return { exitCode: 0, stderr: "", stdout: "0.82.1\n" };
+        return { exitCode: 0, stderr: "", stdout: "0.99.2\n" };
       };
 
       const candidates = await discoverPiRuntimes({
@@ -73,9 +73,9 @@ describe("discoverPiRuntimes", () => {
       assert.equal(candidates[0]?.id, "bundled");
       assert.equal(candidates[0]?.compatible, true);
       assert.equal(candidates[1]?.command, "C:\\tools\\pi.cmd");
-      assert.equal(candidates[1]?.version, "0.82.1");
+      assert.equal(candidates[1]?.version, "0.99.2");
       assert.equal(candidates[1]?.compatible, true);
-      assert.equal(candidates[2]?.version, "0.83.0");
+      assert.equal(candidates[2]?.version, "0.99.3");
       assert.equal(candidates[2]?.packageRoot, source);
       assert.equal(candidates[3]?.id, "custom:developer");
       assert.equal(candidates[3]?.available, true);
@@ -201,7 +201,7 @@ describe("discoverPiRuntimes", () => {
       await mkdir(join(root, "packages", "coding-agent"), { recursive: true });
       await writeFile(
         join(root, "packages", "coding-agent", "package.json"),
-        JSON.stringify({ name: "@earendil-works/pi-coding-agent", version: "0.82.1-rc.1" }),
+        JSON.stringify({ name: "@earendil-works/pi-coding-agent", version: "0.99.2-rc.1" }),
       );
       const candidates = await discoverPiRuntimes({
         commandRunner: async () => ({ exitCode: 1, stderr: "not found", stdout: "" }),
@@ -224,7 +224,7 @@ describe("discoverPiRuntimes", () => {
     const bin = join(root, "bin with spaces");
     try {
       await mkdir(bin, { recursive: true });
-      await writeFile(join(bin, "pi.cmd"), "@echo off\r\necho 0.82.1\r\n");
+      await writeFile(join(bin, "pi.cmd"), "@echo off\r\necho 0.99.2\r\n");
       const env = { ...process.env };
       const pathEntry = Object.entries(env).find(([key]) => key.toLowerCase() === "path");
       for (const key of Object.keys(env)) {
@@ -238,7 +238,7 @@ describe("discoverPiRuntimes", () => {
         await realpath(candidates[1]?.command ?? ""),
         await realpath(join(bin, "pi.cmd")),
       );
-      assert.equal(candidates[1]?.version, "0.82.1");
+      assert.equal(candidates[1]?.version, "0.99.2");
     } finally {
       await rm(root, { force: true, recursive: true });
     }

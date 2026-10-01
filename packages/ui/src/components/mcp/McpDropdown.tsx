@@ -95,8 +95,8 @@ const useMcpAdapterRuntime = () => {
 
   const reconnect = React.useCallback(() => runCommand('/mcp reconnect'), [runCommand]);
   const setServerEnabled = React.useCallback((serverName: string, enabled: boolean) => (
-    runCommand(`/mcp ${enabled ? 'enable' : 'disable'} ${safeCommandArgument(serverName)}`, true)
-  ), [runCommand]);
+    runCommand(`/mcp ${enabled ? 'enable' : 'disable'} ${safeCommandArgument(serverName)}`, status?.owner !== 'native')
+  ), [runCommand, status?.owner]);
 
   return {
     currentSessionId,

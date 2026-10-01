@@ -669,7 +669,7 @@ export function createMemoryOrganizer(deps: MemoryOrganizerDeps) {
         configurationId: status.binding.configurationId,
         providerId: status.binding.providerId,
         modelId: status.binding.modelId,
-        protocol: "typesafe-systemone",
+        protocol: "pi-classifier",
         purpose: "memory-organization",
         goal: "Decide which durable work fragments carry memory-worthy content",
         materials,

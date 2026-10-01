@@ -1,12 +1,14 @@
+import { fauxProvider } from "@earendil-works/pi-ai";
 import assert from "node:assert/strict";
 import { mkdir, mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { describe, it } from "node:test";
 import type { Context } from "@earendil-works/pi-ai";
-import { fauxAssistantMessage, fauxToolCall, registerFauxProvider } from "@earendil-works/pi-ai/compat";
+import { fauxAssistantMessage, fauxToolCall } from "@earendil-works/pi-ai/compat";
 import type { AgentSessionServices } from "@earendil-works/pi-coding-agent";
 import { SessionHost } from "../../src/session-host.js";
+import { createHarnessEmit } from "../harness-emit.js";
 import { createThreadRegistry } from "../../../web/application-host/lib/harness/thread-registry.js";
 import { createThreadRuntime, type ThreadSessionAdapter } from "../../../web/application-host/lib/harness/thread-runtime.js";
 import { createThreadDispatchService } from "../../../web/application-host/lib/harness/thread-services.js";
@@ -24,7 +26,7 @@ describe("inherit — Pi capture through Host dispatch and dequeue", () => {
     const agentDir = join(root, "agent");
     const workspace = join(root, "workspace");
     await mkdir(workspace, { recursive: true });
-    const faux = registerFauxProvider();
+    const faux = fauxProvider();
     const outgoing: Context[] = [];
     faux.setResponses([(context) => {
       outgoing.push(structuredClone(context));
@@ -33,6 +35,7 @@ describe("inherit — Pi capture through Host dispatch and dequeue", () => {
     const model = faux.getModel();
     const configureServices = async (services: AgentSessionServices) => {
       services.modelRuntime.registerProvider(model.provider, {
+          streamSimple: faux.provider.streamSimple,
         api: model.api, baseUrl: model.baseUrl,
         models: [{ api: model.api, baseUrl: model.baseUrl, contextWindow: model.contextWindow,
           cost: model.cost, id: model.id, input: ["text", "image"], maxTokens: model.maxTokens,
@@ -61,7 +64,9 @@ describe("inherit — Pi capture through Host dispatch and dequeue", () => {
           data: data as HostEventData<"harness.request"> } });
       },
     });
-    const childHost = new SessionHost({ agentDir, configureServices, emit: () => {}, projectTrustOverride: true });
+    const childEvents = createHarnessEmit({});
+    const childHost = new SessionHost({ agentDir, configureServices, emit: childEvents.emit, projectTrustOverride: true });
+    childEvents.bind(childHost);
     let runtime!: ReturnType<typeof createThreadRuntime>;
     const registry = createThreadRegistry({
       dataDir: join(root, "data"), hostId: "inherit-test",
@@ -79,7 +84,7 @@ describe("inherit — Pi capture through Host dispatch and dequeue", () => {
       manager.appendMessage({ role: "user", content: "OLD_RAW_OUTSIDE_ACTIVE_INPUT", timestamp: 1 });
       manager.appendMessage(fauxAssistantMessage("old answer"));
       const exactRequirement = "KEEP_REQUIREMENT_BEGIN\n" + "important constraint\n".repeat(1700) + "KEEP_REQUIREMENT_END";
-      const image = { type: "image" as const, mimeType: "image/png", data: "aW1hZ2UtYnl0ZXM=" };
+      const image = { type: "image" as const, mimeType: "image/png", data: "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR4nGP4z8DwHwAFAAH/iZk9HQAAAABJRU5ErkJggg==" };
       const keptId = manager.appendMessage({
         role: "user", content: [{ type: "text", text: exactRequirement }, image], timestamp: 2,
       });
@@ -90,10 +95,10 @@ describe("inherit — Pi capture through Host dispatch and dequeue", () => {
       const stored = sourceServices.outputStore.store(parent.sessionId, fullOutput, "read");
       manager.appendMessage(fauxAssistantMessage([{ ...fauxToolCall("read", { path: "large.txt" }), id: "source-full" }]));
       manager.appendMessage({ role: "toolResult", toolName: "read", toolCallId: "source-full", isError: false, timestamp: 3,
-        content: [{ type: "text", text: `preview; source output ${stored.ref.handle}` }], details: { truncated: { ref: stored.ref, total: stored.total } } });
+        content: [{ type: "text", text: `preview; source output ${stored.ref.handle}` }], details: { truncated: { ref: { ...stored.ref }, total: stored.total } } });
       manager.appendCompaction("COMMITTED_SUMMARY_739", keptId, 18000);
       manager.appendMessage(fauxAssistantMessage([fauxToolCall("dispatch", { task: "PENDING_DISPATCH_MUST_NOT_TRANSFER" })]));
-      parentHost.session.agent.state.messages = manager.buildSessionContext().messages;
+      parentHost.session.refreshContext();
 
       let spawned!: () => void;
       const childStarted = new Promise<void>((resolve) => { spawned = resolve; });
@@ -154,7 +159,7 @@ describe("inherit — Pi capture through Host dispatch and dequeue", () => {
         timer.unref();
       })]);
       await childHost.session.waitForIdle();
-      assert.equal(outgoing.length, 1);
+      assert.equal(outgoing.length, 1, JSON.stringify(childHost.session.messages.filter(message => message.role === "assistant").map(message => message.errorMessage)));
       const actual = JSON.stringify(outgoing[0]!.messages);
       assert.equal(parentBlockReads, 0, "neither task nor inherit reads live parent blocks at spawn");
       assert.match(actual, /COMMITTED_SUMMARY_739/);
@@ -178,7 +183,6 @@ describe("inherit — Pi capture through Host dispatch and dequeue", () => {
       await registry.dispose();
       sourceRouter.dispose();
       await sourceServices.dispose();
-      faux.unregister();
       await rm(root, { recursive: true, force: true });
     }
   });

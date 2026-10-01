@@ -28,7 +28,7 @@ describe('Pi custom provider form', () => {
     expect(config.models).toEqual([]);
     expect(config.capabilities?.chat).toBe(false);
     expect(config.capabilities?.decision).toEqual({
-      protocol: 'typesafe-systemone', baseUrl: 'https://decision.example', endpoint: '/systemone', credentialRef: 'decision-auth',
+      protocol: 'pi-classifier', baseUrl: 'https://decision.example', endpoint: '/systemone', credentialRef: 'decision-auth',
       models: [{ id: 'jev-1.13', name: 'Jev', input: ['text'], reasoning: false }],
     });
     expect(createPiProviderConfigFromForm(createCustomProviderFormStateFromConfig(config))).toEqual(config);

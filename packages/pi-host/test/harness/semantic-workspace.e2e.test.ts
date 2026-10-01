@@ -1,3 +1,4 @@
+import { fauxProvider } from "@earendil-works/pi-ai";
 /**
  * Public explore -> Host router -> production workspace semantic runtime.
  *
@@ -11,7 +12,7 @@ import { readdir, mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
 import path, { join } from "node:path";
 import { tmpdir } from "node:os";
 import { describe, it } from "node:test";
-import { fauxAssistantMessage, fauxToolCall, registerFauxProvider } from "@earendil-works/pi-ai/compat";
+import { fauxAssistantMessage, fauxToolCall } from "@earendil-works/pi-ai/compat";
 import type { AgentSessionServices } from "@earendil-works/pi-coding-agent";
 import type { Context } from "@earendil-works/pi-ai";
 import type {
@@ -69,7 +70,7 @@ interface SemanticHarness {
   semantic: ReturnType<typeof createWorkspaceSemanticRuntime>;
   root: string;
   serviceHost: ReturnType<typeof createHarnessServiceHost>;
-  runSession: (workspace: Workspace, faux: ReturnType<typeof registerFauxProvider>, options?: { journal?: boolean; key?: string }) => Promise<SemanticSession>;
+  runSession: (workspace: Workspace, faux: ReturnType<typeof fauxProvider>, options?: { journal?: boolean; key?: string }) => Promise<SemanticSession>;
   cleanup: () => Promise<void>;
   embedBodies: string[][];
   embedRequests: Array<{ workspaceId: string; input: string[]; authorization: string | null }>;
@@ -212,7 +213,7 @@ async function createSemanticHarness(options: {
 
   const runSession = async (
     workspace: Workspace,
-    faux: ReturnType<typeof registerFauxProvider>,
+    faux: ReturnType<typeof fauxProvider>,
     sessionOptions: { journal?: boolean; key?: string } = {},
   ): Promise<SemanticSession> => {
     const agentDir = join(root, `agent-${workspace.workspaceId}`);
@@ -321,6 +322,7 @@ async function createSemanticHarness(options: {
 
     const configureServices = async (services: AgentSessionServices) => {
       services.modelRuntime.registerProvider(model.provider, {
+          streamSimple: faux.provider.streamSimple,
         api: model.api,
         baseUrl: model.baseUrl,
         models: [{
@@ -510,7 +512,7 @@ const exploreDetails = (session: SemanticSession): ExploreQueryFinishResult["det
 describe("public explore workspace semantic runtime", () => {
   it("uses the resolved remote binding and rerank through the public tool, with independent Documents workspaces", async () => {
     const harness = await createSemanticHarness();
-    const faux = registerFauxProvider();
+    const faux = fauxProvider();
     const contexts: Context[] = [];
     const query = "where is bookkeeping condensed before persistence";
     try {
@@ -556,14 +558,13 @@ describe("public explore workspace semantic runtime", () => {
         await ownerSession.close();
       }
     } finally {
-      faux.unregister();
       await harness.cleanup();
     }
   });
 
   it("observes a durable Host child write before the next public explore call", async () => {
     const harness = await createSemanticHarness();
-    const faux = registerFauxProvider();
+    const faux = fauxProvider();
     const contexts: Context[] = [];
     try {
       await writeFile(join(harness.parent.root, "owner.ts"), "export function ownerLedger() { return \"owner-only\"; }\n");
@@ -616,7 +617,6 @@ describe("public explore workspace semantic runtime", () => {
         await session.close();
       }
     } finally {
-      faux.unregister();
       await harness.cleanup();
     }
   });
@@ -628,7 +628,7 @@ describe("public explore workspace semantic runtime", () => {
         ...(variant.malformed === undefined ? {} : { malformedEmbedding: variant.malformed }),
         ...(variant.inferenceFailure === undefined ? {} : { inferenceFailure: variant.inferenceFailure }),
       });
-      const faux = registerFauxProvider();
+      const faux = fauxProvider();
       const contexts: Context[] = [];
       try {
         await writeFile(join(harness.child.root, "child.ts"), "export function accrueLedger() { return \"child\"; }\n");
@@ -649,7 +649,6 @@ describe("public explore workspace semantic runtime", () => {
           await session.close();
         }
       } finally {
-        faux.unregister();
         await harness.cleanup();
       }
     };

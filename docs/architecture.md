@@ -260,12 +260,19 @@ an OpenCode schema. UI-added API keys use Pi's locked `AuthStorage` flow and are
 provider metadata. Existing literal/env/command keys in native configuration layers remain intact
 and usable but are redacted from the surface protocol.
 
-Background embedding and rerank are user-owned inference bindings. Their isolated Pi resolver applies
+Background embedding, rerank and decision are user-owned inference bindings. Their isolated Pi resolver applies
 the user and operator provider layers but excludes trusted project provider overrides, so a repository
 cannot redirect a user's stored credential. The Application Host receives only a credential-free hash
 of the effective endpoint/API/model binding. These methods and their explicit batch cancellation remain
 on the private Application Host-to-worker protocol and are absent from the renderer/web/mobile runtime
 method catalog.
+
+The bundled Pi SDK is pinned to 0.99.2. Native catalogs distinguish chat, image and classifier models;
+Varin matches type plus ID and preserves non-chat definitions when editing chat providers. Decision
+bindings call Pi's native classifier APIs while retaining Varin's typed judge/choose/score results.
+Virtual selections remain visible as selections; request budgeting and compaction use the actual
+routed chat model. Native context edits and auxiliary usage entries retain their append-only journal
+identity. System messages carry current prompt/tool state and are not rendered as conversation bubbles.
 
 Remote model discovery is a separate privileged operation. It uses the provider's host-owned auth
 when present and also supports anonymous endpoints. HTTP, HTTPS, localhost, LAN, and URL basic
@@ -469,9 +476,11 @@ consumer wired (F0–F4). `harness.fastDecision` is a user-owned default binding
 `"off"`; the Pi side resolves it into a credential-free `configurationId` binding that each query freezes.
 `explore-fast-decision.ts` runs a progressive loop inside the live query: typed judgments decide which real
 views enter the answer and which issued action candidates execute — `followup({actions})` runs them through
-the existing search, graph, and file authorities. The first adapter is TypeSafe System One
-(`pi-host/src/harness/typesafe-systemone.ts`); a ready binding replaces the overlapping LLM select and rerank
-for that query, while unconfigured, disabled, failed, or cancelled paths keep source-ranked material.
+the existing search, graph, and file authorities. `pi-host/src/harness/native-classifier.ts` maps these
+judgments onto Pi's native classifier APIs. Explore freezes its responsibility plan: with a configured
+LLM, the classifier chooses actions while the LLM can select complementary material; without that LLM,
+the classifier may judge material before configured rerank or source ranking. An already performed
+selection is not repeated by another judge. Disabled, failed and cancelled paths retain available material.
 Generative search planning remains separate. Pi inference retains credentials and provider transport; the
 decision service does not own search, permissions or action execution. Computer Use and other consumers are
 future integrations, not delivered features. See harness status for verification and untested boundaries.
@@ -953,7 +962,7 @@ Git and copy directories remain materialization and migration backends as specif
 | Optional Pi recovery commands | User-installed `pi-workspace-history` / `pi-wtf` packages | Remain ordinary Pi CLI extensions and are not provisioned or treated as Varin recovery authorities |
 | Magic Context | Its shared SQLite/config | Read through a maintained adapter; do not duplicate memory state |
 | Native harness thread lifecycle and working state | Host atomic Thread/ThreadRun catalog + Pi child session JSONL; Rust content-addressed WorkingState/result/draft/retrieval, recovery/Integration/agent-mutation durable metadata, canonical file resources, fixed baseline/materialization and managed-directory lifecycle; Document Registry remains unsaved-buffer authority | Dispatch asynchronously, project broker events/Fleet/UI from one registry, preserve attempts and transcripts, publish immutable native results, and merge only the child delta; TS coordinates Registry receipts and Git semantics while controlled disk capture/apply, baseline body capture, immutable-root materialization, reclaim and measurement use the Rust R2/R3 file-resource backend |
-| MCP | `pi-mcp-adapter` config/status events | Show the adapter-owned effective server catalog, project its public `status/v1` snapshot, invoke its commands, and edit one native source at a time without reproducing merge or credential logic |
+| MCP | Pi native MCP or the user's replacement extension | Observe the active owner's config/status, invoke its commands, and edit one authorized source at a time without a parallel connection or credential owner |
 | Web Access | Varin native `webfetch` / `websearch`; optional `pi-web-access` config/custom entries | Native search defaults to keyless Exa with disclosed Parallel failover; explicit user providers remain available. It does not reuse model-account search. Host-owned SSRF/domain/provider authority and the existing page cache/source projection remain shared. Tools never auto-yield to a package; optional plugins keep their own configuration and stored-result UI. |
 | Varin extensions | Varin Extension Manager below `VARIN_DATA_DIR` | Keep installation, desired state, grants, layout, and extension-owned storage separate from Pi packages and plugin-native data |
 | Workspace and user knowledge | Per-host workspace/user `.tdb` under `VARIN_DATA_DIR` | Settings catalog and suggestion accept/edit/retire mutate this store with opened-revision CAS; proposals use the authenticated actor workspace, atomically deduplicate against all history, and consume the session's trusted auto-accept policy. Vectors are derived and must not become a second write authority |
@@ -1125,16 +1134,13 @@ so Pi reloads the real extension instance; otherwise they use the current worksp
 Disabling a package keeps its installation and native configuration intact, filters all Pi resource
 types from that package, and restores the package's previous native filters when enabled again.
 
-Varin provisions one global foundational Pi package when a runtime generation first becomes
-available: the maintained `pi-mcp-adapter`. This is a broker-owned bootstrap layered on top of the same Pi
-package operations, not a second package manager. It does not block the Host handshake or cloud
-health endpoint; the first newly created session waits for the bootstrap, while sessions already
-bound to a worker keep running. Existing enabled or disabled packages are adopted as-is. A configured
-source whose artifact is missing is reported as broken rather than silently repaired. Explicit
-disable remains ordinary Pi package state, and explicit removal records user intent before removal so
-later starts do not reinstall it. Settings can explicitly restore an item or opt out of automatically
-adding integrations introduced by a future manifest revision. Varin does not auto-update these
-packages or materialize plugin configuration defaults.
+Pi's native MCP, codemode and tool-search factories are the session defaults. They are replaceable
+builtins: a user extension that registers the same integration owns it instead. Varin no longer
+automatically installs `pi-mcp-adapter`; existing installed, disabled, removed and explicitly restored
+package choices retain their native state. Foundational provisioning still uses ordinary Pi package
+operations and its existing receipt, not a second package manager. A configured source whose artifact
+is missing is reported as broken rather than silently repaired. Settings can explicitly restore an
+optional integration. Varin does not auto-update these packages or materialize plugin defaults.
 
 The provisioning receipt is Varin application policy stored under the canonical agent directory at
 `varin/package-provisioning.json`. It records only integration identity, intent, and observation;
@@ -1161,14 +1167,14 @@ the resulting package catalog.
   operations, native Pi status component, and persisted public custom entries. Memory,
   compartment, historian/dreamer/sidekick, and diagnostic views read only future public
   plugin/database contracts rather than copied or privately inspected state.
-- **pi-mcp-adapter:** protocol v1 carries the adapter's public `pi-mcp-adapter/status/v1` runtime
-  snapshot and its read-only `configCatalog/v1` RPC projection. The latter is the adapter-computed,
-  deduplicated effective server list plus direct native-source membership; it excludes arguments,
-  environment, headers, tokens, OAuth data, and URL query/user information. Settings, desktop, and
-  mobile surfaces manage the normal Pi package, select an effective server in the left pane, and
-  edit one of the adapter-owned JSON/JSONC sources through revision-checked native document APIs.
-  Varin has no parallel MCP store, generated OpenCode configuration draft, or OAuth callback
-  route; the adapter owns merging, host imports, transports, OAuth/keyring data, and connection state.
+- **MCP:** the session observes its active native manager or replacement extension through
+  `varin.mcp/status/v1` and the credential-free config snapshot. Native Pi owns transports, OAuth,
+  credentials, tool exposure and reconnects. Native `mcp.json` sources are strict JSON; an installed
+  `pi-mcp-adapter` retains its own JSON/JSONC sources and public catalog RPC. Both paths exclude
+  arguments, environment, headers, tokens, OAuth data and URL query/user information from status.
+  Native settings edits use the existing authorized, revision-checked, locked atomic document writer.
+  Enable/disable updates the live owner without a second connection or a Varin OAuth callback route.
+  Codemode executes in native QuickJS; child calls still pass Varin's permission and resource hooks.
 - **pi-web-access:** Varin edits the extension's agent-level `web-search.json` and discovers its
   current registered commands in the active session. The GUI can open the native Curator, invoke
   Gemini Web account diagnostics, and browse the plugin's stored results. Those plugin commands,
@@ -1332,7 +1338,10 @@ Desktop and the local Web UI can load while their runtime starts. Normal startup
 the user's explicit selection, or bundled Pi when nothing is selected; it does not search PATH or
 detect package managers for unrelated installations. The lifecycle starts the production broker
 directly: Node starts, the three Pi SDK packages resolve, and that worker's Host handshake must
-succeed. No disposable probe worker precedes it. A newer Pi is used as-is. An older Pi is upgrade-required only. There
+succeed. No disposable probe worker precedes it. The minimum supported Pi is 0.99.2. The selected SDK
+receives the shipped Host integration patches in memory; external installation files are never edited.
+Already adapted sources are unchanged. A changed required SDK seam fails explicitly with an adaptation
+error. Newer versions have no artificial version ceiling. An older Pi is upgrade-required only. There
 is no version ceiling, downgrade action, or silent upgrade. Cloud and headless Web still require a
 ready runtime before the server finishes starting.
 

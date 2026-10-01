@@ -236,13 +236,7 @@ export class CompactionWorkerRuntime {
           // schema belongs in a model request. Keep the observed context
           // detached because the Agent mutates its working transcript after a
           // tool turn while the next request is being prepared.
-          const outgoingContext = {
-            ...(context.systemPrompt === undefined ? {} : { systemPrompt: context.systemPrompt }),
-            messages: context.messages,
-            ...(context.tools === undefined ? {} : {
-              tools: context.tools.map(({ name, description, parameters }) => ({ name, description, parameters })),
-            }),
-          };
+          const outgoingContext = context;
           const observedContext = structuredClone(outgoingContext);
           const requestOptions = modelRequestOptions(providerOptions);
           const key = contextRequestKey(nextModel, outgoingContext, requestOptions);

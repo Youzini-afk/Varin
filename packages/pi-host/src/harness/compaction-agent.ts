@@ -60,7 +60,8 @@ export function compactionInstruction(spec: Pick<CompactionTaskSpec, "isSplitTur
 /**
  * Messages the worker agent starts from: S0, then A (replaced range) with the
  * split-turn prefix, the retained-material marker, then B verbatim. Order and
- * role identity are preserved; the marker is the only injected message.
+ * conversation roles are preserved. Historical system state is quoted data;
+ * the worker owns its live instructions and tool declarations.
  */
 export function compactionMaterialMessages(spec: CompactionTaskSpec): AgentMessage[] {
   const messages: AgentMessage[] = [];
@@ -77,7 +78,10 @@ export function compactionMaterialMessages(spec: CompactionTaskSpec): AgentMessa
     messages.push(markerMessage(RETAINED_BOUNDARY));
     messages.push(...(spec.keptMessages as unknown as AgentMessage[]));
   }
-  return messages;
+  return messages.map(message => message.role === "system" ? {
+    role: "user", timestamp: message.timestamp,
+    content: [{ type: "text", text: `[Quoted source system state]\n${JSON.stringify(message)}` }],
+  } : message);
 }
 
 /**

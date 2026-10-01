@@ -27,6 +27,7 @@ export function createTodoTool(bridge: HostServicesBridge): ToolDefinition {
       "For non-trivial tasks, write a short plan with todo before acting, and state your confidence.",
     ],
     parameters: TodoParams,
+    outputSchema: Type.Object({ text: Type.String(), materialRevisions: Type.Optional(Type.Record(Type.String(), Type.String())) }),
     executionMode: "sequential",
     execute: async (_toolCallId, params, _signal, _onUpdate, ctx) => {
       try {
@@ -39,12 +40,14 @@ export function createTodoTool(bridge: HostServicesBridge): ToolDefinition {
         return {
           content: [{ type: "text", text: typed.text }],
           details: { materialRevisions: typed.materialRevisions ?? {} },
+          structuredContent: { text: typed.text, materialRevisions: typed.materialRevisions ?? {} },
         };
       } catch (error) {
         const message = error instanceof Error ? error.message : String(error);
         return {
           content: [{ type: "text", text: `todo failed: ${message}` }],
           details: {},
+          isError: true,
         };
       }
     },

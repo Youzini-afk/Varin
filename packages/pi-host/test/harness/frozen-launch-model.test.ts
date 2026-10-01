@@ -1,16 +1,17 @@
+import { fauxProvider } from "@earendil-works/pi-ai";
 import assert from "node:assert/strict";
 import { mkdir, mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { describe, it } from "node:test";
-import { registerFauxProvider } from "@earendil-works/pi-ai/compat";
 import type { AgentSessionServices } from "@earendil-works/pi-coding-agent";
 import type { Model } from "@earendil-works/pi-ai";
 import { SessionHost } from "../../src/session-host.js";
 
-const registerModels = (services: AgentSessionServices, models: Model<string>[]) => {
+const registerModels = (services: AgentSessionServices, models: Model<string>[], faux: ReturnType<typeof fauxProvider>) => {
   const first = models[0]!;
   services.modelRuntime.registerProvider(first.provider, {
+    streamSimple: faux.provider.streamSimple,
     api: first.api,
     baseUrl: first.baseUrl,
     models: models.map((model) => ({
@@ -38,13 +39,13 @@ describe("frozen launch model", () => {
     const agentDir = join(root, "agent");
     const cwd = join(root, "workspace");
     await Promise.all([mkdir(agentDir), mkdir(cwd)]);
-    const faux = registerFauxProvider({ models: [{ id: "faux-default" }, { id: "faux-upgrade" }] });
+    const faux = fauxProvider({ models: [{ id: "faux-default" }, { id: "faux-upgrade" }] });
     const defaultModel = faux.getModel("faux-default")!;
     const upgradeModel = faux.getModel("faux-upgrade")!;
     const host = new SessionHost({
       agentDir,
       configureServices: async (services) => {
-        registerModels(services, [defaultModel, upgradeModel]);
+        registerModels(services, [defaultModel, upgradeModel], faux);
         await services.modelRuntime.setRuntimeApiKey(defaultModel.provider, "faux-key");
         return { model: defaultModel };
       },
@@ -60,7 +61,6 @@ describe("frozen launch model", () => {
     } finally {
       await host.dispose();
       await rm(root, { force: true, recursive: true });
-      faux.unregister();
     }
   });
 
@@ -69,13 +69,13 @@ describe("frozen launch model", () => {
     const agentDir = join(root, "agent");
     const cwd = join(root, "workspace");
     await Promise.all([mkdir(agentDir), mkdir(cwd)]);
-    const faux = registerFauxProvider({ models: [{ id: "faux-first" }, { id: "faux-second" }] });
+    const faux = fauxProvider({ models: [{ id: "faux-first" }, { id: "faux-second" }] });
     const first = faux.getModel("faux-first")!;
     const second = faux.getModel("faux-second")!;
     const host = new SessionHost({
       agentDir,
       configureServices: async (services) => {
-        registerModels(services, [first, second]);
+        registerModels(services, [first, second], faux);
         await services.modelRuntime.setRuntimeApiKey(first.provider, "faux-key");
         return { model: first };
       },
@@ -105,7 +105,6 @@ describe("frozen launch model", () => {
     } finally {
       await host.dispose();
       await rm(root, { force: true, recursive: true });
-      faux.unregister();
     }
   });
 });

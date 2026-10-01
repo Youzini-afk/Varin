@@ -37,6 +37,8 @@ import {
 } from './mcp-config-model';
 
 interface McpStructuredConfigEditorProps {
+  native?: boolean;
+  project?: boolean;
   content: string;
   disabled: boolean;
   mode: 'new' | 'server' | 'settings';
@@ -391,6 +393,8 @@ const SourceOptionalNumberField: React.FC<SourceFieldProps & {
 };
 
 export const McpStructuredConfigEditor: React.FC<McpStructuredConfigEditorProps> = ({
+  native = false,
+  project = false,
   content,
   disabled,
   mode,
@@ -428,8 +432,13 @@ export const McpStructuredConfigEditor: React.FC<McpStructuredConfigEditorProps>
     onChange(setMcpConfigValue(content, path, value));
   }, [content, onChange]);
   const removeValue = React.useCallback((path: readonly string[]) => {
-    onChange(removeMcpConfigValue(content, path));
-  }, [content, onChange]);
+    let next = removeMcpConfigValue(content, path);
+    if (native && path.at(-2) === 'auth' && path.at(-1) === 'provider') {
+      const parent = path.slice(0, -1);
+      if (!Object.keys(asJsonObject(readJsonPath(parseMcpConfigObject(next), parent))).length) next = removeMcpConfigValue(next, parent);
+    }
+    onChange(next);
+  }, [content, native, onChange]);
   const sourceFields = {
     disabled,
     document,
@@ -474,11 +483,16 @@ export const McpStructuredConfigEditor: React.FC<McpStructuredConfigEditorProps>
 
   const selectTransport = (next: McpServerTransportMode): void => {
     if (!selectedName) return;
-    onChange(switchMcpServerTransport(content, selectedName, next));
+    let updated = switchMcpServerTransport(content, selectedName, next);
+    if (native) updated = next === 'unconfigured'
+      ? removeMcpConfigValue(updated, [...serverPath, 'type'])
+      : setMcpConfigValue(updated, [...serverPath, 'type'], next);
+    onChange(updated);
   };
 
   const setUrl = (url: string): void => {
     if (!selectedName) return;
+    if (native) { setValue([...serverPath, 'url'], url); return; }
     let next = updateMcpServerUrl(content, selectedName, url);
     if (!url) next = removeMcpConfigValue(next, [...serverPath, 'url']);
     onChange(next);
@@ -561,9 +575,9 @@ export const McpStructuredConfigEditor: React.FC<McpStructuredConfigEditorProps>
                   <SelectItem value="http">
                     {text('settings.varin.mcp.structured.transport.http')}
                   </SelectItem>
-                  <SelectItem value="socket">
+                  {!native ? <SelectItem value="socket">
                     {text('settings.varin.mcp.structured.transport.localSocket')}
-                  </SelectItem>
+                  </SelectItem> : null}
                 </SelectContent>
               </Select>
             </SettingsFieldRow>
@@ -614,7 +628,7 @@ export const McpStructuredConfigEditor: React.FC<McpStructuredConfigEditorProps>
                     className="min-w-0 flex-1"
                   />
                 </SettingsFieldRow>
-                <SourceOptionalSelectField
+                {!native ? <SourceOptionalSelectField
                   {...sourceFields}
                   path={[...serverPath, 'auth']}
                   label={text('settings.varin.mcp.structured.server.authentication')}
@@ -623,13 +637,13 @@ export const McpStructuredConfigEditor: React.FC<McpStructuredConfigEditorProps>
                     { value: 'bearer', label: text('settings.varin.mcp.structured.server.authentication.bearer') },
                     { value: false, label: text('settings.varin.mcp.structured.server.authentication.none') },
                   ]}
-                />
-                <SourceStringField
+                /> : null}
+                {!native ? <SourceStringField
                   {...sourceFields}
                   path={[...serverPath, 'bearerTokenEnv']}
                   label={text('settings.varin.mcp.structured.server.bearerTokenEnv')}
                   placeholder="MCP_TOKEN"
-                />
+                /> : null}
                 <SourceKeyValueField
                   {...sourceFields}
                   path={[...serverPath, 'headers']}
@@ -655,7 +669,27 @@ export const McpStructuredConfigEditor: React.FC<McpStructuredConfigEditorProps>
               </div>
             ) : null}
 
-            <div className="space-y-4 border-t border-border/60 pt-4">
+            {native ? <div className="space-y-4 border-t border-border/60 pt-4">
+              <SourceOptionalBooleanField {...sourceFields} path={[...serverPath, 'enabled']}
+                label={text('settings.varin.mcp.native.enabled')} />
+              <SourceOptionalSelectField {...sourceFields} path={[...serverPath, 'exposure']}
+                label={text('settings.varin.mcp.native.exposure')}
+                options={['codemode', 'deferred', 'direct', 'hidden'].map(value => ({ value,
+                  label: text(`settings.varin.mcp.native.exposure.${value}`) }))} />
+              <SourceOptionalNumberField {...sourceFields} path={[...serverPath, 'timeout']}
+                label={text('settings.varin.mcp.structured.server.requestTimeout')}
+                min={0} unit={text('settings.varin.mcp.native.seconds')} />
+              <SourceStringField {...sourceFields} path={[...serverPath, 'description']}
+                label={text('settings.varin.mcp.native.description')} />
+              {transport === 'http' ? <>
+                {!project ? <SourceStringField {...sourceFields} path={[...serverPath, 'auth', 'provider']}
+                  label={text('settings.varin.mcp.native.authProvider')} /> : null}
+                <SourceStringField {...sourceFields} path={[...serverPath, 'oauth', 'clientId']}
+                  label="OAuth client ID" />
+                <SourceStringField {...sourceFields} path={[...serverPath, 'oauth', 'scope']}
+                  label="OAuth scope" />
+              </> : null}
+            </div> : <div className="space-y-4 border-t border-border/60 pt-4">
               <SourceOptionalNumberField
                 {...sourceFields}
                 path={[...serverPath, 'idleTimeout']}
@@ -680,7 +714,7 @@ export const McpStructuredConfigEditor: React.FC<McpStructuredConfigEditorProps>
                 path={[...serverPath, 'disabled']}
                 label={text('settings.varin.mcp.structured.server.disabled')}
               />
-            </div>
+            </div>}
           </div>
         ) : (
           <p className="typography-meta text-muted-foreground">
@@ -689,7 +723,12 @@ export const McpStructuredConfigEditor: React.FC<McpStructuredConfigEditorProps>
         )}
       </SettingsControlGroup> : null}
 
-      {mode === 'settings' ? <SettingsControlGroup
+      {mode === 'settings' && native ? <SettingsControlGroup contentClassName="space-y-4">
+        <SourceOptionalBooleanField {...sourceFields} path={['autoEnableCodemode']}
+          label={text('settings.varin.mcp.native.autoEnableCodemode')} />
+      </SettingsControlGroup> : null}
+
+      {mode === 'settings' && !native ? <SettingsControlGroup
         className={SUBGROUP_CLASS}
         title={text('settings.varin.mcp.structured.behavior.title')}
         contentClassName="space-y-4"
@@ -742,7 +781,7 @@ export const McpStructuredConfigEditor: React.FC<McpStructuredConfigEditorProps>
         />
       </SettingsControlGroup> : null}
 
-      {mode === 'settings' ? <SettingsControlGroup
+      {mode === 'settings' && !native ? <SettingsControlGroup
         className={SUBGROUP_CLASS}
         title={text('settings.varin.mcp.structured.interaction.title')}
         contentClassName="space-y-4"

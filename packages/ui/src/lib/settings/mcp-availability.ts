@@ -1,11 +1,8 @@
 import { useSyncExternalStore } from 'react';
 import {
-  FOUNDATIONAL_PI_PACKAGE_MANIFEST,
-  matchesFoundationalPackage,
-  type PackageDescriptor,
   type RuntimeContextTarget,
 } from '@varin/protocol';
-import { listPiPackages } from '@/lib/pi-runtime/packages';
+import { getPiMcpConfigSnapshot } from '@/lib/pi-runtime/mcp';
 import { subscribePiRuntimeCatalogChanged } from '@/lib/pi-runtime/catalog-events';
 import { getRuntimeKey } from '@varin/application-client';
 
@@ -27,21 +24,12 @@ let state = EMPTY_STATE;
 let generation = 0;
 let lastTarget: { key: string; target: RuntimeContextTarget } | null = null;
 const listeners = new Set<() => void>();
-const MCP_FOUNDATIONAL_PACKAGE = FOUNDATIONAL_PI_PACKAGE_MANIFEST.integrations.find((entry) => entry.id === 'mcp');
 
 const publish = (next: McpSettingsAvailabilityState): void => {
   state = next;
   for (const listener of listeners) listener();
 };
 
-export const isPiMcpAdapterInstalled = (packages: readonly PackageDescriptor[]): boolean => (
-  packages.some((candidate) => (
-    candidate.installed
-    && candidate.enabled
-    && MCP_FOUNDATIONAL_PACKAGE !== undefined
-    && matchesFoundationalPackage(MCP_FOUNDATIONAL_PACKAGE, candidate)
-  ))
-);
 
 export function useMcpSettingsAvailabilityState(): McpSettingsAvailabilityState {
   return useSyncExternalStore(
@@ -71,13 +59,14 @@ export async function refreshMcpSettingsAvailability(
   const runtimeKey = getRuntimeKey();
   publish({ ...state, error: null, loading: true });
   try {
-    const installed = isPiMcpAdapterInstalled(await listPiPackages(runtimeTarget));
+    const snapshot = await getPiMcpConfigSnapshot(runtimeTarget);
+    const installed = snapshot.provider.state === 'active' || snapshot.provider.state === 'degraded';
     if (
       requestGeneration !== generation
       || state.targetKey !== targetKey
       || runtimeKey !== getRuntimeKey()
     ) return;
-    publish({ error: null, installed, loading: false, targetKey });
+    publish({ error: snapshot.provider.issue ?? null, installed, loading: false, targetKey });
   } catch (error) {
     if (
       requestGeneration !== generation

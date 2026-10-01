@@ -17,14 +17,14 @@ export const piSessionContextUsage = (
   const reportedWindow = finiteNumber(record.contextWindow);
   const contextLimit = reportedWindow && reportedWindow > 0
     ? reportedWindow
-    : (snapshot?.model?.contextWindow ?? 0);
+    : (snapshot?.routedModel?.model.contextWindow ?? snapshot?.model?.contextWindow ?? 0);
   if (tokens === null || tokens < 0 || contextLimit <= 0) return null;
 
   const reportedPercent = finiteNumber(record.percent);
   const percentage = reportedPercent === null
     ? (tokens / contextLimit) * 100
     : Math.max(0, reportedPercent);
-  const outputLimit = snapshot?.model?.maxTokens;
+  const outputLimit = snapshot?.routedModel?.model.maxTokens ?? snapshot?.model?.maxTokens;
 
   return {
     contextLimit,

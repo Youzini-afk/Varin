@@ -1,11 +1,11 @@
 import { randomUUID } from "node:crypto";
 import {
   buildSessionContext,
+  buildSessionProjection,
   convertToLlm,
   estimateTokens,
   findCutPoint,
   findTurnStartIndex,
-  sessionEntryToContextMessages,
   type AgentSession,
   type AgentSessionEvent,
   type CompactionResult,
@@ -95,6 +95,7 @@ export interface PreparedCandidate extends FixedPreparation {
   epoch: number;
   fixedAt: number;
   modelKey: string;
+  selectionKey: string;
   tokensAtFix: number;
   status: "in-flight" | "ready" | "failed";
   /** The exact frozen task submitted to the worker. */
@@ -159,11 +160,6 @@ function lastCompactionIndex(entries: SessionEntry[]): number {
   return -1;
 }
 
-function entryMessage(entry: SessionEntry): AgentMessage | undefined {
-  if (entry.type === "compaction") return undefined;
-  return sessionEntryToContextMessages(entry)[0];
-}
-
 export function computeFixedPreparation(
   entries: SessionEntry[],
   keepRecentTokens: number,
@@ -183,12 +179,20 @@ export function computeFixedPreparation(
       : -1;
     boundaryStart = prevFirstKept >= 0 ? prevFirstKept : prevIndex + 1;
   }
+  const projected = new Map(buildSessionProjection(entries).entries.map(entry => [entry.sourceEntry.id,
+    entry.messages.filter(message => message.role !== "system")]));
+  // Native system state is retained by appendCompaction; it cannot be freed
+  // by summarizing conversation. Cuts and material use the edited projection.
+  const sourceMessages = (entry: SessionEntry): AgentMessage[] => entry.type === "compaction" ? [] : projected.get(entry.id) ?? [];
+  const raw = entries.map((entry, index) => ({ entry, index, messages: sourceMessages(entry) }))
+    .slice(boundaryStart).filter(item => item.messages.length > 0);
+  const cutEntries: SessionEntry[] = raw.map(({ entry, messages }) => ({ ...entry, type: "message", message: messages[0]! }));
   // Pi's nearest-after cut search cannot find a point after a trailing
   // tool result. Keep at least that complete tool exchange; never choose a
   // tool-result boundary or accidentally retain the entire old branch.
   let pairedTailTokens = 0;
-  for (let i = entries.length - 1; i >= boundaryStart; i--) {
-    const messages = entries[i]!.type === "compaction" ? [] : sessionEntryToContextMessages(entries[i]!);
+  for (let i = raw.length - 1; i >= 0; i--) {
+    const messages = raw[i]!.messages;
     if (messages.some((message) => message.role === "assistant" || message.role === "user")) break;
     pairedTailTokens += messages.reduce((tokens, message) => tokens + estimateTokens(message), 0);
   }
@@ -197,10 +201,8 @@ export function computeFixedPreparation(
       // Pi's cut primitive counts a compaction summary as content even though
       // S0 already carries it separately. A terminal compaction could consume
       // the entire keep budget and snap the cut to the oldest raw message.
-      const raw = entries.map((entry, index) => ({ entry, index }))
-        .slice(boundaryStart).filter(({ entry }) => entry.type !== "compaction");
       if (raw.length === 0) return undefined;
-      const relative = findCutPoint(raw.map(({ entry }) => entry), 0, raw.length,
+      const relative = findCutPoint(cutEntries, 0, raw.length,
         Math.max(keepRecentTokens, pairedTailTokens + 1));
       const firstKeptEntryIndex = raw[relative.firstKeptEntryIndex]?.index;
       if (firstKeptEntryIndex === undefined) return undefined;
@@ -209,11 +211,12 @@ export function computeFixedPreparation(
         isSplitTurn: relative.isSplitTurn };
     })()
     : (() => {
-      if (forcedKeptIndex <= boundaryStart || forcedKeptIndex >= entries.length
-        || entries[forcedKeptIndex]!.type === "compaction") return undefined;
-      const messages = sessionEntryToContextMessages(entries[forcedKeptIndex]!);
+      const relativeIndex = raw.findIndex(entry => entry.index === forcedKeptIndex);
+      if (relativeIndex <= 0) return undefined;
+      const messages = raw[relativeIndex]!.messages;
       if (!messages.some((message) => message.role !== "toolResult")) return undefined;
-      const turnStart = findTurnStartIndex(entries, forcedKeptIndex, boundaryStart);
+      const relativeStart = findTurnStartIndex(cutEntries, relativeIndex, 0);
+      const turnStart = relativeStart < 0 ? -1 : raw[relativeStart]!.index;
       const startsTurn = turnStart === forcedKeptIndex;
       return { firstKeptEntryIndex: forcedKeptIndex,
         turnStartIndex: startsTurn ? -1 : turnStart,
@@ -227,13 +230,13 @@ export function computeFixedPreparation(
   for (let i = boundaryStart; i < historyEnd; i++) {
     const entry = entries[i]!;
     if (entry.type === "compaction") continue;
-    const messages = sessionEntryToContextMessages(entry);
+    const messages = sourceMessages(entry);
     messagesToSummarize.push(...messages);
   }
   const turnPrefixMessages: AgentMessage[] = [];
   if (cut.isSplitTurn) {
     for (let i = cut.turnStartIndex; i < cut.firstKeptEntryIndex; i++) {
-      if (entries[i]!.type !== "compaction") turnPrefixMessages.push(...sessionEntryToContextMessages(entries[i]!));
+      turnPrefixMessages.push(...sourceMessages(entries[i]!));
     }
   }
   if (messagesToSummarize.length === 0 && turnPrefixMessages.length === 0) return undefined;
@@ -241,7 +244,7 @@ export function computeFixedPreparation(
   // S0 carries that entry's summary; A's endpoint names its own last raw entry.
   let lastSummarizedEntryId: string | undefined;
   for (let i = cut.firstKeptEntryIndex - 1; i >= boundaryStart; i--) {
-    if (entryMessage(entries[i]!) !== undefined) {
+    if (sourceMessages(entries[i]!).length > 0) {
       lastSummarizedEntryId = entries[i]!.id;
       break;
     }
@@ -249,7 +252,7 @@ export function computeFixedPreparation(
   if (!lastSummarizedEntryId) return undefined;
   let firstSummarizedEntryId: string | null = null;
   for (let i = boundaryStart; i < cut.firstKeptEntryIndex; i++) {
-    if (entryMessage(entries[i]!) !== undefined) {
+    if (sourceMessages(entries[i]!).length > 0) {
       firstSummarizedEntryId = entries[i]!.id ?? null;
       break;
     }
@@ -262,7 +265,7 @@ export function computeFixedPreparation(
   for (let i = cut.firstKeptEntryIndex; i < entries.length; i++) {
     const entry = entries[i]!;
     if (entry.type === "compaction") continue;
-    const messages = sessionEntryToContextMessages(entry);
+    const messages = sourceMessages(entry);
     if (entry.id) keptEntries.push({ id: entry.id, messages });
     keptMessages.push(...messages);
   }
@@ -507,6 +510,13 @@ export function createContextPreparationExtension(
   // invalidate that prefix, so the key must not include request messages.
   const modelKey = (model: Model<Api> | undefined): string =>
     model === undefined ? "" : JSON.stringify(serializeCompactionModel(model));
+  const executionModel = (ctx: ExtensionContext): Model<Api> | undefined =>
+    latestRequest?.model ?? boundSession?.routedModel?.model ?? ctx.model;
+  const sourceWasEdited = (entries: SessionEntry[], fixedLeafId: string): boolean => {
+    const fixedIndex = entries.findIndex(entry => entry.id === fixedLeafId);
+    const sourceIds = new Set(entries.slice(0, fixedIndex + 1).map(entry => entry.id));
+    return entries.slice(fixedIndex + 1).some(entry => entry.type === "context_edit" && sourceIds.has(entry.targetId));
+  };
 
   // Growth rate measured between consecutive context events (tokens/ms).
   let tokenRatePerMs = 0;
@@ -534,7 +544,9 @@ export function createContextPreparationExtension(
     cand.epoch === epoch
     && cand.spec.sessionId === ctx.sessionManager.getSessionId()
     && cand.boundaryCompactionId === boundaryId(branchEntries)
-    && cand.modelKey === modelKey(ctx.model)
+    && cand.modelKey === modelKey(executionModel(ctx))
+    && cand.selectionKey === modelKey(ctx.model)
+    && !sourceWasEdited(branchEntries, cand.fixedLeafEntryId)
     && branchEntries.some((entry) => entry.id === cand.firstKeptEntryId)
     && branchEntries.some((entry) => entry.id === cand.lastSummarizedEntryId)
     && branchEntries.some((entry) => entry.id === cand.fixedLeafEntryId);
@@ -582,7 +594,7 @@ export function createContextPreparationExtension(
     usable: number,
     manual?: { customInstructions?: string },
   ): PreparedCandidate | undefined => {
-    const model = ctx.model;
+    const model = executionModel(ctx);
     if (!model) return undefined;
     const sessionId = ctx.sessionManager.getSessionId();
     const entries = ctx.sessionManager.getBranch();
@@ -613,6 +625,7 @@ export function createContextPreparationExtension(
       fixedAt: now(),
       id,
       modelKey: modelKey(model),
+      selectionKey: modelKey(ctx.model),
       status: "in-flight",
       tokensAtFix: tokensNow,
       ...(manual === undefined ? {} : { manualRequested: true }),
@@ -718,7 +731,7 @@ export function createContextPreparationExtension(
     // run the same worker task synchronously from Pi's own preparation.
     // This is the blocking path the design allows; manual and automatic
     // compaction share the single worker mechanism.
-    const model = ctx.model;
+    const model = executionModel(ctx);
     if (!model) return undefined;
     const keptIndex = event.branchEntries.findIndex((entry) => entry.id === event.preparation.firstKeptEntryId);
     const fixedLeaf = event.branchEntries[event.branchEntries.length - 1];
@@ -746,6 +759,7 @@ export function createContextPreparationExtension(
       taskId = spec.taskId;
       const sourceEpoch = epoch;
       const sourceModelKey = modelKey(model);
+      const sourceSelectionKey = modelKey(ctx.model);
       const sourceIds = event.branchEntries.map((entry) => entry.id);
       const result = await runWithRecovery(spec, event.signal);
       event.signal.throwIfAborted();
@@ -754,7 +768,9 @@ export function createContextPreparationExtension(
       }
       const live = ctx.sessionManager.getBranch();
       if (sourceEpoch !== epoch || ctx.sessionManager.getSessionId() !== sessionId
-        || modelKey(ctx.model) !== sourceModelKey
+        || modelKey(executionModel(ctx)) !== sourceModelKey
+        || modelKey(ctx.model) !== sourceSelectionKey
+        || sourceWasEdited(live, fixed.fixedLeafEntryId)
         || !sourceIds.every((id, index) => live[index]?.id === id)) {
         throw new ContextCapacityError("The summary source changed while preparation was running");
       }
@@ -822,14 +838,16 @@ export function createContextPreparationExtension(
     });
 
     pi.on("session_tree", async (_event, ctx) => {
+      latestRequest = undefined;
+      lastTokens = lastAt = tokenRatePerMs = 0;
       discard("branch navigation");
       const retained = retainedContextState(ctx.sessionManager.getBranch());
       await options.onRetention?.({ retainedObservationRefs: retained.observationRefs, retainedGit: retained.retainedGit });
     });
-    pi.on("model_select", () => discard("model changed"));
-    pi.on("session_before_switch", () => discard("session switch"));
-    pi.on("session_before_fork", () => discard("session fork"));
-    pi.on("session_shutdown", () => { discard("shutdown"); boundary?.dispose(); });
+    pi.on("model_select", () => { latestRequest = undefined; discard("model changed"); });
+    pi.on("session_before_switch", () => { latestRequest = undefined; discard("session switch"); });
+    pi.on("session_before_fork", () => { latestRequest = undefined; discard("session fork"); });
+    pi.on("session_shutdown", () => { latestRequest = undefined; discard("shutdown"); boundary?.dispose(); });
   };
 
   const extension = factory as ContextPreparationExtension;
@@ -847,7 +865,7 @@ export function createContextPreparationExtension(
       return { taskId: candidate.id, status: candidate.status === "ready" ? "ready" : "preparing" };
     }
     if (candidate) discard("manual summary focus changed");
-    const usable = ctx.model.contextWindow - options.getCompactionSettings().reserveTokens;
+    const usable = executionModel(ctx)!.contextWindow - options.getCompactionSettings().reserveTokens;
     const estimated = estimateModelInputTokens({ messages: convertToLlm(activeCompactionMessages(buildSessionContext(entries).messages)) });
     const tokensNow = Math.max(ctx.getContextUsage()?.tokens ?? 0, estimated);
     const started = startPreparation(ctx, api, tokensNow, usable, { ...(focus ? { customInstructions: focus } : {}) });

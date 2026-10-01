@@ -20,7 +20,7 @@ export type ProviderInferenceCapability = (typeof PROVIDER_INFERENCE_CAPABILITIE
 export const PROVIDER_INFERENCE_PROTOCOLS = {
   embedding: "openai-compatible",
   rerank: "http-rerank",
-  decision: "typesafe-systemone",
+  decision: "pi-classifier",
 } as const;
 
 export interface ProviderInferenceConfig {
@@ -51,6 +51,8 @@ export interface ProviderModelCostInput {
 }
 
 export interface ProviderModelConfigInput {
+  type?: "chat" | "image" | "classifier";
+  output?: Array<"text" | "image">;
   api?: string;
   baseUrl?: string;
   contextWindow?: number;
@@ -192,13 +194,21 @@ function parseThinkingLevelMap(
 function parseModel(value: unknown, index: number, prefix = "config.models"): ProviderModelConfigInput {
   const path = `${prefix}[${index}]`;
   const input = recordAt(value, path);
+  const type = input.type;
+  if (type !== undefined && type !== "chat" && type !== "image" && type !== "classifier") {
+    throw new ProviderConfigValidationError(`${path}.type`, "must be chat, image or classifier");
+  }
+  const output = input.output === undefined ? undefined : input.output;
+  if (output !== undefined && (!Array.isArray(output) || output.some(value => value !== "text" && value !== "image"))) {
+    throw new ProviderConfigValidationError(`${path}.output`, "must contain text or image");
+  }
   const id = requiredString(input.id, `${path}.id`);
   const name = optionalString(input.name, `${path}.name`);
   const api = optionalString(input.api, `${path}.api`);
   const baseUrl = optionalString(input.baseUrl, `${path}.baseUrl`);
   const reasoning = optionalBoolean(input.reasoning, `${path}.reasoning`);
   const contextWindow = optionalFiniteNumber(input.contextWindow, `${path}.contextWindow`, {
-    positive: true,
+    positive: type !== "classifier",
   });
   const maxTokens = optionalFiniteNumber(input.maxTokens, `${path}.maxTokens`, {
     positive: true,
@@ -234,6 +244,8 @@ function parseModel(value: unknown, index: number, prefix = "config.models"): Pr
   }
   const thinkingLevelMap = parseThinkingLevelMap(input.thinkingLevelMap, `${path}.thinkingLevelMap`);
   return {
+    ...(type === undefined ? {} : { type }),
+    ...(output === undefined ? {} : { output: output as Array<"text" | "image"> }),
     ...(api === undefined ? {} : { api }),
     ...(baseUrl === undefined ? {} : { baseUrl }),
     ...(contextWindow === undefined ? {} : { contextWindow }),
@@ -315,10 +327,11 @@ export function parseProviderConfigInput(value: unknown): ProviderConfigInput {
   const capabilities = parseProviderCapabilities(input.capabilities);
   const ids = new Set<string>();
   for (const model of models ?? []) {
-    if (ids.has(model.id)) {
+    const identity = `${model.type ?? "chat"}:${model.id}`;
+    if (ids.has(identity)) {
       throw new ProviderConfigValidationError("config.models", `contains duplicate model id ${model.id}`);
     }
-    ids.add(model.id);
+    ids.add(identity);
   }
   if (
     api === undefined &&

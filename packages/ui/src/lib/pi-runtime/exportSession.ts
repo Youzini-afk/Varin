@@ -58,6 +58,8 @@ const assistantContentMarkdown = (content: PiAssistantContent): string => {
 const formatMessage = (message: PiMessage, timestamp: string): string => {
   const time = asIsoTimestamp(message.timestamp) || timestamp;
   switch (message.role) {
+    case 'system':
+      return `**System instructions**${detailLine(time)}\n\n${message.content ?? ''}${message.sections ? `\n\n${jsonBlock(message.sections)}` : ''}`;
     case 'user':
       return `**User**${detailLine(time)}\n\n${contentMarkdown(message.content) || '*Empty message*'}`;
     case 'assistant': {
@@ -111,6 +113,10 @@ const formatMessage = (message: PiMessage, timestamp: string): string => {
 const formatEntry = (entry: PiSessionEntry): string => {
   const timestamp = asIsoTimestamp(entry.timestamp);
   switch (entry.type) {
+    case 'context_edit':
+      return `**Model context changed**${detailLine(timestamp, `target ${entry.targetId}`)}\n\n${entry.replacement === null ? '*Omitted from model context*' : jsonBlock(entry.replacement)}`;
+    case 'usage':
+      return `**${entry.kind} usage**${detailLine(timestamp, `${entry.provider}/${entry.model}`)}\n\n${jsonBlock({ ...entry.usage, cost: { ...entry.usage.cost } })}${entry.note ? `\n\n${entry.note}` : ''}`;
     case 'message':
       return formatMessage(entry.message, timestamp);
     case 'thinking_level_change':

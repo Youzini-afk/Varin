@@ -760,7 +760,7 @@ describe("explore query services", () => {
       fastDecisionStatus: async () => ({
         status: "ready" as const,
         binding: {
-          protocol: "typesafe-systemone" as const,
+          protocol: "pi-classifier" as const,
           providerId: "jev",
           modelId: "jev-1.13",
           configurationId: "cfg-1",

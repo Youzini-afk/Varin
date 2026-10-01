@@ -28,6 +28,7 @@ const assistantPart = (part: PiAssistantContent): string => {
 
 const formatMessage = (message: PiMessage): string => {
   switch (message.role) {
+    case "system": return `[source system instructions]\n${textParts(message.content)}`;
     case "user": return `[user]\n${textParts(message.content)}`;
     case "assistant": return `[assistant]\n${message.content.map(assistantPart).join("\n")}`;
     case "toolResult": return `[tool result ${message.toolName}${message.isError ? " · error" : ""}]\n${textParts(message.content)}`;
@@ -41,6 +42,8 @@ const formatMessage = (message: PiMessage): string => {
 
 export const formatTranscriptEntry = (entry: PiSessionEntry): string => {
   switch (entry.type) {
+    case "context_edit": return `${entry.id} [model context ${entry.replacement === null ? "omitted" : "edited"} → ${entry.targetId}]`;
+    case "usage": return `${entry.id} [${entry.kind} usage ${entry.provider}/${entry.model}: ${entry.usage.totalTokens} tokens]`;
     case "message": return `${entry.id} ${formatMessage(entry.message)}`;
     case "custom_message": return `${entry.id} [${entry.customType}]\n${textParts(entry.content)}`;
     case "compaction": return `${entry.id} [compaction]\n${entry.summary}`;

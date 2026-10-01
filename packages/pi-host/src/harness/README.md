@@ -133,6 +133,20 @@ const customTools = selectHarnessTools(settings, {
   keeps only the newest compaction summary; superseded summaries remain in the
   native journal. Cancellation retires both the worker and its Host queries.
 
+Pi 0.99.2 represents prompt/tool changes in canonical system messages and applies append-only
+`context_edit` entries when projecting history. Preparation uses that edited projection, while
+retaining original journal entries. System state retained by native compaction is not counted as
+reclaimable conversation. Historical system state passed to a worker is quoted source material;
+the worker keeps its own instructions and scoped read-only tools. A later edit of a frozen source
+invalidates its candidate; later ordinary messages remain raw behind the fixed cut.
+
+Virtual-model selection and the actual routed model are separate. Admission and summary tasks use
+the physical request model's capacity, not a virtual catalog entry's unknown window. Snapshots expose
+both identities. Native cache warming reads user settings only, defaults to `streaming`, and
+reports its own usage. It can make additional billed requests when native cost estimates allow it;
+`off` disables warming. Projects cannot opt users into additional warming costs. Session
+abort, model changes and a capacity compaction cancel obsolete warming work.
+
 ## HostServicesBridge
 
 The `HostServicesBridge` sends `harness.request` events to the host via
@@ -189,11 +203,14 @@ shell/thread controls use their actual target identity. Independent resources ov
 unknown third-party sequential tool stays an ordered barrier, with calls on either side still
 parallel inside their side. The Host Documents/WorkingState gates remain the final mutation
 and alias authority; scheduling does not replace revision checks or recovery.
-The upstream seams are tracked in `patches/@earendil-works%2Fpi-agent-core@0.85.1.patch`
-and `patches/@earendil-works%2Fpi-coding-agent@0.85.1.patch`: the core builds the
+The upstream seams are tracked in `packages/pi-host/patches/@earendil-works%2Fpi-agent-core@0.99.2.patch`
+and `packages/pi-host/patches/@earendil-works%2Fpi-coding-agent@0.99.2.patch`: the core builds the
 resource dependency graph in the actual tool-call batch path, while coding-agent
 preserves effect declarations through `ToolDefinition` wrapping and carries the
 permission hook's Host-authoritative plan. There is no second Agent loop.
+Native codemode child calls use the same preparation and permission hooks, with a scheduler per
+parent scope so descendant calls cannot deadlock on their own enclosing operation. Child identities,
+structured results and nested usage remain native Pi facts projected to the UI.
 
 ## Path Locking
 

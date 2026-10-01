@@ -31,6 +31,7 @@ export interface PermissionGateOptions {
   cwd: string;
   bridge: Pick<HostServicesBridge, "request">;
   smartJudge?: (toolName: string, params: Record<string, unknown>) => Promise<"allow" | "ask">;
+  allowedTools?: () => readonly string[] | undefined;
 }
 
 const ALLOW_ONCE = "Allow once";
@@ -136,6 +137,10 @@ export function createPermissionGateExtension(options: PermissionGateOptions): E
     });
     pi.on("tool_call", async (event, ctx) => {
       const toolName = event.toolName;
+      const allowedTools = options.allowedTools?.();
+      if (allowedTools && !allowedTools.includes(toolName)) {
+        return { block: true, reason: `Tool ${toolName} is outside this session's authorized tool set` };
+      }
       const params = event.input as Record<string, unknown>;
       // Pi passes this validated input object to execute. Pin placement before
       // permission inspection and scheduling so an approval names the actual

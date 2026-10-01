@@ -1,9 +1,10 @@
+import { fauxProvider } from "@earendil-works/pi-ai";
 import assert from "node:assert/strict";
-import { mkdtemp, rm } from "node:fs/promises";
+import { mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { test } from "node:test";
-import { fauxAssistantMessage, registerFauxProvider } from "@earendil-works/pi-ai/compat";
+import { fauxAssistantMessage } from "@earendil-works/pi-ai/compat";
 import { convertToLlm } from "@earendil-works/pi-coding-agent";
 import type { HostEvent, HostEventData } from "@varin/protocol";
 import { activeCompactionMessages } from "../src/harness/compaction-context.js";
@@ -12,22 +13,25 @@ import { SessionHost } from "../src/session-host.js";
 
 test("manual compaction runs beside an active turn and commits only at the next capacity boundary", async () => {
   const root = await mkdtemp(join(tmpdir(), "varin-manual-compaction-"));
-  const faux = registerFauxProvider();
-  const model = { ...faux.getModel(), contextWindow: 16_000, maxTokens: 400 };
+  const faux = fauxProvider();
+  const model = { ...faux.getModel(), contextWindow: 60_000, maxTokens: 400 };
   const traceEvents: Array<{ taskId: string; type: string; message?: string }> = [];
   const harnessMethods: string[] = [];
   let workerRequestId: string | undefined;
   let workerRequests = 0;
   let releaseRunningTurn: () => void = () => undefined;
   const runningTurn = new Promise<void>((resolve) => { releaseRunningTurn = resolve; });
+  let providerStarted!: () => void;
+  const enteredProvider = new Promise<void>(resolve => { providerStarted = resolve; });
   faux.setResponses([
-    async () => { await runningTurn; return fauxAssistantMessage("The foreground turn completed normally."); },
+    async () => { providerStarted(); await runningTurn; return fauxAssistantMessage("The foreground turn completed normally."); },
     () => fauxAssistantMessage("Continued after the prepared summary was applied."),
   ]);
   const host = new SessionHost({
     agentDir: join(root, "agent"),
     configureServices: async (services) => {
       services.modelRuntime.registerProvider(model.provider, {
+        streamSimple: faux.provider.streamSimple,
         api: model.api, baseUrl: model.baseUrl,
         models: [{ api: model.api, baseUrl: model.baseUrl, contextWindow: model.contextWindow,
           cost: model.cost, id: model.id, input: model.input, maxTokens: model.maxTokens,
@@ -38,12 +42,12 @@ test("manual compaction runs beside an active turn and commits only at the next 
     },
     emit: <E extends HostEvent>(event: E, data: HostEventData<E>) => {
       if (event === "harness.request") harnessMethods.push((data as { method: string }).method);
-      if (event === "harness.request" && ["zone2.assemble", "zone2.status"].includes((data as { method: string }).method)) {
+      if (event === "harness.request" && ["zone2.assemble", "zone2.status", "context.retained"].includes((data as { method: string }).method)) {
         const request = data as { method: string; requestId: string };
         queueMicrotask(() => host.respondHarness(host.sessionId ?? "", request.requestId, { ok: true,
           result: request.method === "zone2.assemble"
             ? { content: null, eventCursor: 0 }
-            : { status: "ready", content: null },
+            : request.method === "context.retained" ? { acknowledged: true } : { status: "ready", content: null },
         }));
       }
       if (event === "harness.request" && (data as { method?: string }).method === "compaction.run") {
@@ -59,6 +63,12 @@ test("manual compaction runs beside an active turn and commits only at the next 
     projectTrustOverride: true,
   });
   try {
+    // This case isolates explicit preparation. Automatic preparation of a new
+    // prefix after the commit has separate coverage in the session e2e suite.
+    await mkdir(join(root, "agent"), { recursive: true });
+    await writeFile(join(root, "agent", "settings.json"), JSON.stringify({
+      harness: { context: { backgroundPreparation: false } },
+    }));
     const { sessionId } = await host.create(root);
     const manager = host.session.sessionManager;
     for (let index = 0; index < 6; index += 1) {
@@ -66,6 +76,7 @@ test("manual compaction runs beside an active turn and commits only at the next 
       manager.appendMessage(fauxAssistantMessage(`Result ${index}: ${"finding ".repeat(150)}`));
     }
     assert.deepEqual(await host.prompt(sessionId, "Continue the active task"), { accepted: true });
+    await enteredProvider;
     assert.equal(host.session.isIdle, false);
     const started = host.prepareCompaction(sessionId);
     assert.equal(started.status, "preparing");
@@ -95,20 +106,17 @@ test("manual compaction runs beside an active turn and commits only at the next 
 
     // Later work stays in native history until a real provider request needs
     // capacity. The prepared prefix is then adopted without another worker.
-    const agent = host.session.agent;
     const reserve = host.runtime.services.settingsManager.getCompactionSettings().reserveTokens;
     const estimatedInput = () => estimateModelInputTokens({
-      systemPrompt: agent.state.systemPrompt,
-      tools: agent.state.tools.map(({ name, description, parameters }) => ({ name, description, parameters })),
       messages: convertToLlm(activeCompactionMessages(manager.buildSessionContext().messages)),
     });
-    for (let index = 0; index < 300 && estimatedInput() + reserve < model.contextWindow - 100; index += 1) {
+    for (let index = 0; estimatedInput() + reserve < model.contextWindow - 100; index += 1) {
       manager.appendMessage({ role: "user", content: `Later task ${index}: ${"detail ".repeat(20)}`, timestamp: Date.now() });
       manager.appendMessage(fauxAssistantMessage(`Later finding ${index}: ${"result ".repeat(20)}`));
     }
     assert.ok(estimatedInput() + reserve >= model.contextWindow - 100,
       "the test must reach the next capacity boundary");
-    agent.state.messages = activeCompactionMessages(manager.buildSessionContext().messages);
+    host.session.refreshContext();
     assert.deepEqual(await host.prompt(sessionId, `Continue work: ${"next ".repeat(60)}`), { accepted: true });
     for (let attempt = 0; attempt < 200 && !manager.getBranch().some((entry) => entry.type === "compaction"); attempt += 1) {
       await new Promise((resolve) => setTimeout(resolve, 5));
@@ -121,7 +129,6 @@ test("manual compaction runs beside an active turn and commits only at the next 
   } finally {
     releaseRunningTurn();
     await host.dispose();
-    faux.unregister();
     await rm(root, { recursive: true, force: true });
   }
 });

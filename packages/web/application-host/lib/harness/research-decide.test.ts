@@ -71,7 +71,7 @@ const ctx = (sessionId = "s1", signal?: AbortSignal): HarnessServiceContext => (
   signal: signal ?? new AbortController().signal,
 } as HarnessServiceContext);
 
-const binding = { protocol: "typesafe-systemone" as const, providerId: "typesafe", modelId: "jev-1", configurationId: "cfg-1" };
+const binding = { protocol: "pi-classifier" as const, providerId: "typesafe", modelId: "jev-1", configurationId: "cfg-1" };
 const readyStatus: HarnessFastDecisionPurposeStatus = { status: "ready", binding };
 
 const params = (overrides: Partial<ResearchDecideParams> = {}): ResearchDecideParams => ({

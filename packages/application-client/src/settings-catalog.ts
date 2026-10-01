@@ -317,7 +317,7 @@ export const SETTINGS_CATALOG: readonly SettingsCatalogEntry[] = [
   {
     id: 'harness.fastDecision', category: 'retrieval', owner: 'pi-settings',
     field: { path: 'harness.fastDecision', kind: 'json', scope: 'user',
-      note: 'Fast Decision Model {default?: {protocol:"typesafe-systemone",providerId,modelId,endpoint?}, purposes?: {explore|web|scholarly?: binding|"off"}} — typed candidate/action judgment, not a chat slot; user-owned; applies to the next query' },
+      note: 'Fast Decision Model {default?: {protocol:"pi-classifier",providerId,modelId,endpoint?}, purposes?: {explore|web|scholarly?: binding|"off"}} — typed candidate/action judgment, not a chat slot; user-owned; applies to the next query' },
     apply: 'next-run',
     ui: { page: 'harness-retrieval', titleKey: 'settings.page.harness.section.fastDecision',
       keywords: ['fast decision', 'jev', 'typesafe', 'selection'] },
@@ -805,6 +805,22 @@ export const SETTINGS_CATALOG: readonly SettingsCatalogEntry[] = [
     apply: 'next-run',
     ui: { page: 'sessions', titleKey: 'settings.varin.defaults.field.defaultThinking',
       keywords: ['thinking', 'reasoning', 'variant'] },
+  },
+  {
+    id: 'pi.cache-warming', category: 'model', owner: 'pi-settings',
+    field: { path: 'cacheWarming', kind: 'enum', scope: 'user',
+      options: [{ value: 'off' }, { value: 'streaming' }, { value: 'idle' }], default: 'streaming',
+      note: 'Native Pi policy; refreshes are additional billed inference requests and record their usage.' },
+    apply: 'next-run', ui: { page: 'sessions', titleKey: 'settings.pi.cacheWarming.title',
+      descriptionKey: 'settings.pi.cacheWarming.description', keywords: ['cache', 'cost', 'warming'] },
+  },
+  {
+    id: 'pi.codemode', category: 'model', owner: 'pi-settings',
+    field: { path: 'codemode.mode', kind: 'enum', scope: 'user-or-project',
+      options: [{ value: 'on' }, { value: 'only' }], default: 'on',
+      note: 'Presentation when codemode is active. Activation follows native defaultTools or MCP autoEnableCodemode.' },
+    apply: 'next-run', ui: { page: 'sessions', titleKey: 'settings.pi.codemode.title',
+      descriptionKey: 'settings.pi.codemode.description', keywords: ['codemode', 'tools', 'scripts'] },
   },
   {
     id: 'sessions.default-agent', category: 'model', owner: 'pi-settings',

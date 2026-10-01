@@ -49,6 +49,11 @@ export async function captureInheritedInput(
   const sections: string[] = [];
   for (const message of messages) {
     switch (message.role) {
+      case "system":
+        // The child owns its live instructions and tool loadout. Preserve the
+        // parent's system text as quoted source evidence, never executable tools.
+        sections.push(`[source system instructions]\n${renderContent(message.content)}${message.sections ? `\n${Object.values(message.sections).filter(value => value !== null).join("\n")}` : ""}`);
+        break;
       case "user":
       case "assistant":
       case "custom":

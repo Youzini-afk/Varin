@@ -11,9 +11,9 @@ import {
 
 type ApiKeyInputLike = { value?: string | null } | null | undefined;
 
-export interface CustomProviderModelRowInput extends ProviderModelConfigInput {
+export interface CustomProviderModelRowInput extends Omit<ProviderModelConfigInput, 'output'> {
   context?: string | number;
-  output?: string | number;
+  output?: ProviderModelConfigInput['output'] | string | number;
 }
 
 export interface CustomProviderEditableModel {
@@ -36,6 +36,7 @@ export interface CustomProviderEditableFormState {
   baseURL: string;
   id: string;
   models: CustomProviderEditableModel[];
+  otherModels: ProviderModelConfigInput[];
   modelsDefined: boolean;
   name: string;
   scope: ProviderConfigScope;
@@ -181,6 +182,7 @@ export const createEmptyCustomProviderState = (): CustomProviderEditableFormStat
   baseURL: '',
   id: '',
   models: [createEmptyCustomProviderModel()],
+  otherModels: [],
   modelsDefined: true,
   name: '',
   scope: 'user',
@@ -269,7 +271,7 @@ export const mergeCustomProviderModelRows = (
 export const createCustomProviderFormStateFromConfig = (
   config: CustomProviderConfigInput,
 ): CustomProviderEditableFormState => {
-  const models = (config.models ?? []).map(toEditableModel).filter((model) => model.id);
+  const models = (config.models ?? []).filter(model => model.type === undefined || model.type === 'chat').map(toEditableModel).filter((model) => model.id);
   return {
     api: trimString(config.api),
     apiKey: '',
@@ -277,6 +279,7 @@ export const createCustomProviderFormStateFromConfig = (
     baseURL: trimString(config.baseUrl),
     id: trimString(config.id),
     models: models.length > 0 ? models : [createEmptyCustomProviderModel()],
+    otherModels: (config.models ?? []).filter(model => model.type === 'image' || model.type === 'classifier').map(model => ({ ...model })),
     modelsDefined: config.models !== undefined,
     name: trimString(config.name),
     scope: config.scope ?? 'user',
@@ -308,11 +311,11 @@ export const createPiProviderConfigFromForm = (
     };
   }
   return {
-    ...((state.chatEnabled || chatModels.length > 0) && api ? { api } : {}),
+    ...((state.chatEnabled || chatModels.length > 0 || state.otherModels.length > 0) && api ? { api } : {}),
     ...(state.authHeader === undefined ? {} : { authHeader: state.authHeader }),
     ...(baseUrl ? { baseUrl } : {}),
     id: state.id.trim(),
-    ...(state.modelsDefined || !state.chatEnabled ? { models: chatModels } : {}),
+    ...(state.modelsDefined || !state.chatEnabled ? { models: [...chatModels, ...state.otherModels] } : {}),
     ...(name ? { name } : {}),
     ...(Object.keys(capabilities).length ? { capabilities } : {}),
   };

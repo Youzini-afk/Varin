@@ -1,3 +1,4 @@
+import { fauxProvider } from "@earendil-works/pi-ai";
 import { mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
@@ -5,7 +6,7 @@ import path from "node:path";
 import { execFileSync } from "node:child_process";
 import assert from "node:assert/strict";
 import { describe, it } from "node:test";
-import { fauxAssistantMessage, fauxToolCall, registerFauxProvider } from "@earendil-works/pi-ai/compat";
+import { fauxAssistantMessage, fauxToolCall } from "@earendil-works/pi-ai/compat";
 import type { AgentSessionServices } from "@earendil-works/pi-coding-agent";
 import type { HostEvent, HostEventData } from "@varin/protocol";
 import { createDocumentAuthority } from "../../../web/application-host/lib/documents/authority.js";
@@ -78,7 +79,7 @@ describe("retrieval thread public slice", () => {
     });
     const search = createWorkspaceContentSearch({ documents, pathModule: path, compute });
 
-    const faux = registerFauxProvider();
+    const faux = fauxProvider();
     const model = faux.getModel();
     await writeFile(join(agentDir, "settings.json"), JSON.stringify({
       harness: {
@@ -90,6 +91,7 @@ describe("retrieval thread public slice", () => {
 
     const configureServices = async (services: AgentSessionServices) => {
       services.modelRuntime.registerProvider(model.provider, {
+          streamSimple: faux.provider.streamSimple,
         api: model.api,
         baseUrl: model.baseUrl,
         models: [{
@@ -528,7 +530,6 @@ describe("retrieval thread public slice", () => {
       await compute.dispose();
       await native.dispose();
       await documents.dispose();
-      faux.unregister();
       await rm(root, { recursive: true, force: true });
     }
   });

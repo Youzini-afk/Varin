@@ -2,8 +2,8 @@
  * Fast Decision Model (快速决策模型) — a vendor-neutral structured-judgment
  * capability. This is not a chat slot, not a rerank endpoint, and not free-text
  * generation: the caller supplies a goal, authorized material, and typed
- * questions; the adapter maps them onto the provider's native protocol
- * (TypeSafe `systemone` is the first). See docs/design/fast-decision-model-design.md.
+ * questions; Pi's native classifier API owns the provider protocol. See
+ * docs/design/fast-decision-model-design.md.
  */
 
 import { HarnessInferenceSettingsValidationError } from "./harness-inference.js";
@@ -21,7 +21,7 @@ import { HarnessInferenceSettingsValidationError } from "./harness-inference.js"
 export const FAST_DECISION_PURPOSES = ["explore", "web", "scholarly", "memory-organization", "memory-recall"] as const;
 export type HarnessFastDecisionPurpose = (typeof FAST_DECISION_PURPOSES)[number];
 
-export type HarnessFastDecisionProtocol = "typesafe-systemone";
+export type HarnessFastDecisionProtocol = "pi-classifier";
 
 /** One credential-free binding slot. Secrets stay in the Pi provider/auth layer. */
 export interface HarnessFastDecisionBinding {
@@ -81,10 +81,9 @@ export interface HarnessFastDecisionCapabilities {
 
 export function fastDecisionCapabilities(protocol: HarnessFastDecisionProtocol): HarnessFastDecisionCapabilities {
   switch (protocol) {
-    // TypeSafe Jev 1.13: text-only, 64k tokens per request, 32k for state plus
-    // the longest question, up to 255 options per Choice (docs.typesafe.ai/models).
-    case "typesafe-systemone":
-      return { judge: true, choose: true, score: true, modalities: ["text"], maxStateTokens: 32768, maxChoiceOptions: 255 };
+    case "pi-classifier":
+      // Model/API-specific capacity is not a property of this generic protocol.
+      return { judge: true, choose: true, score: true, modalities: ["text"] };
   }
 }
 
@@ -191,8 +190,8 @@ const parseBinding = (value: unknown, path: string): HarnessFastDecisionBinding 
   if (!isRecord(value)) {
     throw new HarnessInferenceSettingsValidationError(`${path} must be a binding object`);
   }
-  if (value.protocol !== "typesafe-systemone") {
-    throw new HarnessInferenceSettingsValidationError(`${path}.protocol must be typesafe-systemone`);
+  if (value.protocol !== "pi-classifier") {
+    throw new HarnessInferenceSettingsValidationError(`${path}.protocol must be pi-classifier`);
   }
   const providerId = nonEmpty(value.providerId);
   if (!providerId) throw new HarnessInferenceSettingsValidationError(`${path}.providerId must be a non-empty string`);
@@ -200,7 +199,7 @@ const parseBinding = (value: unknown, path: string): HarnessFastDecisionBinding 
   if (!modelId) throw new HarnessInferenceSettingsValidationError(`${path}.modelId must be a non-empty string`);
   const endpoint = fastDecisionEndpoint(value.endpoint, `${path}.endpoint`);
   return {
-    protocol: "typesafe-systemone",
+    protocol: "pi-classifier",
     providerId,
     modelId,
     ...(endpoint === undefined ? {} : { endpoint }),

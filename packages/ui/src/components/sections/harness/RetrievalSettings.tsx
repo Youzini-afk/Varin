@@ -167,7 +167,7 @@ function FastDecisionSettings({ harness, update }: HarnessSettingsPageProps) {
     setFields(next);
     if (!next.providerId.trim() || !next.modelId.trim()) return;
     update({ fastDecision: { default: {
-      protocol: 'typesafe-systemone',
+      protocol: 'pi-classifier',
       providerId: next.providerId.trim(),
       modelId: next.modelId.trim(),
       ...(next.endpoint.trim() ? { endpoint: next.endpoint.trim() } : {}),
@@ -211,7 +211,7 @@ function FastDecisionSettings({ harness, update }: HarnessSettingsPageProps) {
           label={t('settings.page.harness.fastDecision.model')} placeholder="jev-1.13" />
       </SettingsFieldRow>
       <SettingsFieldRow label={t('settings.page.harness.fastDecision.endpoint')} controlClassName="@xl:flex-1 @xl:max-w-80">
-        <AutoSaveInput value={fields.endpoint} onCommit={(endpoint) => commit({ endpoint })} placeholder={providers.find(provider => provider.id === fields.providerId)?.details?.capabilities?.decision?.endpoint ?? '/v1/systemone'} aria-label={t('settings.page.harness.fastDecision.endpoint')}
+        <AutoSaveInput value={fields.endpoint} onCommit={(endpoint) => commit({ endpoint })} placeholder={providers.find(provider => provider.id === fields.providerId)?.details?.capabilities?.decision?.endpoint ?? t('settings.page.harness.fastDecision.endpoint.description')} aria-label={t('settings.page.harness.fastDecision.endpoint')}
           validate={(value) => !value || value.startsWith('/') ? null : t('settings.page.harness.fastDecision.endpoint.description')} />
       </SettingsFieldRow>
       {(['explore', 'web', 'scholarly', 'memory-organization', 'memory-recall'] as const).map((purpose) => {

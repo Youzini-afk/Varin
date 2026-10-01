@@ -52,8 +52,23 @@ const descriptor = (
 });
 
 describe("foundational package reconcile", () => {
-  it("adopts disabled or configured-broken packages offline without repairing them", async () => {
+  it("uses native MCP by default and only installs the external adapter on explicit restore", async () => {
     const integration = FOUNDATIONAL_PI_PACKAGE_MANIFEST.integrations[0]!;
+    let packages: PackageDescriptor[] = []; let installs = 0;
+    const store = fakeStore().store;
+    const reconcile = (restore: boolean) => reconcileFoundationalPackages({
+      integrations: [integration], manifestRevision: FOUNDATIONAL_PI_PACKAGE_MANIFEST.revision,
+      receiptStore: store, listPackages: async () => packages,
+      ...(restore ? { restoreIds: new Set([integration.id]) } : {}),
+      bootstrapPackages: async () => { installs++; packages = [descriptor(integration.source)];
+        return { packages, results: [{ source: integration.source, status: "installed" }] }; },
+    });
+    await reconcile(false); assert.equal(installs, 0);
+    await reconcile(true); assert.equal(installs, 1);
+    await reconcile(false); assert.equal(installs, 1, "a configured user choice is preserved");
+  });
+  it("adopts disabled or configured-broken packages offline without repairing them", async () => {
+    const integration = { ...FOUNDATIONAL_PI_PACKAGE_MANIFEST.integrations[0]!, defaultProvision: true };
     let bootstrapCalls = 0;
     const reconcile = (candidate: PackageDescriptor) => reconcileFoundationalPackages({
       bootstrapPackages: async () => {
@@ -75,7 +90,7 @@ describe("foundational package reconcile", () => {
   });
 
   it("records a bootstrap failure when the Host still reports the package absent", async () => {
-    const integration = FOUNDATIONAL_PI_PACKAGE_MANIFEST.integrations[0]!;
+    const integration = { ...FOUNDATIONAL_PI_PACKAGE_MANIFEST.integrations[0]!, defaultProvision: true };
     const receipt = fakeStore();
     const batch: PackageBootstrapResult = {
       packages: [],
@@ -96,7 +111,7 @@ describe("foundational package reconcile", () => {
   });
 
   it("suppresses external removal until an explicit restore", async () => {
-    const integration = FOUNDATIONAL_PI_PACKAGE_MANIFEST.integrations[0]!;
+    const integration = { ...FOUNDATIONAL_PI_PACKAGE_MANIFEST.integrations[0]!, defaultProvision: true };
     const receipt = fakeStore({
       ...defaultReceipt(),
       entries: {
@@ -144,7 +159,7 @@ describe("foundational package reconcile", () => {
   });
 
   it("keeps an externally restored package visibly outside automatic management", async () => {
-    const integration = FOUNDATIONAL_PI_PACKAGE_MANIFEST.integrations[0]!;
+    const integration = { ...FOUNDATIONAL_PI_PACKAGE_MANIFEST.integrations[0]!, defaultProvision: true };
     const receipt = fakeStore({
       ...defaultReceipt(),
       entries: {
@@ -173,7 +188,7 @@ describe("foundational package reconcile", () => {
   });
 
   it("uses autoInstallNew only as an introduced-revision cutoff", async () => {
-    const integration = FOUNDATIONAL_PI_PACKAGE_MANIFEST.integrations[0]!;
+    const integration = { ...FOUNDATIONAL_PI_PACKAGE_MANIFEST.integrations[0]!, defaultProvision: true };
     const receipt = fakeStore({ ...defaultReceipt(), autoInstallNew: false });
     let installs = 0;
     const result = await reconcileFoundationalPackages({
@@ -206,7 +221,7 @@ describe("foundational package reconcile", () => {
   });
 
   it("records the current cutoff before disabling future automatic additions", async () => {
-    const integration = FOUNDATIONAL_PI_PACKAGE_MANIFEST.integrations[0]!;
+    const integration = { ...FOUNDATIONAL_PI_PACKAGE_MANIFEST.integrations[0]!, defaultProvision: true };
     const receipt = fakeStore();
     const installed = descriptor(integration.source);
     let installs = 0;

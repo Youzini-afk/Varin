@@ -78,7 +78,7 @@ describe("pi-mcp-adapter config bridge", () => {
     });
     assert.deepEqual(await bridge.snapshot("session-a"), {
       catalog: emptyCatalog,
-      provider: { bridgeVersion: 1, state: "active" },
+      provider: { owner: "extension", bridgeVersion: 1, state: "active" },
     });
   });
 
@@ -141,7 +141,7 @@ describe("pi-mcp-adapter config bridge", () => {
     });
     assert.deepEqual(await bridge.snapshot("session-a"), {
       catalog: emptyCatalog,
-      provider: { bridgeVersion: 1, state: "active" },
+      provider: { owner: "extension", bridgeVersion: 1, state: "active" },
     });
   });
 });

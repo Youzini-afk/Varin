@@ -202,7 +202,7 @@ export function createScheduledTaskTool(bridge: HostServicesBridge): ToolDefinit
                 type: "text",
                 text: `Run finished: ${describeTask(result.task)}${result.sessionId ? `\n  session: ${result.sessionId}` : ""}`,
               }],
-              isError: result.task.state.lastStatus === "error" ? true : undefined,
+              ...(result.task.state.lastStatus === "error" ? { isError: true } : {}),
               details: { result: result as unknown as Record<string, unknown> },
             };
           }

@@ -1,9 +1,10 @@
+import { fauxProvider } from "@earendil-works/pi-ai";
 import assert from "node:assert/strict";
 import { mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { describe, it } from "node:test";
-import { fauxAssistantMessage, registerFauxProvider } from "@earendil-works/pi-ai/compat";
+import { fauxAssistantMessage } from "@earendil-works/pi-ai/compat";
 import type { AgentSessionServices } from "@earendil-works/pi-coding-agent";
 import type { HostEvent, HostEventData, PiAgentEvent } from "@varin/protocol";
 import { SessionHost } from "../src/session-host.js";
@@ -27,7 +28,7 @@ describe("SessionHost prompt streaming", () => {
       "utf8",
     );
     const events: Array<{ data: unknown; event: string }> = [];
-    const faux = registerFauxProvider();
+    const faux = fauxProvider();
     let observedContext: unknown;
     const answer = (context: unknown) => {
       observedContext = context;
@@ -37,6 +38,7 @@ describe("SessionHost prompt streaming", () => {
     const model = faux.getModel();
     const configureServices = async (services: AgentSessionServices) => {
       services.modelRuntime.registerProvider(model.provider, {
+          streamSimple: faux.provider.streamSimple,
         api: model.api,
         baseUrl: model.baseUrl,
         models: [
@@ -216,7 +218,6 @@ describe("SessionHost prompt streaming", () => {
       assert.notEqual(forked.snapshot.sessionId, snapshot.sessionId);
     } finally {
       await host.dispose();
-      faux.unregister();
       await rm(root, { force: true, recursive: true });
     }
   });
@@ -225,11 +226,12 @@ describe("SessionHost prompt streaming", () => {
     const root = await mkdtemp(join(tmpdir(), "varin-prompt-source-failure-"));
     const agentDir = join(root, "agent");
     const events: Array<{ data: unknown; event: string }> = [];
-    const faux = registerFauxProvider();
+    const faux = fauxProvider();
     faux.setResponses([() => fauxAssistantMessage("accepted once")]);
     const model = faux.getModel();
     const configureServices = async (services: AgentSessionServices) => {
       services.modelRuntime.registerProvider(model.provider, {
+          streamSimple: faux.provider.streamSimple,
         api: model.api,
         baseUrl: model.baseUrl,
         models: [{
@@ -291,7 +293,6 @@ describe("SessionHost prompt streaming", () => {
       )));
     } finally {
       await host.dispose();
-      faux.unregister();
       await rm(root, { force: true, recursive: true });
     }
   });
@@ -299,11 +300,12 @@ describe("SessionHost prompt streaming", () => {
   it("acknowledges manual abort after signalling cancellation without waiting for idle", async () => {
     const root = await mkdtemp(join(tmpdir(), "varin-abort-"));
     const agentDir = join(root, "agent");
-    const faux = registerFauxProvider();
+    const faux = fauxProvider();
     faux.setResponses([() => fauxAssistantMessage("unused")]);
     const model = faux.getModel();
     const configureServices = async (services: AgentSessionServices) => {
       services.modelRuntime.registerProvider(model.provider, {
+          streamSimple: faux.provider.streamSimple,
         api: model.api,
         baseUrl: model.baseUrl,
         models: [{
@@ -383,14 +385,13 @@ describe("SessionHost prompt streaming", () => {
       }
     } finally {
       await host.dispose();
-      faux.unregister();
       await rm(root, { force: true, recursive: true });
     }
   });
 
   it("rejects a delayed stop for a settled run while a newer run is active", async () => {
     const root = await mkdtemp(join(tmpdir(), "varin-abort-run-"));
-    const faux = registerFauxProvider();
+    const faux = fauxProvider();
     let releaseSecond!: () => void;
     const heldSecond = new Promise<void>((resolve) => { releaseSecond = resolve; });
     faux.setResponses([
@@ -403,6 +404,7 @@ describe("SessionHost prompt streaming", () => {
       agentDir: join(root, "agent"),
       configureServices: async (services) => {
         services.modelRuntime.registerProvider(model.provider, {
+          streamSimple: faux.provider.streamSimple,
           api: model.api, baseUrl: model.baseUrl,
           models: [{
             api: model.api, baseUrl: model.baseUrl, contextWindow: model.contextWindow,
@@ -497,7 +499,6 @@ describe("SessionHost prompt streaming", () => {
     } finally {
       releaseSecond();
       await host.dispose();
-      faux.unregister();
       await rm(root, { force: true, recursive: true });
     }
   });

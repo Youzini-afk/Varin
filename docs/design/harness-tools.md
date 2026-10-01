@@ -303,7 +303,7 @@ Web / 云 host 无 Chromium 时返回 `unavailable (no renderer)`；检测到空
 
 ### 5.9 并发
 
-**实现现状（D-305）。** Pi 0.85.1 的 tracked dependency patch 在真实工具入口消费 `prepareExecution` 和权限门返回的资源计划。
+**实现现状（D-305，升级至 Pi 0.99.2）。** 随 `pi-host` 交付的 dependency patch 在真实工具入口消费 `prepareExecution` 和权限门返回的资源计划，原生 codemode 的子调用也走这套入口。
 独立工作可以重叠执行，有因果关系或共享可变资源的工作保持顺序；
 长操作尽快交回控制权，之后按需读取或等待。适用于普通 coding 和科研线程，不需要为一次工具并行额外创建 Agent。
 并行批次仍在工具结果全部配对后继续请求模型；调度许可不替代权限、Documents/WorkingState 提交或 Rust 进程权威。

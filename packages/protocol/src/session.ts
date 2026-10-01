@@ -64,6 +64,15 @@ export interface PiUserMessage {
   timestamp: number;
 }
 
+export interface PiSystemMessage {
+  role: "system";
+  content: string | PiTextContent[];
+  timestamp: number;
+  sections?: Record<string, string | null>;
+  toolsAdded?: JsonValue;
+  toolsRemoved?: Array<{ name: string }>;
+}
+
 export interface PiAssistantMessage {
   api: string;
   content: PiAssistantContent[];
@@ -72,6 +81,7 @@ export interface PiAssistantMessage {
   provider: string;
   rawStopReason?: string;
   responseModel?: string;
+  thinkingLevel?: string;
   role: "assistant";
   stopReason: "pending" | "stop" | "length" | "toolUse" | "error" | "aborted" | "deferred";
   timestamp: number;
@@ -79,7 +89,11 @@ export interface PiAssistantMessage {
 }
 
 export interface PiToolResultMessage {
-  addedToolNames?: string[];
+  nestedCalls?: {
+    calls: Array<{ id: string; name: string; arguments?: JsonValue; argumentsBytes?: number;
+      status: "ok" | "error" | "unfinished"; durationMs?: number; error?: string }>;
+    complete: boolean;
+  };
   content: PiUserContent[];
   details?: JsonValue;
   isError: boolean;
@@ -133,6 +147,7 @@ export interface PiUnknownMessage {
 }
 
 export type PiMessage =
+  | PiSystemMessage
   | PiUserMessage
   | PiAssistantMessage
   | PiToolResultMessage
@@ -151,6 +166,21 @@ export interface PiSessionEntryBase {
 export interface PiSessionMessageEntry extends PiSessionEntryBase {
   message: PiMessage;
   type: "message";
+}
+
+export interface PiContextEditEntry extends PiSessionEntryBase {
+  type: "context_edit";
+  targetId: string;
+  replacement: { content: JsonValue } | null;
+}
+
+export interface PiUsageEntry extends PiSessionEntryBase {
+  type: "usage";
+  kind: string;
+  provider: string;
+  model: string;
+  usage: PiUsage;
+  note?: string;
 }
 
 export interface PiThinkingLevelChangeEntry extends PiSessionEntryBase {
@@ -215,6 +245,8 @@ export interface PiUnknownSessionEntry extends PiSessionEntryBase {
 }
 
 export type PiSessionEntry =
+  | PiContextEditEntry
+  | PiUsageEntry
   | PiSessionMessageEntry
   | PiThinkingLevelChangeEntry
   | PiModelChangeEntry
@@ -296,11 +328,12 @@ export type PiAgentEvent = (
   | { message: PiMessage; type: "message_start" }
   | { message: PiMessage; type: "message_update"; update: PiAssistantStreamUpdate }
   | { message: PiMessage; type: "message_end" }
-  | { args: JsonValue; toolCallId: string; toolName: string; type: "tool_execution_start" }
+  | { args: JsonValue; toolCallId: string; parentToolCallId?: string; toolName: string; type: "tool_execution_start" }
   | {
       args: JsonValue;
       partialResult: JsonValue;
       toolCallId: string;
+      parentToolCallId?: string;
       toolName: string;
       type: "tool_execution_update";
     }
@@ -308,6 +341,7 @@ export type PiAgentEvent = (
       isError: boolean;
       result: JsonValue;
       toolCallId: string;
+      parentToolCallId?: string;
       toolName: string;
       type: "tool_execution_end";
     }

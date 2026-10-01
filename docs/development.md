@@ -155,5 +155,20 @@ and give a recommendation with any concrete migration work. Do not interpret mis
 no changes, or a patch/minor version as proof of compatibility. Keep these judgments distinct from CI
 results. Production dependency changes may also need the cloud runtime lockfile refreshed as above.
 
+The bundled Pi packages are pinned to 0.99.2. Review its
+[release](https://github.com/earendil-works/pi/releases/tag/v0.99.2) and
+[coding-agent changelog](https://github.com/earendil-works/pi/blob/v0.99.2/packages/coding-agent/CHANGELOG.md)
+alongside the previous-to-target interval. Host integration patches live in `packages/pi-host/patches`
+and ship with that package. Bun applies them to bundled dependencies; the selected external SDK loader
+applies the same hunks in memory, accepts an already adapted source and rejects a changed required seam.
+Never patch a user's external installation or copy its native configuration into another authority.
+
+SDK upgrade checks exercise real native sessions: canonical system/context-edit projection, physical
+virtual-model routing, compaction worker scope, top-level and codemode child permissions/scheduling,
+native MCP status/config mutations and replacement by a user extension. Node/tsx runs these native SDK
+fixtures; UI consumers use Vitest. Controlled local MCP/provider fixtures need no paid request or browser.
+Production packaging must include the Host patch directory and native QuickJS worker/WASM dependencies,
+and refresh `scripts/cloud-runtime.bun.lock` after the final dependency/patch change.
+
 The report only runs default-branch code and reads PR metadata; it neither installs PR dependencies nor
 executes PR code or project tests. `node --test scripts/dependabot-report.test.mjs` exercises its parsing.

@@ -1,3 +1,4 @@
+import { fauxProvider, getCurrentTools, normalizeContext } from "@earendil-works/pi-ai";
 /**
  * Real Pi session e2e — the three in-process extensions that session-host
  * registers for every session, exercised inside an actual agent loop with a
@@ -20,7 +21,7 @@ import path, { join } from "node:path";
 import { spawn } from "node:child_process";
 import { createHash, randomUUID } from "node:crypto";
 import { describe, it } from "node:test";
-import { fauxAssistantMessage, fauxToolCall, registerFauxProvider } from "@earendil-works/pi-ai/compat";
+import { fauxAssistantMessage, fauxToolCall } from "@earendil-works/pi-ai/compat";
 import type { AgentSessionServices } from "@earendil-works/pi-coding-agent";
 import type { Context } from "@earendil-works/pi-ai";
 import type { HarnessError, HostEvent, HostEventData } from "@varin/protocol";
@@ -59,7 +60,9 @@ import type { HarnessEmbedParams, HarnessEmbedResult, HarnessRerankParams, Harne
 import { SessionHost } from "../../src/session-host.js";
 import { CompactionWorkerRuntime } from "../../src/compaction-worker.js";
 import { deserializeCompactionModel } from "../../src/harness/compaction-agent.js";
-import { serializedToolResult } from "./provider-context.js";
+import { providerSystemPrompt, serializedToolResult } from "./provider-context.js";
+import { estimateModelInputTokens } from "../../src/harness/context-request-boundary.js";
+import { EXPLORE_PLAN_SYSTEM, EXPLORE_SELECT_SYSTEM } from "../../src/harness/explore-model.js";
 
 const WORKSPACE_ID = "session-e2e-workspace";
 
@@ -76,7 +79,7 @@ interface UiRequest {
  */
 async function setupSession(options: {
   root: string;
-  faux: ReturnType<typeof registerFauxProvider>;
+  faux: ReturnType<typeof fauxProvider>;
   /** Session launch dir — defaults to `root`; workspace fixtures pass their real root. */
   sessionRoot?: string;
   workspaceId?: string;
@@ -123,6 +126,7 @@ async function setupSession(options: {
         configureModelRuntime: async (modelRuntime) => {
           const model = deserializeCompactionModel(spec.model);
           modelRuntime.registerProvider(model.provider, {
+          streamSimple: faux.provider.streamSimple,
             api: model.api,
             baseUrl: model.baseUrl,
             models: [{
@@ -271,6 +275,7 @@ async function setupSession(options: {
   const model = faux.getModel();
   const configureServices = async (services: AgentSessionServices) => {
     services.modelRuntime.registerProvider(model.provider, {
+          streamSimple: faux.provider.streamSimple,
       api: model.api,
       baseUrl: model.baseUrl,
       models: [
@@ -348,7 +353,7 @@ describe("session e2e — authorized path boundary", () => {
       const outside = join(outer, "outside.txt");
       const secret = "outside-workspace-marker";
       await writeFile(outside, secret);
-      const faux = registerFauxProvider();
+      const faux = fauxProvider();
       faux.setResponses([
         () => fauxAssistantMessage([fauxToolCall("write", { path: "inside.txt", content: "inside" })]),
         () => fauxAssistantMessage([fauxToolCall("write", { path: "../escape.txt", content: "escape" })]),
@@ -400,7 +405,6 @@ describe("session e2e — authorized path boundary", () => {
         assert.ok(!JSON.stringify(readResult.message).includes(secret), "an outside read must not disclose the file");
       } finally {
         await session.dispose();
-        faux.unregister();
       }
     });
   });
@@ -416,7 +420,7 @@ describe("session e2e — cross-directory access", () => {
       await mkdir(externalDir);
       const externalFile = join(externalDir, "notes.md");
       await writeFile(externalFile, "external payload\n");
-      const faux = registerFauxProvider();
+      const faux = fauxProvider();
       let toolResult = "";
       faux.setResponses([
         () => fauxAssistantMessage([fauxToolCall("read", { path: externalFile })]),
@@ -467,7 +471,6 @@ describe("session e2e — cross-directory access", () => {
         assert.match(toolResult, /external payload/, JSON.stringify(toolResult));
       } finally {
         await session.dispose();
-        faux.unregister();
       }
     });
   });
@@ -477,7 +480,7 @@ describe("session e2e — work focus", () => {
   it("applies research only at run boundaries without retaining its prompt after code resumes", async () => {
     await withTempRoot("varin-work-focus-", async (root) => {
       await writeFile(join(root, "observation.txt"), "measured result\n", "utf8");
-      const faux = registerFauxProvider();
+      const faux = fauxProvider();
       const contexts: Context[] = [];
       faux.setResponses([
         (context) => { contexts.push(structuredClone(context)); return fauxAssistantMessage("code turn"); },
@@ -502,34 +505,33 @@ describe("session e2e — work focus", () => {
         );
         await session.host.prompt(snapshot.sessionId, "implement a small change");
         await session.host.session.waitForIdle();
-        assert.doesNotMatch(contexts[0]?.systemPrompt ?? "", /varin-work-focus id="research"/);
+        assert.doesNotMatch(providerSystemPrompt(contexts[0]), /varin-work-focus id="research"/);
 
         assert.equal(session.host.applyWorkFocus(snapshot.sessionId, { id: "research", source: "explicit" }, 2), true);
         await session.host.prompt(snapshot.sessionId, "investigate the observation");
         await session.host.session.waitForIdle();
-        assert.match(contexts[1]?.systemPrompt ?? "", /principal researcher/);
-        assert.equal(contexts[2]?.systemPrompt, contexts[1]?.systemPrompt);
+        assert.match(providerSystemPrompt(contexts[1]), /principal researcher/);
+        assert.equal(providerSystemPrompt(contexts[2]), providerSystemPrompt(contexts[1]));
         assert.equal(session.host.snapshot().workFocus?.active.id, "research");
 
         assert.equal(session.host.applyWorkFocus(snapshot.sessionId, { id: "code", source: "explicit" }, 3), true);
         await session.host.prompt(snapshot.sessionId, "implement the selected analysis");
         await session.host.session.waitForIdle();
-        assert.doesNotMatch(contexts[3]?.systemPrompt ?? "", /varin-work-focus id="research"/);
+        assert.doesNotMatch(providerSystemPrompt(contexts[3]), /varin-work-focus id="research"/);
 
         assert.equal(session.host.applyWorkFocus(snapshot.sessionId, { id: "research", source: "explicit" }, 4), true);
         await session.host.prompt(snapshot.sessionId, "test a competing explanation");
         await session.host.session.waitForIdle();
-        assert.equal((contexts[4]?.systemPrompt?.match(/<varin-work-focus id="research">/g) ?? []).length, 1);
+        assert.equal((providerSystemPrompt(contexts[4]).match(/<varin-work-focus id="research">/g) ?? []).length, 1);
       } finally {
         await session.dispose();
-        faux.unregister();
       }
     });
   });
 
   it("keeps the applied code focus when research preparation is rejected during a live run", async () => {
     await withTempRoot("varin-work-focus-failure-", async (root) => {
-      const faux = registerFauxProvider();
+      const faux = fauxProvider();
       let release!: () => void;
       let entered!: () => void;
       const waiting = new Promise<void>((resolve) => { entered = resolve; });
@@ -553,14 +555,13 @@ describe("session e2e — work focus", () => {
       } finally {
         release?.();
         await session.dispose();
-        faux.unregister();
       }
     });
   });
 
   it("uses the bounded research identity for a spawned branch session", async () => {
     await withTempRoot("varin-work-focus-branch-", async (root) => {
-      const faux = registerFauxProvider();
+      const faux = fauxProvider();
       const contexts: Context[] = [];
       faux.setResponses([
         (context) => { contexts.push(structuredClone(context)); return fauxAssistantMessage("branch finding"); },
@@ -580,11 +581,10 @@ describe("session e2e — work focus", () => {
         );
         await session.host.prompt(snapshot.sessionId, "check the bounded alternative");
         await session.host.session.waitForIdle();
-        assert.match(contexts[0]?.systemPrompt ?? "", /independent research branch/);
-        assert.doesNotMatch(contexts[0]?.systemPrompt ?? "", /principal researcher/);
+        assert.match(providerSystemPrompt(contexts[0]), /independent research branch/);
+        assert.doesNotMatch(providerSystemPrompt(contexts[0]), /principal researcher/);
       } finally {
         await session.dispose();
-        faux.unregister();
       }
     });
   });
@@ -594,7 +594,7 @@ describe("session e2e — passive thread input", () => {
   it("shows a passive note in the next actual tool continuation without adding a turn", async () => {
     await withTempRoot("varin-passive-tool-boundary-", async (root) => {
       await writeFile(join(root, "note-source.txt"), "tool result", "utf8");
-      const faux = registerFauxProvider();
+      const faux = fauxProvider();
       const contexts: Context[] = [];
       let release!: () => void;
       let entered!: () => void;
@@ -615,13 +615,13 @@ describe("session e2e — passive thread input", () => {
         await session.host.session.waitForIdle();
         assert.equal(contexts.length, 2, "one original request plus its existing tool continuation only");
         assert.equal(JSON.stringify(contexts[1]!.messages).match(/NOTE_AT_TOOL_BOUNDARY_739/g)?.length, 1);
-      } finally { release?.(); await session.dispose(); faux.unregister(); }
+      } finally { release?.(); await session.dispose();  }
     });
   });
 
   it("deduplicates concurrent execution requests and replays a native receipt after reopening", async () => {
     await withTempRoot("varin-thread-request-receipt-", async (root) => {
-      const faux = registerFauxProvider();
+      const faux = fauxProvider();
       const contexts: Context[] = [];
       faux.setResponses([
         (context) => { contexts.push(structuredClone(context)); return fauxAssistantMessage("initial task done"); },
@@ -648,12 +648,12 @@ describe("session e2e — passive thread input", () => {
         assert.equal(session.host.snapshot().busy, false);
         assert.equal(contexts.length, 2);
         await assert.rejects(session.host.requestThreadMessage(snapshot.sessionId, "request-once", "different input"), /different input/);
-      } finally { await session.dispose(); faux.unregister(); }
+      } finally { await session.dispose();  }
     });
   });
   it("persists a notification without waking an idle model and deduplicates the Pi receipt", async () => {
     await withTempRoot("varin-passive-idle-", async (root) => {
-      const faux = registerFauxProvider();
+      const faux = fauxProvider();
       const contexts: Context[] = [];
       faux.setResponses([
         (context) => { contexts.push(structuredClone(context)); return fauxAssistantMessage("ready"); },
@@ -680,13 +680,13 @@ describe("session e2e — passive thread input", () => {
         await session.host.session.waitForIdle();
         assert.equal(contexts.length, 2);
         assert.equal(JSON.stringify(contexts[1]!.messages).match(/PASSIVE_NOTE_739/g)?.length, 1);
-      } finally { await session.dispose(); faux.unregister(); }
+      } finally { await session.dispose();  }
     });
   });
 
   it("does not schedule a follow-up when inform arrives during an actual model request", async () => {
     await withTempRoot("varin-passive-active-", async (root) => {
-      const faux = registerFauxProvider();
+      const faux = fauxProvider();
       let entered!: () => void;
       let release!: () => void;
       const started = new Promise<void>((resolve) => { entered = resolve; });
@@ -710,7 +710,7 @@ describe("session e2e — passive thread input", () => {
         await session.host.session.waitForIdle();
         assert.equal(contexts.length, 2);
         assert.match(JSON.stringify(contexts[1]!.messages), /NOTE_DURING_REQUEST_739/);
-      } finally { release(); await session.dispose(); faux.unregister(); }
+      } finally { release(); await session.dispose();  }
     });
   });
 });
@@ -720,7 +720,7 @@ describe("session e2e — passive thread input", () => {
 describe("session e2e — zone2 extension", () => {
   it("sends only new material and rebuilds only material actually removed by a native Pi cut", async () => {
     await withTempRoot("varin-zone2-retained-", async (root) => {
-      const faux = registerFauxProvider();
+      const faux = fauxProvider();
       const requests: Context[] = [];
       faux.setResponses(Array.from({ length: 4 }, () => (context: Context) => {
         requests.push(structuredClone(context)); return fauxAssistantMessage("ok");
@@ -765,7 +765,7 @@ describe("session e2e — zone2 extension", () => {
         assert.equal(actual.match(/KNOWLEDGE_739/g)?.length, 1, "knowledge outside the raw retained interval must be available again");
         assert.doesNotMatch(actual, /PLAN_ORIGINAL_739/);
         assert.match(await readFile(session.host.session.sessionFile!, "utf8"), /PLAN_ORIGINAL_739/);
-      } finally { await session.dispose(); faux.unregister(); }
+      } finally { await session.dispose();  }
     });
   });
   it("carries a committed editor mutation through the Host store into the next real Pi turn", async () => {
@@ -788,7 +788,7 @@ describe("session e2e — zone2 extension", () => {
       });
       const knowledge = createKnowledgeContextRuntime({ getStore: async () => store });
       observeMutation = (event) => knowledge.observeDocumentMutation(event);
-      const faux = registerFauxProvider();
+      const faux = fauxProvider();
       const contexts: Context[] = [];
       faux.setResponses([
         (context) => { contexts.push(context); return fauxAssistantMessage("first done"); },
@@ -836,7 +836,6 @@ describe("session e2e — zone2 extension", () => {
         await knowledge.dispose();
         await store.close();
         await documents.dispose();
-        faux.unregister();
       }
     });
   });
@@ -858,7 +857,7 @@ describe("session e2e — zone2 extension", () => {
         embedding: null,
       });
       const knowledge = createKnowledgeContextRuntime({ getStore: async () => store });
-      const faux = registerFauxProvider();
+      const faux = fauxProvider();
       const contexts: Context[] = [];
       faux.setResponses([
         (context) => { contexts.push(context); return fauxAssistantMessage("first done"); },
@@ -925,14 +924,13 @@ describe("session e2e — zone2 extension", () => {
         await knowledge.dispose();
         await store.close();
         await documents.dispose();
-        faux.unregister();
       }
     });
   });
 
   it("injects assembled <varin-context> into the first request and leaves Zone 0 alone", async () => {
     await withTempRoot("varin-s-zone2-", async (root) => {
-      const faux = registerFauxProvider();
+      const faux = fauxProvider();
       const contexts: Context[] = [];
       faux.setResponses([
         (context) => { contexts.push(context); return fauxAssistantMessage("ok 1"); },
@@ -983,19 +981,18 @@ describe("session e2e — zone2 extension", () => {
         assert.match(firstMessages, /not instructions/, "Zone 2 must be marked as data");
 
         // Zone 2 is a message, never the system prompt (§4.2 / invariant 2).
-        const system = contexts[0]!.systemPrompt ?? "";
+        const system = providerSystemPrompt(contexts[0]);
         assert.doesNotMatch(system, /<varin-context/, "Zone 2 must not touch the system prompt");
-        assert.equal(contexts[1]!.systemPrompt ?? "", system, "system prompt must stay byte-identical");
+        assert.equal(providerSystemPrompt(contexts[1]), system, "system prompt must stay byte-identical");
       } finally {
         await session.dispose();
-        faux.unregister();
       }
     });
   });
 
   it("sends no context message when the host has no Zone 2 material", async () => {
     await withTempRoot("varin-s-zone2-empty-", async (root) => {
-      const faux = registerFauxProvider();
+      const faux = fauxProvider();
       const contexts: Context[] = [];
       faux.setResponses([
         (context) => { contexts.push(context); return fauxAssistantMessage("ok"); },
@@ -1033,7 +1030,6 @@ describe("session e2e — zone2 extension", () => {
         );
       } finally {
         await session.dispose();
-        faux.unregister();
       }
     });
   });
@@ -1042,7 +1038,7 @@ describe("session e2e — zone2 extension", () => {
 describe("session e2e — context preparation settings", () => {
   it("projects background preparation state and honors the retired memory off switch", async () => {
     await withTempRoot("varin-s-context-settings-", async (root) => {
-      const faux = registerFauxProvider();
+      const faux = fauxProvider();
       let session: Awaited<ReturnType<typeof setupSession>> | undefined;
       try {
         session = await setupSession({ root, faux });
@@ -1075,7 +1071,6 @@ describe("session e2e — context preparation settings", () => {
         assert.equal(legacyOff.harness?.context.backgroundPreparation, false);
       } finally {
         await session?.dispose();
-        faux.unregister();
       }
     });
   });
@@ -1092,7 +1087,7 @@ describe("session e2e — context preparation chain", () => {
       await writeFile(join(root, "new-material.txt"), "RAW-TOOL-MATERIAL " + "observed ".repeat(800), "utf8");
       // Leave the first two turns below capacity and make the third cross it
       // despite platform-dependent system-prompt path lengths.
-      const faux = registerFauxProvider({ models: [{ id: "faux-1", contextWindow: 44_000, maxTokens: 800, reasoning: true }] });
+      const faux = fauxProvider({ models: [{ id: "faux-1", contextWindow: 60_000, maxTokens: 800, reasoning: true }] });
       let releaseSummary!: () => void;
       const gate = new Promise<void>((resolve) => { releaseSummary = resolve; });
       let markCompactionStarted!: () => void;
@@ -1107,7 +1102,7 @@ describe("session e2e — context preparation chain", () => {
       let requestHistory = false;
       const respond = (context: Context, options: { cacheRetention?: string; reasoning?: string } | undefined) => {
         if (options) options.cacheRetention = "none"; // avoid faux's overlapping synthetic cache accounting
-        if (context.systemPrompt?.includes("background compaction agent")) {
+        if (providerSystemPrompt(context).includes("background compaction agent")) {
           markSummaryRequested();
           summaries.push({ context, ...(options?.reasoning ? { reasoning: options.reasoning } : {}) });
           return summaries.length === 1
@@ -1166,8 +1161,8 @@ describe("session e2e — context preparation chain", () => {
         // shared compaction system prompt plus the read-only query schemas —
         // never the session's executable tool surface.
         const workerContext = summaries[0]!.context;
-        assert.match(workerContext.systemPrompt ?? "", /background compaction agent/);
-        assert.deepEqual(workerContext.tools?.map((tool) => tool.name), ["history", "output", "records"],
+        assert.match(providerSystemPrompt(workerContext), /background compaction agent/);
+        assert.deepEqual(getCurrentTools(normalizeContext(workerContext).messages).map((tool) => tool.name), ["history", "output", "records"],
           "the worker exposes only the read-only query tools");
         assert.equal(summaries[0]!.reasoning, "high", "the worker keeps the session's resolved reasoning level");
         const boundaryIndex = workerContext.messages.findIndex((message) =>
@@ -1175,12 +1170,20 @@ describe("session e2e — context preparation chain", () => {
         assert.ok(boundaryIndex > 0, "the worker material carries the retained-material marker");
         const summarizedRange = JSON.stringify(workerContext.messages.slice(0, boundaryIndex));
         const retainedRange = JSON.stringify(workerContext.messages.slice(boundaryIndex));
-        assert.ok(summarizedRange.includes("ORIGINAL-TASK-MARKER"), "the replaced range reaches the worker");
+        assert.ok(summarizedRange.includes("ORIGINAL-TASK-MARKER"), "the replaced range reaches the worker: " + JSON.stringify(workerContext.messages.map(message => ({
+          role: message.role, original: JSON.stringify(message).includes("ORIGINAL-TASK-MARKER"),
+          retained: JSON.stringify(message).includes("Retained material begins"), kept: JSON.stringify(message).includes("KEPT-RAW-MARKER"),
+        }))));
         assert.ok(retainedRange.includes("KEPT-RAW-MARKER"), "retained material B is provided verbatim below the marker");
         assert.ok(!summarizedRange.includes("KEPT-RAW-MARKER"), "the fixed kept suffix is not part of the summarized prefix");
 
+        // Fill the measured remaining capacity plus half of A. This crosses
+        // admission, while one summary still leaves all of B in the request.
+        const remaining = session.host.session.model!.contextWindow - 8_000 - estimateModelInputTokens(foreground[2]!);
+        assert.ok(remaining > 0);
+        const nextTokens = remaining + Math.ceil(("alpha ".repeat(6_000).length / 4) / 2);
         const pending = (async () => {
-          await session!.host.prompt(created.sessionId, "NEW-WHILE-PREPARING-MARKER " + "delta ".repeat(10_000));
+          await session!.host.prompt(created.sessionId, "NEW-WHILE-PREPARING-MARKER " + "delta ".repeat(Math.ceil(nextTokens * 4 / 6)));
           await session!.host.session.waitForIdle();
         })();
         await Promise.race([
@@ -1213,7 +1216,12 @@ describe("session e2e — context preparation chain", () => {
         if (committed?.type !== "compaction") throw new Error("missing native boundary");
         assert.equal(committed.firstKeptEntryId, kept.id, "new tool output and prompts cannot move the fixed cut forward");
         assert.match(committed.summary, /FIRST FIXED SUMMARY/);
-        assert.match(JSON.stringify(foreground[3]), /KEPT-RAW-MARKER/);
+        assert.ok(JSON.stringify(foreground[3]).includes("KEPT-RAW-MARKER"), "kept input: " + JSON.stringify({
+          request: foreground[3]!.messages.map(message => ({ role: message.role, kept: JSON.stringify(message).includes("KEPT-RAW-MARKER"),
+            original: JSON.stringify(message).includes("ORIGINAL-TASK-MARKER"), fresh: JSON.stringify(message).includes("NEW-WHILE-PREPARING-MARKER") })),
+          canonical: session.host.session.sessionManager.buildSessionContext().messages.map(message => ({ role: message.role,
+            kept: JSON.stringify(message).includes("KEPT-RAW-MARKER"), fresh: JSON.stringify(message).includes("NEW-WHILE-PREPARING-MARKER") })),
+        }));
         assert.match(JSON.stringify(foreground[3]), /NEW-WHILE-PREPARING-MARKER/);
         assert.match(JSON.stringify(foreground[3]), /RAW-TOOL-MATERIAL/);
         assert.ok(!JSON.stringify(foreground[3]).includes("ORIGINAL-TASK-MARKER"));
@@ -1229,7 +1237,6 @@ describe("session e2e — context preparation chain", () => {
       } finally {
         releaseSummary();
         await session?.dispose();
-        faux.unregister();
       }
     });
   });
@@ -1243,7 +1250,7 @@ describe("session e2e — native file pagination", () => {
         Array.from({ length: 8_000 }, (_, index) => `line ${index + 1} — 大文件`).join("\n"),
         "utf8",
       );
-      const faux = registerFauxProvider();
+      const faux = fauxProvider();
       let nextLine = 0;
       let pagedContext = "";
       faux.setResponses([
@@ -1271,7 +1278,6 @@ describe("session e2e — native file pagination", () => {
         assert.doesNotMatch(pagedContext, /ephemeral, generation/);
       } finally {
         await session.dispose();
-        faux.unregister();
       }
     });
   });
@@ -1281,7 +1287,7 @@ describe("session e2e — fixed surface read", () => {
   it("uses the Host-advertised read override inside a real Pi turn", async () => {
     await withTempRoot("varin-s-surface-read-", async (root) => {
       await writeFile(join(root, "draft.ts"), "stale disk value\n", "utf8");
-      const faux = registerFauxProvider();
+      const faux = fauxProvider();
       let toolResult = "";
       let authorizedReadPath: string | undefined;
       faux.setResponses([
@@ -1340,7 +1346,6 @@ describe("session e2e — fixed surface read", () => {
         assert.equal(authorizedReadPath, path.resolve(root, "draft.ts"));
       } finally {
         await session.dispose();
-        faux.unregister();
       }
     });
   });
@@ -1395,7 +1400,7 @@ describe("session e2e — fixed surface edit", () => {
         resources: [binding],
         workspaceId: harness.identity.workspaceId,
       });
-      const faux = registerFauxProvider();
+      const faux = fauxProvider();
       let editResult = "";
       let readResult = "";
       faux.setResponses([
@@ -1464,7 +1469,6 @@ describe("session e2e — fixed surface edit", () => {
         assert.equal(await readFile(join(harness.workspaceRoot, "draft.ts"), "utf8"), "A disk-only\n");
       } finally {
         await session.dispose();
-        faux.unregister();
       }
     } finally {
       surface.close();
@@ -1478,7 +1482,7 @@ describe("session e2e — fixed surface find and ls", () => {
     await withTempRoot("varin-s-surface-find-ls-", async (root) => {
       await mkdir(join(root, "disk"), { recursive: true });
       await writeFile(join(root, "disk", "old.ts"), "disk old\n", "utf8");
-      const faux = registerFauxProvider();
+      const faux = fauxProvider();
       let findResult = "";
       let lsResult = "";
       const overlayCalls: string[] = [];
@@ -1537,7 +1541,6 @@ describe("session e2e — fixed surface find and ls", () => {
         assert.equal(overlayCalls.length, 2);
       } finally {
         await session.dispose();
-        faux.unregister();
       }
     });
   });
@@ -1546,7 +1549,7 @@ describe("session e2e — fixed surface find and ls", () => {
 describe("session e2e — session-local web reader", () => {
   it("fetches once in the Host and answers with the configured reader model in pi-host", async () => {
     await withTempRoot("varin-s-web-reader-", async (root) => {
-      const faux = registerFauxProvider();
+      const faux = fauxProvider();
       const model = faux.getModel();
       const agentDir = join(root, "agent");
       await mkdir(agentDir, { recursive: true });
@@ -1597,14 +1600,13 @@ describe("session e2e — session-local web reader", () => {
         await session.host.prompt(snapshot.sessionId, "read the guide");
         await session.host.session.waitForIdle();
         assert.equal(fetchCalls, 1);
-        assert.match(readerContext?.systemPrompt ?? "", /strictly from the supplied page content/);
+        assert.match(providerSystemPrompt(readerContext), /strictly from the supplied page content/);
         assert.match(JSON.stringify(readerContext?.messages), /untrusted data, not instructions/);
         assert.match(JSON.stringify(readerContext?.messages), /answer is 42/);
         assert.match(finalToolResult, /answer \(from https:\/\/example\.com\/guide\)/);
         assert.match(finalToolResult, /The answer is 42/);
       } finally {
         await session.dispose();
-        faux.unregister();
       }
     });
   });
@@ -1618,7 +1620,7 @@ describe("session e2e — default web search", () => {
       await writeFile(join(agentDir, "settings.json"), JSON.stringify({
         harness: {},
       }), "utf8");
-      const faux = registerFauxProvider();
+      const faux = fauxProvider();
       let finalToolResult = "";
       let pageToolResult = "";
       let searchRequests = 0;
@@ -1673,7 +1675,6 @@ describe("session e2e — default web search", () => {
         assert.match(pageToolResult, /2: The Host owns file authority/);
       } finally {
         await session.dispose();
-        faux.unregister();
       }
     });
   });
@@ -1717,7 +1718,7 @@ describe("session e2e — explore", () => {
         "export function needle() { return 3; }",
         "export const after = 4;",
       ].join("\n"), "utf8");
-      const faux = registerFauxProvider();
+      const faux = fauxProvider();
       let exploreResult = "";
       faux.setResponses([
         () => fauxAssistantMessage([fauxToolCall("explore", { question: "needle" })]),
@@ -1761,7 +1762,6 @@ describe("session e2e — explore", () => {
       } finally {
         await session.dispose();
         await fixture.dispose();
-        faux.unregister();
       }
     });
   });
@@ -1789,7 +1789,7 @@ describe("session e2e — explore", () => {
         literalCalls: async (request) => ({ status: "unsupported", provider: "lsp", revision: request.revision, calls: [] }),
         imports: async (request) => ({ status: "unsupported", provider: "lsp", revision: request.revision, imports: [] }),
       };
-      const faux = registerFauxProvider();
+      const faux = fauxProvider();
       let exploreResult = "";
       faux.setResponses([
         () => fauxAssistantMessage([fauxToolCall("explore", { question: "needle" })]),
@@ -1832,7 +1832,6 @@ describe("session e2e — explore", () => {
       } finally {
         await session.dispose();
         await fixture.dispose();
-        faux.unregister();
       }
     });
   });
@@ -1843,7 +1842,7 @@ describe("session e2e — explore", () => {
       await writeFile(join(fixture.workspaceRoot, "current.ts"), "export const needle = \"current\";", "utf8");
       await writeFile(join(fixture.workspaceRoot, "changed.ts"), "export const needle = \"before search\";", "utf8");
       let searched = false;
-      const faux = registerFauxProvider();
+      const faux = fauxProvider();
       let exploreResult = "";
       faux.setResponses([
         () => fauxAssistantMessage([fauxToolCall("explore", { question: "needle" })]),
@@ -1887,7 +1886,6 @@ describe("session e2e — explore", () => {
       } finally {
         await session.dispose();
         await fixture.dispose();
-        faux.unregister();
       }
     });
   });
@@ -1898,7 +1896,7 @@ describe("session e2e — explore", () => {
       await writeFile(join(fixture.workspaceRoot, "current.ts"), "export const needle = \"current\";", "utf8");
       await writeFile(join(fixture.workspaceRoot, "missing.ts"), "export const needle = \"to be removed\";", "utf8");
       let searched = false;
-      const faux = registerFauxProvider();
+      const faux = fauxProvider();
       let exploreResult = "";
       faux.setResponses([
         () => fauxAssistantMessage([fauxToolCall("explore", { question: "needle" })]),
@@ -1941,7 +1939,6 @@ describe("session e2e — explore", () => {
       } finally {
         await session.dispose();
         await fixture.dispose();
-        faux.unregister();
       }
     });
   });
@@ -1951,7 +1948,7 @@ describe("session e2e — explore", () => {
       const fixture = await createExploreFixture(root);
       await writeFile(join(fixture.workspaceRoot, "generic.ts"), "export const token = 1;\n", "utf8");
       await writeFile(join(fixture.workspaceRoot, "exact.ts"), "export const uniqueAnchor = 2;\n", "utf8");
-      const faux = registerFauxProvider();
+      const faux = fauxProvider();
       let exploreResult = "";
       faux.setResponses([
         () => fauxAssistantMessage([fauxToolCall("explore", { question: "token", anchors: ["uniqueAnchor"] })]),
@@ -1984,7 +1981,6 @@ describe("session e2e — explore", () => {
       } finally {
         await session.dispose();
         await fixture.dispose();
-        faux.unregister();
       }
     });
   });
@@ -1999,40 +1995,45 @@ describe("session e2e — explore", () => {
         "}",
         "",
       ].join("\n"), "utf8");
-      const faux = registerFauxProvider();
+      const faux = fauxProvider();
       const model = faux.getModel();
       const agentDir = join(root, "agent");
       await mkdir(agentDir, { recursive: true });
       await writeFile(join(agentDir, "settings.json"), JSON.stringify({
-        harness: { models: { explore: { providerId: model.provider, modelId: model.id } } },
+        harness: { codeRetrieval: { decision: "llm" }, models: { explore: { providerId: model.provider, modelId: model.id } } },
       }), "utf8");
       const planPrompts: string[] = [];
+      const requestKinds: Array<{ plan: boolean; selection: boolean; roles: string[] }> = [];
       let exploreResult = "";
-      faux.setResponses([
-        () => fauxAssistantMessage([fauxToolCall("explore", { question: "how does the runtime discard idle tokens" })]),
-        (context) => {
+      const respond = (context: Context) => {
+        const system = providerSystemPrompt(context);
+        requestKinds.push({ plan: system === EXPLORE_PLAN_SYSTEM, selection: system === EXPLORE_SELECT_SYSTEM, roles: context.messages.map(message => message.role) });
+        if (system === EXPLORE_PLAN_SYSTEM) {
           planPrompts.push(JSON.stringify(context));
           return fauxAssistantMessage(JSON.stringify({
             behavior: "discard idle tokens",
             groups: [{ id: "g1", concept: "reclaim", expressions: ["reclaimLease"] }],
           }));
-        },
-        (context) => {
+        }
+        if (system === EXPLORE_SELECT_SYSTEM) {
           const blob = JSON.stringify(context);
           const viewId = blob.match(/view (v\d+)/)?.[1] ?? "v1";
           return fauxAssistantMessage(JSON.stringify({
+            done: true,
             groups: [{
               id: "sel1",
               purpose: "reclaim implementation",
               views: [{ viewId, rangeIds: [`${viewId}:full`], required: true }],
             }],
           }));
-        },
-        (context) => {
+        }
+        if (context.messages.some(message => message.role === "toolResult" && message.toolName === "explore")) {
           exploreResult = serializedToolResult(context, "explore");
           return fauxAssistantMessage("The reclaim implementation is in reclaimLease.");
-        },
-      ]);
+        }
+        return fauxAssistantMessage([fauxToolCall("explore", { question: "how does the runtime discard idle tokens" })]);
+      };
+      faux.setResponses(Array.from({ length: 4 }, () => respond));
       const session = await setupSession({
         root,
         sessionRoot: fixture.workspaceRoot,
@@ -2050,6 +2051,11 @@ describe("session e2e — explore", () => {
         await session.host.prompt(snapshot.sessionId, "how idle tokens are discarded");
         await session.host.session.waitForIdle();
         assert.match(planPrompts.join("\n"), /discard idle tokens|reclaimLease|how does the runtime/);
+        assert.ok(exploreResult, JSON.stringify({ requests: requestKinds,
+          errors: session.host.session.agent.state.messages.filter(message => message.role === "assistant").map(message => ({
+            reason: message.stopReason, error: message.errorMessage,
+          })),
+        }));
         assert.match(exploreResult, /reclaimLease/);
         assert.match(exploreResult, /reclaim\.ts/);
         assert.match(exploreResult, /"plan":"used"/);
@@ -2057,7 +2063,6 @@ describe("session e2e — explore", () => {
       } finally {
         await session.dispose();
         await fixture.dispose();
-        faux.unregister();
       }
     });
   });
@@ -2089,7 +2094,7 @@ describe("session e2e — explore", () => {
           },
         },
       }));
-      const faux = registerFauxProvider();
+      const faux = fauxProvider();
       const model = faux.getModel();
       let exploreResult = "";
       const embedBodies: string[][] = [];
@@ -2224,7 +2229,6 @@ describe("session e2e — explore", () => {
         await runtime.dispose();
         await session.dispose();
         await fixture.dispose();
-        faux.unregister();
       }
     });
   });
@@ -2253,7 +2257,7 @@ describe("session e2e — related", () => {
       ]);
       await writeFile(join(fixture.workspaceRoot, "target.ts"), "export function needle() { return 1; }\n", "utf8");
       await writeFile(join(fixture.workspaceRoot, "dep.ts"), "import { needle } from \"./target.js\";\n", "utf8");
-      const faux = registerFauxProvider();
+      const faux = fauxProvider();
       let relatedResult = "";
       faux.setResponses([
         () => fauxAssistantMessage([fauxToolCall("related", { anchor: "target.ts" })]),
@@ -2290,7 +2294,6 @@ describe("session e2e — related", () => {
         await session.dispose();
         await store.close();
         await fixture.dispose();
-        faux.unregister();
       }
     });
   });
@@ -2305,7 +2308,7 @@ describe("session e2e — real LSP diagnostics", () => {
       pathModule: path,
       isTrusted: async () => true,
     });
-    const faux = registerFauxProvider();
+    const faux = fauxProvider();
     let diagnosticResult = "";
     try {
       const resourceId = "fixture.ts";
@@ -2359,7 +2362,6 @@ describe("session e2e — real LSP diagnostics", () => {
         await session.dispose();
       }
     } finally {
-      faux.unregister();
       await language.dispose();
       await harness.cleanup();
     }
@@ -2369,7 +2371,7 @@ describe("session e2e — real LSP diagnostics", () => {
 describe("session e2e — Harness counters", () => {
   it("publishes real tool failures, retries, output bytes, observations, and cache ratio through session stats", async () => {
     await withTempRoot("varin-s-counters-", async (root) => {
-      const faux = registerFauxProvider();
+      const faux = fauxProvider();
       faux.setResponses([
         () => fauxAssistantMessage([fauxToolCall("read", { path: "missing-counter-file.txt" })]),
         () => fauxAssistantMessage([fauxToolCall("read", { path: "missing-counter-file.txt" })]),
@@ -2389,7 +2391,6 @@ describe("session e2e — Harness counters", () => {
         assert.equal(typeof stats.cacheHitRatio, "number");
       } finally {
         await session.dispose();
-        faux.unregister();
       }
     });
   });
@@ -2400,7 +2401,7 @@ describe("session e2e — Harness counters", () => {
 describe("session e2e — permission gate extension", () => {
   it("asks before a write and performs it when the user allows once", async () => {
     await withTempRoot("varin-s-perm-allow-", async (root) => {
-      const faux = registerFauxProvider();
+      const faux = fauxProvider();
       faux.setResponses([
         () => fauxAssistantMessage([fauxToolCall("write", { path: "allowed.txt", content: "hi" })]),
         () => fauxAssistantMessage("done"),
@@ -2426,14 +2427,13 @@ describe("session e2e — permission gate extension", () => {
         assert.ok(existsSync(join(root, "allowed.txt")), "allowing once must let the write through");
       } finally {
         await session.dispose();
-        faux.unregister();
       }
     });
   });
 
   it("blocks the tool and leaves the file alone when the user denies", async () => {
     await withTempRoot("varin-s-perm-deny-", async (root) => {
-      const faux = registerFauxProvider();
+      const faux = fauxProvider();
       const contexts: Context[] = [];
       faux.setResponses([
         () => fauxAssistantMessage([fauxToolCall("write", { path: "denied.txt", content: "hi" })]),
@@ -2458,14 +2458,13 @@ describe("session e2e — permission gate extension", () => {
         assert.match(JSON.stringify(contexts[0]!.messages), /denied/i, "the block reason must reach the model");
       } finally {
         await session.dispose();
-        faux.unregister();
       }
     });
   });
 
   it("binds a session approval to one resource and always asks for a high-risk path", async () => {
     await withTempRoot("varin-s-perm-session-", async (root) => {
-      const faux = registerFauxProvider();
+      const faux = fauxProvider();
       faux.setResponses([
         () => fauxAssistantMessage([fauxToolCall("write", { path: "one.txt", content: "1" })]),
         () => fauxAssistantMessage([fauxToolCall("write", { path: "two.txt", content: "2" })]),
@@ -2501,14 +2500,13 @@ describe("session e2e — permission gate extension", () => {
         assert.ok(!existsSync(join(root, ".env")), "the high-risk write was denied");
       } finally {
         await session.dispose();
-        faux.unregister();
       }
     });
   });
 
   it("does not ask for a read-only tool", async () => {
     await withTempRoot("varin-s-perm-read-", async (root) => {
-      const faux = registerFauxProvider();
+      const faux = fauxProvider();
       faux.setResponses([
         () => fauxAssistantMessage([fauxToolCall("read", { path: "missing.txt" })]),
         () => fauxAssistantMessage("done"),
@@ -2532,14 +2530,13 @@ describe("session e2e — permission gate extension", () => {
         );
       } finally {
         await session.dispose();
-        faux.unregister();
       }
     });
   });
 
   it("uses the configured Smart judge for an ordinary edit without prompting", async () => {
     await withTempRoot("varin-s-perm-smart-", async (root) => {
-      const faux = registerFauxProvider();
+      const faux = fauxProvider();
       const model = faux.getModel();
       const judgeContexts: Context[] = [];
       faux.setResponses([
@@ -2564,10 +2561,9 @@ describe("session e2e — permission gate extension", () => {
         assert.equal(session.uiRequests.length, 0);
         assert.ok(existsSync(join(root, "smart.txt")));
         assert.equal(judgeContexts.length, 1);
-        assert.match(judgeContexts[0]!.systemPrompt ?? "", /permission judge/i);
+        assert.match(providerSystemPrompt(judgeContexts[0]), /permission judge/i);
       } finally {
         await session.dispose();
-        faux.unregister();
       }
     });
   });
@@ -2587,7 +2583,7 @@ describe("D-284 request admission", () => {
         (_, i) => `line ${i + 1}: ${"material ".repeat(8)}`).join("\n"), "utf8");
       // Keep the fourth request decisively beyond capacity even after the
       // provider's measured-token calibration replaces the initial estimate.
-      const faux = registerFauxProvider({ models: [{ id: "faux-1", contextWindow: 20_000, maxTokens: 800 }] });
+      const faux = fauxProvider({ models: [{ id: "faux-1", contextWindow: 20_000, maxTokens: 800 }] });
       let session: Awaited<ReturnType<typeof setupSession>> | undefined;
       const foreground: { compacted: boolean; chars: number }[] = [];
       let summaryCalls = 0;
@@ -2595,7 +2591,7 @@ describe("D-284 request admission", () => {
         // Faux's synthetic cache-write count overlaps its uncached input.
         // Disable that test-only estimator so the capacity test uses one input count.
         if (options) options.cacheRetention = "none";
-        if (context.systemPrompt?.includes("background compaction agent")) {
+        if (providerSystemPrompt(context).includes("background compaction agent")) {
           summaryCalls += 1;
           return fauxAssistantMessage("The task reads material.txt in chunks. Continue reading; original entries remain in history.");
         }
@@ -2624,7 +2620,6 @@ describe("D-284 request admission", () => {
           "compaction must retain every original tool result in native Pi history");
       } finally {
         await session?.dispose();
-        faux.unregister();
       }
     });
   });

@@ -1,11 +1,13 @@
 /**
- * Chat-independent Pi runtime binding for embedding and rerank.
+ * Chat-independent Pi runtime binding for embedding, rerank and classifiers.
  * Provider/model definitions come from user + operator authority only. A
  * trusted project's provider layer never participates in background inference.
  */
 import { createHash } from "node:crypto";
 import { join } from "node:path";
 import { ModelRuntime, SettingsManager } from "@earendil-works/pi-coding-agent";
+import { classify as classifySystemOne } from "@earendil-works/pi-ai/api/typesafe-system-one";
+import type { ClassifierModel, ClassifierApi } from "@earendil-works/pi-ai";
 import {
   FAST_DECISION_PURPOSES,
   HarnessInferenceSettingsValidationError,
@@ -38,7 +40,7 @@ import { HostError } from "../errors.js";
 import { ProviderConfigurationManager } from "../provider-configuration.js";
 import { requestAdaptiveEmbeddings } from "./openai-embeddings.js";
 import { requestHttpRerank } from "./http-rerank.js";
-import { requestSystemone, SystemoneRequestError, SystemoneResponseError } from "./typesafe-systemone.js";
+import { requestClassifier, ClassifierRequestError, ClassifierResponseError } from "./native-classifier.js";
 
 export { REMOTE_EMBEDDING_DEFAULT_MAX_TOKENS };
 
@@ -56,6 +58,7 @@ type ResolvedProviderBinding = {
   configurationId: string;
   headers?: Record<string, string>;
   endpoint?: string;
+  classifierApi?: ClassifierApi;
 };
 
 const digest = (value: unknown): string => createHash("sha256")
@@ -362,9 +365,22 @@ export class BackgroundInferenceRuntime {
       signal.throwIfAborted();
       let result;
       try {
-        result = await requestSystemone({
+        const runtime = await this.#runtime();
+        const native = runtime.getModelOfType("classifier", configured.providerId, configured.modelId);
+        if (!runtime.getProvider(configured.providerId)?.classify) {
+          runtime.registerProvider(configured.providerId, { classifiers: { "typesafe-system-one": { classify: classifySystemOne } } });
+        }
+        const nativeModel: ClassifierModel<ClassifierApi> = native ? { ...native, baseUrl: endpoint.baseUrl,
+          ...(endpoint.classifierApi ? { api: endpoint.classifierApi } : {}) } : {
+          type: "classifier", api: endpoint.classifierApi ?? "typesafe-system-one", provider: configured.providerId,
+          id: configured.modelId, name: configured.modelId, baseUrl: endpoint.baseUrl,
+          contextWindow: 0, input: ["text"], cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 },
+        };
+        result = await requestClassifier({
+          nativeModel,
+          classify: runtime.classify.bind(runtime),
           baseUrl: endpoint.baseUrl,
-          apiKey: endpoint.apiKey!,
+          ...(endpoint.apiKey === undefined ? {} : { apiKey: endpoint.apiKey }),
           ...(endpoint.headers ? { headers: endpoint.headers } : {}),
           ...(requestEndpoint ? { endpoint: requestEndpoint } : {}),
           model: configured.modelId,
@@ -374,10 +390,10 @@ export class BackgroundInferenceRuntime {
           signal,
         });
       } catch (error) {
-        if (error instanceof SystemoneRequestError) {
+        if (error instanceof ClassifierRequestError) {
           throw new HostError("fast_decision_invalid_request", error.message);
         }
-        if (error instanceof SystemoneResponseError) {
+        if (error instanceof ClassifierResponseError) {
           throw new HostError("fast_decision_provider_error", error.message);
         }
         throw error;
@@ -562,25 +578,26 @@ export class BackgroundInferenceRuntime {
   async #resolveProviderBinding(providerId: string, modelId: string, withAuth: boolean, kind: ProviderInferenceCapability): Promise<ResolvedProviderBinding> {
     const runtime = await this.#runtime();
     const provider = runtime.getProvider(providerId);
-    const model = runtime.getModel(providerId, modelId);
+    const model = kind === "decision" ? runtime.getModelOfType("classifier", providerId, modelId) : runtime.getModel(providerId, modelId);
     let editable: Awaited<ReturnType<ProviderConfigurationManager["effectiveConfig"]>> | undefined;
     try { editable = await this.#providers.effectiveConfig(this.#cwd, providerId, false); } catch { /* built-in */ }
     const capabilities = await this.#providers.effectiveCapabilities(this.#cwd, providerId, false);
     const capability = capabilities?.[kind];
     if (capability?.enabled === false) throw new HostError("provider_capability_disabled", `Provider ${providerId} has disabled ${kind}`);
     const capabilityModel = capability?.models?.find(entry => entry.id === modelId);
-    const baseUrl = capabilityModel?.baseUrl ?? capability?.baseUrl ?? (capability ? undefined : model?.baseUrl) ?? editable?.baseUrl ?? provider?.baseUrl;
+    const baseUrl = capabilityModel?.baseUrl ?? capability?.baseUrl ?? (capability && kind !== "decision" ? undefined : model?.baseUrl) ?? editable?.baseUrl ?? provider?.baseUrl;
     if (!baseUrl) throw new HostError("provider_endpoint_missing", `Provider ${providerId} does not define a base URL`);
+    const classifierApi = kind === "decision" ? (capabilityModel?.api ?? model?.api ?? "typesafe-system-one") as ClassifierApi : undefined;
     const configurationId = digest({
       providerId,
       modelId,
       baseUrl: credentialFreeUrl(baseUrl),
-      api: capability?.protocol ?? model?.api ?? editable?.api,
+      api: classifierApi ?? capability?.protocol ?? model?.api ?? editable?.api,
       capability: capability?.protocol,
       endpoint: capability?.endpoint,
       credentialRef: capability?.credentialRef,
     });
-    const resolved = { baseUrl, configurationId, ...(capability?.endpoint ? { endpoint: capability.endpoint } : {}) };
+    const resolved = { baseUrl, configurationId, ...(classifierApi ? { classifierApi } : {}), ...(capability?.endpoint ? { endpoint: capability.endpoint } : {}) };
     if (!withAuth) return resolved;
     const credentialRef = capability?.credentialRef ?? providerId;
     // Reuse only a live, non-persistent credential overlay from the chat
@@ -589,9 +606,9 @@ export class BackgroundInferenceRuntime {
       ? (await this.#authRuntime.getAuth(credentialRef))?.auth.apiKey : undefined;
     const auth = await runtime.getAuth(credentialRef, runtimeKey ? { apiKey: runtimeKey } : {});
     const apiKey = auth?.auth.apiKey;
-    if (!apiKey) throw new HostError("provider_auth_missing", `Provider ${credentialRef} has no credential`);
+    if (!auth || kind !== "decision" && !apiKey) throw new HostError("provider_auth_missing", `Provider ${credentialRef} has no credential`);
     const headers = stringHeaders(auth.auth.headers);
-    return { ...resolved, apiKey, ...(headers ? { headers } : {}) };
+    return { ...resolved, ...(apiKey === undefined ? {} : { apiKey }), ...(headers ? { headers } : {}) };
   }
 }
 

@@ -1,6 +1,7 @@
 import type { ExtensionFactory } from "@earendil-works/pi-coding-agent";
 import type { HostEvent, HostEventData } from "@varin/protocol";
 import { toJsonValue } from "./json.js";
+import { MCP_STATUS_CHANNEL } from "./pi-mcp-config-bridge.js";
 
 type EventEmitter = <E extends HostEvent>(event: E, data: HostEventData<E>) => void;
 
@@ -19,7 +20,7 @@ export function createExtensionStateBridgeExtension(emit: EventEmitter): Extensi
       pi.events.on(channel, (value) => {
         if (!sessionId) return;
         emit("extension.state", {
-          channel,
+          channel: channel === MCP_ADAPTER_STATUS_CHANNEL ? MCP_STATUS_CHANNEL : channel,
           sessionId,
           value: toJsonValue(value),
         });
@@ -37,7 +38,7 @@ export function createExtensionStateBridgeExtension(emit: EventEmitter): Extensi
       if (!closingSessionId) return;
       for (const channel of PUBLIC_STATE_CHANNELS) {
         emit("extension.state", {
-          channel,
+          channel: channel === MCP_ADAPTER_STATUS_CHANNEL ? MCP_STATUS_CHANNEL : channel,
           sessionId: closingSessionId,
           value: null,
         });

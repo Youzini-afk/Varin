@@ -1,4 +1,4 @@
-export const MINIMUM_PI_VERSION = "0.82.1";
+export const MINIMUM_PI_VERSION = "0.99.2";
 export const MINIMUM_NODE_VERSION = "22.19.0";
 
 export function parseVersion(value: string): string | undefined {

@@ -20,8 +20,7 @@ as a chat model or installs a pretend streaming API.
       "capabilities": {
         "chat": false,
         "decision": {
-          "protocol": "typesafe-systemone",
-          "endpoint": "/v1/systemone",
+          "protocol": "pi-classifier",
           "models": [{ "id": "jev-1.13", "name": "Jev" }]
         }
       }
@@ -40,7 +39,26 @@ The same ID can occur in several capabilities. Duplicate IDs inside one capabili
 | --- | --- | --- | --- |
 | embedding | `openai-compatible` | `/embeddings` | Ordered vectors |
 | rerank | `http-rerank` | `/rerank` | Scores mapped to submitted material IDs |
-| decision | `typesafe-systemone` | `/v1/systemone` | Judge / choose / score answers |
+| decision | `pi-classifier` | Selected native classifier API | Judge / choose / score answers |
+
+Decision requests use Pi's `typesafe-system-one`, `cloudflare-workers-ai-system-one`, or
+`llama-cpp-classify` implementation, including its authentication, retry and cancellation behavior.
+TypeSafe is the default API for an explicitly entered, undiscovered decision model. Its native path
+is `/systemone` appended to the model's base URL; leave the endpoint empty to use native defaults.
+llama.cpp uses several server endpoints, so configure its base URL instead of a single endpoint override.
+Native auth resolution can authorize a classifier without an API key; the decision path accepts that
+resolution instead of inventing a key requirement. A capability model's explicit API participates in
+both the frozen configuration identity and the actual native dispatch.
+Protocol-specific option counts and capacities remain properties of that API/model; the generic
+decision protocol does not impose TypeSafe's window on other classifiers.
+
+Native `models` entries retain their `type` (`chat`, `image`, `classifier`) and `output` metadata.
+Composition matches `type` plus `id`, allowing different model kinds to share an ID. The chat form
+edits chat rows and preserves other kinds and unedited native fields. `chat: false` hides only chat
+entries. Classifiers with an unknown context window use `0`, not an invented chat capacity.
+The inference picker includes Pi's native classifier catalog through the same project-free resolver.
+Project/operator composition also carries native cache lifetimes, sampling parameters, tiered prices
+and input-limit overrides into the live model. Nested overrides preserve unaffected native fields.
 
 Protocol selection is independent of the native chat `api`. A pure inference provider can have no
 chat API and no chat model definitions. `chat: false` suppresses its native chat catalog after all

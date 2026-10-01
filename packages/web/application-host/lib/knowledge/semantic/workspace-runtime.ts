@@ -493,7 +493,7 @@ export function createWorkspaceSemanticRuntime(options: WorkspaceSemanticRuntime
     const result = await requestWorkspaceInference(broker, options.configCwd, 'harness.fastDecision', {
       providerId: input.settings.providerId,
       modelId: input.settings.modelId,
-      protocol: 'typesafe-systemone',
+      protocol: 'pi-classifier',
       configurationId: input.settings.configurationId,
       purpose: input.purpose,
       goal: input.goal,

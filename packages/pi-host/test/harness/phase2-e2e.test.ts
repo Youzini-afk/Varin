@@ -20,7 +20,7 @@ import { createRecallTool } from "../../src/harness/recall-tool.js";
 import { attachContextRequestBoundary } from "../../src/harness/context-request-boundary.js";
 import { createRequestContextInjector } from "../../src/harness/request-context.js";
 import { SessionManager, convertToLlm, type AgentSession, type ToolDefinition } from "@earendil-works/pi-coding-agent";
-import { createAssistantMessageEventStream, type Api, type AssistantMessage, type Context, type Model } from "@earendil-works/pi-ai";
+import { createAssistantMessageEventStream, normalizeContext, type Api, type AssistantMessage, type Context, type Model } from "@earendil-works/pi-ai";
 import type { Zone2Material } from "../../../web/application-host/lib/harness/zone2.js";
 import type { TodoToolDeps } from "../../../web/application-host/lib/harness/todo-tool.js";
 import type { RecallToolDeps } from "../../../web/application-host/lib/harness/recall-tool.js";
@@ -218,10 +218,10 @@ describe("Phase 2 e2e integration", () => {
         compact: async () => { throw new Error("unexpected compaction"); },
         inject: createRequestContextInjector(bridge),
       });
-      const stream = await session.agent.streamFunction(model, {
+      const stream = await session.agent.streamFunction(model, normalizeContext({
         systemPrompt: "stable",
         messages: convertToLlm(manager.buildSessionContext().messages),
-      }, {});
+      }), {});
       await stream.result();
       await new Promise((resolve) => setTimeout(resolve, 0));
 
