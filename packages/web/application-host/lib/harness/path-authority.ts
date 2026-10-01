@@ -1,6 +1,7 @@
 import fs from "node:fs";
 import path from "node:path";
-import type { HarnessActorContext } from "@varin/protocol";
+import type { HarnessActorContext, DocumentReadPageRequest } from "@varin/protocol";
+import { readHandlePage, readStableFile } from './read-page.js';
 import type { HarnessAuthorizedPath } from "./router.js";
 import {
   assertAbsolutePathInWorkspace,
@@ -190,11 +191,12 @@ export function createHarnessPathAuthority({
       return resolveResourceRooted(inputPath, canonical, stat);
     };
 
-  const readAuthorizedFile = async (
+  const withAuthorizedFile = async <T>(
     actor: HarnessActorContext,
     authorized: HarnessAuthorizedPath,
+    read: (handle: fs.promises.FileHandle, stat: fs.BigIntStats) => Promise<T>,
     signal?: AbortSignal,
-  ): Promise<Buffer> => {
+  ): Promise<{ value: T; revision: string }> => {
     // The Documents root record is part of the resolved resource identity,
     // independent of the actor's session classification.
     if (authorized.authorityId !== authorityId) {
@@ -208,39 +210,29 @@ export function createHarnessPathAuthority({
       throw new Error("Document path changed before reading");
     }
 
-    // Open the canonical target selected during router authorization, never
-    // the original alias. O_NOFOLLOW protects the final component on systems
-    // that support it; handle identity checks below cover systems that do not.
-    const noFollow = fs.constants.O_NOFOLLOW ?? 0;
-    const handle = await readFsPromises.open(
-      authorized.resolvedPath,
-      fs.constants.O_RDONLY | noFollow,
-    );
-    try {
-      const opened = await handle.stat({ bigint: true });
-      if (!opened.isFile() || opened.ino === 0n) throw new Error("Document path is not a readable regular file");
-      signal?.throwIfAborted();
-      const bytes = await handle.readFile(signal ? { signal } : undefined);
-      signal?.throwIfAborted();
-
+    // Open the admitted canonical target; re-resolving the caller's alias is
+    // only an identity check, never a second content selection.
+    return readStableFile(authorized.resolvedPath, read, signal, async () => {
       const after = await resolve(actor, authorized.inputPath, { allowMissing: false });
       if (!after || after.workspaceId !== authorized.workspaceId || after.canonicalResourceId !== authorized.canonicalResourceId
         || after.resourceId !== authorized.resourceId || after.resolvedPath !== authorized.resolvedPath) {
         throw new Error("Document path changed while reading");
       }
-      const current = await readFsPromises.stat(after.resolvedPath, { bigint: true });
-      if (!current.isFile() || current.dev !== opened.dev || current.ino !== opened.ino) {
-        throw new Error("Document path changed while reading");
-      }
-      return bytes;
-    } finally {
-      await handle.close();
-    }
+    }, readFsPromises);
   };
+
+  const readAuthorizedFile = async (actor: HarnessActorContext, authorized: HarnessAuthorizedPath, signal?: AbortSignal): Promise<Buffer> => (
+    await withAuthorizedFile(actor, authorized, handle => handle.readFile(signal ? { signal } : undefined), signal)
+  ).value;
+
+  const readAuthorizedPage = async (actor: HarnessActorContext, authorized: HarnessAuthorizedPath, page: DocumentReadPageRequest, signal?: AbortSignal) => (
+    await withAuthorizedFile(actor, authorized, (handle, stat) => readHandlePage(handle, Number(stat.size), page, signal), signal)
+  );
 
   return {
     resolve,
     readAuthorizedFile,
+    readAuthorizedPage,
   };
 }
 

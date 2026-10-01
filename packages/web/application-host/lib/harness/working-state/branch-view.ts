@@ -150,6 +150,17 @@ export async function readBranchFile(
   revision?: number,
   options?: { followSymlinks?: boolean; seen?: ReadonlySet<string>; read?: Omit<WorkingStateReadOptions, "revision"> },
 ): Promise<BranchViewFile | { missing: true; path: string; revision: string; viewRevision: number; origin: WorkingBranchPathOrigin } | { unavailable: string }> {
+  const resolved = await resolveReadableBranchPath(store, branchId, file, revision, options);
+  if ('missing' in resolved || 'unavailable' in resolved) return resolved;
+  const bytes = await store.readContent(resolved.entry, { ...(options?.read?.signal ? { signal: options.read.signal } : {}) });
+  if (!bytes) return { unavailable: `Working-state object is missing for ${resolved.path}` };
+  return { path: resolved.path, bytes, origin: resolved.origin, revision: resolved.revision, viewRevision: resolved.viewRevision };
+}
+
+export async function resolveReadableBranchPath(
+  store: WorkingStateRootStore, branchId: string, file: string, revision?: number,
+  options?: { followSymlinks?: boolean; seen?: ReadonlySet<string>; read?: Omit<WorkingStateReadOptions, 'revision'> },
+): Promise<ResolvedBranchPath | { missing: true; path: string; revision: string; viewRevision: number; origin: WorkingBranchPathOrigin } | { unavailable: string }> {
   const resolved = await resolveBranchPath(store, branchId, file, revision, options?.read);
   if (!resolved) return { unavailable: `Working branch ${branchId} is unavailable` };
   if (resolved.state.kind === "missing") {
@@ -176,21 +187,13 @@ export async function readBranchFile(
     }
     const parent = resolved.path.includes("/") ? resolved.path.slice(0, resolved.path.lastIndexOf("/")) : "";
     const joined = parent ? `${parent}/${target}` : target;
-    return readBranchFile(store, branchId, joined, revision, {
+    return resolveReadableBranchPath(store, branchId, joined, revision, {
       followSymlinks: true,
       seen,
       ...(options?.read ? { read: options.read } : {}),
     });
   }
-  const bytes = await store.readContent(resolved.entry, { ...(options?.read?.signal ? { signal: options.read.signal } : {}) });
-  if (!bytes) return { unavailable: `Working-state object is missing for ${resolved.path}` };
-  return {
-    path: resolved.path,
-    bytes,
-    origin: resolved.origin,
-    revision: resolved.revision,
-    viewRevision: resolved.viewRevision,
-  };
+  return resolved;
 }
 
 export async function listBranchTextFiles(

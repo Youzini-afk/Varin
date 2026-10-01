@@ -493,8 +493,14 @@ For disk, the Host rechecks the authorized canonical target, opens one file hand
 that handle, and checks its identity and the request path again before returning bytes; Pi never
 reopens the original path. The normalized path identity is for comparisons and locks; the Host
 opens the separately retained, case-preserving resolved path so a Windows case-sensitive
-directory cannot redirect `A` to `a`. The Pi wrapper delegates these bytes to
-`createReadToolDefinition`, preserving native offset/limit and image handling. `apply_patch`
+directory cannot redirect `A` to `a`. The Pi wrapper sends its line range and existing Pi
+display budget to the Host. `read-page.ts` scans bounded byte chunks and stops after the requested
+page; it does not count the remaining lines or encode the whole text file. Binary signatures and
+unsupported encodings return a type result before whole-file decoding. Long single lines retain
+Pi's output-size boundary without allocating that line. Supported images keep native Pi processing.
+Virtual branches hold one native pin while paging object slices; surface drafts page their existing
+immutable text; materialized aliases revalidate the owned child target. Disk identity also checks
+size and timestamps to reject in-place changes during a read. `apply_patch`
 uses the same Host-returned disk bytes for its patch base and conditional hash. This rejects the
 tested original-path and parent-junction replacement races; Node has no cross-platform
 directory-handle-relative open here, so it is not a proof against every adversarial ABA swap.

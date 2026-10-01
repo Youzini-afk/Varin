@@ -2,6 +2,7 @@ import type { HarnessService, HarnessServiceContext } from "./router.js";
 import type { FetchResult, HarnessServiceMap, ShellExecResultSpawnFailed, WebFetchRequest } from "@varin/protocol";
 import { createMaterialReadService } from "./material-read-service.js";
 import { encodeDocumentText } from "../documents/inspect.js";
+import { readTextPage } from './read-page.js';
 import { HarnessServiceError } from "./service-error.js";
 import {
   createThreadDispatchService,
@@ -516,10 +517,14 @@ export function createSearchContentService(search: HarnessSearchService): Harnes
  * passed to Documents so aliases cannot select a different snapshot entry.
  */
 export function createDocumentReadSourceService(
-  host: Pick<HarnessServiceHost, "documentReadSource" | "readAuthorizedDiskFile">,
+  host: Pick<HarnessServiceHost, "documentReadSource" | "readAuthorizedDiskFile" | "readAuthorizedDiskPage">,
 ): HarnessService<"document.readSource"> {
   return {
-    handle: async (_params, ctx) => {
+    handle: async (params, ctx) => {
+      const page = params.page;
+      if (page && [page.offset, page.limit, page.maxBytes].some(value => !Number.isSafeInteger(value) || value < 1)) {
+        throw new HarnessServiceError('invalid-params', 'Read page offset, limit and maxBytes must be positive integers.');
+      }
       const authorized = ctx.authorizedPaths[0];
       if (!host.documentReadSource || !authorized || ctx.authorizedPaths.length !== 1) {
         throw new HarnessServiceError("unavailable", "Document read source is unavailable.");
@@ -530,9 +535,15 @@ export function createDocumentReadSourceService(
         ctx.inputContext ?? { source: "disk" },
         authorized.resourceId,
         authorized.workspaceId,
+        page ? { page, signal: ctx.signal } : undefined,
       );
       ctx.signal.throwIfAborted();
       if (snapshot.status === "disk") {
+        if (page) {
+          if (!host.readAuthorizedDiskPage) throw new HarnessServiceError('unavailable', 'Authorized disk paging is unavailable.');
+          const result = await host.readAuthorizedDiskPage(ctx, authorized, page);
+          return { source: 'disk', page: result.value, revision: result.revision };
+        }
         if (!host.readAuthorizedDiskFile) {
           throw new HarnessServiceError("unavailable", "Authorized disk document reading is unavailable.");
         }
@@ -548,11 +559,14 @@ export function createDocumentReadSourceService(
           provenance: snapshot.provenance,
           ...(snapshot.missing ? { missing: true as const } : {}),
           ...(snapshot.base64 === undefined ? {} : { base64: snapshot.base64 }),
+          ...(snapshot.page ? { page: snapshot.page } : {}),
         };
       }
       if (snapshot.status === "unavailable") {
         throw new HarnessServiceError("unavailable", snapshot.message);
       }
+      if (page) return { source: 'surface-draft', revision: snapshot.revision,
+        page: await readTextPage(snapshot.content, page, ctx.signal) };
       let bytes: Buffer;
       try {
         bytes = encodeDocumentText({

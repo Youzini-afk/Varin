@@ -2,7 +2,8 @@ import type { WorkingBranchReadProvenance } from "@varin/protocol";
 import type { SurfaceSnapshotOverlayEntry } from "../../documents/surface-snapshot-store.js";
 import type { ExploreFileSnapshot } from "../explore-file-reader.js";
 import type { HarnessDocumentPathOverlayLookup, HarnessDocumentReadLookup } from "../service-host.js";
-import { readBranchFile } from "./branch-view.js";
+import { readBranchFile, resolveReadableBranchPath } from "./branch-view.js";
+import { readContentPage } from '../read-page.js';
 import type { ThreadExecutionViewRegistry } from "./execution-view.js";
 import type { WorkingStateRootStore, WorkspaceWorkingStateRootAccess } from "./types.js";
 
@@ -10,7 +11,8 @@ import { createWorkingBranchQuery, type WorkingBranchPinOptions, type WorkingBra
 export type { WorkingBranchPinOptions, WorkingBranchQuerySnapshot } from "./working-branch-query.js";
 
 export interface WorkingBranchLookups {
-  readSource(sessionId: string, resourceId: string, workspaceId: string): Promise<HarnessDocumentReadLookup | null>;
+  readSource(sessionId: string, resourceId: string, workspaceId: string,
+    options?: { page: import('@varin/protocol').DocumentReadPageRequest; signal?: AbortSignal }): Promise<HarnessDocumentReadLookup | null>;
   pathOverlay(sessionId: string, resourceId: string, workspaceId: string): Promise<HarnessDocumentPathOverlayLookup | null>;
   exploreFile(sessionId: string, resourceId: string, workspaceId: string): Promise<ExploreFileSnapshot | null>;
   pinQuery(sessionId: string, options?: WorkingBranchPinOptions): Promise<WorkingBranchQuerySnapshot | null>;
@@ -49,10 +51,28 @@ export function createWorkingBranchLookups(options: {
   };
 
   return {
-    async readSource(sessionId, resourceId, workspaceId) {
+    async readSource(sessionId, resourceId, workspaceId, readOptions) {
       if (options.views.get(sessionId)?.workspaceId !== workspaceId) return null;
       return withView(sessionId, async (view, store) => {
         if (view.workspaceId !== workspaceId) return null;
+        if (readOptions) {
+          const signalOptions = readOptions.signal ? { signal: readOptions.signal } : {};
+          const pin = await store.pinBranch(view.branchId, signalOptions);
+          try {
+            const resolved = await resolveReadableBranchPath(store, view.branchId, resourceId, undefined,
+              { read: { pin, ...signalOptions } });
+            if ('unavailable' in resolved) return { status: 'unavailable', message: resolved.unavailable };
+            const provenance = provenanceFor({ ...view, writeRevision: resolved.viewRevision }, resolved.origin);
+            if ('missing' in resolved) return { status: 'working-branch', revision: resolved.revision, provenance, missing: true };
+            if (resolved.state.kind !== 'regular-file') return { status: 'unavailable', message: 'Branch source is not a regular file' };
+            const page = await readContentPage(async (offset, length) => {
+              const bytes = await store.readContent(resolved.entry, { offset, length, ...signalOptions });
+              if (!bytes) throw new Error(`Working-state object is missing for ${resolved.path}`);
+              return bytes;
+            }, resolved.state.byteLength, readOptions.page, readOptions.signal);
+            return { status: 'working-branch', revision: resolved.revision, provenance, page };
+          } finally { await pin.release(); }
+        }
         const result = await readBranchFile(store, view.branchId, resourceId);
         if ("unavailable" in result) {
           return {

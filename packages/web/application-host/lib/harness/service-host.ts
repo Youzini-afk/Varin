@@ -133,6 +133,7 @@ export type HarnessDocumentReadLookup =
     revision: string;
     provenance: import("@varin/protocol").WorkingBranchReadProvenance;
     base64?: string;
+    page?: import("@varin/protocol").DocumentReadPage;
     missing?: true;
     message?: string;
   };
@@ -142,6 +143,7 @@ export type HarnessDocumentReadSource = (
   context: AgentInputContext,
   resourceId: string,
   workspaceId: string,
+  options?: { page: import("@varin/protocol").DocumentReadPageRequest; signal?: AbortSignal },
 ) => HarnessDocumentReadLookup | Promise<HarnessDocumentReadLookup>;
 
 /** Write admission for native Pi write/edit/apply_patch wrappers (D-089). */
@@ -311,6 +313,8 @@ export interface HarnessServiceHost {
   readMaterialFile?: (ctx: import("./router.js").HarnessServiceContext, path: import("./router.js").HarnessAuthorizedPath) => Promise<Buffer>;
   /** Read disk bytes from the already-authorized canonical target through a verified file handle. */
   readAuthorizedDiskFile?: (ctx: import("./router.js").HarnessServiceContext, path: import("./router.js").HarnessAuthorizedPath) => Promise<Buffer>;
+  readAuthorizedDiskPage?: (ctx: import("./router.js").HarnessServiceContext, path: import("./router.js").HarnessAuthorizedPath,
+    page: import("@varin/protocol").DocumentReadPageRequest) => Promise<{ value: import("@varin/protocol").DocumentReadPage; revision: string }>;
   documentReadingSettings?: (sessionId: string) => Promise<import("@varin/protocol").HarnessSettings["documentReading"]>;
   materialWebPolicy?: (sessionId: string) => Promise<import("@varin/protocol").HarnessWebDomainPolicy>;
   documentReadSource: HarnessDocumentReadSource | null;
@@ -578,6 +582,7 @@ export interface HarnessServiceHostOptions {
   documentReader?: HarnessServiceHost["documentReader"];
   readMaterialFile?: HarnessServiceHost["readMaterialFile"];
   readAuthorizedDiskFile?: HarnessServiceHost["readAuthorizedDiskFile"];
+  readAuthorizedDiskPage?: HarnessServiceHost["readAuthorizedDiskPage"];
   documentReadingSettings?: HarnessServiceHost["documentReadingSettings"];
   materialWebPolicy?: HarnessServiceHost["materialWebPolicy"];
   /** Surface-aware native Pi read source (null when Documents is unavailable). */
@@ -1062,6 +1067,7 @@ export function createHarnessServiceHost(options: HarnessServiceHostOptions): Ha
     documentReader: options.documentReader ?? null,
     ...(options.readMaterialFile ? { readMaterialFile: options.readMaterialFile } : {}),
     ...(options.readAuthorizedDiskFile ? { readAuthorizedDiskFile: options.readAuthorizedDiskFile } : {}),
+    ...(options.readAuthorizedDiskPage ? { readAuthorizedDiskPage: options.readAuthorizedDiskPage } : {}),
     ...(options.documentReadingSettings ? { documentReadingSettings: options.documentReadingSettings } : {}),
     ...(options.materialWebPolicy ? { materialWebPolicy: options.materialWebPolicy } : {}),
     documentReadSource,

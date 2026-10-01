@@ -47,6 +47,18 @@ const pixelPng = (): Buffer => {
 };
 
 describe("surface-aware native read", () => {
+  it('passes page bounds to the Host and renders continuation without full source bytes', async () => {
+    const bridge = { request: async (method: string, params: { page: { offset: number; limit: number; maxBytes: number } }) => {
+      assert.equal(method, 'document.readSource');
+      assert.deepEqual(params.page, { offset: 10, limit: 2, maxBytes: 50 * 1024 });
+      return { source: 'disk', revision: 'disk-page:v1', page: { kind: 'text', text: 'ten\neleven',
+        startLine: 10, lineCount: 2, eof: false, nextOffset: 12, truncatedBy: 'lines' } };
+    } } as unknown as HostServicesBridge;
+    const result = await createSurfaceAwareReadTool(bridge, '/tmp').execute('page', { path: 'large.ts', offset: 10, limit: 2 }, undefined, undefined, context);
+    assert.match((result.content[0] as { text: string }).text, /ten\neleven.*offset=12/s);
+    assert.equal((result.details as { revision: string }).revision, 'disk-page:v1');
+  });
+
   it("anchors a relative path at the session cwd for Host authorization", async () => {
     const root = await mkdtemp(join(tmpdir(), "varin-read-admission-"));
     const first = join(root, "first");
@@ -208,7 +220,8 @@ describe("surface-aware native read", () => {
     const file = join(root, "pixel.png");
     await writeFile(file, pixelPng());
     const bridge = {
-      request: async () => ({ source: "disk" as const, base64: await readFile(file).then((bytes) => bytes.toString("base64")) }),
+      request: async () => ({ source: "disk" as const, revision: 'image-page:v1',
+        page: { kind: 'image' as const, base64: await readFile(file).then((bytes) => bytes.toString("base64")) } }),
     } as unknown as HostServicesBridge;
     const tool = createSurfaceAwareReadTool(bridge, root);
     try {

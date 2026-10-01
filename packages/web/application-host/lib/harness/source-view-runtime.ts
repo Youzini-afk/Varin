@@ -1,4 +1,8 @@
 import type { AgentInputContext } from "@varin/protocol";
+import fs from 'node:fs';
+import path from 'node:path';
+import { assertAbsolutePathInWorkspace } from '../workspace/path-safety.js';
+import { readHandlePage, readStableFile } from './read-page.js';
 import type { DocumentAuthority } from "../documents/authority.js";
 import { encodeDocumentText } from "../documents/inspect.js";
 import type { ExploreFileSnapshot } from "./explore-file-reader.js";
@@ -85,9 +89,9 @@ export function createSourceViewRuntime(options: {
   };
 
   const readSource: NonNullable<HarnessServiceHost["documentReadSource"]> = async (
-    sessionId, context, resourceId, workspaceId,
+    sessionId, context, resourceId, workspaceId, readOptions,
   ): Promise<HarnessDocumentReadLookup> => {
-    const branch = await branchLookups.readSource(sessionId, resourceId, workspaceId);
+    const branch = await branchLookups.readSource(sessionId, resourceId, workspaceId, readOptions);
     if (branch) return branch;
     const viewId = await viewForSession(sessionId, context);
     if (!viewId) return documents.readAgentInputSnapshot(sessionId, context, resourceId, workspaceId);
@@ -97,7 +101,7 @@ export function createSourceViewRuntime(options: {
       await reconcilePending(viewId, workspaceId, resourceId);
       return sourceViews.read(viewId, workspaceId, resourceId, identity?.coordinationId ?? null);
     }
-    const aliasedBranch = await branchLookups.readSource(sessionId, alias.resourceId, alias.workspaceId);
+    const aliasedBranch = await branchLookups.readSource(sessionId, alias.resourceId, alias.workspaceId, readOptions);
     if (aliasedBranch) return aliasedBranch;
     const view = views.get(sessionId);
     if (view?.mode !== "materialized" || view.workspaceId !== alias.workspaceId) {
@@ -105,6 +109,28 @@ export function createSourceViewRuntime(options: {
     }
     const childRoot = await materializedThreadRoot(sessionId);
     if (!childRoot) return { status: "unavailable", message: "The materialized child directory is unavailable" };
+    if (readOptions) {
+      const canonicalRoot = (await documents.inspectWorkspace(childRoot.workspaceId)).root;
+      const target = await assertAbsolutePathInWorkspace(path.resolve(canonicalRoot, alias.resourceId),
+        { root: canonicalRoot, fsPromises: fs.promises, pathModule: path, allowMissing: false }).catch(error => {
+          if ((error as NodeJS.ErrnoException).code === 'ENOENT') return null;
+          throw error;
+        });
+      if (!target) return { status: 'working-branch', revision: `materialized:${view.branchId}:missing`,
+        provenance: { branchId: view.branchId, revision: view.writeRevision, origin: 'materialized' }, missing: true };
+      const result = await readStableFile(target.realPath,
+        (handle, stat) => readHandlePage(handle, Number(stat.size), readOptions.page, readOptions.signal), readOptions.signal,
+        async () => {
+          if (views.get(sessionId) !== view) throw new Error('The materialized child view changed while reading');
+          const current = await assertAbsolutePathInWorkspace(path.resolve(canonicalRoot, alias.resourceId),
+            { root: canonicalRoot, fsPromises: fs.promises, pathModule: path, allowMissing: false });
+          if (current.realPath !== target.realPath) throw new Error('The materialized child path changed while reading');
+          const currentRoot = await materializedThreadRoot(sessionId);
+          if (currentRoot?.workspaceId !== childRoot.workspaceId) throw new Error('The materialized child root changed while reading');
+        });
+      return { status: 'working-branch', revision: `materialized:${view.branchId}:${result.revision}`,
+        provenance: { branchId: view.branchId, revision: view.writeRevision, origin: 'materialized' }, page: result.value };
+    }
     const snapshot = await documents.read({ workspaceId: childRoot.workspaceId, resourceId: alias.resourceId });
     const provenance = { branchId: view.branchId, revision: view.writeRevision, origin: "materialized" as const };
     if (snapshot.status === "missing") return {

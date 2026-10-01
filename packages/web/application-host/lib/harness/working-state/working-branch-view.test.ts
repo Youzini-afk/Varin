@@ -159,6 +159,15 @@ async function fixture() {
 }
 
 describe("WorkingState Host branch view production chain", () => {
+  it('pages a pinned branch source and preserves its provenance after parent disk drift', async () => {
+    const f = await fixture();
+    await fs.writeFile(path.join(f.workspace, 'kept.txt'), 'parent changed\n');
+    const result = await f.lookups.readSource(f.actor.sessionId, 'kept.txt', f.workspaceId,
+      { page: { offset: 1, limit: 1, maxBytes: 50 * 1024 } });
+    expect(result).toMatchObject({ status: 'working-branch', provenance: { branchId: 'thread-child', origin: 'base', revision: 0 },
+      page: { kind: 'text', text: 'fixed kept' } });
+  });
+
   it("uses the authorized external root's disk view for read and listing", async () => {
     const f = await fixture();
     const external = path.join(path.dirname(f.workspace), "external-view");

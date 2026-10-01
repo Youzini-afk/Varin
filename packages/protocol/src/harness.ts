@@ -451,14 +451,31 @@ export interface WorkingBranchReadProvenance {
   origin: WorkingBranchPathOrigin;
 }
 
+/** A bounded display page, independent of the size of its source file. */
+export interface DocumentReadPageRequest {
+  offset: number;
+  limit: number;
+  maxBytes: number;
+}
+
+export type DocumentReadPage =
+  | { kind: "text"; text: string; startLine: number; lineCount: number; eof: boolean;
+      nextOffset?: number; totalLines?: number; truncatedBy: "lines" | "bytes" | null;
+      firstLineExceedsLimit?: true }
+  | { kind: "binary"; format: string; byteLength: number }
+  | { kind: "image"; base64: string };
+
 export type DocumentReadSourceResult =
-  | { source: "disk"; base64: string }
-  | { base64: string; revision: string; source: "surface-draft" }
+  | { source: "disk"; base64: string; page?: never }
+  | { source: "disk"; page: DocumentReadPage; revision: string; base64?: never }
+  | { base64: string; revision: string; source: "surface-draft"; page?: never }
+  | { page: DocumentReadPage; revision: string; source: "surface-draft"; base64?: never }
   | {
     source: "working-branch";
     revision: string;
     provenance: WorkingBranchReadProvenance;
     base64?: string;
+    page?: DocumentReadPage;
     missing?: true;
   };
 
@@ -1671,7 +1688,7 @@ export interface HarnessServiceMap {
     params: RelatedQueryParams;
     result: RelatedQueryResult;
   };
-  "document.readSource": { params: { path: string }; result: DocumentReadSourceResult };
+  "document.readSource": { params: { path: string; page?: DocumentReadPageRequest }; result: DocumentReadSourceResult };
   "document.pathOverlay": { params: DocumentPathOverlayParams; result: DocumentPathOverlayResult };
   "document.writeGuard": { params: { path: string }; result: DocumentWriteGuardResult };
   "document.surfaceWrite": { params: DocumentSurfaceWriteParams; result: DocumentSurfaceWriteResult };

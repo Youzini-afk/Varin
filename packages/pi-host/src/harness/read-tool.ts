@@ -1,5 +1,7 @@
 import {
   createReadToolDefinition,
+  DEFAULT_MAX_BYTES,
+  DEFAULT_MAX_LINES,
   type ReadOperations,
   type ReadToolOptions,
   type ToolDefinition,
@@ -92,9 +94,38 @@ export function createSurfaceAwareReadTool(
         : { ...params, path: path.resolve(cwd, params.path) };
       const source = await bridge.request(
         "document.readSource",
-        { path: anchoredParams.path },
+        { path: anchoredParams.path, page: { offset: params.offset ?? 1, limit: params.limit ?? DEFAULT_MAX_LINES, maxBytes: DEFAULT_MAX_BYTES } },
         signal === undefined ? {} : { signal },
       );
+      if (source.page) {
+        const page = source.page;
+        const details = { source: source.source,
+          ...('revision' in source ? { revision: source.revision } : {}),
+          ...(source.source === 'working-branch' ? { provenance: source.provenance } : {}),
+          page: page.kind === 'image' ? { kind: 'image' } : page.kind === 'binary' ? page : {
+            kind: page.kind, startLine: page.startLine, lineCount: page.lineCount, eof: page.eof,
+            nextOffset: page.nextOffset, truncatedBy: page.truncatedBy,
+          } };
+        if (page.kind === 'binary') return {
+          content: [{ type: 'text', text: `This is a ${page.format} binary file (${page.byteLength} bytes). Read cannot display it as source text; use a tool for this file format.` }],
+          details,
+        } as Awaited<ReturnType<typeof native.execute>>;
+        if (page.kind === 'text') {
+          let text = page.text;
+          if (page.firstLineExceedsLimit) {
+            text = `[Line ${page.startLine} exceeds the ${DEFAULT_MAX_BYTES / 1024}KB read output limit. Use a byte-oriented file tool to inspect this line.]`;
+          } else if (!page.eof) {
+            text += `\n\n[Showing lines ${page.startLine}-${page.startLine + page.lineCount - 1}. Use offset=${page.nextOffset} to continue.]`;
+          }
+          return { content: [{ type: 'text', text }], details } as Awaited<ReturnType<typeof native.execute>>;
+        }
+        const imageBytes = Buffer.from(page.base64, 'base64');
+        if (!detectImageMimeType(imageBytes)) return { content: [{ type: 'text',
+          text: 'This image format is not supported by read. Use an image tool for this file.' }], details } as Awaited<ReturnType<typeof native.execute>>;
+        const image = createReadToolDefinition(cwd, { ...options, operations: bytesReadOperations(imageBytes) });
+        const result = await image.execute(toolCallId, anchoredParams, signal, onUpdate, ctx);
+        return { ...result, details: { ...result.details, ...details } } as Awaited<ReturnType<typeof native.execute>>;
+      }
       if (source.source === "disk") {
         if (typeof source.base64 !== "string") {
           throw new Error("Document read source did not return authorized disk bytes");

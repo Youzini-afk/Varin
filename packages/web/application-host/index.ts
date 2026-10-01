@@ -3605,6 +3605,7 @@ async function main(options: StartWebUiServerOptions = {}): Promise<WebUiServerC
       authorized,
       ctx.signal,
     ),
+    readAuthorizedDiskPage: (ctx, authorized, page) => harnessPathAuthority.readAuthorizedPage(ctx.actor, authorized, page, ctx.signal),
     readMaterialFile: async (ctx, authorized) => {
       ctx.signal.throwIfAborted();
       const before = await harnessPathAuthority.resolve(ctx.actor, authorized.inputPath, { allowMissing: true });

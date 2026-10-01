@@ -52,6 +52,7 @@ async function fixture(options: {
       documents.readAgentInputSnapshot(sessionId, context, resourceId, targetWorkspaceId)
     )),
     readAuthorizedDiskFile: (ctx, authorized) => paths.readAuthorizedFile(ctx.actor, authorized, ctx.signal),
+    readAuthorizedDiskPage: (ctx, authorized, page) => paths.readAuthorizedPage(ctx.actor, authorized, page, ctx.signal),
     documentSurfaceWrite: (sessionId, workspaceId, context, changes, signal) => (
       documents.applyAgentSurfaceWrite(sessionId, workspaceId, context, changes, signal)
     ),
@@ -72,7 +73,11 @@ async function fixture(options: {
     expect(path.dirname(path.resolve(root))).toBe(path.resolve(tmpdir()));
     await fs.rm(root, { recursive: true, force: true });
   });
-  const request = async (resourcePath: string, inputContext?: AgentInputContext) => {
+  type ReadResponse<T> = { ok: true; result: T } | { ok: false; error: { code: string; message: string } };
+  type Result = HarnessServiceMap['document.readSource']['result'];
+  async function request(resourcePath: string, inputContext?: AgentInputContext): Promise<ReadResponse<Exclude<Result, { page: import('@varin/protocol').DocumentReadPage }>>>;
+  async function request(resourcePath: string, inputContext: AgentInputContext | undefined, page: import('@varin/protocol').DocumentReadPageRequest): Promise<ReadResponse<Result>>;
+  async function request(resourcePath: string, inputContext?: AgentInputContext, page?: import('@varin/protocol').DocumentReadPageRequest) {
     await router.processEvent({
       kind: "host",
       actor,
@@ -82,7 +87,7 @@ async function fixture(options: {
         data: {
           requestId: crypto.randomUUID(),
           method: "document.readSource",
-          params: { path: resourcePath },
+          params: { path: resourcePath, ...(page ? { page } : {}) },
           ...(inputContext ? { inputContext } : {}),
         },
       },
@@ -90,7 +95,7 @@ async function fixture(options: {
     return response as
       | { ok: true; result: HarnessServiceMap["document.readSource"]["result"] }
       | { ok: false; error: { code: string; message: string } };
-  };
+  }
   const write = async (
     params: HarnessServiceMap["document.surfaceWrite"]["params"],
     inputContext?: AgentInputContext,
@@ -134,6 +139,20 @@ async function fixture(options: {
 }
 
 describe("native read source through Host router and Documents", () => {
+  it('pages the authorized disk target and immutable draft through the same router', async () => {
+    const f = await fixture();
+    await fs.writeFile(path.join(f.workspace, 'page.ts'), 'disk one\ndisk two\ndisk three\n');
+    const page = { offset: 2, limit: 1, maxBytes: 50 * 1024 };
+    const disk = await f.request('page.ts', undefined, page);
+    expect(disk).toMatchObject({ ok: true, result: { source: 'disk', page: { kind: 'text', text: 'disk two', nextOffset: 3 } } });
+    const fixed = await f.capture('page.ts', 'draft one\ndraft two\ndraft three\n', 1);
+    const draft = await f.request('page.ts', fixed, page);
+    expect(draft).toMatchObject({ ok: true, result: { source: 'surface-draft', page: { kind: 'text', text: 'draft two', nextOffset: 3 } } });
+    await fs.writeFile(path.join(f.workspace, 'data.parquet'), Buffer.from('PAR1\x00opaque'));
+    expect(await f.request('data.parquet', undefined, page)).toMatchObject({ ok: true,
+      result: { source: 'disk', page: { kind: 'binary', format: 'parquet' } } });
+  });
+
   it("matches equivalent resource casing when the workspace is case-insensitive", () => {
     const snapshots = createSurfaceSnapshotStore({ caseSensitive: false });
     const context = snapshots.capture({
