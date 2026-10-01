@@ -49,6 +49,7 @@ import {
 import { pathInRoots, type ExploreGraphRecall } from "./explore-graph.js";
 import type { StoredExploreQuery } from "./explore-query-store.js";
 import { actorFromHarness, exploreQueryActorsMatch } from "./explore-query-identity.js";
+import { sessionScopeId } from "./owner-scope.js";
 import {
   exploreResourceAtPath,
   loadExploreGraphRecall,
@@ -549,35 +550,36 @@ export function createExploreQueryStartService(
         let rerankConfigured = false;
         let fastDecision: StoredExploreQuery["fastDecision"];
         let decisionMode: HarnessExploreDecisionMode = "auto";
-        if (ctx.workspaceId) {
-          const snapshotSettings = await Promise.resolve(
-            host.harnessSettings?.(ctx.workspaceId) ?? null,
-          ).catch(() => null);
-          try {
-            const rawHarness = snapshotSettings?.global?.harness;
-            decisionMode = resolveHarnessCodeRetrievalSettings(
-              rawHarness && typeof rawHarness === "object" && !Array.isArray(rawHarness)
-                ? (rawHarness as { codeRetrieval?: unknown }).codeRetrieval : undefined,
-            ).decision;
-          } catch {
-            // An invalid external edit must not silently dispatch a paid judge.
-            decisionMode = "source";
-          }
-          try {
-            rerankConfigured = (decisionMode === "auto" || decisionMode === "rerank")
-              && rerankSettingsFromSnapshot(snapshotSettings) !== undefined;
-          } catch {
-            rerankConfigured = false;
-          }
-          // Fast Decision (D-312): freeze the resolved binding — including its
-          // credential-free configurationId — at query start. A settings edit
-          // applies to the next query, never this one.
-          if ((decisionMode === "auto" || decisionMode === "fast-decision") && host.fastDecision && host.fastDecisionStatus) {
-            const status = await host.fastDecisionStatus(ctx.workspaceId, "explore").catch(() => undefined);
-            fastDecision = resolveExploreFastDecision(status);
-          } else if (decisionMode === "auto" || decisionMode === "fast-decision") {
-            fastDecision = { status: "unavailable" };
-          }
+        // Inference bindings are global even when a session owns no project.
+        // This scope does not grant access to any additional resource root.
+        const inferenceScopeId = ctx.workspaceId ?? sessionScopeId(ctx.sessionId);
+        const snapshotSettings = await Promise.resolve(
+          host.harnessSettings?.(inferenceScopeId) ?? null,
+        ).catch(() => null);
+        try {
+          const rawHarness = snapshotSettings?.global?.harness;
+          decisionMode = resolveHarnessCodeRetrievalSettings(
+            rawHarness && typeof rawHarness === "object" && !Array.isArray(rawHarness)
+              ? (rawHarness as { codeRetrieval?: unknown }).codeRetrieval : undefined,
+          ).decision;
+        } catch {
+          // An invalid external edit must not silently dispatch a paid judge.
+          decisionMode = "source";
+        }
+        try {
+          rerankConfigured = (decisionMode === "auto" || decisionMode === "rerank")
+            && rerankSettingsFromSnapshot(snapshotSettings) !== undefined;
+        } catch {
+          rerankConfigured = false;
+        }
+        // Fast Decision (D-312): freeze the resolved binding — including its
+        // credential-free configurationId — at query start. A settings edit
+        // applies to the next query, never this one.
+        if ((decisionMode === "auto" || decisionMode === "fast-decision") && host.fastDecision && host.fastDecisionStatus) {
+          const status = await host.fastDecisionStatus(inferenceScopeId, "explore").catch(() => undefined);
+          fastDecision = resolveExploreFastDecision(status);
+        } else if (decisionMode === "auto" || decisionMode === "fast-decision") {
+          fastDecision = { status: "unavailable" };
         }
         const localUnits = resourceUnits.filter((unit) => unit.workspaceId === ctx.actor.workspaceId && !unit.external);
         const pinRoots = [...new Set(localUnits.map((unit) => unit.resourcePrefix === "." ? "" : unit.resourcePrefix))];
@@ -641,7 +643,7 @@ export function createExploreQueryStartService(
               run: stored.run,
               binding,
               call: (batch) => host.fastDecision!({
-                workspaceId: ctx.workspaceId!,
+                workspaceId: inferenceScopeId,
                 purpose: "explore",
                 settings: binding,
                 goal: batch.goal,
@@ -770,7 +772,7 @@ export function createExploreQueryFinishService(
     handle: async (params: ExploreQueryFinishParams & { model?: ExploreModelParticipation }, ctx) => {
       const stored = requireQuery(host, ctx, params.queryId, "finish");
       const model = params.model;
-      const workspaceId = ctx.workspaceId;
+      const inferenceScopeId = stored.workspaceId ?? sessionScopeId(stored.sessionId);
       const coverage = queryCoverage.get(stored);
       const packOptions = {
         ...options,
@@ -816,11 +818,11 @@ export function createExploreQueryFinishService(
         const shouldRerank = stored.decisionMode === "rerank"
           || (stored.decisionMode !== "llm" && stored.decisionMode !== "fast-decision"
             && stored.decisionMode !== "source" && exploreShouldRerank(model));
-        if (workspaceId && Date.now() < stored.deadlineAt && shouldRerank && host.rerankExploreViews && !fastDecisionActive) {
+        if (Date.now() < stored.deadlineAt && shouldRerank && host.rerankExploreViews && !fastDecisionActive) {
           let settings: ReturnType<typeof rerankSettingsFromSnapshot>;
           let settingsInvalid = false;
           try {
-            settings = rerankSettingsFromSnapshot(await host.harnessSettings?.(workspaceId) ?? null);
+            settings = rerankSettingsFromSnapshot(await host.harnessSettings?.(inferenceScopeId) ?? null);
           } catch {
             settingsInvalid = true;
             stored.run.applyRerank([], {
@@ -841,7 +843,7 @@ export function createExploreQueryFinishService(
               );
               if (documents.length > 0) {
                 const ranked = await host.rerankExploreViews({
-                  workspaceId,
+                  workspaceId: inferenceScopeId,
                   query: stored.run.question,
                   documents,
                   settings,

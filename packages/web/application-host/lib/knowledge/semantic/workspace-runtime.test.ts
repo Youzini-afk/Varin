@@ -85,6 +85,17 @@ async function setup(hooks: {
 }
 
 describe('production workspace semantic assembly lifecycle', () => {
+  it('reranks a projectless session through global inference without inspecting a document root', async () => {
+    const harness = await setup({});
+    const inspect = vi.spyOn(harness.documents.authority, 'inspectWorkspace');
+    await harness.runtime.rerankExploreViews({
+      workspaceId: 'session:projectless', query: 'q',
+      documents: [{ id: 'one', text: 'body' }], settings: rerank,
+    });
+    expect(harness.reranked).toEqual(['initial']);
+    expect(inspect).not.toHaveBeenCalledWith('session:projectless');
+    expect(harness.runtime.indexStatuses()).toEqual([]);
+  });
   it('keeps semantic indexing off outside selected directories without blocking other retrieval sources', async () => {
     const inventory = vi.fn(async () => []);
     const harness = await setup({ indexDirectories: [], searchFilesystemFiles: inventory });

@@ -2,6 +2,7 @@
  * OpenAI-compatible embeddings wire contract. Credentials are supplied by the
  * caller; this module never persists them.
  */
+import { setTimeout as delay } from "node:timers/promises";
 
 export interface OpenAICompatibleEmbeddingsRequest {
   baseUrl: string;
@@ -12,6 +13,8 @@ export interface OpenAICompatibleEmbeddingsRequest {
   dimensions?: number;
   signal?: AbortSignal;
   fetchImpl?: typeof fetch;
+  /** Additional attempts for temporary HTTP failures; defaults to two. */
+  maxRetries?: number;
 }
 
 export interface OpenAICompatibleEmbeddingsResponse {
@@ -27,6 +30,17 @@ const isRecord = (value: unknown): value is Record<string, unknown> => (
 const embeddingsUrl = (baseUrl: string): string => {
   const trimmed = baseUrl.replace(/\/+$/u, "");
   return trimmed.endsWith("/embeddings") ? trimmed : `${trimmed}/embeddings`;
+};
+
+const retryWait = async (milliseconds: number, signal?: AbortSignal): Promise<void> => {
+  const deadline = Date.now() + milliseconds;
+  do {
+    signal?.throwIfAborted();
+    // Node overflows larger timers into a 1ms delay. Split the wait rather
+    // than shortening the provider's Retry-After instruction.
+    await delay(Math.min(Math.max(0, deadline - Date.now()), 2_147_483_647), undefined,
+      signal ? { signal } : {});
+  } while (Date.now() < deadline);
 };
 
 const finiteVector = (value: unknown): number[] | undefined => {
@@ -50,13 +64,17 @@ export async function requestOpenAICompatibleEmbeddings(
   request: OpenAICompatibleEmbeddingsRequest,
 ): Promise<OpenAICompatibleEmbeddingsResponse> {
   const fetchImpl = request.fetchImpl ?? fetch;
+  const maxRetries = request.maxRetries ?? 2;
+  if (!Number.isSafeInteger(maxRetries) || maxRetries < 0) {
+    throw new Error('Embedding maxRetries must be a nonnegative integer');
+  }
   const body: Record<string, unknown> = {
     model: request.model,
     input: request.input,
     encoding_format: "float",
   };
   if (request.dimensions !== undefined) body.dimensions = request.dimensions;
-  const response = await fetchImpl(embeddingsUrl(request.baseUrl), {
+  const init: RequestInit = {
     method: "POST",
     headers: {
       "Content-Type": "application/json",
@@ -65,7 +83,23 @@ export async function requestOpenAICompatibleEmbeddings(
     },
     body: JSON.stringify(body),
     ...(request.signal ? { signal: request.signal } : {}),
-  });
+  };
+  // A transient gateway failure must not discard a whole long-running index.
+  // Retry the identical batch; persistent errors still reach the caller.
+  let response: Response;
+  for (let attempt = 0; ; attempt++) {
+    request.signal?.throwIfAborted();
+    response = await fetchImpl(embeddingsUrl(request.baseUrl), init);
+    if (attempt >= maxRetries || (response.status !== 429 && (response.status < 500 || response.status > 599))) break;
+    const retryAfter = response.headers.get("retry-after");
+    const seconds = retryAfter?.trim() ? Number(retryAfter) : NaN;
+    const date = retryAfter === null ? NaN : Date.parse(retryAfter);
+    const waitMs = Number.isFinite(seconds * 1000) && seconds >= 0 ? seconds * 1000
+      : Number.isFinite(date) ? Math.max(0, date - Date.now()) : 500 * 2 ** attempt;
+    console.warn(`[Embedding] HTTP ${response.status}; retry ${attempt + 1}/${maxRetries}`);
+    await response.body?.cancel().catch(() => undefined);
+    await retryWait(waitMs, request.signal);
+  }
   if (!response.ok) {
     // Provider messages can echo input or credentials. Keep only a short,
     // machine-readable code and request shape in diagnostics.

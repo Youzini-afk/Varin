@@ -94,6 +94,43 @@ describe("explore query services", () => {
     } finally { store.dispose(); outputStore.dispose(); }
   });
 
+  it("uses configured rerank in a projectless session without assigning it a project", async () => {
+    const store = createExploreQueryStore();
+    const outputStore = createOutputStore();
+    const cwd = resolve("workspace/projectless");
+    const ctx = { ...context({ source: "disk" }), workspaceId: null,
+      actor: { ...actor, workspaceId: null, cwd, authorityRoot: cwd } };
+    const harnessSettings = vi.fn(async () => ({
+      global: { harness: { codeRetrieval: { decision: "rerank" },
+        rerank: { protocol: "http-rerank", providerId: "remote", modelId: "ranking" } } },
+      globalRevision: "1", project: {}, projectRevision: "1", projectTrusted: false,
+    }));
+    const rerankExploreViews = vi.fn(async (input: { documents: Array<{ id: string }> }) => ({
+      batchId: "rank", providerId: "remote", modelId: "ranking",
+      scores: input.documents.map((document, index) => ({ id: document.id, index, score: 1 })),
+    }));
+    const host = { exploreQueryStore: store, outputStore, harnessSettings, rerankExploreViews,
+      searchService: {
+        resolveScopeRoot: async () => ({ workspaceId: "resource-root", root: cwd }),
+        resolveWorkspaceRoot: async () => cwd,
+        search: async () => ({ status: "ready", partial: false,
+          files: [{ path: resolve(cwd, "a.ts"), hits: [{ line: 1, text: "needle" }] }] }),
+      },
+      readExploreFile: async () => ({ status: "ready", content: "needle", revision: "r1", source: "disk" }),
+    } as unknown as HarnessServiceHost;
+    try {
+      const started = await createExploreQueryStartService(host).handle({ question: "needle" }, ctx);
+      expect(started.decisionMode).toBe("rerank");
+      await createExploreQueryViewsService(host).handle({ queryId: started.queryId }, ctx);
+      const result = await createExploreQueryFinishService(host).handle({ queryId: started.queryId,
+        model: { plan: "disabled", select: "disabled", followup: "disabled" } }, ctx);
+      expect(result.details.model?.rerank).toBe("used");
+      expect(harnessSettings).toHaveBeenCalledWith("session:test-session");
+      expect(rerankExploreViews).toHaveBeenCalledWith(expect.objectContaining({ workspaceId: "session:test-session" }));
+      expect(store.get(actor.sessionId, started.queryId)?.workspaceId).toBeNull();
+    } finally { store.dispose(); outputStore.dispose(); }
+  });
+
   it("keeps the direct explore.search contract full while query.finish uses summaries", async () => {
     const outputStore = createOutputStore();
     const paths = Array.from({ length: 9 }, (_, index) => `candidate-${index}.ts`);

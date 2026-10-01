@@ -88,6 +88,44 @@ describe("research root runtime", () => {
     for (const directory of dataDirs.splice(0)) rmSync(directory, { recursive: true, force: true });
   });
 
+  it("forwards cancellation while an earlier service request is still executing", async () => {
+    const dataDir = mkdtempSync(join(tmpdir(), "varin-root-cancel-"));
+    dataDirs.push(dataDir);
+    const current = snapshot("code");
+    const runtime = createResearchRootRuntime({
+      registry: createThreadRegistry({ dataDir, hostId: "host" }),
+      getSessionSnapshot: () => current,
+      sessions: {
+        snapshot: async () => current,
+        stats: async () => stats(),
+        entries: async () => ({ scope: "branch", entries: [], leafId: null, sessionId: SESSION }),
+      },
+    });
+    let enter!: () => void;
+    let release!: () => void;
+    const entered = new Promise<void>((resolve) => { enter = resolve; });
+    const released = new Promise<void>((resolve) => { release = resolve; });
+    const pending = runtime.processEvent({
+      kind: "host", sessionId: SESSION,
+      envelope: { kind: "event", event: "harness.request", data: { method: "explore.query.start", requestId: "slow" } },
+    }, async () => { enter(); await released; });
+    await entered;
+    let cancelled = false;
+    try {
+      const cancellation = runtime.processEvent({
+        kind: "host", sessionId: SESSION,
+        envelope: { kind: "event", event: "harness.cancel", data: { requestId: "slow" } },
+      }, () => { cancelled = true; release(); });
+      // Must reach the router without waiting on the service's completion.
+      expect(cancelled).toBe(true);
+      await cancellation;
+    } finally {
+      release();
+      await pending;
+      await runtime.dispose();
+    }
+  });
+
   it("binds before forwarding execution events, reuses one root, and never tombstones the user session", async () => {
     const dataDir = mkdtempSync(join(tmpdir(), "varin-research-root-"));
     dataDirs.push(dataDir);

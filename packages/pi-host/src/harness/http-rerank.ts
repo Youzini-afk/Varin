@@ -5,7 +5,7 @@
  * POST {baseUrl}{endpoint}
  * {
  *   model, query,
- *   documents: [{ id, text }],
+ *   documents: [text],
  *   return_documents: false
  * }
  * {
@@ -60,7 +60,9 @@ export async function requestHttpRerank(request: HttpRerankRequest): Promise<Htt
     body: JSON.stringify({
       model: request.model,
       query: request.query,
-      documents: request.documents.map((document) => ({ id: document.id, text: document.text })),
+      // HTTP rerank providers receive text strings. Keep our source identities
+      // client-side and bind each returned index back to the submitted document.
+      documents: request.documents.map((document) => document.text),
       return_documents: false,
     }),
     ...(request.signal ? { signal: request.signal } : {}),

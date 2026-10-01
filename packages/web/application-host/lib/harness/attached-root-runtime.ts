@@ -328,6 +328,11 @@ export function createAttachedRootRuntime(options: AttachedRootRuntimeOptions) {
     event: BrokerEventLike,
     forward: () => Promise<void> | void,
   ): Promise<void> => {
+    // A service request can be waiting for this very cancellation. Queuing the
+    // cancel behind its forward() would prevent the router from aborting it.
+    // Cancellation does not attach or mutate root-thread lifecycle state.
+    if (event.kind === "host" && event.envelope?.kind === "event"
+      && event.envelope.event === "harness.cancel") return Promise.resolve(forward());
     const sessionId = event.sessionId;
     if (!sessionId) return Promise.resolve(forward());
     return enqueue(sessionId, async () => {

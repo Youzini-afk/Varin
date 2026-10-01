@@ -430,7 +430,7 @@ export function createWorkspaceSemanticRuntime(options: WorkspaceSemanticRuntime
   ).snapshot;
   const rerankExploreViews: NonNullable<HarnessServiceHost['rerankExploreViews']> = async (input) => {
     input.signal?.throwIfAborted();
-    const state = await waitWithSignal(getWorkspace(input.workspaceId), input.signal);
+    const state = await waitWithSignal(getWorkspace(inferenceScopeId(input.workspaceId)), input.signal);
     const broker = options.getBroker();
     if (!broker) throw new Error('Pi workspace binding is unavailable');
     const configured = state.binding.rerank.status === 'ready' ? state.binding.rerank.binding : undefined;
