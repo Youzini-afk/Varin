@@ -1,4 +1,4 @@
-/** Cancels a caller's wait without changing the lifetime of shared work. */
+/** Shared Host cancellation: stop a caller's wait without cancelling shared work. */
 export const isAbortError = (error: unknown): boolean => (
   error instanceof Error && error.name === 'AbortError'
 );

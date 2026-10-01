@@ -10,7 +10,7 @@ import type { SemanticEmbedder } from "../semantic/embedder.js";
 import type { EmbedScheduler } from "../semantic/embed-scheduler.js";
 import { spaceIdOf } from "../semantic/identity.js";
 import type { SemanticVectorCache } from "../semantic/vector-cache.js";
-import { waitWithSignal } from "../semantic/cancellation.js";
+import { waitWithSignal } from "../../cancellation.js";
 import { packPlainText } from "../semantic/chunker.js";
 import type { Knowledge, KnowledgeScope, KnowledgeStore, NodeId } from "../store.js";
 import {

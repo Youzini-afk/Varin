@@ -2,7 +2,7 @@ import type { HarnessActorIdentity, PiSettingsSnapshot } from "@varin/protocol";
 import type { HarnessServiceHost, HarnessSessionContext } from "./service-host.js";
 import { HarnessShellSettingsError, resolveHarnessShellSetting } from "./harness-shell-settings.js";
 import { resolveHarnessWebBinding } from "./harness-web-settings.js";
-import { waitWithSignal } from "../knowledge/semantic/cancellation.js";
+import { waitWithSignal } from "../cancellation.js";
 
 const sameGeneration = (a: HarnessActorIdentity, b: HarnessActorIdentity): boolean => (
   a.authorityInstanceId === b.authorityInstanceId && a.sessionId === b.sessionId

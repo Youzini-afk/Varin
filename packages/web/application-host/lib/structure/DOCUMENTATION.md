@@ -15,6 +15,10 @@ in a renderer and is not a language-server replacement.
 - Text binding for the LSP provider reuses `createLanguageViewBinder`. Explore
   calls it with `text: "input-context"` (this turn's fixed draft, otherwise disk).
   A dirty path whose draft is unavailable does not fall back to disk.
+- The outline signal reaches text resolution, shared language activation, binding and the individual
+  document-symbol RPC. Cancellation detaches this waiter from shared activation and cancels its own RPC;
+  it does not retire a language session that other callers may be using. Explore can retain versioned
+  text windows when optional structure has not finished.
 - Revisions are hard: every request names a revision, every result names the
   revision it used. A mismatch is `stale`, never a silent reuse of an older
   outline on newer text.

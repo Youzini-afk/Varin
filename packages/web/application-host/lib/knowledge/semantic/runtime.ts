@@ -25,7 +25,7 @@ import {
   type SemanticOverlayBlock,
 } from "./store.js";
 import { createVectorCache, type SemanticVectorCache } from "./vector-cache.js";
-import { isAbortError, waitWithSignal } from "./cancellation.js";
+import { isAbortError, waitWithSignal } from "../../cancellation.js";
 
 const STRUCTURAL_LANGUAGES: ReadonlySet<string> = new Set(Object.keys(TREE_SITTER_LANGUAGE_SPECS));
 const semanticLanguage = (file: string): string | null => languageIdForPath(file);

@@ -17,6 +17,39 @@ const fixtureProvider = (overrides: { env?: NodeJS.ProcessEnv; languageIds?: str
 });
 
 describe("createLspStructureProvider", () => {
+  it('cancels an outline waiting for shared provider activation without retiring that provider', async () => {
+    const harness = await createDocumentAuthorityHarness();
+    let release!: () => void;
+    let entered!: () => void;
+    const activation = new Promise<void>(resolve => { release = resolve; });
+    const activationEntered = new Promise<void>(resolve => { entered = resolve; });
+    const language = createLanguageSupervisor({
+      documents: harness.authority, spawn, pathModule: path, isTrusted: async () => true,
+      activateProviders: async () => { entered(); await activation; },
+    });
+    try {
+      await fs.writeFile(path.join(harness.workspaceRoot, 'note.ts'), 'fixture\nchild\nend\n');
+      const snapshot = await harness.authority.read(harness.resource('note.ts'));
+      if (snapshot.status !== 'ready') throw new Error('expected disk snapshot');
+      const provider = createLspStructureProvider({ documents: harness.authority, supervisor: language });
+      const request = { path: 'note.ts', languageId: 'typescript', text: snapshot.content,
+        revision: snapshot.revision, workspaceId: harness.identity.workspaceId };
+      const controller = new AbortController();
+      const outline = provider.outline({ ...request, signal: controller.signal });
+      await activationEntered;
+      const cancelled = expect(outline).rejects.toMatchObject({ name: 'AbortError' });
+      controller.abort();
+      await cancelled;
+      language.registerProvider(fixtureProvider());
+      release();
+      expect(await provider.outline(request)).toMatchObject({ status: 'ready', revision: snapshot.revision });
+    } finally {
+      release();
+      await language.dispose();
+      await harness.cleanup();
+    }
+  });
+
   it("returns a ready outline with signature and full span from agent-view documentSymbols", async () => {
     const harness = await createDocumentAuthorityHarness();
     const language = createLanguageSupervisor({

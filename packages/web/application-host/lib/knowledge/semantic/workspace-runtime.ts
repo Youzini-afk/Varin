@@ -9,7 +9,7 @@ import type { createWorkingBranchLookups } from '../../harness/working-state/wor
 import type { ThreadExecutionViewRegistry } from '../../harness/working-state/execution-view.js';
 import { createSemanticBackend } from './backend.js';
 import type { SemanticEmbedder } from './embedder.js';
-import { isAbortError, waitWithSignal } from './cancellation.js';
+import { isAbortError, waitWithSignal } from '../../cancellation.js';
 import { workspaceScope } from './identity.js';
 import { pinSemanticQueryView, type SemanticDraftReadResult } from './query-view.js';
 import { createSemanticIndexRuntime, resolveSemanticScanRoots, type SemanticIndexRuntimeOptions } from './runtime.js';

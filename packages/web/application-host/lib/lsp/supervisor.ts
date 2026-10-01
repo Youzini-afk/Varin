@@ -1,4 +1,5 @@
 import path from 'node:path';
+import { waitWithSignal } from '../cancellation.js';
 import type {
   SpawnOptionsWithStdioTuple,
   StdioPipe,
@@ -866,7 +867,8 @@ export const createLanguageSupervisor = ({
     idleTimer.unref?.();
   };
 
-  const syncDocument = async (request: LanguageRequest) => {
+  const syncDocument = async (request: LanguageRequest, options: { signal?: AbortSignal } = {}) => {
+    options.signal?.throwIfAborted();
     const languageId = request.languageId;
     const workspaceId = request.resource?.workspaceId;
     const resourceId = request.resource?.resourceId;
@@ -879,7 +881,7 @@ export const createLanguageSupervisor = ({
       : 0;
     let absolutePath;
     try {
-      const inspected = await documents.inspectWorkspace(workspaceId);
+      const inspected = await waitWithSignal(documents.inspectWorkspace(workspaceId), options.signal);
       const resolved = pathModule.resolve(inspected.root, resourceId);
       const relative = pathModule.relative(inspected.root, resolved);
       if (!relative || relative.startsWith('..') || pathModule.isAbsolute(relative)) {
@@ -887,6 +889,7 @@ export const createLanguageSupervisor = ({
       }
       absolutePath = resolved;
     } catch (error) {
+      options.signal?.throwIfAborted();
       return { status: 'failed', message: error instanceof Error ? error.message : 'Workspace is unavailable' };
     }
 
@@ -950,7 +953,8 @@ export const createLanguageSupervisor = ({
       usedAt: now(),
     };
 
-    const record = await ensureSession(workspaceId, languageId, view);
+    const record = await waitWithSignal(ensureSession(workspaceId, languageId, view), options.signal);
+    options.signal?.throwIfAborted();
     if (!record) return { status: 'absent' };
     if (record.status === 'failed' || !record.rpc) {
       return { status: 'failed', message: record.message || 'Language server is unavailable' };
@@ -1111,14 +1115,16 @@ export const createLanguageSupervisor = ({
     method: string,
     request: LanguageRequest,
     mapResult: FeatureMapper,
-    options: { params?: unknown } = {},
+    options: { params?: unknown; signal?: AbortSignal } = {},
   ) => {
+    options.signal?.throwIfAborted();
     const languageId = request.languageId;
     const workspaceId = request.resource?.workspaceId;
     const resourceId = request.resource?.resourceId;
     const view = asView(request.view);
     if (!workspaceId || !languageId) return { status: 'absent', ...(workspaceId ? { workspaceId } : {}), ...(languageId ? { languageId } : {}) };
-    const record = await ensureSession(workspaceId, languageId, view);
+    const record = await waitWithSignal(ensureSession(workspaceId, languageId, view), options.signal);
+    options.signal?.throwIfAborted();
     if (!record) return { status: 'absent', workspaceId, languageId };
     if (!findProvider(workspaceId, languageId) && record.status !== 'failed') {
       return { status: 'absent', workspaceId, languageId };
@@ -1156,7 +1162,7 @@ export const createLanguageSupervisor = ({
     if (open) open.usedAt = now();
     let uri;
     if (resourceId) {
-      const inspected = await documents.inspectWorkspace(workspaceId);
+      const inspected = await waitWithSignal(documents.inspectWorkspace(workspaceId), options.signal);
       const resolved = pathModule.resolve(inspected.root, resourceId);
       const relative = pathModule.relative(inspected.root, resolved);
       if (!relative || relative.startsWith('..') || pathModule.isAbsolute(relative)) {
@@ -1166,7 +1172,7 @@ export const createLanguageSupervisor = ({
     }
     const params = options.params ?? featureParams(method, request, uri);
     try {
-      const raw = await record.rpc.request(method, params);
+      const raw = await record.rpc.request(method, params, options.signal);
       if (sessions.get(sessionKey(workspaceId, languageId, view)) !== record) {
         return staleResult('generation');
       }
@@ -1193,6 +1199,7 @@ export const createLanguageSupervisor = ({
         value: mapResult(raw, record),
       };
     } catch (error) {
+      options.signal?.throwIfAborted();
       if (error instanceof LanguageMappingError) {
         return featureFailure(record, error.message, error.reason);
       }
@@ -1440,9 +1447,9 @@ export const createLanguageSupervisor = ({
         }).filter(Boolean);
       }, { params: { item: raw } });
     },
-    documentSymbols: (request: LanguageRequest) => requestFeature('textDocument/documentSymbol', request, (raw, record) => (
+    documentSymbols: (request: LanguageRequest, options: { signal?: AbortSignal } = {}) => requestFeature('textDocument/documentSymbol', request, (raw, record) => (
       mapSymbols(raw, mappingContext(record))
-    )),
+    ), options),
     workspaceSymbols: (request: LanguageRequest) => requestFeature('workspace/symbol', request, (raw, record) => (
       mapSymbols(raw, mappingContext(record))
     )),

@@ -22,7 +22,7 @@ import type { SemanticChunk } from "./chunker.js";
 import { pathInRoots, rootsAreRestricted } from "../../workspace/path-scope.js";
 import { embedTextKey } from "./identity.js";
 import { createVectorCache, type SemanticVectorCache } from "./vector-cache.js";
-import { waitWithSignal } from "./cancellation.js";
+import { waitWithSignal } from "../../cancellation.js";
 import type { EmbedPriority, EmbedScheduler } from "./embed-scheduler.js";
 
 const require = createRequire(import.meta.url);

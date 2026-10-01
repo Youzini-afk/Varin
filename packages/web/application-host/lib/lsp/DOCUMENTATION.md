@@ -33,6 +33,14 @@ and acknowledges progress setup. Unsolicited `workspace/applyEdit` is rejected: 
 Documents. A pending preparation belongs to the session's launch cancellation and cannot spawn after
 the workspace is disposed.
 
+Internal `syncDocument` and `documentSymbols` calls accept a separate `{ signal }` option, kept out of
+the public JSON request. Text binding and session activation can stop this caller's wait without retiring
+shared language startup. An active document-symbol request passes the signal into JSON-RPC: its waiter
+and abort listener are released, a `$/cancelRequest` notification names that request ID, and late responses
+are ignored. Other requests remain active; cancellation does not degrade or restart the shared server.
+The peer can ignore cancellation, so returning from the caller's wait is not proof that server work has
+terminated. The notification follows the [LSP cancellation contract](https://github.com/microsoft/language-server-protocol/blob/gh-pages/_specifications/lsp/3.17/specification.md#cancellation-support-arrow_right-arrow_left).
+
 ## Views
 
 A session is keyed by `(workspaceId, languageId, viewId)` because one server cannot be both the

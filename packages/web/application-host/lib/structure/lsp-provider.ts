@@ -136,6 +136,7 @@ export function createLspStructureProvider(options: LspStructureProviderOptions)
         text: "input-context",
         ...(request.sessionId ? { sessionId: request.sessionId } : {}),
         ...(request.inputContext ? { inputContext: request.inputContext } : {}),
+        ...(request.signal ? { signal: request.signal } : {}),
       });
       if (bound.status !== "bound") {
         return { status: "unavailable", provider: "lsp", revision: request.revision, symbols: [], message: bound.message };
@@ -146,12 +147,15 @@ export function createLspStructureProvider(options: LspStructureProviderOptions)
       if (request.signal?.aborted) {
         return { status: "cancelled", provider: "lsp", revision: request.revision, symbols: [], message: "Structure request was cancelled." };
       }
-      const response = recordOf(await options.supervisor.documentSymbols({
+      const symbolsRequest = {
         view: AGENT_LANGUAGE_VIEW,
         resource: { workspaceId: request.workspaceId, resourceId: request.path },
         languageId,
         expectedRevision: request.revision,
-      }));
+      };
+      const response = recordOf(await (request.signal
+        ? options.supervisor.documentSymbols(symbolsRequest, { signal: request.signal })
+        : options.supervisor.documentSymbols(symbolsRequest)));
       const status = mapOutlineStatus(response, request.revision);
       if (status !== "ready") {
         return {

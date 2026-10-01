@@ -864,6 +864,15 @@ graph enrichment. The store's timer may fire while one of those stages is awaiti
 does not depend on the pump reaching its next loop turn first. Explicit query/request cancellation and
 an abort before the source deadline remain cancellations, never successful partial results.
 
+Candidate preparation uses the existing read slots as a worker pool. Each completed slot takes the next
+scheduled file without waiting for the slowest member of a fixed batch. Acquired document text first produces
+revision-checked lexical windows; an available outline then upgrades those windows before optional hit and
+relation classification. A deadline preserves the last valid stage, including an earlier complete window when
+later evidence is being refreshed. Requests interrupted during preparation have an explicit unavailable issue;
+they are not counted among candidates that were never requested. Source scopes, candidate ordering and read
+budgets are unchanged. The shared cancellation helper bounds waits on document/structure dependencies and
+does not publish a late result after the caller has stopped.
+
 `explore.search` asks an optional `structureSource` (see
 `lib/structure/DOCUMENTATION.md`) for a revision-bound outline after a file is
 materialized. Production tries tree-sitter, then the agent-view LSP outline.

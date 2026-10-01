@@ -55,12 +55,32 @@ export const createJsonRpcClient = ({
   };
 
   return {
-    request(method: string, params: unknown): Promise<unknown> {
+    request(method: string, params: unknown, signal?: AbortSignal): Promise<unknown> {
+      if (signal?.aborted) return Promise.reject(signal.reason);
       const id = nextId;
       nextId += 1;
       return new Promise<unknown>((resolve, reject) => {
-        pending.set(id, { resolve, reject });
-        writeContentLengthMessage(output, { jsonrpc: '2.0', id, method, params });
+        const cleanup = (): void => signal?.removeEventListener('abort', abort);
+        const abort = (): void => {
+          if (!pending.delete(id)) return;
+          cleanup();
+          try {
+            writeContentLengthMessage(output, { jsonrpc: '2.0', method: '$/cancelRequest', params: { id } });
+          } catch { /* A closed connection cannot receive cancellation. */ }
+          reject(signal?.reason);
+        };
+        pending.set(id, {
+          resolve: (value) => { cleanup(); resolve(value); },
+          reject: (error) => { cleanup(); reject(error); },
+        });
+        signal?.addEventListener('abort', abort, { once: true });
+        try {
+          writeContentLengthMessage(output, { jsonrpc: '2.0', id, method, params });
+        } catch (error) {
+          pending.delete(id);
+          cleanup();
+          reject(error);
+        }
       });
     },
     notify(method: string, params: unknown): void {

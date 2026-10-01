@@ -17,6 +17,52 @@ const reclaim = [
 ].join("\n");
 
 describe("explore query run", () => {
+  it.each(['read', 'outline'] as const)('prepares later C# candidates while a documentation %s is blocked', async (stage) => {
+    const controller = new AbortController();
+    let clock = 0;
+    let release!: () => void;
+    const blocked = new Promise<void>((resolve) => { release = resolve; });
+    const paths = ['docs/a.md', 'docs/b.md', 'docs/c.md', 'src/Panel.cs'];
+    const readPaths: string[] = [];
+    const run = createExploreQueryRun({ question: 'needle', limit: 4 }, {
+      rgSearch: async () => paths.map(path => ({ path, line: 1,
+        text: path.endsWith('.cs') ? 'class Panel { int needle = 42; }' : 'needle documentation' })),
+      readFile: async (path) => {
+        readPaths.push(path);
+        if (path === 'docs/a.md' && stage === 'read') await blocked;
+        return ready(path.endsWith('.cs') ? 'class Panel { int needle = 42; }' : 'needle documentation');
+      },
+      structure: {
+        outline: async (request) => {
+          if (request.path === 'docs/a.md' && stage === 'outline') await blocked;
+          return { status: 'unsupported', provider: null, revision: request.revision, symbols: [] };
+        },
+        classifyHits: async (request) => ({ status: 'unsupported', provider: null, revision: request.revision, hits: [] }),
+        literalCalls: async (request) => ({ status: 'unsupported', provider: null, revision: request.revision, calls: [] }),
+      },
+    }, { controller, now: () => clock, deadlineAt: 100 });
+    try {
+      run.start();
+      // Flush the immediate producers without releasing the slow dependency.
+      await new Promise<void>((resolve) => setImmediate(resolve));
+      expect(readPaths).toContain('src/Panel.cs');
+      expect(run.viewsForModel().views.some(view => view.path === 'src/Panel.cs')).toBe(true);
+      clock = 100;
+      controller.abort();
+      await run.waitForViews();
+      const result = run.finish();
+      expect(result.snippets.some(snippet => snippet.path === 'src/Panel.cs' && snippet.text.includes('42'))).toBe(true);
+      expect(result.snippets.some(snippet => snippet.path === 'docs/b.md')).toBe(true);
+      if (stage === 'outline') expect(result.snippets.some(snippet => snippet.path === 'docs/a.md')).toBe(true);
+      expect(result.notRequested.paths).not.toContain('docs/a.md');
+      expect(result.issues).toContainEqual(expect.objectContaining({ path: 'docs/a.md', status: 'unavailable', message: expect.stringContaining('deadline') }));
+      expect(result.partial).toBe(true);
+    } finally {
+      release();
+      run.cancel();
+    }
+  });
+
   it("builds catalog vocab packages and entries from already-open paths", () => {
     const vocab = vocabFromCatalog({
       symbolCount: 12,

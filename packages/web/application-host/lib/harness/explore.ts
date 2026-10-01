@@ -1,5 +1,6 @@
 import { languageIdForPath, type ExploreArrival, type ExploreAssessment, type ExploreDistinctivenessDetails, type ExploreFastDecisionDetails, type ExploreGraphDetails, type ExploreGraphStatus, type ExploreGroupedSearchPlan, type ExploreIndexLifecycle, type ExploreModelParticipation, type ExplorePurpose, type ExploreQueryAction, type ExploreQueryFollowupParams, type ExploreQuerySelectResult, type ExploreQuerySelectionGroup, type ExploreQuerySourceState, type ExploreQueryView, type ExploreQueryVocab, type ExploreRerankDetails, type ExploreRerankScore, type ExploreSemanticCoverage, type ExploreSemanticDetails, type ExploreSemanticGap, type ExploreSemanticStatus, type ExploreTermCoverage, type ExploreWindowTrace, type HarnessServiceMap } from "@varin/protocol";
 import type { ExploreFileSnapshot } from "./explore-file-reader.js";
+import { waitWithSignal } from "../cancellation.js";
 import { SMALL_STRUCTURE_SPAN_LINES } from "../structure/constants.js";
 import { classifyLiteralCall } from "../structure/connections.js";
 import { outlineUsableForText, sliceStructureWindows } from "../structure/slice.js";
@@ -901,14 +902,14 @@ async function classifyPreparedWindows(
   if (lines.length === 0) return windows;
   try {
     signal.throwIfAborted();
-    const classified = await deps.structure.classifyHits({
+    const classified = await waitWithSignal(deps.structure.classifyHits({
       path,
       languageId: languageIdForPath(path),
       text: snapshot.content,
       revision: snapshot.revision,
       lines,
       signal,
-    });
+    }), signal);
     signal.throwIfAborted();
     if (classified.status !== "ready") return windows;
     const byLine = new Map(classified.hits.map((hit) => [hit.line, hit.class]));
@@ -958,13 +959,13 @@ async function verifyMaterializedRelations(
   }
   try {
     signal.throwIfAborted();
-    const calls = await deps.structure.literalCalls({
+    const calls = await waitWithSignal(deps.structure.literalCalls({
       path,
       languageId: languageIdForPath(path),
       text: snapshot.content,
       revision: snapshot.revision,
       signal,
-    });
+    }), signal);
     signal.throwIfAborted();
     if (calls.status !== "ready") return weakenUnverifiedConnectionWhy(windows, objects);
     const verified: Array<{ line: number; name: string; literal: string; kind: "connects" | "associates" }> = [];
@@ -1214,14 +1215,14 @@ async function outlineForSnapshot(
   if (!deps.structure) return { status: "not-requested", provider: null };
   try {
     signal.throwIfAborted();
-    const result = await deps.structure.outline({
+    const result = await waitWithSignal(deps.structure.outline({
       path,
       languageId: languageIdForPath(path),
       text: snapshot.content,
       revision: snapshot.revision,
       signal,
       hitLines,
-    });
+    }), signal);
     signal.throwIfAborted();
     return result;
   } catch (error) {
@@ -1783,39 +1784,49 @@ export function createExploreQueryRun(
     });
   };
 
-  const materializeBatch = async (batch: readonly RankedCandidate[]): Promise<void> => {
-    const snapshotsNeeded = await Promise.all(batch.map(async (candidate) => {
-      signal.throwIfAborted();
-      const cached = snapshots.get(candidate.path);
-      if (cached) return [candidate, cached] as const;
-      try {
-        const snapshot = await deps.readFile(candidate.path);
-        snapshots.set(candidate.path, snapshot);
-        return [candidate, snapshot] as const;
-      } catch {
-        signal.throwIfAborted();
-        const failed = { status: "failed" as const, message: "Document read failed. Search again or inspect workspace availability." };
-        snapshots.set(candidate.path, failed);
-        return [candidate, failed] as const;
-      }
-    }));
+  const materializeCandidate = async (candidate: RankedCandidate): Promise<void> => {
     signal.throwIfAborted();
-    for (const [candidate, snapshot] of snapshotsNeeded) {
-      readPaths.add(candidate.path);
+    readPaths.add(candidate.path);
+    let snapshot = snapshots.get(candidate.path);
+    try {
+      if (!snapshot) {
+        try {
+          snapshot = await waitWithSignal(deps.readFile(candidate.path), signal);
+          signal.throwIfAborted();
+        } catch {
+          signal.throwIfAborted();
+          snapshot = { status: "failed", message: "Document read failed. Search again or inspect workspace availability." };
+        }
+        snapshots.set(candidate.path, snapshot);
+      }
       if (snapshot.status !== "ready") {
         issues.push({ path: candidate.path, status: snapshot.status, message: snapshot.message });
         markProvenance(candidate.path, snapshot.status, snapshot);
-        continue;
+        return;
       }
       await buildWindowsFrom(candidate.path, snapshot, candidate.evidence);
+    } catch (error) {
+      if (error instanceof Error && error.name === 'AbortError' && terminal === 'active' && remainingMs() <= 0) {
+        // This path was requested, but did not finish preparing. Do not report
+        // an in-flight read/outline as a candidate that was never requested.
+        if (!prepared.some(window => window.path === candidate.path)) markProvenance(candidate.path, 'unavailable', snapshot);
+        issues.push({ path: candidate.path, status: 'unavailable', message: 'Candidate preparation stopped at the retrieval source deadline.' });
+      }
+      throw error;
     }
+  };
+
+  const materializeBatch = async (batch: readonly RankedCandidate[]): Promise<void> => {
+    const settled = await Promise.allSettled(batch.map(materializeCandidate));
+    const failed = settled.find(result => result.status === 'rejected');
+    if (failed?.status === 'rejected') throw failed.reason;
   };
 
   /**
    * Turn one already-acquired snapshot into windows against the evidence this
    * file carries *now*. Safe to run again on the same snapshot: the snapshot
-   * cache means no disk read, and the structure providers key their parse cache
-   * on the content hash, so a second pass over the same text is a cache hit.
+   * cache means no additional Document read; structure still binds the same
+   * source revision even when later evidence changes the requested ranges.
    */
   const buildWindowsFrom = async (
     path: string,
@@ -1845,6 +1856,26 @@ export function createExploreQueryRun(
       ...evidence.hits.keys(),
       ...evidence.semanticClues.map((clue) => clue.startLine),
     ].filter((line) => Number.isSafeInteger(line) && line >= 1);
+    const initialWeights = weightByGroupId(groups, buildTermWeightTable(groups, byFile, launchedCoverage, searchVariantsOf));
+    const commitWindows = (sliced: ReturnType<typeof windowsFor>, windows: PreparedWindow[]): void => {
+      if (sliced.stale && !issues.some(issue => issue.path === path && issue.status === 'stale')) {
+        issues.push({ path, status: 'stale', message: 'Some search hits no longer match this document revision; those hits were omitted.' });
+      }
+      replacePrepared(path, windows);
+      markProvenance(path, windows.length > 0 ? 'ready' : sliced.stale ? 'stale' : 'empty', snapshot);
+    };
+    // Source text is usable before optional structure is ready. Keep a verified
+    // lexical window now, so a deadline during outline/classification cannot
+    // discard a snapshot already acquired from the document authority.
+    const pendingOutline: StructureOutlineResult = {
+      status: 'unavailable', provider: null, revision: snapshot.revision, symbols: [],
+      message: 'Structure outline is not yet available.',
+    };
+    const initial = windowsFor(path, lines, evidence, snapshot, groups,
+      deps.structure ? pendingOutline : { status: 'not-requested', provider: null }, parsed, initialWeights);
+    const existing = prepared.filter(window => window.path === path && window.revision === snapshot.revision);
+    commitWindows(initial, [...existing, ...weakenUnverifiedConnectionWhy(initial.windows, parsed.objects)]);
+    if (deps.structure && !structureFiles.has(path)) structureFiles.set(path, { path, status: 'unavailable', provider: null });
     const outline = await outlineForSnapshot(path, snapshot, deps, signal, hitLines);
     if (outline.status !== "not-requested") {
       structureFiles.set(path, {
@@ -1855,22 +1886,10 @@ export function createExploreQueryRun(
     }
     const weights = weightByGroupId(groups, buildTermWeightTable(groups, byFile, launchedCoverage, searchVariantsOf));
     const sliced = windowsFor(path, lines, evidence, snapshot, groups, outline, parsed, weights);
+    commitWindows(sliced, weakenUnverifiedConnectionWhy(sliced.windows, parsed.objects));
     const classified = await classifyPreparedWindows(path, snapshot, sliced.windows, deps, signal);
     const windows = await verifyMaterializedRelations(path, snapshot, evidence, classified, parsed, deps, signal);
-    if (sliced.stale && !issues.some((issue) => issue.path === path && issue.status === "stale")) {
-      issues.push({
-        path,
-        status: "stale",
-        message: "Some search hits no longer match this document revision; those hits were omitted.",
-      });
-    }
-    replacePrepared(path, windows);
-    if (windows.length === 0) {
-      markProvenance(path, sliced.stale ? "stale" : "empty", snapshot);
-      windowedEvidence.set(path, consumedEvidence);
-      return;
-    }
-    markProvenance(path, "ready", snapshot);
+    commitWindows(sliced, windows);
     windowedEvidence.set(path, consumedEvidence);
   };
 
@@ -1908,19 +1927,21 @@ export function createExploreQueryRun(
 
   const materializeScheduled = async (scheduled: RankedCandidate[], budget: number): Promise<void> => {
     let next = 0;
-    while (next < scheduled.length && reads < budget) {
-      if (shouldStop(scheduled, next, budget)) break;
-      const batch: RankedCandidate[] = [];
-      while (next < scheduled.length && batch.length < DEFAULT_READ_PARALLELISM && reads + batch.length < budget) {
+    const worker = async (): Promise<void> => {
+      while (!shouldStop(scheduled, next, budget)) {
+        signal.throwIfAborted();
         const candidate = scheduled[next]!;
         next += 1;
         if (readPaths.has(candidate.path)) continue;
-        batch.push(candidate);
+        reads += 1;
+        await materializeCandidate(candidate);
       }
-      if (batch.length === 0) continue;
-      reads += batch.length;
-      await materializeBatch(batch);
-    }
+    };
+    // A free slot takes the next candidate immediately; a slow read or outline
+    // no longer holds up the other slots at an artificial batch boundary.
+    const settled = await Promise.allSettled(Array.from({ length: Math.min(DEFAULT_READ_PARALLELISM, scheduled.length) }, worker));
+    const failed = settled.find(result => result.status === 'rejected');
+    if (failed?.status === 'rejected') throw failed.reason;
   };
 
   const materializeAvailable = async (): Promise<void> => {

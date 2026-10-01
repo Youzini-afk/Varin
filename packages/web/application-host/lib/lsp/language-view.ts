@@ -1,4 +1,5 @@
 import type { AgentInputContext } from '@varin/protocol';
+import { waitWithSignal } from '../cancellation.js';
 import type { DocumentAuthority } from '../documents/authority.js';
 import type { HarnessDocumentReadSource } from '../harness/service-host.js';
 import { AGENT_LANGUAGE_VIEW, type createLanguageSupervisor } from './supervisor.js';
@@ -26,6 +27,7 @@ export interface BindLanguageDocumentInput {
   text: 'disk' | 'input-context';
   sessionId?: string;
   inputContext?: AgentInputContext;
+  signal?: AbortSignal;
 }
 
 interface LanguageViewBinderDeps {
@@ -73,16 +75,21 @@ export function createLanguageViewBinder(deps: LanguageViewBinderDeps) {
   };
 
   const bind = async (input: BindLanguageDocumentInput): Promise<BindLanguageDocumentResult> => {
-    const text = await resolveText(input);
+    input.signal?.throwIfAborted();
+    const text = await waitWithSignal(resolveText(input), input.signal);
+    input.signal?.throwIfAborted();
     if ('status' in text) return text;
-    const synced = recordOf(await deps.supervisor.syncDocument({
+    const request = {
       view: AGENT_LANGUAGE_VIEW,
       resource: { workspaceId: input.workspaceId, resourceId: input.resourceId },
       languageId: input.languageId,
       content: text.content,
       contentRevision: text.revision,
       reason: 'open',
-    }));
+    };
+    const synced = recordOf(await (input.signal
+      ? deps.supervisor.syncDocument(request, { signal: input.signal })
+      : deps.supervisor.syncDocument(request)));
     if (synced.status !== 'synced') {
       const message = typeof synced.message === 'string' && synced.message
         ? synced.message
