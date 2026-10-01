@@ -44,7 +44,7 @@ describe('semantic index settings', () => {
       const response = await fetch(base, { method: 'PUT', headers: { 'x-test-auth': 'yes', 'Content-Type': 'application/json' },
         body: JSON.stringify({ revision: initial.revision,
           config: { storageDirectory: path.join(dataDir, 'custom'), concurrentRequests: 2, requestIntervalMs: 10,
-            indexedDirectories: [path.join(dataDir, 'project')] } }),
+            indexedDirectories: [path.join(dataDir, 'project')], includeIgnoredDirectories: [path.join(dataDir, 'project')] } }),
       });
       expect(response.status).toBe(200);
       const saved = await response.json() as { restartRequired: boolean; revision: string };
@@ -56,9 +56,10 @@ describe('semantic index settings', () => {
       expect(removeResponse.status).toBe(400);
       expect(await removeResponse.json()).toEqual({ error: 'Directory is not an inactive retained index cache' });
       const updated = await (await fetch(base, { headers: { 'x-test-auth': 'yes' } })).json() as {
-        config: { indexedDirectories: string[] }; retained: Array<{ directory: string; active: boolean }>;
+        config: { indexedDirectories: string[]; includeIgnoredDirectories: string[] }; retained: Array<{ directory: string; active: boolean }>;
       };
       expect(updated.config.indexedDirectories).toEqual([path.join(dataDir, 'project')]);
+      expect(updated.config.includeIgnoredDirectories).toEqual([path.join(dataDir, 'project')]);
       expect(updated.retained).toEqual([{ directory: management.activeDirectory(), bytes: 0, active: true }]);
     } finally {
       await new Promise<void>((resolve) => server.close(() => resolve()));

@@ -25,6 +25,8 @@ const LANGUAGE_BY_EXTENSION: Readonly<Record<string, string>> = {
   rs: "rust",
   go: "go",
   java: "java",
+  scala: "scala",
+  sc: "scala",
   c: "c",
   h: "c",
   cpp: "cpp",

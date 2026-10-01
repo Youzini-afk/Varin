@@ -12,6 +12,8 @@ export interface SemanticIndexConfiguration {
   requestIntervalMs: number;
   /** Null indexes every activated resource root; an array indexes only these directories. */
   indexedDirectories: string[] | null;
+  /** Directory-scoped overrides; all other activated roots retain Git filtering. */
+  includeIgnoredDirectories?: string[];
 }
 
 export const DEFAULT_SEMANTIC_INDEX_CONFIGURATION: SemanticIndexConfiguration = {
@@ -19,6 +21,7 @@ export const DEFAULT_SEMANTIC_INDEX_CONFIGURATION: SemanticIndexConfiguration = 
   concurrentRequests: 1,
   requestIntervalMs: 0,
   indexedDirectories: null,
+  includeIgnoredDirectories: [],
 };
 
 const parseConfiguration = (value: unknown): SemanticIndexConfiguration => {
@@ -28,6 +31,7 @@ const parseConfiguration = (value: unknown): SemanticIndexConfiguration => {
   const concurrentRequests = input.concurrentRequests ?? 1;
   const requestIntervalMs = input.requestIntervalMs ?? 0;
   const indexedDirectories = input.indexedDirectories ?? null;
+  const includeIgnoredDirectories = input.includeIgnoredDirectories ?? [];
   if (storageDirectory !== null && (typeof storageDirectory !== "string" || !path.isAbsolute(storageDirectory))) {
     throw new Error("Index storage directory must be an absolute path");
   }
@@ -41,10 +45,14 @@ const parseConfiguration = (value: unknown): SemanticIndexConfiguration => {
     || indexedDirectories.some((directory) => typeof directory !== "string" || !path.isAbsolute(directory)))) {
     throw new Error("Indexed directories must be absolute paths");
   }
+  if (!Array.isArray(includeIgnoredDirectories) || includeIgnoredDirectories.some(directory => typeof directory !== 'string' || !path.isAbsolute(directory))) {
+    throw new Error('Directories including ignored files must be absolute paths');
+  }
   return { storageDirectory: storageDirectory ? path.resolve(storageDirectory as string) : null,
     concurrentRequests: Number(concurrentRequests), requestIntervalMs: Number(requestIntervalMs),
     indexedDirectories: indexedDirectories === null ? null
       : [...new Set((indexedDirectories as string[]).map((directory) => path.resolve(directory)))],
+    includeIgnoredDirectories: [...new Set((includeIgnoredDirectories as string[]).map(directory => path.resolve(directory)))],
   };
 };
 

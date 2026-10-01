@@ -4,7 +4,6 @@ import { mkdirSync, readFileSync, statSync, writeFileSync } from "node:fs";
 import { basename, dirname, join, relative, resolve } from "node:path";
 import { performance } from "node:perf_hooks";
 import { createDocumentAuthorityHarness } from "../application-host/lib/documents/contract-fixtures.js";
-import { languageIdForPath } from "../application-host/lib/harness/language-id.js";
 import { createStructureSource } from "../application-host/lib/structure/source.js";
 import { createTreeSitterStructureProvider } from "../application-host/lib/structure/tree-sitter-provider.js";
 import {
@@ -15,7 +14,7 @@ import {
 } from "../application-host/lib/knowledge/semantic/identity.js";
 import { createLocalMinilmEmbedder } from "../application-host/lib/knowledge/semantic/minilm.js";
 import { resolveInstalledModelPack } from "../application-host/lib/knowledge/semantic/model-store.js";
-import { createSemanticIndexRuntime, SEMANTIC_SCAN_LANGUAGES } from "../application-host/lib/knowledge/semantic/runtime.js";
+import { createSemanticIndexRuntime, isSemanticIndexPath } from "../application-host/lib/knowledge/semantic/runtime.js";
 
 /**
  * Manual one-process performance diagnostic. Its output is evidence for local
@@ -28,7 +27,7 @@ const target = (process.argv[2] ?? "packages/web/application-host/lib/knowledge/
 const tracked = execFileSync("git", ["-C", repositoryRoot, "ls-files", "-z", "--", target], { encoding: "utf8" })
   .split("\0")
   .filter(Boolean)
-  .filter((file) => SEMANTIC_SCAN_LANGUAGES.has(languageIdForPath(file) ?? ""));
+  .filter(isSemanticIndexPath);
 if (tracked.length === 0) throw new Error(`No tracked semantic-scannable files under ${target}`);
 
 const pack = resolveInstalledModelPack("");

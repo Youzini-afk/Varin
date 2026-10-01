@@ -10,6 +10,11 @@ import { runKernelCompute } from "./compute-runner.js";
 import { createKernelComputeService } from "./compute-service.js";
 import type { KernelComputeRecord, KernelEntry } from "./protocol.generated.js";
 import { createTreeSitterStructureProvider } from "../structure/tree-sitter-provider.js";
+import { createStructureSource } from '../structure/source.js';
+import { createDocumentAuthority } from '../documents/authority.js';
+import { createSemanticIndexRuntime } from '../knowledge/semantic/runtime.js';
+import { createHashEmbedder } from '../knowledge/semantic/embedder.js';
+import { workspaceScope } from '../knowledge/semantic/identity.js';
 import { TYPESCRIPT_DEFINITION_QUERY, TYPESCRIPT_IMPORT_QUERY, TYPESCRIPT_LITERAL_CALL_QUERY } from "../structure/queries.js";
 
 const repo = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "../../../../..");
@@ -127,6 +132,58 @@ it("R5 native directory inventory applies Git ignore rules while retaining force
   const tracked=listed.records.find(r=>r.path==="generated/tracked.ts");
   assert.ok(tracked?.revision,"inventory entries must carry their native revision");
 });
+it('explains a parent-ignored directory and permits an explicit directory enumeration', async () => {
+  const f = await fixture();
+  execFileSync('git', ['init', '--quiet'], { cwd: f.workspace, stdio: 'ignore' });
+  await fs.writeFile(path.join(f.workspace, '.gitignore'), 'data/raw/\n');
+  const selected = path.join(f.workspace, 'data/raw');
+  await fs.mkdir(selected, { recursive: true });
+  await fs.writeFile(path.join(selected, 'source.scala'), 'object Source {}\n');
+  const filtered = await f.service.directory(selected, { operation: 'list', lane: 'background', includeTracked: true, respectGitignore: true });
+  assert.equal(filtered.status, 'ready', JSON.stringify(filtered));
+  assert.equal(filtered.records.filter(record => record.kind === 'entry' && data(record).kind === 'file').length, 0);
+  const info = filtered.records.find(record => record.kind === 'inventory');
+  assert.equal(data(info!).selectedRootIgnored, true);
+  assert.equal(path.resolve(String(data(info!).gitRoot)), path.resolve(f.workspace));
+  const included = await f.service.directory(selected, { operation: 'list', lane: 'background', includeTracked: true, respectGitignore: false });
+  assert.ok(included.records.some(record => record.kind === 'entry' && record.path === 'source.scala'));
+  execFileSync('git', ['init', '--quiet'], { cwd: selected, stdio: 'ignore' });
+  const independent = await f.service.directory(selected, { operation: 'list', lane: 'background', includeTracked: true, respectGitignore: true });
+  assert.ok(independent.records.some(record => record.kind === 'entry' && record.path === 'source.scala'));
+  await fs.rm(path.join(selected, 'source.scala'));
+  const empty = await f.service.directory(selected, { operation: 'list', lane: 'background', includeTracked: true, respectGitignore: true });
+  assert.equal(data(empty.records.find(record => record.kind === 'inventory')!).selectedRootIgnored, false);
+});
+
+it('indexes Scala through native text units and validates returned source revisions', async () => {
+  const f = await fixture();
+  const file = path.join(f.workspace, 'Main.scala');
+  const text = 'object Main {\n  def uniqueScalaMarker = 42\n}\n';
+  await fs.writeFile(file, text);
+  const documents = createDocumentAuthority({ hostId: 'scala-index', dataDir: path.join(f.root, 'documents'),
+    isAllowedRoot: async () => true, isTrusted: async () => true });
+  cleanup.push(() => documents.dispose());
+  const { workspaceId } = await documents.resolveWorkspace({ path: f.workspace });
+  const provider = createTreeSitterStructureProvider({ compute: f.service });
+  const units = await provider.unitsFile!({ workspaceId, root: f.workspace, path: 'Main.scala', languageId: 'scala' });
+  assert.equal(units.status, 'ready', JSON.stringify(units));
+  assert.ok(units.units.length > 0 && units.units.every(unit => unit.fallback && unit.parentKind === 'file'));
+  const runtime = createSemanticIndexRuntime({ dataDir: f.root, hostId: 'scala-index', documents,
+    structureSource: createStructureSource([provider]), embedder: createHashEmbedder(),
+    searchFilesystemFiles: async () => [{ name: 'Main.scala', path: file, relativePath: 'Main.scala' }] });
+  cleanup.push(() => runtime.dispose());
+  const scope = workspaceScope(workspaceId);
+  await runtime.scanScope(scope);
+  const result = await runtime.search(scope, 'uniqueScalaMarker', 5);
+  assert.ok(result.hits.some(hit => hit.documentId === 'Main.scala' && hit.body.includes('uniqueScalaMarker') && hit.fallback));
+  assert.equal(result.hits[0]?.revision, units.revision);
+  assert.equal(runtime.scanProgress(scope)?.coverageStats?.textFallbackFiles, 1);
+  assert.equal(runtime.scanProgress(scope)?.coverageStats?.structurallySupportedFiles, 0);
+  await fs.writeFile(file, '// changed\n' + text);
+  const changed = await runtime.search(scope, 'uniqueScalaMarker', 5);
+  assert.ok(changed.hits.every(hit => hit.revision !== units.revision));
+}, 30000);
+
 it("R5 structure provider analyzes and chunks a disk file directly through native compute",async()=>{
   const f=await fixture();
   await fs.mkdir(path.join(f.workspace,"src"),{recursive:true});

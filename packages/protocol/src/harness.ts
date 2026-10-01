@@ -1233,7 +1233,8 @@ export type ExploreSemanticGapReason =
   | "thread-vector-pending"
   | "index-read-failed"
   | "content-changed"
-  | "index-watch-unavailable";
+  | "index-watch-unavailable"
+  | "unsupported-files";
 
 export interface ExploreSemanticGap {
   path: string;

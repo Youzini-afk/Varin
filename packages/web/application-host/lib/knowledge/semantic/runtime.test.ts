@@ -26,6 +26,35 @@ const gate = () => {
 };
 
 describe("semantic index runtime", () => {
+  it('keeps directory overrides scoped and reports unsupported files separately from indexed candidates', async () => {
+    const documents = await createDocumentAuthorityHarness();
+    disposes.push(() => documents.cleanup());
+    const selected = join(documents.workspaceRoot, 'selected');
+    mkdirSync(selected);
+    writeFileSync(join(selected, 'Main.scala'), 'object Main { def scopedScalaMarker = 42 }\n');
+    writeFileSync(join(selected, 'unrecognized.xyz'), 'unrecognized source\n');
+    const inventory = vi.fn(async () => [
+      { name: 'Main.scala', path: join(selected, 'Main.scala'), relativePath: 'Main.scala' },
+      { name: 'unrecognized.xyz', path: join(selected, 'unrecognized.xyz'), relativePath: 'unrecognized.xyz' },
+    ]);
+    const eligibility = vi.fn(async () => true);
+    const runtime = createSemanticIndexRuntime({ dataDir: documents.dataDir, hostId: 'scoped-text-index', documents: documents.authority,
+      structureSource: parsingSource(), embedder: createHashEmbedder(), indexDirectories: [selected],
+      includeIgnoredDirectories: [selected, join(documents.dataDir, 'outside-selection')],
+      searchFilesystemFiles: inventory, isIndexablePath: eligibility });
+    disposes.push(() => runtime.dispose());
+    const scope = workspaceScope(documents.identity.workspaceId);
+    await runtime.scanScope(scope);
+    expect(inventory).toHaveBeenCalledTimes(1);
+    expect(inventory).toHaveBeenCalledWith(await fsPromises.realpath(selected), expect.objectContaining({ respectGitignore: false }));
+    expect(runtime.scanProgress(scope)?.coverageStats).toMatchObject({ visibleFiles: 2, candidateFiles: 1,
+      structurallySupportedFiles: 0, textFallbackFiles: 1, unsupportedFiles: 1 });
+    expect(runtime.statusFor(scope).coverage).not.toBe('complete');
+    runtime.observeDocumentMutation({ workspaceId: scope.scopeId, resourceId: 'selected/Main.scala', kind: 'modified' });
+    await runtime.drain();
+    expect(eligibility).toHaveBeenCalledWith(scope.scopeId, 'selected/Main.scala', expect.any(AbortSignal), { respectGitignore: false });
+  });
+
   it("indexes a selected child directory without enumerating its multi-project parent", async () => {
     const documents = await createDocumentAuthorityHarness();
     disposes.push(() => documents.cleanup());

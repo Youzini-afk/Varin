@@ -1,7 +1,7 @@
 # Documentation index
 
 Status: navigation index — keep current as documents move or change role.
-Last updated: 2026-09-30
+Last updated: 2026-10-01
 
 `docs/` 按角色分目录。文档与代码冲突时以代码与测试为准，并在同一改动里修正失效的一侧。
 
@@ -46,6 +46,8 @@ Harness 总体与模块专卷：
 - [design/security.md](design/security.md) — 安全模型
 
 ## [plan/](plan/) — 实施计划
+
+- [plan/agent-context-preparation-review.md](plan/agent-context-preparation-review.md) — Varin-FC 实测问题复核与七项产品修复、验证边界
 
 - [plan/agent-harness-plan.md](plan/agent-harness-plan.md) — Harness 阶段骨架（锚点稳定；已收口阶段细节在 archive）
 - [plan/agent-runtime-reliability-plan.md](plan/agent-runtime-reliability-plan.md) — RR0–RR6（RR6 平台纵切未测）

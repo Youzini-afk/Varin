@@ -6,7 +6,7 @@
 import type { DocumentAuthority, DocumentMutationObservation } from "../../documents/authority.js";
 import { realpath } from "node:fs/promises";
 import path from "node:path";
-import type { FileSearchEnumerationStatus, FileSearchItem } from "../../fs/types.js";
+import type { FileSearchEnumerationStatus, FileSearchEnumerationInfo, FileSearchItem } from "../../fs/types.js";
 import { languageIdForPath } from "../../harness/language-id.js";
 import { TREE_SITTER_LANGUAGE_SPECS } from "../../structure/languages.js";
 import type { StructureSource, StructureUnitsResult } from "../../structure/types.js";
@@ -27,7 +27,9 @@ import {
 import { createVectorCache, type SemanticVectorCache } from "./vector-cache.js";
 import { isAbortError, waitWithSignal } from "./cancellation.js";
 
-export const SEMANTIC_SCAN_LANGUAGES: ReadonlySet<string> = new Set(Object.keys(TREE_SITTER_LANGUAGE_SPECS));
+const STRUCTURAL_LANGUAGES: ReadonlySet<string> = new Set(Object.keys(TREE_SITTER_LANGUAGE_SPECS));
+const semanticLanguage = (file: string): string | null => languageIdForPath(file);
+export const isSemanticIndexPath = (file: string): boolean => semanticLanguage(file) !== null;
 
 const insideDirectory = (parent: string, child: string): boolean => {
   const relative = path.relative(parent, child);
@@ -75,6 +77,11 @@ export type SemanticScanProgress = SemanticScanBatchProgress & {
   startedAt: number;
   updatedAt: number;
   error?: string;
+  coverageStats?: {
+    visibleFiles: number; candidateFiles: number; structurallySupportedFiles: number;
+    textFallbackFiles: number; unsupportedFiles: number;
+    inventories: Array<FileSearchEnumerationInfo & { root: string }>;
+  };
 };
 
 export type SemanticScanOptions = {
@@ -93,7 +100,7 @@ export type SemanticQueryOverlay = {
 };
 
 type SemanticScanFile = FileSearchItem & { metadata?: { byteLength: string; modifiedTimeNs: string } };
-type SemanticScanFiles = SemanticScanFile[] & { enumerationStatus?: FileSearchEnumerationStatus };
+type SemanticScanFiles = SemanticScanFile[] & { enumerationStatus?: FileSearchEnumerationStatus; enumerationInfo?: FileSearchEnumerationInfo };
 
 export type SemanticSearchRequest = {
   threadQuery?: import("../../harness/working-state/working-branch-query.js").WorkingBranchQuerySnapshot;
@@ -107,7 +114,7 @@ export type SemanticSearchRequest = {
 export type SemanticSearchResult = {
   status: SemanticIndexStatus;
   hits: SemanticHit[];
-  gaps: Array<{ path: string; reason: "draft-vector-pending" | "draft-unavailable" | "thread-vector-pending" | "index-read-failed" | "content-changed" | "index-watch-unavailable" }>;
+  gaps: Array<{ path: string; reason: "draft-vector-pending" | "draft-unavailable" | "thread-vector-pending" | "index-read-failed" | "content-changed" | "index-watch-unavailable" | "unsupported-files" }>;
 };
 
 const yieldToEventLoop = (): Promise<void> => new Promise((resolve) => {
@@ -123,13 +130,14 @@ export interface SemanticIndexRuntimeOptions {
     rootPath: string,
     options: { query: string; respectGitignore?: boolean; includeRevisions?: boolean; signal?: AbortSignal },
   ) => Promise<SemanticScanFiles>;
-  isIndexablePath?: (workspaceId: string, path: string, signal: AbortSignal) => Promise<boolean>;
+  isIndexablePath?: (workspaceId: string, path: string, signal: AbortSignal, options?: { respectGitignore: boolean }) => Promise<boolean>;
   embedder: SemanticEmbedder;
   getEmbedder?: () => SemanticEmbedder;
   onError?: (error: unknown) => void;
   vectorCache?: SemanticVectorCache;
   scheduler?: EmbedScheduler;
   indexDirectories?: readonly string[] | null;
+  includeIgnoredDirectories?: readonly string[];
 }
 
 export function createSemanticIndexRuntime(options: SemanticIndexRuntimeOptions) {
@@ -342,8 +350,10 @@ export function createSemanticIndexRuntime(options: SemanticIndexRuntimeOptions)
     const root = kind === "deleted" ? undefined : (await options.documents.inspectWorkspace(scope.scopeId)).root;
     const included = root !== undefined && (await resolveSemanticScanRoots(root, options.indexDirectories))
       .some((directory) => insideDirectory(directory, path.resolve(root, documentId)));
+    const includeIgnored = root !== undefined && (await resolveSemanticScanRoots(root, options.includeIgnoredDirectories ?? []))
+      .some(directory => insideDirectory(directory, path.resolve(root, documentId)));
     const excluded = kind !== "deleted" && (!included || Boolean(options.isIndexablePath
-      && !await options.isIndexablePath(scope.scopeId, documentId, signal)));
+      && !await options.isIndexablePath(scope.scopeId, documentId, signal, { respectGitignore: !includeIgnored })));
     if (!isCurrentToken(scope, documentId, token)) return;
     if (kind === "deleted" || excluded) {
       const prefix = `${scope.scopeKind}\0${scope.scopeId}\0`;
@@ -385,7 +395,7 @@ export function createSemanticIndexRuntime(options: SemanticIndexRuntimeOptions)
   const observeDocumentMutation = (event: Omit<DocumentMutationObservation, 'owner'> & Partial<Pick<DocumentMutationObservation, 'owner'>>): void => {
     if (disposed) return;
     const languageId = languageIdForPath(event.resourceId);
-    if (!languageId || !SEMANTIC_SCAN_LANGUAGES.has(languageId)) return;
+    if (!languageId) return;
     const pendingForScope = mutationPending.get(scopeIdentity(workspaceScope(event.workspaceId))) ?? new Set<string>();
     forgetScanMetadata(workspaceScope(event.workspaceId), event.resourceId);
     pendingForScope.add(event.resourceId);
@@ -436,12 +446,18 @@ export function createSemanticIndexRuntime(options: SemanticIndexRuntimeOptions)
         const root = (await options.documents.inspectWorkspace(scope.scopeId)).root;
         const scanToken = ++revisionClock;
         const selectedRoots = await resolveSemanticScanRoots(root, options.indexDirectories);
-        const inventories = await Promise.all(selectedRoots.map((directory) => options.searchFilesystemFiles!(directory, {
-          query: "", respectGitignore: true, signal,
+        const ignoredRoots = await resolveSemanticScanRoots(root, options.includeIgnoredDirectories ?? []);
+        const selections = selectedRoots.flatMap(directory => {
+          if (ignoredRoots.some(ignored => insideDirectory(ignored, directory))) return [{ directory, respectGitignore: false }];
+          return [{ directory, respectGitignore: true }, ...ignoredRoots.filter(ignored => insideDirectory(directory, ignored))
+            .map(ignored => ({ directory: ignored, respectGitignore: false }))];
+        });
+        const inventories = await Promise.all(selections.map(({ directory, respectGitignore }) => options.searchFilesystemFiles!(directory, {
+          query: "", respectGitignore, signal,
         })));
         const byPath = new Map<string, SemanticScanFile>();
         for (const [index, inventory] of inventories.entries()) {
-          const prefix = path.relative(root, selectedRoots[index]!).split(path.sep).join("/");
+          const prefix = path.relative(root, selections[index]!.directory).split(path.sep).join("/");
           for (const file of inventory) {
             const relativePath = prefix ? `${prefix}/${file.relativePath}` : file.relativePath;
             byPath.set(relativePath, { ...file, relativePath });
@@ -453,8 +469,16 @@ export function createSemanticIndexRuntime(options: SemanticIndexRuntimeOptions)
           files.enumerationStatus = "incomplete";
         }
         signal.throwIfAborted();
-        const catalog = (files as SemanticScanFiles).filter((file) => SEMANTIC_SCAN_LANGUAGES.has(languageIdForPath(file.relativePath) ?? ""));
-        updateProgress({ totalFiles: catalog.length });
+        const catalog = (files as SemanticScanFiles).filter(file => semanticLanguage(file.relativePath) !== null);
+        const structurallySupportedFiles = catalog.filter(file => STRUCTURAL_LANGUAGES.has(semanticLanguage(file.relativePath)!)).length;
+        const unsupportedFiles = files.length - catalog.length;
+        updateProgress({ totalFiles: catalog.length, coverageStats: {
+          visibleFiles: files.length, candidateFiles: catalog.length, structurallySupportedFiles,
+          textFallbackFiles: catalog.length - structurallySupportedFiles, unsupportedFiles,
+          inventories: inventories.map((inventory, index) => ({ root: selections[index]!.directory,
+            strategy: inventory.enumerationInfo?.strategy ?? (selections[index]!.respectGitignore ? 'git-visible' : 'directory'),
+            ...inventory.enumerationInfo })),
+        } });
         if (catalog.length === 0 && initialEmbedder.space.dim <= 0) {
           // There is no document body with which to resolve an automatic remote
           // dimension. Remember the successful empty catalog. The first real
@@ -484,7 +508,7 @@ export function createSemanticIndexRuntime(options: SemanticIndexRuntimeOptions)
         const publishedIds = new Set(publishedBefore);
         const catalogIds = new Set(catalog.map((file) => file.relativePath));
         const enumerationComplete = files.enumerationStatus === undefined || files.enumerationStatus === "complete";
-        if (!enumerationComplete) scanComplete = false;
+        if (!enumerationComplete || unsupportedFiles > 0) scanComplete = false;
         const removed = enumerationComplete ? publishedBefore.filter((documentId) => !catalogIds.has(documentId)) : [];
         const removalTokens = new Map(removed.map((documentId) => [documentId, scanTokenFor(scope, documentId, scanToken)]));
         const unverified = new Set([...publishedBefore, ...catalog.map((file) => file.relativePath)].filter((documentId) => (
@@ -831,7 +855,7 @@ export function createSemanticIndexRuntime(options: SemanticIndexRuntimeOptions)
           signal.throwIfAborted();
           if (!pathInRoots(file.path, searchOptions.roots)) continue;
           const languageId = languageIdForPath(file.path);
-          if (!languageId || !SEMANTIC_SCAN_LANGUAGES.has(languageId)) continue;
+          if (!languageId) continue;
           const units = await options.structureSource.unitsFixed({
             workspaceId: scope.scopeId,
             path: file.path,
@@ -859,6 +883,9 @@ export function createSemanticIndexRuntime(options: SemanticIndexRuntimeOptions)
       const hasMetadataGap = diskIndexEnabled && [...(metadataUnverifiedPaths.get(key) ?? [])]
         .some((path) => pathInRoots(path, searchOptions?.roots));
       if (hasMetadataGap) indexGaps.push({ path: ".", reason: "index-watch-unavailable" });
+      if (diskIndexEnabled && (scanProgress.get(`${scope.scopeKind}\0${scope.scopeId}`)?.coverageStats?.unsupportedFiles ?? 0) > 0) {
+        indexGaps.push({ path: '.', reason: 'unsupported-files' });
+      }
       const store = storeFor(scope, embedder);
       const maskPaths = [
         ...overlays.map((overlay) => overlay.path),

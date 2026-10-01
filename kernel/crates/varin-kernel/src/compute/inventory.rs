@@ -3,7 +3,11 @@
 use super::{Result, Shared};
 use std::{collections::HashSet, io::Read, path::Path, process::{Command, Stdio}, thread, time::Duration};
 
-pub(super) struct GitInventory { files: HashSet<String>, directories: HashSet<String> }
+pub(super) struct GitInventory {
+    files: HashSet<String>, directories: HashSet<String>,
+    pub git_root: String,
+    pub selected_root_ignored: Option<bool>,
+}
 impl GitInventory {
     pub fn allows(&self, path: &str, directory: bool) -> bool {
         if directory { path.is_empty() || self.directories.contains(path) } else { self.files.contains(path) }
@@ -12,10 +16,10 @@ impl GitInventory {
 fn read(mut stream: impl Read) -> std::io::Result<Vec<u8>> {
     let mut bytes=Vec::new(); stream.read_to_end(&mut bytes)?; Ok(bytes)
 }
-pub(super) fn git_inventory(root: &Path, shared: &Shared) -> Result<Option<GitInventory>> {
+fn run_git(root: &Path, args: &[&str], shared: &Shared) -> Result<(std::process::ExitStatus, Vec<u8>, Vec<u8>)> {
     shared.check()?;
     let mut command=Command::new("git");
-    command.args(["ls-files","-z","--cached","--others","--exclude-standard"])
+    command.args(args)
         .current_dir(root).env("LC_ALL","C").env("GIT_OPTIONAL_LOCKS","0")
         .stdin(Stdio::null()).stdout(Stdio::piped()).stderr(Stdio::piped());
     #[cfg(windows)] { use std::os::windows::process::CommandExt; command.creation_flags(0x08000000); }
@@ -34,11 +38,19 @@ pub(super) fn git_inventory(root: &Path, shared: &Shared) -> Result<Option<GitIn
     };
     let output=output.join().map_err(|_|"Git inventory reader failed")?.map_err(|e|e.to_string())?;
     let diagnostic=diagnostic.join().map_err(|_|"Git inventory diagnostic reader failed")?.map_err(|e|e.to_string())?;
-    let status=status?;
+    Ok((status?, output, diagnostic))
+}
+
+pub(super) fn git_inventory(root: &Path, shared: &Shared) -> Result<Option<GitInventory>> {
+    let (status, git_root, diagnostic) = run_git(root, &["rev-parse", "--show-toplevel"], shared)?;
     if !status.success() {
         if status.code()==Some(128)&&String::from_utf8_lossy(&diagnostic).contains("not a git repository") {return Ok(None);}
         return Err(format!("Git inventory failed (exit {:?}); enumeration is incomplete",status.code()));
     }
+    let git_root = std::str::from_utf8(&git_root).map_err(|_| "Git root is not UTF-8")?
+        .trim_end_matches(['\r', '\n']).to_string();
+    let (status, output, _) = run_git(root, &["ls-files", "-z", "--cached", "--others", "--exclude-standard", "--", "."], shared)?;
+    if !status.success() { return Err(format!("Git inventory failed (exit {:?}); enumeration is incomplete", status.code())); }
     let mut files=HashSet::new();let mut directories=HashSet::new();
     for bytes in output.split(|b|*b==0).filter(|b|!b.is_empty()) {
         shared.check()?;
@@ -47,5 +59,12 @@ pub(super) fn git_inventory(root: &Path, shared: &Shared) -> Result<Option<GitIn
         while let Some((next,_))=parent.rsplit_once('/') { directories.insert(next.to_string());parent=next; }
         files.insert(path);
     }
-    Ok(Some(GitInventory{files,directories}))
+    let selected_root_ignored = if files.is_empty() {
+        let (status, _, _) = run_git(root, &["check-ignore", "--quiet", "--", "."], shared)?;
+        match status.code() {
+            Some(0) => Some(true), Some(1) => Some(false),
+            _ => return Err("Git could not determine the selected directory's ignore status".into()),
+        }
+    } else { None };
+    Ok(Some(GitInventory{files,directories,git_root,selected_root_ignored}))
 }

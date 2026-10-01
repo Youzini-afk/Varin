@@ -68,6 +68,11 @@ export interface FileSearchItem {
 }
 
 export type FileSearchEnumerationStatus = "complete" | "incomplete" | "failed" | "cancelled";
+export interface FileSearchEnumerationInfo {
+  strategy: 'git-visible' | 'directory';
+  gitRoot?: string;
+  selectedRootIgnored?: boolean;
+}
 
 /**
  * Search results carry an optional non-enumerable completeness fact. Existing
@@ -76,4 +81,5 @@ export type FileSearchEnumerationStatus = "complete" | "incomplete" | "failed" |
  */
 export type FileSearchItems = FileSearchItem[] & {
   enumerationStatus?: FileSearchEnumerationStatus;
+  enumerationInfo?: FileSearchEnumerationInfo;
 };

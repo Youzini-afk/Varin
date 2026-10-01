@@ -10,6 +10,11 @@ derived store (`../vectors/`); they reuse `harness.embed` but never this MiniLM 
   otherwise the semantic source is unavailable. `harness.embedding` set → `remote-embedder.ts`
   via workspace `harness.embed`. Configured remote never falls back to MiniLM in the same query.
 - Chunking: `chunker.ts` — tree-sitter containers, backend input length, continue-split of long lines.
+  Semantic eligibility follows recognized text language identities, independently of the tree-sitter
+  grammar list. Languages such as Scala use native text units with path, line range and content
+  revision; `fallback: true` and file-level parents distinguish these from parsed structure.
+  Unsupported file identities remain visible in scan coverage and cannot turn a partial repository
+  into a claim of complete coverage merely because its supported auxiliary files finished indexing.
 - Cache / schedule: `vector-cache.ts` (space + purpose + embedText, byte soft budget);
   `embed-scheduler.ts` (configurable concurrent request slots and background start interval;
   waiting foreground work takes the next free slot without an artificial interval). This
@@ -41,6 +46,11 @@ derived store (`../vectors/`); they reuse `harness.embed` but never this MiniLM 
   The user may select child directories inside a multi-project resource root; the inventory then
   starts at those folders rather than enumerating the entire parent. An empty selection disables
   background semantic indexing, leaving lexical and graph search available.
+  Native inventory reports the actual Git root and whether an empty selected directory is ignored.
+  Each selected directory can opt into `includeIgnoredDirectories`; the override is clipped to
+  the selected indexing scope and applies to subsequent mutation eligibility as well as scans.
+  Other directories retain Git filtering. Status distinguishes visible files, semantic candidates,
+  structurally supported files, text fallback files, unsupported files and published documents.
   Directory selection, storage location and request pacing are frozen when the Host starts. Editing them requires a Host
   restart: an active TriviumDB is never moved while open. A different storage directory begins a
   new derived index; the previous cache is preserved until explicitly cleaned up. This storage
@@ -49,6 +59,9 @@ derived store (`../vectors/`); they reuse `harness.embed` but never this MiniLM 
 - Remote embedding: Pi sends OpenAI-compatible requests. A provider's 400/413 response to a batch
   causes that rejected batch to split recursively; results retain input order and vector-space
   identity. A single rejected input remains an error and the scan reports partial/failed coverage.
+  Temporary HTTP 429/5xx failures retry the same batch with cancellable backoff and Retry-After;
+  the adapter defaults to two additional attempts and accepts a configurable retry count. Permanent
+  errors remain errors. HTTP rerank sends text strings and maps returned indexes to local material IDs.
 - Optional component (D-288): `local-component.ts` owns explicit download/import, manifest and file
   verification, a short native inference check process, and atomic activation under
   `dataDir/optional-components/local-semantic`. `local-component-routes.ts` exposes authenticated

@@ -33,6 +33,17 @@ const runtimeWith = (directory: KernelComputeService["directory"]) => createFsSe
 });
 
 describe("native filesystem search projection", () => {
+  it('retains native Git filtering diagnostics on an empty result', async () => {
+    const runtime = runtimeWith(async (_root, _input, options) => {
+      const records = [{ kind: 'inventory', path: '', revision: '', data: { strategy: 'git-visible', gitRoot: '/parent', selectedRootIgnored: true } }];
+      await options?.onRecords?.(records);
+      return result(records);
+    });
+    const files = await runtime.searchFilesystemFiles('/parent/ignored', { query: '' });
+    expect(files).toHaveLength(0);
+    expect(files.enumerationInfo).toEqual({ strategy: 'git-visible', gitRoot: '/parent', selectedRootIgnored: true });
+  });
+
   it("requests one native inventory and keeps the native revision on file candidates", async () => {
     const directory = vi.fn(async (_root, input, runOptions) => {
       const records = [entry("src/app.ts", "sha256-app"), entry("src/deep/nested.ts", "sha256-nested")];

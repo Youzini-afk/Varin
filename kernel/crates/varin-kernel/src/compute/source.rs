@@ -150,17 +150,45 @@ pub(crate) fn visit(task:&mut Task,shared:&Shared,mut callback:impl FnMut(Docume
             if canonical!=*root {return Err("Admitted root identity changed before native capture".into());}
             let root=canonical;
             let walk_scopes=scopes.clone();let walk_roots=roots.clone();let walk_dirs=dirs.clone();let walk_root=root.clone();
-            let inventory = if task.params.include_tracked.unwrap_or(false) && task.params.respect_gitignore.unwrap_or(true) {
-                super::inventory::git_inventory(&root,shared)?
-            } else {None};
-            let inventory = std::sync::Arc::new(inventory);
-            let walk_inventory=inventory.clone();
+            // Git visibility belongs to the selected directory, which can be
+            // narrower than the admitted Documents root or have its own repo.
+            let mut inventories = Vec::new();
+            if task.params.include_tracked.unwrap_or(false) && task.params.respect_gitignore.unwrap_or(true) {
+                let mut selected = HashSet::new();
+                for prefix in &roots {
+                    let target = root.join(prefix);
+                    let directory_prefix = if fs::symlink_metadata(&target).is_ok_and(|m|m.is_dir()) {
+                        prefix.clone()
+                    } else { prefix.rsplit_once('/').map(|(parent,_)|parent.to_string()).unwrap_or_default() };
+                    if !selected.insert(directory_prefix.clone()) { continue; }
+                    let directory = fs::canonicalize(root.join(&directory_prefix)).map_err(|e|e.to_string())?;
+                    if !directory.starts_with(&root) { continue; }
+                    inventories.push((directory_prefix, super::inventory::git_inventory(&directory,shared)?));
+                }
+            }
+            if task.params.operation == "list" && task.params.include_tracked.unwrap_or(false) {
+                if inventories.is_empty() { shared.emit("inventory", "", "", serde_json::json!({"strategy":"directory","gitRoot":null}))?; }
+                for (prefix, inventory) in &inventories {
+                    shared.emit("inventory", prefix, "", match inventory {
+                        Some(inventory) => serde_json::json!({"strategy":"git-visible","gitRoot":inventory.git_root,
+                            "selectedRootIgnored":inventory.selected_root_ignored}),
+                        None => serde_json::json!({"strategy":"directory","gitRoot":null}),
+                    })?;
+                }
+            }
+            let walk_inventories = std::sync::Arc::new(inventories);
             let mut builder=ignore::WalkBuilder::new(&root);
             let respect=task.params.respect_gitignore.unwrap_or(true)&&!task.params.include_tracked.unwrap_or(false);
             builder.hidden(!include_hidden).follow_links(false).git_ignore(respect).git_global(respect).git_exclude(respect).ignore(respect)
                 .filter_entry(move|entry|{
                     let Ok(path)=entry.path().strip_prefix(&walk_root)else{return false;};let path=path.to_string_lossy().replace('\\',"/");
-                    walk_inventory.as_ref().as_ref().is_none_or(|inventory|inventory.allows(&path,entry.file_type().is_some_and(|t|t.is_dir())))
+                    (walk_inventories.is_empty() || walk_inventories.iter().any(|(prefix, inventory)| {
+                        let directory = entry.file_type().is_some_and(|t|t.is_dir());
+                        if directory && within(prefix, &path) { return true; }
+                        if !within(&path, prefix) { return false; }
+                        let relative = if prefix.is_empty() { path.as_str() } else { path.strip_prefix(prefix).unwrap_or("").trim_start_matches('/') };
+                        inventory.as_ref().is_none_or(|inventory|inventory.allows(relative,directory))
+                    }))
                     && walk_scopes.iter().any(|s|within(&path,s)||within(s,&path))&&walk_roots.iter().any(|s|within(&path,s)||within(s,&path))
                         &&!path.split('/').any(|s|walk_dirs.contains(s))
                 });

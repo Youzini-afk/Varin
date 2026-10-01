@@ -1,6 +1,7 @@
 import React from 'react';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
+import { Checkbox } from '@/components/ui/checkbox';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { SettingsFieldRow, SettingsSection } from '@/components/sections/shared/SettingsSection';
 import { DirectoryExplorerDialog } from '@/components/session/DirectoryExplorerDialog';
@@ -126,7 +127,8 @@ export function IndexSettings(props: Partial<HarnessSettingsPageProps>) {
       description={t('settings.page.harness.index.scope.description')} settingsItem="harness.semanticIndex.scope">
       <SettingsFieldRow label={t('settings.page.harness.index.scope.mode')}>
         <Select value={draft?.indexedDirectories == null ? 'all' : 'selected'}
-          onValueChange={(value) => edit({ indexedDirectories: value === 'all' ? null : draft?.indexedDirectories ?? [] })}>
+          onValueChange={(value) => edit({ indexedDirectories: value === 'all' ? null : draft?.indexedDirectories ?? [],
+            ...(value === 'all' ? { includeIgnoredDirectories: [] } : {}) })}>
           <SelectTrigger size="settings" className="w-64"><SelectValue /></SelectTrigger>
           <SelectContent>
             <SelectItem value="all">{t('settings.page.harness.index.scope.all')}</SelectItem>
@@ -135,9 +137,17 @@ export function IndexSettings(props: Partial<HarnessSettingsPageProps>) {
         </Select>
       </SettingsFieldRow>
       {draft && draft.indexedDirectories !== null ? <div className="space-y-2">
-        {draft?.indexedDirectories.map((directory) => <div key={directory} className="flex min-w-0 items-center gap-2">
+        {draft?.indexedDirectories.map((directory) => <div key={directory} className="flex min-w-0 flex-wrap items-center gap-2">
           <span className="min-w-0 flex-1 break-all typography-meta">{directory}</span>
-          <Button size="sm" variant="ghost" onClick={() => edit({ indexedDirectories: draft.indexedDirectories?.filter((item) => item !== directory) ?? [] })}>
+          <label className="flex items-center gap-2 typography-meta">
+            <Checkbox checked={(draft.includeIgnoredDirectories ?? []).includes(directory)} onChange={(checked) => edit({
+              includeIgnoredDirectories: checked === true ? [...new Set([...(draft.includeIgnoredDirectories ?? []), directory])]
+                : (draft.includeIgnoredDirectories ?? []).filter(item => item !== directory),
+            })} />
+            {t('settings.page.harness.index.scope.includeIgnored')}
+          </label>
+          <Button size="sm" variant="ghost" onClick={() => edit({ indexedDirectories: draft.indexedDirectories?.filter((item) => item !== directory) ?? [],
+            includeIgnoredDirectories: (draft.includeIgnoredDirectories ?? []).filter(item => item !== directory) })}>
             {t('settings.page.harness.index.scope.remove')}
           </Button>
         </div>)}
@@ -208,6 +218,17 @@ export function IndexSettings(props: Partial<HarnessSettingsPageProps>) {
           {root.progress?.totalFiles ? ` · ${root.progress.processedFiles}/${root.progress.totalFiles}` : ''}
           {root.progress ? ` · ${t('settings.page.harness.index.progress.documents', { count: root.progress.publishedDocuments })}` : ''}</p>
         {root.progress?.totalFiles ? <progress className="w-full" value={root.progress.processedFiles} max={root.progress.totalFiles} /> : null}
+        {root.progress?.coverageStats ? <>
+          <p className="typography-meta text-muted-foreground">{t('settings.page.harness.index.progress.coverageStats', {
+            visible: root.progress.coverageStats.visibleFiles, structured: root.progress.coverageStats.structurallySupportedFiles,
+            fallback: root.progress.coverageStats.textFallbackFiles, unsupported: root.progress.coverageStats.unsupportedFiles,
+          })}</p>
+          {root.progress.coverageStats.inventories.map((inventory, index) => <React.Fragment key={`${inventory.root}:${index}`}>
+            {inventory.gitRoot ? <p className="break-all typography-meta text-muted-foreground">{t('settings.page.harness.index.progress.gitRoot', { root: inventory.gitRoot })}</p> : null}
+            {inventory.selectedRootIgnored ? <p className="break-all typography-meta text-[var(--status-warning)]">
+              {t('settings.page.harness.index.progress.ignoredRoot', { directory: inventory.root })}</p> : null}
+          </React.Fragment>)}
+        </> : null}
         {root.progress?.error ? <p role="alert" className="typography-meta text-destructive">{root.progress.error}</p> : null}
       </div>) : <p className="typography-meta text-muted-foreground">{t('settings.page.harness.index.progress.empty')}</p>}
     </SettingsSection>

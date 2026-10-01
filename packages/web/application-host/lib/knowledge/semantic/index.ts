@@ -60,7 +60,7 @@ export type {
   SemanticIndexLifecycle,
   SemanticQueryCoverage,
 } from "./store.js";
-export { SEMANTIC_SCAN_LANGUAGES, createSemanticIndexRuntime } from "./runtime.js";
+export { isSemanticIndexPath, createSemanticIndexRuntime } from "./runtime.js";
 export type {
   SemanticIndexRuntime,
   SemanticIndexRuntimeOptions,

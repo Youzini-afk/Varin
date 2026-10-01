@@ -94,7 +94,11 @@ export function createSurfaceAwareReadTool(
         : { ...params, path: path.resolve(cwd, params.path) };
       const source = await bridge.request(
         "document.readSource",
-        { path: anchoredParams.path, page: { offset: params.offset ?? 1, limit: params.limit ?? DEFAULT_MAX_LINES, maxBytes: DEFAULT_MAX_BYTES } },
+        { path: anchoredParams.path, page: {
+          // Preserve Pi's normalization of zero/negative offsets to line one.
+          offset: params.offset === undefined ? 1 : Math.max(1, Math.trunc(params.offset)),
+          limit: params.limit ?? DEFAULT_MAX_LINES, maxBytes: DEFAULT_MAX_BYTES,
+        } },
         signal === undefined ? {} : { signal },
       );
       if (source.page) {

@@ -3220,13 +3220,14 @@ async function main(options: StartWebUiServerOptions = {}): Promise<WebUiServerC
     },
     structureSource,
     searchFilesystemFiles: catalogFileSearch.searchFilesystemFiles,
-    isIndexablePath: async (id, resourceId, signal) => catalogFileSearch.isSearchableFile(
-      (await documentsAuthority.inspectWorkspace(id)).root, resourceId, signal,
+    isIndexablePath: async (id, resourceId, signal, options) => catalogFileSearch.isSearchableFile(
+      (await documentsAuthority.inspectWorkspace(id)).root, resourceId, signal, options,
     ),
     embedder: localEmbedder,
     vectorCache: semanticVectorCache,
     scheduler: semanticScheduler,
     indexDirectories: semanticIndexConfig.indexedDirectories,
+    includeIgnoredDirectories: semanticIndexConfig.includeIgnoredDirectories ?? [],
     getBroker: getReadyPiRuntimeBroker,
     executionViews: threadExecutionViews,
     workingBranches: workingBranchLookups,

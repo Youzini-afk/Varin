@@ -7,6 +7,7 @@ export interface SemanticIndexConfig {
   concurrentRequests: number;
   requestIntervalMs: number;
   indexedDirectories: string[] | null;
+  includeIgnoredDirectories?: string[];
 }
 
 export interface SemanticIndexStatus {
@@ -25,7 +26,10 @@ export interface SemanticIndexStatus {
     binding: string;
     indexingEnabled: boolean;
     status: { status: string; coverage: string; lifecycle: string };
-    progress: { phase: string; processedFiles: number; totalFiles: number; publishedDocuments: number; error?: string } | null;
+    progress: { phase: string; processedFiles: number; totalFiles: number; publishedDocuments: number; error?: string;
+      coverageStats?: { visibleFiles: number; candidateFiles: number; structurallySupportedFiles: number; textFallbackFiles: number; unsupportedFiles: number;
+        inventories: Array<{ root: string; strategy: 'git-visible' | 'directory'; gitRoot?: string; selectedRootIgnored?: boolean }> };
+    } | null;
   }>;
 }
 
