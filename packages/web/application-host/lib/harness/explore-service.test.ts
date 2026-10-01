@@ -335,7 +335,7 @@ describe("explore through Host router, real ripgrep, and Documents", () => {
     expect(source).not.toMatch(/draftHits/);
   });
 
-  it("T8: stores unread candidates in OutputStore and mentions the handle only when more remains", async () => {
+  it("T8: stores read-but-omitted support refs and mentions the handle only when more remains", async () => {
     const f = await fixture();
     const pad = "x".repeat(120);
     await Promise.all(Array.from({ length: 8 }, async (_, index) => {
@@ -347,11 +347,26 @@ describe("explore through Host router, real ripgrep, and Documents", () => {
     const stored = f.host.outputStore.read(f.actor.sessionId, response.result.handle);
     expect(stored.status).toBe("ready");
     if (stored.status !== "ready") throw new Error("expected stored explore output");
-    expect(stored.slice.text).toMatch(/Unread candidates \(not-requested/);
-    expect(response.result.details.provenance.some((entry) => entry.status === "not-requested")).toBe(true);
+    expect(response.result.snippets).toHaveLength(2);
+    expect(response.result.notRequested).toEqual({ count: 0, paths: [] });
+    expect(response.result.details.provenance.filter(entry => entry.status === "ready").map(entry => entry.path))
+      .toEqual(Array.from({ length: 8 }, (_, index) => `f${index}.ts`));
+    expect(response.result.omitted).toHaveLength(6);
+    for (const item of response.result.omitted) {
+      expect(stored.slice.text).toContain(`${item.path}:${item.startLine}-${item.endLine} (${item.reason})`);
+    }
+    expect(stored.slice.text).not.toContain("Unread candidates");
     expect(Buffer.byteLength(response.result.text, "utf8")).toBeLessThanOrEqual(response.result.details.byteBudget);
-    expect(response.result.text).toMatch(/Unread candidates \(not-requested/);
-    expect(response.result.text).toContain(response.result.handle);
+    expect(response.result.text).not.toContain("Unread candidates");
+    expect(response.result.text).toContain(`get_output("${response.result.handle}")`);
+
+    const complete = await f.request({ question: "needle", limit: 8 });
+    expect(complete.ok).toBe(true);
+    if (!complete.ok) throw new Error(complete.error.message);
+    expect(complete.result.snippets).toHaveLength(8);
+    expect(complete.result.omitted).toEqual([]);
+    expect(complete.result.partial).toBe(false);
+    expect(complete.result.text).not.toContain("get_output(");
   });
 
   it("filters a blank anchor instead of rejecting the call", async () => {

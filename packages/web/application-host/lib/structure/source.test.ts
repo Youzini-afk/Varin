@@ -29,7 +29,7 @@ describe("createStructureSource", () => {
         return { status: 'unavailable', provider: 'lsp', revision: request.revision, symbols: [] };
       } }),
     ]);
-    await source.outline({ path: 'a.ts', revision: 'r1', text: 'source', warmOnly: true });
+    await source.outline({ path: 'a.ts', languageId: 'typescript', revision: 'r1', text: 'source', warmOnly: true });
   });
   it("returns the first ready outline and does not consult a later provider", async () => {
     let later = 0;
