@@ -2,6 +2,8 @@
 
 export const settingsDict = {
   ...englishSettingsDict,
+  'settings.providers.page.custom.type.other.label': 'その他 / 拡張 API',
+  'settings.providers.page.custom.type.other.description': '現在のランタイムが対応する API 識別子を入力します。空欄なら既存設定を引き継ぎます。',
   'settings.knowledge.source.passages': '元の文章を表示',
   'settings.computers.setup.title': "永続的な Linux デスクトップ",
   'settings.computers.setup.description': "選択した Linux ホストにデスクトップとブラウザーをインストールします。ビューを閉じてもアプリは動作し、再起動後も保存済みファイルとブラウザーデータは残ります。",

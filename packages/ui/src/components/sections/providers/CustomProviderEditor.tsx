@@ -79,6 +79,7 @@ export const CustomProviderEditor: React.FC<CustomProviderEditorProps> = ({
   const [state, setState] = React.useState<CustomProviderEditableFormState>(() =>
     initialState ? { ...initialState, models: initialState.models.map((m) => ({ ...m })) } : createEmptyCustomProviderState()
   );
+  const [manualApi, setManualApi] = React.useState(() => !COMMON_PROVIDER_APIS.some(api => api === state.api));
   const [saving, setSaving] = React.useState(false);
   const [fetchingModels, setFetchingModels] = React.useState(false);
   const [modelImportDialogOpen, setModelImportDialogOpen] = React.useState(false);
@@ -118,6 +119,7 @@ export const CustomProviderEditor: React.FC<CustomProviderEditorProps> = ({
         ...initialState,
         models: initialState.models.map((m) => ({ ...m })),
       });
+      setManualApi(!COMMON_PROVIDER_APIS.some(api => api === initialState.api));
     }
   }, [initialState, mode]);
 
@@ -432,6 +434,21 @@ export const CustomProviderEditor: React.FC<CustomProviderEditorProps> = ({
     }
   };
 
+  const renderTypeLabel = (api: string) => {
+    switch (api) {
+      case 'openai-completions':
+        return t('settings.providers.page.custom.type.openaiCompatible.label');
+      case 'openai-responses':
+        return t('settings.providers.page.custom.type.openaiResponses.label');
+      case 'anthropic-messages':
+        return t('settings.providers.page.custom.type.anthropic.label');
+      case 'google-generative-ai':
+        return t('settings.providers.page.custom.type.google.label');
+      default:
+        return api;
+    }
+  };
+
   const renderTypeDescription = (api: string) => {
     switch (api) {
       case 'openai-completions':
@@ -455,21 +472,34 @@ export const CustomProviderEditor: React.FC<CustomProviderEditorProps> = ({
             <label className="typography-ui-label text-foreground">
               {t('settings.providers.page.custom.field.type')}
             </label>
-            <Input
-              value={state.api}
-              onChange={(event) => updateField('api', event.target.value)}
-              list="varin-provider-apis"
-              placeholder="openai-completions"
-              className="h-7 w-full font-mono sm:w-[280px]"
-            />
-            <datalist id="varin-provider-apis">
-              {COMMON_PROVIDER_APIS.map((api) => <option key={api} value={api} />)}
-            </datalist>
-            {renderTypeDescription(state.api) && (
-              <span className="typography-micro text-muted-foreground">
-                {renderTypeDescription(state.api)}
-              </span>
+            <Select value={manualApi ? 'custom' : state.api} onValueChange={(value) => {
+              setManualApi(value === 'custom');
+              if (value !== 'custom') updateField('api', value);
+            }}>
+              <SelectTrigger className="w-full sm:w-[280px]" aria-label={t('settings.providers.page.custom.field.type')}>
+                <SelectValue>
+                  {manualApi ? t('settings.providers.page.custom.type.other.label') : renderTypeLabel(state.api)}
+                </SelectValue>
+              </SelectTrigger>
+              <SelectContent>
+                {COMMON_PROVIDER_APIS.map(api => (
+                  <SelectItem key={api} value={api}>{renderTypeLabel(api)}</SelectItem>
+                ))}
+                <SelectItem value="custom">{t('settings.providers.page.custom.type.other.label')}</SelectItem>
+              </SelectContent>
+            </Select>
+            {manualApi && (
+              <Input
+                value={state.api}
+                onChange={(event) => updateField('api', event.target.value)}
+                aria-label={t('settings.providers.page.custom.type.other.label')}
+                placeholder="my-extension-api"
+                className="h-7 w-full font-mono sm:w-[280px]"
+              />
             )}
+            <span className="typography-micro text-muted-foreground">
+              {manualApi ? t('settings.providers.page.custom.type.other.description') : renderTypeDescription(state.api)}
+            </span>
           </div>
 
           <div className="grid grid-cols-1 gap-4 md:grid-cols-2">

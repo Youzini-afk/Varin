@@ -33,6 +33,11 @@ credentials stay in Pi auth storage and are never persisted in renderer settings
 and subsequent authentication are separate outcomes, so cancelled login must not be reported as
 successful credential setup.
 
+The custom-provider API selector exposes Chat Completions, Responses, Anthropic Messages and Gemini
+by name. The other/extension choice keeps an editable native API identifier, including a blank value
+for an inherited override; choosing that editor does not replace the current identifier or reset models,
+URLs or credentials. This is presentation of the existing Pi protocol path, not a new provider backend.
+
 ## Theme and component system
 
 `varin-mark.ts` owns the approved fold logo as two centered polygons, including the extended tips and
