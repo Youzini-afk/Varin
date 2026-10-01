@@ -15,6 +15,7 @@ import { createDocumentAuthority } from '../documents/authority.js';
 import { createSemanticIndexRuntime } from '../knowledge/semantic/runtime.js';
 import { createHashEmbedder } from '../knowledge/semantic/embedder.js';
 import { workspaceScope } from '../knowledge/semantic/identity.js';
+import { createFsSearchRuntime } from '../fs/search.js';
 import { TYPESCRIPT_DEFINITION_QUERY, TYPESCRIPT_IMPORT_QUERY, TYPESCRIPT_LITERAL_CALL_QUERY } from "../structure/queries.js";
 
 const repo = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "../../../../..");
@@ -157,7 +158,12 @@ it('explains a parent-ignored directory and permits an explicit directory enumer
 
 it('indexes Scala through native text units and validates returned source revisions', async () => {
   const f = await fixture();
-  const file = path.join(f.workspace, 'Main.scala');
+  execFileSync('git', ['init', '--quiet'], { cwd: f.workspace, stdio: 'ignore' });
+  await fs.writeFile(path.join(f.workspace, '.gitignore'), 'data/raw/\n');
+  const selected = path.join(f.workspace, 'data/raw');
+  await fs.mkdir(selected, { recursive: true });
+  const file = path.join(selected, 'Main.scala');
+  const documentId = 'data/raw/Main.scala';
   const text = 'object Main {\n  def uniqueScalaMarker = 42\n}\n';
   await fs.writeFile(file, text);
   const documents = createDocumentAuthority({ hostId: 'scala-index', dataDir: path.join(f.root, 'documents'),
@@ -165,17 +171,18 @@ it('indexes Scala through native text units and validates returned source revisi
   cleanup.push(() => documents.dispose());
   const { workspaceId } = await documents.resolveWorkspace({ path: f.workspace });
   const provider = createTreeSitterStructureProvider({ compute: f.service });
-  const units = await provider.unitsFile!({ workspaceId, root: f.workspace, path: 'Main.scala', languageId: 'scala' });
+  const units = await provider.unitsFile!({ workspaceId, root: f.workspace, path: documentId, languageId: 'scala' });
   assert.equal(units.status, 'ready', JSON.stringify(units));
   assert.ok(units.units.length > 0 && units.units.every(unit => unit.fallback && unit.parentKind === 'file'));
   const runtime = createSemanticIndexRuntime({ dataDir: f.root, hostId: 'scala-index', documents,
     structureSource: createStructureSource([provider]), embedder: createHashEmbedder(),
-    searchFilesystemFiles: async () => [{ name: 'Main.scala', path: file, relativePath: 'Main.scala' }] });
+    indexDirectories: [selected], includeIgnoredDirectories: [selected],
+    searchFilesystemFiles: createFsSearchRuntime({ compute: f.service }).searchFilesystemFiles });
   cleanup.push(() => runtime.dispose());
   const scope = workspaceScope(workspaceId);
   await runtime.scanScope(scope);
   const result = await runtime.search(scope, 'uniqueScalaMarker', 5);
-  assert.ok(result.hits.some(hit => hit.documentId === 'Main.scala' && hit.body.includes('uniqueScalaMarker') && hit.fallback));
+  assert.ok(result.hits.some(hit => hit.documentId === documentId && hit.body.includes('uniqueScalaMarker') && hit.fallback));
   assert.equal(result.hits[0]?.revision, units.revision);
   assert.equal(runtime.scanProgress(scope)?.coverageStats?.textFallbackFiles, 1);
   assert.equal(runtime.scanProgress(scope)?.coverageStats?.structurallySupportedFiles, 0);

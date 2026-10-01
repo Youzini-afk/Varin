@@ -49,6 +49,8 @@ derived store (`../vectors/`); they reuse `harness.embed` but never this MiniLM 
   Native inventory reports the actual Git root and whether an empty selected directory is ignored.
   Each selected directory can opt into `includeIgnoredDirectories`; the override is clipped to
   the selected indexing scope and applies to subsequent mutation eligibility as well as scans.
+  Structure/chunk reads of an admitted exact file do not apply Git filtering again; visibility
+  belongs to enumeration and eligibility, while the explicit content read retains native path grants.
   Other directories retain Git filtering. Status distinguishes visible files, semantic candidates,
   structurally supported files, text fallback files, unsupported files and published documents.
   Directory selection, storage location and request pacing are frozen when the Host starts. Editing them requires a Host

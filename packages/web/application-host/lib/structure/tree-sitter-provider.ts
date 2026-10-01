@@ -209,6 +209,9 @@ export function createTreeSitterStructureProvider(options: TreeSitterStructurePr
         lane: request.lane ?? "background",
         operation,
         includeHidden: true,
+        // File visibility is selected by the catalog or caller. An explicit,
+        // admitted source read must not apply Git filtering a second time.
+        respectGitignore: false,
         paths: [request.path],
         parseBudgetMs: options.parseBudgetMs ?? STRUCTURE_PARSE_BUDGET_MS,
         files: [{ path: request.path, lines: request.lines ?? [], ...(recipeId ? { recipeId } : {}) }],
