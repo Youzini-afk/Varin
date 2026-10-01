@@ -107,7 +107,7 @@
   },
   "dto": {
     "KernelProcessEnvironmentEntry": {"fields":{"name":{"type":"string"},"value":{"type":"string"}}},
-    "KernelProcessSpawnParams": {"fields":{"workspaceId":{"type":"string"},"processId":{"type":"string"},"rootId":{"type":"string"},"cwd":{"type":"string"},"command":{"type":"string"},"args":{"type":"string[]"},"env":{"type":"KernelProcessEnvironmentEntry[]"},"mode":{"type":"string"},"cols":{"type":"number","optional":true},"rows":{"type":"number","optional":true}}},
+    "KernelProcessSpawnParams": {"fields":{"workspaceId":{"type":"string"},"processId":{"type":"string"},"rootId":{"type":"string"},"cwd":{"type":"string"},"command":{"type":"string"},"args":{"type":"string[]"},"windowsRawArguments":{"type":"string","optional":true},"env":{"type":"KernelProcessEnvironmentEntry[]"},"mode":{"type":"string"},"cols":{"type":"number","optional":true},"rows":{"type":"number","optional":true}}},
     "KernelProcessReadParams": {"fields":{"workspaceId":{"type":"string"},"processId":{"type":"string"},"cursor":{"type":"number"},"maxBytes":{"type":"number","optional":true}}},
     "KernelProcessWriteParams": {"fields":{"workspaceId":{"type":"string"},"processId":{"type":"string"},"sequence":{"type":"number"},"bytesBase64":{"type":"string"},"eof":{"type":"boolean","optional":true}}},
     "KernelProcessResizeParams": {"fields":{"workspaceId":{"type":"string"},"processId":{"type":"string"},"cols":{"type":"number"},"rows":{"type":"number"}}},

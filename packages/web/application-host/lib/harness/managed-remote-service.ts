@@ -36,11 +36,16 @@ const SERVICE_CAPABILITIES = [
   "storage.read", "storage.write", "storage.maintenance",
   "recovery", "recovery.maintenance", "process", "process.maintenance",
 ];
+// Windows environment names are case-insensitive even when a parent process
+// publishes SYSTEMROOT or systemroot instead of SystemRoot.
+const environmentKey = (name: string) => process.platform === 'win32' ? name.toLowerCase() : name;
 const TARGET_BASE_ENVIRONMENT = new Set([
   "PATH", "Path", "PATHEXT", "SystemRoot", "WINDIR", "ComSpec",
   "HOME", "USER", "LOGNAME", "USERPROFILE", "SHELL",
   "TMP", "TEMP", "TMPDIR", "LANG", "LC_ALL",
-]);
+].map(environmentKey));
+const isTargetEnvironmentEntry = (entry: [string, string | undefined]): entry is [string, string] =>
+  TARGET_BASE_ENVIRONMENT.has(environmentKey(entry[0])) && typeof entry[1] === 'string';
 
 const digest = (...values: string[]): string => createHash("sha256").update(values.join("\0")).digest("hex");
 const recordPayload = (record: KernelRecordResult): Record<string, unknown> => {
@@ -456,7 +461,7 @@ export function createManagedRemoteExecutionService(options: ManagedRemoteExecut
     const cwd = input.cwd === "" ? "" : normalizedRelative(input.cwd, "Managed remote job cwd");
     const requestedResources = input.resources ?? {};
     const environment = Object.fromEntries(Object.entries(process.env)
-      .filter((entry): entry is [string, string] => TARGET_BASE_ENVIRONMENT.has(entry[0]) && typeof entry[1] === "string"));
+      .filter(isTargetEnvironmentEntry));
     for (const entry of input.env) environment[entry.name] = entry.value;
     if (input.gpuAllocation) {
       // Target-confirmed device binding wins over caller environment input.
@@ -783,13 +788,16 @@ export function createManagedRemoteExecutionService(options: ManagedRemoteExecut
       payload: { ...recordPayload(record), rootId }, expectedRecordRevision: record.recordRevision });
     const windows = process.platform === "win32";
     const executable = windows ? (process.env.ComSpec || "cmd.exe") : "/bin/sh";
-    const args = windows ? ["/d", "/s", "/c", command] : ["-lc", command];
+    const args = windows ? ["/d", "/s", "/c"] : ["-lc", command];
     const environment = Object.fromEntries(Object.entries(process.env)
-      .filter((entry): entry is [string, string] => TARGET_BASE_ENVIRONMENT.has(entry[0]) && typeof entry[1] === "string"));
+      .filter(isTargetEnvironmentEntry));
     const startedAt = now();
     signal?.throwIfAborted();
     await scoped.processSpawn({
       workspaceId: WORKSPACE_ID, processId, rootId, cwd: "", command: executable, args,
+      // CMD consumes shell syntax, not a CRT-escaped argv value. /s removes
+      // these outer quotes while preserving the command's own quoted paths.
+      ...(windows ? { windowsRawArguments: `"${command}"` } : {}),
       env: Object.entries(environment).map(([name, value]) => ({ name, value })), mode: "pipe",
     });
     const deadline = startedAt + Math.max(0, input.waitMs);

@@ -63,7 +63,7 @@
     "cmdk": "^1.1.1",
     "cron-parser": "^5.5.0",
     "diff": "9.0.0",
-    "dompurify": "^3.4.13",
+    "dompurify": "^3.4.16",
     "fuse.js": "^7.5.0",
     "ghostty-web": "^0.4.0",
     "html-to-image": "^1.11.13",

@@ -86,6 +86,11 @@ tracking for adopted descendants. Unproven epoch-loss exits remain unknown and p
 reclamation. Storage retains its lock through process drainage. Guardian receipts precede terminal
 responses. No hostile OS-sandbox or physical power-cut claim follows from this implementation.
 
+Pipe launches normally escape each argument. The private `windowsRawArguments` field appends an
+explicit Windows command-line fragment for shells such as CMD, whose `/c` input must retain its own
+quotes and operators. The shell owner supplies this fragment; it participates in the process identity
+hash. It is rejected on Unix and PTY launches, which use their normal argument transport.
+
 Use `bun run kernel:build` to supply Application Host build identity and architecture. A plain
 Cargo build defaults to the crate identity and is not a production acceptance artifact. See
 [the Host consumer map](../packages/web/application-host/lib/process/DOCUMENTATION.md).

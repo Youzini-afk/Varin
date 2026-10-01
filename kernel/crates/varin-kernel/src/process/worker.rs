@@ -37,6 +37,8 @@ pub struct Config {
     pub cwd: PathBuf,
     pub command: String,
     pub args: Vec<String>,
+    #[cfg(windows)]
+    pub windows_raw_arguments: Option<String>,
     pub env: Vec<Environment>,
     pub mode: String,
     pub cols: u16,
@@ -113,6 +115,9 @@ fn spawn(config: &Config) -> Result<Spawned, Box<dyn std::error::Error>> {
         {
             use std::os::windows::process::CommandExt;
             command.creation_flags(0x08000000);
+            if let Some(raw) = &config.windows_raw_arguments {
+                command.raw_arg(raw);
+            }
         }
         #[cfg(unix)]
         {

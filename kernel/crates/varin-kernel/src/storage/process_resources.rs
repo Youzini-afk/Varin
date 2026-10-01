@@ -200,6 +200,21 @@ impl Storage {
                 "process mode must be pty or pipe".into(),
             ));
         }
+        if let Some(raw) = params_value
+            .get("windowsRawArguments")
+            .and_then(Value::as_str)
+        {
+            if !cfg!(windows) || mode != "pipe" {
+                return Err(KernelError::Operation(
+                    "windowsRawArguments requires a Windows pipe process".into(),
+                ));
+            }
+            if raw.contains('\0') {
+                return Err(KernelError::Operation(
+                    "process windowsRawArguments contains NUL".into(),
+                ));
+            }
+        }
         let command = string(params_value, "command")?;
         if command.is_empty() || command.contains('\0') {
             return Err(KernelError::Operation(
@@ -261,6 +276,7 @@ impl Storage {
         }
         if let Err(error)=self.processes.spawn(id,json!({"processId":id,"kernelEpoch":grant.kernel_epoch,
             "receiptPath":receipt_path,"jobName":job_name,"cwd":cwd,"command":command,"args":params_value["args"],
+            "windowsRawArguments":params_value["windowsRawArguments"],
             "env":params_value["env"],"mode":mode,"cols":cols,"rows":rows})){
             let mut failed=record;
             failed["status"]=json!("failed");failed["writerActive"]=json!(false);failed["reason"]=json!(error.to_string());

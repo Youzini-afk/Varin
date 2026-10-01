@@ -38,14 +38,25 @@ describe.skipIf(!hasNativeProcessKernel)("production consumers over Rust process
     const remote = createManagedRemoteExecutionService(options);
     let otherProcess: string | undefined;
     try {
-      const script = path.join(f.docs.workspaceRoot, 'remote-bot-work.cjs');
-      await fs.writeFile(script, 'setInterval(() => {}, 1000)');
+      const directory = path.join(f.docs.workspaceRoot, 'remote bot & work');
+      await fs.mkdir(directory);
+      const script = path.join(directory, 'remote-bot-work.cjs');
+      await fs.writeFile(script, 'process.stdout.write("ready\\n");setInterval(() => {}, 1000)');
       const input = { coordinatorHostId: 'coordinator', command: `"${process.execPath}" "${script}"`, cwd: f.docs.workspaceRoot, waitMs: 0 };
       const first = await remote.shellExec('principal', { ...input, toolCallId: 'a', ownerScopeId: 'bot:a' });
       const second = await remote.shellExec('principal', { ...input, toolCallId: 'b', ownerScopeId: 'bot:b' });
       expect(first.kind).toBe('background'); expect(second.kind).toBe('background');
       if (first.kind !== 'background' || second.kind !== 'background') throw new Error('Expected running workers');
       otherProcess = second.id;
+      // A published native handle can precede a shell startup failure. Prove
+      // both commands reached user code before testing scope cancellation.
+      for (const id of [first.id, second.id]) {
+        await until(async () => {
+          const state = await remote.shellRead('principal', 'coordinator', id, 0, 4096);
+          if (!state.running) throw new Error(`Remote worker exited before readiness: ${JSON.stringify(state)}`);
+          return state.text.includes('ready\n');
+        });
+      }
       await remote.setShellScopeSleeping('principal', 'coordinator', 'bot:a', true);
       expect((await remote.shellRead('principal', 'coordinator', first.id, 0, 0)).running).toBe(false);
       expect((await remote.shellRead('principal', 'coordinator', second.id, 0, 0)).running).toBe(true);

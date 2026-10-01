@@ -116,6 +116,7 @@ export interface KernelProcessSpawnParams {
   cwd: string;
   command: string;
   args: string[];
+  windowsRawArguments?: string;
   env: KernelProcessEnvironmentEntry[];
   mode: string;
   cols?: number;
