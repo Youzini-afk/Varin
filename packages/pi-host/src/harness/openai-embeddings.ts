@@ -6,6 +6,7 @@ import { setTimeout as delay } from "node:timers/promises";
 
 export interface OpenAICompatibleEmbeddingsRequest {
   baseUrl: string;
+  endpoint?: string;
   apiKey: string;
   headers?: Record<string, string>;
   model: string;
@@ -27,8 +28,9 @@ const isRecord = (value: unknown): value is Record<string, unknown> => (
   typeof value === "object" && value !== null && !Array.isArray(value)
 );
 
-const embeddingsUrl = (baseUrl: string): string => {
+const embeddingsUrl = (baseUrl: string, endpoint?: string): string => {
   const trimmed = baseUrl.replace(/\/+$/u, "");
+  if (endpoint) return `${trimmed}${endpoint}`;
   return trimmed.endsWith("/embeddings") ? trimmed : `${trimmed}/embeddings`;
 };
 
@@ -89,7 +91,7 @@ export async function requestOpenAICompatibleEmbeddings(
   let response: Response;
   for (let attempt = 0; ; attempt++) {
     request.signal?.throwIfAborted();
-    response = await fetchImpl(embeddingsUrl(request.baseUrl), init);
+    response = await fetchImpl(embeddingsUrl(request.baseUrl, request.endpoint), init);
     if (attempt >= maxRetries || (response.status !== 429 && (response.status < 500 || response.status > 599))) break;
     const retryAfter = response.headers.get("retry-after");
     const seconds = retryAfter?.trim() ? Number(retryAfter) : NaN;

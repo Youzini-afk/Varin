@@ -3,6 +3,7 @@ import type {
   ProviderConfigDetails,
   ProviderDescriptor,
 } from '@varin/protocol';
+import { PROVIDER_INFERENCE_CAPABILITIES } from '@varin/protocol';
 import { create } from 'zustand';
 import {
   getPiProviderConfig,
@@ -58,6 +59,8 @@ const catalog = async (cwd: string): Promise<PiProviderView[]> => {
     const providerModels = modelsByProvider.get(provider.id) ?? [];
     return {
       ...provider,
+      modelCount: new Set([...providerModels.map(model => model.id), ...PROVIDER_INFERENCE_CAPABILITIES.flatMap(kind =>
+        details?.capabilities?.[kind]?.enabled === false ? [] : details?.capabilities?.[kind]?.models?.map(model => model.id) ?? [])]).size,
       connected:
         provider.auth.configured
         || hasConfigSource(details)

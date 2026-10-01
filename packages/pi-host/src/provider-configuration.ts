@@ -22,6 +22,8 @@ import {
   type ProviderConfigLocation,
   type ProviderConfigScope,
   parseProviderConfigInput,
+  parseProviderCapabilities,
+  type ProviderCapabilities,
   ProviderConfigValidationError,
 } from "@varin/protocol";
 import {
@@ -49,7 +51,7 @@ interface RuntimeConfigurationState {
 
 const EMPTY_CONFIG = "{\n  \"providers\": {}\n}\n";
 const LOCK_RETRY_MS = 50;
-const EDITABLE_PROVIDER_KEYS = ["api", "authHeader", "baseUrl", "models", "name"] as const;
+const EDITABLE_PROVIDER_KEYS = ["api", "authHeader", "baseUrl", "models", "name", "capabilities"] as const;
 
 function configurableDuration(name: string): number | undefined {
   const configured = process.env[name];
@@ -223,6 +225,7 @@ function runtimeProviderConfig(
     throw new HostError("provider_config_invalid", `Provider ${providerId} must be an object`);
   }
   const currentModels = runtime.getModels(providerId).map((model) => ({ ...model }));
+  parseProviderCapabilities(value.capabilities);
   let models: ProviderModelConfig[] | undefined;
   if (Array.isArray(value.models) || isObject(value.modelOverrides)) {
     models = currentModels;
@@ -266,6 +269,17 @@ function providerRecord(document: ConfigDocument, providerId: string): JsonObjec
   if (!providers || !Object.prototype.hasOwnProperty.call(providers, providerId)) return undefined;
   const value = providers?.[providerId];
   return isObject(value) ? value : undefined;
+}
+
+function capabilitiesFromDocuments(documents: Partial<Record<ProviderConfigScope, ConfigDocument>>, providerId: string): ProviderCapabilities | undefined {
+  let result: ProviderCapabilities | undefined;
+  for (const scope of ["user", "project", "custom"] as const) {
+    const document = documents[scope];
+    const value = document && providerRecord(document, providerId);
+    const capabilities = value && parseProviderCapabilities(value.capabilities);
+    if (capabilities) result = { ...result, ...capabilities };
+  }
+  return result;
 }
 
 function browserSafeConfig(providerId: string, value: JsonObject): ProviderConfigInput | undefined {
@@ -319,6 +333,7 @@ function browserSafeConfig(providerId: string, value: JsonObject): ProviderConfi
       id: providerId,
       ...(models === undefined ? {} : { models }),
       name: value.name,
+      capabilities: value.capabilities,
     });
   } catch (error) {
     if (error instanceof ProviderConfigValidationError) return undefined;
@@ -547,7 +562,8 @@ export class ProviderConfigurationManager {
     }
     state.appliedIds.clear();
     await runtime.refresh({ allowNetwork: false });
-    for (const scope of ["project", "custom"] as const) {
+    const documents: Partial<Record<ProviderConfigScope, ConfigDocument>> = {};
+    for (const scope of ["user", "project", "custom"] as const) {
       if (scope === "project" && !projectTrusted) continue;
       const path = this.#pathForScope(scope, cwd);
       if (!path) continue;
@@ -569,6 +585,8 @@ export class ProviderConfigurationManager {
         continue;
       }
       if (!document.exists) continue;
+      documents[scope] = document;
+      if (scope === "user") continue; // Native Pi loads the user's api/models/auth fields.
       const providers = isObject(document.data.providers) ? document.data.providers : {};
       for (const [providerId, value] of Object.entries(providers)) {
         try {
@@ -579,6 +597,18 @@ export class ProviderConfigurationManager {
             `Failed to apply ${scope} provider ${providerId}: ${error instanceof Error ? error.message : String(error)}`,
           );
         }
+      }
+    }
+    // Apply the effective chat choice after all native layers. Disabling never
+    // deletes model definitions, and a higher-scope enable can restore them.
+    const configuredIds = new Set(Object.values(documents).flatMap(document => Object.keys(isObject(document.data.providers) ? document.data.providers : {})));
+    for (const providerId of configuredIds) {
+      try {
+        if (capabilitiesFromDocuments(documents, providerId)?.chat !== false) continue;
+        runtime.registerProvider(providerId, { models: [] });
+        state.appliedIds.add(providerId);
+      } catch (error) {
+        warnings.push(`Failed to apply provider capabilities for ${providerId}: ${error instanceof Error ? error.message : String(error)}`);
       }
     }
     await runtime.refresh({ allowNetwork: false });
@@ -608,6 +638,9 @@ export class ProviderConfigurationManager {
     }
     const status = runtime.getProviderAuthStatus(normalizedId);
     const config = effective ? browserSafeConfig(normalizedId, effective) : undefined;
+    const backgroundDocuments = { ...documents };
+    delete backgroundDocuments.project;
+    const capabilities = capabilitiesFromDocuments(backgroundDocuments, normalizedId);
     return {
       auth: {
         configured: status.configured,
@@ -615,6 +648,7 @@ export class ProviderConfigurationManager {
         ...(status.source === undefined ? {} : { source: status.source }),
       },
       ...(config === undefined ? {} : { config }),
+      ...(capabilities === undefined ? {} : { capabilities }),
       ...(effectiveScope === undefined ? {} : { effectiveScope }),
       locations,
       providerId: normalizedId,
@@ -638,6 +672,7 @@ export class ProviderConfigurationManager {
       ...(config.baseUrl === undefined ? {} : { baseUrl: config.baseUrl }),
       ...(config.models === undefined ? {} : { models: config.models }),
       ...(config.name === undefined ? {} : { name: config.name }),
+      ...(config.capabilities === undefined ? {} : { capabilities: config.capabilities }),
     };
     // Validate against the currently composed native Pi catalog before touching disk. This keeps
     // partial overrides available while preventing a malformed new model from being silently saved
@@ -689,6 +724,12 @@ export class ProviderConfigurationManager {
       "provider_config_not_found",
       `No editable Pi provider configuration exists for ${normalizedId}`,
     );
+  }
+
+  /** Same configuration authority and scope order as native providers; no project layer for background calls. */
+  async effectiveCapabilities(cwd: string, providerId: string, projectTrusted: boolean): Promise<ProviderCapabilities | undefined> {
+    const documents = await this.#documents(cwd, projectTrusted);
+    return capabilitiesFromDocuments(documents, this.#providerId(providerId));
   }
 
   #providerId(value: string): string {

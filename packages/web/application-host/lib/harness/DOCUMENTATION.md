@@ -135,6 +135,13 @@ Global singleton that owns:
 
 ### HarnessRouter (`router.ts`)
 
+Embedding, reranking and fast decisions resolve operation-specific provider capabilities in Pi.
+Their connection/credential defaults and model declarations are independent of the native chat API;
+the Host receives only frozen, credential-free bindings. User/operator metadata can override the
+operation's address, path and credential owner; project configuration cannot redirect background
+inference. Declared models are picker suggestions, and explicit undiscovered IDs remain usable.
+See [the provider contract](../../../../pi-host/src/PROVIDERS.md) for storage, precedence and disable behavior.
+
 `web.search` has a Host-owned keyless default (D-289): Exa MCP, then Parallel only on failure.
 `web-search.ts` owns direct HTTP/SSE tool calls and normalized source results; no MCP subprocess or
 model credentials are involved. Explicit providers retain their own credential contract and never

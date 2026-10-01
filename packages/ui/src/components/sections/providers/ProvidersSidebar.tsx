@@ -120,7 +120,7 @@ const ProviderListItem: React.FC<{
   selectedProviderId: string;
   onSelect: () => void;
 }> = ({ provider, selectedProviderId, onSelect }) => {
-  const modelCount = provider.models.length;
+  const modelCount = provider.modelCount;
   const isSelected = provider.id === selectedProviderId;
 
   return (

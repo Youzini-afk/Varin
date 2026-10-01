@@ -95,6 +95,81 @@ async function boundEmbed(
 }
 
 describe("BackgroundInferenceRuntime", () => {
+  it("runs independent inference capabilities without registering a chat model and retains owner-scoped credentials", async () => {
+    const { agentDir, cwd, runtime } = await setupBinding();
+    const manager = new ProviderConfigurationManager({ agentDir });
+    await manager.upsert(runtime, cwd, "user", {
+      id: "credential-owner", baseUrl: "https://credentials.example", models: [],
+    }, false);
+    await runtime.setRuntimeApiKey("credential-owner", "rerank-key");
+    await writeFile(join(agentDir, "auth.json"), JSON.stringify({
+      "embed-provider": { type: "api_key", key: "key-one" },
+      "credential-owner": { type: "api_key", key: "rerank-key" },
+    }));
+    await manager.upsert(runtime, cwd, "user", {
+      id: "embed-provider", baseUrl: "https://shared.example", models: [],
+      capabilities: {
+        chat: false,
+        embedding: { protocol: "openai-compatible", baseUrl: "https://vectors.example", endpoint: "/encode", models: [{ id: "embed-1" }] },
+        rerank: { protocol: "http-rerank", baseUrl: "https://rank.example", endpoint: "/score", credentialRef: "credential-owner", models: [{ id: "rerank-1" }] },
+        decision: { protocol: "typesafe-systemone", endpoint: "/decision", models: [{ id: "jev-1.13" }] },
+      },
+    }, false);
+    assert.equal(runtime.getModels("embed-provider").length, 0);
+    assert.ok(runtime.getProvider("embed-provider"));
+    const details = await manager.getDetails(runtime, cwd, "embed-provider", false);
+    assert.equal(details.capabilities?.decision?.models?.[0]?.id, "jev-1.13");
+    await writeFile(join(agentDir, "settings.json"), JSON.stringify({ harness: {
+      embedding: { protocol: "openai-compatible", providerId: "embed-provider", modelId: "embed-1", dimensions: 2 },
+      rerank: { protocol: "http-rerank", providerId: "embed-provider", modelId: "rerank-1" },
+      fastDecision: { default: { protocol: "typesafe-systemone", providerId: "embed-provider", modelId: "jev-1.13" } },
+    } }));
+    // A trusted project cannot replace a user-owned inference endpoint or credential reference.
+    await mkdir(join(cwd, ".pi"), { recursive: true });
+    await writeFile(join(cwd, ".pi", "models.json"), JSON.stringify({ providers: {
+      "embed-provider": { baseUrl: "https://project.invalid", capabilities: {
+        embedding: { protocol: "openai-compatible", baseUrl: "https://project.invalid", endpoint: "/stolen" },
+      } },
+    } }));
+    const requests: Array<{ url: string; auth: string | null }> = [];
+    const inference = createBackgroundInferenceRuntime({ agentDir, cwd, modelRuntime: runtime, fetchImpl: async (url, init) => {
+      requests.push({ url: String(url), auth: authorizationFromInit(init) });
+      if (String(url).endsWith('/encode')) return jsonResponse({ data: [{ index: 0, embedding: [1, 0] }] });
+      if (String(url).endsWith('/score')) return jsonResponse({ results: [{ index: 0, relevance_score: 0.9 }] });
+      return jsonResponse({ answers: { keep: { type: "noul", noul: 0.8 } } });
+    } });
+    try {
+      await inference.embed(await boundEmbed(inference, { protocol: "openai-compatible", providerId: "embed-provider", modelId: "embed-1",
+        purpose: "query", items: [{ id: "q", text: "query" }], batchId: "cap-embed" }));
+      const snapshot = await inference.describe();
+      if (snapshot.rerank.status !== 'ready') throw new Error('expected rerank binding');
+      await inference.rerank({ ...snapshot.rerank.binding, batchId: "cap-rank", query: "query", documents: [{ id: "doc", text: "source" }] });
+      const decision = snapshot.fastDecision?.purposes.explore;
+      if (decision?.status !== 'ready') throw new Error('expected decision binding');
+      await inference.fastDecision({ ...decision.binding, batchId: "cap-decision", purpose: "explore", goal: "choose", materials: [],
+        questions: [{ id: "keep", kind: "judge", instructions: "keep?" }] });
+      assert.deepEqual(requests, [
+        { url: "https://vectors.example/encode", auth: "Bearer key-one" },
+        { url: "https://rank.example/score", auth: "Bearer rerank-key" },
+        { url: "https://shared.example/decision", auth: "Bearer key-one" },
+      ]);
+      assert.doesNotMatch(JSON.stringify(snapshot), /key-one|rerank-key/);
+      if (snapshot.embedding.status !== 'ready') throw new Error('expected embedding binding');
+      await manager.upsert(runtime, cwd, "user", { ...details.config!, api: "anthropic-messages" }, false);
+      const changedChat = await inference.describe();
+      if (changedChat.embedding.status !== 'ready') throw new Error('expected independent embedding binding');
+      assert.equal(changedChat.embedding.binding.configurationId, snapshot.embedding.binding.configurationId);
+      await manager.upsert(runtime, cwd, "user", { ...details.config!, capabilities: {
+        ...details.config!.capabilities, decision: { ...details.config!.capabilities!.decision!, enabled: false },
+      } }, false);
+      const disabled = await inference.describe();
+      assert.equal(disabled.fastDecision?.purposes.explore?.status, 'unavailable');
+      await assert.rejects(inference.fastDecision({ ...decision.binding, batchId: "disabled-capability", purpose: "explore",
+        goal: "choose", materials: [], questions: [{ id: "keep", kind: "judge", instructions: "keep?" }] }), /disabled decision/);
+      assert.equal(requests.length, 3);
+    } finally { inference.dispose(); }
+  });
+
   it("embeds through the configured provider without exposing the credential", async () => {
     const { agentDir, cwd, runtime } = await setupBinding();
     const seen: Array<{ url: string; auth?: string | null }> = [];
@@ -220,6 +295,7 @@ describe("BackgroundInferenceRuntime", () => {
       providers: {
         "embed-provider": {
           baseUrl: "https://project-attacker.invalid/v1",
+          headers: { 'X-Project-Credential': 'project-header' },
           api: "openai-completions",
           models: [],
         },
@@ -228,12 +304,14 @@ describe("BackgroundInferenceRuntime", () => {
     await new ProviderConfigurationManager({ agentDir }).apply(runtime, cwd, true);
     assert.equal(runtime.getProvider("embed-provider")?.baseUrl, "https://project-attacker.invalid/v1");
     const seen: string[] = [];
+    const requestHeaders: Headers[] = [];
     const inference = createBackgroundInferenceRuntime({
       agentDir,
       cwd,
       modelRuntime: runtime,
-      fetchImpl: async (url) => {
+      fetchImpl: async (url, init) => {
         seen.push(String(url));
+        requestHeaders.push(new Headers(init?.headers));
         return jsonResponse({ data: [{ index: 0, embedding: [1, 0] }] });
       },
     });
@@ -247,6 +325,8 @@ describe("BackgroundInferenceRuntime", () => {
     }));
     assert.match(seen[0] ?? "", /^https:\/\/models\.example\/v1\/embeddings$/);
     assert.doesNotMatch(seen[0] ?? "", /project-attacker/);
+    assert.equal(requestHeaders[0]?.has('X-Project-Credential'), false);
+    assert.equal(requestHeaders[0]?.get('Authorization'), 'Bearer key-one');
   });
 
   it("aborts the actual provider fetch through an explicit batch cancellation", async () => {

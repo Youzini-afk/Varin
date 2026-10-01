@@ -1,4 +1,7 @@
 import {
+  PROVIDER_INFERENCE_CAPABILITIES,
+  PROVIDER_INFERENCE_PROTOCOLS,
+  type ProviderInferenceCapability,
   type ThinkingLevel,
   type DiscoverableProviderApi,
   type ProviderConfigInput,
@@ -36,7 +39,31 @@ export interface CustomProviderEditableFormState {
   modelsDefined: boolean;
   name: string;
   scope: ProviderConfigScope;
+  chatEnabled: boolean;
+  chatDefined: boolean;
+  inference: Record<ProviderInferenceCapability, CustomProviderInferenceForm>;
 }
+
+export interface CustomProviderInferenceForm {
+  enabled: boolean;
+  disabled: boolean;
+  baseURL: string;
+  endpoint: string;
+  credentialRef: string;
+  models: CustomProviderEditableModel[];
+}
+
+export const createEmptyInferenceForm = (): CustomProviderInferenceForm => ({
+  enabled: false, disabled: false, baseURL: '', endpoint: '', credentialRef: '', models: [],
+});
+
+const inferenceFormsFromConfig = (config?: ProviderConfigInput['capabilities']): CustomProviderEditableFormState['inference'] =>
+  Object.fromEntries(PROVIDER_INFERENCE_CAPABILITIES.map(kind => {
+    const capability = config?.[kind];
+    return [kind, { ...createEmptyInferenceForm(), enabled: Boolean(capability) && capability?.enabled !== false, disabled: capability?.enabled === false,
+      baseURL: capability?.baseUrl ?? '', endpoint: capability?.endpoint ?? '', credentialRef: capability?.credentialRef ?? '',
+      models: (capability?.models ?? []).map(toEditableModel) }];
+  })) as CustomProviderEditableFormState['inference'];
 
 export type CustomProviderConfigInput = ProviderConfigInput & {
   scope?: ProviderConfigScope;
@@ -157,6 +184,9 @@ export const createEmptyCustomProviderState = (): CustomProviderEditableFormStat
   modelsDefined: true,
   name: '',
   scope: 'user',
+  chatEnabled: true,
+  chatDefined: false,
+  inference: inferenceFormsFromConfig(),
 });
 
 export const resolveCustomProviderApiKey = (
@@ -250,6 +280,9 @@ export const createCustomProviderFormStateFromConfig = (
     modelsDefined: config.models !== undefined,
     name: trimString(config.name),
     scope: config.scope ?? 'user',
+    chatEnabled: config.capabilities?.chat !== false,
+    chatDefined: config.capabilities?.chat !== undefined,
+    inference: inferenceFormsFromConfig(config.capabilities),
   };
 };
 
@@ -259,12 +292,28 @@ export const createPiProviderConfigFromForm = (
   const api = state.api.trim();
   const baseUrl = state.baseURL.trim();
   const name = state.name.trim();
+  const chatModels = normalizeCustomProviderModelRows(state.models);
+  const capabilities: NonNullable<ProviderConfigInput['capabilities']> = {
+    ...(state.chatDefined || !state.chatEnabled ? { chat: state.chatEnabled } : {}),
+  };
+  for (const kind of PROVIDER_INFERENCE_CAPABILITIES) {
+    const capability = state.inference[kind];
+    if (capability.enabled || capability.disabled) capabilities[kind] = {
+      protocol: PROVIDER_INFERENCE_PROTOCOLS[kind],
+      ...(!capability.enabled ? { enabled: false } : {}),
+      ...(capability.baseURL.trim() ? { baseUrl: capability.baseURL.trim() } : {}),
+      ...(capability.endpoint.trim() ? { endpoint: capability.endpoint.trim() } : {}),
+      ...(capability.credentialRef.trim() ? { credentialRef: capability.credentialRef.trim() } : {}),
+      models: normalizeCustomProviderModelRows(capability.models),
+    };
+  }
   return {
-    ...(api ? { api } : {}),
+    ...((state.chatEnabled || chatModels.length > 0) && api ? { api } : {}),
     ...(state.authHeader === undefined ? {} : { authHeader: state.authHeader }),
     ...(baseUrl ? { baseUrl } : {}),
     id: state.id.trim(),
-    ...(state.modelsDefined ? { models: normalizeCustomProviderModelRows(state.models) } : {}),
+    ...(state.modelsDefined || !state.chatEnabled ? { models: chatModels } : {}),
     ...(name ? { name } : {}),
+    ...(Object.keys(capabilities).length ? { capabilities } : {}),
   };
 };

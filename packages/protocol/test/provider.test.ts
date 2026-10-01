@@ -69,4 +69,15 @@ describe("provider configuration protocol", () => {
       /duplicate model id/u,
     );
   });
+
+  it("validates each capability independently while allowing one model ID to serve multiple capabilities", () => {
+    const input = { id: "mixed", capabilities: {
+      embedding: { protocol: "openai-compatible", models: [{ id: "shared" }] },
+      rerank: { protocol: "http-rerank", models: [{ id: "shared" }] },
+    } };
+    assert.equal(parseProviderConfigInput(input).capabilities?.rerank?.models?.[0]?.id, "shared");
+    assert.throws(() => parseProviderConfigInput({ ...input, capabilities: { decision: { protocol: "openai-completions" } } }), /protocol/);
+    assert.throws(() => parseProviderConfigInput({ ...input, capabilities: { embedding: { protocol: "openai-compatible", baseUrl: "file:///tmp" } } }), /http or https/);
+    assert.throws(() => parseProviderConfigInput({ ...input, capabilities: { rerank: { protocol: "http-rerank", endpoint: "https://other.invalid" } } }), /relative path/);
+  });
 });

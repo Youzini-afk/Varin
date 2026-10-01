@@ -15,6 +15,34 @@ export const DISCOVERABLE_PROVIDER_APIS = [
 
 export type DiscoverableProviderApi = (typeof DISCOVERABLE_PROVIDER_APIS)[number];
 
+export const PROVIDER_INFERENCE_CAPABILITIES = ["embedding", "rerank", "decision"] as const;
+export type ProviderInferenceCapability = (typeof PROVIDER_INFERENCE_CAPABILITIES)[number];
+export const PROVIDER_INFERENCE_PROTOCOLS = {
+  embedding: "openai-compatible",
+  rerank: "http-rerank",
+  decision: "typesafe-systemone",
+} as const;
+
+export interface ProviderInferenceConfig {
+  protocol: (typeof PROVIDER_INFERENCE_PROTOCOLS)[ProviderInferenceCapability];
+  /** False retains the connection and model definitions while stopping use of this capability. */
+  enabled?: boolean;
+  /** Absent overrides inherit the provider connection. Secrets stay in Pi auth storage. */
+  baseUrl?: string;
+  endpoint?: string;
+  /** Another Pi provider's credential owner; defaults to this provider. */
+  credentialRef?: string;
+  models?: ProviderModelConfigInput[];
+}
+
+export interface ProviderCapabilities {
+  /** Native Pi api/models fields describe generation. False removes this provider from chat catalogs. */
+  chat?: boolean;
+  embedding?: ProviderInferenceConfig;
+  rerank?: ProviderInferenceConfig;
+  decision?: ProviderInferenceConfig;
+}
+
 export interface ProviderModelCostInput {
   cacheRead?: number;
   cacheWrite?: number;
@@ -47,6 +75,7 @@ export interface ProviderConfigInput {
   id: string;
   models?: ProviderModelConfigInput[];
   name?: string;
+  capabilities?: ProviderCapabilities;
 }
 
 export interface ProviderConfigLocation {
@@ -64,6 +93,8 @@ export interface ProviderConfigDetails {
     source?: string;
   };
   config?: ProviderConfigInput;
+  /** User/operator inference catalog, independent of chat models; project configuration cannot redirect background inference. */
+  capabilities?: ProviderCapabilities;
   effectiveScope?: ProviderConfigScope;
   locations: Record<ProviderConfigScope, ProviderConfigLocation>;
   providerId: string;
@@ -158,8 +189,8 @@ function parseThinkingLevelMap(
   return result;
 }
 
-function parseModel(value: unknown, index: number): ProviderModelConfigInput {
-  const path = `config.models[${index}]`;
+function parseModel(value: unknown, index: number, prefix = "config.models"): ProviderModelConfigInput {
+  const path = `${prefix}[${index}]`;
   const input = recordAt(value, path);
   const id = requiredString(input.id, `${path}.id`);
   const name = optionalString(input.name, `${path}.name`);
@@ -216,6 +247,47 @@ function parseModel(value: unknown, index: number): ProviderModelConfigInput {
   };
 }
 
+export function parseProviderCapabilities(value: unknown): ProviderCapabilities | undefined {
+  if (value === undefined) return undefined;
+  const input = recordAt(value, "config.capabilities");
+  const result: ProviderCapabilities = {};
+  const chat = optionalBoolean(input.chat, "config.capabilities.chat");
+  if (chat !== undefined) result.chat = chat;
+  for (const kind of PROVIDER_INFERENCE_CAPABILITIES) {
+    const raw = input[kind];
+    if (raw === undefined) continue;
+    const location = `config.capabilities.${kind}`;
+    const config = recordAt(raw, location);
+    const enabled = optionalBoolean(config.enabled, `${location}.enabled`);
+    if (config.protocol !== PROVIDER_INFERENCE_PROTOCOLS[kind]) {
+      throw new ProviderConfigValidationError(`${location}.protocol`, `must be ${PROVIDER_INFERENCE_PROTOCOLS[kind]}`);
+    }
+    const baseUrl = optionalString(config.baseUrl, `${location}.baseUrl`);
+    if (baseUrl !== undefined) {
+      let url: URL;
+      try { url = new URL(baseUrl); } catch { throw new ProviderConfigValidationError(`${location}.baseUrl`, "must be a valid URL"); }
+      if (url.protocol !== "http:" && url.protocol !== "https:") throw new ProviderConfigValidationError(`${location}.baseUrl`, "must use http or https");
+    }
+    const endpoint = optionalString(config.endpoint, `${location}.endpoint`);
+    if (endpoint !== undefined && !endpoint.startsWith("/")) {
+      throw new ProviderConfigValidationError(`${location}.endpoint`, "must be a provider-relative path starting with /");
+    }
+    const credentialRef = optionalString(config.credentialRef, `${location}.credentialRef`);
+    if (config.models !== undefined && !Array.isArray(config.models)) throw new ProviderConfigValidationError(`${location}.models`, "must be an array");
+    const models = (config.models as unknown[] | undefined)?.map((model, index) => parseModel(model, index, `${location}.models`));
+    if (models && new Set(models.map(model => model.id)).size !== models.length) throw new ProviderConfigValidationError(`${location}.models`, "contains duplicate model ids");
+    result[kind] = {
+      protocol: PROVIDER_INFERENCE_PROTOCOLS[kind],
+      ...(enabled === undefined ? {} : { enabled }),
+      ...(baseUrl === undefined ? {} : { baseUrl }),
+      ...(endpoint === undefined ? {} : { endpoint }),
+      ...(credentialRef === undefined ? {} : { credentialRef }),
+      ...(models === undefined ? {} : { models }),
+    };
+  }
+  return result;
+}
+
 export function parseProviderConfigInput(value: unknown): ProviderConfigInput {
   const input = recordAt(value, "config");
   const id = requiredString(input.id, "config.id");
@@ -239,7 +311,8 @@ export function parseProviderConfigInput(value: unknown): ProviderConfigInput {
   if (input.models !== undefined && !Array.isArray(input.models)) {
     throw new ProviderConfigValidationError("config.models", "must be an array");
   }
-  const models = input.models?.map(parseModel);
+  const models = input.models?.map((model, index) => parseModel(model, index));
+  const capabilities = parseProviderCapabilities(input.capabilities);
   const ids = new Set<string>();
   for (const model of models ?? []) {
     if (ids.has(model.id)) {
@@ -252,7 +325,7 @@ export function parseProviderConfigInput(value: unknown): ProviderConfigInput {
     authHeader === undefined &&
     baseUrl === undefined &&
     models === undefined &&
-    name === undefined
+    name === undefined && capabilities === undefined
   ) {
     throw new ProviderConfigValidationError(
       "config",
@@ -266,5 +339,6 @@ export function parseProviderConfigInput(value: unknown): ProviderConfigInput {
     id,
     ...(models === undefined ? {} : { models }),
     ...(name === undefined ? {} : { name }),
+    ...(capabilities === undefined ? {} : { capabilities }),
   };
 }

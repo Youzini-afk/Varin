@@ -32,6 +32,7 @@ import {
   type HarnessRerankSettings,
   type HarnessSettingsInput,
   type HarnessVectorSpaceBinding,
+  type ProviderInferenceCapability,
 } from "@varin/protocol";
 import { HostError } from "../errors.js";
 import { ProviderConfigurationManager } from "../provider-configuration.js";
@@ -54,6 +55,7 @@ type ResolvedProviderBinding = {
   baseUrl: string;
   configurationId: string;
   headers?: Record<string, string>;
+  endpoint?: string;
 };
 
 const digest = (value: unknown): string => createHash("sha256")
@@ -154,7 +156,7 @@ export class BackgroundInferenceRuntime {
       catch { return { status: "invalid", message: "Embedding settings are malformed" }; }
       if (!settings) return { status: "unconfigured" };
       try {
-        const provider = await this.#resolveProviderBinding(settings.providerId, settings.modelId, false);
+        const provider = await this.#resolveProviderBinding(settings.providerId, settings.modelId, false, "embedding");
         return { status: "ready", binding: { ...settings, configurationId: provider.configurationId } };
       } catch {
         return { status: "unavailable", message: "Embedding provider binding is unavailable" };
@@ -166,8 +168,9 @@ export class BackgroundInferenceRuntime {
       catch { return { status: "invalid", message: "Rerank settings are malformed" }; }
       if (!settings) return { status: "unconfigured" };
       try {
-        const provider = await this.#resolveProviderBinding(settings.providerId, settings.modelId, false);
-        return { status: "ready", binding: { ...settings, configurationId: provider.configurationId } };
+        const provider = await this.#resolveProviderBinding(settings.providerId, settings.modelId, false, "rerank");
+        const endpoint = settings.endpoint ?? provider.endpoint;
+        return { status: "ready", binding: { ...settings, ...(endpoint ? { endpoint } : {}), configurationId: provider.configurationId } };
       } catch {
         return { status: "unavailable", message: "Rerank provider binding is unavailable" };
       }
@@ -196,11 +199,12 @@ export class BackgroundInferenceRuntime {
         }
         try {
           const provider = await this.#resolveProviderBinding(
-            resolution.binding.providerId, resolution.binding.modelId, false,
+            resolution.binding.providerId, resolution.binding.modelId, false, "decision",
           );
+          const endpoint = resolution.binding.endpoint ?? provider.endpoint;
           purposes[purpose] = {
             status: "ready",
-            binding: { ...resolution.binding, configurationId: provider.configurationId },
+            binding: { ...resolution.binding, ...(endpoint ? { endpoint } : {}), configurationId: provider.configurationId },
           };
         } catch {
           purposes[purpose] = { status: "unavailable", message: "Fast decision provider binding is unavailable" };
@@ -232,7 +236,7 @@ export class BackgroundInferenceRuntime {
       signal.throwIfAborted();
       const configured = this.embeddingSettings();
       if (!configured) throw new HostError("embedding_unconfigured", "Remote embedding is not configured");
-      const endpoint = await this.#resolveProviderBinding(configured.providerId, configured.modelId, true);
+      const endpoint = await this.#resolveProviderBinding(configured.providerId, configured.modelId, true, "embedding");
       const maxTokens = configured.maxTokens ?? REMOTE_EMBEDDING_DEFAULT_MAX_TOKENS;
       if (
         configured.protocol !== params.protocol
@@ -255,6 +259,7 @@ export class BackgroundInferenceRuntime {
       signal.throwIfAborted();
       const result = await requestAdaptiveEmbeddings({
         baseUrl: endpoint.baseUrl,
+        ...(endpoint.endpoint ? { endpoint: endpoint.endpoint } : {}),
         apiKey: endpoint.apiKey!,
         ...(endpoint.headers ? { headers: endpoint.headers } : {}),
         model: configured.modelId,
@@ -300,13 +305,14 @@ export class BackgroundInferenceRuntime {
       signal.throwIfAborted();
       const configured = this.rerankSettings();
       if (!configured) throw new HostError("rerank_unconfigured", "Rerank is not configured");
-      const endpoint = await this.#resolveProviderBinding(configured.providerId, configured.modelId, true);
+      const endpoint = await this.#resolveProviderBinding(configured.providerId, configured.modelId, true, "rerank");
+      const requestEndpoint = configured.endpoint ?? endpoint.endpoint;
       if (
         configured.protocol !== params.protocol
         || configured.providerId !== params.providerId
         || configured.modelId !== params.modelId
         || endpoint.configurationId !== params.configurationId
-        || configured.endpoint !== params.endpoint
+        || requestEndpoint !== params.endpoint
         || configured.maxDocumentTokens !== params.maxDocumentTokens
       ) throw new HostError("rerank_binding_mismatch", "Rerank request does not match the current frozen binding");
       signal.throwIfAborted();
@@ -317,7 +323,7 @@ export class BackgroundInferenceRuntime {
         model: configured.modelId,
         query: params.query,
         documents: params.documents,
-        ...(configured.endpoint ? { endpoint: configured.endpoint } : {}),
+        ...(requestEndpoint ? { endpoint: requestEndpoint } : {}),
         ...(this.#fetchImpl ? { fetchImpl: this.#fetchImpl } : {}),
         signal,
       });
@@ -344,13 +350,14 @@ export class BackgroundInferenceRuntime {
         throw new HostError("fast_decision_unconfigured", "Fast decision is not configured");
       }
       const configured = resolution.binding;
-      const endpoint = await this.#resolveProviderBinding(configured.providerId, configured.modelId, true);
+      const endpoint = await this.#resolveProviderBinding(configured.providerId, configured.modelId, true, "decision");
+      const requestEndpoint = configured.endpoint ?? endpoint.endpoint;
       if (
         configured.protocol !== params.protocol
         || configured.providerId !== params.providerId
         || configured.modelId !== params.modelId
         || endpoint.configurationId !== params.configurationId
-        || configured.endpoint !== params.endpoint
+        || requestEndpoint !== params.endpoint
       ) throw new HostError("fast_decision_binding_mismatch", "Fast decision request does not match the current frozen binding");
       signal.throwIfAborted();
       let result;
@@ -359,7 +366,7 @@ export class BackgroundInferenceRuntime {
           baseUrl: endpoint.baseUrl,
           apiKey: endpoint.apiKey!,
           ...(endpoint.headers ? { headers: endpoint.headers } : {}),
-          ...(configured.endpoint ? { endpoint: configured.endpoint } : {}),
+          ...(requestEndpoint ? { endpoint: requestEndpoint } : {}),
           model: configured.modelId,
           state: { goal: params.goal, materials: params.materials },
           questions: params.questions,
@@ -552,26 +559,39 @@ export class BackgroundInferenceRuntime {
     finally { this.#configRuntimePromise = undefined; }
   }
 
-  async #resolveProviderBinding(providerId: string, modelId: string, withAuth: boolean): Promise<ResolvedProviderBinding> {
+  async #resolveProviderBinding(providerId: string, modelId: string, withAuth: boolean, kind: ProviderInferenceCapability): Promise<ResolvedProviderBinding> {
     const runtime = await this.#runtime();
     const provider = runtime.getProvider(providerId);
     const model = runtime.getModel(providerId, modelId);
     let editable: Awaited<ReturnType<ProviderConfigurationManager["effectiveConfig"]>> | undefined;
     try { editable = await this.#providers.effectiveConfig(this.#cwd, providerId, false); } catch { /* built-in */ }
-    const baseUrl = model?.baseUrl ?? editable?.baseUrl ?? provider?.baseUrl;
+    const capabilities = await this.#providers.effectiveCapabilities(this.#cwd, providerId, false);
+    const capability = capabilities?.[kind];
+    if (capability?.enabled === false) throw new HostError("provider_capability_disabled", `Provider ${providerId} has disabled ${kind}`);
+    const capabilityModel = capability?.models?.find(entry => entry.id === modelId);
+    const baseUrl = capabilityModel?.baseUrl ?? capability?.baseUrl ?? (capability ? undefined : model?.baseUrl) ?? editable?.baseUrl ?? provider?.baseUrl;
     if (!baseUrl) throw new HostError("provider_endpoint_missing", `Provider ${providerId} does not define a base URL`);
     const configurationId = digest({
       providerId,
       modelId,
       baseUrl: credentialFreeUrl(baseUrl),
-      api: model?.api ?? editable?.api,
+      api: capability?.protocol ?? model?.api ?? editable?.api,
+      capability: capability?.protocol,
+      endpoint: capability?.endpoint,
+      credentialRef: capability?.credentialRef,
     });
-    if (!withAuth) return { baseUrl, configurationId };
-    const auth = await (this.#authRuntime ?? runtime).getAuth(providerId);
+    const resolved = { baseUrl, configurationId, ...(capability?.endpoint ? { endpoint: capability.endpoint } : {}) };
+    if (!withAuth) return resolved;
+    const credentialRef = capability?.credentialRef ?? providerId;
+    // Reuse only a live, non-persistent credential overlay from the chat
+    // runtime. Resolve configured keys/headers in the project-free runtime.
+    const runtimeKey = this.#authRuntime?.getProviderAuthStatus(credentialRef).source === "runtime"
+      ? (await this.#authRuntime.getAuth(credentialRef))?.auth.apiKey : undefined;
+    const auth = await runtime.getAuth(credentialRef, runtimeKey ? { apiKey: runtimeKey } : {});
     const apiKey = auth?.auth.apiKey;
-    if (!apiKey) throw new HostError("provider_auth_missing", `Provider ${providerId} has no credential`);
+    if (!apiKey) throw new HostError("provider_auth_missing", `Provider ${credentialRef} has no credential`);
     const headers = stringHeaders(auth.auth.headers);
-    return { baseUrl, configurationId, apiKey, ...(headers ? { headers } : {}) };
+    return { ...resolved, apiKey, ...(headers ? { headers } : {}) };
   }
 }
 

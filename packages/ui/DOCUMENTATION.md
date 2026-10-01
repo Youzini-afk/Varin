@@ -33,10 +33,17 @@ credentials stay in Pi auth storage and are never persisted in renderer settings
 and subsequent authentication are separate outcomes, so cancelled login must not be reported as
 successful credential setup.
 
-The custom-provider API selector exposes Chat Completions, Responses, Anthropic Messages and Gemini
-by name. The other/extension choice keeps an editable native API identifier, including a blank value
-for an inherited override; choosing that editor does not replace the current identifier or reset models,
-URLs or credentials. This is presentation of the existing Pi protocol path, not a new provider backend.
+Custom providers configure their common connection first, then independently enable generation,
+embedding, reranking and fast decisions. Generation exposes Chat Completions, Responses, Anthropic
+Messages, Gemini and an editable extension API identifier. Inference connections expose their actual
+adapter protocols and allow address/path/credential-owner overrides. Credentials stay in Pi auth;
+pure inference providers do not need a chat API or fabricated chat model.
+
+Capability model suggestions appear in their corresponding Harness pickers, alongside manual ID entry.
+Provider counts include those declarations, while the ordinary chat picker still uses only native Pi
+chat models. Disabling retains configuration and model definitions. A declared-model selection retires
+the old manual input generation so its unmount auto-save cannot overwrite the new selection.
+See [provider ownership and format](../pi-host/src/PROVIDERS.md).
 
 ## Theme and component system
 

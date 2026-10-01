@@ -18,6 +18,7 @@ import {
 import { toast } from '@/components/ui';
 import { Icon } from '@/components/icon/Icon';
 import type { IconName } from '@/components/icon/icons';
+import { PROVIDER_INFERENCE_CAPABILITIES } from '@varin/protocol';
 import { useUIStore } from '@/stores/useUIStore';
 import { useDirectoryStore } from '@/stores/useDirectoryStore';
 import {
@@ -454,6 +455,18 @@ export const ProvidersPage: React.FC = () => {
           </div>
         )}
       </SettingsSection>
+      {PROVIDER_INFERENCE_CAPABILITIES.map(kind => {
+        const capability = selectedProvider.details?.capabilities?.[kind];
+        if (!capability || capability.enabled === false) return null;
+        return <SettingsSection key={kind} title={t(`settings.providers.page.custom.capability.${kind}`)} settingsItem={`providers.${kind}`}>
+          <p className="typography-meta text-muted-foreground">{capability.protocol}</p>
+          {kind === 'decision' && <p className="typography-meta text-muted-foreground">{t('settings.providers.page.custom.capability.decisionTasks')}</p>}
+          {(capability.models ?? []).map(model => <div key={model.id} className="flex items-center justify-between gap-2 py-1.5 typography-meta">
+            <span className="truncate">{model.name || model.id}</span><span className="font-mono text-muted-foreground">{model.id}</span>
+          </div>)}
+          {!capability.models?.length && <p className="typography-meta text-muted-foreground">{t('settings.providers.page.custom.capability.manualModels')}</p>}
+        </SettingsSection>;
+      })}
     </SettingsPageLayout>
   );
 };

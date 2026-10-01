@@ -42,6 +42,7 @@ import type {
   CustomProviderModelRowInput,
 } from './customProviderForm';
 import { CustomProviderReasoningLevels } from './CustomProviderReasoningLevels';
+import { ProviderInferenceEditor } from './ProviderInferenceEditor';
 import { ProviderAuthPromptView, usePiProviderAuth } from './ProviderAuthPanel';
 
 interface CustomProviderEditorProps {
@@ -468,40 +469,6 @@ export const CustomProviderEditor: React.FC<CustomProviderEditorProps> = ({
     <div className="space-y-6">
       <div data-settings-item="providers.custom" className="space-y-4">
         <div className="space-y-4">
-          <div className="flex flex-col gap-1.5">
-            <label className="typography-ui-label text-foreground">
-              {t('settings.providers.page.custom.field.type')}
-            </label>
-            <Select value={manualApi ? 'custom' : state.api} onValueChange={(value) => {
-              setManualApi(value === 'custom');
-              if (value !== 'custom') updateField('api', value);
-            }}>
-              <SelectTrigger className="w-full sm:w-[280px]" aria-label={t('settings.providers.page.custom.field.type')}>
-                <SelectValue>
-                  {manualApi ? t('settings.providers.page.custom.type.other.label') : renderTypeLabel(state.api)}
-                </SelectValue>
-              </SelectTrigger>
-              <SelectContent>
-                {COMMON_PROVIDER_APIS.map(api => (
-                  <SelectItem key={api} value={api}>{renderTypeLabel(api)}</SelectItem>
-                ))}
-                <SelectItem value="custom">{t('settings.providers.page.custom.type.other.label')}</SelectItem>
-              </SelectContent>
-            </Select>
-            {manualApi && (
-              <Input
-                value={state.api}
-                onChange={(event) => updateField('api', event.target.value)}
-                aria-label={t('settings.providers.page.custom.type.other.label')}
-                placeholder="my-extension-api"
-                className="h-7 w-full font-mono sm:w-[280px]"
-              />
-            )}
-            <span className="typography-micro text-muted-foreground">
-              {manualApi ? t('settings.providers.page.custom.type.other.description') : renderTypeDescription(state.api)}
-            </span>
-          </div>
-
           <div className="grid grid-cols-1 gap-4 md:grid-cols-2">
             <div className="flex flex-col gap-1.5">
               <label className="typography-ui-label text-foreground">
@@ -592,7 +559,32 @@ export const CustomProviderEditor: React.FC<CustomProviderEditorProps> = ({
           </div>
         </div>
 
-        <div className="space-y-3">
+        <label className="flex items-center gap-2 typography-ui-label">
+          <Checkbox checked={state.chatEnabled} onChange={chatEnabled => setState(prev => ({ ...prev, chatEnabled, chatDefined: true }))}
+            ariaLabel={t('settings.providers.page.custom.capability.chat')} />
+          {t('settings.providers.page.custom.capability.chat')}
+        </label>
+        {state.chatEnabled && <div className="space-y-3 rounded-lg border border-[var(--surface-subtle)] p-3">
+          <div className="flex flex-col gap-1.5">
+            <label className="typography-ui-label text-foreground">{t('settings.providers.page.custom.field.type')}</label>
+            <Select value={manualApi ? 'custom' : state.api} onValueChange={value => {
+              setManualApi(value === 'custom');
+              if (value !== 'custom') updateField('api', value);
+            }}>
+              <SelectTrigger className="w-full sm:w-[280px]" aria-label={t('settings.providers.page.custom.field.type')}>
+                <SelectValue>{manualApi ? t('settings.providers.page.custom.type.other.label') : renderTypeLabel(state.api)}</SelectValue>
+              </SelectTrigger>
+              <SelectContent>
+                {COMMON_PROVIDER_APIS.map(api => <SelectItem key={api} value={api}>{renderTypeLabel(api)}</SelectItem>)}
+                <SelectItem value="custom">{t('settings.providers.page.custom.type.other.label')}</SelectItem>
+              </SelectContent>
+            </Select>
+            {manualApi && <Input value={state.api} onChange={event => updateField('api', event.target.value)}
+              aria-label={t('settings.providers.page.custom.type.other.label')} placeholder="my-extension-api" className="h-7 w-full font-mono sm:w-[280px]" />}
+            <span className="typography-micro text-muted-foreground">
+              {manualApi ? t('settings.providers.page.custom.type.other.description') : renderTypeDescription(state.api)}
+            </span>
+          </div>
           <div className="flex items-center justify-between gap-2">
             <h3 className="typography-ui-header font-medium text-foreground">
               {t('settings.providers.page.custom.field.models')}
@@ -618,7 +610,7 @@ export const CustomProviderEditor: React.FC<CustomProviderEditorProps> = ({
           <div className="space-y-3">
             {state.models.map((row, index) => (
               <div
-                key={`${index}-${row.id}`}
+                key={index}
                 className="rounded-lg border border-[var(--surface-subtle)] p-3"
               >
                 <div className="grid grid-cols-1 gap-3 md:grid-cols-2">
@@ -750,7 +742,11 @@ export const CustomProviderEditor: React.FC<CustomProviderEditorProps> = ({
               </div>
             ))}
           </div>
-        </div>
+        </div>}
+        {state.scope === 'project' && <p className="typography-meta text-muted-foreground">{t('settings.providers.page.custom.capability.projectScope')}</p>}
+        <ProviderInferenceEditor value={state.inference} onChange={(kind, patch) => setState(prev => ({
+          ...prev, inference: { ...prev.inference, [kind]: { ...prev.inference[kind], ...patch } },
+        }))} />
       </div>
 
       {providerAuth.busy && (

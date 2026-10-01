@@ -13,6 +13,34 @@ import {
 } from './customProviderForm';
 
 describe('Pi custom provider form', () => {
+  test('saves a pure decision provider and preserves connection overrides through editing', () => {
+    const state = createEmptyCustomProviderState();
+    state.id = 'typesafe';
+    state.baseURL = 'https://shared.example';
+    state.chatEnabled = false;
+    state.inference.decision.enabled = true;
+    state.inference.decision.baseURL = 'https://decision.example';
+    state.inference.decision.endpoint = '/systemone';
+    state.inference.decision.credentialRef = 'decision-auth';
+    state.inference.decision.models = [{ ...state.models[0]!, id: 'jev-1.13', name: 'Jev' }];
+    const config = createPiProviderConfigFromForm(state);
+    expect(config.api).toBeUndefined();
+    expect(config.models).toEqual([]);
+    expect(config.capabilities?.chat).toBe(false);
+    expect(config.capabilities?.decision).toEqual({
+      protocol: 'typesafe-systemone', baseUrl: 'https://decision.example', endpoint: '/systemone', credentialRef: 'decision-auth',
+      models: [{ id: 'jev-1.13', name: 'Jev', input: ['text'], reasoning: false }],
+    });
+    expect(createPiProviderConfigFromForm(createCustomProviderFormStateFromConfig(config))).toEqual(config);
+    const paused = createCustomProviderFormStateFromConfig(config);
+    paused.inference.decision.enabled = false;
+    paused.inference.decision.disabled = true;
+    const savedPaused = createPiProviderConfigFromForm(paused);
+    expect(savedPaused.capabilities?.decision?.enabled).toBe(false);
+    expect(savedPaused.capabilities?.decision?.models).toEqual(config.capabilities?.decision?.models);
+    expect(savedPaused.capabilities?.decision?.credentialRef).toBe('decision-auth');
+  });
+
   test('uses controlled credentials and supports password-manager autofill', () => {
     expect(resolveCustomProviderApiKey(' sk-state ', { value: 'sk-dom' })).toBe('sk-state');
     expect(resolveCustomProviderApiKey('', { value: ' sk-autofill ' })).toBe('sk-autofill');

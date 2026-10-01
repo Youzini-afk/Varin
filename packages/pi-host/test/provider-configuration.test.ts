@@ -31,6 +31,30 @@ function config(
 }
 
 describe("ProviderConfigurationManager", () => {
+  it("keeps native model definitions when chat is disabled and resolves a higher-scope enable", async () => {
+    const root = await mkdtemp(join(tmpdir(), "varin-capability-layers-"));
+    const agentDir = join(root, "agent");
+    const cwd = join(root, "workspace");
+    const customPath = join(root, "operator", "models.json");
+    await mkdir(agentDir, { recursive: true });
+    await mkdir(cwd, { recursive: true });
+    const runtime = await ModelRuntime.create({ allowModelNetwork: false, authPath: join(agentDir, "auth.json"), modelsPath: join(agentDir, "models.json") });
+    const manager = new ProviderConfigurationManager({ agentDir, customConfigPath: customPath });
+    try {
+      await manager.upsert(runtime, cwd, "user", { ...config("mixed", "chat-model"), capabilities: { chat: false,
+        decision: { protocol: "typesafe-systemone", models: [{ id: "jev-1.13" }] } } }, true);
+      assert.equal(runtime.getModels("mixed").length, 0);
+      const saved = JSON.parse(await readFile(join(agentDir, "models.json"), "utf8"));
+      assert.equal(saved.providers.mixed.models[0].id, "chat-model");
+      await manager.upsert(runtime, cwd, "custom", { id: "mixed", capabilities: { chat: true } }, true);
+      assert.equal(runtime.getModel("mixed", "chat-model")?.id, "chat-model");
+      const effective = await manager.getDetails(runtime, cwd, "mixed", true);
+      assert.equal(effective.capabilities?.decision?.models?.[0]?.id, "jev-1.13");
+      await manager.delete(runtime, cwd, "mixed", "custom", true);
+      assert.equal(runtime.getModels("mixed").length, 0);
+    } finally { await rm(root, { recursive: true, force: true }); }
+  });
+
   it("writes native Pi models.json while preserving comments and configured keys", async () => {
     const root = await mkdtemp(join(tmpdir(), "varin-provider-config-"));
     const agentDir = join(root, "agent");
