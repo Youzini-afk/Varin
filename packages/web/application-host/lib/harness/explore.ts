@@ -1211,6 +1211,7 @@ async function outlineForSnapshot(
   deps: ExploreDeps,
   signal: AbortSignal,
   hitLines: number[],
+  warmOnly = false,
 ): Promise<StructureOutlineResult | { status: "not-requested"; provider: null }> {
   if (!deps.structure) return { status: "not-requested", provider: null };
   try {
@@ -1222,6 +1223,7 @@ async function outlineForSnapshot(
       revision: snapshot.revision,
       signal,
       hitLines,
+      ...(warmOnly ? { warmOnly: true } : {}),
     }), signal);
     signal.throwIfAborted();
     return result;
@@ -1765,6 +1767,10 @@ export function createExploreQueryRun(
   const readPaths = new Set<string>();
   /** Evidence signature each read path's windows were last built against. */
   const windowedEvidence = new Map<string, string>();
+  // A failed optional LSP preparation is shared by files in the same query
+  // scope/language. Later windows may use a now-running server, but do not
+  // repeat that failed cold preparation. A new query can prepare it again.
+  const failedColdOutlines = new Set<string>();
   let reads = 0;
 
   const replacePrepared = (path: string, windows: readonly PreparedWindow[]): void => {
@@ -1876,7 +1882,11 @@ export function createExploreQueryRun(
     const existing = prepared.filter(window => window.path === path && window.revision === snapshot.revision);
     commitWindows(initial, [...existing, ...weakenUnverifiedConnectionWhy(initial.windows, parsed.objects)]);
     if (deps.structure && !structureFiles.has(path)) structureFiles.set(path, { path, status: 'unavailable', provider: null });
-    const outline = await outlineForSnapshot(path, snapshot, deps, signal, hitLines);
+    const scopeRoot = input.paths?.filter(root => pathInRoots(path, [root])).sort((a, b) => b.length - a.length)[0] ?? '';
+    const outlineKey = JSON.stringify([scopeRoot, languageIdForPath(path)]);
+    const outline = await outlineForSnapshot(path, snapshot, deps, signal, hitLines, failedColdOutlines.has(outlineKey));
+    if (outline.provider === 'lsp' && outline.status === 'unavailable') failedColdOutlines.add(outlineKey);
+    else if (outline.provider === 'lsp' && (outline.status === 'ready' || outline.status === 'empty')) failedColdOutlines.delete(outlineKey);
     if (outline.status !== "not-requested") {
       structureFiles.set(path, {
         path,
@@ -1948,10 +1958,13 @@ export function createExploreQueryRun(
     if (terminal !== "active") return;
     const rankedNow = rankNow();
     const scheduledNow = scheduleReads(rankedNow, groups, parsed);
-    const reserved = primaryInflight().length * DEFAULT_READ_PARALLELISM;
+    const deferredContent = contentPatterns.size > 0 && !tasks.has('lexical-content') && !explicitNavigation;
+    const reserved = (primaryInflight().length + Number(deferredContent)) * DEFAULT_READ_PARALLELISM;
     const budget = maxMaterializeReads(scheduledNow.length, excerptLimit);
     const spendable = Math.max(DEFAULT_READ_PARALLELISM, Math.max(0, budget - reserved));
-    await materializeScheduled(scheduledNow, Math.min(budget, reads + spendable));
+    // `reads` is cumulative: adding it to the available total would spend the
+    // reserved slots before later source candidates arrive.
+    await materializeScheduled(scheduledNow, Math.min(budget, spendable));
   };
 
   const markInflightIncomplete = (): boolean => {
@@ -3233,9 +3246,12 @@ function relationLines(relations: NonNullable<WireResult["details"]["relations"]
 function packExploreVisible(
   result: ExploreFormatInput,
   byteBudget: number,
-): { visibleText: string; storedBody: string; showHandle: boolean; omitted: ExploreResult["omitted"] } {
+  prefix = '',
+): { visibleText: string; storedBody: string; showHandle: boolean; omitted: ExploreResult["omitted"]; snippets: ExploreSnippet[] } {
   const header: string[] = [
-    `${result.snippets.length} excerpt(s) from ${result.searched.files} matched file(s) · ${result.searched.patterns} query term(s)${result.partial ? " · partial result" : ""}`,
+    ...(prefix ? [prefix] : []),
+    `Prepared ${result.snippets.length} excerpt(s) from ${result.searched.files} matched file(s) · ${result.searched.patterns} query term(s) · partial result`,
+    `Visible excerpts: ${result.snippets.length}`,
   ];
   const dropped = result.searched.filesDropped ?? 0;
   if (dropped > 0) {
@@ -3287,7 +3303,9 @@ function packExploreVisible(
     : "";
 
   const graphLines = relationLines(result.relations);
-  const storedParts = [...header, ...snippetBlocks];
+  const storedHeader = [...header];
+  if (!result.partial) storedHeader[prefix ? 1 : 0] = storedHeader[prefix ? 1 : 0]!.replace(' · partial result', '');
+  const storedParts = [...storedHeader, ...snippetBlocks];
   if (omittedLines.length > 0) storedParts.push("Omitted supports:", ...omittedLines);
   if (unreadLine) storedParts.push(unreadLine);
   storedParts.push(...issueLines);
@@ -3295,6 +3313,8 @@ function packExploreVisible(
   const storedBody = storedParts.join("\n");
 
   const visible: string[] = [...header];
+  const delivered: ExploreSnippet[] = [];
+  const byteOmissions = new Map<ExploreSnippet, ExploreResult['omitted'][number]>();
   const omitted = [...result.omitted];
   const pushIfFits = (line: string): boolean => {
     const next = [...visible, line].join("\n");
@@ -3305,23 +3325,63 @@ function packExploreVisible(
     return false;
   };
 
+  const coveringSnippet = (snippet: ExploreSnippet, candidates: readonly ExploreSnippet[]): ExploreSnippet | undefined =>
+    !snippet.required ? candidates.find(other => other.path === snippet.path
+      && other.revision === snippet.revision && other.source === snippet.source
+      && other.startLine <= snippet.startLine && other.endLine >= snippet.endLine
+      && !other.unit?.omitted?.some(range => range.startLine <= snippet.endLine && range.endLine >= snippet.startLine)
+      && snippet.text.length > 0 && other.text.includes(snippet.text)) : undefined;
+  const markCovered = (snippet: ExploreSnippet, covering: ExploreSnippet): void => {
+    omitted.push({ path: snippet.path, startLine: snippet.startLine, endLine: snippet.endLine,
+      reason: `already shown in ${covering.path}:${covering.startLine}-${covering.endLine}` });
+  };
+
   result.snippets.forEach((snippet, index) => {
     const block = snippetBlocks[index]!;
     if (!pushIfFits(block)) {
-      omitted.push({
+      const item = {
         path: snippet.path,
         startLine: snippet.startLine,
         endLine: snippet.endLine,
         reason: snippet.required ? "required range exceeded output budget" : "over byte budget",
-      });
-    }
+      };
+      byteOmissions.set(snippet, item);
+      omitted.push(item);
+    } else delivered.push(snippet);
   });
+
+  // First preserve the original priority pack. Deduplicating while allocating
+  // could admit an earlier oversized block and evict already-delivered facts.
+  const originalDelivery = [...delivered];
+  delivered.length = 0;
+  visible.splice(header.length);
+  for (const snippet of originalDelivery) {
+    const covering = coveringSnippet(snippet, delivered);
+    if (covering) markCovered(snippet, covering);
+    else {
+      delivered.push(snippet);
+      visible.push(snippetBlocks[result.snippets.indexOf(snippet)]!);
+    }
+  }
+  for (const [snippet, item] of byteOmissions) {
+    const covering = coveringSnippet(snippet, delivered);
+    if (covering || pushIfFits(snippetBlocks[result.snippets.indexOf(snippet)]!)) {
+      omitted.splice(omitted.indexOf(item), 1);
+      if (covering) markCovered(snippet, covering);
+      else delivered.push(snippet);
+    }
+  }
   const extraOmitted = omitted.filter((item) => (
     item.reason === "over byte budget" || item.reason === "required range exceeded output budget"
   ));
+  // These replacements can only shorten the reserved header, so the delivered
+  // complete blocks still fit. Metadata must describe the actual text pack.
+  const headerIndex = prefix ? 1 : 0;
+  if (!result.partial && extraOmitted.length === 0) visible[headerIndex] = visible[headerIndex]!.replace(' · partial result', '');
+  visible[headerIndex + 1] = `Visible excerpts: ${delivered.length}`;
   if (omitted.length > 0 || (result.summaryOnly === true && (result.omittedCount ?? 0) > 0)) {
     if (result.summaryOnly) {
-      const count = (result.omittedCount ?? result.omitted.length) + extraOmitted.length;
+      const count = (result.omittedCount ?? result.omitted.length) + omitted.length - result.omitted.length;
       pushIfFits(`Omitted supports (${count}): full list in output store`);
     } else {
       pushIfFits("Omitted supports:");
@@ -3345,18 +3405,18 @@ function packExploreVisible(
     || extraOmitted.length > 0
     || (result.omittedCount ?? result.omitted.length) > 0
     || result.notRequested.count > 0 && (result.summaryOnly === true || !visibleText.includes(result.notRequested.paths[0] ?? "\0"));
-  return { visibleText, storedBody, showHandle, omitted };
+  return { visibleText, storedBody, showHandle, omitted, snippets: delivered };
 }
 
 export function formatExploreOutput(
   result: ExploreFormatInput,
-  options?: { byteBudget?: number; handle?: string },
-): { visibleText: string; storedBody: string; showHandle: boolean; omitted: ExploreResult["omitted"] } {
+  options?: { byteBudget?: number; handle?: string; prefix?: string },
+): { visibleText: string; storedBody: string; showHandle: boolean; omitted: ExploreResult["omitted"]; snippets: ExploreSnippet[] } {
   const byteBudget = options?.byteBudget ?? DEFAULT_BYTE_BUDGET;
-  const packed = packExploreVisible(result, byteBudget);
+  const packed = packExploreVisible(result, byteBudget, options?.prefix);
   const hint = options?.handle && packed.showHandle ? exploreHandleHint(options.handle) : "";
   if (!hint) return packed;
-  const reserved = packExploreVisible(result, Math.max(0, byteBudget - utf8Bytes(hint)));
+  const reserved = packExploreVisible(result, Math.max(0, byteBudget - utf8Bytes(hint)), options?.prefix);
   let visibleText = `${reserved.visibleText}${hint}`;
   if (utf8Bytes(visibleText) > byteBudget) {
     const raw = Buffer.from(visibleText, "utf8").subarray(0, byteBudget);

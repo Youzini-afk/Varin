@@ -349,11 +349,13 @@ export async function packExploreSearchResult(
     ...(relations ? { relations } : {}),
     ...(resolvedDetails.sources ? { sources: resolvedDetails.sources } : {}),
   };
-  const preview = formatExploreOutput(formatted, { byteBudget: DEFAULT_BYTE_BUDGET });
+  const prefix = options?.resourceUnits?.length
+    ? `Search scope: ${[...new Set(options.resourceUnits.map((unit) => path.resolve(unit.root, unit.resourcePrefix)))].join(", ")}` : '';
+  const preview = formatExploreOutput(formatted, { byteBudget: DEFAULT_BYTE_BUDGET, prefix });
   const fullDetails = {
     notRequested: result.notRequested,
     omitted: result.omitted,
-    packedOmitted: preview.omitted,
+    previewOmitted: preview.omitted,
     details: resolvedDetails,
     ...(relations ? { relations } : {}),
   };
@@ -366,7 +368,7 @@ export async function packExploreSearchResult(
     omittedCount: result.omitted.length,
     summaryOnly: true,
   };
-  const packed = formatExploreOutput(summaryFormatted, { byteBudget: DEFAULT_BYTE_BUDGET, handle: stored.ref.handle });
+  const packed = formatExploreOutput(summaryFormatted, { byteBudget: DEFAULT_BYTE_BUDGET, handle: stored.ref.handle, prefix });
   const provenanceCounts: Partial<Record<ExploreSourceStatus, number>> = {};
   for (const entry of result.details.provenance) {
     provenanceCounts[entry.status] = (provenanceCounts[entry.status] ?? 0) + 1;
@@ -402,12 +404,12 @@ export async function packExploreSearchResult(
     ...(resolvedDetails.sources ? { sources: summarizeSources(resolvedDetails.sources) } : {}),
   };
   return {
-    text: `${options?.resourceUnits?.length ? `Search scope: ${[...new Set(options.resourceUnits.map((unit) => path.resolve(unit.root, unit.resourcePrefix)))].join(", ")}\n` : ""}${packed.visibleText}`,
-    snippets: result.snippets,
+    text: packed.visibleText,
+    snippets: packed.snippets,
     issueCount: result.issues.length,
     notRequestedCount: result.notRequested.count,
     omittedCount: result.omitted.length + packed.omitted.length,
-    partial: formatted.partial,
+    partial: formatted.partial || packed.omitted.some(item => item.reason === 'over byte budget' || item.reason === 'required range exceeded output budget'),
     searched: formatted.searched,
     handle: stored.ref.handle,
     details,
@@ -779,8 +781,15 @@ export function createExploreQueryFinishService(
         ...(coverage?.graphMissing ? { graphMissing: true } : {}),
         ...(coverage ? { resourceUnits: coverage.resourceUnits } : {}),
       };
+      const packOnce = (result: ReturnType<StoredExploreQuery['run']['finish']>): Promise<ExploreQueryFinishResult> => {
+        if (stored.packed) return stored.packed;
+        const pending = packExploreSearchResult(host, ctx, result, packOptions);
+        stored.packed = pending;
+        void pending.catch(() => { if (stored.packed === pending) delete stored.packed; });
+        return pending;
+      };
       if (stored.run.terminal() === "finished") {
-        return packExploreSearchResult(host, ctx, stored.run.finish(model), packOptions);
+        return packOnce(stored.run.finish(model));
       }
       stored.finishing ??= (async () => {
         // Fast Decision (D-312): the progressive loop owns material relevance
@@ -886,7 +895,7 @@ export function createExploreQueryFinishService(
       if (result.snippets.length === 0 && result.issues.length > 0) {
         throw new HarnessServiceError("unavailable", `No current excerpts could be read: ${result.issues.map((issue: ExploreIssue) => `${issue.path} (${issue.status})`).join(", ")}. Search again.`);
       }
-      return packExploreSearchResult(host, ctx, result, packOptions);
+      return packOnce(result);
     },
   };
 }

@@ -1525,7 +1525,7 @@ export interface ExploreSearchResult {
  */
 export interface ExploreQueryFinishResult {
   text: string;
-  /** The selected current excerpts needed to answer the query. */
+  /** Complete excerpts actually present in text; the handle retains all prepared excerpts. */
   snippets: ExploreSearchSnippet[];
   issueCount: number;
   notRequestedCount: number;

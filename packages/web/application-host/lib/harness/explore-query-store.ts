@@ -31,6 +31,8 @@ export interface StoredExploreQuery {
   cancelController: AbortController;
   run: ExploreQueryRun;
   finishing?: Promise<ReturnType<ExploreQueryRun["finish"]>>;
+  /** One delivered pack/OutputStore identity for concurrent or repeated finish calls. */
+  packed?: Promise<import("@varin/protocol").ExploreQueryFinishResult>;
   /**
    * Fast-decision binding frozen when the query started (D-312). The
    * progressive loop launches with the query while this stays `ready`; a

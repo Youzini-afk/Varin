@@ -1386,7 +1386,12 @@ async function main(options: StartWebUiServerOptions = {}): Promise<WebUiServerC
       return { workspaceId, executionWorkspaceId: workspaceId, canonicalRoot };
     },
   });
-  const managedLanguageServers = createManagedLanguageServers({ directory: VARIN_DATA_DIR, spawn: languageToolProcesses.spawn });
+  // Tool downloads use the same Host proxy/system-network policy as other
+  // outbound requests. The callback runs only when a provider is requested.
+  const managedLanguageServers = createManagedLanguageServers({
+    directory: VARIN_DATA_DIR, spawn: languageToolProcesses.spawn,
+    fetch: (input, init) => egressRuntime.fetch(input, init),
+  });
   const documentReadingDirectory = path.join(VARIN_DATA_DIR, 'document-reading');
   await fsPromises.mkdir(documentReadingDirectory, { recursive: true });
   const documentProcesses = createKernelProcessService({

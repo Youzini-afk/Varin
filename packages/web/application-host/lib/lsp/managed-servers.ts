@@ -63,7 +63,7 @@ export interface ManagedLanguageServersOptions {
   platform?: NodeJS.Platform;
   arch?: string;
   env?: NodeJS.ProcessEnv;
-  fetch?: typeof fetch;
+  fetch?: (url: string, init?: Omit<RequestInit, 'dispatcher'>) => Promise<Response>;
   /** Focused tests can resolve an executable without depending on the host PATH. */
   resolveExecutable?: (command: string) => string | null | Promise<string | null>;
   /** Focused tests can provide a small archive without making an external request. */
@@ -743,10 +743,18 @@ function runtimeOnPath(command: string, env: NodeJS.ProcessEnv, platform: NodeJS
   });
 }
 
-async function downloadWithFetch(fetcher: typeof fetch, url: string, signal: AbortSignal): Promise<Uint8Array> {
-  const response = await fetcher(url, { signal });
-  if (!response.ok) throw new Error(`Failed to download ${url}: ${response.status} ${response.statusText}`);
-  return new Uint8Array(await response.arrayBuffer());
+async function downloadWithFetch(fetcher: NonNullable<ManagedLanguageServersOptions['fetch']>, url: string, signal: AbortSignal): Promise<Uint8Array> {
+  const origin = new URL(url).origin;
+  try {
+    const response = await fetcher(url, { signal });
+    if (!response.ok) throw new Error(`HTTP ${response.status} ${response.statusText}`);
+    return new Uint8Array(await response.arrayBuffer());
+  } catch (error) {
+    signal.throwIfAborted();
+    const cause = error instanceof Error ? error.cause : undefined;
+    const code = cause && typeof cause === 'object' && 'code' in cause ? cause.code : undefined;
+    throw new Error(`Language server download from ${origin} failed: ${asError(error).message}${typeof code === 'string' ? ` (${code})` : ''}`, { cause: error });
+  }
 }
 
 async function raceAbort<T>(promise: Promise<T>, signal: AbortSignal, languageId: string): Promise<T> {

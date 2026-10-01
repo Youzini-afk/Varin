@@ -45,6 +45,22 @@ async function fixture() {
 }
 
 describe("managed native language servers", () => {
+  it('reports the failing download origin and transport cause without exposing URL credentials', async () => {
+    const f = await fixture();
+    const manager = createManagedLanguageServers({
+      directory: f.directory, platform: 'linux', arch: 'x64', env: { PATH: '' },
+      resolveExecutable: async () => null,
+      spawn: async () => { throw new Error('unexpected process'); },
+      artifacts: { marksman: { url: 'https://user:private@test.invalid/marksman?token=private',
+        sha256: 'unused', format: 'raw', executableName: 'marksman' } },
+      fetch: async () => { throw new TypeError('fetch failed', { cause: Object.assign(new Error('connect failed'), { code: 'UND_ERR_CONNECT_TIMEOUT' }) }); },
+    });
+    try {
+      await expect(manager.ensure('markdown', f.directory)).rejects.toThrow('https://test.invalid failed: fetch failed (UND_ERR_CONNECT_TIMEOUT)');
+      expect(manager.inspect('markdown').message).not.toContain('private');
+    } finally { await manager.dispose(); await f.cleanup(); }
+  });
+
   it("keeps inspect side-effect free and de-duplicates concurrent preparation", async () => {
     const f = await fixture();
     const { artifact, bytes } = zipArtifact();

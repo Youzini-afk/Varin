@@ -585,6 +585,13 @@ before the backend counts hits; explore does not match drafts itself. Candidates
 hit metadata, then materialized on demand with bounded parallelism. Unread files are
 `not-requested`, never `empty`. Packing prefers complementary windows across files, then applies
 an explore byte budget below the generic 32 KiB truncation, including any `get_output` hint.
+The resolved search-scope prefix is inside that budget. The body distinguishes prepared and
+visible excerpt counts; `query.finish.snippets` describes the complete blocks actually delivered,
+not every excerpt selected before packing. It first preserves the priority pack, then removes child
+ranges whose exact text is already present in a delivered range of the same path, revision and source.
+A child intersecting a parent's omitted interval, or a required child, is not deduplicated. Recovered space fills omitted blocks
+without evicting the remaining priority pack. Actual byte omissions mark the result partial; covered
+ranges are distinguished from byte omissions. Concurrent/repeated finish calls reuse the same pack and handle.
 Provenance stays in `details`; the model-visible body is `path:start-end`, code, and actionable
 gaps. OutputStore keeps the full pack plus unread-candidate refs, and the tool text mentions the
 handle only when more content remains. Symbol expansion and optional model enrichment remain
@@ -869,8 +876,10 @@ scheduled file without waiting for the slowest member of a fixed batch. Acquired
 revision-checked lexical windows; an available outline then upgrades those windows before optional hit and
 relation classification. A deadline preserves the last valid stage, including an earlier complete window when
 later evidence is being refreshed. Requests interrupted during preparation have an explicit unavailable issue;
-they are not counted among candidates that were never requested. Source scopes, candidate ordering and read
-budgets are unchanged. The shared cancellation helper bounds waits on document/structure dependencies and
+they are not counted among candidates that were never requested. The cumulative read budget reserves existing
+slot capacity for pending primary sources and a deferred content-word pass; each early pass spends only the
+unreserved total, rather than adding previously spent reads to it. Source scopes, candidate ordering and total
+read budgets are unchanged. The shared cancellation helper bounds waits on document/structure dependencies and
 does not publish a late result after the caller has stopped.
 
 `explore.search` asks an optional `structureSource` (see
@@ -882,6 +891,9 @@ containers are emitted in full; large ones keep the signature, the hit block,
 omission markers, and a full-unit read entry. An earlier `empty` outline or a
 ready outline that misses a hit does not hide a later provider; that later call
 is `warmOnly` and will not start a cold language server (D-099). When the source
+reports an unavailable LSP outline, later outlines in that query's same path scope and language also
+use `warmOnly`: they may reuse a ready server but do not repeat a failed optional cold preparation.
+Native parsing still runs, and a new query can try preparation again. When the source
 is missing, cold, unsupported, stale, or failed, explore falls back to the ±3
 line window and records that status on the snippet and in `details.structure`.
 After materialize, tree-sitter may classify hit lines so declaration names

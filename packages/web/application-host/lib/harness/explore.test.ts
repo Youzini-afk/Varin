@@ -273,6 +273,35 @@ describe("explore D-090 candidate ranking and materialization", () => {
     expect(result.snippets.map((snippet) => snippet.path).sort()).toEqual(["first.ts", "second.ts"]);
   });
 
+  it('reclaims duplicate text without evicting an implementation from the original priority pack', () => {
+    const child = 'c'.repeat(1500);
+    const snippets = [
+      { path: 'parent.ts', startLine: 1, endLine: 2, text: `${'p'.repeat(500)}\n${child}`, revision: 'rev', source: 'disk' as const, why: 'parent' },
+      { path: 'parent.ts', startLine: 2, endLine: 2, text: child, revision: 'rev', source: 'disk' as const, why: 'child' },
+      { path: 'large-test.ts', startLine: 1, endLine: 1, text: 't'.repeat(2500), revision: 'rev', source: 'disk' as const, why: 'test' },
+      { path: 'key.cs', startLine: 1, endLine: 1, text: 'key'.repeat(500), revision: 'rev', source: 'disk' as const, why: 'implementation' },
+    ];
+    const packed = formatExploreOutput({ snippets, issues: [], omitted: [], notRequested: { count: 0, paths: [] },
+      partial: false, searchIncomplete: false, searched: { files: 4, patterns: 1, ms: 1, incomplete: false } }, { byteBudget: 6000, prefix: 'Search scope: /workspace' });
+    expect(packed.snippets.map(snippet => snippet.path)).toEqual(['parent.ts', 'key.cs']);
+    expect(packed.visibleText).toContain('Visible excerpts: 2');
+    expect(packed.visibleText).toContain(snippets[3]!.text);
+    expect(packed.storedBody).toContain(snippets[2]!.text);
+    expect(Buffer.byteLength(packed.visibleText)).toBeLessThanOrEqual(6000);
+  });
+
+  it('does not treat a parent omission or another revision as delivered coverage', () => {
+    const snippets = [
+      { path: 'a.ts', startLine: 1, endLine: 4, text: 'before\n...\nshared\nend', revision: 'rev', source: 'disk' as const, why: 'parent',
+        unit: { name: 'a', kind: 'class', startLine: 1, endLine: 4, omitted: [{ startLine: 2, endLine: 2 }] } },
+      { path: 'a.ts', startLine: 2, endLine: 2, text: 'shared', revision: 'rev', source: 'disk' as const, why: 'omitted source' },
+      { path: 'a.ts', startLine: 3, endLine: 3, text: 'shared', revision: 'new-rev', source: 'disk' as const, why: 'new source' },
+    ];
+    const packed = formatExploreOutput({ snippets, issues: [], omitted: [], notRequested: { count: 0, paths: [] },
+      partial: false, searchIncomplete: false, searched: { files: 1, patterns: 1, ms: 1, incomplete: false } });
+    expect(packed.snippets).toHaveLength(3);
+  });
+
   it("T8: packs to a byte budget, lists omitted supports, and keeps provenance in details", async () => {
     const long = "x".repeat(200);
     const files = Array.from({ length: 8 }, (_, index) => `f${index}.ts`);

@@ -98,6 +98,14 @@ remove staging directories and never publish a half-written executable. A concur
 ensure for one server shares one preparation, while a caller cancellation only aborts
 the shared job after the last waiter leaves.
 
+Production artifact downloads use the Host's shared egress fetch, including the configured proxy,
+environment and desktop system-network policy. They do not bypass it through global Node fetch.
+Download failures identify the origin, HTTP status or available transport cause code without putting
+URL credentials/query parameters in the generated context; cancellation keeps its original abort reason.
+An Explore query that has seen an unavailable outline uses warm-only LSP requests for later files in
+that scope/language, avoiding repeated failed cold preparation. This does not change editor preparation,
+explicit retries or the ability of a new query to prepare the server.
+
 Marksman is the standalone `artempyanykh/marksman` binary, started with its official
 `server` subcommand. Markdown, `md`, and `mdx` requests share this provider; the
 download manifest uses the fixed `2026-02-08` release and GitHub asset digests.

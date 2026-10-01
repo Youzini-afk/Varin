@@ -42,6 +42,29 @@ function context(inputContext: AgentInputContext, signal = new AbortController()
 }
 
 describe("explore query services", () => {
+  it('returns delivery metadata for the exact visible byte pack while retaining all prepared source in output storage', async () => {
+    const { explore } = await import('./explore.js');
+    const paths = Array.from({ length: 8 }, (_, index) => `long-source-${index}.ts`);
+    const body = `needle ${'x'.repeat(7800)}`;
+    const result = await explore({ question: 'needle', limit: 8 }, {
+      rgSearch: async () => paths.map(path => ({ path, line: 1, text: body })),
+      readFile: async () => ({ status: 'ready', content: body, revision: 'rev', source: 'disk' }),
+    });
+    const outputStore = createOutputStore();
+    const delivered = await packExploreSearchResult({ outputStore }, context({ source: 'disk' }), result);
+    const headers = delivered.text.split('\n').filter(line => line.startsWith('--- '));
+    expect(headers).toHaveLength(delivered.snippets.length);
+    expect(delivered.snippets.length).toBeLessThan(result.snippets.length);
+    for (const snippet of delivered.snippets) expect(delivered.text).toContain(snippet.text);
+    expect(Buffer.byteLength(delivered.text)).toBeLessThanOrEqual(delivered.details.byteBudget);
+    expect(delivered.partial).toBe(true);
+    const full = outputStore.read(actor.sessionId, delivered.handle, 0, 100_000);
+    expect(full.status).toBe('ready');
+    if (full.status !== 'ready') throw new Error('expected full prepared output');
+    for (const snippet of result.snippets) expect(full.slice.text).toContain(`--- ${snippet.path}:${snippet.startLine}-${snippet.endLine}`);
+    outputStore.dispose();
+  });
+
   it("does not expand explicit directories when a path anchor points elsewhere", async () => {
     const ctx = {
       ...context({ source: "disk" }),

@@ -17,6 +17,80 @@ const reclaim = [
 ].join("\n");
 
 describe("explore query run", () => {
+  it('reserves read capacity for content searches deferred behind a technical object', async () => {
+    const read: string[] = [];
+    let readsBeforeContent = -1;
+    const run = createExploreQueryRun({ question: 'How does Widget.Split calculate?', limit: 2 }, {
+      rgSearch: async pattern => {
+        if (pattern === 'calculate') {
+          readsBeforeContent = read.length;
+          return [{ path: 'zlate.cs', line: 2, text: 'calculate important allocation' }];
+        }
+        return [...Array.from({ length: 8 }, (_, i) => ({ path: `early${i}.ts`, line: 1, text: 'Widget.Split' })),
+          { path: 'zlate.cs', line: 1, text: 'Widget.Split' }];
+      },
+      readFile: async path => {
+        read.push(path);
+        return ready(path === 'zlate.cs' ? 'Widget.Split\ncalculate important allocation' : 'Widget.Split');
+      },
+    });
+    await run.waitForViews();
+    expect(readsBeforeContent).toBeGreaterThan(0);
+    expect(readsBeforeContent).toBeLessThanOrEqual(3);
+    expect(read).toContain('zlate.cs');
+    expect(read.length).toBeLessThanOrEqual(5);
+  });
+
+  it('keeps cumulative read slots available for a late primary source', async () => {
+    let release!: () => void;
+    const pending = new Promise<void>(resolve => { release = resolve; });
+    const read: string[] = [];
+    const run = createExploreQueryRun({ question: 'needle', limit: 2 }, {
+      rgSearch: async () => [...Array.from({ length: 8 }, (_, i) => ({ path: `early${i}.ts`, line: 1, text: 'needle' })),
+        { path: 'zlate.cs', line: 1, text: 'needle important calculation' }],
+      readFile: async path => { read.push(path); return ready(path === 'zlate.cs' ? 'needle important calculation' : 'needle'); },
+      semantic: { search: async () => {
+        await pending;
+        return { status: 'ready', coverage: 'complete', lifecycle: 'ready', hits: [{
+          documentId: 'zlate.cs', blockId: 'late', parentUnitId: 'unit', parentName: 'Calculate', parentKind: 'method',
+          startLine: 1, endLine: 1, contentHash: 'late-hash', body: 'needle important calculation', similarity: 0.9, rank: 1,
+        }] };
+      } },
+    });
+    try {
+      run.start();
+      await new Promise<void>(resolve => setImmediate(resolve));
+      expect(read.length).toBeLessThanOrEqual(3);
+      release();
+      await run.waitForViews();
+      expect(read).toContain('zlate.cs');
+      expect(read.length).toBeLessThanOrEqual(5);
+    } finally { release(); run.cancel(); }
+  });
+
+  it('does not repeat a failed cold language preparation during evidence refresh', async () => {
+    const cold: string[] = [];
+    const warm: string[] = [];
+    const run = createExploreQueryRun({ question: 'needle', paths: ['root'] }, {
+      rgSearch: async pattern => [{ path: 'root/note.md', line: pattern === 'later' ? 2 : 1, text: pattern === 'later' ? 'later' : 'needle' }],
+      readFile: async () => ready('needle\nlater'),
+      structure: {
+        outline: async request => {
+          (request.warmOnly ? warm : cold).push(request.path);
+          return { status: 'unavailable', provider: 'lsp', revision: request.revision, symbols: [], message: 'preparation failed' };
+        },
+        classifyHits: async request => ({ status: 'unsupported', provider: null, revision: request.revision, hits: [] }),
+        literalCalls: async request => ({ status: 'unsupported', provider: null, revision: request.revision, calls: [] }),
+      },
+    });
+    await run.waitForViews();
+    await run.submitPlan({ behavior: 'later evidence', groups: [{ id: 'later', concept: 'later', expressions: ['later'] }] });
+    await run.waitForViews();
+    expect(cold).toEqual(['root/note.md']);
+    expect(warm).toContain('root/note.md');
+    expect(run.finish().snippets.some(snippet => snippet.text.includes('later'))).toBe(true);
+  });
+
   it.each(['read', 'outline'] as const)('prepares later C# candidates while a documentation %s is blocked', async (stage) => {
     const controller = new AbortController();
     let clock = 0;
