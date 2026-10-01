@@ -5,7 +5,7 @@ Status: living document — 项目阶段进度与当前缺口的权威入口。H
 阶段合同在 [plan/](plan)，设计边界在 [design/](design)，逐阶段交付叙述已归档至 [archive/](archive) 不再更新。
 本文件不追加工作日志：新阶段交付事实更新下表与矩阵，历史叙述进归档。
 
-Last updated: 2026-09-29
+Last updated: 2026-10-01
 
 ## 阶段进度
 
@@ -27,6 +27,7 @@ Last updated: 2026-09-29
 
 | 缺口 | 现状 |
 | --- | --- |
+| Explore快速检索改造 | 2026-10-01设计已确认，尚未实施：同query增量取材、调查/输出解耦、按职责补位可选模型、完整材料组交付及冷准备解耦。基线`b7520322`已有修复保留；本次没有新增运行时或模型实测。见[设计§6.1](design/harness-retrieval.md)与[实施计划](plan/agent-harness-plan.md#快速检索改造2026-10-01设计待实施)。 |
 | AI4S 7C–7E 剩余合同 | 远程执行与资源管理部分未交付为产品代码；Slurm/原生集群后端延后 |
 | 阶段 O | O0–O4 未实施 |
 | 阶段 BC | 实现缺口与环境证据分别见[当前验收](plan/bot-computer-use-review.md)。BC1–BC3 尚缺主动/自动共同来源覆盖、分支来源恢复与完整来源追读；BC6–BC9 尚缺独立桌面准备、VM guest 引导、成果/续接整合和正式平台依赖。Linux/macOS 真机、真实 libvirt、完整远端图形操作及正式安装包未验证。 |

@@ -4,7 +4,7 @@ Status: active execution plan; accepted capabilities ship as usable defaults (D-
 （锚点不变）；已收口阶段的完整合同与验收细节见 [archive/agent-harness-plan-detail.md](../archive/agent-harness-plan-detail.md)；
 能力现状以 [status.md](../status.md) 为准。
 
-Last updated: 2026-09-27
+Last updated: 2026-10-01
 
 设计与边界见 [agent-harness.md](../design/agent-harness.md)，Rust 系统内核的完整目标见
 [rust-kernel-design.md](../design/rust-kernel-design.md)，交付事实只看 [status.md](../status.md)，
@@ -30,6 +30,8 @@ Agent 可自然登记条件和后续工作，程序通过时间/事件/确定性
 **阶段 F：快速决策模型与渐进检索（D-312）已交付并接线。**
 通用能力与首个 Jev 适配、模型配置、`explore` 选材和动态下一步选择按 F0 → F1 → F2 → F3 → F4 推进。
 完整合同见 [fast-decision-model-design.md](../design/fast-decision-model-design.md)；Computer Use 等未来用途只保留复用边界。
+
+**快速检索改造（2026-10-01）：设计已确认，尚未实施。** 目标是在直接工具与检索子Agent之间降低整次等待、调用往返和无关上下文；LLM/决策/嵌入/重排均可选并按职责补位。复用既有F/HR与原生检索能力，实施入口见本文“快速检索改造”，完整合同归[检索专卷§6.1](../design/harness-retrieval.md)。不把这次设计更新算作F0–F4新增交付。
 
 **阶段 C：后台压缩 Agent 与语义续接（D-314）已交付并接线。**
 原固定候选的一次摘要调用已替换为独立内部 worker：按需查询历史/产物/任务记录，按语义保留有效要求，
@@ -671,7 +673,7 @@ D-300 的原任务按当时边界交付；下列增量现状路径随后由 D-30
 可复用的投影、消息账本、原文引用和请求准备接缝继续使用，
 不重做实验管理/通信实现，也不因缺少真实远端或付费模型环境而阻断可独立完成的上下文改造。
 
-目标详见 [Harness 8.1.1](../design/harness-context.md#811-d-301环境增量留史团队现状作为请求尾部快照后续-7g) 与
+目标详见 [Harness 8.1.1](../design/harness-context.md#811-d-301环境增量留史团队现状作为请求尾部快照d-305-已实施) 与
 [科研集群设计 7.4](../design/research-cluster-design.md#74-持续更新与-zone-2)。本阶段适用于每个授权 Agent，包括主线、子线和同组协作线程。
 
 1. **一处请求前准备，两种保留方式。** 传统环境观察从仅 `before_agent_start` 扩展到每次实际请求前；新增事实放在完整历史/
@@ -746,7 +748,7 @@ provider 允许的工具配对与上下文边界仍保持；跨平台、真实�
 
 状态：D-305 已实施生产纵切。现有可信连接可登记受管目标；固定输入按缺失对象增量传输到目标 Host，
 每个 attempt 使用独立工作目录并由目标 Rust kernel 监督进程、日志、取消和远端产物。显式目标保持，未指定目标按当前可确认资源稳定放置并写入 attempt。
-详见 [科研集群设计 6.6–6.9](../design/research-cluster-design.md#66-受管远程的职责与实际操作d-304--后续-7i)。
+详见 [科研集群设计 6.6–6.9](../design/research-cluster-design.md#66-受管远程的职责与实际操作d-304--d-305-已实施-7i)。
 目标是让自然产生的实验使用远端现场，并可靠地准备、运行、观察和取回成果。Slurm 等原生集群、独立矩阵产品、
 参数搜索语言、固定管理层级和第二套 Agent runtime 均不在本阶段范围。
 
@@ -883,6 +885,25 @@ Jev 是首个 adapter；不实现 Computer Use，不扩成新的长期 Agent run
 ### F2：`explore` 选材接线和模型职责拆分
 ### F3：动态动作候选与逐步探索
 ### F4：交付收口与实际使用观察
+
+## 快速检索改造（2026-10-01设计，待实施）
+
+设计authority为[检索专卷§6.1](../design/harness-retrieval.md)，[快速决策§4.4](../design/fast-decision-model-design.md)同步职责补位。基线代码`b7520322`已有晚到来源容量、重复LSP冷失败准备、可见交付计数/去重与finish幂等修复，这些作为基础保留，不重复宣布为新交付。
+
+本轮只更新设计、计划与导航，不改运行时。后续在同一query owner中推进，不新建检索Agent框架、第二源码权威或模型训练前置。
+
+| 顺序 | 改动范围 | 完成时应有的行为 |
+| --- | --- | --- |
+| 1：执行与交付 | `explore.ts`、query-store/services、相关protocol；增量collect/submit，读取与可选增强分开，调查与输出limit解耦，实际预算内的DeliveryPlan | 已就绪源码无需等待所有来源；无模型仍可用；必需材料组不会被最终渲染拆坏；重复finish同一交付 |
+| 2：能力补位与动作 | Pi explore-tool/model、fast-decision/rerank消费者；按职责分配，真实输入/上下文身份，不依赖graph的基础动作 | LLM-only、决策-only及组合可工作；显式关闭有效；不逐文件生成往返或重复语义评分；新证据可改变后续选择 |
+| 3：准备成本与真实使用 | structure/LSP与semantic runtime；冷准备不阻塞主流程，按revision/空间复用缓存，必要的真实provider观察 | 冷库能先使用基础结果，热索引有收益，编辑后不混来源；最终材料质量、噪声和补查成本支持速度判断 |
+
+内部接口更新同步消费者并清理退役路径，不长期维护两套query。公共`explore`仍接受自然语言、anchors、paths及已有预算；可选跨调用续查按需要接入，不能把OutputStore句柄误作继续执行权限。
+
+验证复用现有query-run/query-services、结构、语义与adapter行为检查；四类模型的配置组合可用模拟adapter验证分工，不要求16组付费实验。真实观察选冷库、热查询、编辑后及跨文件请求，检查必要源码、实际可见输入、串行等待和后续补查。不以候选数、测试数、HTTP成功或结果更短单独宣称收益，不新增固定轮次/文件数/调用次数硬门槛。
+
+交付事实完成后再更新status和能力矩阵；这份计划本身不启动模型请求、训练或后台测评。
+
 ## 阶段 C：后台压缩 Agent 与语义续接（D-314）
 状态：**已交付（wired）**。承接已交付的阶段 F；D-284/D-286 的固定候选、较长原文、历史权威与
 容量驱动仍是基础。设计 authority 为 [context-compaction-agent-design.md](../design/context-compaction-agent-design.md)。

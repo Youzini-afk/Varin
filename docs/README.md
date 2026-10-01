@@ -17,7 +17,7 @@ Last updated: 2026-10-01
 Harness 总体与模块专卷：
 
 - [design/agent-harness.md](design/agent-harness.md) — 总边界与文档关系；§5–9 已拆为专卷：
-  [harness-tools](design/harness-tools.md)（工具集）、[harness-retrieval](design/harness-retrieval.md)（检索三层）、
+  [harness-tools](design/harness-tools.md)（工具集）、[harness-retrieval](design/harness-retrieval.md)（检索三层；§6.1 含2026-10-01快速检索改造，设计已确认、待实施）、
   [harness-knowledge](design/harness-knowledge.md)（知识库）、[harness-context](design/harness-context.md)（上下文与缓存）、
   [harness-verification](design/harness-verification.md)（验证与多 agent）
 - [design/harness-capability-matrix.md](design/harness-capability-matrix.md) — Harness 能力逐行交付明细（唯一权威）
@@ -30,7 +30,7 @@ Harness 总体与模块专卷：
 - [design/testing-ci-design.md](design/testing-ci-design.md) — Stage Q 测试与 CI 规范
 - [design/web-research-search-design.md](design/web-research-search-design.md) — 阶段 L Web/科研检索
 - [design/agent-settings-design.md](design/agent-settings-design.md) / [design/agent-follow-up-design.md](design/agent-follow-up-design.md) — Agent 设置与续接
-- [design/context-compaction-agent-design.md](design/context-compaction-agent-design.md) / [design/fast-decision-model-design.md](design/fast-decision-model-design.md) — 压缩 Agent 与快速决策模型
+- [design/context-compaction-agent-design.md](design/context-compaction-agent-design.md) / [design/fast-decision-model-design.md](design/fast-decision-model-design.md) — 压缩 Agent 与快速决策模型；后者§4.4与Explore按职责补位设计同步，既有接线与待改造范围分开
 - [design/native-workspace-recovery-design.md](design/native-workspace-recovery-design.md) / [design/recovery.md](design/recovery.md) — 恢复模型
 - [design/office-work-continuity-design.md](design/office-work-continuity-design.md) — 阶段 O 办公连续性（设计已接受，未实施）
 - [design/bot-operated-workbench-design.md](design/bot-operated-workbench-design.md) — 单 Bot、主动/自动记忆、咨询与缓存的设计依据；BC 部分实现，进度见当前验收
