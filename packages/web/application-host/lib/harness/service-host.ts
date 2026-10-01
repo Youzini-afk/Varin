@@ -672,6 +672,11 @@ export function createHarnessServiceHost(options: HarnessServiceHostOptions): Ha
   const researchDecideService = options.researchDecideService ?? null;
   const materialCollectionsService = options.materialCollectionsService ?? null;
   const documentReadSource = options.documentReadSource ?? null;
+  const pathAuthority = options.pathAuthority;
+  const readAuthorizedDiskPage: HarnessServiceHost['readAuthorizedDiskPage'] = options.readAuthorizedDiskPage
+    ?? (typeof pathAuthority?.readAuthorizedPage === 'function'
+      ? (ctx, authorized, page) => pathAuthority.readAuthorizedPage(ctx.actor, authorized, page, ctx.signal)
+      : undefined);
   const documentPathOverlay = options.documentPathOverlay ?? null;
   const documentWriteGuard = options.documentWriteGuard ?? null;
   const documentSurfaceWrite = options.documentSurfaceWrite ?? null;
@@ -1067,7 +1072,7 @@ export function createHarnessServiceHost(options: HarnessServiceHostOptions): Ha
     documentReader: options.documentReader ?? null,
     ...(options.readMaterialFile ? { readMaterialFile: options.readMaterialFile } : {}),
     ...(options.readAuthorizedDiskFile ? { readAuthorizedDiskFile: options.readAuthorizedDiskFile } : {}),
-    ...(options.readAuthorizedDiskPage ? { readAuthorizedDiskPage: options.readAuthorizedDiskPage } : {}),
+    ...(readAuthorizedDiskPage ? { readAuthorizedDiskPage } : {}),
     ...(options.documentReadingSettings ? { documentReadingSettings: options.documentReadingSettings } : {}),
     ...(options.materialWebPolicy ? { materialWebPolicy: options.materialWebPolicy } : {}),
     documentReadSource,
