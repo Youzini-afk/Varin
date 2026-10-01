@@ -145,7 +145,7 @@ it('explains a parent-ignored directory and permits an explicit directory enumer
   assert.equal(filtered.records.filter(record => record.kind === 'entry' && data(record).kind === 'file').length, 0);
   const info = filtered.records.find(record => record.kind === 'inventory');
   assert.equal(data(info!).selectedRootIgnored, true);
-  assert.equal(path.resolve(String(data(info!).gitRoot)), path.resolve(f.workspace));
+  assert.equal(await fs.realpath(String(data(info!).gitRoot)), await fs.realpath(f.workspace));
   const included = await f.service.directory(selected, { operation: 'list', lane: 'background', includeTracked: true, respectGitignore: false });
   assert.ok(included.records.some(record => record.kind === 'entry' && record.path === 'source.scala'));
   execFileSync('git', ['init', '--quiet'], { cwd: selected, stdio: 'ignore' });
@@ -182,7 +182,8 @@ it('indexes Scala through native text units and validates returned source revisi
   const scope = workspaceScope(workspaceId);
   await runtime.scanScope(scope);
   const result = await runtime.search(scope, 'uniqueScalaMarker', 5);
-  assert.ok(result.hits.some(hit => hit.documentId === documentId && hit.body.includes('uniqueScalaMarker') && hit.fallback));
+  assert.ok(result.hits.some(hit => hit.documentId === documentId && hit.body.includes('uniqueScalaMarker') && hit.fallback),
+    JSON.stringify({ result, progress: runtime.scanProgress(scope) }));
   assert.equal(result.hits[0]?.revision, units.revision);
   assert.equal(runtime.scanProgress(scope)?.coverageStats?.textFallbackFiles, 1);
   assert.equal(runtime.scanProgress(scope)?.coverageStats?.structurallySupportedFiles, 0);
@@ -190,6 +191,33 @@ it('indexes Scala through native text units and validates returned source revisi
   const changed = await runtime.search(scope, 'uniqueScalaMarker', 5);
   assert.ok(changed.hits.every(hit => hit.revision !== units.revision));
 }, 30000);
+
+it('resolves directory aliases within the admitted root and rejects aliases outside it', async () => {
+  const f = await fixture();
+  const source = path.join(f.workspace, 'src');
+  await fs.mkdir(source);
+  await fs.writeFile(path.join(source, 'entry.scala'), 'object AliasSource {}\n');
+  const alias = path.join(f.root, 'workspace-alias');
+  await fs.symlink(f.workspace, alias, process.platform === 'win32' ? 'junction' : 'dir');
+  // Exercise a caller alias and a canonical caller against the original
+  // admission spelling, which can itself be a short path on Windows CI.
+  for (const cwd of [path.join(alias, 'src'), await fs.realpath(source)]) {
+    const streamed: string[] = [];
+    const result = await f.service.directory(cwd, {
+      operation: 'read', lane: 'foreground', paths: ['entry.scala'],
+    }, { onRecords: records => { streamed.push(...records.map(record => record.path)); } });
+    assert.equal(result.status, 'ready', JSON.stringify(result));
+    assert.equal(result.records.map(record => data(record).text).join(''), 'object AliasSource {}\n');
+    assert.deepEqual(result.records.map(record => record.path), ['entry.scala']);
+    assert.deepEqual(streamed, ['entry.scala']);
+  }
+  const outside = path.join(f.root, 'outside');
+  await fs.mkdir(outside);
+  await fs.writeFile(path.join(outside, 'secret.scala'), 'object Outside {}\n');
+  const escape = path.join(f.workspace, 'escape');
+  await fs.symlink(outside, escape, process.platform === 'win32' ? 'junction' : 'dir');
+  await assert.rejects(f.service.directory(escape, { operation: 'list', lane: 'foreground' }), /escaped|admitted/i);
+});
 
 it("R5 structure provider analyzes and chunks a disk file directly through native compute",async()=>{
   const f=await fixture();

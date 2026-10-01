@@ -1,5 +1,6 @@
 import { randomUUID } from "node:crypto";
 import path from "node:path";
+import { canonicalizePathIdentity } from "../workspace/path-safety.js";
 import type { KernelClient, KernelGrantHandle, KernelScopedClient } from "./kernel-client.js";
 import type { NativeProcessIdentity } from "./process-service.js";
 import type { KernelComputeGrammarParams, KernelComputeObject } from "./protocol.generated.js";
@@ -106,9 +107,19 @@ export function createKernelComputeService(options: KernelComputeServiceOptions)
       return track((async () => {
         const signal = signalFor(runOptions.signal);
         signal.throwIfAborted();
-        const identity = await options.resolveIdentity(cwd);
+        const canonicalCwd = await canonicalizePathIdentity(cwd);
+        const resolvedIdentity = await options.resolveIdentity(cwd);
+        const identity = {
+          ...resolvedIdentity,
+          canonicalRoot: await canonicalizePathIdentity(resolvedIdentity.canonicalRoot),
+        };
+        // Admission and the selected directory may spell the same location
+        // differently (Windows 8.3 names, junctions or symlinks). Compute the
+        // granted relative scope from filesystem identities, as process launch
+        // does, and reject an escaping alias before creating a context.
+        const base = relative(path.relative(identity.canonicalRoot, canonicalCwd));
+        signal.throwIfAborted();
         const admitted = await context(identity);
-        const base = relative(path.relative(identity.canonicalRoot, cwd));
         const join = (value: string) => [base, relative(value)].filter(Boolean).join("/");
         const params: KernelComputeInput = {
           ...input, workspaceId: identity.workspaceId, rootId: admitted.rootId!,

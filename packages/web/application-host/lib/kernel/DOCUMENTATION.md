@@ -133,6 +133,12 @@ grep/ignore ecosystem plus the fixed Git inventory command for tracked/ignored m
 loads Host-admitted grammar/query recipes and emits bounded symbol/hit/import/call batches or structural units;
 there is no Host parse-tree/source cache.
 
+The Host computes a directory's relative scope from the canonical filesystem identities of both the admitted
+root and caller directory. Windows 8.3 names, junctions and symlinks cannot become false parent traversals;
+aliases whose actual target lies outside that root remain rejected. Returned and streamed paths stay relative
+to the caller's selected directory. Git inventory diagnostics report the actual repository root, whose display
+spelling may differ from the caller's path.
+
 Production `search.content`, file find, Harness grep/explore, language catalog, symbol graph and semantic disk
 index use the same `KernelComputeService`. A virtual Thread query exposes path/revision plus a pin-bound compute
 function; semantic recall invokes `unitsFixed` directly on that pin, so whole branch bodies do not transit through
