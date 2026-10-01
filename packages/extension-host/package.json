@@ -28,7 +28,7 @@
   "dependencies": {
     "@varin/extension-builtins": "workspace:*",
     "@varin/extension-contract": "workspace:*",
-    "esbuild": "^0.28.1",
+    "esbuild": "^0.28.2",
     "tar": "^7.5.22"
   },
   "engines": {
