@@ -712,7 +712,16 @@ export class HostController {
           return;
         }
         this.#requestQueue = this.#requestQueue
-          .then(() => this.#handleEnvelope(envelope))
+          .then(() => {
+            // Admit embeddings after earlier configuration/lifecycle work, but
+            // do not serialize independent network waits. Batch reservations
+            // and cancellation are still owned by the inference runtime.
+            if (envelope.kind === "request" && envelope.method === "harness.embed") {
+              void this.#handleEnvelope(envelope).catch((error) => this.#handleFatalError(error));
+              return;
+            }
+            return this.#handleEnvelope(envelope);
+          })
           .catch((error) => this.#handleFatalError(error));
       },
       () => {

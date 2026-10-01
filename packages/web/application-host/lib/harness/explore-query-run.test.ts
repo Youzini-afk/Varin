@@ -486,6 +486,77 @@ describe("explore query run", () => {
     releaseSemantic?.();
   });
 
+  it("retains acquired windows when the source deadline aborts inside a later read", async () => {
+    const controller = new AbortController();
+    let clock = 0;
+    const run = createExploreQueryRun({ question: "needle" }, {
+      rgSearch: async (pattern) => [{ path: pattern === "later" ? "later.ts" : "a.ts", line: 1, text: "needle" }],
+      readFile: async (path) => {
+        if (path === "later.ts") {
+          // The store's source timer can abort before the pump gets another
+          // loop turn to set its own deadlineStopped flag.
+          clock = 100;
+          controller.abort();
+          controller.signal.throwIfAborted();
+        }
+        return ready("needle");
+      },
+    }, { controller, now: () => clock, deadlineAt: 100 });
+    run.start();
+    await run.waitForViews();
+    expect(run.viewsForModel().views.some((view) => view.path === "a.ts")).toBe(true);
+    await run.submitPlan({ behavior: "later evidence", groups: [{ id: "later", concept: "later", expressions: ["later"] }] });
+    await expect(run.waitForViews()).resolves.toBeUndefined();
+    const result = run.finish();
+    expect(result.partial).toBe(true);
+    expect(result.searchIncomplete).toBe(true);
+    expect(result.snippets.some((snippet) => snippet.path === "a.ts")).toBe(true);
+  });
+
+  it("retains windows when the deadline interrupts graph enrichment after the primary pump", async () => {
+    const controller = new AbortController();
+    let clock = 0;
+    const run = createExploreQueryRun({ question: 'needle' }, {
+      rgSearch: async () => [{ path: 'a.ts', line: 1, text: 'needle' }],
+      readFile: async () => ready('needle'),
+      graph: {
+        catalogStats: async () => ({ symbolCount: 1 }),
+        searchDefinitions: async () => [],
+        findLinks: async () => [],
+        findImporters: async () => ({ resolved: [] }),
+        fileRelations: async () => {
+          clock = 100;
+          controller.abort();
+          controller.signal.throwIfAborted();
+          return null;
+        },
+      },
+    }, { controller, now: () => clock, deadlineAt: 100 });
+    await expect(run.waitForViews()).resolves.toBeUndefined();
+    const result = run.finish();
+    expect(result.snippets.some(snippet => snippet.path === 'a.ts')).toBe(true);
+    expect(result.searchIncomplete).toBe(true);
+    expect(result.partial).toBe(true);
+  });
+
+  it.each(['early-abort', 'user-cancel-after-deadline'] as const)("does not turn %s into a partial success", async (mode) => {
+    const controller = new AbortController();
+    let clock = 0;
+    const run = createExploreQueryRun({ question: 'needle' }, {
+      rgSearch: async () => [{ path: 'a.ts', line: 1, text: 'needle' }],
+      readFile: async () => {
+        if (mode === 'user-cancel-after-deadline') {
+          clock = 100;
+          run.cancel();
+        } else controller.abort();
+        controller.signal.throwIfAborted();
+        return ready('needle');
+      },
+    }, { controller, now: () => clock, deadlineAt: 100 });
+    await expect(run.waitForViews()).rejects.toMatchObject({ name: 'AbortError' });
+    if (mode === 'user-cancel-after-deadline') expect(() => run.finish()).toThrow(/cancelled/i);
+  });
+
   it("merges incremental selection instead of replacing the earlier windows", async () => {
     const run = createExploreQueryRun({ question: "needle", limit: 2 }, {
       rgSearch: async (pattern) => {

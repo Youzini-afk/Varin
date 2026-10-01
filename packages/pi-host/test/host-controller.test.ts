@@ -851,6 +851,77 @@ describe("HostController", () => {
     }
   });
 
+  it("overlaps embedding network waits while retaining batch cancellation isolation", async () => {
+    const root = await mkdtemp(join(tmpdir(), "varin-host-embedding-concurrency-"));
+    const agentDir = join(root, "agent");
+    const cwd = join(root, "workspace");
+    await Promise.all([mkdir(agentDir, { recursive: true }), mkdir(cwd, { recursive: true })]);
+    await writeFile(join(agentDir, "settings.json"), JSON.stringify({ harness: {
+      embedding: { protocol: "openai-compatible", providerId: "embed-provider", modelId: "embed-1", dimensions: 2 },
+    } }));
+    await writeFile(join(agentDir, "models.json"), JSON.stringify({ providers: {
+      "embed-provider": { name: "Embed", baseUrl: "https://models.example/v1", api: "openai-completions", apiKey: "test-key", models: [] },
+    } }));
+    let resolveEntered!: () => void;
+    let resolveRelease!: () => void;
+    const entered = new Promise<void>((resolve) => { resolveEntered = resolve; });
+    const release = new Promise<void>((resolve) => { resolveRelease = resolve; });
+    let calls = 0;
+    const transport = new MemoryHostTransport();
+    const controller = new HostController({ agentDir, transport, projectTrustOverride: true,
+      inferenceFetch: async (_url, init) => {
+        calls++;
+        if (calls === 2) resolveEntered();
+        const signal = init?.signal;
+        await new Promise<void>((resolve, reject) => {
+          const abort = () => reject(new DOMException("cancelled", "AbortError"));
+          if (signal?.aborted) return abort();
+          signal?.addEventListener("abort", abort, { once: true });
+          void release.then(() => { signal?.removeEventListener("abort", abort); resolve(); });
+        });
+        return new Response(JSON.stringify({ data: [{ index: 0, embedding: [1, 0] }] }),
+          { status: 200, headers: { "Content-Type": "application/json" } });
+      },
+    });
+    controller.start();
+    try {
+      transport.receive(createRequest("create", "session.create", { cwd }));
+      const created = await transport.waitFor((entry) => isResponse(entry, "create"), 15_000);
+      assert.ok(created.kind === "response" && created.ok);
+      transport.receive(createRequest("describe", "harness.inference.describe", {}));
+      const described = await transport.waitFor((entry) => isResponse(entry, "describe"), 15_000);
+      assert.ok(described.kind === "response" && described.ok);
+      const snapshot = described.result as HarnessInferenceBindingSnapshot;
+      assert.equal(snapshot.embedding.status, "ready");
+      if (snapshot.embedding.status !== "ready") throw new Error("embedding binding unavailable");
+      const binding = snapshot.embedding.binding;
+      const params = (batchId: string) => ({ batchId, configurationId: binding.configurationId,
+        ...(binding.dimensions !== undefined ? { dimensions: binding.dimensions } : {}), items: [{ id: "q", text: "concurrent" }],
+        maxTokens: binding.maxTokens ?? 8192, modelId: binding.modelId,
+        protocol: "openai-compatible" as const, providerId: binding.providerId, purpose: "query" as const });
+      transport.receive(createRequest("first", "harness.embed", params("first-batch")));
+      transport.receive(createRequest("second", "harness.embed", params("second-batch")));
+      // Neither fetch is released. The second must enter before the first ends.
+      await Promise.race([entered, new Promise<never>((_resolve, reject) => {
+        const timer = setTimeout(() => reject(new Error("second embedding remained serialized")), 5_000);
+        timer.unref();
+      })]);
+      transport.receive(createRequest("cancel-first", "harness.inference.cancel", { batchId: "first-batch" }));
+      const cancelled = await transport.waitFor((entry) => isResponse(entry, "cancel-first"));
+      assert.ok(cancelled.kind === "response" && cancelled.ok);
+      const first = await transport.waitFor((entry) => isResponse(entry, "first"));
+      assert.ok(first.kind === "response" && !first.ok);
+      resolveRelease();
+      const second = await transport.waitFor((entry) => isResponse(entry, "second"));
+      assert.ok(second.kind === "response" && second.ok);
+      assert.equal(calls, 2);
+    } finally {
+      resolveRelease();
+      await controller.dispose();
+      await rm(root, { force: true, recursive: true });
+    }
+  });
+
   it("cancels queued inference and releases rejected or invalid batch reservations", async () => {
     const root = await mkdtemp(join(tmpdir(), "varin-host-inference-queue-"));
     const agentDir = join(root, "agent");

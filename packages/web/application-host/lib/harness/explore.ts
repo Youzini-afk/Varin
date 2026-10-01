@@ -2097,17 +2097,27 @@ export function createExploreQueryRun(
   };
 
   const driveViews = async (): Promise<void> => {
-    if (terminal !== "active") return;
-    start();
     try {
-      await awaitPump();
-      if (terminal !== "active") return;
-      if (fatalError && byFile.size === 0) throw fatalError;
+      await collectViews();
     } catch (error) {
       if (!(error instanceof Error && error.name === "AbortError")) throw error;
-      if (!deadlineStopped || terminalState() === "cancelled" || options.signal?.aborted) throw error;
-      if (terminal !== "active") return;
+      if (terminalState() === "cancelled" || options.signal?.aborted) throw error;
+      // The store's source timer can fire while materialization is awaiting
+      // I/O, before the pump can set deadlineStopped on its next loop turn.
+      // Deadline expiry keeps acquired material; earlier/user aborts still fail.
+      if (!deadlineStopped && remainingMs() > 0) throw error;
+      deadlineStopped = true;
+      searchIncomplete = true;
+      abortLeftoverSources();
+      if (terminal === "active") freezeViews();
     }
+  };
+
+  const collectViews = async (): Promise<void> => {
+    if (terminal !== "active") return;
+    start();
+    await awaitPump();
+    if (terminal !== "active") return;
     if (fatalError && byFile.size === 0) throw fatalError;
     if (options.signal?.aborted || terminalState() === "cancelled") {
       const error = new Error("Explore query cancelled");

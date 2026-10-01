@@ -45,6 +45,13 @@ recovery evidence; the optional backend resolver alone is not a delivered remote
 
 ## Registration
 
+`HostController` admits `harness.embed` in the ordinary request queue, after preceding configuration and
+session lifecycle work, then releases the queue while its provider request is in flight. Independent
+embedding batches can use the Host index scheduler's configured concurrency. Batch identity reservations,
+queued cancellation and actual fetch cancellation remain in `BackgroundInferenceRuntime`; cancelling one
+batch does not cancel another. This does not move inference ahead of lifecycle admission or alter the
+configured concurrency setting.
+
 Tools are selected by `selectHarnessTools()` during `SessionHost.#createRuntimeFactory()`.
 Web search is available whenever the Host advertises its search service, unless the user disables
 `harness.tools.websearch`. It does not require a search key or reuse model-account search. Empty results

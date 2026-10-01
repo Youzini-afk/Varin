@@ -858,6 +858,12 @@ Thread delivery calls the same directed-message ledger, target lock and
 admission path as `thread.send`; an occurrence id is the request identity across
 retry/reconcile. Root sessions retain the Pi broker's native receipt path.
 
+An Explore source deadline preserves already prepared, revision-bound windows and marks the result
+`partial` / `searchIncomplete`, whether it interrupts the source pump, document materialization or later
+graph enrichment. The store's timer may fire while one of those stages is awaiting I/O; partial delivery
+does not depend on the pump reaching its next loop turn first. Explicit query/request cancellation and
+an abort before the source deadline remain cancellations, never successful partial results.
+
 `explore.search` asks an optional `structureSource` (see
 `lib/structure/DOCUMENTATION.md`) for a revision-bound outline after a file is
 materialized. Production tries tree-sitter, then the agent-view LSP outline.
