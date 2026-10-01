@@ -503,7 +503,7 @@ describe("harness router", () => {
           if (ctx.signal.aborted) fail();
           else ctx.signal.addEventListener("abort", fail, { once: true });
         });
-        return { queryId: "eq_1", question: "x", views: [], unevaluated: 0, sources: [], deadlineAt: Date.now() };
+        return { queryId: "eq_1", question: "x", views: [], unevaluated: 0, sequence: 1, pending: false, actions: [], outputByteBudget: 24576, sources: [], deadlineAt: Date.now() };
       },
     });
     const pending = router.processEvent(harnessEvent("explore.query.views", { queryId: "eq_1" }, { requestId: "req-wait" }));
@@ -554,7 +554,7 @@ describe("harness router", () => {
           if (ctx.signal.aborted) fail();
           else ctx.signal.addEventListener("abort", fail, { once: true });
         });
-        return { queryId: "eq_1", question: "x", views: [], unevaluated: 0, sources: [], deadlineAt: Date.now() };
+        return { queryId: "eq_1", question: "x", views: [], unevaluated: 0, sequence: 1, pending: false, actions: [], outputByteBudget: 24576, sources: [], deadlineAt: Date.now() };
       },
     });
     const pending = router.processEvent(harnessEvent("explore.query.views", { queryId: "eq_1" }, { requestId: "req-wait" }));

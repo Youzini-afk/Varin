@@ -87,10 +87,13 @@ export function parseExplorePlan(text: string): ExploreGroupedSearchPlan | undef
 export function parseExploreSelection(text: string): {
   groups: ExploreQuerySelectionGroup[];
   followup?: Omit<ExploreQueryFollowupParams, "queryId">;
+  actionIds: string[];
+  done: boolean;
 } | undefined {
   const value = extractJsonObject(text);
   if (!value || typeof value !== "object" || Array.isArray(value)) return undefined;
   const record = value as Record<string, unknown>;
+  if (!Array.isArray(record.groups)) return undefined;
   const groupsIn = Array.isArray(record.groups) ? record.groups : [];
   const groups = groupsIn.flatMap((item, index) => {
     if (!item || typeof item !== "object" || Array.isArray(item)) return [];
@@ -119,7 +122,6 @@ export function parseExploreSelection(text: string): {
       ...(typeof group.gap === "string" && group.gap.trim() ? { gap: group.gap.trim() } : {}),
     }];
   });
-  if (groups.length === 0) return undefined;
   const followupIn = record.followup && typeof record.followup === "object" && !Array.isArray(record.followup)
     ? record.followup as Record<string, unknown>
     : undefined;
@@ -145,6 +147,8 @@ export function parseExploreSelection(text: string): {
     : [];
   return {
     groups,
+    actionIds: Array.isArray(record.actionIds) ? record.actionIds.filter((id): id is string => typeof id === 'string') : [],
+    done: record.done === true,
     ...(searches.length || locates.length
       ? { followup: { ...(searches.length ? { searches } : {}), ...(locates.length ? { locates } : {}) } }
       : {}),
@@ -167,6 +171,8 @@ export const EXPLORE_SELECT_SYSTEM = [
   "Prefer Host range IDs. Each rangeId lists its line span. Self-drawn ranges must fall inside text you saw.",
   "Name concrete gaps as what this batch of read material did not contain. Never claim the repository lacks an implementation.",
   "Do not score the whole pool. Do not write a long analysis that replaces the main agent.",
+  "Return actionIds for useful Host-issued operations, or followup searches/locates for concrete missing evidence. Empty groups are valid when no evidence is useful yet. Return done:true when the retained material suffices or further work is not useful. Otherwise new evidence can arrive in another batch.",
+  "Each response replaces the retained selection: include the earlier ranges that remain useful. Do not collect unrelated excerpts to fill the output limit. A required group must be deliverable together.",
 ].join(" ");
 
 export function renderExplorePlanPrompt(start: ExploreQueryStartResult): string {
@@ -229,5 +235,8 @@ export function renderExploreSelectPrompt(
       ]),
     "",
     "Select complementary views and required ranges. Keep the original question.",
+    `Visible delivery budget: ${views.outputByteBudget} UTF-8 bytes including paths, source metadata and gap notices. Choose compact complete evidence groups that leave room for those fields.`,
+    `Available operations (choose actionIds): ${JSON.stringify(views.actions)}`,
+    `Pending sources: ${views.pending}; additional unassessed views: ${views.unevaluated}`,
   ].join("\n");
 }

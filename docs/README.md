@@ -17,7 +17,7 @@ Last updated: 2026-10-01
 Harness 总体与模块专卷：
 
 - [design/agent-harness.md](design/agent-harness.md) — 总边界与文档关系；§5–9 已拆为专卷：
-  [harness-tools](design/harness-tools.md)（工具集）、[harness-retrieval](design/harness-retrieval.md)（检索三层；§6.1 含2026-10-01快速检索改造，设计已确认、待实施）、
+  [harness-tools](design/harness-tools.md)（工具集）、[harness-retrieval](design/harness-retrieval.md)（检索三层；§6.1 增量执行与可选模型补位已接入，真实效果未测）、
   [harness-knowledge](design/harness-knowledge.md)（知识库）、[harness-context](design/harness-context.md)（上下文与缓存）、
   [harness-verification](design/harness-verification.md)（验证与多 agent）
 - [design/harness-capability-matrix.md](design/harness-capability-matrix.md) — Harness 能力逐行交付明细（唯一权威）

@@ -26,6 +26,9 @@ export interface StoredExploreQuery {
   startedAt: number;
   deadlineAt: number;
   decisionMode?: HarnessExploreDecisionMode;
+  duties?: NonNullable<import('@varin/protocol').ExploreQueryStartResult['duties']>;
+  rerankSettings?: import('@varin/protocol').HarnessRerankSettings;
+  rerankInvalid?: boolean;
   controller: AbortController;
   /** User/request cancellation and the total query deadline; sources have their own controller. */
   cancelController: AbortController;

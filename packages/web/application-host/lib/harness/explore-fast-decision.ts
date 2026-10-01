@@ -10,6 +10,7 @@
  * next step is worth executing. A missing answer is never read as a no.
  */
 import {
+  fastDecisionCapabilities,
   type ExploreFastDecisionDetails,
   type ExploreModelStageStatus,
   type ExploreQueryAction,
@@ -43,13 +44,6 @@ export function fastDecisionStageStatus(details: ExploreFastDecisionDetails | un
   return details?.status ?? "skipped";
 }
 
-/** Rough per-material text bound; the provider's own state limit still applies. */
-const MATERIAL_TEXT_LIMIT = 8 * 1024;
-
-const clipMaterial = (text: string): string => (
-  text.length <= MATERIAL_TEXT_LIMIT ? text : `${text.slice(0, MATERIAL_TEXT_LIMIT)}\n…`
-);
-
 const MATERIAL_YES = "Carries evidence the answer should cite: the implementation, call path, contract, or failure the question is about.";
 const MATERIAL_NO = "Does not carry that evidence — an unrelated match, a duplicated window, or noise.";
 const ACTION_YES = "Executing this step is likely to produce material that improves the answer.";
@@ -65,6 +59,7 @@ const errorMessage = (error: unknown): string => (
 
 export interface ExploreFastDecisionLoopInput {
   run: ExploreQueryRun;
+  judgeMaterials?: boolean;
   /** Binding resolved when the query started; settings edits never reach it. */
   binding: HarnessResolvedFastDecisionBinding;
   /** One batch against the provider; throws on provider/transport failure. */
@@ -123,6 +118,7 @@ export async function runExploreFastDecisionLoop(
     missing: 0,
     unevaluatedMaterials: 0,
   };
+  const acceptedActions = new Set<string>();
   const judged = new Set<string>();
   const judgedActions = new Set<string>();
   let usage: { inputTokens?: number; outputTokens?: number } | undefined;
@@ -132,31 +128,26 @@ export async function runExploreFastDecisionLoop(
       input.signal.throwIfAborted();
       if (input.closing.requested()) break;
       if (now() >= input.deadlineAt) break;
-      // Wait for the pipeline to produce or for finish to ask us to settle.
-      await Promise.race([input.run.waitForViews(), input.closing.promise]);
-      input.signal.throwIfAborted();
-      if (input.run.terminal() !== "active") break;
+      const capacity = fastDecisionCapabilities(input.binding.protocol).maxStateTokens;
+      const retained = input.run.selectedViews();
+      const snapshot = input.run.collect({ seen: [...judged],
+        ...(capacity ? { inputBytes: Math.max(1, capacity - Buffer.byteLength(JSON.stringify(retained) + input.run.question)) } : {}) });
       const closing = input.closing.requested();
-      // Once the query's source signal closed (source deadline), launched
-      // actions die instantly — judge what remains, offer nothing new.
       const canAct = !closing && !input.run.signal.aborted;
-      const { views, unevaluated } = input.run.viewsForModel();
-      const fresh = views.filter((view) => !view.unevaluated && !judged.has(view.viewId));
-      const pending = canAct
-        ? (await input.run.actionCandidates()).filter(
-          (candidate) => !details.executed.includes(candidate.actionId) && !judgedActions.has(candidate.actionId),
-        )
-        : [];
+      const { views, unevaluated } = snapshot;
+      const fresh = views.filter(view => !view.unevaluated);
+      if (!judged.size && !fresh.length && snapshot.pending) {
+        await Promise.race([input.run.waitForProgress(snapshot.sequence, input.signal), input.closing.promise]);
+        continue;
+      }
+      const contextKey = retained.map(view => view.viewId).sort().join('|');
+      const pending = canAct ? (await input.run.actionCandidates()).filter(candidate =>
+        !details.executed.includes(candidate.actionId) && !judgedActions.has(`${candidate.actionId}@${contextKey}`)) : [];
       if (fresh.length === 0 && pending.length === 0) {
-        // The source side has already closed at its reserve deadline; no
-        // later plan can produce material through this query anymore.
-        if (!waitForLaterProgress || input.run.signal.aborted || input.closing.requested()) break;
-        const remaining = Math.max(1, input.deadlineAt - now());
-        await Promise.race([
-          input.run.waitForProgress(),
-          input.closing.promise,
-          new Promise<void>((resolve) => { setTimeout(resolve, remaining); }),
-        ]);
+        input.run.setJudgmentPending(false);
+        const idle = input.run.collect({ seen: [...judged] });
+        if (!idle.pending && !waitForLaterProgress || input.run.signal.aborted || closing) break;
+        await Promise.race([input.run.waitForProgress(idle.sequence, input.signal), input.closing.promise]);
         continue;
       }
       details.rounds += 1;
@@ -164,14 +155,14 @@ export async function runExploreFastDecisionLoop(
       // Keep it truthful when the loop wakes for later plans or follow-ups.
       details.unevaluatedMaterials = unevaluated;
 
-      const materials: FastDecisionMaterial[] = fresh.map((view: ExploreQueryView) => ({
+      const materials: FastDecisionMaterial[] = [...retained, ...fresh.filter(view => !retained.some(item => item.viewId === view.viewId))].map((view: ExploreQueryView) => ({
         id: view.viewId,
         label: `${view.path}:${view.startLine}-${view.endLine}`,
         revision: view.revision,
-        text: clipMaterial(view.text),
+        text: view.text,
       }));
       const questions: FastDecisionQuestion[] = [
-        ...fresh.map((view): FastDecisionQuestion => ({
+        ...(input.judgeMaterials === false ? [] : fresh).map((view): FastDecisionQuestion => ({
           id: `m:${view.viewId}`,
           kind: "judge",
           instructions: {
@@ -192,6 +183,9 @@ export async function runExploreFastDecisionLoop(
         })),
       ];
 
+      for (const view of fresh) judged.add(view.viewId);
+      if (!questions.length) continue;
+      input.run.setJudgmentPending(true);
       const result = await input.call({
         goal: input.run.question,
         materials,
@@ -210,7 +204,7 @@ export async function runExploreFastDecisionLoop(
         };
       }
       for (const view of fresh) judged.add(view.viewId);
-      for (const action of pending) judgedActions.add(action.actionId);
+      for (const action of pending) judgedActions.add(`${action.actionId}@${contextKey}`);
       const answered = new Map(result.answers.map((answer) => [answer.id, answer]));
 
       const include = fresh
@@ -223,34 +217,33 @@ export async function runExploreFastDecisionLoop(
         input.run.applySelection([{
           id: `fast:${details.rounds}`,
           purpose: "fast-decision material",
-          views: include.map((viewId) => ({ viewId })),
+          views: include.map((viewId) => ({ viewId, required: false })),
         }], { merge: true });
       }
 
-      if (closing) break;
+      if (input.closing.requested()) break;
       const chosen = pending.filter((action) => {
         const answer = answered.get(`a:${action.actionId}`);
         return answer?.kind === "judge" && answer.value >= 0.5;
       });
-      if (chosen.length === 0) {
-        if (!waitForLaterProgress || input.run.signal.aborted || input.closing.requested()) break;
-        continue;
-      }
+      if (chosen.length === 0) continue;
       const followup = await input.run.followup({ actions: chosen });
-      details.executed.push(...followup.actionsExecuted);
-      details.actionsExecuted += followup.actionsExecuted.length;
-      if (followup.newViews.length > 0) judgedActions.clear();
+      for (const id of followup.actionsAccepted) acceptedActions.add(id);
+
       // A quiet action round can still be followed by a later generated plan;
       // wait for progress or the query close/deadline instead of ending early.
-      if (!waitForLaterProgress && (followup.actionsExecuted.length === 0 || followup.newViews.length === 0)) break;
+
     }
   } catch (error) {
     const aborted = isAbort(error) || input.signal.aborted || input.run.terminal() === "cancelled";
     details.status = aborted ? "cancelled" : "failed";
     if (!aborted) details.note = errorMessage(error);
-  }
+  } finally { input.run.setJudgmentPending(false); }
+  details.executed = input.run.completedActionIds().filter(id => acceptedActions.has(id));
+  details.actionsExecuted = details.executed.length;
   if (usage) details.usage = usage;
   if (details.batches === 0 && details.status === "used") {
+    details.status = 'skipped';
     details.note = "No evaluable material arrived before the loop settled.";
   }
   return details;

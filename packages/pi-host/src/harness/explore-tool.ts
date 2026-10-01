@@ -40,11 +40,11 @@ function boundByDeadline(signal: AbortSignal | undefined, deadlineAt: number): A
   return signal ? AbortSignal.any([signal, timeout]) : timeout;
 }
 
-export type ExploreModelComplete = (input: {
+export type ExploreModelComplete = ((input: {
   systemPrompt: string;
   user: string;
   signal?: AbortSignal;
-}) => Promise<string>;
+}) => Promise<string>) & { inputBytes?: number };
 
 function stageFromError(error: unknown, signal?: AbortSignal): ExploreModelStageStatus {
   if (signal?.aborted || (error instanceof Error && error.name === "AbortError")) return "cancelled";
@@ -82,7 +82,7 @@ export function createExploreTool(
         followup: options?.complete ? "skipped" : "unconfigured",
       };
       let queryId = "";
-      const request = async <M extends "explore.query.start" | "explore.query.plan" | "explore.query.views" | "explore.query.select" | "explore.query.followup" | "explore.query.finish" | "explore.query.release" | "explore.query.cancel">(
+      const request = async <M extends "explore.query.start" | "explore.query.plan" | "explore.query.views" | "explore.query.wait" | "explore.query.select" | "explore.query.followup" | "explore.query.finish" | "explore.query.release" | "explore.query.cancel">(
         method: M,
         methodParams: Parameters<HostServicesBridge["request"]>[1],
       ) => {
@@ -149,16 +149,11 @@ export function createExploreTool(
           participation.followup = "disabled";
         }
 
-        // D-312: a ready fast-decision binding owns material relevance and
-        // action choice inside the query; the generative model keeps only its
-        // plan stage — the same judgment is not stacked twice (design §4.4).
-        const fastDecisionActive = started.fastDecision?.status === "ready";
+        const duties = started.duties;
         if (started.fastDecision && started.fastDecision.status !== "ready") {
           participation.fastDecision = started.fastDecision.status === "invalid" || started.fastDecision.status === "unavailable" ? "failed" : started.fastDecision.status;
         }
-        if (!complete && useExploreModel) {
-          participation.note = "Explore model is not configured; excerpts are from algorithm and vector sources.";
-        }
+        if (!complete && useExploreModel) participation.note = "Explore model is not configured; available retrieval sources are used.";
 
         const shouldPlan = useExploreModel && Boolean(complete) && exploreShouldPlanWithModel(params.question, started.parsed.objects);
         if (complete && shouldPlan) {
@@ -184,91 +179,70 @@ export function createExploreTool(
           }
         }
 
-        const views = await request("explore.query.views", { queryId });
-        const shouldSelect = useExploreModel && Boolean(complete)
-          && !fastDecisionActive
-          && views.views.length > 0
-          && exploreShouldSelectWithModel(params.question, started.parsed.objects, participation.plan === "used");
-        if (complete && shouldSelect) {
-          let activeStage: "select" | "followup" = "select";
-          try {
-            const selectText = await complete({
-              systemPrompt: EXPLORE_SELECT_SYSTEM,
-              user: renderExploreSelectPrompt(params.question, views, "full", { excerptLimit: params.limit ?? 20 }),
-              signal: modelSignal(),
-            });
-            const selected = parseExploreSelection(selectText);
-            if (selected) {
+        const seen = new Set<string>();
+        const offeredActions = new Map<string, string>();
+        const selectedViews = new Map<string, import("@varin/protocol").ExploreQueryView>();
+        const useSelection = complete && useExploreModel && duties?.selection !== "fast-decision"
+          && duties?.selection !== "rerank" && duties?.selection !== "source"
+          && exploreShouldSelectWithModel(params.question, started.parsed.objects, participation.plan === 'used');
+        let modelFailed = false;
+        while (remaining() > 0) {
+          signal?.throwIfAborted();
+          const retained = [...selectedViews.values()];
+          const actionContext = retained.map(view => view.viewId).sort().join('|');
+          const capacity = complete?.inputBytes;
+          const retainedBytes = new TextEncoder().encode(JSON.stringify(retained) + EXPLORE_SELECT_SYSTEM + params.question).length;
+          const views = await request("explore.query.views", { queryId, seen: [...seen],
+            ...(capacity ? { inputBytes: Math.max(1, capacity - retainedBytes) } : {}) });
+          const freshActions = views.actions.filter(action => offeredActions.get(action.actionId) !== actionContext);
+          if (useSelection && !modelFailed && (views.views.length > 0 || freshActions.length > 0)) {
+            try {
+              const selected = parseExploreSelection(await complete!({
+                systemPrompt: EXPLORE_SELECT_SYSTEM,
+                user: renderExploreSelectPrompt(params.question, { ...views, actions: freshActions }, "incremental", {
+                  selectedViews: retained, newViews: views.views, excerptLimit: params.limit ?? 20,
+                }), signal: modelSignal(),
+              }));
+              for (const view of views.views) seen.add(view.viewId);
+              for (const action of freshActions) offeredActions.set(action.actionId, actionContext);
+              if (!selected) throw new Error("Explore model returned no valid selection or follow-up.");
+              // Each batch compares its new evidence with the retained group.
+              // Replacement is explicit, rather than accumulating every yes.
               const applied = await request("explore.query.select", { queryId, groups: selected.groups });
-              participation.select = applied.accepted.length > 0 ? "used" : "skipped";
-              if (participation.select === "used" && (participation.plan === "failed" || participation.plan === "cancelled")) {
-                participation.note = `Explore model plan ${participation.plan}; model selection used the candidates that were available.`;
+              selectedViews.clear();
+              for (const view of applied.selectedViews) selectedViews.set(view.viewId, view);
+              participation.select = applied.accepted.length || !selected.groups.length || selectedViews.size ? "used" : "skipped";
+              if (!applied.accepted.length && applied.rejected.length) {
+                participation.note = `Explore model selection was rejected: ${[...new Set(applied.rejected.map(entry => entry.reason))].join('; ')}. Source ranking was kept.`;
               }
-              if (applied.accepted.length === 0 && applied.rejected.length > 0) {
-                participation.note = `Explore model selection was rejected: ${[...new Set(applied.rejected.map((entry) => entry.reason))].join("; ")}. Source ranking was kept.`;
+              const actions = views.actions.filter(action => selected.actionIds.includes(action.actionId));
+              let launched = false;
+              if (selected.followup || actions.length) {
+                const result = await request("explore.query.followup", { queryId, ...selected.followup, actions });
+                launched = result.launched.length > 0;
+                participation.followup = launched ? "used" : "skipped";
               }
-              if (selected.followup && Date.now() < deadlineAt) {
-                activeStage = "followup";
-                const followup = await request("explore.query.followup", {
-                  queryId,
-                  ...(selected.followup.searches ? { searches: selected.followup.searches } : {}),
-                  ...(selected.followup.locates ? { locates: selected.followup.locates } : {}),
-                  ...(selected.groups.map((group) => group.gap).filter(Boolean).length
-                    ? { gaps: selected.groups.flatMap((group) => group.gap ? [group.gap] : []) }
-                    : {}),
-                });
-                participation.followup = followup.launched.length > 0 ? "used" : "skipped";
-                if (followup.newViews.length > 0) {
-                  const acceptedViewIds = new Set(applied.accepted.flatMap((group) => group.viewIds));
-                  const selectedViews = views.views.filter((view) => (
-                    acceptedViewIds.has(view.viewId)
-                  ));
-                  const incrementalText = await complete({
-                    systemPrompt: EXPLORE_SELECT_SYSTEM,
-                    user: renderExploreSelectPrompt(params.question, views, "incremental", {
-                      selectedViews,
-                      newViews: followup.newViews,
-                      excerptLimit: params.limit ?? 20,
-                    }),
-                    signal: modelSignal(),
-                  });
-                  const incremental = parseExploreSelection(incrementalText);
-                  if (incremental) {
-                    const incrementallyApplied = await request("explore.query.select", { queryId, groups: incremental.groups, merge: true });
-                    if (incrementallyApplied.accepted.length > 0) {
-                      participation.select = "used";
-                      if (participation.plan === "failed" || participation.plan === "cancelled") {
-                        participation.note = `Explore model plan ${participation.plan}; model selection used the candidates that were available.`;
-                      }
-                    } else if (incrementallyApplied.rejected.length > 0) {
-                      participation.note = `Explore follow-up selection was rejected: ${[...new Set(incrementallyApplied.rejected.map((entry) => entry.reason))].join("; ")}. Earlier material was kept.`;
-                    }
-                  }
-                }
+              if (selected.done && !launched) break;
+            } catch (error) {
+              if (participation.select === 'used') {
+                participation.followup = stageFromError(error, signal);
+                participation.note = 'Explore follow-up failed; the earlier accepted material was kept.';
+              } else {
+                participation.select = stageFromError(error, signal);
+                participation.note = "Explore model selection failed; acquired source material was kept.";
               }
-            } else {
-              participation.select = "failed";
-              participation.note = participation.note
-                ?? "Explore model selection was unused; excerpts are from algorithm and vector sources.";
+              modelFailed = true;
             }
-          } catch (error) {
-            const status = stageFromError(error, signal);
-            if (activeStage === "select") {
-              participation.select = status;
-              if (status === "failed") {
-                participation.note = participation.note
-                  ?? "Explore model selection failed; excerpts are from algorithm and vector sources.";
-              }
-            } else {
-              participation.followup = status;
-              if (status === "failed") {
-                participation.note = participation.note
-                  ?? (participation.select === "used"
-                    ? "Explore follow-up failed; the earlier accepted material was kept."
-                    : "Explore follow-up failed; excerpts are from algorithm and vector sources.");
-              }
-            }
+          } else {
+            for (const view of views.views) seen.add(view.viewId);
           }
+          if (views.unevaluated > 0) continue;
+          // Re-collect after inference/submission: a producer may have progressed
+          // during that await. The sequence makes check-and-wait race-free.
+          const next = await request("explore.query.views", { queryId, seen: [...seen] });
+          if (next.views.some(view => !seen.has(view.viewId)) || next.sequence !== views.sequence) continue;
+          if (!next.pending) break;
+          await request("explore.query.wait", { queryId, afterSequence: next.sequence });
         }
 
         return await finish();

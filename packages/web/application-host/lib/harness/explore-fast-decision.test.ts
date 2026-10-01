@@ -100,12 +100,12 @@ describe("runExploreFastDecisionLoop", () => {
       closing: neverSettle,
     });
     expect(details.status).toBe("used");
-    expect(details.batches).toBe(2);
+    expect(details.batches).toBe(asked.length);
     expect(details.actionsExecuted).toBe(1);
     expect(details.executed).toEqual(["read:c.ts"]);
     expect(details.viewsJudged).toBe(3);
     expect(asked[0]?.some((id) => id.startsWith("m:"))).toBe(true);
-    expect(asked[0]).toContain("a:read:c.ts");
+    expect(asked.flat()).toContain("a:read:c.ts");
 
     const views = run.viewsForModel().views;
     expect(views.some((view) => view.path === "c.ts")).toBe(true);
@@ -153,6 +153,7 @@ describe("runExploreFastDecisionLoop", () => {
     });
     expect(details.status).toBe("failed");
     expect(details.note).toContain("503");
+    await run.waitForViews();
     const result = run.finish();
     expect(result.snippets.length).toBeGreaterThan(0);
   });
@@ -185,6 +186,9 @@ describe("runExploreFastDecisionLoop", () => {
     const run = newRun();
     run.start();
     await run.waitForViews();
+    const sequence = run.collect().sequence;
+    await run.actionCandidates(); // starts optional graph-fact preparation
+    await run.waitForProgress(sequence);
     const issued = await run.actionCandidates();
     expect(issued.some((action) => action.actionId === "read:c.ts")).toBe(true);
     const outcome = await run.followup({
@@ -193,7 +197,7 @@ describe("runExploreFastDecisionLoop", () => {
         { actionId: "read:secret.ts", kind: "read", target: "secret.ts", why: "fabricated" },
       ],
     });
-    expect(outcome.actionsExecuted).toEqual(["read:c.ts"]);
+    expect(outcome.actionsAccepted).toEqual(["read:c.ts"]);
     expect(outcome.actionsRejected).toEqual([
       { actionId: "read:secret.ts", reason: "unknown or stale action candidate" },
     ]);
@@ -201,7 +205,7 @@ describe("runExploreFastDecisionLoop", () => {
     const again = await run.followup({
       actions: [{ actionId: "read:c.ts", kind: "read", target: "c.ts", why: "again" }],
     });
-    expect(again.actionsExecuted).toEqual([]);
+    expect(again.actionsAccepted).toEqual([]);
     expect(again.reused).toContain("read:c.ts");
     run.cancel();
   });

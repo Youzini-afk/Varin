@@ -84,7 +84,7 @@
   'settings.page.harness.codeRetrieval.description': '每次 explore 檢索只選一種相關性判斷方式。指定模型缺失或失敗時保留來源排序，不會悄悄改用其他付費模型。',
   'settings.page.harness.codeRetrieval.decision': '判斷方式',
   'settings.page.harness.codeRetrieval.mode.auto': '自動',
-  'settings.page.harness.codeRetrieval.mode.auto.description': '快速決策模型可負責判斷結果，explore LLM 仍可能規劃查詢；否則由 LLM 篩選，LLM 未執行篩選時可使用已設定的重排模型。',
+  'settings.page.harness.codeRetrieval.mode.auto.description': '模型皆可選。Explore LLM 可規劃查詢、組合證據，快速決策可選擇補查動作；未設定 LLM 時由快速決策或重排判斷材料，全部未設仍可使用基礎檢索。',
   'settings.page.harness.codeRetrieval.mode.llm': 'Explore LLM',
   'settings.page.harness.codeRetrieval.mode.llm.description': '使用 explore 模型規劃查詢、選擇結果與補充檢索。模型槽位在「模型分工」中設定。',
   'settings.page.harness.codeRetrieval.mode.fast-decision': '快速決策模型',

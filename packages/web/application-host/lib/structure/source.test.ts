@@ -21,6 +21,16 @@ const provider = (overrides: Partial<StructureProvider> & Pick<StructureProvider
 });
 
 describe("createStructureSource", () => {
+  it('preserves an explicit warm-only request after an unavailable provider', async () => {
+    const source = createStructureSource([
+      provider({ id: 'tree-sitter', outline: async request => ({ status: 'unavailable', provider: 'tree-sitter', revision: request.revision, symbols: [] }) }),
+      provider({ id: 'lsp', outline: async request => {
+        expect(request.warmOnly).toBe(true);
+        return { status: 'unavailable', provider: 'lsp', revision: request.revision, symbols: [] };
+      } }),
+    ]);
+    await source.outline({ path: 'a.ts', revision: 'r1', text: 'source', warmOnly: true });
+  });
   it("returns the first ready outline and does not consult a later provider", async () => {
     let later = 0;
     const source = createStructureSource([

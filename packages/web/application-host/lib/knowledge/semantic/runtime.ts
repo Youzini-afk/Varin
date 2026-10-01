@@ -818,12 +818,14 @@ export function createSemanticIndexRuntime(options: SemanticIndexRuntimeOptions)
       await ensureEmbedderSpace(embedder, signal, question, "query");
       if (deferredDimensionScans.get(embedder)?.has(scopeId)) {
         if (embedder !== embedderOf()) return { status: { ...status, status: "stale" }, hits: [], gaps: [] };
-        await scanScope(scope, { signal });
+        // Discovering the provider dimension unblocks the existing background
+        // scan. A query must not inherit the whole repository build latency.
+        track(scanScope(scope, { signal: lifecycleController.signal }));
       }
       status = statusForEmbedder(scope, embedder);
       const key = scopeKey(scope, spaceIdOf(embedder.space));
       const activeScan = activeScanGates.get(scopeId);
-      if (searchOptions?.waitForFirstPublish !== false && activeScan && !activeScan.resolved) {
+      if (searchOptions?.waitForFirstPublish === true && activeScan && !activeScan.resolved) {
         await waitWithSignal(activeScan.promise, signal);
       }
       if (scanFailures.has(scopeId)) {

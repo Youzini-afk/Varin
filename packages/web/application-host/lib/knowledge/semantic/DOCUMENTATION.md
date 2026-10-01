@@ -25,7 +25,9 @@ derived store (`../vectors/`); they reuse `harness.embed` but never this MiniLM 
 - Runtime: `runtime.ts` — native directory inventory first returns path and stat metadata without
   reading every file body. New, changed, invalidated and failed paths then enter Documents reads,
   parsing and embedding. A normal query never traverses the root; returned old hits are checked
-  against current Documents revision. Metadata-only skips keep a range-level partial coverage
+  against current Documents revision. Query-time dimension discovery resumes a deferred scan in the
+  existing background owner rather than awaiting the entire inventory. Queries consume published
+  generations by default; first-publication waiting is an explicit internal option. Metadata-only skips keep a range-level partial coverage
   marker, while watcher reset/recovery forces content verification. `workspace-runtime.ts` injects
   the Host fixed-source reader for external child drafts and working-branch aliases.
 - Production assembly: `workspace-runtime.ts` owns per-workspace Settings/describe resolution, remote

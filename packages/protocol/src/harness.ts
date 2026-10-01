@@ -962,6 +962,8 @@ export interface ExploreSearchSnippet {
   structure?: ExploreStructureSource;
   /** Formatter must keep this range intact or omit the whole excerpt. */
   required?: boolean;
+  /** Required members of each group must be delivered together. */
+  requiredGroups?: string[];
 }
 
 export interface ExploreSearchIssue {
@@ -1207,7 +1209,7 @@ export interface ExploreModelParticipation {
  * verified relevance.
  */
 export interface ExploreFastDecisionDetails {
-  status: "used" | "failed" | "cancelled";
+  status: "used" | "skipped" | "failed" | "cancelled";
   providerId?: string;
   modelId?: string;
   servedModelId?: string;
@@ -1293,6 +1295,8 @@ export interface ExploreQueryStartResult {
    * query; other states leave the query on the existing algorithmic path.
    */
   fastDecision?: { status: "ready" | "disabled" | "unconfigured" | "invalid" | "unavailable" };
+  /** Frozen responsibility assignment; no runtime provider cascade. */
+  duties?: { actions: "source" | "llm" | "fast-decision"; selection: "source" | "llm" | "fast-decision" | "rerank" };
 }
 
 export interface ExploreGroupedSearchPlanGroup {
@@ -1345,6 +1349,9 @@ export interface ExploreQueryView {
 
 export interface ExploreQueryViewsParams {
   queryId: string;
+  seen?: string[];
+  /** Conservative input capacity supplied by the configured model consumer. */
+  inputBytes?: number;
 }
 
 export interface ExploreQueryViewsResult {
@@ -1355,6 +1362,10 @@ export interface ExploreQueryViewsResult {
   unevaluated: number;
   sources: ExploreQuerySourceState[];
   deadlineAt: number;
+  sequence: number;
+  pending: boolean;
+  actions: ExploreQueryAction[];
+  outputByteBudget: number;
 }
 
 export interface ExploreQuerySelectedRange {
@@ -1384,6 +1395,7 @@ export interface ExploreQuerySelectResult {
   accepted: Array<{ groupId: string; viewIds: string[] }>;
   rejected: Array<{ groupId?: string; viewId?: string; reason: string }>;
   gaps: string[];
+  selectedViews: ExploreQueryView[];
 }
 
 export interface ExploreQueryFollowupLocate {
@@ -1408,6 +1420,7 @@ export interface ExploreQueryAction {
     | "connect"    // follow a connection literal to its other end
     | "path"       // read a located path (whole file, outline-driven)
     | "read"       // read a path, optionally a line range or a locate hint
+    | "prepare-structure" // explicitly resolve a missing cold outline for read material
     | "importers"  // who imports this file
     | "callers"    // who calls this symbol
     | "references" // reference sites of this symbol
@@ -1439,9 +1452,8 @@ export interface ExploreQueryFollowupResult {
   queryId: string;
   launched: string[];
   reused: string[];
-  newViews: ExploreQueryView[];
-  /** Action ids the query owner actually executed. */
-  actionsExecuted?: string[];
+  /** Operations accepted for asynchronous execution; collect/wait observes progress. */
+  actionsAccepted: string[];
   /** Action ids rejected as unknown, stale, or out of scope. */
   actionsRejected?: Array<{ actionId: string; reason: string }>;
   sources: ExploreQuerySourceState[];
@@ -1665,6 +1677,10 @@ export interface HarnessServiceMap {
     params: ExploreQueryViewsParams;
     result: ExploreQueryViewsResult;
   };
+  "explore.query.wait": {
+    params: { queryId: string; afterSequence: number };
+    result: { sequence: number };
+  };
   "explore.query.select": {
     params: ExploreQuerySelectParams;
     result: ExploreQuerySelectResult;
@@ -1845,6 +1861,7 @@ export const HARNESS_METHOD_CAPABILITY = {
   "explore.query.start": "read.search",
   "explore.query.plan": "read.search",
   "explore.query.views": "read.search",
+  "explore.query.wait": "read.search",
   "explore.query.select": "read.search",
   "explore.query.followup": "read.search",
   "explore.query.finish": "read.search",
@@ -2008,6 +2025,7 @@ const HARNESS_METHODS: ReadonlySet<string> = new Set<string>([
   "explore.query.start",
   "explore.query.plan",
   "explore.query.views",
+  "explore.query.wait",
   "explore.query.select",
   "explore.query.followup",
   "explore.query.finish",

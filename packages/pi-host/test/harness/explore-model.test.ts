@@ -54,7 +54,7 @@ describe("explore model consumers", () => {
       queryId: "eq",
       question: "how",
       views: [view],
-      unevaluated: 0,
+      unevaluated: 0, sequence: 1, pending: false, actions: [], outputByteBudget: 24576,
       sources: [],
       deadlineAt: 1,
     }, "incremental", { selectedViews: [view], newViews: [added] });

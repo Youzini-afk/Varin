@@ -48,7 +48,7 @@ async function fanOutReadyFirst<Result extends { status: StructureStatus }>(
   let priorAnswered = false;
   for (const provider of providers) {
     if (!provider.capabilities(languageId)[capability]) continue;
-    const result = await invoke(provider, { ...nextRequest, warmOnly: priorAnswered });
+    const result = await invoke(provider, { ...nextRequest, warmOnly: request.warmOnly === true || priorAnswered });
     if (result.status === "cancelled") return result;
     if (result.status === "ready") return result;
     if (result.status === "empty") priorAnswered = true;
@@ -85,7 +85,7 @@ export function createStructureSource(providers: readonly StructureProvider[]): 
       let priorAnswered = false;
       for (const provider of providers) {
         if (!provider.capabilities(languageId).outline) continue;
-        const result = await provider.outline({ ...nextRequest, warmOnly: priorAnswered });
+        const result = await provider.outline({ ...nextRequest, warmOnly: request.warmOnly === true || priorAnswered });
         if (result.status === "cancelled") return result;
         if (result.status === "ready") {
           const covered = hitLines.length === 0 || outlineCoversHitLines(
@@ -121,7 +121,7 @@ export function createStructureSource(providers: readonly StructureProvider[]): 
       let priorAnswered = false;
       for (const provider of providers) {
         if (!provider.capabilities(languageId).classifyHits) continue;
-        const result = await provider.classifyHits({ ...nextRequest, warmOnly: priorAnswered });
+        const result = await provider.classifyHits({ ...nextRequest, warmOnly: request.warmOnly === true || priorAnswered });
         if (result.status === "ready") return result;
         if (result.status === "cancelled") return result;
         if (result.status === "empty") priorAnswered = true;

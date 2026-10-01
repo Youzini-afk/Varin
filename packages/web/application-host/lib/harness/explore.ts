@@ -146,13 +146,10 @@ export const DEFAULT_ANCHOR_BUDGET = 80;
 /** Per-file hit cap inside the candidate pool (not a product hard reject). */
 export const DEFAULT_HITS_PER_FILE = 12;
 export const DEFAULT_READ_PARALLELISM = 3;
-export const DEFAULT_READ_LOOKAHEAD = 2;
 /** Below the 32 KiB generic tool-result truncation so explore packs first. */
 export const DEFAULT_BYTE_BUDGET = 24 * 1024;
 /** Working nearest-neighbor budget. Not a product hard reject. */
 export const DEFAULT_SEMANTIC_RECALL = 24;
-/** Candidate-model input budget, separate from the 24 KiB agent-visible pack. */
-export const DEFAULT_MODEL_INPUT_BYTES = 48 * 1024;
 /** Reserved from the public remaining wait for judge/present. Not a calibrated SLO. */
 export const DEFAULT_JUDGE_RESERVE_MS = 8_000;
 /** Public explore remaining wait shared across stages. Not a calibrated SLO. */
@@ -221,12 +218,6 @@ const normalizeRgResult = (value: RgSearchReturn): {
   };
 };
 
-export function maxMaterializeReads(candidateCount: number, excerptLimit: number): number {
-  return Math.min(
-    candidateCount,
-    DEFAULT_READ_PARALLELISM + Math.max(excerptLimit, DEFAULT_READ_LOOKAHEAD),
-  );
-}
 
 const utf8Bytes = (text: string): number => Buffer.byteLength(text, "utf8");
 
@@ -903,6 +894,7 @@ async function classifyPreparedWindows(
   try {
     signal.throwIfAborted();
     const classified = await waitWithSignal(deps.structure.classifyHits({
+      warmOnly: true,
       path,
       languageId: languageIdForPath(path),
       text: snapshot.content,
@@ -960,6 +952,7 @@ async function verifyMaterializedRelations(
   try {
     signal.throwIfAborted();
     const calls = await waitWithSignal(deps.structure.literalCalls({
+      warmOnly: true,
       path,
       languageId: languageIdForPath(path),
       text: snapshot.content,
@@ -1267,7 +1260,12 @@ export interface ExploreQueryRun {
   submitPlan(plan: ExploreGroupedSearchPlan): Promise<{ launched: string[]; reused: string[] }>;
   waitForViews(): Promise<void>;
   /** Wake a progressive consumer when a later plan/follow-up adds work. */
-  waitForProgress(): Promise<void>;
+  waitForProgress(afterSequence?: number, signal?: AbortSignal): Promise<void>;
+  /** Read ready evidence without driving or awaiting source work. */
+  collect(options?: { seen?: readonly string[]; inputBytes?: number }): {
+    sequence: number; pending: boolean; views: ExploreQueryView[]; unevaluated: number;
+    hypotheses?: { behavior?: string; expectedMaterials?: string[] };
+  };
   viewsForModel(byteBudget?: number): {
     views: ExploreQueryView[];
     unevaluated: number;
@@ -1279,8 +1277,7 @@ export interface ExploreQueryRun {
   followup(request: Omit<ExploreQueryFollowupParams, "queryId">): Promise<{
     launched: string[];
     reused: string[];
-    newViews: ExploreQueryView[];
-    actionsExecuted: string[];
+    actionsAccepted: string[];
     actionsRejected: Array<{ actionId: string; reason: string }>;
   }>;
   /**
@@ -1289,6 +1286,9 @@ export interface ExploreQueryRun {
    * `followup({actions})` executes the chosen ones.
    */
   actionCandidates(): Promise<ExploreQueryAction[]>;
+  selectedViews(): ExploreQueryView[];
+  completedActionIds(): string[];
+  setJudgmentPending(pending: boolean): void;
   /** Record the fast-decision loop's provenance for `finish` (D-312). */
   applyFastDecision(details: ExploreFastDecisionDetails): void;
   finish(model?: ExploreModelParticipation): ExploreResult;
@@ -1374,7 +1374,8 @@ export function createExploreQueryRun(
    * graph lookups already ran so a candidate never duplicates a launched task.
    */
   const issuedActions = new Map<string, ExploreQueryAction>();
-  const executedActions = new Set<string>();
+  const scheduledActions = new Set<string>();
+  const completedActions = new Set<string>();
   const linksRequested = new Set<string>();
   const importersRequested = new Set<string>();
   const relationLookupsRequested = new Set<string>();
@@ -1388,10 +1389,50 @@ export function createExploreQueryRun(
   let unevaluatedViewCount = 0;
   type ChosenGroup = { id: string; purpose: string; windows: PreparedWindow[]; requiredFlags: boolean[] };
   let chosenGroups: ChosenGroup[] = [];
+  let selectionApplied = false;
   let rerankDetails: ExploreRerankDetails | undefined;
   let selectionGaps: string[] = [];
   const uniqueGaps = (values: readonly string[]): string[] => [...new Set(values.map((value) => value.trim()).filter(Boolean))];
   let viewsFrozen = false;
+  const offeredViews = new Map<string, ExploreQueryView>();
+  const enhancements = new Map<string, Promise<void>>();
+  const pendingEnhancements = new Set<string>();
+  const enhancementQueue: Array<() => void> = [];
+  let enhancing = 0;
+  const scheduleEnhancement = (work: () => Promise<void>): Promise<void> => new Promise((resolve, reject) => {
+    const begin = () => {
+      enhancing++;
+      void Promise.resolve().then(() => { signal.throwIfAborted(); return work(); }).then(resolve, reject).finally(() => {
+        enhancing--;
+        enhancementQueue.shift()?.();
+      });
+    };
+    // Preserve the existing preparation parallelism, with a separate queue so
+    // optional structure no longer holds any raw Document read slot.
+    if (enhancing < DEFAULT_READ_PARALLELISM) begin();
+    else enhancementQueue.push(begin);
+  });
+  type Relations = Awaited<ReturnType<NonNullable<ExploreDeps['graph']>['fileRelations']>>;
+  const relationFacts = new Map<string, Relations>();
+  const pendingRelations = new Map<string, Promise<Relations>>();
+  const relationsFor = (path: string): Promise<Relations> => {
+    if (relationFacts.has(path)) return Promise.resolve(relationFacts.get(path)!);
+    const existing = pendingRelations.get(path);
+    if (existing) return existing;
+    const pending = waitWithSignal(deps.graph!.fileRelations(path), signal).then(relations => {
+      if (terminal === 'active' && !signal.aborted) relationFacts.set(path, relations);
+      return relations;
+    }).catch(error => {
+      if (!signal.aborted) relationFacts.set(path, null);
+      throw error;
+    }).finally(() => { pendingRelations.delete(path); notifyProgress(); });
+    pendingRelations.set(path, pending);
+    return pending;
+  };
+  let started = false;
+  let driving = false;
+  let sequence = 0;
+  let judgmentPending = false;
   let frozenResult: ExploreResult | undefined;
   const viewIdsByIdentity = new Map<string, string>();
   let nextViewSerial = 1;
@@ -1421,7 +1462,9 @@ export function createExploreQueryRun(
   };
 
   const stableViewId = (window: PreparedWindow): string => {
-    const key = windowIdentityKey(window);
+    // A structure view may omit different lines at the same source span.
+    // Its actual text is part of the assessment identity.
+    const key = `${windowIdentityKey(window)}:${window.text}`;
     const existing = viewIdsByIdentity.get(key);
     if (existing) return existing;
     const id = `v${nextViewSerial}`;
@@ -1429,10 +1472,6 @@ export function createExploreQueryRun(
     viewIdsByIdentity.set(key, id);
     return id;
   };
-
-  const viewLogicalKey = (view: Pick<ExploreQueryView, "path" | "revision" | "startLine" | "endLine">): string => (
-    `${view.path}@${view.revision}:${view.startLine}-${view.endLine}`
-  );
 
   const remainingMs = (): number => deadlineAt - now() - reserveForJudgeMs;
 
@@ -1472,7 +1511,7 @@ export function createExploreQueryRun(
         task.status = code === "unavailable" ? "unavailable" : "failed";
         fatalError ??= error;
       }
-    })();
+    })().finally(() => { notifyProgress(); });
     tasks.set(id, task);
   };
 
@@ -1767,10 +1806,6 @@ export function createExploreQueryRun(
   const readPaths = new Set<string>();
   /** Evidence signature each read path's windows were last built against. */
   const windowedEvidence = new Map<string, string>();
-  // A failed optional LSP preparation is shared by files in the same query
-  // scope/language. Later windows may use a now-running server, but do not
-  // repeat that failed cold preparation. A new query can prepare it again.
-  const failedColdOutlines = new Set<string>();
   let reads = 0;
 
   const replacePrepared = (path: string, windows: readonly PreparedWindow[]): void => {
@@ -1838,6 +1873,7 @@ export function createExploreQueryRun(
     path: string,
     snapshot: Extract<ExploreFileSnapshot, { status: "ready" }>,
     evidence: FileEvidence,
+    prepareStructure = false,
   ): Promise<void> => {
     const lines = snapshot.content.split(/\r\n|\n|\r/);
     applyGraphLocate(lines, evidence);
@@ -1863,12 +1899,16 @@ export function createExploreQueryRun(
       ...evidence.semanticClues.map((clue) => clue.startLine),
     ].filter((line) => Number.isSafeInteger(line) && line >= 1);
     const initialWeights = weightByGroupId(groups, buildTermWeightTable(groups, byFile, launchedCoverage, searchVariantsOf));
-    const commitWindows = (sliced: ReturnType<typeof windowsFor>, windows: PreparedWindow[]): void => {
+    const commitWindows = (sliced: ReturnType<typeof windowsFor>, windows: PreparedWindow[], enhanced = false): void => {
+      if (enhanced && windowedEvidence.get(path) !== consumedEvidence) return;
+      if (terminal !== 'active' || signal.aborted) return;
       if (sliced.stale && !issues.some(issue => issue.path === path && issue.status === 'stale')) {
         issues.push({ path, status: 'stale', message: 'Some search hits no longer match this document revision; those hits were omitted.' });
       }
       replacePrepared(path, windows);
       markProvenance(path, windows.length > 0 ? 'ready' : sliced.stale ? 'stale' : 'empty', snapshot);
+      viewsFrozen = false;
+      notifyProgress();
     };
     // Source text is usable before optional structure is ready. Keep a verified
     // lexical window now, so a deadline during outline/classification cannot
@@ -1881,26 +1921,34 @@ export function createExploreQueryRun(
       deps.structure ? pendingOutline : { status: 'not-requested', provider: null }, parsed, initialWeights);
     const existing = prepared.filter(window => window.path === path && window.revision === snapshot.revision);
     commitWindows(initial, [...existing, ...weakenUnverifiedConnectionWhy(initial.windows, parsed.objects)]);
-    if (deps.structure && !structureFiles.has(path)) structureFiles.set(path, { path, status: 'unavailable', provider: null });
-    const scopeRoot = input.paths?.filter(root => pathInRoots(path, [root])).sort((a, b) => b.length - a.length)[0] ?? '';
-    const outlineKey = JSON.stringify([scopeRoot, languageIdForPath(path)]);
-    const outline = await outlineForSnapshot(path, snapshot, deps, signal, hitLines, failedColdOutlines.has(outlineKey));
-    if (outline.provider === 'lsp' && outline.status === 'unavailable') failedColdOutlines.add(outlineKey);
-    else if (outline.provider === 'lsp' && (outline.status === 'ready' || outline.status === 'empty')) failedColdOutlines.delete(outlineKey);
-    if (outline.status !== "not-requested") {
-      structureFiles.set(path, {
-        path,
-        provider: outline.provider,
-        status: outline.status === "ready" && outline.revision !== snapshot.revision ? "stale" : outline.status,
-      });
-    }
-    const weights = weightByGroupId(groups, buildTermWeightTable(groups, byFile, launchedCoverage, searchVariantsOf));
-    const sliced = windowsFor(path, lines, evidence, snapshot, groups, outline, parsed, weights);
-    commitWindows(sliced, weakenUnverifiedConnectionWhy(sliced.windows, parsed.objects));
-    const classified = await classifyPreparedWindows(path, snapshot, sliced.windows, deps, signal);
-    const windows = await verifyMaterializedRelations(path, snapshot, evidence, classified, parsed, deps, signal);
-    commitWindows(sliced, windows);
     windowedEvidence.set(path, consumedEvidence);
+    if (!deps.structure) return;
+    const enhancementKey = JSON.stringify([path, snapshot.revision, consumedEvidence, prepareStructure]);
+    if (enhancements.has(enhancementKey)) return;
+    pendingEnhancements.add(enhancementKey);
+    const enhancement = scheduleEnhancement(async () => {
+      if (deps.structure && !structureFiles.has(path)) structureFiles.set(path, { path, status: 'unavailable', provider: null });
+      const outline = await outlineForSnapshot(path, snapshot, deps, signal, hitLines, !prepareStructure);
+      if (outline.status !== "not-requested") {
+        structureFiles.set(path, {
+          path,
+          provider: outline.provider,
+          status: outline.status === "ready" && outline.revision !== snapshot.revision ? "stale" : outline.status,
+        });
+      }
+      const weights = weightByGroupId(groups, buildTermWeightTable(groups, byFile, launchedCoverage, searchVariantsOf));
+      const sliced = windowsFor(path, lines, evidence, snapshot, groups, outline, parsed, weights);
+      commitWindows(sliced, weakenUnverifiedConnectionWhy(sliced.windows, parsed.objects), true);
+      const classified = await classifyPreparedWindows(path, snapshot, sliced.windows, deps, signal);
+      const windows = await verifyMaterializedRelations(path, snapshot, evidence, classified, parsed, deps, signal);
+      commitWindows(sliced, windows, true);
+    }).catch((error) => {
+      if (signal.aborted && remainingMs() <= 0 && terminal === 'active') searchIncomplete = true;
+      if (!signal.aborted && terminal === 'active') {
+        issues.push({ path, status: 'unavailable', message: `Optional structure unavailable: ${error instanceof Error ? error.message : String(error)}` });
+      }
+    }).finally(() => { pendingEnhancements.delete(enhancementKey); notifyProgress(); });
+    enhancements.set(enhancementKey, enhancement);
   };
 
   /**
@@ -1940,7 +1988,10 @@ export function createExploreQueryRun(
     const worker = async (): Promise<void> => {
       while (!shouldStop(scheduled, next, budget)) {
         signal.throwIfAborted();
-        const candidate = scheduled[next]!;
+        // Re-rank the remaining pool at each free read slot. Late sources can
+        // participate without a fixed quota or waiting behind a frozen page.
+        const candidate = scheduleReads(rankNow(), groups, parsed).find(item => !readPaths.has(item.path));
+        if (!candidate) break;
         next += 1;
         if (readPaths.has(candidate.path)) continue;
         reads += 1;
@@ -1958,13 +2009,7 @@ export function createExploreQueryRun(
     if (terminal !== "active") return;
     const rankedNow = rankNow();
     const scheduledNow = scheduleReads(rankedNow, groups, parsed);
-    const deferredContent = contentPatterns.size > 0 && !tasks.has('lexical-content') && !explicitNavigation;
-    const reserved = (primaryInflight().length + Number(deferredContent)) * DEFAULT_READ_PARALLELISM;
-    const budget = maxMaterializeReads(scheduledNow.length, excerptLimit);
-    const spendable = Math.max(DEFAULT_READ_PARALLELISM, Math.max(0, budget - reserved));
-    // `reads` is cumulative: adding it to the available total would spend the
-    // reserved slots before later source candidates arrive.
-    await materializeScheduled(scheduledNow, Math.min(budget, spendable));
+    await materializeScheduled(scheduledNow, Number.POSITIVE_INFINITY);
   };
 
   const markInflightIncomplete = (): boolean => {
@@ -2015,23 +2060,32 @@ export function createExploreQueryRun(
   };
 
   let pumpPromise: Promise<void> | undefined;
-  /** Serializes `waitForViews` driving passes across concurrent callers. */
-  let viewsTurn: Promise<void> = Promise.resolve();
+  /** All consumers observe the same executing pass. */
+  let viewsTurn: Promise<void> | undefined;
   const progressWaiters = new Set<() => void>();
   const notifyProgress = (): void => {
+    sequence += 1;
     for (const resolve of progressWaiters) resolve();
     progressWaiters.clear();
   };
-  const waitForProgress = (): Promise<void> => {
-    if (terminal !== "active" || signal.aborted) return Promise.resolve();
-    return new Promise<void>((resolve) => { progressWaiters.add(resolve); });
+  const waitForProgress = (afterSequence = sequence, waiterSignal?: AbortSignal): Promise<void> => {
+    waiterSignal?.throwIfAborted();
+    if (afterSequence !== sequence || terminal !== "active" || signal.aborted && !judgmentPending) return Promise.resolve();
+    return new Promise<void>((resolve, reject) => {
+      const cleanup = () => { progressWaiters.delete(done); waiterSignal?.removeEventListener('abort', abort); };
+      const done = () => { cleanup(); resolve(); };
+      const abort = () => { cleanup(); reject(waiterSignal!.reason); };
+      progressWaiters.add(done);
+      waiterSignal?.addEventListener('abort', abort, { once: true });
+    });
   };
+  signal.addEventListener('abort', notifyProgress, { once: true });
   const pumpErrors: unknown[] = [];
   const ensurePump = (): Promise<void> => {
     if (pumpPromise) return pumpPromise;
     const running = pumpUntilPrimarySettled()
       .catch((error) => { pumpErrors.push(error); })
-      .finally(() => { pumpPromise = undefined; });
+      .finally(() => { pumpPromise = undefined; notifyProgress(); });
     pumpPromise = running;
     return running;
   };
@@ -2072,7 +2126,7 @@ export function createExploreQueryRun(
     };
   };
 
-  const freezeViews = (byteBudget = DEFAULT_MODEL_INPUT_BYTES): void => {
+  const freezeViews = (byteBudget = Number.POSITIVE_INFINITY): void => {
     const unique: PreparedWindow[] = [];
     const seen = new Set<string>();
     for (const window of prepared) {
@@ -2109,7 +2163,8 @@ export function createExploreQueryRun(
 
   const start = (): void => {
     if (terminal !== "active") return;
-    if (tasks.has("lexical-original") || tasks.has("lexical-content")) return;
+    if (started) return;
+    started = true;
     if (objectPatterns.size > 0) {
       launchTask("lexical-original", "lexical", true, () => runRg(objectPatterns));
     }
@@ -2119,18 +2174,20 @@ export function createExploreQueryRun(
     if (deps.graph) launchTask("graph-seeds", "graph", true, runGraphSeeds);
     if (deps.semantic) launchTask("semantic-original", "semantic", true, runSemantic);
     kickPump();
+    // One shared executor progresses independently of model/collect calls.
+    if (!driving) void waitForViews().catch((error) => { fatalError ??= error; notifyProgress(); });
   };
 
   const waitForViews = async (): Promise<void> => {
-    // Both the caller's views service and the fast-decision loop wait on the
-    // same pipeline; serialize the driving pass so a second caller cannot
-    // double-run the content search / materialize stages below.
-    const turn = viewsTurn.then(() => driveViews());
-    viewsTurn = turn.catch(() => undefined);
+    if (viewsTurn) return viewsTurn;
+    driving = true;
+    const turn = Promise.resolve().then(() => driveViews()).finally(() => { viewsTurn = undefined; });
+    viewsTurn = turn;
     return turn;
   };
 
   const driveViews = async (): Promise<void> => {
+    driving = true;
     try {
       await collectViews();
     } catch (error) {
@@ -2144,7 +2201,7 @@ export function createExploreQueryRun(
       searchIncomplete = true;
       abortLeftoverSources();
       if (terminal === "active") freezeViews();
-    }
+    } finally { driving = false; notifyProgress(); }
   };
 
   const collectViews = async (): Promise<void> => {
@@ -2176,7 +2233,7 @@ export function createExploreQueryRun(
     await refreshReadEvidence();
     ranked = rankNow();
     scheduled = scheduleReads(ranked, groups, parsed);
-    await materializeScheduled(scheduled, maxMaterializeReads(scheduled.length, excerptLimit));
+    await materializeScheduled(scheduled, Number.POSITIVE_INFINITY);
   }
 
   if (deps.graph && (graphStatus as ExploreGraphStatus) === "ready") {
@@ -2191,7 +2248,7 @@ export function createExploreQueryRun(
       }
       for (const window of prepared) {
         signal.throwIfAborted();
-        const relations = await deps.graph.fileRelations(window.path);
+        const relations = await relationsFor(window.path);
         signal.throwIfAborted();
         if (!relations) continue;
         for (const conn of relations.connections) {
@@ -2284,7 +2341,7 @@ export function createExploreQueryRun(
       const relationPaths: string[] = [];
       for (const window of prepared) {
         signal.throwIfAborted();
-        const relations = await deps.graph.fileRelations(window.path);
+        const relations = await relationsFor(window.path);
         signal.throwIfAborted();
         if (!relations) continue;
         for (const site of relations.calls ?? []) {
@@ -2382,7 +2439,7 @@ export function createExploreQueryRun(
         && !readPaths.has(candidate.path)
         && !issues.some((issue) => issue.path === candidate.path)
       ));
-      const extraBatch = scheduleReads(newcomers, groups, parsed).slice(0, maxMaterializeReads(newcomers.length, excerptLimit));
+      const extraBatch = scheduleReads(newcomers, groups, parsed);
       for (let offset = 0; offset < extraBatch.length; offset += DEFAULT_READ_PARALLELISM) {
         signal.throwIfAborted();
         const slice = extraBatch.slice(offset, offset + DEFAULT_READ_PARALLELISM);
@@ -2397,16 +2454,38 @@ export function createExploreQueryRun(
 
     filesDropped = Math.max(filesDropped, graphFilesDropped);
     if (graphFilesDropped > 0) searchIncomplete = true;
+    await waitWithSignal(Promise.all(enhancements.values()), signal);
     freezeViews();
   };
 
-  const viewsForModel = (byteBudget = DEFAULT_MODEL_INPUT_BYTES) => {
+  const viewsForModel = (byteBudget = Number.POSITIVE_INFINITY) => {
     if (!viewsFrozen) freezeViews(byteBudget);
+    for (const view of frozenViews) offeredViews.set(view.viewId, view);
     return {
       views: frozenViews,
       unevaluated: unevaluatedViewCount,
       ...(planHypotheses ? { hypotheses: planHypotheses } : {}),
     };
+  };
+
+  const collect: ExploreQueryRun['collect'] = (options = {}) => {
+    if (fatalError && byFile.size === 0 && primaryInflight().length === 0) throw fatalError;
+    freezeViews();
+    const seen = new Set(options.seen);
+    const available = frozenViews.filter(view => !seen.has(view.viewId));
+    const views: ExploreQueryView[] = [];
+    let used = 0;
+    for (const view of available) {
+      const size = utf8Bytes(JSON.stringify(view));
+      // Keep an oversized item visible as its own batch; the provider adapter
+      // reports unsupported capacity rather than silently treating it as noise.
+      if (views.length && used + size > (options.inputBytes ?? Infinity)) break;
+      views.push(view); used += size;
+      offeredViews.set(view.viewId, view);
+    }
+    return { sequence, pending: judgmentPending || (!signal.aborted && (driving || Boolean(pumpPromise) || primaryInflight().length > 0 || pendingEnhancements.size > 0 || pendingRelations.size > 0)),
+      views, unevaluated: available.length - views.length,
+      ...(planHypotheses ? { hypotheses: planHypotheses } : {}) };
   };
 
   const windowFromView = (view: ExploreQueryView, startLine: number, endLine: number, required: boolean): PreparedWindow | undefined => {
@@ -2416,7 +2495,9 @@ export function createExploreQueryRun(
     const lines = snapshot.content.split(/\r\n|\n|\r/);
     if (startLine < 1 || endLine > lines.length || startLine > endLine) return undefined;
     if (startLine < view.startLine || endLine > view.endLine) return undefined;
-    const text = lines.slice(startLine - 1, endLine).join("\n");
+    const full = startLine === view.startLine && endLine === view.endLine;
+    if (!full && view.unit?.omitted?.some(range => range.startLine <= endLine && range.endLine >= startLine)) return undefined;
+    const text = full ? view.text : lines.slice(startLine - 1, endLine).join("\n");
     const preparedWindow = prepared.find((item) => (
       item.path === view.path && item.start === view.startLine && item.end === view.endLine && item.revision === view.revision
     ));
@@ -2448,6 +2529,16 @@ export function createExploreQueryRun(
     return window;
   };
 
+  const selectedViews = (): ExploreQueryView[] => {
+    const views = new Map<string, ExploreQueryView>();
+    for (const group of chosenGroups) for (const window of group.windows) {
+      const view = toView(stableViewId(window), window);
+      views.set(view.viewId, view);
+      offeredViews.set(view.viewId, view);
+    }
+    return [...views.values()];
+  };
+
   const applySelection = (
     selectionGroups: readonly ExploreQuerySelectionGroup[],
     selectionOptions?: { merge?: boolean },
@@ -2458,13 +2549,14 @@ export function createExploreQueryRun(
         accepted: [],
         rejected: [{ reason: "query is no longer active" }],
         gaps: [],
+        selectedViews: [],
       };
     }
     const accepted: ExploreQuerySelectResult["accepted"] = [];
     const rejected: ExploreQuerySelectResult["rejected"] = [];
     const gaps = [...selectionGroups.flatMap((group) => group.gap ? [group.gap] : [])];
     const built: ChosenGroup[] = [];
-    const byId = new Map(frozenViews.map((view) => [view.viewId, view]));
+    const byId = offeredViews;
     for (const group of selectionGroups) {
       const viewIds: string[] = [];
       const windows: PreparedWindow[] = [];
@@ -2544,15 +2636,18 @@ export function createExploreQueryRun(
         built.push({ id: group.id, purpose: group.purpose, windows, requiredFlags });
       }
     }
+    const previousSelection = JSON.stringify(chosenGroups);
     if (selectionOptions?.merge) {
       const byGroup = new Map(chosenGroups.map((group) => [group.id, group]));
       for (const next of built) byGroup.set(next.id, next);
       chosenGroups = [...byGroup.values()];
-    } else {
+    } else if (built.length || selectionGroups.length === 0) {
       chosenGroups = built;
     }
+    if (built.length > 0 || selectionGroups.length === 0) selectionApplied = true;
     selectionGaps = selectionOptions?.merge ? uniqueGaps([...selectionGaps, ...gaps]) : uniqueGaps(gaps);
-    return { queryId: "", accepted, rejected, gaps };
+    if (previousSelection !== JSON.stringify(chosenGroups)) notifyProgress();
+    return { queryId: "", accepted, rejected, gaps, selectedViews: selectedViews() };
   };
 
   const applyRerank = (scores: readonly ExploreRerankScore[], details: ExploreRerankDetails): void => {
@@ -2618,9 +2713,17 @@ export function createExploreQueryRun(
 
   /** Locate a real symbol's definitions and attach them as clues (followup/action shared). */
   const locateSymbolTarget = async (value: string): Promise<void> => {
-    if (!deps.graph) return;
     symbolsSearched.add(value);
-    const hits = await deps.graph.searchDefinitions(value, DEFAULT_GRAPH_DEFINITIONS_PER_TERM);
+    const lexical = async () => {
+      if (launchedExpressions.has(value)) return;
+      const term: TermGroup = { id: `symbol:${value}`, kind: 'plan', distinctive: value, variants: [value] };
+      groups.push(term);
+      await runRg(collectPatterns([term]));
+    };
+    const [, hits] = await Promise.all([lexical(), deps.graph
+      ? deps.graph.searchDefinitions(value, DEFAULT_GRAPH_DEFINITIONS_PER_TERM).catch(() => {
+        signal.throwIfAborted(); graphPartial = true; return [];
+      }) : Promise.resolve([])]);
     signal.throwIfAborted();
     for (const hit of hits) {
       if (!pathInRoots(hit.path, input.paths)) continue;
@@ -2639,8 +2742,15 @@ export function createExploreQueryRun(
 
   /** Follow a connection literal to its endpoints (followup locate/action shared). */
   const followConnectionLiteral = async (value: string): Promise<void> => {
-    if (!deps.graph) return;
     linksRequested.add(value);
+    if (!deps.graph) {
+      if (!launchedExpressions.has(value)) {
+        const term: TermGroup = { id: `literal:${value}`, kind: 'plan', distinctive: value, variants: [value] };
+        groups.push(term);
+        await runRg(collectPatterns([term]));
+      }
+      return;
+    }
     const ends = await deps.graph.findLinks(value);
     signal.throwIfAborted();
     for (const end of ends) {
@@ -2761,12 +2871,18 @@ export function createExploreQueryRun(
    */
   const actionCandidates = async (): Promise<ExploreQueryAction[]> => {
     const candidates: ExploreQueryAction[] = [];
+    const offered = new Set<string>();
     const offer = (candidate: Omit<ExploreQueryAction, "actionId">): void => {
       const range = candidate.startLine !== undefined && candidate.endLine !== undefined
         ? `:${candidate.startLine}-${candidate.endLine}`
         : "";
       const actionId = `${candidate.kind}:${candidate.target}${range}`;
-      if (executedActions.has(actionId)) return;
+      if (offered.has(actionId)) return;
+      offered.add(actionId);
+      if (scheduledActions.has(actionId)) return;
+      if (candidate.kind === 'read' && candidate.startLine !== undefined && candidate.endLine !== undefined
+        && prepared.some(window => window.path === candidate.target && window.start <= candidate.startLine!
+          && window.end >= candidate.endLine! && !window.unit?.omitted?.some(range => range.startLine <= candidate.endLine! && range.endLine >= candidate.startLine!))) return;
       const existing = issuedActions.get(actionId);
       if (existing) {
         candidates.push(existing);
@@ -2776,10 +2892,38 @@ export function createExploreQueryRun(
       issuedActions.set(actionId, issued);
       candidates.push(issued);
     };
+    // Basic actions are grounded in actual candidates and read text. A symbol
+    // catalog adds precise edges; it is not permission to navigate at all.
+    for (const candidate of rankNow()) {
+      if (readPaths.has(candidate.path)) continue;
+      offer({ kind: 'read', target: candidate.path, why: 'unread candidate from current search sources' });
+    }
+    for (const window of prepared) {
+      const snapshot = snapshots.get(window.path);
+      if (snapshot?.status !== 'ready') continue;
+      const lineCount = snapshot.content.split(/\r\n|\n|\r/).length;
+      const width = Math.max(1, window.end - window.start + 1);
+      const structure = structureFiles.get(window.path);
+      if (structure?.status === 'unavailable') offer({ kind: 'prepare-structure', target: window.path,
+        why: 'current text is available; explicitly prepare optional structure only if precise navigation is needed' });
+      if (window.end < lineCount) offer({ kind: 'read', target: window.path,
+        startLine: window.end + 1, endLine: Math.min(lineCount, window.end + width), why: 'continue after a read source window' });
+      if (window.start > 1) offer({ kind: 'read', target: window.path,
+        startLine: Math.max(1, window.start - width), endLine: window.start - 1, why: 'context preceding a read source window' });
+      for (const match of window.text.matchAll(/\b([A-Za-z_$][\w$]*)\s*\(/g)) {
+        const name = match[1]!;
+        if (/^(if|for|while|switch|catch|function|return|typeof|sizeof)$/.test(name) || symbolsSearched.has(name)) continue;
+        offer({ kind: 'symbol', target: name, why: `literal call/signature ${name} observed in ${window.path}:${window.start}-${window.end}; relationship not yet verified` });
+      }
+    }
     if (!deps.graph) return candidates;
     for (const path of readPaths) {
       signal.throwIfAborted();
-      const relations = await deps.graph.fileRelations(path).catch(() => null);
+      if (!relationFacts.has(path)) {
+        void relationsFor(path).catch(() => undefined);
+        continue;
+      }
+      const relations = relationFacts.get(path);
       if (!relations) continue;
       for (const connection of relations.connections) {
         if (linksRequested.has(connection.literal)) continue;
@@ -2827,15 +2971,13 @@ export function createExploreQueryRun(
   const followup = async (request: Omit<ExploreQueryFollowupParams, "queryId">): Promise<{
     launched: string[];
     reused: string[];
-    newViews: ExploreQueryView[];
-    actionsExecuted: string[];
+    actionsAccepted: string[];
     actionsRejected: Array<{ actionId: string; reason: string }>;
   }> => {
-    if (terminal !== "active" || signal.aborted) return { launched: [], reused: [], newViews: [], actionsExecuted: [], actionsRejected: [] };
-    const before = new Set(frozenViews.map((view) => viewLogicalKey(view)));
+    if (terminal !== "active" || signal.aborted) return { launched: [], reused: [], actionsAccepted: [], actionsRejected: [] };
     const launched: string[] = [];
     const reused: string[] = [];
-    const actionsExecuted: string[] = [];
+    const actionsAccepted: string[] = [];
     const actionsRejected: Array<{ actionId: string; reason: string }> = [];
     const searches = request.searches ?? [];
     const expressions = [...new Set(searches.map((item) => item.expression.trim()).filter(Boolean))];
@@ -2887,40 +3029,41 @@ export function createExploreQueryRun(
         actionsRejected.push({ actionId: requested.actionId, reason: "unknown or stale action candidate" });
         continue;
       }
-      if (executedActions.has(issued.actionId)) {
+      if (scheduledActions.has(issued.actionId)) {
         reused.push(issued.actionId);
         continue;
       }
-      executedActions.add(issued.actionId);
-      actionsExecuted.push(issued.actionId);
+      scheduledActions.add(issued.actionId);
+      actionsAccepted.push(issued.actionId);
       launched.push(issued.actionId);
       launchTask(`action:${issued.actionId}`, "followup", true, async () => {
         switch (issued.kind) {
-          case "symbol":
-            return locateSymbolTarget(issued.target);
-          case "connect":
-            return followConnectionLiteral(issued.target);
-          case "importers":
-            return attachImporterClues(issued.target);
-          case "callers":
-          case "references":
-          case "calls":
-            return attachRelationSites(issued.kind, issued.target);
-          case "path":
-          case "read":
-            return readActionTarget(issued);
+          case "symbol": await locateSymbolTarget(issued.target); break;
+          case "connect": await followConnectionLiteral(issued.target); break;
+          case "importers": await attachImporterClues(issued.target); break;
+          case "callers": case "references": case "calls": await attachRelationSites(issued.kind, issued.target); break;
+          case "path": case "read": await readActionTarget(issued); break;
+          case 'prepare-structure': {
+            const snapshot = snapshots.get(issued.target);
+            const evidence = byFile.get(issued.target);
+            if (snapshot?.status === 'ready' && evidence) {
+              await buildWindowsFrom(issued.target, snapshot, evidence, true);
+              await Promise.all(enhancements.values());
+            }
+            break;
+          }
         }
+        if (terminal === 'active' && !signal.aborted) completedActions.add(issued.actionId);
       });
     }
     if (launched.length > 0) notifyProgress();
-    await awaitPump();
+    if (launched.length > 0) kickPump();
     if (request.gaps?.length) selectionGaps = uniqueGaps([...selectionGaps, ...request.gaps]);
     freezeViews();
     return {
       launched,
       reused,
-      newViews: frozenViews.filter((view) => !before.has(viewLogicalKey(view))),
-      actionsExecuted,
+      actionsAccepted,
       actionsRejected,
     };
   };
@@ -2987,7 +3130,7 @@ export function createExploreQueryRun(
     const packWeights = weightByGroupId(groups, buildTermWeightTable(groups, byFile, launchedCoverage, searchVariantsOf));
     const locatingDone = !allSites && locating && hasVerifiedRegister(prepared);
     const bothEndsDone = !allSites && wantsBothEnds && hasBothConnectsEnds(prepared);
-    const chosenPack = chosenGroups.length > 0 ? packChosenGroups() : undefined;
+    const chosenPack = selectionApplied ? packChosenGroups() : undefined;
     const packed = chosenPack
       ? chosenPack.packed
       : packComplementary(
@@ -3044,6 +3187,8 @@ export function createExploreQueryRun(
     const snippets = packed.map((window) => ({
       ...snippetFrom(window),
       ...(requiredKeys.has(`${window.path}@${window.revision}:${window.start}-${window.end}`) ? { required: true as const } : {}),
+      ...(chosenPack ? { requiredGroups: chosenGroups.filter(group => group.windows.some((entry, i) => group.requiredFlags[i]
+        && windowIdentityKey(entry) === windowIdentityKey(window))).map(group => group.id) } : {}),
     }));
     const omittedRequiredKeys = new Set(
       (chosenPack?.omittedRequired ?? []).map((item) => `${item.path}:${item.startLine}-${item.endLine}`),
@@ -3157,11 +3302,19 @@ export function createExploreQueryRun(
     submitPlan,
     waitForViews,
     waitForProgress,
+    collect,
     viewsForModel,
     applySelection,
     applyRerank,
     followup,
     actionCandidates,
+    completedActionIds: () => [...completedActions],
+    setJudgmentPending: pending => {
+      if (terminal !== 'active' || judgmentPending === pending) return;
+      judgmentPending = pending;
+      notifyProgress();
+    },
+    selectedViews,
     applyFastDecision,
     finish,
     cancel,
@@ -3243,7 +3396,8 @@ function relationLines(relations: NonNullable<WireResult["details"]["relations"]
   return lines;
 }
 
-function packExploreVisible(
+/** A delivery plan owns both selected ranges and their exact rendering. */
+function planExploreDelivery(
   result: ExploreFormatInput,
   byteBudget: number,
   prefix = '',
@@ -3336,19 +3490,32 @@ function packExploreVisible(
       reason: `already shown in ${covering.path}:${covering.startLine}-${covering.endLine}` });
   };
 
-  result.snippets.forEach((snippet, index) => {
-    const block = snippetBlocks[index]!;
+  const pendingDelivery = new Set(result.snippets);
+  for (const snippet of result.snippets) {
+    if (!pendingDelivery.has(snippet)) continue;
+    const group = [snippet];
+    const requiredGroups = new Set(snippet.requiredGroups);
+    // Overlapping required groups form one atomic delivery component.
+    for (let changed = true; changed;) {
+      changed = false;
+      for (const candidate of pendingDelivery) {
+        if (group.includes(candidate) || !candidate.requiredGroups?.some(id => requiredGroups.has(id))) continue;
+        group.push(candidate);
+        for (const id of candidate.requiredGroups) requiredGroups.add(id);
+        changed = true;
+      }
+    }
+    for (const member of group) pendingDelivery.delete(member);
+    const block = group.map(member => snippetBlocks[result.snippets.indexOf(member)]!).join('\n');
     if (!pushIfFits(block)) {
-      const item = {
-        path: snippet.path,
-        startLine: snippet.startLine,
-        endLine: snippet.endLine,
-        reason: snippet.required ? "required range exceeded output budget" : "over byte budget",
-      };
-      byteOmissions.set(snippet, item);
-      omitted.push(item);
-    } else delivered.push(snippet);
-  });
+      for (const member of group) {
+        const item = { path: member.path, startLine: member.startLine, endLine: member.endLine,
+          reason: member.required ? "required range exceeded output budget" : "over byte budget" };
+        if (!requiredGroups.size) byteOmissions.set(member, item);
+        omitted.push(item);
+      }
+    } else delivered.push(...group);
+  }
 
   // First preserve the original priority pack. Deduplicating while allocating
   // could admit an earlier oversized block and evict already-delivered facts.
@@ -3397,7 +3564,7 @@ function packExploreVisible(
   for (const line of graphLines) pushIfFits(line);
 
   let visibleText = visible.join("\n");
-  if (utf8Bytes(visibleText) > byteBudget && !result.snippets.some((snippet) => snippet.required)) {
+  if (utf8Bytes(visibleText) > byteBudget) {
     const raw = Buffer.from(visibleText, "utf8").subarray(0, byteBudget);
     visibleText = raw.toString("utf8").replace(/\uFFFD$/u, "");
   }
@@ -3413,10 +3580,10 @@ export function formatExploreOutput(
   options?: { byteBudget?: number; handle?: string; prefix?: string },
 ): { visibleText: string; storedBody: string; showHandle: boolean; omitted: ExploreResult["omitted"]; snippets: ExploreSnippet[] } {
   const byteBudget = options?.byteBudget ?? DEFAULT_BYTE_BUDGET;
-  const packed = packExploreVisible(result, byteBudget, options?.prefix);
+  const packed = planExploreDelivery(result, byteBudget, options?.prefix);
   const hint = options?.handle && packed.showHandle ? exploreHandleHint(options.handle) : "";
   if (!hint) return packed;
-  const reserved = packExploreVisible(result, Math.max(0, byteBudget - utf8Bytes(hint)), options?.prefix);
+  const reserved = planExploreDelivery(result, Math.max(0, byteBudget - utf8Bytes(hint)), options?.prefix);
   let visibleText = `${reserved.visibleText}${hint}`;
   if (utf8Bytes(visibleText) > byteBudget) {
     const raw = Buffer.from(visibleText, "utf8").subarray(0, byteBudget);

@@ -33,7 +33,7 @@ describe("Host-backed explore tool", () => {
           vocab: { objects: ["service"], anchors: [] }, sources: [], inputSource: "disk",
           decisionMode: "rerank",
         };
-        if (method === "explore.query.views") return { views: [{}], unevaluated: 0 };
+        if (method === "explore.query.views") return { views: [{}], sequence: 1, pending: false, actions: [], outputByteBudget: 24576, unevaluated: 0 };
         if (method === "explore.query.finish") return { ...finishResult,
           details: { ...finishResult.details, model: params.model } };
         if (method === "explore.query.release") return { released: true };
@@ -69,7 +69,7 @@ describe("Host-backed explore tool", () => {
             queryId: "eq_test",
             question: "where is the factory",
             views: [],
-            unevaluated: 0,
+            sequence: 1, pending: false, actions: [], outputByteBudget: 24576, unevaluated: 0,
             sources: [],
             deadlineAt: Date.now() + 1000,
           };
@@ -173,7 +173,7 @@ describe("Host-backed explore tool", () => {
           queryId: "eq_large",
           question: "needle",
           views: [],
-          unevaluated: 0,
+          sequence: 1, pending: false, actions: [], outputByteBudget: 24576, unevaluated: 0,
           sources: [],
           deadlineAt: Date.now() + 10_000,
         };
@@ -244,13 +244,13 @@ describe("Host-backed explore tool", () => {
               purpose: "candidate",
               why: "hit",
             }],
-            unevaluated: 0,
+            sequence: 1, pending: false, actions: [], outputByteBudget: 24576, unevaluated: 0,
             sources: [],
             deadlineAt: Date.now() + 10_000,
           };
         }
         if (method === "explore.query.select") {
-          return { queryId: "eq_test", accepted: [], rejected: [{ viewId: "v1", reason: "required group exceeds excerpt limit" }], gaps: [] };
+          return { queryId: "eq_test", accepted: [], selectedViews: [], rejected: [{ viewId: "v1", reason: "required group exceeds excerpt limit" }], gaps: [] };
         }
         if (method === "explore.query.finish") {
           return {
@@ -320,12 +320,12 @@ describe("Host-backed explore tool", () => {
         if (method === "explore.query.views") return {
           queryId: "eq_test",
           question: "how does reclaim work",
-          views: [view("v1", "a.ts")],
-          unevaluated: 0,
+          views: calls.some(call => call.method === "explore.query.followup") ? [view("v2", "b.ts")] : [view("v1", "a.ts")],
+          sequence: 1, pending: false, actions: [], outputByteBudget: 24576, unevaluated: 0,
           sources: [],
           deadlineAt: Date.now() + 10_000,
         };
-        if (method === "explore.query.select") return { queryId: "eq_test", accepted: [{ groupId: "sel1", viewIds: ["v1"] }], rejected: [], gaps: [] };
+        if (method === "explore.query.select") return { queryId: "eq_test", accepted: [{ groupId: "sel1", viewIds: ["v1"] }], rejected: [], gaps: [], selectedViews: [view("v1", "a.ts")] };
         if (method === "explore.query.followup") return { queryId: "eq_test", launched: ["reclaimNow"], reused: [], newViews: [view("v2", "b.ts")], sources: [] };
         if (method === "explore.query.finish") return {
           ...finishResult,

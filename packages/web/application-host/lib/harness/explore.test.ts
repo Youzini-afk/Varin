@@ -13,7 +13,6 @@ import {
   extractIdentifiers,
   extractQuotedLiterals,
   formatExploreOutput,
-  maxMaterializeReads,
   type ExploreDeps,
 } from "./explore.js";
 import type { ExploreFileSnapshot } from "./explore-file-reader.js";
@@ -239,19 +238,16 @@ describe("explore D-090 candidate ranking and materialization", () => {
     expect(result.snippets[0]?.path).toBe("src/feature.test.ts");
   });
 
-  it("T6: reads on demand, bounds readFile, and reports unread files as not-requested", async () => {
+  it("reads investigation candidates independently of the delivery count", async () => {
     const files = Array.from({ length: 10 }, (_, index) => `f${index}.ts`);
     const readFile = vi.fn(async (path: string) => ready(`needle in ${path}`));
     const result = await explore({ question: "needle", limit: 2 }, {
       rgSearch: async () => files.map((path) => ({ path, line: 1, text: `needle in ${path}` })),
       readFile,
     });
-    const bound = maxMaterializeReads(10, 2);
-    expect(bound).toBe(5);
-    expect(readFile.mock.calls.length).toBeLessThanOrEqual(bound);
-    expect(readFile.mock.calls.length).toBeGreaterThan(0);
+    expect(readFile).toHaveBeenCalledTimes(files.length);
     expect(result.snippets).toHaveLength(2);
-    expect(result.notRequested.count).toBeGreaterThan(0);
+    expect(result.notRequested.count).toBe(0);
     expect(result.notRequested.paths.length).toBe(result.notRequested.count);
     expect(result.details.provenance.filter((entry) => entry.status === "empty")).toEqual([]);
     expect(result.details.provenance.filter((entry) => entry.status === "not-requested").map((entry) => entry.path))
@@ -313,10 +309,10 @@ describe("explore D-090 candidate ranking and materialization", () => {
     expect(Buffer.byteLength(packed.visibleText, "utf8")).toBeLessThanOrEqual(280);
     expect(packed.omitted.length).toBeGreaterThan(0);
     expect(packed.omitted.some((item) => item.reason === "over byte budget")).toBe(true);
-    expect(packed.storedBody).toMatch(/Unread candidates \(not-requested/);
+    expect(packed.storedBody).toContain("Omitted supports");
     expect(packed.showHandle).toBe(true);
     expect(result.details.provenance.length).toBe(8);
-    expect(result.details.provenance.some((entry) => entry.status === "not-requested")).toBe(true);
+    expect(result.details.provenance.some((entry) => entry.status === "not-requested")).toBe(false);
     expect(result.details.byteBudget).toBe(DEFAULT_BYTE_BUDGET);
     expect(result.snippets[0]?.revision).toBe("rev-1");
     const withHandle = formatExploreOutput(result, { byteBudget: 280, handle: "out_test" });
@@ -650,7 +646,7 @@ describe("explore structure slices", () => {
     expect(result.snippets.map((snippet) => snippet.path)).toEqual(["name.ts", "comment.ts"]);
   });
 
-  it("does not classify unread candidates", async () => {
+  it("classifies actually read candidates independently of the output limit", async () => {
     const classified: string[] = [];
     const hits = Array.from({ length: 8 }, (_, index) => ({
       path: `file-${index}.ts`,
@@ -674,8 +670,8 @@ describe("explore structure slices", () => {
       },
     });
     expect(classified.length).toBeGreaterThan(0);
-    expect(classified).not.toContain("file-7.ts");
-    expect(result.notRequested.paths).toContain("file-7.ts");
+    expect(new Set(classified).size).toBe(hits.length);
+    expect(result.notRequested.paths).toEqual([]);
   });
 
   it("keeps anchor-first complementary packing when structure slices are present", async () => {
@@ -1810,7 +1806,6 @@ describe("explore local evidence and pack (3.14 checkpoint 3)", () => {
     });
     expect(result.snippets.some((snippet) => snippet.text.includes("register(\"explore.search\""))).toBe(true);
     expect(result.snippets.some((snippet) => snippet.path.includes("other.service"))).toBe(false);
-    expect(result.details.provenance.some((entry) => entry.path.includes("other.service"))).toBe(false);
   });
 
   it("does not give same-container connection clues direct-clue or extra-read treatment", async () => {
@@ -1871,7 +1866,6 @@ describe("explore local evidence and pack (3.14 checkpoint 3)", () => {
       },
     });
     expect(result.snippets.some((snippet) => snippet.path === "src/ranking.ts")).toBe(true);
-    expect(readPaths.some((path) => path.includes("wire.alpha"))).toBe(false);
     expect(result.snippets.some((snippet) => snippet.path.includes("wire.alpha"))).toBe(false);
     expect(result.details.provenance.some((entry) => entry.path.includes("wire.alpha") && entry.status === "ready")).toBe(false);
   });

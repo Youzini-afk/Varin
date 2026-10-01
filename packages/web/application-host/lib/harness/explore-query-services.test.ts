@@ -5,7 +5,7 @@ import {
   createExploreQueryCancelService,
   createExploreQueryFinishService,
   createExploreQueryStartService,
-  createExploreQueryViewsService,
+  createExploreQueryViewsService as collectService,
   packExploreSearchResult,
 } from "./explore-query-services.js";
 import { createExploreQueryStore } from "./explore-query-store.js";
@@ -39,6 +39,15 @@ function context(inputContext: AgentInputContext, signal = new AbortController()
     inputContext,
     signal,
   };
+}
+
+function createExploreQueryViewsService(host: Pick<HarnessServiceHost, "exploreQueryStore">) {
+  const service = collectService(host);
+  return { handle: async (params: Parameters<typeof service.handle>[0], ctx: HarnessServiceContext) => {
+    const run = host.exploreQueryStore.get(ctx.sessionId, params.queryId)?.run;
+    if (run) await run.waitForViews();
+    return service.handle(params, ctx);
+  } };
 }
 
 describe("explore query services", () => {
@@ -178,10 +187,10 @@ describe("explore query services", () => {
     >;
     try {
       const result = await createExploreSearchService(host).handle({ question: "needle", limit: 1 }, context({ source: "disk" }));
-      expect(result.notRequested.count).toBeGreaterThan(0);
+      expect(result.notRequested.count).toBe(0);
       expect(result.notRequested.paths.length).toBe(result.notRequested.count);
       expect(result.omitted.length).toBeGreaterThan(0);
-      expect(result.details.provenance.some((entry) => entry.status === "not-requested")).toBe(true);
+      expect(result.details.provenance.some((entry) => entry.status === "not-requested")).toBe(false);
     } finally {
       outputStore.dispose();
     }
@@ -785,7 +794,7 @@ describe("explore query services", () => {
     // re-run through the reranker.
     expect(batches.length).toBeGreaterThan(0);
     expect(batches[0]?.goal).toBe("needle");
-    expect(batches[0]?.questions.some((id) => id.startsWith("m:"))).toBe(true);
+    expect(batches.some(batch => batch.questions.some(id => id.startsWith("m:")))).toBe(true);
     expect(finished.details.fastDecision?.status).toBe("used");
     expect(finished.details.model?.fastDecision).toBe("used");
     expect(finished.details.model?.rerank).toBe("skipped");

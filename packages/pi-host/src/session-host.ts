@@ -3824,6 +3824,12 @@ export class SessionHost {
               .trim();
           }
         : undefined;
+      if (completeExplore && exploreModel) {
+        // UTF-8 bytes conservatively bound input tokens. maxTokens describes a
+        // model's maximum output, not a reserved output for this short request.
+        // The provider still validates the actual tokenized request.
+        Object.assign(completeExplore, { inputBytes: exploreModel.contextWindow });
+      }
       const readPage = readerModel
         ? async (input: { finalUrl: string; markdown: string; prompt: string; images?: Array<{ data: string; mimeType: string }>; signal: AbortSignal | undefined }) => {
             const messageContent = [

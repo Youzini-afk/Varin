@@ -21,7 +21,6 @@ import type {
 import { resolveHarnessCodeRetrievalSettings } from "@varin/protocol";
 import {
   documentsFromViews,
-  exploreShouldRerank,
   rerankFailureDetails,
   rerankSettingsFromSnapshot,
   scoresFromRerankResult,
@@ -550,6 +549,8 @@ export function createExploreQueryStartService(
           throw new HarnessServiceError("unavailable", "No usable resource root was available for this query.");
         }
         let rerankConfigured = false;
+        let rerankSettings: ReturnType<typeof rerankSettingsFromSnapshot>;
+        let rerankInvalid = false;
         let fastDecision: StoredExploreQuery["fastDecision"];
         let decisionMode: HarnessExploreDecisionMode = "auto";
         // Inference bindings are global even when a session owns no project.
@@ -569,10 +570,11 @@ export function createExploreQueryStartService(
           decisionMode = "source";
         }
         try {
-          rerankConfigured = (decisionMode === "auto" || decisionMode === "rerank")
-            && rerankSettingsFromSnapshot(snapshotSettings) !== undefined;
+          if (decisionMode === 'auto' || decisionMode === 'rerank') rerankSettings = rerankSettingsFromSnapshot(snapshotSettings);
+          rerankConfigured = rerankSettings !== undefined;
         } catch {
           rerankConfigured = false;
+          rerankInvalid = true;
         }
         // Fast Decision (D-312): freeze the resolved binding — including its
         // credential-free configurationId — at query start. A settings edit
@@ -622,6 +624,14 @@ export function createExploreQueryStartService(
           controller: queryController,
         });
         stored.decisionMode = decisionMode;
+        if (rerankSettings) stored.rerankSettings = rerankSettings;
+        stored.rerankInvalid = rerankInvalid;
+        const llm = Boolean(params.reserveForJudge) && (decisionMode === 'auto' || decisionMode === 'llm');
+        const decision = fastDecision?.status === 'ready';
+        stored.duties = {
+          actions: decision ? 'fast-decision' : llm ? 'llm' : 'source',
+          selection: llm ? 'llm' : decision ? 'fast-decision' : rerankConfigured ? 'rerank' : 'source',
+        };
         queryCoverage.set(stored, { graphMissing: graphSources.missing > 0, resourceUnits });
         if (fastDecision) {
           stored.fastDecision = fastDecision;
@@ -644,6 +654,7 @@ export function createExploreQueryStartService(
             fastDecision.done = runExploreFastDecisionLoop({
               run: stored.run,
               binding,
+              judgeMaterials: stored.duties.selection === 'fast-decision',
               call: (batch) => host.fastDecision!({
                 workspaceId: inferenceScopeId,
                 purpose: "explore",
@@ -682,6 +693,7 @@ export function createExploreQueryStartService(
           sources: stored.run.sourceStates(),
           inputSource: stored.inputContext.source,
           decisionMode,
+          duties: stored.duties,
           ...(fastDecision ? { fastDecision: { status: fastDecision.status } } : {}),
         };
       } catch (error) {
@@ -718,8 +730,14 @@ export function createExploreQueryViewsService(
   return {
     handle: async (params: ExploreQueryViewsParams, ctx) => {
       const stored = requireQuery(host, ctx, params.queryId, "read");
-      await stored.run.waitForViews();
-      const views = stored.run.viewsForModel();
+      if (params.inputBytes !== undefined && (!Number.isFinite(params.inputBytes) || params.inputBytes <= 0)) {
+        throw new HarnessServiceError('invalid-params', 'inputBytes must be positive.');
+      }
+      if (params.seen !== undefined && (!Array.isArray(params.seen) || params.seen.some(id => typeof id !== 'string'))) {
+        throw new HarnessServiceError('invalid-params', 'seen must contain view identities.');
+      }
+      const actions = stored.duties?.actions === 'llm' && !stored.run.signal.aborted ? await stored.run.actionCandidates() : [];
+      const views = stored.run.collect(params);
       return {
         queryId: stored.id,
         question: stored.run.question,
@@ -728,9 +746,26 @@ export function createExploreQueryViewsService(
         unevaluated: views.unevaluated,
         sources: stored.run.sourceStates(),
         deadlineAt: stored.deadlineAt,
+        sequence: views.sequence,
+        pending: views.pending,
+        actions,
+        outputByteBudget: DEFAULT_BYTE_BUDGET,
       };
     },
   };
+}
+
+export function createExploreQueryWaitService(
+  host: Pick<HarnessServiceHost, 'exploreQueryStore'>,
+): HarnessService<'explore.query.wait'> {
+  return { handle: async (params, ctx) => {
+    const stored = requireQuery(host, ctx, params.queryId, 'read');
+    if (!Number.isSafeInteger(params.afterSequence) || params.afterSequence < 0) {
+      throw new HarnessServiceError('invalid-params', 'afterSequence must be a nonnegative sequence.');
+    }
+    await stored.run.waitForProgress(params.afterSequence, ctx.signal);
+    return { sequence: stored.run.collect().sequence };
+  } };
 }
 
 export function createExploreQuerySelectService(
@@ -756,8 +791,7 @@ export function createExploreQueryFollowupService(
         queryId: stored.id,
         launched: result.launched,
         reused: result.reused,
-        newViews: result.newViews,
-        ...(result.actionsExecuted.length > 0 ? { actionsExecuted: result.actionsExecuted } : {}),
+        actionsAccepted: result.actionsAccepted,
         ...(result.actionsRejected.length > 0 ? { actionsRejected: result.actionsRejected } : {}),
         sources: stored.run.sourceStates(),
       };
@@ -792,6 +826,10 @@ export function createExploreQueryFinishService(
         return packOnce(stored.run.finish(model));
       }
       stored.finishing ??= (async () => {
+        if (stored.rerankInvalid && stored.duties?.selection === 'source') {
+          stored.run.applyRerank([], { status: 'failed', note: 'Rerank settings are malformed; source ranking was kept.' });
+          if (model) model.rerank = 'failed';
+        }
         // Fast Decision (D-312): the progressive loop owns material relevance
         // and action choice while it is configured for this query — the same
         // judgment is not re-run through rerank or another paid model (§4.4).
@@ -800,12 +838,12 @@ export function createExploreQueryFinishService(
         if (fastDecisionActive) {
           fastDecision.requestSettle?.();
           const remaining = Math.max(0, stored.deadlineAt - Date.now());
-          await Promise.race([
-            fastDecision.done,
-            new Promise<void>((resolve) => {
-              setTimeout(resolve, Math.min(remaining, DEFAULT_JUDGE_RESERVE_MS));
-            }),
-          ]);
+          let timer: ReturnType<typeof setTimeout> | undefined;
+          try {
+            await Promise.race([fastDecision.done, new Promise<void>(resolve => {
+              timer = setTimeout(resolve, Math.min(remaining, DEFAULT_JUDGE_RESERVE_MS));
+            })]);
+          } finally { if (timer !== undefined) clearTimeout(timer); }
           if (fastDecision.done) {
             fastDecision.abort?.();
             await fastDecision.done;
@@ -824,22 +862,9 @@ export function createExploreQueryFinishService(
             model.note = `${model.note ? `${model.note} ` : ""}Fast decision is ${fastDecision.status}; source ranking was kept.`;
           }
         }
-        const shouldRerank = stored.decisionMode === "rerank"
-          || (stored.decisionMode !== "llm" && stored.decisionMode !== "fast-decision"
-            && stored.decisionMode !== "source" && exploreShouldRerank(model));
+        const shouldRerank = stored.duties?.selection === 'rerank' && (stored.decisionMode === 'rerank' || model?.select !== 'used');
         if (Date.now() < stored.deadlineAt && shouldRerank && host.rerankExploreViews && !fastDecisionActive) {
-          let settings: ReturnType<typeof rerankSettingsFromSnapshot>;
-          let settingsInvalid = false;
-          try {
-            settings = rerankSettingsFromSnapshot(await host.harnessSettings?.(inferenceScopeId) ?? null);
-          } catch {
-            settingsInvalid = true;
-            stored.run.applyRerank([], {
-              status: "failed",
-              note: "Rerank settings are malformed; source ranking was kept.",
-            });
-            if (model) model.rerank = "failed";
-          }
+          const settings = stored.rerankSettings;
           if (settings) {
             try {
               const views = stored.run.viewsForModel().views;
@@ -880,7 +905,7 @@ export function createExploreQueryFinishService(
               ));
               if (model) model.rerank = cancelled ? "cancelled" : "failed";
             }
-          } else if (model && !settingsInvalid) {
+          } else if (model) {
             model.rerank = "unconfigured";
           }
         } else if (model && model.rerank === undefined) {

@@ -43,7 +43,10 @@ runtime), `unsupported` (no language, or no `documentSymbolProvider`), `stale`,
 outline that covers every supplied hit line wins immediately. `empty`, or a
 `ready` outline that misses a hit, does not hide a later provider: the next
 call is `warmOnly` so a cold language server is not started (D-099). The first
-provider's `unavailable` still allows a cold start on the next one. A later
+provider's `unavailable` allows a cold start only when the caller did not request
+`warmOnly`. Explicit caller warm-only policy is preserved across every provider and operation.
+Ordinary Explore slices use that policy; a chosen `prepare-structure` action can request cold
+preparation through the same ownership and cancellation path. A later
 `ready` outline replaces the earlier one; results are not merged.
 `literalCalls` and `imports` use the same cancelled / empty / warmOnly /
 unavailable rules without hit-line coverage. When no configured provider

@@ -597,24 +597,35 @@ gaps. OutputStore keeps the full pack plus unread-candidate refs, and the tool t
 handle only when more content remains. Symbol expansion and optional model enrichment remain
 separate planned sources.
 
-`harness.codeRetrieval.decision` is the user-owned choice frozen at `explore.query.start`:
-`auto` preserves the existing fast-decision → explore LLM → conditional rerank priority;
-`llm`, `fast-decision`, and `rerank` select exactly that judgment path; `source` uses source
-ranking alone. An explicitly selected path does not silently switch to another paid model
-when its binding is unavailable or its request fails. The explore LLM does planning as well as
-selection; embedding is an independent retrieval source, not another relevance judge.
+`harness.codeRetrieval.decision` is frozen at query start. In `auto`, the configured explore LLM owns
+joint selection and may plan searches; a ready fast-decision binding can independently own actions.
+Without an LLM, fast decision owns material judgment, or a configured reranker ranks material;
+without any model, source retrieval and deterministic packing still run. Explicit `llm`, `fast-decision`,
+`rerank`, `source`, and purpose `off` keep their meanings. A failed provider does not start a cascade
+of replacement paid requests. Embedding contributes an independent source. Rerank settings and the
+fast-decision configuration identity stay fixed for this query.
 
-Fast Decision (D-312, `explore-fast-decision.ts`): when the selected path resolves a ready
-`harness.fastDecision` purpose binding, the query freezes the credential-free `configurationId` and runs a
-progressive loop inside the same query lifetime. Each round turns fresh materialized views into `m:` keep/drop
-questions and pending action candidates into `a:` execute/skip questions, sends them through
-`harness.fastDecision` (Host → workspace inference → Pi background inference → TypeSafe System One adapter),
-applies kept views via `applySelection`, and executes chosen actions through `followup({actions})` — which
-rejects unknown or stale ids and reuses the existing search, graph, and file-read authorities. Action
-candidates are generated from real material already read (`actionCandidates`): `read`/`path`/`symbol`/
-`connect`/`importers`/`callers`/`references`/`calls`, deduplicated by deterministic identity. A ready binding
-replaces the overlapping LLM select and HTTP rerank for that query; unconfigured, disabled, failed, or
-cancelled runs keep source-ranked material and report `details.fastDecision` honestly.
+`query.views({seen,inputBytes})` returns ready ranges, current sequence, pending work and actions;
+it does not await all sources or structure. `query.wait({afterSequence})` registers a cancellable,
+race-free progress waiter. `plan` and `followup` admit work asynchronously; `actionsAccepted` is not
+an execution receipt. Fast-decision provenance counts completed operations separately. `select`
+returns the actual retained ranges, including clipped range identities, for the next comparison.
+Model bodies are not silently shortened to 8192 characters or a fixed 48 KiB page. Consumers page
+using configured capacity; an oversized individual view remains identifiable and provider capacity
+errors remain explicit.
+
+The shared executor continues authorized reads while models judge an available batch. The public tool
+waits for an in-flight decision before declaring the frontier quiet, allowing selected follow-ups to
+execute. The decision loop includes retained evidence and keys action reuse on that context. No graph
+is required for unread candidate reads, adjacent ranges, or literal names observed in source. Existing
+graph facts add resolved relationship actions. `prepare-structure` explicitly requests optional cold
+preparation; ordinary slices use warm structure. All actions remain scoped, version-bound and deduplicated.
+
+The visible delivery planner accounts for scope, headers, source blocks and output handle. Required
+members of a group (including overlapping groups) are delivered together or omitted together with a
+reported gap. Invalid later selection retains the previous valid selection; an explicit valid empty
+selection does not refill the answer with rejected hits. OutputStore is additional material, not a
+continued-query capability. No new Agent thread or training dependency is introduced.
 
 ### Knowledge context runtime (`../knowledge/context-runtime.ts`)
 
@@ -871,16 +882,13 @@ graph enrichment. The store's timer may fire while one of those stages is awaiti
 does not depend on the pump reaching its next loop turn first. Explicit query/request cancellation and
 an abort before the source deadline remain cancellations, never successful partial results.
 
-Candidate preparation uses the existing read slots as a worker pool. Each completed slot takes the next
-scheduled file without waiting for the slowest member of a fixed batch. Acquired document text first produces
-revision-checked lexical windows; an available outline then upgrades those windows before optional hit and
-relation classification. A deadline preserves the last valid stage, including an earlier complete window when
-later evidence is being refreshed. Requests interrupted during preparation have an explicit unavailable issue;
-they are not counted among candidates that were never requested. The cumulative read budget reserves existing
-slot capacity for pending primary sources and a deferred content-word pass; each early pass spends only the
-unreserved total, rather than adding previously spent reads to it. Source scopes, candidate ordering and total
-read budgets are unchanged. The shared cancellation helper bounds waits on document/structure dependencies and
-does not publish a late result after the caller has stopped.
+Raw Document reads and optional outline/classification use separate queues with the existing
+preparation parallelism. Output excerpt count no longer limits investigation reads. Each free read
+slot reconsiders current candidate ranking, so late sources are not trapped behind a frozen page.
+Acquired versioned text is immediately available to incremental consumers. Source deadline, user
+cancellation and late completion retain their distinct meanings; stale enhancement results cannot
+overwrite windows built from newer query evidence. Source scope and search-backend coverage limits
+are preserved and reported.
 
 `explore.search` asks an optional `structureSource` (see
 `lib/structure/DOCUMENTATION.md`) for a revision-bound outline after a file is
@@ -891,9 +899,9 @@ containers are emitted in full; large ones keep the signature, the hit block,
 omission markers, and a full-unit read entry. An earlier `empty` outline or a
 ready outline that misses a hit does not hide a later provider; that later call
 is `warmOnly` and will not start a cold language server (D-099). When the source
-reports an unavailable LSP outline, later outlines in that query's same path scope and language also
-use `warmOnly`: they may reuse a ready server but do not repeat a failed optional cold preparation.
-Native parsing still runs, and a new query can try preparation again. When the source
+is used for ordinary Explore slices, requests are explicitly `warmOnly`; native parsing remains available,
+and the provider chain preserves that caller policy. A chosen `prepare-structure` operation can request
+cold preparation through the existing owner and authorization path. When the source
 is missing, cold, unsupported, stale, or failed, explore falls back to the ±3
 line window and records that status on the snippet and in `details.structure`.
 After materialize, tree-sitter may classify hit lines so declaration names

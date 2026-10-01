@@ -272,7 +272,7 @@ export const settingsDict = {
   'settings.page.harness.codeRetrieval.description': 'Choose one relevance judge for each explore query. A missing or failed selected model keeps source ranking; it never silently switches to another paid model.',
   'settings.page.harness.codeRetrieval.decision': 'Judgment method',
   'settings.page.harness.codeRetrieval.mode.auto': 'Automatic',
-  'settings.page.harness.codeRetrieval.mode.auto.description': 'Fast decision judges results when ready; the explore LLM may still plan. Otherwise the LLM selects results, or a configured reranker runs when LLM selection was not attempted.',
+  'settings.page.harness.codeRetrieval.mode.auto.description': 'Models are optional. The explore LLM can plan and select complementary evidence; fast decision can choose follow-up actions. Without an LLM, fast decision or rerank judges material. With none configured, source retrieval still works.',
   'settings.page.harness.codeRetrieval.mode.llm': 'Explore LLM',
   'settings.page.harness.codeRetrieval.mode.llm.description': 'Use the explore model for query planning, result selection and follow-up. Configure its model slot under Model Responsibilities.',
   'settings.page.harness.codeRetrieval.mode.fast-decision': 'Fast decision model',

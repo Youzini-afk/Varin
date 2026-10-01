@@ -48,6 +48,7 @@ import {
   createExploreQuerySelectService,
   createExploreQueryStartService,
   createExploreQueryViewsService,
+  createExploreQueryWaitService,
 } from "./explore-query-services.js";
 import { createRelatedQueryService } from "./related-service.js";
 import { compileFindGlob, normalizeGlobPath } from "./glob-matcher.js";
@@ -1219,6 +1220,7 @@ export function registerHarnessServices(
   router.register("explore.query.start", createExploreQueryStartService(host));
   router.register("explore.query.plan", createExploreQueryPlanService(host));
   router.register("explore.query.views", createExploreQueryViewsService(host));
+  router.register("explore.query.wait", createExploreQueryWaitService(host));
   router.register("explore.query.select", createExploreQuerySelectService(host));
   router.register("explore.query.followup", createExploreQueryFollowupService(host));
   router.register("explore.query.finish", createExploreQueryFinishService(host));

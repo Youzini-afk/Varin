@@ -22,7 +22,7 @@ export interface ModelSelection {
   modelId: string;
 }
 
-/** One relevance judge per code-search query. Planning is part of LLM mode. */
+/** Auto assigns action and selection duties independently; explicit modes keep one judgment path. */
 export type HarnessExploreDecisionMode = "auto" | "llm" | "fast-decision" | "rerank" | "source";
 
 export interface HarnessCodeRetrievalSettings {

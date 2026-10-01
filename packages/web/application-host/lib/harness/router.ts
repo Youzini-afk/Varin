@@ -119,6 +119,7 @@ const requestPaths = (
   if (
     method === "explore.query.plan"
     || method === "explore.query.views"
+    || method === "explore.query.wait"
     || method === "explore.query.select"
     || method === "explore.query.followup"
     || method === "explore.query.finish"
