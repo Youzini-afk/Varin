@@ -8,6 +8,7 @@ import { Input } from '@/components/ui/input';
 import { useI18n } from '@/lib/i18n';
 import { isDesktopLocalOriginActive } from '@/lib/desktop';
 import { AutoSaveInput } from './AutoSaveInput';
+import { HarnessModelField } from './HarnessModelField';
 import type { HarnessSettingsPageProps } from './harness-settings-state';
 import { OutboundNetworkSettings } from './OutboundNetworkSettings';
 
@@ -132,6 +133,7 @@ export function WebSettings({ harness, update }: HarnessSettingsPageProps) {
     <SettingsSection title={t('settings.page.harness.web.documentReading.title')}
       description={t('settings.page.harness.web.documentReading.description')}
       settingsItem="harness.document-reading" contentClassName="space-y-4">
+      <HarnessModelField harness={harness} update={update} slot="reader" />
       <SettingsFieldRow label={t('settings.page.harness.web.documentReading.doclingCommand')}
         description={t('settings.page.harness.web.documentReading.executableHint')}
         controlClassName="@xl:flex-1 @xl:max-w-80">

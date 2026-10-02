@@ -94,9 +94,11 @@ export function beginAgentsCatalogTarget(targetKey: string): void {
 export async function refreshAgentsCatalog(
   runtimeTarget: RuntimeContextTarget,
   targetKey: string,
+  afterMutation = false,
 ): Promise<void> {
   beginAgentsCatalogTarget(targetKey);
-  if (state.loading) return;
+  // A pre-mutation read cannot stand in for observing the acknowledged write.
+  if (state.loading && !afterMutation) return;
   const requestGeneration = ++generation;
   const runtimeKey = getRuntimeKey();
   publish({ ...state, error: null, loading: true });

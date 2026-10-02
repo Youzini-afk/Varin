@@ -101,7 +101,6 @@ const MOBILE_SETTINGS_PAGES = [
   'plugin-settings',
   'harness-tools',
   'harness-permissions',
-  'harness-models',
   'harness-context',
   'harness-retrieval',
   'harness-index',

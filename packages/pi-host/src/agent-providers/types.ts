@@ -5,6 +5,7 @@ import type {
   PiAgentDiagnostic,
   PiAgentProviderActionResult,
   PiAgentProviderDescriptor,
+  PiSettingsSnapshot,
 } from "@varin/protocol";
 
 export interface AgentProviderContext {
@@ -12,6 +13,10 @@ export interface AgentProviderContext {
   cwd: string;
   projectTrusted: boolean;
   session: AgentSession;
+  nativeSettings?: {
+    read(): Promise<PiSettingsSnapshot>;
+    write(harness: JsonValue, revision: string): Promise<PiSettingsSnapshot>;
+  };
 }
 
 export interface AgentProviderListResult {

@@ -16,7 +16,7 @@ import type {
   ThreadUpdateResult,
   ThreadKillResult,
 } from "@varin/protocol";
-import { HARNESS_MAX_REQUEST_TIMEOUT_MS, RESEARCH_CAPABILITY_DEFINITIONS, buildTeamPrompt } from "@varin/protocol";
+import { HARNESS_MAX_REQUEST_TIMEOUT_MS, RESEARCH_CAPABILITY_DEFINITIONS, buildTeamPrompt, isPresetId } from "@varin/protocol";
 
 /**
  * Build an error result for a thread tool failure.
@@ -172,6 +172,7 @@ export function createDispatchTool(
     /** Active tool names of the dispatching session (normal-dispatch default). */
     getActiveToolNames?: () => string[];
     resolvedResearchCapabilities?: readonly ResolvedResearchCapability[];
+    getResearchCapabilities?: () => Promise<readonly ResolvedResearchCapability[]>;
   } = {},
 ): ToolDefinition {
   const available = presets.map((p) => p.id);
@@ -209,7 +210,11 @@ export function createDispatchTool(
           };
         }
         if (params.capability !== undefined) {
-          const resolved = researchCapabilities.find((entry) => entry.capability === params.capability);
+          let currentCapabilities = researchCapabilities;
+          try {
+            if (options.getResearchCapabilities) currentCapabilities = await options.getResearchCapabilities();
+          } catch (error) { return threadErrorResult("dispatch", error); }
+          const resolved = currentCapabilities.find((entry) => entry.capability === params.capability);
           const definition = RESEARCH_CAPABILITY_DEFINITIONS[params.capability];
           if (params.preset !== undefined) {
             return {
@@ -251,7 +256,7 @@ export function createDispatchTool(
         }
         if (params.preset !== undefined) {
         const preset = presets.find((p) => p.id === params.preset);
-        if (!preset) {
+        if (!preset && !isPresetId(params.preset) && !params.preset.startsWith("custom:")) {
           return {
             content: [{
               type: "text" as const,
@@ -261,7 +266,10 @@ export function createDispatchTool(
             details: { code: "invalid-params", availablePresets: available },
           };
         }
-        model = preset.model;
+        // The catalog in the prompt is a snapshot. The Host resolves the current
+        // definition, so an agent created through settings can be used in this turn.
+        const current = ctx?.model;
+        model = current ? { providerId: current.provider, modelId: current.id } : preset?.model;
       } else if (params.capability === undefined && params.bot !== undefined) {
         // The Host prefers the consulted Bot's model. If that Bot has no model
         // preference, the caller's current model is the explicit fallback.
@@ -392,6 +400,7 @@ export function createWaitTool(bridge: HostServicesBridge, _sessionId: string): 
 
 export function createSendTool(bridge: HostServicesBridge, _sessionId: string, options: {
   resolvedResearchCapabilities?: readonly ResolvedResearchCapability[];
+  getResearchCapabilities?: () => Promise<readonly ResolvedResearchCapability[]>;
 } = {}): ToolDefinition {
   const researchCapabilities = options.resolvedResearchCapabilities ?? [];
   return defineTool({
@@ -407,7 +416,8 @@ export function createSendTool(bridge: HostServicesBridge, _sessionId: string, o
         let research: { capability: ResearchCapability; resources: ResearchResourceManifest } | undefined;
         let model: { providerId: string; modelId: string } | "inherit" | undefined;
         if (params.capability !== undefined) {
-          const resolved = researchCapabilities.find((entry) => entry.capability === params.capability);
+          const currentCapabilities = options.getResearchCapabilities ? await options.getResearchCapabilities() : researchCapabilities;
+          const resolved = currentCapabilities.find((entry) => entry.capability === params.capability);
           const definition = RESEARCH_CAPABILITY_DEFINITIONS[params.capability];
           if (resolved === undefined && params.model !== "inherit") {
             return {

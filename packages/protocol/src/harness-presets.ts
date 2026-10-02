@@ -18,7 +18,9 @@
  */
 
 import type { HarnessModelRole, ModelSelection } from "./harness-settings.js";
-import { resolveHarnessModelSlot } from "./harness-model-slots.js";
+import { resolveHarnessModelSlot, type HarnessModelBinding } from "./harness-model-slots.js";
+import type { HarnessCustomAgent } from "./harness-agents.js";
+import type { WorkFocusId } from "./work-focus.js";
 
 // ── Types ──────────────────────────────────────────────────────────
 
@@ -39,8 +41,8 @@ export type PresetId =
 export type PresetWorktree = "isolated" | "none";
 
 export interface ExecutionPreset {
-  id: PresetId;
-  slot: HarnessModelRole;
+  id: string;
+  slot?: HarnessModelRole;
   tools: string[];
   worktree: PresetWorktree;
   /** Appended to the end of the thread's system prompt (Zone 0 stays shared). */
@@ -52,7 +54,7 @@ export interface ExecutionPreset {
 
 // ── Preset definitions ─────────────────────────────────────────────
 
-export const EXECUTION_PRESETS: Readonly<Record<PresetId, ExecutionPreset>> = {
+export const EXECUTION_PRESETS: Readonly<Record<PresetId, ExecutionPreset & { slot: HarnessModelRole }>> = {
   "quick-implement": {
     id: "quick-implement",
     slot: "quickImplement",
@@ -152,19 +154,30 @@ export function isPresetId(value: string): value is PresetId {
 // ── Catalog resolution ─────────────────────────────────────────────
 
 export interface ResolvedPreset {
-  id: PresetId;
+  id: string;
   model: ModelSelection;
   definition: ExecutionPreset;
 }
 
 export function resolvePresets(
-  slots: Partial<Record<HarnessModelRole, ModelSelection | null>>,
+  slots: Partial<Record<HarnessModelRole, HarnessModelBinding | null>>,
   mainModel: ModelSelection | null,
+  custom: Record<string, HarnessCustomAgent> = {},
+  focus?: WorkFocusId,
 ): ResolvedPreset[] {
   const resolved: ResolvedPreset[] = [];
   for (const preset of Object.values(EXECUTION_PRESETS)) {
     const model = resolveHarnessModelSlot(preset.slot, slots, mainModel);
     if (model) resolved.push({ id: preset.id, model, definition: preset });
+  }
+  for (const [key, agent] of Object.entries(custom)) {
+    if (!agent.enabled || (focus && agent.workFocus.length && !agent.workFocus.includes(focus))) continue;
+    const model = agent.model ?? mainModel;
+    if (!model) continue;
+    const id = `custom:${key}`;
+    resolved.push({ id, model, definition: { id, tools: agent.tools, worktree: agent.worktree,
+      systemPromptFragment: agent.instructions, teamDescription: `${agent.name}: ${agent.description}`,
+      resultSchema: { conclusion: "string" } } });
   }
   return resolved;
 }

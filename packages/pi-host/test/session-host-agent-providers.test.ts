@@ -156,6 +156,7 @@ export default function (pi: any) {
         "example-agent-provider",
         "magic-context",
         "pi-subagents",
+        "varin",
       ]);
       const byName = new Map(catalog.agents.map((agent) => [`${agent.providerId}:${agent.name}`, agent]));
       assert.equal(byName.get("pi-subagents:worker")?.kind, "delegatable");
@@ -429,9 +430,9 @@ export default function (pi: any) {
     try {
       await host.openCatalogContext(cwd);
       const catalog = await host.listAgentProviders();
-      assert.deepEqual(catalog.providers.map((provider) => provider.id), ["pi-subagents"]);
-      assert.equal(catalog.providers[0]?.label, "Pi Subagents owned");
-      assert.deepEqual(catalog.agents.map((agent) => agent.name), ["owned"]);
+      assert.deepEqual(catalog.providers.map((provider) => provider.id), ["varin", "pi-subagents"]);
+      assert.equal(catalog.providers.find(provider => provider.id === "pi-subagents")?.label, "Pi Subagents owned");
+      assert.deepEqual(catalog.agents.filter(agent => agent.providerId === "pi-subagents").map((agent) => agent.name), ["owned"]);
     } finally {
       await host.dispose();
       await rm(root, { force: true, recursive: true });

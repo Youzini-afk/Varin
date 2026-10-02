@@ -6,7 +6,6 @@ import { useHarnessSettings } from './useHarnessSettings';
 import type { HarnessSettingsPageProps } from './harness-settings-state';
 import { ToolsSettings } from './ToolsSettings';
 import { PermissionsSettings } from './PermissionsSettings';
-import { ModelsSettings } from './ModelsSettings';
 import { ContextSettings } from './ContextSettings';
 import { RetrievalSettings } from './RetrievalSettings';
 import { IndexSettings } from './IndexSettings';
@@ -17,9 +16,9 @@ import { BotSettings } from '../bots/BotSettings';
 import { useSettingsSearchTarget } from '@/lib/settings/search-target';
 import { cn } from '@/lib/utils';
 
-export type HarnessSettingsSection = 'tools' | 'permissions' | 'models' | 'context' | 'retrieval' | 'index' | 'web' | 'computers' | 'bots';
+export type HarnessSettingsSection = 'tools' | 'permissions' | 'context' | 'retrieval' | 'index' | 'web' | 'computers' | 'bots';
 const pages: Record<HarnessSettingsSection, React.ComponentType<HarnessSettingsPageProps>> = {
-  tools: ToolsSettings, permissions: PermissionsSettings, models: ModelsSettings,
+  tools: ToolsSettings, permissions: PermissionsSettings,
   context: ContextSettings, retrieval: RetrievalSettings, index: IndexSettings, web: WebSettings,
   // Self-fetching: the computer and bot catalogs come from the Host service,
   // not harness settings — extra props are ignored.
@@ -34,7 +33,7 @@ export function HarnessSettingsPage({ section }: { section: HarnessSettingsSecti
   const tabsId = React.useId();
   const combined = section === 'context';
   const searchTab = searchTarget?.startsWith('knowledge.') ? 'knowledge'
-    : searchTarget === 'harness.context' ? 'context' : null;
+    : searchTarget?.startsWith('harness.context') || searchTarget === 'harness.next-step' ? 'context' : null;
   const activeTab = searchTab ?? tab;
   React.useEffect(() => {
     if (searchTab) setTab(searchTab);

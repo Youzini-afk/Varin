@@ -409,9 +409,9 @@ describe("settings update", () => {
   it("enforces pi-settings scope ownership", async () => {
     const { service } = fixture();
     const result = await service.update(caller, {
-      id: "harness.models.retrieval",
+      id: "harness.models.explore",
       scope: "project",
-      set: { "harness.models": { explore: { providerId: "p", modelId: "m" } } },
+      set: { "harness.models.explore": { providerId: "p", modelId: "m" } },
     });
     assert.equal(result.status, "failed");
     assert.match(result.fields[0]?.error ?? "", /user-owned/);

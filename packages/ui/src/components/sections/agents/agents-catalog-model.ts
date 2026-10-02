@@ -1,5 +1,5 @@
 import type { I18nKey } from '@/lib/i18n';
-import type { PiAgentCatalogSnapshot, PiAgentDescriptor } from '@varin/protocol';
+import { HARNESS_MODEL_ROLES, type HarnessModelRole, type PiAgentCatalogSnapshot, type PiAgentDescriptor } from '@varin/protocol';
 import type { AgentProviderFilter, AgentStatusFilter } from './agents-catalog-store';
 
 export const AGENT_KIND_LABEL_KEYS: Partial<Record<string, I18nKey>> = {
@@ -10,6 +10,18 @@ export const AGENT_KIND_LABEL_KEYS: Partial<Record<string, I18nKey>> = {
   service: 'settings.varin.agents.kind.service',
   workflow: 'settings.varin.pluginSettings.subagents.kind.workflow',
 };
+
+export function nativeAgentLabel(agent: PiAgentDescriptor, t: (key: I18nKey) => string): string {
+  const slot = agent.definition?.config.slot;
+  return agent.providerId === 'varin' && typeof slot === 'string' && HARNESS_MODEL_ROLES.includes(slot as HarnessModelRole)
+    ? t(`settings.harness.role.${slot as HarnessModelRole}`) : agent.name;
+}
+
+export function nativeAgentDescription(agent: PiAgentDescriptor, t: (key: I18nKey) => string): string {
+  const slot = agent.definition?.config.slot;
+  return agent.providerId === 'varin' && typeof slot === 'string' && HARNESS_MODEL_ROLES.includes(slot as HarnessModelRole)
+    ? t(`settings.harness.role.${slot as HarnessModelRole}.description`) : agent.description;
+}
 
 export function filterAgentsCatalog(
   catalog: PiAgentCatalogSnapshot,

@@ -32,6 +32,31 @@ const serviceContext = (inputContext?: AgentInputContext) => ({
 const dispatchService = (host: object) => createThreadDispatchService(host as never);
 
 describe("thread services", () => {
+  it("freezes custom agent definitions from the settings owner and rejects disabled profiles", async () => {
+    const dataDir = mkdtempSync(join(tmpdir(), "thread-native-profile-"));
+    const registry = createThreadRegistry({ dataDir, hostId: "host-1" });
+    let enabled = true;
+    const service = dispatchService({
+      threadRegistry: registry, threadSpawnSession: vi.fn(async () => ({ sessionId: "custom-child" })),
+      harnessSettings: async () => ({ global: { harness: { models: { hardImplement: { enabled: false } }, agents: {
+        source: { name: "Reader", description: "Trace facts", instructions: "Cite exact lines.", enabled,
+          tools: ["read", "grep"], worktree: "none", workFocus: [], model: { providerId: "selected", modelId: "reader" } },
+      } } }, project: {}, projectTrusted: true }),
+    });
+    try {
+      const params = { preset: "custom:source", task: "Find the entry point", model: { providerId: "caller", modelId: "main" }, tools: ["bash"] };
+      const dispatched = await service.handle(params, serviceContext());
+      const thread = await registry.getThread("workspace-1", { kind: "session", id: "parent-1" }, dispatched.threadId);
+      expect(thread?.model).toEqual({ providerId: "selected", modelId: "reader" });
+      expect(thread?.manifest.tools).toEqual(["read", "grep"]);
+      expect(thread?.manifest.systemPromptFragment).toBe("Cite exact lines.");
+      enabled = false;
+      await expect(service.handle(params, serviceContext())).rejects.toMatchObject({ harnessCode: "unavailable" });
+      await expect(service.handle({ ...params, preset: "hard-implement" }, serviceContext())).rejects.toMatchObject({ harnessCode: "unavailable" });
+      expect((await registry.getThread("workspace-1", { kind: "session", id: "parent-1" }, dispatched.threadId))?.manifest.tools).toEqual(["read", "grep"]);
+    } finally { await registry.dispose(); rmSync(dataDir, { recursive: true, force: true }); }
+  });
+
   beforeEach(() => {
     prepareIsolatedBranch.mockClear();
   });
@@ -270,9 +295,11 @@ describe("thread services", () => {
     const dataDir = mkdtempSync(join(tmpdir(), "thread-research-dispatch-"));
     const registry = createThreadRegistry({ dataDir, hostId: "host-1" });
     const spawn = vi.fn(async () => ({ sessionId: "research-child" }));
+    let enabled = true;
     const service = dispatchService({
       threadRegistry: registry,
       threadSpawnSession: spawn,
+      harnessSettings: async () => ({ global: { harness: { models: { researchExperimentalDesign: { enabled } } } } }),
     } as never);
     try {
       const root = await registry.createThread({
@@ -305,6 +332,12 @@ describe("thread services", () => {
         },
         model: { providerId: "research-provider", modelId: "design-model" },
       });
+      expect(spawn).toHaveBeenCalledOnce();
+      enabled = false;
+      await expect(service.handle({
+        task: "Try another experiment", model: { providerId: "research-provider", modelId: "design-model" },
+        research: { capability: "experimental-design", resources: { cpu: true } },
+      }, serviceContext())).rejects.toMatchObject({ harnessCode: "unavailable", message: expect.stringContaining("disabled") });
       expect(spawn).toHaveBeenCalledOnce();
     } finally {
       await registry.dispose();
@@ -1703,14 +1736,22 @@ describe("thread services", () => {
     const dataDir = mkdtempSync(join(tmpdir(), "thread-send-capability-"));
     const registry = createThreadRegistry({ dataDir, hostId: "host-1" });
     const continueRun = vi.fn(async () => ({ runId: "run-upgraded" }));
+    let enabled = false;
     const service = createThreadSendService({
       threadRegistry: registry,
       threadSendToSession: vi.fn(async () => {}),
       threadContinueRun: continueRun,
+      harnessSettings: async () => ({ global: { harness: { models: { researchExperimentalDesign: { enabled } } } } }),
     } as never);
     try {
       const caller = await researchCaller(registry);
       const child = await settledChildOf(registry, caller.thread.id);
+      await expect(service.handle({
+        threadId: child.thread.id, message: "Try the disabled capability", from: "parent-agent", kind: "request",
+        capability: "experimental-design", model: "inherit",
+      }, threadCtx(caller.sessionId))).rejects.toMatchObject({ harnessCode: "unavailable", message: expect.stringContaining("disabled") });
+      expect(continueRun).not.toHaveBeenCalled();
+      enabled = true;
       const result = await service.handle({
         threadId: child.thread.id,
         message: "Now design the distinguishing experiment",

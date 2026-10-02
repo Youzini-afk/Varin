@@ -14,6 +14,7 @@ import type {
   PiAgentStatus,
 } from "@varin/protocol";
 import { HostError } from "../errors.js";
+import { isWorkFocusId } from "@varin/protocol";
 import { toJsonValue } from "../json.js";
 import type {
   AgentProviderAdapter,
@@ -179,6 +180,9 @@ function parseAgent(value: unknown, providerId: string): PiAgentDescriptor {
   const path = optionalString(value.source.path, "Agent source path");
   const model = optionalString(value.model, "Agent model");
   const thinking = optionalString(value.thinking, "Agent thinking");
+  if (value.workFocus !== undefined && (!Array.isArray(value.workFocus) || !value.workFocus.every(isWorkFocusId))) {
+    throw new HostError("agent_provider_bridge_invalid", "Agent workFocus is invalid");
+  }
   let invocation: PiAgentDescriptor["invocation"];
   if (value.invocation !== undefined) {
     if (
@@ -213,6 +217,7 @@ function parseAgent(value: unknown, providerId: string): PiAgentDescriptor {
     },
     status: value.status as PiAgentStatus,
     ...(thinking === undefined ? {} : { thinking }),
+    ...(value.workFocus === undefined ? {} : { workFocus: [...value.workFocus as import("@varin/protocol").WorkFocusId[]] }),
   };
 }
 

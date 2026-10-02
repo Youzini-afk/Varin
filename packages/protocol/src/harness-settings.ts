@@ -15,6 +15,8 @@ import {
   type HarnessFastDecisionSettings,
 } from "./harness-fast-decision.js";
 import { mergePolicies, type PermissionMode, type PermissionRule } from "./permission-gate.js";
+import { parseHarnessAgents, type HarnessCustomAgent } from "./harness-agents.js";
+import { parseHarnessModelSlots, type HarnessModelBinding } from "./harness-model-slots.js";
 
 /** A provider + model pair, as stored in a model slot. */
 export interface ModelSelection {
@@ -280,7 +282,9 @@ export interface HarnessSettings {
   shell: "auto" | "git-bash" | "powershell" | "wsl";
   output: { visibleBytes: number };
   bash: { waitMs: number };
-  models: Partial<Record<HarnessModelRole, ModelSelection>>;
+  models: Partial<Record<HarnessModelRole, HarnessModelBinding>>;
+  /** User-owned profiles dispatched through the ordinary native Thread runtime. */
+  agents: Record<string, HarnessCustomAgent>;
   codeRetrieval: HarnessCodeRetrievalSettings;
   dispatch: { concurrency: number; askBefore: Partial<Record<string, boolean>> };
   knowledge: {
@@ -351,6 +355,7 @@ export const DEFAULT_HARNESS_SETTINGS: HarnessSettings = {
   output: { visibleBytes: 32768 },
   bash: { waitMs: 10000 },
   models: {},
+  agents: {},
   codeRetrieval: { decision: "auto" },
   dispatch: { concurrency: 12, askBefore: {} },
   knowledge: {
@@ -481,7 +486,8 @@ export function mergeHarnessSettings(
     bash: { ...DEFAULT_HARNESS_SETTINGS.bash, ...user.bash, ...workspace.bash },
     // Model/provider selection is user-owned. A repository cannot redirect
     // auxiliary requests to another provider.
-    models: { ...DEFAULT_HARNESS_SETTINGS.models, ...user.models },
+    models: parseHarnessModelSlots(user.models),
+    agents: parseHarnessAgents(user.agents),
     // An optional, externally edited judgment choice must not prevent chat
     // creation. Its direct consumer reports the invalid choice and keeps source
     // ranking; settings.update validates new writes separately.

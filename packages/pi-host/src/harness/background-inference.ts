@@ -18,6 +18,7 @@ import {
   parseHarnessRerankSettings,
   remoteEmbeddingSpaceParts,
   resolveFastDecisionPurpose,
+  resolveHarnessModelSlot,
   REMOTE_EMBEDDING_DEFAULT_MAX_TOKENS,
   type HarnessEmbedParams,
   type HarnessEmbedResult,
@@ -428,7 +429,9 @@ export class BackgroundInferenceRuntime {
     try {
       await this.reload();
       signal.throwIfAborted();
-      const configured = harnessFromSettings(this.#settings).models?.memoryOrganizer;
+      const slots = harnessFromSettings(this.#settings).models ?? {};
+      if (slots.memoryOrganizer?.enabled === false) throw new HostError("memory_organizer_disabled", "Memory organizer is disabled");
+      const configured = resolveHarnessModelSlot("memoryOrganizer", slots, null);
       if (!configured && params.modelSource !== "bot") {
         throw new HostError("memory_organizer_unconfigured", "Memory organizer model is not configured");
       }

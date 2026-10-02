@@ -1,4 +1,5 @@
 import type { JsonValue, RuntimeContextTarget } from '@varin/protocol';
+import { getRuntimeKey } from '@varin/application-client';
 import { getPiRuntimeConnection } from './client';
 
 export const listPiAgentProviders = async (target: RuntimeContextTarget) => {
@@ -12,8 +13,10 @@ export const runPiAgentProviderAction = async (
   action: string,
   agentId?: string,
   input?: JsonValue,
+  expectedRuntimeKey = getRuntimeKey(),
 ) => {
-  const { client } = await getPiRuntimeConnection();
+  const { client, runtimeKey } = await getPiRuntimeConnection();
+  if (runtimeKey !== expectedRuntimeKey || getRuntimeKey() !== expectedRuntimeKey) throw new Error('Runtime changed before the agent update');
   return client.request('agentProvider.action', {
     ...target,
     action,

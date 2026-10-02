@@ -8,6 +8,7 @@ import type { AgentProviderBridge } from "./bridge.js";
 import { findMagicContextExtension, MagicContextProvider } from "./magic-context-provider.js";
 import { findPiSubagentsTool, PiSubagentsProvider } from "./pi-subagents-provider.js";
 import type { AgentProviderAdapter, AgentProviderContext } from "./types.js";
+import { VarinAgentProvider } from "./varin-provider.js";
 
 export class AgentProviderRegistry {
   readonly #bridge: AgentProviderBridge | undefined;
@@ -71,7 +72,10 @@ export class AgentProviderRegistry {
     diagnostics: PiAgentCatalogSnapshot["diagnostics"];
   } {
     const bridged = this.#bridge?.snapshot(this.#context) ?? { adapters: [], diagnostics: [] };
-    const adapters: AgentProviderAdapter[] = [...bridged.adapters];
+    const adapters: AgentProviderAdapter[] = [
+      ...(this.#context.nativeSettings ? [new VarinAgentProvider(this.#context)] : []),
+      ...bridged.adapters.filter(adapter => adapter.descriptor.id !== "varin"),
+    ];
     const providerIds = new Set(adapters.map((adapter) => adapter.descriptor.id));
     const extensions = this.#context.session.resourceLoader.getExtensions();
     const subagentsTool = findPiSubagentsTool(this.#context.session);

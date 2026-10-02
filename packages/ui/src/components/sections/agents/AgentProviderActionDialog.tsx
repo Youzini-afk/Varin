@@ -29,6 +29,7 @@ interface AgentProviderActionDialogProps {
   open: boolean;
   projectTrusted: boolean;
   submitting: boolean;
+  error?: string | null;
 }
 
 export const AgentProviderActionDialog: React.FC<AgentProviderActionDialogProps> = ({
@@ -39,6 +40,7 @@ export const AgentProviderActionDialog: React.FC<AgentProviderActionDialogProps>
   open,
   projectTrusted,
   submitting,
+  error,
 }) => {
   const { t } = useI18n();
   const inferredScope = agent?.source.scope === 'user' || agent?.source.scope === 'project'
@@ -103,6 +105,7 @@ export const AgentProviderActionDialog: React.FC<AgentProviderActionDialogProps>
           </p>
         ) : null}
 
+        {error && <p role="alert" className="typography-meta text-destructive">{error}</p>}
         <DialogFooter>
           <Button type="button" variant="ghost" disabled={submitting} onClick={() => onOpenChange(false)}>
             {t('settings.common.actions.cancel')}

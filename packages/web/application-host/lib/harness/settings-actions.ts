@@ -706,37 +706,53 @@ const piPackagesAdapter = (deps: SettingsActionDeps): SettingsActionAdapter => (
 });
 
 const agentsAdapter = (deps: SettingsActionDeps): SettingsActionAdapter => ({
-  verbs: ['list', 'status', 'read'],
+  verbs: ['list', 'status', 'read', 'create', 'update', 'enable', 'disable', 'delete'],
   async describe(ctx) {
-    const root = await needWorkspace(ctx, deps).catch(() => null);
-    if (!root) return { unavailable: 'requires a workspace-bound session' };
-    const snapshot = await deps.requestWorkspace(root, 'agentProvider.list', {}).catch(() => null);
+    const snapshot = await deps.requestSession(ctx.caller.sessionId, 'agentProvider.list', {}).catch(() => null);
     if (!isRecord(snapshot)) return { unavailable: 'agent provider catalog unavailable' };
     const providers = Array.isArray(snapshot.providers) ? snapshot.providers.length : 0;
     return { summary: `${providers} agent providers`, data: snapshot };
   },
   async invoke(ctx, entry, verb, args) {
-    const root = await needWorkspace(ctx, deps);
+    const request = (method: string, params: Record<string, unknown>) => deps.requestSession(ctx.caller.sessionId, method, params);
     try {
       switch (verb) {
         case 'list':
-          return { status: 'applied', data: await deps.requestWorkspace(root, 'agentProvider.list', {}) };
+          return { status: 'applied', data: await request('agentProvider.list', {}) };
         case 'status':
         case 'read': {
-          const snapshot = await deps.requestWorkspace(root, 'agentProvider.list', {});
+          const snapshot = await request('agentProvider.list', {});
           if (verb === 'read' || str(args, 'agentId')) {
             const providerId = str(args, 'providerId');
             const agentId = str(args, 'agentId');
             if (providerId) {
               return {
                 status: 'applied',
-                data: await deps.requestWorkspace(root, 'agentProvider.action', {
+                data: await request('agentProvider.action', {
                   providerId, action: 'inspect', ...(agentId ? { agentId } : {}),
                 }),
               };
             }
           }
           return { status: 'applied', data: snapshot };
+        }
+        case 'create':
+        case 'update':
+        case 'enable':
+        case 'disable':
+        case 'delete': {
+          const providerId = str(args, 'providerId');
+          const agentId = str(args, 'agentId');
+          const action = verb === 'create' ? 'create-agent' : verb;
+          if (!providerId || (verb !== 'create' && !agentId)) return unavailable('providerId and an existing agentId are required (create only needs providerId)');
+          const catalog = await request('agentProvider.list', {});
+          const owners = isRecord(catalog) ? (verb === 'create' ? catalog.providers : catalog.agents) : undefined;
+          const owner = Array.isArray(owners) ? owners.find(item => isRecord(item)
+            && (verb === 'create' ? item.id === providerId : item.id === agentId && item.providerId === providerId)) : undefined;
+          if (!isRecord(owner) || !Array.isArray(owner.actions) || !owner.actions.some(item => isRecord(item) && item.id === action)) return unavailable('The selected agent provider does not expose this action');
+          const result = await request('agentProvider.action', { providerId, ...(agentId ? { agentId } : {}), action, input: args.input });
+          return isRecord(result) && result.success === true ? { status: 'applied', data: result }
+            : { status: 'failed', detail: isRecord(result) && typeof result.message === 'string' ? result.message : 'Agent action failed', data: result };
         }
         default:
           return unavailable(`verb "${verb}" is not supported by the agent provider owner`);

@@ -640,6 +640,16 @@ describe("BackgroundInferenceRuntime", () => {
       (error: unknown) => (error as { code?: string }).code === "memory_organizer_unavailable",
     );
     assert.equal(requests.length, 0);
+    await writeFile(join(agentDir, "settings.json"), JSON.stringify({
+      harness: { models: { memoryOrganizer: { enabled: false, providerId: "embed-provider", modelId: "chat-1" } } },
+    }));
+    for (const modelSource of [undefined, "bot"] as const) {
+      await assert.rejects(
+        inference.memoryOrganize({ ...base, ...(modelSource ? { modelSource } : {}) }),
+        (error: unknown) => (error as { code?: string }).code === "memory_organizer_disabled",
+      );
+    }
+    assert.equal(requests.length, 0);
   });
 
   it("rejects the complete organizer request when input plus reserved output exceeds context", async () => {

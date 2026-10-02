@@ -27,6 +27,7 @@ import {
 import { listBots } from '@/lib/bots';
 import { openPiSessionFromNavigation } from '@/lib/pi-runtime/sessionNavigation';
 import { useHarnessSettings } from '../harness/useHarnessSettings';
+import { HarnessModelField } from '../harness/HarnessModelField';
 import { MemorySources } from './MemorySources';
 
 const statusKey = (item: KnowledgeCatalogItem): I18nKey => (
@@ -469,6 +470,8 @@ export const KnowledgeSettings: React.FC = () => {
         settingsItem="knowledge.automation"
         contentClassName="space-y-2"
       >
+        {harness.harness ? <div data-settings-item="knowledge.model"><HarnessModelField harness={harness.harness} update={harness.update} slot="memoryOrganizer" /></div> : null}
+        {harness.error ? <div role="alert" className="flex items-center gap-2 typography-meta text-destructive"><span>{harness.error}</span><Button size="sm" variant="outline" onClick={() => { void harness.retry(); }}>{t('settings.harness.retry')}</Button></div> : null}
         <p className={SETTINGS_HELPER_CLASS}>
           {t('settings.knowledge.automation.model')}: {organizer?.model
             ? `${organizer.model.providerId} / ${organizer.model.modelId}`

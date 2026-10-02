@@ -15,7 +15,6 @@ import {
 } from '@varin/extension-contract';
 import type { SurfaceActivation, SurfaceActivationContext } from '@varin/extension-surface';
 import { AgentsPage } from '@/components/sections/agents/AgentsPage';
-import { AgentsSidebar } from '@/components/sections/agents/AgentsSidebar';
 import { FleetPage } from '@/components/sections/fleet';
 import {
   HarnessSettingsPage,
@@ -54,7 +53,6 @@ import {
 const HARNESS_SECTION_BY_SLUG: Record<string, HarnessSettingsSection> = {
   'harness-tools': 'tools',
   'harness-permissions': 'permissions',
-  'harness-models': 'models',
   'harness-context': 'context',
   'harness-retrieval': 'retrieval',
   'harness-index': 'index',
@@ -75,14 +73,6 @@ const pageImplementation = (
             target={WORKBENCH_REPLACEMENT_TARGETS.agents}
             region="content"
             fallback={<AgentsPage />}
-          />
-        ),
-        renderSidebar: (options) => (
-          <WorkbenchOwnedView
-            target={WORKBENCH_REPLACEMENT_TARGETS.agents}
-            region="sidebar"
-            onItemSelect={options.onItemSelect}
-            fallback={<AgentsSidebar onItemSelect={options.onItemSelect} />}
           />
         ),
       };

@@ -3,6 +3,7 @@ import { SettingsSection, SettingsCheckboxRow, SettingsFieldRow } from '@/compon
 import { useI18n } from '@/lib/i18n';
 import type { HarnessSettingsPageProps } from './harness-settings-state';
 import { AutoSaveInput } from './AutoSaveInput';
+import { HarnessModelField } from './HarnessModelField';
 
 export function ContextSettings({ harness, update }: HarnessSettingsPageProps) {
   const { t } = useI18n();
@@ -52,6 +53,12 @@ export function ContextSettings({ harness, update }: HarnessSettingsPageProps) {
           value={String(recovery.maxRetries)} validate={validRetries}
           onCommit={(value) => setRecovery({ maxRetries: Number(value) })} />
       </SettingsFieldRow>
+    </SettingsSection>
+    <SettingsSection title={t('settings.page.harness.nextStep.title')} settingsItem="harness.next-step" contentClassName="space-y-3">
+      <SettingsCheckboxRow checked={harness.nextStep.enabled && harness.models.nextStep?.enabled !== false}
+        onChange={enabled => update({ nextStep: { enabled }, models: { nextStep: { enabled } } })}
+        label={t('settings.page.harness.nextStep.enabled')} description={t('settings.page.harness.nextStep.description')} />
+      <HarnessModelField harness={harness} update={update} slot="nextStep" enableControl={false} />
     </SettingsSection>
   </>;
 }

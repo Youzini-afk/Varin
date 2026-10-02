@@ -18,6 +18,7 @@ import { createHash, randomUUID } from "node:crypto";
 import {
   estimateMemoryOrganizerInputTokens,
   mergeHarnessSettings,
+  resolveHarnessModelSlot,
   memoryOrganizerOutputReservation,
   resolveFastDecisionPurpose,
   type FastDecisionMaterial,
@@ -310,6 +311,7 @@ export function createMemoryOrganizer(deps: MemoryOrganizerDeps) {
   };
 
   interface ResolvedOrganizerSettings {
+    disabled?: boolean;
     autoOrganize: { workspace: boolean; user: boolean; bot: boolean };
     model: ModelSelection | null;
     /** Resolved (configurationId-bearing) fast-decision status for this run. */
@@ -329,6 +331,7 @@ export function createMemoryOrganizer(deps: MemoryOrganizerDeps) {
     // Background inference resolves global configuration only — a project's
     // layer can disable organizing for its scope but never picks the model.
     const settings = mergeHarnessSettings(globalHarness, {});
+    if (settings.models.memoryOrganizer?.enabled === false) return { ...empty, disabled: true };
     let fastDecision: HarnessFastDecisionPurposeStatus | null = null;
     try {
       if (resolveFastDecisionPurpose(settings.fastDecision, "memory-organization").status === "ready") {
@@ -339,7 +342,7 @@ export function createMemoryOrganizer(deps: MemoryOrganizerDeps) {
     } catch { fastDecision = null; }
     return {
       autoOrganize: settings.knowledge.autoOrganize,
-      model: settings.models.memoryOrganizer ?? null,
+      model: resolveHarnessModelSlot("memoryOrganizer", settings.models, null),
       fastDecision,
     };
   };
@@ -798,6 +801,7 @@ export function createMemoryOrganizer(deps: MemoryOrganizerDeps) {
   const modelForScope = async (settings: ResolvedOrganizerSettings, scopeId: string): Promise<{
     selection: ModelSelection; source: "configured" | "bot";
   } | null> => {
+    if (settings.disabled) return null;
     if (settings.model) return { selection: settings.model, source: "configured" };
     const botModel = await deps.organizerModelForScope?.(scopeId);
     return botModel ? { selection: botModel, source: "bot" } : null;

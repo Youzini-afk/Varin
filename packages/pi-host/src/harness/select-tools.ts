@@ -94,10 +94,12 @@ export interface SelectHarnessToolsDeps {
   followUpAvailable?: boolean;
   /** Whether the Host exposes the project scheduled-task authority (D-307). */
   scheduledTasksAvailable?: boolean;
-  /** Execution presets whose model slot resolves — dispatch lists and accepts only these. */
+  /** Execution presets for the initial team prompt; the Host resolves new dispatches. */
   resolvedPresets?: readonly ResolvedPreset[];
   /** Research capability model slots resolved for this worker. */
   resolvedResearchCapabilities?: readonly ResolvedResearchCapability[];
+  /** Read current user choices when assigning a research capability to new work. */
+  getResearchCapabilities?: () => Promise<readonly ResolvedResearchCapability[]>;
   /** Active tool names of the dispatching session; the normal-dispatch tool default. */
   getActiveToolNames?: () => string[];
   /** Frozen session tool allowlist; submit_facts registers only when this includes it. */
@@ -145,6 +147,7 @@ export function selectHarnessTools(
     scheduledTasksAvailable,
     resolvedPresets,
     resolvedResearchCapabilities,
+    getResearchCapabilities,
     getActiveToolNames,
     sessionToolAllowlist,
   } = deps;
@@ -252,6 +255,7 @@ export function selectHarnessTools(
         concurrency: settings.dispatch.concurrency,
         ...(getActiveToolNames ? { getActiveToolNames } : {}),
         ...(resolvedResearchCapabilities ? { resolvedResearchCapabilities } : {}),
+        ...(getResearchCapabilities ? { getResearchCapabilities } : {}),
       }));
     }
     if (tools.threads !== false) {
@@ -263,6 +267,7 @@ export function selectHarnessTools(
     if (tools.send !== false) {
       result.push(createSendTool(bridge, sessionId, {
         ...(resolvedResearchCapabilities ? { resolvedResearchCapabilities } : {}),
+        ...(getResearchCapabilities ? { getResearchCapabilities } : {}),
       }));
     }
     if (tools.read_thread !== false) {

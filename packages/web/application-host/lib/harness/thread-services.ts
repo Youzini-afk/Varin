@@ -6,6 +6,10 @@ import {
   HARNESS_MAX_REQUEST_TIMEOUT_MS,
   isAttachedRootPurpose,
   mergeHarnessSettings,
+  resolvePresets,
+  isPresetId,
+  resolveHarnessModelSlot,
+  type ExecutionPreset,
   normalizeFrozenHarnessPermissions,
   sliceUtf8ByBytes,
   type RetrievalArtifactRef,
@@ -265,6 +269,15 @@ const visibleThread = async (
   return thread && parentVisible(owning, thread.parent) ? thread : null;
 };
 
+const agentSettingsFor = async (host: HarnessServiceHost, workspaceId: string) => {
+  if (!host.harnessSettings) return undefined;
+  const snapshot = await host.harnessSettings(workspaceId);
+  if (!snapshot) throw new HarnessServiceError("unavailable", "Agent settings are unavailable");
+  return mergeHarnessSettings(
+    (snapshot.global?.harness ?? {}) as import("@varin/protocol").HarnessSettingsInput, {},
+  );
+};
+
 export function createThreadDispatchService(host: HarnessServiceHost): HarnessService<"thread.dispatch"> {
   return {
     handle: async (params, ctx) => {
@@ -280,13 +293,29 @@ export function createThreadDispatchService(host: HarnessServiceHost): HarnessSe
       // from its own active set — clamped below to the owning Thread's frozen
       // allowlist. A preset freezes its declared tools; retrieval still
       // requires its configured slot (never the main model silently).
-      const preset = params.preset === undefined
+      const { workspaceId, parent, owner } = await resolveOwningContext(host, ctx);
+      const liveSettings = (params.preset !== undefined || params.research !== undefined)
+        ? await agentSettingsFor(host, workspaceId) : undefined;
+      if (params.preset?.startsWith("custom:") && liveSettings) {
+        const key = params.preset.slice("custom:".length);
+        const definition = Object.hasOwn(liveSettings.agents, key) ? liveSettings.agents[key] : undefined;
+        if (definition && (!definition.enabled || (definition.workFocus.length && !definition.workFocus.includes(owner?.execution.workFocus ?? "code")))) {
+          throw new HarnessServiceError("unavailable", `Agent is disabled or unavailable in this work focus: ${params.preset}`);
+        }
+        if (definition && !definition.model && !params.model) throw new HarnessServiceError("unavailable", `Agent requires a caller model: ${params.preset}`);
+      }
+      const customPreset = liveSettings ? resolvePresets(liveSettings.models, params.model ?? null,
+        liveSettings.agents, owner?.execution.workFocus ?? "code").find(entry => entry.id === params.preset) : undefined;
+      const preset: ExecutionPreset | null = params.preset === undefined
         ? null
-        : EXECUTION_PRESETS[params.preset as keyof typeof EXECUTION_PRESETS] ?? null;
+        : customPreset?.definition ?? (isPresetId(params.preset) ? EXECUTION_PRESETS[params.preset] : null);
+      if (preset?.slot && liveSettings?.models[preset.slot]?.enabled === false) {
+        throw new HarnessServiceError("unavailable", `Agent is disabled: ${preset.id}`);
+      }
       if (params.preset !== undefined && !preset) {
         throw new HarnessServiceError("invalid-params", `Unknown preset: ${params.preset}. Available presets: ${Object.keys(EXECUTION_PRESETS).join(", ")}`);
       }
-      if (preset?.id === "retrieval" && !params.model) {
+      if (preset?.id === "retrieval" && !customPreset?.model && !params.model) {
         throw new HarnessServiceError("unavailable", "retrieval is not configured; models.retrievalAgent is empty");
       }
       if (params.kind !== undefined && params.kind !== "implementation" && params.kind !== "discussion") {
@@ -325,11 +354,15 @@ export function createThreadDispatchService(host: HarnessServiceHost): HarnessSe
       }
       // A consult inherits the consulted Bot's model when the caller does not
       // pin one — the answer should come from the Bot's configured identity.
-      const dispatchModel = consultBot?.model ?? params.model ?? undefined;
+      const dispatchModel = consultBot?.model ?? customPreset?.model
+        ?? (preset?.slot && liveSettings ? resolveHarnessModelSlot(preset.slot, liveSettings.models, params.model ?? null) : params.model)
+        ?? undefined;
+      if (preset && liveSettings && !dispatchModel) {
+        throw new HarnessServiceError("unavailable", `Agent model is not configured: ${preset.id}`);
+      }
       if (!preset && !dispatchModel) {
         throw new HarnessServiceError("invalid-params", "A preset-less dispatch must resolve the caller's current model");
       }
-      const { workspaceId, parent, owner } = await resolveOwningContext(host, ctx);
       const environment = params.environment === undefined ? undefined
         : await validateEnvironment(host, workspaceId, params.environment);
       assertOwnerTool(owner, "dispatch");
@@ -337,6 +370,9 @@ export function createThreadDispatchService(host: HarnessServiceHost): HarnessSe
         throw new HarnessServiceError("denied", "Research capabilities require a research work focus");
       }
       const researchDefinition = research === undefined ? undefined : RESEARCH_CAPABILITY_DEFINITIONS[research.capability];
+      if (researchDefinition && liveSettings?.models[researchDefinition.slot]?.enabled === false) {
+        throw new HarnessServiceError("unavailable", `Research agent is disabled: ${research!.capability}`);
+      }
       if (researchDefinition && !params.model) {
         throw new HarnessServiceError("unavailable", `Research capability ${research?.capability ?? "unknown"} has no configured model slot`);
       }
@@ -1239,6 +1275,14 @@ export function createThreadSendService(host: HarnessServiceHost): HarnessServic
         const definition = params.capability === undefined
           ? undefined
           : RESEARCH_CAPABILITY_DEFINITIONS[params.capability];
+        // A retry observes its already accepted request. A new capability
+        // assignment must respect the current switch, including explicit inherit.
+        if (definition && !priorIntent) {
+          const settings = await agentSettingsFor(host, workspaceId);
+          if (settings?.models[definition.slot]?.enabled === false) {
+            throw new HarnessServiceError("unavailable", `Research agent is disabled: ${definition.capability}`);
+          }
+        }
         const model = params.model === "inherit" ? target.model : params.model ?? null;
         if (params.model === "inherit" && !target.model) {
           throw new HarnessServiceError("unavailable", "The target Thread has no recorded model to inherit");

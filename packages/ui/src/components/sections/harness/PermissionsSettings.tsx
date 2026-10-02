@@ -1,5 +1,5 @@
 import React from 'react';
-import { validatePermissionRule, type PermissionMode, type PermissionRule } from '@varin/protocol';
+import { resolveHarnessModelSlot, validatePermissionRule, type PermissionMode, type PermissionRule } from '@varin/protocol';
 import { SettingsSection, SettingsRadioGroup, SettingsRadioOption } from '@/components/sections/shared/SettingsSection';
 import { Button } from '@/components/ui/button';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
@@ -46,11 +46,11 @@ export function PermissionsSettings(props: HarnessSettingsPageProps) {
         {(['normal', 'accept-edits', 'bypass', 'smart'] as const).map((mode: PermissionMode) => <SettingsRadioOption key={mode}
           label={t(`settings.page.harness.permissions.mode.${mode}`)} ariaLabel={t(`settings.page.harness.permissions.mode.${mode}`)}
           selected={(harness.permissions?.mode ?? 'normal') === mode}
-          disabled={mode === 'smart' && !harness.models.permissionJudge}
+          disabled={mode === 'smart' && !resolveHarnessModelSlot('permissionJudge', harness.models, null)}
           onSelect={() => update({ permissions: { mode } })} />)}
       </SettingsRadioGroup>
       <div className="mt-5 border-t border-border/50 pt-3"><HarnessModelField {...props} slot="permissionJudge" />
-        {!harness.models.permissionJudge ? <p className="mt-2 typography-meta text-muted-foreground">{t('settings.page.harness.permissions.smartUnavailable')}</p> : null}
+        {!resolveHarnessModelSlot('permissionJudge', harness.models, null) ? <p className="mt-2 typography-meta text-muted-foreground">{t('settings.page.harness.permissions.smartUnavailable')}</p> : null}
       </div>
     </SettingsSection>
     <SettingsSection title={t('settings.harness.rules.title')} description={t('settings.page.harness.permissions.rules.description')}

@@ -373,9 +373,11 @@ export interface PiAgentInvocationDescriptor {
 /** Provider-owned definition used to seed that agent's edit/update flow. */
 export interface PiAgentDefinitionDescriptor {
   config: { [key: string]: JsonValue };
+  revision?: string;
 }
 
 export interface PiAgentDescriptor {
+  workFocus?: import("./work-focus.js").WorkFocusId[];
   actions: PiAgentActionDescriptor[];
   aliases?: string[];
   configuration?: PiAgentConfigurationTarget;

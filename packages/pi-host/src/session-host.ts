@@ -105,6 +105,7 @@ import type {
 } from "@varin/protocol";
 import {
   resolveResearchCapabilities,
+  resolveHarnessModelSlot,
 } from "@varin/protocol";
 import {
   packageSourceEnabled,
@@ -3287,6 +3288,10 @@ export class SessionHost {
         cwd: this.runtime.cwd,
         projectTrusted: this.runtime.services.settingsManager.isProjectTrusted(),
         session: this.session,
+        nativeSettings: {
+          read: () => this.getSettings(),
+          write: (harness, revision) => this.updateSettings("global", { harness }, [], revision),
+        },
       },
       this.#agentProviders,
     );
@@ -3783,7 +3788,7 @@ export class SessionHost {
         ...providerWarnings.map((message) => ({ message, type: "warning" as const })),
       );
       const configured = await this.#configureServices?.(services);
-      const permissionJudgeSelection = harnessSettings.models.permissionJudge;
+      const permissionJudgeSelection = resolveHarnessModelSlot("permissionJudge", harnessSettings.models, null);
       const permissionJudgeModel = permissionJudgeSelection
         ? services.modelRuntime.getModel(permissionJudgeSelection.providerId, permissionJudgeSelection.modelId)
         : undefined;
@@ -3812,7 +3817,7 @@ export class SessionHost {
           return text === "allow" ? "allow" : "ask";
         };
       }
-      const readerSelection = harnessSettings.models.reader;
+      const readerSelection = resolveHarnessModelSlot("reader", harnessSettings.models, null);
       const readerModel = this.#harnessWebReadEnabled && readerSelection
         ? services.modelRuntime.getModel(readerSelection.providerId, readerSelection.modelId)
         : undefined;
@@ -3822,7 +3827,7 @@ export class SessionHost {
           message: `Reader model is unavailable: ${readerSelection.providerId}/${readerSelection.modelId}`,
         });
       }
-      const exploreSelection = harnessSettings.models.explore;
+      const exploreSelection = resolveHarnessModelSlot("explore", harnessSettings.models, null);
       const exploreModel = exploreSelection
         ? services.modelRuntime.getModel(exploreSelection.providerId, exploreSelection.modelId)
         : undefined;
@@ -3923,12 +3928,13 @@ export class SessionHost {
       // Harness tools — gated by HarnessSettings.tools flags via selectHarnessTools.
       const sessionModel = selectedLaunchModel ?? configured?.model;
       const isOpenAIFamily = sessionModel?.provider === "openai" || (typeof sessionModel?.api === "string" && sessionModel.api.startsWith("openai"));
-      // Presets the session can actually dispatch: a preset whose model slot
-      // is unconfigured is omitted from the team prompt and rejected by the
-      // tool, rather than silently running on the main model (invariant 6).
+      // Initial team prompt. New named dispatches resolve current settings;
+      // unconfigured dedicated slots never silently borrow the main model.
       const resolvedPresets = resolvePresets(
         harnessSettings.models ?? {},
         sessionModel ? { providerId: sessionModel.provider, modelId: sessionModel.id } : null,
+        harnessSettings.agents,
+        this.#workFocus.id,
       );
       const resolvedResearchCapabilities = resolveResearchCapabilities(harnessSettings.models ?? {});
       customTools.push(...selectHarnessTools(harnessSettings, {
@@ -3953,6 +3959,11 @@ export class SessionHost {
         scheduledTasksAvailable: this.#harnessScheduledTasksEnabled,
         resolvedPresets,
         resolvedResearchCapabilities,
+        getResearchCapabilities: async () => {
+          const snapshot = await this.getSettings();
+          const settings = mergeHarnessSettings((snapshot.global?.harness ?? {}) as HarnessSettingsInput, {});
+          return resolveResearchCapabilities(settings.models);
+        },
         getActiveToolNames: () => this.runtime?.session.getActiveToolNames() ?? [],
         ...(this.#sessionToolAllowlist ? { sessionToolAllowlist: this.#sessionToolAllowlist } : {}),
       }));

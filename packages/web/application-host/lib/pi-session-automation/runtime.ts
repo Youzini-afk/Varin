@@ -507,7 +507,7 @@ export const createPiSessionAutomationRuntime = ({
     const nextStep = asRecord(harness?.nextStep);
     const models = asRecord(harness?.models);
     const selection = asRecord(models?.nextStep);
-    if (nextStep?.enabled !== true || typeof selection?.providerId !== 'string' || typeof selection?.modelId !== 'string') return;
+    if (nextStep?.enabled !== true || selection?.enabled === false || typeof selection?.providerId !== 'string' || typeof selection?.modelId !== 'string') return;
     if (snapshot.busy || snapshot.isStreaming || snapshot.pendingMessageCount > 0 || snapshot.features.goal?.status === 'active') return;
     const exchange = latestExchange(entriesResult.entries);
     if (!exchange) return;
@@ -532,6 +532,7 @@ export const createPiSessionAutomationRuntime = ({
         || latestSnapshot.pendingMessageCount > 0
         || latestSnapshot.features.goal?.status === 'active'
         || latestNextStep?.enabled !== true
+        || latestSelection?.enabled === false
         || latestSelection?.providerId !== selection.providerId
         || latestSelection?.modelId !== selection.modelId
       ) return false;

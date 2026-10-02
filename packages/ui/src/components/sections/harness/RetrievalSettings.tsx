@@ -254,8 +254,7 @@ export function RetrievalSettings(props: HarnessSettingsPageProps) {
         </Select>
       </SettingsFieldRow>
       <p className="typography-meta text-muted-foreground">{t(`settings.page.harness.codeRetrieval.mode.${props.harness.codeRetrieval.decision}.description`)}</p>
-      {(props.harness.codeRetrieval.decision === 'auto' || props.harness.codeRetrieval.decision === 'llm')
-        ? <HarnessModelField {...props} slot="explore" /> : null}
+      <HarnessModelField {...props} slot="explore" />
     </SettingsSection>
     <InferenceSettings {...props} kind="rerank" localSemanticStatus={null} />
     <FastDecisionSettings {...props} />
