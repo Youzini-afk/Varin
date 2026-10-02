@@ -65,6 +65,8 @@ import {
 import { ChatMoreButton, ChatTextSource } from './ChatContextMenu';
 import { PiFileChangePreview, PiFileChangePreviewScope } from './PiFileChangePreview';
 import { fileChangePhase, isFileChangeTool, projectFileChanges } from './fileChangePreview';
+import { PiExploreCard, PiExploreScope } from './PiExploreCard';
+import { explorePresentation } from './explorePresentation';
 import { HarnessThreadMarkers } from './HarnessThreadMarkers';
 import { PiTurnUsageFooter } from './PiTurnUsageFooter';
 import { assistantMessagesForTurn } from '@/lib/pi-runtime/usagePresentation';
@@ -416,7 +418,7 @@ const ToolDisclosureContext = React.createContext<Map<string, boolean> | null>(n
 const PiToolDisclosureScope: React.FC<{ children: React.ReactNode }> = ({ children }) => {
   const [choices] = React.useState(() => new Map<string, boolean>());
   return <ToolDisclosureContext.Provider value={choices}>
-    <PiFileChangePreviewScope>{children}</PiFileChangePreviewScope>
+    <PiExploreScope><PiFileChangePreviewScope>{children}</PiFileChangePreviewScope></PiExploreScope>
   </ToolDisclosureContext.Provider>;
 };
 
@@ -494,6 +496,12 @@ const PiToolCard: React.FC<{
   const command = typeof call.arguments === 'object' && call.arguments && !Array.isArray(call.arguments)
     ? String((call.arguments as Record<string, unknown>).command ?? '')
     : '';
+  if (call.name === 'explore') return <PiExploreCard call={call} cwd={cwd} execution={execution}
+    result={result} generating={generating} rawDetails={<>
+      <pre className="overflow-auto whitespace-pre-wrap break-words font-mono typography-micro">{jsonText(call.arguments)}</pre>
+      {result ? <ToolResultContent messageId={`tool-result:${call.id}`} result={result} />
+        : transientOutput !== undefined ? <RawJsonDetails value={transientOutput} /> : null}
+    </>} />;
   return (
     <>
     {fileChanges.map((file, index) => <PiFileChangePreview key={`${index}:${file.path}`} file={file}
@@ -834,10 +842,14 @@ const PiSortedActivityGroup: React.FC<{
     item.streaming
     || (item.kind === 'tool' && executionById[item.call.id]?.status === 'running')
   ));
-  const failed = projection.activity.some((item) => item.kind === 'tool'
-    && (resultByCallId.get(item.call.id)?.isError || executionById[item.call.id]?.status === 'error'
-      || (isFileChangeTool(item.call.name)
-        && ['failed', 'partial'].includes(fileChangePhase(executionById[item.call.id], resultByCallId.get(item.call.id), item.streaming)))));
+  const failed = projection.activity.some((item) => {
+    if (item.kind !== 'tool') return false;
+    const execution = executionById[item.call.id];
+    const result = resultByCallId.get(item.call.id);
+    if (item.call.name === 'explore') return ['failed', 'partial', 'invalid', 'unavailable'].includes(explorePresentation(execution, result, item.streaming).phase);
+    return result?.isError || execution?.status === 'error'
+      || (isFileChangeTool(item.call.name) && ['failed', 'partial'].includes(fileChangePhase(execution, result, item.streaming)));
+  });
   const latest = projection.activity.at(-1);
   const latestLabel = latest?.kind === 'tool'
     ? latest.call.name

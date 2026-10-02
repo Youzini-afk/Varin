@@ -149,6 +149,13 @@ expansion within the mounted turn. Shared worker highlighting coalesces updates;
 typing replay. Mutation outcome/destination comes from native tool result details, and whole-file writes
 without a before-image are labeled as content previews. Raw details and extension renderers remain available.
 
+`PiExploreCard` projects actual `explore` receipts into a binoculars header and compact activity stream.
+It distinguishes received candidates from final excerpts and keeps default completion compact, while
+preserving explicit expansion within the mounted turn. File navigation uses the existing context-file
+path; excerpt previews retain the retrieval revision instead of rereading the current file. Original
+output and process details remain available. The only timer updates local elapsed display while a card
+is mounted and running; no renderer-side retrieval polling or inference is introduced.
+
 The chat timeline provides object-sensitive context menus through `ChatContextMenu`: selection actions,
 whole-turn/message operations, code, file/link actions and image viewing/copy/save. Selection identity is
 captured before popup focus changes; `chatSelection` maps rendered Markdown to native source offsets.

@@ -31,6 +31,10 @@ Common suffixes:
 
 If the icon doesn't exist in the sprite, the script will warn you.
 
+The generator parses JSX expressions and typed icon-returning functions, including conditional branches.
+It retains published sprite registrations, which may also be consumed by extension contributions outside
+the scanned React tree, so adding an icon does not remove another surface's registered glyphs.
+
 Custom product glyphs are registered in `scripts/generate-icon-sprite.mjs`. They must use the shared `24x24` viewbox and `currentColor` so they match Remixicon sizing and theme behavior.
 
 ## Sizing

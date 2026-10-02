@@ -97,6 +97,30 @@ afterEach(() => {
 });
 
 describe('Pi timeline chat render mode', () => {
+  test('uses the compact explore renderer in live/sorted modes and does not label cancellation as failure', () => {
+    const call = { type: 'toolCall' as const, id: 'search', name: 'explore', arguments: { question: 'Find the journal writer' } };
+    const entries: PiSessionEntry[] = [{
+      type: 'message', id: 'assistant', parentId: null, timestamp: 'now',
+      message: { ...liveAssistant, stopReason: 'toolUse', content: [call] },
+    }, {
+      type: 'message', id: 'result', parentId: 'assistant', timestamp: 'now',
+      message: { role: 'toolResult', toolCallId: 'search', toolName: 'explore', timestamp: 3, isError: true,
+        content: [{ type: 'text', text: 'explore cancelled' }], details: {
+          progress: { phase: 'cancelled', elapsedMs: 1000, receivedFiles: 0, receivedSnippets: 0, activities: [], sources: [] },
+        } },
+    }];
+    for (const mode of ['live', 'sorted'] as const) {
+      useUIStore.setState({ chatRenderMode: mode, activityRenderMode: 'summary' });
+      const document = parseHTML(renderTimeline(null, entries)).document;
+      const search = document.querySelector('[data-pi-explore="search"]')!;
+      expect(search.textContent).toContain('Quick search');
+      expect(search.textContent).toContain('Find the journal writer');
+      expect(search.textContent).toContain('Search cancelled');
+      expect(search.querySelector('pre')).toBeNull();
+      expect(document.querySelector('[data-pi-sorted-activity] > button')?.textContent ?? '').not.toContain('Failed');
+    }
+  });
+
   test('exposes live file changes outside raw tool details in both render modes and reports a rejected mutation', () => {
     const call = { type: 'toolCall' as const, id: 'patch', name: 'apply_patch', arguments: {
       patch: '*** Begin Patch\n*** Update File: a.ts\n@@\n-old value\n+new value\n*** End Patch',

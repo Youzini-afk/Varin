@@ -45,6 +45,15 @@ recovery evidence; the optional backend resolver alone is not a delivered remote
 
 ## Registration
 
+`explore` publishes presentation receipts through native `onUpdate`, observing the existing start,
+plan, collect, select, follow-up and finish calls. It adds no extra retrieval/model calls or polling.
+`details.progress` records elapsed observation times, source transitions, actual search/action targets
+and deduplicated versioned ranges received by the coordinator. These candidate counts are separate
+from the final returned snippets. Final native results retain the observed process, while candidate
+bodies stay out of progress history. Cancellation still signals the Host query and ends the Agent loop;
+it returns a native error result with a cancellation receipt so history does not relabel it as success.
+Unavailable Host failures retain their error code instead of appearing as an empty successful search.
+
 Host-backed `write`, `edit`, and `apply_patch` preserve document mutation outcomes in native result
 `details.mutation`: committed working-branch writes, surface/disk destinations, and per-path applied,
 conflict, compensation or partial outcomes. This is presentation evidence from the existing document

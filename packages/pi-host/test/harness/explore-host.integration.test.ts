@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import { it } from 'node:test';
-import type { HarnessActorContext, AgentInputContext } from '@varin/protocol';
+import type { HarnessActorContext, AgentInputContext, ExploreToolProgress } from '@varin/protocol';
 import { createExploreTool } from '../../src/harness/explore-tool.js';
 import type { HostServicesBridge } from '../../src/harness/host-services-bridge.js';
 import { createExploreQueryStore } from '../../../web/application-host/lib/harness/explore-query-store.js';
@@ -67,6 +67,9 @@ for (let configuration = 0; configuration < 16; configuration++) it(`executes op
       const result = await tool.execute('test', { question: 'needle' }, undefined, undefined, undefined as never);
       assert.notEqual((result as { isError?: boolean }).isError, true);
       assert.ok(result.content.some(part => part.type === 'text' && part.text.includes('needle')));
+      const progress = (result.details as { progress: ExploreToolProgress }).progress;
+      assert.ok(progress.activities.some(item => item.kind === 'source' && item.source.targets?.includes('needle')));
+      assert.ok(progress.activities.some(item => item.kind === 'read' && item.path === 'a.ts' && item.revision === 'r1'));
       if (configuration === 2) assert.ok(result.content.some(part => part.type === 'text' && part.text.includes('followup evidence')));
       assert.equal(generations > 0, llm);
       assert.equal(decisionQuestions.some(id => id.startsWith('m:')), decision && !llm);

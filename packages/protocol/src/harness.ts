@@ -1258,6 +1258,32 @@ export interface ExploreQuerySourceState {
   id: string;
   family: ExploreQueryTaskFamily;
   status: ExploreQueryTaskStatus;
+  /** Actual search expressions or action targets, independent of opaque ids. */
+  targets?: string[];
+}
+
+/** Presentation receipts from the existing explore coordinator. Times are
+ * elapsed at observation, not per-source durations. Candidate text is not
+ * duplicated here; only final snippets carry their frozen source contents.
+ */
+export type ExploreProgressPhase = "starting" | "planning" | "collecting" | "selecting" | "following-up"
+  | "finishing" | "complete" | "partial" | "empty" | "failed" | "unavailable" | "cancelled";
+
+export type ExploreProgressActivity = { sequence: number; elapsedMs: number } & (
+  | { kind: "phase"; phase: ExploreProgressPhase }
+  | { kind: "source"; source: ExploreQuerySourceState }
+  | { kind: "read"; viewId: string; path: string; startLine: number; endLine: number;
+      revision: string; source: ExploreQueryView["source"] }
+);
+
+export interface ExploreToolProgress {
+  phase: ExploreProgressPhase;
+  elapsedMs: number;
+  /** Distinct versioned views received by the coordinator, before selection. */
+  receivedSnippets: number;
+  receivedFiles: number;
+  sources: ExploreQuerySourceState[];
+  activities: ExploreProgressActivity[];
 }
 
 export interface ExploreQueryVocab {

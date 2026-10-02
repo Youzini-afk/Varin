@@ -1854,3 +1854,23 @@ html.desktop-runtime .markdown-content [data-varin-file-link="true"] {
 .varin-monaco-test-failure-line {
   background: color-mix(in srgb, var(--status-error) 8%, transparent);
 }
+
+/* Only new explore receipts animate. History and remounts do not replay work. */
+@keyframes pi-explore-arrival {
+  from { transform: translateY(5px); background: color-mix(in srgb, var(--foreground) 6%, transparent); }
+  to { transform: translateY(0); background: transparent; }
+}
+.pi-explore-arrival { animation: pi-explore-arrival 240ms ease-out; }
+[data-explore-active]::before {
+  content: '';
+  position: absolute;
+  top: 3px;
+  bottom: 3px;
+  left: -17px;
+  width: 2px;
+  border-radius: 1px;
+  background: var(--muted-foreground);
+}
+@media (prefers-reduced-motion: reduce) {
+  .pi-explore-arrival { animation: none; }
+}

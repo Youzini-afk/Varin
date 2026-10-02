@@ -8,7 +8,7 @@
  * packages/ui/src/components/icon/sprite.ts.
  */
 
-import { readFileSync, writeFileSync, readdirSync, statSync } from "node:fs"
+import { readFileSync, writeFileSync, readdirSync, statSync, existsSync } from "node:fs"
 import { resolve, dirname } from "node:path"
 import { fileURLToPath } from "node:url"
 import { createRequire } from "node:module"
@@ -16,6 +16,7 @@ import { createRequire } from "node:module"
 const __dirname = dirname(fileURLToPath(import.meta.url))
 const repoRoot = resolve(__dirname, "..")
 const uiRequire = createRequire(resolve(repoRoot, "packages/ui/package.json"))
+const ts = uiRequire("typescript")
 const remixPath = resolve(dirname(uiRequire.resolve("@remixicon/react")), "index.mjs")
 const outPath = resolve(repoRoot, "packages/ui/src/components/icon/sprite.ts")
 
@@ -188,6 +189,13 @@ const addIconLiterals = (content) => {
   }
 }
 
+// Sprite names are also consumed by extension contributions outside the React
+// source tree. Keep published registrations when adding/scanning local icons.
+if (existsSync(outPath)) {
+  const registered = readFileSync(outPath, "utf8").matchAll(/^\s*"([a-z0-9-]+)":/gm)
+  for (const match of registered) addKebabIcon(match[1])
+}
+
 function findMatchingBrace(content, openBraceIndex) {
   let depth = 0
   let quote = null
@@ -308,6 +316,26 @@ const addIconNameVariableAssignments = (content) => {
 
 for (const file of allSrcFiles) {
   const content = readFileSync(file, "utf-8")
+  // JSX expressions may contain nested ternaries or arrows with `>` characters.
+  // Parse those shapes instead of losing existing icons on each regeneration.
+  const ast = ts.createSourceFile(file, content, ts.ScriptTarget.Latest, true)
+  const scan = (node) => {
+    if (ts.isJsxAttribute(node) && node.name.getText(ast) === "name"
+      && node.parent.parent.tagName?.getText(ast) === "Icon" && node.initializer) {
+      addIconLiterals(node.initializer.getText(ast))
+    }
+    if ((ts.isArrowFunction(node) || ts.isFunctionDeclaration(node) || ts.isFunctionExpression(node))
+      && node.type && /IconName|ComponentProps<\s*typeof Icon\s*>/.test(node.type.getText(ast)) && node.body) {
+      const returns = (child) => {
+        if (ts.isReturnStatement(child) && child.expression) addIconLiterals(child.expression.getText(ast))
+        ts.forEachChild(child, returns)
+      }
+      if (ts.isBlock(node.body)) returns(node.body)
+      else addIconLiterals(node.body.getText(ast))
+    }
+    ts.forEachChild(node, scan)
+  }
+  scan(ast)
   // Match RiIcons from @remixicon/react imports
   const iconRegex = /Ri[A-Z][A-Za-z0-9]+/g
   let im

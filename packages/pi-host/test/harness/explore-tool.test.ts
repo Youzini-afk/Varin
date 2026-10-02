@@ -1,8 +1,11 @@
 import assert from "node:assert/strict";
 import { describe, it } from "node:test";
 import { Value } from "typebox/value";
-import type { HostServicesBridge } from "../../src/harness/host-services-bridge.js";
+import { HarnessRequestError, type HostServicesBridge } from "../../src/harness/host-services-bridge.js";
 import { createExploreTool } from "../../src/harness/explore-tool.js";
+import type { ExploreToolProgress, ExploreQueryView } from "@varin/protocol";
+import { runAgentLoop, type AgentLoopConfig, type AgentTool } from "@earendil-works/pi-agent-core";
+import { createAssistantMessageEventStream, type AssistantMessage } from "@earendil-works/pi-ai";
 
 const finishResult = {
   text: "1 excerpt(s)",
@@ -21,6 +24,118 @@ const finishResult = {
 };
 
 describe("Host-backed explore tool", () => {
+  it("keeps unavailable retrieval distinct from an empty successful result", async () => {
+    const bridge = { inputContext: () => ({ source: "disk" }),
+      request: async () => { throw new HarnessRequestError("unavailable", "The search source is offline"); },
+    } as unknown as HostServicesBridge;
+    const result = await createExploreTool(bridge, "session").execute("tool", { question: "needle" }, undefined, undefined, undefined as never);
+    assert.equal((result as { isError?: boolean }).isError, true);
+    assert.equal((result.details as { progress: ExploreToolProgress }).progress.phase, "unavailable");
+    assert.equal((result.details as { errorCode: string }).errorCode, "unavailable");
+  });
+  it("streams versioned evidence through the existing wait loop and preserves the complete process in its result", async () => {
+    const view = (id: string): ExploreQueryView => ({ viewId: id, path: `${id}.ts`, startLine: 2, endLine: 3,
+      text: `private candidate body ${id}`, revision: `rev-${id}`, source: "disk", ranges: [], arrivals: [],
+      assessment: "object-present", purpose: "candidate", why: "literal match" });
+    let release!: () => void;
+    let waiting!: () => void;
+    const blocked = new Promise<void>(resolve => { release = resolve; });
+    const entered = new Promise<void>(resolve => { waiting = resolve; });
+    let sequence = 1;
+    const calls: string[] = [];
+    const bridge = {
+      inputContext: () => ({ source: "disk" }), cancel: () => undefined,
+      request: async (method: string, params: Record<string, unknown>) => {
+        calls.push(method);
+        const sources = [{ id: "literal", family: "lexical", status: sequence === 1 ? "running" : "ready" }];
+        if (method === "explore.query.start") return { queryId: "progress", deadlineAt: Date.now() + 30_000,
+          parsed: { objects: ["needle"] }, vocab: {}, sources, inputSource: "disk" };
+        if (method === "explore.query.views") return { views: [view("a"), ...(sequence === 2 ? [view("b")] : [])]
+          .filter(item => !(params.seen as string[]).includes(item.viewId)),
+          sequence, pending: sequence === 1, sources, actions: [], unevaluated: 0 };
+        if (method === "explore.query.wait") { waiting(); await blocked; sequence = 2; return { sequence }; }
+        if (method === "explore.query.finish") return { ...finishResult, snippets: [view("b")] };
+        if (method === "explore.query.release") return { released: true };
+        throw Error(method);
+      },
+    } as unknown as HostServicesBridge;
+    const updates: ExploreToolProgress[] = [];
+    const running = createExploreTool(bridge, "session").execute("tool", { question: "needle" }, undefined,
+      update => updates.push((update.details as { progress: ExploreToolProgress }).progress), undefined as never);
+    await entered;
+    assert.equal(updates.at(-1)?.receivedSnippets, 1);
+    assert.ok(updates.some(update => update.activities.some(item => item.kind === "read" && item.path === "a.ts" && item.revision === "rev-a")));
+    const frozen = JSON.stringify(updates[1]);
+    release();
+    const result = await running;
+    const progress = (result.details as { progress: ExploreToolProgress }).progress;
+    assert.equal(progress.phase, "complete");
+    assert.equal(progress.receivedSnippets, 2);
+    assert.equal(progress.receivedFiles, 2);
+    assert.equal(progress.activities.filter(item => item.kind === "read").length, 2);
+    assert.equal((result.details as { snippetCount: number }).snippetCount, 1);
+    assert.equal(JSON.stringify(updates[1]), frozen);
+    assert.doesNotMatch(JSON.stringify(progress), /private candidate body/);
+    assert.equal(calls.filter(method => method === "explore.query.wait").length, 1);
+    assert.equal(calls.at(-1), "explore.query.release");
+  });
+
+  it("cancels pending retrieval and persists a cancellation result without finishing or requesting more work", async () => {
+    const controller = new AbortController();
+    const calls: string[] = [];
+    let cancelCount = 0;
+    let waiting!: () => void;
+    const entered = new Promise<void>(resolve => { waiting = resolve; });
+    const bridge = {
+      inputContext: () => ({ source: "disk" }), cancel: () => { cancelCount++; },
+      request: async (method: string, _params: unknown, options: { signal?: AbortSignal }) => {
+        calls.push(method);
+        if (method === "explore.query.start") return { queryId: "cancelled", deadlineAt: Date.now() + 30_000,
+          parsed: { objects: [] }, vocab: {}, sources: [] };
+        if (method === "explore.query.views") return { views: [], sources: [], actions: [], sequence: 0, pending: true, unevaluated: 0 };
+        if (method === "explore.query.wait") {
+          waiting();
+          return new Promise((_resolve, reject) => options.signal!.addEventListener("abort", () => reject(options.signal!.reason), { once: true }));
+        }
+        if (method === "explore.query.release") return { released: true };
+        throw Error(method);
+      },
+    } as unknown as HostServicesBridge;
+    const tool = createExploreTool(bridge, "session");
+    const nativeTool: AgentTool = { name: tool.name, label: tool.label, description: tool.description, parameters: tool.parameters,
+      execute: (id, args, signal, onUpdate) => tool.execute(id, args, signal, onUpdate, undefined as never) };
+    let requests = 0;
+    const run = runAgentLoop([{ role: "user", content: "find needle", timestamp: 0 }], { messages: [], tools: [nativeTool] }, {
+      model: { provider: "test", id: "test", api: "openai-responses" } as AgentLoopConfig["model"],
+      convertToLlm: messages => messages as never,
+    }, async () => {}, controller.signal, (_model, _context, options) => {
+      // Pi calls the adapter with the cancelled signal to produce its native
+      // aborted assistant record. The adapter must not start inference then.
+      const cancelled = options?.signal?.aborted === true;
+      if (!cancelled) assert.equal(++requests, 1, "cancellation must not start another inference");
+      const stream = createAssistantMessageEventStream();
+      const message: AssistantMessage = { role: "assistant", provider: "test", model: "test", api: "openai-responses", timestamp: 1,
+        stopReason: cancelled ? "aborted" : "toolUse", content: cancelled ? [] : [{ type: "toolCall", id: "tool", name: "explore", arguments: { question: "needle" } }],
+        usage: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, totalTokens: 0,
+          cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, total: 0 } } };
+      queueMicrotask(() => {
+        stream.push({ type: "start", partial: message });
+        stream.push(cancelled ? { type: "error", reason: "aborted", error: message } : { type: "done", reason: "toolUse", message });
+      });
+      return stream;
+    });
+    await entered;
+    controller.abort();
+    const messages = await run;
+    const result = messages.find(message => message.role === "toolResult");
+    assert.ok(result?.role === "toolResult");
+    assert.equal(result.isError, true);
+    assert.equal((result.details as unknown as { progress: ExploreToolProgress }).progress.phase, "cancelled");
+    assert.ok(messages.some(message => message.role === "assistant" && message.stopReason === "aborted"));
+    assert.equal(cancelCount, 1);
+    assert.ok(!calls.includes("explore.query.finish"));
+    assert.equal(calls.at(-1), "explore.query.release");
+  });
   it("does not call the explore LLM when the user selected dedicated rerank", async () => {
     let completions = 0;
     const bridge = {

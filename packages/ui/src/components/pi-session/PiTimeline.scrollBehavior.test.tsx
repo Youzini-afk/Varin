@@ -233,7 +233,7 @@ describe('PiTimeline scroll ownership', () => {
     it('lets an overflowing file preview own wheel navigation without cancelling conversation following', () => {
       vi.stubGlobal('HTMLElement', window.HTMLElement);
       const preview = document.createElement('div');
-      preview.setAttribute('data-pi-file-scroll', 'true');
+      preview.setAttribute('data-pi-tool-scroll', 'true');
       Object.defineProperties(preview, { scrollHeight: { value: 440, configurable: true }, clientHeight: { value: 176 } });
       const line = document.createElement('span');
       preview.append(line);

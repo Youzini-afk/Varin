@@ -200,11 +200,11 @@ const isInteractiveKeyTarget = (target: EventTarget | null): boolean => (
   && target.closest('input, textarea, select, button, a, [contenteditable="true"]') !== null
 );
 
-// File previews own their bounded scroll area (including overscroll containment).
+// Tool previews own their bounded scroll area (including overscroll containment).
 // Reading one must not cancel the outer conversation's automatic following.
-const isFilePreviewScrollTarget = (target: EventTarget | null): boolean => {
+const isToolPreviewScrollTarget = (target: EventTarget | null): boolean => {
   if (typeof HTMLElement === 'undefined' || !(target instanceof HTMLElement)) return false;
-  const viewport = target.closest<HTMLElement>('[data-pi-file-scroll]');
+  const viewport = target.closest<HTMLElement>('[data-pi-tool-scroll]');
   return Boolean(viewport && viewport.scrollHeight > viewport.clientHeight);
 };
 
@@ -697,7 +697,7 @@ export const PiTimeline: React.FC<PiTimelineProps> = (props) => {
         onLayout={scheduleFollowEnd}
         onMetricsChange={scheduleFollowEnd}
         onKeyDownCapture={(event) => {
-          if (isFilePreviewScrollTarget(event.target)) return;
+          if (isToolPreviewScrollTarget(event.target)) return;
           if (PI_TIMELINE_SCROLL_KEYS.has(event.key) && !isInteractiveKeyTarget(event.target)) {
             releaseAutomationForIntent(piTimelineKeyIntent(event.key, event.shiftKey));
           }
@@ -709,7 +709,7 @@ export const PiTimeline: React.FC<PiTimelineProps> = (props) => {
         }}
         onScroll={handleScroll}
         onTouchMoveCapture={(event) => {
-          if (isFilePreviewScrollTarget(event.target)) return;
+          if (isToolPreviewScrollTarget(event.target)) return;
           const y = event.touches[0]?.clientY ?? null;
           const previous = touchYRef.current;
           touchYRef.current = y;
@@ -721,7 +721,7 @@ export const PiTimeline: React.FC<PiTimelineProps> = (props) => {
           touchYRef.current = event.touches[0]?.clientY ?? null;
         }}
         onWheelCapture={(event) => {
-          if (isFilePreviewScrollTarget(event.target)) return;
+          if (isToolPreviewScrollTarget(event.target)) return;
           if (!event.ctrlKey && event.deltaY !== 0) {
             releaseAutomationForIntent(event.deltaY < 0 ? 'away-from-end' : 'toward-end');
           }

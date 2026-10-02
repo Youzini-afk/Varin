@@ -1364,6 +1364,7 @@ export function createExploreQueryRun(
     primary: boolean;
     status: ExploreQuerySourceState["status"];
     promise: Promise<void>;
+    targets?: string[];
   };
   const tasks = new Map<string, ProductionTask>();
   let fatalError: unknown;
@@ -1480,9 +1481,11 @@ export function createExploreQueryRun(
     family: ProductionTask["family"],
     primary: boolean,
     work: () => Promise<SettledProductionStatus | void>,
+    targets?: string[],
   ): void => {
     if (tasks.has(id)) return;
-    const task: ProductionTask = { id, family, primary, status: "running", promise: Promise.resolve() };
+    const task: ProductionTask = { id, family, primary, status: "running", promise: Promise.resolve(),
+      ...(targets ? { targets: [...targets] } : {}) };
     task.promise = (async () => {
       try {
         if (terminal !== "active") {
@@ -2166,13 +2169,13 @@ export function createExploreQueryRun(
     if (started) return;
     started = true;
     if (objectPatterns.size > 0) {
-      launchTask("lexical-original", "lexical", true, () => runRg(objectPatterns));
+      launchTask("lexical-original", "lexical", true, () => runRg(objectPatterns), [...objectPatterns.keys()]);
     }
     if (contentPatterns.size > 0 && !explicitNavigation && !locating && !wantsBothEnds) {
-      launchTask("lexical-content", "lexical", true, () => runRg(contentPatterns));
+      launchTask("lexical-content", "lexical", true, () => runRg(contentPatterns), [...contentPatterns.keys()]);
     }
-    if (deps.graph) launchTask("graph-seeds", "graph", true, runGraphSeeds);
-    if (deps.semantic) launchTask("semantic-original", "semantic", true, runSemantic);
+    if (deps.graph) launchTask("graph-seeds", "graph", true, runGraphSeeds, parsed.objects);
+    if (deps.semantic) launchTask("semantic-original", "semantic", true, runSemantic, [input.question]);
     kickPump();
     // One shared executor progresses independently of model/collect calls.
     if (!driving) void waitForViews().catch((error) => { fatalError ??= error; notifyProgress(); });
@@ -2702,7 +2705,7 @@ export function createExploreQueryRun(
           runSemanticQueries(fresh),
         ]);
         return combineProductionStatuses(statuses);
-      });
+      }, fresh);
     }
     if (launched.length > 0) {
       notifyProgress();
@@ -3001,7 +3004,7 @@ export function createExploreQueryRun(
           runSemanticQueries(fresh),
         ]);
         return combineProductionStatuses(statuses);
-      });
+      }, fresh);
     }
     for (const locate of request.locates ?? []) {
       const value = locate.value.trim();
@@ -3019,7 +3022,7 @@ export function createExploreQueryRun(
         }
         if (locate.kind === "symbol") return locateSymbolTarget(value);
         return followConnectionLiteral(value);
-      });
+      }, [value]);
     }
     // Fast-decision actions (D-312): the caller picks issued ids; the query
     // owner executes the recorded candidate, not the wire payload's fields.
@@ -3054,7 +3057,7 @@ export function createExploreQueryRun(
           }
         }
         if (terminal === 'active' && !signal.aborted) completedActions.add(issued.actionId);
-      });
+      }, [issued.target]);
     }
     if (launched.length > 0) notifyProgress();
     if (launched.length > 0) kickPump();
@@ -3287,6 +3290,7 @@ export function createExploreQueryRun(
     id: task.id,
     family: task.family,
     status: task.status,
+    ...(task.targets ? { targets: [...task.targets] } : {}),
   }));
 
   const vocab = (): ExploreQueryVocab => ({

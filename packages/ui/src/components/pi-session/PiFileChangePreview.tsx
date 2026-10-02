@@ -168,7 +168,7 @@ export const PiFileChangePreview: React.FC<{
         <Icon name={expanded ? 'arrow-up-s' : 'arrow-down-s'} className="size-3.5" />
       </button>
     </header>
-    {file.lines.length ? <div ref={viewport} role="region" data-pi-file-scroll="true" aria-label={t('chat.fileChange.previewLabel', { path: file.path })}
+    {file.lines.length ? <div ref={viewport} role="region" data-pi-tool-scroll="true" aria-label={t('chat.fileChange.previewLabel', { path: file.path })}
       tabIndex={0} className="overflow-auto overscroll-contain font-mono typography-code outline-offset-[-2px]"
       style={{ height: Math.min(file.lines.length, expanded ? 24 : 8) * rowHeight, overflowAnchor: 'none' }}
       onWheel={event => { if (event.deltaY < 0) pause(); }}

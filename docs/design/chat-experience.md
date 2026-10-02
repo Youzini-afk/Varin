@@ -149,6 +149,28 @@ accessory stack. There is no independent bar for each feature.
   animations.
 - Unknown Pi/extension entries remain usable through generic renderers and raw detail disclosure.
 
+### Quick retrieval
+
+The built-in `explore` renderer uses a binoculars header, the actual question and scope, and a compact
+stream of the latest four observed activities. This is a viewport choice, not a history or retrieval
+limit. Source-state changes include their real search expressions/action targets; read receipts name
+versioned file ranges. New receipts briefly move into place and advance a quiet left-edge marker.
+History and live-to-persisted remounts do not replay animation, and reduced-motion preferences apply.
+
+The Pi coordinator publishes progress through its existing tool-update callback at RPC and model-stage
+boundaries. It reuses the existing collect/wait loop, adding no polling, reads or inference requests.
+Receipts represent what the coordinator has observed: sources may run concurrently, and the displayed
+phases are not a sequential percentage-complete model. Row times are observation times; total elapsed
+time comes from the coordinator, with a local display clock only while the card is mounted and running.
+
+Received candidate excerpts/files and final returned excerpts/files have separate counters. Finishing
+collapses the default presentation, but preserves a user's expanded view in the mounted turn. Results
+provide current-file navigation and separate, read-only retrieval snapshots with their source revisions.
+The complete observed process is saved in native tool-result details, including failures and cancellation;
+candidate bodies are not duplicated into that history. Empty, partial, cancelled, unavailable, malformed
+and failed results remain distinct. Model participation, original output and raw details remain available
+on expansion. Extension renderers retain precedence in both live and sorted chat modes.
+
 ### Streaming file changes
 
 Built-in `apply_patch`, `edit` and `write` calls project their incrementally decoded Pi arguments into

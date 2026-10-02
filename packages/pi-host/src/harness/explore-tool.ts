@@ -2,7 +2,8 @@ import { Type } from "typebox";
 import { defineTool, type ToolDefinition } from "@earendil-works/pi-coding-agent";
 import type { AgentInputContext, ExploreModelParticipation, ExploreModelStageStatus } from "@varin/protocol";
 import { HARNESS_MAX_REQUEST_TIMEOUT_MS } from "@varin/protocol";
-import type { HostServicesBridge } from "./host-services-bridge.js";
+import { createExploreProgress } from "./explore-progress.js";
+import { HarnessRequestError, type HostServicesBridge } from "./host-services-bridge.js";
 import {
   EXPLORE_PLAN_SYSTEM,
   EXPLORE_SELECT_SYSTEM,
@@ -71,7 +72,9 @@ export function createExploreTool(
     ],
     parameters: ExploreParams,
     executionMode: "parallel",
-    execute: async (_toolCallId, params, signal, _onUpdate, _ctx) => {
+    execute: async (_toolCallId, params, signal, onUpdate, _ctx) => {
+      const progress = createExploreProgress(value => onUpdate?.({ content: [], details: { progress: value } }));
+      progress.phase("starting");
       const pinned: AgentInputContext = structuredClone(bridge.inputContext() ?? { source: "disk" });
       const budgetMs = params.budgetMs ?? EXPLORE_PUBLIC_BUDGET_MS;
       let deadlineAt = Date.now() + budgetMs;
@@ -98,19 +101,24 @@ export function createExploreTool(
       };
 
       const finish = async () => {
+        progress.phase("finishing");
         const exhausted = remaining() <= 0;
         if (exhausted) participation.note = [participation.note, `Explore search budget exhausted (${budgetMs}ms); returning completed material. Increase budgetMs or narrow paths to continue.`].filter(Boolean).join(" ");
         const result = await request("explore.query.finish", { queryId, model: participation });
+        signal?.throwIfAborted();
+        const partial = result.partial || exhausted;
+        const completed = progress.phase(partial ? "partial" : result.snippets.length ? "complete" : "empty");
         return {
           content: [{ type: "text" as const, text: result.text }],
           details: {
             snippets: result.snippets, searched: result.searched, handle: result.handle,
             snippetCount: result.snippets.length, issueCount: result.issueCount,
-            partial: result.partial || exhausted, notRequestedCount: result.notRequestedCount,
+            partial, notRequestedCount: result.notRequestedCount,
             omittedCount: result.omittedCount, provenance: result.details,
             provenanceCounts: result.details.provenance.statusCounts,
             model: result.details.model ?? participation,
             budgetMs, budgetExhausted: exhausted,
+            progress: completed,
           },
         };
       };
@@ -129,6 +137,7 @@ export function createExploreTool(
       }
 
       try {
+        signal?.throwIfAborted();
         const complete = options?.complete;
         const started = await request("explore.query.start", {
           question: params.question,
@@ -139,6 +148,7 @@ export function createExploreTool(
           reserveForJudge: Boolean(complete),
         });
         queryId = started.queryId;
+        progress.observe(started);
         deadlineAt = Math.min(deadlineAt, started.deadlineAt);
         const modelSignal = () => boundByDeadline(signal, deadlineAt);
         const decisionMode = started.decisionMode ?? "auto";
@@ -157,6 +167,7 @@ export function createExploreTool(
 
         const shouldPlan = useExploreModel && Boolean(complete) && exploreShouldPlanWithModel(params.question, started.parsed.objects);
         if (complete && shouldPlan) {
+          progress.phase("planning");
           try {
             const planText = await complete({
               systemPrompt: EXPLORE_PLAN_SYSTEM,
@@ -166,6 +177,7 @@ export function createExploreTool(
             const plan = parseExplorePlan(planText);
             if (plan) {
               const submitted = await request("explore.query.plan", { queryId, plan });
+              progress.observe(submitted);
               participation.plan = submitted.launched.length > 0 ? "used" : "skipped";
             } else {
               participation.plan = "failed";
@@ -188,14 +200,17 @@ export function createExploreTool(
         let modelFailed = false;
         while (remaining() > 0) {
           signal?.throwIfAborted();
+          progress.phase("collecting");
           const retained = [...selectedViews.values()];
           const actionContext = retained.map(view => view.viewId).sort().join('|');
           const capacity = complete?.inputBytes;
           const retainedBytes = new TextEncoder().encode(JSON.stringify(retained) + EXPLORE_SELECT_SYSTEM + params.question).length;
           const views = await request("explore.query.views", { queryId, seen: [...seen],
             ...(capacity ? { inputBytes: Math.max(1, capacity - retainedBytes) } : {}) });
+          progress.observe(views);
           const freshActions = views.actions.filter(action => offeredActions.get(action.actionId) !== actionContext);
           if (useSelection && !modelFailed && (views.views.length > 0 || freshActions.length > 0)) {
+            progress.phase("selecting");
             try {
               const selected = parseExploreSelection(await complete!({
                 systemPrompt: EXPLORE_SELECT_SYSTEM,
@@ -218,7 +233,9 @@ export function createExploreTool(
               const actions = views.actions.filter(action => selected.actionIds.includes(action.actionId));
               let launched = false;
               if (selected.followup || actions.length) {
+                progress.phase("following-up");
                 const result = await request("explore.query.followup", { queryId, ...selected.followup, actions });
+                progress.observe(result);
                 launched = result.launched.length > 0;
                 participation.followup = launched ? "used" : "skipped";
               }
@@ -240,6 +257,7 @@ export function createExploreTool(
           // Re-collect after inference/submission: a producer may have progressed
           // during that await. The sequence makes check-and-wait race-free.
           const next = await request("explore.query.views", { queryId, seen: [...seen] });
+          progress.observe(next);
           if (next.views.some(view => !seen.has(view.viewId)) || next.sequence !== views.sequence) continue;
           if (!next.pending) break;
           await request("explore.query.wait", { queryId, afterSequence: next.sequence });
@@ -248,15 +266,19 @@ export function createExploreTool(
         return await finish();
       } catch (caught) {
         let error: unknown = caught;
-        signal?.throwIfAborted();
-        if (queryId && error instanceof ExploreBudgetExhausted) {
+        if (!signal?.aborted && queryId && error instanceof ExploreBudgetExhausted) {
           try { return await finish(); }
-          catch (finishError) { signal?.throwIfAborted(); error = finishError; }
+          catch (finishError) { error = finishError; }
         }
+        // Keep the cancellation receipt in the native error result. The run's
+        // aborted signal still ends the Agent loop; no finish or new work runs.
+        const cancelled = signal?.aborted === true;
         const message = error instanceof Error ? error.message : String(error);
+        const errorCode = error instanceof HarnessRequestError ? error.code : undefined;
         return {
-          content: [{ type: "text", text: `explore failed: ${message}` }],
-          details: { error: message },
+          content: [{ type: "text", text: cancelled ? "explore cancelled" : `explore failed: ${message}` }],
+          details: { error: message, ...(errorCode ? { errorCode } : {}),
+            progress: progress.phase(cancelled ? "cancelled" : errorCode === "unavailable" ? "unavailable" : "failed") },
           isError: true,
         };
       } finally {
