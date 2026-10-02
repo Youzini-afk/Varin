@@ -62,7 +62,7 @@ import {
   projectPiSortedTurn,
   type PiSortedTurnProjection,
 } from './piSortedTurnProjection';
-import { RememberKnowledgeButton } from './RememberKnowledgeButton';
+import { ChatMoreButton, ChatTextSource } from './ChatContextMenu';
 import { HarnessThreadMarkers } from './HarnessThreadMarkers';
 import { PiTurnUsageFooter } from './PiTurnUsageFooter';
 import { assistantMessagesForTurn } from '@/lib/pi-runtime/usagePresentation';
@@ -142,13 +142,15 @@ const PiUserContentView: React.FC<{
     <>
       {parts.map((part, index) => (
         part.type === 'text' ? (
-          <MarkdownRenderer
-            key={`${messageId}:text:${index}`}
-            content={part.text}
-            messageId={`${messageId}:text:${index}`}
-            variant={variant}
-            enableFileReferences
-          />
+          <ChatTextSource key={`${messageId}:text:${index}`} entryId={messageId} text={part.text}
+            offset={parts.slice(0, index).filter((part) => part.type === 'text').reduce((total, part) => total + part.text.length + 1, 0)}>
+            <MarkdownRenderer
+              content={part.text}
+              messageId={`${messageId}:text:${index}`}
+              variant={variant}
+              enableFileReferences
+            />
+          </ChatTextSource>
         ) : (
           <a
             key={`${messageId}:image:${index}`}
@@ -458,14 +460,8 @@ const PiToolCard: React.FC<{
   const workspaceId = useWorkbenchWorkspaceId();
   const sessionId = usePiSessionStore((state) => state.currentSessionId);
   const extensionRendered = renderFirstWorkbenchMatch(toolRenderers, { call, cwd, execution, result });
-  const resultText = result ? piContentText(result.content).trim() : '';
   const nested = Object.values(executionById ?? {}).filter(child => child.parentToolCallId === call.id);
-  if (extensionRendered !== undefined) return (
-    <>
-      {extensionRendered}
-      {resultText ? <div className="flex justify-end"><RememberKnowledgeButton content={resultText} kind={`tool-result:${call.name}`} /></div> : null}
-    </>
-  );
+  if (extensionRendered !== undefined) return <>{extensionRendered}</>;
   const status = result
     ? (result.isError ? 'error' : 'success')
     : execution?.status ?? 'running';
@@ -549,15 +545,6 @@ const PiToolCard: React.FC<{
             <pre className="overflow-x-auto whitespace-pre-wrap break-words rounded-md bg-background/70 p-2 font-mono typography-micro text-foreground">
               {jsonText(transientOutput)}
             </pre>
-          </div>
-        ) : null}
-        {resultText ? (
-          <div className="flex justify-end">
-            <RememberKnowledgeButton
-              content={resultText}
-              kind={`tool-result:${call.name}`}
-              className="flex size-6 items-center justify-center rounded text-muted-foreground hover:bg-interactive-hover hover:text-foreground"
-            />
           </div>
         ) : null}
         {applyPatchFiles.length > 0 ? (
@@ -750,13 +737,15 @@ const AssistantMessage: React.FC<{
     }
       if (content.type === 'text') {
         rendered.push(
-          <MarkdownRenderer
-            key={`${entryId}:text:${index}`}
-            content={content.text}
-            messageId={`${entryId}:text:${index}`}
-            isStreaming={streaming}
-            enableFileReferences
-          />,
+          <ChatTextSource key={`${entryId}:text:${index}`} entryId={entryId} text={content.text}
+            offset={message.content.slice(0, index).filter((part) => part.type === 'text').reduce((total, part) => total + part.text.length + 1, 0)}>
+            <MarkdownRenderer
+              content={content.text}
+              messageId={`${entryId}:text:${index}`}
+              isStreaming={streaming}
+              enableFileReferences
+            />
+          </ChatTextSource>,
         );
         index += 1;
         continue;
@@ -897,13 +886,16 @@ const PiSortedActivityGroup: React.FC<{
                       <Icon name="chat-1" className="size-3.5" />
                       {t('chat.reasoningTrace.justification')}
                     </div>
-                    <MarkdownRenderer
-                      content={item.content.text}
-                      messageId={item.id}
-                      isStreaming={item.streaming}
-                      variant="assistant"
-                      enableFileReferences
-                    />
+                    <ChatTextSource entryId={item.sourceId} text={item.content.text} offset={0}
+                      contentIndex={Number(item.id.slice(item.id.lastIndexOf(':') + 1))}>
+                      <MarkdownRenderer
+                        content={item.content.text}
+                        messageId={item.id}
+                        isStreaming={item.streaming}
+                        variant="assistant"
+                        enableFileReferences
+                      />
+                    </ChatTextSource>
                   </div>
                 )}
               </React.Fragment>
@@ -949,7 +941,7 @@ export const PiTurnUserMessage: React.FC<{
     });
   }, [messageText, t]);
   return (
-    <article id={entry ? `pi-entry-${entry.id}` : undefined} className="group/message ml-auto max-w-[85%]">
+    <article id={entry ? `pi-entry-${entry.id}` : undefined} data-pi-user-message data-pi-entry-id={entry?.id} className="group/message ml-auto max-w-[85%]">
       <div className="rounded-xl bg-[var(--chat-user-message-bg)] px-4 py-3 text-[var(--chat-user-message)]">
         <PiUserContentView content={message.content} messageId={messageId} />
       </div>
@@ -996,7 +988,6 @@ export const PiTurnUserMessage: React.FC<{
               <TooltipContent side="bottom">{t('chat.messageBody.actions.copyMessage')}</TooltipContent>
             </Tooltip>
           ) : null}
-          {entry && messageText ? <RememberKnowledgeButton content={messageText} kind="message:user" /> : null}
           {entry && messageText && onOpenThread ? (
             <OpenThreadButton
               busy={threadBusyEntryId === entry.id}
@@ -1043,6 +1034,7 @@ export const PiTurnUserMessage: React.FC<{
               <TooltipContent side="bottom">{t('chat.messageBody.actions.revert')}</TooltipContent>
             </Tooltip>
           ) : null}
+          <ChatMoreButton />
         </div>
       ) : null}
       {entry ? <HarnessThreadMarkers cwd={cwd} entryId={entry.id} /> : null}
@@ -1148,7 +1140,7 @@ export const PiTimelineEntryList: React.FC<Omit<
                 && sortedProjection.activity.length > 0;
               if (!displayedMessage && !showsActivity) return null;
               return (
-                <article id={`pi-entry-${entry.id}`} key={entry.id} className="group/message w-full space-y-3">
+                <article id={`pi-entry-${entry.id}`} data-pi-entry-id={entry.id} key={entry.id} className="group/message w-full space-y-3">
                   {showsActivity && sortedProjection ? (
                     <PiSortedActivityGroup
                       cwd={cwd}
@@ -1173,14 +1165,12 @@ export const PiTimelineEntryList: React.FC<Omit<
               );
             }
             if (message.role === 'toolResult') {
-              const resultText = piContentText(message.content).trim();
               return (
                 <article key={entry.id} className="w-full rounded-lg border border-border/60 bg-muted/15 px-3 py-2">
                   <div className="mb-2 flex items-center gap-2 typography-ui-label text-foreground">
                     <Icon name={message.isError ? 'error-warning' : 'check'} className="size-3.5" />
                     <span className="font-mono">{message.toolName}</span>
                     <span className="flex-1" />
-                    {resultText ? <RememberKnowledgeButton content={resultText} kind={`tool-result:${message.toolName}`} /> : null}
                   </div>
                   <ToolResultContent messageId={entry.id} result={message} />
                 </article>
@@ -1189,14 +1179,12 @@ export const PiTimelineEntryList: React.FC<Omit<
             if (message.role === 'system') return null;
             if (message.role === 'bashExecution') {
               const renderedOutput = renderTerminalOutput(message.output);
-              const outputText = renderedOutput.trim();
               return (
                 <article key={entry.id} className="w-full rounded-lg border border-border/60 bg-muted/15">
                   <div className="flex items-center gap-2 border-b border-border/60 px-3 py-2 typography-ui-label text-foreground">
                     <Icon name="terminal" className="size-3.5" />
                     <code className="min-w-0 flex-1 break-all">{message.command}</code>
                     {message.cancelled ? <span>cancelled</span> : message.exitCode !== undefined ? <span>exit {message.exitCode}</span> : null}
-                    {outputText ? <RememberKnowledgeButton content={outputText} kind="tool-result:bash" /> : null}
                   </div>
                   <pre className="overflow-x-auto whitespace-pre-wrap break-words px-3 py-2 font-mono typography-meta text-foreground">{renderedOutput}</pre>
                   {message.truncated && (
@@ -1411,7 +1399,6 @@ export const PiTimelineEntryList: React.FC<Omit<
                 </TooltipTrigger>
                 <TooltipContent side="bottom">{t('chat.messageBody.actions.copyAnswer')}</TooltipContent>
               </Tooltip>
-              <RememberKnowledgeButton content={turnText} kind="turn:assistant" />
               {actionEntry && onOpenThread ? (
                 <OpenThreadButton
                   busy={threadBusyEntryId === actionEntry.id}
@@ -1439,6 +1426,7 @@ export const PiTimelineEntryList: React.FC<Omit<
                   <TooltipContent side="bottom">{t('chat.messageBody.actions.fork')}</TooltipContent>
                 </Tooltip>
               ) : null}
+              <ChatMoreButton />
             </div>
           ) : undefined}
         />

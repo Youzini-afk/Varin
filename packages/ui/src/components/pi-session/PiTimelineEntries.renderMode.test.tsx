@@ -329,7 +329,7 @@ describe('Pi timeline chat render mode', () => {
     }
   });
 
-  test('persisted messages and tool results expose the scoped knowledge review action', () => {
+  test('keeps native discussion actions and thread markers after moving memory into the selection menu', () => {
     useUIStore.setState({ chatRenderMode: 'live' });
     const entries = [{
       id: 'user-entry', parentId: null, timestamp: '2026-09-04T00:00:00.000Z', type: 'message',
@@ -363,7 +363,7 @@ describe('Pi timeline chat render mode', () => {
       () => undefined,
       [{ thread: markerThread, activeRun: markerRun }],
     );
-    expect(markup.match(/aria-label="Add to knowledge review"/g)?.length).toBe(3);
+    expect(markup).not.toContain('aria-label="Add to knowledge review"');
     expect(markup.match(/aria-label="Open a discussion thread from this message"/g)?.length).toBe(2);
     expect(markup).toContain('data-harness-thread-markers="assistant-entry"');
     expect(markup).toContain('aria-label="Open thread: Discussion thread"');

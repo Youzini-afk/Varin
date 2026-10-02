@@ -962,6 +962,11 @@ html:not(.dark) .chat-scroll {
   line-height: inherit;
 }
 
+::highlight(varin-chat-selection) {
+  background: color-mix(in srgb, var(--interactive-border-focus) 25%, transparent);
+  color: var(--surface-foreground);
+}
+
 .markdown-content p,
 .markdown-content li,
 .markdown-content blockquote,

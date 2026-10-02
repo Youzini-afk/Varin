@@ -1341,11 +1341,34 @@ export function createMemoryOrganizer(deps: MemoryOrganizerDeps) {
       activeBatches.clear();
       await Promise.allSettled([...pendingTasks]);
     },
-    /**
-     * Scope organizer state for the settings surface: enable/model readiness
-     * plus durable progress rows (pending, prepared, failed with errors).
-     * Read-only — never schedules a run.
-     */
+    /** Explicit selection preview: no automatic-memory gate, coverage write or commit. */
+    async extractSelection(scopeId: string, system: string, prompt: string, signal: AbortSignal): Promise<string> {
+      if (disposed) throw new Error('Memory organizer is unavailable');
+      signal.throwIfAborted();
+      const broker = deps.getBroker();
+      if (!broker) throw new Error('Memory organizer runtime is unavailable');
+      const binding = await modelForScope(await readHarnessSettings(), scopeId);
+      if (!binding) throw new Error('Configure the memory organizer model to extract memories');
+      if (suspendedScopes.has(scopeId) || (deps.canExecuteScope && !await deps.canExecuteScope(scopeId))) throw new Error('Bot sleeping');
+      signal.throwIfAborted();
+      const batchId = randomUUID();
+      const cancel = () => { void broker.requestForWorkspace(deps.configCwd, 'harness.inference.cancel', { batchId }).catch(report); };
+      activeBatches.set(batchId, scopeId);
+      signal.addEventListener('abort', cancel, { once: true });
+      try {
+        const result = await broker.requestForWorkspace(deps.configCwd, 'harness.memoryOrganize', {
+          batchId, ...binding.selection,
+          ...(binding.source === 'bot' ? { modelSource: 'bot' as const } : {}), system, prompt,
+        });
+        signal.throwIfAborted();
+        if (result.batchId !== batchId) throw new Error('Memory extraction response identity mismatch');
+        return result.text;
+      } finally {
+        signal.removeEventListener('abort', cancel);
+        activeBatches.delete(batchId);
+      }
+    },
+    /** Scope settings and durable progress; read-only, never schedules a run. */
     async describe(scopeId: string): Promise<{
       enabled: boolean;
       model: ModelSelection | null;

@@ -179,6 +179,26 @@ describe("memory organizer (BC2)", () => {
     await org.dispose();
   });
 
+  it('previews an explicit selection while automatic memory is disabled and cancels its inference', async () => {
+    autoOrganize = { workspace: false, user: false, bot: false };
+    const org = organizer(memory());
+    try {
+      const result = await org.extractSelection('ws-1', 'Extract selected memory.', 'Only this passage.', new AbortController().signal);
+      expect(result).toBe(organizeText);
+      expect(stores.size).toBe(0);
+      let finish!: (value: string) => void;
+      organizeText = () => new Promise<string>((resolve) => { finish = resolve; });
+      const controller = new AbortController();
+      const pending = org.extractSelection('ws-1', 'Extract.', 'Selected.', controller.signal);
+      const rejected = expect(pending).rejects.toThrow();
+      await wait(() => !!finish);
+      controller.abort();
+      finish('{"memories":[]}');
+      await rejected;
+      expect(calls.some((call) => call.method === 'harness.inference.cancel')).toBe(true);
+    } finally { await org.dispose(); }
+  });
+
   it("commits two distinct proposals from one source without self-conflicting", async () => {
     const ws = await openStore("workspace", "ws-two-proposals");
     stores.set("ws-two-proposals", ws);

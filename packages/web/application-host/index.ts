@@ -88,6 +88,7 @@ import { createHarnessPathAuthority } from './lib/harness/path-authority.js';
 import { sessionScopeId, isSessionScopeId, sessionIdFromScopeId, isSessionStoreKey, isBotStoreKey, isBotScopeId, botIdFromScopeId, botScopeId, knowledgeStoreKeyForScope, scopeOfScopeId } from './lib/harness/owner-scope.js';
 import { createMemoryService } from './lib/memory/memory-service.js';
 import { createMemoryOrganizer, type OrganizerRunSource } from './lib/memory/memory-organizer.js';
+import { registerSelectionMemoryRoutes } from './lib/memory/selection-memory-routes.js';
 import { createExploreFileReader } from './lib/harness/explore-file-reader.js';
 import { createThreadWorktreeRuntime } from './lib/harness/thread-worktree.js';
 import { createThreadRuntime } from './lib/harness/thread-runtime.js';
@@ -2845,6 +2846,12 @@ async function main(options: StartWebUiServerOptions = {}): Promise<WebUiServerC
       });
     },
     ...(uiAuthController ? { requireAuth: uiAuthController.requireAuth } : {}),
+  });
+  registerSelectionMemoryRoutes(app, {
+    memory: memoryService,
+    entries: async (sessionId) => (await piRuntimeBroker.previewSessionEntries(sessionId, undefined, 'branch')).entries,
+    narrate: (scopeId, system, prompt, signal) => memoryOrganizer.extractSelection(scopeId, system, prompt, signal),
+    requireAuth: uiAuthController?.requireAuth ?? ((_request, _response, next) => next()),
   });
   registerHarnessKnowledgeCatalogRoutes(app, {
     resolveWorkspace: async ({ workspaceId }) => documentsAuthority.resolveWorkspace({ workspaceId }),

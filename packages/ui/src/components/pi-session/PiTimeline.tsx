@@ -40,6 +40,7 @@ import {
   type PiAssistantWaitingPresentation,
 } from './piAssistantWaiting';
 import { PiTurnAssistantChrome } from './PiTurnAssistantChrome';
+import { ChatContextMenu } from './ChatContextMenu';
 
 interface PiTimelineItemViewProps extends Omit<
   PiTimelineProps,
@@ -617,6 +618,36 @@ export const PiTimeline: React.FC<PiTimelineProps> = (props) => {
   }, [takeManualOwnership]);
 
   return (
+    <ChatContextMenu key={props.sessionId} {...props} projection={projection}
+      onRevealEntry={async (entryId) => {
+        const source = props.entries.find((entry) => entry.id === entryId);
+        const toolCallId = source?.type === 'message' && source.message.role === 'toolResult' ? source.message.toolCallId : undefined;
+        const index = projection.items.findIndex((item) => item.kind === 'entry' ? item.entry.id === entryId
+          : item.kind === 'turn' && (item.turn.userEntry?.id === entryId || item.turn.entries.some((entry) => entry.id === entryId)
+            || (toolCallId !== undefined && item.turn.resultByCallId.has(toolCallId))));
+        if (index < 0) throw new Error(t('chat.context.sourceUnavailable'));
+        takeManualOwnership();
+        const list = listRef.current;
+        const generation = generationRef.current;
+        await list?.scrollToIndex({ index, viewPosition: 0, animated: false });
+        if (!list || list !== listRef.current || generation !== generationRef.current
+          || usePiSessionStore.getState().currentSessionId !== props.sessionId) return;
+        const container = list.getScrollableNode();
+        const selector = toolCallId ? `[data-pi-source-id="${CSS.escape(`tool-result:${toolCallId}`)}"]`
+          : `[data-pi-entry-id="${CSS.escape(entryId)}"]`;
+        const sourceElement = container?.querySelector<HTMLElement>(selector);
+        // A quoted tool result can be inside closed disclosures. Open only its
+        // ancestors before measuring, so its owning call remains the target.
+        for (let parent = sourceElement?.parentElement; parent && parent !== container; parent = parent.parentElement) {
+          if (parent instanceof HTMLDetailsElement) parent.open = true;
+        }
+        const element = toolCallId ? sourceElement?.firstElementChild : sourceElement;
+        if (!container || !element) return;
+        const sticky = element.closest('[data-turn-id]')?.querySelector(':scope > .sticky');
+        const inset = sticky && !sticky.contains(element) ? sticky.getBoundingClientRect().height : 0;
+        await list.scrollToOffset({ animated: false, offset: Math.max(0,
+          list.getState().scroll + element.getBoundingClientRect().top - container.getBoundingClientRect().top - inset - PI_TIMELINE_ANCHOR_OFFSET_PX) });
+      }}>
     <div className="relative flex min-h-0 flex-1">
       <LegendList
         ref={listRef}
@@ -702,5 +733,6 @@ export const PiTimeline: React.FC<PiTimelineProps> = (props) => {
         </button>
       ) : null}
     </div>
+    </ChatContextMenu>
   );
 };

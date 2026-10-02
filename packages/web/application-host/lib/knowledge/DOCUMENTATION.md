@@ -101,6 +101,14 @@ reopen their ranges. Prepared proposals and their source ranges survive restart;
 committed provenance reconciles a crash between memory and coverage writes. This
 is recoverable progress, not a cross-store rollback transaction.
 
+Explicit chat selection extraction uses `memory/selection-memory-routes.ts`. Preview validates native
+branch text and exact offsets, calls the existing organizer narrator without automatic coverage/commit,
+and returns editable drafts with source revisions. Save resolves the session's real owner (including
+Bot/session scopes), validates the frozen owner and original revisions, then uses MemoryService.remember.
+Source ranges and `user-extracted` provenance use the same memory authority and original-source reader.
+Undo verifies the saved row revision and originating session before retiring it. An empty extraction is
+a valid result; unconfigured models, invalid envelopes/citations and changed sources remain failures.
+
 `memory get` with `includeSource` and the settings original-passages view read only
 the persisted ranges authorized by the selected memory. They report changed or
 missing originals instead of presenting another revision as the cited evidence.

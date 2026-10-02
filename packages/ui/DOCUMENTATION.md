@@ -143,6 +143,14 @@ actions share a menu; model, permission and send controls stay directly availabl
 are expandable rows rather than another enclosing card. Keep readable content spacious while making
 tool chrome compact, and let narrow composer footers wrap rather than clip their actions.
 
+The chat timeline provides object-sensitive context menus through `ChatContextMenu`: selection actions,
+whole-turn/message operations, code, file/link actions and image viewing/copy/save. Selection identity is
+captured before popup focus changes; `chatSelection` maps rendered Markdown to native source offsets.
+`ChatMemoryDialog` previews extraction with the existing organizer model and commits only on Save through
+the Host memory service. The old direct remember buttons are removed. Quoting appends to the existing
+draft and links to its native entry. These controls never send the draft or create another session state
+owner. See [conversation behavior](../../docs/design/chat-experience.md#chat-context-menu-and-selected-memory).
+
 Agent/Research use a full-width desktop header above the sidebar and work area. `TitlebarLeftControls`
 and the project/session title are ordinary flex siblings; opening or resizing the sidebar does not
 reposition them. There is no floating titlebar overlay, measured-width spacer, or sidebar title strip.

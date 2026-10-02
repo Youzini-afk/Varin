@@ -201,6 +201,22 @@ export const PiComposer: React.FC<PiComposerProps> = ({
   const latestAttachmentRef = React.useRef({ target: attachmentTarget, draft, onChangeDraft });
   latestAttachmentRef.current = { target: attachmentTarget, draft, onChangeDraft };
   const inputRef = React.useRef<ComposerEditorHandle>(null);
+  React.useEffect(() => {
+    let frame: number | undefined;
+    const onQuote = (event: Event) => {
+      const detail = (event as CustomEvent<{ sessionId: string; runtimeKey: string; cursor: number }>).detail;
+      if (detail?.sessionId !== sessionId || detail.runtimeKey !== getRuntimeKey()) return;
+      if (frame !== undefined) cancelAnimationFrame(frame);
+      // Wait for both the draft update and the menu's focus restoration.
+      frame = requestAnimationFrame(() => {
+        if (detail.runtimeKey !== getRuntimeKey()) return;
+        inputRef.current?.focus();
+        inputRef.current?.setSelection(detail.cursor);
+      });
+    };
+    window.addEventListener('varin:chat-quote', onQuote);
+    return () => { window.removeEventListener('varin:chat-quote', onQuote); if (frame !== undefined) cancelAnimationFrame(frame); };
+  }, [sessionId]);
   const commandRef = React.useRef<CommandAutocompleteHandle>(null);
   const skillRef = React.useRef<SkillAutocompleteHandle>(null);
   const snippetRef = React.useRef<SnippetAutocompleteHandle>(null);

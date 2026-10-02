@@ -121,10 +121,11 @@ accessory stack. There is no independent bar for each feature.
   reasoning, cache read, cache write, optional one-hour cache write, and the provider-owned total. Missing
   or all-zero usage stays absent; these cumulative request totals do not represent current context use.
   One footer below the entire turn places actions on the left and statistics on the right, wrapping
-  when necessary. Intermediate assistant messages have no individual action rows. Copy and memory use
-  all built-in assistant prose in chronological order, including the live tail, excluding thinking and
-  tool output. Discussion and fork keep their native entry contract and target the turn's last persisted
-  assistant message with text. User-message actions and extension-owned rendering remain independent.
+  when necessary. Intermediate assistant messages have no individual action rows. Copy uses all built-in
+  assistant prose in chronological order, including the live tail, excluding thinking and tool output.
+  Discussion and fork keep their native entry contract and target the turn's last persisted assistant
+  message with text. Memory extraction belongs to the text-selection menu; there is no per-message or
+  turn-level remember button. User-message actions and extension-owned rendering remain independent.
 - Conversation prose defaults to 16px with pixel-rounded 1.75 line height, 12px paragraph spacing and
   distinct heading/list spacing. The 48rem reading column and explicit wide layout remain available;
   code, tools and reasoning retain their compact presentation. Built-in sans-serif stacks include
@@ -147,6 +148,37 @@ accessory stack. There is no independent bar for each feature.
 - Streaming text is throttled and revealed by committed blocks. Virtualized remounts do not replay reveal
   animations.
 - Unknown Pi/extension entries remain usable through generic renderers and raw detail disclosure.
+
+### Chat context menu and selected memory
+
+The shared timeline owns one context-menu controller across its virtualized turns. Right-click and the
+standard menu primitive's touch long-press use the clicked object: selection, user message, Agent turn,
+code block, file reference, hyperlink or image. Selection has priority. Editable fields retain their
+native menu. A visible More action exposes the same controller without requiring right-click.
+
+Copy, quote and menu actions capture their target before focus changes. Quoting appends to the current
+runtime/session draft, leaves attachments intact, never sends, and focuses the Composer after menu
+closure. Its source link navigates through the timeline's existing scroll owner. Runtime changes close
+open menus/previews; stale actions cannot write to a newly selected runtime.
+
+Extract memories works on the selected text, not the whole turn. Text wrappers register their native
+entry and content position without putting raw source into DOM attributes. The selection mapper tracks
+Markdown formatting, links, entities, lists, tables and code to exact UTF-16 source ranges. Unmapped
+rendered regions and an unsaved live reply remain copyable/quotable, but cannot claim a verified memory
+source. An open menu keeps a highlight over its captured selection.
+
+The authenticated Host validates every passage against the current native branch before asking the
+existing memory-organizer model (or its existing Bot-model fallback) for editable drafts. Explicit
+extraction does not require automatic memory to be enabled, does not advance background coverage and
+does not write memories. Empty results and malformed/failed results are distinct. Closing the preview
+cancels inference through the existing batch cancellation path.
+
+The preview shows content, recall cue, original passages and the actual destination: project, Bot or
+session memory, with personal memory as an explicit alternative. Save uses the unified MemoryService,
+rechecks the source revisions and owner, and commits accepted user-extracted records. Successful rows
+remain visible if a later save fails. Undo is offered only for newly created rows and checks the saved
+revision; duplicates are never silently retired. No second knowledge store or per-row review queue is
+introduced.
 
 ## 9. Delivery phases
 
