@@ -408,6 +408,8 @@ export const dict: Record<I18nKey, string> = {
   'chat.timeline.loadFailed': 'Не вдалося завантажити дерево сеансу',
   'chat.timeline.retry': 'Спробувати ще раз',
   'chat.timeline.tools.openTerminal': 'Відкрити термінал',
+  'chat.timeline.tools.callCount': 'Виклики: {count}',
+  'chat.timeline.tools.incompleteRecord': 'неповний запис',
   'chat.timeline.refresh': 'Оновити дерево сеансу',
   'chat.timeline.attachmentsUnsupported': 'Видаліть вкладення перед відкриттям /tree',
   'chat.chatInput.terminalContext': '{terminal}, рядки {start}-{end}',

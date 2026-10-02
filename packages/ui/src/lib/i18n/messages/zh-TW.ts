@@ -163,6 +163,8 @@ export const dict: Record<I18nKey, string> = {
   'chat.timeline.loadFailed': '無法載入工作階段樹',
   'chat.timeline.retry': '重試',
   'chat.timeline.tools.openTerminal': '開啟終端機',
+  'chat.timeline.tools.callCount': '{count} 次呼叫',
+  'chat.timeline.tools.incompleteRecord': '記錄未完成',
   'chat.timeline.refresh': '重新整理工作階段樹',
   'chat.timeline.attachmentsUnsupported': '開啟 /tree 前請先移除附件',
   'chat.chatInput.terminalContext': '{terminal}，第 {start}-{end} 行',

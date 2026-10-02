@@ -161,6 +161,8 @@ export const dict = {
   'chat.timeline.loadFailed': 'Impossible de charger l’arborescence de la session',
   'chat.timeline.retry': 'Réessayer',
   'chat.timeline.tools.openTerminal': 'Ouvrir le terminal',
+  'chat.timeline.tools.callCount': 'Appels : {count}',
+  'chat.timeline.tools.incompleteRecord': 'enregistrement incomplet',
   'chat.timeline.refresh': 'Actualiser l’arborescence de la session',
   'chat.timeline.attachmentsUnsupported': 'Supprimez les pièces jointes avant d’ouvrir /tree',
   'chat.chatInput.terminalContext': '{terminal}, lignes {start}-{end}',

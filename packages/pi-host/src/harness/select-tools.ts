@@ -24,6 +24,7 @@ import { createHistoryTool } from "./history-tool.js";
 import { createRelatedTool } from "./related-tool.js";
 import { createLspNavigationTools } from "./lsp-tools.js";
 import { createSurfaceAwareReadTool } from "./read-tool.js";
+import { createPiDocsTool } from "./pi-docs-tool.js";
 import { createDocumentReadTool } from "./document-read-tool.js";
 import { createSurfaceAwareFindTool } from "./find-tool.js";
 import { createSurfaceAwareLsTool } from "./ls-tool.js";
@@ -148,6 +149,8 @@ export function selectHarnessTools(
     sessionToolAllowlist,
   } = deps;
   const result: ToolDefinition[] = [];
+
+  if (tools.pi_docs !== false) result.push(createPiDocsTool());
 
   if (tools.bash !== false) {
     result.push(createBashTool(bridge, sessionId, cwd, settings.bash.waitMs));

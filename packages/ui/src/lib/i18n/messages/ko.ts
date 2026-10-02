@@ -163,6 +163,8 @@ export const dict: Record<I18nKey, string> = {
   'chat.timeline.loadFailed': '세션 트리를 불러올 수 없습니다',
   'chat.timeline.retry': '다시 시도',
   'chat.timeline.tools.openTerminal': '터미널 열기',
+  'chat.timeline.tools.callCount': '호출 {count}회',
+  'chat.timeline.tools.incompleteRecord': '미완료 기록',
   'chat.timeline.refresh': '세션 트리 새로 고침',
   'chat.timeline.attachmentsUnsupported': '/tree를 열기 전에 첨부 파일을 제거하세요',
   'chat.chatInput.terminalContext': '{terminal}, {start}-{end}행',

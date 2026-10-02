@@ -408,6 +408,8 @@ export const dict: Record<I18nKey, string> = {
   'chat.timeline.loadFailed': 'No se pudo cargar el árbol de la sesión',
   'chat.timeline.retry': 'Reintentar',
   'chat.timeline.tools.openTerminal': 'Abrir terminal',
+  'chat.timeline.tools.callCount': 'Llamadas: {count}',
+  'chat.timeline.tools.incompleteRecord': 'registro incompleto',
   'chat.timeline.refresh': 'Actualizar árbol de la sesión',
   'chat.timeline.attachmentsUnsupported': 'Quita los archivos adjuntos antes de abrir /tree',
   'chat.chatInput.terminalContext': '{terminal}, líneas {start}-{end}',

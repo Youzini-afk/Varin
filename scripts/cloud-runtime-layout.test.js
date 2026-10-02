@@ -181,7 +181,7 @@ describe('Varin cloud runtime layout', () => {
     const manifestPath = path.join(fixture, 'package.json');
     const manifest = readJson(manifestPath);
     manifest.patchedDependencies = {
-      '@earendil-works/pi-coding-agent@0.99.2': 'packages/pi-host/patches/pi-coding-agent.patch',
+      '@earendil-works/pi-coding-agent@1.0.0': 'packages/pi-host/patches/pi-coding-agent.patch',
     };
     writeJson(manifestPath, manifest);
     expect(() => verifyCloudRuntimeLayout(fixture)).toThrow('Cloud runtime Pi patch is missing');

@@ -155,9 +155,9 @@ and give a recommendation with any concrete migration work. Do not interpret mis
 no changes, or a patch/minor version as proof of compatibility. Keep these judgments distinct from CI
 results. Production dependency changes may also need the cloud runtime lockfile refreshed as above.
 
-The bundled Pi packages are pinned to 0.99.2. Review its
-[release](https://github.com/earendil-works/pi/releases/tag/v0.99.2) and
-[coding-agent changelog](https://github.com/earendil-works/pi/blob/v0.99.2/packages/coding-agent/CHANGELOG.md)
+The bundled Pi packages are pinned to 1.0.0. Review its
+[release](https://github.com/earendil-works/pi/releases/tag/v1.0.0) and
+[coding-agent changelog](https://github.com/earendil-works/pi/blob/v1.0.0/packages/coding-agent/CHANGELOG.md)
 alongside the previous-to-target interval. Host integration patches live in `packages/pi-host/patches`
 and ship with that package. Bun applies them to bundled dependencies; the selected external SDK loader
 applies the same hunks in memory, accepts an already adapted source and rejects a changed required seam.
@@ -169,6 +169,14 @@ native MCP status/config mutations and replacement by a user extension. Node/tsx
 fixtures; UI consumers use Vitest. Controlled local MCP/provider fixtures need no paid request or browser.
 Production packaging must include the Host patch directory and native QuickJS worker/WASM dependencies,
 and refresh `scripts/cloud-runtime.bun.lock` after the final dependency/patch change.
+
+The 1.0 upgrade retains stable AgentSession and rebases the existing Host seams. The additional codemode
+`docsReference` option points to `pi_docs`, which reads actual assets from the selected SDK independently
+of workspace scope/machine placement. Keep `docs/codemode.md`, `docs/models.md` and `docs/mcp.md` in the
+installed runtime. Native image fixtures mock only the paid provider response and exercise the real
+sandbox, reference reader, image journal and protocol projection. UI checks cover zero-token cost and
+combined model/tool receipts. The experimental durable runtime assessment is recorded in
+[architecture](architecture.md#pi-10-durable-runtime-assessment); it is not part of this production dependency change.
 
 The report only runs default-branch code and reads PR metadata; it neither installs PR dependencies nor
 executes PR code or project tests. `node --test scripts/dependabot-report.test.mjs` exercises its parsing.

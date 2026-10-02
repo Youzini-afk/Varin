@@ -167,6 +167,8 @@ export const dict = {
   'common.loading': 'Loading...',
   'common.unavailable': 'Unavailable',
   'chat.timeline.tools.openTerminal': 'Open terminal',
+  'chat.timeline.tools.callCount': 'Calls: {count}',
+  'chat.timeline.tools.incompleteRecord': 'incomplete record',
   'harness.threads.title': 'Threads',
   'harness.context.title': 'Session state',
   'harness.context.open': 'Open session state',

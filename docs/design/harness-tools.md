@@ -7,6 +7,13 @@ Status: 模块专卷，自 [agent-harness.md](agent-harness.md) 拆出（原文�
 
 ### 5.0 清单
 
+Pi 1.0 的运行时参考文档由只读 `pi_docs(document?, offset?, limit?)` 提供。它读取当前所选 SDK 的
+`docs` 资产，省略 document 时列出参考文件；使用 Pi 原生分页。这个来源与工作区文件不同，文档名
+不进入 Host 的工作区路径解析，因此本地 harness 配远端工作区、受限源码 scope 都能读取 SDK 说明，
+同时保留原有文件权限。工具本身仍受权限规则和会话工具集合约束；路径穿越、指向 SDK 文档目录外的
+别名均拒绝。它使用原生 codemode exposure，脚本通过 `tools.pi_docs` 调用；旧会话恢复工具集合时
+不需要新增直接工具声明。codemode 的说明通过原生 factory 的 `docsReference` 接入这个入口。
+
 | 工具 | 来源 | 并发 | 一句话 |
 | --- | --- | --- | --- |
 | `bash` | 覆盖 Pi | 独占（`executionMode: sequential`） | PTY、持久会话 shell、超时转后台不杀 |

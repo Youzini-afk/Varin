@@ -164,6 +164,7 @@ import {
   type HarnessCounterTracker,
 } from "./harness/counter-tracker.js";
 import { selectHarnessTools } from "./harness/select-tools.js";
+import { PI_CODEMODE_REFERENCE } from "./harness/pi-docs-tool.js";
 import { createToolResultTruncationExtension } from "./harness/tool-result-truncation.js";
 import { createContextGuidanceExtension } from "./harness/context-guidance.js";
 import { activeCompactionMessages } from "./harness/compaction-context.js";
@@ -3537,7 +3538,11 @@ export class SessionHost {
         cwd,
         resourceLoaderOptions: {
           extensionFactories: [
-            { builtin: true, replaceable: true, factory: createCodemodeExtension(), name: "codemode" },
+            { builtin: true, replaceable: true, factory: createCodemodeExtension({
+              ...(harnessSettings.tools.pi_docs !== false
+                && (!this.#sessionToolAllowlist || this.#sessionToolAllowlist.includes("pi_docs"))
+                ? { docsReference: PI_CODEMODE_REFERENCE } : {}),
+            }), name: "codemode" },
             { builtin: true, replaceable: true, factory: createToolSearchExtension(), name: "tool-search" },
             {
               builtin: true,

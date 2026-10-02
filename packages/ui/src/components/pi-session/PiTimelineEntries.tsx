@@ -46,10 +46,12 @@ import {
   parseExtensionStatus,
   parseSubagentNotifications,
   parseSubagentRun,
+  projectToolCalls,
   piContentText,
   type SubagentNotificationPresentation,
   type SubagentRunPresentation,
   type SubagentStatus,
+  type ToolCallPresentation,
 } from './extensionPresentation';
 import {
   projectPiTimeline,
@@ -97,6 +99,9 @@ const jsonText = (value: JsonValue): string => {
 };
 
 const formatCount = (value: number): string => new Intl.NumberFormat().format(value);
+const formatUsd = (value: number): string => new Intl.NumberFormat('en-US', {
+  style: 'currency', currency: 'USD', maximumSignificantDigits: 6,
+}).format(value);
 
 const formatDuration = (durationMs: number): string => {
   if (durationMs < 1000) return `${Math.round(durationMs)}ms`;
@@ -359,26 +364,32 @@ const SubagentNotificationsView: React.FC<{
   </article>
 );
 
+const ToolCallRow: React.FC<{ call: ToolCallPresentation }> = ({ call }) => (
+  <div>
+    <span className="font-mono">{call.name}</span>{call.model ? <span> · {call.model}</span> : null} · {call.status}{call.durationMs === undefined ? '' : ` · ${formatDuration(call.durationMs)}`}{call.cost === undefined ? '' : ` · ${formatUsd(call.cost)}`}
+    {call.error ? <p className="break-words text-[var(--status-error)]">{call.error}</p> : null}
+  </div>
+);
+
 const ToolResultContent: React.FC<{
   messageId: string;
   result: PiToolResultMessage;
 }> = ({ messageId, result }) => {
+  const { t } = useI18n();
+  const calls = projectToolCalls(result);
   const subagentRun = (result.toolName === 'subagent' || result.toolName === 'subagent_wait') && result.details !== undefined
     ? parseSubagentRun(result.details)
     : undefined;
   return (
     <div className="space-y-2">
       <PiUserContentView content={result.content} messageId={messageId} variant="tool" />
-      {result.usage && result.usage.totalTokens > 0 ? <p className="typography-meta text-muted-foreground">
-        {result.usage.totalTokens} tokens · ${result.usage.cost.total.toFixed(4)}
+      {result.usage && (result.usage.totalTokens > 0 || result.usage.cost.total > 0) ? <p className="typography-meta text-muted-foreground">
+        {result.usage.totalTokens > 0 ? `${formatCount(result.usage.totalTokens)} tokens · ` : ''}{formatUsd(result.usage.cost.total)}
       </p> : null}
-      {result.nestedCalls ? <details className="typography-meta text-muted-foreground">
-        <summary className="cursor-pointer">{result.nestedCalls.calls.length} nested calls{result.nestedCalls.complete ? '' : ' · incomplete record'}</summary>
+      {calls ? <details className="typography-meta text-muted-foreground">
+        <summary className="cursor-pointer">{t('chat.timeline.tools.callCount', { count: calls.calls.length })}{calls.complete ? '' : ` · ${t('chat.timeline.tools.incompleteRecord')}`}</summary>
         <div className="mt-2 space-y-1 border-l border-border/60 pl-3">
-          {result.nestedCalls.calls.map(call => <div key={call.id}>
-            <span className="font-mono">{call.name}</span> · {call.status}{call.durationMs === undefined ? '' : ` · ${call.durationMs} ms`}
-            {call.error ? <p className="break-words text-[var(--status-error)]">{call.error}</p> : null}
-          </div>)}
+          {calls.calls.map(call => <ToolCallRow key={call.id} call={call} />)}
         </div>
       </details> : null}
       {subagentRun ? (
@@ -419,6 +430,9 @@ const PiToolCard: React.FC<{
     ? (result.isError ? 'error' : 'success')
     : execution?.status ?? 'running';
   const transientOutput = execution?.result ?? execution?.partialResult;
+  const liveModels = projectToolCalls({ toolName: call.name,
+    ...(transientOutput === undefined ? {} : { details: transientOutput }),
+  }, execution?.status === 'running')?.calls.filter(row => row.name === 'models.classify' || row.name === 'models.generateImages') ?? [];
   const transientSubagentRun = (call.name === 'subagent' || call.name === 'subagent_wait') && transientOutput !== undefined
     ? parseSubagentRun(transientOutput)
     : undefined;
@@ -479,6 +493,9 @@ const PiToolCard: React.FC<{
       <div className="ml-2 space-y-3 border-l border-border/60 py-2 pl-3">
         {!result && nested.length ? <div className="space-y-1 typography-meta text-muted-foreground" aria-live="polite">
           {nested.map(child => <div key={child.toolCallId}><span className="font-mono">{child.name}</span> · {child.status}</div>)}
+        </div> : null}
+        {!result && liveModels.length ? <div className="space-y-1 typography-meta text-muted-foreground" aria-live="polite">
+          {liveModels.map(row => <ToolCallRow key={row.id} call={row} />)}
         </div> : null}
         <div>
           <p className="mb-1 typography-micro font-medium text-muted-foreground">arguments</p>

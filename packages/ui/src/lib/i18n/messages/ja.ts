@@ -109,6 +109,8 @@ export const dict: Record<I18nKey, string> = {
   'chat.timeline.loadFailed': 'セッションツリーを読み込めませんでした',
   'chat.timeline.retry': '再試行',
   'chat.timeline.tools.openTerminal': 'ターミナルを開く',
+  'chat.timeline.tools.callCount': '{count} 件の呼び出し',
+  'chat.timeline.tools.incompleteRecord': '未完了の記録',
   'chat.timeline.refresh': 'セッションツリーを更新',
   'chat.timeline.attachmentsUnsupported': '/tree を開く前に添付ファイルを削除してください',
   'chat.chatInput.terminalContext': '{terminal}、{start}〜{end}行',

@@ -23,6 +23,7 @@ export interface HarnessToolMeta {
 
 export const HARNESS_TOOL_META: Readonly<Record<string, HarnessToolMeta>> = {
   read: { mutation: 'none', executionMode: 'parallel' },
+  pi_docs: { mutation: 'none', executionMode: 'parallel' },
   find: { mutation: 'none', executionMode: 'parallel' },
   ls: { mutation: 'none', executionMode: 'parallel' },
   grep: { mutation: 'none', executionMode: 'parallel' },

@@ -133,7 +133,7 @@ const customTools = selectHarnessTools(settings, {
   keeps only the newest compaction summary; superseded summaries remain in the
   native journal. Cancellation retires both the worker and its Host queries.
 
-Pi 0.99.2 represents prompt/tool changes in canonical system messages and applies append-only
+Pi 1.0.0 represents prompt/tool changes in canonical system messages and applies append-only
 `context_edit` entries when projecting history. Preparation uses that edited projection, while
 retaining original journal entries. System state retained by native compaction is not counted as
 reclaimable conversation. Historical system state passed to a worker is quoted source material;
@@ -203,14 +203,28 @@ shell/thread controls use their actual target identity. Independent resources ov
 unknown third-party sequential tool stays an ordered barrier, with calls on either side still
 parallel inside their side. The Host Documents/WorkingState gates remain the final mutation
 and alias authority; scheduling does not replace revision checks or recovery.
-The upstream seams are tracked in `packages/pi-host/patches/@earendil-works%2Fpi-agent-core@0.99.2.patch`
-and `packages/pi-host/patches/@earendil-works%2Fpi-coding-agent@0.99.2.patch`: the core builds the
+The upstream seams are tracked in `packages/pi-host/patches/@earendil-works%2Fpi-agent-core@1.0.0.patch`
+and `packages/pi-host/patches/@earendil-works%2Fpi-coding-agent@1.0.0.patch`: the core builds the
 resource dependency graph in the actual tool-call batch path, while coding-agent
 preserves effect declarations through `ToolDefinition` wrapping and carries the
 permission hook's Host-authoritative plan. There is no second Agent loop.
 Native codemode child calls use the same preparation and permission hooks, with a scheduler per
 parent scope so descendant calls cannot deadlock on their own enclosing operation. Child identities,
 structured results and nested usage remain native Pi facts projected to the UI.
+
+Pi 1.0 additionally exposes native `models.generateImages()`. The session's ModelRegistry owns model
+lookup, request-time credentials, cancellation and usage. Codemode model-call progress/final rows live
+in `details.calls`; the UI merges these with nested tool receipts without duplicating calls or changing
+receipt outcomes. Image content and usage are projected directly, including cost with zero tokens.
+
+`pi_docs` reads/list references in the actual selected SDK's `docs` directory. It uses native read
+offset/limit semantics, checks canonical containment (including aliases) and never asks Host to resolve
+a runtime asset as a workspace file. Native codemode exposure keeps it callable from scripts after a
+historical loadout is restored, without adding a direct declaration to that loadout. `document` is a
+reference name, not workspace authority. Ordinary
+tool permissions and session tool allowlists still apply. The optional `docsReference` factory seam
+points codemode instructions/errors to this reader when available; standard Pi CLI references are
+unchanged. No reference copy or renderer filesystem reader is introduced.
 
 ## Path Locking
 

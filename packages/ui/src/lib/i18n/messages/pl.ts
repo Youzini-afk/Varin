@@ -163,6 +163,8 @@ export const dict: Record<I18nKey, string> = {
   'chat.timeline.loadFailed': 'Nie udało się wczytać drzewa sesji',
   'chat.timeline.retry': 'Spróbuj ponownie',
   'chat.timeline.tools.openTerminal': 'Otwórz terminal',
+  'chat.timeline.tools.callCount': 'Wywołania: {count}',
+  'chat.timeline.tools.incompleteRecord': 'niepełny zapis',
   'chat.timeline.refresh': 'Odśwież drzewo sesji',
   'chat.timeline.attachmentsUnsupported': 'Usuń załączniki przed otwarciem /tree',
   'chat.chatInput.terminalContext': '{terminal}, wiersze {start}-{end}',

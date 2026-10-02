@@ -3,9 +3,42 @@ import {
   parseExtensionStatus,
   parseSubagentNotifications,
   parseSubagentRun,
+  projectToolCalls,
 } from './extensionPresentation';
 
 describe('Pi extension presentation', () => {
+  test('combines codemode model usage with native tool receipts without repeating calls', () => {
+    const result = projectToolCalls({
+      toolName: 'codemode',
+      nestedCalls: { complete: true, calls: [{ id: 'script/1', name: 'read', status: 'error', error: 'denied' }] },
+      details: { calls: [
+        { id: 'script/1', name: 'read', status: 'ok', durationMs: 12 },
+        { id: 'script/models/1', name: 'models.generateImages', args: 'images/model', status: 'ok', durationMs: 50, cost: 0.05 },
+        { id: 'script/models/2', name: 'models.classify', args: 'classifier/model', status: 'running' },
+        { id: 'malformed', name: 'unexpected', status: 'other' },
+        { id: 'malformed-object', name: 'unexpected', status: { toString: null } },
+      ] },
+    });
+    expect(result?.calls).toHaveLength(3);
+    expect(result?.calls[0]?.name).toBe('read');
+    expect(result?.calls[0]?.status).toBe('error');
+    expect(result?.calls[0]?.error).toBe('denied');
+    expect(result?.calls[1]?.model).toBe('images/model');
+    expect(result?.calls[1]?.cost).toBe(0.05);
+    expect(result?.calls[2]?.cost).toBeUndefined();
+    expect(result?.calls[2]?.status).toBe('unfinished');
+    expect(result?.complete).toBe(false);
+  });
+  test('reads live model rows from the native progress envelope without inventing usage', () => {
+    const result = projectToolCalls({ toolName: 'codemode', details: {
+      content: [], details: { calls: [
+        { id: 'model/1', name: 'models.classify', status: 'running', args: 'typesafe/jev' },
+      ] },
+    } }, true);
+    expect(result?.calls[0]?.model).toBe('typesafe/jev');
+    expect(result?.calls[0]?.cost).toBeUndefined();
+    expect(result?.complete).toBe(false);
+  });
   test('projects live and completed subagent details without dropping agents', () => {
     const presentation = parseSubagentRun({
       details: {

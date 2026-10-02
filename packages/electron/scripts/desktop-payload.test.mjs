@@ -68,6 +68,12 @@ test('packaging preserves language runtime libraries and assets, including TypeS
   assert(!selected.some((file) => file.endsWith('.map')));
 });
 
+test('packaging retains the Pi references used by codemode at runtime', async () => {
+  const references = ['docs/codemode.md', 'docs/models.md', 'docs/mcp.md'];
+  const selected = await collect('@earendil-works/pi-coding-agent', ['package.json', 'dist/index.js', ...references]);
+  for (const reference of references) assert(selected.includes(reference), `Missing runtime reference: ${reference}`);
+});
+
 test('packaging excludes generated Host declarations and duplicate UI without dropping runtime code', async () => {
   const selected = await collect('@varin/web', [
     'package.json', 'server/index.js', 'server/index.js.map',

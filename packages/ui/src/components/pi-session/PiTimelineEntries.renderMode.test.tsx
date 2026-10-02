@@ -91,6 +91,27 @@ afterEach(() => {
 });
 
 describe('Pi timeline chat render mode', () => {
+  test('shows image model cost without token counts and preserves native image content', () => {
+    const entries: PiSessionEntry[] = [{
+      id: 'image-agent', parentId: null, timestamp: '2026-10-02T00:00:00Z', type: 'message',
+      message: { ...liveAssistant, stopReason: 'stop', content: [
+        { type: 'toolCall', id: 'image-call', name: 'codemode', arguments: { code: 'image(...)' } },
+      ] },
+    }, {
+      id: 'image-result', parentId: 'image-agent', timestamp: '2026-10-02T00:00:01Z', type: 'message',
+      message: { role: 'toolResult', toolCallId: 'image-call', toolName: 'codemode', isError: false, timestamp: 3,
+        content: [{ type: 'image', mimeType: 'image/png', data: 'png-fixture' }],
+        usage: { ...liveAssistant.usage, cost: { ...liveAssistant.usage.cost, total: 0.05 } },
+        details: { calls: [{ id: 'image-call/model/1', name: 'models.generateImages', args: 'images/draw', status: 'ok', cost: 0.05 }] },
+      },
+    }];
+    const markup = renderTimeline({ ...liveAssistant, content: [] }, entries);
+    expect(markup).toContain('src="data:image/png;base64,png-fixture"');
+    expect(markup).toContain('images/draw');
+    expect(markup).toContain('$0.05');
+    expect(markup).not.toContain('0 tokens');
+    expect(markup).toContain('Calls: 1');
+  });
   test('sorted mode streams activity while withholding unfinished answer text', () => {
     useUIStore.setState({ chatRenderMode: 'sorted', activityRenderMode: 'summary' });
 

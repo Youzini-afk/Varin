@@ -15,7 +15,7 @@ function readPatch(name: PiSdkPackageName): Map<string, Hunk[]> {
   const result = new Map<string, Hunk[]>();
   if (name === "@earendil-works/pi-ai") return result;
   const patchDirectory = fileURLToPath(new URL("../patches/", import.meta.url));
-  const patch = readFileSync(join(patchDirectory, `${name.replace("/", "%2F")}@0.99.2.patch`), "utf8");
+  const patch = readFileSync(join(patchDirectory, `${name.replace("/", "%2F")}@1.0.0.patch`), "utf8");
   let path = "";
   let hunk: Hunk | undefined;
   for (const line of patch.split(/\r?\n/u)) {

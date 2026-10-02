@@ -171,6 +171,8 @@ export const dict: Record<I18nKey, string> = {
   'common.loading': '加载中...',
   'common.unavailable': '不可用',
   'chat.timeline.tools.openTerminal': '打开终端',
+  'chat.timeline.tools.callCount': '{count} 次调用',
+  'chat.timeline.tools.incompleteRecord': '记录未完成',
   'harness.threads.title': '子任务',
   'harness.context.title': '会话状态',
   'harness.context.open': '打开会话状态',

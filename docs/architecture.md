@@ -267,12 +267,23 @@ of the effective endpoint/API/model binding. These methods and their explicit ba
 on the private Application Host-to-worker protocol and are absent from the renderer/web/mobile runtime
 method catalog.
 
-The bundled Pi SDK is pinned to 0.99.2. Native catalogs distinguish chat, image and classifier models;
+The bundled Pi SDK is pinned to 1.0.0. Native catalogs distinguish chat, image and classifier models;
 Varin matches type plus ID and preserves non-chat definitions when editing chat providers. Decision
 bindings call Pi's native classifier APIs while retaining Varin's typed judge/choose/score results.
 Virtual selections remain visible as selections; request budgeting and compaction use the actual
 routed chat model. Native context edits and auxiliary usage entries retain their append-only journal
 identity. System messages carry current prompt/tool state and are not rendered as conversation bubbles.
+
+Pi 1.0 codemode reaches image models through the session's native ModelRegistry. Its image blocks,
+usage and model-call rows stay native journal facts; the UI combines `details.calls` with nested tool
+receipts by identity, preserves receipt outcomes, and displays billed usage even when token counts are
+zero. Model rows are also projected from live progress envelopes. Missing usage remains unknown.
+The `pi_docs` read-only tool serves references from the selected worker SDK's `docs` directory, using
+native read paging. Logical document names never pass through workspace path authorization or a
+different machine's filesystem. It uses native codemode exposure so historical loadouts need no new
+direct tool declaration; session allowlists and tool permissions still apply. Canonical containment
+rejects traversal and escaping aliases. The
+codemode factory's optional `docsReference` seam names this reader; default Pi CLI behavior is retained.
 
 Remote model discovery is a separate privileged operation. It uses the provider's host-owned auth
 when present and also supports anonymous endpoints. HTTP, HTTPS, localhost, LAN, and URL basic
@@ -327,6 +338,40 @@ Pi's JSON RPC mode is a useful compatibility and diagnostic backend, but direct 
 the complete settings, package, model, extension event-bus, and custom UI surfaces needed by the
 product. Pi's newer transport-neutral protocol is intentionally tracked, but its experimental
 server backend and current command set are not yet sufficient as the sole product foundation.
+
+#### Pi 1.0 durable runtime assessment
+
+The stable AgentSession/SessionManager integration remains the production runtime. Pi 1.0 removed
+experimental AgentHarness/pico3 exports from agent-core; Varin consumes the stable Agent loop instead.
+[`pi-durable`](https://github.com/earendil-works/pi/blob/v1.0.0/packages/durable/README.md) is an
+independent experimental harness with atomic entry/document/task commits, idempotent input admission,
+owned child tasks, durable queues, task graphs and restart recovery. These are useful for long-running
+Bot work, but are not a drop-in replacement for current SDK extensions or existing Pi JSONL assets.
+
+Source review established the following integration requirements:
+
+- Runtime tool execution builds its environment when executing or rerunning a tool
+  (`packages/durable/src/harness/tool.ts`); the coding demo selects NodeExecutionEnv from the current
+  conversation cwd. Varin must retain the target and operation identity fixed at Host acceptance
+  across environment changes and recovery. A replay-safe declaration alone does not make external
+  side effects exactly once; recovery must reconcile the original Host/Rust operation.
+- Durable generation/tool tasks and the task ownership graph must map to one Thread/Run lifecycle.
+  Native session entries remain Pi-owned; transferred workspace, file, process and compute resources
+  remain Rust-owned. A second lifecycle catalog or duplicate mutable resource store is not an adapter.
+- Native durable tool hooks/executionMode are a different contract from the stable extension runner's
+  tool_call hook, nested receipts and Varin's resource dependency plans. Permission, scoped source,
+  scheduling, recovery, MCP and extension UI behavior need explicit equivalence before adoption.
+- Its SQLite/JSONL storage has one process owner; the application must retain exclusive worker writer
+  ownership. Existing native Pi session files must remain accessible through their owning SDK.
+- The experimental pi-server is an attachment/service router over application-owned durable Sessions.
+  Authentication, catalog ownership and worker lifecycle remain application responsibilities. It does
+  not replace Varin's authenticated Surface protocol and validated Host contracts by itself.
+
+The next meaningful evaluation is restart recovery at admission, tool intent and result publication:
+repeat a request ID, change the environment while interrupted, reconcile a non-replayable side effect,
+and cancel owned foreground/background work. Compare with the current implementation's real behavior
+and complexity before choosing a runtime transition. No durable dependency or alternate writer is
+installed in production by the stable SDK upgrade.
 
 Direct workers are also where Varin's own agent harness lives. The session worker overrides Pi's
 built-in `bash`, `edit`, `write`, and `grep` tools by name through the same `customTools` path the
@@ -1338,7 +1383,7 @@ Desktop and the local Web UI can load while their runtime starts. Normal startup
 the user's explicit selection, or bundled Pi when nothing is selected; it does not search PATH or
 detect package managers for unrelated installations. The lifecycle starts the production broker
 directly: Node starts, the three Pi SDK packages resolve, and that worker's Host handshake must
-succeed. No disposable probe worker precedes it. The minimum supported Pi is 0.99.2. The selected SDK
+succeed. No disposable probe worker precedes it. The minimum supported Pi is 1.0.0. The selected SDK
 receives the shipped Host integration patches in memory; external installation files are never edited.
 Already adapted sources are unchanged. A changed required SDK seam fails explicitly with an adaptation
 error. Newer versions have no artificial version ceiling. An older Pi is upgrade-required only. There

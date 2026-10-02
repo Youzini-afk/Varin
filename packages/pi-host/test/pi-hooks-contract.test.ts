@@ -111,7 +111,7 @@ void (null as unknown as ToolDefinitionShape satisfies {
 // agent loop.
 // ---------------------------------------------------------------------------
 
-describe("Pi hooks contract (0.99.2)", () => {
+describe("Pi hooks contract (1.0.0)", () => {
   it("before_agent_start message is appended and system prompt is stable across steps", async () => {
     const root = await mkdtemp(join(tmpdir(), "varin-hooks-"));
     const agentDir = join(root, "agent");

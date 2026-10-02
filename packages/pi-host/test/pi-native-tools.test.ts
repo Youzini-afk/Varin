@@ -12,6 +12,8 @@ import { PiMcpConfigBridge, createPiMcpConfigBridgeExtension } from "../src/pi-m
 import { createPermissionGateExtension } from "../src/harness/permission-gate-extension.js";
 import type { HostServicesBridge } from "../src/harness/host-services-bridge.js";
 import { attachContextRequestBoundary, type ContextModelRequest } from "../src/harness/context-request-boundary.js";
+import { createPiDocsTool, PI_CODEMODE_REFERENCE } from "../src/harness/pi-docs-tool.js";
+import { projectMessage } from "../src/protocol-projector.js";
 
 // Real local stdio MCP peer. No network, credentials, or paid model request.
 const peer = `import { createInterface } from 'node:readline';
@@ -28,6 +30,61 @@ for await (const line of lines) {
     : request.method === 'resources/templates/list' ? { resourceTemplates: [] } : {};
   process.stdout.write(JSON.stringify({ jsonrpc: '2.0', id: request.id, result }) + '\\n');
 }`;
+
+test("native codemode reads runtime references and projects image calls with non-token usage", async () => {
+  const root = await mkdtemp(join(tmpdir(), "varin-native-images-"));
+  const faux = fauxProvider(); const model = faux.getModel();
+  const runtime = await ModelRuntime.create({ allowModelNetwork: false,
+    authPath: join(root, "auth.json"), modelsPath: join(root, "models.json") });
+  runtime.registerProvider(model.provider, { streamSimple: faux.provider.streamSimple,
+    api: model.api, baseUrl: model.baseUrl, models: [model] });
+  await runtime.setRuntimeApiKey(model.provider, "local-fixture");
+  const imageModel = runtime.getModelsOfType("image", "openrouter")[0]!;
+  assert.ok(imageModel); await runtime.setRuntimeApiKey(imageModel.provider, "local-fixture");
+  let imageCalls = 0;
+  const png = "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+j8l0AAAAASUVORK5CYII=";
+  // Only the provider result is mocked. The real registry, sandbox, journal and projector run.
+  runtime.generateImages = async (resolved, context, options) => {
+    imageCalls++; assert.equal(resolved.id, imageModel.id);
+    assert.equal(context.input[0]?.type, "text"); assert.ok(options?.signal);
+    return { api: resolved.api, provider: resolved.provider, model: resolved.id,
+      output: [{ type: "image", data: png, mimeType: "image/png" }],
+      usage: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, totalTokens: 0,
+        cost: { input: 0.05, output: 0, cacheRead: 0, cacheWrite: 0, total: 0.05 } },
+      stopReason: "stop", timestamp: Date.now() };
+  };
+  const loader = new DefaultResourceLoader({ cwd: root, agentDir: root, extensionFactories: [
+    { name: "codemode", builtin: true, replaceable: true,
+      factory: createCodemodeExtension({ docsReference: PI_CODEMODE_REFERENCE }) },
+  ] }); await loader.reload();
+  const { session } = await createAgentSession({ cwd: root, agentDir: root, modelRuntime: runtime,
+    model, sessionManager: SessionManager.inMemory(root), resourceLoader: loader,
+    customTools: [createPiDocsTool()], noTools: "builtin" });
+  await session.bindExtensions({ mode: "rpc" }); session.setActiveToolsByName(["codemode"]);
+  assert.equal(session.getActiveToolNames().includes("pi_docs"), false, "old loadouts do not need a new direct declaration");
+  const code = `text(await tools.pi_docs({document:"codemode.md",limit:2}));
+    const model = await models.getModelOfType("image",${JSON.stringify(imageModel.provider)},${JSON.stringify(imageModel.id)});
+    const result = await models.generateImages(model,{input:[{type:"text",text:"fixture only"}]});
+    for (const block of result.output) if (block.type === "image") image(block);`;
+  faux.setResponses([() => fauxAssistantMessage([fauxToolCall("codemode", { code })]), () => fauxAssistantMessage("done")]);
+  try {
+    await session.prompt("local fixture");
+    const entry = session.sessionManager.getBranch().find(entry => entry.type === "message" && entry.message.role === "toolResult");
+    assert.ok(entry?.type === "message" && entry.message.role === "toolResult");
+    const result = entry.message;
+    assert.equal(result.isError, false, JSON.stringify(result)); assert.equal(imageCalls, 1);
+    assert.ok(result.content.some(block => block.type === "image"));
+    assert.match(JSON.stringify(result.content), /Codemode/);
+    assert.match(JSON.stringify(result.details), /models.generateImages/);
+    assert.equal(result.usage?.cost.total, 0.05);
+    const projected = projectMessage(result);
+    assert.ok(projected.role === "toolResult");
+    assert.equal(projected.usage?.totalTokens, 0); assert.equal(projected.usage?.cost.total, 0.05);
+    assert.ok(projected.content.some(block => block.type === "image"));
+    const current = session.sessionManager.buildSessionContext().messages.filter(message => message.role === "system").at(-1);
+    assert.match(JSON.stringify(current), /pi_docs/);
+  } finally { session.dispose(); await rm(root, { recursive: true, force: true }); }
+});
 
 test("native virtual routing retains the selection and admits against the physical request limits", async () => {
   const root = await mkdtemp(join(tmpdir(), "varin-native-routing-"));

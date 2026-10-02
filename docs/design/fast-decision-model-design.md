@@ -94,7 +94,7 @@ Host 只持有去凭据绑定和已授权材料，通过 broker/Pi inference 请
 
 ### 3.3 Jev 首个适配器
 
-当前通过 Pi 0.99.2 原生 classifier API 调用 TypeSafe、Cloudflare System One 或 llama.cpp，
+当前通过 Pi 1.0.0 原生 classifier API 调用 TypeSafe、Cloudflare System One 或 llama.cpp，
 保留通用判断、选择、评分及部分回答语义。传输、认证、重试和供应商限制归原生 API；
 不把某个 TypeSafe 模型的容量固化到通用协议。嵌入和 HTTP 重排继续使用现有独立请求协议。
 由 adapter 处理版本、API 身份、真实输入约束、取消和返回映射；不从聊天模型列表猜测兼容。

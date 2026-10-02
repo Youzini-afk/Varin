@@ -30,6 +30,11 @@ try {
       throw new Error(`Bundled Pi dependency resolves outside the packaged application: ${name} -> ${entry}`);
     }
   }
+  const codingAgentRoot = sdk.findSdkPackageDir(hostPackageRoot, '@earendil-works/pi-coding-agent');
+  for (const reference of ['codemode.md', 'models.md', 'mcp.md']) {
+    const content = await readFile(path.join(codingAgentRoot, 'docs', reference), 'utf8');
+    if (!content.trim()) throw new Error(`Packaged Pi runtime reference is empty: ${reference}`);
+  }
   const runtimeBroker = await import(pathToFileURL(brokerEntry).href);
   const packageManifest = JSON.parse(await readFile(path.join(hostPackageRoot, 'package.json'), 'utf8'));
   const piVersion = packageManifest.dependencies?.['@earendil-works/pi-coding-agent'];

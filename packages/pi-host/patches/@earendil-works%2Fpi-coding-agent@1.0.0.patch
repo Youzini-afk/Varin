@@ -63,7 +63,7 @@
  }
  /** Options for model/thinking mutations. */
  export interface ModelMutationOptions {
-@@ -367,6 +368,7 @@
+@@ -373,6 +374,7 @@
      /** Current cache-warming state and the policy inputs that produced it. */
      get cacheWarmingStatus(): CacheWarmingStatus | undefined;
      /** Persist the cache-warming mode and immediately reconcile active warming. */
@@ -73,7 +73,7 @@
      get model(): Model<any> | undefined;
 --- a/dist/core/agent-session.js
 +++ b/dist/core/agent-session.js
-@@ -370,7 +370,7 @@
+@@ -376,7 +376,7 @@
          this._nestedToolCalls ??= new NestedToolCallRunner({
              getTools: () => this._getCallableTools(),
              isSequential: () => this.agent.toolExecution === "sequential",
@@ -82,7 +82,7 @@
                  const assistantMessage = this._findLastAssistantMessage();
                  if (!assistantMessage) {
                      return Promise.resolve({
-@@ -387,6 +387,7 @@
+@@ -393,6 +393,7 @@
                      afterToolCall: (context) => this._afterToolCall(context, parentId),
                      signal,
                      onUpdate,
@@ -90,7 +90,7 @@
                  });
              },
              emit: async (event) => {
-@@ -1004,6 +1005,9 @@
+@@ -1010,6 +1011,9 @@
          return this._cacheWarmer?.status;
      }
      /** Persist the cache-warming mode and immediately reconcile active warming. */
@@ -100,7 +100,7 @@
      setCacheWarmingMode(mode) {
          this.settingsManager.setCacheWarmingMode(mode);
          this._cacheWarmer?.onModeChanged();
-@@ -1519,9 +1523,9 @@
+@@ -1545,9 +1549,9 @@
          }
          // Check if we need to compact before sending (catches aborted responses).
          // The user's new prompt is sent below, so do not call agent.continue() here.
@@ -113,7 +113,7 @@
          }
          // Emit before_agent_start before normalizing images so extension-driven model
          // selection determines the resize profile used for the request and history.
-@@ -1845,6 +1849,7 @@
+@@ -1871,6 +1875,7 @@
       * Abort current operation and wait for agent to become idle.
       */
      async abort() {
@@ -121,7 +121,7 @@
          if (this._isAgentRunActive) {
              this._agentRunAbortRequested = true;
          }
-@@ -1882,6 +1887,7 @@
+@@ -1908,6 +1913,7 @@
       * @throws Error if no auth is configured for the model
       */
      async setModel(model, options = {}) {
@@ -356,7 +356,7 @@
       * startup, in milliseconds. Their tools become available when they connect. Other servers are
 --- a/dist/extensions/mcp/index.js
 +++ b/dist/extensions/mcp/index.js
-@@ -176,11 +176,14 @@
+@@ -183,11 +183,14 @@
  }
  function describeTransport(entry) {
      const { config } = entry;
@@ -376,7 +376,7 @@
  export function createMcpExtension(options = {}) {
      return (pi) => {
          let servers = [];
-@@ -202,6 +205,7 @@
+@@ -209,6 +212,7 @@
          let generation = 0;
          /** Working directory of the session, for stdio servers. */
          let sessionCwd = process.cwd();
@@ -384,7 +384,7 @@
          let credentials = options.credentials;
          /** The session's model registry, which resolves `auth.provider` tokens. */
          let modelRegistry;
-@@ -210,6 +214,21 @@
+@@ -217,6 +221,21 @@
          const updateConfig = options.updateConfig ?? ((entry, patch) => updateMcpServerConfig(entry.source, entry.name, patch));
          const listeners = new Set();
          const emitChange = () => {
@@ -406,7 +406,7 @@
              for (const listener of listeners)
                  listener();
          };
-@@ -476,10 +495,10 @@
+@@ -483,10 +502,10 @@
           * Save a config change; returns an error message when the file could not be updated. Changes to
           * registered servers only apply to the current session.
           */
@@ -419,7 +419,7 @@
                  }
                  catch (error) {
                      return `Could not update ${server.entry.source}: ${errorMessage(error)}`;
-@@ -541,7 +560,9 @@
+@@ -548,7 +567,9 @@
          };
          /** Returns an error message when the config could not be saved; connection errors show in the state. */
          const setEnabled = async (server, enabled) => {
@@ -430,7 +430,7 @@
              if (failed)
                  return failed;
              if (!enabled) {
-@@ -555,8 +576,10 @@
+@@ -562,8 +583,10 @@
              await startConnection(server, () => true);
              return undefined;
          };
@@ -443,7 +443,7 @@
              if (failed)
                  return failed;
              if (server.connection?.state === "connected")
-@@ -833,6 +856,7 @@
+@@ -844,6 +867,7 @@
              warnedUnreachable = false;
              waitedForStartup = false;
              sessionCwd = ctx.cwd;
@@ -451,7 +451,7 @@
              modelRegistry = ctx.modelRegistry;
              const current = ++generation;
              sessionActive = true;
-@@ -977,14 +1001,14 @@
+@@ -988,14 +1012,14 @@
                  if (rest.length > 0)
                      return null;
                  if (server === undefined) {
@@ -469,7 +469,7 @@
                      .filter((candidate) => candidate.entry.name.startsWith(server))
                      .map((candidate) => ({
                      value: `${action} ${candidate.entry.name}`,
-@@ -1008,6 +1032,15 @@
+@@ -1019,6 +1043,15 @@
                      return;
                  }
                  switch (action) {
@@ -485,3 +485,152 @@
                      case "login": {
                          const server = await pickServer(name, ctx, oauthPick);
                          if (server)
+--- a/dist/extensions/codemode/index.js
++++ b/dist/extensions/codemode/index.js
+@@ -19,6 +19,7 @@
+             ...createCodemodeToolDefinition({
+                 appendEntry: (customType, data) => pi.appendEntry(customType, data),
+                 models: options.models ?? true,
++                docsReference: options.docsReference,
+                 getToolNamespace: (name) => pi.getAllTools().find((tool) => tool.name === name)?.namespace,
+                 getMode: () => options.mode ?? readMode(pi),
+                 getInlineBudget: () => options.inlineBudget ?? readInlineBudget(pi),
+--- a/dist/extensions/codemode/index.d.ts
++++ b/dist/extensions/codemode/index.d.ts
+@@ -14,6 +14,8 @@
+     inlineBudget?: number;
+     /** Expose the model catalog and classifiers to scripts as `models`. Default: `true`. */
+     models?: boolean;
++    /** Host reference reader instruction, instead of a worker filesystem path. */
++    docsReference?: string;
+ }
+ export declare function createCodemodeExtension(options?: CodemodeExtensionOptions): ExtensionFactory;
+ declare const _default: ExtensionFactory;
+--- a/dist/extensions/codemode/tool.d.ts
++++ b/dist/extensions/codemode/tool.d.ts
+@@ -43,6 +43,8 @@
+      * (`ctx.modelRegistry`). Without it, `models` is not declared.
+      */
+     models?: boolean;
++    /** Host reference reader instruction. */
++    docsReference?: string;
+     /**
+      * Persists `store()` writes as a session custom entry. Without it, writes last only for the
+      * current script; `load()` still reads entries already on the branch.
+@@ -96,6 +98,8 @@
+ export interface CodemodeDescriptionOptions {
+     /** Declare the `models` namespace; only for tools created with model access. */
+     models?: boolean;
++    /** Host reference reader instruction. */
++    docsReference?: string;
+     /** Namespace of each tool, by tool name. Tools of one namespace are listed under one heading. */
+     namespaces?: ReadonlyMap<string, ToolNamespace>;
+     /** Tools that are callable but never listed with their declaration (`deferred` exposure). */
+--- a/dist/extensions/codemode/tool.js
++++ b/dist/extensions/codemode/tool.js
+@@ -56,7 +56,7 @@
+ - \`await tools.<name>({ ...args })\` resolves to a string, or an object if the tool's declaration says so, and rejects with an Error on failure. Calls still running when the script ends are cancelled.
+ - Optional first line: \`// @options: {"max_output_tokens": 10000, "timeout_ms": 60000}\``;
+ /** One line per global. The details live in {@link CODEMODE_DOCS_PATH}. */
+-function describeGlobals(models) {
++function describeGlobals(models, reference = CODEMODE_DOCS_PATH) {
+     const lines = [
+         "Globals:",
+         "- `text(value)`, `image(dataUrlOrImageBlock)`, `console.log(...)`, and top-level `return` add output; `exit()` ends the script.",
+@@ -64,7 +64,7 @@
+         "- `ALL_TOOLS`, `searchTools(query, { limit?, namespace? })`, `describeTool(name)`, `describeNamespace(name)`: find unlisted tools, such as MCP tools.",
+     ];
+     if (models) {
+-        lines.push(`- \`models\`: classifiers and image generation. Read ${CODEMODE_DOCS_PATH} first.`);
++        lines.push(`- \`models\`: classifiers and image generation. Read ${reference} first.`);
+     }
+     return lines.join("\n");
+ }
+@@ -139,7 +139,7 @@
+     }
+     const ordered = [...groups.values()].sort((a, b) => a.namespace === undefined ? -1 : b.namespace === undefined ? 1 : a.namespace.name.localeCompare(b.namespace.name));
+     const shown = selectCatalog(ordered, options.inlineBudget);
+-    const sections = [DESCRIPTION_INTRO, describeGlobals(options.models === true)];
++    const sections = [DESCRIPTION_INTRO, describeGlobals(options.models === true, options.docsReference)];
+     if (declarations.some((declaration) => shown.has(declaration.name) && mcpStructuredContentSchema(declaration.outputSchema) !== undefined)) {
+         sections.push(`Shared MCP Types:\n\`\`\`ts\n${MCP_TYPESCRIPT_PREAMBLE}\n\`\`\``);
+     }
+@@ -220,6 +220,7 @@
+     }));
+     descriptions[CODEMODE_TOOL_NAME] = createCodemodeDescription(listed, {
+         models: options.models === true,
++        docsReference: options.docsReference,
+         namespaces,
+         deferred: new Set(listed.filter((tool) => loadout.getExposure(tool.name) === "deferred").map((tool) => tool.name)),
+         inlineBudget: options.getInlineBudget?.() ?? DEFAULT_CODEMODE_INLINE_BUDGET,
+@@ -237,7 +238,7 @@
+         name: CODEMODE_TOOL_NAME,
+         label: CODEMODE_TOOL_NAME,
+         // Replaced with the declarations of the callable tools when the tool is activated.
+-        description: createCodemodeDescription([], { models: options.models === true }),
++        description: createCodemodeDescription([], { models: options.models === true, docsReference: options.docsReference }),
+         promptSnippet: codemodeToolSystemPromptContribution.snippet,
+         promptGuidelines: [...codemodeToolSystemPromptContribution.guidelines],
+         parameters: codemodeSchema,
+@@ -259,7 +260,7 @@
+     const definition = createCodemodeToolDefinition(options);
+     const tool = wrapToolDefinition(definition);
+     Object.assign(tool, {
+-        description: createCodemodeDescription(tools, { models: options.models === true }),
++        description: createCodemodeDescription(tools, { models: options.models === true, docsReference: options.docsReference }),
+         promptSnippet: definition.promptSnippet,
+         promptGuidelines: definition.promptGuidelines,
+     });
+--- a/dist/extensions/codemode/execute.js
++++ b/dist/extensions/codemode/execute.js
+@@ -82,8 +82,8 @@
+ }
+ const CLASSIFIER_CONTEXT_SHAPE = '{ state: { ... }, questions: { <id>: { type: "choice", instructions, criteria: { <label>: <meaning> } } | { type: "score", instructions, criteria: [<lowest level>, ..., <highest level>] } | { type: "bool", instructions, criteria: { true: <meaning>, false: <meaning> } } } }';
+ /** Check a script's classifier context, so mistakes fail with the expected shape instead of a provider error. */
+-function checkClassifierContext(context) {
+-    const fail = (problem) => new Error(`models.classify() ${problem}. Expected context: ${CLASSIFIER_CONTEXT_SHAPE}. See "Classify" in ${CODEMODE_DOCS_PATH}.`);
++function checkClassifierContext(context, reference = CODEMODE_DOCS_PATH) {
++    const fail = (problem) => new Error(`models.classify() ${problem}. Expected context: ${CLASSIFIER_CONTEXT_SHAPE}. See "Classify" in ${reference}.`);
+     if (!isRecord(context))
+         throw fail(`expects a context object as its second argument, got ${describeValue(context)}`);
+     if (!isRecord(context.state))
+@@ -122,8 +122,8 @@
+     return context;
+ }
+ /** Check a script's image context, so mistakes such as `{ prompt }` fail with the expected shape. */
+-function checkImagesContext(context) {
+-    const fail = (problem) => new Error(`models.generateImages() ${problem}. Expected context: { input: [{ type: "text", text: <prompt> }, ...optional { type: "image", data: <base64>, mimeType } references] }. See "Generate images" in ${CODEMODE_DOCS_PATH}.`);
++function checkImagesContext(context, reference = CODEMODE_DOCS_PATH) {
++    const fail = (problem) => new Error(`models.generateImages() ${problem}. Expected context: { input: [{ type: "text", text: <prompt> }, ...optional { type: "image", data: <base64>, mimeType } references] }. See "Generate images" in ${reference}.`);
+     if (!isRecord(context))
+         throw fail(`expects a context object as its second argument, got ${describeValue(context)}`);
+     const { input } = context;
+@@ -320,7 +320,7 @@
+         globals: [
+             ...createDiscoveryGlobals(callable, samples, options),
+             ...(options.models && ctx
+-                ? createModelGlobals(ctx.modelRegistry, toolCallId, calls, publish, addModelUsage, addGeneratedImages)
++                ? createModelGlobals(ctx.modelRegistry, toolCallId, calls, publish, addModelUsage, addGeneratedImages, options.docsReference)
+                 : []),
+         ],
+         timeoutMs: sourceOptions.timeoutMs ?? Number.POSITIVE_INFINITY,
+@@ -459,7 +459,7 @@
+  * Classifier and image calls appear as nested call rows so the renderer shows them, and their usage
+  * goes to `addUsage`. Rows show only the model, never prompts or image data.
+  */
+-function createModelGlobals(models, toolCallId, calls, publish, addUsage, addGeneratedImages) {
++function createModelGlobals(models, toolCallId, calls, publish, addUsage, addGeneratedImages, reference = CODEMODE_DOCS_PATH) {
+     const limit = createLimiter(MAX_CONCURRENT_MODEL_CALLS);
+     let callCount = 0;
+     /**
+@@ -524,8 +524,8 @@
+             const model = models.getModelOfType(toModelType(type), provider, id);
+             return model === undefined ? undefined : toModelInfo(model);
+         },
+-        "models.classify": (args, { signal }) => runModelCall("models.classify", "classifier", args, checkClassifierContext, (resolved, context) => models.classify(resolved, context, { signal })),
+-        "models.generateImages": (args, { signal }) => runModelCall("models.generateImages", "image", args, checkImagesContext, async (resolved, context) => {
++        "models.classify": (args, { signal }) => runModelCall("models.classify", "classifier", args, value => checkClassifierContext(value, reference), (resolved, context) => models.classify(resolved, context, { signal })),
++        "models.generateImages": (args, { signal }) => runModelCall("models.generateImages", "image", args, value => checkImagesContext(value, reference), async (resolved, context) => {
+             const result = await models.generateImages(resolved, context, { signal });
+             addGeneratedImages(result.output.filter((block) => block.type === "image").length);
+             return result;
