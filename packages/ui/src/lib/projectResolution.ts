@@ -1,4 +1,5 @@
 import type { ProjectEntry } from "@varin/application-client";
+import { projectFolders, projectPathKey } from "@varin/application-client";
 import type { WorktreeMetadata } from "@/types/worktree";
 
 import { normalizePath } from "@/lib/pathNormalization";
@@ -8,14 +9,16 @@ export const resolveProjectForDirectory = (
   projects: ProjectEntry[],
   directory: string | null,
 ): ProjectEntry | null => {
-  const nd = normalizeProjectPath(directory);
+  const nd = directory ? projectPathKey(directory) : null;
   if (!nd) return null;
   let best: ProjectEntry | null = null;
+  let bestLength = -1;
   for (const p of projects) {
-    const pp = normalizeProjectPath(p.path);
-    if (!pp) continue;
-    if (nd !== pp && !nd.startsWith(`${pp}/`)) continue;
-    if (!best || pp.length > (normalizeProjectPath(best.path)?.length ?? 0)) best = p;
+    for (const folder of projectFolders(p)) {
+      const pp = projectPathKey(folder);
+      if (nd !== pp && !nd.startsWith(pp === '/' ? '/' : `${pp}/`)) continue;
+      if (pp.length > bestLength) { best = p; bestLength = pp.length; }
+    }
   }
   return best;
 };

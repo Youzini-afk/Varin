@@ -1,4 +1,14 @@
-﻿export const settingsDict = {
+export const settingsDict = {
+  "projects.create.title": "Novo projeto",
+  "projects.create.name": "Nome do projeto",
+  "projects.create.action": "Criar projeto",
+  "projects.folders.title": "Pastas",
+  "projects.folders.hint": "Estas pastas são indexadas. A pasta com estrela é o diretório inicial das novas conversas.",
+  "projects.folders.add": "Adicionar pasta",
+  "projects.folders.remove": "Remover {path}",
+  "projects.folders.default": "Diretório de execução padrão",
+  "projects.folders.makeDefault": "Usar como diretório de execução padrão",
+  "projects.folders.edit": "Editar pastas",
   "settings.chat.width.title": "Largura da conversa",
   "settings.chat.width.hint": "Largura máxima das mensagens e da entrada; adapta-se a painéis estreitos.",
   "settings.chat.width.compact": "Compacta",

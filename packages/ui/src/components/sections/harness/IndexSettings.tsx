@@ -1,4 +1,7 @@
 import React from 'react';
+import { projectFolders } from '@varin/application-client';
+import { useProjectsStore } from '@/stores/useProjectsStore';
+import { useUIStore } from '@/stores/useUIStore';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Checkbox } from '@/components/ui/checkbox';
@@ -45,8 +48,8 @@ export function IndexSettings(props: Partial<HarnessSettingsPageProps>) {
   const [dirty, setDirty] = React.useState(false);
   const [busy, setBusy] = React.useState(false);
   const [error, setError] = React.useState<string | null>(null);
-  const [pickerTarget, setPickerTarget] = React.useState<'storage' | 'scope' | null>(null);
-  const [scopePath, setScopePath] = React.useState('');
+  const [pickerTarget, setPickerTarget] = React.useState<'storage' | null>(null);
+  const projects = useProjectsStore((state) => state.projects);
   const mounted = React.useRef(false);
   const statusRequest = React.useRef<AbortController | null>(null);
 
@@ -94,21 +97,12 @@ export function IndexSettings(props: Partial<HarnessSettingsPageProps>) {
       setError(failure instanceof Error ? failure.message : String(failure));
     } finally { setBusy(false); }
   };
-  const addScopePath = (directory: string) => {
-    const value = directory.trim();
-    if (!value) return;
-    edit({ indexedDirectories: [...new Set([...(draft?.indexedDirectories ?? []), value])] });
-    setScopePath('');
-  };
-  const chooseFolder = async (target: 'storage' | 'scope') => {
+  const chooseFolder = async (_target: 'storage') => {
     if (canRequestNativeDirectoryAccess()) {
-      const result = await requestDirectoryAccess(target === 'storage' ? draft?.storageDirectory ?? '' : scopePath,
+      const result = await requestDirectoryAccess(draft?.storageDirectory ?? '',
         { title: t('settings.page.harness.index.chooseFolder') });
-      if (result.success && result.path) {
-        if (target === 'storage') edit({ storageDirectory: result.path });
-        else addScopePath(result.path);
-      }
-    } else setPickerTarget(target);
+      if (result.success && result.path) edit({ storageDirectory: result.path });
+    } else setPickerTarget('storage');
   };
   const removeOldCache = async (directory: string) => {
     if (!status || !window.confirm(`${t('settings.page.harness.index.retained.confirm')}\n${directory}`)) return;
@@ -125,40 +119,27 @@ export function IndexSettings(props: Partial<HarnessSettingsPageProps>) {
   return <>
     <SettingsSection title={t('settings.page.harness.index.scope.title')}
       description={t('settings.page.harness.index.scope.description')} settingsItem="harness.semanticIndex.scope">
-      <SettingsFieldRow label={t('settings.page.harness.index.scope.mode')}>
-        <Select value={draft?.indexedDirectories == null ? 'all' : 'selected'}
-          onValueChange={(value) => edit({ indexedDirectories: value === 'all' ? null : draft?.indexedDirectories ?? [],
-            ...(value === 'all' ? { includeIgnoredDirectories: [] } : {}) })}>
-          <SelectTrigger size="settings" className="w-64"><SelectValue /></SelectTrigger>
-          <SelectContent>
-            <SelectItem value="all">{t('settings.page.harness.index.scope.all')}</SelectItem>
-            <SelectItem value="selected">{t('settings.page.harness.index.scope.selected')}</SelectItem>
-          </SelectContent>
-        </Select>
-      </SettingsFieldRow>
-      {draft && draft.indexedDirectories !== null ? <div className="space-y-2">
-        {draft?.indexedDirectories.map((directory) => <div key={directory} className="flex min-w-0 flex-wrap items-center gap-2">
-          <span className="min-w-0 flex-1 break-all typography-meta">{directory}</span>
+      {projects.map((project) => <div key={project.id} className="space-y-2">
+        <div className="flex items-center justify-between gap-3">
+          <p className="typography-ui-label">{project.label || project.path}</p>
+          <Button size="sm" variant="ghost" onClick={() => {
+            const ui = useUIStore.getState();
+            ui.setSettingsProjectsSelectedId(project.id);
+            ui.setSettingsPage('projects');
+          }}>{t('projects.folders.edit')}</Button>
+        </div>
+        {projectFolders(project).map((directory) => <div key={directory} className="flex min-w-0 flex-wrap items-center gap-2">
+          <span className="min-w-0 flex-1 break-all typography-meta text-muted-foreground">{directory}</span>
           <label className="flex items-center gap-2 typography-meta">
-            <Checkbox checked={(draft.includeIgnoredDirectories ?? []).includes(directory)} onChange={(checked) => edit({
-              includeIgnoredDirectories: checked === true ? [...new Set([...(draft.includeIgnoredDirectories ?? []), directory])]
-                : (draft.includeIgnoredDirectories ?? []).filter(item => item !== directory),
+            <Checkbox checked={(draft?.includeIgnoredDirectories ?? []).includes(directory)} onChange={(checked) => edit({
+              includeIgnoredDirectories: checked === true ? [...new Set([...(draft?.includeIgnoredDirectories ?? []), directory])]
+                : (draft?.includeIgnoredDirectories ?? []).filter(item => item !== directory),
             })} />
             {t('settings.page.harness.index.scope.includeIgnored')}
           </label>
-          <Button size="sm" variant="ghost" onClick={() => edit({ indexedDirectories: draft.indexedDirectories?.filter((item) => item !== directory) ?? [],
-            includeIgnoredDirectories: (draft.includeIgnoredDirectories ?? []).filter(item => item !== directory) })}>
-            {t('settings.page.harness.index.scope.remove')}
-          </Button>
         </div>)}
-        <div className="flex min-w-0 flex-wrap gap-2">
-          <Input className="min-w-64 flex-1" value={scopePath} onChange={(event) => setScopePath(event.target.value)}
-            aria-label={t('settings.page.harness.index.scope.directory')} />
-          <Button size="sm" variant="outline" disabled={!scopePath.trim()} onClick={() => addScopePath(scopePath)}>{t('settings.page.harness.index.scope.add')}</Button>
-          <Button size="sm" variant="outline" onClick={() => { void chooseFolder('scope'); }}>{t('settings.page.harness.index.chooseFolder')}</Button>
-        </div>
-        {draft?.indexedDirectories.length === 0 ? <p className="typography-meta text-muted-foreground">{t('settings.page.harness.index.scope.none')}</p> : null}
-      </div> : null}
+      </div>)}
+      {projects.length === 0 ? <p className="typography-meta text-muted-foreground">{t('settings.page.harness.index.scope.none')}</p> : null}
     </SettingsSection>
     <SettingsSection title={t('settings.page.harness.index.storage.title')}
       description={t('settings.page.harness.index.storage.description')} settingsItem="harness.semanticIndex">
@@ -236,14 +217,11 @@ export function IndexSettings(props: Partial<HarnessSettingsPageProps>) {
     {props.harness && props.update ? <InferenceSettings harness={props.harness} update={props.update}
       kind="embedding" localSemanticStatus={localSemantic.status} /> : null}
     <DirectoryExplorerDialog open={pickerTarget !== null} onOpenChange={(open) => { if (!open) setPickerTarget(null); }} mode="select-directory"
-      initialPath={pickerTarget === 'storage' ? draft?.storageDirectory ?? '' : scopePath} title={t('settings.page.harness.index.chooseFolder')}
-      description={t(pickerTarget === 'scope'
-        ? 'settings.page.harness.index.scope.description'
-        : 'settings.page.harness.index.storage.description')}
+      initialPath={draft?.storageDirectory ?? ''} title={t('settings.page.harness.index.chooseFolder')}
+      description={t('settings.page.harness.index.storage.description')}
       confirmLabel={t('settings.page.harness.index.chooseFolder')}
       onSelectDirectory={(directory) => {
-        if (pickerTarget === 'storage') edit({ storageDirectory: directory });
-        else if (pickerTarget === 'scope') addScopePath(directory);
+        edit({ storageDirectory: directory });
       }} />
   </>;
 }

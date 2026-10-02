@@ -12,6 +12,7 @@ export interface PiSessionWorkspaceProject {
   label?: string | null;
   lastOpenedAt?: number;
   path: string;
+  additionalPaths?: readonly string[];
   worktrees?: readonly { path: string }[];
 }
 
@@ -242,6 +243,7 @@ const normalizeWorkspaceProjects = <T extends PiSessionWorkspaceProject>(
     if (normalizedPath === null) return [];
     const normalizedRoots = [
       normalizedPath,
+      ...(project.additionalPaths ?? []).flatMap((folder) => normalizePath(folder) ?? []),
       ...(project.worktrees ?? []).flatMap((worktree) => {
         const path = normalizePath(worktree.path);
         return path === null ? [] : [path];

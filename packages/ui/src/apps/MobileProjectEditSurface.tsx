@@ -31,6 +31,7 @@ import type { WorktreeMetadata } from '@/types/worktree';
 
 import { MobileDeleteWorktreeDialog } from './MobileDeleteWorktreeDialog';
 import { MobileSurfaceShell } from './MobileSurfaceShell';
+import { ProjectFoldersSettings } from '@/components/sections/projects/ProjectFoldersEditor';
 
 type MobileEditableProject = {
   id: string;
@@ -109,6 +110,7 @@ export const MobileProjectEditSurface: React.FC<MobileProjectEditSurfaceProps> =
   const { t } = useI18n();
   const { currentTheme } = useThemeSystem();
   const updateProjectMeta = useProjectsStore((state) => state.updateProjectMeta);
+  const folderProject = useProjectsStore((state) => state.projects.find((entry) => entry.id === project?.id));
   const discoverProjectIcon = useProjectsStore((state) => state.discoverProjectIcon);
   const removeProjectIcon = useProjectsStore((state) => state.removeProjectIcon);
   const setWorktreeOrder = useWorktreeOrderStore((state) => state.setWorktreeOrder);
@@ -282,6 +284,7 @@ export const MobileProjectEditSurface: React.FC<MobileProjectEditSurfaceProps> =
             </div>
 
             {/* Color */}
+            {folderProject ? <ProjectFoldersSettings project={folderProject} /> : null}
             <div className="flex flex-col gap-2">
               <label className="typography-ui-label font-medium text-foreground">
                 {t('projectEditDialog.field.color')}

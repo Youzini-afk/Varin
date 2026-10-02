@@ -7,6 +7,17 @@ contracts without hardcoding an origin, port, desktop IPC channel, or local path
 
 ## Module map
 
+Projects have a stable identity and an editable collection of folders. `ProjectEntry.path` is
+the default execution folder; `additionalPaths` contains the other folders. `projectFolders()`
+is the shared collection helper. Membership and default retrieval use the collection; commands,
+Git and project actions use the selected execution directory. These folders never act as file
+access permissions. Bot entry sessions are explicitly projectless.
+
+`ProjectCreateDialog` collects a name and folders, reusing `DirectoryPickerDialog` for browsing,
+native directory access, directory creation and Git cloning. `ProjectFoldersSettings` is shared
+by desktop settings and the mobile project editor. Folder edits preserve project/session IDs and
+project configuration; changing the default affects new conversations, not running sessions.
+
 - `src/lib/documents/DOCUMENTATION.md`: revisioned client buffers and conflict behavior.
 - `src/lib/workbench/editors/DOCUMENTATION.md`: editor groups, providers, panels, and layout state.
 - `src/lib/monaco/DOCUMENTATION.md`: desktop/Web editor projection and language integration.

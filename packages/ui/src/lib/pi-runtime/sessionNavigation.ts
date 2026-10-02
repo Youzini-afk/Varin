@@ -1,4 +1,5 @@
 import type { ProjectEntry } from '@varin/application-client';
+import { projectFolders } from '@varin/application-client';
 import { normalizePath } from '@/lib/pathNormalization';
 import { useDirectoryStore } from '@/stores/useDirectoryStore';
 import { usePiSessionStore, selectActivePiSessions } from '@/stores/usePiSessionStore';
@@ -57,7 +58,7 @@ export const findPiProjectForCwd = (
   const normalizedCwd = normalizePath(cwd);
   if (!normalizedCwd) return null;
   return projects
-    .map((project) => ({ normalizedPath: normalizePath(project.path), project }))
+    .flatMap((project) => projectFolders(project).map((folder) => ({ normalizedPath: normalizePath(folder), project })))
     .filter((entry): entry is { normalizedPath: string; project: ProjectEntry } => (
       entry.normalizedPath !== null && isPathWithin(normalizedCwd, entry.normalizedPath)
     ))

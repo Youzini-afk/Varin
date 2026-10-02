@@ -8,6 +8,7 @@ import {
 } from '@/components/sections/projects/useProjectIdentityForm';
 import { useProjectIdentityAutoSave } from '@/components/sections/projects/useProjectIdentityAutoSave';
 import type { ProjectEntry } from '@varin/application-client';
+import { ProjectFoldersSettings } from './ProjectFoldersEditor';
 
 type ProjectSettingsPanelProps = {
   project: ProjectEntry | null;
@@ -47,6 +48,7 @@ export const ProjectSettingsPanel: React.FC<ProjectSettingsPanelProps> = ({
   return (
     <div className="space-y-0">
       <ProjectIdentityFields form={form} />
+      <ProjectFoldersSettings project={project} />
       <ProjectActionsSection projectRef={projectRef} />
       {showWorktrees ? <WorktreeSectionContent projectRef={projectRef} /> : null}
     </div>

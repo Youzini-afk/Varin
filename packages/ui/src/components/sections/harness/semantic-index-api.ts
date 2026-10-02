@@ -6,7 +6,6 @@ export interface SemanticIndexConfig {
   storageDirectory: string | null;
   concurrentRequests: number;
   requestIntervalMs: number;
-  indexedDirectories: string[] | null;
   includeIgnoredDirectories?: string[];
 }
 

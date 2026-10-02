@@ -68,27 +68,24 @@ export const useProjectIdentityForm = (project: EditableProject | null) => {
   }, []);
 
   const projectId = project?.id ?? null;
+  const savedName = project?.label ?? '';
+  const savedIcon = project?.icon ?? null;
+  const savedColor = project?.color ?? null;
+  const savedBackground = project?.iconBackground ?? null;
+  const savedModel = project?.defaultModel;
+  const savedFocus = project?.defaultWorkFocus ?? 'code';
 
   React.useEffect(() => {
-    if (!project) {
-      setName('');
-      setIcon(null);
-      setColor(null);
-      setIconBackground(null);
-      setDefaultModel(undefined);
-      setDefaultWorkFocus('code');
-      return;
-    }
-    setName(project.label ?? '');
-    setIcon(project.icon ?? null);
-    setColor(project.color ?? null);
-    setIconBackground(project.iconBackground ?? null);
-    setDefaultModel(project.defaultModel);
-    setDefaultWorkFocus(project.defaultWorkFocus ?? 'code');
+    setName(savedName);
+    setIcon(savedIcon);
+    setColor(savedColor);
+    setIconBackground(savedBackground);
+    setDefaultModel(savedModel);
+    setDefaultWorkFocus(savedFocus);
     setPendingRemoveImageIcon(false);
     clearPendingUploadIcon();
     setPreviewImageFailed(false);
-  }, [project, clearPendingUploadIcon]);
+  }, [projectId, savedName, savedIcon, savedColor, savedBackground, savedModel, savedFocus, clearPendingUploadIcon]);
 
   React.useEffect(() => {
     return () => {

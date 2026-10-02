@@ -4,7 +4,7 @@ import type { ProjectEntry } from '@varin/application-client';
 import type { WorkFocusId } from '@varin/protocol';
 import type { DesktopSettings } from '@/lib/desktop';
 import { updateDesktopSettings } from '@/lib/persistence';
-import { createProjectIdFromPath } from '@/lib/projectId';
+import { projectFolders, projectPathKey } from '@varin/application-client';
 import { NO_ACTIVE_PROJECT_STORAGE_VALUE } from '@/lib/projectSelection';
 import { getDeferredSafeStorage } from './utils/safeStorage';
 import { useDirectoryStore } from './useDirectoryStore';
@@ -42,7 +42,8 @@ interface ProjectsStore {
   activeProjectId: string | null;
   manualProjectOrder: string[];
 
-  addProject: (path: string, options?: { label?: string; id?: string }) => Promise<ProjectEntry | null>;
+  addProject: (path: string, options?: { label?: string; id?: string; additionalPaths?: string[] }) => Promise<ProjectEntry | null>;
+  updateProjectFolders: (id: string, folders: string[]) => Promise<void>;
   removeProject: (id: string) => void;
   setActiveProject: (id: string | null) => Promise<boolean>;
   setActiveProjectIdOnly: (id: string | null) => void;
@@ -153,9 +154,8 @@ const normalizeProjectPath = (value: string): string => {
   const expanded = resolveTildePath(trimmed, homeDirectory);
 
   const normalized = expanded.replace(/\\/g, '/');
-  if (normalized === '/') {
-    return '/';
-  }
+  if (normalized === '/') return '/';
+  if (/^[A-Za-z]:\/?$/.test(normalized)) return `${normalized.slice(0, 2)}/`;
   return normalized.length > 1 ? normalized.replace(/\/+$/, '') : normalized;
 };
 
@@ -229,7 +229,6 @@ const sanitizeProjects = (value: unknown): ProjectEntry[] => {
 
   const result: ProjectEntry[] = [];
   const seenIds = new Set<string>();
-  const seenPaths = new Set<string>();
 
   for (const entry of value) {
     if (!entry || typeof entry !== 'object') continue;
@@ -241,16 +240,19 @@ const sanitizeProjects = (value: unknown): ProjectEntry[] => {
     const normalizedPath = normalizeProjectPath(rawPath);
     if (!normalizedPath) continue;
 
-    const id = createProjectIdFromPath(normalizedPath);
+    const id = typeof candidate.id === 'string' ? candidate.id.trim() : '';
     if (!id) continue;
 
-    if (seenIds.has(id) || seenPaths.has(normalizedPath)) continue;
+    if (seenIds.has(id)) continue;
     seenIds.add(id);
-    seenPaths.add(normalizedPath);
 
     const project: ProjectEntry = {
       id,
       path: normalizedPath,
+      additionalPaths: projectFolders({ path: normalizedPath, additionalPaths: Array.isArray(candidate.additionalPaths)
+        ? candidate.additionalPaths.filter((value): value is string => typeof value === 'string' && Boolean(value.trim()))
+          .map(normalizeProjectPath)
+        : [] }).slice(1),
     };
 
     if (typeof candidate.label === 'string' && candidate.label.trim().length > 0) {
@@ -408,7 +410,7 @@ export const useProjectsStore = create<ProjectsStore>()(
       return { ok: true, normalizedPath: normalized };
     },
 
-    addProject: async (path: string, options?: { label?: string; id?: string }) => {
+    addProject: async (path: string, options?: { label?: string; id?: string; additionalPaths?: string[] }) => {
       const { validateProjectPath } = get();
       const validation = validateProjectPath(path);
       if (!validation.ok || !validation.normalizedPath) {
@@ -416,7 +418,8 @@ export const useProjectsStore = create<ProjectsStore>()(
       }
 
       const normalizedPath = validation.normalizedPath;
-      const existing = get().projects.find((project) => project.path === normalizedPath);
+      const existing = options?.label || options?.additionalPaths?.length ? undefined
+        : get().projects.find((project) => projectPathKey(project.path) === projectPathKey(normalizedPath));
       if (existing) {
         if (!await get().setActiveProject(existing.id)) {
           throw new Error('Failed to persist the selected workspace.');
@@ -426,10 +429,11 @@ export const useProjectsStore = create<ProjectsStore>()(
 
       const now = Date.now();
       const label = options?.label?.trim() || deriveProjectLabel(normalizedPath);
-      const id = createProjectIdFromPath(normalizedPath);
+      const id = options?.id ?? `project_${crypto.randomUUID()}`;
       const entry: ProjectEntry = {
         id,
         path: normalizedPath,
+        additionalPaths: projectFolders({ path: normalizedPath, additionalPaths: options?.additionalPaths?.map(normalizeProjectPath) }).slice(1),
         label,
         color: pickAutoColor(get().projects),
         addedAt: now,
@@ -453,6 +457,24 @@ export const useProjectsStore = create<ProjectsStore>()(
       }
       void get().discoverProjectIcon(entry.id);
       return entry;
+    },
+
+    updateProjectFolders: async (id, folders) => {
+      const normalized = folders.map(normalizeProjectPath).filter(Boolean);
+      const path = normalized[0];
+      if (!path) throw new Error('A project needs at least one folder.');
+      const current = get();
+      const previous = current.projects.find((project) => project.id === id);
+      if (!previous) throw new Error('Project no longer exists.');
+      const updated = { ...previous, path, additionalPaths: projectFolders({ path, additionalPaths: normalized.slice(1) }).slice(1) };
+      const projects = current.projects.map((project) => project.id === id ? updated : project);
+      set({ projects });
+      if (!await persistProjects(projects, current.activeProjectId, current.manualProjectOrder).catch(() => false)) {
+        const rollback = get().projects.map((project) => project === updated ? previous : project);
+        set({ projects: rollback });
+        cacheProjects(rollback, get().activeProjectId);
+        throw new Error('Failed to save project folders.');
+      }
     },
 
     removeProject: (id: string) => {

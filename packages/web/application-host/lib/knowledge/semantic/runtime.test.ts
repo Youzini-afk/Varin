@@ -9,6 +9,7 @@ import { createHashEmbedder } from "./embedder.js";
 import { workspaceScope, remoteEmbeddingSpaceId } from "./identity.js";
 import { createSemanticIndexRuntime } from "./runtime.js";
 import { createRemoteEmbedder } from "./remote-embedder.js";
+import { createProjectIndexScope } from '../index-scope.js';
 
 const disposes: Array<() => Promise<void>> = [];
 afterEach(async () => {
@@ -26,6 +27,42 @@ const gate = () => {
 };
 
 describe("semantic index runtime", () => {
+  it('switches project folders without reading their parent or serving removed folders from the old index', async () => {
+    const documents = await createDocumentAuthorityHarness();
+    disposes.push(() => documents.cleanup());
+    const first = join(documents.workspaceRoot, 'first');
+    const second = join(documents.workspaceRoot, 'second');
+    const bot = join(documents.workspaceRoot, 'bot-home');
+    for (const folder of [first, second, bot]) {
+      mkdirSync(folder);
+      writeFileSync(join(folder, 'Main.scala'), 'object Main { def needle = 42 }\n');
+    }
+    const selected = createProjectIndexScope([first], [bot]);
+    const inventory = vi.fn(async (root: string) => [{ name: 'Main.scala', path: join(root, 'Main.scala'), relativePath: 'Main.scala' }]);
+    const runtime = createSemanticIndexRuntime({ dataDir: documents.dataDir, hostId: 'project-folders', documents: documents.authority,
+      structureSource: parsingSource(), embedder: createHashEmbedder(), getIndexScope: selected.get, searchFilesystemFiles: inventory });
+    disposes.push(() => runtime.dispose());
+    const scope = workspaceScope(documents.identity.workspaceId);
+    await runtime.scanScope(scope);
+    expect((await runtime.search(scope, 'needle', 5)).hits.map((hit) => hit.documentId)).toEqual(['first/Main.scala']);
+    selected.update([second]);
+    expect((await runtime.search(scope, 'needle', 5)).hits).toEqual([]);
+    await runtime.scanScope(scope);
+    expect((await runtime.search(scope, 'needle', 5)).hits.map((hit) => hit.documentId)).toEqual(['second/Main.scala']);
+    runtime.observeDocumentMutation({ workspaceId: scope.scopeId, resourceId: 'bot-home/Main.scala', kind: 'modified' });
+    await runtime.drain();
+    expect(inventory.mock.calls.map(([root]) => root)).toEqual([await fsPromises.realpath(first), await fsPromises.realpath(second)]);
+    // Even explicitly selecting the parent never admits Host-owned Bot files.
+    selected.update([documents.workspaceRoot]);
+    inventory.mockImplementation(async (root) => ['first', 'second', 'bot-home'].map((folder) => ({
+      name: 'Main.scala', path: join(root, folder, 'Main.scala'), relativePath: `${folder}/Main.scala`,
+    })));
+    await runtime.scanScope(scope);
+    expect((await runtime.search(scope, 'needle', 5)).hits.map((hit) => hit.documentId).sort()).toEqual(['first/Main.scala', 'second/Main.scala']);
+    selected.update([]);
+    expect((await runtime.search(scope, 'needle', 5)).hits).toEqual([]);
+    selected.dispose();
+  });
   it('keeps directory overrides scoped and reports unsupported files separately from indexed candidates', async () => {
     const documents = await createDocumentAuthorityHarness();
     disposes.push(() => documents.cleanup());

@@ -33,21 +33,27 @@ derived store (`../vectors/`); they reuse `harness.embed` but never this MiniLM 
 - Production assembly: `workspace-runtime.ts` owns per-workspace Settings/describe resolution, remote
   transport, config watches, backend refresh, query view selection and shutdown. Application Host uses
   its `semanticRecall` / `harnessSettings` / `rerankExploreViews` directly; tests consume those same methods.
-  One Host-owned serial reconciler periodically inventories activated roots to recover additions missed
+  One Host-owned serial reconciler periodically inventories selected project folders to recover additions missed
   by quiet watches. The first interval is at least one minute; later quiet intervals use the prior scan's
   elapsed time to target about 1% wall-time duty. Periodic scans stay detached from query latency, while
   watcher reset/recovery still forces content verification.
-  A virtual Thread uses its pinned WorkingBranch files. A materialized Thread indexes its execution
-  Documents workspace, never the owning workspace's current files. Both Documents mutations and successful
+  A virtual Thread uses its pinned WorkingBranch files. A materialized Thread queries its execution
+  Documents workspace; background indexing still requires an explicitly selected source folder. Both Documents mutations and successful
   native-tool journal completions notify this runtime. Open indexes mask an observed path before the tool
   is acknowledged; embedding runs in the background. Metadata resolution obeys query cancellation, and a
   retired workspace worker or closed Host cannot publish a late binding/watch as current.
 - Management: `index-management.ts` owns `semantic-index-settings.json` under the Varin data directory.
   It exposes authenticated status and revisioned configuration routes. The settings page reports the
   active index directory, disk bytes, active-root scan progress, and the embedding model binding.
-  The user may select child directories inside a multi-project resource root; the inventory then
-  starts at those folders rather than enumerating the entire parent. An empty selection disables
-  background semantic indexing, leaving lexical and graph search available.
+  Project entries own the source folder collection: `path` is the default execution folder and
+  `additionalPaths` contains the other explicitly selected folders. `../index-scope.ts` intersects
+  this collection with Documents addressing roots for both semantic and symbol inventories. A
+  registered root, tool read/write, inference request, or Bot home does not grant indexing eligibility.
+  Empty collections disable background source indexing; lexical retrieval and direct structure reads
+  remain available. The Host's private Bot homes are excluded even when a selected parent contains them.
+  Folder edits cancel work under the old scope and refresh indexing without a restart. Queries mask
+  removed folders immediately. A broad addressing root is never recursively watched merely because
+  one selected project lives beneath it. Startup activates each selected folder directly.
   Native inventory reports the actual Git root and whether an empty selected directory is ignored.
   Each selected directory can opt into `includeIgnoredDirectories`; the override is clipped to
   the selected indexing scope and applies to subsequent mutation eligibility as well as scans.
@@ -55,7 +61,7 @@ derived store (`../vectors/`); they reuse `harness.embed` but never this MiniLM 
   belongs to enumeration and eligibility, while the explicit content read retains native path grants.
   Other directories retain Git filtering. Status distinguishes visible files, semantic candidates,
   structurally supported files, text fallback files, unsupported files and published documents.
-  Directory selection, storage location and request pacing are frozen when the Host starts. Editing them requires a Host
+  Storage location, request pacing and ignored-file overrides are frozen when the Host starts. Editing them requires a Host
   restart: an active TriviumDB is never moved while open. A different storage directory begins a
   new derived index; the previous cache is preserved until explicitly cleaned up. This storage
   choice affects the code-semantic index, not the authoritative knowledge database, symbol graph,

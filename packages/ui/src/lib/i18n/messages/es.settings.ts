@@ -1,4 +1,14 @@
-﻿export const settingsDict = {
+export const settingsDict = {
+  "projects.create.title": "Nuevo proyecto",
+  "projects.create.name": "Nombre del proyecto",
+  "projects.create.action": "Crear proyecto",
+  "projects.folders.title": "Carpetas",
+  "projects.folders.hint": "Se indexan estas carpetas. La carpeta marcada es el directorio inicial de las conversaciones nuevas.",
+  "projects.folders.add": "Añadir carpeta",
+  "projects.folders.remove": "Quitar {path}",
+  "projects.folders.default": "Directorio de ejecución predeterminado",
+  "projects.folders.makeDefault": "Usar como directorio de ejecución predeterminado",
+  "projects.folders.edit": "Editar carpetas",
   "settings.chat.width.title": "Ancho de conversación",
   "settings.chat.width.hint": "Ancho máximo de los mensajes y del editor; se adapta a paneles estrechos.",
   "settings.chat.width.compact": "Compacto",

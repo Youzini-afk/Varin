@@ -1,7 +1,17 @@
-﻿import { settingsDict as englishSettingsDict } from './en.settings';
+import { settingsDict as englishSettingsDict } from './en.settings';
 
 export const settingsDict = {
   ...englishSettingsDict,
+  "projects.create.title": "Nouveau projet",
+  "projects.create.name": "Nom du projet",
+  "projects.create.action": "Créer le projet",
+  "projects.folders.title": "Dossiers",
+  "projects.folders.hint": "Ces dossiers sont indexés. Le dossier marqué est le répertoire de départ des nouvelles conversations.",
+  "projects.folders.add": "Ajouter un dossier",
+  "projects.folders.remove": "Retirer {path}",
+  "projects.folders.default": "Répertoire d’exécution par défaut",
+  "projects.folders.makeDefault": "Définir comme répertoire d’exécution par défaut",
+  "projects.folders.edit": "Modifier les dossiers",
   "settings.chat.width.title": "Largeur de conversation",
   "settings.chat.width.hint": "Largeur maximale des messages et de la saisie, adaptée aux panneaux étroits.",
   "settings.chat.width.compact": "Compact",

@@ -207,6 +207,8 @@ export interface HarnessServiceHost {
   observationCursors: ObservationCursorStore;
   pathLockService: PathLockService;
   searchService: HarnessSearchService;
+  /** User-selected project folders for default retrieval, separately authorized from index membership. */
+  defaultExplorePaths?: (actor: HarnessActorContext) => Promise<import('./router.js').HarnessAuthorizedPath[]>;
   exploreQueryStore: ExploreQueryStore;
   diagnosticsProvider: DiagnosticsProvider | null;
   lspNavigationServices: ReturnType<typeof createLspNavigationServices> | null;
@@ -538,6 +540,7 @@ export interface HarnessServiceHostOptions {
   graphRecall?: HarnessServiceHost["graphRecall"];
   relationCollector?: HarnessServiceHost["relationCollector"];
   semanticRecall?: HarnessServiceHost["semanticRecall"];
+  defaultExplorePaths?: HarnessServiceHost["defaultExplorePaths"];
   pinWorkingBranchQuery?: HarnessServiceHost["pinWorkingBranchQuery"];
   harnessSettings?: HarnessServiceHost["harnessSettings"];
   rerankExploreViews?: HarnessServiceHost["rerankExploreViews"];
@@ -1059,6 +1062,7 @@ export function createHarnessServiceHost(options: HarnessServiceHostOptions): Ha
     graphRecall,
     relationCollector,
     semanticRecall,
+    ...(options.defaultExplorePaths ? { defaultExplorePaths: options.defaultExplorePaths } : {}),
     ...(pinWorkingBranchQuery ? { pinWorkingBranchQuery } : {}),
     ...(harnessSettings ? { harnessSettings } : {}),
     ...(rerankExploreViews ? { rerankExploreViews } : {}),

@@ -4,6 +4,14 @@ import type { DesktopSettings } from "@/lib/desktop"
 import { useProjectsStore } from "./useProjectsStore"
 
 describe("useProjectsStore settings synchronization", () => {
+  test('retains a named project identity and all folders when its default folder changes', () => {
+    const project = { id: 'project_stable', path: '/repo/app', additionalPaths: ['/repo/docs', '/other/lib'], label: 'Product' };
+    useProjectsStore.getState().synchronizeFromSettings({ projects: [project], activeProjectId: project.id });
+    useProjectsStore.getState().synchronizeFromSettings({ projects: [{ ...project, path: '/other/lib', additionalPaths: ['/repo/app', '/repo/docs'] }], activeProjectId: project.id });
+    expect(useProjectsStore.getState().getActiveProject()).toEqual({
+      id: project.id, label: 'Product', path: '/other/lib', additionalPaths: ['/repo/app', '/repo/docs'],
+    });
+  });
   test("treats a successful empty project snapshot as authoritative", () => {
     const project = { id: "project-a", path: "/repo", label: "Repo", defaultWorkFocus: "research" } as ProjectEntry
     useProjectsStore.setState({

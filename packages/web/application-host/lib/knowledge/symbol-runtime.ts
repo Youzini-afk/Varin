@@ -1,3 +1,5 @@
+import pathModule from "node:path";
+import { insideDirectory, excludedFromIndex, resolveScopedIndexRoots, resolveIndexScanRoots, type IndexScope } from "./index-scope.js";
 import type { DocumentMutationObservation } from "../documents/authority.js";
 import type { DocumentAuthority } from "../documents/authority.js";
 import type { FileSearchItems } from "../fs/types.js";
@@ -40,6 +42,7 @@ export interface SymbolGraphRuntimeOptions {
     options: { query: string; respectGitignore?: boolean; includeRevisions?: boolean; signal?: AbortSignal },
   ) => Promise<FileSearchItems>;
   isIndexablePath?: (workspaceId: string, path: string, signal: AbortSignal) => Promise<boolean>;
+  getIndexScope?: () => IndexScope;
   onError?: (error: unknown) => void;
 }
 
@@ -162,6 +165,13 @@ export function createSymbolGraphRuntime(options: SymbolGraphRuntimeOptions) {
     languageId: string,
     signal?: AbortSignal,
   ): Promise<CollectedSymbols | null> => {
+    const scope = options.getIndexScope?.();
+    if (scope) {
+      signal = AbortSignal.any([scope.signal, ...(signal ? [signal] : [])]);
+      const root = (await options.documents.inspectWorkspace!(workspaceId)).root;
+      const roots = await resolveScopedIndexRoots(root, scope);
+      if (signal.aborted || excludedFromIndex(scope, pathModule.resolve(root, path)) || !roots.some((directory) => insideDirectory(directory, pathModule.resolve(root, path)))) return null;
+    }
     if (!options.structureSource) return loadSymbolsFromLsp(workspaceId, path, languageId, signal);
     let analysis;
     let lineLengths: number[];
@@ -304,14 +314,21 @@ export function createSymbolGraphRuntime(options: SymbolGraphRuntimeOptions) {
 
   const observeDocumentMutation = (event: DocumentMutationObservation): void => {
     if (disposed) return;
-    track(collectorFor(event.workspaceId).then((collector) => {
+    const scope = options.getIndexScope?.();
+    track((async () => {
+      if (scope) {
+        const root = (await options.documents.inspectWorkspace!(event.workspaceId)).root;
+        const roots = await resolveScopedIndexRoots(root, scope);
+        if (scope.signal.aborted || excludedFromIndex(scope, pathModule.resolve(root, event.resourceId)) || !roots.some((directory) => insideDirectory(directory, pathModule.resolve(root, event.resourceId)))) return;
+      }
+      const collector = await collectorFor(event.workspaceId);
       if (!collector) return;
-      collector.observe({ path: event.resourceId, kind: event.kind });
+      collector.observe({ path: event.resourceId, kind: event.kind, ...(scope ? { signal: scope.signal } : {}) });
       return collector.drain().then(async () => {
         const store = await options.getStore(event.workspaceId);
         if (store) await store.resolveAssociationCandidates();
       });
-    }));
+    })());
   };
 
   const scanWorkspace = (workspaceId: string, optionsForScan?: { signal?: AbortSignal }): Promise<void> => {
@@ -321,13 +338,16 @@ export function createSymbolGraphRuntime(options: SymbolGraphRuntimeOptions) {
       running: null,
     };
     catalogScans.set(workspaceId, state);
-    if (state.running) return state.running;
+    if (state.running) {
+      if (!catalogControllers.get(workspaceId)?.signal.aborted) return state.running;
+      return state.running.then(() => scanWorkspace(workspaceId, optionsForScan));
+    }
 
     const controller = new AbortController();
     catalogControllers.set(workspaceId, controller);
-    const signal = optionsForScan?.signal
-      ? AbortSignal.any([controller.signal, optionsForScan.signal])
-      : controller.signal;
+    const scope = options.getIndexScope?.();
+    const signal = AbortSignal.any([controller.signal,
+      ...(optionsForScan?.signal ? [optionsForScan.signal] : []), ...(scope ? [scope.signal] : [])]);
     const task = Promise.resolve().then(async () => {
       try {
         if (signal.aborted) return;
@@ -337,17 +357,21 @@ export function createSymbolGraphRuntime(options: SymbolGraphRuntimeOptions) {
         } catch {
           return;
         }
-        const files = await options.searchFilesystemFiles!(root, {
-          query: "",
-          respectGitignore: true,
-          includeRevisions: true,
-          signal,
+        const roots = await (scope ? resolveScopedIndexRoots(root, scope) : resolveIndexScanRoots(root, undefined));
+        if (roots.length === 0 || signal.aborted) return;
+        const inventories = await Promise.all(roots.map((directory) => options.searchFilesystemFiles!(directory, {
+          query: "", respectGitignore: true, includeRevisions: true, signal,
+        })));
+        const files = inventories.flatMap((inventory, index) => {
+          const prefix = pathModule.relative(root, roots[index]!).split(pathModule.sep).join('/');
+          return inventory.map((file) => ({ ...file, relativePath: prefix ? `${prefix}/${file.relativePath}` : file.relativePath }));
         });
         if (signal.aborted) return;
         const store = await options.getStore(workspaceId);
         const collector = await collectorFor(workspaceId);
         if (!store || !collector) return;
-        const catalogFiles = files.filter((file) => CATALOG_SCAN_LANGUAGES.has(languageIdForPath(file.relativePath) ?? ""));
+        const catalogFiles = files.filter((file) => !excludedFromIndex(scope, pathModule.resolve(root, file.relativePath))
+          && CATALOG_SCAN_LANGUAGES.has(languageIdForPath(file.relativePath) ?? ""));
         const inventoryPaths = new Set(catalogFiles.map((file) => file.relativePath));
         for (let offset = 0; offset < catalogFiles.length; offset += CATALOG_SCAN_BATCH) {
           if (disposed || signal.aborted) return;
@@ -366,8 +390,7 @@ export function createSymbolGraphRuntime(options: SymbolGraphRuntimeOptions) {
           await yieldToEventLoop();
         }
         if (disposed || signal.aborted) return;
-        const inventoryStatus = files.enumerationStatus;
-        if (inventoryStatus === "complete") {
+        if (inventories.every((inventory) => inventory.enumerationStatus === "complete")) {
           // A complete inventory is the only authority allowed to remove a
           // path that disappeared from the current file set. Re-read a stale
           // path immediately before deletion so a concurrent recreation is
@@ -380,6 +403,12 @@ export function createSymbolGraphRuntime(options: SymbolGraphRuntimeOptions) {
             if (disposed || signal.aborted) return;
             const existing = await store.getFileRelations(stalePath);
             if (!existing) continue;
+            const selected = !excludedFromIndex(scope, pathModule.resolve(root, stalePath)) && roots.some((directory) => insideDirectory(directory, pathModule.resolve(root, stalePath)));
+            if (!selected) {
+              await store.removeFileSymbols(stalePath, { expectedDocumentRevision: existing.documentRevision,
+                expectedGeneration: existing.generation, signal });
+              continue;
+            }
             if (options.isIndexablePath) {
               let present: boolean;
               try { present = await options.isIndexablePath(workspaceId, stalePath, signal); }
@@ -447,7 +476,12 @@ export function createSymbolGraphRuntime(options: SymbolGraphRuntimeOptions) {
     catalogScans.clear();
   };
 
-  return { observeDocumentMutation, scanWorkspace, drain, dispose };
+  return { observeDocumentMutation, scanWorkspace, drain, dispose,
+    refreshIndexScope: () => {
+      for (const controller of catalogControllers.values()) controller.abort();
+      for (const workspaceId of catalogScans.keys()) track(scanWorkspace(workspaceId));
+    },
+  };
 }
 
 export type SymbolGraphRuntime = ReturnType<typeof createSymbolGraphRuntime>;

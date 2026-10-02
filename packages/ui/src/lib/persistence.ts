@@ -1,6 +1,5 @@
 import { isChatContentWidth } from '@varin/application-client';
 import type { DesktopSettings } from '@/lib/desktop';
-import { createProjectIdFromPath } from '@/lib/projectId';
 import { NO_ACTIVE_PROJECT_STORAGE_VALUE } from '@/lib/projectSelection';
 import { useUIStore } from '@/stores/useUIStore';
 import { isMonoFontOption, isUiFontOption } from '@/lib/fontOptions';
@@ -289,7 +288,6 @@ const sanitizeProjects = (value: unknown): DesktopSettings['projects'] | undefin
 
   const result: NonNullable<DesktopSettings['projects']> = [];
   const seenIds = new Set<string>();
-  const seenPaths = new Set<string>();
 
   for (const entry of value) {
     if (!entry || typeof entry !== 'object') continue;
@@ -298,19 +296,23 @@ const sanitizeProjects = (value: unknown): DesktopSettings['projects'] | undefin
     const rawPath = typeof candidate.path === 'string' ? candidate.path.trim() : '';
     if (!rawPath) continue;
 
-    const normalizedPath = rawPath === '/' ? rawPath : rawPath.replace(/\\/g, '/').replace(/\/+$/, '');
+    const slashPath = rawPath.replace(/\\/g, '/');
+    const normalizedPath = slashPath === '/' || /^[A-Za-z]:\/$/.test(slashPath) ? slashPath : slashPath.replace(/\/+$/, '');
     if (!normalizedPath) continue;
 
-    const id = createProjectIdFromPath(normalizedPath);
+    const id = typeof candidate.id === 'string' ? candidate.id.trim() : '';
     if (!id) continue;
 
-    if (seenIds.has(id) || seenPaths.has(normalizedPath)) continue;
+    if (seenIds.has(id)) continue;
     seenIds.add(id);
-    seenPaths.add(normalizedPath);
 
     const project: NonNullable<DesktopSettings['projects']>[number] = {
       id,
       path: normalizedPath,
+      additionalPaths: Array.isArray(candidate.additionalPaths)
+        ? candidate.additionalPaths.filter((value): value is string => typeof value === 'string' && Boolean(value.trim()))
+          .map((value) => value.trim().replace(/\\/g, '/'))
+        : [],
     };
 
     if (typeof candidate.label === 'string' && candidate.label.trim().length > 0) {

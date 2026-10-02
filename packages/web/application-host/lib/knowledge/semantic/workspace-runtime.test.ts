@@ -9,6 +9,7 @@ import { createStructureSource } from '../../structure/source.js';
 import { createTreeSitterStructureProvider } from '../../structure/native-provider.test-helper.js';
 import { createHashEmbedder } from './embedder.js';
 import { createWorkspaceSemanticRuntime, type WorkspaceSemanticRuntimeOptions } from './workspace-runtime.js';
+import { createProjectIndexScope } from '../index-scope.js';
 
 const disposes: Array<() => Promise<void>> = [];
 afterEach(async () => { for (const dispose of disposes.splice(0).reverse()) await dispose(); });
@@ -39,6 +40,7 @@ async function setup(hooks: {
   watchDocuments?: WorkspaceSemanticRuntimeOptions['documents']['watch'];
   reconcileMinimumIntervalMs?: number;
   indexDirectories?: string[] | null;
+  getIndexScope?: WorkspaceSemanticRuntimeOptions['getIndexScope'];
 } = {}) {
   const documents = await createDocumentAuthorityHarness();
   disposes.push(() => documents.cleanup());
@@ -75,6 +77,7 @@ async function setup(hooks: {
     ...(hooks.searchFilesystemFiles ? { searchFilesystemFiles: hooks.searchFilesystemFiles } : {}),
     ...(hooks.reconcileMinimumIntervalMs === undefined ? {} : { reconcileMinimumIntervalMs: hooks.reconcileMinimumIntervalMs }),
     ...(hooks.indexDirectories === undefined ? {} : { indexDirectories: hooks.indexDirectories }),
+    ...(hooks.getIndexScope ? { getIndexScope: hooks.getIndexScope } : {}),
     configCwd: documents.dataDir,
     getBroker: () => broker,
     executionViews, workingBranches: { pinQuery: hooks.pinQuery ?? (async () => null) },
@@ -85,6 +88,28 @@ async function setup(hooks: {
 }
 
 describe('production workspace semantic assembly lifecycle', () => {
+  it('activates selected folders and stops scanning and watching after the project removes them', async () => {
+    const selection = createProjectIndexScope([]);
+    const inventory = vi.fn(async () => []);
+    const closed = vi.fn();
+    const watchDocuments = vi.fn(() => ({ ready: Promise.resolve(true), settle: async () => undefined, close: closed }));
+    const harness = await setup({ getIndexScope: selection.get, searchFilesystemFiles: inventory, watchDocuments });
+    harness.runtime.observeDocumentMutation({ workspaceId: harness.workspaceId, resourceId: 'a.ts', kind: 'modified' });
+    await harness.runtime.drain();
+    expect(inventory).not.toHaveBeenCalled();
+    expect(watchDocuments).not.toHaveBeenCalled();
+    selection.update([harness.documents.workspaceRoot]);
+    await harness.runtime.refreshIndexScope();
+    await harness.runtime.drain();
+    expect(inventory).toHaveBeenCalledTimes(1);
+    expect(watchDocuments).toHaveBeenCalledTimes(1);
+    selection.update([]);
+    await harness.runtime.refreshIndexScope();
+    await harness.runtime.scanWorkspace(harness.workspaceId);
+    expect(inventory).toHaveBeenCalledTimes(1);
+    expect(closed).toHaveBeenCalledTimes(1);
+    expect((await harness.runtime.semanticRecall(harness.workspaceId, 'needle', 5)).status).toBe('unavailable');
+  });
   it('reranks a projectless session through global inference without inspecting a document root', async () => {
     const harness = await setup({});
     const inspect = vi.spyOn(harness.documents.authority, 'inspectWorkspace');

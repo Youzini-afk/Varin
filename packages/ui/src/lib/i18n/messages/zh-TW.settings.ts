@@ -1,4 +1,14 @@
-﻿export const settingsDict = {
+export const settingsDict = {
+  "projects.create.title": "新增專案",
+  "projects.create.name": "專案名稱",
+  "projects.create.action": "建立專案",
+  "projects.folders.title": "資料夾",
+  "projects.folders.hint": "索引這些資料夾。星號資料夾是新對話的預設執行位置。",
+  "projects.folders.add": "新增資料夾",
+  "projects.folders.remove": "移除 {path}",
+  "projects.folders.default": "預設執行位置",
+  "projects.folders.makeDefault": "設為預設執行位置",
+  "projects.folders.edit": "編輯資料夾",
   "settings.chat.width.title": "對話寬度",
   "settings.chat.width.hint": "同時調整訊息與輸入框的最大寬度；視窗較窄時自動適應。",
   "settings.chat.width.compact": "緊湊",

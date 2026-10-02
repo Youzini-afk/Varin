@@ -7,10 +7,32 @@ import { openWorkspaceKnowledge, type KnowledgeStore } from "./store.js";
 import { createSymbolGraphRuntime } from "./symbol-runtime.js";
 import { createDocumentAuthorityHarness } from "../documents/contract-fixtures.js";
 import type { DocumentMutationObservation } from "../documents/authority.js";
+import { createProjectIndexScope } from './index-scope.js';
 
 const TEST_DIR = join(tmpdir(), "varin-symbol-runtime");
 
 describe("symbol graph runtime", () => {
+  it('limits structure inventories and mutation collection to explicit project folders', async () => {
+    const root = join(TEST_DIR, 'user-home');
+    const selected = join(root, 'project');
+    const selection = createProjectIndexScope([selected]);
+    const inventory = vi.fn(async (_directory: string) => []);
+    const getStore = vi.fn(async () => null);
+    const runtime = createSymbolGraphRuntime({ getStore, getIndexScope: selection.get,
+      documents: { inspectWorkspace: async () => ({ root }) } as never,
+      supervisor: {} as never, searchFilesystemFiles: inventory });
+    try {
+      runtime.observeDocumentMutation({ workspaceId: 'home', resourceId: 'bots/private.ts', kind: 'modified', owner: { kind: 'web-route', id: 'bot' } });
+      await runtime.drain();
+      expect(getStore).not.toHaveBeenCalled();
+      await runtime.scanWorkspace('home');
+      expect(inventory.mock.calls.map(([directory]) => directory)).toEqual([selected]);
+      selection.update([]);
+      runtime.refreshIndexScope();
+      await runtime.drain();
+      expect(inventory).toHaveBeenCalledTimes(1);
+    } finally { selection.dispose(); await runtime.dispose(); }
+  });
   let store: KnowledgeStore;
 
   beforeEach(async () => {

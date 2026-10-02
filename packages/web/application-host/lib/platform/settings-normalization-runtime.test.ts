@@ -1,6 +1,5 @@
 import { describe, expect, it } from 'vitest';
 
-import { createProjectIdFromPath } from '../projects/project-id.js';
 import {
   createSettingsNormalizationRuntime,
   type SettingsNormalizationDependencies,
@@ -97,6 +96,12 @@ describe('settings normalization runtime - symlink resolution', () => {
   });
 
   describe('sanitizeProjects', () => {
+    it('preserves project identity and canonicalizes each selected folder independently', () => {
+      const runtime = createTestRuntime({ realpathSync: (value) => value.replace('/alias/', '/actual/') });
+      const result = runtime.sanitizeProjects([{ id: 'project_collection', path: '/alias/app',
+        additionalPaths: ['/alias/docs', '/actual/app', '/other/library'], label: 'Product' }]);
+      expect(result).toEqual([{ id: 'project_collection', path: '/actual/app', additionalPaths: ['/actual/docs', '/other/library'], label: 'Product' }]);
+    });
     it('resolves symlinks in project paths', () => {
       const runtime = createTestRuntime({
         realpathSync: (p) =>
@@ -111,7 +116,7 @@ describe('settings normalization runtime - symlink resolution', () => {
 
       const result = runtime.sanitizeProjects(projects);
       expect(requireValue(result?.[0], 'Sanitized project').path).toBe('/workplace/user/MyProject');
-      expect(requireValue(result?.[0], 'Sanitized project').id).toBe(createProjectIdFromPath('/workplace/user/MyProject'));
+      expect(requireValue(result?.[0], 'Sanitized project').id).toBe('proj1');
     });
 
     it('falls back to path.resolve when realpathSync throws', () => {
@@ -128,7 +133,7 @@ describe('settings normalization runtime - symlink resolution', () => {
       expect(requireValue(result?.[0], 'Sanitized project').path).toBe('/resolved/missing/path');
     });
 
-    it('deduplicates projects that resolve to the same realpath', () => {
+    it('keeps distinct project identities when they share a folder', () => {
       const runtime = createTestRuntime({
         realpathSync: (p) => p.startsWith('/symlink') ? '/real/project' : p,
         path: { resolve: (p) => p, sep: '/', dirname: (p) => p.split('/').slice(0, -1).join('/') || '/' },
@@ -140,8 +145,7 @@ describe('settings normalization runtime - symlink resolution', () => {
       ];
 
       const result = runtime.sanitizeProjects(projects);
-      expect(result).toHaveLength(1);
-      expect(requireValue(result?.[0], 'Sanitized project').id).toBe(createProjectIdFromPath('/real/project'));
+      expect(result?.map((project) => [project.id, project.path])).toEqual([['proj1', '/real/project'], ['proj2', '/real/project']]);
     });
   });
 

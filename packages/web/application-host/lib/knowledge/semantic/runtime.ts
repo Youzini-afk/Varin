@@ -4,7 +4,7 @@
  */
 
 import type { DocumentAuthority, DocumentMutationObservation } from "../../documents/authority.js";
-import { realpath } from "node:fs/promises";
+import { insideDirectory, excludedFromIndex, resolveScopedIndexRoots, resolveIndexScanRoots as resolveSemanticScanRoots, type IndexScope } from "../index-scope.js";
 import path from "node:path";
 import type { FileSearchEnumerationStatus, FileSearchEnumerationInfo, FileSearchItem } from "../../fs/types.js";
 import { languageIdForPath } from "../../harness/language-id.js";
@@ -31,29 +31,7 @@ const STRUCTURAL_LANGUAGES: ReadonlySet<string> = new Set(Object.keys(TREE_SITTE
 const semanticLanguage = (file: string): string | null => languageIdForPath(file);
 export const isSemanticIndexPath = (file: string): boolean => semanticLanguage(file) !== null;
 
-const insideDirectory = (parent: string, child: string): boolean => {
-  const relative = path.relative(parent, child);
-  return relative === "" || (relative !== ".." && !relative.startsWith(`..${path.sep}`) && !path.isAbsolute(relative));
-};
-
-/** Resolve user-selected folders into non-overlapping scan roots inside one resource root. */
-export async function resolveSemanticScanRoots(root: string, selected: readonly string[] | null | undefined): Promise<string[]> {
-  if (selected === null || selected === undefined) return [root];
-  const canonicalDirectories = await Promise.all(selected.map(async (directory) => {
-    // Documents stores a real path, while a saved selection may use another
-    // spelling of the same directory (including Windows 8.3 path aliases).
-    try { return await realpath(directory); }
-    catch (error) {
-      if ((error as NodeJS.ErrnoException).code !== "ENOENT") throw error;
-      return directory;
-    }
-  }));
-  const candidates = canonicalDirectories.flatMap((directory) => {
-    if (insideDirectory(directory, root)) return [root];
-    return insideDirectory(root, directory) ? [directory] : [];
-  }).sort((left, right) => left.length - right.length);
-  return candidates.filter((directory, index) => !candidates.slice(0, index).some((earlier) => insideDirectory(earlier, directory)));
-}
+export { resolveIndexScanRoots as resolveSemanticScanRoots } from "../index-scope.js";
 
 export type SemanticQueryStatus = "not-requested" | "ready" | "empty" | "unavailable" | "failed" | "stale" | "incomplete";
 
@@ -137,6 +115,7 @@ export interface SemanticIndexRuntimeOptions {
   vectorCache?: SemanticVectorCache;
   scheduler?: EmbedScheduler;
   indexDirectories?: readonly string[] | null;
+  getIndexScope?: () => IndexScope;
   includeIgnoredDirectories?: readonly string[];
 }
 
@@ -343,12 +322,13 @@ export function createSemanticIndexRuntime(options: SemanticIndexRuntimeOptions)
   };
 
   const indexDocument = async (scope: SemanticScopeKey, documentId: string, kind: "modified" | "deleted"): Promise<void> => {
-    const signal = lifecycleController.signal;
+    const scopeSnapshot = options.getIndexScope?.();
+    const signal = scopeSnapshot ? AbortSignal.any([lifecycleController.signal, scopeSnapshot.signal]) : lifecycleController.signal;
     signal.throwIfAborted();
     const token = nextToken(scope, documentId);
     const embedder = embedderOf();
     const root = kind === "deleted" ? undefined : (await options.documents.inspectWorkspace(scope.scopeId)).root;
-    const included = root !== undefined && (await resolveSemanticScanRoots(root, options.indexDirectories))
+    const included = root !== undefined && !excludedFromIndex(scopeSnapshot, path.resolve(root, documentId)) && (await (scopeSnapshot ? resolveScopedIndexRoots(root, scopeSnapshot) : resolveSemanticScanRoots(root, options.indexDirectories)))
       .some((directory) => insideDirectory(directory, path.resolve(root, documentId)));
     const includeIgnored = root !== undefined && (await resolveSemanticScanRoots(root, options.includeIgnoredDirectories ?? []))
       .some(directory => insideDirectory(directory, path.resolve(root, documentId)));
@@ -432,9 +412,10 @@ export function createSemanticIndexRuntime(options: SemanticIndexRuntimeOptions)
     }
     const controller = new AbortController();
     scanControllers.set(key, controller);
-    const signal = optionsForScan?.signal
-      ? AbortSignal.any([controller.signal, optionsForScan.signal, lifecycleController.signal])
-      : AbortSignal.any([controller.signal, lifecycleController.signal]);
+    const scopeSnapshot = options.getIndexScope?.();
+    const signal = AbortSignal.any([controller.signal, lifecycleController.signal,
+      ...(optionsForScan?.signal ? [optionsForScan.signal] : []),
+      ...(scopeSnapshot ? [scopeSnapshot.signal] : [])]);
     const gate = createScanGate();
     activeScanGates.set(scopeScanKey, gate);
     let resolvedKey = key;
@@ -445,7 +426,7 @@ export function createSemanticIndexRuntime(options: SemanticIndexRuntimeOptions)
       try {
         const root = (await options.documents.inspectWorkspace(scope.scopeId)).root;
         const scanToken = ++revisionClock;
-        const selectedRoots = await resolveSemanticScanRoots(root, options.indexDirectories);
+        const selectedRoots = await (scopeSnapshot ? resolveScopedIndexRoots(root, scopeSnapshot) : resolveSemanticScanRoots(root, options.indexDirectories));
         const ignoredRoots = await resolveSemanticScanRoots(root, options.includeIgnoredDirectories ?? []);
         const selections = selectedRoots.flatMap(directory => {
           if (ignoredRoots.some(ignored => insideDirectory(ignored, directory))) return [{ directory, respectGitignore: false }];
@@ -460,7 +441,7 @@ export function createSemanticIndexRuntime(options: SemanticIndexRuntimeOptions)
           const prefix = path.relative(root, selections[index]!.directory).split(path.sep).join("/");
           for (const file of inventory) {
             const relativePath = prefix ? `${prefix}/${file.relativePath}` : file.relativePath;
-            byPath.set(relativePath, { ...file, relativePath });
+            if (!excludedFromIndex(scopeSnapshot, path.resolve(root, relativePath))) byPath.set(relativePath, { ...file, relativePath });
           }
         }
         const files = [...byPath.values()] as SemanticScanFiles;
@@ -806,9 +787,23 @@ export function createSemanticIndexRuntime(options: SemanticIndexRuntimeOptions)
     limit: number,
     searchOptions?: SemanticSearchRequest,
   ): Promise<SemanticSearchResult> => {
-    const signal = searchOptions?.signal
-      ? AbortSignal.any([searchOptions.signal, lifecycleController.signal])
-      : lifecycleController.signal;
+    const scopeSnapshot = options.getIndexScope?.();
+    const signal = AbortSignal.any([lifecycleController.signal,
+      ...(searchOptions?.signal ? [searchOptions.signal] : []),
+      ...(scopeSnapshot ? [scopeSnapshot.signal] : [])]);
+    let resourceRoot: string | undefined;
+    if (scopeSnapshot) {
+      const { root } = await options.documents.inspectWorkspace(scope.scopeId);
+      resourceRoot = root;
+      const selected = await resolveScopedIndexRoots(root, scopeSnapshot);
+      const requested = searchOptions?.roots?.map((entry) => path.resolve(root, entry)) ?? [root];
+      const roots = selected.flatMap((directory) => requested.flatMap((request) => {
+        if (insideDirectory(directory, request)) return [request];
+        return insideDirectory(request, directory) ? [directory] : [];
+      })).map((directory) => path.relative(root, directory).split(path.sep).join('/') || '.');
+      if (roots.length === 0) return { status: { ...statusFor(scope), status: 'unavailable', coverage: 'empty' }, hits: [], gaps: [] };
+      searchOptions = { ...searchOptions, roots };
+    }
     signal?.throwIfAborted();
     const embedder = embedderOf();
     let status = statusForEmbedder(scope, embedder);
@@ -913,6 +908,7 @@ export function createSemanticIndexRuntime(options: SemanticIndexRuntimeOptions)
       const overlayByPath = new Map(overlays.map((item) => [item.path, item]));
       for (const hit of indexedHits) {
         signal?.throwIfAborted();
+        if (resourceRoot && excludedFromIndex(scopeSnapshot, path.resolve(resourceRoot, hit.documentId))) continue;
         if (searchOptions?.view === "working-state" || searchOptions?.threadQuery) {
           hits.push(hit);
           continue;

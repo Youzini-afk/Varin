@@ -132,6 +132,15 @@ const createRuntime = () => {
 };
 
 describe('Varin project configuration store', () => {
+  test('keeps actions under the same project identity after changing the default folder', async () => {
+    const harness = createRuntime();
+    const store = createVarinProjectConfigStore(() => harness.runtime);
+    const named = { ...project, id: 'project_named' };
+    await store.update(named, { waitForWorktreeSetup: true });
+    const relocated = { ...named, path: `${REPO}/another-folder` };
+    expect(await store.getPaths(relocated)).toEqual(await store.getPaths(named));
+    expect((await store.read(relocated)).waitForWorktreeSetup).toBe(true);
+  });
   test('refuses to overwrite a malformed canonical file', async () => {
     const harness = createRuntime();
     const store = createVarinProjectConfigStore(() => harness.runtime);

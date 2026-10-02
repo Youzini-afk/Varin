@@ -1,4 +1,4 @@
-import { createProjectIdFromPath } from '../projects/project-id.js';
+import { projectFolders } from '@varin/application-client';
 
 export interface SettingsPathModule {
   dirname(value: string): string;
@@ -24,6 +24,7 @@ export interface SettingsNormalizationDependencies {
 export interface NormalizedProject extends Record<string, unknown> {
   id: string;
   path: string;
+  additionalPaths?: string[];
 }
 
 export const createSettingsNormalizationRuntime = (dependencies: SettingsNormalizationDependencies) => {
@@ -168,7 +169,6 @@ export const createSettingsNormalizationRuntime = (dependencies: SettingsNormali
 
     const result: NormalizedProject[] = [];
     const seenIds = new Set<string>();
-    const seenPaths = new Set<string>();
 
     for (const entry of input) {
       if (!entry || typeof entry !== 'object') continue;
@@ -177,7 +177,11 @@ export const createSettingsNormalizationRuntime = (dependencies: SettingsNormali
       const rawPath = typeof candidate.path === 'string' ? candidate.path.trim() : '';
       const resolvedPath = rawPath ? safeRealpathSync(path.resolve(normalizeDirectoryPath(rawPath))) : '';
       const normalizedPath = resolvedPath ? normalizePathForPersistence(resolvedPath, { resolveRealpath: false }) : '';
-      const id = createProjectIdFromPath(normalizedPath);
+      const id = typeof candidate.id === 'string' ? candidate.id.trim() : '';
+      const additionalPaths = projectFolders({ path: normalizedPath, additionalPaths: Array.isArray(candidate.additionalPaths)
+        ? candidate.additionalPaths.filter((value): value is string => typeof value === 'string' && Boolean(value.trim()))
+          .map((value) => normalizePathForPersistence(safeRealpathSync(path.resolve(normalizeDirectoryPath(value))), { resolveRealpath: false }))
+        : [] }).slice(1);
       const label = typeof candidate.label === 'string' ? candidate.label.trim() : '';
       const icon = typeof candidate.icon === 'string' ? candidate.icon.trim() : '';
       const iconImage = candidate.iconImage && typeof candidate.iconImage === 'object' && !Array.isArray(candidate.iconImage)
@@ -196,16 +200,15 @@ export const createSettingsNormalizationRuntime = (dependencies: SettingsNormali
         ? candidate.lastOpenedAt
         : null;
 
-      if (!id || !normalizedPath) continue;
+      if (!/^[a-zA-Z0-9_-]+$/.test(id) || !normalizedPath) continue;
       if (seenIds.has(id)) continue;
-      if (seenPaths.has(normalizedPath)) continue;
 
       seenIds.add(id);
-      seenPaths.add(normalizedPath);
 
       const project: NormalizedProject = {
         id,
         path: normalizedPath,
+        ...(additionalPaths.length ? { additionalPaths } : {}),
         ...(label ? { label } : {}),
         ...(icon ? { icon } : {}),
         ...(iconBackground ? { iconBackground } : {}),

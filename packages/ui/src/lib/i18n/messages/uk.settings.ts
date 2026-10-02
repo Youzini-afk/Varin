@@ -1,4 +1,14 @@
-﻿export const settingsDict = {
+export const settingsDict = {
+  "projects.create.title": "Новий проєкт",
+  "projects.create.name": "Назва проєкту",
+  "projects.create.action": "Створити проєкт",
+  "projects.folders.title": "Папки",
+  "projects.folders.hint": "Ці папки індексуються. Папка із зірочкою є початковим каталогом нових розмов.",
+  "projects.folders.add": "Додати папку",
+  "projects.folders.remove": "Вилучити {path}",
+  "projects.folders.default": "Типовий каталог виконання",
+  "projects.folders.makeDefault": "Зробити типовим каталогом виконання",
+  "projects.folders.edit": "Редагувати папки",
   "settings.chat.width.title": "Ширина розмови",
   "settings.chat.width.hint": "Максимальна ширина повідомлень і поля введення; вузькі панелі враховуються автоматично.",
   "settings.chat.width.compact": "Компактна",

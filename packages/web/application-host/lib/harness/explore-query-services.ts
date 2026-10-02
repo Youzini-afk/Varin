@@ -56,6 +56,7 @@ import {
   loadSnippetRelations,
   resolveExploreResourceUnits,
   resolveExploreScopeAndAnchors,
+  withProjectExploreDefaults,
   semanticSearchAcrossRoots,
   type ExploreResourceUnit,
 } from "./explore-service.js";
@@ -497,7 +498,7 @@ function summarizeSources(
 }
 
 export function createExploreQueryStartService(
-  host: Pick<HarnessServiceHost, "searchService" | "readExploreFile" | "structureSource" | "graphRecall" | "semanticRecall" | "agentInputDraftPaths" | "exploreQueryStore" | "harnessSettings" | "pinWorkingBranchQuery" | "fastDecision" | "fastDecisionStatus">,
+  host: Pick<HarnessServiceHost, "searchService" | "readExploreFile" | "structureSource" | "graphRecall" | "semanticRecall" | "agentInputDraftPaths" | "exploreQueryStore" | "harnessSettings" | "pinWorkingBranchQuery" | "fastDecision" | "fastDecisionStatus" | "defaultExplorePaths">,
 ): HarnessService<"explore.query.start"> {
   return {
     handle: async (params: ExploreQueryStartParams, ctx) => {
@@ -541,6 +542,7 @@ export function createExploreQueryStartService(
       if (ctx.signal.aborted) onStartAbort();
       else ctx.signal.addEventListener("abort", onStartAbort, { once: true });
       try {
+        ({ params, ctx } = await withProjectExploreDefaults(host, params, ctx));
         const resolvedRequest = resolveExploreScopeAndAnchors(params, ctx);
         const effectivePaths = resolvedRequest.paths;
         const effectiveAnchors = resolvedRequest.anchors;

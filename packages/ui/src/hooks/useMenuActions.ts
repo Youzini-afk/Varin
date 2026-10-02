@@ -6,7 +6,6 @@ import { normalizeContextPanelDirectoryKey, useUIStore } from '@/stores/useUISto
 import { useUpdateStore } from '@/stores/useUpdateStore';
 import { useThemeSystem } from '@/contexts/useThemeSystem';
 import { workspaceEvents } from '@/lib/workspaceEvents';
-import { canChooseDesktopWorkspace, switchDesktopWorkspaceFromPicker } from '@/lib/desktopWorkspace';
 import {
   navigateRelativePiSession,
   startPiSessionDraftFromNavigation,
@@ -135,17 +134,6 @@ export const useMenuActions = (options: { enabled?: boolean } = {}) => {
   }, [checkForUpdates]);
 
   const handleChangeWorkspace = React.useCallback(() => {
-    if (canChooseDesktopWorkspace()) {
-      void switchDesktopWorkspaceFromPicker().then((result) => {
-        if (result.status === 'error') {
-          toast.error('Failed to switch workspace', {
-            description: result.error,
-          });
-        }
-      });
-      return;
-    }
-
     workspaceEvents.requestDirectoryDialog();
   }, []);
 

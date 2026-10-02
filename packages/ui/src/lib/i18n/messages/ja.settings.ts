@@ -1,7 +1,17 @@
-﻿import { settingsDict as englishSettingsDict } from './en.settings';
+import { settingsDict as englishSettingsDict } from './en.settings';
 
 export const settingsDict = {
   ...englishSettingsDict,
+  "projects.create.title": "新しいプロジェクト",
+  "projects.create.name": "プロジェクト名",
+  "projects.create.action": "プロジェクトを作成",
+  "projects.folders.title": "フォルダー",
+  "projects.folders.hint": "これらのフォルダーを索引に登録します。星印のフォルダーは新しい会話の開始ディレクトリです。",
+  "projects.folders.add": "フォルダーを追加",
+  "projects.folders.remove": "{path} を削除",
+  "projects.folders.default": "既定の実行ディレクトリ",
+  "projects.folders.makeDefault": "既定の実行ディレクトリに設定",
+  "projects.folders.edit": "フォルダーを編集",
   "settings.chat.width.title": "会話の幅",
   "settings.chat.width.hint": "メッセージと入力欄の最大幅。狭いペインには自動で収まります。",
   "settings.chat.width.compact": "コンパクト",

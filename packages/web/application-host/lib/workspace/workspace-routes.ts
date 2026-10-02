@@ -3,7 +3,8 @@ import type { Express, Request, Response } from 'express';
 import multer from 'multer';
 import os from 'os';
 import path from 'path';
-import { createProjectIdFromPath } from '../projects/project-id.js';
+import { randomUUID } from 'node:crypto';
+import { projectFolders, projectPathKey } from '@varin/application-client';
 import { createWorkspaceConfig } from './workspace-config.js';
 import { resolveWorkspacePath } from './path-safety.js';
 import {
@@ -50,6 +51,7 @@ type WorkspaceResponse = Response;
 interface ProjectEntry {
   id: string;
   path: string;
+  additionalPaths?: string[];
   label?: string | undefined;
   addedAt?: number | undefined;
   lastOpenedAt?: number | undefined;
@@ -246,12 +248,12 @@ const openWorkspaceProject = async (
 
   const settings = await readSettingsFromDisk();
   const projects = sanitizeProjects(settings?.projects || []) ?? [];
-  const projectId = createProjectIdFromPath(resolved.absolutePath);
   const now = Date.now();
-  const existing = projects.find((project) => project.id === projectId || project.path === resolved.absolutePath);
+  const existing = projects.find((project) => projectFolders(project).some((folder) => projectPathKey(folder) === projectPathKey(resolved.absolutePath)));
+  const projectId = existing?.id ?? `project_${randomUUID()}`;
   const label = context.pathModule.basename(resolved.absolutePath) || resolved.absolutePath;
   const project: ProjectEntry = existing
-    ? { ...existing, id: projectId, path: resolved.absolutePath, lastOpenedAt: now }
+    ? { ...existing, lastOpenedAt: now }
     : {
         id: projectId,
         path: resolved.absolutePath,

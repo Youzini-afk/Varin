@@ -8,7 +8,6 @@ import { requireWorkspaceEpoch } from '@/lib/documents/mutation-token';
 import { getRegisteredRuntimeAPIs } from '@/lib/runtime-api/registry';
 import { useDirectoryStore } from '@/stores/useDirectoryStore';
 import { documentIdentityForPath, pickWorkspaceRoot } from '@/lib/documents/path';
-import { createProjectIdFromPath } from '@/lib/projectId';
 import type { VarinProjectConfig, VarinProjectRef } from './types';
 
 type ProjectConfigFailureReason = 'conflict' | 'malformed' | 'unavailable' | 'unsupported' | 'write-failed';
@@ -122,12 +121,8 @@ export const createVarinProjectConfigStore = (
       throw new VarinProjectConfigError('Home directory is unavailable', { reason: 'unavailable' });
     }
     const home = normalizePath(rawHome);
-    const projectPath = normalizePath(project.path.trim());
-    if (!project.path.trim()) {
-      throw new VarinProjectConfigError('Project path is required', { reason: 'unavailable' });
-    }
-    const pathId = createProjectIdFromPath(projectPath);
-    if (!pathId) {
+    const pathId = project.id.trim();
+    if (!/^[a-zA-Z0-9_-]+$/.test(pathId)) {
       throw new VarinProjectConfigError('Project identity is unavailable', { reason: 'unavailable' });
     }
     const varinProjects = joinPath(home, '.config', 'varin', 'projects');

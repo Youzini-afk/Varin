@@ -644,7 +644,10 @@ export interface FilesAPI {
 
 export interface ProjectEntry {
   id: string;
+  /** Default execution folder. Project membership does not restrict file access. */
   path: string;
+  /** Other folders explicitly included in this project and its background index. */
+  additionalPaths?: string[];
   label?: string;
   icon?: string | null;
   iconImage?: {

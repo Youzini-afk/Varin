@@ -1,3 +1,4 @@
+import { resolveScopedIndexRoots } from '../index-scope.js';
 import { randomUUID } from 'node:crypto';
 import path from 'node:path';
 import type { PiRuntimeBroker, PiRuntimeBrokerEvent } from '@varin/runtime-broker';
@@ -80,6 +81,10 @@ const MAX_TIMER_DELAY_MS = 2_147_483_647;
 
 /** The production owner of workspace settings, inference transport and query views. */
 export function createWorkspaceSemanticRuntime(options: WorkspaceSemanticRuntimeOptions) {
+  const selectedRoots = (root: string) => {
+    const scope = options.getIndexScope?.();
+    return scope ? resolveScopedIndexRoots(root, scope) : resolveSemanticScanRoots(root, options.indexDirectories);
+  };
   let localEmbedder = options.embedder;
   const states = new Map<string, WorkspaceState>();
   const loads = new Map<string, Promise<WorkspaceState>>();
@@ -213,6 +218,15 @@ export function createWorkspaceSemanticRuntime(options: WorkspaceSemanticRuntime
     return task;
   };
   const ensureDocumentWatch = async (state: WorkspaceState, reconcileOnRecovery: boolean): Promise<boolean> => {
+    const selected = await selectedRoots(state.root);
+    // A resource root can be a drive or home directory. Do not recursively
+    // watch that ancestor merely because a selected project lives below it.
+    if (!selected.some((directory) => path.relative(state.root, directory) === '')) {
+      state.documentWatch?.close();
+      state.documentWatch = null;
+      state.documentWatchReady = false;
+      return false;
+    }
     if (state.documentWatchReady && state.documentWatch) return true;
     state.documentWatch?.close();
     state.documentWatch = null;
@@ -292,6 +306,8 @@ export function createWorkspaceSemanticRuntime(options: WorkspaceSemanticRuntime
     if (loading) return loading;
     const existing = states.get(workspaceId);
     if (existing) {
+      existing.indexingEnabled = workspaceId !== GLOBAL_INFERENCE_SCOPE
+        && (await selectedRoots(existing.root)).length > 0;
       if (existing.indexingEnabled) await ensureDocumentWatch(existing, true);
       await watch(existing);
       // Also wait for a refresh already queued by config.changed.
@@ -308,7 +324,7 @@ export function createWorkspaceSemanticRuntime(options: WorkspaceSemanticRuntime
         ? { root: '' }
         : await options.documents.inspectWorkspace(workspaceId);
       const indexingEnabled = workspaceId !== GLOBAL_INFERENCE_SCOPE
-        && (await resolveSemanticScanRoots(inspected.root, options.indexDirectories)).length > 0;
+        && (await selectedRoots(inspected.root)).length > 0;
       assertActive();
       const backend = createSemanticBackend({
         local: localEmbedder,
@@ -541,6 +557,22 @@ export function createWorkspaceSemanticRuntime(options: WorkspaceSemanticRuntime
   };
   return {
     semanticRecall, harnessSettings, rerankExploreViews, fastDecisionStatus, fastDecision, observeDocumentMutation, observeToolWrite, processEvent,
+    refreshIndexScope: async () => {
+      for (const state of states.values()) {
+        if (state.workspaceId === GLOBAL_INFERENCE_SCOPE) continue;
+        state.runtime.cancelScans();
+        state.indexingEnabled = (await selectedRoots(state.root)).length > 0;
+        if (state.indexingEnabled) {
+          await ensureDocumentWatch(state, false);
+          track(state.runtime.scanWorkspace(state.workspaceId));
+        } else {
+          state.documentWatch?.close();
+          state.documentWatch = null;
+          state.documentWatchReady = false;
+        }
+      }
+      scheduleReconcile();
+    },
     indexStatuses: () => [...states.values()]
       .filter((state) => state.workspaceId !== GLOBAL_INFERENCE_SCOPE)
       .map((state) => ({

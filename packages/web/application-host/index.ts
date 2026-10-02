@@ -65,6 +65,8 @@ import { openWorkspaceKnowledge, type KnowledgeStore } from './lib/knowledge/sto
 import { createKnowledgeContextRuntime } from './lib/knowledge/context-runtime.js';
 import { createGitStatusObserver } from './lib/knowledge/git-status-runtime.js';
 import { createSymbolGraphRuntime } from './lib/knowledge/symbol-runtime.js';
+import { createProjectIndexScope } from './lib/knowledge/index-scope.js';
+import { projectFolders, projectContainsPath } from '@varin/application-client';
 import { createLocalMinilmEmbedder } from './lib/knowledge/semantic/minilm.js';
 import { createLocalSemanticComponentManager } from './lib/knowledge/semantic/local-component.js';
 import { registerLocalSemanticComponentRoutes } from './lib/knowledge/semantic/local-component-routes.js';
@@ -1029,15 +1031,15 @@ async function main(options: StartWebUiServerOptions = {}): Promise<WebUiServerC
     // an application restart.
     harnessWebSearch: true,
     resolveProjectWorkFocus: async ({ cwd, workspace }) => {
+      if (workspace?.kind === 'unbound') return undefined;
       const settings = await readSettingsFromDisk();
       const projects = sanitizeProjects(settings.projects || []) ?? [];
       const projectId = workspace?.kind === 'workspace' ? workspace.id : undefined;
-      const normalizedCwd = normalizeDirectoryPath(cwd);
       const explicitProject = projectId === undefined
         ? undefined
         : projects.find((entry) => entry.id === projectId);
       const project = explicitProject
-        ?? projects.find((entry) => normalizeDirectoryPath(entry.path) === normalizedCwd);
+        ?? projects.find((entry) => projectContainsPath(entry, cwd));
       return project?.defaultWorkFocus === 'code' || project?.defaultWorkFocus === 'research'
         ? project.defaultWorkFocus
         : undefined;
@@ -1785,10 +1787,10 @@ async function main(options: StartWebUiServerOptions = {}): Promise<WebUiServerC
       input.cwd,
       input.name,
       undefined,
-      undefined,
+      { kind: 'unbound' },
       input.model ? { model: input.model } : undefined,
     ),
-    openSession: (input) => piRuntimeBroker.openSession(input),
+    openSession: (input) => piRuntimeBroker.openSession({ ...input, workspace: { kind: 'unbound' } }),
     applyModel: async (input) => {
       if (!input.model) {
         await piRuntimeBroker.requestForSession(input.sessionId, 'model.resetDefault', { sessionId: input.sessionId });
@@ -3181,7 +3183,11 @@ async function main(options: StartWebUiServerOptions = {}): Promise<WebUiServerC
       readSource: sourceViewRuntime.readSource,
     }),
   ]);
+  const projectDirectories = (settings: { projects?: unknown }) => (sanitizeProjects(settings.projects) ?? []).flatMap(projectFolders);
+  const projectIndexScope = createProjectIndexScope(projectDirectories(await readSettingsFromDisk()),
+    [path.join(await fsPromises.realpath(VARIN_DATA_DIR), 'bots')]);
   const symbolGraphRuntime = createSymbolGraphRuntime({
+    getIndexScope: projectIndexScope.get,
     getStore: getKnowledgeStoreForScope,
     documents: documentsAuthority,
     supervisor: languageSupervisor,
@@ -3238,7 +3244,7 @@ async function main(options: StartWebUiServerOptions = {}): Promise<WebUiServerC
     embedder: localEmbedder,
     vectorCache: semanticVectorCache,
     scheduler: semanticScheduler,
-    indexDirectories: semanticIndexConfig.indexedDirectories,
+    getIndexScope: projectIndexScope.get,
     includeIgnoredDirectories: semanticIndexConfig.includeIgnoredDirectories ?? [],
     getBroker: getReadyPiRuntimeBroker,
     executionViews: threadExecutionViews,
@@ -3252,6 +3258,23 @@ async function main(options: StartWebUiServerOptions = {}): Promise<WebUiServerC
     onError: (error) => console.error('[HarnessKnowledge] Semantic runtime failed:', errorMessage(error)),
   });
   semanticRuntimeHolder.current = semanticRuntime;
+  const indexProjectFolders = async (): Promise<void> => {
+    const snapshot = projectIndexScope.get();
+    for (const directory of snapshot.directories) {
+      if (snapshot.signal.aborted) return;
+      try {
+        const { workspaceId } = await documentsAuthority.resolveWorkspace({ path: directory });
+        if (!snapshot.signal.aborted) catalogScan.start(workspaceId);
+      } catch (error) { console.error('[ProjectIndex] Folder unavailable:', directory, errorMessage(error)); }
+    }
+  };
+  const unsubscribeProjectIndex = settingsRuntime.subscribe((settings) => {
+    if (!projectIndexScope.update(projectDirectories(settings))) return;
+    symbolGraphRuntime.refreshIndexScope();
+    void semanticRuntime.refreshIndexScope().then(indexProjectFolders).catch((error) => {
+      console.error('[ProjectIndex] Scope refresh failed:', errorMessage(error));
+    });
+  });
   researchDecideDeps.fastDecisionStatus = semanticRuntime.fastDecisionStatus;
   researchDecideDeps.fastDecision = semanticRuntime.fastDecision;
   registerLocalSemanticComponentRoutes(app, {
@@ -3292,6 +3315,7 @@ async function main(options: StartWebUiServerOptions = {}): Promise<WebUiServerC
     knowledgeVectors.scheduleReconcile(store, 'workspace', storeKey, storeKey);
     if (userKnowledgeStore) knowledgeVectors.scheduleReconcile(userKnowledgeStore, 'user', 'user', storeKey);
   }
+  void indexProjectFolders();
   const observeKnowledgeGitStatus = createGitStatusObserver({
     resolveWorkspaceId: (scope) => documentsAuthority.resolveScopeId(scope),
     observe: (event) => knowledgeContextRuntime.observeGitStatus(event),
@@ -3478,6 +3502,19 @@ async function main(options: StartWebUiServerOptions = {}): Promise<WebUiServerC
       }
     },
     pathAuthority: harnessPathAuthority,
+    defaultExplorePaths: async (actor) => {
+      const workspace = recordOf(sessionSnapshots.get(actor.sessionId)?.workspace);
+      if (workspace.kind !== 'workspace' || typeof workspace.id !== 'string') return [];
+      if (await botService.botForSession(actor.sessionId)) return [];
+      const projects = sanitizeProjects((await readSettingsFromDisk()).projects) ?? [];
+      const project = projects.find((entry) => entry.id === workspace.id);
+      // Isolated worktrees keep their execution view; project folder edits do
+      // not redirect an already-running isolated task back to the source tree.
+      if (!project || !actor.cwd || !projectContainsPath(project, actor.cwd)) return [];
+      const authorized = await Promise.all(projectFolders(project).map((directory) =>
+        harnessPathAuthority.resolve(actor, directory, { allowMissing: false })));
+      return authorized.filter((entry): entry is NonNullable<typeof entry> => entry !== null);
+    },
     createTerminalSession: async (input) => {
       const runtime = terminalRuntime;
       if (!runtime?.createTerminalSession) {
@@ -4209,6 +4246,8 @@ async function main(options: StartWebUiServerOptions = {}): Promise<WebUiServerC
       // services. Stop them while those owners are alive; otherwise each late
       // document event can race a disposed mutation authority during shutdown.
       catalogScan.start = () => undefined;
+      unsubscribeProjectIndex();
+      projectIndexScope.dispose();
       observeKnowledgeDocumentMutation = () => undefined;
       await semanticRuntime.dispose();
       await symbolGraphRuntime.dispose();

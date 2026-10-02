@@ -1,4 +1,14 @@
-﻿export const settingsDict = {
+export const settingsDict = {
+  "projects.create.title": "새 프로젝트",
+  "projects.create.name": "프로젝트 이름",
+  "projects.create.action": "프로젝트 만들기",
+  "projects.folders.title": "폴더",
+  "projects.folders.hint": "이 폴더들을 색인합니다. 별표 폴더는 새 대화의 시작 디렉터리입니다.",
+  "projects.folders.add": "폴더 추가",
+  "projects.folders.remove": "{path} 제거",
+  "projects.folders.default": "기본 실행 디렉터리",
+  "projects.folders.makeDefault": "기본 실행 디렉터리로 설정",
+  "projects.folders.edit": "폴더 편집",
   "settings.chat.width.title": "대화 너비",
   "settings.chat.width.hint": "메시지와 입력창의 최대 너비입니다. 좁은 패널에 자동으로 맞춥니다.",
   "settings.chat.width.compact": "좁게",

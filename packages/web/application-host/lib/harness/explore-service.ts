@@ -119,7 +119,9 @@ export function resolveExploreScopeAndAnchors(
   if (localScope.empty && externalRoots.length === 0) {
     throw new HarnessServiceError("forbidden", "Explore scope does not overlap the actor's authorized workspace scope.");
   }
-  const roots = [...(localScope.roots ?? []), ...externalRoots];
+  // In a mixed-root request, omitting the unrestricted local root would leave
+  // only the external paths and silently drop the project's default folder.
+  const roots = [...(localScope.roots ?? (externalRoots.length > 0 && localRequested.length > 0 ? ['.'] : [])), ...externalRoots];
   return {
     ...(anchors !== undefined ? { anchors } : {}),
     ...(roots.length > 0 ? { paths: [...new Set(roots)] } : localScope.roots !== undefined ? { paths: localScope.roots } : {}),
@@ -133,6 +135,24 @@ export interface ExploreResourceUnit {
   resourcePrefix: string;
   logicalPrefix: string;
   authorized?: { workspaceId: string; resourceId: string };
+}
+
+export async function withProjectExploreDefaults<T extends ExploreParams>(
+  host: Pick<HarnessServiceHost, 'defaultExplorePaths'>,
+  params: T,
+  ctx: HarnessServiceContext,
+): Promise<{ params: T; ctx: HarnessServiceContext }> {
+  // Check the actual router envelope before introducing trusted defaults.
+  resolveExploreScopeAndAnchors(params, ctx);
+  if (params.paths?.length || ctx.actor.workspaceScope?.length || !host.defaultExplorePaths) return { params, ctx };
+  const defaults = await host.defaultExplorePaths(ctx.actor);
+  if (!defaults.length) return { params, ctx };
+  // Path anchors still add their own roots when the caller omitted paths.
+  const paths = [...defaults, ...ctx.authorizedPaths];
+  return {
+    params: { ...params, paths: paths.map((entry) => entry.inputPath) },
+    ctx: { ...ctx, authorizedPaths: [...paths, ...ctx.authorizedPaths] },
+  };
 }
 
 const normalizedPath = (value: string): string => value.replaceAll("\\", "/").replace(/\/+$/u, "") || ".";
@@ -309,7 +329,7 @@ export async function loadSnippetRelations(
 }
 
 export function createExploreSearchService(
-  host: Pick<HarnessServiceHost, "searchService" | "outputStore" | "readExploreFile" | "agentInputDraftPaths" | "structureSource" | "fileRelations" | "graphRecall" | "semanticRecall">,
+  host: Pick<HarnessServiceHost, "searchService" | "outputStore" | "readExploreFile" | "agentInputDraftPaths" | "structureSource" | "fileRelations" | "graphRecall" | "semanticRecall" | "defaultExplorePaths">,
   /**
    * Window traces are an observation meter, not a product field: one entry per
    * generated window with its hit text, measured at 482 windows / 185 KB for a
@@ -336,6 +356,7 @@ export function createExploreSearchService(
       if (!readFile) throw new HarnessServiceError("unavailable", "Workspace document reading is unavailable.");
       ctx.signal.throwIfAborted();
       const inputContext = ctx.inputContext ?? { source: "disk" as const };
+      ({ params, ctx } = await withProjectExploreDefaults(host, params, ctx));
       const resolvedRequest = resolveExploreScopeAndAnchors(params, ctx);
       const effectiveParams: ExploreParams = { ...params, ...resolvedRequest };
       const resourceUnits = await resolveExploreResourceUnits(host.searchService, ctx, params, effectiveParams.paths);

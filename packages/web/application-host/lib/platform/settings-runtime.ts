@@ -5,10 +5,12 @@ import {
   type SettingsFileStoreOptions,
 } from '@varin/settings-store';
 import { randomUUID } from 'node:crypto';
+import { projectFolders, projectPathKey } from '@varin/application-client';
 
 interface ProjectEntry extends Record<string, unknown> {
   id: string;
   path: string;
+  additionalPaths?: string[];
 }
 
 interface ManagedTunnelPreset {
@@ -59,12 +61,18 @@ export const createSettingsRuntime = (deps: SettingsRuntimeDependencies) => {
     fsPromises,
     pathModule: path,
   });
+  const listeners = new Set<(settings: VarinSettingsDocument) => void>();
+  const notify = (settings: VarinSettingsDocument): void => {
+    for (const listener of listeners) {
+      try { listener(settings); } catch (error) { console.error('[Settings] Change observer failed:', error); }
+    }
+  };
   const readSettingsFromDisk = () => settingsStore.read();
   const updateSettingsOnDisk = (
     mutator: Parameters<SettingsFileStore['update']>[0],
-  ): Promise<VarinSettingsDocument> => settingsStore.update(mutator);
+  ): Promise<VarinSettingsDocument> => settingsStore.update(mutator).then((settings) => { notify(settings); return settings; });
 
-  const validateProjectEntries = async (projects: unknown): Promise<ProjectEntry[]> => {
+  const validateProjectEntries = async (projects: unknown, previous: unknown): Promise<ProjectEntry[]> => {
     if (!Array.isArray(projects)) {
       return [];
     }
@@ -74,22 +82,18 @@ export const createSettingsRuntime = (deps: SettingsRuntimeDependencies) => {
         console.warn('[validateProjectEntries] Dropping project entry with missing or empty path');
         return null;
       }
-      try {
-        const stats = await fsPromises.stat(project.path);
+      const existing = Array.isArray(previous) ? previous.find((entry) => entry?.id === project.id) as ProjectEntry | undefined : undefined;
+      const known = new Set(existing ? projectFolders(existing).map(projectPathKey) : []);
+      for (const directory of projectFolders(project)) {
+        // Removing/moving an existing folder must not erase the project on an
+        // unrelated metadata save. New selections must name actual folders.
+        if (known.has(projectPathKey(directory))) continue;
+        const stats = await fsPromises.stat(directory);
         if (!stats.isDirectory()) {
-          console.warn(`[validateProjectEntries] Dropping project — path is not a directory: ${project.path}`);
-          return null;
+          throw new Error(`Project folder is not a directory: ${directory}`);
         }
-        return project;
-      } catch (error) {
-        if (error && typeof error === 'object' && (error as { code?: unknown }).code === 'ENOENT') {
-          console.warn(`[validateProjectEntries] Dropping project — directory no longer exists: ${project.path}`);
-          return null;
-        }
-        // Permission or transient fs error — keep the project rather than
-        // silently losing it from the user's list.
-        return project;
       }
+      return project;
     });
 
     return (await Promise.all(validations)).filter((p) => p !== null);
@@ -132,7 +136,7 @@ export const createSettingsRuntime = (deps: SettingsRuntimeDependencies) => {
       // do it when the incoming update actually touches the projects list —
       // not on every theme/window-state/etc. save.
       if (Object.prototype.hasOwnProperty.call(sanitized, 'projects') && Array.isArray(next.projects)) {
-        const validated = await validateProjectEntries(next.projects);
+        const validated = await validateProjectEntries(next.projects, current.projects);
         next = { ...next, projects: validated };
       }
 
@@ -214,7 +218,7 @@ export const createSettingsRuntime = (deps: SettingsRuntimeDependencies) => {
     expectedRevision: string | undefined,
     revisionOf: (document: VarinSettingsDocument) => string,
   ): Promise<{ conflict: boolean; document: VarinSettingsDocument; revision: string }> => {
-    return settingsStore.transact(async (current): Promise<{
+    const result = await settingsStore.transact(async (current): Promise<{
       document?: VarinSettingsDocument;
       write?: boolean;
       result: { conflict: boolean; document: VarinSettingsDocument; revision: string };
@@ -229,6 +233,8 @@ export const createSettingsRuntime = (deps: SettingsRuntimeDependencies) => {
         result: { conflict: false, document: next, revision: revisionOf(next) },
       };
     });
+    if (!result.conflict) notify(result.document);
+    return result;
   };
 
   return {
@@ -236,5 +242,9 @@ export const createSettingsRuntime = (deps: SettingsRuntimeDependencies) => {
     updateSettingsOnDisk,
     persistSettings,
     persistSettingsCas,
+    subscribe: (listener: (settings: VarinSettingsDocument) => void) => {
+      listeners.add(listener);
+      return () => { listeners.delete(listener); };
+    },
   };
 };

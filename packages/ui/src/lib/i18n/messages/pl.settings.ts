@@ -1,4 +1,14 @@
-﻿export const settingsDict = {
+export const settingsDict = {
+  "projects.create.title": "Nowy projekt",
+  "projects.create.name": "Nazwa projektu",
+  "projects.create.action": "Utwórz projekt",
+  "projects.folders.title": "Foldery",
+  "projects.folders.hint": "Te foldery są indeksowane. Folder z gwiazdką jest katalogiem początkowym nowych rozmów.",
+  "projects.folders.add": "Dodaj folder",
+  "projects.folders.remove": "Usuń {path}",
+  "projects.folders.default": "Domyślny katalog wykonania",
+  "projects.folders.makeDefault": "Ustaw jako domyślny katalog wykonania",
+  "projects.folders.edit": "Edytuj foldery",
   "settings.chat.width.title": "Szerokość rozmowy",
   "settings.chat.width.hint": "Maksymalna szerokość wiadomości i pola wpisywania; dopasowuje się do wąskich paneli.",
   "settings.chat.width.compact": "Wąsko",

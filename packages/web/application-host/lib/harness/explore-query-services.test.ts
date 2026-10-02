@@ -11,7 +11,7 @@ import {
 import { createExploreQueryStore } from "./explore-query-store.js";
 import { createOutputStore } from "./output-store.js";
 import type { ExploreResult } from "./explore.js";
-import { createExploreSearchService, resolveExploreScopeAndAnchors, resolveExploreResourceUnits } from "./explore-service.js";
+import { createExploreSearchService, resolveExploreScopeAndAnchors, resolveExploreResourceUnits, withProjectExploreDefaults } from "./explore-service.js";
 import type { HarnessServiceContext } from "./router.js";
 import type { HarnessServiceHost } from "./service-host.js";
 
@@ -51,6 +51,29 @@ function createExploreQueryViewsService(host: Pick<HarnessServiceHost, "exploreQ
 }
 
 describe("explore query services", () => {
+  it('uses multiple project folders by default while retaining path anchors and respecting explicit or restricted scopes', async () => {
+    const rootA = resolve('project-a');
+    const rootB = resolve('project-b');
+    const external = resolve('external/anchor.ts');
+    const ctx = { ...context({ source: 'disk' }), actor: { ...actor, cwd: rootA, authorityRoot: rootA } };
+    const defaults = [
+      { authorityId: 'test-host', workspaceId: actor.workspaceId!, resourceId: '', inputPath: rootA, resolvedPath: rootA, canonicalResourceId: rootA },
+      { authorityId: 'test-host', workspaceId: 'second', resourceId: '', inputPath: rootB, resolvedPath: rootB, canonicalResourceId: rootB },
+    ];
+    const defaultExplorePaths = vi.fn(async () => defaults);
+    const anchored = { ...ctx, authorizedPaths: [{ authorityId: 'test-host', workspaceId: 'external', resourceId: 'anchor.ts', inputPath: external,
+      resolvedPath: external, canonicalResourceId: external }] };
+    const request = await withProjectExploreDefaults({ defaultExplorePaths }, { question: 'needle', anchors: [external] }, anchored);
+    const resolved = resolveExploreScopeAndAnchors(request.params, request.ctx);
+    const units = await resolveExploreResourceUnits({ resolveScopeRoot: undefined, resolveWorkspaceRoot: async (id) => id === actor.workspaceId ? rootA : id === 'second' ? rootB : resolve('external') },
+      request.ctx, request.params, resolved.paths);
+    expect(units.map((unit) => unit.workspaceId)).toEqual([actor.workspaceId!, 'second', 'external']);
+    const explicit = { question: 'needle', paths: [rootA] };
+    expect((await withProjectExploreDefaults({ defaultExplorePaths }, explicit, { ...ctx, authorizedPaths: [defaults[0]!] })).params).toBe(explicit);
+    const restricted = { ...ctx, actor: { ...ctx.actor, workspaceScope: ['src'] } };
+    expect((await withProjectExploreDefaults({ defaultExplorePaths }, { question: 'needle' }, restricted)).ctx).toBe(restricted);
+    expect(defaultExplorePaths).toHaveBeenCalledTimes(1);
+  });
   it('returns delivery metadata for the exact visible byte pack while retaining all prepared source in output storage', async () => {
     const { explore } = await import('./explore.js');
     const paths = Array.from({ length: 8 }, (_, index) => `long-source-${index}.ts`);
