@@ -2266,7 +2266,7 @@
   'settings.providers.page.custom.capability.endpoint': "請求路徑（選填）",
   'settings.providers.page.custom.capability.credentialRef': "憑證來源（提供商 ID，選填）",
   'settings.providers.page.custom.capability.inheritCredential': "沿用此提供商的憑證",
-  'settings.providers.page.custom.capability.manualModels': "新增服務提供的模型 ID，無須先出現在聊天目錄中。",
+  'settings.providers.page.custom.capability.manualModels': "取得後選擇適用於此用途的模型，也可手動填寫模型 ID。部分服務回傳混合清單或不支援取得模型。",
   'settings.providers.page.custom.capability.manualModel': "手動填寫模型 ID",
   'settings.providers.page.custom.capability.projectScope': "嵌入、重新排序和決策使用使用者或管理員設定；請選擇對應範圍來設定這些能力。",
   'settings.providers.page.custom.type.other.description': '填寫目前執行環境支援的 API 識別碼；留空則沿用既有設定。',

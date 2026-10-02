@@ -35,6 +35,20 @@ owner, not a copied key. A capability model can also retain its own `baseUrl`. M
 suggestions for the relevant Harness picker; an operator can explicitly enter an undiscovered ID.
 The same ID can occur in several capabilities. Duplicate IDs inside one capability are rejected.
 
+`provider.models.discover` accepts an optional `capability` (`embedding`, `rerank`, `decision`).
+The provider editor uses one selection/import dialog, applying only the selected models to that
+capability. Discovery uses its address override and credential owner; a draft key for the current
+provider never overrides another credential owner. Saved inference connection/auth configuration
+is resolved without the project layer, just like background inference. Draft settings are explicit
+inputs and need not be saved before discovery.
+
+Embedding and rerank discovery request `<baseUrl>/models` with the OpenAI-compatible `data[].id`
+format. Decision discovery uses TypeSafe's `models[].name` format, as defined by its
+[official OpenAPI contract](https://api.typesafe.ai/openapi.json), and retains the classifier API.
+The inference request `endpoint` is separate from the model-list path. Mixed catalogs are shown
+without name-based capability guesses or automatic selection. Missing discovery endpoints and
+invalid responses remain visible failures; manual model entry is always available.
+
 | Capability | Protocol | Default request path | Result |
 | --- | --- | --- | --- |
 | embedding | `openai-compatible` | `/embeddings` | Ordered vectors |

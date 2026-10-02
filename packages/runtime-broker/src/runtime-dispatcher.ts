@@ -709,7 +709,10 @@ async function dispatchRuntimeRequestUnchecked(
     case "provider.models.discover": {
       const config = input.config === undefined ? undefined : requireProviderConfig(input.config);
       const requestCredential = optionalBoolean(input, "requestCredential");
+      const capability = input.capability === undefined ? undefined
+        : requireEnum(input, "capability", ["embedding", "rerank", "decision"] as const);
       return requestForRuntimeContext(broker, requireRuntimeContext(input), "provider.models.discover", {
+        ...(capability === undefined ? {} : { capability }),
         ...(config === undefined ? {} : { config }),
         interactionId: requireString(input, "interactionId"),
         providerId: requireString(input, "providerId"),

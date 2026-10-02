@@ -24,6 +24,7 @@ import {
   VARIN_PROTOCOL_VERSION,
   type ProviderConfigDeleteScope,
   type ProviderConfigInput,
+  type ProviderInferenceCapability,
   ProviderConfigValidationError,
   type ProviderAuthResponse,
   ProtocolDecodeError,
@@ -527,6 +528,11 @@ function readProviderConfig(value: unknown): ProviderConfigInput {
     }
     throw error;
   }
+}
+
+function readProviderInferenceCapability(value: unknown): ProviderInferenceCapability | undefined {
+  if (value === undefined || value === "embedding" || value === "rerank" || value === "decision") return value;
+  throw new HostError("invalid_params", "capability must be embedding, rerank, or decision");
 }
 
 function readProviderConfigScope(value: string): "user" | "project" | "custom" {
@@ -1274,6 +1280,7 @@ export class HostController {
           readString(params, "providerId"),
           params.config === undefined ? undefined : readProviderConfig(params.config),
           readBoolean(params, "requestCredential", { optional: true }) ?? false,
+          readProviderInferenceCapability(params.capability),
         );
       case "provider.auth.respond": {
         const cancelled = readBoolean(params, "cancelled", { optional: true });

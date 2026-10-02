@@ -1,6 +1,7 @@
 "use client";
 
 import React from 'react';
+import type { ProviderInferenceCapability } from '@varin/protocol';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Checkbox } from '@/components/ui/checkbox';
@@ -60,6 +61,7 @@ const MODEL_IMPORT_SORT_OPTIONS = [
   { value: 'fetched-order', labelKey: 'settings.providers.page.modelImport.sort.fetchedOrder' },
 ] as const;
 type ModelImportSortValue = typeof MODEL_IMPORT_SORT_OPTIONS[number]['value'];
+type ModelImportTarget = 'chat' | ProviderInferenceCapability;
 
 const shouldIgnoreCapabilityCardClick = (target: EventTarget | null): boolean => (
   target instanceof HTMLElement && Boolean(target.closest('[data-capability-control="true"]'))
@@ -82,7 +84,9 @@ export const CustomProviderEditor: React.FC<CustomProviderEditorProps> = ({
   );
   const [manualApi, setManualApi] = React.useState(() => !COMMON_PROVIDER_APIS.some(api => api === state.api));
   const [saving, setSaving] = React.useState(false);
-  const [fetchingModels, setFetchingModels] = React.useState(false);
+  const [fetchingModels, setFetchingModels] = React.useState<ModelImportTarget | null>(null);
+  const [modelImportTarget, setModelImportTarget] = React.useState<ModelImportTarget>('chat');
+  const discoveryController = React.useRef<AbortController | null>(null);
   const [modelImportDialogOpen, setModelImportDialogOpen] = React.useState(false);
   const [fetchedModels, setFetchedModels] = React.useState<CustomProviderModelRowInput[]>([]);
   const [modelImportSearch, setModelImportSearch] = React.useState('');
@@ -103,6 +107,16 @@ export const CustomProviderEditor: React.FC<CustomProviderEditorProps> = ({
   });
 
   React.useEffect(() => { setSaving(false); }, [target]);
+
+  const discoveryConnection = JSON.stringify([
+    state.api, state.apiKey, state.baseURL,
+    Object.values(state.inference).map(({ baseURL, credentialRef, enabled }) => [baseURL, credentialRef, enabled]),
+  ]);
+  React.useEffect(() => {
+    setFetchingModels(null);
+    setModelImportDialogOpen(false);
+    return () => { discoveryController.current?.abort(); };
+  }, [target, discoveryConnection, initialState]);
 
   React.useEffect(() => {
     mountedRef.current = true;
@@ -182,23 +196,29 @@ export const CustomProviderEditor: React.FC<CustomProviderEditorProps> = ({
     });
   };
 
-  const handleFetchModels = async () => {
-    const baseURL = state.baseURL.trim();
+  const handleFetchModels = async (kind: ModelImportTarget) => {
     const providerId = state.id.trim();
-    const api = state.api.trim();
-    const apiKey = readApiKey();
+    const capability = kind === 'chat' ? undefined : state.inference[kind];
+    const credentialRef = capability?.credentialRef.trim();
+    const apiKey = !credentialRef || credentialRef === providerId ? readApiKey() : '';
 
-    if (!providerId || !baseURL || !api) {
-      toast.error(t('settings.providers.page.toast.customProviderFetchRequired'));
+    if (!providerId) {
+      toast.error(t('settings.providers.page.toast.customProviderRequired'));
       return;
     }
 
-    setFetchingModels(true);
+    discoveryController.current?.abort();
+    const controller = new AbortController();
+    discoveryController.current = controller;
+    setFetchingModels(kind);
     try {
       const discovery = await discoverPiProviderModels(currentDirectory, providerId, {
+        ...(kind === 'chat' ? {} : { capability: kind }),
         ...(apiKey ? { apiKey } : {}),
         config: createPiProviderConfigFromForm(state),
+        signal: controller.signal,
       });
+      if (controller.signal.aborted) return;
       const fetched = discovery.models;
       if (fetched.length === 0) {
         toast.error(t('settings.providers.page.toast.customProviderFetchNoModels'));
@@ -206,13 +226,18 @@ export const CustomProviderEditor: React.FC<CustomProviderEditorProps> = ({
       }
 
       setFetchedModels(fetched);
+      setModelImportTarget(kind);
       setModelImportSearch('');
       setModelImportSort('id-asc');
       setModelImportSelectedIds(() => {
         const next = new Set<string>();
+        // Inference endpoints often list every model. Let the user choose the
+        // relevant models instead of guessing capabilities from their names.
+        if (kind !== 'chat') return next;
+        const existingIds = new Set(state.models.map(model => model.id.trim()));
         for (const model of fetched) {
           const id = String(model.id ?? '').trim();
-          if (id && !existingModelIds.has(id)) {
+          if (id && !existingIds.has(id)) {
             next.add(id);
           }
         }
@@ -220,23 +245,27 @@ export const CustomProviderEditor: React.FC<CustomProviderEditorProps> = ({
       });
       setModelImportDialogOpen(true);
     } catch (error) {
-      console.error('Failed to fetch custom provider models:', error);
-      toast.error(t('settings.providers.page.toast.customProviderFetchFailed'));
+      if (!controller.signal.aborted) toast.error(t('settings.providers.page.toast.customProviderFetchFailed'), {
+        description: error instanceof Error ? error.message : undefined,
+      });
     } finally {
-      setFetchingModels(false);
+      if (discoveryController.current === controller) {
+        discoveryController.current = null;
+        if (mountedRef.current) setFetchingModels(null);
+      }
     }
   };
 
   const existingModelIds = React.useMemo(() => {
     const ids = new Set<string>();
-    for (const row of state.models) {
+    for (const row of modelImportTarget === 'chat' ? state.models : state.inference[modelImportTarget].models) {
       const id = row.id.trim();
       if (id) {
         ids.add(id);
       }
     }
     return ids;
-  }, [state.models]);
+  }, [state.models, state.inference, modelImportTarget]);
 
   const modelImportSummary = React.useMemo(() => {
     const total = fetchedModels.length;
@@ -352,8 +381,18 @@ export const CustomProviderEditor: React.FC<CustomProviderEditorProps> = ({
 
     setState((prev) => ({
       ...prev,
-      models: mergeCustomProviderModelRows(prev.models, selectedModels),
-      modelsDefined: true,
+      ...(modelImportTarget === 'chat' ? {
+        models: mergeCustomProviderModelRows(prev.models, selectedModels),
+        modelsDefined: true,
+      } : {
+        inference: {
+          ...prev.inference,
+          [modelImportTarget]: {
+            ...prev.inference[modelImportTarget],
+            models: mergeCustomProviderModelRows(prev.inference[modelImportTarget].models, selectedModels),
+          },
+        },
+      }),
     }));
 
     toast.success(
@@ -594,10 +633,10 @@ export const CustomProviderEditor: React.FC<CustomProviderEditorProps> = ({
                 variant="outline"
                 size="xs"
                 className="!font-normal"
-                onClick={handleFetchModels}
-                disabled={fetchingModels}
+                onClick={() => handleFetchModels('chat')}
+                disabled={fetchingModels !== null}
               >
-                {fetchingModels
+                {fetchingModels === 'chat'
                   ? t('settings.providers.page.actions.fetchingModels')
                   : t('settings.providers.page.actions.fetchModels')}
               </Button>
@@ -744,7 +783,7 @@ export const CustomProviderEditor: React.FC<CustomProviderEditorProps> = ({
           </div>
         </div>}
         {state.scope === 'project' && <p className="typography-meta text-muted-foreground">{t('settings.providers.page.custom.capability.projectScope')}</p>}
-        <ProviderInferenceEditor value={state.inference} onChange={(kind, patch) => setState(prev => ({
+        <ProviderInferenceEditor value={state.inference} onFetchModels={handleFetchModels} fetchingModels={fetchingModels} onChange={(kind, patch) => setState(prev => ({
           ...prev, inference: { ...prev.inference, [kind]: { ...prev.inference[kind], ...patch } },
         }))} />
       </div>
@@ -770,7 +809,7 @@ export const CustomProviderEditor: React.FC<CustomProviderEditorProps> = ({
       <Dialog open={modelImportDialogOpen} onOpenChange={setModelImportDialogOpen}>
         <DialogContent className="max-w-xl">
           <DialogHeader>
-            <DialogTitle>{t('settings.providers.page.modelImport.title')}</DialogTitle>
+            <DialogTitle>{t('settings.providers.page.modelImport.title')} · {t(`settings.providers.page.custom.capability.${modelImportTarget}`)}</DialogTitle>
             <DialogDescription>
               {t('settings.providers.page.modelImport.description')}
             </DialogDescription>

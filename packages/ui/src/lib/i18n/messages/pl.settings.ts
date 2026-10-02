@@ -2267,7 +2267,7 @@
   'settings.providers.page.custom.capability.endpoint': "Ścieżka żądania (opcjonalna)",
   'settings.providers.page.custom.capability.credentialRef': "Źródło poświadczeń (ID dostawcy, opcjonalne)",
   'settings.providers.page.custom.capability.inheritCredential': "Poświadczenia tego dostawcy",
-  'settings.providers.page.custom.capability.manualModels': "Dodaj identyfikatory modeli usługi; katalog czatu nie jest wymagany.",
+  'settings.providers.page.custom.capability.manualModels': "Pobierz i wybierz modele dla tej funkcji lub wpisz ich ID ręcznie. Niektóre usługi zwracają listę mieszaną albo nie obsługują pobierania modeli.",
   'settings.providers.page.custom.capability.manualModel': "Wpisz ID modelu",
   'settings.providers.page.custom.capability.projectScope': "Te możliwości używają ustawień użytkownika lub administratora. Wybierz odpowiedni zakres.",
   'settings.providers.page.custom.type.other.description': 'Wpisz identyfikator API obsługiwany przez aktywne środowisko. Puste pole dziedziczy istniejącą konfigurację.',

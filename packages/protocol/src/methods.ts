@@ -47,6 +47,7 @@ import type {
   ProviderConfigDetails,
   ProviderConfigInput,
   ProviderConfigScope,
+  ProviderInferenceCapability,
   ProviderModelDiscoveryResult,
 } from "./provider.js";
 import type { PiSessionEntry, SessionEntriesResult, SessionReconcileResult, SessionTreeResult } from "./session.js";
@@ -276,6 +277,7 @@ export interface HostMethodMap {
   };
   "provider.models.discover": {
     params: {
+      capability?: ProviderInferenceCapability;
       config?: ProviderConfigInput;
       interactionId: string;
       providerId: string;

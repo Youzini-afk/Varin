@@ -5,6 +5,7 @@ import type {
   ProviderConfigDeleteScope,
   ProviderConfigInput,
   ProviderConfigScope,
+  ProviderInferenceCapability,
 } from '@varin/protocol';
 import { getPiRuntimeConnection } from './client';
 
@@ -42,6 +43,7 @@ export const deletePiProviderConfig = async (
 };
 
 export interface PiProviderDiscoveryOptions {
+  capability?: ProviderInferenceCapability;
   apiKey?: string;
   config?: ProviderConfigInput;
   signal?: AbortSignal;
@@ -66,6 +68,7 @@ export const discoverPiProviderModels = async (
       return apiKey;
     },
   }, (client, interactionId) => client.request('provider.models.discover', {
+      ...(options.capability === undefined ? {} : { capability: options.capability }),
       ...(options.config === undefined ? {} : { config: options.config }),
       cwd,
       interactionId,

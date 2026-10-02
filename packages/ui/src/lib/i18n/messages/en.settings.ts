@@ -2241,7 +2241,7 @@ export const settingsDict = {
   'settings.providers.page.custom.capability.endpoint': "Request path (optional)",
   'settings.providers.page.custom.capability.credentialRef': "Credential source (provider ID, optional)",
   'settings.providers.page.custom.capability.inheritCredential': "Use this provider’s credentials",
-  'settings.providers.page.custom.capability.manualModels': "Add model IDs supplied by the service; chat catalog discovery is not required.",
+  'settings.providers.page.custom.capability.manualModels': "Fetch and select models for this capability, or enter model IDs manually. Some services return a mixed list or do not support model discovery.",
   'settings.providers.page.custom.capability.manualModel': "Enter a model ID",
   'settings.providers.page.custom.capability.projectScope': "Inference capabilities use user or operator configuration. Choose that scope to configure them.",
   'settings.providers.page.custom.type.other.description': 'Enter an API identifier supported by the active runtime; leave empty to inherit an existing configuration.',

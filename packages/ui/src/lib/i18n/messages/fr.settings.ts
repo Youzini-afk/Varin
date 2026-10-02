@@ -2134,7 +2134,7 @@ export const settingsDict = {
   'settings.providers.page.custom.capability.endpoint': "Chemin de requête (facultatif)",
   'settings.providers.page.custom.capability.credentialRef': "Source des identifiants (ID du fournisseur, facultatif)",
   'settings.providers.page.custom.capability.inheritCredential': "Identifiants de ce fournisseur",
-  'settings.providers.page.custom.capability.manualModels': "Ajoutez les ID du service ; le catalogue de dialogue n’est pas requis.",
+  'settings.providers.page.custom.capability.manualModels': "Récupérez et sélectionnez les modèles adaptés, ou saisissez leurs ID. Certains services renvoient une liste mixte ou ne permettent pas de lister les modèles.",
   'settings.providers.page.custom.capability.manualModel': "Saisir un ID de modèle",
   'settings.providers.page.custom.capability.projectScope': "Ces capacités utilisent la configuration utilisateur ou administrateur. Choisissez ce périmètre.",
   'settings.providers.page.custom.type.other.description': 'Saisissez un identifiant API pris en charge par le runtime actif. Laissez vide pour reprendre la configuration existante.',

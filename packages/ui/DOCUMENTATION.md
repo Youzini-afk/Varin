@@ -38,6 +38,9 @@ embedding, reranking and fast decisions. Generation exposes Chat Completions, Re
 Messages, Gemini and an editable extension API identifier. Inference connections expose their actual
 adapter protocols and allow address/path/credential-owner overrides. Credentials stay in Pi auth;
 pure inference providers do not need a chat API or fabricated chat model.
+All four capability sections offer model discovery and a shared selection/import dialog. Inference
+discovery uses its own connection overrides, imports only into that section, and leaves selection
+explicit for mixed catalogs. Changing the connection or leaving the editor cancels pending discovery.
 
 Capability model suggestions appear in their corresponding Harness pickers, alongside manual ID entry.
 Provider counts include those declarations, while the ordinary chat picker still uses only native Pi

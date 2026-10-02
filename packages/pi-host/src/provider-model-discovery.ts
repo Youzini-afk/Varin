@@ -3,7 +3,9 @@ import {
   DISCOVERABLE_PROVIDER_APIS,
   type DiscoverableProviderApi,
   type ProviderConfigInput,
+  type ProviderInferenceCapability,
   type ProviderModelConfigInput,
+  type ProviderModelDiscoveryApi,
   type ProviderModelDiscoveryResult,
 } from "@varin/protocol";
 import { HostError } from "./errors.js";
@@ -62,7 +64,7 @@ function safeHeaders(
 }
 
 function requestHeaders(
-  api: DiscoverableProviderApi,
+  api: ProviderModelDiscoveryApi,
   apiKey: string | undefined,
   configured: Record<string, string | null> | undefined,
 ): Record<string, string> {
@@ -289,13 +291,15 @@ function includesCapability(value: unknown, patterns: RegExp): boolean {
 }
 
 function normalizedModels(
-  api: DiscoverableProviderApi,
+  api: ProviderModelDiscoveryApi,
   payload: unknown,
+  capability?: ProviderInferenceCapability,
 ): ProviderModelConfigInput[] {
   if (!isObject(payload)) {
     throw new HostError("provider_discovery_invalid_response", "Provider response must be an object");
   }
-  const entries = api === "google-generative-ai" ? payload.models : payload.data;
+  const namedModels = api === "google-generative-ai" || api === "typesafe-system-one";
+  const entries = namedModels ? payload.models : payload.data;
   if (!Array.isArray(entries)) {
     throw new HostError("provider_discovery_invalid_response", "Provider response did not contain a model list");
   }
@@ -303,10 +307,22 @@ function normalizedModels(
   const seen = new Set<string>();
   for (const value of entries) {
     if (!isObject(value)) continue;
-    const rawId = api === "google-generative-ai" ? value.name : value.id;
-    const id = typeof rawId === "string" ? rawId.trim().replace(/^models\//u, "") : "";
+    const rawId = namedModels ? value.name : value.id;
+    const id = typeof rawId === "string"
+      ? api === "google-generative-ai" ? rawId.trim().replace(/^models\//u, "") : rawId.trim()
+      : "";
     if (!id || seen.has(id)) continue;
     seen.add(id);
+    if (capability) {
+      const name = [value.displayName, value.display_name, value.title, value.name]
+        .find((entry) => typeof entry === "string" && entry.trim());
+      result.push({
+        id,
+        name: typeof name === "string" ? name.trim() : id,
+        ...(capability === "decision" ? { type: "classifier", api } : {}),
+      });
+      continue;
+    }
     const capabilities = isObject(value.capabilities) ? value.capabilities : {};
     const architecture = isObject(value.architecture) ? value.architecture : {};
     const contextWindow = firstPositive(
@@ -363,6 +379,7 @@ function normalizedModels(
 
 export async function discoverProviderModels(options: {
   apiKey?: string;
+  capability?: ProviderInferenceCapability;
   config?: ProviderConfigInput;
   configuration: ProviderConfigurationManager;
   cwd: string;
@@ -372,19 +389,36 @@ export async function discoverProviderModels(options: {
   signal?: AbortSignal;
 }): Promise<ProviderModelDiscoveryResult> {
   options.signal?.throwIfAborted();
-  const config = options.config
-    ?? await options.configuration.effectiveConfig(
-      options.cwd,
-      options.providerId,
-      options.projectTrusted,
-    );
-  const runtimeProvider = options.runtime.getProvider(options.providerId);
-  const runtimeModel = options.runtime.getModels(options.providerId)[0];
-  const configuredApi = config.api ?? runtimeModel?.api;
-  const configuredBaseUrl = config.baseUrl ?? runtimeProvider?.baseUrl ?? runtimeModel?.baseUrl;
+  const { capability } = options;
+  const runtime = capability
+    ? await options.configuration.inferenceRuntime(options.cwd)
+    : options.runtime;
+  let config = options.config;
+  if (!config) {
+    try {
+      config = await options.configuration.effectiveConfig(
+        options.cwd,
+        options.providerId,
+        capability ? false : options.projectTrusted,
+      );
+    } catch (error) {
+      if (!(error instanceof HostError) || error.code !== "provider_config_not_found") throw error;
+      config = { id: options.providerId };
+    }
+  }
+  const inference = capability
+    ? (options.config?.capabilities ?? await options.configuration.effectiveCapabilities(options.cwd, options.providerId, false))?.[capability]
+    : undefined;
+  const runtimeProvider = runtime.getProvider(options.providerId);
+  const runtimeModel = capability === "decision"
+    ? runtime.getModelsOfType("classifier", options.providerId)[0]
+    : runtime.getModels(options.providerId)[0];
+  const configuredApi = capability === "decision" ? "typesafe-system-one"
+    : capability ? "openai-completions" : config.api ?? runtimeModel?.api;
+  const configuredBaseUrl = inference?.baseUrl ?? config.baseUrl ?? runtimeProvider?.baseUrl ?? runtimeModel?.baseUrl;
   if (
     !configuredApi ||
-    !DISCOVERABLE_PROVIDER_APIS.includes(configuredApi as DiscoverableProviderApi)
+    configuredApi !== "typesafe-system-one" && !DISCOVERABLE_PROVIDER_APIS.includes(configuredApi as DiscoverableProviderApi)
   ) {
     throw new HostError(
       "provider_discovery_unsupported_api",
@@ -397,21 +431,31 @@ export async function discoverProviderModels(options: {
       `Provider ${options.providerId} does not define a base URL`,
     );
   }
-  const api = configuredApi as DiscoverableProviderApi;
+  const api = configuredApi as ProviderModelDiscoveryApi;
   const discoveryUrl = appendModelsPath(configuredBaseUrl);
-  const auth = await options.runtime.getAuth(options.providerId, {
+  const credentialRef = inference?.credentialRef ?? options.providerId;
+  // A key entered in this provider's form belongs to that provider, not an
+  // explicitly selected credential owner. Reuse only live overlays across runtimes.
+  let apiKey = credentialRef === options.providerId ? options.apiKey : undefined;
+  if (apiKey === undefined && capability && options.runtime.getProviderAuthStatus(credentialRef).source === "runtime") {
+    apiKey = (await options.runtime.getAuth(credentialRef, {
+      ...(options.signal === undefined ? {} : { signal: options.signal }),
+    }))?.auth.apiKey;
+  }
+  const auth = await runtime.getAuth(credentialRef, {
+    ...(apiKey === undefined ? {} : { apiKey }),
     ...(options.signal === undefined ? {} : { signal: options.signal }),
   });
   options.signal?.throwIfAborted();
   const payload = await requestJson(
     discoveryUrl,
-    requestHeaders(api, options.apiKey ?? auth?.auth.apiKey, auth?.auth.headers),
+    requestHeaders(api, apiKey ?? auth?.auth.apiKey, auth?.auth.headers),
     options.signal,
   );
   return {
     api,
     baseUrl: configuredBaseUrl,
-    models: normalizedModels(api, payload),
+    models: normalizedModels(api, payload, capability),
     providerId: options.providerId,
   };
 }

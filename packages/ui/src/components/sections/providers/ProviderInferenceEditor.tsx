@@ -7,9 +7,11 @@ import { useI18n } from '@/lib/i18n';
 import { usePiProviderStore } from '@/stores/usePiProviderStore';
 import { createEmptyCustomProviderModel, type CustomProviderInferenceForm } from './customProviderForm';
 
-export function ProviderInferenceEditor({ value, onChange }: {
+export function ProviderInferenceEditor({ value, onChange, onFetchModels, fetchingModels }: {
   value: Record<ProviderInferenceCapability, CustomProviderInferenceForm>;
   onChange: (kind: ProviderInferenceCapability, patch: Partial<CustomProviderInferenceForm>) => void;
+  onFetchModels: (kind: ProviderInferenceCapability) => void;
+  fetchingModels: 'chat' | ProviderInferenceCapability | null;
 }) {
   const { t } = useI18n();
   const providers = usePiProviderStore(state => state.allProviders);
@@ -42,7 +44,7 @@ export function ProviderInferenceEditor({ value, onChange }: {
             <label className="space-y-1.5 typography-meta text-muted-foreground">
               <span>{t('settings.providers.page.custom.capability.endpoint')}</span>
               <Input value={capability.endpoint} onChange={event => onChange(kind, { endpoint: event.target.value })}
-                placeholder={kind === 'embedding' ? '/embeddings' : kind === 'rerank' ? '/rerank' : '/v1/systemone'} className="h-7" />
+                placeholder={kind === 'embedding' ? '/embeddings' : kind === 'rerank' ? '/rerank' : '/systemone'} className="h-7" />
             </label>
             <label className="space-y-1.5 typography-meta text-muted-foreground md:col-span-2">
               <span>{t('settings.providers.page.custom.capability.credentialRef')}</span>
@@ -53,9 +55,14 @@ export function ProviderInferenceEditor({ value, onChange }: {
           <div className="space-y-2">
             <div className="flex items-center justify-between gap-2">
               <span className="typography-ui-label">{t('settings.providers.page.custom.field.models')}</span>
-              <Button size="xs" variant="outline" onClick={() => onChange(kind, { models: [...capability.models, createEmptyCustomProviderModel()] })}>
-                {t('settings.providers.page.actions.addModel')}
-              </Button>
+              <div className="flex items-center gap-1">
+                <Button size="xs" variant="outline" onClick={() => onFetchModels(kind)} disabled={fetchingModels !== null}>
+                  {t(fetchingModels === kind ? 'settings.providers.page.actions.fetchingModels' : 'settings.providers.page.actions.fetchModels')}
+                </Button>
+                <Button size="xs" variant="outline" onClick={() => onChange(kind, { models: [...capability.models, createEmptyCustomProviderModel()] })}>
+                  {t('settings.providers.page.actions.addModel')}
+                </Button>
+              </div>
             </div>
             {capability.models.map((model, index) => <div key={index} className="flex flex-wrap items-center gap-2">
               <Input value={model.id} onChange={event => patchModel(index, 'id', event.target.value)} className="h-7 flex-1"

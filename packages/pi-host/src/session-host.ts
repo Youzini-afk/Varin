@@ -65,6 +65,7 @@ import type {
   ProviderConfigDetails,
   ProviderConfigInput,
   ProviderConfigScope,
+  ProviderInferenceCapability,
   ProviderAuthType,
   ProviderDescriptor,
   ProviderModelDiscoveryResult,
@@ -2456,6 +2457,7 @@ export class SessionHost {
     providerId: string,
     config?: ProviderConfigInput,
     requestCredential: boolean = false,
+    capability?: ProviderInferenceCapability,
   ): Promise<ProviderModelDiscoveryResult> {
     let interactionRecord: ProviderInteraction | undefined;
     try {
@@ -2485,6 +2487,7 @@ export class SessionHost {
           )
         : undefined;
       const result = await discoverProviderModels({
+        ...(capability === undefined ? {} : { capability }),
         configuration: this.#providerConfiguration,
         ...(config === undefined ? {} : { config }),
         cwd: this.runtime.cwd,

@@ -2266,7 +2266,7 @@
   'settings.providers.page.custom.capability.endpoint': "요청 경로 (선택 사항)",
   'settings.providers.page.custom.capability.credentialRef': "자격 증명 출처 (공급자 ID, 선택 사항)",
   'settings.providers.page.custom.capability.inheritCredential': "이 공급자의 자격 증명 사용",
-  'settings.providers.page.custom.capability.manualModels': "서비스의 모델 ID를 추가하세요. 채팅 목록에 없어도 됩니다.",
+  'settings.providers.page.custom.capability.manualModels': "모델을 가져와 이 용도에 맞는 모델을 선택하거나 ID를 직접 입력하세요. 일부 서비스는 여러 용도의 목록을 반환하거나 모델 조회를 지원하지 않습니다.",
   'settings.providers.page.custom.capability.manualModel': "모델 ID 직접 입력",
   'settings.providers.page.custom.capability.projectScope': "이 기능은 사용자 또는 관리자 설정을 사용합니다. 해당 범위를 선택하세요.",
   'settings.providers.page.custom.type.other.description': '현재 런타임이 지원하는 API 식별자를 입력하세요. 비워 두면 기존 설정을 상속합니다.',

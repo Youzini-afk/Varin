@@ -779,16 +779,7 @@ export class ProviderConfigurationManager {
     let capabilities = capabilitiesFromDocuments(backgroundDocuments, normalizedId);
     // Use the native typed catalog, composed without project input. A project
     // provider override must not redirect background inference suggestions.
-    const key = JSON.stringify([backgroundDocuments.user?.data, backgroundDocuments.custom?.data]);
-    if (this.#inferenceCatalog?.key !== key) {
-      const catalog = ModelRuntime.create({
-        allowModelNetwork: false,
-        authPath: join(this.#agentDir, "auth.json"),
-        modelsPath: join(this.#agentDir, "models.json"),
-      }).then(async native => { await this.apply(native, cwd, false); return native; });
-      this.#inferenceCatalog = { key, runtime: catalog };
-    }
-    const catalog = await this.#inferenceCatalog.runtime;
+    const catalog = await this.inferenceRuntime(cwd);
     const classifiers = catalog.getModelsOfType("classifier", normalizedId);
     if (classifiers.length) {
       const declared = capabilities?.decision;
@@ -813,6 +804,21 @@ export class ProviderConfigurationManager {
       locations,
       providerId: normalizedId,
     };
+  }
+
+  /** Catalog and configured credentials for inference, without project overrides. */
+  async inferenceRuntime(cwd: string): Promise<ModelRuntime> {
+    const documents = await this.#documents(cwd, false);
+    const key = JSON.stringify([documents.user?.data, documents.custom?.data]);
+    if (this.#inferenceCatalog?.key !== key) {
+      const catalog = ModelRuntime.create({
+        allowModelNetwork: false,
+        authPath: join(this.#agentDir, "auth.json"),
+        modelsPath: join(this.#agentDir, "models.json"),
+      }).then(async native => { await this.apply(native, cwd, false); return native; });
+      this.#inferenceCatalog = { key, runtime: catalog };
+    }
+    return this.#inferenceCatalog.runtime;
   }
 
   async upsert(

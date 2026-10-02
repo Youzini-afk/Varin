@@ -2073,7 +2073,7 @@
   'settings.providers.page.custom.capability.endpoint': "Caminho da solicitação (opcional)",
   'settings.providers.page.custom.capability.credentialRef': "Origem das credenciais (ID do provedor, opcional)",
   'settings.providers.page.custom.capability.inheritCredential': "Usar as credenciais deste provedor",
-  'settings.providers.page.custom.capability.manualModels': "Adicione IDs do serviço; não precisam aparecer no catálogo de chat.",
+  'settings.providers.page.custom.capability.manualModels': "Busque e selecione modelos para esta função ou insira os IDs manualmente. Alguns serviços retornam uma lista mista ou não permitem consultar modelos.",
   'settings.providers.page.custom.capability.manualModel': "Digitar ID do modelo",
   'settings.providers.page.custom.capability.projectScope': "Essas capacidades usam configuração do usuário ou administrador. Escolha esse escopo para configurá-las.",
   "settings.providers.page.custom.type.other.description": "Insira um identificador de API compatível com o runtime ativo; deixe vazio para herdar a configuração existente.",

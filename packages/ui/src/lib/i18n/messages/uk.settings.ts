@@ -2266,7 +2266,7 @@
   'settings.providers.page.custom.capability.endpoint': "Шлях запиту (необов’язково)",
   'settings.providers.page.custom.capability.credentialRef': "Джерело облікових даних (ID постачальника, необов’язково)",
   'settings.providers.page.custom.capability.inheritCredential': "Облікові дані цього постачальника",
-  'settings.providers.page.custom.capability.manualModels': "Додайте ID моделей сервісу; каталог чату не обов’язковий.",
+  'settings.providers.page.custom.capability.manualModels': "Завантажте та виберіть моделі для цієї функції або введіть ID вручну. Деякі сервіси повертають змішаний список або не підтримують отримання моделей.",
   'settings.providers.page.custom.capability.manualModel': "Ввести ID моделі",
   'settings.providers.page.custom.capability.projectScope': "Ці можливості використовують налаштування користувача або адміністратора. Виберіть відповідну область.",
   "settings.providers.page.custom.type.other.description": "Вкажіть ідентифікатор API, який підтримує активне середовище; залиште поле порожнім, щоб успадкувати наявну конфігурацію.",

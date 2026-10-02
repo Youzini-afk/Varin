@@ -12,7 +12,7 @@ export const settingsDict = {
   'settings.providers.page.custom.capability.endpoint': "リクエストパス（任意）",
   'settings.providers.page.custom.capability.credentialRef': "認証情報の提供元（プロバイダー ID、任意）",
   'settings.providers.page.custom.capability.inheritCredential': "このプロバイダーの認証情報を使用",
-  'settings.providers.page.custom.capability.manualModels': "サービスのモデル ID を追加します。対話用一覧への登録は不要です。",
+  'settings.providers.page.custom.capability.manualModels': "モデルを取得して用途に合うものを選択するか、ID を手動で入力します。サービスによっては複数用途の一覧が返されるか、取得に対応していません。",
   'settings.providers.page.custom.capability.manualModel': "モデル ID を入力",
   'settings.providers.page.custom.capability.projectScope': "これらの機能はユーザーまたは管理者の設定を使用します。対応する範囲を選択してください。",
   'settings.providers.page.custom.type.other.description': '現在のランタイムが対応する API 識別子を入力します。空欄なら既存設定を引き継ぎます。',

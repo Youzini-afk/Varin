@@ -58,6 +58,19 @@ beforeEach(() => {
 const loginOptions = { cwd: '/workspace', providerId: 'shared-provider', type: 'api_key' as const };
 
 describe('native Pi authentication interactions', () => {
+  it('passes the inference capability with its draft configuration through the existing auth interaction', async () => {
+    const config = { id: 'shared-provider', capabilities: { embedding: {
+      protocol: 'openai-compatible' as const, baseUrl: 'https://embedding.example/v1', credentialRef: 'embedding-key',
+    } } };
+    const operation = discoverPiProviderModels('/workspace', 'shared-provider', { capability: 'embedding', config });
+    await vi.waitFor(() => expect(client.operations.size).toBe(1));
+    const request = client.requests.find(entry => entry.method === 'provider.models.discover')!;
+    expect(request.params).toMatchObject({ capability: 'embedding', config, cwd: '/workspace', providerId: 'shared-provider' });
+    expect(request.params.requestCredential).toBeUndefined();
+    client.finish(String(request.params.interactionId), { models: [{ id: 'embedding-model' }] });
+    await expect(operation).resolves.toEqual({ models: [{ id: 'embedding-model' }] });
+  });
+
   it('isolates two logins and model discovery for the same provider', async () => {
     const firstPrompt = vi.fn(async () => 'first-key');
     const secondPrompt = vi.fn(async () => 'second-key');

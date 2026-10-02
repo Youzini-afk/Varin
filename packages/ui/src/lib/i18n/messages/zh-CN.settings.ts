@@ -2235,7 +2235,7 @@
   'settings.providers.page.custom.capability.endpoint': "请求路径（可选）",
   'settings.providers.page.custom.capability.credentialRef': "凭据来源（提供商 ID，可选）",
   'settings.providers.page.custom.capability.inheritCredential': "沿用此提供商的凭据",
-  'settings.providers.page.custom.capability.manualModels': "按服务提供的模型 ID 添加，无需先出现在聊天目录中。",
+  'settings.providers.page.custom.capability.manualModels': "拉取后选择适用于此用途的模型，也可手动填写模型 ID。部分服务返回混合列表或不支持拉取。",
   'settings.providers.page.custom.capability.manualModel': "手动填写模型 ID",
   'settings.providers.page.custom.capability.projectScope': "嵌入、重排和决策使用用户或管理员配置；请选择对应范围来配置这些能力。",
   'settings.providers.page.custom.type.other.description': '填写当前运行时支持的 API 标识；留空则沿用已有配置。',

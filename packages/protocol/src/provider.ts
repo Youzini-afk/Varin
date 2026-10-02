@@ -15,6 +15,8 @@ export const DISCOVERABLE_PROVIDER_APIS = [
 
 export type DiscoverableProviderApi = (typeof DISCOVERABLE_PROVIDER_APIS)[number];
 
+export type ProviderModelDiscoveryApi = DiscoverableProviderApi | "typesafe-system-one";
+
 export const PROVIDER_INFERENCE_CAPABILITIES = ["embedding", "rerank", "decision"] as const;
 export type ProviderInferenceCapability = (typeof PROVIDER_INFERENCE_CAPABILITIES)[number];
 export const PROVIDER_INFERENCE_PROTOCOLS = {
@@ -103,7 +105,7 @@ export interface ProviderConfigDetails {
 }
 
 export interface ProviderModelDiscoveryResult {
-  api: DiscoverableProviderApi;
+  api: ProviderModelDiscoveryApi;
   baseUrl: string;
   models: ProviderModelConfigInput[];
   providerId: string;

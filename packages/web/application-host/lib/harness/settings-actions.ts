@@ -441,6 +441,7 @@ const providersAdapter = (deps: SettingsActionDeps): SettingsActionAdapter => ({
               interactionId: randomUUID(),
               providerId: needString(args, 'providerId'),
               ...(isRecord(args.config) ? { config: args.config } : {}),
+              ...(args.capability === undefined ? {} : { capability: args.capability }),
             })),
           };
         default:
