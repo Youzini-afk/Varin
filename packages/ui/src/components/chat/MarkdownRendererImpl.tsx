@@ -829,6 +829,7 @@ const useDecorateContext = (
   }), [t]);
 
   const codeBlockLineWrap = useUIStore((state) => state.codeBlockLineWrap);
+  const mermaidRenderingMode = useUIStore((state) => state.mermaidRenderingMode);
   const setCodeBlockLineWrap = useUIStore((state) => state.setCodeBlockLineWrap);
   const toggleCodeBlockLineWrap = React.useCallback(() => {
     setCodeBlockLineWrap(!useUIStore.getState().codeBlockLineWrap);
@@ -836,7 +837,7 @@ const useDecorateContext = (
 
   return React.useMemo<DecorateContext>(() => {
     const colors = mermaidColorsFromTheme(currentTheme);
-    const mode = useUIStore.getState().mermaidRenderingMode;
+    const mode = mermaidRenderingMode;
     const themeId = currentTheme.metadata?.id ?? 'theme';
     const renderMermaid = (source: string): MermaidRender =>
       cachedMermaidRender(`${themeId}:${mode}:${source}`, () => {
@@ -848,7 +849,7 @@ const useDecorateContext = (
         }
       });
     return { labels, mermaidControls, codeBlockLineWrap, deferCodeLineNumberSync, onToggleCodeBlockLineWrap: toggleCodeBlockLineWrap, renderMermaid, onPreviewLoopback };
-  }, [currentTheme, labels, mermaidControls, codeBlockLineWrap, deferCodeLineNumberSync, toggleCodeBlockLineWrap, onPreviewLoopback]);
+  }, [currentTheme, labels, mermaidControls, codeBlockLineWrap, mermaidRenderingMode, deferCodeLineNumberSync, toggleCodeBlockLineWrap, onPreviewLoopback]);
 };
 
 // Runs the async render pipeline into the container and keeps a stable

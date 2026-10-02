@@ -1,6 +1,7 @@
 import React from 'react';
 import { useVirtualizer } from '@tanstack/react-virtual';
 import { Icon } from '@/components/icon/Icon';
+import { useUIStore } from '@/stores/useUIStore';
 import { useI18n } from '@/lib/i18n';
 import { cn } from '@/lib/utils';
 import { getLanguageFromExtension } from '@/lib/toolHelpers';
@@ -73,6 +74,7 @@ export const PiFileChangePreview: React.FC<{
   onOpen?: () => void;
 }> = ({ previewId, file, phase, onOpen }) => {
   const { t } = useI18n();
+  const showFileIcons = useUIStore(state => state.showToolFileIcons);
   const theme = useOptionalThemeSystem();
   const syntaxVars = React.useMemo(() => theme ? getMarkdownSyntaxVars(theme.currentTheme) : {}, [theme]);
   const viewport = React.useRef<HTMLDivElement>(null);
@@ -148,8 +150,8 @@ export const PiFileChangePreview: React.FC<{
   return <section className="my-2 min-w-0 overflow-hidden rounded-xl border border-border/60 bg-muted/20"
     data-pi-file-preview={file.path} style={syntaxVars as React.CSSProperties}>
     <header className="flex min-w-0 items-center gap-2 bg-muted/35 px-3 py-2 typography-meta">
-      <Icon name={busy ? 'loader-4' : failed ? 'error-warning' : 'file-code'}
-        className={cn('size-3.5 shrink-0', busy && 'animate-spin', failed && 'text-[var(--status-error)]')} />
+      {showFileIcons || busy || failed ? <Icon name={busy ? 'loader-4' : failed ? 'error-warning' : 'file-code'}
+        className={cn('size-3.5 shrink-0', busy && 'animate-spin', failed && 'text-[var(--status-error)]')} /> : null}
       <button type="button" title={file.path} data-varin-file-path={file.path}
         disabled={!onOpen || file.operation === 'delete'} onClick={onOpen}
         className="min-w-0 flex-1 truncate text-left text-muted-foreground enabled:hover:text-foreground enabled:hover:underline">

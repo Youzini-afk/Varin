@@ -1,3 +1,4 @@
+import { isChatContentWidth } from '@varin/application-client';
 import type { DesktopSettings } from '@/lib/desktop';
 import { createProjectIdFromPath } from '@/lib/projectId';
 import { NO_ACTIVE_PROJECT_STORAGE_VALUE } from '@/lib/projectSelection';
@@ -498,8 +499,7 @@ const materializeAuthoritativeUiSettings = (settings: DesktopSettings): DesktopS
     stickyUserHeader: defaults.stickyUserHeader,
     promptNavigatorEnabled: defaults.promptNavigatorEnabled,
     expandedEditorToolbar: defaults.expandedEditorToolbar,
-    wideChatLayoutEnabled: defaults.wideChatLayoutEnabled,
-    showSplitAssistantMessageActions: defaults.showSplitAssistantMessageActions,
+    chatContentWidth: defaults.chatContentWidth,
     draftStartersVisible: defaults.draftStartersVisible,
     fontSize: defaults.fontSize,
     terminalFontSize: defaults.terminalFontSize,
@@ -711,14 +711,8 @@ const applyDesktopUiPreferences = (settings: DesktopSettings) => applyAuthoritat
   if (typeof settings.expandedEditorToolbar === 'boolean' && settings.expandedEditorToolbar !== store.expandedEditorToolbar) {
     store.setExpandedEditorToolbar(settings.expandedEditorToolbar);
   }
-  if (typeof settings.wideChatLayoutEnabled === 'boolean' && settings.wideChatLayoutEnabled !== store.wideChatLayoutEnabled) {
-    store.setWideChatLayoutEnabled(settings.wideChatLayoutEnabled);
-  }
-  if (
-    typeof settings.showSplitAssistantMessageActions === 'boolean'
-    && settings.showSplitAssistantMessageActions !== store.showSplitAssistantMessageActions
-  ) {
-    store.setShowSplitAssistantMessageActions(settings.showSplitAssistantMessageActions);
+  if (isChatContentWidth(settings.chatContentWidth) && settings.chatContentWidth !== store.chatContentWidth) {
+    store.setChatContentWidth(settings.chatContentWidth);
   }
   if (typeof settings.fontSize === 'number' && Number.isFinite(settings.fontSize) && settings.fontSize !== store.fontSize) {
     store.setFontSize(settings.fontSize);
@@ -1318,11 +1312,8 @@ const sanitizeWebSettings = (payload: unknown): DesktopSettings | null => {
   if (typeof candidate.expandedEditorToolbar === 'boolean') {
     result.expandedEditorToolbar = candidate.expandedEditorToolbar;
   }
-  if (typeof candidate.wideChatLayoutEnabled === 'boolean') {
-    result.wideChatLayoutEnabled = candidate.wideChatLayoutEnabled;
-  }
-  if (typeof candidate.showSplitAssistantMessageActions === 'boolean') {
-    result.showSplitAssistantMessageActions = candidate.showSplitAssistantMessageActions;
+  if (isChatContentWidth(candidate.chatContentWidth)) {
+    result.chatContentWidth = candidate.chatContentWidth;
   }
   if (typeof candidate.fontSize === 'number' && Number.isFinite(candidate.fontSize)) {
     result.fontSize = candidate.fontSize;

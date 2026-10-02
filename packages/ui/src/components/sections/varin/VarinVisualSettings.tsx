@@ -4,7 +4,6 @@ import { runtimeFetch } from '@varin/application-client';
 import { useThemeSystem } from '@/contexts/useThemeSystem';
 import type { ThemeMode } from '@/types/theme';
 import { useUIStore } from '@/stores/useUIStore';
-import { useMessageQueueStore, type FollowUpBehavior } from '@/stores/messageQueueStore';
 import { cn } from '@/lib/utils';
 import { Button } from '@/components/ui/button';
 import { NumberInput } from '@/components/ui/number-input';
@@ -31,13 +30,8 @@ import { usePwaDetection } from '@/hooks/usePwaDetection';
 import { updateDesktopSettings } from '@/lib/persistence';
 import { CODE_FONT_OPTIONS, DEFAULT_MONO_FONT, DEFAULT_UI_FONT, UI_FONT_OPTIONS, type MonoFontOption, type UiFontOption } from '@/lib/fontOptions';
 import { useI18n, type Locale } from '@/lib/i18n';
-import { usePreferencesStore } from '@/stores/usePreferencesStore';
 import { normalizeMobileKeyboardMode, supportsMobileKeyboardResizeContent, type MobileKeyboardMode } from '@/lib/mobileKeyboardMode';
 import { getStoredMobileLayoutPreference, setStoredMobileLayoutPreference, type MobileLayoutPreference } from '@/lib/mobileLayoutPreference';
-import {
-    setDirectoryShowHidden,
-    useDirectoryShowHidden,
-} from '@/lib/directoryShowHidden';
 import {
     SettingsSection,
     SettingsTwoColumn,
@@ -89,37 +83,6 @@ const THEME_MODE_OPTIONS: Array<{ value: ThemeMode; labelKey: string; descriptio
         value: 'dark',
         labelKey: 'settings.varin.visual.option.themeMode.dark',
         descriptionKey: 'settings.varin.visual.option.themeMode.dark.description',
-    },
-];
-
-const DIFF_LAYOUT_OPTIONS: Option<'dynamic' | 'inline' | 'side-by-side'>[] = [
-    {
-        id: 'dynamic',
-        labelKey: 'settings.varin.visual.option.diffLayout.dynamic.label',
-        descriptionKey: 'settings.varin.visual.option.diffLayout.dynamic.description',
-    },
-    {
-        id: 'inline',
-        labelKey: 'settings.varin.visual.option.diffLayout.inline.label',
-        descriptionKey: 'settings.varin.visual.option.diffLayout.inline.description',
-    },
-    {
-        id: 'side-by-side',
-        labelKey: 'settings.varin.visual.option.diffLayout.sideBySide.label',
-        descriptionKey: 'settings.varin.visual.option.diffLayout.sideBySide.description',
-    },
-];
-
-const MERMAID_RENDERING_OPTIONS: Option<'svg' | 'ascii'>[] = [
-    {
-        id: 'svg',
-        labelKey: 'settings.varin.visual.option.mermaidRendering.svg.label',
-        descriptionKey: 'settings.varin.visual.option.mermaidRendering.svg.description',
-    },
-    {
-        id: 'ascii',
-        labelKey: 'settings.varin.visual.option.mermaidRendering.ascii.label',
-        descriptionKey: 'settings.varin.visual.option.mermaidRendering.ascii.description',
     },
 ];
 
@@ -176,45 +139,6 @@ const normalizePwaOrientation = (value: unknown): 'system' | 'portrait' | 'lands
     return value === 'portrait' || value === 'landscape' ? value : 'system';
 };
 
-const USER_MESSAGE_RENDERING_OPTIONS: Option<'markdown' | 'plain'>[] = [
-    {
-        id: 'markdown',
-        labelKey: 'settings.varin.visual.option.userMessageRendering.markdown.label',
-        descriptionKey: 'settings.varin.visual.option.userMessageRendering.markdown.description',
-    },
-    {
-        id: 'plain',
-        labelKey: 'settings.varin.visual.option.userMessageRendering.plain.label',
-        descriptionKey: 'settings.varin.visual.option.userMessageRendering.plain.description',
-    },
-];
-
-const CHAT_RENDER_MODE_OPTIONS: Option<'sorted' | 'live'>[] = [
-    {
-        id: 'sorted',
-        labelKey: 'settings.varin.visual.option.chatRenderMode.sorted.label',
-        descriptionKey: 'settings.varin.visual.option.chatRenderMode.sorted.description',
-    },
-    {
-        id: 'live',
-        labelKey: 'settings.varin.visual.option.chatRenderMode.live.label',
-        descriptionKey: 'settings.varin.visual.option.chatRenderMode.live.description',
-    },
-];
-
-const ACTIVITY_RENDER_MODE_OPTIONS: Option<'collapsed' | 'summary'>[] = [
-    {
-        id: 'collapsed',
-        labelKey: 'settings.varin.visual.option.activityRenderMode.collapsed.label',
-        descriptionKey: 'settings.varin.visual.option.activityRenderMode.collapsed.description',
-    },
-    {
-        id: 'summary',
-        labelKey: 'settings.varin.visual.option.activityRenderMode.summary.label',
-        descriptionKey: 'settings.varin.visual.option.activityRenderMode.summary.description',
-    },
-];
-
 const TIME_FORMAT_OPTIONS: Option<'auto' | '12h' | '24h'>[] = [
     {
         id: 'auto',
@@ -249,21 +173,6 @@ const WEEK_START_OPTIONS: Option<'auto' | 'monday' | 'sunday'>[] = [
     },
 ];
 
-const FOLLOW_UP_BEHAVIOR_OPTIONS: Option<FollowUpBehavior>[] = [
-    {
-        id: 'queue',
-        labelKey: 'settings.varin.visual.option.followUpBehavior.queue.label',
-    },
-    {
-        id: 'steer',
-        labelKey: 'settings.varin.visual.option.followUpBehavior.steer.label',
-    },
-];
-
-const normalizeUserMessageRenderingMode = (mode: unknown): 'markdown' | 'plain' => {
-    return mode === 'markdown' ? 'markdown' : 'plain';
-};
-
 type VisibleSetting =
     | 'theme'
     | 'windowControlsPosition'
@@ -279,34 +188,12 @@ type VisibleSetting =
     | 'editorFontSize'
     | 'spacing'
     | 'inputBarOffset'
-    | 'mermaidRendering'
-    | 'userMessageRendering'
-    | 'chatRenderMode'
-    | 'activityRenderMode'
-    | 'collapsibleUserMessages'
-    | 'stickyUserHeader'
-    | 'promptNavigatorEnabled'
-    | 'wideChatLayout'
-    | 'codeBlockLineWrap'
-    | 'splitAssistantMessageActions'
-    | 'subagentReadOnlyBanner'
-    | 'diffLayout'
     | 'mobileStatusBar'
-    | 'dotfiles'
-    | 'fileViewerPreview'
-    | 'reasoning'
-    | 'showToolFileIcons'
-    | 'showTurnChangedFiles'
-    | 'expandedTools'
-    | 'followUpBehavior'
     | 'terminalQuickKeys'
     | 'fileEditorKeymap'
     | 'fileEditorPreferences'
-    | 'persistDraft'
-    | 'inputSpellcheck'
     | 'expandedEditorToolbar'
-    | 'autoSaveEnabled'
-    | 'draftStartersVisible';
+    | 'autoSaveEnabled';
 
 const WINDOW_CONTROLS_POSITION_OPTIONS: Array<{ id: DesktopWindowControlsPosition; labelKey: string }> = [
     { id: 'left', labelKey: 'settings.varin.desktopNetwork.option.windowControlsLeft' },
@@ -329,34 +216,11 @@ export const VarinVisualSettings: React.FC<VarinVisualSettingsProps> = ({ visibl
     const { isMobile } = useDeviceInfo();
     const { terminal } = useRuntimeAPIs();
     const { browserTab } = usePwaDetection();
-    const directoryShowHidden = useDirectoryShowHidden();
-    const showReasoningTraces = useUIStore(state => state.showReasoningTraces);
-    const setShowReasoningTraces = useUIStore(state => state.setShowReasoningTraces);
-    const collapsibleThinkingBlocks = useUIStore(state => state.collapsibleThinkingBlocks);
-    const setCollapsibleThinkingBlocks = useUIStore(state => state.setCollapsibleThinkingBlocks);
 
-    const mermaidRenderingMode = useUIStore(state => state.mermaidRenderingMode);
-    const setMermaidRenderingMode = useUIStore(state => state.setMermaidRenderingMode);
-    const userMessageRenderingMode = useUIStore(state => state.userMessageRenderingMode);
-    const setUserMessageRenderingMode = useUIStore(state => state.setUserMessageRenderingMode);
-    const collapsibleUserMessages = useUIStore(state => state.collapsibleUserMessages);
-    const setCollapsibleUserMessages = useUIStore(state => state.setCollapsibleUserMessages);
-    const stickyUserHeader = useUIStore(state => state.stickyUserHeader);
-    const promptNavigatorEnabled = useUIStore(state => state.promptNavigatorEnabled);
-    const setStickyUserHeader = useUIStore(state => state.setStickyUserHeader);
-    const setPromptNavigatorEnabled = useUIStore(state => state.setPromptNavigatorEnabled);
     const expandedEditorToolbar = useUIStore(state => state.expandedEditorToolbar);
     const setExpandedEditorToolbar = useUIStore(state => state.setExpandedEditorToolbar);
     const autoSaveEnabled = useUIStore(state => state.autoSaveEnabled);
     const setAutoSaveEnabled = useUIStore(state => state.setAutoSaveEnabled);
-    const wideChatLayoutEnabled = useUIStore(state => state.wideChatLayoutEnabled);
-    const setWideChatLayoutEnabled = useUIStore(state => state.setWideChatLayoutEnabled);
-    const codeBlockLineWrap = useUIStore(state => state.codeBlockLineWrap);
-    const setCodeBlockLineWrap = useUIStore(state => state.setCodeBlockLineWrap);
-    const chatRenderMode = useUIStore(state => state.chatRenderMode);
-    const setChatRenderMode = useUIStore(state => state.setChatRenderMode);
-    const activityRenderMode = useUIStore(state => state.activityRenderMode);
-    const setActivityRenderMode = useUIStore(state => state.setActivityRenderMode);
     const fontSize = useUIStore(state => state.fontSize);
     const setFontSize = useUIStore(state => state.setFontSize);
     const terminalFontSize = useUIStore(state => state.terminalFontSize);
@@ -377,39 +241,14 @@ export const VarinVisualSettings: React.FC<VarinVisualSettingsProps> = ({ visibl
     const setInputBarOffset = useUIStore(state => state.setInputBarOffset);
     const mobileKeyboardMode = useUIStore(state => state.mobileKeyboardMode);
     const setMobileKeyboardMode = useUIStore(state => state.setMobileKeyboardMode);
-    const diffLayoutPreference = useUIStore(state => state.diffLayoutPreference);
-    const setDiffLayoutPreference = useUIStore(state => state.setDiffLayoutPreference);
     const showTerminalQuickKeysOnDesktop = useUIStore(state => state.showTerminalQuickKeysOnDesktop);
     const setShowTerminalQuickKeysOnDesktop = useUIStore(state => state.setShowTerminalQuickKeysOnDesktop);
     const fileEditorKeymap = useUIStore(state => state.fileEditorKeymap);
     const setFileEditorKeymap = useUIStore(state => state.setFileEditorKeymap);
-    const followUpBehavior = useMessageQueueStore(state => state.followUpBehavior);
-    const setFollowUpBehavior = useMessageQueueStore(state => state.setFollowUpBehavior);
-    const persistChatDraft = useUIStore(state => state.persistChatDraft);
-    const setPersistChatDraft = useUIStore(state => state.setPersistChatDraft);
-    const inputSpellcheckEnabled = useUIStore(state => state.inputSpellcheckEnabled);
-    const setInputSpellcheckEnabled = useUIStore(state => state.setInputSpellcheckEnabled);
-    const showToolFileIcons = useUIStore(state => state.showToolFileIcons);
-    const setShowToolFileIcons = useUIStore(state => state.setShowToolFileIcons);
-    const showTurnChangedFiles = useUIStore(state => state.showTurnChangedFiles);
-    const setShowTurnChangedFiles = useUIStore(state => state.setShowTurnChangedFiles);
-    const showExpandedBashTools = useUIStore(state => state.showExpandedBashTools);
-    const setShowExpandedBashTools = useUIStore(state => state.setShowExpandedBashTools);
-    const showExpandedEditTools = useUIStore(state => state.showExpandedEditTools);
-    const setShowExpandedEditTools = useUIStore(state => state.setShowExpandedEditTools);
     const timeFormatPreference = useUIStore(state => state.timeFormatPreference);
     const setTimeFormatPreference = useUIStore(state => state.setTimeFormatPreference);
     const weekStartPreference = useUIStore(state => state.weekStartPreference);
     const setWeekStartPreference = useUIStore(state => state.setWeekStartPreference);
-    const showSplitAssistantMessageActions = useUIStore(state => state.showSplitAssistantMessageActions);
-    const setShowSplitAssistantMessageActions = useUIStore(state => state.setShowSplitAssistantMessageActions);
-    const allowPromptingSubagentSessions = useUIStore(state => state.allowPromptingSubagentSessions);
-    const setAllowPromptingSubagentSessions = useUIStore(state => state.setAllowPromptingSubagentSessions);
-    const draftStartersVisible = useUIStore(state => state.draftStartersVisible);
-    const setDraftStartersVisible = useUIStore(state => state.setDraftStartersVisible);
-    const settingsDefaultFileViewerPreview = usePreferencesStore((state) => state.settingsDefaultFileViewerPreview);
-    const setSettingsDefaultFileViewerPreview = usePreferencesStore((state) => state.setSettingsDefaultFileViewerPreview);
-    const isSettingsDialogOpen = useUIStore(state => state.isSettingsDialogOpen);
     const {
         themeMode,
         setThemeMode,
@@ -453,7 +292,6 @@ export const VarinVisualSettings: React.FC<VarinVisualSettingsProps> = ({ visibl
     const setDesktopWindowControlsPosition = useUIStore((state) => state.setDesktopWindowControlsPosition);
     const desktopWindowControlsStyle = useUIStore((state) => state.desktopWindowControlsStyle);
     const setDesktopWindowControlsStyle = useUIStore((state) => state.setDesktopWindowControlsStyle);
-    const [chatRenderPreviewTick, setChatRenderPreviewTick] = React.useState(0);
 
     const handleWindowControlsPositionChange = React.useCallback((value: DesktopWindowControlsPosition) => {
         setDesktopWindowControlsPosition(value);
@@ -465,137 +303,10 @@ export const VarinVisualSettings: React.FC<VarinVisualSettingsProps> = ({ visibl
         void updateDesktopSettings({ desktopWindowControlsStyle: value });
     }, [setDesktopWindowControlsStyle]);
 
-    const shouldAnimateChatPreview = (isSettingsDialogOpen || isMobile)
-        && (visibleSettings ? visibleSettings.includes('chatRenderMode') : true);
-
-    React.useEffect(() => {
-        if (!shouldAnimateChatPreview) {
-            return;
-        }
-
-        // Use requestAnimationFrame for smoother animation without setInterval overhead
-        let rafId: number | null = null;
-        let lastTime = Date.now();
-
-        const tick = () => {
-            const now = Date.now();
-            // Update every ~420ms
-            if (now - lastTime >= 420) {
-                setChatRenderPreviewTick((prev) => (prev + 1) % 24);
-                lastTime = now;
-            }
-            rafId = requestAnimationFrame(tick);
-        };
-
-        // Only run when visible
-        if (typeof document === 'undefined' || document.visibilityState === 'visible') {
-            rafId = requestAnimationFrame(tick);
-        }
-
-        const onVisibility = () => {
-            if (document.visibilityState === 'visible' && rafId === null) {
-                rafId = requestAnimationFrame(tick);
-            } else if (document.visibilityState !== 'visible' && rafId !== null) {
-                cancelAnimationFrame(rafId);
-                rafId = null;
-            }
-        };
-
-        document.addEventListener('visibilitychange', onVisibility);
-
-        return () => {
-            document.removeEventListener('visibilitychange', onVisibility);
-            if (rafId !== null) {
-                cancelAnimationFrame(rafId);
-            }
-        };
-    }, [shouldAnimateChatPreview]);
-
-    const handleUserMessageRenderingModeChange = React.useCallback((mode: 'markdown' | 'plain') => {
-        setUserMessageRenderingMode(mode);
-        void updateDesktopSettings({ userMessageRenderingMode: mode });
-    }, [setUserMessageRenderingMode]);
-
-    const handleStickyUserHeaderChange = React.useCallback((enabled: boolean) => {
-        setStickyUserHeader(enabled);
-        void updateDesktopSettings({ stickyUserHeader: enabled });
-    }, [setStickyUserHeader]);
-
-    const handlePromptNavigatorEnabledChange = React.useCallback((enabled: boolean) => {
-        setPromptNavigatorEnabled(enabled);
-        void updateDesktopSettings({ promptNavigatorEnabled: enabled });
-    }, [setPromptNavigatorEnabled]);
-
-    const handleDraftStartersVisibleChange = React.useCallback((enabled: boolean) => {
-        setDraftStartersVisible(enabled);
-        void updateDesktopSettings({ draftStartersVisible: enabled });
-    }, [setDraftStartersVisible]);
-
     const handleExpandedEditorToolbarChange = React.useCallback((enabled: boolean) => {
         setExpandedEditorToolbar(enabled);
         void updateDesktopSettings({ expandedEditorToolbar: enabled });
     }, [setExpandedEditorToolbar]);
-
-    const handleCollapsibleUserMessagesChange = React.useCallback((enabled: boolean) => {
-        setCollapsibleUserMessages(enabled);
-        void updateDesktopSettings({ collapsibleUserMessages: enabled });
-    }, [setCollapsibleUserMessages]);
-
-    const handleWideChatLayoutChange = React.useCallback((enabled: boolean) => {
-        setWideChatLayoutEnabled(enabled);
-        void updateDesktopSettings({ wideChatLayoutEnabled: enabled });
-    }, [setWideChatLayoutEnabled]);
-
-    const handleShowSplitAssistantMessageActionsChange = React.useCallback((enabled: boolean) => {
-        setShowSplitAssistantMessageActions(enabled);
-        void updateDesktopSettings({ showSplitAssistantMessageActions: enabled });
-    }, [setShowSplitAssistantMessageActions]);
-
-    const handleInputSpellcheckChange = React.useCallback((enabled: boolean) => {
-        setInputSpellcheckEnabled(enabled);
-        void updateDesktopSettings({ inputSpellcheckEnabled: enabled });
-    }, [setInputSpellcheckEnabled]);
-
-    const handleChatRenderModeChange = React.useCallback((mode: 'sorted' | 'live') => {
-        setChatRenderMode(mode);
-        void updateDesktopSettings({ chatRenderMode: mode });
-    }, [setChatRenderMode]);
-
-    const handleActivityRenderModeChange = React.useCallback((mode: 'collapsed' | 'summary') => {
-        setActivityRenderMode(mode);
-        void updateDesktopSettings({ activityRenderMode: mode });
-    }, [setActivityRenderMode]);
-
-    const handleMermaidRenderingModeChange = React.useCallback((mode: 'svg' | 'ascii') => {
-        setMermaidRenderingMode(mode);
-        void updateDesktopSettings({ mermaidRenderingMode: mode });
-    }, [setMermaidRenderingMode]);
-
-    const handleShowToolFileIconsChange = React.useCallback((enabled: boolean) => {
-        setShowToolFileIcons(enabled);
-        void updateDesktopSettings({ showToolFileIcons: enabled });
-    }, [setShowToolFileIcons]);
-
-    const handleShowTurnChangedFilesChange = React.useCallback((enabled: boolean) => {
-        setShowTurnChangedFiles(enabled);
-        void updateDesktopSettings({ showTurnChangedFiles: enabled });
-    }, [setShowTurnChangedFiles]);
-
-    const handleFileViewerPreviewChange = React.useCallback((enabled: boolean) => {
-        setSettingsDefaultFileViewerPreview(enabled);
-        void updateDesktopSettings({ defaultFileViewerPreview: enabled });
-        window.dispatchEvent(new CustomEvent('varin:file-viewer-preview-mode-changed', { detail: { enabled } }));
-    }, [setSettingsDefaultFileViewerPreview]);
-
-    const handleShowExpandedBashToolsChange = React.useCallback((enabled: boolean) => {
-        setShowExpandedBashTools(enabled);
-        void updateDesktopSettings({ showExpandedBashTools: enabled });
-    }, [setShowExpandedBashTools]);
-
-    const handleShowExpandedEditToolsChange = React.useCallback((enabled: boolean) => {
-        setShowExpandedEditTools(enabled);
-        void updateDesktopSettings({ showExpandedEditTools: enabled });
-    }, [setShowExpandedEditTools]);
 
     const handleTimeFormatPreferenceChange = React.useCallback((value: 'auto' | '12h' | '24h') => {
         setTimeFormatPreference(value);
@@ -641,54 +352,6 @@ export const VarinVisualSettings: React.FC<VarinVisualSettingsProps> = ({ visibl
     const hasAppearanceSettings = shouldShow('theme') || showWindowControlsPositionSetting || showMobileLayoutSetting || shouldShow('pwaInstallName') || shouldShow('pwaOrientation') || shouldShow('timeFormat') || shouldShow('weekStart');
     const hasLayoutSettings = shouldShow('fontSize') || shouldShow('terminalFontSize') || shouldShow('editorFontSize') || shouldShow('spacing') || (shouldShow('inputBarOffset') && isMobile);
     const hasNavigationSettings = (shouldShow('terminalQuickKeys') && !isMobile) || shouldShow('terminalShell') || shouldShow('terminalLoginShell') || shouldShow('fileEditorKeymap') || shouldShow('autoSaveEnabled') || shouldShow('expandedEditorToolbar');
-    const hasBehaviorSettings = shouldShow('mermaidRendering')
-        || shouldShow('userMessageRendering')
-        || shouldShow('chatRenderMode')
-        || (shouldShow('activityRenderMode') && chatRenderMode === 'sorted')
-        || shouldShow('collapsibleUserMessages')
-        || shouldShow('stickyUserHeader')
-        || shouldShow('promptNavigatorEnabled')
-        || shouldShow('wideChatLayout')
-        || shouldShow('codeBlockLineWrap')
-        || shouldShow('splitAssistantMessageActions')
-        || shouldShow('subagentReadOnlyBanner')
-        || shouldShow('diffLayout')
-        || shouldShow('dotfiles')
-        || shouldShow('fileViewerPreview')
-        || shouldShow('reasoning')
-        || shouldShow('draftStartersVisible')
-        || shouldShow('followUpBehavior')
-        || shouldShow('persistDraft')
-        || shouldShow('showToolFileIcons')
-        || shouldShow('showTurnChangedFiles')
-        || shouldShow('expandedTools')
-        || (!isMobile && shouldShow('inputSpellcheck'));
-    const showBehaviorDisplaySettings = shouldShow('chatRenderMode')
-        || (shouldShow('activityRenderMode') && chatRenderMode === 'sorted');
-    const showBehaviorMessageOptions = shouldShow('userMessageRendering')
-        || shouldShow('mermaidRendering')
-        || shouldShow('diffLayout')
-        || shouldShow('followUpBehavior');
-    const showBehaviorFeatureCheckboxes = shouldShow('draftStartersVisible')
-        || shouldShow('subagentReadOnlyBanner')
-        || shouldShow('collapsibleUserMessages')
-        || shouldShow('stickyUserHeader')
-        || shouldShow('promptNavigatorEnabled')
-        || shouldShow('wideChatLayout')
-        || shouldShow('codeBlockLineWrap')
-        || shouldShow('splitAssistantMessageActions')
-        || shouldShow('dotfiles')
-        || shouldShow('fileViewerPreview')
-        || shouldShow('persistDraft')
-        || shouldShow('showToolFileIcons')
-        || shouldShow('showTurnChangedFiles')
-        || (!isMobile && shouldShow('inputSpellcheck'))
-        || shouldShow('reasoning')
-        || shouldShow('expandedTools');
-    // First behavior section under the page header should not draw a top border on Chat-only;
-    // when Appearance (or earlier sections) already rendered, keep the default divider.
-    const behaviorSectionDivider = hasAppearanceSettings || hasLayoutSettings || hasNavigationSettings;
-
     const showPwaInstallNameSetting = shouldShow('pwaInstallName') && isWebRuntime() && browserTab && !isDesktopShell();
     const showPwaOrientationSetting = shouldShow('pwaOrientation') && isWebRuntime() && !isDesktopShell();
     const showMobileKeyboardModeSetting = shouldShow('mobileKeyboardMode') && isWebRuntime() && !isDesktopShell() && supportsMobileKeyboardResizeContent();
@@ -1549,417 +1212,6 @@ export const VarinVisualSettings: React.FC<VarinVisualSettingsProps> = ({ visibl
                     </SettingsSection>
                 )}
 
-                {hasBehaviorSettings && (
-                    <>
-                        {showBehaviorDisplaySettings && (
-                            <SettingsSection
-                                title={t('settings.varin.visual.section.chatDisplay')}
-                                divider={behaviorSectionDivider}
-                                contentClassName="space-y-6"
-                            >
-                                {shouldShow('chatRenderMode') && (
-                                    <SettingsControlGroup
-                                        title={t('settings.varin.visual.section.chatRenderMode')}
-                                        settingsItem="chat.render-mode"
-                                    >
-                                        <div role="radiogroup" aria-label={t('settings.varin.visual.section.chatRenderModeAria')} className="grid w-full max-w-[26rem] grid-cols-1 gap-3 @xl:grid-cols-2">
-                                            {CHAT_RENDER_MODE_OPTIONS.map((option) => {
-                                                const selected = chatRenderMode === option.id;
-                                                const previewPhase = chatRenderPreviewTick % 12;
-                                                return (
-                                                    <button
-                                                        key={option.id}
-                                                        type="button"
-                                                        onClick={() => handleChatRenderModeChange(option.id)}
-                                                        aria-pressed={selected}
-                                                        className={cn(
-                                                            'flex flex-col items-start gap-1 rounded-lg border p-3 text-left transition-colors',
-                                                            selected
-                                                                ? 'border-primary bg-primary/5'
-                                                                : 'border-border hover:border-border/80 hover:bg-muted/50'
-                                                        )}
-                                                    >
-                                                        <span className={cn('typography-ui-label', selected ? 'text-foreground' : 'text-muted-foreground')}>
-                                                            {tUnsafe(option.labelKey)}
-                                                        </span>
-                                                        <div className="mt-2 w-full rounded-md border border-border/60 bg-muted/30 p-2">
-                                                            {option.id === 'live' ? (
-                                                                <div className="space-y-1.5">
-                                                                    {[0, 1, 2].map((index) => {
-                                                                        const rowStart = index * 3 + 1;
-                                                                        const rowProgressPhase = previewPhase - rowStart + 1;
-                                                                        const rowProgress = rowProgressPhase <= 0
-                                                                            ? 0
-                                                                            : rowProgressPhase === 1
-                                                                                ? 42
-                                                                                : rowProgressPhase === 2
-                                                                                    ? 68
-                                                                                    : 92;
-                                                                        const visible = rowProgress > 0;
-                                                                        return (
-                                                                            <div
-                                                                                key={index}
-                                                                                className={cn(
-                                                                                    'flex items-center gap-1.5 transition-all duration-300 motion-reduce:transition-none',
-                                                                                    visible ? 'translate-y-0 opacity-100' : 'translate-y-1 opacity-0'
-                                                                                )}
-                                                                            >
-                                                                                <span className="h-2 w-2 shrink-0 rounded-full bg-muted-foreground/55" />
-                                                                                <span
-                                                                                    className="h-1.5 rounded bg-muted-foreground/30 transition-all duration-300 motion-reduce:transition-none"
-                                                                                    style={{ width: `${rowProgress}%` }}
-                                                                                />
-                                                                            </div>
-                                                                        );
-                                                                    })}
-                                                                </div>
-                                                            ) : (
-                                                                <div className="space-y-1.5">
-                                                                    {[0, 1, 2].map((index) => {
-                                                                        const visible = previewPhase >= (index + 1) * 3;
-                                                                        return (
-                                                                            <div
-                                                                                key={index}
-                                                                                className={cn(
-                                                                                    'flex items-center gap-1.5 transition-all duration-300 motion-reduce:transition-none',
-                                                                                    visible ? 'translate-y-0 opacity-100' : 'translate-y-1 opacity-0'
-                                                                                )}
-                                                                            >
-                                                                                <span className="h-2 w-2 shrink-0 rounded-full bg-muted-foreground/55" />
-                                                                                <span
-                                                                                    className="h-1.5 rounded bg-muted-foreground/30"
-                                                                                    style={{ width: '92%' }}
-                                                                                />
-                                                                            </div>
-                                                                        );
-                                                                    })}
-                                                                </div>
-                                                            )}
-                                                        </div>
-                                                    </button>
-                                                );
-                                            })}
-                                        </div>
-                                    </SettingsControlGroup>
-                                )}
-
-                                {shouldShow('activityRenderMode') && chatRenderMode === 'sorted' && (
-                                    <SettingsControlGroup title={t('settings.varin.visual.section.activityDefault')}>
-                                        <SettingsRadioGroup aria-label={t('settings.varin.visual.section.activityDefaultAria')}>
-                                            {ACTIVITY_RENDER_MODE_OPTIONS.map((option) => (
-                                                <SettingsRadioOption
-                                                    key={option.id}
-                                                    selected={activityRenderMode === option.id}
-                                                    onSelect={() => handleActivityRenderModeChange(option.id)}
-                                                    label={tUnsafe(option.labelKey)}
-                                                    ariaLabel={t('settings.varin.visual.field.activityDefaultModeAria', { option: tUnsafe(option.labelKey) })}
-                                                />
-                                            ))}
-                                        </SettingsRadioGroup>
-                                    </SettingsControlGroup>
-                                )}
-                            </SettingsSection>
-                        )}
-
-                        {showBehaviorMessageOptions && (
-                            <SettingsSection
-                                title={t('settings.varin.visual.section.chatMessageOptions')}
-                                divider={showBehaviorDisplaySettings || behaviorSectionDivider}
-                            >
-                                {/* Flat 2×2 grid so row headers share a baseline (not stacked columns). */}
-                                <SettingsTwoColumn className="lg:gap-y-6">
-                                    {shouldShow('userMessageRendering') && (
-                                        <SettingsControlGroup title={t('settings.varin.visual.section.userMessageRendering')}>
-                                            <SettingsRadioGroup aria-label={t('settings.varin.visual.section.userMessageRenderingAria')}>
-                                                {USER_MESSAGE_RENDERING_OPTIONS.map((option) => (
-                                                    <SettingsRadioOption
-                                                        key={option.id}
-                                                        selected={normalizeUserMessageRenderingMode(userMessageRenderingMode) === option.id}
-                                                        onSelect={() => handleUserMessageRenderingModeChange(option.id)}
-                                                        label={tUnsafe(option.labelKey)}
-                                                        ariaLabel={t('settings.varin.visual.field.userMessageRenderingAria', { option: tUnsafe(option.labelKey) })}
-                                                    />
-                                                ))}
-                                            </SettingsRadioGroup>
-                                        </SettingsControlGroup>
-                                    )}
-
-                                    {shouldShow('mermaidRendering') && (
-                                        <SettingsControlGroup title={t('settings.varin.visual.section.mermaidRendering')}>
-                                            <SettingsRadioGroup aria-label={t('settings.varin.visual.section.mermaidRenderingAria')}>
-                                                {MERMAID_RENDERING_OPTIONS.map((option) => (
-                                                    <SettingsRadioOption
-                                                        key={option.id}
-                                                        selected={mermaidRenderingMode === option.id}
-                                                        onSelect={() => handleMermaidRenderingModeChange(option.id)}
-                                                        label={tUnsafe(option.labelKey)}
-                                                        ariaLabel={t('settings.varin.visual.field.mermaidRenderingAria', { option: tUnsafe(option.labelKey) })}
-                                                    />
-                                                ))}
-                                            </SettingsRadioGroup>
-                                        </SettingsControlGroup>
-                                    )}
-
-                                    {shouldShow('diffLayout') && (
-                                        <SettingsControlGroup title={t('settings.varin.visual.section.diffLayout')}>
-                                            <SettingsRadioGroup aria-label={t('settings.varin.visual.section.diffLayoutAria')}>
-                                                {DIFF_LAYOUT_OPTIONS.map((option) => (
-                                                    <SettingsRadioOption
-                                                        key={option.id}
-                                                        selected={diffLayoutPreference === option.id}
-                                                        onSelect={() => setDiffLayoutPreference(option.id)}
-                                                        label={tUnsafe(option.labelKey)}
-                                                        ariaLabel={t('settings.varin.visual.field.diffLayoutAria', { option: tUnsafe(option.labelKey) })}
-                                                    />
-                                                ))}
-                                            </SettingsRadioGroup>
-                                        </SettingsControlGroup>
-                                    )}
-
-                                    {shouldShow('followUpBehavior') && (
-                                        <SettingsControlGroup
-                                            title={t('settings.varin.visual.section.followUpBehavior')}
-                                            description={t('settings.varin.visual.field.followUpBehaviorDescription')}
-                                            settingsItem="chat.follow-up-behavior"
-                                        >
-                                            <SettingsRadioGroup aria-label={t('settings.varin.visual.section.followUpBehaviorAria')}>
-                                                {FOLLOW_UP_BEHAVIOR_OPTIONS.map((option) => (
-                                                    <SettingsRadioOption
-                                                        key={option.id}
-                                                        selected={followUpBehavior === option.id}
-                                                        onSelect={() => setFollowUpBehavior(option.id)}
-                                                        label={tUnsafe(option.labelKey)}
-                                                        ariaLabel={t('settings.varin.visual.field.followUpBehaviorAria', { option: tUnsafe(option.labelKey) })}
-                                                    />
-                                                ))}
-                                            </SettingsRadioGroup>
-                                        </SettingsControlGroup>
-                                    )}
-                                </SettingsTwoColumn>
-                            </SettingsSection>
-                        )}
-
-                        {showBehaviorFeatureCheckboxes && (
-                            <>
-                                {shouldShow('expandedTools') && (
-                                    <SettingsSection
-                                        title={t('settings.varin.visual.section.showToolsOpenedByDefault')}
-                                        settingsItem="chat.expanded-tools"
-                                        divider={showBehaviorDisplaySettings || showBehaviorMessageOptions || behaviorSectionDivider}
-                                        contentClassName={SETTINGS_OPTION_STACK_CLASS}
-                                    >
-                                        <SettingsCheckboxRow
-                                            checked={showExpandedBashTools}
-                                            onChange={handleShowExpandedBashToolsChange}
-                                            label={t('settings.varin.visual.field.bash')}
-                                            ariaLabel={t('settings.varin.visual.field.showExpandedBashToolsAria')}
-                                        />
-                                        <SettingsCheckboxRow
-                                            checked={showExpandedEditTools}
-                                            onChange={handleShowExpandedEditToolsChange}
-                                            label={t('settings.varin.visual.field.editTools')}
-                                            ariaLabel={t('settings.varin.visual.field.showExpandedEditToolsAria')}
-                                        />
-                                    </SettingsSection>
-                                )}
-                                {(shouldShow('draftStartersVisible') || shouldShow('subagentReadOnlyBanner')) && (
-                                    <SettingsSection
-                                        title={t('settings.varin.visual.section.sessionAssistance')}
-                                        settingsItem="chat.session-assistance"
-                                        contentClassName={SETTINGS_OPTION_STACK_CLASS}
-                                    >
-                                        {shouldShow('draftStartersVisible') && (
-                                            <SettingsCheckboxRow
-                                                checked={draftStartersVisible}
-                                                onChange={handleDraftStartersVisibleChange}
-                                                label={t('settings.varin.visual.field.draftStartersVisible')}
-                                                ariaLabel={t('settings.varin.visual.field.draftStartersVisibleAria')}
-                                                settingsItem="chat.draft-starters-visible"
-                                            />
-                                        )}
-                                        {shouldShow('subagentReadOnlyBanner') && (
-                                            <SettingsCheckboxRow
-                                                checked={allowPromptingSubagentSessions}
-                                                onChange={setAllowPromptingSubagentSessions}
-                                                label={t('settings.varin.visual.field.allowPromptingSubagentSessions')}
-                                                ariaLabel={t('settings.varin.visual.field.allowPromptingSubagentSessionsAria')}
-                                                settingsItem="chat.subagent-read-only-banner"
-                                            />
-                                        )}
-                                    </SettingsSection>
-                                )}
-                                {shouldShow('reasoning') && (
-                                    <SettingsSection
-                                        title={t('settings.varin.visual.section.reasoning')}
-                                        settingsItem="chat.reasoning"
-                                        contentClassName={SETTINGS_OPTION_STACK_CLASS}
-                                    >
-                                        <SettingsCheckboxRow
-                                            checked={showReasoningTraces}
-                                            onChange={setShowReasoningTraces}
-                                            label={t('settings.varin.visual.field.showReasoningTraces')}
-                                            ariaLabel={t('settings.varin.visual.field.showReasoningTracesAria')}
-                                            settingsItem="chat.reasoning-traces"
-                                        />
-                                        {showReasoningTraces && (
-                                            <SettingsCheckboxRow
-                                                checked={collapsibleThinkingBlocks}
-                                                onChange={setCollapsibleThinkingBlocks}
-                                                label={t('settings.varin.visual.field.collapsibleThinkingBlocks')}
-                                                ariaLabel={t('settings.varin.visual.field.collapsibleThinkingBlocksAria')}
-                                            />
-                                        )}
-                                    </SettingsSection>
-                                )}
-
-                                {(shouldShow('collapsibleUserMessages') || shouldShow('stickyUserHeader') || shouldShow('promptNavigatorEnabled') || shouldShow('wideChatLayout') || shouldShow('splitAssistantMessageActions') || shouldShow('codeBlockLineWrap')) && (
-                                <SettingsSection
-                                    title={t('settings.varin.visual.section.messageAppearance')}
-                                    settingsItem="chat.message-appearance"
-                                    contentClassName={SETTINGS_OPTION_STACK_CLASS}
-                                >
-                                {shouldShow('collapsibleUserMessages') && (
-                                    <SettingsCheckboxRow
-                                        checked={collapsibleUserMessages}
-                                        onChange={handleCollapsibleUserMessagesChange}
-                                        label={t('settings.varin.visual.field.collapsibleUserMessages')}
-                                        ariaLabel={t('settings.varin.visual.field.collapsibleUserMessagesAria')}
-                                        settingsItem="chat.collapsible-user-messages"
-                                    />
-                                )}
-
-                                {shouldShow('stickyUserHeader') && (
-                                    <SettingsCheckboxRow
-                                        checked={stickyUserHeader}
-                                        onChange={handleStickyUserHeaderChange}
-                                        label={t('settings.varin.visual.field.stickyUserHeader')}
-                                        ariaLabel={t('settings.varin.visual.field.stickyUserHeaderAria')}
-                                        settingsItem="chat.sticky-user-header"
-                                    />
-                                )}
-
-                                {shouldShow('promptNavigatorEnabled') && (
-                                    <SettingsCheckboxRow
-                                        checked={promptNavigatorEnabled}
-                                        onChange={handlePromptNavigatorEnabledChange}
-                                        label={t('settings.varin.visual.field.promptNavigatorEnabled')}
-                                        ariaLabel={t('settings.varin.visual.field.promptNavigatorEnabledAria')}
-                                        settingsItem="chat.prompt-navigator"
-                                    />
-                                )}
-
-                                {shouldShow('wideChatLayout') && (
-                                    <SettingsCheckboxRow
-                                        checked={wideChatLayoutEnabled}
-                                        onChange={handleWideChatLayoutChange}
-                                        label={t('settings.varin.visual.field.wideChatLayout')}
-                                        ariaLabel={t('settings.varin.visual.field.wideChatLayoutAria')}
-                                        settingsItem="chat.wide-layout"
-                                    />
-                                )}
-
-                                {shouldShow('splitAssistantMessageActions') && (
-                                    <SettingsCheckboxRow
-                                        checked={showSplitAssistantMessageActions}
-                                        onChange={handleShowSplitAssistantMessageActionsChange}
-                                        label={t('settings.varin.visual.field.showSplitAssistantMessageActions')}
-                                        ariaLabel={t('settings.varin.visual.field.showSplitAssistantMessageActionsAria')}
-                                        settingsItem="chat.inline-assistant-actions"
-                                        info={t('settings.varin.visual.field.showSplitAssistantMessageActionsTooltip')}
-                                    />
-                                )}
-
-                                {shouldShow('codeBlockLineWrap') && (
-                                    <SettingsCheckboxRow
-                                        checked={codeBlockLineWrap}
-                                        onChange={setCodeBlockLineWrap}
-                                        label={t('settings.varin.visual.field.codeBlockLineWrap')}
-                                        ariaLabel={t('settings.varin.visual.field.codeBlockLineWrapAria')}
-                                        settingsItem="chat.code-block-line-wrap"
-                                    />
-                                )}
-                                </SettingsSection>
-                                )}
-
-                                {(shouldShow('showToolFileIcons') || shouldShow('showTurnChangedFiles') || shouldShow('dotfiles') || shouldShow('fileViewerPreview')) && (
-                                <SettingsSection
-                                    title={t('settings.varin.visual.section.toolsAndFiles')}
-                                    settingsItem="chat.tools-and-files"
-                                    contentClassName={SETTINGS_OPTION_STACK_CLASS}
-                                >
-                                {shouldShow('showToolFileIcons') && (
-                                    <SettingsCheckboxRow
-                                        checked={showToolFileIcons}
-                                        onChange={handleShowToolFileIconsChange}
-                                        label={t('settings.varin.visual.field.showToolFileIcons')}
-                                        ariaLabel={t('settings.varin.visual.field.showToolFileIconsAria')}
-                                        settingsItem="chat.tool-file-icons"
-                                    />
-                                )}
-
-                                {shouldShow('showTurnChangedFiles') && (
-                                    <SettingsCheckboxRow
-                                        checked={showTurnChangedFiles}
-                                        onChange={handleShowTurnChangedFilesChange}
-                                        label={t('settings.varin.visual.field.showTurnChangedFiles')}
-                                        ariaLabel={t('settings.varin.visual.field.showTurnChangedFilesAria')}
-                                        settingsItem="chat.changed-files"
-                                    />
-                                )}
-
-                                {shouldShow('dotfiles') && (
-                                    <SettingsCheckboxRow
-                                        checked={directoryShowHidden}
-                                        onChange={setDirectoryShowHidden}
-                                        label={t('settings.varin.visual.field.showDotfiles')}
-                                        ariaLabel={t('settings.varin.visual.field.showDotfilesAria')}
-                                        settingsItem="chat.dotfiles"
-                                    />
-                                )}
-
-                                {shouldShow('fileViewerPreview') && (
-                                    <SettingsCheckboxRow
-                                        checked={settingsDefaultFileViewerPreview}
-                                        onChange={handleFileViewerPreviewChange}
-                                        label={t('settings.varin.defaults.field.openFilesPreview')}
-                                        ariaLabel={t('settings.varin.defaults.field.openFilesPreviewAria')}
-                                        settingsItem="chat.file-viewer-preview"
-                                    />
-                                )}
-                                </SettingsSection>
-                                )}
-
-                                {(shouldShow('persistDraft') || (!isMobile && shouldShow('inputSpellcheck'))) && (
-                                <SettingsSection
-                                    title={t('settings.varin.visual.section.composer')}
-                                    settingsItem="chat.composer"
-                                    contentClassName={SETTINGS_OPTION_STACK_CLASS}
-                                >
-                                {shouldShow('persistDraft') && (
-                                    <SettingsCheckboxRow
-                                        checked={persistChatDraft}
-                                        onChange={setPersistChatDraft}
-                                        label={t('settings.varin.visual.field.persistDraftMessages')}
-                                        ariaLabel={t('settings.varin.visual.field.persistDraftMessagesAria')}
-                                        settingsItem="chat.persist-drafts"
-                                    />
-                                )}
-
-                                {!isMobile && shouldShow('inputSpellcheck') && (
-                                    <SettingsCheckboxRow
-                                        checked={inputSpellcheckEnabled}
-                                        onChange={handleInputSpellcheckChange}
-                                        label={t('settings.varin.visual.field.enableSpellcheckInTextInputs')}
-                                        ariaLabel={t('settings.varin.visual.field.enableSpellcheckInTextInputsAria')}
-                                        settingsItem="chat.spellcheck"
-                                    />
-                                )}
-                                </SettingsSection>
-                                )}
-                            </>
-                        )}
-                    </>
-                )}
 
             </div>
     );

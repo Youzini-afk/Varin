@@ -1,10 +1,19 @@
 import { describe, expect, test } from 'bun:test';
 import type { PiToolCall, PiToolResultMessage } from '@varin/protocol';
-import { fileChangePhase, projectFileChanges } from './fileChangePreview';
+import { fileChangePhase, fileChangeTargets, projectFileChanges } from './fileChangePreview';
 
 const call = (name: string, args: PiToolCall['arguments']): PiToolCall => ({ type: 'toolCall', id: 'call', name, arguments: args });
 
 describe('file change projection', () => {
+  test('collects summary targets across rename/delete without projecting file contents', () => {
+    const patch = '*** Begin Patch\r\n*** Update File: old.ts\r\n*** Move to: new.ts\r\n-old\r\n+new\r\n*** Delete File: gone.ts\r\n*** End Patch\r\n*** Add File: outside.txt';
+    expect(fileChangeTargets(call('apply_patch', { patch }))).toEqual([
+      { path: 'new.ts', operation: 'update' }, { path: 'gone.ts', operation: 'delete' },
+    ]);
+    expect(fileChangeTargets(call('write', { path: 'whole.ts', content: 'a\nb\nc' }))).toEqual([{ path: 'whole.ts', operation: 'write' }]);
+    expect(fileChangeTargets(call('read', { path: 'whole.ts' }))).toEqual([]);
+  });
+
   test('streams incomplete multi-file patches without inventing paths, context numbers or deleted content', () => {
     const patch = '*** Begin Patch\n*** Update File: D:\\work\\a.ts\n@@ existing\n old\n-remove\n+add';
     const first = projectFileChanges(call('apply_patch', { patch }), true);

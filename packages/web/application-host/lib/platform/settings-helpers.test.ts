@@ -86,12 +86,15 @@ describe('settings helpers', () => {
     expect(helpers.sanitizeSettingsUpdate({ draftStartersVisible: 'false' })).toEqual({});
   });
 
-  it('accepts only booleans for wide chat layout', () => {
+  it('round-trips custom and fill-pane chat widths and rejects invalid dimensions', () => {
     const helpers = createTestHelpers();
-
-    expect(helpers.sanitizeSettingsUpdate({ wideChatLayoutEnabled: true })).toEqual({ wideChatLayoutEnabled: true });
-    expect(helpers.sanitizeSettingsUpdate({ wideChatLayoutEnabled: false })).toEqual({ wideChatLayoutEnabled: false });
-    expect(helpers.sanitizeSettingsUpdate({ wideChatLayoutEnabled: 'true' })).toEqual({});
+    for (const chatContentWidth of [0, 960, 1088, 2560]) {
+      const saved = helpers.mergePersistedSettings({}, helpers.sanitizeSettingsUpdate({ chatContentWidth }));
+      expect(helpers.formatSettingsResponse(saved).chatContentWidth).toBe(chatContentWidth);
+    }
+    for (const chatContentWidth of [-1, 1.5, Infinity, NaN, '960', null, true]) {
+      expect(helpers.sanitizeSettingsUpdate({ chatContentWidth })).toEqual({});
+    }
   });
 
   it('round-trips only supported recovery preferences', () => {

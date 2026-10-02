@@ -1,5 +1,6 @@
 import React from 'react';
 import { VarinVisualSettings } from './VarinVisualSettings';
+import { ChatSettings } from './ChatSettings';
 import { AboutSettings } from './AboutSettings';
 import { SessionRetentionSettings } from './SessionRetentionSettings';
 import { PasskeySettings } from './PasskeySettings';
@@ -48,6 +49,7 @@ export const VarinSettingsPage: React.FC<VarinSettingsPageProps> = ({ section })
         return (
             <SettingsPageLayout showSaveStatus className="varin-settings-page-body space-y-3 sm:space-y-6">
                 <VarinVisualSettings />
+                <ChatSettings />
                 <DefaultsSettings />
                 {showDesktopNetworkSettings && <DesktopNetworkSettings />}
                 <SessionRetentionSettings />
@@ -176,37 +178,7 @@ const VisualSectionContent: React.FC = () => {
     ]} />;
 };
 
-// Chat section: User message rendering, Diff layout, Mobile status bar, Show reasoning traces, Follow-up behavior, Persist draft
-const ChatSectionContent: React.FC = () => {
-    return (
-        <VarinVisualSettings
-            visibleSettings={[
-                'draftStartersVisible',
-                'chatRenderMode',
-                'activityRenderMode',
-                'userMessageRendering',
-                'mermaidRendering',
-                'reasoning',
-                'showToolFileIcons',
-                'showTurnChangedFiles',
-                'expandedTools',
-                'collapsibleUserMessages',
-                'stickyUserHeader',
-                'promptNavigatorEnabled',
-                'wideChatLayout',
-                'codeBlockLineWrap',
-                'splitAssistantMessageActions',
-                'subagentReadOnlyBanner',
-                'diffLayout',
-                'dotfiles',
-                'fileViewerPreview',
-                'followUpBehavior',
-                'persistDraft',
-                'inputSpellcheck',
-            ]}
-        />
-    );
-};
+const ChatSectionContent: React.FC = () => <ChatSettings />;
 
 // Sessions section: Default model & agent, Session retention
 const SessionsSectionContent: React.FC = () => {

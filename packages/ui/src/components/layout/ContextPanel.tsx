@@ -2246,7 +2246,6 @@ export const ContextPanel: React.FC = () => {
   const openContextPreview = useUIStore((state) => state.openContextPreview);
   const contextEditorTreeVisible = useUIStore((state) => state.contextEditorTreeVisible);
   const toggleContextEditorTree = useUIStore((state) => state.toggleContextEditorTree);
-  const allowPromptingSubagentSessions = useUIStore((state) => state.allowPromptingSubagentSessions);
   const { themeMode, setThemeMode, lightThemeId, darkThemeId, currentTheme } = useThemeSystem();
 
   const tabs = React.useMemo(() => panelState?.tabs ?? [], [panelState?.tabs]);
@@ -2533,18 +2532,6 @@ export const ContextPanel: React.FC = () => {
     }
   }, [currentTheme, darkThemeId, lightThemeId, themeMode]);
 
-  const postChatSettingsSyncToEmbeddedChat = React.useCallback(() => {
-    if (typeof window === 'undefined') return;
-
-    const payload = { allowPromptingSubagentSessions };
-    for (const frame of chatFrameRefs.current.values()) {
-      const frameWindow = frame.contentWindow;
-      if (!frameWindow) continue;
-
-      frameWindow.postMessage({ type: 'varin:chat-settings-sync', payload }, window.location.origin);
-    }
-  }, [allowPromptingSubagentSessions]);
-
   const postEmbeddedVisibilityToChats = React.useCallback(() => {
     if (typeof window === 'undefined') {
       return;
@@ -2608,10 +2595,6 @@ export const ContextPanel: React.FC = () => {
         postThemeSyncToEmbeddedChat();
         return;
       }
-      if (data?.type === 'varin:chat-settings-request') {
-        postChatSettingsSyncToEmbeddedChat();
-        return;
-      }
       if (data?.type !== 'varin:cycle-theme-request') {
         return;
       }
@@ -2624,7 +2607,7 @@ export const ContextPanel: React.FC = () => {
 
     window.addEventListener('message', handleMessage);
     return () => window.removeEventListener('message', handleMessage);
-  }, [postChatSettingsSyncToEmbeddedChat, postThemeSyncToEmbeddedChat, setThemeMode, themeMode]);
+  }, [postThemeSyncToEmbeddedChat, setThemeMode, themeMode]);
 
   React.useLayoutEffect(() => {
     const hasAnyChatTab = tabs.some((tab) => tab.mode === 'chat');
@@ -2633,9 +2616,8 @@ export const ContextPanel: React.FC = () => {
     }
 
     postThemeSyncToEmbeddedChat();
-    postChatSettingsSyncToEmbeddedChat();
     postEmbeddedVisibilityToChats();
-  }, [darkThemeId, lightThemeId, postChatSettingsSyncToEmbeddedChat, postEmbeddedVisibilityToChats, postThemeSyncToEmbeddedChat, tabs, themeMode]);
+  }, [darkThemeId, lightThemeId, postEmbeddedVisibilityToChats, postThemeSyncToEmbeddedChat, tabs, themeMode]);
 
   // The rail switches between surfaces (modes); the in-panel strip only lists
   // instances of the active multi-instance surface (open files, split chats,
@@ -2922,7 +2904,6 @@ export const ContextPanel: React.FC = () => {
             className="absolute inset-0 h-full w-full border-0 bg-background"
             onLoad={() => {
               postThemeSyncToEmbeddedChat();
-              postChatSettingsSyncToEmbeddedChat();
               postEmbeddedVisibilityToChats();
             }}
           />

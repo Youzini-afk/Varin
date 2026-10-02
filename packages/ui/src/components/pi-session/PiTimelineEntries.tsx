@@ -69,6 +69,8 @@ import { PiExploreCard, PiExploreScope } from './PiExploreCard';
 import { explorePresentation } from './explorePresentation';
 import { HarnessThreadMarkers } from './HarnessThreadMarkers';
 import { PiTurnUsageFooter } from './PiTurnUsageFooter';
+import { PiCollapsibleUserContent } from './PiCollapsibleUserContent';
+import { PiTurnChangedFiles } from './PiTurnChangedFiles';
 import { assistantMessagesForTurn } from '@/lib/pi-runtime/usagePresentation';
 import { parseCompactionTraceDetails, PI_COMPACTION_TRACE_OPEN_EVENT } from '@/lib/pi-runtime/compactionTrace';
 
@@ -138,7 +140,8 @@ const PiUserContentView: React.FC<{
   content: string | PiUserContent[];
   messageId: string;
   variant?: 'assistant' | 'tool';
-}> = ({ content, messageId, variant = 'assistant' }) => {
+  plain?: boolean;
+}> = ({ content, messageId, variant = 'assistant', plain = false }) => {
   const parts: PiUserContent[] = typeof content === 'string'
     ? [{ text: content, type: 'text' }]
     : content;
@@ -148,12 +151,12 @@ const PiUserContentView: React.FC<{
         part.type === 'text' ? (
           <ChatTextSource key={`${messageId}:text:${index}`} entryId={messageId} text={part.text}
             offset={parts.slice(0, index).filter((part) => part.type === 'text').reduce((total, part) => total + part.text.length + 1, 0)}>
-            <MarkdownRenderer
+            {plain ? <div className="markdown-content whitespace-pre-wrap break-words">{part.text}</div> : <MarkdownRenderer
               content={part.text}
               messageId={`${messageId}:text:${index}`}
               variant={variant}
               enableFileReferences
-            />
+            />}
           </ChatTextSource>
         ) : (
           <a
@@ -430,6 +433,9 @@ const PiToolDisclosure: React.FC<{
 }> = ({ children, className, disclosureId, initiallyExpanded = false }) => {
   const choices = React.useContext(ToolDisclosureContext);
   const [expanded, setExpanded] = React.useState(() => choices?.get(disclosureId) ?? initiallyExpanded);
+  React.useEffect(() => {
+    if (!choices?.has(disclosureId)) setExpanded(initiallyExpanded);
+  }, [choices, disclosureId, initiallyExpanded]);
   return (
     <details className={className} open={expanded} data-pi-tool-disclosure={disclosureId}
       onToggle={(event) => {
@@ -458,6 +464,8 @@ const PiToolCard: React.FC<{
   result?: PiToolResultMessage;
 }> = ({ call, cwd, generating = false, execution, executionById, result }) => {
   const { t } = useI18n();
+  const expandCommands = useUIStore(state => state.showExpandedBashTools);
+  const expandEdits = useUIStore(state => state.showExpandedEditTools);
   const toolRenderers = useWorkbenchMatchRenderers<{
     call: PiToolCall;
     cwd: string;
@@ -516,6 +524,7 @@ const PiToolCard: React.FC<{
       }) : undefined} />)}
     <PiToolDisclosure
       disclosureId={`tool:${call.id}`}
+      initiallyExpanded={(call.name === 'bash' && expandCommands) || (isFileChangeTool(call.name) && expandEdits)}
       className={cn(
         'group',
         'my-1',
@@ -703,6 +712,29 @@ const PiThinkingBody: React.FC<{
   return <MarkdownRenderer content={content.thinking} messageId={messageId} variant="reasoning" />;
 };
 
+const PiThinkingBlock: React.FC<{
+  content: PiThinkingContent; messageId: string; streaming: boolean; label: string;
+}> = ({ content, messageId, streaming, label }) => {
+  const visible = useUIStore(state => state.showReasoningTraces);
+  const collapse = useUIStore(state => state.collapsibleThinkingBlocks);
+  const [open, setOpen] = React.useState(streaming || !collapse);
+  React.useEffect(() => { setOpen(streaming || !collapse); }, [streaming, collapse]);
+  if (!visible) return null;
+  const preview = content.redacted ? '' : thinkingPreview(content.thinking);
+  return <details className="group/thinking my-1" open={open && !content.redacted}
+    onToggle={event => setOpen(event.currentTarget.open)} data-pi-activity-kind="thinking">
+    <summary className="flex cursor-pointer list-none items-center gap-1.5 rounded-xl py-1.5 pr-2 typography-meta text-muted-foreground hover:bg-muted/25 [&::-webkit-details-marker]:hidden">
+      <Icon name="brain" className="size-3.5 shrink-0" />
+      <span className="shrink-0 font-medium text-foreground/80">{label}{content.redacted ? ' (redacted)' : ''}</span>
+      {!streaming && !open && preview ? <span className="min-w-0 flex-1 truncate opacity-75">{preview}</span> : <span className="flex-1" />}
+      <Icon name="arrow-right-s" className="size-3.5 shrink-0 transition-transform group-open/thinking:rotate-90" />
+    </summary>
+    {!content.redacted ? <div className="ml-2 border-l border-border/60 py-1 pl-3 text-muted-foreground">
+      <PiThinkingBody content={content} messageId={messageId} streaming={streaming} />
+    </div> : null}
+  </details>;
+};
+
 const PiToolSequence: React.FC<{
   calls: PiToolCall[];
   cwd: string;
@@ -781,34 +813,9 @@ const AssistantMessage: React.FC<{
         continue;
       }
       if (content.type === 'thinking') {
-        const preview = content.redacted ? '' : thinkingPreview(content.thinking);
-        rendered.push(
-          <details
-            key={`${entryId}:thinking:${index}`}
-            className="group/thinking my-1"
-            open={streaming && !content.redacted ? true : undefined}
-          >
-            <summary className="flex cursor-pointer list-none items-center gap-1.5 rounded-xl py-1.5 pr-2 typography-meta text-muted-foreground hover:bg-muted/25 [&::-webkit-details-marker]:hidden">
-              <Icon name="brain" className="size-3.5 shrink-0" />
-              <span className="shrink-0 font-medium text-foreground/80">
-                {hiddenThinkingLabel || 'Thinking'}{content.redacted ? ' (redacted)' : ''}
-              </span>
-              {!streaming && preview
-                ? <span className="min-w-0 flex-1 truncate opacity-75">{preview}</span>
-                : <span className="min-w-0 flex-1" />}
-              <Icon name="arrow-right-s" className="size-3.5 shrink-0 transition-transform group-open/thinking:rotate-90" />
-            </summary>
-            {!content.redacted && (
-              <div className="ml-2 border-l border-border/60 py-1 pl-3 text-muted-foreground">
-                <PiThinkingBody
-                  content={content}
-                  messageId={`${entryId}:thinking:${index}`}
-                  streaming={streaming && message.stopReason === 'pending' && index === message.content.length - 1}
-                />
-              </div>
-            )}
-          </details>,
-        );
+        rendered.push(<PiThinkingBlock key={`${entryId}:thinking:${index}`} content={content}
+          messageId={`${entryId}:thinking:${index}`} label={hiddenThinkingLabel || 'Thinking'}
+          streaming={streaming && message.stopReason === 'pending' && index === message.content.length - 1} />);
         index += 1;
         continue;
       }
@@ -833,16 +840,18 @@ const PiSortedActivityGroup: React.FC<{
 }> = ({ cwd, executionById, hiddenThinkingLabel, projection, resultByCallId }) => {
   const { t } = useI18n();
   const activityRenderMode = useUIStore((state) => state.activityRenderMode);
+  const showThinking = useUIStore(state => state.showReasoningTraces);
+  const activity = projection.activity.filter(item => showThinking || item.kind !== 'thinking');
   const [expanded, setExpanded] = React.useState(activityRenderMode === 'summary');
   React.useEffect(() => {
     setExpanded(activityRenderMode === 'summary');
   }, [activityRenderMode]);
 
-  const running = projection.activity.some((item) => (
+  const running = activity.some((item) => (
     item.streaming
     || (item.kind === 'tool' && executionById[item.call.id]?.status === 'running')
   ));
-  const failed = projection.activity.some((item) => {
+  const failed = activity.some((item) => {
     if (item.kind !== 'tool') return false;
     const execution = executionById[item.call.id];
     const result = resultByCallId.get(item.call.id);
@@ -850,7 +859,7 @@ const PiSortedActivityGroup: React.FC<{
     return result?.isError || execution?.status === 'error'
       || (isFileChangeTool(item.call.name) && ['failed', 'partial'].includes(fileChangePhase(execution, result, item.streaming)));
   });
-  const latest = projection.activity.at(-1);
+  const latest = activity.at(-1);
   const latestLabel = latest?.kind === 'tool'
     ? latest.call.name
     : latest?.kind === 'thinking'
@@ -859,6 +868,7 @@ const PiSortedActivityGroup: React.FC<{
         ? t('chat.reasoningTrace.justification')
         : '';
 
+  if (!activity.length) return null;
   return (
     <section
       className="min-w-0"
@@ -881,18 +891,18 @@ const PiSortedActivityGroup: React.FC<{
         <span className="font-medium">{t('chat.piActivity.title')}</span>
         {latestLabel ? <span className="min-w-0 flex-1 truncate">· {latestLabel}</span> : <span className="flex-1" />}
         {failed ? <PiToolStatus status="error" /> : null}
-        <span className="typography-micro">{projection.activity.length}</span>
+        <span className="typography-micro">{activity.length}</span>
         <Icon name="arrow-down-s" className={cn('size-3.5 shrink-0 transition-transform', expanded && 'rotate-180')} />
       </button>
       {expanded ? (
         <div className="ml-2 space-y-2 border-l border-border py-2 pl-3">
-          {projection.activity.map((item, index) => {
+          {activity.map((item, index) => {
             if (item.kind === 'tool') {
-              if (projection.activity[index - 1]?.kind === 'tool') return null;
+              if (activity[index - 1]?.kind === 'tool') return null;
               const calls: PiToolCall[] = [];
               const generatingCallIds = new Set<string>();
-              for (let next = index; next < projection.activity.length; next += 1) {
-                const candidate = projection.activity[next]!;
+              for (let next = index; next < activity.length; next += 1) {
+                const candidate = activity[next]!;
                 if (candidate.kind !== 'tool') break;
                 calls.push(candidate.call);
                 if (candidate.streaming) generatingCallIds.add(candidate.call.id);
@@ -904,21 +914,8 @@ const PiSortedActivityGroup: React.FC<{
             return (
               <React.Fragment key={item.id}>
                 {item.kind === 'thinking' ? (
-                  <div data-pi-activity-kind="thinking">
-                    <div className="mb-1 flex items-center gap-1.5 typography-meta font-medium text-muted-foreground">
-                      <Icon name="brain" className="size-3.5" />
-                      {hiddenThinkingLabel}{item.content.redacted ? ' (redacted)' : ''}
-                    </div>
-                    {!item.content.redacted ? (
-                      <div className="ml-2 border-l border-border/60 pl-3 text-muted-foreground">
-                        <PiThinkingBody
-                          content={item.content}
-                          messageId={item.id}
-                          streaming={item.streaming}
-                        />
-                      </div>
-                    ) : null}
-                  </div>
+                  <PiThinkingBlock content={item.content} messageId={item.id}
+                    streaming={item.streaming} label={hiddenThinkingLabel} />
                 ) : (
                   <div className="rounded-lg bg-background/45 px-2.5 py-2" data-pi-activity-kind="justification">
                     <div className="mb-1 flex items-center gap-1.5 typography-meta font-medium text-muted-foreground">
@@ -970,6 +967,7 @@ export const PiTurnUserMessage: React.FC<{
   threadBusyEntryId,
 }) => {
   const { t } = useI18n();
+  const plain = useUIStore(state => state.userMessageRenderingMode === 'plain');
   const messageId = entry?.id ?? `live-user:${message.timestamp}`;
   const messageText = piContentText(message.content).trim();
   const copyMessage = React.useCallback(() => {
@@ -982,7 +980,7 @@ export const PiTurnUserMessage: React.FC<{
   return (
     <article id={entry ? `pi-entry-${entry.id}` : undefined} data-pi-user-message data-pi-entry-id={entry?.id} className="group/message ml-auto max-w-[85%]">
       <div className="rounded-xl bg-[var(--chat-user-message-bg)] px-4 py-3 text-[var(--chat-user-message)]">
-        <PiUserContentView content={message.content} messageId={messageId} />
+        <PiCollapsibleUserContent><PiUserContentView content={message.content} messageId={messageId} plain={plain} /></PiCollapsibleUserContent>
       </div>
       {status ? (
         <div
@@ -1414,6 +1412,8 @@ export const PiTimelineEntryList: React.FC<Omit<
             </article>
           );
         })()}
+        <PiTurnChangedFiles messages={assistantMessagesForTurn(builtInEntries, projection.liveAssistant)}
+          results={resultByCallId} executions={toolExecutions} cwd={cwd} sessionId={sessionId} />
         <PiTurnUsageFooter
           entries={entries}
           liveAssistant={projection.liveAssistant}

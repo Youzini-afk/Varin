@@ -692,11 +692,11 @@ export interface SettingsPayload {
   showTurnChangedFiles?: boolean;
   showExpandedBashTools?: boolean;
   showExpandedEditTools?: boolean;
+  chatContentWidth?: number;
   chatRenderMode?: 'sorted' | 'live';
   messageStreamTransport?: 'auto' | 'ws' | 'sse';
   activityRenderMode?: 'collapsed' | 'summary';
   mermaidRenderingMode?: 'svg' | 'ascii';
-  showSplitAssistantMessageActions?: boolean;
   fontSize?: number;
   terminalFontSize?: number;
   terminalShell?: TerminalShell;

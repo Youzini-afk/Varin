@@ -994,7 +994,7 @@ html:not(.dark) .chat-scroll {
 
 /* Conversation prose has a reading rhythm independent of compact tool output.
    Round streamed line growth to whole pixels, as with the scroll controller's
-   other text surfaces. The default column remains 48rem; wide mode is explicit. */
+   other text surfaces. Column width follows the global chat layout preference. */
 .chat-message-column .markdown-content:not(.markdown-tool):not(.markdown-reasoning) {
   line-height: round(1.75em, 1px);
 }

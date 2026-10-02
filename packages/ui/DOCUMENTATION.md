@@ -129,6 +129,14 @@ and selected chips use the theme's selection color. Menus use one border
 and a restrained shadow, inputs keep a visible border on hover, and keyboard focus must remain visible.
 UI labels use 14px, metadata 13px and small badges 12px at the default scale; Markdown body text uses 16px.
 
+`ChatSettings` owns the Chat page, separate from the application appearance form. It groups reading,
+execution display, input behavior and code/files. `chatContentWidth` sets the shared message/composer
+maximum width (960px by default; 0 fills the pane) through `useChatContentWidth`; presets and direct
+adjustments share the same persisted value. Existing conversations respond immediately. Controls use
+the settings catalog's search identities and the normal save feedback, with explanatory copy limited
+to ambiguous choices and contextual help. Pi rendering consumes the visibility/disclosure preferences;
+obsolete per-fragment actions and the unconsumed subagent display-message preference have been retired.
+
 The desktop Agent shell separates two titlebar controls in `ContextPanelControls`: double chevrons
 show/hide the right icon rail, and the panel icon toggles the last workspace panel directly. Rail
 visibility is a persisted UI preference and never changes panel visibility. The existing per-workspace

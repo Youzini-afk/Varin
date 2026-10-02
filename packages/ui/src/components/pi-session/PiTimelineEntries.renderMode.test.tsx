@@ -4,7 +4,7 @@ import { vi } from 'vitest';
 import { parseHTML } from 'linkedom';
 import { createRoot } from 'react-dom/client';
 import { renderToStaticMarkup } from 'react-dom/server';
-import type { PiAssistantMessage, PiSessionEntry, Thread, ThreadRun } from '@varin/protocol';
+import type { JsonValue, PiAssistantMessage, PiSessionEntry, Thread, ThreadRun } from '@varin/protocol';
 import type { RuntimeAPIs } from '@varin/application-client';
 import { RuntimeAPIContext } from '@/contexts/runtimeAPIContext';
 import { I18nProvider } from '@/lib/i18n';
@@ -54,9 +54,19 @@ const renderTimeline = (
   const previous = {
     activityRenderMode: serverState.activityRenderMode,
     chatRenderMode: serverState.chatRenderMode,
+    showReasoningTraces: serverState.showReasoningTraces,
+    collapsibleThinkingBlocks: serverState.collapsibleThinkingBlocks,
+    showExpandedBashTools: serverState.showExpandedBashTools,
+    showExpandedEditTools: serverState.showExpandedEditTools,
+    showTurnChangedFiles: serverState.showTurnChangedFiles,
   };
   serverState.activityRenderMode = currentState.activityRenderMode;
   serverState.chatRenderMode = currentState.chatRenderMode;
+  serverState.showReasoningTraces = currentState.showReasoningTraces;
+  serverState.collapsibleThinkingBlocks = currentState.collapsibleThinkingBlocks;
+  serverState.showExpandedBashTools = currentState.showExpandedBashTools;
+  serverState.showExpandedEditTools = currentState.showExpandedEditTools;
+  serverState.showTurnChangedFiles = currentState.showTurnChangedFiles;
   const previousSessionId = piServerState.currentSessionId;
   piServerState.currentSessionId = 'session';
   try {
@@ -86,17 +96,63 @@ const renderTimeline = (
       </RuntimeAPIContext.Provider>,
     );
   } finally {
-    serverState.activityRenderMode = previous.activityRenderMode;
-    serverState.chatRenderMode = previous.chatRenderMode;
+    Object.assign(serverState, previous);
     piServerState.currentSessionId = previousSessionId;
   }
 };
 
 afterEach(() => {
-  useUIStore.setState({ chatRenderMode: 'live' });
+  useUIStore.setState({ chatRenderMode: 'live', showReasoningTraces: true,
+    collapsibleThinkingBlocks: true, showExpandedBashTools: false, showExpandedEditTools: false, showTurnChangedFiles: false });
 });
 
 describe('Pi timeline chat render mode', () => {
+  test('hides thinking in both reply layouts and applies its completed disclosure preference', () => {
+    const complete = { ...liveAssistant, stopReason: 'stop' as const };
+    for (const chatRenderMode of ['live', 'sorted'] as const) {
+      useUIStore.setState({ chatRenderMode, activityRenderMode: 'summary', showReasoningTraces: false });
+      expect(renderTimeline(complete)).not.toContain('Inspecting the current implementation.');
+      useUIStore.setState({ showReasoningTraces: true, collapsibleThinkingBlocks: false });
+      expect(parseHTML(renderTimeline(complete)).document.querySelector('[data-pi-activity-kind="thinking"]')?.hasAttribute('open')).toBe(true);
+      useUIStore.setState({ collapsibleThinkingBlocks: true });
+      expect(parseHTML(renderTimeline(complete)).document.querySelector('[data-pi-activity-kind="thinking"]')?.hasAttribute('open')).toBe(false);
+    }
+  });
+
+  test('applies command and edit detail defaults independently', () => {
+    const complete: PiAssistantMessage = { ...liveAssistant, stopReason: 'toolUse', content: [
+      { type: 'toolCall', id: 'cmd', name: 'bash', arguments: { command: 'pwd' } },
+      { type: 'toolCall', id: 'edit', name: 'edit', arguments: { path: 'file.ts' } },
+    ] };
+    for (const [showExpandedBashTools, showExpandedEditTools] of [[true, false], [false, true]]) {
+      useUIStore.setState({ chatRenderMode: 'live', showExpandedBashTools, showExpandedEditTools });
+      const doc = parseHTML(renderTimeline(complete)).document;
+      expect(doc.querySelector('[data-pi-tool-disclosure="tool:cmd"]')?.hasAttribute('open')).toBe(showExpandedBashTools);
+      expect(doc.querySelector('[data-pi-tool-disclosure="tool:edit"]')?.hasAttribute('open')).toBe(showExpandedEditTools);
+    }
+  });
+
+  test('lists only applied file changes when the turn file summary is enabled', () => {
+    useUIStore.setState({ showTurnChangedFiles: true, chatRenderMode: 'live' });
+    const entries: PiSessionEntry[] = [{ type: 'message', id: 'writes', parentId: null, timestamp: 'now',
+      message: { ...liveAssistant, stopReason: 'toolUse', content: ['saved', 'conflict', 'draft'].map(id => ({
+        type: 'toolCall', id, name: 'write', arguments: { path: `${id}.ts`, content: 'updated' },
+      })) } }];
+    const outcomes: Record<string, JsonValue> = { saved: { applied: true }, conflict: { applied: false }, draft: {
+      mutation: { status: 'applied', results: [{ path: 'draft.ts', status: 'applied', target: 'surface' }] },
+    } };
+    for (const [id, details] of Object.entries(outcomes)) entries.push({ type: 'message', id: `result-${id}`, parentId: 'writes', timestamp: 'now', message: {
+      role: 'toolResult', toolCallId: id, toolName: 'write', content: [], timestamp: 3, isError: false, details,
+    } });
+    const doc = parseHTML(renderTimeline(null, entries)).document;
+    const summary = doc.querySelector('details.group\\/files');
+    expect(summary?.textContent).toContain('saved.ts');
+    expect(summary?.textContent).not.toContain('conflict.ts');
+    expect(summary?.textContent).not.toContain('draft.ts');
+    useUIStore.setState({ showTurnChangedFiles: false });
+    expect(parseHTML(renderTimeline(null, entries)).document.querySelector('details.group\\/files')).toBeNull();
+  });
+
   test('uses the compact explore renderer in live/sorted modes and does not label cancellation as failure', () => {
     const call = { type: 'toolCall' as const, id: 'search', name: 'explore', arguments: { question: 'Find the journal writer' } };
     const entries: PiSessionEntry[] = [{

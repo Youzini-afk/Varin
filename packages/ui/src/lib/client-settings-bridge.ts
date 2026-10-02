@@ -159,11 +159,6 @@ const AUTHORITIES: Record<string, ClientSettingAuthority> = {
     (value) => useUIStore.getState().setShowTerminalQuickKeysOnDesktop(value),
   ),
 
-  'chat.subagent-read-only-banner': uiStoreField(
-    () => useUIStore.getState().allowPromptingSubagentSessions,
-    (value) => useUIStore.getState().setAllowPromptingSubagentSessions(value),
-  ),
-
   'chat.persist-drafts': uiStoreField(
     () => useUIStore.getState().persistChatDraft,
     (value) => useUIStore.getState().setPersistChatDraft(value),

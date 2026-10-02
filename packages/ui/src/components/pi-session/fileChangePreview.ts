@@ -20,6 +20,24 @@ export const isFileChangeTool = (name: string): boolean => name === 'apply_patch
 const record = (value: unknown): Record<string, unknown> | undefined =>
   value !== null && typeof value === 'object' && !Array.isArray(value) ? value as Record<string, unknown> : undefined;
 
+/** Turn summaries only need file identities; do not diff or split full writes. */
+export function fileChangeTargets(call: PiToolCall): Array<Pick<FileChangePreview, 'path' | 'operation'>> {
+  const args = record(call.arguments);
+  if (!args) return [];
+  if ((call.name === 'write' || call.name === 'edit') && typeof args.path === 'string' && args.path) {
+    return [{ path: args.path, operation: call.name === 'write' ? 'write' : 'update' }];
+  }
+  if (call.name !== 'apply_patch' || typeof args.patch !== 'string') return [];
+  const files: Array<Pick<FileChangePreview, 'path' | 'operation'>> = [];
+  const headers = /^\*\*\* (?:((?:Add|Update|Delete) File): ([^\r\n]+)|Move to: ([^\r\n]+)|End Patch\r?$)/gm;
+  for (const match of args.patch.matchAll(headers)) {
+    if (match[1]) files.push({ path: match[2]!, operation: match[1] === 'Add File' ? 'add' : match[1] === 'Delete File' ? 'delete' : 'update' });
+    else if (match[3]) { const current = files.at(-1); if (current) current.path = match[3]; }
+    else break;
+  }
+  return files;
+}
+
 // A terminating newline ends the previous line; it is not another added line.
 const linesOf = (text: string): string[] => {
   if (!text) return [];

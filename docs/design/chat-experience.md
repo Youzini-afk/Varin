@@ -135,7 +135,9 @@ accessory stack. There is no independent bar for each feature.
   message with text. Memory extraction belongs to the text-selection menu; there is no per-message or
   turn-level remember button. User-message actions and extension-owned rendering remain independent.
 - Conversation prose defaults to 16px with pixel-rounded 1.75 line height, 12px paragraph spacing and
-  distinct heading/list spacing. The 48rem reading column and explicit wide layout remain available;
+  distinct heading/list spacing. Message and composer columns share `chatContentWidth`, defaulting to
+  960 CSS pixels. Settings offer 768/960/1152px presets, custom widths and fill-pane (`0`); narrower panes
+  constrain the column to their available width. Changes apply to existing and new conversations;
   code, tools and reasoning retain their compact presentation. Built-in sans-serif stacks include
   Chinese system-font fallbacks while honoring the user's selected font and scale.
 - Built-in tool calls start as compact disclosure rows, including while running. Consecutive known
@@ -144,6 +146,7 @@ accessory stack. There is no independent bar for each feature.
   while failures remain visible even when another call in the group is still running. Explicit disclosure
   choices survive a live-to-persisted message handoff within the mounted turn, and are not reset by status
   changes. Extension tool renderers retain ownership of their presentation.
+
 - Before the first assistant entry arrives, the newest unanswered turn shows the session model and a neutral
   working animation. It is presentation state, not a fabricated assistant message or progress phase.
 - Chat presentation never changes Pi's live event transport. Live mode renders assistant text, thinking,
@@ -156,6 +159,23 @@ accessory stack. There is no independent bar for each feature.
 - Streaming text is throttled and revealed by committed blocks. Virtualized remounts do not replay reveal
   animations.
 - Unknown Pi/extension entries remain usable through generic renderers and raw detail disclosure.
+
+### Chat settings
+
+`ChatSettings` groups controls into reading/layout, replies/process, input/follow-ups and code/files.
+Width has presets, continuous adjustment and a numeric field; the slider's suggested range does not
+limit explicitly entered widths. The same setting goes through the shared catalog, Host sanitization,
+settings persistence and the pre-paint CSS variable hook. There is no per-session layout copy.
+
+Chronological and answer-focused presentation have short descriptions of what appears and when.
+Thinking, tool disclosure defaults, user message formatting/collapse, sticky prompts and turn navigation
+are consumed by the Pi timeline. File summary lists only applied file mutations; the individual previews
+still distinguish drafts, branch commits and failures. Diagram-format changes also invalidate the
+Markdown renderer's decoration context. Font, spacing and theme preferences remain on Appearance.
+
+The obsolete per-fragment action setting is removed; actions remain once per turn. The old subagent
+prompting display toggle and its unconsumed iframe message are removed as well; native session execution
+and permission rules continue to own whether a session accepts input.
 
 ### Quick retrieval
 

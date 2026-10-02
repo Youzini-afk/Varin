@@ -1,3 +1,4 @@
+import { DEFAULT_CHAT_CONTENT_WIDTH, isChatContentWidth } from '@varin/application-client';
 import { create } from 'zustand';
 import { devtools, persist } from 'zustand/middleware';
 import type { SidebarSection } from '@/constants/sidebar';
@@ -579,7 +580,7 @@ interface UIStore {
   showTerminalQuickKeysOnDesktop: boolean;
   persistChatDraft: boolean;
   inputSpellcheckEnabled: boolean;
-  wideChatLayoutEnabled: boolean;
+  chatContentWidth: number;
   codeBlockLineWrap: boolean;
   showToolFileIcons: boolean;
   showTurnChangedFiles: boolean;
@@ -595,8 +596,6 @@ interface UIStore {
   stickyUserHeader: boolean;
   promptNavigatorEnabled: boolean;
   expandedEditorToolbar: boolean;
-  showSplitAssistantMessageActions: boolean;
-  allowPromptingSubagentSessions: boolean;
   mobileSessionPanelOpen: boolean;
   mobileSessionFilterProjectId: string | null;
   isExpandedInput: boolean;
@@ -745,7 +744,7 @@ interface UIStore {
   setMaxLastMessageLength: (value: number) => void;
   setPersistChatDraft: (value: boolean) => void;
   setInputSpellcheckEnabled: (value: boolean) => void;
-  setWideChatLayoutEnabled: (value: boolean) => void;
+  setChatContentWidth: (value: number) => void;
   setCodeBlockLineWrap: (value: boolean) => void;
   setShowToolFileIcons: (value: boolean) => void;
   setShowTurnChangedFiles: (value: boolean) => void;
@@ -761,8 +760,6 @@ interface UIStore {
   setStickyUserHeader: (value: boolean) => void;
   setPromptNavigatorEnabled: (value: boolean) => void;
   setExpandedEditorToolbar: (value: boolean) => void;
-  setShowSplitAssistantMessageActions: (value: boolean) => void;
-  setAllowPromptingSubagentSessions: (value: boolean) => void;
   setMobileSessionPanelOpen: (value: boolean) => void;
   setMobileSessionFilterProjectId: (value: string | null) => void;
   viewPagerPage: 'left' | 'center' | 'right';
@@ -896,7 +893,7 @@ export const useUIStore = create<UIStore>()(
         showTerminalQuickKeysOnDesktop: false,
         persistChatDraft: true,
         inputSpellcheckEnabled: false,
-        wideChatLayoutEnabled: false,
+        chatContentWidth: DEFAULT_CHAT_CONTENT_WIDTH,
         codeBlockLineWrap: true,
         showToolFileIcons: true,
         showTurnChangedFiles: false,
@@ -912,8 +909,6 @@ export const useUIStore = create<UIStore>()(
         stickyUserHeader: false,
         promptNavigatorEnabled: true,
         expandedEditorToolbar: false,
-        showSplitAssistantMessageActions: false,
-        allowPromptingSubagentSessions: false,
         draftStartersVisible: true,
         mobileSessionPanelOpen: false,
         mobileSessionFilterProjectId: null,
@@ -2115,8 +2110,8 @@ export const useUIStore = create<UIStore>()(
         setInputSpellcheckEnabled: (value) => {
           set({ inputSpellcheckEnabled: value });
         },
-        setWideChatLayoutEnabled: (value) => {
-          set({ wideChatLayoutEnabled: value });
+        setChatContentWidth: (value) => {
+          if (isChatContentWidth(value)) set({ chatContentWidth: value });
         },
         setCodeBlockLineWrap: (value) => {
           set({ codeBlockLineWrap: value });
@@ -2164,12 +2159,6 @@ export const useUIStore = create<UIStore>()(
         },
         setExpandedEditorToolbar: (value: boolean) => {
           set({ expandedEditorToolbar: value });
-        },
-        setShowSplitAssistantMessageActions: (value) => {
-          set({ showSplitAssistantMessageActions: value });
-        },
-        setAllowPromptingSubagentSessions: (value) => {
-          set({ allowPromptingSubagentSessions: value });
         },
         setMobileSessionPanelOpen: (value) => {
           set({ mobileSessionPanelOpen: value });
@@ -2226,6 +2215,7 @@ export const useUIStore = create<UIStore>()(
           return {
             ...current,
             ...saved,
+            chatContentWidth: isChatContentWidth(saved.chatContentWidth) ? saved.chatContentWidth : DEFAULT_CHAT_CONTENT_WIDTH,
             fileEditorSettings: normalizeFileEditorSettings(
               saved.fileEditorSettings,
               current.fileEditorSettings,
@@ -2306,7 +2296,7 @@ export const useUIStore = create<UIStore>()(
           maxLastMessageLength: state.maxLastMessageLength,
           persistChatDraft: state.persistChatDraft,
           inputSpellcheckEnabled: state.inputSpellcheckEnabled,
-          wideChatLayoutEnabled: state.wideChatLayoutEnabled,
+          chatContentWidth: state.chatContentWidth,
           codeBlockLineWrap: state.codeBlockLineWrap,
           showToolFileIcons: state.showToolFileIcons,
           showTurnChangedFiles: state.showTurnChangedFiles,
@@ -2322,8 +2312,6 @@ export const useUIStore = create<UIStore>()(
           stickyUserHeader: state.stickyUserHeader,
           promptNavigatorEnabled: state.promptNavigatorEnabled,
           expandedEditorToolbar: state.expandedEditorToolbar,
-          showSplitAssistantMessageActions: state.showSplitAssistantMessageActions,
-          allowPromptingSubagentSessions: state.allowPromptingSubagentSessions,
           draftStartersVisible: state.draftStartersVisible,
           mobileSessionFilterProjectId: state.mobileSessionFilterProjectId,
           shortcutOverrides: state.shortcutOverrides,

@@ -1,3 +1,4 @@
+import { isChatContentWidth } from '@varin/application-client';
 import { normalizeOutboundNetwork } from '../harness/egress-settings.js';
 
 export type SettingsRecord = Record<string, unknown>;
@@ -609,11 +610,8 @@ export const createSettingsHelpers = (dependencies: SettingsHelpersDependencies)
     if (typeof candidate.expandedEditorToolbar === 'boolean') {
       result.expandedEditorToolbar = candidate.expandedEditorToolbar;
     }
-    if (typeof candidate.wideChatLayoutEnabled === 'boolean') {
-      result.wideChatLayoutEnabled = candidate.wideChatLayoutEnabled;
-    }
-    if (typeof candidate.showSplitAssistantMessageActions === 'boolean') {
-      result.showSplitAssistantMessageActions = candidate.showSplitAssistantMessageActions;
+    if (isChatContentWidth(candidate.chatContentWidth)) {
+      result.chatContentWidth = candidate.chatContentWidth;
     }
     if (typeof candidate.fontSize === 'number' && Number.isFinite(candidate.fontSize)) {
       result.fontSize = Math.max(50, Math.min(200, Math.round(candidate.fontSize)));

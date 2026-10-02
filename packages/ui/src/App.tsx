@@ -62,7 +62,7 @@ import { subscribeVarinEvents } from '@/lib/varinEvents';
 import { invalidateSettingsCache, syncDesktopSettings } from '@/lib/persistence';
 import { useAppFontEffects } from '@/apps/useAppFontEffects';
 import { markStartupTrace, startupTraceEnabled } from '@/lib/startupTrace';
-import { useWideChatLayoutClass } from '@/hooks/useWideChatLayoutClass';
+import { useChatContentWidth } from '@/hooks/useChatContentWidth';
 import {
   openPiSessionFromNavigation,
   startPiSessionDraftFromNavigation,
@@ -213,7 +213,7 @@ function App({ apis }: AppProps) {
   const refreshGitHubAuthStatus = useGitHubAuthStore((state) => state.refreshStatus);
   const [isEmbeddedVisible, setIsEmbeddedVisible] = React.useState(true);
   const [runtimeEndpointEpoch, setRuntimeEndpointEpoch] = React.useState(0);
-  const wideChatLayoutEnabled = useUIStore((state) => state.wideChatLayoutEnabled);
+  const chatContentWidth = useUIStore((state) => state.chatContentWidth);
   const mobileKeyboardMode = useUIStore((state) => state.mobileKeyboardMode);
   const isDesktopRuntime = React.useMemo(() => isDesktopShell(), []);
   const enableMobileAppViewport = React.useMemo(() => isMobileAppRuntime(), []);
@@ -319,7 +319,7 @@ function App({ apis }: AppProps) {
     });
   }, [isDesktopRuntime, runtimeSnapshot?.status, runtimeEndpointEpoch]);
 
-  useWideChatLayoutClass(wideChatLayoutEnabled);
+  useChatContentWidth(chatContentWidth);
 
   React.useEffect(() => {
     registerRuntimeAPIs(apis);

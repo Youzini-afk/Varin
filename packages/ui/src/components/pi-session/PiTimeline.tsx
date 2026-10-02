@@ -41,6 +41,8 @@ import {
 } from './piAssistantWaiting';
 import { PiTurnAssistantChrome } from './PiTurnAssistantChrome';
 import { ChatContextMenu } from './ChatContextMenu';
+import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger } from '@/components/ui/dropdown-menu';
+import { piContentText } from './extensionPresentation';
 
 interface PiTimelineItemViewProps extends Omit<
   PiTimelineProps,
@@ -93,6 +95,7 @@ const PiTimelineItemView: React.FC<PiTimelineItemViewProps> = ({
   sessionId,
   threadBusyEntryId,
 }) => {
+  const stickyUserHeader = useUIStore(state => state.stickyUserHeader);
   const toolCallIds = React.useMemo(() => toolCallIdsForItem(item), [item]);
   const itemExecutions = usePiSessionStore(useShallow((state) => {
     const executions = state.records[sessionId]?.toolExecutions;
@@ -159,7 +162,7 @@ const PiTimelineItemView: React.FC<PiTimelineItemViewProps> = ({
       data-turn-entry={turn.id}
     >
       <div className={cn(
-        !isMobile && 'sticky top-0 z-10 -mx-1 bg-background/95 px-1 py-1 backdrop-blur-sm',
+        !isMobile && stickyUserHeader && 'sticky top-0 z-10 -mx-1 bg-background/95 px-1 py-1 backdrop-blur-sm',
       )}>
         <PiTurnUserMessage
           cwd={cwd}
@@ -226,6 +229,7 @@ const piTimelineKeyIntent = (key: string, shiftKey: boolean): PiTimelineScrollIn
 
 export const PiTimeline: React.FC<PiTimelineProps> = (props) => {
   const { t } = useI18n();
+  const promptNavigatorEnabled = useUIStore(state => state.promptNavigatorEnabled);
   const isMobile = useUIStore((state) => state.isMobile);
   const onScrollContainerChange = props.onScrollContainerChange;
   const listRef = React.useRef<LegendListRef>(null);
@@ -657,6 +661,26 @@ export const PiTimeline: React.FC<PiTimelineProps> = (props) => {
           list.getState().scroll + element.getBoundingClientRect().top - container.getBoundingClientRect().top - inset - PI_TIMELINE_ANCHOR_OFFSET_PX) });
       }}>
     <div className="relative flex min-h-0 flex-1">
+      {promptNavigatorEnabled && projection.items.filter(item => item.kind === 'turn').length > 1 ? (
+        <DropdownMenu>
+          <DropdownMenuTrigger asChild>
+            <button type="button" aria-label={t('settings.chat.navigator')} title={t('settings.chat.navigator')}
+              className="absolute right-3 top-2 z-20 flex size-7 items-center justify-center rounded-md border border-border/50 bg-background/95 text-muted-foreground shadow-sm hover:text-foreground">
+              <Icon name="list-check-2" className="size-4" />
+            </button>
+          </DropdownMenuTrigger>
+          <DropdownMenuContent align="end" className="max-h-80 max-w-[min(24rem,85vw)] overflow-y-auto">
+            {projection.items.map((item, index) => item.kind === 'turn' ? (
+              <DropdownMenuItem key={item.id} onSelect={() => {
+                takeManualOwnership();
+                void listRef.current?.scrollToIndex({ index, viewPosition: 0, animated: false });
+              }}>
+                <span className="truncate">{piContentText(item.turn.user.content).trim() || '…'}</span>
+              </DropdownMenuItem>
+            ) : null)}
+          </DropdownMenuContent>
+        </DropdownMenu>
+      ) : null}
       <LegendList
         ref={listRef}
         anchoredEndSpace={anchoredEndSpace}

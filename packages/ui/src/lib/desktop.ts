@@ -172,8 +172,7 @@ export type DesktopSettings = {
   stickyUserHeader?: boolean;
   promptNavigatorEnabled?: boolean;
   expandedEditorToolbar?: boolean;
-  wideChatLayoutEnabled?: boolean;
-  showSplitAssistantMessageActions?: boolean;
+  chatContentWidth?: number;
   fontSize?: number;
   terminalFontSize?: number;
   terminalShell?: TerminalShell;
