@@ -30,7 +30,7 @@ export const PiTurnUsageFooter: React.FC<{
     : undefined;
   if (!projectPiUsagePresentation(usage) && !actions) return null;
   return (
-    <div className="flex min-w-0 flex-wrap items-center gap-x-4 gap-y-1.5" data-pi-message-footer>
+    <div className="flex min-w-0 flex-wrap items-center gap-x-4 gap-y-1.5" data-pi-turn-footer>
       {actions}
       {usage ? (
         <PiAssistantUsageFooter

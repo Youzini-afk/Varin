@@ -120,9 +120,11 @@ accessory stack. There is no independent bar for each feature.
 - Each completed turn aggregates the exact positive usage fields Pi reported: input, output,
   reasoning, cache read, cache write, optional one-hour cache write, and the provider-owned total. Missing
   or all-zero usage stays absent; these cumulative request totals do not represent current context use.
-  The final built-in assistant message places its actions on the left and the turn's statistics on the
-  right of one wrapping row. Earlier messages keep their own actions. A live-only or extension-owned
-  terminal answer retains standalone statistics, without attaching them to an earlier message.
+  One footer below the entire turn places actions on the left and statistics on the right, wrapping
+  when necessary. Intermediate assistant messages have no individual action rows. Copy and memory use
+  all built-in assistant prose in chronological order, including the live tail, excluding thinking and
+  tool output. Discussion and fork keep their native entry contract and target the turn's last persisted
+  assistant message with text. User-message actions and extension-owned rendering remain independent.
 - Conversation prose defaults to 16px with pixel-rounded 1.75 line height, 12px paragraph spacing and
   distinct heading/list spacing. The 48rem reading column and explicit wide layout remain available;
   code, tools and reasoning retain their compact presentation. Built-in sans-serif stacks include
@@ -139,8 +141,9 @@ accessory stack. There is no independent bar for each feature.
   and tools in arrival order. Sorted mode streams thinking, tool calls, and tool-use justification into one
   turn Activity group, with the terminal answer rendered after that group; unfinished answer text is withheld
   from the sorted body rather than turning the whole response into a non-streaming request.
-- Copy, recover, and branch/fork actions remain attached to the message that owns them and call Pi's
-  native session operations. Varin does not pin messages or inject a second context layer over Pi packages.
+- User-message recovery and branching keep their original entry targets; turn-footer discussion and
+  branching use the final persisted text reply. These actions call native session operations. Varin does
+  not pin messages or inject a second context layer over Pi packages.
 - Streaming text is throttled and revealed by committed blocks. Virtualized remounts do not replay reveal
   animations.
 - Unknown Pi/extension entries remain usable through generic renderers and raw detail disclosure.

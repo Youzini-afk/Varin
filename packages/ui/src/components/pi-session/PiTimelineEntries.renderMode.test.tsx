@@ -170,7 +170,7 @@ describe('Pi timeline chat render mode', () => {
     expect(markup).toContain('group/tools my-1');
   });
 
-  test('puts the turn totals beside the terminal message actions without changing earlier message ownership', () => {
+  test('renders one action row with usage below the whole turn, including a textless final reply', () => {
     const entries: PiSessionEntry[] = ['step', 'answer'].map((id, index) => ({
       type: 'message', id, parentId: index === 0 ? null : 'step', timestamp: String(index),
       message: {
@@ -179,21 +179,76 @@ describe('Pi timeline chat render mode', () => {
         usage: { ...liveAssistant.usage, input: 100, output: 20, totalTokens: 120 },
       },
     }));
-    const { document } = parseHTML(renderTimeline(null, entries));
-    expect(document.querySelectorAll('[data-pi-turn-usage]').length).toBe(1);
-    const answerFooter = document.querySelector('#pi-entry-answer [data-pi-message-footer]')!;
-    expect(answerFooter.querySelector('[aria-label="Copy answer"]')).not.toBeNull();
-    expect(answerFooter.querySelector('[title="Input: 200"]')).not.toBeNull();
-    expect(answerFooter.querySelector('[title="Output: 40"]')).not.toBeNull();
-    const step = document.querySelector('#pi-entry-step')!;
-    expect(step.querySelector('[aria-label="Copy answer"]')).not.toBeNull();
-    expect(step.querySelector('[data-pi-turn-usage]')).toBeNull();
+    for (const mode of ['live', 'sorted'] as const) {
+      useUIStore.setState({ chatRenderMode: mode });
+      const { document } = parseHTML(renderTimeline(null, entries));
+      expect(document.querySelectorAll('[data-pi-turn-usage]').length).toBe(1);
+      expect(document.querySelectorAll('[aria-label="Copy answer"]').length).toBe(1);
+      const footer = document.querySelector('[data-pi-turn-footer]')!;
+      expect(footer.querySelector('[aria-label="Copy answer"]')).not.toBeNull();
+      expect(footer.querySelector('[title="Input: 200"]')).not.toBeNull();
+      expect(footer.querySelector('[title="Output: 40"]')).not.toBeNull();
+      expect(footer.parentElement?.lastElementChild).toBe(footer);
+      expect(document.querySelector('article [data-pi-turn-footer]')).toBeNull();
+    }
 
     const noText = { ...entries[1], message: { ...liveAssistant, stopReason: 'stop', content: [],
       usage: { ...liveAssistant.usage, input: 50, totalTokens: 50 } } } as PiSessionEntry;
     const emptyAnswer = parseHTML(renderTimeline(null, [entries[0]!, noText])).document;
     expect(emptyAnswer.querySelectorAll('[data-pi-turn-usage]').length).toBe(1);
-    expect(emptyAnswer.querySelector('#pi-entry-answer [title="Input: 150"]')).not.toBeNull();
+    expect(emptyAnswer.querySelector('[data-pi-turn-footer] [title="Input: 150"]')).not.toBeNull();
+  });
+
+  test('copies all assistant prose once across a live handoff and forks from the final saved text reply', async () => {
+    const { document, window } = parseHTML('<html><body></body></html>');
+    vi.stubGlobal('document', document);
+    vi.stubGlobal('window', window);
+    vi.stubGlobal('IS_REACT_ACT_ENVIRONMENT', true);
+    const writeText = vi.fn(async () => undefined);
+    vi.stubGlobal('navigator', { clipboard: { writeText } });
+    const fork = vi.fn();
+    const container = document.createElement('div');
+    document.body.append(container);
+    const root = createRoot(container);
+    const entry: PiSessionEntry = {
+      type: 'message', id: 'progress', parentId: null, timestamp: 'now',
+      message: { ...liveAssistant, timestamp: 1, stopReason: 'toolUse', content: [
+        { type: 'thinking', thinking: 'Hidden reasoning' },
+        { type: 'text', text: 'First progress update.' },
+        { type: 'toolCall', id: 'read', name: 'read', arguments: { path: 'a.ts' } },
+      ] },
+    };
+    const finalMessage: PiAssistantMessage = { ...liveAssistant, stopReason: 'stop', content: [
+      { type: 'text', text: 'The final answer.' },
+    ] };
+    const answer: PiSessionEntry = { ...entry, id: 'answer', parentId: 'progress', message: finalMessage };
+    const render = async (entries: PiSessionEntry[], live?: PiAssistantMessage) => {
+      await act(async () => root.render(
+        <RuntimeAPIContext.Provider value={runtimeAPIs}><I18nProvider>
+          <PiTimelineEntryList cwd="/workspace" entries={entries} liveAssistant={live}
+            onFork={fork} sessionId="turn-test" toolExecutions={{}} />
+        </I18nProvider></RuntimeAPIContext.Provider>,
+      ));
+    };
+    const copy = async () => {
+      expect(container.querySelectorAll('[aria-label="Copy answer"]').length).toBe(1);
+      await act(async () => container.querySelector<HTMLButtonElement>('[aria-label="Copy answer"]')!.click());
+      expect(writeText.mock.calls.at(-1)).toEqual(['First progress update.\n\nThe final answer.']);
+    };
+    try {
+      await render([entry], { ...finalMessage, stopReason: 'pending' });
+      await copy();
+      // A snapshot can contain both the persisted reply and its last live overlay.
+      await render([entry, answer], finalMessage);
+      await copy();
+      await act(async () => container.querySelector<HTMLButtonElement>('[aria-label="Fork from this message"]')!.click());
+      expect(fork.mock.calls).toEqual([[answer]]);
+      await act(async () => useUIStore.setState({ chatRenderMode: 'sorted' }));
+      await copy();
+    } finally {
+      await act(async () => root.unmount());
+      vi.unstubAllGlobals();
+    }
   });
 
   test('keeps failures visible in a collapsed tool group while another call is still running in either mode', () => {

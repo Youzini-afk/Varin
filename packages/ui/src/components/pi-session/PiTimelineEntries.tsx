@@ -65,6 +65,7 @@ import {
 import { RememberKnowledgeButton } from './RememberKnowledgeButton';
 import { HarnessThreadMarkers } from './HarnessThreadMarkers';
 import { PiTurnUsageFooter } from './PiTurnUsageFooter';
+import { assistantMessagesForTurn } from '@/lib/pi-runtime/usagePresentation';
 import { parseCompactionTraceDetails, PI_COMPACTION_TRACE_OPEN_EVENT } from '@/lib/pi-runtime/compactionTrace';
 
 export interface PiTimelineProps {
@@ -1102,18 +1103,17 @@ export const PiTimelineEntryList: React.FC<Omit<
     [builtInEntries, chatRenderMode, projection.liveAssistant],
   );
   const resolvedThinkingLabel = hiddenThinkingLabel || t('chat.reasoningTrace.thinking');
-  // Keep the aggregate on the final native assistant message. Extension-owned
-  // or live-only answers retain a standalone footer instead of lending their
-  // usage to an earlier message's copy/fork controls.
-  const lastAssistantEntry = projection.visibleEntries.filter((entry) => (
+  // The row owns the whole turn, independent of live/sorted presentation.
+  // Only assistant prose belongs in copy/memory; thinking and tool output do
+  // not. Native discussion/fork actions still need a persisted text message.
+  const turnText = assistantMessagesForTurn(builtInEntries, projection.liveAssistant)
+    .map((message) => message.content.filter((content) => content.type === 'text')
+      .map((content) => content.text).join('\n').trim())
+    .filter(Boolean).join('\n\n');
+  const actionEntry = builtInEntries.filter((entry): entry is PiSessionMessageEntry => (
     entry.type === 'message' && entry.message.role === 'assistant'
+      && entry.message.content.some((content) => content.type === 'text' && content.text.trim())
   )).at(-1);
-  const usageEntryId = !projection.liveAssistant && lastAssistantEntry
-    && !extensionEntries.has(lastAssistantEntry.id)
-    && (!sortedProjection || sortedProjection.answersBySourceId.has(lastAssistantEntry.id)
-      || sortedProjection.activityAnchorId === lastAssistantEntry.id)
-    ? lastAssistantEntry.id
-    : undefined;
 
   return (
     <PiToolDisclosureScope key={sessionId}>
@@ -1147,11 +1147,6 @@ export const PiTimelineEntryList: React.FC<Omit<
               const showsActivity = sortedProjection?.activityAnchorId === entry.id
                 && sortedProjection.activity.length > 0;
               if (!displayedMessage && !showsActivity) return null;
-              const assistantText = displayedMessage?.content
-                .filter((content) => content.type === 'text')
-                .map((content) => content.text)
-                .join('\n')
-                .trim() ?? '';
               return (
                 <article id={`pi-entry-${entry.id}`} key={entry.id} className="group/message w-full space-y-3">
                   {showsActivity && sortedProjection ? (
@@ -1173,60 +1168,6 @@ export const PiTimelineEntryList: React.FC<Omit<
                       resultByCallId={resultByCallId}
                     />
                   ) : null}
-                  <PiTurnUsageFooter
-                    entries={entry.id === usageEntryId ? entries : []}
-                    outputDurationsMs={outputDurationsMs}
-                    actions={displayedMessage && assistantText ? (
-                      <div className="flex h-6 shrink-0 items-center">
-                        <Tooltip>
-                          <TooltipTrigger asChild>
-                            <button
-                              type="button"
-                              onClick={() => {
-                                void copyTextToClipboard(assistantText).then((result) => {
-                                  if (result.ok) toast.success(t('sessions.sidebar.session.menu.copied'));
-                                  else toast.error(result.error);
-                                });
-                              }}
-                              className="flex size-6 items-center justify-center rounded text-muted-foreground hover:bg-interactive-hover hover:text-foreground"
-                              aria-label={t('chat.messageBody.actions.copyAnswer')}
-                            >
-                              <Icon name="file-copy" className="size-3.5" />
-                            </button>
-                          </TooltipTrigger>
-                          <TooltipContent side="bottom">{t('chat.messageBody.actions.copyAnswer')}</TooltipContent>
-                        </Tooltip>
-                        <RememberKnowledgeButton content={assistantText} kind="message:assistant" />
-                        {onOpenThread ? (
-                          <OpenThreadButton
-                            busy={threadBusyEntryId === entry.id}
-                            disabled={threadBusyEntryId !== null && threadBusyEntryId !== undefined}
-                            entry={entry}
-                            onOpen={onOpenThread}
-                          />
-                        ) : null}
-                        {onFork ? (
-                          <Tooltip>
-                            <TooltipTrigger asChild>
-                              <button
-                                type="button"
-                                onClick={() => onFork(entry)}
-                                disabled={forkBusyEntryId !== null && forkBusyEntryId !== undefined}
-                                className="flex size-6 items-center justify-center rounded text-muted-foreground hover:bg-interactive-hover hover:text-foreground disabled:opacity-50"
-                                aria-label={t('chat.messageBody.actions.forkAria')}
-                              >
-                                <Icon
-                                  name={forkBusyEntryId === entry.id ? 'loader-4' : 'git-branch'}
-                                  className={cn('size-3.5', forkBusyEntryId === entry.id && 'animate-spin')}
-                                />
-                              </button>
-                            </TooltipTrigger>
-                            <TooltipContent side="bottom">{t('chat.messageBody.actions.fork')}</TooltipContent>
-                          </Tooltip>
-                        ) : null}
-                      </div>
-                    ) : undefined}
-                  />
                   <HarnessThreadMarkers cwd={cwd} entryId={entry.id} />
                 </article>
               );
@@ -1446,9 +1387,61 @@ export const PiTimelineEntryList: React.FC<Omit<
             </article>
           );
         })()}
-        {!usageEntryId ? (
-          <PiTurnUsageFooter entries={entries} liveAssistant={liveAssistant} outputDurationsMs={outputDurationsMs} />
-        ) : null}
+        <PiTurnUsageFooter
+          entries={entries}
+          liveAssistant={projection.liveAssistant}
+          outputDurationsMs={outputDurationsMs}
+          actions={turnText ? (
+            <div className="flex h-6 shrink-0 items-center">
+              <Tooltip>
+                <TooltipTrigger asChild>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      void copyTextToClipboard(turnText).then((result) => {
+                        if (result.ok) toast.success(t('sessions.sidebar.session.menu.copied'));
+                        else toast.error(result.error);
+                      });
+                    }}
+                    className="flex size-6 items-center justify-center rounded text-muted-foreground hover:bg-interactive-hover hover:text-foreground"
+                    aria-label={t('chat.messageBody.actions.copyAnswer')}
+                  >
+                    <Icon name="file-copy" className="size-3.5" />
+                  </button>
+                </TooltipTrigger>
+                <TooltipContent side="bottom">{t('chat.messageBody.actions.copyAnswer')}</TooltipContent>
+              </Tooltip>
+              <RememberKnowledgeButton content={turnText} kind="turn:assistant" />
+              {actionEntry && onOpenThread ? (
+                <OpenThreadButton
+                  busy={threadBusyEntryId === actionEntry.id}
+                  disabled={threadBusyEntryId !== null && threadBusyEntryId !== undefined}
+                  entry={actionEntry}
+                  onOpen={onOpenThread}
+                />
+              ) : null}
+              {actionEntry && onFork ? (
+                <Tooltip>
+                  <TooltipTrigger asChild>
+                    <button
+                      type="button"
+                      onClick={() => onFork(actionEntry)}
+                      disabled={forkBusyEntryId !== null && forkBusyEntryId !== undefined}
+                      className="flex size-6 items-center justify-center rounded text-muted-foreground hover:bg-interactive-hover hover:text-foreground disabled:opacity-50"
+                      aria-label={t('chat.messageBody.actions.forkAria')}
+                    >
+                      <Icon
+                        name={forkBusyEntryId === actionEntry.id ? 'loader-4' : 'git-branch'}
+                        className={cn('size-3.5', forkBusyEntryId === actionEntry.id && 'animate-spin')}
+                      />
+                    </button>
+                  </TooltipTrigger>
+                  <TooltipContent side="bottom">{t('chat.messageBody.actions.fork')}</TooltipContent>
+                </Tooltip>
+              ) : null}
+            </div>
+          ) : undefined}
+        />
     </div>
     </PiToolDisclosureScope>
   );
