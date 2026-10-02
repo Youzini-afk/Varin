@@ -454,7 +454,7 @@ export const createHarnessRouter = (options: HarnessRouterOptions) => {
         if (!authorized) {
           await respond({
             ok: false,
-            error: harnessError("forbidden", "Harness path is outside the actor workspace"),
+            error: harnessError("forbidden", "Path could not be authorized for this operation; check the actor's explicit resource scope and the Host resource resolver"),
           });
           return;
         }

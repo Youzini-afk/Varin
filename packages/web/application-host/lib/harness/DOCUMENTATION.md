@@ -1,8 +1,16 @@
 # Agent Harness — Host Side
 
-The host-side harness provides workspace-scoped services that the pi-host
+The host-side harness provides task and resource services that the pi-host
 agent tools call via the `HostServicesBridge`. All services are registered
 on the `HarnessRouter` and dispatched from the broker event stream.
+
+A session's project binding supplies organization and a default directory, not a filesystem
+boundary. Bound and unbound sessions can read/write explicit external paths and execute with an
+external `cwd` through the same path authority. External directories need no prior project
+registration; Documents resource roots are internal addressing records. Explicit actor scopes,
+Host deployment boundaries and normal operation permissions still apply. An explicit command cwd
+does not change the session default. Native acceptance covers cross-root writes/rereads and a
+permission-inspected external command followed by a command at the original default directory.
 
 ## Architecture
 

@@ -214,7 +214,7 @@ function createPermissionInspectService(host: HarnessServiceHost): HarnessServic
   return {
     handle: async (params, ctx) => {
       const cwd = ctx.authorizedPaths[0];
-      if (!cwd) throw new HarnessServiceError("forbidden", "Permission cwd is outside the actor workspace");
+      if (!cwd) throw new HarnessServiceError("forbidden", "Permission inspection has no authorized working directory");
       const executionTargets = params.threadScopes
         .filter((scope) => scope.startsWith("execution-target:"))
         .map((scope) => scope.slice("execution-target:".length));

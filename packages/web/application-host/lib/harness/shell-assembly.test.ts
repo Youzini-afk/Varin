@@ -2,10 +2,11 @@ import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, statSync } fr
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, describe, expect, it, vi } from "vitest";
-import type { HarnessActorContext, HarnessActorIdentity } from "@varin/protocol";
+import type { HarnessActorContext, HarnessActorIdentity, HarnessServiceMap } from "@varin/protocol";
+import { createDocumentAuthority } from "../documents/authority.js";
 import { createHarnessPathAuthority } from "./path-authority.js";
-import { createShellExecService } from "./harness-services.js";
-import type { HarnessServiceContext } from "./router.js";
+import { createShellExecService, registerHarnessServices } from "./harness-services.js";
+import { createHarnessRouter, type HarnessServiceContext } from "./router.js";
 import { createIsolatedTerminalSessionApi } from "../terminal/isolated-session-api.test-helper.js";
 import { discoverShells } from "./shell-discovery.js";
 import { createHarnessServiceHost } from "./service-host.js";
@@ -71,6 +72,56 @@ afterEach(async () => {
 });
 
 describe("production shell assembly", () => {
+  nativeAuthorityIt("authorizes and executes an external cwd without changing the bound session's default", async () => {
+    const root = mkdtempSync(join(tmpdir(), "shell-external-cwd-"));
+    dirs.push(root);
+    const project = join(root, "project");
+    const external = join(root, "external directory");
+    mkdirSync(project); mkdirSync(external);
+    const documents = createDocumentAuthority({ hostId: "host", dataDir: join(root, "data"),
+      isAllowedRoot: async () => true, isTrusted: async () => true });
+    const { workspaceId } = await documents.resolveWorkspace({ path: project });
+    const pathAuthority = createHarnessPathAuthority({ authorityId: "host", documents });
+    const host = createHost({ search: async () => ({ status: "empty", generation: undefined }),
+      resolveWorkspaceRoot: async id => (await documents.inspectWorkspace(id)).root, pathAuthority });
+    const identity = actor("external-cwd-session");
+    host.registerSession({ actor: identity, grantedCapabilities: ["process.shell", "context.session"],
+      workspaceId, workspaceRoot: project, shellSetting: process.platform === "win32" ? "powershell" : "auto" });
+    let response: unknown;
+    const router = createHarnessRouter({
+      resolveActor: current => host.resolveActor(current),
+      authorizeWorkspacePath: (current, input, options) => pathAuthority.resolve(current, input, options),
+      respond: async (_session, _request, result) => { response = result; },
+    });
+    registerHarnessServices(router, host);
+    const request = async <M extends "permission.inspect" | "shell.exec">(method: M, params: HarnessServiceMap[M]["params"]) => {
+      await router.processEvent({ kind: "host", actor: identity, envelope: { kind: "event", event: "harness.request",
+        data: { requestId: crypto.randomUUID(), method, params } } });
+      return response as { ok: boolean; result?: HarnessServiceMap[M]["result"]; error?: { message: string } };
+    };
+    try {
+      const inspected = await request("permission.inspect", { tool: "bash", source: { kind: "harness", id: "harness:bash" },
+        action: "process", cwd: project, paths: [external], networkTargets: [], threadScopes: [], evidenceComplete: true });
+      expect(inspected, JSON.stringify(inspected)).toMatchObject({ ok: true });
+      expect(inspected.result?.paths[0]?.workspaceId).not.toBe(workspaceId);
+      const command = process.platform === "win32"
+        ? "Set-Content -LiteralPath 'created.txt' -Value 'external-command'"
+        : "printf 'external-command\\n' > created.txt";
+      const executed = await request("shell.exec", { command, cwd: external, waitMs: 10_000 });
+      expect(executed, JSON.stringify(executed)).toMatchObject({ ok: true, result: { kind: "completed", exitCode: 0 } });
+      expectCwd(executed.result, external);
+      expect(readFileSync(join(external, "created.txt"), "utf8").trim()).toBe("external-command");
+      expect(existsSync(join(project, "created.txt"))).toBe(false);
+      const next = await request("shell.exec", { command: "echo default-cwd", waitMs: 10_000 });
+      expect(next, JSON.stringify(next)).toMatchObject({ ok: true, result: { kind: "completed", exitCode: 0 } });
+      expectCwd(next.result, project);
+      expect((await host.resolveActor(identity))?.workspaceId).toBe(workspaceId);
+    } finally {
+      router.dispose();
+      await documents.dispose();
+    }
+  });
+
   it("discovers once at Host construction and keeps workspace settings from crossing", async () => {
     const workspaceA = mkdtempSync(join(tmpdir(), "shell-a-"));
     const workspaceB = mkdtempSync(join(tmpdir(), "shell-b-"));
