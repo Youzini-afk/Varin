@@ -74,6 +74,12 @@ Sending arms the anchor before the optimistic row commits. Real wheel/touch/keyb
 automatic movement. Row measurement, list data changes, and Composer height changes are handled by the
 list/controller pair rather than independent effects.
 
+The footer keeps additional space available for manual scrolling. Automatic following measures the
+content edge before that spacer, including any compaction status row and the normal bottom padding.
+If the user scrolls into the extra space, the viewport stays put while new output fills it, then
+advances with the content edge. Return-to-latest targets that content edge; entry intents apply once
+per epoch, and the virtual list's physical-end following is disabled to avoid competing scroll writes.
+
 On session re-entry, a busy session, a session with unseen attention, or a session updated since its last
 view opens at the live edge. Otherwise Varin restores the last visible turn plus its viewport offset.
 

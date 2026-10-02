@@ -5,6 +5,7 @@ import {
   clearPiTimelineSubmissionAnchor,
   completePiTimelineReturn,
   getPiAnchoredTurnCorrection,
+  getPiTimelineFollowOffset,
   isPiTimelineAtEnd,
   isPiTimelineEntryCurrent,
   preparePiTimelineEntry,
@@ -79,6 +80,26 @@ describe('Pi timeline scroll state', () => {
   test('uses a device-pixel epsilon only at the live edge', () => {
     expect(isPiTimelineAtEnd(1000, 398, 600)).toBe(true);
     expect(isPiTimelineAtEnd(1000, 397, 600)).toBe(false);
+  });
+
+  test('follows content after it fills the manually revealed end space', () => {
+    // 1500px of content + 300px spacer in a 600px viewport. The user
+    // scrolls to the physical bottom, leaving all 300px visible below the text.
+    expect(getPiTimelineFollowOffset(1800, 1200, 600, 300)).toBe(1200);
+    expect(getPiTimelineFollowOffset(2000, 1200, 600, 300)).toBe(1200);
+    expect(getPiTimelineFollowOffset(2100, 1200, 600, 300)).toBe(1200);
+    expect(getPiTimelineFollowOffset(2150, 1200, 600, 300)).toBe(1250);
+    expect(getPiTimelineFollowOffset(2250, 1250, 600, 300)).toBe(1350);
+  });
+
+  test('treats the content edge and extra end space as the same following zone', () => {
+    expect(isPiTimelineAtEnd(1800, 900, 600, 300)).toBe(true);
+    expect(isPiTimelineAtEnd(1800, 1200, 600, 300)).toBe(true);
+    expect(isPiTimelineAtEnd(1800, 897, 600, 300)).toBe(false);
+    expect(getPiTimelineFollowOffset(500, 0, 600, 300)).toBe(0);
+    // A taller viewport or a collapsed block may open space; do not yank
+    // the current text down just to realign its end.
+    expect(getPiTimelineFollowOffset(1800, 1200, 800, 300)).toBe(1200);
   });
 
   test('keeps auto-follow ownership for no-op gestures toward the live edge', () => {

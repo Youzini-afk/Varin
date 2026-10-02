@@ -217,9 +217,18 @@ export const isPiTimelineAtEnd = (
   contentHeight: number,
   scrollOffset: number,
   viewportHeight: number,
+  endSpaceHeight = 0,
 ): boolean => (
-  contentHeight - (scrollOffset + viewportHeight) <= PI_TIMELINE_EDGE_EPSILON_PX
+  contentHeight - endSpaceHeight - (scrollOffset + viewportHeight) <= PI_TIMELINE_EDGE_EPSILON_PX
 );
+
+/** Leave manually revealed end space in place until new content fills it. */
+export const getPiTimelineFollowOffset = (
+  contentHeight: number,
+  scrollOffset: number,
+  viewportHeight: number,
+  endSpaceHeight: number,
+): number => Math.max(scrollOffset, 0, contentHeight - endSpaceHeight - viewportHeight);
 
 export type PiTimelineScrollIntent = 'toward-end' | 'away-from-end';
 

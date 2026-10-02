@@ -15,9 +15,11 @@ import { useUIStore } from '@/stores/useUIStore';
 import {
   DEFAULT_PI_TIMELINE_VIEW,
   getPiAnchoredTurnCorrection,
+  getPiTimelineFollowOffset,
   isPiTimelineAtEnd,
   isPiTimelineEntryCurrent,
   PI_TIMELINE_ANCHOR_OFFSET_PX,
+  PI_TIMELINE_EDGE_EPSILON_PX,
   shouldReleasePiTimelineFollow,
   type PiTimelineScrollIntent,
   type PiTimelineScrollMode,
@@ -219,6 +221,7 @@ export const PiTimeline: React.FC<PiTimelineProps> = (props) => {
   const isMobile = useUIStore((state) => state.isMobile);
   const onScrollContainerChange = props.onScrollContainerChange;
   const listRef = React.useRef<LegendListRef>(null);
+  const endSpaceRef = React.useRef<HTMLDivElement>(null);
   const projectionRef = React.useRef<PiTimelineProjection | undefined>(undefined);
   const projectionSessionRef = React.useRef(props.sessionId);
   if (projectionSessionRef.current !== props.sessionId) {
@@ -263,7 +266,7 @@ export const PiTimeline: React.FC<PiTimelineProps> = (props) => {
   const observedLeafIdRef = React.useRef<string | null | undefined>(timelineView.observedLeafId);
   const atEndRef = React.useRef(initialScrollAtEnd);
   const listLoadedRef = React.useRef(false);
-  const appliedEntryEpochRef = React.useRef(-1);
+  const appliedEntryRef = React.useRef<{ sessionId: string; epoch: number } | null>(null);
   const viewportFrameRef = React.useRef<number | null>(null);
   const anchorCorrectionFrameRef = React.useRef<number | null>(null);
   const followEndFrameRef = React.useRef<number | null>(null);
@@ -320,6 +323,28 @@ export const PiTimeline: React.FC<PiTimelineProps> = (props) => {
     }
   }, [captureViewport, onScrollContainerChange, props.sessionId, saveTimelineCheckpoint]);
 
+  const followContentEnd = React.useCallback(() => {
+    const list = listRef.current;
+    if (!list) return;
+    const state = list.getState();
+    const offset = getPiTimelineFollowOffset(
+      state.contentLength,
+      state.scroll,
+      state.scrollLength,
+      endSpaceRef.current?.getBoundingClientRect().height ?? 0,
+    );
+    if (offset - state.scroll > PI_TIMELINE_EDGE_EPSILON_PX) {
+      void list.scrollToOffset({ animated: false, offset });
+    }
+  }, []);
+
+  const scrollToContentEnd = React.useCallback((animated: boolean) => (
+    listRef.current?.scrollToEnd({
+      animated,
+      viewOffset: endSpaceRef.current?.getBoundingClientRect().height ?? 0,
+    })
+  ), []);
+
   const scheduleFollowEnd = React.useCallback(() => {
     if (followEndFrameRef.current !== null) return;
     followEndFrameRef.current = requestAnimationFrame(() => {
@@ -327,9 +352,9 @@ export const PiTimeline: React.FC<PiTimelineProps> = (props) => {
       if (!listLoadedRef.current) return;
       const current = usePiSessionStore.getState().records[props.sessionId]?.view;
       if (current?.scrollMode !== 'following-end') return;
-      void listRef.current?.scrollToEnd({ animated: false });
+      followContentEnd();
     });
-  }, [props.sessionId]);
+  }, [followContentEnd, props.sessionId]);
 
   React.useLayoutEffect(() => {
     if (!listLoadedRef.current) return;
@@ -340,21 +365,23 @@ export const PiTimeline: React.FC<PiTimelineProps> = (props) => {
     const list = listRef.current;
     if (!list) return;
     const current = usePiSessionStore.getState().records[props.sessionId]?.view;
+    const entryWasApplied = appliedEntryRef.current?.sessionId === props.sessionId;
     if (
       !current
       || current.entry.epoch !== timelineView.entry.epoch
       || !isPiTimelineEntryCurrent(current)
+      || (entryWasApplied && appliedEntryRef.current?.epoch === current.entry.epoch)
     ) return;
     if (
-      appliedEntryEpochRef.current >= 0
+      entryWasApplied
       && current.scrollMode === 'free-scrolling'
     ) return;
-    appliedEntryEpochRef.current = current.entry.epoch;
+    appliedEntryRef.current = { sessionId: props.sessionId, epoch: current.entry.epoch };
     const target = current.entry.target;
     if (target.kind === 'end') {
       atEndRef.current = true;
       observedLeafIdRef.current = props.leafId;
-      void list.scrollToEnd({ animated: false });
+      followContentEnd();
       return;
     }
     const index = projection.items.findIndex((item) => item.id === target.itemId);
@@ -362,7 +389,7 @@ export const PiTimeline: React.FC<PiTimelineProps> = (props) => {
       atEndRef.current = true;
       observedLeafIdRef.current = props.leafId;
       const token = requestTimelineReturn(props.sessionId);
-      void Promise.resolve(list.scrollToEnd({ animated: false }))
+      void Promise.resolve(scrollToContentEnd(false))
         .then(() => completeTimelineReturn(props.sessionId, token));
       return;
     }
@@ -375,10 +402,12 @@ export const PiTimeline: React.FC<PiTimelineProps> = (props) => {
     });
   }, [
     completeTimelineReturn,
+    followContentEnd,
     projection.items,
     props.leafId,
     props.sessionId,
     requestTimelineReturn,
+    scrollToContentEnd,
     timelineView.entry.epoch,
   ]);
 
@@ -471,6 +500,7 @@ export const PiTimeline: React.FC<PiTimelineProps> = (props) => {
       contentSize.height,
       contentOffset.y,
       layoutMeasurement.height,
+      endSpaceRef.current?.getBoundingClientRect().height ?? 0,
     );
     if (atEndRef.current && props.leafId !== undefined) {
       observedLeafIdRef.current = props.leafId;
@@ -488,9 +518,9 @@ export const PiTimeline: React.FC<PiTimelineProps> = (props) => {
   const handleReturnToLatest = React.useCallback(() => {
     const token = requestTimelineReturn(props.sessionId);
     if (token <= 0) return;
-    void Promise.resolve(listRef.current?.scrollToEnd({ animated: true }))
+    void Promise.resolve(scrollToContentEnd(true))
       .then(() => completeTimelineReturn(props.sessionId, token));
-  }, [completeTimelineReturn, props.sessionId, requestTimelineReturn]);
+  }, [completeTimelineReturn, props.sessionId, requestTimelineReturn, scrollToContentEnd]);
 
   const extraData = React.useMemo(() => ({
     assistantWaiting: props.assistantWaiting,
@@ -566,6 +596,7 @@ export const PiTimeline: React.FC<PiTimelineProps> = (props) => {
         </div>
       ) : null}
       <div
+        ref={endSpaceRef}
         aria-hidden="true"
         className={isMobile
           ? 'h-[clamp(7rem,24dvh,13rem)]'
@@ -594,8 +625,10 @@ export const PiTimeline: React.FC<PiTimelineProps> = (props) => {
         dataKey={props.sessionId}
         extraData={extraData}
         getItemType={(item) => item.kind}
-        initialScrollAtEnd={initialScrollAtEnd}
-        initialScrollIndex={initialScrollAtEnd ? undefined : {
+        initialScrollIndex={initialScrollAtEnd ? (projection.items.length ? {
+          index: projection.items.length - 1,
+          viewPosition: 1,
+        } : undefined) : {
           index: entryTargetIndex,
           viewOffset: timelineView.entry.target.kind === 'turn'
             ? timelineView.entry.target.offset
@@ -605,12 +638,7 @@ export const PiTimeline: React.FC<PiTimelineProps> = (props) => {
         itemsAreEqual={(previous, item) => previous === item}
         keyExtractor={(item) => item.id}
         ListFooterComponent={endBreathingSpace}
-        maintainScrollAtEnd={timelineView.scrollMode === 'following-end'
-          ? {
-              animated: false,
-              on: { dataChange: true, footerLayout: true, itemLayout: true, layout: true },
-            }
-          : false}
+        maintainScrollAtEnd={false}
         maintainVisibleContentPosition={timelineView.scrollMode === 'following-end'
           ? false
           : { data: true, size: true }}
@@ -622,6 +650,8 @@ export const PiTimeline: React.FC<PiTimelineProps> = (props) => {
           if (itemKey === timelineView.newTurn?.turnId) correctAnchoredTurn();
           if (modeRef.current === 'following-end') scheduleFollowEnd();
         }}
+        onLayout={scheduleFollowEnd}
+        onMetricsChange={scheduleFollowEnd}
         onKeyDownCapture={(event) => {
           if (PI_TIMELINE_SCROLL_KEYS.has(event.key) && !isInteractiveKeyTarget(event.target)) {
             releaseAutomationForIntent(piTimelineKeyIntent(event.key, event.shiftKey));

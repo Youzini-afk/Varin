@@ -1,12 +1,22 @@
-import React from 'react';
+import React, { act } from 'react';
+import { createRoot, type Root } from 'react-dom/client';
 import { renderToStaticMarkup } from 'react-dom/server';
-import { beforeEach, describe, expect, it, vi } from 'vitest';
+import { parseHTML } from 'linkedom';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import type { LegendListRef, NativeScrollEvent, NativeSyntheticEvent } from '@legendapp/list/react';
 import type { PiTimelineViewState } from '@/lib/pi-runtime/piTimelineScrollState';
+import { cancelPiTimelineAutomation, completePiTimelineReturn, requestPiTimelineReturn } from '@/lib/pi-runtime/piTimelineScrollState';
 import { PiTimeline } from './PiTimeline';
 
 interface MockLegendProps {
   ListFooterComponent?: React.ReactNode;
   contentContainerClassName?: string;
+  maintainScrollAtEnd?: unknown;
+  onItemSizeChanged?: (event: { itemKey: string }) => void;
+  onLayout?: () => void;
+  onLoad?: () => void;
+  onMetricsChange?: () => void;
+  onScroll?: (event: NativeSyntheticEvent<NativeScrollEvent>) => void;
   onWheelCapture?: (event: { ctrlKey: boolean; deltaY: number }) => void;
 }
 
@@ -29,13 +39,24 @@ const mocks = vi.hoisted(() => ({
   requestTimelineReturn: vi.fn(() => 1),
   saveTimelineCheckpoint: vi.fn(),
   storeState: null as unknown as MockStoreState,
+  listState: { contentLength: 1800, scroll: 1200, scrollLength: 600 },
+  scrollToOffset: vi.fn(),
+  scrollToEnd: vi.fn(),
+  scrollToIndex: vi.fn(),
 }));
 
 vi.mock('@legendapp/list/react', () => ({
-  LegendList: (props: MockLegendProps) => {
+  LegendList: React.forwardRef<LegendListRef, MockLegendProps>((props, ref) => {
     mocks.legendProps = props;
+    React.useImperativeHandle(ref, () => ({
+      getState: () => mocks.listState,
+      scrollToOffset: mocks.scrollToOffset,
+      scrollToEnd: mocks.scrollToEnd,
+      scrollToIndex: mocks.scrollToIndex,
+      getScrollableNode: () => null,
+    } as unknown as LegendListRef));
     return <div>{props.ListFooterComponent}</div>;
-  },
+  }),
 }));
 
 vi.mock('@/components/icon/Icon', () => ({ Icon: () => null }));
@@ -119,5 +140,138 @@ describe('PiTimeline scroll ownership', () => {
     renderTimeline(true);
     expect(mocks.legendProps?.contentContainerClassName).toContain('xl:pr-[24rem]');
     expect(mocks.legendProps?.contentContainerClassName).toContain('duration-200');
+  });
+
+  describe('streaming follow', () => {
+    let container: HTMLDivElement;
+    let root: Root;
+    let frames: Map<number, FrameRequestCallback>;
+    beforeEach(async () => {
+      const { document, window } = parseHTML('<html><body></body></html>');
+      vi.stubGlobal('document', document);
+      vi.stubGlobal('window', window);
+      vi.stubGlobal('IS_REACT_ACT_ENVIRONMENT', true);
+      frames = new Map();
+      let nextFrame = 0;
+      vi.stubGlobal('requestAnimationFrame', (callback: FrameRequestCallback) => {
+        frames.set(++nextFrame, callback);
+        return nextFrame;
+      });
+      vi.stubGlobal('cancelAnimationFrame', (id: number) => frames.delete(id));
+      mocks.listState = { contentLength: 1800, scroll: 1200, scrollLength: 600 };
+      mocks.scrollToOffset.mockImplementation(({ offset }: { offset: number }) => {
+        mocks.listState.scroll = offset;
+        return Promise.resolve();
+      });
+      mocks.scrollToEnd.mockResolvedValue(undefined);
+      mocks.cancelTimelineAutomation.mockImplementation(() => {
+        const record = mocks.storeState.records['session-1']!;
+        record.view = cancelPiTimelineAutomation(record.view);
+      });
+      mocks.requestTimelineReturn.mockImplementation(() => {
+        const record = mocks.storeState.records['session-1']!;
+        const requested = requestPiTimelineReturn(record.view);
+        record.view = requested.view;
+        return requested.token;
+      });
+      mocks.completeTimelineReturn.mockImplementation((_sessionId: string, token: number) => {
+        const record = mocks.storeState.records['session-1']!;
+        record.view = completePiTimelineReturn(record.view, token)!;
+      });
+      container = document.createElement('div');
+      document.body.append(container);
+      root = createRoot(container);
+      await render();
+      const spacer = container.querySelector<HTMLDivElement>('[data-pi-timeline-end-space]')!;
+      spacer.getBoundingClientRect = () => ({ height: 300 } as DOMRect);
+      await act(async () => mocks.legendProps!.onLoad!());
+    });
+    afterEach(async () => {
+      await act(async () => root.unmount());
+      vi.unstubAllGlobals();
+    });
+    const render = async () => act(async () => root.render(
+      <PiTimeline cwd="/workspace" entries={[]} sessionId="session-1" toolExecutions={{}} />,
+    ));
+    const flush = async () => act(async () => {
+      const callbacks = [...frames.values()];
+      frames.clear();
+      for (const callback of callbacks) callback(0);
+    });
+    const resizeContent = async (height: number) => {
+      mocks.listState.contentLength = height;
+      mocks.legendProps!.onItemSizeChanged!({ itemKey: 'streaming-turn' });
+      await render();
+      await flush();
+    };
+
+    it('keeps a manually revealed gap stationary until the response reaches the content edge', async () => {
+      expect(mocks.legendProps!.maintainScrollAtEnd).toBe(false);
+      await resizeContent(2000);
+      expect(mocks.scrollToOffset).not.toHaveBeenCalled();
+      expect(mocks.scrollToEnd).not.toHaveBeenCalled();
+      await resizeContent(2150);
+      expect(mocks.scrollToOffset).toHaveBeenLastCalledWith({ animated: false, offset: 1250 });
+      await resizeContent(2250);
+      expect(mocks.scrollToOffset).toHaveBeenLastCalledWith({ animated: false, offset: 1350 });
+      expect(mocks.scrollToEnd).not.toHaveBeenCalled();
+    });
+
+    it('keeps following when scrolling down from the content edge into the spacer', async () => {
+      mocks.legendProps!.onScroll!({ nativeEvent: {
+        contentOffset: { y: 900 }, contentSize: { height: 1800 }, layoutMeasurement: { height: 600 },
+      } } as NativeSyntheticEvent<NativeScrollEvent>);
+      mocks.legendProps!.onWheelCapture!({ ctrlKey: false, deltaY: 120 });
+      expect(mocks.cancelTimelineAutomation).not.toHaveBeenCalled();
+      mocks.legendProps!.onWheelCapture!({ ctrlKey: false, deltaY: -120 });
+      expect(mocks.cancelTimelineAutomation).toHaveBeenCalledOnce();
+      mocks.storeState.records['session-1']!.view.scrollMode = 'free-scrolling';
+      await resizeContent(2400);
+      expect(mocks.scrollToOffset).not.toHaveBeenCalled();
+    });
+
+    it('follows footer content and viewport resizes without restoring the spacer gap', async () => {
+      mocks.listState.scroll = 900;
+      mocks.listState.contentLength += 60;
+      mocks.legendProps!.onMetricsChange!();
+      await flush();
+      expect(mocks.scrollToOffset).toHaveBeenLastCalledWith({ animated: false, offset: 960 });
+      mocks.listState.scrollLength = 500;
+      mocks.legendProps!.onLayout!();
+      await flush();
+      expect(mocks.scrollToOffset).toHaveBeenLastCalledWith({ animated: false, offset: 1060 });
+    });
+
+    it('resumes following from manual end space without scrolling backward or toward the physical end', async () => {
+      mocks.cancelTimelineAutomation('session-1');
+      await render();
+      mocks.legendProps!.onScroll!({ nativeEvent: {
+        contentOffset: { y: 1200 }, contentSize: { height: 1800 }, layoutMeasurement: { height: 600 },
+      } } as NativeSyntheticEvent<NativeScrollEvent>);
+      await render();
+      await flush();
+      expect(mocks.storeState.records['session-1']!.view.scrollMode).toBe('following-end');
+      expect(mocks.scrollToOffset).not.toHaveBeenCalled();
+      expect(mocks.scrollToEnd).not.toHaveBeenCalled();
+      await resizeContent(2150);
+      expect(mocks.scrollToOffset).toHaveBeenLastCalledWith({ animated: false, offset: 1250 });
+    });
+
+    it('applies another session’s saved reading position even when its entry epoch matches', async () => {
+      mocks.storeState.records['session-2'] = {
+        toolExecutions: {}, assistantOutputDurationsMs: {},
+        view: {
+          generation: 0, scrollMode: 'free-scrolling',
+          entry: { epoch: 0, generation: 0, target: { kind: 'turn', itemId: 'turn:other-user', offset: -40 } },
+        },
+      };
+      await act(async () => root.render(
+        <PiTimeline cwd="/workspace" sessionId="session-2" toolExecutions={{}} entries={[{
+          id: 'other-user', type: 'message', parentId: null, timestamp: '1',
+          message: { role: 'user', content: 'Earlier question', timestamp: 1 },
+        }]} />,
+      ));
+      expect(mocks.scrollToIndex).toHaveBeenCalledWith({ animated: false, index: 0, viewOffset: -40, viewPosition: 0 });
+    });
   });
 });
