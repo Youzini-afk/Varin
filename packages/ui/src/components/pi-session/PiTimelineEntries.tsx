@@ -64,6 +64,7 @@ import {
 } from './piSortedTurnProjection';
 import { RememberKnowledgeButton } from './RememberKnowledgeButton';
 import { HarnessThreadMarkers } from './HarnessThreadMarkers';
+import { PiTurnUsageFooter } from './PiTurnUsageFooter';
 import { parseCompactionTraceDetails, PI_COMPACTION_TRACE_OPEN_EVENT } from '@/lib/pi-runtime/compactionTrace';
 
 export interface PiTimelineProps {
@@ -402,6 +403,43 @@ const ToolResultContent: React.FC<{
   );
 };
 
+// A tool keeps its disclosure choice when a live message becomes a persisted
+// entry, or when an adjacent read makes it part of a group. This cache belongs
+// to the mounted turn, never to execution state or the native session history.
+const ToolDisclosureContext = React.createContext<Map<string, boolean> | null>(null);
+
+const PiToolDisclosureScope: React.FC<{ children: React.ReactNode }> = ({ children }) => {
+  const [choices] = React.useState(() => new Map<string, boolean>());
+  return <ToolDisclosureContext.Provider value={choices}>{children}</ToolDisclosureContext.Provider>;
+};
+
+const PiToolDisclosure: React.FC<{
+  children: React.ReactNode;
+  className: string;
+  disclosureId: string;
+  initiallyExpanded?: boolean;
+}> = ({ children, className, disclosureId, initiallyExpanded = false }) => {
+  const choices = React.useContext(ToolDisclosureContext);
+  const [expanded, setExpanded] = React.useState(() => choices?.get(disclosureId) ?? initiallyExpanded);
+  return (
+    <details className={className} open={expanded} data-pi-tool-disclosure={disclosureId}
+      onToggle={(event) => {
+        const open = event.currentTarget.open;
+        choices?.set(disclosureId, open);
+        setExpanded(open);
+      }}>
+      {children}
+    </details>
+  );
+};
+
+const PiToolStatus: React.FC<{ status: PiToolExecutionState['status'] }> = ({ status }) => {
+  const { t } = useI18n();
+  return <span className={cn('shrink-0 typography-micro', status === 'success' && 'sr-only', status === 'error' && 'text-[var(--status-error)]')}>
+    {t(`chat.timeline.tools.${status}`)}
+  </span>;
+};
+
 const PiToolCard: React.FC<{
   call: PiToolCall;
   cwd: string;
@@ -453,28 +491,24 @@ const PiToolCard: React.FC<{
     ? String((call.arguments as Record<string, unknown>).command ?? '')
     : '';
   return (
-    <details
+    <PiToolDisclosure
+      disclosureId={`tool:${call.id}`}
       className={cn(
         'group',
         'my-1',
         status === 'error' && 'text-[var(--status-error)]',
       )}
-      open={status === 'running'}
     >
-      <summary className="flex cursor-pointer list-none items-center gap-2 rounded-xl px-1 py-1.5 typography-meta text-muted-foreground hover:bg-muted/25 [&::-webkit-details-marker]:hidden">
+      <summary className="flex min-w-0 cursor-pointer list-none items-center gap-2 rounded-md px-1 py-1.5 typography-meta text-muted-foreground hover:bg-muted/25 [&::-webkit-details-marker]:hidden">
         <Icon
           name={status === 'running' ? 'loader-4' : status === 'error' ? 'error-warning' : 'check'}
           className={cn(
             'size-3.5 shrink-0',
-            status === 'running' && 'animate-spin text-primary',
+            status === 'running' && 'animate-spin',
             status === 'error' && 'text-[var(--status-error)]',
-            status === 'success' && 'text-[var(--status-success)]',
           )}
         />
-        <span className="shrink-0 font-mono font-medium text-foreground">{call.name}</span>
-        {compactSummary && compactSummary !== call.name ? (
-          <span className="min-w-0 flex-1 truncate text-muted-foreground/85">· {compactSummary}</span>
-        ) : <span className="flex-1" />}
+        <span className="min-w-0 flex-1 truncate" title={`${call.name}: ${compactSummary || call.name}`}>{compactSummary || call.name}</span>
         {harnessShellId ? (
           <button
             type="button"
@@ -488,7 +522,7 @@ const PiToolCard: React.FC<{
             {t('chat.timeline.tools.openTerminal')}
           </button>
         ) : null}
-        <span className="typography-micro">{status}</span>
+        <PiToolStatus status={status} />
         <Icon name="arrow-down-s" className="size-3.5 text-muted-foreground transition-transform group-open:rotate-180" />
       </summary>
       <div className="ml-2 space-y-3 border-l border-border/60 py-2 pl-3">
@@ -568,7 +602,7 @@ const PiToolCard: React.FC<{
           </div>
         ) : null}
       </div>
-    </details>
+    </PiToolDisclosure>
   );
 };
 
@@ -578,35 +612,40 @@ const PiReadOnlyToolGroup: React.FC<{
   executionById: Record<string, PiToolExecutionState>;
   resultByCallId: ReadonlyMap<string, PiToolResultMessage>;
 }> = ({ calls, cwd, executionById, resultByCallId }) => {
+  const { t } = useI18n();
+  const disclosureChoices = React.useContext(ToolDisclosureContext);
   const states = calls.map((call) => {
     const result = resultByCallId.get(call.id);
     return result ? (result.isError ? 'error' : 'success') : executionById[call.id]?.status ?? 'running';
   });
-  const status = calls.some((call) => !resultByCallId.has(call.id))
-    ? 'running'
-    : states.includes('error') ? 'error' : 'success';
-  const first = calls[0]!;
-  const firstResult = resultByCallId.get(first.id);
-  const firstExecution = executionById[first.id];
-  const firstSummary = getToolSummary({
-    toolName: first.name,
-    arguments: first.arguments,
-    details: firstResult?.details ?? firstExecution?.result ?? firstExecution?.partialResult,
-  }).text;
+  const status = states.includes('running') ? 'running' : states.includes('error') ? 'error' : 'success';
+  const counts = { reads: 0, searches: 0, inspections: 0 };
+  for (const call of calls) {
+    const name = call.name.toLowerCase().replace(/:\d+$/, '');
+    if (name === 'read') counts.reads += 1;
+    else if (['grep', 'find', 'glob', 'websearch'].includes(name)) counts.searches += 1;
+    else counts.inspections += 1;
+  }
+  const summary = (Object.keys(counts) as (keyof typeof counts)[])
+    .filter((kind) => counts[kind] > 0)
+    .map((kind) => t(`chat.timeline.tools.${kind}`, { count: counts[kind] }))
+    .join(' · ');
   return (
-    <details className={cn('group/tools my-1', status === 'error' && 'text-[var(--status-error)]')} open={status === 'running'}>
-      <summary className="flex cursor-pointer list-none items-center gap-2 rounded-xl px-1 py-1.5 typography-meta text-muted-foreground hover:bg-muted/25 [&::-webkit-details-marker]:hidden">
+    <PiToolDisclosure disclosureId={`group:${calls[0]!.id}`}
+      initiallyExpanded={calls.some((call) => disclosureChoices?.get(`tool:${call.id}`))}
+      className="group/tools my-1">
+      <summary className="flex min-w-0 cursor-pointer list-none items-center gap-2 rounded-md px-1 py-1.5 typography-meta text-muted-foreground hover:bg-muted/25 [&::-webkit-details-marker]:hidden">
         <Icon
           name={status === 'running' ? 'loader-4' : status === 'error' ? 'error-warning' : 'check'}
           className={cn(
             'size-3.5 shrink-0',
-            status === 'running' && 'animate-spin text-primary',
+            status === 'running' && 'animate-spin',
             status === 'error' && 'text-[var(--status-error)]',
-            status === 'success' && 'text-[var(--status-success)]',
           )}
         />
-        <span className="min-w-0 flex-1 truncate">{firstSummary || first.name} · +{calls.length - 1}</span>
-        <span className="typography-micro">{status}</span>
+        <span className="min-w-0 flex-1 truncate" title={summary}>{summary}</span>
+        {status === 'running' && states.includes('error') ? <PiToolStatus status="error" /> : null}
+        <PiToolStatus status={status} />
         <Icon name="arrow-down-s" className="size-3.5 text-muted-foreground transition-transform group-open/tools:rotate-180" />
       </summary>
       <div className="ml-2 border-l border-border/60 py-1 pl-3">
@@ -621,7 +660,7 @@ const PiReadOnlyToolGroup: React.FC<{
           />
         ))}
       </div>
-    </details>
+    </PiToolDisclosure>
   );
 };
 
@@ -649,6 +688,41 @@ const PiThinkingBody: React.FC<{
   return <MarkdownRenderer content={content.thinking} messageId={messageId} variant="reasoning" />;
 };
 
+const PiToolSequence: React.FC<{
+  calls: PiToolCall[];
+  cwd: string;
+  executionById: Record<string, PiToolExecutionState>;
+  resultByCallId: ReadonlyMap<string, PiToolResultMessage>;
+}> = ({ calls, cwd, executionById, resultByCallId }) => {
+  const projected = groupToolCalls(calls.map((call) => ({
+    toolName: call.name,
+    toolCallId: call.id,
+    arguments: call.arguments,
+    details: resultByCallId.get(call.id)?.details
+      ?? executionById[call.id]?.result
+      ?? executionById[call.id]?.partialResult,
+  })));
+  const byId = new Map(calls.map((call) => [call.id, call]));
+  return <>{projected.map((group) => group.type === 'single' ? (
+    <PiToolCard
+      key={group.entry.toolCallId}
+      call={byId.get(group.entry.toolCallId)!}
+      cwd={cwd}
+      execution={executionById[group.entry.toolCallId]}
+      executionById={executionById}
+      result={resultByCallId.get(group.entry.toolCallId)}
+    />
+  ) : (
+    <PiReadOnlyToolGroup
+      key={`group:${group.entries[0]!.toolCallId}`}
+      calls={group.entries.map((entry) => byId.get(entry.toolCallId)!)}
+      cwd={cwd}
+      executionById={executionById}
+      resultByCallId={resultByCallId}
+    />
+  ))}</>;
+};
+
 const AssistantMessage: React.FC<{
   cwd: string;
   entryId: string;
@@ -667,41 +741,10 @@ const AssistantMessage: React.FC<{
         consecutive.push(message.content[index] as PiToolCall);
         index += 1;
       }
-      const projected = groupToolCalls(consecutive.map((call) => ({
-        toolName: call.name,
-        toolCallId: call.id,
-        arguments: call.arguments,
-        details: resultByCallId.get(call.id)?.details
-          ?? executionById[call.id]?.result
-          ?? executionById[call.id]?.partialResult,
-      })));
-      const byId = new Map(consecutive.map((call) => [call.id, call]));
-      for (const group of projected) {
-        if (group.type === 'single') {
-          const call = byId.get(group.entry.toolCallId)!;
-          rendered.push(
-            <PiToolCard
-              key={`${entryId}:tool:${call.id}`}
-              call={call}
-              cwd={cwd}
-              execution={executionById[call.id]}
-              executionById={executionById}
-              result={resultByCallId.get(call.id)}
-            />,
-          );
-        } else {
-          const calls = group.entries.map((entry) => byId.get(entry.toolCallId)!).filter(Boolean);
-          rendered.push(
-            <PiReadOnlyToolGroup
-              key={`${entryId}:tools:${calls[0]!.id}`}
-              calls={calls}
-              cwd={cwd}
-              executionById={executionById}
-              resultByCallId={resultByCallId}
-            />,
-          );
-        }
-      }
+      rendered.push(
+        <PiToolSequence key={`tools:${consecutive[0]!.id}`} calls={consecutive}
+          cwd={cwd} executionById={executionById} resultByCallId={resultByCallId} />,
+      );
       continue;
     }
       if (content.type === 'text') {
@@ -779,6 +822,8 @@ const PiSortedActivityGroup: React.FC<{
     item.streaming
     || (item.kind === 'tool' && executionById[item.call.id]?.status === 'running')
   ));
+  const failed = projection.activity.some((item) => item.kind === 'tool'
+    && (resultByCallId.get(item.call.id)?.isError || executionById[item.call.id]?.status === 'error'));
   const latest = projection.activity.at(-1);
   const latestLabel = latest?.kind === 'tool'
     ? latest.call.name
@@ -800,31 +845,36 @@ const PiSortedActivityGroup: React.FC<{
         aria-expanded={expanded}
       >
         <Icon
-          name={running ? 'loader-4' : 'check'}
+          name={running ? 'loader-4' : failed ? 'error-warning' : 'check'}
           className={cn(
             'size-3.5 shrink-0',
-            running ? 'animate-spin text-primary' : 'text-[var(--status-success)]',
+            running && 'animate-spin',
+            failed && 'text-[var(--status-error)]',
           )}
         />
         <span className="font-medium">{t('chat.piActivity.title')}</span>
         {latestLabel ? <span className="min-w-0 flex-1 truncate">· {latestLabel}</span> : <span className="flex-1" />}
+        {failed ? <PiToolStatus status="error" /> : null}
         <span className="typography-micro">{projection.activity.length}</span>
         <Icon name="arrow-down-s" className={cn('size-3.5 shrink-0 transition-transform', expanded && 'rotate-180')} />
       </button>
       {expanded ? (
         <div className="ml-2 space-y-2 border-l border-border py-2 pl-3">
-          {projection.activity.map((item) => {
+          {projection.activity.map((item, index) => {
+            if (item.kind === 'tool') {
+              if (projection.activity[index - 1]?.kind === 'tool') return null;
+              const calls: PiToolCall[] = [];
+              for (let next = index; next < projection.activity.length; next += 1) {
+                const candidate = projection.activity[next]!;
+                if (candidate.kind !== 'tool') break;
+                calls.push(candidate.call);
+              }
+              return <PiToolSequence key={item.id} calls={calls} cwd={cwd}
+                executionById={executionById} resultByCallId={resultByCallId} />;
+            }
             return (
               <React.Fragment key={item.id}>
-                {item.kind === 'tool' ? (
-                  <PiToolCard
-                    call={item.call}
-                    cwd={cwd}
-                    execution={executionById[item.call.id]}
-                    executionById={executionById}
-                    result={resultByCallId.get(item.call.id)}
-                  />
-                ) : item.kind === 'thinking' ? (
+                {item.kind === 'thinking' ? (
                   <div data-pi-activity-kind="thinking">
                     <div className="mb-1 flex items-center gap-1.5 typography-meta font-medium text-muted-foreground">
                       <Icon name="brain" className="size-3.5" />
@@ -1003,6 +1053,7 @@ export const PiTimelineEntryList: React.FC<Omit<
   PiTimelineProps,
   'assistantWaiting' | 'liveUser' | 'liveUserStatus'
 > & {
+  outputDurationsMs?: Readonly<Record<string, number>>;
   projectedResultByCallId?: ReadonlyMap<string, PiToolResultMessage>;
 }> = ({
   cwd,
@@ -1013,6 +1064,7 @@ export const PiTimelineEntryList: React.FC<Omit<
   onFork,
   onOpenThread,
   onRecover,
+  outputDurationsMs,
   projectedResultByCallId,
   recoveryBusyEntryId,
   sessionId,
@@ -1050,8 +1102,21 @@ export const PiTimelineEntryList: React.FC<Omit<
     [builtInEntries, chatRenderMode, projection.liveAssistant],
   );
   const resolvedThinkingLabel = hiddenThinkingLabel || t('chat.reasoningTrace.thinking');
+  // Keep the aggregate on the final native assistant message. Extension-owned
+  // or live-only answers retain a standalone footer instead of lending their
+  // usage to an earlier message's copy/fork controls.
+  const lastAssistantEntry = projection.visibleEntries.filter((entry) => (
+    entry.type === 'message' && entry.message.role === 'assistant'
+  )).at(-1);
+  const usageEntryId = !projection.liveAssistant && lastAssistantEntry
+    && !extensionEntries.has(lastAssistantEntry.id)
+    && (!sortedProjection || sortedProjection.answersBySourceId.has(lastAssistantEntry.id)
+      || sortedProjection.activityAnchorId === lastAssistantEntry.id)
+    ? lastAssistantEntry.id
+    : undefined;
 
   return (
+    <PiToolDisclosureScope key={sessionId}>
     <div className="flex flex-col gap-3">
         {projection.visibleEntries.map((entry) => {
           if (extensionEntries.has(entry.id)) {
@@ -1108,61 +1173,60 @@ export const PiTimelineEntryList: React.FC<Omit<
                       resultByCallId={resultByCallId}
                     />
                   ) : null}
-                  {displayedMessage && assistantText ? (
-                  <div className={cn(
-                    'flex h-6 items-center transition-opacity',
-                    'opacity-100',
-                  )}>
-                    {assistantText ? (
-                      <Tooltip>
-                        <TooltipTrigger asChild>
-                          <button
-                            type="button"
-                            onClick={() => {
-                              void copyTextToClipboard(assistantText).then((result) => {
-                                if (result.ok) toast.success(t('sessions.sidebar.session.menu.copied'));
-                                else toast.error(result.error);
-                              });
-                            }}
-                            className="flex size-6 items-center justify-center rounded text-muted-foreground hover:bg-interactive-hover hover:text-foreground"
-                            aria-label={t('chat.messageBody.actions.copyAnswer')}
-                          >
-                            <Icon name="file-copy" className="size-3.5" />
-                          </button>
-                        </TooltipTrigger>
-                        <TooltipContent side="bottom">{t('chat.messageBody.actions.copyAnswer')}</TooltipContent>
-                      </Tooltip>
-                    ) : null}
-                    {assistantText ? <RememberKnowledgeButton content={assistantText} kind="message:assistant" /> : null}
-                    {assistantText && onOpenThread ? (
-                      <OpenThreadButton
-                        busy={threadBusyEntryId === entry.id}
-                        disabled={threadBusyEntryId !== null && threadBusyEntryId !== undefined}
-                        entry={entry}
-                        onOpen={onOpenThread}
-                      />
-                    ) : null}
-                    {onFork ? (
-                    <Tooltip>
-                      <TooltipTrigger asChild>
-                        <button
-                          type="button"
-                          onClick={() => onFork(entry)}
-                          disabled={forkBusyEntryId !== null && forkBusyEntryId !== undefined}
-                          className="flex size-6 items-center justify-center rounded text-muted-foreground hover:bg-interactive-hover hover:text-foreground disabled:opacity-50"
-                          aria-label={t('chat.messageBody.actions.forkAria')}
-                        >
-                          <Icon
-                            name={forkBusyEntryId === entry.id ? 'loader-4' : 'git-branch'}
-                            className={cn('size-3.5', forkBusyEntryId === entry.id && 'animate-spin')}
+                  <PiTurnUsageFooter
+                    entries={entry.id === usageEntryId ? entries : []}
+                    outputDurationsMs={outputDurationsMs}
+                    actions={displayedMessage && assistantText ? (
+                      <div className="flex h-6 shrink-0 items-center">
+                        <Tooltip>
+                          <TooltipTrigger asChild>
+                            <button
+                              type="button"
+                              onClick={() => {
+                                void copyTextToClipboard(assistantText).then((result) => {
+                                  if (result.ok) toast.success(t('sessions.sidebar.session.menu.copied'));
+                                  else toast.error(result.error);
+                                });
+                              }}
+                              className="flex size-6 items-center justify-center rounded text-muted-foreground hover:bg-interactive-hover hover:text-foreground"
+                              aria-label={t('chat.messageBody.actions.copyAnswer')}
+                            >
+                              <Icon name="file-copy" className="size-3.5" />
+                            </button>
+                          </TooltipTrigger>
+                          <TooltipContent side="bottom">{t('chat.messageBody.actions.copyAnswer')}</TooltipContent>
+                        </Tooltip>
+                        <RememberKnowledgeButton content={assistantText} kind="message:assistant" />
+                        {onOpenThread ? (
+                          <OpenThreadButton
+                            busy={threadBusyEntryId === entry.id}
+                            disabled={threadBusyEntryId !== null && threadBusyEntryId !== undefined}
+                            entry={entry}
+                            onOpen={onOpenThread}
                           />
-                        </button>
-                      </TooltipTrigger>
-                      <TooltipContent side="bottom">{t('chat.messageBody.actions.fork')}</TooltipContent>
-                    </Tooltip>
-                    ) : null}
-                  </div>
-                  ) : null}
+                        ) : null}
+                        {onFork ? (
+                          <Tooltip>
+                            <TooltipTrigger asChild>
+                              <button
+                                type="button"
+                                onClick={() => onFork(entry)}
+                                disabled={forkBusyEntryId !== null && forkBusyEntryId !== undefined}
+                                className="flex size-6 items-center justify-center rounded text-muted-foreground hover:bg-interactive-hover hover:text-foreground disabled:opacity-50"
+                                aria-label={t('chat.messageBody.actions.forkAria')}
+                              >
+                                <Icon
+                                  name={forkBusyEntryId === entry.id ? 'loader-4' : 'git-branch'}
+                                  className={cn('size-3.5', forkBusyEntryId === entry.id && 'animate-spin')}
+                                />
+                              </button>
+                            </TooltipTrigger>
+                            <TooltipContent side="bottom">{t('chat.messageBody.actions.fork')}</TooltipContent>
+                          </Tooltip>
+                        ) : null}
+                      </div>
+                    ) : undefined}
+                  />
                   <HarnessThreadMarkers cwd={cwd} entryId={entry.id} />
                 </article>
               );
@@ -1382,6 +1446,10 @@ export const PiTimelineEntryList: React.FC<Omit<
             </article>
           );
         })()}
+        {!usageEntryId ? (
+          <PiTurnUsageFooter entries={entries} liveAssistant={liveAssistant} outputDurationsMs={outputDurationsMs} />
+        ) : null}
     </div>
+    </PiToolDisclosureScope>
   );
 };

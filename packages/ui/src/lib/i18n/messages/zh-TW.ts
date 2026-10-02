@@ -4,6 +4,12 @@ import { settingsDict } from './zh-TW.settings';
 export const dict: Record<I18nKey, string> = {
   ...enDict,
   ...settingsDict,
+  'chat.timeline.tools.reads': "讀取 {count} 次",
+  'chat.timeline.tools.searches': "搜尋 {count} 次",
+  'chat.timeline.tools.inspections': "檢查 {count} 次",
+  'chat.timeline.tools.running': "進行中",
+  'chat.timeline.tools.error': "失敗",
+  'chat.timeline.tools.success': "已完成",
   'tasksHub.create': "建立",
   'tasksHub.all': "全部",
   'tasksHub.enabled': "已啟用",

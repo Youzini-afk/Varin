@@ -117,9 +117,22 @@ accessory stack. There is no independent bar for each feature.
 - A user prompt is the visual turn anchor and may stick at the top on desktop; mobile uses normal flow.
 - One assistant header identifies the turn. The actual provider/model appears once; trustworthy tool and
   token facts appear in the footer. Varin does not infer a fake duration from Pi's request-start timestamp.
-- Each completed assistant message may show the exact positive usage fields Pi reported: input, output,
+- Each completed turn aggregates the exact positive usage fields Pi reported: input, output,
   reasoning, cache read, cache write, optional one-hour cache write, and the provider-owned total. Missing
-  or all-zero usage stays absent; Varin does not reconstruct unsupported fields or sum a turn into context use.
+  or all-zero usage stays absent; these cumulative request totals do not represent current context use.
+  The final built-in assistant message places its actions on the left and the turn's statistics on the
+  right of one wrapping row. Earlier messages keep their own actions. A live-only or extension-owned
+  terminal answer retains standalone statistics, without attaching them to an earlier message.
+- Conversation prose defaults to 16px with pixel-rounded 1.75 line height, 12px paragraph spacing and
+  distinct heading/list spacing. The 48rem reading column and explicit wide layout remain available;
+  code, tools and reasoning retain their compact presentation. Built-in sans-serif stacks include
+  Chinese system-font fallbacks while honoring the user's selected font and scale.
+- Built-in tool calls start as compact disclosure rows, including while running. Consecutive known
+  read-only calls show read/search/inspection counts in either presentation mode; writes and unknown
+  tools remain separate. Calls never group across intervening text or thinking. Success stays neutral,
+  while failures remain visible even when another call in the group is still running. Explicit disclosure
+  choices survive a live-to-persisted message handoff within the mounted turn, and are not reset by status
+  changes. Extension tool renderers retain ownership of their presentation.
 - Before the first assistant entry arrives, the newest unanswered turn shows the session model and a neutral
   working animation. It is presentation state, not a fabricated assistant message or progress phase.
 - Chat presentation never changes Pi's live event transport. Live mode renders assistant text, thinking,

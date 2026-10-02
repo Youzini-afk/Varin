@@ -2,6 +2,12 @@ import { settingsDict } from './en.settings';
 
 export const dict = {
   ...settingsDict,
+  'chat.timeline.tools.reads': "Reads: {count}",
+  'chat.timeline.tools.searches': "Searches: {count}",
+  'chat.timeline.tools.inspections': "Inspections: {count}",
+  'chat.timeline.tools.running': "Running",
+  'chat.timeline.tools.error': "Failed",
+  'chat.timeline.tools.success': "Completed",
   'tasksHub.create': "Create",
   'tasksHub.all': "All",
   'tasksHub.enabled': "Enabled",

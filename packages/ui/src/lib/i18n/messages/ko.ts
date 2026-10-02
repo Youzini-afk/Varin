@@ -4,6 +4,12 @@ import { settingsDict } from './ko.settings';
 export const dict: Record<I18nKey, string> = {
   ...enDict,
   ...settingsDict,
+  'chat.timeline.tools.reads': "읽기 {count}회",
+  'chat.timeline.tools.searches': "검색 {count}회",
+  'chat.timeline.tools.inspections': "확인 {count}회",
+  'chat.timeline.tools.running': "실행 중",
+  'chat.timeline.tools.error': "실패",
+  'chat.timeline.tools.success': "완료",
   'tasksHub.create': "만들기",
   'tasksHub.all': "전체",
   'tasksHub.enabled': "활성화",

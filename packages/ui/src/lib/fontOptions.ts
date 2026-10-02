@@ -18,68 +18,70 @@ export interface FontOptionDefinition<T extends string> {
     source?: FontFaceSource;
 }
 
+const SYSTEM_SANS_STACK = '"SF Pro Text", -apple-system, BlinkMacSystemFont, "Segoe UI", "PingFang SC", "Microsoft YaHei UI", "Microsoft YaHei", system-ui, sans-serif';
+
 export const UI_FONT_OPTIONS: FontOptionDefinition<UiFontOption>[] = [
     {
         id: 'inter',
         label: 'Inter',
         description: 'Modern UI sans with excellent readability at small sizes.',
-        stack: '"Inter", "SF Pro Text", -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif',
+        stack: `"Inter", ${SYSTEM_SANS_STACK}`,
         source: { family: 'Inter', packageName: '@fontsource/inter', filePrefix: 'inter', weights: [400, 500, 600] }
     },
     {
         id: 'geist-sans',
         label: 'Geist Sans',
         description: 'Crisp sans-serif with a technical interface feel.',
-        stack: '"Geist Sans", "SF Pro Text", -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif',
+        stack: `"Geist Sans", ${SYSTEM_SANS_STACK}`,
         source: { family: 'Geist Sans', packageName: '@fontsource/geist-sans', filePrefix: 'geist-sans', weights: [400, 500, 600] }
     },
     {
         id: 'atkinson-hyperlegible',
         label: 'Atkinson Hyperlegible',
         description: 'Accessibility-focused sans-serif optimized for character distinction.',
-        stack: '"Atkinson Hyperlegible", "SF Pro Text", -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif',
+        stack: `"Atkinson Hyperlegible", ${SYSTEM_SANS_STACK}`,
         source: { family: 'Atkinson Hyperlegible', packageName: '@fontsource/atkinson-hyperlegible', filePrefix: 'atkinson-hyperlegible', weights: [400, 700] }
     },
     {
         id: 'source-sans-3',
         label: 'Source Sans 3',
         description: 'Adobe sans-serif tuned for clean, readable interfaces.',
-        stack: '"Source Sans 3", "SF Pro Text", -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif',
+        stack: `"Source Sans 3", ${SYSTEM_SANS_STACK}`,
         source: { family: 'Source Sans 3', packageName: '@fontsource/source-sans-3', filePrefix: 'source-sans-3', weights: [400, 500, 600] }
     },
     {
         id: 'roboto',
         label: 'Roboto',
         description: 'Familiar Material-style sans-serif with broad UI usage.',
-        stack: '"Roboto", "SF Pro Text", -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif',
+        stack: `"Roboto", ${SYSTEM_SANS_STACK}`,
         source: { family: 'Roboto', packageName: '@fontsource/roboto', filePrefix: 'roboto', weights: [400, 500, 600] }
     },
     {
         id: 'noto-sans',
         label: 'Noto Sans',
         description: 'Readable sans-serif with strong international coverage.',
-        stack: '"Noto Sans", "SF Pro Text", -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif',
+        stack: `"Noto Sans", ${SYSTEM_SANS_STACK}`,
         source: { family: 'Noto Sans', packageName: '@fontsource/noto-sans', filePrefix: 'noto-sans', weights: [400, 500, 600] }
     },
     {
         id: 'dm-sans',
         label: 'DM Sans',
         description: 'Modern product UI sans-serif with friendly proportions.',
-        stack: '"DM Sans", "SF Pro Text", -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif',
+        stack: `"DM Sans", ${SYSTEM_SANS_STACK}`,
         source: { family: 'DM Sans', packageName: '@fontsource/dm-sans', filePrefix: 'dm-sans', weights: [400, 500, 600] }
     },
     {
         id: 'manrope',
         label: 'Manrope',
         description: 'Polished geometric sans-serif for modern app interfaces.',
-        stack: '"Manrope", "SF Pro Text", -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif',
+        stack: `"Manrope", ${SYSTEM_SANS_STACK}`,
         source: { family: 'Manrope', packageName: '@fontsource/manrope', filePrefix: 'manrope', weights: [400, 500, 600] }
     },
     {
         id: 'system',
         label: 'System',
         description: 'Native operating system interface font.',
-        stack: '"SF Pro Text", -apple-system, BlinkMacSystemFont, "Segoe UI", system-ui, sans-serif'
+        stack: SYSTEM_SANS_STACK
     }
 ];
 

@@ -4,6 +4,12 @@ import { settingsDict } from './uk.settings';
 export const dict: Record<I18nKey, string> = {
   ...enDict,
   ...settingsDict,
+  'chat.timeline.tools.reads': "Читання: {count}",
+  'chat.timeline.tools.searches': "Пошуки: {count}",
+  'chat.timeline.tools.inspections': "Перевірки: {count}",
+  'chat.timeline.tools.running': "Виконується",
+  'chat.timeline.tools.error': "Помилка",
+  'chat.timeline.tools.success': "Завершено",
   'tasksHub.create': "Створити",
   'tasksHub.all': "Усі",
   'tasksHub.enabled': "Увімкнені",

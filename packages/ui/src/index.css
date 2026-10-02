@@ -987,6 +987,47 @@ html:not(.dark) .chat-scroll {
   margin-bottom: 0;
 }
 
+/* Conversation prose has a reading rhythm independent of compact tool output.
+   Round streamed line growth to whole pixels, as with the scroll controller's
+   other text surfaces. The default column remains 48rem; wide mode is explicit. */
+.chat-message-column .markdown-content:not(.markdown-tool):not(.markdown-reasoning) {
+  line-height: round(1.75em, 1px);
+}
+
+.chat-message-column .markdown-content:not(.markdown-tool):not(.markdown-reasoning) :is(ul, ol) {
+  margin-block: 0 var(--markdown-paragraph-spacing);
+  padding-left: 1.5em !important;
+}
+
+.chat-message-column .markdown-content:not(.markdown-tool):not(.markdown-reasoning) li + li {
+  margin-top: 0.375em;
+}
+
+.chat-message-column .markdown-content:not(.markdown-tool):not(.markdown-reasoning) li :is(ul, ol) {
+  margin-block: 0.375em;
+}
+
+.chat-message-column .markdown-content:not(.markdown-tool):not(.markdown-reasoning) :is(h1, h2, h3, h4, h5, h6) {
+  line-height: 1.4;
+  margin-block: 1.25em 0.5em;
+}
+
+.chat-message-column .markdown-content:not(.markdown-tool):not(.markdown-reasoning) h1 {
+  font-size: 1.375em;
+}
+
+.chat-message-column .markdown-content:not(.markdown-tool):not(.markdown-reasoning) h2 {
+  font-size: 1.25em;
+}
+
+.chat-message-column .markdown-content:not(.markdown-tool):not(.markdown-reasoning) h3 {
+  font-size: 1.125em;
+}
+
+.chat-message-column .markdown-content:not(.markdown-tool):not(.markdown-reasoning) code[data-markdown="inline-code"] {
+  font-size: 0.875em;
+}
+
 /* Tool cards (code size) and reasoning (meta size, dimmed) are intentionally
    compact — keep their paragraphs tight, matching prior behavior. */
 .markdown-content.markdown-tool p,

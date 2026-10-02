@@ -35,7 +35,7 @@ const UsageMetric: React.FC<{
   const formatted = formatNumber(value);
   return (
     <span
-      className="inline-flex items-center gap-1 tabular-nums"
+      className="inline-flex shrink-0 items-center gap-1 whitespace-nowrap tabular-nums"
       title={`${label}: ${formatted}`}
     >
       <Icon name={icon} className="size-3 shrink-0" />
@@ -51,7 +51,7 @@ export const PiAssistantUsageFooter: React.FC<{ tokensPerSecond?: number; usage:
   if (!presentation) return null;
   return (
     <footer
-      className="mt-2 flex flex-wrap items-center gap-x-2.5 gap-y-1 typography-micro text-muted-foreground/65"
+      className="ml-auto flex w-max max-w-full flex-wrap items-center justify-end gap-x-2.5 gap-y-1 typography-micro text-muted-foreground/65"
       aria-label={t('chat.messageUsage.label')}
       data-pi-assistant-usage="true"
       data-pi-turn-usage="true"
@@ -73,7 +73,7 @@ export const PiAssistantUsageFooter: React.FC<{ tokensPerSecond?: number; usage:
       ) : null}
       {tokensPerSecond !== undefined && Number.isFinite(tokensPerSecond) && tokensPerSecond > 0 ? (
         <span
-          className="inline-flex items-center gap-1 tabular-nums"
+          className="inline-flex shrink-0 items-center gap-1 whitespace-nowrap tabular-nums"
           title={`Output token rate: ${tokensPerSecond.toFixed(1)} Tok/s`}
         >
           <span aria-hidden="true">{tokensPerSecond.toFixed(1)} Tok/s</span>

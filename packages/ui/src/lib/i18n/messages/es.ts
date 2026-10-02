@@ -4,6 +4,12 @@ import { settingsDict } from './es.settings';
 export const dict: Record<I18nKey, string> = {
   ...enDict,
   ...settingsDict,
+  'chat.timeline.tools.reads': "Lecturas: {count}",
+  'chat.timeline.tools.searches': "Búsquedas: {count}",
+  'chat.timeline.tools.inspections': "Inspecciones: {count}",
+  'chat.timeline.tools.running': "En curso",
+  'chat.timeline.tools.error': "Error",
+  'chat.timeline.tools.success': "Completado",
   'tasksHub.create': "Crear",
   'tasksHub.all': "Todas",
   'tasksHub.enabled': "Activadas",

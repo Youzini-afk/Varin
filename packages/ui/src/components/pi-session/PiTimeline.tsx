@@ -40,7 +40,6 @@ import {
   type PiAssistantWaitingPresentation,
 } from './piAssistantWaiting';
 import { PiTurnAssistantChrome } from './PiTurnAssistantChrome';
-import { PiTurnUsageFooter } from './PiTurnUsageFooter';
 
 interface PiTimelineItemViewProps extends Omit<
   PiTimelineProps,
@@ -117,13 +116,13 @@ const PiTimelineItemView: React.FC<PiTimelineItemViewProps> = ({
           onFork={onFork}
           onOpenThread={onOpenThread}
           onRecover={onRecover}
+          outputDurationsMs={outputDurationsMs}
           projectedResultByCallId={item.resultByCallId}
           recoveryBusyEntryId={recoveryBusyEntryId}
           sessionId={sessionId}
           threadBusyEntryId={threadBusyEntryId}
           toolExecutions={toolExecutions}
         />
-        <PiTurnUsageFooter entries={[]} liveAssistant={item.message} outputDurationsMs={outputDurationsMs} />
       </div>
     );
   }
@@ -139,13 +138,13 @@ const PiTimelineItemView: React.FC<PiTimelineItemViewProps> = ({
           onFork={onFork}
           onOpenThread={onOpenThread}
           onRecover={onRecover}
+          outputDurationsMs={outputDurationsMs}
           projectedResultByCallId={item.resultByCallId}
           recoveryBusyEntryId={recoveryBusyEntryId}
           sessionId={sessionId}
           threadBusyEntryId={threadBusyEntryId}
           toolExecutions={toolExecutions}
         />
-        <PiTurnUsageFooter entries={[item.entry]} outputDurationsMs={outputDurationsMs} />
       </div>
     );
   }
@@ -184,13 +183,13 @@ const PiTimelineItemView: React.FC<PiTimelineItemViewProps> = ({
         onFork={onFork}
         onOpenThread={onOpenThread}
         onRecover={onRecover}
+        outputDurationsMs={outputDurationsMs}
         projectedResultByCallId={item.turn.resultByCallId}
         recoveryBusyEntryId={recoveryBusyEntryId}
         sessionId={sessionId}
         threadBusyEntryId={threadBusyEntryId}
         toolExecutions={toolExecutions}
       />
-        <PiTurnUsageFooter entries={turnEntries} liveAssistant={turn.liveAssistant} outputDurationsMs={outputDurationsMs} />
     </div>
   );
 };

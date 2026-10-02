@@ -1,5 +1,8 @@
-import React from 'react';
+import React, { act } from 'react';
 import { afterEach, describe, expect, test } from 'bun:test';
+import { vi } from 'vitest';
+import { parseHTML } from 'linkedom';
+import { createRoot } from 'react-dom/client';
 import { renderToStaticMarkup } from 'react-dom/server';
 import type { PiAssistantMessage, PiSessionEntry, Thread, ThreadRun } from '@varin/protocol';
 import type { RuntimeAPIs } from '@varin/application-client';
@@ -32,10 +35,13 @@ const liveAssistant: PiAssistantMessage = {
   },
 };
 
-const runtimeAPIs = { editor: undefined } as unknown as RuntimeAPIs;
+const runtimeAPIs = {
+  editor: undefined,
+  documents: { resolveWorkspace: async () => ({ workspaceId: 'workspace' }) },
+} as unknown as RuntimeAPIs;
 
 const renderTimeline = (
-  assistant: PiAssistantMessage = liveAssistant,
+  assistant: PiAssistantMessage | null = liveAssistant,
   entries: PiSessionEntry[] = [],
   onOpenThread?: (entry: Extract<PiSessionEntry, { type: 'message' }>, options: { carryBlocks: boolean }) => void,
   threads: HarnessThreadSnapshot[] = [],
@@ -70,7 +76,7 @@ const renderTimeline = (
             <PiTimelineEntryList
               cwd="C:\\workspace"
               entries={entries}
-              liveAssistant={assistant}
+              liveAssistant={assistant ?? undefined}
               onOpenThread={onOpenThread}
               sessionId="session"
               toolExecutions={{}}
@@ -159,9 +165,113 @@ describe('Pi timeline chat render mode', () => {
     };
 
     const markup = renderTimeline(assistant);
-    expect(markup).toContain('Searched TODO in src · +1');
+    expect(markup).toContain('Reads: 1 · Searches: 1');
     expect(markup).toContain('Edited src/a.ts');
     expect(markup).toContain('group/tools my-1');
+  });
+
+  test('puts the turn totals beside the terminal message actions without changing earlier message ownership', () => {
+    const entries: PiSessionEntry[] = ['step', 'answer'].map((id, index) => ({
+      type: 'message', id, parentId: index === 0 ? null : 'step', timestamp: String(index),
+      message: {
+        ...liveAssistant, timestamp: index, stopReason: index === 0 ? 'toolUse' : 'stop',
+        content: [{ type: 'text', text: index === 0 ? 'Checking the implementation.' : 'The answer.' }],
+        usage: { ...liveAssistant.usage, input: 100, output: 20, totalTokens: 120 },
+      },
+    }));
+    const { document } = parseHTML(renderTimeline(null, entries));
+    expect(document.querySelectorAll('[data-pi-turn-usage]').length).toBe(1);
+    const answerFooter = document.querySelector('#pi-entry-answer [data-pi-message-footer]')!;
+    expect(answerFooter.querySelector('[aria-label="Copy answer"]')).not.toBeNull();
+    expect(answerFooter.querySelector('[title="Input: 200"]')).not.toBeNull();
+    expect(answerFooter.querySelector('[title="Output: 40"]')).not.toBeNull();
+    const step = document.querySelector('#pi-entry-step')!;
+    expect(step.querySelector('[aria-label="Copy answer"]')).not.toBeNull();
+    expect(step.querySelector('[data-pi-turn-usage]')).toBeNull();
+
+    const noText = { ...entries[1], message: { ...liveAssistant, stopReason: 'stop', content: [],
+      usage: { ...liveAssistant.usage, input: 50, totalTokens: 50 } } } as PiSessionEntry;
+    const emptyAnswer = parseHTML(renderTimeline(null, [entries[0]!, noText])).document;
+    expect(emptyAnswer.querySelectorAll('[data-pi-turn-usage]').length).toBe(1);
+    expect(emptyAnswer.querySelector('#pi-entry-answer [title="Input: 150"]')).not.toBeNull();
+  });
+
+  test('keeps failures visible in a collapsed tool group while another call is still running in either mode', () => {
+    const assistant: PiAssistantMessage = { ...liveAssistant, content: [
+      { type: 'toolCall', id: 'read-failed', name: 'read', arguments: { path: 'a.ts' } },
+      { type: 'toolCall', id: 'read-running', name: 'read', arguments: { path: 'b.ts' } },
+    ] };
+    const entries: PiSessionEntry[] = [{
+      type: 'message', id: 'result', parentId: null, timestamp: 'now', message: {
+        role: 'toolResult', toolCallId: 'read-failed', toolName: 'read', timestamp: 3,
+        isError: true, content: [],
+      },
+    }];
+    for (const mode of ['live', 'sorted'] as const) {
+      useUIStore.setState({ chatRenderMode: mode, activityRenderMode: 'summary' });
+      const { document } = parseHTML(renderTimeline(assistant, entries));
+      const group = document.querySelector('[data-pi-tool-disclosure="group:read-failed"]')!;
+      expect(group.hasAttribute('open')).toBe(false);
+      expect(group.querySelector('summary')?.textContent).toContain('Failed');
+      expect(group.querySelector('summary')?.textContent).toContain('Running');
+    }
+    useUIStore.setState({ chatRenderMode: 'sorted', activityRenderMode: 'collapsed' });
+    const { document } = parseHTML(renderTimeline(assistant, entries));
+    expect(document.querySelector('[data-pi-sorted-activity] > button')?.textContent).toContain('Failed');
+  });
+
+  test('keeps the user disclosure choice across streaming updates, grouping and message persistence', async () => {
+    const { document, window } = parseHTML('<html><body></body></html>');
+    vi.stubGlobal('document', document);
+    vi.stubGlobal('window', window);
+    vi.stubGlobal('IS_REACT_ACT_ENVIRONMENT', true);
+    const container = document.createElement('div');
+    document.body.append(container);
+    const root = createRoot(container);
+    const firstCall = { type: 'toolCall' as const, id: 'read-1', name: 'read', arguments: { path: 'src/a.ts' } };
+    const secondCall = { ...firstCall, id: 'read-2', arguments: { path: 'src/b.ts' } };
+    const render = async (assistant: PiAssistantMessage | undefined, entries: PiSessionEntry[] = []) => {
+      await act(async () => root.render(
+        <RuntimeAPIContext.Provider value={runtimeAPIs}><I18nProvider>
+          <PiTimelineEntryList cwd="/workspace" entries={entries} liveAssistant={assistant}
+            sessionId="disclosure-test" toolExecutions={{}} />
+        </I18nProvider></RuntimeAPIContext.Provider>,
+      ));
+    };
+    const disclosure = (id: string) => container.querySelector<HTMLDetailsElement>(`[data-pi-tool-disclosure="${id}"]`)!;
+    // linkedom does not implement native <details> activation or toggle events.
+    const toggle = async (id: string, open: boolean) => {
+      await act(async () => {
+        const element = disclosure(id);
+        element.open = open;
+        element.dispatchEvent(new window.Event('toggle'));
+      });
+    };
+    try {
+      await render({ ...liveAssistant, content: [firstCall] });
+      expect(disclosure('tool:read-1').hasAttribute('open')).toBe(false);
+      await toggle('tool:read-1', true);
+      await render({ ...liveAssistant, content: [firstCall, secondCall] });
+      expect(disclosure('group:read-1').hasAttribute('open')).toBe(true);
+      expect(disclosure('tool:read-1').hasAttribute('open')).toBe(true);
+      const entries: PiSessionEntry[] = [{
+        type: 'message', id: 'saved-tools', parentId: null, timestamp: 'now',
+        message: { ...liveAssistant, stopReason: 'toolUse', content: [firstCall, secondCall] },
+      }, ...[firstCall, secondCall].map((call) => ({
+        type: 'message' as const, id: `result-${call.id}`, parentId: 'saved-tools', timestamp: 'now',
+        message: { role: 'toolResult' as const, toolCallId: call.id, toolName: call.name,
+          isError: false, timestamp: 3, content: [] },
+      }))];
+      await render(undefined, entries);
+      expect(disclosure('group:read-1').hasAttribute('open')).toBe(true);
+      expect(disclosure('tool:read-1').hasAttribute('open')).toBe(true);
+      await toggle('group:read-1', false);
+      await render({ ...liveAssistant, timestamp: 4, content: [] }, entries);
+      expect(disclosure('group:read-1').hasAttribute('open')).toBe(false);
+    } finally {
+      await act(async () => root.unmount());
+      vi.unstubAllGlobals();
+    }
   });
 
   test('persisted messages and tool results expose the scoped knowledge review action', () => {

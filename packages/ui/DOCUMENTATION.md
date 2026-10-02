@@ -127,7 +127,7 @@ the interface font when choosing a built-in palette. Custom themes may still sup
 and font overrides. Default buttons are solid actions; secondary/outline/ghost variants stay quiet,
 and selected chips use the theme's selection color. Menus use one border
 and a restrained shadow, inputs keep a visible border on hover, and keyboard focus must remain visible.
-UI labels use 14px, metadata 13px and small badges 12px at the default scale; body text stays 15px.
+UI labels use 14px, metadata 13px and small badges 12px at the default scale; Markdown body text uses 16px.
 
 The desktop Agent shell separates two titlebar controls in `ContextPanelControls`: double chevrons
 show/hide the right icon rail, and the panel icon toggles the last workspace panel directly. Rail

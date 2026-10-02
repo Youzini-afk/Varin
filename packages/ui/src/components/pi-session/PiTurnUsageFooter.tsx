@@ -7,6 +7,7 @@ import {
   aggregateAssistantUsage,
   assistantMessagesForTurn,
   assistantTokensPerSecond,
+  projectPiUsagePresentation,
 } from '@/lib/pi-runtime/usagePresentation';
 import { PiAssistantUsageFooter } from './PiAssistantUsageFooter';
 
@@ -19,17 +20,24 @@ const isPiAssistantTurnComplete = (
 };
 
 export const PiTurnUsageFooter: React.FC<{
+  actions?: React.ReactNode;
   entries: readonly PiSessionEntry[];
   liveAssistant?: PiAssistantMessage;
   outputDurationsMs?: Readonly<Record<string, number>>;
-}> = ({ entries, liveAssistant, outputDurationsMs }) => {
-  if (!isPiAssistantTurnComplete(entries, liveAssistant)) return null;
-  const usage = aggregateAssistantUsage(entries, liveAssistant);
-  if (!usage) return null;
+}> = ({ actions, entries, liveAssistant, outputDurationsMs }) => {
+  const usage = isPiAssistantTurnComplete(entries, liveAssistant)
+    ? aggregateAssistantUsage(entries, liveAssistant)
+    : undefined;
+  if (!projectPiUsagePresentation(usage) && !actions) return null;
   return (
-    <PiAssistantUsageFooter
-      tokensPerSecond={assistantTokensPerSecond(entries, liveAssistant, outputDurationsMs)}
-      usage={usage}
-    />
+    <div className="flex min-w-0 flex-wrap items-center gap-x-4 gap-y-1.5" data-pi-message-footer>
+      {actions}
+      {usage ? (
+        <PiAssistantUsageFooter
+          tokensPerSecond={assistantTokensPerSecond(entries, liveAssistant, outputDurationsMs)}
+          usage={usage}
+        />
+      ) : null}
+    </div>
   );
 };

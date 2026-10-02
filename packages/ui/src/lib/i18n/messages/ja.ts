@@ -4,6 +4,12 @@ import { settingsDict } from './ja.settings';
 export const dict: Record<I18nKey, string> = {
   ...enDict,
   ...settingsDict,
+  'chat.timeline.tools.reads': "読み取り {count} 件",
+  'chat.timeline.tools.searches': "検索 {count} 件",
+  'chat.timeline.tools.inspections': "確認 {count} 件",
+  'chat.timeline.tools.running': "実行中",
+  'chat.timeline.tools.error': "失敗",
+  'chat.timeline.tools.success': "完了",
   'tasksHub.create': "作成",
   'tasksHub.all': "すべて",
   'tasksHub.enabled': "有効",
