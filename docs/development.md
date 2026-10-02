@@ -165,7 +165,8 @@ Never patch a user's external installation or copy its native configuration into
 
 SDK upgrade checks exercise real native sessions: canonical system/context-edit projection, physical
 virtual-model routing, compaction worker scope, top-level and codemode child permissions/scheduling,
-native MCP status/config mutations and replacement by a user extension. Node/tsx runs these native SDK
+native MCP status/config mutations and replacement by a user extension, and atomic message-queue edits,
+promotion and delivery with grouped instructions/attachments. Node/tsx runs these native SDK
 fixtures; UI consumers use Vitest. Controlled local MCP/provider fixtures need no paid request or browser.
 Production packaging must include the Host patch directory and native QuickJS worker/WASM dependencies,
 and refresh `scripts/cloud-runtime.bun.lock` after the final dependency/patch change.

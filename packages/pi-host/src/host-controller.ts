@@ -42,6 +42,7 @@ import {
   type ThinkingLevel,
   type WireEnvelope,
   parseAgentInputContext,
+  parseQueuedMessageUpdate,
   type AgentInputContext,
   type HarnessEmbedItem,
   type HarnessEmbedParams,
@@ -137,6 +138,7 @@ const OUT_OF_BAND_METHODS = new Set([
   "session.reconcile",
   "agent.abort",
   "agent.queue.clear",
+  "agent.queue.update",
   "config.unwatch",
   "extension.ui.respond",
   "harness.respond",
@@ -1202,6 +1204,11 @@ export class HostController {
         ) };
       case "agent.queue.clear":
         return this.#sessionHost.clearQueue(readString(params, "sessionId"));
+      case "agent.queue.update": {
+        const update = parseQueuedMessageUpdate(params);
+        if (!update) throw new HostError("invalid_params", "Queue update is malformed");
+        return this.#sessionHost.updateQueue(update);
+      }
       case "agentProvider.list":
         return this.#sessionHost.listAgentProviders();
       case "agentProvider.action":

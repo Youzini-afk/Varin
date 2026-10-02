@@ -31,6 +31,7 @@ import {
 import type {
   HostEvent,
   HostEventData,
+  HostMethodParams,
   HostMethodResult,
   ImageAttachment,
   JsonValue,
@@ -912,6 +913,7 @@ export class SessionHost {
       cwd: this.runtime.cwd,
       features: readSessionFeatures(session.sessionManager),
       followUp: [...session.getFollowUpMessages()],
+      queuedMessages: session.getQueuedUserMessages(),
       followUpMode: session.followUpMode,
       harness: { context: this.#contextRuntimeState() },
       isCompacting: session.isCompacting || pendingActivity?.kind === "manualCompaction"
@@ -1439,9 +1441,12 @@ export class SessionHost {
     const previousContext = this.#inputContext;
     this.#inputContext = inputContext;
     try {
-      await this.#queueInstructions(instructions, "steer");
-      await this.session.steer(text, images === undefined ? undefined : toImages(images));
+      const message = await this.#instructionMessage(instructions, false);
+      const disposition = await this.session.steer(text, images === undefined ? undefined : toImages(images), {
+        beforeMessages: message ? [{ ...message, role: "custom", timestamp: Date.now() }] : [],
+      });
       await this.#commitInputContext(inputContext, previousContext);
+      if (disposition === "queued") await this.#resumeQueueIfIdle(this.session);
       return true;
     } catch (error) {
       this.#inputContext = previousContext;
@@ -1461,9 +1466,12 @@ export class SessionHost {
     const previousContext = this.#inputContext;
     this.#inputContext = inputContext;
     try {
-      await this.#queueInstructions(instructions, "followUp");
-      await this.session.followUp(text, images === undefined ? undefined : toImages(images));
+      const message = await this.#instructionMessage(instructions, false);
+      const disposition = await this.session.followUp(text, images === undefined ? undefined : toImages(images), {
+        beforeMessages: message ? [{ ...message, role: "custom", timestamp: Date.now() }] : [],
+      });
       await this.#commitInputContext(inputContext, previousContext);
+      if (disposition === "queued") await this.#resumeQueueIfIdle(this.session);
       return true;
     } catch (error) {
       this.#inputContext = previousContext;
@@ -1537,27 +1545,26 @@ export class SessionHost {
     instructions: string | undefined,
     deliverAs: "followUp" | "nextTurn" | "steer",
   ): Promise<void> {
+    const message = await this.#instructionMessage(instructions);
+    if (message) await this.session.sendCustomMessage(message, { deliverAs });
+  }
+
+  async #instructionMessage(instructions: string | undefined, deduplicate = true) {
     const sessionInstructions = await this.#sessionInstructions();
     const combined = [sessionInstructions, instructions]
       .filter((part) => part?.trim())
       .join("\n\n");
-    // Branch navigation and compaction can remove an earlier hidden message
-    // from the active model context. Deduplicate against that context rather
-    // than a process-local string that outlives the message it describes.
-    const active = activeCompactionMessages(this.session.sessionManager.buildSessionContext().messages);
-    const last = [...active].reverse().find((message) =>
-      message.role === "custom" && message.customType === VARIN_INSTRUCTIONS_MESSAGE_TYPE);
-    if (!combined && !last) return;
     const desired = combined || "Session instructions were cleared. Ignore earlier varin.instructions messages for this session.";
-    if (last && "content" in last && last.content === desired) return;
-    await this.session.sendCustomMessage(
-      {
-        content: desired,
-        customType: VARIN_INSTRUCTIONS_MESSAGE_TYPE,
-        display: false,
-      },
-      { deliverAs },
-    );
+    if (deduplicate) {
+      // Navigation/compaction can remove an earlier instruction. Use the active native context.
+      const active = activeCompactionMessages(this.session.sessionManager.buildSessionContext().messages);
+      const last = [...active].reverse().find((message) =>
+        message.role === "custom" && message.customType === VARIN_INSTRUCTIONS_MESSAGE_TYPE);
+      if (!combined && !last) return;
+      if (last && "content" in last && last.content === desired) return;
+    }
+    // Queued input carries its own instruction context: promotion/removal can change delivery order.
+    return { content: desired, customType: VARIN_INSTRUCTIONS_MESSAGE_TYPE, display: false };
   }
 
   /**
@@ -1743,6 +1750,33 @@ export class SessionHost {
       return result;
     } finally {
       this.#finishStoppableActivity(activity);
+    }
+  }
+
+  async updateQueue(params: HostMethodParams<"agent.queue.update">): Promise<HostMethodResult<"agent.queue.update">> {
+    this.assertSession(params.sessionId);
+    const session = this.session;
+    const status = session.updateQueuedUserMessage(params.id, params.revision, params.action, params.text);
+    if (status !== "updated" || params.action !== "steer") return { accepted: false, status };
+    await this.#resumeQueueIfIdle(session);
+    return { accepted: true, status };
+  }
+
+  async #resumeQueueIfIdle(session: AgentSession): Promise<void> {
+    // A run can settle between the surface's busy observation and native admission.
+    if (session.isIdle && session.agent.hasQueuedMessages()) {
+      let started = () => {};
+      const agentStarted = new Promise<void>((resolve) => { started = resolve; });
+      const unsubscribe = session.subscribe((event) => { if (event.type === "agent_start") started(); });
+      // Admission already succeeded. Report execution failure without inviting a duplicate submission.
+      const run = session.resumeQueuedMessages().catch((error) => this.#emit("host.error", {
+        code: "agent_run_failed", message: error instanceof Error ? error.message : String(error),
+      }));
+      try {
+        await Promise.race([agentStarted, run]);
+      } finally {
+        unsubscribe();
+      }
     }
   }
 

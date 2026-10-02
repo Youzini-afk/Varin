@@ -30,6 +30,7 @@ export * from "./harness-local-semantic.js";
 export * from "./permission-gate.js";
 
 export * from "./methods.js";
+export * from "./message-queue.js";
 export * from "./mcp.js";
 export * from "./provider.js";
 export * from "./runtime.js";

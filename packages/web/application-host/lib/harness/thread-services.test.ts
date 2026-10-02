@@ -881,6 +881,7 @@ describe("thread services", () => {
       features: { revision: 0, schemaVersion: 1 },
       followUp: [],
       followUpMode: "one-at-a-time",
+      queuedMessages: [],
       isCompacting: false,
       isStreaming: false,
       leafId: "entry-1",

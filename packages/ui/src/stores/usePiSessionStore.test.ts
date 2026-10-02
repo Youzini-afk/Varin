@@ -37,6 +37,7 @@ const snapshot = (sessionId: string, cwd = 'D:/work'): SessionSnapshot => ({
   features: { revision: 0, schemaVersion: 1 },
   followUp: [],
   followUpMode: 'all',
+  queuedMessages: [],
   isCompacting: false,
   isStreaming: false,
   leafId: null,
@@ -443,12 +444,18 @@ describe('Pi session event state', () => {
     const queued = reducePiAgentEvent(busy, {
       followUp: ['later'],
       steering: ['now'],
+      queuedMessages: [
+        { id: 'now', revision: 0, mode: 'steer', text: 'now', imageCount: 0 },
+        { id: 'later', revision: 0, mode: 'followUp', text: 'later', imageCount: 0 },
+      ],
       type: 'queue_update',
     });
     const settled = reducePiAgentEvent(queued, positionedAgentEvent({ type: 'agent_settled' }), 5_500);
     expect(repeatedStart.activityStartedAt).toBe(1_000);
     expect(queued.snapshot?.followUp).toEqual(['later']);
     expect(queued.snapshot?.steering).toEqual(['now']);
+    expect(queued.snapshot?.pendingMessageCount).toBe(2);
+    expect(queued.snapshot?.queuedMessages.map((message) => message.id)).toEqual(['now', 'later']);
     expect(settled.snapshot?.busy).toBe(false);
     expect(settled.activityStartedAt).toBeUndefined();
     expect(settled.settledActivityDurationMs).toBe(4_500);
@@ -713,6 +720,9 @@ describe('Pi session store', () => {
     const runtime = new FakeRuntime();
     runtime.handler = (method) => {
       if (method === 'agent.queue.clear') {
+        runtime.event('agent.event', { sessionId: 'session-a', event: {
+          type: 'queue_update', followUp: [], steering: [], queuedMessages: [],
+        } }, 'session-a');
         return { cleared: true, followUp: ['later'], steering: ['now'] };
       }
       throw new Error(`Unexpected ${method}`);
@@ -743,6 +753,35 @@ describe('Pi session store', () => {
     expect(store.getState().records['session-a']?.snapshot?.followUp).toEqual([]);
     expect(store.getState().records['session-a']?.snapshot?.pendingMessageCount).toBe(0);
     expect(store.getState().records['session-a']?.snapshot?.steering).toEqual([]);
+  });
+
+  test('a late clear acknowledgement cannot erase a newly queued message', async () => {
+    const runtime = new FakeRuntime();
+    const cleared = deferred<{ cleared: boolean; followUp: string[]; steering: string[] }>();
+    runtime.handler = (method) => {
+      if (method === 'agent.queue.clear') return cleared.promise;
+      throw new Error(`Unexpected ${method}`);
+    };
+    const store = createPiSessionStore(runtime);
+    store.setState({ records: { 'session-a': { extensionStates: {}, open: true, sessionId: 'session-a', snapshot: snapshot('session-a'), toolExecutions: {} } } });
+    const clearing = store.getState().clearQueue('session-a', 'runtime-a');
+    await flushAsync();
+    runtime.event('agent.event', { sessionId: 'session-a', event: { type: 'queue_update', followUp: ['new'], steering: [],
+      queuedMessages: [{ id: 'new', revision: 0, mode: 'followUp', text: 'new', imageCount: 1 }],
+    } }, 'session-a');
+    cleared.resolve({ cleared: true, followUp: ['old'], steering: [] });
+    await clearing;
+    expect(store.getState().records['session-a']?.snapshot?.queuedMessages[0]?.id).toBe('new');
+    expect(store.getState().records['session-a']?.snapshot?.pendingMessageCount).toBe(1);
+  });
+
+  test('queue controls cannot submit an old surface action to a different runtime', async () => {
+    const runtime = new FakeRuntime();
+    const store = createPiSessionStore(runtime);
+    runtime.switchTo('runtime-b');
+    await expect(store.getState().updateQueue({ sessionId: 'session-a', id: 'queued-a', revision: 0, action: 'steer' }, 'runtime-a')).rejects.toThrow();
+    await expect(store.getState().clearQueue('session-a', 'runtime-a')).rejects.toThrow();
+    expect(runtime.calls).toEqual([]);
   });
 
   test('loads, sorts, and splits the native catalog', async () => {

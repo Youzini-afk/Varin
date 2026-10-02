@@ -11,6 +11,7 @@ const snapshot = (sessionId: string): SessionSnapshot => ({
   features: { revision: 0, schemaVersion: 1 },
   followUp: [],
   followUpMode: "one-at-a-time",
+  queuedMessages: [],
   isCompacting: false,
   isStreaming: false,
   leafId: null,
@@ -23,6 +24,21 @@ const snapshot = (sessionId: string): SessionSnapshot => ({
 });
 
 describe("runtime dispatcher session launch projection", () => {
+  it("routes queue mutations by stable identity and validates the revision and edit body", async () => {
+    const calls: unknown[][] = [];
+    const broker = { requestForSession: async (...args: unknown[]) => {
+      calls.push(args); return { accepted: true, status: "updated" };
+    } } as unknown as PiRuntimeBroker;
+    const update = { sessionId: "session-1", id: "queue-2", revision: 0, action: "steer" };
+    await dispatchRuntimeRequest(broker, "agent.queue.update", update);
+    assert.deepEqual(calls, [["session-1", "agent.queue.update", update]]);
+    for (const invalid of [{ ...update, revision: -1 }, { ...update, revision: 1.5 },
+      { ...update, action: "edit" }, { ...update, action: "delete" }, { ...update, id: "" },
+      { ...update, text: "unexpected" }]) {
+      await assert.rejects(dispatchRuntimeRequest(broker, "agent.queue.update", invalid), { code: "invalid_params" });
+    }
+    assert.equal(calls.length, 1);
+  });
   it("routes immediate application to the exact session and requires a candidate identity", async () => {
     const calls: unknown[][] = [];
     const broker = { requestForSession: async (...args: unknown[]) => {

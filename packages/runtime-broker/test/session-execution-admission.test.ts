@@ -148,6 +148,19 @@ test("session execution admission precedes worker and agent execution and owns c
     assert.equal(admissions.at(-1)?.sessionId, created.sessionId);
     assert.deepEqual(admissions.at(-1)?.workspace, workspaceBinding);
 
+    const missingQueueEntry = await broker.requestForSession(created.sessionId, "agent.queue.update", {
+      sessionId: created.sessionId, id: "already-consumed", revision: 0, action: "steer",
+    });
+    assert.deepEqual(missingQueueEntry, { accepted: false, status: "missing" });
+    assert.equal(admissions.at(-1)?.method, "agent.queue.update");
+    assert.equal(activeLeases, 0, "a consumed queue identity must release its unused execution admission");
+
+    const admissionCount = admissions.length;
+    await broker.requestForSession(created.sessionId, "agent.queue.update", {
+      sessionId: created.sessionId, id: "already-consumed", revision: 0, action: "remove",
+    });
+    assert.equal(admissions.length, admissionCount, "removing pending input does not start a run");
+
     deny = true;
     await assert.rejects(
       broker.requestForSession(created.sessionId, "recovery.checkpoint.create", {
@@ -185,7 +198,8 @@ test("session execution admission precedes worker and agent execution and owns c
       sessionId: created.sessionId,
       text: "/admission-write",
     });
-    assert.equal(submitted.accepted, true);
+    assert.equal(submitted.accepted, false, "a handled extension command does not start a model run");
+    assert.match(await readFile(commandMarker, "utf8"), /executed\n$/);
     assert.equal(coordinatedCodeRuns, 0,
       "an already selected code focus does not need research workspace preparation");
 

@@ -62,6 +62,7 @@ it('continues the original session after Git/native archive, reclaim and restore
     sessionId, cwd, workspace: { authorityId: workspaceId, id: workspaceId, kind: 'workspace' },
     activeTools: ['read', 'edit'], busy: false, features: { revision: 0, schemaVersion: 1 },
     followUp: [], followUpMode: 'one-at-a-time', steering: [], steeringMode: 'all', leafId: null,
+    queuedMessages: [],
     isCompacting: false, isStreaming: false, pendingMessageCount: 0, retryAttempt: 0, thinkingLevel: 'off',
   });
   const stats: SessionStats = {

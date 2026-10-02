@@ -20,8 +20,9 @@ owner — while implementing them directly over Pi DTOs.
 
 - Pi's session JSONL and live worker remain the message/tree authority.
 - `usePiSessionStore` is the one renderer projection for every open, previewed, or optimistic session.
-- Pi's `followUp` and `steering` arrays are the only queue authority. The retained OpenChamber local
-  queue data model must not become a second queue.
+- Pi's Agent queues are the only pending-message authority. `queuedMessages` projects stable IDs,
+  revisions, delivery mode, text and image counts; `followUp`/`steering` remain text projections for
+  native consumers. The retained OpenChamber local queue data model must not become a second queue.
 - A read-only `session.entries.preview` result may make a cold session presentable but cannot accept a
   prompt, mutate the tree, or claim execution readiness.
 - Workbench extensions may replace the Composer, timeline, message, tool, and session-decoration
@@ -99,9 +100,16 @@ queue cap or start background workers merely to prefetch UI.
 - Idle Enter sends a new turn.
 - Busy Enter follows the selected Pi-native Queue or Steer behavior.
 - Stop is a separate action and remains available while a draft can be queued or steered.
-- Pi's authoritative queued/steering messages appear as typed rows above the Composer. Controls must map
-  to atomic Pi operations: Pi 0.84.3 supports clearing the queue as a whole, so Varin does not simulate
-  single-row editing or removal by clearing and racing messages back into the runtime.
+- Pi's queued/steering messages appear above the Composer. Settings select Queue (the default) or
+  Add to current task. Each queued row can send now, edit text in place while retaining images, or be
+  removed. Clear all remains available. Send now promotes the same accepted input to steering at Pi's
+  next input boundary; it does not abort tools. An idle queue can resume the native run.
+- The Pi 1.0 integration patches add atomic per-message mutation against ID and revision. User input
+  and its hidden instructions form one delivery unit, including in one-at-a-time mode. Consumed IDs
+  cannot be replayed, and stale edits cannot overwrite another change. Input hooks/templates run once
+  at admission; editing changes the displayed, already expanded text literally. Queue changes arrive
+  through native events, never renderer clear-and-requeue. An edit stays visible for copying if its
+  message is consumed while editing; a runtime/session change clears that local editor.
 - The Composer clears after a local submission transaction is committed, refocuses on desktop, and remains
   available for the next follow-up.
 - Up/Down recalls local sent drafts only when autocomplete is closed and the caret is at the appropriate

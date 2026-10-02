@@ -251,12 +251,12 @@ const WEEK_START_OPTIONS: Option<'auto' | 'monday' | 'sunday'>[] = [
 
 const FOLLOW_UP_BEHAVIOR_OPTIONS: Option<FollowUpBehavior>[] = [
     {
-        id: 'steer',
-        labelKey: 'settings.varin.visual.option.followUpBehavior.steer.label',
-    },
-    {
         id: 'queue',
         labelKey: 'settings.varin.visual.option.followUpBehavior.queue.label',
+    },
+    {
+        id: 'steer',
+        labelKey: 'settings.varin.visual.option.followUpBehavior.steer.label',
     },
 ];
 
@@ -1719,6 +1719,7 @@ export const VarinVisualSettings: React.FC<VarinVisualSettingsProps> = ({ visibl
                                     {shouldShow('followUpBehavior') && (
                                         <SettingsControlGroup
                                             title={t('settings.varin.visual.section.followUpBehavior')}
+                                            description={t('settings.varin.visual.field.followUpBehaviorDescription')}
                                             settingsItem="chat.follow-up-behavior"
                                         >
                                             <SettingsRadioGroup aria-label={t('settings.varin.visual.section.followUpBehaviorAria')}>

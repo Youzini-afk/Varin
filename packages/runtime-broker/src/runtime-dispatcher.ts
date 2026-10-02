@@ -23,6 +23,7 @@ import {
   type RuntimeMethodResult,
   type SessionWorkspaceBinding,
   parseAgentInputContext,
+  parseQueuedMessageUpdate,
   type AgentInputContext,
   isWorkFocusId,
   type WorkFocusId,
@@ -597,6 +598,11 @@ async function dispatchRuntimeRequestUnchecked(
     case "agent.queue.clear": {
       const sessionId = requireString(input, "sessionId");
       return broker.requestForSession(sessionId, "agent.queue.clear", { sessionId });
+    }
+    case "agent.queue.update": {
+      const update = parseQueuedMessageUpdate(input);
+      if (!update) throw new RuntimeDispatchError("invalid_params", "Queue update is malformed");
+      return broker.requestForSession(update.sessionId, "agent.queue.update", update);
     }
 
     case "agentProvider.list": {

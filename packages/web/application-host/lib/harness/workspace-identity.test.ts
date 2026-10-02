@@ -90,6 +90,7 @@ describe("owning vs execution workspace identity", () => {
       features: { revision: 0, schemaVersion: 1 },
       followUp: [],
       followUpMode: "one-at-a-time",
+      queuedMessages: [],
       steering: [],
       steeringMode: "all",
       leafId: null,

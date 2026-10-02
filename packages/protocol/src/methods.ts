@@ -179,6 +179,16 @@ export interface HostMethodMap {
     params: { sessionId: string };
     result: { published: boolean };
   };
+  "agent.queue.update": {
+    params: {
+      sessionId: string;
+      id: string;
+      revision: number;
+      action: "edit" | "remove" | "steer";
+      text?: string;
+    };
+    result: { accepted: boolean; status: "updated" | "missing" | "conflict" };
+  };
   "agent.queue.clear": {
     params: { sessionId: string };
     result: { cleared: boolean; followUp: string[]; steering: string[] };

@@ -55,7 +55,29 @@
          throw new MissingSessionCwdError(issue);
 --- a/dist/core/agent-session.d.ts
 +++ b/dist/core/agent-session.d.ts
-@@ -173,6 +173,7 @@
+@@ -43,6 +43,13 @@
+ } ? E & {
+     parentToolCallId?: string;
+ } : E;
++export interface QueuedUserMessage {
++    id: string;
++    revision: number;
++    mode: "steer" | "followUp";
++    text: string;
++    imageCount: number;
++}
+ /** Session-specific events that extend the core AgentEvent */
+ export type AgentSessionEvent = WithParentToolCallId<Exclude<AgentEvent, {
+     type: "agent_end";
+@@ -56,6 +63,7 @@
+     type: "queue_update";
+     steering: readonly string[];
+     followUp: readonly string[];
++    queuedMessages: QueuedUserMessage[];
+ } | {
+     type: "compaction_start";
+     reason: "manual" | "threshold" | "overflow";
+@@ -173,6 +181,7 @@
      source?: InputSource;
      /** Internal hook used by RPC mode to observe how an accepted prompt was dispatched. Not called if the prompt is rejected. */
      preflightResult?: (disposition: PromptDisposition) => void;
@@ -63,7 +85,20 @@
  }
  /** Options for model/thinking mutations. */
  export interface ModelMutationOptions {
-@@ -373,6 +374,7 @@
+@@ -216,10 +225,8 @@
+     private _agentRunAbortRequested;
+     private _idleWaitPromise;
+     private _resolveIdleWait;
+-    /** Tracks pending steering messages for UI display. Removed when delivered. */
+-    private _steeringMessages;
+-    /** Tracks pending follow-up messages for UI display. Removed when delivered. */
+-    private _followUpMessages;
++    /** UI identities only; pending content remains owned by the Agent's queues. */
++    private _queuedMessageIdentity;
+     /** Messages queued to be included with the next user prompt as context ("asides"). */
+     private _pendingNextTurnMessages;
+     /** Context-only custom messages queued during a run, flushed once the current turn's tool results are in. */
+@@ -373,6 +380,7 @@
      /** Current cache-warming state and the policy inputs that produced it. */
      get cacheWarmingStatus(): CacheWarmingStatus | undefined;
      /** Persist the cache-warming mode and immediately reconcile active warming. */
@@ -71,9 +106,56 @@
      setCacheWarmingMode(mode: CacheWarmingMode): void;
      /** Current model (may be undefined if not yet selected) */
      get model(): Model<any> | undefined;
+@@ -524,6 +532,7 @@
+      * @throws Error if text is an extension command
+      */
+     steer(text: string, images?: ImageContent[], options?: {
++        beforeMessages?: AgentMessage[];
+         source?: InputSource;
+     }): Promise<QueuedInputDisposition>;
+     /**
+@@ -535,6 +544,7 @@
+      * @throws Error if text is an extension command
+      */
+     followUp(text: string, images?: ImageContent[], options?: {
++        beforeMessages?: AgentMessage[];
+         source?: InputSource;
+     }): Promise<QueuedInputDisposition>;
+     /**
+@@ -589,6 +599,9 @@
+      * Useful for restoring to editor when user aborts.
+      * @returns Object with steering and followUp arrays
+      */
++    getQueuedUserMessages(): QueuedUserMessage[];
++    updateQueuedUserMessage(id: string, revision: number, action: "edit" | "remove" | "steer", text?: string): "updated" | "missing" | "conflict";
++    resumeQueuedMessages(): Promise<void>;
+     clearQueue(): {
+         steering: string[];
+         followUp: string[];
 --- a/dist/core/agent-session.js
 +++ b/dist/core/agent-session.js
-@@ -376,7 +376,7 @@
+@@ -12,6 +12,7 @@
+  *
+  * Modes use this class and add their own I/O layer on top.
+  */
++import { randomUUID } from "node:crypto";
+ import { readFileSync } from "node:fs";
+ import { basename, dirname } from "node:path";
+ import { runToolCall, } from "@earendil-works/pi-agent-core";
+@@ -90,10 +91,8 @@
+     _agentRunAbortRequested = false;
+     _idleWaitPromise;
+     _resolveIdleWait;
+-    /** Tracks pending steering messages for UI display. Removed when delivered. */
+-    _steeringMessages = [];
+-    /** Tracks pending follow-up messages for UI display. Removed when delivered. */
+-    _followUpMessages = [];
++    /** UI identities only; pending content remains owned by the Agent's queues. */
++    _queuedMessageIdentity = new WeakMap();
+     /** Messages queued to be included with the next user prompt as context ("asides"). */
+     _pendingNextTurnMessages = [];
+     /** Context-only custom messages queued during a run, flushed once the current turn's tool results are in. */
+@@ -376,7 +375,7 @@
          this._nestedToolCalls ??= new NestedToolCallRunner({
              getTools: () => this._getCallableTools(),
              isSequential: () => this.agent.toolExecution === "sequential",
@@ -82,7 +164,7 @@
                  const assistantMessage = this._findLastAssistantMessage();
                  if (!assistantMessage) {
                      return Promise.resolve({
-@@ -393,6 +393,7 @@
+@@ -393,6 +392,7 @@
                      afterToolCall: (context) => this._afterToolCall(context, parentId),
                      signal,
                      onUpdate,
@@ -90,7 +172,44 @@
                  });
              },
              emit: async (event) => {
-@@ -1010,6 +1011,9 @@
+@@ -642,8 +642,9 @@
+     _emitQueueUpdate() {
+         this._emit({
+             type: "queue_update",
+-            steering: [...this._steeringMessages],
+-            followUp: [...this._followUpMessages],
++            steering: [...this.getSteeringMessages()],
++            followUp: [...this.getFollowUpMessages()],
++            queuedMessages: this.getQueuedUserMessages(),
+         });
+     }
+     async _emitSessionCompactFailed(event) {
+@@ -713,23 +714,7 @@
+         // This ensures the UI sees the updated queue state
+         if (event.type === "message_start" && event.message.role === "user") {
+             this._overflowRecoveryAttempted = false;
+-            const messageText = contentText(event.message.content, "");
+-            if (messageText) {
+-                // Check steering queue first
+-                const steeringIndex = this._steeringMessages.indexOf(messageText);
+-                if (steeringIndex !== -1) {
+-                    this._steeringMessages.splice(steeringIndex, 1);
+-                    this._emitQueueUpdate();
+-                }
+-                else {
+-                    // Check follow-up queue
+-                    const followUpIndex = this._followUpMessages.indexOf(messageText);
+-                    if (followUpIndex !== -1) {
+-                        this._followUpMessages.splice(followUpIndex, 1);
+-                        this._emitQueueUpdate();
+-                    }
+-                }
+-            }
++            this._emitQueueUpdate();
+         }
+         // Emit to extensions first, then notify public listeners.
+         await this._emitExtensionEvent(event);
+@@ -1010,6 +995,9 @@
          return this._cacheWarmer?.status;
      }
      /** Persist the cache-warming mode and immediately reconcile active warming. */
@@ -100,7 +219,17 @@
      setCacheWarmingMode(mode) {
          this.settingsManager.setCacheWarmingMode(mode);
          this._cacheWarmer?.onModeChanged();
-@@ -1545,9 +1549,9 @@
+@@ -1351,7 +1339,8 @@
+         this._pendingToolNames.clear();
+         this._isAgentRunActive = true;
+         try {
+-            await this.agent.prompt(messages);
++            if (messages === undefined) await this.agent.continue();
++            else await this.agent.prompt(messages);
+             while (!this._agentRunAbortRequested) {
+                 if (await this._handlePostAgentRun()) {
+                     if (this._agentRunAbortRequested)
+@@ -1545,9 +1534,9 @@
          }
          // Check if we need to compact before sending (catches aborted responses).
          // The user's new prompt is sent below, so do not call agent.continue() here.
@@ -113,7 +242,162 @@
          }
          // Emit before_agent_start before normalizing images so extension-driven model
          // selection determines the resize profile used for the request and history.
-@@ -1871,6 +1875,7 @@
+@@ -1651,7 +1640,7 @@
+             return text; // Return original on error
+         }
+     }
+-    async _queueUserInput(text, images, behavior, source) {
++    async _queueUserInput(text, images, behavior, source, beforeMessages) {
+         if (text.startsWith("/")) {
+             this._throwIfExtensionCommand(text);
+         }
+@@ -1661,10 +1650,10 @@
+         let expandedText = this._expandSkillCommand(processedInput.text);
+         expandedText = expandPromptTemplate(expandedText, [...this.promptTemplates]);
+         if (behavior === "steer") {
+-            await this._queueSteer(expandedText, processedInput.images);
++            await this._queueSteer(expandedText, processedInput.images, beforeMessages);
+         }
+         else {
+-            await this._queueFollowUp(expandedText, processedInput.images);
++            await this._queueFollowUp(expandedText, processedInput.images, beforeMessages);
+         }
+         return "queued";
+     }
+@@ -1678,7 +1667,7 @@
+      * @throws Error if text is an extension command
+      */
+     async steer(text, images, options) {
+-        return this._queueUserInput(text, images, "steer", options?.source ?? "interactive");
++        return this._queueUserInput(text, images, "steer", options?.source ?? "interactive", options?.beforeMessages);
+     }
+     /**
+      * Queue a follow-up message to be processed after the agent finishes.
+@@ -1689,35 +1678,69 @@
+      * @throws Error if text is an extension command
+      */
+     async followUp(text, images, options) {
+-        return this._queueUserInput(text, images, "followUp", options?.source ?? "interactive");
++        return this._queueUserInput(text, images, "followUp", options?.source ?? "interactive", options?.beforeMessages);
+     }
+     /**
+      * Internal: Queue a steering message (already expanded, no extension command check).
+      */
+-    async _queueSteer(text, images) {
+-        this._steeringMessages.push(text);
++    async _queueSteer(text, images, beforeMessages) {
++        this._queueUserMessage(text, images, "steer", beforeMessages);
++    }
++    async _queueFollowUp(text, images, beforeMessages) {
++        this._queueUserMessage(text, images, "followUp", beforeMessages);
++    }
++    _queueUserMessage(text, images, behavior, beforeMessages) {
++        const content = [{ type: "text", text }, ...(images ?? [])];
++        this.agent[behavior]({ role: "user", content, timestamp: Date.now() }, beforeMessages);
+         this._emitQueueUpdate();
+-        const content = [{ type: "text", text }];
+-        if (images) {
+-            content.push(...images);
+-        }
+-        this.agent.steer({
+-            role: "user",
+-            content,
+-            timestamp: Date.now(),
+-        });
+-    }
+-    /**
+-     * Internal: Queue a follow-up message (already expanded, no extension command check).
+-     */
+-    async _queueFollowUp(text, images) {
+-        this._followUpMessages.push(text);
++    }
++    _queuedUserMessages() {
++        const queues = this.agent.getQueuedMessageBatches();
++        return [
++            ...queues.steering.flat().map((message) => ({ message, mode: "steer" })),
++            ...queues.followUp.flat().map((message) => ({ message, mode: "followUp" })),
++        ].filter(({ message }) => message.role === "user");
++    }
++    _queueIdentity(message) {
++        let identity = this._queuedMessageIdentity.get(message);
++        if (!identity) {
++            identity = { id: randomUUID(), revision: 0 };
++            this._queuedMessageIdentity.set(message, identity);
++        }
++        return identity;
++    }
++    getQueuedUserMessages() {
++        return this._queuedUserMessages().map(({ message, mode }) => ({
++            ...this._queueIdentity(message), mode,
++            text: contentText(message.content, ""),
++            imageCount: Array.isArray(message.content) ? message.content.filter((part) => part.type === "image").length : 0,
++        }));
++    }
++    updateQueuedUserMessage(id, revision, action, text) {
++        const entry = this._queuedUserMessages().find(({ message }) => this._queueIdentity(message).id === id);
++        if (!entry) return "missing";
++        const identity = this._queueIdentity(entry.message);
++        if (identity.revision !== revision) return "conflict";
++        if (!["edit", "remove", "steer"].includes(action)) throw new Error("Invalid queue action");
++        let replacement;
++        if (action === "edit") {
++            if (typeof text !== "string") throw new Error("Queue edit requires text");
++            const images = Array.isArray(entry.message.content) ? entry.message.content.filter((part) => part.type === "image") : [];
++            if (!text.trim() && images.length === 0) throw new Error("A queued message must contain text or an image");
++            // Input hooks/templates have already run on queue admission. Edit the displayed input literally.
++            replacement = { ...entry.message, content: [{ type: "text", text }, ...images] };
++        }
++        const updated = this.agent.updateQueuedMessage(entry.message, action === "remove" ? null
++            : action === "steer" ? { behavior: "steer" } : { message: replacement });
++        if (!updated) return "missing";
++        this._queuedMessageIdentity.set(replacement ?? entry.message, { id, revision: revision + 1 });
+         this._emitQueueUpdate();
+-        const content = [{ type: "text", text }];
+-        if (images) {
+-            content.push(...images);
+-        }
+-        this.agent.followUp({ role: "user", content, timestamp: Date.now() });
++        return "updated";
++    }
++    async resumeQueuedMessages() {
++        if (!this.isIdle || !this.agent.hasQueuedMessages()) return;
++        // Resume the accepted native input, retaining hooks, context, retry, and settlement ownership.
++        await this._runAgentPrompt(undefined);
+     }
+     /**
+      * Throw an error if the text is an extension command.
+@@ -1844,25 +1867,23 @@
+      * @returns Object with steering and followUp arrays
+      */
+     clearQueue() {
+-        const steering = [...this._steeringMessages];
+-        const followUp = [...this._followUpMessages];
+-        this._steeringMessages = [];
+-        this._followUpMessages = [];
++        const steering = [...this.getSteeringMessages()];
++        const followUp = [...this.getFollowUpMessages()];
+         this.agent.clearAllQueues();
+         this._emitQueueUpdate();
+         return { steering, followUp };
+     }
+     /** Number of pending messages (includes both steering and follow-up) */
+     get pendingMessageCount() {
+-        return this._steeringMessages.length + this._followUpMessages.length;
++        return this._queuedUserMessages().length;
+     }
+     /** Get pending steering messages (read-only) */
+     getSteeringMessages() {
+-        return this._steeringMessages;
++        return this.getQueuedUserMessages().filter((entry) => entry.mode === "steer").map((entry) => entry.text);
+     }
+     /** Get pending follow-up messages (read-only) */
+     getFollowUpMessages() {
+-        return this._followUpMessages;
++        return this.getQueuedUserMessages().filter((entry) => entry.mode === "followUp").map((entry) => entry.text);
+     }
+     get resourceLoader() {
+         return this._resourceLoader;
+@@ -1871,6 +1892,7 @@
       * Abort current operation and wait for agent to become idle.
       */
      async abort() {
@@ -121,7 +405,7 @@
          if (this._isAgentRunActive) {
              this._agentRunAbortRequested = true;
          }
-@@ -1908,6 +1913,7 @@
+@@ -1908,6 +1930,7 @@
       * @throws Error if no auth is configured for the model
       */
      async setModel(model, options = {}) {

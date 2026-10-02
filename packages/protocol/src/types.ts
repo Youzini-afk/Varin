@@ -608,6 +608,14 @@ export interface ExtensionUiResponse {
   value?: JsonValue;
 }
 
+export interface QueuedUserMessage {
+  id: string;
+  revision: number;
+  mode: "steer" | "followUp";
+  text: string;
+  imageCount: number;
+}
+
 export interface SessionRuntimeState {
   activeTools: string[];
   busy: boolean;
@@ -616,6 +624,7 @@ export interface SessionRuntimeState {
   isCompacting: boolean;
   isStreaming: boolean;
   pendingMessageCount: number;
+  queuedMessages: QueuedUserMessage[];
   retryAttempt: number;
   steering: string[];
   steeringMode: "all" | "one-at-a-time";

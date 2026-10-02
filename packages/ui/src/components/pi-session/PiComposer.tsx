@@ -3,6 +3,7 @@ import type {
   ImageAttachment,
   SessionSnapshot,
   SessionWorkspaceBinding,
+  RuntimeMethodResult,
   ThinkingLevel,
 } from '@varin/protocol';
 import { Icon } from '@/components/icon/Icon';
@@ -62,6 +63,7 @@ import type { PiComposerAgentSelection } from '@/lib/pi-runtime/composerAgent';
 import { useMessageHistory } from '@/components/chat/composer/state/useMessageHistory';
 import { isPiAbortError } from '@/lib/pi-runtime/abort';
 import { projectPiComposerActions } from './piComposerActions';
+import { PiMessageQueue, type QueueUpdate } from './PiMessageQueue';
 import { parsePiLocalCommand } from './piLocalCommands';
 import type { WorkFocusId } from '@varin/protocol';
 import { PiWorkFocusControl } from './PiWorkFocusControl';
@@ -85,6 +87,7 @@ interface PiComposerProps {
   messageHistory: readonly string[];
   onAbort?(): Promise<void> | void;
   onClearQueue?(): Promise<void> | void;
+  onUpdateQueue?(update: QueueUpdate): Promise<RuntimeMethodResult<'agent.queue.update'>>;
   onChangeAgent(value: PiComposerAgentSelection | undefined): void;
   onChangeDraft(value: string): void;
   onChangeImages(value: ImageAttachment[]): void;
@@ -151,6 +154,7 @@ export const PiComposer: React.FC<PiComposerProps> = ({
   messageHistory: sentMessageHistory,
   onAbort,
   onClearQueue,
+  onUpdateQueue,
   onChangeAgent,
   onChangeDraft,
   onChangeImages,
@@ -227,7 +231,6 @@ export const PiComposer: React.FC<PiComposerProps> = ({
   const [confirmedMentions, setConfirmedMentions] = React.useState<ReadonlySet<string>>(() => new Set());
   const [knownAgentNames, setKnownAgentNames] = React.useState<ReadonlySet<string>>(() => new Set());
   const [aborting, setAborting] = React.useState(false);
-  const [clearingQueue, setClearingQueue] = React.useState(false);
   const messageHistory = useMessageHistory(sentMessageHistory);
   const varinCommands = React.useMemo<readonly CommandInfo[]>(() => [
     ...MAGIC_VARIN_COMMANDS,
@@ -379,22 +382,6 @@ export const PiComposer: React.FC<PiComposerProps> = ({
       addPdfFiles(classified.pdfs),
     ]);
   }, [addImageFiles, addPdfFiles]);
-
-  const steeringQueue = snapshot?.steering ?? [];
-  const followUpQueue = snapshot?.followUp ?? [];
-  const queuedMessageCount = steeringQueue.length + followUpQueue.length;
-
-  const handleClearQueue = React.useCallback(async () => {
-    if (!onClearQueue || clearingQueue) return;
-    setClearingQueue(true);
-    try {
-      await onClearQueue();
-    } catch (error) {
-      toast.error(error instanceof Error ? error.message : String(error));
-    } finally {
-      setClearingQueue(false);
-    }
-  }, [clearingQueue, onClearQueue]);
 
   const handleAbort = React.useCallback(async () => {
     if (!onAbort || aborting) return;
@@ -590,58 +577,14 @@ export const PiComposer: React.FC<PiComposerProps> = ({
       isExpandedInput && 'fixed inset-0 z-40 flex items-end bg-background/95',
     )} data-pi-composer-shell="true">
       <div className={cn('chat-input-column', isExpandedInput && 'flex h-full flex-col justify-end py-6')}>
-        {queuedMessageCount > 0 && (
-          <section
-            className="mb-2 overflow-hidden rounded-xl border border-border/60 bg-muted/15"
-            data-pi-runtime-queue="true"
-          >
-            <div className="flex items-center justify-between gap-3 border-b border-border/50 px-3 py-2">
-              <span className="typography-meta font-medium text-foreground">
-                {t('chat.queuedMessage.title')} · {queuedMessageCount}
-              </span>
-              {onClearQueue ? (
-                <Tooltip>
-                  <TooltipTrigger asChild>
-                    <button
-                      type="button"
-                      disabled={clearingQueue}
-                      onClick={() => void handleClearQueue()}
-                      className="flex size-7 items-center justify-center rounded-md text-muted-foreground transition-colors hover:bg-foreground/5 hover:text-foreground disabled:opacity-40"
-                      aria-label={t('chat.queuedMessage.removeAria')}
-                    >
-                      <Icon
-                        name={clearingQueue ? 'loader-4' : 'close'}
-                        className={cn('size-3.5', clearingQueue && 'animate-spin')}
-                      />
-                    </button>
-                  </TooltipTrigger>
-                  <TooltipContent side="top">{t('chat.queuedMessage.removeAria')}</TooltipContent>
-                </Tooltip>
-              ) : null}
-            </div>
-            <div className="divide-y divide-border/40">
-              {steeringQueue.map((message, index) => (
-                <div key={`steer:${index}:${message}`} className="flex items-start gap-2 px-3 py-2">
-                  <span className="mt-0.5 shrink-0 rounded-md bg-primary/10 px-1.5 py-0.5 typography-micro font-medium text-primary">
-                    {t('settings.varin.visual.option.followUpBehavior.steer.label')}
-                  </span>
-                  <p className="min-w-0 whitespace-pre-wrap break-words typography-meta text-foreground">
-                    {message || t('chat.queuedMessage.empty')}
-                  </p>
-                </div>
-              ))}
-              {followUpQueue.map((message, index) => (
-                <div key={`follow-up:${index}:${message}`} className="flex items-start gap-2 px-3 py-2">
-                  <span className="mt-0.5 shrink-0 rounded-md bg-muted px-1.5 py-0.5 typography-micro font-medium text-muted-foreground">
-                    {t('settings.varin.visual.option.followUpBehavior.queue.label')}
-                  </span>
-                  <p className="min-w-0 whitespace-pre-wrap break-words typography-meta text-foreground">
-                    {message || t('chat.queuedMessage.empty')}
-                  </p>
-                </div>
-              ))}
-            </div>
-          </section>
+        {snapshot && onClearQueue && onUpdateQueue && (
+          <PiMessageQueue
+            key={`${runtimeKey}:${sessionId}`}
+            messages={snapshot.queuedMessages}
+            working={projectPiSessionActivity(snapshot).isWorking}
+            onClear={async () => { await onClearQueue(); }}
+            onUpdate={onUpdateQueue}
+          />
         )}
 
         {images.length > 0 && (

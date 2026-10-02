@@ -215,6 +215,7 @@ export const PiChatView: React.FC<PiChatViewProps> = ({
   const openSession = usePiSessionStore((state) => state.openSession);
   const beginSubmission = usePiSessionStore((state) => state.beginSubmission);
   const clearQueue = usePiSessionStore((state) => state.clearQueue);
+  const updateQueue = usePiSessionStore((state) => state.updateQueue);
   const clearSubmission = usePiSessionStore((state) => state.clearSubmission);
   const prompt = usePiSessionStore((state) => state.prompt);
   const steer = usePiSessionStore((state) => state.steer);
@@ -1138,7 +1139,8 @@ export const PiChatView: React.FC<PiChatViewProps> = ({
                 snapshot={snapshot}
                 workspace={snapshot.workspace}
                 onAbort={async () => { await abort(currentSessionId); }}
-                onClearQueue={async () => { await clearQueue(currentSessionId); }}
+                onClearQueue={async () => { await clearQueue(currentSessionId, runtimeKey); }}
+                onUpdateQueue={(update) => updateQueue({ ...update, sessionId: currentSessionId }, runtimeKey)}
                 onChangeAgent={(agent) => updateDraft(currentSessionId, { agent })}
                 onChangeDraft={(text) => updateDraft(currentSessionId, { text })}
                 onChangeImages={(images) => updateDraft(currentSessionId, { images })}

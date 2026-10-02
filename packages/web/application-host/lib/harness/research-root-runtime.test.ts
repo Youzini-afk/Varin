@@ -16,6 +16,7 @@ const snapshot = (focus: "code" | "research"): SessionSnapshot => ({
   features: { revision: 1, schemaVersion: 1 },
   followUp: [],
   followUpMode: "one-at-a-time",
+  queuedMessages: [],
   isCompacting: false,
   isStreaming: focus === "research",
   leafId: "entry-2",

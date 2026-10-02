@@ -307,6 +307,7 @@ const AGENT_RUN_METHODS = new Set<HostMethod>([
 // These Host methods acknowledge queue admission before Pi emits agent_start.
 // Their execution identity must remain attached until agent_settled.
 const DEFERRED_AGENT_SETTLEMENT_METHODS = new Set<HostMethod>([
+  "agent.queue.update",
   "agent.followUp",
   "agent.prompt",
   "agent.steer",
@@ -905,7 +906,9 @@ export class PiRuntimeBroker {
         params as HostMethodParams<"agent.prompt">,
       ) as Promise<HostMethodResult<M>>;
     }
-    if ((method as HostMethod) === "agent.steer" || (method as HostMethod) === "agent.followUp") {
+    if ((method as HostMethod) === "agent.steer" || (method as HostMethod) === "agent.followUp"
+      || ((method as HostMethod) === "agent.queue.update"
+        && (params as HostMethodParams<"agent.queue.update">).action === "steer")) {
       return this.#withWorkFocusBoundary(sessionId, async () => {
         const cwd = this.#workerCwds.get(worker);
         if (!cwd) {
@@ -1095,13 +1098,12 @@ export class PiRuntimeBroker {
       phase,
       ...(sessionId === undefined ? {} : { sessionId }),
     });
-    let dispatched = false;
     try {
       await admission.lease?.assertCanExecute?.();
-      dispatched = true;
       const result = await worker.request(method, params);
       if (
-        admission.awaitsAgentSettlement
+        !wasRunning
+        && admission.awaitsAgentSettlement
         && typeof result === "object"
         && result !== null
         && "accepted" in result
@@ -1111,7 +1113,8 @@ export class PiRuntimeBroker {
       }
       return result;
     } catch (error) {
-      if (dispatched || !wasRunning) admission.running = false;
+      // A rejected/stale queue operation does not settle the run it joined.
+      if (!wasRunning) admission.running = false;
       throw error;
     } finally {
       await this.#finishSessionExecutionAdmission(admission);

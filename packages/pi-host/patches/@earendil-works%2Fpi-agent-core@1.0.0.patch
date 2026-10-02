@@ -287,3 +287,118 @@
      /** Tools the call resolves against. */
      tools: readonly AgentTool<any>[];
      /** Passed to the hooks as the message that issued the call. */
+--- a/dist/agent.d.ts
++++ b/dist/agent.d.ts
+@@ -87,9 +87,13 @@
+     set followUpMode(mode: QueueMode);
+     get followUpMode(): QueueMode;
+     /** Queue a message to be injected after the current assistant turn finishes. */
+-    steer(message: AgentMessage): void;
++    steer(message: AgentMessage, before?: AgentMessage[]): void;
+     /** Queue a message to run only after the agent would otherwise stop. */
+-    followUp(message: AgentMessage): void;
++    followUp(message: AgentMessage, before?: AgentMessage[]): void;
++    /** Inspect actual pending delivery units; message identity is retained. */
++    getQueuedMessageBatches(): { steering: AgentMessage[][]; followUp: AgentMessage[][] };
++    /** Atomically update, move, or remove a still-pending unit by message identity. */
++    updateQueuedMessage(message: AgentMessage, update: { message?: AgentMessage; behavior?: "steer" | "followUp" } | null): boolean;
+     /** Remove all queued steering messages. */
+     clearSteeringQueue(): void;
+     /** Remove all queued follow-up messages. */
+--- a/dist/agent.js
++++ b/dist/agent.js
+@@ -63,21 +63,21 @@
+     constructor(mode) {
+         this.mode = mode;
+     }
+-    enqueue(message) {
+-        this.messages.push(message);
++    enqueue(message, before = []) {
++        // A user's hidden context and input are one delivery unit, including in one-at-a-time mode.
++        this.messages.push([...before, message]);
+     }
+     hasItems() {
+         return this.messages.length > 0;
+     }
+     peek() {
+         if (this.mode === "all")
+-            return this.messages.slice();
+-        const first = this.messages[0];
+-        return first ? [first] : [];
++            return this.messages.flat();
++        return this.messages[0]?.slice() ?? [];
+     }
+     drain() {
+         const drained = this.peek();
+-        this.messages = this.messages.slice(drained.length);
++        this.messages = this.mode === "all" ? [] : this.messages.slice(1);
+         return drained;
+     }
+     clear() {
+@@ -181,12 +181,40 @@
+         return this.followUpQueue.mode;
+     }
+     /** Queue a message to be injected after the current assistant turn finishes. */
+-    steer(message) {
+-        this.steeringQueue.enqueue(message);
++    steer(message, before) {
++        this.steeringQueue.enqueue(message, before);
+     }
+     /** Queue a message to run only after the agent would otherwise stop. */
+-    followUp(message) {
+-        this.followUpQueue.enqueue(message);
++    followUp(message, before) {
++        this.followUpQueue.enqueue(message, before);
++    }
++    /** Inspect actual pending delivery units without draining them. */
++    getQueuedMessageBatches() {
++        return {
++            steering: this.steeringQueue.messages.map((batch) => batch.slice()),
++            followUp: this.followUpQueue.messages.map((batch) => batch.slice()),
++        };
++    }
++    updateQueuedMessage(message, update) {
++        for (const queue of [this.steeringQueue, this.followUpQueue]) {
++            const index = queue.messages.findIndex((batch) => batch.includes(message));
++            if (index < 0) continue;
++            const batch = queue.messages[index];
++            if (update === null) {
++                queue.messages.splice(index, 1);
++            } else {
++                if (update.message) batch[batch.indexOf(message)] = update.message;
++                const target = update.behavior === "steer" ? this.steeringQueue
++                    : update.behavior === "followUp" ? this.followUpQueue : queue;
++                if (target !== queue) {
++                    queue.messages.splice(index, 1);
++                    target.messages.push(batch);
++                }
++            }
++            return true;
++        }
++        // A drained message is already in flight; never re-enqueue it.
++        return false;
+     }
+     /** Remove all queued steering messages. */
+     clearSteeringQueue() {
+@@ -253,10 +281,8 @@
+             throw new Error("Agent is already processing. Wait for completion before continuing.");
+         }
+         const lastMessage = this._state.messages[this._state.messages.length - 1];
+-        if (!lastMessage || this._state.messages.every((message) => message.role === "system")) {
+-            throw new Error("No messages to continue from");
+-        }
+-        if (lastMessage.role === "assistant") {
++        const empty = !lastMessage || this._state.messages.every((message) => message.role === "system");
++        if (empty || lastMessage.role === "assistant") {
+             const queuedSteering = this.steeringQueue.drain();
+             if (queuedSteering.length > 0) {
+                 await this.runPromptMessages(queuedSteering, { skipInitialSteeringPoll: true });
+@@ -267,7 +293,7 @@
+                 await this.runPromptMessages(queuedFollowUps);
+                 return;
+             }
+-            throw new Error("Cannot continue from message role: assistant");
++            throw new Error(empty ? "No messages to continue from" : "Cannot continue from message role: assistant");
+         }
+         await this.runContinuation();
+     }

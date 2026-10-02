@@ -1,4 +1,4 @@
-import type { JsonValue, SessionSnapshot, SessionStats, ThinkingLevel } from "./types.js";
+import type { JsonValue, QueuedUserMessage, SessionSnapshot, SessionStats, ThinkingLevel } from "./types.js";
 
 export const VARIN_RECOVERY_NAVIGATION_MARKER_SCHEMA_VERSION = 1 as const;
 export const VARIN_RECOVERY_NAVIGATION_MARKER_TYPE = "varin.recovery.navigation/v1";
@@ -345,7 +345,7 @@ export type PiAgentEvent = (
       toolName: string;
       type: "tool_execution_end";
     }
-  | { followUp: string[]; steering: string[]; type: "queue_update" }
+  | { followUp: string[]; steering: string[]; queuedMessages: QueuedUserMessage[]; type: "queue_update" }
   | ({ entry: PiSessionEntry; type: "entry_appended" } & PiAgentEventPosition)
   | { name?: string; type: "session_info_changed" }
   | { level: ThinkingLevel; type: "thinking_level_changed" }

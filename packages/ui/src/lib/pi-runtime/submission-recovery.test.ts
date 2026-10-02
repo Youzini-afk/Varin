@@ -10,6 +10,7 @@ import { isPiRequestOutcomeUnknown } from './request-outcome';
 
 const sessionId = 'submission-fixture';
 const snapshot: SessionSnapshot = {
+  queuedMessages: [],
   activeTools: [], busy: false, cwd: '/fixture', features: { revision: 0, schemaVersion: 1 },
   followUp: [], followUpMode: 'all', isCompacting: false, isStreaming: false,
   leafId: 'native-user', pendingMessageCount: 0, retryAttempt: 0, sessionId,

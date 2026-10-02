@@ -9,6 +9,7 @@ const snapshot = (patch: Partial<SessionSnapshot> = {}): SessionSnapshot => ({
   features: { revision: 0, schemaVersion: 1 },
   followUp: [],
   followUpMode: 'all',
+  queuedMessages: [],
   isCompacting: false,
   isStreaming: false,
   leafId: null,

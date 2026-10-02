@@ -85,6 +85,7 @@ const sessionSnapshot = (sessionId: string): SessionSnapshot => ({
   },
   followUp: [],
   followUpMode: "all",
+  queuedMessages: [],
   isCompacting: false,
   isStreaming: false,
   leafId: null,

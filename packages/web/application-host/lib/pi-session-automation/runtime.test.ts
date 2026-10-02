@@ -91,6 +91,7 @@ const createHarness = ({
         features,
         followUp: [],
         followUpMode: 'all',
+        queuedMessages: [],
         isCompacting: false,
         isStreaming: false,
         leafId: assistantEntry.id,

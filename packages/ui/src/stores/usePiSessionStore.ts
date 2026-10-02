@@ -189,7 +189,8 @@ export interface PiSessionStoreState {
   ): string;
   archiveSession(sessionId: string): Promise<SessionSummary>;
   closeSession(sessionId: string): Promise<boolean>;
-  clearQueue(sessionId: string): Promise<boolean>;
+  clearQueue(sessionId: string, runtimeKey?: string): Promise<boolean>;
+  updateQueue(params: RuntimeMethodParams<'agent.queue.update'>, runtimeKey?: string): Promise<RuntimeMethodResult<'agent.queue.update'>>;
   clearSubmission(sessionId: string, submissionId: string): void;
   cancelTimelineAutomation(sessionId: string): void;
   compactSession(
@@ -754,6 +755,8 @@ export const reducePiAgentEvent = (
       next.snapshot = updateSnapshot(current.snapshot, {
         followUp: [...event.followUp],
         steering: [...event.steering],
+        queuedMessages: event.queuedMessages,
+        pendingMessageCount: event.queuedMessages.length,
       });
       return next;
     case 'thinking_level_changed':
@@ -1738,19 +1741,15 @@ export const createPiSessionStore = (
         }
       },
 
-      clearQueue: async (sessionId) => {
-        const { result } = await request('agent.queue.clear', { sessionId });
-        set((state) => ({
-          records: upsertRecord(state.records, sessionId, (current) => ({
-            ...current,
-            snapshot: updateSnapshot(current.snapshot, {
-              followUp: [],
-              pendingMessageCount: 0,
-              steering: [],
-            }),
-          })),
-        }));
+      clearQueue: async (sessionId, runtimeKey) => {
+        const { result } = await request('agent.queue.clear', { sessionId }, runtimeKey);
+        // Native queue events own the projection. A late clear response must not erase newer input.
         return result.cleared;
+      },
+
+      updateQueue: async (params, runtimeKey) => {
+        const { result } = await request('agent.queue.update', params, runtimeKey);
+        return result;
       },
 
       clearSubmission: (sessionId, submissionId) => {
@@ -2314,6 +2313,7 @@ export const createPiSessionStore = (
             || JSON.stringify(authority.liveAssistant ?? null) !== JSON.stringify(current.liveAssistant ?? null)
             || JSON.stringify(authoritativeToolIds) !== JSON.stringify(runningToolIds)
             || JSON.stringify(authority.followUp) !== JSON.stringify(known.followUp)
+            || JSON.stringify(authority.queuedMessages) !== JSON.stringify(known.queuedMessages)
             || JSON.stringify(authority.steering) !== JSON.stringify(known.steering);
           if (diverged || hasUnresolvedSubmission(current)) await syncSessionRecord(sessionId);
         } catch (error) {

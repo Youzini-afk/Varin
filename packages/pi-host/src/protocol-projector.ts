@@ -401,7 +401,8 @@ export function projectAgentEvent(
         type: "tool_execution_end",
       };
     case "queue_update":
-      return { followUp: [...event.followUp], steering: [...event.steering], type: "queue_update" };
+      return { followUp: [...event.followUp], steering: [...event.steering],
+        queuedMessages: event.queuedMessages.map((message) => ({ ...message })), type: "queue_update" };
     case "entry_appended":
       return { ...position, entry: projectSessionEntry(event.entry), type: "entry_appended" };
     case "session_info_changed":
