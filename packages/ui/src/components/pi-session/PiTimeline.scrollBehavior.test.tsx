@@ -17,7 +17,7 @@ interface MockLegendProps {
   onLoad?: () => void;
   onMetricsChange?: () => void;
   onScroll?: (event: NativeSyntheticEvent<NativeScrollEvent>) => void;
-  onWheelCapture?: (event: { ctrlKey: boolean; deltaY: number }) => void;
+  onWheelCapture?: (event: { ctrlKey: boolean; deltaY: number; target?: EventTarget }) => void;
 }
 
 interface MockStoreState {
@@ -228,6 +228,21 @@ describe('PiTimeline scroll ownership', () => {
       mocks.storeState.records['session-1']!.view.scrollMode = 'free-scrolling';
       await resizeContent(2400);
       expect(mocks.scrollToOffset).not.toHaveBeenCalled();
+    });
+
+    it('lets an overflowing file preview own wheel navigation without cancelling conversation following', () => {
+      vi.stubGlobal('HTMLElement', window.HTMLElement);
+      const preview = document.createElement('div');
+      preview.setAttribute('data-pi-file-scroll', 'true');
+      Object.defineProperties(preview, { scrollHeight: { value: 440, configurable: true }, clientHeight: { value: 176 } });
+      const line = document.createElement('span');
+      preview.append(line);
+      mocks.legendProps!.onWheelCapture!({ ctrlKey: false, deltaY: -120, target: line });
+      expect(mocks.cancelTimelineAutomation).not.toHaveBeenCalled();
+      // Short previews do not consume page scrolling.
+      Object.defineProperty(preview, 'scrollHeight', { value: 44 });
+      mocks.legendProps!.onWheelCapture!({ ctrlKey: false, deltaY: -120, target: line });
+      expect(mocks.cancelTimelineAutomation).toHaveBeenCalledOnce();
     });
 
     it('follows footer content and viewport resizes without restoring the spacer gap', async () => {

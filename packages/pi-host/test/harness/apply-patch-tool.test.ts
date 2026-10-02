@@ -118,13 +118,13 @@ describe("apply_patch (Codex syntax)", () => {
 
     const patch = `*** Begin Patch
 *** Add File: new.txt
-hello world
-line2
++hello world
++line2
 *** End Patch`;
     const text = await executePatch(tool, patch);
     assert.match(text, /applied successfully/);
     const content = readFileSync(join(tmpDir, "new.txt"), "utf8");
-    assert.equal(content, "hello world\nline2");
+    assert.equal(content, "hello world\nline2\n");
   });
 
   it("deletes a file", async () => {
@@ -140,6 +140,27 @@ line2
     assert.equal(existsSync(join(tmpDir, "delete-me.txt")), false);
   });
 
+  it("preserves interleaved context and Windows newlines instead of moving context before changes", async () => {
+    const path = join(tmpDir, "ordered.txt");
+    writeFileSync(path, "header\r\nold one\r\nmiddle\r\nold two\r\ntail\r\n");
+    const tool = createApplyPatchTool(createFakeBridge(tmpDir) as HostServicesBridge, "s1", tmpDir, undefined, { surfaceWrite: true });
+    const text = await executePatch(tool, [
+      "*** Begin Patch", "*** Update File: ordered.txt", "@@", " header", "-old one", "+new one",
+      " middle", "-old two", "+new two", " tail", "*** End of File", "*** End Patch",
+    ].join("\r\n"));
+    assert.match(text, /applied successfully/);
+    assert.equal(readFileSync(path, "utf8"), "header\r\nnew one\r\nmiddle\r\nnew two\r\ntail\r\n");
+  });
+
+  it("keeps literal plus signs in added content and rejects incomplete patches without a write", async () => {
+    const tool = createApplyPatchTool(createFakeBridge(tmpDir) as HostServicesBridge, "s1", tmpDir, undefined, { surfaceWrite: true });
+    await executePatch(tool, "*** Begin Patch\n*** Add File: plus.txt\n++literal\n+\n+last\n*** End Patch");
+    assert.equal(readFileSync(join(tmpDir, "plus.txt"), "utf8"), "+literal\n\nlast\n");
+    const text = await executePatch(tool, "*** Begin Patch\n*** Add File: unfinished.txt\n+partial");
+    assert.match(text, /must end with/);
+    assert.equal(existsSync(join(tmpDir, "unfinished.txt")), false);
+  });
+
   it("handles multiple files in one patch", async () => {
     writeFileSync(join(tmpDir, "a.txt"), "aaa\n");
     writeFileSync(join(tmpDir, "b.txt"), "bbb\n");
@@ -153,7 +174,7 @@ line2
 -aaa
 +AAA
 *** Add File: c.txt
-ccc
++ccc
 *** Update File: b.txt
 @@
 -bbb
@@ -163,7 +184,7 @@ ccc
     assert.match(text, /applied successfully/);
     assert.equal(readFileSync(join(tmpDir, "a.txt"), "utf8"), "AAA\n");
     assert.equal(readFileSync(join(tmpDir, "b.txt"), "utf8"), "BBB\n");
-    assert.equal(readFileSync(join(tmpDir, "c.txt"), "utf8"), "ccc");
+    assert.equal(readFileSync(join(tmpDir, "c.txt"), "utf8"), "ccc\n");
     assert.equal(lockBatches.length, 0, "Host surface mutations own the kernel gate and must not nest fs.lock");
   });
 

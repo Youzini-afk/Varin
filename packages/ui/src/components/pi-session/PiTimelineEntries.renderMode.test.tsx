@@ -97,6 +97,33 @@ afterEach(() => {
 });
 
 describe('Pi timeline chat render mode', () => {
+  test('exposes live file changes outside raw tool details in both render modes and reports a rejected mutation', () => {
+    const call = { type: 'toolCall' as const, id: 'patch', name: 'apply_patch', arguments: {
+      patch: '*** Begin Patch\n*** Update File: a.ts\n@@\n-old value\n+new value\n*** End Patch',
+    } };
+    for (const mode of ['live', 'sorted'] as const) {
+      useUIStore.setState({ chatRenderMode: mode, activityRenderMode: 'summary' });
+      const live = parseHTML(renderTimeline({ ...liveAssistant, content: [call] })).document;
+      const preview = live.querySelector('[data-pi-file-preview="a.ts"]')!;
+      expect(preview.textContent).toContain('Preparing changes');
+      expect(preview.textContent).toContain('old value');
+      expect(preview.textContent).toContain('new value');
+      expect(preview.closest('details')).toBeNull();
+      const entries: PiSessionEntry[] = [{
+        type: 'message', id: 'assistant', parentId: null, timestamp: 'now',
+        message: { ...liveAssistant, stopReason: 'toolUse', content: [call] },
+      }, {
+        type: 'message', id: 'result', parentId: 'assistant', timestamp: 'now',
+        message: { role: 'toolResult', toolCallId: 'patch', toolName: 'apply_patch', timestamp: 3, isError: false,
+          content: [{ type: 'text', text: 'The source changed' }], details: { applied: false } },
+      }];
+      const saved = parseHTML(renderTimeline(null, entries)).document;
+      expect(saved.querySelector('[data-pi-file-preview]')?.textContent).toContain('Not applied');
+      expect(saved.querySelector('[data-pi-tool-disclosure="tool:patch"]')?.textContent).toContain('The source changed');
+      if (mode === 'sorted') expect(saved.querySelector('[data-pi-sorted-activity] > button')?.textContent).toContain('Failed');
+    }
+  });
+
   test('shows image model cost without token counts and preserves native image content', () => {
     const entries: PiSessionEntry[] = [{
       id: 'image-agent', parentId: null, timestamp: '2026-10-02T00:00:00Z', type: 'message',

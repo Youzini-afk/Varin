@@ -149,6 +149,27 @@ accessory stack. There is no independent bar for each feature.
   animations.
 - Unknown Pi/extension entries remain usable through generic renderers and raw detail disclosure.
 
+### Streaming file changes
+
+Built-in `apply_patch`, `edit` and `write` calls project their incrementally decoded Pi arguments into
+file cards, outside the raw tool disclosure. The preview displays additions in green, removals in red
+and unchanged context neutrally, with the file name and received-line counts in the header. Codex hunk
+anchors are not actual source line numbers. A whole-file `write` has no before-image in its arguments:
+it is explicitly a content preview, without invented deletion counts. Delete-file requests without
+content show the operation rather than a fabricated red body. Shell commands are not parsed as edits.
+
+The compact viewport shows up to eight lines; expansion increases the viewport and permits scrolling
+all received lines and navigating changes. Neither size is a content limit. Rows are virtualized and
+syntax highlighting uses the shared worker, coalescing queued snapshots. Native deltas paint directly;
+there is no typing replay. Only the preview's inner viewport follows new lines. Upward navigation or
+selection pauses it, and Back to latest resumes. Expansion, pause and scroll position survive the
+live-to-persisted handoff within the mounted turn. The timeline retains sole ownership of page scrolling.
+
+Preparing, applying, applied, unsaved-draft, working-branch, partial-failure and missing-result states
+remain distinct. Host-backed mutation tools retain their actual destination and per-path outcome in
+native result details; normal tool completion does not hide a rejected write. Raw arguments/results
+and existing document navigation remain available, and extension tool renderers keep precedence.
+
 ### Chat context menu and selected memory
 
 The shared timeline owns one context-menu controller across its virtualized turns. Right-click and the

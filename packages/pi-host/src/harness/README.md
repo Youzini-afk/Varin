@@ -45,6 +45,20 @@ recovery evidence; the optional backend resolver alone is not a delivered remote
 
 ## Registration
 
+Host-backed `write`, `edit`, and `apply_patch` preserve document mutation outcomes in native result
+`details.mutation`: committed working-branch writes, surface/disk destinations, and per-path applied,
+conflict, compensation or partial outcomes. This is presentation evidence from the existing document
+authority; no extra file reads or renderer-side writes are introduced. A normally returned tool result
+can still describe a rejected write. The UI uses these facts to distinguish generating a preview from
+applying it, including edits to unsaved drafts. Native Pi result renderers keep their original detail
+shape through the wrapper; Varin's additional evidence does not replace native edit diffs.
+
+The Codex patch parser consumes `+`-prefixed Add File bodies, keeps literal content after the first
+prefix, and matches each update's complete old span with context in its original order. `@@` anchors
+and End of File constraints are separate from body lines. Update operations preserve source CRLF/LF
+and final-newline state. Incomplete or unsupported directives fail before document mutation admission;
+resource preflight and execution continue to share this parser.
+
 `HostController` admits `harness.embed` in the ordinary request queue, after preceding configuration and
 session lifecycle work, then releases the queue while its provider request is in flight. Independent
 embedding batches can use the Host index scheduler's configured concurrency. Batch identity reservations,

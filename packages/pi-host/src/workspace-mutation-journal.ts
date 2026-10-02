@@ -4,14 +4,19 @@ import {
   createEditToolDefinition,
   createWriteToolDefinition,
   defineTool,
+  type EditToolDetails,
   type ToolDefinition,
 } from "@earendil-works/pi-coding-agent";
-import type { HostEventData } from "@varin/protocol";
+import type { DocumentSurfaceWritePathResult, HostEventData } from "@varin/protocol";
 import type { HostServicesBridge } from "./harness/host-services-bridge.js";
 import { withToolExecutionResources } from "./harness/tool-execution-resources.js";
 
 type WorkspaceMutationRequest = HostEventData<"workspace.mutation.request">;
 type WorkspaceMutationToolName = WorkspaceMutationRequest["toolName"];
+type MutationDetails = { mutation: {
+  status: "committed" | "applied" | "conflict" | "unavailable" | "partial";
+  results?: DocumentSurfaceWritePathResult[];
+} };
 type WithoutRequestIdentity<T> = T extends unknown
   ? Omit<T, "requestId" | "sessionId">
   : never;
@@ -261,12 +266,13 @@ export function createWorkspaceMutationJournalTools(
   _sessionId?: string,
   options: { surfaceWrite?: boolean } = {},
 ): ToolDefinition[] {
-  const write = createWriteToolDefinition(cwd);
-  const edit = createEditToolDefinition(cwd);
+  const { renderResult: renderWriteResult, ...write } = createWriteToolDefinition(cwd);
+  const { renderResult: renderEditResult, ...edit } = createEditToolDefinition(cwd);
   const anchorPath = (input: string) => resolve(cwd, input);
   const surface = options.surfaceWrite === true;
-  const journaledWrite = defineTool({
+  const journaledWrite = defineTool<typeof write.parameters, MutationDetails | undefined>({
     ...write,
+    ...(renderWriteResult ? { renderResult: (result, ...args) => renderWriteResult({ ...result, details: undefined }, ...args) } : {}),
     execute: async (toolCallId, params, signal, onUpdate, ctx) => {
       if (hostServicesBridge) {
         const virtual = await tryVirtualBranchWrite(hostServicesBridge, {
@@ -275,7 +281,7 @@ export function createWorkspaceMutationJournalTools(
           content: params.content,
         }, signal);
         if (virtual !== "disk") {
-          return { content: [{ type: "text" as const, text: virtual.text }], details: undefined };
+          return { content: [{ type: "text" as const, text: virtual.text }], details: { mutation: { status: "committed" } } };
         }
         if (surface) {
           const planned = await trySurfaceWrite(hostServicesBridge, {
@@ -284,7 +290,8 @@ export function createWorkspaceMutationJournalTools(
             content: params.content,
           }, signal);
           if (planned !== "disk") {
-            return { content: [{ type: "text" as const, text: await withDiskDiagnostics(hostServicesBridge, params.path, planned) }], details: undefined };
+            return { content: [{ type: "text" as const, text: await withDiskDiagnostics(hostServicesBridge, params.path, planned) }],
+              details: { mutation: { status: planned.status, results: planned.results } } };
           }
         }
         throw new Error("Host document mutation backend is unavailable; refusing a parallel Pi-worker disk write");
@@ -300,8 +307,11 @@ export function createWorkspaceMutationJournalTools(
       });
     },
   });
-  const journaledEdit = defineTool({
+  const journaledEdit = defineTool<typeof edit.parameters, EditToolDetails | MutationDetails | undefined>({
     ...edit,
+    ...(renderEditResult ? { renderResult: (result, ...args) => renderEditResult({
+      ...result, details: result.details && "mutation" in result.details ? undefined : result.details,
+    }, ...args) } : {}),
     execute: async (toolCallId, params, signal, onUpdate, ctx) => {
       if (hostServicesBridge) {
         const virtual = await tryVirtualBranchWrite(hostServicesBridge, {
@@ -310,7 +320,7 @@ export function createWorkspaceMutationJournalTools(
           edits: params.edits,
         }, signal);
         if (virtual !== "disk") {
-          return { content: [{ type: "text" as const, text: virtual.text }], details: undefined };
+          return { content: [{ type: "text" as const, text: virtual.text }], details: { mutation: { status: "committed" } } };
         }
         if (surface) {
           const planned = await trySurfaceWrite(hostServicesBridge, {
@@ -319,7 +329,8 @@ export function createWorkspaceMutationJournalTools(
             edits: params.edits,
           }, signal);
           if (planned !== "disk") {
-            return { content: [{ type: "text" as const, text: await withDiskDiagnostics(hostServicesBridge, params.path, planned) }], details: undefined };
+            return { content: [{ type: "text" as const, text: await withDiskDiagnostics(hostServicesBridge, params.path, planned) }],
+              details: { mutation: { status: planned.status, results: planned.results } } };
           }
         }
         throw new Error("Host document mutation backend is unavailable; refusing a parallel Pi-worker disk write");

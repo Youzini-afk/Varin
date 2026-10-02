@@ -133,9 +133,10 @@ describe("workspace mutation journal", () => {
       const writeResult = await write.execute("write-call", { content: "created", path: "created.txt" }, undefined, undefined, undefined as never);
       assert.equal(await readFile(join(cwd, "created.txt"), "utf8"), "created");
       assert.match((writeResult.content[0] as { text: string }).text, /diagnostics: clean/);
+      assert.deepEqual(writeResult.details, { mutation: { status: "applied", results: [{ path: "created.txt", target: "disk", status: "applied" }] } });
 
       const edit = host.session.getToolDefinition("edit") as ReturnType<typeof createEditToolDefinition>;
-      await edit.execute(
+      const editResult = await edit.execute(
         "edit-call",
         { edits: [{ newText: "updated", oldText: "created" }], path: "created.txt" },
         undefined,
@@ -143,6 +144,7 @@ describe("workspace mutation journal", () => {
         undefined as never,
       );
       assert.equal(await readFile(join(cwd, "created.txt"), "utf8"), "updated");
+      assert.deepEqual(editResult.details, { mutation: { status: "applied", results: [{ path: "created.txt", target: "disk", status: "applied" }] } });
       assert.equal(events.seen.length, 0, "Host-backed document mutations must not enter the legacy pi-host disk journal");
     } finally {
       await host.dispose();
@@ -212,6 +214,12 @@ describe("workspace mutation journal", () => {
         }
         if (data.method === "document.surfaceWrite") {
           const path = (data.params as { path?: string }).path ?? "";
+          if (path === "conflict.txt") {
+            hostServices.respond("session-guard", data.requestId, { ok: true, result: {
+              status: "conflict", results: [{ path, target: "disk", status: "conflict", message: "Source changed" }],
+            } });
+            return;
+          }
           surfaceWrites.push(path);
           const params = data.params as { path?: string; content?: string };
           const diskTarget = !path.endsWith("draft.txt");
@@ -245,6 +253,7 @@ describe("workspace mutation journal", () => {
       undefined as never,
     );
     assert.match((surfaceResult.content[0] as { text: string }).text, /Successfully wrote/);
+    assert.deepEqual(surfaceResult.details, { mutation: { status: "applied", results: [{ path: "draft.txt", target: "surface", status: "applied" }] } });
     await assert.rejects(readFile(join(root, "draft.txt")), { code: "ENOENT" });
     assert.equal(events.seen.length, 0);
     assert.deepEqual(surfaceWrites, ["draft.txt"]);
@@ -259,6 +268,10 @@ describe("workspace mutation journal", () => {
     assert.equal(await readFile(join(root, "disk.txt"), "utf8"), "disk turn");
     assert.equal(events.seen.length, 0);
     assert.deepEqual(surfaceWrites, ["draft.txt", "other.txt", "disk.txt"]);
+
+    const conflict = await write.execute("conflict", { content: "never written", path: "conflict.txt" }, undefined, undefined, undefined as never);
+    assert.deepEqual(conflict.details, { mutation: { status: "conflict", results: [{ path: "conflict.txt", target: "disk", status: "conflict", message: "Source changed" }] } });
+    await assert.rejects(readFile(join(root, "conflict.txt")), { code: "ENOENT" });
 
     journal.dispose();
     hostServices.dispose();
@@ -390,6 +403,7 @@ describe("workspace mutation journal", () => {
       undefined as never,
     );
     assert.match((result.content[0] as { text: string }).text, /Successfully wrote kept.txt/);
+    assert.deepEqual(result.details, { mutation: { status: "committed" } });
     assert.deepEqual(writes, [{ path: "kept.txt", content: "virtual only" }]);
     await assert.rejects(readFile(join(root, "kept.txt")), { code: "ENOENT" });
   });

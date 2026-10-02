@@ -27,12 +27,13 @@ type PatchOperation =
   | { kind: "delete"; path: string };
 
 interface CodexHunk {
-  context: string[];   // lines starting with space or @@ (unchanged context)
-  changes: Array<{ type: "add" | "remove"; line: string }>;
+  anchor?: string;
+  endOfFile?: boolean;
+  lines: Array<{ type: "context" | "add" | "remove"; line: string }>;
 }
 
 function parseCodexPatch(patchText: string): { operations: PatchOperation[] } | { error: string } {
-  const lines = patchText.split("\n");
+  const lines = patchText.replace(/\r\n/g, "\n").trimEnd().split("\n");
   const operations: PatchOperation[] = [];
   let i = 0;
 
@@ -40,6 +41,7 @@ function parseCodexPatch(patchText: string): { operations: PatchOperation[] } | 
   if (lines[i]?.trim() !== "*** Begin Patch") {
     return { error: "Patch must start with *** Begin Patch" };
   }
+  if (lines.at(-1)?.trim() !== "*** End Patch") return { error: "Patch must end with *** End Patch" };
   i++;
 
   while (i < lines.length) {
@@ -52,8 +54,14 @@ function parseCodexPatch(patchText: string): { operations: PatchOperation[] } | 
       const hunks: CodexHunk[] = [];
       let currentHunk: CodexHunk | null = null;
 
-      while (i < lines.length && !lines[i]!.startsWith("*** ")) {
+      while (i < lines.length && (!lines[i]!.startsWith("*** ") || lines[i] === "*** End of File")) {
         const hunkLine = lines[i]!;
+        if (hunkLine === "*** End of File") {
+          if (!currentHunk) return { error: "End of File outside hunk" };
+          currentHunk.endOfFile = true;
+          i++;
+          break;
+        }
         if (hunkLine.startsWith("@@")) {
           if (currentHunk) hunks.push(currentHunk);
           // @@ marker: the rest of the line after "@@ " is context
@@ -61,21 +69,23 @@ function parseCodexPatch(patchText: string): { operations: PatchOperation[] } | 
           // Strip leading space (the separator between @@ and context)
           const ctx = ctxAfterMarker.startsWith(" ") ? ctxAfterMarker.slice(1) : ctxAfterMarker;
           currentHunk = {
-            context: ctx.length > 0 ? [ctx] : [],
-            changes: [],
+            ...(ctx.length > 0 ? { anchor: ctx } : {}),
+            lines: [],
           };
         } else if (hunkLine.startsWith("+")) {
           if (!currentHunk) return { error: "Change line outside hunk" };
-          currentHunk.changes.push({ type: "add", line: hunkLine.slice(1) });
+          currentHunk.lines.push({ type: "add", line: hunkLine.slice(1) });
         } else if (hunkLine.startsWith("-")) {
           if (!currentHunk) return { error: "Change line outside hunk" };
-          currentHunk.changes.push({ type: "remove", line: hunkLine.slice(1) });
+          currentHunk.lines.push({ type: "remove", line: hunkLine.slice(1) });
         } else if (hunkLine.startsWith(" ")) {
           if (!currentHunk) return { error: "Context line outside hunk" };
-          currentHunk.context.push(hunkLine.slice(1));
+          currentHunk.lines.push({ type: "context", line: hunkLine.slice(1) });
         } else if (hunkLine === "") {
           // Empty line is context
-          if (currentHunk) currentHunk.context.push("");
+          if (currentHunk) currentHunk.lines.push({ type: "context", line: "" });
+        } else {
+          return { error: `Invalid hunk line: ${hunkLine}` };
         }
         i++;
       }
@@ -86,15 +96,17 @@ function parseCodexPatch(patchText: string): { operations: PatchOperation[] } | 
       i++;
       const contentLines: string[] = [];
       while (i < lines.length && !lines[i]!.startsWith("*** ")) {
-        contentLines.push(lines[i]!);
+        if (!lines[i]!.startsWith("+")) return { error: "Add File lines must start with +" };
+        contentLines.push(lines[i]!.slice(1));
         i++;
       }
-      operations.push({ kind: "add", path, content: contentLines.join("\n") });
+      operations.push({ kind: "add", path, content: contentLines.length ? contentLines.join("\n") + "\n" : "" });
     } else if (line.startsWith("*** Delete File: ")) {
       const path = line.slice("*** Delete File: ".length).trim();
       operations.push({ kind: "delete", path });
       i++;
     } else {
+      if (line.trim() !== "") return { error: `Unsupported patch directive: ${line}` };
       i++;
     }
   }
@@ -116,45 +128,32 @@ export function parseCodexPatchPaths(patchText: string): { paths: string[] } | {
 // ── Apply a single update hunk ──────────────────────────────────────
 
 function applyCodexHunks(content: string, hunks: CodexHunk[]): { result: string; applied: number } | { error: string } {
-  const contentLines = content.split("\n");
+  const newline = content.includes("\r\n") ? "\r\n" : "\n";
+  const normalized = content.replace(/\r\n/g, "\n");
+  const trailingNewline = normalized.endsWith("\n");
+  const contentLines = normalized ? normalized.split("\n") : [];
+  if (trailingNewline) contentLines.pop();
   const result: string[] = [];
   let contentIdx = 0;
   let applied = 0;
 
   for (const hunk of hunks) {
-    // Context lines are the search anchor — used to find position but
-    // NOT output to result (they remain in the file, copied from content).
-    const plainContext = hunk.context;
-
-    // Find the context block in remaining content
+    // Match the complete old span, preserving context interleaved with edits.
+    // @@ text is a search anchor, not a line to move to the front of the hunk.
+    let searchFrom = contentIdx;
+    if (hunk.anchor !== undefined) {
+      const anchorIndex = contentLines.indexOf(hunk.anchor, searchFrom);
+      if (anchorIndex < 0) return { error: `Context not found for anchor: ${hunk.anchor}` };
+      searchFrom = anchorIndex + 1;
+    }
+    const before = hunk.lines.filter(line => line.type !== "add").map(line => line.line);
     let foundIdx = -1;
-    if (plainContext.length === 0 && hunk.changes.length > 0) {
-      // No context — search for the first remove line as anchor
-      const firstRemove = hunk.changes.find((c) => c.type === "remove");
-      if (firstRemove) {
-        for (let j = contentIdx; j < contentLines.length; j++) {
-          if (contentLines[j] === firstRemove.line) {
-            foundIdx = j;
-            break;
-          }
-        }
-        if (foundIdx === -1) {
-          return { error: `Line not found for removal: ${firstRemove.line}` };
-        }
-      } else {
-        // Only additions — apply at current position
-        foundIdx = contentIdx;
-      }
+    if (before.length === 0) {
+      foundIdx = hunk.anchor === undefined || hunk.endOfFile ? contentLines.length : searchFrom;
     } else {
-      for (let j = contentIdx; j <= contentLines.length - plainContext.length; j++) {
-        let match = true;
-        for (let k = 0; k < plainContext.length; k++) {
-          if (contentLines[j + k] !== plainContext[k]) {
-            match = false;
-            break;
-          }
-        }
-        if (match) {
+      for (let j = searchFrom; j <= contentLines.length - before.length; j++) {
+        if (hunk.endOfFile && j + before.length !== contentLines.length) continue;
+        if (before.every((line, index) => contentLines[j + index] === line)) {
           foundIdx = j;
           break;
         }
@@ -162,34 +161,19 @@ function applyCodexHunks(content: string, hunks: CodexHunk[]): { result: string;
     }
 
     if (foundIdx === -1) {
-      const ctxPreview = plainContext.slice(0, 3).join(" | ");
-      return { error: `Context not found for hunk: ${ctxPreview}` };
+      return { error: `Context not found for hunk: ${before.slice(0, 3).join(" | ")}` };
     }
 
-    // Copy lines before context (or before the found remove position)
+    // Copy the untouched prefix and replace the matched span in order.
     while (contentIdx < foundIdx) {
       result.push(contentLines[contentIdx]!);
       contentIdx++;
     }
 
-    // Copy context lines from content (they stay in the file)
-    for (let k = 0; k < plainContext.length; k++) {
-      result.push(contentLines[contentIdx]!);
-      contentIdx++;
+    for (const line of hunk.lines) {
+      if (line.type !== "remove") result.push(line.line);
     }
-
-    // Apply changes after context
-    for (const change of hunk.changes) {
-      if (change.type === "remove") {
-        // Verify the line matches
-        if (contentLines[contentIdx] !== change.line) {
-          return { error: `Remove mismatch: expected "${change.line}", got "${contentLines[contentIdx] ?? "<EOF>"}"` };
-        }
-        contentIdx++;
-      } else {
-        result.push(change.line);
-      }
-    }
+    contentIdx += before.length;
     applied++;
   }
 
@@ -199,7 +183,7 @@ function applyCodexHunks(content: string, hunks: CodexHunk[]): { result: string;
     contentIdx++;
   }
 
-  return { result: result.join("\n"), applied };
+  return { result: result.join(newline) + (trailingNewline && result.length ? newline : ""), applied };
 }
 
 // ── Tool factory ────────────────────────────────────────────────────
@@ -336,7 +320,7 @@ export function createApplyPatchTool(
           const hunks = prepared.reduce((sum, row) => sum + (row.hunks ?? 0), 0);
           return {
             content: [{ type: "text" as const, text: `patch applied successfully (${parsed.operations.length} file(s), ${hunks} hunk(s))` }],
-            details: { applied: true, operations: parsed.operations.length, hunks },
+            details: { applied: true, operations: parsed.operations.length, hunks, mutation: { status: "committed" } },
           };
         }
         if (virtual.status !== "disk") {
@@ -372,7 +356,8 @@ export function createApplyPatchTool(
             if (diagnostics.length > 0) text += `\n\n[diagnostics: ${diagnostics.join("; ")}]`;
             return {
               content: [{ type: "text" as const, text }],
-              details: { applied: planned.status === "applied", operations: parsed.operations.length },
+              details: { applied: planned.status === "applied", operations: parsed.operations.length,
+                mutation: { status: planned.status, results: planned.results } },
             };
           }
         }

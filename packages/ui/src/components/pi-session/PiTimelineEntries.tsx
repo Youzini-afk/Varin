@@ -63,6 +63,8 @@ import {
   type PiSortedTurnProjection,
 } from './piSortedTurnProjection';
 import { ChatMoreButton, ChatTextSource } from './ChatContextMenu';
+import { PiFileChangePreview, PiFileChangePreviewScope } from './PiFileChangePreview';
+import { fileChangePhase, isFileChangeTool, projectFileChanges } from './fileChangePreview';
 import { HarnessThreadMarkers } from './HarnessThreadMarkers';
 import { PiTurnUsageFooter } from './PiTurnUsageFooter';
 import { assistantMessagesForTurn } from '@/lib/pi-runtime/usagePresentation';
@@ -413,7 +415,9 @@ const ToolDisclosureContext = React.createContext<Map<string, boolean> | null>(n
 
 const PiToolDisclosureScope: React.FC<{ children: React.ReactNode }> = ({ children }) => {
   const [choices] = React.useState(() => new Map<string, boolean>());
-  return <ToolDisclosureContext.Provider value={choices}>{children}</ToolDisclosureContext.Provider>;
+  return <ToolDisclosureContext.Provider value={choices}>
+    <PiFileChangePreviewScope>{children}</PiFileChangePreviewScope>
+  </ToolDisclosureContext.Provider>;
 };
 
 const PiToolDisclosure: React.FC<{
@@ -446,10 +450,11 @@ const PiToolStatus: React.FC<{ status: PiToolExecutionState['status'] }> = ({ st
 const PiToolCard: React.FC<{
   call: PiToolCall;
   cwd: string;
+  generating?: boolean;
   execution?: PiToolExecutionState;
   executionById?: Record<string, PiToolExecutionState>;
   result?: PiToolResultMessage;
-}> = ({ call, cwd, execution, executionById, result }) => {
+}> = ({ call, cwd, generating = false, execution, executionById, result }) => {
   const { t } = useI18n();
   const toolRenderers = useWorkbenchMatchRenderers<{
     call: PiToolCall;
@@ -460,9 +465,11 @@ const PiToolCard: React.FC<{
   const workspaceId = useWorkbenchWorkspaceId();
   const sessionId = usePiSessionStore((state) => state.currentSessionId);
   const extensionRendered = renderFirstWorkbenchMatch(toolRenderers, { call, cwd, execution, result });
+  const fileChanges = React.useMemo(() => extensionRendered === undefined ? projectFileChanges(call, generating) : [], [call, generating, extensionRendered]);
   const nested = Object.values(executionById ?? {}).filter(child => child.parentToolCallId === call.id);
   if (extensionRendered !== undefined) return <>{extensionRendered}</>;
-  const status = result
+  const mutationPhase = isFileChangeTool(call.name) ? fileChangePhase(execution, result, generating) : undefined;
+  const status = mutationPhase === 'failed' || mutationPhase === 'partial' ? 'error' : result
     ? (result.isError ? 'error' : 'success')
     : execution?.status ?? 'running';
   const transientOutput = execution?.result ?? execution?.partialResult;
@@ -488,6 +495,17 @@ const PiToolCard: React.FC<{
     ? String((call.arguments as Record<string, unknown>).command ?? '')
     : '';
   return (
+    <>
+    {fileChanges.map((file, index) => <PiFileChangePreview key={`${index}:${file.path}`} file={file}
+      previewId={`${call.id}:${index}:${file.path}`}
+      phase={fileChangePhase(execution, result, generating, file.path)}
+      onOpen={workspaceId ? () => revealResourceInEditor({
+        workspaceId,
+        resourceId: resourceIdFromWorkspacePath(cwd, file.path) ?? file.path.replace(/\\/g, '/'),
+        workspaceRoot: cwd,
+        ...(sessionId ? { sessionId } : {}),
+        toolCallId: call.id,
+      }) : undefined} />)}
     <PiToolDisclosure
       disclosureId={`tool:${call.id}`}
       className={cn(
@@ -498,14 +516,14 @@ const PiToolCard: React.FC<{
     >
       <summary className="flex min-w-0 cursor-pointer list-none items-center gap-2 rounded-md px-1 py-1.5 typography-meta text-muted-foreground hover:bg-muted/25 [&::-webkit-details-marker]:hidden">
         <Icon
-          name={status === 'running' ? 'loader-4' : status === 'error' ? 'error-warning' : 'check'}
+          name={fileChanges.length ? 'code-sslash' : status === 'running' ? 'loader-4' : status === 'error' ? 'error-warning' : 'check'}
           className={cn(
             'size-3.5 shrink-0',
-            status === 'running' && 'animate-spin',
+            !fileChanges.length && status === 'running' && 'animate-spin',
             status === 'error' && 'text-[var(--status-error)]',
           )}
         />
-        <span className="min-w-0 flex-1 truncate" title={`${call.name}: ${compactSummary || call.name}`}>{compactSummary || call.name}</span>
+        <span className="min-w-0 flex-1 truncate" title={`${call.name}: ${compactSummary || call.name}`}>{fileChanges.length ? t('chat.fileChange.details') : compactSummary || call.name}</span>
         {harnessShellId ? (
           <button
             type="button"
@@ -519,7 +537,7 @@ const PiToolCard: React.FC<{
             {t('chat.timeline.tools.openTerminal')}
           </button>
         ) : null}
-        <PiToolStatus status={status} />
+        {!fileChanges.length ? <PiToolStatus status={status} /> : null}
         <Icon name="arrow-down-s" className="size-3.5 text-muted-foreground transition-transform group-open:rotate-180" />
       </summary>
       <div className="ml-2 space-y-3 border-l border-border/60 py-2 pl-3">
@@ -591,6 +609,7 @@ const PiToolCard: React.FC<{
         ) : null}
       </div>
     </PiToolDisclosure>
+    </>
   );
 };
 
@@ -679,9 +698,10 @@ const PiThinkingBody: React.FC<{
 const PiToolSequence: React.FC<{
   calls: PiToolCall[];
   cwd: string;
+  generatingCallIds?: ReadonlySet<string>;
   executionById: Record<string, PiToolExecutionState>;
   resultByCallId: ReadonlyMap<string, PiToolResultMessage>;
-}> = ({ calls, cwd, executionById, resultByCallId }) => {
+}> = ({ calls, cwd, generatingCallIds, executionById, resultByCallId }) => {
   const projected = groupToolCalls(calls.map((call) => ({
     toolName: call.name,
     toolCallId: call.id,
@@ -695,6 +715,7 @@ const PiToolSequence: React.FC<{
     <PiToolCard
       key={group.entry.toolCallId}
       call={byId.get(group.entry.toolCallId)!}
+      generating={generatingCallIds?.has(group.entry.toolCallId)}
       cwd={cwd}
       execution={executionById[group.entry.toolCallId]}
       executionById={executionById}
@@ -731,6 +752,7 @@ const AssistantMessage: React.FC<{
       }
       rendered.push(
         <PiToolSequence key={`tools:${consecutive[0]!.id}`} calls={consecutive}
+          generatingCallIds={message.stopReason === 'pending' ? new Set(consecutive.map(call => call.id)) : undefined}
           cwd={cwd} executionById={executionById} resultByCallId={resultByCallId} />,
       );
       continue;
@@ -813,7 +835,9 @@ const PiSortedActivityGroup: React.FC<{
     || (item.kind === 'tool' && executionById[item.call.id]?.status === 'running')
   ));
   const failed = projection.activity.some((item) => item.kind === 'tool'
-    && (resultByCallId.get(item.call.id)?.isError || executionById[item.call.id]?.status === 'error'));
+    && (resultByCallId.get(item.call.id)?.isError || executionById[item.call.id]?.status === 'error'
+      || (isFileChangeTool(item.call.name)
+        && ['failed', 'partial'].includes(fileChangePhase(executionById[item.call.id], resultByCallId.get(item.call.id), item.streaming)))));
   const latest = projection.activity.at(-1);
   const latestLabel = latest?.kind === 'tool'
     ? latest.call.name
@@ -854,12 +878,15 @@ const PiSortedActivityGroup: React.FC<{
             if (item.kind === 'tool') {
               if (projection.activity[index - 1]?.kind === 'tool') return null;
               const calls: PiToolCall[] = [];
+              const generatingCallIds = new Set<string>();
               for (let next = index; next < projection.activity.length; next += 1) {
                 const candidate = projection.activity[next]!;
                 if (candidate.kind !== 'tool') break;
                 calls.push(candidate.call);
+                if (candidate.streaming) generatingCallIds.add(candidate.call.id);
               }
               return <PiToolSequence key={item.id} calls={calls} cwd={cwd}
+                generatingCallIds={generatingCallIds}
                 executionById={executionById} resultByCallId={resultByCallId} />;
             }
             return (

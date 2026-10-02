@@ -143,6 +143,12 @@ actions share a menu; model, permission and send controls stay directly availabl
 are expandable rows rather than another enclosing card. Keep readable content spacious while making
 tool chrome compact, and let narrow composer footers wrap rather than clip their actions.
 
+`PiFileChangePreview` renders live `write`, native multi-`edit`, and Codex `apply_patch` arguments as
+compact file cards. Its virtualized inner viewport follows actual deltas and preserves user pause and
+expansion within the mounted turn. Shared worker highlighting coalesces updates; it never schedules a
+typing replay. Mutation outcome/destination comes from native tool result details, and whole-file writes
+without a before-image are labeled as content previews. Raw details and extension renderers remain available.
+
 The chat timeline provides object-sensitive context menus through `ChatContextMenu`: selection actions,
 whole-turn/message operations, code, file/link actions and image viewing/copy/save. Selection identity is
 captured before popup focus changes; `chatSelection` maps rendered Markdown to native source offsets.
