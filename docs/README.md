@@ -40,7 +40,7 @@ Harness 总体与模块专卷：
 - [design/plugin-gui-design.md](design/plugin-gui-design.md) / [design/varin-extension-platform.md](design/varin-extension-platform.md) — 插件 GUI 与扩展平台
 - [design/unified-file-editor-platform.md](design/unified-file-editor-platform.md) — 统一文件编辑器平台
 - [design/varin-motion-platform.md](design/varin-motion-platform.md) — 动效平台
-- [design/varin-product-experience.md](design/varin-product-experience.md) — 基于现有工作台的视觉与交互修订（简化样板已撤回，源码基线已补，未实施）
+- [design/varin-product-experience.md](design/varin-product-experience.md) — 工作台视觉与交互候选（布局重组、排版、状态动效及完整功能对照；待评审，未实施）
 - [design/varin-rebrand-design.md](design/varin-rebrand-design.md) — 阶段 B 更名
 - [design/extension-compatibility.md](design/extension-compatibility.md) — 扩展兼容边界
 - [design/chat-experience.md](design/chat-experience.md) — 聊天体验
