@@ -1,5 +1,5 @@
 import pathModule from "node:path";
-import { insideDirectory, excludedFromIndex, resolveScopedIndexRoots, resolveIndexScanRoots, type IndexScope } from "./index-scope.js";
+import { insideDirectory, indexPathAllowed, resolveScopedIndexRoots, resolveIndexScanRoots, type IndexScope } from "./index-scope.js";
 import type { DocumentMutationObservation } from "../documents/authority.js";
 import type { DocumentAuthority } from "../documents/authority.js";
 import type { FileSearchItems } from "../fs/types.js";
@@ -129,6 +129,7 @@ export function createSymbolGraphRuntime(options: SymbolGraphRuntimeOptions) {
     running: Promise<void> | null;
   }
   const catalogScans = new Map<string, CatalogScanState>();
+  const manualWorkspaces = new Set<string>();
   let disposed = false;
 
   /**
@@ -169,8 +170,8 @@ export function createSymbolGraphRuntime(options: SymbolGraphRuntimeOptions) {
     if (scope) {
       signal = AbortSignal.any([scope.signal, ...(signal ? [signal] : [])]);
       const root = (await options.documents.inspectWorkspace!(workspaceId)).root;
-      const roots = await resolveScopedIndexRoots(root, scope);
-      if (signal.aborted || excludedFromIndex(scope, pathModule.resolve(root, path)) || !roots.some((directory) => insideDirectory(directory, pathModule.resolve(root, path)))) return null;
+      const roots = await resolveScopedIndexRoots(root, scope, manualWorkspaces.has(workspaceId));
+      if (signal.aborted || !indexPathAllowed(scope, pathModule.resolve(root, path), manualWorkspaces.has(workspaceId)) || !roots.some((directory) => insideDirectory(directory, pathModule.resolve(root, path)))) return null;
     }
     if (!options.structureSource) return loadSymbolsFromLsp(workspaceId, path, languageId, signal);
     let analysis;
@@ -319,7 +320,7 @@ export function createSymbolGraphRuntime(options: SymbolGraphRuntimeOptions) {
       if (scope) {
         const root = (await options.documents.inspectWorkspace!(event.workspaceId)).root;
         const roots = await resolveScopedIndexRoots(root, scope);
-        if (scope.signal.aborted || excludedFromIndex(scope, pathModule.resolve(root, event.resourceId)) || !roots.some((directory) => insideDirectory(directory, pathModule.resolve(root, event.resourceId)))) return;
+        if (scope.signal.aborted || !indexPathAllowed(scope, pathModule.resolve(root, event.resourceId)) || !roots.some((directory) => insideDirectory(directory, pathModule.resolve(root, event.resourceId)))) return;
       }
       const collector = await collectorFor(event.workspaceId);
       if (!collector) return;
@@ -331,7 +332,7 @@ export function createSymbolGraphRuntime(options: SymbolGraphRuntimeOptions) {
     })());
   };
 
-  const scanWorkspace = (workspaceId: string, optionsForScan?: { signal?: AbortSignal }): Promise<void> => {
+  const scanWorkspace = (workspaceId: string, optionsForScan?: { signal?: AbortSignal; manual?: boolean }): Promise<void> => {
     if (disposed || !options.searchFilesystemFiles || !options.documents.inspectWorkspace) return Promise.resolve();
     if (optionsForScan?.signal?.aborted) return Promise.resolve();
     const state = catalogScans.get(workspaceId) ?? {
@@ -339,11 +340,13 @@ export function createSymbolGraphRuntime(options: SymbolGraphRuntimeOptions) {
     };
     catalogScans.set(workspaceId, state);
     if (state.running) {
+      if (optionsForScan?.manual && !manualWorkspaces.has(workspaceId)) catalogControllers.get(workspaceId)?.abort();
       if (!catalogControllers.get(workspaceId)?.signal.aborted) return state.running;
       return state.running.then(() => scanWorkspace(workspaceId, optionsForScan));
     }
 
     const controller = new AbortController();
+    if (optionsForScan?.manual) manualWorkspaces.add(workspaceId);
     catalogControllers.set(workspaceId, controller);
     const scope = options.getIndexScope?.();
     const signal = AbortSignal.any([controller.signal,
@@ -357,7 +360,7 @@ export function createSymbolGraphRuntime(options: SymbolGraphRuntimeOptions) {
         } catch {
           return;
         }
-        const roots = await (scope ? resolveScopedIndexRoots(root, scope) : resolveIndexScanRoots(root, undefined));
+        const roots = await (scope ? resolveScopedIndexRoots(root, scope, optionsForScan?.manual) : resolveIndexScanRoots(root, undefined));
         if (roots.length === 0 || signal.aborted) return;
         const inventories = await Promise.all(roots.map((directory) => options.searchFilesystemFiles!(directory, {
           query: "", respectGitignore: true, includeRevisions: true, signal,
@@ -370,7 +373,7 @@ export function createSymbolGraphRuntime(options: SymbolGraphRuntimeOptions) {
         const store = await options.getStore(workspaceId);
         const collector = await collectorFor(workspaceId);
         if (!store || !collector) return;
-        const catalogFiles = files.filter((file) => !excludedFromIndex(scope, pathModule.resolve(root, file.relativePath))
+        const catalogFiles = files.filter((file) => (!scope || indexPathAllowed(scope, pathModule.resolve(root, file.relativePath), optionsForScan?.manual))
           && CATALOG_SCAN_LANGUAGES.has(languageIdForPath(file.relativePath) ?? ""));
         const inventoryPaths = new Set(catalogFiles.map((file) => file.relativePath));
         for (let offset = 0; offset < catalogFiles.length; offset += CATALOG_SCAN_BATCH) {
@@ -403,7 +406,9 @@ export function createSymbolGraphRuntime(options: SymbolGraphRuntimeOptions) {
             if (disposed || signal.aborted) return;
             const existing = await store.getFileRelations(stalePath);
             if (!existing) continue;
-            const selected = !excludedFromIndex(scope, pathModule.resolve(root, stalePath)) && roots.some((directory) => insideDirectory(directory, pathModule.resolve(root, stalePath)));
+            if (!optionsForScan?.manual && scope && !indexPathAllowed(scope, pathModule.resolve(root, stalePath))
+              && indexPathAllowed(scope, pathModule.resolve(root, stalePath), true)) continue;
+            const selected = (!scope || indexPathAllowed(scope, pathModule.resolve(root, stalePath), optionsForScan?.manual)) && roots.some((directory) => insideDirectory(directory, pathModule.resolve(root, stalePath)));
             if (!selected) {
               await store.removeFileSymbols(stalePath, { expectedDocumentRevision: existing.documentRevision,
                 expectedGeneration: existing.generation, signal });
@@ -448,8 +453,12 @@ export function createSymbolGraphRuntime(options: SymbolGraphRuntimeOptions) {
       } catch (error) {
         if (signal.aborted || disposed) return;
         try { options.onError?.(error); } catch { /* catalog failures stay observational */ }
+        if (optionsForScan?.manual) throw error;
       } finally {
-        if (catalogControllers.get(workspaceId) === controller) catalogControllers.delete(workspaceId);
+        if (catalogControllers.get(workspaceId) === controller) {
+          catalogControllers.delete(workspaceId);
+          manualWorkspaces.delete(workspaceId);
+        }
         if (state.running === task) state.running = null;
       }
     });
@@ -477,6 +486,24 @@ export function createSymbolGraphRuntime(options: SymbolGraphRuntimeOptions) {
   };
 
   return { observeDocumentMutation, scanWorkspace, drain, dispose,
+    purgeDirectory: async (workspaceId: string, directory: string, resourceRoot?: string, preserveDirectories: readonly string[] = []) => {
+      catalogControllers.get(workspaceId)?.abort();
+      await catalogScans.get(workspaceId)?.running;
+      const collector = await collectors.get(workspaceId);
+      await collector?.dispose();
+      collectors.delete(workspaceId);
+      const store = await options.getStore(workspaceId);
+      if (!store) return;
+      const root = resourceRoot ?? (await options.documents.inspectWorkspace!(workspaceId)).root;
+      let removed = false;
+      for (const resourceId of (await store.catalogStats()).paths) {
+        if (!insideDirectory(directory, pathModule.resolve(root, resourceId))) continue;
+        if (preserveDirectories.some((retained) => insideDirectory(retained, pathModule.resolve(root, resourceId)))) continue;
+        await store.removeFileSymbols(resourceId);
+        removed = true;
+      }
+      if (removed) await store.compact();
+    },
     refreshIndexScope: () => {
       for (const controller of catalogControllers.values()) controller.abort();
       for (const workspaceId of catalogScans.keys()) track(scanWorkspace(workspaceId));

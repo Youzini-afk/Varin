@@ -10,6 +10,11 @@ export interface SemanticIndexConfig {
 }
 
 export interface SemanticIndexStatus {
+  directories: {
+    revision: string;
+    entries: Array<{ path: string; workspaceId: string; state: 'active' | 'paused' | 'deleting';
+      project: boolean; manual: boolean; lastCheckedAt?: number; error?: string; checking: boolean; busy: boolean; cacheOnly?: boolean }>;
+  };
   config: SemanticIndexConfig;
   activeConfig: SemanticIndexConfig;
   revision: string;
@@ -36,6 +41,11 @@ async function check(response: Response): Promise<void> {
   if (response.ok) return;
   const body = await response.json().catch(() => null) as { error?: unknown } | null;
   throw new Error(typeof body?.error === 'string' ? body.error : `Index settings request failed (${response.status})`);
+}
+
+export async function manageIndexDirectory(action: 'add' | 'pause' | 'resume' | 'check' | 'remove', directory: string, revision: string): Promise<void> {
+  await check(await runtimeFetch(`${endpoint}/directories`, { method: 'POST', headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ action, directory, revision }) }));
 }
 
 export async function readSemanticIndexStatus(signal?: AbortSignal): Promise<SemanticIndexStatus> {

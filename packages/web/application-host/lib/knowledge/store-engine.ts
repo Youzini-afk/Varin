@@ -2335,6 +2335,9 @@ export async function openKnowledgeStoreEngine(deps: KnowledgeStoreEngineOptions
         });
       },
 
+      async compact(): Promise<void> {
+        return enqueueWrite(() => { nativeDb.compact(); persistence.commit(); });
+      },
       async close(): Promise<void> {
         return enqueueWrite(() => {
           persistence.close();

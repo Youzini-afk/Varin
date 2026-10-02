@@ -65,7 +65,9 @@ import { openWorkspaceKnowledge, type KnowledgeStore } from './lib/knowledge/sto
 import { createKnowledgeContextRuntime } from './lib/knowledge/context-runtime.js';
 import { createGitStatusObserver } from './lib/knowledge/git-status-runtime.js';
 import { createSymbolGraphRuntime } from './lib/knowledge/symbol-runtime.js';
-import { createProjectIndexScope } from './lib/knowledge/index-scope.js';
+import { createProjectIndexScope, insideDirectory, excludedFromIndex, indexPathAllowed } from './lib/knowledge/index-scope.js';
+import { createIndexDirectoryManager } from './lib/knowledge/index-directories.js';
+import { purgeSemanticWorkspaceCache } from './lib/knowledge/semantic/cache-maintenance.js';
 import { projectFolders, projectContainsPath } from '@varin/application-client';
 import { createLocalMinilmEmbedder } from './lib/knowledge/semantic/minilm.js';
 import { createLocalSemanticComponentManager } from './lib/knowledge/semantic/local-component.js';
@@ -3184,7 +3186,7 @@ async function main(options: StartWebUiServerOptions = {}): Promise<WebUiServerC
     }),
   ]);
   const projectDirectories = (settings: { projects?: unknown }) => (sanitizeProjects(settings.projects) ?? []).flatMap(projectFolders);
-  const projectIndexScope = createProjectIndexScope(projectDirectories(await readSettingsFromDisk()),
+  const projectIndexScope = createProjectIndexScope([],
     [path.join(await fsPromises.realpath(VARIN_DATA_DIR), 'bots')]);
   const symbolGraphRuntime = createSymbolGraphRuntime({
     getIndexScope: projectIndexScope.get,
@@ -3258,20 +3260,66 @@ async function main(options: StartWebUiServerOptions = {}): Promise<WebUiServerC
     onError: (error) => console.error('[HarnessKnowledge] Semantic runtime failed:', errorMessage(error)),
   });
   semanticRuntimeHolder.current = semanticRuntime;
-  const indexProjectFolders = async (): Promise<void> => {
-    const snapshot = projectIndexScope.get();
-    for (const directory of snapshot.directories) {
-      if (snapshot.signal.aborted) return;
-      try {
-        const { workspaceId } = await documentsAuthority.resolveWorkspace({ path: directory });
-        if (!snapshot.signal.aborted) catalogScan.start(workspaceId);
-      } catch (error) { console.error('[ProjectIndex] Folder unavailable:', directory, errorMessage(error)); }
-    }
-  };
+  const indexDirectories = createIndexDirectoryManager({
+    dataDir: VARIN_DATA_DIR,
+    resolve: async (directory) => {
+      const { workspaceId } = await documentsAuthority.resolveWorkspace({ path: directory });
+      const { root } = await documentsAuthority.inspectWorkspace(workspaceId);
+      if (excludedFromIndex(projectIndexScope.get(), root)) throw new Error('Bot private directories cannot be indexed');
+      return { path: root, workspaceId };
+    },
+    apply: async (entries) => {
+      if (!projectIndexScope.update(entries.filter((entry) => entry.state === 'active').map((entry) => entry.path),
+        entries.filter((entry) => entry.state === 'paused').map((entry) => entry.path),
+        entries.filter((entry) => entry.state === 'deleting' || entry.state === 'removed').map((entry) => entry.path))) return;
+      symbolGraphRuntime.refreshIndexScope();
+      await semanticRuntime.refreshIndexScope();
+    },
+    check: async (entry, requestSignal) => {
+      const scope = projectIndexScope.get();
+      const signal = AbortSignal.any([scope.signal, requestSignal]);
+      signal.throwIfAborted();
+      await Promise.all([
+        symbolGraphRuntime.scanWorkspace(entry.workspaceId, { signal, manual: true }),
+        semanticRuntime.scanWorkspace(entry.workspaceId, { signal, manual: true, forceContentVerification: true }),
+      ]);
+      signal.throwIfAborted();
+      const progress = semanticRuntime.indexStatuses().find((status) => status.workspaceId === entry.workspaceId)?.progress;
+      if (progress?.phase === 'failed') throw new Error(progress.error ?? 'Index update failed');
+    },
+    purge: async (directory) => semanticIndexManagement.withCacheMaintenance(async () => {
+      const saved = await semanticIndexManagement.read();
+      const caches = [...new Set([semanticIndexManagement.activeDirectory(), ...saved.retainedDirectories])];
+      const scope = projectIndexScope.get();
+      const preserved = [...scope.directories, ...(scope.pausedDirectories ?? [])]
+        .filter((candidate) => insideDirectory(directory, candidate) && indexPathAllowed(scope, candidate, true));
+      for (const resource of await documentsAuthority.listWorkspaceRegistrations()) {
+        if (!insideDirectory(directory, resource.canonicalPath) && !insideDirectory(resource.canonicalPath, directory)) continue;
+        if (preserved.some((candidate) => insideDirectory(candidate, resource.canonicalPath))) continue;
+        await semanticRuntime.withIndexMaintenance(resource.workspaceId, async () => {
+          for (const semanticDirectory of caches) await purgeSemanticWorkspaceCache({ semanticDirectory,
+            workspaceId: resource.workspaceId, resourceRoot: resource.canonicalPath, removedDirectory: directory, preserveDirectories: preserved });
+        });
+        const storeFile = path.join(VARIN_DATA_DIR, 'knowledge', hostId, `${knowledgeStoreKeyForScope(resource.workspaceId)}.tdb`);
+        if (fs.existsSync(storeFile)) await symbolGraphRuntime.purgeDirectory(resource.workspaceId, directory, resource.canonicalPath, preserved);
+      }
+    }),
+    cached: async () => {
+      const saved = await semanticIndexManagement.read();
+      const caches = [...new Set([semanticIndexManagement.activeDirectory(), ...saved.retainedDirectories])];
+      const result: Array<{ path: string; workspaceId: string }> = [];
+      for (const resource of await documentsAuthority.listWorkspaceRegistrations()) {
+        if (caches.some((cache) => fs.existsSync(path.join(cache, 'workspace', resource.workspaceId)))) {
+          result.push({ path: resource.canonicalPath, workspaceId: resource.workspaceId });
+        }
+      }
+      return result;
+    },
+    onError: (error) => console.error('[ProjectIndex]', errorMessage(error)),
+  });
   const unsubscribeProjectIndex = settingsRuntime.subscribe((settings) => {
-    if (!projectIndexScope.update(projectDirectories(settings))) return;
-    symbolGraphRuntime.refreshIndexScope();
-    void semanticRuntime.refreshIndexScope().then(indexProjectFolders).catch((error) => {
+    void indexDirectories.syncProjects(projectDirectories(settings).filter((directory) =>
+      !excludedFromIndex(projectIndexScope.get(), directory))).catch((error) => {
       console.error('[ProjectIndex] Scope refresh failed:', errorMessage(error));
     });
   });
@@ -3284,6 +3332,7 @@ async function main(options: StartWebUiServerOptions = {}): Promise<WebUiServerC
   registerSemanticIndexRoutes(app, {
     management: semanticIndexManagement,
     runtime: semanticRuntime,
+    directories: indexDirectories,
     ...(uiAuthController ? { requireAuth: uiAuthController.requireAuth } : {}),
   });
   knowledgeVectors = createKnowledgeVectorRuntime({
@@ -3315,7 +3364,9 @@ async function main(options: StartWebUiServerOptions = {}): Promise<WebUiServerC
     knowledgeVectors.scheduleReconcile(store, 'workspace', storeKey, storeKey);
     if (userKnowledgeStore) knowledgeVectors.scheduleReconcile(userKnowledgeStore, 'user', 'user', storeKey);
   }
-  void indexProjectFolders();
+  await indexDirectories.load();
+  await indexDirectories.syncProjects(projectDirectories(await readSettingsFromDisk()).filter((directory) =>
+    !excludedFromIndex(projectIndexScope.get(), directory)));
   const observeKnowledgeGitStatus = createGitStatusObserver({
     resolveWorkspaceId: (scope) => documentsAuthority.resolveScopeId(scope),
     observe: (event) => knowledgeContextRuntime.observeGitStatus(event),
@@ -3556,7 +3607,10 @@ async function main(options: StartWebUiServerOptions = {}): Promise<WebUiServerC
         // LSP answers in that view, but those rows must not enter the owning
         // workspace graph as committed facts.
         if (!owningWorkspaceId || owningWorkspaceId !== input.workspaceId) return { recorded: 0 };
-        return relationCollector.record(owningWorkspaceId, input);
+        const root = (await documentsAuthority.inspectWorkspace(input.workspaceId)).root;
+        if (!indexPathAllowed(projectIndexScope.get(), path.resolve(root, input.anchor.path))) return { recorded: 0 };
+        return relationCollector.record(owningWorkspaceId, { ...input,
+          sites: input.sites.filter((site) => indexPathAllowed(projectIndexScope.get(), path.resolve(root, site.path))) });
       },
     }),
     structureSource,
@@ -4248,6 +4302,7 @@ async function main(options: StartWebUiServerOptions = {}): Promise<WebUiServerC
       catalogScan.start = () => undefined;
       unsubscribeProjectIndex();
       projectIndexScope.dispose();
+      await indexDirectories.dispose();
       observeKnowledgeDocumentMutation = () => undefined;
       await semanticRuntime.dispose();
       await symbolGraphRuntime.dispose();

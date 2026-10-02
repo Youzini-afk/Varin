@@ -4,7 +4,7 @@
  */
 
 import type { DocumentAuthority, DocumentMutationObservation } from "../../documents/authority.js";
-import { insideDirectory, excludedFromIndex, resolveScopedIndexRoots, resolveIndexScanRoots as resolveSemanticScanRoots, type IndexScope } from "../index-scope.js";
+import { insideDirectory, indexPathAllowed, resolveScopedIndexRoots, resolveIndexScanRoots as resolveSemanticScanRoots, type IndexScope } from "../index-scope.js";
 import path from "node:path";
 import type { FileSearchEnumerationStatus, FileSearchEnumerationInfo, FileSearchItem } from "../../fs/types.js";
 import { languageIdForPath } from "../../harness/language-id.js";
@@ -63,6 +63,8 @@ export type SemanticScanProgress = SemanticScanBatchProgress & {
 };
 
 export type SemanticScanOptions = {
+  /** One explicit update check may refresh a paused directory. */
+  manual?: boolean;
   signal?: AbortSignal;
   onBatchComplete?: (progress: SemanticScanBatchProgress) => void;
   /** Watch continuity was lost: metadata is not enough to retain old content. */
@@ -327,8 +329,10 @@ export function createSemanticIndexRuntime(options: SemanticIndexRuntimeOptions)
     signal.throwIfAborted();
     const token = nextToken(scope, documentId);
     const embedder = embedderOf();
-    const root = kind === "deleted" ? undefined : (await options.documents.inspectWorkspace(scope.scopeId)).root;
-    const included = root !== undefined && !excludedFromIndex(scopeSnapshot, path.resolve(root, documentId)) && (await (scopeSnapshot ? resolveScopedIndexRoots(root, scopeSnapshot) : resolveSemanticScanRoots(root, options.indexDirectories)))
+    const root = (await options.documents.inspectWorkspace(scope.scopeId)).root;
+    if (root && scopeSnapshot && !indexPathAllowed(scopeSnapshot, path.resolve(root, documentId))
+      && indexPathAllowed(scopeSnapshot, path.resolve(root, documentId), true)) return;
+    const included = root !== undefined && (!scopeSnapshot || indexPathAllowed(scopeSnapshot, path.resolve(root, documentId))) && (await (scopeSnapshot ? resolveScopedIndexRoots(root, scopeSnapshot) : resolveSemanticScanRoots(root, options.indexDirectories)))
       .some((directory) => insideDirectory(directory, path.resolve(root, documentId)));
     const includeIgnored = root !== undefined && (await resolveSemanticScanRoots(root, options.includeIgnoredDirectories ?? []))
       .some(directory => insideDirectory(directory, path.resolve(root, documentId)));
@@ -426,7 +430,7 @@ export function createSemanticIndexRuntime(options: SemanticIndexRuntimeOptions)
       try {
         const root = (await options.documents.inspectWorkspace(scope.scopeId)).root;
         const scanToken = ++revisionClock;
-        const selectedRoots = await (scopeSnapshot ? resolveScopedIndexRoots(root, scopeSnapshot) : resolveSemanticScanRoots(root, options.indexDirectories));
+        const selectedRoots = await (scopeSnapshot ? resolveScopedIndexRoots(root, scopeSnapshot, optionsForScan?.manual) : resolveSemanticScanRoots(root, options.indexDirectories));
         const ignoredRoots = await resolveSemanticScanRoots(root, options.includeIgnoredDirectories ?? []);
         const selections = selectedRoots.flatMap(directory => {
           if (ignoredRoots.some(ignored => insideDirectory(ignored, directory))) return [{ directory, respectGitignore: false }];
@@ -441,7 +445,7 @@ export function createSemanticIndexRuntime(options: SemanticIndexRuntimeOptions)
           const prefix = path.relative(root, selections[index]!.directory).split(path.sep).join("/");
           for (const file of inventory) {
             const relativePath = prefix ? `${prefix}/${file.relativePath}` : file.relativePath;
-            if (!excludedFromIndex(scopeSnapshot, path.resolve(root, relativePath))) byPath.set(relativePath, { ...file, relativePath });
+            if ((!scopeSnapshot || indexPathAllowed(scopeSnapshot, path.resolve(root, relativePath), optionsForScan?.manual))) byPath.set(relativePath, { ...file, relativePath });
           }
         }
         const files = [...byPath.values()] as SemanticScanFiles;
@@ -490,10 +494,13 @@ export function createSemanticIndexRuntime(options: SemanticIndexRuntimeOptions)
         const catalogIds = new Set(catalog.map((file) => file.relativePath));
         const enumerationComplete = files.enumerationStatus === undefined || files.enumerationStatus === "complete";
         if (!enumerationComplete || unsupportedFiles > 0) scanComplete = false;
-        const removed = enumerationComplete ? publishedBefore.filter((documentId) => !catalogIds.has(documentId)) : [];
+        const retainedPaused = (documentId: string) => !optionsForScan?.manual && scopeSnapshot
+          && !indexPathAllowed(scopeSnapshot, path.resolve(root, documentId))
+          && indexPathAllowed(scopeSnapshot, path.resolve(root, documentId), true);
+        const removed = enumerationComplete ? publishedBefore.filter((documentId) => !catalogIds.has(documentId) && !retainedPaused(documentId)) : [];
         const removalTokens = new Map(removed.map((documentId) => [documentId, scanTokenFor(scope, documentId, scanToken)]));
         const unverified = new Set([...publishedBefore, ...catalog.map((file) => file.relativePath)].filter((documentId) => (
-          (documentTokens.get(`${scopeKey(scope, "token")}\0${documentId}`) ?? 0) <= scanToken
+          !retainedPaused(documentId) && (documentTokens.get(`${scopeKey(scope, "token")}\0${documentId}`) ?? 0) <= scanToken
         )));
         unverifiedPaths.set(resolvedKey, unverified);
         const priorMetadata = verifiedScanMetadata.get(resolvedKey) ?? new Map<string, string>();
@@ -795,7 +802,7 @@ export function createSemanticIndexRuntime(options: SemanticIndexRuntimeOptions)
     if (scopeSnapshot) {
       const { root } = await options.documents.inspectWorkspace(scope.scopeId);
       resourceRoot = root;
-      const selected = await resolveScopedIndexRoots(root, scopeSnapshot);
+      const selected = await resolveScopedIndexRoots(root, scopeSnapshot, true);
       const requested = searchOptions?.roots?.map((entry) => path.resolve(root, entry)) ?? [root];
       const roots = selected.flatMap((directory) => requested.flatMap((request) => {
         if (insideDirectory(directory, request)) return [request];
@@ -888,10 +895,12 @@ export function createSemanticIndexRuntime(options: SemanticIndexRuntimeOptions)
         ...overlays.map((overlay) => overlay.path),
         ...(unverifiedPaths.get(key) ?? []),
         ...(mutationPending.get(scopeId) ?? []),
-      ];
+      ].filter((documentId) => !resourceRoot || !scopeSnapshot || indexPathAllowed(scopeSnapshot, path.resolve(resourceRoot, documentId))
+        || !indexPathAllowed(scopeSnapshot, path.resolve(resourceRoot, documentId), true));
       const indexedHits = queryVector
         ? await waitWithSignal(store.search(queryVector, limit, {
           maskPaths,
+          ...(resourceRoot && scopeSnapshot ? { allowDocument: (documentId: string) => indexPathAllowed(scopeSnapshot, path.resolve(resourceRoot!, documentId), true) } : {}),
           extras: overlay.extras,
           disk: searchOptions?.view !== "working-state",
           ...(searchOptions?.roots === undefined ? {} : { roots: searchOptions.roots }),
@@ -908,7 +917,7 @@ export function createSemanticIndexRuntime(options: SemanticIndexRuntimeOptions)
       const overlayByPath = new Map(overlays.map((item) => [item.path, item]));
       for (const hit of indexedHits) {
         signal?.throwIfAborted();
-        if (resourceRoot && excludedFromIndex(scopeSnapshot, path.resolve(resourceRoot, hit.documentId))) continue;
+        if (resourceRoot && scopeSnapshot && !indexPathAllowed(scopeSnapshot, path.resolve(resourceRoot, hit.documentId), true)) continue;
         if (searchOptions?.view === "working-state" || searchOptions?.threadQuery) {
           hits.push(hit);
           continue;

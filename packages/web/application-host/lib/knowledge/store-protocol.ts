@@ -21,7 +21,7 @@ export const STORE_METHODS: Record<StoreMethod, true> = {
   getDefinedSymbols: true, getFileRelations: true, findLinks: true,
   findReferences: true, findCallers: true, findCalls: true, catalogStats: true,
   findImporters: true, connectionLiterals: true, deleteSession: true,
-  runRetention: true, close: true,
+  runRetention: true, compact: true, close: true,
 };
 export const isStoreMethod = (value: unknown): value is StoreMethod => (
   typeof value === "string" && Object.hasOwn(STORE_METHODS, value)

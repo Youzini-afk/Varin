@@ -1,10 +1,7 @@
 import React from 'react';
-import { projectFolders } from '@varin/application-client';
-import { useProjectsStore } from '@/stores/useProjectsStore';
-import { useUIStore } from '@/stores/useUIStore';
+import { IndexDirectories } from './IndexDirectories';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
-import { Checkbox } from '@/components/ui/checkbox';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { SettingsFieldRow, SettingsSection } from '@/components/sections/shared/SettingsSection';
 import { DirectoryExplorerDialog } from '@/components/session/DirectoryExplorerDialog';
@@ -27,19 +24,6 @@ const bytesLabel = (bytes: number): string => {
 
 export function IndexSettings(props: Partial<HarnessSettingsPageProps>) {
   const { t } = useI18n();
-  const phaseLabel = (phase: string): string => {
-    if (phase === 'enumerating') return t('settings.page.harness.index.phase.enumerating');
-    if (phase === 'processing' || phase === 'building' || phase === 'rebuilding') return t('settings.page.harness.index.phase.processing');
-    if (phase === 'ready') return t('settings.page.harness.index.phase.ready');
-    if (phase === 'failed') return t('settings.page.harness.index.phase.failed');
-    if (phase === 'cancelled') return t('settings.page.harness.index.phase.cancelled');
-    return t('settings.page.harness.index.phase.idle');
-  };
-  const coverageLabel = (coverage: string): string => {
-    if (coverage === 'complete') return t('settings.page.harness.index.coverage.complete');
-    if (coverage === 'partial') return t('settings.page.harness.index.coverage.partial');
-    return t('settings.page.harness.index.coverage.empty');
-  };
   const cwd = useDirectoryStore((state) => state.currentDirectory);
   const loadProviders = usePiProviderStore((state) => state.load);
   const localSemantic = useLocalSemantic();
@@ -49,7 +33,6 @@ export function IndexSettings(props: Partial<HarnessSettingsPageProps>) {
   const [busy, setBusy] = React.useState(false);
   const [error, setError] = React.useState<string | null>(null);
   const [pickerTarget, setPickerTarget] = React.useState<'storage' | null>(null);
-  const projects = useProjectsStore((state) => state.projects);
   const mounted = React.useRef(false);
   const statusRequest = React.useRef<AbortController | null>(null);
 
@@ -117,30 +100,7 @@ export function IndexSettings(props: Partial<HarnessSettingsPageProps>) {
     && (draft.storageDirectory === null || draft.storageDirectory.trim().length > 0);
 
   return <>
-    <SettingsSection title={t('settings.page.harness.index.scope.title')}
-      description={t('settings.page.harness.index.scope.description')} settingsItem="harness.semanticIndex.scope">
-      {projects.map((project) => <div key={project.id} className="space-y-2">
-        <div className="flex items-center justify-between gap-3">
-          <p className="typography-ui-label">{project.label || project.path}</p>
-          <Button size="sm" variant="ghost" onClick={() => {
-            const ui = useUIStore.getState();
-            ui.setSettingsProjectsSelectedId(project.id);
-            ui.setSettingsPage('projects');
-          }}>{t('projects.folders.edit')}</Button>
-        </div>
-        {projectFolders(project).map((directory) => <div key={directory} className="flex min-w-0 flex-wrap items-center gap-2">
-          <span className="min-w-0 flex-1 break-all typography-meta text-muted-foreground">{directory}</span>
-          <label className="flex items-center gap-2 typography-meta">
-            <Checkbox checked={(draft?.includeIgnoredDirectories ?? []).includes(directory)} onChange={(checked) => edit({
-              includeIgnoredDirectories: checked === true ? [...new Set([...(draft?.includeIgnoredDirectories ?? []), directory])]
-                : (draft?.includeIgnoredDirectories ?? []).filter(item => item !== directory),
-            })} />
-            {t('settings.page.harness.index.scope.includeIgnored')}
-          </label>
-        </div>)}
-      </div>)}
-      {projects.length === 0 ? <p className="typography-meta text-muted-foreground">{t('settings.page.harness.index.scope.none')}</p> : null}
-    </SettingsSection>
+    <IndexDirectories status={status} draft={draft} edit={edit} refresh={refresh} />
     <SettingsSection title={t('settings.page.harness.index.storage.title')}
       description={t('settings.page.harness.index.storage.description')} settingsItem="harness.semanticIndex">
       <SettingsFieldRow label={t('settings.page.harness.index.storage.mode')}>
@@ -189,29 +149,6 @@ export function IndexSettings(props: Partial<HarnessSettingsPageProps>) {
       </SettingsFieldRow>
       <Button size="sm" disabled={!dirty || !validDraft || busy} onClick={() => { void save(); }}>{t('settings.page.harness.index.save')}</Button>
       {error ? <p role="alert" className="typography-meta text-destructive">{error}</p> : null}
-    </SettingsSection>
-    <SettingsSection title={t('settings.page.harness.index.progress.title')}
-      description={t('settings.page.harness.index.progress.description')}>
-      <Button size="sm" variant="outline" onClick={() => { void refresh(); }}>{t('settings.page.harness.index.refresh')}</Button>
-      {status?.roots.length ? status.roots.map((root) => <div key={root.workspaceId} className="space-y-1 rounded-lg border border-border/60 p-3">
-        <p className="break-all typography-ui-label">{root.root ?? root.workspaceId}</p>
-        <p className="typography-meta text-muted-foreground">{root.indexingEnabled ? phaseLabel(root.progress?.phase ?? root.status.lifecycle) : t('settings.page.harness.index.scope.excluded')} · {coverageLabel(root.status.coverage)}
-          {root.progress?.totalFiles ? ` · ${root.progress.processedFiles}/${root.progress.totalFiles}` : ''}
-          {root.progress ? ` · ${t('settings.page.harness.index.progress.documents', { count: root.progress.publishedDocuments })}` : ''}</p>
-        {root.progress?.totalFiles ? <progress className="w-full" value={root.progress.processedFiles} max={root.progress.totalFiles} /> : null}
-        {root.progress?.coverageStats ? <>
-          <p className="typography-meta text-muted-foreground">{t('settings.page.harness.index.progress.coverageStats', {
-            visible: root.progress.coverageStats.visibleFiles, structured: root.progress.coverageStats.structurallySupportedFiles,
-            fallback: root.progress.coverageStats.textFallbackFiles, unsupported: root.progress.coverageStats.unsupportedFiles,
-          })}</p>
-          {root.progress.coverageStats.inventories.map((inventory, index) => <React.Fragment key={`${inventory.root}:${index}`}>
-            {inventory.gitRoot ? <p className="break-all typography-meta text-muted-foreground">{t('settings.page.harness.index.progress.gitRoot', { root: inventory.gitRoot })}</p> : null}
-            {inventory.selectedRootIgnored ? <p className="break-all typography-meta text-[var(--status-warning)]">
-              {t('settings.page.harness.index.progress.ignoredRoot', { directory: inventory.root })}</p> : null}
-          </React.Fragment>)}
-        </> : null}
-        {root.progress?.error ? <p role="alert" className="typography-meta text-destructive">{root.progress.error}</p> : null}
-      </div>) : <p className="typography-meta text-muted-foreground">{t('settings.page.harness.index.progress.empty')}</p>}
     </SettingsSection>
     <LocalSemanticSettings state={localSemantic} />
     {props.harness && props.update ? <InferenceSettings harness={props.harness} update={props.update}

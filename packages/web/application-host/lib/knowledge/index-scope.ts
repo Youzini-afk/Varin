@@ -3,6 +3,8 @@ import path from 'node:path';
 
 export interface IndexScope {
   directories: readonly string[];
+  pausedDirectories?: readonly string[];
+  removedDirectories?: readonly string[];
   /** Host-owned private state (for example Bot homes), never a source corpus. */
   excludedDirectories?: readonly string[];
   signal: AbortSignal;
@@ -11,8 +13,22 @@ export interface IndexScope {
 export const excludedFromIndex = (scope: IndexScope | undefined, absolutePath: string): boolean =>
   scope?.excludedDirectories?.some((directory) => insideDirectory(directory, absolutePath)) ?? false;
 
-export async function resolveScopedIndexRoots(root: string, scope: IndexScope): Promise<string[]> {
-  return (await resolveIndexScanRoots(root, scope.directories)).filter((directory) => !excludedFromIndex(scope, directory));
+/** More-specific directory settings override a parent's setting; private Host
+ * state always stays excluded. Pause retains query access to published data. */
+export function indexPathAllowed(scope: IndexScope, absolutePath: string, query = false): boolean {
+  if (excludedFromIndex(scope, absolutePath)) return false;
+  const rules = [
+    ...scope.directories.map((directory) => ({ directory, allowed: true })),
+    ...(scope.pausedDirectories ?? []).map((directory) => ({ directory, allowed: query })),
+    ...(scope.removedDirectories ?? []).map((directory) => ({ directory, allowed: false })),
+  ].filter((rule) => insideDirectory(rule.directory, absolutePath))
+    .sort((left, right) => right.directory.length - left.directory.length);
+  return rules[0]?.allowed ?? false;
+}
+
+export async function resolveScopedIndexRoots(root: string, scope: IndexScope, query = false): Promise<string[]> {
+  const selected = query ? [...scope.directories, ...(scope.pausedDirectories ?? [])] : scope.directories;
+  return (await resolveIndexScanRoots(root, selected)).filter((directory) => indexPathAllowed(scope, directory, query));
 }
 
 export const insideDirectory = (parent: string, child: string): boolean => {
@@ -42,17 +58,25 @@ export async function resolveIndexScanRoots(root: string, selected: readonly str
 /** A folder edit cancels work accepted under the previous indexing scope. */
 export function createProjectIndexScope(directories: readonly string[], excludedDirectories: readonly string[] = []) {
   let controller = new AbortController();
+  let disposed = false;
   let current = [...new Set(directories)].sort();
+  let paused: string[] = [];
+  let removed: string[] = [];
   return {
-    get: (): IndexScope => ({ directories: current, excludedDirectories, signal: controller.signal }),
-    update(next: readonly string[]): boolean {
+    get: (): IndexScope => ({ directories: current, pausedDirectories: paused, removedDirectories: removed, excludedDirectories, signal: controller.signal }),
+    update(next: readonly string[], pausedDirectories: readonly string[] = [], removedDirectories: readonly string[] = []): boolean {
+      if (disposed) return false;
       const normalized = [...new Set(next)].sort();
-      if (JSON.stringify(normalized) === JSON.stringify(current)) return false;
+      const nextPaused = [...new Set(pausedDirectories)].sort();
+      const nextRemoved = [...new Set(removedDirectories)].sort();
+      if (JSON.stringify([normalized, nextPaused, nextRemoved]) === JSON.stringify([current, paused, removed])) return false;
       controller.abort();
       controller = new AbortController();
       current = normalized;
+      paused = nextPaused;
+      removed = nextRemoved;
       return true;
     },
-    dispose: () => controller.abort(),
+    dispose: () => { disposed = true; controller.abort(); },
   };
 }

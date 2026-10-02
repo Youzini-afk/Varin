@@ -112,6 +112,7 @@ export type SemanticOverlayBlock = {
 };
 
 export type SemanticSearchOptions = {
+  allowDocument?: (documentId: string) => boolean;
   roots?: readonly string[];
   maskPaths?: readonly string[];
   extras?: readonly SemanticOverlayBlock[];
@@ -537,10 +538,10 @@ export function createSemanticGenerationStore(options: {
       const includeDisk = searchOptions.disk !== false;
       const restricted = rootsAreRestricted(roots);
       const allowedDisk = (documentId: string): boolean => (
-        !mask.has(documentId) && (!restricted || pathInRoots(documentId, roots))
+        !mask.has(documentId) && (!restricted || pathInRoots(documentId, roots)) && (searchOptions.allowDocument?.(documentId) ?? true)
       );
       const allowedExtra = (documentId: string): boolean => (
-        !restricted || pathInRoots(documentId, roots)
+        (!restricted || pathInRoots(documentId, roots)) && (searchOptions.allowDocument?.(documentId) ?? true)
       );
       return enqueue(() => {
         const extras = (searchOptions.extras ?? [])
@@ -575,7 +576,7 @@ export function createSemanticGenerationStore(options: {
         const db = writer ?? openDb(dbFile(), space.dim, writer ? "readWrite" : "readOnly");
         try {
           let hits: Array<{ score: number; payload: BlockPayload | SemanticOverlayBlock }>;
-          const scoped = restricted || mask.size > 0;
+          const scoped = restricted || mask.size > 0 || Boolean(searchOptions.allowDocument);
           if (scoped) {
             const scopedIds = [...documentBlockIds(db).entries()]
               .filter(([documentId]) => allowedDisk(documentId))

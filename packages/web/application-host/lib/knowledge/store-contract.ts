@@ -621,6 +621,8 @@ export interface KnowledgeStore {
   /** Resolved call sites whose enclosing caller is `caller` — "what caller calls". */
   findCalls(caller: string, roots?: readonly string[]): Promise<SymbolGraphRelationRecord[]>;
   catalogStats(): Promise<SymbolGraphCatalogStats>;
+  /** Reclaim deleted derived rows inside the existing storage owner. */
+  compact(): Promise<void>;
   findImporters(path: string): Promise<SymbolGraphImportersResult>;
   /**
    * Values that are a confirmed connection literal somewhere in the graph.

@@ -45,15 +45,29 @@ derived store (`../vectors/`); they reuse `harness.embed` but never this MiniLM 
 - Management: `index-management.ts` owns `semantic-index-settings.json` under the Varin data directory.
   It exposes authenticated status and revisioned configuration routes. The settings page reports the
   active index directory, disk bytes, active-root scan progress, and the embedding model binding.
-  Project entries own the source folder collection: `path` is the default execution folder and
-  `additionalPaths` contains the other explicitly selected folders. `../index-scope.ts` intersects
-  this collection with Documents addressing roots for both semantic and symbol inventories. A
+  Project entries own their folder collection: `path` is the default execution folder and
+  `additionalPaths` contains the other explicitly selected folders. `../index-directories.ts`
+  persists directory maintenance state in `index-directories.json`: project folders join by default,
+  and users may add independent directories. `../index-scope.ts` intersects the active collection
+  with Documents addressing roots for both semantic and symbol inventories. A
   registered root, tool read/write, inference request, or Bot home does not grant indexing eligibility.
   Empty collections disable background source indexing; lexical retrieval and direct structure reads
   remain available. The Host's private Bot homes are excluded even when a selected parent contains them.
   Folder edits cancel work under the old scope and refresh indexing without a restart. Queries mask
   removed folders immediately. A broad addressing root is never recursively watched merely because
   one selected project lives beneath it. Startup activates each selected folder directly.
+  Pausing cancels background scans and stops incremental maintenance while preserving published
+  indexes for query-time revision checks. An explicit update check may refresh a paused directory
+  once. More-specific folder settings override their parent's state; Host-private exclusions always win.
+  Removal first persists a deleting state and stops writers. The semantic workspace maintenance gate
+  closes active generation handles; `cache-maintenance.ts` then removes the matching paths from every
+  retained/current model space and compacts remaining generations, or removes the whole derived
+  workspace cache. The graph storage owner deletes matching source rows and compacts its database,
+  preserving memory, sessions and other folders. Source files are untouched. Failed cleanup stays
+  visible and retryable; deleting entries resume cleanup on Host restart. Removed entries remain
+  tombstones so an unchanged project folder is not silently re-added. Existing on-disk caches are
+  listed without enrolling their source roots in background indexing; cleanup also works for missing
+  source directories. Cache-directory removal and per-folder cleanup share the management write queue.
   Native inventory reports the actual Git root and whether an empty selected directory is ignored.
   Each selected directory can opt into `includeIgnoredDirectories`; the override is clipped to
   the selected indexing scope and applies to subsequent mutation eligibility as well as scans.

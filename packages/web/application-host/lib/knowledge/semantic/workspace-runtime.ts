@@ -13,7 +13,7 @@ import type { SemanticEmbedder } from './embedder.js';
 import { isAbortError, waitWithSignal } from '../../cancellation.js';
 import { workspaceScope } from './identity.js';
 import { pinSemanticQueryView, type SemanticDraftReadResult } from './query-view.js';
-import { createSemanticIndexRuntime, resolveSemanticScanRoots, type SemanticIndexRuntimeOptions } from './runtime.js';
+import { createSemanticIndexRuntime, resolveSemanticScanRoots, type SemanticIndexRuntimeOptions, type SemanticScanOptions } from './runtime.js';
 import { requestWorkspaceInference, resolveInferenceBinding } from './workspace-inference.js';
 import { isBotScopeId, isSessionScopeId } from '../../harness/owner-scope.js';
 
@@ -88,6 +88,7 @@ export function createWorkspaceSemanticRuntime(options: WorkspaceSemanticRuntime
   let localEmbedder = options.embedder;
   const states = new Map<string, WorkspaceState>();
   const loads = new Map<string, Promise<WorkspaceState>>();
+  const maintenance = new Map<string, Promise<unknown>>();
   const watchWorkspaces = new Map<string, string>();
   const pending = new Set<Promise<unknown>>();
   let epoch = 0;
@@ -301,6 +302,7 @@ export function createWorkspaceSemanticRuntime(options: WorkspaceSemanticRuntime
     try { await state.watching; } finally { state.watching = null; }
   };
   const getWorkspace = async (workspaceId: string, autoScan = true): Promise<WorkspaceState> => {
+    await maintenance.get(workspaceId);
     assertActive();
     const loading = loads.get(workspaceId);
     if (loading) return loading;
@@ -380,7 +382,8 @@ export function createWorkspaceSemanticRuntime(options: WorkspaceSemanticRuntime
   const semanticRecall: NonNullable<HarnessServiceHost['semanticRecall']> = async (workspaceId, question, limit, searchOptions) => {
     searchOptions?.signal?.throwIfAborted();
     const state = await waitWithSignal(getWorkspace(workspaceId), searchOptions?.signal);
-    if (!state.indexingEnabled) return {
+    const queryScope = options.getIndexScope?.();
+    if (queryScope ? (await resolveScopedIndexRoots(state.root, queryScope, true)).length === 0 : !state.indexingEnabled) return {
       status: 'unavailable', coverage: 'empty', lifecycle: 'idle', hits: [],
       note: 'This resource root is outside the selected semantic index directories.',
     };
@@ -583,9 +586,31 @@ export function createWorkspaceSemanticRuntime(options: WorkspaceSemanticRuntime
       status: state.runtime.statusFor(workspaceScope(state.workspaceId)),
       progress: state.runtime.scanProgress(workspaceScope(state.workspaceId)),
     })),
-    scanWorkspace: async (workspaceId: string) => {
+    scanWorkspace: async (workspaceId: string, scanOptions?: SemanticScanOptions) => {
       const state = await getWorkspace(workspaceId, false);
-      if (state.indexingEnabled) await state.runtime.scanWorkspace(workspaceId);
+      const queryScope = options.getIndexScope?.();
+      const manualAllowed = scanOptions?.manual && queryScope && (await resolveScopedIndexRoots(state.root, queryScope, true)).length > 0;
+      if (state.indexingEnabled || manualAllowed) await state.runtime.scanWorkspace(workspaceId, scanOptions);
+    },
+    withIndexMaintenance: async <T>(workspaceId: string, work: () => Promise<T>): Promise<T> => {
+      const prior = maintenance.get(workspaceId);
+      const task = (async () => {
+        await prior;
+        await loads.get(workspaceId);
+        const state = states.get(workspaceId);
+        states.delete(workspaceId);
+        if (state) {
+          state.documentWatch?.close();
+          await state.runtime.dispose();
+          await state.refreshTail;
+          await state.watching;
+          await unwatch(state);
+        }
+        return work();
+      })();
+      maintenance.set(workspaceId, task);
+      try { return await task; }
+      finally { if (maintenance.get(workspaceId) === task) maintenance.delete(workspaceId); }
     },
     refreshLocalSemantic: (next: SemanticEmbedder): void => {
       localEmbedder = next;

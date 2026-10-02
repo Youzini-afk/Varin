@@ -18,6 +18,12 @@ native directory access, directory creation and Git cloning. `ProjectFoldersSett
 by desktop settings and the mobile project editor. Folder edits preserve project/session IDs and
 project configuration; changing the default affects new conversations, not running sessions.
 
+Index settings use `IndexDirectories` for directory-level add, pause/resume, explicit update checks
+and deletion. Project membership and index maintenance are independent: deleting an index leaves
+the project folder and its files intact. Paused indexes remain usable, and a manual check can run
+once without resuming background work. Cleanup progress/errors stay on the directory row; old cached
+roots are manageable without automatically enrolling them in indexing.
+
 - `src/lib/documents/DOCUMENTATION.md`: revisioned client buffers and conflict behavior.
 - `src/lib/workbench/editors/DOCUMENTATION.md`: editor groups, providers, panels, and layout state.
 - `src/lib/monaco/DOCUMENTATION.md`: desktop/Web editor projection and language integration.

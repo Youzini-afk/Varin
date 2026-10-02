@@ -4,6 +4,7 @@ import path from "node:path";
 import express, { type Express, type RequestHandler } from "express";
 import type { createWorkspaceSemanticRuntime } from "./workspace-runtime.js";
 import { semanticRootDir } from "./identity.js";
+import type { createIndexDirectoryManager, IndexDirectoryAction } from '../index-directories.js';
 
 export interface SemanticIndexConfiguration {
   /** Base directory; the Host-specific index remains under knowledge/<host>/semantic. */
@@ -168,7 +169,12 @@ export function createSemanticIndexManagement(dataDir: string, hostId: string) {
   };
   const activeDirectory = () => semanticRootDir(active.storageDirectory ?? dataDir, hostId);
   const configuredDirectory = (config: SemanticIndexConfiguration) => semanticRootDir(config.storageDirectory ?? dataDir, hostId);
-  return { read, load, save, removeRetained, activeDirectory, configuredDirectory, active: () => active, directoryBytes };
+  const withCacheMaintenance = <T>(work: () => Promise<T>): Promise<T> => {
+    const run = saveTail.then(work);
+    saveTail = run.then(() => undefined, () => undefined);
+    return run;
+  };
+  return { read, load, save, removeRetained, withCacheMaintenance, activeDirectory, configuredDirectory, active: () => active, directoryBytes };
 }
 
 export function registerSemanticIndexRoutes(
@@ -176,6 +182,7 @@ export function registerSemanticIndexRoutes(
   options: {
     management: ReturnType<typeof createSemanticIndexManagement>;
     runtime: ReturnType<typeof createWorkspaceSemanticRuntime>;
+    directories?: ReturnType<typeof createIndexDirectoryManager>;
     requireAuth?: RequestHandler;
   },
 ): void {
@@ -188,6 +195,7 @@ export function registerSemanticIndexRoutes(
       const roots = options.runtime.indexStatuses();
       response.setHeader("Cache-Control", "no-store");
       response.json({ config: saved.config, activeConfig: options.management.active(), revision: saved.revision, activeDirectory,
+        directories: await options.directories?.list() ?? { revision: '', entries: [] },
         ...(saved.error ? { configError: saved.error } : {}),
         configuredDirectory: options.management.configuredDirectory(saved.config),
         restartRequired: JSON.stringify(saved.config) !== JSON.stringify(options.management.active()),
@@ -196,6 +204,21 @@ export function registerSemanticIndexRoutes(
           directory, bytes: await options.management.directoryBytes(directory), active: sameDirectory(directory, activeDirectory),
         }))) });
     } catch (error) { next(error); }
+  });
+  app.post('/api/harness/semantic-index/directories', requireAuth, parseSettingsJson, async (request, response) => {
+    try {
+      if (!options.directories) { response.status(503).json({ error: 'Index directory management is unavailable' }); return; }
+      const { action, directory, revision } = request.body ?? {};
+      if (!['add', 'pause', 'resume', 'check', 'remove'].includes(action) || typeof directory !== 'string'
+        || !path.isAbsolute(directory) || typeof revision !== 'string') {
+        response.status(400).json({ error: 'An index directory, action and revision are required' }); return;
+      }
+      await options.directories.act(action as IndexDirectoryAction, directory, revision);
+      response.status(202).json(options.directories.snapshot());
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
+      response.status(message.includes('changed elsewhere') ? 409 : 400).json({ error: message });
+    }
   });
   app.put("/api/harness/semantic-index", requireAuth, parseSettingsJson, async (request, response) => {
     try {

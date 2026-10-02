@@ -12,6 +12,19 @@ import { createProjectIndexScope } from './index-scope.js';
 const TEST_DIR = join(tmpdir(), "varin-symbol-runtime");
 
 describe("symbol graph runtime", () => {
+  it('purges only the selected source catalog and preserves other source folders and memory', async () => {
+    const root = join(TEST_DIR, 'source');
+    for (const folder of ['removed', 'retained']) await store.replaceFileSymbols(`${folder}/file.ts`, 'typescript', [{
+      name: folder, kind: 'function', range: { startLine: 0, startCharacter: 0, endLine: 0, endCharacter: 3 },
+    }], 'revision');
+    const memoryId = await store.putKnowledge({ scope: 'workspace', status: 'accepted', content: 'Keep this memory', trigger: 'fixture' });
+    const runtime = createSymbolGraphRuntime({ getStore: async () => store, documents: {} as never, supervisor: {} as never });
+    try {
+      await runtime.purgeDirectory('workspace', join(root, 'removed'), root);
+      expect((await store.catalogStats()).paths).toEqual(['retained/file.ts']);
+      expect((await store.getKnowledge(memoryId))?.content).toBe('Keep this memory');
+    } finally { await runtime.dispose(); }
+  });
   it('limits structure inventories and mutation collection to explicit project folders', async () => {
     const root = join(TEST_DIR, 'user-home');
     const selected = join(root, 'project');
