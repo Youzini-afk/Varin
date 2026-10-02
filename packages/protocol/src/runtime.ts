@@ -22,6 +22,7 @@ import type {
 
 type DirectRuntimeMethod =
   | "agent.compact"
+  | "agent.compact.apply"
   | "agent.followUp"
   | "agent.prompt"
   | "agent.queue.clear"
@@ -198,6 +199,7 @@ export type RuntimeMethodMap = Omit<Pick<HostMethodMap, DirectRuntimeMethod>, "s
 export const RUNTIME_METHODS = [
   "agent.abort",
   "agent.compact",
+  "agent.compact.apply",
   "agent.followUp",
   "agent.prompt",
   "agent.queue.clear",

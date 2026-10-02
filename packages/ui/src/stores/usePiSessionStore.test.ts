@@ -1704,6 +1704,30 @@ describe('Pi session store', () => {
     }]);
   });
 
+  test('requests application of the selected summary and keeps applying until the commit arrives', async () => {
+    const runtime = new FakeRuntime();
+    runtime.handler = method => {
+      if (method === 'agent.compact.apply') return { accepted: true, taskId: 'task-a' };
+      throw new Error(`Unexpected ${method}`);
+    };
+    const store = createPiSessionStore(runtime);
+    await store.getState().applyCompaction('session-a', 'task-a');
+    expect(runtime.calls).toEqual([{ method: 'agent.compact.apply', params: { sessionId: 'session-a', taskId: 'task-a' } }]);
+    const emit = (type: 'finished' | 'apply-requested' | 'committed', seq: number) => runtime.emit({
+      kind: 'event', event: 'compaction.trace', seq,
+      data: { sessionId: 'session-a', taskId: 'task-a', type },
+      source: { role: 'session', runtimeGeneration: 1, sessionId: 'session-a', workerId: 'worker-session' },
+      v: VARIN_PROTOCOL_VERSION,
+    } as RuntimeEventEnvelope);
+    emit('finished', 1);
+    emit('apply-requested', 2);
+    expect(store.getState().records['session-a']?.compactionTraces?.['task-a']?.status).toBe('applying');
+    emit('finished', 3);
+    expect(store.getState().records['session-a']?.compactionTraces?.['task-a']?.status).toBe('applying');
+    emit('committed', 4);
+    expect(store.getState().records['session-a']?.compactionTraces?.['task-a']?.status).toBe('committed');
+  });
+
   test('shows auxiliary compaction steps in the owning chat without merging them into its assistant turn', async () => {
     const runtime = new FakeRuntime();
     runtime.handler = (method) => {

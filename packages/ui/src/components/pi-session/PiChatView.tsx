@@ -287,15 +287,27 @@ export const PiChatView: React.FC<PiChatViewProps> = ({
   const compactionTraceBaseline = React.useRef(new Map<string, Set<string>>());
   const [compactingSessions, setCompactingSessions] = React.useState<ReadonlySet<string>>(() => new Set());
   const currentCompactionTraces = currentRecord?.compactionTraces;
+  const currentPreparation = currentRecord?.snapshot?.harness?.context;
+  const candidateTaskId = currentPreparation?.candidateTaskId;
   const currentCompactionKey = JSON.stringify([runtimeKey, currentSessionId]);
   const traceBaseline = compactionTraceBaseline.current.get(currentCompactionKey);
   const latestManualTrace = Object.values(currentCompactionTraces ?? {}).filter((trace) => trace.manual).at(-1) ?? null;
-  const activeCompactionTrace = Object.values(currentCompactionTraces ?? {})
+  const activeCompactionTrace = (candidateTaskId ? currentCompactionTraces?.[candidateTaskId] : undefined) ?? Object.values(currentCompactionTraces ?? {})
     .filter((trace) => traceBaseline ? !traceBaseline.has(trace.taskId) : trace.manual && trace.status !== 'committed')
     .at(-1) ?? null;
   const compactionStatus = compactingSessions.has(currentCompactionKey)
     ? 'requested' as const
-    : latestManualTrace?.status === 'committed' ? undefined : latestManualTrace?.status;
+    : currentPreparation?.applicationRequested ? 'applying' as const
+      : currentPreparation?.candidate === 'ready' ? 'ready' as const
+        : latestManualTrace?.status === 'committed' ? undefined : latestManualTrace?.status;
+  const applyPreparedCompaction = React.useCallback(async (taskId: string) => {
+    if (!currentSessionId || readOnly) return;
+    try {
+      await usePiSessionStore.getState().applyCompaction(currentSessionId, taskId, runtimeKey);
+    } catch (error) {
+      toast.error(error instanceof Error ? error.message : t('chat.chatInput.toast.compactFailed'));
+    }
+  }, [currentSessionId, readOnly, runtimeKey, t]);
   const openActiveCompaction = React.useCallback(() => {
     setSelectedCompactionTrace(null);
     setSelectedCompactionTaskId(activeCompactionTrace?.taskId ?? null);
@@ -1032,6 +1044,8 @@ export const PiChatView: React.FC<PiChatViewProps> = ({
                   forkBusyEntryId={forkBusyEntryId}
                   onFork={previewOnly ? undefined : handleFork}
                   onOpenCompaction={openActiveCompaction}
+                  onApplyCompaction={!readOnly && !previewOnly && candidateTaskId && currentPreparation?.candidate === 'ready' && !currentPreparation.applicationRequested
+                    ? () => { void applyPreparedCompaction(candidateTaskId); } : undefined}
                   onOpenThread={previewOnly || !threadWorkspaceId ? undefined : handleOpenThread}
                   onRecover={previewOnly ? undefined : handleRecover}
                   onScrollContainerChange={handleTimelineScrollContainerChange}
@@ -1207,6 +1221,9 @@ export const PiChatView: React.FC<PiChatViewProps> = ({
       <PiCompactionTraceDialog
         open={compactionTraceOpen}
         onOpenChange={setCompactionTraceOpen}
+        onApply={!readOnly && !previewOnly && !selectedCompactionTrace && candidateTaskId
+          && candidateTaskId === selectedCompactionTaskId && currentPreparation?.candidate === 'ready' && !currentPreparation.applicationRequested
+          ? () => { void applyPreparedCompaction(candidateTaskId); } : undefined}
         trace={visibleCompactionTrace ?? null}
         partial={selectedCompactionTrace ? undefined : currentCompactionTraces?.[selectedCompactionTaskId ?? '']?.partial}
         retry={selectedCompactionTrace ? undefined : currentCompactionTraces?.[selectedCompactionTaskId ?? '']?.retry}

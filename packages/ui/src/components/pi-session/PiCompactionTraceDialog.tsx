@@ -3,6 +3,7 @@ import type { CompactionTrace, JsonValue } from '@varin/protocol';
 import { MarkdownRenderer } from '@/components/chat/MarkdownRenderer';
 import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from '@/components/ui/dialog';
 import { useI18n } from '@/lib/i18n';
+import { Button } from '@/components/ui/button';
 
 const resultText = (value: JsonValue | undefined): string => {
   if (value === undefined) return '';
@@ -21,12 +22,13 @@ const resultText = (value: JsonValue | undefined): string => {
 export const PiCompactionTraceDialog: React.FC<{
   error?: string;
   onOpenChange(open: boolean): void;
+  onApply?(): void;
   open: boolean;
-  status: 'requested' | 'running' | 'retrying' | 'ready' | 'committed' | 'failed';
+  status: 'requested' | 'running' | 'retrying' | 'ready' | 'applying' | 'committed' | 'failed';
   trace: CompactionTrace | null;
   partial?: { text: string; thinking: string };
   retry?: { attempt: number; maxAttempts: number; reason: string };
-}> = ({ error, onOpenChange, open, partial, retry, status, trace }) => {
+}> = ({ error, onApply, onOpenChange, open, partial, retry, status, trace }) => {
   const { t } = useI18n();
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
@@ -64,8 +66,13 @@ export const PiCompactionTraceDialog: React.FC<{
             {t('chat.compaction.retrying')}{retry ? ` (${retry.attempt}/${retry.maxAttempts})` : ''}
           </p> : null}
           {status === 'ready' ? <p role="status" className="typography-meta text-muted-foreground">{t('chat.compaction.ready')}</p> : null}
+          {status === 'applying' ? <p role="status" className="typography-meta text-muted-foreground">{t('chat.compaction.applying')}</p> : null}
+          {status === 'committed' ? <p role="status" className="typography-meta text-muted-foreground">{t('chat.compaction.applied')}</p> : null}
           {status === 'failed' ? <p role="alert" className="typography-meta text-[var(--status-error)]">{error ?? t('chat.chatInput.toast.compactFailed')}</p> : null}
         </div>
+        {status === 'ready' && onApply ? <div className="flex justify-end">
+          <Button size="sm" onClick={onApply}>{t('chat.compaction.applyNow')}</Button>
+        </div> : null}
       </DialogContent>
     </Dialog>
   );

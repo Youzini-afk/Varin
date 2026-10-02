@@ -1158,6 +1158,11 @@ export class HostController {
           readString(params, "sessionId"),
           optionalString(params, "customInstructions"),
         );
+      case "agent.compact.apply":
+        return this.#sessionHost.applyCompaction(
+          readString(params, "sessionId"),
+          readString(params, "taskId"),
+        );
       case "agent.steer":
         return {
           accepted: await this.#sessionHost.steer(

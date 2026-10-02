@@ -273,5 +273,21 @@ describe('PiTimeline scroll ownership', () => {
       ));
       expect(mocks.scrollToIndex).toHaveBeenCalledWith({ animated: false, index: 0, viewOffset: -40, viewPosition: 0 });
     });
+
+    it('lets the user apply a ready summary and removes the action while application is pending', async () => {
+      const apply = vi.fn();
+      const renderSummary = (status: 'ready' | 'applying') => act(async () => root.render(
+        <PiTimeline cwd="/workspace" sessionId="session-1" entries={[]} toolExecutions={{}}
+          compactionStatus={status} onApplyCompaction={apply} />,
+      ));
+      await renderSummary('ready');
+      const button = [...container.querySelectorAll('button')].find(node => node.textContent === 'chat.compaction.applyNow');
+      expect(button).toBeDefined();
+      await act(async () => button!.click());
+      expect(apply).toHaveBeenCalledOnce();
+      await renderSummary('applying');
+      expect([...container.querySelectorAll('button')].some(node => node.textContent === 'chat.compaction.applyNow')).toBe(false);
+      expect(container.textContent).toContain('chat.compaction.applying');
+    });
   });
 });

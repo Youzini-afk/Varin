@@ -101,7 +101,7 @@ export interface PiSessionViewState {
   branchEntriesSource?: 'live' | 'preview';
   /** Live read-only view of auxiliary compaction workers; completed traces also live in Pi entries. */
   compactionTraces?: Record<string, import('@varin/protocol').CompactionTrace & {
-    status: 'requested' | 'running' | 'retrying' | 'ready' | 'committed' | 'failed';
+    status: 'requested' | 'running' | 'retrying' | 'ready' | 'applying' | 'committed' | 'failed';
     manual?: boolean;
     error?: string;
     partial?: { text: string; thinking: string };
@@ -197,6 +197,7 @@ export interface PiSessionStoreState {
     customInstructions?: string,
     expectedRuntimeKey?: string,
   ): Promise<RuntimeMethodResult<'agent.compact'>>;
+  applyCompaction(sessionId: string, taskId: string, expectedRuntimeKey?: string): Promise<void>;
   completeTimelineReturn(sessionId: string, token: number): void;
   clearSessionAttention(sessionId: string): void;
   createSession(
@@ -1010,11 +1011,15 @@ export const createPiSessionStore = (
                 ? { ...trace, status: 'failed' as const, error: envelope.data.message }
                 : envelope.data.type === 'finished'
                   ? { ...trace, status: 'ready' as const }
+                  : envelope.data.type === 'apply-requested'
+                    ? { ...trace, manual: true, status: 'applying' as const }
                   : envelope.data.type === 'committed'
                     ? { ...trace, status: 'committed' as const }
                   : trace;
             return { ...current, compactionTraces: { ...current.compactionTraces, [taskId]: {
               ...updated, ...(incomingAttempt === undefined ? {} : { attempt: incomingAttempt }),
+              ...(previous?.status === 'applying' && updated.status !== 'failed' && updated.status !== 'committed'
+                ? { status: 'applying' as const } : {}),
             } } };
           }),
         }));
@@ -1650,6 +1655,10 @@ export const createPiSessionStore = (
           }),
         }));
         return result;
+      },
+
+      applyCompaction: async (sessionId, taskId, expectedRuntimeKey) => {
+        await request('agent.compact.apply', { sessionId, taskId }, expectedRuntimeKey);
       },
 
       beginSubmission: (sessionId, message, mode) => {

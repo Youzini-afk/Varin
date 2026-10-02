@@ -1651,7 +1651,8 @@ export class SessionHost {
     if (expectedRunId !== undefined && expectedRunId !== this.#runId) return false;
     const pendingActivity = this.#pendingActivity?.session === this.session
       ? this.#pendingActivity : undefined;
-    const wasBusy = !this.session.isIdle || pendingActivity !== undefined;
+    const cancelledApplication = this.#contextPreparation?.cancelApplication() ?? false;
+    const wasBusy = !this.session.isIdle || pendingActivity !== undefined || cancelledApplication;
     if (pendingActivity && pendingActivity.id === this.#runId) pendingActivity.cancelRequested = true;
     // AgentSession.abort() deliberately waits for waitForIdle() after signalling
     // cancellation. That makes sense for local callers that need a settled
@@ -1696,6 +1697,21 @@ export class SessionHost {
     } finally {
       this.#finishStoppableActivity(activity);
     }
+  }
+
+  async applyCompaction(sessionId: string, taskId: string): Promise<{ accepted: true; taskId: string }> {
+    this.assertSession(sessionId);
+    // A repeated click or an uncertain RPC response must not apply the same
+    // summary again or report an already-committed candidate as stale.
+    if (this.session.sessionManager.getBranch().some(entry => entry.type === "compaction"
+      && (entry.details as { varinCompactionTrace?: { taskId?: unknown } } | undefined)?.varinCompactionTrace?.taskId === taskId)) {
+      return { accepted: true, taskId };
+    }
+    const preparation = this.#contextPreparation;
+    if (!preparation) throw new HostError("compaction_unavailable", "Context preparation is unavailable for this session");
+    if (this.session.isIdle && !preparation.isCommitting()) this.#runId = randomUUID();
+    await preparation.applyManual(taskId);
+    return { accepted: true, taskId };
   }
 
   #beginStoppableActivity(session: AgentSession, kind: StoppableActivity["kind"]): StoppableActivity {
@@ -3655,6 +3671,11 @@ export class SessionHost {
                       sessionId: this.sessionId, taskId, type: "finished",
                     });
                   },
+                  onApplyRequested: (taskId) => {
+                    if (this.sessionId) this.#emit("compaction.trace", {
+                      sessionId: this.sessionId, taskId, type: "apply-requested",
+                    });
+                  },
                   onManualCommitted: (taskId) => {
                     if (this.sessionId) this.#emit("compaction.trace", {
                       sessionId: this.sessionId, taskId, type: "committed",
@@ -4175,9 +4196,12 @@ export class SessionHost {
   }
 
   #contextRuntimeState(): HarnessContextRuntimeState {
+    const preparation = this.#contextPreparation?.status();
     return {
       backgroundPreparation: this.#contextConfigReader?.().backgroundPreparation ?? true,
-      candidate: this.#contextPreparation?.status().candidate ?? "none",
+      candidate: preparation?.candidate ?? "none",
+      ...(preparation?.candidateTaskId ? { candidateTaskId: preparation.candidateTaskId,
+        applicationRequested: preparation.applicationRequested === true } : {}),
       ...(this.#contextLastFailure === undefined
         ? {}
         : { lastFailure: { ...this.#contextLastFailure } }),

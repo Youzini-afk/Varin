@@ -580,6 +580,12 @@ async function dispatchRuntimeRequestUnchecked(
         sessionId,
       });
     }
+    case "agent.compact.apply": {
+      const sessionId = requireString(input, "sessionId");
+      return broker.requestForSession(sessionId, "agent.compact.apply", {
+        sessionId, taskId: requireString(input, "taskId"),
+      });
+    }
     case "agent.abort": {
       const sessionId = requireString(input, "sessionId");
       const expectedRunId = requireString(input, "expectedRunId");

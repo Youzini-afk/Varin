@@ -67,7 +67,7 @@ import { HarnessThreadMarkers } from './HarnessThreadMarkers';
 import { parseCompactionTraceDetails, PI_COMPACTION_TRACE_OPEN_EVENT } from '@/lib/pi-runtime/compactionTrace';
 
 export interface PiTimelineProps {
-  compactionStatus?: 'requested' | 'running' | 'retrying' | 'ready' | 'failed';
+  compactionStatus?: 'requested' | 'running' | 'retrying' | 'ready' | 'applying' | 'failed';
   assistantWaiting?: PiAssistantWaitingPresentation;
   cwd: string;
   entries: PiSessionEntry[];
@@ -79,6 +79,7 @@ export interface PiTimelineProps {
   liveUserStatus?: PiSessionSubmissionStatus;
   onFork?(entry: PiSessionMessageEntry): void;
   onOpenCompaction?(): void;
+  onApplyCompaction?(): void;
   onOpenThread?(entry: PiSessionMessageEntry, options: { carryBlocks: boolean }): void;
   onRecover?(entry: PiSessionMessageEntry): void;
   onScrollContainerChange?(element: HTMLElement | null): void;

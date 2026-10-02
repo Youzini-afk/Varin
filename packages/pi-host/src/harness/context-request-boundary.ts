@@ -101,6 +101,9 @@ export interface ContextRequestBoundaryOptions {
   getCompactionSettings(): Required<Pick<CompactionSettings, "enabled" | "reserveTokens" | "keepRecentTokens">>;
   /** An explicit manual summary may be applied at capacity even with automatic compaction disabled. */
   hasPreparedExplicitCompaction?(): boolean;
+  /** A user selected a ready candidate for application at the next safe boundary. */
+  hasImmediateCompaction?(): boolean;
+  onImmediateFailure?(error: unknown): void;
   /** Observe every request; needsSpace requests must not start a second task. */
   observe(request: ContextModelRequest): void;
   /** Return one fixed, validated compaction. Failure must not fall through. */
@@ -133,6 +136,8 @@ export function attachContextRequestBoundary(session: AgentSession, options: Con
   let refreshedGeneration = 0;
   let latestOptions: SimpleStreamOptions = {};
   let disposed = false;
+  let idleApplication: Promise<void> | undefined;
+  let idleController: AbortController | undefined;
 
   const request = (model: Model<Api>, context: Context, rawOptions?: SimpleStreamOptions): ContextModelRequest => {
     const transcript = normalizeContext(context);
@@ -168,12 +173,76 @@ export function attachContextRequestBoundary(session: AgentSession, options: Con
     });
   };
 
+  const commit = async (next: ContextModelRequest, signal: AbortSignal, reason: "manual" | "threshold") => {
+    committing = true;
+    options.onStatus?.();
+    options.onEvent?.({ type: "compaction_start", reason });
+    try {
+      const before = next.inputTokens;
+      const result = await options.compact(next, signal);
+      signal.throwIfAborted();
+      const branch = session.sessionManager.getBranch();
+      if (!branch.some((entry) => entry.id === result.firstKeptEntryId)) {
+        throw new ContextCapacityError("The prepared context boundary no longer belongs to the active branch");
+      }
+      const systemMessage = getCurrentSystemMessage(normalizeContext(next.context).messages);
+      const preview = buildSessionContext([...branch, {
+        type: "compaction", id: "varin-context-preview", parentId: session.sessionManager.getLeafId(),
+        timestamp: new Date().toISOString(), summary: result.summary,
+        firstKeptEntryId: result.firstKeptEntryId, tokensBefore: before,
+        ...(systemMessage ? { systemMessage } : {}),
+      }]);
+      const previewTokens = estimateModelInputTokens({ ...next.context,
+        messages: await agent.convertToLlm(activeCompactionMessages(preview.messages)) });
+      signal.throwIfAborted();
+      if (previewTokens >= estimateModelInputTokens(next.context)
+        && (reason === "manual" || previewTokens + next.reserveTokens > next.model.contextWindow)) {
+        throw new ContextCapacityError("The prepared summary does not free input capacity. No compaction was committed; use paginated material or adjust the configured window.");
+      }
+      // Append-only input may arrive during the preview. It stays behind the
+      // fixed cut; branch replacement must never apply that cut to another tree.
+      const live = session.sessionManager.getBranch();
+      if (!branch.every((entry, index) => live[index]?.id === entry.id)) {
+        throw new ContextCapacityError("The compaction source branch changed before application");
+      }
+      const id = session.sessionManager.appendCompaction(result.summary, result.firstKeptEntryId,
+        before, result.details, true, result.usage);
+      const entry = session.sessionManager.getEntry(id);
+      if (!entry || entry.type !== "compaction") throw new Error("Pi did not publish the compaction entry");
+      session.refreshContext();
+      session.cancelCacheWarming();
+      generation += 1;
+      budget.clear();
+      options.onEvent?.({ type: "entry_appended", entry });
+      await session.extensionRunner?.emit({ type: "session_compact", compactionEntry: entry,
+        fromExtension: true, reason, willRetry: false });
+      const refreshed = await currentRequest(signal, next.model);
+      options.onEvent?.({ type: "compaction_end", reason, aborted: false, willRetry: false,
+        result: { ...result, tokensBefore: before, estimatedTokensAfter: refreshed.inputTokens } });
+      return refreshed;
+    } catch (error) {
+      options.onEvent?.({ type: "compaction_end", reason, aborted: signal.aborted,
+        result: undefined, willRetry: false, errorMessage: error instanceof Error ? error.message : String(error) });
+      if (reason === "manual") options.onImmediateFailure?.(error);
+      throw error;
+    } finally {
+      committing = false;
+      options.onStatus?.();
+    }
+  };
+
   const wrapper: StreamFn = async (model, context, rawOptions) => {
     if (disposed) throw new ContextCapacityError("The context request boundary has been disposed");
     latestOptions = modelRequestOptions(rawOptions);
     const signal = rawOptions?.signal ?? agent.signal ?? new AbortController().signal;
     signal.throwIfAborted();
-    let next = request(model, context, rawOptions);
+    const pending = idleApplication;
+    if (pending) await pending;
+    signal.throwIfAborted();
+    // A prompt accepted while an idle application was validating may carry
+    // a pre-compaction array. Rebuild it after the same commit finishes.
+    let next = pending || generation !== refreshedGeneration
+      ? await currentRequest(signal, model) : request(model, context, rawOptions);
     let injection: Awaited<ReturnType<NonNullable<ContextRequestBoundaryOptions["inject"]>>>;
     const prepare = async (): Promise<void> => {
       injection = await options.inject?.(next, session);
@@ -184,53 +253,14 @@ export function attachContextRequestBoundary(session: AgentSession, options: Con
     };
     try {
       await prepare();
-      while (next.needsSpace) {
-        if (!options.getCompactionSettings().enabled && !options.hasPreparedExplicitCompaction?.()) {
+      while (next.needsSpace || options.hasImmediateCompaction?.()) {
+        const immediate = options.hasImmediateCompaction?.() === true;
+        if (!immediate && !options.getCompactionSettings().enabled && !options.hasPreparedExplicitCompaction?.()) {
           throw new ContextCapacityError(`Model input needs approximately ${next.inputTokens} tokens plus ${next.reserveTokens} reserved output tokens, beyond the ${model.contextWindow}-token context window; automatic compaction is disabled. History was not changed.`);
         }
-        if (!committing) {
-          committing = true;
-          options.onStatus?.();
-          options.onEvent?.({ type: "compaction_start", reason: "threshold" });
-        }
         const before = next.inputTokens;
-        const result = await options.compact(next, signal);
-        signal.throwIfAborted();
-        const branch = session.sessionManager.getBranch();
-        if (!branch.some((entry) => entry.id === result.firstKeptEntryId)) {
-          throw new ContextCapacityError("The prepared context boundary no longer belongs to the active branch");
-        }
-        const systemMessage = getCurrentSystemMessage(normalizeContext(next.context).messages);
-        const preview = buildSessionContext([...branch, {
-          type: "compaction", id: "varin-context-preview", parentId: session.sessionManager.getLeafId(),
-          timestamp: new Date().toISOString(), summary: result.summary,
-          firstKeptEntryId: result.firstKeptEntryId, tokensBefore: before,
-          ...(systemMessage ? { systemMessage } : {}),
-        }]);
-        const previewTokens = estimateModelInputTokens({ ...next.context,
-          messages: await agent.convertToLlm(activeCompactionMessages(preview.messages)) });
-        signal.throwIfAborted();
-        if (previewTokens + next.reserveTokens > model.contextWindow
-          && previewTokens >= estimateModelInputTokens(next.context)) {
-          throw new ContextCapacityError("The prepared summary does not free input capacity. No compaction was committed; use paginated material or adjust the configured window.");
-        }
-        const id = session.sessionManager.appendCompaction(result.summary, result.firstKeptEntryId,
-          before, result.details, true, result.usage);
-        const entry = session.sessionManager.getEntry(id);
-        if (!entry || entry.type !== "compaction") throw new Error("Pi did not publish the compaction entry");
-        session.refreshContext();
-        session.cancelCacheWarming();
-        generation += 1;
-        budget.clear();
-        options.onEvent?.({ type: "entry_appended", entry });
-        await session.extensionRunner?.emit({ type: "session_compact", compactionEntry: entry,
-          fromExtension: true, reason: "threshold", willRetry: false });
-        next = await currentRequest(signal, next.model);
+        next = await commit(next, signal, immediate ? "manual" : "threshold");
         await prepare();
-        options.onEvent?.({ type: "compaction_end", reason: "threshold", aborted: false, willRetry: false,
-          result: { ...result, tokensBefore: before, estimatedTokensAfter: next.inputTokens } });
-        committing = false;
-        options.onStatus?.();
         if (next.needsSpace && next.inputTokens >= before) {
           throw new ContextCapacityError("Compaction cannot make this request fit. Read the oversized material in pages or increase the configured model capacity; the original Pi history is retained.");
         }
@@ -285,14 +315,7 @@ export function attachContextRequestBoundary(session: AgentSession, options: Con
         }
       })();
       return forwarded;
-    } catch (error) {
-      if (committing) options.onEvent?.({ type: "compaction_end", reason: "threshold", aborted: signal.aborted,
-        result: undefined, willRetry: false, errorMessage: error instanceof Error ? error.message : String(error) });
-      throw error;
-    } finally {
-      committing = false;
-      options.onStatus?.();
-    }
+    } finally { options.onStatus?.(); }
   };
 
   const refresh: NonNullable<typeof prepareNextTurn> = async (context, signal) => {
@@ -308,9 +331,28 @@ export function attachContextRequestBoundary(session: AgentSession, options: Con
 
   return {
     currentRequest,
-    isCommitting: () => committing,
+    isCommitting: () => committing || idleApplication !== undefined,
+    applyWhileIdle: (): Promise<void> | undefined => {
+      if (idleApplication) return idleApplication;
+      if (disposed || committing || !session.isIdle || !options.hasImmediateCompaction?.()) return undefined;
+      const controller = new AbortController();
+      idleController = controller;
+      idleApplication = (async () => {
+        const next = await currentRequest(controller.signal);
+        controller.signal.throwIfAborted();
+        await commit(next, controller.signal, "manual");
+      })().finally(() => {
+        idleApplication = undefined;
+        idleController = undefined;
+        options.onStatus?.();
+      });
+      options.onStatus?.();
+      return idleApplication;
+    },
+    cancelIdleApplication: () => idleController?.abort(),
     dispose: () => {
       disposed = true;
+      idleController?.abort();
       budget.clear();
       if (agent.streamFunction === wrapper) agent.streamFunction = stream;
       if (agent.prepareNextTurnWithContext === refresh) {

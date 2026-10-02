@@ -141,6 +141,11 @@ export interface HostMethodMap {
     params: { customInstructions?: string; sessionId: string };
     result: import("./session.js").PiCompactionStartResult;
   };
+  /** Apply this ready candidate at the next safe boundary, regardless of capacity. */
+  "agent.compact.apply": {
+    params: { sessionId: string; taskId: string };
+    result: { accepted: true; taskId: string };
+  };
   /** Host-only passive delivery; deliberately absent from the surface method catalog. */
   "agent.notify": {
     params: { sessionId: string; messageId: string; text: string };

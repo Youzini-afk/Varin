@@ -23,6 +23,16 @@ const snapshot = (sessionId: string): SessionSnapshot => ({
 });
 
 describe("runtime dispatcher session launch projection", () => {
+  it("routes immediate application to the exact session and requires a candidate identity", async () => {
+    const calls: unknown[][] = [];
+    const broker = { requestForSession: async (...args: unknown[]) => {
+      calls.push(args); return { accepted: true, taskId: "summary-1" };
+    } } as unknown as PiRuntimeBroker;
+    await dispatchRuntimeRequest(broker, "agent.compact.apply", { sessionId: "session-1", taskId: "summary-1" });
+    assert.deepEqual(calls, [["session-1", "agent.compact.apply", { sessionId: "session-1", taskId: "summary-1" }]]);
+    await assert.rejects(dispatchRuntimeRequest(broker, "agent.compact.apply", { sessionId: "session-1" }), { code: "invalid_params" });
+    assert.equal(calls.length, 1);
+  });
   it("passes a validated frozen model and tool set into create and open", async () => {
     const calls: unknown[][] = [];
     const broker = {

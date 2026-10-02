@@ -634,6 +634,8 @@ export interface HarnessContextRuntimeState {
   backgroundPreparation: boolean;
   /** Live candidate state for the current compaction cycle. */
   candidate: "none" | "preparing" | "ready";
+  candidateTaskId?: string;
+  applicationRequested?: boolean;
   lastFailure?: HarnessContextRuntimeFailure;
 }
 

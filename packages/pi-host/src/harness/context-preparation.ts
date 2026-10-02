@@ -67,6 +67,8 @@ export interface ContextPreparationConfig {
 
 export interface ContextPreparationStatus {
   candidate: "none" | "preparing" | "ready";
+  candidateTaskId?: string;
+  applicationRequested?: boolean;
   enabled: boolean;
 }
 
@@ -108,6 +110,7 @@ export interface PreparedCandidate extends FixedPreparation {
   error?: string;
   manualRequested?: boolean;
   manualReadyNotified?: boolean;
+  applyRequested?: boolean;
 }
 
 export interface ContextPreparationOptions {
@@ -135,6 +138,7 @@ export interface ContextPreparationOptions {
   onSuccess?: (phase: "prepare" | "commit") => void;
   onStatus?: () => void;
   onManualReady?: (taskId: string) => void;
+  onApplyRequested?: (taskId: string) => void;
   onManualCommitted?: (taskId: string) => void;
   onManualFailed?: (taskId: string, message: string) => void;
   onRetry?: (taskId: string, attempt: number, maxAttempts: number, reason: string) => void;
@@ -467,6 +471,8 @@ export type ContextPreparationExtension = ExtensionFactory & {
   isCommitting(): boolean;
   observeRequest(request: ContextModelRequest): void;
   prepareManual(customInstructions?: string): { taskId: string; status: "preparing" | "ready" };
+  applyManual(taskId: string): Promise<void> | undefined;
+  cancelApplication(): boolean;
 };
 
 export function createContextPreparationExtension(
@@ -566,11 +572,24 @@ export function createContextPreparationExtension(
   const discard = (reason: string): void => {
     epoch += 1;
     if (!candidate) return;
+    if (candidate.applyRequested && reason !== "compacted") boundary?.cancelIdleApplication();
     failManual(candidate, reason);
     if (candidate.status === "in-flight") candidate.abort.abort();
     candidate = undefined;
     void reason;
   };
+
+  const failApplication = (error: unknown): void => {
+    if (!candidate?.applyRequested) return;
+    const message = error instanceof Error ? error.message : String(error);
+    options.onFailure?.("commit", message);
+    discard(message);
+  };
+
+  const applyWhileIdle = () => boundary?.applyWhileIdle()?.catch(error => {
+    failApplication(error);
+    throw error;
+  });
 
   const prefixTokens = (ctx: ExtensionContext, pi: ExtensionAPI): number => {
     let chars = ctx.getSystemPrompt().length;
@@ -792,6 +811,9 @@ export function createContextPreparationExtension(
 
   const factory: ExtensionFactory = (pi) => {
     api = pi;
+    // A final answer has no next model request. Apply the selected candidate
+    // after Pi finishes this run instead of leaving it pending indefinitely.
+    pi.on("agent_settled", () => applyWhileIdle()?.catch(() => undefined));
     pi.on("context", (event, ctx) => {
       latestContext = ctx;
       if ((!options.getPreparationConfig().enabled || !options.getCompactionSettings().enabled)
@@ -805,7 +827,7 @@ export function createContextPreparationExtension(
       // Pi's post-agent-end check is not request admission. The bound adapter
       // owns automatic commits. Manual compaction uses this same worker seam;
       // failure must cancel instead of falling through to Pi's one-shot engine.
-      if (boundary && event.reason !== "manual") return { cancel: true };
+      if (boundary && (event.reason !== "manual" || boundary.isCommitting())) return { cancel: true };
       try {
         const compaction = await commitFromEvent(event, ctx, pi);
         return compaction === undefined ? { cancel: true } : { compaction };
@@ -833,7 +855,7 @@ export function createContextPreparationExtension(
     });
 
     pi.on("session_compact_failed", (event) => {
-      if (boundary && event.reason !== "manual") return;
+      if (boundary && (event.reason !== "manual" || boundary.isCommitting())) return;
       if (candidate?.status === "ready") discard("commit failed");
     });
 
@@ -853,6 +875,25 @@ export function createContextPreparationExtension(
   const extension = factory as ContextPreparationExtension;
   extension.isBound = () => boundary !== undefined;
   extension.isCommitting = () => boundary?.isCommitting() ?? false;
+  extension.applyManual = (taskId) => {
+    const ctx = boundSession?.extensionRunner?.createContext() ?? latestContext;
+    if (!boundary || !ctx || !candidate || candidate.id !== taskId || candidate.status !== "ready"
+      || !candidateValid(candidate, ctx, ctx.sessionManager.getBranch())) {
+      throw new Error("The selected summary is not ready or no longer matches this session; prepare a new summary");
+    }
+    if (candidate.applyRequested) return applyWhileIdle();
+    if (boundary.isCommitting()) throw new Error("Context compaction is already being applied; wait for it to finish");
+    candidate.manualRequested = true;
+    candidate.applyRequested = true;
+    options.onApplyRequested?.(taskId);
+    options.onStatus?.();
+    return applyWhileIdle();
+  };
+  extension.cancelApplication = () => {
+    if (!candidate?.applyRequested) return false;
+    discard("Immediate summary application was cancelled");
+    return true;
+  };
   extension.prepareManual = (customInstructions) => {
     const ctx = boundSession?.extensionRunner?.createContext() ?? latestContext;
     if (!ctx || !api || !ctx.model) throw new Error("The session compaction context is unavailable");
@@ -905,6 +946,8 @@ export function createContextPreparationExtension(
         return !!(candidate?.manualRequested && candidate.status !== "failed" && ctx
           && candidateValid(candidate, ctx, ctx.sessionManager.getBranch()));
       },
+      hasImmediateCompaction: () => candidate?.applyRequested === true,
+      onImmediateFailure: failApplication,
       observe: extension.observeRequest,
       ...(options.inject ? { inject: options.inject } : {}),
       onEvent,
@@ -914,6 +957,9 @@ export function createContextPreparationExtension(
         const ctx = session.extensionRunner?.createContext() ?? latestContext;
         if (!ctx || !api) throw new ContextCapacityError("The Pi context extension is unavailable");
         const entries = ctx.sessionManager.getBranch();
+        if (candidate?.applyRequested && !candidateValid(candidate, ctx, entries)) {
+          throw new ContextCapacityError("The selected summary no longer matches this session; no compaction was applied");
+        }
         if (!candidate || !candidateValid(candidate, ctx, entries) || candidate.status === "failed") {
           if (!options.getCompactionSettings().enabled) {
             throw new ContextCapacityError("The explicit summary is no longer available and automatic compaction is disabled; original history was retained");
@@ -938,6 +984,9 @@ export function createContextPreparationExtension(
     });
   };
   extension.status = (): ContextPreparationStatus => ({
+    ...(candidate && candidate.status !== "failed" ? {
+      candidateTaskId: candidate.id, applicationRequested: candidate.applyRequested === true,
+    } : {}),
     candidate: candidate === undefined
       ? "none"
       : candidate.status === "ready"

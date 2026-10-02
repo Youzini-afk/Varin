@@ -113,6 +113,7 @@ export type CompactionTraceUpdate = {
   | { type: "delta"; channel: "text" | "thinking"; delta: string }
   | { type: "entry"; entry: CompactionTraceEntry }
   | { type: "finished" }
+  | { type: "apply-requested" }
   | { type: "committed" }
   | { type: "failed"; message: string }
 ) & { attempt?: number };

@@ -584,15 +584,21 @@ export const PiTimeline: React.FC<PiTimelineProps> = (props) => {
     <>
       {props.compactionStatus ? (
         <div className="chat-message-column py-1.5">
-          <button type="button" className="flex w-full items-center gap-2 rounded-lg border border-border/60 bg-muted/20 px-3 py-2 text-left typography-meta hover:bg-interactive-hover" onClick={props.onOpenCompaction}>
-            <Icon name={props.compactionStatus === 'failed' ? 'error-warning'
-              : props.compactionStatus === 'ready' ? 'check' : 'loader-4'}
-              className={cn('size-3.5', (props.compactionStatus === 'requested' || props.compactionStatus === 'running' || props.compactionStatus === 'retrying') && 'animate-spin')} />
-            {props.compactionStatus === 'failed' ? t('chat.compaction.failed')
-              : props.compactionStatus === 'ready' ? t('chat.compaction.ready')
+          <div className="flex w-full items-center gap-2 rounded-lg border border-border/60 bg-muted/20 px-3 py-2 typography-meta">
+            <button type="button" className="flex min-w-0 flex-1 items-center gap-2 text-left hover:text-foreground" onClick={props.onOpenCompaction}>
+              <Icon name={props.compactionStatus === 'failed' ? 'error-warning'
+                : props.compactionStatus === 'ready' ? 'check' : 'loader-4'}
+                className={cn('size-3.5 shrink-0', (props.compactionStatus === 'requested' || props.compactionStatus === 'running' || props.compactionStatus === 'retrying' || props.compactionStatus === 'applying') && 'animate-spin')} />
+              {props.compactionStatus === 'failed' ? t('chat.compaction.failed')
+                : props.compactionStatus === 'ready' ? t('chat.compaction.ready')
+                : props.compactionStatus === 'applying' ? t('chat.compaction.applying')
                 : props.compactionStatus === 'retrying' ? t('chat.compaction.retrying') : t('chat.compaction.inProgress')}
-            <span className="ml-auto text-primary">{t('harness.threads.transcript')}</span>
-          </button>
+              <span className="ml-auto text-primary">{t('harness.threads.transcript')}</span>
+            </button>
+            {props.compactionStatus === 'ready' && props.onApplyCompaction ? <button type="button"
+              className="shrink-0 rounded px-2 py-1 text-primary hover:bg-interactive-hover"
+              onClick={props.onApplyCompaction}>{t('chat.compaction.applyNow')}</button> : null}
+          </div>
         </div>
       ) : null}
       <div
@@ -604,7 +610,7 @@ export const PiTimeline: React.FC<PiTimelineProps> = (props) => {
         data-pi-timeline-end-space="true"
       />
     </>
-  ), [isMobile, props.compactionStatus, props.onOpenCompaction, t]);
+  ), [isMobile, props.compactionStatus, props.onApplyCompaction, props.onOpenCompaction, t]);
 
   const releaseAutomationForIntent = React.useCallback((intent: PiTimelineScrollIntent) => {
     if (!shouldReleasePiTimelineFollow(modeRef.current, atEndRef.current, intent)) return;
