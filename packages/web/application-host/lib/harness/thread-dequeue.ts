@@ -62,6 +62,7 @@ export const createOnThreadDequeued = (options: {
       autoRun: true,
       worktree: thread.manifest.worktree,
       ...(thread.model ? { model: thread.model } : {}),
+      ...(thread.manifest.modelSettings === undefined ? {} : { modelSettings: { ...thread.manifest.modelSettings } }),
       tools: [...thread.manifest.tools],
       permissions: thread.manifest.permissions,
       ...(thread.manifest.scope.length > 0 ? { scope: [...thread.manifest.scope] } : {}),

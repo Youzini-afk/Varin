@@ -24,6 +24,7 @@ import {
   SettingsManager,
 } from "@earendil-works/pi-coding-agent";
 import { getSupportedThinkingLevels } from "@earendil-works/pi-ai";
+import { attachAgentModelSettings, resolveAgentModelSettings } from "./agent-model-settings.js";
 import {
   VARIN_RECOVERY_NAVIGATION_MARKER_SCHEMA_VERSION,
   VARIN_RECOVERY_NAVIGATION_MARKER_TYPE,
@@ -653,6 +654,7 @@ export class SessionHost {
   #workFocusGeneration = 1;
   #workFocusRole: WorkFocusExecutionRole = "principal";
   readonly #inferenceFetch: typeof fetch | undefined;
+  #launchModelSettings: import("@varin/protocol").HarnessAgentModelSettings | null | undefined;
 
   constructor(options: SessionHostOptions) {
     this.#agentDir = resolve(options.agentDir);
@@ -795,7 +797,9 @@ export class SessionHost {
     workFocus: WorkFocusSelection = { id: "code", source: "product-default" },
     workFocusGeneration = 1,
     workFocusRole: WorkFocusExecutionRole = "principal",
+    modelSettings?: import("@varin/protocol").HarnessAgentModelSettings | null,
   ): Promise<SessionSnapshot> {
+    this.#launchModelSettings = modelSettings;
     this.#sessionToolAllowlist = tools === undefined ? undefined : [...new Set(tools)];
     this.#sessionModelSelection = model === undefined ? undefined : { ...model };
     this.#frozenPermissionOverlay = permissions === undefined
@@ -815,11 +819,13 @@ export class SessionHost {
   }
 
   async openCatalogContext(cwd: string): Promise<SessionSnapshot> {
+    this.#launchModelSettings = undefined;
     await this.#replaceWith(SessionManager.inMemory(cwd));
     return this.snapshot();
   }
 
   async open(input: {
+    modelSettings?: import("@varin/protocol").HarnessAgentModelSettings | null;
     cwd?: string;
     sessionFile?: string;
     sessionId?: string;
@@ -830,6 +836,7 @@ export class SessionHost {
     workFocusGeneration?: number;
     workFocusRole?: WorkFocusExecutionRole;
   }): Promise<SessionSnapshot> {
+    this.#launchModelSettings = input.modelSettings;
     this.#sessionToolAllowlist = input.tools === undefined ? undefined : [...new Set(input.tools)];
     this.#sessionModelSelection = input.model === undefined ? undefined : { ...input.model };
     this.#frozenPermissionOverlay = input.permissions === undefined
@@ -3166,7 +3173,7 @@ export class SessionHost {
       const globalHarness = (globalHarnessValue ?? {}) as HarnessSettingsInput;
       const projectHarness = (projectHarnessValue ?? {}) as HarnessSettingsInput;
       // This is the same merge/validator used to assemble a new Run. It catches
-      // malformed permission rules, context/review values, and scope overlays
+      // malformed permission rules, context values, and scope overlays
       // before the revisioned editor commits the candidate.
       mergeHarnessSettings(globalHarness, projectHarness);
       parseHarnessEmbeddingSettings(globalHarness.embedding);
@@ -3973,6 +3980,7 @@ export class SessionHost {
       // Run's model (7B/D-300).
       const restored = sessionManager.buildSessionContext();
       const restoredModel = restored.model;
+      const modelSettings = resolveAgentModelSettings(sessionManager, this.#launchModelSettings);
       const created = await createAgentSessionFromServices({
         ...(sessionModel === undefined ? {} : { model: sessionModel }),
         customTools,
@@ -3998,6 +4006,7 @@ export class SessionHost {
           sessionId: created.session.sessionId,
         });
       });
+      attachAgentModelSettings(created.session, modelSettings);
       const diagnostics = [
         ...services.diagnostics,
         ...services.resourceLoader.getExtensions().errors.map((entry) => ({

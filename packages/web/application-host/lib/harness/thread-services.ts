@@ -6,6 +6,7 @@ import {
   HARNESS_MAX_REQUEST_TIMEOUT_MS,
   isAttachedRootPurpose,
   mergeHarnessSettings,
+  customizeHarnessAgent,
   resolvePresets,
   isPresetId,
   resolveHarnessModelSlot,
@@ -308,7 +309,8 @@ export function createThreadDispatchService(host: HarnessServiceHost): HarnessSe
         liveSettings.agents, owner?.execution.workFocus ?? "code").find(entry => entry.id === params.preset) : undefined;
       const preset: ExecutionPreset | null = params.preset === undefined
         ? null
-        : customPreset?.definition ?? (isPresetId(params.preset) ? EXECUTION_PRESETS[params.preset] : null);
+        : customPreset?.definition ?? (isPresetId(params.preset)
+          ? customizeHarnessAgent(EXECUTION_PRESETS[params.preset], liveSettings?.models[EXECUTION_PRESETS[params.preset].slot]?.agent) : null);
       if (preset?.slot && liveSettings?.models[preset.slot]?.enabled === false) {
         throw new HarnessServiceError("unavailable", `Agent is disabled: ${preset.id}`);
       }
@@ -369,7 +371,8 @@ export function createThreadDispatchService(host: HarnessServiceHost): HarnessSe
       if (research !== undefined && owner?.execution.workFocus !== "research") {
         throw new HarnessServiceError("denied", "Research capabilities require a research work focus");
       }
-      const researchDefinition = research === undefined ? undefined : RESEARCH_CAPABILITY_DEFINITIONS[research.capability];
+      const researchBase = research === undefined ? undefined : RESEARCH_CAPABILITY_DEFINITIONS[research.capability];
+      const researchDefinition = researchBase && customizeHarnessAgent(researchBase, liveSettings?.models[researchBase.slot]?.agent);
       if (researchDefinition && liveSettings?.models[researchDefinition.slot]?.enabled === false) {
         throw new HarnessServiceError("unavailable", `Research agent is disabled: ${research!.capability}`);
       }
@@ -482,6 +485,9 @@ export function createThreadDispatchService(host: HarnessServiceHost): HarnessSe
         permissions: normalizeFrozenHarnessPermissions(owner?.execution.permissions),
         ...(consultBot ? { consultBotId: consultBot.id } : {}),
         ...(dispatchModel ? { model: dispatchModel } : {}),
+        ...((researchDefinition?.modelSettings ?? preset?.modelSettings) === undefined ? {} : {
+          modelSettings: { ...(researchDefinition?.modelSettings ?? preset?.modelSettings) },
+        }),
         ...(environment ? { environment } : {}),
         ...(preset?.systemPromptFragment ? { systemPromptFragment: preset.systemPromptFragment } : {}),
         ...(researchDefinition ? {
@@ -782,7 +788,6 @@ export function createThreadWaitService(host: HarnessServiceHost): HarnessServic
         if (self.thread.messages?.some((message) => message.direction === "in"
           && (message.status === "delivered" || message.status === "resolved")
           && (message.kind === "request" || message.replyTo !== undefined) && !initialRequests.has(message.id))) return true;
-        if (selfBaseline.thread.waitingFor?.review !== undefined && self.thread.waitingFor?.review === undefined) return true;
         return actionable.has(self.thread.attention) && self.thread.attention !== selfBaseline.thread.attention;
       };
       let timedOut = false;
@@ -1272,18 +1277,23 @@ export function createThreadSendService(host: HarnessServiceHost): HarnessServic
       let rerouteFrozen: ThreadRun["frozen"] | undefined;
       if (priorIntent) executionMode = priorIntent.mode;
       if (upgradeRequested && target) {
-        const definition = params.capability === undefined
-          ? undefined
-          : RESEARCH_CAPABILITY_DEFINITIONS[params.capability];
+        const settings = priorIntent ? undefined : await agentSettingsFor(host, workspaceId);
+        const base = params.capability === undefined ? undefined : RESEARCH_CAPABILITY_DEFINITIONS[params.capability];
+        const priorFrozen = priorIntent?.frozen;
+        const accepted = params.capability !== undefined && priorFrozen?.research?.capability === params.capability ? priorFrozen : undefined;
+        const definition = base && customizeHarnessAgent(base, accepted ? {
+          instructions: accepted.systemPromptFragment ?? "", tools: accepted.tools,
+          ...(accepted.worktree === "shared" ? {} : { worktree: accepted.worktree }),
+          ...(accepted.modelSettings ? { modelSettings: accepted.modelSettings } : {}),
+        } : settings?.models[base.slot]?.agent);
         // A retry observes its already accepted request. A new capability
         // assignment must respect the current switch, including explicit inherit.
         if (definition && !priorIntent) {
-          const settings = await agentSettingsFor(host, workspaceId);
           if (settings?.models[definition.slot]?.enabled === false) {
             throw new HarnessServiceError("unavailable", `Research agent is disabled: ${definition.capability}`);
           }
         }
-        const model = params.model === "inherit" ? target.model : params.model ?? null;
+        const model = params.model === "inherit" ? priorIntent?.frozen?.model ?? target.model : params.model ?? null;
         if (params.model === "inherit" && !target.model) {
           throw new HarnessServiceError("unavailable", "The target Thread has no recorded model to inherit");
         }
@@ -1293,8 +1303,10 @@ export function createThreadSendService(host: HarnessServiceHost): HarnessServic
         executionMode = definition?.worktree !== undefined && definition.worktree !== target.manifest.worktree
           ? "fresh"
           : executionMode;
+        const modelSettings = definition ? definition.modelSettings : priorFrozen?.modelSettings ?? target.manifest.modelSettings;
         rerouteFrozen = {
           model: model ?? target.model,
+          ...(modelSettings === undefined ? {} : { modelSettings: { ...modelSettings } }),
           tools: definition ? [...definition.tools] : [...target.manifest.tools],
           ...(target.manifest.permissions ? { permissions: structuredClone(target.manifest.permissions) } : {}),
           scope: [...target.manifest.scope],

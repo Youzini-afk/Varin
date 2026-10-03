@@ -329,18 +329,18 @@ describe("verification coordinator", () => {
     const { store } = memoryStore();
     const coordinator = createVerificationCoordinator();
     await coordinator.putReview(asTestWorkingStateRootStore(store), "thread-a", {
-      resultRevision: 1, status: "running", recordedAt: 1, reviewThreadId: "review-r1", reviewRunId: "run-r1", gate: true,
+      resultRevision: 1, status: "running", recordedAt: 1, reviewThreadId: "review-r1", reviewRunId: "run-r1",
     }, 10, "thread-a");
     await coordinator.putReview(asTestWorkingStateRootStore(store), "thread-a", {
-      resultRevision: 10, status: "running", recordedAt: 2, reviewThreadId: "review-r10", reviewRunId: "run-r10", gate: true,
+      resultRevision: 10, status: "running", recordedAt: 2, reviewThreadId: "review-r10", reviewRunId: "run-r10",
     }, 10, "thread-a");
     await coordinator.putReview(asTestWorkingStateRootStore(store), "thread-a", {
-      resultRevision: 10, status: "cancelled", recordedAt: 3, reviewThreadId: "review-r10", reviewRunId: "run-r10", gate: false,
+      resultRevision: 10, status: "cancelled", recordedAt: 3, reviewThreadId: "review-r10", reviewRunId: "run-r10",
     }, 10, "thread-a");
     await coordinator.putReview(asTestWorkingStateRootStore(store), "thread-a", {
-      resultRevision: 10, status: "completed", recordedAt: 4, reviewThreadId: "late-other", reviewRunId: "late-other", gate: false,
+      resultRevision: 10, status: "completed", recordedAt: 4, reviewThreadId: "late-other", reviewRunId: "late-other",
     }, 10, "thread-a");
     expect(store.getReviewRecord("thread-a", 1)?.status).toBe("running");
-    expect(store.getReviewRecord("thread-a", 10)).toMatchObject({ status: "cancelled", reviewThreadId: "review-r10", gate: false });
+    expect(store.getReviewRecord("thread-a", 10)).toMatchObject({ status: "cancelled", reviewThreadId: "review-r10" });
   });
 });

@@ -20,7 +20,8 @@ export interface AgentsCatalogState {
   selectedAgentId: string | null;
   statusFilter: AgentStatusFilter;
   targetKey: string;
-  definitionRequest: 'create-agent' | null;
+  definitionRequest: 'create-agent' | 'create-native' | null;
+  showAllFocuses: boolean;
 }
 
 export const EMPTY_AGENT_CATALOG: PiAgentCatalogSnapshot = {
@@ -41,6 +42,7 @@ const EMPTY_STATE: AgentsCatalogState = {
   statusFilter: 'all',
   targetKey: '',
   definitionRequest: null,
+  showAllFocuses: false,
 };
 
 let state = EMPTY_STATE;
@@ -80,9 +82,13 @@ export function selectAgentsCatalogAgent(selectedAgentId: string | null): void {
 }
 
 export function requestAgentsCatalogDefinition(
-  definitionRequest: 'create-agent' | null,
+  definitionRequest: 'create-agent' | 'create-native' | null,
 ): void {
   publish({ ...state, definitionRequest });
+}
+
+export function setAgentsCatalogShowAllFocuses(showAllFocuses: boolean): void {
+  publish({ ...state, showAllFocuses });
 }
 
 export function beginAgentsCatalogTarget(targetKey: string): void {

@@ -31,7 +31,6 @@ import {
   type ThreadRunWorkerState,
   type ThreadVerificationProjection,
 } from "@varin/protocol";
-import { formatReviewForZone2 } from "./review-sensor.js";
 
 // ── Types ──────────────────────────────────────────────────────────
 
@@ -172,6 +171,17 @@ export interface Zone2Material {
 export interface Zone2Params {
   sinceTurn: number;
 }
+
+const formatReviewForZone2 = (input: NonNullable<Zone2Material["reviews"]>[number]): string => {
+  const lines = [
+    `result ${input.threadId}@${input.resultRevision} ${input.status}`,
+    input.conclusion ?? null,
+    input.error ? `error: ${input.error}` : null,
+    ...(input.findings ?? []).map(finding => `[${finding.severity}] ${finding.file
+      ? `${finding.file}${finding.line === undefined ? "" : `:${finding.line}`} ` : ""}${finding.message}`),
+  ].filter((line): line is string => line !== null);
+  return `<review>\n${lines.join("\n")}\n</review>`;
+};
 
 export interface Zone2BudgetSettings {
   budgetTokens?: number;

@@ -24,6 +24,15 @@ the project folder and its files intact. Paused indexes remain usable, and a man
 once without resuming background work. Cleanup progress/errors stay on the directory row; old cached
 roots are manageable without automatically enrolling them in indexing.
 
+Agents settings use the same split layout as Projects: `AgentsSidebar` holds the unified native,
+custom and plugin catalog, search and work-focus filtering; `AgentsPage` holds the selected editor.
+`NativeAgentEditor` edits built-in and user profiles inline, including name, responsibility, model,
+temperature, thinking level, instructions, tools and workspace isolation. Built-in resets restore
+the shipped profile fields while keeping the chosen model and enable switch. Unsaved drafts survive
+selection changes inside the current catalog. Draft saves retain
+their opened settings revision across external refreshes; conflicts stay visible instead of
+overwriting another edit. Plugin agents keep their provider-owned management and definition format.
+
 - `src/lib/documents/DOCUMENTATION.md`: revisioned client buffers and conflict behavior.
 - `src/lib/workbench/editors/DOCUMENTATION.md`: editor groups, providers, panels, and layout state.
 - `src/lib/monaco/DOCUMENTATION.md`: desktop/Web editor projection and language integration.

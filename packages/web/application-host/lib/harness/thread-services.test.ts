@@ -32,6 +32,29 @@ const serviceContext = (inputContext?: AgentInputContext) => ({
 const dispatchService = (host: object) => createThreadDispatchService(host as never);
 
 describe("thread services", () => {
+  it("freezes customized built-in prompts, tools and model parameters before later settings edits", async () => {
+    const dataDir = mkdtempSync(join(tmpdir(), "thread-builtin-profile-"));
+    const registry = createThreadRegistry({ dataDir, hostId: "host-1" });
+    let instructions = "Trace the exact source lines.";
+    let temperature = 0.35;
+    const service = dispatchService({ threadRegistry: registry, threadSpawnSession: vi.fn(async () => ({ sessionId: "child" })),
+      harnessSettings: async () => ({ global: { harness: { models: { retrievalAgent: {
+        providerId: "selected", modelId: "reader", agent: { name: "Source reader", instructions, tools: ["read", "grep"],
+          worktree: "none", modelSettings: { temperature, thinkingLevel: "low" } },
+      } } } } }),
+    });
+    try {
+      const first = await service.handle({ preset: "retrieval", task: "Find the entry point" }, serviceContext());
+      const prior = await registry.getThreadById("workspace-1", first.threadId);
+      expect(prior?.manifest).toMatchObject({ systemPromptFragment: instructions, tools: ["read", "grep"], modelSettings: { temperature, thinkingLevel: "low" } });
+      expect((await registry.getActiveRun("workspace-1", first.threadId))?.frozen?.modelSettings).toEqual({ temperature, thinkingLevel: "low" });
+      instructions = "Report a different question."; temperature = 0.8;
+      const next = await service.handle({ preset: "retrieval", task: "Find another entry" }, serviceContext());
+      expect((await registry.getThreadById("workspace-1", next.threadId))?.manifest).toMatchObject({ systemPromptFragment: instructions, modelSettings: { temperature: 0.8 } });
+      expect((await registry.getThreadById("workspace-1", first.threadId))?.manifest).toMatchObject({ systemPromptFragment: "Trace the exact source lines.", modelSettings: { temperature: 0.35 } });
+    } finally { await registry.dispose(); rmSync(dataDir, { recursive: true, force: true }); }
+  });
+
   it("freezes custom agent definitions from the settings owner and rejects disabled profiles", async () => {
     const dataDir = mkdtempSync(join(tmpdir(), "thread-native-profile-"));
     const registry = createThreadRegistry({ dataDir, hostId: "host-1" });
@@ -1793,10 +1816,14 @@ describe("thread services", () => {
       from: { kind: "thread"; id: string };
       frozen: NonNullable<import("@varin/protocol").ThreadRunFrozenConfig>;
     }) => ({ runId: "run-upgraded" }));
+    let temperature = 0.35;
     const service = createThreadSendService({
       threadRegistry: registry,
       threadSendToSession: vi.fn(async () => {}),
       threadContinueRun: continueRun,
+      harnessSettings: async () => ({ global: { harness: { models: { researchHighThroughputExecution: {
+        enabled: temperature === 0.35, agent: { instructions: `Use the admitted settings ${temperature}.`, modelSettings: { temperature } },
+      } } } } }),
     } as never);
     try {
       const caller = await researchCaller(registry);
@@ -1831,12 +1858,14 @@ describe("thread services", () => {
       await service.handle(request, threadCtx(caller.sessionId));
       const firstCall = continueRun.mock.calls[0]![0];
       expect(firstCall.mode).toBe("fresh");
+      expect(firstCall.frozen.modelSettings).toEqual({ temperature: 0.35 });
       await registry.admitRun("workspace-1", child.id, "pi", {
         allowSettled: true,
         inputOrigin: firstCall.mode,
         frozen: firstCall.frozen,
         request: { ...firstCall, at: new Date().toISOString() },
       });
+      temperature = 0.9;
       const retry = await service.handle(request, threadCtx(caller.sessionId));
       expect(retry).toMatchObject({ accepted: true, messageId: "req-forced-fresh" });
       expect(continueRun).toHaveBeenCalledOnce();

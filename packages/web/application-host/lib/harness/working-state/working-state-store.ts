@@ -357,7 +357,7 @@ const parseReviewRecord = (value: unknown, label: string): ResultReviewRecord =>
   const row = value as Record<string, unknown>;
   const statuses = new Set(["queued", "running", "completed", "failed", "cancelled"]);
   if (!isSafeInt(row.resultRevision) || Number(row.resultRevision) <= 0 || !statuses.has(row.status as string)
-    || !isSafeInt(row.recordedAt) || (row.gate !== undefined && typeof row.gate !== "boolean")) {
+    || !isSafeInt(row.recordedAt)) {
     throw new Error(`${label} is malformed`);
   }
   return {
@@ -366,7 +366,6 @@ const parseReviewRecord = (value: unknown, label: string): ResultReviewRecord =>
     recordedAt: row.recordedAt,
     ...(typeof row.reviewThreadId === "string" ? { reviewThreadId: row.reviewThreadId } : {}),
     ...(typeof row.reviewRunId === "string" ? { reviewRunId: row.reviewRunId } : {}),
-    ...(typeof row.gate === "boolean" ? { gate: row.gate } : {}),
     ...(typeof row.conclusion === "string" ? { conclusion: row.conclusion } : {}),
     ...(Array.isArray(row.findings)
       ? {

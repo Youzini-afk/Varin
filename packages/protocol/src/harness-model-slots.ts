@@ -1,10 +1,12 @@
 import { HarnessSettingsValidationError, type HarnessModelRole, type ModelSelection } from "./harness-settings.js";
+import { parseHarnessAgentOverrides, type HarnessAgentOverrides } from "./harness-agents.js";
 
 /** An enabled flag preserves the selected model while the user turns a role off. */
 export interface HarnessModelBinding {
   enabled?: boolean;
   providerId?: string;
   modelId?: string;
+  agent?: HarnessAgentOverrides;
 }
 
 export type HarnessModelPreset = "anthropic" | "openai" | "gemini";
@@ -51,7 +53,7 @@ export function parseHarnessModelSlots(value: unknown): HarnessModelSlots {
       throw new HarnessSettingsValidationError(`Invalid model role: ${role}`);
     }
     const input = raw as Record<string, unknown>;
-    if (Object.keys(input).some(key => !["enabled", "providerId", "modelId"].includes(key))
+    if (Object.keys(input).some(key => !["enabled", "providerId", "modelId", "agent"].includes(key))
       || (input.enabled !== undefined && typeof input.enabled !== "boolean")
       || ((input.providerId !== undefined || input.modelId !== undefined)
         && (typeof input.providerId !== "string" || !input.providerId.trim() || typeof input.modelId !== "string" || !input.modelId.trim()))) {
@@ -60,6 +62,7 @@ export function parseHarnessModelSlots(value: unknown): HarnessModelSlots {
     result[role as HarnessModelRole] = {
       ...(input.enabled === undefined ? {} : { enabled: input.enabled as boolean }),
       ...(input.providerId === undefined ? {} : { providerId: input.providerId as string, modelId: input.modelId as string }),
+      ...(input.agent === undefined ? {} : { agent: parseHarnessAgentOverrides(input.agent) }),
     };
   }
   return result;

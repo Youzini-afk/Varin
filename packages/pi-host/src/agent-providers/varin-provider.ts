@@ -29,12 +29,17 @@ export class VarinAgentProvider implements AgentProviderAdapter {
       const binding = settings.models[slot];
       const displayedModel = binding?.providerId && binding.modelId ? { providerId: binding.providerId, modelId: binding.modelId } : model;
       const enabled = settings.models[slot]?.enabled !== false;
-      agents.push({ id: `varin:builtin:${slot}`, providerId: "varin", kind: "delegatable", name, description,
+      const overrides = binding?.agent;
+      agents.push({ id: `varin:builtin:${slot}`, providerId: "varin", kind: "delegatable", name: overrides?.name ?? name, description: overrides?.description ?? description,
         source: { scope: "builtin" }, status: !enabled ? "disabled" : model ? "available" : "unconfigured",
         ...(focus ? { workFocus: [focus] } : {}),
         ...(displayedModel ? { model: `${displayedModel.providerId}/${displayedModel.modelId}` } : {}),
         definition: { revision: snapshot.globalRevision,
-          config: { kind: "builtin", slot, binding: { ...settings.models[slot] }, tools, instructions, worktree, ...dispatch } },
+          config: { kind: "builtin", slot, binding: { ...settings.models[slot] } as unknown as JsonValue,
+            tools: overrides?.tools ?? tools, instructions: overrides?.instructions ?? instructions,
+            worktree: overrides?.worktree ?? worktree,
+            ...(overrides?.modelSettings ? { modelSettings: overrides.modelSettings as JsonValue } : {}),
+            defaults: { name, description, tools, instructions, worktree }, ...dispatch } },
         actions: [{ id: enabled ? "disable" : "enable", label: enabled ? "Disable" : "Enable" }, { id: "update", label: "Configure" }],
       });
     };

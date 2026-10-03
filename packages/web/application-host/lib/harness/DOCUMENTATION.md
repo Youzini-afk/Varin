@@ -362,6 +362,15 @@ processes, or a second Host.
 
 ### ThreadRegistry / ThreadRuntime
 
+Native built-in profiles keep optional user customizations in `harness.models[role].agent`; custom
+profiles use `harness.agents`. The protocol resolver supplies the same effective names, instructions,
+tools, worktree and model parameters to the catalog, ordinary dispatch and research routing.
+Review agents are dispatched on demand through that same path; publishing a result never schedules
+another review or establishes a review gate. A dispatch copies the profile into the launch manifest and Run snapshot. Temperature/thinking
+settings travel through the existing session adapter and broker on create/open, including dequeue,
+restore and continuation. Pi records them in a branch custom entry and applies temperature through
+its native stream seam; no alternate model loop or provider registry is involved.
+
 The registry persists one versioned atomic catalog per workspace. `Thread` is
 durable work; `ThreadRun` is one execution attempt, and
 `ThreadLaunchManifest` freezes model-adjacent launch inputs. Isolated `dispatch`
@@ -388,8 +397,8 @@ and drive-letter paths, not names such as `src/foo..bar`. Sibling threads may
 exchange directed messages inside their root task (below); they still cannot
 read each other's transcripts or control each other's Runs, and the root
 session list and Zone 2 projection stay on direct children. After a successful publish, only same-Run observations whose start/end
-identity matches the fixed result are bound to that `resultRevision`. A hidden
-review thread is then created with `startRun` + `spawn` (not `autoRun` alone).
+identity matches the fixed result are bound to that `resultRevision`. The
+result is available to the caller without creating another review Thread.
 Draft merge records that disk commands cannot verify unsaved buffers.
 
 `thread.dispatch` also freezes the Host-confirmed parent operation directory and query scope
@@ -479,12 +488,6 @@ once. A fully applied parent merge opens a persisted window keyed by operation,
 result revision, and exact parent session; draft-unsaved and incomplete merge
 states do not. Review records additionally bind review thread and review Run.
 
-### Review sensor (`review-sensor.ts`)
-
-`onPublishedResult` opens a hidden review thread for one published revision.
-`createAndStart` must `startRun` and `spawn`. There is no parent
-journaled-change review entry point; fixed result publication is the only
-automatic trigger.
 
 ### HarnessSearchService (`search-service.ts`)
 

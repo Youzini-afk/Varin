@@ -3,7 +3,6 @@ import { describe, it } from "node:test";
 import {
   mergeHarnessSettings,
   resolveHarnessContextSettings,
-  resolveHarnessReviewSettings,
   resolveHarnessNextStepSettings,
   resolveHarnessDocumentReadingSettings,
   resolveHarnessCodeRetrievalSettings,
@@ -184,17 +183,6 @@ describe("harness settings", () => {
     );
   });
 
-  it("keeps automatic review user-owned and defaults to disabled non-blocking", () => {
-    assert.deepEqual(mergeHarnessSettings({}, {}).review, { enabled: false, gate: false });
-    assert.deepEqual(mergeHarnessSettings(
-      { review: { enabled: false, gate: true } },
-      { review: { enabled: true, gate: false } },
-    ).review, { enabled: false, gate: true });
-    assert.deepEqual(mergeHarnessSettings(
-      { review: { enabled: false } },
-      {},
-    ).review, { enabled: false, gate: false });
-  });
 
   it("keeps next-step selection user-owned, disabled by default, and separate from the memory organizer", () => {
     assert.deepEqual(mergeHarnessSettings({}, {}).nextStep, { enabled: false });
@@ -256,10 +244,6 @@ describe("harness settings", () => {
     );
   });
 
-  it("rejects malformed review settings", () => {
-    assert.throws(() => resolveHarnessReviewSettings({ enabled: "yes" }), HarnessSettingsValidationError);
-    assert.throws(() => resolveHarnessReviewSettings(false), /must be an object/);
-  });
 
   it("does not let a workspace change the user-owned background preparation setting", () => {
     assert.equal(mergeHarnessSettings(

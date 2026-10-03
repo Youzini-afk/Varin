@@ -610,6 +610,7 @@ export class PiRuntimeBroker {
     parentSession?: string,
     workspace?: SessionWorkspaceBinding,
     launch?: {
+      modelSettings?: import("@varin/protocol").HarnessAgentModelSettings | null;
       model?: { providerId: string; modelId: string };
       permissions?: PermissionPolicy;
       scope?: string[];
@@ -632,6 +633,7 @@ export class PiRuntimeBroker {
         ...(name === undefined ? {} : { name }),
         ...(parentSession === undefined ? {} : { parentSession }),
         ...(launch?.model === undefined ? {} : { model: { ...launch.model } }),
+        ...(launch?.modelSettings === undefined ? {} : { modelSettings: launch.modelSettings }),
         ...(launch?.permissions === undefined ? {} : { permissions: launch.permissions }),
         ...(launch?.tools === undefined ? {} : { tools: [...launch.tools] }),
         workFocus,
@@ -665,6 +667,7 @@ export class PiRuntimeBroker {
   }
 
   async openSession(input: {
+    modelSettings?: import("@varin/protocol").HarnessAgentModelSettings | null;
     cwd?: string;
     model?: { providerId: string; modelId: string };
     permissions?: PermissionPolicy;
@@ -741,6 +744,7 @@ export class PiRuntimeBroker {
       ...(sessionFile === undefined ? {} : { sessionFile }),
       ...(input.sessionId === undefined ? {} : { sessionId: input.sessionId }),
       ...(input.model === undefined ? {} : { model: { ...input.model } }),
+      ...(input.modelSettings === undefined ? {} : { modelSettings: input.modelSettings }),
       ...(input.permissions === undefined ? {} : { permissions: input.permissions }),
       ...(input.tools === undefined ? {} : { tools: [...input.tools] }),
     };

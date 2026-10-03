@@ -11,11 +11,8 @@ import type {
   ParentVerificationBundle,
   ResultReviewRecord,
   ResultVerificationBundle,
-  WorkingResult,
 } from "./types.js";
-import type { WorkingStateRootStore } from "./types.js";
 
-const looksBinary = (bytes: Buffer): boolean => bytes.includes(0);
 
 export const cwdUnderRoot = (cwd: string, root: string): boolean => {
   const resolvedCwd = path.resolve(cwd).replace(/\\/g, "/").toLowerCase();
@@ -166,7 +163,6 @@ export const projectReview = (
     status: record.status,
     ...(record.reviewThreadId ? { reviewThreadId: record.reviewThreadId } : {}),
     ...(record.reviewRunId ? { reviewRunId: record.reviewRunId } : {}),
-    ...(record.gate !== undefined ? { gate: record.gate } : {}),
     ...(record.conclusion ? { conclusion: record.conclusion } : {}),
     ...(record.findings ? { findings: record.findings } : {}),
     ...(record.error ? { error: record.error } : {}),
@@ -184,44 +180,3 @@ export const projectThreadVerification = (input: {
   parentChecks: projectParentChecks(input.parent),
   review: projectReview(input.review, input.currentResultRevision),
 });
-
-const decodeObject = (bytes: Buffer | null, hash: string): string => {
-  if (!bytes) return `[missing object ${hash}]`;
-  if (looksBinary(bytes)) return `[binary object ${hash} ${bytes.byteLength} bytes]`;
-  return bytes.toString("utf8");
-};
-
-const formatUnified = (file: string, before: string, after: string): string => {
-  const beforeLines = before.split("\n");
-  const afterLines = after.split("\n");
-  if (before === after) return `--- a/${file}\n+++ b/${file}\n`;
-  return [
-    `--- a/${file}`,
-    `+++ b/${file}`,
-    "@@",
-    ...beforeLines.map((line) => `-${line}`),
-    ...afterLines.map((line) => `+${line}`),
-  ].join("\n");
-};
-
-export const formatPublishedResultDiff = async (
-  store: Pick<WorkingStateRootStore, "getObject">,
-  result: WorkingResult,
-): Promise<string> => {
-  if (result.changedPaths.length === 0) return "";
-  const sections: string[] = [];
-  for (const file of result.changedPaths) {
-    const beforeState = result.baseStates[file];
-    const afterState = result.pathStates[file];
-    const beforeHash = beforeState?.kind === "regular-file" ? beforeState.objectHash : undefined;
-    const afterHash = afterState?.kind === "regular-file" ? afterState.objectHash : undefined;
-    const before = beforeHash
-      ? decodeObject(await store.getObject(beforeHash), beforeHash)
-      : beforeState ? `[${beforeState.kind}]` : "";
-    const after = afterHash
-      ? decodeObject(await store.getObject(afterHash), afterHash)
-      : afterState ? `[${afterState.kind}]` : "";
-    sections.push(formatUnified(file, before, after));
-  }
-  return sections.join("\n");
-};

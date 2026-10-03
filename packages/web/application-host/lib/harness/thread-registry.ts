@@ -11,6 +11,7 @@ import { createHash, randomUUID } from "node:crypto";
 import { join } from "node:path";
 import {
   isResearchCapability,
+  parseHarnessAgentModelSettings,
   normalizeFrozenHarnessPermissions,
   sealRetrievalEvidence,
   summarizeRetrievalEvidence,
@@ -125,6 +126,7 @@ export interface ThreadCatalogDocument {
 }
 
 export interface CreateThreadInput {
+  modelSettings?: import("@varin/protocol").HarnessAgentModelSettings;
   scopeId: string;
   parent: ThreadParent;
   brief: string;
@@ -149,11 +151,10 @@ export interface CreateThreadInput {
   research?: ThreadResearchManifest;
   permissions: unknown;
   systemPromptFragment?: string;
-  /** Bespoke first-Run prompt that survives queuing (auto-review threads). */
+  /** Bespoke first-Run prompt that survives queuing. */
   promptText?: string;
   autoRun: boolean;
   hidden?: boolean;
-  reviewOf?: ThreadReviewOf;
   /** BC3: a discussion Thread bound to consult this Bot. */
   consultBotId?: string;
   /**
@@ -392,11 +393,7 @@ const isWaitingFor = (value: unknown): value is ThreadWaitingFor | null => (
   value === null
   || (isRecord(value)
     && (value.kind === "user" || value.kind === "permission" || value.kind === "thread" || value.kind === "experiment" || value.kind === "followup")
-    && isString(value.text)
-    && (value.review === undefined || (value.kind === "thread" && isRecord(value.review)
-      && Number.isSafeInteger(value.review.resultRevision) && Number(value.review.resultRevision) > 0
-      && isString(value.review.reviewThreadId)
-      && (value.review.reviewRunId === undefined || isString(value.review.reviewRunId)))))
+      && isString(value.text))
 );
 
 const isMessagePeer = (value: unknown): value is ThreadMessagePeer => (
@@ -541,6 +538,7 @@ const isLaunchManifest = (value: unknown): value is ThreadLaunchManifest => (
   && (value.initialAuthorityRoot === undefined || isString(value.initialAuthorityRoot))
   && Array.isArray(value.scope) && value.scope.every(isString)
   && isNullableString(value.systemPromptFragment)
+  && isAgentModelSettings(value.modelSettings)
   && Array.isArray(value.tools) && value.tools.every(isString)
   && (value.workFocus === "code" || value.workFocus === "research")
   && (value.research === undefined || isResearchManifest(value.research))
@@ -645,6 +643,11 @@ const isThread = (value: unknown): value is Thread => {
     && (value.deletion === undefined || isDeletionState(value.deletion));
 };
 
+const isAgentModelSettings = (value: unknown): boolean => {
+  if (value === undefined) return true;
+  try { parseHarnessAgentModelSettings(value); return true; } catch { return false; }
+};
+
 const isFrozenRunConfig = (value: unknown): value is NonNullable<ThreadRun["frozen"]> => (
   isRecord(value)
   && (value.model === null || (isRecord(value.model) && isString(value.model.providerId) && isString(value.model.modelId)))
@@ -653,6 +656,7 @@ const isFrozenRunConfig = (value: unknown): value is NonNullable<ThreadRun["froz
   && Array.isArray(value.scope) && value.scope.every(isString)
   && (value.worktree === "none" || value.worktree === "shared" || value.worktree === "isolated")
   && isNullableString(value.systemPromptFragment)
+  && isAgentModelSettings(value.modelSettings)
   && (value.inputOrigin === "task" || value.inputOrigin === "inherit" || value.inputOrigin === "continue" || value.inputOrigin === "fresh")
   && (value.workFocus === "code" || value.workFocus === "research")
   && (value.research === undefined || isResearchManifest(value.research))
@@ -1447,6 +1451,7 @@ export function createThreadRegistry(options: ThreadRegistryOptions) {
         preset: input.preset ?? null,
         model: input.model ?? null,
         manifest: {
+          ...(input.modelSettings === undefined ? {} : { modelSettings: parseHarnessAgentModelSettings(input.modelSettings) }),
           carryBlocks: input.carryBlocks ?? true,
           concurrency: input.concurrency,
           draftBaselineId: input.draftBaselineId ?? null,
@@ -1480,7 +1485,6 @@ export function createThreadRegistry(options: ThreadRegistryOptions) {
         updatedAt: timestamp,
         eventSeq: nextEventSeq(catalog),
         hidden: input.hidden ?? false,
-        ...(input.reviewOf ? { reviewOf: structuredClone(input.reviewOf) } : {}),
         ...(input.consultBotId ? { consultBotId: input.consultBotId } : {}),
         ...(environment && (environment.workTarget !== undefined || environment.desktopId !== undefined)
           ? { environment: { ...environment, updatedAt: timestamp } }
@@ -1686,8 +1690,8 @@ export function createThreadRegistry(options: ThreadRegistryOptions) {
       // they are not delegated model work and must not permanently occupy the
       // parent's implementation concurrency slots.
       if (thread.kind !== "implementation" || thread.lifecycle !== "active") return false;
-      // A Thread waiting on a real dependency (a requested answer or a review
-      // gate) relinquishes its model execution slot while it waits; sessions,
+      // A Thread waiting on a requested answer relinquishes its model
+      // execution slot while it waits; sessions,
       // processes, writers, and worktrees stay occupied regardless.
       const run = activeRunFor(catalog, thread);
       if (run?.executionYielded === true) return false;
@@ -1766,8 +1770,7 @@ export function createThreadRegistry(options: ThreadRegistryOptions) {
           if (!run.executionYielded) return { value: true, changed: [], write: false };
           const root = rootSessionFor(catalog, thread.parent);
           if (root === null) throw new Error("The waiting Run has no root task");
-          if (thread.waitingFor?.review !== undefined
-            || countActiveInCatalog(catalog, root) >= thread.manifest.concurrency) {
+          if (countActiveInCatalog(catalog, root) >= thread.manifest.concurrency) {
             return { value: false, changed: [], write: false };
           }
           run.executionYielded = false;
@@ -1856,6 +1859,7 @@ export function createThreadRegistry(options: ThreadRegistryOptions) {
           inputOrigin: options.inputOrigin ?? options.frozen.inputOrigin,
         } : {
           model: structuredClone(thread.model),
+          ...(thread.manifest.modelSettings === undefined ? {} : { modelSettings: { ...thread.manifest.modelSettings } }),
           tools: [...thread.manifest.tools],
           ...(thread.manifest.permissions ? { permissions: structuredClone(thread.manifest.permissions) } : {}),
           scope: [...thread.manifest.scope],

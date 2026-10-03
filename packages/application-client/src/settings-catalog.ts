@@ -300,15 +300,6 @@ export const SETTINGS_CATALOG: readonly SettingsCatalogEntry[] = [
       keywords: ['next step', 'suggestion', 'follow up', 'model'] },
   },
   {
-    id: 'harness.review', category: 'harness', owner: 'pi-settings',
-    field: { path: 'harness.review', kind: 'json', scope: 'user',
-      note: '{enabled: boolean, gate: boolean} — user-owned automatic review of child results',
-      default: { enabled: false, gate: false } },
-    apply: 'next-run',
-    ui: { page: 'agents', titleKey: 'settings.page.harness.section.review',
-      keywords: ['review', 'gate'] },
-  },
-  {
     id: 'harness.context', category: 'harness', owner: 'pi-settings',
     field: { path: 'harness.context', kind: 'json', scope: 'user',
       note: '{backgroundPreparation: boolean, preparationWaterline: 0<n<1} — user-owned background compaction prep',

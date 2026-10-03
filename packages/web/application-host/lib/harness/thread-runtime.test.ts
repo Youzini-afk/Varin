@@ -200,6 +200,19 @@ describe("thread runtime", () => {
     return { input, thread, run };
   };
 
+  it('uses the admitted model parameters when spawning and continuing a retained worker', async () => {
+    const modelSettings = { temperature: 0.35, thinkingLevel: 'low' as const };
+    const input = { ...createInput(), modelSettings };
+    const thread = await registry.createThread(input);
+    modelSettings.temperature = 0.9;
+    const run = await registry.startRun(WORKSPACE, thread.id);
+    await runtime.spawn({ ...input, threadId: thread.id, runId: run.id });
+    expect(sessionAdapter.create).toHaveBeenCalledWith(expect.objectContaining({ modelSettings: { temperature: 0.35, thinkingLevel: 'low' } }));
+    await runtime.suspendForBot(WORKSPACE, thread.id);
+    await runtime.continueRun({ scopeId: WORKSPACE, parent: PARENT, threadId: thread.id, mode: 'continue', task: 'Continue the work', requestId: 'parameters-continue' });
+    expect(sessionAdapter.open).toHaveBeenCalledWith(expect.objectContaining({ modelSettings: { temperature: 0.35, thinkingLevel: 'low' } }));
+  });
+
   it('Bot sleep confirms worker closure, preserves the worktree, and continues the retained session once', async () => {
     const { thread, run } = await start();
     vi.mocked(sessionAdapter.close).mockRejectedValueOnce(new Error('worker still alive'));
@@ -3228,32 +3241,23 @@ describe("thread runtime", () => {
     await partialRuntime.dispose();
   });
 
-  it("binds recorded commands to a published result and reviews that revision once", async () => {
+  it("binds recorded commands to a published result without scheduling another task", async () => {
     const { createVerificationCoordinator } = await import("./verification-coordinator.js");
-    const { resolvePresets } = await import("./presets.js");
     const verification = createVerificationCoordinator();
     let created = 0;
-    let failNextReviewStart = false;
-    let hidePublishedResult = false;
     const sessions: ThreadSessionAdapter = {
       ...sessionAdapter,
       create: vi.fn(async () => {
         const id = `child-${++created}`;
-        if (failNextReviewStart) {
-          failNextReviewStart = false;
-          throw new Error("review model failed to start");
-        }
         return snapshot(id);
       }),
     };
-    const reviewRuntime = createThreadRuntime({
+    const verificationRuntime = createThreadRuntime({
       registry,
       sessions,
       verification,
       resolveWorkspaceRoot: async () => "/workspace",
       resolveRuntimeWorkspaceId: async () => WORKSPACE,
-      resolveReviewSettings: () => ({ enabled: true, gate: true }),
-      resolveReviewPreset: () => resolvePresets({}, { providerId: "test-provider", modelId: "test-model" }).find((role) => role.id === "review") ?? null,
       worktrees: {
         prepare: prepareWorktree,
         snapshot: async (worktree) => ({ ...worktree, resultCommit: "result" }),
@@ -3272,7 +3276,6 @@ describe("thread runtime", () => {
           createdAt: new Date().toISOString(),
         };
         const child = new Map<string, unknown[]>();
-        const reviews = new Map<string, unknown[]>();
         return {
           withStore: async (_workspaceId, _purpose, operation) => operation(
             {
@@ -3283,24 +3286,19 @@ describe("thread runtime", () => {
               publishDirectoryResult: async () => published,
               publishHeadResult: async () => published,
               resultTreeIdentity: () => "tree-1",
-              getResult: () => hidePublishedResult ? null : published,
+              getResult: () => published,
               getObject: async () => Buffer.from("new\n"),
               getChildVerification: (threadId: string, revision: number) => (
                 (child.get(threadId) ?? []).find((item) => (item as { resultRevision: number }).resultRevision === revision) ?? null
               ),
               listChildVerifications: (threadId: string) => child.get(threadId) ?? [],
               getParentVerification: () => null,
-              getReviewRecord: (threadId: string, revision: number) => (
-                (reviews.get(threadId) ?? []).find((item) => (item as { resultRevision: number }).resultRevision === revision) ?? null
-              ),
-              listReviewRecords: (threadId: string) => reviews.get(threadId) ?? [],
+              getReviewRecord: () => null,
+              listReviewRecords: () => [],
               putChildVerification: async (threadId: string, bundle: unknown) => {
                 child.set(threadId, [bundle]);
               },
               putParentVerification: async () => undefined,
-              putReviewRecord: async (threadId: string, record: unknown) => {
-                reviews.set(threadId, [record]);
-              },
             } as unknown as WorkingStateStore,
             {} as WorkspaceRecoveryStorageContext,
           ),
@@ -3310,7 +3308,7 @@ describe("thread runtime", () => {
     const input = { ...createInput(), tools: ["read", "edit", "bash"] };
     const thread = await registry.createThread(input);
     const run = await registry.startRun(WORKSPACE, thread.id);
-    await reviewRuntime.spawn({ ...input, threadId: thread.id, runId: run.id });
+    await verificationRuntime.spawn({ ...input, threadId: thread.id, runId: run.id });
     const actor = {
       authorityInstanceId: "host", sessionId: "child-1", workerId: "worker", workerGeneration: 1, runId: run.id,
     };
@@ -3338,127 +3336,26 @@ describe("thread runtime", () => {
       outputHandle: "out_1",
       outputPreview: "ok",
     });
-    reviewRuntime.processEvent({
+    verificationRuntime.processEvent({
       kind: "host",
       sessionId: "child-1",
       envelope: { kind: "event", event: "agent.event", data: { event: { type: "agent_end", messages: [assistantMessage("Conclusion\n- done")], willRetry: false } } },
     });
-    reviewRuntime.processEvent({
+    verificationRuntime.processEvent({
       kind: "host",
       sessionId: "child-1",
       envelope: { kind: "event", event: "agent.event", data: { event: { type: "agent_settled" } } },
     });
-    await reviewRuntime.drain();
+    await verificationRuntime.drain();
     const settled = await registry.getThread(WORKSPACE, PARENT, thread.id);
     expect(settled?.verification?.childChecks?.commands[0]).toMatchObject({
       command: "bun test",
       exitCode: 0,
       relation: "same-run-matching-result",
     });
-    await vi.waitFor(async () => {
-      const current = await registry.getThread(WORKSPACE, PARENT, thread.id);
-      expect(current?.verification?.review?.status).toBe("running");
-      expect(current?.verification?.review?.resultRevision).toBe(1);
-      expect(current?.verification?.review?.gate).toBe(true);
-      expect(current).toMatchObject({
-        attention: "thread",
-        waitingFor: {
-          kind: "thread",
-          review: {
-            resultRevision: 1,
-            reviewThreadId: current?.verification?.review?.reviewThreadId,
-            reviewRunId: current?.verification?.review?.reviewRunId,
-          },
-        },
-      });
-    });
-    const hidden = await registry.listThreads(WORKSPACE, PARENT, true);
-    const review = hidden.find((item) => item.reviewOf?.sourceThreadId === thread.id);
-    expect(review?.hidden).toBe(true);
-    expect(review?.reviewOf).toEqual({ sourceThreadId: thread.id, resultRevision: 1 });
-    expect(await registry.listThreads(WORKSPACE, PARENT, false)).toHaveLength(1);
-    expect(sent.some((text) => text.includes("Published diff") && text.includes("Implement the feature"))).toBe(true);
-    expect(sent.some((text) => text.includes("not seen the parent conversation"))).toBe(true);
-    expect(sent.some((text) => text.includes("Could this use the existing seam?"))).toBe(false);
-    expect(sent.filter((text) => text.includes("Published diff")).some((text) => text.includes("<parent-blocks"))).toBe(false);
-    reviewRuntime.processEvent({
-      kind: "host",
-      sessionId: "child-2",
-      envelope: {
-        kind: "event",
-        event: "agent.event",
-        data: { event: { type: "agent_end", messages: [assistantMessage("Conclusion\nLooks good\nUnresolved issues\n- [high] a.ts:1 add a test")], willRetry: false } },
-      },
-    });
-    reviewRuntime.processEvent({
-      kind: "host",
-      sessionId: "child-2",
-      envelope: { kind: "event", event: "agent.event", data: { event: { type: "agent_settled" } } },
-    });
-    await reviewRuntime.drain();
-    const reviewed = await registry.getThread(WORKSPACE, PARENT, thread.id);
-    expect(reviewed?.verification?.review).toMatchObject({
-      status: "completed",
-      resultRevision: 1,
-      conclusion: expect.stringContaining("Looks good"),
-      gate: false,
-    });
-    expect(reviewed).toMatchObject({ attention: "none", waitingFor: null });
-    expect(reviewed?.verification?.review?.findings?.some((finding) => finding.file === "a.ts" && finding.severity === "high")).toBe(true);
-
-    const secondThread = await registry.createThread(input);
-    const secondRun = await registry.startRun(WORKSPACE, secondThread.id);
-    await reviewRuntime.spawn({ ...input, threadId: secondThread.id, runId: secondRun.id });
-    failNextReviewStart = true;
-    reviewRuntime.processEvent({
-      kind: "host",
-      sessionId: "child-3",
-      envelope: { kind: "event", event: "agent.event", data: { event: { type: "agent_end", messages: [assistantMessage("Conclusion\n- done")], willRetry: false } } },
-    });
-    reviewRuntime.processEvent({
-      kind: "host",
-      sessionId: "child-3",
-      envelope: { kind: "event", event: "agent.event", data: { event: { type: "agent_settled" } } },
-    });
-    await reviewRuntime.drain();
-    await vi.waitFor(async () => {
-      const failed = await registry.getThread(WORKSPACE, PARENT, secondThread.id);
-      expect(failed?.verification?.review).toMatchObject({
-        resultRevision: 1,
-        status: "failed",
-        gate: false,
-        reviewThreadId: expect.any(String),
-        reviewRunId: expect.any(String),
-        error: expect.stringContaining("review model failed to start"),
-      });
-      expect(failed).toMatchObject({ attention: "none", waitingFor: null });
-    });
-
-    const thirdThread = await registry.createThread(input);
-    const thirdRun = await registry.startRun(WORKSPACE, thirdThread.id);
-    await reviewRuntime.spawn({ ...input, threadId: thirdThread.id, runId: thirdRun.id });
-    hidePublishedResult = true;
-    reviewRuntime.processEvent({
-      kind: "host",
-      sessionId: "child-5",
-      envelope: { kind: "event", event: "agent.event", data: { event: { type: "agent_end", messages: [assistantMessage("Conclusion\n- done")], willRetry: false } } },
-    });
-    reviewRuntime.processEvent({
-      kind: "host",
-      sessionId: "child-5",
-      envelope: { kind: "event", event: "agent.event", data: { event: { type: "agent_settled" } } },
-    });
-    await reviewRuntime.drain();
-    await vi.waitFor(async () => {
-      const failed = await registry.getThread(WORKSPACE, PARENT, thirdThread.id);
-      expect(failed?.verification?.review).toMatchObject({
-        resultRevision: 1,
-        status: "failed",
-        gate: false,
-        error: expect.stringContaining("Published result is missing"),
-      });
-    });
-    await reviewRuntime.dispose();
+    expect(created).toBe(1);
+    expect(await registry.listThreads(WORKSPACE, PARENT, true)).toHaveLength(1);
+    await verificationRuntime.dispose();
   });
 
   it("aborts in-flight preparation when kill is called without an open session", async () => {

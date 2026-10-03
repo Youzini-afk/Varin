@@ -355,7 +355,6 @@ export interface ResultReviewRecord {
   recordedAt: number;
   reviewThreadId?: string;
   reviewRunId?: string;
-  gate?: boolean;
   conclusion?: string;
   findings?: Array<{ severity: string; file?: string; line?: number; message: string }>;
   error?: string;

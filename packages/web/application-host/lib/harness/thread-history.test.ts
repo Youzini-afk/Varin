@@ -138,18 +138,20 @@ describe("user Thread history release", () => {
     expect((await h.inspect().expect(200)).body.results).toHaveLength(2);
   });
 
-  it("rechecks a review added after listing and preserves active or lost Run inputs", async () => {
+  it("preserves referenced review evidence and active or lost Run inputs", async () => {
     const h = await setup();
     await h.publish("old\n"); await h.publish("new\n");
     expect((await h.inspect().expect(200)).body.results[1].protectedReasons).toEqual([]);
-    const review = await h.registry.createThread({
-      scopeId: "ws", parent: h.parent, brief: "Review old result", kind: "implementation", createdBy: "agent",
-      concurrency: 8, autoRun: false, worktree: "none", tools: ["read"], permissions: {}, preset: "review",
-      reviewOf: { sourceThreadId: h.thread.id, resultRevision: 1 },
+    await h.registry.setVerification("ws", h.thread.id, {
+      currentResultRevision: 2, childChecks: null, parentChecks: null,
+      review: { resultRevision: 1, status: "running" },
     });
     await h.release([1]).expect(409);
     expect((await h.inspect().expect(200)).body.results[1].protectedReasons).toContain("review");
-    await h.registry.archiveThread("ws", review.id);
+    await h.registry.setVerification("ws", h.thread.id, {
+      currentResultRevision: 2, childChecks: null, parentChecks: null,
+      review: { resultRevision: 1, status: "completed" },
+    });
     await h.registry.setWorkingState("ws", h.thread.id, { branchId: h.branchId, resultRevision: 1 });
     const run = await h.registry.startRun("ws", h.thread.id);
     expect((await h.inspect().expect(200)).body.results[1].protectedReasons).toEqual(["run-input"]);

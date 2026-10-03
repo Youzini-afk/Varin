@@ -126,7 +126,7 @@ import { createWorkingBranchWriteServices } from './lib/harness/working-state/wo
 import { acquireVirtualWriteTicket, VirtualWriteGate } from './lib/harness/working-state/virtual-write-gate.js';
 import { IntegrationCoordinator } from './lib/harness/working-state/integration-coordinator.js';
 import { reconcileInterruptedKernelBranchIntegrations } from './lib/recovery/durable-file-operation.js';
-import { DEFAULT_HARNESS_SETTINGS, mergeHarnessSettings, resolveHarnessDocumentReadingSettings, resolvePresets, THINKING_LEVELS, type HarnessSettingsInput, type SessionSnapshot } from '@varin/protocol';
+import { DEFAULT_HARNESS_SETTINGS, mergeHarnessSettings, resolveHarnessDocumentReadingSettings, THINKING_LEVELS, type HarnessSettingsInput, type SessionSnapshot } from '@varin/protocol';
 import { createSettingsService, settingsDocumentRevision } from './lib/harness/settings-service.js';
 import { createFollowUpService } from './lib/harness/followups.js';
 import { createFollowUpThreadSender } from './lib/harness/followup-delivery.js';
@@ -2301,54 +2301,6 @@ async function main(options: StartWebUiServerOptions = {}): Promise<WebUiServerC
       if (!sessionId) throw new Error('Parent thread has no Pi session for worktree settings');
       return resolveThreadWorktreeSettings(await piRuntimeBroker.requestForSession(sessionId, 'settings.get', {}));
     },
-    resolveReviewSettings: async (workspaceId, parent) => {
-      const sessionId = parent.kind === 'session'
-        ? parent.id
-        : (await threadRegistry.getActiveRun(workspaceId, parent.id))?.sessionId;
-      if (!sessionId) return { enabled: false, gate: false };
-      try {
-        const snapshot = await piRuntimeBroker.requestForSession(sessionId, 'settings.get', {});
-        const global = recordOf(recordOf(snapshot).global).harness;
-        return mergeHarnessSettings(
-          global && typeof global === 'object' && !Array.isArray(global) ? global : {},
-          {},
-        ).review;
-      } catch {
-        return { enabled: false, gate: false };
-      }
-    },
-    resolveReviewPreset: async (workspaceId, parent) => {
-      const sessionId = parent.kind === 'session'
-        ? parent.id
-        : (await threadRegistry.getActiveRun(workspaceId, parent.id))?.sessionId;
-      if (!sessionId) return null;
-      const [settingsSnapshot, sessionSnapshot] = await Promise.all([
-        piRuntimeBroker.requestForSession(sessionId, 'settings.get', {}).catch(() => null),
-        piRuntimeBroker.requestForSession(sessionId, 'session.snapshot', { sessionId }).catch(() => null),
-      ]);
-      const global = settingsSnapshot ? recordOf(recordOf(settingsSnapshot).global).harness : undefined;
-      const merged = mergeHarnessSettings(
-        global && typeof global === 'object' && !Array.isArray(global) ? global : {},
-        {},
-      );
-      const model = recordOf(sessionSnapshot).model;
-      const main = model && typeof recordOf(model).provider === 'string' && typeof recordOf(model).id === 'string'
-        ? { providerId: recordOf(model).provider as string, modelId: recordOf(model).id as string }
-        : null;
-      return resolvePresets(merged.models, main).find((preset) => preset.id === 'review') ?? null;
-    },
-    recallProjectKnowledge: async (workspaceId, query) => {
-      const store = await getKnowledgeStoreForScope(workspaceId);
-      const hits = await store.recall(query, 5);
-      return hits.map((hit) => {
-        const payload = hit.node.payload;
-        const title = typeof payload.title === 'string' ? payload.title
-          : typeof payload.trigger === 'string' ? payload.trigger
-            : String(hit.node.id);
-        const content = typeof payload.content === 'string' ? payload.content : '';
-        return `#${hit.node.id} ${title}${content ? `\n${content}` : ''}`;
-      }).join('\n\n');
-    },
     // A `bot:` scope's working root is the Bot's durable home directory —
     // there is no registered project workspace behind it.
     resolveWorkspaceRoot: async (workspaceId) => isBotScopeId(workspaceId)
@@ -2419,6 +2371,7 @@ async function main(options: StartWebUiServerOptions = {}): Promise<WebUiServerC
         { authorityId: input.workspaceId, id: input.workspaceId, kind: 'workspace' },
         {
           ...(input.model ? { model: input.model } : {}),
+          ...(input.modelSettings === undefined ? {} : { modelSettings: input.modelSettings }),
           ...(input.permissions ? { permissions: input.permissions } : {}),
           ...(input.scope?.length ? { scope: input.scope } : {}),
           tools: input.tools,
@@ -2428,6 +2381,7 @@ async function main(options: StartWebUiServerOptions = {}): Promise<WebUiServerC
       ),
       open: (input) => piRuntimeBroker.openSession({
         cwd: input.cwd,
+        ...(input.modelSettings === undefined ? {} : { modelSettings: input.modelSettings }),
         ...(input.model ? { model: input.model } : {}),
         ...(input.permissions ? { permissions: input.permissions } : {}),
         ...(input.scope?.length ? { scope: input.scope } : {}),

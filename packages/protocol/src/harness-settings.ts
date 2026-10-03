@@ -95,12 +95,6 @@ export interface CompactionRecoverySettings {
   maxRetries: number;
 }
 
-export interface HarnessReviewSettings {
-  /** Default false: automatic review of child results is opt-in. */
-  enabled: boolean;
-  /** Default false: do not block ordinary settlement on the review finding. */
-  gate: boolean;
-}
 
 /** User-owned post-turn next-step picker. Disabled by default. */
 export interface HarnessNextStepSettings {
@@ -184,25 +178,6 @@ export class HarnessSettingsValidationError extends Error {
   }
 }
 
-const DEFAULT_HARNESS_REVIEW_SETTINGS: HarnessReviewSettings = { enabled: false, gate: false };
-
-export function resolveHarnessReviewSettings(value: unknown): HarnessReviewSettings {
-  if (value === undefined) return { ...DEFAULT_HARNESS_REVIEW_SETTINGS };
-  if (typeof value !== "object" || value === null || Array.isArray(value)) {
-    throw new HarnessSettingsValidationError("harness.review must be an object");
-  }
-  const input = value as Record<string, unknown>;
-  if (input.enabled !== undefined && typeof input.enabled !== "boolean") {
-    throw new HarnessSettingsValidationError("harness.review.enabled must be a boolean");
-  }
-  if (input.gate !== undefined && typeof input.gate !== "boolean") {
-    throw new HarnessSettingsValidationError("harness.review.gate must be a boolean");
-  }
-  return {
-    enabled: input.enabled ?? DEFAULT_HARNESS_REVIEW_SETTINGS.enabled,
-    gate: input.gate ?? DEFAULT_HARNESS_REVIEW_SETTINGS.gate,
-  };
-}
 
 const DEFAULT_HARNESS_CONTEXT_SETTINGS: HarnessContextSettings = {
   backgroundPreparation: true,
@@ -268,10 +243,9 @@ export function resolveHarnessContextSettings(
   };
 }
 
-export type HarnessSettingsInput = Omit<Partial<HarnessSettings>, "context" | "review" | "nextStep" | "documentReading" | "codeRetrieval"> & {
+export type HarnessSettingsInput = Omit<Partial<HarnessSettings>, "context" | "nextStep" | "documentReading" | "codeRetrieval"> & {
   context?: HarnessContextSettingsInput;
   memory?: HarnessMemorySettingsInput;
-  review?: Partial<HarnessReviewSettings>;
   nextStep?: Partial<HarnessNextStepSettings>;
   documentReading?: HarnessDocumentReadingSettingsInput;
   codeRetrieval?: Partial<HarnessCodeRetrievalSettings>;
@@ -300,8 +274,6 @@ export interface HarnessSettings {
   };
   /** Context-management settings (background compaction preparation). */
   context: HarnessContextSettings;
-  /** User-owned automatic review of published child results. */
-  review: HarnessReviewSettings;
   /** User-owned post-turn next-step suggestions; projects cannot enable it. */
   nextStep: HarnessNextStepSettings;
   /** Optional Host-side document parsers and OCR language; user-owned. */
@@ -364,7 +336,6 @@ export const DEFAULT_HARNESS_SETTINGS: HarnessSettings = {
   },
   context: { backgroundPreparation: true, preparationWaterline: 0.75,
     compactionRecovery: { ...DEFAULT_HARNESS_CONTEXT_SETTINGS.compactionRecovery } },
-  review: { enabled: false, gate: false },
   nextStep: { enabled: false },
   documentReading: { ...DEFAULT_HARNESS_DOCUMENT_READING_SETTINGS },
   worktree: {
@@ -524,8 +495,6 @@ export function mergeHarnessSettings(
     // Local document parser executables are user-owned. Project settings can
     // never select a process for the Host to launch.
     documentReading,
-    // Automatic review enablement and the completion gate are user-owned.
-    review: resolveHarnessReviewSettings(user.review),
     // Next-step suggestions are user-owned. A project cannot enable them when
     // the user has opted out, and project settings cannot redirect the model.
     nextStep: resolveHarnessNextStepSettings(userNextStep),

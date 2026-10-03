@@ -13,12 +13,16 @@ export const AGENT_KIND_LABEL_KEYS: Partial<Record<string, I18nKey>> = {
 
 export function nativeAgentLabel(agent: PiAgentDescriptor, t: (key: I18nKey) => string): string {
   const slot = agent.definition?.config.slot;
+  const binding = agent.definition?.config.binding as { agent?: { name?: string } } | undefined;
+  if (binding?.agent?.name !== undefined) return agent.name;
   return agent.providerId === 'varin' && typeof slot === 'string' && HARNESS_MODEL_ROLES.includes(slot as HarnessModelRole)
     ? t(`settings.harness.role.${slot as HarnessModelRole}`) : agent.name;
 }
 
 export function nativeAgentDescription(agent: PiAgentDescriptor, t: (key: I18nKey) => string): string {
   const slot = agent.definition?.config.slot;
+  const binding = agent.definition?.config.binding as { agent?: { description?: string } } | undefined;
+  if (binding?.agent?.description !== undefined) return agent.description;
   return agent.providerId === 'varin' && typeof slot === 'string' && HARNESS_MODEL_ROLES.includes(slot as HarnessModelRole)
     ? t(`settings.harness.role.${slot as HarnessModelRole}.description`) : agent.description;
 }

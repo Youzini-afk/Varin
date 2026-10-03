@@ -401,6 +401,7 @@ export interface HostMethodMap {
     params: {
       cwd: string;
       model?: ModelSelection;
+      modelSettings?: import("./harness-agents.js").HarnessAgentModelSettings | null;
       name?: string;
       parentSession?: string;
       permissions?: PermissionPolicy;
@@ -503,6 +504,7 @@ export interface HostMethodMap {
     params: {
       cwd?: string;
       model?: ModelSelection;
+      modelSettings?: import("./harness-agents.js").HarnessAgentModelSettings | null;
       permissions?: PermissionPolicy;
       sessionFile?: string;
       sessionId?: string;

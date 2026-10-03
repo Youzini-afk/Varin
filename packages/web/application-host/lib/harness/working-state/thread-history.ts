@@ -42,7 +42,6 @@ export async function projectThreadResultHistory(input: {
     keep(owner.resultRevision, "current-result");
     if (activeRun && (activeRun.outcome === null || activeRun.outcome === "lost")) keep(activeRun.inputRevision, "run-input");
     if (owner.verification?.review?.status === "running") keep(owner.verification.review.resultRevision, "review");
-    keep(owner.waitingFor?.review?.resultRevision, "review");
   }
   for (const snapshot of snapshots) {
     const review = snapshot.thread.reviewOf;

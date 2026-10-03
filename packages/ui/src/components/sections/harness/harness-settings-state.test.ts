@@ -66,12 +66,12 @@ describe('Harness automatic saving', () => {
     const write = vi.fn(async (harness: JsonValue) => snapshot(harness, 'b'));
     const controller = new HarnessSettingsController({ read: async () => snapshot({
       models: { review: { providerId: 'one', modelId: 'model' }, explore: { providerId: 'two', modelId: 'other' } },
-      web: { domains: { block: ['blocked.test'] } }, review: { enabled: true },
+      web: { domains: { block: ['blocked.test'] } }, nextStep: { enabled: true },
     }, 'a'), write });
     await controller.load();
-    controller.update({ models: { review: undefined }, web: { domains: { allow: [] } }, review: { enabled: false } });
+    controller.update({ models: { review: undefined }, web: { domains: { allow: [] } }, nextStep: { enabled: false } });
     await controller.load();
-    expect(write.mock.calls[0]![0]).toEqual({ models: { explore: { providerId: 'two', modelId: 'other' } }, web: { domains: { block: ['blocked.test'], allow: [] } }, review: { enabled: false } });
+    expect(write.mock.calls[0]![0]).toEqual({ models: { explore: { providerId: 'two', modelId: 'other' } }, web: { domains: { block: ['blocked.test'], allow: [] } }, nextStep: { enabled: false } });
   });
 
   it('restores a document parser default by removing only that user override', async () => {
@@ -108,7 +108,7 @@ describe('Harness automatic saving', () => {
     const pendingWrite = deferred<PiSettingsSnapshot>();
     const read = vi.fn()
       .mockResolvedValueOnce(snapshot({ shell: 'auto' }, 'a'))
-      .mockResolvedValueOnce(snapshot({ shell: 'wsl', review: { enabled: true } }, 'c'));
+      .mockResolvedValueOnce(snapshot({ shell: 'wsl', nextStep: { enabled: true } }, 'c'));
     const controller = new HarnessSettingsController({ read, write: vi.fn(() => pendingWrite.promise) });
     await controller.load();
     controller.update({ tools: { grep: false } });
@@ -116,6 +116,6 @@ describe('Harness automatic saving', () => {
     pendingWrite.resolve(snapshot({ shell: 'auto', tools: { grep: false } }, 'b'));
     await refreshed;
     expect(read).toHaveBeenCalledTimes(2);
-    expect(controller.getSnapshot().harness).toMatchObject({ shell: 'wsl', review: { enabled: true } });
+    expect(controller.getSnapshot().harness).toMatchObject({ shell: 'wsl', nextStep: { enabled: true } });
   });
 });

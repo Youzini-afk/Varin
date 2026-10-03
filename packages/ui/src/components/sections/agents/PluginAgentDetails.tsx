@@ -27,7 +27,6 @@ import { cn } from '@/lib/utils';
 import { AgentProviderActionDialog } from './AgentProviderActionDialog';
 import { PiSubagentsDefinitionDialog } from './PiSubagentsDefinitionDialog';
 import type { PiSubagentsDefinitionMode } from './pi-subagents-action-model';
-import { filterAgentsCatalog } from './agents-catalog-model';
 import {
   refreshAgentsCatalog,
   requestAgentsCatalogDefinition,
@@ -148,7 +147,7 @@ const DetailRow: React.FC<{
   </div>
 );
 
-export const PluginAgentDetails: React.FC = () => {
+export const PluginAgentDetails: React.FC<{ agent: PiAgentDescriptor | null }> = ({ agent: selectedAgent }) => {
   const { t } = useI18n();
   const setSettingsPage = useUIStore((state) => state.setSettingsPage);
   const currentDirectory = useDirectoryStore((state) => state.currentDirectory);
@@ -179,25 +178,12 @@ export const PluginAgentDetails: React.FC = () => {
     setDefinitionMode(null);
     setDialogAction(null);
     setDialogAgent(null);
-    void refresh();
   }, [refresh]);
 
   const providerById = React.useMemo(() => new Map(
     catalog.providers.map((provider) => [provider.id, provider]),
   ), [catalog.providers]);
 
-  const filteredAgents = React.useMemo(() => filterAgentsCatalog(
-    catalog,
-    catalogState.query,
-    catalogState.providerFilter,
-    catalogState.statusFilter,
-  ).filter(agent => agent.providerId !== 'varin'), [catalog, catalogState.providerFilter, catalogState.query, catalogState.statusFilter]);
-
-  const selectedAgent = React.useMemo(() => (
-    filteredAgents.find((agent) => agent.id === catalogState.selectedAgentId)
-      ?? filteredAgents[0]
-      ?? null
-  ), [catalogState.selectedAgentId, filteredAgents]);
   const selectedInvocation = selectedAgent ? invocationExample(selectedAgent) : null;
 
   const runAction = React.useCallback(async (input: {
@@ -270,7 +256,7 @@ export const PluginAgentDetails: React.FC = () => {
     && actionState?.agentId === selectedAgent.id
     ? actionState
     : null;
-  const effectiveDefinitionMode = definitionMode ?? catalogState.definitionRequest;
+  const effectiveDefinitionMode = definitionMode ?? (catalogState.definitionRequest === 'create-agent' ? 'create-agent' : null);
   const definitionAgent = effectiveDefinitionMode === 'update-agent'
     ? selectedAgent ?? undefined
     : undefined;

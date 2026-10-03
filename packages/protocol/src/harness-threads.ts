@@ -279,12 +279,6 @@ export interface TranscriptRef {
 export interface ThreadWaitingFor {
   kind: "user" | "permission" | "thread" | "experiment" | "followup";
   text: string;
-  review?: {
-    resultRevision: number;
-    reviewThreadId: string;
-    /** Absent while the review Thread is still queued for admission. */
-    reviewRunId?: string;
-  };
 }
 
 export interface ThreadBaselineUpdate {
@@ -407,6 +401,7 @@ export interface ThreadInheritedContext {
 
 
 export interface ThreadLaunchManifest {
+  modelSettings?: import("./harness-agents.js").HarnessAgentModelSettings;
   carryBlocks: boolean;
   concurrency: number;
   /** Host-owned immutable editor draft baseline captured at dispatch. */
@@ -434,7 +429,7 @@ export interface ThreadLaunchManifest {
   permissions?: PermissionPolicy;
   /**
    * Bespoke first-Run prompt that cannot be reconstructed from the manifest
-   * fields (auto-review threads). Persisted so a queued Thread still receives
+   * fields. Persisted so a queued Thread still receives
    * its intended input when admission promotes it.
    */
   promptText?: string;
@@ -632,7 +627,7 @@ export interface Thread {
    * Command exits are facts; they are not a "result verified" flag.
    */
   verification?: ThreadVerificationProjection;
-  /** Hidden auto-review thread bound to one published source revision. */
+  /** Source identity retained with an existing review result. */
   reviewOf?: ThreadReviewOf;
   /**
    * BC3 Bot consultation: this discussion Thread was dispatched to consult a
@@ -743,8 +738,6 @@ export interface ThreadReviewProjection {
   status: "none" | "queued" | "running" | "completed" | "failed" | "cancelled";
   reviewThreadId?: string;
   reviewRunId?: string;
-  /** True only while this exact review identity is the configured completion gate. */
-  gate?: boolean;
   conclusion?: string;
   findings?: ThreadReviewFinding[];
   error?: string;
@@ -777,6 +770,7 @@ export interface ThreadReviewOf {
 export type ThreadRunInputOrigin = "task" | "inherit" | "continue" | "fresh";
 
 export interface ThreadRunFrozenConfig {
+  modelSettings?: import("./harness-agents.js").HarnessAgentModelSettings;
   model: import("./harness-settings.js").ModelSelection | null;
   tools: string[];
   permissions?: PermissionPolicy;

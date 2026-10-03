@@ -202,7 +202,7 @@ export const VARIN_BUILTIN_AGENTS_EXTENSION = definition({
     icon: "robot-2",
     id: "varin.builtin.pi-agents.page.agents",
     keywords: ["agent", "agents", "subagent", "subagents", "roles", "workflow"],
-    kind: "single",
+    kind: "split",
     order: 2,
     slug: "agents",
     title: "Agents",

@@ -19,7 +19,7 @@
 
 import type { HarnessModelRole, ModelSelection } from "./harness-settings.js";
 import { resolveHarnessModelSlot, type HarnessModelBinding } from "./harness-model-slots.js";
-import type { HarnessCustomAgent } from "./harness-agents.js";
+import { customizeHarnessAgent, type HarnessCustomAgent, type HarnessAgentModelSettings } from "./harness-agents.js";
 import type { WorkFocusId } from "./work-focus.js";
 
 // ── Types ──────────────────────────────────────────────────────────
@@ -49,6 +49,8 @@ export interface ExecutionPreset {
   systemPromptFragment: string;
   /** One clause describing the preset, used to build the team prompt. */
   teamDescription: string;
+  name?: string;
+  modelSettings?: HarnessAgentModelSettings;
   resultSchema: unknown;
 }
 
@@ -168,7 +170,9 @@ export function resolvePresets(
   const resolved: ResolvedPreset[] = [];
   for (const preset of Object.values(EXECUTION_PRESETS)) {
     const model = resolveHarnessModelSlot(preset.slot, slots, mainModel);
-    if (model) resolved.push({ id: preset.id, model, definition: preset });
+    const definition = customizeHarnessAgent(preset, slots[preset.slot]?.agent);
+    if (definition.description !== undefined) definition.teamDescription = definition.description;
+    if (model) resolved.push({ id: preset.id, model, definition });
   }
   for (const [key, agent] of Object.entries(custom)) {
     if (!agent.enabled || (focus && agent.workFocus.length && !agent.workFocus.includes(focus))) continue;
@@ -177,6 +181,7 @@ export function resolvePresets(
     const id = `custom:${key}`;
     resolved.push({ id, model, definition: { id, tools: agent.tools, worktree: agent.worktree,
       systemPromptFragment: agent.instructions, teamDescription: `${agent.name}: ${agent.description}`,
+      name: agent.name, ...(agent.modelSettings ? { modelSettings: { ...agent.modelSettings } } : {}),
       resultSchema: { conclusion: "string" } } });
   }
   return resolved;
@@ -191,7 +196,7 @@ export function resolvePresets(
  */
 export function buildTeamPrompt(presets: ResolvedPreset[]): string {
   const presetList = presets
-    .map((p) => `${p.definition.id} (${p.definition.teamDescription})`)
+    .map((p) => `${p.definition.id} (${p.definition.name ? `${p.definition.name}: ` : ''}${p.definition.teamDescription})`)
     .join(", ");
   const base =
     "You can hand work to a sub-agent thread with dispatch(task). Without a preset it runs on your " +

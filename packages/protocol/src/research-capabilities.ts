@@ -1,5 +1,6 @@
 import type { HarnessModelRole, ModelSelection } from './harness-settings.js';
 import { resolveHarnessModelSlot, type HarnessModelBinding } from './harness-model-slots.js';
+import { customizeHarnessAgent, type HarnessAgentModelSettings } from './harness-agents.js';
 
 /** Research capabilities are routing identities, not permanent agent personas. */
 export type ResearchCapability =
@@ -34,6 +35,9 @@ export interface ResearchCapabilityDefinition {
   worktree: 'none' | 'isolated';
   systemPromptFragment: string;
   defaultResources: ResearchResourceManifest;
+  name?: string;
+  description?: string;
+  modelSettings?: HarnessAgentModelSettings;
 }
 
 export interface ResolvedResearchCapability {
@@ -84,7 +88,8 @@ export const isResearchCapability = (value: unknown): value is ResearchCapabilit
 export const resolveResearchCapabilities = (
   slots: Partial<Record<HarnessModelRole, HarnessModelBinding | null>>,
 ): ResolvedResearchCapability[] => RESEARCH_CAPABILITIES.flatMap((capability) => {
-  const definition = RESEARCH_CAPABILITY_DEFINITIONS[capability];
+  const base = RESEARCH_CAPABILITY_DEFINITIONS[capability];
+  const definition = customizeHarnessAgent(base, slots[base.slot]?.agent);
   const model = resolveHarnessModelSlot(definition.slot, slots, null);
   return model ? [{ capability, model, definition }] : [];
 });

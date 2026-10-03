@@ -15,6 +15,7 @@ import {
 } from '@varin/extension-contract';
 import type { SurfaceActivation, SurfaceActivationContext } from '@varin/extension-surface';
 import { AgentsPage } from '@/components/sections/agents/AgentsPage';
+import { AgentsSidebar } from '@/components/sections/agents/AgentsSidebar';
 import { FleetPage } from '@/components/sections/fleet';
 import {
   HarnessSettingsPage,
@@ -75,6 +76,8 @@ const pageImplementation = (
             fallback={<AgentsPage />}
           />
         ),
+        renderSidebar: options => <WorkbenchOwnedView target={WORKBENCH_REPLACEMENT_TARGETS.agents} region="sidebar"
+          onItemSelect={options.onItemSelect} fallback={<AgentsSidebar onItemSelect={options.onItemSelect} />} />,
       };
     case VARIN_BUILTIN_FLEET_EXTENSION.manifest.id:
       return { renderContent: () => <FleetPage /> };

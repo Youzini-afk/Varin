@@ -67,9 +67,6 @@ import type { createSourceViewStore } from "./source-view-store.js";
 import { normalizePathIdentity } from "../workspace/path-safety.js";
 import { sameState } from "../recovery/journal-files.js";
 import type { VerificationCoordinator } from "./verification-coordinator.js";
-import { formatPublishedResultDiff } from "./working-state/verification-records.js";
-import { onPublishedResult, parseReviewFindings, type ReviewSensorSettings } from "./review-sensor.js";
-import type { ResolvedPreset } from "./presets.js";
 import { runNeedsMaterializedDirectory } from "./working-state/path-requirement.js";
 import {
   directoryBaselineFingerprint,
@@ -80,6 +77,7 @@ import {
 
 export interface ThreadSessionAdapter {
   create(input: {
+    modelSettings?: import("@varin/protocol").HarnessAgentModelSettings | null;
     cwd: string;
     name: string;
     parentSession: string;
@@ -92,6 +90,7 @@ export interface ThreadSessionAdapter {
     workspaceId: string;
   }): Promise<SessionSnapshot>;
   open(input: {
+    modelSettings?: import("@varin/protocol").HarnessAgentModelSettings | null;
     cwd: string;
     model?: { providerId: string; modelId: string };
     permissions?: import("@varin/protocol").PermissionPolicy;
@@ -165,9 +164,6 @@ export interface ThreadRuntimeOptions {
   canReclaimWorktree?(workspaceId: string, threadId: string, path: string): Promise<{ safe: boolean; reason?: string; release?: () => Promise<void> }>;
   hasActiveCommands?(directory: string): boolean | Promise<boolean>;
   verification?: VerificationCoordinator;
-  resolveReviewSettings?(workspaceId: string, parent: ThreadParent): Promise<ReviewSensorSettings> | ReviewSensorSettings;
-  resolveReviewPreset?(workspaceId: string, parent: ThreadParent): Promise<ResolvedPreset | null> | ResolvedPreset | null;
-  recallProjectKnowledge?(workspaceId: string, query: string): Promise<string>;
   onThreadSessionBound?(sessionId: string, owningScopeId: string): void;
 }
 
@@ -2065,6 +2061,7 @@ export function createThreadRuntime(options: ThreadRuntimeOptions) {
     // configuration. Dequeue/recovery and direct dispatch use this same snapshot.
     const {
       model: _model,
+      modelSettings: _modelSettings,
       permissions: _permissions,
       scope: _scope,
       systemPromptFragment: _fragment,
@@ -2072,6 +2069,7 @@ export function createThreadRuntime(options: ThreadRuntimeOptions) {
       ...identity
     } = input;
     input = { ...identity, tools: [...frozen.tools], scope: [...frozen.scope], worktree: frozen.worktree,
+      ...(frozen.modelSettings ? { modelSettings: { ...frozen.modelSettings } } : {}),
       ...(frozen.model ? { model: frozen.model } : {}),
       permissions: normalizeFrozenHarnessPermissions(frozen.permissions),
       workFocus: frozen.workFocus,
@@ -2351,6 +2349,7 @@ export function createThreadRuntime(options: ThreadRuntimeOptions) {
         cwd: preparedCwd,
         name: `${input.preset ?? "Thread"}: ${input.brief.slice(0, 80)}`,
         parentSession: parent.file,
+        modelSettings: frozen.modelSettings ?? null,
         ...(input.model ? { model: input.model } : {}),
         permissions: normalizeFrozenHarnessPermissions(input.permissions),
         ...(input.scope?.length ? { scope: [...input.scope] } : {}),
@@ -2383,32 +2382,6 @@ export function createThreadRuntime(options: ThreadRuntimeOptions) {
       await options.registry.markRunRunning(input.scopeId, input.threadId, input.runId, sessionId);
       options.onThreadSessionBound?.(sessionId, input.scopeId);
       checkPreparation();
-      // A review Thread admitted after queuing upgrades its verification
-      // record from queued to running now that a Run exists (3.18C). Only a
-      // queued record is upgraded — a directly started review writes its own
-      // running record after this point and must not be pre-empted.
-      if (existing?.reviewOf && options.verification) {
-        const source = await options.registry.getThread(
-          input.scopeId, input.parent, existing.reviewOf.sourceThreadId,
-        ).catch(() => null);
-        const review = source?.verification?.review;
-        const revision = existing.reviewOf.resultRevision;
-        if (source?.workBranchId
-          && review?.status === "queued"
-          && review.resultRevision === revision
-          && review.reviewThreadId === input.threadId) {
-          await projectVerification(source.workspaceId, source.id, revision, (store) => (
-            options.verification!.putReview(store, source.id, {
-              resultRevision: revision,
-              status: "running",
-              recordedAt: Date.now(),
-              reviewThreadId: input.threadId,
-              reviewRunId: input.runId,
-              ...(review.gate === true ? { gate: true } : {}),
-            }, revision, source.workBranchId!)
-          )).catch(reportError);
-        }
-      }
       checkPreparation();
       // Messages held while the Thread was queued flush into the first Run's
       // input here — they never start execution on their own (3.18C).
@@ -2574,166 +2547,6 @@ export function createThreadRuntime(options: ThreadRuntimeOptions) {
     await options.registry.setVerification(workspaceId, threadId, projection);
   };
 
-  const completeAutoReview = async (
-    reviewThread: Thread,
-    reviewRunId: string,
-    outcome: ThreadRunOutcome,
-    report: ThreadReport | null,
-  ): Promise<void> => {
-    const reviewed = reviewThread.reviewOf;
-    if (!reviewed || !options.verification || !options.workingStates) return;
-    const source = await options.registry.getThread(reviewThread.workspaceId, reviewThread.parent, reviewed.sourceThreadId);
-    if (!source) return;
-    if (!source.workBranchId) throw new Error(`Reviewed Thread has no working branch: ${source.id}`);
-    const sourceBranchId = source.workBranchId;
-    const status = outcome === "cancelled" ? "cancelled" as const
-      : outcome === "success" ? "completed" as const
-        : "failed" as const;
-    const findings = report ? parseReviewFindings(report.conclusion, report.unresolved) : [];
-    await projectVerification(source.workspaceId, source.id, source.resultRevision, (store) => (
-      options.verification!.putReview(store, source.id, {
-        resultRevision: reviewed.resultRevision,
-        status,
-        recordedAt: Date.now(),
-        reviewThreadId: reviewThread.id,
-        reviewRunId,
-        gate: false,
-        ...(report ? { conclusion: report.conclusion } : {}),
-        ...(findings.length > 0 ? { findings } : {}),
-        ...(outcome !== "success" && !report ? { error: outcome } : {}),
-        ...(report && outcome === "failure" ? { error: report.conclusion } : {}),
-      }, source.resultRevision, sourceBranchId)
-    ));
-    const gate = source.waitingFor?.kind === "thread" ? source.waitingFor.review : undefined;
-    if (gate
-      && gate.resultRevision === reviewed.resultRevision
-      && gate.reviewThreadId === reviewThread.id
-      // A queued review's gate is bound to the Thread before a Run exists.
-      && (gate.reviewRunId === undefined || gate.reviewRunId === reviewRunId)) {
-      await options.registry.setAttention(source.workspaceId, source.id, "none");
-    }
-  };
-
-  const dispatchAutoReview = async (
-    source: Thread,
-    resultRevision: number,
-    changedPaths: readonly string[],
-    branchId: string,
-  ): Promise<void> => {
-    if (!options.verification || !options.workingStates || source.reviewOf) return;
-    let reviewAttempt: { reviewThreadId: string; reviewRunId: string } | undefined;
-    let result: Awaited<ReturnType<typeof onPublishedResult>>;
-    try {
-      const settings = options.resolveReviewSettings
-        ? await options.resolveReviewSettings(source.workspaceId, source.parent)
-        : { enabled: false, gate: false };
-      const reviewPreset = options.resolveReviewPreset
-        ? await options.resolveReviewPreset(source.workspaceId, source.parent)
-        : null;
-      const existing = source.verification?.review;
-      result = await onPublishedResult({
-        workspaceId: source.workspaceId,
-        source,
-        resultRevision,
-        changedPaths,
-        reviewPreset,
-        settings,
-        ...(existing !== undefined ? { existingReview: existing } : {}),
-        formatDiff: async () => options.workingStates!.withBranchStore(source.workspaceId, "thread-review-diff", async (store) => {
-          const published = await store.getResult(branchId, resultRevision);
-          if (!published) throw new Error(`Published result is missing: ${branchId}@${resultRevision}`);
-          return formatPublishedResultDiff(store, published);
-        }),
-        ...(options.recallProjectKnowledge
-          ? {
-              recallKnowledge: () => options.recallProjectKnowledge!(
-                source.workspaceId,
-                `${source.brief}\n${changedPaths.join("\n")}`,
-              ),
-            }
-          : {}),
-        cancelReview: async (reviewThreadId) => {
-          await kill(reviewThreadId, true).catch(reportError);
-        },
-        createAndStart: async (input) => {
-          const { promptText, ...createInput } = input;
-          // Auto-review shares the root execution budget (3.18C): when the
-          // pool is full the review Thread queues like any dispatch and the
-          // bespoke prompt survives in the manifest for the dequeue spawn.
-          const thread = await options.registry.createThread({
-            ...createInput,
-            ...(promptText ? { promptText } : {}),
-          });
-          if (await options.registry.countActiveInRoot(source.workspaceId, source.parent) >= createInput.concurrency) {
-            return thread;
-          }
-          let run: ThreadRun;
-          try {
-            run = await options.registry.startRun(source.workspaceId, thread.id);
-          } catch (error) {
-            if (error instanceof ThreadAdmissionError) return thread;
-            throw error;
-          }
-          reviewAttempt = { reviewThreadId: thread.id, reviewRunId: run.id };
-          try {
-            await spawn({ ...createInput, threadId: thread.id, runId: run.id, ...(promptText ? { promptText } : {}) });
-          } catch (error) {
-            await options.registry.endRun(
-              source.workspaceId,
-              thread.id,
-              run.id,
-              "failure",
-              `review start failed: ${error instanceof Error ? error.message : String(error)}`,
-            ).catch(reportError);
-            throw error;
-          }
-          return thread;
-        },
-      });
-    } catch (error) {
-      await projectVerification(source.workspaceId, source.id, resultRevision, (store) => (
-        options.verification!.putReview(store, source.id, {
-          resultRevision,
-          status: "failed",
-          recordedAt: Date.now(),
-          gate: false,
-          ...(reviewAttempt ? reviewAttempt : {}),
-          error: error instanceof Error ? error.message : String(error),
-        }, resultRevision, branchId)
-      ));
-      return;
-    }
-    if (!result.reviewDispatched || !result.threadId) return;
-    const reviewThreadId = result.threadId;
-    await projectVerification(source.workspaceId, source.id, resultRevision, (store) => (
-      options.verification!.putReview(store, source.id, {
-        resultRevision,
-        status: reviewAttempt ? "running" : "queued",
-        recordedAt: Date.now(),
-        reviewThreadId,
-        ...(reviewAttempt ? { reviewRunId: reviewAttempt.reviewRunId } : {}),
-        gate: result.blocking,
-      }, resultRevision, branchId)
-    ));
-    if (result.blocking) {
-      const current = await options.registry.getThread(source.workspaceId, source.parent, source.id);
-      const review = current?.verification?.review;
-      if ((review?.status === "running" || review?.status === "queued")
-        && review.resultRevision === resultRevision
-        && review.reviewThreadId === reviewThreadId
-        && review.reviewRunId === reviewAttempt?.reviewRunId) {
-        await options.registry.setAttention(source.workspaceId, source.id, "thread", {
-          kind: "thread",
-          text: `Waiting for review of result r${resultRevision}`,
-          review: {
-            resultRevision,
-            reviewThreadId,
-            ...(reviewAttempt ? { reviewRunId: reviewAttempt.reviewRunId } : {}),
-          },
-        });
-      }
-    }
-  };
 
   const settle = async (binding: RuntimeBinding): Promise<void> => {
     const currentRun = await options.registry.getActiveRun(binding.scopeId, binding.threadId);
@@ -3062,12 +2875,6 @@ export function createThreadRuntime(options: ThreadRuntimeOptions) {
       conclusion.error,
       report,
     );
-    const settledThread = await options.registry.getThread(binding.scopeId, binding.parent, binding.threadId);
-    if (settledThread?.reviewOf) {
-      await completeAutoReview(settledThread, binding.runId, outcome, report).catch(reportError);
-    } else if (settledThread && publishedResultRevision && changedFiles.length > 0 && outcome === "success" && settledThread.workBranchId) {
-      void dispatchAutoReview(settledThread, publishedResultRevision, changedFiles, settledThread.workBranchId).catch(reportError);
-    }
     autoResumedThreads.delete(`${binding.scopeId}\0${binding.threadId}`);
     await closeBinding(binding, false);
     await releasePendingMaterializeReservation(binding.threadId);
@@ -3291,6 +3098,7 @@ export function createThreadRuntime(options: ThreadRuntimeOptions) {
           const cwd = thread.worktree?.path ?? sourceRoot;
           const runtimeWorkspaceId = await options.resolveRuntimeWorkspaceId(cwd);
           const snapshot = await options.sessions.open({
+            modelSettings: frozen.modelSettings ?? null,
             cwd,
             ...(frozen.model ? { model: frozen.model } : {}),
             permissions: normalizeFrozenHarnessPermissions(frozen.permissions),
@@ -3463,6 +3271,7 @@ export function createThreadRuntime(options: ThreadRuntimeOptions) {
       try {
         const runtimeWorkspaceId = await options.resolveRuntimeWorkspaceId(prepared.cwd);
         opened = await options.sessions.open({
+          modelSettings: converted.run.frozen?.modelSettings ?? null,
           cwd: prepared.cwd,
           ...(model ? { model } : {}),
           permissions: normalizeFrozenHarnessPermissions(thread.manifest.permissions),
@@ -3579,8 +3388,6 @@ export function createThreadRuntime(options: ThreadRuntimeOptions) {
         const run = await options.registry.getActiveRun(binding.scopeId, threadId);
         if (run?.id === binding.runId && run.outcome === null) {
           await options.registry.endRun(binding.scopeId, threadId, binding.runId, "cancelled", "killed by parent");
-          const killed = await options.registry.getThread(binding.scopeId, binding.parent, threadId);
-          if (killed?.reviewOf) await completeAutoReview(killed, binding.runId, "cancelled", killed.report).catch(reportError);
         }
         const killed = await options.registry.getThreadById(binding.scopeId, threadId);
         if (killed?.preset === "retrieval" && killed.worktree && options.worktrees.discardInput) {
@@ -4782,6 +4589,7 @@ export function createThreadRuntime(options: ThreadRuntimeOptions) {
       const frozen = run.frozen;
       if (!frozen) throw new ThreadRuntimeError("unavailable", "Restored Run has no frozen execution configuration");
       const opened = await options.sessions.open({
+        modelSettings: frozen.modelSettings ?? null,
         cwd,
         ...(frozen.model ? { model: frozen.model } : {}),
         permissions: normalizeFrozenHarnessPermissions(frozen.permissions),
@@ -5809,6 +5617,7 @@ export function createThreadRuntime(options: ThreadRuntimeOptions) {
         const cwd = thread.worktree?.path ?? sourceRoot;
         const runtimeWorkspaceId = await options.resolveRuntimeWorkspaceId(cwd);
         const snapshot = await options.sessions.open({
+          modelSettings: frozen.modelSettings ?? null,
           cwd,
           ...(frozen.model ? { model: frozen.model } : {}),
           permissions: normalizeFrozenHarnessPermissions(frozen.permissions),

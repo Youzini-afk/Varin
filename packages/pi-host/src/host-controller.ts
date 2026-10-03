@@ -39,6 +39,7 @@ import {
   type RuntimeSourceKind,
   type RuntimeWorkerRole,
   THINKING_LEVELS,
+  parseHarnessAgentModelSettings,
   type ThinkingLevel,
   type WireEnvelope,
   parseAgentInputContext,
@@ -938,6 +939,7 @@ export class HostController {
           optionalWorkFocusSelection(params),
           optionalPositiveInteger(params, "workFocusGeneration"),
           optionalWorkFocusRole(params),
+          params.modelSettings === undefined ? undefined : params.modelSettings === null ? null : parseHarnessAgentModelSettings(params.modelSettings),
         );
       case "session.open": {
         const cwd = optionalString(params, "cwd");
@@ -950,6 +952,9 @@ export class HostController {
         const workFocusGeneration = optionalPositiveInteger(params, "workFocusGeneration");
         const workFocusRole = optionalWorkFocusRole(params);
         return this.#sessionHost.open({
+          ...(params.modelSettings === undefined ? {} : {
+            modelSettings: params.modelSettings === null ? null : parseHarnessAgentModelSettings(params.modelSettings),
+          }),
           ...(cwd === undefined ? {} : { cwd }),
           ...(sessionFile === undefined ? {} : { sessionFile }),
           ...(sessionId === undefined ? {} : { sessionId }),

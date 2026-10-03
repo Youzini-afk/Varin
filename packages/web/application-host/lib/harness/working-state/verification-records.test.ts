@@ -2,12 +2,11 @@ import { describe, expect, it } from "vitest";
 import {
   bindCommandsToPublishedResult,
   cwdUnderRoot,
-  formatPublishedResultDiff,
   inputChangedDuringCommand,
   projectThreadVerification,
   relateCommandToPublish,
 } from "./verification-records.js";
-import type { CommandVerificationRecord, WorkingResult } from "./types.js";
+import type { CommandVerificationRecord } from "./types.js";
 
 const actor = { authorityInstanceId: "host", sessionId: "session", workerId: "worker", workerGeneration: 1, runId: "run-1" };
 
@@ -52,17 +51,4 @@ describe("verification records", () => {
     expect(projection.review?.status).toBe("none");
   });
 
-  it("formats a published result from stored objects rather than a live scan", async () => {
-    const objects = new Map<string, Buffer>([["sha256-a", Buffer.from("old\n")], ["sha256-b", Buffer.from("new\n")]]);
-    const result: WorkingResult = {
-      resultRevision: 1, branchId: "thread-1", changedPaths: ["a.txt"],
-      baseStates: { "a.txt": { kind: "regular-file", objectHash: "sha256-a", byteLength: 4, mode: 0o644 } },
-      pathStates: { "a.txt": { kind: "regular-file", objectHash: "sha256-b", byteLength: 4, mode: 0o644 } },
-      diffStats: { files: 1, insertions: 1, deletions: 1 }, createdAt: new Date().toISOString(),
-    };
-    const diff = await formatPublishedResultDiff({ getObject: async (hash) => objects.get(hash) ?? null }, result);
-    expect(diff).toContain("--- a/a.txt");
-    expect(diff).toContain("-old");
-    expect(diff).toContain("+new");
-  });
 });
