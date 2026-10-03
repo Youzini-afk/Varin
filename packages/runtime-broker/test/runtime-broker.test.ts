@@ -93,12 +93,14 @@ test("broker owns catalog and per-session Pi workers", async () => {
       cwd: workspace,
     });
     assert.equal(agentCatalog.projectTrusted, true);
-    assert.deepEqual(agentCatalog.providers, []);
+    assert.ok(agentCatalog.providers.some((provider) => provider.id === "varin" && provider.available));
+    assert.ok(agentCatalog.agents.some((agent) => agent.providerId === "varin" && agent.source.scope === "builtin"));
     const mcpConfig = await dispatchRuntimeRequest(broker, "mcp.config.snapshot", {
       cwd: workspace,
     });
-    assert.equal(mcpConfig.provider.state, "unavailable");
-    assert.equal(mcpConfig.catalog, undefined);
+    assert.equal(mcpConfig.provider.owner, "native");
+    assert.equal(mcpConfig.provider.state, "active");
+    assert.deepEqual(mcpConfig.catalog?.servers, []);
     const packageRoot = join(root, "broker-package");
     await mkdir(packageRoot, { recursive: true });
     await writeFile(

@@ -268,8 +268,7 @@ describe("production shell assembly", () => {
       stdout: expect.stringContaining("after-syntax") });
   }, 45_000);
 
-  nativeAuthorityIt("executes consecutive commands and preserves non-zero exit through PowerShell", async () => {
-    if (process.platform !== "win32") return;
+  it.skipIf(process.env.VARIN_REQUIRE_RELEASE_KERNEL !== "1" || process.platform !== "win32")("executes consecutive commands and preserves non-zero exit through PowerShell", async () => {
     const discovered = discoverShells();
     expect(discovered.hasPowerShell, "PowerShell should be discovered on this Windows machine").toBe(true);
     // Keep the real path long enough to wrap a path-bearing PTY control record.

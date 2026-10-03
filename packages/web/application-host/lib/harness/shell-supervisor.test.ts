@@ -556,8 +556,7 @@ describe("shell respawn working directory", () => {
     }
   });
 
-  it("normalizes git-bash cwd state and recovers after killing the background shell", async () => {
-    if (process.platform !== "win32") return;
+  it.skipIf(process.platform !== "win32")("normalizes git-bash cwd state and recovers after killing the background shell", async () => {
     const workspace = mkdtempSync(join(tmpdir(), "shell-cwd-"));
     // A caller can supply git-bash /c/... mounts; spawn still gets a native path.
     const posixWorkspace = `/${workspace[0]!.toLowerCase()}${workspace.slice(2).replaceAll("\\", "/")}`;
@@ -642,8 +641,7 @@ describe("shell respawn working directory", () => {
     }
   });
 
-  it("renders a native requested cwd in a form git-bash can cd into", async () => {
-    if (process.platform !== "win32") return;
+  it.skipIf(process.platform !== "win32")("renders a native requested cwd in a form git-bash can cd into", async () => {
     const workspace = mkdtempSync(join(tmpdir(), "shell-cwd-"));
     const child = join(workspace, "child");
     mkdirSync(child);

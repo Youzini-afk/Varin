@@ -109,6 +109,10 @@ the phase 7 plan and current harness status for subsequent capability routing an
   Web files that use real Rust resources are named `*.native.test.ts`; the native command discovers
   them by that convention and the portable Web suite excludes them. The framed Node transport suite
   remains a separate runner within the default native command.
+  Desktop driver protocol tests use Python's standard library runner:
+  `python3 -m unittest discover -s packages/computer-driver/linux -p 'test_*.py'`.
+  They exercise loopback CDP, published components and Office/driver dispatch without opening apps;
+  CI runs them in source-quality. Native desktop operation still needs its platform smoke.
 - `bun.lock` covers development. `scripts/cloud-runtime.bun.lock` separately pins the production cloud
   runtime graph; dependency changes that reach it need `bun run update:cloud-runtime-lock`.
 - UI and Web tests import Vitest directly and run as part of `bun run test:pi`.

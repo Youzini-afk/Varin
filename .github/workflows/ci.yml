@@ -74,6 +74,9 @@ jobs:
       - if: needs.changes.outputs.code == 'true'
         run: bun run test:pi
       - if: needs.changes.outputs.code == 'true'
+        name: Test desktop driver protocols
+        run: python3 -m unittest discover -s packages/computer-driver/linux -p 'test_*.py'
+      - if: needs.changes.outputs.code == 'true'
         run: bun run --cwd packages/electron test:linux-desktop
       - if: needs.changes.outputs.code == 'true'
         run: bun run test:cloud

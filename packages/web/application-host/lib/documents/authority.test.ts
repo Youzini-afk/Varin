@@ -448,8 +448,7 @@ it('queues a document mutation behind a Host subtree operation without locking u
   }
 });
 
-it('uses one Host resource queue for Windows case aliases', async () => {
-  if (process.platform !== 'win32') return;
+it.skipIf(process.platform !== 'win32')('uses one Host resource queue for Windows case aliases', async () => {
   const harness = await createDocumentAuthorityHarness();
   let release: (() => void) | undefined;
   let announce: (() => void) | undefined;

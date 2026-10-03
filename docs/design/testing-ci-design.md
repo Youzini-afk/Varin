@@ -2,7 +2,11 @@
 
 Status: accepted design (D-292); Stage Q implemented and accepted (D-293/D-295), locally verified; the former VS Code companion was retired under D-296 and locally verified
 
-Last updated: 2026-09-21
+Last updated: 2026-10-03
+
+2026-10-03 补充：完成全仓测试内容、辅助设施和执行入口的后续清理，包括真实 React 验证、
+慢测试装配、原生文件自动发现及 Python 驱动测试归属。具体去留、保留风险与实测结果见
+[全仓清理记录](../archive/testing-ci-audit.md#12-whole-project-test-cleanup-2026-10-03)。
 
 2026-09-21 补充：阶段 Q 主要修正了测试装配与执行归属，未充分清理验证内容本身。
 本轮直接删除源码/样式字面量、手写 DTO 自证和退休迁移检查，收窄发布 smoke；具体去向见

@@ -433,3 +433,106 @@ Validation used the changed behavior suites and scripts: protocol/application-cl
 geometry/playback and localization, Electron runtime, cloud layout, CLI/shell/locale tests, the real
 Harness bridge and the simplified release-kernel smoke against existing Windows x64 artifacts.
 No new installers, full source-suite rerun or cross-platform desktop launch was required for this cleanup.
+
+## 12. Whole-project test cleanup (2026-10-03)
+
+This pass starts at `14df00de`. The inventory covered every maintained package, its runners,
+test imports/helpers and release workflows, including the Python desktop drivers and four Rust
+unit tests outside the JS/TS inventory. Scientific replay/evaluation assets were classified
+separately from software regressions. At the start there were 918 tracked JS/TS test files and
+184,836 lines; after cleanup there are 907 files and 182,184 lines. Python retains three files
+with four discoverable tests. These are source counts, not execution counts or deletion targets.
+
+The implementation changes test content, fixtures, discovery, commands and documentation.
+Production source, dependency locks and application behavior are unchanged. Fast, distinct
+behavior checks remain even where their package needed no edits. The review used family-level
+inventory and direct reading of the relevant implementation, consumers and suspect assertions;
+it does not claim every retained assertion was read line by line.
+
+### Dispositions across maintained modules
+
+| Area | Change and retained protection |
+| --- | --- |
+| UI components, stores and hooks | UI/Web tests now import Vitest directly; removed the Bun adapter and its incomplete handwritten matcher types. Removed a deleted Hook's copied algorithm and a Git-dialog reproduction that never rendered the dialog. NumberInput and SessionAuthGate now mount actual React and dispatch input/form events. Stable user state, async races, pending input, selection, queue, clipboard, editor/document and extension activation tests remain. |
+| Chat scrolling, chrome and localization | Removed authored logo geometry, icon/animation-class checks and duplicated locale coverage. Removed tests of the retired visibility-ratio picker and empty-map no-op assertions. Six compact scroll tests cover current position selection at large offsets, the bottom spacer, frame coalescing and cleanup. Locale key/placeholder parity and splash playback remain. |
+| Web memory and knowledge | All 30 organizer scenarios retain real Trivium stores, writes, reopen/retry, provenance and stale-proposal protection. Only delay timers are controlled; filesystem I/O and time used by the polling deadline stay real. Organizer instances and blocked inference callbacks are released at teardown. The automatic-disabled scenario now reaches settings evaluation before asserting no inference. |
+| Web Git, worktrees and LSP | A small immutable repository template removes repeated initial Git setup; every test mutates its own real repository. Conflict, writer, worktree and hunk behavior remain. LSP cwd fallback uses an isolated project with positive and negative membership checks instead of scanning the developer's repository. Missing Git no longer silently passes 21 cases. |
+| Web harness, resources, documents, recovery and semantic search | Retained distinct permission, lifecycle, conflict, data-preservation, authority and recovery checks. Eight previously misowned native files join the native runner. All 34 native Vitest files use `*.native.test.ts`, replacing the maintained filename allowlist; the portable runner excludes the same convention. Node framed transport remains separately owned. |
+| Other Web domains | Retained the small behavior families for bots, auth, computers, connections, dictation/TTS, external access, filesystem, GitHub, language support, mobile, notifications, packages, platform/preview, projects, quotas, relay, runs, scheduling, security, session folders, shutdown, small-model/smart-search/structure, terminal/text, tunnels and walkthroughs. Their similar names do not imply duplicate consumer or failure paths. Platform cases now report unsupported environments as skipped rather than successful early returns. |
+| Pi host | Retained actual SDK/tool-loop, provider, configuration, permission, context/compaction, retrieval, fleet and session behavior. Corrected an obsolete MCP event-channel expectation and authorization wording. Remote embedding/rerank E2E obtains the public inference binding instead of copying its configuration-digest algorithm. SDK adaptation checks retain the actual shipped SDK seam. |
+| Runtime broker/client | Lifecycle/manager fixtures use the installed compatible Pi version and isolate package-manager probing where discovery and install plans are already supplied by the test. A callback wait fails if refresh finishes before entering it. Worker, admission, cwd, shutdown and transport tests remain. Broker smoke now expects the existing native Agent catalog and MCP owner. |
+| Protocol, application-client and settings-store | Removed enum/catalog/type-literal mirrors and export-existence lists. Parsing/rejection, unknown-method guards, settings persistence, typed errors and relay registration remain. Shared auth timeout/abort/retry/late-publication protection uses Node's controlled timer instead of waiting for the real timeout. |
+| Extension contract/SDK | Removed uninvoked callbacks, DTO self-checks, package-field mirrors and fixture-boolean self-checks. Unique malformed shell manifests moved into the shared schema/runtime fixture set; removed the second compiler and redundant schema cases. Runtime validation, client routing, asset confinement, lifecycle/abort and teardown remain. AJV is still used by the real schema suite. |
+| Extension host/loader/surface/CLI/react/builtins | Retained real owner/generation, conflict, package-integrity, activation, disposal and generated-template behavior. React is validated by consumers and types. Builtin packaging smoke still launches copied language-server payloads and checks protocol results; it is artifact evidence, not another source suite. |
+| Electron and Mobile | Removed duplicate desktop DTO checks and dev-script source matching; renderer security and compiled Pi/broker handshake remain. Mobile retains native IDs, app groups, schemes and Xcode references; removed inherited-brand scanning and PNG equality. Updater, archive, payload and architecture checks remain. |
+| Desktop drivers | Converted the import-time CDP script to standard unittest discovery, using one ephemeral loopback HTTP/WebSocket fixture with explicit shutdown. Removed fixed ports, detached listener threads and unused protocol fixture state. Office document selection now goes through the public operation dispatcher. Existing published-generation and human-input cleanup checks remain. CI runs all four protocol tests without opening apps. |
+| Rust kernel | Retained all four unit tests: frame truncation, required publish CAS, valid revoke admission and lease overlap/coverage. Real native acceptance still verifies persistence, restart, cancellation, grants, process trees, file operations and materialization. |
+| Root scripts, dependencies and workflows | Deleted the obsolete `test-release-build.sh`/release-test aliases, which referenced a nonexistent workflow job and duplicated an incomplete packaging path. Dist tests consume the existing build. Targeted native Vitest calls no longer run unrelated Node transport tests. Linux-only desktop checks run on Linux; simulated UI runs once in source-quality, while Host/worker/filesystem suites still run on Windows. Removed both Bun test shims and dead auxiliary fields; retained Vitest, Linkedom, tsx and AJV because their consumers remain. |
+
+The existing release-ref verification is retained: its selected ref can differ from a prior CI run.
+Docker, VM and desktop artifact smokes remain owned by their corresponding build/release flows.
+No new test framework, compatibility layer, test quota, timeout increase or production test hook
+was added. The small Git fixture helper remains outside the emitted Host production boundary.
+
+### Measured cost and verification
+
+| Focused workload | Observed before → after | Why it changed |
+| --- | --- | --- |
+| Runtime lifecycle/manager, same 20 cases | 31.07 s → 0.44 s | Their supplied discovery/install results no longer trigger real host package-manager probes. |
+| Memory organizer, same 30 cases | 134.99 s → 13.81 s | Controlled delay timers replace repeated two-second debounces/backoff waits; real stores and teardown remain. |
+| TypeScript LSP, same five cases | 21.23 s → 1.55 s | The default-root case no longer walks the development checkout. |
+| Shared auth timeout case | About 10 s → 21–25 ms | Advances the real timeout logic with Node's timer control, preserving abort, shared requests and rejection of late results. |
+| Portable Web suite | 179.30 s → 55.05 s | Fixture cleanup plus eight native files moving to their own runner; this timing includes the ownership change. |
+
+The memory/LSP baseline timings came from a full-package diagnostic run; focused after-runs
+have different parallel load. They identify the removed cost and are not controlled performance
+benchmarks. The original root baseline hung at an obsolete Pi fixture and required terminating
+that test worker, so its 749.9 seconds are not used as an overall speedup comparison.
+The current full native entry took 141.31 seconds and covers more files than the former entry.
+
+Actual verification on Windows x64:
+
+- `test:pi` ran every workspace source entry once: UI 347 files / 2,116 passed; portable Web
+  323 files / 2,852 passed + four platform skips; Pi host 603 passed + one environment skip.
+  Extension, protocol, client and settings entries completed successfully. Its one failure was
+  the Broker's obsolete empty-provider assertion; after correcting native Agent/MCP expectations,
+  the complete Broker entry passed all 92 cases. The aggregate command's original exit status
+  remains recorded as failed; it was not rerun just to replace that log.
+- Final scroll reduction followed that run: all six replacement/retained cases passed, and UI
+  type-check passed. The final platform-label edits passed 96 portable cases + one missing-zsh
+  skip and all seven shell-assembly native cases.
+- Full `test:kernel`: 26 Node cases passed; 33 Vitest files passed and the optional MiniLM file
+  skipped; 395 Vitest cases passed + two skipped without an installed model pack. No required
+  release-kernel case skipped. Protocol generation was current; existing matching release bytes
+  were used. The unchanged Cargo unit tests were reviewed and retained, not rebuilt separately.
+- Compiled `test:pi:dist`: six cases passed without rebuilding dependencies inside each smoke.
+- Electron architecture/runtime: 21 Vitest + 32 Node cases passed. Updater: 14 Vitest + seven
+  Node cases passed. Linux desktop helper entry: three Vitest cases and both headless discovery/path
+  smokes passed; POSIX unreadable-permission behavior could not be exercised by Windows chmod.
+- Python driver discovery: four tests passed, using loopback protocols, boundary fakes and copied
+  production component files. No browser, Office or desktop session was launched.
+- Root release/dependency/production-boundary/replay helpers: 25 passed; cloud layout: 11 passed;
+  docs checker: nine passed. The engineering/site documentation validator also passed.
+- Owning source/test type-checks passed for UI, Web Host, Pi host, Broker, application-client,
+  extension-contract and SDK. ESLint passed for changed code; CI YAML parsed successfully.
+
+Local logs were captured as `varin-tests-after-cleanup.log`, `varin-broker-final-verification.log`,
+`varin-native-tests-after-cleanup.log` and focused `varin-cleanup-*` logs beneath the task's
+temporary directory. Remote CI was not polled, and new installers, live desktop smokes, Docker
+deploys and VM boots were not run for this test-only change.
+
+### Deliberately retained higher-risk evidence
+
+Large thread/runtime, document authority, grants and recovery suites protect different lost-write,
+ownership, cancellation and restart failures. They remain even where fixture bodies are verbose.
+Native permission/session differences and the optional installed-model test remain explicitly
+platform/component-dependent.
+
+Three kinds of narrower checks retain a concrete reason: CLI import boundaries can be hidden by
+source aliases while the emitted package is broken; the NSIS directory check is the only automated
+guard for the historical repeated-child-directory failure; CodeMirror caret/selection specificity
+checks guard prior invisible-handle and input-lag failures. Removing these without corresponding
+artifact/browser evidence would lose protection. They do not prove actual installer or WebKit UI
+behavior. The manual native-driver smoke remains a desktop diagnostic and is not counted among
+the passing unit tests. Linux AT-SPI/UNO, Windows UIA and macOS AX still need their real platform
+acceptance. Research replay inputs and historical experiment evidence remain scientific assets.

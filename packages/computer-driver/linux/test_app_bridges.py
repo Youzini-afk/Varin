@@ -20,11 +20,10 @@ class Enumeration:
         return selected
 
 
-def document(title, uid, kind="text"):
+def document(title, uid):
     return SimpleNamespace(Title=title, RuntimeUID=uid, getURL=lambda: "file:///" + title,
-        supportsService=lambda service: service == "com.sun.star.document.OfficeDocument" or
-            service == ("com.sun.star.text.TextDocument" if kind == "text" else "com.sun.star.sheet.SpreadsheetDocument"),
-        Text=SimpleNamespace(String="unsaved text"), isModified=lambda: True)
+        supportsService=lambda service: service in ("com.sun.star.document.OfficeDocument", "com.sun.star.text.TextDocument"),
+        Text=SimpleNamespace(String=f"unsaved text {uid}"), isModified=lambda: True)
 
 
 class AppBridges(unittest.TestCase):
@@ -33,11 +32,15 @@ class AppBridges(unittest.TestCase):
         desktop = SimpleNamespace(Components=SimpleNamespace(createEnumeration=lambda: Enumeration([first, second])),
                                   getCurrentComponent=lambda: second)
         with patch.object(office_bridge, "_desktop", lambda _ctx: desktop), patch.object(office_bridge, "_context", lambda: object()):
-            self.assertIs(office_bridge._find_document(None, "doc:2"), second)
-            with self.assertRaisesRegex(ValueError, "ambiguous"):
-                office_bridge._find_document(None, "same")
+            selected = office_bridge.perform({"op": "act", "act": {"kind": "read", "doc": "doc:2"}})
+            self.assertTrue(selected["ok"])
+            self.assertEqual(selected["text"], "unsaved text 2")
+            ambiguous = office_bridge.perform({"op": "act", "act": {"kind": "read", "doc": "same"}})
+            self.assertFalse(ambiguous["ok"])
+            self.assertIn("ambiguous", ambiguous["error"])
             result = office_bridge.perform({"op": "act", "act": {"kind": "read"}})
-            self.assertEqual(result["text"], "unsaved text")
+            self.assertTrue(result["ok"])
+            self.assertEqual(result["text"], "unsaved text 2")
             self.assertTrue(result["modified"])
 
     def test_read_queries_preserve_a_human_gesture_even_when_office_is_unavailable(self):

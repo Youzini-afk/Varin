@@ -15,6 +15,13 @@ const powershellPath = process.env.SystemRoot
   : "C:\\Windows\\System32\\WindowsPowerShell\\v1.0\\powershell.exe";
 const zshCandidate = process.env.VARIN_TEST_ZSH ?? "zsh";
 const hasZsh = !spawnSync(zshCandidate, ["--version"], { encoding: "utf8" }).error;
+const hasPowerShell = process.platform === "win32" && existsSync(powershellPath);
+const bashPath = [
+  process.env.VARIN_TERMINAL_SHELL,
+  "C:/Program Files/Git/bin/bash.exe",
+  "C:/Program Files/Git/usr/bin/bash.exe",
+  "/bin/bash",
+].find((candidate) => typeof candidate === "string" && existsSync(candidate));
 
 describe("shell integration launch", () => {
   it("injects an init file for bash and a script file for PowerShell", () => {
@@ -73,8 +80,7 @@ describe("shell integration launch", () => {
     }
   });
 
-  it("does not reuse native exit 7 for a later failed cmdlet", () => {
-    if (process.platform !== "win32" || !existsSync(powershellPath)) return;
+  it.skipIf(!hasPowerShell)("does not reuse native exit 7 for a later failed cmdlet", () => {
     const probe = join(tmpdir(), `varin-missing-${Date.now()}`);
     const result = spawnSync(powershellPath, [
       "-NoProfile",
@@ -97,8 +103,7 @@ describe("shell integration launch", () => {
     expect(result.stdout.trim().split(/\r?\n/).at(-1)).toBe("7,1,0");
   });
 
-  it("reports 1 for a consecutive identical native status when precision is unknowable", () => {
-    if (process.platform !== "win32" || !existsSync(powershellPath)) return;
+  it.skipIf(!hasPowerShell)("reports 1 for a consecutive identical native status when precision is unknowable", () => {
     const result = spawnSync(powershellPath, [
       "-NoProfile",
       "-NonInteractive",
@@ -121,14 +126,8 @@ describe("shell integration launch", () => {
     expect(result.stdout.trim().split(/\r?\n/).at(-1)).toBe("7,1");
   });
 
-  it("keeps a custom Bash PROMPT_COMMAND array and DEBUG trap after sourcing the init file", () => {
-    const bash = [
-      process.env.VARIN_TERMINAL_SHELL,
-      "C:/Program Files/Git/bin/bash.exe",
-      "C:/Program Files/Git/usr/bin/bash.exe",
-      "/bin/bash",
-    ].find((candidate) => typeof candidate === "string" && existsSync(candidate));
-    if (!bash) return;
+  it.skipIf(!bashPath)("keeps a custom Bash PROMPT_COMMAND array and DEBUG trap after sourcing the init file", () => {
+    const bash = bashPath!;
     const launch = shellIntegrationLaunch(bash, [], false, "term-bash:live");
     const script = String(launch?.args[1]).replace(/\\/g, "/").replace(/^([A-Za-z]):/, (_, drive: string) => `/${drive.toLowerCase()}`);
     const result = spawnSync(bash, [
