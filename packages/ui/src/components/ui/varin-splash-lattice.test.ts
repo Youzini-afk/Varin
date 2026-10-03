@@ -80,7 +80,7 @@ const buildField = (
  * A small 2D Canvas harness for the controller's observable lifecycle. The real mount drives the camera and
  * renderer attributes; this fallback context only supplies the browser calls needed to reach those effects.
  */
-const createSplashCanvasHarness = () => {
+const createSplashCanvasHarness = (webgl?: WebGL2RenderingContext) => {
   let now = 0;
   let nextFrameId = 0;
   const pendingFrames = new Map<number, FrameRequestCallback>();
@@ -157,7 +157,7 @@ const createSplashCanvasHarness = () => {
   const canvas = {
     clientHeight: 360,
     clientWidth: 640,
-    getContext: (kind: string) => kind === '2d' ? context : null,
+    getContext: (kind: string) => kind === 'webgl2' ? webgl ?? null : kind === '2d' ? context : null,
     isConnected: true,
     ownerDocument: document,
     parentElement,
@@ -486,6 +486,47 @@ describe('exit choreography', () => {
     expect(harness.splashAttributes.has('data-varin-camera-owner')).toBe(false);
     expect(harness.canvasAttributes.has('data-varin-splash-renderer')).toBe(false);
     expect(harness.cameraValues.has(options.camera.tiltProperty)).toBe(false);
+  });
+
+  test('WebGL retirement releases owned objects without forcing the compositor context to be lost', async () => {
+    const loseContext = vi.fn();
+    const deleteBuffer = vi.fn();
+    const deleteProgram = vi.fn();
+    const deleteVertexArray = vi.fn();
+    const noop = () => undefined;
+    const allocate = () => ({});
+    const gl = {
+      MAX_RENDERBUFFER_SIZE: 0x84e8,
+      MAX_VIEWPORT_DIMS: 0x0d3a,
+      attachShader: noop, bindBuffer: noop, bindVertexArray: noop, blendFunc: noop,
+      bufferData: noop, bufferSubData: noop, clear: noop, clearColor: noop, compileShader: noop,
+      createBuffer: allocate, createProgram: allocate, createShader: allocate, createVertexArray: allocate,
+      deleteBuffer, deleteProgram, deleteShader: noop, deleteVertexArray,
+      disable: noop, drawArraysInstanced: noop, enable: noop, enableVertexAttribArray: noop,
+      getExtension: () => ({ loseContext }),
+      getParameter: (parameter: number) => parameter === 0x84e8 ? 4096 : new Int32Array([4096, 4096]),
+      getProgramParameter: () => true, getShaderParameter: () => true, getUniformLocation: allocate,
+      linkProgram: noop, shaderSource: noop, uniform1f: noop, uniform2f: noop, uniform4fv: noop,
+      useProgram: noop, vertexAttribDivisor: noop, vertexAttribPointer: noop, viewport: noop,
+    } as unknown as WebGL2RenderingContext;
+    const harness = createSplashCanvasHarness(gl);
+    const controller = mountSplashTileCanvas(harness.canvas, createSplashCanvasMountOptions({
+      breathe: false,
+      direction: 'forward',
+      mode: 'boot',
+      playback: resolveSplashCanvasPlayback({ mode: 'boot', reducedMotion: false, tempo: 'standard' }),
+    }));
+    expect(harness.canvasAttributes.get('data-varin-splash-renderer')).toBe('webgl2');
+
+    controller.dispose();
+    await Promise.resolve();
+    expect(deleteProgram).not.toHaveBeenCalled();
+    harness.detach();
+    harness.nextFrame(0);
+    expect(deleteBuffer).toHaveBeenCalledTimes(1);
+    expect(deleteVertexArray).toHaveBeenCalledTimes(1);
+    expect(deleteProgram).toHaveBeenCalledTimes(1);
+    expect(loseContext).not.toHaveBeenCalled();
   });
 
   test('the camera reaches true overhead in one motion before the floor opens', () => {

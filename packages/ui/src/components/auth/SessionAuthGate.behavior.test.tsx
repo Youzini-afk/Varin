@@ -87,6 +87,7 @@ const resetHarness = () => {
   };
   const initialLoadingElement = {
     ownerDocument: testDocument,
+    style: { opacity: '' },
     setAttribute: (name: string, value: string) => {
       if (name === 'data-leaving' && value === 'true') initialLoadingLeaving = true;
     },

@@ -83,9 +83,8 @@
          backdrop, not this, so that the floor's cells can be what reveals the window underneath. */
       html { background: var(--splash-background); }
       /* SPLASH-CSS-BEGIN */
-/* A splash/Transition Scene and the application Shell are sibling paint owners. Keep their shared canvas
-   colour stable for one committed application frame after either visual owner is removed; otherwise a
-   delayed theme/root paint can expose the browser's white default between them. */
+/* Keep the application's canvas opaque throughout compositor retirement. Once its theme is present,
+   use that live background; the captured splash palette belongs only to the splash itself. */
 html:root[data-varin-splash-handoff='true'],
 html:root[data-varin-workbench-handoff='true'],
 html:root[data-varin-splash-handoff='true'] body,
@@ -96,8 +95,8 @@ html:root.desktop-runtime[data-varin-splash-handoff='true'] body,
 html:root.desktop-runtime[data-varin-workbench-handoff='true'] body,
 html:root.desktop-runtime[data-varin-splash-handoff='true'] #root,
 html:root.desktop-runtime[data-varin-workbench-handoff='true'] #root {
-background: var(--splash-background, var(--color-background, #151313)) !important;
-background-color: var(--splash-background, var(--color-background, #151313)) !important;
+background: var(--surface-background, var(--splash-background, var(--color-background, #151313))) !important;
+background-color: var(--surface-background, var(--splash-background, var(--color-background, #151313))) !important;
 }
 .varin-splash {
 position: fixed;
@@ -584,7 +583,6 @@ void main() {
           gl.deleteBuffer(buffer);
           gl.deleteVertexArray(vertexArray);
           gl.deleteProgram(program);
-          gl.getExtension("WEBGL_lose_context")?.loseContext();
         },
         draw: (values, viewport, tiltDeg) => {
           const requiredLength = values.length * 5;

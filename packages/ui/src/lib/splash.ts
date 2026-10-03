@@ -77,19 +77,29 @@ export const dismissInitialSplash = (): void => {
   documentElement?.setAttribute(SPLASH_HANDOFF_ATTRIBUTE, 'true');
   element.setAttribute(LEAVING_ATTRIBUTE, 'true');
   removalTimer = scheduleTimeout(() => {
-    removalTimer = null;
-    element.remove();
-
-    // `requestAnimationFrame` runs before paint. Waiting for the following frame keeps the semantic splash
-    // background underneath the first fully committed application frame, then releases it without extending
-    // the visible transition. The timeout fallback is only for DOM hosts without a visual frame scheduler.
+    // Retire the entire compositor layer before detaching its Canvas. The terminal tile frame alone
+    // does not retire that layer: DOM removal and GPU resource cleanup used to happen in the same turn.
+    // Keeping an explicitly transparent cover through a paint gives the application the screen first.
+    element.style.opacity = '0';
     const requestFrame = ownerWindow?.requestAnimationFrame?.bind(ownerWindow);
+    const remove = (): void => {
+      element.remove();
+      removalTimer = null;
+      // Keep the active application background through the subsequent DOM/GPU cleanup paint too.
+      if (requestFrame) {
+        requestFrame(() => {
+          requestFrame(() => documentElement?.removeAttribute(SPLASH_HANDOFF_ATTRIBUTE));
+        });
+      } else {
+        scheduleTimeout(() => documentElement?.removeAttribute(SPLASH_HANDOFF_ATTRIBUTE), 0);
+      }
+    };
     if (!requestFrame) {
-      scheduleTimeout(() => documentElement?.removeAttribute(SPLASH_HANDOFF_ATTRIBUTE), 0);
+      remove();
       return;
     }
     requestFrame(() => {
-      requestFrame(() => documentElement?.removeAttribute(SPLASH_HANDOFF_ATTRIBUTE));
+      requestFrame(remove);
     });
   }, SPLASH_EXIT_DURATION_MS);
 };

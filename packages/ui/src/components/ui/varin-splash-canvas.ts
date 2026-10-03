@@ -581,14 +581,13 @@ void main() {
 
       return {
         kind: 'webgl2',
-        // Only ever reached once the controller has observed this Canvas detached. Losing a context that
-        // is still part of page composition clears a full-screen surface while it is visible, so the
-        // decision about when that is safe belongs to the one place that knows: the controller.
+        // Detachment from the DOM does not mean Chromium has retired the GPU surface yet. Release our
+        // objects without forcibly losing the context during that compositor handoff; the detached
+        // Canvas and context become collectible when the controller drops the renderer reference.
         dispose: () => {
           gl.deleteBuffer(buffer);
           gl.deleteVertexArray(vertexArray);
           gl.deleteProgram(program);
-          gl.getExtension('WEBGL_lose_context')?.loseContext();
         },
         draw: (values, viewport, tiltDeg) => {
           const requiredLength = values.length * 5;

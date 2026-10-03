@@ -86,6 +86,10 @@ and camera; `varin-splash-cube.ts` places the same polygons on its top face. `br
 desktop/Web/mobile/Widget assets, and `splash:emit` updates the pre-paint HTML. Keep shape edits at this
 shared source rather than drawing independent versions for individual surfaces.
 
+At boot exit, the splash wrapper stays transparent through a paint before its Canvas is detached. The
+handoff canvas uses the live application background. WebGL retirement deletes owned resources without
+forcing context loss during the compositor handoff; generated pre-paint hosts use the same renderer.
+
 Research uses `MainLayout` for shared window controls, navigation, permissions, settings and resource
 panels. Its conversation composition shows the real research-root Thread/Run and an expandable branch
 and materials area. `HarnessThreadStateProvider` owns this read-only projection; branches remain

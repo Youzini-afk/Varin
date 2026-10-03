@@ -627,9 +627,8 @@ animation-fill-mode: both;
   const hole = `radial-gradient(circle at 50% ${SPLASH_GROUND_ORIGIN_Y_PCT}%, rgba(0,0,0,0) var(--varin-splash-open, 0px), rgba(0,0,0,1) calc(var(--varin-splash-open, 0px) + ${REVEAL_EDGE_PX}px))`;
 
   return `
-/* A splash/Transition Scene and the application Shell are sibling paint owners. Keep their shared canvas
-   colour stable for one committed application frame after either visual owner is removed; otherwise a
-   delayed theme/root paint can expose the browser's white default between them. */
+/* Keep the application's canvas opaque throughout compositor retirement. Once its theme is present,
+   use that live background; the captured splash palette belongs only to the splash itself. */
 html:root[${SPLASH_HANDOFF_ATTRIBUTE}='true'],
 html:root[${WORKBENCH_TRANSITION_HANDOFF_ATTRIBUTE}='true'],
 html:root[${SPLASH_HANDOFF_ATTRIBUTE}='true'] body,
@@ -640,8 +639,8 @@ html:root.desktop-runtime[${SPLASH_HANDOFF_ATTRIBUTE}='true'] body,
 html:root.desktop-runtime[${WORKBENCH_TRANSITION_HANDOFF_ATTRIBUTE}='true'] body,
 html:root.desktop-runtime[${SPLASH_HANDOFF_ATTRIBUTE}='true'] #root,
 html:root.desktop-runtime[${WORKBENCH_TRANSITION_HANDOFF_ATTRIBUTE}='true'] #root {
-background: ${colors.background} !important;
-background-color: ${colors.background} !important;
+background: var(--surface-background, ${colors.background}) !important;
+background-color: var(--surface-background, ${colors.background}) !important;
 }
 .varin-splash {
 position: fixed;
