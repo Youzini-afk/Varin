@@ -102,7 +102,6 @@ interface PiChatViewProps {
   conversationHeader?: React.ReactNode;
   threadPanelMode?: 'sidebar' | 'inline';
   threadPanelTitle?: string;
-  showWorkingDirectory?: boolean;
 }
 
 const DRAFT_PROJECT_MARKER = '__VARIN_DRAFT_PROJECT__';
@@ -186,7 +185,6 @@ export const PiChatView: React.FC<PiChatViewProps> = ({
   conversationHeader,
   threadPanelMode = 'sidebar',
   threadPanelTitle,
-  showWorkingDirectory = true,
 }) => {
   const { t } = useI18n();
   const chatScrollTrackRef = React.useRef<HTMLDivElement | null>(null);
@@ -1095,16 +1093,6 @@ export const PiChatView: React.FC<PiChatViewProps> = ({
                   : connectionPhase === 'connecting'
                     ? t('chat.connection.connecting')
                     : t('chat.connection.disconnected')}
-              </span>
-            </div>
-          </div>
-        ) : null}
-
-        {!previewOnly && showWorkingDirectory && snapshot?.cwd ? (
-          <div className="chat-input-column px-3 pb-2 sm:px-5" role="note">
-            <div className="flex items-center gap-2 rounded-md border border-border/60 bg-muted/40 px-3 py-1.5 text-xs text-muted-foreground">
-              <span className="truncate font-mono">
-                {t('chat.context.cwd', { dir: snapshot.cwd })}
               </span>
             </div>
           </div>

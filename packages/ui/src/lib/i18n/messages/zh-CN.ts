@@ -2616,7 +2616,6 @@ export const dict: Record<I18nKey, string> = {
   'chat.connection.connecting': '正在连接 Agent 运行时…',
   'chat.connection.disconnected': '与 Agent 运行时的连接已断开。',
   'chat.connection.reconnecting': '连接已断开，正在重连并补齐状态…',
-  'chat.context.cwd': '当前工作目录：{dir}',
   'chat.piComposer.submission.preparing': '正在准备…',
   'chat.piComposer.submission.dispatching': '正在发送…',
   'chat.piComposer.submission.accepted': '已发送',

@@ -2632,7 +2632,6 @@ export const dict: Record<I18nKey, string> = {
   "chat.connection.connecting": "Conectando con el entorno del agente…",
   "chat.connection.disconnected": "Desconectado del entorno del agente.",
   "chat.connection.reconnecting": "Conexión perdida; reconectando y sincronizando…",
-"chat.context.cwd": "Trabajando en {dir}",
   "chat.piComposer.submission.preparing": "Preparando…",
   "chat.piComposer.submission.dispatching": "Enviando…",
   "chat.piComposer.submission.accepted": "Enviado",

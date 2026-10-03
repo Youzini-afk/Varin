@@ -2552,7 +2552,6 @@ export const dict: Record<I18nKey, string> = {
   'chat.connection.connecting': '에이전트 런타임에 연결하는 중…',
   'chat.connection.disconnected': '에이전트 런타임 연결이 끊겼습니다.',
   'chat.connection.reconnecting': '연결이 끊겼습니다. 다시 연결하여 상태를 동기화하는 중…',
-'chat.context.cwd': '{dir}에서 작업 중',
   'chat.piComposer.submission.preparing': '준비 중…',
   'chat.piComposer.submission.dispatching': '전송 중…',
   'chat.piComposer.submission.accepted': '전송됨',

@@ -2545,7 +2545,6 @@ export const dict = {
   'chat.connection.connecting': 'Connecting to the agent runtime…',
   'chat.connection.disconnected': 'Disconnected from the agent runtime.',
   'chat.connection.reconnecting': 'Connection lost — reconnecting and catching up…',
-'chat.context.cwd': 'Working in {dir}',
   'chat.piComposer.submission.preparing': 'Preparing…',
   'chat.piComposer.submission.dispatching': 'Sending…',
   'chat.piComposer.submission.accepted': 'Sent',
