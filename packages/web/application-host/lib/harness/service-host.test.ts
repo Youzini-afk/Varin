@@ -1,6 +1,7 @@
 import { describe, expect, it, vi } from "vitest";
 import type { HarnessActorIdentity, PiSessionEntry } from "@varin/protocol";
 import { COMPACTION_QUERY_CAPABILITIES, COMPACTION_QUERY_METHODS } from "@varin/protocol";
+import * as shellRuntime from "./shell-supervisor.js";
 import {
   createHarnessServiceHost,
   deriveHarnessCapabilities,
@@ -14,6 +15,38 @@ const ACTOR: HarnessActorIdentity = {
 };
 
 describe("harness service host authorization", () => {
+  it("does not gate command start or completion on slow knowledge observations", async () => {
+    const createShell = vi.spyOn(shellRuntime, "createShellSupervisor");
+    let release!: () => void;
+    const storage = new Promise<void>(resolve => { release = resolve; });
+    let startObserved = false;
+    let completionObserved = false;
+    const host = createHarnessServiceHost({
+      search: async () => ({ status: "empty", generation: undefined }),
+      resolveWorkspaceRoot: async () => "D:/workspace",
+      discoveredShells: { hasBash: true, gitBashPath: "bash.exe" },
+      onShellStarted: async () => { startObserved = true; await storage; },
+      onShellCompleted: async () => { completionObserved = true; await storage; },
+    });
+    const event = { command: "echo alive", commandRunId: "terminal-1", executionId: "execution-1", cwd: "D:/workspace", startedAt: 1 };
+    host.registerSession({ actor: ACTOR, grantedCapabilities: ["process.shell"], workspaceId: "workspace-1", workspaceRoot: "D:/workspace" });
+    const lifecycle = createShell.mock.calls.at(-1)![0].commandLifecycle!;
+    let started = false;
+    let completed = false;
+    const starting = Promise.resolve(lifecycle.started!(event)).then(() => { started = true; });
+    let finishing = Promise.resolve();
+    try {
+      await expect.poll(() => startObserved && started, { timeout: 1000 }).toBe(true);
+      finishing = Promise.resolve(lifecycle.completed!({ ...event, endedAt: 2, exitCode: 0, cancelled: false })).then(() => { completed = true; });
+      await expect.poll(() => completionObserved && completed, { timeout: 1000 }).toBe(true);
+    } finally {
+      release();
+      await Promise.all([starting, finishing]);
+      await host.dispose();
+      createShell.mockRestore();
+    }
+  });
+
   it("keeps a dropped session's command observable until shell shutdown finishes", async () => {
     const host = createHarnessServiceHost({
       search: async () => ({ status: "empty", generation: undefined }),

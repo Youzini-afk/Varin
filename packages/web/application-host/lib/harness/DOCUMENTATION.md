@@ -4,6 +4,11 @@ The host-side harness provides task and resource services that the pi-host
 agent tools call via the `HostServicesBridge`. All services are registered
 on the `HarnessRouter` and dispatched from the broker event stream.
 
+Attached Bot/research roots order request admission after their lifecycle changes, then release the
+lifecycle queue while the Router executes the service. A slow handler must not serialize later tools or
+the same session's compaction-worker queries. Cancellation still goes directly to the Router, and root
+shutdown drains both lifecycle work and admitted requests.
+
 A session's project binding supplies organization and a default directory, not a filesystem
 boundary. Bound and unbound sessions can read/write explicit external paths and execute with an
 external `cwd` through the same path authority. External directories need no prior project

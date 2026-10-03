@@ -50,6 +50,12 @@ remain queued. The boundary snapshots arguments on admission. `removeFileSymbols
 cancellation applies before dispatch; after dispatch the caller receives the actual
 native result, not a false cancellation of an already-committed mutation.
 
+Shell start/completion knowledge observations run on their existing owned queue after command verification,
+without holding PTY admission, command results or writer release behind an index checkpoint. The next
+model request synchronizes that session's observations. Zone 2 reads stop waiting when their request is
+cancelled, and do not schedule subsequent reads or recall after that cancellation; accepted storage work
+keeps its original durability and outcome. No database writer is killed to satisfy a caller timeout.
+
 ## Checkpoints and acknowledgement
 
 `persistence.ts` tracks native data mutations and owns the checkpoint schedule.

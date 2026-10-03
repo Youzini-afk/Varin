@@ -1,4 +1,5 @@
 import type { DocumentMutationObservation } from "../documents/authority.js";
+import { waitWithSignal } from "../cancellation.js";
 import type { Zone2ContextUsage, Zone2Knowledge, Zone2Material, Zone2ShellCompletion } from "../harness/zone2.js";
 import type { ShellCommandCompletedEvent, ShellCommandOutputEvent, ShellCommandStartedEvent } from "../harness/shell-supervisor.js";
 import { createObservers, type DiagnosticEvent, type GitStatusEvent, type Observers, type TerminalCommandEvent, type TerminalExitEvent } from "./observers.js";
@@ -371,7 +372,8 @@ export function createKnowledgeContextRuntime(options: KnowledgeContextRuntimeOp
 
   const zone2Material = async (request: Zone2MaterialRequest): Promise<Zone2MaterialResult> => {
     request.signal?.throwIfAborted();
-    if (options.resolveScope) bindSession(request.sessionId, await options.resolveScope(request.sessionId));
+    const wait = <T>(work: Promise<T>): Promise<T> => waitWithSignal(work, request.signal);
+    if (options.resolveScope) bindSession(request.sessionId, await wait(options.resolveScope(request.sessionId)));
     const binding = sessions.get(request.sessionId);
     if (!binding) {
       return { eventCursor: request.afterEventId ?? 0, material: emptyMaterial(request.contextUsage) };
@@ -380,17 +382,17 @@ export function createKnowledgeContextRuntime(options: KnowledgeContextRuntimeOp
     // A document commit deliberately does not wait for observational storage.
     // The next model turn is the synchronization point: include every event
     // already queued for this session before advancing its cursor.
-    await binding.tail;
-    const store = await options.getStore(binding.workspaceId);
+    await wait(binding.tail);
+    const store = await wait(options.getStore(binding.workspaceId));
     if (!store) {
       return { eventCursor: request.afterEventId ?? 0, material: emptyMaterial(request.contextUsage) };
     }
-    const events = await store.listEvents({
+    const events = await wait(store.listEvents({
       sessionId: request.sessionId,
       ...(request.afterEventId === undefined
         ? { minTurnIndex: request.sinceTurn }
         : { afterId: request.afterEventId }),
-    });
+    }));
     const material = emptyMaterial(request.contextUsage);
     const shellCompletions: string[] = [];
     const observedShellExecutions = new Set(request.observedShellExecutions ?? []);
@@ -452,17 +454,17 @@ export function createKnowledgeContextRuntime(options: KnowledgeContextRuntimeOp
         };
       }
     }
-    material.blocks = (await store.getBlocks(
+    material.blocks = (await wait(store.getBlocks(
       request.sessionId,
       request.branchEntryIds === undefined ? undefined : request.branchEntryIds,
-    )).map((block) => ({
+    ))).map((block) => ({
       label: block.label,
       content: block.content,
     }));
     material.blocksComplete = true;
     const query = request.query?.trim();
     const goal = options.goalForSession
-      ? await options.goalForSession(request.sessionId).catch(() => undefined)
+      ? await wait(options.goalForSession(request.sessionId).catch(() => undefined))
       : undefined;
     // BC3: the recall query carries the owning work's goal plus the latest
     // message, so "continue" still reaches the memories bound to that work.
@@ -473,22 +475,22 @@ export function createKnowledgeContextRuntime(options: KnowledgeContextRuntimeOp
       return [{ scope: match[1] as KnowledgeScope, id: Number(match[2]) }];
     });
     const userStore = (recallQuery || retainedKnowledge.length > 0) && options.getUserStore
-      ? await options.getUserStore()
+      ? await wait(options.getUserStore())
       : null;
     // Owner-scope rows (workspace/bot/session) live in `store`; only `user`
     // rows resolve against the user store.
-    const sessionStore = options.getSessionStore ? await options.getSessionStore(request.sessionId) : null;
+    const sessionStore = options.getSessionStore ? await wait(options.getSessionStore(request.sessionId)) : null;
     const storeForScope = (scope: KnowledgeScope) => scope === "user" ? userStore
       : scope === "session" && sessionStore ? sessionStore : store;
     if (retainedKnowledge.length > 0) {
-      const invalidations = (await Promise.all(retainedKnowledge.map(async ({ scope, id }) => {
+      const invalidations = (await wait(Promise.all(retainedKnowledge.map(async ({ scope, id }) => {
         const source = storeForScope(scope);
         if (!source) return [];
-        const current = await source.getKnowledge(id);
+        const current = await wait(source.getKnowledge(id));
         return !current || current.scope !== scope || current.invalidAt !== undefined || current.status !== "accepted"
           ? [{ id, scope }]
           : [];
-      }))).flat();
+      })))).flat();
       if (invalidations.length > 0) {
         (material as Zone2Material & { knowledgeInvalidations: typeof invalidations }).knowledgeInvalidations = invalidations;
       }
@@ -507,17 +509,17 @@ export function createKnowledgeContextRuntime(options: KnowledgeContextRuntimeOp
         || cached.workspaceRevision !== workspaceRevision
         || cached.userRevision !== userRevision || cached.sessionRevision !== sessionRevision;
       if (sameQuery && revisionsChanged) {
-        const invalidations = (await Promise.all(cached.results.flatMap(async (result) => {
+        const invalidations = (await wait(Promise.all(cached.results.flatMap(async (result) => {
           if (result.node.type !== "knowledge") return [];
           const payload = result.node.payload;
           const scope = payload.scope as KnowledgeScope;
           const source = storeForScope(scope);
           if (!source) return [];
-          const current = await source.getKnowledge(result.node.id);
+          const current = await wait(source.getKnowledge(result.node.id));
           return !current || current.invalidAt !== undefined || current.status !== "accepted"
             ? [{ id: result.node.id, scope }]
             : [];
-        }))).flat();
+        })))).flat();
         if (invalidations.length > 0) {
           // Preserve this explicit fact on the material object until the
           // formatter/receipt selector has represented it in history.
@@ -532,15 +534,15 @@ export function createKnowledgeContextRuntime(options: KnowledgeContextRuntimeOp
         recalled = cached.results;
       } else {
         recalled = options.recall
-          ? await options.recall({
+          ? await wait(options.recall({
               workspaceId: binding.workspaceId,
               store,
               sessionId: request.sessionId,
               query: recallQuery,
               ...(goal !== undefined ? { goal } : {}),
               ...(request.signal ? { signal: request.signal } : {}),
-            })
-          : await store.recall(recallQuery, 5);
+            }))
+          : await wait(store.recall(recallQuery, 5));
         request.signal?.throwIfAborted();
         binding.recallCache = { query: recallQuery, workspaceRevision, userRevision, sessionRevision, results: recalled };
       }
@@ -568,16 +570,16 @@ export function createKnowledgeContextRuntime(options: KnowledgeContextRuntimeOp
     // successor is delivered beside the removal.
     const deliveredInvalidations = material.knowledgeInvalidations ?? [];
     if (deliveredInvalidations.length > 0) {
-      const corrections = (await Promise.all(deliveredInvalidations.map(async ({ scope, id }) => {
+      const corrections = (await wait(Promise.all(deliveredInvalidations.map(async ({ scope, id }) => {
         const source = storeForScope(scope);
         if (!source) return [];
-        const chain = await source.getSupersedeChain(id, scope).catch(() => null);
+        const chain = await wait(source.getSupersedeChain(id, scope).catch(() => null));
         const successor = chain?.successors
           .filter((item) => item.status === "accepted" && item.invalidAt === undefined)
           .at(-1);
         return successor ? [{ id: successor.id, scope, supersedes: id, title: successor.content, trigger: successor.trigger,
           ...(successor.nature ? { nature: successor.nature } : {}), ...(successor.source ? { sourceKind: successor.source.kind } : {}) }] : [];
-      }))).flat();
+      })))).flat();
       if (corrections.length > 0) material.knowledgeCorrections = corrections;
     }
     return { eventCursor, material, ...(shellCompletions.length > 0 ? { shellCompletions } : {}) };

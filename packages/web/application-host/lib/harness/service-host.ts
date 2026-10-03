@@ -724,7 +724,7 @@ export function createHarnessServiceHost(options: HarnessServiceHostOptions): Ha
     if (observedShellCompletions.has(key)) return Promise.resolve();
     const existing = shellCompletionWrites.get(key);
     if (existing) return existing;
-    const write = Promise.resolve(options.onShellCompleted?.(sessionId, event)).then(() => {
+    const write = Promise.resolve().then(() => options.onShellCompleted?.(sessionId, event)).then(() => {
       observedShellCompletions.add(key);
     }).catch((error: unknown) => {
       console.error('[HarnessShell] Completion observation failed:', sessionId, error);
@@ -789,12 +789,18 @@ export function createHarnessServiceHost(options: HarnessServiceHostOptions): Ha
         commandLifecycle: {
           started: async (event) => {
             await verification.beginCommand({ ...event, actor: ctx.actor });
-            await options.onShellStarted?.(sessionId, event);
+            // Verification owns the command admission fact. Knowledge observations are queued by
+            // their owner and synchronized at the next model turn, not on the PTY's start path.
+            void Promise.resolve().then(() => options.onShellStarted?.(sessionId, event)).catch((error: unknown) => {
+              console.error('[HarnessShell] Start observation failed:', sessionId, error);
+            });
           },
           output: (event) => options.onShellOutput?.(sessionId, event),
           completed: async (event) => {
             await verification.completeCommand({ ...event, actor: ctx.actor });
-            await observeShellCompletion(sessionId, event);
+            // A completed command must not hold its writer lease or its tool result while an unrelated
+            // index checkpoint is being written. Observation retains its own completion/retry state.
+            void observeShellCompletion(sessionId, event).catch(() => undefined);
           },
         },
         ...(options.registerWriter ? {

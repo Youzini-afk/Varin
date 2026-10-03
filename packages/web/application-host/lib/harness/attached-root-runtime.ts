@@ -121,6 +121,7 @@ export function createAttachedRootRuntime(options: AttachedRootRuntimeOptions) {
   const active = new Map<string, ActiveAttachedRoot>();
   const blocked = new Map<string, string>();
   const tails = new Map<string, Promise<void>>();
+  const requests = new Set<Promise<void>>();
   let disposed = false;
 
   const reportError = (error: unknown): void => {
@@ -335,6 +336,29 @@ export function createAttachedRootRuntime(options: AttachedRootRuntimeOptions) {
       && event.envelope.event === "harness.cancel") return Promise.resolve(forward());
     const sessionId = event.sessionId;
     if (!sessionId) return Promise.resolve(forward());
+    const request = harnessRequest(event);
+    if (request) {
+      // Admission remains ordered after root lifecycle changes, but executing a service is not a
+      // lifecycle mutation. Waiting for its result here blocks every later tool and auxiliary-worker
+      // request in the session, including the requests needed to finish compaction.run itself.
+      const admitted = enqueue(sessionId, async () => ({
+        completion: (async () => {
+          const blockedReason = blocked.get(sessionId);
+          if (blockedReason && request.method.startsWith("thread.")) {
+            if (options.rejectHarnessRequest) {
+              await options.rejectHarnessRequest(sessionId, request.requestId,
+                `${noun} root attachment failed; thread execution is unavailable for this Run: ${blockedReason}`);
+            } else {
+              reportError(new Error(`Unable to reject ${request.method} after ${purpose} root attachment failed`));
+            }
+          } else await forward();
+        })(),
+      }));
+      const completion = admitted.then(({ completion }) => completion).catch(reportError);
+      requests.add(completion);
+      void completion.finally(() => requests.delete(completion));
+      return completion;
+    }
     return enqueue(sessionId, async () => {
       const agentEvent = eventType(event);
       if (agentEvent?.type === "agent_start") {
@@ -347,21 +371,7 @@ export function createAttachedRootRuntime(options: AttachedRootRuntimeOptions) {
           reportError(error);
         }
       }
-      const request = harnessRequest(event);
-      const blockedReason = blocked.get(sessionId);
-      if (blockedReason && request?.method.startsWith("thread.")) {
-        if (options.rejectHarnessRequest) {
-          await options.rejectHarnessRequest(
-            sessionId,
-            request.requestId,
-            `${noun} root attachment failed; thread execution is unavailable for this Run: ${blockedReason}`,
-          );
-        } else {
-          reportError(new Error(`Unable to reject ${request.method} after ${purpose} root attachment failed`));
-        }
-      } else {
-        await forward();
-      }
+      await forward();
       const binding = active.get(sessionId);
       if (!binding) {
         if ((event.kind === "worker.exit" && event.role === "session")
@@ -408,7 +418,7 @@ export function createAttachedRootRuntime(options: AttachedRootRuntimeOptions) {
   );
 
   const drain = async (): Promise<void> => {
-    while (tails.size > 0) await Promise.allSettled([...tails.values()]);
+    while (tails.size > 0 || requests.size > 0) await Promise.allSettled([...tails.values(), ...requests]);
   };
 
   const dispose = async (): Promise<void> => {

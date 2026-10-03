@@ -127,6 +127,49 @@ describe("research root runtime", () => {
     }
   });
 
+  it("does not hold later requests behind a handler that has not settled after cancellation", async () => {
+    const dataDir = mkdtempSync(join(tmpdir(), "varin-root-request-"));
+    dataDirs.push(dataDir);
+    const current = snapshot("code");
+    const runtime = createResearchRootRuntime({
+      registry: createThreadRegistry({ dataDir, hostId: "host" }),
+      getSessionSnapshot: () => current,
+      sessions: {
+        snapshot: async () => current,
+        stats: async () => stats(),
+        entries: async () => ({ scope: "branch", entries: [], leafId: null, sessionId: SESSION }),
+      },
+    });
+    let enter!: () => void;
+    let release!: () => void;
+    const entered = new Promise<void>(resolve => { enter = resolve; });
+    const blocked = new Promise<void>(resolve => { release = resolve; });
+    const request = (method: string, requestId: string) => ({
+      kind: "host", sessionId: SESSION,
+      envelope: { kind: "event", event: "harness.request", data: { method, requestId } },
+    });
+    const pending = runtime.processEvent(request("zone2.assemble", "slow"), async () => { enter(); await blocked; });
+    await entered;
+    let readFinished = false;
+    let drained = false;
+    const cancellation = runtime.processEvent({
+      kind: "host", sessionId: SESSION,
+      envelope: { kind: "event", event: "harness.cancel", data: { requestId: "slow" } },
+    }, () => undefined);
+    await cancellation;
+    const read = runtime.processEvent(request("document.read", "next"), () => { readFinished = true; });
+    const draining = runtime.drain().then(() => { drained = true; });
+    try {
+      await expect.poll(() => readFinished, { timeout: 1000 }).toBe(true);
+      await read;
+      expect(drained).toBe(false);
+    } finally {
+      release();
+      await Promise.all([pending, read, draining]);
+      await runtime.dispose();
+    }
+  });
+
   it("binds before forwarding execution events, reuses one root, and never tombstones the user session", async () => {
     const dataDir = mkdtempSync(join(tmpdir(), "varin-research-root-"));
     dataDirs.push(dataDir);

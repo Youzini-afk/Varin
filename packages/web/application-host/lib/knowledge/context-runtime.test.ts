@@ -1,7 +1,7 @@
 import { existsSync, mkdirSync, rmSync } from "node:fs";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
-import { afterEach, beforeEach, describe, expect, it } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { createKnowledgeContextRuntime } from "./context-runtime.js";
 import { zone2MaterialRevision } from "../harness/zone2-material.js";
 import { createGitStatusObserver } from "./git-status-runtime.js";
@@ -10,6 +10,33 @@ import { createTerminalCommandObserveAdapter, createTerminalCommandProjector } f
 import type { TerminalCommandRecord } from "../terminal/session-api.js";
 
 const TEST_DIR = join(tmpdir(), "varin-knowledge-context-runtime");
+
+it("aborts a context read waiting for storage without cancelling the store or continuing late reads", async () => {
+  let enter!: () => void;
+  let release!: (store: KnowledgeStore) => void;
+  const entered = new Promise<void>(resolve => { enter = resolve; });
+  const storage = new Promise<KnowledgeStore>(resolve => { release = resolve; });
+  const listEvents = vi.fn(async () => []);
+  const getBlocks = vi.fn(async () => []);
+  const store = { listEvents, getBlocks } as unknown as KnowledgeStore;
+  const runtime = createKnowledgeContextRuntime({ getStore: async () => { enter(); return storage; } });
+  runtime.bindSession("session-a", "workspace-1");
+  const controller = new AbortController();
+  let aborted = false;
+  const pending = runtime.zone2Material({ sessionId: "session-a", sinceTurn: 0, contextUsage: null, signal: controller.signal })
+    .catch(error => { aborted = error.name === "AbortError"; });
+  await entered;
+  controller.abort();
+  try {
+    await expect.poll(() => aborted, { timeout: 1000 }).toBe(true);
+  } finally {
+    release(store);
+    await pending;
+    await runtime.dispose();
+  }
+  expect(listEvents).not.toHaveBeenCalled();
+  expect(getBlocks).not.toHaveBeenCalled();
+});
 
 describe("knowledge context runtime", () => {
   let store: KnowledgeStore;
