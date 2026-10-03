@@ -1007,7 +1007,7 @@ export const PiChatView: React.FC<PiChatViewProps> = ({
       <div className={cn('@container relative flex h-full min-h-0 bg-background', !active && 'pointer-events-none')}>
         <div className={cn(
           'flex min-h-0 min-w-0 flex-1 flex-col transition-[padding-right] duration-200 ease-out',
-          workOverviewOpen && 'xl:pr-[24rem] 2xl:pr-[25rem]',
+          workOverviewOpen && 'xl:pr-[21rem] 2xl:pr-[22rem]',
         )}>
         {conversationHeader}
         {threadWorkspaceId && threadPanelMode === 'inline' ? (

@@ -268,6 +268,7 @@ export const dict: Record<I18nKey, string> = {
   'harness.context.title': 'Стан сесії',
   'harness.context.open': 'Відкрити стан сесії',
   'harness.overview.title': 'Огляд роботи',
+  'harness.overview.empty': 'В огляді роботи ще немає елементів.',
   'harness.overview.open': 'Відкрити огляд роботи',
   'harness.overview.collapse': 'Згорнути огляд роботи',
   'harness.overview.expand': 'Розгорнути огляд роботи',

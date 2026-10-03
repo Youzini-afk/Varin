@@ -175,8 +175,9 @@ obsolete per-fragment actions and the unconsumed subagent display-message prefer
 
 The desktop work overview reserves space on the shared conversation column, so
 messages and the composer remain aligned as it opens or closes. It stays open
-while users interact with chat; its toggle/close control or explicit workspace
-panel switch closes it.
+while users interact with chat; its toolbar toggle or explicit workspace panel
+switch closes it. The 320px-wide floating panel starts directly with its content
+sections, without a duplicated overview heading or summary-badge row.
 
 The desktop Agent shell separates two titlebar controls in `ContextPanelControls`: double chevrons
 show/hide the right icon rail, and the panel icon toggles the last workspace panel directly. Rail

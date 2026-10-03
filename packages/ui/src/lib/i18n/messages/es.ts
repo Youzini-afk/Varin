@@ -268,6 +268,7 @@ export const dict: Record<I18nKey, string> = {
   'harness.context.title': 'Estado de la sesión',
   'harness.context.open': 'Abrir estado de la sesión',
   'harness.overview.title': 'Resumen de trabajo',
+  'harness.overview.empty': 'Aún no hay elementos en el resumen de trabajo.',
   'harness.overview.open': 'Abrir resumen de trabajo',
   'harness.overview.collapse': 'Contraer resumen de trabajo',
   'harness.overview.expand': 'Expandir resumen de trabajo',

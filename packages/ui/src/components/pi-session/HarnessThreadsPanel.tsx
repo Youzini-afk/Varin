@@ -630,39 +630,9 @@ export const HarnessThreadsPanel: React.FC<{
   );
   const content = (
     <div className="min-h-0 flex-1 overflow-y-auto">
-      <div className="border-b border-border/45 px-3 py-2.5">
-        <div className="flex items-start gap-2">
-          <div className="min-w-0 flex-1">
-            <div className="flex flex-wrap gap-1.5">
-              {planSummary.total > 0 ? (
-                <span className="rounded-md bg-muted/45 px-1.5 py-0.5 text-[9px] tabular-nums text-muted-foreground">
-                  {t('harness.overview.plan')} {planSummary.done}/{planSummary.total}
-                </span>
-              ) : null}
-              {hasOutputs ? (
-                <span className="rounded-md bg-muted/45 px-1.5 py-0.5 text-[9px] tabular-nums text-muted-foreground">
-                  {t('harness.overview.outputs')} {gitDiff.files || pendingThreadDiff.files}
-                </span>
-              ) : null}
-              {threadSummary.total > 0 ? (
-                <span className="rounded-md bg-muted/45 px-1.5 py-0.5 text-[9px] tabular-nums text-muted-foreground">
-                  {t('harness.overview.threads')} {threadSummary.active + threadSummary.attention + threadSummary.integrationPending}/{threadSummary.total}
-                </span>
-              ) : null}
-              {webSources.length > 0 ? (
-                <span className="rounded-md bg-muted/45 px-1.5 py-0.5 text-[9px] tabular-nums text-muted-foreground">
-                  {t('harness.overview.sources')} {webSources.length}
-                </span>
-              ) : null}
-            </div>
-          </div>
-          {attentionCount > 0 ? (
-            <span className="shrink-0 rounded-full bg-[var(--status-warning)]/12 px-1.5 py-0.5 text-[9px] tabular-nums text-[var(--status-warning)]">
-              {attentionCount}
-            </span>
-          ) : null}
-        </div>
-      </div>
+      {!hasOverviewData ? (
+        <p className="px-3 py-4 typography-meta text-muted-foreground">{t('harness.overview.empty')}</p>
+      ) : null}
       {suggestions.length > 0 ? (
         <HarnessOverviewSection
           title={t('harness.overview.review')}
@@ -696,13 +666,13 @@ export const HarnessThreadsPanel: React.FC<{
               <textarea
                 value={blockDraft}
                 onChange={(event) => setBlockDraft(event.target.value)}
-                className="min-h-28 w-full resize-y rounded-md border border-border bg-background px-2 py-1.5 text-[11px] leading-4 text-foreground outline-none focus:border-primary"
+                className="min-h-28 w-full resize-y rounded-md border border-border bg-background px-2 py-1.5 typography-meta leading-5 text-foreground outline-none focus:border-primary"
               />
               <div className="flex justify-end gap-1.5">
-                <button type="button" className="rounded px-2 py-1 text-[10px] text-muted-foreground hover:bg-interactive-hover" onClick={() => setEditingBlock(null)}>
+                <button type="button" className="rounded px-2 py-1 typography-micro text-muted-foreground hover:bg-interactive-hover" onClick={() => setEditingBlock(null)}>
                   {t('harness.blocks.cancel')}
                 </button>
-                <button type="button" disabled={savingBlock} className="rounded bg-primary px-2 py-1 text-[10px] text-primary-foreground disabled:opacity-50" onClick={() => void saveBlock(blockGroups.plan!)}>
+                <button type="button" disabled={savingBlock} className="rounded bg-primary px-2 py-1 typography-micro text-primary-foreground disabled:opacity-50" onClick={() => void saveBlock(blockGroups.plan!)}>
                   {t('harness.blocks.save')}
                 </button>
               </div>
@@ -715,7 +685,7 @@ export const HarnessThreadsPanel: React.FC<{
                     const current = planSummary.currentIndex === index;
                     return (
                       <div key={index + ':' + item.text} className={cn(
-                        'flex items-start gap-2 rounded-md px-1.5 py-1 text-[11px] leading-4',
+                        'flex items-start gap-2 rounded-md px-1.5 py-1 typography-meta leading-5',
                         current && item.status === 'open' && 'bg-[var(--status-info)]/8 text-foreground',
                       )}>
                         {item.status === 'done' ? (
@@ -739,12 +709,12 @@ export const HarnessThreadsPanel: React.FC<{
                   })}
                 </div>
               ) : (
-                <p className="whitespace-pre-wrap text-[11px] leading-4 text-muted-foreground">{blockGroups.plan.content}</p>
+                <p className="whitespace-pre-wrap typography-meta leading-5 text-muted-foreground">{blockGroups.plan.content}</p>
               )}
               <div className="mt-2 flex justify-end">
                 <button
                   type="button"
-                  className="inline-flex items-center gap-1 rounded px-1.5 py-1 text-[10px] text-muted-foreground hover:bg-interactive-hover hover:text-foreground"
+                  className="inline-flex items-center gap-1 rounded px-1.5 py-1 typography-micro text-muted-foreground hover:bg-interactive-hover hover:text-foreground"
                   onClick={() => {
                     setEditingBlock(blockGroups.plan!.label);
                     setBlockDraft(blockGroups.plan!.content);
@@ -772,10 +742,10 @@ export const HarnessThreadsPanel: React.FC<{
             {gitStatus && gitStatus.files.length > 0 ? (
               <div className="space-y-1">
                 <div className="flex items-center justify-between gap-2 px-1.5 pb-0.5">
-                  <span className="text-[9px] font-medium uppercase tracking-wide text-muted-foreground">
+                  <span className="typography-micro font-medium uppercase tracking-wide text-muted-foreground">
                     {t('harness.overview.workspaceChanges')}
                   </span>
-                  <span className="text-[9px] tabular-nums text-muted-foreground">
+                  <span className="typography-micro tabular-nums text-muted-foreground">
                     {t('harness.overview.outputDiff', {
                       files: gitDiff.files,
                       insertions: gitDiff.insertions,
@@ -788,10 +758,10 @@ export const HarnessThreadsPanel: React.FC<{
                   const stats = gitStatus.diffStats?.[file.path];
                   return (
                     <div key={file.path} className="flex min-w-0 items-center gap-2 rounded-md px-1.5 py-1 hover:bg-interactive-hover/45">
-                      <span className="w-4 shrink-0 font-mono text-[10px] font-medium text-muted-foreground">{marker}</span>
-                      <span className="min-w-0 flex-1 truncate font-mono text-[10px] text-foreground" title={file.path}>{file.path}</span>
+                      <span className="w-4 shrink-0 font-mono typography-micro font-medium text-muted-foreground">{marker}</span>
+                      <span className="min-w-0 flex-1 truncate font-mono typography-micro text-foreground" title={file.path}>{file.path}</span>
                       {stats ? (
-                        <span className="shrink-0 text-[9px] tabular-nums text-muted-foreground">
+                        <span className="shrink-0 typography-micro tabular-nums text-muted-foreground">
                           +{stats.insertions} −{stats.deletions}
                         </span>
                       ) : null}
@@ -799,11 +769,11 @@ export const HarnessThreadsPanel: React.FC<{
                   );
                 })}
                 {gitStatus.files.length > 6 ? (
-                  <p className="px-1.5 text-[9px] text-muted-foreground">
+                  <p className="px-1.5 typography-micro text-muted-foreground">
                     {t('harness.overview.moreItems', { count: gitStatus.files.length - 6 })}
                   </p>
                 ) : null}
-                <div className="flex items-center justify-end gap-2 px-1.5 pt-1 text-[9px] text-muted-foreground">
+                <div className="flex items-center justify-end gap-2 px-1.5 pt-1 typography-micro text-muted-foreground">
                   {fallbackCwd ? (
                     <button
                       type="button"
@@ -819,8 +789,8 @@ export const HarnessThreadsPanel: React.FC<{
             {pendingThreadDiff.files > 0 ? (
               <div className="rounded-lg border border-border/45 bg-background/35 px-2.5 py-2">
                 <div className="flex items-center justify-between gap-2">
-                  <span className="text-[10px] font-medium text-foreground">{t('harness.overview.pendingThreadChanges')}</span>
-                  <span className="text-[9px] tabular-nums text-muted-foreground">
+                  <span className="typography-micro font-medium text-foreground">{t('harness.overview.pendingThreadChanges')}</span>
+                  <span className="typography-micro tabular-nums text-muted-foreground">
                     {t('harness.overview.outputDiff', {
                       files: pendingThreadDiff.files,
                       insertions: pendingThreadDiff.insertions,
@@ -828,7 +798,7 @@ export const HarnessThreadsPanel: React.FC<{
                     })}
                   </span>
                 </div>
-                <p className="mt-1 text-[9px] leading-4 text-muted-foreground">{t('harness.overview.pendingThreadChangesDescription')}</p>
+                <p className="mt-1 typography-micro leading-5 text-muted-foreground">{t('harness.overview.pendingThreadChangesDescription')}</p>
               </div>
             ) : null}
           </div>
@@ -850,13 +820,13 @@ export const HarnessThreadsPanel: React.FC<{
               <button
                 type="button"
                 onClick={() => threadState.setIncludeArchived(!threadState.includeArchived)}
-                className="rounded px-1.5 py-0.5 text-[10px] text-muted-foreground hover:bg-background/70 hover:text-foreground"
+                className="rounded px-1.5 py-0.5 typography-micro text-muted-foreground hover:bg-background/70 hover:text-foreground"
               >
                 {t(threadState.includeArchived ? 'harness.threads.hideArchived' : 'harness.threads.showArchived')}
               </button>
             </div>
             {space && (space.status === 'over-budget' || space.status === 'low-free' || space.status === 'enospc') ? (
-              <div className="mb-2 rounded-md border border-border/50 bg-background/40 px-2 py-1.5 text-[10px] leading-4 text-muted-foreground">
+              <div className="mb-2 rounded-md border border-border/50 bg-background/40 px-2 py-1.5 typography-micro leading-5 text-muted-foreground">
                 {space.status === 'over-budget' ? <p className="text-[var(--status-warning)]">{t('harness.threads.space.overBudget')}</p> : null}
                 {space.status === 'low-free' ? <p className="text-[var(--status-warning)]">{t('harness.threads.space.lowFree')}</p> : null}
                 {space.status === 'enospc' ? <p className="text-[var(--status-error)]">{t('harness.threads.space.enospc')}</p> : null}
@@ -864,7 +834,7 @@ export const HarnessThreadsPanel: React.FC<{
             ) : null}
             <div className="space-y-1.5">
         {threads.length === 0 ? (
-          <p className="px-1 text-[10px] text-muted-foreground">{t('harness.threads.empty')}</p>
+          <p className="px-1 typography-micro text-muted-foreground">{t('harness.threads.empty')}</p>
         ) : null}
         {threads.map((entry) => {
           const state = projectHarnessThreadState(entry);
@@ -898,24 +868,24 @@ export const HarnessThreadsPanel: React.FC<{
                     <span className={cn('size-2 shrink-0 rounded-full', stateTone[state])} aria-hidden="true" />
                   )}
                   <span className="min-w-0 flex-1 truncate typography-meta font-medium text-foreground">{label}</span>
-                  <span className="rounded bg-muted/60 px-1 py-0.5 text-[9px] text-muted-foreground">
+                  <span className="rounded bg-muted/60 px-1 py-0.5 typography-micro text-muted-foreground">
                     {t(entry.thread.kind === 'discussion' ? 'harness.threads.kind.discussion' : 'harness.threads.kind.implementation')}
                   </span>
-                  <span className="shrink-0 text-[10px] text-muted-foreground">{t(stateKey[state])}</span>
+                  <span className="shrink-0 typography-micro text-muted-foreground">{t(stateKey[state])}</span>
                 </div>
-                <p className="mt-1 line-clamp-2 text-[11px] leading-4 text-muted-foreground">{entry.thread.brief}</p>
+                <p className="mt-1 line-clamp-2 typography-meta leading-5 text-muted-foreground">{entry.thread.brief}</p>
                 {entry.thread.waitingFor ? (
-                  <p className="mt-1 line-clamp-2 text-[11px] leading-4 text-[var(--status-warning)]">
+                  <p className="mt-1 line-clamp-2 typography-meta leading-5 text-[var(--status-warning)]">
                     ? {entry.thread.waitingFor.text}
                   </p>
                 ) : null}
                 {entry.thread.deletion ? (
-                  <p className="mt-1 line-clamp-2 text-[10px] leading-4 text-[var(--status-warning)]">
+                  <p className="mt-1 line-clamp-2 typography-micro leading-5 text-[var(--status-warning)]">
                     {t('harness.threads.deleting')} · {entry.thread.deletion.phase}
                     {entry.thread.deletion.error ? ` · ${entry.thread.deletion.error}` : ''}
                   </p>
                 ) : null}
-                <div className="mt-1.5 flex items-center gap-2 text-[10px] tabular-nums text-muted-foreground/80">
+                <div className="mt-1.5 flex items-center gap-2 typography-micro tabular-nums text-muted-foreground/80">
                   <span>↳ {entry.activeRun?.steps ?? 0}</span>
                   {entry.thread.diffStats && entry.thread.diffStats.files > 0 ? (
                     <span>Δ {entry.thread.diffStats.files} · +{entry.thread.diffStats.insertions} −{entry.thread.diffStats.deletions}</span>
@@ -934,11 +904,11 @@ export const HarnessThreadsPanel: React.FC<{
                 />
               ) : null}
               <details className="group/details border-t border-border/35">
-                <summary className="flex cursor-pointer list-none items-center gap-1.5 px-2.5 py-1.5 text-[10px] text-muted-foreground hover:bg-background/45 hover:text-foreground [&::-webkit-details-marker]:hidden">
+                <summary className="flex cursor-pointer list-none items-center gap-1.5 px-2.5 py-1.5 typography-micro text-muted-foreground hover:bg-background/45 hover:text-foreground [&::-webkit-details-marker]:hidden">
                   <Icon name="arrow-right-s" className="size-3 transition-transform group-open/details:rotate-90" />
                   <span>{t('harness.overview.runDetails')}</span>
                   {occupancy ? (
-                    <span className="ml-auto tabular-nums text-[9px] text-muted-foreground/75">
+                    <span className="ml-auto tabular-nums typography-micro text-muted-foreground/75">
                       {t('harness.threads.space.logical', { bytes: formatLogical(occupancy.materialized.logicalBytes, occupancy.materialized.unknown) })}
                     </span>
                   ) : null}
@@ -953,14 +923,14 @@ export const HarnessThreadsPanel: React.FC<{
                         ? t('harness.threads.peer.session')
                         : last.from.id;
                     return (
-                      <p className="mb-1.5 line-clamp-2 text-[10px] leading-4 text-muted-foreground/80">
+                      <p className="mb-1.5 line-clamp-2 typography-micro leading-5 text-muted-foreground/80">
                         {last.direction === 'in' ? '↓' : '↑'} {peer} · {t(last.kind === 'request' ? 'harness.threads.msg.request' : 'harness.threads.msg.inform')}
                         {(last.status === 'held' || last.status === 'pending') ? ` · ${t('harness.threads.msg.held')}` : ''}
                       </p>
                     );
                   })()}
                   {entry.thread.verification?.childChecks ? (
-                    <p className="mb-1 text-[10px] leading-4 text-muted-foreground">
+                    <p className="mb-1 typography-micro leading-5 text-muted-foreground">
                       {t('harness.threads.verification.child', { revision: String(entry.thread.verification.childChecks.resultRevision) })}: {' '}
                       {entry.thread.verification.childChecks.commands.length === 0
                         ? t('harness.threads.verification.childEmpty')
@@ -973,7 +943,7 @@ export const HarnessThreadsPanel: React.FC<{
                     </p>
                   ) : null}
                   {entry.thread.integrationBinding ? (
-                    <p className="mb-1 text-[10px] leading-4 text-muted-foreground">
+                    <p className="mb-1 typography-micro leading-5 text-muted-foreground">
                       {t('harness.threads.verification.merge')}: {' '}
                       {entry.thread.integrationBinding.valid === false
                         ? t('harness.threads.previewStale')
@@ -983,7 +953,7 @@ export const HarnessThreadsPanel: React.FC<{
                     </p>
                   ) : null}
                   {entry.thread.verification?.parentChecks ? (
-                    <p className="mb-1 text-[10px] leading-4 text-muted-foreground">
+                    <p className="mb-1 typography-micro leading-5 text-muted-foreground">
                       {t('harness.threads.verification.parent')}: {' '}
                       {entry.thread.verification.parentChecks.draftUnsaved
                         ? t('harness.threads.verification.parentUnsaved')
@@ -993,7 +963,7 @@ export const HarnessThreadsPanel: React.FC<{
                     </p>
                   ) : null}
                   {entry.thread.verification?.review && entry.thread.verification.review.status !== 'none' ? (
-                    <p className="mb-1 text-[10px] leading-4 text-muted-foreground">
+                    <p className="mb-1 typography-micro leading-5 text-muted-foreground">
                       {t('harness.threads.verification.review', { revision: String(entry.thread.verification.review.resultRevision) })}: {' '}
                       {entry.thread.verification.review.status === 'running'
                         ? t('harness.threads.verification.reviewRunning')
@@ -1003,12 +973,12 @@ export const HarnessThreadsPanel: React.FC<{
                     </p>
                   ) : null}
                   {occupancy && occupancy.keepReasons.length > 0 ? (
-                    <p className="mb-1 text-[10px] leading-4 text-muted-foreground">
+                    <p className="mb-1 typography-micro leading-5 text-muted-foreground">
                       {t('harness.threads.space.kept', { reason: occupancy.keepReasons.join('; ') })}
                     </p>
                   ) : null}
                   {entry.thread.worktree?.retentionReason ? (
-                    <p className="mb-1 text-[10px] leading-4 text-[var(--status-warning)]">{entry.thread.worktree.retentionReason}</p>
+                    <p className="mb-1 typography-micro leading-5 text-[var(--status-warning)]">{entry.thread.worktree.retentionReason}</p>
                   ) : null}
               {!deletionPending ? (
                 <HarnessThreadResultHistory
@@ -1018,7 +988,7 @@ export const HarnessThreadsPanel: React.FC<{
                 />
               ) : null}
               {!deletionPending && entry.thread.kind === 'implementation' && entry.thread.lifecycle !== 'archived' ? (
-                <div className="flex items-center gap-1 border-t border-border/40 px-2 py-1.5">
+                <div className="flex flex-wrap items-center gap-1 border-t border-border/40 px-2 py-1.5">
                   <input
                     type="text"
                     value={messageDrafts[entry.thread.id] ?? ''}
@@ -1031,14 +1001,14 @@ export const HarnessThreadsPanel: React.FC<{
                         void sendThreadMessage(entry, 'request');
                       }
                     }}
-                    className="min-w-0 flex-1 rounded bg-background/60 px-1.5 py-1 text-[10px] text-foreground placeholder:text-muted-foreground/60 focus:outline-none focus:ring-1 focus:ring-border disabled:opacity-50"
+                    className="min-w-0 basis-full rounded bg-background/60 px-1.5 py-1 typography-meta text-foreground placeholder:text-muted-foreground/60 focus:outline-none focus:ring-1 focus:ring-border disabled:opacity-50"
                   />
                   <button
                     type="button"
                     disabled={busy || !(messageDrafts[entry.thread.id] ?? '').trim()}
                     title={t('harness.threads.ask')}
                     onClick={() => { void sendThreadMessage(entry, 'request'); }}
-                    className="inline-flex items-center gap-1 rounded px-1.5 py-1 text-[10px] text-muted-foreground hover:bg-background/70 hover:text-foreground disabled:opacity-50"
+                    className="inline-flex items-center gap-1 rounded px-1.5 py-1 typography-micro text-muted-foreground hover:bg-background/70 hover:text-foreground disabled:opacity-50"
                   >
                     <Icon name={busy ? 'loader-4' : 'send-plane'} className={cn('size-3', busy && 'animate-spin')} />
                     {t('harness.threads.ask')}
@@ -1048,7 +1018,7 @@ export const HarnessThreadsPanel: React.FC<{
                     disabled={busy || !(messageDrafts[entry.thread.id] ?? '').trim()}
                     title={t('harness.threads.fresh')}
                     onClick={() => { void sendThreadMessage(entry, 'fresh'); }}
-                    className="inline-flex items-center gap-1 rounded px-1.5 py-1 text-[10px] text-muted-foreground hover:bg-background/70 hover:text-foreground disabled:opacity-50"
+                    className="inline-flex items-center gap-1 rounded px-1.5 py-1 typography-micro text-muted-foreground hover:bg-background/70 hover:text-foreground disabled:opacity-50"
                   >
                     <Icon name="refresh" className="size-3" />
                     {t('harness.threads.fresh')}
@@ -1058,7 +1028,7 @@ export const HarnessThreadsPanel: React.FC<{
                     disabled={busy || !(messageDrafts[entry.thread.id] ?? '').trim()}
                     title={t('harness.threads.note')}
                     onClick={() => { void sendThreadMessage(entry, 'inform'); }}
-                    className="inline-flex items-center gap-1 rounded px-1.5 py-1 text-[10px] text-muted-foreground hover:bg-background/70 hover:text-foreground disabled:opacity-50"
+                    className="inline-flex items-center gap-1 rounded px-1.5 py-1 typography-micro text-muted-foreground hover:bg-background/70 hover:text-foreground disabled:opacity-50"
                   >
                     <Icon name="sticky-note" className="size-3" />
                     {t('harness.threads.note')}
@@ -1071,7 +1041,7 @@ export const HarnessThreadsPanel: React.FC<{
                     type="button"
                     disabled={convertingThreadId !== null || deletionPending}
                     onClick={() => { void convertDiscussion(entry); }}
-                    className="inline-flex items-center gap-1 rounded px-1.5 py-1 text-[10px] text-muted-foreground hover:bg-background/70 hover:text-foreground disabled:opacity-50"
+                    className="inline-flex items-center gap-1 rounded px-1.5 py-1 typography-micro text-muted-foreground hover:bg-background/70 hover:text-foreground disabled:opacity-50"
                   >
                     <Icon name={converting ? 'loader-4' : 'git-branch'} className={cn('size-3', converting && 'animate-spin')} />
                     {t(converting ? 'harness.threads.converting' : 'harness.threads.convert')}
@@ -1090,7 +1060,7 @@ export const HarnessThreadsPanel: React.FC<{
                       toast.error(error instanceof Error ? error.message : t('harness.threads.keepFailed'));
                     }).finally(() => setThreadAction(null));
                   }}
-                  className="inline-flex items-center gap-1 rounded px-1.5 py-1 text-[10px] text-muted-foreground hover:bg-background/70 hover:text-foreground disabled:opacity-50"
+                  className="inline-flex items-center gap-1 rounded px-1.5 py-1 typography-micro text-muted-foreground hover:bg-background/70 hover:text-foreground disabled:opacity-50"
                 >
                   {t(entry.thread.keepWorktree ? 'harness.threads.keepWorktreeOn' : 'harness.threads.keepWorktree')}
                 </button>
@@ -1107,7 +1077,7 @@ export const HarnessThreadsPanel: React.FC<{
                         toast.error(error instanceof Error ? error.message : t('harness.threads.reclaimFailed'));
                       }).finally(() => setThreadAction(null));
                     }}
-                    className="inline-flex items-center gap-1 rounded px-1.5 py-1 text-[10px] text-muted-foreground hover:bg-background/70 hover:text-foreground disabled:opacity-50"
+                    className="inline-flex items-center gap-1 rounded px-1.5 py-1 typography-micro text-muted-foreground hover:bg-background/70 hover:text-foreground disabled:opacity-50"
                   >
                     {t(busy ? 'harness.threads.reclaiming' : 'harness.threads.reclaim')}
                   </button>
@@ -1125,7 +1095,7 @@ export const HarnessThreadsPanel: React.FC<{
                         toast.error(error instanceof Error ? error.message : t('harness.threads.restoreFailed'));
                       }).finally(() => setThreadAction(null));
                     }}
-                    className="inline-flex items-center gap-1 rounded px-1.5 py-1 text-[10px] text-muted-foreground hover:bg-background/70 hover:text-foreground disabled:opacity-50"
+                    className="inline-flex items-center gap-1 rounded px-1.5 py-1 typography-micro text-muted-foreground hover:bg-background/70 hover:text-foreground disabled:opacity-50"
                   >
                     {t(busy ? 'harness.threads.restoring' : 'harness.threads.restore')}
                   </button>
@@ -1143,7 +1113,7 @@ export const HarnessThreadsPanel: React.FC<{
                         toast.error(error instanceof Error ? error.message : t('harness.threads.archiveFailed'));
                       }).finally(() => setThreadAction(null));
                     }}
-                    className="inline-flex items-center gap-1 rounded px-1.5 py-1 text-[10px] text-muted-foreground hover:bg-background/70 hover:text-foreground disabled:opacity-50"
+                    className="inline-flex items-center gap-1 rounded px-1.5 py-1 typography-micro text-muted-foreground hover:bg-background/70 hover:text-foreground disabled:opacity-50"
                   >
                     {t(busy ? 'harness.threads.archiving' : 'harness.threads.archive')}
                   </button>
@@ -1165,7 +1135,7 @@ export const HarnessThreadsPanel: React.FC<{
                   onBlur={() => {
                     if (confirmDeleteId === entry.thread.id) setConfirmDeleteId(null);
                   }}
-                  className={`inline-flex items-center gap-1 rounded px-1.5 py-1 text-[10px] disabled:opacity-50 ${confirmDeleteId === entry.thread.id ? 'bg-[var(--status-error)]/15 text-[var(--status-error)] hover:bg-[var(--status-error)]/25' : 'text-muted-foreground hover:bg-background/70 hover:text-foreground'}`}
+                  className={`inline-flex items-center gap-1 rounded px-1.5 py-1 typography-micro disabled:opacity-50 ${confirmDeleteId === entry.thread.id ? 'bg-[var(--status-error)]/15 text-[var(--status-error)] hover:bg-[var(--status-error)]/25' : 'text-muted-foreground hover:bg-background/70 hover:text-foreground'}`}
                 >
                   {t((busy || deletionPending) && confirmDeleteId !== entry.thread.id
                     ? 'harness.threads.deleting'
@@ -1204,17 +1174,17 @@ export const HarnessThreadsPanel: React.FC<{
                     <Icon name={source.tool === 'websearch' ? 'search' : source.tool === 'research_search' ? 'book' : source.tool === 'materials' ? 'archive-stack' : source.tool === 'research_decide' ? 'scales-3' : isPdf ? 'file-image' : 'global'} className="mt-0.5 size-3 shrink-0 text-muted-foreground" />
                     {isPdf ? (
                       <div className="min-w-0 flex-1">
-                        <button type="button" className="block w-full truncate text-left text-[11px] text-foreground hover:underline" onClick={openPdf} title={source.title}>{source.title}</button>
-                        <a href={source.url} target="_blank" rel="noreferrer" className="block truncate text-[9px] text-muted-foreground hover:text-foreground" title={source.url}>{t('harness.sources.originalSource')}</a>
+                        <button type="button" className="block w-full truncate text-left typography-meta text-foreground hover:underline" onClick={openPdf} title={source.title}>{source.title}</button>
+                        <a href={source.url} target="_blank" rel="noreferrer" className="block truncate typography-micro text-muted-foreground hover:text-foreground" title={source.url}>{t('harness.sources.originalSource')}</a>
                       </div>
                     ) : (
                       <a href={source.url} target="_blank" rel="noreferrer" className="min-w-0 flex-1" title={source.url}>
-                        <span className="block truncate text-[11px] text-foreground">{source.title}</span>
-                        <span className="block truncate text-[9px] text-muted-foreground">{source.url}</span>
+                        <span className="block truncate typography-meta text-foreground">{source.title}</span>
+                        <span className="block truncate typography-micro text-muted-foreground">{source.url}</span>
                       </a>
                     )}
                     {source.paperId ? (
-                      <span className="block truncate text-[9px] text-muted-foreground/70" title={source.paperId}>
+                      <span className="block truncate typography-micro text-muted-foreground/70" title={source.paperId}>
                         {source.provider}:{source.paperId}{source.relation ? ` · ${source.relation}` : ''}
                       </span>
                     ) : null}
@@ -1258,7 +1228,7 @@ export const HarnessThreadsPanel: React.FC<{
               return (
                 <div key={block.label} className="rounded-lg border border-border/45 bg-background/35 p-2.5">
                   <div className="flex items-center gap-2">
-                    <span className="min-w-0 flex-1 truncate text-[11px] font-medium text-foreground">{friendlyLabel}</span>
+                    <span className="min-w-0 flex-1 truncate typography-meta font-medium text-foreground">{friendlyLabel}</span>
                     <button
                       type="button"
                       title={t('harness.blocks.edit')}
@@ -1277,26 +1247,26 @@ export const HarnessThreadsPanel: React.FC<{
                       <textarea
                         value={blockDraft}
                         onChange={(event) => setBlockDraft(event.target.value)}
-                        className="min-h-24 w-full resize-y rounded-md border border-border bg-background px-2 py-1.5 text-[11px] leading-4 text-foreground outline-none focus:border-primary"
+                        className="min-h-24 w-full resize-y rounded-md border border-border bg-background px-2 py-1.5 typography-meta leading-5 text-foreground outline-none focus:border-primary"
                       />
                       <div className="flex justify-end gap-1.5">
-                        <button type="button" className="rounded px-2 py-1 text-[10px] text-muted-foreground hover:bg-interactive-hover" onClick={() => setEditingBlock(null)}>
+                        <button type="button" className="rounded px-2 py-1 typography-micro text-muted-foreground hover:bg-interactive-hover" onClick={() => setEditingBlock(null)}>
                           {t('harness.blocks.cancel')}
                         </button>
-                        <button type="button" disabled={savingBlock} className="rounded bg-primary px-2 py-1 text-[10px] text-primary-foreground disabled:opacity-50" onClick={() => void saveBlock(block)}>
+                        <button type="button" disabled={savingBlock} className="rounded bg-primary px-2 py-1 typography-micro text-primary-foreground disabled:opacity-50" onClick={() => void saveBlock(block)}>
                           {t('harness.blocks.save')}
                         </button>
                       </div>
                     </div>
                   ) : (
-                    <p className="mt-1 whitespace-pre-wrap text-[10px] leading-4 text-muted-foreground">{block.content}</p>
+                    <p className="mt-1 whitespace-pre-wrap typography-micro leading-5 text-muted-foreground">{block.content}</p>
                   )}
                   {!editing ? (
                     <div className="mt-2 flex flex-wrap gap-1">
-                      <button type="button" disabled={knowledgeBusy !== null} className="rounded px-1.5 py-1 text-[9px] text-muted-foreground hover:bg-interactive-hover hover:text-foreground disabled:opacity-50" onClick={() => void rememberBlock(block, 'workspace')}>
+                      <button type="button" disabled={knowledgeBusy !== null} className="rounded px-1.5 py-1 typography-micro text-muted-foreground hover:bg-interactive-hover hover:text-foreground disabled:opacity-50" onClick={() => void rememberBlock(block, 'workspace')}>
                         {t('harness.knowledge.rememberWorkspace')}
                       </button>
-                      <button type="button" disabled={knowledgeBusy !== null} className="rounded px-1.5 py-1 text-[9px] text-muted-foreground hover:bg-interactive-hover hover:text-foreground disabled:opacity-50" onClick={() => void rememberBlock(block, 'user')}>
+                      <button type="button" disabled={knowledgeBusy !== null} className="rounded px-1.5 py-1 typography-micro text-muted-foreground hover:bg-interactive-hover hover:text-foreground disabled:opacity-50" onClick={() => void rememberBlock(block, 'user')}>
                         {t('harness.knowledge.rememberUser')}
                       </button>
                     </div>
@@ -1346,7 +1316,7 @@ export const HarnessThreadsPanel: React.FC<{
           <summary className="flex cursor-pointer list-none items-center gap-2 px-4 py-2 typography-meta text-muted-foreground hover:text-foreground sm:px-6">
             <Icon name="arrow-right-s" className="size-3.5 transition-transform group-open:rotate-90" />
             <span>{title ?? t('harness.overview.title')}</span>
-            <span className="ml-auto min-w-0 truncate text-[10px] text-muted-foreground/80">{overviewSummary}</span>
+            <span className="ml-auto min-w-0 truncate typography-micro text-muted-foreground/80">{overviewSummary}</span>
           </summary>
           <div className="max-h-[40dvh] overflow-auto">{content}</div>
         </details>
@@ -1413,26 +1383,9 @@ export const HarnessThreadsPanel: React.FC<{
             exit={{ opacity: 0, y: -5, scale: 0.99 }}
             transition={{ duration: 0.18, ease: [0.22, 0.8, 0.2, 1] }}
             style={{ transformOrigin: 'top right' }}
-            className="pointer-events-auto mt-2 flex max-h-[min(72dvh,46rem)] w-[min(23rem,calc(100vw-6rem))] flex-col overflow-hidden rounded-2xl border border-border/70 bg-background/96 shadow-2xl backdrop-blur-xl will-change-transform"
+            className="pointer-events-auto mt-2 flex max-h-[min(72dvh,46rem)] w-[min(20rem,calc(100vw-6rem))] flex-col overflow-hidden rounded-xl border border-border/70 bg-background/96 shadow-lg backdrop-blur-xl will-change-transform"
             data-harness-overview-floating="true"
           >
-            <div className="flex shrink-0 items-center gap-2 border-b border-border/50 px-3.5 py-3">
-              <span className="flex size-7 shrink-0 items-center justify-center rounded-lg bg-muted/45 text-muted-foreground">
-                <Icon name="stack" className="size-4" />
-              </span>
-              <div className="min-w-0 flex-1">
-                <p className="typography-meta font-semibold text-foreground">{t('harness.overview.title')}</p>
-                <p className="truncate text-[10px] text-muted-foreground">{overviewSummary}</p>
-              </div>
-              <button
-                type="button"
-                onClick={() => setOverviewOpen(false)}
-                className="flex size-7 shrink-0 items-center justify-center rounded-md text-muted-foreground hover:bg-interactive-hover hover:text-foreground"
-                aria-label={t('harness.overview.collapse')}
-              >
-                <Icon name="close" className="size-3.5" />
-              </button>
-            </div>
             {content}
           </motion.section>
         ) : null}

@@ -29,10 +29,10 @@ export const HarnessOverviewSection: React.FC<{
         >
           <Icon name={icon} className="size-3.5" />
         </span>
-        <span className="min-w-0 flex-1 truncate typography-meta font-medium text-foreground">{title}</span>
+        <span className="min-w-0 flex-1 truncate typography-ui-label font-medium text-foreground">{title}</span>
         {status ? (
           <span className={cn(
-            'shrink-0 typography-micro tabular-nums text-muted-foreground',
+            'shrink-0 typography-meta tabular-nums text-muted-foreground',
             attention && 'text-[var(--status-warning)]',
           )}>
             {status}

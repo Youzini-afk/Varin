@@ -287,6 +287,7 @@ export const dict: Record<I18nKey, string> = {
   'harness.context.title': 'Stan sesji',
   'harness.context.open': 'Otwórz stan sesji',
   'harness.overview.title': 'Przegląd pracy',
+  'harness.overview.empty': 'Nie ma jeszcze elementów przeglądu pracy.',
   'harness.overview.open': 'Otwórz przegląd pracy',
   'harness.overview.collapse': 'Zwiń przegląd pracy',
   'harness.overview.expand': 'Rozwiń przegląd pracy',

@@ -284,6 +284,7 @@ export const dict = {
   'harness.context.title': 'État de la session',
   'harness.context.open': 'Ouvrir l’état de la session',
   'harness.overview.title': 'Vue d’ensemble du travail',
+  'harness.overview.empty': 'Aucun élément dans la vue d’ensemble pour le moment.',
   'harness.overview.open': 'Ouvrir la vue d’ensemble du travail',
   'harness.overview.collapse': 'Réduire la vue d’ensemble du travail',
   'harness.overview.expand': 'Développer la vue d’ensemble du travail',

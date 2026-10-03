@@ -280,6 +280,7 @@ export const dict = {
   'harness.context.title': 'Session state',
   'harness.context.open': 'Open session state',
   'harness.overview.title': 'Work overview',
+  'harness.overview.empty': 'No work overview items yet.',
   'harness.overview.open': 'Open work overview',
   'harness.overview.collapse': 'Collapse work overview',
   'harness.overview.expand': 'Expand work overview',

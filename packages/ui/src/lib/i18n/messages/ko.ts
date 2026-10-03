@@ -286,6 +286,7 @@ export const dict: Record<I18nKey, string> = {
   'harness.context.title': '세션 상태',
   'harness.context.open': '세션 상태 열기',
   'harness.overview.title': '작업 개요',
+  'harness.overview.empty': '아직 작업 개요 항목이 없습니다.',
   'harness.overview.open': '작업 개요 열기',
   'harness.overview.collapse': '작업 개요 접기',
   'harness.overview.expand': '작업 개요 펼치기',

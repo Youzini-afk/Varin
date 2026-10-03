@@ -284,6 +284,7 @@ export const dict: Record<I18nKey, string> = {
   'harness.context.title': '会话状态',
   'harness.context.open': '打开会话状态',
   'harness.overview.title': '工作概览',
+  'harness.overview.empty': '暂无工作概览内容。',
   'harness.overview.open': '打开工作概览',
   'harness.overview.collapse': '收起工作概览',
   'harness.overview.expand': '展开工作概览',

@@ -268,7 +268,7 @@ describe('work overview presentation', () => {
     expect(container.querySelector('[data-harness-overview-floating="true"]')).not.toBeNull();
     outside.remove();
 
-    const close = container.querySelector<HTMLButtonElement>('[data-harness-overview-floating="true"] button[aria-label="harness.overview.collapse"]')!;
+    const close = container.querySelector<HTMLButtonElement>('[data-harness-overview-controls="true"] button[aria-label="harness.overview.collapse"]')!;
     await act(async () => close.click());
     expect(container.querySelector('[data-harness-overview-floating="true"]')).toBeNull();
     await act(async () => expand!.click());

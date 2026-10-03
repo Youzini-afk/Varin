@@ -232,6 +232,7 @@ export const dict: Record<I18nKey, string> = {
   'harness.context.title': 'セッション状態',
   'harness.context.open': 'セッション状態を開く',
   'harness.overview.title': '作業概要',
+  'harness.overview.empty': '作業概要の項目はまだありません。',
   'harness.overview.open': '作業概要を開く',
   'harness.overview.collapse': '作業概要を折りたたむ',
   'harness.overview.expand': '作業概要を展開する',
