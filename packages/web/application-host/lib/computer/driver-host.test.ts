@@ -1,7 +1,8 @@
 import { describe, it, expect } from "vitest";
-import { existsSync } from "node:fs";
+import { existsSync, mkdtempSync, mkdirSync, rmSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { createDriverSession, computerDriverDir } from "./driver-host.js";
+import { createDriverSession, computerDriverDir, localDriverSpawnSpec } from "./driver-host.js";
 
 /**
  * Driver supervisor tests run against a real child process speaking the
@@ -178,6 +179,18 @@ describe("computer driver host (BC4)", () => {
 });
 
 describe("computerDriverDir (BC9 packaging)", () => {
+  it('uses physical unpacked driver files when the supplied path is inside an ASAR archive', () => {
+    const root = mkdtempSync(join(tmpdir(), 'varin-computer-assets-'));
+    const logical = join(root, 'app.asar', 'server', 'computer-driver');
+    const physical = join(root, 'app.asar.unpacked', 'server', 'computer-driver');
+    mkdirSync(join(physical, 'windows'), { recursive: true });
+    writeFileSync(join(physical, 'windows', 'driver-host.ps1'), '# fixture');
+    try {
+      const spec = localDriverSpawnSpec('windows', logical);
+      expect(spec?.env?.VARIN_COMPUTER_DRIVER_ENTRY).toBe(join(physical, 'windows', 'driver-host.ps1'));
+    } finally { rmSync(root, { recursive: true, force: true }); }
+  });
+
   it("env override wins and the fallback resolves real driver assets", () => {
     const original = process.env.VARIN_COMPUTER_DRIVER_DIR;
     try {
@@ -192,5 +205,29 @@ describe("computerDriverDir (BC9 packaging)", () => {
       if (original === undefined) delete process.env.VARIN_COMPUTER_DRIVER_DIR;
       else process.env.VARIN_COMPUTER_DRIVER_DIR = original;
     }
+  });
+});
+
+describe.skipIf(process.platform !== 'win32')('Windows driver transport', () => {
+  it('round-trips multilingual input and reports readable startup errors from unpacked scripts', async () => {
+    const root = mkdtempSync(join(tmpdir(), 'varin-computer-windows-'));
+    const logical = join(root, 'app.asar', "桌面'日本語", 'computer-driver');
+    const physical = join(root, 'app.asar.unpacked', "桌面'日本語", 'computer-driver');
+    const script = join(physical, 'windows', 'driver-host.ps1');
+    mkdirSync(join(physical, 'windows'), { recursive: true });
+    let driver: ReturnType<typeof createDriverSession> | undefined;
+    try {
+      writeFileSync(script, '\ufeff' + `
+$request = [Console]::In.ReadLine() | ConvertFrom-Json
+[Console]::Out.WriteLine((@{ id = $request.id; ok = $true; text = $request.text } | ConvertTo-Json -Compress))
+`);
+      driver = createDriverSession(localDriverSpawnSpec('windows', logical)!);
+      const text = '中文 · 日本語 · 한국어 · café';
+      expect((await driver.request({ tool: 'ping', text })).text).toBe(text);
+      await driver.dispose();
+      writeFileSync(script, '\ufeffthrow "启动失败：缺少组件，日本語，한국어"');
+      driver = createDriverSession(localDriverSpawnSpec('windows', logical)!);
+      await expect(driver.request({ tool: 'ping' })).rejects.toThrow('启动失败：缺少组件，日本語，한국어');
+    } finally { await driver?.dispose(); rmSync(root, { recursive: true, force: true }); }
   });
 });

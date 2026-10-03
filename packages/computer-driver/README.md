@@ -150,5 +150,10 @@ capture failure preserves the input acceptance. Inspect the desktop before
 retrying.
 Drivers are staged inside the compiled Application Host generation at `server/computer-driver`, so publication replaces code and scripts together. Environment overrides remain explicit. On Debian and Ubuntu, the explicit Prepare Desktop operation installs the graphical session and its native packages. Existing local console desktops still require their own graphical session and platform packages.
 
+Packaged Electron Hosts pass the physical `app.asar.unpacked` driver directory
+to external interpreters. The Windows launcher configures UTF-8 input, output
+and error output before loading the driver, so both multilingual operations and
+startup failures use the same transport encoding.
+
 See the [BC acceptance record](../../docs/plan/bot-computer-use-review.md)
 for remaining native platform and packaging work.

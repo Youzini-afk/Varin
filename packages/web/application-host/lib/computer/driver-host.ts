@@ -16,10 +16,23 @@ import { existsSync, mkdirSync, rmSync, writeFileSync } from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import type { ComputerCapabilities, ComputerPlatform } from "@varin/protocol";
+import { remapAsarUnpackedPath } from "../structure/runtime-path.js";
 
 const DEFAULT_REQUEST_TIMEOUT_MS = 45_000;
 const STDERR_TAIL_MAX_CHARS = 4000;
 const MAX_FRAME_BYTES = 32 * 1024 * 1024;
+
+// Set the transport encoding before PowerShell loads a file: startup failures
+// must use the same UTF-8 protocol as successful driver responses.
+const WINDOWS_DRIVER_BOOTSTRAP = `
+$ErrorActionPreference = 'Stop'
+$utf8 = New-Object System.Text.UTF8Encoding $false
+[Console]::InputEncoding = $utf8
+[Console]::OutputEncoding = $utf8
+$OutputEncoding = $utf8
+try { & $env:VARIN_COMPUTER_DRIVER_ENTRY }
+catch { [Console]::Error.WriteLine($_.Exception.Message); exit 1 }
+`;
 
 /** The op vocabulary shared by every platform driver (README.md). */
 export interface DriverRequest {
@@ -88,8 +101,8 @@ export interface DriverSpawnSpec {
  * are published together and do not depend on a source checkout.
  */
 export function computerDriverDir(): string {
-  if (process.env.VARIN_COMPUTER_DRIVER_DIR) return process.env.VARIN_COMPUTER_DRIVER_DIR;
-  const generationAssets = fileURLToPath(new URL("../../computer-driver", import.meta.url));
+  if (process.env.VARIN_COMPUTER_DRIVER_DIR) return remapAsarUnpackedPath(process.env.VARIN_COMPUTER_DRIVER_DIR);
+  const generationAssets = remapAsarUnpackedPath(fileURLToPath(new URL("../../computer-driver", import.meta.url)));
   if (existsSync(generationAssets)) return generationAssets;
   const sourceCheckout = fileURLToPath(new URL("../../../../computer-driver", import.meta.url));
   if (existsSync(sourceCheckout)) return sourceCheckout;
@@ -98,12 +111,15 @@ export function computerDriverDir(): string {
 
 /** Spawn spec for this platform's resident driver, or null when unsupported. */
 export function localDriverSpawnSpec(platform: ComputerPlatform, driverDir = computerDriverDir()): DriverSpawnSpec | null {
+  // Node can read virtual ASAR paths; external interpreters require real files.
+  driverDir = remapAsarUnpackedPath(driverDir);
   if (platform === "windows") {
     const script = path.join(driverDir, "windows", "driver-host.ps1");
     if (!existsSync(script)) return null;
     return {
       command: "powershell.exe",
-      args: ["-NoProfile", "-NonInteractive", "-ExecutionPolicy", "Bypass", "-File", script],
+      args: ["-NoProfile", "-NonInteractive", "-ExecutionPolicy", "Bypass", "-Command", WINDOWS_DRIVER_BOOTSTRAP],
+      env: { ...process.env, VARIN_COMPUTER_DRIVER_ENTRY: script },
     };
   }
   if (platform === "linux") {
@@ -260,13 +276,14 @@ export function createDriverSession(spec: DriverSpawnSpec): ComputerDriverSessio
       }
     });
     spawned.stderr?.on("data", (chunk: string) => {
+      if (child !== spawned) return;
       stderrTail = (stderrTail + chunk).slice(-STDERR_TAIL_MAX_CHARS);
     });
     spawned.on("error", () => {
       if (child !== spawned) return;
       stop(new Error(`Computer driver failed to start: ${spec.command}`));
     });
-    spawned.on("exit", (code, signal) => {
+    spawned.on("close", (code, signal) => {
       if (child !== spawned) return;
       child = null;
       const tail = stderrTail.trim();
