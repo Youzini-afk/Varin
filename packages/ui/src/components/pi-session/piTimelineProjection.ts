@@ -61,10 +61,12 @@ export interface PiTimelineProjection {
 }
 
 interface PiTimelinePersistentProjection {
+  assistantIdentities: ReadonlySet<string>;
   items: readonly PiTimelineItem[];
   pendingMetadata: PiTimelineTurnMetadata;
   resultByCallId: ReadonlyMap<string, PiToolResultMessage>;
   visibleEntries: readonly PiTimelineEntry[];
+  userTimestamps: ReadonlySet<number>;
 }
 
 interface PiTimelineTurnDraft {
@@ -74,18 +76,17 @@ interface PiTimelineTurnDraft {
   userEntry: PiSessionMessageEntry;
 }
 
-const sameAssistantMessage = (
-  left: PiAssistantMessage,
-  right: PiAssistantMessage,
-): boolean => (
-  left.timestamp === right.timestamp
-  && left.provider === right.provider
-  && left.model === right.model
-);
+const assistantIdentity = (message: PiAssistantMessage): string =>
+  JSON.stringify([message.timestamp, message.provider, message.model]);
 
-const sameUserMessage = (left: PiUserMessage, right: PiUserMessage): boolean => (
-  left.timestamp === right.timestamp
-);
+// A live text delta cannot change immutable history. Keep this source identity
+// on the previous projection, so it is reclaimed with the view/session rather
+// than retained in an app-wide history cache.
+const projectionSources = new WeakMap<PiTimelineProjection, {
+  entries: readonly PiSessionEntry[];
+  liveToolCallIds: readonly string[];
+  persistent: PiTimelinePersistentProjection;
+}>();
 
 const isTimelineControlEntry = (entry: PiSessionEntry): entry is PiTimelineControlEntry => (
   entry.type === 'model_change'
@@ -165,20 +166,25 @@ const resultsForMessages = (
 };
 
 const persistentProjection = (
-  entries: PiSessionEntry[],
+  entries: readonly PiSessionEntry[],
   liveAssistant: PiAssistantMessage | undefined,
   previous: PiTimelineProjection | undefined,
 ): PiTimelinePersistentProjection => {
+  const assistantIdentities = new Set<string>();
+  const userTimestamps = new Set<number>();
   const knownToolCallIds = new Set<string>();
   const resultByCallId = new Map<string, PiToolResultMessage>();
   for (const entry of entries) {
     if (entry.type !== 'message') continue;
     if (entry.message.role === 'assistant') {
+      assistantIdentities.add(assistantIdentity(entry.message));
       for (const content of entry.message.content) {
         if (content.type === 'toolCall') knownToolCallIds.add(content.id);
       }
     } else if (entry.message.role === 'toolResult') {
       resultByCallId.set(entry.message.toolCallId, entry.message);
+    } else if (entry.message.role === 'user') {
+      userTimestamps.add(entry.message.timestamp);
     }
   }
   if (liveAssistant) {
@@ -273,28 +279,27 @@ const persistentProjection = (
     };
   });
 
-  return { items, pendingMetadata, resultByCallId: stableGlobalResults, visibleEntries };
+  return { assistantIdentities, items, pendingMetadata, resultByCallId: stableGlobalResults, visibleEntries, userTimestamps };
 };
 
 export const projectPiTimeline = (
-  entries: PiSessionEntry[],
+  entries: readonly PiSessionEntry[],
   liveAssistant?: PiAssistantMessage,
   liveUser?: PiUserMessage,
   previous?: PiTimelineProjection,
 ): PiTimelineProjection => {
-  const persistedAssistant = liveAssistant !== undefined && entries.some((entry) => (
-    entry.type === 'message'
-    && entry.message.role === 'assistant'
-    && sameAssistantMessage(entry.message, liveAssistant)
-  ));
+  const liveToolCallIds = liveAssistant?.content.flatMap(content => content.type === 'toolCall' ? [content.id] : []) ?? [];
+  const source = previous ? projectionSources.get(previous) : undefined;
+  const persistent = source?.entries === entries
+    && source.liveToolCallIds.length === liveToolCallIds.length
+    && source.liveToolCallIds.every((id, index) => id === liveToolCallIds[index])
+    ? source.persistent
+    : persistentProjection(entries, liveAssistant, previous);
+  const persistedAssistant = liveAssistant !== undefined
+    && persistent.assistantIdentities.has(assistantIdentity(liveAssistant));
   const projectedLiveAssistant = persistedAssistant ? undefined : liveAssistant;
-  const persistedUser = liveUser !== undefined && entries.some((entry) => (
-    entry.type === 'message'
-    && entry.message.role === 'user'
-    && sameUserMessage(entry.message, liveUser)
-  ));
+  const persistedUser = liveUser !== undefined && persistent.userTimestamps.has(liveUser.timestamp);
   const projectedLiveUser = persistedUser ? undefined : liveUser;
-  const persistent = persistentProjection(entries, projectedLiveAssistant, previous);
   const items = [...persistent.items];
 
   if (projectedLiveUser) {
@@ -348,7 +353,7 @@ export const projectPiTimeline = (
     }
   }
 
-  return {
+  const projection: PiTimelineProjection = {
     items,
     ...(projectedLiveAssistant ? { liveAssistant: projectedLiveAssistant } : {}),
     ...(projectedLiveUser ? { liveUser: projectedLiveUser } : {}),
@@ -356,4 +361,6 @@ export const projectPiTimeline = (
     resultByCallId: persistent.resultByCallId,
     visibleEntries: persistent.visibleEntries,
   };
+  projectionSources.set(projection, { entries, liveToolCallIds, persistent });
+  return projection;
 };

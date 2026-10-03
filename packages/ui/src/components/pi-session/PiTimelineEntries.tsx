@@ -78,7 +78,7 @@ export interface PiTimelineProps {
   compactionStatus?: 'requested' | 'running' | 'retrying' | 'ready' | 'applying' | 'failed';
   assistantWaiting?: PiAssistantWaitingPresentation;
   cwd: string;
-  entries: PiSessionEntry[];
+  entries: readonly PiSessionEntry[];
   forkBusyEntryId?: string | null;
   hiddenThinkingLabel?: string;
   leafId?: string | null;
@@ -1108,10 +1108,12 @@ export const PiTimelineEntryList: React.FC<Omit<
     entry: PiSessionEntry;
     sessionId: string;
   }>('message-renderer', 'chat.timeline.entries');
+  const previousProjection = React.useRef<ReturnType<typeof projectPiTimeline> | undefined>(undefined);
   const projection = React.useMemo(
-    () => projectPiTimeline(entries, liveAssistant),
+    () => projectPiTimeline(entries, liveAssistant, undefined, previousProjection.current),
     [entries, liveAssistant],
   );
+  previousProjection.current = projection;
   const resultByCallId = projectedResultByCallId ?? projection.resultByCallId;
   const extensionEntries = React.useMemo(() => {
     const renderedById = new Map<string, React.ReactNode>();

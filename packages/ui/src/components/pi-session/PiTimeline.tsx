@@ -5,7 +5,7 @@ import {
   type NativeScrollEvent,
   type NativeSyntheticEvent,
 } from '@legendapp/list/react';
-import type { PiAssistantMessage, PiSessionEntry } from '@varin/protocol';
+import type { PiAssistantMessage } from '@varin/protocol';
 import { useShallow } from 'zustand/react/shallow';
 import { Icon } from '@/components/icon/Icon';
 import { useI18n } from '@/lib/i18n';
@@ -80,7 +80,7 @@ const toolCallIdsForItem = (item: PiTimelineItem): readonly string[] => {
   return result;
 };
 
-const PiTimelineItemView: React.FC<PiTimelineItemViewProps> = ({
+const PiTimelineItemView = React.memo(({
   assistantWaiting,
   cwd,
   forkBusyEntryId,
@@ -94,7 +94,7 @@ const PiTimelineItemView: React.FC<PiTimelineItemViewProps> = ({
   recoveryBusyEntryId,
   sessionId,
   threadBusyEntryId,
-}) => {
+}: PiTimelineItemViewProps) => {
   const stickyUserHeader = useUIStore(state => state.stickyUserHeader);
   const toolCallIds = React.useMemo(() => toolCallIdsForItem(item), [item]);
   const itemExecutions = usePiSessionStore(useShallow((state) => {
@@ -154,7 +154,6 @@ const PiTimelineItemView: React.FC<PiTimelineItemViewProps> = ({
   }
 
   const { turn } = item;
-  const turnEntries: PiSessionEntry[] = [...turn.entries];
   return (
     <div
       className="chat-message-column flex flex-col gap-3 py-1.5"
@@ -180,7 +179,7 @@ const PiTimelineItemView: React.FC<PiTimelineItemViewProps> = ({
       <PiTurnAssistantChrome turn={turn} waiting={assistantWaiting} />
       <PiTimelineEntryList
         cwd={cwd}
-        entries={turnEntries}
+        entries={turn.entries}
         forkBusyEntryId={forkBusyEntryId}
         hiddenThinkingLabel={hiddenThinkingLabel}
         liveAssistant={turn.liveAssistant}
@@ -196,7 +195,7 @@ const PiTimelineItemView: React.FC<PiTimelineItemViewProps> = ({
       />
     </div>
   );
-};
+});
 
 const isInteractiveKeyTarget = (target: EventTarget | null): boolean => (
   target instanceof HTMLElement

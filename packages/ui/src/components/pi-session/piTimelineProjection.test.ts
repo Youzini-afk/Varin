@@ -204,4 +204,21 @@ describe('Pi timeline projection', () => {
     expect(extended.items[0]).toBe(initial.items[0]);
     expect(extended.items[1]?.kind).toBe('turn');
   });
+
+  test('reuses unchanged history during text streaming and refreshes it when live tool identities change', () => {
+    const entries: PiSessionEntry[] = [userEntry('user-1', 'first', 1), {
+      id: 'result', parentId: null, timestamp: '2', type: 'message',
+      message: { role: 'toolResult', toolName: 'read', toolCallId: 'tool-live',
+        content: [{ type: 'text', text: 'result' }], isError: false, timestamp: 2 },
+    }];
+    const first = projectPiTimeline(entries, assistant('first delta', 3));
+    const next = projectPiTimeline(entries, assistant('next delta', 3), undefined, first);
+    expect(next.persistentItems).toBe(first.persistentItems);
+    expect(next.visibleEntries).toBe(first.visibleEntries);
+    expect(next.items[0]?.kind === 'turn' && next.items[0].turn.liveAssistant?.content).toEqual(assistant('next delta', 3).content);
+    const call = { ...assistant('', 3), content: [{ type: 'toolCall' as const, id: 'tool-live', name: 'read', arguments: {} }] };
+    const withCall = projectPiTimeline(entries, call, undefined, next);
+    expect(withCall.visibleEntries.map(entry => entry.id)).toEqual(['user-1']);
+    expect(withCall.resultByCallId.get('tool-live')).toBe(entries[1]!.type === 'message' ? entries[1]!.message : undefined);
+  });
 });

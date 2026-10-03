@@ -56,6 +56,12 @@ Workbench/IDE navigation waits for this authority before showing conversations; 
 visible as an error. Entering those modes from Bot refreshes the index, while ordinary mode switches
 reuse the cached result.
 
+The Pi timeline reuses its immutable history projection while live text changes.
+New persisted entries or live tool-call identities rebuild that projection;
+completed virtual rows keep their item identity. Projection source state is weakly
+owned by the prior view result and is released with that view, not accumulated in
+a global history cache.
+
 `useGlobalSessionsStore.ts` owns cold/global active and archived session coverage, including `sessionsByDirectory`. It is complementary to directory child stores: it is not the source of live busy/retry status or session messages.
 
 User-visible session ordering is also not owned by the global cache array order. `sync/session-ordering.ts` combines lifecycle rank with timestamp fallbacks, and session surfaces must use that shared comparator instead of independently sorting global sessions by `time.updated`.
