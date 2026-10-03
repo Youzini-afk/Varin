@@ -106,6 +106,9 @@ the phase 7 plan and current harness status for subsequent capability routing an
   through `packages/web/vitest.kernel.config.ts` under that entry; the main `packages/web` suite excludes
   them and stays deterministic without Rust artifacts.
   Electron splits `test:runtime` from the dedicated `test:updater`/`test:linux-desktop` vitest files.
+  Web files that use real Rust resources are named `*.native.test.ts`; the native command discovers
+  them by that convention and the portable Web suite excludes them. The framed Node transport suite
+  remains a separate runner within the default native command.
 - `bun.lock` covers development. `scripts/cloud-runtime.bun.lock` separately pins the production cloud
   runtime graph; dependency changes that reach it need `bun run update:cloud-runtime-lock`.
 - UI and Web tests import Vitest directly and run as part of `bun run test:pi`.

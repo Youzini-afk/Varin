@@ -183,6 +183,9 @@ describe("fixed source views", () => {
 const repositoryRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "../../../../..");
 const kernelPath = process.env.VARIN_TEST_KERNEL_PATH ?? path.join(repositoryRoot, "kernel", "target", "release", process.platform === "win32" ? "varin-kernel.exe" : "varin-kernel");
 const hasKernel = await fs.stat(kernelPath).then(() => true).catch(() => false);
+if (!hasKernel && process.env.VARIN_REQUIRE_RELEASE_KERNEL === '1') {
+  throw new Error('Source-view acceptance requires the selected release kernel');
+}
 
 it.skipIf(!hasKernel)("round-trips a source view through the native kernel record store", async () => {
   const root = await fs.mkdtemp(path.join(os.tmpdir(), "varin-source-view-"));

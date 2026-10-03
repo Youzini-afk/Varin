@@ -116,4 +116,4 @@ Production receives `KernelProcessService.spawn` with no default Node fallback. 
 last-document close and idle release wait for pending startup and native close. Unconfirmed exits
 remain degraded/failed with the owner retained. Synchronous fake-child unit seams are explicit;
 real LSP initialization/completion/disposal is covered by the
-[native consumer tests](../kernel/process-consumers.test.ts). See [process ownership](../process/DOCUMENTATION.md).
+[native consumer tests](../kernel/process-consumers.native.test.ts). See [process ownership](../process/DOCUMENTATION.md).

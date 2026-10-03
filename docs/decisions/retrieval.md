@@ -529,7 +529,7 @@ anchor 优先（打包阶段 `windowScore` 给 anchor +100），故只影响候�
 
 观察（同一目录 `--skip-scan`）：问题 1 的三个无关另一端从 #4/#5/#6 退到 #11/#12/#13，排在全部八个 `explore.search` 窗口之后；`limit=20` 未被更好证据填满时它们仍占尾部槽位，**没有消失**。问题 1/9 与五个变体仍满足 `wants`。问题 4/6 的诊断改为如实报告窗口不含所需证据。尾部噪声与无对象 how 问句留给下一层。
 
-影响：`docs/design/agent-harness.md` 头部；`scripts/explore-observe.ts`；`explore.ts` 连线展开与 `windowGrade`；`explore.test.ts`；订正 D-149 的诊断要求与 D-150 第三条。
+影响：`docs/design/agent-harness.md` 头部；`scripts/explore-observe.ts`；`explore.ts` 连线展开与 `windowGrade`；`explore.native.test.ts`；订正 D-149 的诊断要求与 D-150 第三条。
 
 状态：已实施。
 
@@ -641,7 +641,7 @@ how 问句不再因为摘录包已满而停读：`limit` 是输出上限，读�
 
 背景：3.14 验收在 `4b3ae079` 上核出三处，报告未记。
 
-一，**测试夹具压过了生产注册**。问题 1 的可见顺序变成夹具 `explore-service.test.ts:19-51` #1、请求端 #2、生产注册 `harness-services.ts:501-588` #3；`6f92b49c` 上是请求端、生产注册、夹具。机制：夹具正文里也写着 `register("explore.search", ...)`，`looksLikeRegister && relation === "register"` 让它拿到同一档；D-154 把 `roleFit` 从第二比较键降到第三，D-155 又只给它 `roleFit * 3`，即 source 2 对 test 0 相差 6 分，对上 `windowWeight * 10` 里几十分的差距完全不够。D-148 那条「查生产实现/注册时，对象与关系匹配相当则优先非测试」因此失效。这是上一轮「角色退回有界偏好」的过度纠正——6 分不是偏好。
+一，**测试夹具压过了生产注册**。问题 1 的可见顺序变成夹具 `explore-service.native.test.ts:19-51` #1、请求端 #2、生产注册 `harness-services.ts:501-588` #3；`6f92b49c` 上是请求端、生产注册、夹具。机制：夹具正文里也写着 `register("explore.search", ...)`，`looksLikeRegister && relation === "register"` 让它拿到同一档；D-154 把 `roleFit` 从第二比较键降到第三，D-155 又只给它 `roleFit * 3`，即 source 2 对 test 0 相差 6 分，对上 `windowWeight * 10` 里几十分的差距完全不够。D-148 那条「查生产实现/注册时，对象与关系匹配相当则优先非测试」因此失效。这是上一轮「角色退回有界偏好」的过度纠正——6 分不是偏好。
 
 二，**`details.windows` 是没有门控、没有上限的观察字段，却进了每一次生产调用的协议载荷**。真实仓库实测：问题 1 为 52 个窗口 / 18.8 KB，问题 6 为 120 / 44 KB，问题 2 为 **482 个窗口 / 185 KB，`details` 总计 295 KB**，而模型可见字节预算是 24 KiB。`hits` 还重复了片段正文已有的文本。它既不进 `visibleText` 也不进 `storedBody`，唯一消费者是观察脚本。
 
@@ -823,7 +823,7 @@ D-151 的 `offTopic` 只在问句已有对象且定位完成时生效；无对�
 - `offTopic` 仍按 D-151 / D-156：定位或两端已验证后不展开无关字面量；未完成时 `statement-evidence` 即使
   与对象名对不上也仍可读另一端（support 档），避免把「语句里的连线」误判成同容器噪音。
 
-已验证：`explore.test.ts` 同容器 16 条 wire 在无修复时 extra-read（先红）、修复后不读且 `src/ranking.ts` 仍在包内；
+已验证：`explore.native.test.ts` 同容器 16 条 wire 在无修复时 extra-read（先红）、修复后不读且 `src/ranking.ts` 仍在包内；
 命中行上的 `rank.pipeline.core` 仍 extra-read；原有连线另一端 / 反向 import / 定位后 offTopic 仍绿。explore 相关
 89 项通过。
 
@@ -1017,7 +1017,7 @@ web tsc。
 决定：
 
 - `@huggingface/transformers` 进 `packages/web` 依赖；动态加载改为 `await import(/* @vite-ignore */ MODULE_ID)`——仍不进打包器静态图，但真能加载、可测。模型包按上游布局保留 `onnx/` 子目录，`dtype: "q8"`，`env.localModelPath` 指向包的父目录、模型 id 用目录名。
-- 新增 `minilm.live.test.ts`（包缺失时 `skipIf` 跳过，权重由 `semantic:copy-model` 取、不入库）：真分词、真 384 维归一化向量、**词汇缺口排序**（`how does the runtime discard idle tokens` 对 `reclaimLease` 正文的余弦高于对 CSS 常量），以及**经真运行时的端到端**——真嵌入器扫两个文件、用零词汇重合的问题查回 `lease.ts`，`lifecycle=ready`、`coverage=complete`。这是这一片的招牌交付第一次真的发生。
+- 新增 `minilm.live.native.test.ts`（包缺失时 `skipIf` 跳过，权重由 `semantic:copy-model` 取、不入库）：真分词、真 384 维归一化向量、**词汇缺口排序**（`how does the runtime discard idle tokens` 对 `reclaimLease` 正文的余弦高于对 CSS 常量），以及**经真运行时的端到端**——真嵌入器扫两个文件、用零词汇重合的问题查回 `lease.ts`，`lifecycle=ready`、`coverage=complete`。这是这一片的招牌交付第一次真的发生。
 - 主证据分区改为覆盖全部挑选轮次，成员判据收窄为 `assessment === "verified-relation"`（仅含有对象不算，否则会把只重复对象的窗口抬到同文件机制块前面，与 D-155 冲突）；定义偏好仍只作首条 tie-break（`limit: 1` 的「哪一个窗口定义了 X」本就只关心第一条）。
 - `arrivalForImport` 增加 `literalOnHitLine` 判据。
 
@@ -1480,7 +1480,7 @@ ModelRuntime 纵切继续通过。
 4. Host 首次 workspace 初始化在解析 binding 前不对并发调用者暴露默认 backend；刷新按 workspace 串行，读失败与未配置分列。workspace worker 退出后废弃旧 watch，在下次使用时重新绑定、订阅并恢复扫描。仅配置 reranker 时，首条查询也等到配置解析后保留判断时间；异步准备算在原查询截止内。
 5. Pi reservation 按已收 requestId 管理 batch 所有权，所有终结路径释放；重复 batch 不抢占首请求，未知取消不创建记录。并发与重复 explore finish 共用一次 rerank 和冻结结果。字符长度只是远程输入估算，不能称为 tokenizer 上界。
 
-验证：`semantic/runtime.test.ts` 的发布/目录/失败/重启/固定 backend/草稿生命周期反例；真实 Git 文件筛选；HostController + MemoryHostTransport 的排队取消、重复 batch 和失败后复用；workspace inference 配置状态测试；finish 异步设置与并发幂等。真实外部 provider、完整桌面多工作区与活跃 child 公开纵切仍按 status 的未观察项记录。
+验证：`semantic/runtime.native.test.ts` 的发布/目录/失败/重启/固定 backend/草稿生命周期反例；真实 Git 文件筛选；HostController + MemoryHostTransport 的排队取消、重复 batch 和失败后复用；workspace inference 配置状态测试；finish 异步设置与并发幂等。真实外部 provider、完整桌面多工作区与活跃 child 公开纵切仍按 status 的未观察项记录。
 
 影响：semantic runtime/store/cache、fs search、Application Host 装配、Pi inference dispatch、explore query services/store、plan/status 3.16B–E。
 

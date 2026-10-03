@@ -121,9 +121,9 @@ R3：Thread Registry 持久化 `materializationHandoff`，固定 source root/rev
 
 ## 4. 测试证据与 CI 修正
 
-`file-resource-audit.test.ts` 将跨根互斥、租约覆盖、路径身份、owner、重试、GC、pins、物化冲突、分页及真实消费者放在实际 release kernel 上验证；没有把 mock 的返回值计为 Rust 行为。
+`file-resource-audit.native.test.ts` 将跨根互斥、租约覆盖、路径身份、owner、重试、GC、pins、物化冲突、分页及真实消费者放在实际 release kernel 上验证；没有把 mock 的返回值计为 Rust 行为。
 
-`kernel-durable-engine.test.ts` 原先用了 fake Documents 与 no-op resource gate。本轮改为真实 DocumentAuthority、KernelRecoveryContentStore、KernelRecoveryStore 和生产形式的 resource gate，保留显式模拟的 Pi navigation adapter。它证明真实文件/元数据/Host gate 加 kernel restart/undo，不冒充真实 Pi 模型会话或完整浏览器 UI 测试。
+`kernel-durable-engine.native.test.ts` 原先用了 fake Documents 与 no-op resource gate。本轮改为真实 DocumentAuthority、KernelRecoveryContentStore、KernelRecoveryStore 和生产形式的 resource gate，保留显式模拟的 Pi navigation adapter。它证明真实文件/元数据/Host gate 加 kernel restart/undo，不冒充真实 Pi 模型会话或完整浏览器 UI 测试。
 
 新增 `bun run test:kernel`：先拒绝缺失的 release executable，再分别用 Node 跑 kernel-client.test.ts、用 Vitest 跑 audit/storage-adapter/combined recovery。`--build` 从现有 rust-toolchain.toml 读取钉住版本并构建。现有 Linux source-quality 与 Windows runtime CI job 均执行该入口，不新增本地跨平台门槛。普通 Vitest 排除 Node-only kernel suite；无 kernel 的通用单测可跳过 native suites，但专用验收绝不把 missing binary 解释为成功。
 

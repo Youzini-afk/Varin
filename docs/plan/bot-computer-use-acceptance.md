@@ -172,7 +172,7 @@ Remaining gaps (not falsely complete):
 
 ### BC3: inference binding separated from indexing; Bot consultation bound — implemented, follow-up gaps above
 
-Implemented behavior covered by focused tests (`workspace-runtime.test.ts`,
+Implemented behavior covered by focused tests (`workspace-runtime.native.test.ts`,
 `memory-recall.test.ts`, `knowledge-recall.test.ts`,
 `thread-services.test.ts`, `thread-runtime-session.e2e.test.ts`):
 

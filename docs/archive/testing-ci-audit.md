@@ -58,15 +58,15 @@ five more kernel-requiring files use
 - `lib/kernel/{file-resource-audit,kernel-compute,kernel-process,
   kernel-transport.acceptance,process-consumers,request-window,
   storage-adapter}.test.ts`
-- `lib/recovery/kernel-durable-engine.test.ts`
-- `lib/harness/shell-assembly.test.ts`
-- `lib/lsp/bundled-language.test.ts` (kernel-gated, **not** in the authority
+- `lib/recovery/kernel-durable-engine.native.test.ts`
+- `lib/harness/shell-assembly.native.test.ts`
+- `lib/lsp/bundled-language.native.test.ts` (kernel-gated, **not** in the authority
   list — hidden `skipIf` in the Web suite; only runs when a binary exists)
-- `lib/documents/authority-surface-identity.test.ts`,
-  `lib/harness/document-read-source.test.ts`,
-  `lib/harness/thread-lifecycle.acceptance.test.ts`,
-  `lib/harness/working-state/materialized-baseline-update.acceptance.test.ts`,
-  `test/integration-surface-vertical.test.ts` (fail hard when the kernel is
+- `lib/documents/authority-surface-identity.native.test.ts`,
+  `lib/harness/document-read-source.native.test.ts`,
+  `lib/harness/thread-lifecycle.acceptance.native.test.ts`,
+  `lib/harness/working-state/materialized-baseline-update.acceptance.native.test.ts`,
+  `test/integration-surface-vertical.native.test.ts` (fail hard when the kernel is
   absent or stale)
 
 Consequences measured locally: `bun run test:pi` on a checkout whose
@@ -146,7 +146,7 @@ in-memory port already exists
 
 Disposition: **replace** — point engine/consumer tests at the production
 `createWorkspaceRecoveryEngine` with the in-memory durable port, then delete
-the retired engine helper. Keep `kernel-durable-engine.test.ts` and the
+the retired engine helper. Keep `kernel-durable-engine.native.test.ts` and the
 native vertical files as the authoritative-path evidence.
 
 ### 3.3 Source-text / statement-order tests

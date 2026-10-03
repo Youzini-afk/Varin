@@ -384,7 +384,7 @@ git diff --check
 
 UI 的现有测试通过 Vitest；runtime-client/broker/pi-host 依其 `tsx --test` 脚本。限定测试文件和命令参数以该包配置为准。kernel-backed suite 已隔离到 `packages/web/vitest.kernel.config.ts` 并由 `scripts/test-kernel-authority.mjs` 管理；不要误用普通 web 测试入口得到“未执行所以通过”。原生版本错配应构建/准备正确环境或明确标记未测，不能沿用报告里的旧环境失败豁免。
 
-优先复用现有 `usePiSessionStore.test.ts`、`client.test.ts`、`websocket.test.ts`、`runtime-surface-connection.test.ts`、`gateway.test.ts`、`path-authority.test.ts`、`session-registration.test.ts`、`shell-supervisor.test.ts`、`shell-assembly.test.ts`、`output-store.test.ts`、`explore-service.test.ts`、`todo-tool.test.ts`、`web-fetch.test.ts` 等最近行为覆盖。缺失的真实消费者/故障组合再添加，不以本文件列表决定测试数量。
+优先复用现有 `usePiSessionStore.test.ts`、`client.test.ts`、`websocket.test.ts`、`runtime-surface-connection.test.ts`、`gateway.test.ts`、`path-authority.test.ts`、`session-registration.test.ts`、`shell-supervisor.test.ts`、`shell-assembly.native.test.ts`、`output-store.test.ts`、`explore-service.native.test.ts`、`todo-tool.test.ts`、`web-fetch.test.ts` 等最近行为覆盖。缺失的真实消费者/故障组合再添加，不以本文件列表决定测试数量。
 
 ### 11.3 交接/结束报告
 

@@ -158,7 +158,7 @@ builders. Its implementation is divided into `core`, `operations`, `authority_st
 one transaction/authority boundary with bounded source visibility, not independent stores. Storage domains do not
 open their own writable catalog connections or bypass dispatch identity checks.
 
-The Windows release child-process acceptance paths include `packages/web/application-host/lib/kernel/kernel-client.test.ts` and `kernel-compute.test.ts`; the current native authority suite covers the original R0/R1 invariants, R2 file root/lease and conditional filesystem apply, R3 filesystem scan/materialization/restart reconciliation, R4 process authority, and R5 immutable-pin/live-root search, scheduling/cancellation, Git inventory and native structure/chunk computation.
+The Windows release child-process acceptance paths include `packages/web/application-host/lib/kernel/kernel-client.test.ts` and `kernel-compute.native.test.ts`; the current native authority suite covers the original R0/R1 invariants, R2 file root/lease and conditional filesystem apply, R3 filesystem scan/materialization/restart reconciliation, R4 process authority, and R5 immutable-pin/live-root search, scheduling/cancellation, Git inventory and native structure/chunk computation.
 The production adapter longitudinal path is assembled in `application-host/index.ts`; actor-bound recovery calls
 derive session identity from the persisted turn and use an explicit maintenance grant only for startup/list/GC
 operations, never the Host-management grant for domain calls. `KernelRecoveryContentStore` is explicitly bound after adapter construction;

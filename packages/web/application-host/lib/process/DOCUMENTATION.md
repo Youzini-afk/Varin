@@ -55,8 +55,8 @@ from a stale PID. Linux/macOS implementation is not claimed as locally tested on
 
 `native-process.test-helper.ts` uses an isolated real release kernel, never a production import.
 `bun run test:kernel` requires that binary and runs
-[../kernel/kernel-process.test.ts](../kernel/kernel-process.test.ts) and
-[../kernel/process-consumers.test.ts](../kernel/process-consumers.test.ts): binary streams, PTY/resize,
+[../kernel/kernel-process.native.test.ts](../kernel/kernel-process.native.test.ts) and
+[../kernel/process-consumers.native.test.ts](../kernel/process-consumers.native.test.ts): binary streams, PTY/resize,
 input deduplication, bounded backpressure, leases/revocation, descendant drainage, Host/kernel loss,
 retained writers, and actual LSP/DAP/task/test consumers. Existing synchronous fake-child unit seams
 are kept distinct from native evidence.

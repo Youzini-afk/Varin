@@ -313,7 +313,7 @@ LSP 范围是 0-based，转换在 Host 结构模块完成，协议不暴露 0-ba
 
 类型：问题与解法
 
-背景：D-098 / D-099 验收复跑暴露两件事。其一，`packages/web` 完整套件里 `tree-sitter-provider.test.ts`「outlines TypeScript units from the vendored wasm」与 `explore.test.ts`「keeps a value-binding hit inside its enclosing function」失败，单独跑同样两个文件 44/44 通过；失败时收到的状态是 `failed`，而那条路径上 `failed` 只由 `STRUCTURE_PARSE_BUDGET_MS` 产生——40ms 挂钟在满载 runner 上被调度延迟吃掉。其二，D-098 只按 kind 认容器，而 `documentSymbol` 把接口调用签名报成 `method`，所以最小容器可以是一行：命中该行时切出 19 字节的 `  needle(): string;`，比它替换掉的 ±3 窗口（145 字节 / 7 行）更少，而 status 3.11 已经写下「至少不差于 ±3」。
+背景：D-098 / D-099 验收复跑暴露两件事。其一，`packages/web` 完整套件里 `tree-sitter-provider.native.test.ts`「outlines TypeScript units from the vendored wasm」与 `explore.native.test.ts`「keeps a value-binding hit inside its enclosing function」失败，单独跑同样两个文件 44/44 通过；失败时收到的状态是 `failed`，而那条路径上 `failed` 只由 `STRUCTURE_PARSE_BUDGET_MS` 产生——40ms 挂钟在满载 runner 上被调度延迟吃掉。其二，D-098 只按 kind 认容器，而 `documentSymbol` 把接口调用签名报成 `method`，所以最小容器可以是一行：命中该行时切出 19 字节的 `  needle(): string;`，比它替换掉的 ±3 窗口（145 字节 / 7 行）更少，而 status 3.11 已经写下「至少不差于 ±3」。
 
 决定：(1) 预算定位为跑飞文件的兜底闸，不是延迟目标，默认值上调到 250ms 并在常量注释里写明理由；断言真实解析或断言预算耗尽的测试都自带预算，不继承生产值。(2) 单元的签名范围覆盖整个单元范围时，视为没有自己函数体的片段，按每个命中的 ±3 窗口取并补齐；有函数体的单元仍精确输出。
 
@@ -323,7 +323,7 @@ LSP 范围是 0-based，转换在 Host 结构模块完成，协议不暴露 0-ba
 
 不改：`SMALL_STRUCTURE_SPAN_LINES`（24，D-093）；`STRUCTURE_HIT_CLASS_SCORE`（D-095）；容器 kind 集合（D-098）；provider 顺序与 `warmOnly` 契约（D-097 / D-099）。不声称解析耗时或省时比例。
 
-影响：`lib/structure/constants.ts`；`lib/structure/slice.ts`；`lib/structure/slice.test.ts`；`lib/structure/tree-sitter-provider.test.ts`；`lib/harness/explore.test.ts`；`lib/structure/DOCUMENTATION.md`；status 3.11。
+影响：`lib/structure/constants.ts`；`lib/structure/slice.ts`；`lib/structure/slice.test.ts`；`lib/structure/tree-sitter-provider.native.test.ts`；`lib/harness/explore.native.test.ts`；`lib/structure/DOCUMENTATION.md`；status 3.11。
 
 状态：已实施。
 
@@ -341,7 +341,7 @@ LSP 范围是 0-based，转换在 Host 结构模块完成，协议不暴露 0-ba
 
 不改：JS/JSON 语法包、设置页、按需下载（第 5 步）；仓库级词法索引；LSP 全仓扫描。
 
-影响：`symbol-runtime.ts` `CATALOG_SCAN_LANGUAGES`；`catalog-scan.test.ts`；status 3.11 必须写 TS/TSX only。
+影响：`symbol-runtime.ts` `CATALOG_SCAN_LANGUAGES`；`catalog-scan.native.test.ts`；status 3.11 必须写 TS/TSX only。
 
 状态：已实施。
 
@@ -493,7 +493,7 @@ LSP 范围是 0-based，转换在 Host 结构模块完成，协议不暴露 0-ba
 
 不改：候选池（D-108 不扩候选仍然成立）；24 KiB 预算；`ExploreSearchSnippet`。
 
-影响：protocol `ExploreRelationStatus` / `ExploreFileRelation.stale` / `.incomplete` / `details.relations.status`；`lib/harness/explore-service.ts`；`lib/harness/explore.ts` 打包顺序与 `relationLines`；`lib/harness/service-host.ts` `fileRelations` 返回类型（不含 `stale`）；`application-host/index.ts`；`explore.test.ts` / `explore-service.test.ts`。
+影响：protocol `ExploreRelationStatus` / `ExploreFileRelation.stale` / `.incomplete` / `details.relations.status`；`lib/harness/explore-service.ts`；`lib/harness/explore.ts` 打包顺序与 `relationLines`；`lib/harness/service-host.ts` `fileRelations` 返回类型（不含 `stale`）；`application-host/index.ts`；`explore.native.test.ts` / `explore-service.native.test.ts`。
 
 状态：已实施。
 
@@ -511,7 +511,7 @@ LSP 范围是 0-based，转换在 Host 结构模块完成，协议不暴露 0-ba
 
 不改：`TYPESCRIPT_DEFINITION_QUERY`（`lexical_declaration` / `variable_declaration` 早已捕获，被 provider 过滤掉的）；`isSliceUnit`；`isStructureContainerKind`；D-098 的切片行为。
 
-影响：`lib/structure/tree-sitter-provider.ts`（`isModuleLevelBinding` / `isOutlineUnit`）；`tree-sitter-provider.test.ts`。
+影响：`lib/structure/tree-sitter-provider.ts`（`isModuleLevelBinding` / `isOutlineUnit`）；`tree-sitter-provider.native.test.ts`。
 
 状态：已实施。
 
@@ -547,7 +547,7 @@ LSP 范围是 0-based，转换在 Host 结构模块完成，协议不暴露 0-ba
 
 不改：D-104 原文；非目录语言的 `touchFile`；扫描不挡启动（D-107）。
 
-影响：`CATALOG_SCAN_LANGUAGES` 改由规格表推导；`catalog-scan.test.ts`。
+影响：`CATALOG_SCAN_LANGUAGES` 改由规格表推导；`catalog-scan.native.test.ts`。
 
 状态：已实施。
 
@@ -821,7 +821,7 @@ LSP 范围是 0-based，转换在 Host 结构模块完成，协议不暴露 0-ba
 
 不改：rg 200/80/20 预算；embedding；模型增强。
 
-影响：`explore.ts`；`explore-graph.ts`；`explore.test.ts`。
+影响：`explore.ts`；`explore-graph.ts`；`explore.native.test.ts`。
 
 状态：已实施。
 
@@ -1043,7 +1043,7 @@ TriviumDB」的主要论据是查询模型不匹配——store 为此叠了八�
 
 影响：`structure/queries.ts`；`knowledge/symbols.ts`（`CATALOG_EXTRACTOR_VERSION`）；`knowledge/store.ts`（`extractor` 字段与
 `SymbolGraphFileRelations.extractor`）；`knowledge/symbol-runtime.ts`（跳过条件）；`scripts/symbol-graph-query.ts`；
-`tree-sitter-provider.test.ts`（+1）；`catalog-scan.test.ts`（+1）。
+`tree-sitter-provider.native.test.ts`（+1）；`catalog-scan.native.test.ts`（+1）。
 
 状态：已实施。
 

@@ -48,8 +48,7 @@ if (vitestFiles.length === 0) {
     'packages/web/application-host/lib/kernel/kernel-client.test.ts',
   ]);
 }
-// The kernel Vitest config owns the native-file set (KERNEL_VITEST_FILES in
-// packages/web/vitest.config.ts): every file that starts real kernels, durable
+// The kernel Vitest config collects *.native.test.ts: every file that starts real kernels, durable
 // stores or OS process trees runs here and nowhere else. These tests start real
 // native resources, so serialize files on every runner; concurrency within
 // each test remains exercised without coupling teardown to another fixture.

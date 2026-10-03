@@ -23,34 +23,7 @@ export const COMMON_TEST_EXCLUDE = [
   '**/lib/kernel/kernel-client.test.ts',
 ];
 
-export const KERNEL_VITEST_FILES = [
-  'application-host/lib/bots/bot-delete.acceptance.test.ts',
-  'application-host/lib/computer/computer-evidence.acceptance.test.ts',
-  'application-host/lib/kernel/file-resource-audit.test.ts',
-  'application-host/lib/kernel/kernel-compute.test.ts',
-  'application-host/lib/kernel/kernel-process.test.ts',
-  'application-host/lib/kernel/kernel-transport.acceptance.test.ts',
-  'application-host/lib/kernel/process-consumers.test.ts',
-  'application-host/lib/kernel/shell-supervisor-process-tree.test.ts',
-  'application-host/lib/kernel/storage-adapter.test.ts',
-  'application-host/lib/recovery/kernel-durable-engine.test.ts',
-  'application-host/lib/harness/shell-assembly.test.ts',
-  'application-host/lib/harness/followups.test.ts',
-  'application-host/lib/harness/sources.test.ts',
-  'application-host/lib/harness/resources.test.ts',
-  'application-host/lib/harness/experiments.test.ts',
-  'application-host/lib/harness/experiment-workspace.test.ts',
-  'application-host/lib/harness/workspace-identity.test.ts',
-  'application-host/lib/lsp/bundled-language.test.ts',
-  'application-host/lib/knowledge/catalog-scan.test.ts',
-  'application-host/lib/harness/explore-service.test.ts',
-  'application-host/lib/documents/authority-surface-identity.test.ts',
-  'application-host/lib/harness/document-read-source.test.ts',
-  'application-host/lib/harness/thread-lifecycle.acceptance.test.ts',
-  'application-host/lib/harness/working-state/materialized-baseline-update.acceptance.test.ts',
-  'application-host/lib/terminal/shell-integration.live.test.ts',
-  'test/integration-surface-vertical.test.ts',
-];
+export const NATIVE_TEST_INCLUDE = ['**/*.native.test.ts'];
 
 export default defineConfig({
   resolve: {
@@ -68,7 +41,7 @@ export default defineConfig({
     testTimeout: 45_000,
     exclude: [
       ...COMMON_TEST_EXCLUDE,
-      ...KERNEL_VITEST_FILES,
+      ...NATIVE_TEST_INCLUDE,
     ],
   },
 });

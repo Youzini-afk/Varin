@@ -47,6 +47,6 @@ Electron reuses this Web host in-process. It does not add a generic filesystem p
 When durable mutation storage is bound, nested Documents resource operations must enter the kernel gate even when
 canonical path keys match. Only Rust `file.lease.check` may decide whether exact/subtree coverage is sufficient;
 the local queue shortcut is confined to the unbound test seam. The real Documents write/stale-save/move/delete
-composition and a nested exact-to-subtree rejection are covered by `../kernel/file-resource-audit.test.ts`.
+composition and a nested exact-to-subtree rejection are covered by `../kernel/file-resource-audit.native.test.ts`.
 The combined recovery restart/undo test now uses real Documents and the real Recovery kernel gate rather than
 no-op gate stubs. The Pi navigation response-loss adapter is still simulated and is not a real model/UI session.
