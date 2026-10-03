@@ -10,7 +10,8 @@ import { pathInRoots, rootsAreRestricted } from "../../workspace/path-scope.js";
 import { readSemanticCheckpoint, writeSemanticCheckpoint } from "./checkpoint.js";
 import { resolveSemanticSearchOptions, type BlockPayload, type DocumentPayload, type PreparedSemanticPublication,
   type SemanticStoreOpenOptions, type SemanticIndexLifecycle, type SemanticQueryCoverage, type SemanticCheckpoint,
-  type SemanticHit, type SemanticSearchOptions, type SemanticOverlayBlock } from "./store-contract.js";
+  type SemanticHit, type SemanticSearchOptions, type SemanticOverlayBlock,
+  type SemanticDocumentState, type SemanticSourceMetadataUpdate } from "./store-contract.js";
 const { TriviumDB } = createRequire(import.meta.url)("triviumdb") as typeof import("triviumdb");
 const FLUSH_QUIET_MS = 250;
 const FLUSH_MAX_DEFER_MS = 30_000;
@@ -228,6 +229,7 @@ export function createSemanticStoreEngine(options: SemanticStoreOpenOptions & { 
           revision: input.revision,
           recipeId,
           blockCount: input.chunks.length,
+          ...(input.sourceMetadata ? { sourceMetadata: input.sourceMetadata } : {}),
         };
         operations.push({ type: "insert", vector: emptyVector, payload: document });
       }
@@ -290,6 +292,35 @@ export function createSemanticStoreEngine(options: SemanticStoreOpenOptions & { 
       return enqueue(() => texts.map(text => lookupVectorByEmbedText(writer, text)));
     },
     publishDocuments,
+    async listDocumentStates(): Promise<SemanticDocumentState[]> {
+      return enqueue(() => {
+        if (!writer) return [];
+        return writer.indexedLookup({ type: "document" }, maximumLookupResults(writer)).flatMap(id => {
+          const row = writer!.getPayload(id) as DocumentPayload | null;
+          return row?.documentId ? [{ documentId: row.documentId, revision: row.revision, recipeId: row.recipeId,
+            ...(row.sourceMetadata ? { sourceMetadata: row.sourceMetadata } : {}) }] : [];
+        });
+      });
+    },
+    async recordSourceMetadata(updates: readonly SemanticSourceMetadataUpdate[]): Promise<void> {
+      await enqueue(() => {
+        if (!writer || updates.length === 0) return;
+        let changed = false;
+        for (const update of updates) {
+          if (update.publishToken < (latestPublish.get(update.documentId) ?? 0)) continue;
+          for (const id of lookupDocuments(writer, update.documentId)) {
+            const row = writer.getPayload(id) as DocumentPayload | null;
+            if (row?.revision !== update.revision || row.recipeId !== recipeId) continue;
+            latestPublish.set(update.documentId, update.publishToken);
+            if (row.sourceMetadata?.byteLength === update.sourceMetadata.byteLength
+              && row.sourceMetadata?.modifiedTimeNs === update.sourceMetadata.modifiedTimeNs) continue;
+            writer.patchPayload(id, { $set: { sourceMetadata: update.sourceMetadata } });
+            changed = true;
+          }
+        }
+        if (changed) scheduleFlush();
+      });
+    },
     async listDocumentIds(): Promise<string[]> {
       return enqueue(() => {
         if (!existsSync(dbFile()) && !writer) return [];

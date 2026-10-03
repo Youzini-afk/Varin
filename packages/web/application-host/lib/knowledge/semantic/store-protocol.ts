@@ -3,6 +3,7 @@ export type SemanticStoreMethod = Exclude<keyof SemanticStoreEngine, "scope" | "
 export const SEMANTIC_STORE_METHODS: Record<SemanticStoreMethod, true> = {
   checkpoint: true, markBuilding: true, markReady: true, lookupVectors: true,
   publishedRevision: true, publishDocuments: true, listDocumentIds: true,
+  listDocumentStates: true, recordSourceMetadata: true,
   removeDocument: true, search: true, close: true,
 };
 export const isSemanticStoreMethod = (value: unknown): value is SemanticStoreMethod =>

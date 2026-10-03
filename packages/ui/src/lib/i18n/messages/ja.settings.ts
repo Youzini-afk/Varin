@@ -9,6 +9,8 @@ export const settingsDict = {
   "index.directories.resume": "再開",
   "index.directories.check": "更新を確認",
   "index.directories.checking": "更新を確認中",
+  "index.directories.indexedFiles": "インデックス済み {count}/{total} ドキュメント",
+  "index.directories.checkedFiles": "今回の確認 {count}/{total} ファイル",
   "index.directories.paused": "一時停止中",
   "index.directories.deleting": "索引を削除中",
   "index.directories.remove": "索引を削除",

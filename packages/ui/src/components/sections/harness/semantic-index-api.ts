@@ -29,8 +29,8 @@ export interface SemanticIndexStatus {
     root: string | null;
     binding: string;
     indexingEnabled: boolean;
-    status: { status: string; coverage: string; lifecycle: string };
-    progress: { phase: string; processedFiles: number; totalFiles: number; publishedDocuments: number; error?: string;
+    status: { status: string; coverage: string; lifecycle: string; publishedDocuments?: number };
+    progress: { phase: string; processedFiles: number; totalFiles: number; publishedDocuments?: number; error?: string;
       coverageStats?: { visibleFiles: number; candidateFiles: number; structurallySupportedFiles: number; textFallbackFiles: number; unsupportedFiles: number;
         inventories: Array<{ root: string; strategy: 'git-visible' | 'directory'; gitRoot?: string; selectedRootIgnored?: boolean }> };
     } | null;

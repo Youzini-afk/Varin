@@ -27,6 +27,49 @@ async function fixture(overrides: Partial<IndexDirectoryManagerOptions> = {}) {
 }
 
 describe('index directory management', () => {
+  it('promotes an in-flight startup check when explicit content verification is requested', async () => {
+    let entered!: () => void;
+    const started = new Promise<void>(resolve => { entered = resolve; });
+    const modes: boolean[] = [];
+    const f = await fixture({ check: async (_entry, signal, options) => {
+      modes.push(options.manual);
+      if (!options.manual) {
+        entered();
+        await new Promise<void>((_resolve, reject) => {
+          if (signal.aborted) reject(signal.reason);
+          else signal.addEventListener('abort', () => reject(signal.reason), { once: true });
+        });
+      }
+    } });
+    const directory = path.join(f.dataDir, 'project');
+    await f.manager.syncProjects([directory]); await started;
+    await f.manager.act('check', directory, f.manager.snapshot().revision); await f.manager.drain();
+    expect(modes).toEqual([false, true]);
+    expect(f.manager.snapshot().entries[0]).toMatchObject({ checking: false, busy: false, error: undefined });
+  });
+
+  it('uses incremental checks on startup/resume, preserves explicit verification, and clears busy state after completion', async () => {
+    const modes: boolean[] = [];
+    const f = await fixture({ check: async (_entry, _signal, options) => { modes.push(options.manual); } });
+    const directory = path.join(f.dataDir, 'project');
+    await f.manager.syncProjects([directory]); await f.manager.drain();
+    expect(modes).toEqual([false]);
+    expect(f.manager.snapshot().entries[0]).toMatchObject({ checking: false, busy: false });
+    await f.manager.dispose();
+    const reopened = createIndexDirectoryManager(f.options);
+    cleanups.push(() => reopened.dispose());
+    await reopened.load(); await reopened.drain();
+    expect(modes).toEqual([false, false]);
+    await reopened.act('check', directory, reopened.snapshot().revision); await reopened.drain();
+    expect(modes).toEqual([false, false, true]);
+    await reopened.act('pause', directory, reopened.snapshot().revision);
+    await reopened.act('check', directory, reopened.snapshot().revision); await reopened.drain();
+    expect(reopened.snapshot().entries[0]).toMatchObject({ state: 'paused', checking: false, busy: false });
+    await reopened.act('resume', directory, reopened.snapshot().revision); await reopened.drain();
+    expect(modes).toEqual([false, false, true, true, false]);
+    expect(reopened.snapshot().entries[0]).toMatchObject({ state: 'active', checking: false, busy: false });
+  });
+
   it('keeps a separately selected child active when its parent is removed from project folders', async () => {
     const f = await fixture();
     const parent = path.join(f.dataDir, 'parent');

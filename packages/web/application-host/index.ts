@@ -3229,13 +3229,13 @@ async function main(options: StartWebUiServerOptions = {}): Promise<WebUiServerC
       symbolGraphRuntime.refreshIndexScope();
       await semanticRuntime.refreshIndexScope();
     },
-    check: async (entry, requestSignal) => {
+    check: async (entry, requestSignal, { manual }) => {
       const scope = projectIndexScope.get();
       const signal = AbortSignal.any([scope.signal, requestSignal]);
       signal.throwIfAborted();
       await Promise.all([
-        symbolGraphRuntime.scanWorkspace(entry.workspaceId, { signal, manual: true }),
-        semanticRuntime.scanWorkspace(entry.workspaceId, { signal, manual: true, forceContentVerification: true }),
+        symbolGraphRuntime.scanWorkspace(entry.workspaceId, { signal, manual }),
+        semanticRuntime.scanWorkspace(entry.workspaceId, { signal, manual, forceContentVerification: manual }),
       ]);
       signal.throwIfAborted();
       const progress = semanticRuntime.indexStatuses().find((status) => status.workspaceId === entry.workspaceId)?.progress;

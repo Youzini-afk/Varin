@@ -6,6 +6,8 @@ export const settingsDict = {
   "index.directories.resume": "계속",
   "index.directories.check": "업데이트 확인",
   "index.directories.checking": "업데이트 확인 중",
+  "index.directories.indexedFiles": "색인 문서 {count}/{total}개",
+  "index.directories.checkedFiles": "이번 검사 {count}/{total}개 파일",
   "index.directories.paused": "일시 중지됨",
   "index.directories.deleting": "색인 삭제 중",
   "index.directories.remove": "색인 삭제",

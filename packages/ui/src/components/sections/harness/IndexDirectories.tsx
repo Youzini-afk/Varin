@@ -45,6 +45,8 @@ export function IndexDirectories({ status, draft, edit, refresh }: {
         const deleting = entry.state === 'deleting';
         const processing = entry.checking || (entry.state === 'active' && ['enumerating', 'processing'].includes(root?.progress?.phase ?? ''));
         const failure = entry.error ?? root?.progress?.error;
+        const indexedDocuments = root?.status.publishedDocuments ?? root?.progress?.publishedDocuments;
+        const totalFiles = root?.progress?.totalFiles ?? 0;
         return <div key={entry.path} className="space-y-2 py-4">
           <div className="flex min-w-0 items-start gap-2">
             <RiFolderLine className="mt-0.5 size-4 shrink-0 text-muted-foreground" />
@@ -55,19 +57,24 @@ export function IndexDirectories({ status, draft, edit, refresh }: {
                   : t('settings.page.harness.index.phase.ready')}
                 {root ? ` · ${t(root.status.coverage === 'complete' ? 'settings.page.harness.index.coverage.complete'
                   : root.status.coverage === 'partial' ? 'settings.page.harness.index.coverage.partial' : 'settings.page.harness.index.coverage.empty')}` : ''}
-                {root?.progress?.totalFiles ? ` · ${root.progress.processedFiles}/${root.progress.totalFiles}` : ''}
-                {root?.progress ? ` · ${t('settings.page.harness.index.progress.documents', { count: root.progress.publishedDocuments })}` : ''}
+                {indexedDocuments !== undefined ? ` · ${totalFiles > 0
+                  ? t('index.directories.indexedFiles', { count: indexedDocuments, total: totalFiles })
+                  : t('settings.page.harness.index.progress.documents', { count: indexedDocuments })}` : ''}
               </p>
+              {processing && totalFiles > 0 && root?.progress ? <p className="typography-micro text-muted-foreground">
+                {t('index.directories.checkedFiles', { count: root.progress.processedFiles, total: totalFiles })}
+              </p> : null}
             </div>
           </div>
-          {processing && root?.progress?.totalFiles ? <progress className="h-1 w-full" value={root.progress.processedFiles} max={root.progress.totalFiles} /> : null}
+          {totalFiles > 0 && indexedDocuments !== undefined ? <progress className="h-1 w-full" value={indexedDocuments} max={totalFiles}
+            aria-label={t('index.directories.indexedFiles', { count: indexedDocuments, total: totalFiles })} /> : null}
           <div className="flex flex-wrap items-center gap-1">
             {!deleting ? <>
               <Button size="xs" variant="ghost" disabled={pending.has(entry.path)} onClick={() => void act(paused ? 'resume' : 'pause', entry.path)}>
                 {paused ? <RiPlayLine className="size-3.5" /> : <RiPauseLine className="size-3.5" />}
                 {t(paused ? 'index.directories.resume' : 'index.directories.pause')}
               </Button>
-              <Button size="xs" variant="ghost" disabled={pending.has(entry.path) || processing} onClick={() => void act('check', entry.path)}>
+              <Button size="xs" variant="ghost" disabled={pending.has(entry.path)} onClick={() => void act('check', entry.path)}>
                 <RiRefreshLine className={processing ? 'size-3.5 animate-spin' : 'size-3.5'} />{t('index.directories.check')}
               </Button>
             </> : null}

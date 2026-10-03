@@ -6,6 +6,8 @@ export const settingsDict = {
   "index.directories.resume": "继续维护",
   "index.directories.check": "检测更新",
   "index.directories.checking": "正在检测更新",
+  "index.directories.indexedFiles": "已索引 {count}/{total} 个文档",
+  "index.directories.checkedFiles": "本轮检查 {count}/{total} 个文件",
   "index.directories.paused": "已暂停",
   "index.directories.deleting": "正在清理索引",
   "index.directories.remove": "删除索引",

@@ -27,7 +27,12 @@ derived store (`../vectors/`); they reuse `harness.embed` but never this MiniLM 
   mutations, full checkpoints and cache maintenance never execute on Electron main.
 - Runtime: `runtime.ts` — native directory inventory first returns path and stat metadata without
   reading every file body. New, changed, invalidated and failed paths then enter Documents reads,
-  parsing and embedding. A normal query never traverses the root; returned old hits are checked
+  parsing and embedding. Successful document publications retain their inventory metadata
+  with the actual content revision in the same native generation. Unchanged-content verification
+  updates that hint only against the matching revision/recipe and publication token. Each completed
+  batch retains its hints even when a later batch is interrupted; startup reuses those hints and
+  prepares only the remaining/changed paths. Metadata equality remains an unverified hint, and
+  explicit verification or watcher reset still reads content. A normal query never traverses the root; returned old hits are checked
   against current Documents revision. Query-time dimension discovery resumes a deferred scan in the
   existing background owner rather than awaiting the entire inventory. Queries consume published
   generations by default; first-publication waiting is an explicit internal option. Metadata-only skips keep a range-level partial coverage
@@ -48,6 +53,9 @@ derived store (`../vectors/`); they reuse `harness.embed` but never this MiniLM 
 - Management: `index-management.ts` owns `semantic-index-settings.json` under the Varin data directory.
   It exposes authenticated status and revisioned configuration routes. The settings page reports the
   active index directory, disk bytes, active-root scan progress, and the embedding model binding.
+  Directory progress bars show published documents; a separate current-pass check counter
+  reports inventory processing. Startup shows the existing generation's document count
+  without inventing a zero while enumeration is pending.
   Project entries own their folder collection: `path` is the default execution folder and
   `additionalPaths` contains the other explicitly selected folders. `../index-directories.ts`
   persists directory maintenance state in `index-directories.json`: project folders join by default,
@@ -66,7 +74,10 @@ derived store (`../vectors/`); they reuse `harness.embed` but never this MiniLM 
   inventories, preserving force-tracked ignored files.
   Pausing cancels background scans and stops incremental maintenance while preserving published
   indexes for query-time revision checks. An explicit update check may refresh a paused directory
-  once. More-specific folder settings override their parent's state; Host-private exclusions always win.
+  once and requests content verification. Startup, new enrollment and resume use incremental
+  reconciliation and never inherit that manual verification flag. The directory's checking/busy
+  state is released after both accepted scans finish. More-specific folder settings override
+  their parent's state; Host-private exclusions always win.
   Removal first persists a deleting state and stops writers. The semantic workspace maintenance gate
   closes active generation handles; `cache-maintenance.ts` then removes the matching paths from every
   retained/current model space and compacts remaining generations, or removes the whole derived

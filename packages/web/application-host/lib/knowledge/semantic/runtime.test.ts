@@ -27,6 +27,39 @@ const gate = () => {
 };
 
 describe("semantic index runtime", () => {
+  it('resumes an interrupted build after restart without reading or embedding completed files again', async () => {
+    const documents = await createDocumentAuthorityHarness();
+    disposes.push(() => documents.cleanup());
+    const files = Array.from({ length: 11 }, (_, n) => `file-${n}.ts`);
+    for (const [n, file] of files.entries()) writeFileSync(join(documents.workspaceRoot, file), `export const value_${n} = "marker ${n}";\n`);
+    const native = parsingSource();
+    const reads: string[] = [];
+    const base = createHashEmbedder();
+    const embed = vi.fn((texts: readonly string[], request?: Parameters<typeof base.embed>[1]) => base.embed(texts, request));
+    const makeRuntime = () => createSemanticIndexRuntime({ dataDir: documents.dataDir, hostId: 'resume-partial',
+      documents: documents.authority, embedder: { ...base, embed },
+      searchFilesystemFiles: async () => files.map((file, n) => ({ name: file, path: join(documents.workspaceRoot, file),
+        relativePath: file, metadata: { byteLength: String(statSync(join(documents.workspaceRoot, file)).size), modifiedTimeNs: `stable-${n}` } })),
+      structureSource: { ...native, unitsFile: request => { reads.push(request.path); return native.unitsFile!(request); } },
+    });
+    let runtime = makeRuntime();
+    disposes.push(() => runtime.dispose());
+    const scope = workspaceScope(documents.identity.workspaceId);
+    const stop = new AbortController();
+    await runtime.scanScope(scope, { signal: stop.signal, onBatchComplete: () => stop.abort() });
+    expect(runtime.scanProgress(scope)?.phase).toBe('cancelled');
+    expect(runtime.statusFor(scope).publishedDocuments).toBe(8);
+    await runtime.dispose();
+    reads.length = 0;
+    embed.mockClear();
+    runtime = makeRuntime();
+    expect(runtime.statusFor(scope).publishedDocuments).toBe(8);
+    await runtime.scanScope(scope);
+    expect(reads.sort()).toEqual(files.slice(8).sort());
+    expect(embed).toHaveBeenCalledTimes(1);
+    expect(runtime.statusFor(scope).publishedDocuments).toBe(11);
+  });
+
   it('coalesces rapid saves into the latest file state while invalidating old hits immediately', async () => {
     const documents = await createDocumentAuthorityHarness();
     disposes.push(() => documents.cleanup());
@@ -310,7 +343,7 @@ describe("semantic index runtime", () => {
     const filePath = join(documents.workspaceRoot, "changed.ts");
     writeFileSync(filePath, 'export function changed() { return "old indexed needle"; }\n', "utf8");
     const originalStat = statSync(filePath);
-    const runtime = createSemanticIndexRuntime({
+    const makeRuntime = () => createSemanticIndexRuntime({
       dataDir: documents.dataDir,
       hostId: "semantic-hit-version",
       documents: documents.authority,
@@ -318,13 +351,16 @@ describe("semantic index runtime", () => {
       searchFilesystemFiles: async () => [{ name: "changed.ts", path: filePath, relativePath: "changed.ts", metadata: { byteLength: String(originalStat.size), modifiedTimeNs: "same-stat" } }],
       embedder: createHashEmbedder(),
     });
+    let runtime = makeRuntime();
     disposes.push(() => runtime.dispose());
     const scope = workspaceScope(documents.identity.workspaceId);
     await runtime.scanScope(scope);
     expect((await runtime.search(scope, "old indexed needle", 8)).hits[0]?.documentId).toBe("changed.ts");
 
+    await runtime.dispose();
     writeFileSync(filePath, 'export function changed() { return "new indexed phrase"; }\n', "utf8");
     utimesSync(filePath, originalStat.atime, originalStat.mtime);
+    runtime = makeRuntime();
     await runtime.scanScope(scope);
     const result = await runtime.search(scope, "old indexed needle", 8);
 
@@ -345,7 +381,7 @@ describe("semantic index runtime", () => {
     let inventory = [{ name: "old.ts", path: oldPath, relativePath: "old.ts", metadata }];
     const native = parsingSource();
     const processed: string[] = [];
-    const runtime = createSemanticIndexRuntime({
+    const makeRuntime = () => createSemanticIndexRuntime({
       dataDir: documents.dataDir,
       hostId: "semantic-metadata-inventory",
       documents: documents.authority,
@@ -362,10 +398,14 @@ describe("semantic index runtime", () => {
       },
       embedder: createHashEmbedder(),
     });
+    let runtime = makeRuntime();
     disposes.push(() => runtime.dispose());
     const scope = workspaceScope(documents.identity.workspaceId);
 
     await runtime.scanScope(scope);
+    await runtime.dispose();
+    runtime = makeRuntime();
+    expect(runtime.statusFor(scope).publishedDocuments).toBe(1);
     inventory = [
       ...inventory,
       { name: "new.ts", path: newPath, relativePath: "new.ts", metadata: { byteLength: String(Buffer.byteLength('export const newValue = "newly discovered marker";\n')), modifiedTimeNs: "new" } },

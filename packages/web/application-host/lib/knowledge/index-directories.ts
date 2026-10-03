@@ -18,7 +18,7 @@ export interface IndexDirectoryManagerOptions {
   dataDir: string;
   resolve(directory: string): Promise<{ path: string; workspaceId: string }>;
   apply(entries: readonly IndexDirectoryEntry[]): Promise<void>;
-  check(entry: IndexDirectoryEntry, signal: AbortSignal): Promise<void>;
+  check(entry: IndexDirectoryEntry, signal: AbortSignal, options: { manual: boolean }): Promise<void>;
   purge(directory: string): Promise<void>;
   cached?(): Promise<Array<{ path: string; workspaceId: string }>>;
   onError?(error: unknown): void;
@@ -42,6 +42,8 @@ export function createIndexDirectoryManager(options: IndexDirectoryManagerOption
   const jobs = new Map<string, Promise<void>>();
   const checkControllers = new Map<string, AbortController>();
   const checking = new Set<string>();
+  const checkModes = new Map<string, boolean>();
+  const requestedVerification = new Set<string>();
   const serialize = <T>(work: () => Promise<T>): Promise<T> => {
     const run = tail.then(work);
     tail = run.then(() => undefined, () => undefined);
@@ -50,7 +52,10 @@ export function createIndexDirectoryManager(options: IndexDirectoryManagerOption
   const persist = async (next: IndexDirectoryEntry[]): Promise<void> => {
     for (const entry of next) {
       const prior = entries.find((item) => key(item.path) === key(entry.path));
-      if (entry.state !== 'active' && prior?.state !== entry.state) checkControllers.get(key(entry.path))?.abort();
+      if (entry.state !== 'active' && prior?.state !== entry.state) {
+        requestedVerification.delete(key(entry.path));
+        checkControllers.get(key(entry.path))?.abort();
+      }
     }
     const temporary = `${filename}.${randomUUID()}.tmp`;
     await mkdir(options.dataDir, { recursive: true });
@@ -69,10 +74,18 @@ export function createIndexDirectoryManager(options: IndexDirectoryManagerOption
     await persist(entries.map((entry) => key(entry.path) === key(directory) || (descendants && entry.state === 'deleting' && insideDirectory(directory, entry.path))
       ? { ...entry, ...patch } : entry));
   });
-  const startCheck = (entry: IndexDirectoryEntry): void => {
+  const startCheck = (entry: IndexDirectoryEntry, manual = false): void => {
     const id = key(entry.path);
-    if (disposed || jobs.has(id)) return;
+    if (disposed) return;
+    if (jobs.has(id)) {
+      if (manual && checkModes.get(id) === false) {
+        requestedVerification.add(id);
+        checkControllers.get(id)?.abort();
+      }
+      return;
+    }
     checking.add(id);
+    checkModes.set(id, manual);
     const controller = new AbortController();
     checkControllers.set(id, controller);
     let interrupted = false;
@@ -80,7 +93,7 @@ export function createIndexDirectoryManager(options: IndexDirectoryManagerOption
     const task = options.resolve(entry.path).then((value) => {
       controller.signal.throwIfAborted();
       resolved = value;
-      return options.check({ ...entry, ...value }, controller.signal);
+      return options.check({ ...entry, ...value }, controller.signal, { manual });
     }).then(
       () => finishJob(entry.path, { ...resolved, lastCheckedAt: Date.now(), error: undefined }),
       (error: unknown) => {
@@ -91,11 +104,13 @@ export function createIndexDirectoryManager(options: IndexDirectoryManagerOption
       },
     ).catch(report).finally(() => {
       checking.delete(id);
+      checkModes.delete(id);
       if (checkControllers.get(id) === controller) checkControllers.delete(id);
       if (jobs.get(id) !== task) return;
       jobs.delete(id);
       const current = entries.find((entry) => key(entry.path) === id);
-      if (interrupted && current?.state === 'active') startCheck(current);
+      const verify = requestedVerification.delete(id);
+      if ((interrupted || verify) && current?.state === 'active') startCheck(current, verify || manual);
     });
     jobs.set(id, task);
   };
@@ -193,7 +208,7 @@ export function createIndexDirectoryManager(options: IndexDirectoryManagerOption
       }
       if (!entry) throw new Error('Index directory no longer exists');
       if (entry.state === 'deleting' && action !== 'remove') throw new Error('This index is still being deleted');
-      if (action === 'check') { startCheck(entry); return; }
+      if (action === 'check') { startCheck(entry, true); return; }
       if (action === 'remove') {
         if (entry.state === 'deleting' && jobs.has(key(entry.path))) return;
         await persist(entries.map((item) => insideDirectory(entry.path, item.path) ? { ...item, state: 'deleting', error: undefined } : item));
@@ -207,6 +222,7 @@ export function createIndexDirectoryManager(options: IndexDirectoryManagerOption
     drain: async () => { await tail; while (jobs.size) await Promise.allSettled([...jobs.values()]); },
     dispose: async () => {
       disposed = true;
+      requestedVerification.clear();
       for (const controller of checkControllers.values()) controller.abort();
       await tail;
       await Promise.allSettled([...jobs.values()]);

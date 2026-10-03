@@ -57,6 +57,15 @@ export type DocumentPayload = {
   revision: string;
   recipeId: string;
   blockCount: number;
+  sourceMetadata?: SemanticSourceMetadata;
+};
+
+/** Inventory hint paired with a successfully published/verified revision.
+ * Equality avoids a repeat build, but never replaces query-time byte checks. */
+export type SemanticSourceMetadata = { byteLength: string; modifiedTimeNs: string };
+export type SemanticDocumentState = Pick<DocumentPayload, "documentId" | "revision" | "recipeId" | "sourceMetadata">;
+export type SemanticSourceMetadataUpdate = {
+  documentId: string; revision: string; sourceMetadata: SemanticSourceMetadata; publishToken: number;
 };
 
 export type SemanticDocumentPublication = {
@@ -65,6 +74,7 @@ export type SemanticDocumentPublication = {
   chunks: readonly SemanticChunk[];
   /** Monotonic per-document token. A lower token cannot overwrite a higher one. */
   publishToken?: number;
+  sourceMetadata?: SemanticSourceMetadata;
 };
 
 export type SemanticOverlayBlock = {

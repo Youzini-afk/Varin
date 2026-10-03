@@ -9,6 +9,8 @@ export const settingsDict = {
   "index.directories.resume": "Reprendre",
   "index.directories.check": "Vérifier les mises à jour",
   "index.directories.checking": "Vérification en cours",
+  "index.directories.indexedFiles": "Documents indexés : {count}/{total}",
+  "index.directories.checkedFiles": "Fichiers vérifiés cette fois : {count}/{total}",
   "index.directories.paused": "Suspendu",
   "index.directories.deleting": "Suppression de l’index",
   "index.directories.remove": "Supprimer l’index",

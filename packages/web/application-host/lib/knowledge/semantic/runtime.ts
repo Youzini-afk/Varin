@@ -25,6 +25,7 @@ import {
   type SemanticOverlayBlock,
 } from "./store.js";
 import { createVectorCache, type SemanticVectorCache } from "./vector-cache.js";
+import type { SemanticSourceMetadata, SemanticSourceMetadataUpdate } from "./store-contract.js";
 import { isAbortError, waitWithSignal } from "../../cancellation.js";
 
 const STRUCTURAL_LANGUAGES: ReadonlySet<string> = new Set(Object.keys(TREE_SITTER_LANGUAGE_SPECS));
@@ -42,6 +43,7 @@ export type SemanticIndexStatus = {
   generation: string | null;
   spaceId: string | null;
   scope: SemanticScopeKey;
+  publishedDocuments?: number;
 };
 
 export type SemanticScanBatchProgress = {
@@ -50,7 +52,8 @@ export type SemanticScanBatchProgress = {
   publishedDocuments: number;
 };
 
-export type SemanticScanProgress = SemanticScanBatchProgress & {
+export type SemanticScanProgress = Omit<SemanticScanBatchProgress, "publishedDocuments"> & {
+  publishedDocuments?: number;
   phase: "enumerating" | "processing" | "ready" | "failed" | "cancelled";
   startedAt: number;
   updatedAt: number;
@@ -79,7 +82,7 @@ export type SemanticQueryOverlay = {
   gap?: "draft-vector-pending" | "draft-unavailable" | "thread-vector-pending";
 };
 
-type SemanticScanFile = FileSearchItem & { metadata?: { byteLength: string; modifiedTimeNs: string } };
+type SemanticScanFile = FileSearchItem & { metadata?: SemanticSourceMetadata };
 type SemanticScanFiles = SemanticScanFile[] & { enumerationStatus?: FileSearchEnumerationStatus; enumerationInfo?: FileSearchEnumerationInfo };
 
 export type SemanticSearchRequest = {
@@ -130,9 +133,8 @@ export function createSemanticIndexRuntime(options: SemanticIndexRuntimeOptions)
   const verifyingScanKeys = new Set<string>();
   const activeScanGates = new Map<string, { promise: Promise<void>; resolve: () => void; resolved: boolean }>();
   const unverifiedPaths = new Map<string, Set<string>>();
-  // Metadata only gates repeat reads within this Host lifetime. It is a hint,
-  // never a content revision; skipped paths remain visible as coverage gaps.
-  const verifiedScanMetadata = new Map<string, Map<string, string>>();
+  // Persisted inventory hints never become content revisions. Skipped paths
+  // remain visible as coverage gaps and hits retain authoritative byte checks.
   const metadataUnverifiedPaths = new Map<string, Set<string>>();
   const mutationPending = new Map<string, Set<string>>();
   const mutationWork = new Map<string, { token: number; kind: "modified" | "deleted"; controller: AbortController | null }>();
@@ -181,9 +183,8 @@ export function createSemanticIndexRuntime(options: SemanticIndexRuntimeOptions)
     `${scope.scopeKind}\0${scope.scopeId}\0${spaceId ?? spaceIdOf(embedderOf().space)}`
   );
   const scopeIdentity = (scope: SemanticScopeKey): string => `${scope.scopeKind}\0${scope.scopeId}`;
-  const forgetScanMetadata = (scope: SemanticScopeKey, documentId: string): void => {
+  const forgetMetadataVerification = (scope: SemanticScopeKey, documentId: string): void => {
     const prefix = `${scopeIdentity(scope)}\0`;
-    for (const [key, metadata] of verifiedScanMetadata) if (key.startsWith(prefix)) metadata.delete(documentId);
     for (const [key, paths] of metadataUnverifiedPaths) if (key.startsWith(prefix)) paths.delete(documentId);
   };
   const metadataIdentity = (metadata: SemanticScanFile["metadata"]): string | undefined => (
@@ -305,13 +306,14 @@ export function createSemanticIndexRuntime(options: SemanticIndexRuntimeOptions)
     embedder: SemanticEmbedder = embedderOf(),
     signal?: AbortSignal,
     expectedRevision?: string,
-  ): Promise<SemanticDocumentPublication | { kind: "unchanged-current" } | { kind: "superseded" } | { kind: "read-failed" }> => {
+    sourceMetadata?: SemanticSourceMetadata,
+  ): Promise<SemanticDocumentPublication | { kind: "unchanged-current"; revision: string } | { kind: "superseded" } | { kind: "read-failed" }> => {
     if (scope.scopeKind !== "workspace") return { kind: "read-failed" };
     signal?.throwIfAborted();
     if (!isCurrentToken(scope, documentId, token)) return { kind: "superseded" };
     const published = await store.publishedRevision(documentId);
     if (expectedRevision && published?.revision === expectedRevision && published.recipeId === store.recipeId) {
-      return { kind: "unchanged-current" };
+      return { kind: "unchanged-current", revision: published.revision };
     }
     let prepared;
     try { prepared = await diskChunksFor(scope.scopeId, root, documentId, embedder, signal); }
@@ -319,9 +321,10 @@ export function createSemanticIndexRuntime(options: SemanticIndexRuntimeOptions)
     if (!isCurrentToken(scope, documentId, token)) return {kind:"superseded"};
     if (expectedRevision && prepared.revision !== expectedRevision) return { kind: "superseded" };
     if (published?.revision === prepared.revision && published.recipeId === store.recipeId) {
-      return { kind: "unchanged-current" };
+      return { kind: "unchanged-current", revision: published.revision };
     }
-    return { documentId, revision: prepared.revision, chunks: prepared.chunks, publishToken: token };
+    return { documentId, revision: prepared.revision, chunks: prepared.chunks, publishToken: token,
+      ...(sourceMetadata ? { sourceMetadata } : {}) };
   };
 
   const indexDocument = async (scope: SemanticScopeKey, documentId: string, kind: "modified" | "deleted",
@@ -382,7 +385,7 @@ export function createSemanticIndexRuntime(options: SemanticIndexRuntimeOptions)
     const languageId = languageIdForPath(event.resourceId);
     if (!languageId) return;
     const pendingForScope = mutationPending.get(scopeIdentity(workspaceScope(event.workspaceId))) ?? new Set<string>();
-    forgetScanMetadata(workspaceScope(event.workspaceId), event.resourceId);
+    forgetMetadataVerification(workspaceScope(event.workspaceId), event.resourceId);
     pendingForScope.add(event.resourceId);
     mutationPending.set(scopeIdentity(workspaceScope(event.workspaceId)), pendingForScope);
     const scope = workspaceScope(event.workspaceId);
@@ -434,12 +437,12 @@ export function createSemanticIndexRuntime(options: SemanticIndexRuntimeOptions)
     const startedAt = Date.now();
     const updateProgress = (patch: Partial<SemanticScanProgress>): void => {
       scanProgress.set(scopeScanKey, {
-        phase: "enumerating", processedFiles: 0, totalFiles: 0, publishedDocuments: 0,
+        phase: "enumerating", processedFiles: 0, totalFiles: 0,
         startedAt, ...scanProgress.get(scopeScanKey), ...patch, updatedAt: Date.now(),
       });
     };
     scanProgress.delete(scopeScanKey);
-    updateProgress({ phase: "enumerating", processedFiles: 0, totalFiles: 0, publishedDocuments: 0, startedAt });
+    updateProgress({ phase: "enumerating", processedFiles: 0, totalFiles: 0, startedAt });
     scanFailures.add(scopeScanKey);
     for (const [activeKey, activeController] of scanControllers) {
       if (activeKey.startsWith(`${scopeScanKey}\0`)) activeController.abort();
@@ -519,7 +522,9 @@ export function createSemanticIndexRuntime(options: SemanticIndexRuntimeOptions)
         }
         store = storeFor(scope, embedder);
         await store.markBuilding(store.lifecycle === "ready" ? "rebuilding" : "building");
-        const publishedBefore = await store.listDocumentIds();
+        const publishedStates = await store.listDocumentStates();
+        const publishedByPath = new Map(publishedStates.map(row => [row.documentId, row]));
+        const publishedBefore = [...publishedByPath.keys()];
         const publishedIds = new Set(publishedBefore);
         const catalogIds = new Set(catalog.map((file) => file.relativePath));
         const enumerationComplete = files.enumerationStatus === undefined || files.enumerationStatus === "complete";
@@ -533,8 +538,6 @@ export function createSemanticIndexRuntime(options: SemanticIndexRuntimeOptions)
           !retainedPaused(documentId) && (documentTokens.get(`${scopeKey(scope, "token")}\0${documentId}`) ?? 0) <= scanToken
         )));
         unverifiedPaths.set(resolvedKey, unverified);
-        const priorMetadata = verifiedScanMetadata.get(resolvedKey) ?? new Map<string, string>();
-        const nextMetadata = new Map(priorMetadata);
         const previouslyMetadataUnverified = metadataUnverifiedPaths.get(resolvedKey) ?? new Set<string>();
         const metadataUnverified = enumerationComplete ? new Set<string>() : new Set(previouslyMetadataUnverified);
         const readFailures = indexReadFailures.get(resolvedKey) ?? new Set<string>();
@@ -550,7 +553,8 @@ export function createSemanticIndexRuntime(options: SemanticIndexRuntimeOptions)
           const pendingMutation = mutationPending.get(scopeIdentity(scope))?.has(path) ?? false;
           const canSkip = identity !== undefined
             && optionsForScan?.forceContentVerification !== true
-            && priorMetadata.get(path) === identity
+            && metadataIdentity(publishedByPath.get(path)?.sourceMetadata) === identity
+            && publishedByPath.get(path)?.recipeId === store.recipeId
             && publishedIds.has(path)
             && !readFailures.has(path)
             && !pendingMutation
@@ -564,7 +568,6 @@ export function createSemanticIndexRuntime(options: SemanticIndexRuntimeOptions)
           } else {
             toProcess.push(file);
             metadataUnverified.delete(path);
-            nextMetadata.delete(path);
           }
         }
         scanFailures.delete(scopeScanKey);
@@ -591,11 +594,20 @@ export function createSemanticIndexRuntime(options: SemanticIndexRuntimeOptions)
                 embedder,
                 signal,
                 file.revision,
+                file.metadata,
               )
             )));
             signal.throwIfAborted();
             const accepted = prepared.filter((publication): publication is SemanticDocumentPublication => !("kind" in publication));
             if (accepted.length > 0) await scanStore.publishDocuments(accepted, signal);
+            const metadataUpdates: SemanticSourceMetadataUpdate[] = prepared.flatMap((publication, index) => {
+              const file = batch[index]!;
+              return "kind" in publication && publication.kind === "unchanged-current" && file.metadata
+                && isCurrentToken(scope, file.relativePath, scanToken)
+                ? [{ documentId: file.relativePath, revision: publication.revision,
+                  sourceMetadata: file.metadata, publishToken: scanToken }] : [];
+            });
+            if (metadataUpdates.length > 0) await scanStore.recordSourceMetadata(metadataUpdates, signal);
             for (const [index, publication] of prepared.entries()) {
               const path = batch[index]!.relativePath;
               if (!isCurrentToken(scope, path, scanToken)) continue;
@@ -603,15 +615,11 @@ export function createSemanticIndexRuntime(options: SemanticIndexRuntimeOptions)
                 scanComplete = false;
                 readFailures.add(path);
                 metadataUnverified.delete(path);
-                nextMetadata.delete(path);
               } else if (!("kind" in publication) || publication.kind === "unchanged-current") {
                 unverified.delete(path);
                 readFailures.delete(path);
                 mutationPending.get(scopeIdentity(scope))?.delete(path);
                 metadataUnverified.delete(path);
-                const identity = metadataIdentity(batch[index]!.metadata);
-                if (identity) nextMetadata.set(path, identity);
-                else nextMetadata.delete(path);
               }
             }
             if (prepared.some((publication) => !("kind" in publication) || publication.kind === "unchanged-current")) gate.resolve();
@@ -641,20 +649,14 @@ export function createSemanticIndexRuntime(options: SemanticIndexRuntimeOptions)
         for (const path of [...metadataUnverified]) {
           if (!isCurrentToken(scope, path, scanToken)) {
             metadataUnverified.delete(path);
-            nextMetadata.delete(path);
           }
         }
         const currentRemovals = removed.filter((documentId) => isCurrentToken(scope, documentId, removalTokens.get(documentId)!));
         await Promise.all(currentRemovals.map((documentId) => store!.removeDocument(documentId, removalTokens.get(documentId)!)));
         for (const documentId of currentRemovals) {
           unverified.delete(documentId);
-          nextMetadata.delete(documentId);
           metadataUnverified.delete(documentId);
         }
-        if (enumerationComplete) {
-          for (const documentId of nextMetadata.keys()) if (!catalogIds.has(documentId)) nextMetadata.delete(documentId);
-        }
-        verifiedScanMetadata.set(resolvedKey, nextMetadata);
         if (metadataUnverified.size > 0) metadataUnverifiedPaths.set(resolvedKey, metadataUnverified);
         else metadataUnverifiedPaths.delete(resolvedKey);
         await store.markReady(scanComplete && unverified.size === 0 && metadataUnverified.size === 0);
@@ -721,6 +723,7 @@ export function createSemanticIndexRuntime(options: SemanticIndexRuntimeOptions)
       generation: store?.generation ?? checkpoint?.generation ?? null,
       spaceId: store?.spaceId ?? checkpoint?.spaceId ?? spaceIdOf(embedder.space),
       scope,
+      ...(checkpoint ? { publishedDocuments: checkpoint.publishedDocuments } : {}),
     };
   };
 
@@ -1025,7 +1028,6 @@ export function createSemanticIndexRuntime(options: SemanticIndexRuntimeOptions)
     await drain();
     await Promise.allSettled([...stores.values()].map((store) => store.close()));
     stores.clear();
-    verifiedScanMetadata.clear();
     metadataUnverifiedPaths.clear();
   };
 

@@ -9,7 +9,8 @@ import type { EmbedPriority, EmbedScheduler } from "./embed-scheduler.js";
 import type { SemanticEmbedder } from "./embedder.js";
 import { waitWithSignal } from "../../cancellation.js";
 import type { SemanticStoreMethod } from "./store-protocol.js";
-import type { SemanticCheckpoint, SemanticDocumentPublication, SemanticHit, SemanticSearchOptions } from "./store-contract.js";
+import type { SemanticCheckpoint, SemanticDocumentPublication, SemanticHit, SemanticSearchOptions,
+  SemanticDocumentState, SemanticSourceMetadataUpdate } from "./store-contract.js";
 export type { SemanticIndexLifecycle, SemanticQueryCoverage, SemanticHit, SemanticCheckpoint,
   SemanticDocumentPublication, SemanticOverlayBlock, SemanticSearchOptions } from "./store-contract.js";
 export { readSemanticCheckpoint } from "./checkpoint.js";
@@ -146,6 +147,9 @@ export function createSemanticGenerationStore(options: {
     publishDocument: (input: SemanticDocumentPublication, signal?: AbortSignal) => publishDocuments([input], signal),
     publishDocuments,
     listDocumentIds: (): Promise<string[]> => track(() => call("listDocumentIds", [])),
+    listDocumentStates: (): Promise<SemanticDocumentState[]> => track(() => call("listDocumentStates", [])),
+    recordSourceMetadata: (updates: readonly SemanticSourceMetadataUpdate[], signal?: AbortSignal): Promise<void> =>
+      track(() => call("recordSourceMetadata", [updates], signal)),
     removeDocument: (documentId: string, publishToken?: number): Promise<void> => {
       const token = publishToken ?? ((latestPublish.get(documentId) ?? 0) + 1);
       latestPublish.set(documentId, Math.max(latestPublish.get(documentId) ?? 0, token));

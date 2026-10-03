@@ -30,6 +30,29 @@ const chunk = (documentId: string, body: string, startLine = 1, endLine = 3): Se
 });
 
 describe("semantic generation store", () => {
+  it('pairs inventory hints with the current revision and preserves them through reopen', async () => {
+    const dataDir = mkdtempSync(join(tmpdir(), 'varin-semantic-metadata-'));
+    dirs.push(dataDir);
+    const open = () => createSemanticGenerationStore({ dataDir, hostId: 'host', scope: workspaceScope('metadata'), embedder: createHashEmbedder() });
+    let store = open();
+    const original = { byteLength: '10', modifiedTimeNs: '1' };
+    const refreshed = { byteLength: '10', modifiedTimeNs: '2' };
+    try {
+      await store.markBuilding('building');
+      await store.publishDocument({ documentId: 'file.ts', revision: 'r1', chunks: [chunk('file.ts', 'same body')],
+        sourceMetadata: original, publishToken: 1 });
+      await store.recordSourceMetadata([{ documentId: 'file.ts', revision: 'wrong', sourceMetadata: refreshed, publishToken: 2 }]);
+      expect((await store.listDocumentStates())[0]?.sourceMetadata).toEqual(original);
+      await store.recordSourceMetadata([{ documentId: 'file.ts', revision: 'r1', sourceMetadata: refreshed, publishToken: 3 }]);
+      expect(await store.publishedRevision('file.ts')).toEqual({ revision: 'r1', recipeId: store.recipeId });
+      await store.close();
+      store = open();
+      expect((await store.listDocumentStates())[0]?.sourceMetadata).toEqual(refreshed);
+      await store.publishDocument({ documentId: 'file.ts', revision: 'r2', chunks: [chunk('file.ts', 'changed body')], publishToken: 4 });
+      expect((await store.listDocumentStates())[0]?.sourceMetadata).toBeUndefined();
+    } finally { await store.close(); }
+  });
+
   it("keeps two scopeIds isolated and accepts a non-path documentId", async () => {
     const dataDir = mkdtempSync(join(tmpdir(), "varin-semantic-scope-"));
     dirs.push(dataDir);
