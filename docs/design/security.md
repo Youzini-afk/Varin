@@ -2,7 +2,7 @@
 
 Status: Pi-native host, desktop, recovery, and extension boundaries in place; release verification active
 
-Last updated: 2026-08-24
+Last updated: 2026-10-03
 
 ## Protected assets
 
@@ -37,6 +37,24 @@ Last updated: 2026-08-24
   deletion or hard restore.
 - Web fetch keeps private/reserved network ranges blocked by default. Browser-cookie access is
   explicit opt-in.
+
+## Dependency repairs and audit
+
+`bun run audit:dependencies` verifies installed dependency behavior, then runs Bun's advisory
+audit. Two advisories have no published fixed version as of 2026-10-03 and use pinned Bun patches:
+
+- [GHSA-vfj7-8cjw-p6xm](https://github.com/advisories/GHSA-vfj7-8cjw-p6xm), `braces@3.0.3`:
+  compile, stringify, expansion traversal and flattening use explicit stacks. Existing pattern/range
+  semantics and limits remain. The patch ships in desktop, Web and cloud dependency graphs.
+- [GHSA-ch52-4w7c-c8xp](https://github.com/advisories/GHSA-ch52-4w7c-c8xp), `http-cache-semantics@4.2.0`:
+  request `max-stale` cannot override non-storable or mandatory-revalidation responses or the shared
+  cache's cookie protection. Normal stale reuse and explicit public/private cookie caching remain.
+
+Bun reports published versions and cannot recognize these local repairs. CI and desktop release
+exclude only these advisory IDs after the installed-version and exploit regression checks pass.
+Other advisories still block. A missing patch or failed repair test blocks before the audit. When
+upstream publishes fixes, replace the pins/patches and remove the corresponding exception and repair
+tests in the same change. Development and canonical cloud locks both retain the relevant patches.
 
 ## Extension capability labels
 

@@ -412,10 +412,12 @@
     "electron",
   ],
   "patchedDependencies": {
-    "app-builder-lib@26.15.7": "bun-patches/app-builder-lib@26.15.7.patch",
     "@earendil-works/pi-agent-core@1.0.0": "packages/pi-host/patches/@earendil-works%2Fpi-agent-core@1.0.0.patch",
+    "http-cache-semantics@4.2.0": "bun-patches/http-cache-semantics@4.2.0.patch",
     "ghostty-web@0.4.0": "bun-patches/ghostty-web+0.4.0.patch",
     "@tanstack/virtual-core@3.17.3": "bun-patches/@tanstack+virtual-core+3.17.3.patch",
+    "app-builder-lib@26.15.7": "bun-patches/app-builder-lib@26.15.7.patch",
+    "braces@3.0.3": "bun-patches/braces@3.0.3.patch",
     "@earendil-works/pi-coding-agent@1.0.0": "packages/pi-host/patches/@earendil-works%2Fpi-coding-agent@1.0.0.patch",
   },
   "overrides": {

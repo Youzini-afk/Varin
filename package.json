@@ -43,6 +43,7 @@
     "lint:ui": "bun run --cwd packages/ui lint",
     "lint:electron": "bun run --cwd packages/electron lint",
     "lint:mobile": "bun run --cwd packages/mobile lint",
+    "audit:dependencies": "node scripts/audit-dependencies.mjs",
     "clean": "bun run --filter '*' clean",
     "changelog-card": "node scripts/changelog-card/generate.mjs",
     "branding:generate": "bun run scripts/generate-product-brand-assets.ts && bun run --cwd packages/mobile branding:generate",
@@ -194,6 +195,8 @@
     "ghostty-web@0.4.0": "bun-patches/ghostty-web+0.4.0.patch",
     "@earendil-works/pi-agent-core@1.0.0": "packages/pi-host/patches/@earendil-works%2Fpi-agent-core@1.0.0.patch",
     "@earendil-works/pi-coding-agent@1.0.0": "packages/pi-host/patches/@earendil-works%2Fpi-coding-agent@1.0.0.patch",
-    "app-builder-lib@26.15.7": "bun-patches/app-builder-lib@26.15.7.patch"
+    "app-builder-lib@26.15.7": "bun-patches/app-builder-lib@26.15.7.patch",
+    "braces@3.0.3": "bun-patches/braces@3.0.3.patch",
+    "http-cache-semantics@4.2.0": "bun-patches/http-cache-semantics@4.2.0.patch"
   }
 }

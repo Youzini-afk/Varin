@@ -184,8 +184,20 @@ describe('Varin cloud runtime layout', () => {
       '@earendil-works/pi-coding-agent@1.0.0': 'packages/pi-host/patches/pi-coding-agent.patch',
     };
     writeJson(manifestPath, manifest);
-    expect(() => verifyCloudRuntimeLayout(fixture)).toThrow('Cloud runtime Pi patch is missing');
+    expect(() => verifyCloudRuntimeLayout(fixture)).toThrow('Cloud runtime patch is missing');
     fs.writeFileSync(path.join(fixture, 'packages', 'pi-host', 'patches', 'pi-coding-agent.patch'), 'fixture patch\n');
+    expect(() => verifyCloudRuntimeLayout(fixture)).not.toThrow();
+  });
+
+  it('requires the runtime security patch referenced by the deployable manifest', () => {
+    const fixture = createFixture();
+    const manifestPath = path.join(fixture, 'package.json');
+    const manifest = readJson(manifestPath);
+    manifest.patchedDependencies = { 'braces@3.0.3': 'bun-patches/braces@3.0.3.patch' };
+    writeJson(manifestPath, manifest);
+    expect(() => verifyCloudRuntimeLayout(fixture)).toThrow('Cloud runtime patch is missing');
+    fs.mkdirSync(path.join(fixture, 'bun-patches'));
+    fs.copyFileSync(path.join(repoRoot, 'bun-patches/braces@3.0.3.patch'), path.join(fixture, 'bun-patches/braces@3.0.3.patch'));
     expect(() => verifyCloudRuntimeLayout(fixture)).not.toThrow();
   });
 

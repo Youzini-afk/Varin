@@ -43,7 +43,7 @@ const CLOUD_RUNTIME_PATCHED_PACKAGES = Object.freeze([
 const cloudRuntimePatches = (rootPackage) => {
   const patches = rootPackage.patchedDependencies ?? {};
   const piHost = readJson(path.join(repoRoot, 'packages', 'pi-host', 'package.json'));
-  return Object.fromEntries(CLOUD_RUNTIME_PATCHED_PACKAGES.map((name) => {
+  const piPatches = Object.fromEntries(CLOUD_RUNTIME_PATCHED_PACKAGES.map((name) => {
     const version = piHost.dependencies?.[name];
     const key = `${name}@${version}`;
     const relative = patches[key];
@@ -52,6 +52,9 @@ const cloudRuntimePatches = (rootPackage) => {
     }
     return [key, relative];
   }));
+  const bracePatch = patches['braces@3.0.3'];
+  if (bracePatch !== 'bun-patches/braces@3.0.3.patch') throw new Error('Cloud runtime is missing its pinned braces security patch');
+  return { ...piPatches, 'braces@3.0.3': bracePatch };
 };
 
 export const CLOUD_RUNTIME_FORBIDDEN_UPDATE_IDENTITIES = Object.freeze([
@@ -281,8 +284,10 @@ export const verifyCloudRuntimeLayout = (outputDir, { requireLock = true, requir
     throw new Error(`Unexpected cloud runtime license: ${rootManifest.license || '(missing)'}`);
   }
   for (const relative of Object.values(rootManifest.patchedDependencies ?? {})) {
-    if (typeof relative !== 'string' || !relative.startsWith('packages/pi-host/patches/') || !existsSync(path.join(outputDir, relative))) {
-      throw new Error(`Cloud runtime Pi patch is missing: ${String(relative)}`);
+    if (typeof relative !== 'string' || relative.split(/[\\/]/).includes('..')
+      || (!relative.startsWith('packages/pi-host/patches/') && relative !== 'bun-patches/braces@3.0.3.patch')
+      || !existsSync(path.join(outputDir, relative))) {
+      throw new Error(`Cloud runtime patch is missing: ${String(relative)}`);
     }
   }
   if (

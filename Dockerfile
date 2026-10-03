@@ -47,7 +47,6 @@ ARG TARGETARCH
 # workspace manifest required by the frozen monorepo lockfile.
 COPY package.json bun.lock ./
 COPY bun-patches ./bun-patches
-COPY patches ./patches
 COPY scripts/fix-deprecation.js ./scripts/fix-deprecation.js
 COPY packages/application-client/package.json ./packages/application-client/package.json
 COPY packages/electron/package.json ./packages/electron/package.json
@@ -61,6 +60,7 @@ COPY packages/extension-sdk/package.json ./packages/extension-sdk/package.json
 COPY packages/extension-surface/package.json ./packages/extension-surface/package.json
 COPY packages/mobile/package.json ./packages/mobile/package.json
 COPY packages/pi-host/package.json ./packages/pi-host/package.json
+COPY packages/pi-host/patches ./packages/pi-host/patches
 COPY packages/protocol/package.json ./packages/protocol/package.json
 COPY packages/runtime-broker/package.json ./packages/runtime-broker/package.json
 COPY packages/runtime-client/package.json ./packages/runtime-client/package.json

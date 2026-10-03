@@ -124,6 +124,7 @@
   },
   "patchedDependencies": {
     "@earendil-works/pi-agent-core@1.0.0": "packages/pi-host/patches/@earendil-works%2Fpi-agent-core@1.0.0.patch",
+    "braces@3.0.3": "bun-patches/braces@3.0.3.patch",
     "@earendil-works/pi-coding-agent@1.0.0": "packages/pi-host/patches/@earendil-works%2Fpi-coding-agent@1.0.0.patch",
   },
   "overrides": {

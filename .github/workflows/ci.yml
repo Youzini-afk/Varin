@@ -56,7 +56,7 @@ jobs:
       - run: bun run test:docs
       - run: bun run docs:validate
       - if: needs.changes.outputs.code == 'true'
-        run: bun audit
+        run: bun run audit:dependencies
       - if: needs.changes.outputs.code == 'true'
         uses: taiki-e/install-action@7623a79cdfecb99d681017af368ca353d9f49bb5 # v2
         with:

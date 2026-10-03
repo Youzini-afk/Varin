@@ -40,7 +40,7 @@ jobs:
           node-version: 24
 
       - run: bun install --frozen-lockfile
-      - run: bun audit
+      - run: bun run audit:dependencies
       - run: bun run test:docs
       - run: bun run docs:validate
       - run: bun run type-check
