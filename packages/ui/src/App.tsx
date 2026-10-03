@@ -31,8 +31,6 @@ import {
   desktopWorkspaceIsOperable,
   resolveDesktopWorkspaceView,
 } from '@/lib/desktopWorkspaceView';
-import { shouldApplyPiRuntimeSnapshot } from '@/lib/pi-runtime/snapshot-order';
-import type { PiRuntimeSnapshot } from '@varin/protocol';
 import type { RecoveryVariant } from '@/components/onboarding/DesktopConnectionRecovery';
 import { useDirectoryStore } from '@/stores/useDirectoryStore';
 import { usePiSessionStore } from '@/stores/usePiSessionStore';
@@ -63,6 +61,7 @@ import { invalidateSettingsCache, syncDesktopSettings } from '@/lib/persistence'
 import { useAppFontEffects } from '@/apps/useAppFontEffects';
 import { markStartupTrace, startupTraceEnabled } from '@/lib/startupTrace';
 import { useChatContentWidth } from '@/hooks/useChatContentWidth';
+import { usePiCatalogBootstrap } from '@/hooks/usePiCatalogBootstrap';
 import {
   openPiSessionFromNavigation,
   startPiSessionDraftFromNavigation,
@@ -220,8 +219,6 @@ function App({ apis }: AppProps) {
   const [bootInjectionStatus, setBootInjectionStatus] = React.useState<BootInjectionStatus>(() => {
     return getBootInjectionStatus();
   });
-  const [runtimeSnapshot, setRuntimeSnapshot] = React.useState<PiRuntimeSnapshot | null>(null);
-  const runtimeSnapshotRevisionRef = React.useRef(0);
   const [bootView, setBootView] = React.useState<DesktopBootView | null>(() => {
     const outcome = getInjectedBootOutcome();
     return outcome !== null
@@ -257,67 +254,11 @@ function App({ apis }: AppProps) {
     });
   }, []);
 
-  React.useEffect(() => {
-    const state = usePiSessionStore.getState();
-    if (state.catalogLoaded || state.catalogLoading) return;
-    void state.loadCatalog().catch((catalogError) => {
-      console.warn('[Varin] failed to load the Pi session catalog:', catalogError);
-    });
-  }, [runtimeEndpointEpoch]);
-
-  React.useEffect(() => {
-    runtimeSnapshotRevisionRef.current = 0;
-    setRuntimeSnapshot(null);
-    const piRuntime = apis.piRuntime;
-    if (!piRuntime) {
-      setRuntimeSnapshot({
-        installations: [],
-        revision: 0,
-        status: 'failed',
-      });
-      return;
-    }
-    let cancelled = false;
-    const applySnapshot = (next: PiRuntimeSnapshot) => {
-      if (cancelled) {
-        return;
-      }
-      if (!shouldApplyPiRuntimeSnapshot(runtimeSnapshotRevisionRef.current, next)) {
-        return;
-      }
-      runtimeSnapshotRevisionRef.current = next.revision;
-      setRuntimeSnapshot(next);
-    };
-    const unsubscribe = piRuntime.subscribe(applySnapshot);
-    void piRuntime.getSnapshot().then(applySnapshot).catch((error) => {
-      if (cancelled || runtimeSnapshotRevisionRef.current > 0) {
-        return;
-      }
-      setRuntimeSnapshot({
-        installations: [],
-        issue: error instanceof Error ? error.message : String(error),
-        revision: 0,
-        status: 'failed',
-      });
-    });
-    return () => {
-      cancelled = true;
-      unsubscribe();
-    };
-  }, [apis.piRuntime, runtimeEndpointEpoch]);
-
-  React.useEffect(() => {
-    if (!isDesktopRuntime || runtimeSnapshot?.status !== 'ready') {
-      return;
-    }
-    const state = usePiSessionStore.getState();
-    if (state.catalogLoaded || state.catalogLoading) {
-      return;
-    }
-    void state.loadCatalog().catch((catalogError) => {
-      console.warn('[Varin] failed to load the Pi session catalog after the runtime became ready:', catalogError);
-    });
-  }, [isDesktopRuntime, runtimeSnapshot?.status, runtimeEndpointEpoch]);
+  const runtimeSnapshot = usePiCatalogBootstrap({
+    isDesktopRuntime,
+    piRuntime: apis.piRuntime,
+    runtimeEndpointEpoch,
+  });
 
   useChatContentWidth(chatContentWidth);
 
@@ -576,7 +517,7 @@ function App({ apis }: AppProps) {
 
   useMenuActions({ enabled: !embeddedSessionChat });
 
-  useTraySync({ enabled: !embeddedSessionChat });
+  useTraySync({ enabled: !embeddedSessionChat && piCatalogLoaded });
 
   // Poll for the injected boot outcome until it becomes available (desktop only).
   // The Rust backend sets window.__VARIN_DESKTOP_BOOT_OUTCOME__ once the
@@ -754,7 +695,7 @@ function App({ apis }: AppProps) {
         <FireworksProvider>
           <TooltipProvider delayDuration={300} skipDelayDuration={150}>
             <div className={isDesktopRuntime ? 'h-full text-foreground bg-transparent' : 'h-full text-foreground bg-background'}>
-              <PiAppEffects backgroundWorkEnabled={embeddedBackgroundWorkEnabled} />
+              {piCatalogLoaded && <PiAppEffects backgroundWorkEnabled={embeddedBackgroundWorkEnabled} />}
               <AgentEditorCoordinator />
               <RunDebugCoordinator />
               <WorkbenchProfileBridge />

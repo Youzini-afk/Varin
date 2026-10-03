@@ -54,6 +54,14 @@ The provider picker reads the active Pi runtime catalog; it does not maintain a 
 provider list. A failed catalog load stops the loading indicator and exposes an explicit retry;
 directory changes invalidate the loaded state before accepting a new catalog. Invalid Harness
 settings remain an error in the settings surface rather than escaping its error handler.
+Desktop `App` has one catalog bootstrap effect (`usePiCatalogBootstrap`), admitted only after the
+runtime manager reports readiness from the catalog worker handshake. HTTP availability alone does
+not admit a Pi socket: the gateway rejects connections while its broker is starting. Tray catalog
+refresh and Pi app effects start after the initial catalog loads, so they cannot create an early
+competing request. Real catalog failures after readiness retain the existing manual recovery action;
+endpoint changes re-enter the readiness gate.
+Readiness snapshots belong to their API/endpoint epoch. A new epoch becomes unready during render,
+before effect cleanup; old status requests and notifications cannot admit the new catalog connection.
 Login and model discovery use separate interaction identities even for the same
 provider. The shared authentication UI renders Pi's secret/text/select/manual-code questions and
 events for both API keys and OAuth. Prompt withdrawal clears the corresponding input, and closing
