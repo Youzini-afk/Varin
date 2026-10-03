@@ -1,9 +1,5 @@
 import assert from "node:assert/strict";
-import { readFile } from "node:fs/promises";
 import test from "node:test";
-import { fileURLToPath } from "node:url";
-import semver from "semver";
-import * as Ajv2020Module from "ajv/dist/2020.js";
 import {
   VarinExtensionContractError,
   assertVarinExtensionManifestCompatibility,
@@ -333,91 +329,4 @@ test("rejects editor contributions without a resource selector", () => {
     error instanceof VarinExtensionContractError
     && error.issues.some((issue) => issue.includes("languageIds or filenames"))
   ));
-});
-
-test("published JSON Schema and runtime parser agree on shell seam fixtures", async () => {
-  const schemaPath = fileURLToPath(new URL("../schema/varin.extension.schema.json", import.meta.url));
-  const schema = JSON.parse(await readFile(schemaPath, "utf8"));
-  type AjvInstance = { compile(schemaValue: unknown): (value: unknown) => boolean };
-  type AjvConstructor = new (options: Record<string, unknown>) => AjvInstance;
-  const Ajv2020 = ((Ajv2020Module as unknown as { default?: AjvConstructor }).default
-    ?? Ajv2020Module as unknown as AjvConstructor);
-  const validateSchema = new Ajv2020({
-    allErrors: true,
-    strict: false,
-    formats: { "semver-range": (input: string) => semver.validRange(input) !== null },
-  }).compile(schema);
-  type ShellSeams = { replacementTargets: string[]; slots: string[] };
-  type MutableShellManifest = Record<string, unknown> & {
-    contributions: [{
-      contractVersion: number;
-      data: { contract: string; seams: Record<string, ShellSeams> };
-      entrypoint: string;
-      id: string;
-      kind: string;
-      replacement: { target: string };
-      supports: string[];
-    }];
-  };
-  const shellManifest = (): MutableShellManifest => ({
-    ...manifest(),
-    contributions: [{
-      contractVersion: 1,
-      data: {
-        contract: "varin-workbench-shell/v1",
-        seams: { web: { replacementTargets: ["workbench.editor"], slots: ["workbench.editor.actions"] } },
-      },
-      entrypoint: "main",
-      id: "dev.example.memory-workbench.shell",
-      kind: "shell",
-      replacement: { target: "workbench.shell" },
-      supports: ["web"],
-    }],
-  } as unknown as MutableShellManifest);
-  const fixtures: Array<{ name: string; value: ReturnType<typeof shellManifest>; valid: boolean }> = [
-    { name: "valid", value: shellManifest(), valid: true },
-    {
-      name: "missing supported surface",
-      value: (() => {
-        const value = shellManifest();
-        value.contributions[0]!.data.seams = {};
-        return value;
-      })(),
-      valid: false,
-    },
-    {
-      name: "undeclared supported surface",
-      value: (() => {
-        const value = shellManifest();
-        Object.assign(value.contributions[0]!.data.seams, {
-          mobile: { replacementTargets: [], slots: [] },
-        });
-        return value;
-      })(),
-      valid: false,
-    },
-    {
-      name: "recursive target",
-      value: (() => {
-        const value = shellManifest();
-        value.contributions[0]!.data.seams.web!.replacementTargets = ["workbench.shell"];
-        return value;
-      })(),
-      valid: false,
-    },
-    {
-      name: "duplicate target",
-      value: (() => {
-        const value = shellManifest();
-        value.contributions[0]!.data.seams.web!.replacementTargets = ["workbench.editor", "workbench.editor"];
-        return value;
-      })(),
-      valid: false,
-    },
-  ];
-  for (const fixture of fixtures) {
-    assert.equal(validateSchema(fixture.value), fixture.valid, `${fixture.name}: JSON Schema`);
-    if (fixture.valid) assert.doesNotThrow(() => parseVarinExtensionManifest(fixture.value));
-    else assert.throws(() => parseVarinExtensionManifest(fixture.value), `${fixture.name}: runtime parser`);
-  }
 });

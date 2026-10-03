@@ -1,14 +1,9 @@
-import type { VarinApplicationSurface } from "../src/types.js";
-
 export interface ManifestFixture {
   readonly label: string;
   readonly manifest: unknown;
   readonly schemaValid: boolean;
   readonly runtimeValid: boolean;
-  readonly compatible: boolean;
 }
-
-const surface = (s: VarinApplicationSurface): VarinApplicationSurface => s;
 
 const baseManifest = () => ({
   schemaVersion: 1,
@@ -32,6 +27,18 @@ const baseSurfaceEntrypoint = () => ({
   supports: ["web" as const],
 });
 
+const shellManifest = (seams: Record<string, { replacementTargets: string[]; slots: string[] }>) => ({
+  ...baseManifest(),
+  contributions: [{
+    id: 'dev.example.fixtures.shell',
+    kind: 'shell',
+    contractVersion: 1,
+    supports: ['web'],
+    replacement: { target: 'workbench.shell' },
+    data: { contract: 'varin-workbench-shell/v1', seams },
+  }],
+});
+
 export const manifestFixtures: readonly ManifestFixture[] = [
   {
     label: "valid declarative entrypoint without file",
@@ -48,7 +55,6 @@ export const manifestFixtures: readonly ManifestFixture[] = [
     },
     schemaValid: true,
     runtimeValid: true,
-    compatible: true,
   },
   {
     label: "valid managed entrypoint with file",
@@ -59,7 +65,6 @@ export const manifestFixtures: readonly ManifestFixture[] = [
     },
     schemaValid: true,
     runtimeValid: true,
-    compatible: true,
   },
   {
     label: "valid isolated entrypoint with file and isolation",
@@ -78,7 +83,6 @@ export const manifestFixtures: readonly ManifestFixture[] = [
     },
     schemaValid: true,
     runtimeValid: true,
-    compatible: true,
   },
   {
     label: "valid native entrypoint with file",
@@ -96,7 +100,6 @@ export const manifestFixtures: readonly ManifestFixture[] = [
     },
     schemaValid: true,
     runtimeValid: true,
-    compatible: true,
   },
   {
     label: "valid brokered host entrypoint with file",
@@ -109,7 +112,6 @@ export const manifestFixtures: readonly ManifestFixture[] = [
     },
     schemaValid: true,
     runtimeValid: true,
-    compatible: true,
   },
   {
     label: "managed entrypoint missing file",
@@ -126,7 +128,6 @@ export const manifestFixtures: readonly ManifestFixture[] = [
     },
     schemaValid: false,
     runtimeValid: false,
-    compatible: true,
   },
   {
     label: "isolated entrypoint missing file",
@@ -144,7 +145,6 @@ export const manifestFixtures: readonly ManifestFixture[] = [
     },
     schemaValid: false,
     runtimeValid: false,
-    compatible: true,
   },
   {
     label: "native entrypoint missing file",
@@ -161,7 +161,6 @@ export const manifestFixtures: readonly ManifestFixture[] = [
     },
     schemaValid: false,
     runtimeValid: false,
-    compatible: true,
   },
   {
     label: "host entrypoint missing file",
@@ -174,7 +173,6 @@ export const manifestFixtures: readonly ManifestFixture[] = [
     },
     schemaValid: false,
     runtimeValid: false,
-    compatible: true,
   },
   {
     label: "invalid SemVer version",
@@ -185,7 +183,6 @@ export const manifestFixtures: readonly ManifestFixture[] = [
     },
     schemaValid: false,
     runtimeValid: false,
-    compatible: true,
   },
   {
     label: "invalid engine range",
@@ -196,7 +193,6 @@ export const manifestFixtures: readonly ManifestFixture[] = [
     },
     schemaValid: false, // semver-range format now uses real semver.validRange
     runtimeValid: false,
-    compatible: true,
   },
   {
     label: "contribution ID not qualified by extension ID",
@@ -209,7 +205,6 @@ export const manifestFixtures: readonly ManifestFixture[] = [
     },
     schemaValid: true, // schema cannot express cross-field prefix rules
     runtimeValid: false,
-    compatible: true,
   },
   {
     label: "contribution references unknown entrypoint",
@@ -223,7 +218,6 @@ export const manifestFixtures: readonly ManifestFixture[] = [
     },
     schemaValid: true, // schema cannot express cross-field reference rules
     runtimeValid: false,
-    compatible: true,
   },
   {
     label: "contribution supports surface not in entrypoint supports",
@@ -238,7 +232,6 @@ export const manifestFixtures: readonly ManifestFixture[] = [
     },
     schemaValid: true, // schema cannot express cross-field support rules
     runtimeValid: false,
-    compatible: true,
   },
   {
     label: "contribution requires undeclared capability",
@@ -251,7 +244,6 @@ export const manifestFixtures: readonly ManifestFixture[] = [
     },
     schemaValid: true, // schema cannot express cross-field capability rules
     runtimeValid: false,
-    compatible: true,
   },
   {
     label: "unknown contract version (parsed but not compatible)",
@@ -264,50 +256,30 @@ export const manifestFixtures: readonly ManifestFixture[] = [
     },
     schemaValid: true,
     runtimeValid: true,
-    compatible: false,
   },
   {
     label: "shell with valid seam data",
-    manifest: {
-      ...baseManifest(),
-      contributions: [{
-        id: "dev.example.fixtures.shell",
-        kind: "shell",
-        contractVersion: 1,
-        data: {
-          contract: "varin-workbench-shell/v1",
-          seams: {
-            web: { replacementTargets: ["workbench.editor"], slots: [] },
-          },
-        },
-        supports: ["web"],
-        replacement: { target: "workbench.shell" },
-      }],
-    },
+    manifest: shellManifest({ web: { replacementTargets: ['workbench.editor'], slots: [] } }),
     schemaValid: true,
     runtimeValid: true,
-    compatible: true,
   },
   {
     label: "shell with invalid seam data (missing required surface)",
-    manifest: {
-      ...baseManifest(),
-      contributions: [{
-        id: "dev.example.fixtures.shell",
-        kind: "shell",
-        contractVersion: 1,
-        data: {
-          contract: "varin-workbench-shell/v1",
-          seams: {},
-        },
-        supports: ["web"],
-        replacement: { target: "workbench.shell" },
-      }],
-    },
+    manifest: shellManifest({}),
     schemaValid: false,
     runtimeValid: false,
-    compatible: true,
   },
+  ...[
+    { label: 'shell declares an unsupported surface', seams: {
+      web: { replacementTargets: [], slots: [] }, mobile: { replacementTargets: [], slots: [] },
+    } },
+    { label: 'shell recursively replaces itself', seams: {
+      web: { replacementTargets: ['workbench.shell'], slots: [] },
+    } },
+    { label: 'shell duplicates a replacement target', seams: {
+      web: { replacementTargets: ['workbench.editor', 'workbench.editor'], slots: [] },
+    } },
+  ].map(({ label, seams }) => ({ label, manifest: shellManifest(seams), schemaValid: false, runtimeValid: false })),
   {
     label: "versioned shell data with extra field",
     manifest: {
@@ -329,7 +301,6 @@ export const manifestFixtures: readonly ManifestFixture[] = [
     },
     schemaValid: false, // schema enforces additionalProperties: false on shell data
     runtimeValid: false, // runtime now also rejects unknown fields in shell data
-    compatible: true,
   },
   {
     label: "transition-scene contribution with valid data",
@@ -355,7 +326,6 @@ export const manifestFixtures: readonly ManifestFixture[] = [
     },
     schemaValid: true,
     runtimeValid: true,
-    compatible: true,
   },
   {
     label: "editor contribution with valid languageIds",
@@ -371,7 +341,6 @@ export const manifestFixtures: readonly ManifestFixture[] = [
     },
     schemaValid: true,
     runtimeValid: true,
-    compatible: true,
   },
   {
     label: "editor contribution missing both languageIds and filenames",
@@ -387,7 +356,6 @@ export const manifestFixtures: readonly ManifestFixture[] = [
     },
     schemaValid: false,
     runtimeValid: false,
-    compatible: true,
   },
   {
     label: "view contribution with valid structured when expression",
@@ -400,7 +368,6 @@ export const manifestFixtures: readonly ManifestFixture[] = [
     },
     schemaValid: true,
     runtimeValid: true,
-    compatible: true,
   },
   {
     label: "view contribution with nested when expression (all/any)",
@@ -422,7 +389,6 @@ export const manifestFixtures: readonly ManifestFixture[] = [
     },
     schemaValid: true,
     runtimeValid: true,
-    compatible: true,
   },
   {
     label: "view contribution with invalid when operator",
@@ -435,7 +401,6 @@ export const manifestFixtures: readonly ManifestFixture[] = [
     },
     schemaValid: false,
     runtimeValid: false,
-    compatible: true,
   },
   {
     label: "shell contribution with when (disallowed)",
@@ -458,7 +423,6 @@ export const manifestFixtures: readonly ManifestFixture[] = [
     },
     schemaValid: false, // schema now rejects when on shell contributions
     runtimeValid: false, // runtime rejects when on shell contributions
-    compatible: true,
   },
   {
     label: "transition-scene contribution with when (disallowed)",
@@ -485,6 +449,5 @@ export const manifestFixtures: readonly ManifestFixture[] = [
     },
     schemaValid: false, // schema now rejects when on transition-scene contributions
     runtimeValid: false, // runtime rejects when on transition-scene contributions
-    compatible: true,
   },
 ];

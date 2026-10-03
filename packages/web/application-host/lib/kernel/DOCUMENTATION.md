@@ -186,6 +186,7 @@ fingerprint and fail on drift; the implementation still rescans each page and ma
 
 Run `bun run test:kernel` from the repository root (or invoke its script by absolute path). The dedicated command
 requires a release binary and runs Node-only transport tests separately from Vitest authority/adapter/recovery tests.
+`--vitest-file=<path>` selects only that Vitest file; the unrelated Node transport suite runs in the default full invocation.
 CI uses `node scripts/test-kernel-authority.mjs --build` in the existing Linux/Windows jobs. Generic tests may skip
 native cases in an unbuilt checkout; the dedicated acceptance command cannot silently skip them. At D-282 the
 command passes 25 Node release-process cases and 70 native Vitest cases, including request-window saturation and

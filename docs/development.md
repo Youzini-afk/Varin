@@ -111,6 +111,13 @@ the phase 7 plan and current harness status for subsequent capability routing an
 - UI and Web tests import Vitest directly and run as part of `bun run test:pi`.
   The former Bun aliases, mock wrappers, and handwritten matcher declarations are removed.
   Runtime-dependent mock factories use `vi.doMock` before dynamic imports; static mocks use `vi.mock`.
+  CI runs the browser-simulated UI suite once on Linux; Host/worker/filesystem suites also run on Windows.
+  Electron's Linux desktop checks run on Linux.
+- `test:dist` consumes existing compiled output. Build the owning package first when running locally;
+  production CI builds once before `test:pi:dist`, instead of rebuilding the dependency chain in each smoke.
+- Local desktop packaging uses `bun run electron:build` (or the owning Electron platform command),
+  followed by the relevant unpacked smoke. The retired release-test shell script duplicated an
+  incomplete packaging sequence and its `act` mode selected a CI job that no longer exists.
 - Electron's `type-check` covers both `tsconfig.json` (product) and `tsconfig.tests.json` (tests).
   `bun run type-check:electron` prepares workspace type dependencies and emits current Application Host
   declarations into a type-only generated directory; it does not replace a running/locked `server/` runtime.

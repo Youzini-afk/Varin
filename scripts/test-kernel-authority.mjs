@@ -41,11 +41,13 @@ if (!fs.existsSync(binary)) {
 env.VARIN_TEST_KERNEL_PATH = binary;
 env.VARIN_KERNEL_PATH = binary;
 run(process.execPath, ['scripts/generate-kernel-protocol.mjs', '--check']);
-// These suites use different test runners. Do not count node:test registrations
-// as Vitest suites, or call a missing release executable a successful smoke.
-run(process.execPath, ['--import', 'tsx', '--test',
-  'packages/web/application-host/lib/kernel/kernel-client.test.ts',
-]);
+// A default invocation covers both runners. A targeted Vitest invocation must
+// not silently run the unrelated full node:test transport suite first.
+if (vitestFiles.length === 0) {
+  run(process.execPath, ['--import', 'tsx', '--test',
+    'packages/web/application-host/lib/kernel/kernel-client.test.ts',
+  ]);
+}
 // The kernel Vitest config owns the native-file set (KERNEL_VITEST_FILES in
 // packages/web/vitest.config.ts): every file that starts real kernels, durable
 // stores or OS process trees runs here and nowhere else. These tests start real

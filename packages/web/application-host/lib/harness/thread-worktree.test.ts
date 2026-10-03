@@ -5,18 +5,14 @@ import { PassThrough } from "node:stream";
 import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, unlinkSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
-import { describe, expect, it } from "vitest";
+import { afterAll, describe, expect, it } from "vitest";
+import { createGitTemplate } from '../git/repository.test-helper.js';
 import { createThreadWorktreeRuntime } from "./thread-worktree.js";
 import { canonicalizePathIdentity, normalizePathIdentity } from "../workspace/path-safety.js";
 
 const git = (cwd: string, args: string[]): string => execFileSync("git", args, { cwd, encoding: "utf8" }).trim();
 
-const createRepo = (): { root: string; repo: string; worktrees: string } => {
-  const root = mkdtempSync(join(tmpdir(), "thread-worktree-"));
-  const repo = join(root, "repo");
-  const worktrees = join(root, "worktrees");
-  fs.mkdirSync(repo);
-  fs.mkdirSync(worktrees);
+const repositoryTemplate = createGitTemplate(repo => {
   git(repo, ["init"]);
   git(repo, ["config", "user.name", "Test"]);
   git(repo, ["config", "user.email", "test@example.com"]);
@@ -24,6 +20,16 @@ const createRepo = (): { root: string; repo: string; worktrees: string } => {
   writeFileSync(join(repo, "tracked.txt"), "base\n");
   git(repo, ["add", "."]);
   git(repo, ["commit", "-m", "base"]);
+});
+afterAll(() => repositoryTemplate.dispose());
+
+const createRepo = (): { root: string; repo: string; worktrees: string } => {
+  const root = mkdtempSync(join(tmpdir(), "thread-worktree-"));
+  const repo = join(root, "repo");
+  const worktrees = join(root, "worktrees");
+  fs.mkdirSync(repo);
+  fs.mkdirSync(worktrees);
+  repositoryTemplate.copyTo(repo);
   return { root, repo, worktrees };
 };
 

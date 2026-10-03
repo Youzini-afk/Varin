@@ -8,7 +8,8 @@ import {
   refreshRuntimeUrlAuthToken,
 } from '../src/transport/runtime-auth.js';
 
-it('expires shared auth mints, retries without restart, and rejects late token publication', { timeout: 20_000 }, async () => {
+it('expires shared auth mints, retries without restart, and rejects late token publication', { timeout: 20_000 }, async (t) => {
+  t.mock.timers.enable({ apis: ['setTimeout'] });
   const originalFetch = globalThis.fetch;
   clearRuntimeAuthCredentialProvider();
   const signals: AbortSignal[] = [];
@@ -32,8 +33,11 @@ it('expires shared auth mints, retries without restart, and rejects late token p
     const samePrimary = refreshRuntimeUrlAuthToken('http://remote.test');
     const local = refreshLocalRuntimeUrlAuthToken('http://local.test');
     const sameLocal = refreshLocalRuntimeUrlAuthToken('http://local.test');
-    await Promise.all([primary, samePrimary, local, sameLocal].map((promise) =>
+    const rejected = Promise.all([primary, samePrimary, local, sameLocal].map((promise) =>
       assert.rejects(promise, /authentication timed out/)));
+    await new Promise(resolve => setImmediate(resolve));
+    t.mock.timers.runAll();
+    await rejected;
     assert.equal(calls.length, 2, 'callers share one bounded operation per authority');
     assert.ok(signals.every((signal) => signal.aborted));
 

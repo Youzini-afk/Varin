@@ -255,20 +255,12 @@ test("workspace.search and workspace.language capability helpers forward host ca
   ]);
 });
 
-test("typed document and language clients plus workbench mounts are public SDK contracts", async () => {
+test("typed document and language clients forward calls and providers confine package assets", async () => {
   const {
     createWorkspaceDocumentsClient,
     createWorkspaceLanguageClient,
-    defineEditorMount,
     defineLanguageProvider,
-    defineShellMount,
-    VARIN_WORKBENCH_CONTEXT_KEYS,
-    VARIN_WORKBENCH_REPLACEMENT_TARGETS,
-    VARIN_WORKBENCH_SLOTS,
   } = await import("../src/index.js");
-  assert.equal(VARIN_WORKBENCH_CONTEXT_KEYS.editorIsOpen, "editorIsOpen");
-  assert.equal(VARIN_WORKBENCH_SLOTS.primarySidebarViews, "workbench.primary-sidebar.views");
-  assert.equal(VARIN_WORKBENCH_REPLACEMENT_TARGETS.editor, "workbench.editor");
   const calls: Array<[string, string]> = [];
   const capabilities = {
     call: async (capability: string, method: string) => {
@@ -307,18 +299,6 @@ test("typed document and language clients plus workbench mounts are public SDK c
     extensionId: "dev.example.language",
     packageRoot,
   });
-  const shellMount = defineShellMount((_container, mount) => {
-    assert.equal(typeof mount.workbench.mountReplacement, "function");
-    assert.equal(typeof mount.workbench.mountSlot, "function");
-  });
-  assert.equal(typeof shellMount.mount, "function");
-  assert.equal(typeof defineEditorMount, "function");
-  const editorMount = defineEditorMount((_container, mount) => {
-    const snapshot = mount.props.document.getSnapshot();
-    assert.equal(typeof snapshot.documentVersion, "number");
-    assert.equal(mount.props.resource.workspaceId, "ws");
-  });
-  assert.equal(typeof editorMount.mount, "function");
   assert.deepEqual(calls.slice(0, 2), [
     ["workspace.documents", "write"],
     ["workspace.language", "registerProvider"],

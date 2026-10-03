@@ -1,5 +1,6 @@
-import { describe, it, expect, beforeEach, afterEach } from "vitest";
-import { rmSync, mkdirSync, existsSync } from "node:fs";
+import { describe, it, expect, beforeEach, afterEach, vi } from "vitest";
+import { rmSync, mkdirSync, mkdtempSync } from "node:fs";
+import { setImmediate } from "node:timers/promises";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
 import { openKnowledgeStoreEngine } from "../knowledge/store-engine.js";
@@ -10,16 +11,11 @@ import type { PiSessionEntry } from "@varin/protocol";
 import { estimateMemoryOrganizerInputTokens } from "@varin/protocol";
 import { sourceRevision } from "./memory-sources.js";
 
-// Scratch stores live in the OS temp dir; see harness/recall-tool.test.ts.
-const TEST_DIR = join(tmpdir(), "varin-test-memory-organizer");
-
-const cleanup = () => {
-  if (existsSync(TEST_DIR)) rmSync(TEST_DIR, { recursive: true, force: true });
-};
+let testDir: string;
 
 let counter = 0;
 const openStore = async (scope: KnowledgeScope = "workspace", name = `store-${++counter}`): Promise<KnowledgeStore> => {
-  const dir = join(TEST_DIR, name);
+  const dir = join(testDir, name);
   mkdirSync(dir, { recursive: true });
   return openKnowledgeStoreEngine({ dataDir: dir, hostId: "test-host", workspaceId: name, scope, embedding: null });
 };
@@ -34,7 +30,8 @@ const wait = async (predicate: () => boolean | Promise<boolean>, ms = 10_000): P
   const deadline = Date.now() + ms;
   while (Date.now() < deadline) {
     if (await predicate()) return;
-    await new Promise((resolve) => setTimeout(resolve, 10));
+    await vi.advanceTimersToNextTimerAsync();
+    await setImmediate();
   }
   throw new Error("timed out waiting for organizer");
 };
@@ -52,6 +49,8 @@ describe("memory organizer (BC2)", () => {
   let autoOrganize: { workspace: boolean; user: boolean; bot: boolean };
   let contextWindow: number | null;
   let organizerConfigured: boolean;
+  let organizers: Set<ReturnType<typeof createMemoryOrganizer>>;
+  let releaseInference: Array<() => void>;
 
   const memory = (overrides: Partial<Parameters<typeof createMemoryService>[0]> = {}): MemoryService => createMemoryService({
     storeForScopeId: async (scopeId) => {
@@ -107,7 +106,8 @@ describe("memory organizer (BC2)", () => {
     }) as unknown as MemoryOrganizerBroker["requestForWorkspace"],
   });
 
-  const organizer = (service: MemoryService, overrides: Partial<Parameters<typeof createMemoryOrganizer>[0]> = {}) => createMemoryOrganizer({
+  const organizer = (service: MemoryService, overrides: Partial<Parameters<typeof createMemoryOrganizer>[0]> = {}) => {
+    const instance = createMemoryOrganizer({
     configCwd: "/tmp/varin-config",
     getBroker: () => broker(),
     storeForScopeId: async (scopeId) => {
@@ -127,7 +127,10 @@ describe("memory organizer (BC2)", () => {
     now: () => nowMs,
     onError: (error) => { console.error("[organizer]", error); },
     ...overrides,
-  });
+    });
+    organizers.add(instance);
+    return instance;
+  };
 
   const progressFor = async (scopeId: string, key: string): Promise<OrganizerProgress | null> => {
     const store = stores.get(scopeId);
@@ -135,7 +138,10 @@ describe("memory organizer (BC2)", () => {
   };
 
   beforeEach(async () => {
-    cleanup();
+    vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout'] });
+    testDir = mkdtempSync(join(tmpdir(), 'varin-memory-organizer-'));
+    organizers = new Set();
+    releaseInference = [];
     stores = new Map();
     userStore = await openStore("user", "user-store");
     calls = [];
@@ -151,8 +157,17 @@ describe("memory organizer (BC2)", () => {
   });
 
   afterEach(async () => {
-    await Promise.all([...stores.values(), userStore].map((store) => store.close().catch(() => undefined)));
-    cleanup();
+    try {
+      for (const release of releaseInference) release();
+      await Promise.all([...organizers].map(instance => instance.dispose()));
+    } finally {
+      try {
+        await Promise.all([...new Set([...stores.values(), userStore])].map(store => store.close()));
+      } finally {
+        rmSync(testDir, { recursive: true, force: true });
+        vi.useRealTimers();
+      }
+    }
   });
 
   it("organizes durable session events into effective memory with inference provenance", async () => {
@@ -187,7 +202,7 @@ describe("memory organizer (BC2)", () => {
       expect(result).toBe(organizeText);
       expect(stores.size).toBe(0);
       let finish!: (value: string) => void;
-      organizeText = () => new Promise<string>((resolve) => { finish = resolve; });
+      organizeText = () => new Promise<string>((resolve) => { finish = resolve; releaseInference.push(() => resolve('{"memories":[]}')); });
       const controller = new AbortController();
       const pending = org.extractSelection('ws-1', 'Extract.', 'Selected.', controller.signal);
       const rejected = expect(pending).rejects.toThrow();
@@ -322,7 +337,7 @@ describe("memory organizer (BC2)", () => {
       && ["formed", "reviewed-empty"].includes((await progressFor("ws-2", "session:s1"))?.status ?? ""));
     const callsAfterFirst = calls.filter((c) => c.method === "harness.memoryOrganize").length;
     org.noteScope("ws-2");
-    await new Promise((resolve) => setTimeout(resolve, 2200));
+    await vi.advanceTimersByTimeAsync(2200);
     expect(calls.filter((c) => c.method === "harness.memoryOrganize").length).toBe(callsAfterFirst);
     const next = await ws.putEvent({ kind: "turn", at: 2, sessionId: "s1", text: "A later decision in the same conversation.", source: "user" });
     org.noteScope("ws-2");
@@ -373,7 +388,7 @@ describe("memory organizer (BC2)", () => {
     expect(attempts).toBe(1);
     // Not yet retryable — backoff still active.
     org.noteScope("ws-3");
-    await new Promise((resolve) => setTimeout(resolve, 300));
+    await vi.advanceTimersByTimeAsync(2200);
     expect(attempts).toBe(1);
     // A deliberate user retry bypasses the automatic backoff immediately.
     org.retryScope("ws-3");
@@ -406,7 +421,8 @@ describe("memory organizer (BC2)", () => {
     scopeSessions.set("ws-5", ["s1"]);
     const org = organizer(memory());
     org.noteScope("ws-5");
-    await new Promise((resolve) => setTimeout(resolve, 300));
+    await vi.advanceTimersByTimeAsync(2200);
+    expect(calls.some(call => call.method === 'settings.get')).toBe(true);
     expect(calls.filter((c) => c.method === "harness.memoryOrganize")).toEqual([]);
     expect(await progressFor("ws-5", "session:s1")).toBeNull();
     org.dispose();
@@ -513,7 +529,7 @@ describe("memory organizer (BC2)", () => {
     await store.putEvent({ kind: "turn", at: 1, sessionId: "s1", text: "Important source", source: "user" });
     const org = organizer(memory(), { readEntries: async () => { throw new Error("session read failed"); } });
     org.noteScope("ws");
-    await new Promise((resolve) => setTimeout(resolve, 2200));
+    await wait(async () => (await store.getOrganizerProgress('session:s1'))?.status === 'failed');
     expect(await store.getOrganizerProgress("session:s1")).toMatchObject({
       status: "failed", lastError: "session read failed",
     });
@@ -544,11 +560,12 @@ describe("memory organizer (BC2)", () => {
     const started = new Promise<void>((resolve) => { began = resolve; });
     organizeText = async () => {
       began();
-      await new Promise<void>((resolve) => { finish = resolve; });
+      await new Promise<void>((resolve) => { finish = resolve; releaseInference.push(resolve); });
       return JSON.stringify({ memories: [{ action: "new", scope: "workspace", content: "A paraphrase of the forgotten preference.", source: "u0", quote: "last-material-marker" }] });
     };
     const org = organizer(service);
     org.noteScope("ws");
+    await wait(() => Boolean(finish));
     await started;
     expect(calls.find((call) => call.method === "harness.memoryOrganize")?.params.prompt).toContain("last-material-marker");
     await service.remember(owner, { content: "Old preference.", source: { kind: "user-mark", sessionId: "s1", spans: [{
@@ -665,19 +682,21 @@ describe("memory organizer (BC2)", () => {
     organizeText = async () => {
       if (++requests === 1) {
         began();
-        await new Promise<void>((resolve) => { finish = resolve; });
+        await new Promise<void>((resolve) => { finish = resolve; releaseInference.push(resolve); });
         return JSON.stringify({ memories: [{ action: "new", scope: "workspace", content: "Release v1 shipped.", source: "u0", quote: "Release v1." }] });
       }
       return JSON.stringify({ memories: [] });
     };
-    const org = organizer(memory());
+    const errors: unknown[] = [];
+    const org = organizer(memory(), { onError: error => errors.push(error) });
     org.noteScope("ws-live-report-change");
+    await wait(() => Boolean(finish));
     await started;
     runSources = [{ ...runSources[0]!, reportText: "Release v2 after rollback." }];
     finish();
-    await wait(async () => (await ws.getOrganizerProgress("run:r1"))?.lastError?.includes("source changed") === true);
-    expect(await ws.listKnowledge({ scope: "workspace" })).toEqual([]);
+    await wait(() => errors.some(error => error instanceof Error && error.message.includes('source changed')));
     await org.dispose();
+    expect(await ws.listKnowledge({ scope: "workspace" })).toEqual([]);
   });
 
   it("subdivides an oversized run report into per-part coverage rows", async () => {

@@ -74,6 +74,8 @@ jobs:
       - if: needs.changes.outputs.code == 'true'
         run: bun run test:pi
       - if: needs.changes.outputs.code == 'true'
+        run: bun run --cwd packages/electron test:linux-desktop
+      - if: needs.changes.outputs.code == 'true'
         run: bun run test:cloud
 
   windows-runtime:
@@ -93,11 +95,12 @@ jobs:
       - run: bun run build:type-dependencies
       - name: Build and verify native kernel authority
         run: node scripts/test-kernel-authority.mjs --build
-      - run: bun run test:pi
+      # UI tests use simulated browser/surface inputs and run in source-quality.
+      # Keep filesystem, process, worker and Host suites on both operating systems.
+      - run: bun run --sequential --no-exit-on-error --filter '@varin/*' --filter '!@varin/ui' test
       - run: |
           bun run --cwd packages/electron test:architecture
           bun run --cwd packages/electron test:updater
-          bun run --cwd packages/electron test:linux-desktop
 
   production-build:
     name: Production build

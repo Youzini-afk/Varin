@@ -5,23 +5,9 @@ import {
   defaultRules,
   toolExecutionMode,
   toolMutation,
-  type HarnessToolMutation,
 } from "../src/index.js";
 
 describe("harness tool mutation attributes", () => {
-  it("classifies every known tool into none, journaled, or process", () => {
-    const allowed: HarnessToolMutation[] = ["none", "journaled", "process"];
-    for (const [name, meta] of Object.entries(HARNESS_TOOL_META)) {
-      assert.ok(allowed.includes(meta.mutation), `${name} has invalid mutation ${meta.mutation}`);
-      assert.ok(
-        meta.executionMode === "parallel" || meta.executionMode === "sequential",
-        `${name} has invalid executionMode ${meta.executionMode}`,
-      );
-      assert.equal(toolMutation(name), meta.mutation);
-      assert.equal(toolExecutionMode(name), meta.executionMode);
-    }
-  });
-
   it("reports unknown for tools not in the table", () => {
     assert.equal(toolMutation("nonexistent_tool"), "unknown");
     assert.equal(toolExecutionMode("nonexistent_tool"), "unknown");

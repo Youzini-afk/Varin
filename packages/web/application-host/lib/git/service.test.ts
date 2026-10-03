@@ -2,7 +2,8 @@ import * as childProcess from 'node:child_process';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
-import { afterEach, describe, expect, it, vi } from 'vitest';
+import { afterAll, afterEach, describe, expect, it, vi } from 'vitest';
+import { createGitTemplate } from './repository.test-helper.js';
 import { createProjectIdFromPath } from '../projects/project-id.js';
 
 import {
@@ -58,17 +59,9 @@ const runGit = (cwd: string, args: string[]): string =>
 const runGitMaybe = (cwd: string, args: string[]): string => {
   try {
     return runGit(cwd, args);
-  } catch {
+  } catch (error) {
+    if ((error as { status?: number }).status !== 1) throw error;
     return '';
-  }
-};
-
-const canRunGit = (): boolean => {
-  try {
-    childProcess.execFileSync('git', ['--version'], { stdio: 'ignore' });
-    return true;
-  } catch {
-    return false;
   }
 };
 
@@ -79,12 +72,17 @@ afterEach(() => {
 });
 
 /** Create a temp repo and a small git helper. */
+const repositoryTemplate = createGitTemplate(directory => {
+  runGit(directory, ['init']);
+  runGit(directory, ['config', 'user.name', 'Test User']);
+  runGit(directory, ['config', 'user.email', 'test@example.com']);
+  runGit(directory, ['symbolic-ref', 'HEAD', 'refs/heads/main']);
+});
+afterAll(() => repositoryTemplate.dispose());
+
 async function createTempRepo() {
   const tmpDir = createTempDir();
-  runGit(tmpDir, ['init']);
-  runGit(tmpDir, ['config', 'user.name', 'Test User']);
-  runGit(tmpDir, ['config', 'user.email', 'test@example.com']);
-  runGit(tmpDir, ['symbolic-ref', 'HEAD', 'refs/heads/main']);
+  repositoryTemplate.copyTo(tmpDir);
   const git = {
     add: async (file: string) => runGit(tmpDir, ['add', file]),
     commit: async (message: string) => {
@@ -110,7 +108,6 @@ async function createTempRepo() {
 
 describe('cloneRepository', () => {
   it('clones safely into the requested directory and applies the selected identity', async () => {
-    if (!canRunGit()) return;
     const { tmpDir, git } = await createTempRepo();
     fs.writeFileSync(path.join(tmpDir, 'README.md'), '# Source\n');
     await git.add('README.md');
@@ -173,7 +170,6 @@ describe('resolveBaseRefForLog', () => {
 
 describe('setLocalIdentity', () => {
   it('writes an explicitly selected SSH key through the targeted simple-git opt-in', async () => {
-    if (!canRunGit()) return;
     const { tmpDir } = await createTempRepo();
 
     await setLocalIdentity(tmpDir, {
@@ -260,7 +256,6 @@ describe('applyHunk', () => {
   });
 
   it('stages a single hunk while leaving the rest unstaged', async () => {
-    if (!canRunGit()) return;
     const { tmpDir, git } = await createTempRepo();
     await writeFile(tmpDir, 'file.txt', ORIGINAL_FILE);
     await git.add('file.txt');
@@ -278,7 +273,6 @@ describe('applyHunk', () => {
   });
 
   it('discards a single hunk from the working tree', async () => {
-    if (!canRunGit()) return;
     const { tmpDir, git } = await createTempRepo();
     await writeFile(tmpDir, 'file.txt', ORIGINAL_FILE);
     await git.add('file.txt');
@@ -295,7 +289,6 @@ describe('applyHunk', () => {
   });
 
   it('unstages a single hunk from the index', async () => {
-    if (!canRunGit()) return;
     const { tmpDir, git } = await createTempRepo();
     await writeFile(tmpDir, 'file.txt', ORIGINAL_FILE);
     await git.add('file.txt');
@@ -316,7 +309,6 @@ describe('applyHunk', () => {
   });
 
   it('rejects a patch whose target path does not match the requested file', async () => {
-    if (!canRunGit()) return;
     const { tmpDir, git } = await createTempRepo();
     await writeFile(tmpDir, 'file.txt', ORIGINAL_FILE);
     await git.add('file.txt');
@@ -332,7 +324,6 @@ describe('applyHunk', () => {
   });
 
   it('accepts hunk patches for files with spaces in their path', async () => {
-    if (!canRunGit()) return;
     const { tmpDir, git } = await createTempRepo();
     const filePath = 'file name.txt';
     await writeFile(tmpDir, filePath, ORIGINAL_FILE);
@@ -352,8 +343,7 @@ describe('applyHunk', () => {
 });
 
 describe('symlink diffs', () => {
-  it('represents an untracked directory symlink by its link target', async () => {
-    if (!canRunGit() || process.platform === 'win32') return;
+  it.skipIf(process.platform === 'win32')('represents an untracked directory symlink by its link target', async () => {
     const { tmpDir } = await createTempRepo();
     fs.mkdirSync(path.join(tmpDir, 'source'));
     fs.symlinkSync('source', path.join(tmpDir, 'linked-source'));
@@ -378,7 +368,6 @@ describe('getStatus', () => {
   });
 
   it('handles repositories without upstream tracking', async () => {
-    if (!canRunGit()) return;
 
     const repo = createTempDir();
     runGit(repo, ['init', '-b', 'main']);
@@ -398,7 +387,6 @@ describe('getStatus', () => {
 
 describe('worktree root resolution', () => {
   it('resolves the git toplevel for a repository subdirectory', async () => {
-    if (!canRunGit()) return;
 
     const repo = createTempDir();
     const subdirectory = path.join(repo, 'packages', 'app');
@@ -409,7 +397,6 @@ describe('worktree root resolution', () => {
   });
 
   it('resolves the primary worktree root from a linked worktree', async () => {
-    if (!canRunGit()) return;
 
     const repo = createTempDir();
     const worktree = createTempDir();
@@ -428,7 +415,6 @@ describe('worktree root resolution', () => {
 
 describe('integrateWorktreeCommits writer lifecycle', () => {
   it('acquires the repository writer before creating the temporary worktree', async () => {
-    if (!canRunGit()) return;
 
     const previousVarinDataDir = process.env.VARIN_DATA_DIR;
     const dataHome = createTempDir();
@@ -523,7 +509,6 @@ describe('createWorktree', () => {
   });
 
   it('uses Varin-owned storage and branch names by default', async () => {
-    if (!canRunGit()) return;
 
     const previousVarinDataDir = process.env.VARIN_DATA_DIR;
     const dataHome = createTempDir();
@@ -569,7 +554,6 @@ describe('createWorktree', () => {
   });
 
   it('runs post-checkout after populating the managed worktree', async () => {
-    if (!canRunGit()) return;
     const previousVarinDataDir = process.env.VARIN_DATA_DIR;
     const dataHome = createTempDir();
     process.env.VARIN_DATA_DIR = dataHome;
@@ -609,7 +593,6 @@ describe('createWorktree', () => {
   });
 
   it('reports directory, Git, and setup bootstrap phases', async () => {
-    if (!canRunGit()) return;
 
     const previousVarinDataDir = process.env.VARIN_DATA_DIR;
     const dataHome = createTempDir();
@@ -680,7 +663,6 @@ describe('createWorktree', () => {
   });
 
   it('waits for active bootstrap work before removing a worktree', async () => {
-    if (!canRunGit()) return;
 
     const previousVarinDataDir = process.env.VARIN_DATA_DIR;
     const dataHome = createTempDir();
@@ -737,7 +719,6 @@ describe('createWorktree', () => {
   });
 
   it('hands the create writer to background bootstrap before returning and releases it exactly once', async () => {
-    if (!canRunGit()) return;
 
     const previousVarinDataDir = process.env.VARIN_DATA_DIR;
     const dataHome = createTempDir();
@@ -812,7 +793,6 @@ describe('createWorktree', () => {
   });
 
   it('keeps the create writer through bootstrap on the normal create path', async () => {
-    if (!canRunGit()) return;
 
     const previousVarinDataDir = process.env.VARIN_DATA_DIR;
     const dataHome = createTempDir();
@@ -865,7 +845,6 @@ describe('createWorktree', () => {
   });
 
   it('keeps the create writer active until failed background attach cleanup finishes', async () => {
-    if (!canRunGit()) return;
 
     const previousVarinDataDir = process.env.VARIN_DATA_DIR;
     const dataHome = createTempDir();
@@ -935,7 +914,6 @@ describe('createWorktree', () => {
   });
 
   it('recovers from an unchanged stale index lock while populating a worktree', async () => {
-    if (!canRunGit()) return;
 
     const repo = createTempDir();
     const worktree = createTempDir();
@@ -958,7 +936,6 @@ describe('createWorktree', () => {
   });
 
   it('preflights fast create branch-in-use failures before creating the candidate directory', async () => {
-    if (!canRunGit()) return;
 
     const previousVarinDataDir = process.env.VARIN_DATA_DIR;
     const dataHome = createTempDir();
@@ -1017,7 +994,6 @@ describe('createWorktree', () => {
 
 describe('removeWorktree', () => {
   it('forgets unmanaged orphan worktree entries without deleting files', async () => {
-    if (!canRunGit()) return;
 
     const previousVarinDataDir = process.env.VARIN_DATA_DIR;
     const dataHome = createTempDir();

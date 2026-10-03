@@ -1,7 +1,7 @@
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
 import { createTypescriptLanguageWorkspace } from './typescript-service.js';
 
 describe('typescript language workspace', () => {
@@ -92,6 +92,10 @@ describe('typescript language workspace', () => {
     const callerFile = path.join(srcB, 'caller.ts');
     fs.writeFileSync(defFile, 'export function uniqueTarget() { return 1; }\n');
     fs.writeFileSync(callerFile, 'import { uniqueTarget } from "../a/def";\nexport function driver() { return uniqueTarget(); }\n');
+    const cwd = path.join(dir, 'cwd');
+    fs.mkdirSync(cwd);
+    fs.writeFileSync(path.join(cwd, 'root-member.ts'), 'import { uniqueTarget } from "../src/a/def";\nuniqueTarget();\n');
+    const currentDirectory = vi.spyOn(process, 'cwd').mockReturnValue(cwd);
     const workspace = createTypescriptLanguageWorkspace();
     try {
       const defText = fs.readFileSync(defFile, 'utf8');
@@ -101,8 +105,10 @@ describe('typescript language workspace', () => {
       // caller.ts is under a sibling directory, not under cwd, so it must not
       // be resolved when no root was provided.
       expect(sites.some((site) => site.fileName.replace(/\\/g, '/').endsWith('caller.ts'))).toBe(false);
+      expect(sites.some((site) => site.fileName.replace(/\\/g, '/').endsWith('root-member.ts'))).toBe(true);
     } finally {
       workspace.dispose();
+      currentDirectory.mockRestore();
       fs.rmSync(dir, { recursive: true, force: true });
     }
   });

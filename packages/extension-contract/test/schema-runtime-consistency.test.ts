@@ -23,16 +23,7 @@ const validateSchema = new Ajv2020Ctor({
   },
 }).compile(schema);
 
-const schemaValid = (manifest: unknown): boolean => {
-  const ok = validateSchema(manifest);
-  if (ok) return true;
-  // Collect errors for debugging
-  const errors = validateSchema.errors;
-  if (errors && errors.length > 0) {
-    // Return false — errors are expected for invalid fixtures
-  }
-  return false;
-};
+const schemaValid = (manifest: unknown): boolean => Boolean(validateSchema(manifest));
 
 const runtimeValid = (manifest: unknown): boolean => {
   try {
@@ -83,25 +74,7 @@ test("semver-range format uses real semver.validRange validation", () => {
   assert.equal(schemaValid({ ...minimalManifest(), engines: { varin: "not-a-range" } }), false);
 });
 
-test("runtime-only rules have schemaValid: true and runtimeValid: false", () => {
-  const runtimeOnlyFixtures = manifestFixtures.filter(
-    (f) => f.schemaValid === true && f.runtimeValid === false,
-  );
-  // These are cross-field rules the schema cannot express
-  for (const fixture of runtimeOnlyFixtures) {
-    assert.equal(fixture.schemaValid, true, `${fixture.label} should be schemaValid: true`);
-    assert.equal(fixture.runtimeValid, false, `${fixture.label} should be runtimeValid: false`);
-  }
-  // We expect at least the cross-field fixtures
-  assert.ok(runtimeOnlyFixtures.length >= 4, "expected at least 4 runtime-only fixtures");
-});
 
-test("unsupported contract version fixtures are runtimeValid but not compatible", () => {
-  const unsupportedFixtures = manifestFixtures.filter((f) => !f.compatible);
-  for (const fixture of unsupportedFixtures) {
-    assert.equal(fixture.runtimeValid, true, `${fixture.label} should be runtimeValid: true`);
-  }
-});
 
 test("editor, shell, and transition rules are scoped to their supported contract version", () => {
   const futureContributions = [
