@@ -9,6 +9,23 @@ const deferred = <T,>() => { let resolve!: (value: T) => void; let reject!: (rea
   const promise = new Promise<T>((yes, no) => { resolve = yes; reject = no; }); return { promise, resolve, reject }; };
 
 describe('Harness automatic saving', () => {
+  it('reports invalid settings without rejecting the load and recovers after the document is corrected', async () => {
+    const read = vi.fn()
+      .mockResolvedValueOnce(snapshot({ models: { unknownRole: { providerId: 'one', modelId: 'model' } } }, 'invalid'))
+      .mockResolvedValueOnce(snapshot({ models: { review: { providerId: 'one', modelId: 'model' } } }, 'corrected'));
+    const write = vi.fn();
+    const controller = new HarnessSettingsController({ read, write });
+    await expect(controller.load()).resolves.toBeUndefined();
+    expect(controller.getSnapshot()).toEqual({
+      harness: null, status: 'error', error: 'Invalid model role: unknownRole',
+    });
+    await controller.retry();
+    expect(controller.getSnapshot()).toMatchObject({
+      harness: { models: { review: { providerId: 'one', modelId: 'model' } } }, status: 'idle', error: null,
+    });
+    expect(write).not.toHaveBeenCalled();
+  });
+
   it('keeps rapid edits visible and sends them after the acknowledged revision without overwriting other settings', async () => {
     const first = deferred<PiSettingsSnapshot>();
     const second = deferred<PiSettingsSnapshot>();

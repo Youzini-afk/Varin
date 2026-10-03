@@ -87,7 +87,7 @@ export const usePiProviderStore = create<PiProviderState>((set, get) => ({
     if (!options?.force && inFlight?.cwd === normalizedCwd) return inFlight.promise;
 
     const generation = ++loadGeneration;
-    set({ cwd: normalizedCwd, error: null, isLoading: true });
+    set({ cwd: normalizedCwd, error: null, isLoading: true, loaded: false });
     const promise = catalog(normalizedCwd)
       .then((allProviders) => {
         if (generation === loadGeneration) {

@@ -75,8 +75,10 @@ export const ModelSelector: React.FC<ModelSelectorProps> = ({
     const providersCwd = usePiProviderStore((state) => state.cwd);
     const providerError = usePiProviderStore((state) => state.error);
     const loadProviders = usePiProviderStore((state) => state.load);
-    const isReady = providersLoaded && !providersLoading && providersCwd === (cwd ?? currentDirectory);
-    const isUnavailable = Boolean(providerError) && !providersLoading;
+    const targetDirectory = (cwd ?? currentDirectory)?.trim();
+    const isReady = providersLoaded && !providersLoading && providersCwd === targetDirectory;
+    const isUnavailable = providersCwd === targetDirectory && Boolean(providerError) && !providersLoading;
+    const triggerDisabled = disabled || (!isReady && !isUnavailable);
     const modelsMetadata = React.useMemo(() => new Map<string, ModelMetadata>(), []);
     const isMobile = useUIStore((state) => state.isMobile);
     const hiddenModels = useUIStore((state) => state.hiddenModels);
@@ -92,7 +94,6 @@ export const ModelSelector: React.FC<ModelSelectorProps> = ({
     const [isDropdownOpen, setIsDropdownOpen] = React.useState(false);
     const [searchQuery, setSearchQuery] = React.useState('');
     const [isSelecting, setIsSelecting] = React.useState(false);
-    const targetDirectory = cwd ?? currentDirectory;
     const pickerOpen = open ?? (isActuallyMobile ? isMobilePanelOpen : isDropdownOpen);
 
     const setPickerOpen = React.useCallback((nextOpen: boolean) => {
@@ -106,6 +107,25 @@ export const ModelSelector: React.FC<ModelSelectorProps> = ({
         if (!targetDirectory) return;
         void loadProviders(targetDirectory).catch(() => undefined);
     }, [loadProviders, targetDirectory]);
+
+    const retryProviders = () => {
+        if (!targetDirectory || disabled) return;
+        void loadProviders(targetDirectory, { force: true }).catch(() => undefined);
+    };
+
+    const catalogStatus = !isReady ? (
+        <>
+            <Icon
+                name={isUnavailable ? 'error-warning' : 'loader-4'}
+                className={cn('h-3.5 w-3.5 shrink-0', isUnavailable
+                    ? 'text-[var(--status-error)]'
+                    : 'animate-spin text-muted-foreground')}
+            />
+            <span className="typography-meta whitespace-nowrap text-muted-foreground">
+                {isUnavailable ? `${t('common.unavailable')} · ${t('settings.harness.retry')}` : t('common.loading')}
+            </span>
+        </>
+    ) : null;
 
     const closePicker = React.useCallback(() => {
         setPickerOpen(false);
@@ -204,12 +224,13 @@ export const ModelSelector: React.FC<ModelSelectorProps> = ({
             <>
                 <button
                     type="button"
-                    onClick={isReady && !disabled ? () => setPickerOpen(true) : undefined}
+                    onClick={isUnavailable ? retryProviders : isReady && !disabled ? () => setPickerOpen(true) : undefined}
                     onMouseDown={(event) => event.preventDefault()}
                     onPointerDownCapture={(event) => {
                         if (event.pointerType === 'touch') event.preventDefault();
                     }}
-                    disabled={!isReady || disabled}
+                    disabled={triggerDisabled}
+                    title={isUnavailable ? `${providerError} · ${t('settings.harness.retry')}` : undefined}
                     className={cn(
                         variant === 'composer'
                             ? 'flex h-8 min-w-0 flex-1 items-center justify-between gap-1.5 overflow-hidden px-1 typography-meta text-foreground transition-opacity hover:opacity-70'
@@ -219,12 +240,7 @@ export const ModelSelector: React.FC<ModelSelectorProps> = ({
                     )}
                 >
                     <div className="flex min-w-0 items-center gap-2">
-                        {!isReady ? (
-                            <>
-                                <Icon name="loader-4" className="h-3.5 w-3.5 animate-spin text-muted-foreground" />
-                                <span className="typography-meta text-muted-foreground">{isUnavailable ? t('common.unavailable') : t('common.loading')}</span>
-                            </>
-                        ) : effectiveProviderId ? (
+                        {!isReady ? catalogStatus : effectiveProviderId ? (
                             <ProviderLogo providerId={effectiveProviderId} className="h-3.5 w-3.5 flex-shrink-0" />
                         ) : (
                             <Icon name="pencil-ai" className="h-3 w-3 text-muted-foreground" />
@@ -247,22 +263,18 @@ export const ModelSelector: React.FC<ModelSelectorProps> = ({
     return (
         <DropdownMenu open={isReady && pickerOpen} onOpenChange={isReady && !disabled ? setPickerOpen : undefined}>
             <DropdownMenuTrigger asChild>
-                <button type="button" disabled={!isReady || disabled} className={cn(
+                <button type="button" disabled={triggerDisabled}
+                    onClick={isUnavailable ? retryProviders : undefined}
+                    title={isUnavailable ? `${providerError} · ${t('settings.harness.retry')}` : undefined}
+                    className={cn(
                     variant === 'composer'
                         ? 'flex h-8 min-w-0 w-fit max-w-[220px] items-center gap-1.5 overflow-hidden px-1 typography-meta text-foreground transition-opacity hover:opacity-70'
                         : dropdownTriggerVariants({ size: 'sm' }),
                     variant === 'field' && 'min-w-0 w-fit overflow-hidden',
-                    (!isReady || disabled) && 'opacity-60 cursor-not-allowed',
+                    triggerDisabled && 'opacity-60 cursor-not-allowed',
                     className,
                 )}>
-                    {!isReady ? (
-                        <>
-                            <Icon name="loader-4" className="h-3.5 w-3.5 animate-spin text-muted-foreground flex-shrink-0" />
-                            <span className="typography-ui-label font-normal whitespace-nowrap text-muted-foreground">
-                                {isUnavailable ? t('common.unavailable') : t('common.loading')}
-                            </span>
-                        </>
-                    ) : (
+                    {!isReady ? catalogStatus : (
                         <>
                             {effectiveProviderId ? <ProviderLogo providerId={effectiveProviderId} className="h-3.5 w-3.5 flex-shrink-0" /> : <Icon name="pencil-ai" className="h-3.5 w-3.5 flex-shrink-0 text-muted-foreground" />}
                             <span className="typography-ui-label min-w-0 flex-1 truncate text-left font-normal text-foreground">{triggerLabel}</span>

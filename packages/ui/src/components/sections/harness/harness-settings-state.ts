@@ -50,7 +50,14 @@ export class HarnessSettingsController {
 
   private project(status: HarnessSettingsState['status'], error: string | null = null) {
     const raw = this.pending.reduce(patchHarnessSettings, object(this.confirmed?.global?.harness));
-    this.state = { harness: this.confirmed ? mergeHarnessSettings(raw as HarnessSettingsInput, {}) : null, status, error };
+    let harness: HarnessSettings | null = null;
+    try {
+      if (this.confirmed) harness = mergeHarnessSettings(raw as HarnessSettingsInput, {});
+    } catch (failure) {
+      status = 'error';
+      error = failure instanceof Error ? failure.message : String(failure);
+    }
+    this.state = { harness, status, error };
     this.listeners.forEach((listener) => listener());
   }
 

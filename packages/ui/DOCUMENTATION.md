@@ -42,7 +42,10 @@ Runtime API types and auth/fetch/URL/switch primitives are imported directly fro
 `@varin/application-client`; UI-owned forwarding modules are not part of the boundary.
 
 The provider picker reads the active Pi runtime catalog; it does not maintain a second built-in
-provider list. Login and model discovery use separate interaction identities even for the same
+provider list. A failed catalog load stops the loading indicator and exposes an explicit retry;
+directory changes invalidate the loaded state before accepting a new catalog. Invalid Harness
+settings remain an error in the settings surface rather than escaping its error handler.
+Login and model discovery use separate interaction identities even for the same
 provider. The shared authentication UI renders Pi's secret/text/select/manual-code questions and
 events for both API keys and OAuth. Prompt withdrawal clears the corresponding input, and closing
 or changing the target cancels the native operation. Custom model configuration stays in `models.json`;
