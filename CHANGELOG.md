@@ -5,6 +5,100 @@ private runtime protocol and product surfaces still move together.
 
 ## Unreleased
 
+## 0.9.22 - 2026-10-03
+
+### Release highlights
+
+Varin 0.9.22 adds a dedicated Bot mode, improves multilingual dictation and chat presentation,
+and makes retrieval, indexing, and Agent configuration more practical for everyday work.
+
+#### Bots and execution environments
+
+- Switch between Workbench, IDE, and Varin bot from a compact mode menu. Bot conversations stay
+  separate from the other modes, and their private home directories are excluded from background indexing.
+- Name new Bots and manage pinning, renaming, profiles, memory, sleep/wake, archive/restore, and deletion
+  from their context menus and settings. Deletion stops owned work and cleans Bot-owned sessions and
+  generated resources, with durable pending/error state and retry.
+- Bind work and computer targets independently; add cross-environment open/file writes, authenticated
+  service forwarding, desktop follow-ups, component recipes, and persistent operation evidence.
+- Attach Chromium CDP and LibreOffice UNO to the visible Linux desktop session. Linux VM and remote
+  desktop integration remains experimental; real target-host validation is still pending.
+- Fix Windows computer-driver startup by resolving unpacked script paths and initializing UTF-8 output.
+
+#### Chat and Agent controls
+
+- Refine typography and compact tool disclosures; show actions and usage once per turn, with a wider
+  adjustable conversation column and a composer aligned with the persistent work overview.
+- Show streamed file edits with additions/deletions and live quick-retrieval progress with source evidence.
+  Add chat context menus and memory extraction from selected text.
+- Manage queued messages individually, choose queueing or steering the current task, and apply prepared
+  context summaries immediately at safe request boundaries.
+- Edit built-in, custom, and plugin Agents in a list/detail layout, including names, models, temperature,
+  prompts, and tools. Remove automatic review and merge gates; keep review Agents available on demand.
+- Upgrade the bundled Pi runtime to 1.0.0 and integrate native runtime references and image usage reporting.
+
+#### Projects, retrieval, and providers
+
+- Create named projects with multiple folders. Manage index directories, pause/resume updates, check
+  for changes, and remove generated index resources when deleting a directory.
+- Persist scan hints and reuse unchanged index content after restart. Move native index storage work
+  off the desktop main thread, coalesce source updates, and reuse immutable chat history during streaming.
+- Preserve partial retrieval material at deadlines, progress candidate preparation, and keep delivered
+  source windows faithful to the selected results. Add text fallback coverage for unsupported languages.
+- Page authorized file bytes before decoding or transport; retain draft/version checks and explicit
+  cross-project path authorization. Let cancellation bypass a blocked session request queue.
+- Separate chat, embedding, reranking, and fast-decision provider capabilities, expose custom API formats,
+  and discover/import models for each enabled capability. Repair projectless inference configuration,
+  reranker document formatting, transient embedding retries, and failed model-catalog retry states.
+
+#### Multilingual voice and maintenance
+
+- Add Whisper large-v3 Turbo, Qwen3-ASR 0.6B, and SenseVoice Small; default local dictation to multilingual
+  Whisper Turbo, expose language selection, and unify voice preferences and model lifecycle.
+- Upgrade Wasmtime to 48.0.4 for upstream security fixes. Apply verified dependency repairs for braces
+  and HTTP cache semantics, and stage the Pi patches correctly in Docker builds.
+
+---
+
+### 更新摘要
+
+Varin 0.9.22 加入独立 Bot 模式，改善多语言听写和聊天显示，并完善检索、索引与 Agent 配置。
+
+#### Bot 与执行环境
+
+- 从紧凑的模式菜单切换工作台、IDE 和 Varin bot。Bot 会话与其他模式分开，私有目录不参与后台索引。
+- 新建 Bot 时可填写名称；右键菜单和设置支持置顶、重命名、档案、记忆、休眠/唤醒、归档/恢复和删除。
+  删除会停止所属工作，清理 Bot 会话及生成资源，并保留可恢复的处理状态、错误和重试入口。
+- 分别绑定工作环境与电脑目标，加入跨环境打开/写入文件、认证服务转发、桌面事件跟随、组件配方和持久操作证据。
+- Chromium CDP 与 LibreOffice UNO 接入同一可见 Linux 桌面。Linux VM 和远端桌面仍为实验性能力，尚待真实目标主机验证。
+- 修复 Windows 电脑驱动启动的解包路径与 UTF-8 输出问题。
+
+#### 聊天与 Agent 控制
+
+- 调整文字排版和工具折叠显示，辅助操作与用量按整轮呈现；聊天宽度可调，输入框与聊天列一起为固定工作概览留出空间。
+- 文件编辑实时显示增删变化，快速检索展示进度与来源证据；加入聊天右键菜单和选中文本提取记忆。
+- 逐条管理排队消息，可选择排队或补充当前任务；已准备的上下文摘要可在安全请求边界立即应用。
+- 用列表和详情编辑器管理内置、自定义与插件 Agent，开放名称、模型、温度、提示词和工具配置。
+  移除自动审阅与合并门禁，保留按需派发的审阅 Agent。
+- 内置 Pi 升级至 1.0.0，接入原生运行时引用和图像用量统计。
+
+#### 项目、检索与提供商
+
+- 创建项目时可命名并选择多个文件夹；索引目录支持新增、暂停/恢复、检测更新，以及删除对应的索引资源。
+- 持久保存扫描提示，重启后复用未变化的索引内容；原生索引存储移出桌面主线程，合并文件更新，并复用流式聊天中的不可变历史。
+- 检索到截止时间时保留已取得的材料，推进候选准备，保证选中片段完整呈现；为结构解析未支持的语言加入文本分块覆盖。
+- 文件读取在解码和传输前分页，保留草稿、版本与跨项目路径授权；取消请求可绕过阻塞的会话请求队列。
+- 分开配置聊天、嵌入、重排和快速决策能力，自定义提供商可选择 API 格式，并为启用的能力拉取和导入模型。
+  修复无项目推理配置、重排材料格式、嵌入临时失败重试，以及模型目录失败后的状态与重试入口。
+
+#### 多语言语音与维护
+
+- 新增 Whisper large-v3 Turbo、Qwen3-ASR 0.6B 和 SenseVoice Small；本地听写默认使用多语言 Whisper Turbo，
+  支持语言选择，统一语音偏好与模型生命周期。
+- Wasmtime 升级至 48.0.4，纳入上游安全修复；验证并修复 braces 和 HTTP 缓存语义问题，修正 Docker 构建的 Pi 补丁路径。
+
+[完整提交记录 / Full changelog](https://github.com/Youzini-afk/Varin/compare/v0.9.21...v0.9.22)
+
 ## 0.9.11
 
 Piarium 0.9.11 adopts Electron 44 across the desktop shell, applies upstream security fixes to the
