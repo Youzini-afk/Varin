@@ -1131,6 +1131,7 @@ export interface KernelComputeFile {
   path: string;
   recipeId?: string;
   revision?: string;
+  unchangedRevision?: string;
   lines?: number[];
 }
 

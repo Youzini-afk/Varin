@@ -77,6 +77,16 @@ enumeration and Documents missing observations. Store deletion checks the old
 revision/generation and cancellation inside its write queue; an incomplete or
 unknown enumeration preserves the graph, and recreated paths are recollected.
 
+Startup symbol catalogs enumerate paths and stat metadata without content hashes. The storage
+owner returns compact persisted file states in one call; unchanged metadata plus the current
+extractor skips collection. New/changed files capture bytes in Rust and persist that capture's
+metadata with the symbol generation. Manual checks compare content revisions in the native worker
+before parsing; unchanged revisions refresh metadata under a revision/extractor guard while
+retaining symbols and relations. Unsupported inventory files never enter content verification.
+Native chunk container selection sorts line intervals and walks their prefix coverage rather than
+comparing every symbol with every other symbol. Large sets of sibling functions retain full source
+coverage without quadratic ancestor selection.
+
 ## Slice
 
 Slice units are **containers**: function, method, constructor, class, interface,

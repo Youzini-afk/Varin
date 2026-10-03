@@ -25,9 +25,12 @@ derived store (`../vectors/`); they reuse `harness.embed` but never this MiniLM 
   storage process. `store-engine.ts` holds one native TriviumDB generation per
   scope/space, scoped Top-K (D-189) and `publishToken`; open/recovery, queries,
   mutations, full checkpoints and cache maintenance never execute on Electron main.
+  Source-index queries use native exact Top-K (scoped graph-first or unrestricted exact search).
+  This generation disables automatic QuIVer construction: checkpoints must not build an ANN graph
+  that neither query path consumes. Knowledge-vector and other stores retain their own search policies.
 - Runtime: `runtime.ts` — native directory inventory first returns path and stat metadata without
   reading every file body. New, changed, invalidated and failed paths then enter Documents reads,
-  parsing and embedding. Successful document publications retain their inventory metadata
+  parsing and embedding. Successful document publications retain the metadata from the native byte capture
   with the actual content revision in the same native generation. Unchanged-content verification
   updates that hint only against the matching revision/recipe and publication token. Each completed
   batch retains its hints even when a later batch is interrupted; startup reuses those hints and
@@ -45,6 +48,15 @@ derived store (`../vectors/`); they reuse `harness.embed` but never this MiniLM 
   by quiet watches. The first interval is at least one minute; later quiet intervals use the prior scan's
   elapsed time to target about 1% wall-time duty. Periodic scans stay detached from query latency, while
   watcher reset/recovery still forces content verification.
+  Native content verification compares the published revision before parsing or emitting units; an
+  unchanged file never enters tokenizer packing or vector publication. Catalog state is loaded once
+  per pass rather than requested again per file. One batch prepares on the native background lane
+  while preceding publications use the configured model request concurrency; increasing model slots
+  does not multiply outstanding parsing batches. Watch publications retain capture metadata too.
+  Remote identity uses the actual embedding wire destination and protocol. Chat API changes,
+  implicit/explicit default capability declarations, credential references and equivalent forms of
+  the default embeddings URL do not change its configuration identity. Provider/model, destination,
+  actual vector dimension and configured packing window still distinguish incompatible spaces.
   A virtual Thread uses its pinned WorkingBranch files. A materialized Thread queries its execution
   Documents workspace; background indexing still requires an explicitly selected source folder. Both Documents mutations and successful
   native-tool journal completions notify this runtime. Open indexes mask an observed path before the tool
@@ -56,6 +68,8 @@ derived store (`../vectors/`); they reuse `harness.embed` but never this MiniLM 
   Directory progress bars show published documents; a separate current-pass check counter
   reports inventory processing. Startup shows the existing generation's document count
   without inventing a zero while enumeration is pending.
+  Active work includes the current file and preparation/embedding stage. The current-pass counter is
+  transient; published document revisions and metadata survive interruption and process restart.
   Project entries own their folder collection: `path` is the default execution folder and
   `additionalPaths` contains the other explicitly selected folders. `../index-directories.ts`
   persists directory maintenance state in `index-directories.json`: project folders join by default,

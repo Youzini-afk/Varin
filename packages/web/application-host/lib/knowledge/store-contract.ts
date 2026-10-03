@@ -333,6 +333,14 @@ export interface SymbolGraphLinkInput {
   callee?: string;
 }
 
+export type FileIndexSourceMetadata = { byteLength: string; modifiedTimeNs: string };
+export interface FileIndexState {
+  path: string;
+  documentRevision: string | null;
+  extractor: number | null;
+  linksIncomplete: boolean;
+  sourceMetadata?: FileIndexSourceMetadata;
+}
 export interface SymbolGraphFileRelations {
   path: string;
   documentRevision: string | null;
@@ -564,6 +572,7 @@ export interface KnowledgeStore {
     options?: {
       linksIncomplete?: boolean;
       extractor?: number;
+      sourceMetadata?: FileIndexSourceMetadata;
       /** Compact association calls held until a confirmed connect exists. */
       associationCandidates?: readonly SymbolGraphLinkInput[];
     },
@@ -609,6 +618,9 @@ export interface KnowledgeStore {
   searchSymbols(query: string, k: number, roots?: readonly string[]): Promise<SymbolGraphSearchResult[]>;
   getDefinedSymbols(path: string): Promise<Array<Omit<SymbolGraphSearchResult, "score" | "match">>>;
   getFileRelations(path: string): Promise<SymbolGraphFileRelations | null>;
+  /** Bulk incremental inventory hints, without loading symbols or relations. */
+  listFileIndexStates(): Promise<FileIndexState[]>;
+  recordFileSourceMetadata(path: string, revision: string, extractor: number, metadata: FileIndexSourceMetadata): Promise<void>;
   findLinks(value: string): Promise<SymbolGraphLinkSearchResult[]>;
   /**
    * Resolved reference sites for a symbol name — rows where `value` (the name

@@ -51,6 +51,29 @@ async function fixture() {
 }
 const drain = (client: KernelScopedClient, pinId: string, operation="search", query="needle") => runKernelCompute(client,{workspaceId:"ws",pinId,operation,query,lane:"foreground",includeHidden:true,paths:[""]});
 
+it('compares native content before parsing and retains complete coverage for many sibling functions', async () => {
+  const f = await fixture();
+  const text = Array.from({ length: 3000 }, (_, n) => `export function fn_${n}() { return ${n}; }`).join('\n');
+  await fs.writeFile(path.join(f.workspace, 'large.ts'), text);
+  const provider = createTreeSitterStructureProvider({ compute: f.service, parseBudgetMs: 30000 });
+  const request = { workspaceId: 'ws', root: f.workspace, path: 'large.ts', languageId: 'typescript', lane: 'background' as const };
+  const first = await provider.unitsFile!(request);
+  assert.equal(first.status, 'ready', first.message);
+  assert.equal(first.units.length, 3000);
+  assert.equal(first.units.map(unit => unit.text).join('\n'), text);
+  assert.ok(first.sourceMetadata?.modifiedTimeNs);
+  const unchanged = await provider.unitsFile!({ ...request, unchangedRevision: first.revision });
+  assert.equal(unchanged.unchanged, true);
+  assert.equal(unchanged.units.length, 0);
+  assert.equal(unchanged.revision, first.revision);
+  assert.deepEqual(unchanged.sourceMetadata, first.sourceMetadata);
+  await fs.writeFile(path.join(f.workspace, 'large.ts'), 'export function replacement() {}');
+  const changed = await provider.unitsFile!({ ...request, unchangedRevision: first.revision });
+  assert.notEqual(changed.unchanged, true);
+  assert.notEqual(changed.revision, first.revision);
+  assert.equal(changed.units[0]?.parentName, 'replacement');
+}, 60000);
+
 it("R5 searches pinned bytes, not drifting parent disk, and reads a fixed range", async()=>{
   const f=await fixture();const pin=await f.branch({"src/a.ts":"first\nneedle fixed\nlast","gone.txt":"not relevant"});
   await fs.mkdir(path.join(f.workspace,"src"));await fs.writeFile(path.join(f.workspace,"src/a.ts"),"needle live");await fs.writeFile(path.join(f.workspace,"unborn.txt"),"needle unrelated");

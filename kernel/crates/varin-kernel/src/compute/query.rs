@@ -29,10 +29,12 @@ fn units(shared:&Shared,path:&str,revision:&str,text:&str,analysis:Option<&Value
     let lines=source_lines(text);if text.is_empty(){return Ok(());}
     let symbols=analysis.and_then(|a|a["symbols"].as_array()).cloned().unwrap_or_default();
     let range=|s:&Value|->(usize,usize){(s["range"]["startLine"].as_u64().unwrap_or(1) as usize,s["range"]["endLine"].as_u64().unwrap_or(1) as usize)};
-    let candidates=symbols.iter().filter(|s|container(s["kind"].as_str().unwrap_or_default(),json_language)).collect::<Vec<_>>();
-    let mut top=candidates.iter().copied().filter(|s|{let(start,end)=range(s);!candidates.iter().any(|o|{
-        let(a,b)=range(o);a<=start&&b>=end&&(b-a)>(end-start)
-    })}).collect::<Vec<_>>();top.sort_by_key(|s|range(s));
+    let mut candidates=symbols.iter().filter(|s|container(s["kind"].as_str().unwrap_or_default(),json_language)).collect::<Vec<_>>();
+    candidates.sort_by_key(|s|{let(start,end)=range(s);(start,std::cmp::Reverse(end))});
+    // Sorted intervals make ancestor selection linear after sorting. Comparing
+    // every symbol with every other symbol stalls generated/large source files.
+    let mut top=Vec::new();let mut furthest=0;
+    for symbol in &candidates{shared.check()?;let(_,end)=range(symbol);if end>furthest{top.push(*symbol);furthest=end;}}
     let mut ranges=Vec::<(usize,usize,Option<&Value>)>::new();let mut covered=1usize;
     for symbol in top{
         let(start,end)=range(symbol);if end<start||start>lines.len()||start<covered{continue;}
@@ -52,7 +54,9 @@ fn units(shared:&Shared,path:&str,revision:&str,text:&str,analysis:Option<&Value
             shared.check()?;let mut last=first.saturating_add(max_lines.saturating_sub(1)).min(end);
             if last<end{
                 // Prefer the last complete child boundary inside this batch.
-                if let Some(boundary)=candidates.iter().map(|s|range(s)).filter(|(a,b)|*a>=first&&*b<=last&&*b>first).map(|(_,b)|b).max(){last=boundary;}
+                let from=candidates.partition_point(|s|range(s).0<first);
+                let to=candidates.partition_point(|s|range(s).0<=last);
+                if let Some(boundary)=candidates[from..to].iter().map(|s|range(s)).filter(|(_,b)|*b<=last&&*b>first).map(|(_,b)|b).max(){last=boundary;}
             }
             let body=line_range(&lines,first,last);
             text_batches(shared,"unit",path,revision,&body,&json!({"startLine":first,"endLine":last,"parentName":name,"parentKind":kind,
@@ -95,6 +99,16 @@ pub(crate) fn execute(mut task:Task,shared:&Shared,syntax:&mut SyntaxRuntime)->R
             shared.emit("entry",path,revision,data)?;count+=1;
         }else if let Some(bytes)=document.bytes{
             shared.scanned();found.insert(path.clone());
+            if matches!(params.operation.as_str(),"structure"|"chunks"){
+                if files.get(path).and_then(|f|f.revision.as_deref()).is_some_and(|requested|requested!=revision){
+                    shared.emit("structure",path,revision,json!({"status":"stale","message":"The structure source revision changed"}))?;
+                    structure_failed=true;return Ok(true);
+                }
+                let metadata=document.metadata.map(|m|json!({"byteLength":m.byte_length.to_string(),"modifiedTimeNs":m.modified_time_ns}));
+                let unchanged=files.get(path).and_then(|f|f.unchanged_revision.as_deref())==Some(revision.as_str());
+                shared.emit("document",path,revision,json!({"status":if unchanged{"unchanged"}else{"captured"},"metadata":metadata}))?;
+                if unchanged{return Ok(true);}
+            }
             if params.operation=="bytes"{
                 let start=params.byte_offset.unwrap_or(0) as usize;let length=params.byte_length.unwrap_or(TEXT_BATCH_BYTES as i64) as usize;
                 let end=start.saturating_add(length).min(bytes.len());
@@ -123,8 +137,6 @@ pub(crate) fn execute(mut task:Task,shared:&Shared,syntax:&mut SyntaxRuntime)->R
                     text_batches(shared,"text",path,revision,&body,&json!({"startLine":start,"endLine":end.min(lines.len()),"totalLines":lines.len(),"byteLength":bytes.len()}))?;
                 }else if matches!(params.operation.as_str(),"structure"|"chunks"){
                     let file=files.get(path);
-                    let requested=file.and_then(|f|f.revision.as_deref());
-                    if requested.is_some_and(|requested|requested!=revision){shared.emit("structure",path,revision,json!({"status":"stale","message":"The structure source revision changed"}))?;structure_failed=true;return Ok(true);}
                     let recipe=file.and_then(|f|f.recipe_id.as_ref()).and_then(|id|recipes.get(id));
                     let analysis=match recipe{
                         Some(recipe)=>match syntax.analyze(recipe,text,file.and_then(|f|f.lines.as_deref()).unwrap_or_default(),params.parse_budget_ms.unwrap_or(250) as u64,shared){

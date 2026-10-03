@@ -95,6 +95,41 @@ async function boundEmbed(
 }
 
 describe("BackgroundInferenceRuntime", () => {
+  it('retains the embedding space across restarts, capability declarations, chat changes and equivalent endpoint forms', async () => {
+    const { agentDir, cwd, runtime } = await setupBinding();
+    const manager = new ProviderConfigurationManager({ agentDir });
+    let inference = createBackgroundInferenceRuntime({ agentDir, cwd, modelRuntime: runtime,
+      fetchImpl: async () => jsonResponse({ data: [{ index: 0, embedding: [1, 0] }] }) });
+    const identify = async (batchId: string) => (await inference.embed(await boundEmbed(inference, {
+      purpose: 'document', protocol: 'openai-compatible', providerId: 'embed-provider', modelId: 'embed-1',
+      batchId, items: [{ id: 'one', text: 'stable input' }],
+    }))).space.spaceId;
+    try {
+      const initial = await identify('initial');
+      const configure = async (baseUrl: string, endpoint?: string) => manager.upsert(runtime, cwd, 'user', {
+        id: 'embed-provider', baseUrl: 'https://unrelated-chat.example', api: 'anthropic-messages', models: [],
+        capabilities: { embedding: { protocol: 'openai-compatible', baseUrl,
+          ...(endpoint ? { endpoint } : {}), credentialRef: 'embed-provider', models: [{ id: 'embed-1' }] } },
+      }, false);
+      await configure('https://models.example/v1', '/embeddings');
+      assert.equal(await identify('explicit-capability'), initial);
+      await configure('https://models.example/v1/embeddings');
+      assert.equal(await identify('full-url'), initial);
+      inference.dispose();
+      inference = createBackgroundInferenceRuntime({ agentDir, cwd, modelRuntime: runtime,
+        fetchImpl: async () => jsonResponse({ data: [{ index: 0, embedding: [1, 0] }] }) });
+      assert.equal(await identify('restarted'), initial);
+      await configure('https://models.example/v1', '/encode');
+      const customEndpoint = await identify('custom-endpoint');
+      await configure('https://models.example', '/v1/encode');
+      assert.equal(await identify('equivalent-custom-endpoint'), customEndpoint);
+      await configure('https://models.example/v1/encode');
+      assert.notEqual(await identify('different-wire-endpoint'), customEndpoint);
+      await configure('https://different.example/v1');
+      assert.notEqual(await identify('different-destination'), initial);
+    } finally { inference.dispose(); }
+  });
+
   it("runs independent inference capabilities without registering a chat model and retains owner-scoped credentials", async () => {
     const { agentDir, cwd, runtime } = await setupBinding();
     const manager = new ProviderConfigurationManager({ agentDir });

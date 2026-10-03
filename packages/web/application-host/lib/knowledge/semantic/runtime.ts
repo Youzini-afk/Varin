@@ -25,7 +25,7 @@ import {
   type SemanticOverlayBlock,
 } from "./store.js";
 import { createVectorCache, type SemanticVectorCache } from "./vector-cache.js";
-import type { SemanticSourceMetadata, SemanticSourceMetadataUpdate } from "./store-contract.js";
+import type { SemanticDocumentState, SemanticSourceMetadata, SemanticSourceMetadataUpdate } from "./store-contract.js";
 import { isAbortError, waitWithSignal } from "../../cancellation.js";
 
 const STRUCTURAL_LANGUAGES: ReadonlySet<string> = new Set(Object.keys(TREE_SITTER_LANGUAGE_SPECS));
@@ -57,6 +57,7 @@ export type SemanticScanProgress = Omit<SemanticScanBatchProgress, "publishedDoc
   phase: "enumerating" | "processing" | "ready" | "failed" | "cancelled";
   startedAt: number;
   updatedAt: number;
+  activeFile?: { path: string; phase: "preparing" | "embedding" } | undefined;
   error?: string;
   coverageStats?: {
     visibleFiles: number; candidateFiles: number; structurallySupportedFiles: number;
@@ -279,6 +280,7 @@ export function createSemanticIndexRuntime(options: SemanticIndexRuntimeOptions)
     documentId: string,
     embedder: SemanticEmbedder,
     signal?: AbortSignal,
+    unchangedRevision?: string,
   ) => {
     if (!options.structureSource.unitsFile) throw new Error("Native disk structural unit service is unavailable");
     const units = await options.structureSource.unitsFile({
@@ -288,13 +290,15 @@ export function createSemanticIndexRuntime(options: SemanticIndexRuntimeOptions)
       languageId: languageIdForPath(documentId),
       lane: "background",
       ...(signal ? { signal } : {}),
+      ...(unchangedRevision ? { unchangedRevision } : {}),
     });
     signal?.throwIfAborted();
     if (units.status !== "ready" && units.status !== "empty") {
       throw new Error(units.message ?? "Native disk structural units did not complete");
     }
     if (!units.revision) throw new Error("Native disk structural units returned no source revision");
-    return { revision: units.revision, ...packUnits(documentId, units, embedder) };
+    return { revision: units.revision, sourceMetadata: units.sourceMetadata,
+      ...(units.unchanged ? { chunks: [], unchanged: true } : packUnits(documentId, units, embedder)) };
   };
 
   const prepareDocument = async (
@@ -307,24 +311,28 @@ export function createSemanticIndexRuntime(options: SemanticIndexRuntimeOptions)
     signal?: AbortSignal,
     expectedRevision?: string,
     sourceMetadata?: SemanticSourceMetadata,
-  ): Promise<SemanticDocumentPublication | { kind: "unchanged-current"; revision: string } | { kind: "superseded" } | { kind: "read-failed" }> => {
+    knownPublished?: SemanticDocumentState | null,
+  ): Promise<SemanticDocumentPublication | { kind: "unchanged-current"; revision: string; sourceMetadata?: SemanticSourceMetadata } | { kind: "superseded" } | { kind: "read-failed" }> => {
     if (scope.scopeKind !== "workspace") return { kind: "read-failed" };
     signal?.throwIfAborted();
     if (!isCurrentToken(scope, documentId, token)) return { kind: "superseded" };
-    const published = await store.publishedRevision(documentId);
+    const published = knownPublished === undefined ? await store.publishedRevision(documentId) : knownPublished;
     if (expectedRevision && published?.revision === expectedRevision && published.recipeId === store.recipeId) {
-      return { kind: "unchanged-current", revision: published.revision };
+      return { kind: "unchanged-current", revision: published.revision, ...(sourceMetadata ? { sourceMetadata } : {}) };
     }
     let prepared;
-    try { prepared = await diskChunksFor(scope.scopeId, root, documentId, embedder, signal); }
+    try { prepared = await diskChunksFor(scope.scopeId, root, documentId, embedder, signal,
+      published?.recipeId === store.recipeId ? published.revision : undefined); }
     catch { signal?.throwIfAborted(); return {kind:"read-failed"}; }
     if (!isCurrentToken(scope, documentId, token)) return {kind:"superseded"};
     if (expectedRevision && prepared.revision !== expectedRevision) return { kind: "superseded" };
     if (published?.revision === prepared.revision && published.recipeId === store.recipeId) {
-      return { kind: "unchanged-current", revision: published.revision };
+      return { kind: "unchanged-current", revision: published.revision,
+        ...(prepared.sourceMetadata ? { sourceMetadata: prepared.sourceMetadata } : {}) };
     }
+    const capturedMetadata = prepared.sourceMetadata ?? sourceMetadata;
     return { documentId, revision: prepared.revision, chunks: prepared.chunks, publishToken: token,
-      ...(sourceMetadata ? { sourceMetadata } : {}) };
+      ...(capturedMetadata ? { sourceMetadata: capturedMetadata } : {}) };
   };
 
   const indexDocument = async (scope: SemanticScopeKey, documentId: string, kind: "modified" | "deleted",
@@ -370,6 +378,9 @@ export function createSemanticIndexRuntime(options: SemanticIndexRuntimeOptions)
       indexReadFailures.get(resolvedKey)?.delete(documentId);
       unverifiedPaths.get(resolvedKey)?.delete(documentId);
     } else if ("kind" in publication && publication.kind === "unchanged-current" && isCurrentToken(scope, documentId, token)) {
+      if (publication.sourceMetadata) await store.recordSourceMetadata([{ documentId, revision: publication.revision,
+        sourceMetadata: publication.sourceMetadata, publishToken: token }], signal);
+      if (!isCurrentToken(scope, documentId, token)) return;
       mutationPending.get(scopeIdentity(scope))?.delete(documentId);
       indexReadFailures.get(resolvedKey)?.delete(documentId);
       unverifiedPaths.get(resolvedKey)?.delete(documentId);
@@ -578,34 +589,58 @@ export function createSemanticIndexRuntime(options: SemanticIndexRuntimeOptions)
         let nextOffset = 0;
         let workerFailure: unknown;
         let failed = false;
+        // Model request concurrency belongs to publication. The native parser
+        // has one background worker; keep one batch preparing while preceding
+        // publications use the independently configured embedding slots.
+        let preparationTail = Promise.resolve();
+        const activeFiles = new Map<string, "preparing" | "embedding">();
+        const updateActiveFile = () => {
+          const first = activeFiles.entries().next().value;
+          updateProgress({ activeFile: first ? { path: first[0], phase: first[1] } : undefined });
+        };
         const processBatches = async (): Promise<void> => {
           while (nextOffset < toProcess.length && !failed) {
             const offset = nextOffset;
             nextOffset += CATALOG_SCAN_BATCH;
             signal.throwIfAborted();
             const batch = toProcess.slice(offset, offset + CATALOG_SCAN_BATCH);
-            const prepared = await Promise.all(batch.map((file) => (
-              prepareDocument(
-                scope,
-                scanStore,
-                root,
-                file.relativePath,
-                scanTokenFor(scope, file.relativePath, scanToken),
-                embedder,
-                signal,
-                file.revision,
-                file.metadata,
-              )
-            )));
+            const preparation = preparationTail.then(() => {
+              signal.throwIfAborted();
+              for (const file of batch) activeFiles.set(file.relativePath, "preparing");
+              updateActiveFile();
+              return Promise.all(batch.map(async (file) => {
+                const publication = await prepareDocument(
+                  scope,
+                  scanStore,
+                  root,
+                  file.relativePath,
+                  scanTokenFor(scope, file.relativePath, scanToken),
+                  embedder,
+                  signal,
+                  file.revision,
+                  file.metadata,
+                  publishedByPath.get(file.relativePath) ?? null,
+                );
+                if (signal.aborted) return publication;
+                if ("kind" in publication) activeFiles.delete(file.relativePath);
+                else activeFiles.set(file.relativePath, "embedding");
+                updateActiveFile();
+                return publication;
+              }));
+            });
+            preparationTail = preparation.then(() => undefined, () => undefined);
+            const prepared = await preparation;
             signal.throwIfAborted();
             const accepted = prepared.filter((publication): publication is SemanticDocumentPublication => !("kind" in publication));
             if (accepted.length > 0) await scanStore.publishDocuments(accepted, signal);
+            for (const file of batch) activeFiles.delete(file.relativePath);
+            updateActiveFile();
             const metadataUpdates: SemanticSourceMetadataUpdate[] = prepared.flatMap((publication, index) => {
               const file = batch[index]!;
-              return "kind" in publication && publication.kind === "unchanged-current" && file.metadata
+              return "kind" in publication && publication.kind === "unchanged-current" && publication.sourceMetadata
                 && isCurrentToken(scope, file.relativePath, scanToken)
                 ? [{ documentId: file.relativePath, revision: publication.revision,
-                  sourceMetadata: file.metadata, publishToken: scanToken }] : [];
+                  sourceMetadata: publication.sourceMetadata, publishToken: scanToken }] : [];
             });
             if (metadataUpdates.length > 0) await scanStore.recordSourceMetadata(metadataUpdates, signal);
             for (const [index, publication] of prepared.entries()) {
@@ -660,12 +695,12 @@ export function createSemanticIndexRuntime(options: SemanticIndexRuntimeOptions)
         if (metadataUnverified.size > 0) metadataUnverifiedPaths.set(resolvedKey, metadataUnverified);
         else metadataUnverifiedPaths.delete(resolvedKey);
         await store.markReady(scanComplete && unverified.size === 0 && metadataUnverified.size === 0);
-        updateProgress({ phase: "ready", processedFiles: catalog.length, publishedDocuments: store.checkpoint()?.publishedDocuments ?? 0 });
+        updateProgress({ phase: "ready", activeFile: undefined, processedFiles: catalog.length, publishedDocuments: store.checkpoint()?.publishedDocuments ?? 0 });
         deferredDimensionScans.get(embedder)?.delete(scopeScanKey);
       } catch (error) {
-        updateProgress(signal.aborted && isAbortError(error)
+        updateProgress({ activeFile: undefined, ...(signal.aborted && isAbortError(error)
           ? { phase: "cancelled" }
-          : { phase: "failed", error: error instanceof Error ? error.message : String(error) });
+          : { phase: "failed", error: error instanceof Error ? error.message : String(error) }) });
         if (!disposed && !isAbortError(error)) {
           await store?.markReady(false);
           try { options.onError?.(error); } catch { /* observational */ }

@@ -1,4 +1,6 @@
 export const settingsDict = {
+  "index.directories.preparingFile": "Preparando · {path}",
+  "index.directories.embeddingFile": "Generando vectores · {path}",
   "settings.bots.delete": "Eliminar Bot",
   "settings.bots.deleting": "Eliminando Bot…",
   "settings.bots.deleteFailed": "No se pudo eliminar el Bot",

@@ -2,6 +2,8 @@ import { settingsDict as englishSettingsDict } from './en.settings';
 
 export const settingsDict = {
   ...englishSettingsDict,
+  "index.directories.preparingFile": "ファイルを準備中 · {path}",
+  "index.directories.embeddingFile": "埋め込みを生成中 · {path}",
   "settings.bots.delete": "Bot を削除",
   "settings.bots.deleting": "Bot を削除中…",
   "settings.bots.deleteFailed": "Bot の削除に失敗しました",

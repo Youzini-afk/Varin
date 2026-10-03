@@ -22,15 +22,18 @@ fn revision_from_object_hash(hash:&str)->Result<String>{
     if bytes.len()!=32{return Err("Invalid immutable object identity".into());}
     Ok(format!("d1_{}",URL_SAFE_NO_PAD.encode(bytes)))
 }
-fn read_bytes(mut file:File,expected:Option<&str>,shared:&Shared)->Result<Vec<u8>>{
+fn read_capture(mut file:File,expected:Option<&str>,shared:&Shared)->Result<(Vec<u8>,SourceMetadata)>{
     let before=file.metadata().map_err(|e|e.to_string())?;
     let mut result=Vec::new();let mut buffer=[0u8;65536];let mut digest=Sha256::new();
     loop {shared.check()?;let n=file.read(&mut buffer).map_err(|e|e.to_string())?;if n==0{break;}digest.update(&buffer[..n]);result.extend_from_slice(&buffer[..n]);}
     let after=file.metadata().map_err(|e|e.to_string())?;
     if before.len()!=after.len()||before.modified().ok()!=after.modified().ok()||after.len()!=result.len() as u64{return Err("File changed during native capture; retry the source".into());}
     if let Some(expected)=expected{if format!("sha256-{}",hex::encode(digest.finalize()))!=expected{return Err("Immutable content object hash mismatch".into());}}
-    Ok(result)
+    let metadata=SourceMetadata{byte_length:after.len(),modified_time_ns:after.modified().ok()
+        .and_then(|time|time.duration_since(std::time::UNIX_EPOCH).ok()).map(|time|time.as_nanos().to_string())};
+    Ok((result,metadata))
 }
+fn read_bytes(file:File,expected:Option<&str>,shared:&Shared)->Result<Vec<u8>>{read_capture(file,expected,shared).map(|(bytes,_)|bytes)}
 struct TreeReader {conn:Connection}
 impl TreeReader {
     fn open(path:&Path)->Result<Self>{Ok(Self{conn:Connection::open_with_flags(path,OpenFlags::SQLITE_OPEN_READ_ONLY|OpenFlags::SQLITE_OPEN_NO_MUTEX).map_err(|e|e.to_string())?})}
@@ -212,7 +215,7 @@ pub(crate) fn visit(task:&mut Task,shared:&Shared,mut callback:impl FnMut(Docume
                 if shadowed.iter().any(|p|within(&path,p))||!eligible(&path,kind.is_dir()){continue;}
                 if task.params.immediate.unwrap_or(false)&&!roots.iter().any(|r|path==*r||path.rsplit_once('/').map(|(p,_)|p==r).unwrap_or(r.is_empty())){continue;}
                 let mut bytes=None;
-                let metadata=if task.params.operation=="list"&&kind.is_file(){
+                let mut metadata=if task.params.operation=="list"&&kind.is_file(){
                     match fs::symlink_metadata(entry.path()){
                         Ok(metadata) if metadata.is_file()=>Some(SourceMetadata{
                             byte_length:metadata.len(),
@@ -227,9 +230,9 @@ pub(crate) fn visit(task:&mut Task,shared:&Shared,mut callback:impl FnMut(Docume
                 let state=if kind.is_dir(){PathState::Directory{mode:None}}else if kind.is_symlink(){PathState::Symlink{symlink_target:fs::read_link(entry.path()).map_err(|e|e.to_string())?.to_string_lossy().into(),mode:None}}
                 else if kind.is_file(){
                     if content {
-                        let result: Result<Vec<u8>>=(||{let canonical=safe_disk_path(&root,entry.path(),&scopes)?;let b=read_bytes(File::open(&canonical).map_err(|e|e.to_string())?,None,shared)?;
+                        let result: Result<(Vec<u8>,SourceMetadata)>=(||{let canonical=safe_disk_path(&root,entry.path(),&scopes)?;let b=read_capture(File::open(&canonical).map_err(|e|e.to_string())?,None,shared)?;
                             if fs::canonicalize(entry.path()).map_err(|e|e.to_string())?!=canonical{return Err("File identity changed during native capture".into());}Ok(b)})();
-                        match result{Ok(b)=>bytes=Some(b),Err(e)=>{shared.check()?;partial=true;shared.emit("error",&path,"",serde_json::json!({"message":e}))?;continue;}}
+                        match result{Ok((b,m))=>{bytes=Some(b);metadata=Some(m);},Err(e)=>{shared.check()?;partial=true;shared.emit("error",&path,"",serde_json::json!({"message":e}))?;continue;}}
                     }
                     PathState::RegularFile{object_hash:bytes.as_deref().map(|b|format!("sha256-{}",hex::encode(Sha256::digest(b)))).unwrap_or_default(),byte_length:bytes.as_ref().map(|b|b.len() as u64).or_else(||metadata.as_ref().map(|value|value.byte_length)).unwrap_or(0),mode:0o644}
                 }else{PathState::Unsupported};

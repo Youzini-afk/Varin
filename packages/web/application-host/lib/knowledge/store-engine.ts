@@ -1454,6 +1454,7 @@ export async function openKnowledgeStoreEngine(deps: KnowledgeStoreEngineOptions
               : {}),
             ...(previous["hasAssociationCandidates"] === true ? { hasAssociationCandidates: true } : {}),
             ...(Number.isSafeInteger(previous["extractor"]) ? { extractor: previous["extractor"] } : {}),
+            ...(previous["sourceMetadata"] ? { sourceMetadata: previous["sourceMetadata"] } : {}),
           };
           const fileId = existing[0]?.id ?? db.insert(placeholderVec, payload);
           const operations: TransactionOperation[] = [
@@ -1570,6 +1571,7 @@ export async function openKnowledgeStoreEngine(deps: KnowledgeStoreEngineOptions
               : { hasAssociationCandidates: false }),
             ...(options.linksIncomplete ? { linksIncomplete: true } : {}),
             ...(Number.isSafeInteger(options.extractor) ? { extractor: options.extractor } : {}),
+            ...(options.sourceMetadata ? { sourceMetadata: options.sourceMetadata } : {}),
           };
           const previousTargets = new Set([
             ...previousSymbols.map(({ id }) => id),
@@ -2118,6 +2120,26 @@ export async function openKnowledgeStoreEngine(deps: KnowledgeStoreEngineOptions
               : [];
           })
           .toSorted((left, right) => left.range.startLine - right.range.startLine || left.range.startCharacter - right.range.startCharacter || left.name.localeCompare(right.name));
+      },
+
+      async listFileIndexStates() {
+        return lookup({ type: "file", active: true }).map(({ payload }) => ({
+          path: String(payload["path"]),
+          documentRevision: typeof payload["documentRevision"] === "string" ? payload["documentRevision"] : null,
+          extractor: Number.isSafeInteger(payload["extractor"]) ? payload["extractor"] as number : null,
+          linksIncomplete: payload["linksIncomplete"] === true,
+          ...(payload["sourceMetadata"] ? { sourceMetadata: payload["sourceMetadata"] as { byteLength: string; modifiedTimeNs: string } } : {}),
+        }));
+      },
+
+      async recordFileSourceMetadata(path, revision, extractor, metadata) {
+        await enqueueWrite(() => {
+          const file = fileNodes(assertGraphText(path, "File path"))[0];
+          if (!file || file.payload["documentRevision"] !== revision || file.payload["extractor"] !== extractor) return;
+          if (JSON.stringify(file.payload["sourceMetadata"]) === JSON.stringify(metadata)) return;
+          db.updatePayload(file.id, { ...file.payload, sourceMetadata: metadata });
+          scheduleGraphFlush();
+        });
       },
 
       async getFileRelations(path) {

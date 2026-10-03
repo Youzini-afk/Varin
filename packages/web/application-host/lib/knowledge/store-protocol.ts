@@ -19,6 +19,7 @@ export const STORE_METHODS: Record<StoreMethod, true> = {
   removeFileSymbols: true, recordResolvedRelations: true,
   replaceResolvedRelationsForAnchor: true, searchSymbols: true,
   getDefinedSymbols: true, getFileRelations: true, findLinks: true,
+  listFileIndexStates: true, recordFileSourceMetadata: true,
   findReferences: true, findCallers: true, findCalls: true, catalogStats: true,
   findImporters: true, connectionLiterals: true, deleteSession: true,
   runRetention: true, compact: true, close: true,

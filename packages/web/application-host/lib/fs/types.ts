@@ -65,6 +65,8 @@ export interface FileSearchItem {
   relativePath: string;
   /** Native content/state identity observed by the same directory enumeration. */
   revision?: string;
+  /** Native disk metadata; an incremental hint, not a content revision. */
+  metadata?: { byteLength: string; modifiedTimeNs: string };
 }
 
 export type FileSearchEnumerationStatus = "complete" | "incomplete" | "failed" | "cancelled";

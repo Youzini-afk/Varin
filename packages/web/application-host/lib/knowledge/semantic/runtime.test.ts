@@ -9,6 +9,7 @@ import { createHashEmbedder } from "./embedder.js";
 import { workspaceScope, remoteEmbeddingSpaceId } from "./identity.js";
 import { createSemanticIndexRuntime } from "./runtime.js";
 import { createRemoteEmbedder } from "./remote-embedder.js";
+import { createEmbedScheduler } from './embed-scheduler.js';
 import { createProjectIndexScope } from '../index-scope.js';
 
 const disposes: Array<() => Promise<void>> = [];
@@ -25,8 +26,90 @@ const gate = () => {
   const promise = new Promise<void>((done) => { resolve = done; });
   return { promise, resolve };
 };
+const metadataFor = (file: string) => {
+  const stat = statSync(file, { bigint: true });
+  return { byteLength: String(stat.size), modifiedTimeNs: String(stat.mtimeNs) };
+};
 
 describe("semantic index runtime", () => {
+  it('pipelines model requests without multiplying outstanding native file preparation', async () => {
+    const documents = await createDocumentAuthorityHarness();
+    disposes.push(() => documents.cleanup());
+    const files = Array.from({ length: 24 }, (_, n) => `pipeline-${n}.ts`);
+    for (const [n, file] of files.entries()) writeFileSync(join(documents.workspaceRoot, file), `export function fn_${n}() { return ${n}; }\n`);
+    const readsEntered = gate(), allowReads = gate(), embedsEntered = gate(), allowEmbeds = gate();
+    const native = parsingSource();
+    const base = createHashEmbedder();
+    let preparing = 0, maxPreparing = 0, embedding = 0;
+    const runtime = createSemanticIndexRuntime({ dataDir: documents.dataDir, hostId: 'separate-index-pipeline', documents: documents.authority,
+      scheduler: createEmbedScheduler({ concurrency: 3 }),
+      searchFilesystemFiles: async () => files.map(file => ({ name: file, relativePath: file, path: join(documents.workspaceRoot, file) })),
+      structureSource: { ...native, unitsFile: async request => {
+        preparing++; maxPreparing = Math.max(maxPreparing, preparing);
+        if (preparing === 8) readsEntered.resolve();
+        try { await allowReads.promise; return await native.unitsFile!(request); }
+        finally { preparing--; }
+      } },
+      embedder: { ...base, embed: async (texts, request) => {
+        if (++embedding === 3) embedsEntered.resolve();
+        try { await allowEmbeds.promise; return await base.embed(texts, request); }
+        finally { embedding--; }
+      } },
+    });
+    disposes.push(() => runtime.dispose());
+    const scope = workspaceScope(documents.identity.workspaceId);
+    const scan = runtime.scanScope(scope);
+    try {
+      await readsEntered.promise;
+      await new Promise(resolve => setImmediate(resolve));
+      expect(preparing).toBe(8);
+      expect(runtime.scanProgress(scope)?.activeFile?.phase).toBe('preparing');
+      allowReads.resolve();
+      await embedsEntered.promise;
+      expect(maxPreparing).toBe(8);
+      expect(embedding).toBe(3);
+      expect(runtime.scanProgress(scope)?.activeFile?.phase).toBe('embedding');
+    } finally { allowReads.resolve(); allowEmbeds.resolve(); await scan; }
+    expect(runtime.statusFor(scope).publishedDocuments).toBe(24);
+    expect(runtime.scanProgress(scope)?.activeFile).toBeUndefined();
+  });
+
+  it('verifies unchanged bytes without packing or embedding and persists metadata after a watch edit', async () => {
+    const documents = await createDocumentAuthorityHarness();
+    disposes.push(() => documents.cleanup());
+    const file = join(documents.workspaceRoot, 'verified.ts');
+    writeFileSync(file, 'export const marker = "initial";\n');
+    const native = parsingSource();
+    const base = createHashEmbedder();
+    const countTokens = vi.fn(base.countTokens);
+    const embed = vi.fn(base.embed);
+    const unitsFile = vi.fn(native.unitsFile!);
+    const makeRuntime = () => createSemanticIndexRuntime({ dataDir: documents.dataDir, hostId: 'verified-fast-path',
+      documents: documents.authority, structureSource: { ...native, unitsFile }, embedder: { ...base, countTokens, embed },
+      searchFilesystemFiles: async () => [{ name: 'verified.ts', path: file, relativePath: 'verified.ts', metadata: metadataFor(file) }],
+    });
+    let runtime = makeRuntime();
+    disposes.push(() => runtime.dispose());
+    const scope = workspaceScope(documents.identity.workspaceId);
+    await runtime.scanScope(scope);
+    countTokens.mockClear(); embed.mockClear();
+    await runtime.scanScope(scope, { forceContentVerification: true });
+    expect(unitsFile.mock.calls.at(-1)?.[0].unchangedRevision).toBeTruthy();
+    expect(countTokens).not.toHaveBeenCalled();
+    expect(embed).not.toHaveBeenCalled();
+    expect(runtime.statusFor(scope).coverage).toBe('complete');
+    writeFileSync(file, 'export const marker = "changed by watch";\n');
+    runtime.observeDocumentMutation({ workspaceId: scope.scopeId, resourceId: 'verified.ts', kind: 'modified' });
+    await runtime.drain();
+    await runtime.dispose();
+    unitsFile.mockClear(); embed.mockClear();
+    runtime = makeRuntime();
+    await runtime.scanScope(scope);
+    expect(unitsFile).not.toHaveBeenCalled();
+    expect(embed).not.toHaveBeenCalled();
+    expect(runtime.statusFor(scope).publishedDocuments).toBe(1);
+  });
+
   it('resumes an interrupted build after restart without reading or embedding completed files again', async () => {
     const documents = await createDocumentAuthorityHarness();
     disposes.push(() => documents.cleanup());
@@ -38,8 +121,8 @@ describe("semantic index runtime", () => {
     const embed = vi.fn((texts: readonly string[], request?: Parameters<typeof base.embed>[1]) => base.embed(texts, request));
     const makeRuntime = () => createSemanticIndexRuntime({ dataDir: documents.dataDir, hostId: 'resume-partial',
       documents: documents.authority, embedder: { ...base, embed },
-      searchFilesystemFiles: async () => files.map((file, n) => ({ name: file, path: join(documents.workspaceRoot, file),
-        relativePath: file, metadata: { byteLength: String(statSync(join(documents.workspaceRoot, file)).size), modifiedTimeNs: `stable-${n}` } })),
+      searchFilesystemFiles: async () => files.map(file => ({ name: file, path: join(documents.workspaceRoot, file),
+        relativePath: file, metadata: metadataFor(join(documents.workspaceRoot, file)) })),
       structureSource: { ...native, unitsFile: request => { reads.push(request.path); return native.unitsFile!(request); } },
     });
     let runtime = makeRuntime();
@@ -343,12 +426,13 @@ describe("semantic index runtime", () => {
     const filePath = join(documents.workspaceRoot, "changed.ts");
     writeFileSync(filePath, 'export function changed() { return "old indexed needle"; }\n', "utf8");
     const originalStat = statSync(filePath);
+    const originalMetadata = metadataFor(filePath);
     const makeRuntime = () => createSemanticIndexRuntime({
       dataDir: documents.dataDir,
       hostId: "semantic-hit-version",
       documents: documents.authority,
       structureSource: parsingSource(),
-      searchFilesystemFiles: async () => [{ name: "changed.ts", path: filePath, relativePath: "changed.ts", metadata: { byteLength: String(originalStat.size), modifiedTimeNs: "same-stat" } }],
+      searchFilesystemFiles: async () => [{ name: "changed.ts", path: filePath, relativePath: "changed.ts", metadata: originalMetadata }],
       embedder: createHashEmbedder(),
     });
     let runtime = makeRuntime();
@@ -377,7 +461,7 @@ describe("semantic index runtime", () => {
     const oldPath = join(documents.workspaceRoot, "old.ts");
     const newPath = join(documents.workspaceRoot, "new.ts");
     writeFileSync(oldPath, 'export const oldValue = "existing marker";\n', "utf8");
-    const metadata = { byteLength: String(Buffer.byteLength('export const oldValue = "existing marker";\n')), modifiedTimeNs: "stable" };
+    const metadata = metadataFor(oldPath);
     let inventory = [{ name: "old.ts", path: oldPath, relativePath: "old.ts", metadata }];
     const native = parsingSource();
     const processed: string[] = [];

@@ -1082,6 +1082,7 @@ pub(crate) struct KernelComputeFile {
     pub(crate) path: String,
     pub(crate) recipe_id: Option<String>,
     pub(crate) revision: Option<String>,
+    pub(crate) unchanged_revision: Option<String>,
     pub(crate) lines: Option<Vec<i64>>,
 }
 

@@ -25,6 +25,7 @@ import type {
   StructureSymbol,
   StructureUnit,
   StructureUnitsResult,
+  StructureSourceMetadata,
 } from "./types.js";
 
 export interface TreeSitterStructureProviderOptions {
@@ -107,6 +108,20 @@ const observedRevision = (
   }
   if (revisions.size > 1) throw new Error("Native disk structure mixed source revisions");
   return revisions.values().next().value ?? "";
+};
+
+const captureOf = (path: string, result: KernelComputeResult): { unchanged?: boolean; sourceMetadata?: StructureSourceMetadata } => {
+  const frame = result.records.find(record => record.path === path && record.kind === "document"
+    && ["captured", "unchanged"].includes(String(recordOf(record.data).status)));
+  if (!frame) return {};
+  if (result.message || !["ready", "empty"].includes(result.status)) return {};
+  const data = recordOf(frame.data);
+  const metadata = data.metadata as Partial<StructureSourceMetadata> | null;
+  return {
+    ...(data.status === "unchanged" ? { unchanged: true } : {}),
+    ...(typeof metadata?.byteLength === "string" && typeof metadata.modifiedTimeNs === "string"
+      ? { sourceMetadata: { byteLength: metadata.byteLength, modifiedTimeNs: metadata.modifiedTimeNs } } : {}),
+  };
 };
 
 /** Only shapes and small grammar recipes live here. Text/AST parsing and the
@@ -214,7 +229,8 @@ export function createTreeSitterStructureProvider(options: TreeSitterStructurePr
         respectGitignore: false,
         paths: [request.path],
         parseBudgetMs: options.parseBudgetMs ?? STRUCTURE_PARSE_BUDGET_MS,
-        files: [{ path: request.path, lines: request.lines ?? [], ...(recipeId ? { recipeId } : {}) }],
+        files: [{ path: request.path, lines: request.lines ?? [], ...(recipeId ? { recipeId } : {}),
+          ...(request.unchangedRevision ? { unchangedRevision: request.unchangedRevision } : {}) }],
       },
       { signal: request.signal },
     );
@@ -246,6 +262,8 @@ export function createTreeSitterStructureProvider(options: TreeSitterStructurePr
     recipeId?: string,
   ): StructureAnalysis => {
     const revision = observedRevision(path, expectedRevision, result);
+    const capture = captureOf(path, result);
+    if (capture.unchanged) return { ...empty(revision, "empty", ""), ...capture };
     const parts: Record<"symbols" | "hits" | "calls" | "imports", unknown[]> = {
       symbols: [],
       hits: [],
@@ -314,6 +332,7 @@ export function createTreeSitterStructureProvider(options: TreeSitterStructurePr
       literalCalls: { ...common, status: summary.callsStatus === "unsupported" ? "unsupported" : "ready", calls },
       imports: { ...common, status: summary.importsStatus === "unsupported" ? "unsupported" : "ready", imports },
       lineLengths,
+      ...capture,
       ...(recipeId ? { recipeId } : {}),
     };
   };
@@ -324,6 +343,8 @@ export function createTreeSitterStructureProvider(options: TreeSitterStructurePr
     run: { result: KernelComputeResult; recipeId?: string },
   ): StructureUnitsResult => {
     const revision = observedRevision(path, expectedRevision, run.result);
+    const capture = captureOf(path, run.result);
+    if (capture.unchanged) return { status: "empty", revision, units: [], ...capture };
     const units: StructureUnit[] = [];
     let pending: StructureUnit | undefined;
     let offset = 0;
@@ -361,6 +382,7 @@ export function createTreeSitterStructureProvider(options: TreeSitterStructurePr
       status: units.length ? "ready" : "empty",
       revision,
       units,
+      ...capture,
       ...(run.recipeId ? { recipeId: run.recipeId } : {}),
     };
   };

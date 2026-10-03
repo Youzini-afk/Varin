@@ -1,4 +1,6 @@
 export const settingsDict = {
+  "index.directories.preparingFile": "파일 준비 · {path}",
+  "index.directories.embeddingFile": "임베딩 생성 · {path}",
   "settings.bots.delete": "Bot 삭제",
   "settings.bots.deleting": "Bot 삭제 중…",
   "settings.bots.deleteFailed": "Bot 삭제 실패",

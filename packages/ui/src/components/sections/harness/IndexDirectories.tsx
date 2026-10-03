@@ -64,6 +64,10 @@ export function IndexDirectories({ status, draft, edit, refresh }: {
               {processing && totalFiles > 0 && root?.progress ? <p className="typography-micro text-muted-foreground">
                 {t('index.directories.checkedFiles', { count: root.progress.processedFiles, total: totalFiles })}
               </p> : null}
+              {processing && root?.progress?.activeFile ? <p className="truncate typography-micro text-muted-foreground" title={root.progress.activeFile.path}>
+                {t(root.progress.activeFile.phase === 'preparing' ? 'index.directories.preparingFile' : 'index.directories.embeddingFile',
+                  { path: root.progress.activeFile.path })}
+              </p> : null}
             </div>
           </div>
           {totalFiles > 0 && indexedDocuments !== undefined ? <progress className="h-1 w-full" value={indexedDocuments} max={totalFiles}

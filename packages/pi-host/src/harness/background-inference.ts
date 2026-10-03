@@ -39,7 +39,7 @@ import {
 } from "@varin/protocol";
 import { HostError } from "../errors.js";
 import { ProviderConfigurationManager } from "../provider-configuration.js";
-import { requestAdaptiveEmbeddings } from "./openai-embeddings.js";
+import { embeddingRequestUrl, requestAdaptiveEmbeddings } from "./openai-embeddings.js";
 import { requestHttpRerank } from "./http-rerank.js";
 import { requestClassifier, ClassifierRequestError, ClassifierResponseError } from "./native-classifier.js";
 
@@ -74,6 +74,19 @@ const credentialFreeUrl = (value: string): string => {
   } catch {
     return value.replace(/\/$/u, "");
   }
+};
+
+const embeddingConfigurationId = (providerId: string, modelId: string, baseUrl: string, endpoint?: string): string => {
+  const address = new URL(credentialFreeUrl(embeddingRequestUrl(baseUrl, endpoint)));
+  address.hash = "";
+  // The default endpoint may be implicit, explicit, or part of the base URL.
+  // Canonicalize the actual wire destination, independently of chat settings,
+  // capability declaration shape and credential ownership.
+  const defaultEndpoint = address.pathname.endsWith("/embeddings");
+  const customEndpoint = defaultEndpoint ? undefined : address.pathname;
+  if (defaultEndpoint) address.pathname = address.pathname.slice(0, -"/embeddings".length);
+  return digest({ providerId, modelId, baseUrl: address.toString().replace(/\/$/u, ""),
+    api: "openai-compatible", capability: "openai-compatible", endpoint: customEndpoint });
 };
 
 const spaceIdOf = (input: {
@@ -591,7 +604,7 @@ export class BackgroundInferenceRuntime {
     const baseUrl = capabilityModel?.baseUrl ?? capability?.baseUrl ?? (capability && kind !== "decision" ? undefined : model?.baseUrl) ?? editable?.baseUrl ?? provider?.baseUrl;
     if (!baseUrl) throw new HostError("provider_endpoint_missing", `Provider ${providerId} does not define a base URL`);
     const classifierApi = kind === "decision" ? (capabilityModel?.api ?? model?.api ?? "typesafe-system-one") as ClassifierApi : undefined;
-    const configurationId = digest({
+    const configurationId = kind === "embedding" ? embeddingConfigurationId(providerId, modelId, baseUrl, capability?.endpoint) : digest({
       providerId,
       modelId,
       baseUrl: credentialFreeUrl(baseUrl),

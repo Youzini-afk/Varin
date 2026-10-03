@@ -70,6 +70,8 @@ export interface StructureFileRequest {
   lane?: "foreground" | "background";
   /** Hit lines for a single native parse/classification pass. */
   lines?: number[];
+  /** Compare captured bytes before parsing; only usable with the same recipe. */
+  unchangedRevision?: string;
 }
 
 export type StructureFixedComputeInput = Omit<KernelComputeInput, "workspaceId" | "pinId" | "rootId" | "objects" | "operation"> & {
@@ -192,7 +194,10 @@ export interface StructureAnalysis {
   recipeId?: string;
   /** UTF-16 line lengths produced by the same native parse input. */
   lineLengths?: number[];
+  unchanged?: boolean;
+  sourceMetadata?: StructureSourceMetadata;
 }
+export type StructureSourceMetadata = { byteLength: string; modifiedTimeNs: string };
 export interface StructureUnit {
   startLine: number;
   endLine: number;
@@ -209,4 +214,6 @@ export interface StructureUnitsResult {
   units: StructureUnit[];
   recipeId?: string;
   message?: string;
+  unchanged?: boolean;
+  sourceMetadata?: StructureSourceMetadata;
 }

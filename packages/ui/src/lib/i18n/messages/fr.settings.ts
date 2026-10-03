@@ -2,6 +2,8 @@ import { settingsDict as englishSettingsDict } from './en.settings';
 
 export const settingsDict = {
   ...englishSettingsDict,
+  "index.directories.preparingFile": "Préparation · {path}",
+  "index.directories.embeddingFile": "Vectorisation · {path}",
   "settings.bots.delete": "Supprimer le Bot",
   "settings.bots.deleting": "Suppression du Bot…",
   "settings.bots.deleteFailed": "Échec de la suppression du Bot",

@@ -4,6 +4,7 @@ import type {
   KnowledgeStore,
   SymbolGraphLinkInput,
   SymbolGraphSymbolInput,
+  FileIndexSourceMetadata,
 } from "./store.js";
 
 /**
@@ -31,10 +32,13 @@ export interface CollectedSymbols {
   linksIncomplete?: boolean;
   /** Disk revision the ranges were computed from. */
   documentRevision: string;
+  sourceMetadata?: FileIndexSourceMetadata;
+  /** Native content verification retained the already published generation. */
+  unchanged?: boolean;
 }
 
 export interface SymbolCollectorDeps {
-  store: Pick<KnowledgeStore, "touchFile" | "replaceFileSymbols" | "removeFileSymbols">;
+  store: Pick<KnowledgeStore, "touchFile" | "replaceFileSymbols" | "removeFileSymbols" | "recordFileSourceMetadata">;
   getDocumentSymbols(path: string, language: string, signal?: AbortSignal): Promise<CollectedSymbols | null>;
   getLanguage(path: string): string | null;
   onError?: (error: unknown) => void;
@@ -70,6 +74,11 @@ export function createSymbolCollector(deps: SymbolCollectorDeps) {
     }
     const collected = await deps.getDocumentSymbols(change.path, language, change.signal);
     if (change.signal?.aborted) return;
+    if (collected?.unchanged) {
+      if (collected.sourceMetadata) await deps.store.recordFileSourceMetadata(change.path,
+        collected.documentRevision, CATALOG_EXTRACTOR_VERSION, collected.sourceMetadata);
+      return;
+    }
     if (collected === null) await deps.store.touchFile(change.path, language);
     else await deps.store.replaceFileSymbols(
       change.path,
@@ -81,6 +90,7 @@ export function createSymbolCollector(deps: SymbolCollectorDeps) {
         ...(collected.linksIncomplete ? { linksIncomplete: true } : {}),
         ...(collected.associationCandidates ? { associationCandidates: collected.associationCandidates } : {}),
         extractor: CATALOG_EXTRACTOR_VERSION,
+        ...(collected.sourceMetadata ? { sourceMetadata: collected.sourceMetadata } : {}),
       },
     );
   };

@@ -21,6 +21,10 @@ const openDb = (file: string, dim: number, accessMode: "readWrite" | "readOnly")
     dim,
     syncMode: "normal",
     loadTextIndex: false,
+    // Every source-index query uses searchExact or scoped searchGraphFirst.
+    // Building an ANN graph during checkpoints consumes CPU/memory without
+    // serving either query path. Other stores retain their own search policy.
+    autoBuildQuiver: false,
     // Derived generations are scanned and replaced in batches; keep parsed
     // payload memory out of each open generation until its workload warrants it.
     payloadCacheMb: 0,

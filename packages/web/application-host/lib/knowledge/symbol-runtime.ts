@@ -9,7 +9,7 @@ import { createLanguageViewBinder } from "../lsp/language-view.js";
 import { languageIdForPath } from "../harness/language-id.js";
 import { classifyLiteralCall } from "../structure/connections.js";
 import { CATALOG_SCAN_LANGUAGES } from "../structure/languages.js";
-import type { StructureSource, StructureSymbol } from "../structure/types.js";
+import type { StructureSource, StructureSymbol, StructureSourceMetadata } from "../structure/types.js";
 import { CATALOG_EXTRACTOR_VERSION, createSymbolCollector, type CollectedSymbols, type SymbolCollector } from "./symbols.js";
 import type {
   KnowledgeStore,
@@ -132,6 +132,8 @@ export function createSymbolGraphRuntime(options: SymbolGraphRuntimeOptions) {
   const catalogScans = new Map<string, CatalogScanState>();
   const manualWorkspaces = new Set<string>();
   let disposed = false;
+  const metadataMatches = (left: StructureSourceMetadata | undefined, right: StructureSourceMetadata | undefined) =>
+    left !== undefined && right !== undefined && left.byteLength === right.byteLength && left.modifiedTimeNs === right.modifiedTimeNs;
 
   /**
    * The graph holds committed facts, so collection binds the Host language view
@@ -177,10 +179,15 @@ export function createSymbolGraphRuntime(options: SymbolGraphRuntimeOptions) {
     if (!options.structureSource) return loadSymbolsFromLsp(workspaceId, path, languageId, signal);
     let analysis;
     let lineLengths: number[];
+    let sourceMetadata: StructureSourceMetadata | undefined;
     if (options.structureSource.analyzeFile && options.documents.inspectWorkspace) {
       let root: string;
       try { root = (await options.documents.inspectWorkspace(workspaceId)).root; }
       catch { return null; }
+      const store = await options.getStore(workspaceId);
+      const existing = await store?.getFileRelations(path);
+      const unchangedRevision = existing?.extractor === CATALOG_EXTRACTOR_VERSION && !existing.linksIncomplete
+        ? existing.documentRevision : undefined;
       analysis = await options.structureSource.analyzeFile({
         workspaceId,
         root,
@@ -189,7 +196,13 @@ export function createSymbolGraphRuntime(options: SymbolGraphRuntimeOptions) {
         lane: "background",
         lines: [],
         ...(signal ? { signal } : {}),
+        ...(unchangedRevision ? { unchangedRevision } : {}),
       });
+      sourceMetadata = analysis.sourceMetadata;
+      if (analysis.unchanged && unchangedRevision === analysis.outline.revision) return {
+        symbols: [], documentRevision: unchangedRevision, unchanged: true,
+        ...(sourceMetadata ? { sourceMetadata } : {}),
+      };
       lineLengths = analysis.lineLengths ?? [];
     } else {
       let snapshot: Awaited<ReturnType<DocumentAuthority["read"]>>;
@@ -285,6 +298,7 @@ export function createSymbolGraphRuntime(options: SymbolGraphRuntimeOptions) {
       ...(associationCandidates.length > 0 ? { associationCandidates } : {}),
       ...(linksIncomplete ? { linksIncomplete: true } : {}),
       documentRevision: outline.revision,
+      ...(sourceMetadata ? { sourceMetadata } : {}),
     };
   };
 
@@ -376,7 +390,7 @@ export function createSymbolGraphRuntime(options: SymbolGraphRuntimeOptions) {
         const roots = await (scope ? resolveScopedIndexRoots(root, scope, optionsForScan?.manual) : resolveIndexScanRoots(root, undefined));
         if (roots.length === 0 || signal.aborted) return;
         const inventories = await Promise.all(roots.map((directory) => options.searchFilesystemFiles!(directory, {
-          query: "", respectGitignore: true, includeRevisions: true, signal,
+          query: "", respectGitignore: true, signal,
         })));
         const files = inventories.flatMap((inventory, index) => {
           const prefix = pathModule.relative(root, roots[index]!).split(pathModule.sep).join('/');
@@ -389,17 +403,18 @@ export function createSymbolGraphRuntime(options: SymbolGraphRuntimeOptions) {
         const catalogFiles = files.filter((file) => (!scope || indexPathAllowed(scope, pathModule.resolve(root, file.relativePath), optionsForScan?.manual))
           && CATALOG_SCAN_LANGUAGES.has(languageIdForPath(file.relativePath) ?? ""));
         const inventoryPaths = new Set(catalogFiles.map((file) => file.relativePath));
+        const indexed = new Map((await store.listFileIndexStates()).map(file => [file.path, file]));
         for (let offset = 0; offset < catalogFiles.length; offset += CATALOG_SCAN_BATCH) {
           if (disposed || signal.aborted) return;
           const batch = catalogFiles.slice(offset, offset + CATALOG_SCAN_BATCH);
           for (const file of batch) {
             if (disposed || signal.aborted) return;
-            const existing = await store.getFileRelations(file.relativePath);
+            const existing = indexed.get(file.relativePath);
             // Current only if both the source and the extractor that read it are
             // unchanged; rows from an older extractor are recomputed (D-143).
-            if (file.revision
-              && existing?.documentRevision === file.revision
-              && existing.extractor === CATALOG_EXTRACTOR_VERSION) continue;
+            if (existing?.extractor === CATALOG_EXTRACTOR_VERSION && !existing.linksIncomplete
+              && ((file.revision && existing.documentRevision === file.revision)
+                || (!optionsForScan?.manual && metadataMatches(file.metadata, existing.sourceMetadata)))) continue;
             collector.observe({ path: file.relativePath, kind: "modified", signal });
           }
           await collector.drain();

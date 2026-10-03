@@ -23,6 +23,49 @@ const parsingSource = () => createStructureSource([
 ]);
 
 describe("cold workspace catalog scan", () => {
+  it('reuses persisted file metadata after restart and only hashes unchanged files on an explicit check', async () => {
+    const documents = await createDocumentAuthorityHarness();
+    disposes.push(() => documents.cleanup());
+    const options = { dataDir: documents.dataDir, hostId: 'incremental-catalog', workspaceId: documents.identity.workspaceId, embedding: null };
+    let store = await openWorkspaceKnowledge(options);
+    disposes.push(() => store.close());
+    const file = join(documents.workspaceRoot, 'kept.ts');
+    writeFileSync(file, 'export function Kept() { return 1; }\n');
+    writeFileSync(join(documents.workspaceRoot, 'large-unsupported.bin'), Buffer.alloc(1024 * 1024));
+    const search = createFsSearchRuntime({ compute: nativeCompute, path });
+    const inventory = vi.fn(search.searchFilesystemFiles);
+    const source = parsingSource();
+    const analyzeFile = vi.fn(source.analyzeFile!);
+    const createRuntime = () => createSymbolGraphRuntime({ getStore: async () => store, documents: documents.authority,
+      supervisor: {} as never, structureSource: { ...source, analyzeFile }, searchFilesystemFiles: inventory });
+    let runtime = createRuntime();
+    disposes.push(() => runtime.dispose());
+    await runtime.scanWorkspace(documents.identity.workspaceId);
+    expect(inventory.mock.calls[0]?.[1].includeRevisions).toBeUndefined();
+    expect(analyzeFile).toHaveBeenCalledTimes(1);
+    const generation = (await store.getFileRelations('kept.ts'))?.generation;
+    await runtime.dispose(); await store.close();
+    store = await openWorkspaceKnowledge(options); runtime = createRuntime();
+    analyzeFile.mockClear();
+    await runtime.scanWorkspace(documents.identity.workspaceId);
+    expect(analyzeFile).not.toHaveBeenCalled();
+    await runtime.scanWorkspace(documents.identity.workspaceId, { manual: true });
+    expect(analyzeFile).toHaveBeenCalledTimes(1);
+    expect(analyzeFile.mock.calls[0]?.[0].unchangedRevision).toBeTruthy();
+    expect((await store.getFileRelations('kept.ts'))?.generation).toBe(generation);
+    expect((await store.searchSymbols('Kept', 5))[0]?.name).toBe('Kept');
+    writeFileSync(file, 'export function Edited() { return 2; }\n');
+    runtime.observeDocumentMutation({ workspaceId: documents.identity.workspaceId, resourceId: 'kept.ts',
+      kind: 'modified', owner: { kind: 'web-route', id: 'fixture' } });
+    await runtime.drain();
+    await runtime.dispose(); await store.close();
+    store = await openWorkspaceKnowledge(options); runtime = createRuntime();
+    analyzeFile.mockClear();
+    await runtime.scanWorkspace(documents.identity.workspaceId);
+    expect(analyzeFile).not.toHaveBeenCalled();
+    expect((await store.searchSymbols('Edited', 5))[0]?.name).toBe('Edited');
+  });
+
   it("indexes unmodified TS and JS files from disk and skips dirty buffers, markdown, and JSON", async () => {
     const documents = await createDocumentAuthorityHarness();
     disposes.push(() => documents.cleanup());
