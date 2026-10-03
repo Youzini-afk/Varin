@@ -33,7 +33,7 @@
     "test:identity": "node --test scripts/native-identity.test.mjs"
   },
   "dependencies": {
-    "@aparajita/capacitor-secure-storage": "^8.0.0",
+    "@aparajita/capacitor-secure-storage": "^8.0.1",
     "@capacitor-mlkit/barcode-scanning": "^8.2.1",
     "@capacitor/app": "^8.1.1",
     "@capacitor/core": "^8.5.2",
