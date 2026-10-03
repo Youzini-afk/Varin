@@ -1,4 +1,9 @@
 export const settingsDict = {
+  "settings.bots.delete": "Bot 삭제",
+  "settings.bots.deleting": "Bot 삭제 중…",
+  "settings.bots.deleteFailed": "Bot 삭제 실패",
+  "settings.bots.deleteRetry": "삭제 다시 시도",
+  "settings.bots.deleteDescription": "작업을 중지한 후 Bot, 대화, 기억 및 전용 파일을 영구 삭제합니다. 프로젝트 폴더, 공유 환경 및 가상 머신은 유지됩니다.",
   "index.directories.cached": "기존 캐시",
   "index.directories.title": "색인 디렉터리",
   "index.directories.description": "프로젝트 폴더는 자동으로 추가됩니다. 다른 디렉터리도 여기에서 추가할 수 있습니다.",

@@ -1,4 +1,9 @@
 export const settingsDict = {
+  "settings.bots.delete": "Excluir Bot",
+  "settings.bots.deleting": "Excluindo Bot…",
+  "settings.bots.deleteFailed": "Falha ao excluir o Bot",
+  "settings.bots.deleteRetry": "Tentar exclusão novamente",
+  "settings.bots.deleteDescription": "Após interromper o trabalho, o Bot, suas conversas, memória e arquivos privados serão excluídos permanentemente. Pastas de projetos, ambientes compartilhados e máquinas virtuais serão preservados.",
   "index.directories.cached": "Cache existente",
   "index.directories.title": "Diretórios do índice",
   "index.directories.description": "As pastas do projeto são adicionadas automaticamente. Outros diretórios podem ser adicionados aqui.",

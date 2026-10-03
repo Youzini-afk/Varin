@@ -225,6 +225,7 @@ export interface PiSessionStoreState {
   ): Promise<RuntimeMethodResult<'session.fork'>>;
   getSessionTree(sessionId: string): Promise<SessionTreeResult>;
   loadCatalog(cwd?: string): Promise<SessionSummary[]>;
+  forgetDeletedSessions(sessionIds: readonly string[]): void;
   mutateFeatures(
     sessionId: string,
     mutation: PiSessionFeatureMutation,
@@ -1815,21 +1816,8 @@ export const createPiSessionStore = (
         try {
           const { result } = await request('session.delete', { sessionId });
           if (!result.deleted) return false;
-          catalogGeneration += 1;
-          deletedSessionIds.add(sessionId);
-          invalidateSessionHydration(sessionId);
-          set((state) => {
-            const records = { ...state.records };
-            delete records[sessionId];
-            return {
-              attentionBySession: clearAttention(state.attentionBySession, sessionId),
-              catalogLoading: false,
-              currentSessionId: state.currentSessionId === sessionId ? null : state.currentSessionId,
-              lastError: null,
-              records,
-              summaries: state.summaries.filter((summary) => summary.id !== sessionId),
-            };
-          });
+          get().forgetDeletedSessions([sessionId]);
+          set({ lastError: null });
           return true;
         } catch (error) {
           commitError(runtime.currentKey(), error);
@@ -1925,6 +1913,24 @@ export const createPiSessionStore = (
           }
           throw error;
         }
+      },
+
+      // Host-owned cascades delete sessions without a renderer request. Retire their cached
+      // catalog/hydration state before Bot ownership disappears from ordinary-mode filtering.
+      forgetDeletedSessions: (sessionIds) => {
+        const ids = new Set(sessionIds);
+        if (!ids.size) return;
+        catalogGeneration += 1;
+        if (ids.has(get().currentSessionId ?? '')) beginSelectionIntent();
+        for (const id of ids) { deletedSessionIds.add(id); invalidateSessionHydration(id); }
+        set((state) => {
+          const records = { ...state.records };
+          let attentionBySession = state.attentionBySession;
+          for (const id of ids) { delete records[id]; attentionBySession = clearAttention(attentionBySession, id); }
+          return { records, attentionBySession, catalogLoading: false,
+            currentSessionId: ids.has(state.currentSessionId ?? '') ? null : state.currentSessionId,
+            summaries: state.summaries.filter((summary) => !ids.has(summary.id)) };
+        });
       },
 
       mutateFeatures: async (sessionId, mutation, expectedRuntimeKey) => {

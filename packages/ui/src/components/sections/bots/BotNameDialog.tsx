@@ -15,6 +15,7 @@ interface BotNameDialogProps {
   title: string;
   name: string;
   busy?: boolean;
+  error?: string | null;
   onNameChange: (name: string) => void;
   onOpenChange: (open: boolean) => void;
   onSubmit: (event: React.FormEvent<HTMLFormElement>) => void;
@@ -25,6 +26,7 @@ export const BotNameDialog: React.FC<BotNameDialogProps> = ({
   title,
   name,
   busy = false,
+  error,
   onNameChange,
   onOpenChange,
   onSubmit,
@@ -49,6 +51,7 @@ export const BotNameDialog: React.FC<BotNameDialogProps> = ({
               placeholder={t('settings.bots.name.label')}
             />
           </label>
+          {error ? <p role="alert" className="typography-meta text-destructive">{error}</p> : null}
           <DialogFooter>
             <Button type="button" variant="ghost" disabled={busy} onClick={() => onOpenChange(false)}>
               {t('dialog.common.actions.close')}

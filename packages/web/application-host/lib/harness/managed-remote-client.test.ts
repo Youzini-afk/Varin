@@ -2,6 +2,28 @@ import { describe, expect, it, vi } from "vitest";
 import { createManagedRemoteTargetRegistry } from "./managed-remote-client.js";
 
 describe("managed remote target recovery", () => {
+  it('releases only the removed owner receipts while retaining shared machine ownership', async () => {
+    const targets = new Set(['bot:a', 'bot:b']);
+    const releaseRecord = vi.fn(async (_operation: string, workspaceId: string, recordId: string) => {
+      expect(recordId).toBe('managed.shell.target:managed:vm'); targets.delete(workspaceId);
+    });
+    const registry = createManagedRemoteTargetRegistry({ coordinatorHostId: 'host',
+      kernel: {
+        issueGrant: async (grant: object) => grant, revokeGrant: async () => {},
+        recordWorkspaces: async () => ({ workspaceIds: [...targets] }),
+        scoped: () => ({ releaseRecord, listRecords: async ({ workspaceId, recordType }: { workspaceId: string; recordType: string }) => ({
+          records: targets.has(workspaceId) && recordType === 'managed.shell.target'
+            ? [{ recordId: 'managed.shell.target:managed:vm', state: 'used', payloadJson: JSON.stringify({ machineId: 'managed:vm' }) }] : [], nextCursor: null,
+        }) }),
+      } as never,
+      resources: {} as never, readSettings: async () => ({}),
+    });
+    await registry.releaseScope('bot:a');
+    expect(await registry.ownersForMachine('managed:vm')).toEqual(['bot:b']);
+    await registry.releaseScope('bot:a');
+    expect(releaseRecord).toHaveBeenCalledTimes(1);
+  });
+
   it("remembers a workspace binding before the first successful target probe", async () => {
     let reachable = false;
     const fetchMock = vi.fn(async (input: string | URL | Request) => {

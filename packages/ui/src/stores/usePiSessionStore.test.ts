@@ -2271,6 +2271,30 @@ describe('Pi session store', () => {
     ).rejects.toThrow('deleted');
   });
 
+  test('retires Host-deleted sessions and rejects stale catalog and preview completions', async () => {
+    const runtime = new FakeRuntime();
+    const catalog = deferred<SessionSummary[]>();
+    const entries = deferred<SessionEntriesResult>();
+    runtime.handler = (method) => {
+      if (method === 'session.list') return catalog.promise;
+      if (method === 'session.entries.preview') return entries.promise;
+      throw new Error(`Unexpected ${method}`);
+    };
+    const store = createPiSessionStore(runtime);
+    store.setState({ currentSessionId: 'session-a', summaries: [summary('session-a', ''), summary('session-b', '')] });
+    const loading = store.getState().loadCatalog();
+    const preview = store.getState().prefetchSession('session-a', 'D:/work');
+    await flushAsync();
+    store.getState().forgetDeletedSessions(['session-a']);
+    expect(store.getState().currentSessionId).toBeNull();
+    expect(store.getState().summaries.map((item) => item.id)).toEqual(['session-b']);
+    catalog.resolve([summary('session-a', '')]); entries.resolve(branch('session-a'));
+    await Promise.all([loading, preview]);
+    expect(store.getState().records['session-a']).toBeUndefined();
+    expect(store.getState().summaries.map((item) => item.id)).toEqual(['session-b']);
+    await expect(store.getState().prefetchSession('session-a', 'D:/work')).rejects.toThrow('deleted');
+  });
+
   test('drops a preview completion from a previous runtime generation', async () => {
     const runtime = new FakeRuntime();
     const entries = deferred<SessionEntriesResult>();

@@ -28,11 +28,14 @@ const setup = async () => {
       return row;
     },
     listRecords: async () => ({ records: [...records.values()], nextCursor: null }),
+    releaseRecord: vi.fn(async (_operation: string, _workspace: string, id: string) => { records.delete(id); }),
   };
   const createSession = vi.fn(async () => ({ sessionId: "session-1" }));
   const openSession = vi.fn(async ({ sessionId }: { sessionId: string }) => ({ sessionId }));
   const applyModel = vi.fn(async () => {});
   const applyInstructions = vi.fn(async () => {});
+  const removeData = vi.fn<NonNullable<BotServiceOptions['removeData']>>(async () => {});
+  const onDeleted = vi.fn();
   const lifecycle = {
     planWork: vi.fn<BotLifecycleRuntime['planWork']>(async () => []),
     planMachines: vi.fn<BotLifecycleRuntime['planMachines']>(async () => []),
@@ -45,12 +48,77 @@ const setup = async () => {
     client: { issueGrant: async () => ({}), scoped: () => catalog } as unknown as BotServiceOptions["client"],
     dataDir, hostId: "test", registry: {
       listWorkspaceThreadSnapshots: async () => [], listRuns: async () => [], listWorkspaceRunSessionIds: async () => [],
-    }, createSession, openSession, applyModel, applyInstructions, lifecycle: () => lifecycle,
+    }, createSession, openSession, applyModel, applyInstructions, removeData, onDeleted, lifecycle: () => lifecycle,
   };
   const recreate = () => { const service = createBotService(options); services.push(service); return service; };
   const service = recreate();
-  return { service, recreate, lifecycle, records, createSession, openSession, applyModel, applyInstructions, failWrite: () => { failWrite = true; } };
+  return { service, recreate, lifecycle, records, catalog, removeData, onDeleted, createSession, openSession, applyModel, applyInstructions, failWrite: () => { failWrite = true; } };
 };
+
+it('closes admission and retains the profile until stopped work and data cleanup both finish', async () => {
+  const { service, lifecycle, removeData, catalog, onDeleted } = await setup();
+  const bot = await service.create();
+  const other = await service.create({ name: 'Other' });
+  await service.ensureEntry(bot.id);
+  let finish!: () => void;
+  const gate = new Promise<void>((resolve) => { finish = resolve; });
+  removeData.mockImplementation(async (deleting) => {
+    expect(deleting.activity?.state).toBe('asleep');
+    expect(lifecycle.stopScope).toHaveBeenCalled();
+    await gate;
+  });
+  const accepted = await service.remove(bot.id);
+  expect(accepted?.deletion).toBeTruthy();
+  expect(await service.canExecute(bot.id)).toBe(false);
+  await expect(service.ensureEntry(bot.id)).rejects.toThrow(/being deleted/);
+  await expect(service.update(bot.id, { name: 'Changed' })).rejects.toThrow(/being deleted/);
+  await vi.waitFor(() => expect(removeData).toHaveBeenCalledTimes(1));
+  await service.releaseEntry('session-1');
+  expect((await service.get(bot.id))?.entrySessionId).toBe('session-1');
+  expect(await service.listSessionIds()).toContain('session-1');
+  expect(catalog.releaseRecord).not.toHaveBeenCalled();
+  await service.remove(bot.id);
+  finish();
+  await vi.waitFor(async () => expect(await service.get(bot.id)).toBeNull());
+  expect(removeData).toHaveBeenCalledTimes(1);
+  expect(onDeleted).toHaveBeenCalledWith(bot.id);
+  expect((await service.list()).map((item) => item.id)).toEqual([other.id]);
+  expect(await service.remove(bot.id)).toBeNull();
+});
+
+it('keeps failed stops and cleanup visible, and retries each stage without reopening work', async () => {
+  const { service, lifecycle, removeData } = await setup();
+  const bot = await service.create();
+  lifecycle.stopScope.mockRejectedValueOnce(new Error('Remote offline'));
+  await service.remove(bot.id);
+  await vi.waitFor(async () => expect((await service.get(bot.id))?.deletion?.error).toContain('Remote offline'));
+  expect(removeData).not.toHaveBeenCalled();
+  removeData.mockRejectedValueOnce(new Error('File busy'));
+  await service.retry(bot.id);
+  await vi.waitFor(async () => expect((await service.get(bot.id))?.deletion?.error).toBe('File busy'));
+  await expect(service.wake(bot.id)).rejects.toThrow(/being deleted/);
+  expect(await service.canExecute(bot.id)).toBe(false);
+  await service.retry(bot.id);
+  await vi.waitFor(async () => expect(await service.get(bot.id)).toBeNull());
+  expect(lifecycle.stopScope).toHaveBeenCalledTimes(2);
+  expect(removeData).toHaveBeenCalledTimes(2);
+  expect(lifecycle.resume).not.toHaveBeenCalled();
+});
+
+it('recovers archived Bot deletion after restart', async () => {
+  const { service, removeData, recreate } = await setup();
+  const bot = await service.create();
+  await service.archive(bot.id);
+  await vi.waitFor(async () => expect((await service.get(bot.id))?.archived).toBe(true));
+  removeData.mockRejectedValueOnce(new Error('Storage offline'));
+  await service.remove(bot.id);
+  await vi.waitFor(async () => expect((await service.get(bot.id))?.deletion?.error).toBe('Storage offline'));
+  await service.dispose();
+  const recovered = recreate();
+  await recovered.reconcile();
+  await vi.waitFor(async () => expect(await recovered.get(bot.id)).toBeNull());
+  expect(removeData).toHaveBeenCalledTimes(2);
+});
 
 it("concurrent entry opens share one durably bound session", async () => {
   const { service, createSession } = await setup();

@@ -1,4 +1,5 @@
 import 'reflect-metadata';
+import { createBotDataCleanup } from './lib/bots/bot-data-cleanup.js';
 import { createKernelComputeService } from './lib/kernel/compute-service.js';
 import { createExperimentService } from './lib/harness/experiments.js';
 import { createResourceService } from './lib/harness/resources.js';
@@ -1785,6 +1786,28 @@ async function main(options: StartWebUiServerOptions = {}): Promise<WebUiServerC
       return botLifecycleRuntime;
     },
     onChange: (bot) => broadcastGlobalUiEvent?.({ type: 'varin:bot-changed', properties: { botId: bot.id } }),
+    onDeleted: (botId) => broadcastGlobalUiEvent?.({ type: 'varin:bot-changed', properties: { botId } }),
+    removeData: createBotDataCleanup({
+      dataDir: VARIN_DATA_DIR, hostId, registry: threadRegistry,
+      deleteThread: (...args) => {
+        if (!threadRuntime) throw new Error('Thread runtime is not ready');
+        return threadRuntime.deleteUser(...args);
+      },
+      deleteSession: async (sessionId) => {
+        const result = await piRuntimeBroker.deleteSession(sessionId);
+        broadcastGlobalUiEvent?.({ type: 'varin:session-deleted', properties: { sessionId } });
+        return result;
+      },
+      releaseRemoteScope: (scopeId) => managedRemoteTargets.releaseScope(scopeId),
+      closeMemory: async (scopeId, storeKey) => {
+        await knowledgeVectors?.releaseScope('bot', scopeId);
+        const loading = knowledgeStoreLoads.get(storeKey);
+        if (loading) await Promise.allSettled([loading]);
+        await knowledgeStores.get(storeKey)?.close();
+        knowledgeStores.delete(storeKey);
+      },
+      files: new KernelFileResourceBackend(kernelStorageAdapter, { authorityPurpose: 'bot-data-cleanup' }),
+    }),
     createSession: (input) => piRuntimeBroker.createSession(
       input.cwd,
       input.name,
@@ -2295,6 +2318,10 @@ async function main(options: StartWebUiServerOptions = {}): Promise<WebUiServerC
     verification: verificationCoordinator,
     worktreeSettings: DEFAULT_HARNESS_SETTINGS.worktree,
     resolveWorktreeSettings: async (workspaceId, parent) => {
+      // Bot deletion closes every parent session. Cleanup accounting must not reopen one for display settings.
+      if (isBotScopeId(workspaceId) && (await botService.get(botIdFromScopeId(workspaceId)))?.deletion) {
+        return DEFAULT_HARNESS_SETTINGS.worktree;
+      }
       const sessionId = parent.kind === 'session'
         ? parent.id
         : (await threadRegistry.getActiveRun(workspaceId, parent.id))?.sessionId;
@@ -2884,6 +2911,12 @@ async function main(options: StartWebUiServerOptions = {}): Promise<WebUiServerC
     const scope = isBotScopeId(scopeId) ? 'bot' as const
       : isSessionScopeId(scopeId) ? 'session' as const
         : 'workspace' as const;
+    const assertMemoryOwner = async () => {
+      if (scope !== 'bot') return;
+      const bot = await botService.get(botIdFromScopeId(scopeId));
+      if (!bot || bot.deletion) throw new Error('Bot memory is unavailable during or after deletion');
+    };
+    await assertMemoryOwner();
     const storeKey = knowledgeStoreKeyForScope(scopeId);
     const existing = knowledgeStores.get(storeKey);
     if (existing) return existing;
@@ -2906,7 +2939,9 @@ async function main(options: StartWebUiServerOptions = {}): Promise<WebUiServerC
           properties: { workspaceId: scopeId, sessionId },
         });
       },
-    }).then((store) => {
+    }).then(async (store) => {
+      try { await assertMemoryOwner(); }
+      catch (error) { await store.close(); throw error; }
       knowledgeStores.set(storeKey, store);
       catalogScan.start(scopeId);
       knowledgeVectors?.scheduleReconcile(store, scope, scopeId, scopeId);

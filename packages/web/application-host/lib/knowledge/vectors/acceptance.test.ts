@@ -1,5 +1,5 @@
-import { afterEach, describe, expect, it } from "vitest";
-import { mkdtempSync, rmSync } from "node:fs";
+import { afterEach, describe, expect, it, vi } from "vitest";
+import { existsSync, mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { openWorkspaceKnowledge } from "../store.js";
@@ -11,6 +11,7 @@ import { remoteEmbeddingSpaceId } from "../semantic/identity.js";
 import { spaceIdOf } from "../semantic/identity.js";
 import { createHashEmbedder } from "../semantic/embedder.js";
 import { executeRecall } from "../../harness/recall-tool.js";
+import { knowledgeStoreKeyForScope } from '../../harness/owner-scope.js';
 
 const cleanup: Array<() => unknown | Promise<unknown>> = [];
 afterEach(async () => { for (const close of cleanup.splice(0).reverse()) await close(); });
@@ -25,6 +26,45 @@ async function fixture() {
 }
 
 describe("knowledge recall acceptance", () => {
+  it('retires only the deleted Bot and prevents late work from recreating its vector directory', async () => {
+    const { dataDir, authority } = await fixture();
+    const scopeId = 'bot:10b6af44-89e4-4e1a-b042-4d03344fe8af';
+    const key = knowledgeStoreKeyForScope(scopeId);
+    const botStore = await openWorkspaceKnowledge({ dataDir, hostId: 'host', workspaceId: key, scope: 'bot', embedding: null });
+    cleanup.push(() => botStore.close());
+    await botStore.putKnowledge({ scope: 'bot', status: 'accepted', content: 'Keep Bot memory', trigger: 'policy' });
+    const embedder = createHashEmbedder();
+    const runtime = createKnowledgeVectorRuntime({ dataDir, hostId: 'host', scheduler: createEmbedScheduler(), cache: createVectorCache(), resolveEmbedder: async () => ({ status: 'ready', embedder }) });
+    cleanup.push(() => runtime.close());
+    runtime.scheduleReconcile(botStore, 'bot', scopeId, scopeId);
+    runtime.scheduleReconcile(authority, 'workspace', 'workspace', 'workspace');
+    await Promise.all([runtime.waitForBuild('bot', scopeId, scopeId), runtime.waitForBuild('workspace', 'workspace', 'workspace')]);
+    const directory = join(dataDir, 'knowledge', 'host', 'semantic', 'knowledge-bot', key);
+    expect(existsSync(directory)).toBe(true);
+    await runtime.releaseScope('bot', scopeId);
+    rmSync(directory, { recursive: true, force: true });
+    runtime.notify(botStore, 'bot', scopeId, scopeId, [1]);
+    runtime.scheduleReconcile(botStore, 'bot', scopeId, scopeId);
+    expect(await runtime.search({ authority: botStore, scope: 'bot', scopeId, workspaceId: scopeId, query: 'policy', limit: 5 })).toEqual({ status: 'unavailable', hits: [] });
+    expect(existsSync(directory)).toBe(false);
+    const other = await runtime.search({ authority, scope: 'workspace', scopeId: 'workspace', workspaceId: 'workspace', query: 'bun', limit: 5 });
+    expect(other.hits).toHaveLength(1);
+    await runtime.releaseScope('bot', scopeId);
+  });
+
+  it('cancels a retired owner while embedding configuration is still resolving', async () => {
+    const { dataDir, authority } = await fixture();
+    let resolve!: (value: { status: 'unconfigured' }) => void;
+    const gate = new Promise<{ status: 'unconfigured' }>((done) => { resolve = done; });
+    const onError = vi.fn();
+    const runtime = createKnowledgeVectorRuntime({ dataDir, hostId: 'host', scheduler: createEmbedScheduler(), cache: createVectorCache(), resolveEmbedder: () => gate, onError });
+    cleanup.push(() => runtime.close());
+    runtime.scheduleReconcile(authority, 'bot', 'bot:pending', 'bot:pending');
+    await runtime.releaseScope('bot', 'bot:pending');
+    resolve({ status: 'unconfigured' });
+    expect(onError).not.toHaveBeenCalled();
+  });
+
   it("builds accepted knowledge with automatic remote dimensions without relying on a code scan", async () => {
     const { dataDir, authority } = await fixture();
     const purposes: string[] = [];

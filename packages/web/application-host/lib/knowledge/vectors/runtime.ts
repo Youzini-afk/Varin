@@ -80,11 +80,25 @@ export function createKnowledgeVectorRuntime(options: {
   const documentTokens = new Map<string, number>();
   const dimensionBootstraps = new WeakMap<SemanticEmbedder, Promise<number[]>>();
   const lifecycleController = new AbortController();
+  const scopeControllers = new Map<string, { controller: AbortController; signal: AbortSignal }>();
+  const scopeSearches = new Map<string, Set<Promise<unknown>>>();
   const activeSearches = new Set<Promise<unknown>>();
   const activeQueryWorks = new Set<Promise<unknown>>();
   let tokenClock = 0;
   let disposed = false;
   let closePromise: Promise<void> | null = null;
+
+  const scopeKey = (scope: KnowledgeScope, scopeId: string) => `${scope}\0${scopeId}\0`;
+  const scopeSignal = (scope: KnowledgeScope, scopeId: string): AbortSignal => {
+    const key = scopeKey(scope, scopeId);
+    let entry = scopeControllers.get(key);
+    if (!entry) {
+      const controller = new AbortController();
+      entry = { controller, signal: AbortSignal.any([controller.signal, lifecycleController.signal]) };
+      scopeControllers.set(key, entry);
+    }
+    return entry.signal;
+  };
 
   const reportError = (error: unknown): void => {
     try { options.onError?.(error); } catch { /* diagnostics cannot break indexing */ }
@@ -101,6 +115,7 @@ export function createKnowledgeVectorRuntime(options: {
 
   const storeFor = (scope: KnowledgeScope, scopeId: string, embedder: SemanticEmbedder): KnowledgeVectorStore => {
     if (disposed) throw new DOMException("Knowledge vector runtime is closed", "AbortError");
+    scopeSignal(scope, scopeId).throwIfAborted();
     const key = storeKey(scope, scopeId, spaceIdOf(embedder.space));
     const existing = stores.get(key);
     if (existing) return existing;
@@ -293,7 +308,7 @@ export function createKnowledgeVectorRuntime(options: {
     if (!latest || !eligible(latest, registration.scope)
       || knowledgeContentRevision(latest.content, latest.trigger) !== revision) return;
     const chunks = chunksFor(latest, embedder);
-    await store.publishDocument({ documentId, revision, chunks, publishToken: token }, lifecycleController.signal);
+    await store.publishDocument({ documentId, revision, chunks, publishToken: token }, scopeSignal(registration.scope, registration.scopeId));
     if (currentToken(registration.scope, registration.scopeId, item.id) !== token) return;
     const after = await registration.authority.getKnowledge(item.id);
     if (!after || !eligible(after, registration.scope)
@@ -347,7 +362,7 @@ export function createKnowledgeVectorRuntime(options: {
       });
     }
     if (publications.length > 0) {
-      await store.publishDocuments(publications, lifecycleController.signal);
+      await store.publishDocuments(publications, scopeSignal(registration.scope, registration.scopeId));
       for (const publication of publications) {
         const id = Number(publication.documentId);
         if (!Number.isSafeInteger(id) || currentToken(registration.scope, registration.scopeId, id) !== publication.publishToken) continue;
@@ -361,9 +376,10 @@ export function createKnowledgeVectorRuntime(options: {
   };
 
   const reconcileRegistration = async (registration: Registration): Promise<void> => {
+    const signal = scopeSignal(registration.scope, registration.scopeId);
     const resolved = await waitWithSignal(
       options.resolveEmbedder(registration.workspaceId),
-      lifecycleController.signal,
+      signal,
     );
     if (resolved.status !== "ready") {
       registration.status = statusForResolution(resolved);
@@ -389,9 +405,9 @@ export function createKnowledgeVectorRuntime(options: {
         registration.status = "empty";
         return;
       }
-      await ensureDimension(embedder, firstChunk.embedText, "document");
+      await ensureDimension(embedder, firstChunk.embedText, "document", signal);
     }
-    if (disposed || lifecycleController.signal.aborted || embedder.space.dim <= 0) return;
+    if (disposed || signal.aborted || embedder.space.dim <= 0) return;
     const resolvedSpaceId = spaceIdOf(embedder.space);
     if (registration.spaceId !== undefined && registration.spaceId !== resolvedSpaceId) {
       registration.pendingFull = true;
@@ -420,7 +436,7 @@ export function createKnowledgeVectorRuntime(options: {
   };
 
   const kick = (registration: Registration): void => {
-    if (disposed) return;
+    if (disposed || scopeSignal(registration.scope, registration.scopeId).aborted) return;
     const key = registrationKey(registration.scope, registration.scopeId, registration.workspaceId);
     if (!registration.pendingFull && registration.dirtyIds.size === 0) return;
     if (builds.has(key)) return;
@@ -430,7 +446,7 @@ export function createKnowledgeVectorRuntime(options: {
       try {
         await reconcileRegistration(registration);
       } catch (error) {
-        if (!lifecycleController.signal.aborted && !disposed) {
+        if (!scopeSignal(registration.scope, registration.scopeId).aborted && !disposed) {
           registration.status = "failed";
           reportError(error);
         }
@@ -450,8 +466,11 @@ export function createKnowledgeVectorRuntime(options: {
     limit: number,
     signal?: AbortSignal,
   ): Promise<{ status: KnowledgeVectorStatus; spaceId?: string; hits: KnowledgeVectorHit[] }> => {
-    if (disposed) return { status: "unavailable", hits: [] };
+    const ownerSignal = scopeSignal(registration.scope, registration.scopeId);
+    if (disposed || ownerSignal.aborted) return { status: "unavailable", hits: [] };
+    signal = signal ? AbortSignal.any([signal, ownerSignal]) : ownerSignal;
     const accepted = await listAccepted(registration);
+    signal.throwIfAborted();
     if (embedder.space.dim <= 0) {
       await ensureDimension(embedder, query, "query", signal);
     }
@@ -474,6 +493,7 @@ export function createKnowledgeVectorRuntime(options: {
     kick(registration);
     if (accepted.length === 0) return { status: "empty", spaceId, hits: [] };
     const queryVector = await embedQuery(embedder, query, signal);
+    signal.throwIfAborted();
     const publishedIds = await store.listDocumentIds();
     const byDocument = new Map(accepted.map((item) => [knowledgeDocumentId(item.id), item]));
     const validDocuments = new Set<string>();
@@ -524,7 +544,9 @@ export function createKnowledgeVectorRuntime(options: {
     limit: number,
     signal?: AbortSignal,
   ): Promise<Array<{ scope: KnowledgeScope; result: Awaited<ReturnType<typeof searchScope>> }>> => {
-    if (disposed) return scopes.map((scope) => ({ scope: scope.scope, result: { status: "unavailable", hits: [] } }));
+    if (disposed || scopes.every((scope) => scopeSignal(scope.scope, scope.scopeId).aborted)) {
+      return scopes.map((scope) => ({ scope: scope.scope, result: { status: "unavailable", hits: [] } }));
+    }
     const resolveSignal = signal
       ? AbortSignal.any([signal, lifecycleController.signal])
       : lifecycleController.signal;
@@ -537,14 +559,24 @@ export function createKnowledgeVectorRuntime(options: {
     const embedder = resolved.embedder;
     const result: Array<{ scope: KnowledgeScope; result: Awaited<ReturnType<typeof searchScope>> }> = [];
     for (const scope of scopes) {
+      if (scopeSignal(scope.scope, scope.scopeId).aborted) {
+        result.push({ scope: scope.scope, result: { status: "unavailable", hits: [] } });
+        continue;
+      }
       const registration = registrationFor(scope.authority, scope.scope, scope.scopeId, workspaceId);
+      const key = scopeKey(scope.scope, scope.scopeId);
+      const pending = scopeSearches.get(key) ?? new Set<Promise<unknown>>();
+      scopeSearches.set(key, pending);
+      const work = searchScope(registration, embedder, query, limit, signal);
+      pending.add(work);
       try {
-        result.push({ scope: scope.scope, result: await searchScope(registration, embedder, query, limit, signal) });
+        result.push({ scope: scope.scope, result: await work });
       } catch (error) {
         if (signal?.aborted) throw error;
-        reportError(error);
-        result.push({ scope: scope.scope, result: { status: "failed", hits: [] } });
-      }
+        const retired = scopeSignal(scope.scope, scope.scopeId).aborted;
+        if (!retired) reportError(error);
+        result.push({ scope: scope.scope, result: { status: retired ? "unavailable" : "failed", hits: [] } });
+      } finally { pending.delete(work); if (!pending.size) scopeSearches.delete(key); }
     }
     return result;
   };
@@ -597,7 +629,7 @@ export function createKnowledgeVectorRuntime(options: {
     workspaceId: string | undefined,
     ids: readonly NodeId[],
   ): void => {
-    if (disposed) return;
+    if (disposed || scopeSignal(scope, scopeId).aborted) return;
     const targets = [...registrations.values()].filter((registration) => (
       registration.authority === authority
       && registration.scope === scope
@@ -627,7 +659,7 @@ export function createKnowledgeVectorRuntime(options: {
     scopeId: string,
     workspaceId: string,
   ): void => {
-    if (disposed) return;
+    if (disposed || scopeSignal(scope, scopeId).aborted) return;
     const registration = registrationFor(authority, scope, scopeId, workspaceId);
     kick(registration);
   };
@@ -659,6 +691,24 @@ export function createKnowledgeVectorRuntime(options: {
     builds.get(registrationKey(scope, scopeId, workspaceId)) ?? Promise.resolve()
   );
 
+  /** Retire one owner before its authoritative memory and files are removed. */
+  const releaseScope = async (scope: KnowledgeScope, scopeId: string): Promise<void> => {
+    const prefix = scopeKey(scope, scopeId);
+    scopeSignal(scope, scopeId);
+    scopeControllers.get(prefix)!.controller.abort();
+    await Promise.allSettled([
+      ...[...builds].filter(([key]) => key.startsWith(prefix)).map(([, work]) => work),
+      ...(scopeSearches.get(prefix) ?? []),
+    ]);
+    for (const [key, store] of stores) {
+      if (!key.startsWith(prefix)) continue;
+      await store.close();
+      stores.delete(key);
+    }
+    for (const key of registrations.keys()) if (key.startsWith(prefix)) registrations.delete(key);
+    for (const key of documentTokens.keys()) if (key.startsWith(prefix)) documentTokens.delete(key);
+  };
+
   const close = (): Promise<void> => {
     if (closePromise) return closePromise;
     disposed = true;
@@ -685,6 +735,7 @@ export function createKnowledgeVectorRuntime(options: {
     search,
     searchScopes,
     waitForBuild,
+    releaseScope,
     close,
   };
 }

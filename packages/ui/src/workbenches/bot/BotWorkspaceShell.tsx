@@ -16,6 +16,7 @@ import { useDeviceInfo } from '@/lib/device';
 import { BotNameDialog } from '@/components/sections/bots/BotNameDialog';
 import { BotMenu, type BotMenuAction } from '@/components/sections/bots/BotMenu';
 import { BotActivityBanner } from '@/components/sections/bots/BotActivityBanner';
+import { BotDeleteDialog } from '@/components/sections/bots/BotDeleteDialog';
 import { subscribeVarinEvents } from '@/lib/varinEvents';
 
 const BotDetailsDialog = React.lazy(() => import('@/components/sections/bots/BotDetailsDialog').then((module) => ({ default: module.BotDetailsDialog })));
@@ -49,10 +50,11 @@ const BotWorkspace: React.FC<{ committed: boolean }> = ({ committed }) => {
   const [actionBusy, setActionBusy] = React.useState<string | null>(null);
   const [nameDialog, setNameDialog] = React.useState<{ mode: 'create' } | { mode: 'rename'; bot: BotSummary } | null>(null);
   const [nameDraft, setNameDraft] = React.useState('');
+  const [deleting, setDeleting] = React.useState<BotSummary | null>(null);
   const [revision, refresh] = React.useReducer((value: number) => value + 1, 0);
   const opening = React.useRef<AbortController | null>(null);
   const selected = bots?.find((bot) => bot.id === selectedId);
-  const readOnly = Boolean(selected?.archived || (selected?.activity && selected.activity.state !== 'awake'));
+  const readOnly = Boolean(selected?.archived || selected?.deletion || (selected?.activity && selected.activity.state !== 'awake'));
   const visibleBots = bots?.filter((bot) => bot.archived === showArchived);
   const botsRef = React.useRef(bots);
   botsRef.current = bots;
@@ -93,6 +95,7 @@ const BotWorkspace: React.FC<{ committed: boolean }> = ({ committed }) => {
     setError(null);
     try {
       const known = botsRef.current?.find((bot) => bot.id === botId);
+      if (known?.deletion) return;
       if (known && (known.archived || (known.activity && known.activity.state !== 'awake')) && !known.entrySessionId) return;
       const { bot, sessionId } = known?.archived && known.entrySessionId
         ? { bot: known, sessionId: known.entrySessionId }
@@ -161,6 +164,7 @@ const BotWorkspace: React.FC<{ committed: boolean }> = ({ committed }) => {
   };
 
   const mutateBot = async (bot: BotSummary, action: BotMenuAction) => {
+    if (action === 'delete') { setDeleting(bot); return; }
     if (action === 'rename') { openRenameDialog(bot); return; }
     if (action === 'profile' || action === 'memory') { setDetails({ id: bot.id, name: bot.name, tab: action }); return; }
     setActionBusy(`${action}:${bot.id}`);
@@ -203,6 +207,7 @@ const BotWorkspace: React.FC<{ committed: boolean }> = ({ committed }) => {
               aria-current={bot.id === selectedId ? 'page' : undefined}
               className={cn(rowClass, 'min-w-0', bot.id === selectedId ? 'bg-interactive-selection text-foreground' : 'text-muted-foreground hover:bg-interactive-hover hover:text-foreground')}>
               <Icon name={bot.activity && bot.activity.state !== 'awake' ? 'moon' : 'robot'} className="size-4 shrink-0" /><span className="truncate">{bot.name}</span>
+              {bot.deletion ? <span className="ml-auto shrink-0 typography-micro text-muted-foreground">{t(bot.deletion.error ? 'settings.bots.deleteFailed' : 'settings.bots.deleting')}</span> : null}
               {bot.pinnedAt ? <Icon name="pushpin" className="ml-auto size-3 shrink-0 text-muted-foreground" /> : null}
             </button>
         </BotMenu>)}
@@ -253,7 +258,7 @@ const BotWorkspace: React.FC<{ committed: boolean }> = ({ committed }) => {
         {visibleBots?.length === 0 ? <>
           <p className="typography-body text-muted-foreground">{t(showArchived ? 'settings.bots.archivedEmpty' : 'settings.bots.empty')}</p>
           {!showArchived ? <Button disabled={busy || actionBusy !== null} onClick={openCreateDialog}>{t('settings.bots.create')}</Button> : null}
-        </> : selected && !busy && (!readOnly || selected.entrySessionId) ? <Button onClick={() => { void openEntry(selected.id); }}>{t('settings.bots.openEntry')}</Button> : null}
+        </> : selected && !selected.deletion && !busy && (!readOnly || selected.entrySessionId) ? <Button onClick={() => { void openEntry(selected.id); }}>{t('settings.bots.openEntry')}</Button> : null}
       </div>
     )}
     <BotNameDialog
@@ -261,10 +266,15 @@ const BotWorkspace: React.FC<{ committed: boolean }> = ({ committed }) => {
       title={nameDialog?.mode === 'rename' ? t('settings.bots.rename') : t('settings.bots.create')}
       name={nameDraft}
       busy={actionBusy !== null}
+      error={error}
       onNameChange={setNameDraft}
       onOpenChange={(open) => { if (!open && actionBusy === null) setNameDialog(null); }}
       onSubmit={(event) => { void saveName(event); }}
     />
+    {deleting ? <BotDeleteDialog key={deleting.id} bot={deleting} onClose={() => setDeleting(null)} onAccepted={(bot) => {
+      setBots((list) => list?.flatMap((item) => item.id === deleting.id ? bot ? [bot] : [] : [item]) ?? null);
+      refresh();
+    }} /> : null}
     {details ? <React.Suspense fallback={null}><BotDetailsDialog bot={details} onClose={() => { setDetails(null); refresh(); }} /></React.Suspense> : null}
   </div>;
 

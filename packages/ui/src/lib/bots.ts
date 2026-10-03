@@ -75,6 +75,10 @@ export const archiveBot = async (botId: string): Promise<BotSummary> => {
   return result.bot;
 };
 
+export const deleteBot = async (botId: string): Promise<BotSummary | null> => (
+  await readJson<{ bot: BotSummary | null }>(await runtimeFetch(`/api/harness/bots/${encodeURIComponent(botId)}`, { method: 'DELETE' }), 'Unable to delete Bot')
+).bot;
+
 export const changeBotState = async (botId: string, action: 'sleep' | 'wake' | 'restore' | 'retry'): Promise<BotSummary> => {
   const result = await readJson<{ bot: BotSummary }>(await runtimeFetch(`/api/harness/bots/${encodeURIComponent(botId)}/${action}`, { method: 'POST' }), 'Unable to change Bot state');
   return result.bot;

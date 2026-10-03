@@ -1,4 +1,9 @@
 export const settingsDict = {
+  "settings.bots.delete": "删除 Bot",
+  "settings.bots.deleting": "正在删除 Bot…",
+  "settings.bots.deleteFailed": "Bot 删除失败",
+  "settings.bots.deleteRetry": "重试删除",
+  "settings.bots.deleteDescription": "停止工作后，将永久删除此 Bot、会话、记忆和专属文件。项目文件夹、共享环境和虚拟机会保留。",
   "index.directories.cached": "已有缓存",
   "index.directories.title": "索引目录",
   "index.directories.description": "项目文件夹默认加入，也可在这里单独添加目录。",

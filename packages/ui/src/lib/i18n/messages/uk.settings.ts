@@ -1,4 +1,9 @@
 export const settingsDict = {
+  "settings.bots.delete": "Видалити Bot",
+  "settings.bots.deleting": "Видалення Bot…",
+  "settings.bots.deleteFailed": "Не вдалося видалити Bot",
+  "settings.bots.deleteRetry": "Повторити видалення",
+  "settings.bots.deleteDescription": "Після зупинки роботи Bot, його розмови, пам’ять і приватні файли буде видалено назавжди. Папки проєктів, спільні середовища та віртуальні машини буде збережено.",
   "index.directories.cached": "Наявний кеш",
   "index.directories.title": "Каталоги індексу",
   "index.directories.description": "Папки проєкту додаються автоматично. Тут можна додати інші каталоги.",

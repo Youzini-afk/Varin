@@ -57,7 +57,9 @@ export interface BotServiceOptions {
   applyInstructions?: (input: { sessionId: string; instructions: string | null }) => Promise<void>;
   onError?(error: unknown): void;
   lifecycle?(): BotLifecycleRuntime;
+  removeData?(bot: BotSummary): Promise<void>;
   onChange?(bot: BotSummary): void;
+  onDeleted?(botId: string): void;
 }
 
 const isObject = (value: unknown): value is Record<string, unknown> =>
@@ -78,6 +80,8 @@ const parseProfile = (record: KernelRecordResult): BotProfile | null => {
     if (typeof raw.coordinatorHostId !== "string") return null;
     const id = record.recordId.split(":")[1];
     if (!id || raw.id !== id) return null;
+    if (raw.deletion !== undefined && (!isObject(raw.deletion) || typeof raw.deletion.operationId !== 'string'
+      || (raw.deletion.error !== null && typeof raw.deletion.error !== 'string'))) return null;
     return {
       id,
       name: raw.name,
@@ -88,6 +92,7 @@ const parseProfile = (record: KernelRecordResult): BotProfile | null => {
       entrySessionId: typeof raw.entrySessionId === "string" ? raw.entrySessionId : null,
       pinnedAt: typeof raw.pinnedAt === "string" ? raw.pinnedAt : null,
       archiveRequested: raw.archiveRequested === true,
+      ...(raw.deletion === undefined ? {} : { deletion: raw.deletion as NonNullable<BotProfile['deletion']> }),
       ...(raw.activity === undefined ? {} : { activity: parseActivity(raw.activity) }),
       createdAt: typeof raw.createdAt === "string" ? raw.createdAt : new Date(record.createdAt).toISOString(),
       updatedAt: new Date(record.updatedAt).toISOString(),
@@ -127,6 +132,7 @@ export interface BotService {
     pinned?: boolean;
   }): Promise<BotSummary | null>;
   archive(botId: string): Promise<BotSummary | null>;
+  remove(botId: string): Promise<BotSummary | null>;
   restore(botId: string): Promise<BotSummary | null>;
   sleep(botId: string): Promise<BotSummary>;
   wake(botId: string): Promise<BotSummary>;
@@ -296,6 +302,7 @@ export function createBotService(options: BotServiceOptions): BotService {
   const update: BotService["update"] = (botId, patch) => serialize(botId, async () => {
     const existing = await recordFor(botId);
     if (!existing || existing.state === "archived") return null;
+    if (parseProfile(existing)?.deletion) throw new HarnessServiceError('invalid-params', 'This Bot is being deleted');
     const updates: Partial<BotProfile> = {};
     if (patch.name !== undefined) {
       const name = patch.name.trim();
@@ -342,6 +349,7 @@ export function createBotService(options: BotServiceOptions): BotService {
 
   const restore: BotService["restore"] = (botId) => serialize(botId, async () => {
     const existing = await recordFor(botId);
+    if (existing && parseProfile(existing)?.deletion) throw new HarnessServiceError('invalid-params', 'This Bot is being deleted');
     return existing ? write(botId, "active", { archiveRequested: false }, existing.recordRevision) : null;
   });
 
@@ -350,7 +358,7 @@ export function createBotService(options: BotServiceOptions): BotService {
   const timers = new Map<string, ReturnType<typeof setTimeout>>();
   const canExecute = async (botId: string): Promise<boolean> => {
     const bot = await get(botId);
-    return Boolean(bot && !bot.archived && (!bot.activity || bot.activity.state === "awake"
+    return Boolean(bot && !bot.archived && !bot.deletion && (!bot.activity || bot.activity.state === "awake"
       || (bot.activity.state === "waking" && bot.activity.readyToResume === true && operations.has(botId))));
   };
   const checkpoint = (botId: string, activity: BotActivity) => serialize(botId, async () => {
@@ -359,11 +367,15 @@ export function createBotService(options: BotServiceOptions): BotService {
     const archive = current.archiveRequested && activity.state === "asleep";
     return write(botId, current.archived || archive ? "archived" : "active", {
       activity, ...(archive ? { archiveRequested: false } : {}),
+      ...(current.deletion && activity.state === 'sleep-failed'
+        ? { deletion: { ...current.deletion, error: activity.error } } : {}),
     });
   });
   const runLifecycle = async (botId: string): Promise<void> => {
     let bot = await get(botId);
-    if (!bot?.activity || !["sleeping", "waking"].includes(bot.activity.state) || disposed) return;
+    if (disposed || !bot) return;
+    if (bot.deletion && bot.activity?.state === 'asleep') { await removeStoppedBot(bot); return; }
+    if (!bot.activity || !["sleeping", "waking"].includes(bot.activity.state)) return;
     const activity = structuredClone(bot.activity);
     const waking = activity.state === "waking";
     try {
@@ -433,6 +445,7 @@ export function createBotService(options: BotServiceOptions): BotService {
       activity.error = null;
       bot = await checkpoint(botId, activity);
       if (waking) await runtime.awakened(bot);
+      else if (bot.deletion) await removeStoppedBot(bot);
     } catch (error) {
       if (disposed) return;
       activity.state = waking ? "wake-failed" : "sleep-failed";
@@ -452,6 +465,7 @@ export function createBotService(options: BotServiceOptions): BotService {
     const bot = await serialize(botId, async () => {
       const current = await get(botId);
       if (!current || current.archived) throw new HarnessServiceError("not-found", "Unknown or archived Bot");
+      if (current.deletion) throw new HarnessServiceError('invalid-params', 'This Bot is being deleted');
       const state = current.activity?.state ?? "awake";
       if (state === (waking ? "awake" : "asleep") || state === (waking ? "waking" : "sleeping")) return current;
       if (state === "sleeping" || state === "waking" || (waking && state === "sleep-failed")) {
@@ -467,6 +481,11 @@ export function createBotService(options: BotServiceOptions): BotService {
     return bot;
   };
   const retry = async (botId: string): Promise<BotSummary> => {
+    if ((await get(botId))?.deletion) {
+      const deleting = await remove(botId);
+      if (!deleting) throw new HarnessServiceError('not-found', 'Unknown Bot');
+      return deleting;
+    }
     const bot = await serialize(botId, async () => {
       const current = await get(botId);
       if (!current || current.archived) throw new HarnessServiceError("not-found", "Unknown Bot");
@@ -488,9 +507,55 @@ export function createBotService(options: BotServiceOptions): BotService {
     return bot;
   };
 
+  const removeStoppedBot = async (bot: BotSummary): Promise<void> => {
+    const deletion = bot.deletion!;
+    try {
+      if (!options.removeData) throw new Error('Bot data cleanup is unavailable');
+      await options.removeData(bot);
+      await serialize(bot.id, async () => {
+        const current = await get(bot.id);
+        if (!current) return;
+        if (current.deletion?.operationId !== deletion.operationId) throw new Error('Bot deletion was superseded');
+        await (await scoped()).releaseRecord(`bot.delete:${deletion.operationId}`, BOT_CATALOG_WORKSPACE_ID, `bot.profile:${bot.id}`);
+        catalogGeneration++;
+        sessionIndex = null;
+        options.onDeleted?.(bot.id);
+      });
+    } catch (error) {
+      await serialize(bot.id, async () => {
+        const current = await get(bot.id);
+        if (current?.deletion?.operationId === deletion.operationId) await write(bot.id, current.archived ? 'archived' : 'active', {
+          deletion: { ...deletion, error: error instanceof Error ? error.message : String(error) },
+        });
+      });
+    }
+  };
+
+  const remove: BotService['remove'] = async (botId) => {
+    const bot = await serialize(botId, async () => {
+      const current = await get(botId);
+      if (!current) return null;
+      if (current.deletion && !current.deletion.error) return current;
+      const state = current.activity?.state ?? 'awake';
+      if (state === 'sleeping' || state === 'waking') throw new HarnessServiceError('invalid-params', 'Finish the current Bot lifecycle operation before deleting it');
+      const timer = timers.get(botId);
+      if (timer) clearTimeout(timer);
+      timers.delete(botId);
+      const activity: BotActivity = state === 'asleep' ? current.activity!
+        : state === 'sleep-failed' && current.activity
+          ? { ...structuredClone(current.activity), state: 'sleeping', error: null }
+          : { state: 'sleeping', operationId: randomUUID(), planned: false, work: [], machines: [], error: null };
+      return write(botId, current.archived ? 'archived' : 'active', { activity, archiveRequested: false,
+        deletion: { operationId: current.deletion?.operationId ?? randomUUID(), error: null } });
+    });
+    if (bot) launch(botId);
+    return bot;
+  };
+
   const ensureEntry: BotService["ensureEntry"] = (botId) => serialize(botId, async () => {
     const bot = await get(botId);
     if (!bot) throw new HarnessServiceError("not-found", `Unknown Bot "${botId}"`);
+    if (bot.deletion) throw new HarnessServiceError('unavailable', 'This Bot is being deleted');
     if (bot.archived) throw new HarnessServiceError("invalid-params", `Bot "${botId}" is archived`);
     if (bot.activity && bot.activity.state !== "awake") {
       if (!bot.entrySessionId) throw new HarnessServiceError("unavailable", "Wake this Bot to start its first conversation");
@@ -574,12 +639,12 @@ export function createBotService(options: BotServiceOptions): BotService {
   const releaseEntry: BotService["releaseEntry"] = async (sessionId) => {
     const bots = await list();
     for (const bot of bots) {
-      if (bot.entrySessionId !== sessionId || bot.archived) continue;
+      if (bot.entrySessionId !== sessionId || bot.archived || bot.deletion) continue;
       await serialize(bot.id, async () => {
         const existing = await recordFor(bot.id);
         if (!existing) return;
         const profile = parseProfile(existing);
-        if (profile?.entrySessionId !== sessionId) return;
+        if (profile?.entrySessionId !== sessionId || profile.deletion) return;
         await write(bot.id, "active", { entrySessionId: null }, existing.recordRevision);
       });
     }
@@ -591,6 +656,7 @@ export function createBotService(options: BotServiceOptions): BotService {
     create,
     update,
     archive,
+    remove,
     restore,
     sleep: (botId) => transition(botId, false),
     wake: (botId) => transition(botId, true),

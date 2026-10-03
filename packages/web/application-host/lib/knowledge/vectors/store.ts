@@ -12,8 +12,14 @@ import {
 import type { SemanticVectorCache } from "../semantic/vector-cache.js";
 import type { EmbedScheduler } from "../semantic/embed-scheduler.js";
 import type { KnowledgeScope } from "../store.js";
+import { knowledgeStoreKeyForScope } from "../../harness/owner-scope.js";
 
 export type KnowledgeVectorStore = SemanticGenerationStore;
+
+export const knowledgeVectorScopeKey = (scope: KnowledgeScope, scopeId: string) => ({
+  scopeKind: `knowledge-${scope}`,
+  scopeId: scope === 'bot' ? knowledgeStoreKeyForScope(scopeId) : scopeId,
+});
 
 /** A vector hit after the semantic block result is aggregated by knowledge id. */
 export type KnowledgeVectorHit = {
@@ -36,10 +42,7 @@ export function createKnowledgeVectorStore(options: {
   return createSemanticGenerationStore({
     dataDir: options.dataDir,
     hostId: options.hostId,
-    scope: {
-      scopeKind: `knowledge-${options.scope}`,
-      scopeId: options.scopeId,
-    },
+    scope: knowledgeVectorScopeKey(options.scope, options.scopeId),
     embedder: options.embedder,
     ...(options.cache ? { vectorCache: options.cache } : {}),
     ...(options.scheduler ? { scheduler: options.scheduler } : {}),

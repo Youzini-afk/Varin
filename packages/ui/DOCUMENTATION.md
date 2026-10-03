@@ -131,7 +131,14 @@ records, and returning from Bot restores the prior ordinary session and location
 same mode control in its navigation drawer (IDE remains desktop/Web).
 
 Bot rows expose the same actions through right-click and their visible-on-hover `…` button:
-pin/unpin, rename, the targeted Bot profile, scoped memory, sleep/wake, and archive.
+pin/unpin, rename, the targeted Bot profile, scoped memory, sleep/wake, archive and delete.
+Settings catalog rows use the same menu, and the profile includes a delete button. Deletion has an
+explicit confirmation and first closes Bot admission and stops its work through the existing sleep
+lifecycle. The Host then cascades owned Threads, deletes all owned Pi conversations, closes and
+removes Bot memory/vector stores and private home files, and releases the profile last. Original
+project folders, shared environments and VM definitions/disks remain. Interrupted cleanup is durable;
+failed deletion keeps a blocked row with its error and a retry action. Session ownership stays in the
+catalog until cleanup succeeds, so its conversations cannot leak into ordinary Workbench/IDE lists.
 Opening another Bot's profile or memory never selects its conversation. The memory panel uses the
 Host's existing MemoryService to show source excerpts, supersede a corrected memory, or forget it;
 revision checks prevent overwriting concurrent organizer/user edits. Archived Bots have a separate

@@ -315,6 +315,17 @@ export function createManagedRemoteTargetRegistry(options: ManagedRemoteTargetRe
     if (failed.length) throw new Error(failed.map((result) => String(result.reason)).join("\n"));
   };
 
+  // The caller has already stopped the scope. Release its ownership receipts, not the machines.
+  const releaseScope = async (scopeId: string): Promise<void> => {
+    const ids = await scopeTargets(scopeId);
+    const grant = await options.kernel.issueGrant({ grantId: `remote-release:${randomUUID()}`,
+      owningWorkspace: scopeId, executionWorkspace: scopeId, capabilities: ['storage.maintenance'], pathScopes: [] });
+    try {
+      const scoped = options.kernel.scoped(grant);
+      for (const id of ids) await scoped.releaseRecord(randomUUID(), scopeId, `managed.shell.target:${id}`);
+    } finally { await options.kernel.revokeGrant(grant.grantId); }
+  };
+
   const ownersForMachine = async (machineId: string): Promise<string[]> => {
     const grantId = `remote-owners:${randomUUID()}`;
     const grant = await options.kernel.issueGrant({ grantId, owningWorkspace: null, executionWorkspace: null,
@@ -537,7 +548,7 @@ export function createManagedRemoteTargetRegistry(options: ManagedRemoteTargetRe
     };
   };
 
-  return { refresh, resolveBackend, externalAuthority, targetFor, shellExec, shellRead, shellWrite, shellKill, setScopeSleeping, ownersForMachine };
+  return { refresh, resolveBackend, externalAuthority, targetFor, shellExec, shellRead, shellWrite, shellKill, setScopeSleeping, releaseScope, ownersForMachine };
 }
 
 export type ManagedRemoteTargetRegistry = ReturnType<typeof createManagedRemoteTargetRegistry>;

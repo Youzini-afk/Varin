@@ -236,6 +236,14 @@ const dispatchFromEnvelope = (envelope: { type: string; properties: unknown }) =
     return;
   }
 
+  if (envelope.type === 'varin:session-deleted') {
+    const properties = getEventProperties(envelope.properties);
+    if (typeof properties?.sessionId === 'string' && properties.sessionId) {
+      usePiSessionStore.getState().forgetDeletedSessions([properties.sessionId]);
+    }
+    return;
+  }
+
   if (envelope.type === 'varin:harness-blocks-changed') {
     const properties = getEventProperties(envelope.properties);
     const workspaceId = typeof properties?.workspaceId === 'string' ? properties.workspaceId : '';

@@ -52,6 +52,8 @@ export interface BotProfile {
   pinnedAt?: string | null;
   activity?: BotActivity;
   archiveRequested?: boolean;
+  /** Durable deletion intent; a failed cleanup stays blocked and retryable. */
+  deletion?: { operationId: string; error: string | null };
   createdAt: string;
   updatedAt: string;
 }

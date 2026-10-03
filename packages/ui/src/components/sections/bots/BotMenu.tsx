@@ -6,17 +6,21 @@ import { useI18n } from '@/lib/i18n';
 import { ContextMenu, ContextMenuTrigger, ContextMenuContent, ContextMenuItem, ContextMenuSeparator } from '@/components/ui/context-menu';
 import { DropdownMenu, DropdownMenuTrigger, DropdownMenuContent, DropdownMenuItem, DropdownMenuSeparator } from '@/components/ui/dropdown-menu';
 
-export type BotMenuAction = 'pin' | 'rename' | 'profile' | 'memory' | 'sleep' | 'wake' | 'archive' | 'restore' | 'retry';
+export type BotMenuAction = 'pin' | 'rename' | 'profile' | 'memory' | 'sleep' | 'wake' | 'archive' | 'restore' | 'retry' | 'delete';
 export function BotMenu({ bot, disabled, onAction, children }: {
   bot: BotSummary; disabled: boolean; onAction(action: BotMenuAction): void; children: React.ReactNode;
 }) {
   const { t } = useI18n();
   const state = bot.activity?.state ?? 'awake';
   const transitioning = state === 'sleeping' || state === 'waking';
-  const actions: Array<{ id: BotMenuAction; icon: IconName; label: string; disabled?: boolean } | null> = bot.archived ? [
+  const actions: Array<{ id: BotMenuAction; icon: IconName; label: string; disabled?: boolean } | null> = bot.deletion ? [
+    { id: 'retry', icon: 'refresh', label: t(bot.deletion.error ? 'settings.bots.deleteRetry' : 'settings.bots.deleting'), disabled: !bot.deletion.error },
+  ] : bot.archived ? [
     { id: 'restore', icon: 'history', label: t('settings.bots.restore') },
     { id: 'profile', icon: 'settings-3', label: t('settings.bots.section.profile') },
     { id: 'memory', icon: 'brain', label: t('settings.bots.memory') },
+    null,
+    { id: 'delete', icon: 'delete-bin', label: t('settings.bots.delete'), disabled: transitioning },
   ] : [
     { id: 'pin', icon: 'pushpin', label: t(bot.pinnedAt ? 'settings.bots.unpin' : 'settings.bots.pin') },
     { id: 'rename', icon: 'edit', label: t('settings.bots.rename') },
@@ -28,11 +32,13 @@ export function BotMenu({ bot, disabled, onAction, children }: {
       icon: state === 'awake' || state === 'sleep-failed' ? 'moon' : 'play',
       label: t(state === 'awake' ? 'settings.bots.sleep' : state === 'sleep-failed' ? 'settings.bots.sleepRetry' : 'settings.bots.wake'), disabled: transitioning },
     { id: 'archive', icon: 'archive', label: t('settings.bots.archive'), disabled: transitioning },
+    null,
+    { id: 'delete', icon: 'delete-bin', label: t('settings.bots.delete'), disabled: transitioning },
   ];
   const items = (dropdown: boolean) => {
     const Item = dropdown ? DropdownMenuItem : ContextMenuItem;
     const Separator = dropdown ? DropdownMenuSeparator : ContextMenuSeparator;
-    return actions.map((action, index) => action ? <Item key={action.id} disabled={disabled || action.disabled} onSelect={() => onAction(action.id)}>
+    return actions.map((action, index) => action ? <Item key={action.id} className={action.id === 'delete' ? 'text-destructive' : undefined} disabled={disabled || action.disabled} onSelect={() => onAction(action.id)}>
       <Icon name={action.icon} className="size-4" />{action.label}
     </Item> : <Separator key={`separator-${index}`} />);
   };

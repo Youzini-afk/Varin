@@ -2,6 +2,11 @@ import { settingsDict as englishSettingsDict } from './en.settings';
 
 export const settingsDict = {
   ...englishSettingsDict,
+  "settings.bots.delete": "Bot を削除",
+  "settings.bots.deleting": "Bot を削除中…",
+  "settings.bots.deleteFailed": "Bot の削除に失敗しました",
+  "settings.bots.deleteRetry": "削除を再試行",
+  "settings.bots.deleteDescription": "作業を停止した後、この Bot、会話、記憶、専用ファイルを完全に削除します。プロジェクトフォルダー、共有環境、仮想マシンは保持されます。",
   "index.directories.cached": "既存のキャッシュ",
   "index.directories.title": "索引ディレクトリ",
   "index.directories.description": "プロジェクトのフォルダーは自動的に追加されます。他のディレクトリもここで追加できます。",

@@ -132,6 +132,14 @@ export function registerBotRoutes(app: Express, { bots, computers, memory, requi
     }
   });
 
+  app.delete('/api/harness/bots/:botId', requireAuth, async (request: Request, response: Response) => {
+    response.setHeader('Cache-Control', 'no-store');
+    try {
+      const bot = await bots.remove(botIdOf(request));
+      response.status(bot ? 202 : 200).json({ bot });
+    } catch (error) { sendError(response, error, 'Unable to delete Bot'); }
+  });
+
   for (const action of ["sleep", "wake", "restore", "retry"] as const) {
     app.post(`/api/harness/bots/:botId/${action}`, requireAuth, async (request: Request, response: Response) => {
       response.setHeader("Cache-Control", "no-store");

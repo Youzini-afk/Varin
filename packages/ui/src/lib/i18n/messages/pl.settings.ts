@@ -1,4 +1,9 @@
 export const settingsDict = {
+  "settings.bots.delete": "Usuń Bota",
+  "settings.bots.deleting": "Usuwanie Bota…",
+  "settings.bots.deleteFailed": "Nie udało się usunąć Bota",
+  "settings.bots.deleteRetry": "Ponów usuwanie",
+  "settings.bots.deleteDescription": "Po zatrzymaniu pracy Bot, jego rozmowy, pamięć i prywatne pliki zostaną trwale usunięte. Foldery projektów, współdzielone środowiska i maszyny wirtualne zostaną zachowane.",
   "index.directories.cached": "Istniejąca pamięć podręczna",
   "index.directories.title": "Katalogi indeksu",
   "index.directories.description": "Foldery projektu są dodawane automatycznie. Tutaj możesz dodać inne katalogi.",

@@ -20,7 +20,7 @@ export function BotDetailsDialog({ bot, onClose }: {
         <DialogTitle>{bot?.name} · {t(bot?.tab === 'memory' ? 'settings.bots.memory' : 'settings.bots.section.profile')}</DialogTitle>
         <DialogDescription>{t(bot?.tab === 'memory' ? 'settings.bots.memory.description' : 'settings.bots.instructions.description')}</DialogDescription>
       </DialogHeader>
-      {bot ? bot.tab === 'profile' ? <BotSettings key={bot.id} initialBotId={bot.id} />
+      {bot ? bot.tab === 'profile' ? <BotSettings key={bot.id} initialBotId={bot.id} onDeleted={onClose} />
         : <BotMemoryPanel key={bot.id} botId={bot.id} /> : null}
     </DialogContent>
   </Dialog>;

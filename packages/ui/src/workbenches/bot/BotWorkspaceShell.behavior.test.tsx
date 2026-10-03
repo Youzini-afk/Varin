@@ -19,6 +19,7 @@ vi.mock('@/lib/bots', () => ({
   updateBot: state.update,
   archiveBot: state.archive,
   changeBotState: state.change,
+  deleteBot: vi.fn(),
 }));
 vi.mock('@/lib/pi-runtime/sessionNavigation', () => ({ openPiSessionFromNavigation: state.open }));
 vi.mock('@/lib/workbench/profile-context', () => ({ useWorkbenchProfileId: () => state.profileId }));

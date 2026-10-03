@@ -2,6 +2,11 @@ import { settingsDict as englishSettingsDict } from './en.settings';
 
 export const settingsDict = {
   ...englishSettingsDict,
+  "settings.bots.delete": "Supprimer le Bot",
+  "settings.bots.deleting": "Suppression du Bot…",
+  "settings.bots.deleteFailed": "Échec de la suppression du Bot",
+  "settings.bots.deleteRetry": "Réessayer la suppression",
+  "settings.bots.deleteDescription": "Après arrêt de son travail, le Bot, ses conversations, sa mémoire et ses fichiers privés seront supprimés définitivement. Les dossiers de projets, environnements partagés et machines virtuelles seront conservés.",
   "index.directories.cached": "Cache existant",
   "index.directories.title": "Dossiers indexés",
   "index.directories.description": "Les dossiers du projet sont ajoutés automatiquement. Vous pouvez en ajouter d’autres ici.",
