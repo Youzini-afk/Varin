@@ -3,7 +3,7 @@
  * state, and exposes a readiness snapshot for the status route.
  *
  * Providers:
- * - 'local' (default): sherpa-onnx Parakeet running in a worker process.
+ * - 'local' (default): catalog-selected sherpa-onnx models in a worker process.
  *   Models auto-download in the background on first use.
  * - 'openai-compatible': any OpenAI-compatible /v1/audio/transcriptions
  *   endpoint (faster-whisper, whisper.cpp, OpenAI).
@@ -26,6 +26,7 @@ import {
   isLocalTtsModelId,
 } from './local/model-catalog.js';
 import { ensureLocalSttModel, isLocalSttModelInstalled } from './local/model-downloader.js';
+import { resolveLocalSttLanguage } from './local/model-language.js';
 import type { LocalSttModelId } from './local/model-catalog.js';
 import type {
   DictationStartOptions,
@@ -124,6 +125,9 @@ export function createDictationService({ modelsDir }: { modelsDir: string }) {
     }
 
     const modelId = resolveLocalModelId(options.localModel);
+    let language: string;
+    try { language = resolveLocalSttLanguage(modelId, options.language); }
+    catch (error) { return { error: errorMessage(error), retryable: false, reasonCode: 'stt_language_unsupported' }; }
     const installed = await isLocalSttModelInstalled(modelsDir, modelId);
     if (!installed) {
       const state = downloadStates.get(modelId);
@@ -145,7 +149,7 @@ export function createDictationService({ modelsDir }: { modelsDir: string }) {
       };
     }
 
-    const session = new WorkerBackedTranscriptionSession(workerClient, { modelsDir, modelId });
+    const session = new WorkerBackedTranscriptionSession(workerClient, { modelsDir, modelId, language });
     try {
       await session.connect();
     } catch (error) {
@@ -189,7 +193,8 @@ export function createDictationService({ modelsDir }: { modelsDir: string }) {
     });
 
     const models = await Promise.all(
-      LOCAL_STT_MODEL_IDS.map((id) => describeModel(id, LOCAL_STT_MODEL_CATALOG)),
+      LOCAL_STT_MODEL_IDS.map(async (id) => ({ ...await describeModel(id, LOCAL_STT_MODEL_CATALOG),
+        ...LOCAL_STT_MODEL_CATALOG[id].info })),
     );
     const ttsModels = await Promise.all(
       LOCAL_TTS_MODEL_IDS.map((id) => describeModel(id, LOCAL_TTS_MODEL_CATALOG)),

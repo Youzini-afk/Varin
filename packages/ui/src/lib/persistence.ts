@@ -1,4 +1,4 @@
-import { isChatContentWidth } from '@varin/application-client';
+import { DEFAULT_LOCAL_STT_MODEL, isChatContentWidth } from '@varin/application-client';
 import type { DesktopSettings } from '@/lib/desktop';
 import { NO_ACTIVE_PROJECT_STORAGE_VALUE } from '@/lib/projectSelection';
 import { useUIStore } from '@/stores/useUIStore';
@@ -530,7 +530,7 @@ const materializeAuthoritativeUiSettings = (settings: DesktopSettings): DesktopS
     sttProvider: 'local',
     sttServerUrl: 'http://localhost:8001/v1',
     sttModel: 'deepdml/faster-whisper-large-v3-turbo-ct2',
-    sttLocalModel: 'parakeet-tdt-0.6b-v2-int8',
+    sttLocalModel: DEFAULT_LOCAL_STT_MODEL,
     sttLanguage: '',
     ...settings,
   };

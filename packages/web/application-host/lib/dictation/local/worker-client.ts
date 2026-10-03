@@ -107,7 +107,7 @@ export class DictationWorkerClient {
    * @returns {Promise<{ sessionId: string, requiredSampleRate: number }>}
    */
   async createSession(
-    { modelsDir, modelId }: { modelId: string; modelsDir: string },
+    { modelsDir, modelId, language }: { modelId: string; modelsDir: string; language?: string },
     emitter: EventEmitter,
   ): Promise<{ requiredSampleRate: number; sessionId: string }> {
     const sessionId = randomUUID();
@@ -118,6 +118,7 @@ export class DictationWorkerClient {
         sessionId,
         modelsDir,
         modelId,
+        ...(language ? { language } : {}),
       });
       return {
         sessionId,
@@ -343,7 +344,7 @@ export class DictationWorkerClient {
  */
 export class WorkerBackedTranscriptionSession extends EventEmitter {
   readonly client: DictationWorkerClient;
-  readonly modelConfig: { modelId: string; modelsDir: string };
+  readonly modelConfig: { modelId: string; modelsDir: string; language?: string };
   requiredSampleRate: number;
   private connectedSessionId: string | null;
   private connecting: Promise<void> | null;
@@ -352,7 +353,7 @@ export class WorkerBackedTranscriptionSession extends EventEmitter {
    * @param {DictationWorkerClient} client
    * @param {{ modelsDir: string, modelId: string }} modelConfig
    */
-  constructor(client: DictationWorkerClient, modelConfig: { modelId: string; modelsDir: string }) {
+  constructor(client: DictationWorkerClient, modelConfig: { modelId: string; modelsDir: string; language?: string }) {
     super();
     this.client = client;
     this.modelConfig = modelConfig;

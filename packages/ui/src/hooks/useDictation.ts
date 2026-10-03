@@ -12,7 +12,7 @@ import { useCallback, useEffect, useRef, useState } from 'react';
 import { dictationClient, type DictationStartOptions } from '@/lib/dictation/dictation-client';
 import { DictationStreamSender } from '@/lib/dictation/dictation-stream-sender';
 import { useDictationAudioSource } from '@/lib/dictation/use-dictation-audio-source';
-import { useVarinPreferencesStore } from '@/stores/useVarinPreferencesStore';
+import { usePreferencesStore } from '@/stores/usePreferencesStore';
 
 export type DictationStatus = 'idle' | 'recording' | 'uploading' | 'failed';
 
@@ -44,8 +44,8 @@ const DURATION_TICK_MS = 1000;
 const toError = (value: unknown): Error =>
     value instanceof Error ? value : new Error(String(value));
 
-const getDictationStartOptions = (): DictationStartOptions => {
-    const state = useVarinPreferencesStore.getState();
+export const getDictationStartOptions = (): DictationStartOptions => {
+    const state = usePreferencesStore.getState();
     const language = state.sttLanguage?.trim();
     if (state.sttProvider === 'openai-compatible') {
         return {

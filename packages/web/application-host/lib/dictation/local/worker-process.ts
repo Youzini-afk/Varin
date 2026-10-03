@@ -1,13 +1,13 @@
 /**
  * Dictation local-speech worker process.
  *
- * Hosts the sherpa-onnx native inference (Parakeet STT) in a separate process
+ * Hosts catalog-selected sherpa-onnx native inference in a separate process
  * so ONNX decoding never blocks the main Varin server. Communicates
  * with the parent over child_process IPC (advanced serialization, so Buffers
  * survive the trip as Uint8Array).
  *
  * Request/response protocol (parent -> worker):
- *   { type: 'session.create', requestId, sessionId, modelsDir, modelId }
+ *   { type: 'session.create', requestId, sessionId, modelsDir, modelId, language? }
  *   { type: 'session.append', requestId, sessionId, audio }
  *   { type: 'session.commit' | 'session.clear' | 'session.close', requestId, sessionId }
  * Worker -> parent:
@@ -30,6 +30,8 @@ process.title = 'Varin Dictation';
 const engines = new Map<string, SherpaOfflineRecognizerEngine>();
 const ttsEngines = new Map<string, SherpaTtsEngine>();
 const sessions = new Map<string, SherpaRealtimeTranscriptionSession>();
+const sessionEngineKeys = new Map<string, string>();
+let lastEngineKey: string | undefined;
 let ipcClosing = false;
 
 function sendToParent(message: unknown): void {
@@ -51,48 +53,68 @@ function sendOk(requestId: string | undefined, result?: unknown): void {
   sendToParent({ type: 'response', requestId, ok: true, ...(result !== undefined ? { result } : {}) });
 }
 
-function getEngine(modelsDir: string, modelId: string): SherpaOfflineRecognizerEngine {
-  const key = `${modelsDir}:${modelId}`;
+const engineKey = (modelsDir: string, modelId: string, language: string): string => JSON.stringify([modelsDir, modelId, language]);
+
+function releaseUnusedEngines(): void {
+  const active = new Set(sessionEngineKeys.values());
+  for (const [key, engine] of engines) {
+    if (key === lastEngineKey || active.has(key)) continue;
+    engine.free();
+    engines.delete(key);
+  }
+}
+
+function getEngine(modelsDir: string, modelId: string, language: string): SherpaOfflineRecognizerEngine {
+  const key = engineKey(modelsDir, modelId, language);
   const existing = engines.get(key);
   if (existing) {
+    lastEngineKey = key;
+    releaseUnusedEngines();
     return existing;
   }
   const modelDir = getLocalSttModelDir(modelsDir, modelId);
   const spec = getLocalSttModelSpec(modelId);
-  if (spec.type !== 'nemo_transducer' && spec.type !== 'whisper') {
-    throw new Error(`Model is not an STT recognizer: ${modelId}`);
-  }
-  if (!spec.files.encoder || !spec.files.decoder) {
-    throw new Error(`STT model is missing encoder or decoder metadata: ${modelId}`);
-  }
-  if (spec.type === 'nemo_transducer' && !spec.files.joiner) {
-    throw new Error(`Transducer model is missing joiner metadata: ${modelId}`);
-  }
-  const common = {
-    encoder: path.join(modelDir, spec.files.encoder),
-    decoder: path.join(modelDir, spec.files.decoder),
-    tokens: path.join(modelDir, spec.files.tokens),
-    numThreads: 2,
+  const asset = (role: keyof typeof spec.files): string => {
+    const filename = spec.files[role];
+    if (!filename) throw new Error(`STT model is missing ${role} metadata: ${modelId}`);
+    return path.join(modelDir, filename);
   };
-  const created = spec.type === 'nemo_transducer'
-    ? new SherpaOfflineRecognizerEngine({
-        ...common,
-        type: 'nemo_transducer',
-        joiner: path.join(modelDir, spec.files.joiner as string),
-      })
-    : new SherpaOfflineRecognizerEngine({ ...common, type: 'whisper' });
+  const common = { numThreads: 2, language, ...(spec.featureDim ? { featureDim: spec.featureDim } : {}) };
+  let created: SherpaOfflineRecognizerEngine;
+  switch (spec.type) {
+    case 'nemo_transducer':
+      created = new SherpaOfflineRecognizerEngine({ ...common, type: spec.type,
+        encoder: asset('encoder'), decoder: asset('decoder'), joiner: asset('joiner'), tokens: asset('tokens') });
+      break;
+    case 'whisper':
+      created = new SherpaOfflineRecognizerEngine({ ...common, type: spec.type,
+        encoder: asset('encoder'), decoder: asset('decoder'), tokens: asset('tokens') });
+      break;
+    case 'sense_voice':
+      created = new SherpaOfflineRecognizerEngine({ ...common, type: spec.type, model: asset('model'), tokens: asset('tokens') });
+      break;
+    case 'qwen3_asr':
+      created = new SherpaOfflineRecognizerEngine({ ...common, type: spec.type, convFrontend: asset('convFrontend'),
+        encoder: asset('encoder'), decoder: asset('decoder'), tokenizer: asset('tokenizer') });
+      break;
+    default: throw new Error(`Model is not an STT recognizer: ${modelId}`);
+  }
   engines.set(key, created);
+  lastEngineKey = key;
+  releaseUnusedEngines();
   return created;
 }
 
 function cleanupSession(sessionId: string): void {
   const session = sessions.get(sessionId);
   sessions.delete(sessionId);
+  sessionEngineKeys.delete(sessionId);
   try {
     session?.close();
   } catch {
     // ignore
   }
+  releaseUnusedEngines();
 }
 
 function toBuffer(audio: unknown): Buffer {
@@ -120,6 +142,7 @@ function getTtsEngine(modelsDir: string, modelId: string): SherpaTtsEngine {
     || !spec.files.model
     || !spec.files.voices
     || !spec.files.espeakData
+    || !spec.files.tokens
   ) {
     throw new Error(`Model is not a complete TTS model: ${modelId}`);
   }
@@ -161,7 +184,10 @@ async function handleRequest(message: WorkerRequest): Promise<void> {
     case 'session.create': {
       const sessionId = stringField(message, 'sessionId');
       cleanupSession(sessionId);
-      const engine = getEngine(stringField(message, 'modelsDir'), stringField(message, 'modelId'));
+      const modelsDir = stringField(message, 'modelsDir');
+      const modelId = stringField(message, 'modelId');
+      const language = typeof message.language === 'string' ? message.language : '';
+      const engine = getEngine(modelsDir, modelId, language);
       const session = new SherpaRealtimeTranscriptionSession({ engine });
       session.on('committed', (payload) => {
         sendToParent({ type: 'session.committed', sessionId, payload });
@@ -178,6 +204,7 @@ async function handleRequest(message: WorkerRequest): Promise<void> {
       });
       await session.connect();
       sessions.set(sessionId, session);
+      sessionEngineKeys.set(sessionId, engineKey(modelsDir, modelId, language));
       sendOk(requestId, { requiredSampleRate: session.requiredSampleRate });
       return;
     }

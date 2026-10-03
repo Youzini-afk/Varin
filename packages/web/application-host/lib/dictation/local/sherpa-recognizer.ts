@@ -1,5 +1,5 @@
 /**
- * Sherpa-onnx offline recognizer engine (NeMo transducer / Parakeet) plus a
+ * Sherpa-onnx offline recognizer engine for the managed STT catalog, plus a
  * realtime streaming transcription session that re-decodes the accumulated
  * segment audio on a throttle to produce live partial transcripts.
  *
@@ -15,14 +15,11 @@ import { loadSherpaOnnxNode } from './sherpa-loader.js';
 import { pcm16lePeakAbs, pcm16leToFloat32 } from '../audio.js';
 import type { SherpaOfflineRecognizer, SherpaOfflineStream } from '../types.js';
 
-type RecognizerConfig = {
-  decoder: string;
-  encoder: string;
-  numThreads?: number;
-  tokens: string;
-} & (
-  | { joiner: string; type: 'nemo_transducer' }
-  | { joiner?: never; type: 'whisper' }
+export type RecognizerConfig = { numThreads?: number; language?: string; featureDim?: number } & (
+  | { encoder: string; decoder: string; tokens: string; joiner: string; type: 'nemo_transducer' }
+  | { encoder: string; decoder: string; tokens: string; type: 'whisper' }
+  | { model: string; tokens: string; type: 'sense_voice' }
+  | { convFrontend: string; encoder: string; decoder: string; tokenizer: string; type: 'qwen3_asr' }
 );
 
 function assertFileExists(filePath: string, label: string): void {
@@ -34,53 +31,38 @@ function assertFileExists(filePath: string, label: string): void {
 export class SherpaOfflineRecognizerEngine {
   readonly recognizer: SherpaOfflineRecognizer;
   readonly sampleRate: number;
+  private readonly streamLanguage: string;
 
-  /**
-   * @param {{ type: 'nemo_transducer' | 'whisper',
-   *           encoder: string, decoder: string, joiner?: string, tokens: string,
-   *           numThreads?: number }} config
-   */
   constructor(config: RecognizerConfig) {
-    assertFileExists(config.encoder, 'offline encoder');
-    assertFileExists(config.decoder, 'offline decoder');
-    if (config.type === 'nemo_transducer') {
-      assertFileExists(config.joiner, 'offline joiner');
+    const modelConfig: Record<string, unknown> = { numThreads: config.numThreads ?? 2, provider: 'cpu', debug: 0 };
+    const paths: Record<string, string> = {};
+    this.streamLanguage = '';
+    switch (config.type) {
+      case 'whisper':
+        Object.assign(paths, { encoder: config.encoder, decoder: config.decoder, tokens: config.tokens });
+        Object.assign(modelConfig, { whisper: { encoder: config.encoder, decoder: config.decoder,
+          language: config.language ?? '', task: 'transcribe', tailPaddings: -1 }, tokens: config.tokens, modelType: 'whisper' });
+        break;
+      case 'nemo_transducer':
+        Object.assign(paths, { encoder: config.encoder, decoder: config.decoder, joiner: config.joiner, tokens: config.tokens });
+        Object.assign(modelConfig, { transducer: { encoder: config.encoder, decoder: config.decoder, joiner: config.joiner },
+          tokens: config.tokens, modelType: 'nemo_transducer' });
+        break;
+      case 'sense_voice':
+        Object.assign(paths, { model: config.model, tokens: config.tokens });
+        Object.assign(modelConfig, { senseVoice: { model: config.model, language: config.language || 'auto',
+          useInverseTextNormalization: 1 }, tokens: config.tokens });
+        break;
+      case 'qwen3_asr':
+        Object.assign(paths, { convFrontend: config.convFrontend, encoder: config.encoder, decoder: config.decoder, tokenizer: config.tokenizer });
+        Object.assign(modelConfig, { qwen3Asr: { convFrontend: config.convFrontend, encoder: config.encoder,
+          decoder: config.decoder, tokenizer: config.tokenizer }, tokens: '' });
+        this.streamLanguage = config.language ?? '';
+        break;
     }
-    assertFileExists(config.tokens, 'tokens');
-
+    for (const [role, filename] of Object.entries(paths)) assertFileExists(filename, role);
     const sherpa = loadSherpaOnnxNode();
-
-    const modelConfig =
-      config.type === 'whisper'
-        ? {
-            whisper: {
-              encoder: config.encoder,
-              decoder: config.decoder,
-              // Empty language auto-detects for multilingual Whisper exports.
-              language: '',
-              task: 'transcribe',
-              tailPaddings: -1,
-            },
-            tokens: config.tokens,
-            modelType: 'whisper',
-            numThreads: config.numThreads ?? 2,
-            provider: 'cpu',
-            debug: 0,
-          }
-        : {
-            transducer: {
-              encoder: config.encoder,
-              decoder: config.decoder,
-              joiner: config.joiner,
-            },
-            tokens: config.tokens,
-            modelType: 'nemo_transducer',
-            numThreads: config.numThreads ?? 2,
-            provider: 'cpu',
-            debug: 0,
-          };
-
-    const featConfig = { sampleRate: 16000, featureDim: 80 };
+    const featConfig = { sampleRate: 16000, featureDim: config.featureDim ?? 80 };
     const recognizerConfig: Record<string, unknown> = {
       featConfig,
       modelConfig,
@@ -97,7 +79,12 @@ export class SherpaOfflineRecognizerEngine {
   }
 
   createStream(): SherpaOfflineStream {
-    return this.recognizer.createStream();
+    const stream = this.recognizer.createStream();
+    if (this.streamLanguage) {
+      if (!stream.setOption) throw new Error('The speech runtime cannot apply the selected language');
+      stream.setOption('language', this.streamLanguage);
+    }
+    return stream;
   }
 
   acceptWaveform(stream: SherpaOfflineStream, sampleRate: number, samples: Float32Array): void {
@@ -177,6 +164,7 @@ export class SherpaRealtimeTranscriptionSession extends EventEmitter {
   private lastPartialText: string;
   private pcm16: Buffer;
   private lastDecodeAt: number;
+  private lastDecodedBytes: number;
   private decoding: boolean;
   private pendingDecode: boolean;
 
@@ -197,6 +185,7 @@ export class SherpaRealtimeTranscriptionSession extends EventEmitter {
     this.lastPartialText = '';
     this.pcm16 = Buffer.alloc(0);
     this.lastDecodeAt = 0;
+    this.lastDecodedBytes = 0;
     this.decoding = false;
     this.pendingDecode = false;
   }
@@ -240,6 +229,7 @@ export class SherpaRealtimeTranscriptionSession extends EventEmitter {
         this.currentSegmentId = randomUUID();
         this.lastPartialText = '';
         this.pcm16 = Buffer.alloc(0);
+        this.lastDecodedBytes = 0;
       } catch (err) {
         this.emit('error', err instanceof Error ? err : new Error(String(err)));
       }
@@ -251,6 +241,7 @@ export class SherpaRealtimeTranscriptionSession extends EventEmitter {
       return;
     }
     this.pcm16 = Buffer.alloc(0);
+    this.lastDecodedBytes = 0;
     this.currentSegmentId = randomUUID();
     this.lastPartialText = '';
   }
@@ -259,12 +250,16 @@ export class SherpaRealtimeTranscriptionSession extends EventEmitter {
     this.connected = false;
     this.currentSegmentId = null;
     this.pcm16 = Buffer.alloc(0);
+    this.lastDecodedBytes = 0;
   }
 
   async maybeDecode(force: boolean): Promise<void> {
     if (!this.connected || !this.currentSegmentId) {
       return;
     }
+    // Finalizing the same audio only changes transcript finality. Reuse the
+    // decoded text instead of repeating the native inference.
+    if (this.pcm16.length === this.lastDecodedBytes) return;
 
     const now = Date.now();
     if (!force && now - this.lastDecodeAt < this.minDecodeIntervalMs) {
@@ -280,6 +275,7 @@ export class SherpaRealtimeTranscriptionSession extends EventEmitter {
     try {
       const decodeStartedAt = Date.now();
       const text = this.engine.decodePcm16(this.pcm16);
+      this.lastDecodedBytes = this.pcm16.length;
       this.lastDecodeAt = Date.now();
       // Adaptive throttle: on slow hardware (or heavy models) re-decoding the
       // growing segment every 350ms would monopolize the worker. Space partial

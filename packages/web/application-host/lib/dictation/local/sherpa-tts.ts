@@ -60,9 +60,9 @@ export class SherpaTtsEngine {
           dataDir,
           lengthScale: 1.0,
         },
+        numThreads: config.numThreads ?? 2,
+        provider: 'cpu',
       },
-      numThreads: config.numThreads ?? 2,
-      provider: 'cpu',
       maxNumSentences: 1,
     });
   }
@@ -84,8 +84,10 @@ export class SherpaTtsEngine {
 
     const audio = this.tts.generate({
       text: trimmed,
-      sid: Number.isInteger(options.speakerId) ? options.speakerId : 0,
-      speed: typeof options.speed === 'number' && options.speed > 0 ? options.speed : 1.0,
+      generationConfig: {
+        sid: Number.isInteger(options.speakerId) ? options.speakerId : 0,
+        speed: typeof options.speed === 'number' && options.speed > 0 ? options.speed : 1.0,
+      },
       // Request a copied buffer from sherpa itself: native external-backed
       // typed arrays are rejected by Electron.
       enableExternalBuffer: false,

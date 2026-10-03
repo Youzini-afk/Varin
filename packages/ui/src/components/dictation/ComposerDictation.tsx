@@ -16,7 +16,7 @@ import { cn } from '@/lib/utils';
 import { runtimeFetch } from '@varin/application-client';
 import { useDictation } from '@/hooks/useDictation';
 import { isDictationCaptureSupported } from '@/lib/dictation/use-dictation-audio-source';
-import { useVarinPreferencesStore } from '@/stores/useVarinPreferencesStore';
+import { usePreferencesStore } from '@/stores/usePreferencesStore';
 import { useUIStore } from '@/stores/useUIStore';
 import { formatShortcutForDisplay, getEffectiveShortcutCombo } from '@/lib/shortcuts';
 
@@ -73,7 +73,7 @@ const VolumeMeter: React.FC<{ volume: number }> = ({ volume }) => {
  * returns the download percent (null while unknown / not downloading).
  */
 const useModelDownloadProgress = (active: boolean): number | null => {
-    const sttLocalModel = useVarinPreferencesStore((state) => state.sttLocalModel);
+    const sttLocalModel = usePreferencesStore((state) => state.sttLocalModel);
     const [percent, setPercent] = React.useState<number | null>(null);
 
     React.useEffect(() => {
@@ -131,7 +131,7 @@ export const ComposerDictation: React.FC<ComposerDictationProps> = ({
 }) => {
     const { t } = useI18n();
     const { currentTheme } = useThemeSystem();
-    const dictationEnabled = useVarinPreferencesStore((state) => state.dictationEnabled);
+    const dictationEnabled = usePreferencesStore((state) => state.dictationEnabled);
     const shortcutOverrides = useUIStore((state) => state.shortcutOverrides);
     const dictationShortcut = formatShortcutForDisplay(getEffectiveShortcutCombo('toggle_dictation', shortcutOverrides));
     const [supported] = React.useState(() => isDictationCaptureSupported());

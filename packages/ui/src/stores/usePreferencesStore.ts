@@ -1,6 +1,7 @@
 import { create } from 'zustand';
 import { devtools, persist } from 'zustand/middleware';
 import { createDeferredSafeJSONStorage } from './utils/safeStorage';
+import { DEFAULT_LOCAL_STT_MODEL } from '@varin/application-client';
 
 export type VoiceProvider = 'browser' | 'local' | 'openai' | 'openai-compatible' | 'say';
 export type SttProvider = 'local' | 'openai-compatible';
@@ -172,7 +173,7 @@ export const usePreferencesStore = create<PreferencesState>()(
         speechVolume: numberValue('speechVolume', 1, 0, 1),
         sttApiKey: stringValue('sttApiKey', ''),
         sttLanguage: stringValue('sttLanguage', ''),
-        sttLocalModel: stringValue('sttLocalModel', 'parakeet-tdt-0.6b-v2-int8'),
+        sttLocalModel: stringValue('sttLocalModel', DEFAULT_LOCAL_STT_MODEL),
         sttModel: stringValue('sttModel', 'deepdml/faster-whisper-large-v3-turbo-ct2'),
         sttProvider: initialSttProvider(),
         sttServerUrl: stringValue('sttServerUrl', 'http://localhost:8001/v1'),

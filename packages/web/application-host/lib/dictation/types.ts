@@ -53,27 +53,31 @@ export interface DictationStreamState {
 }
 
 export interface LocalSpeechModelFiles {
+  convFrontend?: string;
   decoder?: string;
   encoder?: string;
   espeakData?: string;
   joiner?: string;
   model?: string;
-  tokens: string;
+  tokenizer?: string;
+  tokens?: string;
   voices?: string;
 }
 
 export interface LocalSpeechModelSpec {
   archiveUrl: string;
+  featureDim?: number;
   description: string;
   extractedDir: string;
   files: LocalSpeechModelFiles;
-  type: 'nemo_transducer' | 'whisper' | 'kokoro';
+  type: 'nemo_transducer' | 'whisper' | 'sense_voice' | 'qwen3_asr' | 'kokoro';
 }
 
 export type LocalSpeechModelCatalog = Record<string, LocalSpeechModelSpec>;
 
 export interface SherpaOfflineStream {
   acceptWaveform(...args: unknown[]): void;
+  setOption?(key: string, value: string): void;
   free?(): void;
 }
 

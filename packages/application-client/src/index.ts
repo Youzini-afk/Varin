@@ -3,6 +3,7 @@ export * from "./bots.js";
 export * from "./ui-dto.js";
 export * from "./chat-memory.js";
 export * from "./chat-layout.js";
+export * from "./speech-models.js";
 export * from "./settings-catalog.js";
 export * from "./thread-history.js";
 export * from "./desktop.js";
