@@ -28,8 +28,10 @@ for every open store without measurements on real mixed catalogs.
 error classes without loading a native addon. `store-process.ts` lazily starts one
 private Node storage process per Host module generation, shared by that generation's
 open workspace/user stores. `store-worker.ts` is its only entry; `store-engine.ts`
-contains the native implementation. Opening, indexed reads, graph computations,
-user writes, checkpoints and closing of these stores all run in that process.
+contains the native implementation. `semantic/store.ts` orchestrates embeddings
+through the same owner; `semantic/store-engine.ts` owns its native generations.
+Opening, indexed reads, graph/vector computations, user writes, checkpoints and
+closing of these stores all run in that process. Cache maintenance also runs there.
 Electron uses its own executable in Node mode, like the existing Pi worker boundary.
 The Web Host uses the same component. No renderer API or public server is added.
 
@@ -69,11 +71,20 @@ first recover that checkpoint, including reads and duplicate-write fast paths.
 This retries persistence of already-applied state, not the original mutations.
 Notifications are observational: observer errors cannot undo a durable write.
 
-The derived code-semantic store also uses this checkpoint scheduler and has
-retryable close/final-flush semantics. Its embedding orchestration and native handle
-have not moved to the new authority-store process. Other native vector adapters
-retain their existing owners. This change does not claim every Host native operation
-is now off-thread, nor does it reduce the cost of one full TriviumDB snapshot to O(delta).
+The derived semantic and knowledge-vector stores use this checkpoint scheduler
+in the private storage process, with retryable close/final-flush semantics.
+Embedding/provider callbacks and the vector reuse cache stay in the Host.
+During an ongoing build, provider gaps do not count as a quiet period: checkpoints
+use the existing 30-second deadline, and build completion commits the pending
+snapshot. Ordinary incremental updates retain the quiet-period schedule.
+New databases recover an uncheckpointed WAL even before the first base file exists.
+The database format and full-snapshot cost are unchanged.
+
+Source watch bursts keep one latest-state collection per path. Symbol mutation
+admission applies the same Git eligibility as inventory, including unknown file
+types; ignored outputs cannot create graph file rows by bypassing structure reads.
+After a burst, relation candidates reconcile once per workspace, with another
+pass only when new changes arrive during reconciliation.
 
 ## Build and verification
 

@@ -152,7 +152,7 @@ describe("semantic generation store", () => {
       embedder,
     });
     try {
-      store.markBuilding("building");
+      await store.markBuilding("building");
       await store.publishDocument({
         documentId: "src/ready.ts",
         revision: "r1",
@@ -198,7 +198,7 @@ describe("semantic generation store", () => {
     const scope = workspaceScope("ws-count");
     const open = () => createSemanticGenerationStore({ dataDir, hostId: "host", scope, embedder });
     const store = open();
-    store.markBuilding("building");
+    await store.markBuilding("building");
     await store.publishDocuments([
       { documentId: "src/a.ts", revision: "r1", chunks: [chunk("src/a.ts", "alpha")] },
       { documentId: "src/b.ts", revision: "r1", chunks: [chunk("src/b.ts", "beta")] },
@@ -222,6 +222,7 @@ describe("semantic generation store", () => {
     writeFileSync(current, `${JSON.stringify({ ...stale, publishedDocuments: 99 })}\n`, "utf8");
     const reopened = open();
     try {
+      await reopened.ready();
       expect(reopened.checkpoint()?.publishedDocuments).toBe(1);
       expect(reopened.coverage).toBe("partial");
       expect(await reopened.publishedRevision("src/a.ts")).toEqual({ revision: "r2", recipeId: reopened.recipeId });
@@ -274,7 +275,7 @@ describe("semantic generation store", () => {
         scope: workspaceScope("ws-recovery"),
         embedder: createHashEmbedder(),
       });
-      store.markBuilding("building");
+      await store.markBuilding("building");
       await store.publishDocument({
         documentId,
         revision: "r1",
@@ -309,6 +310,7 @@ describe("semantic generation store", () => {
       embedder: createHashEmbedder(),
     });
     try {
+      await reopened.ready();
       expect(reopened.checkpoint()).toMatchObject({
         lifecycle: "building",
         coverage: "partial",

@@ -33,7 +33,7 @@ export type StoreOpenOptions = Pick<OpenWorkspaceKnowledgeDeps, "dataDir" | "hos
 export type StoreRequest = {
   id: number;
   storeId: number;
-  method: StoreMethod | "open";
+  method: StoreMethod | "open" | "semantic";
   args: unknown[];
 };
 export type StoreFailure = { name: string; message: string; code?: string; current?: Block | null };

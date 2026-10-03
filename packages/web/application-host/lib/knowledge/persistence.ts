@@ -88,7 +88,7 @@ export function createStorePersistence(options: {
       if (batchActive) commitRequested = true;
       else checkpoint();
     },
-    defer(): void {
+    defer(optionsForDefer?: { busy?: boolean }): void {
       assertOpen();
       if (version === durableVersion) return;
       const now = Date.now();
@@ -98,7 +98,10 @@ export function createStorePersistence(options: {
         else checkpoint();
         return;
       }
-      schedule(Math.min(quietMs, deadline - now));
+      // A known ongoing build is not idle during its provider/network gaps.
+      // Retain the existing durability deadline without checkpointing the full
+      // database after every slow batch.
+      schedule(optionsForDefer?.busy ? deadline - now : Math.min(quietMs, deadline - now));
     },
     afterCommit(notify: () => void): void {
       if (version === durableVersion) {

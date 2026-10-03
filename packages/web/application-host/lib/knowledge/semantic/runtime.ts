@@ -135,6 +135,7 @@ export function createSemanticIndexRuntime(options: SemanticIndexRuntimeOptions)
   const verifiedScanMetadata = new Map<string, Map<string, string>>();
   const metadataUnverifiedPaths = new Map<string, Set<string>>();
   const mutationPending = new Map<string, Set<string>>();
+  const mutationWork = new Map<string, { token: number; kind: "modified" | "deleted"; controller: AbortController | null }>();
   const indexReadFailures = new Map<string, Set<string>>();
   const scanFailures = new Set<string>();
   const deferredDimensionScans = new WeakMap<SemanticEmbedder, Set<string>>();
@@ -323,11 +324,11 @@ export function createSemanticIndexRuntime(options: SemanticIndexRuntimeOptions)
     return { documentId, revision: prepared.revision, chunks: prepared.chunks, publishToken: token };
   };
 
-  const indexDocument = async (scope: SemanticScopeKey, documentId: string, kind: "modified" | "deleted"): Promise<void> => {
+  const indexDocument = async (scope: SemanticScopeKey, documentId: string, kind: "modified" | "deleted",
+    token: number, changeSignal: AbortSignal): Promise<void> => {
     const scopeSnapshot = options.getIndexScope?.();
-    const signal = scopeSnapshot ? AbortSignal.any([lifecycleController.signal, scopeSnapshot.signal]) : lifecycleController.signal;
+    const signal = AbortSignal.any([lifecycleController.signal, changeSignal, ...(scopeSnapshot ? [scopeSnapshot.signal] : [])]);
     signal.throwIfAborted();
-    const token = nextToken(scope, documentId);
     const embedder = embedderOf();
     const root = (await options.documents.inspectWorkspace(scope.scopeId)).root;
     if (root && scopeSnapshot && !indexPathAllowed(scopeSnapshot, path.resolve(root, documentId))
@@ -384,7 +385,36 @@ export function createSemanticIndexRuntime(options: SemanticIndexRuntimeOptions)
     forgetScanMetadata(workspaceScope(event.workspaceId), event.resourceId);
     pendingForScope.add(event.resourceId);
     mutationPending.set(scopeIdentity(workspaceScope(event.workspaceId)), pendingForScope);
-    track(indexDocument(workspaceScope(event.workspaceId), event.resourceId, event.kind === "deleted" ? "deleted" : "modified"));
+    const scope = workspaceScope(event.workspaceId);
+    const key = `${scopeIdentity(scope)}\0${event.resourceId}`;
+    const token = nextToken(scope, event.resourceId);
+    const kind = event.kind === "deleted" ? "deleted" : "modified";
+    const existing = mutationWork.get(key);
+    if (existing) {
+      existing.token = token;
+      existing.kind = kind;
+      existing.controller?.abort();
+      return;
+    }
+    const work: { token: number; kind: "modified" | "deleted"; controller: AbortController | null } = { token, kind, controller: null };
+    mutationWork.set(key, work);
+    // Filesystem bursts project the latest source state. Intermediate saves
+    // need neither another provider request nor another queued file-body read.
+    track(Promise.resolve().then(async () => {
+      while (!disposed) {
+        const admitted = work.token;
+        work.controller = new AbortController();
+        try { await indexDocument(scope, event.resourceId, work.kind, admitted, work.controller.signal); }
+        catch (error) {
+          if (!isAbortError(error) && work.token === admitted) {
+            mutationWork.delete(key);
+            throw error;
+          }
+        }
+        if (work.token === admitted) break;
+      }
+      mutationWork.delete(key);
+    }));
   };
 
   const scanScope = async (scope: SemanticScopeKey, optionsForScan?: SemanticScanOptions): Promise<void> => {
@@ -488,7 +518,7 @@ export function createSemanticIndexRuntime(options: SemanticIndexRuntimeOptions)
           if (optionsForScan?.forceContentVerification) verifyingScanKeys.add(resolvedKey);
         }
         store = storeFor(scope, embedder);
-        store.markBuilding(store.lifecycle === "ready" ? "rebuilding" : "building");
+        await store.markBuilding(store.lifecycle === "ready" ? "rebuilding" : "building");
         const publishedBefore = await store.listDocumentIds();
         const publishedIds = new Set(publishedBefore);
         const catalogIds = new Set(catalog.map((file) => file.relativePath));
@@ -627,7 +657,7 @@ export function createSemanticIndexRuntime(options: SemanticIndexRuntimeOptions)
         verifiedScanMetadata.set(resolvedKey, nextMetadata);
         if (metadataUnverified.size > 0) metadataUnverifiedPaths.set(resolvedKey, metadataUnverified);
         else metadataUnverifiedPaths.delete(resolvedKey);
-        store.markReady(scanComplete && unverified.size === 0 && metadataUnverified.size === 0);
+        await store.markReady(scanComplete && unverified.size === 0 && metadataUnverified.size === 0);
         updateProgress({ phase: "ready", processedFiles: catalog.length, publishedDocuments: store.checkpoint()?.publishedDocuments ?? 0 });
         deferredDimensionScans.get(embedder)?.delete(scopeScanKey);
       } catch (error) {
@@ -635,7 +665,7 @@ export function createSemanticIndexRuntime(options: SemanticIndexRuntimeOptions)
           ? { phase: "cancelled" }
           : { phase: "failed", error: error instanceof Error ? error.message : String(error) });
         if (!disposed && !isAbortError(error)) {
-          store?.markReady(false);
+          await store?.markReady(false);
           try { options.onError?.(error); } catch { /* observational */ }
         }
       } finally {
@@ -830,6 +860,7 @@ export function createSemanticIndexRuntime(options: SemanticIndexRuntimeOptions)
       if (searchOptions?.waitForFirstPublish === true && activeScan && !activeScan.resolved) {
         await waitWithSignal(activeScan.promise, signal);
       }
+      status = statusForEmbedder(scope, embedder);
       if (scanFailures.has(scopeId)) {
         return { status: { ...status, status: "stale" }, hits: [], gaps: [] };
       }
@@ -900,7 +931,9 @@ export function createSemanticIndexRuntime(options: SemanticIndexRuntimeOptions)
       const indexedHits = queryVector
         ? await waitWithSignal(store.search(queryVector, limit, {
           maskPaths,
-          ...(resourceRoot && scopeSnapshot ? { allowDocument: (documentId: string) => indexPathAllowed(scopeSnapshot, path.resolve(resourceRoot!, documentId), true) } : {}),
+          ...(resourceRoot && scopeSnapshot ? { indexScope: { resourceRoot,
+            directories: scopeSnapshot.directories, pausedDirectories: scopeSnapshot.pausedDirectories,
+            removedDirectories: scopeSnapshot.removedDirectories, excludedDirectories: scopeSnapshot.excludedDirectories } } : {}),
           extras: overlay.extras,
           disk: searchOptions?.view !== "working-state",
           ...(searchOptions?.roots === undefined ? {} : { roots: searchOptions.roots }),

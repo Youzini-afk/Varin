@@ -156,6 +156,28 @@ it('explains a parent-ignored directory and permits an explicit directory enumer
   assert.equal(data(empty.records.find(record => record.kind === 'inventory')!).selectedRootIgnored, false);
 });
 
+it('keeps nested Git visibility under a non-Git project parent and checks exact filenames', async () => {
+  const f = await fixture();
+  const repo = path.join(f.workspace, 'nested');
+  await fs.mkdir(path.join(repo, 'generated'), { recursive: true });
+  await fs.writeFile(path.join(repo, '.gitignore'), 'generated/\n');
+  await fs.writeFile(path.join(repo, 'source.ts'), 'export const source = 1;\n');
+  await fs.writeFile(path.join(repo, 'generated', 'ignored.ts'), 'ignored\n');
+  await fs.writeFile(path.join(repo, 'generated', 'tracked.ts'), 'tracked\n');
+  await fs.writeFile(path.join(repo, 'literal[1].ts'), 'literal\n');
+  execFileSync('git', ['init', '--quiet'], { cwd: repo, stdio: 'ignore' });
+  execFileSync('git', ['add', '-f', '--', 'generated/tracked.ts'], { cwd: repo, stdio: 'ignore' });
+  const inventory = await f.service.directory(f.workspace, { operation: 'list', lane: 'background',
+    includeTracked: true, respectGitignore: true });
+  const paths = inventory.records.filter(record => record.kind === 'entry' && data(record).kind === 'file').map(record => record.path);
+  assert.ok(paths.includes('nested/source.ts'));
+  assert.ok(paths.includes('nested/generated/tracked.ts'));
+  assert.ok(!paths.includes('nested/generated/ignored.ts'), JSON.stringify(paths));
+  const exact = await f.service.directory(f.workspace, { operation: 'list', lane: 'background',
+    includeTracked: true, respectGitignore: true, files: [{ path: 'nested/literal[1].ts' }], paths: ['nested/literal[1].ts'] });
+  assert.deepEqual(exact.records.filter(record => record.kind === 'entry' && data(record).kind === 'file').map(record => record.path), ['nested/literal[1].ts']);
+});
+
 it('indexes Scala through native text units and validates returned source revisions', async () => {
   const f = await fixture();
   execFileSync('git', ['init', '--quiet'], { cwd: f.workspace, stdio: 'ignore' });

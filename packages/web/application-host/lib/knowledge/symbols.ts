@@ -53,13 +53,14 @@ export interface SymbolDocumentChange {
  * are always stored with the disk revision they were computed from (D-087).
  */
 export function createSymbolCollector(deps: SymbolCollectorDeps) {
-  const tails = new Map<string, Promise<void>>();
+  const changes = new Map<string, { change: SymbolDocumentChange; version: number; controller: AbortController | null }>();
   const pending = new Set<Promise<void>>();
   let disposed = false;
 
   const run = async (change: SymbolDocumentChange): Promise<void> => {
+    change.signal?.throwIfAborted();
     if (change.kind === "deleted") {
-      await deps.store.removeFileSymbols(change.path);
+      await deps.store.removeFileSymbols(change.path, change.signal ? { signal: change.signal } : undefined);
       return;
     }
     const language = deps.getLanguage(change.path) ?? "unknown";
@@ -86,15 +87,32 @@ export function createSymbolCollector(deps: SymbolCollectorDeps) {
 
   const observe = (change: SymbolDocumentChange): void => {
     if (disposed) return;
-    const previous = tails.get(change.path) ?? Promise.resolve();
-    const operation = previous.then(() => run(change));
-    const settled = operation.catch((error) => {
-      try { deps.onError?.(error); } catch { /* diagnostics cannot stop later collection */ }
+    const existing = changes.get(change.path);
+    if (existing) {
+      existing.change = change;
+      existing.version++;
+      existing.controller?.abort();
+      return;
+    }
+    const work = { change, version: 0, controller: null as AbortController | null };
+    changes.set(change.path, work);
+    const settled = Promise.resolve().then(async () => {
+      while (!disposed) {
+        const version = work.version;
+        work.controller = new AbortController();
+        const signal = AbortSignal.any([work.controller.signal, ...(work.change.signal ? [work.change.signal] : [])]);
+        try { await run({ ...work.change, signal }); }
+        catch (error) {
+          if (!signal.aborted) {
+            try { deps.onError?.(error); } catch { /* observational */ }
+          }
+        }
+        if (version === work.version) break;
+      }
+      changes.delete(change.path);
     }).finally(() => {
       pending.delete(settled);
-      if (tails.get(change.path) === settled) tails.delete(change.path);
     });
-    tails.set(change.path, settled);
     pending.add(settled);
   };
 
@@ -104,8 +122,9 @@ export function createSymbolCollector(deps: SymbolCollectorDeps) {
 
   const dispose = async (): Promise<void> => {
     disposed = true;
+    for (const work of changes.values()) work.controller?.abort();
     await drain();
-    tails.clear();
+    changes.clear();
   };
 
   return { observe, drain, dispose };

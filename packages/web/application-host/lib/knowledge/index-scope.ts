@@ -1,21 +1,24 @@
 import { realpath } from 'node:fs/promises';
 import path from 'node:path';
 
-export interface IndexScope {
+export interface IndexPathScope {
   directories: readonly string[];
-  pausedDirectories?: readonly string[];
-  removedDirectories?: readonly string[];
+  pausedDirectories?: readonly string[] | undefined;
+  removedDirectories?: readonly string[] | undefined;
   /** Host-owned private state (for example Bot homes), never a source corpus. */
-  excludedDirectories?: readonly string[];
+  excludedDirectories?: readonly string[] | undefined;
+}
+
+export interface IndexScope extends IndexPathScope {
   signal: AbortSignal;
 }
 
-export const excludedFromIndex = (scope: IndexScope | undefined, absolutePath: string): boolean =>
+export const excludedFromIndex = (scope: IndexPathScope | undefined, absolutePath: string): boolean =>
   scope?.excludedDirectories?.some((directory) => insideDirectory(directory, absolutePath)) ?? false;
 
 /** More-specific directory settings override a parent's setting; private Host
  * state always stays excluded. Pause retains query access to published data. */
-export function indexPathAllowed(scope: IndexScope, absolutePath: string, query = false): boolean {
+export function indexPathAllowed(scope: IndexPathScope, absolutePath: string, query = false): boolean {
   if (excludedFromIndex(scope, absolutePath)) return false;
   const rules = [
     ...scope.directories.map((directory) => ({ directory, allowed: true })),

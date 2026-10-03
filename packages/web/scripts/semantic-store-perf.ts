@@ -29,7 +29,7 @@ const store = createSemanticGenerationStore({
 });
 
 try {
-  store.markBuilding("building");
+  await store.markBuilding("building");
   let windowStarted = performance.now();
   const started = windowStarted;
   for (let offset = 0; offset < total;) {

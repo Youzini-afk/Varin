@@ -12,6 +12,36 @@ import { createProjectIndexScope } from './index-scope.js';
 const TEST_DIR = join(tmpdir(), "varin-symbol-runtime");
 
 describe("symbol graph runtime", () => {
+  it('coalesces watch bursts and relation refreshes, and removes ignored paths without reading their bodies', async () => {
+    await store.replaceFileSymbols('generated/old.ts', 'typescript', [{ name: 'Old', kind: 'function',
+      range: { startLine: 0, startCharacter: 0, endLine: 0, endCharacter: 3 } }], 'old');
+    const read = vi.fn(async () => ({ status: 'ready' as const,
+      resource: { workspaceId: 'workspace', resourceId: 'src/a.ts' }, content: 'export const Current = true;',
+      revision: 'current', encoding: 'utf-8', bom: false, byteLength: 28, epoch: 1 }));
+    const resolve = vi.fn(() => store.resolveAssociationCandidates());
+    const runtime = createSymbolGraphRuntime({ getStore: async () => ({ ...store, resolveAssociationCandidates: resolve }),
+      documents: { read, readAgentInputSnapshot: () => ({ status: 'disk' as const }) } as never,
+      isIndexablePath: async (_workspace, resource) => !resource.startsWith('generated/'),
+      supervisor: {
+        syncDocument: async () => ({ status: 'synced', documentVersion: 1 }),
+        documentSymbols: async () => ({ status: 'ready', value: [{ name: 'Current', kind: 13,
+          range: { start: { line: 0, character: 13 }, end: { line: 0, character: 20 } } }] }),
+      } as never,
+    });
+    try {
+      for (let n = 0; n < 30; n++) runtime.observeDocumentMutation({ workspaceId: 'workspace', resourceId: 'src/a.ts',
+        kind: 'modified', owner: { kind: 'web-route', id: 'editor' } });
+      for (const resourceId of ['generated/old.ts', 'generated/output.bin']) runtime.observeDocumentMutation({
+        workspaceId: 'workspace', resourceId, kind: 'modified', owner: { kind: 'web-route', id: 'build' } });
+      await runtime.drain();
+      expect(read).toHaveBeenCalledTimes(1);
+      expect(resolve).toHaveBeenCalledTimes(1);
+      expect((await store.searchSymbols('Current', 5)).map(symbol => symbol.path)).toEqual(['src/a.ts']);
+      expect(await store.getFileRelations('generated/old.ts')).toBeNull();
+      expect((await store.catalogStats()).paths).toEqual(['src/a.ts']);
+    } finally { await runtime.dispose(); }
+  });
+
   it('purges only the selected source catalog and preserves other source folders and memory', async () => {
     const root = join(TEST_DIR, 'source');
     for (const folder of ['removed', 'retained']) await store.replaceFileSymbols(`${folder}/file.ts`, 'typescript', [{

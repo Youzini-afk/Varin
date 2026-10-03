@@ -117,6 +117,9 @@ export const createFsSearchRuntime = ({ compute, path = pathModule }: {
   const isSearchableFile=async(root:string,resourceId:string,signal?:AbortSignal,options?:{respectGitignore:boolean}):Promise<boolean>=>{
     const normalized=resourceId.replaceAll("\\","/");
     if(path.isAbsolute(resourceId)||normalized.split("/").includes(".."))return false;
+    // Match the inventory's existing exclusions before starting native/Git work
+    // for build and dependency watch events.
+    if (normalized.split("/").some(part => part.startsWith(".") || EXCLUDED.includes(part))) return false;
     const result=await compute.directory(root,{lane:"background",operation:"list",includeTracked:true,
       respectGitignore: options?.respectGitignore ?? true,
       excludeDirectories:EXCLUDED,includeHidden:false,files:[{path:normalized}],paths:[normalized]}, {signal});

@@ -21,7 +21,10 @@ derived store (`../vectors/`); they reuse `harness.embed` but never this MiniLM 
   scheduler is shared with knowledge-vector embeddings, so its concurrency setting covers both.
 - Overlay: `query-view.ts` pins surface/thread drafts at query start; masked disk paths cannot leak
   old vectors. Thread view is fixed baseline + this branch’s delta.
-- Storage: `store.ts` — one TriviumDB generation per scope/space; scoped Top-K (D-189); `publishToken`.
+- Storage: `store.ts` — Host embedding orchestration over the existing private knowledge
+  storage process. `store-engine.ts` holds one native TriviumDB generation per
+  scope/space, scoped Top-K (D-189) and `publishToken`; open/recovery, queries,
+  mutations, full checkpoints and cache maintenance never execute on Electron main.
 - Runtime: `runtime.ts` — native directory inventory first returns path and stat metadata without
   reading every file body. New, changed, invalidated and failed paths then enter Documents reads,
   parsing and embedding. A normal query never traverses the root; returned old hits are checked
@@ -56,6 +59,11 @@ derived store (`../vectors/`); they reuse `harness.embed` but never this MiniLM 
   Folder edits cancel work under the old scope and refresh indexing without a restart. Queries mask
   removed folders immediately. A broad addressing root is never recursively watched merely because
   one selected project lives beneath it. Startup activates each selected folder directly.
+  Same-file watch bursts cancel superseded work and prepare the latest state once;
+  pending paths mask old hits immediately. Native exact-file Git eligibility uses
+  literal pathspecs rather than enumerating siblings. A non-Git selected parent
+  retains ignore handling and delegates nested repositories to their own Git
+  inventories, preserving force-tracked ignored files.
   Pausing cancels background scans and stops incremental maintenance while preserving published
   indexes for query-time revision checks. An explicit update check may refresh a paused directory
   once. More-specific folder settings override their parent's state; Host-private exclusions always win.
@@ -98,4 +106,5 @@ derived store (`../vectors/`); they reuse `harness.embed` but never this MiniLM 
 
 Checkpoint scheduling is shared with `../persistence.ts`: dirty state clears only after successful
 native persistence, a failed checkpoint remains retryable, and native close supplies the final flush.
-This derived semantic store has not moved to the workspace/user knowledge storage process.
+Active builds use the existing 30-second checkpoint deadline across embedding
+gaps, then commit at completion; idle incremental writes retain the quiet period.

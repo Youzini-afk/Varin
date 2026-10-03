@@ -123,6 +123,7 @@ const yieldToEventLoop = (): Promise<void> => new Promise((resolve) => {
 export function createSymbolGraphRuntime(options: SymbolGraphRuntimeOptions) {
   const collectors = new Map<string, Promise<SymbolCollector | null>>();
   const pending = new Set<Promise<void>>();
+  const relationRefreshes = new Map<string, { version: number }>();
   const binder = createLanguageViewBinder({ documents: options.documents, supervisor: options.supervisor });
   const catalogControllers = new Map<string, AbortController>();
   interface CatalogScanState {
@@ -324,11 +325,23 @@ export function createSymbolGraphRuntime(options: SymbolGraphRuntimeOptions) {
       }
       const collector = await collectorFor(event.workspaceId);
       if (!collector) return;
-      collector.observe({ path: event.resourceId, kind: event.kind, ...(scope ? { signal: scope.signal } : {}) });
-      return collector.drain().then(async () => {
-        const store = await options.getStore(event.workspaceId);
-        if (store) await store.resolveAssociationCandidates();
-      });
+      const eligible = event.kind === "deleted" || !options.isIndexablePath
+        || await options.isIndexablePath(event.workspaceId, event.resourceId, scope?.signal ?? new AbortController().signal);
+      if (disposed || scope?.signal.aborted) return;
+      collector.observe({ path: event.resourceId, kind: eligible ? event.kind : "deleted", ...(scope ? { signal: scope.signal } : {}) });
+      const existing = relationRefreshes.get(event.workspaceId);
+      if (existing) { existing.version++; return; }
+      const refresh = { version: 0 };
+      relationRefreshes.set(event.workspaceId, refresh);
+      try {
+        while (!disposed) {
+          await collector.drain();
+          const version = refresh.version;
+          const store = await options.getStore(event.workspaceId);
+          if (store) await store.resolveAssociationCandidates();
+          if (version === refresh.version) break;
+        }
+      } finally { relationRefreshes.delete(event.workspaceId); }
     })());
   };
 

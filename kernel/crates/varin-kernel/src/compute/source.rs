@@ -149,49 +149,61 @@ pub(crate) fn visit(task:&mut Task,shared:&Shared,mut callback:impl FnMut(Docume
             let canonical=fs::canonicalize(root).map_err(|e|e.to_string())?;
             if canonical!=*root {return Err("Admitted root identity changed before native capture".into());}
             let root=canonical;
-            let walk_scopes=scopes.clone();let walk_roots=roots.clone();let walk_dirs=dirs.clone();let walk_root=root.clone();
-            // Git visibility belongs to the selected directory, which can be
-            // narrower than the admitted Documents root or have its own repo.
-            let mut inventories = Vec::new();
-            if task.params.include_tracked.unwrap_or(false) && task.params.respect_gitignore.unwrap_or(true) {
-                let mut selected = HashSet::new();
-                for prefix in &roots {
-                    let target = root.join(prefix);
-                    let directory_prefix = if fs::symlink_metadata(&target).is_ok_and(|m|m.is_dir()) {
-                        prefix.clone()
-                    } else { prefix.rsplit_once('/').map(|(parent,_)|parent.to_string()).unwrap_or_default() };
-                    if !selected.insert(directory_prefix.clone()) { continue; }
-                    let directory = fs::canonicalize(root.join(&directory_prefix)).map_err(|e|e.to_string())?;
-                    if !directory.starts_with(&root) { continue; }
-                    inventories.push((directory_prefix, super::inventory::git_inventory(&directory,shared)?));
-                }
+            // Traverse selected directories independently. A non-Git parent
+            // keeps ignore rules active and hands nested repositories to their
+            // own Git inventory (including tracked files ignored by patterns).
+            let mut selected = HashSet::new();
+            let mut walk_starts = Vec::new();
+            for prefix in &roots {
+                let target = root.join(prefix);
+                let directory_prefix = if fs::symlink_metadata(&target).is_ok_and(|m|m.is_dir()) {
+                    prefix.clone()
+                } else { prefix.rsplit_once('/').map(|(parent,_)|parent.to_string()).unwrap_or_default() };
+                if selected.insert(directory_prefix.clone()) { walk_starts.push(directory_prefix); }
             }
-            if task.params.operation == "list" && task.params.include_tracked.unwrap_or(false) {
-                if inventories.is_empty() { shared.emit("inventory", "", "", serde_json::json!({"strategy":"directory","gitRoot":null}))?; }
-                for (prefix, inventory) in &inventories {
-                    shared.emit("inventory", prefix, "", match inventory {
+            let initial = selected.clone();
+            let mut visited = HashSet::new();
+            while let Some(prefix) = walk_starts.pop() {
+                if !visited.insert(prefix.clone()) { continue; }
+                shared.check()?;
+                let directory = fs::canonicalize(root.join(&prefix)).map_err(|e|e.to_string())?;
+                if !directory.starts_with(&root) { continue; }
+                let git_visible = task.params.include_tracked.unwrap_or(false) && task.params.respect_gitignore.unwrap_or(true);
+                let exact = if explicit.is_empty() { None } else {
+                    Some(explicit.iter().filter(|p|within(p,&prefix)).map(|p| {
+                        if prefix.is_empty() { p.clone() } else { p.strip_prefix(&prefix).unwrap_or("").trim_start_matches('/').to_string() }
+                    }).collect::<Vec<_>>())
+                };
+                let inventory = if git_visible { super::inventory::git_inventory(&directory,shared,exact.as_deref())? } else { None };
+                if task.params.operation == "list" && task.params.include_tracked.unwrap_or(false) && initial.contains(&prefix) {
+                    shared.emit("inventory", &prefix, "", match &inventory {
                         Some(inventory) => serde_json::json!({"strategy":"git-visible","gitRoot":inventory.git_root,
                             "selectedRootIgnored":inventory.selected_root_ignored}),
                         None => serde_json::json!({"strategy":"directory","gitRoot":null}),
                     })?;
                 }
-            }
-            let walk_inventories = std::sync::Arc::new(inventories);
-            let mut builder=ignore::WalkBuilder::new(&root);
-            let respect=task.params.respect_gitignore.unwrap_or(true)&&!task.params.include_tracked.unwrap_or(false);
-            builder.hidden(!include_hidden).follow_links(false).git_ignore(respect).git_global(respect).git_exclude(respect).ignore(respect)
-                .filter_entry(move|entry|{
-                    let Ok(path)=entry.path().strip_prefix(&walk_root)else{return false;};let path=path.to_string_lossy().replace('\\',"/");
-                    (walk_inventories.is_empty() || walk_inventories.iter().any(|(prefix, inventory)| {
-                        let directory = entry.file_type().is_some_and(|t|t.is_dir());
-                        if directory && within(prefix, &path) { return true; }
-                        if !within(&path, prefix) { return false; }
-                        let relative = if prefix.is_empty() { path.as_str() } else { path.strip_prefix(prefix).unwrap_or("").trim_start_matches('/') };
-                        inventory.as_ref().is_none_or(|inventory|inventory.allows(relative,directory))
-                    }))
-                    && walk_scopes.iter().any(|s|within(&path,s)||within(s,&path))&&walk_roots.iter().any(|s|within(&path,s)||within(s,&path))
-                        &&!path.split('/').any(|s|walk_dirs.contains(s))
-                });
+                let respect = task.params.respect_gitignore.unwrap_or(true) && inventory.is_none();
+                let discover_repositories = git_visible && inventory.is_none();
+                let nested = std::sync::Arc::new(std::sync::Mutex::new(Vec::<String>::new()));
+                let queued = nested.clone();
+                let walk_scopes=scopes.clone();let walk_roots=roots.clone();let walk_dirs=dirs.clone();let walk_root=root.clone();
+                let walk_prefix=prefix.clone();
+                let mut builder=ignore::WalkBuilder::new(&directory);
+                builder.hidden(!include_hidden).follow_links(false).git_ignore(respect).git_global(respect).git_exclude(respect).ignore(respect)
+                    .filter_entry(move|entry|{
+                        let Ok(path)=entry.path().strip_prefix(&walk_root)else{return false;};let path=path.to_string_lossy().replace('\\',"/");
+                        let is_directory=entry.file_type().is_some_and(|t|t.is_dir());
+                        if !walk_scopes.iter().any(|s|within(&path,s)||within(s,&path))
+                            || !walk_roots.iter().any(|s|within(&path,s)||within(s,&path))
+                            || path.split('/').any(|s|walk_dirs.contains(s)) { return false; }
+                        let relative = if walk_prefix.is_empty() { path.as_str() } else { path.strip_prefix(&walk_prefix).unwrap_or("").trim_start_matches('/') };
+                        if inventory.as_ref().is_some_and(|inventory|!inventory.allows(relative,is_directory)) { return false; }
+                        if discover_repositories && is_directory && path != walk_prefix && entry.path().join(".git").exists() {
+                            queued.lock().unwrap().push(path);
+                            return false;
+                        }
+                        true
+                    });
             for entry in builder.build(){shared.check()?;
                 let entry=match entry{Ok(entry)=>entry,Err(_)=>{partial=true;continue;}};
                 if entry.error().is_some(){partial=true;}
@@ -223,6 +235,8 @@ pub(crate) fn visit(task:&mut Task,shared:&Shared,mut callback:impl FnMut(Docume
                 }else{PathState::Unsupported};
                 let revision=bytes.as_deref().map(revision).unwrap_or_default();
                 if !callback(Document{path,revision,state,bytes,metadata})?{return Ok(partial);}
+            }
+                walk_starts.extend(std::mem::take(&mut *nested.lock().unwrap()));
             }
         }
     }

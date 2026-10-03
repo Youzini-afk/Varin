@@ -41,7 +41,7 @@ fn run_git(root: &Path, args: &[&str], shared: &Shared) -> Result<(std::process:
     Ok((status?, output, diagnostic))
 }
 
-pub(super) fn git_inventory(root: &Path, shared: &Shared) -> Result<Option<GitInventory>> {
+pub(super) fn git_inventory(root: &Path, shared: &Shared, paths: Option<&[String]>) -> Result<Option<GitInventory>> {
     let (status, git_root, diagnostic) = run_git(root, &["rev-parse", "--show-toplevel"], shared)?;
     if !status.success() {
         if status.code()==Some(128)&&String::from_utf8_lossy(&diagnostic).contains("not a git repository") {return Ok(None);}
@@ -49,7 +49,11 @@ pub(super) fn git_inventory(root: &Path, shared: &Shared) -> Result<Option<GitIn
     }
     let git_root = std::str::from_utf8(&git_root).map_err(|_| "Git root is not UTF-8")?
         .trim_end_matches(['\r', '\n']).to_string();
-    let (status, output, _) = run_git(root, &["ls-files", "-z", "--cached", "--others", "--exclude-standard", "--", "."], shared)?;
+    // Exact-file eligibility must not enumerate every sibling in its Git tree.
+    // Literal pathspecs also keep wildcard characters in user filenames literal.
+    let mut args = vec!["--literal-pathspecs", "ls-files", "-z", "--cached", "--others", "--exclude-standard", "--"];
+    if let Some(paths) = paths { args.extend(paths.iter().map(String::as_str)); } else { args.push("."); }
+    let (status, output, _) = run_git(root, &args, shared)?;
     if !status.success() { return Err(format!("Git inventory failed (exit {:?}); enumeration is incomplete", status.code())); }
     let mut files=HashSet::new();let mut directories=HashSet::new();
     for bytes in output.split(|b|*b==0).filter(|b|!b.is_empty()) {

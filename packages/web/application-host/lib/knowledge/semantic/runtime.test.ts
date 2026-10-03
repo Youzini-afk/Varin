@@ -27,6 +27,40 @@ const gate = () => {
 };
 
 describe("semantic index runtime", () => {
+  it('coalesces rapid saves into the latest file state while invalidating old hits immediately', async () => {
+    const documents = await createDocumentAuthorityHarness();
+    disposes.push(() => documents.cleanup());
+    const file = join(documents.workspaceRoot, 'burst.ts');
+    writeFileSync(file, 'export const value = "initial";');
+    const entered = gate(), release = gate();
+    const native = parsingSource();
+    let holding = false, reads = 0;
+    const runtime = createSemanticIndexRuntime({ dataDir: documents.dataDir, hostId: 'burst',
+      documents: documents.authority, embedder: createHashEmbedder(),
+      searchFilesystemFiles: async () => [{ name: 'burst.ts', path: file, relativePath: 'burst.ts' }],
+      structureSource: { ...native, unitsFile: async input => {
+        const result = await native.unitsFile!(input);
+        if (holding && ++reads === 1) { entered.resolve(); await release.promise; }
+        return result;
+      } },
+    });
+    disposes.push(() => runtime.dispose());
+    const scope = workspaceScope(documents.identity.workspaceId);
+    const mutate = () => runtime.observeDocumentMutation({ workspaceId: scope.scopeId, resourceId: 'burst.ts', kind: 'modified' });
+    await runtime.scanScope(scope);
+    holding = true;
+    try {
+      writeFileSync(file, 'export const value = "first";'); mutate();
+      await entered.promise;
+      for (let n = 0; n < 20; n++) { writeFileSync(file, `export const value = "latest-${n}";`); mutate(); }
+      expect((await runtime.search(scope, 'value', 5)).hits).toEqual([]);
+      release.resolve();
+      await runtime.drain();
+      expect(reads).toBe(2);
+      expect((await runtime.search(scope, 'value', 5)).hits[0]?.body).toContain('latest-19');
+    } finally { release.resolve(); }
+  });
+
   it('switches project folders without reading their parent or serving removed folders from the old index', async () => {
     const documents = await createDocumentAuthorityHarness();
     disposes.push(() => documents.cleanup());

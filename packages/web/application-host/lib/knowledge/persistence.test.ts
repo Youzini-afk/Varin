@@ -37,6 +37,22 @@ describe("knowledge persistence boundary", () => {
     expect(flush).toHaveBeenCalledTimes(1);
   });
 
+  it("ongoing builds use the existing deadline across slow batches and completion commits once", async () => {
+    vi.useFakeTimers();
+    const { persistence: p, flush } = fixture();
+    p.changed(); p.defer({ busy: true });
+    await vi.advanceTimersByTimeAsync(10_000);
+    p.changed(); p.defer({ busy: true });
+    await vi.advanceTimersByTimeAsync(19_999);
+    expect(flush).not.toHaveBeenCalled();
+    await vi.advanceTimersByTimeAsync(1);
+    expect(flush).toHaveBeenCalledTimes(1);
+    p.changed(); p.defer({ busy: true });
+    p.commit();
+    await vi.advanceTimersByTimeAsync(31_000);
+    expect(flush).toHaveBeenCalledTimes(2);
+  });
+
   it("failed checkpoints keep dirty data and notifications, and recover before a read", async () => {
     vi.useFakeTimers();
     const { persistence: p, flush } = fixture();

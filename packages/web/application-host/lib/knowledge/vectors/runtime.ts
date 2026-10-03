@@ -404,7 +404,7 @@ export function createKnowledgeVectorRuntime(options: {
     const ids = [...registration.dirtyIds];
     registration.pendingFull = false;
     registration.dirtyIds.clear();
-    store.markBuilding(store.lifecycle === "ready" ? "rebuilding" : "building");
+    await store.markBuilding(store.lifecycle === "ready" ? "rebuilding" : "building");
     const accepted = full ? await listAccepted(registration) : [];
     if (full) await reconcileFull(registration, store, embedder, accepted);
     else {
@@ -415,7 +415,7 @@ export function createKnowledgeVectorRuntime(options: {
       }
     }
     const published = await store.listDocumentIds();
-    store.markReady(registration.pendingFull || registration.dirtyIds.size > 0 ? false : true);
+    await store.markReady(registration.pendingFull || registration.dirtyIds.size > 0 ? false : true);
     registration.status = published.length === 0 && accepted.length === 0 ? "empty" : "used";
   };
 

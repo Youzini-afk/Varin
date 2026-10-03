@@ -1,5 +1,9 @@
 /** Application Host private storage process. Never imported into Electron main. */
 import { openKnowledgeStoreEngine, type KnowledgeStoreEngine } from "./store-engine.js";
+import { createSemanticStoreEngine, type SemanticStoreEngine } from "./semantic/store-engine.js";
+import { isSemanticStoreMethod } from "./semantic/store-protocol.js";
+import { purgeSemanticWorkspaceCache } from "./semantic/cache-maintenance-engine.js";
+import type { SemanticStoreOpenOptions } from "./semantic/store-contract.js";
 import {
   isStoreMethod, storeFailure, type StoreChildMessage, type StoreOpenOptions,
   type StoreRequest, type StoreResponse,
@@ -7,6 +11,7 @@ import {
 
 if (!process.send) throw new Error("Knowledge storage requires a private IPC channel");
 const stores = new Map<number, KnowledgeStoreEngine>();
+const semanticStores = new Map<number, SemanticStoreEngine>();
 let tail: Promise<void> = Promise.resolve();
 let disconnected = false;
 const send = (message: StoreChildMessage): void => {
@@ -19,7 +24,7 @@ const validateRequest = (value: unknown): value is StoreRequest => {
   if (!value || typeof value !== "object") return false;
   const r = value as Partial<StoreRequest>;
   return Number.isSafeInteger(r.id) && Number.isSafeInteger(r.storeId)
-    && (r.method === "open" || isStoreMethod(r.method)) && Array.isArray(r.args);
+    && (r.method === "open" || r.method === "semantic" || isStoreMethod(r.method)) && Array.isArray(r.args);
 };
 const openOptions = (value: unknown): StoreOpenOptions => {
   if (!value || typeof value !== "object") throw new Error("Invalid knowledge store open request");
@@ -38,6 +43,38 @@ async function handle(requests: StoreRequest[]): Promise<void> {
   let offset = 0;
   while (offset < requests.length) {
     const first = requests[offset]!;
+    if (first.method === "semantic") {
+      offset += 1;
+      try {
+        const [method, ...args] = first.args;
+        if (method === "purge") {
+          await purgeSemanticWorkspaceCache(args[0] as Parameters<typeof purgeSemanticWorkspaceCache>[0]);
+          responses.push({ id: first.id, ok: true, value: undefined });
+        } else if (method === "open") {
+          if (semanticStores.has(first.storeId) || stores.has(first.storeId)) throw new Error("Storage handle already exists");
+          const input = args[0] as SemanticStoreOpenOptions;
+          if (!input || typeof input.dataDir !== "string" || typeof input.hostId !== "string"
+            || typeof input.scope?.scopeId !== "string" || typeof input.scope.scopeKind !== "string"
+            || !Number.isSafeInteger(input.space?.dim) || input.space.dim < 1) throw new Error("Invalid semantic store open request");
+          const store = createSemanticStoreEngine({ ...input,
+            onPersistenceError: error => send({ type: "persistence-error", storeId: first.storeId, error: storeFailure(error) }),
+          });
+          semanticStores.set(first.storeId, store);
+          responses.push({ id: first.id, ok: true, value: { checkpoint: store.checkpoint() } });
+        } else {
+          if (!isSemanticStoreMethod(method)) throw new Error("Invalid semantic store method");
+          const store = semanticStores.get(first.storeId);
+          if (!store) throw new Error("Semantic store is not open");
+          const value: unknown = await Reflect.apply(store[method], store, args);
+          if (method === "close") semanticStores.delete(first.storeId);
+          responses.push({ id: first.id, ok: true, value: { value, checkpoint: store.checkpoint() } });
+        }
+      } catch (error) {
+        if (first.args[0] === "open" && error instanceof AggregateError) throw error;
+        responses.push({ id: first.id, ok: false, error: storeFailure(error) });
+      }
+      continue;
+    }
     if (first.method === "open" || first.method === "close") {
       offset += 1;
       try {
@@ -76,7 +113,7 @@ async function handle(requests: StoreRequest[]): Promise<void> {
     const group: StoreRequest[] = [];
     while (offset < requests.length) {
       const r = requests[offset]!;
-      if (r.storeId !== first.storeId || r.method === "open" || r.method === "close") break;
+      if (r.storeId !== first.storeId || r.method === "open" || r.method === "close" || r.method === "semantic") break;
       group.push(r);
       offset += 1;
     }
@@ -131,7 +168,7 @@ process.on("message", (message: unknown) => {
 process.once("disconnect", () => {
   disconnected = true;
   void tail.then(async () => {
-    const results = await Promise.allSettled([...stores.values()].map(store => store.close()));
+    const results = await Promise.allSettled([...stores.values(), ...semanticStores.values()].map(store => store.close()));
     // Process exit also releases Windows mmap handles still retained by the addon.
     process.exit(results.some(result => result.status === "rejected") ? 1 : 0);
   });

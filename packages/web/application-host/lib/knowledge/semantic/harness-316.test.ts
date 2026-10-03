@@ -500,7 +500,7 @@ describe("3.16 vector reuse, scheduler, overlays, and remote spaces", () => {
     disposes.push(() => runtime.dispose());
     const scope = workspaceScope(documents.identity.workspaceId);
     const scanning = runtime.scanScope(scope);
-    const partial = await runtime.search(scope, "first batch pineapple", 4);
+    const partial = await runtime.search(scope, "first batch pineapple", 4, { waitForFirstPublish: true });
     expect(partial.status.coverage).toBe("partial");
     expect(partial.hits[0]?.documentId).toBe("f0.ts");
     releaseSecond();
