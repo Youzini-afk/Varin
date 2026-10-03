@@ -1,4 +1,4 @@
-import { describe, expect, test } from 'bun:test';
+import { describe, expect, test } from 'vitest';
 import type { MagicPromptId } from '@/lib/magicPrompts';
 import { renderPiComposerSubmission } from './piComposerSubmission';
 

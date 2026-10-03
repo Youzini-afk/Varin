@@ -1,4 +1,4 @@
-import { expect, test } from 'bun:test';
+import { expect, test } from 'vitest';
 import type { SurfaceContribution, SurfaceRegistrySnapshot } from '@varin/extension-surface';
 import { varinSurfaceRuntime } from '@/lib/extensions/surface-runtime';
 import {

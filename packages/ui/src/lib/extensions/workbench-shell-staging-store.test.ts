@@ -1,4 +1,4 @@
-import { expect, test } from 'bun:test';
+import { expect, test } from 'vitest';
 import type { SurfaceContribution } from '@varin/extension-surface';
 import { VARIN_WORKBENCH_SHELL_DATA_CONTRACT } from '@varin/extension-contract';
 import {

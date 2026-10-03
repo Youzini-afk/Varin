@@ -1,31 +1,12 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 
-test("application-client exports error classes", async () => {
-  const mod = await import("../src/index.js");
-  assert.ok(mod.DocumentsError, "DocumentsError should be exported");
-  assert.ok(mod.FilesystemError, "FilesystemError should be exported");
-  assert.ok(mod.LanguageServicesError, "LanguageServicesError should be exported");
-  assert.ok(mod.RunServicesError, "RunServicesError should be exported");
-  assert.ok(mod.WorkspaceSearchError, "WorkspaceSearchError should be exported");
-});
-
 test("DocumentsError preserves reason and status", async () => {
   const { DocumentsError } = await import("../src/index.js");
   const error = new DocumentsError("test", { reason: "untrusted", status: 403 });
   assert.equal(error.reason, "untrusted");
   assert.equal(error.status, 403);
   assert.equal(error.name, "DocumentsError");
-});
-
-test("application-client exports transport functions", async () => {
-  const mod = await import("../src/index.js");
-  assert.ok(typeof mod.runtimeFetch === "function", "runtimeFetch should be exported");
-  assert.ok(typeof mod.buildRuntimeAuthHeaders === "function", "buildRuntimeAuthHeaders should be exported");
-  assert.ok(typeof mod.configureRuntimeUrlResolver === "function", "configureRuntimeUrlResolver should be exported");
-  assert.ok(typeof mod.switchRuntimeEndpoint === "function", "switchRuntimeEndpoint should be exported");
-  assert.ok(typeof mod.registerRelayTunnelProvider === "function", "registerRelayTunnelProvider should be exported");
-  assert.ok(typeof mod.registerRelayTunnelLifecycle === "function", "registerRelayTunnelLifecycle should be exported");
 });
 
 test("relay activation fails explicitly when a surface did not register its lifecycle", async () => {

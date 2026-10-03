@@ -55,7 +55,6 @@ export const KERNEL_VITEST_FILES = [
 export default defineConfig({
   resolve: {
     alias: [
-      { find: 'bun:test', replacement: fileURLToPath(new URL('./test/bun-test-shim.ts', import.meta.url)) },
       // CLI sources address the Application Host through a private package import so the
       // published bin/ output resolves server/. Tests run against Host source instead,
       // which keeps them working in a clean checkout with nothing generated yet.

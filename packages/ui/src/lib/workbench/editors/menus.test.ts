@@ -1,4 +1,4 @@
-import { afterEach, describe, expect, test } from 'bun:test';
+import { afterEach, describe, expect, test } from 'vitest';
 import { projectWorkbenchMenu, registerWorkbenchMenuItem, resetWorkbenchMenus } from './menus';
 import { clearWorkbenchContextKeys, setWorkbenchContextKey } from './context-keys';
 

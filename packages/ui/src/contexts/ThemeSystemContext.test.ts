@@ -1,4 +1,4 @@
-import { afterAll, beforeEach, describe, expect, test } from 'bun:test';
+import { afterAll, beforeEach, describe, expect, test } from 'vitest';
 import { getDefaultTheme } from '@/lib/theme/themes';
 import { resetEmbeddedSessionChatCache } from '@/components/layout/contextPanelEmbeddedChat';
 import {

@@ -1,4 +1,4 @@
-import { describe, expect, test } from "bun:test"
+import { describe, expect, test } from 'vitest'
 import type { ProjectEntry } from "@varin/application-client"
 import type { DesktopSettings } from "@/lib/desktop"
 import { useProjectsStore } from "./useProjectsStore"

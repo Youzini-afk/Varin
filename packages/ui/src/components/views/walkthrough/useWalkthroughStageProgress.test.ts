@@ -1,4 +1,4 @@
-import { describe, expect, test } from 'bun:test';
+import { describe, expect, test } from 'vitest';
 import { WALKTHROUGH_STAGE_ORDER, __testing } from './useWalkthroughStageProgress';
 
 const { indexOfStage, nextIndex } = __testing;

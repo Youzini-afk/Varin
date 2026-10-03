@@ -10,7 +10,7 @@
     "build": "tsc --noEmit",
     "type-check": "tsc --noEmit",
     "test": "vitest run",
-    "test:i18n": "vitest run src/lib/i18n/messages.test.ts src/lib/i18n/messages/i18nParity.test.ts",
+    "test:i18n": "vitest run src/lib/i18n",
     "lint": "eslint \"./src/**/*.{ts,tsx}\" --config ../../eslint.config.js"
   },
   "dependencies": {

@@ -108,17 +108,19 @@ the phase 7 plan and current harness status for subsequent capability routing an
   Electron splits `test:runtime` from the dedicated `test:updater`/`test:linux-desktop` vitest files.
 - `bun.lock` covers development. `scripts/cloud-runtime.bun.lock` separately pins the production cloud
   runtime graph; dependency changes that reach it need `bun run update:cloud-runtime-lock`.
-- `@varin/ui` runs under Vitest as part of `bun run test:pi`.
+- UI and Web tests import Vitest directly and run as part of `bun run test:pi`.
+  The former Bun aliases, mock wrappers, and handwritten matcher declarations are removed.
+  Runtime-dependent mock factories use `vi.doMock` before dynamic imports; static mocks use `vi.mock`.
 - Electron's `type-check` covers both `tsconfig.json` (product) and `tsconfig.tests.json` (tests).
   `bun run type-check:electron` prepares workspace type dependencies and emits current Application Host
   declarations into a type-only generated directory; it does not replace a running/locked `server/` runtime.
   `bun run lint:electron` checks all `./packages/electron/*.ts` against the shared ESLint config
   with zero expected errors. Desktop startup, preload, process, native-module, and packaging claims
   still require Electron tests or an actual smoke.
-- The 58 `desktop_*` IPC commands, preload bootstrap payload, desktop events, and shared DTOs are
+- The `desktop_*` IPC commands, preload bootstrap payload, desktop events, and shared DTOs are
   typed in `packages/application-client/src/desktop.ts` — the single framework-neutral contract
   consumed by Electron main, preload, and the UI. Runtime contract tests protect command recognition
-  and the remote-safe subset. Source language
+  and credential isolation. Source language
   and compiler/lint policy are not duplicated in a separate architecture test.
 - Engineering docs are checked by `bun run test:docs`; public docs-site content is checked by
   `bun run docs:validate`.

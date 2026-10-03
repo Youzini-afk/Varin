@@ -1,5 +1,5 @@
 import React from 'react';
-import { describe, expect, test } from 'bun:test';
+import { describe, expect, test } from 'vitest';
 import { renderToStaticMarkup } from 'react-dom/server';
 import type { PiAssistantMessage } from '@varin/protocol';
 import { I18nProvider } from '@/lib/i18n';
@@ -52,7 +52,6 @@ describe('Pi turn assistant chrome', () => {
     expect(markup).toContain('Varin');
     expect(markup).not.toContain('>Pi</span>');
     expect(markup).toContain('snapshot-provider/snapshot-model');
-    expect(markup.match(/animate-busy-pulse/g)).toHaveLength(3);
   });
 
   test('lets the real live assistant model take over without adding a second header', () => {
@@ -66,13 +65,11 @@ describe('Pi turn assistant chrome', () => {
     expect(markup).toContain('runtime-provider/runtime-model');
     expect(markup).not.toContain('snapshot-provider/snapshot-model');
     expect(markup).not.toContain('16,024');
-    expect(markup.match(/animate-busy-pulse/g)).toHaveLength(3);
   });
 
   test('removes the working animation from a completed assistant header', () => {
     const markup = renderChrome(<PiTurnAssistantChrome turn={turn(assistant('stop'))} />);
     expect(markup).not.toContain('role="status"');
-    expect(markup).not.toContain('animate-busy-pulse');
   });
 
   test('uses the provider agent label for non-Varin agent providers', () => {

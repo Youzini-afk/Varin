@@ -1,4 +1,4 @@
-import { afterEach, beforeEach, describe, expect, mock, test } from 'bun:test';
+import { afterEach, beforeEach, describe, expect, test, vi } from 'vitest';
 import type { WalkthroughResult, WalkthroughSource } from '@/lib/walkthrough/types';
 
 const SOURCE: WalkthroughSource = { kind: 'working-tree', scope: 'all' };
@@ -37,7 +37,7 @@ let lastReadLanguage: string | undefined;
 let lastGenerateLanguage: string | undefined;
 let cancelCalls = 0;
 
-mock.module('@/lib/walkthrough/api', () => ({
+vi.doMock('@/lib/walkthrough/api', () => ({
   fetchWalkthrough: async (
     _directory: string,
     _source: WalkthroughSource,
@@ -64,7 +64,7 @@ mock.module('@/lib/walkthrough/api', () => ({
   // makes the whole module fail to load, which reads as an unrelated crash.
   fetchWalkthroughStage: async () => null,
 }));
-mock.module('@varin/application-client', () => ({ getRuntimeKey: () => 'local' }));
+vi.doMock('@varin/application-client', () => ({ getRuntimeKey: () => 'local' }));
 
 const { useWalkthroughStore } = await import('./useWalkthroughStore');
 

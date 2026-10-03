@@ -1,4 +1,4 @@
-import { describe, expect, test } from 'bun:test';
+import { describe, expect, test } from 'vitest';
 import type { SessionSnapshot } from '@varin/protocol';
 import type { WorktreeMetadata } from '@/types/worktree';
 import {

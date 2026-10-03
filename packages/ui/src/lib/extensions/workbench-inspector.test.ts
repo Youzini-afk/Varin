@@ -1,4 +1,4 @@
-import { describe, expect, test } from 'bun:test';
+import { describe, expect, test } from 'vitest';
 import type { VarinExtensionCatalogEntry, VarinExtensionStaticContribution } from '@varin/extension-contract';
 import {
   VARIN_DEBUG_SERVICE_ID,

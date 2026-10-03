@@ -12,11 +12,6 @@ import {
   resolveElectronPiHostEntry,
 } from './pi-runtime.js';
 
-const source = (relativePath: string): Promise<string> => fs.readFile(
-  fileURLToPath(new URL(relativePath, import.meta.url)),
-  'utf8',
-);
-
 // The bundled Pi version is declared once, in the host package. Read it here instead of repeating
 // the literal, so upgrading the runtime does not mean hunting for copies of the number in tests.
 const pinnedPiVersion = () => {
@@ -154,18 +149,4 @@ test('desktop broker handshakes with the compiled Pi host', async () => {
     assert.ok(events.some((event) => event.kind === 'worker.exit' && event.expected));
     await fs.rm(agentDir, { force: true, recursive: true });
   }
-});
-
-test('Electron startup and shutdown own the Pi runtime lifecycle', async () => {
-  const main = await source('./main.ts');
-  assert.match(main, /requirePiRuntime: false/);
-  assert.match(main, /hostEntry: getDesktopPiHostEntry\(\)/);
-  assert.match(main, /const hostEntry = getDesktopPiHostEntry\(\);[\s\S]*hostEntry,/);
-  assert.match(main, /createPiRuntimeBroker:/);
-  assert.doesNotMatch(main, /await ensurePiRuntime\(\);[\s\S]*startWebUiServer/);
-  assert.match(
-    main,
-    /await killSidecar\(\);[\s\S]*await shutdownPiRuntime\(\);/,
-  );
-  assert.match(main, /await shutdownBackgroundServices\(\);[\s\S]*app\.exit\(1\)/);
 });

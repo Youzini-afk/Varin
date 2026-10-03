@@ -1,4 +1,4 @@
-import { expect, test } from 'bun:test';
+import { expect, test } from 'vitest';
 import {
   VARIN_BUILTIN_AGENT_WORKSPACE_EXTENSION_ID,
   VARIN_BUILTIN_IDE_WORKBENCH_EXTENSION_ID,

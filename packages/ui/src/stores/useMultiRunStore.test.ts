@@ -1,4 +1,4 @@
-import { afterAll, beforeEach, describe, expect, test } from 'bun:test';
+import { afterAll, beforeEach, describe, expect, test } from 'vitest';
 import type { SessionSnapshot } from '@varin/protocol';
 import type { CreateGitWorktreePayload, RuntimeAPIs } from '@varin/application-client';
 import { registerRuntimeAPIs } from '@/lib/runtime-api/registry';

@@ -1,4 +1,4 @@
-import { describe, expect, mock, test } from 'bun:test';
+import { describe, expect, test, vi } from 'vitest';
 
 import { createMobilePasswordOperationTracker, loadMobileConnections, migrateLegacyInlineTokenRecords, upsertMobileConnection, validateMobileConnectionSession, type MobileRelayConfig } from './mobileConnections';
 
@@ -168,7 +168,7 @@ describe('mobile connection storage', () => {
 
 describe('validateMobileConnectionSession', () => {
   test('accepts a reachable authenticated runtime', async () => {
-    const fetchMock = mock(async (input: RequestInfo | URL) => {
+    const fetchMock = vi.fn(async (input: RequestInfo | URL) => {
       const url = String(input);
       if (url.endsWith('/health')) return Response.json({ ok: true });
       if (url.endsWith('/auth/session')) return Response.json({ authenticated: true, scope: 'client' });
@@ -188,7 +188,7 @@ describe('validateMobileConnectionSession', () => {
   test('rejects unreachable runtimes', async () => {
     try {
       installTestWindow();
-      globalThis.fetch = mock(async () => new Response(null, { status: 503 })) as typeof fetch;
+      globalThis.fetch = vi.fn(async () => new Response(null, { status: 503 })) as typeof fetch;
 
       const result = await validateMobileConnectionSession({ url: 'https://runtime.example', clientToken: 'token' });
       expect(result).toBe(false);
@@ -198,7 +198,7 @@ describe('validateMobileConnectionSession', () => {
   });
 
   test('rejects invalid or unauthenticated sessions', async () => {
-    const fetchMock = mock(async (input: RequestInfo | URL) => {
+    const fetchMock = vi.fn(async (input: RequestInfo | URL) => {
       const url = String(input);
       if (url.endsWith('/health')) return Response.json({ ok: true });
       return Response.json({ authenticated: false }, { status: 401 });

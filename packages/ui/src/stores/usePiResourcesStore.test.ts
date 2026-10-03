@@ -1,4 +1,4 @@
-import { beforeEach, describe, expect, mock, test } from 'bun:test';
+import { beforeEach, describe, expect, test, vi } from 'vitest';
 import type {
   PiResourceCatalogSnapshot,
   PiResourceDescriptor,
@@ -47,8 +47,8 @@ let copyImpl: (
   name?: string,
 ) => Promise<PiResourceDocumentSnapshot>;
 
-mock.module('@varin/application-client', () => ({ getRuntimeKey: () => runtimeKey }));
-mock.module('@/lib/pi-runtime/resources', () => ({
+vi.doMock('@varin/application-client', () => ({ getRuntimeKey: () => runtimeKey }));
+vi.doMock('@/lib/pi-runtime/resources', () => ({
   listPiResources: (...args: Parameters<typeof listImpl>) => listImpl(...args),
   getPiResource: (...args: Parameters<typeof getImpl>) => getImpl(...args),
   createPiResource: (...args: Parameters<typeof createImpl>) => createImpl(...args),

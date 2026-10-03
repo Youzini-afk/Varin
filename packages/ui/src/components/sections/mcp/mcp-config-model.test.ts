@@ -1,4 +1,4 @@
-import { describe, expect, test } from 'bun:test';
+import { describe, expect, test } from 'vitest';
 import { readJsonPath } from '@/components/sections/plugin-settings/plugin-config-model';
 import {
   canLeaveMcpConfigSource,

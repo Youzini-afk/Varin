@@ -1,4 +1,4 @@
-import { beforeEach, describe, expect, test } from 'bun:test';
+import { beforeEach, describe, expect, test } from 'vitest';
 import { openFileInMainEditor } from './openFileInMainEditor';
 import { setWorkbenchWorkspaceResolutionForTests } from '@/lib/extensions/workbench-workspace';
 import { activeEditorTab } from '@/lib/workbench/editors/groups';

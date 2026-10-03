@@ -1,4 +1,4 @@
-import { afterAll, beforeEach, describe, expect, mock, test } from 'bun:test';
+import { afterAll, beforeEach, describe, expect, test, vi } from 'vitest';
 import type { RuntimeAPIs } from '@varin/application-client';
 import { registerRuntimeAPIs } from '@/lib/runtime-api/registry';
 import { switchRuntimeEndpoint } from '@varin/application-client';
@@ -21,7 +21,7 @@ const createDeferred = <T>(): Deferred<T> => {
   return { promise, resolve, reject };
 };
 
-const searchFilesMock = mock(() => {
+const searchFilesMock = vi.fn(() => {
   const request = createDeferred<Array<{ path: string }>>();
   searchRequests.push(request);
   return request.promise;

@@ -1,4 +1,4 @@
-import { describe, expect, test } from 'bun:test';
+import { describe, expect, test } from 'vitest';
 
 import {
   CONSTRAINED_FILE_REFERENCE_ANNOTATION_MAX_CHARS,

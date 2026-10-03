@@ -1,4 +1,4 @@
-import { describe, expect, test } from 'bun:test';
+import { describe, expect, test } from 'vitest';
 import type { editor } from 'monaco-editor/editor';
 
 import type { DocumentRegistry } from '@/lib/documents/registry';

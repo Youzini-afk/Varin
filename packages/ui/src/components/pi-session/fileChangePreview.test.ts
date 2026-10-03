@@ -1,4 +1,4 @@
-import { describe, expect, test } from 'bun:test';
+import { describe, expect, test } from 'vitest';
 import type { PiToolCall, PiToolResultMessage } from '@varin/protocol';
 import { fileChangePhase, fileChangeTargets, projectFileChanges } from './fileChangePreview';
 

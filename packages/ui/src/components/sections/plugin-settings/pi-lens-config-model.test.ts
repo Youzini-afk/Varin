@@ -1,4 +1,4 @@
-import { describe, expect, test } from 'bun:test';
+import { describe, expect, test } from 'vitest';
 import { piLensDraftIssues } from './pi-lens-config-model';
 
 describe('pi-lens config model', () => {

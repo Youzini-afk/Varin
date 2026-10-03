@@ -1,4 +1,4 @@
-import { beforeEach, describe, expect, test } from 'bun:test';
+import { beforeEach, describe, expect, test } from 'vitest';
 import { DEFAULT_LOCALE } from './runtime';
 import { resetI18nDictionaryCacheForTests, useI18nStore } from './store';
 

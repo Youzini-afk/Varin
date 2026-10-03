@@ -1,4 +1,4 @@
-import { afterEach, describe, expect, test } from 'bun:test';
+import { afterEach, describe, expect, test } from 'vitest';
 import { registerRuntimeAPIs } from '@/lib/runtime-api/registry';
 import type { RuntimeAPIs } from '@varin/application-client';
 import type { DocumentsAPI, VarinAgentInputSnapshotCaptureRequest } from '@varin/application-client';

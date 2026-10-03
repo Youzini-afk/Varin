@@ -1,4 +1,4 @@
-import { describe, expect, test } from 'bun:test';
+import { describe, expect, test } from 'vitest';
 import { resolveRecoveryNextStep } from './desktopRecoveryRouting';
 import type { RecoveryPrimaryAction, RecoveryNextStep } from './desktopRecoveryRouting';
 import type { RecoveryVariant } from './desktopRecoveryConfig';

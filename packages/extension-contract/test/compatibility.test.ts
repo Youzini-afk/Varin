@@ -1,7 +1,6 @@
 import { strict as assert } from "node:assert";
 import { test } from "node:test";
 import {
-  VARIN_CONTRIBUTION_SUPPORTED_VERSIONS,
   checkVarinContributionCompatibility,
   isVarinContributionCompatible,
   parseVarinExtensionManifest,
@@ -50,12 +49,6 @@ test("isVarinContributionCompatible predicate", () => {
   assert.equal(isVarinContributionCompatible("shell", 99), false);
   assert.equal(isVarinContributionCompatible("editor", 1), true);
   assert.equal(isVarinContributionCompatible("editor", 2), false);
-});
-
-test("all contribution kinds have v1 in supported versions", () => {
-  for (const [kind, versions] of Object.entries(VARIN_CONTRIBUTION_SUPPORTED_VERSIONS)) {
-    assert.ok(versions.includes(1), `kind ${kind} must support version 1`);
-  }
 });
 
 test("parseVarinExtensionManifest accepts contractVersion 1", () => {

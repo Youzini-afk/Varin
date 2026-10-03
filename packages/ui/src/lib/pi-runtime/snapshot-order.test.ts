@@ -1,4 +1,4 @@
-import { describe, expect, test } from 'bun:test';
+import { describe, expect, test } from 'vitest';
 import type { PiRuntimeSnapshot } from '@varin/protocol';
 import { shouldApplyPiRuntimeSnapshot } from './snapshot-order';
 

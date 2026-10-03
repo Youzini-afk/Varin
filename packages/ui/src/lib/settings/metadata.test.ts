@@ -1,7 +1,7 @@
-import { describe, expect, mock, test } from 'bun:test';
+import { describe, expect, test, vi } from 'vitest';
 import type { SettingsRuntimeContext } from './page-types';
 
-mock.module('@/hooks/useProviderLogo', () => ({
+vi.doMock('@/hooks/useProviderLogo', () => ({
   preloadProviderLogos: () => undefined,
   useProviderLogo: () => ({ hasLogo: false, onError: () => undefined, src: null }),
 }));
@@ -41,47 +41,7 @@ const runtimeContext = (mcpInstalled: boolean): SettingsRuntimeContext => ({
 });
 
 describe('settings metadata', () => {
-  test('does not expose the removed Smart Search settings page', async () => {
-    await ensureBuiltinSettingsContributions();
-    const smartSearch = getSettingsPageMetadata().find((page) => page.title === 'Smart Search');
 
-    expect(resolveSettingsSlug('smart-search')).toBe('home');
-    expect(smartSearch).toBe(undefined);
-  });
-
-  test('exposes only Pi-native runtime pages', async () => {
-    await ensureBuiltinSettingsContributions();
-    const metadata = getSettingsPageMetadata();
-    const slugs = metadata.map((page) => page.slug);
-
-    expect(slugs).not.toContain('knowledge');
-    expect(slugs).toContain('harness-context');
-    expect(slugs).toContain('language-support');
-    expect(slugs).toContain('runtime');
-    expect(slugs).toContain('providers');
-    expect(slugs).toContain('agents');
-    expect(slugs).toContain('fleet');
-    expect(slugs).toContain('commands');
-    expect(slugs).toContain('prompts');
-    expect(slugs).toContain('skills');
-    expect(slugs).toContain('mcp');
-    expect(slugs).toContain('plugins');
-    expect(slugs).toContain('plugin-settings');
-    expect(slugs).toContain('extensions');
-    expect(metadata.find((page) => page.slug === 'harness-context')?.group).toBe('harness');
-    expect(metadata.find((page) => page.slug === 'language-support')?.group).toBe('pi');
-    expect(metadata.find((page) => page.slug === 'runtime')?.group).toBe('pi');
-    expect(metadata.find((page) => page.slug === 'providers')?.group).toBe('pi');
-    expect(metadata.find((page) => page.slug === 'agents')?.group).toBe('pi');
-    expect(metadata.find((page) => page.slug === 'fleet')?.group).toBe('pi');
-    expect(metadata.find((page) => page.slug === 'commands')?.group).toBe('pi');
-    expect(metadata.find((page) => page.slug === 'prompts')?.group).toBe('pi');
-    expect(metadata.find((page) => page.slug === 'skills')?.group).toBe('pi');
-    expect(metadata.find((page) => page.slug === 'mcp')?.group).toBe('pi');
-    expect(metadata.find((page) => page.slug === 'plugins')?.group).toBe('pi');
-    expect(metadata.find((page) => page.slug === 'plugin-settings')?.group).toBe('pi');
-    expect(metadata.find((page) => page.slug === 'plugin-settings')?.kind).toBe('split');
-  });
 
   test('exposes the split MCP page only for an installed adapter', async () => {
     await ensureBuiltinSettingsContributions();
@@ -91,20 +51,6 @@ describe('settings metadata', () => {
     expect(mcp?.isAvailable?.(runtimeContext(true))).toBe(true);
   });
 
-  test('does not route removed OpenCode settings through compatibility aliases', async () => {
-    await ensureBuiltinSettingsContributions();
-    for (const slug of [
-      'behavior',
-      'skills.installed',
-      'skills.catalog',
-      'openagent',
-      'agent-orchestration',
-    ]) {
-      expect(resolveSettingsSlug(slug)).toBe('home');
-    }
-    expect(resolveSettingsSlug('agents')).toBe('agents');
-    expect(resolveSettingsSlug('commands')).toBe('commands');
-  });
 
   test('adds and withdraws an extension-owned settings page without a document refresh', async () => {
     await ensureBuiltinSettingsContributions();

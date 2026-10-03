@@ -1,4 +1,4 @@
-import { describe, expect, test } from 'bun:test';
+import { describe, expect, test } from 'vitest';
 import { createPiEditorContextDraft } from '@/lib/pi-runtime/editorContext';
 
 const file = {

@@ -1,4 +1,4 @@
-import { beforeEach, describe, expect, mock, test } from 'bun:test';
+import { beforeEach, describe, expect, test, vi } from 'vitest';
 import type { GitWorktreeBootstrapStatus } from '@varin/application-client';
 
 const bootstrapStatusCalls: string[] = [];
@@ -10,7 +10,7 @@ let bootstrapStatusResult: GitWorktreeBootstrapStatus = {
 let getBootstrapStatus = (): Promise<GitWorktreeBootstrapStatus> => Promise.resolve(bootstrapStatusResult);
 const toastErrors: Array<{ title: string; description?: string }> = [];
 
-mock.module('@/components/ui', () => ({
+vi.doMock('@/components/ui', () => ({
   toast: {
     error: (title: string, options?: { description?: string }) => {
       toastErrors.push({ title, description: options?.description });
@@ -18,7 +18,7 @@ mock.module('@/components/ui', () => ({
   },
 }));
 
-mock.module('@/lib/runtime-api/registry', () => ({
+vi.doMock('@/lib/runtime-api/registry', () => ({
   getRegisteredRuntimeAPIs: () => ({
     git: {
       worktree: {
@@ -31,7 +31,7 @@ mock.module('@/lib/runtime-api/registry', () => ({
   }),
 }));
 
-mock.module('@/lib/gitApiHttp', () => ({
+vi.doMock('@/lib/gitApiHttp', () => ({
   getGitWorktreeBootstrapStatus: (directory: string) => {
     bootstrapStatusCalls.push(directory);
     return getBootstrapStatus();

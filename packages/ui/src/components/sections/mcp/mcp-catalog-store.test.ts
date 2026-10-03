@@ -1,4 +1,4 @@
-import { beforeEach, describe, expect, mock, test } from 'bun:test';
+import { beforeEach, describe, expect, test, vi } from 'vitest';
 import type { PiMcpConfigSnapshot } from '@varin/protocol';
 
 let runtimeKey = 'runtime-a';
@@ -20,8 +20,8 @@ const nextSnapshot: PiMcpConfigSnapshot = {
   provider: { bridgeVersion: 1, state: 'active' },
 };
 
-mock.module('@varin/application-client', () => ({ getRuntimeKey: () => runtimeKey }));
-mock.module('@/lib/pi-runtime/mcp', () => ({
+vi.doMock('@varin/application-client', () => ({ getRuntimeKey: () => runtimeKey }));
+vi.doMock('@/lib/pi-runtime/mcp', () => ({
   getPiMcpConfigSnapshot: async () => {
     if (!deferSnapshot) return nextSnapshot;
     return new Promise<PiMcpConfigSnapshot>((resolve) => {

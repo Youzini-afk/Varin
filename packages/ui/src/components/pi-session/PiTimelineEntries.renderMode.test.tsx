@@ -1,5 +1,5 @@
 import React, { act } from 'react';
-import { afterEach, describe, expect, test } from 'bun:test';
+import { afterEach, describe, expect, test } from 'vitest';
 import { vi } from 'vitest';
 import { parseHTML } from 'linkedom';
 import { createRoot } from 'react-dom/client';

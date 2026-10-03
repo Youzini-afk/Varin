@@ -1,4 +1,4 @@
-import { describe, expect, test } from 'bun:test';
+import { describe, expect, test } from 'vitest';
 import { FOUNDATIONAL_PI_PACKAGE_MANIFEST } from '@varin/protocol';
 import { RECOMMENDED_PACKAGES } from './recommended-packages';
 

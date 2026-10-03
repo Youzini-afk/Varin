@@ -66,7 +66,9 @@ The contract exports:
 
 The preload bridge (`preload.ts`) implements `VarinDesktopBridge` and accepts only the exhaustive event catalog shared with the typed main-process emit helpers. The main process validates raw command names with the shared runtime catalog, exhaustively handles the resulting command union, and gates remote-unsafe commands through `REMOTE_SAFE_DESKTOP_COMMANDS`.
 
-The `desktop-contract.test.ts` suite verifies command and event catalog completeness, remote-safe subset equality, unknown-name rejection, argument/result type fixtures, and bootstrap credential isolation.
+`renderer-security-policy.test.ts` verifies trusted renderer origins, remote command restrictions,
+and bootstrap credential isolation. Command guards are tested in `application-client`;
+production main/preload/UI consumers type-check against the shared desktop contract.
 
 ## Development
 

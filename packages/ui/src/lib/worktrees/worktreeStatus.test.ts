@@ -1,4 +1,4 @@
-import { beforeEach, describe, expect, mock, test } from 'bun:test';
+import { beforeEach, describe, expect, test, vi } from 'vitest';
 
 // Per-test controllable behaviour plus manual call tracking (the project's
 // tsconfig does not load bun-test's mock matcher types, so existing tests track
@@ -9,7 +9,7 @@ let statusImpl: (directory: string) => { current: string } = () => ({ current: '
 const resolveRootCalls: string[] = [];
 const statusCalls: string[] = [];
 
-mock.module('@/lib/gitApi', () => ({
+vi.doMock('@/lib/gitApi', () => ({
   getGitStatus: (directory: string) => {
     statusCalls.push(directory);
     return Promise.resolve(statusImpl(directory));

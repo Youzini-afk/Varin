@@ -1,4 +1,4 @@
-import { describe, expect, test } from 'bun:test';
+import { describe, expect, test } from 'vitest';
 import { assignLanes } from './gitGraph';
 import type { GitLogEntry } from '@varin/application-client';
 

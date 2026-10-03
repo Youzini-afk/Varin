@@ -1,4 +1,4 @@
-import { describe, test, expect } from 'bun:test';
+import { describe, test, expect } from 'vitest';
 import { serializeQuestionAsJson, serializeQuestionAsMarkdown } from '../questionSerializers';
 import type { QuestionRequest, QuestionInfo, QuestionOption } from '@/types/question';
 

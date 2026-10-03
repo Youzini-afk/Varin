@@ -1,4 +1,4 @@
-import { expect, mock, test } from 'bun:test';
+import { expect, test, vi } from 'vitest';
 import type {
   VarinExtensionCatalogEntry,
   VarinExtensionHostStateSnapshot,
@@ -12,7 +12,7 @@ import type { SurfaceContribution, SurfaceOwnerIdentity, SurfaceRegistrySnapshot
 import { startWorkbenchMountSession } from './workbench-mount';
 import type { VarinExtensionCatalogStoreState } from './catalog-store';
 
-mock.module('@/hooks/useProviderLogo', () => ({
+vi.doMock('@/hooks/useProviderLogo', () => ({
   preloadProviderLogos: () => undefined,
   useProviderLogo: () => ({ hasLogo: false, onError: () => undefined, src: null }),
 }));

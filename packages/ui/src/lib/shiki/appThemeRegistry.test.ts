@@ -1,4 +1,4 @@
-import { describe, expect, test } from 'bun:test';
+import { describe, expect, test } from 'vitest';
 
 import { themes } from '@/lib/theme/themes';
 import { getResolvedShikiTheme, getThemeContentSignature } from './appThemeRegistry';

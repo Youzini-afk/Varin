@@ -1,4 +1,4 @@
-import { describe, expect, test } from 'bun:test';
+import { describe, expect, test } from 'vitest';
 
 import type { DocumentsAPI, VarinDocumentReadResult, VarinResourceReference } from '@varin/application-client';
 import { validateContextFileOpen } from './contextFileOpenGuard';

@@ -1,4 +1,4 @@
-import { describe, expect, test } from 'bun:test';
+import { describe, expect, test } from 'vitest';
 
 import { DEFAULT_FILE_EDITOR_SETTINGS } from '@/lib/file-editor-settings';
 import { createMonacoEditorOptions, fileEditorPresentationForProfile } from './editor-options';

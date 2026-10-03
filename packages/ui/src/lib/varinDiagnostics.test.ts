@@ -1,12 +1,10 @@
-import { describe, expect, mock, test } from 'bun:test';
-
-(mock as unknown as { restore?: () => void }).restore?.();
+import { describe, expect, test, vi } from 'vitest';
 
 const packageTargets: unknown[] = [];
 const agentTargets: unknown[] = [];
 const resourceTargets: unknown[] = [];
 
-mock.module('@/lib/runtime-api/registry', () => ({
+vi.doMock('@/lib/runtime-api/registry', () => ({
   getRegisteredRuntimeAPIs: () => ({
     git: {
       checkIsGitRepository: async () => true,
@@ -19,7 +17,7 @@ mock.module('@/lib/runtime-api/registry', () => ({
   }),
 }));
 
-mock.module('@/lib/pi-runtime/client', () => ({
+vi.doMock('@/lib/pi-runtime/client', () => ({
   getPiRuntimeConnection: async () => ({
     client: {
       request: async (method: string, params: Record<string, unknown>) => {
@@ -85,7 +83,7 @@ mock.module('@/lib/pi-runtime/client', () => ({
   }),
 }));
 
-mock.module('@/lib/pi-runtime/packages', () => ({
+vi.doMock('@/lib/pi-runtime/packages', () => ({
   listPiPackages: async (target: unknown) => {
     packageTargets.push(target);
     return [{
@@ -101,7 +99,7 @@ mock.module('@/lib/pi-runtime/packages', () => ({
   },
 }));
 
-mock.module('@/lib/pi-runtime/agent-providers', () => ({
+vi.doMock('@/lib/pi-runtime/agent-providers', () => ({
   listPiAgentProviders: async (target: unknown) => {
     agentTargets.push(target);
     return {
@@ -133,7 +131,7 @@ mock.module('@/lib/pi-runtime/agent-providers', () => ({
   },
 }));
 
-mock.module('@/lib/pi-runtime/resources', () => ({
+vi.doMock('@/lib/pi-runtime/resources', () => ({
   listPiResources: async (target: unknown, kind: string) => {
     resourceTargets.push({ kind, target });
     return {
@@ -170,7 +168,7 @@ mock.module('@/lib/pi-runtime/resources', () => ({
   },
 }));
 
-mock.module('@/lib/pi-runtime/fleet', () => ({
+vi.doMock('@/lib/pi-runtime/fleet', () => ({
   getPiFleetStatus: async () => ({
     entries: [{
       actions: [],
@@ -195,7 +193,7 @@ mock.module('@/lib/pi-runtime/fleet', () => ({
   }),
 }));
 
-mock.module('@varin/application-client', () => ({
+vi.doMock('@varin/application-client', () => ({
   getRuntimeUrlResolver: () => ({
     health: () => 'https://runtime.example/health?varin_url_token=secret-token',
   }),
@@ -224,7 +222,7 @@ mock.module('@varin/application-client', () => ({
   }),
 }));
 
-mock.module('@/stores/useDirectoryStore', () => ({
+vi.doMock('@/stores/useDirectoryStore', () => ({
   useDirectoryStore: {
     getState: () => ({
       currentDirectory: 'C:/project',
@@ -236,7 +234,7 @@ mock.module('@/stores/useDirectoryStore', () => ({
   },
 }));
 
-mock.module('@/stores/usePiSessionStore', () => ({
+vi.doMock('@/stores/usePiSessionStore', () => ({
   usePiSessionStore: {
     getState: () => ({
       catalogCwd: 'C:/project',
@@ -288,7 +286,7 @@ mock.module('@/stores/usePiSessionStore', () => ({
   },
 }));
 
-mock.module('@/stores/useProjectsStore', () => ({
+vi.doMock('@/stores/useProjectsStore', () => ({
   useProjectsStore: {
     getState: () => ({
       activeProjectId: 'project-1',

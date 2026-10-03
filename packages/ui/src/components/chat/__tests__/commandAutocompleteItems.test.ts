@@ -1,4 +1,4 @@
-import { describe, expect, test } from 'bun:test';
+import { describe, expect, test } from 'vitest';
 import { commandMatchesSearch } from '../commandAutocompleteItems';
 
 describe('Pi command autocomplete search', () => {

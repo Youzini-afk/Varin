@@ -1,4 +1,4 @@
-import { describe, expect, test } from 'bun:test';
+import { describe, expect, test } from 'vitest';
 import { usePrContextStore, getPrContextKey } from './usePrContextStore';
 import type { GitHubAPI, GitHubPullRequestContextResult } from '@varin/application-client';
 

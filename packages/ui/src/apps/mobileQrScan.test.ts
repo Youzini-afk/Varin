@@ -1,4 +1,4 @@
-import { afterEach, describe, expect, mock, test } from 'bun:test';
+import { afterEach, describe, expect, test, vi } from 'vitest';
 
 import { encodePairingConnectionPayload, buildPairingConnectionPayload } from '@/lib/connectionPayload';
 
@@ -67,13 +67,13 @@ describe('scanConnectionQr on Android', () => {
     const stopScan = async () => { stopCalls += 1; };
     const scan = async () => { oneShotScanCalls += 1; return { barcodes: [] }; };
     const plugin = {
-      requestPermissions: mock(async () => ({ camera: 'granted' })),
+      requestPermissions: vi.fn(async () => ({ camera: 'granted' })),
       scan,
       stopScan,
-      startScan: mock(async () => {
+      startScan: vi.fn(async () => {
         listeners.get('barcodesScanned')?.({ barcodes: [{ rawValue: 'https://varin.example' }] });
       }),
-      addListener: mock((event: string, callback: (info: { barcodes?: Array<{ rawValue?: string }> }) => void) => {
+      addListener: vi.fn((event: string, callback: (info: { barcodes?: Array<{ rawValue?: string }> }) => void) => {
         listeners.set(event, callback);
         return Promise.resolve({ remove });
       }),
@@ -93,10 +93,10 @@ describe('scanConnectionQr on Android', () => {
     let stopCalls = 0;
     const stopScan = async () => { stopCalls += 1; };
     const plugin = {
-      requestPermissions: mock(async () => ({ camera: 'granted' })),
-      startScan: mock(async () => undefined),
+      requestPermissions: vi.fn(async () => ({ camera: 'granted' })),
+      startScan: vi.fn(async () => undefined),
       stopScan,
-      addListener: mock(async () => ({ remove: mock(() => undefined) })),
+      addListener: vi.fn(async () => ({ remove: vi.fn(() => undefined) })),
     };
     Object.defineProperty(globalThis, 'window', {
       configurable: true,

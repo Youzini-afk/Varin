@@ -2,7 +2,7 @@
 // responder side is built from the SAME protocol modules (createHostHandshake +
 // the tunnel codec). No network, no real WebSocket.
 
-import { afterEach, describe, expect, test } from 'bun:test';
+import { afterEach, describe, expect, test } from 'vitest';
 import {
   exportPublicKeyJwk,
   generateEcdhKeyPair,

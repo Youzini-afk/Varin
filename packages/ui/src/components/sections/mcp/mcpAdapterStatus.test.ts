@@ -1,4 +1,4 @@
-import { describe, expect, test } from 'bun:test';
+import { describe, expect, test } from 'vitest';
 import { mcpServerCommandArgument, parseMcpAdapterStatus } from './mcpAdapterStatus';
 
 describe('MCP adapter status contract', () => {

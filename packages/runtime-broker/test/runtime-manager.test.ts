@@ -4,15 +4,23 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { test } from "node:test";
 import type { HostHandshakeResult, PiRuntimeInstallation } from "@varin/protocol";
-import type { RuntimeCandidate } from "@varin/pi-host/discovery";
+import { readPinnedPiVersion, type RuntimeCandidate } from "@varin/pi-host/discovery";
 import { PiHostEntryUnavailableError } from "../src/errors.js";
-import { PiRuntimeManager } from "../src/runtime-manager.js";
+import { PiRuntimeManager, type PiRuntimeManagerOptions } from "../src/runtime-manager.js";
 import { saveRuntimeSelection } from "../src/runtime-selection-store.js";
 
 const SYSTEM_ROOT = "C:\\tools\\node_modules\\@earendil-works\\pi-coding-agent";
 const BUNDLED_ROOT = "C:\\Varin\\bundled\\pi";
 const CUSTOM_ROOT = "D:\\other\\pi-coding-agent";
-const TARGET_VERSION = "0.84.1";
+const TARGET_VERSION = readPinnedPiVersion();
+const NEWER_VERSION = `${Number(TARGET_VERSION.split('.')[0]) + 1}.0.0`;
+
+// These tests own discovery results and install plans. Package-manager probing
+// belongs to the discovery/installer suites, not the developer's real PATH.
+const createManager = (options: PiRuntimeManagerOptions): PiRuntimeManager => new PiRuntimeManager({
+  ...options,
+  discovery: { commandRunner: async () => ({ exitCode: 1, stderr: '', stdout: '' }), ...options.discovery },
+});
 
 const systemReady: RuntimeCandidate = {
   available: true,
@@ -33,7 +41,7 @@ const systemOld: RuntimeCandidate = {
 
 const systemNewer: RuntimeCandidate = {
   ...systemReady,
-  version: "0.99.0",
+  version: NEWER_VERSION,
 };
 
 const bundledReady: RuntimeCandidate = {
@@ -93,7 +101,7 @@ const withDataDir = async (run: (dataDir: string) => Promise<void>): Promise<voi
 test("starts a discovered system install and records the callback handshake", async () => {
   await withDataDir(async (dataDir) => {
     const revisions: number[] = [];
-    const manager = new PiRuntimeManager({
+    const manager = createManager({
       dataDir,
       discover: async () => [systemReady],
       planInstall: planNone,
@@ -119,12 +127,12 @@ test("starts a discovered system install and records the callback handshake", as
 test("keeps a newer installed Pi without downgrading or skipping startup", async () => {
   await withDataDir(async (dataDir) => {
     let started = false;
-    const manager = new PiRuntimeManager({
+    const manager = createManager({
       dataDir,
       discover: async () => [systemNewer],
       planInstall: () => ({
         action: "keep-newer" as const,
-        currentVersion: "0.99.0",
+        currentVersion: NEWER_VERSION,
         reason: "keep newer",
         targetVersion: TARGET_VERSION,
       }),
@@ -138,7 +146,7 @@ test("keeps a newer installed Pi without downgrading or skipping startup", async
 
     assert.equal(started, true);
     assert.equal(snapshot.status, "ready");
-    assert.equal(snapshot.active?.version, "0.99.0");
+    assert.equal(snapshot.active?.version, NEWER_VERSION);
     assert.equal(JSON.stringify(snapshot).includes("downgrade"), false);
   });
 });
@@ -146,7 +154,7 @@ test("keeps a newer installed Pi without downgrading or skipping startup", async
 test("marks an older install as upgrade-required without starting it", async () => {
   await withDataDir(async (dataDir) => {
     let started = false;
-    const manager = new PiRuntimeManager({
+    const manager = createManager({
       dataDir,
       discover: async () => [systemOld],
       planInstall: () => ({
@@ -174,7 +182,7 @@ test("marks an older install as upgrade-required without starting it", async () 
 
 test("preserves a typed Host startup failure through the runtime snapshot", async () => {
   await withDataDir(async (dataDir) => {
-    const manager = new PiRuntimeManager({
+    const manager = createManager({
       dataDir,
       discover: async () => [systemReady],
       planInstall: planNone,
@@ -198,7 +206,7 @@ test("reports probing until the startup callback completes", async () => {
     const entered = new Promise<void>((resolve) => {
       callbackEntered = resolve;
     });
-    const manager = new PiRuntimeManager({
+    const manager = createManager({
       dataDir,
       discover: async () => [systemReady],
       planInstall: planNone,
@@ -212,10 +220,16 @@ test("reports probing until the startup callback completes", async () => {
     });
 
     const startPromise = manager.refresh();
-    await entered;
-    assert.equal(manager.snapshot.status, "probing");
-    assert.equal(manager.snapshot.active, undefined);
-    release();
+    try {
+      await Promise.race([
+        entered,
+        startPromise.then(() => assert.fail('refresh completed without entering the startup callback')),
+      ]);
+      assert.equal(manager.snapshot.status, "probing");
+      assert.equal(manager.snapshot.active, undefined);
+    } finally {
+      release?.();
+    }
     const snapshot = await startPromise;
     assert.equal(snapshot.status, "ready");
     assert.equal(snapshot.active?.state, "ready");
@@ -226,7 +240,7 @@ test("start selects bundled Pi directly without invoking install discovery", asy
   await withDataDir(async (dataDir) => {
     const selectedIds: Array<string | undefined> = [];
     let commandRunnerCalls = 0;
-    const manager = new PiRuntimeManager({
+    const manager = createManager({
       dataDir,
       discover: async (options = {}) => {
         selectedIds.push(options.selectedId);
@@ -255,7 +269,7 @@ test("honors an explicit selected runtime ahead of bundled Pi", async () => {
     await saveRuntimeSelection(dataDir, { selectedId: "system" });
     const selectedIds: Array<string | undefined> = [];
     const started: string[] = [];
-    const manager = new PiRuntimeManager({
+    const manager = createManager({
       dataDir,
       discover: async (options = {}) => {
         selectedIds.push(options.selectedId);
@@ -280,7 +294,7 @@ test("does not fall back to bundled Pi when an explicit selection is missing", a
   await withDataDir(async (dataDir) => {
     await saveRuntimeSelection(dataDir, { selectedId: "system" });
     let started = false;
-    const manager = new PiRuntimeManager({
+    const manager = createManager({
       dataDir,
       discover: async (options = {}) => {
         assert.equal(options.selectedId, "system");
@@ -304,7 +318,7 @@ test("does not fall back to bundled Pi when an explicit selection is missing", a
 test("does not download or install when PATH already has a usable Pi", async () => {
   await withDataDir(async (dataDir) => {
     let installed = false;
-    const manager = new PiRuntimeManager({
+    const manager = createManager({
       dataDir,
       discover: async () => [systemReady],
       installer: {
@@ -327,7 +341,7 @@ test("upgrades an older Pi then starts the rediscovered install", async () => {
   await withDataDir(async (dataDir) => {
     const calls: string[][] = [];
     let discoverCount = 0;
-    const manager = new PiRuntimeManager({
+    const manager = createManager({
       dataDir,
       discover: async () => {
         discoverCount += 1;
@@ -362,7 +376,7 @@ test("upgrades an older Pi then starts the rediscovered install", async () => {
 
 test("keeps the rediscovered state when an upgrade command fails", async () => {
   await withDataDir(async (dataDir) => {
-    const manager = new PiRuntimeManager({
+    const manager = createManager({
       dataDir,
       discover: async () => [systemOld],
       installer: {
@@ -399,7 +413,7 @@ test("installs a missing Pi then starts the rediscovered runtime", async () => {
   await withDataDir(async (dataDir) => {
     const calls: Array<{ executable: string; args: string[] }> = [];
     let discoverCount = 0;
-    const manager = new PiRuntimeManager({
+    const manager = createManager({
       dataDir,
       discover: async () => {
         discoverCount += 1;
@@ -441,7 +455,7 @@ test("activateCustom preserves the selected custom runtime and starts it", async
       selectedId?: string;
       customRuntimes?: Array<{ id?: string; nodePath?: string; packageRoot: string }>;
     }> = [];
-    const manager = new PiRuntimeManager({
+    const manager = createManager({
       dataDir,
       discover: async (options = {}) => {
         seen.push({
@@ -484,7 +498,7 @@ test("preserves a persisted custom runtime id suffix across startup", async () =
       selectedId?: string;
       customRuntimes?: Array<{ id?: string; nodePath?: string; packageRoot: string }>;
     }> = [];
-    const manager = new PiRuntimeManager({
+    const manager = createManager({
       dataDir,
       discover: async (options = {}) => {
         seen.push({

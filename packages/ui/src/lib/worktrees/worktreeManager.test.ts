@@ -1,4 +1,4 @@
-import { beforeEach, describe, expect, mock, test } from 'bun:test';
+import { beforeEach, describe, expect, test, vi } from 'vitest';
 import type { GitWorktreeCreateResult } from '@varin/application-client';
 import type { WorktreeMetadata } from '@/types/worktree';
 
@@ -23,27 +23,27 @@ let createdWorktreeResult: GitWorktreeCreateResult = createdWorktree;
 const bootstrapWatcherCalls: string[] = [];
 const bootstrapWatcherOptions: Array<{ onFailed?: () => void; onReady?: () => void }> = [];
 
-mock.module('@/lib/project-config', () => ({
+vi.doMock('@/lib/project-config', () => ({
   substituteCommandVariables: (command: string) => command,
 }));
 
-mock.module('@/lib/worktrees/worktreeBootstrap', () => ({
-  clearWorktreeBootstrapState: mock(),
-  markWorktreeBootstrapPending: mock(),
-  setWorktreeBootstrapState: mock(),
+vi.doMock('@/lib/worktrees/worktreeBootstrap', () => ({
+  clearWorktreeBootstrapState: vi.fn(),
+  markWorktreeBootstrapPending: vi.fn(),
+  setWorktreeBootstrapState: vi.fn(),
   startWorktreeBootstrapWatcher: (directory: string, options?: { onReady?: () => void }) => {
     bootstrapWatcherCalls.push(directory);
     bootstrapWatcherOptions.push(options ?? {});
   },
 }));
 
-mock.module('@/lib/worktrees/worktreeStatus', () => ({
-  invalidateResolvedProjectRootCache: mock(),
+vi.doMock('@/lib/worktrees/worktreeStatus', () => ({
+  invalidateResolvedProjectRootCache: vi.fn(),
   resolveProjectRoot: (directory: string) => Promise.resolve(directory),
 }));
 
-mock.module('@/lib/gitApi', () => ({
-  deleteRemoteBranch: mock(),
+vi.doMock('@/lib/gitApi', () => ({
+  deleteRemoteBranch: vi.fn(),
   git: {
     worktree: {
       list: (directory: string) => {
@@ -52,8 +52,8 @@ mock.module('@/lib/gitApi', () => ({
           listResolvers.push(resolve);
         });
       },
-      create: mock(() => Promise.resolve(createdWorktreeResult)),
-      remove: mock(() => Promise.resolve({ success: true })),
+      create: vi.fn(() => Promise.resolve(createdWorktreeResult)),
+      remove: vi.fn(() => Promise.resolve({ success: true })),
     },
   },
 }));

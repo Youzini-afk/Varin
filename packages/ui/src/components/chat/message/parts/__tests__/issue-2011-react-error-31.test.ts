@@ -1,4 +1,4 @@
-import { describe, test, expect } from 'bun:test';
+import { describe, test, expect } from 'vitest';
 import { coerceToText, renderTodoOutput } from '../../toolRenderers';
 
 describe('coerceToText (issue #2011)', () => {

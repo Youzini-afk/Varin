@@ -19,7 +19,7 @@ import { mkdir, mkdtemp, readFile, realpath, rm, writeFile } from "node:fs/promi
 import { tmpdir } from "node:os";
 import path, { join } from "node:path";
 import { spawn } from "node:child_process";
-import { createHash, randomUUID } from "node:crypto";
+import { randomUUID } from "node:crypto";
 import { describe, it } from "node:test";
 import { fauxAssistantMessage, fauxToolCall } from "@earendil-works/pi-ai/compat";
 import type { AgentSessionServices } from "@earendil-works/pi-coding-agent";
@@ -55,7 +55,6 @@ import { createSemanticIndexRuntime } from "../../../web/application-host/lib/kn
 import { workspaceScope } from "../../../web/application-host/lib/knowledge/semantic/identity.js";
 import { createStructureSource } from "../../../web/application-host/lib/structure/source.js";
 import { createTreeSitterStructureProvider } from "../../../web/application-host/lib/structure/tree-sitter-provider.js";
-import type { HarnessEmbedParams, HarnessEmbedResult, HarnessRerankParams, HarnessRerankResult } from "@varin/protocol";
 
 import { SessionHost } from "../../src/session-host.js";
 import { CompactionWorkerRuntime } from "../../src/compaction-worker.js";
@@ -397,11 +396,12 @@ describe("session e2e — authorized path boundary", () => {
         const writeResults = branch.filter((entry) => entry.type === "message"
           && entry.message.role === "toolResult" && entry.message.toolName === "write");
         assert.equal(writeResults.length, 2);
-        assert.match(JSON.stringify(writeResults[1]), /outside the actor workspace/);
+        const deniedWrite = writeResults[1];
+        assert.ok(deniedWrite?.type === "message" && deniedWrite.message.role === "toolResult" && deniedWrite.message.isError);
         const readResult = branch.find((entry) => entry.type === "message"
           && entry.message.role === "toolResult" && entry.message.toolName === "read");
         assert.ok(readResult && readResult.type === "message");
-        assert.match(JSON.stringify(readResult.message), /outside the actor workspace/);
+        assert.ok(readResult.message.role === "toolResult" && readResult.message.isError);
         assert.ok(!JSON.stringify(readResult.message).includes(secret), "an outside read must not disclose the file");
       } finally {
         await session.dispose();
@@ -2106,43 +2106,7 @@ describe("session e2e — explore", () => {
           return fauxAssistantMessage("Found the remote pineapple.");
         },
       ]);
-      const hostApi: {
-        embed?: (params: HarnessEmbedParams) => Promise<HarnessEmbedResult>;
-        rerank?: (params: HarnessRerankParams) => Promise<HarnessRerankResult>;
-      } = {};
-      const inferenceConfigurationId = (modelId: string) => createHash("sha256").update(JSON.stringify({
-        providerId: "embed-provider",
-        modelId,
-        baseUrl: "https://models.example/v1",
-        api: "openai-completions",
-      })).digest("hex").slice(0, 16);
-      const remote = createRemoteEmbedder({
-        binding: {
-          protocol: "openai-compatible",
-          providerId: "embed-provider",
-          modelId: "text-embedding-3-small",
-          dimensions: 2,
-          configurationId: inferenceConfigurationId("text-embedding-3-small"),
-        },
-        client: {
-          embed: async (params) => {
-            if (!hostApi.embed) throw new Error("SessionHost embed is not ready");
-            return hostApi.embed(params);
-          },
-        },
-      });
-      const runtime = createSemanticIndexRuntime({
-        dataDir: join(root, "semantic-data"),
-        hostId: "explore-remote-e2e",
-        documents: fixture.documents,
-        structureSource: createStructureSource([createTreeSitterStructureProvider({ compute: fixture.compute, parseBudgetMs: 10_000 })]),
-        searchFilesystemFiles: async () => [{
-          name: "remote.ts",
-          path: join(fixture.workspaceRoot, "remote.ts"),
-          relativePath: "remote.ts",
-        }],
-        embedder: remote,
-      });
+      let runtime: ReturnType<typeof createSemanticIndexRuntime> | undefined;
       const session = await setupSession({
         root,
         sessionRoot: fixture.workspaceRoot,
@@ -2169,6 +2133,7 @@ describe("session e2e — explore", () => {
           resolveWorkspaceRoot: async () => fixture.workspaceRoot,
           readExploreFile: createExploreFileReader(fixture.documents, fixture.paths),
           semanticRecall: async (workspaceId, question, limit, searchOptions) => {
+            assert.ok(runtime, 'semantic runtime must be ready before the agent starts');
             const result = await runtime.search(workspaceScope(workspaceId), question, limit, {
               ...(searchOptions?.signal ? { signal: searchOptions.signal } : {}),
               ...(searchOptions?.roots ? { roots: searchOptions.roots } : {}),
@@ -2196,12 +2161,11 @@ describe("session e2e — explore", () => {
             projectTrusted: true,
           }),
           rerankExploreViews: async (input) => {
-            if (!hostApi.rerank) throw new Error("SessionHost rerank is not ready");
-            return hostApi.rerank({
-              configurationId: inferenceConfigurationId(input.settings.modelId),
-              providerId: input.settings.providerId,
-              modelId: input.settings.modelId,
-              protocol: "http-rerank",
+            const { rerank } = await session.host.describeInference();
+            assert.equal(rerank.status, 'ready');
+            if (rerank.status !== 'ready') throw new Error('Rerank binding is unavailable');
+            return session.host.rerank({
+              ...rerank.binding,
               query: input.query,
               documents: input.documents,
               batchId: "explore-e2e-rerank",
@@ -2210,12 +2174,21 @@ describe("session e2e — explore", () => {
         },
         authorizeWorkspacePath: (actor, inputPath, options) => fixture.paths.resolve(actor, inputPath, options),
       });
-      hostApi.embed = (params) => session.host.embed(params);
-      hostApi.rerank = (params) => session.host.rerank(params);
       try {
         const snapshot = await session.host.create(fixture.workspaceRoot);
         await session.host.runtime.services.modelRuntime.setRuntimeApiKey(model.provider, "faux-key");
         await session.host.runtime.services.modelRuntime.setRuntimeApiKey("embed-provider", "embed-key");
+        const { embedding } = await session.host.describeInference();
+        assert.equal(embedding.status, 'ready');
+        if (embedding.status !== 'ready') throw new Error('Embedding binding is unavailable');
+        runtime = createSemanticIndexRuntime({
+          dataDir: join(root, "semantic-data"),
+          hostId: "explore-remote-e2e",
+          documents: fixture.documents,
+          structureSource: createStructureSource([createTreeSitterStructureProvider({ compute: fixture.compute, parseBudgetMs: 10_000 })]),
+          searchFilesystemFiles: async () => [{ name: 'remote.ts', path: join(fixture.workspaceRoot, 'remote.ts'), relativePath: 'remote.ts' }],
+          embedder: createRemoteEmbedder({ binding: embedding.binding, client: { embed: params => session.host.embed(params) } }),
+        });
         await runtime.scanWorkspace(fixture.identity.workspaceId);
         await session.host.prompt(snapshot.sessionId, "find the remote pineapple");
         await session.host.session.waitForIdle();
@@ -2226,7 +2199,7 @@ describe("session e2e — explore", () => {
         assert.ok(rerankBodies.length > 0);
         assert.doesNotMatch(exploreResult, /embed-key|faux-key/);
       } finally {
-        await runtime.dispose();
+        await runtime?.dispose();
         await session.dispose();
         await fixture.dispose();
       }

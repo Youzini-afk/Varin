@@ -1,12 +1,12 @@
 import React from 'react';
-import { describe, expect, mock, test } from 'bun:test';
+import { describe, expect, test, vi } from 'vitest';
 import { renderToStaticMarkup } from 'react-dom/server';
 
 import { I18nProvider } from '@/lib/i18n';
 
 type MockDialogProps = React.PropsWithChildren<{ open?: boolean; className?: string }>;
 
-mock.module('@/components/ui/dialog', () => ({
+vi.doMock('@/components/ui/dialog', () => ({
   Dialog: ({ children, open = true }: MockDialogProps) => (open ? <>{children}</> : null),
   DialogContent: ({ children }: MockDialogProps) => <div>{children}</div>,
   DialogDescription: ({ children }: MockDialogProps) => <p>{children}</p>,

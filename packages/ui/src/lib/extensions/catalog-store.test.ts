@@ -1,4 +1,4 @@
-import { beforeEach, expect, test } from 'bun:test';
+import { beforeEach, expect, test } from 'vitest';
 import type { VarinExtensionHostStateSnapshot } from '@varin/extension-contract';
 
 let refreshCount = 0;

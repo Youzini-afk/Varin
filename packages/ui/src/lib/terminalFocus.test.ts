@@ -1,4 +1,4 @@
-import { describe, expect, test } from 'bun:test';
+import { describe, expect, test } from 'vitest';
 import { getTerminalFocusOwner, isTerminalEventTarget } from './terminalFocus';
 
 describe('terminal focus ownership', () => {

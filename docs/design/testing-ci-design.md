@@ -36,7 +36,7 @@ Last updated: 2026-09-21
 | 最新 CI 源码/Windows 检查通过，云运行时首次部署启动失败 | 存在真实成品故障，不能把所有红灯归咎于测试或通过取消检查消除 |
 
 历史调查入口包括 CI 源码断言 `scripts/docker-cloud-tools.test.js`（已删除，容器构建与启动检查验证产物）、部署源码断言 `scripts/cloud-remote-deploy.test.js`（已删除）、
-[桌面契约测试](../../packages/electron/desktop-contract.test.ts)、[文档检查](../../scripts/docs/engineering-docs.mjs)、
+[桌面安全行为测试](../../packages/electron/renderer-security-policy.test.ts)、[文档检查](../../scripts/docs/engineering-docs.mjs)、
 [上下文稳定性测试](../../packages/pi-host/test/zone0-stability.test.ts) 和 [原生验收入口](../../scripts/test-kernel-authority.mjs)。
 这些是历史定位线索，不是必须保持原名或固定数量的契约；清理后同步或移除失效链接。
 

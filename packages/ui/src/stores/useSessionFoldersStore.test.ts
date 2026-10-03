@@ -1,4 +1,4 @@
-import { beforeEach, describe, expect, mock, test } from 'bun:test';
+import { beforeEach, describe, expect, test, vi } from 'vitest';
 
 const storage = new Map<string, string>();
 let storageSetCount = 0;
@@ -23,17 +23,17 @@ const safeStorage = {
   },
 } as Storage;
 
-mock.module('./utils/safeStorage', () => ({
+vi.doMock('./utils/safeStorage', () => ({
   getDeferredSafeStorage: () => safeStorage,
   getSafeStorage: () => safeStorage,
 }));
 
-mock.module('@/lib/desktop', () => ({
+vi.doMock('@/lib/desktop', () => ({
 }));
 
-mock.module('@varin/application-client', () => ({
+vi.doMock('@varin/application-client', () => ({
   getRuntimeKey: () => runtimeKey,
-  runtimeFetch: mock(async () => new Response(JSON.stringify(diskResponseBody), { headers: { 'Content-Type': 'application/json' } })),
+  runtimeFetch: vi.fn(async () => new Response(JSON.stringify(diskResponseBody), { headers: { 'Content-Type': 'application/json' } })),
 }));
 
 const { useSessionFoldersStore } = await import('./useSessionFoldersStore');

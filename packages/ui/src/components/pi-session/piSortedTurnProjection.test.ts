@@ -1,4 +1,4 @@
-import { describe, expect, test } from 'bun:test';
+import { describe, expect, test } from 'vitest';
 import type { PiAssistantMessage, PiSessionMessageEntry } from '@varin/protocol';
 import { PI_SORTED_LIVE_ASSISTANT_ID, projectPiSortedTurn } from './piSortedTurnProjection';
 

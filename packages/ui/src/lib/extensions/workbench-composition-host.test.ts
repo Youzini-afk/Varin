@@ -1,4 +1,4 @@
-import { expect, test } from 'bun:test';
+import { expect, test } from 'vitest';
 import type { JsonObject } from '@varin/extension-contract';
 import type { SurfaceContribution } from '@varin/extension-surface';
 import {

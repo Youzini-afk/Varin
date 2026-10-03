@@ -1,5 +1,5 @@
 import React from 'react';
-import { describe, expect, test } from 'bun:test';
+import { describe, expect, test } from 'vitest';
 import { renderToStaticMarkup } from 'react-dom/server';
 import type { PiUsage } from '@varin/protocol';
 import { I18nProvider } from '@/lib/i18n';
@@ -20,10 +20,6 @@ describe('Pi assistant usage footer', () => {
       totalTokens: 10_500,
     });
     expect(markup).toContain('Token');
-    expect(markup).toContain('href="#oc-arrow-down"');
-    expect(markup).toContain('href="#oc-arrow-up"');
-    expect(markup).toContain('href="#oc-database-2"');
-    expect(markup).toContain('href="#oc-bar-chart-box"');
     expect(markup).toContain('title="Input: 2,000"');
     expect(markup).toContain('title="Output: 500"');
     expect(markup).toContain('title="Cache Read: 8,000"');

@@ -1,9 +1,9 @@
-import { beforeEach, describe, expect, mock, test } from 'bun:test';
+import { beforeEach, describe, expect, test, vi } from 'vitest';
 
 let restartCalls = 0;
 let restartImpl: () => Promise<boolean> = async () => true;
 
-mock.module('@/lib/desktop', () => ({
+vi.doMock('@/lib/desktop', () => ({
   checkForDesktopUpdates: async () => null,
   downloadDesktopUpdate: async () => false,
   isDesktopShell: () => true,
@@ -15,16 +15,17 @@ mock.module('@/lib/desktop', () => ({
   },
 }));
 
-mock.module('@varin/application-client', () => ({
+vi.doMock('@varin/application-client', async () => ({
+  ...await vi.importActual<typeof import('@varin/application-client')>('@varin/application-client'),
   runtimeFetch: async () => new Response(null, { status: 204 }),
 }));
 
-mock.module('@/lib/platform', () => ({
+vi.doMock('@/lib/platform', () => ({
   getClientPlatform: () => 'web',
   isCapacitorApp: () => false,
 }));
 
-mock.module('./usePreferencesStore', () => ({
+vi.doMock('./usePreferencesStore', () => ({
   usePreferencesStore: {
     getState: () => ({ settingsAutoUpdateChecksEnabled: true }),
   },

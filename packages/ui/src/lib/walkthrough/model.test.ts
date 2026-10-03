@@ -1,4 +1,4 @@
-import { describe, expect, test as it } from 'bun:test';
+import { describe, expect, test as it } from 'vitest';
 import { buildWalkthroughView, groupHunksByFile, mergeRunPatch, summarizeHunkFiles } from './model';
 import type { WalkthroughHunk, WalkthroughResult } from './types';
 

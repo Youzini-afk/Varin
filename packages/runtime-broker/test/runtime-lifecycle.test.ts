@@ -4,14 +4,20 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { test } from "node:test";
 import type { HostHandshakeResult, SessionSnapshot, SessionSummary } from "@varin/protocol";
-import type { RuntimeCandidate } from "@varin/pi-host/discovery";
+import { readPinnedPiVersion, type RuntimeCandidate } from "@varin/pi-host/discovery";
 import { PiRuntimeNotReadyError } from "../src/errors.js";
 import { dispatchRuntimeRequest } from "../src/runtime-dispatcher.js";
-import { PiRuntimeLifecycle } from "../src/runtime-lifecycle.js";
+import { PiRuntimeLifecycle, type PiRuntimeLifecycleOptions } from "../src/runtime-lifecycle.js";
 import type { PiRuntimeBroker, PiRuntimeBrokerEvent } from "../src/runtime-broker.js";
 
 const SYSTEM_ROOT = "C:\\tools\\node_modules\\@earendil-works\\pi-coding-agent";
 const CUSTOM_ROOT = "D:\\other\\pi-coding-agent";
+const TARGET_VERSION = readPinnedPiVersion();
+
+const createLifecycle = (options: PiRuntimeLifecycleOptions): PiRuntimeLifecycle => new PiRuntimeLifecycle({
+  ...options,
+  discovery: { commandRunner: async () => ({ exitCode: 1, stderr: '', stdout: '' }), ...options.discovery },
+});
 
 const handshakeFor = (packageRoot: string, source: "system" | "custom"): HostHandshakeResult => ({
   capabilities: {
@@ -34,7 +40,7 @@ const handshakeFor = (packageRoot: string, source: "system" | "custom"): HostHan
     nodePath: "C:\\tools\\node.exe",
     nodeVersion: "22.19.0",
     packageRoot,
-    piVersion: "0.84.1",
+    piVersion: TARGET_VERSION,
     source,
   },
 });
@@ -47,7 +53,7 @@ const systemCandidate: RuntimeCandidate = {
   nodePath: "C:\\tools\\node.exe",
   packageRoot: SYSTEM_ROOT,
   source: "system",
-  version: "0.84.1",
+  version: TARGET_VERSION,
 };
 
 const customCandidate: RuntimeCandidate = {
@@ -57,7 +63,7 @@ const customCandidate: RuntimeCandidate = {
   nodePath: "C:\\tools\\node.exe",
   packageRoot: CUSTOM_ROOT,
   source: "custom",
-  version: "0.84.1",
+  version: TARGET_VERSION,
 };
 
 const fakeBroker = (
@@ -156,7 +162,7 @@ const recordingBroker = (
 test("starts without a broker when Pi is missing", async () => {
   const dataDir = await mkdtemp(join(tmpdir(), "varin-lifecycle-"));
   try {
-    const lifecycle = new PiRuntimeLifecycle({
+    const lifecycle = createLifecycle({
       dataDir,
       createBroker: () => {
         throw new Error("should not create a broker");
@@ -166,7 +172,7 @@ test("starts without a broker when Pi is missing", async () => {
       planInstall: () => ({
         action: "install",
         reason: "missing",
-        targetVersion: "0.84.1",
+        targetVersion: TARGET_VERSION,
       }),
     });
     const result = await lifecycle.start();
@@ -182,7 +188,7 @@ test("starts the real broker once and publishes ready only after its handshake",
   const dataDir = await mkdtemp(join(tmpdir(), "varin-lifecycle-"));
   try {
     const created: string[] = [];
-    const lifecycle = new PiRuntimeLifecycle({
+    const lifecycle = createLifecycle({
       dataDir,
       createBroker: (options) => {
         created.push(options.packageRoot ?? "");
@@ -193,7 +199,7 @@ test("starts the real broker once and publishes ready only after its handshake",
       planInstall: () => ({
         action: "none",
         reason: "already installed",
-        targetVersion: "0.84.1",
+        targetVersion: TARGET_VERSION,
       }),
     });
     const observed: Array<{ revision: number; status: string }> = [];
@@ -214,7 +220,7 @@ test("reports broker activation failure instead of publishing a false ready stat
   const dataDir = await mkdtemp(join(tmpdir(), "varin-lifecycle-"));
   try {
     let disposed = false;
-    const lifecycle = new PiRuntimeLifecycle({
+    const lifecycle = createLifecycle({
       dataDir,
       createBroker: () => ({
         activeSessionIds: [],
@@ -235,7 +241,7 @@ test("reports broker activation failure instead of publishing a false ready stat
       planInstall: () => ({
         action: "none",
         reason: "already installed",
-        targetVersion: "0.84.1",
+        targetVersion: TARGET_VERSION,
       }),
     });
     assert.equal(await lifecycle.start(), undefined);
@@ -255,7 +261,7 @@ test("keeps the previous broker generation after activating another install", as
     const first = fakeBroker(SYSTEM_ROOT, ["session-old"]);
     const second = fakeBroker(CUSTOM_ROOT);
     const created: PiRuntimeBroker[] = [];
-    const lifecycle = new PiRuntimeLifecycle({
+    const lifecycle = createLifecycle({
       dataDir,
       createBroker: (options) => {
         const broker = options.packageRoot === CUSTOM_ROOT ? second : first;
@@ -267,7 +273,7 @@ test("keeps the previous broker generation after activating another install", as
       planInstall: () => ({
         action: "none",
         reason: "already installed",
-        targetVersion: "0.84.1",
+        targetVersion: TARGET_VERSION,
       }),
     });
     await lifecycle.start();
@@ -286,7 +292,7 @@ test("routes old-session and worker operations to their owning generation", asyn
     const calls: string[] = [];
     const first = recordingBroker("old", SYSTEM_ROOT, ["session-old"], calls);
     const second = recordingBroker("current", CUSTOM_ROOT, [], calls);
-    const lifecycle = new PiRuntimeLifecycle({
+    const lifecycle = createLifecycle({
       dataDir,
       createBroker: (options) => options.packageRoot === CUSTOM_ROOT ? second.broker : first.broker,
       discover: async () => [systemCandidate, customCandidate],
@@ -294,7 +300,7 @@ test("routes old-session and worker operations to their owning generation", asyn
       planInstall: () => ({
         action: "none",
         reason: "already installed",
-        targetVersion: "0.84.1",
+        targetVersion: TARGET_VERSION,
       }),
     });
     await lifecycle.start();
@@ -353,7 +359,7 @@ test("stops workers that use the global install before upgrading", async () => {
   const dataDir = await mkdtemp(join(tmpdir(), "varin-lifecycle-"));
   try {
     let disposed = false;
-    const lifecycle = new PiRuntimeLifecycle({
+    const lifecycle = createLifecycle({
       dataDir,
       createBroker: (options) => fakeBroker(options.packageRoot ?? SYSTEM_ROOT, ["session-old"], () => {
         disposed = true;
@@ -368,12 +374,12 @@ test("stops workers that use the global install before upgrading", async () => {
       },
       planInstall: () => ({
         action: "upgrade",
-        args: ["install", "-g", "@earendil-works/pi-coding-agent@0.84.1"],
+        args: ["install", "-g", `@earendil-works/pi-coding-agent@${TARGET_VERSION}`],
         currentVersion: "0.80.0",
         executable: "npm.cmd",
         manager: "npm",
         reason: "upgrade",
-        targetVersion: "0.84.1",
+        targetVersion: TARGET_VERSION,
       }),
     });
     await lifecycle.start();

@@ -1,4 +1,4 @@
-import { describe, expect, test } from 'bun:test';
+import { describe, expect, test } from 'vitest';
 import { observationalMemoryDraftIssue } from './observational-memory-config-model';
 
 describe('observational memory config model', () => {

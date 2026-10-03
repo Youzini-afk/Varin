@@ -1,4 +1,4 @@
-import { afterEach, describe, expect, mock, test } from 'bun:test';
+import { afterEach, describe, expect, test, vi } from 'vitest';
 import type { RuntimeAPIs } from '@varin/application-client';
 
 type ComponentFn<P extends Record<string, unknown> = Record<string, unknown>> = (props: P) => unknown;
@@ -239,80 +239,80 @@ let initialLoadingRemoved = false;
 let initialSplashHandoffSet = false;
 let initialSplashHandoffReleased = false;
 
-mock.module('react/jsx-runtime', () => reactJsxRuntime);
-mock.module('react/jsx-dev-runtime', () => reactJsxRuntime);
+vi.doMock('react/jsx-runtime', () => reactJsxRuntime);
+vi.doMock('react/jsx-dev-runtime', () => reactJsxRuntime);
 
-mock.module('react', () => ({
+vi.doMock('react', () => ({
   __esModule: true,
   default: ReactMock,
   ...ReactMock,
 }));
 
-mock.module('@simplewebauthn/browser', () => ({
-  browserSupportsWebAuthn: mock(() => false),
+vi.doMock('@simplewebauthn/browser', () => ({
+  browserSupportsWebAuthn: vi.fn(() => false),
 }));
 
-mock.module('@remixicon/react', () => ({
+vi.doMock('@remixicon/react', () => ({
   RiLoader4Line: () => null,
   RiLockLine: () => null,
   RiLockUnlockLine: () => null,
 }));
 
-mock.module('@/components/ui/button', () => ({
+vi.doMock('@/components/ui/button', () => ({
   Button: ({ children }: { children?: unknown }) => children ?? null,
 }));
 
-mock.module('@/components/ui/checkbox', () => ({
+vi.doMock('@/components/ui/checkbox', () => ({
   Checkbox: () => null,
 }));
 
-mock.module('@/components/ui/input', () => ({
+vi.doMock('@/components/ui/input', () => ({
   Input: (props: JSXProps) => ({ type: 'input', props }),
 }));
 
-mock.module('@/components/ui', () => ({
+vi.doMock('@/components/ui', () => ({
   toast: {
-    success: mock(() => undefined),
-    error: mock(() => undefined),
-    message: mock(() => undefined),
+    success: vi.fn(() => undefined),
+    error: vi.fn(() => undefined),
+    message: vi.fn(() => undefined),
   },
 }));
 
-mock.module('@/components/ui/VarinLogo', () => ({
+vi.doMock('@/components/ui/VarinLogo', () => ({
   VarinLogo: () => 'logo',
 }));
 
-mock.module('@/components/icon/Icon', () => ({
+vi.doMock('@/components/icon/Icon', () => ({
   Icon: () => null,
 }));
 
-mock.module('@/components/desktop/DesktopHostSwitcher', () => ({
+vi.doMock('@/components/desktop/DesktopHostSwitcher', () => ({
   DesktopHostSwitcherInline: () => 'host-switcher',
 }));
 
-mock.module('@/lib/i18n', () => ({
+vi.doMock('@/lib/i18n', () => ({
   useI18n: () => ({ t: (key: string) => key }),
 }));
 
-mock.module('@/lib/desktop', () => ({
+vi.doMock('@/lib/desktop', () => ({
   invokeDesktop: () => desktopInvoke(),
-  isDesktopShell: mock(() => desktopShell),
+  isDesktopShell: vi.fn(() => desktopShell),
 }));
 
-mock.module('@/lib/persistence', () => ({
-  initializeAppearancePreferences: mock(() => Promise.resolve()),
-  syncDesktopSettings: mock(() => Promise.resolve()),
+vi.doMock('@/lib/persistence', () => ({
+  initializeAppearancePreferences: vi.fn(() => Promise.resolve()),
+  syncDesktopSettings: vi.fn(() => Promise.resolve()),
 }));
 
-mock.module('@/lib/directoryPersistence', () => ({
-  applyPersistedDirectoryPreferences: mock(() => restoreDirectoryPreferences()),
+vi.doMock('@/lib/directoryPersistence', () => ({
+  applyPersistedDirectoryPreferences: vi.fn(() => restoreDirectoryPreferences()),
 }));
 
-mock.module('@varin/application-client', () => ({
+vi.doMock('@varin/application-client', () => ({
   getRuntimeApiBaseUrl: () => runtimeApiBaseUrl,
-  getRuntimeExtraHeadersSync: mock(() => ({})),
+  getRuntimeExtraHeadersSync: vi.fn(() => ({})),
   getRuntimeKey: () => runtimeKey,
-  runtimeFetch: mock(async () => {
+  runtimeFetch: vi.fn(async () => {
     if (runtimeFetchRejects) {
       throw new Error('offline');
     }
@@ -331,7 +331,7 @@ mock.module('@varin/application-client', () => ({
   switchRuntimeEndpointSafely: async () => { runtimeSwitchCalls += 1; },
 }));
 
-mock.module('@/lib/desktopHosts', () => ({
+vi.doMock('@/lib/desktopHosts', () => ({
   desktopHostsGet: () => {
     desktopHostsGetCalls += 1;
     return Promise.resolve(null);
@@ -340,17 +340,17 @@ mock.module('@/lib/desktopHosts', () => ({
     desktopHostsSetCalls += 1;
     return Promise.resolve();
   },
-  getDesktopHostApiUrl: mock(() => ''),
-  normalizeHostUrl: mock(() => ''),
+  getDesktopHostApiUrl: vi.fn(() => ''),
+  normalizeHostUrl: vi.fn(() => ''),
 }));
 
-mock.module('@/lib/passkeys', () => ({
-  authenticateWithPasskey: mock(() => Promise.resolve(null)),
-  cancelPasskeyCeremony: mock(() => undefined),
+vi.doMock('@/lib/passkeys', () => ({
+  authenticateWithPasskey: vi.fn(() => Promise.resolve(null)),
+  cancelPasskeyCeremony: vi.fn(() => undefined),
   defaultPasskeyStatus: { enabled: false, hasPasskeys: false, passkeyCount: 0, rpID: null },
-  fetchPasskeyStatus: mock(() => Promise.resolve({ enabled: false, hasPasskeys: false, passkeyCount: 0, rpID: null })),
-  isPasskeyCeremonyAbort: mock(() => false),
-  registerCurrentDevicePasskey: mock(() => Promise.resolve(null)),
+  fetchPasskeyStatus: vi.fn(() => Promise.resolve({ enabled: false, hasPasskeys: false, passkeyCount: 0, rpID: null })),
+  isPasskeyCeremonyAbort: vi.fn(() => false),
+  registerCurrentDevicePasskey: vi.fn(() => Promise.resolve(null)),
 }));
 
 const { SessionAuthGate } = await import('./SessionAuthGate');

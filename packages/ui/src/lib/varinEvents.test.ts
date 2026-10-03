@@ -1,4 +1,4 @@
-import { afterEach, beforeEach, describe, expect, mock, test } from 'bun:test';
+import { afterEach, beforeEach, describe, expect, test, vi } from 'vitest';
 
 let mockSessionId: string | null = null;
 const sessionListeners = new Set<(state: { currentSessionId: string | null }, previous: { currentSessionId: string | null }) => void>();
@@ -6,7 +6,7 @@ const bindCalls: string[] = [];
 let bindGate: Promise<void> | null = null;
 let runtimeListener: (() => void) | null = null;
 
-mock.module('@varin/application-client', () => ({
+vi.doMock('@varin/application-client', () => ({
   getRuntimeUrlResolver: () => ({
     sse: (path: string, query?: Record<string, string>) => {
       const suffix = query ? `?${new URLSearchParams(query).toString()}` : '';
@@ -19,7 +19,7 @@ mock.module('@varin/application-client', () => ({
   },
 }));
 
-mock.module('@/stores/usePiSessionStore', () => ({
+vi.doMock('@/stores/usePiSessionStore', () => ({
   usePiSessionStore: {
     getState: () => ({ currentSessionId: mockSessionId }),
     subscribe: (listener: (state: { currentSessionId: string | null }, previous: { currentSessionId: string | null }) => void) => {
@@ -29,7 +29,7 @@ mock.module('@/stores/usePiSessionStore', () => ({
   },
 }));
 
-mock.module('@/lib/client-settings-bridge', () => ({
+vi.doMock('@/lib/client-settings-bridge', () => ({
   bindClientSurfaceSession: async (sessionId: string) => {
     bindCalls.push(sessionId);
     if (bindGate) await bindGate;

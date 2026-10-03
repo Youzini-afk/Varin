@@ -1,4 +1,4 @@
-import { describe, expect, test } from 'bun:test';
+import { describe, expect, test } from 'vitest';
 
 import { settingsDict as enSettingsDict } from './en.settings';
 import { settingsDict as zhSettingsDict } from './zh-CN.settings';

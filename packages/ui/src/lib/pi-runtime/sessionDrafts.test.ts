@@ -1,4 +1,4 @@
-import { beforeEach, describe, expect, test } from 'bun:test';
+import { beforeEach, describe, expect, test } from 'vitest';
 import type { PiSessionStoreState } from '@/stores/usePiSessionStore';
 import { readPiDraft, usePiDraftStore } from '@/stores/usePiDraftStore';
 import {

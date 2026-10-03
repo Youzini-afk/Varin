@@ -1,4 +1,4 @@
-import { describe, expect, test } from "bun:test";
+import { describe, expect, test } from 'vitest';
 import { extractHunkPatch, splitPatchIntoHunks } from "./patchFileDiff";
 
 const SAMPLE_PATCH = `diff --git a/foo.txt b/foo.txt

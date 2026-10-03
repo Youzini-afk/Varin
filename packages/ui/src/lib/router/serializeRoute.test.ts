@@ -1,4 +1,4 @@
-import { afterAll, afterEach, beforeEach, describe, expect, test } from 'bun:test';
+import { afterAll, afterEach, beforeEach, describe, expect, test } from 'vitest';
 import { updateBrowserURL } from './serializeRoute';
 import type { AppRouteState } from './serializeRoute';
 import { isEmbeddedSessionChat, resetEmbeddedSessionChatCache } from '@/components/layout/contextPanelEmbeddedChat';

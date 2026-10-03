@@ -1,4 +1,4 @@
-import { beforeEach, describe, expect, test } from 'bun:test';
+import { beforeEach, describe, expect, test } from 'vitest';
 import type { GitStatus } from '@varin/application-client';
 import { useGitStore } from './useGitStore';
 import { getRuntimeKey } from '@varin/application-client';

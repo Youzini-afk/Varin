@@ -1,4 +1,4 @@
-import { beforeEach, describe, expect, mock, test } from "bun:test";
+import { beforeEach, describe, expect, test, vi } from 'vitest';
 
 import type {
   WorkspaceAPI,
@@ -139,11 +139,11 @@ const workspaceApi: WorkspaceAPI = {
   },
 };
 
-mock.module("@/lib/workspaceApi", () => ({
+vi.doMock("@/lib/workspaceApi", () => ({
   getWorkspaceAPI: () => workspaceApi,
 }));
 
-mock.module("@/stores/useProjectsStore", () => ({
+vi.doMock("@/stores/useProjectsStore", () => ({
   useProjectsStore: {
     getState: () => ({
       synchronizeFromSettings: () => {},

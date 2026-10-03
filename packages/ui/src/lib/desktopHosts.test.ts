@@ -1,4 +1,4 @@
-import { describe, expect, test } from 'bun:test';
+import { describe, expect, test } from 'vitest';
 import { desktopHostProbe, desktopHostsGet, desktopHostsSet, importDesktopHostPairing, redactSensitiveUrl, resolveDesktopHostUrl } from './desktopHosts';
 
 const withDesktopBridge = async <T>(handler: (cmd: string, args: Record<string, unknown>) => unknown | Promise<unknown>, run: () => Promise<T>): Promise<T> => {

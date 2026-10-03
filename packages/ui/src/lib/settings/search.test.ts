@@ -1,7 +1,7 @@
-import { describe, expect, mock, test } from 'bun:test';
+import { describe, expect, test, vi } from 'vitest';
 import type { SettingsSearchAvailabilityContext } from './search';
 
-mock.module('@/hooks/useProviderLogo', () => ({
+vi.doMock('@/hooks/useProviderLogo', () => ({
   preloadProviderLogos: () => undefined,
   useProviderLogo: () => ({ hasLogo: false, onError: () => undefined, src: null }),
 }));

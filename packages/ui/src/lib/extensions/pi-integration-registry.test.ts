@@ -1,4 +1,4 @@
-import { expect, mock, test } from 'bun:test';
+import { expect, test, vi } from 'vitest';
 import {
   VARIN_BUILTIN_FLEET_EXTENSION,
   VARIN_BUILTIN_IDE_WORKBENCH_EXTENSION,
@@ -7,7 +7,7 @@ import {
 import { SurfaceExtensionRuntime } from '@varin/extension-surface';
 import type { PackageDescriptor } from '@varin/protocol';
 
-mock.module('@/hooks/useProviderLogo', () => ({
+vi.doMock('@/hooks/useProviderLogo', () => ({
   preloadProviderLogos: () => undefined,
   useProviderLogo: () => ({ hasLogo: false, onError: () => undefined, src: null }),
 }));

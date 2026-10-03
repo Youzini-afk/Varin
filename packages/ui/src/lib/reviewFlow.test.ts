@@ -1,4 +1,4 @@
-import { beforeEach, describe, expect, test } from 'bun:test';
+import { beforeEach, describe, expect, test } from 'vitest';
 import type { PiSessionEntry } from '@varin/protocol';
 import { switchRuntimeEndpoint } from '@varin/application-client';
 

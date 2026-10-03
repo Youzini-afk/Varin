@@ -1,4 +1,4 @@
-import { describe, expect, test } from 'bun:test';
+import { describe, expect, test } from 'vitest';
 import type { PiSettingsSnapshot } from '@varin/protocol';
 import { resolvePiComposerDefaults } from './usePiComposerDefaults';
 

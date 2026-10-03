@@ -1,4 +1,4 @@
-import { describe, expect, test } from 'bun:test';
+import { describe, expect, test } from 'vitest';
 import { updateJsoncPath } from './plugin-config-model';
 import { rtkDraftIssues } from './rtk-config-model';
 import { parsePluginTextObjectDraft } from './usePluginConfigDraft';

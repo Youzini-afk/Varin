@@ -6,6 +6,7 @@ import {
   createExtensionStateBridgeExtension,
   MCP_ADAPTER_STATUS_CHANNEL,
 } from "../src/extension-state-bridge.js";
+import { MCP_STATUS_CHANNEL } from "../src/pi-mcp-config-bridge.js";
 
 describe("extension state bridge", () => {
   it("projects public snapshots for the active session and clears them on shutdown", async () => {
@@ -45,7 +46,7 @@ describe("extension state bridge", () => {
     assert.deepEqual(events.at(-1), {
       event: "extension.state",
       data: {
-        channel: MCP_ADAPTER_STATUS_CHANNEL,
+        channel: MCP_STATUS_CHANNEL,
         sessionId: "session-a",
         value: {
           connectedCount: 1,
@@ -59,7 +60,7 @@ describe("extension state bridge", () => {
     assert.deepEqual(events.at(-1), {
       event: "extension.state",
       data: {
-        channel: MCP_ADAPTER_STATUS_CHANNEL,
+        channel: MCP_STATUS_CHANNEL,
         sessionId: "session-a",
         value: null,
       },

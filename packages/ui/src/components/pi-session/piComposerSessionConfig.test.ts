@@ -1,4 +1,4 @@
-import { describe, expect, test } from 'bun:test';
+import { describe, expect, test } from 'vitest';
 import type { ModelDescriptor, SessionSnapshot, ThinkingLevel } from '@varin/protocol';
 import { configurePiComposerSession } from './piComposerSessionConfig';
 

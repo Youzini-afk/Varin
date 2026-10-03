@@ -1,4 +1,4 @@
-import { describe, expect, test } from 'bun:test';
+import { describe, expect, test } from 'vitest';
 import { openAICodexCompatDraftIssue } from './openai-codex-compat-config-model';
 
 describe('OpenAI Codex compatibility config model', () => {

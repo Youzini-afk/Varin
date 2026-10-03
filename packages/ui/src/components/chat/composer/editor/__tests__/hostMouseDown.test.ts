@@ -1,4 +1,4 @@
-import { describe, expect, test } from 'bun:test';
+import { describe, expect, test } from 'vitest';
 import { EditorState, type TransactionSpec } from '@codemirror/state';
 import { drawSelection, type EditorView } from '@codemirror/view';
 

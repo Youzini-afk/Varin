@@ -1,4 +1,4 @@
-import { describe, expect, test } from 'bun:test';
+import { describe, expect, test } from 'vitest';
 import {
   DEFAULT_IDE_WORKBENCH_LAYOUT,
   IDE_LAYOUT_NODE_IDS,

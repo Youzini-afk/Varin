@@ -1,4 +1,4 @@
-import { afterEach, describe, expect, test } from 'bun:test';
+import { afterEach, describe, expect, test } from 'vitest';
 import type { DocumentsAPI, VarinDocumentReadResult, VarinResourceReference } from '@varin/application-client';
 import { getRuntimeKey } from '@varin/application-client';
 import { bindDocumentRegistry, resetDocumentRegistry } from '@/lib/documents/session';

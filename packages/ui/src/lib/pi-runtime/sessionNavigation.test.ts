@@ -1,4 +1,4 @@
-import { describe, expect, test } from 'bun:test';
+import { describe, expect, test } from 'vitest';
 import type { ProjectEntry } from '@varin/application-client';
 import type { SessionSnapshot, SessionSummary } from '@varin/protocol';
 import { useDirectoryStore } from '@/stores/useDirectoryStore';

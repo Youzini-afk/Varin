@@ -1,10 +1,10 @@
 import React from 'react';
-import { describe, expect, mock, test } from 'bun:test';
+import { describe, expect, test, vi } from 'vitest';
 import { renderToStaticMarkup } from 'react-dom/server';
 
 type WrapperProps = React.PropsWithChildren<Record<string, unknown>>;
 
-mock.module('@/components/ui/dialog', () => ({
+vi.doMock('@/components/ui/dialog', () => ({
   Dialog: ({ children, onOpenChange }: WrapperProps) => (
     <div data-dialog-locked={onOpenChange === undefined ? 'true' : 'false'}>{children}</div>
   ),
@@ -14,19 +14,19 @@ mock.module('@/components/ui/dialog', () => ({
   DialogTitle: ({ children }: WrapperProps) => <div>{children}</div>,
 }));
 
-mock.module('@/components/ui/button', () => ({
+vi.doMock('@/components/ui/button', () => ({
   Button: ({ children, ...props }: WrapperProps) => <button {...props}>{children}</button>,
 }));
 
-mock.module('@/components/ui/ScrollableOverlay', () => ({
+vi.doMock('@/components/ui/ScrollableOverlay', () => ({
   ScrollableOverlay: ({ children }: WrapperProps) => <div>{children}</div>,
 }));
 
-mock.module('@/components/chat/MarkdownRenderer', () => ({
+vi.doMock('@/components/chat/MarkdownRenderer', () => ({
   SimpleMarkdownRenderer: ({ content }: { content: string }) => <div>{content}</div>,
 }));
 
-mock.module('@/lib/i18n', () => ({
+vi.doMock('@/lib/i18n', () => ({
   getCurrentIntlLocale: () => 'en-US',
   useI18n: () => ({ t: (key: string) => key }),
 }));

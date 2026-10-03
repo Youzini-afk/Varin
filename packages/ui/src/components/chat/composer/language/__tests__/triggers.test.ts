@@ -1,4 +1,4 @@
-import { describe, expect, test } from 'bun:test';
+import { describe, expect, test } from 'vitest';
 
 import { resolveAutocompleteTrigger, type TriggerContext } from '../triggers';
 

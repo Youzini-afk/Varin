@@ -1,8 +1,8 @@
-import { expect, mock, test } from 'bun:test';
+import { expect, test, vi } from 'vitest';
 import type { SurfaceContribution, SurfaceOwnerIdentity } from '@varin/extension-surface';
 import { startWorkbenchMountSession } from './workbench-mount';
 
-mock.module('@/hooks/useProviderLogo', () => ({
+vi.doMock('@/hooks/useProviderLogo', () => ({
   preloadProviderLogos: () => undefined,
   useProviderLogo: () => ({ hasLogo: false, onError: () => undefined, src: null }),
 }));

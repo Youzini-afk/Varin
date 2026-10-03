@@ -13,7 +13,7 @@
  * directory that hasn't been explicitly fetched, matching the "sometimes empty"
  * behavior reported in the issue.
  */
-import { beforeEach, describe, expect, test } from 'bun:test';
+import { beforeEach, describe, expect, test } from 'vitest';
 import { useGitStore } from './useGitStore';
 
 type GitAPI = Parameters<ReturnType<typeof useGitStore.getState>['fetchStatus']>[1];

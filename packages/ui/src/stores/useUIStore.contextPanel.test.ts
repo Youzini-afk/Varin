@@ -1,4 +1,4 @@
-import { beforeEach, describe, expect, test } from 'bun:test';
+import { beforeEach, describe, expect, test } from 'vitest';
 import { getContextRailMode, sortContextSurfaces } from '../lib/surfaces/registry';
 import { useUIStore } from './useUIStore';
 

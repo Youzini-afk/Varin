@@ -1,4 +1,4 @@
-import { describe, expect, test } from 'bun:test';
+import { describe, expect, test } from 'vitest';
 import { buildRuntimeFetchUrl, isLatin1Safe, runtimeFetch, sanitizeHeadersForBrowser } from '@varin/application-client';
 import { clearRuntimeAuthCredentialProvider, setRuntimeBearerToken } from '@varin/application-client';
 import { configureRuntimeUrlResolver, getRuntimeUrlResolver, setRuntimeUrlResolver } from '@varin/application-client';

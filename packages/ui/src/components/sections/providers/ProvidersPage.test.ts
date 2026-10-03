@@ -1,4 +1,4 @@
-import { describe, expect, test } from 'bun:test';
+import { describe, expect, test } from 'vitest';
 import type { ProviderConfigDetails } from '@varin/protocol';
 import {
   buildProviderSourcesFromDetails,

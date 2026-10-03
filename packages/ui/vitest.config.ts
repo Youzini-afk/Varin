@@ -6,7 +6,6 @@ const src = fileURLToPath(new URL('./src', import.meta.url));
 export default defineConfig({
   resolve: {
     alias: [
-      { find: 'bun:test', replacement: fileURLToPath(new URL('./test/bun-test-shim.ts', import.meta.url)) },
       { find: '@varin/ui', replacement: src },
       { find: '@', replacement: src },
     ],

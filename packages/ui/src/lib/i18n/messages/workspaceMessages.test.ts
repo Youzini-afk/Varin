@@ -1,4 +1,4 @@
-import { describe, expect, test } from 'bun:test';
+import { describe, expect, test } from 'vitest';
 
 import { dict as enDict } from './en';
 import { dict as zhDict } from './zh-CN';

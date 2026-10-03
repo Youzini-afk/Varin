@@ -1,4 +1,4 @@
-import { describe, expect, test } from 'bun:test';
+import { describe, expect, test } from 'vitest';
 import type { ModelDescriptor, SessionSnapshot } from '@varin/protocol';
 import { nextPiFavoriteModel, nextPiThinkingLevel } from './keyboardActions';
 

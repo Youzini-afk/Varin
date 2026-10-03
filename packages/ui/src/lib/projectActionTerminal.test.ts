@@ -1,4 +1,4 @@
-import { describe, expect, test } from 'bun:test';
+import { describe, expect, test } from 'vitest';
 import type { TerminalAPI, TerminalHandlers } from '@varin/application-client';
 import { waitForTerminalExit } from './projectActionTerminal';
 import { detectDevServerCommand } from './detectDevServer';

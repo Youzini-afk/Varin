@@ -1,4 +1,4 @@
-import { describe, expect, test } from 'bun:test';
+import { describe, expect, test } from 'vitest';
 import { getDefaultTheme } from '@/lib/theme/themes';
 import { getSyncedThemeFromPayload, getSyncedThemeVariant } from './theme-sync-payload';
 

@@ -1,8 +1,8 @@
-import { beforeEach, describe, expect, mock, test } from "bun:test"
+import { beforeEach, describe, expect, test, vi } from 'vitest'
 import type { GitHubPullRequestStatus, RuntimeAPIs } from "@varin/application-client"
 
 let runtimeKey = "runtime-a"
-mock.module("@varin/application-client", () => ({ getRuntimeKey: () => runtimeKey }))
+vi.doMock("@varin/application-client", () => ({ getRuntimeKey: () => runtimeKey }))
 
 const { getGitHubPrStatusKey, useGitHubPrStatusStore } = await import("./useGitHubPrStatusStore")
 

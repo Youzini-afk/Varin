@@ -1,4 +1,4 @@
-import { describe, expect, test } from 'bun:test';
+import { describe, expect, test } from 'vitest';
 
 /**
  * These tests verify the rAF coalescing PATTERN used in useChatAutoFollow's

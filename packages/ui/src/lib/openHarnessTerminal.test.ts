@@ -1,4 +1,4 @@
-import { afterEach, describe, expect, test } from 'bun:test';
+import { afterEach, describe, expect, test } from 'vitest';
 import { useTerminalStore } from '@/stores/useTerminalStore';
 import { useUIStore } from '@/stores/useUIStore';
 import { harnessShellIdFromDetails, openHarnessTerminal } from './openHarnessTerminal';
