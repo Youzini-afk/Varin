@@ -258,6 +258,20 @@ describe('work overview presentation', () => {
     expect(container.querySelector('[data-harness-overview-floating="true"]')).not.toBeNull();
     expect(container.querySelector('aside')).toBeNull();
 
+    const outside = document.createElement('textarea');
+    document.body.appendChild(outside);
+    await act(async () => {
+      outside.dispatchEvent(new window.Event('pointerdown', { bubbles: true }));
+      outside.focus();
+      outside.dispatchEvent(new window.Event('click', { bubbles: true }));
+    });
+    expect(container.querySelector('[data-harness-overview-floating="true"]')).not.toBeNull();
+    outside.remove();
+
+    const close = container.querySelector<HTMLButtonElement>('[data-harness-overview-floating="true"] button[aria-label="harness.overview.collapse"]')!;
+    await act(async () => close.click());
+    expect(container.querySelector('[data-harness-overview-floating="true"]')).toBeNull();
+    await act(async () => expand!.click());
     await act(async () => openPanel!.click());
     expect(mocks.toggleContextPanel).toHaveBeenCalledWith('/parent');
     expect(container.querySelector('[data-harness-overview-floating="true"]')).toBeNull();

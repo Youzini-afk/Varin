@@ -684,10 +684,7 @@ export const PiTimeline: React.FC<PiTimelineProps> = (props) => {
         ref={listRef}
         anchoredEndSpace={anchoredEndSpace}
         className="overlay-scrollbar-target overlay-scrollbar-container min-h-0 flex-1 overscroll-contain"
-        contentContainerClassName={cn(
-          'py-5 transition-[padding-right] duration-200 ease-out',
-          props.rightSafeInset && 'xl:pr-[24rem] 2xl:pr-[25rem]',
-        )}
+        contentContainerClassName="py-5"
         data={projection.items}
         dataKey={props.sessionId}
         extraData={extraData}

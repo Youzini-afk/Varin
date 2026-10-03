@@ -99,11 +99,10 @@ describe('PiTimeline scroll ownership', () => {
     };
   });
 
-  const renderTimeline = (rightSafeInset = false) => renderToStaticMarkup(
+  const renderTimeline = () => renderToStaticMarkup(
     <PiTimeline
       cwd="/workspace"
       entries={[]}
-      rightSafeInset={rightSafeInset}
       sessionId="session-1"
       toolExecutions={{}}
     />,
@@ -134,12 +133,6 @@ describe('PiTimeline scroll ownership', () => {
     );
     expect(markup).toContain('chat.compaction.inProgress');
     expect(markup.indexOf('chat.compaction.inProgress')).toBeLessThan(markup.indexOf('data-pi-timeline-end-space'));
-  });
-
-  it('reserves a temporary desktop safe area while the floating work overview is open', () => {
-    renderTimeline(true);
-    expect(mocks.legendProps?.contentContainerClassName).toContain('xl:pr-[24rem]');
-    expect(mocks.legendProps?.contentContainerClassName).toContain('duration-200');
   });
 
   describe('streaming follow', () => {

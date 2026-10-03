@@ -166,6 +166,11 @@ the settings catalog's search identities and the normal save feedback, with expl
 to ambiguous choices and contextual help. Pi rendering consumes the visibility/disclosure preferences;
 obsolete per-fragment actions and the unconsumed subagent display-message preference have been retired.
 
+The desktop work overview reserves space on the shared conversation column, so
+messages and the composer remain aligned as it opens or closes. It stays open
+while users interact with chat; its toggle/close control or explicit workspace
+panel switch closes it.
+
 The desktop Agent shell separates two titlebar controls in `ContextPanelControls`: double chevrons
 show/hide the right icon rail, and the panel icon toggles the last workspace panel directly. Rail
 visibility is a persisted UI preference and never changes panel visibility. The existing per-workspace

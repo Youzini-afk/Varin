@@ -1007,7 +1007,10 @@ export const PiChatView: React.FC<PiChatViewProps> = ({
     <TooltipProvider>
       <HarnessThreadStateProvider parentSessionId={currentSessionId} workspaceId={threadWorkspaceId}>
       <div className={cn('@container relative flex h-full min-h-0 bg-background', !active && 'pointer-events-none')}>
-        <div className="flex min-h-0 min-w-0 flex-1 flex-col">
+        <div className={cn(
+          'flex min-h-0 min-w-0 flex-1 flex-col transition-[padding-right] duration-200 ease-out',
+          workOverviewOpen && 'xl:pr-[24rem] 2xl:pr-[25rem]',
+        )}>
         {conversationHeader}
         {threadWorkspaceId && threadPanelMode === 'inline' ? (
           <HarnessThreadsPanel presentation="inline" title={threadPanelTitle}
@@ -1050,7 +1053,6 @@ export const PiChatView: React.FC<PiChatViewProps> = ({
                   onOpenThread={previewOnly || !threadWorkspaceId ? undefined : handleOpenThread}
                   onRecover={previewOnly ? undefined : handleRecover}
                   onScrollContainerChange={handleTimelineScrollContainerChange}
-                  rightSafeInset={workOverviewOpen}
                   recoveryBusyEntryId={recoveryBusyEntryId}
                   sessionId={currentSessionId}
                   threadBusyEntryId={threadBusyEntryId}

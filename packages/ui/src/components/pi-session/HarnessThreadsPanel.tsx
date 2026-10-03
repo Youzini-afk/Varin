@@ -139,7 +139,6 @@ export const HarnessThreadsPanel: React.FC<{
   const [activePdfMaterial, setActivePdfMaterial] = React.useState<ActivePdfMaterial | null>(null);
   const [overviewOpen, setOverviewOpen] = React.useState(false);
   const [gitStatus, setGitStatus] = React.useState<GitStatus | null>(null);
-  const floatingOverviewRef = React.useRef<HTMLDivElement>(null);
   const messageRequests = React.useRef(new Map<string, { id: string; text: string; mode: string; inFlight: boolean }>());
   const spaceTargetRef = React.useRef(`${workspaceId}\u0000${parentSessionId}`);
   spaceTargetRef.current = `${workspaceId}\u0000${parentSessionId}`;
@@ -577,24 +576,6 @@ export const HarnessThreadsPanel: React.FC<{
       void reloadGitStatus();
     });
   }, [fallbackCwd, reloadGitStatus]);
-
-  React.useEffect(() => {
-    if (!overviewOpen) return;
-    const handlePointerDown = (event: PointerEvent) => {
-      const target = event.target as Node | null;
-      if (target && floatingOverviewRef.current?.contains(target)) return;
-      setOverviewOpen(false);
-    };
-    const handleKeyDown = (event: KeyboardEvent) => {
-      if (event.key === 'Escape') setOverviewOpen(false);
-    };
-    document.addEventListener('pointerdown', handlePointerDown, true);
-    document.addEventListener('keydown', handleKeyDown, true);
-    return () => {
-      document.removeEventListener('pointerdown', handlePointerDown, true);
-      document.removeEventListener('keydown', handleKeyDown, true);
-    };
-  }, [overviewOpen]);
 
   React.useEffect(() => {
     if (presentation !== 'sidebar') return;
@@ -1371,7 +1352,6 @@ export const HarnessThreadsPanel: React.FC<{
         </details>
       ) : <>
       <div
-        ref={floatingOverviewRef}
         className="pointer-events-none absolute right-3 top-2 z-40 hidden flex-col items-end xl:flex"
       >
         <div
