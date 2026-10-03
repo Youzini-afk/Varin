@@ -17,17 +17,19 @@ import {
 import { CSS } from '@dnd-kit/utilities';
 
 import { Icon } from '@/components/icon/Icon';
-import { DiffIcon } from '@/components/icons/DiffIcon';
 import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip';
 import { useEffectiveDirectory } from '@/hooks/useEffectiveDirectory';
 import { useI18n } from '@/lib/i18n';
 import {
   sortContextSurfaces,
+  getContextRailMode,
   type ContextSurfaceDescriptor,
 } from '@/lib/surfaces/registry';
 import { cn } from '@/lib/utils';
 import { useFeatureFlagsStore } from '@/stores/useFeatureFlagsStore';
 import { useGitStatus } from '@/stores/useGitStore';
+import { usePiSessionStore } from '@/stores/usePiSessionStore';
+import { contextPanelGitDirectoryScopeKey, useContextPanelGitDirectoryStore } from '@/stores/useContextPanelGitDirectoryStore';
 import { normalizeContextPanelDirectoryKey, useUIStore } from '@/stores/useUIStore';
 
 const RAIL_TOOLTIP_DELAY_MS = 150;
@@ -85,11 +87,7 @@ const ContextPanelRailItem: React.FC<RailItemProps> = ({
             {isActive ? (
               <span aria-hidden="true" className="absolute -left-1 h-4 w-0.5 rounded-full bg-primary" />
             ) : null}
-            {surface.id === 'diff' ? (
-              <DiffIcon className="h-[18px] w-[18px]" />
-            ) : (
-              <Icon name={surface.icon} className="h-[18px] w-[18px]" />
-            )}
+            <Icon name={surface.icon} className="h-[18px] w-[18px]" />
             {badgeCount !== undefined && badgeCount > 0 ? (
               <span
                 aria-hidden="true"
@@ -130,7 +128,9 @@ export const ContextPanelRail: React.FC = () => {
   const setContextRailOrder = useUIStore((state) => state.setContextRailOrder);
   const openContextSurface = useUIStore((state) => state.openContextSurface);
   const planModeEnabled = useFeatureFlagsStore((state) => state.planModeEnabled);
-  const gitStatus = useGitStatus(directoryKey || null);
+  const sessionId = usePiSessionStore((state) => state.currentSessionId);
+  const gitScopeKey = contextPanelGitDirectoryScopeKey(sessionId, effectiveDirectory);
+  const selectedGitDirectory = useContextPanelGitDirectoryStore((state) => gitScopeKey ? state.directories[gitScopeKey] : undefined);
 
   const sensors = useSensors(
     useSensor(MouseSensor, { activationConstraint: { distance: 8 } }),
@@ -139,7 +139,10 @@ export const ContextPanelRail: React.FC = () => {
 
   const tabs = panelState?.tabs ?? EMPTY_TABS;
   const activeTab = tabs.find((tab) => tab.id === panelState?.activeTabId) ?? null;
-  const activeMode = panelState?.isOpen ? activeTab?.mode ?? null : null;
+  const activeMode = panelState?.isOpen && activeTab ? getContextRailMode(activeTab.mode) : null;
+  const gitStatusDirectory = activeTab && getContextRailMode(activeTab.mode) === 'git' ? activeTab.targetDirectory ?? selectedGitDirectory ?? effectiveDirectory
+    : selectedGitDirectory ?? effectiveDirectory;
+  const gitStatus = useGitStatus(gitStatusDirectory || null);
   const changedFilesCount = gitStatus?.files.length ?? 0;
 
   // Content-driven surfaces are hidden (not disabled) until content exists;

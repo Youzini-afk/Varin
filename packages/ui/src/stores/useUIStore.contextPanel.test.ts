@@ -1,5 +1,5 @@
 import { beforeEach, describe, expect, test } from 'bun:test';
-import { CONTEXT_SURFACES, sortContextSurfaces } from '../lib/surfaces/registry';
+import { getContextRailMode, sortContextSurfaces } from '../lib/surfaces/registry';
 import { useUIStore } from './useUIStore';
 
 beforeEach(() => {
@@ -75,6 +75,44 @@ describe('useUIStore openContextSurface', () => {
     const state = useUIStore.getState().contextPanelByDirectory[directory];
     expect(state?.isOpen).toBe(false);
     expect(state?.tabs.map((tab) => tab.mode)).toEqual(['diff']);
+  });
+
+  for (const mode of ['pr', 'diff'] as const) {
+    test(`the Git entry closes and restores its ${mode} page without changing the repository`, () => {
+      useUIStore.getState().openContextPanelTab(directory, { mode: 'git' });
+      useUIStore.getState().openContextPanelTab(directory, {
+        mode, targetDirectory: 'D:\\other-repo', targetPath: mode === 'diff' ? 'src/main.ts' : null,
+      });
+      useUIStore.getState().openContextSurface(directory, 'git');
+      expect(useUIStore.getState().contextPanelByDirectory[directory]?.isOpen).toBe(false);
+      useUIStore.getState().openContextSurface(directory, 'git');
+      const state = useUIStore.getState().contextPanelByDirectory[directory];
+      const active = state?.tabs.find((tab) => tab.id === state.activeTabId);
+      expect(state?.isOpen).toBe(true);
+      expect(active?.mode).toBe(mode);
+      expect(active?.targetDirectory).toBe('D:/other-repo');
+      expect(getContextRailMode(active!.mode)).toBe('git');
+      expect(state?.tabs).toHaveLength(2);
+    });
+  }
+
+  test('direct diff navigation retains its source repository', () => {
+    useUIStore.getState().openContextDiff(directory, 'src/main.ts', true);
+    const tab = useUIStore.getState().contextPanelByDirectory[directory]?.tabs[0];
+    expect(tab?.targetDirectory).toBe(directory);
+    expect(tab?.targetPath).toBe('src/main.ts');
+    expect(tab?.diffScope).toBe('staged');
+  });
+
+  test('opening a source line from another repository separates its resource root from the panel location', () => {
+    useUIStore.getState().openContextFileAtLine(directory, '/selected-repo/src/main.ts', 12, 3, '/selected-repo');
+    const state = useUIStore.getState();
+    const tab = state.contextPanelByDirectory[directory]?.tabs[0];
+    expect(tab?.mode).toBe('file');
+    expect(tab?.targetDirectory).toBe('/selected-repo');
+    expect(tab?.targetPath).toBe('/selected-repo/src/main.ts');
+    expect(state.pendingFileNavigation).toEqual({ path: '/selected-repo/src/main.ts', line: 12, column: 3 });
+    expect(state.contextPanelByDirectory['/selected-repo']).toBeUndefined();
   });
 
   test('does nothing for content-driven modes without existing content', () => {
@@ -225,13 +263,13 @@ describe('useUIStore contextRailOrder', () => {
   });
 
   test('sortContextSurfaces applies persisted order and appends missing surfaces', () => {
-    const ordered = sortContextSurfaces(['browser', 'unknown-id', 'diff']);
+    const ordered = sortContextSurfaces(['browser', 'unknown-id', 'pr', 'diff', 'git', 'git']);
     const ids = ordered.map((surface) => surface.id);
 
-    expect(ids.slice(0, 2)).toEqual(['browser', 'diff']);
-    // Assert against the registry itself so this test cannot go stale when a
-    // surface is added or removed.
-    expect(new Set(ids)).toEqual(new Set(CONTEXT_SURFACES.map((surface) => surface.id)));
-    expect(ids).toHaveLength(CONTEXT_SURFACES.length);
+    expect(ids.slice(0, 2)).toEqual(['browser', 'git']);
+    expect(ids).not.toContain('pr');
+    expect(ids).not.toContain('diff');
+    expect(ids).toContain('editor');
+    expect(ids.filter((id) => id === 'git')).toHaveLength(1);
   });
 });

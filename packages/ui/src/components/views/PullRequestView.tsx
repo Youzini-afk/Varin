@@ -27,10 +27,15 @@ const remoteCacheKey = (directory: string): string => `${getRuntimeKey()}::${dir
  * GitView does (branch, base branch, remotes) from the shared git stores and
  * renders the pull-request workflow full-size in the context panel.
  */
-export const PullRequestView: React.FC = () => {
+export const PullRequestView: React.FC<{
+  isActive?: boolean;
+  directoryOverride?: string | null;
+  navigationDirectory?: string | null;
+}> = ({ isActive = true, directoryOverride, navigationDirectory }) => {
   const { t } = useI18n();
   const { git } = useRuntimeAPIs();
-  const currentDirectory = useEffectiveDirectory();
+  const sessionDirectory = useEffectiveDirectory();
+  const currentDirectory = directoryOverride ?? sessionDirectory;
   const status = useGitStatus(currentDirectory ?? null);
   const branches = useGitBranches(currentDirectory ?? null);
   const { ensureAll } = useGitStore(useShallow((state) => ({ ensureAll: state.ensureAll })));
@@ -197,7 +202,9 @@ export const PullRequestView: React.FC = () => {
       preventOverscroll
     >
       <PullRequestSection
+        isActive={isActive}
         directory={currentDirectory}
+        navigationDirectory={navigationDirectory}
         branch={currentBranch}
         baseBranch={baseBranch}
         trackingBranch={status?.tracking ?? undefined}

@@ -21,9 +21,8 @@ import {
 import { ScrollableOverlay } from '@/components/ui/ScrollableOverlay';
 import { ScrollShadow } from '@/components/ui/ScrollShadow';
 import { Button } from '@/components/ui/button';
-import { DirectoryExplorerDialog } from '@/components/session/DirectoryExplorerDialog';
+import { GitDirectorySelector } from './git/GitDirectorySelector';
 import {
-  RiFolder3Line,
   RiGitBranchLine,
   RiLoader4Line,
 } from '@remixicon/react';
@@ -91,6 +90,7 @@ type GitViewProps = {
   onDirectoryChange?: (directory: string) => void;
   onFollowSessionDirectory?: () => void;
   onViewDiff?: (path: string, staged: boolean) => void;
+  onViewPullRequest?: () => void;
 };
 
 const GIT_RECONCILE_DELAY_MS = 15000;
@@ -195,12 +195,6 @@ const rememberSnapshot = (key: string, snapshot: GitViewSnapshot) => {
 const normalizePath = (value?: string | null): string =>
   (value || '').replace(/\\/g, '/').replace(/\/+$/, '');
 
-const getDirectoryName = (directory?: string | null): string => {
-  const normalized = normalizePath(directory);
-  if (!normalized) return '';
-  return normalized.split('/').filter(Boolean).pop() || normalized;
-};
-
 const isStagedStatusFile = (file: GitStatus['files'][number]): boolean => {
   const indexStatus = file.index?.trim();
   return Boolean(indexStatus && indexStatus !== '?');
@@ -222,6 +216,7 @@ export const GitView: React.FC<GitViewProps> = ({
   onDirectoryChange,
   onFollowSessionDirectory,
   onViewDiff,
+  onViewPullRequest,
 }) => {
   const { t } = useI18n();
   const { git } = useRuntimeAPIs();
@@ -278,7 +273,7 @@ export const GitView: React.FC<GitViewProps> = ({
   })));
   const isMobile = useUIStore((state) => state.isMobile);
   const openContextDiff = useUIStore((state) => state.openContextDiff);
-  const openContextSurface = useUIStore((state) => state.openContextSurface);
+  const openContextPanelTab = useUIStore((state) => state.openContextPanelTab);
 
   const prStatusBranch = status?.current ?? null;
   const prChipStatus = useGitHubPrStatusStore((state) => {
@@ -501,7 +496,6 @@ export const GitView: React.FC<GitViewProps> = ({
   );
   const [visibleChangePaths, setVisibleChangePaths] = React.useState<string[]>([]);
   const [isGitmojiPickerOpen, setIsGitmojiPickerOpen] = React.useState(false);
-  const [isDirectoryDialogOpen, setIsDirectoryDialogOpen] = React.useState(false);
   const actionPanelScrollRef = React.useRef<HTMLElement | null>(null);
   const [syncAction, setSyncAction] = React.useState<SyncAction>(null);
   const [isStashesDialogOpen, setIsStashesDialogOpen] = React.useState(false);
@@ -2163,56 +2157,14 @@ export const GitView: React.FC<GitViewProps> = ({
   );
 
   const directorySelector = showDirectorySelector ? (
-    <div className="shrink-0 border-b border-border/60 bg-sidebar px-3 py-2">
-      <div className="flex min-w-0 items-center gap-2">
-        <RiFolder3Line className="h-4 w-4 shrink-0 text-muted-foreground" />
-        <div className="min-w-0 flex-1">
-          <div className="typography-micro font-medium uppercase text-muted-foreground">
-            {t('gitView.directorySelector.label')}
-          </div>
-          <div className="flex min-w-0 items-center gap-1">
-            <span className="truncate typography-ui-label text-foreground" title={currentDirectory || undefined}>
-              {currentDirectory ? getDirectoryName(currentDirectory) : t('gitView.directorySelector.noDirectory')}
-            </span>
-            {currentDirectory ? (
-              <span className="truncate typography-micro text-muted-foreground" title={currentDirectory}>
-                {currentDirectory}
-              </span>
-            ) : null}
-          </div>
-        </div>
-        {!isFollowingSessionDirectory && sessionDirectory ? (
-          <Button
-            type="button"
-            variant="ghost"
-            size="xs"
-            className="shrink-0"
-            onClick={onFollowSessionDirectory}
-          >
-            {followDirectoryLabel ?? t('gitView.directorySelector.followSession')}
-          </Button>
-        ) : null}
-        <Button
-          type="button"
-          variant="outline"
-          size="xs"
-          className="shrink-0"
-          onClick={() => setIsDirectoryDialogOpen(true)}
-        >
-          {t('gitView.directorySelector.choose')}
-        </Button>
-      </div>
-      <DirectoryExplorerDialog
-        open={isDirectoryDialogOpen}
-        onOpenChange={setIsDirectoryDialogOpen}
-        mode="select-directory"
-        initialPath={currentDirectory ?? sessionDirectory ?? null}
-        title={t('gitView.directorySelector.dialogTitle')}
-        description={t('gitView.directorySelector.dialogDescription')}
-        confirmLabel={t('gitView.directorySelector.dialogConfirm')}
-        onSelectDirectory={(directory) => onDirectoryChange?.(directory)}
-      />
-    </div>
+    <GitDirectorySelector
+      directory={currentDirectory}
+      sessionDirectory={sessionDirectory}
+      isFollowingSessionDirectory={isFollowingSessionDirectory}
+      followDirectoryLabel={followDirectoryLabel}
+      onDirectoryChange={onDirectoryChange}
+      onFollowSessionDirectory={onFollowSessionDirectory}
+    />
   ) : null;
 
   const renderGitContent = (content: React.ReactElement) => {
@@ -2363,7 +2315,9 @@ export const GitView: React.FC<GitViewProps> = ({
             pullRequest={prChipStatus?.pr ?? null}
             prChecks={prChipStatus?.checks ?? null}
             onOpenPullRequest={
-              currentDirectory ? () => openContextSurface(currentDirectory, 'pr') : undefined
+              currentDirectory ? onViewPullRequest ?? (() => openContextPanelTab(effectiveDirectory ?? currentDirectory, {
+                mode: 'pr', targetDirectory: currentDirectory,
+              })) : undefined
             }
           />
 

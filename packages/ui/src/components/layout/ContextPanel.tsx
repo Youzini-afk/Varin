@@ -10,6 +10,7 @@ import { PiRecoveryPanel } from './PiRecoveryPanel';
 import { ProjectActionsButton } from './ProjectActionsButton';
 import { useProjectActionsContext } from '@/hooks/useProjectActionsContext';
 import { SidebarFilesTree } from './SidebarFilesTree';
+import { ContextPanelGitNavigation } from './ContextPanelGitNavigation';
 import { useThemeSystem } from '@/contexts/useThemeSystem';
 import { openExternalUrl } from '@/lib/url';
 import { copyTextToClipboard } from '@/lib/clipboard';
@@ -19,7 +20,7 @@ import { useI18n } from '@/lib/i18n';
 import { useUIStore, type ContextPanelMode, type PendingDiffScope } from '@/stores/useUIStore';
 import { usePiSessionStore } from '@/stores/usePiSessionStore';
 import { addPiDraftImageFile, usePiDraftStore } from '@/stores/usePiDraftStore';
-import { useContextPanelGitDirectoryStore } from '@/stores/useContextPanelGitDirectoryStore';
+import { contextPanelGitDirectoryScopeKey, useContextPanelGitDirectoryStore } from '@/stores/useContextPanelGitDirectoryStore';
 import { ContextPanelContent } from './ContextSidebarTab';
 import { toast } from '@/components/ui';
 import { runtimeFetch } from '@varin/application-client';
@@ -59,6 +60,7 @@ const WalkthroughView = lazyWithChunkRecovery(() => import('@/components/views/w
 const DiffView = lazyWithChunkRecovery(() => import('@/components/views/DiffView').then((module) => ({ default: module.DiffView })));
 const ContextResourceEditor = lazyWithChunkRecovery(() => import('@/components/workbench/ContextResourceEditor').then((module) => ({ default: module.ContextResourceEditor })));
 const GitView = lazyWithChunkRecovery(() => import('@/components/views/GitView').then((module) => ({ default: module.GitView })));
+const GitDirectorySelector = lazyWithChunkRecovery(() => import('@/components/views/git/GitDirectorySelector').then((module) => ({ default: module.GitDirectorySelector })));
 const PullRequestView = lazyWithChunkRecovery(() => import('@/components/views/PullRequestView').then((module) => ({ default: module.PullRequestView })));
 const PlanView = lazyWithChunkRecovery(() => import('@/components/views/PlanView').then((module) => ({ default: module.PlanView })));
 const ComputerWorkSurface = lazyWithChunkRecovery(() => import('@/components/sections/computers/ComputerWorkSurface').then((module) => ({ default: module.ComputerWorkSurface })));
@@ -2208,9 +2210,7 @@ export const ContextPanel: React.FC = () => {
   ));
   const gitSessionDirectory = currentSessionDirectory || effectiveDirectory || null;
   const gitDirectoryScopeKey = React.useMemo(() => {
-    if (currentSessionId) return `session:${currentSessionId}`;
-    const normalizedDirectory = normalizeDirectoryKey(gitSessionDirectory ?? '');
-    return normalizedDirectory ? `directory:${normalizedDirectory}` : null;
+    return contextPanelGitDirectoryScopeKey(currentSessionId, gitSessionDirectory);
   }, [currentSessionId, gitSessionDirectory]);
   const selectedGitDirectory = useContextPanelGitDirectoryStore((state) => (
     gitDirectoryScopeKey ? state.directories[gitDirectoryScopeKey] ?? null : null
@@ -2218,10 +2218,6 @@ export const ContextPanel: React.FC = () => {
   const setRightSidebarGitDirectory = useContextPanelGitDirectoryStore((state) => state.setDirectory);
 
   const gitDirectory = selectedGitDirectory || gitSessionDirectory;
-  const isFollowingSessionGitDirectory = Boolean(
-    !selectedGitDirectory
-    || normalizeDirectoryKey(selectedGitDirectory) === normalizeDirectoryKey(gitSessionDirectory ?? ''),
-  );
   const handleGitDirectoryChange = React.useCallback((directory: string) => {
     if (!gitDirectoryScopeKey) return;
     const normalized = directory.trim();
@@ -2230,10 +2226,12 @@ export const ContextPanel: React.FC = () => {
       ? normalized
       : null;
     setRightSidebarGitDirectory(gitDirectoryScopeKey, nextDirectory);
-  }, [gitDirectoryScopeKey, gitSessionDirectory, setRightSidebarGitDirectory]);
+    useUIStore.getState().openContextPanelTab(directoryKey, { mode: 'git' });
+  }, [directoryKey, gitDirectoryScopeKey, gitSessionDirectory, setRightSidebarGitDirectory]);
   const handleFollowSessionGitDirectory = React.useCallback(() => {
     if (gitDirectoryScopeKey) setRightSidebarGitDirectory(gitDirectoryScopeKey, null);
-  }, [gitDirectoryScopeKey, setRightSidebarGitDirectory]);
+    useUIStore.getState().openContextPanelTab(directoryKey, { mode: 'git' });
+  }, [directoryKey, gitDirectoryScopeKey, setRightSidebarGitDirectory]);
 
   const panelState = useUIStore((state) => (directoryKey ? state.contextPanelByDirectory[directoryKey] : undefined));
   const closeContextPanel = useUIStore((state) => state.closeContextPanel);
@@ -2250,6 +2248,9 @@ export const ContextPanel: React.FC = () => {
 
   const tabs = React.useMemo(() => panelState?.tabs ?? [], [panelState?.tabs]);
   const activeTab = tabs.find((tab) => tab.id === panelState?.activeTabId) ?? tabs[tabs.length - 1] ?? null;
+  const gitPageMode = activeTab?.mode === 'git' || activeTab?.mode === 'pr' || activeTab?.mode === 'diff'
+    ? activeTab.mode : null;
+  const activeGitDirectory = activeTab?.mode === 'git' ? gitDirectory : activeTab?.targetDirectory ?? gitDirectory;
   const isOpen = Boolean(panelState?.isOpen && activeTab);
   const isExpanded = Boolean(isOpen && panelState?.expanded);
   const [availablePanelAreaWidth, setAvailablePanelAreaWidth] = React.useState<number | null>(null);
@@ -2499,6 +2500,7 @@ export const ContextPanel: React.FC = () => {
     openContextPanelTab(directoryKey, {
       mode: 'diff',
       targetPath: activeTab.targetPath,
+      targetDirectory: activeTab.targetDirectory,
       stagedDiff: nextScope === 'staged',
       diffScope: nextScope,
     });
@@ -2650,15 +2652,15 @@ export const ContextPanel: React.FC = () => {
               <GitView
                 isActive={isOpen}
                 directoryOverride={gitDirectory}
-                showDirectorySelector
-                sessionDirectory={gitSessionDirectory}
-                isFollowingSessionDirectory={isFollowingSessionGitDirectory}
-                onDirectoryChange={handleGitDirectoryChange}
-                onFollowSessionDirectory={handleFollowSessionGitDirectory}
+                onViewDiff={(path, staged) => openContextPanelTab(directoryKey, {
+                  mode: 'diff', targetDirectory: gitDirectory, targetPath: path,
+                  stagedDiff: staged, diffScope: staged ? 'staged' : 'working',
+                })}
+                onViewPullRequest={() => openContextPanelTab(directoryKey, { mode: 'pr', targetDirectory: gitDirectory })}
               />
             )
             : activeTab?.mode === 'pr'
-                ? <PullRequestView />
+                ? <PullRequestView isActive={isOpen} directoryOverride={activeGitDirectory} navigationDirectory={directoryKey} />
             : activeTab?.mode === 'notes'
                 ? <ProjectContextPanel />
         : activeTab?.mode === 'computer'
@@ -2732,6 +2734,13 @@ export const ContextPanel: React.FC = () => {
           }}
           layoutMode="scrollable"
           variant="default"
+        />
+      ) : gitPageMode ? (
+        <ContextPanelGitNavigation
+          mode={gitPageMode}
+          panelDirectory={directoryKey}
+          repositoryDirectory={activeGitDirectory}
+          onReturnToChanges={handleGitDirectoryChange}
         />
       ) : (
         <div className="flex min-w-0 flex-1 items-center gap-1.5 px-3">
@@ -2864,6 +2873,17 @@ export const ContextPanel: React.FC = () => {
         aria-hidden={!isOpen}
       >
       {header}
+      {gitPageMode ? (
+        <React.Suspense fallback={null}>
+          <GitDirectorySelector
+            directory={activeGitDirectory}
+            sessionDirectory={gitSessionDirectory}
+            isFollowingSessionDirectory={normalizeDirectoryKey(activeGitDirectory ?? '') === normalizeDirectoryKey(gitSessionDirectory ?? '')}
+            onDirectoryChange={handleGitDirectoryChange}
+            onFollowSessionDirectory={handleFollowSessionGitDirectory}
+          />
+        </React.Suspense>
+      ) : null}
       <div className={cn('relative min-h-0 flex-1 overflow-hidden', isResizing && 'pointer-events-none')}>
         {hasFileTabs ? (
           <div className={cn('absolute inset-0 flex', isFileTabActive ? 'flex' : 'hidden')}>
@@ -2874,7 +2894,7 @@ export const ContextPanel: React.FC = () => {
                     <ContextResourceEditor
                       filePath={activeTab.targetPath}
                       viewId={activeTab.id}
-                      workspaceRoot={directoryKey}
+                      workspaceRoot={activeTab.targetDirectory ?? directoryKey}
                     />
                   ) : null}
                 </React.Suspense>
@@ -2929,6 +2949,8 @@ export const ContextPanel: React.FC = () => {
           >
             <React.Suspense fallback={null}>
               <DiffView
+                directoryOverride={tab.targetDirectory ?? gitDirectory}
+                navigationDirectory={directoryKey}
                 hideStackedFileSidebar
                 stackedDefaultCollapsedAll
                 pinSelectedFileHeaderToTopOnNavigate
@@ -2950,7 +2972,7 @@ export const ContextPanel: React.FC = () => {
         {hasWalkthroughTab ? (
           <div className={cn('absolute inset-0', activeTab?.mode === 'walkthrough' ? 'block' : 'hidden')}>
             <React.Suspense fallback={null}>
-              <WalkthroughView directory={effectiveDirectory} />
+              <WalkthroughView directory={tabs.find((tab) => tab.mode === 'walkthrough')?.targetDirectory ?? effectiveDirectory} />
             </React.Suspense>
           </div>
         ) : null}

@@ -179,12 +179,20 @@ while users interact with chat; its toolbar toggle or explicit workspace panel
 switch closes it. The 320px-wide floating panel starts directly with its content
 sections, without a duplicated overview heading or summary-badge row.
 
-The desktop Agent shell separates two titlebar controls in `ContextPanelControls`: double chevrons
-show/hide the right icon rail, and the panel icon toggles the last workspace panel directly. Rail
+The desktop Agent shell uses double chevrons in `ContextPanelControls` to show/hide the right icon rail;
+the work-overview control row toggles the last workspace panel directly. Rail
 visibility is a persisted UI preference and never changes panel visibility. The existing per-workspace
 panel state retains tabs, widths, expanded layout and the active tab across close/reopen; only a workspace
 without retained tabs starts with the file view. The rail switches surfaces and displays Git change
 counts. Explicit file/terminal/review actions still open the panel directly. Extension slots remain available.
+Git has one rail entry. Its panel header switches between Changes and Pull requests; full file diffs
+remain a child of Changes. Both child pages keep Git selected in the rail, and the Git entry closes or
+restores the current child page. The shared repository selector applies to all three pages. Tabs retain
+their repository directory independently of the session's panel location, including editor and walkthrough
+navigation from a diff or pull request.
+`ContextResourceEditor` resolves the explicit resource root through `DocumentsAPI` and uses that
+Host-owned workspace identity; it never borrows the session workspace identity for another repository.
+Closing the PR panel stops its refresh watchers and timers while retaining its page state and drafts.
 
 Default desktop navigation is 256px wide (manual widths are retained). New session and search stay
 visible; project/session management and display choices share one labeled menu. The titlebar is 40px except

@@ -969,6 +969,8 @@ const MultiFileDiffEntry = React.memo<MultiFileDiffEntryProps>(({
 });
 
 interface DiffViewProps {
+    directoryOverride?: string | null;
+    navigationDirectory?: string | null;
     hideStackedFileSidebar?: boolean;
     stackedDefaultCollapsedAll?: boolean;
     pinSelectedFileHeaderToTopOnNavigate?: boolean;
@@ -983,6 +985,8 @@ interface DiffViewProps {
 }
 
 export const DiffView: React.FC<DiffViewProps> = ({
+    directoryOverride,
+    navigationDirectory,
     hideStackedFileSidebar = false,
     stackedDefaultCollapsedAll = false,
     pinSelectedFileHeaderToTopOnNavigate = false,
@@ -995,8 +999,9 @@ export const DiffView: React.FC<DiffViewProps> = ({
 }) => {
     const { t } = useI18n();
     const { git, documents } = useRuntimeAPIs();
-    const effectiveDirectory = useEffectiveDirectory();
-    const openContextSurface = useUIStore((state) => state.openContextSurface);
+    const sessionDirectory = useEffectiveDirectory();
+    const effectiveDirectory = directoryOverride ?? sessionDirectory;
+    const openContextPanelTab = useUIStore((state) => state.openContextPanelTab);
     const requestWalkthroughSource = useWalkthroughStore((state) => state.requestSource);
     const { screenWidth, isMobile } = useDeviceInfo();
     const useMonacoFileDiff = !isMobile;
@@ -1541,15 +1546,16 @@ export const DiffView: React.FC<DiffViewProps> = ({
             }
 
             openContextFileAtLine(
-                effectiveDirectory,
+                navigationDirectory ?? effectiveDirectory,
                 absolutePath,
                 resolvedTargetLine,
                 1,
+                effectiveDirectory,
             );
         } finally {
             setOpeningEditorFilePath((current) => (current === filePath ? null : current));
         }
-    }, [activeDiffStaged, documents, effectiveDirectory, git, openContextFileAtLine, setDiff]);
+    }, [activeDiffStaged, documents, effectiveDirectory, git, navigationDirectory, openContextFileAtLine, setDiff]);
 
     const renderStackedDiffView = () => {
         if (!effectiveDirectory) return null;
@@ -1731,7 +1737,7 @@ export const DiffView: React.FC<DiffViewProps> = ({
                                     ? activeDiffScope
                                     : 'all',
                             });
-                            openContextSurface(directory, 'walkthrough');
+                            openContextPanelTab(navigationDirectory ?? directory, { mode: 'walkthrough', targetDirectory: directory });
                         }}
                         className={cn('diff-toolbar__walkthrough-button h-7 flex-shrink-0 gap-1.5 px-2', WALKTHROUGH_ACTION_CLASS)}
                         aria-label={t('walkthrough.action.open')}

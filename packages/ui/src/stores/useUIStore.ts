@@ -3,6 +3,7 @@ import { create } from 'zustand';
 import { devtools, persist } from 'zustand/middleware';
 import type { SidebarSection } from '@/constants/sidebar';
 import { createDeferredSafeJSONStorage } from './utils/safeStorage';
+import { getContextRailMode } from '@/lib/surfaces/registry';
 import { SEMANTIC_TYPOGRAPHY, getTypographyVariable, type SemanticTypographyKey } from '@/lib/typography';
 import type { ShortcutCombo } from '@/lib/shortcuts';
 import type { DraftStarterRef } from '@/lib/draftStarters';
@@ -40,6 +41,7 @@ type ContextPanelTab = {
   id: string;
   mode: ContextPanelMode;
   targetPath: string | null;
+  targetDirectory: string | null;
   dedupeKey: string;
   label: string | null;
   sessionTitleFallback: string | null;
@@ -52,6 +54,7 @@ type ContextPanelTab = {
 type ContextPanelTabDescriptor = {
   mode: ContextPanelMode;
   targetPath?: string | null;
+  targetDirectory?: string | null;
   dedupeKey?: string | null;
   label?: string | null;
   sessionTitleFallback?: string | null;
@@ -215,6 +218,7 @@ const createContextPanelTab = (descriptor: ContextPanelTabDescriptor): ContextPa
     id: buildContextPanelTabID(descriptor.mode, dedupeKey),
     mode: descriptor.mode,
     targetPath: normalizedTargetPath,
+    targetDirectory: normalizeDirectoryPath(descriptor.targetDirectory?.trim() ?? '') || null,
     dedupeKey,
     label: normalizeContextTabLabel(descriptor.label),
     sessionTitleFallback: normalizeContextTabLabel(descriptor.sessionTitleFallback),
@@ -257,6 +261,7 @@ const sanitizeContextPanelTabs = (tabs: unknown): ContextPanelTab[] => {
     const candidate = entry as {
       mode?: unknown;
       targetPath?: unknown;
+      targetDirectory?: unknown;
       dedupeKey?: unknown;
       label?: unknown;
       sessionTitleFallback?: unknown;
@@ -287,6 +292,7 @@ const sanitizeContextPanelTabs = (tabs: unknown): ContextPanelTab[] => {
       mode: candidate.mode,
       targetPath,
       dedupeKey,
+      targetDirectory: normalizeDirectoryPath(typeof candidate.targetDirectory === 'string' ? candidate.targetDirectory.trim() : '') || null,
       label: normalizeContextTabLabel(typeof candidate.label === 'string' ? candidate.label : null),
       sessionTitleFallback: normalizeContextTabLabel(typeof candidate.sessionTitleFallback === 'string' ? candidate.sessionTitleFallback : null),
       readOnly: candidate.readOnly === true,
@@ -352,6 +358,7 @@ const upsertContextPanelTab = (
           ...tab,
           mode: nextTab.mode,
           targetPath: nextTab.targetPath || tab.targetPath,
+          targetDirectory: nextTab.targetDirectory,
           dedupeKey: nextTab.dedupeKey,
           label: nextTab.label,
           sessionTitleFallback: nextTab.sessionTitleFallback || tab.sessionTitleFallback,
@@ -615,7 +622,7 @@ interface UIStore {
   openContextPanelTab: (directory: string, tab: ContextPanelTabDescriptor) => void;
   openContextDiff: (directory: string, filePath: string, staged?: boolean, scope?: PendingDiffScope | null) => void;
   openContextFile: (directory: string, filePath: string) => void;
-  openContextFileAtLine: (directory: string, filePath: string, line: number, column?: number) => void;
+  openContextFileAtLine: (directory: string, filePath: string, line: number, column?: number, resourceDirectory?: string) => void;
   openContextOverview: (directory: string) => void;
   openContextPlan: (directory: string) => void;
   openContextPreview: (directory: string, url: string) => void;
@@ -990,9 +997,9 @@ export const useUIStore = create<UIStore>()(
           set({ contextEditorTreeWidth: Math.min(480, Math.max(200, Math.round(width))) });
         },
 
-        // Surface entry point: activates the most recent tab of the requested
-        // mode, opens a fresh singleton tab when none exists, and toggles the
-        // panel closed when the requested mode is already active and visible.
+        // Rail entry point: restores the current or latest page in a surface's
+        // family, opens a singleton when none exists, and closes a visible family.
+        // Explicit child-page requests continue to target their exact mode.
         openContextSurface: (directory, mode) => {
           const normalizedDirectory = normalizeDirectoryPath((directory || '').trim());
           if (!normalizedDirectory) {
@@ -1004,16 +1011,21 @@ export const useUIStore = create<UIStore>()(
           const tabs = panelState?.tabs ?? [];
           const activeTab = tabs.find((tab) => tab.id === panelState?.activeTabId) ?? null;
 
-          if (panelState?.isOpen && activeTab?.mode === mode) {
+          const belongsToSurface = (tab: ContextPanelTab): boolean => (
+            mode === getContextRailMode(mode) ? getContextRailMode(tab.mode) === mode : tab.mode === mode
+          );
+          if (panelState?.isOpen && activeTab && belongsToSurface(activeTab)) {
             state.closeContextPanel(normalizedDirectory);
             return;
           }
 
-          const tabsOfMode = tabs.filter((tab) => tab.mode === mode);
+          const tabsOfMode = tabs.filter(belongsToSurface);
           if (tabsOfMode.length > 0) {
-            // `>=` so equal timestamps (same-millisecond opens) resolve to the
-            // later tab in insertion order.
-            const mostRecent = tabsOfMode.reduce((best, tab) => (tab.touchedAt >= best.touchedAt ? tab : best));
+            // Preserve the active page on reopen. Otherwise, `>=` resolves equal
+            // timestamps to the later tab in insertion order.
+            const mostRecent = activeTab && belongsToSurface(activeTab)
+              ? activeTab
+              : tabsOfMode.reduce((best, tab) => (tab.touchedAt >= best.touchedAt ? tab : best));
             state.setActiveContextPanelTab(normalizedDirectory, mostRecent.id);
             return;
           }
@@ -1055,6 +1067,7 @@ export const useUIStore = create<UIStore>()(
 
           get().openContextPanelTab(normalizedDirectory, {
             mode: 'diff',
+            targetDirectory: normalizedDirectory,
             targetPath: normalizedFilePath,
             stagedDiff: diffScope === 'staged',
             diffScope,
@@ -1068,12 +1081,12 @@ export const useUIStore = create<UIStore>()(
             return;
           }
 
-          get().openContextPanelTab(normalizedDirectory, { mode: 'file', targetPath: normalizedFilePath });
+          get().openContextPanelTab(normalizedDirectory, { mode: 'file', targetPath: normalizedFilePath, targetDirectory: normalizedDirectory });
           get().setPendingFileFocusPath(normalizedFilePath);
           get().setPendingFileNavigation(null);
         },
 
-        openContextFileAtLine: (directory, filePath, line, column) => {
+        openContextFileAtLine: (directory, filePath, line, column, resourceDirectory) => {
           const normalizedDirectory = normalizeDirectoryPath((directory || '').trim());
           const normalizedFilePath = normalizeContextTargetPath(filePath);
           const normalizedLine = Number.isFinite(line) ? Math.max(1, Math.trunc(line)) : 1;
@@ -1082,7 +1095,9 @@ export const useUIStore = create<UIStore>()(
             return;
           }
 
-          get().openContextPanelTab(normalizedDirectory, { mode: 'file', targetPath: normalizedFilePath });
+          get().openContextPanelTab(normalizedDirectory, {
+            mode: 'file', targetPath: normalizedFilePath, targetDirectory: resourceDirectory ?? normalizedDirectory,
+          });
           get().setPendingFileFocusPath(null);
           get().setPendingFileNavigation({
             path: normalizedFilePath,

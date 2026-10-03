@@ -22,6 +22,8 @@ export type ContextSurfaceDescriptor = {
   id: ContextSurfaceId;
   /** The context panel tab mode this surface activates. 1:1 in the current model. */
   mode: ContextPanelMode;
+  /** Child pages share their parent's rail entry but keep their own panel content. */
+  parentMode?: ContextPanelMode;
   icon: IconName;
   labelKey: I18nKey;
   /**
@@ -73,6 +75,7 @@ export const CONTEXT_SURFACES: readonly ContextSurfaceDescriptor[] = [
     descriptionKey: 'contextRail.surface.pr.description',
     defaultWidthFraction: 0.45,
     mode: 'pr',
+    parentMode: 'git',
     icon: 'git-pull-request',
     labelKey: 'contextPanel.mode.pr',
     availability: 'always',
@@ -82,6 +85,7 @@ export const CONTEXT_SURFACES: readonly ContextSurfaceDescriptor[] = [
     descriptionKey: 'contextRail.surface.diff.description',
     defaultWidthFraction: 3 / 5,
     mode: 'diff',
+    parentMode: 'git',
     icon: 'arrow-left-right',
     labelKey: 'contextPanel.mode.diff',
     availability: 'always',
@@ -171,6 +175,11 @@ export const CONTEXT_SURFACES: readonly ContextSurfaceDescriptor[] = [
 
 const SURFACE_BY_ID = new Map(CONTEXT_SURFACES.map((surface) => [surface.id, surface]));
 const FRACTION_BY_MODE = new Map(CONTEXT_SURFACES.map((surface) => [surface.mode, surface.defaultWidthFraction]));
+const SURFACE_BY_MODE = new Map(CONTEXT_SURFACES.map((surface) => [surface.mode, surface]));
+
+export const getContextRailMode = (mode: ContextPanelMode): ContextPanelMode => (
+  SURFACE_BY_MODE.get(mode)?.parentMode ?? mode
+);
 
 export const getContextSurfaceWidthFraction = (mode: ContextPanelMode): number => {
   return FRACTION_BY_MODE.get(mode) ?? 1 / 2;
@@ -182,7 +191,7 @@ const isContextSurfaceId = (value: unknown): value is ContextSurfaceId => {
 
 /**
  * Applies a persisted user reorder on top of the default registry order:
- * unknown ids are dropped, missing surfaces are appended in default order.
+ * unknown ids and child pages are dropped, missing rail entries are appended in default order.
  */
 export const sortContextSurfaces = (railOrder: readonly string[]): ContextSurfaceDescriptor[] => {
   const ordered: ContextSurfaceDescriptor[] = [];
@@ -193,14 +202,14 @@ export const sortContextSurfaces = (railOrder: readonly string[]): ContextSurfac
       continue;
     }
     const surface = SURFACE_BY_ID.get(id);
-    if (surface) {
+    if (surface && !surface.parentMode) {
       seen.add(id);
       ordered.push(surface);
     }
   }
 
   for (const surface of CONTEXT_SURFACES) {
-    if (!seen.has(surface.id)) {
+    if (!surface.parentMode && !seen.has(surface.id)) {
       ordered.push(surface);
     }
   }

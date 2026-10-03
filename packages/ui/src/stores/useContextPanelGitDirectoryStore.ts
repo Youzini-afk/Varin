@@ -1,4 +1,11 @@
 import { create } from 'zustand';
+import { normalizeContextPanelDirectoryKey } from './useUIStore';
+
+export const contextPanelGitDirectoryScopeKey = (sessionId: string | null, directory: string | null | undefined): string | null => {
+  if (sessionId) return `session:${sessionId}`;
+  const normalized = normalizeContextPanelDirectoryKey(directory ?? '');
+  return normalized ? `directory:${normalized}` : null;
+};
 
 interface ContextPanelGitDirectoryState {
   directories: Record<string, string>;

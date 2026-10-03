@@ -323,15 +323,19 @@ function useDetectedUpstreamRepo(directory: string, github: GitHubAPI | undefine
 }
 
 export const PullRequestSection: React.FC<{
+  isActive?: boolean;
   directory: string;
+  navigationDirectory?: string | null;
   branch: string;
   baseBranch: string;
   trackingBranch?: string;
   remotes?: GitRemote[];
   remoteBranches?: string[];
   onGeneratedDescription?: () => void;
-}> = ({ directory, branch, baseBranch, trackingBranch, remotes = [], remoteBranches = [], onGeneratedDescription }) => {
+}> = ({ isActive = true, directory, navigationDirectory, branch, baseBranch, trackingBranch, remotes = [], remoteBranches = [], onGeneratedDescription }) => {
   const { t } = useI18n();
+  const activeRef = React.useRef(isActive);
+  activeRef.current = isActive;
   const timeFormatPreference = useUIStore((state) => state.timeFormatPreference);
   const { github } = useRuntimeAPIs();
   const githubAuthStatus = useGitHubAuthStore((state) => state.status);
@@ -340,7 +344,7 @@ export const PullRequestSection: React.FC<{
   const setSettingsPage = useUIStore((state) => state.setSettingsPage);
   const setActiveMainTab = useUIStore((state) => state.setActiveMainTab);
   const { isMobile, hasTouchInput, screenWidth } = useDeviceInfo();
-  const openContextSurface = useUIStore((state) => state.openContextSurface);
+  const openContextPanelTab = useUIStore((state) => state.openContextPanelTab);
   const requestWalkthroughSource = useWalkthroughStore((state) => state.requestSource);
   const showWalkthroughAction = !isMobile && screenWidth >= 768;
 
@@ -532,14 +536,14 @@ export const PullRequestSection: React.FC<{
 
   // Load the context the active segment needs; checks include details.
   React.useEffect(() => {
-    if (!pr || !github?.prContext || activeSegment === 'overview') {
+    if (!isActive || !pr || !github?.prContext || activeSegment === 'overview') {
       return;
     }
     void ensurePrContext(github, directory, pr.number, {
       includeCheckDetails: activeSegment === 'checks',
       sourceRepo: status?.repo ?? null,
     });
-  }, [activeSegment, directory, ensurePrContext, github, pr, status?.repo]);
+  }, [activeSegment, directory, ensurePrContext, github, isActive, pr, status?.repo]);
 
   const checks = status?.checks ?? null;
   const checksArePending = (checks?.pending ?? 0) > 0;
@@ -592,7 +596,7 @@ export const PullRequestSection: React.FC<{
   // While checks run and the checks segment is visible, keep the detailed
   // run list fresh; the shared context store dedupes against other callers.
   React.useEffect(() => {
-    if (activeSegment !== 'checks' || !checksArePending || !pr || !github?.prContext) {
+    if (!isActive || activeSegment !== 'checks' || !checksArePending || !pr || !github?.prContext) {
       return;
     }
     const intervalId = window.setInterval(() => {
@@ -603,18 +607,18 @@ export const PullRequestSection: React.FC<{
       });
     }, PR_CHECKS_AUTO_REFRESH_MS);
     return () => window.clearInterval(intervalId);
-  }, [activeSegment, checksArePending, directory, ensurePrContext, github, pr, status?.repo]);
+  }, [activeSegment, checksArePending, directory, ensurePrContext, github, isActive, pr, status?.repo]);
 
   // Coarse clock for "running for Nm" labels; only ticks while checks run.
   const [nowTick, setNowTick] = React.useState(() => Date.now());
   React.useEffect(() => {
-    if (!checksArePending) {
+    if (!isActive || !checksArePending) {
       return;
     }
     setNowTick(Date.now());
     const intervalId = window.setInterval(() => setNowTick(Date.now()), 30_000);
     return () => window.clearInterval(intervalId);
-  }, [checksArePending]);
+  }, [checksArePending, isActive]);
 
   const currentPrBodyHydrationKey = pr ? `${directory}#${pr.number}` : null;
   const isHydratingCurrentPrBody = Boolean(
@@ -1044,10 +1048,12 @@ export const PullRequestSection: React.FC<{
   }, [attachCommentDraft, resolveDraftTarget, setActiveMainTab]);
 
   const refresh = React.useCallback(async (options?: { force?: boolean; onlyExistingPr?: boolean; silent?: boolean; markInitialResolved?: boolean }) => {
+    if (!activeRef.current) return;
     await refreshPrStatus(prStatusKey, options);
   }, [prStatusKey, refreshPrStatus]);
 
   const scheduleActionRefresh = React.useCallback(() => {
+    if (!activeRef.current) return;
     pendingActionRefreshTimersRef.current.forEach((timerId) => {
       window.clearTimeout(timerId);
     });
@@ -1132,11 +1138,12 @@ export const PullRequestSection: React.FC<{
   ]);
 
   React.useEffect(() => {
+    if (!isActive) return;
     startPrStatusWatching(prStatusKey);
     return () => {
       stopPrStatusWatching(prStatusKey);
     };
-  }, [prStatusKey, startPrStatusWatching, stopPrStatusWatching]);
+  }, [isActive, prStatusKey, startPrStatusWatching, stopPrStatusWatching]);
 
   React.useEffect(() => {
     const snapshot = pullRequestDraftSnapshots.get(snapshotKey) ?? null;
@@ -1153,7 +1160,7 @@ export const PullRequestSection: React.FC<{
 
   React.useEffect(() => {
     void refresh({ markInitialResolved: true });
-  }, [prStatusKey, refresh]);
+  }, [isActive, prStatusKey, refresh]);
 
   React.useEffect(() => {
     if (!canShow || !selectedRemote?.name) {
@@ -1175,6 +1182,7 @@ export const PullRequestSection: React.FC<{
   }, [remotes, status?.resolvedRemoteName]);
 
   React.useEffect(() => {
+    if (!isActive) return;
     const isTerminal = status?.pr?.state === 'closed' || status?.pr?.state === 'merged';
     const lastRefreshAt = statusEntry?.lastRefreshAt ?? 0;
     const isStale = Date.now() - lastRefreshAt > 60_000;
@@ -1199,7 +1207,7 @@ export const PullRequestSection: React.FC<{
       window.removeEventListener('focus', onFocus);
       document.removeEventListener('visibilitychange', onVisibility);
     };
-  }, [refresh, status?.pr?.state, statusEntry?.lastRefreshAt]);
+  }, [isActive, refresh, status?.pr?.state, statusEntry?.lastRefreshAt]);
 
   React.useEffect(() => {
     if (githubAuthChecked && githubAuthStatus?.connected === false) {
@@ -1223,14 +1231,13 @@ export const PullRequestSection: React.FC<{
   }, [snapshotKey, title, body, draft, additionalContext, targetBaseBranch, selectedRemote?.name, directory, branch, activeSegment]);
 
   React.useEffect(() => {
-    const pendingActionRefreshTimers = pendingActionRefreshTimersRef.current;
     return () => {
-      pendingActionRefreshTimers.forEach((timerId) => {
+      pendingActionRefreshTimersRef.current.forEach((timerId) => {
         window.clearTimeout(timerId);
       });
       pendingActionRefreshTimersRef.current = [];
     };
-  }, []);
+  }, [isActive]);
 
   const generateDescription = React.useCallback(async () => {
     if (isGenerating) return;
@@ -1526,7 +1533,7 @@ export const PullRequestSection: React.FC<{
                   className={cn('pr-actions__walkthrough-button h-7 shrink-0 gap-1.5 px-2', WALKTHROUGH_ACTION_CLASS)}
                   onClick={() => {
                     requestWalkthroughSource(directory, { kind: 'pr', number: pr.number });
-                    openContextSurface(directory, 'walkthrough');
+                    openContextPanelTab(navigationDirectory ?? directory, { mode: 'walkthrough', targetDirectory: directory });
                   }}
                   aria-label={t('walkthrough.action.open')}
                 >
