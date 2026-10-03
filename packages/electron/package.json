@@ -14,12 +14,12 @@
     "@varin/protocol": "workspace:*",
     "@varin/runtime-broker": "workspace:*",
     "@varin/settings-store": "workspace:*",
-    "electron-context-menu": "^5.0.0",
+    "electron-context-menu": "^5.1.0",
     "electron-log": "^5.4.3",
     "electron-updater": "^6.8.9"
   },
   "devDependencies": {
-    "electron": "^44.4.1",
+    "electron": "^44.5.1",
     "electron-builder": "^26.15.7",
     "node-abi": "^4.33.0"
   },
