@@ -313,14 +313,6 @@ export const collectVarinDiagnostics = async () => {
     : Promise.resolve(skippedProbe<ReturnType<typeof summarizeAgents>>(
         missingContext ?? unavailable('agentProviders'),
       ));
-  const promptsPromise = capabilities?.resources && target && runtimeClient
-    ? probe(async () => summarizeResources(await runtimeClient.request('resource.list', {
-        ...target,
-        kind: 'prompt',
-      })))
-    : Promise.resolve(skippedProbe<ReturnType<typeof summarizeResources>>(
-        missingContext ?? unavailable('resources'),
-      ));
   const skillsPromise = capabilities?.resources && target && runtimeClient
     ? probe(async () => summarizeResources(await runtimeClient.request('resource.list', {
         ...target,
@@ -344,10 +336,9 @@ export const collectVarinDiagnostics = async () => {
         activeSessionId ? unavailable('recovery') : 'No active Pi session',
       ));
 
-  const [packages, agents, prompts, skills, fleet, recovery] = await Promise.all([
+  const [packages, agents, skills, fleet, recovery] = await Promise.all([
     packagesPromise,
     agentsPromise,
-    promptsPromise,
     skillsPromise,
     fleetPromise,
     recoveryPromise,
@@ -365,7 +356,7 @@ export const collectVarinDiagnostics = async () => {
     catalogs: {
       agents,
       packages,
-      resources: { prompts, skills },
+      resources: { skills },
     },
     context: {
       directory: {

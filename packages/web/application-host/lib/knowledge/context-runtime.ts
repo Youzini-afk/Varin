@@ -27,6 +27,7 @@ export interface KnowledgeContextRuntimeOptions {
   /** Optional user store used by cross-scope recall (owner and user IDs overlap). */
   getUserStore?: () => Promise<KnowledgeStore | null>;
   getSessionStore?: (sessionId: string) => Promise<KnowledgeStore | null>;
+  recallEnabled?: (sessionId: string) => Promise<boolean>;
   resolveScope?: (sessionId: string) => Promise<string>;
   /**
    * BC3: the goal the session is working toward (owning thread brief). When
@@ -462,6 +463,10 @@ export function createKnowledgeContextRuntime(options: KnowledgeContextRuntimeOp
       content: block.content,
     }));
     material.blocksComplete = true;
+    if (options.recallEnabled && !await wait(options.recallEnabled(request.sessionId))) {
+      binding.recallCache = null;
+      return { eventCursor, material, ...(shellCompletions.length > 0 ? { shellCompletions } : {}) };
+    }
     const query = request.query?.trim();
     const goal = options.goalForSession
       ? await wait(options.goalForSession(request.sessionId).catch(() => undefined))

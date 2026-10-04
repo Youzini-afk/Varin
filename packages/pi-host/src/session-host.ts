@@ -166,6 +166,7 @@ import {
   type HarnessCounterTracker,
 } from "./harness/counter-tracker.js";
 import { selectHarnessTools } from "./harness/select-tools.js";
+import { createAgentPromptRuntime } from "./harness/agent-personalization.js";
 import { PI_CODEMODE_REFERENCE } from "./harness/pi-docs-tool.js";
 import { createToolResultTruncationExtension } from "./harness/tool-result-truncation.js";
 import { activeCompactionMessages } from "./harness/compaction-context.js";
@@ -525,8 +526,7 @@ function resourceId(kind: PiResourceKind, filePath: string): string {
 }
 
 function normalizeResourceName(kind: PiResourceKind, requestedName: string): string {
-  let name = requestedName.trim();
-  if (kind === "prompt" && name.toLowerCase().endsWith(".md")) name = name.slice(0, -3);
+  const name = requestedName.trim();
   if (
     name.length === 0
     || name === "."
@@ -625,6 +625,8 @@ export class SessionHost {
   #harnessWebReadEnabled = false;
   #harnessWebSearchEnabled = false;
   #hostServicesBridge: HostServicesBridge | undefined;
+  #agentPromptRuntime: ReturnType<typeof createAgentPromptRuntime> | undefined;
+  #memoryMode: "agent" | "bot" = "agent";
   #harnessCounters: HarnessCounterTracker | undefined;
   #sessionToolAllowlist: string[] | undefined;
   #sessionModelSelection: ModelSelection | undefined;
@@ -958,7 +960,7 @@ export class SessionHost {
     if (this.#workFocus.id === selection.id
       && this.#workFocus.source === selection.source
       && this.#workFocusGeneration === generation) return true;
-    this.session.setToolExclusions(excludedWorkFocusTools(selection.id));
+    this.session.setToolExclusions([...excludedWorkFocusTools(selection.id), ...(this.#memoryMode === "agent" ? ["recall"] : [])]);
     this.#workFocus = structuredClone(selection);
     this.#workFocusGeneration = generation;
     return true;
@@ -981,6 +983,12 @@ export class SessionHost {
       timestamp: header.timestamp,
       ...(header.version === undefined ? {} : { version: header.version }),
     };
+  }
+
+  async systemPrompt(sessionId: string) {
+    this.assertSession(sessionId);
+    if (!this.#agentPromptRuntime) throw new HostError("unavailable", "System prompt inspection is unavailable");
+    return this.#agentPromptRuntime.inspect(this.session);
   }
 
   async captureInput(sessionId: string): Promise<HostMethodResult<"session.input.capture">> {
@@ -1940,9 +1948,8 @@ export class SessionHost {
 
   async listResources(kind: PiResourceKind): Promise<PiResourceCatalogSnapshot> {
     const projectTrusted = this.runtime.services.settingsManager.isProjectTrusted();
-    const prompts = kind === "prompt" ? this.session.resourceLoader.getPrompts() : undefined;
-    const skills = kind === "skill" ? this.session.resourceLoader.getSkills() : undefined;
-    const nativeDiagnostics = prompts?.diagnostics ?? skills?.diagnostics ?? [];
+    const skills = this.session.resourceLoader.getSkills();
+    const nativeDiagnostics = skills.diagnostics;
     const diagnostics: PiResourceDiagnostic[] = nativeDiagnostics.map((diagnostic) => ({
       ...(diagnostic.collision === undefined
         ? {}
@@ -1964,48 +1971,27 @@ export class SessionHost {
       ...(diagnostic.path === undefined ? {} : { path: diagnostic.path }),
       type: diagnostic.type,
     }));
-    const nativeResources: PiResourceDescriptor[] = prompts
-      ? prompts.prompts.map((resource) => ({
-          active: true,
-          ...(resource.argumentHint === undefined ? {} : { argumentHint: resource.argumentHint }),
-          description: resource.description,
-          filePath: resource.filePath,
-          id: resourceId(kind, resource.filePath),
-          kind,
-          name: resource.name,
-          sourceInfo: {
-            ...(resource.sourceInfo.baseDir === undefined
-              ? {}
-              : { baseDir: resource.sourceInfo.baseDir }),
-            origin: resource.sourceInfo.origin,
-            path: resource.sourceInfo.path,
-            scope: resource.sourceInfo.scope,
-            source: resource.sourceInfo.source,
-          },
-          valid: true,
-          writable: false,
-        }))
-      : (skills?.skills ?? []).map((resource) => ({
-          active: true,
-          baseDir: resource.baseDir,
-          description: resource.description,
-          disableModelInvocation: resource.disableModelInvocation,
-          filePath: resource.filePath,
-          id: resourceId(kind, resource.filePath),
-          kind,
-          name: resource.name,
-          sourceInfo: {
-            ...(resource.sourceInfo.baseDir === undefined
-              ? {}
-              : { baseDir: resource.sourceInfo.baseDir }),
-            origin: resource.sourceInfo.origin,
-            path: resource.sourceInfo.path,
-            scope: resource.sourceInfo.scope,
-            source: resource.sourceInfo.source,
-          },
-          valid: true,
-          writable: false,
-        }));
+    const nativeResources: PiResourceDescriptor[] = skills.skills.map((resource) => ({
+      active: true,
+      baseDir: resource.baseDir,
+      description: resource.description,
+      disableModelInvocation: resource.disableModelInvocation,
+      filePath: resource.filePath,
+      id: resourceId(kind, resource.filePath),
+      kind,
+      name: resource.name,
+      sourceInfo: {
+        ...(resource.sourceInfo.baseDir === undefined
+          ? {}
+          : { baseDir: resource.sourceInfo.baseDir }),
+        origin: resource.sourceInfo.origin,
+        path: resource.sourceInfo.path,
+        scope: resource.sourceInfo.scope,
+        source: resource.sourceInfo.source,
+      },
+      valid: true,
+      writable: false,
+    }));
     const resources = await Promise.all(
       nativeResources.map(async (resource) => {
         const ownership = await this.#resourceOwnership(
@@ -2038,14 +2024,12 @@ export class SessionHost {
       const fileName = basename(candidate.filePath);
       resources.push({
         active: false,
-        ...(kind === "skill" ? { baseDir: dirname(candidate.filePath) } : {}),
+        baseDir: dirname(candidate.filePath),
         description: "",
         filePath: candidate.filePath,
         id,
         kind,
-        name: kind === "prompt"
-          ? fileName.replace(/\.md$/i, "")
-          : fileName.toLowerCase() === "skill.md"
+        name: fileName.toLowerCase() === "skill.md"
             ? basename(dirname(candidate.filePath))
             : fileName.replace(/\.md$/i, ""),
         sourceInfo: {
@@ -2209,20 +2193,13 @@ export class SessionHost {
         source: "extension",
         sourceInfo: command.sourceInfo,
       }));
-    const templates: PiCommandDescriptor[] = this.session.promptTemplates.map((template) => ({
-      ...(template.argumentHint === undefined ? {} : { argumentHint: template.argumentHint }),
-      ...(template.description === undefined ? {} : { description: template.description }),
-      name: template.name,
-      source: "prompt",
-      sourceInfo: template.sourceInfo,
-    }));
     const skills: PiCommandDescriptor[] = this.session.resourceLoader.getSkills().skills.map((skill) => ({
       description: skill.description,
       name: `skill:${skill.name}`,
       source: "skill",
       sourceInfo: skill.sourceInfo,
     }));
-    return [...extensionCommands, ...templates, ...skills];
+    return [...extensionCommands, ...skills];
   }
 
   async executeCommand(sessionId: string, command: string): Promise<JsonValue> {
@@ -3260,18 +3237,13 @@ export class SessionHost {
     return active;
   }
 
-  #resourceRoots(kind: PiResourceKind): ResourceRoot[] {
-    const roots: ResourceRoot[] = kind === "prompt"
-      ? [
-          { path: join(this.#agentDir, "prompts"), scope: "user" },
-          { path: join(this.runtime.cwd, ".pi", "prompts"), scope: "project" },
-        ]
-      : [
-          { path: join(this.#agentDir, "skills"), scope: "user" },
-          { path: join(homeRoot(), ".agents", "skills"), scope: "user" },
-          { path: join(this.runtime.cwd, ".pi", "skills"), scope: "project" },
-          { path: join(this.runtime.cwd, ".agents", "skills"), scope: "project" },
-        ];
+  #resourceRoots(): ResourceRoot[] {
+    const roots: ResourceRoot[] = [
+      { path: join(this.#agentDir, "skills"), scope: "user" },
+      { path: join(homeRoot(), ".agents", "skills"), scope: "user" },
+      { path: join(this.runtime.cwd, ".pi", "skills"), scope: "project" },
+      { path: join(this.runtime.cwd, ".agents", "skills"), scope: "project" },
+    ];
     const seen = new Set<string>();
     return roots.filter((root) => {
       const key = resourcePathKey(root.path);
@@ -3304,7 +3276,7 @@ export class SessionHost {
     scope: PiResourceScope | "temporary",
   ): Promise<ResourceOwnership | undefined> {
     if (origin !== "top-level" || scope === "temporary") return undefined;
-    for (const root of this.#resourceRoots(kind)) {
+    for (const root of this.#resourceRoots()) {
       if (root.scope !== scope || !isPathInside(root.path, filePath)) continue;
       const relativePath = relative(resolve(root.path), resolve(filePath));
       try {
@@ -3346,9 +3318,9 @@ export class SessionHost {
     requestedName: string,
   ): Promise<ResourceOwnership> {
     const name = normalizeResourceName(kind, requestedName);
-    const root = this.#resourceRoots(kind).find((candidate) => candidate.scope === scope);
+    const root = this.#resourceRoots().find((candidate) => candidate.scope === scope);
     if (!root) throw new HostError("resource_scope_unavailable", `No ${scope} ${kind} root exists`);
-    const requestedPath = kind === "prompt" ? `${name}.md` : join(name, "SKILL.md");
+    const requestedPath = join(name, "SKILL.md");
     const location = await resolveConfigDocumentPath(root.path, requestedPath, {
       extensions: [".md"],
       reservedPaths: [],
@@ -3380,7 +3352,7 @@ export class SessionHost {
     projectTrusted: boolean,
   ): Promise<Array<{ filePath: string; root: string; scope: PiResourceScope }>> {
     const candidates: Array<{ filePath: string; root: string; scope: PiResourceScope }> = [];
-    for (const root of this.#resourceRoots(kind)) {
+    for (const root of this.#resourceRoots()) {
       if (root.scope === "project" && !projectTrusted) continue;
       let rootInfo: Awaited<ReturnType<typeof lstat>>;
       try {
@@ -3392,13 +3364,7 @@ export class SessionHost {
       if (!rootInfo.isDirectory() || rootInfo.isSymbolicLink()) continue;
       let files: string[];
       try {
-        files = kind === "prompt"
-          ? (await readdir(root.path, { withFileTypes: true }))
-              .filter(
-                (entry) => entry.isFile() && !entry.isSymbolicLink() && entry.name.endsWith(".md"),
-              )
-              .map((entry) => join(root.path, entry.name))
-          : await this.#walkSkillCandidates(root.path, true);
+        files = await this.#walkSkillCandidates(root.path, true);
       } catch {
         continue;
       }
@@ -3542,6 +3508,9 @@ export class SessionHost {
         sessionId: sessionManager.getSessionId(),
       });
       this.#hostServicesBridge = hostServicesBridge;
+      const promptRuntime = createAgentPromptRuntime(hostServicesBridge, () => this.#sessionInstructionsAvailable);
+      this.#agentPromptRuntime = promptRuntime;
+      this.#memoryMode = "agent";
       // Tool admission awaits the first read after the worker has been bound.
       // Issuing it while creating an unbound worker races Host registration.
       const harnessCounters = createHarnessCounterTracker();
@@ -3595,7 +3564,15 @@ export class SessionHost {
         agentDir,
         cwd,
         resourceLoaderOptions: {
+          noPromptTemplates: true,
           extensionFactories: [
+            { hidden: true, name: "varin-agent-personalization", factory: (pi) => {
+              pi.on("before_agent_start", async () => {
+                const context = await promptRuntime.preferences(sessionManager.getSessionId());
+                this.#memoryMode = context.mode;
+                this.session.setToolExclusions([...excludedWorkFocusTools(this.#workFocus.id), ...(context.mode === "agent" ? ["recall"] : [])]);
+              });
+            } },
             { builtin: true, replaceable: true, factory: createCodemodeExtension({
               ...(harnessSettings.tools.pi_docs !== false
                 && (!this.#sessionToolAllowlist || this.#sessionToolAllowlist.includes("pi_docs"))
@@ -3655,7 +3632,11 @@ export class SessionHost {
               factory: (() => {
                 const contextPreparation = createContextPreparationExtension({
                   getProjectTrusted: () => settingsManager.isProjectTrusted(),
-                  inject: createRequestContextInjector(hostServicesBridge),
+                  inject: async (request, session) => {
+                    const personalized = await promptRuntime.inject(request, session);
+                    return createRequestContextInjector(hostServicesBridge)(personalized, session);
+                  },
+                  sent: promptRuntime.sent,
                   runCompactionTask: (spec, signal) =>
                     hostServicesBridge.request<"compaction.run">("compaction.run", spec, {
                       signal,
@@ -3989,7 +3970,7 @@ export class SessionHost {
         });
       });
       attachAgentModelSettings(created.session, modelSettings);
-      created.session.setToolExclusions(excludedWorkFocusTools(this.#workFocus.id));
+      created.session.setToolExclusions([...excludedWorkFocusTools(this.#workFocus.id), "recall"]);
       const diagnostics = [
         ...services.diagnostics,
         ...services.resourceLoader.getExtensions().errors.map((entry) => ({

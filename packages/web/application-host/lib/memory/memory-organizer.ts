@@ -34,7 +34,7 @@ import {
   type MemorySourceSpan,
   type PiSettingsSnapshot,
 } from "@varin/protocol";
-import { botIdFromScopeId, isBotScopeId, isSessionScopeId } from "../harness/owner-scope.js";
+import { botIdFromScopeId, isBotScopeId } from "../harness/owner-scope.js";
 import {
   KnowledgeMutationError,
   MEMORY_NATURES,
@@ -63,7 +63,7 @@ const MIN_SEGMENT_CHARS = 64;
 
 const MEMORY_ORGANIZER_SYSTEM = [
   "Extract durable memory proposals from the supplied work fragments and existing memories.",
-  "Return a JSON object: {\"memories\":[{\"action\":\"new\",\"scope\":\"workspace\",\"nature\":\"decision\",\"content\":\"...\",\"trigger\":\"...\",\"source\":\"u0\",\"quote\":\"...\"}]}. An empty memories array means no durable information to add.",
+  "Return a JSON object: {\"memories\":[{\"action\":\"new\",\"scope\":\"bot\",\"nature\":\"decision\",\"content\":\"...\",\"trigger\":\"...\",\"source\":\"u0\",\"quote\":\"...\"}]}. An empty memories array means no durable information to add.",
   "action is new, supplement, or correct. supplement and correct require target (k:<id>) from the supplied existing memories in the source scope; correct replaces it and supplement adds related information.",
   "Choose scope from the available scopes in the input. content holds the durable information; optional trigger describes when to recall it. Optional nature is experience, decision, preference, judgment, or instruction; instruction denotes an explicit user directive.",
   "source identifies the fragment (u<index>). quote is an exact supporting passage within that fragment, used to bind the memory to its original source.",
@@ -113,25 +113,14 @@ export interface MemoryOrganizerDeps {
   storeForScopeId(scopeId: string): Promise<KnowledgeStore | null>;
   /** Whether the scope's store file already exists (cheap — no store open). */
   hasStoreForScope(scopeId: string): boolean | Promise<boolean>;
-  /**
-   * Workspace + `bot:<id>` scopes that may own memory material: thread-catalog
-   * scopes plus on-disk store keys (interactive sessions write events without
-   * ever owning a Thread).
-   */
+  /** Bot scopes from the durable Bot registry. */
   listScopeIds(): Promise<string[]>;
   /** Sessions durably bound under a scope (thread runs incl. attached roots). */
   listScopeSessions(scopeId: string): Promise<string[]>;
   /** Terminal runs carrying a report under a scope. */
   listRunSources(scopeId: string): Promise<OrganizerRunSource[]>;
-  /**
-   * Project-layer disable for a workspace scope: the workspace's own settings
-   * may turn organizing off for itself but cannot touch user/bot switches.
-   * Return null for non-workspace scopes or when per-scope settings are
-   * unavailable — the user-level `autoOrganize` stays the gate.
-   */
-  autoOrganizeForScope?(scopeId: string): Promise<boolean | null>;
   canExecuteScope?(scopeId: string): Promise<boolean>;
-  /** Durable owner resolution for a session (`workspaceId`, `bot:<id>`, `session:<id>`). */
+  /** Returns the owning Bot scope, or null for ordinary Agent sessions. */
   scopeForSession(sessionId: string): Promise<string | null>;
   /** All native entries, including inactive branches; never wakes a live worker. */
   readEntries(sessionId: string): Promise<PiSessionEntry[]>;
@@ -173,13 +162,13 @@ interface OrganizerUnit {
 }
 
 interface OrganizerPromptScope {
-  sourceScope: "workspace" | "bot";
+  sourceScope: "bot";
   userMemoryEnabled: boolean;
 }
 
 interface OrganizerProposal {
   action: "new" | "supplement" | "correct";
-  scope: "workspace" | "user" | "bot";
+  scope: "user" | "bot";
   nature?: MemoryNature;
   content: string;
   trigger?: string;
@@ -193,9 +182,6 @@ interface OrganizerProposal {
 const record = (value: unknown): Record<string, unknown> => (
   value && typeof value === "object" && !Array.isArray(value) ? value as Record<string, unknown> : {}
 );
-
-const scopeKind = (scopeId: string): "workspace" | "bot" =>
-  (isBotScopeId(scopeId) ? "bot" : "workspace");
 
 const progressKeyForSession = (sessionId: string): string => `session:${sessionId}`;
 const progressKeyForRun = (runId: string, part: number): string =>
@@ -263,7 +249,7 @@ const parseProposals = (text: string): OrganizerProposal[] | null => {
     const content = typeof item["content"] === "string" ? item["content"].trim() : "";
     if (!content) return null;
     if (action !== "new" && action !== "supplement" && action !== "correct") return null;
-    if (scope !== "workspace" && scope !== "user" && scope !== "bot") return null;
+    if (scope !== "user" && scope !== "bot") return null;
     const nature = typeof item["nature"] === "string" && (MEMORY_NATURES as readonly string[]).includes(item["nature"])
       ? item["nature"] as MemoryNature
       : undefined;
@@ -314,7 +300,7 @@ export function createMemoryOrganizer(deps: MemoryOrganizerDeps) {
 
   interface ResolvedOrganizerSettings {
     disabled?: boolean;
-    autoOrganize: { workspace: boolean; user: boolean; bot: boolean };
+    autoOrganize: { user: boolean; bot: boolean };
     model: ModelSelection | null;
     /** Resolved (configurationId-bearing) fast-decision status for this run. */
     fastDecision: HarnessFastDecisionPurposeStatus | null;
@@ -323,7 +309,7 @@ export function createMemoryOrganizer(deps: MemoryOrganizerDeps) {
   const readHarnessSettings = async (): Promise<ResolvedOrganizerSettings> => {
     const broker = deps.getBroker();
     const empty: ResolvedOrganizerSettings = {
-      autoOrganize: { workspace: false, user: false, bot: false },
+      autoOrganize: { user: false, bot: false },
       model: null,
       fastDecision: null,
     };
@@ -349,13 +335,9 @@ export function createMemoryOrganizer(deps: MemoryOrganizerDeps) {
     };
   };
 
-  const ownerFor = (scope: "workspace" | "user" | "bot", scopeId: string): MemoryOwner | null => {
+  const ownerFor = (scope: "user" | "bot", scopeId: string): MemoryOwner | null => {
     if (scope === "user") return { scope: "user", ownerId: null };
-    if (scope === "bot") {
-      if (!isBotScopeId(scopeId)) return null;
-      return { scope: "bot", ownerId: botIdFromScopeId(scopeId) };
-    }
-    return isBotScopeId(scopeId) ? null : { scope: "workspace", ownerId: scopeId };
+    return isBotScopeId(scopeId) ? { scope: "bot", ownerId: botIdFromScopeId(scopeId) } : null;
   };
 
   interface ProgressPatch {
@@ -868,7 +850,7 @@ export function createMemoryOrganizer(deps: MemoryOrganizerDeps) {
     // supplement/correct: targets came from the source scope's presented
     // memory list; a cross-scope numeric id must never address an unrelated
     // row in another store.
-    if (proposal.target === undefined || proposal.scope !== scopeKind(scopeId)) return null;
+    if (proposal.target === undefined || proposal.scope !== "bot") return null;
     const item = existingMemories.find((memory) => memory.id === proposal.target);
     const expectedTarget = proposal.expectedTarget;
     if (!item || !expectedTarget || item.content !== expectedTarget.content
@@ -993,7 +975,7 @@ export function createMemoryOrganizer(deps: MemoryOrganizerDeps) {
   // ── Scope run ────────────────────────────────────────────────────
 
   const runScope = async (scopeId: string): Promise<void> => {
-    if (disposed || isSessionScopeId(scopeId)) return;
+    if (disposed || !isBotScopeId(scopeId)) return;
     running.add(scopeId);
     const force = forced.delete(scopeId);
     try {
@@ -1005,11 +987,7 @@ export function createMemoryOrganizer(deps: MemoryOrganizerDeps) {
         ? await deps.storeForScopeId(scopeId) : null;
       if (existingStore && await settleCommittedPrepared(existingStore, scopeId)) queued.add(scopeId);
       const settings = await readHarnessSettings();
-      if (!settings.autoOrganize[scopeKind(scopeId)]) return;
-      const scopeGate = scopeKind(scopeId) === "workspace"
-        ? await deps.autoOrganizeForScope?.(scopeId)
-        : null;
-      if (scopeGate === false) return;
+      if (!settings.autoOrganize.bot) return;
       const binding = await modelForScope(settings, scopeId);
       if (!binding) return;
       const model = binding.selection;
@@ -1017,11 +995,11 @@ export function createMemoryOrganizer(deps: MemoryOrganizerDeps) {
       if (!store) return;
 
       const promptScope: OrganizerPromptScope = {
-        sourceScope: scopeKind(scopeId),
+        sourceScope: "bot",
         userMemoryEnabled: settings.autoOrganize.user,
       };
       const budget = await resolveBudget(model, promptScope);
-      const planningOwner = ownerFor(scopeKind(scopeId), scopeId)!;
+      const planningOwner = ownerFor("bot", scopeId)!;
       const planningMemories = await deps.memory.list(planningOwner, { activeOnly: true });
       let unitChars = budget.unitChars;
       let candidates: OrganizerUnit[] = [];
@@ -1129,7 +1107,7 @@ export function createMemoryOrganizer(deps: MemoryOrganizerDeps) {
         // dedupe instead of committing against an unseen state.
         let narratedRevision: string | null = null;
         if (judged.length > 0) {
-          const owner = ownerFor(scopeKind(scopeId), scopeId)!;
+          const owner = ownerFor("bot", scopeId)!;
           const existing = await deps.memory.list(owner, { activeOnly: true });
           const selected = selectPrompt(judged, existing, budget.inputTokens, promptScope);
           if (!selected) throw new Error("Memory organizer prompt exceeded the selected model's context after source selection");
@@ -1144,7 +1122,7 @@ export function createMemoryOrganizer(deps: MemoryOrganizerDeps) {
             const unit = judged[Number(proposal.source!.slice(1))];
             if (!unit) throw new Error("Memory organizer referenced an unknown source");
             if (!ownerFor(proposal.scope, scopeId)) throw new Error("Memory organizer referenced an unrelated owner scope");
-            if (proposal.action !== "new" && (proposal.scope !== scopeKind(scopeId)
+            if (proposal.action !== "new" && (proposal.scope !== "bot"
               || !selected.presented.some((item) => item.id === proposal.target))) {
               throw new Error("Memory organizer referenced a target outside its presented candidates");
             }
@@ -1196,12 +1174,11 @@ export function createMemoryOrganizer(deps: MemoryOrganizerDeps) {
         // Commit phase. Settings re-read: a switch flipped mid-run still gates.
         const currentSettings = await readHarnessSettings();
         if (suspendedScopes.has(scopeId) || (deps.canExecuteScope && !await deps.canExecuteScope(scopeId))) return;
-        if (!currentSettings.autoOrganize[scopeKind(scopeId)]) return;
-        if (scopeKind(scopeId) === "workspace" && await deps.autoOrganizeForScope?.(scopeId) === false) return;
+        if (!currentSettings.autoOrganize.bot) return;
         if (narratedRevision !== null && narratedRevision !== store.knowledgeRevision()) {
           throw new KnowledgeMutationError("conflict", "Memory changed while the organizer was narrating proposals");
         }
-        const owner = ownerFor(scopeKind(scopeId), scopeId)!;
+        const owner = ownerFor("bot", scopeId)!;
         const existing = await deps.memory.list(owner, { activeOnly: true });
         let revision = store.knowledgeRevision();
         const userOwner: MemoryOwner = { scope: "user", ownerId: null };
@@ -1259,7 +1236,7 @@ export function createMemoryOrganizer(deps: MemoryOrganizerDeps) {
   };
 
   const schedule = (scopeId: string): void => {
-    if (disposed || scopeId === "user" || isSessionScopeId(scopeId) || suspendedScopes.has(scopeId)) return;
+    if (disposed || !isBotScopeId(scopeId) || suspendedScopes.has(scopeId)) return;
     queued.add(scopeId);
     if (running.has(scopeId) || timers.has(scopeId)) return;
     timers.set(scopeId, setTimeout(() => {
@@ -1275,7 +1252,7 @@ export function createMemoryOrganizer(deps: MemoryOrganizerDeps) {
     for (const scopeId of await deps.listScopeIds()) {
       // User memory is an output of organization, never a source event store.
       // Opening it through storeForScopeId would create a second writer.
-      if (disposed || scopeId === "user" || isSessionScopeId(scopeId)) continue;
+      if (disposed || !isBotScopeId(scopeId)) continue;
       try {
         // Cheap sources first: a scope with no threads and no store file does
         // not get an empty .tdb created by a background sweep.
@@ -1342,12 +1319,12 @@ export function createMemoryOrganizer(deps: MemoryOrganizerDeps) {
     },
     /** A thread run completed (or a scope otherwise gained material). */
     noteScope(scopeId: string): void {
-      if (disposed || isSessionScopeId(scopeId)) return;
+      if (disposed || !isBotScopeId(scopeId)) return;
       schedule(scopeId);
     },
     /** User-requested retry bypasses only the automatic failure backoff. */
     retryScope(scopeId: string): void {
-      if (disposed || isSessionScopeId(scopeId)) return;
+      if (disposed || !isBotScopeId(scopeId)) return;
       forced.add(scopeId);
       schedule(scopeId);
     },
@@ -1398,18 +1375,14 @@ export function createMemoryOrganizer(deps: MemoryOrganizerDeps) {
       model: ModelSelection | null;
       rows: OrganizerProgress[];
     }> {
-      if (isSessionScopeId(scopeId)) return { enabled: false, model: null, rows: [] };
+      if (!isBotScopeId(scopeId)) return { enabled: false, model: null, rows: [] };
       const settings = await readHarnessSettings().catch(() => null);
-      const kind = scopeKind(scopeId);
-      const scopeGate = kind === "workspace" && settings
-        ? await deps.autoOrganizeForScope?.(scopeId).catch(() => null)
-        : null;
       const binding = settings ? await modelForScope(settings, scopeId).catch(() => null) : null;
       const storeExists = await Promise.resolve(deps.hasStoreForScope(scopeId)).catch(() => false);
       const store = storeExists ? await deps.storeForScopeId(scopeId).catch(() => null) : null;
       const rows = store ? await store.listOrganizerProgress().catch(() => [] as OrganizerProgress[]) : [];
       return {
-        enabled: settings !== null && settings.autoOrganize[kind] && scopeGate !== false && binding !== null,
+        enabled: settings !== null && settings.autoOrganize.bot && binding !== null,
         model: binding?.selection ?? null,
         rows,
       };

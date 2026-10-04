@@ -1,4 +1,4 @@
-import { parseSlashCommand } from '@/components/chat/composer/submit/slashCommands';
+import { parseSlashCommand } from '@/lib/pi-session/slashCommands';
 
 export type PiLocalCommand = {
   kind: 'tree';

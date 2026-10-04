@@ -13,7 +13,7 @@ through `PiChatView`; they do not own separate send semantics.
 | Existing session model and thinking level | Pi runtime `SessionSnapshot` |
 | Provider/model catalog | `usePiProviderStore` and `ModelPickerList` |
 | New-session defaults | Pi settings, with Varin project metadata allowed to override the model |
-| Prompt parsing and rendering | `language/`, `editor/`, and `piComposerSubmission.ts` |
+| Prompt parsing and rendering | `language/` and `editor/`; sends use the composed draft directly |
 | Process execution and model mutation | Pi Host through `usePiSessionStore` |
 
 The UI may stage a model or thinking choice for a session that does not exist
@@ -86,7 +86,7 @@ For a first prompt:
    failure cannot orphan the user's text.
 3. Apply the explicit draft model, or the Varin project model when present.
 4. Apply an explicit thinking level after checking the selected model.
-5. Render Varin magic prompts, snippets, inline comments, editor context, and
+5. Compose the user's draft, snippets, inline comments, editor context, and
    goal state.
 6. Send through Pi `prompt`.
 

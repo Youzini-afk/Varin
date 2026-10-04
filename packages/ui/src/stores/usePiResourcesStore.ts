@@ -85,9 +85,9 @@ const emptyPane = (): PiResourcePaneState => ({
   targetKey: null,
 });
 
-const catalogGeneration: Record<PiResourceKind, number> = { prompt: 0, skill: 0 };
-const documentGeneration: Record<PiResourceKind, number> = { prompt: 0, skill: 0 };
-const mutationGeneration: Record<PiResourceKind, number> = { prompt: 0, skill: 0 };
+const catalogGeneration: Record<PiResourceKind, number> = { skill: 0 };
+const documentGeneration: Record<PiResourceKind, number> = { skill: 0 };
+const mutationGeneration: Record<PiResourceKind, number> = { skill: 0 };
 
 const messageForError = (error: unknown): string => (
   error instanceof Error ? error.message : String(error)
@@ -134,7 +134,7 @@ export const usePiResourcesStore = create<PiResourcesStore>()((set, get) => {
   };
 
   return {
-    panes: { prompt: emptyPane(), skill: emptyPane() },
+    panes: { skill: emptyPane() },
 
     clearError: (kind) => updatePane(kind, (pane) => ({ ...pane, error: null })),
 

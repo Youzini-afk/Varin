@@ -238,46 +238,50 @@ test("broker owns catalog and per-session Pi workers", async () => {
       await readFile(join(homeDir, ".config", "mcp", "mcp.json"), "utf8"),
       homeMcpContent,
     );
-    const promptContent = "---\ndescription: Broker-managed prompt\n---\nCheck $1.\n";
-    const createdPrompt = await dispatchRuntimeRequest(broker, "resource.create", {
-      content: promptContent,
+    const skillContent = "---\nname: broker-check\ndescription: Broker-managed skill\n---\nCheck the selected code.\n";
+    const createdSkill = await dispatchRuntimeRequest(broker, "resource.create", {
+      content: skillContent,
       cwd: workspace,
-      kind: "prompt",
+      kind: "skill",
       name: "broker-check",
       scope: "project",
     });
-    assert.equal(createdPrompt.content, promptContent);
-    assert.equal(createdPrompt.descriptor.writable, true);
+    assert.equal(createdSkill.content, skillContent);
+    assert.equal(createdSkill.descriptor.writable, true);
     assert.ok(
       (await dispatchRuntimeRequest(broker, "resource.list", {
         cwd: workspace,
-        kind: "prompt",
-      })).resources.some((resource) => resource.id === createdPrompt.descriptor.id),
+        kind: "skill",
+      })).resources.some((resource) => resource.id === createdSkill.descriptor.id),
     );
     assert.equal(
       (await dispatchRuntimeRequest(broker, "resource.get", {
         cwd: workspace,
-        id: createdPrompt.descriptor.id,
-        kind: "prompt",
+        id: createdSkill.descriptor.id,
+        kind: "skill",
       })).revision,
-      createdPrompt.revision,
+      createdSkill.revision,
     );
-    const updatedPrompt = await dispatchRuntimeRequest(broker, "resource.update", {
-      content: `${promptContent}\nFollow repository conventions.\n`,
+    const updatedSkill = await dispatchRuntimeRequest(broker, "resource.update", {
+      content: `${skillContent}\nFollow repository conventions.\n`,
       cwd: workspace,
-      expectedRevision: createdPrompt.revision,
-      id: createdPrompt.descriptor.id,
-      kind: "prompt",
+      expectedRevision: createdSkill.revision,
+      id: createdSkill.descriptor.id,
+      kind: "skill",
     });
     assert.deepEqual(
       await dispatchRuntimeRequest(broker, "resource.delete", {
         cwd: workspace,
-        expectedRevision: updatedPrompt.revision,
-        id: updatedPrompt.descriptor.id,
-        kind: "prompt",
+        expectedRevision: updatedSkill.revision,
+        id: updatedSkill.descriptor.id,
+        kind: "skill",
       }),
-      { deleted: true, id: createdPrompt.descriptor.id },
+      { deleted: true, id: createdSkill.descriptor.id },
     );
+    const systemPrompt = await dispatchRuntimeRequest(broker, "session.systemPrompt", { cwd: workspace });
+    assert.equal(systemPrompt.mode, "agent");
+    assert.ok(systemPrompt.content.length > 0);
+    assert.ok(Object.keys(systemPrompt.original).length > 0);
     assert.deepEqual(broker.activeSessionIds, []);
     let stopAuthPromptListener = () => {};
     const authPrompt = new Promise<{ interactionId: string; requestId: string; sessionId: string }>((resolvePrompt) => {

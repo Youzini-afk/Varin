@@ -95,6 +95,8 @@ import { sessionScopeId, isSessionScopeId, sessionIdFromScopeId, isSessionStoreK
 import { createMemoryService } from './lib/memory/memory-service.js';
 import { createMemoryOrganizer, type OrganizerRunSource } from './lib/memory/memory-organizer.js';
 import { registerSelectionMemoryRoutes } from './lib/memory/selection-memory-routes.js';
+import { createAgentPersonalization } from './lib/memory/agent-personalization.js';
+import { registerAgentPersonalizationRoutes } from './lib/memory/agent-personalization-routes.js';
 import { createExploreFileReader } from './lib/harness/explore-file-reader.js';
 import { createThreadWorktreeRuntime } from './lib/harness/thread-worktree.js';
 import { createThreadRuntime } from './lib/harness/thread-runtime.js';
@@ -128,14 +130,13 @@ import { createWorkingBranchWriteServices } from './lib/harness/working-state/wo
 import { acquireVirtualWriteTicket, VirtualWriteGate } from './lib/harness/working-state/virtual-write-gate.js';
 import { IntegrationCoordinator } from './lib/harness/working-state/integration-coordinator.js';
 import { reconcileInterruptedKernelBranchIntegrations } from './lib/recovery/durable-file-operation.js';
-import { DEFAULT_HARNESS_SETTINGS, mergeHarnessSettings, resolveHarnessDocumentReadingSettings, THINKING_LEVELS, type HarnessSettingsInput, type SessionSnapshot } from '@varin/protocol';
+import { DEFAULT_HARNESS_SETTINGS, resolveHarnessDocumentReadingSettings, THINKING_LEVELS, type SessionSnapshot } from '@varin/protocol';
 import { createSettingsService, settingsDocumentRevision } from './lib/harness/settings-service.js';
 import { createFollowUpService } from './lib/harness/followups.js';
 import { createFollowUpThreadSender } from './lib/harness/followup-delivery.js';
 import { createClientSurfaceBridge } from './lib/harness/client-surfaces.js';
 import { createSettingsActionRegistry } from './lib/harness/settings-actions.js';
 import { createKernelSettingsActionOperationStore } from './lib/harness/settings-operation-store.js';
-import { createMagicPromptRuntime } from './lib/magic-prompts/runtime.js';
 import * as gitIdentityStorage from './lib/git/identity-storage.js';
 import { getGitHubAuth, getGitHubAuthAccounts, isGhCliActive, isGhCliDisabled } from './lib/github/auth.js';
 import { getGhCliToken } from './lib/github/gh-cli-credential.js';
@@ -147,7 +148,6 @@ import { registerHarnessExperimentRoutes } from './lib/harness/experiment-routes
 import { registerHarnessFollowUpRoutes } from './lib/harness/follow-up-routes.js';
 import { registerHarnessThreadRoutes } from './lib/harness/thread-routes.js';
 import { registerHarnessContextRoutes } from './lib/harness/context-routes.js';
-import { registerHarnessKnowledgeCatalogRoutes } from './lib/harness/knowledge-catalog-routes.js';
 import { createLanguageSupervisorDiagnosticsProvider } from './lib/harness/diagnostics-adapter.js';
 import { createLspNavigationServices } from './lib/harness/lsp-nav.js';
 import { createRelationCollector } from './lib/knowledge/relations.js';
@@ -582,11 +582,6 @@ let isPiSessionLive: (sessionId: string) => Promise<boolean> = async () => false
 const clientSurfaceBridge = createClientSurfaceBridge({
   writeSseEvent,
   isSessionLive: (sessionId) => isPiSessionLive(sessionId),
-});
-const magicPromptRuntime = createMagicPromptRuntime({
-  filePath: path.join(VARIN_DATA_DIR, 'magic-prompts.json'),
-  fsPromises,
-  path,
 });
 broadcastGlobalUiEvent = createGlobalUiEventBroadcaster({
   sseClients: uiNotificationClients,
@@ -1509,18 +1504,13 @@ async function main(options: StartWebUiServerOptions = {}): Promise<WebUiServerC
     remoteClients: () => remoteClientAuthRuntime,
     languageSupport: () => languageSupportRuntime,
     runtimeLifecycle: () => piRuntimeLifecycle,
-    magicPrompts: () => magicPromptRuntime,
+    agentPersonalization: () => agentPersonalization,
     foundational: () => ({
       status: () => piRuntimeBroker.foundationalPackageStatus(),
       restore: (ids) => piRuntimeBroker.restoreFoundationalPackages(
         ids as Parameters<typeof piRuntimeBroker.restoreFoundationalPackages>[0],
       ),
     }),
-    knowledgeStore: async (workspaceId, scope) => (
-      scope === 'user'
-        ? getUserKnowledgeStore().catch(() => null)
-        : getKnowledgeStoreForScope(workspaceId).catch(() => null)
-    ),
     gitIdentities: gitIdentityStorage,
     surfaceHint: () => {
       const surfaces = clientSurfaceBridge.list();
@@ -1744,7 +1734,7 @@ async function main(options: StartWebUiServerOptions = {}): Promise<WebUiServerC
         type: 'varin:harness-thread-done',
         properties: { workspaceId, parent, threadId, report },
       });
-      memoryOrganizerRef.current?.noteScope(workspaceId);
+      if (isBotScopeId(workspaceId)) memoryOrganizerRef.current?.noteScope(workspaceId);
     },
 
     onThreadDequeued: createOnThreadDequeued({
@@ -1928,8 +1918,20 @@ async function main(options: StartWebUiServerOptions = {}): Promise<WebUiServerC
     },
     onError: (error) => console.error('[VarinMemory]', errorMessage(error)),
   });
-  // BC2: background memory organizer. Reads durable sources under each
-  // workspace/bot scope (session events, Pi entries, settled run reports),
+  const agentPersonalization = createAgentPersonalization({
+    client: kernelClient,
+    context: async (sessionId) => {
+      const scopeId = await owningKnowledgeScopeIdForSession(sessionId);
+      if (scopeId && isBotScopeId(scopeId)) return { bot: true };
+      const snapshot = sessionSnapshots.get(sessionId);
+      const cwd = typeof snapshot?.cwd === 'string' ? snapshot.cwd : '';
+      const projects = sanitizeProjects((await readSettingsFromDisk()).projects) ?? [];
+      const project = projects.find(entry => cwd && projectContainsPath(entry, cwd));
+      return { bot: false, ...(project ? { projectId: project.id } : {}) };
+    },
+    onChanged: () => broadcastGlobalUiEvent?.({ type: 'varin:agent-personalization-changed', properties: {} }),
+  });
+  // Bot background memory organizer reads durable session/run sources.
   // filters them with the memory-organization fast decision when bound, and
   // narrates proposals through the models.memoryOrganizer slot on the shared
   // workspace worker. All commits go through memoryService, so inferred output
@@ -1943,19 +1945,7 @@ async function main(options: StartWebUiServerOptions = {}): Promise<WebUiServerC
       return fsPromises.access(storePath).then(() => true, () => false);
     },
     listScopeIds: async () => {
-      const fromRegistry = await threadRegistry.listWorkspaceIds().catch(() => [] as string[]);
-      // Interactive sessions can write events into a workspace store without
-      // ever owning a Thread — the on-disk store set is the second enumerator.
-      const storeDir = path.join(VARIN_DATA_DIR, 'knowledge', hostId);
-      const fromDisk = (await fsPromises.readdir(storeDir).catch(() => [] as string[]))
-        .filter((file) => file.endsWith('.tdb'))
-        .map((file) => file.slice(0, -'.tdb'.length))
-        .filter((key) => key !== 'user' && !isSessionStoreKey(key) && !isBotStoreKey(key));
-      // Bot store files are hashed and cannot be reversed — enumerate the bot
-      // registry so `bot:<id>` scopes are swept like workspaces.
-      const fromBots = (await botService.list())
-        .map((bot) => botScopeId(bot.id));
-      return [...new Set([...fromRegistry, ...fromDisk, ...fromBots])].sort();
+      return (await botService.list()).map((bot) => botScopeId(bot.id)).sort();
     },
     listScopeSessions: async (scopeId) => {
       const threads = await threadRegistry.listWorkspaceThreads(scopeId);
@@ -1987,7 +1977,10 @@ async function main(options: StartWebUiServerOptions = {}): Promise<WebUiServerC
       }
       return sources;
     },
-    scopeForSession: (sessionId) => owningKnowledgeScopeIdForSession(sessionId),
+    scopeForSession: async (sessionId) => {
+      const scope = await owningKnowledgeScopeIdForSession(sessionId);
+      return scope && isBotScopeId(scope) ? scope : null;
+    },
     canExecuteScope: canExecuteBotScope,
     // A Bot scope with no dedicated organizer slot inherits the Bot's own
     // model — Bot memory keeps organizing without a second configuration.
@@ -2007,26 +2000,6 @@ async function main(options: StartWebUiServerOptions = {}): Promise<WebUiServerC
       const entries = (await piRuntimeBroker.previewSessionEntries(bot.entrySessionId, bot.homeDir, 'branch')).entries;
       const selected = entries.findLast((entry) => entry.type === 'model_change');
       return selected?.type === 'model_change' ? { providerId: selected.provider, modelId: selected.modelId } : null;
-    },
-    autoOrganizeForScope: async (scopeId) => {
-      if (!await canExecuteBotScope(scopeId)) return false;
-      const runtime = semanticRuntimeHolder.current;
-      if (!runtime) return null;
-      try {
-        const snapshot = await runtime.harnessSettings(scopeId);
-        if (!snapshot) return null;
-        const globalHarness = recordOf(recordOf(snapshot).global).harness;
-        const projectHarness = snapshot.projectTrusted ? recordOf(recordOf(snapshot).project).harness : undefined;
-        const merged = mergeHarnessSettings(
-          globalHarness && typeof globalHarness === 'object' && !Array.isArray(globalHarness)
-            ? globalHarness as HarnessSettingsInput : {},
-          projectHarness && typeof projectHarness === 'object' && !Array.isArray(projectHarness)
-            ? projectHarness as HarnessSettingsInput : {},
-        );
-        return merged.knowledge.autoOrganize.workspace;
-      } catch {
-        return null;
-      }
     },
     readEntries: async (sessionId) => (
       (await piRuntimeBroker.previewSessionEntries(sessionId, undefined, 'all')).entries
@@ -2831,25 +2804,13 @@ async function main(options: StartWebUiServerOptions = {}): Promise<WebUiServerC
     },
     ...(uiAuthController ? { requireAuth: uiAuthController.requireAuth } : {}),
   });
+  registerAgentPersonalizationRoutes(app, agentPersonalization, uiAuthController?.requireAuth ?? ((_req, _res, next) => next()));
   registerSelectionMemoryRoutes(app, {
+    agentPersonalization,
     memory: memoryService,
     entries: async (sessionId) => (await piRuntimeBroker.previewSessionEntries(sessionId, undefined, 'branch')).entries,
     narrate: (scopeId, system, prompt, signal) => memoryOrganizer.extractSelection(scopeId, system, prompt, signal),
     requireAuth: uiAuthController?.requireAuth ?? ((_request, _response, next) => next()),
-  });
-  registerHarnessKnowledgeCatalogRoutes(app, {
-    resolveWorkspace: async ({ workspaceId }) => documentsAuthority.resolveWorkspace({ workspaceId }),
-    getWorkspaceStore: getKnowledgeStoreForScope,
-    getUserStore: getUserKnowledgeStore,
-    onKnowledgeChanged: ({ scope, workspaceId }) => {
-      broadcastGlobalUiEvent?.({
-        type: 'varin:harness-knowledge-changed',
-        properties: { scope, ...(workspaceId ? { workspaceId } : {}) },
-      });
-    },
-    organizer: memoryOrganizer,
-    memory: memoryService,
-    ...(uiAuthController ? { requireAuth: uiAuthController.requireAuth } : {}),
   });
   registerWebSearchCredentialRoutes(app, {
     ...(uiAuthController ? { requireAuth: uiAuthController.requireAuth } : {}),
@@ -2943,8 +2904,8 @@ async function main(options: StartWebUiServerOptions = {}): Promise<WebUiServerC
       catch (error) { await store.close(); throw error; }
       knowledgeStores.set(storeKey, store);
       catalogScan.start(scopeId);
-      knowledgeVectors?.scheduleReconcile(store, scope, scopeId, scopeId);
-      if (userKnowledgeStore) knowledgeVectors?.scheduleReconcile(userKnowledgeStore, 'user', 'user', scopeId);
+      if (scope === 'bot') knowledgeVectors?.scheduleReconcile(store, scope, scopeId, scopeId);
+      if (scope === 'bot' && userKnowledgeStore) knowledgeVectors?.scheduleReconcile(userKnowledgeStore, 'user', 'user', scopeId);
       return store;
     });
     knowledgeStoreLoads.set(storeKey, loading);
@@ -3074,6 +3035,7 @@ async function main(options: StartWebUiServerOptions = {}): Promise<WebUiServerC
   };
 
   const knowledgeContextRuntime = createKnowledgeContextRuntime({
+    recallEnabled: async (sessionId) => isBotScopeId(await owningKnowledgeScopeIdForSession(sessionId) ?? ''),
     getStore: getKnowledgeStoreForScope,
     getUserStore: getUserKnowledgeStore,
     resolveScope: async (sessionId) => await owningKnowledgeScopeIdForSession(sessionId) ?? sessionScopeId(sessionId),
@@ -3345,12 +3307,10 @@ async function main(options: StartWebUiServerOptions = {}): Promise<WebUiServerC
         });
     });
   };
-  for (const [storeKey, store] of knowledgeStores) {
+  for (const storeKey of knowledgeStores.keys()) {
     // Store keys may be hashed session scopes — only real resource roots index.
     if (isSessionStoreKey(storeKey) || isBotStoreKey(storeKey)) continue;
     catalogScan.start(storeKey);
-    knowledgeVectors.scheduleReconcile(store, 'workspace', storeKey, storeKey);
-    if (userKnowledgeStore) knowledgeVectors.scheduleReconcile(userKnowledgeStore, 'user', 'user', storeKey);
   }
   await indexDirectories.load();
   await indexDirectories.syncProjects(projectDirectories(await readSettingsFromDisk()).filter((directory) =>
@@ -3450,6 +3410,7 @@ async function main(options: StartWebUiServerOptions = {}): Promise<WebUiServerC
 
   const discoveredShells = discoverShells();
   const harnessServiceHost = createHarnessServiceHost({
+    agentPersonalization,
     discoveredShells,
     memoryService,
     computerService,

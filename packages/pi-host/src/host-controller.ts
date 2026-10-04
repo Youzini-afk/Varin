@@ -125,6 +125,7 @@ const OUT_OF_BAND_METHODS = new Set([
   // Synchronous read-only cuts must not queue behind a prompt that is waiting
   // in preflight; otherwise the UI health check waits on the very same stall.
   "session.snapshot",
+  "session.systemPrompt",
   "session.reconcile",
   "agent.abort",
   "agent.queue.clear",
@@ -272,8 +273,8 @@ function readSessionFeatureMutation(value: unknown) {
 
 function readResourceKind(record: Record<string, unknown>): PiResourceKind {
   const kind = readString(record, "kind");
-  if (kind !== "prompt" && kind !== "skill") {
-    throw new HostError("invalid_params", "kind must be prompt or skill");
+  if (kind !== "skill") {
+    throw new HostError("invalid_params", "kind must be skill");
   }
   return kind;
 }
@@ -1032,6 +1033,8 @@ export class HostController {
         // snapshot, letting clients reconcile a subscribe/snapshot race
         // without reapplying covered events.
         return { ...this.#sessionHost.snapshot(), eventWatermark: this.#sequence };
+      case "session.systemPrompt":
+        return this.#sessionHost.systemPrompt(optionalString(params, "sessionId") ?? this.#sessionHost.snapshot().sessionId);
       case "session.reconcile": {
         const sessionId = readString(params, "sessionId");
         this.#sessionHost.assertSession(sessionId);

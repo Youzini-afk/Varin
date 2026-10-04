@@ -1,5 +1,10 @@
 # Knowledge storage
 
+Ordinary Agent notes and editable system instructions use the Rust typed-record authority
+described in [Memory ownership](../memory/DOCUMENTATION.md). They bypass semantic recall and
+background memory organization. This module still owns plans, observations, symbol indexes,
+and Bot/user long-term knowledge; these are separate from ordinary Agent notes.
+
 The workspace/user KnowledgeStore authority remains TriviumDB 0.8.8. Its existing
 `.tdb` files, node IDs, graph links and sidecars are unchanged. There is no migration,
 second writer, replacement database or in-main fallback.

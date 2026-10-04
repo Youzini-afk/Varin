@@ -11,6 +11,13 @@ owned by the native session and are never rendered as reasoning text.
 
 ## Module map
 
+`components/sections/assistant` owns the ordinary Agent memory and system-prompt settings pages.
+Memory CRUD and scope changes use the Host personalization authority; the editor stores only changed
+native prompt sections. Full previews include current project files, skills and memories, while the
+last-request disclosure comes from the live Pi worker. Bot settings retain their separate memory
+controls. Magic Prompts and prompt-template resource pages/expansion have been removed; skill resources
+and product action requests remain. See [Memory ownership](../web/application-host/lib/memory/DOCUMENTATION.md).
+
 Projects have a stable identity and an editable collection of folders. `ProjectEntry.path` is
 the default execution folder; `additionalPaths` contains the other folders. `projectFolders()`
 is the shared collection helper. Membership and default retrieval use the collection; commands,

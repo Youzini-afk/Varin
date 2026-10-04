@@ -44,7 +44,6 @@ import {
 import { useProjectsStore } from '@/stores/useProjectsStore';
 import { useUIStore } from '@/stores/useUIStore';
 import { projectPiSessionActivity } from '@/lib/pi-runtime/sessionActivity';
-import { joinPiDraftInstructions } from '@/lib/pi-runtime/sessionDrafts';
 import { appendInlineComments } from '@/lib/messages/inlineComments';
 import { consumeEditorContextAttachments, restoreEditorContextAttachments } from '@/lib/agent-editor/attachments';
 import { projectEditorContextAttachments } from '@/lib/agent-editor/projection';
@@ -60,7 +59,6 @@ import { PiExtensionUiChrome } from './PiExtensionUiChrome';
 import { PiGoalStrip } from './PiGoalControls';
 import { PiFollowUpsStrip } from './PiFollowUpsStrip';
 import { OverlayScrollbar } from '@/components/ui/OverlayScrollbar';
-import { renderPiComposerSubmission } from './piComposerSubmission';
 import {
   WorkbenchReplacement,
   WORKBENCH_REPLACEMENT_TARGETS,
@@ -438,12 +436,8 @@ export const PiChatView: React.FC<PiChatViewProps> = ({
     let startedGoalId: string | null = null;
     let draftCleared = false;
     try {
-      const rendered = await renderPiComposerSubmission(currentDraft.text);
-      let promptText = rendered.text;
-      let instructions = joinPiDraftInstructions(
-        currentDraft.instructions,
-        rendered.instructions,
-      );
+      let promptText = currentDraft.text;
+      let instructions = currentDraft.instructions;
       try {
         promptText = await useSnippetsStore.getState().expandText(promptText);
       } catch (error) {

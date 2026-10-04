@@ -352,7 +352,7 @@ export async function openKnowledgeStoreEngine(deps: KnowledgeStoreEngineOptions
       const scope = p["scope"];
       const content = p["content"];
       if (action !== "new" && action !== "supplement" && action !== "correct") return null;
-      if (scope !== "workspace" && scope !== "user" && scope !== "bot") return null;
+      if (scope !== "user" && scope !== "bot") return null;
       if (typeof content !== "string" || !content) return null;
       const nature = p["nature"];
       const trigger = p["trigger"];

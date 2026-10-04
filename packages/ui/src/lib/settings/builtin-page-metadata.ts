@@ -3,16 +3,16 @@ import type { SettingsPageMeta, SettingsRuntimeContext } from './page-types';
 export const BUILTIN_SETTINGS_EXTENSION_ID = 'varin.builtin.settings';
 
 export type BuiltinSettingsRenderer =
+  | 'agent-memory'
+  | 'agent-prompt'
   | 'empty'
   | 'about'
   | 'commands'
   | 'extensions'
   | 'git'
   | 'language-support'
-  | 'magic-prompts'
   | 'plugins'
   | 'projects'
-  | 'prompts'
   | 'providers'
   | 'remote-instances'
   | 'runtime'
@@ -41,6 +41,8 @@ const spec = (
 ): BuiltinSettingsPageSpec => ({ meta, renderer, ...(availability ? { availability } : {}) });
 
 export const BUILTIN_SETTINGS_PAGE_SPECS: readonly BuiltinSettingsPageSpec[] = [
+  spec({ slug: 'agent-memory', title: 'Memory', titleKey: 'assistant.memory.title', group: 'harness', kind: 'single', icon: 'database-2', order: 32, keywords: ['memory', 'global', 'project', 'session'] }, 'agent-memory'),
+  spec({ slug: 'agent-prompt', title: 'System prompt', titleKey: 'assistant.prompt.title', group: 'harness', kind: 'single', icon: 'file-text', order: 33, keywords: ['prompt', 'instructions', 'style', 'autonomy'] }, 'agent-prompt'),
   spec({ slug: 'home', title: 'Settings', titleKey: 'settings.view.home.title', group: 'general', kind: 'single', icon: null, order: -1, keywords: ['search', 'settings'] }, 'empty'),
   spec({ slug: 'general', title: 'General', titleKey: 'settings.page.general.title', group: 'general', kind: 'single', icon: 'settings-3', order: 0, keywords: ['general', 'startup', 'launch at login', 'autostart', 'tray', 'password', 'passkey', 'security', 'transport', 'network', 'lan'] }, 'varin:general'),
   spec({ slug: 'appearance', title: 'Appearance', titleKey: 'settings.page.appearance.title', group: 'general', kind: 'single', icon: 'palette', order: 1, keywords: ['theme', 'font', 'spacing', 'padding', 'corner radius', 'radius', 'input bar', 'keyboard', 'viewport', 'mobile', 'terminal', 'pwa', 'install name', 'app shortcuts'] }, 'varin:visual'),
@@ -59,11 +61,9 @@ export const BUILTIN_SETTINGS_PAGE_SPECS: readonly BuiltinSettingsPageSpec[] = [
   spec({ slug: 'runtime', title: 'Runtime', titleKey: 'settings.page.runtime.title', group: 'pi', kind: 'single', icon: 'terminal-box', order: 39, keywords: ['pi', 'runtime', 'install', 'upgrade', 'node', 'path', 'package root'] }, 'runtime'),
   spec({ slug: 'providers', title: 'Providers', titleKey: 'settings.page.providers.title', group: 'pi', kind: 'split', icon: 'cloud', order: 40, keywords: ['provider', 'providers', 'models', 'model', 'api key', 'api keys', 'openai', 'anthropic', 'ollama', 'credentials'] }, 'providers'),
   spec({ slug: 'commands', title: 'Commands', titleKey: 'settings.page.commands.title', group: 'pi', kind: 'single', icon: 'command', order: 43, keywords: ['pi', 'command', 'commands', 'slash command', 'extension command', 'prompt command', 'skill command'] }, 'commands'),
-  spec({ slug: 'prompts', title: 'Prompts', titleKey: 'settings.page.prompts.title', group: 'pi', kind: 'split', icon: 'file-text', order: 44, keywords: ['pi', 'prompt', 'prompts', 'template', 'templates', 'markdown', '.md', 'argument hint'] }, 'prompts'),
   spec({ slug: 'skills', title: 'Skills', titleKey: 'settings.page.skills.title', group: 'pi', kind: 'split', icon: 'sparkling', order: 45, keywords: ['pi', 'skill', 'skills', 'skill.md', 'markdown', 'package resource'] }, 'skills'),
   spec({ slug: 'plugins', title: 'Pi Packages', titleKey: 'settings.page.plugins.title', group: 'pi', kind: 'single', icon: 'plug-2', order: 47, keywords: ['pi', 'package', 'packages', 'plugin', 'plugins', 'extensions', 'npm', 'git', 'local path'] }, 'plugins'),
   spec({ slug: 'extensions', title: 'Varin Extensions', titleKey: 'settings.page.extensions.title', group: 'pi', kind: 'single', icon: 'plug-2', order: 49, keywords: ['varin', 'extension', 'extensions', 'enable', 'disable', 'capabilities'] }, 'extensions'),
-  spec({ slug: 'magic-prompts', title: 'Magic Prompts', titleKey: 'settings.page.magicPrompts.title', group: 'content', kind: 'split', icon: 'ai-generate-2', order: 60, keywords: ['prompts', 'templates', 'git', 'github', 'review', 'commit', 'pull request'] }, 'magic-prompts'),
   spec({ slug: 'snippets', title: 'Snippets', titleKey: 'settings.page.snippets.title', group: 'content', kind: 'split', icon: 'chat-thread', order: 61, keywords: ['prompt', 'templates', 'multi-run', 'strategy', 'approach'] }, 'snippets'),
 ];
 

@@ -44,11 +44,9 @@ import {
   type ComposerEditorHandle,
 } from '@/components/chat/composer/editor/ComposerEditor';
 import type { ComposerLanguageContext } from '@/components/chat/composer/language/tokenize';
-import { MAGIC_PROMPT_COMMANDS } from '@/components/chat/composer/submit/slashCommands';
 import { getInlineCommentDraftKey, useInlineCommentDraftStore } from '@/stores/useInlineCommentDraftStore';
 import { getRuntimeKey, runtimeFetch } from '@varin/application-client';
 import { useRuntimeAPIs } from '@/hooks/useRuntimeAPIs';
-import { getMagicPromptDefinition } from '@/lib/magicPrompts';
 import type { Snippet } from '@/types/snippet';
 import { useSnippetsStore } from '@/stores/useSnippetsStore';
 import { PiActiveEditorContextSuggestion } from './PiActiveEditorContextSuggestion';
@@ -130,12 +128,6 @@ const fileToAttachment = (file: File): Promise<ImageAttachment> => new Promise((
   reader.readAsDataURL(file);
 });
 
-const MAGIC_VARIN_COMMANDS: readonly CommandInfo[] = MAGIC_PROMPT_COMMANDS.map((command) => ({
-  description: getMagicPromptDefinition(command.visiblePrompt).description,
-  id: `varin:${command.name}`,
-  name: command.name,
-  source: 'varin',
-}));
 
 type PiComposerAutocomplete = {
   kind: 'command' | 'mention' | 'skill' | 'snippet';
@@ -233,7 +225,6 @@ export const PiComposer: React.FC<PiComposerProps> = ({
   const [aborting, setAborting] = React.useState(false);
   const messageHistory = useMessageHistory(sentMessageHistory);
   const varinCommands = React.useMemo<readonly CommandInfo[]>(() => [
-    ...MAGIC_VARIN_COMMANDS,
     ...(sessionId
       ? [{
           description: t('chat.commandAutocomplete.command.compactDescription'),

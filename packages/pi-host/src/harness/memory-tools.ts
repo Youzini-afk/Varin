@@ -78,10 +78,10 @@ export function createMemoryTool(bridge: HostServicesBridge, _sessionId: string)
   return defineTool({
     name: "memory",
     label: "Memory",
-    description: "Record, search, inspect, correct, or forget durable memory that persists across sessions",
-    promptSnippet: "memory: record/search/inspect/correct/forget durable cross-session memory",
+    description: "Manage memory: remember, inspect, correct or forget. Ordinary assistant notes load into every request; Bot memories are retrieved on demand. Choose user (global), workspace (project), or session scope.",
+    promptSnippet: "memory: manage notes in global, project or conversation scope",
     promptGuidelines: [
-      "remember/correct persist immediately. sourceText carries the exact passage supporting a paraphrase; get(includeSource=true) returns source passages and the revision chain.",
+      "remember/correct persist immediately. Ordinary Agent notes default to session scope and are loaded directly into subsequent requests. Bot memory defaults to its owning Bot and supports sourceText provenance and get(includeSource=true) source passages and revision chains.",
     ],
     parameters: MemoryParams,
     execute: async (_toolCallId, params, _signal, _onUpdate, _ctx) => {

@@ -70,7 +70,7 @@ const descriptor = (
   description: '',
   filePath: `C:/agent/prompts/${id}.md`,
   id,
-  kind: 'prompt',
+  kind: 'skill',
   name: id,
   sourceInfo: {
     origin: 'top-level',
@@ -132,14 +132,14 @@ describe('usePiResourcesStore', () => {
     deleteImpl = async () => ({ deleted: true });
     copyImpl = async (_target, _kind, _id, _scope, name) => document(name ?? 'review-copy');
     usePiResourcesStore.setState({
-      panes: { prompt: emptyPane(), skill: emptyPane() },
+      panes: { skill: emptyPane() },
     });
   });
 
   test('loads a catalog and selects the first native resource document', async () => {
-    await usePiResourcesStore.getState().loadCatalog('prompt', target, targetKey);
+    await usePiResourcesStore.getState().loadCatalog('skill', target, targetKey);
 
-    const pane = usePiResourcesStore.getState().panes.prompt;
+    const pane = usePiResourcesStore.getState().panes.skill;
     expect(pane.selectedId).toBe('review');
     expect(pane.document?.content).toBe('# review');
     expect(pane.draft).toBe('# review');
@@ -153,12 +153,12 @@ describe('usePiResourcesStore', () => {
       receivedRevision = expectedRevision;
       return document(id, content, 'revision-2');
     };
-    await usePiResourcesStore.getState().loadCatalog('prompt', target, targetKey);
-    usePiResourcesStore.getState().setDraft('prompt', '# edited');
+    await usePiResourcesStore.getState().loadCatalog('skill', target, targetKey);
+    usePiResourcesStore.getState().setDraft('skill', '# edited');
 
-    const saved = await usePiResourcesStore.getState().saveResource('prompt', target, targetKey);
+    const saved = await usePiResourcesStore.getState().saveResource('skill', target, targetKey);
 
-    const pane = usePiResourcesStore.getState().panes.prompt;
+    const pane = usePiResourcesStore.getState().panes.skill;
     expect(saved).toBe(true);
     expect(receivedRevision).toBe('revision-review');
     expect(pane.document?.revision).toBe('revision-2');
@@ -168,12 +168,12 @@ describe('usePiResourcesStore', () => {
 
   test('preserves the edited draft when revision conflict rejects a save', async () => {
     updateImpl = async () => { throw new Error('resource_conflict'); };
-    await usePiResourcesStore.getState().loadCatalog('prompt', target, targetKey);
-    usePiResourcesStore.getState().setDraft('prompt', '# local edit');
+    await usePiResourcesStore.getState().loadCatalog('skill', target, targetKey);
+    usePiResourcesStore.getState().setDraft('skill', '# local edit');
 
-    const saved = await usePiResourcesStore.getState().saveResource('prompt', target, targetKey);
+    const saved = await usePiResourcesStore.getState().saveResource('skill', target, targetKey);
 
-    const pane = usePiResourcesStore.getState().panes.prompt;
+    const pane = usePiResourcesStore.getState().panes.skill;
     expect(saved).toBe(false);
     expect(pane.document?.content).toBe('# review');
     expect(pane.draft).toBe('# local edit');
@@ -190,14 +190,14 @@ describe('usePiResourcesStore', () => {
       return catalog(descriptor('remote'));
     };
     getImpl = async (_target, _kind, id) => document(id);
-    const firstLoad = usePiResourcesStore.getState().loadCatalog('prompt', target, targetKey);
+    const firstLoad = usePiResourcesStore.getState().loadCatalog('skill', target, targetKey);
 
     runtimeKey = 'runtime-b';
-    await usePiResourcesStore.getState().loadCatalog('prompt', target, 'runtime-b:project');
+    await usePiResourcesStore.getState().loadCatalog('skill', target, 'runtime-b:project');
     firstRequest.resolve(catalog(descriptor('stale')));
     await firstLoad;
 
-    const pane = usePiResourcesStore.getState().panes.prompt;
+    const pane = usePiResourcesStore.getState().panes.skill;
     expect(pane.targetKey).toBe('runtime-b:project');
     expect(pane.selectedId).toBe('remote');
     expect(pane.catalog?.resources.map((resource) => resource.id)).toEqual(['remote']);
@@ -221,17 +221,17 @@ describe('usePiResourcesStore', () => {
       currentCatalog = catalog(external.descriptor, copied.descriptor);
       return copied;
     };
-    await usePiResourcesStore.getState().loadCatalog('prompt', target, targetKey);
+    await usePiResourcesStore.getState().loadCatalog('skill', target, targetKey);
 
     const success = await usePiResourcesStore.getState().copyResource(
-      'prompt',
+      'skill',
       target,
       targetKey,
       'user',
       'managed-copy',
     );
 
-    const pane = usePiResourcesStore.getState().panes.prompt;
+    const pane = usePiResourcesStore.getState().panes.skill;
     expect(success).toBe(true);
     expect(pane.selectedId).toBe('managed-copy');
     expect(pane.document?.descriptor.writable).toBe(true);

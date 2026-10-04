@@ -1744,7 +1744,7 @@ export interface HarnessServiceMap {
    * Bot persona for Bot entry sessions, null otherwise. The worker merges
    * them ahead of per-request `instructions` on prompt/steer/followUp.
    */
-  "session.instructions": { params: Record<string, never>; result: { instructions: string | null } };
+  "session.instructions": { params: Record<string, never>; result: { instructions: string | null; personalization?: import("./agent-personalization.js").AgentPersonalizationContext } };
   // Phase 7C/7D: experiment execution and resource facts (D-300)
   "experiment.submit": { params: import("./harness-experiments.js").ExperimentSubmitParams; result: import("./harness-experiments.js").ExperimentSubmitResult };
   "experiment.list": { params: import("./harness-experiments.js").ExperimentListParams; result: import("./harness-experiments.js").ExperimentListResult };

@@ -263,7 +263,7 @@ export interface PackageDescriptor {
 
 export type PiPackageScope = "global" | "project";
 
-export type PiResourceKind = "prompt" | "skill";
+export type PiResourceKind = "skill";
 
 export type PiResourceScope = "user" | "project";
 
@@ -275,7 +275,7 @@ export interface PiResourceSourceInfo {
   source: string;
 }
 
-export type PiCommandSource = "extension" | "prompt" | "skill";
+export type PiCommandSource = "extension" | "skill";
 
 export interface PiCommandDescriptor {
   argumentHint?: string;

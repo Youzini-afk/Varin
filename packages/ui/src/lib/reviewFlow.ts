@@ -7,7 +7,7 @@ import type {
   SessionSummary,
   ThinkingLevel,
 } from '@varin/protocol';
-import { renderMagicPrompt } from '@/lib/magicPrompts';
+import { actionInstruction } from '@/lib/actionInstructions';
 import { renderPiAgentInvocation } from '@/lib/piAgentInvocation';
 import { getPiRuntimeConnection } from '@/lib/pi-runtime/client';
 import {
@@ -563,8 +563,8 @@ export const startReviewFlow = async (input: StartReviewFlowInput): Promise<void
   };
 
   if (input.generateHandoff ?? true) {
-    const visibleText = await renderMagicPrompt('session.reviewHandoff.visible');
-    const instructionsText = await renderMagicPrompt('session.reviewHandoff.instructions');
+    const visibleText = await actionInstruction('session.reviewHandoff.visible');
+    const instructionsText = await actionInstruction('session.reviewHandoff.instructions');
     const startedAt = Date.now();
     const sentEntryId = await sendPiMessage(
       input.originalSessionId,
@@ -582,7 +582,7 @@ export const startReviewFlow = async (input: StartReviewFlowInput): Promise<void
         sentEntryId,
       );
       assertAutoReviewRuntimeStillCurrent(expectedRuntimeKey);
-      const prompt = await renderMagicPrompt('session.reviewSession.visible', { handoff });
+      const prompt = await actionInstruction('session.reviewSession.visible', { handoff });
       await startReviewSession(prompt);
     };
     if (input.returnAfterHandoffRequest) {
@@ -595,7 +595,7 @@ export const startReviewFlow = async (input: StartReviewFlowInput): Promise<void
     return;
   }
 
-  await startReviewSession(await renderMagicPrompt('session.reviewSessionWithoutHandoff.visible'));
+  await startReviewSession(await actionInstruction('session.reviewSessionWithoutHandoff.visible'));
 };
 
 export const sendReviewFeedbackToOriginal = async (
@@ -609,7 +609,7 @@ export const sendReviewFeedbackToOriginal = async (
   const link = findLinkByReviewSession(reviewSessionId, directory, summaries);
   if (!link) throw new Error('Original session is missing');
   rememberReviewLink(link.originalSessionId, reviewSessionId, directory);
-  const prompt = await renderMagicPrompt('session.reviewFeedbackToImplementer.visible', {
+  const prompt = await actionInstruction('session.reviewFeedbackToImplementer.visible', {
     review_feedback: reviewFeedback,
   });
   return sendPiMessage(
@@ -634,7 +634,7 @@ export const sendImplementationResponseToReviewer = async (
   const review = resolveReviewSummary(originalSessionId, summaries);
   if (!review) throw new Error('Review session is missing');
   rememberReviewLink(originalSessionId, review.id, directory);
-  const prompt = await renderMagicPrompt('session.implementationResponseToReviewer.visible', {
+  const prompt = await actionInstruction('session.implementationResponseToReviewer.visible', {
     implementation_response: implementationResponse,
   });
   const sentEntryId = await sendPiMessage(

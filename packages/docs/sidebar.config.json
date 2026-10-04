@@ -243,17 +243,10 @@
           }
         },
         {
-          "label": "Magic Prompts",
-          "link": "/magic-prompts/",
+          "label": "Agent memory & instructions",
+          "link": "/agent-personalization/",
           "translations": {
-            "zh-CN": "魔法提示词",
-            "uk": "Магічні підказки",
-            "es": "Prompts mágicos",
-            "pt-BR": "Prompts mágicos",
-            "ko": "매직 프롬프트",
-            "pl": "Magiczne prompty",
-            "fr": "Magic Prompts",
-            "ja": "マジックプロンプト"
+            "zh-CN": "Agent 记忆与系统提示词"
           }
         },
         {

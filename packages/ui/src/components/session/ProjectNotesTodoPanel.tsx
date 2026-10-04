@@ -41,7 +41,7 @@ import { useProjectsStore } from '@/stores/useProjectsStore';
 import { createPiSessionFromNavigation } from '@/lib/pi-runtime/sessionNavigation';
 import { createPiWorktreeSession } from '@/lib/pi-runtime/worktreeSession';
 import { cn } from '@/lib/utils';
-import { renderMagicPrompt } from '@/lib/magicPrompts';
+import { actionInstruction } from '@/lib/actionInstructions';
 import { getCurrentIntlLocale, useI18n } from '@/lib/i18n';
 import { runtimeFetch } from '@varin/application-client';
 import { TodoSendDialog, type TodoSendExecution } from './TodoSendDialog';
@@ -520,10 +520,10 @@ export const ProjectNotesTodoPanel: React.FC<ProjectNotesTodoPanelProps> = ({
         return;
       }
 
-      const visiblePrompt = await renderMagicPrompt('plan.todo.visible', {
+      const visiblePrompt = await actionInstruction('plan.todo.visible', {
         todo_text: pendingSendTarget.todoText,
       });
-      const instructionsText = await renderMagicPrompt('plan.todo.instructions', {
+      const instructionsText = await actionInstruction('plan.todo.instructions', {
         todo_text: pendingSendTarget.todoText,
       });
       const promptText = [visiblePrompt, instructionsText].join('\n\n');

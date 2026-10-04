@@ -134,6 +134,7 @@ export interface ContextPreparationOptions {
   onRetention?: (params: import("@varin/protocol").ContextRetentionParams) => void | Promise<void>;
   /** Per-request injection seam forwarded to the request boundary (D-300). */
   inject?: ContextRequestBoundaryOptions["inject"];
+  sent?: ContextRequestBoundaryOptions["sent"];
   onFailure?: (phase: "prepare" | "commit", message: string) => void;
   onSuccess?: (phase: "prepare" | "commit") => void;
   onStatus?: () => void;
@@ -950,6 +951,7 @@ export function createContextPreparationExtension(
       onImmediateFailure: failApplication,
       observe: extension.observeRequest,
       ...(options.inject ? { inject: options.inject } : {}),
+      ...(options.sent ? { sent: options.sent } : {}),
       onEvent,
       onStatus: () => options.onStatus?.(),
       compact: async (request, signal) => {

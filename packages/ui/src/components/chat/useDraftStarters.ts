@@ -138,15 +138,14 @@ export function useDraftStarters(options: UseDraftStartersOptions = {}): UseDraf
         const requestRuntimeKey = getRuntimeKey();
         void Promise.all([
             listPiCommands(runtimeTarget),
-            listPiResources(runtimeTarget, 'prompt'),
             listPiResources(runtimeTarget, 'skill'),
-        ]).then(([commands, prompts, skills]) => {
+        ]).then(([commands, skills]) => {
             if (
                 loadGenerationRef.current !== generation
                 || runtimeTargetKeyRef.current !== requestKey
                 || getRuntimeKey() !== requestRuntimeKey
             ) return;
-            setCatalogItems(buildPiDraftStarterCatalog(commands, prompts, skills));
+            setCatalogItems(buildPiDraftStarterCatalog(commands, skills));
         }).catch((error) => {
             console.warn('[DraftStarters] Failed to load Pi commands and skills:', error);
             if (

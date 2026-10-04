@@ -8,7 +8,7 @@ import type {
 import { buildPiDraftStarterCatalog } from './piDraftStarterCatalog';
 
 const descriptor = (
-  kind: 'prompt' | 'skill',
+  kind: 'skill',
   name: string,
   scope: 'project' | 'user',
   active = true,
@@ -50,16 +50,13 @@ describe('Pi draft starter catalog', () => {
   test('keeps Pi command invocations while normalizing skill references', () => {
     const items = buildPiDraftStarterCatalog(
       [
-        command('review', 'prompt'),
         command('skill:workspace-check', 'skill'),
         command('reload', 'extension'),
       ],
-      catalog(descriptor('prompt', 'review', 'project')),
       catalog(descriptor('skill', 'workspace-check', 'project')),
     );
 
     expect(items).toEqual([
-      { invocation: '/review', name: 'review', scope: 'project', source: 'prompt', type: 'command' },
       { invocation: '/skill:workspace-check', name: 'workspace-check', scope: 'project', source: 'skill', type: 'skill' },
       { invocation: '/reload', name: 'reload', scope: 'user', source: 'extension', type: 'command' },
     ]);
@@ -69,10 +66,8 @@ describe('Pi draft starter catalog', () => {
     const items = buildPiDraftStarterCatalog(
       [
         command('review', 'extension'),
-        command('review', 'prompt'),
         command('skill:check', 'skill'),
       ],
-      catalog(descriptor('prompt', 'review', 'project')),
       catalog(descriptor('skill', 'check', 'project', false)),
     );
 

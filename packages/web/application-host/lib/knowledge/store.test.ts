@@ -564,7 +564,7 @@ describe("KnowledgeStore", () => {
         produced: [3],
         preparedRange: { eventCursor: 7, eventPartial: { id: 8, offset: 2048 } },
         proposals: [{
-          action: "supplement", scope: "workspace", nature: "decision",
+          action: "supplement", scope: "bot", nature: "decision",
           content: "Thursday releases this quarter.", trigger: "release", target: 42,
         }],
         updatedAt: 100,

@@ -437,6 +437,13 @@ interfaces and resource locations. The same shipped SDK patch applies to bundled
 to selected external SDK code and reference assets. See the [Pi harness README](../packages/pi-host/src/harness/README.md)
 and [thread runtime contract](../packages/web/application-host/lib/harness/DOCUMENTATION.md).
 
+Users can edit official system sections and scope those edits globally, by project, or by session.
+The request boundary applies these edits and directly loads matching lightweight Agent notes.
+The settings editor previews the complete prompt and exposes the last observed outgoing system text.
+Bot sessions retain separate instructions, recall and memory organization; ordinary Agent preferences
+never enter Bot requests. The Host/Rust persistence and revision contract is documented in
+[Memory ownership](../packages/web/application-host/lib/memory/DOCUMENTATION.md).
+
 D-302 / 7H is implemented at D-305. Resource-aware tool scheduling runs at the real
 Pi execution boundary, while Host authority and Rust file/process owners retain permission, mutation
 and lifecycle enforcement. Independent calls can overlap; shared resources and unresolved sequential

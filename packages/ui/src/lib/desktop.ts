@@ -206,10 +206,6 @@ export type DesktopSettings = {
   autoUpdateChecksEnabled?: boolean;
 
   // Varin-owned global behavior prompt.
-  globalBehaviorPrompt?: string;
-  responseStyleEnabled?: boolean;
-  responseStylePreset?: 'concise' | 'detailed' | 'mentor' | 'pushback' | 'noFiller' | 'matchEnergy' | 'warmPeer' | 'custom';
-  responseStyleCustomInstructions?: string;
   dictationEnabled?: boolean;
   sttProvider?: 'local' | 'openai-compatible';
   sttServerUrl?: string;

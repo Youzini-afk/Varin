@@ -97,9 +97,7 @@ export const PiResourceSidebar: React.FC<PiResourceSidebarProps> = ({ kind, onIt
       <div className="space-y-3 border-b px-3 pb-3 pt-4">
         <div className="flex items-center justify-between gap-2">
           <h2 className={SETTINGS_PANEL_TITLE_CLASS}>
-            {kind === 'prompt'
-              ? t('settings.varin.prompts.sidebar.title')
-              : t('settings.varin.skills.sidebar.title')}
+            {t('settings.varin.skills.sidebar.title')}
           </h2>
           <div className="flex items-center gap-1">
             <Button
@@ -145,18 +143,13 @@ export const PiResourceSidebar: React.FC<PiResourceSidebarProps> = ({ kind, onIt
             }}
           >
             <div className="relative">
-              {kind === 'prompt' ? (
-                <span className="pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 font-mono typography-meta text-muted-foreground">
-                  /
-                </span>
-              ) : null}
               <Input
                 value={name}
                 onChange={(event) => setName(event.target.value)}
-                placeholder={kind === 'prompt' ? 'review-change' : 'workspace-check'}
+                placeholder={'workspace-check'}
                 autoFocus
                 aria-invalid={Boolean(name && nameError)}
-                className={kind === 'prompt' ? 'pl-6 font-mono' : undefined}
+                className={undefined}
               />
             </div>
             <div className="flex items-center gap-2">
@@ -194,7 +187,7 @@ export const PiResourceSidebar: React.FC<PiResourceSidebarProps> = ({ kind, onIt
       <ScrollableOverlay outerClassName="min-h-0 flex-1" className="space-y-1 overflow-x-hidden px-3 py-2">
         {!pane.loadingCatalog && resources.length === 0 ? (
           <div className="px-3 py-10 text-center text-muted-foreground">
-            <Icon name={kind === 'prompt' ? 'file-text' : 'sparkling'} className="mx-auto size-9 opacity-50" />
+            <Icon name={'sparkling'} className="mx-auto size-9 opacity-50" />
             <p className="mt-3 typography-ui-label">{t('settings.varin.resources.empty.title')}</p>
             <p className="mt-1 typography-meta opacity-75">{t('settings.varin.resources.empty.description')}</p>
           </div>
@@ -222,7 +215,7 @@ export const PiResourceSidebar: React.FC<PiResourceSidebarProps> = ({ kind, onIt
               <span className="min-w-0 flex-1">
                 <span className="flex items-center gap-1.5">
                   <span className="min-w-0 flex-1 truncate typography-ui-label text-foreground">
-                    {kind === 'prompt' ? `/${resource.name}` : resource.name}
+                    {resource.name}
                   </span>
                   {!resource.valid ? (
                     <span className="shrink-0 typography-micro text-[var(--status-warning)]">

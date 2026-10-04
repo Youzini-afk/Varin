@@ -762,19 +762,22 @@ async function dispatchRuntimeRequestUnchecked(
 
     case "resource.list": {
       return requestForRuntimeContext(broker, requireRuntimeContext(input), "resource.list", {
-        kind: requireEnum(input, "kind", ["prompt", "skill"] as const),
+        kind: requireEnum(input, "kind", ["skill"] as const),
       });
+    }
+    case "session.systemPrompt": {
+      return requestForRuntimeContext(broker, requireRuntimeContext(input), "session.systemPrompt", {});
     }
     case "resource.get": {
       return requestForRuntimeContext(broker, requireRuntimeContext(input), "resource.get", {
         id: requireString(input, "id"),
-        kind: requireEnum(input, "kind", ["prompt", "skill"] as const),
+        kind: requireEnum(input, "kind", ["skill"] as const),
       });
     }
     case "resource.create": {
       return requestForRuntimeContext(broker, requireRuntimeContext(input), "resource.create", {
         content: requireString(input, "content", { allowEmpty: true }),
-        kind: requireEnum(input, "kind", ["prompt", "skill"] as const),
+        kind: requireEnum(input, "kind", ["skill"] as const),
         name: requireString(input, "name"),
         scope: requireEnum(input, "scope", ["user", "project"] as const),
       });
@@ -784,21 +787,21 @@ async function dispatchRuntimeRequestUnchecked(
         content: requireString(input, "content", { allowEmpty: true }),
         expectedRevision: requireString(input, "expectedRevision"),
         id: requireString(input, "id"),
-        kind: requireEnum(input, "kind", ["prompt", "skill"] as const),
+        kind: requireEnum(input, "kind", ["skill"] as const),
       });
     }
     case "resource.delete": {
       return requestForRuntimeContext(broker, requireRuntimeContext(input), "resource.delete", {
         expectedRevision: requireString(input, "expectedRevision"),
         id: requireString(input, "id"),
-        kind: requireEnum(input, "kind", ["prompt", "skill"] as const),
+        kind: requireEnum(input, "kind", ["skill"] as const),
       });
     }
     case "resource.copy": {
       const name = optionalString(input, "name");
       return requestForRuntimeContext(broker, requireRuntimeContext(input), "resource.copy", {
         id: requireString(input, "id"),
-        kind: requireEnum(input, "kind", ["prompt", "skill"] as const),
+        kind: requireEnum(input, "kind", ["skill"] as const),
         ...(name === undefined ? {} : { name }),
         scope: requireEnum(input, "scope", ["user", "project"] as const),
       });

@@ -73,6 +73,7 @@ Harness 总体与模块专卷：
 ## [archive/](archive/) — 历史归档（不再更新，与现状冲突时以根目录权威为准）
 
 - [archive/harness-delivery-log.md](archive/harness-delivery-log.md) — 逐阶段交付叙述与 D-xxx 证据（原 status 主体 + RR/HR 叙述）
+- [archive/tool-health-repair-2026-10-04.md](archive/tool-health-repair-2026-10-04.md) — 材料快照、记忆句柄、参数与工具链体检修复记录
 - [archive/agent-harness-plan-detail.md](archive/agent-harness-plan-detail.md) — 已收口阶段的完整计划细节
 - [archive/roadmap-history.md](archive/roadmap-history.md) — Phase 0–10 / Stage Q / D-296 历史明细
 - [archive/phase-2-desktop.md](archive/phase-2-desktop.md)、[archive/testing-ci-audit.md](archive/testing-ci-audit.md)、

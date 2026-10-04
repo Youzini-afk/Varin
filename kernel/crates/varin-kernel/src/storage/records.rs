@@ -808,6 +808,7 @@ impl Storage {
             "followup.observation",
             "settings.operation",
             "bot.profile",
+            "agent.personalization",
             "computer.machine",
             "computer.desktop",
             "computer.evidence.cursor",

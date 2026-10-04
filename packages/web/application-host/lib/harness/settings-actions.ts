@@ -13,6 +13,7 @@ import type { SettingsActionResult } from '@varin/protocol';
 import { randomUUID } from 'node:crypto';
 import { HarnessServiceError } from './service-error.js';
 import type { AppPersistOutcome, SettingsServiceCaller } from './settings-service.js';
+import { parseAgentScope, type AgentPersonalization } from '../memory/agent-personalization.js';
 
 export interface SettingsActionContext {
   caller: SettingsServiceCaller;
@@ -123,17 +124,7 @@ export interface RuntimeLifecycleHandle {
   activateCustom(packageRoot: string, nodePath?: string): Promise<unknown>;
 }
 
-export interface MagicPromptsHandle {
-  readPromptState(): Promise<unknown>;
-  setOverride(id: string, text: string): Promise<unknown>;
-  resetOverride(id: string): Promise<unknown>;
-  resetAllOverrides(): Promise<unknown>;
-}
 
-export type KnowledgeHandle = Pick<
-  import('../knowledge/store.js').KnowledgeStore,
-  'listKnowledge' | 'acceptKnowledge' | 'retireKnowledge'
->;
 
 export interface FoundationalHandle {
   status(): { entries?: { id: string; observed?: string }[] };
@@ -156,6 +147,7 @@ export interface GitIdentityStore {
 }
 
 export interface SettingsActionDeps {
+  agentPersonalization?(): AgentPersonalization;
   /** Worker-scoped Pi RPC on the caller's workspace. */
   requestWorkspace(cwd: string, method: string, params: Record<string, unknown>): Promise<unknown>;
   /** Session-scoped Pi RPC (slash commands, provider auth). */
@@ -168,9 +160,7 @@ export interface SettingsActionDeps {
   remoteClients?(): RemoteClientsHandle | null;
   languageSupport?(): LanguageSupportHandle | null;
   runtimeLifecycle?(): RuntimeLifecycleHandle | null;
-  magicPrompts?(): MagicPromptsHandle | null;
   foundational?(): FoundationalHandle | null;
-  knowledgeStore?(workspaceId: string, scope: 'workspace' | 'user'): Promise<KnowledgeHandle | null>;
   gitIdentities?: GitIdentityStore;
   gitHubAuthStatus?(): Promise<Record<string, unknown>>;
   /** Single connected surface kind when unambiguous (web/desktop/mobile). */
@@ -543,11 +533,11 @@ const resourcesAdapter = (deps: SettingsActionDeps): SettingsActionAdapter => ({
   async describe(ctx) {
     const root = await needWorkspace(ctx, deps).catch(() => null);
     if (!root) return { unavailable: 'requires a workspace-bound session' };
-    return { summary: 'Pi resource authority (prompts, skills)' };
+    return { summary: 'Pi skill resources' };
   },
   async invoke(ctx, entry, verb, args) {
     const root = await needWorkspace(ctx, deps);
-    const kind = entry.id.startsWith('prompts.') ? 'prompt' : entry.id.startsWith('skills.') ? 'skill' : null;
+    const kind = entry.id.startsWith('skills.') ? 'skill' : null;
     if (!kind) return unavailable('this entry has no Pi resource kind (snippets are UI-owned, not a runtime resource)');
     try {
       switch (verb) {
@@ -1164,56 +1154,6 @@ const workbenchExtensionsAdapter = (deps: SettingsActionDeps): SettingsActionAda
   },
 });
 
-const knowledgeAdapter = (deps: SettingsActionDeps): SettingsActionAdapter => ({
-  verbs: ['list', 'accept', 'supersede'],
-  async describe(ctx) {
-    const scope = ctx.caller.workspaceId ? 'workspace' : 'user';
-    const store = await deps.knowledgeStore?.(ctx.caller.workspaceId ?? 'user', scope).catch(() => null);
-    if (!store) return { unavailable: 'knowledge store unavailable' };
-    return { summary: `${scope} knowledge store`, verbs: ['list', 'accept', 'supersede'] };
-  },
-  async invoke(ctx, entry, verb, args) {
-    if (!deps.knowledgeStore) return unavailable('knowledge store unavailable');
-    const scope = entry.id === 'knowledge.user' ? 'user' : 'workspace';
-    if (scope === 'workspace' && !ctx.caller.workspaceId) {
-      return unavailable('workspace knowledge requires a workspace-bound session');
-    }
-    const store = await deps.knowledgeStore(ctx.caller.workspaceId ?? 'user', scope);
-    if (!store) return unavailable('knowledge store unavailable');
-    try {
-      switch (verb) {
-        case 'list':
-          return {
-            status: 'applied',
-            data: await store.listKnowledge({
-              scope,
-              ...(str(args, 'status')
-                ? { status: str(args, 'status') as import('../knowledge/store.js').KnowledgeStatus }
-                : {}),
-            }),
-          };
-        case 'accept': {
-          const id = Number(args.id);
-          if (!Number.isInteger(id)) return { status: 'failed', detail: 'verb requires integer args.id' };
-          const supersedes = Array.isArray(args.supersedes)
-            ? args.supersedes.map(Number).filter(Number.isInteger)
-            : undefined;
-          return { status: 'applied', data: await store.acceptKnowledge(id, { ...(supersedes ? { supersedes } : {}) }) };
-        }
-        case 'supersede': {
-          const id = Number(args.id);
-          if (!Number.isInteger(id)) return { status: 'failed', detail: 'verb requires integer args.id' };
-          return { status: 'applied', data: await store.retireKnowledge(id, scope) };
-        }
-        default:
-          return unavailable(`verb "${verb}" is not supported by the knowledge owner`);
-      }
-    } catch (error) {
-      return wrapError(error);
-    }
-  },
-});
-
 const languageSupportAdapter = (deps: SettingsActionDeps): SettingsActionAdapter => ({
   verbs: ['status', 'prepare', 'cancel'],
   async describe(ctx) {
@@ -1356,43 +1296,6 @@ const tunnelAdapter = (deps: SettingsActionDeps): SettingsActionAdapter => ({
   },
 });
 
-const magicPromptsAdapter = (deps: SettingsActionDeps): SettingsActionAdapter => ({
-  verbs: ['read', 'write', 'reset'],
-  async describe() {
-    const runtime = deps.magicPrompts?.();
-    if (!runtime) return { unavailable: 'magic prompt runtime unavailable' };
-    const state = await runtime.readPromptState().catch(() => null);
-    return { summary: 'magic prompt overrides', data: state };
-  },
-  async invoke(_ctx, _entry, verb, args) {
-    const runtime = deps.magicPrompts?.();
-    if (!runtime) return unavailable('magic prompt runtime unavailable');
-    try {
-      switch (verb) {
-        case 'read':
-          return { status: 'applied', data: await runtime.readPromptState() };
-        case 'write': {
-          const id = needString(args, 'id');
-          const text = typeof args.text === 'string' ? args.text : undefined;
-          if (text === undefined) return { status: 'failed', detail: 'write requires args.text' };
-          return { status: 'applied', data: await runtime.setOverride(id, text) };
-        }
-        case 'reset': {
-          const id = str(args, 'id');
-          return {
-            status: 'applied',
-            data: id ? await runtime.resetOverride(id) : await runtime.resetAllOverrides(),
-          };
-        }
-        default:
-          return unavailable(`verb "${verb}" is not supported by the magic-prompt owner`);
-      }
-    } catch (error) {
-      return wrapError(error);
-    }
-  },
-});
-
 const notificationsAdapter = (): SettingsActionAdapter => ({
   verbs: [],
   async describe() {
@@ -1404,6 +1307,35 @@ const notificationsAdapter = (): SettingsActionAdapter => ({
   },
   async invoke(_ctx, _entry, verb) {
     return unavailable(`verb "${verb}" is not supported — push subscription is per-device`);
+  },
+});
+
+const agentPersonalizationAdapter = (deps: SettingsActionDeps): SettingsActionAdapter => ({
+  verbs: ['read', 'write', 'delete', 'reset'],
+  async describe() {
+    const service = deps.agentPersonalization?.();
+    return service ? { summary: 'Ordinary assistant notes and system prompt sections', data: await service.catalog() }
+      : { unavailable: 'Assistant preferences are unavailable' };
+  },
+  async invoke(ctx, entry, verb, args) {
+    const service = deps.agentPersonalization?.();
+    if (!service) return unavailable('Assistant preferences are unavailable');
+    try {
+      if (verb === 'read') return { status: 'applied', data: await service.catalog() };
+      const revision = args.revision;
+      if (typeof revision !== 'number' || !Number.isSafeInteger(revision)) return { status: 'failed', detail: 'Read the current revision before editing' };
+      if (entry.id === 'agent.memory') {
+        if (verb === 'delete') return { status: 'applied', data: await service.removeNote(Number(args.id), revision) };
+        if (verb !== 'write') return unavailable(`Unsupported memory action: ${verb}`);
+        return { status: 'applied', data: await service.saveNote({
+          scope: parseAgentScope(args.scope), content: needString(args, 'content'), revision,
+          ...(typeof args.id === 'number' ? { id: args.id } : {}), source: { label: 'agent', sessionId: ctx.caller.sessionId },
+        }) };
+      }
+      if (verb !== 'write' && verb !== 'reset') return unavailable(`Unsupported prompt action: ${verb}`);
+      return { status: 'applied', data: await service.savePrompt(parseAgentScope(args.scope), verb === 'reset'
+        ? null : args.profile as unknown as import('@varin/protocol').AgentPromptProfile, revision) };
+    } catch (error) { return wrapError(error); }
   },
 });
 
@@ -1420,6 +1352,7 @@ export function createSettingsActionRegistry(deps: SettingsActionDeps) {
     },
   };
   const adapters = new Map<string, SettingsActionAdapter>([
+    ['service:agent-personalization', agentPersonalizationAdapter(deps)],
     ['runtime:providers', providersAdapter(deps)],
     ['runtime:mcp', mcpAdapter(deps)],
     ['runtime:resources', resourcesAdapter(deps)],
@@ -1430,11 +1363,9 @@ export function createSettingsActionRegistry(deps: SettingsActionDeps) {
     ['service:projects', projectsAdapter(deps)],
     ['service:remote-instances', remoteInstancesAdapter(deps)],
     ['service:extensions', workbenchExtensionsAdapter(deps)],
-    ['service:knowledge', knowledgeAdapter(deps)],
     ['runtime:language-support', languageSupportAdapter(deps)],
     ['runtime:runtime-update', runtimeUpdateAdapter(deps)],
     ['service:tunnel', tunnelAdapter(deps)],
-    ['service:magic-prompts', magicPromptsAdapter(deps)],
     ['service:snippets', snippetsAdapter],
     ['service:notifications', notificationsAdapter()],
   ]);

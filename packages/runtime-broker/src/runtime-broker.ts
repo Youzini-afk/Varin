@@ -215,6 +215,7 @@ export interface PiRuntimeBrokerOptions {
 }
 
 export const PI_CATALOG_METHODS = [
+  "session.systemPrompt",
   "agentProvider.action",
   "agentProvider.list",
   "config.document.get",

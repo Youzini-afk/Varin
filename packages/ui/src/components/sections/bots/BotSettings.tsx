@@ -1,4 +1,5 @@
 import React from 'react';
+import { BotMemoryPreferences } from './BotMemoryPreferences';
 import { SettingsSection, SettingsFieldRow } from '@/components/sections/shared/SettingsSection';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
@@ -268,5 +269,6 @@ export function BotSettings({ initialBotId, onDeleted }: { initialBotId?: string
       void refresh();
     }} /> : null}
     {memoryBot ? <React.Suspense fallback={null}><BotDetailsDialog bot={{ ...memoryBot, tab: 'memory' }} onClose={() => setMemoryBot(null)} /></React.Suspense> : null}
+    <BotMemoryPreferences />
   </>;
 }

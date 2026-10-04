@@ -1423,28 +1423,6 @@ const sanitizeWebSettings = (payload: unknown): DesktopSettings | null => {
     result.skillCatalogs = skillCatalogs;
   }
 
-  if (typeof candidate.globalBehaviorPrompt === 'string') {
-    result.globalBehaviorPrompt = candidate.globalBehaviorPrompt;
-  }
-  if (typeof candidate.responseStyleEnabled === 'boolean') {
-    result.responseStyleEnabled = candidate.responseStyleEnabled;
-  }
-  if (
-    typeof candidate.responseStylePreset === 'string'
-    && (candidate.responseStylePreset === 'concise'
-      || candidate.responseStylePreset === 'detailed'
-      || candidate.responseStylePreset === 'mentor'
-      || candidate.responseStylePreset === 'pushback'
-      || candidate.responseStylePreset === 'noFiller'
-      || candidate.responseStylePreset === 'matchEnergy'
-      || candidate.responseStylePreset === 'warmPeer'
-      || candidate.responseStylePreset === 'custom')
-  ) {
-    result.responseStylePreset = candidate.responseStylePreset;
-  }
-  if (typeof candidate.responseStyleCustomInstructions === 'string') {
-    result.responseStyleCustomInstructions = candidate.responseStyleCustomInstructions;
-  }
   if (typeof candidate.dictationEnabled === 'boolean') {
     result.dictationEnabled = candidate.dictationEnabled;
   }

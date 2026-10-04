@@ -57,6 +57,7 @@ type DirectRuntimeMethod =
   | "thinking.select";
 
 type SessionScopedRuntimeMethod =
+  | "session.systemPrompt"
   | "agentProvider.action"
   | "agentProvider.list"
   | "config.document.get"
@@ -271,6 +272,7 @@ export const RUNTIME_METHODS = [
   "session.open",
   "session.rename",
   "session.snapshot",
+  "session.systemPrompt",
   "session.reconcile",
   "session.stats",
   "session.summary",

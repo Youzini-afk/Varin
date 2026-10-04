@@ -52,16 +52,13 @@ describe("harness settings", () => {
     assert.equal(merged.dispatch.askBefore.write, true);
   });
 
-  it("keeps user-owned autoOrganize switches while workspace memory remains overridable", () => {
+  it("keeps user-owned autoOrganize switches independent of project settings", () => {
     const merged = mergeHarnessSettings(
       { knowledge: { eventRetentionDays: 30,
-        autoOrganize: { workspace: true, user: true, bot: true } } },
+        autoOrganize: { user: true, bot: true } } },
       { knowledge: { eventRetentionDays: 30,
-        autoOrganize: { workspace: false, user: false, bot: false } } },
+        autoOrganize: { user: false, bot: false } } },
     );
-    // A workspace may turn off organizing for itself; the user/bot switches
-    // are user-owned and cannot be re-disabled or re-enabled by a project.
-    assert.equal(merged.knowledge.autoOrganize.workspace, false);
     assert.equal(merged.knowledge.autoOrganize.user, true);
     assert.equal(merged.knowledge.autoOrganize.bot, true);
   });
@@ -69,10 +66,9 @@ describe("harness settings", () => {
   it("keeps user autoOrganize when the workspace does not set it", () => {
     const merged = mergeHarnessSettings(
       { knowledge: { eventRetentionDays: 30,
-        autoOrganize: { workspace: false, user: true, bot: false } } },
+        autoOrganize: { user: true, bot: false } } },
       {},
     );
-    assert.equal(merged.knowledge.autoOrganize.workspace, false);
     assert.equal(merged.knowledge.autoOrganize.user, true);
     assert.equal(merged.knowledge.autoOrganize.bot, false);
   });

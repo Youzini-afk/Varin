@@ -32,7 +32,7 @@ vi.doMock('@/lib/pi-runtime/client', () => ({
           case 'resource.list':
             return (await import('@/lib/pi-runtime/resources')).listPiResources(
               target,
-              params.kind === 'skill' ? 'skill' : 'prompt',
+              'skill',
             );
           case 'fleet.status':
             return (await import('@/lib/pi-runtime/fleet')).getPiFleetStatus(String(params.sessionId));
@@ -309,13 +309,11 @@ describe('Varin diagnostics', () => {
     expect(report.context.session?.id).toBe('session-1');
     expect(report.catalogs.packages.ok && report.catalogs.packages.value.total).toBe(1);
     expect(report.catalogs.agents.ok && report.catalogs.agents.value.providers[0]?.id).toBe('magic-context');
-    expect(report.catalogs.resources.prompts.ok && report.catalogs.resources.prompts.value.total).toBe(1);
     expect(report.integrations.fleet.ok && report.integrations.fleet.value.totalActive).toBe(1);
     expect(report.integrations.recovery.ok && report.integrations.recovery.value.available).toBe(true);
     expect(packageTargets).toEqual([{ sessionId: 'session-1' }]);
     expect(agentTargets).toEqual([{ sessionId: 'session-1' }]);
     expect(resourceTargets).toEqual([
-      { kind: 'prompt', target: { sessionId: 'session-1' } },
       { kind: 'skill', target: { sessionId: 'session-1' } },
     ]);
   });

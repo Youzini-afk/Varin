@@ -13,7 +13,7 @@ import { useUIStore } from '@/stores/useUIStore';
 import { usePiSessionStore } from '@/stores/usePiSessionStore';
 import { toast } from '@/components/ui';
 import { getConflictDetails, type MergeConflictDetails } from '@/lib/gitApi';
-import { renderMagicPrompt } from '@/lib/magicPrompts';
+import { actionInstruction } from '@/lib/actionInstructions';
 import {
   createPiSessionWithDraft,
   joinPiDraftInstructions,
@@ -80,12 +80,12 @@ export const ConflictDialog: React.FC<ConflictDialogProps> = ({
     const headRef = conflictDetails.headInfo || (operation === 'merge' ? 'MERGE_HEAD' : 'REBASE_HEAD');
     const continueCmd = operation === 'merge' ? 'git commit --no-edit' : 'git rebase --continue';
 
-    const visibleText = await renderMagicPrompt('git.conflict.resolve.visible', {
+    const visibleText = await actionInstruction('git.conflict.resolve.visible', {
       operation_label: operationLabel,
       head_ref: headRef,
     });
 
-    const instructionsText = await renderMagicPrompt('git.conflict.resolve.instructions', {
+    const instructionsText = await actionInstruction('git.conflict.resolve.instructions', {
       operation_label: operationLabel,
       directory,
       operation,

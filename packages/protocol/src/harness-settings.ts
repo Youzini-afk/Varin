@@ -265,12 +265,12 @@ export interface HarnessSettings {
     eventRetentionDays: number;
     /**
      * Background memory organization (BC2): which source scopes the organizer
-     * may process (`workspace`/`bot`), and whether inferred proposals may land
+     * may process (`bot`), and whether inferred proposals may land
      * in the `user` scope. Explicit memory actions are never gated by this.
-     * All three switches are user-owned; a project cannot re-enable organizing
+     * Both switches are user-owned; a project cannot re-enable organizing
      * the user turned off.
      */
-    autoOrganize: { workspace: boolean; user: boolean; bot: boolean };
+    autoOrganize: { user: boolean; bot: boolean };
   };
   /** Context-management settings (background compaction preparation). */
   context: HarnessContextSettings;
@@ -332,7 +332,7 @@ export const DEFAULT_HARNESS_SETTINGS: HarnessSettings = {
   dispatch: { concurrency: 12, askBefore: {} },
   knowledge: {
     eventRetentionDays: 30,
-    autoOrganize: { workspace: true, user: true, bot: true },
+    autoOrganize: { user: true, bot: true },
   },
   context: { backgroundPreparation: true, preparationWaterline: 0.75,
     compactionRecovery: { ...DEFAULT_HARNESS_CONTEXT_SETTINGS.compactionRecovery } },
@@ -476,12 +476,8 @@ export function mergeHarnessSettings(
       ...DEFAULT_HARNESS_SETTINGS.knowledge,
       ...user.knowledge,
       ...workspace.knowledge,
-      // Background organization is user-owned. The workspace layer may disable
-      // organizing for its own scope but cannot touch the user/bot switches.
+      // Bot background organization is user-owned, independent of project settings.
       autoOrganize: {
-        workspace: workspace.knowledge?.autoOrganize?.workspace
-          ?? user.knowledge?.autoOrganize?.workspace
-          ?? DEFAULT_HARNESS_SETTINGS.knowledge.autoOrganize.workspace,
         user: user.knowledge?.autoOrganize?.user
           ?? DEFAULT_HARNESS_SETTINGS.knowledge.autoOrganize.user,
         bot: user.knowledge?.autoOrganize?.bot

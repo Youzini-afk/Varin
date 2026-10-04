@@ -6,19 +6,7 @@ import type {
 
 export const createPiResourceStarter = (kind: PiResourceKind, rawName: string): string => {
   const name = rawName.trim().replace(/\.md$/i, '');
-  if (kind === 'prompt') {
-    return [
-      '---',
-      'description: Describe when to use this prompt',
-      'argument-hint: "[target] [focus]"',
-      '---',
-      '',
-      `# ${name || 'Prompt'}`,
-      '',
-      'Write the prompt template here. Positional arguments are available as $1, $2, and so on.',
-      '',
-    ].join('\n');
-  }
+
   return [
     '---',
     `name: ${JSON.stringify(name || 'skill-name')}`,

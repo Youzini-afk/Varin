@@ -296,8 +296,11 @@ describe("knowledge context runtime", () => {
     await runtime.dispose();
   });
 
-  it("keeps agent-authored events out of Zone 2 while preserving current blocks", async () => {
-    const runtime = createKnowledgeContextRuntime({ getStore: async () => store });
+  it("keeps ordinary Agent plans while bypassing recall and agent-authored events", async () => {
+    const runtime = createKnowledgeContextRuntime({ getStore: async () => store,
+      recallEnabled: async () => false,
+      getUserStore: async () => { throw new Error('Ordinary Agent context must not open Bot memory'); },
+    });
     runtime.bindSession("session-a", "workspace-1");
     await store.upsertBlock({
       sessionId: "session-a",
@@ -317,6 +320,7 @@ describe("knowledge context runtime", () => {
       sessionId: "session-a",
       sinceTurn: 0,
       contextUsage: null,
+      query: "Find earlier project decisions",
     });
     expect(result.material.userEdits).toEqual([]);
     expect(result.material.blocks).toEqual([{ label: "plan", content: "- [ ] keep working" }]);

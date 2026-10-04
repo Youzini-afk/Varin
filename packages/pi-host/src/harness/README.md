@@ -40,7 +40,13 @@ Research tools require the Host's actual services, research work focus and the s
 General work focus removes `research_search`, `research_decide`, `materials`, `experiment`, `resources`
 and `research_source` from the native Pi registry, including discovery and nested tool execution.
 Switching focus updates the registry before the next user run; current runs keep their selected focus.
-`memory`, `recall`, ordinary web search and PDF reading remain shared capabilities.
+`memory`, ordinary web search and PDF reading remain shared capabilities. Ordinary Agent
+`memory` calls manage explicit global/project/session notes loaded on every model request;
+`recall` is registered only for Bot sessions. Bot instructions and long-term memory remain
+independent. `agent-personalization.ts` applies user edits to native system sections and
+records the last system text at the model-request boundary. Native prompt templates are
+disabled; skills and native instruction files retain their normal loading. See the
+[memory ownership document](../../../web/application-host/lib/memory/DOCUMENTATION.md).
 Queries are native read actions; starting/stopping attempts retains the
 process permission gate. A resource query does not confer process-control capability. Experiment
 output remains available through its attempt/artifact identity even when it was produced outside the

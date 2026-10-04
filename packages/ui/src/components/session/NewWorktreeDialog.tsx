@@ -47,7 +47,7 @@ import { waitForWorktreeBootstrap } from '@/lib/worktrees/worktreeBootstrap';
 import { getWorktreeSetupCommands, getWorktreeSetupWaitEnabled } from '@/lib/project-config';
 import { getRootBranch } from '@/lib/worktrees/worktreeStatus';
 import { generateBranchSlug } from '@/lib/git/branchNameGenerator';
-import { renderMagicPrompt } from '@/lib/magicPrompts';
+import { actionInstruction } from '@/lib/actionInstructions';
 import { rankBranchesForQuery } from '@/lib/worktrees/branchSearch';
 import {
   LAST_WORKTREE_SOURCE_BRANCH_KEY,
@@ -474,10 +474,10 @@ export function NewWorktreeDialog({
         throw new Error('Failed to load issue comments');
       }
 
-      const visiblePromptText = await renderMagicPrompt('github.issue.review.visible', {
+      const visiblePromptText = await actionInstruction('github.issue.review.visible', {
         issue_number: String(args.issue.number),
       });
-      const instructionsText = await renderMagicPrompt('github.issue.review.instructions');
+      const instructionsText = await actionInstruction('github.issue.review.instructions');
       const contextText = buildIssueContextText({
         repo: issueRes.repo,
         issue: issueRes.issue,
@@ -510,10 +510,10 @@ export function NewWorktreeDialog({
         throw new Error('Failed to load PR context');
       }
 
-      const visiblePromptText = await renderMagicPrompt('github.pr.review.visible', {
+      const visiblePromptText = await actionInstruction('github.pr.review.visible', {
         pr_number: String(args.pr.number),
       });
-      const instructionsText = await renderMagicPrompt('github.pr.review.instructions');
+      const instructionsText = await actionInstruction('github.pr.review.instructions');
       const contextText = buildPullRequestContextText(prContext);
 
       const accepted = await usePiSessionStore.getState().prompt(

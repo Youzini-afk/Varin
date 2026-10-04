@@ -1,6 +1,6 @@
 
 import * as gitHttp from './gitApiHttp';
-import { renderMagicPrompt } from './magicPrompts';
+import { actionInstruction } from './actionInstructions';
 import { getRegisteredRuntimeAPIs } from '@/lib/runtime-api/registry';
 import { generateStructuredInPiSession } from '@/lib/piStructuredGeneration';
 import { usePiSessionStore } from '@/stores/usePiSessionStore';
@@ -221,8 +221,8 @@ export async function generateCommitMessage(
     selectedFiles: files.length,
   });
 
-  const visiblePrompt = await renderMagicPrompt('git.commit.generate.visible');
-  const hiddenPrompt = await renderMagicPrompt('git.commit.generate.instructions', {
+  const visiblePrompt = await actionInstruction('git.commit.generate.visible');
+  const hiddenPrompt = await actionInstruction('git.commit.generate.instructions', {
     selected_files: files.map((file) => `- ${file}`).join('\n'),
   });
 
@@ -311,8 +311,8 @@ export async function generatePullRequestDescription(
     changedFiles: changedFiles.length,
   });
 
-  const visiblePrompt = await renderMagicPrompt('git.pr.generate.visible');
-  const hiddenPrompt = await renderMagicPrompt('git.pr.generate.instructions', {
+  const visiblePrompt = await actionInstruction('git.pr.generate.visible');
+  const hiddenPrompt = await actionInstruction('git.pr.generate.instructions', {
     base_branch: payload.base,
     head_branch: payload.head,
     commits: commits.map((commit) => {

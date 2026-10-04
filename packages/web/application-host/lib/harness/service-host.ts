@@ -335,6 +335,7 @@ export interface HarnessServiceHost {
   todoDepsProvider: ((sessionId: string) => Promise<TodoToolDeps>) | null;
   /** BC1 unified memory service shared by harness methods, routes, and UI. */
   memoryService?: import("../memory/memory-service.js").MemoryService | null;
+  agentPersonalization?: import("../memory/agent-personalization.js").AgentPersonalization | null;
   /** BC4 Computer Use service: catalog, observations, actions, cancellation. */
   computerService?: import("../computer/computer-service.js").ComputerService | null;
   environmentForwards: EnvironmentForwardRuntime;
@@ -606,6 +607,7 @@ export interface HarnessServiceHostOptions {
   recallDepsProvider?: (sessionId: string, workspaceId: string | null) => Promise<RecallToolDeps>;
   todoDepsProvider?: (sessionId: string) => Promise<TodoToolDeps>;
   memoryService?: NonNullable<HarnessServiceHost["memoryService"]>;
+  agentPersonalization?: NonNullable<HarnessServiceHost["agentPersonalization"]>;
   computerService?: NonNullable<HarnessServiceHost["computerService"]>;
   sessionInstructionsFor?: NonNullable<HarnessServiceHost["sessionInstructionsFor"]>;
   bots?: NonNullable<HarnessServiceHost["bots"]>;
@@ -1108,6 +1110,7 @@ export function createHarnessServiceHost(options: HarnessServiceHostOptions): Ha
     recallDepsProvider,
     todoDepsProvider,
     memoryService: options.memoryService ?? null,
+    agentPersonalization: options.agentPersonalization ?? null,
     computerService: options.computerService ?? null,
     sessionInstructionsFor: options.sessionInstructionsFor ?? null,
     bots: options.bots ?? null,

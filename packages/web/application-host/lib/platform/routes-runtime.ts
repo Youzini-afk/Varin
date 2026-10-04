@@ -13,7 +13,6 @@ import { registerExtensionRoutes } from '../extensions/routes.js';
 import { registerFsRoutes } from '../fs/routes.js';
 import { registerGitRoutes } from '../git/routes.js';
 import { registerGitHubRoutes } from '../github/routes.js';
-import { registerMagicPromptRoutes } from '../magic-prompts/routes.js';
 import { registerQuotaRoutes } from '../quota/routes.js';
 import { registerVarinEventRoutes, registerScheduledTaskRoutes } from '../scheduled-tasks/routes.js';
 import { registerSessionFoldersRoutes } from '../session-folders/routes.js';
@@ -297,7 +296,6 @@ export const createPlatformRoutesRuntime = ({
       ...(documents ? { documents } : {}),
       ...(onGitStatus ? { onGitStatus } : {}),
     });
-    registerMagicPromptRoutes(app, { fsPromises, path, varinDataDir });
     registerSessionFoldersRoutes(app, { fsPromises, path, varinDataDir });
     registerFsRoutes(app, {
       os,

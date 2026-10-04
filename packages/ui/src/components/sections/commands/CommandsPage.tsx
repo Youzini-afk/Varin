@@ -14,17 +14,12 @@ import { useUIStore } from '@/stores/useUIStore';
 
 const SOURCE_DETAILS: Readonly<Record<PiCommandSource, {
   descriptionKey: I18nKey;
-  destination?: 'prompts' | 'skills';
+  destination?: 'skills';
   labelKey: I18nKey;
 }>> = {
   extension: {
     labelKey: 'settings.varin.commands.source.extension.title',
     descriptionKey: 'settings.varin.commands.source.extension.description',
-  },
-  prompt: {
-    labelKey: 'settings.varin.commands.source.prompt.title',
-    descriptionKey: 'settings.varin.commands.source.prompt.description',
-    destination: 'prompts',
   },
   skill: {
     labelKey: 'settings.varin.commands.source.skill.title',
@@ -112,7 +107,7 @@ export const CommandsPage: React.FC = () => {
       current.push(command);
       result.set(command.source, current);
     }
-    return (['extension', 'prompt', 'skill'] as const)
+    return (['extension', 'skill'] as const)
       .map((source) => ({ commands: result.get(source) ?? [], source }))
       .filter((group) => group.commands.length > 0);
   }, [filtered]);
@@ -169,9 +164,7 @@ export const CommandsPage: React.FC = () => {
                         className="shrink-0 !font-normal"
                         onClick={() => setSettingsPage(details.destination!)}
                       >
-                        {details.destination === 'prompts'
-                          ? t('settings.varin.commands.actions.openPrompts')
-                          : t('settings.varin.commands.actions.openSkills')}
+                        {t('settings.varin.commands.actions.openSkills')}
                       </Button>
                     ) : null}
                   </div>

@@ -99,9 +99,7 @@ export const PiResourcePage: React.FC<PiResourcePageProps> = ({ kind }) => {
 
   const remove = React.useCallback(async () => {
     if (!descriptor?.writable) return;
-    const message = kind === 'skill'
-      ? t('settings.varin.skills.deleteConfirm', { name: descriptor.name })
-      : t('settings.varin.prompts.deleteConfirm', { name: descriptor.name });
+    const message = t('settings.varin.skills.deleteConfirm', { name: descriptor.name });
     if (!window.confirm(message)) return;
     const success = await deleteResource(kind, runtimeTarget, targetKey);
     if (success) toast.success(t('settings.varin.resources.toast.deleted'));
@@ -121,12 +119,8 @@ export const PiResourcePage: React.FC<PiResourcePageProps> = ({ kind }) => {
     toast.success(t('settings.varin.resources.toast.copied'));
   }, [copyName, copyNameError, copyResource, copyScope, descriptor, kind, pane.mutating, projectBlocked, runtimeTarget, t, targetKey]);
 
-  const title = kind === 'prompt'
-    ? t('settings.page.prompts.title')
-    : t('settings.page.skills.title');
-  const description = kind === 'prompt'
-    ? t('settings.varin.prompts.description')
-    : t('settings.varin.skills.description');
+  const title = t('settings.page.skills.title');
+  const description = t('settings.varin.skills.description');
 
   if (!document || !descriptor) {
     return (
@@ -134,7 +128,7 @@ export const PiResourcePage: React.FC<PiResourcePageProps> = ({ kind }) => {
         <div className="flex min-h-80 items-center justify-center rounded-lg border border-dashed border-border/60 px-6 text-center">
           <div className="max-w-sm text-muted-foreground">
             <Icon
-              name={pane.loadingDocument || pane.loadingCatalog ? 'loader-4' : kind === 'prompt' ? 'file-text' : 'sparkling'}
+              name={pane.loadingDocument || pane.loadingCatalog ? 'loader-4' : 'sparkling'}
               className={cn('mx-auto size-10 opacity-50', (pane.loadingDocument || pane.loadingCatalog) && 'animate-spin')}
             />
             <p className="mt-3 typography-ui-label text-foreground">
@@ -156,7 +150,7 @@ export const PiResourcePage: React.FC<PiResourcePageProps> = ({ kind }) => {
 
   return (
     <SettingsPageLayout
-      title={kind === 'prompt' ? `/${descriptor.name}` : descriptor.name}
+      title={descriptor.name}
       description={descriptor.description || description}
       showSaveStatus={false}
       headerEnd={(
@@ -199,14 +193,6 @@ export const PiResourcePage: React.FC<PiResourcePageProps> = ({ kind }) => {
           </div>
 
           <div className="rounded-lg bg-[var(--surface-elevated)] px-3 py-2">
-            {kind === 'prompt' ? (
-              <p className="mb-1 typography-meta text-foreground">
-                {t('settings.varin.prompts.invocation')}{' '}
-                <code className="font-mono">
-                  /{descriptor.name}{descriptor.argumentHint ? ` ${descriptor.argumentHint}` : ''}
-                </code>
-              </p>
-            ) : null}
             <p className="break-all font-mono typography-micro text-muted-foreground">{descriptor.filePath}</p>
             <p className="mt-1 typography-micro text-muted-foreground">
               {descriptor.sourceInfo.origin} · {descriptor.sourceInfo.source}
@@ -260,9 +246,7 @@ export const PiResourcePage: React.FC<PiResourcePageProps> = ({ kind }) => {
 
       <SettingsSection
         title={t('settings.varin.resources.actions.title')}
-        description={kind === 'skill'
-          ? t('settings.varin.skills.actions.description')
-          : t('settings.varin.prompts.actions.description')}
+        description={t('settings.varin.skills.actions.description')}
       >
         <div className="space-y-3">
           <div className="flex flex-wrap items-center gap-2">

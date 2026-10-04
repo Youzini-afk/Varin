@@ -72,6 +72,10 @@ import type { WorkFocusSelection } from "./work-focus.js";
 
 
 export interface HostMethodMap {
+  "session.systemPrompt": {
+    params: { sessionId?: string };
+    result: import("./agent-personalization.js").AgentSystemPromptSnapshot;
+  };
   "agentProvider.action": {
     params: { action: string; agentId?: string; input?: JsonValue; providerId: string };
     result: PiAgentProviderActionResult;

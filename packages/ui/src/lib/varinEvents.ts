@@ -65,6 +65,7 @@ type SessionCreatedEvent = {
 };
 
 export type VarinEvent = StreamReadyEvent | ScheduledTaskRanEvent | SessionCreatedEvent | HarnessThreadChangedEvent | HarnessBlocksChangedEvent | HarnessKnowledgeChangedEvent | HarnessExperimentChangedEvent | SettingsChangedEvent
+  | { type: 'agent-personalization-changed' }
   | { type: 'ssh-instance-status'; status: unknown }
   | { type: 'bot-changed'; botId: string };
 type Listener = (event: VarinEvent) => void;
@@ -233,6 +234,11 @@ const dispatchFromEnvelope = (envelope: { type: string; properties: unknown }) =
   if (envelope.type === 'varin:bot-changed') {
     const properties = getEventProperties(envelope.properties);
     if (typeof properties?.botId === 'string') for (const listener of listeners) listener({ type: 'bot-changed', botId: properties.botId });
+    return;
+  }
+
+  if (envelope.type === 'varin:agent-personalization-changed') {
+    for (const listener of listeners) listener({ type: 'agent-personalization-changed' });
     return;
   }
 

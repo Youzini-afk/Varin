@@ -1488,6 +1488,7 @@ export function registerHarnessServices(
     router.register("session.instructions", {
       handle: async (_params, ctx) => ({
         instructions: await host.sessionInstructionsFor!(ctx.sessionId),
+        ...(host.agentPersonalization ? { personalization: await host.agentPersonalization.context(ctx.sessionId) } : {}),
       }),
     });
   }

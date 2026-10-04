@@ -29,10 +29,8 @@ const skillNameFromCommand = (name: string): string => (
 
 export const buildPiDraftStarterCatalog = (
   commands: RuntimeMethodResult<'command.list'>,
-  prompts: PiResourceCatalogSnapshot,
   skills: PiResourceCatalogSnapshot,
 ): PiDraftStarterCatalogItem[] => {
-  const promptScopes = resourceScopes(prompts);
   const skillScopes = resourceScopes(skills);
   const items: PiDraftStarterCatalogItem[] = [];
   const seen = new Set<string>();
@@ -46,9 +44,7 @@ export const buildPiDraftStarterCatalog = (
     const key = `${type}:${name}`;
     if (seen.has(key)) continue;
     seen.add(key);
-    const scope = command.source === 'prompt'
-      ? promptScopes.get(name) ?? 'user'
-      : command.source === 'skill'
+    const scope = command.source === 'skill'
         ? skillScopes.get(name) ?? 'user'
         : 'user';
     items.push({

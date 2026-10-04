@@ -51,7 +51,7 @@ const catalog = (...resources: PiResourceDescriptor[]): PiResourceCatalogSnapsho
 describe('Pi chat catalog', () => {
   test('keeps command invocations authoritative and enriches skills from active resources', () => {
     const commands = [
-      command('review', 'prompt'),
+      command('review', 'extension'),
       command('skill:workspace-check'),
     ];
 

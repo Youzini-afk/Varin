@@ -1,0 +1,26 @@
+---
+title: Agent memory and instructions
+description: Manage scoped notes and edit the system instructions used by ordinary Agents.
+---
+
+# Agent memory and instructions
+
+Open **Settings → Memory** to add, edit, delete or move a note between global,
+project and conversation scopes. All matching notes are included in subsequent model
+requests. The Agent's `memory` tool uses the same notes; ordinary Agents do not use `recall`.
+
+Open **Settings → System prompt** to edit the built-in instructions in the main text box.
+The density, style and autonomy selectors below it insert editable instructions. Manual text
+is preserved. Global edits apply across ordinary Agent chats, with project and conversation
+edits taking precedence for sections they change. **Restore defaults** removes the selected
+scope's edits. Changes apply on the next model request, including within an ongoing chat.
+
+The complete preview includes project instructions, skills and matching memory notes.
+The last-request panel shows the system text observed at the last actual model request in
+the active runtime; it does not persist after the worker stops. Generated context continues
+to follow its source files and memory entries. Native instruction files keep their normal
+Pi behavior and can still be edited as files.
+
+Bot instructions and long-term memory are managed separately in **Varin Bot**. Agent
+preferences and notes are not injected into Bots. Magic Prompts and command templates have
+been retired; Git, review and plan actions remain available.

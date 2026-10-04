@@ -514,9 +514,10 @@ describe("session e2e — work focus", () => {
             assert.equal(active.includes(name), available, `${name} execution`);
             assert.equal(callable.includes(name), available, `${name} nested execution`);
           }
-          for (const name of ["read", "websearch", "memory", "recall"]) {
+          for (const name of ["read", "websearch", "memory"]) {
             assert.ok(catalog.includes(name), `${name} remains shared`);
           }
+          assert.equal(catalog.includes("recall"), false, "ordinary assistants use always-loaded notes");
         };
         assertResearchTools(false);
         await session.host.prompt(snapshot.sessionId, "implement a small change");
@@ -579,6 +580,43 @@ describe("session e2e — work focus", () => {
         release?.();
         await session.dispose();
       }
+    });
+  });
+
+  it("sends edited system instructions and current notes to the model while keeping Bot recall independent", async () => {
+    await withTempRoot("varin-agent-personalization-", async (root) => {
+      let context: import("@varin/protocol").AgentPersonalizationContext = { mode: "agent", sessionId: "current", profiles: [
+        { scope: { kind: "global" }, profile: { sections: { preamble: "User-edited assistant identity.", rules: "User-edited official rules." } } },
+      ], memories: [{ id: 1, content: "Project uses PostgreSQL.", scope: { kind: "project", id: "p" }, updatedAt: "" }] };
+      const contexts: Context[] = [];
+      const faux = fauxProvider();
+      faux.setResponses(Array.from({ length: 3 }, () => (value: Context) => {
+        contexts.push(structuredClone(value)); return fauxAssistantMessage("done");
+      }));
+      const session = await setupSession({ root, faux, serviceHostOptions: {
+        sessionInstructionsFor: async () => null,
+        agentPersonalization: { context: async (sessionId: string) => ({ ...structuredClone(context), sessionId }) } as never,
+      } });
+      session.host.setSessionInstructionsAvailable(true);
+      try {
+        const snapshot = await session.host.create(root);
+        await session.host.prompt(snapshot.sessionId, "first"); await session.host.session.waitForIdle();
+        assert.match(providerSystemPrompt(contexts[0]), /User-edited assistant identity/);
+        assert.match(providerSystemPrompt(contexts[0]), /User-edited official rules/);
+        assert.match(providerSystemPrompt(contexts[0]), /Project uses PostgreSQL/);
+        assert.equal(session.host.session.getAllTools().some(tool => tool.name === "recall"), false);
+        const inspected = await session.host.systemPrompt(snapshot.sessionId);
+        assert.equal(inspected.lastRequest?.content, providerSystemPrompt(contexts[0]));
+        assert.equal(inspected.content, providerSystemPrompt(contexts[0]));
+        context = { ...context, memories: [{ ...context.memories[0]!, content: "Project now uses SQLite." }] };
+        await session.host.prompt(snapshot.sessionId, "second"); await session.host.session.waitForIdle();
+        assert.match(providerSystemPrompt(contexts[1]), /Project now uses SQLite/);
+        assert.doesNotMatch(providerSystemPrompt(contexts[1]), /Project uses PostgreSQL/);
+        context = { ...context, mode: "bot", profiles: [], memories: [] };
+        await session.host.prompt(snapshot.sessionId, "third"); await session.host.session.waitForIdle();
+        assert.equal(session.host.session.getAllTools().some(tool => tool.name === "recall"), true);
+        assert.doesNotMatch(providerSystemPrompt(contexts[2]), /User-edited|Project now uses SQLite/);
+      } finally { await session.dispose(); }
     });
   });
 

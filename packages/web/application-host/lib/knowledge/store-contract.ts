@@ -212,7 +212,7 @@ export type OrganizerProgressStatus =
  */
 export interface OrganizerPreparedProposal {
   action: "new" | "supplement" | "correct";
-  scope: "workspace" | "user" | "bot";
+  scope: "user" | "bot";
   nature?: string;
   content: string;
   spans?: import("@varin/protocol").MemorySourceSpan[];

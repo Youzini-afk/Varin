@@ -9,6 +9,7 @@ import { HarnessServiceError } from "./service-error.js";
 import { KnowledgeMutationError } from "../knowledge/store.js";
 import type { MemoryOwner, MemoryService } from "../memory/memory-service.js";
 import { MemoryOwnerUnavailableError } from "../memory/memory-service.js";
+import { withAgentMemory } from "./agent-memory-services.js";
 import { botIdFromScopeId, isBotScopeId, isSessionScopeId, sessionIdFromScopeId } from "./owner-scope.js";
 
 /**
@@ -243,11 +244,11 @@ export function registerMemoryServices(
   host: HarnessServiceHost,
 ): void {
   if (!host.memoryService) return;
-  router.register("memory.remember", createMemoryRememberService(host));
-  router.register("memory.correct", createMemoryCorrectService(host));
-  router.register("memory.forget", createMemoryForgetService(host));
-  router.register("memory.get", createMemoryGetService(host));
-  router.register("memory.search", createMemorySearchService(host));
+  router.register("memory.remember", withAgentMemory(host, "memory.remember", createMemoryRememberService(host)));
+  router.register("memory.correct", withAgentMemory(host, "memory.correct", createMemoryCorrectService(host)));
+  router.register("memory.forget", withAgentMemory(host, "memory.forget", createMemoryForgetService(host)));
+  router.register("memory.get", withAgentMemory(host, "memory.get", createMemoryGetService(host)));
+  router.register("memory.search", withAgentMemory(host, "memory.search", createMemorySearchService(host)));
 }
 
 // Re-exported for wiring-time scope derivation in index.ts.

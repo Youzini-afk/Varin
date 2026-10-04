@@ -19,7 +19,7 @@ import { Icon } from "@/components/icon/Icon";
 import { useUIStore } from '@/stores/useUIStore';
 import { usePiSessionStore } from '@/stores/usePiSessionStore';
 import { getGitCommitSummaries } from '@/lib/gitApi';
-import { renderMagicPrompt } from '@/lib/magicPrompts';
+import { actionInstruction } from '@/lib/actionInstructions';
 import {
   createPiSessionWithDraft,
   joinPiDraftInstructions,
@@ -185,11 +185,11 @@ export const IntegrateCommitsSection: React.FC<{
   );
 
   const buildConflictContext = React.useCallback(async (payload: { state: IntegrateInProgress; details: IntegrateConflictDetails }) => {
-    const visibleText = await renderMagicPrompt('git.integrate.cherrypick.resolve.visible', {
+    const visibleText = await actionInstruction('git.integrate.cherrypick.resolve.visible', {
       current_commit: payload.state.currentCommit,
       target_branch: payload.state.targetBranch,
     });
-    const instructionsText = await renderMagicPrompt('git.integrate.cherrypick.resolve.instructions', {
+    const instructionsText = await actionInstruction('git.integrate.cherrypick.resolve.instructions', {
       repo_root: payload.state.repoRoot,
       temp_worktree_path: payload.state.tempWorktreePath,
       source_branch: payload.state.sourceBranch,

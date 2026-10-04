@@ -117,6 +117,7 @@ export interface ContextRequestBoundaryOptions {
   } | undefined>;
   onEvent?(event: AgentSessionEvent): void;
   onStatus?(): void;
+  sent?(request: ContextModelRequest): void;
 }
 
 /**
@@ -271,6 +272,7 @@ export function attachContextRequestBoundary(session: AgentSession, options: Con
       const outgoing = structuredClone(next.context);
       const key = contextRequestKey(next.model, outgoing, next.options);
       const sentGeneration = generation;
+      options.sent?.(next);
       const result = await stream(next.model, normalizeContext(next.context), { ...rawOptions, ...next.options, signal });
       void result.result().then((response) => {
         if (!disposed && generation === sentGeneration) budget.record(key, outgoing, response);

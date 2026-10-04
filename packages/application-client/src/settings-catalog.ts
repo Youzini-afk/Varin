@@ -90,10 +90,10 @@ export interface SettingsActionRef {
   domain:
     | 'runtime:extensions' | 'runtime:resources' | 'runtime:providers'
     | 'runtime:mcp' | 'runtime:language-support' | 'runtime:runtime-update'
-    | 'service:git' | 'service:tunnel' | 'service:knowledge'
+    | 'service:git' | 'service:tunnel' | 'service:agent-personalization'
     | 'service:extensions' | 'service:fleet' | 'service:agents'
     | 'service:notifications' | 'service:projects' | 'service:remote-instances'
-    | 'service:magic-prompts' | 'service:snippets'
+    | 'service:snippets'
     | 'tool:resource' | 'tool:extension' | 'page:ui';
   /** What the agent can actually do without opening the UI. */
   verbs?: readonly string[];
@@ -165,6 +165,18 @@ const modelField = (path: string, scope: 'user' | 'user-or-project'): SettingsFi
 });
 
 export const SETTINGS_CATALOG: readonly SettingsCatalogEntry[] = [
+  {
+    id: 'agent.memory', category: 'knowledge', owner: 'action',
+    actionRef: { domain: 'service:agent-personalization', verbs: ['read', 'write', 'delete'],
+      note: 'Always-loaded ordinary assistant notes. Read returns revision; write takes revision, scope {kind:global|project|session,id?}, content and optional id. Delete takes revision and id.' },
+    apply: 'next-run', ui: { page: 'agent-memory', titleKey: 'assistant.memory.title', keywords: ['memory', 'global', 'project', 'session'] },
+  },
+  {
+    id: 'agent.system-prompt', category: 'model', owner: 'action',
+    actionRef: { domain: 'service:agent-personalization', verbs: ['read', 'write', 'reset'],
+      note: 'Ordinary assistant prompt sections. Write takes revision, scope {kind:global|project|session,id?}, profile {sections:{sectionName:string|null}}. Null removes a section. Reset removes scope overrides. Bot instructions have their own owner.' },
+    apply: 'next-run', ui: { page: 'agent-prompt', titleKey: 'assistant.prompt.title', keywords: ['system', 'prompt', 'instructions', 'style', 'autonomy'] },
+  },
   // ── Harness (pi-settings owner) ──────────────────────────────────────────
   {
     id: 'harness.tools', category: 'harness', owner: 'pi-settings',
@@ -271,7 +283,7 @@ export const SETTINGS_CATALOG: readonly SettingsCatalogEntry[] = [
       { path: 'harness.models.memoryOrganizer', kind: 'json', scope: 'user', note: '{enabled?: boolean, providerId?: string, modelId?: string}; false disables the role while retaining its model' },
     ],
     apply: 'next-run',
-    ui: { page: 'harness-context', titleKey: 'settings.harness.role.memoryOrganizer', keywords: ["memoryOrganizer", "agent", "model", "enable", "disable"] },
+    ui: { page: 'harness-bots', titleKey: 'settings.harness.role.memoryOrganizer', keywords: ["memoryOrganizer", "agent", "model", "enable", "disable"] },
   },
   {
     id: 'harness.models.permissionJudge', category: 'harness', owner: 'pi-settings',
@@ -404,7 +416,7 @@ export const SETTINGS_CATALOG: readonly SettingsCatalogEntry[] = [
   {
     id: 'harness.knowledge.retention', category: 'harness', owner: 'pi-settings',
     field: { path: 'harness.knowledge', kind: 'json', scope: 'user-or-project',
-      note: '{eventRetentionDays: number, autoOrganize: {workspace, user, bot}}' },
+      note: '{eventRetentionDays: number, autoOrganize: {user, bot}}; automatic memory applies only to Bots' },
     apply: 'next-run',
     ui: { page: 'harness-context', titleKey: 'settings.knowledge.section.workspace',
       keywords: ['knowledge', 'retention', 'suggestions'] },
@@ -1242,14 +1254,6 @@ export const SETTINGS_CATALOG: readonly SettingsCatalogEntry[] = [
       keywords: ['agent', 'subagent', 'workflow', 'role', 'model', 'fallback', 'thinking'] },
   },
   {
-    id: 'prompts.editor', category: 'agents', owner: 'action',
-    actionRef: { domain: 'runtime:resources', verbs: ['list', 'read', 'write', 'delete'],
-      note: 'prompt templates are Pi resources (user/project scope), edited through the resource authority' },
-    ui: { page: 'prompts', titleKey: 'settings.varin.prompts.catalog.title',
-      descriptionKey: 'settings.varin.prompts.description',
-      keywords: ['prompt', 'template', 'markdown', 'argument hint', 'user', 'project', 'copy'] },
-  },
-  {
     id: 'skills.editor', category: 'agents', owner: 'action',
     actionRef: { domain: 'runtime:resources', verbs: ['list', 'read', 'write', 'delete'],
       note: 'skills are Pi resources (agent/user/project/package scope); read-only scopes stay read-only' },
@@ -1366,22 +1370,6 @@ export const SETTINGS_CATALOG: readonly SettingsCatalogEntry[] = [
       keywords: ['markdown', 'prompt', 'template'] },
   },
   {
-    id: 'knowledge.workspace', category: 'knowledge', owner: 'action',
-    actionRef: { domain: 'service:knowledge', verbs: ['list', 'accept', 'supersede'],
-      note: 'workspace knowledge events and suggestions via the knowledge service' },
-    ui: { page: 'harness-context', titleKey: 'settings.knowledge.section.workspace',
-      descriptionKey: 'settings.page.knowledge.description',
-      keywords: ['knowledge', 'memory', 'recall', 'workspace', 'supersede'] },
-  },
-  {
-    id: 'knowledge.user', category: 'knowledge', owner: 'action',
-    actionRef: { domain: 'service:knowledge', verbs: ['list', 'accept', 'supersede'],
-      note: 'user-scoped knowledge events' },
-    ui: { page: 'harness-context', titleKey: 'settings.knowledge.section.user',
-      descriptionKey: 'settings.page.knowledge.description',
-      keywords: ['knowledge', 'memory', 'user', 'recall'] },
-  },
-  {
     id: 'language-support.workspace', category: 'language', owner: 'action',
     actionRef: { domain: 'runtime:language-support', verbs: ['status'],
       note: 'per-workspace language/grammar detection state' },
@@ -1465,26 +1453,6 @@ export const SETTINGS_CATALOG: readonly SettingsCatalogEntry[] = [
     apply: 'immediate',
     ui: { page: 'providers', titleKey: 'settings.providers.page.models.title',
       keywords: ['models', 'hide', 'show'] },
-  },
-  {
-    id: 'magic-prompts.visible-prompt', category: 'productivity', owner: 'action',
-    actionRef: { domain: 'service:magic-prompts', verbs: ['read', 'write'],
-      note: 'magic prompt templates use the Host magic-prompt authority' },
-    ui: { page: 'magic-prompts', titleKey: 'settings.magicPrompts.page.block.visiblePrompt',
-      keywords: ['prompt text', 'user message', 'template'] },
-  },
-  {
-    id: 'magic-prompts.instructions', category: 'productivity', owner: 'action',
-    actionRef: { domain: 'service:magic-prompts', verbs: ['read', 'write'] },
-    ui: { page: 'magic-prompts', titleKey: 'settings.magicPrompts.page.block.instructions',
-      keywords: ['hidden prompt', 'instructions', 'template'] },
-  },
-  {
-    id: 'magic-prompts.reset-overrides', category: 'productivity', owner: 'action',
-    actionRef: { domain: 'service:magic-prompts', verbs: ['reset'],
-      note: 'restore shipped prompt defaults' },
-    ui: { page: 'magic-prompts', titleKey: 'settings.magicPrompts.page.actions.resetAllOverrides',
-      keywords: ['reset', 'default prompts', 'overrides'] },
   },
   {
     id: 'shortcuts.keyboard-shortcuts', category: 'productivity', owner: 'app',
@@ -1590,30 +1558,6 @@ export const SETTINGS_CATALOG: readonly SettingsCatalogEntry[] = [
     ui: { page: 'tunnel', titleKey: 'settings.varin.tunnel.actions.startTunnel',
       descriptionKey: 'settings.varin.tunnel.note.connectLinksOneTime',
       keywords: ['connect link', 'qr code', 'public url', 'remote access'] },
-  },
-  {
-    id: 'global.behavior-prompt', category: 'model', owner: 'app',
-    field: { path: 'globalBehaviorPrompt', kind: 'string', multiline: true,
-      note: 'Varin-owned global behavior prompt prepended to sessions' },
-    apply: 'next-run',
-    ui: { page: 'general', titleKey: 'settings.varin.defaults.field.defaultModel',
-      keywords: ['behavior', 'prompt', 'instructions', 'global'] },
-  },
-  {
-    id: 'global.response-style', category: 'model', owner: 'app',
-    fields: [
-      { path: 'responseStyleEnabled', kind: 'boolean' },
-      { path: 'responseStylePreset', kind: 'enum',
-        options: [
-          { value: 'concise' }, { value: 'detailed' }, { value: 'mentor' },
-          { value: 'pushback' }, { value: 'noFiller' }, { value: 'matchEnergy' },
-          { value: 'warmPeer' }, { value: 'custom' },
-        ] },
-      { path: 'responseStyleCustomInstructions', kind: 'string', multiline: true, nullable: true },
-    ],
-    apply: 'next-run',
-    ui: { page: 'general', titleKey: 'settings.varin.defaults.field.defaultModel',
-      keywords: ['response style', 'tone', 'concise', 'detailed'] },
   },
   {
     id: 'global.auto-update-checks', category: 'sessions', owner: 'app',

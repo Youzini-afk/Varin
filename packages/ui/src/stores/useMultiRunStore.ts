@@ -18,7 +18,6 @@ import {
   resolveVarinRootTrackingRemote,
 } from '@/lib/varinWorktrees';
 import { waitForWorktreeBootstrap } from '@/lib/worktrees/worktreeBootstrap';
-import { renderPiComposerSubmission } from '@/lib/pi-session/piComposerSubmission';
 import { useDirectoryStore } from './useDirectoryStore';
 import { useProjectsStore } from './useProjectsStore';
 import { useSnippetsStore } from './useSnippetsStore';
@@ -302,10 +301,9 @@ export const useMultiRunStore = create<MultiRunStore>()(
           const attachments = prepareAttachments(params.files);
           await Promise.all(createdRuns.map(async (run) => {
             try {
-              const rendered = await renderPiComposerSubmission(run.prompt);
-              const expanded = await useSnippetsStore.getState().expandText(rendered.text)
-                .catch(() => rendered.text);
-              const instructionParts = [rendered.instructions, attachments.instructions]
+              const expanded = await useSnippetsStore.getState().expandText(run.prompt)
+                .catch(() => run.prompt);
+              const instructionParts = [attachments.instructions]
                 .filter((value): value is string => Boolean(value?.trim()));
               const directInstructions = instructionParts.length > 0
                 ? instructionParts.join('\n\n')

@@ -13,7 +13,7 @@ const descriptor = (overrides: Partial<PiResourceDescriptor>): PiResourceDescrip
   description: '',
   filePath: `C:/agent/${overrides.name ?? 'resource'}.md`,
   id: overrides.name ?? 'resource',
-  kind: 'prompt',
+  kind: 'skill',
   name: overrides.name ?? 'resource',
   sourceInfo: {
     origin: 'top-level',
@@ -27,10 +27,7 @@ const descriptor = (overrides: Partial<PiResourceDescriptor>): PiResourceDescrip
 });
 
 describe('Pi resource library model', () => {
-  test('creates native prompt and skill markdown starters without restricting names', () => {
-    const prompt = createPiResourceStarter('prompt', 'review.md');
-    expect(prompt).toContain('# review');
-    expect(prompt).toContain('argument-hint: "[target] [focus]"');
+  test('creates native skill markdown starters without restricting names', () => {
     expect(createPiResourceStarter('skill', 'Workspace Check')).toContain('name: "Workspace Check"');
     expect(validatePiResourceName('Workspace Check')).toBeNull();
     expect(validatePiResourceName('../escape')).toBe('separator');

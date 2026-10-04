@@ -45,7 +45,7 @@ import { TodoSendDialog, type TodoSendExecution } from '@/components/session/Tod
 import { Icon } from "@/components/icon/Icon";
 import { toast } from '@/components/ui';
 import { useMessageTTS } from '@/hooks/useMessageTTS';
-import { renderMagicPrompt } from '@/lib/magicPrompts';
+import { actionInstruction } from '@/lib/actionInstructions';
 import { useI18n } from '@/lib/i18n';
 
 type PlanViewProps = {
@@ -519,13 +519,13 @@ export const PlanView: React.FC<PlanViewProps> = ({ targetPath = null }) => {
         return;
       }
 
-      const visiblePrompt = await renderMagicPrompt(
+      const visiblePrompt = await actionInstruction(
         pendingPlanSend.action === 'improve' ? 'plan.improve.visible' : 'plan.implement.visible',
         {
           plan_title: sendPromptTitle,
         },
       );
-      const instructionsText = await renderMagicPrompt(
+      const instructionsText = await actionInstruction(
         pendingPlanSend.action === 'improve' ? 'plan.improve.instructions' : 'plan.implement.instructions',
         {
           plan_title: sendPromptTitle,

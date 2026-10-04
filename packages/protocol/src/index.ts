@@ -1,4 +1,5 @@
 export * from "./auth.js";
+export * from "./agent-personalization.js";
 export * from "./codec.js";
 export * from "./envelopes.js";
 export * from "./events.js";

@@ -16,7 +16,7 @@ function createHost(agentDir: string, projectTrusted: boolean): SessionHost {
 }
 
 describe("SessionHost Pi resources", () => {
-  it("creates, discovers, updates, and deletes native prompt templates with revisions", async () => {
+  it("creates, discovers, updates, and deletes native skills with revisions", async () => {
     const root = await mkdtemp(join(tmpdir(), "varin-resources-prompt-"));
     const cwd = join(root, "workspace");
     const agentDir = join(root, "agent");
@@ -26,54 +26,52 @@ describe("SessionHost Pi resources", () => {
     const host = createHost(agentDir, true);
     try {
       const snapshot = await host.openCatalogContext(cwd);
-      const content = "---\ndescription: Review a change\nargument-hint: <path>\n---\nReview $1 carefully.\n";
-      const created = await host.createResource("prompt", "user", "review", content);
+      const content = "---\nname: review\ndescription: Review a change\n---\nReview $1 carefully.\n";
+      const created = await host.createResource("skill", "user", "review", content);
       assert.equal(created.content, content);
       assert.equal(created.descriptor.active, true);
-      assert.equal(created.descriptor.argumentHint, "<path>");
       assert.equal(created.descriptor.sourceInfo.scope, "user");
       assert.equal(created.descriptor.writable, true);
-      const command = host.listCommands(snapshot.sessionId).find((entry) => entry.name === "review");
-      assert.equal(command?.source, "prompt");
-      assert.equal(command?.argumentHint, "<path>");
+      const command = host.listCommands(snapshot.sessionId).find((entry) => entry.name === "skill:review");
+      assert.equal(command?.source, "skill");
       assert.equal(command?.sourceInfo?.path, created.descriptor.filePath);
       assert.equal(
-        await readFile(join(agentDir, "prompts", "review.md"), "utf8"),
+        await readFile(join(agentDir, "skills", "review", "SKILL.md"), "utf8"),
         content,
       );
 
-      const listed = await host.listResources("prompt");
+      const listed = await host.listResources("skill");
       assert.equal(listed.projectTrusted, true);
       assert.ok(listed.resources.some((resource) => resource.id === created.descriptor.id));
 
       const updatedContent = `${content}\nUse the project conventions.\n`;
       const updated = await host.updateResource(
-        "prompt",
+        "skill",
         created.descriptor.id,
         updatedContent,
         created.revision,
       );
       assert.equal(updated.content, updatedContent);
       await assert.rejects(
-        host.updateResource("prompt", created.descriptor.id, content, created.revision),
+        host.updateResource("skill", created.descriptor.id, content, created.revision),
         (error: unknown) => error instanceof HostError && error.code === "resource_conflict",
       );
 
       assert.deepEqual(
         await host.deleteResource(
-          "prompt",
+          "skill",
           created.descriptor.id,
           updated.revision,
         ),
         { deleted: true, id: created.descriptor.id },
       );
       assert.equal(
-        (await host.listResources("prompt")).resources.some(
+        (await host.listResources("skill")).resources.some(
           (resource) => resource.id === created.descriptor.id,
         ),
         false,
       );
-      assert.equal(host.listCommands(snapshot.sessionId).some((entry) => entry.name === "review"), false);
+      assert.equal(host.listCommands(snapshot.sessionId).some((entry) => entry.name === "skill:review"), false);
     } finally {
       await host.dispose();
       if (previousHome === undefined) delete process.env.HOME;
@@ -154,40 +152,40 @@ describe("SessionHost Pi resources", () => {
     const root = await mkdtemp(join(tmpdir(), "varin-resources-trust-"));
     const cwd = join(root, "workspace");
     const agentDir = join(root, "agent");
-    const externalPrompt = join(root, "external", "shared.md");
+    const externalSkill = join(root, "external", "shared.md");
     const previousHome = process.env.HOME;
     process.env.HOME = join(root, "home");
     await mkdir(cwd, { recursive: true });
     await mkdir(join(root, "external"), { recursive: true });
     await mkdir(agentDir, { recursive: true });
-    await writeFile(externalPrompt, "Shared external prompt.\n", "utf8");
+    await writeFile(externalSkill, "---\nname: shared\ndescription: Shared skill\n---\nShared skill.\n", "utf8");
     await writeFile(
       join(agentDir, "settings.json"),
-      `${JSON.stringify({ prompts: [externalPrompt] }, null, 2)}\n`,
+      `${JSON.stringify({ skills: [externalSkill] }, null, 2)}\n`,
       "utf8",
     );
     const host = createHost(agentDir, false);
     try {
       await host.openCatalogContext(cwd);
-      const external = (await host.listResources("prompt")).resources.find(
-        (resource) => resource.filePath === externalPrompt,
+      const external = (await host.listResources("skill")).resources.find(
+        (resource) => resource.filePath === externalSkill,
       );
       assert.ok(external);
       assert.equal(external.writable, false);
-      const externalDocument = await host.getResource("prompt", external.id);
+      const externalDocument = await host.getResource("skill", external.id);
       await assert.rejects(
-        host.updateResource("prompt", external.id, "Changed.\n", externalDocument.revision),
+        host.updateResource("skill", external.id, "Changed.\n", externalDocument.revision),
         (error: unknown) => error instanceof HostError && error.code === "resource_read_only",
       );
       await assert.rejects(
         host.createResource("skill", "project", "blocked", "---\ndescription: no\n---\n"),
         (error: unknown) => error instanceof HostError && error.code === "project_not_trusted",
       );
-      const copied = await host.copyResource("prompt", external.id, "user", "shared-copy");
+      const copied = await host.copyResource("skill", external.id, "user", "shared-copy");
       assert.equal(copied.descriptor.writable, true);
-      assert.equal(copied.content, "Shared external prompt.\n");
+      assert.match(copied.content, /Shared skill/);
       await assert.rejects(
-        host.createResource("prompt", "user", "../escape", "No escape.\n"),
+        host.createResource("skill", "user", "../escape", "No escape.\n"),
         (error: unknown) => error instanceof HostError && error.code === "invalid_resource_name",
       );
     } finally {
