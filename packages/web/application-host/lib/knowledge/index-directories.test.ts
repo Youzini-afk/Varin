@@ -8,7 +8,8 @@ import { createProjectIndexScope } from './index-scope.js';
 const cleanups: Array<() => Promise<void>> = [];
 afterEach(async () => { for (const cleanup of cleanups.splice(0).reverse()) await cleanup(); });
 async function fixture(overrides: Partial<IndexDirectoryManagerOptions> = {}) {
-  const dataDir = await mkdtemp(path.join(tmpdir(), 'varin-index-directories-'));
+  // Project settings resolve directory aliases before index management.
+  const dataDir = await realpath(await mkdtemp(path.join(tmpdir(), 'varin-index-directories-')));
   cleanups.push(() => rm(dataDir, { recursive: true, force: true }));
   const scope = createProjectIndexScope([]);
   const check = vi.fn(async () => undefined);
