@@ -15,25 +15,34 @@ pub(crate) fn normalize(value:&str)->Result<String>{
     if value.contains('\0')||value.starts_with('/')||value.contains(':')||value.split('/').any(|s|s==".."){return Err("Computation path is outside its admitted view".into());}
     Ok(value.split('/').filter(|s|!s.is_empty()&&*s!=".").collect::<Vec<_>>().join("/"))
 }
-pub(crate) fn revision(bytes:&[u8])->String{format!("d1_{}",URL_SAFE_NO_PAD.encode(Sha256::digest(bytes)))}
+struct CapturedFile {
+    bytes: Vec<u8>,
+    metadata: SourceMetadata,
+    object_hash: String,
+    revision: String,
+}
 fn revision_from_object_hash(hash:&str)->Result<String>{
     let hex=hash.strip_prefix("sha256-").ok_or("Invalid immutable object identity")?;
     let bytes=hex::decode(hex).map_err(|_|"Invalid immutable object identity")?;
     if bytes.len()!=32{return Err("Invalid immutable object identity".into());}
     Ok(format!("d1_{}",URL_SAFE_NO_PAD.encode(bytes)))
 }
-fn read_capture(mut file:File,expected:Option<&str>,shared:&Shared)->Result<(Vec<u8>,SourceMetadata)>{
+fn read_capture(mut file:File,expected:Option<&str>,shared:&Shared)->Result<CapturedFile>{
     let before=file.metadata().map_err(|e|e.to_string())?;
     let mut result=Vec::new();let mut buffer=[0u8;65536];let mut digest=Sha256::new();
     loop {shared.check()?;let n=file.read(&mut buffer).map_err(|e|e.to_string())?;if n==0{break;}digest.update(&buffer[..n]);result.extend_from_slice(&buffer[..n]);}
     let after=file.metadata().map_err(|e|e.to_string())?;
     if before.len()!=after.len()||before.modified().ok()!=after.modified().ok()||after.len()!=result.len() as u64{return Err("File changed during native capture; retry the source".into());}
-    if let Some(expected)=expected{if format!("sha256-{}",hex::encode(digest.finalize()))!=expected{return Err("Immutable content object hash mismatch".into());}}
+    // One digest of the bytes actually captured supplies both identities. Live
+    // files, immutable objects and structure consumers must not rehash the body.
+    let digest=digest.finalize();
+    let object_hash=format!("sha256-{}",hex::encode(digest));
+    if expected.is_some_and(|expected|expected!=object_hash){return Err("Immutable content object hash mismatch".into());}
+    let revision=format!("d1_{}",URL_SAFE_NO_PAD.encode(digest));
     let metadata=SourceMetadata{byte_length:after.len(),modified_time_ns:after.modified().ok()
         .and_then(|time|time.duration_since(std::time::UNIX_EPOCH).ok()).map(|time|time.as_nanos().to_string())};
-    Ok((result,metadata))
+    Ok(CapturedFile{bytes:result,metadata,object_hash,revision})
 }
-fn read_bytes(file:File,expected:Option<&str>,shared:&Shared)->Result<Vec<u8>>{read_capture(file,expected,shared).map(|(bytes,_)|bytes)}
 struct TreeReader {conn:Connection}
 impl TreeReader {
     fn open(path:&Path)->Result<Self>{Ok(Self{conn:Connection::open_with_flags(path,OpenFlags::SQLITE_OPEN_READ_ONLY|OpenFlags::SQLITE_OPEN_NO_MUTEX).map_err(|e|e.to_string())?})}
@@ -60,9 +69,14 @@ impl TreeReader {
 }
 fn load_object(source:ObjectSource,content:bool,shared:&Shared)->Result<Document>{
     if let Some(file)=source.file{
-        let bytes=if content{Some(read_bytes(file,source.hash.as_deref(),shared)?)}else{None};
-        let length=bytes.as_ref().map(|b|b.len() as u64).unwrap_or(0);
-        Ok(Document{path:source.path,revision:source.revision,state:PathState::RegularFile{object_hash:source.hash.unwrap_or_default(),byte_length:length,mode:0o644},bytes,metadata:None})
+        let (bytes,object_hash,length)=if content{
+            let captured=read_capture(file,source.hash.as_deref(),shared)?;
+            let length=captured.bytes.len() as u64;
+            (Some(captured.bytes),captured.object_hash,length)
+        }else{(None,source.hash.unwrap_or_default(),0)};
+        // Registry drafts retain their supplied revision; their content identity
+        // still comes from the verified object bytes, not that opaque revision.
+        Ok(Document{path:source.path,revision:source.revision,state:PathState::RegularFile{object_hash,byte_length:length,mode:0o644},bytes,metadata:None})
     }else{Ok(Document{path:source.path,revision:source.revision,state:PathState::Missing,bytes:None,metadata:None})}
 }
 fn safe_disk_path(root:&Path,path:&Path,scopes:&[String])->Result<PathBuf>{
@@ -138,12 +152,11 @@ pub(crate) fn visit(task:&mut Task,shared:&Shared,mut callback:impl FnMut(Docume
                         if depth_allowed{stack.push(Visit::Index(children,path.clone()));}
                     }}
                     if shadowed.iter().any(|p|within(&path,p))||!eligible(&path,directory){continue;}
-                    let bytes=match &state{PathState::RegularFile{object_hash,..} if content=>{
+                    let (bytes,revision)=match &state{PathState::RegularFile{object_hash,..} if content=>{
                         let file=File::open(object_path(objects,object_hash).map_err(|e|e.to_string())?).map_err(|e|e.to_string())?;
-                        Some(read_bytes(file,Some(object_hash),shared)?)
-                    },_=>None};
-                    let revision=if let Some(bytes)=bytes.as_deref(){revision(bytes)}
-                        else if let Some(hash)=state.object_hash(){revision_from_object_hash(hash)?}else{root.clone()};
+                        let captured=read_capture(file,Some(object_hash),shared)?;
+                        (Some(captured.bytes),captured.revision)
+                    },_=>{let revision=if let Some(hash)=state.object_hash(){revision_from_object_hash(hash)?}else{root.clone()};(None,revision)}};
                     if !callback(Document{path,revision,state,bytes,metadata:None})?{return Ok(partial);}
                 }
             }}
@@ -214,7 +227,7 @@ pub(crate) fn visit(task:&mut Task,shared:&Shared,mut callback:impl FnMut(Docume
                 let Some(kind)=entry.file_type()else{partial=true;continue;};
                 if shadowed.iter().any(|p|within(&path,p))||!eligible(&path,kind.is_dir()){continue;}
                 if task.params.immediate.unwrap_or(false)&&!roots.iter().any(|r|path==*r||path.rsplit_once('/').map(|(p,_)|p==r).unwrap_or(r.is_empty())){continue;}
-                let mut bytes=None;
+                let mut bytes=None;let mut object_hash=String::new();let mut revision=String::new();
                 let mut metadata=if task.params.operation=="list"&&kind.is_file(){
                     match fs::symlink_metadata(entry.path()){
                         Ok(metadata) if metadata.is_file()=>Some(SourceMetadata{
@@ -230,13 +243,12 @@ pub(crate) fn visit(task:&mut Task,shared:&Shared,mut callback:impl FnMut(Docume
                 let state=if kind.is_dir(){PathState::Directory{mode:None}}else if kind.is_symlink(){PathState::Symlink{symlink_target:fs::read_link(entry.path()).map_err(|e|e.to_string())?.to_string_lossy().into(),mode:None}}
                 else if kind.is_file(){
                     if content {
-                        let result: Result<(Vec<u8>,SourceMetadata)>=(||{let canonical=safe_disk_path(&root,entry.path(),&scopes)?;let b=read_capture(File::open(&canonical).map_err(|e|e.to_string())?,None,shared)?;
+                        let result: Result<CapturedFile>=(||{let canonical=safe_disk_path(&root,entry.path(),&scopes)?;let b=read_capture(File::open(&canonical).map_err(|e|e.to_string())?,None,shared)?;
                             if fs::canonicalize(entry.path()).map_err(|e|e.to_string())?!=canonical{return Err("File identity changed during native capture".into());}Ok(b)})();
-                        match result{Ok((b,m))=>{bytes=Some(b);metadata=Some(m);},Err(e)=>{shared.check()?;partial=true;shared.emit("error",&path,"",serde_json::json!({"message":e}))?;continue;}}
+                        match result{Ok(captured)=>{bytes=Some(captured.bytes);metadata=Some(captured.metadata);object_hash=captured.object_hash;revision=captured.revision;},Err(e)=>{shared.check()?;partial=true;shared.emit("error",&path,"",serde_json::json!({"message":e}))?;continue;}}
                     }
-                    PathState::RegularFile{object_hash:bytes.as_deref().map(|b|format!("sha256-{}",hex::encode(Sha256::digest(b)))).unwrap_or_default(),byte_length:bytes.as_ref().map(|b|b.len() as u64).or_else(||metadata.as_ref().map(|value|value.byte_length)).unwrap_or(0),mode:0o644}
+                    PathState::RegularFile{object_hash,byte_length:bytes.as_ref().map(|b|b.len() as u64).or_else(||metadata.as_ref().map(|value|value.byte_length)).unwrap_or(0),mode:0o644}
                 }else{PathState::Unsupported};
-                let revision=bytes.as_deref().map(revision).unwrap_or_default();
                 if !callback(Document{path,revision,state,bytes,metadata})?{return Ok(partial);}
             }
                 walk_starts.extend(std::mem::take(&mut *nested.lock().unwrap()));
@@ -244,4 +256,38 @@ pub(crate) fn visit(task:&mut Task,shared:&Shared,mut callback:impl FnMut(Docume
         }
     }
     Ok(partial)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    struct TestFile(PathBuf);
+    impl Drop for TestFile {
+        fn drop(&mut self) { let _ = fs::remove_file(&self.0); }
+    }
+
+    #[test]
+    fn capture_keeps_one_verified_identity_for_exact_bytes() {
+        let fixture = TestFile(std::env::temp_dir().join(format!("varin-capture-{}", uuid::Uuid::new_v4())));
+        fs::write(&fixture.0, b"abc").unwrap();
+        let hash = "sha256-ba7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff61f20015ad";
+        let captured = read_capture(File::open(&fixture.0).unwrap(), None, &Shared::new()).unwrap();
+        assert_eq!(captured.bytes, b"abc");
+        assert_eq!(captured.metadata.byte_length, 3);
+        assert_eq!(captured.object_hash, hash);
+        assert_eq!(captured.revision, "d1_ungWv48Bz-pBQUDeXa4iI7ADYaOWF3qctBD_YfIAFa0");
+        assert_eq!(captured.revision, revision_from_object_hash(hash).unwrap());
+        let verified = read_capture(File::open(&fixture.0).unwrap(), Some(hash), &Shared::new()).unwrap();
+        assert_eq!(verified.object_hash, captured.object_hash);
+        assert_eq!(verified.revision, captured.revision);
+
+        fs::write(&fixture.0, b"abd").unwrap();
+        let error = read_capture(File::open(&fixture.0).unwrap(), Some(hash), &Shared::new())
+            .err().expect("corrupt immutable bytes must remain rejected");
+        assert!(error.contains("hash mismatch"), "{error}");
+        let cancelled = Shared::new();
+        cancelled.cancel();
+        assert_eq!(read_capture(File::open(&fixture.0).unwrap(), None, &cancelled).err().unwrap(), "cancelled");
+    }
 }

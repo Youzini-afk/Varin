@@ -139,7 +139,8 @@ pub(crate) fn execute(mut task:Task,shared:&Shared,syntax:&mut SyntaxRuntime)->R
                     let file=files.get(path);
                     let recipe=file.and_then(|f|f.recipe_id.as_ref()).and_then(|id|recipes.get(id));
                     let analysis=match recipe{
-                        Some(recipe)=>match syntax.analyze(recipe,text,file.and_then(|f|f.lines.as_deref()).unwrap_or_default(),params.parse_budget_ms.unwrap_or(250) as u64,shared){
+                        Some(recipe)=>match syntax.analyze(recipe,text,file.and_then(|f|f.lines.as_deref()).unwrap_or_default(),params.parse_budget_ms.unwrap_or(250) as u64,
+                            document.state.object_hash().and_then(|hash|hash.strip_prefix("sha256-")).ok_or("Captured content identity is unavailable")?,shared){
                             Ok(value)=>Some(value),Err(error)=>{shared.check()?;
                                 let status=if error.starts_with("unavailable:"){"unavailable"}else{"failed"};
                                 shared.emit("structure",path,revision,json!({"status":status,"message":error,"recipeId":recipe.recipe_id}))?;structure_failed=true;None

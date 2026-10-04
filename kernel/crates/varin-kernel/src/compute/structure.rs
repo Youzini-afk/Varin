@@ -4,19 +4,40 @@ use super::{Result,Shared};
 use crate::protocol_generated::KernelComputeGrammarParams;
 use serde_json::{json,Value};
 use sha2::{Digest,Sha256};
-use std::{collections::{HashMap,HashSet},fs,ops::ControlFlow,time::{Duration,Instant}};
+use std::{collections::{HashMap,HashSet},fs,ops::ControlFlow,sync::Arc,time::{Duration,Instant}};
 use streaming_iterator::StreamingIterator;
 use tree_sitter::{Language,Node,Parser,Query,QueryCursor,QueryCursorOptions,ParseOptions,WasmStore,wasmtime};
 
+struct CompiledQueries {
+    definition: Option<Query>,
+    literal_call: Option<Query>,
+    imports: Option<Query>,
+}
+struct CachedQueries {
+    recipe_id: String,
+    compiled: Arc<CompiledQueries>,
+}
+struct CachedLanguage {
+    language: Language,
+    // Keep only the latest immutable recipe for this grammar name + hash.
+    // Replacing a recipe evicts executable queries, never source text or trees.
+    queries: Option<CachedQueries>,
+}
 #[derive(Default)]
-pub(crate) struct SyntaxRuntime { parser:Option<Parser>,languages:HashMap<String,Language> }
+pub(crate) struct SyntaxRuntime {
+    parser: Option<Parser>,
+    languages: HashMap<String, CachedLanguage>,
+    #[cfg(test)]
+    compiled_query_count: usize,
+}
 impl SyntaxRuntime {
-    fn language(&mut self,recipe:&KernelComputeGrammarParams,shared:&Shared)->Result<Language>{
+    fn language(&mut self,recipe:&KernelComputeGrammarParams,shared:&Shared)->Result<(String,Language)>{
         shared.check()?;
         let bytes=fs::read(&recipe.grammar_path).map_err(|_|"unavailable: grammar WASM is not readable".to_string())?;
-        if recipe.grammar_hash.as_deref()!=Some(format!("sha256-{}",hex::encode(Sha256::digest(&bytes))).as_str()){return Err("unavailable: Grammar bytes changed after recipe admission".into());}
-        let key=format!("{}:{}",recipe.grammar_name,hex::encode(Sha256::digest(&bytes)));
-        if let Some(language)=self.languages.get(&key){return Ok(language.clone());}
+        let grammar_hash=format!("sha256-{}",hex::encode(Sha256::digest(&bytes)));
+        if recipe.grammar_hash.as_deref()!=Some(grammar_hash.as_str()){return Err("unavailable: Grammar bytes changed after recipe admission".into());}
+        let key=format!("{}:{}",recipe.grammar_name,grammar_hash);
+        if let Some(cached)=self.languages.get(&key){return Ok((key,cached.language.clone()));}
         // Cache capacity is eviction, not a language admission limit. Resetting
         // the store also drops compiled modules; no tree escapes this worker.
         if self.languages.len()>=32 {self.languages.clear();self.parser=None;}
@@ -34,14 +55,41 @@ impl SyntaxRuntime {
         if !(tree_sitter::MIN_COMPATIBLE_LANGUAGE_VERSION..=tree_sitter::LANGUAGE_VERSION).contains(&language.abi_version()){
             return Err(format!("unavailable: Grammar ABI {} is incompatible with this native runtime",language.abi_version()));
         }
-        self.languages.insert(key,language.clone());Ok(language)
+        self.languages.insert(key.clone(),CachedLanguage{language:language.clone(),queries:None});Ok((key,language))
+    }
+    fn queries(&mut self, language_key: &str, recipe: &KernelComputeGrammarParams, shared: &Shared) -> Result<Arc<CompiledQueries>> {
+        shared.check()?;
+        let cached = self.languages.get_mut(language_key).ok_or("unavailable: Native grammar cache entry is unavailable")?;
+        if let Some(queries) = &cached.queries {
+            if queries.recipe_id == recipe.recipe_id { return Ok(queries.compiled.clone()); }
+        }
+        let language = &cached.language;
+        let compile = |source: &str| -> Result<Query> {
+            shared.check()?;
+            let query = Query::new(language, source).map_err(|error| format!("unavailable: Grammar query is incompatible: {error}"))?;
+            shared.check()?;
+            Ok(query)
+        };
+        let queries = Arc::new(CompiledQueries {
+            definition: if recipe.style == "json" { None } else { Some(compile(&recipe.definition_query)?) },
+            literal_call: recipe.literal_call_query.as_deref().map(compile).transpose()?,
+            imports: recipe.import_query.as_deref().map(compile).transpose()?,
+        });
+        #[cfg(test)] {
+            self.compiled_query_count += usize::from(queries.definition.is_some())
+                + usize::from(queries.literal_call.is_some()) + usize::from(queries.imports.is_some());
+        }
+        // Publish only a complete successful recipe. Existing Arc users keep
+        // their compiled queries alive while this entry replaces its owner.
+        cached.queries = Some(CachedQueries { recipe_id: recipe.recipe_id.clone(), compiled: queries.clone() });
+        Ok(queries)
     }
     pub fn probe(&mut self, recipe: &KernelComputeGrammarParams, shared: &Shared) -> Result<Value> {
-        let language = self.language(recipe, shared)?;
+        let (_, language) = self.language(recipe, shared)?;
         Ok(json!({"abi": language.abi_version(), "recipeId": recipe.recipe_id}))
     }
-    pub fn analyze(&mut self,recipe:&KernelComputeGrammarParams,text:&str,lines:&[i64],budget_ms:u64,shared:&Shared)->Result<Value>{
-        let language=self.language(recipe,shared)?;
+    pub fn analyze(&mut self,recipe:&KernelComputeGrammarParams,text:&str,lines:&[i64],budget_ms:u64,content_hash:&str,shared:&Shared)->Result<Value>{
+        let (language_key,language)=self.language(recipe,shared)?;
         let parser=self.parser.as_mut().unwrap();
         parser.set_language(&language).map_err(|e|format!("unavailable: {e}"))?;
         let started=Instant::now();let budget=Duration::from_millis(budget_ms);
@@ -53,13 +101,16 @@ impl SyntaxRuntime {
         shared.check()?;
         let tree=tree.ok_or("failed: Parse budget exhausted before the file was finished")?;
         if expired(){return Err("failed: Parse budget exhausted before the file was finished".into());}
-        let root=tree.root_node();let mut symbols=Vec::new();let mut names=HashSet::new();let mut seen=HashSet::new();
+        let root=tree.root_node();
+        let compiled=self.queries(&language_key,recipe,shared)?;
+        if expired(){return Err("failed: Structure query budget exhausted".into());}
+        let mut symbols=Vec::new();let mut names=HashSet::new();let mut seen=HashSet::new();
         if recipe.style=="json"{
             let mut collector=JsonOutline{symbols:&mut symbols,names:&mut names,seen:&mut seen,max_depth:recipe.max_depth.unwrap_or(8) as usize,
                 max_symbols:recipe.max_symbols.unwrap_or(256) as usize,text:bytes,shared};
             collector.collect(root)?;
         }else{
-            matches(&language,&recipe.definition_query,root,bytes,&expired,|captures|{
+            matches(compiled.definition.as_ref().ok_or("unavailable: Definition query is unavailable")?,root,bytes,&expired,|captures|{
                 let name=captures.iter().find(|(name,_)|*name=="name").map(|(_,node)|*node);
                 if let Some(name)=name{names.insert(name.start_position().row+1);}
                 let definition=if recipe.style=="tags"{captures.iter().find(|(name,_)|name.starts_with("definition."))}
@@ -84,16 +135,16 @@ impl SyntaxRuntime {
             hits.push(json!({"line":line,"class":class}));
         }
         let mut calls=Vec::new();let mut imports=Vec::new();
-        if let Some(query)=&recipe.literal_call_query{
-            matches(&language,query,root,bytes,&expired,|captures|{
+        if let Some(query)=&compiled.literal_call{
+            matches(query,root,bytes,&expired,|captures|{
                 let function=captures.iter().find(|(name,_)|*name=="fn").map(|(_,n)|*n);
                 let literal=captures.iter().find(|(name,_)|*name=="literal").map(|(_,n)|*n);
                 if let (Some(function),Some(literal))=(function,literal){calls.push(json!({"name":node_text(function,bytes),"literal":unquote(node_text(literal,bytes)),"line":literal.start_position().row+1}));}
                 Ok(())
             })?;
         }
-        if let Some(query)=&recipe.import_query{
-            matches(&language,query,root,bytes,&expired,|captures|{
+        if let Some(query)=&compiled.imports{
+            matches(query,root,bytes,&expired,|captures|{
                 if let Some((_,source))=captures.iter().find(|(name,_)|*name=="source"){
                     imports.push(json!({"source":unquote(node_text(*source,bytes)),"line":source.start_position().row+1}));
                 }Ok(())
@@ -104,15 +155,14 @@ impl SyntaxRuntime {
         Ok(json!({"status":if symbols.is_empty(){"empty"}else{"ready"},"symbols":symbols,"hits":hits,"calls":calls,"imports":imports,
             "callsStatus":if recipe.literal_call_query.is_some(){"ready"}else{"unsupported"},
             "importsStatus":if recipe.import_query.is_some(){"ready"}else{"unsupported"},
-            "recipeId":recipe.recipe_id,"abi":language.abi_version(),"contentHash":hex::encode(Sha256::digest(bytes)),
+            "recipeId":recipe.recipe_id,"abi":language.abi_version(),"contentHash":content_hash,
             "lineLengths":text.split('\n').map(|l|l.trim_end_matches('\r').encode_utf16().count()).collect::<Vec<_>>() }))
     }
 }
-fn matches<'tree>(language:&Language,source:&str,root:Node<'tree>,text:&[u8],expired:&impl Fn()->bool,
+fn matches<'tree>(query:&Query,root:Node<'tree>,text:&[u8],expired:&impl Fn()->bool,
     mut consume:impl FnMut(Vec<(&str,Node<'tree>)>)->Result<()>)->Result<()>{
-    let query=Query::new(language,source).map_err(|e|format!("unavailable: Grammar query is incompatible: {e}"))?;
     let mut cursor=QueryCursor::new();let mut progress=|_:&tree_sitter::QueryCursorState|if expired(){ControlFlow::Break(())}else{ControlFlow::Continue(())};
-    let mut matches=cursor.matches_with_options(&query,root,text,QueryCursorOptions::new().progress_callback(&mut progress));
+    let mut matches=cursor.matches_with_options(query,root,text,QueryCursorOptions::new().progress_callback(&mut progress));
     while let Some(matched)=matches.next(){if expired(){return Err("failed: Structure query budget exhausted".into());}
         consume(matched.captures().iter().map(|c|(query.capture_names()[c.index as usize],c.node)).collect())?;
     }
@@ -190,5 +240,111 @@ impl JsonOutline<'_>{
         if let Some(value)=value.filter(|_|structured&&depth<self.max_depth){
             if !self.push(&name,value.kind(),value,key.unwrap_or(value))||!self.value(value,depth+1)?{return Ok(false);}
         }Ok(true)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::path::PathBuf;
+
+    fn recipe() -> KernelComputeGrammarParams {
+        let grammar = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+            .join("../../../packages/web/application-host/lib/structure/runtime/tree-sitter-typescript.wasm");
+        let hash = format!("sha256-{}", hex::encode(Sha256::digest(fs::read(&grammar).unwrap())));
+        serde_json::from_value(json!({
+            "recipeId": "test-full-typescript",
+            "grammarPath": grammar,
+            "grammarName": "typescript",
+            "grammarHash": hash,
+            "style": "code",
+            "definitionQuery": "(function_declaration name: (identifier) @name) @unit",
+            "literalCallQuery": "(call_expression function: (identifier) @fn arguments: (arguments (string) @literal))",
+            "importQuery": "(import_statement source: (string) @source)"
+        })).unwrap()
+    }
+
+    #[test]
+    fn repeated_documents_share_compilation_without_sharing_analysis() {
+        let mut syntax = SyntaxRuntime::default();
+        let recipe = recipe();
+        let shared = Shared::new();
+        for index in 0..8 {
+            let text = format!("import x from './x';\nfunction fn_{index}() {{ return fetch('/api/{index}'); }}");
+            let hash = hex::encode(Sha256::digest(text.as_bytes()));
+            let result = syntax.analyze(&recipe, &text, &[2], 30000, &hash, &shared).unwrap();
+            assert_eq!(result["symbols"][0]["name"], format!("fn_{index}"));
+            assert_eq!(result["calls"][0]["literal"], format!("/api/{index}"));
+            assert_eq!(result["imports"][0]["source"], "./x");
+            assert_eq!(result["contentHash"], hash);
+            assert_eq!(syntax.compiled_query_count, 3);
+        }
+        let mut selected = recipe.clone();
+        selected.recipe_id = "test-selected-typescript".into();
+        selected.definition_query = "((function_declaration name: (identifier) @name) @unit (#eq? @name \"included\"))".into();
+        let text = "function included() {}\nfunction excluded() {}";
+        let hash = hex::encode(Sha256::digest(text.as_bytes()));
+        let result = syntax.analyze(&selected, text, &[], 30000, &hash, &shared).unwrap();
+        assert_eq!(result["symbols"].as_array().unwrap().len(), 1);
+        assert_eq!(result["symbols"][0]["name"], "included");
+        assert_eq!(syntax.compiled_query_count, 6);
+
+        selected.recipe_id = "test-invalid-query".into();
+        selected.definition_query = "(unknown_syntax_node) @unit".into();
+        assert!(syntax.analyze(&selected, text, &[], 30000, &hash, &shared)
+            .unwrap_err().contains("Grammar query is incompatible"));
+    }
+
+    #[test]
+    fn latest_recipe_replaces_queries_and_revisiting_recompiles() {
+        let mut syntax = SyntaxRuntime::default();
+        let base = recipe();
+        let shared = Shared::new();
+        let text = (0..12).map(|index| format!("function fn_{index}() {{}}\n")).collect::<String>();
+        let hash = hex::encode(Sha256::digest(text.as_bytes()));
+        let recipes = (0..12).map(|index| {
+            let mut selected = base.clone();
+            selected.recipe_id = format!("test-replacement-{index}");
+            selected.definition_query = format!(
+                "((function_declaration name: (identifier) @name) @unit (#eq? @name \"fn_{index}\"))");
+            selected
+        }).collect::<Vec<_>>();
+        for (index, selected) in recipes.iter().enumerate() {
+            let result = syntax.analyze(selected, &text, &[], 30000, &hash, &shared).unwrap();
+            assert_eq!(result["symbols"].as_array().unwrap().len(), 1);
+            assert_eq!(result["symbols"][0]["name"], format!("fn_{index}"));
+            assert_eq!(syntax.compiled_query_count, 3 * (index + 1));
+            assert_eq!(syntax.languages.len(), 1);
+            let cached = syntax.languages.values().next().unwrap();
+            assert_eq!(cached.queries.as_ref().unwrap().recipe_id, selected.recipe_id);
+        }
+        // The old recipe remains usable, but its evicted queries must compile
+        // again. A consecutive repeat then reuses that latest compilation.
+        for _ in 0..2 {
+            let result = syntax.analyze(&recipes[0], &text, &[], 30000, &hash, &shared).unwrap();
+            assert_eq!(result["symbols"].as_array().unwrap().len(), 1);
+            assert_eq!(result["symbols"][0]["name"], "fn_0");
+            assert_eq!(syntax.compiled_query_count, 3 * (recipes.len() + 1));
+            assert_eq!(syntax.languages.len(), 1);
+            let cached = syntax.languages.values().next().unwrap();
+            assert_eq!(cached.queries.as_ref().unwrap().recipe_id, recipes[0].recipe_id);
+        }
+    }
+
+    #[test]
+    fn compiled_queries_do_not_bypass_grammar_integrity_or_cancellation() {
+        let mut syntax = SyntaxRuntime::default();
+        let mut recipe = recipe();
+        let text = "function current() {}";
+        let hash = hex::encode(Sha256::digest(text.as_bytes()));
+        syntax.analyze(&recipe, text, &[], 30000, &hash, &Shared::new()).unwrap();
+        assert_eq!(syntax.compiled_query_count, 3);
+        recipe.grammar_hash = Some("sha256-changed-after-admission".into());
+        assert!(syntax.analyze(&recipe, text, &[], 30000, &hash, &Shared::new())
+            .unwrap_err().contains("Grammar bytes changed"));
+        let cancelled = Shared::new();
+        cancelled.cancel();
+        assert_eq!(syntax.analyze(&recipe, text, &[], 30000, &hash, &cancelled).unwrap_err(), "cancelled");
+        assert_eq!(syntax.compiled_query_count, 3);
     }
 }

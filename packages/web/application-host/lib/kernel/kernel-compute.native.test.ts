@@ -1,4 +1,5 @@
 import assert from "node:assert/strict";
+import { createHash } from "node:crypto";
 import fs from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
@@ -6,7 +7,7 @@ import { execFileSync } from "node:child_process";
 import { fileURLToPath } from "node:url";
 import { afterEach, it as test } from "vitest";
 import { createKernelClient, type KernelScopedClient } from "./kernel-client.js";
-import { runKernelCompute } from "./compute-runner.js";
+import { runKernelCompute, type KernelComputeInput } from "./compute-runner.js";
 import { createKernelComputeService } from "./compute-service.js";
 import type { KernelComputeRecord, KernelEntry } from "./protocol.generated.js";
 import { createTreeSitterStructureProvider } from "../structure/tree-sitter-provider.js";
@@ -298,3 +299,45 @@ it("R5 refuses root replacement and does not report failed traversal as successf
   await fs.rename(f.workspace,f.workspace+"-saved");await fs.symlink(outside,f.workspace,process.platform==="win32"?"junction":"dir");
   await assert.rejects(runKernelCompute(f.client,{...f.address,lane:"foreground",operation:"search",query:"needle"}),/root|identity|changed/i);
 });
+
+it('uses captured byte identities for live, pinned and opaque-revision structure inputs', async () => {
+  const f = await fixture();
+  const file = 'identity.ts';
+  const original = "export function original() { return '中文😀'; }\r\n";
+  await fs.writeFile(path.join(f.workspace, file), original);
+  const pin = await f.branch({ [file]: original });
+  const object = await f.client.putBlob(Buffer.from(original), 'identity-fixed-object');
+  const recipeId = await f.service.registerGrammar({
+    recipeId: '', grammarName: '', style: 'code',
+    grammarPath: path.join(repo, 'packages/web/application-host/lib/structure/runtime/tree-sitter-typescript.wasm'),
+    definitionQuery: TYPESCRIPT_DEFINITION_QUERY,
+    importQuery: TYPESCRIPT_IMPORT_QUERY, literalCallQuery: TYPESCRIPT_LITERAL_CALL_QUERY,
+  });
+  const expectedHash = createHash('sha256').update(original).digest('hex');
+  const expectedRevision = 'd1_' + Buffer.from(expectedHash, 'hex').toString('base64url');
+  const inputs: Array<Omit<KernelComputeInput, 'operation' | 'lane'>> = [
+    { ...f.address },
+    { workspaceId: 'ws', pinId: String(pin.pinId) },
+    { workspaceId: 'ws', objects: [{ path: file, revision: 'draft:opaque',
+      objectHash: object.hash, ownerId: object.ownerId }] },
+  ];
+  for (const [index, source] of inputs.entries()) {
+    const result = await runKernelCompute(f.client, { ...source, operation: 'structure', lane: 'background',
+      paths: [file], files: [{ path: file, recipeId }], parseBudgetMs: 30000 });
+    assert.equal(result.status, 'ready', result.message ?? undefined);
+    const structure = result.records.find(record => record.kind === 'structure')!;
+    assert.equal(structure.revision, index === 2 ? 'draft:opaque' : expectedRevision);
+    assert.equal(data(structure).contentHash, expectedHash);
+    assert.ok(result.records.some(record => record.kind === 'structure-part'
+      && data(record).category === 'symbols' && JSON.stringify(data(record).items).includes('original')));
+  }
+  const changed = "export function changed() {}\n";
+  await fs.writeFile(path.join(f.workspace, file), changed);
+  const result = await runKernelCompute(f.client, { ...f.address, operation: 'structure', lane: 'background',
+    paths: [file], files: [{ path: file, recipeId }], parseBudgetMs: 30000 });
+  const structure = result.records.find(record => record.kind === 'structure')!;
+  assert.equal(data(structure).contentHash, createHash('sha256').update(changed).digest('hex'));
+  assert.notEqual(structure.revision, expectedRevision);
+  assert.ok(result.records.some(record => record.kind === 'structure-part'
+    && data(record).category === 'symbols' && JSON.stringify(data(record).items).includes('changed')));
+}, 60000);

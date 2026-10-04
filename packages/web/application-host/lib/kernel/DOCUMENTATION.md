@@ -133,6 +133,17 @@ grep/ignore ecosystem plus the fixed Git inventory command for tracked/ignored m
 loads Host-admitted grammar/query recipes and emits bounded symbol/hit/import/call batches or structural units;
 there is no Host parse-tree/source cache.
 
+Each native worker retains only the latest compiled tree-sitter recipe in each existing language-cache
+entry, keyed by the verified grammar name and hash. The immutable recipe identity minted at admission
+selects reuse; a different recipe replaces that entry only after all its queries compile successfully.
+Revisiting an evicted recipe compiles it again with its own semantics. There is no separate recipe-history
+cache: query retention follows the existing 32-language worker-cache lifetime without limiting which
+recipes can run. Active analysis retains its compiled queries through an Arc. Grammar bytes are still
+checked against the admitted hash on every use. Workspace and fixed-object bytes are still captured and
+validated on each request. That capture's single SHA-256 digest supplies the object identity, native
+revision and structural content hash; an opaque Registry draft revision remains unchanged rather than
+being replaced with a disk revision.
+
 The Host computes a directory's relative scope from the canonical filesystem identities of both the admitted
 root and caller directory. Windows 8.3 names, junctions and symlinks cannot become false parent traversals;
 aliases whose actual target lies outside that root remain rejected. Returned and streamed paths stay relative
@@ -210,3 +221,21 @@ Kernel transport loss invalidates live handles, rejects completion and keeps wri
 Pending launches participate in shutdown; consumers drain while native grants remain valid.
 Startup errors carrying an owned child cannot trigger another interpreter as a fallback.
 See [process ownership](../process/DOCUMENTATION.md). Web/Electron use the same production injection.
+
+## Focused native performance observations
+
+`scripts/measure-kernel.mjs` remains the measurement owner. Its `--compute-hotpaths` mode measures a
+generated 31,450,000-byte live/pinned search and repeated structure batches over 128 distinct TypeScript
+files. For example:
+
+```text
+node scripts/measure-kernel.mjs --compute-hotpaths artifacts/compute-hotpaths.json artifacts/kernel-compute-after/varin-kernel.exe
+```
+
+The optional final argument selects the built Web package root (default `packages/web`). Both compared
+kernels use that package's emitted Host adapters; rebuild Web before attributing an adapter change to this
+measurement. Reports include corpus/result hashes, binary identity, first/warm samples and separate process
+memory observations. Corpus creation and object upload are outside timing. The OS cache is not flushed.
+The owning Rust tests count successful query compilations across distinct documents and check recipe
+replacement/revisit semantics, corrupt content rejection and cancellation; latency by itself is not a
+compilation/hash counter.

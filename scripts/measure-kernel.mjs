@@ -44,6 +44,121 @@ function memorySample(pids) {
   return { processes, totalRssBytes: processes.reduce((sum, p) => sum + p.rssBytes, 0) };
 }
 
+
+/** Current native hot paths on generated data. Both binaries use these same
+ * emitted Host adapters; this isolates the kernel change without rebuilding a
+ * historical Host or including fixture creation/object upload in timings. */
+async function computeHotpaths(output, kernelPath, webRoot) {
+  const temporary = await fsp.mkdtemp(path.join(os.tmpdir(), 'varin-compute-hotpaths-'));
+  const corpus = path.join(temporary, 'workspace');
+  const pids = [process.pid];
+  let client;
+  try {
+    await fsp.mkdir(path.join(corpus, 'src'), { recursive: true });
+    const hostRoot = path.join(webRoot, 'server');
+    const [{ createKernelClient }, { runKernelCompute }, queries] = await Promise.all([
+      load(hostRoot, 'lib/kernel/kernel-client.js'),
+      load(hostRoot, 'lib/kernel/compute-runner.js'),
+      load(hostRoot, 'lib/structure/queries.js'),
+    ]);
+    const buildVersion = JSON.parse(await fsp.readFile(path.join(repo, 'package.json'), 'utf8')).version;
+    client = createKernelClient({ hostId: 'compute-hotpaths', storageRoot: path.join(temporary, 'state'),
+      buildVersion, kernelPath, allowCargoDevRunner: false,
+      spawnProcess: (...args) => { const child = spawn(...args); if (child.pid) pids.push(child.pid); return child; },
+    });
+    await client.start();
+    const scoped = client.scoped(await client.issueGrant({ grantId: 'hotpath-owner',
+      owningWorkspace: 'ws', executionWorkspace: 'ws', pathScopes: [''],
+      capabilities: ['storage.read', 'storage.write', 'storage.gc', 'compute.grammar'] }));
+    const registered = await scoped.fileRootRegister({ workspaceId: 'ws', executionWorkspaceId: 'ws', canonicalRoot: corpus });
+    const address = { workspaceId: 'ws', rootId: String(registered.rootId), lane: 'background' };
+    const samples = 8;
+    const large = Buffer.from(('captured payload 中文 stable bytes\n').repeat(850000));
+    await fsp.writeFile(path.join(corpus, 'large.txt'), large);
+    const digest = hash(large);
+    const expectedRevision = 'd1_' + Buffer.from(digest, 'hex').toString('base64url');
+    const blob = await scoped.putBlob(large, 'hotpath-large-object');
+    assert.equal(blob.hash, 'sha256-' + digest);
+    await scoped.createBranch({ operationId: 'hotpath-large-branch', workspaceId: 'ws', branchId: 'large',
+      draftBasePaths: [], captureScopes: [], entries: [{ path: 'large.txt', ownerId: blob.ownerId,
+        state: { kind: 'regular-file', objectHash: blob.hash, byteLength: blob.byteLength, mode: 0o644 } }] });
+    const pin = await scoped.pinBranch({ operationId: 'hotpath-large-pin', branchId: 'large', revision: 0 });
+    const sources = {
+      live: address,
+      pinned: { workspaceId: 'ws', pinId: String(pin.pinId), lane: 'background' },
+    };
+    const content = {};
+    const memory = [{ phase: 'initialized', ...memorySample(pids) }];
+    for (const [source, sourceAddress] of Object.entries(sources)) {
+      const read = await runKernelCompute(scoped, { ...sourceAddress, operation: 'bytes', paths: ['large.txt'],
+        byteOffset: 0, byteLength: 32 });
+      assert.equal(read.status, 'ready', read.message);
+      assert.equal(read.records[0].revision, expectedRevision);
+      assert.deepEqual(Buffer.from(read.records[0].data.bytesBase64, 'base64'), large.subarray(0, 32));
+      content[source] = await repeat(samples, async () => {
+        const result = await runKernelCompute(scoped, { ...sourceAddress, operation: 'search', paths: ['large.txt'],
+          query: 'absent-hotpath-marker', fixedStrings: true });
+        assert.equal(result.status, 'empty', result.message);
+        assert.equal(result.scannedFiles, 1);
+        assert.equal(result.records.length, 0);
+      });
+    }
+    const recipe = await scoped.computeGrammarRegister({ recipeId: '', grammarName: '', style: 'code',
+      grammarPath: path.join(repo, 'packages/web/application-host/lib/structure/runtime/tree-sitter-typescript.wasm'),
+      definitionQuery: queries.TYPESCRIPT_DEFINITION_QUERY, importQuery: queries.TYPESCRIPT_IMPORT_QUERY,
+      literalCallQuery: queries.TYPESCRIPT_LITERAL_CALL_QUERY });
+    const fileCount = 128;
+    const files = [];
+    const sourceDigest = createHash('sha256');
+    let sourceBytes = 0;
+    for (let i = 0; i < fileCount; i++) {
+      const file = 'src/file' + String(i).padStart(5, '0') + '.ts';
+      const text = "import { dependency } from './dependency';\nexport function fn_" + i
+        + "() { return fetch('/api/" + i + "'); }\n";
+      await fsp.writeFile(path.join(corpus, file), text);
+      sourceDigest.update(file + '\0' + text); sourceBytes += Buffer.byteLength(text);
+      files.push({ path: file, recipeId: String(recipe.recipeId), lines: [2] });
+    }
+    let resultSha256;
+    const structure = await repeat(samples, async () => {
+      const result = await runKernelCompute(scoped, { ...address, operation: 'structure',
+        paths: ['src'], files, parseBudgetMs: 30000 });
+      assert.equal(result.status, 'ready', result.message);
+      assert.equal(result.scannedFiles, fileCount);
+      const parts = result.records.filter(record => record.kind === 'structure-part')
+        .map(record => ({ path: record.path, revision: record.revision, data: record.data }));
+      const symbols = parts.filter(record => record.data.category === 'symbols')
+        .flatMap(record => record.data.items.map(item => item.name)).sort();
+      assert.deepEqual(symbols, Array.from({ length: fileCount }, (_, i) => 'fn_' + i).sort());
+      assert.equal(parts.filter(record => record.data.category === 'imports').flatMap(record => record.data.items).length, fileCount);
+      assert.equal(parts.filter(record => record.data.category === 'calls').flatMap(record => record.data.items).length, fileCount);
+      const current = hash(JSON.stringify(parts));
+      if (resultSha256 !== undefined) assert.equal(current, resultSha256);
+      resultSha256 = current;
+    });
+    memory.push({ phase: 'after-hotpaths', ...memorySample(pids) });
+    const report = { schema: 1, mode: 'compute-hotpaths', observedAt: new Date().toISOString(),
+      platform: process.platform, arch: process.arch, node: process.version, cpu: os.cpus()[0]?.model,
+      checkoutBase: execFileSync('git', ['rev-parse', 'HEAD'], { cwd: repo, encoding: 'utf8' }).trim(),
+      kernelPath, kernelSha256: hash(await fsp.readFile(kernelPath)), scriptSha256: hash(await fsp.readFile(script)),
+      samples, largeFile: { utf8Bytes: large.length, sha256: digest }, content,
+      structure: { files: fileCount, utf8Bytes: sourceBytes, sourceSha256: sourceDigest.digest('hex'),
+        resultSha256, ...structure }, memory,
+      limitations: ['First call does not flush the OS cache.', 'Timings include native capture/search/parse, IPC and Host projection, but exclude corpus creation and object upload.',
+        'Both kernels use the same emitted Host adapters; rebuild Web before measuring a Host adapter change.',
+        'The background lane intentionally reuses one worker to measure repeated same-recipe compilation across distinct files.',
+        'Operation counts must be supported by the owning Rust tests/source; timing alone is not a compilation or hash counter.'] };
+    await client.close(); client = undefined;
+    await fsp.rm(temporary, { recursive: true, force: true });
+    await fsp.mkdir(path.dirname(output), { recursive: true });
+    await fsp.writeFile(output, JSON.stringify({ ...report, cleanupComplete: true }, null, 2) + '\n');
+    console.log(output);
+  } finally {
+    await client?.close();
+    await fsp.rm(temporary, { recursive: true, force: true });
+  }
+}
+
 async function worker(input) {
   const { backend, corpus, count, webRoot, baselineRoot, samples } = input;
   const state = await fsp.mkdtemp(path.join(os.tmpdir(), 'varin-r6-measure-state-'));
@@ -225,7 +340,12 @@ async function runWorker(input) {
   });
 }
 
-if (process.argv[2] === '--worker') {
+if (process.argv[2] === '--compute-hotpaths') {
+  const output = path.resolve(process.argv[3] ?? path.join(repo, 'artifacts/compute-hotpaths.json'));
+  const kernelPath = path.resolve(process.argv[4] ?? path.join(repo, 'kernel/target/release', process.platform === 'win32' ? 'varin-kernel.exe' : 'varin-kernel'));
+  const webRoot = path.resolve(process.argv[5] ?? path.join(repo, 'packages/web'));
+  await computeHotpaths(output, kernelPath, webRoot);
+} else if (process.argv[2] === '--worker') {
   console.log(JSON.stringify(await worker(JSON.parse(process.argv[3]))));
 } else {
   const output = path.resolve(process.argv[2] ?? path.join(repo, 'artifacts/r6-performance.json'));
