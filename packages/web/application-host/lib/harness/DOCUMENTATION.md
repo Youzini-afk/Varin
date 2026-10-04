@@ -396,8 +396,25 @@ its native stream seam; no alternate model loop or provider registry is involved
 
 The registry persists one versioned atomic catalog per workspace. `Thread` is
 durable work; `ThreadRun` is one execution attempt, and
-`ThreadLaunchManifest` freezes model-adjacent launch inputs. Isolated `dispatch`
-creates the Thread, then captures the disk baseline and WorkingBranch before it
+`ThreadLaunchManifest` freezes model-adjacent launch inputs.
+
+Read queries derive Thread, Run and historical-session indexes from the committed catalog
+generation. Public results remain detached copies. Mutable drafts never reuse those indexes;
+a failed write leaves the previous generation visible, and a successful atomic catalog write
+publishes a new generation before notifications. Progress notifications do not eagerly build
+the read indexes. Host-wide discovery still enumerates directories to find new scopes, but
+reuses already-loaded catalog generations rather than rereading and discarding their files.
+Concurrent discovery shares its in-flight enumeration; malformed newly discovered files remain
+retryable. Explicit restart reconciliation independently rereads every catalog and reports errors.
+
+`scripts/thread-registry-perf.ts` measures cold/warm snapshots and ordinary/historical session-owner
+queries against synthetic retained Threads/Runs in temporary directories, including catalog
+read counts and bytes. Run from the repository root with
+`node --import tsx packages/web/scripts/thread-registry-perf.ts`;
+`--threads`, `--scopes`, `--runs` and `--iterations` accept positive values using `--name=value`.
+It measures the registry APIs, including result cloning, not model or desktop latency.
+
+Isolated `dispatch` creates the Thread, then captures the disk baseline and WorkingBranch before it
 returns — including queued threads. Git inventory failures, capture-window parent
 writes, active Documents writers, and gitlinks fail the dispatch instead of
 inventing a complete branch. Capture failure or cancellation deletes the

@@ -512,7 +512,11 @@ describe("thread registry", () => {
         writeFile: fs.promises.writeFile,
       },
     });
+    expect((await failing.getThreadSnapshot(WORKSPACE, thread.id))?.activeRun).toBeNull();
     await expect(failing.setAttention(WORKSPACE, thread.id, "stalled")).rejects.toBeInstanceOf(ThreadRegistryError);
+    await expect(failing.startRun(WORKSPACE, thread.id)).rejects.toBeInstanceOf(ThreadRegistryError);
+    expect(await failing.getActiveRun(WORKSPACE, thread.id)).toBeNull();
+    expect(await failing.listRuns(WORKSPACE, thread.id)).toEqual([]);
     expect((await failing.getThread(WORKSPACE, PARENT, thread.id))?.attention).toBe("none");
     await failing.dispose();
     registry = createThreadRegistry({ dataDir, hostId: "test-host" });
@@ -900,6 +904,84 @@ describe("thread registry", () => {
       owner: "spawned-child",
     });
     expect(await registry.resolveSessionOwner("never-seen")).toBeNull();
+  });
+
+  it("reuses committed catalog reads while discovering new scopes and retaining explicit corruption checks", async () => {
+    const thread = await registry.createThread(createInput());
+    const run = await registry.startRun(WORKSPACE, thread.id);
+    await registry.markRunRunning(WORKSPACE, thread.id, run.id, "historical-owner");
+    await registry.endRun(WORKSPACE, thread.id, run.id, "success");
+    await registry.dispose();
+
+    const observedRead = vi.fn(fs.promises.readFile);
+    const observedDirectory = vi.fn(fs.promises.readdir);
+    registry = createThreadRegistry({
+      dataDir, hostId: "test-host",
+      fsPromises: {
+        ...fs.promises,
+        readFile: observedRead as typeof fs.promises.readFile,
+        // vi.fn retains the implementation but exposes only its last overload.
+        readdir: observedDirectory as unknown as typeof fs.promises.readdir,
+      },
+    });
+    expect(await registry.resolveSessionOwner("historical-owner")).toMatchObject({ threadId: thread.id });
+    const path = threadCatalogPath(dataDir, "test-host", WORKSPACE);
+    observedRead.mockClear();
+    observedDirectory.mockClear();
+    const owners = await Promise.all(Array.from({ length: 8 }, (_, index) =>
+      registry.resolveSessionOwner(index % 2 ? "historical-owner" : "ordinary-root")));
+    expect(owners[0]).toBeNull();
+    expect(owners[1]).toMatchObject({ threadId: thread.id, runId: run.id });
+    expect(observedRead.mock.calls.filter(([file]) => String(file) === path)).toHaveLength(0);
+    expect(observedDirectory).toHaveBeenCalledTimes(1);
+
+    const lateScope = "workspace-late";
+    const latePath = threadCatalogPath(dataDir, "test-host", lateScope);
+    await writeFile(latePath, "{broken", "utf8");
+    expect(await registry.listWorkspaceIds()).not.toContain(lateScope);
+    await expect(registry.listWorkspaceThreads(lateScope)).rejects.toMatchObject({ code: "corrupt" });
+    await writeFile(latePath, JSON.stringify({
+      schemaVersion: THREAD_REGISTRY_SCHEMA_VERSION, scopeId: lateScope, threads: [], runs: [],
+    }), "utf8");
+    expect(await registry.listWorkspaceIds()).toContain(lateScope);
+
+    // Discovery preserves the live writer's committed generation, as before;
+    // restart reconciliation remains a fresh disk check even for cached scopes.
+    await writeFile(path, "{broken", "utf8");
+    expect(await registry.resolveSessionOwner("historical-owner")).toMatchObject({ threadId: thread.id });
+    const reconciled = await registry.reconcileAfterHostRestart();
+    expect(reconciled.failures).toEqual([expect.objectContaining({ code: "corrupt", path })]);
+  });
+
+  it("keeps indexed snapshots detached and replaces run and owner lookups after commits and deletion", async () => {
+    const thread = await registry.createThread(createInput({ tools: ["read"] }));
+    const first = await registry.startRun(WORKSPACE, thread.id);
+    await registry.markRunRunning(WORKSPACE, thread.id, first.id, "first-owner");
+    await registry.endRun(WORKSPACE, thread.id, first.id, "success");
+    const snapshot = await registry.getThreadSnapshot(WORKSPACE, thread.id);
+    snapshot!.thread.manifest.tools.push("caller-only");
+    snapshot!.activeRun!.tokens.input = 999;
+    expect((await registry.getThreadSnapshot(WORKSPACE, thread.id))?.thread.manifest.tools).toEqual(["read"]);
+    expect((await registry.getActiveRun(WORKSPACE, thread.id))?.tokens.input).toBe(0);
+    expect(await registry.resolveSessionOwner("first-owner")).toMatchObject({ runId: first.id });
+
+    const second = await registry.startRun(WORKSPACE, thread.id, "pi", { allowSettled: true });
+    await registry.markRunRunning(WORKSPACE, thread.id, second.id, "second-owner");
+    expect((await registry.listThreadSnapshots(WORKSPACE, PARENT))[0]?.activeRun?.id).toBe(second.id);
+    expect(await registry.getThreadForSession(WORKSPACE, "second-owner")).toMatchObject({ id: thread.id });
+    const runs = await registry.listRuns(WORKSPACE, thread.id);
+    expect(runs.map((run) => run.id)).toEqual([first.id, second.id]);
+    runs[0]!.attempt = 99;
+    expect((await registry.listRuns(WORKSPACE, thread.id))[0]?.attempt).toBe(1);
+    expect(await registry.resolveSessionOwner("second-owner")).toMatchObject({ runId: second.id });
+
+    await registry.endRun(WORKSPACE, thread.id, second.id, "success");
+    await registry.removeThread(WORKSPACE, PARENT, thread.id);
+    expect(await registry.getThreadSnapshot(WORKSPACE, thread.id)).toBeNull();
+    expect(await registry.listRuns(WORKSPACE, thread.id)).toEqual([]);
+    expect(await registry.listWorkspaceThreadSnapshots(WORKSPACE)).toEqual([]);
+    expect(await registry.resolveSessionOwner("first-owner")).toBeNull();
+    expect(await registry.resolveSessionOwner("second-owner")).toBeNull();
   });
 
   it("HR0: a session-owned catalog persists and reloads under a filename-safe scope key", async () => {

@@ -125,6 +125,14 @@ export interface ThreadCatalogDocument {
   runs: ThreadRun[];
 }
 
+/** Derived references into one committed catalog generation, never another authority. */
+interface ThreadCatalogReadIndex {
+  threadsById: Map<string, Thread>;
+  runsById: Map<string, ThreadRun>;
+  runsByThreadId: Map<string, ThreadRun[]>;
+  latestRunBySessionId: Map<string, ThreadRun>;
+}
+
 export interface CreateThreadInput {
   modelSettings?: import("@varin/protocol").HarnessAgentModelSettings;
   scopeId: string;
@@ -810,20 +818,20 @@ const parseCatalog = (raw: string, path: string, expectedScopeId?: string): Thre
     }
     threadIds.add(thread.id);
   }
-  const runIds = new Set<string>();
+  const runsById = new Map<string, ThreadRun>();
   const attempts = new Set<string>();
   for (const run of catalog.runs) {
     const attemptKey = `${run.threadId}\0${run.attempt}`;
-    if (!threadIds.has(run.threadId) || runIds.has(run.id) || attempts.has(attemptKey)) {
+    if (!threadIds.has(run.threadId) || runsById.has(run.id) || attempts.has(attemptKey)) {
       throw new ThreadRegistryError("corrupt", `Thread registry contains orphaned or duplicate runs: ${path}`, path);
     }
-    runIds.add(run.id);
+    runsById.set(run.id, run);
     attempts.add(attemptKey);
   }
   for (const thread of catalog.threads) {
     const activeRun = thread.activeRunId === null
       ? null
-      : catalog.runs.find((run) => run.id === thread.activeRunId) ?? null;
+      : runsById.get(thread.activeRunId) ?? null;
     if (thread.activeRunId !== null && (!activeRun || activeRun.threadId !== thread.id)) {
       throw new ThreadRegistryError("corrupt", `Thread registry thread points to a missing active run: ${path}`, path);
     }
@@ -855,7 +863,39 @@ export function createThreadRegistry(options: ThreadRegistryOptions) {
   const now = options.now ?? (() => new Date());
   const maxConcurrency = options.maxConcurrency ?? 12;
   const cache = new Map<string, ThreadCatalogDocument>();
+  const readIndexes = new WeakMap<ThreadCatalogDocument, ThreadCatalogReadIndex>();
   const loads = new Map<string, Promise<ThreadCatalogDocument>>();
+  let hostCatalogLoad: Promise<void> | null = null;
+
+  const readIndexFor = (catalog: ThreadCatalogDocument): ThreadCatalogReadIndex | null => {
+    // Mutations use a private mutable draft. Index only published generations:
+    // a failed write cannot publish entries, and a successful write replaces
+    // the catalog identity rather than mutating references retained by readers.
+    if (cache.get(catalog.scopeId) !== catalog) return null;
+    const existing = readIndexes.get(catalog);
+    if (existing) return existing;
+    const index: ThreadCatalogReadIndex = {
+      threadsById: new Map(catalog.threads.map((thread) => [thread.id, thread])),
+      runsById: new Map(),
+      runsByThreadId: new Map(),
+      latestRunBySessionId: new Map(),
+    };
+    for (const run of catalog.runs) {
+      index.runsById.set(run.id, run);
+      const threadRuns = index.runsByThreadId.get(run.threadId);
+      if (threadRuns) threadRuns.push(run);
+      else index.runsByThreadId.set(run.threadId, [run]);
+      if (run.sessionId) {
+        const previous = index.latestRunBySessionId.get(run.sessionId);
+        // Preserve catalog order on equal timestamps, as the original scan did.
+        if (!previous || run.startedAt.localeCompare(previous.startedAt) > 0) {
+          index.latestRunBySessionId.set(run.sessionId, run);
+        }
+      }
+    }
+    readIndexes.set(catalog, index);
+    return index;
+  };
   const mutationTails = new Map<string, Promise<void>>();
   const cursors = new Map<string, ThreadViewCursor>();
   const cursorEpochs = new Map<string, number>();
@@ -1069,7 +1109,7 @@ export function createThreadRegistry(options: ThreadRegistryOptions) {
 
   const bindingFromRun = (catalog: ThreadCatalogDocument, run: ThreadRun): ThreadSessionBinding | null => {
     if (!run.sessionId) return null;
-    const thread = catalog.threads.find((entry) => entry.id === run.threadId) ?? null;
+    const thread = findThread(catalog, run.threadId);
     if (!thread || thread.activeRunId !== run.id || thread.lifecycle === "archived"
       || (run.outcome !== null && run.outcome !== "lost")
       || (run.sessionOwner === "attached-root" && run.outcome === "lost")
@@ -1086,10 +1126,11 @@ export function createThreadRegistry(options: ThreadRegistryOptions) {
 
   const bindingMatchesCatalog = (binding: ThreadSessionBinding, catalog: ThreadCatalogDocument): boolean => {
     if (catalog.scopeId !== binding.owningScopeId) return false;
-    const thread = catalog.threads.find((entry) => entry.id === binding.threadId) ?? null;
-    const run = catalog.runs.find((entry) => entry.id === binding.runId && entry.threadId === binding.threadId);
+    const thread = findThread(catalog, binding.threadId);
+    const run = findRun(catalog, binding.runId);
     return !!thread
       && !!run
+      && run.threadId === binding.threadId
       && thread.activeRunId === run.id
       && (run.outcome === null || run.outcome === "lost")
       && (run.workerState === "starting" || run.workerState === "running" || run.workerState === "lost")
@@ -1107,29 +1148,45 @@ export function createThreadRegistry(options: ThreadRegistryOptions) {
   };
 
   const loadHostCatalogs = async (): Promise<void> => {
-    const directory = join(dataDir, "threads", hostId);
-    let entries: fs.Dirent<string>[];
-    try {
-      entries = await fsPromises.readdir(directory, { withFileTypes: true, encoding: "utf8" });
-    } catch (error) {
-      if ((error as NodeJS.ErrnoException).code === "ENOENT") return;
-      throw new ThreadRegistryError("read-failed", `Unable to enumerate thread registries: ${directory}`, directory, { cause: error });
-    }
-    for (const entry of entries) {
-      if (!entry.isFile() || !isThreadCatalogFileName(entry.name)) continue;
-      const path = join(directory, entry.name);
+    if (hostCatalogLoad) return hostCatalogLoad;
+    const loading = (async () => {
+      const directory = join(dataDir, "threads", hostId);
+      let entries: fs.Dirent<string>[];
       try {
-        const raw = await readText(path);
-        if (raw === null) continue;
-        const parsed = parseJson(raw, path);
-        if (Array.isArray(parsed)) continue;
-        const catalog = parseCatalog(raw, path);
-        if (threadCatalogPath(dataDir, hostId, catalog.scopeId) !== path) continue;
-        if (!cache.has(catalog.scopeId)) cache.set(catalog.scopeId, catalog);
-      } catch {
-        // One malformed workspace catalog must not hide healthy workspace
-        // roots or prevent rebuilding the derived session index.
+        entries = await fsPromises.readdir(directory, { withFileTypes: true, encoding: "utf8" });
+      } catch (error) {
+        if ((error as NodeJS.ErrnoException).code === "ENOENT") return;
+        throw new ThreadRegistryError("read-failed", `Unable to enumerate thread registries: ${directory}`, directory, { cause: error });
       }
+      const cachedPaths = new Set([...cache.keys()].map((scopeId) => threadCatalogPath(dataDir, hostId, scopeId)));
+      for (const entry of entries) {
+        if (!entry.isFile() || !isThreadCatalogFileName(entry.name)) continue;
+        const path = join(directory, entry.name);
+        // The live Host is the catalog writer. Discovery has always kept an
+        // already-loaded generation; do not read/parse a replacement only to
+        // discard it. New paths are still discovered on each directory scan,
+        // and explicit restart reconciliation independently rereads every file.
+        if (cachedPaths.has(path)) continue;
+        try {
+          const raw = await readText(path);
+          if (raw === null) continue;
+          const parsed = parseJson(raw, path);
+          if (Array.isArray(parsed)) continue;
+          const catalog = parseCatalog(raw, path);
+          if (threadCatalogPath(dataDir, hostId, catalog.scopeId) !== path) continue;
+          if (!cache.has(catalog.scopeId)) cache.set(catalog.scopeId, catalog);
+        } catch {
+          // One malformed workspace catalog must not hide healthy workspace
+          // roots or prevent rebuilding the derived session index. Failed
+          // discoveries are not cached, so a repaired file can be retried.
+        }
+      }
+    })();
+    hostCatalogLoad = loading;
+    try {
+      await loading;
+    } finally {
+      if (hostCatalogLoad === loading) hostCatalogLoad = null;
     }
   };
 
@@ -1205,11 +1262,9 @@ export function createThreadRegistry(options: ThreadRegistryOptions) {
     await loadHostCatalogs();
     let best: { scopeId: string; run: ThreadRun } | null = null;
     for (const catalog of cache.values()) {
-      for (const run of catalog.runs) {
-        if (run.sessionId !== sessionId) continue;
-        if (!best || run.startedAt.localeCompare(best.run.startedAt) > 0) {
-          best = { scopeId: catalog.scopeId, run };
-        }
+      const run = readIndexFor(catalog)!.latestRunBySessionId.get(sessionId);
+      if (run && (!best || run.startedAt.localeCompare(best.run.startedAt) > 0)) {
+        best = { scopeId: catalog.scopeId, run };
       }
     }
     return best
@@ -1274,10 +1329,13 @@ export function createThreadRegistry(options: ThreadRegistryOptions) {
     }
   };
 
+  const findRun = (catalog: ThreadCatalogDocument, runId: string): ThreadRun | null => {
+    const index = readIndexFor(catalog);
+    return (index ? index.runsById.get(runId) : catalog.runs.find((run) => run.id === runId)) ?? null;
+  };
+
   const activeRunFor = (catalog: ThreadCatalogDocument, thread: Thread): ThreadRun | null => (
-    thread.activeRunId === null
-      ? null
-      : catalog.runs.find((run) => run.id === thread.activeRunId) ?? null
+    thread.activeRunId === null ? null : findRun(catalog, thread.activeRunId)
   );
 
   const reportObserverError = (error: unknown): void => {
@@ -1287,7 +1345,11 @@ export function createThreadRegistry(options: ThreadRegistryOptions) {
   const emitChanges = (catalog: ThreadCatalogDocument, mutation: MutationResult<unknown>): void => {
     for (const thread of mutation.changed) {
       try {
-        options.onThreadChanged?.(catalog.scopeId, thread.parent, structuredClone(thread), structuredClone(activeRunFor(catalog, thread)));
+        // A notification already knows its changed Thread; do not build a full
+        // read index after every progress write merely to find this one Run.
+        options.onThreadChanged?.(catalog.scopeId, thread.parent, structuredClone(thread), structuredClone(
+          thread.activeRunId === null ? null : catalog.runs.find((run) => run.id === thread.activeRunId) ?? null,
+        ));
       } catch (error) {
         reportObserverError(error);
       }
@@ -1360,9 +1422,10 @@ export function createThreadRegistry(options: ThreadRegistryOptions) {
     return loadWorkspace(scopeId);
   };
 
-  const findThread = (catalog: ThreadCatalogDocument, threadId: string): Thread | null => (
-    catalog.threads.find((thread) => thread.id === threadId) ?? null
-  );
+  const findThread = (catalog: ThreadCatalogDocument, threadId: string): Thread | null => {
+    const index = readIndexFor(catalog);
+    return (index ? index.threadsById.get(threadId) : catalog.threads.find((thread) => thread.id === threadId)) ?? null;
+  };
 
   const findThreadInScope = (catalog: ThreadCatalogDocument, parent: ThreadParent, threadId: string): Thread | null => {
     const thread = findThread(catalog, threadId);
@@ -1641,7 +1704,9 @@ export function createThreadRegistry(options: ThreadRegistryOptions) {
 
   const listRuns = async (scopeId: string, threadId: string): Promise<ThreadRun[]> => {
     const catalog = await loadWorkspace(scopeId);
-    return structuredClone(catalog.runs.filter((run) => run.threadId === threadId).toSorted((a, b) => a.attempt - b.attempt));
+    const index = readIndexFor(catalog);
+    const runs = index ? index.runsByThreadId.get(threadId) ?? [] : catalog.runs.filter((run) => run.threadId === threadId);
+    return structuredClone(runs.toSorted((a, b) => a.attempt - b.attempt));
   };
 
   const getThreadById = async (scopeId: string, threadId: string): Promise<Thread | null> => {
