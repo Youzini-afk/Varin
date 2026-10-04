@@ -27,6 +27,41 @@ afterEach(async () => {
 });
 
 describe("knowledge storage process", () => {
+  it("serves plans and observations between association files and converges after a source changes", async () => {
+    const { store } = await fixture();
+    await store.replaceFileSymbols("producer.ts", "typescript", [], "p1", [
+      { kind: "connects", value: "wire", line: 1, callee: "on" },
+    ]);
+    for (let i = 0; i < 12; i++) await store.replaceFileSymbols(`consumer-${i}.ts`, "typescript", [], "c1", [], {
+      associationCandidates: [{ kind: "associates", value: "wire", line: 2, callee: "emit" }],
+    });
+    const owner = knowledgeStoreProcess();
+    let started!: () => void;
+    const firstFile = new Promise<void>(resolve => { started = resolve; });
+    const send = owner.child.send;
+    const observe = vi.spyOn(owner.child, "send").mockImplementation((...args) => {
+      const result = Reflect.apply(send, owner.child, args);
+      if ((args[0] as { requests?: StoreRequest[] }).requests?.some(r => r.method === "stepAssociationRefresh")) started();
+      return result;
+    });
+    let complete = false;
+    const refresh = store.resolveAssociationCandidates().then(result => { complete = true; return result; });
+    try {
+      await firstFile;
+      const plan = store.upsertBlock({ sessionId: "s", label: "plan", content: "- [x] done", updatedBy: "agent" });
+      const observations = store.getBlocks("s");
+      await plan;
+      expect((await observations)[0]?.content).toBe("- [x] done");
+      expect(complete).toBe(false);
+      await Promise.all([
+        store.removeFileSymbols("producer.ts"),
+        store.replaceFileSymbols("consumer-0.ts", "typescript", [], "c2"),
+      ]);
+      await refresh;
+      for (let i = 0; i < 12; i++) expect((await store.getFileRelations(`consumer-${i}.ts`))?.associations).toEqual([]);
+      expect((await store.getFileRelations("consumer-0.ts"))?.documentRevision).toBe("c2");
+    } finally { observe.mockRestore(); await refresh; }
+  });
   it("commits a plan while derived-index maintenance is stalled", async () => {
     const { root, store } = await fixture();
     const owner = knowledgeStoreProcess("semantic");
@@ -190,14 +225,22 @@ describe("knowledge storage process", () => {
 
   it("drains accepted writes before close, rejects late writes and makes close idempotent", async () => {
     const { options, store } = await fixture();
+    await store.replaceFileSymbols("connected.ts", "typescript", [], "r1", [
+      { kind: "connects", value: "wire", line: 1, callee: "on" },
+    ], { associationCandidates: [{ kind: "associates", value: "wire", line: 2, callee: "emit" }] });
+    const associations = store.resolveAssociationCandidates();
     const write = store.putEvent({ kind: "turn", at: 1, sessionId: "s", text: "synthetic", source: "agent" });
     const close = store.close();
     await expect(store.putEvent({ kind: "turn", at: 2, sessionId: "s", text: "late", source: "agent" })).rejects.toThrow(/clos/);
     await write;
+    expect(await associations).toEqual({ activated: 1 });
     await close;
     await store.close();
     const reopened = await openWorkspaceKnowledge(options);
     stores.push(reopened);
     expect(await reopened.listEvents({ sessionId: "s" })).toHaveLength(1);
+    expect((await reopened.getFileRelations("connected.ts"))?.associations).toEqual([
+      expect.objectContaining({ literal: "wire", callee: "emit" }),
+    ]);
   });
 });

@@ -76,8 +76,9 @@ import {
   type OpenWorkspaceKnowledgeDeps,
 } from "./store-contract.js";
 import { createStorePersistence, trackStoreMutations } from "./persistence.js";
+import { resolveAssociations, type AssociationRefreshPort } from "./association-refresh.js";
 
-export interface KnowledgeStoreEngine extends KnowledgeStore {
+export interface KnowledgeStoreEngine extends KnowledgeStore, AssociationRefreshPort {
   runBatch<T>(operation: () => Promise<T>): Promise<T>;
 }
 export type KnowledgeStoreEngineOptions = Omit<OpenWorkspaceKnowledgeDeps, "embedding"> & {
@@ -714,6 +715,108 @@ export async function openKnowledgeStoreEngine(deps: KnowledgeStoreEngineOptions
     };
 
     const scheduleGraphFlush = (): void => persistence.defer();
+
+    let associationVersion = 0;
+    let resolvedAssociationVersion = -1;
+    let nextAssociationJob = 0;
+    const associationJobs = new Map<number, { version: number; files: number[]; offset: number; confirmed: Set<string> }>();
+    const captureAssociations = () => ({
+      version: associationVersion,
+      files: db.indexedLookup({ type: "file", active: true, hasAssociationCandidates: true }, GRAPH_RESULT_CEILING),
+      offset: 0,
+      // One set join, not one multi-index intersection per candidate literal.
+      confirmed: new Set(lookup({ type: "link", kind: "connects", active: true })
+        .flatMap(({ payload }) => typeof payload["value"] === "string" ? [payload["value"]] : [])),
+    });
+    const associationPort: AssociationRefreshPort = {
+      async beginAssociationRefresh() {
+        persistence.assertOpen();
+        if (associationVersion === resolvedAssociationVersion) return null;
+        const job = captureAssociations();
+        if (job.files.length === 0) { resolvedAssociationVersion = associationVersion; return null; }
+        const id = ++nextAssociationJob;
+        associationJobs.set(id, job);
+        return id;
+      },
+      stepAssociationRefresh(id) {
+        return enqueueGraphWrite(() => {
+          let job = associationJobs.get(id);
+          if (!job) throw new Error("Association refresh is not active");
+          if (job.version !== associationVersion) {
+            // Source mutations between steps invalidate the captured join. A
+            // fresh pass removes associations whose producer disappeared too.
+            job = captureAssociations();
+            associationJobs.set(id, job);
+          }
+          if (job.files.length === 0) {
+            resolvedAssociationVersion = job.version;
+            associationJobs.delete(id);
+            return { done: true, activated: 0 };
+          }
+          const fileId = job.files[job.offset++]!;
+          let activated = 0;
+          const file = db.getPayload(fileId) as Record<string, unknown> | null;
+          // Read the current generation inside the per-file writer. A replaced
+          // or removed file cannot be overwritten by an older captured payload.
+          if (file?.["type"] === "file" && file["active"] === true
+            && typeof file["path"] === "string" && typeof file["language"] === "string"
+            && Array.isArray(file["associationCandidates"])) {
+            const candidates = file["associationCandidates"].flatMap((value: unknown) => {
+              if (!value || typeof value !== "object" || Array.isArray(value)) return [];
+              const candidate = value as Record<string, unknown>;
+              return typeof candidate["value"] === "string" && candidate["value"].trim()
+                && validLinkLine(Number(candidate["line"])) && typeof candidate["callee"] === "string" && candidate["callee"].trim()
+                ? [{ value: candidate["value"], line: Number(candidate["line"]), callee: candidate["callee"] }] : [];
+            });
+            const key = (row: { value: string; line: number; callee: string }) => `${row.value}\0${row.line}\0${row.callee}`;
+            const candidateKeys = new Set(candidates.map(key));
+            const generation = typeof file["generation"] === "string" ? file["generation"] : undefined;
+            const revision = typeof file["documentRevision"] === "string" ? file["documentRevision"] : undefined;
+            // Follow this file's edges rather than intersecting the full link
+            // catalog with a path index again for every consumer file.
+            const existing = db.getEdges(fileId).flatMap(edge => {
+              if (edge.label !== "associates") return [];
+              const payload = db.getPayload(edge.targetId) as Record<string, unknown> | null;
+              return payload?.["active"] === true && payload["kind"] === "associates"
+                && payload["generation"] === generation && payload["documentRevision"] === revision
+                && candidateKeys.has(key({ value: String(payload["value"]), line: Number(payload["line"]), callee: String(payload["callee"] ?? "") }))
+                ? [{ id: edge.targetId, payload }] : [];
+            });
+            const activeKeys = new Set(existing.map(({ payload }) => key({ value: String(payload["value"]), line: Number(payload["line"]), callee: String(payload["callee"] ?? "") })));
+            const toActivate = candidates.filter(candidate => job.confirmed.has(candidate.value) && !activeKeys.has(key(candidate)));
+            const toDeactivate = existing.filter(({ payload }) => !job.confirmed.has(String(payload["value"])));
+            if (toActivate.length || toDeactivate.length) {
+              const payloads = toActivate.map(candidate => ({
+                type: "link", path: file["path"], language: file["language"], kind: "associates",
+                ...candidate, ...(generation ? { generation } : {}), ...(revision ? { documentRevision: revision } : {}), active: false,
+              }));
+              const ids = payloads.length ? db.batchInsert(payloads.map(() => placeholderVec), payloads) : [];
+              const operations: TransactionOperation[] = [
+                ...ids.flatMap((nodeId, index): TransactionOperation[] => [
+                  { type: "updatePayload", id: nodeId, payload: { ...payloads[index]!, active: true } },
+                  { type: "upsertEdge", src: fileId, dst: nodeId, label: "associates", weight: 1 },
+                ]),
+                ...toDeactivate.flatMap(({ id: nodeId }): TransactionOperation[] => [
+                  { type: "unlinkLabel", src: fileId, dst: nodeId, label: "associates" },
+                  { type: "delete", id: nodeId },
+                ]),
+              ];
+              db.commitTransaction(operations);
+              activated = toActivate.length;
+              bumpCounters({ links: activated - toDeactivate.length });
+              scheduleGraphFlush();
+            }
+          }
+          const done = job.offset === job.files.length;
+          if (done) {
+            if (job.version === associationVersion) resolvedAssociationVersion = job.version;
+            associationJobs.delete(id);
+          }
+          return { done, activated };
+        });
+      },
+      async releaseAssociationRefresh(id) { associationJobs.delete(id); },
+    };
 
     const store: KnowledgeStore = {
       dim,
@@ -1592,6 +1695,8 @@ export async function openKnowledgeStoreEngine(deps: KnowledgeStoreEngineOptions
             ]),
           ];
           db.commitTransaction(operations);
+          if (associationFacts.length || previousFiles.some(({ payload }) => payload["hasAssociationCandidates"] === true)
+            || links.some(link => link.kind === "connects") || previousLinks.some(({ payload }) => payload["kind"] === "connects")) associationVersion++;
           bumpCounters({
             files: previousFiles.length === 0 ? 1 : 1 - previousFiles.length,
             symbols: symbolIds.length - previousSymbols.filter(({ payload }) => payload["active"] === true).length,
@@ -1603,117 +1708,7 @@ export async function openKnowledgeStoreEngine(deps: KnowledgeStoreEngineOptions
         });
       },
 
-      async resolveAssociationCandidates(): Promise<{ activated: number }> {
-        return enqueueGraphWrite(() => {
-          const files = lookup({ type: "file", active: true, hasAssociationCandidates: true });
-          if (files.length === 0) return { activated: 0 };
-
-          type AssociationCandidate = { value: string; line: number; callee: string };
-          const candidatesByFile = new Map<number, AssociationCandidate[]>();
-          const values = new Set<string>();
-          for (const file of files) {
-            const raw = file.payload["associationCandidates"];
-            if (!Array.isArray(raw)) continue;
-            const candidates: AssociationCandidate[] = [];
-            for (const value of raw) {
-              if (!value || typeof value !== "object" || Array.isArray(value)) continue;
-              const candidate = value as Record<string, unknown>;
-              if (
-                typeof candidate["value"] !== "string"
-                || candidate["value"].trim().length === 0
-                || !validLinkLine(Number(candidate["line"]))
-                || typeof candidate["callee"] !== "string"
-                || candidate["callee"].trim().length === 0
-              ) continue;
-              const normalized = {
-                value: candidate["value"],
-                line: Number(candidate["line"]),
-                callee: candidate["callee"],
-              };
-              candidates.push(normalized);
-              values.add(normalized.value);
-            }
-            if (candidates.length > 0) candidatesByFile.set(file.id, candidates);
-          }
-          if (values.size === 0) return { activated: 0 };
-
-          const confirmed = new Set<string>();
-          for (const value of values) {
-            if (db.indexedLookup({ type: "link", kind: "connects", value, active: true }, GRAPH_RESULT_CEILING).length > 0) {
-              confirmed.add(value);
-            }
-          }
-
-          const operations: TransactionOperation[] = [];
-          let activated = 0;
-          let deactivated = 0;
-          for (const file of files) {
-            const candidates = candidatesByFile.get(file.id);
-            if (!candidates) continue;
-            const generation = typeof file.payload["generation"] === "string" ? file.payload["generation"] : undefined;
-            const revision = typeof file.payload["documentRevision"] === "string" ? file.payload["documentRevision"] : undefined;
-            const candidateKeys = new Set(candidates.map((candidate) => (
-              `${candidate.value}\u0000${candidate.line}\u0000${candidate.callee}`
-            )));
-            const activeAssociations = linkNodes(String(file.payload["path"]))
-              .filter(({ payload }) => (
-                payload["active"] === true
-                && payload["kind"] === "associates"
-                && payload["generation"] === generation
-                && payload["documentRevision"] === revision
-                && candidateKeys.has(`${String(payload["value"])}\u0000${Number(payload["line"])}\u0000${String(payload["callee"] ?? "")}`)
-              ));
-            const activeKeys = new Set(activeAssociations.map(({ payload }) => (
-              `${String(payload["value"])}\u0000${Number(payload["line"])}\u0000${String(payload["callee"] ?? "")}`
-            )));
-            const toActivate = candidates.filter((candidate) => (
-              confirmed.has(candidate.value)
-              && !activeKeys.has(`${candidate.value}\u0000${candidate.line}\u0000${candidate.callee}`)
-            ));
-            const toDeactivate = activeAssociations.filter(({ payload }) => !confirmed.has(String(payload["value"])));
-            if (toActivate.length === 0 && toDeactivate.length === 0) continue;
-
-            const path = file.payload["path"];
-            const language = file.payload["language"];
-            if (typeof path !== "string" || typeof language !== "string") continue;
-            const pendingPayloads = toActivate.map((candidate) => ({
-              type: "link" as const,
-              path,
-              language,
-              kind: "associates" as const,
-              value: candidate.value,
-              line: candidate.line,
-              callee: candidate.callee,
-              ...(generation ? { generation } : {}),
-              ...(revision ? { documentRevision: revision } : {}),
-              active: false,
-            }));
-            const linkIds = pendingPayloads.length > 0
-              ? db.batchInsert(pendingPayloads.map(() => placeholderVec), pendingPayloads)
-              : [];
-            const activePayloads = pendingPayloads.map((payload) => ({ ...payload, active: true }));
-            for (const [index, id] of linkIds.entries()) {
-              operations.push(
-                { type: "updatePayload", id, payload: activePayloads[index] },
-                { type: "upsertEdge", src: file.id, dst: id, label: "associates", weight: 1 },
-              );
-            }
-            for (const link of toDeactivate) {
-              operations.push(
-                { type: "unlinkLabel", src: file.id, dst: link.id, label: "associates" },
-                { type: "delete", id: link.id },
-              );
-            }
-            activated += toActivate.length;
-            deactivated += toDeactivate.length;
-          }
-          if (operations.length === 0) return { activated: 0 };
-          db.commitTransaction(operations);
-          bumpCounters({ links: activated - deactivated });
-          scheduleGraphFlush();
-          return { activated };
-        });
-      },
+      resolveAssociationCandidates: () => resolveAssociations(associationPort),
 
       async removeFileSymbols(path, options) {
         return enqueueGraphWrite(() => {
@@ -1760,6 +1755,8 @@ export async function openKnowledgeStoreEngine(deps: KnowledgeStoreEngineOptions
             ...files.map(({ id }) => ({ type: "delete" as const, id })),
           ];
           if (operations.length > 0) db.commitTransaction(operations);
+          if (files.some(({ payload }) => payload["hasAssociationCandidates"] === true)
+            || links.some(({ payload }) => payload["kind"] === "connects")) associationVersion++;
           bumpCounters({
             files: -files.length,
             symbols: -symbols.filter(({ payload }) => payload["active"] === true).length,
@@ -2324,11 +2321,12 @@ export async function openKnowledgeStoreEngine(deps: KnowledgeStoreEngineOptions
       async close(): Promise<void> {
         return enqueueWrite(() => {
           persistence.close();
+          associationJobs.clear();
         });
       },
     };
 
-    return { ...store, runBatch: (operation) => persistence.batch(operation) };
+    return { ...store, ...associationPort, runBatch: (operation) => persistence.batch(operation) };
   } catch (error) {
     try { persistence.close(); } catch (closeError) {
       throw new AggregateError([error, closeError], "Knowledge store initialization and cleanup failed");

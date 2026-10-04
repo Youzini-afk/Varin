@@ -2,10 +2,12 @@ import {
   KnowledgeBlockConflictError, KnowledgeMutationError,
   type Block, type BlockChange, type KnowledgeStore, type OpenWorkspaceKnowledgeDeps,
 } from "./store-contract.js";
+import type { AssociationRefreshPort } from "./association-refresh.js";
 
-export type StoreMethod = Exclude<keyof KnowledgeStore, "dim" | "knowledgeRevision">;
+export type DirectStoreMethod = Exclude<keyof KnowledgeStore, "dim" | "knowledgeRevision" | "resolveAssociationCandidates">;
+export type StoreMethod = DirectStoreMethod | keyof AssociationRefreshPort;
 // Exhaustive at compile time, and a runtime allowlist on the private child pipe.
-export const STORE_METHODS: Record<StoreMethod, true> = {
+export const STORE_METHODS: Record<DirectStoreMethod, true> = {
   putEvent: true, listEvents: true, listEventSessionIds: true, putSession: true,
   getOrganizerProgress: true, putOrganizerProgress: true,
   listOrganizerProgress: true, getBlocks: true,
@@ -15,7 +17,7 @@ export const STORE_METHODS: Record<StoreMethod, true> = {
   retireKnowledge: true, getKnowledge: true,
   listKnowledge: true, getSupersedeChain: true, acceptKnowledge: true,
   dismissKnowledge: true, recordRecall: true, recall: true, touchFile: true,
-  replaceFileSymbols: true, resolveAssociationCandidates: true,
+  replaceFileSymbols: true,
   removeFileSymbols: true, recordResolvedRelations: true,
   replaceResolvedRelationsForAnchor: true, searchSymbols: true,
   getDefinedSymbols: true, getFileRelations: true, findLinks: true,
@@ -24,8 +26,11 @@ export const STORE_METHODS: Record<StoreMethod, true> = {
   findImporters: true, connectionLiterals: true, deleteSession: true,
   runRetention: true, compact: true, close: true,
 };
+const ASSOCIATION_METHODS: Record<keyof AssociationRefreshPort, true> = {
+  beginAssociationRefresh: true, stepAssociationRefresh: true, releaseAssociationRefresh: true,
+};
 export const isStoreMethod = (value: unknown): value is StoreMethod => (
-  typeof value === "string" && Object.hasOwn(STORE_METHODS, value)
+  typeof value === "string" && (Object.hasOwn(STORE_METHODS, value) || Object.hasOwn(ASSOCIATION_METHODS, value))
 );
 
 export type StoreOpenOptions = Pick<OpenWorkspaceKnowledgeDeps, "dataDir" | "hostId" | "workspaceId" | "scope"> & {
@@ -47,7 +52,7 @@ export type StoreNotification =
   | { type: "knowledge"; storeId: number; ids: readonly number[]; revision: string }
   | { type: "persistence-error"; storeId: number; error: StoreFailure };
 export type StoreChildMessage =
-  | { type: "ready"; version: 2 }
+  | { type: "ready"; version: 3 }
   | { type: "results"; responses: StoreResponse[] }
   | StoreNotification;
 

@@ -179,4 +179,4 @@ process.once("disconnect", () => {
     process.exit(results.some(result => result.status === "rejected") ? 1 : 0);
   });
 });
-void send({ type: "ready", version: 2 });
+void send({ type: "ready", version: 3 });

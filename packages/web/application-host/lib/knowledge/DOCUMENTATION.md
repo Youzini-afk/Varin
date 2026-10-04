@@ -27,8 +27,9 @@ for every open store without measurements on real mixed catalogs.
 `store.ts` is the async Host facade; `store-contract.ts` owns its existing DTOs and
 error classes without loading a native addon. `store-process.ts` lazily starts private
 Node storage owners per Host module generation: one for authoritative workspace/user
-stores and another for derived semantic stores and their maintenance. Native index
-work cannot occupy the plan/memory owner's IPC queue. `store-worker.ts` is their entry; `store-engine.ts`
+stores and another for derived semantic stores and their maintenance. Semantic vector
+work cannot occupy the plan/memory owner's IPC queue. The symbol graph still shares the
+authority store and uses the cooperative association refresh below. `store-worker.ts` is their entry; `store-engine.ts`
 contains the native implementation. `semantic/store.ts` orchestrates embeddings
 through the semantic owner; `semantic/store-engine.ts` owns its native generations.
 Opening, indexed reads, graph/vector computations, user writes, checkpoints and
@@ -104,6 +105,23 @@ admission applies the same Git eligibility as inventory, including unknown file
 types; ignored outputs cannot create graph file rows by bypassing structure reads.
 After a burst, relation candidates reconcile once per workspace, with another
 pass only when new changes arrive during reconciliation.
+
+Association refresh uses one connection-literal set and follows each file's own
+association edges. It does not run a global index intersection for every candidate
+literal or consumer path. The private `beginAssociationRefresh` / `stepAssociationRefresh` /
+`releaseAssociationRefresh` protocol (version 3) processes one file per IPC step, then
+returns to the ordinary queue. Plans, context reads and other requests can complete
+between files; no full-workspace pass occupies one in-flight transport batch.
+Each file's association changes remain a native transaction.
+
+Only changes to connection rows or candidate-bearing file generations invalidate the
+completed pass. Ordinary symbol-only files, notes, plans and unchanged repeated requests
+do not trigger another scan. If relevant source facts change between steps, the job
+refreshes its captured set and file IDs before proceeding. File payloads are read inside
+the writer, so a removed/replaced generation cannot be restored by an older snapshot.
+Already admitted passes drain before store close; their private state is released after
+success/failure and at native close. This changes neither the database format nor its
+single-writer ownership, and adds no candidate limit or longer tool timeout.
 
 ## Build and verification
 

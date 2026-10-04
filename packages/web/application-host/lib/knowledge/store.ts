@@ -2,7 +2,8 @@
  * native TriviumDB handle; main-process callers receive committed async results. */
 import type { KnowledgeStore, OpenWorkspaceKnowledgeDeps } from "./store-contract.js";
 import { knowledgeStoreProcess } from "./store-process.js";
-import { STORE_METHODS, restoreStoreError, type StoreMethod } from "./store-protocol.js";
+import { STORE_METHODS, restoreStoreError, type StoreMethod, type DirectStoreMethod } from "./store-protocol.js";
+import { resolveAssociations, type AssociationRefreshPort } from "./association-refresh.js";
 export * from "./store-contract.js";
 
 export async function openWorkspaceKnowledge(deps: OpenWorkspaceKnowledgeDeps): Promise<KnowledgeStore> {
@@ -10,6 +11,7 @@ export async function openWorkspaceKnowledge(deps: OpenWorkspaceKnowledgeDeps): 
   let revision = "";
   let closed = false;
   let closing: Promise<void> | null = null;
+  const associationWork = new Set<Promise<{ activated: number }>>();
   const storeId = owner.register({
     revision: (value) => { revision = value; },
     notify: (message) => {
@@ -37,11 +39,24 @@ export async function openWorkspaceKnowledge(deps: OpenWorkspaceKnowledgeDeps): 
     if (closed || closing) return Promise.reject(new Error("Knowledge store is closing or closed"));
     return owner.request(storeId, method, args, signal);
   };
-  const methods = Object.fromEntries((Object.keys(STORE_METHODS) as StoreMethod[])
-    .map(method => [method, (...args: unknown[]) => call(method, args)])) as Pick<KnowledgeStore, StoreMethod>;
+  const methods = Object.fromEntries((Object.keys(STORE_METHODS) as DirectStoreMethod[])
+    .map(method => [method, (...args: unknown[]) => call(method, args)])) as Pick<KnowledgeStore, DirectStoreMethod>;
+  // Continuations belong to the admitted operation, including while close drains it.
+  const associationPort: AssociationRefreshPort = {
+    beginAssociationRefresh: () => owner.request(storeId, "beginAssociationRefresh", []) as ReturnType<AssociationRefreshPort["beginAssociationRefresh"]>,
+    stepAssociationRefresh: id => owner.request(storeId, "stepAssociationRefresh", [id]) as ReturnType<AssociationRefreshPort["stepAssociationRefresh"]>,
+    releaseAssociationRefresh: async id => { await owner.request(storeId, "releaseAssociationRefresh", [id]); },
+  };
   return {
     ...methods,
     dim,
+    resolveAssociationCandidates: () => {
+      if (closed || closing) return Promise.reject(new Error("Knowledge store is closing or closed"));
+      const work = resolveAssociations(associationPort);
+      associationWork.add(work);
+      void work.then(() => associationWork.delete(work), () => associationWork.delete(work));
+      return work;
+    },
     knowledgeRevision: () => {
       if (owner.failed || closed) throw new Error("Knowledge store is unavailable");
       return revision;
@@ -56,7 +71,7 @@ export async function openWorkspaceKnowledge(deps: OpenWorkspaceKnowledgeDeps): 
     close: () => {
       if (closed) return Promise.resolve();
       if (closing) return closing;
-      closing = owner.request(storeId, "close", []).then(async () => {
+      closing = Promise.allSettled([...associationWork]).then(() => owner.request(storeId, "close", [])).then(async () => {
         closed = true;
         await owner.release(storeId);
       }).catch(async (error: unknown) => {

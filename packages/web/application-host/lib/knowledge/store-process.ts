@@ -87,7 +87,7 @@ export class KnowledgeStoreProcess {
       }
       const response = message as StoreChildMessage;
       if (response.type === "ready") {
-        if (response.version !== 2 || this.#ready) { this.#fail(new Error("Knowledge storage protocol mismatch")); return; }
+        if (response.version !== 3 || this.#ready) { this.#fail(new Error("Knowledge storage protocol mismatch")); return; }
         clearTimeout(bootstrapTimer);
         this.#ready = true;
         this.#pump();

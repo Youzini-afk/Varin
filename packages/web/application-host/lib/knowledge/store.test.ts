@@ -816,6 +816,10 @@ describe("KnowledgeStore", () => {
         documentRevision: "disk-consumer",
         associations: [{ callee: "log", literal: "wire.late" }],
       });
+      expect(await second.resolveAssociationCandidates()).toEqual({ activated: 0 });
+      await second.removeFileSymbols("lib/producer.ts");
+      await second.resolveAssociationCandidates();
+      expect((await second.getFileRelations("lib/consumer.ts"))?.associations).toEqual([]);
       await second.close();
     });
 
