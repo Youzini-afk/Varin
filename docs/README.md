@@ -1,7 +1,7 @@
 # Documentation index
 
 Status: navigation index — keep current as documents move or change role.
-Last updated: 2026-10-03
+Last updated: 2026-10-04
 
 `docs/` 按角色分目录。文档与代码冲突时以代码与测试为准，并在同一改动里修正失效的一侧。
 
@@ -9,6 +9,7 @@ Last updated: 2026-10-03
 
 - [architecture.md](architecture.md) — 系统架构总览与边界（权威）
 - [development.md](development.md) — 开发入口、验证命令、knowledge map
+- [performance.md](performance.md) — 关键路径性能设计、可复现测量与验证边界（2026-10-04）
 - [status.md](status.md) — 项目阶段进度与当前缺口（权威；不记工作日志）
 - [roadmap.md](roadmap.md) — 交付路线图与 Phase status 表
 

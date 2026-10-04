@@ -1,0 +1,891 @@
+{
+  "schemaVersion": 1,
+  "measuredAt": "2026-10-04",
+  "sourceBaseCommit": "438b60c40287fa73c63f0b58fec349e5676d7ea5",
+  "environment": {
+    "platform": "win32",
+    "arch": "x64",
+    "osRelease": "10.0.26200",
+    "cpu": "AMD Ryzen 5 5600GT with Radeon Graphics",
+    "logicalCpus": 12,
+    "physicalMemoryGiB": 31.29737091064453,
+    "node": "24.18.0",
+    "bun": "1.3.14",
+    "rust": "1.97.1",
+    "triviumdb": "0.8.8"
+  },
+  "scope": "Synthetic local workloads. Timed jobs ran serially, without concurrent builds or tests started by this task. No OS cache flush. Not full-application, provider, browser FPS or peak-memory measurements.",
+  "documents": {
+    "before": {
+      "fixture": {
+        "rootCount": 10000,
+        "lookupsPerRound": 100,
+        "rounds": 3,
+        "platform": "win32",
+        "node": "v24.18.0"
+      },
+      "verifiedLookups": 900,
+      "medianMs": {
+        "byId": 7.959,
+        "exactPath": 653.023,
+        "containingPath": 983.785
+      },
+      "samplesMs": {
+        "byId": [
+          8.795299999999997,
+          7.357499999999845,
+          7.9585000000001855
+        ],
+        "exactPath": [
+          649.0613000000001,
+          660.3837999999998,
+          653.0234
+        ],
+        "containingPath": [
+          980.6367,
+          983.7850000000003,
+          1016.3069999999998
+        ]
+      },
+      "coldMedianMs": {
+        "firstId": 3.488,
+        "firstPath": 0.01
+      },
+      "coldConcurrentLookups": {
+        "requests": 32,
+        "fileReads": 32
+      },
+      "concurrentSameRootCreates": {
+        "requests": 16,
+        "fileReads": 16,
+        "writes": 16,
+        "renames": 16
+      }
+    },
+    "after": {
+      "fixture": {
+        "rootCount": 10000,
+        "lookupsPerRound": 100,
+        "rounds": 3,
+        "platform": "win32",
+        "node": "v24.18.0"
+      },
+      "verifiedLookups": 900,
+      "medianMs": {
+        "byId": 0.091,
+        "exactPath": 0.191,
+        "containingPath": 0.586
+      },
+      "samplesMs": {
+        "byId": [
+          0.12819999999999254,
+          0.09129999999998972,
+          0.07529999999999859
+        ],
+        "exactPath": [
+          0.27129999999999654,
+          0.18629999999998859,
+          0.19149999999999068
+        ],
+        "containingPath": [
+          0.6722000000000037,
+          0.5857000000000028,
+          0.46530000000001337
+        ]
+      },
+      "coldMedianMs": {
+        "firstId": 4.585,
+        "firstPath": 12.85
+      },
+      "coldConcurrentLookups": {
+        "requests": 32,
+        "fileReads": 1
+      },
+      "concurrentSameRootCreates": {
+        "requests": 16,
+        "fileReads": 1,
+        "writes": 1,
+        "renames": 1
+      }
+    },
+    "notes": "Real Registry with generated 10000-entry JSON and in-memory filesystem fixture; timings are 100 lookups per round, median of 3 rounds. firstPath measures first path query after an ID lookup, not process startup. Both versions verify 900 lookups. Before source exported from sourceBaseCommit."
+  },
+  "threads": {
+    "before": {
+      "fixture": {
+        "threadsPerScope": 1000,
+        "scopeCount": 3,
+        "runsPerThread": 4,
+        "totalCatalogBytes": 9874242
+      },
+      "results": [
+        {
+          "name": "coldWorkspaceSnapshot",
+          "iterations": 1,
+          "totalMs": 126.634,
+          "medianMs": 126.634,
+          "catalogReads": 1,
+          "catalogBytesRead": 3291414,
+          "directoryReads": 0
+        },
+        {
+          "name": "warmWorkspaceSnapshot",
+          "iterations": 8,
+          "totalMs": 240.109,
+          "medianMs": 30.175,
+          "catalogReads": 0,
+          "catalogBytesRead": 0,
+          "directoryReads": 0
+        },
+        {
+          "name": "warmSingleThreadSnapshot",
+          "iterations": 800,
+          "totalMs": 48.911,
+          "medianMs": 0.059,
+          "catalogReads": 0,
+          "catalogBytesRead": 0,
+          "directoryReads": 0
+        },
+        {
+          "name": "warmUnboundOwner",
+          "iterations": 8,
+          "totalMs": 2218.771,
+          "medianMs": 280.161,
+          "catalogReads": 24,
+          "catalogBytesRead": 78993936,
+          "directoryReads": 8
+        },
+        {
+          "name": "warmHistoricalOwner",
+          "iterations": 8,
+          "totalMs": 2179.395,
+          "medianMs": 275.794,
+          "catalogReads": 24,
+          "catalogBytesRead": 78993936,
+          "directoryReads": 8
+        },
+        {
+          "name": "concurrentUnboundOwner",
+          "iterations": 1,
+          "totalMs": 2132.712,
+          "medianMs": 2132.712,
+          "catalogReads": 24,
+          "catalogBytesRead": 78993936,
+          "directoryReads": 8
+        }
+      ]
+    },
+    "after": {
+      "fixture": {
+        "threadsPerScope": 1000,
+        "scopeCount": 3,
+        "runsPerThread": 4,
+        "totalCatalogBytes": 9874242
+      },
+      "results": [
+        {
+          "name": "coldWorkspaceSnapshot",
+          "iterations": 1,
+          "totalMs": 89.885,
+          "medianMs": 89.885,
+          "catalogReads": 1,
+          "catalogBytesRead": 3291414,
+          "directoryReads": 0
+        },
+        {
+          "name": "warmWorkspaceSnapshot",
+          "iterations": 8,
+          "totalMs": 105.571,
+          "medianMs": 13.239,
+          "catalogReads": 0,
+          "catalogBytesRead": 0,
+          "directoryReads": 0
+        },
+        {
+          "name": "warmSingleThreadSnapshot",
+          "iterations": 800,
+          "totalMs": 10.97,
+          "medianMs": 0.013,
+          "catalogReads": 0,
+          "catalogBytesRead": 0,
+          "directoryReads": 0
+        },
+        {
+          "name": "warmUnboundOwner",
+          "iterations": 8,
+          "totalMs": 4.779,
+          "medianMs": 0.302,
+          "catalogReads": 0,
+          "catalogBytesRead": 0,
+          "directoryReads": 8
+        },
+        {
+          "name": "warmHistoricalOwner",
+          "iterations": 8,
+          "totalMs": 1.625,
+          "medianMs": 0.165,
+          "catalogReads": 0,
+          "catalogBytesRead": 0,
+          "directoryReads": 8
+        },
+        {
+          "name": "concurrentUnboundOwner",
+          "iterations": 1,
+          "totalMs": 0.265,
+          "medianMs": 0.265,
+          "catalogReads": 0,
+          "catalogBytesRead": 0,
+          "directoryReads": 1
+        }
+      ]
+    },
+    "notes": "Generated real temporary catalog files. Before source exported from sourceBaseCommit; both versions use identical final fixture and the same built protocol workspace. Returned value cloning included. Reported medianMs uses sorted[floor(n/2)], the upper-middle observation for even sample counts, not the arithmetic mean of two middle observations."
+  },
+  "knowledge": {
+    "engine": {
+      "mode": "engine",
+      "documents": 1000,
+      "blocksPerDocument": 8,
+      "bodyBytes": 2048,
+      "samples": [
+        {
+          "iteration": 0,
+          "before": {
+            "path": "legacy",
+            "elapsedMs": 299.232,
+            "cpuMs": 314,
+            "requests": 0,
+            "requestBytes": 0,
+            "responseBytes": 0,
+            "resultBytes": 54902
+          },
+          "after": {
+            "path": "document-scores",
+            "elapsedMs": 148.254,
+            "cpuMs": 202,
+            "requests": 0,
+            "requestBytes": 0,
+            "responseBytes": 0,
+            "resultBytes": 54902
+          }
+        },
+        {
+          "iteration": 1,
+          "before": {
+            "path": "legacy",
+            "elapsedMs": 279.007,
+            "cpuMs": 265,
+            "requests": 0,
+            "requestBytes": 0,
+            "responseBytes": 0,
+            "resultBytes": 54902
+          },
+          "after": {
+            "path": "document-scores",
+            "elapsedMs": 46.947,
+            "cpuMs": 63,
+            "requests": 0,
+            "requestBytes": 0,
+            "responseBytes": 0,
+            "resultBytes": 54902
+          }
+        },
+        {
+          "iteration": 2,
+          "before": {
+            "path": "legacy",
+            "elapsedMs": 272.261,
+            "cpuMs": 328,
+            "requests": 0,
+            "requestBytes": 0,
+            "responseBytes": 0,
+            "resultBytes": 54902
+          },
+          "after": {
+            "path": "document-scores",
+            "elapsedMs": 45.484,
+            "cpuMs": 47,
+            "requests": 0,
+            "requestBytes": 0,
+            "responseBytes": 0,
+            "resultBytes": 54902
+          }
+        }
+      ]
+    },
+    "ipc": {
+      "mode": "ipc",
+      "documents": 1000,
+      "blocksPerDocument": 8,
+      "bodyBytes": 2048,
+      "samples": [
+        {
+          "iteration": 0,
+          "before": {
+            "path": "legacy",
+            "elapsedMs": 496.87,
+            "requests": 1002,
+            "requestBytes": 48003,
+            "responseBytes": 18625663,
+            "resultBytes": 54902
+          },
+          "after": {
+            "path": "document-scores",
+            "elapsedMs": 179.723,
+            "requests": 1,
+            "requestBytes": 33958,
+            "responseBytes": 51024,
+            "resultBytes": 50839
+          }
+        },
+        {
+          "iteration": 1,
+          "before": {
+            "path": "legacy",
+            "elapsedMs": 464.399,
+            "requests": 1002,
+            "requestBytes": 48003,
+            "responseBytes": 18632663,
+            "resultBytes": 54902
+          },
+          "after": {
+            "path": "document-scores",
+            "elapsedMs": 47.448,
+            "requests": 1,
+            "requestBytes": 33958,
+            "responseBytes": 51024,
+            "resultBytes": 50839
+          }
+        },
+        {
+          "iteration": 2,
+          "before": {
+            "path": "legacy",
+            "elapsedMs": 447.895,
+            "requests": 1002,
+            "requestBytes": 48003,
+            "responseBytes": 18632663,
+            "resultBytes": 54902
+          },
+          "after": {
+            "path": "document-scores",
+            "elapsedMs": 50.538,
+            "requests": 1,
+            "requestBytes": 33958,
+            "responseBytes": 51024,
+            "resultBytes": 50839
+          }
+        }
+      ]
+    },
+    "notes": "1000 generated documents, 8 blocks per document, 2048-byte bodies, 2-dimensional vectors. Legacy algorithm retained only in measurement script. Every pair verifies deep equality. First new query builds document block index; two subsequent warm observations. responseBytes/requestBytes are V8-serialized argument/return-value bytes, not full wire framing."
+  },
+  "broker": {
+    "runtime": "v24.18.0",
+    "platform": "win32",
+    "serialization": "json",
+    "description": "Real Node IPC; cumulative full assistant prefix + 32-byte delta; compares the prior roundtrip with built protocol validateEnvelope; excludes Varin app, provider and UI timings",
+    "summaries": [
+      {
+        "count": 256,
+        "deltaBytes": 32,
+        "finalTextBytes": 8192,
+        "before": {
+          "elapsedMs": 8.277600000000007,
+          "receiverValidationMs": 2.4052999999999827
+        },
+        "after": {
+          "elapsedMs": 5.795199999999994,
+          "receiverValidationMs": 0.05410000000003379
+        },
+        "elapsedReductionPercent": 29.989368899197967
+      },
+      {
+        "count": 2048,
+        "deltaBytes": 32,
+        "finalTextBytes": 65536,
+        "before": {
+          "elapsedMs": 189.48059999999998,
+          "receiverValidationMs": 84.6732999999989
+        },
+        "after": {
+          "elapsedMs": 119.17339999999996,
+          "receiverValidationMs": 0.40100000000052205
+        },
+        "elapsedReductionPercent": 37.10522343712233
+      }
+    ],
+    "rows": [
+      {
+        "trial": 1,
+        "mode": "roundtrip",
+        "count": 256,
+        "deltaBytes": 32,
+        "finalTextBytes": 8192,
+        "received": 256,
+        "chars": 1052672,
+        "elapsedMs": 9.559899999999999,
+        "cpuMs": 16,
+        "receiverValidationMs": 2.6559999999999775,
+        "receiverValidationP95Ms": 0.01650000000000773
+      },
+      {
+        "trial": 1,
+        "mode": "validated",
+        "count": 256,
+        "deltaBytes": 32,
+        "finalTextBytes": 8192,
+        "received": 256,
+        "chars": 1052672,
+        "elapsedMs": 5.795199999999994,
+        "cpuMs": 0,
+        "receiverValidationMs": 0.05599999999989791,
+        "receiverValidationP95Ms": 0.0004000000000132786
+      },
+      {
+        "trial": 2,
+        "mode": "validated",
+        "count": 256,
+        "deltaBytes": 32,
+        "finalTextBytes": 8192,
+        "received": 256,
+        "chars": 1052672,
+        "elapsedMs": 6.801800000000014,
+        "cpuMs": 0,
+        "receiverValidationMs": 0.0452000000000794,
+        "receiverValidationP95Ms": 0.00030000000000995897
+      },
+      {
+        "trial": 2,
+        "mode": "roundtrip",
+        "count": 256,
+        "deltaBytes": 32,
+        "finalTextBytes": 8192,
+        "received": 256,
+        "chars": 1052672,
+        "elapsedMs": 7.710100000000011,
+        "cpuMs": 0,
+        "receiverValidationMs": 2.30889999999971,
+        "receiverValidationP95Ms": 0.01300000000000523
+      },
+      {
+        "trial": 3,
+        "mode": "roundtrip",
+        "count": 256,
+        "deltaBytes": 32,
+        "finalTextBytes": 8192,
+        "received": 256,
+        "chars": 1052672,
+        "elapsedMs": 8.277600000000007,
+        "cpuMs": 0,
+        "receiverValidationMs": 2.4052999999999827,
+        "receiverValidationP95Ms": 0.013700000000000045
+      },
+      {
+        "trial": 3,
+        "mode": "validated",
+        "count": 256,
+        "deltaBytes": 32,
+        "finalTextBytes": 8192,
+        "received": 256,
+        "chars": 1052672,
+        "elapsedMs": 5.634900000000016,
+        "cpuMs": 16,
+        "receiverValidationMs": 0.05410000000003379,
+        "receiverValidationP95Ms": 0.00030000000000995897
+      },
+      {
+        "trial": 1,
+        "mode": "roundtrip",
+        "count": 2048,
+        "deltaBytes": 32,
+        "finalTextBytes": 65536,
+        "received": 2048,
+        "chars": 67141632,
+        "elapsedMs": 206.7518,
+        "cpuMs": 203,
+        "receiverValidationMs": 92.3188000000008,
+        "receiverValidationP95Ms": 0.08749999999997726
+      },
+      {
+        "trial": 1,
+        "mode": "validated",
+        "count": 2048,
+        "deltaBytes": 32,
+        "finalTextBytes": 65536,
+        "received": 2048,
+        "chars": 67141632,
+        "elapsedMs": 119.17339999999996,
+        "cpuMs": 124,
+        "receiverValidationMs": 0.4082000000010453,
+        "receiverValidationP95Ms": 0.0004000000000132786
+      },
+      {
+        "trial": 2,
+        "mode": "validated",
+        "count": 2048,
+        "deltaBytes": 32,
+        "finalTextBytes": 65536,
+        "received": 2048,
+        "chars": 67141632,
+        "elapsedMs": 121.67919999999992,
+        "cpuMs": 110,
+        "receiverValidationMs": 0.40100000000052205,
+        "receiverValidationP95Ms": 0.0004000000000132786
+      },
+      {
+        "trial": 2,
+        "mode": "roundtrip",
+        "count": 2048,
+        "deltaBytes": 32,
+        "finalTextBytes": 65536,
+        "received": 2048,
+        "chars": 67141632,
+        "elapsedMs": 189.48059999999998,
+        "cpuMs": 204,
+        "receiverValidationMs": 84.6732999999989,
+        "receiverValidationP95Ms": 0.07589999999993324
+      },
+      {
+        "trial": 3,
+        "mode": "roundtrip",
+        "count": 2048,
+        "deltaBytes": 32,
+        "finalTextBytes": 65536,
+        "received": 2048,
+        "chars": 67141632,
+        "elapsedMs": 169.49379999999996,
+        "cpuMs": 140,
+        "receiverValidationMs": 81.31219999999996,
+        "receiverValidationP95Ms": 0.06999999999993634
+      },
+      {
+        "trial": 3,
+        "mode": "validated",
+        "count": 2048,
+        "deltaBytes": 32,
+        "finalTextBytes": 65536,
+        "received": 2048,
+        "chars": 67141632,
+        "elapsedMs": 87.64940000000001,
+        "cpuMs": 94,
+        "receiverValidationMs": 0.14059999999903994,
+        "receiverValidationP95Ms": 0.00010000000008858478
+      }
+    ]
+  },
+  "timeline": {
+    "before": {
+      "fixture": "timeline-streaming",
+      "turns": 2000,
+      "updates": 100,
+      "elapsedMs": 1111.8097,
+      "listDataReplacements": 100,
+      "promptReads": 200000
+    },
+    "after": {
+      "fixture": "timeline-streaming",
+      "turns": 2000,
+      "updates": 100,
+      "elapsedMs": 54.676399999999944,
+      "listDataReplacements": 0,
+      "promptReads": 0
+    },
+    "notes": "Performance test body unchanged. Final mock includes additional hooks for generation-transition regressions, inactive in timing case; before and after suite selection differs. Work counts directly comparable; elapsed times are illustrative, not a strict identical-harness A/B or full application speedup."
+  },
+  "kernel": {
+    "before": {
+      "schema": 1,
+      "mode": "compute-hotpaths",
+      "observedAt": "2026-10-04T14:44:33.106Z",
+      "platform": "win32",
+      "arch": "x64",
+      "node": "v24.18.0",
+      "cpu": "AMD Ryzen 5 5600GT with Radeon Graphics        ",
+      "checkoutBase": "438b60c40287fa73c63f0b58fec349e5676d7ea5",
+      "kernelPath": "D:\\project\\opencr\\Varin\\artifacts\\kernel-compute-before-exact\\varin-kernel.exe",
+      "kernelSha256": "69a5a41b9ef73bceff669a731e09519efd1d16c9b61746a9ac5a532f0c9be1b2",
+      "scriptSha256": "ba23560d8c8847c0b78569e15edc0e80ce7079b94b1efabbc5807a19a09e3061",
+      "samples": 8,
+      "largeFile": {
+        "utf8Bytes": 31450000,
+        "sha256": "9a92b02b1a684fbe4ef31c40d0e0a2334a69a3e69019618192a662f1a10b95b5"
+      },
+      "content": {
+        "live": {
+          "firstCallMs": 106.027,
+          "warmupCalls": 2,
+          "warm": {
+            "samples": [
+              108.349,
+              106.893,
+              106.309,
+              106.877,
+              107.471,
+              108.466,
+              108.333,
+              107.685
+            ],
+            "p50Ms": 107.471,
+            "p95Ms": 108.466,
+            "maxMs": 108.466
+          }
+        },
+        "pinned": {
+          "firstCallMs": 92.024,
+          "warmupCalls": 2,
+          "warm": {
+            "samples": [
+              92.166,
+              105.823,
+              90.941,
+              92.013,
+              92.087,
+              92.866,
+              92.176,
+              91.719
+            ],
+            "p50Ms": 92.087,
+            "p95Ms": 105.823,
+            "maxMs": 105.823
+          }
+        }
+      },
+      "structure": {
+        "files": 128,
+        "utf8Bytes": 12324,
+        "sourceSha256": "fb95bf3efd911b494280d6da0c829967515e3361d71028976a94a2e57413d124",
+        "resultSha256": "1f49cb4155381514d83c51f51a13e3be28b4bd7262cf6c60f37ef63f7ff29771",
+        "firstCallMs": 3662.476,
+        "warmupCalls": 2,
+        "warm": {
+          "samples": [
+            3714.657,
+            3676.992,
+            3676.229,
+            3644.882,
+            3649.542,
+            3784.001,
+            3693.152,
+            3720.187
+          ],
+          "p50Ms": 3676.992,
+          "p95Ms": 3784.001,
+          "maxMs": 3784.001
+        }
+      },
+      "memory": [
+        {
+          "phase": "initialized",
+          "processes": [
+            {
+              "pid": 33876,
+              "rssBytes": 111570944,
+              "privateBytes": 124858368,
+              "handles": 200,
+              "threads": 17,
+              "cpuMs": 328.125
+            },
+            {
+              "pid": 26948,
+              "rssBytes": 9383936,
+              "privateBytes": 1908736,
+              "handles": 77,
+              "threads": 6,
+              "cpuMs": 406.25
+            }
+          ],
+          "totalRssBytes": 120954880
+        },
+        {
+          "phase": "after-hotpaths",
+          "processes": [
+            {
+              "pid": 33876,
+              "rssBytes": 117022720,
+              "privateBytes": 128090112,
+              "handles": 200,
+              "threads": 14,
+              "cpuMs": 1296.875
+            },
+            {
+              "pid": 26948,
+              "rssBytes": 25559040,
+              "privateBytes": 14532608,
+              "handles": 80,
+              "threads": 6,
+              "cpuMs": 43453.125
+            }
+          ],
+          "totalRssBytes": 142581760
+        }
+      ],
+      "limitations": [
+        "First call does not flush the OS cache.",
+        "Timings include native capture/search/parse, IPC and Host projection, but exclude corpus creation and object upload.",
+        "Both kernels use the same emitted Host adapters; rebuild Web before measuring a Host adapter change.",
+        "The background lane intentionally reuses one worker to measure repeated same-recipe compilation across distinct files.",
+        "Operation counts must be supported by the owning Rust tests/source; timing alone is not a compilation or hash counter."
+      ],
+      "cleanupComplete": true
+    },
+    "after": {
+      "schema": 1,
+      "mode": "compute-hotpaths",
+      "observedAt": "2026-10-04T14:44:53.107Z",
+      "platform": "win32",
+      "arch": "x64",
+      "node": "v24.18.0",
+      "cpu": "AMD Ryzen 5 5600GT with Radeon Graphics        ",
+      "checkoutBase": "438b60c40287fa73c63f0b58fec349e5676d7ea5",
+      "kernelPath": "D:\\project\\opencr\\Varin\\artifacts\\kernel-compute-after\\varin-kernel.exe",
+      "kernelSha256": "b82481315030ac9fe938b1dbb8904fb6705d6f6be296f4c7c31ad61f0361aa57",
+      "scriptSha256": "ba23560d8c8847c0b78569e15edc0e80ce7079b94b1efabbc5807a19a09e3061",
+      "samples": 8,
+      "largeFile": {
+        "utf8Bytes": 31450000,
+        "sha256": "9a92b02b1a684fbe4ef31c40d0e0a2334a69a3e69019618192a662f1a10b95b5"
+      },
+      "content": {
+        "live": {
+          "firstCallMs": 75.556,
+          "warmupCalls": 2,
+          "warm": {
+            "samples": [
+              75.74,
+              77.039,
+              77.038,
+              78.196,
+              75.627,
+              76.166,
+              77.149,
+              77.344
+            ],
+            "p50Ms": 77.038,
+            "p95Ms": 78.196,
+            "maxMs": 78.196
+          }
+        },
+        "pinned": {
+          "firstCallMs": 77.854,
+          "warmupCalls": 2,
+          "warm": {
+            "samples": [
+              76.799,
+              76.149,
+              75.899,
+              75.884,
+              75.959,
+              76.177,
+              76.799,
+              78.048
+            ],
+            "p50Ms": 76.149,
+            "p95Ms": 78.048,
+            "maxMs": 78.048
+          }
+        }
+      },
+      "structure": {
+        "files": 128,
+        "utf8Bytes": 12324,
+        "sourceSha256": "fb95bf3efd911b494280d6da0c829967515e3361d71028976a94a2e57413d124",
+        "resultSha256": "1f49cb4155381514d83c51f51a13e3be28b4bd7262cf6c60f37ef63f7ff29771",
+        "firstCallMs": 248.332,
+        "warmupCalls": 2,
+        "warm": {
+          "samples": [
+            184.686,
+            183.953,
+            186.731,
+            184.918,
+            182.783,
+            182.821,
+            197.676,
+            183.517
+          ],
+          "p50Ms": 183.953,
+          "p95Ms": 197.676,
+          "maxMs": 197.676
+        }
+      },
+      "memory": [
+        {
+          "phase": "initialized",
+          "processes": [
+            {
+              "pid": 32592,
+              "rssBytes": 111783936,
+              "privateBytes": 124919808,
+              "handles": 197,
+              "threads": 17,
+              "cpuMs": 453.125
+            },
+            {
+              "pid": 29320,
+              "rssBytes": 8912896,
+              "privateBytes": 1900544,
+              "handles": 71,
+              "threads": 6,
+              "cpuMs": 296.875
+            }
+          ],
+          "totalRssBytes": 120696832
+        },
+        {
+          "phase": "after-hotpaths",
+          "processes": [
+            {
+              "pid": 32592,
+              "rssBytes": 113283072,
+              "privateBytes": 126038016,
+              "handles": 197,
+              "threads": 17,
+              "cpuMs": 656.25
+            },
+            {
+              "pid": 29320,
+              "rssBytes": 24825856,
+              "privateBytes": 14168064,
+              "handles": 74,
+              "threads": 9,
+              "cpuMs": 3937.5
+            }
+          ],
+          "totalRssBytes": 138108928
+        }
+      ],
+      "limitations": [
+        "First call does not flush the OS cache.",
+        "Timings include native capture/search/parse, IPC and Host projection, but exclude corpus creation and object upload.",
+        "Both kernels use the same emitted Host adapters; rebuild Web before measuring a Host adapter change.",
+        "The background lane intentionally reuses one worker to measure repeated same-recipe compilation across distinct files.",
+        "Operation counts must be supported by the owning Rust tests/source; timing alone is not a compilation or hash counter."
+      ],
+      "cleanupComplete": true
+    },
+    "sourceIdentity": {
+      "beforeCommit": "438b60c40287fa73c63f0b58fec349e5676d7ea5",
+      "beforeKernelTree": "e80d1ada12ca0279fe1e1bbbeadbf36cc85fa83c",
+      "cargoLockBlob": "2ac37a48af2d6d462829de12efa9c7b041a1862c",
+      "afterCommit": "762558c505b8c1e7f2e61ee0ce6468e002194141",
+      "afterKernelTree": "b9734c8d53b9b272537b1dfcf0dae50a763e2e16"
+    },
+    "notes": "Before is rebuilt from 41 exact Git-exported kernel files. After rebuilt after cleaning only local crate artifacts to avoid stale shared-target reuse; all third-party artifacts retained. Both binaries staged by standard manifest logic and source hashes checked after compilation. Quantiles use nearest rank ceil(q*n)-1; p95 of eight observations is their maximum."
+  },
+  "validation": {
+    "documents": 47,
+    "harness": 145,
+    "protocol": 70,
+    "brokerFocused": 11,
+    "uiCore": 37,
+    "knowledge": 37,
+    "rustCompute": 4,
+    "kernelNative": 16,
+    "runtimeDist": 6,
+    "knowledgeBuiltNode": 2,
+    "workspaceTypes": "all package checks completed, affected Host tests and CLI steps resumed after test typing fixes",
+    "productionBuild": "passed; final Rust cache refinement subsequently rebuilt, restaged and tested"
+  },
+  "sourceAfterCommit": "762558c505b8c1e7f2e61ee0ce6468e002194141"
+}
