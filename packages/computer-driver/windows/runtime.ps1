@@ -716,6 +716,14 @@ function Resolve-App([string]$query) {
         }
     }
 
+    # Same-name Electron helpers may own hidden zero-area windows. Prefer
+    # processes with an actual visible window before choosing a name match.
+    $processes = @($processes | Sort-Object @{ Expression = {
+        @($script:ProcessWindows[[int]$_.Id] | Where-Object {
+            $_.visible -and $_.bounds.width -gt 0 -and $_.bounds.height -gt 0
+        }).Count -gt 0
+    }; Descending = $true })
+
     # Prefer the app identity before titles: an Explorer window showing a
     # Varin folder must not win over the running Varin process.
     $match = $processes | Where-Object { $_.ProcessName -ieq $processQuery } | Select-Object -First 1
@@ -776,9 +784,13 @@ function Resolve-AppWindow($process, $selector) {
         if ($null -eq $match) { throw "no window of $($process.ProcessName) matches title `"$title`"" }
         return [IntPtr]$match.handle
     }
-    if ($process.MainWindowHandle -ne 0) { return [IntPtr]$process.MainWindowHandle }
-    $visible = $windows | Where-Object { $_.visible -and -not $_.minimized } | Select-Object -First 1
+    $visible = $windows | Where-Object {
+        $_.visible -and $_.bounds.width -gt 0 -and $_.bounds.height -gt 0
+    } | Sort-Object @{ Expression = { -not $_.minimized }; Descending = $true },
+        @{ Expression = { $_.handle -eq $process.MainWindowHandle }; Descending = $true },
+        @{ Expression = { -not [string]::IsNullOrWhiteSpace($_.title) }; Descending = $true } | Select-Object -First 1
     if ($null -ne $visible) { return [IntPtr]$visible.handle }
+    if ($process.MainWindowHandle -ne 0) { return [IntPtr]$process.MainWindowHandle }
     if ($windows.Count -gt 0) { return [IntPtr]$windows[0].handle }
     return [IntPtr]::Zero
 }

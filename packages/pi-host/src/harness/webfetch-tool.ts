@@ -129,7 +129,7 @@ function formatFetchResult(result: FetchResult, hasPrompt: boolean): { text: str
     }
     case "snapshot-missing": {
       return {
-        text: `snapshot unavailable: ${result.snapshotId} was released or never persisted. Fetch the source URL again to mint a new snapshot.`,
+        text: `snapshot unavailable for this session: ${result.snapshotId}. Fetch the source URL again to mint a new snapshot.`,
         isError: true,
       };
     }

@@ -192,6 +192,16 @@ references, collection-scoped keyword search, `persisted` workspace-readable set
 `thread.send` same-root relation rule and releases with the sender's thread. Grants let the
 receiver reread under its own session/thread authority; they never transfer the sender's receipts.
 
+Ordinary sessions own materials without a Thread/Run binding. Kernel record responses omit
+absent optional identities; JSON null is not a thread owner. Missing/released or unauthorized
+snapshots remain unavailable; malformed metadata, missing blob references and storage failures
+propagate as failures, including through both web and PDF readers.
+
+Harness deadline/cancellation diagnostics record the request method, admission/service/response
+phase, elapsed time, service completion and pending storage method counts. They contain no tool
+arguments or material contents. A late completion is recorded separately. Worker response rejection
+aborts deferred observation delivery, so a timed-out consumer cannot advance unseen context cursors.
+
 `egress.ts` is the executing Host's shared outbound path for `web.fetch`, Web search and scholarly
 search. Harness → Web exposes this Host's `outboundNetwork` setting. Desktop `auto` uses an
 isolated Electron network session when no Host environment proxy is configured, so the operating

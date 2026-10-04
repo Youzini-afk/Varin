@@ -7,6 +7,7 @@ import {
 } from "./store-protocol.js";
 
 interface Pending {
+  admittedAt: number;
   request: StoreRequest;
   resolve(value: unknown): void;
   reject(error: unknown): void;
@@ -119,6 +120,7 @@ export class KnowledgeStoreProcess {
     try { cloned = structuredClone(args); } catch (error) { return Promise.reject(error); }
     return new Promise((resolve, reject) => {
       const pending: Pending = {
+        admittedAt: performance.now(),
         request: { id: ++this.#nextRequest, storeId, method, args: cloned },
         resolve, reject, cleanup: () => {}, cancelled: false, sent: false,
       };
@@ -146,6 +148,24 @@ export class KnowledgeStoreProcess {
     this.child.channel?.ref();
     if (this.child.connected) this.child.disconnect();
     await this.exited; // Windows mmap lifetime ends before the final close resolves.
+  }
+
+  activity() {
+    const summarize = (pending: readonly Pending[]) => {
+      const groups = new Map<string, { method: string; count: number; oldestMs: number }>();
+      const now = performance.now();
+      for (const item of pending) {
+        if (item.cancelled) continue;
+        const method = item.request.method;
+        const group = groups.get(method) ?? { method, count: 0, oldestMs: 0 };
+        group.count++;
+        group.oldestMs = Math.max(group.oldestMs, Math.round(now - item.admittedAt));
+        groups.set(method, group);
+      }
+      return [...groups.values()];
+    };
+    return { pid: this.child.pid, ready: this.#ready, failed: this.failed,
+      inFlight: summarize(this.#batch ?? []), queued: summarize(this.#queue) };
   }
 
   #pump(): void {
@@ -216,6 +236,8 @@ export class KnowledgeStoreProcess {
 }
 
 const shared = new Map<"knowledge" | "semantic", KnowledgeStoreProcess>();
+/** Metadata only, captured when a Harness request times out or is cancelled. */
+export const knowledgeStorageActivity = () => [...shared].map(([domain, owner]) => ({ domain, ...owner.activity() }));
 export function knowledgeStoreProcess(domain: "knowledge" | "semantic" = "knowledge"): KnowledgeStoreProcess {
   let owner = shared.get(domain);
   if (!owner || owner.failed) {

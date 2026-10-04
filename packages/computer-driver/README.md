@@ -159,5 +159,9 @@ to external interpreters. The Windows launcher configures UTF-8 input, output
 and error output before loading the driver, so both multilingual operations and
 startup failures use the same transport encoding.
 
+Windows app-name matching prefers a same-name process with a visible, nonzero-area window.
+Default window selection prefers such windows before auxiliary handles; explicit PID and window
+handle selectors retain their exact targets.
+
 See the [BC acceptance record](../../docs/plan/bot-computer-use-review.md)
 for remaining native platform and packaging work.

@@ -30,6 +30,27 @@ const harnessEvent = (method: string, params: unknown, data: Record<string, unkn
 });
 
 describe("harness router", () => {
+  it("reports a timed-out plan separately from its late successful commit", async () => {
+    const diagnostic = vi.fn();
+    let finish!: () => void;
+    const router = createHarnessRouter({
+      defaultTimeoutMs: 10, onRequestDiagnostic: diagnostic,
+      resolveActor: async () => resolvedActor(["context.session"]), respond: async () => undefined,
+    });
+    router.register("todo.upsert", { handle: async () => {
+      await new Promise<void>(resolve => { finish = resolve; });
+      return { text: "plan updated: 4/4 done" };
+    } });
+    const pending = router.processEvent(harnessEvent("todo.upsert", { items: [] }));
+    try {
+      await vi.waitFor(() => expect(diagnostic).toHaveBeenCalledWith(expect.objectContaining({
+        kind: "deadline", method: "todo.upsert", phase: "service", serviceCompleted: false,
+      })));
+    } finally { finish?.(); await pending; router.dispose(); }
+    expect(diagnostic).toHaveBeenLastCalledWith(expect.objectContaining({
+      kind: "settled-after-interruption", phase: "respond", serviceCompleted: true, outcome: "success",
+    }));
+  });
   it("pins inherited shell placement before authorizing paths on the correct machine", async () => {
     const authorizeWorkspacePath = vi.fn(async () => null);
     const handle = vi.fn(async () => ({ kind: "spawn-failed" as const, reason: "fixture", interpreter: "", hint: "fixture" }));

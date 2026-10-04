@@ -76,8 +76,10 @@ describe("knowledge storage process", () => {
     try {
       await expect(first).resolves.toEqual([]);
       expect(laterDone).toBe(false);
+      expect(owner.activity().inFlight).toEqual([{ method: "getBlocks", count: 1, oldestMs: expect.any(Number) }]);
     } finally { send.mockRestore(); completeLater?.(); }
     await expect(later).resolves.toEqual([]);
+    expect(owner.activity().inFlight).toEqual([]);
   });
 
   it("does not load the native database into the Host and preserves Set/Date values", async () => {

@@ -225,7 +225,7 @@ describe("webfetch tool", () => {
     bridge.respond("test", emitted[1]!.requestId, { ok: true, result: { status: "snapshot-missing", snapshotId: "snap-gone" } });
     const gone = await missing;
     assert.equal((gone as { isError?: boolean }).isError, true);
-    assert.match((gone.content[0] as { text: string }).text, /snapshot unavailable: snap-gone/);
+    assert.match((gone.content[0] as { text: string }).text, /snapshot unavailable.*snap-gone/);
     bridge.dispose();
   });
 

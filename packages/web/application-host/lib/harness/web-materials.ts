@@ -252,24 +252,24 @@ export const createWebMaterialStore = (
         if (!granted) return null;
       }
       const ref = parseSnapshotPayload(record.payloadJson);
-      if (!ref || ref.snapshotId !== snapshotId) return null;
+      if (!ref || ref.snapshotId !== snapshotId) throw new Error(`Invalid web snapshot metadata: ${snapshotId}`);
       const reference = record.references.find((item) => item.slot === "body" && item.objectHash === ref.contentHash);
-      if (!reference) return null;
+      if (!reference) throw new Error(`Web snapshot body reference is missing: ${snapshotId}`);
       const body = context.client
         ? await context.client.getBlob(ref.contentHash, { recordId: record.recordId, slot: "body" })
           .then((value) => Buffer.from(value.bytesBase64, "base64"))
         : await store.getObject(ref.contentHash);
-      if (!body || body.byteLength !== ref.byteLength) return null;
+      if (!body || body.byteLength !== ref.byteLength) throw new Error(`Web snapshot body is missing or incomplete: ${snapshotId}`);
       let source: WebSnapshotContent["source"];
       if (options.includeSource && ref.document?.source) {
         const sourceReference = record.references.find((item) =>
           item.slot === "source" && item.objectHash === ref.document?.source?.contentHash);
-        if (!sourceReference) return null;
+        if (!sourceReference) throw new Error(`Web snapshot source reference is missing: ${snapshotId}`);
         const sourceBytes = context.client
           ? await context.client.getBlob(ref.document.source.contentHash, { recordId: record.recordId, slot: "source" })
             .then((value) => Buffer.from(value.bytesBase64, "base64"))
           : await store.getObject(ref.document.source.contentHash);
-        if (!sourceBytes || sourceBytes.byteLength !== ref.document.source.byteLength) return null;
+        if (!sourceBytes || sourceBytes.byteLength !== ref.document.source.byteLength) throw new Error(`Web snapshot source is missing or incomplete: ${snapshotId}`);
         source = { bytes: sourceBytes, contentType: ref.document.source.contentType };
       }
       return { ref, body, ...(source ? { source } : {}) };

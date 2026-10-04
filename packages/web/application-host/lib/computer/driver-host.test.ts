@@ -219,19 +219,30 @@ $ast = [System.Management.Automation.Language.Parser]::ParseFile($env:VARIN_TEST
 if ($errors.Count) { throw $errors[0] }
 $definition = $ast.Find({ param($node) $node -is [System.Management.Automation.Language.FunctionDefinitionAst] -and $node.Name -eq 'Resolve-App' }, $true)
 Invoke-Expression $definition.Extent.Text
+$windowDefinition = $ast.Find({ param($node) $node -is [System.Management.Automation.Language.FunctionDefinitionAst] -and $node.Name -eq 'Resolve-AppWindow' }, $true)
+Invoke-Expression $windowDefinition.Extent.Text
+function ConvertTo-ObjectArray($value) { return ,@($value) }
 function Get-Process {
     [pscustomobject]@{ Id = 1; ProcessName = 'explorer'; MainWindowTitle = 'Varin' }
-    [pscustomobject]@{ Id = 2; ProcessName = 'Varin'; MainWindowTitle = 'Project' }
+    [pscustomobject]@{ Id = 4; ProcessName = 'Varin'; MainWindowTitle = ''; MainWindowHandle = 40 }
+    [pscustomobject]@{ Id = 2; ProcessName = 'Varin'; MainWindowTitle = 'Project'; MainWindowHandle = 20 }
     [pscustomobject]@{ Id = 3; ProcessName = 'editor'; MainWindowTitle = 'Notes' }
 }
 function Get-WindowProcessMap {
-    return @{ 1 = @([pscustomobject]@{ title = 'Varin' }, [pscustomobject]@{ title = 'Notes backup' }); 2 = @([pscustomobject]@{ title = 'Project' }); 3 = @([pscustomobject]@{ title = 'Notes' }) }
+    $window = @{ visible = $true; minimized = $false; bounds = @{ width = 800; height = 600 } }
+    return @{ 1 = @([pscustomobject](@{ title = 'Varin' } + $window), [pscustomobject](@{ title = 'Notes backup' } + $window));
+        2 = @([pscustomobject]@{ title = ''; handle = 20; visible = $false; bounds = @{ width = 0; height = 0 } },
+            [pscustomobject](@{ title = 'Project'; handle = 21 } + $window));
+        3 = @([pscustomobject](@{ title = 'Notes' } + $window));
+        4 = @([pscustomobject]@{ title = ''; handle = 40; visible = $false; bounds = @{ width = 0; height = 0 } }) }
 }
-@((Resolve-App 'Varin').Id, (Resolve-App 'VARIN.exe').Id, (Resolve-App '1').Id, (Resolve-App 'Notes').Id, (Resolve-App 'backup').Id) | ConvertTo-Json -Compress
+@((Resolve-App 'Varin').Id, (Resolve-App 'VARIN.exe').Id, (Resolve-App '1').Id, (Resolve-App 'Notes').Id, (Resolve-App 'backup').Id,
+    (Resolve-App '4').Id, (Resolve-AppWindow (Resolve-App 'Varin') $null).ToInt64(),
+    (Resolve-AppWindow (Resolve-App 'Varin') '20').ToInt64()) | ConvertTo-Json -Compress
 `], { encoding: 'utf8', windowsHide: true, env: { ...process.env,
       VARIN_TEST_DRIVER_RUNTIME: fileURLToPath(new URL('../../../../computer-driver/windows/runtime.ps1', import.meta.url)),
     } });
-    expect(JSON.parse(result.trim())).toEqual([2, 2, 1, 3, 1]);
+    expect(JSON.parse(result.trim())).toEqual([2, 2, 1, 3, 1, 4, 21, 20]);
   });
 
   it('round-trips multilingual input and reports readable startup errors from unpacked scripts', async () => {

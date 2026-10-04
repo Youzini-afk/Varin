@@ -288,14 +288,14 @@ export const createDocumentReader = (deps: { materials: Materials; engineFactory
     const snapshotId = request.snapshotId?.trim();
     if (!snapshotId) return { status: "failed", url: "", reason: "snapshotId is required" };
     checkAbort(ctx.signal);
-    const found = await deps.materials.read(ctx.workspaceId, snapshotId, ctx.authority, { includeSource: true }).catch(() => null);
+    const found = await deps.materials.read(ctx.workspaceId, snapshotId, ctx.authority, { includeSource: true });
     if (!found) return { status: "snapshot-missing", snapshotId };
     if (domainBlocked(found.ref.finalUrl, ctx.domainPolicy)) return { status: "blocked", url: found.ref.finalUrl, reason: "domain-blocked" };
     if (found.ref.document?.kind !== "pdf" || !found.source) return { status: "failed", url: found.ref.finalUrl, reason: "snapshot has no original PDF" };
     const sourceHash = found.ref.document.source?.contentHash ?? hash(found.source.bytes);
     const sourceSnapshotId = found.ref.document.sourceSnapshotId ?? found.ref.snapshotId;
     const sourceRef = sourceSnapshotId === found.ref.snapshotId ? found.ref
-      : (await deps.materials.read(ctx.workspaceId, sourceSnapshotId, ctx.authority).catch(() => null))?.ref;
+      : (await deps.materials.read(ctx.workspaceId, sourceSnapshotId, ctx.authority))?.ref;
     const options = ctx.engineOptions ?? {};
     const engine = engineFactory(options);
     const source = found.source.bytes;
@@ -308,7 +308,7 @@ export const createDocumentReader = (deps: { materials: Materials; engineFactory
     });
     const recheck = async (): Promise<boolean> => {
       checkAbort(ctx.signal);
-      const current = await deps.materials.read(ctx.workspaceId, snapshotId, ctx.authority).catch(() => null);
+      const current = await deps.materials.read(ctx.workspaceId, snapshotId, ctx.authority);
       return !!current && current.ref.document?.source?.contentHash === sourceHash && !domainBlocked(current.ref.finalUrl, ctx.domainPolicy);
     };
     const overview = (probe?: Awaited<ReturnType<typeof engine.probe>>, textStatus: DocumentOverview["textStatus"] = "not-requested"): DocumentOverview => ({
@@ -442,7 +442,7 @@ export const createDocumentReader = (deps: { materials: Materials; engineFactory
     }
     if (!derived) {
       const indexedId = analysisIndex.get(cacheKey);
-      if (indexedId) derived = await deps.materials.read(ctx.workspaceId, indexedId, ctx.authority).catch(() => null);
+      if (indexedId) derived = await deps.materials.read(ctx.workspaceId, indexedId, ctx.authority);
     }
     if (!derived) {
       const analyze = async (signal: AbortSignal) => {

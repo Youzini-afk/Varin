@@ -50,6 +50,16 @@ export interface HarnessService<M extends HarnessMethod> {
 }
 
 export interface HarnessRouterOptions {
+  onRequestDiagnostic?(event: {
+    kind: "deadline" | "cancelled" | "settled-after-interruption";
+    method: HarnessMethod;
+    requestId: string;
+    sessionId: string;
+    phase: string;
+    elapsedMs: number;
+    serviceCompleted: boolean;
+    outcome?: "success" | "error";
+  }): void;
   /**
    * Deliver the outcome to the requesting worker. Auxiliary workers (a
    * session's compaction worker) are not the session's registered worker, so
@@ -349,9 +359,11 @@ export const createHarnessRouter = (options: HarnessRouterOptions) => {
     const data = event.envelope.data as HarnessRequestData | undefined;
     const identity = event.actor;
     if (!data || typeof data.requestId !== "string" || !identity) return;
-    const respond = (outcome: { ok: true; result: unknown } | { ok: false; error: HarnessError }) => (
-      options.respond(identity, data.requestId, outcome)
-    );
+    let phase = "resolve-actor";
+    const respond = (outcome: { ok: true; result: unknown } | { ok: false; error: HarnessError }) => {
+      phase = "respond";
+      return options.respond(identity, data.requestId, outcome);
+    };
     if (!isHarnessMethod(data.method)) {
       await respond({
         ok: false,
@@ -360,7 +372,23 @@ export const createHarnessRouter = (options: HarnessRouterOptions) => {
       return;
     }
     const method = data.method;
+    const startedAt = performance.now();
+    let deadlineExpired = false;
+    let serviceCompleted = false;
+    let outcome: "success" | "error" = "error";
+    const diagnose = (kind: "deadline" | "cancelled" | "settled-after-interruption"): void => {
+      try {
+        options.onRequestDiagnostic?.({ kind, method, requestId: data.requestId, sessionId: identity.sessionId,
+          phase, elapsedMs: Math.round(performance.now() - startedAt), serviceCompleted,
+          ...(kind === "settled-after-interruption" ? { outcome } : {}) });
+      } catch { /* diagnostics cannot change an operation's outcome */ }
+    };
     const controller = new AbortController();
+    // The worker's deadline can cancel before the Host timer fires. Capture
+    // that path too, without mislabelling explicit user cancellation as timeout.
+    controller.signal.addEventListener("abort", () => {
+      if (!deadlineExpired) diagnose("cancelled");
+    }, { once: true });
     const queryId = data.params && typeof data.params === "object" && !Array.isArray(data.params)
       && typeof (data.params as { queryId?: unknown }).queryId === "string"
       ? (data.params as { queryId: string }).queryId
@@ -394,7 +422,11 @@ export const createHarnessRouter = (options: HarnessRouterOptions) => {
     // duration. Worker cancellation, generation replacement, and Host disposal
     // still abort these zero-transport-timeout requests.
     const timer = (data.method === "thread.wait" || data.method === "thread.send" || data.method === "experiment.wait" || data.method === "compaction.run" || data.method === "materials.read" || data.method === "shell.exec" || data.method === "shell.read" || data.method === "computer.installSoftware") && data.timeoutMs === 0
-      ? undefined : setTimeout(() => controller.abort(), requestTimeoutMs);
+      ? undefined : setTimeout(() => {
+        deadlineExpired = true;
+        diagnose("deadline");
+        controller.abort();
+      }, requestTimeoutMs);
     try {
       const actor = await options.resolveActor(identity, controller.signal);
       if (!actor) {
@@ -430,6 +462,7 @@ export const createHarnessRouter = (options: HarnessRouterOptions) => {
         return;
       }
       let operationParams = data.params;
+      phase = "authorize";
       if (method === "shell.exec" && operationParams && typeof operationParams === "object" && !Array.isArray(operationParams)) {
         const shell = operationParams as Record<string, unknown>;
         if (shell.target === undefined && options.resolveWorkTarget) {
@@ -468,7 +501,9 @@ export const createHarnessRouter = (options: HarnessRouterOptions) => {
         });
         return;
       }
+      phase = "execution-admission";
       await options.assertExecution?.(actor.sessionId);
+      phase = "service";
       const result = await service.handle(operationParams as never, {
         actor,
         authorizedPaths,
@@ -482,12 +517,14 @@ export const createHarnessRouter = (options: HarnessRouterOptions) => {
         },
       });
       try {
+        serviceCompleted = true;
         await respond({ ok: true, result });
       } catch (error) {
         settleDeliveries("abort");
         throw error;
       }
       settleDeliveries("commit");
+      outcome = "success";
     } catch (error) {
       settleDeliveries("abort");
       let code: HarnessError["code"];
@@ -517,6 +554,7 @@ export const createHarnessRouter = (options: HarnessRouterOptions) => {
     } finally {
       clearTimeout(timer);
       inflight.delete(inflightKey);
+      if (controller.signal.aborted) diagnose("settled-after-interruption");
     }
   };
 

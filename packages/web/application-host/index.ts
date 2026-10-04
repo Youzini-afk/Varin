@@ -63,6 +63,7 @@ import { createHarnessSessionRegistration } from './lib/harness/session-registra
 import { performHarnessWebFetch, registerHarnessServices } from './lib/harness/harness-services.js';
 import { createUserThreadSendAdapter } from './lib/harness/thread-ui-adapter.js';
 import { openWorkspaceKnowledge, type KnowledgeStore } from './lib/knowledge/store.js';
+import { knowledgeStorageActivity } from './lib/knowledge/store-process.js';
 import { createKnowledgeContextRuntime } from './lib/knowledge/context-runtime.js';
 import { createGitStatusObserver } from './lib/knowledge/git-status-runtime.js';
 import { createSymbolGraphRuntime } from './lib/knowledge/symbol-runtime.js';
@@ -3874,16 +3875,20 @@ async function main(options: StartWebUiServerOptions = {}): Promise<WebUiServerC
   // subscription as recovery turn coordinator) and dispatches to the
   // registered harness services.
   const harnessRouter = createHarnessRouter({
+    onRequestDiagnostic: (event) => {
+      console.error('[HarnessDeadline]', JSON.stringify({ ...event, storage: knowledgeStorageActivity() }));
+    },
     assertExecution: assertBotSessionExecution,
     resolveWorkTarget: async (sessionId) => (await threadRegistry.threadEnvironmentForSession(sessionId))?.environment?.workTarget,
     // Route by the requesting worker, not by session: a session's internal
     // compaction worker is pinned for identity but is not the session worker.
     respond: async (identity, requestId, outcome) => {
-      await piRuntimeBroker.requestForWorker(
+      const delivered = await piRuntimeBroker.requestForWorker(
         identity.workerId,
         'harness.respond',
         buildHarnessRespondParams(identity.sessionId, requestId, outcome),
       );
+      if (!delivered.accepted) throw new Error('Harness response was no longer accepted by its worker');
     },
     resolveActor: (identity, signal) => harnessSessionRegistration.resolveActor(identity, signal),
     authorizeWorkspacePath: (actor, candidate, options) => harnessPathAuthority.resolve(actor, candidate, options),

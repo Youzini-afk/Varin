@@ -716,7 +716,7 @@ impl Storage {
         let payload = serde_json::from_str::<Value>(&payload_json).map_err(|error| {
             KernelError::Storage(format!("domain record payload is corrupt: {error}"))
         })?;
-        Ok(Some(json!({
+        let mut record = json!({
             "recordId": record_id,
             "workspaceId": workspace_id,
             "recordType": record_type,
@@ -732,7 +732,15 @@ impl Storage {
             "references": references,
             "createdAt": created_at,
             "updatedAt": updated_at,
-        })))
+        });
+        // Optional record fields are absent on the wire, as declared by
+        // KernelRecordResult. In particular, a session-owned record must not
+        // appear to have a thread owner whose identity is JSON null.
+        record
+            .as_object_mut()
+            .unwrap()
+            .retain(|_, value| !value.is_null());
+        Ok(Some(record))
     }
 
     pub(super) fn domain_record_put(

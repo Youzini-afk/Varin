@@ -183,6 +183,9 @@ describe("independent document reading", () => {
     const denied = await f.reader.read({ snapshotId: opened.snapshot!.snapshotId, view: "page-image", page: 1 }, f.ctx("other"));
     expect(denied).toEqual({ status: "snapshot-missing", snapshotId: opened.snapshot!.snapshotId });
     expect(f.engine.renderPage).not.toHaveBeenCalled();
+    f.materials.read.mockRejectedValueOnce(new Error("kernel connection failed"));
+    await expect(f.reader.read({ snapshotId: opened.snapshot!.snapshotId, view: "overview" }, f.ctx()))
+      .rejects.toThrow("kernel connection failed");
   });
 
   it("reports unavailable Docling structure without presenting native text as Docling output", async () => {

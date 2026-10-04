@@ -600,7 +600,7 @@ export function createWebFetch(deps: WebFetchDeps) {
 
   const readSnapshot = async (snapshotId: string, request: WebFetchRequest, ctx: FetchContext): Promise<FetchResult> => {
     const found = deps.materials
-      ? await deps.materials.read(ctx.workspaceId, snapshotId, ctx.authority).catch(() => null)
+      ? await deps.materials.read(ctx.workspaceId, snapshotId, ctx.authority)
       : null;
     if (!found) return { status: "snapshot-missing", snapshotId };
     const policyCheck = checkDomainPolicy(found.ref.finalUrl, ctx.workspaceId, ctx.domainPolicy);
