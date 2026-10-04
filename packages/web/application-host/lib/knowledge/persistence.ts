@@ -7,11 +7,14 @@ export function createStorePersistence(options: {
   onError(error: unknown): void;
   quietMs?: number;
   maxDeferMs?: number;
+  /** Explicit commits follow native WAL fsync; deferred derived writes may lag. */
+  walCommits?: boolean;
 }) {
   const quietMs = options.quietMs ?? 250;
   const maxDeferMs = options.maxDeferMs ?? 30_000;
   let version = 0;
   let durableVersion = 0;
+  let acknowledgedVersion = 0;
   let deadline = 0;
   let timer: ReturnType<typeof setTimeout> | null = null;
   let batchActive = false;
@@ -69,11 +72,36 @@ export function createStorePersistence(options: {
       throw error;
     }
     durableVersion = target;
+    acknowledgedVersion = target;
     failed = false;
     retries = 0;
     deadline = 0;
     commitRequested = false;
     publish();
+  }
+
+  function defer(optionsForDefer?: { busy?: boolean }): void {
+    assertOpen();
+    if (version === durableVersion) return;
+    const now = Date.now();
+    if (deadline === 0) deadline = now + maxDeferMs;
+    // Full-sync commits need no immediate snapshot. Keep derived writes on the
+    // same checkpoint deadline, outside the calling operation.
+    if (options.walCommits) { schedule(Math.max(0, deadline - now)); return; }
+    if (now >= deadline) {
+      if (batchActive) commitRequested = true;
+      else checkpoint();
+      return;
+    }
+    schedule(optionsForDefer?.busy ? deadline - now : Math.min(quietMs, deadline - now));
+  }
+
+  function commitChanges(): void {
+    if (!options.walCommits || failed) { checkpoint(); return; }
+    acknowledgedVersion = version;
+    commitRequested = false;
+    publish();
+    defer();
   }
 
   return {
@@ -86,25 +114,11 @@ export function createStorePersistence(options: {
     commit(): void {
       assertOpen();
       if (batchActive) commitRequested = true;
-      else checkpoint();
+      else commitChanges();
     },
-    defer(optionsForDefer?: { busy?: boolean }): void {
-      assertOpen();
-      if (version === durableVersion) return;
-      const now = Date.now();
-      if (deadline === 0) deadline = now + maxDeferMs;
-      if (now >= deadline) {
-        if (batchActive) commitRequested = true;
-        else checkpoint();
-        return;
-      }
-      // A known ongoing build is not idle during its provider/network gaps.
-      // Retain the existing durability deadline without checkpointing the full
-      // database after every slow batch.
-      schedule(optionsForDefer?.busy ? deadline - now : Math.min(quietMs, deadline - now));
-    },
+    defer,
     afterCommit(notify: () => void): void {
-      if (version === durableVersion) {
+      if (version === acknowledgedVersion) {
         try { notify(); } catch { /* observational */ }
       } else notifications.push(notify);
     },
@@ -117,7 +131,7 @@ export function createStorePersistence(options: {
         return await operation();
       } finally {
         batchActive = false;
-        if (commitRequested) checkpoint();
+        if (commitRequested) commitChanges();
       }
     },
     close(): void {
@@ -133,6 +147,7 @@ export function createStorePersistence(options: {
         throw error; // Keep the handle and dirty state available for a retry.
       }
       durableVersion = version;
+      acknowledgedVersion = version;
       failed = false;
       closed = true;
       publish();

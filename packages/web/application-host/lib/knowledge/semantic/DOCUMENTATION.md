@@ -21,8 +21,8 @@ derived store (`../vectors/`); they reuse `harness.embed` but never this MiniLM 
   scheduler is shared with knowledge-vector embeddings, so its concurrency setting covers both.
 - Overlay: `query-view.ts` pins surface/thread drafts at query start; masked disk paths cannot leak
   old vectors. Thread view is fixed baseline + this branch’s delta.
-- Storage: `store.ts` — Host embedding orchestration over the existing private knowledge
-  storage process. `store-engine.ts` holds one native TriviumDB generation per
+- Storage: `store.ts` — Host embedding orchestration over the private semantic
+  storage process, separate from plan and memory writes. `store-engine.ts` holds one native TriviumDB generation per
   scope/space, scoped Top-K (D-189) and `publishToken`; open/recovery, queries,
   mutations, full checkpoints and cache maintenance never execute on Electron main.
   Source-index queries use native exact Top-K (scoped graph-first or unrestricted exact search).

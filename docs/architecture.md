@@ -90,7 +90,9 @@ Application host: web/Electron shell + Varin broker + extension host
     |- Documents/Registry coordination, LSP/DAP protocol, knowledge/model adapters
     |
     |- private Node knowledge storage process
-    |    `- workspace/user TriviumDB handle, queries and coalesced checkpoints
+    |    `- workspace/user TriviumDB handles, queries, WAL fsync and deferred snapshots
+    |- private Node semantic storage process
+    |    `- derived source/memory vector generations, queries and checkpoints
     |
     |- private generated varin.kernel.v1 framed protocol
     |    v
@@ -127,8 +129,9 @@ lifecycle, Document Registry coordination, knowledge-domain services, and model/
 Pi worker/session management stays in runtime-broker; credentials and native Pi state remain in Pi.
 TriviumDB graph/vector stores keep their current single-writer adapters; changing the implementation
 language is not authorization to replace those databases. The workspace/user KnowledgeStore handle
-runs in a private Host storage process, outside Electron main, with shared-checkpoint acknowledgement
-and no in-main fallback. Derived semantic/vector adapters retain their named owners. See
+runs in a private Host storage process, outside Electron main, with WAL-backed acknowledgement
+and deferred full snapshots. Derived semantic/vector adapters share a separate private owner so native
+index work cannot queue-block plans and memory. Neither owner falls back to Electron main. See
 [knowledge storage](../packages/web/application-host/lib/knowledge/DOCUMENTATION.md).
 
 The process is an implementation component of this Host, shared by all surfaces. It does not create

@@ -8,6 +8,8 @@ import {
   openWorkspaceKnowledge, type KnowledgeStore,
 } from "./store.js";
 import { knowledgeStoreProcess } from "./store-process.js";
+import { purgeSemanticWorkspaceCache } from "./semantic/cache-maintenance.js";
+import type { StoreRequest } from "./store-protocol.js";
 
 const roots: string[] = [];
 const stores: KnowledgeStore[] = [];
@@ -25,6 +27,59 @@ afterEach(async () => {
 });
 
 describe("knowledge storage process", () => {
+  it("commits a plan while derived-index maintenance is stalled", async () => {
+    const { root, store } = await fixture();
+    const owner = knowledgeStoreProcess("semantic");
+    const send = owner.child.send;
+    let resume!: () => void;
+    let admitted!: () => void;
+    const started = new Promise<void>(resolve => { admitted = resolve; });
+    const held = vi.spyOn(owner.child, "send").mockImplementationOnce((...args) => {
+      resume = () => { Reflect.apply(send, owner.child, args); };
+      admitted();
+      return true;
+    });
+    const maintenance = purgeSemanticWorkspaceCache({ semanticDirectory: join(root, "semantic"), workspaceId: "workspace", resourceRoot: root, removedDirectory: root });
+    let timer: ReturnType<typeof setTimeout> | undefined;
+    try {
+      await started;
+      const plan = store.upsertBlock({ sessionId: "s", label: "plan", content: "- [x] saved", updatedBy: "agent" });
+      const result = await Promise.race([plan, new Promise<never>((_resolve, reject) => {
+        timer = setTimeout(() => reject(new Error("Plan waited on the unrelated index owner")), 10_000);
+      })]);
+      expect(result.content).toBe("- [x] saved");
+      expect((await store.getBlocks("s"))[0]?.content).toBe(result.content);
+    } finally {
+      clearTimeout(timer);
+      held.mockRestore();
+      resume?.();
+      await maintenance;
+    }
+  });
+
+  it("delivers a completed store group while a later group is still pending", async () => {
+    const { options, store } = await fixture();
+    const other = await openWorkspaceKnowledge({ ...options, workspaceId: "other" });
+    stores.push(other);
+    const owner = knowledgeStoreProcess();
+    let completeLater!: () => void;
+    const send = vi.spyOn(owner.child, "send").mockImplementationOnce((message) => {
+      const [first, second] = (message as { requests: StoreRequest[] }).requests;
+      queueMicrotask(() => owner.child.emit("message", { type: "results", responses: [{ id: first!.id, ok: true, value: [] }] }));
+      completeLater = () => owner.child.emit("message", { type: "results", responses: [{ id: second!.id, ok: true, value: [] }] });
+      return true;
+    });
+    let laterDone = false;
+    const first = store.getBlocks("s");
+    const later = other.getBlocks("s").then(value => { laterDone = true; return value; });
+    void later.catch(() => {});
+    try {
+      await expect(first).resolves.toEqual([]);
+      expect(laterDone).toBe(false);
+    } finally { send.mockRestore(); completeLater?.(); }
+    await expect(later).resolves.toEqual([]);
+  });
+
   it("does not load the native database into the Host and preserves Set/Date values", async () => {
     const { store } = await fixture();
     const require = createRequire(import.meta.url);
@@ -87,9 +142,13 @@ describe("knowledge storage process", () => {
 
   it("rejects lost in-flight work and reopens acknowledged data after a real process kill", async () => {
     const { options, store } = await fixture();
+    await store.replaceFileSymbols("src/a.ts", "typescript", [{ name: "durableSymbol", kind: "function",
+      range: { startLine: 1, startCharacter: 0, endLine: 1, endCharacter: 8 } }], "r1");
     await Promise.all([1, 2, 3].map(at => store.putEvent({
       kind: "turn", at, sessionId: "s", text: "synthetic", source: "agent",
     })));
+    const plan = await store.upsertBlock({ sessionId: "s", label: "plan", content: "- [x] durable plan", updatedBy: "agent" });
+    const memoryId = await store.putKnowledge({ scope: "workspace", status: "accepted", content: "Use the synthetic database", trigger: "database" });
     const owner = knowledgeStoreProcess();
     const pending = store.listEvents({ sessionId: "s" });
     const rejected = expect(pending).rejects.toThrow(/storage|IPC|process/i);
@@ -100,6 +159,9 @@ describe("knowledge storage process", () => {
     const reopened = await openWorkspaceKnowledge(options);
     stores.push(reopened);
     expect(await reopened.listEvents({ sessionId: "s" })).toHaveLength(3);
+    expect((await reopened.getBlocks("s"))[0]).toEqual(plan);
+    expect((await reopened.recall("database", 5)).map(result => result.node.id)).toContain(memoryId);
+    expect((await reopened.searchSymbols("durableSymbol", 5))[0]?.name).toBe("durableSymbol");
   });
 
   it("an unreadable database fails explicitly without disabling another store", async () => {

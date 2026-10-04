@@ -25,13 +25,14 @@ for every open store without measurements on real mixed catalogs.
 ## Execution ownership
 
 `store.ts` is the async Host facade; `store-contract.ts` owns its existing DTOs and
-error classes without loading a native addon. `store-process.ts` lazily starts one
-private Node storage process per Host module generation, shared by that generation's
-open workspace/user stores. `store-worker.ts` is its only entry; `store-engine.ts`
+error classes without loading a native addon. `store-process.ts` lazily starts private
+Node storage owners per Host module generation: one for authoritative workspace/user
+stores and another for derived semantic stores and their maintenance. Native index
+work cannot occupy the plan/memory owner's IPC queue. `store-worker.ts` is their entry; `store-engine.ts`
 contains the native implementation. `semantic/store.ts` orchestrates embeddings
-through the same owner; `semantic/store-engine.ts` owns its native generations.
+through the semantic owner; `semantic/store-engine.ts` owns its native generations.
 Opening, indexed reads, graph/vector computations, user writes, checkpoints and
-closing of these stores all run in that process. Cache maintenance also runs there.
+closing run in the corresponding owner. Cache maintenance uses the semantic owner.
 Electron uses its own executable in Node mode, like the existing Pi worker boundary.
 The Web Host uses the same component. No renderer API or public server is added.
 
@@ -44,7 +45,9 @@ error and never automatically replays writes or silently switches storage backen
 
 The private IPC contract has an exhaustive method allowlist, response validation,
 advanced serialization for existing Set/Date values, and reconstruction of block
-conflict/knowledge mutation errors. Only one transport batch is in flight. The
+conflict/knowledge mutation errors. Only one transport batch per owner is in flight.
+Completed contiguous store groups return after their own durability boundary, before later
+groups in that batch. The
 64-request scheduling batch is not a data rejection limit: additional requests
 remain queued. The boundary snapshots arguments on admission. `removeFileSymbols`
 cancellation applies before dispatch; after dispatch the caller receives the actual
@@ -59,17 +62,26 @@ keeps its original durability and outcome. No database writer is killed to satis
 ## Checkpoints and acknowledgement
 
 `persistence.ts` tracks native data mutations and owns the checkpoint schedule.
-Graph-derived writes retain their 250 ms quiet period / 30 s maximum deferral.
-A user write requests an immediate checkpoint. Contiguous requests already admitted
-for one store share a single checkpoint; their results and commit notifications are
-not published until it succeeds. Sequential writes that await each other cannot
-be combined by this mechanism, and a batch is not a rollback transaction.
+Authoritative stores use TriviumDB `syncMode: "full"` for user state: payload/edge writes
+fsync their incremental WAL before returning. Derived symbol callbacks keep their
+existing `normal` WAL mode and deferred snapshot; the synchronous writer restores
+`full` before another operation can enter. Plans, events and memories are
+acknowledged on that durable write, without rewriting the entire symbol catalog.
+Full snapshots run on the existing 30-second deadline and at close. Contiguous
+requests in a store group publish notifications at the end of the group; a batch
+is not a rollback transaction.
+
+Authority readers use property/ngram indexes, payload text and graph edges.
+The unused full-text/keyword sidecar is neither loaded nor rebuilt. Its text
+already exists in payloads; semantic recall continues through derived vectors.
+This also keeps acknowledged changes recoverable from WAL without an unlogged
+text-index mutation. No user database is deleted or replaced.
 
 A successful complete checkpoint also covers and cancels any pending graph
 checkpoint. No-op recall updates/deletions/retention do not request another full
 snapshot. A close uses TriviumDB's own final checkpoint rather than calling flush
-before native close. Backend syncMode and the user-data acknowledgement contract
-are unchanged; no success is returned merely because a debounce was scheduled.
+before native close. Successful authoritative writes require completed WAL fsync;
+scheduling a future snapshot alone never acknowledges data.
 
 A failed checkpoint retains the dirty version and pending notifications, reports
 its failure and schedules a bounded-backoff retry. The next admitted request must
@@ -78,7 +90,8 @@ This retries persistence of already-applied state, not the original mutations.
 Notifications are observational: observer errors cannot undo a durable write.
 
 The derived semantic and knowledge-vector stores use this checkpoint scheduler
-in the private storage process, with retryable close/final-flush semantics.
+in the separate semantic process, with their existing snapshot acknowledgements
+and retryable close/final-flush semantics.
 Embedding/provider callbacks and the vector reuse cache stay in the Host.
 During an ongoing build, provider gaps do not count as a quiet period: checkpoints
 use the existing 30-second deadline, and build completion commits the pending

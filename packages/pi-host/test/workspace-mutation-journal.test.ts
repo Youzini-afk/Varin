@@ -84,8 +84,7 @@ function serveHarnessRequest(
     return;
   }
   if (request.method === "lsp.diagnostics") {
-    host.respondHarness(sessionId, request.requestId, { ok: true, result: { status: "ready", diagnostics: [] } });
-    return;
+    throw new Error("File mutations must complete without waiting for the language service");
   }
   if (request.method === "document.branchWrite") {
     host.respondHarness(sessionId, request.requestId, { ok: true, result: { status: "disk" } });
@@ -132,7 +131,6 @@ describe("workspace mutation journal", () => {
       const write = host.session.getToolDefinition("write") as ReturnType<typeof createWriteToolDefinition>;
       const writeResult = await write.execute("write-call", { content: "created", path: "created.txt" }, undefined, undefined, undefined as never);
       assert.equal(await readFile(join(cwd, "created.txt"), "utf8"), "created");
-      assert.match((writeResult.content[0] as { text: string }).text, /diagnostics: clean/);
       assert.deepEqual(writeResult.details, { mutation: { status: "applied", results: [{ path: "created.txt", target: "disk", status: "applied" }] } });
 
       const edit = host.session.getToolDefinition("edit") as ReturnType<typeof createEditToolDefinition>;

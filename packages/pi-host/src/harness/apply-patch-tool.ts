@@ -3,7 +3,7 @@ import { defineTool, type ToolDefinition } from "@earendil-works/pi-coding-agent
 import { createHash } from "node:crypto";
 import { resolve } from "node:path";
 import type { HostServicesBridge } from "./host-services-bridge.js";
-import { fetchDiagnostics, trySurfaceWrite, type WorkspaceMutationJournalBridge } from "../workspace-mutation-journal.js";
+import { trySurfaceWrite, type WorkspaceMutationJournalBridge } from "../workspace-mutation-journal.js";
 
 const editorBufferHash = (text: string): string => (
   `sha256-${createHash("sha256").update(text.replace(/\r\n/g, "\n").replace(/\r/g, "\n"), "utf8").digest("hex")}`
@@ -340,22 +340,8 @@ export function createApplyPatchTool(
             })),
           }, signal, "apply_patch");
           if (planned !== "disk") {
-            let text = planned.text;
-            const diagnostics: string[] = [];
-            for (const row of prepared) {
-              if (row.action !== "write") continue;
-              const appliedOnDisk = planned.results.some((entry) => (
-                entry.path === row.op.path && entry.target === "disk" && entry.status === "applied"
-              ));
-              if (!appliedOnDisk) continue;
-              const diagnostic = await fetchDiagnostics(bridge, row.op.path, 500);
-              if (diagnostic?.status === "ready" && diagnostic.summary !== "clean") {
-                diagnostics.push(`${row.op.path}: ${diagnostic.summary}`);
-              }
-            }
-            if (diagnostics.length > 0) text += `\n\n[diagnostics: ${diagnostics.join("; ")}]`;
             return {
-              content: [{ type: "text" as const, text }],
+              content: [{ type: "text" as const, text: planned.text }],
               details: { applied: planned.status === "applied", operations: parsed.operations.length,
                 mutation: { status: planned.status, results: planned.results } },
             };

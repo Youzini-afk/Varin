@@ -19,8 +19,9 @@ export interface StoreObserver {
   notify(message: StoreNotification): void;
 }
 
-/** One lazily started storage process per Host module generation, shared by its
- * open knowledge stores. Only one IPC batch is in flight (transport backpressure).
+/** Lazily started storage owners for authoritative knowledge and derived indexes.
+ * Native index work must not hold up plans and memory in the knowledge owner.
+ * Only one IPC batch is in flight per owner (transport backpressure).
  * Requests queued behind it can share a checkpoint; a rejected/unknown batch is
  * never automatically replayed. There is no in-main native fallback. */
 export class KnowledgeStoreProcess {
@@ -85,7 +86,7 @@ export class KnowledgeStoreProcess {
       }
       const response = message as StoreChildMessage;
       if (response.type === "ready") {
-        if (response.version !== 1 || this.#ready) { this.#fail(new Error("Knowledge storage protocol mismatch")); return; }
+        if (response.version !== 2 || this.#ready) { this.#fail(new Error("Knowledge storage protocol mismatch")); return; }
         clearTimeout(bootstrapTimer);
         this.#ready = true;
         this.#pump();
@@ -174,18 +175,21 @@ export class KnowledgeStoreProcess {
 
   #accept(responses: StoreResponse[]): void {
     const batch = this.#batch;
-    if (!batch || !Array.isArray(responses) || !responses.every(isStoreResponse) || responses.length !== batch.length) {
-      this.#fail(new Error("Incomplete knowledge storage batch response"));
+    if (!batch || !Array.isArray(responses) || !responses.every(isStoreResponse) || responses.length === 0 || responses.length > batch.length) {
+      this.#fail(new Error("Invalid knowledge storage batch response"));
       return;
     }
     const byId = new Map(responses.map(response => [response.id, response]));
-    if (byId.size !== batch.length || batch.some(item => !byId.has(item.request.id))) {
+    const pendingIds = new Set(batch.map(item => item.request.id));
+    if (byId.size !== responses.length || responses.some(response => !pendingIds.has(response.id))) {
       this.#fail(new Error("Mismatched knowledge storage response IDs"));
       return;
     }
-    this.#batch = null;
+    const remaining = batch.filter(item => !byId.has(item.request.id));
+    this.#batch = remaining.length ? remaining : null;
     for (const item of batch) {
-      const response = byId.get(item.request.id)!;
+      const response = byId.get(item.request.id);
+      if (!response) continue;
       if (response.revision !== undefined) this.#observers.get(item.request.storeId)?.revision(response.revision);
       if (response.ok) item.resolve(response.value);
       else item.reject(restoreStoreError(response.error));
@@ -211,11 +215,12 @@ export class KnowledgeStoreProcess {
   }
 }
 
-let shared: KnowledgeStoreProcess | null = null;
-export function knowledgeStoreProcess(): KnowledgeStoreProcess {
-  if (!shared || shared.failed) {
-    const owner = new KnowledgeStoreProcess(() => { if (shared === owner) shared = null; });
-    shared = owner;
+const shared = new Map<"knowledge" | "semantic", KnowledgeStoreProcess>();
+export function knowledgeStoreProcess(domain: "knowledge" | "semantic" = "knowledge"): KnowledgeStoreProcess {
+  let owner = shared.get(domain);
+  if (!owner || owner.failed) {
+    owner = new KnowledgeStoreProcess(() => { if (shared.get(domain) === owner) shared.delete(domain); });
+    shared.set(domain, owner);
   }
-  return shared;
+  return owner;
 }

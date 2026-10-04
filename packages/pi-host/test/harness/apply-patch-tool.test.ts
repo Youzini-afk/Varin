@@ -16,7 +16,6 @@ function createFakeBridge(root?: string, lockBatches?: string[][]): Pick<HostSer
         return { held: true, leaseIds: paths.map((_, index) => `lease-${index}`) };
       }
       if (method === "fs.lock" && params.action === "release") return { held: false, released: true };
-      if (method === "lsp.diagnostics") return { status: "ready", diagnostics: [] };
       if (method === "document.branchWrite") return { status: "disk" };
       if (method === "document.surfaceWrite") {
         if (!root) return { status: "disk" };
@@ -96,7 +95,6 @@ describe("apply_patch (Codex syntax)", () => {
           surfaceContent = change?.content ?? "";
           return { status: "applied", results: [{ path: "remote.txt", target: "disk", status: "applied" }] };
         }
-        if (method === "lsp.diagnostics") return { status: "ready", diagnostics: [] };
         throw new Error(`unexpected method: ${method}`);
       },
     } as unknown as HostServicesBridge;
@@ -247,7 +245,6 @@ describe("apply_patch (Codex syntax)", () => {
             results: [{ path: "draft.txt", target: "surface", status: "applied" }],
           };
         }
-        if (method === "lsp.diagnostics") return { status: "ready", diagnostics: [] };
         throw new Error(`unexpected method: ${method}`);
       },
     } as unknown as HostServicesBridge;
@@ -294,7 +291,6 @@ describe("apply_patch (Codex syntax)", () => {
             ],
           };
         }
-        if (method === "lsp.diagnostics") return { status: "ready", diagnostics: [] };
         throw new Error(`unexpected method: ${method}`);
       },
     } as unknown as HostServicesBridge;
@@ -374,7 +370,6 @@ describe("apply_patch (Codex syntax)", () => {
             results: [{ path: "stale.txt", target: "disk", status: "conflict" }],
           };
         }
-        if (method === "lsp.diagnostics") return { status: "ready", diagnostics: [] };
         throw new Error(`unexpected method: ${method}`);
       },
     } as unknown as HostServicesBridge;

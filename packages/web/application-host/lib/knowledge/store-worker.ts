@@ -14,12 +14,13 @@ const stores = new Map<number, KnowledgeStoreEngine>();
 const semanticStores = new Map<number, SemanticStoreEngine>();
 let tail: Promise<void> = Promise.resolve();
 let disconnected = false;
-const send = (message: StoreChildMessage): void => {
-  if (!process.connected) return;
+const send = (message: StoreChildMessage): Promise<void> => new Promise(resolve => {
+  if (!process.connected) { resolve(); return; }
   process.send!(message, (error: Error | null) => {
     if (error && process.connected) process.disconnect();
+    resolve();
   });
-};
+});
 const validateRequest = (value: unknown): value is StoreRequest => {
   if (!value || typeof value !== "object") return false;
   const r = value as Partial<StoreRequest>;
@@ -73,6 +74,7 @@ async function handle(requests: StoreRequest[]): Promise<void> {
         if (first.args[0] === "open" && error instanceof AggregateError) throw error;
         responses.push({ id: first.id, ok: false, error: storeFailure(error) });
       }
+      await send({ type: "results", responses: responses.splice(0) });
       continue;
     }
     if (first.method === "open" || first.method === "close") {
@@ -105,11 +107,12 @@ async function handle(requests: StoreRequest[]): Promise<void> {
         if (first.method === "open" && error instanceof AggregateError) throw error;
         responses.push({ id: first.id, ok: false, error: storeFailure(error) });
       }
+      await send({ type: "results", responses: responses.splice(0) });
       continue;
     }
 
     // Requests arrive in admitted order. Only a contiguous run on one store
-    // shares a checkpoint; no cross-store transaction or rollback is implied.
+    // shares a durability boundary; no cross-store transaction or rollback is implied.
     const group: StoreRequest[] = [];
     while (offset < requests.length) {
       const r = requests[offset]!;
@@ -120,6 +123,7 @@ async function handle(requests: StoreRequest[]): Promise<void> {
     const store = stores.get(first.storeId);
     if (!store) {
       for (const r of group) responses.push({ id: r.id, ok: false, error: storeFailure(new Error("Knowledge store is not open")) });
+      await send({ type: "results", responses: responses.splice(0) });
       continue;
     }
     const results: StoreResponse[] = [];
@@ -145,8 +149,10 @@ async function handle(requests: StoreRequest[]): Promise<void> {
         responses.push(result?.ok === false ? result : { id: r.id, ok: false, error: failure });
       }
     }
+    // This group's durability boundary is complete. Publish it before entering another
+    // store: unrelated native work must not delay an already durable result.
+    await send({ type: "results", responses: responses.splice(0) });
   }
-  send({ type: "results", responses });
 }
 
 process.on("message", (message: unknown) => {
@@ -173,4 +179,4 @@ process.once("disconnect", () => {
     process.exit(results.some(result => result.status === "rejected") ? 1 : 0);
   });
 });
-send({ type: "ready", version: 1 });
+void send({ type: "ready", version: 2 });

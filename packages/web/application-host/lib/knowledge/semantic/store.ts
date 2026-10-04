@@ -1,5 +1,5 @@
 /** Embedding orchestration stays in the Host; all native index work is owned by
- * the existing private storage process, including recovery and checkpoints. */
+ * the private semantic storage process, including recovery and checkpoints. */
 import { knowledgeStoreProcess } from "../store-process.js";
 import { readSemanticCheckpoint } from "./checkpoint.js";
 import { defaultRecipeIdentity, recipeIdOf, semanticSpaceDir, spaceIdOf,
@@ -36,7 +36,7 @@ export function createSemanticGenerationStore(options: {
 
   const open = (): Promise<void> => {
     if (openTask) return openTask;
-    owner = knowledgeStoreProcess();
+    owner = knowledgeStoreProcess("semantic");
     storeId = owner.register({ revision: () => {}, notify: message => {
       if (message.type === "persistence-error") console.error("[SemanticStore] Deferred checkpoint failed; pending data retained for retry");
     } });

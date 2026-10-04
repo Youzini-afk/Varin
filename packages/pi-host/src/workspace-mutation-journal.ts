@@ -118,32 +118,6 @@ export function formatSurfaceWriteResult(
   return `${result.message ?? `surface mutation ${result.status}`}${lines.length > 0 ? `\n${lines.join("\n")}` : ""}`;
 }
 
-export async function fetchDiagnostics(
-  bridge: HostServicesBridge,
-  path: string,
-  waitMs = 5_000,
-): Promise<{ status: string; summary: string } | null> {
-  try {
-    const result = await bridge.request("lsp.diagnostics", { path, waitMs });
-    if (result.status === "unavailable") {
-      const reason = typeof (result as { reason?: string }).reason === "string"
-        ? (result as { reason: string }).reason
-        : "no language server";
-      return { status: "unavailable", summary: `unavailable — ${reason}` };
-    }
-    if (result.status === "pending") {
-      return { status: "pending", summary: `pending — call diagnostics("${path}")` };
-    }
-    if (result.diagnostics.length === 0) return { status: "clean", summary: "clean" };
-    const errors = result.diagnostics.filter((entry: { severity: string }) => entry.severity === "error").length;
-    const warnings = result.diagnostics.filter((entry: { severity: string }) => entry.severity === "warning").length;
-    const summary = `${result.diagnostics.length} diagnostic(s)${errors > 0 ? `, ${errors} error(s)` : ""}${warnings > 0 ? `, ${warnings} warning(s)` : ""}`;
-    return { status: "ready", summary };
-  } catch {
-    return { status: "unavailable", summary: "unavailable — request failed" };
-  }
-}
-
 export async function trySurfaceWrite(
   bridge: HostServicesBridge,
   params: {
@@ -182,18 +156,6 @@ export async function trySurfaceWrite(
   const action = label ?? params.action ?? params.changes?.[0]?.action ?? "edit";
   const fallback = params.path ?? params.changes?.[0]?.path ?? "";
   return { text: formatSurfaceWriteResult(result, fallback, action), status: result.status, results: result.results };
-}
-
-async function withDiskDiagnostics(
-  bridge: HostServicesBridge,
-  path: string,
-  planned: Exclude<Awaited<ReturnType<typeof trySurfaceWrite>>, "disk">,
-): Promise<string> {
-  if (!planned.results.some((entry) => entry.target === "disk" && entry.status === "applied")) {
-    return planned.text;
-  }
-  const diagnostics = await fetchDiagnostics(bridge, path);
-  return diagnostics ? `${planned.text}\n\n[diagnostics: ${diagnostics.summary}]` : planned.text;
 }
 
 async function tryVirtualBranchWrite(
@@ -290,7 +252,7 @@ export function createWorkspaceMutationJournalTools(
             content: params.content,
           }, signal);
           if (planned !== "disk") {
-            return { content: [{ type: "text" as const, text: await withDiskDiagnostics(hostServicesBridge, params.path, planned) }],
+            return { content: [{ type: "text" as const, text: planned.text }],
               details: { mutation: { status: planned.status, results: planned.results } } };
           }
         }
@@ -329,7 +291,7 @@ export function createWorkspaceMutationJournalTools(
             edits: params.edits,
           }, signal);
           if (planned !== "disk") {
-            return { content: [{ type: "text" as const, text: await withDiskDiagnostics(hostServicesBridge, params.path, planned) }],
+            return { content: [{ type: "text" as const, text: planned.text }],
               details: { mutation: { status: planned.status, results: planned.results } } };
           }
         }

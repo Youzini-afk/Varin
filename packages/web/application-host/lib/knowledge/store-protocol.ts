@@ -47,7 +47,7 @@ export type StoreNotification =
   | { type: "knowledge"; storeId: number; ids: readonly number[]; revision: string }
   | { type: "persistence-error"; storeId: number; error: StoreFailure };
 export type StoreChildMessage =
-  | { type: "ready"; version: 1 }
+  | { type: "ready"; version: 2 }
   | { type: "results"; responses: StoreResponse[] }
   | StoreNotification;
 

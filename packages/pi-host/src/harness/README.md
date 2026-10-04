@@ -291,8 +291,9 @@ unavailable or disabled.
 `document.surfaceWrite`: snapshot-owned paths edit the Document Registry buffer and disk-target paths are
 applied by Host Documents through the Rust file-resource backend. If the Host mutation backend cannot take
 the request, the worker fails explicitly; it does not fall through to Pi's local file writer or the legacy
-`workspace.mutation.request` loop. Host-confirmed disk writes still request post-write LSP diagnostics after
-the mutation gate has been released. The journal loop remains a standalone/no-Host helper path used by its own
+`workspace.mutation.request` loop. A confirmed write returns its mutation result immediately; it does not start
+or wait for LSP diagnostics. Agents can request `diagnostics` after a logical set of edits, and existing
+language observations still arrive through the context path. The journal loop remains a standalone/no-Host helper path used by its own
 tests and is not Varin's production disk authority.
 
 `apply_patch` uses the same shared plan. Mixed surface/disk batches return per-path

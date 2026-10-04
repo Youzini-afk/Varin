@@ -153,8 +153,12 @@ export async function openKnowledgeStoreEngine(deps: KnowledgeStoreEngineOptions
   const dim = embedding?.dim ?? PLACEHOLDER_DIM;
   const nativeDb = new TriviumDB(dbPath, {
     dim,
-    syncMode: "normal",
-    loadTextIndex: true,
+    // User state is acknowledged after native WAL fsync, not a whole-catalog
+    // checkpoint. Derived property indexes are rebuilt from those payloads.
+    syncMode: "full",
+    // Readers use property/ngram indexes and payload text. No production query
+    // uses the separate full-text/keyword index, so do not build or load it.
+    loadTextIndex: false,
     // TriviumDB 0.8.7 fixed the parsed-cache O(N) recency bug. Keep the
     // explicit zero-cache policy for large, mixed catalogs: it avoids keeping
     // parsed payloads resident and remains faster for cold full-catalog reads.
@@ -167,7 +171,16 @@ export async function openKnowledgeStoreEngine(deps: KnowledgeStoreEngineOptions
     writeTail = result.then(() => undefined, () => undefined);
     return result;
   }
+  function enqueueGraphWrite<T>(fn: () => T): Promise<T> {
+    return enqueueWrite(() => {
+      // Derived symbols retain their existing deferred persistence. These
+      // synchronous callbacks cannot overlap a full-sync plan/memory mutation.
+      nativeDb.setSyncMode("normal");
+      try { return fn(); } finally { nativeDb.setSyncMode("full"); }
+    });
+  }
   const persistence = createStorePersistence({
+    walCommits: true,
     flush: () => nativeDb.flush(),
     close: () => nativeDb.close(),
     enqueue: enqueueWrite,
@@ -729,7 +742,6 @@ export async function openKnowledgeStoreEngine(deps: KnowledgeStoreEngineOptions
             source: e.source,
           };
           const id = db.insert(placeholderVec, payload);
-          db.indexText(id, e.text);
           persistence.commit();
           return { id, inserted: true };
         });
@@ -913,14 +925,11 @@ export async function openKnowledgeStoreEngine(deps: KnowledgeStoreEngineOptions
           };
 
           const targetNode = newestNode(candidates.filter((node) => sourceLeafOf(node) === inputSourceLeaf));
-          let id: number;
           if (targetNode) {
             db.updatePayload(targetNode.id, payload);
-            id = targetNode.id;
           } else {
-            id = db.insert(placeholderVec, payload);
+            db.insert(placeholderVec, payload);
           }
-          db.indexText(id, b.content);
           persistence.commit();
 
           return { previous: current, result: {
@@ -1005,8 +1014,6 @@ export async function openKnowledgeStoreEngine(deps: KnowledgeStoreEngineOptions
           assertSupplementsTarget(k.supplements, k.scope);
           const payload = knowledgeInsertPayload(k, Date.now());
           const id = db.insert(placeholderVec, payload);
-          db.indexText(id, k.content);
-          if (k.trigger) db.indexKeyword(id, k.trigger);
           linkSupplements(id, k.supplements);
           persistence.commit();
           bumpKnowledgeEpoch();
@@ -1078,8 +1085,6 @@ export async function openKnowledgeStoreEngine(deps: KnowledgeStoreEngineOptions
           assertSupplementsTarget(k.supplements, k.scope);
           const payload = knowledgeInsertPayload(k, Date.now());
           const id = db.insert(placeholderVec, payload);
-          db.indexText(id, k.content);
-          if (k.trigger) db.indexKeyword(id, k.trigger);
           linkSupplements(id, k.supplements);
           persistence.commit();
           bumpKnowledgeEpoch();
@@ -1136,8 +1141,6 @@ export async function openKnowledgeStoreEngine(deps: KnowledgeStoreEngineOptions
           }
           if (!patch.content.trim()) throw new KnowledgeMutationError("invalid", "Knowledge content is required");
           db.patchPayload(id, { $set: { content: patch.content, trigger: patch.trigger } });
-          db.indexText(id, patch.content);
-          if (patch.trigger) db.indexKeyword(id, patch.trigger);
           persistence.commit();
           bumpKnowledgeEpoch();
           notifyKnowledge([id]);
@@ -1164,8 +1167,6 @@ export async function openKnowledgeStoreEngine(deps: KnowledgeStoreEngineOptions
           }
           if (!patch.content.trim()) throw new KnowledgeMutationError("invalid", "Knowledge content is required");
           db.patchPayload(id, { $set: { content: patch.content, trigger: patch.trigger } });
-          db.indexText(id, patch.content);
-          if (patch.trigger) db.indexKeyword(id, patch.trigger);
           persistence.commit();
           bumpKnowledgeEpoch();
           notifyKnowledge([id]);
@@ -1205,8 +1206,6 @@ export async function openKnowledgeStoreEngine(deps: KnowledgeStoreEngineOptions
             ...(inheritedSource ? { source: inheritedSource } : {}),
           }, now);
           const nextId = db.insert(placeholderVec, nextPayload);
-          db.indexText(nextId, input.content);
-          if (input.trigger) db.indexKeyword(nextId, input.trigger);
           db.patchPayload(id, { $set: { invalidAt: now } });
           db.link(nextId, id, "supersedes", 1);
           // A correction keeps the predecessor's supplements relation unless
@@ -1340,10 +1339,6 @@ export async function openKnowledgeStoreEngine(deps: KnowledgeStoreEngineOptions
             status: "accepted",
             ...(opts.edit ? { content: opts.edit.content, trigger: opts.edit.trigger } : {}),
           } });
-          if (opts.edit) {
-            db.indexText(id, opts.edit.content);
-            if (opts.edit.trigger) db.indexKeyword(id, opts.edit.trigger);
-          }
           if (superseded.length > 0) {
             const now = Date.now();
             for (const oldId of superseded) {
@@ -1435,7 +1430,7 @@ export async function openKnowledgeStoreEngine(deps: KnowledgeStoreEngineOptions
       },
 
       async touchFile(path, language): Promise<NodeId> {
-        return enqueueWrite(() => {
+        return enqueueGraphWrite(() => {
           const normalizedPath = assertGraphText(path, "File path");
           const normalizedLanguage = assertGraphText(language, "File language");
           const existing = fileNodes(normalizedPath);
@@ -1464,14 +1459,13 @@ export async function openKnowledgeStoreEngine(deps: KnowledgeStoreEngineOptions
           db.commitTransaction(operations);
           bumpCounters({ files: existing.length === 0 ? 1 : 1 - existing.length });
           invalidateGraphShape();
-          db.indexText(fileId, normalizedPath);
           scheduleGraphFlush();
           return fileId;
         });
       },
 
       async replaceFileSymbols(path, language, symbols, documentRevision, links = [], options = {}) {
-        return enqueueWrite(() => {
+        return enqueueGraphWrite(() => {
           const normalizedPath = assertGraphText(path, "File path");
           const normalizedLanguage = assertGraphText(language, "File language");
           const normalizedRevision = assertGraphText(documentRevision, "Document revision");
@@ -1604,26 +1598,13 @@ export async function openKnowledgeStoreEngine(deps: KnowledgeStoreEngineOptions
             links: links.length - previousLinks.filter(({ payload }) => payload["active"] === true).length,
           });
           invalidateGraphShape();
-          db.indexText(fileId, normalizedPath);
-          for (let index = 0; index < symbolIds.length; index += 1) {
-            const id = symbolIds[index]!;
-            const symbol = symbols[index]!;
-            db.indexText(id, `${symbol.name} ${normalizedPath}`);
-            db.indexKeyword(id, symbol.name);
-          }
-          for (let index = 0; index < linkIds.length; index += 1) {
-            const id = linkIds[index]!;
-            const link = links[index]!;
-            db.indexText(id, `${link.value} ${normalizedPath}`);
-            db.indexKeyword(id, link.value);
-          }
           scheduleGraphFlush();
           return { fileId, symbols: symbolIds.length, edges: symbolIds.length + links.length };
         });
       },
 
       async resolveAssociationCandidates(): Promise<{ activated: number }> {
-        return enqueueWrite(() => {
+        return enqueueGraphWrite(() => {
           const files = lookup({ type: "file", active: true, hasAssociationCandidates: true });
           if (files.length === 0) return { activated: 0 };
 
@@ -1664,7 +1645,6 @@ export async function openKnowledgeStoreEngine(deps: KnowledgeStoreEngineOptions
           }
 
           const operations: TransactionOperation[] = [];
-          const newLinkRows: Array<{ file: StoredNode; candidate: AssociationCandidate; id: NodeId }> = [];
           let activated = 0;
           let deactivated = 0;
           for (const file of files) {
@@ -1713,8 +1693,6 @@ export async function openKnowledgeStoreEngine(deps: KnowledgeStoreEngineOptions
               : [];
             const activePayloads = pendingPayloads.map((payload) => ({ ...payload, active: true }));
             for (const [index, id] of linkIds.entries()) {
-              const candidate = toActivate[index]!;
-              newLinkRows.push({ file, candidate, id });
               operations.push(
                 { type: "updatePayload", id, payload: activePayloads[index] },
                 { type: "upsertEdge", src: file.id, dst: id, label: "associates", weight: 1 },
@@ -1732,17 +1710,13 @@ export async function openKnowledgeStoreEngine(deps: KnowledgeStoreEngineOptions
           if (operations.length === 0) return { activated: 0 };
           db.commitTransaction(operations);
           bumpCounters({ links: activated - deactivated });
-          for (const row of newLinkRows) {
-            db.indexText(row.id, `${row.candidate.value} ${String(row.file.payload["path"])}`);
-            db.indexKeyword(row.id, row.candidate.value);
-          }
           scheduleGraphFlush();
           return { activated };
         });
       },
 
       async removeFileSymbols(path, options) {
-        return enqueueWrite(() => {
+        return enqueueGraphWrite(() => {
           if (options?.signal?.aborted) return { removedFiles: 0, removedSymbols: 0 };
           const normalizedPath = assertGraphText(path, "File path");
           const files = fileNodes(normalizedPath);
@@ -1799,7 +1773,7 @@ export async function openKnowledgeStoreEngine(deps: KnowledgeStoreEngineOptions
       },
 
       async recordResolvedRelations(path, language, relations) {
-        return enqueueWrite(() => {
+        return enqueueGraphWrite(() => {
           if (relations.length === 0) return { recorded: 0 };
           const normalizedPath = assertGraphText(path, "File path");
           const normalizedLanguage = assertGraphText(language, "File language");
@@ -1900,12 +1874,6 @@ export async function openKnowledgeStoreEngine(deps: KnowledgeStoreEngineOptions
           }
           if (operations.length > 0) db.commitTransaction(operations);
           bumpCounters({ links: linkIds.length - superseded.length });
-          for (let index = 0; index < linkIds.length; index += 1) {
-            const id = linkIds[index]!;
-            const relation = relations[index]!;
-            db.indexText(id, `${relation.value} ${normalizedPath}`);
-            db.indexKeyword(id, relation.value);
-          }
           if (files.length === 0) bumpCounters({ files: 1 });
           invalidateGraphShape();
           scheduleGraphFlush();
@@ -1914,7 +1882,7 @@ export async function openKnowledgeStoreEngine(deps: KnowledgeStoreEngineOptions
       },
 
       async replaceResolvedRelationsForAnchor(anchor, rows, kinds) {
-        return enqueueWrite(() => {
+        return enqueueGraphWrite(() => {
           const anchorPath = assertGraphText(anchor.path, "Anchor path");
           const anchorLine = anchor.line;
           if (!Number.isSafeInteger(anchorLine) || anchorLine < 1) {
@@ -2034,13 +2002,6 @@ export async function openKnowledgeStoreEngine(deps: KnowledgeStoreEngineOptions
           ];
           if (insertOps.length > 0) db.commitTransaction(insertOps);
           bumpCounters({ links: linkIds.length - staleIds.length });
-          for (let index = 0; index < linkIds.length; index += 1) {
-            const id = linkIds[index]!;
-            const relation = newLinkRelations[index]!;
-            const indexPath = typeof newLinkPayloads[index]!["path"] === "string" ? newLinkPayloads[index]!["path"] as string : "";
-            db.indexText(id, `${relation.value} ${indexPath}`);
-            db.indexKeyword(id, relation.value);
-          }
           invalidateGraphShape();
           scheduleGraphFlush();
           return { recorded: linkIds.length, removed: staleIds.length };
@@ -2133,7 +2094,7 @@ export async function openKnowledgeStoreEngine(deps: KnowledgeStoreEngineOptions
       },
 
       async recordFileSourceMetadata(path, revision, extractor, metadata) {
-        await enqueueWrite(() => {
+        await enqueueGraphWrite(() => {
           const file = fileNodes(assertGraphText(path, "File path"))[0];
           if (!file || file.payload["documentRevision"] !== revision || file.payload["extractor"] !== extractor) return;
           if (JSON.stringify(file.payload["sourceMetadata"]) === JSON.stringify(metadata)) return;
