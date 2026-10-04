@@ -46,10 +46,7 @@ export function createWebSearchTool(bridge: HostServicesBridge, _sessionId: stri
     description: "Search the web for current information. Accepts a query, a natural-language objective, several queries, known URLs to pin as snapshots, or a cursor from a previous result page. Each requested item reports its own status. Works without search credentials by default; a user-configured provider takes precedence. Use webfetch to read a page or re-read a pinned snapshot.",
     promptSnippet: "websearch: search the web for current information",
     promptGuidelines: [
-      "Use websearch to find current information. Give query, objective, queries, urls, or a cursor; follow up with webfetch to read specific pages.",
-      "Results are summaries — always verify important claims by reading the source page.",
-      "Domain filters (allowed_domains / blocked_domains) restrict results to/from specific sites.",
-      "When an item reports nextCursor, pass it back as cursor to continue that result page.",
+      "Results contain summaries and source links. webfetch reads a source page or pinned snapshot; nextCursor continues a result page.",
     ],
     parameters: WebSearchParams,
     executionMode: "parallel",

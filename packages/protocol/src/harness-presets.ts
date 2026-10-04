@@ -45,13 +45,12 @@ export interface ExecutionPreset {
   slot?: HarnessModelRole;
   tools: string[];
   worktree: PresetWorktree;
-  /** Appended to the end of the thread's system prompt (Zone 0 stays shared). */
+  /** Included in the thread's initial task input. */
   systemPromptFragment: string;
   /** One clause describing the preset, used to build the team prompt. */
   teamDescription: string;
   name?: string;
   modelSettings?: HarnessAgentModelSettings;
-  resultSchema: unknown;
 }
 
 // ── Preset definitions ─────────────────────────────────────────────
@@ -63,9 +62,8 @@ export const EXECUTION_PRESETS: Readonly<Record<PresetId, ExecutionPreset & { sl
     tools: ["read", "edit", "write", "apply_patch", "bash", "grep", "glob", "get_output", "write_to_process", "kill_shell"],
     worktree: "isolated",
     systemPromptFragment:
-      "You are a quick implementation agent. Make mechanical, well-specified changes efficiently.",
+      "Preset focus: well-specified implementation tasks.",
     teamDescription: "mechanical, well-specified changes",
-    resultSchema: { changedFiles: "string[]", conclusion: "string" },
   },
   "hard-implement": {
     id: "hard-implement",
@@ -73,9 +71,8 @@ export const EXECUTION_PRESETS: Readonly<Record<PresetId, ExecutionPreset & { sl
     tools: ["read", "edit", "write", "apply_patch", "bash", "grep", "glob", "get_output", "write_to_process", "kill_shell", "explore", "recall", "todo", "dispatch", "threads", "wait", "send", "read_thread", "merge", "update", "kill"],
     worktree: "isolated",
     systemPromptFragment:
-      "You are a hard implementation agent. Handle ambiguous or cross-cutting work that requires deeper reasoning.",
+      "Preset focus: complex implementation tasks.",
     teamDescription: "ambiguous or cross-cutting work",
-    resultSchema: { changedFiles: "string[]", conclusion: "string", unresolved: "string[]" },
   },
   "frontend": {
     id: "frontend",
@@ -83,18 +80,16 @@ export const EXECUTION_PRESETS: Readonly<Record<PresetId, ExecutionPreset & { sl
     tools: ["read", "edit", "write", "apply_patch", "bash", "grep", "glob", "get_output", "write_to_process", "kill_shell", "explore", "dispatch", "threads", "wait", "send", "read_thread", "merge", "update", "kill"],
     worktree: "isolated",
     systemPromptFragment:
-      "You are a frontend specialist. Focus on UI components, styles, and user-facing behavior.",
+      "Preset focus: frontend implementation.",
     teamDescription: "UI specialist",
-    resultSchema: { changedFiles: "string[]", conclusion: "string" },
   },
   "review": {
     id: "review",
     slot: "review",
     tools: ["read", "grep", "glob", "bash", "get_output", "write_to_process", "kill_shell"],
     worktree: "none",
-    systemPromptFragment: "You have not seen the conversation; review the diff on its own merits.",
+    systemPromptFragment: "Preset focus: review.",
     teamDescription: "independent review of a diff",
-    resultSchema: { conclusion: "string", issues: "string[]", severity: "string" },
   },
   "check": {
     id: "check",
@@ -102,9 +97,8 @@ export const EXECUTION_PRESETS: Readonly<Record<PresetId, ExecutionPreset & { sl
     tools: ["read", "bash", "grep", "glob", "get_output", "write_to_process", "kill_shell"],
     worktree: "isolated",
     systemPromptFragment:
-      "You are a check agent. Run tests and lint, report results. Do not make changes.",
+      "Preset focus: checks and validation.",
     teamDescription: "run tests/lint and report",
-    resultSchema: { conclusion: "string", passed: "boolean", output: "string" },
   },
   "retrieval": {
     id: "retrieval",
@@ -135,17 +129,8 @@ export const EXECUTION_PRESETS: Readonly<Record<PresetId, ExecutionPreset & { sl
     ],
     worktree: "none",
     systemPromptFragment:
-      "You are a retrieval agent. Investigate the open question and give the parent the clearest useful report for the work at hand. "
-      + "When precise source-addressable claim rows would help the parent reuse a finding, attach them with submit_facts; prose alone is a complete report. "
-      + "Do not recommend product changes, priorities, or architecture. Do not edit, write, or run shell commands. "
-      + "Cite local paths with compact line ranges or stored URL receipts. "
-      + "The Host can mark a source source-checked or source-valid; it cannot prove a claim is true. "
-      + "Record material you tried and could not obtain as unknown, in the report or structured facts.",
+      "Preset focus: information retrieval.",
     teamDescription: "multi-step fact retrieval",
-    resultSchema: {
-      conclusion: "natural-language report",
-      evidence: "optional Host-validated structured facts and unknowns",
-    },
   },
 };
 
@@ -181,8 +166,7 @@ export function resolvePresets(
     const id = `custom:${key}`;
     resolved.push({ id, model, definition: { id, tools: agent.tools, worktree: agent.worktree,
       systemPromptFragment: agent.instructions, teamDescription: `${agent.name}: ${agent.description}`,
-      name: agent.name, ...(agent.modelSettings ? { modelSettings: { ...agent.modelSettings } } : {}),
-      resultSchema: { conclusion: "string" } } });
+      name: agent.name, ...(agent.modelSettings ? { modelSettings: { ...agent.modelSettings } } : {}) } });
   }
   return resolved;
 }
@@ -204,7 +188,6 @@ export function buildTeamPrompt(presets: ResolvedPreset[]): string {
   const list = presetList ? ` Available presets: ${presetList}.` : "";
   return (
     `${base}${list} ` +
-    "Judge by time and cost: if you can finish in a few tool calls yourself, do it yourself. " +
     "Dispatch is asynchronous: wait blocks until a teammate changes state, threads is a quick glance, " +
     "send passes a teammate new information, read_thread shows their notes. " +
     "The user may also open and talk to teammates directly; their final report tells you what actually happened."

@@ -184,7 +184,7 @@ describe("get_output tool", () => {
     assert.match(text, /12\/100 bytes/);
   });
 
-  it("renders incremental shell changes and discourages empty polling", async () => {
+  it("renders incremental shell changes and empty reads", async () => {
     let reads = 0;
     const bridge = createFakeBridge((method) => {
       if (method !== "shell.read") throw new Error(`unexpected: ${method}`);
@@ -201,8 +201,9 @@ describe("get_output tool", () => {
   it("handles errors gracefully", async () => {
     const bridge = createFakeBridge(() => { throw new Error("not found"); });
     const tool = createGetOutputTool(bridge as HostServicesBridge, "s1");
-    const text = await executeTool(tool, { handle: "out_missing" });
-    assert.match(text, /get_output failed/);
+    const result = await tool.execute("call-failed", { handle: "out_missing" }, undefined, undefined, undefined as never);
+    assert.equal(result.isError, true);
+    assert.equal((result.details as { error: string }).error, "not found");
   });
 });
 
@@ -223,7 +224,7 @@ describe("bash tool preparation result", () => {
     const result = await tool.execute("call-1", { command: "npm test", waitMs: 25 }, undefined, undefined, undefined as never);
     const text = (result.content[0] as { type: "text"; text: string }).text;
     assert.match(text, /no runtime shell handle exists yet/);
-    assert.match(text, /get_output\("exec_0123456789abcdef0123456789abcdef"\)/);
+    assert.match(text, /get_output.*exec_0123456789abcdef0123456789abcdef/);
     assert.doesNotMatch(text, /write_to_process|kill_shell/);
   });
 });
@@ -324,5 +325,43 @@ describe("diagnostics tool", () => {
     assert.match(text, /\+1 −1 since last check/);
     assert.match(text, /\+ error.*new error/);
     assert.match(text, /− resolved warning.*old warning/);
+  });
+});
+
+describe("output and diagnostic failure receipts", () => {
+  it("preserves unavailable and rejected outcomes as tool errors", async () => {
+    const cases = [
+      { create: createGetOutputTool, params: { handle: "exec_old" }, response: {
+        text: "", offset: 0, length: 0, nextOffset: 0, total: 0, eof: false,
+        running: false, unavailable: "expired",
+      } },
+      { create: createGetOutputTool, params: { handle: "exec_failed" }, response: {
+        text: "", offset: 0, length: 0, nextOffset: 0, total: 0, eof: true,
+        running: false, spawnFailed: "no interpreter", observation: { mode: "incremental", first: true },
+      } },
+      { create: createWriteToProcessTool, params: { shellId: "sh_missing", text: "x" }, response: { accepted: false } },
+      { create: createKillShellTool, params: { shellId: "sh_missing" }, response: { killed: false } },
+      { create: createDiagnosticsTool, params: { path: "file.ts" }, response: { status: "unavailable", diagnostics: [] } },
+    ];
+    for (const { create, params, response } of cases) {
+      const bridge = createFakeBridge(() => response) as HostServicesBridge;
+      const result = await create(bridge, "s1").execute("call", params as never, undefined, undefined, undefined as never);
+      assert.equal(result.isError, true, create.name);
+    }
+  });
+
+  it("keeps bridge failures distinct from empty successful results", async () => {
+    for (const [create, params] of [
+      [createWriteToProcessTool, { shellId: "sh_1", text: "x" }],
+      [createKillShellTool, { shellId: "sh_1" }],
+      [createDiagnosticsTool, { path: "file.ts" }],
+    ] as const) {
+      const bridge = createFakeBridge(() => { throw new Error("offline"); }) as HostServicesBridge;
+      const result = await create(bridge, "s1").execute("call", params as never, undefined, undefined, undefined as never);
+      assert.equal(result.isError, true, create.name);
+    }
+    const bridge = createFakeBridge(() => ({ status: "ready", diagnostics: [] })) as HostServicesBridge;
+    const ready = await createDiagnosticsTool(bridge, "s1").execute("call", { path: "file.ts" }, undefined, undefined, undefined as never);
+    assert.notEqual(ready.isError, true);
   });
 });

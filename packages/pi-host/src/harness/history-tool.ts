@@ -46,9 +46,8 @@ export function createHistoryTool(bridge?: HostServicesBridge): ToolDefinition {
       + "Use run to read a retained earlier Run of this same Thread; parent and sibling transcripts are not accessible.",
     promptSnippet: "history: read original entries from this session or an authorized earlier Run of the same Thread",
     promptGuidelines: [
-      "Use query/path to locate entries, offset/nextOffset to page, or entry with before/after for neighbours.",
-      "A fresh input supplies its source Run id. Pass run with the old entry id to read that preserved transcript; old ids do not identify current-session entries.",
-      "Returned images keep their original bytes. Large text uses normal ephemeral output paging; repeat the history query instead of treating output handles as durable history.",
+      "run selects a retained earlier Run of this same Thread; entry ids belong to that selected transcript. Parent and sibling transcripts are not accessible.",
+      "Images retain their original bytes. Output handles for large text are ephemeral; the history query can retrieve the retained entry again.",
     ],
     parameters: HistoryParams,
     executionMode: "parallel",

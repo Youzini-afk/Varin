@@ -702,10 +702,15 @@ to scratch or materialized cwd. A missing or mismatched owner is denied; it
 cannot skip the thread tool allowlist. Knowledge, recall, suggestions, and
 Zone 2 knowledge resolve that owning workspace. Documents, LSP, shell, paths,
 and workspace semantic index stay on the execution workspace.
-A Run whose launch manifest explicitly carries blocks includes a tagged snapshot of the parent's then-current blocks. At
-settlement the runtime combines explicitly headed report sections, tagged
-decision deviations, the child block snapshot, metrics, transcript bounds, and
-worktree facts before the registry commits the terminal Run and report together.
+A Run whose launch manifest explicitly carries blocks includes a tagged snapshot of the parent's then-current blocks.
+Initial child input identifies the parent relationship and configured role, and carries the assigned task and frozen input
+for implementation, retrieval, and consultation threads. User discussions retain their selected parent-message reference.
+When an implementation or retrieval Run settles, the runtime preserves the assistant report as free text without
+imposing or parsing section headings. Host-recorded issues, the child block snapshot, metrics, transcript bounds, and
+worktree facts remain separate fields before the registry commits the terminal Run and report together. Report reads
+include the complete assistant text alongside optional structured retrieval evidence; empty issue arrays are not
+presented as a claim that no work remains. Discussion threads, including agent-created consultations, currently remain
+active after a response and wait for further input; their replies are read through steps/transcript, with no terminal report.
 An isolated child fixes its logical baseline during dispatch, before the Pi session starts. Git still inventories
 HEAD plus staged, unstaged, tracked, deleted, and non-ignored untracked paths, index modes, and dirty-path content
 identities; a command failure is a failed capture, not an empty inventory. Unborn HEAD is `baseRef: "zero-commit"`

@@ -60,16 +60,8 @@ export function createExploreTool(
   return defineTool({
     name: "explore",
     label: "Explore",
-    description: "Locate relevant code and read the related context in the same call (definitions, registration sites, callers, and the excerpts needed to judge). Use grep when you only need an exact match. Put known symbols, method names, error text, and path fragments in anchors. Natural-language questions can be rewritten into repository search expressions when models.explore is configured; conceptual names do not have to match identifiers literally.",
-    promptSnippet: "explore: locate and read related context in one call; put known symbols, method names, error text, and path fragments in anchors; conceptual questions can be mapped to repository names; use grep for exact match only",
-    promptGuidelines: [
-      "Use explore to locate code and read the related context (definitions, registration sites, callers, and excerpts needed to judge) in one call.",
-      "Use grep when you only need exact matches.",
-      "Put known symbols, method names, error text, and path fragments in anchors.",
-      "Use paths to choose one or more search directories, especially when cwd contains multiple projects. Absolute and cwd-relative paths are supported; anchors do not widen explicit paths.",
-      "Set budgetMs to adjust search time and limit to adjust the number of returned excerpts. Inspect reported scope and incomplete coverage before widening a search.",
-      "Explore can bridge a conceptual question and repository identifiers when an explore model is configured. It still returns current source excerpts, not a substitute analysis.",
-    ],
+    description: "Locate relevant code and read the related context in the same call (definitions, registration sites, callers, and the excerpts needed to judge). Optional anchors prioritize literal symbols, method names, error text, and path fragments. Natural-language questions can be rewritten into repository search expressions when models.explore is configured; conceptual names do not have to match identifiers literally.",
+    promptSnippet: "explore: locate and read related source context with optional literal anchors and model-assisted query mapping",
     parameters: ExploreParams,
     executionMode: "parallel",
     execute: async (_toolCallId, params, signal, onUpdate, _ctx) => {

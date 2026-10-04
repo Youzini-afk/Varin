@@ -4,9 +4,9 @@ import type { HostServicesBridge } from "./host-services-bridge.js";
 import { HARNESS_MAX_REQUEST_TIMEOUT_MS, type ShellExecResult } from "@varin/protocol";
 
 const BashParams = Type.Object({
-  command: Type.String(),
-  waitMs: Type.Optional(Type.Integer({ minimum: 0 })),
-  description: Type.Optional(Type.String()),
+  command: Type.String({ description: "Shell command text" }),
+  waitMs: Type.Optional(Type.Integer({ minimum: 0, description: "Foreground observation window in milliseconds; defaults to the session setting (10000 by default). Expiry backgrounds the command without terminating it." })),
+  description: Type.Optional(Type.String({ description: "Optional display label; not part of the command" })),
   target: Type.Optional(Type.String({ description: "Stable managed execution target from resources; omit for the work's environment binding or this Host" })),
   cwd: Type.Optional(Type.String({ description: "Absolute working directory on the selected target; remote targets never reuse the local workspace path" })),
 });
@@ -25,7 +25,7 @@ function formatShellResult(result: ShellExecResult): string {
       if (result.stderr) lines.push(`[stderr]\n${result.stderr}`);
       lines.push(`\n[exit ${result.exitCode}]`);
       if (result.handle) {
-        lines.push(`[full output: get_output("${result.handle}")]`);
+        lines.push(`[full output: get_output({handle:"${result.handle}"})]`);
       }
       return `${location}${lines.join("\n")}`;
     }
@@ -34,10 +34,10 @@ function formatShellResult(result: ShellExecResult): string {
       const observation = result.organized?.partial
         ? `[Command is still running. waited ${result.waitedMs}ms — current observation, not a final summary]`
         : `[Command is still running. waited ${result.waitedMs}ms]`;
-      return `${location}${observation}\n${body}\n\n[Continue: get_output("${result.id}") or write_to_process("${result.id}", "...") or kill_shell("${result.id}")]`;
+      return `${location}${observation}\n${body}\n\n[Continue: get_output({handle:"${result.id}"}) or write_to_process({shellId:"${result.id}",text:"..."}) or kill_shell({shellId:"${result.id}"})]`;
     }
     case "preparing":
-      return `[Command accepted; shell preparation is still in progress. waited ${result.waitedMs}ms — no runtime shell handle exists yet]\n[Continue: get_output("${result.id}")]`;
+      return `[Command accepted; shell preparation is still in progress. waited ${result.waitedMs}ms — no runtime shell handle exists yet]\n[Continue: get_output({handle:"${result.id}"})]`;
     case "spawn-failed": {
       return `[spawn failed: ${result.reason}]\n${result.hint ?? ""}`;
     }
@@ -55,13 +55,11 @@ export function createBashTool(
   return defineTool({
     name: "bash",
     label: "Bash",
-    description: "Execute an independent bash command and return stdout, stderr, and exit code. Each call starts in its explicit cwd or the request's frozen default cwd; cd and environment changes do not carry into another call. Long-running commands are backgrounded after waitMs. Under PTY-based shells (git-bash, wsl), stdout and stderr are merged into a single stream.",
+    description: "Execute an independent bash command and return formatted output, exit status, or a background/preparation handle. Each call starts in its explicit cwd or the request's frozen default cwd; cd and environment changes do not carry into another call. Long-running commands are backgrounded after waitMs. Under PTY-based shells (git-bash, wsl), stdout and stderr are merged into a single stream.",
     promptSnippet: "bash: execute shell commands (bash family)",
     promptGuidelines: [
-      "Use bash for independent shell commands. Each call starts in its explicit cwd or frozen default cwd; cd and environment changes do not carry into another call.",
-      "For a long-running interactive process, use its returned shell id with get_output, write_to_process, and kill_shell to observe, interact, or stop that process.",
-      "A non-zero exit code is a result, not an error. Only use bash when no specialized tool fits.",
-      "Prefer grep, edit, read, write, and find tools over bash equivalents.",
+      "Each bash call starts in its explicit cwd or the request's default cwd; cd and environment changes do not carry to another call.",
+      "Shell results are formatted text. A non-zero command exit code remains a completed result. Background shell ids support get_output, write_to_process, and kill_shell; a preparing execution id supports get_output only.",
     ],
     parameters: BashParams,
     executionMode: "sequential",
@@ -94,12 +92,14 @@ export function createBashTool(
           : {};
         return {
           content: [{ type: "text", text }],
+          ...(result.kind === "spawn-failed" ? { isError: true as const } : {}),
           details: { ...result, ...shellCompletion, ...(params.target ? { target: params.target } : {}) },
         };
       } catch (error) {
         const message = error instanceof Error ? error.message : String(error);
         return {
-          content: [{ type: "text", text: `bash failed: ${message}\nThe Host may already have accepted this command. Check get_output("${toolCallId}") before retrying it.` }],
+          content: [{ type: "text", text: `bash failed: ${message}\nThe Host may already have accepted this command; get_output({handle:"${toolCallId}"}) queries its acceptance identity.` }],
+          isError: true,
           details: { kind: "spawn-failed", reason: "bridge-error", interpreter: "", hint: message } as ShellExecResult,
         };
       }

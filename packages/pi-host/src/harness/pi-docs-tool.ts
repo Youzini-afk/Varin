@@ -2,6 +2,7 @@ import { open, readdir, realpath } from "node:fs/promises";
 import path from "node:path";
 import { createReadToolDefinition, getDocsPath, VERSION, type ToolDefinition } from "@earendil-works/pi-coding-agent";
 import { Type } from "typebox";
+import { adaptPiSdkAsset } from "../pi-sdk-adaptation.js";
 
 export const PI_CODEMODE_REFERENCE = 'the SDK reference using text(await tools.pi_docs({ document: "codemode.md" })) in codemode';
 
@@ -25,7 +26,8 @@ export function createPiDocsTool(docsDirectory = getDocsPath()): ToolDefinition 
         try {
           const bytes = await handle.readFile();
           if (await resolveDocument(target) !== canonical) throw new Error("SDK reference changed while reading");
-          return bytes;
+          const relative = path.relative(await realpath(docsDirectory), canonical).replaceAll("\\", "/");
+          return adaptPiSdkAsset("@earendil-works/pi-coding-agent", `docs/${relative}`, bytes);
         } finally { await handle.close(); }
       },
     },

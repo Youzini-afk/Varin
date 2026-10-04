@@ -42,10 +42,7 @@ export function createDocumentReadTool(bridge: HostServicesBridge): ToolDefiniti
     description: "Open a local or stored PDF, find passages, read selected pages, inspect actual page/crop images, or extract structured tables. Preserves the original and fixed references across reads.",
     promptSnippet: "document_read: read, search or visually inspect local and pinned PDFs",
     promptGuidelines: [
-      "Choose the view that helps the current question. Page images can be read directly; they do not require text or structure extraction first.",
-      "Search hits and returned page links locate the fixed original. Reuse those links when citing a passage or figure so the user can open the same location.",
-      "For a figure or table, include its caption, headers, units and relevant surrounding text when they matter. Adjacent pages and wider crops remain available.",
-      "OCR and structured parsing are optional components. If unavailable, the original page images remain readable.",
+      "Page images are available independently of text extraction, OCR, and structured parsing. Returned page links identify positions in the fixed original PDF.",
     ],
     parameters: DocumentReadParams,
     executionMode: "parallel",

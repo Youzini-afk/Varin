@@ -1,4 +1,4 @@
-import { fauxProvider, getCurrentTools, normalizeContext } from "@earendil-works/pi-ai";
+import { fauxProvider, getCurrentSystemMessage, getCurrentTools, normalizeContext } from "@earendil-works/pi-ai";
 /**
  * Real Pi session e2e — the three in-process extensions that session-host
  * registers for every session, exercised inside an actual agent loop with a
@@ -477,7 +477,7 @@ describe("session e2e — cross-directory access", () => {
 });
 
 describe("session e2e — work focus", () => {
-  it("applies research only at run boundaries without retaining its prompt after code resumes", async () => {
+  it("changes research tools at run boundaries while preserving native system sections", async () => {
     await withTempRoot("varin-work-focus-", async (root) => {
       await writeFile(join(root, "observation.txt"), "measured result\n", "utf8");
       const faux = fauxProvider();
@@ -521,13 +521,15 @@ describe("session e2e — work focus", () => {
         assertResearchTools(false);
         await session.host.prompt(snapshot.sessionId, "implement a small change");
         await session.host.session.waitForIdle();
-        assert.doesNotMatch(providerSystemPrompt(contexts[0]), /varin-work-focus id="research"/);
+        const defaultSystem = getCurrentSystemMessage(normalizeContext(contexts[0]!).messages)!;
+        assert.ok(defaultSystem.sections, "the default uses native sections rather than a forced string");
 
         assert.equal(session.host.applyWorkFocus(snapshot.sessionId, { id: "research", source: "explicit" }, 2), true);
         assertResearchTools(true);
         await session.host.prompt(snapshot.sessionId, "investigate the observation");
         await session.host.session.waitForIdle();
-        assert.match(providerSystemPrompt(contexts[1]), /principal researcher/);
+        const researchSystem = getCurrentSystemMessage(normalizeContext(contexts[1]!).messages)!;
+        assert.equal(researchSystem.sections?.preamble, defaultSystem.sections!.preamble);
         assert.equal(providerSystemPrompt(contexts[2]), providerSystemPrompt(contexts[1]));
         assert.equal(session.host.snapshot().workFocus?.active.id, "research");
 
@@ -535,13 +537,15 @@ describe("session e2e — work focus", () => {
         assertResearchTools(false);
         await session.host.prompt(snapshot.sessionId, "implement the selected analysis");
         await session.host.session.waitForIdle();
-        assert.doesNotMatch(providerSystemPrompt(contexts[3]), /varin-work-focus id="research"/);
+        assert.equal(getCurrentSystemMessage(normalizeContext(contexts[3]!).messages)?.sections?.preamble,
+          defaultSystem.sections!.preamble);
 
         assert.equal(session.host.applyWorkFocus(snapshot.sessionId, { id: "research", source: "explicit" }, 4), true);
         assertResearchTools(true);
         await session.host.prompt(snapshot.sessionId, "test a competing explanation");
         await session.host.session.waitForIdle();
-        assert.equal((providerSystemPrompt(contexts[4]).match(/<varin-work-focus id="research">/g) ?? []).length, 1);
+        assert.equal(getCurrentSystemMessage(normalizeContext(contexts[4]!).messages)?.sections?.preamble,
+          defaultSystem.sections!.preamble);
       } finally {
         await session.dispose();
       }
@@ -578,34 +582,73 @@ describe("session e2e — work focus", () => {
     });
   });
 
-  it("uses the bounded research identity for a spawned branch session", async () => {
-    await withTempRoot("varin-work-focus-branch-", async (root) => {
-      const faux = fauxProvider();
-      const contexts: Context[] = [];
-      faux.setResponses([
-        (context) => { contexts.push(structuredClone(context)); return fauxAssistantMessage("branch finding"); },
-      ]);
-      const session = await setupSession({ root, faux });
-      try {
-        const snapshot = await session.host.create(
-          root,
-          undefined,
-          undefined,
-          undefined,
-          undefined,
-          undefined,
-          { id: "research", source: "explicit" },
-          1,
-          "branch",
-        );
-        await session.host.prompt(snapshot.sessionId, "check the bounded alternative");
-        await session.host.session.waitForIdle();
-        assert.match(providerSystemPrompt(contexts[0]), /independent research branch/);
-        assert.doesNotMatch(providerSystemPrompt(contexts[0]), /principal researcher/);
-      } finally {
-        await session.dispose();
-      }
-    });
+  it("keeps native tools and rules dynamic and honors SYSTEM and extension force overrides", async () => {
+    for (const custom of [false, true]) {
+      await withTempRoot("varin-native-prompt-", async (root) => {
+        const faux = fauxProvider();
+        const contexts: Context[] = [];
+        faux.setResponses(Array.from({ length: 3 }, () => (context: Context) => {
+          contexts.push(structuredClone(context));
+          return fauxAssistantMessage("done");
+        }));
+        const session = await setupSession({ root, faux });
+        const extensions = join(root, ".pi", "extensions");
+        await mkdir(extensions, { recursive: true });
+        await writeFile(join(extensions, "prompt-probe.ts"), `export default function (pi) {
+          pi.registerTool({
+            name: "prompt_probe", label: "Prompt probe", description: "Test tool.",
+            promptSnippet: "A runtime-discovered test tool",
+            promptGuidelines: ["Probe results contain the current revision."],
+            parameters: { type: "object", properties: {} },
+            execute: async () => ({ content: [{ type: "text", text: "ok" }] }),
+          });
+          pi.on("before_agent_start", event => {
+            if (event.prompt === "force") return { systemPrompt: event.systemPrompt + "\\nPLUGIN_FORCE" };
+            return { message: { customType: "prompt-probe", content: event.systemPrompt, display: false } };
+          });
+        }`);
+        if (custom) await writeFile(join(root, "agent", "SYSTEM.md"), "USER_SYSTEM");
+        await writeFile(join(root, "agent", "APPEND_SYSTEM.md"), "USER_APPEND");
+        await writeFile(join(root, "agent", "AGENTS.md"), "USER_CONTEXT");
+        try {
+          const snapshot = await session.host.create(root);
+          session.host.session.setActiveToolsByName(["read"]);
+          await session.host.prompt(snapshot.sessionId, "first");
+          await session.host.session.waitForIdle();
+          session.host.session.setActiveToolsByName(["read", "prompt_probe"]);
+          await session.host.prompt(snapshot.sessionId, "second");
+          await session.host.session.waitForIdle();
+          const initial = getCurrentSystemMessage(normalizeContext(contexts[0]!).messages)!;
+          const updated = getCurrentSystemMessage(normalizeContext(contexts[1]!).messages)!;
+          assert.ok(initial.sections && updated.sections);
+          assert.equal(initial.sections.preamble, custom ? "USER_SYSTEM" : "You are an agent running in Varin.");
+          assert.equal(updated.sections.preamble, initial.sections.preamble);
+          assert.ok(!getCurrentTools(normalizeContext(contexts[0]!).messages).some(tool => tool.name === "prompt_probe"));
+          assert.ok(getCurrentTools(normalizeContext(contexts[1]!).messages).some(tool => tool.name === "prompt_probe"));
+          if (custom) {
+            assert.equal(updated.sections.tools, undefined, "SYSTEM keeps native prefix replacement semantics");
+            assert.equal(updated.sections.rules, undefined);
+            assert.equal(updated.sections.docs, undefined);
+          } else {
+            assert.notEqual(updated.sections.tools, initial.sections.tools);
+            assert.notEqual(updated.sections.rules, initial.sections.rules);
+            assert.equal(updated.sections.docs, initial.sections.docs);
+          }
+          assert.match(updated.sections.addendum ?? "", /USER_APPEND/);
+          assert.match(updated.sections.project_context ?? "", /USER_CONTEXT/);
+          const probe = session.host.entries(snapshot.sessionId, "branch").entries.find(
+            entry => entry.type === "custom_message" && entry.customType === "prompt-probe",
+          );
+          assert.ok(probe?.type === "custom_message");
+          assert.ok(String(probe.content).startsWith(initial.sections.preamble),
+            "extensions see the selected identity before their hooks run");
+          await session.host.prompt(snapshot.sessionId, "force");
+          await session.host.session.waitForIdle();
+          assert.equal(providerSystemPrompt(contexts[2]), providerSystemPrompt(contexts[1]) + "\nPLUGIN_FORCE");
+          assert.ok(getCurrentTools(normalizeContext(contexts[2]!).messages).some(tool => tool.name === "prompt_probe"));
+        } finally { await session.dispose(); }
+      });
+    }
   });
 });
 

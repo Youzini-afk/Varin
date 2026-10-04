@@ -92,7 +92,7 @@ export function createToolResultTruncationExtension(options: ToolResultTruncatio
         return undefined;
       }
 
-      const truncatedText = `${head}\n…\n${tail}\n[output: ${total} bytes; showing first ${shownHeadBytes} and last ${shownTailBytes} — get_output("${ref.handle}", offset, length) for more (ephemeral, generation ${ref.generation})]`;
+      const truncatedText = `${head}\n…\n${tail}\n[output: ${total} bytes; showing first ${shownHeadBytes} and last ${shownTailBytes} — get_output({handle:"${ref.handle}",offset:${shownHeadBytes},length:${visibleBytes}}) for more (ephemeral, generation ${ref.generation})]`;
 
       // Only replace the text projection. Images are first-class input, not
       // text-store contents: dropping them here silently destroys comparison

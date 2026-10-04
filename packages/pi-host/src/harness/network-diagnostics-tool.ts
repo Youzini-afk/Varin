@@ -45,10 +45,6 @@ export function createNetworkDiagnosticsTool(bridge: HostServicesBridge): ToolDe
       "Proxy-side target DNS is resolved by the configured proxy; desktop auto mode uses the system proxy/PAC stack. " +
       "Read-only — never fetches the URL or changes settings.",
     promptSnippet: "network_diag: inspect outbound network policy and resolution for a URL (read-only)",
-    promptGuidelines: [
-      "Use network_diag to inspect static blocks, local DNS, and proxy routing; it does not test TLS or connect to the target.",
-      "Reported proxyOrigin is sanitized (no credentials); the tool cannot change proxy or credential settings.",
-    ],
     parameters: NetworkDiagParams,
     executionMode: "parallel",
     execute: async (_toolCallId, params, _signal, _onUpdate, _ctx) => {

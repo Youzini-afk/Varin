@@ -5,10 +5,10 @@ import { HARNESS_MAX_REQUEST_TIMEOUT_MS, type OutputSlice, type DiagnosticsResul
 
 // ── get_output ──────────────────────────────────────────────────────
 const GetOutputParams = Type.Object({
-  handle: Type.String(),
-  offset: Type.Optional(Type.Integer({ minimum: 0 })),
-  length: Type.Optional(Type.Integer({ minimum: 1 })),
-  waitMs: Type.Optional(Type.Integer({ minimum: 0 })),
+  handle: Type.String({ description: "out_ stored-output handle, sh_ runtime shell id, exec_ accepted execution id, or the original shell tool-call id" }),
+  offset: Type.Optional(Type.Integer({ minimum: 0, description: "UTF-8 byte offset for an explicit historical slice" })),
+  length: Type.Optional(Type.Integer({ minimum: 1, description: "Maximum UTF-8 bytes in an explicit slice" })),
+  waitMs: Type.Optional(Type.Integer({ minimum: 0, description: "Wait for shell preparation, new output, or exit when an incremental read has no unread bytes. Stored outputs and explicit slices return immediately." })),
 });
 
 const formatElapsed = (milliseconds: number | undefined): string => {
@@ -27,9 +27,7 @@ export function createGetOutputTool(bridge: HostServicesBridge, _sessionId: stri
     description: "Retrieve stored output or accepted shell output. Use offset/length for an explicit historical slice; waitMs waits for preparation, new output, or exit without stopping the process.",
     promptSnippet: "get_output: retrieve stored/shell output, optionally wait for new bytes/exit, paginate with offset/length",
     promptGuidelines: [
-      "Use get_output to retrieve large outputs that were truncated or backgrounded.",
-      "The handle is shown in the original tool result as out_XXX (stored), sh_N (background shell), or exec_… (accepted while the shell is preparing).",
-      "An execution id without offset/length returns only output added since your last read. Do not poll it repeatedly; wait for useful work before checking again.",
+      "out_ handles identify stored text; sh_ handles identify runtime shells; exec_ handles identify accepted commands, including preparation. Shell reads without offset/length return new output since the previous read.",
     ],
     parameters: GetOutputParams,
     executionMode: "parallel",
@@ -77,6 +75,7 @@ export function createGetOutputTool(bridge: HostServicesBridge, _sessionId: stri
             const text = `[shell ${params.handle} · no new output since last read (${formatElapsed(observation.sinceMs)} ago); ${state}; ${lastOutput}]`;
             return {
               content: [{ type: "text", text }],
+              ...(result.unavailable || result.spawnFailed ? { isError: true as const } : {}),
               details: { handle: params.handle, ...result, ...shellCompletion },
             };
           }
@@ -97,6 +96,7 @@ export function createGetOutputTool(bridge: HostServicesBridge, _sessionId: stri
           lines.push(`[${result.nextOffset}/${result.total} bytes${result.eof ? " · eof" : ""}]`);
           return {
             content: [{ type: "text", text: lines.join("\n") }],
+            ...(result.unavailable || result.spawnFailed ? { isError: true as const } : {}),
             details: { handle: params.handle, ...result, ...shellCompletion },
           };
         }
@@ -116,6 +116,7 @@ export function createGetOutputTool(bridge: HostServicesBridge, _sessionId: stri
         lines.push(`\n[${shown}]`);
         return {
           content: [{ type: "text", text: lines.join("") }],
+          ...(result.unavailable || result.spawnFailed ? { isError: true as const } : {}),
           details: {
             handle: params.handle,
             offset: result.offset,
@@ -139,6 +140,7 @@ export function createGetOutputTool(bridge: HostServicesBridge, _sessionId: stri
         const message = error instanceof Error ? error.message : String(error);
         return {
           content: [{ type: "text", text: `get_output failed: ${message}` }],
+          isError: true,
           details: { handle: params.handle, error: message },
         };
       }
@@ -148,20 +150,16 @@ export function createGetOutputTool(bridge: HostServicesBridge, _sessionId: stri
 
 // ── write_to_process ────────────────────────────────────────────────
 const WriteToProcessParams = Type.Object({
-  shellId: Type.String(),
-  text: Type.String(),
+  shellId: Type.String({ description: "Runtime shell id returned by bash or get_output; preparing execution ids do not support this action" }),
+  text: Type.String({ description: "Text written to stdin, including a newline when required by the process" }),
 });
 
 export function createWriteToProcessTool(bridge: HostServicesBridge, _sessionId: string): ToolDefinition {
   return defineTool({
     name: "write_to_process",
     label: "Write to Process",
-    description: "Write text to the stdin of a background shell. Use after a bash command goes background and needs input.",
+    description: "Write text to the stdin of a background shell.",
     promptSnippet: "write_to_process: send stdin to a background shell",
-    promptGuidelines: [
-      "Use write_to_process to send input to a background shell that is waiting for stdin.",
-      "The shellId is shown in the bash result as sh_N.",
-    ],
     parameters: WriteToProcessParams,
     executionMode: "sequential",
     execute: async (_toolCallId, params, _signal, _onUpdate, _ctx) => {
@@ -172,12 +170,14 @@ export function createWriteToProcessTool(bridge: HostServicesBridge, _sessionId:
         });
         return {
           content: [{ type: "text", text: result.accepted ? `wrote ${Buffer.byteLength(params.text, "utf8")} bytes to ${params.shellId}` : `shell ${params.shellId} not found or not writable` }],
+          ...(result.accepted ? {} : { isError: true as const }),
           details: { shellId: params.shellId, accepted: result.accepted },
         };
       } catch (error) {
         const message = error instanceof Error ? error.message : String(error);
         return {
           content: [{ type: "text", text: `write_to_process failed: ${message}` }],
+          isError: true,
           details: { shellId: params.shellId, accepted: false, error: message },
         };
       }
@@ -187,7 +187,7 @@ export function createWriteToProcessTool(bridge: HostServicesBridge, _sessionId:
 
 // ── kill_shell ──────────────────────────────────────────────────────
 const KillShellParams = Type.Object({
-  shellId: Type.String(),
+  shellId: Type.String({ description: "Runtime shell id returned by bash or get_output; preparing execution ids do not support this action" }),
 });
 
 export function createKillShellTool(bridge: HostServicesBridge, _sessionId: string): ToolDefinition {
@@ -196,9 +196,6 @@ export function createKillShellTool(bridge: HostServicesBridge, _sessionId: stri
     label: "Kill Shell",
     description: "Terminate a background shell by its shell ID.",
     promptSnippet: "kill_shell: terminate a background shell",
-    promptGuidelines: [
-      "Use kill_shell to stop a background shell that is no longer needed.",
-    ],
     parameters: KillShellParams,
     executionMode: "sequential",
     execute: async (_toolCallId, params, _signal, _onUpdate, _ctx) => {
@@ -206,12 +203,14 @@ export function createKillShellTool(bridge: HostServicesBridge, _sessionId: stri
         const result = await bridge.request("shell.kill", { id: params.shellId });
         return {
           content: [{ type: "text", text: result.killed ? `killed ${params.shellId}` : `shell ${params.shellId} not found or termination failed` }],
+          ...(result.killed ? {} : { isError: true as const }),
           details: { shellId: params.shellId, killed: result.killed },
         };
       } catch (error) {
         const message = error instanceof Error ? error.message : String(error);
         return {
           content: [{ type: "text", text: `kill_shell failed: ${message}` }],
+          isError: true,
           details: { shellId: params.shellId, killed: false, error: message },
         };
       }
@@ -221,8 +220,8 @@ export function createKillShellTool(bridge: HostServicesBridge, _sessionId: stri
 
 // ── diagnostics ────────────────────────────────────────────────────
 const DiagnosticsParams = Type.Object({
-  path: Type.String(),
-  full: Type.Optional(Type.Boolean()),
+  path: Type.String({ description: "File path whose on-disk diagnostics to read" }),
+  full: Type.Optional(Type.Boolean({ description: "Return the full current snapshot instead of changes since the previous read" })),
 });
 
 export function createDiagnosticsTool(bridge: HostServicesBridge, _sessionId: string): ToolDefinition {
@@ -232,9 +231,7 @@ export function createDiagnosticsTool(bridge: HostServicesBridge, _sessionId: st
     description: "Get diagnostic changes for a file. Set full=true for the complete current snapshot.",
     promptSnippet: "diagnostics: get LSP diagnostics for a file (errors, warnings, hints)",
     promptGuidelines: [
-      "Use diagnostics after editing a file to check for type errors or lint issues.",
-      "An empty result means the file is clean, not that the server is unavailable.",
-      "Repeated checks return only added and resolved diagnostics; use full=true only when you need the complete snapshot.",
+      "Diagnostics describe the file on disk. Repeated reads return added/resolved diagnostics; full=true returns the complete current snapshot.",
     ],
     parameters: DiagnosticsParams,
     executionMode: "parallel",
@@ -251,6 +248,7 @@ export function createDiagnosticsTool(bridge: HostServicesBridge, _sessionId: st
         const message = error instanceof Error ? error.message : String(error);
         return {
           content: [{ type: "text", text: `diagnostics failed: ${message}` }],
+          isError: true,
           details: { path: params.path, status: "unavailable", diagnostics: [] },
         };
       }
@@ -258,10 +256,11 @@ export function createDiagnosticsTool(bridge: HostServicesBridge, _sessionId: st
   });
 }
 
-function formatDiagnosticsResult(result: DiagnosticsResult, path: string): { content: Array<{ type: "text"; text: string }>; details: unknown } {
+function formatDiagnosticsResult(result: DiagnosticsResult, path: string): { content: Array<{ type: "text"; text: string }>; details: unknown; isError?: true } {
   if (result.status === "unavailable") {
     return {
       content: [{ type: "text", text: `diagnostics unavailable for ${path}` }],
+      isError: true,
       details: { path, status: "unavailable", diagnostics: [] },
     };
   }
@@ -270,7 +269,7 @@ function formatDiagnosticsResult(result: DiagnosticsResult, path: string): { con
     const header = `[${path} · +${result.observation.added} −${result.observation.resolved} since last check (${formatElapsed(result.observation.sinceMs)} ago)]`;
     if (result.diagnostics.length === 0 && resolved.length === 0) {
       return {
-        content: [{ type: "text", text: `${header}\nno diagnostic changes; wait until the file or language-server state changes before checking again` }],
+        content: [{ type: "text", text: `${header}\nno diagnostic changes` }],
         details: { path, status: result.status, diagnostics: [], resolvedDiagnostics: [], observation: result.observation },
       };
     }

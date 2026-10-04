@@ -73,10 +73,8 @@ export function createResearchSearchTool(bridge: HostServicesBridge): ToolDefini
     description: "Search scholarly metadata, look up one paper, or expand its references/citations/related works through OpenAlex or Semantic Scholar. Metadata discovery is separate from reading the linked source.",
     promptSnippet: "research_search: find papers, metadata, relations, and open-access locations",
     promptGuidelines: [
-      "Use action=search with a focused query; use the returned provider id with action=paper to inspect one record.",
-      "Use action=relations with paper_id and relation=references|citations|related to walk the citation graph one page at a time; pass nextCursor back as cursor to continue.",
-      "Metadata, an open-access URL, and read content are separate states. Fetch the linked source before relying on paper details.",
-      "Preserve provider ids, DOI, and version markers when handing papers to another thread — titles alone do not identify a work.",
+      "paper_id is a provider's returned paper identity. relations returns one page and nextCursor; cursor continues that page sequence.",
+      "Results are scholarly metadata and source locations, not the linked paper's full content.",
     ],
     parameters: ResearchSearchParams,
     executionMode: "parallel",

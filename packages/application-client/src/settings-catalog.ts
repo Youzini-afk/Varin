@@ -1392,7 +1392,7 @@ export const SETTINGS_CATALOG: readonly SettingsCatalogEntry[] = [
   {
     id: 'language-support.pack', category: 'language', owner: 'action',
     actionRef: { domain: 'runtime:language-support', verbs: ['prepare', 'status'],
-      note: 'structure pack install/prepare downloads real assets — status reports actual readiness' },
+      note: 'prepare ensures the managed language server for args.languageId; status reports language-support readiness' },
     ui: { page: 'language-support', titleKey: 'settings.languageSupport.row.structurePack',
       keywords: ['grammar', 'wasm', 'install', 'structure pack'] },
   },

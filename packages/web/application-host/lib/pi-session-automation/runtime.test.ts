@@ -151,13 +151,13 @@ const createHarness = ({
     }),
   };
   const broker = brokerImplementation as unknown as Parameters<typeof createPiSessionAutomationRuntime>[0]['broker'];
-  const generateSmallModelText = vi.fn(async ({ system }: GenerateSmallModelTextInput) => ({
+  const generateSmallModelText = vi.fn(async ({ model }: GenerateSmallModelTextInput) => ({
     modelID: 'audit-model',
     providerID: 'faux',
     source: 'test',
-    text: system?.includes('Audit a coding agent')
-      ? JSON.stringify(audit)
-      : JSON.stringify({ suggestions: emptySuggestions ? [] : ['Package the application.', 'Review the result.'] }),
+    text: model === 'faux/next-step'
+      ? JSON.stringify({ suggestions: emptySuggestions ? [] : ['Package the application.', 'Review the result.'] })
+      : JSON.stringify(audit),
   }));
   return {
     broker,
@@ -169,7 +169,7 @@ const createHarness = ({
 };
 
 describe('Pi-native session automation', () => {
-  it('settles an independently verified goal without sending another turn', async () => {
+  it('settles a completed-goal verdict without sending another turn', async () => {
     const harness = createHarness();
     const onGoalSettled = vi.fn(() => {});
     const runtime = createPiSessionAutomationRuntime({

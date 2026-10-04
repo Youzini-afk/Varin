@@ -54,9 +54,7 @@ export function createResearchDecideTool(bridge: HostServicesBridge): ToolDefini
     description: "Batch-judge real Web/scholarly candidates (URLs, snapshots, papers, sections, queries) with the configured fast-decision model. The model only selects or scores candidates you supply; when it is disabled or unavailable the original order is returned and your own judgment applies.",
     promptSnippet: "research_decide: fast-decision ranking over real URL/snapshot/paper/section/query candidates",
     promptGuidelines: [
-      "Candidates must come from results you already obtained — websearch URLs, webfetch snapshots, research_search papers, snapshot sections, or new query text. Do not invent ids or URLs.",
-      "kind=next chooses one candidate to open; the scoring kinds rank all candidates. Missing answers mean unevaluated, never zero.",
-      "When the result reports disabled/unconfigured/unavailable/failed/cancelled, continue with direct search and your own judgment — the ranked list keeps your original order.",
+      "kind=next selects one supplied candidate; scoring kinds rank them. Missing scores mean unevaluated. Disabled or unavailable inference retains the supplied order.",
     ],
     parameters: ResearchDecideParams,
     executionMode: "parallel",

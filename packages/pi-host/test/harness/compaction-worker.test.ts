@@ -102,7 +102,7 @@ describe("compaction worker", () => {
       assert.match(text, /CUSTOM-HISTORY-KEEP-ME/);
       assert.match(text, /PARENT-LIVE-INSTRUCTIONS/);
       assert.doesNotMatch(getCurrentSystemPrompt(requests[0]!.messages), /PARENT-LIVE-INSTRUCTIONS/);
-      assert.match(getCurrentSystemPrompt(requests[0]!.messages), /background compaction agent/);
+      assert.ok(getCurrentSystemPrompt(requests[0]!.messages).trim());
       assert.deepEqual(getCurrentTools(requests[0]!.messages).map(tool => tool.name), ["history", "output", "records"]);
       assert.match(text, /conversation history before this point was compacted/);
     } finally {

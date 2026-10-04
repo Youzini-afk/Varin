@@ -117,6 +117,19 @@ const customTools = selectHarnessTools(settings, {
 });
 ```
 
+## Default model context
+
+The selected Pi SDK keeps its native system-section assembly and tool-loadout updates.
+Varin's shipped SDK patch gives the default preamble the identity `You are an agent running in Varin.`
+and keeps runtime tool descriptions, contributed tool/extension guidelines and SDK reference paths.
+It does not add response style, a research persona or a prescribed task workflow.
+User `SYSTEM.md` prefix replacement, `APPEND_SYSTEM.md`, context files, skills and extension
+forced prompts keep their native semantics. Work focus changes tool availability without adding system text.
+Environment observations and current teammate snapshots carry their lifetime facts with the data.
+
+`pi_docs` applies the same shipped reference corrections in memory for an external SDK.
+The source installation remains unchanged; paging uses the adapted reference text.
+
 ## Extensions
 
 - `createToolResultTruncationExtension` — truncates large non-shell tool results,
@@ -140,8 +153,6 @@ const customTools = selectHarnessTools(settings, {
   organizer (`harness.memoryOrganize`) over durable session/run source material.
   There is no per-message suggestion extension; explicit user marks still write
   through `memory.remember`/`context.putKnowledge`.
-- `createContextGuidanceExtension` — adds stable source and collaboration guidance
-  to the system prompt. It does not fetch dynamic material at turn start.
 - `createRequestContextInjector` — prepares environment deltas and a complete
   authorized teammate snapshot before every actual model request, including tool
   continuations. Environment facts are appended to native Pi history only when

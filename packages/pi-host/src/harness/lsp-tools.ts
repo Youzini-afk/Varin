@@ -4,9 +4,9 @@ import type { HarnessMethod, LspNavigationResult } from "@varin/protocol";
 import type { HostServicesBridge } from "./host-services-bridge.js";
 
 const PositionParams = Type.Object({
-  path: Type.String(),
-  line: Type.Integer({ minimum: 1 }),
-  character: Type.Optional(Type.Integer({ minimum: 1 })),
+  path: Type.String({ description: "File path selecting the language server and source document" }),
+  line: Type.Integer({ minimum: 1, description: "One-based line number" }),
+  character: Type.Optional(Type.Integer({ minimum: 1, description: "One-based character position; defaults to 1" })),
 }, { additionalProperties: false });
 
 const SymbolsParams = Type.Object({
@@ -16,6 +16,7 @@ const SymbolsParams = Type.Object({
 
 const resultContent = (result: LspNavigationResult) => ({
   content: [{ type: "text" as const, text: result.text }],
+  ...(result.status === "unavailable" ? { isError: true as const } : {}),
   details: {
     status: result.status,
     ...(result.value === undefined ? {} : { value: result.value }),
@@ -24,6 +25,7 @@ const resultContent = (result: LspNavigationResult) => ({
 
 const failedContent = (name: string, error: unknown) => ({
   content: [{ type: "text" as const, text: `${name} unavailable: ${error instanceof Error ? error.message : String(error)}` }],
+  isError: true as const,
   details: { status: "unavailable" },
 });
 
@@ -37,7 +39,6 @@ export function createLspNavigationTools(bridge: HostServicesBridge): ToolDefini
     label: name[0]!.toUpperCase() + name.slice(1),
     description,
     promptSnippet: `${name}: ${description}`,
-    ...(name === "hover" ? { promptGuidelines: ["Use hover to check a signature or type before reading an entire definition file."] } : {}),
     parameters: PositionParams,
     executionMode: "parallel",
     execute: async (_toolCallId, params) => {

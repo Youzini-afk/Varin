@@ -375,7 +375,11 @@ describe("thread.read retrieval pagination", () => {
       attempted: [],
       completion: "delivered",
     });
-    await registry.endRun("workspace-1", thread.id, run.id, "success");
+    const conclusion = "The relevant implementation is in the evidence below; the integration behavior remains untested.";
+    await registry.endRun("workspace-1", thread.id, run.id, "success", null, {
+      conclusion, changedFiles: [], deviations: [], unresolved: [], confidence: 0.5, blocksSnapshot: {},
+      transcriptRef: { runtimeId: "pi", sessionId: "child-1", fromEntryId: null, toEntryId: null },
+    });
     const reads: Array<{ offset: number; length: number }> = [];
     const hostFor = (activeRegistry: typeof registry) => ({
       threadRegistry: activeRegistry,
@@ -392,6 +396,7 @@ describe("thread.read retrieval pagination", () => {
       }, parentCtx);
       expect(Buffer.byteLength(first.text, "utf8")).toBeLessThanOrEqual(260);
       expect(first.eof).toBe(false);
+      expect(first.text).toContain(conclusion);
       expect(first.report?.evidence?.facts[0]?.sources[0]?.excerpt).toBeUndefined();
       expect(JSON.stringify(first.report)).not.toContain("正文🙂正文🙂");
       expect(reads.length).toBeLessThanOrEqual(1);
@@ -409,6 +414,7 @@ describe("thread.read retrieval pagination", () => {
       let offset = 0;
       let previous = 0;
       let pages = 0;
+      const pageTexts: string[] = [];
       do {
         const page = await createThreadReadService(hostFor(registry)).handle({
           threadId: thread.id,
@@ -416,6 +422,7 @@ describe("thread.read retrieval pagination", () => {
           offset,
           length: 4097,
         }, parentCtx);
+        pageTexts.push(page.text);
         expect(page.nextOffset).toBeGreaterThan(previous);
         expect(page.text).not.toContain("�");
         previous = page.nextOffset!;
@@ -425,6 +432,8 @@ describe("thread.read retrieval pagination", () => {
       } while (pages < 100);
       expect(pages).toBeGreaterThan(1);
       expect(pages).toBeLessThan(100);
+      expect(pageTexts.join("")).toContain(conclusion);
+      expect(pageTexts.join("")).toContain(body.toString("utf8"));
     } finally {
       await registry.dispose();
       rmSync(dataDir, { force: true, recursive: true });

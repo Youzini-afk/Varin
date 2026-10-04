@@ -974,3 +974,66 @@
              const result = await models.generateImages(resolved, context, { signal });
              addGeneratedImages(result.output.filter((block) => block.type === "image").length);
              return result;
+--- a/dist/core/system-prompt.js
++++ b/dist/core/system-prompt.js
+@@ -37,30 +37,12 @@
+         seen.add(normalized);
+         rules.push(normalized);
+     };
+-    const hasBash = selectedTools.includes("bash");
+-    const hasPowerShell = selectedTools.includes("powershell");
+-    const hasGrep = selectedTools.includes("grep");
+-    const hasFind = selectedTools.includes("find");
+-    const hasLs = selectedTools.includes("ls");
+-    if ((hasBash || hasPowerShell) && !hasGrep && !hasFind && !hasLs) {
+-        if (hasBash && hasPowerShell) {
+-            addRule("Use bash or PowerShell for file operations like listing, searching, and finding files");
+-        }
+-        else if (hasPowerShell) {
+-            addRule("Use PowerShell for file operations like listing, searching, and finding files");
+-        }
+-        else {
+-            addRule("Use bash for file operations like ls, rg, find");
+-        }
+-    }
+     for (const name of selectedTools) {
+         for (const rule of toolGuidelines[name] ?? [])
+             addRule(rule);
+     }
+     for (const rule of promptGuidelines)
+         addRule(rule);
+-    addRule("Be concise in your responses");
+-    addRule("Show file paths clearly when working with files");
+     return rules.map((rule) => `- ${rule}`).join("\n");
+ }
+ /** Build the ordered, independently replaceable sections of the structured system prompt. */
+@@ -78,19 +60,16 @@
+     }
+     else {
+         promptSections.preamble =
+-            "You are an expert coding assistant operating inside pi, a coding agent harness. You help users by reading files, executing commands, editing code, and writing new files.";
++            "You are an agent running in Varin.";
+         const visibleTools = selectedTools.filter((name) => !!toolSnippets[name]);
+         const tools = visibleTools.length > 0 ? visibleTools.map((name) => `- ${name}: ${toolSnippets[name]}`).join("\n") : "(none)";
+-        promptSections.tools = `${tools}\n\nIn addition to the tools above, you may have access to other custom tools depending on the project.`;
++        promptSections.tools = tools;
+         promptSections.rules = buildRules(selectedTools, toolGuidelines, promptGuidelines);
+-        promptSections.docs = `Pi documentation (read only when the user asks about pi itself, its SDK, extensions, themes, skills, or TUI):
++        promptSections.docs = `Pi SDK reference files:
+ - Main documentation: ${getReadmePath()}
+ - Additional docs: ${getDocsPath()}
+-- Examples: ${getExamplesPath()} (extensions, custom tools, SDK)
+-- When reading pi docs or examples, resolve docs/... under Additional docs and examples/... under Examples, not the current working directory
+-- When asked about: extensions (docs/extensions.md, examples/extensions/), themes (docs/themes.md), skills (docs/skills.md), prompt templates (docs/prompt-templates.md), TUI components (docs/tui.md), keybindings (docs/keybindings.md), SDK integrations (docs/sdk.md), custom providers (docs/custom-provider.md), adding models (docs/models.md), pi packages (docs/packages.md), environment variables (docs/environment-variables.md), MCP servers (docs/mcp.md), codemode scripts and non-LLM models such as classifiers and image models (docs/codemode.md)
+-- When working on pi topics, read the docs and examples, and follow .md cross-references before implementing
+-- Always read pi .md files completely and follow links to related docs (e.g., tui.md for TUI API details)`;
++- Examples: ${getExamplesPath()}
++Paths beginning with docs/ and examples/ are relative to the SDK directories above.`;
+     }
+     if (appendSystemPrompt)
+         promptSections.addendum = appendSystemPrompt;
+--- a/docs/codemode.md
++++ b/docs/codemode.md
+@@ -43 +43 @@
+-- Tools with an output schema resolve to a structured value. `bash` resolves to `{ output, truncated, full_output_path?, exit_code, wall_time_seconds }`, also for non-zero exit codes. Its `output` is not limited to the 2000 lines or 50KB the model sees: it holds up to 1 MiB, and longer output keeps its first and last 512 KiB around an omission marker, with `truncated` set and the full output in `full_output_path`.
++- Tools with an output schema resolve to a structured value described by that schema.

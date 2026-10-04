@@ -153,11 +153,8 @@ export function createExperimentTool(bridge: HostServicesBridge, _sessionId: str
     description: "Run and manage durable experiments. submit pins a spec and starts an attempt on a machine (local backend now); list shows concise attempt rows; get/logs/artifact/collect expand one attemptId; wait blocks until the attempt finishes or times out; cancel requests backend stop. Retrying a submit with the same requestId returns the recorded attempt instead of starting a second job.",
     promptSnippet: "experiment: submit/list/get/logs/artifact/wait/cancel/collect durable experiment attempts",
     promptGuidelines: [
-      "An attempt keeps running when your Run ends or the session disconnects — use list/get to reattach by attemptId, not a fresh submit.",
-      "wait only ends when the attempt reaches a terminal state or its deadline passes; a timeout never cancels the job.",
-      "experiment is not a shell — it records specs, jobs, and collected artifacts durably. Use bash for interactive troubleshooting.",
-      "Check resources before demanding CPU/GPU; an attempt queues when its request cannot be confirmed.",
-      "Use artifact with an artifactId from get/collect to inspect a collected table or result; follow nextOffset to continue text. Binary artifacts remain downloadable from the research panel.",
+      "Attempts retain their identity after the Run ends or the session disconnects. get/list read existing attempts; wait timeout leaves the job running.",
+      "Unconfirmed capacity requests queue. artifact reads collected text by artifactId with nextOffset pagination; binary artifacts remain downloadable from the research panel.",
     ],
     parameters: ExperimentParams,
     executionMode: "sequential",
@@ -408,9 +405,6 @@ export function createResourcesTool(bridge: HostServicesBridge, _sessionId: stri
     label: "Resources",
     description: "Show the machine resource overview: capacity, confirmed commitments, observed usage with its source and age, and connection state. Unknown usage is unknown, not idle.",
     promptSnippet: "resources: machine capacity, commitments, and observed usage",
-    promptGuidelines: [
-      "Unknown or stale usage is not idle — a quiet GPU can still be committed.",
-    ],
     parameters: Type.Object({}),
     executionMode: "parallel",
     execute: async (_toolCallId, _params, signal, _onUpdate, _ctx) => {
@@ -434,9 +428,6 @@ export function createResearchSourceTool(bridge: HostServicesBridge, _sessionId:
     label: "Research Source",
     description: "Register or list provenance-carrying research inputs (dataset, paper, code, artifact, collection, other). Registration records the locator only — it does not fetch or copy content. A registered sourceId can feed experiment inputs.",
     promptSnippet: "research_source: register/list research inputs with provenance",
-    promptGuidelines: [
-      "Register a source once and reuse its sourceId in experiment inputs — do not re-register duplicates.",
-    ],
     parameters: SourceParams,
     executionMode: "parallel",
     execute: async (_toolCallId, params, signal, _onUpdate, _ctx) => {

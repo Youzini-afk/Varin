@@ -108,13 +108,9 @@ export function createScheduledTaskTool(bridge: HostServicesBridge): ToolDefinit
       "Manage this project's calendar tasks — recurring or one-shot work that starts a NEW session each time it fires (daily/weekly/once/cron). The same task list the GUI, CLI, and .agents/loops Markdown files edit. Actions: list, get, upsert, remove, run, set_enabled, read_loop, write_loop, remove_loop, status.",
     promptSnippet: "scheduled_task: project calendar tasks (list/get/upsert/remove/run/set_enabled/read_loop/write_loop/remove_loop/status)",
     promptGuidelines: [
-      "Calendar tasks create NEW sessions on a schedule — to resume THIS conversation when a condition holds, use follow_up instead.",
-      "Scope is the current workspace's project. You cannot manage another project's tasks from here.",
-      "Tasks with a loop file are owned by their Markdown document — read_loop/write_loop edit it with the content revision as CAS guard. Direct upsert/remove of a loop task is rejected.",
-      "A new loop task is created by writing a Markdown file under .agents/loops/ (project) or the user loops directory — the host watches those directories, no task-list visit is needed for it to take effect.",
-      "run blocks until the run actually settles and returns the real session id; if it reports timeout the task is still running — read its terminal state later with get.",
-      "enabled defaults to false for loop definitions — a checked-in file must not start unattended model runs on its own.",
-      "Missed fire times: recurring kinds skip to the next slot; a once task that expired while the host was down runs once on recovery and is then consumed.",
+      "Calendar tasks start new sessions. follow_up instead resumes the current conversation on a condition.",
+      "Loop-backed tasks are edited through read_loop/write_loop/remove_loop with their content revision; direct upsert/remove is rejected. Loop definitions default to disabled.",
+      "run returns after settlement or timeout; timeout leaves the task running. Recurring schedules skip missed slots; an expired once task runs once on recovery.",
     ],
     parameters: Type.Object({
       action: Type.Union([

@@ -14,9 +14,6 @@ export function createRecallTool(bridge: HostServicesBridge, _sessionId: string)
     label: "Recall",
     description: "Search this workspace's memory of past sessions and decisions",
     promptSnippet: "recall: search this workspace's memory of past sessions and decisions",
-    promptGuidelines: [
-      "Use recall to find relevant past decisions, errors, and learnings before repeating work.",
-    ],
     parameters: RecallParams,
     executionMode: "parallel",
     execute: async (_toolCallId, params, _signal, _onUpdate, _ctx) => {

@@ -103,8 +103,7 @@ describe("inherit — Pi capture through Host dispatch and dequeue", () => {
       let spawned!: () => void;
       const childStarted = new Promise<void>((resolve) => { spawned = resolve; });
       const adapter: ThreadSessionAdapter = {
-        create: async (input) => childHost.create(input.cwd, input.name, input.parentSession, input.tools, input.model, input.permissions,
-          undefined, 1, "branch"),
+        create: async (input) => childHost.create(input.cwd, input.name, input.parentSession, input.tools, input.model, input.permissions),
         open: async () => { throw new Error("new dispatch must not open an old child"); },
         prompt: async (sessionId, text, instructions, images) => {
           const result = await childHost.prompt(sessionId, text, images, instructions);

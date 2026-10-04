@@ -409,7 +409,6 @@ export interface HostMethodMap {
       tools?: string[];
       workFocus?: WorkFocusSelection;
       workFocusGeneration?: number;
-      workFocusRole?: import("./work-focus.js").WorkFocusExecutionRole;
     };
     result: SessionSnapshot;
   };
@@ -513,7 +512,6 @@ export interface HostMethodMap {
       workspace?: SessionWorkspaceBinding;
       workFocus?: WorkFocusSelection;
       workFocusGeneration?: number;
-      workFocusRole?: import("./work-focus.js").WorkFocusExecutionRole;
     };
     result: SessionSnapshot;
   };

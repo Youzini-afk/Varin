@@ -1,4 +1,4 @@
-import { fauxProvider } from "@earendil-works/pi-ai";
+import { fauxProvider, getCurrentSystemMessage, normalizeContext, type Context } from "@earendil-works/pi-ai";
 import { mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
@@ -21,6 +21,8 @@ import { createDocumentAuthority } from "../../../web/application-host/lib/docum
 import { createManagedRootAdmission } from "../../../web/application-host/lib/kernel/managed-root-admission.js";
 import { assertManagedWorktreeOwnership } from "../../../web/application-host/lib/harness/worktree-ownership.js";
 import { SessionHost } from "../../src/session-host.js";
+import { createHarnessEmit } from "../harness-emit.js";
+import { serializedToolResult } from "./provider-context.js";
 
 describe("thread runtime with real Pi sessions", () => {
   it("runs a persisted child and continues a user discussion through implementation conversion", async () => {
@@ -58,7 +60,9 @@ describe("thread runtime with real Pi sessions", () => {
       return { model };
     };
 
-    const parentHost = new SessionHost({ agentDir, configureServices, emit: () => {}, projectTrustOverride: true });
+    const parentHarness = createHarnessEmit({});
+    const parentHost = new SessionHost({ agentDir, configureServices, emit: parentHarness.emit, projectTrustOverride: true });
+    parentHarness.bind(parentHost);
     const parent = await parentHost.create(workspace, "Parent");
     assert.ok(parent.sessionFile);
     const registry = createThreadRegistry({ dataDir: join(root, "data"), hostId: "host-1" });
@@ -75,7 +79,9 @@ describe("thread runtime with real Pi sessions", () => {
     };
 
     const createChildHost = (): SessionHost => {
+      const harness = createHarnessEmit({});
       const emit = <E extends HostEvent>(event: E, data: HostEventData<E>): void => {
+        if (event === "harness.request") { harness.emit(event, data); return; }
         const sessionId = child.sessionId;
         if (!sessionId) return;
         runtime.processEvent({
@@ -85,6 +91,7 @@ describe("thread runtime with real Pi sessions", () => {
         });
       };
       const child = new SessionHost({ agentDir, configureServices, emit, projectTrustOverride: true });
+      harness.bind(child);
       return child;
     };
 
@@ -512,8 +519,7 @@ describe("thread runtime with native working-state integration", () => {
         const targetRun = spawningRunId ?? (dispatchedThreadId ? (await registry.getActiveRun(workspaceId, dispatchedThreadId))?.id : undefined);
         if (!targetRun) throw new Error("Native child session was created without a Run id");
         const child = createChildHost();
-        const created = await child.create(input.cwd, input.name, input.parentSession, input.tools, input.model, input.permissions,
-          undefined, 1, "branch");
+        const created = await child.create(input.cwd, input.name, input.parentSession, input.tools, input.model, input.permissions);
         childHosts.set(created.sessionId, child);
         childRunIds.set(created.sessionId, targetRun);
         const execution = await documents.resolveWorkspace({ path: input.cwd });
@@ -627,14 +633,20 @@ describe("thread runtime with native working-state integration", () => {
     let answeredDependency = false;
     let childWrote = false;
     let firstRoundFailure: unknown;
-    const firstRoundResponse = (context: { messages: unknown[] }) => {
+    const isChildRequest = (context: Context): boolean => {
+      const cwdSection = getCurrentSystemMessage(normalizeContext(context).messages)?.sections?.cwd;
+      return [...executionContexts.values()].some(({ root }) => (
+        cwdSection === `<cwd>\n${root.replaceAll("\\", "/")}\n</cwd>`
+      ));
+    };
+    const firstRoundResponse = (context: Context) => {
       const serialized = JSON.stringify(context.messages);
-      const last = context.messages.at(-1) as { role?: string; isError?: boolean } | undefined;
+      const last = context.messages.findLast(message => message.role === "toolResult");
       if (last?.role === "toolResult" && last.isError) {
         firstRoundFailure = last;
         return fauxAssistantMessage("Fixture stopped after the failed tool result.");
       }
-      if (serialized.includes("You are working as the teammate thread")) {
+      if (isChildRequest(context)) {
         childRoundTools += 1;
         if (childRoundTools === 1) return fauxAssistantMessage([fauxToolCall("send", {
           to: "parent", kind: "request", requestId: "native-contract-question", message: "Which filename is approved for the result?",
@@ -763,7 +775,7 @@ describe("thread runtime with native working-state integration", () => {
       let freshParentStep = 0;
       faux.setResponses(Array.from({ length: 10 }, () => (context) => {
         const material = JSON.stringify(context.messages);
-        if (material.includes("You are working as the teammate thread")) {
+        if (isChildRequest(context)) {
           assert.match(material, /CONTINUE_NATIVE_WORK/);
           if (!freshWrote) { freshWrote = true; return fauxAssistantMessage([fauxToolCall("write", { path: "child-result.txt", content: "fresh child result\n" })]); }
           return fauxAssistantMessage("Conclusion\nFresh work delivered.\nDeviations from brief\n- none\nUnresolved issues\n- none");
@@ -774,8 +786,9 @@ describe("thread runtime with native working-state integration", () => {
         })]);
         if (freshParentStep === 2) return fauxAssistantMessage([fauxToolCall("wait", { timeout_ms: 5_000 })]);
         if (freshParentStep === 3) return fauxAssistantMessage([fauxToolCall("read_thread", { threadId: created.id, what: "report", resultRevision: 1 })]);
-        assert.match(JSON.stringify(context.messages.at(-1)), /First child result is ready/);
-        assert.doesNotMatch(JSON.stringify(context.messages.at(-1)), /Fresh work delivered/);
+        const report = serializedToolResult(context, "read_thread");
+        assert.match(report, /First child result is ready/);
+        assert.doesNotMatch(report, /Fresh work delivered/);
         return fauxAssistantMessage("The continued result is ready; the original R1 report remains readable.");
       }));
       parentExecutionId = undefined;

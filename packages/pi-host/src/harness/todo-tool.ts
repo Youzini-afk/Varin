@@ -23,9 +23,6 @@ export function createTodoTool(bridge: HostServicesBridge): ToolDefinition {
     label: "Todo",
     description: "Update the session plan with a list of todo items and their statuses",
     promptSnippet: "todo: update the session plan with a list of todo items and their statuses",
-    promptGuidelines: [
-      "For non-trivial tasks, write a short plan with todo before acting, and state your confidence.",
-    ],
     parameters: TodoParams,
     outputSchema: Type.Object({ text: Type.String(), materialRevisions: Type.Optional(Type.Record(Type.String(), Type.String())) }),
     executionMode: "sequential",

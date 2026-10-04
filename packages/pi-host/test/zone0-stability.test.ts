@@ -115,6 +115,8 @@ describe("Zone 0 stability contract (1.2)", () => {
     };
 
     const harness = createHarnessEmit({
+      "zone2.assemble": () => ({ content: null }),
+      "zone2.status": () => ({ status: "ready", content: "<varin-status>thread-1: working</varin-status>" }),
       "permission.inspect": permissionInspectResult,
       "permission.audit": () => ({}),
     });

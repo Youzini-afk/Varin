@@ -24,4 +24,16 @@ describe("LSP navigation tools", () => {
     assert.deepEqual(requests, [{ method: "lsp.definition", params: { path: "src/a.ts", line: 2, character: 3 } }]);
     assert.equal(result.content[0]?.type === "text" ? result.content[0].text : "", "src/a.ts:2:3");
   });
+  it("distinguishes unavailable navigation from an empty ready response", async () => {
+    for (const response of [{ status: "ready", text: "no references", value: [] }, { status: "unavailable", text: "no server" }, new Error("offline")]) {
+      const tools = createLspNavigationTools({ request: async () => {
+        if (response instanceof Error) throw response;
+        return response;
+      } } as never);
+      for (const tool of tools) {
+        const result = await tool.execute("call", { path: "file.ts", line: 1, query: "name" } as never, undefined, undefined, undefined as never);
+        assert.equal(result.isError === true, response instanceof Error || response.status === "unavailable", tool.name);
+      }
+    }
+  });
 });

@@ -56,3 +56,9 @@ export function adaptPiSdkSource(name: PiSdkPackageName, path: string, source: s
   }
   return lineEnding === "\r\n" ? adapted.replaceAll("\n", "\r\n") : adapted;
 }
+
+/** Reference assets use the same patch without decoding unrelated binary files. */
+export function adaptPiSdkAsset(name: PiSdkPackageName, path: string, source: Buffer): Buffer {
+  if (!readPatch(name).has(path)) return source;
+  return Buffer.from(adaptPiSdkSource(name, path, source.toString("utf8")));
+}

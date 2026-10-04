@@ -1,5 +1,6 @@
 import assert from "node:assert/strict";
 import { describe, it } from "node:test";
+import { validateToolArguments } from "@earendil-works/pi-ai";
 import { HostServicesBridge } from "../../src/harness/host-services-bridge.js";
 import { createComputerTool } from "../../src/harness/computer-tools.js";
 import { selectHarnessTools } from "../../src/harness/select-tools.js";
@@ -52,6 +53,36 @@ const observation = (id: string) => ({
 });
 
 describe("computer tool", () => {
+  it("validates and forwards desktop, browser, and office operation arguments", async () => {
+    const { bridge, requests } = scriptedBridge({
+      "computer.act": () => ({ result: { accepted: true } }),
+      "computer.browser": () => ({ ok: true }),
+      "computer.office": () => ({ ok: true }),
+    });
+    const tool = createComputerTool(bridge, SESSION);
+    for (const [args, method, key, operation] of [
+      [{ action: "act", operation: { kind: "key", app: "editor", key: "ctrl+s" } }, "computer.act", "action", { kind: "key", app: "editor", key: "ctrl+s" }],
+      [{ action: "browser", browserOp: "act", tabId: "tab-1", browserAct: { kind: "navigate", url: "https://example.test" } }, "computer.browser", "act", { kind: "navigate", url: "https://example.test" }],
+      [{ action: "office", officeOp: "act", officeAct: { kind: "write", range: "A1:B1", values: [[1, "name"]] } }, "computer.office", "act", { kind: "write", range: "A1:B1", values: [[1, "name"]] }],
+    ] as const) {
+      const parsed = validateToolArguments(tool, { type: "toolCall", id: "call", name: tool.name, arguments: args });
+      const result = await execute(tool, parsed);
+      assert.notEqual(isError(result), true);
+      assert.equal(requests.at(-1)?.method, method);
+      assert.deepEqual((requests.at(-1)?.params as Record<string, unknown>)[key], operation);
+    }
+    const count = requests.length;
+    for (const args of [
+      { action: "act", operation: { kind: "key" } },
+      { action: "browser", browserAct: { kind: "click", x: "bad", y: 2 } },
+      { action: "office", officeAct: { kind: "unsupported-operation" } },
+    ]) {
+      assert.throws(() => validateToolArguments(tool, { type: "toolCall", id: "invalid", name: tool.name, arguments: args }), JSON.stringify(args));
+    }
+    assert.equal(requests.length, count, "invalid arguments never reach the Host");
+    bridge.dispose();
+  });
+
   it("observe forwards app and screenshot choice and returns the observation id", async () => {
     const { bridge, requests } = scriptedBridge({
       "computer.observe": () => observation("obs-1"),
@@ -74,7 +105,8 @@ describe("computer tool", () => {
       operation: { kind: "click", app: "notepad", elementIndex: 0, observationId: "obs-1" },
     });
     assert.deepEqual(requests[0]!.method, "computer.act");
-    assert.match((result.content[0] as { text: string }).text, /observe to verify/);
+    assert.equal((result.details as { accepted: boolean }).accepted, true);
+    assert.equal((result.details as { observationId?: string }).observationId, undefined);
   });
 
   it("registers a saved desktop file with the current work through the Host", async () => {

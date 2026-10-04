@@ -136,6 +136,11 @@ user requirements. Acceptance is not a persistence receipt or an authority level
 The organizer discovers source events only in workspace and Bot stores. `user.tdb`
 is the shared memory destination and is opened exclusively through the Host's user
 store owner; directory discovery must not reopen it as a workspace event store.
+Narration receives the actual source scope and available destination scopes; the user
+scope is offered only while automatic user memory is enabled. This metadata is included
+in the same context-budget calculation as the source and existing memory list. The
+preliminary fast-decision filter sees source fragments only, so duplication against
+existing memories is handled by narration and storage.
 
 New organizer proposals can supply the knowledge revision they observed. The
 single writer checks both committed and pending mutations before inserting them.

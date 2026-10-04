@@ -101,8 +101,6 @@ describe("buildTeamPrompt", () => {
     expect(prompt).toContain("check (run tests/lint and report)");
     expect(prompt).not.toContain("cheap model");
     expect(prompt).not.toContain("strong model");
-    // The judgement principle, not a quota or a cost estimate (§9.2.4).
-    expect(prompt).toContain("Judge by time and cost");
     expect(prompt).toContain("wait blocks until a teammate changes state");
   });
 
@@ -123,10 +121,6 @@ describe("buildTeamPrompt", () => {
 });
 
 describe("EXECUTION_PRESETS", () => {
-  it("review systemPromptFragment mentions not seeing conversation", () => {
-    expect(EXECUTION_PRESETS["review"].systemPromptFragment).toContain("not seen the conversation");
-  });
-
   it("check has read-only + bash tools", () => {
     const tools = EXECUTION_PRESETS["check"].tools;
     expect(tools).toContain("bash");

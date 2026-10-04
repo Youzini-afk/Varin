@@ -26,7 +26,6 @@ import type {
   SessionWorkspaceBinding,
   SessionWorkFocusSnapshot,
   WorkFocusId,
-  WorkFocusExecutionRole,
   WorkFocusSelection,
 } from "@varin/protocol";
 import {
@@ -616,7 +615,6 @@ export class PiRuntimeBroker {
       scope?: string[];
       tools?: string[];
       workFocus?: WorkFocusId;
-      workFocusRole?: WorkFocusExecutionRole;
     },
   ): Promise<SessionSnapshot> {
     await this.#ensureFoundationalBootstrap();
@@ -638,7 +636,6 @@ export class PiRuntimeBroker {
         ...(launch?.tools === undefined ? {} : { tools: [...launch.tools] }),
         workFocus,
         workFocusGeneration: 1,
-        ...(launch?.workFocusRole === undefined ? {} : { workFocusRole: launch.workFocusRole }),
       });
       this.#bindSession(worker, snapshot.sessionId);
       await (await this.#metadataFor(worker)).ensureWorkFocus(snapshot.sessionId, workFocus);
@@ -675,7 +672,6 @@ export class PiRuntimeBroker {
     sessionId?: string;
     scope?: string[];
     tools?: string[];
-    workFocusRole?: WorkFocusExecutionRole;
     workspace?: SessionWorkspaceBinding;
   }): Promise<SessionSnapshot> {
     if (input.sessionId) {
@@ -708,7 +704,6 @@ export class PiRuntimeBroker {
       ...(input.model === undefined ? {} : { model: { ...input.model } }),
       ...(input.scope === undefined ? {} : { scope: [...input.scope] }),
       ...(input.tools === undefined ? {} : { tools: [...input.tools] }),
-      ...(input.workFocusRole === undefined ? {} : { workFocusRole: input.workFocusRole }),
     };
     let known = this.#knownSummaryForOpen(normalizedInput);
     if (

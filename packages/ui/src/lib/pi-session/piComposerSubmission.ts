@@ -26,10 +26,15 @@ export const renderPiComposerSubmission = async (
   if (!command || !canRunCommand(command, { hasSession: true, hasDraft: false })) {
     return { text };
   }
-  const variables = buildCommandVariables(command, parsed?.argument ?? '');
+  const argument = parsed?.argument ?? '';
+  const variables = buildCommandVariables(command, argument);
   const [visibleText, instructions] = await Promise.all([
     renderer(command.visiblePrompt, variables.visible),
     renderer(command.instructionsPrompt, variables.instructions),
   ]);
-  return { instructions, text: visibleText };
+  // Keep free-form input independent of template placeholders, including overrides.
+  const submittedText = argument && !command.buildVariables
+    ? [visibleText, argument].filter(Boolean).join('\n\n')
+    : visibleText;
+  return { instructions, text: submittedText };
 };

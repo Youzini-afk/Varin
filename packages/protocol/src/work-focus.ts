@@ -2,9 +2,6 @@ export const WORK_FOCUS_IDS = ["code", "research"] as const;
 
 export type WorkFocusId = (typeof WORK_FOCUS_IDS)[number];
 
-/** Execution identity used only to tailor the research system fragment. */
-export type WorkFocusExecutionRole = "principal" | "branch";
-
 export const WORK_FOCUS_SOURCES = [
   "explicit",
   "project-default",

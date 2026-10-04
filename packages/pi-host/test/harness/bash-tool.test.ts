@@ -17,6 +17,18 @@ async function executeBash(bridge: HostServicesBridge, command: string): Promise
 }
 
 describe("bash tool", () => {
+  it("marks launch and bridge failures as tool errors", async () => {
+    for (const request of [
+      async () => ({ kind: "spawn-failed", reason: "no-shell", interpreter: "bash" }),
+      async () => { throw new Error("transport lost"); },
+    ]) {
+      const tool = createBashTool({ request } as unknown as HostServicesBridge, "s1", "/workspace");
+      const result = await tool.execute("call-failed", { command: "echo ready" }, undefined, undefined, undefined as never);
+      assert.equal(result.isError, true);
+      assert.equal((result.details as { kind: string }).kind, "spawn-failed");
+    }
+  });
+
   it("forwards explicit zero wait with an RPC deadline beyond process detachment", async () => {
     let observed: { params?: unknown; options?: unknown } = {};
     const bridge = {
@@ -91,6 +103,7 @@ describe("bash tool", () => {
       "call-1", { command: "false" }, undefined, undefined, undefined as never,
     );
     assert.deepEqual((result.details as { shellCompletion?: unknown }).shellCompletion, { executionId: "exec-1" });
+    assert.notEqual(result.isError, true, "a completed non-zero exit is a process result");
   });
 
   it("formats completed result with handle for large output", async () => {
@@ -105,7 +118,7 @@ describe("bash tool", () => {
       shown: { head: 100, tail: 100, total: 50000 },
     }) as HostServicesBridge;
     const text = await executeBash(bridge, "cat big.txt");
-    assert.match(text, /get_output\("out_abc123"\)/);
+    assert.match(text, /get_output.*out_abc123/);
   });
 
   it("formats background result with id", async () => {
@@ -119,7 +132,7 @@ describe("bash tool", () => {
     const text = await executeBash(bridge, "sleep 100");
     assert.match(text, /still running/);
     assert.match(text, /partial output/);
-    assert.match(text, /get_output\("sh_1"\)/);
+    assert.match(text, /get_output.*sh_1/);
   });
 
   it("formats spawn-failed result", async () => {
@@ -151,7 +164,7 @@ describe("bash tool", () => {
     assert.match(text, /FAIL src\/mid\.test\.ts/);
     assert.doesNotMatch(text, /RERUN/);
     assert.match(text, /\[exit 1\]/);
-    assert.match(text, /get_output\("out_full"\)/);
+    assert.match(text, /get_output.*out_full/);
   });
 
   it("formats stderr in completed result", async () => {

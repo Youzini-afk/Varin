@@ -15,9 +15,7 @@ export function createRelatedTool(bridge: HostServicesBridge, _sessionId: string
     description: "Topology and resolved relations from the symbol graph: what a path or symbol defines, what it imports, who imports it, the other ends of its connection literals — and, for a symbol name, language-server-resolved reference sites and call edges (who calls it, what it calls). Resolution is bounded to the anchor's own definitions, so related is not a positional lsp.references replacement; sites marked [unpinned] came from the server's own file read, not a bound revision.",
     promptSnippet: "related: file-level topology plus resolved references/calls for a symbol name from the symbol graph",
     promptGuidelines: [
-      "Use related for file-level import topology, connection-literal endpoints (register/request/on/emit), and resolved who-calls / what-it-calls edges for a symbol name.",
-      "Use lsp.references when you need every site for a symbol at a precise position. related resolves around the anchor's definitions only.",
-      "Pass a workspace path or a symbol / connection-literal name. Graph ranges are hints only; read current text to confirm.",
+      "Graph ranges identify indexed locations. related resolves around the anchor's own definitions; references uses an exact file position. Unpinned sites come from the language server's file read.",
     ],
     parameters: RelatedParams,
     executionMode: "parallel",

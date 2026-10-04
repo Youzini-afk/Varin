@@ -868,8 +868,9 @@ export function createThreadWaitService(host: HarnessServiceHost): HarnessServic
         if (thread.report) {
           lines.push(`✔ ${thread.id} (${thread.preset ?? "unknown"}) — ${thread.report.conclusion.split("\n")[0] ?? "completed"}`);
           lines.push(`  files: ${thread.report.changedFiles.join(", ") || "(none)"} · confidence ${thread.report.confidence}`);
-          lines.push(`  deviations from brief: ${thread.report.deviations.join("; ") || "none"}`);
-          lines.push(`  unresolved: ${thread.report.unresolved.join("; ") || "none"} · notes: read_thread("${thread.id}") · trace: read_thread("${thread.id}", "steps")`);
+          if (thread.report.deviations.length) lines.push(`  deviations from brief: ${thread.report.deviations.join("; ")}`);
+          if (thread.report.unresolved.length) lines.push(`  recorded issues: ${thread.report.unresolved.join("; ")}`);
+          lines.push(`  report: read_thread(${JSON.stringify({ threadId: thread.id, what: "report" })}) · trace: read_thread(${JSON.stringify({ threadId: thread.id, what: "steps" })})`);
         } else {
           lines.push(`✔ ${thread.id} (${thread.preset ?? "unknown"}) — ${threadState(snapshot)}`);
         }
@@ -1687,6 +1688,11 @@ export function createThreadReadService(host: HarnessServiceHost): HarnessServic
           };
         }
         const report = delivery;
+        lines.push(`Thread ${thread.id} (${thread.preset ?? "unknown"}) — Report`);
+        lines.push("", report.conclusion, "");
+        lines.push(`Changed files: ${report.changedFiles.join(", ") || "(none)"}`);
+        if (report.deviations.length) lines.push(`Deviations from brief: ${report.deviations.join("; ")}`);
+        if (report.unresolved.length) lines.push(`Recorded issues: ${report.unresolved.join("; ")}`);
         if (report.evidence) {
           let visibleBytes = DEFAULT_HARNESS_SETTINGS.output.visibleBytes;
           try {
@@ -1706,7 +1712,7 @@ export function createThreadReadService(host: HarnessServiceHost): HarnessServic
           const page = await readRetrievalReportPage({
             host,
             workspaceId,
-            heading: `Thread ${thread.id} (${thread.preset ?? "unknown"}) — Report`,
+            heading: lines.join("\n"),
             evidence: report.evidence,
             offset: params.offset ?? 0,
             length: params.length ?? visibleBytes,
@@ -1718,13 +1724,6 @@ export function createThreadReadService(host: HarnessServiceHost): HarnessServic
             nextOffset: page.nextOffset,
             eof: page.eof,
           };
-        } else {
-          lines.push(`Thread ${thread.id} (${thread.preset ?? "unknown"}) — Report`);
-          lines.push(`Conclusion: ${report.conclusion}`);
-          lines.push(`Changed files: ${report.changedFiles.join(", ") || "(none)"}`);
-          lines.push(`Deviations from brief: ${report.deviations.join("; ") || "none"}`);
-          lines.push(`Unresolved: ${report.unresolved.join("; ") || "none"}`);
-          lines.push(`Confidence: ${report.confidence}`);
         }
         const full = lines.join("\n");
         if (params.offset !== undefined || params.length !== undefined) {

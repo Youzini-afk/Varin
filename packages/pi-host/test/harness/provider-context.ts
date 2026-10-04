@@ -28,7 +28,7 @@ export function serializedToolResult(context: Context, toolName: string): string
 function isTransientRequestObservation(message: ProviderMessage): boolean {
   if (message.role !== "user") return false;
   const text = providerMessageText(message).trimStart();
-  return text.startsWith("<varin-status")
+  return /<varin-status(?:\s|>)/u.test(text)
     || text.startsWith('<varin-context status="unavailable"');
 }
 
@@ -45,6 +45,6 @@ export function persistentProviderMessages(context: Context): ProviderMessage[] 
 
 export function providerRosterMessages(context: Context): ProviderMessage[] {
   return context.messages.filter((message) => (
-    message.role === "user" && providerMessageText(message).trimStart().startsWith("<varin-status")
+    message.role === "user" && /<varin-status(?:\s|>)/u.test(providerMessageText(message))
   ));
 }

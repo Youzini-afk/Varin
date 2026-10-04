@@ -77,11 +77,8 @@ export function createMaterialsTool(bridge: HostServicesBridge): ToolDefinition 
     description: "Create and manage named material collections (snapshots, URLs, paper identities) and keyword-search within one collection. Members are references to fixed snapshots and sources, not copies.",
     promptSnippet: "materials: named sets of snapshots/URLs/papers with scoped keyword search",
     promptGuidelines: [
-      "Create a collection before adding; pass persist=true for material that must outlive this thread.",
-      "action=search scopes the keyword query to the collection's readable member bodies — it never scans other material.",
-      "Unreadable members are reported separately; a member reference does not grant content access.",
-      "Adding a URL fetches and pins it through the normal web.fetch authority path first.",
-      "action=share grants a related thread read access to a collection or snapshot; the receiver still reads under its own authority and receipts stay per-Run.",
+      "Collections contain references to fixed snapshots and sources. Adding a URL fetches and pins it; search covers only readable member bodies.",
+      "share grants a related thread access to a collection or snapshot under its own authority. persist=true retains a collection after the thread settles.",
     ],
     parameters: MaterialsParams,
     executionMode: "parallel",

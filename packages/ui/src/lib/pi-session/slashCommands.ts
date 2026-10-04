@@ -30,8 +30,8 @@ export interface MagicPromptCommand {
     errorToastKey: I18nKey;
     requires: CommandRequirement;
     /**
-     * Turn the text typed after the command name into template variables.
-     * Commands without an argument omit this.
+     * Interpolate the argument into dedicated template slots when needed.
+     * Otherwise submission appends it unchanged to the visible message.
      */
     buildVariables?: (argument: string) => {
         visible?: Record<string, string>;
@@ -48,7 +48,7 @@ const summaryVariables = (topic: string) => ({
     visible: { topic_line: topic ? ` focused on: ${topic}` : '' },
     instructions: {
         topic_block: topic
-            ? `The user asked you to focus this summary on: ${topic}. Prioritize that topic; mention unrelated threads only in passing.`
+            ? `Summary focus: ${topic}`
             : '',
     },
 });

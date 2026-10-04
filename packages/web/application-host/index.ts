@@ -2404,7 +2404,6 @@ async function main(options: StartWebUiServerOptions = {}): Promise<WebUiServerC
           ...(input.scope?.length ? { scope: input.scope } : {}),
           tools: input.tools,
           workFocus: input.workFocus,
-          workFocusRole: 'branch',
         },
       ),
       open: (input) => piRuntimeBroker.openSession({
@@ -2416,7 +2415,6 @@ async function main(options: StartWebUiServerOptions = {}): Promise<WebUiServerC
         sessionId: input.sessionId,
         workspace: { authorityId: input.workspaceId, id: input.workspaceId, kind: 'workspace' },
         tools: input.tools,
-        workFocusRole: 'branch',
       }),
       prompt: async (sessionId, text, instructions, images, inputContext) => {
         const fixedContext = inputContext ?? await sourceViewRuntime.contextForSession(sessionId);

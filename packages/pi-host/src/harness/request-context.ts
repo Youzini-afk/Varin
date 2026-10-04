@@ -44,19 +44,24 @@ export function createRequestContextInjector(bridge: HostServicesBridge): NonNul
     signal?.throwIfAborted();
     const material: Zone2AssembleResult | undefined = environment.status === "fulfilled" ? environment.value : undefined;
     const roster: Zone2StatusResult | undefined = status.status === "fulfilled" ? status.value : undefined;
+    const environmentContent = material?.content
+      ? `Environment observations (retained in session history):\n${material.content}`
+      : undefined;
     const additions: Message[] = [];
-    if (material?.content) additions.push(observation(material.content));
+    if (environmentContent) additions.push(observation(environmentContent));
     else if (environment.status === "rejected") {
       additions.push(observation('<varin-context status="unavailable">Current environment observations could not be read. Previously observed facts may be stale.</varin-context>'));
     }
-    additions.push(observation(roster?.content ?? (roster?.status === "empty"
+    additions.push(observation(roster?.content
+      ? `Current teammates (request snapshot; progress excerpts):\n${roster.content}`
+      : (roster?.status === "empty"
       ? '<varin-status status="empty">No teammates in the current authorized scope.</varin-status>'
       : '<varin-status status="unavailable">Current teammate status could not be read. This does not mean there are no teammates.</varin-status>')));
     return {
       request: { ...request, context: { ...request.context, messages: [...request.context.messages, ...additions] } },
-      ...(material?.content ? {
+      ...(material?.content && environmentContent ? {
         retained: {
-          content: material.content,
+          content: environmentContent,
           details: {
             deliveryId: material.deliveryId,
             eventCursor: material.eventCursor,

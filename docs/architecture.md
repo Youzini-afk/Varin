@@ -8,7 +8,7 @@ product surfaces. The cleanup and root build were locally verified; packaged, cr
 remote-CI evidence remains owned by their respective release checks. Historical Stage R and migration
 evidence may still name that surface where it records work completed before retirement.
 
-Last updated: 2026-09-30
+Last updated: 2026-10-05
 
 Design direction (D-337, implemented HR0–HR5): [task/resource Harness and continuous retrieval](design/resource-oriented-harness-design.md)
 separates project grouping from session/task ownership, resource identity, execution directories and indexes.
@@ -420,11 +420,22 @@ D-301's 7G request preparation is implemented at D-305. It runs before every act
 new environment facts become replayable
 history, followed by a complete compact team roster that exists only in that request. Prior rosters
 never enter the growing conversation prefix; the full current scoped view is supplied even when
-unchanged. Fixed collaboration guidance stays in the system prompt; dynamic observations and the
-snapshot use source-labelled user content through the provider adapter. Request capacity includes
+unchanged. Each payload carries its source and lifetime: environment observations remain in history,
+while the teammate roster is a request snapshot with progress excerpts. Both use user content
+through the provider adapter. Request capacity includes
 both materials. Environment delivery receipts remain distinct from transient snapshot visibility,
 and neither UI reads nor a snapshot marker consumes a directed message or result body. Pi's existing
 session manager remains the only conversation authority; there is no second context service.
+
+Default model input follows the native Pi section builder with a neutral Varin Agent identity, the
+current tool descriptions, and SDK reference paths. Work focus selects capabilities without appending
+a mode persona or workflow. Built-in task prompts describe the requested action and actual context;
+ordinary child-thread reports retain the complete answer rather than parsing required headings.
+Feature-local structured outputs remain where a consumer parses them, including commit/PR drafts,
+retrieval selection, memory proposals, and automatic run decisions. Built-in Skills describe current
+interfaces and resource locations. The same shipped SDK patch applies to bundled code and, in memory,
+to selected external SDK code and reference assets. See the [Pi harness README](../packages/pi-host/src/harness/README.md)
+and [thread runtime contract](../packages/web/application-host/lib/harness/DOCUMENTATION.md).
 
 D-302 / 7H is implemented at D-305. Resource-aware tool scheduling runs at the real
 Pi execution boundary, while Host authority and Rust file/process owners retain permission, mutation

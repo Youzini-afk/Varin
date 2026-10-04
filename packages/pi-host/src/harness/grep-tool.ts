@@ -44,7 +44,7 @@ function formatSearchResult(result: SearchContentResult, pattern: string): strin
   if (shownHits < result.totalHits && result.handle) {
     const remaining = result.totalHits - shownHits;
     const moreFiles = result.totalFiles - result.files.length;
-    lines.push(`\n[${remaining} more hits in ${moreFiles} files — get_output("${result.handle}") or narrow with glob/path]`);
+    lines.push(`\n[${remaining} more hits in ${moreFiles} files — get_output({handle:"${result.handle}"}) or narrow with glob/path]`);
   }
 
   return lines.join("\n");
@@ -56,10 +56,6 @@ export function createGrepTool(bridge: HostServicesBridge, _sessionId: string): 
     label: "Grep",
     description: "Search file contents with ripgrep semantics",
     promptSnippet: "grep: search file contents with ripgrep semantics",
-    promptGuidelines: [
-      "Use grep to search file contents. Prefer it over shell grep or rg.",
-      "A non-zero exit or empty result is a result, not an error.",
-    ],
     parameters: GrepParams,
     execute: async (_toolCallId, params, signal, _onUpdate, _ctx) => {
       try {

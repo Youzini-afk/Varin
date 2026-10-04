@@ -201,8 +201,7 @@ export function createApplyPatchTool(
     description: "Apply a Codex-format multi-file patch. Supports *** Update File / *** Add File / *** Delete File with @@ context hunks.",
     promptSnippet: "apply_patch: apply Codex-format multi-file patches (Update/Add/Delete File)",
     promptGuidelines: [
-      "Use apply_patch for multi-file edits with Codex patch syntax.",
-      "Format: *** Begin Patch / *** Update File: path / @@ context / +added / -removed / *** End Patch",
+      "Patch syntax: *** Begin Patch / *** Update File: path / @@ context / +added / -removed / *** End Patch.",
     ],
     parameters: ApplyPatchParams,
     executionMode: "sequential",

@@ -184,9 +184,6 @@ export function createDispatchTool(
     description: "Dispatch a sub-agent thread for a task. kind:\"discussion\" starts a read-only consult thread that answers against memory and reports back. Optional preset picks a fixed execution configuration. Asynchronous — returns immediately, never blocks.",
     promptSnippet: "dispatch: spawn a sub-agent thread for a task",
     promptGuidelines: [
-      "Dispatch is asynchronous. Use wait to block until something changes; threads is a quick non-blocking glance — do not call it in a loop.",
-      "Teammates report deviations from your brief; trust the report over your assumptions.",
-      "read_thread shows a teammate's notes first; only read steps when the notes are not enough.",
       teamPrompt,
     ],
     parameters: DispatchParams,
@@ -329,11 +326,8 @@ export function createThreadsTool(bridge: HostServicesBridge, _sessionId: string
   return defineTool({
     name: "threads",
     label: "Threads",
-    description: "List sub-agent threads — non-blocking dashboard glance. Default incremental (only changes since last view). Use wait to block instead of polling.",
+    description: "List sub-agent threads without blocking. Defaults to changes since the previous view; wait blocks for a result or addressed dependency.",
     promptSnippet: "threads: quick non-blocking glance at sub-agent threads",
-    promptGuidelines: [
-      "threads is a quick non-blocking glance — do not call it in a loop. Use wait to block until something changes.",
-    ],
     parameters: ThreadListParams,
     executionMode: "parallel",
     execute: async (_toolCallId, params, _signal, _onUpdate, _ctx) => {
@@ -408,7 +402,6 @@ export function createSendTool(bridge: HostServicesBridge, _sessionId: string, o
     label: "Send",
     description: "Send a message to a related thread (child, sibling, or parent). kind: 'inform' delivers without waking a waiting thread; 'request' asks for execution — on a settled thread it starts a new Run (context: 'continue' resumes its session; 'fresh' rebuilds the input). replyTo answers a request and completes the requester's wait. capability re-routes the new Run under that capability's frozen configuration.",
     promptSnippet: "send: inform a teammate; kind=request resumes a settled thread",
-    promptGuidelines: [],
     parameters: ThreadSendParams,
     executionMode: "parallel",
     execute: async (_toolCallId, params, signal, _onUpdate, _ctx) => {
@@ -478,9 +471,6 @@ export function createReadThreadTool(bridge: HostServicesBridge, _sessionId: str
     label: "Read Thread",
     description: "Read a teammate's notes, delivery report, transcript slice, or transcript entries. Use runId or resultRevision for an immutable earlier delivery; what:'transcript' with an entry id expands the exact passage a status excerpt cites; viewing never executes work.",
     promptSnippet: "read_thread: read a teammate's notes (blocks), report, steps, or transcript entries",
-    promptGuidelines: [
-      "read_thread shows a teammate's notes first; only read steps when the notes are not enough.",
-    ],
     parameters: ThreadReadParams,
     executionMode: "parallel",
     execute: async (_toolCallId, params, signal, _onUpdate, _ctx) => {
@@ -523,7 +513,6 @@ export function createMergeTool(bridge: HostServicesBridge, _sessionId: string):
     label: "Merge",
     description: "Integrate a completed sub-agent's published result into parent files or editor drafts. Draft changes remain unsaved. Reports applied paths, conflicts, and any recovery required.",
     promptSnippet: "merge: integrate a completed teammate's published result",
-    promptGuidelines: [],
     parameters: ThreadMergeParams,
     executionMode: "sequential",
     execute: async (_toolCallId, params, signal, _onUpdate, _ctx) => {
@@ -577,7 +566,6 @@ export function createUpdateTool(bridge: HostServicesBridge, _sessionId: string)
     label: "Update",
     description: "Incorporate a published parent result revision into a started teammate's working baseline. The teammate's own changes are preserved through a three-way merge; paths where both sides diverged keep the teammate's bytes and are reported as conflicts.",
     promptSnippet: "update: pull a published parent revision into a teammate's baseline",
-    promptGuidelines: [],
     parameters: ThreadUpdateParams,
     executionMode: "sequential",
     execute: async (_toolCallId, params, signal, _onUpdate, _ctx) => {
@@ -612,7 +600,6 @@ export function createKillTool(bridge: HostServicesBridge, _sessionId: string): 
     label: "Kill",
     description: "Stop a sub-agent and retain its published work. Idle materializations can be reclaimed after the result is saved; keep_worktree explicitly preserves the directory.",
     promptSnippet: "kill: stop a teammate; published work is retained",
-    promptGuidelines: [],
     parameters: ThreadKillParams,
     executionMode: "sequential",
     execute: async (_toolCallId, params, _signal, _onUpdate, _ctx) => {

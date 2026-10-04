@@ -1,4 +1,4 @@
-import { fauxProvider } from "@earendil-works/pi-ai";
+import { fauxProvider, getCurrentTools, normalizeContext, type Context } from "@earendil-works/pi-ai";
 import { mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
@@ -212,8 +212,7 @@ describe("retrieval thread public slice", () => {
         if (!spawningRunId) throw new Error("retrieval child created without a Run id");
         childScope = input.scope;
         const child = createChildHost();
-        const created = await child.create(input.cwd, input.name, input.parentSession, input.tools, input.model, input.permissions,
-          undefined, 1, "branch");
+        const created = await child.create(input.cwd, input.name, input.parentSession, input.tools, input.model, input.permissions);
         childHosts.set(created.sessionId, child);
         childRunIds.set(created.sessionId, spawningRunId);
         executionContexts.set(created.sessionId, { workspaceId: input.workspaceId, root: input.cwd });
@@ -337,7 +336,7 @@ describe("retrieval thread public slice", () => {
     let parentPhase = 0;
     let childPhase = 0;
     let followPhase = 0;
-    const respond = (context: { messages: unknown }) => {
+    const respond = (context: Context) => {
       const blob = JSON.stringify(context.messages);
       if (blob.includes("Read the retrieval report")) {
         followPhase += 1;
@@ -353,9 +352,7 @@ describe("retrieval thread public slice", () => {
         }
         return fauxAssistantMessage("Parent read the retrieval report.");
       }
-      if (
-        blob.includes("You are working as the retrieval thread")
-      ) {
+      if (getCurrentTools(normalizeContext(context).messages).some(tool => tool.name === "submit_facts")) {
         childPhase += 1;
         if (childPhase === 1) {
           return fauxAssistantMessage([fauxToolCall("explore", { question: "login helper", anchors: ["login"] })]);
@@ -478,7 +475,6 @@ describe("retrieval thread public slice", () => {
       assert.ok(!childTools.includes("edit"));
       assert.ok(!childInitialPrompt.includes(parentUserText));
       assert.ok(!childInitialPrompt.includes("<parent-blocks"));
-      assert.match(childInitialPrompt, /submit_facts/);
 
       assert.ok(childTranscript.length > 0);
       assert.equal(childTranscript.includes(parentUserText), false);

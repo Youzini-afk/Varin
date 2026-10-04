@@ -8,7 +8,6 @@ import type {
   SessionSummary,
   SessionWorkspaceBinding,
   WorkFocusId,
-  WorkFocusExecutionRole,
 } from "@varin/protocol";
 import { PiRuntimeNotReadyError } from "./errors.js";
 import { resolveBundledPiHostEntry } from "./host-entry.js";
@@ -204,7 +203,7 @@ export class PiRuntimeLifecycle {
     name?: string,
     parentSession?: string,
     workspace?: SessionWorkspaceBinding,
-    launch?: { model?: { providerId: string; modelId: string }; scope?: string[]; tools?: string[]; workFocus?: WorkFocusId; workFocusRole?: WorkFocusExecutionRole },
+    launch?: { model?: { providerId: string; modelId: string }; scope?: string[]; tools?: string[]; workFocus?: WorkFocusId },
   ): Promise<SessionSnapshot> {
     return this.requireBroker().createSession(cwd, name, parentSession, workspace, launch);
   }
@@ -216,7 +215,6 @@ export class PiRuntimeLifecycle {
     sessionId?: string;
     scope?: string[];
     tools?: string[];
-    workFocusRole?: WorkFocusExecutionRole;
     workspace?: SessionWorkspaceBinding;
   }): Promise<SessionSnapshot> {
     const broker = input.sessionId ? this.#findBrokerForSession(input.sessionId) : undefined;

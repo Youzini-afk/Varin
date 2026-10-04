@@ -97,17 +97,6 @@ const readWorkFocusSelection = (params: Record<string, unknown>): WorkFocusSelec
   return { id: value.id, source: value.source };
 };
 
-const optionalWorkFocusRole = (
-  params: Record<string, unknown>,
-): import("@varin/protocol").WorkFocusExecutionRole | undefined => {
-  const value = params.workFocusRole;
-  if (value === undefined) return undefined;
-  if (value !== "principal" && value !== "branch") {
-    throw new HostError("invalid_params", "workFocusRole must be principal or branch");
-  }
-  return value;
-};
-
 const optionalPositiveInteger = (params: Record<string, unknown>, key: string): number | undefined => {
   const value = params[key];
   if (value === undefined) return undefined;
@@ -940,7 +929,6 @@ export class HostController {
           optionalPermissionPolicy(params),
           optionalWorkFocusSelection(params),
           optionalPositiveInteger(params, "workFocusGeneration"),
-          optionalWorkFocusRole(params),
           params.modelSettings === undefined ? undefined : params.modelSettings === null ? null : parseHarnessAgentModelSettings(params.modelSettings),
         );
       case "session.open": {
@@ -952,7 +940,6 @@ export class HostController {
         const permissions = optionalPermissionPolicy(params);
         const workFocus = optionalWorkFocusSelection(params);
         const workFocusGeneration = optionalPositiveInteger(params, "workFocusGeneration");
-        const workFocusRole = optionalWorkFocusRole(params);
         return this.#sessionHost.open({
           ...(params.modelSettings === undefined ? {} : {
             modelSettings: params.modelSettings === null ? null : parseHarnessAgentModelSettings(params.modelSettings),
@@ -965,7 +952,6 @@ export class HostController {
           ...(permissions === undefined ? {} : { permissions }),
           ...(workFocus === undefined ? {} : { workFocus }),
           ...(workFocusGeneration === undefined ? {} : { workFocusGeneration }),
-          ...(workFocusRole === undefined ? {} : { workFocusRole }),
         });
       }
       case "session.workFocus.apply": {

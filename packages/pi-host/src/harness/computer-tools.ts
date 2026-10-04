@@ -24,102 +24,114 @@ import type {
  * It is an execution facility, not an operating-system security sandbox.
  */
 
+const ComputerOperation = Type.Object({
+  kind: Type.Union(["click", "type", "key", "scroll", "drag", "set_value", "secondary"].map((kind) => Type.Literal(kind))),
+  app: Type.String({ description: "Process name, window title substring, or pid" }),
+  window: Type.Optional(Type.Union([Type.Integer(), Type.String()], { description: "Native window handle or title within the app" })),
+  observationId: Type.Optional(Type.String({ description: "Observation supplying elementIndex or coordinates; stale observations are rejected" })),
+  elementIndex: Type.Optional(Type.Integer({ description: "Element index from observationId" })),
+  x: Type.Optional(Type.Number({ description: "Window-relative pointer x coordinate" })),
+  y: Type.Optional(Type.Number({ description: "Window-relative pointer y coordinate" })),
+  fromX: Type.Optional(Type.Number({ description: "Drag start x in window coordinates" })),
+  fromY: Type.Optional(Type.Number({ description: "Drag start y in window coordinates" })),
+  toX: Type.Optional(Type.Number({ description: "Drag end x in window coordinates" })),
+  toY: Type.Optional(Type.Number({ description: "Drag end y in window coordinates" })),
+  clickCount: Type.Optional(Type.Number()),
+  mouseButton: Type.Optional(Type.Union([Type.Literal("left"), Type.Literal("right"), Type.Literal("middle")])),
+  clickMethod: Type.Optional(Type.Union([Type.Literal("auto"), Type.Literal("accessibility"), Type.Literal("app_post"), Type.Literal("global")])),
+  direction: Type.Optional(Type.Union([Type.Literal("up"), Type.Literal("down"), Type.Literal("left"), Type.Literal("right")])),
+  pages: Type.Optional(Type.Number({ description: "scroll: number of pages" })),
+  text: Type.Optional(Type.String({ description: "type: text to insert" })),
+  key: Type.Optional(Type.String({ description: "key: chord such as enter, ctrl+s, or f5" })),
+  value: Type.Optional(Type.String({ description: "set_value: replacement element value" })),
+  action: Type.Optional(Type.String({ description: "secondary: name from the element's actions list" })),
+}, { additionalProperties: true });
+
+const BrowserOperation = Type.Object({
+  kind: Type.Union(["navigate", "evaluate", "click", "type", "screenshot"].map((kind) => Type.Literal(kind))),
+  url: Type.Optional(Type.String({ description: "navigate: destination URL on the target machine" })),
+  expression: Type.Optional(Type.String({ description: "evaluate: JavaScript expression in the page" })),
+  x: Type.Optional(Type.Number({ description: "click: CSS viewport x coordinate" })),
+  y: Type.Optional(Type.Number({ description: "click: CSS viewport y coordinate" })),
+  text: Type.Optional(Type.String({ description: "type: text to insert" })),
+}, { additionalProperties: true });
+
+const OfficeOperation = Type.Object({
+  kind: Type.Union(["read", "write", "insert", "save", "export"].map((kind) => Type.Literal(kind))),
+  doc: Type.Optional(Type.String({ description: "Open document id, unique title, or URL; defaults to the active document" })),
+  sheet: Type.Optional(Type.String({ description: "read/write: sheet name; defaults to the first sheet" })),
+  range: Type.Optional(Type.String({ description: "read/write: cell range, for example A1:B4" })),
+  values: Type.Optional(Type.Array(Type.Array(Type.Unknown()), { description: "write: two-dimensional values matching the range" })),
+  text: Type.Optional(Type.String({ description: "insert: text appended to the Writer document" })),
+  path: Type.Optional(Type.String({ description: "save/export: destination path on the target machine" })),
+  url: Type.Optional(Type.String({ description: "save/export: destination URL" })),
+  filter: Type.Optional(Type.String({ description: "export: native filter name; defaults to the document kind's PDF filter" })),
+}, { additionalProperties: true });
+
 const ComputerParams = Type.Object({
   action: Type.Union([
-    Type.Literal("list"),
-    Type.Literal("prepare"),
-    Type.Literal("start"),
-    Type.Literal("stop"),
-    Type.Literal("artifact"),
-    Type.Literal("apps"),
-    Type.Literal("observe"),
-    Type.Literal("act"),
-    Type.Literal("cancel"),
-    Type.Literal("release"),
-    Type.Literal("run"),
-    Type.Literal("reset"),
-    Type.Literal("environment"),
-    Type.Literal("open"),
-    Type.Literal("put"),
-    Type.Literal("forward"),
-    Type.Literal("forwards"),
-    Type.Literal("forwardClose"),
-    Type.Literal("install"),
-    Type.Literal("browser"),
-    Type.Literal("office"),
-    Type.Literal("evidence"),
+    Type.Literal("list", { description: "List registered machines and desktops" }),
+    Type.Literal("prepare", { description: "Install a persistent Linux desktop and browser on this Host or a saved connection" }),
+    Type.Literal("start", { description: "Start desktopId" }),
+    Type.Literal("stop", { description: "Stop desktopId; saved files and browser profile remain" }),
+    Type.Literal("artifact", { description: "Register the current revision of a managed-home file for download" }),
+    Type.Literal("apps", { description: "List visible applications and windows" }),
+    Type.Literal("observe", { description: "Read an app's accessibility tree and optional screenshot" }),
+    Type.Literal("act", { description: "Submit operation; acceptance identifies driver dispatch, not application completion" }),
+    Type.Literal("cancel", { description: "Drop queued input and cancel active script evaluations" }),
+    Type.Literal("release", { description: "Release held keys and pointer buttons" }),
+    Type.Literal("run", { description: "Evaluate JavaScript with persistent bindings and the computer API" }),
+    Type.Literal("reset", { description: "Clear the script context and bindings" }),
+    Type.Literal("environment", { description: "Read or change this work's shell target and desktop binding; accepted operations retain their targets" }),
+    Type.Literal("open", { description: "Open a URL, path, or application on the desktop's machine" }),
+    Type.Literal("put", { description: "Write a file into the managed desktop user's home" }),
+    Type.Literal("forward", { description: "Expose a target service on this Host; the returned local access path lasts while the forward is live" }),
+    Type.Literal("forwards", { description: "List live service forwards" }),
+    Type.Literal("forwardClose", { description: "Close forwardId" }),
+    Type.Literal("install", { description: "Install recipe groups or packages in the desktop's environment" }),
+    Type.Literal("browser", { description: "Operate the visible Chromium session through CDP" }),
+    Type.Literal("office", { description: "Operate live LibreOffice documents, including unsaved state, through UNO" }),
+    Type.Literal("evidence", { description: "Read the durable operation journal's identifiers and outcomes" }),
   ]),
-  /** Target desktop; omit for the work's environment binding or the configured default. */
-  desktopId: Type.Optional(Type.String()),
-  /** environment: managed execution target for this work's shell/process ops; "" or null clears back to this Host. */
-  workTarget: Type.Optional(Type.String()),
-  /** environment: also clear the work's desktop binding when true. */
-  clear: Type.Optional(Type.Boolean()),
-  /** open: URL opened by the target machine's handlers (localhost is the target's own loopback). */
-  url: Type.Optional(Type.String()),
-  /** open: absolute path on the target machine opened with its default app. */
-  path: Type.Optional(Type.String()),
-  /** open: application/binary resolved on the target machine. */
-  command: Type.Optional(Type.String()),
-  args: Type.Optional(Type.Array(Type.String())),
-  /** put: file bytes (base64) written atomically into the managed desktop user's home. */
-  contentBase64: Type.Optional(Type.String()),
-  /** forward: port the service listens on at the target machine. */
-  port: Type.Optional(Type.Number()),
-  /** forward: address on the target machine (default its loopback); also the managed target id when set. */
-  host: Type.Optional(Type.String()),
-  /** forward: managed target the service runs on (default this work's workTarget or this Host). */
-  target: Type.Optional(Type.String()),
-  /** forwardClose: access id returned by forward/forwards. */
-  forwardId: Type.Optional(Type.String()),
-  /** install: recipe component groups from the environment manifest (e.g. "dev", "docs"). */
-  groups: Type.Optional(Type.Array(Type.String())),
-  /** install: explicit package names on top of any groups. */
-  packages: Type.Optional(Type.Array(Type.String())),
-  /** browser: status | launch | tabs | snapshot | act — ops on the visible Chromium session (CDP attach). */
-  browserOp: Type.Optional(Type.String()),
-  /** browser: tab to attach for snapshot/act (default first page). */
-  tabId: Type.Optional(Type.String()),
-  /** browser launch: browser executable on the target machine. */
-  browserBinary: Type.Optional(Type.String()),
-  /** browser launch: persistent profile directory on the target machine. */
-  browserProfile: Type.Optional(Type.String()),
-  /** browser: explicit CDP port on the target machine. */
-  browserPort: Type.Optional(Type.Integer({ minimum: 1, maximum: 65535 })),
-  /** browser snapshot: number of accessibility lines to return. */
-  browserLimit: Type.Optional(Type.Integer({ minimum: 1 })),
-  /** browser act: navigate(url) | evaluate(expression) | click(x,y) | type(text) | screenshot; click uses CSS viewport coords, not desktop/window coords. */
-  browserAct: Type.Optional(Type.Object({}, { additionalProperties: true })),
-  /** office: status | launch | docs | open | act — ops on the live LibreOffice instance (UNO attach; open docs keep unsaved state). */
-  officeOp: Type.Optional(Type.String()),
-  /** office open: file path on the target machine. */
-  officePath: Type.Optional(Type.String()),
-  /** office open: URL on the target machine. */
-  officeUrl: Type.Optional(Type.String()),
-  /** office act: read/write {doc,sheet,range,values} | insert {doc,text} | save/export {doc,path,filter}. */
-  officeAct: Type.Optional(Type.Object({}, { additionalProperties: true })),
-  /** evidence: review the durable step journal — seq/at/sessionId/lane/tool/op/target/outcome for each executed operation (identifiers only). */
-  evidenceSince: Type.Optional(Type.Number()),
-  evidenceLimit: Type.Optional(Type.Number()),
-  evidenceSession: Type.Optional(Type.String()),
-  connectionId: Type.Optional(Type.String({ description: "prepare: saved Host connection id; omit for this Host." })),
-  width: Type.Optional(Type.Integer({ minimum: 1 })),
-  height: Type.Optional(Type.Integer({ minimum: 1 })),
-  relativePath: Type.Optional(Type.String({ description: "artifact: file path relative to the managed desktop user's home." })),
-  /** observe/act/apps: app selector (process name, window title, or pid). */
-  app: Type.Optional(Type.String()),
-  /** observe: which of the app's windows to bind — hwnd number or title (multi-window apps). */
-  window: Type.Optional(Type.Union([Type.Integer(), Type.String()])),
-  /** observe: include a PNG screenshot of the window. */
-  includeScreenshot: Type.Optional(Type.Boolean()),
-  /** observe: cap the textual tree dump (number of lines, or "max"). */
-  textLimit: Type.Optional(Type.Union([Type.Integer({ minimum: 1 }), Type.Literal("max")])),
-  /** act: the structured action object. */
-  operation: Type.Optional(Type.Object({}, { additionalProperties: true })),
-  /** run: JavaScript evaluated in the session-persistent context. */
-  script: Type.Optional(Type.String()),
-  /** run: optional evaluation budget; cancellation is always supported. */
-  timeoutMs: Type.Optional(Type.Integer({ minimum: 1 })),
+  desktopId: Type.Optional(Type.String({ description: "Target desktop; defaults to the work's binding or configured default. Required for start/stop." })),
+  workTarget: Type.Optional(Type.String({ description: "environment: managed shell target; empty string resets to this Host" })),
+  clear: Type.Optional(Type.Boolean({ description: "environment: clear both the shell target and desktop binding" })),
+  url: Type.Optional(Type.String({ description: "open: destination URL; localhost refers to the target machine" })),
+  path: Type.Optional(Type.String({ description: "open: absolute path on the target machine" })),
+  command: Type.Optional(Type.String({ description: "open: application executable on the target machine" })),
+  args: Type.Optional(Type.Array(Type.String(), { description: "open: application arguments" })),
+  contentBase64: Type.Optional(Type.String({ description: "put: base64 file bytes for an atomic write" })),
+  port: Type.Optional(Type.Number({ description: "forward: service port on the target machine" })),
+  host: Type.Optional(Type.String({ description: "forward: service address on the target machine; defaults to its loopback" })),
+  target: Type.Optional(Type.String({ description: "forward: managed target id; defaults to the work's shell target or this Host" })),
+  forwardId: Type.Optional(Type.String({ description: "forwardClose: id returned by forward/forwards" })),
+  groups: Type.Optional(Type.Array(Type.String(), { description: "install: recipe groups such as dev or docs" })),
+  packages: Type.Optional(Type.Array(Type.String(), { description: "install: explicit package names" })),
+  browserOp: Type.Optional(Type.Union(["status", "launch", "tabs", "snapshot", "act"].map((op) => Type.Literal(op)), { description: "browser operation; defaults to status" })),
+  tabId: Type.Optional(Type.String({ description: "browser snapshot/act: page id; optional only when exactly one page is open" })),
+  browserBinary: Type.Optional(Type.String({ description: "browser launch: executable on the target machine" })),
+  browserProfile: Type.Optional(Type.String({ description: "browser launch: persistent profile directory on the target machine" })),
+  browserPort: Type.Optional(Type.Integer({ minimum: 1, maximum: 65535, description: "browser: explicit CDP port" })),
+  browserLimit: Type.Optional(Type.Integer({ minimum: 1, description: "browser snapshot: accessibility-tree line limit" })),
+  browserAct: Type.Optional(BrowserOperation),
+  officeOp: Type.Optional(Type.Union(["status", "launch", "docs", "open", "act"].map((op) => Type.Literal(op)), { description: "office operation; defaults to status" })),
+  officePath: Type.Optional(Type.String({ description: "office open: path on the target machine" })),
+  officeUrl: Type.Optional(Type.String({ description: "office open: URL on the target machine" })),
+  officeAct: Type.Optional(OfficeOperation),
+  evidenceSince: Type.Optional(Type.Number({ description: "evidence: return entries after this sequence number" })),
+  evidenceLimit: Type.Optional(Type.Number({ description: "evidence: maximum number of journal entries" })),
+  evidenceSession: Type.Optional(Type.String({ description: "evidence: filter by session id" })),
+  connectionId: Type.Optional(Type.String({ description: "prepare: saved Host connection id; omit for this Host" })),
+  width: Type.Optional(Type.Integer({ minimum: 1, description: "prepare: desktop width in pixels" })),
+  height: Type.Optional(Type.Integer({ minimum: 1, description: "prepare: desktop height in pixels" })),
+  relativePath: Type.Optional(Type.String({ description: "artifact/put: file path relative to the managed desktop user's home" })),
+  app: Type.Optional(Type.String({ description: "observe: process name, window title, or pid" })),
+  window: Type.Optional(Type.Union([Type.Integer(), Type.String()], { description: "observe: native window handle or title" })),
+  includeScreenshot: Type.Optional(Type.Boolean({ description: "observe: attach a PNG screenshot" })),
+  textLimit: Type.Optional(Type.Union([Type.Integer({ minimum: 1 }), Type.Literal("max")], { description: "observe: maximum accessibility-tree lines" })),
+  operation: Type.Optional(ComputerOperation),
+  script: Type.Optional(Type.String({ description: "run: JavaScript with top-level await; the last expression is returned. Example: const obs = await computer.observe('app'); await computer.emitImage(obs); obs.id" })),
+  timeoutMs: Type.Optional(Type.Integer({ minimum: 1, description: "run: evaluation budget in milliseconds; cancellation clears bindings" })),
 });
 
 const errorResult = (error: unknown) => {
@@ -128,7 +140,7 @@ const errorResult = (error: unknown) => {
   const uncertainEffect = code === "timeout" || /abort|budget exhausted/i.test(message);
   return {
     content: [{ type: "text" as const, text: `computer failed (${code}): ${message}${uncertainEffect
-      ? ". A submitted GUI action may have partly reached the desktop; observe before retrying."
+      ? ". A submitted GUI action may have partly reached the desktop."
       : ""}` }],
     isError: true as const,
     details: { code },
@@ -162,22 +174,9 @@ export function createComputerTool(bridge: HostServicesBridge, _sessionId: strin
     description: "Observe and operate real desktop applications: list computers/desktops, read the accessibility tree, click, type, press keys, scroll, drag — or run a persistent JavaScript REPL for multi-step GUI orchestration",
     promptSnippet: "computer: observe and operate desktop apps (list/apps/observe/act/cancel/run scripts)",
     promptGuidelines: [
-      "Always observe before acting: element indexes are only valid for the observation that produced them — pass that observationId to act.",
-      "act reports driver acceptance, not business completion; observe again to verify the UI changed.",
-      "For sequences (fill a form, navigate a wizard) prefer action=run with a script over many round trips; bindings persist across run calls.",
-      "In run scripts, top-level await and lexical declarations work; the last expression is the result (e.g. `const obs = await computer.observe('app'); obs.id`). Cancellation clears the script bindings.",
-      "Use await computer.emitImage(obs) to show an observation screenshot to the model. A script batch is invalidated by desktop cancellation or human handoff; start a new run after observing the current scene.",
-      "cancel drops queued input; release frees held keys/buttons. Use them when a gesture must not continue.",
-      "If the tool reports the desktop unavailable or unprobed, report that honestly — never claim a GUI action happened.",
-      "prepare installs a persistent Linux desktop and browser on this Host or a saved connection. Use it when an independent desktop is needed. start/stop require its desktopId; stopping closes applications but retains their saved files and browser profile.",
-      "After saving a file in a managed desktop, action=artifact with its path relative to that desktop user's home records the exact file revision on the current work. The work view provides a download; a changed file must be registered again.",
-      "action=environment reads or rebinds this work's execution environment (work target for shell ops, desktop for GUI ops). Operations already accepted keep their target; a rebind is never a file or session migration.",
-      "action=open starts a URL/path/app on the desktop's own machine — `localhost` URLs and file paths resolve on that machine, not yours. action=put writes one file into the managed desktop user's home and returns its revision; it is a one-shot copy, not a sync.",
-      "action=forward opens a live service access path: for a managed remote target it returns a loopback URL valid ONLY on this Host (a forward dies with it, close it with action=forwardClose); for the local target it returns the service's own address. forwards lists live handles. A remote service's localhost is never your localhost.",
-      "action=install adds software to the environment owning the bound desktop — recipe groups (`dev`, `docs`) or explicit package names. It reports the package layer's real result: `installed` means packages landed, not that a control interface exists.",
-      "action=browser attaches the visible Chromium session on the target machine (CDP): browserOp=launch starts it on the persistent profile, tabs lists real tabs, snapshot returns the page accessibility tree, browserAct runs navigate/evaluate/click(x,y viewport)/type/screenshot in that same session — the tabs and login state a human sees are the ones you operate.",
-      "action=office attaches the live LibreOffice instance on the target machine (UNO): officeOp=launch starts it, docs lists open documents with their modified state, officePath/officeUrl opens a resource, officeAct does read/write (sheet,range,values), insert(text), save, and export on an open document — the same document a human is editing, unsaved state included.",
-      "action=evidence reviews the desktop's durable operation journal (seq/at/sessionId/tool/op/target/outcome, identifiers only) — use it when a result mismatches, an action may have failed, or a response was lost, before deciding what actually happened. Diagnosis is a hypothesis until a later op confirms it; once a fix is verified against the real scene, memory remember can keep it as an experience with its trigger condition.",
+      "Element indexes and coordinates bind to observationId; the Host rejects stale observations. act reports driver acceptance, and uncertain or partial outcomes remain explicit.",
+      "run supports top-level await, lexical bindings, and computer.list/apps/observe/act/open/browser/office/evidence/cancel/release. computer.emitImage(observation) attaches its screenshot. Bindings persist until reset or evaluation cancellation; desktop handoff invalidates the evaluation.",
+      "Browser actions use CSS viewport coordinates; desktop actions use window-relative coordinates. URLs, files, and localhost resolve on the target machine.",
     ],
     parameters: ComputerParams,
     execute: async (_toolCallId, params, signal, _onUpdate, _ctx) => {
@@ -275,7 +274,7 @@ export function createComputerTool(bridge: HostServicesBridge, _sessionId: strin
                 : r.cancelled
               ? `${r.accepted ? "input was dispatched before cancellation; observe its effect" : "action cancelled before dispatch"}${r.detail ? `: ${r.detail}` : ""}`
               : r.accepted
-                ? `action dispatched${r.detail ? ` (${r.detail})` : ""} — observe to verify the effect`
+                ? `action dispatched${r.detail ? ` (${r.detail})` : ""} — driver acceptance; application completion is not confirmed`
                 : `action rejected${r.detail ? `: ${r.detail}` : ""}`;
             const blocks: Array<{ type: "text"; text: string } | { type: "image"; data: string; mimeType: string }> = [
               { type: "text", text },

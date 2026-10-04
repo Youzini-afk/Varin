@@ -81,11 +81,7 @@ export function createMemoryTool(bridge: HostServicesBridge, _sessionId: string)
     description: "Record, search, inspect, correct, or forget durable memory that persists across sessions",
     promptSnippet: "memory: record/search/inspect/correct/forget durable cross-session memory",
     promptGuidelines: [
-      "Use memory remember when the user states a durable preference, a decision is made, or an outcome is worth keeping for future sessions.",
-      "Use memory search for a natural-language lookup over durable memory; use memory get to inspect one id and its revision chain.",
-      "For remember/correct, cite the exact supporting passage in sourceText when paraphrasing. This shares source coverage with background memory and makes forgetting effective. Use get with includeSource to read original evidence, including other native branches.",
-      "Use memory correct to replace a memory that is wrong or stale; use memory forget when it should no longer apply.",
-      "memory remember persists immediately — do not also call recall or wait for a review step.",
+      "remember/correct persist immediately. sourceText carries the exact passage supporting a paraphrase; get(includeSource=true) returns source passages and the revision chain.",
     ],
     parameters: MemoryParams,
     execute: async (_toolCallId, params, _signal, _onUpdate, _ctx) => {
