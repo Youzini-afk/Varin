@@ -10,7 +10,7 @@ import type { SemanticEmbedder } from "./embedder.js";
 import { waitWithSignal } from "../../cancellation.js";
 import type { SemanticStoreMethod } from "./store-protocol.js";
 import type { SemanticCheckpoint, SemanticDocumentPublication, SemanticHit, SemanticSearchOptions,
-  SemanticDocumentState, SemanticSourceMetadataUpdate } from "./store-contract.js";
+  SemanticDocumentState, SemanticSourceMetadataUpdate, SemanticDocumentExpectation, SemanticDocumentScores } from "./store-contract.js";
 export type { SemanticIndexLifecycle, SemanticQueryCoverage, SemanticHit, SemanticCheckpoint,
   SemanticDocumentPublication, SemanticOverlayBlock, SemanticSearchOptions } from "./store-contract.js";
 export { readSemanticCheckpoint } from "./checkpoint.js";
@@ -157,6 +157,9 @@ export function createSemanticGenerationStore(options: {
     },
     search: (query: number[], limit: number, searchOptions?: readonly string[] | SemanticSearchOptions): Promise<SemanticHit[]> =>
       track(() => call("search", [query, limit, searchOptions])),
+    searchDocumentScores: (query: number[], documents: readonly SemanticDocumentExpectation[], limit: number,
+      signal?: AbortSignal): Promise<SemanticDocumentScores> =>
+      track(() => call("searchDocumentScores", [query, documents, limit], signal)),
     close: (): Promise<void> => {
       if (closed) return Promise.resolve();
       if (closing) return closing;

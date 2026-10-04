@@ -1,10 +1,12 @@
-import { afterEach, describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import { mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { spawnSync } from "node:child_process";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
 import { createHashEmbedder } from "./embedder.js";
+import { createSemanticStoreEngine } from "./store-engine.js";
+import { createRequire } from "node:module";
 import { blockIdentity, semanticSpaceDir, spaceIdOf, workspaceScope } from "./identity.js";
 import { createSemanticGenerationStore } from "./store.js";
 import type { SemanticChunk } from "./chunker.js";
@@ -30,6 +32,83 @@ const chunk = (documentId: string, body: string, startLine = 1, endLine = 3): Se
 });
 
 describe("semantic generation store", () => {
+  it("ranks whole documents in the owner, preserving revision scope and numeric knowledge ties", async () => {
+    const dataDir = mkdtempSync(join(tmpdir(), "varin-semantic-document-scores-"));
+    dirs.push(dataDir);
+    const embedder = createHashEmbedder();
+    const open = () => createSemanticGenerationStore({
+      dataDir, hostId: "host", scope: workspaceScope("document-scores"), embedder,
+    });
+    let store = open();
+    const body = "shared query body";
+    const query = (await embedder.embed([body]))[0]!;
+    const expected = ["2", "10", "20", "30", "missing"].map(documentId => ({ documentId, revision: "r1" }));
+    try {
+      await store.publishDocuments([
+        { documentId: "10", revision: "r1", chunks: [chunk("10", body)] },
+        { documentId: "2", revision: "r1", chunks: Array.from({ length: 8 }, (_, index) => chunk("2", body, index + 1, index + 1)) },
+        { documentId: "20", revision: "r1", chunks: [chunk("20", body)] },
+        { documentId: "30", revision: "newer", chunks: [chunk("30", body)] },
+        { documentId: "99", revision: "r1", chunks: [chunk("99", body)] },
+      ]);
+      const scored = await store.searchDocumentScores(query, expected, 2);
+      expect(scored.validDocuments).toBe(3);
+      expect(scored.hits.map(hit => hit.documentId)).toEqual(["2", "10"]);
+      expect((await store.searchDocumentScores(query, expected, 3)).hits.map(hit => hit.documentId))
+        .toEqual(["2", "10", "20"]);
+      expect(scored.hits.every(hit => !("body" in hit) && !("blockId" in hit))).toBe(true);
+      await store.close();
+      store = open();
+      expect((await store.searchDocumentScores(query, expected, 3)).hits.map(hit => hit.documentId))
+        .toEqual(["2", "10", "20"]);
+      await store.publishDocument({ documentId: "2", revision: "r2", chunks: [chunk("2", body)], publishToken: 2 });
+      await store.removeDocument("10", 3);
+      expect(await store.searchDocumentScores(query, expected, 3)).toMatchObject({
+        validDocuments: 1, hits: [{ documentId: "20", revision: "r1" }],
+      });
+      await expect(store.searchDocumentScores([NaN], expected, 1)).rejects.toThrow("finite dimensions");
+      const controller = new AbortController();
+      controller.abort(new Error("cancelled score query"));
+      await expect(store.searchDocumentScores(query, expected, 3, controller.signal)).rejects.toThrow("cancelled score query");
+      const admitted = store.searchDocumentScores(query, expected, 3);
+      const closed = store.close();
+      await expect(admitted).resolves.toMatchObject({ validDocuments: 1 });
+      await closed;
+      await expect(store.searchDocumentScores(query, expected, 3)).rejects.toThrow("closing or closed");
+    } finally { await store.close(); }
+  });
+
+  it("keeps native document-score failure distinct from an empty generation", async () => {
+    const dataDir = mkdtempSync(join(tmpdir(), "varin-semantic-document-score-failure-"));
+    dirs.push(dataDir);
+    const embedder = createHashEmbedder();
+    const store = createSemanticStoreEngine({ dataDir, hostId: "host", scope: workspaceScope("failure"), space: { ...embedder.space, dim: 2 } });
+    const query = [1, 0];
+    const { TriviumDB } = createRequire(import.meta.url)("triviumdb") as typeof import("triviumdb");
+    try {
+      expect(await store.searchDocumentScores(query, [], 1)).toEqual({ hits: [], validDocuments: 0 });
+      await store.publishDocuments([
+        { documentId: "1", revision: "r1", chunks: [chunk("1", "weak", 1, 1), chunk("1", "best", 2, 2)], vectors: [[0, 1], query] },
+        { documentId: "2", revision: "r1", chunks: [chunk("2", "negative")], vectors: [[-1, 0]] },
+      ]);
+      let failQueries = false;
+      const native = TriviumDB.prototype.searchGraphFirst;
+      const fail = vi.spyOn(TriviumDB.prototype, "searchGraphFirst")
+        .mockImplementation(function (this: InstanceType<typeof TriviumDB>, ...args: Parameters<typeof native>) {
+          if (failQueries) throw new Error("native score failure");
+          return native.apply(this, args);
+        });
+      try {
+        const exact = await store.searchDocumentScores(query, [{ documentId: "2", revision: "r1" }, { documentId: "1", revision: "r1" }], 2);
+        expect(exact.hits.map(hit => hit.documentId)).toEqual(["1", "2"]);
+        expect(exact.hits[0]?.similarity).toBeCloseTo(1);
+        expect(exact.hits[1]?.similarity).toBeCloseTo(-1);
+        failQueries = true;
+        await expect(store.searchDocumentScores(query, [{ documentId: "1", revision: "r1" }], 1)).rejects.toThrow("native score failure");
+      } finally { fail.mockRestore(); }
+    } finally { await store.close(); }
+  });
+
   it('pairs inventory hints with the current revision and preserves them through reopen', async () => {
     const dataDir = mkdtempSync(join(tmpdir(), 'varin-semantic-metadata-'));
     dirs.push(dataDir);

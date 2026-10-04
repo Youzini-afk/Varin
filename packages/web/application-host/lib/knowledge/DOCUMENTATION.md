@@ -109,7 +109,7 @@ pass only when new changes arrive during reconciliation.
 Association refresh uses one connection-literal set and follows each file's own
 association edges. It does not run a global index intersection for every candidate
 literal or consumer path. The private `beginAssociationRefresh` / `stepAssociationRefresh` /
-`releaseAssociationRefresh` protocol (version 3) processes one file per IPC step, then
+`releaseAssociationRefresh` protocol (version 4) processes one file per IPC step, then
 returns to the ordinary queue. Plans, context reads and other requests can complete
 between files; no full-workspace pass occupies one in-flight transport batch.
 Each file's association changes remain a native transaction.

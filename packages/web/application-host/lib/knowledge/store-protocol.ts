@@ -52,7 +52,7 @@ export type StoreNotification =
   | { type: "knowledge"; storeId: number; ids: readonly number[]; revision: string }
   | { type: "persistence-error"; storeId: number; error: StoreFailure };
 export type StoreChildMessage =
-  | { type: "ready"; version: 3 }
+  | { type: "ready"; version: 4 }
   | { type: "results"; responses: StoreResponse[] }
   | StoreNotification;
 

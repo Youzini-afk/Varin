@@ -26,8 +26,11 @@ derived store (`../vectors/`); they reuse `harness.embed` but never this MiniLM 
   scope/space, scoped Top-K (D-189) and `publishToken`; open/recovery, queries,
   mutations, full checkpoints and cache maintenance never execute on Electron main.
   Source-index queries use native exact Top-K (scoped graph-first or unrestricted exact search).
+  Knowledge-vector recall uses `searchDocumentScores`: one writer snapshot validates expected
+  revisions, takes native exact Top-1 over every document's full block set, and ranks documents.
+  It sends only document IDs, revisions and scores; code-semantic `search` still returns source hits.
   This generation disables automatic QuIVer construction: checkpoints must not build an ANN graph
-  that neither query path consumes. Knowledge-vector and other stores retain their own search policies.
+  that neither query path consumes. Stores outside this shared generation retain their own search policies.
 - Runtime: `runtime.ts` — native directory inventory first returns path and stat metadata without
   reading every file body. New, changed, invalidated and failed paths then enter Documents reads,
   parsing and embedding. Successful document publications retain the metadata from the native byte capture

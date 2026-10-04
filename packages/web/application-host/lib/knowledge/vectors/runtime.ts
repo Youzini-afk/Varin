@@ -329,13 +329,17 @@ export function createKnowledgeVectorRuntime(options: {
     accepted: Knowledge[],
   ): Promise<void> => {
     const byId = new Map(accepted.map((item) => [item.id, item]));
-    for (const documentId of await store.listDocumentIds()) {
+    // Read one compact catalog snapshot, not a revision IPC round trip for
+    // every published entry (and another one for every accepted entry).
+    const publishedByDocument = new Map((await store.listDocumentStates())
+      .map(document => [document.documentId, document]));
+    for (const [documentId, published] of publishedByDocument) {
       const id = Number(documentId);
       const current = Number.isSafeInteger(id) ? byId.get(id) : undefined;
-      const published = current ? await store.publishedRevision(documentId) : null;
-      if (!current || published?.revision !== knowledgeContentRevision(current.content, current.trigger)) {
+      if (!current || published.revision !== knowledgeContentRevision(current.content, current.trigger)) {
         if (Number.isSafeInteger(id)) await removeKnowledge(registration, store, id);
         else await store.removeDocument(documentId);
+        publishedByDocument.delete(documentId);
       }
     }
     const publications = [] as Array<{
@@ -348,7 +352,7 @@ export function createKnowledgeVectorRuntime(options: {
       const current = await registration.authority.getKnowledge(item.id);
       if (!current || !eligible(current, registration.scope)) continue;
       const revision = knowledgeContentRevision(current.content, current.trigger);
-      const published = await store.publishedRevision(knowledgeDocumentId(current.id));
+      const published = publishedByDocument.get(knowledgeDocumentId(current.id));
       if (published?.revision === revision && published.recipeId === store.recipeId) continue;
       const token = nextToken(registration.scope, registration.scopeId, current.id);
       const latest = await registration.authority.getKnowledge(current.id);
@@ -494,44 +498,28 @@ export function createKnowledgeVectorRuntime(options: {
     if (accepted.length === 0) return { status: "empty", spaceId, hits: [] };
     const queryVector = await embedQuery(embedder, query, signal);
     signal.throwIfAborted();
-    const publishedIds = await store.listDocumentIds();
-    const byDocument = new Map(accepted.map((item) => [knowledgeDocumentId(item.id), item]));
-    const validDocuments = new Set<string>();
-    for (const documentId of publishedIds) {
-      const item = byDocument.get(documentId);
-      const published = item ? await store.publishedRevision(documentId) : null;
-      if (item && published?.revision === knowledgeContentRevision(item.content, item.trigger)) validDocuments.add(documentId);
-    }
-    const maskPaths = publishedIds.filter((documentId) => !validDocuments.has(documentId));
-    if (validDocuments.size === 0) {
+    // Revision validation and exact document aggregation share one writer
+    // snapshot. Only scores cross IPC; chunk bodies and per-document reads stay
+    // with their owner. Numeric knowledge order preserves deterministic ties.
+    const expected = accepted.slice().sort((left, right) => left.id - right.id)
+      .map(item => ({ documentId: knowledgeDocumentId(item.id),
+        revision: knowledgeContentRevision(item.content, item.trigger) }));
+    const scored = await waitWithSignal(store.searchDocumentScores(queryVector, expected, limit, signal), signal);
+    signal.throwIfAborted();
+    if (scored.validDocuments === 0) {
       return { status: "partial", spaceId, hits: [] };
     }
-    const semanticHits = await store.search(queryVector, Number.MAX_SAFE_INTEGER, { maskPaths });
-    const bestByKnowledge = new Map<number, { revision: string; similarity: number }>();
-    for (const hit of semanticHits) {
-      const id = Number(hit.documentId);
-      if (!Number.isSafeInteger(id) || !validDocuments.has(hit.documentId)) continue;
-      const item = byDocument.get(hit.documentId);
-      if (!item || hit.revision !== knowledgeContentRevision(item.content, item.trigger)) continue;
-      const previous = bestByKnowledge.get(id);
-      if (!previous || hit.similarity > previous.similarity) {
-        bestByKnowledge.set(id, { revision: hit.revision, similarity: hit.similarity });
-      }
-    }
-    const hits = [...bestByKnowledge.entries()]
-      .sort((left, right) => right[1].similarity - left[1].similarity || left[0] - right[0])
-      .slice(0, limit)
-      .map(([knowledgeId, value], index) => ({
-        knowledgeId,
-        contentRevision: value.revision,
-        similarity: value.similarity,
-        rank: index + 1,
-        spaceId,
-      }));
+    const hits = scored.hits.map((hit, index) => ({
+      knowledgeId: Number(hit.documentId),
+      contentRevision: hit.revision,
+      similarity: hit.similarity,
+      rank: index + 1,
+      spaceId,
+    }));
     const building = builds.has(registrationKey(registration.scope, registration.scopeId, registration.workspaceId))
       || registration.pendingFull || registration.dirtyIds.size > 0;
     return {
-      status: retryingFailure ? "failed" : building || validDocuments.size < accepted.length ? "partial" : "used",
+      status: retryingFailure ? "failed" : building || scored.validDocuments < accepted.length ? "partial" : "used",
       spaceId,
       hits,
     };

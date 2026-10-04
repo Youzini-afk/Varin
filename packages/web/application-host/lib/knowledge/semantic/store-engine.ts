@@ -11,7 +11,8 @@ import { readSemanticCheckpoint, writeSemanticCheckpoint } from "./checkpoint.js
 import { resolveSemanticSearchOptions, type BlockPayload, type DocumentPayload, type PreparedSemanticPublication,
   type SemanticStoreOpenOptions, type SemanticIndexLifecycle, type SemanticQueryCoverage, type SemanticCheckpoint,
   type SemanticHit, type SemanticSearchOptions, type SemanticOverlayBlock,
-  type SemanticDocumentState, type SemanticSourceMetadataUpdate } from "./store-contract.js";
+  type SemanticDocumentState, type SemanticSourceMetadataUpdate, type SemanticDocumentExpectation,
+  type SemanticDocumentScore, type SemanticDocumentScores } from "./store-contract.js";
 const { TriviumDB } = createRequire(import.meta.url)("triviumdb") as typeof import("triviumdb");
 const FLUSH_QUIET_MS = 250;
 const FLUSH_MAX_DEFER_MS = 30_000;
@@ -490,6 +491,57 @@ export function createSemanticStoreEngine(options: SemanticStoreOpenOptions & { 
         } finally {
           if (db !== writer) db.close();
         }
+      });
+    },
+    async searchDocumentScores(
+      query: number[],
+      documents: readonly SemanticDocumentExpectation[],
+      limit: number,
+    ): Promise<SemanticDocumentScores> {
+      if (query.length !== space.dim || query.some(value => !Number.isFinite(value))) {
+        throw new Error(`Invalid semantic query vector; expected ${space.dim} finite dimensions.`);
+      }
+      if (!Number.isSafeInteger(limit) || limit < 0) throw new Error("Invalid semantic document result count");
+      const expected = new Map<string, string>();
+      for (const document of documents) {
+        if (typeof document.documentId !== "string" || typeof document.revision !== "string"
+          || (expected.has(document.documentId) && expected.get(document.documentId) !== document.revision)) {
+          throw new Error("Invalid semantic document revision expectation");
+        }
+        expected.set(document.documentId, document.revision);
+      }
+      return enqueue(() => {
+        if (!writer || expected.size === 0) return { hits: [], validDocuments: 0 };
+        const db = writer;
+        const valid = new Map<string, string>();
+        for (const id of db.indexedLookup({ type: "document" }, maximumLookupResults(db))) {
+          const row = db.getPayload(id) as DocumentPayload | null;
+          if (row?.type === "document" && expected.has(row.documentId) && expected.get(row.documentId) === row.revision) {
+            valid.set(row.documentId, row.revision);
+          }
+        }
+        const hits: SemanticDocumentScore[] = [];
+        if (valid.size > 0 && limit > 0) {
+          const blocks = documentBlockIds(db);
+          // The writer cannot publish or remove a generation between revision
+          // validation and scoring. Score every valid document's full block set
+          // before document Top-K; block Top-K would crowd out shorter memories.
+          for (const [documentId, revision] of expected) {
+            if (valid.get(documentId) !== revision) continue;
+            const ids = blocks.get(documentId);
+            if (!ids?.length) continue;
+            const best = db.searchGraphFirst(query, ids, 1, ids.length)[0];
+            if (!best) continue;
+            const payload = best.payload as BlockPayload;
+            if (payload.type !== "block" || payload.documentId !== documentId || payload.revision !== revision) {
+              throw new Error("Semantic document and block generations disagree");
+            }
+            hits.push({ documentId, revision, similarity: best.score });
+          }
+        }
+        // Stable sort preserves the caller's deterministic tie order.
+        hits.sort((left, right) => right.similarity - left.similarity);
+        return { hits: hits.slice(0, limit), validDocuments: valid.size };
       });
     },
     async close(): Promise<void> {

@@ -4,7 +4,7 @@ export const SEMANTIC_STORE_METHODS: Record<SemanticStoreMethod, true> = {
   checkpoint: true, markBuilding: true, markReady: true, lookupVectors: true,
   publishedRevision: true, publishDocuments: true, listDocumentIds: true,
   listDocumentStates: true, recordSourceMetadata: true,
-  removeDocument: true, search: true, close: true,
+  removeDocument: true, search: true, searchDocumentScores: true, close: true,
 };
 export const isSemanticStoreMethod = (value: unknown): value is SemanticStoreMethod =>
   typeof value === "string" && Object.hasOwn(SEMANTIC_STORE_METHODS, value);

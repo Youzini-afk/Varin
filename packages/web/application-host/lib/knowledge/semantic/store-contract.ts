@@ -24,6 +24,22 @@ export type SemanticHit = {
   generation: string;
 };
 
+/** Exact best block score per published document, without transporting source bodies. */
+export type SemanticDocumentScore = {
+  documentId: string;
+  revision: string;
+  similarity: number;
+};
+
+export type SemanticDocumentScores = {
+  hits: SemanticDocumentScore[];
+  /** Documents whose published revision still matches the caller's authority snapshot. */
+  validDocuments: number;
+};
+
+/** Equal scores retain this caller-provided document order. */
+export type SemanticDocumentExpectation = Pick<DocumentPayload, "documentId" | "revision">;
+
 export type SemanticCheckpoint = {
   generation: string;
   spaceId: string;
