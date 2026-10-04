@@ -78,6 +78,7 @@ export const projectPiSortedTurn = (
     for (let index = 0; index < message.content.length; index += 1) {
       const content = message.content[index];
       if (content.type === 'thinking') {
+        if (!content.redacted && !content.thinking.trim()) continue;
         activityAnchorId ??= source.id;
         activity.push({
           content,

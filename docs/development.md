@@ -179,6 +179,10 @@ and ship with that package. Bun applies them to bundled dependencies; the select
 applies the same hunks in memory, accepts an already adapted source and rejects a changed required seam.
 Never patch a user's external installation or copy its native configuration into another authority.
 
+The Responses parser seam consumes reasoning deltas, completed summary/content parts and terminal
+response output. Completed parts replace their streamed prefix rather than duplicating it; encrypted
+reasoning remains in the native replay signature even when no visible summary is returned.
+
 SDK upgrade checks exercise real native sessions: canonical system/context-edit projection, physical
 virtual-model routing, compaction worker scope, top-level and codemode child permissions/scheduling,
 native MCP status/config mutations and replacement by a user extension, and atomic message-queue edits,

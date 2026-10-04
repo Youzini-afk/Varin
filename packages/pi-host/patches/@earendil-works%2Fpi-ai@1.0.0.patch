@@ -1,0 +1,170 @@
+--- a/dist/api/openai-responses-shared.js
++++ b/dist/api/openai-responses-shared.js
+@@ -321,7 +321,7 @@
+ export async function processResponsesStream(openaiStream, output, stream, model, options) {
+     let sawTerminalResponseEvent = false;
+     const outputSlots = new Map();
+-    const reasoningBlocksById = new Map();
++    const reasoningSlotsById = new Map();
+     const applyMessagePhaseStopReason = (item) => {
+         if (item.type === "message" && item.phase === "final_answer") {
+             output.stopReason = "stop";
+@@ -349,8 +349,12 @@
+                 type: "thinking",
+                 block,
+                 contentIndex: output.content.length - 1,
++                summaryParts: new Map(),
++                contentParts: new Map(),
++                ended: false,
+             };
+             outputSlots.set(outputIndex, slot);
++            reasoningSlotsById.set(item.id, slot);
+             stream.push({ type: "thinking_start", contentIndex: slot.contentIndex, partial: output });
+             return slot;
+         }
+@@ -411,29 +415,57 @@
+     const getOrCreateSlot = (outputIndex, item) => {
+         return outputSlots.get(outputIndex) ?? createSlot(outputIndex, item);
+     };
+-    // Azure OpenAI can omit reasoning.encrypted_content from response.output_item.done
+-    // and provide it only in response.completed.response.output. Backfill the
+-    // persisted reasoning signature from the terminal response to keep store:false
+-    // multi-turn replay stateless. See https://github.com/earendil-works/pi/issues/6409.
+-    const backfillReasoningSignatures = (responseOutput) => {
+-        for (const item of responseOutput) {
+-            if (item.type !== "reasoning" || !item.encrypted_content)
+-                continue;
+-            const block = reasoningBlocksById.get(item.id);
+-            if (!block?.thinkingSignature)
+-                continue;
+-            const storedItem = JSON.parse(block.thinkingSignature);
+-            if (storedItem.encrypted_content)
+-                continue;
+-            block.thinkingSignature = JSON.stringify({
++    const joinReasoningParts = (parts) => [...parts.entries()]
++        .sort(([a], [b]) => a - b).map(([, text]) => text).join("\n\n");
++    const updateReasoningPart = (slot, kind, index, text, append) => {
++        if (typeof text !== "string") return;
++        const parts = kind === "summary" ? slot.summaryParts : slot.contentParts;
++        parts.set(index, append ? (parts.get(index) ?? "") + text : text);
++        const previous = slot.block.thinking;
++        const next = joinReasoningParts(slot.summaryParts) || joinReasoningParts(slot.contentParts);
++        if (next === previous) return;
++        slot.block.thinking = next;
++        if (next.startsWith(previous)) {
++            stream.push({ type: "thinking_delta", contentIndex: slot.contentIndex,
++                delta: next.slice(previous.length), partial: output });
++        } else {
++            // A completed part can replace its streamed prefix with authoritative text.
++            stream.push({ type: "thinking_end", contentIndex: slot.contentIndex,
++                content: next, partial: output });
++        }
++    };
++    const finishReasoning = (slot, item) => {
++        const previous = slot.block.thinking;
++        const summaryText = item.summary?.map((part) => part.text).join("\n\n") || "";
++        const contentText = item.content?.map((part) => part.text).join("\n\n") || "";
++        slot.block.thinking = summaryText || contentText || previous;
++        const storedItem = slot.block.thinkingSignature ? JSON.parse(slot.block.thinkingSignature) : {};
++        slot.block.thinkingSignature = JSON.stringify({
+                 ...storedItem,
+-                encrypted_content: item.encrypted_content,
+-            });
++                ...item,
++                ...(!item.encrypted_content && storedItem.encrypted_content
++                    ? { encrypted_content: storedItem.encrypted_content } : {}),
++        });
++        if (!slot.ended || slot.block.thinking !== previous) {
++            stream.push({ type: "thinking_end", contentIndex: slot.contentIndex,
++                content: slot.block.thinking, partial: output });
++        }
++        slot.ended = true;
++    };
++    // Terminal output is authoritative for visible reasoning as well as the opaque
++    // replay state. Azure and other Responses providers can finish these there.
++    const finalizeReasoningItems = (responseOutput) => {
++        for (const [index, item] of responseOutput.entries()) {
++            if (item.type !== "reasoning") continue;
++            const slot = reasoningSlotsById.get(item.id) ?? getOrCreateSlot(index, item);
++            if (slot?.type !== "thinking") continue;
++            finishReasoning(slot, item);
++            outputSlots.delete(index);
+         }
+     };
+     const finalizeResponse = (response) => {
+         sawTerminalResponseEvent = true;
+-        backfillReasoningSignatures(response.output ?? []);
++        finalizeReasoningItems(response.output ?? []);
+         if (response?.id) {
+             output.responseId = response.id;
+         }
+@@ -487,37 +519,29 @@
+             const slot = getSlot(event.output_index, "thinking");
+             if (!slot)
+                 continue;
+-            slot.block.thinking += event.delta;
+-            stream.push({
+-                type: "thinking_delta",
+-                contentIndex: slot.contentIndex,
+-                delta: event.delta,
+-                partial: output,
+-            });
++            updateReasoningPart(slot, "summary", event.summary_index, event.delta, true);
++        }
++        else if (event.type === "response.reasoning_summary_text.done") {
++            const slot = getSlot(event.output_index, "thinking");
++            if (!slot) continue;
++            updateReasoningPart(slot, "summary", event.summary_index, event.text, false);
+         }
+         else if (event.type === "response.reasoning_summary_part.done") {
+             const slot = getSlot(event.output_index, "thinking");
+             if (!slot)
+                 continue;
+-            slot.block.thinking += "\n\n";
+-            stream.push({
+-                type: "thinking_delta",
+-                contentIndex: slot.contentIndex,
+-                delta: "\n\n",
+-                partial: output,
+-            });
++            updateReasoningPart(slot, "summary", event.summary_index, event.part.text, false);
+         }
+         else if (event.type === "response.reasoning_text.delta") {
+             const slot = getSlot(event.output_index, "thinking");
+             if (!slot)
+                 continue;
+-            slot.block.thinking += event.delta;
+-            stream.push({
+-                type: "thinking_delta",
+-                contentIndex: slot.contentIndex,
+-                delta: event.delta,
+-                partial: output,
+-            });
++            updateReasoningPart(slot, "content", event.content_index, event.delta, true);
++        }
++        else if (event.type === "response.reasoning_text.done") {
++            const slot = getSlot(event.output_index, "thinking");
++            if (!slot) continue;
++            updateReasoningPart(slot, "content", event.content_index, event.text, false);
+         }
+         else if (event.type === "response.output_text.delta") {
+             const slot = getSlot(event.output_index, "text");
+@@ -581,17 +605,7 @@
+             applyMessagePhaseStopReason(item);
+             const slot = getOrCreateSlot(event.output_index, item);
+             if (item.type === "reasoning" && slot?.type === "thinking") {
+-                const summaryText = item.summary?.map((s) => s.text).join("\n\n") || "";
+-                const contentText = item.content?.map((c) => c.text).join("\n\n") || "";
+-                slot.block.thinking = summaryText || contentText || slot.block.thinking;
+-                slot.block.thinkingSignature = JSON.stringify(item);
+-                reasoningBlocksById.set(item.id, slot.block);
+-                stream.push({
+-                    type: "thinking_end",
+-                    contentIndex: slot.contentIndex,
+-                    content: slot.block.thinking,
+-                    partial: output,
+-                });
++                finishReasoning(slot, item);
+                 outputSlots.delete(event.output_index);
+             }
+             else if (item.type === "message" && slot?.type === "text") {

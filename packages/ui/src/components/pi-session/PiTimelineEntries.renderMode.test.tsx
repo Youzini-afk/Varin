@@ -107,6 +107,22 @@ afterEach(() => {
 });
 
 describe('Pi timeline chat render mode', () => {
+  test('does not render empty reasoning disclosures or count them as sorted activity', () => {
+    for (const chatRenderMode of ['live', 'sorted'] as const) {
+      useUIStore.setState({ chatRenderMode, activityRenderMode: 'summary', showReasoningTraces: true });
+      for (const thinking of ['', ' \n\n ']) {
+        const complete: PiAssistantMessage = { ...liveAssistant, stopReason: 'stop', content: [
+          { type: 'thinking', thinking }, { type: 'text', text: 'Visible answer' },
+        ] };
+        const markup = renderTimeline(complete);
+        const document = parseHTML(markup).document;
+        expect(document.querySelector('[data-pi-activity-kind="thinking"]')).toBeNull();
+        expect(document.querySelector('[data-pi-sorted-activity]')).toBeNull();
+        expect(markup).toContain('Visible answer');
+      }
+    }
+  });
+
   test('hides thinking in both reply layouts and applies its completed disclosure preference', () => {
     const complete = { ...liveAssistant, stopReason: 'stop' as const };
     for (const chatRenderMode of ['live', 'sorted'] as const) {

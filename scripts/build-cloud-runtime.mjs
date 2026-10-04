@@ -36,6 +36,7 @@ export const CLOUD_RUNTIME_PACKAGE_DIRS = Object.freeze([
 // All shipped native authorities use verified prebuilt binaries. No PTY source rebuild fallback.
 export const CLOUD_RUNTIME_TRUSTED_DEPENDENCIES = Object.freeze([]);
 const CLOUD_RUNTIME_PATCHED_PACKAGES = Object.freeze([
+  '@earendil-works/pi-ai',
   '@earendil-works/pi-agent-core',
   '@earendil-works/pi-coding-agent',
 ]);

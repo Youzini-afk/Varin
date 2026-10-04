@@ -13,7 +13,6 @@ function readPatch(name: PiSdkPackageName): Map<string, Hunk[]> {
   const cached = patches.get(name);
   if (cached) return cached;
   const result = new Map<string, Hunk[]>();
-  if (name === "@earendil-works/pi-ai") return result;
   const patchDirectory = fileURLToPath(new URL("../patches/", import.meta.url));
   const patch = readFileSync(join(patchDirectory, `${name.replace("/", "%2F")}@1.0.0.patch`), "utf8");
   let path = "";

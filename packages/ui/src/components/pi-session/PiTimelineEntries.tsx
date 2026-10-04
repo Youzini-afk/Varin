@@ -718,7 +718,7 @@ const PiThinkingBlock: React.FC<{
   const collapse = useUIStore(state => state.collapsibleThinkingBlocks);
   const [open, setOpen] = React.useState(streaming || !collapse);
   React.useEffect(() => { setOpen(streaming || !collapse); }, [streaming, collapse]);
-  if (!visible) return null;
+  if (!visible || (!content.redacted && !content.thinking.trim())) return null;
   const preview = content.redacted ? '' : thinkingPreview(content.thinking);
   return <details className="group/thinking my-1" open={open && !content.redacted}
     onToggle={event => setOpen(event.currentTarget.open)} data-pi-activity-kind="thinking">

@@ -5,6 +5,10 @@ presentation and client-side kernels, not privileged filesystem, credential, she
 Surface-specific packages provide `RuntimeAPIs` and host bridges; shared components consume those
 contracts without hardcoding an origin, port, desktop IPC channel, or local path.
 
+Pi thinking disclosures render received visible text or an explicit redacted block. Empty/whitespace
+thinking stays out of both live disclosures and sorted activity counts. Opaque replay signatures remain
+owned by the native session and are never rendered as reasoning text.
+
 ## Module map
 
 Projects have a stable identity and an editable collection of folders. `ProjectEntry.path` is
