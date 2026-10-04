@@ -3,7 +3,7 @@ import { randomUUID } from "node:crypto";
 import { isAbsolute, join } from "node:path";
 import {
   createRequest,
-  decodeEnvelope,
+  validateEnvelope,
   type EventEnvelope,
   type HostHandshakeParams,
   type HostHandshakeResult,
@@ -352,9 +352,7 @@ export class PiHostClient {
   #handleMessage(message: unknown): void {
     let envelope: WireEnvelope;
     try {
-      const frame = JSON.stringify(message);
-      if (frame === undefined) throw new Error("Pi host sent a non-JSON IPC message");
-      envelope = decodeEnvelope(frame);
+      envelope = validateEnvelope(message);
     } catch (error) {
       this.#fail(error);
       const child = this.#child;

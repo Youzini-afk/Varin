@@ -9,6 +9,7 @@ import {
   JsonLineDecoder,
   VARIN_PROTOCOL_VERSION,
   ProtocolDecodeError,
+  validateEnvelope,
 } from "../src/index.js";
 
 describe("protocol envelopes", () => {
@@ -57,6 +58,54 @@ describe("protocol envelopes", () => {
         ),
       /event.seq/,
     );
+  });
+
+  it("validates already decoded requests, responses, and events", () => {
+    for (const envelope of [
+      createRequest("request", "session.list", {}),
+      createSuccessResponse<"agent.abort">("response", { aborted: true }),
+      createEvent(0, "session.closed", { sessionId: "fixture" }),
+    ]) {
+      assert.deepEqual(validateEnvelope(envelope), decodeEnvelope(JSON.stringify(envelope)));
+    }
+  });
+
+  it("keeps object and text envelope failures equivalent after JSON decoding", () => {
+    const invalid: unknown[] = [
+      null,
+      [],
+      {},
+      { v: 999, kind: "request", id: "request", method: "session.list", params: {} },
+      { v: 1, kind: "unknown" },
+      { v: 1, kind: "request", id: "", method: "session.list", params: {} },
+      { v: 1, kind: "request", id: "request", method: "", params: {} },
+      { v: 1, kind: "request", id: "request", method: "session.list" },
+      { v: 1, kind: "response", id: "", ok: true, result: {} },
+      { v: 1, kind: "response", id: "response", ok: 1, result: {} },
+      { v: 1, kind: "response", id: "response", ok: true },
+      { v: 1, kind: "response", id: "response", ok: false, error: null },
+      { v: 1, kind: "event", event: "", seq: 0, data: {} },
+      { v: 1, kind: "event", event: "session.closed", seq: -1, data: {} },
+      { v: 1, kind: "event", event: "session.closed", seq: 0.5, data: {} },
+      { v: 1, kind: "event", event: "session.closed", seq: "0", data: {} },
+      { v: 1, kind: "event", event: "session.closed", seq: 0 },
+    ];
+    for (const value of invalid) {
+      let expected: ProtocolDecodeError | undefined;
+      try {
+        decodeEnvelope(JSON.stringify(value));
+      } catch (error) {
+        assert.ok(error instanceof ProtocolDecodeError);
+        expected = error;
+      }
+      assert.ok(expected);
+      assert.throws(() => validateEnvelope(value), (error: unknown) => {
+        assert.ok(error instanceof ProtocolDecodeError);
+        assert.equal(error.code, expected.code);
+        assert.equal(error.message, expected.message);
+        return true;
+      });
+    }
   });
 });
 

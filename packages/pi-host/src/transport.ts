@@ -1,7 +1,7 @@
 import {
   encodeEnvelope,
   JsonLineDecoder,
-  ProtocolDecodeError,
+  validateEnvelope,
   type WireEnvelope,
 } from "@varin/protocol";
 import { createDeferred } from "./deferred.js";
@@ -23,12 +23,7 @@ export class IpcHostTransport implements HostTransport {
     if (this.#messageHandler) throw new Error("IPC transport is already started");
     this.#messageHandler = (message) => {
       try {
-        const frame = JSON.stringify(message);
-        if (frame === undefined) {
-          throw new ProtocolDecodeError("invalid_json", "IPC message is not JSON serializable");
-        }
-        const decoder = new JsonLineDecoder();
-        for (const envelope of decoder.push(`${frame}\n`)) handler(envelope);
+        handler(validateEnvelope(message));
       } catch (error) {
         onError?.(error);
       }

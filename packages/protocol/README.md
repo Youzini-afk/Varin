@@ -2,6 +2,14 @@
 
 Varin protocol types, schemas, and event/method definitions.
 
+## Envelope decoding
+
+Text transports use `decodeEnvelope` (or `JsonLineDecoder` for stdio). Node IPC uses
+JSON serialization at the process boundary, so its receiver passes the decoded value directly to
+`validateEnvelope`. Both entry points share the same envelope validation and protocol errors;
+IPC must not serialize and parse a second copy of each streaming event. Method and event payload
+validation remains with the owning dispatcher or consumer.
+
 ## Harness events and methods
 
 ### Broker events

@@ -35,6 +35,11 @@ export function decodeEnvelope(frame: string): WireEnvelope {
     throw new ProtocolDecodeError("invalid_json", "Protocol frame is not valid JSON");
   }
 
+  return validateEnvelope(value);
+}
+
+/** Validate a value already decoded from JSON, including a Node IPC message. */
+export function validateEnvelope(value: unknown): WireEnvelope {
   if (!isRecord(value)) {
     throw new ProtocolDecodeError("invalid_envelope", "Protocol frame must be a JSON object");
   }
