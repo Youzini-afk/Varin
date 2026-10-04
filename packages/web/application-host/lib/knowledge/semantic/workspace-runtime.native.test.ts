@@ -12,13 +12,15 @@ import { createWorkspaceSemanticRuntime, type WorkspaceSemanticRuntimeOptions } 
 import { createProjectIndexScope } from '../index-scope.js';
 
 const disposes: Array<() => Promise<void>> = [];
-afterEach(async () => { for (const dispose of disposes.splice(0).reverse()) await dispose(); });
+afterEach(async () => {
+  try { for (const dispose of disposes.splice(0).reverse()) await dispose(); }
+  finally { vi.useRealTimers(); }
+});
 const deferred = <T>() => {
   let resolve!: (value: T) => void;
   const promise = new Promise<T>((done) => { resolve = done; });
   return { promise, resolve };
 };
-const pause = (ms: number): Promise<void> => new Promise((resolve) => setTimeout(resolve, ms));
 const rerank: HarnessRerankSettings = { protocol: 'http-rerank', providerId: 'remote', modelId: 'ranking' };
 const settings = (revision: string): PiSettingsSnapshot => ({
   global: { harness: { rerank: { ...rerank } } }, globalRevision: revision,
@@ -318,7 +320,7 @@ describe('production workspace semantic assembly lifecycle', () => {
     expect(new Set(harness.requestCwds)).toEqual(new Set([harness.documents.dataDir]));
   });
 
-  it('reconciles missed additions in the background and clears its timer on disposal', async () => {
+  it('reconciles missed additions without blocking queries and backs off after the scan', async () => {
     const oldBody = 'export const oldValue = "existing reconcile marker";\n';
     const newBody = 'export const newValue = "quietly added reconcile marker";\n';
     let inventory: Array<{ name: string; path: string; relativePath: string; metadata: { byteLength: string; modifiedTimeNs: string } }> = [];
@@ -348,6 +350,8 @@ describe('production workspace semantic assembly lifecycle', () => {
       },
       reconcileMinimumIntervalMs: 1_000,
     });
+    // Keep native I/O timers running; only the reconcile deadline and elapsed clock are controlled.
+    vi.useFakeTimers({ toFake: ['Date', 'performance'] });
     const oldPath = path.join(controlled.documents.workspaceRoot, 'old.ts');
     const newPath = path.join(controlled.documents.workspaceRoot, 'new.ts');
     await fs.promises.writeFile(oldPath, oldBody, 'utf8');
@@ -364,32 +368,34 @@ describe('production workspace semantic assembly lifecycle', () => {
       inventory = [...inventory, { name: 'new.ts', path: newPath, relativePath: 'new.ts', metadata: {
         byteLength: String(Buffer.byteLength(newBody)), modifiedTimeNs: 'new-stat',
       } }];
-      await pause(100);
+      await vi.advanceTimersByTimeAsync(100);
       expect(scans).toBe(1);
+      await vi.advanceTimersByTimeAsync(900);
       await secondScanEntered.promise;
 
       // A query against the last published generation returns while the
       // metadata inventory call is deliberately held open.
       const query = controlled.runtime.semanticRecall(controlled.workspaceId, 'existing reconcile marker', 5);
-      const oldResult = await Promise.race([
+      let queryDeadline: ReturnType<typeof setTimeout> | undefined;
+      await Promise.race([
         query,
-        new Promise<never>((_resolve, reject) => setTimeout(() => reject(new Error('query waited for periodic reconciliation')), 2_000)),
-      ]);
-      expect(oldResult.status).toBeDefined();
+        new Promise<never>((_resolve, reject) => {
+          queryDeadline = setTimeout(() => reject(new Error('query waited for periodic reconciliation')), 2_000);
+        }),
+      ]).finally(() => clearTimeout(queryDeadline));
 
       // The measured inventory duration should push the next interval well
       // beyond the one-second minimum, preserving a low scan duty cycle.
-      await pause(100);
+      await vi.advanceTimersByTimeAsync(100);
       resumeSecondScan.resolve(undefined);
       await controlled.runtime.drain();
       expect(indexedPaths).toContain('new.ts');
       const added = await controlled.runtime.semanticRecall(controlled.workspaceId, 'quietly added reconcile marker', 5);
       expect(added.hits[0]?.documentId).toBe('new.ts');
 
-      await pause(100);
-      expect(scans).toBe(2);
-      await controlled.runtime.dispose();
-      await pause(550);
+      // Pass the minimum interval on both clocks: a missing duty-cycle backoff would scan again.
+      await vi.advanceTimersByTimeAsync(1_100);
+      await new Promise<void>(resolve => setTimeout(resolve, 1_050));
       expect(scans).toBe(2);
     } finally {
       resumeSecondScan.resolve(undefined);
@@ -408,7 +414,7 @@ describe('production workspace semantic assembly lifecycle', () => {
     expect(scans).toBe(1);
 
     await harness.runtime.dispose();
-    await pause(1_050);
+    await new Promise<void>(resolve => setTimeout(resolve, 1_050));
     expect(scans).toBe(1);
   });
 });

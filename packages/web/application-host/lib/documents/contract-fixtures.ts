@@ -80,7 +80,8 @@ export interface DocumentAuthorityHarness {
 export const createDocumentAuthorityHarness = async (
   overrides: DocumentAuthorityHarnessOverrides = {},
 ): Promise<DocumentAuthorityHarness> => {
-  const root = await fs.promises.mkdtemp(path.join(os.tmpdir(), 'varin-documents-'));
+  // Runner temp directories can be junctions; use the same canonical paths as Documents.
+  const root = await fs.promises.realpath(await fs.promises.mkdtemp(path.join(os.tmpdir(), 'varin-documents-')));
   const workspaceRoot = path.join(root, 'workspace');
   const dataDir = path.join(root, 'data');
   await fs.promises.mkdir(workspaceRoot, { recursive: true });

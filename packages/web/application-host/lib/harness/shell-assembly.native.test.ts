@@ -252,15 +252,15 @@ describe("production shell assembly", () => {
     expectCwd(nested, first);
     const pwd = await run("pwd");
     expect(pwd).toMatchObject({ kind: "completed" });
-    if (pwd.kind === "completed") expect(pwd.stdout.trim()).toMatch(/[\\/]first$/);
+    if (pwd.kind === "completed") expect(pwd.stdout).toMatch(/[\\/]first\r?$/m);
     expectCwd(pwd, first);
     const explicit = await run("pwd", second);
     expect(explicit).toMatchObject({ kind: "completed" });
-    if (explicit.kind === "completed") expect(explicit.stdout.trim()).toMatch(/[\\/]second$/);
+    if (explicit.kind === "completed") expect(explicit.stdout).toMatch(/[\\/]second\r?$/m);
     expectCwd(explicit, second);
     const afterExplicit = await run("pwd");
     expect(afterExplicit).toMatchObject({ kind: "completed" });
-    if (afterExplicit.kind === "completed") expect(afterExplicit.stdout.trim()).toMatch(/[\\/]first$/);
+    if (afterExplicit.kind === "completed") expect(afterExplicit.stdout).toMatch(/[\\/]first\r?$/m);
     const syntax = await run("if then");
     expect(syntax.kind).toBe("completed");
     if (syntax.kind === "completed") expect(syntax.exitCode).not.toBe(0);
