@@ -102,6 +102,10 @@ not a new database owner. Automatic memory enabled by the user commits effective
 `accepted` rows; claim nature and source still distinguish inference from explicit
 user requirements. Acceptance is not a persistence receipt or an authority level.
 
+The organizer discovers source events only in workspace and Bot stores. `user.tdb`
+is the shared memory destination and is opened exclusively through the Host's user
+store owner; directory discovery must not reopen it as a workspace event store.
+
 New organizer proposals can supply the knowledge revision they observed. The
 single writer checks both committed and pending mutations before inserting them.
 Explicit and automatic memories carry the same original-source ranges (native Pi

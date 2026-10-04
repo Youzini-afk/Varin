@@ -107,7 +107,7 @@ const publish = (server: { notify(method: string, params: unknown): void }, uri:
   const diagnostics: Array<Record<string, unknown>> = [];
   if (text.includes('FIXTURE_ERROR')) {
     diagnostics.push({
-      range: { start: { line: 0, character: 0 }, end: { line: 0, character: 1 } },
+      range: { start: offsetToPosition(text, text.indexOf('FIXTURE_ERROR')), end: offsetToPosition(text, text.indexOf('FIXTURE_ERROR') + 1) },
       severity: 1,
       message: 'fixture error',
     });

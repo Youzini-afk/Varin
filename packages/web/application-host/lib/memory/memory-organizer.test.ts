@@ -170,6 +170,27 @@ describe("memory organizer (BC2)", () => {
     }
   });
 
+  it("keeps user memory out of startup source discovery and scheduled source reads", async () => {
+    const opened: string[] = [];
+    const workspaceStore = await openStore("workspace", "ws-1");
+    stores.set("ws-1", workspaceStore);
+    const org = organizer(memory(), {
+      listScopeIds: async () => ["user", "session:s1", "ws-1"],
+      hasStoreForScope: async () => true,
+      storeForScopeId: async (scopeId) => {
+        opened.push(scopeId);
+        if (scopeId !== "ws-1") throw new Error("user memory already has its own writer");
+        return workspaceStore;
+      },
+    });
+    org.start();
+    org.noteScope("user");
+    await vi.advanceTimersByTimeAsync(5_000);
+    await org.dispose();
+    expect(opened).toEqual(["ws-1"]);
+    await expect(userStore.listKnowledge({ scope: "user" })).resolves.toEqual([]);
+  });
+
   it("organizes durable session events into effective memory with inference provenance", async () => {
     const ws = await stores.get("ws-1") ?? await openStore("workspace", "ws-1");
     stores.set("ws-1", ws);

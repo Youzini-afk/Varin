@@ -1,4 +1,5 @@
 import type { DocumentAuthority } from "../documents/authority.js";
+import type { VarinLanguageDiagnostic } from "@varin/application-client";
 import type { createLanguageSupervisor } from "../lsp/supervisor.js";
 import { AGENT_LANGUAGE_VIEW } from "../lsp/supervisor.js";
 import { createLanguageViewBinder } from "../lsp/language-view.js";
@@ -56,7 +57,7 @@ export function createLanguageSupervisorDiagnosticsProvider(
         kind?: string;
         resourceId?: string;
         generation?: number;
-        items?: unknown[];
+        items?: VarinLanguageDiagnostic[];
         view?: string;
         contentRevision?: string;
       };
@@ -67,24 +68,14 @@ export function createLanguageSupervisorDiagnosticsProvider(
         wsCache = new Map();
         cache.set(workspaceId, wsCache);
       }
-      const items = Array.isArray(e.items) ? e.items.map((item) => {
-        const d = item as {
-          line?: number;
-          character?: number;
-          severity?: string;
-          code?: string;
-          message?: string;
-          source?: string;
-        };
-        return {
-          line: typeof d.line === "number" ? d.line : 0,
-          character: typeof d.character === "number" ? d.character : 0,
-          severity: typeof d.severity === "string" ? d.severity : "info",
-          ...(d.code !== undefined ? { code: d.code } : {}),
-          message: typeof d.message === "string" ? d.message : "",
-          source: typeof d.source === "string" ? d.source : "unknown",
-        };
-      }) : [];
+      const items = (e.items ?? []).map((d) => ({
+        line: d.range.start.line + 1,
+        character: d.range.start.character + 1,
+        severity: d.severity,
+        ...(d.code !== undefined ? { code: String(d.code) } : {}),
+        message: d.message,
+        source: d.source ?? "unknown",
+      }));
       const key = normalizeResourceId(e.resourceId);
       const previous = wsCache.get(key);
       wsCache.set(key, {

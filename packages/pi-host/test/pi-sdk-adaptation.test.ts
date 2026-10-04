@@ -14,6 +14,9 @@ test("SDK adaptation is idempotent for the shipped SDK and rejects a changed req
   const responses = readFileSync(fileURLToPath(import.meta.resolve("@earendil-works/pi-ai/api/openai-responses-shared")), "utf8");
   assert.equal(adaptPiSdkSource("@earendil-works/pi-ai", "dist/api/openai-responses-shared.js", responses), responses);
   assert.throws(() => adaptPiSdkSource("@earendil-works/pi-ai", "dist/api/openai-responses-shared.js", "changed parser"), /required seam/);
+  const responsesProvider = readFileSync(fileURLToPath(import.meta.resolve("@earendil-works/pi-ai/api/openai-responses")), "utf8");
+  assert.equal(adaptPiSdkSource("@earendil-works/pi-ai", "dist/api/openai-responses.js", responsesProvider), responsesProvider);
+  assert.throws(() => adaptPiSdkSource("@earendil-works/pi-ai", "dist/api/openai-responses.js", "changed provider"), /required seam/);
   const coreDirectory = dirname(fileURLToPath(import.meta.resolve("@earendil-works/pi-agent-core")));
   const core = readFileSync(join(coreDirectory, "agent.js"), "utf8");
   assert.equal(adaptPiSdkSource("@earendil-works/pi-agent-core", "dist/agent.js", core), core);

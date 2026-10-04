@@ -1,5 +1,25 @@
+--- a/dist/api/openai-responses.js
++++ b/dist/api/openai-responses.js
+@@ -65,7 +65,7 @@
+         supportsMidConvoSystemMessages: model.compat?.supportsMidConvoSystemMessages ?? false,
+         sessionAffinityFormat: model.compat?.sessionAffinityFormat ?? detectSessionAffinityFormat(model),
+         supportsLongCacheRetention: model.compat?.supportsLongCacheRetention ?? true,
+-        supportsStrictMode: model.compat?.supportsStrictMode ?? false,
++        supportsStrictMode: model.compat?.supportsStrictMode ?? true,
+         supportsOpenAIGrammarTools: model.compat?.supportsOpenAIGrammarTools ?? false,
+         supportsAdditionalTools: model.compat?.supportsAdditionalTools ?? false,
+         supportsToolSearch: model.compat?.supportsToolSearch ?? false,
 --- a/dist/api/openai-responses-shared.js
 +++ b/dist/api/openai-responses-shared.js
+@@ -270,7 +270,7 @@
+ // Tool conversion
+ // =============================================================================
+ export function convertResponsesTools(tools, options) {
+-    const defaultStrict = options?.strict === undefined ? false : options.strict;
++    const defaultStrict = options?.strict ?? false;
+     const supportsStrictMode = options?.supportsStrictMode ?? true;
+     const supportsOpenAIGrammarTools = options?.supportsOpenAIGrammarTools ?? false;
+     return tools.map((tool) => {
 @@ -321,7 +321,7 @@
  export async function processResponsesStream(openaiStream, output, stream, model, options) {
      let sawTerminalResponseEvent = false;

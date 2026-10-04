@@ -716,14 +716,23 @@ function Resolve-App([string]$query) {
         }
     }
 
-    $match = $processes | Where-Object {
-        $candidate = $_
-        $_.ProcessName -ieq $processQuery -or
-        "$($_.ProcessName).exe" -ieq $normalized -or
-        $_.MainWindowTitle -ieq $normalized -or
-        $_.MainWindowTitle -ilike "*$normalized*" -or
-        (@($script:ProcessWindows[[int]$candidate.Id] | Where-Object { $_.title -ieq $normalized -or $_.title -ilike "*$normalized*" }).Count) -gt 0
-    } | Select-Object -First 1
+    # Prefer the app identity before titles: an Explorer window showing a
+    # Varin folder must not win over the running Varin process.
+    $match = $processes | Where-Object { $_.ProcessName -ieq $processQuery } | Select-Object -First 1
+    if ($null -eq $match) {
+        $match = $processes | Where-Object {
+            $candidate = $_
+            $_.MainWindowTitle -ieq $normalized -or
+            (@($script:ProcessWindows[[int]$candidate.Id] | Where-Object { $_.title -ieq $normalized }).Count) -gt 0
+        } | Select-Object -First 1
+    }
+    if ($null -eq $match) {
+        $match = $processes | Where-Object {
+            $candidate = $_
+            $_.MainWindowTitle -ilike "*$normalized*" -or
+            (@($script:ProcessWindows[[int]$candidate.Id] | Where-Object { $_.title -ilike "*$normalized*" }).Count) -gt 0
+        } | Select-Object -First 1
+    }
     if ($null -ne $match) {
         return $match
     }

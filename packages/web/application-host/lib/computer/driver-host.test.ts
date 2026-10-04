@@ -2,6 +2,8 @@ import { describe, it, expect } from "vitest";
 import { existsSync, mkdtempSync, mkdirSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import { fileURLToPath } from "node:url";
+import { execFileSync } from "node:child_process";
 import { createDriverSession, computerDriverDir, localDriverSpawnSpec } from "./driver-host.js";
 
 /**
@@ -209,6 +211,29 @@ describe("computerDriverDir (BC9 packaging)", () => {
 });
 
 describe.skipIf(process.platform !== 'win32')('Windows driver transport', () => {
+  it('resolves exact app names before unrelated window titles without touching the desktop', () => {
+    const result = execFileSync('powershell.exe', ['-NoProfile', '-NonInteractive', '-Command', `
+$ErrorActionPreference = 'Stop'
+$tokens = $null; $errors = $null
+$ast = [System.Management.Automation.Language.Parser]::ParseFile($env:VARIN_TEST_DRIVER_RUNTIME, [ref]$tokens, [ref]$errors)
+if ($errors.Count) { throw $errors[0] }
+$definition = $ast.Find({ param($node) $node -is [System.Management.Automation.Language.FunctionDefinitionAst] -and $node.Name -eq 'Resolve-App' }, $true)
+Invoke-Expression $definition.Extent.Text
+function Get-Process {
+    [pscustomobject]@{ Id = 1; ProcessName = 'explorer'; MainWindowTitle = 'Varin' }
+    [pscustomobject]@{ Id = 2; ProcessName = 'Varin'; MainWindowTitle = 'Project' }
+    [pscustomobject]@{ Id = 3; ProcessName = 'editor'; MainWindowTitle = 'Notes' }
+}
+function Get-WindowProcessMap {
+    return @{ 1 = @([pscustomobject]@{ title = 'Varin' }, [pscustomobject]@{ title = 'Notes backup' }); 2 = @([pscustomobject]@{ title = 'Project' }); 3 = @([pscustomobject]@{ title = 'Notes' }) }
+}
+@((Resolve-App 'Varin').Id, (Resolve-App 'VARIN.exe').Id, (Resolve-App '1').Id, (Resolve-App 'Notes').Id, (Resolve-App 'backup').Id) | ConvertTo-Json -Compress
+`], { encoding: 'utf8', windowsHide: true, env: { ...process.env,
+      VARIN_TEST_DRIVER_RUNTIME: fileURLToPath(new URL('../../../../computer-driver/windows/runtime.ps1', import.meta.url)),
+    } });
+    expect(JSON.parse(result.trim())).toEqual([2, 2, 1, 3, 1]);
+  });
+
   it('round-trips multilingual input and reports readable startup errors from unpacked scripts', async () => {
     const root = mkdtempSync(join(tmpdir(), 'varin-computer-windows-'));
     const logical = join(root, 'app.asar', "桌面'日本語", 'computer-driver');

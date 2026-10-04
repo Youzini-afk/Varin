@@ -1241,7 +1241,7 @@ export function createMemoryOrganizer(deps: MemoryOrganizerDeps) {
   };
 
   const schedule = (scopeId: string): void => {
-    if (disposed || suspendedScopes.has(scopeId)) return;
+    if (disposed || scopeId === "user" || isSessionScopeId(scopeId) || suspendedScopes.has(scopeId)) return;
     queued.add(scopeId);
     if (running.has(scopeId) || timers.has(scopeId)) return;
     timers.set(scopeId, setTimeout(() => {
@@ -1255,7 +1255,9 @@ export function createMemoryOrganizer(deps: MemoryOrganizerDeps) {
   const sweep = async (): Promise<void> => {
     if (disposed) return;
     for (const scopeId of await deps.listScopeIds()) {
-      if (disposed || isSessionScopeId(scopeId)) continue;
+      // User memory is an output of organization, never a source event store.
+      // Opening it through storeForScopeId would create a second writer.
+      if (disposed || scopeId === "user" || isSessionScopeId(scopeId)) continue;
       try {
         // Cheap sources first: a scope with no threads and no store file does
         // not get an empty .tdb created by a background sweep.

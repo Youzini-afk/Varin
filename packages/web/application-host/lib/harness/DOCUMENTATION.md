@@ -1005,6 +1005,8 @@ just wrote, never the editor buffer — and waits for the publication computed f
 that exact revision, returning `pending` on timeout. `lsp.diagnosticsSnapshot`
 binds without waiting and stays incremental. Both report `revision` and `source`.
 Cache lookups use the exact normalized resource identity.
+The adapter converts the language service's zero-based `range.start` to the
+one-based line and character positions used by Harness tools.
 Snapshot calls are incremental per observer and canonical resource by default;
 `full: true` is a non-mutating full view. `shell.read` follows the same rule when
 neither `offset` nor `length` is supplied, while static `out_*` handles remain

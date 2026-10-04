@@ -1949,7 +1949,7 @@ async function main(options: StartWebUiServerOptions = {}): Promise<WebUiServerC
       const fromDisk = (await fsPromises.readdir(storeDir).catch(() => [] as string[]))
         .filter((file) => file.endsWith('.tdb'))
         .map((file) => file.slice(0, -'.tdb'.length))
-        .filter((key) => !isSessionStoreKey(key) && !isBotStoreKey(key));
+        .filter((key) => key !== 'user' && !isSessionStoreKey(key) && !isBotStoreKey(key));
       // Bot store files are hashed and cannot be reversed — enumerate the bot
       // registry so `bot:<id>` scopes are swept like workspaces.
       const fromBots = (await botService.list())

@@ -183,6 +183,14 @@ The Responses parser seam consumes reasoning deltas, completed summary/content p
 response output. Completed parts replace their streamed prefix rather than duplicating it; encrypted
 reasoning remains in the native replay signature even when no visible summary is returned.
 
+Responses tool conversion explicitly sends non-strict mode for the default/null
+provider setting, including the Codex Responses path, so optional fields stay
+optional. The standard Responses provider enables the strict-parameter protocol
+by default so it actually sends that explicit `false`; an explicit provider
+compatibility override is still honored. Tools that request strict constrained sampling still use
+Pi's strict schema conversion. Minimal dispatch/document/web/history calls are
+checked through provider conversion and native tool execution.
+
 SDK upgrade checks exercise real native sessions: canonical system/context-edit projection, physical
 virtual-model routing, compaction worker scope, top-level and codemode child permissions/scheduling,
 native MCP status/config mutations and replacement by a user extension, and atomic message-queue edits,

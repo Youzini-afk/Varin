@@ -150,6 +150,12 @@ TS ripgrep child path, recursive file-search scanner and branch corpus/body mirr
 
 ## Rust source ownership
 
+Web snapshots, material collections and explicit thread-sharing grants use the
+kernel's `web.snapshot`, `material.collection` and `material.grant` record types.
+Their object references and restart durability are exercised through the real
+kernel in `web-materials.native.test.ts`; Host map fixtures alone cannot verify
+record-type admission.
+
 The executable `main.rs` only invokes the library runtime. `lib.rs` owns crate assembly and `runtime.rs`
 owns framed transport, handshake, request admission, cancellation, and authorized dispatch. A single
 `storage::Storage` owns the SQLite connection, object root, process lock, cancellation state, and active

@@ -129,6 +129,10 @@ default; the escape hatches `VARIN_COMPUTER_ALLOW_FOCUS_ACTIONS`,
 `VARIN_COMPUTER_ALLOW_UIA_TEXT_FALLBACK` are evaluated inside the driver
 session.
 
+Windows app selection prefers a PID or exact process name (with an optional
+`.exe` suffix), then an exact window title, then a title substring. A folder or
+document title containing an app's name must not override that running app.
+
 ## Provenance
 
 Substantial portions of `windows/runtime.ps1` and `linux/runtime.py` are

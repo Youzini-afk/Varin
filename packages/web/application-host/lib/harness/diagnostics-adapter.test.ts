@@ -56,12 +56,12 @@ describe("LanguageSupervisor diagnostics adapter", () => {
       expect(cleanRevision).toBeTruthy();
 
       // An agent write changes disk; the answer must describe the new text.
-      await fs.promises.writeFile(absolute, "FIXTURE_ERROR\n");
+      await fs.promises.writeFile(absolute, "// first line\n\n  FIXTURE_ERROR\n");
       const broken = await service.handle({ path: resourceId, waitMs: 2_000 }, contextFor(harness.identity.workspaceId));
       expect(broken).toMatchObject({
         status: "ready",
         source: "disk",
-        diagnostics: [expect.objectContaining({ message: "fixture error", severity: "error" })],
+        diagnostics: [expect.objectContaining({ message: "fixture error", severity: "error", line: 3, character: 3 })],
       });
       expect((broken as { revision?: string }).revision).not.toBe(cleanRevision);
 

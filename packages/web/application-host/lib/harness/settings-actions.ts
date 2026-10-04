@@ -456,9 +456,7 @@ const providersAdapter = (deps: SettingsActionDeps): SettingsActionAdapter => ({
 const mcpAdapter = (deps: SettingsActionDeps): SettingsActionAdapter => ({
   verbs: ['status', 'reconnect', 'enable', 'disable', 'read', 'write'],
   async describe(ctx) {
-    const root = await needWorkspace(ctx, deps).catch(() => null);
-    if (!root) return { unavailable: 'requires a workspace-bound session' };
-    const snapshot = await deps.requestWorkspace(root, 'mcp.config.snapshot', {}).catch(() => null);
+    const snapshot = await deps.requestSession(ctx.caller.sessionId, 'mcp.config.snapshot', {}).catch(() => null);
     if (!isRecord(snapshot)) return { unavailable: 'mcp provider unavailable' };
     const provider = isRecord(snapshot.provider) ? snapshot.provider.state : undefined;
     const catalog = isRecord(snapshot.catalog) ? snapshot.catalog : null;
@@ -470,11 +468,11 @@ const mcpAdapter = (deps: SettingsActionDeps): SettingsActionAdapter => ({
     };
   },
   async invoke(ctx, _entry, verb, args) {
-    const root = await needWorkspace(ctx, deps);
+    const request = (method: string, params: Record<string, unknown>) => deps.requestSession(ctx.caller.sessionId, method, params);
     try {
       switch (verb) {
         case 'status':
-          return { status: 'applied', data: sanitizeMcpSnapshot(await deps.requestWorkspace(root, 'mcp.config.snapshot', {})) };
+          return { status: 'applied', data: sanitizeMcpSnapshot(await request('mcp.config.snapshot', {})) };
         case 'reconnect': {
           const name = str(args, 'name');
           const command = name ? `/mcp reconnect ${name}` : '/mcp reconnect';
@@ -489,7 +487,7 @@ const mcpAdapter = (deps: SettingsActionDeps): SettingsActionAdapter => ({
           return { status: 'applied', detail: `executed "${command}" in the owning session`, data: result };
         }
         case 'read': {
-          const snapshot = await deps.requestWorkspace(root, 'mcp.config.snapshot', {});
+          const snapshot = await request('mcp.config.snapshot', {});
           const catalog = isRecord(snapshot) && isRecord(snapshot.catalog) ? snapshot.catalog : null;
           const sourceId = str(args, 'sourceId');
           if (!sourceId) return { status: 'applied', data: sanitizeMcpSnapshot(snapshot) };
@@ -500,7 +498,7 @@ const mcpAdapter = (deps: SettingsActionDeps): SettingsActionAdapter => ({
           }
           return {
             status: 'applied',
-            data: sanitizeTextDocument(await deps.requestWorkspace(root, 'config.text.get', source.target as Record<string, unknown>)),
+            data: sanitizeTextDocument(await request('config.text.get', source.target as Record<string, unknown>)),
           };
         }
         case 'write': {
@@ -509,7 +507,7 @@ const mcpAdapter = (deps: SettingsActionDeps): SettingsActionAdapter => ({
           if (!sourceId || content === undefined) {
             return { status: 'failed', detail: 'write requires args {sourceId, content, expectedRevision?}' };
           }
-          const snapshot = await deps.requestWorkspace(root, 'mcp.config.snapshot', {});
+          const snapshot = await request('mcp.config.snapshot', {});
           const catalog = isRecord(snapshot) && isRecord(snapshot.catalog) ? snapshot.catalog : null;
           const sources = Array.isArray(catalog?.sources) ? catalog.sources : [];
           const source = sources.find((s: unknown) => isRecord(s) && s.id === sourceId);
@@ -519,12 +517,12 @@ const mcpAdapter = (deps: SettingsActionDeps): SettingsActionAdapter => ({
           const target = source.target as Record<string, unknown>;
           let expectedRevision = str(args, 'expectedRevision');
           if (!expectedRevision) {
-            const current = await deps.requestWorkspace(root, 'config.text.get', target) as Record<string, unknown>;
+            const current = await request('config.text.get', target) as Record<string, unknown>;
             expectedRevision = typeof current?.revision === 'string' ? current.revision : '';
           }
           return {
             status: 'applied',
-            data: sanitizeTextDocument(await deps.requestWorkspace(root, 'config.text.update', {
+            data: sanitizeTextDocument(await request('config.text.update', {
               ...target,
               content,
               expectedRevision,
