@@ -178,7 +178,7 @@ import {
   type ContextPreparationExtension,
 } from "./harness/context-preparation.js";
 import { createPermissionGateExtension, buildPermissionPolicy } from "./harness/permission-gate-extension.js";
-import { createWorkFocusExtension } from "./harness/work-focus-extension.js";
+import { createWorkFocusExtension, excludedWorkFocusTools } from "./harness/work-focus-extension.js";
 import type { ToolDefinition } from "@earendil-works/pi-coding-agent";
 import {
   HarnessSettingsValidationError,
@@ -966,6 +966,7 @@ export class SessionHost {
     if (this.#workFocus.id === selection.id
       && this.#workFocus.source === selection.source
       && this.#workFocusGeneration === generation) return true;
+    this.session.setToolExclusions(excludedWorkFocusTools(selection.id));
     this.#workFocus = structuredClone(selection);
     this.#workFocusGeneration = generation;
     return true;
@@ -3943,7 +3944,8 @@ export class SessionHost {
         harnessSettings.agents,
         this.#workFocus.id,
       );
-      const resolvedResearchCapabilities = resolveResearchCapabilities(harnessSettings.models ?? {});
+      const resolvedResearchCapabilities = this.#workFocus.id === "research"
+        ? resolveResearchCapabilities(harnessSettings.models ?? {}) : [];
       customTools.push(...selectHarnessTools(harnessSettings, {
         bridge: hostServicesBridge,
         sessionId: sessionManager.getSessionId(),
@@ -3967,6 +3969,7 @@ export class SessionHost {
         resolvedPresets,
         resolvedResearchCapabilities,
         getResearchCapabilities: async () => {
+          if (this.#workFocus.id !== "research") return [];
           const snapshot = await this.getSettings();
           const settings = mergeHarnessSettings((snapshot.global?.harness ?? {}) as HarnessSettingsInput, {});
           return resolveResearchCapabilities(settings.models);
@@ -4007,6 +4010,7 @@ export class SessionHost {
         });
       });
       attachAgentModelSettings(created.session, modelSettings);
+      created.session.setToolExclusions(excludedWorkFocusTools(this.#workFocus.id));
       const diagnostics = [
         ...services.diagnostics,
         ...services.resourceLoader.getExtensions().errors.map((entry) => ({

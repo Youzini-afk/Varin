@@ -151,7 +151,7 @@ describe("harness service host authorization", () => {
         workspaceId: "workspace-1",
         workspaceRoot: "D:/workspace",
       });
-      expect(host.observationCursors.get(ACTOR.sessionId, "shell", "sh_1")).toBeNull();
+      expect(host.observationCursors.get(ACTOR.sessionId, "shell", "sh_1")?.value).toEqual({ offset: 10 });
       expect(host.observationCursors.get(ACTOR.sessionId, "diagnostics", "D:/workspace/a.ts")).not.toBeNull();
       await expect(host.resolveActor({ ...ACTOR, runId: "run-2" })).resolves.toEqual({
         ...ACTOR,

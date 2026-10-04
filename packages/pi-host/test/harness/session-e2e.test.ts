@@ -492,7 +492,9 @@ describe("session e2e — work focus", () => {
         (context) => { contexts.push(structuredClone(context)); return fauxAssistantMessage("code again"); },
         (context) => { contexts.push(structuredClone(context)); return fauxAssistantMessage("research again"); },
       ]);
-      const session = await setupSession({ root, faux });
+      const session = await setupSession({ root, faux, harnessWebSearch: true });
+      session.host.setHarnessMaterialsEnabled(true);
+      session.host.setHarnessExperimentsEnabled(true);
       try {
         const snapshot = await session.host.create(
           root,
@@ -503,11 +505,26 @@ describe("session e2e — work focus", () => {
           undefined,
           { id: "code", source: "product-default" },
         );
+        const assertResearchTools = (available: boolean) => {
+          const catalog = session.host.session.getAllTools().map((tool) => tool.name);
+          const active = session.host.snapshot().activeTools;
+          const callable = session.host.session.getCallableToolNames();
+          for (const name of ["research_search", "research_decide", "materials", "experiment", "resources", "research_source"]) {
+            assert.equal(catalog.includes(name), available, `${name} discovery`);
+            assert.equal(active.includes(name), available, `${name} execution`);
+            assert.equal(callable.includes(name), available, `${name} nested execution`);
+          }
+          for (const name of ["read", "websearch", "memory", "recall"]) {
+            assert.ok(catalog.includes(name), `${name} remains shared`);
+          }
+        };
+        assertResearchTools(false);
         await session.host.prompt(snapshot.sessionId, "implement a small change");
         await session.host.session.waitForIdle();
         assert.doesNotMatch(providerSystemPrompt(contexts[0]), /varin-work-focus id="research"/);
 
         assert.equal(session.host.applyWorkFocus(snapshot.sessionId, { id: "research", source: "explicit" }, 2), true);
+        assertResearchTools(true);
         await session.host.prompt(snapshot.sessionId, "investigate the observation");
         await session.host.session.waitForIdle();
         assert.match(providerSystemPrompt(contexts[1]), /principal researcher/);
@@ -515,11 +532,13 @@ describe("session e2e — work focus", () => {
         assert.equal(session.host.snapshot().workFocus?.active.id, "research");
 
         assert.equal(session.host.applyWorkFocus(snapshot.sessionId, { id: "code", source: "explicit" }, 3), true);
+        assertResearchTools(false);
         await session.host.prompt(snapshot.sessionId, "implement the selected analysis");
         await session.host.session.waitForIdle();
         assert.doesNotMatch(providerSystemPrompt(contexts[3]), /varin-work-focus id="research"/);
 
         assert.equal(session.host.applyWorkFocus(snapshot.sessionId, { id: "research", source: "explicit" }, 4), true);
+        assertResearchTools(true);
         await session.host.prompt(snapshot.sessionId, "test a competing explanation");
         await session.host.session.waitForIdle();
         assert.equal((providerSystemPrompt(contexts[4]).match(/<varin-work-focus id="research">/g) ?? []).length, 1);

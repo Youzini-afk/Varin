@@ -36,8 +36,12 @@ The pi-host harness tools are custom tools registered in the Pi session's
 | `resources` | Read machine capacity, commitments, observations and queued work | `resource.list` |
 | `research_source` | Register or inspect provenance and retained source objects | `source.register/list` |
 
-Research tools register only when the Host advertises their actual services and the session's frozen
-tool selection permits them. Queries are native read actions; starting/stopping attempts retains the
+Research tools require the Host's actual services, research work focus and the session's tool selection.
+General work focus removes `research_search`, `research_decide`, `materials`, `experiment`, `resources`
+and `research_source` from the native Pi registry, including discovery and nested tool execution.
+Switching focus updates the registry before the next user run; current runs keep their selected focus.
+`memory`, `recall`, ordinary web search and PDF reading remain shared capabilities.
+Queries are native read actions; starting/stopping attempts retains the
 process permission gate. A resource query does not confer process-control capability. Experiment
 output remains available through its attempt/artifact identity even when it was produced outside the
 Agent's own working directory. See the Host harness documentation and current status for backend and

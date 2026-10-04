@@ -9,6 +9,10 @@ lifecycle queue while the Router executes the service. A slow handler must not s
 the same session's compaction-worker queries. Cancellation still goes directly to the Router, and root
 shutdown drains both lifecycle work and admitted requests.
 
+Tool-set snapshots refresh grants for the same worker generation, including a work-focus change.
+Registration keeps that worker's live shell and retrieval/input contexts; only a replacement generation
+retires them. Pending first registration uses the latest grants received while settings are loading.
+
 A session's project binding supplies organization and a default directory, not a filesystem
 boundary. Bound and unbound sessions can read/write explicit external paths and execute with an
 external `cwd` through the same path authority. External directories need no prior project

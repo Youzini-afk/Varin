@@ -760,6 +760,15 @@ export function createHarnessServiceHost(options: HarnessServiceHostOptions): Ha
   const registerSession = (ctx: HarnessSessionContext): void => {
     const sessionId = ctx.actor.sessionId;
     const previous = sessions.get(sessionId);
+    if (previous && previous.actor.authorityInstanceId === ctx.actor.authorityInstanceId
+      && previous.actor.workerId === ctx.actor.workerId && previous.actor.workerGeneration === ctx.actor.workerGeneration) {
+      // A mode/tool-set snapshot updates grants without retiring live shells
+      // or discarding requests owned by this same worker generation.
+      previous.grantedCapabilities = Promise.resolve(ctx.grantedCapabilities).then((capabilities) => (
+        Object.freeze([...new Set(capabilities)])
+      ));
+      return;
+    }
     if (previous) {
       retireShell(sessionId, previous.shellSupervisor);
       observationCursors.clearKind(sessionId, "shell");

@@ -1,6 +1,10 @@
 import type { ExtensionFactory } from "@earendil-works/pi-coding-agent";
 import type { WorkFocusId } from "@varin/protocol";
 
+const RESEARCH_TOOLS = ["research_search", "research_decide", "materials", "experiment", "resources", "research_source"];
+
+export const excludedWorkFocusTools = (focus: WorkFocusId): string[] => focus === "research" ? [] : [...RESEARCH_TOOLS];
+
 export const RESEARCH_WORK_FOCUS_PROMPT = [
   "<varin-work-focus id=\"research\">",
   "Act as the principal researcher for the user's scientific work. Use the current session model for the main research line.",

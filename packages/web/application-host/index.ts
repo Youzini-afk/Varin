@@ -4033,27 +4033,25 @@ async function main(options: StartWebUiServerOptions = {}): Promise<WebUiServerC
         }).catch((error) => {
           console.error('[HarnessKnowledge] Session knowledge bind failed:', errorMessage(error));
         });
-        if (!harnessSessionRegistration.hasActor(event.actor)) {
-          const activeTools = Array.isArray(envelopeData.activeTools)
-            ? envelopeData.activeTools.filter((entry): entry is string => typeof entry === 'string')
-            : [];
-          void harnessSessionRegistration.register({
-            actor: event.actor,
-            workspaceId: harnessWorkspaceId || null,
-            workspaceRoot: envelopeData.cwd,
-            grantedCapabilities: deriveHarnessCapabilities(activeTools, {
-              documentRead: true,
-              documentPathOverlay: true,
-              threadRuntime: Boolean(harnessServiceHost.threadRegistry && harnessServiceHost.threadSpawnSession),
-              experiments: Boolean(harnessServiceHost.experimentService),
-              settings: Boolean(harnessServiceHost.settingsService),
-              followUps: Boolean(harnessServiceHost.followUpService),
-              computer: Boolean(harnessServiceHost.computerService),
-            }),
-          }).catch((error) => {
-            console.error('[Harness] Failed to register session shell:', errorMessage(error));
-          });
-        }
+        const activeTools = Array.isArray(snapshot.activeTools)
+          ? snapshot.activeTools.filter((entry): entry is string => typeof entry === 'string')
+          : [];
+        void harnessSessionRegistration.register({
+          actor: event.actor,
+          workspaceId: harnessWorkspaceId || null,
+          workspaceRoot: envelopeData.cwd,
+          grantedCapabilities: deriveHarnessCapabilities(activeTools, {
+            documentRead: true,
+            documentPathOverlay: true,
+            threadRuntime: Boolean(harnessServiceHost.threadRegistry && harnessServiceHost.threadSpawnSession),
+            experiments: Boolean(harnessServiceHost.experimentService),
+            settings: Boolean(harnessServiceHost.settingsService),
+            followUps: Boolean(harnessServiceHost.followUpService),
+            computer: Boolean(harnessServiceHost.computerService),
+          }),
+        }).catch((error) => {
+          console.error('[Harness] Failed to register session shell:', errorMessage(error));
+        });
         void (async () => {
           const binding = await threadRegistry.getSessionBinding(sessionId);
           await threadRuntime.resumeLostForParent(

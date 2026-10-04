@@ -29,6 +29,26 @@ function fixture(readSettings: (ctx: HarnessSessionContext) => Promise<PiSetting
 }
 
 describe("asynchronous Harness registration", () => {
+  it("uses current tool grants during and after registration without retiring the same worker", async () => {
+    const settings = deferred<PiSettingsSnapshot>();
+    const readSettings = vi.fn(async () => settings.promise);
+    const { registrations, dropInputContexts } = fixture(readSettings);
+    const initial = context();
+    const registered = registrations.register(initial);
+    const research: HarnessSessionContext = { ...initial, grantedCapabilities: ["read.output", "process.shell", "read.experiment"] };
+    const updated = registrations.register(research);
+    settings.resolve(snapshot);
+    await Promise.all([registered, updated]);
+    expect((await registrations.resolveActor(actor))?.grantedCapabilities).toContain("read.experiment");
+
+    await registrations.register(initial);
+    expect((await registrations.resolveActor(actor))?.grantedCapabilities).toEqual(initial.grantedCapabilities);
+    await registrations.register(research);
+    expect((await registrations.resolveActor(actor))?.grantedCapabilities).toContain("read.experiment");
+    expect(readSettings).toHaveBeenCalledTimes(1);
+    expect(dropInputContexts).not.toHaveBeenCalled();
+  });
+
   it("lets the first public request wait for its exact actor registration", async () => {
     const settings = deferred<PiSettingsSnapshot>();
     const { host, registrations, dropInputContexts } = fixture(async () => settings.promise);

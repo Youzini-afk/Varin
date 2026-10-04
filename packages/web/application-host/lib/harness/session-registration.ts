@@ -16,20 +16,26 @@ export function createHarnessSessionRegistration(options: {
   /** Resolve a project resource root when available; session admission does not depend on it. */
   resolveWorkspaceRoot?: (workspaceId: string) => Promise<string | null>;
 }) {
-  const pending = new Map<string, { actor: HarnessActorIdentity; controller: AbortController; promise: Promise<void> }>();
+  const pending = new Map<string, { actor: HarnessActorIdentity; context: HarnessSessionContext; controller: AbortController; promise: Promise<void> }>();
   let disposed = false;
 
   const register = (context: HarnessSessionContext): Promise<void> => {
     if (disposed) return Promise.resolve();
     const previous = pending.get(context.actor.sessionId);
-    if (previous && sameGeneration(previous.actor, context.actor)) return previous.promise;
-    if (!previous && options.host.hasActor(context.actor)) return Promise.resolve();
+    if (previous && sameGeneration(previous.actor, context.actor)) {
+      previous.context = context;
+      return previous.promise;
+    }
+    if (!previous && options.host.hasActor(context.actor)) {
+      options.host.registerSession(context);
+      return Promise.resolve();
+    }
     previous?.controller.abort();
     // Replacing an actor revokes the old generation before waiting on configuration.
     if (previous || options.host.getInterpreter(context.actor.sessionId) !== null) {
       options.host.dropSession(context.actor.sessionId);
     }
-    const entry = { actor: { ...context.actor }, controller: new AbortController(), promise: Promise.resolve() };
+    const entry = { actor: { ...context.actor }, context, controller: new AbortController(), promise: Promise.resolve() };
     pending.set(context.actor.sessionId, entry);
     entry.promise = (async () => {
       let resolved: Pick<HarnessSessionContext, "shellSetting" | "shellResolution" | "webBinding">;
@@ -54,7 +60,7 @@ export function createHarnessSessionRegistration(options: {
         : context.authorityWorkspaceRoot;
       if (disposed || entry.controller.signal.aborted || pending.get(context.actor.sessionId) !== entry) return;
       options.host.registerSession({
-        ...context,
+        ...entry.context,
         actor: entry.actor,
         ...resolved,
         ...(authorityWorkspaceRoot ? { authorityWorkspaceRoot } : {}),
