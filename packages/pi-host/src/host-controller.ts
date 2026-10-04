@@ -151,6 +151,13 @@ const OUT_OF_BAND_METHODS = new Set([
   "workspace.mutation.respond",
 ]);
 
+const INFERENCE_METHODS = new Set<HostMethod>([
+  "harness.embed",
+  "harness.rerank",
+  "harness.fastDecision",
+  "harness.memoryOrganize",
+]);
+
 const COMMON_ROLE_METHODS = new Set<HostMethod>(["host.handshake", "host.shutdown"]);
 const CATALOG_ROLE_METHODS = new Set<HostMethod>([
   ...COMMON_ROLE_METHODS,
@@ -695,12 +702,7 @@ export class HostController {
         }
         if (
           envelope.kind === "request"
-          && (
-            envelope.method === "harness.embed"
-            || envelope.method === "harness.rerank"
-            || envelope.method === "harness.fastDecision"
-            || envelope.method === "harness.memoryOrganize"
-          )
+          && INFERENCE_METHODS.has(envelope.method)
           && envelope.params
           && typeof envelope.params === "object"
           && !Array.isArray(envelope.params)
@@ -722,10 +724,10 @@ export class HostController {
         }
         this.#requestQueue = this.#requestQueue
           .then(() => {
-            // Admit embeddings after earlier configuration/lifecycle work, but
-            // do not serialize independent network waits. Batch reservations
-            // and cancellation are still owned by the inference runtime.
-            if (envelope.kind === "request" && envelope.method === "harness.embed") {
+            // Admit inference after earlier configuration/lifecycle work, then
+            // release the queue during provider waits. The inference runtime
+            // retains batch reservations and cancellation for each request.
+            if (envelope.kind === "request" && INFERENCE_METHODS.has(envelope.method)) {
               void this.#handleEnvelope(envelope).catch((error) => this.#handleFatalError(error));
               return;
             }

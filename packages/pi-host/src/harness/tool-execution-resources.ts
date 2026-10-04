@@ -97,7 +97,7 @@ const PLANNED_HARNESS_TOOLS = new Set([
   "update", "kill", "wait", "threads", "read_thread", "dispatch", "webfetch",
   "websearch", "explore", "recall", "related", "history", "resources",
   "research_source", "research_search", "research_decide", "materials", "document_read",
-  "submit_facts",
+  "submit_facts", "experiment",
 ]);
 
 
@@ -166,12 +166,19 @@ const planForHarnessTool = async (name: string, cwd: string, args: ToolArguments
       // is returned to Pi, they are ordered barriers rather than thread-id-only.
       return { barrier: true };
     case "dispatch":
-    case "explore":
     case "related":
       // They capture/read the current working authority. Explicit tool scope is
       // further enforced by Host, while this broad read preserves write-before-
       // capture ordering when no canonical narrow set is available to Pi yet.
       return subtreePathPlan(cwd, {});
+    case "explore":
+      // Retrieval reports versioned observations; it does not hold the live
+      // source stable until its search and model selection have completed.
+      return { resources: [] };
+    case "experiment":
+      return ["list", "get", "logs", "artifact", "wait"].includes(String(args.action))
+        ? { resources: [] }
+        : { barrier: true };
     case "wait":
     case "threads":
     case "read_thread":

@@ -105,6 +105,9 @@ function directPaths(toolName: string, params: Record<string, unknown>): string[
     const value = params[key];
     if (typeof value === "string" && value.trim()) values.push(value.trim());
   }
+  if (toolName === "explore" && Array.isArray(params.paths)) {
+    values.push(...params.paths.filter((value): value is string => typeof value === "string" && Boolean(value.trim())));
+  }
   if (toolName === "apply_patch") values.push(...patchPaths(params.patch));
   return values;
 }

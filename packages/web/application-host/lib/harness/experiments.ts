@@ -34,6 +34,7 @@ import type {
   ExperimentSubmitParams,
 } from "@varin/protocol";
 import { canonicalizePathIdentity } from "../workspace/path-safety.js";
+import { waitWithSignal } from "../cancellation.js";
 import { HarnessServiceError } from "./service-error.js";
 import {
   createLocalExperimentBackend,
@@ -1746,9 +1747,11 @@ export function createExperimentService(deps: ExperimentServiceDeps) {
   const submitUnsafe = async (
     caller: ExperimentCaller,
     params: ExperimentSubmitParams,
+    signal?: AbortSignal,
   ): Promise<{ spec: ExperimentSpecView; attempt: ExperimentAttemptView; text: string }> => {
-    await ensureReconciled(caller.workspaceId);
-    const ctx = params.specId !== undefined ? await recordContext(caller.workspaceId) : await context(caller);
+    signal?.throwIfAborted();
+    await waitWithSignal(ensureReconciled(caller.workspaceId), signal);
+    const ctx = await waitWithSignal(params.specId !== undefined ? recordContext(caller.workspaceId) : context(caller), signal);
     if (params.specId !== undefined) {
       if (params.command !== undefined || params.args !== undefined || params.inputs !== undefined
         || params.resources !== undefined || params.outputPaths !== undefined || params.env !== undefined
@@ -1788,9 +1791,11 @@ export function createExperimentService(deps: ExperimentServiceDeps) {
       const inputSnapshot = await prepareExperimentInput(deps.client, caller, ctx.canonicalRoot, {
         captureScopes: caller.workspaceScope ?? [],
         ...(cwd ? { cwd } : {}),
+        ...(signal ? { signal } : {}),
       });
       try {
         await assertInputPathsCaptured(ctx, inputSnapshot, inputs);
+        signal?.throwIfAborted();
       } catch (error) {
         await ctx.scoped.deleteBranch({
           operationId: `experiment-input-discard:${randomUUID()}`,
@@ -1917,6 +1922,9 @@ export function createExperimentService(deps: ExperimentServiceDeps) {
         }
         return existing;
       }
+      // Once the attempt intent is durable, reconciliation owns its outcome.
+      // Before that boundary, cancellation must stop preparation and admission.
+      signal?.throwIfAborted();
       try {
         const created = await putRecord(ctx, caller.workspaceId, caller, {
           recordId: recordIdFor.attempt(attemptId),
@@ -2106,13 +2114,14 @@ export function createExperimentService(deps: ExperimentServiceDeps) {
   const submit = async (
     caller: ExperimentCaller,
     params: ExperimentSubmitParams,
+    signal?: AbortSignal,
   ): Promise<{ spec: ExperimentSpecView; attempt: ExperimentAttemptView; text: string }> => {
-    if (!caller.threadId) return submitUnsafe(caller, params);
+    if (!caller.threadId) return submitUnsafe(caller, params, signal);
     const key = `${caller.workspaceId}\0${caller.threadId}`;
     if (sharedRuntime.stoppingThreads.has(key)) {
       throw new HarnessServiceError("unavailable", `Thread ${caller.threadId} is stopping and cannot submit a new experiment`);
     }
-    const submitted = submitUnsafe(caller, params);
+    const submitted = submitUnsafe(caller, params, signal);
     const active = sharedRuntime.submissionsByThread.get(key) ?? new Set<Promise<unknown>>();
     active.add(submitted);
     sharedRuntime.submissionsByThread.set(key, active);

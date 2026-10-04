@@ -253,7 +253,6 @@ test("Harness plans full patch paths and directory descendants with canonical id
   assert.equal(patch?.resources?.length, 2);
   assert.equal(new Set(patch?.resources?.map((resource) => resource.id)).size, 2);
   assert.equal((await definition("merge").prepareExecution?.({ threadId: "thread-1" }))?.barrier, true);
-  assert.equal((await definition("explore").prepareExecution?.({ question: "where" }))?.resources?.[0]?.scope, "subtree");
 });
 
 test("Harness execution plans order a workspace write before dispatch-style capture", async () => {
@@ -286,5 +285,57 @@ test("Harness execution plans order a workspace write before dispatch-style capt
     { id: "dispatch", name: "dispatch", arguments: { task: "inspect current files" } },
   ]);
   assert.equal(captureSawWrite, true);
+});
+
+test("retrieval overlaps source writes, unrelated writes and experiment reads", async () => {
+  const log: string[] = [];
+  let release!: () => void;
+  let readEntered!: () => void;
+  let writeEntered!: () => void;
+  let sourceEntered!: () => void;
+  const held = new Promise<void>((resolve) => { release = resolve; });
+  const read = new Promise<void>((resolve) => { readEntered = resolve; });
+  const write = new Promise<void>((resolve) => { writeEntered = resolve; });
+  const source = new Promise<void>((resolve) => { sourceEntered = resolve; });
+  const result = () => ({ content: [{ type: "text" as const, text: "done" }], details: {} });
+  const explore = withToolExecutionResources({
+    name: "explore", label: "explore", description: "explore", executionMode: "parallel" as const,
+    parameters: Type.Object({ question: Type.String(), paths: Type.Array(Type.String()) }),
+    execute: async () => { log.push("search:start"); await held; log.push("search:end"); return result(); },
+  }, process.cwd());
+  const edit = withToolExecutionResources({
+    name: "edit", label: "edit", description: "edit", executionMode: "sequential" as const,
+    parameters: Type.Object({ path: Type.String() }),
+    execute: async (_id: string, args: { path: string }) => {
+      log.push(args.path);
+      if (args.path === "artifacts/health.txt") writeEntered();
+      if (args.path === "src/source.ts") sourceEntered();
+      return result();
+    },
+  }, process.cwd());
+  const experiment = withToolExecutionResources({
+    name: "experiment", label: "experiment", description: "experiment", executionMode: "sequential" as const,
+    parameters: Type.Object({ action: Type.String() }),
+    execute: async () => { log.push("experiment:list"); readEntered(); return result(); },
+  }, process.cwd());
+  const running = runBatch([explore, edit, experiment] as unknown as AgentTool[], [
+    { id: "search", name: "explore", arguments: { question: "source", paths: ["src"] } },
+    { id: "observe", name: "experiment", arguments: { action: "list" } },
+    { id: "unrelated", name: "edit", arguments: { path: "artifacts/health.txt" } },
+    { id: "source", name: "edit", arguments: { path: "src/source.ts" } },
+  ]);
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  try {
+    await Promise.race([Promise.all([read, write, source]), new Promise<never>((_resolve, reject) => {
+      timer = setTimeout(() => reject(new Error("independent tools waited for retrieval")), 5_000);
+    })]);
+    assert.ok(log.includes("search:start"));
+    assert.ok(log.includes("src/source.ts"));
+  } finally {
+    clearTimeout(timer);
+    release();
+    await running;
+  }
+  assert.ok(log.indexOf("src/source.ts") < log.indexOf("search:end"));
 });
 

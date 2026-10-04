@@ -68,12 +68,15 @@ and End of File constraints are separate from body lines. Update operations pres
 and final-newline state. Incomplete or unsupported directives fail before document mutation admission;
 resource preflight and execution continue to share this parser.
 
-`HostController` admits `harness.embed` in the ordinary request queue, after preceding configuration and
-session lifecycle work, then releases the queue while its provider request is in flight. Independent
-embedding batches can use the Host index scheduler's configured concurrency. Batch identity reservations,
-queued cancellation and actual fetch cancellation remain in `BackgroundInferenceRuntime`; cancelling one
-batch does not cancel another. This does not move inference ahead of lifecycle admission or alter the
-configured concurrency setting.
+`HostController` admits `harness.embed`, `harness.rerank`, `harness.fastDecision` and
+`harness.memoryOrganize` after preceding configuration and session lifecycle work, then releases the
+request queue during provider waits. Independent batches retain their own identity reservations and
+cancellation in `BackgroundInferenceRuntime`; embedding concurrency still follows the index scheduler.
+
+`explore` has no source dependencies in Pi scheduling. Its versioned observations can be collected while
+source files are edited. Host permission inspection still authorizes the searched paths. Experiment
+list/get/logs/artifact/wait calls also permit parallel observation; process-control actions keep their
+ordered execution contract.
 
 Tools are selected by `selectHarnessTools()` during `SessionHost.#createRuntimeFactory()`.
 Web search is available whenever the Host advertises its search service, unless the user disables

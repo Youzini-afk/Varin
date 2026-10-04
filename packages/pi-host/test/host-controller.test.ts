@@ -851,13 +851,14 @@ describe("HostController", () => {
     }
   });
 
-  it("overlaps embedding network waits while retaining batch cancellation isolation", async () => {
+  for (const method of ["harness.embed", "harness.rerank"] as const) it(`overlaps ${method} waits without blocking configuration reads or batch cancellation`, async () => {
     const root = await mkdtemp(join(tmpdir(), "varin-host-embedding-concurrency-"));
     const agentDir = join(root, "agent");
     const cwd = join(root, "workspace");
     await Promise.all([mkdir(agentDir, { recursive: true }), mkdir(cwd, { recursive: true })]);
     await writeFile(join(agentDir, "settings.json"), JSON.stringify({ harness: {
       embedding: { protocol: "openai-compatible", providerId: "embed-provider", modelId: "embed-1", dimensions: 2 },
+      rerank: { protocol: "http-rerank", providerId: "embed-provider", modelId: "rank-1" },
     } }));
     await writeFile(join(agentDir, "models.json"), JSON.stringify({ providers: {
       "embed-provider": { name: "Embed", baseUrl: "https://models.example/v1", api: "openai-completions", apiKey: "test-key", models: [] },
@@ -879,7 +880,9 @@ describe("HostController", () => {
           signal?.addEventListener("abort", abort, { once: true });
           void release.then(() => { signal?.removeEventListener("abort", abort); resolve(); });
         });
-        return new Response(JSON.stringify({ data: [{ index: 0, embedding: [1, 0] }] }),
+        return new Response(JSON.stringify(method === "harness.embed"
+          ? { data: [{ index: 0, embedding: [1, 0] }] }
+          : { results: [{ index: 0, relevance_score: 1 }] }),
           { status: 200, headers: { "Content-Type": "application/json" } });
       },
     });
@@ -892,20 +895,30 @@ describe("HostController", () => {
       const described = await transport.waitFor((entry) => isResponse(entry, "describe"), 15_000);
       assert.ok(described.kind === "response" && described.ok);
       const snapshot = described.result as HarnessInferenceBindingSnapshot;
-      assert.equal(snapshot.embedding.status, "ready");
-      if (snapshot.embedding.status !== "ready") throw new Error("embedding binding unavailable");
-      const binding = snapshot.embedding.binding;
-      const params = (batchId: string) => ({ batchId, configurationId: binding.configurationId,
-        ...(binding.dimensions !== undefined ? { dimensions: binding.dimensions } : {}), items: [{ id: "q", text: "concurrent" }],
-        maxTokens: binding.maxTokens ?? 8192, modelId: binding.modelId,
-        protocol: "openai-compatible" as const, providerId: binding.providerId, purpose: "query" as const });
-      transport.receive(createRequest("first", "harness.embed", params("first-batch")));
-      transport.receive(createRequest("second", "harness.embed", params("second-batch")));
+      const params = (batchId: string) => {
+        if (method === "harness.rerank") {
+          assert.equal(snapshot.rerank.status, "ready");
+          if (snapshot.rerank.status !== "ready") throw new Error("rerank binding unavailable");
+          return { ...snapshot.rerank.binding, batchId, query: "concurrent", documents: [{ id: "q", text: "context" }] };
+        }
+        assert.equal(snapshot.embedding.status, "ready");
+        if (snapshot.embedding.status !== "ready") throw new Error("embedding binding unavailable");
+        const binding = snapshot.embedding.binding;
+        return { ...binding, batchId, items: [{ id: "q", text: "concurrent" }],
+          maxTokens: binding.maxTokens ?? 8192, purpose: "query" as const };
+      };
+      transport.receive(createRequest("first", method, params("first-batch")));
+      transport.receive(createRequest("second", method, params("second-batch")));
       // Neither fetch is released. The second must enter before the first ends.
-      await Promise.race([entered, new Promise<never>((_resolve, reject) => {
-        const timer = setTimeout(() => reject(new Error("second embedding remained serialized")), 5_000);
-        timer.unref();
-      })]);
+      let timer: ReturnType<typeof setTimeout> | undefined;
+      try {
+        await Promise.race([entered, new Promise<never>((_resolve, reject) => {
+          timer = setTimeout(() => reject(new Error("second inference remained serialized")), 5_000);
+        })]);
+      } finally { clearTimeout(timer); }
+      transport.receive(createRequest("settings-during-inference", "settings.get", {}));
+      const settings = await transport.waitFor((entry) => isResponse(entry, "settings-during-inference"));
+      assert.ok(settings.kind === "response" && settings.ok);
       transport.receive(createRequest("cancel-first", "harness.inference.cancel", { batchId: "first-batch" }));
       const cancelled = await transport.waitFor((entry) => isResponse(entry, "cancel-first"));
       assert.ok(cancelled.kind === "response" && cancelled.ok);

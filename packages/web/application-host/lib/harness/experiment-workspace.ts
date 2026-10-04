@@ -173,8 +173,10 @@ const issueExperimentGrant = async (
   client: KernelClient,
   caller: ExperimentWorkspaceCaller,
   purpose: string,
+  signal?: AbortSignal,
 ): Promise<KernelScopedClient> => {
   assertCaller(caller);
+  signal?.throwIfAborted();
   await client.start();
   const grant = await client.issueGrant({
     grantId: `experiment-workspace:${purpose}:${randomUUID()}`,
@@ -189,7 +191,7 @@ const issueExperimentGrant = async (
     // The root registration is the authority boundary. Materialization also
     // requires an unbounded source-view grant, hence the explicit empty scope.
     pathScopes: [""],
-  });
+  }, signal);
   return client.scoped(grant);
 };
 
@@ -322,12 +324,13 @@ export async function prepareExperimentInput(
   options: PrepareExperimentInputOptions = {},
 ): Promise<ExperimentInputSnapshot> {
   assertCaller(caller);
+  options.signal?.throwIfAborted();
   const sourceRoot = await canonicalizePathIdentity(asNonEmptyString(canonicalRoot, "Experiment source root"));
   if (!options.captureScopes) throw new Error("Experiment capture scopes must be explicit caller-authorized paths");
   const scopes = [...new Set(options.captureScopes.map((entry) => normalizeRelative(entry, "Experiment capture scope")))].sort();
   for (const scope of scopes) await validateScope(sourceRoot, scope);
   const cwd = options.cwd === undefined ? undefined : normalizeRelative(options.cwd, "Experiment cwd");
-  const scoped = await issueExperimentGrant(client, caller, "prepare");
+  const scoped = await issueExperimentGrant(client, caller, "prepare", options.signal);
   const registered = await scoped.fileRootRegister({
     workspaceId: caller.workspaceId,
     executionWorkspaceId: caller.executionWorkspaceId,

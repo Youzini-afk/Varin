@@ -116,6 +116,10 @@ storage. `experiment-workspace.ts` captures and checks source bytes through Rust
 files under the declared capture scope, excludes the kernel scan's `.git`/`.varin` metadata, and
 rewrites internal absolute links to remain inside the captured tree. It does not promise an OS sandbox.
 Capturing a large dependency/data tree has a real cost; spec reuse keeps the prior input root.
+Submission cancellation reaches grant issuance, native inventory and file capture before an attempt
+is admitted, including transport timeout cancellation. Shared startup reconciliation retains its own
+lifetime while a cancelled caller stops waiting. Once the attempt intent is durable, its backend and
+reconciliation continue to own the accepted outcome.
 
 Machine capacity, observations and Varin commitments share a Host-level kernel catalog domain in
 `resources.ts`. Reservations are serialized across owning workspaces and survive service recreation;

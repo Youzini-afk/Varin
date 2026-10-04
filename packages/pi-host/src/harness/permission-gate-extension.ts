@@ -55,6 +55,11 @@ const fallbackInspection = (
 });
 
 const permissionExecutionPlan = (target: PermissionInspectResult): ToolExecutionPlan => {
+  if (target.tool === "explore" && target.source.kind === "harness" && target.action === "read") {
+    // Authorization still names the searched paths. Those observations do not
+    // acquire scheduling dependencies on later reads or writes to the source.
+    return { resources: [] };
+  }
   const access = target.action === "read" ? "read" as const : "write" as const;
   const resources = target.paths.map((entry) => ({
     id: `host-path:${entry.workspaceId}:${entry.canonicalResourceId}`,

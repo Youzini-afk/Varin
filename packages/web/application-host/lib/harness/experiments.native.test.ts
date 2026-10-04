@@ -116,6 +116,45 @@ async function serviceWithBackend(
 }
 
 describe("experiment service on the real kernel", () => {
+  it("cancels input preparation before admission and leaves later kernel calls usable", async () => {
+    const f = await fixture();
+    await fs.writeFile(path.join(f.workspace, "input.txt"), "source");
+    const controller = new AbortController();
+    let entered!: () => void;
+    const capturing = new Promise<void>((resolve) => { entered = resolve; });
+    const originalScoped = f.client.scoped.bind(f.client);
+    f.client.scoped = (grant) => new Proxy(originalScoped(grant), {
+      get(target, key) {
+        if (key === "fileCapture") return async (_params: unknown, signal?: AbortSignal) => {
+          entered();
+          assert.ok(signal, "submission cancellation must reach native input capture");
+          await new Promise<void>((_resolve, reject) => {
+            if (signal.aborted) reject(signal.reason);
+            else signal.addEventListener("abort", () => reject(signal.reason), { once: true });
+          });
+        };
+        const value = Reflect.get(target, key);
+        return typeof value === "function" ? value.bind(target) : value;
+      },
+    });
+    try {
+      const submitting = f.experiments.submit(f.caller, node("process.stdout.write('never started')"), controller.signal)
+        .then((value) => value, (error: unknown) => error);
+      await capturing;
+      controller.abort();
+      const outcome = await submitting;
+      assert.ok(outcome instanceof Error && outcome.name === "AbortError");
+    } finally {
+      controller.abort();
+      f.client.scoped = originalScoped;
+    }
+    assert.deepEqual((await f.experiments.list(f.caller, {})).attempts, []);
+    assert.ok((await f.resources.list(f.caller.workspaceId)).machines.length > 0);
+    const submitted = await f.experiments.submit(f.caller, node("process.stdout.write('after cancellation')"));
+    const waited = await f.experiments.wait(f.caller, submitted.attempt.attemptId, 15_000);
+    assert.equal(waited.attempt.state, "completed");
+  });
+
   it("runs a local attempt to completion, collects streams and output files, and dedupes the request", async () => {
     const f = await fixture();
     const spec = node(

@@ -101,6 +101,21 @@ const mcpTool = (name: string) => ({
 const normal = () => ({ mode: "normal" as const, rules: defaultRules("normal") });
 
 describe("native permission gate integration", () => {
+  it("retains retrieval path authorization without reserving the source for scheduling", async () => {
+    const { bridge, audits } = makeBridge();
+    const sourceInfo = { path: "<sdk>", source: "sdk", scope: "temporary", origin: "top-level" };
+    const call = harness({ policy: normal(), sessionId: "s", cwd: workspaceRoot, bridge }, [{ name: "explore", sourceInfo }]);
+    const result = await call({ toolName: "explore", input: { question: "source", paths: ["src/source.ts"] } }, ui().context) as {
+      block?: boolean; executionPlan?: { barrier?: boolean; resources?: unknown[] };
+    };
+    assert.notEqual(result.block, true);
+    assert.equal(audits.length, 1);
+    assert.equal(audits[0]?.target.source.kind, "harness");
+    assert.equal(audits[0]?.target.paths[0]?.resourceId, "src/source.ts");
+    assert.notEqual(result.executionPlan?.barrier, true);
+    assert.deepEqual(result.executionPlan?.resources, []);
+  });
+
   it("pins an inherited shell target before permission inspection", async () => {
     const { bridge, audits } = makeBridge({ workTarget: "managed:cloud" });
     const call = harness({ policy: normal(), sessionId: "s", cwd: workspaceRoot, bridge }, [builtin("bash")]);

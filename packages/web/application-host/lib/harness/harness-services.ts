@@ -1245,7 +1245,7 @@ export function registerHarnessServices(
       handle: async (params, ctx) => {
         const materializeError = await requireMaterializedDirectory(host, ctx.sessionId, ctx.signal);
         if (materializeError) throw new HarnessServiceError("unavailable", materializeError);
-        return experiments.submit(await experimentCaller(ctx), params);
+        return experiments.submit(await experimentCaller(ctx), params, ctx.signal);
       },
     });
     router.register("experiment.list", {
