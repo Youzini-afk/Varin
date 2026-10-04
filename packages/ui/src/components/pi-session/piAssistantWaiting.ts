@@ -4,7 +4,7 @@ import type {
   PiSessionSubmissionMode,
   PiSessionSubmissionStatus,
 } from '@/stores/usePiSessionStore';
-import type { PiTimelineItem } from './piTimelineProjection';
+import { resolvePiTimelineItem, type PiTimelineItem, type PiTimelineLiveItem, type PiTimelineRow } from './piTimelineProjection';
 
 export interface PiAssistantWaitingPresentation {
   model?: Pick<ModelDescriptor, 'id' | 'provider'>;
@@ -48,12 +48,15 @@ const turnHasPersistedAssistant = (item: Extract<PiTimelineItem, { kind: 'turn' 
  * extension actions, or an older request must not leak onto an earlier turn.
  */
 export const findPiAssistantWaitingTurnId = (
-  items: readonly PiTimelineItem[],
+  items: readonly PiTimelineRow[],
   active: boolean,
+  liveItem?: PiTimelineLiveItem,
 ): string | undefined => {
   if (!active) return undefined;
   for (let index = items.length - 1; index >= 0; index -= 1) {
-    const item = items[index];
+    const row = items[index];
+    if (row?.kind !== 'turn') continue;
+    const item = resolvePiTimelineItem(row, liveItem);
     if (item?.kind !== 'turn') continue;
     if (item.turn.liveAssistant?.stopReason === 'pending') return item.id;
     if (!item.turn.liveAssistant && !turnHasPersistedAssistant(item)) return item.id;

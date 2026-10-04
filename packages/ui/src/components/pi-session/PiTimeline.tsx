@@ -27,7 +27,9 @@ import {
 } from '@/lib/pi-runtime/piTimelineScrollState';
 import {
   projectPiTimeline,
+  resolvePiTimelineItem,
   type PiTimelineItem,
+  type PiTimelineRow,
   type PiTimelineProjection,
 } from './piTimelineProjection';
 import {
@@ -41,8 +43,7 @@ import {
 } from './piAssistantWaiting';
 import { PiTurnAssistantChrome } from './PiTurnAssistantChrome';
 import { ChatContextMenu } from './ChatContextMenu';
-import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger } from '@/components/ui/dropdown-menu';
-import { piContentText } from './extensionPresentation';
+import { PiPromptNavigator } from './PiPromptNavigator';
 
 interface PiTimelineItemViewProps extends Omit<
   PiTimelineProps,
@@ -249,7 +250,8 @@ export const PiTimeline: React.FC<PiTimelineProps> = (props) => {
   const assistantWaitingTurnId = React.useMemo(() => findPiAssistantWaitingTurnId(
     projection.items,
     props.assistantWaiting !== undefined,
-  ), [projection.items, props.assistantWaiting]);
+    projection.liveItem,
+  ), [projection.items, projection.liveItem, props.assistantWaiting]);
 
   const timelineView = usePiSessionStore(useShallow((state) => (
     state.records[props.sessionId]?.view ?? DEFAULT_PI_TIMELINE_VIEW
@@ -268,9 +270,9 @@ export const PiTimeline: React.FC<PiTimelineProps> = (props) => {
   newTurnRef.current = timelineView.newTurn;
 
   const entryTarget = timelineView.entry.target;
-  const entryTargetIndex = entryTarget.kind === 'turn'
+  const entryTargetIndex = React.useMemo(() => entryTarget.kind === 'turn'
     ? projection.items.findIndex((item) => item.id === entryTarget.itemId)
-    : -1;
+    : -1, [entryTarget, projection.items]);
   const initialScrollAtEnd = entryTarget.kind === 'end' || entryTargetIndex < 0;
   const firstVisibleIndexRef = React.useRef(-1);
   const viewportRef = React.useRef<PiTimelineViewportAnchor | undefined>(timelineView.viewport);
@@ -293,7 +295,7 @@ export const PiTimeline: React.FC<PiTimelineProps> = (props) => {
     const index = firstVisibleIndexRef.current;
     if (!list || index < 0) return;
     const state = list.getState();
-    const item = state.data[index] as PiTimelineItem | undefined;
+    const item = state.data[index] as PiTimelineRow | undefined;
     if (!item) return;
     const position = state.positionAtIndex(index);
     if (!Number.isFinite(position) || !Number.isFinite(state.scroll)) return;
@@ -440,9 +442,10 @@ export const PiTimeline: React.FC<PiTimelineProps> = (props) => {
     cancelTimelineAutomation(props.sessionId);
   }, [cancelTimelineAutomation, props.sessionId]);
 
-  const anchorIndex = timelineView.newTurn
-    ? projection.items.findIndex((item) => item.id === timelineView.newTurn?.turnId)
-    : -1;
+  const anchoredTurnId = timelineView.newTurn?.turnId;
+  const anchorIndex = React.useMemo(() => anchoredTurnId
+    ? projection.items.findIndex((item) => item.id === anchoredTurnId)
+    : -1, [anchoredTurnId, projection.items]);
 
   const correctAnchoredTurn = React.useCallback(() => {
     if (anchorCorrectionFrameRef.current !== null) return;
@@ -534,6 +537,7 @@ export const PiTimeline: React.FC<PiTimelineProps> = (props) => {
   }, [completeTimelineReturn, props.sessionId, requestTimelineReturn, scrollToContentEnd]);
 
   const extraData = React.useMemo(() => ({
+    liveItem: projection.liveItem,
     assistantWaiting: props.assistantWaiting,
     assistantWaitingTurnId,
     forkBusyEntryId: props.forkBusyEntryId,
@@ -546,6 +550,7 @@ export const PiTimeline: React.FC<PiTimelineProps> = (props) => {
     recoveryBusyEntryId: props.recoveryBusyEntryId,
     threadBusyEntryId: props.threadBusyEntryId,
   }), [
+    projection.liveItem,
     props.assistantWaiting,
     assistantWaitingTurnId,
     props.forkBusyEntryId,
@@ -558,7 +563,10 @@ export const PiTimeline: React.FC<PiTimelineProps> = (props) => {
     props.recoveryBusyEntryId,
     props.threadBusyEntryId,
   ]);
-  const renderItem = React.useCallback(({ item }: { item: PiTimelineItem }) => (
+  const renderItem = React.useCallback(({ item: row }: { item: PiTimelineRow }) => {
+    const item = resolvePiTimelineItem(row, projection.liveItem);
+    if (!item) return null;
+    return (
     <PiTimelineItemView
       {...(item.id === assistantWaitingTurnId && props.assistantWaiting
         ? { assistantWaiting: props.assistantWaiting }
@@ -576,7 +584,9 @@ export const PiTimeline: React.FC<PiTimelineProps> = (props) => {
       sessionId={props.sessionId}
       threadBusyEntryId={props.threadBusyEntryId}
     />
-  ), [
+    );
+  }, [
+    projection.liveItem,
     props.assistantWaiting,
     assistantWaitingTurnId,
     props.cwd,
@@ -628,14 +638,23 @@ export const PiTimeline: React.FC<PiTimelineProps> = (props) => {
     takeManualOwnership();
   }, [takeManualOwnership]);
 
+  const selectPrompt = React.useCallback((index: number) => {
+    takeManualOwnership();
+    void listRef.current?.scrollToIndex({ index, viewPosition: 0, animated: false });
+  }, [takeManualOwnership]);
+
   return (
     <ChatContextMenu key={props.sessionId} {...props} projection={projection}
       onRevealEntry={async (entryId) => {
         const source = props.entries.find((entry) => entry.id === entryId);
         const toolCallId = source?.type === 'message' && source.message.role === 'toolResult' ? source.message.toolCallId : undefined;
-        const index = projection.items.findIndex((item) => item.kind === 'entry' ? item.entry.id === entryId
-          : item.kind === 'turn' && (item.turn.userEntry?.id === entryId || item.turn.entries.some((entry) => entry.id === entryId)
-            || (toolCallId !== undefined && item.turn.resultByCallId.has(toolCallId))));
+        const index = projection.items.findIndex((row) => {
+          const item = resolvePiTimelineItem(row, projection.liveItem);
+          if (!item) return false;
+          return item.kind === 'entry' ? item.entry.id === entryId
+            : item.kind === 'turn' && (item.turn.userEntry?.id === entryId || item.turn.entries.some((entry) => entry.id === entryId)
+              || (toolCallId !== undefined && item.turn.resultByCallId.has(toolCallId)));
+        });
         if (index < 0) throw new Error(t('chat.context.sourceUnavailable'));
         takeManualOwnership();
         const list = listRef.current;
@@ -660,26 +679,7 @@ export const PiTimeline: React.FC<PiTimelineProps> = (props) => {
           list.getState().scroll + element.getBoundingClientRect().top - container.getBoundingClientRect().top - inset - PI_TIMELINE_ANCHOR_OFFSET_PX) });
       }}>
     <div className="relative flex min-h-0 flex-1">
-      {promptNavigatorEnabled && projection.items.filter(item => item.kind === 'turn').length > 1 ? (
-        <DropdownMenu>
-          <DropdownMenuTrigger asChild>
-            <button type="button" aria-label={t('settings.chat.navigator')} title={t('settings.chat.navigator')}
-              className="absolute right-3 top-2 z-20 flex size-7 items-center justify-center rounded-md border border-border/50 bg-background/95 text-muted-foreground shadow-sm hover:text-foreground">
-              <Icon name="list-check-2" className="size-4" />
-            </button>
-          </DropdownMenuTrigger>
-          <DropdownMenuContent align="end" className="max-h-80 max-w-[min(24rem,85vw)] overflow-y-auto">
-            {projection.items.map((item, index) => item.kind === 'turn' ? (
-              <DropdownMenuItem key={item.id} onSelect={() => {
-                takeManualOwnership();
-                void listRef.current?.scrollToIndex({ index, viewPosition: 0, animated: false });
-              }}>
-                <span className="truncate">{piContentText(item.turn.user.content).trim() || '…'}</span>
-              </DropdownMenuItem>
-            ) : null)}
-          </DropdownMenuContent>
-        </DropdownMenu>
-      ) : null}
+      {promptNavigatorEnabled ? <PiPromptNavigator items={projection.items} onSelect={selectPrompt} /> : null}
       <LegendList
         ref={listRef}
         anchoredEndSpace={anchoredEndSpace}

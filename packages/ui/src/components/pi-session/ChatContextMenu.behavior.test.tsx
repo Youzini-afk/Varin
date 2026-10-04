@@ -48,9 +48,9 @@ describe('chat context actions', () => {
   const projection = projectPiTimeline(entries);
   const fork = vi.fn();
   const recover = vi.fn();
-  const render = async () => act(async () => root.render(
-    <ChatContextMenu sessionId="session" entries={entries} projection={projection} onFork={fork} onRecover={recover} onRevealEntry={() => {}}>
-      <div data-turn-id={projection.items[0]!.id}>
+  const render = async (currentProjection = projection) => act(async () => root.render(
+    <ChatContextMenu sessionId="session" entries={entries} projection={currentProjection} onFork={fork} onRecover={recover} onRevealEntry={() => {}}>
+      <div data-turn-id={currentProjection.items[0]!.id}>
         <article data-pi-entry-id="user"><span data-user>My request.</span></article>
         <article data-pi-entry-id="answer"><ChatTextSource entryId="answer" text="A useful answer." offset={0}>
           <p data-answer>A useful answer.</p></ChatTextSource><ChatMoreButton /></article>
@@ -99,4 +99,19 @@ describe('chat context actions', () => {
     await open('[data-answer]'); mocks.runtimeKey = 'runtime-b'; await click('chat.context.copyTurn');
     expect(mocks.copy).not.toHaveBeenCalled();
   });
+  it('copies the current streamed reply while the virtual row identity stays unchanged', async () => {
+    if (answer.type !== 'message' || answer.message.role !== 'assistant') throw new Error('expected assistant');
+    const first = projectPiTimeline(entries, {
+      ...answer.message, timestamp: 3, stopReason: 'pending', content: [{ type: 'text', text: 'Old delta' }],
+    }, undefined, projection);
+    const current = projectPiTimeline(entries, {
+      ...answer.message, timestamp: 3, stopReason: 'pending', content: [{ type: 'text', text: 'Current delta' }],
+    }, undefined, first);
+    expect(current.items).toBe(first.items);
+    await render(current);
+    await open('[data-answer]');
+    await click('chat.context.copyTurn');
+    expect(mocks.copy).toHaveBeenLastCalledWith('A useful answer.\n\nCurrent delta');
+  });
+
 });

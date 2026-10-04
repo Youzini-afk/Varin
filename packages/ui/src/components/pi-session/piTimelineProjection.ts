@@ -49,12 +49,24 @@ export type PiTimelineItem =
     }
   | { id: string; kind: 'turn'; turn: PiTimelineTurn };
 
+type PiTimelinePersistentItem = Exclude<PiTimelineItem, { kind: 'live-assistant' }>;
+
+// Virtual-list rows change only with history or transient row identity. The live
+// payload is resolved separately so a text delta never replaces the whole data array.
+export type PiTimelineRow = PiTimelinePersistentItem | { id: string; kind: 'live-assistant' };
+
+export interface PiTimelineLiveItem {
+  row: PiTimelineRow;
+  item: PiTimelineItem;
+}
+
 export interface PiTimelineProjection {
-  items: readonly PiTimelineItem[];
+  items: readonly PiTimelineRow[];
+  liveItem?: PiTimelineLiveItem;
   liveAssistant?: PiAssistantMessage;
   liveUser?: PiUserMessage;
   /** Stable history before live user/assistant overlays are applied. */
-  persistentItems: readonly PiTimelineItem[];
+  persistentItems: readonly PiTimelinePersistentItem[];
   resultByCallId: ReadonlyMap<string, PiToolResultMessage>;
   /** Flat visible entries used by a single virtual turn row's presentation. */
   visibleEntries: readonly PiTimelineEntry[];
@@ -62,7 +74,7 @@ export interface PiTimelineProjection {
 
 interface PiTimelinePersistentProjection {
   assistantIdentities: ReadonlySet<string>;
-  items: readonly PiTimelineItem[];
+  items: readonly PiTimelinePersistentItem[];
   pendingMetadata: PiTimelineTurnMetadata;
   resultByCallId: ReadonlyMap<string, PiToolResultMessage>;
   visibleEntries: readonly PiTimelineEntry[];
@@ -86,6 +98,7 @@ const projectionSources = new WeakMap<PiTimelineProjection, {
   entries: readonly PiSessionEntry[];
   liveToolCallIds: readonly string[];
   persistent: PiTimelinePersistentProjection;
+  standaloneLiveAssistantId: string | undefined;
 }>();
 
 const isTimelineControlEntry = (entry: PiSessionEntry): entry is PiTimelineControlEntry => (
@@ -235,7 +248,7 @@ const persistentProjection = (
 
   const stableGlobalResults = stableResultMap(resultByCallId, previous?.resultByCallId);
   const previousById = new Map(previous?.persistentItems.map((item) => [item.id, item]) ?? []);
-  const items = drafts.map<PiTimelineItem>((draft) => {
+  const items = drafts.map<PiTimelinePersistentItem>((draft) => {
     if (draft.kind === 'entry') {
       const id = `entry:${draft.entry.id}`;
       const prior = previousById.get(id);
@@ -282,6 +295,22 @@ const persistentProjection = (
   return { assistantIdentities, items, pendingMetadata, resultByCallId: stableGlobalResults, visibleEntries, userTimestamps };
 };
 
+const resultsIncludingLiveAssistant = (
+  results: ReadonlyMap<string, PiToolResultMessage>,
+  allResults: ReadonlyMap<string, PiToolResultMessage>,
+  message: PiAssistantMessage,
+): ReadonlyMap<string, PiToolResultMessage> => {
+  let combined: Map<string, PiToolResultMessage> | undefined;
+  for (const content of message.content) {
+    if (content.type !== 'toolCall') continue;
+    const result = allResults.get(content.id);
+    if (!result || results.get(content.id) === result) continue;
+    combined ??= new Map(results);
+    combined.set(content.id, result);
+  }
+  return combined ?? results;
+};
+
 export const projectPiTimeline = (
   entries: readonly PiSessionEntry[],
   liveAssistant?: PiAssistantMessage,
@@ -300,11 +329,18 @@ export const projectPiTimeline = (
   const projectedLiveAssistant = persistedAssistant ? undefined : liveAssistant;
   const persistedUser = liveUser !== undefined && persistent.userTimestamps.has(liveUser.timestamp);
   const projectedLiveUser = persistedUser ? undefined : liveUser;
-  const items = [...persistent.items];
-
-  if (projectedLiveUser) {
+  // Once a user turn exists, every later visible entry belongs to that turn.
+  const standaloneLiveAssistantId = projectedLiveAssistant && !projectedLiveUser
+    && persistent.items.at(-1)?.kind !== 'turn'
+    ? `live-assistant:${projectedLiveAssistant.timestamp}`
+    : undefined;
+  let items: readonly PiTimelineRow[];
+  if (previous && source?.persistent === persistent && previous.liveUser === projectedLiveUser
+    && source.standaloneLiveAssistantId === standaloneLiveAssistantId) {
+    items = previous.items;
+  } else if (projectedLiveUser) {
     const id = `turn:live-user:${projectedLiveUser.timestamp}`;
-    items.push({
+    items = [...persistent.items, {
       id,
       kind: 'turn',
       turn: {
@@ -315,52 +351,65 @@ export const projectPiTimeline = (
         resultByCallId: EMPTY_RESULT_MAP,
         user: projectedLiveUser,
       },
-    });
+    }];
+  } else if (standaloneLiveAssistantId) {
+    items = [...persistent.items, { id: standaloneLiveAssistantId, kind: 'live-assistant' }];
+  } else {
+    items = persistent.items;
   }
 
-  if (projectedLiveAssistant) {
-    let tailTurnIndex = -1;
-    for (let index = items.length - 1; index >= 0; index -= 1) {
-      if (items[index]?.kind === 'turn') {
-        tailTurnIndex = index;
-        break;
-      }
-    }
-    const tailTurn = items[tailTurnIndex];
-    if (tailTurn?.kind === 'turn') {
-      const tailResults = stableResultMap(
-        resultsForMessages(tailTurn.turn.entries, persistent.resultByCallId, projectedLiveAssistant),
-        tailTurn.turn.resultByCallId,
-      );
-      items[tailTurnIndex] = {
-        ...tailTurn,
-        turn: {
-          ...tailTurn.turn,
-          liveAssistant: projectedLiveAssistant,
-          resultByCallId: tailResults,
-        },
-      };
-    } else {
-      items.push({
-        id: `live-assistant:${projectedLiveAssistant.timestamp}`,
+  let liveItem: PiTimelineLiveItem | undefined;
+  const tail = items.at(-1);
+  if (projectedLiveAssistant && tail && tail.kind !== 'entry') {
+    const previousItem = previous?.liveItem?.item;
+    const previousResults = previousItem?.kind === 'turn'
+      ? previousItem.turn.resultByCallId
+      : previousItem?.kind === 'live-assistant' ? previousItem.resultByCallId : undefined;
+    // The persistent source includes the live call IDs. Its unchanged identity
+    // proves both completed results and live-result membership are unchanged.
+    const results = source?.persistent === persistent && previous?.liveItem?.row === tail && previousResults
+      ? previousResults
+      : stableResultMap(resultsIncludingLiveAssistant(
+        tail.kind === 'turn' ? tail.turn.resultByCallId : EMPTY_RESULT_MAP,
+        persistent.resultByCallId,
+        projectedLiveAssistant,
+      ), previousResults);
+    liveItem = {
+      row: tail,
+      item: tail.kind === 'turn' ? {
+        ...tail,
+        turn: { ...tail.turn, liveAssistant: projectedLiveAssistant, resultByCallId: results },
+      } : {
+        id: tail.id,
         kind: 'live-assistant',
         message: projectedLiveAssistant,
-        resultByCallId: stableResultMap(
-          resultsForMessages([], persistent.resultByCallId, projectedLiveAssistant),
-          undefined,
-        ),
-      });
-    }
+        resultByCallId: results,
+      },
+    };
   }
 
   const projection: PiTimelineProjection = {
     items,
+    ...(liveItem ? { liveItem } : {}),
     ...(projectedLiveAssistant ? { liveAssistant: projectedLiveAssistant } : {}),
     ...(projectedLiveUser ? { liveUser: projectedLiveUser } : {}),
     persistentItems: persistent.items,
     resultByCallId: persistent.resultByCallId,
     visibleEntries: persistent.visibleEntries,
   };
-  projectionSources.set(projection, { entries, liveToolCallIds, persistent });
+  projectionSources.set(projection, { entries, liveToolCallIds, persistent, standaloneLiveAssistantId });
   return projection;
+};
+
+/**
+ * A virtual container may retain its previous assigned row while calling the
+ * current renderer. Live content belongs to the exact row object, never merely
+ * its ID; a retired standalone row has no payload and renders nothing.
+ */
+export const resolvePiTimelineItem = (
+  row: PiTimelineRow,
+  liveItem?: PiTimelineLiveItem,
+): PiTimelineItem | undefined => {
+  if (liveItem?.row === row) return liveItem.item;
+  return row.kind === 'live-assistant' ? undefined : row;
 };

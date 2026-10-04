@@ -6,7 +6,7 @@ import type {
   PiUserMessage,
 } from '@varin/protocol';
 import { VARIN_RECOVERY_NAVIGATION_MARKER_TYPE } from '@varin/protocol';
-import { projectPiTimeline } from './piTimelineProjection';
+import { projectPiTimeline, resolvePiTimelineItem } from './piTimelineProjection';
 
 const assistant = (text: string, timestamp = 1): PiAssistantMessage => ({
   api: 'messages',
@@ -197,7 +197,8 @@ describe('Pi timeline projection', () => {
     );
     expect(streaming.persistentItems[0]).toBe(initial.persistentItems[0]);
     expect(streaming.resultByCallId).toBe(initial.resultByCallId);
-    expect(streaming.items[0]).not.toBe(initial.items[0]);
+    expect(streaming.items[0]).toBe(initial.items[0]);
+    expect(resolvePiTimelineItem(streaming.items[0]!, streaming.liveItem)).not.toBe(initial.items[0]);
 
     const secondUser = userEntry('user-2', 'second', 4);
     const extended = projectPiTimeline([firstUser, firstAssistant, secondUser], undefined, undefined, streaming);
@@ -215,10 +216,88 @@ describe('Pi timeline projection', () => {
     const next = projectPiTimeline(entries, assistant('next delta', 3), undefined, first);
     expect(next.persistentItems).toBe(first.persistentItems);
     expect(next.visibleEntries).toBe(first.visibleEntries);
-    expect(next.items[0]?.kind === 'turn' && next.items[0].turn.liveAssistant?.content).toEqual(assistant('next delta', 3).content);
+    expect(next.items).toBe(first.items);
+    const liveTurn = resolvePiTimelineItem(next.items[0]!, next.liveItem);
+    expect(liveTurn?.kind === 'turn' && liveTurn.turn.liveAssistant?.content).toEqual(assistant('next delta', 3).content);
     const call = { ...assistant('', 3), content: [{ type: 'toolCall' as const, id: 'tool-live', name: 'read', arguments: {} }] };
     const withCall = projectPiTimeline(entries, call, undefined, next);
     expect(withCall.visibleEntries.map(entry => entry.id)).toEqual(['user-1']);
     expect(withCall.resultByCallId.get('tool-live')).toBe(entries[1]!.type === 'message' ? entries[1]!.message : undefined);
   });
+  test('refreshes a replaced historical message without invalidating an unchanged tail turn', () => {
+    const firstUser = userEntry('user-1', 'first', 1);
+    const firstAnswer = assistantEntry('answer-1', assistant('old answer', 2));
+    const lastUser = userEntry('user-2', 'second', 3);
+    const entries = [firstUser, firstAnswer, lastUser];
+    const before = projectPiTimeline(entries, assistant('live delta', 4));
+    const replacement = assistantEntry('answer-1', assistant('corrected answer', 2));
+    const after = projectPiTimeline([firstUser, replacement, lastUser], assistant('new live delta', 4), undefined, before);
+
+    expect(after.items[0]).not.toBe(before.items[0]);
+    expect(after.items[1]).toBe(before.items[1]);
+    const first = resolvePiTimelineItem(after.items[0]!, after.liveItem);
+    expect(first?.kind === 'turn' && first.turn.entries).toEqual([replacement]);
+    const tail = resolvePiTimelineItem(after.items[1]!, after.liveItem);
+    expect(tail?.kind === 'turn' && tail.turn.liveAssistant?.content).toEqual(assistant('new live delta', 4).content);
+  });
+
+  test('updates live tool results on completion and retires the overlay when the assistant persists', () => {
+    const user = userEntry('user', 'read the file', 1);
+    const live: PiAssistantMessage = {
+      ...assistant('', 2), stopReason: 'pending',
+      content: [{ type: 'toolCall', id: 'call', name: 'read', arguments: { path: 'README.md' } }],
+    };
+    const initial = projectPiTimeline([user], live);
+    const result: PiSessionMessageEntry = {
+      id: 'result', type: 'message', parentId: user.id, timestamp: '3',
+      message: { role: 'toolResult', toolName: 'read', toolCallId: 'call', content: [{ type: 'text', text: 'complete' }],
+        isError: false, timestamp: 3 },
+    };
+    const entries = [user, result];
+    const completed = projectPiTimeline(entries, live, undefined, initial);
+    const turn = resolvePiTimelineItem(completed.items[0]!, completed.liveItem);
+    expect(turn?.kind === 'turn' && turn.turn.resultByCallId.get('call')).toBe(result.message);
+    expect(completed.visibleEntries).toEqual([user]);
+    const next = projectPiTimeline(entries, { ...live }, undefined, completed);
+    expect(next.items).toBe(completed.items);
+    const nextTurn = resolvePiTimelineItem(next.items[0]!, next.liveItem);
+    expect(nextTurn?.kind === 'turn' && turn?.kind === 'turn' && nextTurn.turn.resultByCallId).toBe(turn?.kind === 'turn' && turn.turn.resultByCallId);
+
+    const persisted = assistantEntry('assistant', { ...live, stopReason: 'toolUse' });
+    const settled = projectPiTimeline([user, persisted, result], live, undefined, next);
+    expect(settled.liveItem).toBeUndefined();
+    expect(settled.items).toHaveLength(1);
+    const settledTurn = resolvePiTimelineItem(settled.items[0]!);
+    expect(settledTurn?.kind === 'turn' && settledTurn.turn.entries).toEqual([persisted]);
+    expect(settledTurn?.kind === 'turn' && settledTurn.turn.resultByCallId.get('call')).toBe(result.message);
+  });
+
+  test('keeps a standalone live row stable and removes it when the live message is withdrawn', () => {
+    const entries: PiSessionEntry[] = [];
+    const first = projectPiTimeline(entries, assistant('first', 1));
+    const next = projectPiTimeline(entries, assistant('latest', 1), undefined, first);
+    expect(next.items).toBe(first.items);
+    const item = resolvePiTimelineItem(next.items[0]!, next.liveItem);
+    expect(item?.kind === 'live-assistant' && item.message.content).toEqual(assistant('latest', 1).content);
+    const withdrawn = projectPiTimeline(entries, undefined, undefined, next);
+    expect(withdrawn.items).toEqual([]);
+    expect(withdrawn.liveItem).toBeUndefined();
+    const newUser = { role: 'user' as const, content: 'new prompt', timestamp: 2 };
+    const restarted = projectPiTimeline(entries, assistant('new reply', 3), newUser, withdrawn);
+    expect(restarted.items.map(row => row.id)).toEqual(['turn:live-user:2']);
+    expect(resolvePiTimelineItem(restarted.items[0]!, restarted.liveItem)?.kind).toBe('turn');
+  });
+
+  test('does not apply a live payload to another row generation with the same ID', () => {
+    const first = projectPiTimeline([], assistant('old owner', 1));
+    const current = projectPiTimeline([], assistant('current owner', 1));
+    expect(first.items[0]?.id).toBe(current.items[0]?.id);
+    expect(resolvePiTimelineItem(first.items[0]!, current.liveItem)).toBeUndefined();
+    const item = resolvePiTimelineItem(current.items[0]!, current.liveItem);
+    expect(item?.kind === 'live-assistant' && item.message.content).toEqual(assistant('current owner', 1).content);
+
+    const persisted = projectPiTimeline([userEntry('user', 'saved prompt', 2)]);
+    expect(resolvePiTimelineItem(persisted.items[0]!, current.liveItem)).toBe(persisted.items[0]);
+  });
+
 });

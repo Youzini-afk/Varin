@@ -57,10 +57,20 @@ visible as an error. Entering those modes from Bot refreshes the index, while or
 reuse the cached result.
 
 The Pi timeline reuses its immutable history projection while live text changes.
-New persisted entries or live tool-call identities rebuild that projection;
-completed virtual rows keep their item identity. Projection source state is weakly
-owned by the prior view result and is released with that view, not accumulated in
-a global history cache.
+Its virtual-list rows retain their array identity during text deltas; one separate
+live item supplies the current payload to the mounted row and explicit chat actions.
+New persisted entries or live tool-call identities rebuild the history projection;
+completed virtual rows keep their item identity. Live tool results reuse the
+unchanged persistent source and are refreshed on result or call membership changes.
+Projection source state is weakly owned by the prior view result and is released
+with that view, not accumulated in a global history cache.
+
+Prompt navigation projects only structural row changes and reads prompt text only
+while its menu is open. Streaming must not rebuild closed menu elements or run
+full-history anchor lookups. `PiTimeline.streaming.test.tsx` exercises 2,000 turns
+and 100 live updates with deterministic history-read and list-data identity checks.
+Set `VARIN_PERF_UI=1` when running that focused test to print the isolated component
+timing; it is not a browser frame-rate or packaged-desktop measurement.
 
 `useGlobalSessionsStore.ts` owns cold/global active and archived session coverage, including `sessionsByDirectory`. It is complementary to directory child stores: it is not the source of live busy/retry status or session messages.
 

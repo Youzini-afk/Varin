@@ -11,7 +11,7 @@ import { readPiDraft, usePiDraftStore } from '@/stores/usePiDraftStore';
 import { getMarkdownCodeText } from '@/components/chat/markdown/decorate';
 import { captureChatSelection, type ChatTextSource as ChatSourceData } from './chatSelection';
 import { ChatMemoryDialog } from './ChatMemoryDialog';
-import type { PiTimelineProjection } from './piTimelineProjection';
+import { resolvePiTimelineItem, type PiTimelineProjection } from './piTimelineProjection';
 import type { PiTimelineProps } from './PiTimelineEntries';
 import { assistantMessagesForTurn } from '@/lib/pi-runtime/usagePresentation';
 import { piContentText } from './extensionPresentation';
@@ -122,7 +122,9 @@ export const ChatContextMenu: React.FC<Pick<PiTimelineProps,
       .map(([, source]) => source.text).join('\n'), runtimeKey };
     const turnId = element.closest<HTMLElement>('[data-turn-id],[data-turn-entry]')?.getAttribute('data-turn-id')
       ?? element.closest<HTMLElement>('[data-turn-entry]')?.getAttribute('data-turn-entry');
-    const item = props.projection.items.find((row) => row.id === turnId);
+    const row = props.projection.items.find((item) => item.id === turnId);
+    if (!row) return null;
+    const item = resolvePiTimelineItem(row, props.projection.liveItem);
     if (!item) return null;
     const entries = item.kind === 'turn' ? item.turn.entries : item.kind === 'entry' ? [item.entry] : [];
     const live = item.kind === 'turn' ? item.turn.liveAssistant : item.kind === 'live-assistant' ? item.message : undefined;

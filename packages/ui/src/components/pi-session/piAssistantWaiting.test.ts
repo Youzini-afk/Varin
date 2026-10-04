@@ -102,10 +102,10 @@ describe('Pi assistant waiting turn', () => {
 
   test('keeps a live pending assistant on its owning turn', () => {
     const projection = projectPiTimeline(
-      [userEntry('user', 1)],
-      assistant('pending'),
+      [userEntry('user', 1), assistantEntry(assistant('toolUse'))],
+      { ...assistant('pending'), timestamp: 3 },
     );
-    expect(findPiAssistantWaitingTurnId(projection.items, true)).toBe('turn:user');
+    expect(findPiAssistantWaitingTurnId(projection.items, true, projection.liveItem)).toBe('turn:user');
   });
 
   test('does not attach unrelated working state to a completed turn', () => {
