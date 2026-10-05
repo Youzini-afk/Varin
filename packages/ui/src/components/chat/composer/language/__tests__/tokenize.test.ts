@@ -12,7 +12,6 @@ const context = (overrides: Partial<ComposerLanguageContext> = {}): ComposerLang
     knownAgentNames: new Set(['build', 'plan']),
     confirmedMentions: new Set(['NOTES']),
     knownSlashNames: new Set(['review', 'explore']),
-    knownSnippetTriggers: new Set(['sig']),
     attachmentFilenames: [],
     ...overrides,
 });
@@ -54,8 +53,8 @@ describe('tokenizeComposer — reference constructs', () => {
         )).toEqual([['/skill:workspace-check', 'mentionCommand']]);
     });
 
-    test('a known snippet trigger is styled as a snippet', () => {
-        expect(styled('end with #sig')).toEqual([['#sig', 'mentionSnippet']]);
+    test('hash names stay ordinary text', () => {
+        expect(styled('end with #sig')).toEqual([]);
     });
 
     test('an attachment citation is styled as a file', () => {
@@ -131,7 +130,6 @@ describe('tokenizeComposer — disabled and empty paths', () => {
     test('empty registries leave their sigils plain', () => {
         expect(styled('/review #sig', context({
             knownSlashNames: new Set(),
-            knownSnippetTriggers: new Set(),
         }))).toEqual([]);
     });
 });

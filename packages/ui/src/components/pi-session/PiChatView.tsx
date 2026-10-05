@@ -48,7 +48,6 @@ import { appendInlineComments } from '@/lib/messages/inlineComments';
 import { consumeEditorContextAttachments, restoreEditorContextAttachments } from '@/lib/agent-editor/attachments';
 import { projectEditorContextAttachments } from '@/lib/agent-editor/projection';
 import { useInlineCommentDraftStore } from '@/stores/useInlineCommentDraftStore';
-import { useSnippetsStore } from '@/stores/useSnippetsStore';
 import { useSessionGoalArmStore } from '@/stores/useSessionGoalArmStore';
 import { DraftPresetChips } from '@/components/chat/DraftPresetChips';
 import { AutoReviewBanner } from '@/components/chat/AutoReviewBanner';
@@ -438,11 +437,6 @@ export const PiChatView: React.FC<PiChatViewProps> = ({
     try {
       let promptText = currentDraft.text;
       let instructions = currentDraft.instructions;
-      try {
-        promptText = await useSnippetsStore.getState().expandText(promptText);
-      } catch (error) {
-        console.warn('[PiChatView] Failed to expand snippets, sending original text:', error);
-      }
       inlineDrafts = inlineDraftStore.consumeDrafts(inlineDraftTarget);
       promptText = appendInlineComments(promptText, inlineDrafts);
       editorAttachments = consumeEditorContextAttachments(

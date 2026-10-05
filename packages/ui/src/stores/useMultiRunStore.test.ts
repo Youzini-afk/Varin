@@ -5,7 +5,6 @@ import { registerRuntimeAPIs } from '@/lib/runtime-api/registry';
 import { useDirectoryStore } from './useDirectoryStore';
 import { usePiSessionStore } from './usePiSessionStore';
 import { useProjectsStore } from './useProjectsStore';
-import { useSnippetsStore } from './useSnippetsStore';
 import { useMultiRunStore } from './useMultiRunStore';
 
 const worktreeCreateCalls: Array<{ directory: string; payload: CreateGitWorktreePayload }> = [];
@@ -123,7 +122,6 @@ describe('useMultiRunStore', () => {
     usePiSessionStore.setState(
       piSessionOverrides as unknown as Partial<ReturnType<typeof usePiSessionStore.getState>>,
     );
-    useSnippetsStore.setState({ expandText: (value: string) => Promise.resolve(value) });
     useMultiRunStore.setState({ error: null, isLoading: false });
   });
 
@@ -131,7 +129,7 @@ describe('useMultiRunStore', () => {
     const result = await useMultiRunStore.getState().createMultiRun({
       groups: [{
         models: [{ providerID: 'anthropic', modelID: 'claude-sonnet', variant: 'high' }],
-        prompt: 'Fix it',
+        prompt: 'Fix #issue42',
       }],
       isolateRuns: false,
       name: 'Fix thing',
@@ -145,7 +143,7 @@ describe('useMultiRunStore', () => {
     });
     expect(selectedModels).toEqual([{ id: 'ses_1', model: { id: 'claude-sonnet', provider: 'anthropic' } }]);
     expect(selectedThinking).toEqual([{ id: 'ses_1', level: 'high' }]);
-    expect(prompts).toEqual([{ id: 'ses_1', text: 'Fix it' }]);
+    expect(prompts).toEqual([{ id: 'ses_1', text: 'Fix #issue42' }]);
     expect(currentSessionId).toBe('ses_1');
   });
 

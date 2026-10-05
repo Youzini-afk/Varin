@@ -20,7 +20,6 @@ import {
 import { waitForWorktreeBootstrap } from '@/lib/worktrees/worktreeBootstrap';
 import { useDirectoryStore } from './useDirectoryStore';
 import { useProjectsStore } from './useProjectsStore';
-import { useSnippetsStore } from './useSnippetsStore';
 import { usePiSessionStore } from './usePiSessionStore';
 import { getMultiRunSessionTitle } from '@/lib/multirun/title';
 import { renderPiAgentInvocation } from '@/lib/piAgentInvocation';
@@ -301,16 +300,14 @@ export const useMultiRunStore = create<MultiRunStore>()(
           const attachments = prepareAttachments(params.files);
           await Promise.all(createdRuns.map(async (run) => {
             try {
-              const expanded = await useSnippetsStore.getState().expandText(run.prompt)
-                .catch(() => run.prompt);
               const instructionParts = [attachments.instructions]
                 .filter((value): value is string => Boolean(value?.trim()));
               const directInstructions = instructionParts.length > 0
                 ? instructionParts.join('\n\n')
                 : undefined;
               const task = params.agent && directInstructions
-                ? `${expanded}\n\n<varin-run-instructions>\n${directInstructions}\n</varin-run-instructions>`
-                : expanded;
+                ? `${run.prompt}\n\n<varin-run-instructions>\n${directInstructions}\n</varin-run-instructions>`
+                : run.prompt;
               const text = params.agent ? renderPiAgentInvocation(params.agent, task) : task;
               const accepted = await piSessions.prompt(
                 run.sessionId,

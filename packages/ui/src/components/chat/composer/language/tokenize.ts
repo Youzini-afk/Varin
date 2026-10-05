@@ -1,17 +1,5 @@
 /**
- * One pass over the composer text producing every highlight range.
- *
- * The composer used to derive its highlighting from six independent memos in
- * ChatInput.tsx — markdown, fenced-code syntax, mentions, slash tokens,
- * snippet tokens and attachment citations — each re-scanning the same string
- * and each having to be remembered when a new construct was added. This is the
- * single entry point: give it the text and what the composer knows about the
- * workspace, get back the ranges.
- *
- * It is also the seam the editor renders through. The mirror overlay consumes
- * these ranges via `buildHighlightParts`; a CodeMirror view maps the same
- * ranges to decorations. Adding a construct to the language means adding it
- * here, once.
+ * Produce highlight ranges for markdown, code, references, paths and attachment citations.
  */
 
 import { findAttachmentCitationRanges } from '../../attachmentCitations';
@@ -24,7 +12,7 @@ import {
 } from '../../composerHighlight';
 import { classifyMention, scanMentions } from './mentions';
 import { pathHighlightRanges } from './paths';
-import { filterKnownTokens, scanPrefixTokens } from './prefixTokens';
+import { filterKnownTokens, scanSlashTokens } from './prefixTokens';
 
 /**
  * What the composer knows about its workspace while tokenizing. Every set is
@@ -40,8 +28,6 @@ export interface ComposerLanguageContext {
     confirmedMentions: ReadonlySet<string>;
     /** Lowercased command, skill and built-in names invocable with `/`. */
     knownSlashNames: ReadonlySet<string>;
-    /** Lowercased snippet names and aliases invocable with `#`. */
-    knownSnippetTriggers: ReadonlySet<string>;
     /** Filenames of the currently attached files, cited inline as `[name]`. */
     attachmentFilenames: readonly string[];
 }
@@ -77,12 +63,8 @@ export function tokenizeComposer(
         ...pathHighlightRanges(text),
     ];
 
-    for (const token of filterKnownTokens(scanPrefixTokens(text, '/'), context.knownSlashNames)) {
+    for (const token of filterKnownTokens(scanSlashTokens(text), context.knownSlashNames)) {
         ranges.push({ start: token.start, end: token.end, style: 'mentionCommand' });
-    }
-
-    for (const token of filterKnownTokens(scanPrefixTokens(text, '#'), context.knownSnippetTriggers)) {
-        ranges.push({ start: token.start, end: token.end, style: 'mentionSnippet' });
     }
 
     if (context.attachmentFilenames.length > 0 && text.includes('[')) {

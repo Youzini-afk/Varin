@@ -23,7 +23,6 @@ import { BranchSelector, useBranchOptions } from './BranchSelector';
 import { PiAgentSelector } from './PiAgentSelector';
 import { CommandAutocomplete, type CommandAutocompleteHandle, type CommandInfo } from '@/components/chat/CommandAutocomplete';
 import { FileMentionAutocomplete, type FileMentionHandle } from '@/components/chat/FileMentionAutocomplete';
-import { SnippetAutocomplete, type SnippetAutocompleteHandle } from '@/components/chat/SnippetAutocomplete';
 import { Icon } from "@/components/icon/Icon";
 import { isDesktopShell } from '@/lib/desktop';
 import { useTabletStandalonePwaRuntime } from '@/lib/device';
@@ -716,12 +715,9 @@ const RunGroupCard: React.FC<RunGroupCardProps> = ({
   const [mentionQuery, setMentionQuery] = React.useState('');
   const [showCommandAutocomplete, setShowCommandAutocomplete] = React.useState(false);
   const [commandQuery, setCommandQuery] = React.useState('');
-  const [showSnippetAutocomplete, setShowSnippetAutocomplete] = React.useState(false);
-  const [snippetQuery, setSnippetQuery] = React.useState('');
   const promptTextareaRef = React.useRef<HTMLTextAreaElement>(null);
   const mentionRef = React.useRef<FileMentionHandle>(null);
   const commandRef = React.useRef<CommandAutocompleteHandle>(null);
-  const snippetRef = React.useRef<SnippetAutocompleteHandle>(null);
 
   const handleAddModel = React.useCallback((model: ModelSelectionWithId) => {
     onUpdate(group.id, { models: [...group.models, model] });
@@ -748,7 +744,6 @@ const RunGroupCard: React.FC<RunGroupCardProps> = ({
         setCommandQuery(value.substring(1, commandEnd));
         setShowCommandAutocomplete(true);
         setShowFileMention(false);
-        setShowSnippetAutocomplete(false);
         return;
       }
     }
@@ -756,21 +751,6 @@ const RunGroupCard: React.FC<RunGroupCardProps> = ({
     setShowCommandAutocomplete(false);
 
     const textBeforeCursor = value.substring(0, cursorPosition);
-    const lastHashSymbol = textBeforeCursor.lastIndexOf('#');
-    if (lastHashSymbol !== -1) {
-      const charBefore = lastHashSymbol > 0 ? textBeforeCursor[lastHashSymbol - 1] : null;
-      const textAfterHash = textBeforeCursor.substring(lastHashSymbol + 1);
-      const isWordBoundary = !charBefore || /\s/.test(charBefore);
-      if (isWordBoundary && !textAfterHash.includes(' ') && !textAfterHash.includes('\n')) {
-        setSnippetQuery(textAfterHash);
-        setShowSnippetAutocomplete(true);
-        setShowFileMention(false);
-        return;
-      }
-    }
-
-    setShowSnippetAutocomplete(false);
-
     const lastAtSymbol = textBeforeCursor.lastIndexOf('@');
     if (lastAtSymbol !== -1) {
       const charBefore = lastAtSymbol > 0 ? textBeforeCursor[lastAtSymbol - 1] : null;
@@ -851,7 +831,6 @@ const RunGroupCard: React.FC<RunGroupCardProps> = ({
     setPrompt(nextPrompt);
     setShowCommandAutocomplete(false);
     setCommandQuery('');
-    setShowSnippetAutocomplete(false);
 
     requestAnimationFrame(() => {
       const currentTextarea = promptTextareaRef.current;
@@ -863,29 +842,6 @@ const RunGroupCard: React.FC<RunGroupCardProps> = ({
       updateAutocompleteState(nextPrompt, nextPrompt.length);
     });
   }, [setPrompt, updateAutocompleteState]);
-
-  const handleSnippetSelect = React.useCallback((_snippet: unknown, trigger: string) => {
-    const prompt = group.prompt;
-    const textarea = promptTextareaRef.current;
-    const cursorPosition = textarea?.selectionStart ?? prompt.length;
-    const textBeforeCursor = prompt.substring(0, cursorPosition);
-    const lastHashSymbol = textBeforeCursor.lastIndexOf('#');
-    const startIndex = lastHashSymbol !== -1 ? lastHashSymbol : cursorPosition;
-    const nextPrompt = `${prompt.substring(0, startIndex)}#${trigger} ${prompt.substring(cursorPosition)}`;
-    const nextCursor = startIndex + trigger.length + 2;
-    setPrompt(nextPrompt);
-    setShowSnippetAutocomplete(false);
-    setSnippetQuery('');
-    requestAnimationFrame(() => {
-      const currentTextarea = promptTextareaRef.current;
-      if (currentTextarea) {
-        currentTextarea.selectionStart = nextCursor;
-        currentTextarea.selectionEnd = nextCursor;
-        currentTextarea.focus();
-      }
-      updateAutocompleteState(nextPrompt, nextCursor);
-    });
-  }, [group.prompt, setPrompt, updateAutocompleteState]);
 
   const handlePromptKeyDown = React.useCallback((event: React.KeyboardEvent<HTMLTextAreaElement>) => {
     if (showCommandAutocomplete && commandRef.current) {
@@ -902,14 +858,7 @@ const RunGroupCard: React.FC<RunGroupCardProps> = ({
         mentionRef.current.handleKeyDown(event.key);
       }
     }
-
-    if (showSnippetAutocomplete && snippetRef.current) {
-      if (event.key === 'Enter' || event.key === 'ArrowUp' || event.key === 'ArrowDown' || event.key === 'Escape' || event.key === 'Tab') {
-        event.preventDefault();
-        snippetRef.current.handleKeyDown(event.key);
-      }
-    }
-  }, [showCommandAutocomplete, showFileMention, showSnippetAutocomplete]);
+  }, [showCommandAutocomplete, showFileMention]);
 
   return (
     <div className="rounded-lg border border-border p-3 space-y-3">
@@ -965,16 +914,6 @@ const RunGroupCard: React.FC<RunGroupCardProps> = ({
               onFileSelect={handleFileSelect}
               onAgentSelect={handleAgentSelect}
               onClose={() => setShowFileMention(false)}
-              style={{ left: 0, top: 'auto', bottom: 'calc(100% + 6px)', marginBottom: 0, maxWidth: '100%' }}
-            />
-          ) : null}
-
-          {showSnippetAutocomplete ? (
-            <SnippetAutocomplete
-              ref={snippetRef}
-              searchQuery={snippetQuery}
-              onSnippetSelect={handleSnippetSelect}
-              onClose={() => setShowSnippetAutocomplete(false)}
               style={{ left: 0, top: 'auto', bottom: 'calc(100% + 6px)', marginBottom: 0, maxWidth: '100%' }}
             />
           ) : null}

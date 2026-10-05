@@ -1,8 +1,6 @@
 import React from 'react';
 import { cn, getModifierLabel } from '@/lib/utils';
 import { useUIStore } from '@/stores/useUIStore';
-import { useProjectsStore } from '@/stores/useProjectsStore';
-import { useSnippetsStore } from '@/stores/useSnippetsStore';
 import { usePiProviderStore } from '@/stores/usePiProviderStore';
 import { Tooltip, TooltipTrigger } from '@/components/ui/tooltip';
 import { ErrorBoundary } from '@/components/ui/ErrorBoundary';
@@ -48,7 +46,7 @@ interface SettingsViewProps {
   initialMobileStage?: MobileStage;
 }
 
-const NAV_GROUP_ORDER = ['general', 'projects', 'harness', 'pi', 'content'] as const;
+const NAV_GROUP_ORDER = ['general', 'projects', 'harness', 'pi'] as const;
 
 const ADD_PROVIDER_SETTINGS_ID = '__add_provider__';
 
@@ -68,17 +66,6 @@ function isPageAvailable(page: SettingsPageMeta, ctx: SettingsRuntimeContext): b
   return page.isAvailable(ctx);
 }
 
-function nextUniqueName(baseName: string, existingNames: Iterable<string>): string {
-  const existing = new Set(existingNames);
-  let name = baseName;
-  let counter = 1;
-  while (existing.has(name)) {
-    name = `${baseName}-${counter}`;
-    counter += 1;
-  }
-  return name;
-}
-
 export const SettingsView: React.FC<SettingsViewProps> = ({ onClose, forceMobile, isWindowed, visiblePageSlugs, initialMobileStage = 'nav' }) => {
   const { t } = useI18n();
   const deviceInfo = useDeviceInfo();
@@ -94,7 +81,6 @@ export const SettingsView: React.FC<SettingsViewProps> = ({ onClose, forceMobile
   }, [mcpTargetKey, runtimeTarget]);
 
   const settingsPageRaw = useUIStore((state) => state.settingsPage);
-  const isSettingsDialogOpen = useUIStore((state) => state.isSettingsDialogOpen);
   const setSettingsPage = useUIStore((state) => state.setSettingsPage);
   const settingsSlug = resolveSettingsSlug(settingsPageRaw);
 
@@ -160,19 +146,6 @@ export const SettingsView: React.FC<SettingsViewProps> = ({ onClose, forceMobile
       .filter((page) => isPageAvailable(page, runtimeCtx))
   }, [runtimeCtx, settingsPageRegistrations, visiblePageSlugs]);
 
-  const activeProjectId = useProjectsStore((state) => state.activeProjectId);
-
-  // Load project-scoped content when its page becomes active.
-  React.useEffect(() => {
-    if (!isSettingsDialogOpen && !isWindowed) {
-      return;
-    }
-
-    if (settingsSlug === 'snippets') {
-      void useSnippetsStore.getState().loadSnippets();
-    }
-  }, [activeProjectId, isSettingsDialogOpen, isWindowed, settingsSlug]);
-
   const openPage = React.useCallback((slug: SettingsPageSlug) => {
     setSettingsPage(slug);
     autoNavSlugRef.current = slug;
@@ -209,14 +182,6 @@ export const SettingsView: React.FC<SettingsViewProps> = ({ onClose, forceMobile
   }, [getPageTitle, isDesktopLocalOrigin, isMac, isWindows, isLinux, runtimeCtx, settingsSearchQuery, t, visiblePageSlugs]);
 
   const prepareSettingsSearchTarget = React.useCallback((result: SettingsSearchResult): string => {
-    if (result.id.startsWith('snippets.')) {
-      const store = useSnippetsStore.getState();
-      const name = nextUniqueName('new-snippet', store.snippets.map((snippet) => snippet.name));
-      store.setSnippetDraft({ name, scope: 'global' });
-      store.setSelectedSnippet(name);
-      return result.id === 'snippets.create' ? 'snippets.content' : result.id;
-    }
-
     if (result.id === 'providers.connect') {
       usePiProviderStore.getState().setSelectedProvider(ADD_PROVIDER_SETTINGS_ID);
     }

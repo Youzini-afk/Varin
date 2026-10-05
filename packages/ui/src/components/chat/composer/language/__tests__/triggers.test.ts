@@ -56,24 +56,6 @@ describe('inline skill picker', () => {
     });
 });
 
-describe('snippet picker', () => {
-    test('a hash after whitespace opens the snippet picker', () => {
-        expect(at('use #sig|')).toEqual({ kind: 'snippet', query: 'sig' });
-    });
-
-    test('a hash at the start of the text opens it', () => {
-        expect(at('#sig|')).toEqual({ kind: 'snippet', query: 'sig' });
-    });
-
-    test('an issue reference does not open it', () => {
-        expect(at('issue#42|')).toBeNull();
-    });
-
-    test('a slash outranks a hash when both are candidates', () => {
-        expect(at('#tag /skill|')).toEqual({ kind: 'skill', query: 'skill' });
-    });
-});
-
 describe('mention picker', () => {
     test('an at-sign after whitespace opens the mention picker', () => {
         expect(at('see @src/ap|')).toEqual({ kind: 'mention', query: 'src/ap' });
@@ -122,6 +104,8 @@ describe('precedence and disabling', () => {
 
     test('plain prose triggers nothing', () => {
         expect(at('just typing a sentence|')).toBeNull();
+        expect(at('use #sig|')).toBeNull();
+        expect(at('#sig|')).toBeNull();
         expect(at('|')).toBeNull();
     });
 });

@@ -46,7 +46,6 @@ export const EMPTY_CONTEXT: ComposerLanguageContext = {
     knownAgentNames: new Set(),
     confirmedMentions: new Set(),
     knownSlashNames: new Set(),
-    knownSnippetTriggers: new Set(),
     attachmentFilenames: [],
 };
 

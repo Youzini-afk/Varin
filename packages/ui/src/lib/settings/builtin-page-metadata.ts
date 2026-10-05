@@ -17,7 +17,6 @@ export type BuiltinSettingsRenderer =
   | 'remote-instances'
   | 'runtime'
   | 'skills'
-  | 'snippets'
   | 'usage'
   | 'varin:general'
   | 'varin:visual'
@@ -64,7 +63,6 @@ export const BUILTIN_SETTINGS_PAGE_SPECS: readonly BuiltinSettingsPageSpec[] = [
   spec({ slug: 'skills', title: 'Skills', titleKey: 'settings.page.skills.title', group: 'pi', kind: 'split', icon: 'sparkling', order: 45, keywords: ['pi', 'skill', 'skills', 'skill.md', 'markdown', 'package resource'] }, 'skills'),
   spec({ slug: 'plugins', title: 'Pi Packages', titleKey: 'settings.page.plugins.title', group: 'pi', kind: 'single', icon: 'plug-2', order: 47, keywords: ['pi', 'package', 'packages', 'plugin', 'plugins', 'extensions', 'npm', 'git', 'local path'] }, 'plugins'),
   spec({ slug: 'extensions', title: 'Varin Extensions', titleKey: 'settings.page.extensions.title', group: 'pi', kind: 'single', icon: 'plug-2', order: 49, keywords: ['varin', 'extension', 'extensions', 'enable', 'disable', 'capabilities'] }, 'extensions'),
-  spec({ slug: 'snippets', title: 'Snippets', titleKey: 'settings.page.snippets.title', group: 'content', kind: 'split', icon: 'chat-thread', order: 61, keywords: ['prompt', 'templates', 'multi-run', 'strategy', 'approach'] }, 'snippets'),
 ];
 
 export const isBuiltinSettingsPageAvailable = (

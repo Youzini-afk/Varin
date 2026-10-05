@@ -93,7 +93,6 @@ export interface SettingsActionRef {
     | 'service:git' | 'service:tunnel' | 'service:agent-personalization'
     | 'service:extensions' | 'service:agents'
     | 'service:notifications' | 'service:projects' | 'service:remote-instances'
-    | 'service:snippets'
     | 'tool:resource' | 'tool:extension' | 'page:ui';
   /** What the agent can actually do without opening the UI. */
   verbs?: readonly string[];
@@ -1330,20 +1329,6 @@ export const SETTINGS_CATALOG: readonly SettingsCatalogEntry[] = [
         'rtk', 'rtk optimizer', 'command rewrite', 'output compaction',
         'smart truncation',
       ] },
-  },
-  {
-    id: 'snippets.create', category: 'productivity', owner: 'action',
-    actionRef: { domain: 'service:snippets', verbs: [],
-      note: 'snippets are currently owned by the interactive UI' },
-    ui: { page: 'snippets', titleKey: 'settings.snippets.sidebar.actions.create',
-      keywords: ['add', 'new snippet'] },
-  },
-  {
-    id: 'snippets.content', category: 'productivity', owner: 'action',
-    actionRef: { domain: 'service:snippets', verbs: [],
-      note: 'snippet markdown content is currently owned by the interactive UI' },
-    ui: { page: 'snippets', titleKey: 'settings.snippets.page.field.content',
-      keywords: ['markdown', 'prompt', 'template'] },
   },
   {
     id: 'language-support.workspace', category: 'language', owner: 'action',

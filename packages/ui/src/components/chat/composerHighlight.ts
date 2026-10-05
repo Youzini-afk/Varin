@@ -37,7 +37,7 @@ type MentionKind = 'file' | 'agent';
 export interface HighlightRange {
     start: number;
     end: number;
-    style: HighlightStyle | 'mentionFile' | 'mentionAgent' | 'mentionCommand' | 'mentionSnippet';
+    style: HighlightStyle | 'mentionFile' | 'mentionAgent' | 'mentionCommand';
     /**
      * Optional explicit class, used by syntax highlighting where the style is
      * resolved dynamically (per language token) rather than from a fixed enum.
@@ -79,7 +79,6 @@ const STYLE_PRIORITY: Record<AnyStyle, number> = {
     mentionFile: 100,
     mentionAgent: 100,
     mentionCommand: 100,
-    mentionSnippet: 100,
     code: 90,
     codeFence: 90,
     // A bare path is a visual aid, not a reference: an `@mention` covering the
@@ -102,7 +101,6 @@ const STYLE_CLASS: Record<AnyStyle, string> = {
     mentionFile: 'text-[var(--status-info)]',
     mentionAgent: 'text-[var(--status-success)]',
     mentionCommand: 'text-[var(--primary)]',
-    mentionSnippet: 'text-[var(--status-warning)]',
     code: 'rounded-[3px] bg-[var(--surface-subtle)] text-[var(--markdown-inline-code)]',
     codeFence: 'bg-[var(--surface-subtle)] text-[var(--markdown-inline-code)]',
     // A `~path` is written for the reader's benefit, not to attach anything —

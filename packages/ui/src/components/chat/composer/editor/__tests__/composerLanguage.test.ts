@@ -10,7 +10,6 @@ const context = (overrides: Partial<ComposerLanguageContext> = {}): ComposerLang
     knownAgentNames: new Set(['build']),
     confirmedMentions: new Set(),
     knownSlashNames: new Set(['review']),
-    knownSnippetTriggers: new Set(['sig']),
     attachmentFilenames: [],
     ...overrides,
 });

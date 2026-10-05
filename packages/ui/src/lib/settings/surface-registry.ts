@@ -64,7 +64,7 @@ const pageRegistration = (contribution: SurfaceContribution): SettingsPageRegist
   const badgeKey = stringData(data, 'badgeKey');
   const order = typeof data.order === 'number' && Number.isFinite(data.order) ? data.order : undefined;
   if (!slug || !title || !titleKey || !group || !kind || icon === undefined || order === undefined) return null;
-  if (group !== 'general' && group !== 'projects' && group !== 'harness' && group !== 'pi' && group !== 'content') return null;
+  if (group !== 'general' && group !== 'projects' && group !== 'harness' && group !== 'pi') return null;
   if (kind !== 'single' && kind !== 'split') return null;
   const keywords = Array.isArray(data.keywords)
     ? data.keywords.filter((value): value is string => typeof value === 'string')

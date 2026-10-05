@@ -28,10 +28,6 @@ import {
   type SkillAutocompleteHandle,
 } from '@/components/chat/SkillAutocomplete';
 import {
-  SnippetAutocomplete,
-  type SnippetAutocompleteHandle,
-} from '@/components/chat/SnippetAutocomplete';
-import {
   FileMentionAutocomplete,
   type FileMentionHandle,
 } from '@/components/chat/FileMentionAutocomplete';
@@ -47,8 +43,6 @@ import type { ComposerLanguageContext } from '@/components/chat/composer/languag
 import { getInlineCommentDraftKey, useInlineCommentDraftStore } from '@/stores/useInlineCommentDraftStore';
 import { getRuntimeKey, runtimeFetch } from '@varin/application-client';
 import { useRuntimeAPIs } from '@/hooks/useRuntimeAPIs';
-import type { Snippet } from '@/types/snippet';
-import { useSnippetsStore } from '@/stores/useSnippetsStore';
 import { PiActiveEditorContextSuggestion } from './PiActiveEditorContextSuggestion';
 import { EditorContextAttachmentChips } from '@/components/workbench/EditorContextAttachmentChips';
 import { PiGoalButton } from './PiGoalControls';
@@ -130,7 +124,7 @@ const fileToAttachment = (file: File): Promise<ImageAttachment> => new Promise((
 
 
 type PiComposerAutocomplete = {
-  kind: 'command' | 'mention' | 'skill' | 'snippet';
+  kind: 'command' | 'mention' | 'skill';
   query: string;
 } | null;
 
@@ -215,7 +209,6 @@ export const PiComposer: React.FC<PiComposerProps> = ({
   }, [sessionId]);
   const commandRef = React.useRef<CommandAutocompleteHandle>(null);
   const skillRef = React.useRef<SkillAutocompleteHandle>(null);
-  const snippetRef = React.useRef<SnippetAutocompleteHandle>(null);
   const mentionRef = React.useRef<FileMentionHandle>(null);
   const fileInputRef = React.useRef<HTMLInputElement>(null);
   const pendingHistoryTextRef = React.useRef<string | null>(null);
@@ -259,15 +252,13 @@ export const PiComposer: React.FC<PiComposerProps> = ({
     sending,
   });
   const footerIconButtonClass = 'flex size-8 shrink-0 items-center justify-center rounded-md text-muted-foreground transition-colors hover:bg-interactive-hover hover:text-foreground disabled:cursor-not-allowed disabled:opacity-35';
-  const snippets = useSnippetsStore((state) => state.snippets);
   const languageContext = React.useMemo<ComposerLanguageContext>(() => ({
     attachmentFilenames: [],
     confirmedMentions,
     inputMode: 'normal',
     knownAgentNames,
     knownSlashNames: new Set(varinCommands.map((command) => command.name.toLowerCase())),
-    knownSnippetTriggers: new Set(snippets.flatMap((snippet) => [snippet.name, ...snippet.aliases]).map((value) => value.toLowerCase())),
-  }), [confirmedMentions, knownAgentNames, varinCommands, snippets]);
+  }), [confirmedMentions, knownAgentNames, varinCommands]);
   const modelControls = (
     <div className="flex min-w-0 items-center justify-end gap-2.5">
       <PiComposerModelControls
@@ -304,7 +295,6 @@ export const PiComposer: React.FC<PiComposerProps> = ({
   React.useEffect(() => {
     if (autocomplete?.kind === 'command' && !draft.startsWith('/')) setAutocomplete(null);
     if (autocomplete?.kind === 'skill' && !draft.includes('/')) setAutocomplete(null);
-    if (autocomplete?.kind === 'snippet' && !draft.includes('#')) setAutocomplete(null);
     if (autocomplete?.kind === 'mention' && !draft.includes('@')) setAutocomplete(null);
   }, [autocomplete?.kind, draft]);
 
@@ -424,23 +414,6 @@ export const PiComposer: React.FC<PiComposerProps> = ({
     });
   }, [onChangeDraft]);
 
-  const handleSnippetSelect = React.useCallback((_snippet: Snippet, trigger: string) => {
-    const input = inputRef.current;
-    const cursorPosition = input?.getSelection().end ?? draft.length;
-    const hashIndex = draft.slice(0, cursorPosition).lastIndexOf('#');
-    const startIndex = hashIndex === -1 ? cursorPosition : hashIndex;
-    const value = `${draft.slice(0, startIndex)}#${trigger} ${draft.slice(cursorPosition)}`;
-    onChangeDraft(value);
-    setAutocomplete(null);
-    const nextCursor = startIndex + trigger.length + 2;
-    requestAnimationFrame(() => {
-      const editor = inputRef.current;
-      if (!editor) return;
-      editor.focus();
-      editor.setSelection(nextCursor);
-    });
-  }, [draft, onChangeDraft]);
-
   const handleSkillSelect = React.useCallback((invocation: string) => {
     const input = inputRef.current;
     const cursorPosition = input?.getSelection().end ?? draft.length;
@@ -526,7 +499,6 @@ export const PiComposer: React.FC<PiComposerProps> = ({
     ) {
       if (autocomplete.kind === 'command') commandRef.current?.handleKeyDown(event.key);
       else if (autocomplete.kind === 'skill') skillRef.current?.handleKeyDown(event.key);
-      else if (autocomplete.kind === 'snippet') snippetRef.current?.handleKeyDown(event.key);
       else mentionRef.current?.handleKeyDown(event.key);
       return true;
     }
@@ -694,14 +666,6 @@ export const PiComposer: React.FC<PiComposerProps> = ({
             />
           ) : null}
 
-          {autocomplete?.kind === 'snippet' ? (
-            <SnippetAutocomplete
-              ref={snippetRef}
-              searchQuery={autocomplete.query}
-              onSnippetSelect={handleSnippetSelect}
-              onClose={() => setAutocomplete(null)}
-            />
-          ) : null}
 
           <div data-chat-input-footer="true" className="flex flex-wrap items-center justify-between gap-x-2 gap-y-1 px-2 pb-2 pt-0.5">
             <div className="flex min-w-0 items-center gap-0.5">

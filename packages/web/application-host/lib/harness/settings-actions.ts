@@ -1288,15 +1288,6 @@ const agentPersonalizationAdapter = (deps: SettingsActionDeps): SettingsActionAd
 /* ── registry ───────────────────────────────────────────────────────────── */
 
 export function createSettingsActionRegistry(deps: SettingsActionDeps) {
-  const snippetsAdapter: SettingsActionAdapter = {
-    verbs: [],
-    async describe() {
-      return { unavailable: 'snippets are owned by the interactive UI and have no host action authority' };
-    },
-    async invoke(_ctx, _entry, verb) {
-      return unavailable(`verb "${verb}" is not available through the host snippet owner`);
-    },
-  };
   const adapters = new Map<string, SettingsActionAdapter>([
     ['service:agent-personalization', agentPersonalizationAdapter(deps)],
     ['runtime:providers', providersAdapter(deps)],
@@ -1311,7 +1302,6 @@ export function createSettingsActionRegistry(deps: SettingsActionDeps) {
     ['runtime:language-support', languageSupportAdapter(deps)],
     ['runtime:runtime-update', runtimeUpdateAdapter(deps)],
     ['service:tunnel', tunnelAdapter(deps)],
-    ['service:snippets', snippetsAdapter],
     ['service:notifications', notificationsAdapter()],
   ]);
 

@@ -16,8 +16,6 @@ import { RemoteInstancesPage } from '@/components/sections/remote-instances/Remo
 import { PiRuntimeSettingsPage } from '@/components/sections/runtime/PiRuntimeSettingsPage';
 import { SkillsPage } from '@/components/sections/skills/SkillsPage';
 import { SkillsSidebar } from '@/components/sections/skills/SkillsSidebar';
-import { SnippetsPage } from '@/components/sections/snippets/SnippetsPage';
-import { SnippetsSidebar } from '@/components/sections/snippets/SnippetsSidebar';
 import { UsagePage } from '@/components/sections/usage/UsagePage';
 import { UsageSidebar } from '@/components/sections/usage/UsageSidebar';
 import {
@@ -53,7 +51,6 @@ const implementationFor = (spec: BuiltinSettingsPageSpec): SettingsPageImplement
       case 'remote-instances': implementation = { renderContent: () => <RemoteInstancesPage /> }; break;
       case 'runtime': implementation = { renderContent: () => <PiRuntimeSettingsPage /> }; break;
       case 'skills': implementation = { renderContent: () => <SkillsPage />, renderSidebar: (options) => <SkillsSidebar onItemSelect={options.onItemSelect} /> }; break;
-      case 'snippets': implementation = { renderContent: () => <SnippetsPage />, renderSidebar: (options) => <SnippetsSidebar onItemSelect={options.onItemSelect} /> }; break;
       case 'usage': implementation = { renderContent: () => <UsagePage />, renderSidebar: (options) => <UsageSidebar onItemSelect={options.onItemSelect} /> }; break;
     }
   }

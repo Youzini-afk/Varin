@@ -5,6 +5,9 @@ private runtime protocol and product surfaces still move together.
 
 ## Unreleased
 
+- Remove reusable text snippets and the Library settings group, including `#name` pickers,
+  send-time expansion requests, settings actions, translations and obsolete help pages.
+
 - Remove the Fleet settings workbench, its runtime API, provider aggregation and plugin task bridges.
   Native subagent work remains in the conversation/work overview, and background commands remain in
   chat tool cards and terminals.

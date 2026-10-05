@@ -1,17 +1,5 @@
 /**
- * Which autocomplete a caret position asks for.
- *
- * The composer has four pickers (command, skill, snippet, file/agent mention)
- * and the rule that opens each of them used to be inlined in a single 90-line
- * `updateAutocompleteState` callback, duplicating the boundary logic that
- * `scanPrefixTokens` and `scanMentions` already own. This module answers the
- * one question the composer actually asks — "given the text and the caret,
- * what should be open?" — as a pure function, so the editor layer only has to
- * report the caret and render the result.
- *
- * Exactly one trigger can be active, and order matters: the command palette
- * (a leading `/`) outranks the inline skill picker, which outranks snippets,
- * which outrank mentions. That precedence is the previous behavior, preserved.
+ * Select one picker for the caret: leading command, inline skill, then file/agent mention.
  */
 
 import {
@@ -19,7 +7,7 @@ import {
     type FileMentionAutocompleteInputSource,
 } from '../../fileMentionAutocompleteState';
 
-export type AutocompleteKind = 'command' | 'skill' | 'snippet' | 'mention';
+export type AutocompleteKind = 'command' | 'skill' | 'mention';
 
 export interface AutocompleteTrigger {
     kind: AutocompleteKind;
@@ -38,7 +26,7 @@ export interface TriggerContext {
 
 /**
  * A sigil opens a picker only at a word boundary — the start of the text or
- * directly after whitespace. This mirrors `scanPrefixTokens`, but works
+ * directly after whitespace. This mirrors `scanSlashTokens`, but works
  * backwards from the caret because the token is still being typed.
  */
 const isWordBoundaryBefore = (text: string, index: number): boolean =>
@@ -63,24 +51,22 @@ function matchCommandPalette(value: string, cursorPosition: number): Autocomplet
 }
 
 /**
- * An inline `/skill` or `#snippet` still being typed: the nearest sigil before
+ * An inline `/skill` still being typed: the nearest slash before
  * the caret, at a word boundary, with no separator between it and the caret.
  */
-function matchInlineToken(
+function matchInlineSkill(
     value: string,
     cursorPosition: number,
-    sigil: '/' | '#',
-    kind: AutocompleteKind,
 ): AutocompleteTrigger | null {
     const textBeforeCursor = value.substring(0, cursorPosition);
-    const sigilIndex = textBeforeCursor.lastIndexOf(sigil);
+    const sigilIndex = textBeforeCursor.lastIndexOf('/');
     if (sigilIndex === -1) return null;
     if (!isWordBoundaryBefore(textBeforeCursor, sigilIndex)) return null;
 
     const query = textBeforeCursor.substring(sigilIndex + 1);
     if (query.includes(' ') || query.includes('\n')) return null;
 
-    return { kind, query };
+    return { kind: 'skill', query };
 }
 
 /**
@@ -96,8 +82,7 @@ export function resolveAutocompleteTrigger(
     if (context.inputMode === 'shell') return null;
 
     return matchCommandPalette(value, cursorPosition)
-        ?? matchInlineToken(value, cursorPosition, '/', 'skill')
-        ?? matchInlineToken(value, cursorPosition, '#', 'snippet')
+        ?? matchInlineSkill(value, cursorPosition)
         ?? matchMention(value, cursorPosition, context);
 }
 
