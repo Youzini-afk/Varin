@@ -5,6 +5,9 @@ private runtime protocol and product surfaces still move together.
 
 ## Unreleased
 
+- Correct recovery-storage reporting: show shared catalog size once, omit empty workspace histories,
+  report actual GC file bytes and failures, and hide unsupported history-delete/retention controls.
+
 - Expand work-overview sections by default except Sources. Persist panel visibility and explicit
   section choices per runtime and conversation across navigation, reopen and reload.
 

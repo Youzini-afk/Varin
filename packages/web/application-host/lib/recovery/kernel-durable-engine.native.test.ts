@@ -2,6 +2,7 @@ import fs from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 import { afterEach, expect, it } from "vitest";
+import { parseRecoveryStorageWorkspaceListResult } from "@varin/extension-contract";
 import { createDocumentAuthority, type DocumentAuthority } from "../documents/authority.js";
 import { createKernelClient, type KernelClient } from "../kernel/kernel-client.js";
 import { KernelRecoveryContentStore, KernelRecoveryStore, createKernelRecoveryDirectFacade } from "../kernel/kernel-recovery-store.js";
@@ -39,10 +40,12 @@ it.skipIf(!hasReleaseKernel)("runs combined recovery and undo across a Rust-kern
   const root = await fs.mkdtemp(path.join(os.tmpdir(), "varin-kernel-combined-"));
   roots.push(root);
   const workspace = path.join(root, "workspace");
+  const emptyWorkspace = path.join(root, "empty-workspace");
   const dataDir = path.join(root, "host-data");
   const storageRoot = path.join(root, "kernel-storage");
   const sessionId = "durable-combined-session";
   await fs.mkdir(workspace, { recursive: true });
+  await fs.mkdir(emptyWorkspace, { recursive: true });
   const note = path.join(workspace, "note.txt");
   await fs.writeFile(note, "before\n");
 
@@ -50,11 +53,12 @@ it.skipIf(!hasReleaseKernel)("runs combined recovery and undo across a Rust-kern
   let loseNavigationResponse = true;
   const documents = createDocumentAuthority({
     hostId: "durable-combined-host", dataDir,
-    isAllowedRoot: async (candidate) => candidate === await fs.realpath(workspace),
+    isAllowedRoot: async (candidate) => candidate === await fs.realpath(workspace) || candidate === await fs.realpath(emptyWorkspace),
     isTrusted: async () => true,
   });
   authorities.push(documents);
   const { workspaceId } = await documents.resolveWorkspace({ path: workspace });
+  await documents.resolveWorkspace({ path: emptyWorkspace });
   const navigation: CreateWorkspaceRecoveryEngineOptions["sessionNavigation"] = {
     prepare: async () => ({
       expectedLeafId: leaf,
@@ -87,7 +91,10 @@ it.skipIf(!hasReleaseKernel)("runs combined recovery and undo across a Rust-kern
     adapter.bindFileStore(content);
     const store = new KernelRecoveryStore(adapter, content);
     const base = createWorkspaceRecoveryEngine({ authorityId: "durable-combined-host", dataDir, documents, durableRecoveryStore: store, fileStore: content, sessionNavigation: navigation });
-    const engine = createKernelRecoveryDirectFacade(base, store);
+    const engine = createKernelRecoveryDirectFacade(base, store, {
+      authorityId: "durable-combined-host",
+      listWorkspaceRegistrations: () => documents.listWorkspaceRegistrations(),
+    });
     documents.bindDurableMutationStorage((id, operation) => engine.withWorkspaceStorage(
       id, { mode: "exclusive", purpose: "document-mutation", create: true }, operation,
     ));
@@ -97,8 +104,9 @@ it.skipIf(!hasReleaseKernel)("runs combined recovery and undo across a Rust-kern
   let runtime = await open("cache-first");
   expect(await runtime.engine.storageStatus(workspaceId)).toMatchObject({
     status: "ready",
-    storage: { location: { mode: "application-data" }, locationSource: "global", state: "ready" },
+    storage: { scope: "host", location: { mode: "application-data" }, locationSource: "global", state: "ready" },
   });
+  expect(await runtime.engine.listStorageWorkspaces()).toEqual({ status: "ready", workspaces: [] });
   expect(await runtime.engine.status(workspaceId)).toMatchObject({
     status: "ready",
     capabilities: { storageManagement: false },
@@ -136,6 +144,16 @@ it.skipIf(!hasReleaseKernel)("runs combined recovery and undo across a Rust-kern
     mutationObserved: true, observationComplete: true, observedResourceIds: ["note.txt"],
     provenance: "caused-by", workspaceId,
   })).toMatchObject({ status: "ready", binding: { status: "ready", unrecordedResourceIds: [] } });
+
+  const inventory = parseRecoveryStorageWorkspaceListResult(await runtime.engine.listStorageWorkspaces());
+  if (inventory.status !== "ready") throw new Error(inventory.failure.message);
+  expect(inventory.workspaces.map((item) => item.workspaceId)).toEqual([workspaceId]);
+  const history = inventory.workspaces[0]!;
+  expect(history.checkpointCount).toBe(1);
+  expect(history.byteLength).toBeUndefined();
+  expect(history.objectCount).toBeUndefined();
+  expect(history.lastActivityAt).not.toBeNull();
+  expect(await runtime.engine.cleanupStorage({ workspaceId })).toMatchObject({ status: "ready", result: { status: "complete" } });
 
   const prepared = await runtime.engine.prepareCombinedRecovery({ entryId: "user-1", sessionId, workspaceId });
   expect(prepared).toMatchObject({ status: "ready", plan: { affectedPaths: ["note.txt"], coverage: "ready" } });

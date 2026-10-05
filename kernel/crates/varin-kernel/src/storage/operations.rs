@@ -195,10 +195,12 @@ pub(super) fn idempotent(
     if let Some(result) = storage.operation_existing(operation_id, kind, &params_hash)? {
         return Ok(result);
     }
-    if kind == "storage.gc" {
+    let prior_cleanup = if kind == "storage.gc" {
         storage.sweep_orphan_objects()?;
-        let _ = storage.drain_gc_files()?;
-    }
+        Some(storage.drain_gc_files()?)
+    } else {
+        None
+    };
     storage.conn.execute(
         "DELETE FROM operations WHERE operation_id = ?1 AND state = 'failed'",
         params![operation_id],
@@ -221,16 +223,28 @@ pub(super) fn idempotent(
                 let cleanup = storage.drain_gc_files()?;
                 let mut enriched = result.clone();
                 if let Some(object) = enriched.as_object_mut() {
-                    let deleted = cleanup.get("deleted").cloned().unwrap_or_else(|| json!([]));
-                    let failures = cleanup
-                        .get("failures")
-                        .cloned()
-                        .unwrap_or_else(|| json!([]));
-                    object.insert(
-                        "deletedBlobs".to_string(),
-                        json!(deleted.as_array().map_or(0, Vec::len)),
-                    );
-                    object.insert("cleanupFailures".to_string(), failures);
+                    let deleted = cleanup
+                        .get("deleted")
+                        .and_then(Value::as_array)
+                        .map_or(0, Vec::len)
+                        + prior_cleanup
+                            .as_ref()
+                            .and_then(|prior| prior.get("deleted"))
+                            .and_then(Value::as_array)
+                            .map_or(0, Vec::len);
+                    let reclaimed_bytes = cleanup
+                        .get("byteLengthReclaimed")
+                        .and_then(Value::as_u64)
+                        .unwrap_or(0)
+                        + prior_cleanup
+                            .as_ref()
+                            .and_then(|prior| prior.get("byteLengthReclaimed"))
+                            .and_then(Value::as_u64)
+                            .unwrap_or(0);
+                    let (_, failures) = storage.cleanup_status()?;
+                    object.insert("deletedBlobs".to_string(), json!(deleted));
+                    object.insert("byteLengthReclaimed".to_string(), json!(reclaimed_bytes));
+                    object.insert("cleanupFailures".to_string(), json!(failures));
                 }
                 storage.conn.execute(
                     "UPDATE operations SET result_json = ?2, updated_at = ?3 WHERE operation_id = ?1",

@@ -9,6 +9,7 @@ impl Storage {
             .query_map([], |row| Ok((row.get(0)?, row.get(1)?)))?
             .collect::<Result<_, _>>()?;
         let mut deleted = Vec::new();
+        let mut reclaimed_bytes = 0_u64;
         let mut failures = Vec::new();
         for (hash, raw_path) in rows {
             // An object may have been installed again after an earlier cleanup
@@ -65,8 +66,24 @@ impl Storage {
                 failures.push(message);
                 continue;
             }
+            let byte_length = match fs::symlink_metadata(&derived) {
+                Ok(metadata) => metadata.len(),
+                Err(error) if error.kind() == io::ErrorKind::NotFound => 0,
+                Err(error) => {
+                    let message = format!("{hash}: unable to measure pending object: {error}");
+                    self.conn.execute(
+                        "UPDATE pending_gc_files SET state = 'failed', last_error = ?2 WHERE hash = ?1",
+                        params![hash, message],
+                    )?;
+                    failures.push(message);
+                    continue;
+                }
+            };
             match fs::remove_file(&derived) {
-                Ok(()) => deleted.push(hash.clone()),
+                Ok(()) => {
+                    deleted.push(hash.clone());
+                    reclaimed_bytes += byte_length;
+                }
                 Err(error) if error.kind() == io::ErrorKind::NotFound => deleted.push(hash.clone()),
                 Err(error) => {
                     let message = format!("{hash}: {error}");
@@ -84,7 +101,9 @@ impl Storage {
                 params![hash],
             )?;
         }
-        Ok(json!({"deleted": deleted, "failures": failures}))
+        Ok(
+            json!({"deleted": deleted, "failures": failures, "byteLengthReclaimed": reclaimed_bytes}),
+        )
     }
 
     pub(super) fn sweep_orphan_objects(&mut self) -> Result<(), KernelError> {

@@ -4022,4 +4022,10 @@ export const settingsDict = {
   'settings.page.harness.nextStep.title': 'Next-step suggestions',
   'settings.page.harness.nextStep.enabled': 'Suggest possible next user messages',
   'settings.page.harness.nextStep.description': 'Uses a dedicated user-selected model once after a settled agent turn. Disabled by default.',
+  "settings.varin.recovery.storage.sharedTitle": "Спільна база даних",
+  "settings.varin.recovery.storage.sharedSummary": "База даних: {bytes} · {count} об’єктів вмісту",
+  "settings.varin.recovery.storage.sharedDescription": "Відновлення файлів і версії робочих просторів використовують це спільне сховище. Розмір бази не є обсягом даних, які можна видалити.",
+  "settings.varin.recovery.storage.historyDescription": "Показано лише робочі простори зі збереженою історією відновлення. Очищення зберігає контрольні точки та версії, на які є посилання.",
+  "settings.varin.recovery.storage.cleanupShared": "Очистити вміст без посилань",
+  "settings.varin.recovery.storage.cleanupNothing": "Немає вмісту для звільнення. Контрольні точки та версії, на які є посилання, зберігаються.",
 } as const;

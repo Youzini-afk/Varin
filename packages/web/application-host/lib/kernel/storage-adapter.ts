@@ -1845,7 +1845,13 @@ export class KernelStorageAdapter {
       collectUnreachableObjects: async () => {
         const maintenance = await this.context(workspaceId, "recovery-maintenance", { owningWorkspace: workspaceId, executionWorkspace: workspaceId, pathScopes: [""], capabilities: ["recovery.maintenance", "storage.gc"] });
         const result = await maintenance.client.gc(`kernel-gc:${workspaceId}:${randomUUID()}`);
-        return { byteLengthReclaimed: Number(result.byteLengthReclaimed ?? 0), objectsDeleted: Number(result.deletedBlobs ?? result.objectsDeleted ?? 0) };
+        if (Array.isArray(result.cleanupFailures) && result.cleanupFailures.length > 0) {
+          throw new Error(`Kernel object cleanup failed: ${result.cleanupFailures.join('; ')}`);
+        }
+        if (typeof result.byteLengthReclaimed !== 'number' || typeof result.deletedBlobs !== 'number') {
+          throw new Error('Kernel object cleanup returned no reclaimed-byte or deletion receipt');
+        }
+        return { byteLengthReclaimed: result.byteLengthReclaimed, objectsDeleted: result.deletedBlobs };
       },
       ...(this.options.durableRecoveryStore ? { durableRecoveryStore: this.options.durableRecoveryStore } : {}),
       records,

@@ -4069,4 +4069,10 @@ export const settingsDict = {
   'settings.page.harness.nextStep.title': '下一步选择',
   'settings.page.harness.nextStep.enabled': '生成可能的下一步用户消息',
   'settings.page.harness.nextStep.description': '每轮代理完成后使用指定模型请求一次。默认关闭。',
+  "settings.varin.recovery.storage.sharedTitle": "共享数据库",
+  "settings.varin.recovery.storage.sharedSummary": "数据库 {bytes} · {count} 个内容对象",
+  "settings.varin.recovery.storage.sharedDescription": "文件恢复与工作区版本等功能共用此存储。这是数据库大小，不是可清理的垃圾量。",
+  "settings.varin.recovery.storage.historyDescription": "这里只显示仍有恢复历史的工作区。清理会保留被引用的检查点和工作区版本。",
+  "settings.varin.recovery.storage.cleanupShared": "清理未引用内容",
+  "settings.varin.recovery.storage.cleanupNothing": "没有需要回收的内容。被引用的检查点和工作区版本会保留。",
 } as const;

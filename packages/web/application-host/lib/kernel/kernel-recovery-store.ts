@@ -884,6 +884,7 @@ export const createKernelRecoveryDirectFacade = (
       ?? (workspaceId ? (await store.workspaceStorageContext(workspaceId)).identity.authorityId : "kernel");
     return {
       authorityId,
+      scope: "host" as const,
       byteLength: Number(health.catalogBytes ?? 0) + Number(health.walBytes ?? 0),
       catalog: { currentSchemaVersion: 1, retiredCatalogCount: 0, state: "ready" as const },
       checkpointCount: checkpoints.length,
@@ -900,30 +901,32 @@ export const createKernelRecoveryDirectFacade = (
   facade.storageStatus = async (workspaceId) => ({ status: "ready", storage: await storageStatus(workspaceId) });
   facade.listStorageWorkspaces = async () => {
     const registrations = await options.listWorkspaceRegistrations?.() ?? [];
+    const storage = await storageStatus();
     const workspaces = await Promise.all(registrations.map(async (registration) => {
-      const storage = await storageStatus(registration.workspaceId);
-      const operations = await store.listOperations(registration.workspaceId);
-      const lastActivityAt = operations.map((operation) => operation.updatedAt)
+      const [checkpoints, operations] = await Promise.all([
+        store.listCheckpoints(registration.workspaceId),
+        store.listOperations(registration.workspaceId),
+      ]);
+      if (checkpoints.length === 0 && operations.length === 0) return null;
+      const lastActivityAt = [...checkpoints.map((checkpoint) => checkpoint.createdAt), ...operations.map((operation) => operation.updatedAt)]
         .filter((value): value is string => typeof value === "string")
         .sort()
         .at(-1) ?? null;
       return {
-        byteLength: storage.byteLength,
         canonicalRoot: registration.canonicalPath,
         catalog: storage.catalog,
-        checkpointCount: storage.checkpointCount,
+        checkpointCount: checkpoints.length,
         lastActivityAt,
         location: storage.location,
         locationSource: storage.locationSource,
         migrationRequired: false,
-        objectCount: storage.objectCount,
         state: storage.state,
         storageAvailable: true,
         workspaceAvailable: true,
         workspaceId: registration.workspaceId,
       };
     }));
-    return { status: "ready", workspaces };
+    return { status: "ready", workspaces: workspaces.filter((workspace) => workspace !== null) };
   };
   facade.retentionStatus = async (workspaceId) => ({
     status: "ready",
@@ -946,7 +949,8 @@ export const createKernelRecoveryDirectFacade = (
   facade.getStorageMove = async () => unavailable("Rust recovery storage does not create standalone move operations");
   facade.cleanupStorage = async (input) => {
     const context = await store.workspaceStorageContext(input.workspaceId);
-    const collected = await context.collectUnreachableObjects?.() ?? { byteLengthReclaimed: 0, objectsDeleted: 0 };
+    if (!context.collectUnreachableObjects) return unavailable("Kernel object cleanup is unavailable");
+    const collected = await context.collectUnreachableObjects();
     return {
       status: "ready",
       result: {

@@ -883,6 +883,7 @@ export const createWorkspaceRecoveryEngine = (options: CreateWorkspaceRecoveryEn
     ]) as [{ catalogBytes?: number; walBytes?: number; blobs?: number }, WorkspaceRecoveryCheckpointSummary[]];
     return {
       authorityId,
+      scope: "host" as const,
       byteLength: Number(health.catalogBytes ?? 0) + Number(health.walBytes ?? 0),
       catalog: { currentSchemaVersion: 1, retiredCatalogCount: 0, state: "ready" as const },
       checkpointCount: checkpoints.length,
@@ -924,7 +925,8 @@ export const createWorkspaceRecoveryEngine = (options: CreateWorkspaceRecoveryEn
     }),
     clearStorageLocationOverride: async () => unavailable("Rust recovery storage has no workspace location override"),
     cleanupStorage: (input) => safe(async () => {
-      const collected = await durable.collectUnreachableObjects?.(input.workspaceId) ?? { byteLengthReclaimed: 0, objectsDeleted: 0 };
+      if (!durable.collectUnreachableObjects) return unavailable("Kernel object cleanup is unavailable");
+      const collected = await durable.collectUnreachableObjects(input.workspaceId);
       return {
         status: "ready",
         result: {
@@ -963,28 +965,31 @@ export const createWorkspaceRecoveryEngine = (options: CreateWorkspaceRecoveryEn
         status: "ready",
       };
     }),
-    listStorageWorkspaces: () => safe(async () => ({
-      status: "ready",
-      workspaces: await Promise.all((await documents.listWorkspaceRegistrations()).map(async (registration) => {
-        const status = await storage(registration.workspaceId);
-        const operations = await durable.listOperations(registration.workspaceId);
+    listStorageWorkspaces: () => safe(async () => {
+      const status = await storage();
+      const workspaces = await Promise.all((await documents.listWorkspaceRegistrations()).map(async (registration) => {
+        const [checkpoints, operations] = await Promise.all([
+          durable.listCheckpoints(registration.workspaceId),
+          durable.listOperations(registration.workspaceId),
+        ]);
+        if (checkpoints.length === 0 && operations.length === 0) return null;
         return {
-          byteLength: status.byteLength,
           canonicalRoot: registration.canonicalPath,
           catalog: status.catalog,
-          checkpointCount: status.checkpointCount,
-          lastActivityAt: operations.map((value) => value.updatedAt).filter((value): value is string => typeof value === "string").sort().at(-1) ?? null,
+          checkpointCount: checkpoints.length,
+          lastActivityAt: [...checkpoints.map((checkpoint) => checkpoint.createdAt), ...operations.map((value) => value.updatedAt)]
+            .filter((value): value is string => typeof value === "string").sort().at(-1) ?? null,
           location: status.location,
           locationSource: status.locationSource,
           migrationRequired: false,
-          objectCount: status.objectCount,
           state: status.state,
           storageAvailable: true,
           workspaceAvailable: true,
           workspaceId: registration.workspaceId,
         };
-      })),
-    })),
+      }));
+      return { status: "ready", workspaces: workspaces.filter((workspace) => workspace !== null) };
+    }),
     prepareCombinedRecovery: (input) => safe(async () => ({ plan: await runWorkspace(input.workspaceId, () => prepareCombined(input)), status: "ready" })),
     prepareCombinedUndo: (operationId) => safe(async () => {
       const located = await locate(operationId);

@@ -202,6 +202,8 @@ export interface RecoveryCatalogStatus {
 
 export interface RecoveryStorageStatus {
   authorityId: string;
+  /** Host scope counts shared catalog storage, not this workspace's retained history. */
+  scope?: "host" | "workspace";
   byteLength: number;
   catalog: RecoveryCatalogStatus;
   checkpointCount: number;
@@ -217,7 +219,8 @@ export interface RecoveryStorageStatus {
 
 export interface SetRecoveryStorageLocationInput { location: RecoveryStorageLocation; workspaceId: string }
 export interface RecoveryStorageWorkspaceSummary {
-  byteLength: number;
+  /** Omitted when the provider cannot attribute shared physical storage to one workspace. */
+  byteLength?: number;
   catalog: RecoveryCatalogStatus;
   canonicalRoot: string;
   checkpointCount: number;
@@ -226,7 +229,7 @@ export interface RecoveryStorageWorkspaceSummary {
   location: RecoveryStorageLocation;
   locationSource: "global" | "workspace";
   migrationRequired: boolean;
-  objectCount: number;
+  objectCount?: number;
   state: RecoveryStorageStatus["state"] | "unavailable";
   storageAvailable: boolean;
   workspaceAvailable: boolean;
@@ -574,6 +577,7 @@ export const parseRecoveryRetentionStatus = (value: unknown): RecoveryRetentionS
 export const parseRecoveryStorageStatus = (value: unknown): RecoveryStorageStatus => {
   const raw = record(value, "Recovery storage status"); const encryption = record(raw.encryption, "storage.encryption");
   return {
+    ...(raw.scope === undefined ? {} : { scope: oneOf(raw.scope, ["host", "workspace"] as const, "storage.scope") }),
     authorityId: text(raw.authorityId, "storage.authorityId"), byteLength: count(raw.byteLength, "storage.byteLength"), catalog: parseRecoveryCatalogStatus(raw.catalog), checkpointCount: count(raw.checkpointCount, "storage.checkpointCount"),
     encryption: { available: bool(encryption.available, "storage.encryption.available"), enabled: bool(encryption.enabled, "storage.encryption.enabled") },
     location: parseRecoveryStorageLocation(raw.location), locationSource: oneOf(raw.locationSource, ["global", "workspace"] as const, "storage.locationSource"),
@@ -584,10 +588,10 @@ export const parseRecoveryStorageStatus = (value: unknown): RecoveryStorageStatu
 export const parseRecoveryStorageWorkspaceSummary = (value: unknown): RecoveryStorageWorkspaceSummary => {
   const raw = record(value, "Recovery storage workspace summary");
   return {
-    byteLength: count(raw.byteLength, "workspace.byteLength"), canonicalRoot: text(raw.canonicalRoot, "workspace.canonicalRoot"), catalog: parseRecoveryCatalogStatus(raw.catalog), checkpointCount: count(raw.checkpointCount, "workspace.checkpointCount"),
+    ...(raw.byteLength === undefined ? {} : { byteLength: count(raw.byteLength, "workspace.byteLength") }), canonicalRoot: text(raw.canonicalRoot, "workspace.canonicalRoot"), catalog: parseRecoveryCatalogStatus(raw.catalog), checkpointCount: count(raw.checkpointCount, "workspace.checkpointCount"),
     lastActivityAt: raw.lastActivityAt === null ? null : isoTimestamp(raw.lastActivityAt, "workspace.lastActivityAt"), location: parseRecoveryStorageLocation(raw.location),
     locationSource: oneOf(raw.locationSource, ["global", "workspace"] as const, "workspace.locationSource"), migrationRequired: bool(raw.migrationRequired, "workspace.migrationRequired"),
-    objectCount: count(raw.objectCount, "workspace.objectCount"), state: oneOf(raw.state, ["missing", "ready", "incomplete", "malformed", "corrupt", "unavailable"] as const, "workspace.state"),
+    ...(raw.objectCount === undefined ? {} : { objectCount: count(raw.objectCount, "workspace.objectCount") }), state: oneOf(raw.state, ["missing", "ready", "incomplete", "malformed", "corrupt", "unavailable"] as const, "workspace.state"),
     storageAvailable: bool(raw.storageAvailable, "workspace.storageAvailable"), workspaceAvailable: bool(raw.workspaceAvailable, "workspace.workspaceAvailable"), workspaceId: text(raw.workspaceId, "workspace.workspaceId"),
     ...(raw.failure === undefined ? {} : { failure: parseWorkspaceRecoveryFailure(raw.failure) }),
   };

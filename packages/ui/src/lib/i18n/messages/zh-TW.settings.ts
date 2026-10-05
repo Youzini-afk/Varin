@@ -4026,4 +4026,10 @@ export const settingsDict = {
   'settings.page.harness.nextStep.title': '下一步選擇',
   'settings.page.harness.nextStep.enabled': '產生可能的下一步使用者訊息',
   'settings.page.harness.nextStep.description': '每輪代理完成後使用指定模型請求一次。預設關閉。',
+  "settings.varin.recovery.storage.sharedTitle": "共用資料庫",
+  "settings.varin.recovery.storage.sharedSummary": "資料庫 {bytes} · {count} 個內容物件",
+  "settings.varin.recovery.storage.sharedDescription": "檔案還原與工作區版本等功能共用此儲存空間。資料庫大小不代表可清理的資料量。",
+  "settings.varin.recovery.storage.historyDescription": "僅列出仍有還原歷史的工作區。清理會保留被引用的檢查點和工作區版本。",
+  "settings.varin.recovery.storage.cleanupShared": "清理未引用內容",
+  "settings.varin.recovery.storage.cleanupNothing": "沒有需要回收的內容。被引用的檢查點和工作區版本會保留。",
 } as const;

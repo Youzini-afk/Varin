@@ -79,6 +79,15 @@ doing so would split recovery references from the WorkingState/object transactio
 made authoritative. The Recovery settings UI therefore exposes location and migration controls only when the
 selected replacement provider advertises `storageManagement: true`.
 
+The built-in storage status marks its size/object metrics as `scope: "host"`: catalog and WAL bytes
+are shared by kernel domains and are not reclaimable-history bytes for each workspace. The history
+inventory contains only registrations with actual checkpoints or durable recovery operations;
+workspace size/object attribution remains unknown rather than repeating the host totals. The UI
+shows shared database size once and runs shared GC once, without unsupported delete-history or
+retention controls. A zero-reclaim result is distinct from cleanup failure. GC receipts include
+deleted object-file lengths from both prior/orphan cleanup and the committed release pass; the
+Host propagates physical deletion failures instead of reporting successful zero-byte cleanup.
+
 The public recovery v5 contract still permits replacement providers to implement application-data,
 workspace-local, workspace-adjacent, or custom locations. For those providers, transfer and cleanup semantics
 remain provider-owned. They do not grant direct access to the built-in kernel catalog.

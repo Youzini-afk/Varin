@@ -3602,4 +3602,10 @@ export const settingsDict = {
   'settings.page.harness.nextStep.title': 'Next-step suggestions',
   'settings.page.harness.nextStep.enabled': 'Suggest possible next user messages',
   'settings.page.harness.nextStep.description': 'Uses a dedicated user-selected model once after a settled agent turn. Disabled by default.',
+  "settings.varin.recovery.storage.sharedTitle": "共有データベース",
+  "settings.varin.recovery.storage.sharedSummary": "データベース {bytes} · コンテンツオブジェクト {count} 個",
+  "settings.varin.recovery.storage.sharedDescription": "ファイルの復元やワークスペースのバージョンがこのストレージを共有します。データベースのサイズは、削除して解放できる容量ではありません。",
+  "settings.varin.recovery.storage.historyDescription": "復元履歴が残っているワークスペースのみ表示します。参照されているチェックポイントとバージョンは保持されます。",
+  "settings.varin.recovery.storage.cleanupShared": "未参照のコンテンツを削除",
+  "settings.varin.recovery.storage.cleanupNothing": "解放するコンテンツはありません。参照されているチェックポイントとバージョンは保持されます。",
 } as const;

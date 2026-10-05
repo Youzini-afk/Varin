@@ -4025,4 +4025,10 @@ export const settingsDict = {
   'settings.page.harness.nextStep.title': 'Next-step suggestions',
   'settings.page.harness.nextStep.enabled': 'Suggest possible next user messages',
   'settings.page.harness.nextStep.description': 'Uses a dedicated user-selected model once after a settled agent turn. Disabled by default.',
+  "settings.varin.recovery.storage.sharedTitle": "공유 데이터베이스",
+  "settings.varin.recovery.storage.sharedSummary": "데이터베이스 {bytes} · 콘텐츠 객체 {count}개",
+  "settings.varin.recovery.storage.sharedDescription": "파일 복구와 작업 공간 버전이 이 저장소를 공유합니다. 데이터베이스 크기는 회수 가능한 데이터의 양이 아닙니다.",
+  "settings.varin.recovery.storage.historyDescription": "복구 기록이 남아 있는 작업 공간만 표시합니다. 정리해도 참조된 체크포인트와 작업 공간 버전은 유지됩니다.",
+  "settings.varin.recovery.storage.cleanupShared": "참조되지 않은 콘텐츠 정리",
+  "settings.varin.recovery.storage.cleanupNothing": "회수할 콘텐츠가 없습니다. 참조된 체크포인트와 작업 공간 버전은 유지됩니다.",
 } as const;

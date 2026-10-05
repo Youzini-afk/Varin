@@ -302,7 +302,9 @@ export const RecoverySettings: React.FC = () => {
       toast.success(t(
         action === 'migrate'
           ? 'settings.varin.recovery.storage.migrateComplete'
-          : 'settings.varin.recovery.storage.cleanupAllComplete',
+          : reclaimedBytes === 0
+            ? 'settings.varin.recovery.storage.cleanupNothing'
+            : 'settings.varin.recovery.storage.cleanupAllComplete',
         { bytes: formatWorkspaceArchiveBytes(reclaimedBytes), count: targets.length },
       ));
       await refresh();
@@ -341,13 +343,19 @@ export const RecoverySettings: React.FC = () => {
   }, [refresh, t]);
 
   const cleanup = React.useCallback(async () => {
-    if (!workspaceId) return;
+    const cleanupWorkspaceId = workspaceId ?? storageWorkspaces.find((workspace) => workspace.storageAvailable && workspace.workspaceAvailable)?.workspaceId;
+    if (!cleanupWorkspaceId) return;
     setBusy('cleanup');
     try {
       const result = requireWorkspaceRecoveryResult(
-        await getWorkspaceRecoveryAPI().cleanupStorage({ workspaceId }),
+        await getWorkspaceRecoveryAPI().cleanupStorage({ workspaceId: cleanupWorkspaceId }),
       );
-      toast.success(t('settings.varin.recovery.storage.cleanupComplete', {
+      if (result.result.status !== 'complete') {
+        throw new Error(result.result.failures[0]?.message || t('settings.varin.recovery.storage.maintenanceFailed'));
+      }
+      toast.success(t(result.result.byteLengthReclaimed === 0
+        ? 'settings.varin.recovery.storage.cleanupNothing'
+        : 'settings.varin.recovery.storage.cleanupComplete', {
         bytes: formatWorkspaceArchiveBytes(result.result.byteLengthReclaimed),
       }));
       await refresh();
@@ -356,7 +364,7 @@ export const RecoverySettings: React.FC = () => {
     } finally {
       setBusy(null);
     }
-  }, [refresh, t, workspaceId]);
+  }, [refresh, storageWorkspaces, t, workspaceId]);
 
   const deleteHistory = React.useCallback(async () => {
     if (!workspaceId || typeof window === 'undefined') return;
@@ -399,7 +407,8 @@ export const RecoverySettings: React.FC = () => {
 
   const visibleStorageWorkspaces = React.useMemo(() => storageWorkspaces.filter((workspace) => (
     workspace.checkpointCount > 0
-    || workspace.objectCount > 0
+    || (workspace.objectCount ?? 0) > 0
+    || workspace.lastActivityAt !== null
     || workspace.locationSource === 'workspace'
   )), [storageWorkspaces]);
   const migratableStorageWorkspaces = React.useMemo(() => visibleStorageWorkspaces.filter((workspace) => (
@@ -410,10 +419,12 @@ export const RecoverySettings: React.FC = () => {
   )), [visibleStorageWorkspaces]);
   const cleanableStorageWorkspaces = React.useMemo(() => visibleStorageWorkspaces.filter((workspace) => (
     workspace.storageAvailable
-    && (workspace.checkpointCount > 0 || workspace.objectCount > 0)
+    && (workspace.checkpointCount > 0 || (workspace.objectCount ?? 0) > 0)
   )), [visibleStorageWorkspaces]);
 
   const storageManagement = status?.capabilities.storageManagement === true;
+  const sharedStorage = globalStatus?.scope === 'host';
+  const canCleanupShared = Boolean(workspaceId || storageWorkspaces.some((workspace) => workspace.storageAvailable && workspace.workspaceAvailable));
   const selectedLocation = status?.storage.location;
   const globalLocationChanged = globalStatus
     ? globalStatus.location.mode !== globalStorageMode
@@ -526,6 +537,23 @@ export const RecoverySettings: React.FC = () => {
           </div>
         ) : null}
 
+        {sharedStorage && globalStatus ? (
+          <div className="space-y-2 rounded-xl border border-border/60 p-3">
+            <h4 className="typography-ui-label font-medium text-foreground">
+              {t('settings.varin.recovery.storage.sharedTitle')}
+            </h4>
+            <p className="typography-meta text-muted-foreground">
+              {t('settings.varin.recovery.storage.sharedSummary', {
+                bytes: formatWorkspaceArchiveBytes(globalStatus.byteLength),
+                count: globalStatus.objectCount,
+              })}
+            </p>
+            <p className="typography-meta text-muted-foreground">
+              {t('settings.varin.recovery.storage.sharedDescription')}
+            </p>
+          </div>
+        ) : null}
+
         <div className="space-y-3 rounded-xl border border-border/60 p-3">
           <div className="flex flex-wrap items-start justify-between gap-3">
             <div>
@@ -533,7 +561,9 @@ export const RecoverySettings: React.FC = () => {
                 {t('settings.varin.recovery.storage.managerTitle')}
               </h4>
               <p className="mt-1 typography-meta text-muted-foreground">
-                {t('settings.varin.recovery.storage.managerDescription')}
+                {t(storageManagement
+                  ? 'settings.varin.recovery.storage.managerDescription'
+                  : 'settings.varin.recovery.storage.historyDescription')}
               </p>
             </div>
             <div className="flex flex-wrap gap-2">
@@ -552,10 +582,10 @@ export const RecoverySettings: React.FC = () => {
                 type="button"
                 variant="outline"
                 size="sm"
-                disabled={maintenanceBusy !== null || cleanableStorageWorkspaces.length === 0}
-                onClick={() => void maintainStorageWorkspaces('cleanup', cleanableStorageWorkspaces)}
+                disabled={busy !== null || maintenanceBusy !== null || (sharedStorage ? !canCleanupShared : cleanableStorageWorkspaces.length === 0)}
+                onClick={() => void (sharedStorage ? cleanup() : maintainStorageWorkspaces('cleanup', cleanableStorageWorkspaces))}
               >
-                {t('settings.varin.recovery.storage.cleanupAll')}
+                {t(sharedStorage ? 'settings.varin.recovery.storage.cleanupShared' : 'settings.varin.recovery.storage.cleanupAll')}
               </Button>
             </div>
           </div>
@@ -583,8 +613,9 @@ export const RecoverySettings: React.FC = () => {
                             : t('settings.varin.recovery.storage.neverUsed')}
                           {' · '}
                           {t('settings.varin.recovery.storage.checkpointCount', { count: workspace.checkpointCount })}
-                          {' · '}
-                          {formatWorkspaceArchiveBytes(workspace.byteLength)}
+                          {workspace.byteLength === undefined ? null : (
+                            <> · {formatWorkspaceArchiveBytes(workspace.byteLength)}</>
+                          )}
                         </p>
                       </div>
                       <div className="flex flex-wrap gap-1.5">
@@ -610,7 +641,7 @@ export const RecoverySettings: React.FC = () => {
                         ) : null}
                       </div>
                     </div>
-                    <div className="flex flex-wrap gap-2">
+                    {storageManagement ? <div className="flex flex-wrap gap-2">
                       {storageManagement && workspace.locationSource === 'global' && workspace.migrationRequired ? (
                         <Button
                           type="button"
@@ -630,7 +661,7 @@ export const RecoverySettings: React.FC = () => {
                         size="xs"
                         disabled={maintenanceBusy !== null
                           || !workspace.storageAvailable
-                          || (workspace.checkpointCount === 0 && workspace.objectCount === 0)}
+                          || (workspace.checkpointCount === 0 && (workspace.objectCount ?? 0) === 0)}
                         onClick={() => void maintainStorageWorkspaces('cleanup', [workspace])}
                       >
                         {t('settings.varin.recovery.storage.cleanupOne')}
@@ -641,7 +672,7 @@ export const RecoverySettings: React.FC = () => {
                         size="xs"
                         disabled={maintenanceBusy !== null
                           || !workspace.storageAvailable
-                          || (workspace.checkpointCount === 0 && workspace.objectCount === 0)}
+                          || (workspace.checkpointCount === 0 && (workspace.objectCount ?? 0) === 0)}
                         className="text-[var(--status-error)] hover:text-[var(--status-error)]"
                         onClick={() => void deleteStoredWorkspaceHistory(workspace)}
                       >
@@ -649,7 +680,7 @@ export const RecoverySettings: React.FC = () => {
                           ? t('settings.varin.recovery.storage.working')
                           : t('settings.varin.recovery.storage.deleteStored')}
                       </Button>
-                    </div>
+                    </div> : null}
                   </div>
                 );
               })}
@@ -669,7 +700,7 @@ export const RecoverySettings: React.FC = () => {
           </div>
         ) : null}
 
-        {status ? (
+        {status?.capabilities.retention ? (
           <div className="rounded-xl border border-border/60 p-3">
             <div className="flex flex-wrap items-center gap-x-4 gap-y-2">
               <span className="typography-ui-label font-medium text-foreground">varin.builtin.recovery</span>

@@ -3,6 +3,7 @@ import assert from "node:assert/strict";
 import fs from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
+import { createHash } from "node:crypto";
 import { createKernelClient, KernelClient } from "./kernel-client.js";
 import type { KernelGrantHandle } from "./kernel-client.js";
 import { KernelStorageAdapter } from "./storage-adapter.js";
@@ -367,8 +368,13 @@ test("GC distinguishes durable release from physical cleanup failure and retries
   const failed = await faultedMaintenance.gc("gc-run");
   assert.equal(failed.releasedBlobs, 1);
   assert.equal(failed.deletedBlobs, 0);
+  assert.equal(failed.byteLengthReclaimed, 0);
   assert.equal((failed.cleanupFailures as string[]).length, 1);
   assert.equal((await faulted.health({ deep: true })).integrity, "degraded");
+  const adapter = new KernelStorageAdapter({ client: faultedHost, hostId: "gc-fault-host", storageRoot: root, resolveWorkspaceRoot: async () => root });
+  const context = await adapter.context("gc-workspace", "gc");
+  await assert.rejects(context.collectUnreachableObjects!(), /object cleanup failed/i);
+  await adapter.dispose();
   await faulted.close();
 
   const recoveredHost = createKernelClient({ hostId: "gc-fault-host", storageRoot: root, buildVersion, kernelPath, allowCargoDevRunner: false });
@@ -608,11 +614,22 @@ test("temporary blob owners are independent and have explicit release", async (t
   assert.equal((await client.releaseBlob(first.ownerId)).released, false);
   assert.equal((await client.health()).temporaryObjectOwners, 1);
   await client.deleteBranch({ operationId: "owner-delete", branchId: "owner-branch" });
-  await client.gc("owner-gc-retained");
+  const orphan = Buffer.from("orphan-content");
+  const orphanHash = createHash("sha256").update(orphan).digest("hex");
+  const orphanPath = path.join(root, "objects", orphanHash.slice(0, 2), orphanHash.slice(2));
+  await fs.mkdir(path.dirname(orphanPath), { recursive: true });
+  await fs.writeFile(orphanPath, orphan);
+  const orphanCleanup = await client.gc("owner-gc-retained");
+  assert.equal(orphanCleanup.byteLengthReclaimed, orphan.length);
+  assert.equal(orphanCleanup.deletedBlobs, 1);
+  await assert.rejects(fs.stat(orphanPath), { code: "ENOENT" });
+  assert.deepEqual(await client.gc("owner-gc-retained"), orphanCleanup);
   assert.equal(Buffer.from((await client.getBlob(second.hash, { ownerId: second.ownerId })).bytesBase64, "base64").toString("utf8"), "same-content");
   assert.equal((await client.releaseBlob(second.ownerId)).released, true);
   assert.equal((await client.releaseOperation("owner-put-second")).released, true);
-  await client.gc("owner-gc-released");
+  const releasedCleanup = await client.gc("owner-gc-released");
+  assert.equal(releasedCleanup.byteLengthReclaimed, Buffer.byteLength("same-content"));
+  assert.equal(releasedCleanup.deletedBlobs, 1);
   await assert.rejects(client.getBlob(second.hash, { ownerId: second.ownerId }), /owner|owned|grant/i);
 });
 

@@ -4023,4 +4023,10 @@ export const settingsDict = {
   'settings.page.harness.nextStep.title': 'Next-step suggestions',
   'settings.page.harness.nextStep.enabled': 'Suggest possible next user messages',
   'settings.page.harness.nextStep.description': 'Uses a dedicated user-selected model once after a settled agent turn. Disabled by default.',
+  "settings.varin.recovery.storage.sharedTitle": "Base de datos compartida",
+  "settings.varin.recovery.storage.sharedSummary": "Base de datos: {bytes} · {count} objetos de contenido",
+  "settings.varin.recovery.storage.sharedDescription": "La recuperación de archivos y las versiones del espacio de trabajo comparten este almacenamiento. El tamaño de la base de datos no indica cuánto se puede recuperar.",
+  "settings.varin.recovery.storage.historyDescription": "Solo se muestran espacios de trabajo con historial de recuperación. La limpieza conserva los puntos de control y las versiones que siguen referenciados.",
+  "settings.varin.recovery.storage.cleanupShared": "Limpiar contenido sin referencias",
+  "settings.varin.recovery.storage.cleanupNothing": "No hay contenido que recuperar. Se conservan los puntos de control y las versiones referenciados.",
 } as const;

@@ -4068,4 +4068,10 @@ export const settingsDict = {
   "settings.theme.preset.mono.description": "A monochrome palette built from black, white, and gray.",
   "settings.theme.preset.vitesse.name": "Vitesse",
   "settings.theme.preset.vitesse.description": "Minimal surfaces with subdued green syntax colors.",
+  "settings.varin.recovery.storage.sharedTitle": "Shared database",
+  "settings.varin.recovery.storage.sharedSummary": "Database {bytes} · {count} content objects",
+  "settings.varin.recovery.storage.sharedDescription": "File recovery and workspace versions share this storage. The database size is not the amount of reclaimable data.",
+  "settings.varin.recovery.storage.historyDescription": "Only workspaces with retained recovery history are listed. Cleanup preserves referenced checkpoints and workspace versions.",
+  "settings.varin.recovery.storage.cleanupShared": "Clean unreferenced content",
+  "settings.varin.recovery.storage.cleanupNothing": "No content needs reclaiming. Referenced checkpoints and workspace versions are retained.",
 } as const;
