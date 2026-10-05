@@ -3,7 +3,7 @@ import { rmSync, mkdirSync, existsSync } from "node:fs";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
 import { openWorkspaceKnowledge, type KnowledgeStore } from "../knowledge/store.js";
-import { executeRecall, openUserKnowledgeStore, RECALL_PROMPT_SNIPPET } from "./recall-tool.js";
+import { executeRecall, openUserKnowledgeStore } from "./recall-tool.js";
 
 // Keep scratch stores separate from the source tree.
 const TEST_DIR = join(tmpdir(), "varin-test-recall");
@@ -89,13 +89,6 @@ describe("executeRecall", () => {
     });
     expect(result.text).toContain("(text,");
     expect(result.text).toContain("#");
-  });
-});
-
-describe("RECALL_PROMPT_SNIPPET", () => {
-  it("has prompt snippet", () => {
-    expect(RECALL_PROMPT_SNIPPET).toContain("recall:");
-    expect(RECALL_PROMPT_SNIPPET).toContain("memory");
   });
 });
 

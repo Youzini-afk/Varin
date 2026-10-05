@@ -346,35 +346,6 @@ describe('resolveHighlightSegments', () => {
     });
 });
 
-describe('resolveHighlightSegments — additive styles', () => {
-    /**
-     * A segment carries one class string, so weight and colour cannot be
-     * chosen between: emphasis composes onto whatever construct it sits in.
-     */
-    test('emphasis inside a heading keeps the heading colour and gains weight', () => {
-        const text = '# A **strong** title';
-        const segment = resolveHighlightSegments(text, tokenizeMarkdown(text))
-            .find((candidate) => text.slice(candidate.start, candidate.end) === 'strong');
-        expect(segment!.className.includes('font-semibold')).toBe(true);
-        expect(segment!.className.includes('--syntax-keyword')).toBe(true);
-    });
-
-    test('emphasis on its own still renders over the default text colour', () => {
-        const text = '*slanted*';
-        const segment = resolveHighlightSegments(text, tokenizeMarkdown(text))
-            .find((candidate) => text.slice(candidate.start, candidate.end) === 'slanted');
-        expect(segment!.className.includes('italic')).toBe(true);
-    });
-
-    test('a style is not repeated when two identical ranges overlap', () => {
-        const parts = resolveHighlightSegments('abcd', [
-            { start: 0, end: 4, style: 'strong' },
-            { start: 0, end: 4, style: 'strong' },
-        ]);
-        expect(parts[0].className.split('font-semibold').length - 1).toBe(1);
-    });
-});
-
 describe('buildHighlightParts', () => {
     test('returns null when there is nothing to highlight', () => {
         expect(buildHighlightParts('', [])).toBeNull();
@@ -397,15 +368,13 @@ describe('buildHighlightParts', () => {
         expect(parts![0].text).toBe('abcdef');
     });
 
-    test('higher priority wins on overlap — a mention beats inline code', () => {
+    test('keeps delimiters and mention text intact when ranges overlap', () => {
         const text = '`@a/b.ts`';
         const parts = buildHighlightParts(text, [
             { start: 0, end: text.length, style: 'code' },
             { start: 1, end: text.length - 1, style: 'mentionFile' },
         ]);
         expect(parts!.map((part) => part.text)).toEqual(['`', '@a/b.ts', '`']);
-        expect(parts![1].className).toBe(parts![1].className);
-        expect(parts![0].className).not.toBe(parts![1].className);
     });
 
     test('equal priority resolves to the earliest range in input order', () => {

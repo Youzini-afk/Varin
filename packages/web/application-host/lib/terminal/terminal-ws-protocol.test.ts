@@ -1,7 +1,6 @@
 import { describe, expect, it } from 'vitest';
 
 import {
-  TERMINAL_WS_PATH,
   TERMINAL_WS_CONTROL_TAG_JSON,
   createTerminalWsControlFrame,
   isTerminalWsPathname,
@@ -14,9 +13,6 @@ import {
 } from './terminal-ws-protocol.js';
 
 describe('terminal websocket protocol', () => {
-  it('uses fixed websocket paths', () => {
-    expect(TERMINAL_WS_PATH).toBe('/api/terminal/ws');
-  });
 
   it('matches supported websocket pathnames', () => {
     expect(isTerminalWsPathname('/api/terminal/ws')).toBe(true);

@@ -1,6 +1,5 @@
 import { expect, test, vi } from 'vitest';
 import {
-  VARIN_BUILTIN_FLEET_EXTENSION,
   VARIN_BUILTIN_IDE_WORKBENCH_EXTENSION,
   VARIN_BUILTIN_PLUGIN_ADAPTER_EXTENSIONS,
 } from '@varin/extension-builtins';
@@ -215,14 +214,4 @@ test('maps only pi-rtk-optimizer to the RTK settings adapter', async () => {
     adapters,
   )).toBeNull();
   await handle.deactivate(2, 2);
-});
-
-test('the public Fleet builtin owns both work providers and has no Plugin Settings adapter', () => {
-  expect(VARIN_BUILTIN_FLEET_EXTENSION.manifest.integrates?.piPackages).toEqual([
-    'pi-subagents',
-    'pi-background-tasks',
-  ]);
-  expect(VARIN_BUILTIN_PLUGIN_ADAPTER_EXTENSIONS.some((definition) => (
-    definition.manifest.integrates?.piPackages?.includes('pi-background-tasks')
-  ))).toBe(false);
 });

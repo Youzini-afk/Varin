@@ -466,8 +466,7 @@ test("parses a complete Agent shell seam declaration", () => {
   const parsed = parseVarinWorkbenchShellContributionData(agentSeams, ["web", "desktop", "mobile"]);
   assert.equal(parsed.contract, VARIN_WORKBENCH_SHELL_DATA_CONTRACT);
   const webSeams = resolveVarinWorkbenchShellSurfaceSeams(parsed, "web");
-  assert.equal(webSeams.replacementTargets.length, 7);
-  assert.equal(webSeams.slots.length, 0);
+  assert.deepEqual(webSeams, agentSeams.seams.web);
   const mobileSeams = resolveVarinWorkbenchShellSurfaceSeams(parsed, "mobile");
   assert.ok(!mobileSeams.replacementTargets.includes(VARIN_WORKBENCH_REPLACEMENT_TARGETS.workspaceExplorer));
 });

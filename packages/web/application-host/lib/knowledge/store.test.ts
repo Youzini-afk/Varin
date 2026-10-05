@@ -1229,12 +1229,6 @@ describe("KnowledgeStore", () => {
     });
   });
 
-  describe("dim", () => {
-    it("returns placeholder dim when no embedding", () => {
-      expect(store.dim).toBe(8);
-    });
-  });
-
   /**
    * Graph writes flush on a trailing debounce because a per-file flush made a
    * catalog build quadratic (D-140). The contract that matters is that nothing

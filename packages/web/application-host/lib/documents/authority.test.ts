@@ -10,16 +10,560 @@ import {
 import {
   attachLiveSurfaceCompleter,
   createDocumentAuthorityHarness,
-  defineDocumentAuthorityContract,
   hashSurfaceText,
   type DocumentAuthorityHarness,
   type LiveSurfaceBuffer,
 } from './contract-fixtures.js';
-import type { WatchPosition, WorkspaceWatchFs } from './watch.js';
+import type { WatchEvent, WatchPosition, WorkspaceWatchFs } from './watch.js';
+import { DocumentPathError, DocumentUntrustedError } from './errors.js';
 import { createRecoveryFileStore } from "../recovery/file-store.test-helper.js";
 import { createInMemoryRecoveryDurablePort } from '../recovery/recovery-durable-port.test-helper.js';
 
-defineDocumentAuthorityContract({ describe, it, expect, beforeEach, afterEach });
+const wait = (ms: number): Promise<void> => new Promise((resolve) => setTimeout(resolve, ms));
+
+const waitUntil = async <T>(probe: () => T | Promise<T>, timeoutMs = 8000): Promise<T> => {
+  const started = Date.now();
+  let lastError: unknown;
+  while (Date.now() - started < timeoutMs) {
+    try {
+      const value = await probe();
+      if (value) return value;
+    } catch (error) {
+      lastError = error;
+    }
+    await wait(20);
+  }
+  throw lastError ?? new Error('Timed out waiting for document authority condition');
+};
+
+const isWatchEvent = (value: unknown): value is WatchEvent => (
+  Boolean(value)
+  && typeof value === 'object'
+  && !Array.isArray(value)
+  && typeof (value as { kind?: unknown }).kind === 'string'
+  && typeof (value as { sourceId?: unknown }).sourceId === 'string'
+  && Number.isSafeInteger((value as { generation?: unknown }).generation)
+  && Number.isSafeInteger((value as { sequence?: unknown }).sequence)
+);
+
+const requireStatus = <T extends { status: string }, S extends T['status']>(
+  result: T,
+  status: S,
+): Extract<T, { status: S }> => {
+  if (result.status !== status) throw new Error(`Expected ${status}, received ${result.status}`);
+  return result as Extract<T, { status: S }>;
+};
+
+const requireValue = <T>(value: T | null | undefined, label: string): T => {
+  if (value === null || value === undefined) throw new Error(`${label} is required`);
+  return value;
+};
+
+describe('document authority contract', () => {
+  let harness!: DocumentAuthorityHarness;
+
+  beforeEach(async () => {
+    harness = await createDocumentAuthorityHarness();
+  });
+
+  afterEach(async () => {
+    await harness?.cleanup();
+  });
+
+  it('distinguishes missing, empty, binary, and read failure', async () => {
+    const missing = await harness.authority.read(harness.resource('missing.txt'));
+    expect(missing).toEqual({
+      status: 'missing',
+      epoch: harness.identity.epoch,
+      resource: harness.resource('missing.txt'),
+    });
+
+    await fs.promises.writeFile(path.join(harness.workspaceRoot, 'empty.txt'), '');
+    const empty = requireStatus(await harness.authority.read(harness.resource('empty.txt')), 'ready');
+    expect(empty.status).toBe('ready');
+    expect(empty.content).toBe('');
+    expect(empty.byteLength).toBe(0);
+
+    await fs.promises.writeFile(path.join(harness.workspaceRoot, 'binary.bin'), Buffer.from([0, 1, 2, 0, 9]));
+    const binary = requireStatus(await harness.authority.read(harness.resource('binary.bin')), 'binary');
+    expect(binary.status).toBe('binary');
+    expect('content' in binary).toBe(false);
+
+    const fsPromises = new Proxy(fs.promises, {
+      get(target, property, receiver) {
+        if (property === 'readFile') return async (...args: Parameters<typeof fs.promises.readFile>) => {
+          if (String(args[0]).includes('denied.txt')) {
+            throw Object.assign(new Error('EACCES: permission denied'), { code: 'EACCES' });
+          }
+          return Reflect.apply(target.readFile, target, args) as ReturnType<typeof fs.promises.readFile>;
+        };
+        const member = Reflect.get(target, property, receiver) as unknown;
+        return typeof member === 'function' ? member.bind(target) : member;
+      },
+    });
+    await harness.cleanup();
+    harness = await createDocumentAuthorityHarness({
+      authority: { fsPromises },
+    });
+    await fs.promises.writeFile(path.join(harness.workspaceRoot, 'denied.txt'), 'classified');
+    await expect(harness.authority.read(harness.resource('denied.txt'))).rejects.toMatchObject({
+      code: 'failed',
+    });
+    const stillMissing = requireStatus(await harness.authority.read(harness.resource('also-missing.txt')), 'missing');
+    expect(stillMissing.status).toBe('missing');
+  });
+
+  it('creates when expected revision is missing and conflicts when the file exists', async () => {
+    const resource = harness.resource('created.txt');
+    const written = requireStatus(await harness.authority.write({
+      token: harness.token(),
+      resource,
+      content: 'hello\n',
+      encoding: 'utf-8',
+      bom: false,
+      expectedRevision: null,
+      operationId: randomUUID(),
+    }), 'written');
+    expect(written.status).toBe('written');
+    const conflict = requireStatus(await harness.authority.write({
+      token: harness.token(),
+      resource,
+      content: 'other',
+      encoding: 'utf-8',
+      bom: false,
+      expectedRevision: null,
+      operationId: randomUUID(),
+    }), 'conflict');
+    expect(conflict.status).toBe('conflict');
+    const current = requireStatus(conflict.current, 'ready');
+    expect(current.epoch).toBe(harness.identity.epoch);
+    expect('content' in current).toBe(false);
+  });
+
+  it('rejects stale revisions and detects same-mtime content changes', async () => {
+    const filePath = path.join(harness.workspaceRoot, 'note.txt');
+    await fs.promises.writeFile(filePath, 'alpha');
+    const first = requireStatus(await harness.authority.read(harness.resource('note.txt')), 'ready');
+    expect(first.status).toBe('ready');
+    const stat = await fs.promises.stat(filePath);
+    await fs.promises.writeFile(filePath, 'bravo');
+    await fs.promises.utimes(filePath, stat.atime, stat.mtime);
+    const second = requireStatus(await harness.authority.read(harness.resource('note.txt')), 'ready');
+    expect(second.status).toBe('ready');
+    expect(second.content).toBe('bravo');
+    expect(second.revision).not.toBe(first.revision);
+    const conflict = requireStatus(await harness.authority.write({
+      token: harness.token(),
+      resource: harness.resource('note.txt'),
+      content: 'charlie',
+      encoding: 'utf-8',
+      bom: false,
+      expectedRevision: first.revision,
+      operationId: randomUUID(),
+    }), 'conflict');
+    expect(conflict.status).toBe('conflict');
+  });
+
+  it('serializes mutations so overlapping read/write operations do not tear', async () => {
+    const filePath = path.join(harness.workspaceRoot, 'race.txt');
+    await fs.promises.writeFile(filePath, 'start');
+    const resource = harness.resource('race.txt');
+    const firstRead = harness.authority.read(resource);
+    const current = requireStatus(await firstRead, 'ready');
+    const firstWrite = harness.authority.write({
+      token: harness.token(),
+      resource,
+      content: 'first-write',
+      encoding: 'utf-8',
+      bom: false,
+      expectedRevision: current.status === 'ready' ? current.revision : null,
+      operationId: randomUUID(),
+    });
+    const secondWrite = harness.authority.write({
+      token: harness.token(),
+      resource,
+      content: 'second-write',
+      encoding: 'utf-8',
+      bom: false,
+      expectedRevision: current.status === 'ready' ? current.revision : null,
+      operationId: randomUUID(),
+    });
+    const results = await Promise.all([firstWrite, secondWrite]);
+    expect(results.filter((result) => result.status === 'written').length).toBeGreaterThanOrEqual(1);
+    const final = requireStatus(await harness.authority.read(resource), 'ready');
+    expect(final.status).toBe('ready');
+    expect(['first-write', 'second-write']).toContain(final.content);
+  });
+
+  it('preserves the previous document when atomic replacement fails', async () => {
+    await harness.cleanup();
+    const fsPromises = new Proxy(fs.promises, {
+      get(target, property, receiver) {
+        if (property === 'rename') return async (...args: Parameters<typeof fs.promises.rename>) => {
+          if (String(args[0]).includes('.varin-tmp-') && String(args[1]).endsWith('protected.txt')) {
+            throw Object.assign(new Error('EPERM: replacement denied'), { code: 'EPERM' });
+          }
+          return target.rename(...args);
+        };
+        const member = Reflect.get(target, property, receiver) as unknown;
+        return typeof member === 'function' ? member.bind(target) : member;
+      },
+    });
+    harness = await createDocumentAuthorityHarness({ authority: { fsPromises } });
+    const filePath = path.join(harness.workspaceRoot, 'protected.txt');
+    await fs.promises.writeFile(filePath, 'original');
+    const current = requireStatus(await harness.authority.read(harness.resource('protected.txt')), 'ready');
+    expect(current.status).toBe('ready');
+
+    await expect(harness.authority.write({
+      token: harness.token(),
+      resource: harness.resource('protected.txt'),
+      content: 'replacement',
+      encoding: 'utf-8',
+      bom: false,
+      expectedRevision: current.revision,
+      operationId: randomUUID(),
+    })).rejects.toMatchObject({ code: 'failed' });
+
+    expect(await fs.promises.readFile(filePath, 'utf8')).toBe('original');
+    expect((await fs.promises.readdir(harness.workspaceRoot)).some((entry) => entry.includes('.varin-tmp-'))).toBe(false);
+  });
+
+  it('fences document and journal mutations by persisted workspace epoch', async () => {
+    const note = harness.resource('fenced.txt');
+    const first = requireStatus(await harness.authority.write({
+      token: harness.token(),
+      resource: note,
+      content: 'epoch-one',
+      encoding: 'utf-8',
+      bom: false,
+      expectedRevision: null,
+      operationId: randomUUID(),
+    }), 'written');
+    expect(first.status).toBe('written');
+    const journal = requireStatus(await harness.authority.writeRecoveryJournal({
+      token: harness.token(),
+      workspaceId: harness.identity.workspaceId,
+      recoverySessionId: 'session-fenced',
+      resource: note,
+      content: 'draft-one',
+      encoding: 'utf-8',
+      bom: false,
+      baseRevision: first.revision,
+      expectedRevision: null,
+    }), 'written');
+    expect(journal.status).toBe('written');
+    expect(journal.journal.epoch).toBe(harness.identity.epoch);
+
+    const active = await harness.authority.registerWriter(harness.token(), { purpose: 'test-active' });
+    await expect(harness.authority.advanceEpoch(harness.identity.workspaceId, { maintenance: false }))
+      .rejects.toMatchObject({ code: 'active-writer' });
+    await active.close();
+
+    const advanced = await harness.authority.advanceEpoch(harness.identity.workspaceId, { maintenance: false });
+    expect(advanced.epoch).toBe(harness.identity.epoch + 1);
+    const staleWrite = await harness.authority.write({
+      token: harness.token(),
+      resource: note,
+      content: 'stale-write',
+      encoding: 'utf-8',
+      bom: false,
+      expectedRevision: first.revision,
+      operationId: randomUUID(),
+    });
+    expect(staleWrite).toEqual({ status: 'stale-epoch', currentEpoch: advanced.epoch });
+    expect(await fs.promises.readFile(path.join(harness.workspaceRoot, 'fenced.txt'), 'utf8')).toBe('epoch-one');
+    expect(await harness.authority.move({
+      token: harness.token(),
+      from: note,
+      to: harness.resource('moved.txt'),
+      expectedRevision: first.revision,
+      operationId: randomUUID(),
+    })).toEqual({ status: 'stale-epoch', currentEpoch: advanced.epoch });
+    expect(await harness.authority.delete({
+      token: harness.token(),
+      resource: note,
+      expectedRevision: first.revision,
+      operationId: randomUUID(),
+    })).toEqual({ status: 'stale-epoch', currentEpoch: advanced.epoch });
+    expect(await harness.authority.writeRecoveryJournal({
+      token: harness.token(),
+      workspaceId: harness.identity.workspaceId,
+      recoverySessionId: 'session-fenced',
+      resource: note,
+      content: 'stale-draft',
+      encoding: 'utf-8',
+      bom: false,
+      baseRevision: first.revision,
+      expectedRevision: journal.journal.revision,
+    })).toEqual({ status: 'stale-epoch', currentEpoch: advanced.epoch });
+    expect(await harness.authority.deleteRecoveryJournal({
+      token: harness.token(),
+      journalId: journal.journal.journalId,
+      expectedRevision: journal.journal.revision,
+    })).toEqual({ status: 'stale-epoch', currentEpoch: advanced.epoch });
+
+    const freshToken = harness.token(advanced.epoch);
+    const freshJournal = requireStatus(await harness.authority.writeRecoveryJournal({
+      token: freshToken,
+      workspaceId: harness.identity.workspaceId,
+      recoverySessionId: 'session-fenced',
+      resource: note,
+      content: 'epoch-two-draft',
+      encoding: 'utf-8',
+      bom: false,
+      baseRevision: first.revision,
+      expectedRevision: null,
+    }), 'written');
+    expect(freshJournal.status).toBe('written');
+    expect(freshJournal.journal.epoch).toBe(advanced.epoch);
+    const journalHistory = await harness.authority.listRecoveryJournals({
+      workspaceId: harness.identity.workspaceId,
+      recoverySessionId: 'session-fenced',
+    });
+    expect(journalHistory.some((entry) => entry.epoch === harness.identity.epoch)).toBe(true);
+    expect(journalHistory.some((entry) => entry.epoch === advanced.epoch)).toBe(true);
+    const fresh = requireStatus(await harness.authority.write({
+      token: freshToken,
+      resource: note,
+      content: 'epoch-two',
+      encoding: 'utf-8',
+      bom: false,
+      expectedRevision: first.revision,
+      operationId: randomUUID(),
+    }), 'written');
+    expect(fresh.status).toBe('written');
+    const restarted = createDocumentAuthority({
+      hostId: harness.authority.hostId,
+      dataDir: harness.dataDir,
+      isTrusted: async () => true,
+      isAllowedRoot: async () => true,
+    });
+    const persisted = await restarted.inspectMutation(harness.identity.workspaceId);
+    expect(persisted.epoch).toBe(advanced.epoch);
+    await restarted.dispose();
+  });
+
+  it('binds mutation tokens to the target workspace and gates new writers during maintenance', async () => {
+    const resource = harness.resource('workspace-bound.txt');
+    const wrongToken = {
+      ...harness.token(),
+      workspaceId: '22222222-2222-4222-8222-222222222222',
+    };
+    await expect(harness.authority.write({
+      token: wrongToken,
+      resource,
+      content: 'must-not-write',
+      encoding: 'utf-8',
+      bom: false,
+      expectedRevision: null,
+      operationId: randomUUID(),
+    })).rejects.toMatchObject({ statusCode: 400 });
+    await expect(fs.promises.stat(path.join(harness.workspaceRoot, 'workspace-bound.txt')))
+      .rejects.toMatchObject({ code: 'ENOENT' });
+
+    const active = await harness.authority.registerWriter(harness.token(), { purpose: 'maintenance-drain' });
+    const maintenance = await harness.authority.setMaintenance(harness.identity.workspaceId, true);
+    expect(maintenance.maintenance).toBe(true);
+    expect(maintenance.activeWriters).toHaveLength(1);
+    await expect(harness.authority.registerWriter(harness.token(), { purpose: 'late-writer' }))
+      .rejects.toMatchObject({ code: 'maintenance' });
+    await active.close();
+    const advanced = await harness.authority.advanceEpoch(harness.identity.workspaceId, {
+      expectedEpoch: harness.identity.epoch,
+    });
+    expect(advanced.epoch).toBe(harness.identity.epoch + 1);
+    await expect(harness.authority.advanceEpoch(harness.identity.workspaceId, {
+      expectedEpoch: harness.identity.epoch,
+    })).rejects.toMatchObject({ code: 'stale-epoch', currentEpoch: advanced.epoch });
+    await harness.authority.setMaintenance(harness.identity.workspaceId, false);
+  });
+
+  it('tracks legacy Host mutations by canonical workspace scope', async () => {
+    const nested = path.join(harness.workspaceRoot, 'nested-cwd');
+    await fs.promises.mkdir(nested);
+    expect(await harness.authority.resolveScopeId(nested)).toBe(harness.identity.workspaceId);
+    expect(await harness.authority.resolveScopeId(path.join(nested, 'not-created-yet')))
+      .toBe(harness.identity.workspaceId);
+    const before = await harness.authority.inspectMutation(harness.identity.workspaceId);
+    await harness.authority.runMutationForScope(
+      harness.workspaceRoot,
+      { kind: 'host-route', id: 'legacy-fixture' },
+      () => fs.promises.writeFile(path.join(harness.workspaceRoot, 'legacy.txt'), 'tracked'),
+    );
+    const after = await harness.authority.inspectMutation(harness.identity.workspaceId);
+    expect(after.mutationRevision).toBeGreaterThan(before.mutationRevision);
+
+    await harness.authority.setMaintenance(harness.identity.workspaceId, true);
+    await expect(harness.authority.runMutationForScope(
+      harness.workspaceRoot,
+      { kind: 'host-route', id: 'maintenance-rejected' },
+      () => fs.promises.writeFile(path.join(harness.workspaceRoot, 'late.txt'), 'late'),
+    )).rejects.toMatchObject({ code: 'maintenance' });
+    await expect(fs.promises.stat(path.join(harness.workspaceRoot, 'late.txt')))
+      .rejects.toMatchObject({ code: 'ENOENT' });
+    await harness.authority.setMaintenance(harness.identity.workspaceId, false);
+  });
+
+  it('tracks live dirty buffers by surface owner and rejects stale generations', async () => {
+    const publication = await harness.authority.publishDirtyBuffers({
+      generation: 2,
+      ownerId: 'surface-1',
+      resources: [{
+        baseRevision: null,
+        localEditRevision: 3,
+        resource: harness.resource('dirty.txt'),
+      }],
+      workspaceId: harness.identity.workspaceId,
+    });
+    expect(publication).toMatchObject({ ownerId: 'surface-1', generation: 2 });
+    const dirty = await harness.authority.inspectDirtyBuffers(harness.identity.workspaceId);
+    expect(dirty).toHaveLength(1);
+    const dirtyPublication = requireValue(dirty[0], 'Dirty buffer publication');
+    expect(dirtyPublication.ownerId).toBe('surface-1');
+    expect(requireValue(dirtyPublication.resources[0], 'Dirty buffer resource').resource)
+      .toEqual(harness.resource('dirty.txt'));
+    await expect(harness.authority.clearDirtyBuffers({
+      generation: 1,
+      ownerId: 'surface-1',
+      workspaceId: harness.identity.workspaceId,
+    })).rejects.toMatchObject({ code: 'stale-completion' });
+    expect(await harness.authority.clearDirtyBuffers({
+      generation: 2,
+      ownerId: 'surface-1',
+      workspaceId: harness.identity.workspaceId,
+    })).toEqual({ cleared: true });
+    expect(await harness.authority.inspectDirtyBuffers(harness.identity.workspaceId)).toEqual([]);
+  });
+
+  it('watches created, changed, moved, deleted, and reset events without file bodies', async () => {
+    const events: WatchEvent[] = [];
+    const subscription = harness.authority.watch(harness.identity.workspaceId, (event: unknown) => {
+      if (!isWatchEvent(event)) return;
+      events.push(event);
+    });
+    await waitUntil(() => harness.authority.hasWatch(harness.identity.workspaceId));
+    await wait(150);
+    const filePath = path.join(harness.workspaceRoot, 'watched.txt');
+    await fs.promises.writeFile(filePath, 'one');
+    await waitUntil(() => events.some((event) => event.kind === 'created' && event.resource?.resourceId === 'watched.txt'));
+    await fs.promises.writeFile(filePath, 'two');
+    await waitUntil(() => events.some((event) => event.kind === 'changed' && event.resource?.resourceId === 'watched.txt'));
+    await fs.promises.rename(filePath, path.join(harness.workspaceRoot, 'renamed.txt'));
+    await waitUntil(() => events.some((event) => (
+      event.kind === 'moved'
+      || (event.kind === 'deleted' && event.resource?.resourceId === 'watched.txt')
+    )));
+    await fs.promises.unlink(path.join(harness.workspaceRoot, 'renamed.txt'));
+    await waitUntil(() => events.some((event) => event.kind === 'deleted'));
+    expect(JSON.stringify(events)).not.toContain('one');
+    expect(JSON.stringify(events)).not.toContain('two');
+    expect(harness.authority.emitWatchOverflow(harness.identity.workspaceId)).toBe(true);
+    await waitUntil(() => events.some((event) => event.kind === 'reset' && event.reason === 'overflow'));
+    harness.authority.reconnectWatch(harness.identity.workspaceId);
+    await waitUntil(() => events.some((event) => event.kind === 'reset' && event.reason === 'reconnected'));
+    const overflowIndex = events.findIndex((event) => event.kind === 'reset' && event.reason === 'overflow');
+    expect(events.slice(overflowIndex).filter((event) => event.kind === 'deleted')).toEqual([]);
+    subscription.close();
+  });
+
+  it('rejects symlink escape, path traversal, and untrusted projects', async () => {
+    await expect(harness.authority.read(harness.resource('../secret.txt'))).rejects.toBeInstanceOf(DocumentPathError);
+    const outside = path.join(harness.root, 'outside.txt');
+    await fs.promises.writeFile(outside, 'nope');
+    const link = path.join(harness.workspaceRoot, 'escape.txt');
+    try {
+      await fs.promises.symlink(outside, link);
+      await expect(harness.authority.read(harness.resource('escape.txt'))).rejects.toBeInstanceOf(DocumentPathError);
+    } catch (error) {
+      if (error instanceof Error && (error as NodeJS.ErrnoException).code === 'EPERM') {
+        // Windows without developer symlink privilege still covered by path traversal.
+      } else {
+        throw error;
+      }
+    }
+    harness.setTrusted(false);
+    await fs.promises.writeFile(path.join(harness.workspaceRoot, 'trusted.txt'), 'ok');
+    await expect(harness.authority.read(harness.resource('trusted.txt'))).rejects.toBeInstanceOf(DocumentUntrustedError);
+  });
+
+  it('treats missing, malformed, and failed recovery journals as distinct results', async () => {
+    await harness.cleanup();
+    let failJournalWrites = false;
+    const fsPromises = new Proxy(fs.promises, {
+      get(target, property, receiver) {
+        if (property === 'writeFile') return async (...args: Parameters<typeof fs.promises.writeFile>) => {
+          if (failJournalWrites && String(args[0]).includes('document-recovery') && String(args[0]).includes('.tmp')) {
+            throw new Error('disk full');
+          }
+          return Reflect.apply(target.writeFile, target, args) as ReturnType<typeof fs.promises.writeFile>;
+        };
+        const member = Reflect.get(target, property, receiver) as unknown;
+        return typeof member === 'function' ? member.bind(target) : member;
+      },
+    });
+    harness = await createDocumentAuthorityHarness({ authority: { fsPromises } });
+    const missing = await harness.authority.readRecoveryJournal('missing-journal');
+    expect(missing.status).toBe('missing');
+    const resource = harness.resource('draft.txt');
+    const written = requireStatus(await harness.authority.writeRecoveryJournal({
+      token: harness.token(),
+      workspaceId: harness.identity.workspaceId,
+      recoverySessionId: 'session-1',
+      resource,
+      content: 'draft',
+      encoding: 'utf-8',
+      bom: false,
+      baseRevision: null,
+      expectedRevision: null,
+    }), 'written');
+    expect(written.status).toBe('written');
+    const listed = await harness.authority.listRecoveryJournals({
+      workspaceId: harness.identity.workspaceId,
+      recoverySessionId: 'session-1',
+    });
+    expect(listed).toHaveLength(1);
+    const journalDir = path.join(
+      harness.dataDir,
+      'document-recovery',
+      harness.authority.hostId,
+      harness.identity.workspaceId,
+      'session-1',
+    );
+    await fs.promises.writeFile(path.join(journalDir, 'broken.json'), '{not-json');
+    const afterMalformed = await harness.authority.listRecoveryJournals({
+      workspaceId: harness.identity.workspaceId,
+      recoverySessionId: 'session-1',
+    });
+    expect(afterMalformed).toHaveLength(1);
+    failJournalWrites = true;
+    await expect(harness.authority.writeRecoveryJournal({
+      token: harness.token(),
+      workspaceId: harness.identity.workspaceId,
+      recoverySessionId: 'session-1',
+      resource: harness.resource('other.txt'),
+      content: 'nope',
+      encoding: 'utf-8',
+      bom: false,
+      baseRevision: null,
+      expectedRevision: null,
+    })).rejects.toThrow(/disk full/);
+    await expect(harness.authority.listRecoveryJournals({
+      workspaceId: '../escape',
+    })).rejects.toThrow(/workspaceId is malformed/);
+    await expect(harness.authority.writeRecoveryJournal({
+      token: harness.token(),
+      workspaceId: harness.identity.workspaceId,
+      recoverySessionId: '../escape',
+      resource,
+      content: 'nope',
+      encoding: 'utf-8',
+      bom: false,
+      baseRevision: null,
+      expectedRevision: null,
+    })).rejects.toThrow(/recoverySessionId is malformed/);
+  });
+});
 
 const surfaceHash = (text: string) => `sha256-${createHash('sha256').update(text).digest('hex')}`;
 

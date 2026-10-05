@@ -536,3 +536,73 @@ artifact/browser evidence would lose protection. They do not prove actual instal
 behavior. The manual native-driver smoke remains a desktop diagnostic and is not counted among
 the passing unit tests. Linux AT-SPI/UNO, Windows UIA and macOS AX still need their real platform
 acceptance. Research replay inputs and historical experiment evidence remain scientific assets.
+
+## 13. Behavior-focused follow-up (2026-10-05)
+
+Starting at `156cd581`, this second pass reviewed the test families, runners, helpers and dependency
+consumers across all maintained packages. Suspicious assertions were checked against their owning
+implementation and callers. Tests were judged by the failure they could detect; existing assertions
+were not treated as product requirements. This is a family-level review with direct examination of
+the changed logic, not a claim that every retained assertion was read line by line.
+
+Production behavior and dependency locks are unchanged. Eight test files were retired, and other
+files were reduced or combined without a replacement quota or a new test framework.
+
+| Area | Disposition and remaining protection |
+| --- | --- |
+| UI | Removed authored splash geometry/choreography, fixed theme colors/selectors, default editor presentation, literal chrome/translation wording, CSS-class checks and hardcoded package/layout counts. Kept final-frame retirement and WebGL disposal for the white-flash regression, viewport coverage, selected-versus-actual model identity, usage arithmetic, user editor preferences and interaction/state behavior. |
+| Localization | Removed source regexes requiring every locale to physically spell every English key and duplicated settings/key lists. The runtime supports inherited English entries. One compact check calls the real formatter and verifies required parameters survive in the actual locale messages. Existing loading, fallback and stale asynchronous result checks remain. Empty suffix messages are valid and are not rejected. |
+| Pi and protocol | Removed the bridge test's copied responder/router path and the phase3b file's default-policy repetitions, export checks and misleading integration fixture without an installed permission hook. Retained actual HostServicesBridge, Host/Pi flows and native gate hooks. Preset/custom-policy precedence and response correlation/error preservation moved into their existing owners. Tool rendering checks preserve supplied evidence rather than prose. |
+| Host storage/recovery | Deleted self-tests for the non-shipped TS WorkingStateStore/state trie, its retention, and retired SQLite JournalCatalog/migrations. Production storage belongs to Rust. Real native roots, pinning, CAS, restart, owner cleanup and recovery tests remain; current capability evidence now points to them. The old modules still serve as boundary doubles for Host policy tests and are not claimed as production persistence evidence. |
+| Documents and helpers | Inlined the single-consumer document contract suite into its owner, removing framework injection and handwritten matcher interfaces. All 40 document cases remain. Removed an unused durable root adapter factory. Shared filesystem/authority and live-surface failure fixtures remain where they support distinct conflict, recovery or cancellation behavior. |
+| Other Host/CLI modules | Removed prompt prose, a private default dimension, export-existence/provider labels, a URL constant and a fixed tunnel-provider list. Actual dispatch, quota selection, framed terminal messages, CLI startup/transport and knowledge behavior remain. Native explore now checks authorized forwarding instead of reading implementation source to ban variable names. |
+| Extensions and replay | Removed layout/seam/catalog counts. Retained real manifest parsing/roundtrip, profile mapping, owner generations, activation, routing, asset confinement and teardown. Replay still verifies real referenced tasks and non-overwriting records, without requiring exactly six tasks. |
+| Electron and CI | Split existing Node packaging checks into `test:packaging-tools`. Local `test:architecture` still prepares dependencies, while Windows CI reuses `build:type-dependencies` and runs runtime/packaging entries directly. The same runtime, installer, architecture, update and payload checks remain. No validation gate was disabled. |
+| Runtime broker/client, application-client, settings, mobile, drivers and Rust | Retained distinct process/session identity, correlation, cancellation, settings readers/writers, external API, platform identity and driver protocol behavior. Similar fixture inputs can exercise different implementations and do not alone make tests redundant. Built artifact checks and native acceptance remain separately owned. |
+
+### Verification and discovered test faults
+
+One final `bun run test:pi` exercised every workspace source entry. Pi passed 602 cases with one
+environment skip; protocol passed 71, broker 96, and the other extension/client/settings entries
+passed. UI passed 2,035 cases with three failures in one Bot file; portable Host/Web passed 2,806
+with two failures and four platform skips. The aggregate exit status remains failed in its log.
+
+Those failures exposed test problems rather than product regressions:
+
+- Bot mounted Linkedom but sent Node's CustomEvent into its window. Use the simulated browser's
+  Event/CustomEvent pair; all three interaction cases pass.
+- The inherited-context assertion demanded a closing bracket immediately after the session attribute,
+  rejecting the current provenance note. Verify the session identity independently of other attributes.
+- Shell termination cases assumed preparation always finished within five milliseconds. Reuse the
+  existing public execution/read readiness helper before testing kill/exit, preserving termination
+  protection without tying it to machine speed. Both kill cases remain.
+
+The two affected Host files then passed all 53 cases. Other successful package suites were not
+rerun merely to replace the aggregate log. Additional risk-specific checks passed:
+
+- Five native files: 36 cases against the existing matching release kernel. These cover working-state
+  storage, durable recovery, explore forwarding, document surface identity, and the actual UI Registry
+  → Documents → Host/kernel integration. Four files took 16.34 s; identity took 4.72 s separately.
+- Electron runtime: 21 cases; the unchanged packaging test list through its new entry: 32 cases.
+- Replay: three cases. UI, Pi and Host/CLI test type-checks and changed-code ESLint passed.
+- Engineering docs: nine cases; documentation links/status validation and CI YAML parsing passed.
+
+Source timings from the aggregate run were UI 29.52 s, portable Web 64.64 s, Pi 48.35 s and broker
+69.24 s. They are observations under this local load, not a controlled before/after benchmark or
+a claim of overall CI speedup. Logs are `varin-test-cleanup-20261005-all.log` and
+`varin-test-cleanup-20261005-native.log` in the task's Windows temporary directory.
+
+### Retained risks and boundaries
+
+The live-surface completer, in-memory durable port and TS storage adapters remain controlled failure
+boundaries for Host orchestration tests; they cannot prove real UI or Rust persistence behavior.
+The real vertical Registry/kernel test provides complementary integration evidence. Replacing all
+such fixtures at once would risk removing distinct lost-write, compensation and conflict coverage.
+The single static CodeMirror native-caret scoping guard remains for the documented WebKit input-lag
+regression; no real iOS acceptance was run. NSIS, public package/API and native identity checks retain
+their concrete external contracts, rather than being removed simply because they inspect constants.
+
+Vitest, Linkedom, better-sqlite3 and the grammar dev dependencies still have consumers: retained
+fixtures use SQLite, and runtime asset staging uses tree-sitter WASM. No dependency was removed on
+the strength of a source-import search alone. No new installer, live desktop, Linux/macOS acceptance,
+Docker deployment or VM boot was required or claimed for this test-only pass.

@@ -225,7 +225,7 @@ describe("dequeued thread permissions", () => {
       await vi.waitFor(() => {
         expect(prompts.length).toBeGreaterThan(0);
       });
-      expect(prompts.at(-1)).toContain('<inherited-context from-session="parent-1">');
+      expect(prompts.at(-1)).toMatch(/<inherited-context\b[^>]*\bfrom-session="parent-1"[^>]*>/u);
       expect(prompts.at(-1)).toContain("PARENT SUMMARY");
       const run = await registry.getActiveRun(WORKSPACE, queued.id);
       expect(run?.frozen?.inputOrigin).toBe("inherit");

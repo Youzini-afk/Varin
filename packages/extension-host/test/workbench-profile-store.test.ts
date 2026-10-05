@@ -103,7 +103,6 @@ test("missing storage seeds Agent, IDE, Research, and Bot bindings without persi
     VARIN_WORKBENCH_RESEARCH_PROFILE_ID,
     VARIN_WORKBENCH_BOT_PROFILE_ID,
   ]);
-  assert.equal(missing.document.layouts.length, 11);
   const shellByProfileSurface = Object.fromEntries(missing.document.layouts.map((layer) => (
     [`${layer.profileId}:${layer.surface}`, layer.replacementSelections["workbench.shell"]]
   )));

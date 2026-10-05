@@ -101,9 +101,9 @@ jobs:
       # UI tests use simulated browser/surface inputs and run in source-quality.
       # Keep filesystem, process, worker and Host suites on both operating systems.
       - run: bun run --sequential --no-exit-on-error --filter '@varin/*' --filter '!@varin/ui' test
-      - run: |
-          bun run --cwd packages/electron test:architecture
-          bun run --cwd packages/electron test:updater
+      - run: bun run --cwd packages/electron test:runtime
+      - run: bun run --cwd packages/electron test:packaging-tools
+      - run: bun run --cwd packages/electron test:updater
 
   production-build:
     name: Production build

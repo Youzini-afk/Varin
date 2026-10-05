@@ -79,8 +79,9 @@ Stage Q, specified in [testing-ci-design.md](design/testing-ci-design.md) and th
 AI4S implementation stage. It reassessed test responsibilities, fixtures, discovery, repeated
 builds and CI execution across the repository. The 2026-09-21 follow-up removes source-text, type-literal,
 retired migration and release-layout checks that remained after Q; the dispositions are recorded in
-[the audit addendum](archive/testing-ci-audit.md#11-test-content-reduction-2026-09-21). Current scripts remain the
-command authority. Do not turn cleanup into a checklist for every change or replace every deleted
+[the audit addendum](archive/testing-ci-audit.md#11-test-content-reduction-2026-09-21). The whole-project
+follow-ups and their retained risks are recorded in [sections 12–13](archive/testing-ci-audit.md#13-behavior-focused-follow-up-2026-10-05).
+Current scripts remain the command authority. Do not turn cleanup into a checklist for every change or replace every deleted
 assertion with a new test. Prefer fewer tests that exercise distinct product behavior.
 
 ## Companion retirement and current AI4S stage
@@ -106,6 +107,9 @@ the phase 7 plan and current harness status for subsequent capability routing an
   through `packages/web/vitest.kernel.config.ts` under that entry; the main `packages/web` suite excludes
   them and stays deterministic without Rust artifacts.
   Electron splits `test:runtime` from the dedicated `test:updater`/`test:linux-desktop` vitest files.
+  `test:packaging-tools` owns the Node packaging helper checks. Local `test:architecture` prepares
+  the runtime before both entries; Windows CI calls them directly after `build:type-dependencies`
+  so it reuses the existing compiled runtime rather than rebuilding the same dependency chain.
   Web files that use real Rust resources are named `*.native.test.ts`; the native command discovers
   them by that convention and the portable Web suite excludes them. The framed Node transport suite
   remains a separate runner within the default native command.

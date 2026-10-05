@@ -34,6 +34,7 @@ let root: Root;
 beforeEach(() => {
   const { window, document } = parseHTML('<!doctype html><html><body></body></html>');
   vi.stubGlobal('window', window); vi.stubGlobal('document', document); vi.stubGlobal('IS_REACT_ACT_ENVIRONMENT', true);
+  vi.stubGlobal('Event', window.Event); vi.stubGlobal('CustomEvent', window.CustomEvent);
   container = document.createElement('div'); document.body.append(container); root = createRoot(container);
   api.list.mockReset().mockResolvedValue([bot('a'), bot('b', true)]);
   api.work.mockReset().mockResolvedValue([]); api.update.mockReset().mockResolvedValue(bot('a'));

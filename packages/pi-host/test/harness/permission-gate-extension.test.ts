@@ -1,8 +1,8 @@
 import assert from "node:assert/strict";
 import { relative, resolve } from "node:path";
 import { describe, it } from "node:test";
-import { defaultRules, type PermissionAuditRecord, type PermissionInspectParams } from "@varin/protocol";
-import { createPermissionGateExtension } from "../../src/harness/permission-gate-extension.js";
+import { defaultRules, evaluateGate, type PermissionAuditRecord, type PermissionInspectParams } from "@varin/protocol";
+import { buildPermissionPolicy, createPermissionGateExtension } from "../../src/harness/permission-gate-extension.js";
 
 const workspaceRoot = resolve("permission-gate-workspace");
 
@@ -101,6 +101,14 @@ const mcpTool = (name: string) => ({
 const normal = () => ({ mode: "normal" as const, rules: defaultRules("normal") });
 
 describe("native permission gate integration", () => {
+  it("keeps preset approval choices and user rules ahead of mode defaults", () => {
+    const policy = buildPermissionPolicy("normal", { check: true, retrieval: false }, [
+      { tool: "read", decision: "deny" },
+    ]);
+    assert.equal(evaluateGate("dispatch", { preset: "check", task: "inspect" }, policy).decision, "ask");
+    assert.equal(evaluateGate("dispatch", { preset: "retrieval", task: "find" }, policy).decision, "allow");
+    assert.equal(evaluateGate("read", { path: "private.txt" }, policy).decision, "deny");
+  });
   it("retains retrieval path authorization without reserving the source for scheduling", async () => {
     const { bridge, audits } = makeBridge();
     const sourceInfo = { path: "<sdk>", source: "sdk", scope: "temporary", origin: "top-level" };

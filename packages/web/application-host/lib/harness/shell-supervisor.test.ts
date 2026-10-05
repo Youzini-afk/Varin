@@ -1016,13 +1016,15 @@ describe("shell-supervisor disposal protection", () => {
       ptyProvider: { backend: "fake", spawn: () => process },
     });
     try {
-      const started = await supervisor.exec("never completes", { waitMs: 5 });
-      expect(started).toMatchObject({ kind: "background", id: "sh_1" });
-      await expect(supervisor.kill("sh_1")).resolves.toBe(false);
-      await expect(supervisor.read("sh_1")).resolves.toMatchObject({ running: true });
+      const started = await supervisor.exec("never completes", { waitMs: 0 });
+      if (started.kind !== "preparing" && started.kind !== "background") throw new Error("expected pending execution");
+      const shellId = await waitForRuntimeShellId(supervisor, started.id);
+      await expect(supervisor.kill(shellId)).resolves.toBe(false);
+      await expect(supervisor.read(shellId)).resolves.toMatchObject({ running: true });
       process.emitExit();
-      await new Promise((resolve) => setTimeout(resolve, 10));
-      await expect(supervisor.read("sh_1")).resolves.toMatchObject({ running: false, exitCode: 0 });
+      await vi.waitFor(async () => {
+        expect(await supervisor.read(shellId)).toMatchObject({ running: false, exitCode: 0 });
+      });
     } finally {
       await supervisor.dispose().catch(() => undefined);
       outputStore.dispose();
@@ -1039,10 +1041,11 @@ describe("shell-supervisor disposal protection", () => {
       ptyProvider: { backend: "fake", spawn: () => process },
     });
     try {
-      const started = await supervisor.exec("never completes", { waitMs: 5 });
-      expect(started).toMatchObject({ kind: "background", id: "sh_1" });
-      await expect(supervisor.kill("sh_1")).resolves.toBe(true);
-      await expect(supervisor.read("sh_1")).resolves.toMatchObject({ running: false });
+      const started = await supervisor.exec("never completes", { waitMs: 0 });
+      if (started.kind !== "preparing" && started.kind !== "background") throw new Error("expected pending execution");
+      const shellId = await waitForRuntimeShellId(supervisor, started.id);
+      await expect(supervisor.kill(shellId)).resolves.toBe(true);
+      await expect(supervisor.read(shellId)).resolves.toMatchObject({ running: false });
     } finally {
       await supervisor.dispose().catch(() => undefined);
       outputStore.dispose();

@@ -308,7 +308,7 @@ describe("explore through Host router, real ripgrep, and Documents", () => {
     expect(JSON.stringify(unavailable)).not.toContain("otherSessionNeedle");
   });
 
-  it("T2: search-service receives actor and inputContext; explore-service has no draft matcher", async () => {
+  it("search-service receives the actor and authorized input context", async () => {
     const f = await fixture();
     await fs.writeFile(path.join(f.workspace, "a.ts"), "needle\n", "utf8");
     const calls: Array<{
@@ -330,9 +330,6 @@ describe("explore through Host router, real ripgrep, and Documents", () => {
       expect(call.params.limit).toBeUndefined();
       expect(call.ctx.candidateBudget).toEqual(expect.any(Number));
     }
-    const source = await fs.readFile(path.join(import.meta.dirname, "explore-service.ts"), "utf8");
-    expect(source).not.toMatch(/dirtySnapshots/);
-    expect(source).not.toMatch(/draftHits/);
   });
 
   it("T8: stores read-but-omitted support refs and mentions the handle only when more remains", async () => {

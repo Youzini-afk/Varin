@@ -23,11 +23,6 @@ import { formatProjectLine } from './lib/commands-projects.js';
 import { resolveTargetPort } from './lib/cli-api-target.js';
 import type { FetchLike, FetchResponseLike } from './lib/cli-http.js';
 import type { CliOptions } from './lib/cli-types.js';
-import { DEFAULT_TUNNEL_PROVIDER_CAPABILITIES } from './lib/cli-tunnel-capabilities.js';
-import {
-  TUNNEL_PROVIDER_CLOUDFLARE,
-  TUNNEL_PROVIDER_NGROK,
-} from '#application-host/lib/tunnels/types.js';
 import {
   assertAuthenticatedNetworkExposure,
   commands,
@@ -233,12 +228,6 @@ const requestHeader = (options: RequestInit | undefined, name: string): string |
 );
 
 describe('cli args', () => {
-  it('loads fallback tunnel provider capabilities for CLI startup', () => {
-    expect(DEFAULT_TUNNEL_PROVIDER_CAPABILITIES.map((provider) => provider.provider)).toEqual([
-      TUNNEL_PROVIDER_CLOUDFLARE,
-      TUNNEL_PROVIDER_NGROK,
-    ]);
-  });
 
   it('accepts legacy daemon flags as no-ops', () => {
     expect(parseArgs(['serve', '--daemon']).removedFlagErrors).toEqual([]);

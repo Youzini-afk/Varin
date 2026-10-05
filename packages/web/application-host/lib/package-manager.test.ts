@@ -8,8 +8,6 @@ vi.mock('node:child_process', () => ({
 
 const {
   checkForUpdates,
-  detectPackageManager,
-  executeUpdate,
   getCurrentVersion,
   setPackageManagerSpawnSyncForTest,
 } = await import('./package-manager.js');
@@ -360,12 +358,5 @@ describe('getCurrentVersion', () => {
   it('is exported for the CLI update command', () => {
     expect(typeof getCurrentVersion).toBe('function');
     expect(getCurrentVersion()).toMatch(/^\d+\.\d+\.\d+|unknown$/);
-  });
-});
-
-describe('CLI update exports', () => {
-  it('exports package-manager helpers used by the update command', () => {
-    expect(typeof detectPackageManager).toBe('function');
-    expect(typeof executeUpdate).toBe('function');
   });
 });

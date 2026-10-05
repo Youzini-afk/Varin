@@ -61,12 +61,10 @@ describe('Pi turn usage footer', () => {
       assistant('2', 'stop', usage({ cacheRead: 9_000, input: 10_278, output: 64, totalTokens: 19_342 })),
     ]);
 
-    expect(markup.match(/data-pi-assistant-usage="true"/g)).toHaveLength(1);
-    expect(markup).toContain('title="Input: 20,086"');
-    expect(markup).toContain('title="Output: 518"');
-    expect(markup).toContain('title="Cache Read: 9,000"');
-    expect(markup).not.toContain('Cache Write');
-    expect(markup).toContain('title="Total: 29,604"');
+    expect(markup).toContain('20,086');
+    expect(markup).toContain('518');
+    expect(markup).toContain('9,000');
+    expect(markup).toContain('29,604');
   });
 
   test('waits through tool use and live streaming instead of rendering intermediate totals', () => {

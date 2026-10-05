@@ -8,7 +8,7 @@ import { DEFAULT_HARNESS_SETTINGS } from "@varin/protocol";
 import { HostServicesBridge as Bridge } from "../../src/harness/host-services-bridge.js";
 
 describe("Host-backed related tool", () => {
-  it("forwards the anchor and describes the split with lsp.references", async () => {
+  it("validates and forwards the anchor", async () => {
     let forwarded: unknown;
     const bridge = {
       request: async (_method: string, params: unknown) => {
@@ -26,8 +26,6 @@ describe("Host-backed related tool", () => {
       },
     } as unknown as HostServicesBridge;
     const tool = createRelatedTool(bridge, "session");
-    assert.match(tool.description ?? "", /not a positional lsp\.references/i);
-    assert.match(tool.description ?? "", /language.server/i);
     await tool.execute("call", { anchor: "target.ts" }, undefined, undefined, undefined as never);
     assert.deepEqual(forwarded, { anchor: "target.ts" });
     assert.equal(Value.Check(tool.parameters, { anchor: "target.ts" }), true);

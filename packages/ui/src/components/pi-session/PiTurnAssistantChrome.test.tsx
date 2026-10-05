@@ -39,32 +39,27 @@ const renderChrome = (node: React.ReactNode): string => renderToStaticMarkup(
 );
 
 describe('Pi turn assistant chrome', () => {
-  test('renders one accessible waiting header with the snapshot model and busy dots', () => {
+  test('announces waiting and shows the selected model', () => {
     const markup = renderChrome(
       <PiTurnAssistantChrome
         turn={turn()}
         waiting={{ model: { id: 'snapshot-model', provider: 'snapshot-provider' } }}
       />,
     );
-    expect(markup.match(/<header/g)).toHaveLength(1);
     expect(markup).toContain('role="status"');
     expect(markup).toContain('aria-live="polite"');
-    expect(markup).toContain('Varin');
-    expect(markup).not.toContain('>Pi</span>');
     expect(markup).toContain('snapshot-provider/snapshot-model');
   });
 
-  test('lets the real live assistant model take over without adding a second header', () => {
+  test('shows the model that actually answered instead of the selected model', () => {
     const markup = renderChrome(
       <PiTurnAssistantChrome
         turn={turn(assistant('pending'))}
         waiting={{ model: { id: 'snapshot-model', provider: 'snapshot-provider' } }}
       />,
     );
-    expect(markup.match(/<header/g)).toHaveLength(1);
     expect(markup).toContain('runtime-provider/runtime-model');
     expect(markup).not.toContain('snapshot-provider/snapshot-model');
-    expect(markup).not.toContain('16,024');
   });
 
   test('removes the working animation from a completed assistant header', () => {

@@ -18,7 +18,7 @@ import type {
   WorkspaceWorkingStateRootAccess,
 } from "./types.js";
 import { WorkingStateStore, type LocalWorkingStateStorageContext } from "./working-state-store.js";
-import type { WorkspaceRecoveryEngine, WorkspaceRecoveryStorageContext } from "../../recovery/journal-engine.js";
+import type { WorkspaceRecoveryStorageContext } from "../../recovery/journal-engine.js";
 import { measurementFromStates } from "./thread-space.js";
 import { createInMemoryRecoveryDurablePort, type InMemoryRecoveryDurablePort } from "../../recovery/recovery-durable-port.test-helper.js";
 
@@ -477,41 +477,3 @@ export const createTestWorkingStateRootAccess = (
     async (context) => operation(await WorkingStateStore.open(context as never), context),
   ),
 }, durableRecoveryStore);
-
-export type DurableTestWorkingStateRootAccess = WorkspaceWorkingStateRootAccess & {
-  readonly durableRecoveryStore: InMemoryRecoveryDurablePort;
-  withStore<T>(
-    workspaceId: string,
-    purpose: string,
-    operation: (store: WorkingStateStore, context: WorkspaceRecoveryStorageContext) => Promise<T> | T,
-    mode?: "exclusive" | "shared",
-  ): Promise<T>;
-};
-
-/** Production durable-port variant used by integration/kernel acceptance.
- * Keep the legacy SQLite adapter above for its own isolated unit fixtures. */
-export const createDurableTestWorkingStateRootAccess = (
-  recovery: Pick<WorkspaceRecoveryEngine, "withWorkspaceStorage">,
-  durableRecoveryStore: InMemoryRecoveryDurablePort,
-): DurableTestWorkingStateRootAccess => {
-  const withStore: DurableTestWorkingStateRootAccess["withStore"] = (
-    workspaceId,
-    purpose,
-    operation,
-    mode = "exclusive",
-  ) => recovery.withWorkspaceStorage(
-    workspaceId,
-    { mode, purpose },
-    async (context) => operation(await WorkingStateStore.open(context as never), context),
-  );
-  return {
-    durableRecoveryStore,
-    withStore,
-    withBranchStore: (workspaceId, purpose, operation, mode = "exclusive") => withStore(
-      workspaceId,
-      purpose,
-      (store, context) => operation(new LegacyWorkingStateRootAdapter(store, context), context),
-      mode,
-    ),
-  };
-};

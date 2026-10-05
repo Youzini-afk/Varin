@@ -6,7 +6,6 @@ import {
   getMermaidSvgContentBox,
   getMermaidViewerSignature,
   hasMermaidPointerDragMoved,
-  MERMAID_BLOCK_SELECTOR,
   panMermaidViewBox,
   shouldRefreshMermaidViewers,
   zoomMermaidViewBoxAtPoint,
@@ -190,9 +189,5 @@ describe('mermaidViewer', () => {
 
     expect(shouldRefreshMermaidViewers(withoutMermaidBlock)).toBe(false);
     expect(shouldRefreshMermaidViewers(withMermaidBlock)).toBe(true);
-  });
-
-  test('exports the shared Mermaid block selector', () => {
-    expect(MERMAID_BLOCK_SELECTOR).toBe('[data-markdown="mermaid-block"]');
   });
 });
