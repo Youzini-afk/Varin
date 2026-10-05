@@ -38,6 +38,9 @@ Electron stages the executable outside `app.asar`; Web/cloud stage it in package
 The private storage root is `<VARIN_DATA_DIR>/kernel/<hostId>`, with an OS-held owner lock (the
 diagnostic record is not the lock) preventing two Hosts from writing it at once. Built-in Recovery shares
 this root and reports `application-data` with `storageManagement: false`; it is not independently relocatable.
+The source-view partition uses direct kernel record access without a workspace-Recovery decorator.
+Its private directory is not registered as a user Documents workspace or checked against the deployment's
+allowed work directories; user file access still passes through its ordinary Documents authority.
 The public recovery v5 location methods remain available to replacement providers that advertise storage
 management, but they do not move this kernel authority. A process epoch invalidates transient handles after
 restart; Host, authority, worker generation, session, Thread and Run identity are bound into actor grants.

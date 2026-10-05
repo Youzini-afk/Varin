@@ -1131,9 +1131,7 @@ async function main(options: StartWebUiServerOptions = {}): Promise<WebUiServerC
     if (isBotScopeId(scopeId)) return botScopeRoot(scopeId);
     return (await documentsAuthority.inspectWorkspace(scopeId)).root;
   };
-  const scopeDocumentWorkspace = async (scopeId: string): Promise<string> => scopeId === SOURCE_VIEW_STORAGE_SCOPE
-    ? (await documentsAuthority.resolveWorkspace({ path: sourceViewStorageRoot })).workspaceId
-    : isSessionScopeId(scopeId) || isBotScopeId(scopeId)
+  const scopeDocumentWorkspace = async (scopeId: string): Promise<string> => isSessionScopeId(scopeId) || isBotScopeId(scopeId)
       ? (await documentsAuthority.resolveWorkspace({ path: await scopeDirectory(scopeId) })).workspaceId : scopeId;
   const kernelStorageAdapter = new KernelStorageAdapter({
     client: kernelClient,
@@ -2109,7 +2107,8 @@ async function main(options: StartWebUiServerOptions = {}): Promise<WebUiServerC
     return branch.entries.map((entry) => entry.id);
   };
   const harnessWorkingStates = createKernelWorkspaceWorkingStateAccess(kernelStorageAdapter, foundationalRecoveryEngine, kernelRecoveryStore, scopeDocumentWorkspace);
-  const sourceViews = createSourceViewStore(harnessWorkingStates);
+  // Source views own private kernel records, not user workspace recovery or disk mutations.
+  const sourceViews = createSourceViewStore(createKernelWorkspaceWorkingStateAccess(kernelStorageAdapter));
   const retrievalArtifacts = createRetrievalArtifactAccess(harnessWorkingStates);
   const webMaterials = createWebMaterialStore(harnessWorkingStates);
   webMaterialAccess.put = webMaterials.put;

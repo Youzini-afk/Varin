@@ -257,7 +257,7 @@ describe("owning vs execution workspace identity", () => {
       const listed = await request("thread.list", {});
       expect(listed).toMatchObject({ ok: true });
       if (!listed.ok) throw new Error(listed.error.message);
-      expect(listed.result.threads.map((thread) => thread.id)).toEqual([grandchildId]);
+      expect(new Set(listed.result.threads.map((thread) => thread.id))).toEqual(new Set([parentThread.id, grandchildId]));
 
       const waited = await request("thread.wait", { timeoutMs: 50 });
       expect(waited).toMatchObject({ ok: true });

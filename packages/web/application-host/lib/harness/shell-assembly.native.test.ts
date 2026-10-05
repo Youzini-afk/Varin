@@ -94,10 +94,29 @@ describe("production shell assembly", () => {
       respond: async (_session, _request, result) => { response = result; },
     });
     registerHarnessServices(router, host);
-    const request = async <M extends "permission.inspect" | "shell.exec">(method: M, params: HarnessServiceMap[M]["params"]) => {
+    const request = async <M extends "permission.inspect" | "shell.exec" | "shell.read">(method: M, params: HarnessServiceMap[M]["params"]) => {
       await router.processEvent({ kind: "host", actor: identity, envelope: { kind: "event", event: "harness.request",
         data: { requestId: crypto.randomUUID(), method, params } } });
       return response as { ok: boolean; result?: HarnessServiceMap[M]["result"]; error?: { message: string } };
+    };
+    const execute = async (command: string, cwd?: string) => {
+      const started = await request("shell.exec", { command, ...(cwd ? { cwd } : {}), waitMs: 0 });
+      expect(started.ok, started.error?.message).toBe(true);
+      const result = started.result;
+      if (!result || result.kind === "spawn-failed") throw new Error(JSON.stringify(started));
+      if (result.kind === "completed") {
+        expect(result.exitCode).toBe(0);
+        return result;
+      }
+      while (true) {
+        const observed = await request("shell.read", { id: result.id, waitMs: 1000 });
+        expect(observed.ok, observed.error?.message).toBe(true);
+        if (!observed.result) throw new Error("Missing shell observation");
+        if (!observed.result.running) {
+          expect(observed.result.exitCode, observed.result.text).toBe(0);
+          return observed.result;
+        }
+      }
     };
     try {
       const inspected = await request("permission.inspect", { tool: "bash", source: { kind: "harness", id: "harness:bash" },
@@ -107,14 +126,12 @@ describe("production shell assembly", () => {
       const command = process.platform === "win32"
         ? "Set-Content -LiteralPath 'created.txt' -Value 'external-command'"
         : "printf 'external-command\\n' > created.txt";
-      const executed = await request("shell.exec", { command, cwd: external, waitMs: 10_000 });
-      expect(executed, JSON.stringify(executed)).toMatchObject({ ok: true, result: { kind: "completed", exitCode: 0 } });
-      expectCwd(executed.result, external);
+      const executed = await execute(command, external);
+      expectCwd(executed, external);
       expect(readFileSync(join(external, "created.txt"), "utf8").trim()).toBe("external-command");
       expect(existsSync(join(project, "created.txt"))).toBe(false);
-      const next = await request("shell.exec", { command: "echo default-cwd", waitMs: 10_000 });
-      expect(next, JSON.stringify(next)).toMatchObject({ ok: true, result: { kind: "completed", exitCode: 0 } });
-      expectCwd(next.result, project);
+      const next = await execute("echo default-cwd");
+      expectCwd(next, project);
       expect((await host.resolveActor(identity))?.workspaceId).toBe(workspaceId);
     } finally {
       router.dispose();
