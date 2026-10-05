@@ -25,6 +25,10 @@ ordinary Agent memory from Bot memory, and improves tool execution and long-sess
 - Remove Magic Prompts, prompt-template editors and command-template expansion, along with their
   obsolete configuration and tests. Git, review and plan actions, skills and native instruction files remain.
 - Simplify default model instructions and tool descriptions while preserving parsed output contracts.
+- Remove the four built-in configuration Skills and their startup generator; configuration guidance
+  is provided by the settings tools on demand.
+- Filter native Agent choices, dispatch/send parameters and generated team instructions by work focus
+  and enabled state. Refresh them at run boundaries; disabled research roles cannot bypass the switch by inheriting a model.
 
 #### Tool reliability and performance
 
@@ -46,6 +50,9 @@ ordinary Agent memory from Bot memory, and improves tool execution and long-sess
   imported into the new memory list; Bot long-term memory remains on its existing storage path.
 - System-instruction and note changes take effect at the next model request. Native instruction files
   keep their normal Pi loading behavior.
+- Earlier builds generated `varin-research-environment`, `varin-multi-agent-models`,
+  `varin-retrieval-setup` and `varin-remote-experiments` in the Pi skills directory.
+  Delete these guides manually if present; this release stops generating them.
 
 ---
 
@@ -64,6 +71,9 @@ Varin 0.9.23 开放系统提示词编辑和分范围轻记忆，将普通 Agent 
 - 移除魔法提示词、提示词模板编辑与命令模板展开，清理对应配置和过时测试。
   Git、审阅、计划操作、技能及原生指令文件继续可用。
 - 精简默认模型指令和工具描述，保留实际需要解析的输出契约。
+- 移除四份内置配置 Skill 及启动生成器；配置说明由设置工具按需提供。
+- 子 Agent 派发参数和自动团队提示词按工作侧重与启用状态筛选，在运行边界刷新；
+  关闭的科研角色也无法通过继承模型绕过开关。
 
 #### 工具可靠性与性能
 
@@ -79,6 +89,8 @@ Varin 0.9.23 开放系统提示词编辑和分范围轻记忆，将普通 Agent 
 
 - 普通 Agent 轻记忆使用独立存储，旧知识库记录不会自动导入新记忆列表；Bot 长期记忆继续使用原存储。
 - 提示词与记忆修改从下一次模型请求生效，原生指令文件保持 Pi 的加载行为。
+- 旧版在 Pi 技能目录生成的 `varin-research-environment`、`varin-multi-agent-models`、
+  `varin-retrieval-setup`、`varin-remote-experiments` 需手动删除；新版不再自动生成。
 
 [完整提交记录 / Full changelog](https://github.com/Youzini-afk/Varin/compare/v0.9.22...v0.9.23)
 

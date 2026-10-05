@@ -7,6 +7,7 @@ import { createDispatchTool, createSendTool } from "../../src/harness/thread-too
 describe("Native thread dispatch", () => {
   it("uses the current research model for a new dispatch or capability assignment", async () => {
     let request: HarnessRequestData | undefined;
+    const lastRequest = (): HarnessRequestData | undefined => request;
     const bridge = new HostServicesBridge({ sessionId: "caller", emit: (_event, data) => {
       request = data as HarnessRequestData;
       queueMicrotask(() => bridge.respond("caller", request!.requestId, { ok: true, result: { text: "started", threadId: "child", queued: false, accepted: true } }));
@@ -41,7 +42,7 @@ describe("Native thread dispatch", () => {
         capability: "experimental-design", model: "inherit" } as never,
         undefined, undefined, { model: { provider: "caller", id: "main" } } as never);
       assert.equal((result as { isError?: boolean }).isError, undefined);
-      assert.deepEqual((request?.params as { model?: unknown }).model,
+      assert.deepEqual((lastRequest()?.params as { model?: unknown }).model,
         tool.name === "send" ? "inherit" : { providerId: "caller", modelId: "main" });
     }
   });
