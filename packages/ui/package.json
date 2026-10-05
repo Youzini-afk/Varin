@@ -107,7 +107,7 @@
     "tsx": "^4.20.6",
     "tw-animate-css": "^1.3.8",
     "typescript": "~5.9.0",
-    "typescript-eslint": "^8.70.1",
+    "typescript-eslint": "^8.71.0",
     "vite": "^8.3.0",
     "vitest": "^5.0.0"
   }
