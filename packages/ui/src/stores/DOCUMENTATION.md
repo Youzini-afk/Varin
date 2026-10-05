@@ -41,6 +41,10 @@ Examples:
 
 These stores coordinate visible app state, navigation, selected tabs, dialogs, and lightweight feature flags.
 
+`useWorkOverviewStore` retains explicit panel/disclosure choices by runtime and conversation ID.
+Plan, task and other content updates do not write these preferences. Missing choices use the view's
+defaults: the overview is closed, content sections are expanded, and Sources is collapsed.
+
 ### Session / project coordination stores
 
 Examples:

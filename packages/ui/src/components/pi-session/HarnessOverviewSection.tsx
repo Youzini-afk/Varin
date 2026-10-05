@@ -7,16 +7,20 @@ export const HarnessOverviewSection: React.FC<{
   title: string;
   icon: IconName;
   status?: React.ReactNode;
-  defaultOpen?: boolean;
+  open: boolean;
+  onOpenChange: (open: boolean) => void;
   attention?: boolean;
   children: React.ReactNode;
-}> = ({ title, icon, status, defaultOpen = false, attention = false, children }) => {
-  const [open, setOpen] = React.useState(defaultOpen);
+}> = ({ title, icon, status, open, onOpenChange, attention = false, children }) => {
   return (
     <details
       className="group border-b border-border/45 last:border-b-0"
       open={open}
-      onToggle={(event) => setOpen(event.currentTarget.open)}
+      onToggle={(event) => {
+        if (event.target === event.currentTarget && event.currentTarget.open !== open) {
+          onOpenChange(event.currentTarget.open);
+        }
+      }}
     >
       <summary
         className="flex cursor-pointer list-none items-center gap-2 px-3 py-2.5 text-left hover:bg-interactive-hover/45 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-primary [&::-webkit-details-marker]:hidden"

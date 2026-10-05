@@ -8,8 +8,12 @@ import { HarnessThreadsPanel } from './HarnessThreadsPanel';
 import { HarnessThreadStateContext, type HarnessThreadStateValue } from './HarnessThreadStateContext';
 import type { SessionEntriesResult } from '@varin/protocol';
 import type { HarnessThreadSnapshot } from './harnessThreadPresentation';
+import type { WebSource } from '@/stores/useWebSourcesStore';
+import { useWorkOverviewStore } from '@/stores/useWorkOverviewStore';
 
 const mocks = vi.hoisted(() => ({
+  runtimeKey: 'runtime-1',
+  webSources: [] as WebSource[],
   openSession: vi.fn(),
   prefetchSession: vi.fn(),
   timeline: vi.fn(),
@@ -23,6 +27,7 @@ vi.mock('@/lib/gitApiHttp', () => ({ getGitStatus: mocks.getGitStatus }));
 vi.mock('@/components/icon/Icon', () => ({ Icon: () => null }));
 vi.mock('@/components/ui', () => ({ toast: { error: vi.fn(), success: vi.fn() } }));
 vi.mock('@/lib/i18n', () => ({ useI18n: () => ({ t: mocks.translate }) }));
+vi.mock('@/lib/device', () => ({ useDeviceInfo: () => ({ breakpoint: 'xl' }) }));
 vi.mock('motion/react', () => ({
   AnimatePresence: ({ children }: { children: React.ReactNode }) => <>{children}</>,
   motion: {
@@ -53,7 +58,7 @@ vi.mock('@/stores/usePiSessionStore', () => ({
   usePiSessionStore: (select: (state: typeof mocks) => unknown) => select(mocks),
 }));
 vi.mock('@/stores/useWebSourcesStore', () => ({
-  useWebSources: () => [],
+  useWebSources: () => mocks.webSources,
   useWebSourcesStore: () => () => {},
 }));
 vi.mock('./HarnessKnowledgeReviewSection', () => ({ HarnessKnowledgeReviewSection: () => null }));
@@ -100,6 +105,9 @@ let finishPreview: (result: SessionEntriesResult) => void;
 let failPreview: (error: Error) => void;
 
 beforeEach(() => {
+  mocks.runtimeKey = 'runtime-1';
+  mocks.webSources = [];
+  useWorkOverviewStore.setState({ bySession: {} });
   const dom = parseHTML('<!doctype html><html><body></body></html>');
   vi.stubGlobal('window', dom.window);
   vi.stubGlobal('document', dom.document);
@@ -202,7 +210,7 @@ describe('work overview presentation', () => {
         return new Response(JSON.stringify({
           branchLeafId: null,
           blocks: [
-            { label: 'plan', content: '- [x] Inspect\n- [ ] Implement', updatedBy: 'agent', updatedAt: 1 },
+            { label: 'plan', content: '- [x] Inspect\n- [x] Implement', updatedBy: 'agent', updatedAt: 1 },
             { label: 'progress', content: 'Working on tests', updatedBy: 'memory-agent', updatedAt: 2 },
             { label: 'decisions', content: 'Use vitest', updatedBy: 'user', updatedAt: 3 },
           ],
@@ -234,29 +242,44 @@ describe('work overview presentation', () => {
     expect(container.textContent).toContain('harness.overview.memoryDecisions');
     expect(container.textContent).toContain('Use vitest');
     expect(container.textContent).not.toContain('memory-agent');
+    const sections = [...container.querySelectorAll('details')];
+    expect(sections.find((section) => section.firstElementChild?.textContent?.includes('harness.overview.plan'))?.hasAttribute('open')).toBe(true);
+    expect(sections.find((section) => section.firstElementChild?.textContent?.includes('harness.overview.memory'))?.hasAttribute('open')).toBe(true);
   });
 
-  it('opens a floating overview from a shared control row with the workspace panel control to its right', async () => {
-    await act(async () => root.render(
+  it('retains disclosure choices across reopen, session navigation and persistent hydration', async () => {
+    mocks.webSources = [{
+      id: 'source-1', sessionId: 'parent-1', title: 'Reference', url: 'https://example.com',
+      fetchedAt: 1, toolCallId: 'call-1', tool: 'webfetch', pinned: false,
+    }];
+    const render = (sessionId = 'parent-1') => act(async () => root.render(
       <HarnessThreadStateContext.Provider value={state}>
-        <HarnessThreadsPanel workspaceId="workspace-1" parentSessionId="parent-1" fallbackCwd="/parent" />
+        <HarnessThreadsPanel workspaceId="workspace-1" parentSessionId={sessionId} fallbackCwd="/parent" />
       </HarnessThreadStateContext.Provider>,
     ));
+    const section = (title: string) => [...container.querySelectorAll('details')]
+      .find((details) => details.firstElementChild?.textContent?.includes(title))!;
+    const toggleSection = (details: HTMLDetailsElement, open: boolean) => act(async () => {
+      // Linkedom does not implement the native summary/default-toggle action.
+      details.open = open;
+      details.toggleAttribute('open', open);
+      details.dispatchEvent(new window.Event('toggle'));
+    });
+    await render();
 
     const expand = container.querySelector<HTMLButtonElement>('button[aria-label="harness.overview.expand"]');
     const openPanel = container.querySelector<HTMLButtonElement>('button[aria-label="contextPanel.actions.openPanel"]');
     expect(expand).not.toBeNull();
     expect(openPanel).not.toBeNull();
 
-    const controls = container.querySelector('[data-harness-overview-controls="true"]');
-    const buttons = controls?.querySelectorAll('button');
-    expect(buttons?.[0]).toBe(expand);
-    expect(buttons?.[1]).toBe(openPanel);
     expect(container.querySelector('[data-harness-overview-floating="true"]')).toBeNull();
 
     await act(async () => expand!.click());
     expect(container.querySelector('[data-harness-overview-floating="true"]')).not.toBeNull();
-    expect(container.querySelector('aside')).toBeNull();
+    expect(section('harness.overview.threads').hasAttribute('open')).toBe(true);
+    expect(section('harness.overview.sources').hasAttribute('open')).toBe(false);
+    await toggleSection(section('harness.overview.threads'), false);
+    await toggleSection(section('harness.overview.sources'), true);
 
     const outside = document.createElement('textarea');
     document.body.appendChild(outside);
@@ -272,8 +295,41 @@ describe('work overview presentation', () => {
     await act(async () => close.click());
     expect(container.querySelector('[data-harness-overview-floating="true"]')).toBeNull();
     await act(async () => expand!.click());
-    await act(async () => openPanel!.click());
+    expect(section('harness.overview.threads').hasAttribute('open')).toBe(false);
+    expect(section('harness.overview.sources').hasAttribute('open')).toBe(true);
+
+    await render('parent-2');
+    expect(container.querySelector('[data-harness-overview-floating="true"]')).toBeNull();
+    await render();
+    expect(container.querySelector('[data-harness-overview-floating="true"]')).not.toBeNull();
+    expect(section('harness.overview.threads').hasAttribute('open')).toBe(false);
+
+    mocks.runtimeKey = 'runtime-2';
+    await render();
+    expect(container.querySelector('[data-harness-overview-floating="true"]')).toBeNull();
+    mocks.runtimeKey = 'runtime-1';
+    await render();
+    expect(container.querySelector('[data-harness-overview-floating="true"]')).not.toBeNull();
+
+    const { name, storage } = useWorkOverviewStore.persist.getOptions();
+    const saved = await storage!.getItem(name!);
+    await act(async () => {
+      root.render(null);
+      useWorkOverviewStore.setState({ bySession: {} });
+      await storage!.setItem(name!, saved!);
+      await useWorkOverviewStore.persist.rehydrate();
+    });
+    await render();
+    expect(container.querySelector('[data-harness-overview-floating="true"]')).not.toBeNull();
+    expect(section('harness.overview.threads').hasAttribute('open')).toBe(false);
+    expect(section('harness.overview.sources').hasAttribute('open')).toBe(true);
+
+    const workspacePanel = container.querySelector<HTMLButtonElement>('button[aria-label="contextPanel.actions.openPanel"]')!;
+    await act(async () => workspacePanel.click());
     expect(mocks.toggleContextPanel).toHaveBeenCalledWith('/parent');
+    expect(container.querySelector('[data-harness-overview-floating="true"]')).toBeNull();
+    await render('parent-2');
+    await render();
     expect(container.querySelector('[data-harness-overview-floating="true"]')).toBeNull();
   });
 

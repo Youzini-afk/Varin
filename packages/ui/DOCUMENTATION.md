@@ -201,6 +201,9 @@ messages and the composer remain aligned as it opens or closes. It stays open
 while users interact with chat; its toolbar toggle or explicit workspace panel
 switch closes it. The 320px-wide floating panel starts directly with its content
 sections, without a duplicated overview heading or summary-badge row.
+Sections default to expanded except Sources. Explicit section choices and panel visibility are
+persisted per runtime and conversation, including the narrow-screen overlay. Closing/reopening,
+session navigation and data refreshes retain those choices; plan/task completion does not change them.
 
 The desktop Agent shell uses double chevrons in `ContextPanelControls` to show/hide the right icon rail;
 the work-overview control row toggles the last workspace panel directly. Rail

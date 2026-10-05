@@ -5,6 +5,9 @@ private runtime protocol and product surfaces still move together.
 
 ## Unreleased
 
+- Expand work-overview sections by default except Sources. Persist panel visibility and explicit
+  section choices per runtime and conversation across navigation, reopen and reload.
+
 - Remove reusable text snippets and the Library settings group, including `#name` pickers,
   send-time expansion requests, settings actions, translations and obsolete help pages.
 

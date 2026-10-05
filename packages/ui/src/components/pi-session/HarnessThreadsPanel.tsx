@@ -6,7 +6,9 @@ import { toast } from '@/components/ui';
 import { useI18n } from '@/lib/i18n';
 import { subscribeVarinEvents } from '@/lib/varinEvents';
 import { cn } from '@/lib/utils';
+import { useDeviceInfo } from '@/lib/device';
 import { usePiSessionStore } from '@/stores/usePiSessionStore';
+import { EMPTY_WORK_OVERVIEW_CHOICES, useWorkOverviewStore, workOverviewStateKey } from '@/stores/useWorkOverviewStore';
 import {
   parseHarnessThreadMutation,
   parseHarnessThreadSpace,
@@ -102,6 +104,16 @@ export const HarnessThreadsPanel: React.FC<{
   onDesktopOpenChange?: (open: boolean) => void;
 }> = ({ workspaceId, parentSessionId, fallbackCwd, presentation = 'sidebar', title, onDesktopOpenChange }) => {
   const { t } = useI18n();
+  const { breakpoint } = useDeviceInfo();
+  const narrowScreen = breakpoint !== 'xl' && breakpoint !== '2xl';
+  const runtimeKey = usePiSessionStore((state) => state.runtimeKey);
+  const overviewKey = workOverviewStateKey(runtimeKey, parentSessionId);
+  const choices = useWorkOverviewStore((state) => state.bySession[overviewKey] ?? EMPTY_WORK_OVERVIEW_CHOICES);
+  const setDisclosure = useWorkOverviewStore((state) => state.setDisclosure);
+  const overviewOpen = choices.overview ?? false;
+  const narrowOpen = choices.mobile ?? false;
+  const setOverviewOpen = (open: boolean) => setDisclosure(overviewKey, 'overview', open);
+  const setNarrowOpen = (open: boolean) => setDisclosure(overviewKey, 'mobile', open);
   const prefetchSession = usePiSessionStore((state) => state.prefetchSession);
   const [historyPreview, setHistoryPreview] = React.useState<{ result: SessionEntriesResult; brief: string; cwd?: string } | null>(null);
   React.useEffect(() => { setHistoryPreview(null); }, [workspaceId, parentSessionId]);
@@ -130,14 +142,12 @@ export const HarnessThreadsPanel: React.FC<{
   const [editingBlock, setEditingBlock] = React.useState<string | null>(null);
   const [blockDraft, setBlockDraft] = React.useState('');
   const [savingBlock, setSavingBlock] = React.useState(false);
-  const [narrowOpen, setNarrowOpen] = React.useState(false);
   const [convertingThreadId, setConvertingThreadId] = React.useState<string | null>(null);
   const [space, setSpace] = React.useState<WorkspaceThreadSpace | null>(null);
   const [threadAction, setThreadAction] = React.useState<string | null>(null);
   const [confirmDeleteId, setConfirmDeleteId] = React.useState<string | null>(null);
   const [messageDrafts, setMessageDrafts] = React.useState<Record<string, string>>({});
   const [activePdfMaterial, setActivePdfMaterial] = React.useState<ActivePdfMaterial | null>(null);
-  const [overviewOpen, setOverviewOpen] = React.useState(false);
   const [gitStatus, setGitStatus] = React.useState<GitStatus | null>(null);
   const messageRequests = React.useRef(new Map<string, { id: string; text: string; mode: string; inFlight: boolean }>());
   const spaceTargetRef = React.useRef(`${workspaceId}\u0000${parentSessionId}`);
@@ -521,8 +531,6 @@ export const HarnessThreadsPanel: React.FC<{
     setSuggestions([]);
     setKnowledgeDrafts({});
     setEditingBlock(null);
-    setNarrowOpen(false);
-    setOverviewOpen(false);
     setConvertingThreadId(null);
     setGitStatus(null);
     void reloadBlocks(controller.signal).catch((error) => {
@@ -635,10 +643,12 @@ export const HarnessThreadsPanel: React.FC<{
       ) : null}
       {suggestions.length > 0 ? (
         <HarnessOverviewSection
+          key={`${overviewKey}:review`}
           title={t('harness.overview.review')}
           icon="error-warning"
           status={t('harness.overview.reviewCount', { count: suggestions.length })}
-          defaultOpen
+          open={choices.review ?? true}
+          onOpenChange={(open) => setDisclosure(overviewKey, 'review', open)}
           attention
         >
         <HarnessKnowledgeReviewSection
@@ -653,12 +663,14 @@ export const HarnessThreadsPanel: React.FC<{
       ) : null}
       {blockGroups.plan ? (
         <HarnessOverviewSection
+          key={`${overviewKey}:plan`}
           title={t('harness.overview.plan')}
           icon="file-text"
           status={planSummary.total > 0
             ? t('harness.overview.planProgress', { done: planSummary.done, total: planSummary.total })
             : undefined}
-          defaultOpen={planSummary.open > 0 || planSummary.blocked > 0}
+          open={choices.plan ?? true}
+          onOpenChange={(open) => setDisclosure(overviewKey, 'plan', open)}
           attention={planSummary.blocked > 0}
         >
           {editingBlock === blockGroups.plan.label ? (
@@ -731,12 +743,14 @@ export const HarnessThreadsPanel: React.FC<{
 
       {hasOutputs ? (
         <HarnessOverviewSection
+          key={`${overviewKey}:outputs`}
           title={t('harness.overview.outputs')}
           icon="git-branch"
           status={gitDiff.files > 0
             ? t('harness.overview.outputFiles', { count: gitDiff.files })
             : t('harness.overview.outputFiles', { count: pendingThreadDiff.files })}
-          defaultOpen
+          open={choices.outputs ?? true}
+          onOpenChange={(open) => setDisclosure(overviewKey, 'outputs', open)}
         >
           <div className="space-y-2">
             {gitStatus && gitStatus.files.length > 0 ? (
@@ -807,13 +821,15 @@ export const HarnessThreadsPanel: React.FC<{
 
       {hasThreadRecords ? (
         <HarnessOverviewSection
+          key={`${overviewKey}:threads`}
           title={t('harness.overview.threads')}
           icon="git-branch"
           status={t('harness.overview.threadsSummary', {
             active: threadSummary.active + threadSummary.attention + threadSummary.integrationPending,
             completed: threadSummary.completed,
           })}
-          defaultOpen={threadSummary.active + threadSummary.attention + threadSummary.integrationPending > 0}
+          open={choices.threads ?? true}
+          onOpenChange={(open) => setDisclosure(overviewKey, 'threads', open)}
           attention={threadSummary.attention > 0}
         >
             <div className="flex items-center justify-end gap-2 pb-1.5">
@@ -1154,9 +1170,12 @@ export const HarnessThreadsPanel: React.FC<{
       ) : null}
       {webSources.length > 0 ? (
         <HarnessOverviewSection
+          key={`${overviewKey}:sources`}
           title={t('harness.overview.sources')}
           icon="global"
           status={webSources.length}
+          open={choices.sources ?? false}
+          onOpenChange={(open) => setDisclosure(overviewKey, 'sources', open)}
         >
           <div className="space-y-1">
               {[...webSources].sort((left, right) => Number(right.pinned) - Number(left.pinned) || right.fetchedAt - left.fetchedAt).map((source) => (
@@ -1213,9 +1232,12 @@ export const HarnessThreadsPanel: React.FC<{
       ) : null}
       {memoryBlocks.length > 0 ? (
         <HarnessOverviewSection
+          key={`${overviewKey}:memory`}
           title={t('harness.overview.memory')}
           icon="brain"
           status={memoryBlocks.length}
+          open={choices.memory ?? true}
+          onOpenChange={(open) => setDisclosure(overviewKey, 'memory', open)}
         >
           <div className="space-y-2">
             {memoryBlocks.map((block) => {
@@ -1312,7 +1334,16 @@ export const HarnessThreadsPanel: React.FC<{
         </DialogContent>
       </Dialog>
       {presentation === 'inline' ? (
-        <details className="group shrink-0 border-b border-border/60">
+        <details
+          key={overviewKey}
+          className="group shrink-0 border-b border-border/60"
+          open={overviewOpen}
+          onToggle={(event) => {
+            if (event.target === event.currentTarget && event.currentTarget.open !== overviewOpen) {
+              setOverviewOpen(event.currentTarget.open);
+            }
+          }}
+        >
           <summary className="flex cursor-pointer list-none items-center gap-2 px-4 py-2 typography-meta text-muted-foreground hover:text-foreground sm:px-6">
             <Icon name="arrow-right-s" className="size-3.5 transition-transform group-open:rotate-90" />
             <span>{title ?? t('harness.overview.title')}</span>
@@ -1332,7 +1363,7 @@ export const HarnessThreadsPanel: React.FC<{
             <TooltipTrigger asChild>
               <button
                 type="button"
-                onClick={() => setOverviewOpen((open) => !open)}
+                onClick={() => setOverviewOpen(!overviewOpen)}
                 aria-expanded={overviewOpen}
                 aria-label={t(overviewOpen ? 'harness.overview.collapse' : 'harness.overview.expand')}
                 className={cn(
@@ -1393,7 +1424,7 @@ export const HarnessThreadsPanel: React.FC<{
       </div>
       <HarnessSessionStateTrigger count={activityCount} attention={attentionCount > 0} onOpen={() => setNarrowOpen(true)} />
       <MobileOverlayPanel
-        open={narrowOpen}
+        open={narrowOpen && narrowScreen}
         onClose={() => setNarrowOpen(false)}
         title={t('harness.overview.title')}
         className="h-[min(82dvh,720px)]"
