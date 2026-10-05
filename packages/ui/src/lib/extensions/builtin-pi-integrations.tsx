@@ -3,7 +3,6 @@ import React from 'react';
 import {
   VARIN_BUILTIN_AGENTS_EXTENSION,
   VARIN_BUILTIN_EXTENSION_DEFINITIONS,
-  VARIN_BUILTIN_FLEET_EXTENSION,
   VARIN_BUILTIN_HARNESS_EXTENSION,
   VARIN_BUILTIN_MCP_EXTENSION,
   VARIN_BUILTIN_PLUGIN_SETTINGS_EXTENSION,
@@ -16,7 +15,6 @@ import {
 import type { SurfaceActivation, SurfaceActivationContext } from '@varin/extension-surface';
 import { AgentsPage } from '@/components/sections/agents/AgentsPage';
 import { AgentsSidebar } from '@/components/sections/agents/AgentsSidebar';
-import { FleetPage } from '@/components/sections/fleet';
 import {
   HarnessSettingsPage,
   type HarnessSettingsSection,
@@ -79,8 +77,6 @@ const pageImplementation = (
         renderSidebar: options => <WorkbenchOwnedView target={WORKBENCH_REPLACEMENT_TARGETS.agents} region="sidebar"
           onItemSelect={options.onItemSelect} fallback={<AgentsSidebar onItemSelect={options.onItemSelect} />} />,
       };
-    case VARIN_BUILTIN_FLEET_EXTENSION.manifest.id:
-      return { renderContent: () => <FleetPage /> };
     case VARIN_BUILTIN_MCP_EXTENSION.manifest.id:
       return {
         isAvailable: (context) => context.mcpInstalled,

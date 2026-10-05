@@ -108,7 +108,6 @@ const MOBILE_SETTINGS_PAGES = [
   'runtime',
   'providers',
   'agents',
-  'fleet',
   'commands',
   'skills',
   'usage',

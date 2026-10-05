@@ -294,7 +294,6 @@ export const SubagentsSettings: React.FC<SubagentsSettingsProps> = ({ runtimeTar
       <PluginRuntimeNote>{t('settings.varin.pluginSettings.subagents.runtimeNote')}</PluginRuntimeNote>
       <div className="flex flex-wrap justify-end gap-2">
         <Button type="button" variant="outline" size="sm" onClick={() => setSettingsPage('agents')}>{t('settings.page.agents.title')}</Button>
-        <Button type="button" variant="outline" size="sm" onClick={() => setSettingsPage('fleet')}>{t('settings.page.fleet.title')}</Button>
       </div>
       <SettingsChipGroup value={panel} options={panelOptions} onChange={setPanel} aria-label={tx('settings.varin.pluginSettings.subagents.panel.aria')} />
 
@@ -368,7 +367,6 @@ export const SubagentsSettings: React.FC<SubagentsSettingsProps> = ({ runtimeTar
             <SettingsControlGroup title={tx('settings.varin.pluginSettings.subagents.delegation.behavior')} contentClassName="space-y-4">
               <PluginBooleanField {...runtimeFields} path={['asyncByDefault']} label={tx('settings.varin.pluginSettings.subagents.field.asyncByDefault')} defaultValue={false} />
               <PluginBooleanField {...runtimeFields} draft={waitToolDraft} path={['waitTool', 'enabled']} label={tx('settings.varin.pluginSettings.subagents.field.waitTool')} defaultValue />
-              <PluginBooleanField {...runtimeFields} path={['fleetView']} label={tx('settings.varin.pluginSettings.subagents.field.fleetView')} defaultValue />
               <PluginOptionalBooleanField {...proactiveFields} path={['proactiveSkillSubagents', 'enabled']} label={tx('settings.varin.pluginSettings.subagents.field.proactiveDelegation')} />
               <PluginNumberField {...runtimeFields} path={['maxSubagentDepth']} label={tx('settings.varin.pluginSettings.subagents.field.maximumDepth')} defaultValue={2} min={0} />
               <PluginNumberField {...runtimeFields} path={['globalConcurrencyLimit']} label={tx('settings.varin.pluginSettings.subagents.field.globalConcurrency')} defaultValue={20} min={1} />

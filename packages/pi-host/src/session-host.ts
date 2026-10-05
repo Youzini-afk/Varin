@@ -52,8 +52,6 @@ import type {
   PiConfigTextRoot,
   PiConfigWatchSubscription,
   PiConfigWatchTarget,
-  PiFleetActionResult,
-  PiFleetSnapshot,
   PiMcpConfigSnapshot,
   PiResourceCatalogSnapshot,
   PiResourceDescriptor,
@@ -119,7 +117,6 @@ import {
   createAgentProviderBridgeExtension,
 } from "./agent-providers/bridge.js";
 import { AgentProviderRegistry } from "./agent-providers/registry.js";
-import { findPiSubagentsTool } from "./agent-providers/pi-subagents-provider.js";
 import { ConfigTextFileEditor, resolveConfigDocumentPath } from "./config-text-file-editor.js";
 import { resolveConfigTextAuthority } from "./config-text-authority-resolver.js";
 import { ConfigWatchManager } from "./config-watch-manager.js";
@@ -128,11 +125,7 @@ import { ExtensionUiBridge } from "./extension-ui-bridge.js";
 import { applyTopLevelJsonChanges, JsonObjectFileEditor } from "./json-object-file-editor.js";
 import { toJsonValue } from "./json.js";
 import { ProjectTrustController } from "./project-trust-controller.js";
-import { FleetProviderRegistry, createFleetRegistryExtension } from "./fleet/registry.js";
-import { PiBackgroundTasksFleetAdapter } from "./fleet/pi-background-tasks-adapter.js";
-import { VarinHarnessFleetAdapter } from "./fleet/varin-harness-adapter.js";
 import { packageManifestFromPath, packageNameFromSource } from "./package-descriptor.js";
-import { PiSubagentsFleetBridge } from "./pi-subagents-fleet-bridge.js";
 import {
   createPiMcpConfigBridgeExtension,
   PiMcpConfigBridge,
@@ -226,39 +219,6 @@ function permissionJudgeFacts(toolName: string, params: Record<string, unknown>)
   }
   if (toolName === "dispatch") return { preset: params.preset, task: params.task };
   return params;
-}
-
-function overlayFleetExtensionLoadErrors(
-  snapshot: PiFleetSnapshot,
-  session: AgentSession,
-): PiFleetSnapshot {
-  const extensions = session.resourceLoader.getExtensions();
-  const overlay = (providerId: string, needle: string, incompatibleIssue?: string) => {
-    const provider = snapshot.providers.find((entry) => entry.id === providerId);
-    if (provider?.state !== "unavailable") return snapshot;
-    const loadError = extensions.errors.find((entry) => entry.path.toLowerCase().includes(needle));
-    if (loadError) {
-      snapshot = {
-        ...snapshot,
-        providers: snapshot.providers.map((entry) => entry.id === providerId
-          ? { ...entry, issue: loadError.error, state: "degraded" as const }
-          : entry),
-      };
-      return snapshot;
-    }
-    if (providerId === "pi-subagents" && incompatibleIssue && findPiSubagentsTool(session)) {
-      snapshot = {
-        ...snapshot,
-        providers: snapshot.providers.map((entry) => entry.id === providerId
-          ? { ...entry, issue: incompatibleIssue, state: "incompatible" as const }
-          : entry),
-      };
-    }
-    return snapshot;
-  };
-  overlay("pi-subagents", "pi-subagents", "The loaded pi-subagents version does not expose fleetStatus v1");
-  overlay("pi-background-tasks", "pi-background-tasks");
-  return snapshot;
 }
 
 function hasVarinTrustRequiringProjectResources(cwd: string): boolean {
@@ -604,7 +564,6 @@ export class SessionHost {
   readonly auth: ProviderAuthBridge;
   readonly #providerInteractions = new Map<string, ProviderInteraction>();
   #agentProviders: AgentProviderBridge | undefined;
-  #fleet: FleetProviderRegistry | undefined;
   #mcpConfig: PiMcpConfigBridge | undefined;
   #runtime: AgentSessionRuntime | undefined;
   #turnIndex = 0;
@@ -1937,29 +1896,6 @@ export class SessionHost {
     input: JsonValue | undefined,
   ): Promise<PiAgentProviderActionResult> {
     return this.#agentProviderRegistry().action(providerId, action, agentId, input);
-  }
-
-  async fleetStatus(sessionId: string): Promise<PiFleetSnapshot> {
-    this.assertSession(sessionId);
-    const snapshot = await this.fleet.status(sessionId);
-    return overlayFleetExtensionLoadErrors(snapshot, this.session);
-  }
-
-  async fleetAction(
-    sessionId: string,
-    providerId: string,
-    action: string,
-    entryKey: string | undefined,
-    input: JsonValue | undefined,
-  ): Promise<PiFleetActionResult> {
-    this.assertSession(sessionId);
-    return this.fleet.action({
-      action,
-      ...(entryKey === undefined ? {} : { entryKey }),
-      ...(input === undefined ? {} : { input }),
-      providerId,
-      sessionId,
-    });
   }
 
   mcpConfigSnapshot(): Promise<PiMcpConfigSnapshot> {
@@ -3572,14 +3508,6 @@ export class SessionHost {
       const serviceRef: { current?: AgentSessionServices } = {};
       const agentProviders = new AgentProviderBridge();
       this.#agentProviders = agentProviders;
-      const fleet = new FleetProviderRegistry([
-        new PiSubagentsFleetBridge(),
-        new PiBackgroundTasksFleetAdapter(),
-        ...(this.#harnessThreadRuntimeEnabled && this.#sessionToolAllowlist === undefined
-          ? [new VarinHarnessFleetAdapter(hostServicesBridge)]
-          : []),
-      ]);
-      this.#fleet = fleet;
       const mcpConfig = new PiMcpConfigBridge();
       this.#mcpConfig = mcpConfig;
       const services = await createAgentSessionServices({
@@ -3619,11 +3547,6 @@ export class SessionHost {
               factory: createExtensionStateBridgeExtension(this.#emit),
               hidden: true,
               name: "varin-extension-state-bridge",
-            },
-            {
-              factory: createFleetRegistryExtension(fleet),
-              hidden: true,
-              name: "varin-fleet-registry",
             },
             {
               factory: createPiMcpConfigBridgeExtension(mcpConfig),
@@ -4224,13 +4147,7 @@ export class SessionHost {
     this.#runtime = undefined;
     if (runtime) await runtime.dispose();
     this.#agentProviders = undefined;
-    this.#fleet = undefined;
     this.#mcpConfig = undefined;
-  }
-
-  get fleet(): FleetProviderRegistry {
-    if (!this.#fleet) throw new HostError("fleet_unavailable", "Fleet is unavailable");
-    return this.#fleet;
   }
 
   get mcpConfig(): PiMcpConfigBridge {

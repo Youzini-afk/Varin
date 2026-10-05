@@ -978,28 +978,6 @@ async function dispatchRuntimeRequestUnchecked(
       return { accepted };
     }
 
-    case "fleet.status": {
-      const sessionId = requireString(input, "sessionId");
-      return broker.requestForSession(sessionId, "fleet.status", { sessionId });
-    }
-
-    case "fleet.action": {
-      rejectUnknownKeys(
-        input,
-        ["action", "entryKey", "input", "providerId", "sessionId"],
-        "fleet.action",
-      );
-      const sessionId = requireString(input, "sessionId");
-      const entryKey = optionalString(input, "entryKey");
-      return broker.requestForSession(sessionId, "fleet.action", {
-        action: requireString(input, "action"),
-        ...(entryKey === undefined ? {} : { entryKey }),
-        ...(input.input === undefined ? {} : { input: input.input as JsonValue }),
-        providerId: requireString(input, "providerId"),
-        sessionId,
-      });
-    }
-
     case "recovery.status": {
       const sessionId = requireString(input, "sessionId");
       return broker.requestForSession(sessionId, method, { sessionId });

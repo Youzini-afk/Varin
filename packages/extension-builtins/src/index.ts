@@ -210,23 +210,6 @@ export const VARIN_BUILTIN_AGENTS_EXTENSION = definition({
   })],
 });
 
-export const VARIN_BUILTIN_FLEET_EXTENSION = definition({
-  id: "varin.builtin.pi-fleet",
-  displayName: "Pi Fleet Workbench",
-  piPackages: ["pi-subagents", "pi-background-tasks"],
-  contributions: [pageContribution({
-    group: "pi",
-    icon: "pulse",
-    id: "varin.builtin.pi-fleet.page.fleet",
-    keywords: ["fleet", "subagent", "delegation", "tasks", "running", "background", "eventbus", "logs"],
-    kind: "single",
-    order: 42,
-    slug: "fleet",
-    title: "Fleet",
-    titleKey: "settings.page.fleet.title",
-  })],
-});
-
 export const VARIN_BUILTIN_MCP_EXTENSION = definition({
   id: "varin.builtin.pi-mcp",
   displayName: "Pi MCP Workbench",
@@ -661,7 +644,6 @@ export const VARIN_BUILTIN_EXTENSION_DEFINITIONS: readonly VarinBuiltinExtension
   VARIN_BUILTIN_RESEARCH_WORKBENCH_EXTENSION,
   VARIN_BUILTIN_BOT_WORKSPACE_EXTENSION,
   VARIN_BUILTIN_AGENTS_EXTENSION,
-  VARIN_BUILTIN_FLEET_EXTENSION,
   VARIN_BUILTIN_MCP_EXTENSION,
   VARIN_BUILTIN_PLUGIN_SETTINGS_EXTENSION,
   VARIN_BUILTIN_RECOVERY_EXTENSION,

@@ -51,7 +51,7 @@ source checkouts used for the audit were fast-forwarded to their tracked upstrea
 | Extension | Source reviewed | Adapter result |
 | --- | --- | --- |
 | `pi-subagents` | npm/source `0.55.0` | Removed the deleted durable-chain catalog, accepted grouped runtime output, and added the current provider/thinking/output overrides. |
-| `pi-background-tasks` | npm/source `2.4.2` | EventBus v1 and Fleet ownership are unchanged; no adapter change. |
+| `pi-background-tasks` | npm/source `2.4.2` | Optional native package; Varin does not provide a dedicated task-state adapter. |
 | `@cortexkit/pi-magic-context` | npm `0.38.1`; source tag `0.39.0` | Added Todo/Mural controls and `/todos`; 0.39 installations write Pi model execution under `historian.pi` / `dreamer.pi`, while plugin-supported legacy fields remain visible until migrated. |
 | `pi-openai-codex-compat` | npm/source `0.0.9` | Recommendation now uses the stable tag and exposes `applyPatchDebug`. |
 | `pi-observational-memory` | npm/source `3.0.4` | Native settings and public commands are unchanged; no adapter change. |
@@ -73,8 +73,8 @@ Each row is the public contract Varin consumes. Varin owns none of these files o
 | --- | --- | --- |
 | `pi-wtf` | Registered prompt-repair commands | Plugin-owned `wtf.json` |
 | `pi-workspace-history` | Focused native configuration plus ordinary registered commands, independent of Varin recovery | Plugin-owned history store |
-| `pi-subagents` | Public `subagents:rpc:v1` with advertised `fleetStatus: { version: 1 }`; provider-owned agent management tool | Scoped Pi `settings.json`, Agent Markdown, and global runtime JSON |
-| `pi-background-tasks` | Public EventBus v1 `request`/`response`/`terminal` for Fleet run, bounded logs, kill | Plugin-owned task store |
+| `pi-subagents` | Provider-owned agent management tool, registered tools/commands and public entries | Scoped Pi `settings.json`, Agent Markdown, and global runtime JSON |
+| `pi-background-tasks` | Ordinary Pi tools/commands and plugin UI when explicitly installed; no task-state aggregation | Plugin-owned task store |
 | `pi-mcp-adapter` | Public `status/v1` snapshots and read-only `configCatalog/v1`; adapter commands | Adapter-reported JSON/JSONC sources (six in normal mode, one in exclusive mode) |
 | `pi-web-access` | Registered command catalog for Curator, account diagnostics, stored results | Agent-level `web-search.json` |
 | `@cortexkit/pi-magic-context` | Registered `ctx-*` commands; native Pi status component; public custom entries | CortexKit user/project JSONC |
@@ -92,10 +92,9 @@ Each row is the public contract Varin consumes. Varin owns none of these files o
   `varin.builtin.recovery` provider owns affected-file checkpoints, restore, undo, retention, and
   crash reconciliation. `pi-workspace-history` and `pi-wtf` remain optional Pi packages whose own
   commands and settings never satisfy or replace that service.
-- **Fleet** is a registry of Host adapters keyed by `providerId + key`. One degraded provider does
-  not hide another. The public DTO carries kind, state, name, and advertised actions only; private
-  paths, PIDs, output files, and plugin kill messages never reach the renderer, and Varin does not
-  read `.pi/tasks` or parse terminal text.
+- **Live work** appears in the owning conversation and work overview. Native child tasks use the
+  Harness registry and events; background shell tools expose their existing terminal. Pi plugin
+  tasks use their ordinary registered tools/UI, without a parallel settings task monitor.
 - **MCP** consumes the adapter's status and effective-server projection and edits one revisioned
   native source at a time. Varin never merges the sources in the renderer and never handles
   transports, OAuth, or the credential store. The catalog excludes arguments, environment, headers,

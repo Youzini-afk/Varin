@@ -5,6 +5,10 @@ private runtime protocol and product surfaces still move together.
 
 ## Unreleased
 
+- Remove the Fleet settings workbench, its runtime API, provider aggregation and plugin task bridges.
+  Native subagent work remains in the conversation/work overview, and background commands remain in
+  chat tool cards and terminals.
+
 - Reconcile filesystem watcher resets/recovery incrementally instead of rereading every indexed file.
   Stable inventories skip embedding-model preparation and generation checkpoints; metadata skips no
   longer manufacture missing-watch coverage gaps. Distinguish index construction from code-relation

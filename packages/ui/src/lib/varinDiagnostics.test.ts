@@ -34,8 +34,6 @@ vi.doMock('@/lib/pi-runtime/client', () => ({
               target,
               'skill',
             );
-          case 'fleet.status':
-            return (await import('@/lib/pi-runtime/fleet')).getPiFleetStatus(String(params.sessionId));
           case 'recovery.status':
             return {
               actions: ['navigate', 'undo'],
@@ -59,7 +57,6 @@ vi.doMock('@/lib/pi-runtime/client', () => ({
       capabilities: {
         agentProviders: true,
         extensionUi: true,
-        fleet: true,
         models: true,
         packages: true,
         providerConfiguration: true,
@@ -166,31 +163,6 @@ vi.doMock('@/lib/pi-runtime/resources', () => ({
       }],
     };
   },
-}));
-
-vi.doMock('@/lib/pi-runtime/fleet', () => ({
-  getPiFleetStatus: async () => ({
-    entries: [{
-      actions: [],
-      agent: 'Historian',
-      description: 'private task contents',
-      key: 'agent-1',
-      kind: 'delegated-agent',
-      name: 'Historian',
-      providerId: 'magic-context',
-      startedAt: 1,
-      state: 'running',
-      tokens: { input: 2, output: 3, total: 5 },
-    }],
-    omitted: 0,
-    providers: [{
-      id: 'magic-context',
-      label: 'Magic Context',
-      source: 'https://token:secret-token@example.test/fleet.git',
-      state: 'active',
-    }],
-    totalActive: 1,
-  }),
 }));
 
 vi.doMock('@varin/application-client', () => ({
@@ -309,7 +281,6 @@ describe('Varin diagnostics', () => {
     expect(report.context.session?.id).toBe('session-1');
     expect(report.catalogs.packages.ok && report.catalogs.packages.value.total).toBe(1);
     expect(report.catalogs.agents.ok && report.catalogs.agents.value.providers[0]?.id).toBe('magic-context');
-    expect(report.integrations.fleet.ok && report.integrations.fleet.value.totalActive).toBe(1);
     expect(report.integrations.recovery.ok && report.integrations.recovery.value.available).toBe(true);
     expect(packageTargets).toEqual([{ sessionId: 'session-1' }]);
     expect(agentTargets).toEqual([{ sessionId: 'session-1' }]);
@@ -318,14 +289,13 @@ describe('Varin diagnostics', () => {
     ]);
   });
 
-  test('keeps credentials, raw plugin sources, fleet goals, and unknown health fields out of the report', async () => {
+  test('keeps credentials, raw plugin sources, session contents, and unknown health fields out of the report', async () => {
     const report = await buildVarinDiagnosticsReport();
 
     expect(report).toContain('https://runtime.example/health');
     expect(report).toContain('magic-context');
     expect(report).not.toContain('secret-token');
     expect(report).not.toContain('must-not-be-copied');
-    expect(report).not.toContain('private task contents');
     expect(report).not.toContain('private recap contents');
     expect(report).not.toContain('private suggestion contents');
     expect(report).not.toContain('private goal note');

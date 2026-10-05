@@ -57,7 +57,7 @@ package must not silently mutate the Varin extension's installation or layout st
 | Pi Packages | Install, enable, disable, update, remove, scope, source, version, reload state | Extension-specific configuration |
 | Plugin Settings | First-class GUI adapters plus advanced native document editing | Package installation semantics or copied plugin state |
 | Agents | Unified provider catalog and provider-advertised lifecycle actions | A universal agent schema that overrides providers |
-| Fleet | Live and recent delegated work, task graph, controls, artifacts | Agent definitions or terminal-text parsing |
+| Conversation / work overview | Native child work, progress, results and controls; shell messages attach existing terminals | Reusable agent definitions or a separate settings task monitor |
 | Commands | Read-only live slash-command catalog and provenance | A second command registry |
 | Prompts | Pi-native `.md` prompt templates through the resource loader | OpenCode command files or extension commands |
 | Skills | Pi resource discovery/management when supported by the loader | An OpenCode skills store |
@@ -256,36 +256,19 @@ Agents consumes every current provider action advertised by the extension: creat
 update, delete, eject, enable, disable, reset, and model-resolution inspection. It does not stop at
 displaying action badges.
 
-Fleet is a separate live-work surface. It is provider-neutral: each Host adapter reports its own
-`active` / `degraded` / `incompatible` / `unavailable` state, and the registry merges entries under
-`providerId + key`. The page is master/detail (list then detail on narrow panes) and does not parse
-plugin wire in the renderer.
-
-Implemented Fleet providers:
-
-- `pi-subagents` after `subagents:rpc:v1` advertises `fleetStatus: { version: 1 }`. Entries are
-  `delegated-agent` / `running`, with agent/role, caller-facing goal as `description`, model, effort,
-  timing, and token totals. The host drops RPC text, tool details, run IDs, and async paths. Native
-  inspector, stop selector, and doctor remain command-backed.
-- `pi-background-tasks` through published EventBus v1
-  (`pi-background-tasks:request:v1` / `response:v1` / `terminal:v1`). `isAgent:true` becomes
-  `background-agent`; other tasks become `background-task`; plugin `killed` becomes `stopped`.
-  Provider `run` and entry `logs` / `kill` are advertised on the DTO. The Host omits `command`,
-  `cwd`, output paths, PIDs, and the plugin kill message. There is no Plugin Settings schema and no
-  `.pi/tasks` reader.
-
-Per-entry controls render only for DTO actions Varin knows how to invoke (`logs`, `kill`, `run`).
-Richer workflow graphs remain a later public-contract slice.
+Live work belongs to its conversation. Native child tasks appear through the Harness registry and
+events in the chat/work overview; native background commands appear in tool cards with terminal
+attachment. Optional Pi plugins continue to own their tools, commands and public custom entries.
+The former Fleet settings page, runtime DTO/RPC, status polling and dedicated provider bridges
+were removed on 2026-10-05. Settings owns reusable agent definitions and plugin configuration.
 
 Acceptance:
 
 - settings round-trip unknown keys at both scopes;
 - provider-owned actions update the catalog without a renderer refresh;
-- an async child task appears in its parent session and Fleet with structured state;
-- a background-task EventBus fixture can run, list mixed running/recent work, load bounded logs
-  without a file path, stop a running task, and survive session replacement without leaking stale
-  rows;
-- unavailable or malformed provider contracts degrade only that provider, not parsed terminal text.
+- an async native child task appears in its parent conversation/work overview with structured state;
+- background shell output remains in its tool message and can attach the existing terminal;
+- provider-owned agent definitions remain independent of live task presentation.
 
 ### 5.2 Magic Context
 
@@ -609,7 +592,7 @@ parse their notification text into status or copy metrics into Varin state.
 1. Recovery correctness and sidebar controls, because the host operations already exist and the
    message-level contract is user-facing today.
 2. Shared adapter shell and capability states.
-3. Subagents settings, provider lifecycle actions, and Fleet projection.
+3. Subagents settings and provider lifecycle actions; live work stays in the owning conversation.
 4. Magic Context schema-complete settings and command operations.
 5. Web Access advanced routing/security and public runtime status when available.
 6. MCP provenance improvements without replacing its native panel.
@@ -619,8 +602,7 @@ parse their notification text into status or copy metrics into Varin state.
    command catalog.
 10. Hermes Memory settings over its single native agent-root JSON authority and command-only
    runtime observation.
-11. Provider-neutral Fleet plus `pi-background-tasks` EventBus v1 (list, run, bounded logs, stop)
-   without a fabricated settings schema.
+11. Removed: the standalone Fleet workbench and its dedicated task-provider aggregation.
 12. RTK Optimizer over its one native strict-JSON authority, with command-only runtime observation
    and no fork or old-Pi compatibility layer.
 13. Cross-page navigation, unknown-plugin discovery, and final removal of superseded pages after

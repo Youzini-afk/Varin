@@ -112,7 +112,6 @@ export type ThinkingLevel = (typeof THINKING_LEVELS)[number];
 export interface HostCapabilities {
   agentProviders: boolean;
   extensionUi: boolean;
-  fleet: boolean;
   models: boolean;
   packages: boolean;
   providerConfiguration: boolean;
@@ -424,74 +423,6 @@ export interface PiAgentProviderActionResult {
   data?: JsonValue;
   message: string;
   providerId: string;
-  success: boolean;
-}
-
-export type PiFleetProviderState = "active" | "degraded" | "incompatible" | "unavailable";
-
-export type PiFleetEntryKind = "background-agent" | "background-task" | "delegated-agent";
-export type PiFleetEntryState = "completed" | "failed" | "running" | "stopped";
-export type PiFleetActionScope = "entry" | "provider";
-
-export interface PiFleetActionDescriptor {
-  action: string;
-  destructive?: boolean;
-  scope: PiFleetActionScope;
-}
-
-export interface PiFleetProviderSnapshot {
-  actions?: PiFleetActionDescriptor[];
-  bridgeVersion?: number;
-  id: string;
-  issue?: string;
-  label: string;
-  source?: string;
-  state: PiFleetProviderState;
-}
-
-export interface PiFleetEntry {
-  actions: PiFleetActionDescriptor[];
-  agent?: string;
-  bytesWritten?: number;
-  description?: string;
-  effort?: string;
-  endedAt?: number;
-  error?: string;
-  key: string;
-  kind: PiFleetEntryKind;
-  model?: string;
-  name: string;
-  providerId: string;
-  role?: string;
-  startedAt: number;
-  state: PiFleetEntryState;
-  tokens?: {
-    input: number;
-    output: number;
-    total: number;
-  };
-}
-
-export interface PiFleetSnapshot {
-  entries: PiFleetEntry[];
-  omitted: number;
-  providers: PiFleetProviderSnapshot[];
-  totalActive: number;
-}
-
-export interface PiFleetLogsData {
-  bytesRead: number;
-  tail: boolean;
-  text: string;
-  truncated: boolean;
-}
-
-export interface PiFleetActionResult {
-  entry?: PiFleetEntry;
-  logs?: PiFleetLogsData;
-  message: string;
-  providerId: string;
-  snapshot: PiFleetSnapshot;
   success: boolean;
 }
 

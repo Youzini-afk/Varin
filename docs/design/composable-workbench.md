@@ -23,7 +23,7 @@ Profile 或 Host ownership。
 
 Varin 是一套可由 Varin 扩展重新组合乃至替换完整 UI/UX 的工作空间平台，当前已交付两套官方工作形态：
 
-- **Agent Workspace**：会话、任务、Fleet、上下文与恢复工作流居中；
+- **Agent Workspace**：会话、任务、上下文与恢复工作流居中；任务呈现在所属会话与工作概览中；
 - **IDE Workbench**：项目、编辑器、搜索、Git、终端、诊断与调试居中，Agent 是可停靠的一等工作面板。
 
 二者不是 Varin Core 中的两个硬编码 mode，也不是两套应用。它们是普通的第一方 Varin 扩展和 Workbench Profile。用户可以：

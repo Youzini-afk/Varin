@@ -869,14 +869,10 @@ export const PluginsPage: React.FC = () => {
                         variant="outline"
                         size="xs"
                         disabled={isBusy}
-                        onClick={() => item.workbench === 'fleet' && configured.installed
-                          ? setSettingsPage('fleet')
-                          : openPackageConfiguration(configured)}
+                        onClick={() => openPackageConfiguration(configured)}
                         className="!font-normal"
                       >
-                        {item.workbench === 'fleet' && configured.installed
-                          ? t('settings.varin.plugins.actions.openFleet')
-                          : t('settings.varin.plugins.actions.configure')}
+                        {t('settings.varin.plugins.actions.configure')}
                       </Button>
                     </div>
                   ) : null}

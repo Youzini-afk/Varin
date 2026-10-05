@@ -4,7 +4,6 @@ interface RecommendedPackage {
   descriptionKey: I18nKey;
   name: string;
   source: string;
-  workbench?: 'fleet';
 }
 
 export const RECOMMENDED_PACKAGES: readonly RecommendedPackage[] = [
@@ -17,7 +16,6 @@ export const RECOMMENDED_PACKAGES: readonly RecommendedPackage[] = [
     name: 'pi-background-tasks',
     source: 'npm:pi-background-tasks',
     descriptionKey: 'settings.varin.plugins.package.backgroundTasks',
-    workbench: 'fleet',
   },
   {
     name: '@cortexkit/pi-magic-context',

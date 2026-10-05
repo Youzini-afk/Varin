@@ -31,7 +31,6 @@ class HandshakeSocket implements RuntimeWebSocket {
           capabilities: {
             agentProviders: true,
             extensionUi: true,
-            fleet: true,
             models: true,
             packages: true,
             providerConfiguration: true,

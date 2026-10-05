@@ -30,8 +30,6 @@ type DirectRuntimeMethod =
   | "agent.steer"
   | "command.execute"
   | "config.unwatch"
-  | "fleet.action"
-  | "fleet.status"
   | "recovery.checkpoint.create"
   | "recovery.navigate"
   | "recovery.repair"
@@ -220,8 +218,6 @@ export const RUNTIME_METHODS = [
   "config.unwatch",
   "config.watch",
   "extension.ui.respond",
-  "fleet.action",
-  "fleet.status",
   "host.handshake",
   "model.list",
   "mcp.config.snapshot",

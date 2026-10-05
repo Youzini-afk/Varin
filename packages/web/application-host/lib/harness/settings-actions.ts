@@ -751,60 +751,6 @@ const agentsAdapter = (deps: SettingsActionDeps): SettingsActionAdapter => ({
   },
 });
 
-const fleetAdapter = (deps: SettingsActionDeps): SettingsActionAdapter => ({
-  verbs: ['status', 'list', 'kill', 'inspect', 'doctor'],
-  async describe(ctx) {
-    const root = await needWorkspace(ctx, deps).catch(() => null);
-    if (!root) return { unavailable: 'requires a workspace-bound session' };
-    const status = await deps.requestSession(ctx.caller.sessionId, 'fleet.status', {}).catch(() => null);
-    if (!isRecord(status)) return { unavailable: 'fleet status unavailable' };
-    return { summary: 'fleet status available', data: status };
-  },
-  async invoke(ctx, _entry, verb, args) {
-    try {
-      switch (verb) {
-        case 'status':
-        case 'list':
-          return { status: 'applied', data: await deps.requestSession(ctx.caller.sessionId, 'fleet.status', {}) };
-        case 'kill': {
-          const entryKey = needString(args, 'entryKey');
-          return {
-            status: 'applied',
-            data: await deps.requestSession(ctx.caller.sessionId, 'fleet.action', {
-              providerId: str(args, 'providerId') ?? 'subagents',
-              action: 'kill',
-              entryKey,
-            }),
-          };
-        }
-        case 'inspect': {
-          const entryKey = needString(args, 'entryKey');
-          return {
-            status: 'applied',
-            data: await deps.requestSession(ctx.caller.sessionId, 'fleet.action', {
-              providerId: str(args, 'providerId') ?? 'subagents',
-              action: 'logs',
-              entryKey,
-            }),
-          };
-        }
-        case 'doctor':
-          return {
-            status: 'applied',
-            data: await deps.requestSession(ctx.caller.sessionId, 'fleet.action', {
-              providerId: str(args, 'providerId') ?? 'subagents',
-              action: 'status',
-            }),
-          };
-        default:
-          return unavailable(`verb "${verb}" is not supported by the fleet owner`);
-      }
-    } catch (error) {
-      return wrapError(error);
-    }
-  },
-});
-
 /**
  * Profiles hold sshKey/signingKey material. Agents get presence facts, never
  * secret values — the same rule as password fields on ordinary entries.
@@ -1358,7 +1304,6 @@ export function createSettingsActionRegistry(deps: SettingsActionDeps) {
     ['runtime:resources', resourcesAdapter(deps)],
     ['runtime:extensions', piPackagesAdapter(deps)],
     ['service:agents', agentsAdapter(deps)],
-    ['service:fleet', fleetAdapter(deps)],
     ['service:git', gitAdapter(deps)],
     ['service:projects', projectsAdapter(deps)],
     ['service:remote-instances', remoteInstancesAdapter(deps)],

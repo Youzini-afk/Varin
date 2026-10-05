@@ -91,7 +91,7 @@ export interface SettingsActionRef {
     | 'runtime:extensions' | 'runtime:resources' | 'runtime:providers'
     | 'runtime:mcp' | 'runtime:language-support' | 'runtime:runtime-update'
     | 'service:git' | 'service:tunnel' | 'service:agent-personalization'
-    | 'service:extensions' | 'service:fleet' | 'service:agents'
+    | 'service:extensions' | 'service:agents'
     | 'service:notifications' | 'service:projects' | 'service:remote-instances'
     | 'service:snippets'
     | 'tool:resource' | 'tool:extension' | 'page:ui';
@@ -1212,7 +1212,7 @@ export const SETTINGS_CATALOG: readonly SettingsCatalogEntry[] = [
       availability: { desktop: true } },
   },
 
-  // ── Agents / fleet ───────────────────────────────────────────────────────
+  // ── Agents ──────────────────────────────────────────────────────────────
   {
     id: 'agents.providers', category: 'agents', owner: 'action',
     actionRef: { domain: 'service:agents', verbs: ['list', 'status'],
@@ -1220,30 +1220,6 @@ export const SETTINGS_CATALOG: readonly SettingsCatalogEntry[] = [
     ui: { page: 'agents', titleKey: 'settings.varin.agents.providers.title',
       descriptionKey: 'settings.varin.agents.providers.description',
       keywords: ['provider', 'pi-subagents', 'magic context', 'historian', 'dreamer', 'sidekick'] },
-  },
-  {
-    id: 'fleet.provider', category: 'agents', owner: 'action',
-    actionRef: { domain: 'service:fleet', verbs: ['status'],
-      note: 'delegation providers (pi-subagents, pi-background-tasks, eventbus)' },
-    ui: { page: 'fleet', titleKey: 'settings.varin.fleet.provider.title',
-      descriptionKey: 'settings.varin.fleet.provider.description',
-      keywords: ['pi-subagents', 'pi-background-tasks', 'eventbus', 'provider', 'delegation'] },
-  },
-  {
-    id: 'fleet.list', category: 'agents', owner: 'action',
-    actionRef: { domain: 'service:fleet', verbs: ['list', 'kill'],
-      note: 'background task/agent jobs; real lifecycle control lives in the fleet provider' },
-    ui: { page: 'fleet', titleKey: 'settings.varin.fleet.list.title',
-      descriptionKey: 'settings.varin.fleet.description',
-      keywords: ['background task', 'background agent', 'logs', 'kill', 'stop', 'run', 'jobs'] },
-  },
-  {
-    id: 'fleet.actions', category: 'agents', owner: 'action',
-    actionRef: { domain: 'service:fleet', verbs: ['inspect', 'doctor'],
-      note: 'provider diagnostics and maintenance actions' },
-    ui: { page: 'fleet', titleKey: 'settings.varin.fleet.actions.title',
-      descriptionKey: 'settings.varin.fleet.actions.description',
-      keywords: ['inspector', 'doctor', 'subagents-stop', 'packages'] },
   },
   {
     id: 'agents.catalog', category: 'agents', owner: 'action',
@@ -1297,7 +1273,7 @@ export const SETTINGS_CATALOG: readonly SettingsCatalogEntry[] = [
       note: 'curated plugin recommendations' },
     ui: { page: 'plugins', titleKey: 'settings.varin.plugins.recommended.title',
       descriptionKey: 'settings.varin.plugins.recommended.description',
-      keywords: ['subagents', 'magic context', 'mcp', 'web access', 'workspace history', 'wtf', 'background tasks', 'fleet'] },
+      keywords: ['subagents', 'magic context', 'mcp', 'web access', 'workspace history', 'wtf', 'background tasks'] },
   },
   {
     id: 'extensions.workbench', category: 'extensions', owner: 'action',
@@ -1339,7 +1315,7 @@ export const SETTINGS_CATALOG: readonly SettingsCatalogEntry[] = [
       keywords: [
         'json', 'jsonc', 'settings', 'subagents', 'agents', 'workflows', 'roles',
         'create agent', 'model overrides', 'fallback models', 'thinking',
-        'delegation', 'review', 'watchdog', 'fleet', 'worktree', 'intercom',
+        'delegation', 'review', 'watchdog', 'worktree', 'intercom',
         'budget', 'scheduled runs', 'magic context', 'historian', 'dreamer',
         'sidekick', 'memory', 'embedding', 'synapse', 'sqlite', 'mural',
         'context compression', 'aft', 'cortexkit', 'hashline',

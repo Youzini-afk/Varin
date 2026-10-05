@@ -152,7 +152,7 @@ The target contribution families cover the complete workbench:
 - session navigator rows, badges, grouping, actions, and a replaceable navigator implementation;
 - chat timeline items, message/tool/custom-entry renderers, composer actions, attachments, and a
   replaceable timeline or composer;
-- Agents, Fleet, MCP, Provider, Recovery, Commands, Prompts, Skills, package, and integration views;
+- Agents, MCP, Provider, Recovery, Commands, Prompts, Skills, package, and integration views;
 - file, Git, terminal, walkthrough, diagram, and project/workspace surfaces;
 - notifications, background status, scheduled-work UI, and diagnostics;
 - an alternative `workbench.shell` that replaces the default product organization.
@@ -798,7 +798,7 @@ High-value migration seams already visible in the current code are:
 1. settings metadata, navigation, sidebars, pages, and search registry;
 2. command palette, menus, keybindings, and status widgets;
 3. message/tool/custom-entry renderers;
-4. Plugin Settings adapters, Agents, Fleet, and MCP workbenches;
+4. Plugin Settings adapters, Agents, and MCP workbenches;
 5. right sidebar and bottom-panel surfaces;
 6. session navigator and composer/timeline augmentations;
 7. complete workbench shell selection.

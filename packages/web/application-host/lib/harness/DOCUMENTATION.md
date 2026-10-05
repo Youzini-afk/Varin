@@ -513,8 +513,9 @@ One unexpected worker exit is resumed in the same session/worktree as a new
 Run; a second consecutive crash becomes `stalled` instead of entering a crash
 loop. Interactive child prompts, event silence, and six identical tool
 signatures project to `permission`/`user`, `stalled`, and `looping`. The Web UI
-reads the same registry through `/api/harness/threads` and SSE; the Pi Fleet
-registry exposes it through the `varin-harness` provider.
+reads the same registry through `/api/harness/threads` and SSE, presenting work
+in the parent conversation and work overview. Shell tool messages expose their
+existing terminal attachment; task state does not require a settings workbench.
 
 ### VerificationCoordinator (`verification-coordinator.ts`)
 

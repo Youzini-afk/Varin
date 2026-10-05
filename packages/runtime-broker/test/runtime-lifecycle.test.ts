@@ -23,7 +23,6 @@ const handshakeFor = (packageRoot: string, source: "system" | "custom"): HostHan
   capabilities: {
     agentProviders: true,
     extensionUi: true,
-    fleet: true,
     models: true,
     packages: true,
     providerConfiguration: true,

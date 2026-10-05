@@ -360,10 +360,6 @@ export const PluginAgentDetails: React.FC<{ agent: PiAgentDescriptor | null }> =
         description={selectedAgent?.description ?? t('settings.varin.agents.description')}
         headerEnd={(
           <div className="flex items-center gap-2">
-            <Button type="button" variant="ghost" size="sm" onClick={() => setSettingsPage('fleet')}>
-              <Icon name="pulse" className="size-4" />
-              {t('settings.page.fleet.title')}
-            </Button>
             <Button type="button" variant="outline" size="sm" onClick={() => void refresh()} disabled={catalogState.loading}>
               <Icon name="refresh" className={cn('size-4', catalogState.loading && 'animate-spin')} />
               {t('settings.varin.agents.actions.refresh')}

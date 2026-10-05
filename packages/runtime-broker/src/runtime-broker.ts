@@ -301,7 +301,6 @@ const AGENT_RUN_METHODS = new Set<HostMethod>([
   "agent.prompt",
   "agent.steer",
   "command.execute",
-  "fleet.action",
 ]);
 
 // These Host methods acknowledge queue admission before Pi emits agent_start.

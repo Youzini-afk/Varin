@@ -1027,7 +1027,7 @@ Git and copy directories remain materialization and migration backends as specif
 | Conversation and file rollback | Pi session tree + selected `varin.workspace-recovery@5` Host service | Pi owns branch navigation; the recovery provider journals only affected paths and coordinates the two operations |
 | Optional Pi recovery commands | User-installed `pi-workspace-history` / `pi-wtf` packages | Remain ordinary Pi CLI extensions and are not provisioned or treated as Varin recovery authorities |
 | Magic Context | Its shared SQLite/config | Read through a maintained adapter; do not duplicate memory state |
-| Native harness thread lifecycle and working state | Host atomic Thread/ThreadRun catalog + Pi child session JSONL; Rust content-addressed WorkingState/result/draft/retrieval, recovery/Integration/agent-mutation durable metadata, canonical file resources, fixed baseline/materialization and managed-directory lifecycle; Document Registry remains unsaved-buffer authority | Dispatch asynchronously, project broker events/Fleet/UI from one registry, preserve attempts and transcripts, publish immutable native results, and merge only the child delta; TS coordinates Registry receipts and Git semantics while controlled disk capture/apply, baseline body capture, immutable-root materialization, reclaim and measurement use the Rust R2/R3 file-resource backend |
+| Native harness thread lifecycle and working state | Host atomic Thread/ThreadRun catalog + Pi child session JSONL; Rust content-addressed WorkingState/result/draft/retrieval, recovery/Integration/agent-mutation durable metadata, canonical file resources, fixed baseline/materialization and managed-directory lifecycle; Document Registry remains unsaved-buffer authority | Dispatch asynchronously, project broker events and conversation UI from one registry, preserve attempts and transcripts, publish immutable native results, and merge only the child delta; TS coordinates Registry receipts and Git semantics while controlled disk capture/apply, baseline body capture, immutable-root materialization, reclaim and measurement use the Rust R2/R3 file-resource backend |
 | MCP | Pi native MCP or the user's replacement extension | Observe the active owner's config/status, invoke its commands, and edit one authorized source at a time without a parallel connection or credential owner |
 | Web Access | Varin native `webfetch` / `websearch`; optional `pi-web-access` config/custom entries | Native search defaults to keyless Exa with disclosed Parallel failover; explicit user providers remain available. It does not reuse model-account search. Host-owned SSRF/domain/provider authority and the existing page cache/source projection remain shared. Tools never auto-yield to a package; optional plugins keep their own configuration and stored-result UI. |
 | Varin extensions | Varin Extension Manager below `VARIN_DATA_DIR` | Keep installation, desired state, grants, layout, and extension-owned storage separate from Pi packages and plugin-native data |
@@ -1216,16 +1216,12 @@ the resulting package catalog.
 
 ### 7.2 First-class adapters
 
-- **pi-subagents:** task tree and controls from its event bus; lifecycle artifacts for restart and
-  cross-process reconciliation. Fleet consumes its public in-process RPC `fleetStatus/v1`
-  projection as the `delegated-agent` provider; private run identifiers and artifact paths remain
-  host-side, while the plugin's own inspector/stop/doctor commands retain their validation and
-  selectors.
-- **pi-background-tasks:** Fleet, not Plugin Settings. The Host speaks the published EventBus v1
-  channels (`request`/`response`/`terminal`) and projects running and recent background agents or
-  shell tasks. `command`, `cwd`, output paths, PIDs, and delegate/Fusion artifacts never cross to
-  the renderer. New-task, bounded logs, and stop use `fleet.action`; Varin does not read `.pi/tasks`
-  or parse terminal text.
+- **pi-subagents:** provider-owned agent management and scoped plugin configuration. Its registered
+  tools, commands and public entries use the normal Pi conversation UI; Varin does not aggregate
+  the plugin's task state in Settings.
+- **Background work:** native child work uses the Harness thread registry, conversation and work
+  overview. Native shell work uses tool messages and terminal attachment. Optional Pi packages
+  keep their own tools and registered UI; no Fleet RPC or background-task EventBus adapter is loaded.
 - **pi-hermes-memory:** one Host-resolved global JSON authority,
   `<active Pi agent directory>/hermes-memory-config.json`. Project Markdown and SQLite stores are
   data, not settings. Runtime observation is the registered `memory-insights` command only.
@@ -1443,9 +1439,9 @@ mismatch is a diagnostic state, never silently repaired.
 
 The production diagnostics surface is Pi-native and shared by About, the desktop Help menu, the
 keyboard shortcut, and `window.__varinDebug`. It combines the negotiated host handshake, the
-server `/health` snapshot, package/resource/agent-provider diagnostics, fleet and recovery status,
+server `/health` snapshot, package/resource/agent-provider diagnostics, recovery status,
 and bounded project/session metadata. It never probes OpenCode endpoints or serializes provider
-settings, package source URLs, message content, fleet goals, or unknown health fields.
+settings, package source URLs, message content, or unknown health fields.
 
 ## 11. Failure semantics
 

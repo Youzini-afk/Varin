@@ -1,7 +1,6 @@
 import type {
   PackageDescriptor,
   PiAgentCatalogSnapshot,
-  PiFleetSnapshot,
   PiResourceCatalogSnapshot,
   PiSessionFeatureState,
   RecoveryStatus,
@@ -171,31 +170,6 @@ const summarizeAgents = (catalog: PiAgentCatalogSnapshot) => ({
   })),
 });
 
-const summarizeFleet = (fleet: PiFleetSnapshot) => ({
-  entries: fleet.entries.map((entry) => ({
-    agent: entry.agent ?? null,
-    effort: entry.effort ?? null,
-    key: entry.key,
-    kind: entry.kind,
-    model: entry.model ?? null,
-    name: entry.name,
-    providerId: entry.providerId,
-    role: entry.role ?? null,
-    startedAt: entry.startedAt,
-    state: entry.state,
-    tokens: entry.tokens ?? null,
-  })),
-  omitted: fleet.omitted,
-  providers: fleet.providers.map((provider) => ({
-    bridgeVersion: provider.bridgeVersion ?? null,
-    id: provider.id,
-    issue: provider.issue ?? null,
-    label: provider.label,
-    state: provider.state,
-  })),
-  totalActive: fleet.totalActive,
-});
-
 const summarizeRecovery = (status: RecoveryStatus) => ({
   actions: status.actions,
   available: status.available,
@@ -321,13 +295,6 @@ export const collectVarinDiagnostics = async () => {
     : Promise.resolve(skippedProbe<ReturnType<typeof summarizeResources>>(
         missingContext ?? unavailable('resources'),
       ));
-  const fleetPromise = capabilities?.fleet && activeSessionId && runtimeClient
-    ? probe(async () => summarizeFleet(await runtimeClient.request('fleet.status', {
-        sessionId: activeSessionId,
-      })))
-    : Promise.resolve(skippedProbe<ReturnType<typeof summarizeFleet>>(
-        activeSessionId ? unavailable('fleet') : 'No active Pi session',
-      ));
   const recoveryPromise = capabilities?.recovery && activeSessionId && runtimeClient
     ? probe(async () => summarizeRecovery(await runtimeClient.request('recovery.status', {
         sessionId: activeSessionId,
@@ -336,11 +303,10 @@ export const collectVarinDiagnostics = async () => {
         activeSessionId ? unavailable('recovery') : 'No active Pi session',
       ));
 
-  const [packages, agents, skills, fleet, recovery] = await Promise.all([
+  const [packages, agents, skills, recovery] = await Promise.all([
     packagesPromise,
     agentsPromise,
     skillsPromise,
-    fleetPromise,
     recoveryPromise,
   ]);
 
@@ -399,7 +365,6 @@ export const collectVarinDiagnostics = async () => {
       },
     },
     integrations: {
-      fleet,
       git,
       recovery,
     },
