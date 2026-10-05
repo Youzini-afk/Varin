@@ -12,6 +12,7 @@ export type ContextSurfaceId =
   | 'plan'
   | 'notes'
   | 'context'
+  | 'threads'
   | 'recovery'
   | 'browser'
   | 'preview'
@@ -43,6 +44,15 @@ export type ContextSurfaceDescriptor = {
 };
 
 export const CONTEXT_SURFACES: readonly ContextSurfaceDescriptor[] = [
+  {
+    id: 'threads',
+    mode: 'threads',
+    icon: 'chat-1',
+    labelKey: 'harness.overview.threads',
+    descriptionKey: 'harness.threads.panelDescription',
+    defaultWidthFraction: 0.45,
+    availability: 'always',
+  },
   {
     id: 'context',
     descriptionKey: 'contextRail.surface.context.description',

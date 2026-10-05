@@ -952,6 +952,15 @@ restore rematerializes the published result at the recorded path or reports
 that the path is occupied. Thread occupancy and reclaim reasons are Host
 projections, not a second store.
 
+The work overview shows active/attention tasks and a compact, collapsible finished group.
+Its disclosure choice is local to the runtime and parent conversation. Clicking a task opens
+a conversation dialog; the independent Subtasks context surface provides search, status filters,
+and an inline conversation view. Both read native history through `session.entries.preview` and
+subscribe to the shared Pi session state for live messages. Only the explicit Open conversation
+action navigates to the child with its launch values, and provides a return path to the parent.
+Archive/delete controls and result history live in the task menu; viewing the overview does not
+request workspace occupancy or materialize a directory.
+
 User-created discussions use authenticated, session-scoped Host routes: the
 caller supplies only a persisted message entry and the block-snapshot choice;
 the Host derives the parent edge and workspace from the broker-owned session.

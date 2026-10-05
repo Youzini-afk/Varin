@@ -1,7 +1,7 @@
 import React from 'react';
 import type { CompactionTrace, JsonValue } from '@varin/protocol';
 import { MarkdownRenderer } from '@/components/chat/MarkdownRenderer';
-import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from '@/components/ui/dialog';
+import { Dialog, DialogContent, DialogHeader, DialogTitle } from '@/components/ui/dialog';
 import { useI18n } from '@/lib/i18n';
 import { Button } from '@/components/ui/button';
 
@@ -32,10 +32,9 @@ export const PiCompactionTraceDialog: React.FC<{
   const { t } = useI18n();
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent className="flex h-[80dvh] max-w-[90vw] flex-col">
+      <DialogContent className="flex h-[80dvh] max-w-5xl flex-col" aria-describedby={undefined}>
         <DialogHeader>
-          <DialogTitle>/compact</DialogTitle>
-          <DialogDescription>{t('harness.threads.transcriptReadOnly')}</DialogDescription>
+          <DialogTitle>{t('chat.compaction.process')}</DialogTitle>
         </DialogHeader>
         <div className="min-h-0 flex-1 space-y-3 overflow-auto pr-2">
           {trace?.entries.map((entry, index) => (

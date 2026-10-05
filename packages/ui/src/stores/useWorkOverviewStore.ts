@@ -2,11 +2,12 @@ import { create } from 'zustand';
 import { persist } from 'zustand/middleware';
 import { createDeferredSafeJSONStorage } from './utils/safeStorage';
 
-type OverviewDisclosure = 'overview' | 'mobile' | 'review' | 'plan' | 'outputs' | 'threads' | 'sources' | 'memory';
+type OverviewDisclosure = 'overview' | 'mobile' | 'review' | 'plan' | 'outputs' | 'threads' | 'endedThreads' | 'sources' | 'memory';
 type OverviewChoices = Partial<Record<OverviewDisclosure, boolean>>;
 
 interface WorkOverviewStore {
   bySession: Record<string, OverviewChoices>;
+  parentBySession: Record<string, { sessionId: string; directory?: string }>;
   setDisclosure: (key: string, disclosure: OverviewDisclosure, open: boolean) => void;
 }
 
@@ -20,6 +21,7 @@ export const useWorkOverviewStore = create<WorkOverviewStore>()(
   persist(
     (set) => ({
       bySession: {},
+      parentBySession: {},
       setDisclosure: (key, disclosure, open) => set((state) => {
         const current = state.bySession[key] ?? EMPTY_WORK_OVERVIEW_CHOICES;
         if (current[disclosure] === open) return state;

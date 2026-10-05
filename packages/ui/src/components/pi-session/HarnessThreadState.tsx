@@ -15,8 +15,6 @@ export const HarnessThreadStateProvider: React.FC<{
   parentSessionId: string;
   workspaceId: string | null;
 }> = ({ children, parentSessionId, workspaceId }) => {
-  const [includeArchived, setIncludeArchived] = React.useState(false);
-  const includeArchivedRef = React.useRef(false);
   const [threads, setThreads] = React.useState<HarnessThreadSnapshot[]>([]);
   const [researchRoot, setResearchRoot] = React.useState<HarnessThreadSnapshot | null>(null);
   const researchRootRef = React.useRef<HarnessThreadSnapshot | null>(null);
@@ -48,16 +46,15 @@ export const HarnessThreadStateProvider: React.FC<{
       return;
     }
     if (snapshot.thread.parent.kind === 'thread' && snapshot.thread.parent.id === researchRootRef.current?.thread.id) {
-      setResearchBranches((current) => mergeHarnessThreadSnapshot(current, snapshot, { includeArchived: includeArchivedRef.current }));
+      setResearchBranches((current) => mergeHarnessThreadSnapshot(current, snapshot, { includeArchived: true }));
       return;
     }
-    setThreads((current) => mergeHarnessThreadSnapshot(current, snapshot, { includeArchived: includeArchivedRef.current }));
+    setThreads((current) => mergeHarnessThreadSnapshot(current, snapshot, { includeArchived: true }));
   }, []);
 
   const reload = React.useCallback(async (signal?: AbortSignal) => {
     const revisionAtStart = eventRevision.current;
-    const query = includeArchivedRef.current ? '?archived=1' : '';
-    const response = await runtimeFetch(`/api/harness/sessions/${encodeURIComponent(parentSessionId)}/threads${query}`, {
+    const response = await runtimeFetch(`/api/harness/sessions/${encodeURIComponent(parentSessionId)}/threads?archived=1`, {
       cache: 'no-store',
       ...(signal ? { signal } : {}),
     });
@@ -65,7 +62,8 @@ export const HarnessThreadStateProvider: React.FC<{
       if (response.status === 404) return;
       throw new Error(`Unable to load threads (${response.status})`);
     }
-    const projection = parseHarnessThreadProjection(await response.json(), { includeArchived: includeArchivedRef.current });
+    if (signal?.aborted) return;
+    const projection = parseHarnessThreadProjection(await response.json(), { includeArchived: true });
     setLoadError(null);
     commitScope({ workspaceId: projection.workspaceId, parent: projection.parent });
     if (eventRevision.current === revisionAtStart
@@ -77,13 +75,13 @@ export const HarnessThreadStateProvider: React.FC<{
     setResearchBranches((current) => eventRevision.current === revisionAtStart
       ? projection.researchBranches
       : projection.researchBranches.reduce((list, snapshot) => (
-        mergeHarnessThreadSnapshot(list, snapshot, { includeArchived: includeArchivedRef.current })
+        mergeHarnessThreadSnapshot(list, snapshot, { includeArchived: true })
       ), current));
     setThreads((current) => {
       const ordinary = projection.threads.filter(({ thread }) => thread.purpose !== 'research-root');
       if (eventRevision.current === revisionAtStart) return ordinary;
       return ordinary.reduce(
-        (list, snapshot) => mergeHarnessThreadSnapshot(list, snapshot, { includeArchived: includeArchivedRef.current }),
+        (list, snapshot) => mergeHarnessThreadSnapshot(list, snapshot, { includeArchived: true }),
         current,
       );
     });
@@ -123,26 +121,16 @@ export const HarnessThreadStateProvider: React.FC<{
     };
   }, [commitScope, merge, parentSessionId, reload, workspaceId]);
 
-  const setIncludeArchivedAndReload = React.useCallback((value: boolean) => {
-    includeArchivedRef.current = value;
-    setIncludeArchived(value);
-    void reload().catch((error) => {
-      setLoadError(error instanceof Error ? error.message : String(error));
-    });
-  }, [reload]);
-
   const value = React.useMemo<HarnessThreadStateValue>(() => ({
-    includeArchived,
     merge,
     parent: scope.parent,
     reload,
-    setIncludeArchived: setIncludeArchivedAndReload,
     threads,
     researchRoot,
     researchBranches,
     loadError,
     workspaceId: scope.workspaceId,
-  }), [includeArchived, merge, reload, scope.parent, scope.workspaceId, setIncludeArchivedAndReload, threads, researchRoot, researchBranches, loadError]);
+  }), [merge, reload, scope.parent, scope.workspaceId, threads, researchRoot, researchBranches, loadError]);
 
   return <HarnessThreadStateContext.Provider value={value}>{children}</HarnessThreadStateContext.Provider>;
 };

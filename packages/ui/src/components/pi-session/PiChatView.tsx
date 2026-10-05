@@ -1,3 +1,4 @@
+import { HarnessThreadParentLink } from './HarnessThreadConversation';
 import React from 'react';
 import type {
   WorkspaceCombinedRecoveryOperation,
@@ -998,6 +999,7 @@ export const PiChatView: React.FC<PiChatViewProps> = ({
           workOverviewOpen && 'xl:pr-[21rem] 2xl:pr-[22rem]',
         )}>
         {conversationHeader}
+        <HarnessThreadParentLink sessionId={currentSessionId} />
         {threadWorkspaceId && threadPanelMode === 'inline' ? (
           <HarnessThreadsPanel presentation="inline" title={threadPanelTitle}
             fallbackCwd={sessionCwd} parentSessionId={currentSessionId} workspaceId={threadWorkspaceId} />

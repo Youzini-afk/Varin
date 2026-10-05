@@ -64,6 +64,7 @@ const GitDirectorySelector = lazyWithChunkRecovery(() => import('@/components/vi
 const PullRequestView = lazyWithChunkRecovery(() => import('@/components/views/PullRequestView').then((module) => ({ default: module.PullRequestView })));
 const PlanView = lazyWithChunkRecovery(() => import('@/components/views/PlanView').then((module) => ({ default: module.PlanView })));
 const ComputerWorkSurface = lazyWithChunkRecovery(() => import('@/components/sections/computers/ComputerWorkSurface').then((module) => ({ default: module.ComputerWorkSurface })));
+const HarnessSubtasksPanel = lazyWithChunkRecovery(() => import('@/components/pi-session/HarnessSubtasksPanel').then((module) => ({ default: module.HarnessSubtasksPanel })));
 
 const CONTEXT_PANEL_MIN_WIDTH = 380;
 const CONTEXT_PANEL_MAX_WIDTH = 1400;
@@ -167,6 +168,7 @@ const getModeLabel = (
   t: TranslateFn
 ): string => {
   if (mode === 'chat') return t('contextPanel.mode.chat');
+  if (mode === 'threads') return t('harness.overview.threads');
   if (mode === 'file') return t('contextPanel.mode.files');
   if (mode === 'diff') return t('contextPanel.mode.diff');
   if (mode === 'walkthrough') return t('contextPanel.mode.walkthrough');
@@ -251,6 +253,7 @@ const getTabLabel = (
 };
 
 const getTabIcon = (tab: { mode: ContextPanelMode; targetPath: string | null }): React.ReactNode | undefined => {
+  if (tab.mode === 'threads') return <Icon name="chat-1" className="h-3.5 w-3.5" />;
   if (tab.mode === 'file') {
     return tab.targetPath
       ? <FileTypeIcon filePath={tab.targetPath} className="h-3.5 w-3.5" />
@@ -2645,6 +2648,8 @@ export const ContextPanel: React.FC = () => {
 
   const activeNonChatContent = activeTab?.mode === 'context'
         ? <ContextPanelContent />
+        : activeTab?.mode === 'threads'
+            ? <HarnessSubtasksPanel />
         : activeTab?.mode === 'recovery'
             ? <PiRecoveryPanel />
         : activeTab?.mode === 'git'

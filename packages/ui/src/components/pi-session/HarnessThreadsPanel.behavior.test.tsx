@@ -3,9 +3,9 @@ import { createRoot, type Root } from 'react-dom/client';
 import { parseHTML } from 'linkedom';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { runtimeFetch } from '@varin/application-client';
-import { toast } from '@/components/ui';
 import { HarnessThreadsPanel } from './HarnessThreadsPanel';
 import { HarnessThreadStateContext, type HarnessThreadStateValue } from './HarnessThreadStateContext';
+import type { PiSessionViewState } from '@/stores/usePiSessionStore';
 import type { SessionEntriesResult } from '@varin/protocol';
 import type { HarnessThreadSnapshot } from './harnessThreadPresentation';
 import type { WebSource } from '@/stores/useWebSourcesStore';
@@ -13,6 +13,7 @@ import { useWorkOverviewStore } from '@/stores/useWorkOverviewStore';
 
 const mocks = vi.hoisted(() => ({
   runtimeKey: 'runtime-1',
+  records: {} as Record<string, Partial<PiSessionViewState>>,
   webSources: [] as WebSource[],
   openSession: vi.fn(),
   prefetchSession: vi.fn(),
@@ -23,6 +24,7 @@ const mocks = vi.hoisted(() => ({
   translate: (key: string) => key,
 }));
 vi.mock('@varin/application-client', () => ({ runtimeFetch: vi.fn() }));
+vi.mock('@/lib/pi-runtime/sessionNavigation', () => ({ openPiSessionFromNavigation: mocks.openSession }));
 vi.mock('@/lib/gitApiHttp', () => ({ getGitStatus: mocks.getGitStatus }));
 vi.mock('@/components/icon/Icon', () => ({ Icon: () => null }));
 vi.mock('@/components/ui', () => ({ toast: { error: vi.fn(), success: vi.fn() } }));
@@ -106,8 +108,9 @@ let failPreview: (error: Error) => void;
 
 beforeEach(() => {
   mocks.runtimeKey = 'runtime-1';
+  mocks.records = {};
   mocks.webSources = [];
-  useWorkOverviewStore.setState({ bySession: {} });
+  useWorkOverviewStore.setState({ bySession: {}, parentBySession: {} });
   const dom = parseHTML('<!doctype html><html><body></body></html>');
   vi.stubGlobal('window', dom.window);
   vi.stubGlobal('document', dom.document);
@@ -119,7 +122,7 @@ beforeEach(() => {
   root = createRoot(container);
   state = {
     workspaceId: 'workspace-1', parent: { kind: 'session', id: 'parent-1' },
-    includeArchived: false, setIncludeArchived: vi.fn(), merge: vi.fn(), reload: vi.fn(async () => {}),
+    merge: vi.fn(), reload: vi.fn(async () => {}),
     threads: [snapshot()],
     researchRoot: null, researchBranches: [], loadError: null,
   };
@@ -145,7 +148,7 @@ const clickOpen = async () => {
   ));
   const overview = container.querySelector<HTMLButtonElement>('button[aria-label="harness.overview.expand"]')!;
   await act(async () => overview.click());
-  const button = container.querySelector<HTMLButtonElement>('button[title="harness.threads.transcript"]')!;
+  const button = container.querySelector<HTMLButtonElement>('button[aria-label^="harness.threads.viewConversation:"]')!;
   await act(async () => button.click());
   return button;
 };
@@ -163,7 +166,7 @@ describe('thread panel transcript is inspection, not execution', () => {
     ));
     expect(container.querySelector('summary')?.textContent).toContain('Research branches');
     expect(container.textContent).toContain(branch.thread.brief);
-    const button = container.querySelector<HTMLButtonElement>('button[title="harness.threads.transcript"]')!;
+    const button = container.querySelector<HTMLButtonElement>('button[aria-label^="harness.threads.viewConversation:"]')!;
     await act(async () => button.click());
     expect(mocks.prefetchSession).toHaveBeenCalledExactlyOnceWith('old-session');
     expect(mocks.openSession).not.toHaveBeenCalled();
@@ -173,16 +176,15 @@ describe('thread panel transcript is inspection, not execution', () => {
   for (const lifecycle of ['settled', 'archived'] as const) {
     it(`reads ${lifecycle} history without restoring a directory, opening a worker or starting a Run`, async () => {
       state.threads[0]!.thread.lifecycle = lifecycle;
-      const button = await clickOpen();
+      await clickOpen();
       expect(mocks.prefetchSession).toHaveBeenCalledExactlyOnceWith('old-session');
-      expect(button.disabled).toBe(true);
+      expect(container.querySelector('[role="dialog"]')).not.toBeNull();
       const result: SessionEntriesResult = { sessionId: 'old-session', scope: 'branch', leafId: 'old-entry', entries: [{
         id: 'old-entry', parentId: null, timestamp: '2026-09-10T00:00:00.000Z', type: 'message',
         message: { role: 'user', content: 'PERSISTED_TRANSCRIPT_BODY', timestamp: 0 },
       }] };
       await act(async () => { finishPreview(result); });
       expect(container.textContent).toContain('PERSISTED_TRANSCRIPT_BODY');
-      expect(container.textContent).toContain('harness.threads.transcriptReadOnly');
       expect(mocks.timeline).toHaveBeenCalledWith(expect.objectContaining({ sessionId: 'old-session', entries: result.entries }));
       expect(mocks.openSession).not.toHaveBeenCalled();
       expect(state.merge).not.toHaveBeenCalled();
@@ -195,10 +197,38 @@ describe('thread panel transcript is inspection, not execution', () => {
   it('reports a missing transcript without converting the read into a restore', async () => {
     await clickOpen();
     await act(async () => { failPreview(new Error('Native transcript is unavailable')); });
-    expect(toast.error).toHaveBeenCalledExactlyOnceWith('Native transcript is unavailable');
+    expect(container.querySelector('[role="alert"]')?.textContent).toContain('Native transcript is unavailable');
     expect(mocks.openSession).not.toHaveBeenCalled();
     expect(vi.mocked(runtimeFetch).mock.calls.filter(([, init]) => init?.method === 'POST')).toEqual([]);
   });
+  it('updates the child preview from live session state and navigates only on Open conversation', async () => {
+    await clickOpen();
+    const result: SessionEntriesResult = { sessionId: 'old-session', scope: 'branch', leafId: null, entries: [] };
+    await act(async () => { finishPreview(result); });
+    const liveAssistant = {
+      role: 'assistant' as const, content: [{ type: 'text' as const, text: 'Still working' }],
+      api: 'test', model: 'test', provider: 'test', stopReason: 'pending' as const, timestamp: 0,
+      usage: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, totalTokens: 0,
+        cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, total: 0 } },
+    };
+    mocks.records['old-session'] = { branchEntries: result, liveAssistant };
+    await act(async () => root.render(
+      <HarnessThreadStateContext.Provider value={state}>
+        <HarnessThreadsPanel workspaceId="workspace-1" parentSessionId="parent-1" fallbackCwd="/parent" />
+      </HarnessThreadStateContext.Provider>,
+    ));
+    expect(mocks.timeline).toHaveBeenLastCalledWith(expect.objectContaining({ liveAssistant }));
+    expect(mocks.openSession).not.toHaveBeenCalled();
+    expect(mocks.openContextSurface).not.toHaveBeenCalled();
+    const open = [...container.querySelectorAll<HTMLButtonElement>('button')]
+      .find((button) => button.textContent === 'harness.threads.openConversation')!;
+    await act(async () => open.click());
+    expect(mocks.openSession).toHaveBeenCalledExactlyOnceWith({ sessionId: 'old-session', directory: '/old-cwd', launch: { scope: ['src'], tools: ['read'] } });
+    expect(useWorkOverviewStore.getState().parentBySession[JSON.stringify(['runtime-1', 'old-session'])])
+      .toEqual({ sessionId: 'parent-1', directory: '/parent' });
+    expect(container.querySelector('[role="dialog"]')).toBeNull();
+  });
+
 });
 
 describe('work overview presentation', () => {

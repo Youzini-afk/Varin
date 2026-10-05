@@ -3,11 +3,9 @@ import type { ThreadParent } from '@varin/protocol';
 import type { HarnessThreadSnapshot } from './harnessThreadPresentation';
 
 export interface HarnessThreadStateValue {
-  includeArchived: boolean;
   merge(snapshot: HarnessThreadSnapshot): void;
   parent: ThreadParent;
   reload(): Promise<void>;
-  setIncludeArchived(value: boolean): void;
   threads: HarnessThreadSnapshot[];
   researchRoot: HarnessThreadSnapshot | null;
   researchBranches: HarnessThreadSnapshot[];
@@ -16,11 +14,9 @@ export interface HarnessThreadStateValue {
 }
 
 const EMPTY_STATE: HarnessThreadStateValue = {
-  includeArchived: false,
   merge: () => {},
   parent: { kind: 'session', id: '' },
   reload: async () => {},
-  setIncludeArchived: () => {},
   threads: [],
   researchRoot: null,
   researchBranches: [],

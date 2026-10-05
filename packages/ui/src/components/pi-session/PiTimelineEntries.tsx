@@ -1342,7 +1342,7 @@ export const PiTimelineEntryList: React.FC<Omit<
                     <button type="button" className="ml-auto text-primary hover:underline" onClick={() => {
                       window.dispatchEvent(new CustomEvent(PI_COMPACTION_TRACE_OPEN_EVENT, { detail: { sessionId, trace } }));
                     }}>
-                      {t('harness.threads.transcript')}
+                      {t('chat.compaction.process')}
                     </button>
                   ) : null}
                 </div>

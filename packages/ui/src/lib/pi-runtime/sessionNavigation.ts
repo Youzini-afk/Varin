@@ -7,6 +7,7 @@ import { refreshBotSessionIndex, regularPiSessions, useBotSessionIndex } from '@
 import { useProjectsStore } from '@/stores/useProjectsStore';
 import { useUIStore } from '@/stores/useUIStore';
 import type {
+  RuntimeMethodParams,
   SessionSnapshot,
   SessionSummary,
   SessionWorkspaceBinding,
@@ -15,6 +16,7 @@ import type {
 export interface PiSessionOpenTarget {
   directory?: string | null;
   sessionId: string;
+  launch?: Pick<RuntimeMethodParams<'session.open'>, 'model' | 'scope' | 'tools'>;
 }
 
 export interface PiSessionCreateTarget {
@@ -171,6 +173,7 @@ export const openPiSessionFromNavigation = async (
       ? { ...summary.workspace, id: project.id }
       : summary?.workspace;
     const opening = state.openSession({
+      ...target.launch,
       ...(cwd ? { cwd } : {}),
       sessionId,
       ...(workspace === undefined ? {} : { workspace }),

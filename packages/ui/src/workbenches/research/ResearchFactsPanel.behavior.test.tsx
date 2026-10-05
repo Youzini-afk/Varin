@@ -78,8 +78,6 @@ let container: HTMLElement;
 const state = (overrides: Partial<HarnessThreadStateValue> = {}): HarnessThreadStateValue => ({
   workspaceId: 'workspace-1',
   parent: { kind: 'session', id: 'session-1' },
-  includeArchived: false,
-  setIncludeArchived: vi.fn(),
   merge: vi.fn(),
   reload: vi.fn(async () => {}),
   threads: [],

@@ -5,6 +5,10 @@ private runtime protocol and product surfaces still move together.
 
 ## Unreleased
 
+- Simplify subtask cards, compact finished tasks with remembered disclosure, and add live conversation
+  dialogs with explicit child/parent navigation. Add a separate Subtasks side panel with search and
+  status filters, move task management into menus, and name compaction history by its purpose.
+
 - Correct recovery-storage reporting: show shared catalog size once, omit empty workspace histories,
   report actual GC file bytes and failures, and hide unsupported history-delete/retention controls.
 

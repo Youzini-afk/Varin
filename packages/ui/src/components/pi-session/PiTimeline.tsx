@@ -614,7 +614,7 @@ export const PiTimeline: React.FC<PiTimelineProps> = (props) => {
                 : props.compactionStatus === 'ready' ? t('chat.compaction.ready')
                 : props.compactionStatus === 'applying' ? t('chat.compaction.applying')
                 : props.compactionStatus === 'retrying' ? t('chat.compaction.retrying') : t('chat.compaction.inProgress')}
-              <span className="ml-auto text-primary">{t('harness.threads.transcript')}</span>
+              <span className="ml-auto text-primary">{t('chat.compaction.process')}</span>
             </button>
             {props.compactionStatus === 'ready' && props.onApplyCompaction ? <button type="button"
               className="shrink-0 rounded px-2 py-1 text-primary hover:bg-interactive-hover"

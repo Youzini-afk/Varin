@@ -56,6 +56,18 @@ export const sameHarnessThreadParent = (left: ThreadParent, right: ThreadParent)
   left.kind === right.kind && left.id === right.id
 );
 
+export const harnessThreadSessionId = (entry: HarnessThreadSnapshot): string | undefined => (
+  entry.activeRun?.sessionId ?? entry.thread.report?.transcriptRef.sessionId
+);
+
+export const harnessThreadTitle = (entry: HarnessThreadSnapshot): string => (
+  entry.thread.brief.trim().split(/\r?\n/)[0] || entry.thread.preset || entry.thread.id
+);
+
+export const isEndedHarnessThread = (entry: HarnessThreadSnapshot): boolean => (
+  ['completed', 'cancelled', 'merged', 'archived'].includes(projectHarnessThreadState(entry))
+);
+
 export const mergeHarnessThreadSnapshot = (
   current: HarnessThreadSnapshot[],
   incoming: HarnessThreadSnapshot,
