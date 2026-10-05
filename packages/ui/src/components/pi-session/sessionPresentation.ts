@@ -311,27 +311,26 @@ export const groupPiSessionForestByWorkspace = (
     for (const project of normalizedProjects) ensureGroup(project);
   }
 
-  const visit = (
-    node: PiSessionNode,
-    parent: PiSessionNode | null,
-    parentGroupId: string | null,
-  ): void => {
+  const cloneTree = (node: PiSessionNode): PiSessionNode => ({
+    children: node.children.map(cloneTree),
+    session: node.session,
+  });
+
+  const visit = (node: PiSessionNode): void => {
     const project = resolveNormalizedWorkspaceProject(node.session, normalizedProjects);
     if (project === null && options.showRecentSection === false) {
       // Hiding the unbound zone must not hide a descendant that has explicit
       // ownership in a project. Revisit descendants as roots of their own zone.
-      node.children.forEach((child) => visit(child, null, null));
+      node.children.forEach(visit);
       return;
     }
-    const group = ensureGroup(project);
-    const clone: PiSessionNode = { children: [], session: node.session };
-    if (parent !== null && parentGroupId === group.id) parent.children.push(clone);
-    else group.forest.push(clone);
-    for (const child of node.children) visit(child, clone, group.id);
+    // Navigation follows the conversation family. A child may execute in an
+    // isolated or unbound workspace without becoming an unrelated Recent item.
+    ensureGroup(project).forest.push(cloneTree(node));
   };
 
   for (const node of forest) {
-    visit(node, null, null);
+    visit(node);
   }
 
   const sortNodes = (nodes: PiSessionNode[]): void => {

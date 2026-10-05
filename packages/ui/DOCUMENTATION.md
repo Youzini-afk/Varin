@@ -24,6 +24,12 @@ is the shared collection helper. Membership and default retrieval use the collec
 Git and project actions use the selected execution directory. These folders never act as file
 access permissions. Bot entry sessions are explicitly projectless.
 
+Session navigation groups each conversation tree by its root. Child sessions remain nested below
+their parent across isolated directories and workspace bindings; selecting a child still opens its
+own execution directory. The sidebar expands children initially, retains explicit collapse choices
+while mounted, and reveals matching descendants during search. Native parent links remain the
+authority; sessions whose parent is unavailable remain accessible as roots.
+
 `ProjectCreateDialog` collects a name and folders, reusing `DirectoryPickerDialog` for browsing,
 native directory access, directory creation and Git cloning. `ProjectFoldersSettings` is shared
 by desktop settings and the mobile project editor. Folder edits preserve project/session IDs and

@@ -126,7 +126,8 @@ interface SessionRowProps {
   currentSessionId: string | null;
   editingId: string | null;
   editingName: string;
-  expandedIds: ReadonlySet<string>;
+  collapsedIds: ReadonlySet<string>;
+  revealChildren: boolean;
   node: PiSessionNode;
   onArchive(node: PiSessionNode): void;
   onBeginRename(session: SessionSummary): void;
@@ -154,7 +155,7 @@ const PiSessionRow: React.FC<SessionRowProps> = (props) => {
   const { session } = node;
   const title = piSessionTitle(session, props.untitled);
   const hasChildren = node.children.length > 0;
-  const expanded = props.expandedIds.has(session.id);
+  const expanded = props.revealChildren || !props.collapsedIds.has(session.id);
   const pinned = isSessionPinned(props.pinnedIds, session.cwd, session.id);
   const timestamp = Date.parse(session.updatedAt);
   const timeLabel = formatSessionCompactDateLabel(Number.isFinite(timestamp) ? timestamp : Date.now());
@@ -217,7 +218,10 @@ const PiSessionRow: React.FC<SessionRowProps> = (props) => {
             type="button"
             onClick={() => props.onToggleExpanded(session.id)}
             className="flex size-5 shrink-0 items-center justify-center rounded text-muted-foreground hover:text-foreground"
-            aria-label={expanded ? 'Collapse child sessions' : 'Expand child sessions'}
+            aria-expanded={expanded}
+            aria-label={t(expanded
+              ? 'sessions.sidebar.session.subsessions.collapse'
+              : 'sessions.sidebar.session.subsessions.expand')}
           >
             <Icon name={expanded ? 'arrow-down-s' : 'arrow-right-s'} className="size-3.5" />
           </button>
@@ -349,9 +353,16 @@ const PiSessionRow: React.FC<SessionRowProps> = (props) => {
       </div>
 
       {hasChildren && expanded && (
-        <div className="ml-3 border-l border-border/60 pl-1">
-          {node.children.map((child) => (
-            <PiSessionRow key={child.session.id} {...props} node={child} />
+        <div className="ml-3">
+          {node.children.map((child, index) => (
+            <div key={child.session.id} className="relative pl-2">
+              <span aria-hidden="true" className={cn(
+                'pointer-events-none absolute left-0 top-0 border-l border-border/60',
+                index === node.children.length - 1 ? 'h-4' : 'bottom-0',
+              )} />
+              <span aria-hidden="true" className="pointer-events-none absolute left-0 top-4 w-2 border-t border-border/60" />
+              <PiSessionRow {...props} node={child} />
+            </div>
           ))}
         </div>
       )}
@@ -427,7 +438,7 @@ export const PiSessionSidebar: React.FC<PiSessionSidebarProps> = ({
   const [selectionMode, setSelectionMode] = React.useState(false);
   const [selectedSessionIds, setSelectedSessionIds] = React.useState<Set<string>>(() => new Set());
   const [collapsedGroupIds, setCollapsedGroupIds] = React.useState<Set<string>>(() => new Set());
-  const [expandedIds, setExpandedIds] = React.useState<Set<string>>(() => new Set());
+  const [collapsedSessionIds, setCollapsedSessionIds] = React.useState<Set<string>>(() => new Set());
   const [editingId, setEditingId] = React.useState<string | null>(null);
   const [editingName, setEditingName] = React.useState('');
   const [confirmation, setConfirmation] = React.useState<ConfirmationState | null>(null);
@@ -453,6 +464,7 @@ export const PiSessionSidebar: React.FC<PiSessionSidebarProps> = ({
     setSearchOpen(false);
     setSelectionMode(false);
     setSelectedSessionIds(new Set());
+    setCollapsedSessionIds(new Set());
   }, [runtimeKey]);
 
   const isPinned = React.useCallback((session: SessionSummary) => (
@@ -919,14 +931,14 @@ export const PiSessionSidebar: React.FC<PiSessionSidebarProps> = ({
               <DropdownMenuSeparator />
               <DropdownMenuItem onClick={() => {
                 setCollapsedGroupIds(new Set(workspaceGroups.map((group) => group.id)));
-                setExpandedIds(new Set());
+                setCollapsedSessionIds(new Set(collectPiSessionForestIds(workspaceGroups.flatMap((group) => group.forest))));
               }}>
                 <Icon name="arrow-right-s" className="mr-2 size-4" />
                 {t('sessions.sidebar.header.displayMode.collapseAll')}
               </DropdownMenuItem>
               <DropdownMenuItem onClick={() => {
                 setCollapsedGroupIds(new Set());
-                setExpandedIds(new Set(collectPiSessionForestIds(workspaceGroups.flatMap((group) => group.forest))));
+                setCollapsedSessionIds(new Set());
               }}>
                 <Icon name="arrow-down-s" className="mr-2 size-4" />
                 {t('sessions.sidebar.header.displayMode.expandAll')}
@@ -1174,7 +1186,8 @@ export const PiSessionSidebar: React.FC<PiSessionSidebarProps> = ({
                       currentSessionId={currentSessionId}
                       editingId={editingId}
                       editingName={editingName}
-                      expandedIds={expandedIds}
+                      collapsedIds={collapsedSessionIds}
+                      revealChildren={query.trim().length > 0}
                       pendingDialogCountBySession={pendingDialogCountBySession}
                       pinnedIds={pinnedIds}
                       selectedIds={selectedSessionIds}
@@ -1186,7 +1199,7 @@ export const PiSessionSidebar: React.FC<PiSessionSidebarProps> = ({
                         else void handleSelect(session);
                       }}
                       onPrefetch={handlePrefetch}
-                      onToggleExpanded={(sessionId) => setExpandedIds((current) => {
+                      onToggleExpanded={(sessionId) => setCollapsedSessionIds((current) => {
                         const next = new Set(current);
                         if (next.has(sessionId)) next.delete(sessionId);
                         else next.add(sessionId);

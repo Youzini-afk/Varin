@@ -171,9 +171,12 @@ terminal, and pull-request views do not maintain a second session-to-directory o
 session-to-worktree map. Varin separately records the product workspace binding selected when it
 creates a session: either one registered workspace ID or an explicit unbound/general-chat marker.
 That metadata controls navigation grouping only and never replaces the Pi cwd. Native Pi sessions
-without Varin metadata are grouped by their cwd, while an explicitly unbound session remains in
-Recent even when its runtime cwd happens to sit below a registered workspace. The same workspace
-picker, grouping rules, and navigation path are used by Web, Electron, mobile, and the IDE shell
+without Varin metadata are grouped by their cwd, while an explicitly unbound root session remains in
+Recent even when its runtime cwd happens to sit below a registered workspace. Conversation trees
+are grouped by their root session: children stay below the parent even when their execution cwd or
+workspace binding differs. This navigation projection does not change any session's binding or cwd.
+The same workspace picker, grouping rules, and navigation path are used by Web, Electron, mobile,
+and the IDE shell
 instead of keeping platform-specific workspace state.
 
 The composer keeps three different controls semantically separate. Model and thinking mutate the Pi

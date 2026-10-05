@@ -244,8 +244,11 @@ describe('Pi session presentation', () => {
     )).toEqual(['parent', 'child', 'sibling']);
   });
 
-  test('detaches children whose workspace differs from their parent', () => {
-    const projects = [{ id: 'repo', label: 'Repo', path: 'D:/work/repo' }];
+  test('keeps a conversation family under its parent across execution workspaces', () => {
+    const projects = [
+      { id: 'repo', label: 'Repo', path: 'D:/work/repo' },
+      { id: 'other', label: 'Other', path: 'D:/other' },
+    ];
     const forest = buildPiSessionForest([
       session('parent', {
         cwd: 'D:/work/repo',
@@ -256,12 +259,25 @@ describe('Pi session presentation', () => {
         parentId: 'parent',
         workspace: { kind: 'unbound' },
       }),
+      session('nested-child', {
+        cwd: 'D:/other',
+        parentId: 'general-child',
+        workspace: { id: 'other', kind: 'workspace' },
+      }),
+      session('unrelated', { cwd: 'D:/home', workspace: { kind: 'unbound' } }),
     ]);
 
     const groups = groupPiSessionForestByWorkspace(forest, projects);
     expect(groups[0]?.forest[0]?.session.id).toBe('parent');
-    expect(groups[0]?.forest[0]?.children).toEqual([]);
+    expect(groups[0]?.forest[0]?.children[0]?.session.id).toBe('general-child');
+    expect(groups[0]?.forest[0]?.children[0]?.children[0]?.session.id).toBe('nested-child');
+    expect(groups[0]?.forest[0]?.children[0]?.session.cwd).toBe('D:/home');
     expect(groups[1]?.id).toBe('recent');
-    expect(groups[1]?.forest[0]?.session.id).toBe('general-child');
+    expect(groups[1]?.forest.map((node) => node.session.id)).toEqual(['unrelated']);
+    const hiddenRecent = groupPiSessionForestByWorkspace(forest, projects, undefined, {
+      showRecentSection: false,
+    });
+    expect(hiddenRecent).toHaveLength(1);
+    expect(hiddenRecent[0]?.forest[0]?.children[0]?.session.id).toBe('general-child');
   });
 });

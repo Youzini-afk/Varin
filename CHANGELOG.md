@@ -5,6 +5,9 @@ private runtime protocol and product surfaces still move together.
 
 ## Unreleased
 
+- Keep child conversations beneath their parent across execution workspaces, with expanded sidebar
+  trees, branch connectors and search that reveals matching descendants.
+
 - Simplify subtask cards, compact finished tasks with remembered disclosure, and add live conversation
   dialogs with explicit child/parent navigation. Add a separate Subtasks side panel with search and
   status filters, move task management into menus, and name compaction history by its purpose.
