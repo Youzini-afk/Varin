@@ -304,11 +304,11 @@ export const VARIN_BUILTIN_HARNESS_EXTENSION = definition({
       group: "harness",
       icon: "chat-history",
       id: "varin.builtin.pi-harness.page.context",
-      keywords: ["harness", "context", "compaction", "preparation", "long session", "knowledge", "memory", "recall"],
+      keywords: ["harness", "context", "compaction", "preparation", "long session", "recovery", "next step"],
       kind: "single",
       order: 3,
       slug: "harness-context",
-      title: "Context & Knowledge",
+      title: "Context Management",
       titleKey: "settings.page.harness.page.context.title",
     }),
     pageContribution({
