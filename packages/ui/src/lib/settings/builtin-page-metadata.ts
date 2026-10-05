@@ -41,8 +41,8 @@ const spec = (
 ): BuiltinSettingsPageSpec => ({ meta, renderer, ...(availability ? { availability } : {}) });
 
 export const BUILTIN_SETTINGS_PAGE_SPECS: readonly BuiltinSettingsPageSpec[] = [
-  spec({ slug: 'agent-memory', title: 'Memory', titleKey: 'assistant.memory.title', group: 'harness', kind: 'single', icon: 'database-2', order: 32, keywords: ['memory', 'global', 'project', 'session'] }, 'agent-memory'),
-  spec({ slug: 'agent-prompt', title: 'System prompt', titleKey: 'assistant.prompt.title', group: 'harness', kind: 'single', icon: 'file-text', order: 33, keywords: ['prompt', 'instructions', 'style', 'autonomy'] }, 'agent-prompt'),
+  spec({ slug: 'agent-memory', title: 'Memory', titleKey: 'assistant.memory.title', group: 'harness', kind: 'single', icon: 'database-2', order: 5, keywords: ['memory', 'global', 'project', 'session'] }, 'agent-memory'),
+  spec({ slug: 'agent-prompt', title: 'System prompt', titleKey: 'assistant.prompt.title', group: 'harness', kind: 'single', icon: 'file-text', order: 3, keywords: ['prompt', 'instructions', 'style', 'autonomy'] }, 'agent-prompt'),
   spec({ slug: 'home', title: 'Settings', titleKey: 'settings.view.home.title', group: 'general', kind: 'single', icon: null, order: -1, keywords: ['search', 'settings'] }, 'empty'),
   spec({ slug: 'general', title: 'General', titleKey: 'settings.page.general.title', group: 'general', kind: 'single', icon: 'settings-3', order: 0, keywords: ['general', 'startup', 'launch at login', 'autostart', 'tray', 'password', 'passkey', 'security', 'transport', 'network', 'lan'] }, 'varin:general'),
   spec({ slug: 'appearance', title: 'Appearance', titleKey: 'settings.page.appearance.title', group: 'general', kind: 'single', icon: 'palette', order: 1, keywords: ['theme', 'font', 'spacing', 'padding', 'corner radius', 'radius', 'input bar', 'keyboard', 'viewport', 'mobile', 'terminal', 'pwa', 'install name', 'app shortcuts'] }, 'varin:visual'),
