@@ -335,7 +335,7 @@ export const VARIN_BUILTIN_HARNESS_EXTENSION = definition({
       kind: "single",
       order: 10,
       slug: "harness-computers",
-      title: "Computers",
+      title: "Computer Use",
       titleKey: "settings.page.harness.page.computers.title",
     }),
     pageContribution({
