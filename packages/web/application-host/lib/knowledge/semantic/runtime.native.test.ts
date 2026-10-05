@@ -83,9 +83,10 @@ describe("semantic index runtime", () => {
     const base = createHashEmbedder();
     const countTokens = vi.fn(base.countTokens);
     const embed = vi.fn(base.embed);
+    const prepare = vi.fn(base.prepare);
     const unitsFile = vi.fn(native.unitsFile!);
     const makeRuntime = () => createSemanticIndexRuntime({ dataDir: documents.dataDir, hostId: 'verified-fast-path',
-      documents: documents.authority, structureSource: { ...native, unitsFile }, embedder: { ...base, countTokens, embed },
+      documents: documents.authority, structureSource: { ...native, unitsFile }, embedder: { ...base, countTokens, embed, prepare },
       searchFilesystemFiles: async () => [{ name: 'verified.ts', path: file, relativePath: 'verified.ts', metadata: metadataFor(file) }],
     });
     let runtime = makeRuntime();
@@ -102,12 +103,14 @@ describe("semantic index runtime", () => {
     runtime.observeDocumentMutation({ workspaceId: scope.scopeId, resourceId: 'verified.ts', kind: 'modified' });
     await runtime.drain();
     await runtime.dispose();
-    unitsFile.mockClear(); embed.mockClear();
+    unitsFile.mockClear(); embed.mockClear(); prepare.mockClear();
     runtime = makeRuntime();
     await runtime.scanScope(scope);
     expect(unitsFile).not.toHaveBeenCalled();
     expect(embed).not.toHaveBeenCalled();
+    expect(prepare).not.toHaveBeenCalled();
     expect(runtime.statusFor(scope).publishedDocuments).toBe(1);
+    expect(runtime.statusFor(scope).coverage).toBe('complete');
   });
 
   it('resumes an interrupted build after restart without reading or embedding completed files again', async () => {
@@ -500,9 +503,9 @@ describe("semantic index runtime", () => {
     expect(processed).toEqual(["old.ts", "new.ts"]);
     const found = await runtime.search(scope, "newly discovered marker", 1);
     expect(found.hits[0]?.documentId).toBe("new.ts");
-    expect(found.gaps).toContainEqual({ path: ".", reason: "index-watch-unavailable" });
-    expect(found.status.coverage).toBe("partial");
-    expect(found.status.status).toBe("incomplete");
+    expect(found.gaps).toEqual([]);
+    expect(found.status.coverage).toBe("complete");
+    expect(found.status.status).toBe("ready");
     await runtime.scanScope(scope, { forceContentVerification: true });
     expect(processed).toEqual(["old.ts", "new.ts", "old.ts", "new.ts"]);
     const verified = await runtime.search(scope, "newly discovered marker", 1);

@@ -38,11 +38,15 @@ derived store (`../vectors/`); they reuse `harness.embed` but never this MiniLM 
   updates that hint only against the matching revision/recipe and publication token. Each completed
   batch retains its hints even when a later batch is interrupted; startup reuses those hints and
   prepares only the remaining/changed paths. Metadata equality remains an unverified hint, and
-  explicit verification or watcher reset still reads content. A normal query never traverses the root; returned old hits are checked
+  explicit verification still reads content. Watcher reset/recovery uses metadata reconciliation,
+  preserving stable publications. A normal query never traverses the root; returned old hits are checked
   against current Documents revision. Query-time dimension discovery resumes a deferred scan in the
   existing background owner rather than awaiting the entire inventory. Queries consume published
-  generations by default; first-publication waiting is an explicit internal option. Metadata-only skips keep a range-level partial coverage
-  marker, while watcher reset/recovery forces content verification. `workspace-runtime.ts` injects
+  generations by default; first-publication waiting is an explicit internal option. Coverage records
+  indexed source coverage, not whether every unchanged body was reread this pass: metadata skips do
+  not add missing-watch gaps. Actual watcher unavailability, unsupported files and read failures remain
+  visible. An unchanged inventory neither prepares the embedding model nor rewrites/flushes the generation.
+  `workspace-runtime.ts` injects
   the Host fixed-source reader for external child drafts and working-branch aliases.
 - Production assembly: `workspace-runtime.ts` owns per-workspace Settings/describe resolution, remote
   transport, config watches, backend refresh, query view selection and shutdown. Application Host uses
@@ -50,7 +54,8 @@ derived store (`../vectors/`); they reuse `harness.embed` but never this MiniLM 
   One Host-owned serial reconciler periodically inventories selected project folders to recover additions missed
   by quiet watches. The first interval is at least one minute; later quiet intervals use the prior scan's
   elapsed time to target about 1% wall-time duty. Periodic scans stay detached from query latency, while
-  watcher reset/recovery still forces content verification.
+  watcher reset/recovery requests another incremental inventory without aborting an accepted scan
+  to replace it with a full content pass.
   Native content verification compares the published revision before parsing or emitting units; an
   unchanged file never enters tokenizer packing or vector publication. Catalog state is loaded once
   per pass rather than requested again per file. One batch prepares on the native background lane
@@ -73,6 +78,8 @@ derived store (`../vectors/`); they reuse `harness.embed` but never this MiniLM 
   without inventing a zero while enumeration is pending.
   Active work includes the current file and preparation/embedding stage. The current-pass counter is
   transient; published document revisions and metadata survive interruption and process restart.
+  The UI distinguishes inventory checks, semantic construction and code-relation maintenance;
+  a completed semantic pass does not keep displaying its check counter while the graph is finishing.
   Project entries own their folder collection: `path` is the default execution folder and
   `additionalPaths` contains the other explicitly selected folders. `../index-directories.ts`
   persists directory maintenance state in `index-directories.json`: project folders join by default,

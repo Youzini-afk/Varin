@@ -90,6 +90,42 @@ async function setup(hooks: {
 }
 
 describe('production workspace semantic assembly lifecycle', () => {
+  it('reconciles watcher resets without rereading stable files and discovers missed edits', async () => {
+    let notify: Parameters<WorkspaceSemanticRuntimeOptions['documents']['watch']>[1] = () => {};
+    let file = '';
+    const native = createStructureSource([createTreeSitterStructureProvider({ parseBudgetMs: 30_000 })]);
+    const unitsFile = vi.fn(native.unitsFile!);
+    const harness = await setup({
+      watchDocuments: (_workspaceId, listener) => {
+        notify = listener;
+        return { ready: Promise.resolve(true), settle: async () => undefined, close() {} };
+      },
+      searchFilesystemFiles: async () => {
+        const stat = fs.statSync(file, { bigint: true });
+        return [{ name: 'stable.ts', path: file, relativePath: 'stable.ts',
+          metadata: { byteLength: String(stat.size), modifiedTimeNs: String(stat.mtimeNs) } }];
+      },
+      structureSource: { ...native, unitsFile },
+    });
+    file = path.join(harness.documents.workspaceRoot, 'stable.ts');
+    fs.writeFileSync(file, 'export const marker = "before reset";\n');
+    await harness.runtime.scanWorkspace(harness.workspaceId);
+    await harness.runtime.drain();
+    unitsFile.mockClear(); harness.embedded.mockClear();
+    const reset = () => notify({ sourceId: 'watch', generation: 2, sequence: 1, kind: 'reset', reason: 'reconnected' });
+    reset(); reset();
+    await harness.runtime.drain();
+    expect(unitsFile).not.toHaveBeenCalled();
+    expect(harness.embedded).not.toHaveBeenCalled();
+    expect(harness.runtime.indexStatuses()[0]?.status.coverage).toBe('complete');
+    fs.writeFileSync(file, 'export const marker = "missed external change after reset";\n');
+    reset();
+    await harness.runtime.drain();
+    expect(unitsFile).toHaveBeenCalledTimes(1);
+    const found = await harness.runtime.semanticRecall(harness.workspaceId, 'missed external change', 5);
+    expect(found.hits[0]?.body).toContain('missed external change');
+  });
+
   it('activates selected folders and stops scanning and watching after the project removes them', async () => {
     const selection = createProjectIndexScope([]);
     const inventory = vi.fn(async () => []);

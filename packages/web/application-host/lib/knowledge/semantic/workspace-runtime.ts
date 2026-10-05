@@ -235,7 +235,10 @@ export function createWorkspaceSemanticRuntime(options: WorkspaceSemanticRuntime
     try {
       const documentWatch = options.documents.watch(state.workspaceId, (event) => {
         if (event.kind === 'reset') {
-          track(state.runtime.scanWorkspace(state.workspaceId, { forceContentVerification: true }));
+          // A lost notification requires a new inventory, not a read of every
+          // unchanged body. Persisted hints select changed files; query hits
+          // still verify their content revision through Documents.
+          track(state.runtime.scanWorkspace(state.workspaceId));
           return;
         }
         const resource = event.resource;
@@ -261,7 +264,7 @@ export function createWorkspaceSemanticRuntime(options: WorkspaceSemanticRuntime
       }
       // A root that was temporarily unavailable needs one reconciliation when
       // it becomes observable again; a successful retry is not a baseline.
-      if (reconcileOnRecovery && !wasReady) track(state.runtime.scanWorkspace(state.workspaceId, { forceContentVerification: true }));
+      if (reconcileOnRecovery && !wasReady) track(state.runtime.scanWorkspace(state.workspaceId));
       return true;
     } catch {
       state.documentWatch?.close();

@@ -71,7 +71,7 @@ export type SemanticScanOptions = {
   manual?: boolean;
   signal?: AbortSignal;
   onBatchComplete?: (progress: SemanticScanBatchProgress) => void;
-  /** Watch continuity was lost: metadata is not enough to retain old content. */
+  /** Explicit byte verification; automatic maintenance uses persisted metadata. */
   forceContentVerification?: boolean;
 };
 
@@ -134,9 +134,6 @@ export function createSemanticIndexRuntime(options: SemanticIndexRuntimeOptions)
   const verifyingScanKeys = new Set<string>();
   const activeScanGates = new Map<string, { promise: Promise<void>; resolve: () => void; resolved: boolean }>();
   const unverifiedPaths = new Map<string, Set<string>>();
-  // Persisted inventory hints never become content revisions. Skipped paths
-  // remain visible as coverage gaps and hits retain authoritative byte checks.
-  const metadataUnverifiedPaths = new Map<string, Set<string>>();
   const mutationPending = new Map<string, Set<string>>();
   const mutationWork = new Map<string, { token: number; kind: "modified" | "deleted"; controller: AbortController | null }>();
   const indexReadFailures = new Map<string, Set<string>>();
@@ -184,10 +181,6 @@ export function createSemanticIndexRuntime(options: SemanticIndexRuntimeOptions)
     `${scope.scopeKind}\0${scope.scopeId}\0${spaceId ?? spaceIdOf(embedderOf().space)}`
   );
   const scopeIdentity = (scope: SemanticScopeKey): string => `${scope.scopeKind}\0${scope.scopeId}`;
-  const forgetMetadataVerification = (scope: SemanticScopeKey, documentId: string): void => {
-    const prefix = `${scopeIdentity(scope)}\0`;
-    for (const [key, paths] of metadataUnverifiedPaths) if (key.startsWith(prefix)) paths.delete(documentId);
-  };
   const metadataIdentity = (metadata: SemanticScanFile["metadata"]): string | undefined => (
     metadata ? JSON.stringify([metadata.byteLength, metadata.modifiedTimeNs]) : undefined
   );
@@ -396,7 +389,6 @@ export function createSemanticIndexRuntime(options: SemanticIndexRuntimeOptions)
     const languageId = languageIdForPath(event.resourceId);
     if (!languageId) return;
     const pendingForScope = mutationPending.get(scopeIdentity(workspaceScope(event.workspaceId))) ?? new Set<string>();
-    forgetMetadataVerification(workspaceScope(event.workspaceId), event.resourceId);
     pendingForScope.add(event.resourceId);
     mutationPending.set(scopeIdentity(workspaceScope(event.workspaceId)), pendingForScope);
     const scope = workspaceScope(event.workspaceId);
@@ -532,7 +524,6 @@ export function createSemanticIndexRuntime(options: SemanticIndexRuntimeOptions)
           if (optionsForScan?.forceContentVerification) verifyingScanKeys.add(resolvedKey);
         }
         store = storeFor(scope, embedder);
-        await store.markBuilding(store.lifecycle === "ready" ? "rebuilding" : "building");
         const publishedStates = await store.listDocumentStates();
         const publishedByPath = new Map(publishedStates.map(row => [row.documentId, row]));
         const publishedBefore = [...publishedByPath.keys()];
@@ -549,8 +540,6 @@ export function createSemanticIndexRuntime(options: SemanticIndexRuntimeOptions)
           !retainedPaused(documentId) && (documentTokens.get(`${scopeKey(scope, "token")}\0${documentId}`) ?? 0) <= scanToken
         )));
         unverifiedPaths.set(resolvedKey, unverified);
-        const previouslyMetadataUnverified = metadataUnverifiedPaths.get(resolvedKey) ?? new Set<string>();
-        const metadataUnverified = enumerationComplete ? new Set<string>() : new Set(previouslyMetadataUnverified);
         const readFailures = indexReadFailures.get(resolvedKey) ?? new Set<string>();
         indexReadFailures.set(resolvedKey, readFailures);
         if (enumerationComplete) {
@@ -571,18 +560,18 @@ export function createSemanticIndexRuntime(options: SemanticIndexRuntimeOptions)
             && !pendingMutation
             && isCurrentToken(scope, path, scanToken);
           if (canSkip) {
-            // Keep the prior index available so its candidate revision can be
-            // checked against Documents. The scan still cannot claim complete
-            // recall because metadata equality does not prove equal contents.
-            metadataUnverified.add(path);
+            // Coverage records which files have an index, not a promise that
+            // no external writer can change them. Returned hits independently
+            // verify the published revision against current Documents bytes.
             unverified.delete(path);
           } else {
             toProcess.push(file);
-            metadataUnverified.delete(path);
           }
         }
         scanFailures.delete(scopeScanKey);
-        await embedder.prepare();
+        const hasWork = toProcess.length > 0 || removed.length > 0;
+        if (hasWork) await store.markBuilding(store.lifecycle === "ready" ? "rebuilding" : "building");
+        if (toProcess.length > 0) await embedder.prepare();
         const scanStore = store;
         let completedFiles = catalog.length - toProcess.length;
         updateProgress({ phase: "processing", processedFiles: completedFiles, publishedDocuments: scanStore.checkpoint()?.publishedDocuments ?? 0 });
@@ -649,12 +638,10 @@ export function createSemanticIndexRuntime(options: SemanticIndexRuntimeOptions)
               if ("kind" in publication && publication.kind === "read-failed") {
                 scanComplete = false;
                 readFailures.add(path);
-                metadataUnverified.delete(path);
               } else if (!("kind" in publication) || publication.kind === "unchanged-current") {
                 unverified.delete(path);
                 readFailures.delete(path);
                 mutationPending.get(scopeIdentity(scope))?.delete(path);
-                metadataUnverified.delete(path);
               }
             }
             if (prepared.some((publication) => !("kind" in publication) || publication.kind === "unchanged-current")) gate.resolve();
@@ -681,20 +668,16 @@ export function createSemanticIndexRuntime(options: SemanticIndexRuntimeOptions)
         await Promise.all(workers);
         if (failed) throw workerFailure;
         signal.throwIfAborted();
-        for (const path of [...metadataUnverified]) {
-          if (!isCurrentToken(scope, path, scanToken)) {
-            metadataUnverified.delete(path);
-          }
-        }
         const currentRemovals = removed.filter((documentId) => isCurrentToken(scope, documentId, removalTokens.get(documentId)!));
         await Promise.all(currentRemovals.map((documentId) => store!.removeDocument(documentId, removalTokens.get(documentId)!)));
         for (const documentId of currentRemovals) {
           unverified.delete(documentId);
-          metadataUnverified.delete(documentId);
         }
-        if (metadataUnverified.size > 0) metadataUnverifiedPaths.set(resolvedKey, metadataUnverified);
-        else metadataUnverifiedPaths.delete(resolvedKey);
-        await store.markReady(scanComplete && unverified.size === 0 && metadataUnverified.size === 0);
+        const complete = scanComplete && unverified.size === 0;
+        const coverage = complete ? "complete" : (store.checkpoint()?.publishedDocuments ?? 0) > 0 ? "partial" : "empty";
+        // An unchanged inventory must not load inference or rewrite/flush the
+        // generation. Interrupted builds and changed coverage still finalize.
+        if (hasWork || store.lifecycle !== "ready" || store.coverage !== coverage) await store.markReady(complete);
         updateProgress({ phase: "ready", activeFile: undefined, processedFiles: catalog.length, publishedDocuments: store.checkpoint()?.publishedDocuments ?? 0 });
         deferredDimensionScans.get(embedder)?.delete(scopeScanKey);
       } catch (error) {
@@ -950,12 +933,6 @@ export function createSemanticIndexRuntime(options: SemanticIndexRuntimeOptions)
       const indexGaps: SemanticSearchResult["gaps"] = [...(indexReadFailures.get(key) ?? [])]
         .filter((path) => pathInRoots(path, searchOptions?.roots))
         .map((path) => ({ path, reason: "index-read-failed" as const }));
-      // One scope-level gap represents the inventory's coverage uncertainty.
-      // Expanding every unchanged file into a query result would make a large
-      // workspace's response scale with its file count even for a one-hit query.
-      const hasMetadataGap = diskIndexEnabled && [...(metadataUnverifiedPaths.get(key) ?? [])]
-        .some((path) => pathInRoots(path, searchOptions?.roots));
-      if (hasMetadataGap) indexGaps.push({ path: ".", reason: "index-watch-unavailable" });
       if (diskIndexEnabled && (scanProgress.get(`${scope.scopeKind}\0${scope.scopeId}`)?.coverageStats?.unsupportedFiles ?? 0) > 0) {
         indexGaps.push({ path: '.', reason: 'unsupported-files' });
       }
@@ -1028,7 +1005,6 @@ export function createSemanticIndexRuntime(options: SemanticIndexRuntimeOptions)
         || store.lifecycle === "building"
         || store.lifecycle === "rebuilding"
         || (unverifiedPaths.get(key)?.size ?? 0) > 0
-        || (diskIndexEnabled && [...(metadataUnverifiedPaths.get(key) ?? [])].some((path) => pathInRoots(path, searchOptions?.roots)))
         || (mutationPending.get(scopeId)?.size ?? 0) > 0;
       return {
         status: {
@@ -1063,7 +1039,6 @@ export function createSemanticIndexRuntime(options: SemanticIndexRuntimeOptions)
     await drain();
     await Promise.allSettled([...stores.values()].map((store) => store.close()));
     stores.clear();
-    metadataUnverifiedPaths.clear();
   };
 
   return {

@@ -43,7 +43,8 @@ export function IndexDirectories({ status, draft, edit, refresh }: {
         const root = status.roots.find((item) => item.workspaceId === entry.workspaceId);
         const paused = entry.state === 'paused';
         const deleting = entry.state === 'deleting';
-        const processing = entry.checking || (entry.state === 'active' && ['enumerating', 'processing'].includes(root?.progress?.phase ?? ''));
+        const semanticProcessing = (entry.state === 'active' || entry.checking) && ['enumerating', 'processing'].includes(root?.progress?.phase ?? '');
+        const processing = entry.checking || semanticProcessing;
         const failure = entry.error ?? root?.progress?.error;
         const indexedDocuments = root?.status.publishedDocuments ?? root?.progress?.publishedDocuments;
         const totalFiles = root?.progress?.totalFiles ?? 0;
@@ -53,7 +54,10 @@ export function IndexDirectories({ status, draft, edit, refresh }: {
             <div className="min-w-0 flex-1">
               <p className="break-all typography-ui-label">{entry.path}</p>
               <p className="typography-micro text-muted-foreground">
-                {failure && !processing && !entry.busy ? t('settings.page.harness.index.phase.failed') : deleting ? t('index.directories.deleting') : processing ? t('index.directories.checking') : entry.cacheOnly ? t('index.directories.cached') : paused ? t('index.directories.paused')
+                {failure && !processing && !entry.busy ? t('settings.page.harness.index.phase.failed') : deleting ? t('index.directories.deleting')
+                  : semanticProcessing && root?.progress?.phase === 'processing' ? t('settings.page.harness.index.phase.processing')
+                  : entry.checking && root?.progress?.phase === 'ready' ? t('index.directories.updatingRelations')
+                  : processing ? t('index.directories.checking') : entry.cacheOnly ? t('index.directories.cached') : paused ? t('index.directories.paused')
                   : t('settings.page.harness.index.phase.ready')}
                 {root ? ` · ${t(root.status.coverage === 'complete' ? 'settings.page.harness.index.coverage.complete'
                   : root.status.coverage === 'partial' ? 'settings.page.harness.index.coverage.partial' : 'settings.page.harness.index.coverage.empty')}` : ''}
@@ -61,10 +65,10 @@ export function IndexDirectories({ status, draft, edit, refresh }: {
                   ? t('index.directories.indexedFiles', { count: indexedDocuments, total: totalFiles })
                   : t('settings.page.harness.index.progress.documents', { count: indexedDocuments })}` : ''}
               </p>
-              {processing && totalFiles > 0 && root?.progress ? <p className="typography-micro text-muted-foreground">
+              {semanticProcessing && totalFiles > 0 && root?.progress ? <p className="typography-micro text-muted-foreground">
                 {t('index.directories.checkedFiles', { count: root.progress.processedFiles, total: totalFiles })}
               </p> : null}
-              {processing && root?.progress?.activeFile ? <p className="truncate typography-micro text-muted-foreground" title={root.progress.activeFile.path}>
+              {semanticProcessing && root?.progress?.activeFile ? <p className="truncate typography-micro text-muted-foreground" title={root.progress.activeFile.path}>
                 {t(root.progress.activeFile.phase === 'preparing' ? 'index.directories.preparingFile' : 'index.directories.embeddingFile',
                   { path: root.progress.activeFile.path })}
               </p> : null}

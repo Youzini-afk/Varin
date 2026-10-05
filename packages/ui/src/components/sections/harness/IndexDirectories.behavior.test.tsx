@@ -39,6 +39,12 @@ describe('index progress presentation', () => {
     expect(document.body.textContent).toContain('Indexed 50/100 documents');
     expect(document.body.textContent).toContain('Checked 3/100 files this pass');
     expect(document.querySelector('progress')?.getAttribute('value')).toBe('50');
+    const status = snapshot();
+    status.directories.entries[0]!.checking = true;
+    status.roots[0]!.progress!.phase = 'ready';
+    const graphOnly = render(status);
+    expect(graphOnly.body.textContent).toContain('Indexed 50/100 documents');
+    expect(graphOnly.body.textContent).not.toContain('files this pass');
   });
 
   it('keeps the saved count visible before a restarted directory inventory knows its total', () => {

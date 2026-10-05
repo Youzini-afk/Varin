@@ -5,6 +5,11 @@ private runtime protocol and product surfaces still move together.
 
 ## Unreleased
 
+- Reconcile filesystem watcher resets/recovery incrementally instead of rereading every indexed file.
+  Stable inventories skip embedding-model preparation and generation checkpoints; metadata skips no
+  longer manufacture missing-watch coverage gaps. Distinguish index construction from code-relation
+  maintenance in directory progress.
+
 ## 0.9.23 - 2026-10-04
 
 ### Release highlights

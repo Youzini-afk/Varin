@@ -13,6 +13,7 @@ export const settingsDict = {
   "index.directories.resume": "繼續維護",
   "index.directories.check": "檢查更新",
   "index.directories.checking": "正在檢查更新",
+  "index.directories.updatingRelations": "正在更新程式碼關聯",
   "index.directories.indexedFiles": "已索引 {count}/{total} 個文件",
   "index.directories.checkedFiles": "本次檢查 {count}/{total} 個檔案",
   "index.directories.paused": "已暫停",

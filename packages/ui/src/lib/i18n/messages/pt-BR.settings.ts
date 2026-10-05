@@ -55,6 +55,7 @@ export const settingsDict = {
   "index.directories.pause": "Pausar",
   "index.directories.resume": "Retomar",
   "index.directories.check": "Verificar atualizações",
+  "index.directories.updatingRelations": "Atualizando relações de código",
   "index.directories.checking": "Verificando atualizações",
   "index.directories.indexedFiles": "Documentos indexados: {count}/{total}",
   "index.directories.checkedFiles": "Arquivos verificados nesta checagem: {count}/{total}",
