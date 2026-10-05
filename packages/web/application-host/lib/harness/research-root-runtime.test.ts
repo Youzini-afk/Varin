@@ -4,6 +4,7 @@ import { join } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
 import type { PiMessage, SessionSnapshot, SessionStats } from "@varin/protocol";
 import { createResearchRootRuntime } from "./research-root-runtime.js";
+import { createAgentRootRuntime } from "./agent-root-runtime.js";
 import { createThreadRegistry } from "./thread-registry.js";
 
 const WORKSPACE = "workspace-research";
@@ -175,8 +176,9 @@ describe("research root runtime", () => {
     dataDirs.push(dataDir);
     let registry = createThreadRegistry({ dataDir, hostId: "host" });
     let currentSnapshot = snapshot("research");
+    currentSnapshot.permissions = { mode: "accept-edits", rules: [] };
     let currentStats = stats();
-    const runtime = createResearchRootRuntime({
+    const rootOptions: Parameters<typeof createResearchRootRuntime>[0] = {
       registry,
       getSessionSnapshot: () => currentSnapshot,
       sessions: {
@@ -192,7 +194,9 @@ describe("research root runtime", () => {
           sessionId: SESSION,
         }),
       },
-    });
+    };
+    const runtime = createResearchRootRuntime(rootOptions);
+    const agentRuntime = createAgentRootRuntime(rootOptions);
 
     let bindingSeenBeforeForward = false;
     await runtime.processEvent({
@@ -211,6 +215,7 @@ describe("research root runtime", () => {
       model: { providerId: "faux", modelId: "current-model" },
       tools: ["read", "thread.dispatch", "thread.read"],
       workFocus: "research",
+      permissions: { mode: "accept-edits", rules: [] },
     });
 
     const branch = await registry.createThread({
@@ -245,12 +250,18 @@ describe("research root runtime", () => {
     });
 
     currentSnapshot = snapshot("code");
+    delete currentSnapshot.workspace;
     await runtime.processEvent({
       kind: "host",
       sessionId: SESSION,
       envelope: { kind: "event", event: "agent.event", data: { event: { type: "agent_start" } } },
     }, () => undefined);
     expect(await registry.getSessionBinding(SESSION)).toBeNull();
+    await agentRuntime.processEvent({ kind: "host", sessionId: SESSION, envelope: { kind: "event", event: "agent.event", data: { event: { type: "agent_start" } } } }, () => undefined);
+    expect((await registry.getSessionBinding(SESSION))?.threadId).toBe(root!.id);
+    expect((await registry.getActiveRun(WORKSPACE, root!.id))?.frozen?.workFocus).toBe("code");
+    expect((await registry.listTaskThreadSnapshots(WORKSPACE, { kind: "thread", id: root!.id }, true)).map(entry => entry.thread.id)).toContain(branch.id);
+    await agentRuntime.processEvent({ kind: "host", sessionId: SESSION, envelope: { kind: "event", event: "agent.event", data: { event: { type: "agent_settled" } } } }, () => undefined);
 
     currentSnapshot = snapshot("research");
     await runtime.processEvent({
@@ -260,8 +271,9 @@ describe("research root runtime", () => {
     }, () => undefined);
     const rebound = await registry.getSessionBinding(SESSION);
     expect(rebound?.threadId).toBe(root!.id);
-    expect((await registry.getActiveRun(WORKSPACE, root!.id))?.attempt).toBe(2);
+    expect((await registry.getActiveRun(WORKSPACE, root!.id))?.attempt).toBe(3);
 
+    await agentRuntime.dispose();
     await runtime.dispose();
     await registry.dispose();
     registry = createThreadRegistry({ dataDir, hostId: "host" });

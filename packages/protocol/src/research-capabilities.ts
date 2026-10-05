@@ -81,7 +81,7 @@ export const RESEARCH_CAPABILITY_DEFINITIONS: Readonly<Record<ResearchCapability
   'high-throughput-execution': {
     capability: 'high-throughput-execution',
     slot: 'researchHighThroughputExecution',
-    tools: ['read', 'edit', 'write', 'apply_patch', 'bash', 'grep', 'find', 'ls', 'get_output', 'write_to_process', 'kill_shell', 'threads', 'wait', 'send', 'read_thread', 'experiment', 'resources', 'research_source'],
+    tools: ['read', 'edit', 'write', 'apply_patch', 'bash', 'grep', 'find', 'ls', 'get_output', 'write_to_process', 'kill_shell', 'threads', 'wait', 'send', 'read_thread', 'submit_code', 'experiment', 'resources', 'research_source'],
     worktree: 'isolated',
     systemPromptFragment: 'Research capability: batch execution.',
     defaultResources: { cpu: true, longRunning: true },

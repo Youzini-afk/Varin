@@ -31,12 +31,21 @@ The pi-host harness tools are custom tools registered in the Pi session's
 | `materials` | Named collections of snapshot/URL/paper references with collection-scoped keyword search and explicit cross-thread `share` grants | `materials.collections` |
 | `research_decide` | Batch fast-decision scoring/selection over real URL/snapshot/paper/section/query candidates | `research.decide` |
 | `dispatch`, `threads`, `wait`, `send`, `read_thread`, `merge`, `update`, `kill` | Delegate Worker/retrieval tasks, inspect task-family conversations by range, and coordinate Host-owned threads | `thread.*` |
+| `submit_code` | Submit selected file changes or unique original/replacement snippets directly to a writable task peer or parent; automatic native integration and durable application receipts | `thread.submitCode` |
 | `submit_facts` | Retrieval child delivers Host-validated facts | `thread.facts.set` |
 | `experiment` | Submit and manage attempts, page logs and collected text artifacts | `experiment.submit/list/get/logs/artifact/wait/cancel/collect` |
 | `resources` | Read machine capacity, commitments, observations and queued work | `resource.list` |
 | `research_source` | Register or inspect provenance and retained source objects | `source.register/list` |
 
 Research tools require the Host's actual services, research work focus and the session's tool selection.
+`wait` without `timeout_ms` holds an event subscription with no periodic model calls. New user input
+interrupts the wait normally; the Host readmits the yielded execution slot before returning. Task roots
+and waiting conditions persist across restarts. `submit_code` captures one fixed source in the Host,
+returns accepted/queued separately from applied, and exposes the durable receipt to `threads`, `wait`
+and the conversation UI. Its default identity includes the session, history leaf and tool call; explicit
+`submissionId` retries retain the original selection. Full integration advances the acknowledged source
+baseline, so later changes and reversions are distinct from recipient edits. Disabling a tool removes
+its team-prompt guidance.
 General work focus removes `research_search`, `research_decide`, `materials`, `experiment`, `resources`
 and `research_source` from the native Pi registry, including discovery and nested tool execution.
 Switching focus updates the registry before the next user run; current runs keep their selected focus.

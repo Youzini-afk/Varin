@@ -586,6 +586,8 @@ export interface HarnessRuntimeState {
 }
 
 export interface SessionSnapshot extends SessionRuntimeState {
+  /** Effective Pi permission policy, used when freezing delegated work. */
+  permissions?: import("./permission-gate.js").PermissionPolicy;
   cwd: string;
   /**
    * Per-worker event sequence observed when this snapshot was read. Events from

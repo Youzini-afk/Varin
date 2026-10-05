@@ -723,6 +723,17 @@ export function createThreadWorktreeRuntime(options: ThreadWorktreeRuntimeOption
       readlink: fsPromises.readlink,
       join: pathModule.join,
     });
+    const rawPaths = [...new Set([...parseGitNullList(tracked), ...parseGitNullList(untracked)])].filter(file => {
+      const identity = contentIdentities[file];
+      return identity ? identity.startsWith("file:") : indexModes[file] === "100644" || indexModes[file] === "100755";
+    }).sort();
+    // One native Git process hashes raw bytes for the reusable baseline identity.
+    // C-quoted UTF-8 input handles spaces, quotes and control characters without a shell.
+    const quoted = (file: string) => '"' + [...Buffer.from(file)].map(byte => byte >= 32 && byte < 127 && byte !== 34 && byte !== 92
+      ? String.fromCharCode(byte) : `\\${byte.toString(8).padStart(3, "0")}`).join("") + '"';
+    const rawHashes = rawPaths.length ? (await runGit(directory, ["hash-object", "--no-filters", "--stdin-paths"], rawPaths.map(quoted).join("\n") + "\n")).stdout.trim().split(/\r?\n/u) : [];
+    if (rawHashes.length !== rawPaths.length || rawHashes.some(hash => !/^[0-9a-f]+$/u.test(hash))) throw new Error("Git returned an incomplete raw baseline identity");
+    const rawFileHashes = Object.fromEntries(rawPaths.map((file, index) => [file, rawHashes[index]!]));
     return {
       kind: "git",
       baseRef,
@@ -738,6 +749,7 @@ export function createThreadWorktreeRuntime(options: ThreadWorktreeRuntimeOption
       gitlinks,
       indexModes,
       contentIdentities,
+      rawFileHashes,
     };
   };
 

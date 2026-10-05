@@ -4,6 +4,9 @@ import type { ThreadRegistry } from "./thread-registry.js";
 export function dependencyChange(wait: ThreadDependencyWait, thread: Thread, run: ThreadRun | null): string | null {
   const target = wait.targets.find(entry => entry.id === thread.id);
   if (!target) return null;
+  if (thread.codeSubmissions?.some(submission => ["applied", "conflict", "failed"].includes(submission.status)
+    && target.codeSubmissionStates?.[submission.id] !== submission.status)) return `Code submission receipt available in ${thread.id}`;
+  if (target.runId === wait.runId) return null;
   if (thread.resultRevision !== undefined && thread.resultRevision !== target.resultRevision) return `Result available from ${thread.id}`;
   if (run?.outcome === "lost" && target.outcome !== "lost") return `Execution lost in ${thread.id}`;
   if (["user", "permission", "stalled", "looping"].includes(thread.attention) && thread.attention !== target.attention) return `Attention required in ${thread.id}`;

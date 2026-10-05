@@ -87,9 +87,9 @@ rebase | clean`、包管理安装 / 卸载、路径含 `.env | id_rsa | .ssh`；
 
 ### 9.2 多 agent：持续工作的主线与按任务展开的线程（D-285）
 
-2026-10-05：D-339 的[多 Agent 协作设计](agent-collaboration-design.md)已确认，尚未实施。
-新设计将常规子 Agent 收敛为 Worker/检索，补齐同任务会话互读、主线事件接续和选定代码提交。
-下文预设表及父子读取/结果合入规则继续描述既有实现；目标调整以新设计为准，不能据此宣称已经交付。
+2026-10-06：D-339 的[多 Agent 协作设计](agent-collaboration-design.md)已接线并完成定向行为及真实 Rust 内核验证。
+常规子 Agent 收敛为 Worker/检索；同任务互读、普通主线持久事件等待和选定代码提交沿现有权威实现。
+交付事实与未验证边界见该设计 §8–9；下文未由 D-339 修改的运行及科研合同继续有效。
 
 主线是能调查、设计、实现和验收的正常 agent。独立工作值得展开时才委派；共享接口未确定就先解决真实依赖，已经明确就
 直接并行，不先设 planner/manager 层，不要求模型规划完整 DAG。主线负责整体取舍、关键验收和最终交付，也亲自推进重要
@@ -126,20 +126,16 @@ Rust WorkingState/Integration 保持文件与结果权威。任务身份不会�
 而不是会话启动时缓存的模型。关闭保留配置，但阻止新的角色派发；科研能力切换也不能通过 `model: "inherit"`
 绕过开关。已经受理的工作及其重试保留原配置。目录按工作侧重筛选，插件 Agent 的执行与配置仍由插件拥有。
 
-内置 quick-implement、hard-implement、frontend 适用于通用侧重；四项科研能力适用于科研侧重；
-review、check、retrieval 为两边共用，自定义定义按其 `workFocus` 生效（空数组表示共用）。
+内置 Worker、retrieval 为两种工作侧重共用；四项科研能力仅适用于科研侧重。
+旧实现/前端/审查/检查的有效配置保留为可编辑用户配置；自定义定义按其 `workFocus` 生效（空数组表示共用）。
 模型可见的派发参数、自动生成的团队说明与实际派发使用同一启用状态和模式范围。
 切换侧重、关闭角色或修改定义后，在运行边界刷新参数和系统提示词；已关闭或不适用的角色不列为可用选项。
 设置管理目录继续显示关闭项以便编辑和重新启用；用户自写提示词及历史消息不自动改写。
 
 | 可选预设 | 主要用途与工具形状 | 模型来源 |
 | --- | --- | --- |
-| quick-implement | 已有模式下的实现、局部设计与相关验证；能力边界按任务配置，不强制 shared | models.quickImplement |
-| hard-implement | 需要深入推理或跨层协调的实现 | models.hardImplement，可明确继承当前模型 |
-| frontend | 界面设计、实现与可用的预览工具 | models.frontend |
+| worker | 独立实现、相关理解、协调和必要验证；隔离工作状态，允许按授权工具嵌套 | models.worker，默认继承当前主模型 |
 | retrieval | 较长事实追踪，读取/检索/授权 web 与可选 submit_facts；无写入和 shell | models.retrievalAgent，未配不可用 |
-| review | 对实际成果作独立审查，给具体发现和来源 | models.review，可明确继承当前模型 |
-| check | 任务所需的验证与事实核对；执行命令可能写生成物，不称只读 | models.check |
 
 上表记录当前预设。D-315 / 阶段 L 沿同一 retrieval Thread 支持自然语言报告及可选结构化 facts；当前已补上 `research_search`
 的学术发现工具，通信、关系、结构阅读与材料复用仍按计划推进。保留来源、scope、Run 和耐久引用的核对，不能只改提示。
@@ -276,7 +272,7 @@ reclaim 清除该执行 SHA；rematerialize 只从父仓库导出父仓库能解
 把虚拟写吃进执行基线后丢掉。WorkingBranch 普通读取在取得 store lease 后重取当前 view；一次 explore 查询在同一 lease 内
 复制 immutable snapshot，词法/结构/语义/原文都消费它。新文件默认 mode 按 umask 计算，不在用户树写探测文件。
 捕获窗口 fingerprint 含 dirty/untracked 内容身份，路径集合不变但正文被替换时拒绝混合基线。
-嵌套 merge 先取得父分支写入/切换权威，再决定 branch 或 directory authority，再打开对应 store/目录，不得持有
+嵌套 merge 在接收者生命周期协调内取得父分支写入/切换权威，再决定 branch 或 directory authority，再打开对应 store/目录；已经持有写票据时不重复获取，不得持有
 WorkingState exclusive lease 后再等 `VirtualWriteGate`（D-221）。branch Integration 先持久化 applying intent、before/after
 与 retry identity，再 CAS 父 branch，再写 complete；启动对账按当前 revision/切片补 aborted、complete 或 needs-attention。
 `runWhenVirtual` 按 gate、切换结束和取消信号等待或改走 disk。
@@ -512,9 +508,9 @@ retrieval 默认 task，保留不携父 blocks 和专门事实协议的选择；
 
 T1 的落地值是：无事件 300 秒只翻 `stalled` 告警、不取消 Run；连续 6 次完全相同的 `(tool name, 参数哈希)` 翻
 `looping`，下一次不同调用自动清除。第一次非预期 worker 退出会在同一会话/worktree 上自动开新 Run；若新 Run 再连续崩溃，
-停止自动重启并翻 `stalled`，避免形成进程崩溃循环。角色模型、工具和冻结 permission overlay 经 `session.create/open` 在 Pi 会话构造前冻结（D-219 / D-222）；`hard-implement` 与 `frontend` 的角色目录含嵌套线程工具，
-由 Host 能力与 `assertOwnerTool` 启用，不是提示词授权。`review` / `check` / `retrieval` / `quick-implement` 不含
-`dispatch`（D-215）。`retrieval` 通过冻结 allowlist 与 `thread.facts.set` 交付事实：Host 按冻结 scope 与
+停止自动重启并翻 `stalled`，避免形成进程崩溃循环。角色模型、工具和冻结 permission overlay 经 `session.create/open` 在 Pi 会话构造前冻结（D-219 / D-222）；Worker 目录包含嵌套线程工具，
+由 Host 能力、冻结工具及 `assertOwnerTool` 启用，不是提示词授权。retrieval 不含 `dispatch`；
+用户保存的配置按实际工具选择执行（D-215 / D-339）。`retrieval` 通过冻结 allowlist 与 `thread.facts.set` 交付事实：Host 按冻结 scope 与
 Documents 读取核对路径/行范围，模型不能自行把不存在或越权来源标成 source-checked；Host 不能把来源存在写成 claim 为真。
 大材料与子会话 output 复制为耐久 artifact，URL 必须带 active retrieval Run 铸造、绑定 owning/session/thread/run、exact URL 与
 正文 hash 的 Host receipt；普通 webfetch 不生成该权威。临时 artifact/receipt 从创建起有 object reference，提交时转成 pending，
@@ -536,11 +532,12 @@ attention——实践里最常见的"卡死"其实
 - `dispatch(task, options)`：异步建立任务线程，选 task/inherit、可选预设与工作状态；返回实际准备/排队状态。
 - `threads(ids?)`：任务名、当前执行/等待、最近实际活动、可用结果与缺口的增量视图，不伪造 progress。
 - `wait(targets?, timeout?)`：由 Host 订阅指定结果、请求答复或需要处理的状态变化；超时是正常观察结果。普通读文件进度留在
-  UI，不因每个步骤把等待者唤醒做模型检查。等待明确让出执行名额，完成后按同一队列恢复。
+  UI，不因每个步骤把等待者唤醒做模型检查。省略期限是持续事件等待；目标、位置和期限持久化，重启仅接续满足条件的丢失/空闲执行。等待让出模型名额，恢复时重新准入。
 - `send(to, message, { kind, replyTo?, context? })`：inform 投递材料，request 请求回答/执行；replyTo 绑定已有请求，满足显式
   等待时可唤醒一次。context 的 continue/fresh 用于后续执行请求，不改变普通通知。来源由 Host 填入。
-- `read_thread(id, what?)`：默认状态/结果说明，可按结果修订读报告、产物、计划/用户笔记或分页转录；不给所有场景统一极小摘要。
-- `merge(id, resultRevision?)`：沿现有 Integration 消费固定成果；依赖线程纳入父变化是明确的工作状态更新，不靠 send 模拟。
+- `read_thread(id, what?)`：同任务成员可按范围、最近记录、稳定 ID 续读、关键词/路径读取工作记录；互读不启动模型、不授予停止/重派等控制权。
+- `merge(id, resultRevision?)`：沿现有 Integration 消费固定成果；识别先前接受的局部变化和完整合并源快照，后续修改与撤回仍做三方规划。
+- `submit_code(threadId, files, submissionId?)`：向同任务可写成员或 parent 直接提交文件改动/唯一原文替换片段；固定源、自动原生应用和耐久回执，待应用与已应用分开。重试不覆盖接收者后续编辑。
 - `update(resultRevision?)`：把调用方工作分支重订到选定父结果修订；三方规划保留自身 delta、采纳父方变更、干净
   文本合并，分歧路径保留自身字节并报告冲突；kernel 在同一 CAS 写中原子切换基线并记录 `parentRef`，旧结果仍绑定
   其发布时基线。普通消息和 fresh 续做都不能替代这次文件级更新。

@@ -14,6 +14,9 @@ import { createThreadWorktreeRuntime } from "../thread-worktree.js";
 import { applyDurableFileOperation, markDurableExternalDispatched, reconcileInterruptedKernelBranchIntegrations } from "../../recovery/durable-file-operation.js";
 import { createDocumentAuthority } from "../../documents/authority.js";
 import { createInMemoryRecoveryDurablePort } from "../../recovery/recovery-durable-port.test-helper.js";
+import { createCodeSubmissionRuntime, selectCodeChanges, submittedCodeBaseline } from "./code-submission.js";
+import { createThreadRegistry } from "../thread-registry.js";
+import { VirtualWriteGate, acquireVirtualWriteTicket } from "./virtual-write-gate.js";
 
 const roots: string[] = [];
 const recoveryEngines = new Set<{ dispose(): Promise<void> }>();
@@ -228,6 +231,170 @@ afterEach(async () => {
 });
 
 describe("IntegrationCoordinator", () => {
+  it("finishes an admitted merge while materialization waits on its existing virtual-write ticket", async () => {
+    const h = await createHarness();
+    await fs.promises.writeFile(path.join(h.workspace, "a.txt"), "old\n");
+    const result = await h.workingStates.withBranchStore("ws", "merge-switch-setup", async store => {
+      const base = await store.captureDirectory(h.workspace);
+      await store.createBranch("ws", "source", base); await store.createBranch("ws", "recipient", base);
+      const object = await store.putObject(Buffer.from("new\n"));
+      await store.commitVirtualWrites("source", 0, { "a.txt": { kind: "regular-file", objectHash: object.hash, byteLength: object.byteLength } });
+      return store.publishHeadResult("source");
+    });
+    const gate = new VirtualWriteGate();
+    const ticket = await acquireVirtualWriteTicket(gate, "recipient-session", () => true);
+    if (ticket === "disk") throw new Error("Expected virtual authority");
+    const switching = gate.beginSwitch("recipient-session");
+    const coordinator = new IntegrationCoordinator({ workingStates: h.workingStates, holdParentVirtualWrite: async sessionId => {
+      expect(gate.switching(sessionId)).toBe(false); // Reacquiring here would wait for the switch, which is waiting for this merge.
+      const held = await acquireVirtualWriteTicket(gate, sessionId, () => true);
+      return held === "disk" ? { status: "disk" } : { status: "virtual", release: held.finish };
+    } });
+    try {
+      expect(gate.switching("recipient-session")).toBe(true);
+      expect((await coordinator.mergeResult({ workspaceId: "ws", threadId: "source", branchId: "source", resultRevision: result.resultRevision,
+        parentWriteHeld: true, parentAuthority: { kind: "branch", branchId: "recipient", sessionId: "recipient-session" } })).status).toBe("applied");
+    } finally { ticket.finish(); await switching; gate.endSwitch("recipient-session"); }
+    await h.workingStates.withBranchStore("ws", "merge-switch-check", async store => {
+      const file = (await store.readStateSlice("recipient", ["a.txt"]))!["a.txt"]!;
+      expect(file.kind === "regular-file" && (await store.getObject(file.objectHash))?.toString()).toBe("new\n");
+    });
+  });
+
+  it("selected code preserves unsent hunks and recipient edits through repeated and final integration", async () => {
+    const h = await createHarness();
+    const registry = createThreadRegistry({ dataDir: h.dataDir, hostId: "test" });
+    try {
+      const source = await registry.createThread({ scopeId: "ws", parent: { kind: "session", id: "main" }, brief: "Source", kind: "implementation", createdBy: "agent", autoRun: false, concurrency: 2, worktree: "isolated", tools: ["write"], permissions: {} });
+      const target = await registry.createThread({ scopeId: "ws", parent: source.parent, brief: "Recipient", kind: "implementation", createdBy: "agent", autoRun: false, concurrency: 2, worktree: "isolated", tools: ["write"], permissions: {} });
+      const original = "first=old\nkeep1\nkeep2\nlast=old\n";
+      await fs.promises.writeFile(path.join(h.workspace, "a.txt"), original);
+      const prepared = await h.workingStates.withBranchStore("ws", "selected-code-setup", async store => {
+        const base = await store.captureDirectory(h.workspace);
+        await store.createBranch("ws", "source", base); await store.createBranch("ws", "recipient", base);
+        const sourceText = "first=new\nkeep1\nkeep2\nlast=new\n";
+        const object = await store.putObject(Buffer.from(sourceText));
+        const current = { "a.txt": { kind: "regular-file" as const, objectHash: object.hash, byteLength: object.byteLength } };
+        await store.commitVirtualWrites("source", 0, current);
+        const selected = await selectCodeChanges(store, [{ path: "a.txt", edits: [{ before: "first=old\n", after: "first=new\n" }] }], base, current);
+        await store.createBranch("ws", "selected", base);
+        await store.commitVirtualWrites("selected", 0, selected);
+        return { selected: await store.publishHeadResult("selected"), full: await store.publishHeadResult("source") };
+      });
+      const first = await h.coordinator.mergeResult({ workspaceId: "ws", threadId: source.id, branchId: "selected", resultRevision: prepared.selected.resultRevision,
+        operationId: "selected-first", parentAuthority: { kind: "branch", branchId: "recipient" } });
+      expect(first.status).toBe("applied");
+      await registry.recordCodeSubmission("ws", { id: "selection", fingerprint: "selection", fromThreadId: source.id, toThreadId: target.id, branchId: "selected",
+        resultRevision: prepared.selected.resultRevision, paths: ["a.txt"], acceptedPaths: ["a.txt"], appliedPaths: ["a.txt"], conflictPaths: [], status: "applied", createdAt: new Date().toISOString() });
+      const baseline = await h.workingStates.withBranchStore("ws", "selected-code-recipient-edit", async store => {
+        const state = await store.readStateSlice("recipient", ["a.txt"]);
+        const file = state!["a.txt"]!;
+        expect(file.kind === "regular-file" && (await store.getObject(file.objectHash))?.toString()).toBe("first=new\nkeep1\nkeep2\nlast=old\n");
+        const edited = await store.putObject(Buffer.from("first=recipient-edited\nkeep1\nkeep2\nlast=old\n"));
+        await store.commitVirtualWrites("recipient", (await store.getBranchRoot("recipient"))!.writeRevision, { "a.txt": { kind: "regular-file", objectHash: edited.hash, byteLength: edited.byteLength } });
+        return submittedCodeBaseline(store, (await registry.getThreadById("ws", source.id))!, target.id);
+      });
+      const restarted = new IntegrationCoordinator({ workingStates: h.workingStates });
+      expect((await restarted.mergeResult({ workspaceId: "ws", threadId: source.id, branchId: "selected", resultRevision: prepared.selected.resultRevision,
+        operationId: "selected-first", parentAuthority: { kind: "branch", branchId: "recipient" } })).status).toBe("applied");
+      const final = await restarted.mergeResult({ workspaceId: "ws", threadId: source.id, branchId: "source", resultRevision: prepared.full.resultRevision,
+        baseStatesOverride: baseline, parentAuthority: { kind: "branch", branchId: "recipient" } });
+      expect(final.status).toBe("applied");
+      await h.workingStates.withBranchStore("ws", "selected-code-check", async store => {
+        const state = (await store.readStateSlice("recipient", ["a.txt"]))!["a.txt"]!;
+        expect(state.kind === "regular-file" && (await store.getObject(state.objectHash))?.toString()).toBe("first=recipient-edited\nkeep1\nkeep2\nlast=new\n");
+      });
+      const fullBaseline = { branchId: "source", resultRevision: prepared.full.resultRevision, receiver: { kind: "thread" as const, id: target.id },
+        recipientAuthority: "branch:recipient", sourcePaths: ["a.txt"], codeReceiptIds: ["selection"] };
+      await registry.setIntegration("ws", source.id, "merged", final.diffStats, undefined, prepared.full.resultRevision, fullBaseline);
+      const retract = async (text: string) => h.workingStates.withBranchStore("ws", "source-retraction", async store => {
+        const object = await store.putObject(Buffer.from(text));
+        await store.commitVirtualWrites("source", (await store.getBranchRoot("source"))!.writeRevision,
+          { "a.txt": { kind: "regular-file", objectHash: object.hash, byteLength: object.byteLength } });
+        return store.publishHeadResult("source");
+      });
+      const resolveBaseStates = async (store: Parameters<typeof submittedCodeBaseline>[0]) => {
+        const current = (await registry.getThreadById("ws", source.id))!;
+        return submittedCodeBaseline(store, current, target.id, "branch:recipient", current.mergedSource);
+      };
+      const retracted = await retract("first=new\nkeep1\nkeep2\nlast=old\n");
+      const input = { workspaceId: "ws", threadId: source.id, branchId: "source", resolveBaseStates, parentAuthority: { kind: "branch" as const, branchId: "recipient" } };
+      const retraction = await restarted.mergeResult({ ...input, resultRevision: retracted.resultRevision });
+      expect(retraction.status).toBe("applied");
+      await registry.setIntegration("ws", source.id, "merged", retraction.diffStats, undefined, retracted.resultRevision,
+        { ...fullBaseline, resultRevision: retracted.resultRevision });
+      await h.workingStates.withBranchStore("ws", "retracted-source-check", async store => {
+        const file = (await store.readStateSlice("recipient", ["a.txt"]))!["a.txt"]!;
+        expect(file.kind === "regular-file" && (await store.getObject(file.objectHash))?.toString()).toBe("first=recipient-edited\nkeep1\nkeep2\nlast=old\n");
+      });
+      const originalAgain = await retract(original);
+      expect(originalAgain.changedPaths).toEqual([]);
+      expect((await restarted.previewResult({ ...input, resultRevision: originalAgain.resultRevision })).conflictPaths).toEqual(["a.txt"]);
+      expect((await restarted.mergeResult({ ...input, resultRevision: originalAgain.resultRevision })).status).toBe("conflict");
+      await h.workingStates.withBranchStore("ws", "conflicting-retraction-keeps-recipient", async store => {
+        const file = (await store.readStateSlice("recipient", ["a.txt"]))!["a.txt"]!;
+        expect(file.kind === "regular-file" && (await store.getObject(file.objectHash))?.toString()).toBe("first=recipient-edited\nkeep1\nkeep2\nlast=old\n");
+      });
+    } finally { await registry.dispose(); }
+  });
+
+  it("selected code resumes queued application after restart, reports real conflicts and never repeats a completed write", async () => {
+    const h = await createHarness();
+    let registry = createThreadRegistry({ dataDir: h.dataDir, hostId: "test" });
+    let runtime: ReturnType<typeof createCodeSubmissionRuntime> | undefined;
+    const errors: unknown[] = [];
+    const applied = new Map<string, () => void>();
+    let allowed = false;
+    try {
+      const source = await registry.createThread({ scopeId: "ws", parent: { kind: "session", id: "main" }, brief: "Source", kind: "implementation", createdBy: "agent", autoRun: false, concurrency: 2, worktree: "isolated", tools: ["write"], permissions: {} });
+      const target = await registry.createThread({ scopeId: "ws", parent: source.parent, brief: "Recipient", kind: "implementation", createdBy: "agent", autoRun: false, concurrency: 2, worktree: "isolated", tools: ["write"], permissions: {} });
+      await fs.promises.writeFile(path.join(h.workspace, "a.txt"), "old\n");
+      await h.workingStates.withBranchStore("ws", "selected-queue-setup", async store => {
+        const base = await store.captureDirectory(h.workspace);
+        await store.createBranch("ws", "source", base); await store.createBranch("ws", "recipient", base);
+        const object = await store.putObject(Buffer.from("new\n"));
+        await store.commitVirtualWrites("source", 0, { "a.txt": { kind: "regular-file", objectHash: object.hash, byteLength: object.byteLength } });
+      });
+      const create = () => createCodeSubmissionRuntime({ registry, workingStates: h.workingStates, onError: error => errors.push(error),
+        capture: async (_scope, _source, _target, paths, store) => ({ base: (await store.readStateSlice("source", paths, { revision: 0 }))!, current: (await store.readStateSlice("source", paths))! }),
+        apply: async (_scope, _target, submission) => allowed ? h.coordinator.mergeResult({ workspaceId: "ws", threadId: source.id,
+          branchId: submission.branchId, resultRevision: submission.resultRevision, operationId: `selected-${submission.id}`, parentAuthority: { kind: "branch", branchId: "recipient" } }) : null,
+        notify: async (_scope, _thread, submission) => { applied.get(submission.id)?.(); },
+      });
+      runtime = create();
+      const request = { threadId: target.id, files: [{ path: "a.txt" }] };
+      expect((await runtime.submit("ws", source, target, request, "once")).status).toBe("queued");
+      await runtime.dispose(); runtime = undefined; await registry.dispose();
+      registry = createThreadRegistry({ dataDir: h.dataDir, hostId: "test" }); allowed = true;
+      const completed = new Promise<void>(resolve => applied.set("once", resolve));
+      runtime = create(); await runtime.reconcile(); await completed; await runtime.dispose(); runtime = create();
+      await h.workingStates.withBranchStore("ws", "selected-queue-edit", async store => {
+        const object = await store.putObject(Buffer.from("recipient-edit\n"));
+        await store.commitVirtualWrites("recipient", (await store.getBranchRoot("recipient"))!.writeRevision, { "a.txt": { kind: "regular-file", objectHash: object.hash, byteLength: object.byteLength } });
+      });
+      expect((await runtime.submit("ws", source, target, request, "once")).status).toBe("applied");
+      await runtime.dispose(); runtime = create();
+      await h.workingStates.withBranchStore("ws", "selected-conflict-edit", async store => {
+        const object = await store.putObject(Buffer.from("source-next\n"));
+        await store.commitVirtualWrites("source", (await store.getBranchRoot("source"))!.writeRevision, { "a.txt": { kind: "regular-file", objectHash: object.hash, byteLength: object.byteLength } });
+      });
+      const conflicted = new Promise<void>(resolve => applied.set("conflict", resolve));
+      await runtime.submit("ws", source, target, request, "conflict"); await conflicted; await runtime.dispose(); runtime = undefined;
+      expect((await registry.getThreadById("ws", source.id))?.codeSubmissions?.find(entry => entry.id === "conflict")).toMatchObject({ status: "conflict", acceptedPaths: [], conflictPaths: ["a.txt"] });
+      await h.workingStates.withBranchStore("ws", "selected-queue-check", async store => {
+        const state = (await store.readStateSlice("recipient", ["a.txt"]))!["a.txt"]!;
+        expect(state.kind === "regular-file" && (await store.getObject(state.objectHash))?.toString()).toBe("recipient-edit\n");
+      });
+      expect(errors).toEqual([]);
+      await registry.recordCodeSubmission("ws", { id: "interrupted-capture", fingerprint: "fixed-selection", fromThreadId: source.id, toThreadId: target.id,
+        branchId: "code-interrupted", resultRevision: 0, paths: ["a.txt"], status: "capturing", appliedPaths: [], acceptedPaths: [], conflictPaths: [], notificationsPending: true, createdAt: new Date().toISOString() });
+      await h.workingStates.withBranchStore("ws", "simulate-interrupted-code-capture", store => store.createBranch("ws", "code-interrupted", {}));
+      const discarded = new Promise<void>(resolve => applied.set("interrupted-capture", resolve));
+      runtime = create(); await runtime.reconcile(); await discarded; await runtime.dispose(); runtime = undefined;
+      expect((await registry.getThreadById("ws", source.id))?.codeSubmissions?.find(entry => entry.id === "interrupted-capture")?.status).toBe("failed");
+      await h.workingStates.withBranchStore("ws", "interrupted-code-released", async store => expect(await store.getBranchRoot("code-interrupted")).toBeNull());
+    } finally { await runtime?.dispose(); await registry.dispose(); }
+  });
   it("does not apply a manual conflict resolution against a parent newer than the reviewed revision", async () => {
     const h = await createHarness();
     try {

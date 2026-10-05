@@ -54,7 +54,7 @@ export interface ExecutionPreset {
 export const EXECUTION_PRESETS: Readonly<Record<PresetId, ExecutionPreset & { slot: HarnessModelRole }>> = {
   worker: {
     id: "worker", slot: "worker",
-    tools: ["read", "edit", "write", "apply_patch", "bash", "grep", "find", "ls", "get_output", "write_to_process", "kill_shell", "explore", "related", "diagnostics", "symbols", "definition", "references", "hover", "webfetch", "document_read", "websearch", "todo", "dispatch", "threads", "wait", "send", "read_thread", "merge", "update", "kill"],
+    tools: ["read", "edit", "write", "apply_patch", "bash", "grep", "find", "ls", "get_output", "write_to_process", "kill_shell", "explore", "related", "diagnostics", "symbols", "definition", "references", "hover", "webfetch", "document_read", "websearch", "todo", "dispatch", "threads", "wait", "send", "read_thread", "merge", "submit_code", "update", "kill"],
     worktree: "isolated",
     systemPromptFragment: "Complete the assigned work with awareness of the overall goal and related tasks. Read teammates' relevant work, coordinate shared interfaces directly, and inform the main agent of decisions affecting the overall design. Revisit the task boundary when evidence calls for it. Verify the actual result in proportion to its risk.",
     teamDescription: "independent implementation or other assigned work, including coordination and relevant verification",
@@ -138,7 +138,7 @@ export function resolvePresets(
  * The team prompt is stable for a given available preset set. Its owner refreshes
  * the set at run boundaries when settings, model, or work focus changes.
  */
-export function buildTeamPrompt(presets: ResolvedPreset[]): string {
+export function buildTeamPrompt(presets: ResolvedPreset[], activeTools?: readonly string[]): string {
   const presetList = presets
     .map((p) => `${p.definition.id} (${p.definition.name ? `${p.definition.name}: ` : ''}${p.definition.teamDescription})`)
     .join(", ");
@@ -151,5 +151,12 @@ export function buildTeamPrompt(presets: ResolvedPreset[]): string {
       ? "Use dispatch(task) for a worker on your current model and authorized tools, or an optional configured profile."
       : "Choose an available configured profile explicitly with dispatch(task, preset).");
   const list = presetList ? ` Available profiles: ${presetList}.` : "";
-  return base + list + " Threads run independently. Use threads/read_thread to inspect relevant task-family work, send to coordinate interfaces or request help, and wait for dependencies when no useful independent work remains. Routine progress does not require polling or a response.";
+  const available = (tool: string) => activeTools === undefined || activeTools.includes(tool);
+  return base + list + " Threads run independently. "
+    + (available("read_thread") ? "Use read_thread to inspect relevant task-family conversations. " : "")
+    + (available("threads") ? "Use threads to discover related work. " : "")
+    + (available("send") ? "Use send to coordinate interfaces or request help. " : "")
+    + (available("submit_code") ? "Use submit_code to send selected files or original/replacement snippets directly to a teammate or parent. Queued acceptance is not application; its receipt arrives through task state and passive messages. " : "")
+    + (available("wait") ? "Use wait for dependencies when no useful independent work remains; omit its duration for indefinite event waiting. " : "")
+    + "Routine progress does not require polling or a response.";
 }

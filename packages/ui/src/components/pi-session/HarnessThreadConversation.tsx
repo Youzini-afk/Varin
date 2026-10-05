@@ -101,6 +101,16 @@ export function HarnessThreadConversation({ entry, parentSessionId, cwd, dialog 
     </div>
     {entry.thread.waitingFor?.text ? <p className="shrink-0 px-4 py-2 typography-meta text-[var(--status-warning)]">{entry.thread.waitingFor.text}</p> : null}
     {entry.thread.deletion ? <p role="status" className="px-4 py-2 typography-meta text-muted-foreground">{entry.thread.deletion.error ?? t('harness.threads.deleting')}</p> : null}
+    {entry.thread.codeSubmissions?.length ? <details className="shrink-0 border-b border-border px-4 py-2 typography-meta">
+      <summary className="cursor-pointer text-muted-foreground">{t('harness.threads.codeSubmissions')}</summary>
+      <div className="mt-2 max-h-40 space-y-2 overflow-auto">
+        {entry.thread.codeSubmissions.map(submission => <div key={submission.id}>
+          <p>{t(`harness.threads.codeSubmission.${submission.status}`)} · {submission.paths.join(', ')}</p>
+          {submission.conflictPaths.length ? <p className="text-[var(--status-warning)]">{submission.conflictPaths.join(', ')}</p> : null}
+          {submission.error ? <p className="text-destructive">{submission.error}</p> : null}
+        </div>)}
+      </div>
+    </details> : null}
     <div className="relative flex min-h-0 flex-1 flex-col">
       {error ? <div role="alert" className="p-4 typography-meta text-destructive">{error}
         <Button className="ml-2" variant="outline" size="sm" onClick={() => setRetry((value) => value + 1)}>{t('settings.harness.retry')}</Button>

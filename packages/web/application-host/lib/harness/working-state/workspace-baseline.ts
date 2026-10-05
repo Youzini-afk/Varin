@@ -14,6 +14,8 @@ export type GitBaselineInventory = {
   indexModes?: Record<string, string>;
   /** Workdir identity of dirty/untracked paths; detects content replacement with an unchanged path set. */
   contentIdentities?: Record<string, string>;
+  /** Raw byte hashes for all regular working files; Git filters/EOL normalization are bypassed. */
+  rawFileHashes?: Record<string, string>;
 };
 
 export type BaselineInventory = GitBaselineInventory | { kind: "directory" };
@@ -80,6 +82,7 @@ export const gitBaselineFingerprint = (inventory: GitBaselineInventory): string 
   contentIdentities: Object.fromEntries(
     Object.entries(inventory.contentIdentities ?? {}).sort(([left], [right]) => left.localeCompare(right)),
   ),
+  ...(inventory.rawFileHashes ? { rawFileHashes: Object.fromEntries(Object.entries(inventory.rawFileHashes).sort(([left], [right]) => left.localeCompare(right))) } : {}),
 });
 
 export const directoryBaselineFingerprint = (

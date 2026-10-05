@@ -57,6 +57,7 @@ interface PlannedSurfaceTextEdit {
 }
 
 export interface IntegrationCoordinatorOptions {
+  resolveDocumentWorkspaceId?: (owningScopeId: string) => Promise<string>;
   workingStates: WorkspaceWorkingStateRootAccess;
   inspectDirtyBuffers?: (workspaceId: string) => Promise<DirtyBufferInspectPublication[]>;
   beginDirtyStateBarrier?: (workspaceId: string, paths: string[]) => Promise<{
@@ -86,6 +87,12 @@ export interface IntegrationCoordinatorOptions {
 }
 
 export interface IntegrationPlanInput {
+  /** Stable selected-code receipt identity; retries must not replay against later recipient edits. */
+  operationId?: string;
+  baseStatesOverride?: Record<string, RecoveryState>;
+  resolveBaseStates?: (store: WorkingStateRootStore) => Promise<Record<string, RecoveryState>>;
+  /** Trusted Host has already acquired the receiving virtual-write ticket. */
+  parentWriteHeld?: boolean;
   workspaceId: string;
   threadId: string;
   branchId: string;
@@ -288,6 +295,7 @@ const projectPreview = (
 
 export class IntegrationCoordinator {
   private readonly workingStates: WorkspaceWorkingStateRootAccess;
+  private readonly resolveDocumentWorkspaceId?: IntegrationCoordinatorOptions["resolveDocumentWorkspaceId"];
   private readonly inspectDirtyBuffers?: IntegrationCoordinatorOptions["inspectDirtyBuffers"];
   private readonly beginDirtyStateBarrier?: IntegrationCoordinatorOptions["beginDirtyStateBarrier"];
   private readonly requestSurfaceOperation?: IntegrationCoordinatorOptions["requestSurfaceOperation"];
@@ -299,6 +307,7 @@ export class IntegrationCoordinator {
 
   constructor(options: IntegrationCoordinatorOptions) {
     this.workingStates = options.workingStates;
+    this.resolveDocumentWorkspaceId = options.resolveDocumentWorkspaceId;
     this.inspectDirtyBuffers = options.inspectDirtyBuffers;
     this.beginDirtyStateBarrier = options.beginDirtyStateBarrier;
     this.requestSurfaceOperation = options.requestSurfaceOperation;
@@ -318,6 +327,12 @@ export class IntegrationCoordinator {
       if (!context?.durableRecoveryStore) throw new Error("Rust recovery operation port is unavailable");
       return operation(store, context as WorkingStateRootContext & { durableRecoveryStore: NonNullable<WorkingStateRootContext["durableRecoveryStore"]> });
     }, mode);
+  }
+
+  private documentWorkspace(input: { workspaceId: string; parentAuthority?: IntegrationPlanInput["parentAuthority"] }): Promise<string> {
+    return input.parentAuthority?.kind === "directory" && input.parentAuthority.workspaceId
+      ? Promise.resolve(input.parentAuthority.workspaceId)
+      : this.resolveDocumentWorkspaceId?.(input.workspaceId) ?? Promise.resolve(input.workspaceId);
   }
 
   invalidateThread(workspaceId: string, threadId: string): void {
@@ -478,7 +493,7 @@ export class IntegrationCoordinator {
   }
 
   async mergeResult(input: IntegrationPlanInput): Promise<IntegrationApplyResult & { changedFiles: string[] }> {
-    const releaseParentWrite = await this.holdParentBranchWrite(input.parentAuthority, input.signal);
+    const releaseParentWrite = input.parentWriteHeld ? () => undefined : await this.holdParentBranchWrite(input.parentAuthority, input.signal);
     try {
     return await this.withWorkingStore(input.workspaceId, "thread-result-integration", async (store, context) => {
       if (input.requireTurnBinding && !input.executionId) {
@@ -486,6 +501,24 @@ export class IntegrationCoordinator {
       }
       await reconcileInterruptedIntegrationOperations(context);
       await reconcileInterruptedKernelBranchIntegrations(context, store);
+      if (input.operationId) {
+        const receipt = (await context.durableRecoveryStore.listOperations(input.workspaceId, "integration"))
+          .find(entry => entry.operationId === input.operationId);
+        if (receipt) {
+          const operation = await inspectDurableIntegrationOperation(context, input.operationId);
+          if (operation.threadId !== input.threadId || Number(operation.resultRevision) !== input.resultRevision
+            || operation.retryBinding?.branchId !== input.branchId) throw new Error("Integration receipt belongs to another fixed source");
+          return {
+            operationId: input.operationId,
+            status: receipt.state === "complete" ? "applied" as const : receipt.state === "conflict" ? "conflict" as const
+              : receipt.state === "compensated" ? "compensated" as const : "needs-attention" as const,
+            appliedPaths: operation.appliedPaths, conflictPaths: operation.conflictPaths,
+            needsAttentionPaths: operation.needsAttentionPaths, diffStats: operation.diffStats,
+            changedFiles: Object.keys(operation.retryBinding?.childStates ?? {}),
+            text: `Recorded integration ${input.operationId}: ${String(receipt.state)}`,
+          };
+        }
+      }
       const blocking = (await context.durableRecoveryStore.listOperations(input.workspaceId, "integration"))
         .find((entry) => !["complete", "conflict", "compensated", "aborted", "undone"].includes(String(entry.state)));
       if (blocking) throw new Error(`Integration ${String(blocking.operationId)} requires recovery before planning (${String(blocking.state)})`);
@@ -496,7 +529,7 @@ export class IntegrationCoordinator {
         && input.expectedBindingFingerprint !== planned.preview.bindingFingerprint) {
         throw new Error("Integration preview is stale because the parent binding changed");
       }
-      const operationId = `integration-${randomUUID()}`;
+      const operationId = input.operationId ?? `integration-${randomUUID()}`;
       planned.plan = { ...planned.plan, operationId };
       planned.preview = { ...planned.preview, operationId };
       this.previewByThread.set(this.previewKey(input.workspaceId, input.threadId), { workspaceId: input.workspaceId, preview: planned.preview });
@@ -732,11 +765,11 @@ export class IntegrationCoordinator {
                   bom: current.bom!,
                   lineEnding: current.lineEnding!,
                   localEditRevision: current.localEditRevision!,
-                  resource: { workspaceId: input.workspaceId, resourceId: file },
+                  resource: { workspaceId: planned.documentWorkspaceId, resourceId: file },
                   newText: editsByPath.get(file)!.newText,
                 };
               }),
-              workspaceId: input.workspaceId,
+              workspaceId: planned.documentWorkspaceId,
             }, input.signal ? { signal: input.signal } : {});
             for (const result of results) observed.set(result.resource.resourceId, result);
           } catch {
@@ -792,13 +825,13 @@ export class IntegrationCoordinator {
                     bom: current.bom!,
                     lineEnding: current.lineEnding!,
                     localEditRevision: current.localEditRevision!,
-                    resource: { workspaceId: input.workspaceId, resourceId: file },
+                    resource: { workspaceId: planned.documentWorkspaceId, resourceId: file },
                     newText: edit.newText,
                     expectedAppliedRevision: current.localEditRevision! + 1,
                     expectedAppliedHash: contentHash(edit.newText),
                   };
                 }),
-                workspaceId: input.workspaceId,
+                workspaceId: planned.documentWorkspaceId,
               });
               const undoneByPath = new Map(undone.map((entry) => [entry.resource.resourceId, entry]));
               for (const file of paths) {
@@ -1087,8 +1120,9 @@ export class IntegrationCoordinator {
         .filter(([, kind]) => kind === "surface")
         .map(([file]) => file)
         .sort();
+      const documentWorkspaceId = operation.applyExecutionWorkspaceId ?? await this.documentWorkspace(input);
       const barrier = surfacePaths.length > 0 && this.beginDirtyStateBarrier
-        ? await this.beginDirtyStateBarrier(input.workspaceId, surfacePaths)
+        ? await this.beginDirtyStateBarrier(documentWorkspaceId, surfacePaths)
         : null;
       // The barrier forces every connected owner to publish a fresh revision.
       // Release it before asking the registry to undo: registry edits are
@@ -1135,10 +1169,10 @@ export class IntegrationCoordinator {
                     localEditRevision: binding.beforeLocalEditRevision,
                     expectedAppliedRevision: binding.afterLocalEditRevision!,
                     expectedAppliedHash: binding.afterHash!,
-                    resource: { workspaceId: input.workspaceId, resourceId: file },
+                    resource: { workspaceId: documentWorkspaceId, resourceId: file },
                   };
                 }),
-                workspaceId: input.workspaceId,
+                workspaceId: documentWorkspaceId,
               }, input.signal ? { signal: input.signal } : {});
               const byPath = new Map(results.map((result) => [result.resource.resourceId, result]));
               for (const file of group.paths) {
@@ -1176,6 +1210,7 @@ export class IntegrationCoordinator {
   }
 
   private async plan(input: IntegrationPlanInput): Promise<{
+    documentWorkspaceId: string;
     plan: ThreeWayMergePlan;
     preview: ThreadIntegrationPreview;
     targets: Record<string, ReturnType<typeof classifyIntegrationTarget>>;
@@ -1194,6 +1229,7 @@ export class IntegrationCoordinator {
     context: WorkingStateRootContext,
     input: IntegrationPlanInput,
   ): Promise<{
+    documentWorkspaceId: string;
     plan: ThreeWayMergePlan;
     preview: ThreadIntegrationPreview;
     targets: Record<string, ReturnType<typeof classifyIntegrationTarget>>;
@@ -1204,17 +1240,28 @@ export class IntegrationCoordinator {
     surfaceEdits: PlannedSurfaceTextEdit[];
     texts: Record<string, { parent?: string; child?: string; baseline?: string }>;
   }> {
-    const result = await store.getResult(input.branchId, input.resultRevision);
+    const storedResult = await store.getResult(input.branchId, input.resultRevision);
+    const overrides = input.baseStatesOverride ?? await input.resolveBaseStates?.(store);
+    const result = storedResult && { ...storedResult, baseStates: { ...storedResult.baseStates, ...overrides },
+      pathStates: { ...storedResult.pathStates }, changedPaths: [...storedResult.changedPaths] };
     if (!result) throw new Error(`Working result not found: ${input.branchId}@${input.resultRevision}`);
+    if (overrides && Object.keys(overrides).length) {
+      const paths = [...new Set([...result.changedPaths, ...Object.keys(overrides)])];
+      const fixed = await store.readStateSlice(input.branchId, paths, { revision: input.resultRevision });
+      if (!fixed) throw new Error("The fixed source for acknowledged paths is unavailable");
+      result.pathStates = Object.fromEntries(paths.map(path => [path, fixed[path] ?? { kind: "missing" as const }]));
+      result.changedPaths = paths.filter(path => !sameState(result.baseStates[path] ?? { kind: "missing" }, result.pathStates[path]!));
+    }
     const branch = await store.getBranchRoot(input.branchId);
     if (!branch) throw new Error(`Working branch not found: ${input.branchId}`);
     const parentAuthority = input.parentAuthority ?? { kind: "workspace" as const };
+    const documentWorkspaceId = await this.documentWorkspace(input);
     const barrier = parentAuthority.kind !== "branch" && this.beginDirtyStateBarrier
-      ? await this.beginDirtyStateBarrier(input.workspaceId, result.changedPaths)
+      ? await this.beginDirtyStateBarrier(documentWorkspaceId, result.changedPaths)
       : null;
     try {
       const publications = parentAuthority.kind !== "branch" && this.inspectDirtyBuffers
-        ? await this.inspectDirtyBuffers(input.workspaceId)
+        ? await this.inspectDirtyBuffers(documentWorkspaceId)
         : [];
       const dirty = dirtyResourceMap(publications);
       const sourceOwner = input.sourceOwner;
@@ -1304,9 +1351,9 @@ export class IntegrationCoordinator {
             targets: group.paths.map((file) => ({
               ...group.owner,
               ...selectedSurfaces.get(file)!,
-              resource: { workspaceId: input.workspaceId, resourceId: file },
+              resource: { workspaceId: documentWorkspaceId, resourceId: file },
             })),
-            workspaceId: input.workspaceId,
+            workspaceId: documentWorkspaceId,
           }, input.signal ? { signal: input.signal } : {});
         } catch {
           input.signal?.throwIfAborted();
@@ -1421,6 +1468,7 @@ export class IntegrationCoordinator {
       }
       const preview = projectPreview(plan, targets, bindings, {}, texts);
       return {
+        documentWorkspaceId,
         plan,
         preview,
         targets,

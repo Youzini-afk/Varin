@@ -383,6 +383,8 @@ export interface HarnessServiceHost {
   /** Retry lost Runs under a parent scope when the shared budget may have room. */
   threadResumeLost?: ((workspaceId: string, parent: import("@varin/protocol").ThreadParent) => Promise<void>) | null;
   threadKillSession: ((threadId: string, keepWorktree?: boolean, workspaceId?: string) => Promise<void>) | null;
+  threadSubmitCode?: ((scopeId: string, source: import("@varin/protocol").Thread, target: import("@varin/protocol").Thread,
+    input: import("@varin/protocol").ThreadSubmitCodeParams, id: string, signal?: AbortSignal, draftBaselineId?: string) => Promise<import("@varin/protocol").ThreadCodeSubmission>) | null;
   requireThreadMergeJournal: boolean;
   threadApplyWorktreeDiff: ((
     workspaceId: string,
@@ -620,6 +622,7 @@ export interface HarnessServiceHostOptions {
   threadContinueRun?: HarnessServiceHost["threadContinueRun"];
   threadResumeLost?: HarnessServiceHost["threadResumeLost"];
   threadKillSession?: (threadId: string, keepWorktree?: boolean, workspaceId?: string) => Promise<void>;
+  threadSubmitCode?: NonNullable<HarnessServiceHost["threadSubmitCode"]>;
   threadApplyWorktreeDiff?: HarnessServiceHost["threadApplyWorktreeDiff"];
   threadUpdateBaseline?: HarnessServiceHost["threadUpdateBaseline"];
   requireThreadMergeJournal?: boolean;
@@ -704,6 +707,7 @@ export function createHarnessServiceHost(options: HarnessServiceHostOptions): Ha
   const threadContinueRun = options.threadContinueRun ?? null;
   const threadResumeLost = options.threadResumeLost ?? null;
   const threadKillSession = options.threadKillSession ?? null;
+  const threadSubmitCode = options.threadSubmitCode ?? null;
   const threadApplyWorktreeDiff = options.threadApplyWorktreeDiff ?? null;
   const threadUpdateBaseline = options.threadUpdateBaseline ?? null;
   const threadSendToSession = options.threadSendToSession ?? null;
@@ -1122,6 +1126,7 @@ export function createHarnessServiceHost(options: HarnessServiceHostOptions): Ha
     threadContinueRun,
     threadResumeLost,
     threadKillSession,
+    threadSubmitCode,
     threadApplyWorktreeDiff,
     threadUpdateBaseline,
     requireThreadMergeJournal: options.requireThreadMergeJournal ?? false,

@@ -880,9 +880,15 @@ describe("thread runtime", () => {
       resourceOperationGate: { run: async (_resources, operation) => operation() },
       root: recoveryRoot,
     };
+    let captureCount = 0;
     const workingStates = {
       withStore: async <T>(_workspaceId: string, _purpose: string, operation: (store: DurableWorkingStateStore, context: WorkspaceRecoveryStorageContext) => Promise<T> | T) => (
-        operation(await DurableWorkingStateStore.open(storageContext), storageContext)
+        (async () => {
+          const store = await DurableWorkingStateStore.open(storageContext);
+          const capture = store.captureDirectory.bind(store);
+          store.captureDirectory = (...args) => { captureCount++; return capture(...args); };
+          return operation(store, storageContext);
+        })()
       ),
     };
     const documents = createDocumentAuthority({
@@ -900,6 +906,7 @@ describe("thread runtime", () => {
       resolveRuntimeWorkspaceId: async () => identity.workspaceId,
       sessions: sessionAdapter,
       worktrees: {
+        inspectGitBaselineInventory: async () => ({ kind: "git", baseRef: "confirmed-head", unborn: false, paths: ["kept.txt"], gitlinks: [], rawFileHashes: { "kept.txt": await fs.promises.readFile(join(workspace, "kept.txt"), "utf8") } }),
         prepare: async () => ({
           cwd: scratch,
           worktree: { path: scratch, base: "zero-commit", viewMode: "virtual", materialized: false },
@@ -917,7 +924,18 @@ describe("thread runtime", () => {
         parent: PARENT,
         threadId: thread.id,
       });
+      const capturedOnce = captureCount;
+      const sibling = await registry.createThread(input);
+      await baselineRuntime.prepareIsolatedBranch({ scopeId: identity.workspaceId, parent: PARENT, threadId: sibling.id });
+      expect(captureCount).toBe(capturedOnce);
       await fs.promises.writeFile(join(workspace, "kept.txt"), "parent after dispatch\n");
+      const later = await registry.createThread(input);
+      await baselineRuntime.prepareIsolatedBranch({ scopeId: identity.workspaceId, parent: PARENT, threadId: later.id });
+      expect(captureCount).toBeGreaterThan(capturedOnce);
+      await workingStates.withStore(identity.workspaceId, "assert-new-baseline", async store => {
+        const state = store.getBranch(`thread-${later.id}`)!.baseState["kept.txt"];
+        expect(state?.kind === "regular-file" && (await store.getObject(state.objectHash))?.toString()).toBe("parent after dispatch\n");
+      });
       await workingStates.withStore(identity.workspaceId, "assert-dispatch-baseline", async (store) => {
         const branch = store.getBranch(`thread-${thread.id}`)!;
         const kept = branch.baseState["kept.txt"];
@@ -1872,7 +1890,7 @@ describe("thread runtime", () => {
     await registry.setWorkingState(WORKSPACE, thread.id, { branchId: "branch-coord", resultRevision: 1 });
 
     const res = await coordinatorRuntime.merge(WORKSPACE, PARENT, thread.id);
-    expect(mockMergeResult).toHaveBeenCalledWith({ workspaceId: WORKSPACE, threadId: thread.id, branchId: "branch-coord", resultRevision: 1 });
+    expect(mockMergeResult).toHaveBeenCalledWith(expect.objectContaining({ workspaceId: WORKSPACE, threadId: thread.id, branchId: "branch-coord", resultRevision: 1 }));
     expect(res).toMatchObject({ merged: 2, conflicts: [] });
     mockMergeResult.mockResolvedValue({
       operationId: "opaque-conflict", status: "conflict", appliedPaths: ["a.txt"], conflictPaths: ["asset.bin"],
@@ -1918,7 +1936,10 @@ describe("thread runtime", () => {
         merge: async () => ({ merged: 0, conflicts: [], conflictState: "none", changedFiles: [], diffStats: { files: 0, insertions: 0, deletions: 0 } }),
       },
       workingStates: {
-        withStore: async (_workspaceId: string, _purpose: string, operation: (store: WorkingStateStore) => Promise<unknown>) => operation({} as WorkingStateStore),
+        withStore: async (_workspaceId: string, _purpose: string, operation: (store: WorkingStateStore) => Promise<unknown>) => operation({
+          getResult: () => ({ branchId: "surface-branch", resultRevision: 1, changedPaths: ["draft.ts"], baseStates: {}, pathStates: {},
+            diffStats: { files: 1, insertions: 1, deletions: 0 }, createdAt: new Date().toISOString() }),
+        } as unknown as WorkingStateStore),
       } as never,
       verification: { captureParentInput, recordParentMerge } as never,
       resolveWorkspaceRoot: async () => "/workspace",

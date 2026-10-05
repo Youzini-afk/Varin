@@ -35,6 +35,7 @@ import {
   createSendTool,
   createReadThreadTool,
   createMergeTool,
+  createSubmitCodeTool,
   createUpdateTool,
   createKillTool,
 } from "./thread-tools.js";
@@ -276,6 +277,7 @@ export function selectHarnessTools(
     if (tools.merge !== false) {
       result.push(createMergeTool(bridge, sessionId));
     }
+    if (tools.submit_code !== false) result.push(createSubmitCodeTool(bridge, sessionId));
     if (tools.update !== false) {
       result.push(createUpdateTool(bridge, sessionId));
     }

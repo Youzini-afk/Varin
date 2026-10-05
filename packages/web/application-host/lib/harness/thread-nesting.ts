@@ -8,6 +8,7 @@ export const THREAD_CONTROL_TOOL_NAMES = [
   "read_thread",
   "history",
   "merge",
+  "submit_code",
   "update",
   "kill",
 ] as const;

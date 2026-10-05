@@ -1,6 +1,7 @@
 import { queryTestFiles } from "./file-query.test-helper.js";
 import type { WorkingStateFileQuery, WorkingStateQueryOptions, WorkingStateQueryResult } from "./query-contract.js";
 import { createHash, randomUUID } from "node:crypto";
+import { stableIdentityJson } from "../thread-registry.js";
 import fs from "node:fs";
 import path from "node:path";
 import type { SqliteDatabase } from "../../recovery/journal-catalog.js";
@@ -119,7 +120,7 @@ const checkRead = (options?: WorkingStateReadOptions): void => {
 const transientStateIdentity = (states: Record<string, RecoveryState>): string => {
   const hash = createHash("sha256");
   for (const [path, state] of Object.entries(states).sort(([left], [right]) => left.localeCompare(right))) {
-    hash.update(path).update("\0").update(JSON.stringify(state)).update("\0");
+    hash.update(path).update("\0").update(stableIdentityJson(state)).update("\0");
   }
   return `sha256-${hash.digest("hex")}`;
 };

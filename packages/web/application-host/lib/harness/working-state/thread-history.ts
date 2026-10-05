@@ -40,6 +40,7 @@ export async function projectThreadResultHistory(input: {
   const ownerIds = new Set(owners.map((snapshot) => snapshot.thread.id));
   for (const { thread: owner, activeRun } of owners) {
     keep(owner.resultRevision, "current-result");
+    if (owner.mergedSource?.branchId === branchId) keep(owner.mergedSource.resultRevision, "integration");
     if (activeRun && (activeRun.outcome === null || activeRun.outcome === "lost")) keep(activeRun.inputRevision, "run-input");
     if (owner.verification?.review?.status === "running") keep(owner.verification.review.resultRevision, "review");
   }

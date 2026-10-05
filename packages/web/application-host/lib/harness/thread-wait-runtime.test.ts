@@ -38,7 +38,8 @@ it("retains an indefinite root wait across restart and resumes once on a real de
     let resumed!: () => void;
     const completed = new Promise<void>(resolve => { resumed = resolve; });
     const resume = vi.fn(async (_scope, thread) => {
-      await registry.admitRun("workspace", thread.id, "pi", { allowSettled: true, sessionOwner: "attached-root" });
+      const admitted = await registry.admitRun("workspace", thread.id, "pi", { allowSettled: true, sessionOwner: "attached-root" });
+      await registry.markRunRunning("workspace", thread.id, admitted.run.id, "main");
       resumed();
     });
     waitRuntime = createThreadWaitRuntime({ registry, resume, onError: error => { throw error; } });
@@ -53,5 +54,12 @@ it("retains an indefinite root wait across restart and resumes once on a real de
     await waitRuntime.dispose(); waitRuntime = undefined;
     expect(resume).toHaveBeenCalledTimes(1);
     expect((await registry.getThreadById("workspace", root.id))?.dependencyWait).toBeUndefined();
+    await registry.recordCodeSubmission("workspace", { id: "completed-before-wait", fingerprint: "selected-change", fromThreadId: child.id, toThreadId: root.id,
+      branchId: "fixed-code", resultRevision: 1, paths: ["a.ts"], appliedPaths: ["a.ts"], acceptedPaths: ["a.ts"], conflictPaths: [], status: "applied", createdAt: new Date().toISOString() });
+    const receipt = await createThreadWaitService({ threadRegistry: registry } as never).handle({ ids: [] }, {
+      actor: { authorityInstanceId: "host", sessionId: "main", workerId: "worker", workerGeneration: 1, workspaceId: "workspace", grantedCapabilities: ["control.thread"] },
+      authorizedPaths: [], sessionId: "main", workspaceId: "workspace", signal: new AbortController().signal,
+    });
+    expect(receipt.text).toContain("completed-before-wait");
   } finally { await waitRuntime?.dispose(); await registry.dispose(); await rm(dataDir, { recursive: true, force: true }); }
 });

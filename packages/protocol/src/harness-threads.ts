@@ -288,7 +288,8 @@ export interface ThreadDependencyWait {
   deadline?: number;
   state: "watching" | "ready" | "resuming";
   targets: Array<{ id: string; runId: string | null; resultRevision: number | null;
-    lifecycle: ThreadLifecycle; attention: ThreadAttention; integration: ThreadIntegration; outcome: ThreadRunOutcome | null }>;
+    lifecycle: ThreadLifecycle; attention: ThreadAttention; integration: ThreadIntegration; outcome: ThreadRunOutcome | null;
+    codeSubmissionStates?: Record<string, string> }>;
   requestIds: string[];
   reason?: string;
   error?: string;
@@ -488,6 +489,43 @@ export interface ThreadMessageRecord {
   at: string;
 }
 
+/** A selected immutable patch and its actual receiving-authority receipt. */
+export interface ThreadCodeSubmission {
+  id: string;
+  fingerprint: string;
+  fromThreadId: string;
+  toThreadId: string;
+  branchId: string;
+  resultRevision: number;
+  paths: string[];
+  status: "capturing" | "queued" | "applying" | "applied" | "conflict" | "failed";
+  appliedPaths: string[];
+  conflictPaths: string[];
+  acceptedPaths: string[];
+  operationId?: string;
+  error?: string;
+  createdAt: string;
+  completedAt?: string;
+  completedSequence?: number;
+  notificationsPending?: boolean;
+  /** Only present before acceptance; distinguishes a live capture from a previous Host instance. */
+  captureOwner?: string;
+  /** Actual receiving branch/resource identity, independent of a conversation's directory changes. */
+  recipientAuthority?: string;
+}
+
+export interface ThreadSubmitCodeParams {
+  /** Any writable member of this task family, including parent. */
+  threadId: string;
+  submissionId?: string;
+  files: Array<{ path: string; edits?: Array<{ before: string; after: string }> }>;
+}
+
+export interface ThreadSubmitCodeResult {
+  text: string;
+  submission: ThreadCodeSubmission;
+}
+
 /**
  * An execution request that arrived while the shared root execution budget
  * was full. The parked continuation promotes through the same admission path
@@ -634,6 +672,8 @@ export interface Thread {
   mergedCommit?: string;
   /** Native result revision most recently integrated into the parent. */
   mergedResultRevision?: number;
+  /** Last fully integrated source, retained as the receiving baseline for later edits/reverts. */
+  mergedSource?: { branchId: string; resultRevision: number; receiver: ThreadParent; recipientAuthority: string; sourcePaths: string[]; codeReceiptIds: string[] };
   /** Compact Host preview binding shared by Thread, wait, Zone 2, and the thread UI. */
   integrationBinding?: ThreadIntegrationBinding;
   /**
@@ -656,6 +696,7 @@ export interface Thread {
    * input boundary; they never start execution by themselves.
    */
   messages?: ThreadMessageRecord[];
+  codeSubmissions?: ThreadCodeSubmission[];
   /** Request parked behind a full shared execution budget (3.18C). */
   pendingContinuations?: ThreadPendingContinuation[];
   /**
@@ -833,6 +874,7 @@ export interface ThreadViewCursor {
   retainedBy?: string[];
   /** Explicit addressed requests already shown, independent of UI/progress events. */
   requestIds?: string[];
+  codeSubmissionStates?: Record<string, string>;
   eventSeq: number;
   resultRevision?: number;
   lifecycle: ThreadLifecycle;

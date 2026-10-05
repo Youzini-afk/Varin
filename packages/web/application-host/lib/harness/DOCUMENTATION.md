@@ -65,6 +65,30 @@ interrupts the live wait through the Router and readmits the execution slot befo
 aborts admitted Router services before draining attached-root queues. Task UI projects all attached
 roots and their branches; deleting a root cannot delete the user's native Pi transcript as a child asset.
 
+`working-state/code-submission.ts` orchestrates `submit_code` on the existing Registry/WorkingState/
+Integration authorities. Source capture intent is durable before native branch creation; an interrupted
+unaccepted capture releases its private branch, while queued/application receipts resume their fixed
+source after restart. Per-recipient lifecycle serialization encloses application and acknowledgment;
+filesystem gates/CAS remain path-scoped and do not disable other tools for a whole run. Stable operation
+IDs return the recorded application even if the recipient edited those files afterward. Acknowledged
+baselines fold only selected source changes; they exclude recipient edits and unsent source content.
+Later submissions and final merge use that baseline. A full integration retains its source snapshot and
+consumed receipt identities; later reversions are planned even when the source delta against its original
+baseline is empty. Acknowledgment invalidates previous previews. Lifecycle coordination precedes
+virtual-write admission; admitted merges pass their held ticket through Integration without reacquiring.
+Receipt messages are passive and retryable;
+`wait` consumes completed receipts, including receipts arriving just before wait registration. Shared
+private code branches are included in space accounting and released after their last Thread reference.
+
+Task owner scopes remain distinct from directory/resource identities. Session/Bot storage composes the
+owner's native grant with the real Documents resource workspace; surface capture/apply/undo use the
+actual receiver resource. Attached roots freeze the native session's effective permissions, and tool
+control respects the live authenticated actor's path scope. Switching ordinary/research focus retains
+the same task root and children.
+For Git baselines without drafts/ignored-copy scopes, a fresh raw-byte Git identity can reuse a retained
+immutable native baseline. Git filters and EOL conversion are bypassed; changed identities or lost/
+rebased roots return to capture. The derived cache retains a root reference and fingerprint, not file trees.
+
 ### Bot sleep and wake
 
 `bots/bot-service.ts` stores sleep intent, interrupted Run identities, confirmed stop/resume steps,

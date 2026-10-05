@@ -1120,6 +1120,21 @@ async function main(options: StartWebUiServerOptions = {}): Promise<WebUiServerC
   const sourceViewStorageRoot = path.join(VARIN_DATA_DIR, 'source-views');
   await fsPromises.mkdir(sourceViewStorageRoot, { recursive: true });
   const kernelSessionActors = new Map<string, { authorityInstanceId: string; sessionId: string; workerId: string; workerGeneration: number; runId?: string }>();
+  const scopeDirectory = async (scopeId: string): Promise<string> => {
+    if (isSessionScopeId(scopeId)) {
+      const sessionId = sessionIdFromScopeId(scopeId);
+      const summary = await piRuntimeBroker.requestForSession(sessionId, 'session.summary', { sessionId })
+        .catch(async () => (await piRuntimeBroker.listSessions()).find(candidate => candidate.id === sessionId));
+      if (!summary?.cwd) throw new Error(`Task session directory is unavailable: ${sessionId}`);
+      return summary.cwd;
+    }
+    if (isBotScopeId(scopeId)) return botScopeRoot(scopeId);
+    return (await documentsAuthority.inspectWorkspace(scopeId)).root;
+  };
+  const scopeDocumentWorkspace = async (scopeId: string): Promise<string> => scopeId === SOURCE_VIEW_STORAGE_SCOPE
+    ? (await documentsAuthority.resolveWorkspace({ path: sourceViewStorageRoot })).workspaceId
+    : isSessionScopeId(scopeId) || isBotScopeId(scopeId)
+      ? (await documentsAuthority.resolveWorkspace({ path: await scopeDirectory(scopeId) })).workspaceId : scopeId;
   const kernelStorageAdapter = new KernelStorageAdapter({
     client: kernelClient,
     hostId: extensionRuntime.services.hostId,
@@ -1127,7 +1142,7 @@ async function main(options: StartWebUiServerOptions = {}): Promise<WebUiServerC
     storageRoot: path.join(VARIN_DATA_DIR, 'kernel', extensionRuntime.services.hostId),
     resolveWorkspaceRoot: async (workspaceId) => workspaceId === SOURCE_VIEW_STORAGE_SCOPE
       ? sourceViewStorageRoot
-      : (await documentsAuthority.inspectWorkspace(workspaceId)).root,
+      : scopeDirectory(workspaceId),
     resolveActor: async (workspaceId, purpose, hint) => {
       const maintenance = hint?.capabilities?.some((capability) => (
         capability === 'recovery.maintenance' || capability === 'storage.maintenance'
@@ -1706,6 +1721,7 @@ async function main(options: StartWebUiServerOptions = {}): Promise<WebUiServerC
     },
     onThreadChanged: (workspaceId, parent, thread, activeRun) => {
       threadWaitRuntimeRef.current?.observe(workspaceId, thread, activeRun);
+      threadRuntime?.observeCodeSubmissions(workspaceId, thread);
       broadcastGlobalUiEvent?.({
         type: 'varin:harness-thread-changed',
         properties: { workspaceId, parent, thread, activeRun },
@@ -2092,7 +2108,7 @@ async function main(options: StartWebUiServerOptions = {}): Promise<WebUiServerC
     });
     return branch.entries.map((entry) => entry.id);
   };
-  const harnessWorkingStates = createKernelWorkspaceWorkingStateAccess(kernelStorageAdapter, foundationalRecoveryEngine, kernelRecoveryStore);
+  const harnessWorkingStates = createKernelWorkspaceWorkingStateAccess(kernelStorageAdapter, foundationalRecoveryEngine, kernelRecoveryStore, scopeDocumentWorkspace);
   const sourceViews = createSourceViewStore(harnessWorkingStates);
   const retrievalArtifacts = createRetrievalArtifactAccess(harnessWorkingStates);
   const webMaterials = createWebMaterialStore(harnessWorkingStates);
@@ -2205,6 +2221,7 @@ async function main(options: StartWebUiServerOptions = {}): Promise<WebUiServerC
     onProjection: (workspaceId, threadId, projection) => threadRegistry.setVerification(workspaceId, threadId, projection).then(() => undefined),
   });
   const threadIntegrationCoordinator = new IntegrationCoordinator({
+    resolveDocumentWorkspaceId: scopeDocumentWorkspace,
     workingStates: harnessWorkingStates,
     inspectDirtyBuffers: (workspaceId) => documentsAuthority.inspectDirtyBuffers(workspaceId),
     beginDirtyStateBarrier: (workspaceId, paths) => documentsAuthority.beginDirtyStateBarrier(workspaceId, paths),
@@ -2298,9 +2315,7 @@ async function main(options: StartWebUiServerOptions = {}): Promise<WebUiServerC
     },
     // A `bot:` scope's working root is the Bot's durable home directory —
     // there is no registered project workspace behind it.
-    resolveWorkspaceRoot: async (workspaceId) => isBotScopeId(workspaceId)
-      ? botScopeRoot(workspaceId)
-      : (await documentsAuthority.inspectWorkspace(workspaceId)).root,
+    resolveWorkspaceRoot: scopeDirectory,
     resolveRuntimeWorkspaceId: async (cwd) => (await documentsAuthority.resolveWorkspace({ path: cwd })).workspaceId,
     beginBaselineCapture: (workspaceId) => documentsAuthority.beginCapture(workspaceId),
     completeBaselineCapture: async (capture) => {
@@ -2399,6 +2414,7 @@ async function main(options: StartWebUiServerOptions = {}): Promise<WebUiServerC
         if (!result.accepted) throw new Error(`Pi session rejected execution input: ${sessionId}`);
       },
       notify: async (sessionId, text, messageId) => {
+        if (!piRuntimeBroker.activeSessionIds.includes(sessionId)) await piRuntimeBroker.openSession({ sessionId });
         const result = await piRuntimeBroker.requestForSession(sessionId, 'agent.notify', { sessionId, text, messageId });
         if (!result.accepted) throw new Error(`Pi session rejected passive input: ${sessionId}`);
       },
@@ -2887,6 +2903,9 @@ async function main(options: StartWebUiServerOptions = {}): Promise<WebUiServerC
     console.error('[HarnessThreads] Pending deletion recovery failed:', errorMessage(error));
   });
 
+  void threadRuntime.resumeCodeSubmissions().catch((error) => {
+    console.error('[HarnessThreads] Code submission recovery failed:', errorMessage(error));
+  });
   const catalogScan = {
     start(_workspaceId: string): void {},
   };
@@ -3737,6 +3756,7 @@ async function main(options: StartWebUiServerOptions = {}): Promise<WebUiServerC
     threadUpdateBaseline: (workspaceId, parent, threadId, resultRevision, extras) => (
       threadRuntime!.updateBaseline(workspaceId, parent, threadId, resultRevision, extras)
     ),
+    threadSubmitCode: (...args) => threadRuntime!.submitCode(...args),
     threadSendToSession: async (sessionId, message, meta) => {
       if (!piRuntimeBroker.activeSessionIds.includes(sessionId)) await piRuntimeBroker.openSession({ sessionId });
       await threadRuntime!.send(sessionId, message, meta);

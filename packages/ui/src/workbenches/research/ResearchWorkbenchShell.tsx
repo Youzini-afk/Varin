@@ -12,7 +12,7 @@ import { ResearchFactsPanel } from './ResearchFactsPanel';
 const ResearchOverview: React.FC = () => {
   const { t } = useI18n();
   const { rootThreads, loadError, reload } = useHarnessThreadState();
-  const researchRoot = rootThreads.find(({ thread }) => thread.purpose === 'research-root');
+  const researchRoot = rootThreads.find(({ thread, activeRun }) => (activeRun?.frozen?.workFocus ?? thread.manifest.workFocus) === 'research');
   if (loadError) return (
     <div role="alert" className="flex items-center gap-3 border-b border-border/60 px-4 py-2 typography-meta sm:px-6">
       <span className="min-w-0 flex-1 text-muted-foreground">{loadError}</span>

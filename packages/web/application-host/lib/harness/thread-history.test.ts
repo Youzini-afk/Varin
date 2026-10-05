@@ -152,6 +152,12 @@ describe("user Thread history release", () => {
       currentResultRevision: 2, childChecks: null, parentChecks: null,
       review: { resultRevision: 1, status: "completed" },
     });
+    await h.registry.setIntegration("ws", h.thread.id, "merged", undefined, undefined, 1, {
+      branchId: h.branchId, resultRevision: 1, receiver: h.parent, recipientAuthority: "directory:ws", sourcePaths: ["a.txt"], codeReceiptIds: [],
+    });
+    expect((await h.inspect().expect(200)).body.results[1].protectedReasons).toContain("integration");
+    await h.release([1]).expect(409);
+    await h.registry.setIntegration("ws", h.thread.id, "dirty", undefined, undefined, null);
     await h.registry.setWorkingState("ws", h.thread.id, { branchId: h.branchId, resultRevision: 1 });
     const run = await h.registry.startRun("ws", h.thread.id);
     expect((await h.inspect().expect(200)).body.results[1].protectedReasons).toEqual(["run-input"]);

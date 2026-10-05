@@ -1,8 +1,8 @@
 # Varin 多 Agent 协作：综合主线、Worker 与检索
 
-Status: implementation in progress（D-339）。Worker/检索入口、同任务会话发现/范围读取、普通主线的持久依赖等待与重启接续已接线并完成定向验证。选定代码提交继续实施；第 8 节保留初次设计时的现状对照。
+Status: implemented / wired；已完成相关行为回归及真实 Rust 内核定向验证。付费模型协作质量和安装包完整点击流程未由本轮验证。
 
-Last updated: 2026-10-05
+Last updated: 2026-10-06
 
 本文负责常规多 Agent 的职责、通信、等待、会话查看与代码协作。在这些事项上修订
 [harness-verification.md §9.2–9.3](harness-verification.md)，保留原有 Thread/Run、Pi 会话、
@@ -25,7 +25,7 @@ Rust WorkingState/Integration 和 Documents 的职责边界。
 快速实现、复杂实现、前端、审查、检查等用途可以用任务要求和执行配置表达，不再分别作为常规内置子 Agent 类别维护。
 需要独立审查时，可派发一个具有对应只读权限的 Worker 任务；审查与测试不成为每轮委派之后的固定追加流程。
 模型、思考强度和工具按任务及用户配置选择，“快速”不代表必须使用较弱模型。
-用户自定义指令和模型选择应保留；旧预设配置如何收敛到新入口在实施时明确。
+用户自定义指令、启用状态和模型选择保留。已配置的旧实现/前端/审查/检查预设转为可编辑的 saved-* 配置；旧 hardImplement 槽在未配置 Worker 时迁入 Worker。
 
 ## 2. 主 Agent 的综合责任
 
@@ -139,7 +139,7 @@ Agent 应能直接表达“把这些文件或改动片段提交给 B”，一次
 
 所选内容作为补丁进入目标的当前工作状态。文件选择默认表达该文件的改动，不代表无条件覆盖目标完整文件。
 片段携带对应的原内容、上下文和来源身份，不能仅保存易漂移的行号；新增文件、删除和其他文件操作也保留其实际含义。
-公开工具名、选区参数及补丁表示在实现时收敛，本文的自然语言示例不是已经存在的 API。
+公开入口为 submit_code：threadId 指定同任务的可写线程或 parent；files[].path 选文件的实际改动，files[].edits 的 before/after 选唯一原文及替换内容。片段限可读取的 UTF-8 文本，整文件变化沿原生路径状态保留新增、删除和二进制含义。submissionId 可显式指定重试身份；省略时由会话、当前历史位置和工具调用身份生成。
 
 ### 6.2 精细合并与并发写入
 
@@ -177,48 +177,46 @@ Git 可参与差异和执行目录管理，未提交文件及编辑器草稿仍�
 Rust 内核管理不可变工作状态、受控文件操作及 Integration，Documents 管理未保存编辑内容。
 独立工作默认使用隔离工作状态，读取和文本修改可留在虚拟分支，Shell/LSP 等需要真实路径时再生成实际目录。
 
-批量派发应关注基线捕获成本。当前从主目录建立多个隔离子任务仍会分别进入捕获与复核路径；
-可利用已有固定根引用能力，让同一起点的一批 Worker 复用一次已确认的捕获，各自记录后续修改。
-具体复用条件由真实内容身份决定，不能因路径相同就把不同时间的工作状态视为一致。
-这是待实施的性能方向，本设计没有给出未经测量的加速倍数或并发硬上限。
+同一 Git 工作起点的隔离子任务现在可以复用已确认的原生基线：每次仍核对当前路径及原始字节身份，
+并确认保留的不可变根未被释放或重订。Git 原始内容哈希通过一次批处理获取，不受过滤器或换行规范化影响。
+派生缓存只保留根引用及身份摘要，各 Worker 仍拥有独立工作分支；内容变化、编辑器草稿、忽略文件复制等不满足条件时重新捕获。
+本轮验证了复用和失效行为，没有测量端到端加速倍数。
 
-## 8. 当前实现与缺口（2026-10-05 源码核对）
+## 8. 实施状态（2026-10-06）
 
-本节记录静态代码证据，本轮没有进行运行时复测。
-
-| 能力 | 当前事实 | 本设计需要补齐 |
+| 能力 | 已交付行为 | 主要实现入口 |
 | --- | --- | --- |
-| 子 Agent 类型 | `quick-implement`、`hard-implement`、`frontend`、`review`、`check`、`retrieval` 六项常规预设 | 收敛为 Worker/检索入口，调整提示、工具、配置与模式暴露，保留用户有效配置 |
-| 原生工作状态 | 隔离基线、虚拟读写、按需物化、固定结果和三方合入已有实现 | 批量基线复用及选定改动提交 |
-| 定向通信 | 父子/同级 `inform`、`request`、`replyTo` 已有实际服务路径 | 与等待、代码提交、同任务查看统一衔接 |
-| 等待 | `wait` 订阅 Registry 事件；进度和普通通知不唤醒；等待中的子 Run 让出名额 | 无期限依赖挂起、明确的主线恢复条件及重启接续 |
-| 等待期限 | 现有 `wait` 默认及最长为 3,595 秒，超时返回正常结果 | 时间限制作为明确的等待选择；无期限等待不靠模型反复续订 |
-| 主会话唤醒 | 显式 `request` 在 Pi 空闲时可启动一轮，忙碌时作为 steer；完成 observer 主要广播 UI 事件 | 按登记的依赖在子任务完成后恢复挂起主线；不能把现状描述成“完成必定自动唤醒” |
-| 会话读取 | `read_thread` 有状态、报告、记录定位/邻近展开和搜索分页，默认可见范围主要为自己管理的子线程 | 同任务成员互相发现与互读，最近记录、范围与续读交互统一 |
-| 文件合入 | `merge` 按已发布结果的改动集计算；公开参数没有文件/片段选择 | 一次提交所选文件/片段到目标，准确回执与来源追踪 |
-| 基线更新 | `update` 要求父 Thread 有工作分支和已发布结果；不是任意同级代码同步 | 同级之间及与主会话之间的选定改动提交 |
-| 重启恢复 | 既有 Thread、消息、工作状态已有持久化基础 | 新的等待/提交恢复需要实际接线与验证，本轮未确认完整恢复行为 |
+| 职责与入口 | 常规 Worker/检索，主线持续负责整体实现和整合；Worker 默认继承主模型，保留旧配置及关闭状态 | protocol/harness-presets.ts、harness-model-slots.ts |
+| 同任务会话 | 按真实任务祖先发现主线、同级和后代；按记录范围、最近记录、稳定 ID 续读、关键词/路径读取；互读不授予控制权 | thread-registry.ts、thread-services.ts、Pi thread-tools.ts |
+| 事件等待 | 无期限或显式期限等待；Run 让出模型名额，事件满足后重新准入；普通进度不唤醒 | thread-services.ts、thread-wait-runtime.ts |
+| 普通主线接续 | 普通会话登记同一 Thread/Run 身份；等待对象、位置和期限持久化；重启只接续符合真实等待条件的丢失/空闲执行 | attached-root-runtime.ts、thread-wait-runtime.ts |
+| 选定代码提交 | submit_code 一次固定文件/片段变化并尝试应用；同级、子到主线及主线到可写成员使用原生 Integration | working-state/code-submission.ts、thread-runtime.ts |
+| 回执与重试 | 先持久捕获意图，再固定源；待应用、已应用、冲突和失败分开；固定操作身份返回既有应用记录，不覆盖接收者后续编辑 | code-submission.ts、integration-coordinator.ts |
+| 重启与通知 | 未受理的中断捕获释放私有分支；队列和应用重启对账；完成回执被动通知双方，wait 可消费登记前刚到的回执 | code-submission.ts、thread-wait-runtime.ts |
+| 最终整合 | 已接受的源变化单独形成基线，不混入接收者编辑；完整合并后保留源快照，后续修改与撤回也参加三方规划 | integration-coordinator.ts、thread-runtime.ts、working-state/thread-history.ts |
+| 写入与物化 | 接收者生命周期协调应用和确认；分支写票据在打开 store 前获取，已持有票据不重复获取；文件仍受原生 gates/CAS 保护 | thread-runtime.ts、integration-coordinator.ts |
+| 所属任务与目录 | 会话/Bot 的存储所属范围与实际 Documents 目录资源分开；普通/科研侧重切换保留原任务及子线程；沿用根会话生效权限 | attached-root-runtime.ts、kernel/storage-adapter.ts、Host index.ts |
+| UI | 现有子线程会话面板显示选定文件、应用状态、冲突及错误；任务树复用普通主线和科研主线投影 | HarnessThreadConversation.tsx、ResearchWorkbenchShell.tsx |
+| 基线成本 | 完整原始内容身份一致、无草稿/忽略复制且原生根仍有效时复用；不同源内容重新捕获 | thread-worktree.ts、working-state/workspace-baseline.ts |
 
-关键实现入口：
+上述文件位于 [Host harness](../../packages/web/application-host/lib/harness/DOCUMENTATION.md)、
+[Pi 工具](../../packages/pi-host/src/harness/README.md)及 [Protocol](../../packages/protocol/README.md) 的现有模块。
+代码写入继续由 Rust WorkingState/Integration 和 Documents 负责，Host 只协调，不直接写目标文件。
 
-- [预设与工具定义](../../packages/protocol/src/harness-presets.ts)、[线程工具](../../packages/pi-host/src/harness/thread-tools.ts)。
-- [线程服务](../../packages/web/application-host/lib/harness/thread-services.ts)：`createThreadWaitService`、`createThreadSendService`、`createThreadReadService`、`createThreadUpdateService`。
-- [Pi 消息接收](../../packages/pi-host/src/session-host.ts)：`requestThreadMessage`、`notify`；[Host 接线](../../packages/web/application-host/index.ts)：Thread Registry observers。
-- [线程运行时](../../packages/web/application-host/lib/harness/thread-runtime.ts)：`prepareIsolatedBranchCore`、`materializeExecutionView`、`updateBaseline`。
-- [集成协调](../../packages/web/application-host/lib/harness/working-state/integration-coordinator.ts)、[Rust 工作状态适配](../../packages/web/application-host/lib/kernel/storage-adapter.ts)。
+## 9. 验证与边界
 
-## 9. 实施与验证边界
+复用了相关套件，补充的是能发现真实丢结果、覆盖文件或等待死锁的少量行为场景：
 
-实施应沿现有权威分块交付：先收敛职责与模型可见入口，打通同任务发现/读取与事件接续，再补齐精细改动提交和已有 UI 的结果呈现。
-相关代码改变时更新模块文档及交付状态；本文不代替对实际调用链的理解。
+- 同任务互读及可写目标授权、无关任务/只读目标拒绝，读取不启动目标。
+- 普通主线等待的重启恢复与登记前已到的代码回执；用户输入、取消、运行状态和消息身份继续沿既有链路处理。
+- 所选片段保留未发送内容，接收者独立编辑得到保留；真实冲突报告且不覆盖目标。
+- 待应用重启接续、中断捕获释放、固定回执重试，以及接收者后来编辑后的重复提交。
+- 完整整合后的撤回修改，包括原生相对初始基线的 changedPaths 为空时仍发现撤回冲突。
+- 已准入的虚拟合并与物化交错不重复等待写票据；Git 中文路径与原始 CRLF/LF 内容身份。
+- 真实 Rust 存储适配完成分支 CAS、丢失终态响应后的重启对账及重复提交不覆盖后续编辑。
 
-验证围绕真实失效方式复用已有覆盖，按改动范围选择必要场景：
+相关 Protocol 构建、Host/Pi/UI 类型检查和改动源码 lint 作为接线验证；没有跑全项目测试或重建测试框架，
+没有通过固定提示词全文、UI 尺寸或参数排列证明行为。提交分为入口/互读、持久等待、精细代码交换三个阶段。
 
-- 等待登记前后恰好有结果、多个结果同时到达、取消后迟到消息，不造成丢事件或重复执行。
-- 同任务成员能定位所需历史，读取不启动目标；消息与任务关系不串线。
-- 只提交所选片段，保留源和目标的其他修改；同文件独立改动可合并，真实冲突明确可处理。
-- 投递重试、待应用、重启后未知结果与最终整合，不重复写入或把未应用报告成成功。
-- 主线整合成果时仍处理跨模块的行为一致性；运行时保证和提示词引导分别说明证据。
-
-不因新增角色配置或 UI 文案自动建设一套测试框架，不锁死提示词全文、界面排版或每个参数排列。
-性能只报告实际测量，模型协作质量不以静态测试通过替代。
+没有打安装包，也没有用付费模型验证真实多线程协作质量或完整 UI 点击流程。
+本轮不声明未测量的性能提升；主线理解和整合成果的质量仍需要实际任务验证。

@@ -2,7 +2,7 @@
 
 Status: design accepted; D-284–D-286 are implemented and independently corrected by D-287; delivery facts are in status.md
 
-Last updated: 2026-09-22
+Last updated: 2026-10-06
 
 正文为中文。English readers: this document specifies the Varin-owned agent harness (tools, retrieval,
 knowledge store, context and cache contract, verification, profiles) layered on the Pi agent kernel.
@@ -17,7 +17,7 @@ takeover 已删除，新链按 2.4A/B、2.6A/B 接线并经真 Pi+faux 纵切验
 D-285 接受以工作为中心的可续做线程、可选预设、定向通信与分段成果；D-286 补齐整套上下文原则及“工作可延续、上下文可重建”。
 D-287 已按真实 Pi/Host/Rust 消费者验收并修正上下文收据、Run 准入、消息提交边界和物化 baseline handoff；证据见 status 与验收记录。
 
-D-339 的[多 Agent 协作设计](agent-collaboration-design.md)于 2026-10-05 确认，尚未实施：主线持续负责整体实现，
+D-339 的[多 Agent 协作设计](agent-collaboration-design.md)于 2026-10-05 确认，2026-10-06 已接线并完成定向验证：主线持续负责整体实现，
 常规子 Agent 收敛为 Worker/检索，同任务成员可按范围互读会话，等待按事件恢复，代码可按文件或片段直接提交给目标。
 它修订 D-285 的预设保留与协作范围目标；已有 Thread/Run、Pi、WorkingState/Integration 权威继续沿用。
 

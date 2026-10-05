@@ -1881,6 +1881,7 @@ export const createKernelWorkspaceWorkingStateAccess = (
   adapter: KernelStorageAdapter,
   recoveryEngine?: WorkspaceRecoveryEngine,
   durableRecoveryStore?: RecoveryDurableOperationPort,
+  resolveRecoveryWorkspace?: (owningScopeId: string) => Promise<string>,
 ): WorkspaceWorkingStateRootAccess => ({
     withBranchStore: async (workspaceId, purpose, operation, _mode: Mode = "exclusive", actor) => {
       const context = await adapter.context(workspaceId, purpose, {
@@ -1895,7 +1896,7 @@ export const createKernelWorkspaceWorkingStateAccess = (
         return operation(new KernelWorkingStateRootStore(composed), composed);
       }
       return recoveryEngine.withWorkspaceStorage(
-        workspaceId,
+        resolveRecoveryWorkspace ? await resolveRecoveryWorkspace(workspaceId) : workspaceId,
         { mode: _mode, purpose, create: true },
         (recoveryContext) => {
           const composed = {

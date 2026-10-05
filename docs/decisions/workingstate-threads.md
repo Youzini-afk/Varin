@@ -1307,4 +1307,4 @@ Thread/Run、Pi 会话、Rust WorkingState/Integration、Documents 权威不变�
 完整合同及源码现状见 [agent-collaboration-design.md](../design/agent-collaboration-design.md)，
 入口已回写 agent-harness、harness-verification、development、文档索引及 status。
 
-状态：设计已确认，未实施；本次仅交付文档，未进行运行时复测。
+状态：2026-10-06 已实施并接线。Worker/检索、同任务互读、普通主线持久等待、选定代码提交和回执 UI、源基线推进及 Git 基线复用已交付。相关行为回归及真实 Rust 分支 CAS/重启回执验证通过；未打包，付费模型协作质量与完整 UI 点击流程未验证。

@@ -13,10 +13,11 @@ import type {
   ThreadSendResult,
   ThreadReadResult,
   ThreadMergeResult,
+  ThreadSubmitCodeResult,
   ThreadUpdateResult,
   ThreadKillResult,
 } from "@varin/protocol";
-import { HARNESS_MAX_REQUEST_TIMEOUT_MS, buildTeamPrompt, isPresetId } from "@varin/protocol";
+import { buildTeamPrompt, isPresetId } from "@varin/protocol";
 
 /**
  * Build an error result for a thread tool failure.
@@ -126,12 +127,12 @@ function threadToolParameters<T extends typeof DispatchParams | typeof ThreadSen
 }
 
 export function dispatchToolPresentation(
-  presets: readonly ResolvedPreset[], capabilities: readonly ResearchCapabilityOption[],
+  presets: readonly ResolvedPreset[], capabilities: readonly ResearchCapabilityOption[], activeTools?: readonly string[],
 ) {
   const research = capabilities.map(entry => `${entry.capability}${entry.definition.name ? ` (${entry.definition.name})` : ''}`).join(', ');
   return {
     parameters: threadToolParameters(DispatchParams, capabilities),
-    promptGuidelines: [buildTeamPrompt([...presets]) + (research ? ` Available research capabilities: ${research}.` : '')],
+    promptGuidelines: [buildTeamPrompt([...presets], activeTools) + (research ? ` Available research capabilities: ${research}.` : '')],
   };
 }
 
@@ -186,6 +187,18 @@ const ThreadUpdateParams = Type.Object({
   resultRevision: Type.Optional(Type.Integer({ minimum: 1, description: "Published parent result revision to incorporate into this thread's baseline; defaults to the parent's latest published result." })),
 });
 
+const ThreadSubmitCodeParams = Type.Object({
+  threadId: Type.String({ description: "Writable teammate in this task, or parent." }),
+  submissionId: Type.Optional(Type.String({ description: "Reuse this identity to read/retry the same receipt; a new identity selects a new source snapshot." })),
+  files: Type.Array(Type.Object({
+    path: Type.String({ description: "Relative file path. Omit edits to submit this file's changes." }),
+    edits: Type.Optional(Type.Array(Type.Object({
+      before: Type.String({ description: "Unique original snippet with context, from this branch's baseline or last accepted submission to the recipient." }),
+      after: Type.String({ description: "Corresponding snippet in the source's current content." }),
+    }))),
+  })),
+});
+
 const ThreadKillParams = Type.Object({
   threadId: Type.String(),
   keep_worktree: Type.Optional(Type.Boolean()),
@@ -220,7 +233,7 @@ export function createDispatchTool(
     label: "Dispatch",
     description: "Dispatch a sub-agent thread for a task. kind:\"discussion\" starts a read-only consult thread that answers against memory and reports back. Optional preset picks a fixed execution configuration. Asynchronous — returns immediately, never blocks.",
     promptSnippet: "dispatch: spawn a sub-agent thread for a task",
-    ...dispatchToolPresentation(presets, researchCapabilities),
+    ...dispatchToolPresentation(presets, researchCapabilities, options.getActiveToolNames?.()),
     executionMode: "parallel",
     execute: async (_toolCallId, params, _signal, _onUpdate, ctx) => {
         let model: { providerId: string; modelId: string } | undefined;
@@ -632,6 +645,21 @@ export function createUpdateTool(bridge: HostServicesBridge, _sessionId: string)
       } catch (error) {
         return threadErrorResult("update", error);
       }
+    },
+  });
+}
+
+export function createSubmitCodeTool(bridge: HostServicesBridge, sessionId: string): ToolDefinition {
+  return defineTool({
+    name: "submit_code", label: "Submit code",
+    description: "Submit selected file changes or exact original/replacement snippets to a writable teammate or parent in one operation. Keeps unrelated source and recipient edits. Captures an immutable patch and applies through native integration; queued acceptance is not an applied receipt. Wait for a receipt or continue work; no manual publish/commit/pull is needed.",
+    parameters: ThreadSubmitCodeParams, executionMode: "parallel",
+    execute: async (toolCallId, params, signal, _onUpdate, ctx) => {
+      try {
+        const submissionId = params.submissionId ?? `${sessionId}:${ctx.sessionManager.getLeafId() ?? "root"}:${toolCallId}`;
+        const result = await bridge.request<"thread.submitCode">("thread.submitCode", { ...params, submissionId }, signal ? { signal } : undefined) as ThreadSubmitCodeResult;
+        return { content: [{ type: "text", text: result.text }], details: { submission: result.submission } };
+      } catch (error) { return threadErrorResult("submit_code", error); }
     },
   });
 }

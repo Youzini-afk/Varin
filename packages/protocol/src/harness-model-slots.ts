@@ -89,7 +89,7 @@ export function normalizeHarnessAgentConfiguration(models: unknown, agents: unkn
   if (!source || typeof source !== "object" || Array.isArray(source)) throw new HarnessSettingsValidationError("harness.models must be an object");
   const bindings = { ...source } as Record<string, unknown>;
   const legacy = ["hardImplement", "quickImplement", "frontend", "review", "check"] as const;
-  const tools = ["read", "edit", "write", "apply_patch", "bash", "grep", "find", "ls", "explore", "related", "get_output", "write_to_process", "kill_shell", "threads", "wait", "send", "read_thread", "merge", "update", "dispatch", "kill"];
+  const tools = ["read", "edit", "write", "apply_patch", "bash", "grep", "find", "ls", "explore", "related", "get_output", "write_to_process", "kill_shell", "threads", "wait", "send", "read_thread", "merge", "submit_code", "update", "dispatch", "kill"];
   for (const role of legacy) {
     const raw = bindings[role];
     delete bindings[role];

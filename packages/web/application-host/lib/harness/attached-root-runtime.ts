@@ -157,14 +157,17 @@ export function createAttachedRootRuntime(options: AttachedRootRuntimeOptions) {
     if (!snapshot) return;
     const target = await options.resolveTarget(sessionId, snapshot);
     if (!target) return;
-    const scopeId = target.scopeId;
+    const ordinaryRoot = purpose === "agent-root" || purpose === "research-root";
+    const retainedRoot = ordinaryRoot ? await options.registry.findTaskRootForSession(sessionId) : null;
+    const scopeId = retainedRoot?.workspaceId ?? target.scopeId;
     const existingBinding = await options.registry.getSessionBinding(sessionId);
     if (existingBinding?.owner === "spawned-child") return;
     if (existingBinding?.owner === "attached-root") {
       const boundThread = await options.registry.getThreadById(existingBinding.owningScopeId, existingBinding.threadId);
       // A Bot entry using research focus must not be adopted and settled by
       // two attached-root runtimes.
-      if (boundThread?.purpose !== purpose) return;
+      if (boundThread?.purpose !== purpose && !(ordinaryRoot
+        && (boundThread?.purpose === "agent-root" || boundThread?.purpose === "research-root"))) return;
       const run = await options.registry.getActiveRun(existingBinding.owningScopeId, existingBinding.threadId);
       if (run?.id === existingBinding.runId && run.outcome === null) {
         const entries = await options.sessions.entries(sessionId, "branch").catch(() => null);
@@ -185,7 +188,7 @@ export function createAttachedRootRuntime(options: AttachedRootRuntimeOptions) {
     const startEntries = await options.sessions.entries(sessionId, "branch");
     const input = userInputFromEntries(startEntries);
     if (!input) throw new Error(`The ${purpose} root cannot identify the current user request`);
-    let thread = await findRoot(scopeId, sessionId);
+    let thread = retainedRoot ?? await findRoot(scopeId, sessionId);
     if (!thread) {
       thread = await options.registry.createThread({
         scopeId,
@@ -201,7 +204,7 @@ export function createAttachedRootRuntime(options: AttachedRootRuntimeOptions) {
         ...(snapshot.model ? { model: { providerId: snapshot.model.provider, modelId: snapshot.model.id } } : {}),
         tools: [...snapshot.activeTools],
         workFocus: target.workFocus,
-        permissions: {},
+        permissions: snapshot.permissions ?? { mode: "normal", rules: [] },
         autoRun: false,
         hidden: true,
       });
@@ -225,6 +228,7 @@ export function createAttachedRootRuntime(options: AttachedRootRuntimeOptions) {
         systemPromptFragment: null,
         inputOrigin: "task",
         workFocus: target.workFocus,
+        permissions: snapshot.permissions ?? { mode: "normal", rules: [] },
       },
     })).run;
     try {

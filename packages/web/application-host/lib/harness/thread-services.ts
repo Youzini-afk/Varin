@@ -110,7 +110,8 @@ const resolveOwningContext = async (
     return {
       workspaceId: binding.owningScopeId,
       parent: { kind: "thread", id: binding.threadId },
-      owner: { ...owner, execution: run.frozen },
+      owner: { ...owner, execution: isAttachedRootPurpose(owner.purpose) && ctx.actor.workspaceScope !== undefined
+        ? { ...run.frozen, scope: [...ctx.actor.workspaceScope] } : run.frozen },
       family: owner.purpose === "bot-root"
         ? await botRootFamily(registry!, binding.owningScopeId)
         : null,
@@ -198,6 +199,9 @@ const formatThreadLine = (snapshot: ThreadSnapshot, cursor: ThreadViewCursor | n
   for (const message of questions) if (!cursor?.requestIds?.includes(message.id)) {
     line += `\n  request ${message.id} to parent: ${message.text}`;
   }
+  for (const submission of thread.codeSubmissions ?? []) if (full || cursor?.codeSubmissionStates?.[submission.id] !== submission.status) {
+    line += `\n  code ${submission.id}: ${submission.fromThreadId} → ${submission.toThreadId}, ${submission.status}; selected ${submission.paths.join(", ")}; applied ${submission.appliedPaths.join(", ") || "none"}; conflicts ${submission.conflictPaths.join(", ") || "none"}${submission.error ? `; ${submission.error}` : ""}`;
+  }
   return line;
 };
 
@@ -210,6 +214,7 @@ const advanceCursor = (
 ): void => {
   const { thread, activeRun } = snapshot;
   registry.setCursor(observerSessionId, thread.id, {
+    codeSubmissionStates: Object.fromEntries((thread.codeSubmissions ?? []).map(submission => [submission.id, submission.status])),
     requestIds: (thread.messages ?? []).filter((message) => message.direction === "out" && message.kind === "request").map((message) => message.id),
     ...(observationRef ? { retainedBy: [...(registry.getCursor(observerSessionId, thread.id)?.retainedBy ?? []), observationRef] } : {}),
     eventSeq: thread.eventSeq,
@@ -791,6 +796,8 @@ export function createThreadWaitService(host: HarnessServiceHost): HarnessServic
         : peerEquals(peer, parent);
       const relevantChildChange = ({ thread, activeRun }: ThreadSnapshot): boolean => {
         const cursor = registry.getCursor(observer, thread.id);
+        if (thread.codeSubmissions?.some(submission => ["applied", "conflict", "failed"].includes(submission.status)
+          && cursor?.codeSubmissionStates?.[submission.id] !== submission.status)) return true;
         if (thread.messages?.some((message) => message.direction === "out" && message.kind === "request"
           && message.status === "delivered" && addressedToCaller(message.to)
           && !cursor?.requestIds?.includes(message.id))) return true;
@@ -816,6 +823,8 @@ export function createThreadWaitService(host: HarnessServiceHost): HarnessServic
         if (self.thread.messages?.some((message) => message.direction === "in"
           && (message.status === "delivered" || message.status === "resolved")
           && (message.kind === "request" || message.replyTo !== undefined) && !initialRequests.has(message.id))) return true;
+        if (self.thread.codeSubmissions?.some(submission => ["applied", "conflict", "failed"].includes(submission.status)
+          && registry.getCursor(observer, self.thread.id)?.codeSubmissionStates?.[submission.id] !== submission.status)) return true;
         return actionable.has(self.thread.attention) && self.thread.attention !== selfBaseline.thread.attention;
       };
       let timedOut = false;
@@ -823,7 +832,8 @@ export function createThreadWaitService(host: HarnessServiceHost): HarnessServic
         if (owner?.activeRunId) {
           if (!await registry.setDependencyWait(workspaceId, owner.id, { id: waitId, runId: owner.activeRunId, sessionId: ctx.sessionId,
             ...(deadline === undefined ? {} : { deadline }), state: "watching", requestIds: [...initialRequests],
-            targets: initialTargets.map(({ thread, activeRun }) => ({ id: thread.id, runId: thread.activeRunId,
+            targets: [...initialTargets, ...(selfBaseline && !initialTargets.some(entry => entry.thread.id === selfBaseline.thread.id) ? [selfBaseline] : [])].map(({ thread, activeRun }) => ({ id: thread.id, runId: thread.activeRunId,
+              codeSubmissionStates: Object.fromEntries((thread.codeSubmissions ?? []).map(submission => [submission.id, submission.status])),
               resultRevision: thread.resultRevision ?? null, lifecycle: thread.lifecycle, attention: thread.attention,
               integration: thread.integration, outcome: activeRun?.outcome ?? null })) })) {
             throw new HarnessServiceError("unavailable", "The waiting Run could not retain its dependency subscription");
@@ -2002,6 +2012,35 @@ export function createThreadMergeService(host: HarnessServiceHost): HarnessServi
       };
     },
   };
+}
+
+export function createThreadSubmitCodeService(host: HarnessServiceHost): HarnessService<"thread.submitCode"> {
+  return { handle: async (params, ctx) => {
+    if (!host.threadRegistry || !host.threadSubmitCode) throw new HarnessServiceError("unavailable", "Native code submission is unavailable");
+    const owning = await resolveOwningContext(host, ctx);
+    assertOwnerTool(owning.owner, "submit_code");
+    if (!owning.owner) throw new HarnessServiceError("unavailable", "This conversation has no task root yet");
+    const snapshots = await taskSnapshotsFor(host, owning, true);
+    const targetId = params.threadId === "parent" ? owning.owner.parent.id : params.threadId;
+    const snapshot = snapshots.find(snapshot => snapshot.thread.id === targetId);
+    const target = snapshot?.thread;
+    if (!target) throw new HarnessServiceError("not-found", "Code recipient is outside this task or unavailable");
+    const targetExecution = snapshot.activeRun?.frozen ?? target.manifest;
+    if (owning.owner.deletion || target.deletion || target.lifecycle === "archived"
+      || (target.kind === "discussion" && !isAttachedRootPurpose(target.purpose)) || !targetExecution.tools.some(tool => ["write", "edit", "apply_patch"].includes(tool))) {
+      throw new HarnessServiceError("denied", "Code recipient is not writable");
+    }
+    if (params.submissionId !== undefined && (typeof params.submissionId !== "string" || !params.submissionId.trim())) throw new HarnessServiceError("invalid-params", "submissionId must be nonempty");
+    const captured = ctx.inputContext?.source === "surface" && host.threadCaptureDraftBaseline
+      ? await host.threadCaptureDraftBaseline(ctx.sessionId, owning.workspaceId, ctx.inputContext) : null;
+    try {
+      const source = { ...owning.owner, manifest: { ...owning.owner.manifest, scope: owning.owner.execution.scope } };
+      const receiver = { ...target, manifest: { ...target.manifest, scope: targetExecution.scope } };
+      const submission = await host.threadSubmitCode(owning.workspaceId, source, receiver, params,
+        params.submissionId ?? randomUUID(), ctx.signal, captured?.draftBaselineId ?? undefined);
+      return { submission, text: `Code submission ${submission.id}: ${submission.status}. From ${submission.fromThreadId} to ${submission.toThreadId}. Selected: ${submission.paths.join(", ") || "no changed files"}. Applied: ${submission.appliedPaths.join(", ") || "none"}. Conflicts: ${submission.conflictPaths.join(", ") || "none"}.${submission.error ? ` ${submission.error}` : ""}${submission.status === "queued" || submission.status === "applying" ? " Accepted for automatic application; use wait for its receipt, or continue other work." : submission.status === "capturing" ? " Source capture has not been accepted yet." : ""}` };
+    } finally { await captured?.cleanup(); }
+  } };
 }
 
 export function createThreadUpdateService(host: HarnessServiceHost): HarnessService<"thread.update"> {

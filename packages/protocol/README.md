@@ -71,10 +71,11 @@ language server read itself, which LSP cannot attribute to a version.
 | `surface.snapshot.commit/release` | content-free `AgentInputContext` | lifecycle acknowledgement | Bind or release an opaque Documents snapshot after input delivery |
 | `thread.dispatch` | `{ task, preset?, input?, scope?, worktree? }` | `ThreadDispatchResult` | Dispatch a sub-agent thread; `input: "inherit"` fixes the parent's committed input at dispatch |
 | `thread.list` | `{ ids?, full? }` | `ThreadListResult` | List threads (incremental) |
-| `thread.wait` | `{ ids?, timeoutMs? }` | `ThreadWaitResult` | Block until thread state change |
+| `thread.wait` | `{ ids?, timeoutMs? }` | `ThreadWaitResult` | Event-driven dependency wait; no duration means indefinite. Targets, receipt positions and optional deadline survive Host restart; routine progress does not wake a model |
 | `thread.send` | `{ threadId?, to?, message, from, kind?, context?, requestId?, replyTo? }` | `ThreadSendResult` | `inform` (default) delivers only — held durably for non-running targets, never starts a Run; `request` wakes a waiting target and on a settled thread starts a new Run (`context`: `continue` resumes the retained session, `fresh` rebuilds the input) or parks behind the shared root budget (`delivery: "scheduled"`). `to: "parent"` targets the caller's own parent; `requestId` is the idempotency key; `replyTo` answers a request and completes the requester's wait |
-| `thread.read` | `{ threadId, what?, since? }` | `ThreadReadResult` | Read thread notes/report/steps |
+| `thread.read` | `{ threadId, what?, start?, end?, tail?, afterEntry?, entry?, query?, path?, limit? }` | `ThreadReadResult` | Same-task read-only conversation access, including ancestors, siblings and descendants; record ranges, stable entry continuation, search and tool results |
 | `thread.merge` | `{ threadId, resultRevision? }` | `ThreadMergeResult` | Integrate a fixed native result and identify disk, marker, or editor-surface conflicts |
+| `thread.submitCode` | `{ threadId, submissionId?, files: [{ path, edits?: [{ before, after }] }] }` | `ThreadSubmitCodeResult` | Capture and automatically apply selected file changes/snippets to a writable task peer or parent. Durable fixed source, queued/application/conflict receipts, idempotent retries and acknowledged source baselines |
 | `thread.update` | `{ threadId, resultRevision? }` | `ThreadUpdateResult` | Rebase the calling thread's working baseline onto a selected parent result revision; keeps the thread's own deltas, merges clean text edits, and reports divergent paths as conflicts |
 | `thread.kill` | `{ threadId, keepWorktree? }` | `ThreadKillResult` | Kill a thread |
 

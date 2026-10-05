@@ -592,6 +592,7 @@ export class SessionHost {
   #sessionToolAllowlist: string[] | undefined;
   #sessionModelSelection: ModelSelection | undefined;
   #frozenPermissionOverlay: PermissionPolicy | undefined;
+  #effectivePermissionPolicy: PermissionPolicy | undefined;
   #contextPreparation: ContextPreparationExtension | undefined;
   #contextConfigReader: (() => HarnessContextSettings) | undefined;
   #contextLastFailure: HarnessContextRuntimeFailure | undefined;
@@ -872,6 +873,7 @@ export class SessionHost {
       : undefined;
     return {
       activeTools: session.getActiveToolNames(),
+      ...(this.#effectivePermissionPolicy ? { permissions: structuredClone(this.#effectivePermissionPolicy) } : {}),
       busy: !session.isIdle || pendingActivity !== undefined,
       cwd: this.runtime.cwd,
       features: readSessionFeatures(session.sessionManager),
@@ -3500,6 +3502,7 @@ export class SessionHost {
       const sessionPermissions = this.#frozenPermissionOverlay
         ? mergePolicies(this.#frozenPermissionOverlay, livePermissions)
         : livePermissions;
+      this.#effectivePermissionPolicy = structuredClone(sessionPermissions);
       const contextConfigReader = () => {
         if (this.#pendingContextSettings !== undefined) return this.#pendingContextSettings;
         const currentHarness = (settingsManager.getGlobalSettings() as {

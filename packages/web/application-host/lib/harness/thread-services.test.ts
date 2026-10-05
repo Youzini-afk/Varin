@@ -3,7 +3,7 @@ import { join } from "node:path";
 import { tmpdir } from "node:os";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { createThreadRegistry } from "./thread-registry.js";
-import { createThreadDispatchService, createThreadKillService, createThreadListService, createThreadMergeService, createThreadReadService, createThreadSendService, createThreadWaitService } from "./thread-services.js";
+import { createThreadDispatchService, createThreadKillService, createThreadListService, createThreadMergeService, createThreadReadService, createThreadSendService, createThreadSubmitCodeService, createThreadWaitService } from "./thread-services.js";
 import { createThreadRuntime, ThreadRuntimeError } from "./thread-runtime.js";
 import type { AgentInputContext, SessionEntriesResult, SessionSnapshot, SessionStats, SessionSummary } from "@varin/protocol";
 
@@ -32,6 +32,35 @@ const serviceContext = (inputContext?: AgentInputContext) => ({
 const dispatchService = (host: object) => createThreadDispatchService(host as never);
 
 describe("thread services", () => {
+  it("submits code to writable task peers and the ordinary parent without granting cross-task or read-only writes", async () => {
+    const dataDir = mkdtempSync(join(tmpdir(), "thread-code-authorization-"));
+    const registry = createThreadRegistry({ dataDir, hostId: "host-1" });
+    const create = (parent: { kind: "session" | "thread"; id: string }, tools: string[], purpose: "agent-root" | "task" = "task") => registry.createThread({
+      scopeId: "workspace-1", parent, brief: "Assigned work", kind: purpose === "agent-root" ? "discussion" : "implementation",
+      purpose, createdBy: "agent", concurrency: 4, autoRun: false, worktree: "none", tools, permissions: {},
+    });
+    try {
+      const root = await create({ kind: "session", id: "parent-1" }, ["write", "submit_code"], "agent-root");
+      const rootRun = await registry.startRun("workspace-1", root.id);
+      await registry.markRunRunning("workspace-1", root.id, rootRun.id, "parent-1");
+      const source = await create({ kind: "thread", id: root.id }, ["write", "submit_code"]);
+      const sourceRun = await registry.startRun("workspace-1", source.id);
+      await registry.markRunRunning("workspace-1", source.id, sourceRun.id, "source-session");
+      const peer = await create(source.parent, ["write"]);
+      const reader = await create(source.parent, ["read"]);
+      const unrelated = await create({ kind: "session", id: "another-task" }, ["write"]);
+      const submit = vi.fn(async (_scope, sender, receiver, _input, id) => ({ id, fingerprint: "selected", fromThreadId: sender.id, toThreadId: receiver.id,
+        branchId: "fixed", resultRevision: 1, paths: ["a.ts"], status: "queued", appliedPaths: [], acceptedPaths: [], conflictPaths: [], createdAt: new Date().toISOString() }));
+      const service = createThreadSubmitCodeService({ threadRegistry: registry, threadSubmitCode: submit } as never);
+      const context = { ...serviceContext(), sessionId: "source-session", actor: { ...serviceContext().actor, sessionId: "source-session" } };
+      const request = { files: [{ path: "a.ts" }] };
+      expect((await service.handle({ ...request, threadId: peer.id }, context)).submission.toThreadId).toBe(peer.id);
+      expect((await service.handle({ ...request, threadId: "parent" }, context)).submission.toThreadId).toBe(root.id);
+      await expect(service.handle({ ...request, threadId: reader.id }, context)).rejects.toMatchObject({ harnessCode: "denied" });
+      await expect(service.handle({ ...request, threadId: unrelated.id }, context)).rejects.toMatchObject({ harnessCode: "not-found" });
+      expect(submit).toHaveBeenCalledTimes(2);
+    } finally { await registry.dispose(); rmSync(dataDir, { recursive: true, force: true }); }
+  });
   it("freezes customized built-in prompts, tools and model parameters before later settings edits", async () => {
     const dataDir = mkdtempSync(join(tmpdir(), "thread-builtin-profile-"));
     const registry = createThreadRegistry({ dataDir, hostId: "host-1" });
@@ -389,7 +418,7 @@ describe("thread services", () => {
         preset: null,
         brief: "Summarize the diff",
         model: { providerId: "anthropic", modelId: "claude-sonnet-4" },
-        manifest: { tools: ["read", "grep", "bash"], worktree: "isolated", systemPromptFragment: null },
+        manifest: { tools: ["read", "grep", "bash"], worktree: "isolated" },
       });
       const run = await registry.getActiveRun("workspace-1", result.threadId);
       expect(run?.frozen).toMatchObject({

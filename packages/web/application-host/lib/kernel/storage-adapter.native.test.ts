@@ -10,6 +10,7 @@ import { createWorkingBranchLookups } from "../harness/working-state/working-bra
 import { createWorkingBranchWriteServices } from "../harness/working-state/working-branch-writes.js";
 import { VirtualWriteGate } from "../harness/working-state/virtual-write-gate.js";
 import { IntegrationCoordinator } from "../harness/working-state/integration-coordinator.js";
+import { selectCodeChanges } from "../harness/working-state/code-submission.js";
 import { createWorkspaceRecoveryEngine, type CreateWorkspaceRecoveryEngineOptions } from "../recovery/journal-engine.js";
 import { createKernelClient } from "./kernel-client.js";
 import { createKernelWorkspaceWorkingStateAccess, KernelStorageAdapter, KernelWorkingStateRootStore } from "./storage-adapter.js";
@@ -453,11 +454,13 @@ it.skipIf(!hasReleaseKernel)("reconciles a branch CAS after the terminal respons
   const workspace = path.join(root, "workspace");
   const storageRoot = path.join(root, "storage");
   const dataDir = path.join(root, "data");
-  const workspaceId = "kernel-branch-reconcile-workspace";
-  await fs.mkdir(workspace, { recursive: true });
+  const workspaceId = "session:kernel-branch-reconcile-task";
+  const documentWorkspaceId = "kernel-branch-reconcile-workspace";
+  await fs.mkdir(path.join(workspace, "src"), { recursive: true });
   await fs.writeFile(path.join(workspace, "base.txt"), "base\n");
+  await fs.writeFile(path.join(workspace, "src", "api.ts"), "first=old\nkeep1\nkeep2\nlast=old\n");
   const documents: CreateWorkspaceRecoveryEngineOptions["documents"] = {
-    inspectWorkspace: async () => ({ root: workspace, workspaceId }),
+    inspectWorkspace: async id => { assert.equal(id, documentWorkspaceId); return { root: workspace, workspaceId: documentWorkspaceId }; },
     listWorkspaceRegistrations: async () => [{ canonicalPath: workspace, workspaceId }],
     beginDirtyStateBarrier: async () => ({ release: async () => undefined, settle: async () => undefined }),
     inspectDirtyBuffers: async () => [],
@@ -479,16 +482,20 @@ it.skipIf(!hasReleaseKernel)("reconciles a branch CAS after the terminal respons
   const engine = createKernelRecoveryDirectFacade(baseEngine, kernelRecoveryStore);
   try {
     await client.start();
-    const access = createKernelWorkspaceWorkingStateAccess(adapter, engine, kernelRecoveryStore);
+    const access = createKernelWorkspaceWorkingStateAccess(adapter, engine, kernelRecoveryStore, async () => documentWorkspaceId);
     const result = await access.withBranchStore(workspaceId, "branch-reconcile-setup", async (store) => {
       const base = await store.captureDirectory(workspace);
       await store.createBranch(workspaceId, "reconcile-parent", base, "base");
       await store.createBranch(workspaceId, "reconcile-child", base, "reconcile-parent@0");
       const object = await store.putObject(Buffer.from("child\n"));
       await store.commitVirtualWrites("reconcile-child", 0, { "child.txt": { kind: "regular-file", objectHash: object.hash, byteLength: object.byteLength } });
+      const body = await store.putObject(Buffer.from("first=new\nkeep1\nkeep2\nlast=new\n"));
+      const mode = base["src/api.ts"]?.kind === "regular-file" ? base["src/api.ts"].mode : undefined;
+      const selected = await selectCodeChanges(store, [{ path: "src/api.ts", edits: [{ before: "first=old\n", after: "first=new\n" }] }], base, { "src/api.ts": { kind: "regular-file", objectHash: body.hash, byteLength: body.byteLength, ...(mode === undefined ? {} : { mode }) } });
+      assert.equal((await store.commitVirtualWrites("reconcile-child", 1, selected)).status, "committed");
       return store.publishHeadResult("reconcile-child");
     });
-    const coordinator = new IntegrationCoordinator({ workingStates: access });
+    const coordinator = new IntegrationCoordinator({ workingStates: access, resolveDocumentWorkspaceId: async () => documentWorkspaceId });
     const originalComplete = kernelRecoveryStore.completeOperation.bind(kernelRecoveryStore);
     let lost = true;
     kernelRecoveryStore.completeOperation = async (input) => {
@@ -499,16 +506,29 @@ it.skipIf(!hasReleaseKernel)("reconciles a branch CAS after the terminal respons
       return originalComplete(input);
     };
     await assert.rejects(
-      coordinator.mergeResult({ workspaceId, threadId: "reconcile-thread", branchId: "reconcile-child", resultRevision: result.resultRevision, parentAuthority: { kind: "branch", branchId: "reconcile-parent" } }),
+      coordinator.mergeResult({ workspaceId, operationId: "selected-native-once", threadId: "reconcile-thread", branchId: "reconcile-child", resultRevision: result.resultRevision, parentAuthority: { kind: "branch", branchId: "reconcile-parent" } }),
       /lost terminal response/i,
     );
     const pending = (await kernelRecoveryStore.listOperations(workspaceId, "integration")).find((entry) => String(entry.state) === "applying");
     assert.ok(pending);
     kernelRecoveryStore.completeOperation = originalComplete;
-    const restartedCoordinator = new IntegrationCoordinator({ workingStates: access });
-    await restartedCoordinator.mergeResult({ workspaceId, threadId: "reconcile-thread", branchId: "reconcile-child", resultRevision: result.resultRevision, parentAuthority: { kind: "branch", branchId: "reconcile-parent" } });
+    const restartedCoordinator = new IntegrationCoordinator({ workingStates: access, resolveDocumentWorkspaceId: async () => documentWorkspaceId });
+    await restartedCoordinator.mergeResult({ workspaceId, operationId: "selected-native-once", threadId: "reconcile-thread", branchId: "reconcile-child", resultRevision: result.resultRevision, parentAuthority: { kind: "branch", branchId: "reconcile-parent" } });
     const reconciled = await kernelRecoveryStore.getOperation(workspaceId, String(pending?.operationId));
     assert.equal(reconciled?.state, "complete");
+    await access.withBranchStore(workspaceId, "recipient-edit-after-receipt", async store => {
+      const entry = await store.readPath("reconcile-parent", "src/api.ts");
+      assert.ok(entry);
+      assert.equal((await store.readContent(entry))?.toString(), "first=new\nkeep1\nkeep2\nlast=old\n");
+      const body = await store.putObject(Buffer.from("recipient edit\n"));
+      const parent = await store.getBranchRoot("reconcile-parent");
+      assert.equal((await store.commitVirtualWrites("reconcile-parent", parent!.writeRevision, { "child.txt": { kind: "regular-file", objectHash: body.hash, byteLength: body.byteLength } })).status, "committed");
+    });
+    assert.equal((await restartedCoordinator.mergeResult({ workspaceId, operationId: "selected-native-once", threadId: "reconcile-thread", branchId: "reconcile-child", resultRevision: result.resultRevision, parentAuthority: { kind: "branch", branchId: "reconcile-parent" } })).status, "applied");
+    await access.withBranchStore(workspaceId, "unchanged-recipient-after-retry", async store => {
+      const entry = await store.readPath("reconcile-parent", "child.txt");
+      assert.ok(entry); assert.equal((await store.readContent(entry))?.toString(), "recipient edit\n");
+    });
   } finally {
     await adapter.dispose().catch(() => undefined);
     await client.close().catch(() => undefined);

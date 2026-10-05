@@ -10,6 +10,7 @@ import {
   createThreadKillService,
   createThreadListService,
   createThreadMergeService,
+  createThreadSubmitCodeService,
   createThreadUpdateService,
   createThreadReadService,
   createThreadHistoryService,
@@ -1212,6 +1213,7 @@ export function registerHarnessServices(
   }
   if (host.threadRegistry && host.threadApplyWorktreeDiff) {
     router.register("thread.merge", createThreadMergeService(host));
+    router.register("thread.submitCode", createThreadSubmitCodeService(host));
   }
   if (host.threadRegistry && host.threadUpdateBaseline) {
     router.register("thread.update", createThreadUpdateService(host));

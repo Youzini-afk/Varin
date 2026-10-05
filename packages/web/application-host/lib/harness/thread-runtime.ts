@@ -13,6 +13,7 @@ import type {
   SessionSummary,
   Thread,
   ThreadConflictResolution,
+  ThreadSubmitCodeParams,
   ThreadParent,
   ThreadReport,
   ThreadRun,
@@ -66,6 +67,7 @@ import type { SurfaceSnapshotCloneResult } from "../documents/surface-snapshot-s
 import type { createSourceViewStore } from "./source-view-store.js";
 import { normalizePathIdentity } from "../workspace/path-safety.js";
 import { sameState } from "../recovery/journal-files.js";
+import { createCodeSubmissionRuntime, submittedCodeBaseline } from "./working-state/code-submission.js";
 import type { VerificationCoordinator } from "./verification-coordinator.js";
 import { runNeedsMaterializedDirectory } from "./working-state/path-requirement.js";
 import {
@@ -1336,6 +1338,8 @@ export function createThreadRuntime(options: ThreadRuntimeOptions) {
         throw snapshotError;
       }
     }
+    const retainedRoot = await options.registry.findTaskRootForSession(sessionId);
+    if (retainedRoot) return { scopeId: retainedRoot.workspaceId, parent: { kind: "session", id: sessionId }, snapshot };
     const workspace = snapshot?.workspace ?? summary?.workspace;
     if (workspace?.kind !== "workspace") {
       // HR0: an unbound session is its own durable owner scope. Threads stay
@@ -1582,12 +1586,14 @@ export function createThreadRuntime(options: ThreadRuntimeOptions) {
   ): Promise<CapturedThreadDraftBaseline> => {
     const empty = { draftBaselineId: null, sourceViewId: null, cleanup: async () => undefined };
     if (context.source === "disk") return empty;
+    const documentWorkspaceId = workspaceId.startsWith("session:") || workspaceId.startsWith("bot:")
+      ? await options.resolveRuntimeWorkspaceId(await options.resolveWorkspaceRoot(workspaceId)) : workspaceId;
     if (context.snapshot.status === "unavailable") {
-      if (context.roots.length === 0 || context.roots.some((root) => root.workspaceId === workspaceId && root.dirtyPaths.length > 0)) {
+      if (context.roots.length === 0 || context.roots.some((root) => root.workspaceId === documentWorkspaceId && root.dirtyPaths.length > 0)) {
         throw new ThreadRuntimeError("unavailable", "The worktree source snapshot is unavailable; its dirty files cannot be safely inherited");
       }
       if (!options.sourceViews) throw new ThreadRuntimeError("unavailable", "Fixed external source storage is unavailable");
-      const fixed = await options.sourceViews.capture({ status: "ready", resources: [], supersededResources: [] }, workspaceId,
+      const fixed = await options.sourceViews.capture({ status: "ready", resources: [], supersededResources: [] }, documentWorkspaceId,
         context.roots.flatMap((root) => root.dirtyPaths.map((resourceId) => ({ workspaceId: root.workspaceId, resourceId }))));
       return fixed ? {
         draftBaselineId: null,
@@ -1606,33 +1612,33 @@ export function createThreadRuntime(options: ThreadRuntimeOptions) {
     }
     const targetResources = [...new Map(cloned.resources.flatMap((resource) =>
       (resource.aliases ?? [resource.resource])
-        .filter((alias) => alias.workspaceId === workspaceId)
+        .filter((alias) => alias.workspaceId === documentWorkspaceId)
         .map((alias) => [alias.resourceId, { ...resource, resource: alias }] as const)
     )).values()];
-    const requestedPaths = [...(context.roots.find((root) => root.workspaceId === workspaceId)?.dirtyPaths ?? [])].sort();
+    const requestedPaths = [...(context.roots.find((root) => root.workspaceId === documentWorkspaceId)?.dirtyPaths ?? [])].sort();
     // A path written during this turn is answered from disk, which the Run
     // materializes anyway; overlaying its older draft would undo that write.
     // Completeness is still verified: every requested path must be accounted
     // for as either a cloned draft or a superseded one (D-088).
     const clonedPaths = [
       ...targetResources.map((resource) => resource.resource.resourceId),
-      ...cloned.supersededResources.filter((resource) => resource.workspaceId === workspaceId).map((resource) => resource.resourceId),
+      ...cloned.supersededResources.filter((resource) => resource.workspaceId === documentWorkspaceId).map((resource) => resource.resourceId),
     ].sort();
     if (clonedPaths.length !== requestedPaths.length
       || clonedPaths.some((file, index) => file !== requestedPaths[index])) {
       throw new ThreadRuntimeError("unavailable", "The editor source snapshot no longer matches the dispatch context");
     }
     const hasExternal = cloned.resources.some((resource) =>
-      (resource.aliases ?? [resource.resource]).some((alias) => alias.workspaceId !== workspaceId));
+      (resource.aliases ?? [resource.resource]).some((alias) => alias.workspaceId !== documentWorkspaceId));
     if (hasExternal && !options.sourceViews) throw new ThreadRuntimeError("unavailable", "Fixed external source storage is unavailable");
     const externalWorkspaceIds = [...new Set(cloned.resources.flatMap((resource) =>
       (resource.aliases ?? [resource.resource]).map((alias) => alias.workspaceId)
-    ))].filter((id) => id !== workspaceId);
+    ))].filter((id) => id !== documentWorkspaceId);
     const owners = externalWorkspaceIds.flatMap((id) => {
       const owner = options.agentInputSurfaceOwner?.(sessionId, context, id);
       return owner ? [owner] : [];
     });
-    const fixed = hasExternal ? await options.sourceViews!.capture(cloned, workspaceId, [], owners) : null;
+    const fixed = hasExternal ? await options.sourceViews!.capture(cloned, documentWorkspaceId, [], owners) : null;
     if (targetResources.length === 0) return fixed ? {
       draftBaselineId: null,
       sourceViewId: fixed.viewId,
@@ -1675,6 +1681,9 @@ export function createThreadRuntime(options: ThreadRuntimeOptions) {
     };
   };
 
+  // Derived cache only: the native branch owns the immutable baseline. Reuse
+  // requires a fresh complete Git identity and the same retained base root.
+  const baselineRoots = new Map<string, { fingerprint: string; branchId: string; root: string }>();
   const prepareIsolatedBranchCore = async (
     input: PrepareIsolatedBranchInput,
     preparationSignal: AbortSignal,
@@ -1869,6 +1878,30 @@ export function createThreadRuntime(options: ThreadRuntimeOptions) {
           baseRef = beforeInventory.baseRef;
           worktree!.base = beforeInventory.baseRef;
           gitWindow = gitBaselineFingerprint(beforeInventory);
+          if (!draftBaselineId && !captureScopes.length && beforeInventory.rawFileHashes) {
+            const key = `${input.scopeId}:${sourceRoot}`;
+            const cached = baselineRoots.get(key);
+            if (cached?.fingerprint === createHash("sha256").update(gitWindow).digest("hex")) {
+              const retained = await store.getBranchRoot(cached.branchId);
+              if (retained?.baseRoot === cached.root) {
+                const pin = await store.pinBranch(cached.branchId, { revision: 0, signal: preparationSignal });
+                try {
+                  if (pin.root === cached.root) {
+                    const afterInventory = await inspectInventory();
+                    if (afterInventory?.kind !== "git" || gitBaselineFingerprint(afterInventory) !== gitWindow) throw baselineChanged("Git identity during baseline reuse");
+                    await assertNoActiveBaselineWriters();
+                    if (typeof options.completeBaselineCapture === "function" && baselineCapture !== undefined) {
+                      const completed = await options.completeBaselineCapture(baselineCapture); baselineCapture = undefined;
+                      if (!completed.stable) throw baselineChanged(`documents capture ${completed.reasons.join(",") || "unstable"}`);
+                    }
+                    await store.createBranchFromPin(input.scopeId, branchId, pin, baseRef, null, captureScopes);
+                    return;
+                  }
+                } finally { await pin.release(); }
+              }
+              baselineRoots.delete(key);
+            }
+          }
         } else {
           if (captureScopes.length > 0 && canListCaptureScopes) {
             frozenCaptureScopePaths = [...new Set(await store.listCaptureScopePaths(sourceRoot, captureScopes))].sort();
@@ -1935,6 +1968,10 @@ export function createThreadRuntime(options: ThreadRuntimeOptions) {
           }
         }
         await createFromStates(store, baseline, baseRef);
+        if (gitWindow !== null && beforeInventory?.kind === "git" && beforeInventory.rawFileHashes && !draftBaselineId && !captureScopes.length) {
+          const branch = await store.getBranchRoot(branchId);
+          if (branch) baselineRoots.set(`${input.scopeId}:${sourceRoot}`, { fingerprint: createHash("sha256").update(gitWindow).digest("hex"), branchId, root: branch.baseRoot });
+        }
       }, "exclusive", { executionWorkspace: captureWorkspaceId });
       const setupPending = existing.manifest.tools.includes("bash")
         && Boolean(options.worktrees.runSetup)
@@ -2684,25 +2721,7 @@ export function createThreadRuntime(options: ThreadRuntimeOptions) {
             : null;
           if (previewCoordinator) {
             try {
-              const preview = await previewCoordinator.previewResult({
-                workspaceId: binding.scopeId,
-                threadId: binding.threadId,
-                branchId: thread.workBranchId,
-                resultRevision: published.resultRevision,
-              });
-              await options.registry.setIntegration(
-                binding.scopeId,
-                binding.threadId,
-                preview.mergeReady ? "merge-ready" : preview.conflictPaths.length > 0 || preview.unavailablePaths.length > 0
-                  ? "conflict"
-                  : "dirty",
-                published.diffStats,
-              );
-              await options.registry.setIntegrationBinding(
-                binding.scopeId,
-                binding.threadId,
-                threadIntegrationBindingFromPreview(preview),
-              );
+              await previewIntegration(binding.scopeId, binding.parent, binding.threadId, { resultRevision: published.resultRevision });
             } catch (error) {
               unresolved.push(`Unable to bind integration preview: ${error instanceof Error ? error.message : String(error)}`);
             }
@@ -2900,6 +2919,11 @@ export function createThreadRuntime(options: ThreadRuntimeOptions) {
     }
     if (event.envelope.event !== "agent.event") return;
     const agentEvent = recordOf(recordOf(event.envelope.data).event);
+    if (agentEvent.type === "tool_execution_end" && codeSubmissions) {
+      void options.registry.getThreadById(binding.scopeId, binding.threadId).then(thread => {
+        if (thread) codeSubmissions.observe(binding.scopeId, thread);
+      }).catch(reportError);
+    }
     markAgentActivity(binding);
     clearWaitingAttention(binding);
     if (agentEvent.type === "agent_end") {
@@ -3379,21 +3403,25 @@ export function createThreadRuntime(options: ThreadRuntimeOptions) {
     }
   };
 
-  const merge = async (
-    workspaceId: string,
-    parent: ThreadParent,
-    threadId: string,
-    requestedRevision?: number,
-    executionId?: string,
-    extras?: { sourceOwner?: { ownerId: string; generation: number }; expectedBindingFingerprint?: string; resolutions?: ThreadConflictResolution[]; signal?: AbortSignal },
-  ) => {
-    const existing = await options.registry.getThread(workspaceId, parent, threadId);
-    if (!existing) throw new Error(`Thread not found: ${threadId}`);
-    let thread = existing;
-    if (!thread.worktree && !thread.workBranchId) throw new Error("Thread has no published work state to merge");
+  const sessionDirectory = async (thread: Thread) => {
+    const run = await options.registry.getActiveRun(thread.workspaceId, thread.id);
+    const sessionId = run?.sessionId ?? (thread.parent.kind === "session" ? thread.parent.id : null);
+    if (!sessionId && thread.manifest.worktree === "shared") {
+      const owner = thread.parent.kind === "thread" ? await options.registry.getThreadById(thread.workspaceId, thread.parent.id) : null;
+      return owner?.worktree?.path && owner.worktree.materialized !== false && !isVirtualWorktree(owner.worktree)
+        ? owner.worktree.path : options.resolveWorkspaceRoot(thread.workspaceId);
+    }
+    if (!sessionId) throw new Error(`Task root has no session: ${thread.id}`);
+    const snapshot = await options.sessions.snapshot(sessionId).catch(() => options.sessions.summary(sessionId));
+    if (!snapshot.cwd) throw new Error(`Task root has no working directory: ${thread.id}`);
+    return snapshot.cwd;
+  };
+
+  const receivingAuthority = async (workspaceId: string, parent: ThreadParent, signal?: AbortSignal) => {
     let parentRoot = await options.resolveWorkspaceRoot(workspaceId);
     let parentAuthority: { kind: "branch"; branchId: string; sessionId?: string } | { kind: "directory"; directory: string; workspaceId?: string } | undefined;
     let releaseParentWrite = (): void => undefined;
+    let parentWriteHeld = false;
     if (parent.kind === "thread") {
       const owner = await options.registry.getThreadById(workspaceId, parent.id);
       if (!owner) throw new Error(`Parent thread not found: ${parent.id}`);
@@ -3407,9 +3435,9 @@ export function createThreadRuntime(options: ThreadRuntimeOptions) {
             const view = options.executionViews?.get(parentSessionId);
             return !!view && view.mode === "virtual";
           },
-          extras?.signal,
+          signal,
         );
-        if (ticket !== "disk") releaseParentWrite = () => ticket.finish();
+        if (ticket !== "disk") { parentWriteHeld = true; releaseParentWrite = () => ticket.finish(); }
         try {
           const latest = await options.registry.getThreadById(workspaceId, parent.id);
           if (ticket !== "disk") {
@@ -3430,7 +3458,6 @@ export function createThreadRuntime(options: ThreadRuntimeOptions) {
               parentAuthority = {
                 kind: "branch",
                 branchId: latest!.workBranchId!,
-                sessionId: parentSessionId,
               };
             } else {
               throw new Error(`Parent thread write authority is unavailable: ${parent.id}`);
@@ -3444,7 +3471,7 @@ export function createThreadRuntime(options: ThreadRuntimeOptions) {
         parentAuthority = {
           kind: "branch",
           branchId: owner.workBranchId!,
-          ...(parentSessionId ? { sessionId: parentSessionId } : {}),
+          ...(parentSessionId && options.executionViews?.get(parentSessionId)?.mode === "virtual" ? { sessionId: parentSessionId } : {}),
         };
       } else if (owner.worktree?.path && owner.worktree.materialized !== false && !isVirtualWorktree(owner.worktree)) {
         parentRoot = owner.worktree.path;
@@ -3453,19 +3480,129 @@ export function createThreadRuntime(options: ThreadRuntimeOptions) {
           directory: owner.worktree.path,
           workspaceId: await options.resolveRuntimeWorkspaceId(owner.worktree.path),
         };
+      } else if (isAttachedRootPurpose(owner.purpose) || owner.manifest.worktree === "shared") {
+        parentRoot = await sessionDirectory(owner);
+        parentAuthority = { kind: "directory", directory: parentRoot, workspaceId: await options.resolveRuntimeWorkspaceId(parentRoot) };
       } else {
         throw new Error(`Parent thread write authority is unavailable: ${parent.id}`);
       }
     }
-    let coordinator: Pick<IntegrationCoordinator, "mergeResult" | "previewResult" | "undoIntegration" | "invalidateWorkspace"> | null;
-    try {
-      coordinator = options.resolveIntegrationCoordinator
-        ? await options.resolveIntegrationCoordinator(workspaceId)
-        : null;
-    } catch (error) {
-      releaseParentWrite();
-      throw error;
-    }
+    return { parentRoot, parentAuthority, parentWriteHeld, release: releaseParentWrite };
+  };
+
+  const codeRecipientAuthority = async (_scopeId: string, thread: Thread): Promise<string> => thread.workBranchId
+    ? `branch:${thread.workBranchId}` : thread.manifest.worktree === "isolated" ? `branch:thread-${thread.id}`
+      : `directory:${await options.resolveRuntimeWorkspaceId(await sessionDirectory(thread))}`;
+
+  const receiverIdentity = async (scopeId: string, parent: ThreadParent) => {
+    const receiver = parent.kind === "thread" ? await options.registry.getThreadById(scopeId, parent.id)
+      : (await options.registry.listThreads(scopeId, parent, true)).find(thread => isAttachedRootPurpose(thread.purpose));
+    return { receiver: receiver ? { kind: "thread" as const, id: receiver.id } : parent,
+      authority: receiver ? await codeRecipientAuthority(scopeId, receiver) : `directory:${await options.resolveRuntimeWorkspaceId(await options.resolveWorkspaceRoot(scopeId))}` };
+  };
+
+  const knownCodeBaseline = async (scopeId: string, source: Thread, parent: ThreadParent, store: WorkingStateRootStore): Promise<Record<string, RecoveryState>> => {
+    if (!source.mergedSource && !source.codeSubmissions?.some(entry => entry.acceptedPaths.length)) return {};
+    const identity = await receiverIdentity(scopeId, parent);
+    const full = source.mergedSource?.receiver.kind === identity.receiver.kind && source.mergedSource.receiver.id === identity.receiver.id
+      && source.mergedSource.recipientAuthority === identity.authority ? source.mergedSource : undefined;
+    return submittedCodeBaseline(store, source, identity.receiver.id, identity.authority, full);
+  };
+
+  const codeSubmissions = options.workingStates ? createCodeSubmissionRuntime({
+    registry: options.registry,
+    workingStates: options.workingStates,
+    onError: reportError,
+    serializeRecipient: withThreadLifecycle,
+    recipientAuthority: codeRecipientAuthority,
+    baseline: (scopeId, store, source, target) => knownCodeBaseline(scopeId, source, { kind: "thread", id: target.id }, store),
+    capture: async (_scopeId, source, target, paths, store, signal, draftBaselineId) => {
+      const baseBranchId = source.workBranchId ?? target.workBranchId;
+      let base = baseBranchId ? await store.readStateSlice(baseBranchId, paths, { revision: 0, ...(signal ? { signal } : {}) }) : null;
+      if (baseBranchId && !base) throw new Error("Selected code baseline is unavailable");
+      let current: Record<string, RecoveryState>;
+      if (source.workBranchId && usesWorkingBranchAuthority(source)) {
+        const pin = await store.pinBranch(source.workBranchId, signal ? { signal } : {});
+        try { current = await store.readStateSlice(source.workBranchId, paths, { pin, ...(signal ? { signal } : {}) }) ?? {}; }
+        finally { await pin.release(); }
+      } else {
+        const directory = source.worktree?.path ?? await sessionDirectory(source);
+        if (!directory) throw new Error("Source working directory is unavailable");
+        current = await store.captureDirectory(directory, paths, { store: true, ...(signal ? { signal } : {}) });
+        if (!base) {
+          if (await codeRecipientAuthority(_scopeId, source) !== await codeRecipientAuthority(_scopeId, target)) throw new Error("Separate directories need an isolated source or recipient baseline");
+          base = current; // Shared directory changes are already visible; publish an empty patch.
+        }
+      }
+      if (draftBaselineId) {
+        const drafts = await store.getDraftBaseline(draftBaselineId);
+        if (!drafts) throw new Error("Source editor snapshot is unavailable");
+        for (const file of paths) if (drafts.pathStates[file]) current[file] = drafts.pathStates[file]!;
+      }
+      return { base: base!, current };
+    },
+    apply: async (scopeId, target, submission, signal) => {
+      signal.throwIfAborted();
+      const latest = await options.registry.getThreadById(scopeId, target.id);
+      if (!latest || latest.deletion || latest.lifecycle === "archived") throw new Error("Recipient is no longer writable");
+      if (submission.recipientAuthority && await codeRecipientAuthority(scopeId, latest) !== submission.recipientAuthority) throw new Error("Recipient changed its working authority after code acceptance");
+      if (latest.lifecycle === "queued" && !latest.workBranchId) return null;
+      const receiving = await receivingAuthority(scopeId, { kind: "thread", id: latest.id }, signal);
+      try {
+        const coordinator = await options.resolveIntegrationCoordinator?.(scopeId);
+        if (!coordinator) throw new Error("Native code integration is unavailable");
+        const operation = () => coordinator.mergeResult({ workspaceId: scopeId, threadId: submission.fromThreadId,
+          branchId: submission.branchId, resultRevision: submission.resultRevision,
+          operationId: `code-integration-${createHash("sha256").update(`${scopeId}:${submission.id}`).digest("hex")}`,
+          parentWriteHeld: receiving.parentWriteHeld,
+          ...(receiving.parentAuthority ? { parentAuthority: receiving.parentAuthority } : {}), signal });
+        return options.withMergeWriter ? options.withMergeWriter(scopeId, latest.id, operation) : operation();
+      } finally { receiving.release(); }
+    },
+    notify: async (scopeId, thread, submission) => {
+      const current = await options.registry.getThreadById(scopeId, thread.id);
+      if (!current || current.deletion) return;
+      if (thread.id === submission.fromThreadId && submission.acceptedPaths.length) {
+        const coordinator = await options.resolveIntegrationCoordinator?.(scopeId);
+        coordinator?.invalidateThread?.(scopeId, thread.id);
+        if (current.integrationBinding) await options.registry.invalidateIntegrationBinding(scopeId, thread.id, current.integrationBinding.bindingFingerprint);
+      }
+      const id = `code-receipt:${submission.id}:${thread.id}`;
+      const message = { id, from: { kind: "thread" as const, id: submission.fromThreadId },
+        to: { kind: "thread" as const, id: thread.id }, kind: "inform" as const, status: "pending" as const,
+        text: `Code submission ${submission.id} from ${submission.fromThreadId} to ${submission.toThreadId}: ${submission.status}. Applied: ${submission.appliedPaths.join(", ") || "none"}. Conflicts: ${submission.conflictPaths.join(", ") || "none"}.${submission.error ? ` ${submission.error}` : ""}`,
+        at: submission.completedAt ?? submission.createdAt };
+      const recorded = await options.registry.recordDirectedMessage(scopeId, message);
+      if (recorded.status !== "pending") return;
+      const run = await options.registry.getActiveRun(scopeId, thread.id);
+      if (run?.sessionId && options.sessions.notify) {
+        await options.sessions.notify(run.sessionId, message.text, id);
+        await options.registry.patchDirectedMessage(scopeId, thread.id, recorded.id, { status: "delivered" });
+      }
+    },
+  }) : null;
+
+  const submitCode = async (scopeId: string, source: Thread, target: Thread, input: ThreadSubmitCodeParams, id: string, signal?: AbortSignal, draftBaselineId?: string) => {
+    if (!codeSubmissions) throw new Error("Native working state is unavailable");
+    return codeSubmissions.submit(scopeId, source, target, input, id, signal, draftBaselineId);
+  };
+
+  const merge = async (
+    workspaceId: string,
+    parent: ThreadParent,
+    threadId: string,
+    requestedRevision?: number,
+    executionId?: string,
+    extras?: { sourceOwner?: { ownerId: string; generation: number }; expectedBindingFingerprint?: string; resolutions?: ThreadConflictResolution[]; signal?: AbortSignal },
+  ) => {
+    const existing = await options.registry.getThreadById(workspaceId, threadId);
+    if (!existing) throw new Error(`Thread not found: ${threadId}`);
+    let thread = existing;
+    if (!thread.worktree && !thread.workBranchId) throw new Error("Thread has no published work state to merge");
+    let parentRoot = "";
+    let parentAuthority: IntegrationPlanInput["parentAuthority"];
+    let parentWriteHeld = false;
+    const coordinator = await options.resolveIntegrationCoordinator?.(workspaceId);
     const operation = async () => {
       const branchId = thread.workBranchId;
       const resultRevision = requestedRevision ?? thread.resultRevision;
@@ -3473,11 +3610,14 @@ export function createThreadRuntime(options: ThreadRuntimeOptions) {
         throw new Error("Thread draft baseline requires a published native result for integration");
       }
       if (coordinator && branchId && resultRevision) {
+        const identity = await receiverIdentity(workspaceId, parent);
         const result = await coordinator.mergeResult({
           workspaceId,
           threadId,
           branchId,
           resultRevision,
+          resolveBaseStates: store => knownCodeBaseline(workspaceId, thread, parent, store),
+          parentWriteHeld,
           ...(executionId ? { executionId, requireTurnBinding: true } : {}),
           ...(extras?.sourceOwner ? { sourceOwner: extras.sourceOwner } : {}),
           ...(extras?.expectedBindingFingerprint ? { expectedBindingFingerprint: extras.expectedBindingFingerprint } : {}),
@@ -3485,6 +3625,20 @@ export function createThreadRuntime(options: ThreadRuntimeOptions) {
           ...(extras?.resolutions ? { resolutions: extras.resolutions } : {}),
           ...(parentAuthority ? { parentAuthority } : {}),
         });
+        const mergedSource = result.status === "applied" && !result.conflictPaths.length && !result.needsAttentionPaths?.length
+          && !result.preview?.unavailablePaths.length && !result.preview?.paths.some(path => path.target === "surface" && !["surface-applied", "skipped-identical"].includes(path.phase))
+          && options.workingStates ? await options.workingStates.withBranchStore(workspaceId, "record-integrated-source", async store => {
+            const source = await store.getResult(branchId, resultRevision);
+            if (!source) throw new Error("The integrated source could not be retained");
+            const prior = thread.mergedSource?.recipientAuthority === identity.authority
+              && thread.mergedSource.receiver.kind === identity.receiver.kind && thread.mergedSource.receiver.id === identity.receiver.id ? thread.mergedSource.sourcePaths : [];
+            const receipts = (thread.codeSubmissions ?? []).filter(entry => entry.toThreadId === identity.receiver.id && entry.recipientAuthority === identity.authority);
+            return { branchId, resultRevision, receiver: identity.receiver, recipientAuthority: identity.authority,
+              sourcePaths: [...new Set([...prior, ...receipts.flatMap(entry => entry.acceptedPaths), ...source.changedPaths])],
+              codeReceiptIds: (thread.codeSubmissions ?? []).filter(entry => entry.toThreadId === identity.receiver.id
+                && entry.recipientAuthority === identity.authority && entry.acceptedPaths.length).map(entry => entry.id) };
+          }) : undefined;
+        if (mergedSource && !result.preview) await options.registry.setIntegration(workspaceId, threadId, "merged", result.diffStats, undefined, resultRevision, mergedSource);
         if (result.preview) {
           const pendingSurface = result.preview.paths.some((path) => (
             path.target === "surface"
@@ -3502,6 +3656,7 @@ export function createThreadRuntime(options: ThreadRuntimeOptions) {
             result.diffStats,
             undefined,
             failed || pendingSurface ? undefined : resultRevision,
+            mergedSource,
           );
           await options.registry.setIntegrationBinding(
             workspaceId,
@@ -3561,20 +3716,21 @@ export function createThreadRuntime(options: ThreadRuntimeOptions) {
       if (!thread.worktree?.resultCommit) throw new Error("Thread has no fixed published result to merge");
       return options.worktrees.merge(parentRoot, thread.worktree);
     };
-    try {
-      return await withThreadLifecycle(workspaceId, threadId, async () => {
-        const latest = await options.registry.getThread(workspaceId, parent, threadId);
-        if (!latest) throw new Error(`Thread not found: ${threadId}`);
+    const receive = async () => {
+      const receiving = await receivingAuthority(workspaceId, parent, extras?.signal);
+      parentRoot = receiving.parentRoot; parentAuthority = receiving.parentAuthority; parentWriteHeld = receiving.parentWriteHeld;
+      try {
+        const latest = await options.registry.getThreadById(workspaceId, threadId);
+        if (!latest) throw new Error("The merge source is no longer available");
         if (latest.deletion) throw new Error("Cannot merge a thread while deletion is pending");
         if (latest.lifecycle === "archived") throw new Error("Cannot merge an archived thread");
         thread = latest;
-        return options.withMergeWriter
-          ? options.withMergeWriter(workspaceId, threadId, operation)
-          : operation();
-      });
-    } finally {
-      releaseParentWrite();
-    }
+        return options.withMergeWriter ? options.withMergeWriter(workspaceId, threadId, operation) : operation();
+      } finally { receiving.release(); }
+    };
+    if (parent.kind === "thread" && parent.id === threadId) throw new Error("A thread cannot integrate into itself");
+    return withThreadLifecycle(workspaceId, threadId, () => parent.kind === "thread"
+      ? withThreadLifecycle(workspaceId, parent.id, receive) : receive());
   };
 
   /**
@@ -3709,48 +3865,32 @@ export function createThreadRuntime(options: ThreadRuntimeOptions) {
     if (!coordinator || !branchId || resultRevision === undefined) {
       throw new Error("Thread has no published native result to preview");
     }
-    let parentAuthority: { kind: "branch"; branchId: string; sessionId?: string } | { kind: "directory"; directory: string; workspaceId?: string } | undefined;
-    if (parent.kind === "thread") {
-      const owner = await options.registry.getThreadById(workspaceId, parent.id);
-      if (!owner) throw new Error(`Parent thread not found: ${parent.id}`);
-      const parentRun = await options.registry.getActiveRun(workspaceId, parent.id);
-      if (usesWorkingBranchAuthority(owner)) {
-        parentAuthority = {
-          kind: "branch",
-          branchId: owner.workBranchId!,
-          ...(parentRun?.sessionId ? { sessionId: parentRun.sessionId } : {}),
-        };
-      } else if (owner?.worktree?.path && owner.worktree.materialized !== false && !isVirtualWorktree(owner.worktree)) {
-        parentAuthority = {
-          kind: "directory",
-          directory: owner.worktree.path,
-          workspaceId: await options.resolveRuntimeWorkspaceId(owner.worktree.path),
-        };
-      } else {
-        throw new Error(`Parent thread write authority is unavailable: ${parent.id}`);
-      }
-    }
-    const preview = await coordinator.previewResult({
-      workspaceId,
-      threadId,
-      branchId,
-      resultRevision,
-      ...(extras?.sourceOwner ? { sourceOwner: extras.sourceOwner } : {}),
-      ...(extras?.expectedBindingFingerprint ? { expectedBindingFingerprint: extras.expectedBindingFingerprint } : {}),
-      ...(extras?.signal ? { signal: extras.signal } : {}),
-      ...(extras?.resolutions ? { resolutions: extras.resolutions } : {}),
-      ...(parentAuthority ? { parentAuthority } : {}),
-    });
-    await options.registry.setIntegration(
-      workspaceId,
-      threadId,
-      preview.mergeReady ? "merge-ready" : preview.conflictPaths.length > 0 || preview.unavailablePaths.length > 0
-        ? "conflict"
-        : "dirty",
-      thread.diffStats,
-    );
-    await options.registry.setIntegrationBinding(workspaceId, threadId, threadIntegrationBindingFromPreview(preview));
-    return preview;
+    const receiving = await receivingAuthority(workspaceId, parent, extras?.signal);
+    const parentAuthority = receiving.parentAuthority;
+    try {
+      const preview = await coordinator.previewResult({
+        workspaceId,
+        threadId,
+        branchId,
+        resultRevision,
+        resolveBaseStates: store => knownCodeBaseline(workspaceId, thread, parent, store),
+        ...(extras?.sourceOwner ? { sourceOwner: extras.sourceOwner } : {}),
+        ...(extras?.expectedBindingFingerprint ? { expectedBindingFingerprint: extras.expectedBindingFingerprint } : {}),
+        ...(extras?.signal ? { signal: extras.signal } : {}),
+        ...(extras?.resolutions ? { resolutions: extras.resolutions } : {}),
+        ...(parentAuthority ? { parentAuthority } : {}),
+      });
+      await options.registry.setIntegration(
+        workspaceId,
+        threadId,
+        preview.mergeReady ? "merge-ready" : preview.conflictPaths.length > 0 || preview.unavailablePaths.length > 0
+          ? "conflict"
+          : "dirty",
+        thread.diffStats,
+      );
+      await options.registry.setIntegrationBinding(workspaceId, threadId, threadIntegrationBindingFromPreview(preview));
+      return preview;
+    } finally { receiving.release(); }
   };
 
   const isEnospc = (error: unknown): boolean => {
@@ -3850,7 +3990,9 @@ export function createThreadRuntime(options: ThreadRuntimeOptions) {
       for (const thread of threads) {
         const branchHashes = thread.workBranchId ? await collectBranchObjectHashesFromRoot(store, thread.workBranchId) : new Map();
         const draftHashes = await collectDraftBaselineHashesFromRoot(store, thread.manifest.draftBaselineId);
-        perThread.set(thread.id, mergeHashMaps(branchHashes, draftHashes));
+        const codeBranches = [...new Set([...(thread.codeSubmissions ?? []).map(entry => entry.branchId), ...(thread.mergedSource ? [thread.mergedSource.branchId] : [])])];
+        const codeHashes = await Promise.all(codeBranches.map(branchId => collectBranchObjectHashesFromRoot(store, branchId)));
+        perThread.set(thread.id, mergeHashMaps(branchHashes, draftHashes, ...codeHashes));
       }
       return perThread;
     }, "shared");
@@ -4268,6 +4410,11 @@ export function createThreadRuntime(options: ThreadRuntimeOptions) {
         if (branchId) {
           await store.deleteBranch(branchId);
         }
+        if (thread.mergedSource && thread.mergedSource.branchId !== branchId) await store.deleteBranch(thread.mergedSource.branchId);
+        const otherThreads = (await options.registry.listWorkspaceThreadSnapshots(workspaceId)).filter(entry => entry.thread.id !== thread.id);
+        for (const codeBranchId of new Set((thread.codeSubmissions ?? []).map(entry => entry.branchId))) {
+          if (!otherThreads.some(entry => entry.thread.codeSubmissions?.some(submission => submission.branchId === codeBranchId))) await store.deleteBranch(codeBranchId);
+        }
         if (draftBaselineId) await store.deleteDraftBaseline(draftBaselineId);
         try {
           await store.collectUnreachableObjects();
@@ -4429,6 +4576,7 @@ export function createThreadRuntime(options: ThreadRuntimeOptions) {
         threadId,
         operationId,
       );
+      await codeSubmissions?.retire(workspaceId, [...descendants.map(child => child.id), threadId]);
       const nodeResults: DeletionNodeResult[] = [];
       for (const child of descendants) {
         preparations.get(child.id)?.controller.abort();
@@ -5366,9 +5514,11 @@ export function createThreadRuntime(options: ThreadRuntimeOptions) {
 
   const dispose = async (): Promise<void> => {
     abortController.abort();
+    await codeSubmissions?.dispose();
     for (const preparation of preparations.values()) preparation.controller.abort();
     await drain();
     bindingsBySession.clear();
+    baselineRoots.clear();
     sessionByThread.clear();
     lastAgentEnd.clear();
     autoResumedThreads.clear();
@@ -5657,6 +5807,9 @@ export function createThreadRuntime(options: ThreadRuntimeOptions) {
     send,
     kill,
     merge,
+    submitCode,
+    resumeCodeSubmissions: () => codeSubmissions?.reconcile() ?? Promise.resolve(),
+    observeCodeSubmissions: (scopeId: string, thread: Thread) => codeSubmissions?.observe(scopeId, thread),
     updateBaseline,
     previewIntegration,
     undoIntegration,

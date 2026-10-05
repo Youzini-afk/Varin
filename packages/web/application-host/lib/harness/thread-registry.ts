@@ -35,6 +35,7 @@ import type {
   ThreadLaunchManifest,
   ThreadMessagePeer,
   ThreadMessageRecord,
+  ThreadCodeSubmission,
   ThreadParent,
   ThreadPurpose,
   ThreadPendingContinuation,
@@ -438,6 +439,20 @@ const isPendingContinuation = (value: unknown): value is ThreadPendingContinuati
   && isString(value.at)
 );
 
+const isCodeSubmission = (value: unknown): value is ThreadCodeSubmission => (
+  isRecord(value) && [value.id, value.fingerprint, value.fromThreadId, value.toThreadId, value.branchId, value.createdAt].every(isString)
+  && Number.isSafeInteger(value.resultRevision) && (Number(value.resultRevision) > 0 || (value.resultRevision === 0 && ["capturing", "failed"].includes(String(value.status))))
+  && [value.paths, value.appliedPaths, value.acceptedPaths, value.conflictPaths].every(isStringArray)
+  && ["capturing", "queued", "applying", "applied", "conflict", "failed"].includes(String(value.status))
+  && (value.operationId === undefined || isString(value.operationId))
+  && (value.error === undefined || isString(value.error))
+  && (value.completedAt === undefined || isString(value.completedAt))
+  && (value.completedSequence === undefined || (Number.isSafeInteger(value.completedSequence) && Number(value.completedSequence) > 0))
+  && (value.notificationsPending === undefined || typeof value.notificationsPending === "boolean")
+  && (value.captureOwner === undefined || isString(value.captureOwner))
+  && (value.recipientAuthority === undefined || isString(value.recipientAuthority))
+);
+
 const isDiffStats = (value: unknown): value is ThreadDiffStats | null => (
   value === null
   || (isRecord(value)
@@ -644,11 +659,15 @@ const isThread = (value: unknown): value is Thread => {
     && (value.pendingEvidence === undefined || isEvidence(value.pendingEvidence))
     && (value.mergedCommit === undefined || isString(value.mergedCommit))
     && (value.mergedResultRevision === undefined || (Number.isSafeInteger(value.mergedResultRevision) && Number(value.mergedResultRevision) > 0))
+    && (value.mergedSource === undefined || (isRecord(value.mergedSource) && isString(value.mergedSource.branchId)
+      && Number.isSafeInteger(value.mergedSource.resultRevision) && Number(value.mergedSource.resultRevision) > 0
+      && isParent(value.mergedSource.receiver) && isString(value.mergedSource.recipientAuthority) && isStringArray(value.mergedSource.sourcePaths) && isStringArray(value.mergedSource.codeReceiptIds)))
     && (value.integrationBinding === undefined || isIntegrationBinding(value.integrationBinding))
     && (value.verification === undefined || isVerificationProjection(value.verification))
     && (value.reviewOf === undefined || isReviewOf(value.reviewOf))
     && (value.consultBotId === undefined || isString(value.consultBotId))
     && (value.messages === undefined || (Array.isArray(value.messages) && value.messages.every(isMessageRecord)))
+    && (value.codeSubmissions === undefined || (Array.isArray(value.codeSubmissions) && value.codeSubmissions.every(isCodeSubmission)))
     && !("pendingContinuation" in value)
     && (value.pendingContinuations === undefined || (Array.isArray(value.pendingContinuations) && value.pendingContinuations.every(isPendingContinuation)))
     && isNullableString(value.activeRunId)
@@ -2302,6 +2321,49 @@ export function createThreadRegistry(options: ThreadRegistryOptions) {
     return { value: message, changed: [thread] };
   });
 
+  const recordCodeSubmission = async (scopeId: string, submission: ThreadCodeSubmission): Promise<ThreadCodeSubmission> => mutateWorkspace(scopeId, catalog => {
+    const source = findThread(catalog, submission.fromThreadId);
+    const target = findThread(catalog, submission.toThreadId);
+    if (!source || !target || ((source.deletion || target.deletion) && submission.status === "queued")) throw new Error("Code submission party is unavailable");
+    const previous = source.codeSubmissions?.find(entry => entry.id === submission.id);
+    const targetPrevious = target.codeSubmissions?.find(entry => entry.id === submission.id);
+    if (targetPrevious && targetPrevious.fingerprint !== submission.fingerprint) throw new Error("submissionId is already bound to another selected change");
+    if (previous && (previous.fingerprint !== submission.fingerprint || previous.toThreadId !== target.id || previous.fromThreadId !== source.id)) {
+      throw new Error("submissionId is already bound to another selected change");
+    }
+    if (previous && ["applied", "conflict", "failed"].includes(previous.status)) {
+      if (!previous.notificationsPending || submission.notificationsPending !== false) return { value: previous, changed: [], write: false };
+      submission = { ...previous, notificationsPending: false };
+    }
+    for (const thread of [source, target]) {
+      touchThread(catalog, thread);
+      if (thread === source && ["applied", "conflict", "failed"].includes(submission.status) && !submission.completedSequence) submission.completedSequence = thread.eventSeq;
+      const ledger = thread.codeSubmissions ?? [];
+      thread.codeSubmissions = ledger.some(entry => entry.id === submission.id)
+        ? ledger.map(entry => entry.id === submission.id ? structuredClone(submission) : entry) : [...ledger, structuredClone(submission)];
+    }
+    return { value: submission, changed: [source, target] };
+  });
+
+  const taskRootRefs = new Map<string, { scopeId: string; threadId: string }>();
+  const findTaskRootForSession = async (sessionId: string): Promise<Thread | null> => {
+    const cached = taskRootRefs.get(sessionId);
+    if (cached) {
+      const root = await getThreadById(cached.scopeId, cached.threadId);
+      if (root) return root;
+      taskRootRefs.delete(sessionId);
+    }
+    for (const scopeId of await listWorkspaceIds()) {
+      const candidates = (await listThreads(scopeId, { kind: "session", id: sessionId }, true))
+        .filter(thread => thread.purpose === "agent-root" || thread.purpose === "research-root");
+      if (candidates.length) {
+        const root = candidates.toSorted((left, right) => left.createdAt.localeCompare(right.createdAt))[0]!;
+        taskRootRefs.set(sessionId, { scopeId, threadId: root.id }); return root;
+      }
+    }
+    return null;
+  };
+
   const patchThreadMessage = async (
     scopeId: string,
     threadId: string,
@@ -2416,6 +2478,7 @@ export function createThreadRegistry(options: ThreadRegistryOptions) {
     diffStats?: ThreadDiffStats | null,
     mergedCommit?: string | null,
     mergedResultRevision?: number | null,
+    mergedSource?: NonNullable<Thread["mergedSource"]>,
   ): Promise<Thread | null> => mutateWorkspace(scopeId, (catalog) => {
     const thread = findThread(catalog, threadId);
     if (!thread) return { value: null, changed: [], write: false };
@@ -2430,6 +2493,8 @@ export function createThreadRegistry(options: ThreadRegistryOptions) {
       && (diffStats === undefined || JSON.stringify(thread.diffStats) === JSON.stringify(diffStats))
       && nextMergedCommit === thread.mergedCommit
       && nextMergedResultRevision === thread.mergedResultRevision
+      && (mergedSource === undefined || stableIdentityJson(mergedSource) === stableIdentityJson(thread.mergedSource))
+      && (mergedResultRevision !== null || !thread.mergedSource)
       && !clearsBinding) {
       return { value: thread, changed: [], write: false };
     }
@@ -2443,6 +2508,8 @@ export function createThreadRegistry(options: ThreadRegistryOptions) {
       if (mergedResultRevision) thread.mergedResultRevision = mergedResultRevision;
       else delete thread.mergedResultRevision;
     }
+    if (mergedSource) thread.mergedSource = structuredClone(mergedSource);
+    else if (mergedResultRevision === null) delete thread.mergedSource;
     if (integration === "merged" || integration === "none") delete thread.integrationBinding;
     touchThread(catalog, thread);
     return { value: thread, changed: [thread] };
@@ -3175,6 +3242,8 @@ export function createThreadRegistry(options: ThreadRegistryOptions) {
     setAttention,
     recordThreadMessage,
     recordDirectedMessage,
+    recordCodeSubmission,
+    findTaskRootForSession,
     patchThreadMessage,
     patchDirectedMessage,
     listPendingThreadMessages,

@@ -93,7 +93,7 @@ const targetResource = (
 const PLANNED_HARNESS_TOOLS = new Set([
   "read", "write", "edit", "apply_patch", "find", "ls", "grep",
   "diagnostics", "symbols", "definition", "references", "hover", "bash",
-  "get_output", "write_to_process", "kill_shell", "todo", "send", "merge",
+  "get_output", "write_to_process", "kill_shell", "todo", "send", "merge", "submit_code",
   "update", "kill", "wait", "threads", "read_thread", "dispatch", "webfetch",
   "websearch", "explore", "recall", "related", "history", "resources",
   "research_source", "research_search", "research_decide", "materials", "document_read",
@@ -158,6 +158,12 @@ const planForHarnessTool = async (name: string, cwd: string, args: ToolArguments
       return targetResource("session-state", "todo");
     case "send":
       return targetResource("thread", stringArgument(args, "threadId") ?? stringArgument(args, "to"));
+    case "submit_code": {
+      const receiver = targetResource("thread", stringArgument(args, "threadId"));
+      if (receiver.barrier || !Array.isArray(args.files)) return receiver;
+      const files = args.files.filter((file): file is { path: string } => Boolean(file) && typeof file === "object" && typeof file.path === "string");
+      return { resources: [...(receiver.resources ?? []), ...files.map(file => fileResource(cwd, file.path, "read"))] };
+    }
     case "merge":
     case "update":
     case "kill":

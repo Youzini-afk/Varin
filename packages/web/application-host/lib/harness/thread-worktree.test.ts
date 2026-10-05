@@ -48,6 +48,22 @@ const runtimeFor = (worktrees: string) => createThreadWorktreeRuntime({
 });
 
 describe("thread worktree runtime", () => {
+  it("identifies raw baseline bytes across Git EOL normalization and quoted paths", async () => {
+    const fixture = createRepo();
+    const runtime = runtimeFor(fixture.worktrees);
+    try {
+      git(fixture.repo, ["config", "core.autocrlf", "true"]);
+      writeFileSync(join(fixture.repo, "中文 file.txt"), "untracked\n");
+      writeFileSync(join(fixture.repo, "tracked.txt"), "base\r\n");
+      const first = await runtime.inspectGitBaselineInventory(fixture.repo);
+      writeFileSync(join(fixture.repo, "tracked.txt"), "base\n");
+      const second = await runtime.inspectGitBaselineInventory(fixture.repo);
+      expect(first.kind).toBe("git"); expect(second.kind).toBe("git");
+      if (first.kind !== "git" || second.kind !== "git") throw new Error("Expected a Git baseline");
+      expect(first.rawFileHashes?.["中文 file.txt"]).toBeTruthy();
+      expect(first.rawFileHashes?.["tracked.txt"]).not.toBe(second.rawFileHashes?.["tracked.txt"]);
+    } finally { rmSync(fixture.root, { recursive: true, force: true }); }
+  });
   it("prepares a virtual isolated scratch without copying parent bytes", async () => {
     const fixture = createRepo();
     const runtime = runtimeFor(fixture.worktrees);
