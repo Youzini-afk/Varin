@@ -138,25 +138,29 @@ export function resolvePresets(
  * The team prompt is stable for a given available preset set. Its owner refreshes
  * the set at run boundaries when settings, model, or work focus changes.
  */
-export function buildTeamPrompt(presets: ResolvedPreset[], activeTools?: readonly string[]): string {
-  const presetList = presets
-    .map((p) => `${p.definition.id} (${p.definition.name ? `${p.definition.name}: ` : ''}${p.definition.teamDescription})`)
-    .join(", ");
-  const base =
-    "You remain responsible for the overall goal, design, implementation consistency, integration and final delivery. " +
-    "Work directly by default; delegate independent work when it has a concrete benefit, rather than whenever a problem is difficult. " +
-    "Give workers the overall goal, relevant decisions, responsibilities and collaborators. Continue global design and unassigned work while they run. " +
-    "Inspect important implementations and integrate their actual changes; a teammate's report alone is not proof that the overall task is complete. " +
-    (presets.some(p => p.id === "worker")
-      ? "Use dispatch(task) for a worker on your current model and authorized tools, or an optional configured profile."
-      : "Choose an available configured profile explicitly with dispatch(task, preset).");
-  const list = presetList ? ` Available profiles: ${presetList}.` : "";
+export function buildTeamPrompt(presets: ResolvedPreset[], activeTools?: readonly string[], additionalProfiles: readonly { tools: readonly string[] }[] = []): string {
   const available = (tool: string) => activeTools === undefined || activeTools.includes(tool);
-  return base + list + " Threads run independently. "
+  const worker = presets.some(preset => preset.id === "worker");
+  const retrieval = presets.some(preset => preset.id === "retrieval");
+  const canDispatch = available("dispatch") && (presets.length > 0 || additionalProfiles.length > 0);
+  const responsibility = "You are responsible for the overall goal, design, implementation consistency, integration and final delivery. Work directly by default. ";
+  if (!canDispatch) return responsibility + "New sub-agent dispatch is currently unavailable. Continue the work yourself; disabled profiles are not available for new work."
+    + (available("read_thread") ? " You may inspect existing task-family conversations with read_thread when relevant." : "");
+  const writing = worker || [...presets.map(preset => preset.definition), ...additionalProfiles].some(profile => profile.tools.some(tool => ["write", "edit", "apply_patch", "bash", "experiment"].includes(tool)));
+  let guidance = responsibility;
+  if (writing) guidance += "Delegate independent work only when it has a concrete benefit. Give delegated agents the overall goal, relevant decisions, responsibilities and collaborators. Continue global design and unassigned work while they run. Inspect important implementations and integrate their actual changes; their reports alone do not prove the overall task is complete. ";
+  else guidance += "Use the enabled read-only profiles for independent fact finding and investigation. Design, implementation and final verification remain your own work; no implementation worker is enabled. Read the decisive evidence yourself. ";
+  if (worker) guidance += "Use dispatch(task) for a worker on your current model and authorized tools, or select a configured profile explicitly. ";
+  else if (presets.length) guidance += "Choose an available configured profile explicitly with dispatch(task, preset). ";
+  if (additionalProfiles.length) guidance += "Choose an enabled research capability explicitly with dispatch(task, capability) when relevant. ";
+  if (retrieval && writing) guidance += "Use retrieval for multi-step fact finding when its independent context has a concrete benefit. ";
+  const profiles = presets.map(preset => `${preset.id} (${preset.definition.name ? `${preset.definition.name}: ` : ""}${preset.definition.teamDescription})`).join(", ");
+  if (profiles) guidance += `Available profiles: ${profiles}. `;
+  return guidance + "Threads run independently. "
     + (available("read_thread") ? "Use read_thread to inspect relevant task-family conversations. " : "")
     + (available("threads") ? "Use threads to discover related work. " : "")
     + (available("send") ? "Use send to coordinate interfaces or request help. " : "")
-    + (available("submit_code") ? "Use submit_code to send selected files or original/replacement snippets directly to a teammate or parent. Queued acceptance is not application; its receipt arrives through task state and passive messages. " : "")
+    + (writing && available("submit_code") ? "Use submit_code to send selected files or original/replacement snippets directly to a teammate or parent. Queued acceptance is not application; its receipt arrives through task state and passive messages. " : "")
     + (available("wait") ? "Use wait for dependencies when no useful independent work remains; omit its duration for indefinite event waiting. " : "")
     + "Routine progress does not require polling or a response.";
 }

@@ -83,6 +83,7 @@ import type {
   HarnessContextRuntimeState,
   HarnessContextSettings,
   SessionEntriesResult,
+  ExtensionUiResponse,
   SessionHeader,
   SessionSnapshot,
   SessionStats,
@@ -822,6 +823,13 @@ export class SessionHost {
     return true;
   }
 
+  respondRetainedQuestion(sessionFile: string, response: ExtensionUiResponse) {
+    const manager = SessionManager.open(sessionFile);
+    const ui = new ExtensionUiBridge(() => {}, () => manager.getSessionId());
+    ui.bindQuestions(manager);
+    return ui.respondWithContinuation(response);
+  }
+
   async list(cwd?: string): Promise<SessionSummary[]> {
     const infos = cwd
       ? await SessionManager.list(cwd, getSessionDir(cwd, this.#agentDir))
@@ -873,6 +881,7 @@ export class SessionHost {
       : undefined;
     return {
       activeTools: session.getActiveToolNames(),
+      questions: this.ui.questionRequests(),
       ...(this.#effectivePermissionPolicy ? { permissions: structuredClone(this.#effectivePermissionPolicy) } : {}),
       busy: !session.isIdle || pendingActivity !== undefined,
       cwd: this.runtime.cwd,
@@ -1158,6 +1167,7 @@ export class SessionHost {
   ): Promise<{ cancelled: boolean; editorText?: string; snapshot: SessionSnapshot }> {
     this.assertSession(sessionId);
     const result = await this.runtime.fork(entryId, { position });
+    if (!result.cancelled) this.ui.bindQuestions(this.session.sessionManager);
     return {
       cancelled: result.cancelled,
       ...(result.selectedText === undefined ? {} : { editorText: result.selectedText }),
@@ -1736,11 +1746,13 @@ export class SessionHost {
   ) {
     if (options?.summarize !== true) {
       const result = await session.navigateTree(targetId, options);
+      if (!result.cancelled) this.ui.bindQuestions(session.sessionManager);
       return result;
     }
     const activity = this.#beginStoppableActivity(session, "branchSummary");
     try {
       const result = await session.navigateTree(targetId, options);
+      if (!result.cancelled) this.ui.bindQuestions(session.sessionManager);
       return result;
     } finally {
       this.#finishStoppableActivity(activity);
@@ -2209,6 +2221,8 @@ export class SessionHost {
     const model = this.runtime.services.modelRuntime.getModel(provider, modelId);
     if (!model) throw new HostError("model_not_found", `Unknown model: ${provider}/${modelId}`);
     await this.session.setModel(model);
+    this.#refreshThreadAgentTools();
+    this.session.setToolExclusions([...excludedWorkFocusTools(this.#workFocus.id), ...(this.#memoryMode === "agent" ? ["recall"] : [])]);
     return this.snapshot();
   }
 
@@ -2226,6 +2240,8 @@ export class SessionHost {
       const model = preview.session.model;
       if (!model) throw new HostError("model_not_found", "Pi has no available default model for a new session");
       await this.session.setModel(model);
+      this.#refreshThreadAgentTools();
+      this.session.setToolExclusions([...excludedWorkFocusTools(this.#workFocus.id), ...(this.#memoryMode === "agent" ? ["recall"] : [])]);
       return this.snapshot();
     } finally {
       preview.session.dispose();
@@ -3862,6 +3878,7 @@ export class SessionHost {
       const researchCapabilities = this.#workFocus.id === "research"
         ? resolveResearchCapabilityOptions(harnessSettings.models ?? {}) : [];
       customTools.push(...selectHarnessTools(harnessSettings, {
+        questionUi: this.ui,
         bridge: hostServicesBridge,
         sessionId: sessionManager.getSessionId(),
         cwd,
@@ -3974,6 +3991,7 @@ export class SessionHost {
       },
       uiContext: this.ui.createContext(),
     });
+    this.ui.bindQuestions(session.sessionManager);
     this.#refreshThreadAgentTools();
     session.setToolExclusions([...excludedWorkFocusTools(this.#workFocus.id), ...(this.#memoryMode === "agent" ? ["recall"] : [])]);
     this.#unsubscribe = session.subscribe((event) => {

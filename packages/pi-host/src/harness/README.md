@@ -33,6 +33,7 @@ The pi-host harness tools are custom tools registered in the Pi session's
 | `dispatch`, `threads`, `wait`, `send`, `read_thread`, `merge`, `update`, `kill` | Delegate Worker/retrieval tasks, inspect task-family conversations by range, and coordinate Host-owned threads | `thread.*` |
 | `submit_code` | Submit selected file changes or unique original/replacement snippets directly to a writable task peer or parent; automatic native integration and durable application receipts | `thread.submitCode` |
 | `submit_facts` | Retrieval child delivers Host-validated facts | `thread.facts.set` |
+| `ask_question` | Submit user questions without waiting, or wait up to 600 seconds; preserve unanswered questions for later replies | Native Pi question journal + ExtensionUiBridge |
 | `experiment` | Submit and manage attempts, page logs and collected text artifacts | `experiment.submit/list/get/logs/artifact/wait/cancel/collect` |
 | `resources` | Read machine capacity, commitments, observations and queued work | `resource.list` |
 | `research_source` | Register or inspect provenance and retained source objects | `source.register/list` |
@@ -48,6 +49,10 @@ baseline, so later changes and reversions are distinct from recipient edits. Dis
 its team-prompt guidance.
 Thread tools are constructed before the native session exists. Their live tool-selection callback is
 used during execution; SessionHost refreshes team presentation from actual active tools after binding.
+Team instructions distinguish Worker-only, retrieval-only, both and neither, using the current
+enabled profiles and tool set. Custom profiles and research capabilities retain their own choices.
+Model selection refreshes this presentation as well. Tool list entries require Pi's `promptSnippet`;
+`submit_code` supplies it rather than relying on its description alone.
 General work focus removes `research_search`, `research_decide`, `materials`, `experiment`, `resources`
 and `research_source` from the native Pi registry, including discovery and nested tool execution.
 Switching focus updates the registry before the next user run; current runs keep their selected focus.
@@ -63,6 +68,27 @@ process permission gate. A resource query does not confer process-control capabi
 output remains available through its attempt/artifact identity even when it was produced outside the
 Agent's own working directory. See the Host harness documentation and current status for backend and
 recovery evidence; the optional backend resolver alone is not a delivered remote scheduler.
+
+## User questions
+
+Varin registers its native `ask_question` over any same-name external extension; the user's original
+extension file remains untouched. Single questions and related batches support select, confirm, input
+and multiline editor answers. `wait_seconds` omitted or zero returns immediately; positive values
+wait up to the user-requested maximum of 600 seconds. This tool holds no filesystem resource barrier.
+An expired wait returns pending, never an assumed choice or approval.
+
+`ExtensionUiBridge` writes `varin.user-question` custom entries through Pi's SessionManager.
+The live bridge owns timers; Pi JSONL owns retained requests and answers on the current branch.
+Session snapshots include unanswered questions. Closing a worker removes its live wait without
+discarding the question. A waiting answer returns in the current tool result; a later answer carries
+a stable `question-answer:<requestId>` identity into the ordinary native addressed-input path.
+Repeated identical responses reuse this identity; conflicting replacements are rejected.
+
+The broker uses the catalog's `session.question.respond` to answer a closed session without starting
+a model or restoring its directory. The application Host resumes a settled child through ThreadRuntime's
+existing continuation admission and frozen configuration; ordinary sessions use native request receipts.
+Cancelling an unanswered question needs no execution continuation. Generic extension and permission
+dialogs retain their existing request/response behavior.
 
 ## Registration
 

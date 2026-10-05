@@ -8,6 +8,7 @@ import { subscribeVarinEvents } from '@/lib/varinEvents';
 import { cn } from '@/lib/utils';
 import { useDeviceInfo } from '@/lib/device';
 import { usePiSessionStore } from '@/stores/usePiSessionStore';
+import { usePiInteractionStore, userQuestionRequest } from '@/stores/usePiInteractionStore';
 import { EMPTY_WORK_OVERVIEW_CHOICES, useWorkOverviewStore, workOverviewStateKey } from '@/stores/useWorkOverviewStore';
 import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip';
 import { parseHarnessSessionBlockResponse, type HarnessSessionBlock } from './harnessBlockPresentation';
@@ -74,6 +75,11 @@ export const HarnessThreadsPanel: React.FC<{
     ...threadState.threads,
     ...threadState.branches,
   ], [threadState.threads, threadState.branches]);
+  const dialogs = usePiInteractionStore(state => state.dialogs);
+  const showQuestion = usePiInteractionStore(state => state.showQuestion);
+  const respondQuestion = usePiInteractionStore(state => state.respondDialog);
+  const questionSessions = new Set([parentSessionId, ...threads.map(thread => thread.activeRun?.sessionId)]);
+  const questions = dialogs.filter(dialog => dialog.method === 'question' && questionSessions.has(dialog.sessionId));
   const webSources = useWebSources(parentSessionId);
   const openContextSurface = useUIStore((state) => state.openContextSurface);
   const toggleContextPanel = useUIStore((state) => state.toggleContextPanel);
@@ -365,7 +371,7 @@ export const HarnessThreadsPanel: React.FC<{
 
   const hasThreadRecords = threads.length > 0;
   const hasWorkspaceChanges = (gitStatus?.files.length ?? 0) > 0;
-  const hasOverviewData = threads.length > 0 || hasThreadRecords || blocks.length > 0 || suggestions.length > 0
+  const hasOverviewData = questions.length > 0 || threads.length > 0 || hasThreadRecords || blocks.length > 0 || suggestions.length > 0
     || webSources.length > 0 || hasWorkspaceChanges;
   if (presentation === 'inline' && !hasOverviewData && !activePdfMaterial) return null;
 
@@ -380,9 +386,9 @@ export const HarnessThreadsPanel: React.FC<{
     ...blockGroups.other,
   ];
   const hasOutputs = gitDiff.files > 0 || pendingThreadDiff.files > 0;
-  const attentionCount = suggestions.length + planSummary.blocked + threadSummary.attention;
+  const attentionCount = questions.length + suggestions.length + planSummary.blocked + threadSummary.attention;
   const activityCount = attentionCount || planSummary.open + threadSummary.active + threadSummary.integrationPending;
-  const overviewSummary = threadSummary.attention > 0
+  const overviewSummary = questions.length > 0 ? t('pi.question.pending') + ' · ' + questions.length : threadSummary.attention > 0
     ? t('harness.overview.summary.attention', { count: threadSummary.attention })
     : planSummary.blocked > 0
       ? t('harness.overview.summary.blocked', { count: planSummary.blocked })
@@ -402,6 +408,12 @@ export const HarnessThreadsPanel: React.FC<{
       {!hasOverviewData ? (
         <p className="px-3 py-4 typography-meta text-muted-foreground">{t('harness.overview.empty')}</p>
       ) : null}
+      {questions.length > 0 ? <HarnessOverviewSection title={t('pi.question.pending')} icon="question" status={questions.length} attention open={choices.questions ?? true} onOpenChange={open => setDisclosure(overviewKey, 'questions', open)}>
+        <div className="space-y-2">{questions.map(dialog => <div key={dialog.id} className="flex items-start gap-2 rounded-md bg-muted/25 px-2 py-2">
+          <button type="button" className="min-w-0 flex-1 text-left typography-meta hover:text-primary" onClick={() => showQuestion(dialog.id)}>{userQuestionRequest(dialog)?.questions.map(question => question.question).join(' · ')}</button>
+          <button type="button" aria-label={t('pi.question.close')} className="shrink-0 text-muted-foreground hover:text-foreground" onClick={() => void respondQuestion(dialog.id, undefined, true).catch(error => toast.error(error instanceof Error ? error.message : String(error)))}><Icon name="close" className="size-3.5" /></button>
+        </div>)}</div>
+      </HarnessOverviewSection> : null}
       {suggestions.length > 0 ? (
         <HarnessOverviewSection
           key={`${overviewKey}:review`}

@@ -93,7 +93,7 @@ const targetResource = (
 const PLANNED_HARNESS_TOOLS = new Set([
   "read", "write", "edit", "apply_patch", "find", "ls", "grep",
   "diagnostics", "symbols", "definition", "references", "hover", "bash",
-  "get_output", "write_to_process", "kill_shell", "todo", "send", "merge", "submit_code",
+  "get_output", "write_to_process", "kill_shell", "todo", "ask_question", "send", "merge", "submit_code",
   "update", "kill", "wait", "threads", "read_thread", "dispatch", "webfetch",
   "websearch", "explore", "recall", "related", "history", "resources",
   "research_source", "research_search", "research_decide", "materials", "document_read",
@@ -156,6 +156,8 @@ const planForHarnessTool = async (name: string, cwd: string, args: ToolArguments
       return targetResource("shell", stringArgument(args, "shellId"));
     case "todo":
       return targetResource("session-state", "todo");
+    case "ask_question":
+      return { resources: [] };
     case "send":
       return targetResource("thread", stringArgument(args, "threadId") ?? stringArgument(args, "to"));
     case "submit_code": {

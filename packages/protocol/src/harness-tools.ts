@@ -36,6 +36,7 @@ export const HARNESS_TOOL_META: Readonly<Record<string, HarnessToolMeta>> = {
   get_output: { mutation: 'none', executionMode: 'parallel' },
   diagnostics: { mutation: 'none', executionMode: 'parallel' },
   todo: { mutation: 'none', executionMode: 'sequential' },
+  ask_question: { mutation: 'none', executionMode: 'parallel' },
   explore: { mutation: 'none', executionMode: 'parallel' },
   dispatch: { mutation: 'none', executionMode: 'parallel' },
   wait: { mutation: 'none', executionMode: 'sequential' },

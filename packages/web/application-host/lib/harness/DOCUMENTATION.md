@@ -13,6 +13,12 @@ Tool-set snapshots refresh grants for the same worker generation, including a wo
 Registration keeps that worker's live shell and retrieval/input contexts; only a replacement generation
 retires them. Pending first registration uses the latest grants received while settings are loading.
 
+Late native user-question replies reuse the broker's addressed-input path. For a settled child,
+the Host's question continuation callback resolves its durable session owner and starts a normal
+`continueRun` using the recorded model/tools/worktree configuration. The reply identity is the
+continuation request identity, so replay cannot start a second Run. Cancelling a retained question
+does not start a Run. Active-child replies reach their existing Pi run; ordinary roots stay ordinary.
+
 A session's project binding supplies organization and a default directory, not a filesystem
 boundary. Bound and unbound sessions can read/write explicit external paths and execute with an
 external `cwd` through the same path authority. External directories need no prior project

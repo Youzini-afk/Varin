@@ -152,6 +152,7 @@ const CATALOG_ROLE_METHODS = new Set<HostMethod>([
   ...COMMON_ROLE_METHODS,
   "session.entries.read",
   "session.list",
+  "session.question.respond",
   "session.rename",
   "session.resolve",
 ]);
@@ -174,6 +175,7 @@ const CONTEXT_FORBIDDEN_METHODS = new Set<HostMethod>([
   "package.bootstrap",
   "session.entries.read",
   "session.list",
+  "session.question.respond",
   "session.resolve",
 ]);
 
@@ -1509,7 +1511,18 @@ export class HostController {
           ...(cancelled === undefined ? {} : { cancelled }),
           ...(params.value === undefined ? {} : { value: params.value as JsonValue }),
         };
-        return { accepted: this.#sessionHost.ui.respond(response) };
+        return this.#sessionHost.ui.respondWithContinuation(response);
+      }
+      case "session.question.respond": {
+        const input = expectRecord(params.response, "response");
+        const cancelled = readBoolean(input, "cancelled", { optional: true });
+        return this.#sessionHost.respondRetainedQuestion(
+          readString(params, "sessionFile"), {
+            requestId: readString(input, "requestId"),
+            ...(cancelled === undefined ? {} : { cancelled }),
+            ...(input.value === undefined ? {} : { value: input.value as JsonValue }),
+          },
+        );
       }
       case "project.trust.respond":
         return {

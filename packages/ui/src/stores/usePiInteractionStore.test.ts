@@ -71,6 +71,29 @@ class FakeRuntime implements PiInteractionStoreRuntime {
 }
 
 describe('Pi interaction state', () => {
+  test('hides a question without cancelling it, keeps its draft, and can answer after reopening', async () => {
+    const runtime = new FakeRuntime();
+    const store = createPiInteractionStore(runtime);
+    await store.getState().connect();
+    runtime.event('extension.ui.request', { id: 'question-1', method: 'question', sessionId: 'session-a', payload: {
+      id: 'question-1', sessionId: 'session-a', createdAt: Date.now(), popupUntil: Date.now() + 60_000,
+      questions: [{ id: 'name', type: 'input', question: 'Project name?' }],
+    } }, { role: 'session', sessionId: 'session-a', workerId: 'worker-a' });
+    store.getState().setQuestionDraft('question-1', 'name', 'Sample');
+    store.getState().hideQuestion('question-1');
+    expect(runtime.calls).toHaveLength(0);
+    expect(store.getState().dialogs).toHaveLength(1);
+    runtime.event('session.closed', { sessionId: 'session-a' }, { role: 'session', sessionId: 'session-a', workerId: 'worker-a' });
+    runtime.event('session.worker.exited', { sessionId: 'session-a', expected: true, code: 0, signal: null }, { role: 'session', sessionId: 'session-a', workerId: 'worker-a' });
+    expect(store.getState().dialogs).toHaveLength(1);
+    store.getState().showQuestion('question-1');
+    expect(store.getState().hiddenQuestions['question-1']).toBeUndefined();
+    expect(store.getState().questionDrafts['question-1']?.name).toBe('Sample');
+    expect(await store.getState().respondDialog('question-1', [{ id: 'name', type: 'input', value: 'Sample' }])).toBe(true);
+    expect(store.getState().dialogs).toHaveLength(0);
+    expect(store.getState().questionDrafts['question-1']).toBeUndefined();
+  });
+
   test('lets the surface answer project trust for the exact worker', async () => {
     const runtime = new FakeRuntime();
     const store = createPiInteractionStore(runtime);

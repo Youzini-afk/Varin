@@ -132,7 +132,7 @@ export function dispatchToolPresentation(
   const research = capabilities.map(entry => `${entry.capability}${entry.definition.name ? ` (${entry.definition.name})` : ''}`).join(', ');
   return {
     parameters: threadToolParameters(DispatchParams, capabilities),
-    promptGuidelines: [buildTeamPrompt([...presets], activeTools) + (research ? ` Available research capabilities: ${research}.` : '')],
+    promptGuidelines: [buildTeamPrompt([...presets], activeTools, capabilities.map(capability => capability.definition)) + (research ? ` Available research capabilities: ${research}.` : '')],
   };
 }
 
@@ -654,6 +654,7 @@ export function createUpdateTool(bridge: HostServicesBridge, _sessionId: string)
 export function createSubmitCodeTool(bridge: HostServicesBridge, sessionId: string): ToolDefinition {
   return defineTool({
     name: "submit_code", label: "Submit code",
+    promptSnippet: "submit_code: submit selected file changes or snippets to a writable task teammate",
     description: "Submit selected file changes or exact original/replacement snippets to a writable teammate or parent in one operation. Keeps unrelated source and recipient edits. Captures an immutable patch and applies through native integration; queued acceptance is not an applied receipt. Wait for a receipt or continue work; no manual publish/commit/pull is needed.",
     parameters: ThreadSubmitCodeParams, executionMode: "parallel",
     execute: async (toolCallId, params, signal, _onUpdate, ctx) => {

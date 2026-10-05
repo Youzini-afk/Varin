@@ -45,6 +45,12 @@ These stores coordinate visible app state, navigation, selected tabs, dialogs, a
 Plan, task and other content updates do not write these preferences. Missing choices use the view's
 defaults: the overview is closed, content sections are expanded, and Sources is collapsed.
 
+`usePiInteractionStore` projects native questions separately from generic extension dialogs. Popup
+visibility, expiration overrides and answer drafts are transient UI choices. Hiding a popup sends no
+runtime response; answering or explicitly closing the overview item uses `extension.ui.respond`.
+Question dialogs remain available after a session worker closes, while native snapshots reconcile
+their current branch. Runtime changes clear the projection and drafts along with other interaction state.
+
 ### Session / project coordination stores
 
 Examples:

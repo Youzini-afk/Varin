@@ -16,6 +16,7 @@ import {
   type PiRuntimeBrokerEvent,
   type PiRuntimeBrokerOptions,
   type PiSessionDeleteCoordinator,
+  type PiQuestionContinuation,
   type PiSessionRunCoordinator,
   type PiSessionRunCoordinatorOptions,
   type ProjectTrustDecision,
@@ -63,6 +64,7 @@ export class PiRuntimeLifecycle {
   #sessionDeleteCoordinator: PiSessionDeleteCoordinator | undefined;
   #sessionRunCoordinator: PiSessionRunCoordinator | undefined;
   #sessionRunCoordinatorOptions: PiSessionRunCoordinatorOptions = {};
+  #questionContinuation: PiQuestionContinuation | undefined;
 
   constructor(options: PiRuntimeLifecycleOptions) {
     this.#createBroker = options.createBroker;
@@ -135,6 +137,11 @@ export class PiRuntimeLifecycle {
   async start(): Promise<HostHandshakeResult | undefined> {
     const snapshot = await this.#manager.start();
     return snapshot.status === "ready" ? this.#handshake : undefined;
+  }
+
+  setQuestionContinuation(coordinate: PiQuestionContinuation | undefined): void {
+    this.#questionContinuation = coordinate;
+    for (const generation of this.#generations.values()) generation.broker.setQuestionContinuation(coordinate);
   }
 
   async refresh(): Promise<PiRuntimeSnapshot> {
@@ -290,6 +297,7 @@ export class PiRuntimeLifecycle {
         if (property === "setSessionRunCoordinator") {
           return (coordinate: PiSessionRunCoordinator | undefined, options?: PiSessionRunCoordinatorOptions) => this.setSessionRunCoordinator(coordinate, options);
         }
+        if (property === "setQuestionContinuation") return this.setQuestionContinuation.bind(this);
         if (property === "requestForSession") {
           return (
             sessionId: string,
@@ -360,6 +368,7 @@ export class PiRuntimeLifecycle {
     if (this.#sessionRunCoordinator !== undefined) {
       broker.setSessionRunCoordinator(this.#sessionRunCoordinator, this.#sessionRunCoordinatorOptions);
     }
+    if (this.#questionContinuation !== undefined) broker.setQuestionContinuation(this.#questionContinuation);
     let handshake: HostHandshakeResult;
     try {
       handshake = await broker.warmup();

@@ -209,7 +209,11 @@ export interface HostMethodMap {
   };
   "extension.ui.respond": {
     params: ExtensionUiResponse;
-    result: { accepted: boolean };
+    result: { accepted: boolean; continuation?: { messageId: string; text: string } };
+  };
+  "session.question.respond": {
+    params: { sessionFile: string; response: ExtensionUiResponse };
+    result: { accepted: boolean; continuation?: { messageId: string; text: string } };
   };
   "host.handshake": {
     params: HostHandshakeParams;

@@ -3,8 +3,69 @@ import { describe, it } from "node:test";
 import { resolvePresets, resolveResearchCapabilityOptions, type HarnessRequestData } from "@varin/protocol";
 import { HostServicesBridge } from "../../src/harness/host-services-bridge.js";
 import { createDispatchTool, createSendTool } from "../../src/harness/thread-tools.js";
+import { fauxProvider } from "@earendil-works/pi-ai";
+import { fauxAssistantMessage, fauxToolCall } from "@earendil-works/pi-ai/compat";
+import { mkdtemp, rm } from "node:fs/promises";
+import { tmpdir } from "node:os";
+import { join, resolve } from "node:path";
+import { SessionHost } from "../../src/session-host.js";
+import { createHarnessEmit } from "../harness-emit.js";
+import { PiRuntimeBroker } from "../../../runtime-broker/src/runtime-broker.js";
 
 describe("Native thread dispatch", () => {
+  it("finishes a nonblocking question turn and delivers a later answer through the native session only once", async () => {
+    const root = await mkdtemp(join(tmpdir(), "varin-question-session-"));
+    const faux = fauxProvider();
+    const model = faux.getModel();
+    let calls = 0;
+    faux.setResponses([
+      () => { calls++; return fauxAssistantMessage([fauxToolCall("ask_question", { question: "What is the project name?", type: "input" })]); },
+      () => { calls++; return fauxAssistantMessage("I will continue the independent work."); },
+      (context) => { calls++; assert.ok(JSON.stringify(context.messages).includes("QUESTION_LATE_RESPONSE_OK")); return fauxAssistantMessage("The user answer is available."); },
+    ]);
+    const harness = createHarnessEmit({});
+    const host = new SessionHost({ agentDir: root, emit: harness.emit, projectTrustOverride: true, configureServices: async services => {
+      services.modelRuntime.registerProvider(model.provider, { streamSimple: faux.provider.streamSimple, api: model.api, baseUrl: model.baseUrl,
+        models: [{ api: model.api, baseUrl: model.baseUrl, contextWindow: model.contextWindow, cost: model.cost, id: model.id, input: model.input, maxTokens: model.maxTokens, name: model.name, reasoning: model.reasoning }] });
+      await services.modelRuntime.setRuntimeApiKey(model.provider, "faux-key");
+      return { model };
+    } });
+    harness.bind(host); host.setHarnessThreadRuntimeEnabled(true);
+    try {
+      const session = await host.create(root);
+      assert.match(host.session.systemPrompt.match(/<tools>([\s\S]*?)<\/tools>/)?.[1] ?? "", /submit_code/);
+      await host.prompt(session.sessionId, "Proceed and ask for the name without stopping.");
+      await host.session.waitForIdle();
+      assert.equal(calls, 2);
+      const pending = host.snapshot().questions![0]!;
+      await host.close(session.sessionId);
+      const input = { requestId: pending.id, value: [{ id: pending.questions[0]!.id, value: "QUESTION_LATE_RESPONSE_OK" }] };
+      let continuation: { messageId: string; text: string } | undefined;
+      const broker = new PiRuntimeBroker({ agentDir: root, hostEntry: resolve(import.meta.dirname, "../../src/main.ts"),
+        execArgv: ["--import", import.meta.resolve("tsx")], projectTrustOverride: true,
+        client: { clientName: "question-continuation-test", clientVersion: "0.1.0", mode: "test" } });
+      broker.setQuestionContinuation(async (_sessionId, reply) => { continuation = reply; return true; });
+      try {
+        assert.equal(await broker.respondToExtensionUi(session.sessionId, input), true);
+        const first = continuation;
+        assert.equal(await broker.respondToExtensionUi(session.sessionId, input), true);
+        assert.deepEqual(continuation, first);
+        assert.deepEqual(broker.activeSessionIds, []);
+      } finally { await broker.dispose(); }
+      assert.ok(continuation);
+      await host.open({ sessionFile: session.sessionFile! });
+      await host.requestThreadMessage(session.sessionId, continuation.messageId, continuation.text);
+      await host.session.waitForIdle();
+      assert.equal(calls, 3);
+      const completed = host.session.messages.findLast(message => message.role === "assistant");
+      assert.equal(completed?.stopReason, "stop");
+      assert.match(JSON.stringify(completed?.content), /The user answer is available/);
+      assert.equal((await host.requestThreadMessage(session.sessionId, continuation.messageId, continuation.text)).alreadyDelivered, true);
+      assert.equal(calls, 3);
+      assert.equal(host.snapshot().questions?.length, 0);
+    } finally { await host.dispose(); await rm(root, { recursive: true, force: true }); }
+  });
+
   it("uses the current research model for a new dispatch or capability assignment", async () => {
     let request: HarnessRequestData | undefined;
     const lastRequest = (): HarnessRequestData | undefined => request;

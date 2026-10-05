@@ -8,6 +8,7 @@ import type {
   RuntimeMethodParams,
   RuntimeMethodResult,
   RuntimeWorkerRole,
+  UserQuestionRequest,
 } from '@varin/protocol';
 import type { PiRuntimeClient } from '@varin/runtime-client';
 import { create, type StoreApi, type UseBoundStore } from 'zustand';
@@ -21,7 +22,7 @@ export interface PiProjectTrustPrompt extends ProjectTrustRequest {
 
 export interface PiExtensionDialog extends ExtensionUiRequest {
   id: string;
-  method: Extract<ExtensionUiMethod, 'select' | 'confirm' | 'input' | 'editor' | 'custom'>;
+  method: Extract<ExtensionUiMethod, 'question' | 'select' | 'confirm' | 'input' | 'editor' | 'custom'>;
 }
 
 export interface PiExtensionNotice {
@@ -73,6 +74,9 @@ export interface PiInteractionStoreRuntime {
 export interface PiInteractionStoreState {
   connected: boolean;
   dialogs: PiExtensionDialog[];
+  hiddenQuestions: Record<string, true>;
+  questionPopupUntil: Record<string, number>;
+  questionDrafts: Record<string, Record<string, string | boolean>>;
   lastError: string | null;
   notices: PiExtensionNotice[];
   responding: Record<string, true>;
@@ -82,6 +86,9 @@ export interface PiInteractionStoreState {
 
   connect(): Promise<void>;
   dismissNotice(id: string): void;
+  hideQuestion(id: string): void;
+  showQuestion(id: string): void;
+  setQuestionDraft(id: string, questionId: string, value: string | boolean): void;
   reset(): void;
   respondDialog(requestId: string, value?: JsonValue, cancelled?: boolean): Promise<boolean>;
   respondTrust(requestId: string, trusted: boolean, remember: boolean): Promise<boolean>;
@@ -96,6 +103,7 @@ const DEFAULT_RUNTIME: PiInteractionStoreRuntime = {
 };
 
 const INTERACTIVE_METHODS = new Set<ExtensionUiMethod>([
+  'question',
   'select',
   'confirm',
   'input',
@@ -111,6 +119,9 @@ const initialFields = (runtimeKey: string): Pick<
   PiInteractionStoreState,
   | 'connected'
   | 'dialogs'
+  | 'hiddenQuestions'
+  | 'questionPopupUntil'
+  | 'questionDrafts'
   | 'lastError'
   | 'notices'
   | 'responding'
@@ -120,6 +131,9 @@ const initialFields = (runtimeKey: string): Pick<
 > => ({
   connected: false,
   dialogs: [],
+  hiddenQuestions: {},
+  questionPopupUntil: {},
+  questionDrafts: {},
   lastError: null,
   notices: [],
   responding: {},
@@ -133,6 +147,13 @@ const asRecord = (value: JsonValue): Record<string, JsonValue> | undefined => (
     ? value as Record<string, JsonValue>
     : undefined
 );
+
+export const userQuestionRequest = (dialog: PiExtensionDialog): UserQuestionRequest | null => {
+  if (dialog.method !== 'question') return null;
+  const payload = asRecord(dialog.payload);
+  if (payload?.id !== dialog.id || payload.sessionId !== dialog.sessionId || !Array.isArray(payload.questions)) return null;
+  return payload as unknown as UserQuestionRequest;
+};
 
 const readString = (record: Record<string, JsonValue> | undefined, key: string): string | undefined => {
   const value = record?.[key];
@@ -389,13 +410,17 @@ export const createPiInteractionStore = (
           }));
           return;
         case 'session.snapshot': {
+          if (envelope.data.questions) set((state) => ({ dialogs: [
+            ...state.dialogs.filter(dialog => dialog.sessionId !== envelope.data.sessionId || dialog.method !== 'question'),
+            ...envelope.data.questions!.map(question => ({ id: question.id, method: 'question' as const, sessionId: question.sessionId, payload: question as unknown as JsonValue })),
+          ] }));
           if (envelope.source.role !== 'workspace') return;
           const previousSessionId = workspaceSessionByWorker.get(envelope.source.workerId);
           const nextSessionId = envelope.data.sessionId;
           workspaceSessionByWorker.set(envelope.source.workerId, nextSessionId);
           if (!previousSessionId || previousSessionId === nextSessionId) return;
           set((state) => ({
-            dialogs: state.dialogs.filter((dialog) => dialog.sessionId !== previousSessionId),
+            dialogs: state.dialogs.filter((dialog) => dialog.sessionId !== previousSessionId || dialog.method === 'question'),
             sessions: withoutKey(state.sessions, previousSessionId),
           }));
           return;
@@ -406,7 +431,7 @@ export const createPiInteractionStore = (
             workspaceSessionByWorker.delete(envelope.source.workerId);
           }
           set((state) => ({
-            dialogs: state.dialogs.filter((dialog) => dialog.sessionId !== sessionId),
+            dialogs: state.dialogs.filter((dialog) => dialog.sessionId !== sessionId || dialog.method === 'question'),
             sessions: withoutKey(state.sessions, sessionId),
           }));
           return;
@@ -414,7 +439,7 @@ export const createPiInteractionStore = (
         case 'session.worker.exited': {
           const { sessionId } = envelope.data;
           set((state) => ({
-            dialogs: state.dialogs.filter((dialog) => dialog.sessionId !== sessionId),
+            dialogs: state.dialogs.filter((dialog) => dialog.sessionId !== sessionId || dialog.method === 'question'),
             responding: Object.fromEntries(Object.entries(state.responding).filter(([key]) => (
               !state.dialogs.some((dialog) => dialog.sessionId === sessionId && piDialogResponseKey(dialog.id) === key)
             ))),
@@ -473,6 +498,19 @@ export const createPiInteractionStore = (
         set((state) => ({ notices: state.notices.filter((notice) => notice.id !== id) }));
       },
 
+      hideQuestion: (id) => set((state) => ({ hiddenQuestions: { ...state.hiddenQuestions, [id]: true } })),
+      showQuestion: (id) => set((state) => {
+        const dialog = state.dialogs.find(candidate => candidate.id === id && candidate.method === 'question');
+        const question = dialog ? userQuestionRequest(dialog) : null;
+        const now = Date.now();
+        return {
+          hiddenQuestions: { ...withoutKey(state.hiddenQuestions, id), ...Object.fromEntries(state.dialogs
+            .filter(candidate => candidate.method === 'question' && candidate.id !== id).map(candidate => [candidate.id, true as const])) },
+          questionPopupUntil: { ...state.questionPopupUntil, [id]: question?.waitingUntil && question.waitingUntil > now ? question.waitingUntil : now + 60_000 },
+        };
+      }),
+      setQuestionDraft: (id, questionId, value) => set((state) => ({ questionDrafts: { ...state.questionDrafts, [id]: { ...state.questionDrafts[id], [questionId]: value } } })),
+
       reset: () => {
         workspaceSessionByWorker.clear();
         unsubscribeEvents?.();
@@ -482,6 +520,7 @@ export const createPiInteractionStore = (
       },
 
       respondDialog: async (requestId, value, cancelled = false) => {
+        const responseRuntimeKey = get().runtimeKey;
         const dialog = get().dialogs.find((candidate) => candidate.id === requestId);
         const responseKey = piDialogResponseKey(requestId);
         if (!dialog || get().responding[responseKey]) return false;
@@ -497,12 +536,20 @@ export const createPiInteractionStore = (
           });
           set((state) => ({
             dialogs: state.dialogs.filter((candidate) => candidate.id !== requestId),
+            hiddenQuestions: withoutKey(state.hiddenQuestions, requestId),
+            questionPopupUntil: withoutKey(state.questionPopupUntil, requestId),
+            questionDrafts: withoutKey(state.questionDrafts, requestId),
             lastError: null,
             responding: withoutResponse(state.responding, responseKey),
           }));
           return result.accepted;
         } catch (error) {
-          set((state) => ({ responding: withoutResponse(state.responding, responseKey) }));
+          set((state) => ({
+            responding: withoutResponse(state.responding, responseKey),
+            ...(dialog.method === 'question' && contextIsCurrent(responseRuntimeKey) ? {
+              dialogs: [...state.dialogs.filter(candidate => candidate.id !== requestId), dialog],
+            } : {}),
+          }));
           throw error;
         }
       },

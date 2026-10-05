@@ -97,6 +97,8 @@ export type PiSessionRunCoordinator = (request: {
   summary: SessionSummary;
 }) => Promise<{ workspace?: SessionWorkspaceBinding } | void>;
 
+export type PiQuestionContinuation = (sessionId: string, reply: { messageId: string; text: string }) => Promise<boolean>;
+
 export interface PiSessionRunCoordinatorOptions {
   /** Skip coordinator reads for work focuses that have no pre-run binding work. */
   appliesToWorkFocus?: readonly WorkFocusId[];
@@ -299,6 +301,7 @@ const AGENT_RUN_METHODS = new Set<HostMethod>([
   "agent.compact.apply",
   "agent.followUp",
   "agent.prompt",
+  "agent.threadRequest",
   "agent.steer",
   "command.execute",
 ]);
@@ -309,6 +312,7 @@ const DEFERRED_AGENT_SETTLEMENT_METHODS = new Set<HostMethod>([
   "agent.queue.update",
   "agent.followUp",
   "agent.prompt",
+  "agent.threadRequest",
   "agent.steer",
 ]);
 
@@ -376,6 +380,7 @@ export class PiRuntimeBroker {
   #sessionDeleteCoordinator: PiSessionDeleteCoordinator | undefined;
   #sessionRunCoordinator: PiSessionRunCoordinator | undefined;
   #sessionRunCoordinatorFocuses: ReadonlySet<WorkFocusId> | undefined;
+  #questionContinuation: PiQuestionContinuation | undefined;
 
   constructor(options: PiRuntimeBrokerOptions) {
     this.#options = options;
@@ -457,6 +462,10 @@ export class PiRuntimeBroker {
     const worker = await this.#getCatalog();
     this.#startFoundationalBootstrap();
     return worker.handshake;
+  }
+
+  setQuestionContinuation(coordinate: PiQuestionContinuation | undefined): void {
+    this.#questionContinuation = coordinate;
   }
 
   foundationalPackageStatus(): FoundationalPiPackageStatusSnapshot {
@@ -898,6 +907,15 @@ export class PiRuntimeBroker {
       ) as Promise<HostMethodResult<M>>;
     }
     const worker = this.#workerForSession(sessionId);
+    if ((method as HostMethod) === "agent.threadRequest") {
+      return worker.request("session.snapshot", { sessionId }).then(snapshot => snapshot.busy
+        ? this.#withWorkFocusBoundary(sessionId, async () => {
+          const cwd = this.#workerCwds.get(worker);
+          if (!cwd) throw new PiRuntimeBrokerError("session_context_unavailable", "Session execution directory is unavailable");
+          return this.#requestWithExecutionAdmission(worker, cwd, sessionId, "agent.threadRequest", params as HostMethodParams<"agent.threadRequest">, "agent-run");
+        })
+        : this.#promptWithSelectedWorkFocus(worker, sessionId, params as HostMethodParams<"agent.threadRequest">, "agent.threadRequest")) as Promise<HostMethodResult<M>>;
+    }
     if ((method as HostMethod) === "agent.prompt") {
       return this.#promptWithSelectedWorkFocus(
         worker,
@@ -975,7 +993,8 @@ export class PiRuntimeBroker {
   async #promptWithSelectedWorkFocus(
     worker: PiHostClient,
     sessionId: string,
-    params: HostMethodParams<"agent.prompt">,
+    params: HostMethodParams<"agent.prompt"> | HostMethodParams<"agent.threadRequest">,
+    method: "agent.prompt" | "agent.threadRequest" = "agent.prompt",
   ): Promise<HostMethodResult<"agent.prompt">> {
     return this.#withWorkFocusBoundary(sessionId, async () => {
       const metadata = await this.#metadataFor(worker);
@@ -1065,7 +1084,7 @@ export class PiRuntimeBroker {
         worker,
         cwd,
         sessionId,
-        "agent.prompt",
+        method,
         params,
         "agent-run",
       );
@@ -1380,10 +1399,22 @@ export class PiRuntimeBroker {
     sessionId: string,
     response: ExtensionUiResponse,
   ): Promise<boolean> {
-    const result = await this.#workerForInteractiveContext(sessionId).request(
-      "extension.ui.respond",
-      response,
-    );
+    const live = this.#sessions.get(sessionId) ?? this.#workspaceSessions.get(sessionId);
+    let result: HostMethodResult<"extension.ui.respond">;
+    if (!live && response.requestId.startsWith(sessionId + ":question:")) {
+      if (!this.#knownSummaries.has(sessionId)) await this.listSessions();
+      const summary = this.#knownSummaries.get(sessionId);
+      if (!summary) throw new PiRuntimeBrokerError("session_not_found", "The question session no longer exists");
+      result = await (await this.#getCatalog()).request("session.question.respond", { sessionFile: summary.sessionFile, response });
+    } else {
+      result = await this.#workerForInteractiveContext(sessionId).request("extension.ui.respond", response);
+    }
+    if (result.accepted && result.continuation) {
+      if (!await this.#questionContinuation?.(sessionId, result.continuation)) {
+        if (!live) await this.openSession({ sessionId });
+        await this.requestForSession(sessionId, "agent.threadRequest", { sessionId, ...result.continuation });
+      }
+    }
     return result.accepted;
   }
 

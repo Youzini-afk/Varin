@@ -2759,6 +2759,21 @@ async function main(options: StartWebUiServerOptions = {}): Promise<WebUiServerC
     },
   });
   threadWaitRuntimeRef.current = threadWaitRuntime;
+  piRuntimeBroker.setQuestionContinuation(async (sessionId, reply) => {
+    const owner = await threadRegistry.resolveSessionOwner(sessionId);
+    if (!owner || owner.owner === 'attached-root') return false;
+    const runs = await threadRegistry.listRuns(owner.owningScopeId, owner.threadId);
+    const prior = runs.find(candidate => candidate.request?.requestId === reply.messageId);
+    const run = prior ?? runs.find(candidate => candidate.id === owner.runId);
+    if (!run) throw new Error('The question thread run no longer exists');
+    if (!prior && run.outcome === null && run.workerState !== 'lost') return false;
+    const thread = await threadRegistry.getThreadById(owner.owningScopeId, owner.threadId);
+    if (!thread || !run.frozen) throw new Error('The question thread cannot be continued');
+    await threadRuntime!.continueRun({ scopeId: owner.owningScopeId, parent: thread.parent, threadId: thread.id,
+      mode: 'continue', resumeSuspended: true, task: reply.text, requestId: reply.messageId,
+      from: { kind: 'user', id: 'question' }, frozen: run.frozen });
+    return true;
+  });
   piRuntimeBroker.setSessionRunCoordinator(async ({ snapshot }) => {
     if (snapshot.workFocus?.active.id !== 'research' || snapshot.workspace?.kind === 'workspace') return;
     try {

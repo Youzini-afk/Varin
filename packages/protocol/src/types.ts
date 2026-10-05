@@ -511,7 +511,33 @@ export interface HostHandshakeResult {
   runtime: RuntimeDescriptor;
 }
 
+export interface UserQuestion {
+  id: string;
+  type: "select" | "confirm" | "input" | "editor";
+  question: string;
+  options?: Array<{ label: string; value: string; description?: string }>;
+  allowOther?: boolean;
+  placeholder?: string;
+  prefill?: string;
+}
+
+export interface UserQuestionAnswer {
+  id: string;
+  type: UserQuestion["type"];
+  value: string | boolean;
+}
+
+export interface UserQuestionRequest {
+  id: string;
+  sessionId: string;
+  questions: UserQuestion[];
+  createdAt: number;
+  popupUntil: number;
+  waitingUntil?: number;
+}
+
 export type ExtensionUiMethod =
+  | "question"
   | "select"
   | "confirm"
   | "input"
@@ -586,6 +612,7 @@ export interface HarnessRuntimeState {
 }
 
 export interface SessionSnapshot extends SessionRuntimeState {
+  questions?: UserQuestionRequest[];
   /** Effective Pi permission policy, used when freezing delegated work. */
   permissions?: import("./permission-gate.js").PermissionPolicy;
   cwd: string;

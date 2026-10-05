@@ -16,6 +16,8 @@ import { createResearchSearchTool } from "./research-search-tool.js";
 import { createMaterialsTool } from "./materials-tool.js";
 import { createResearchDecideTool } from "./research-decide-tool.js";
 import { createTodoTool } from "./todo-tool.js";
+import { createQuestionTool } from "./question-tool.js";
+import type { ExtensionUiBridge } from "../extension-ui-bridge.js";
 import { createRecallTool } from "./recall-tool.js";
 import { createMemoryTool } from "./memory-tools.js";
 import { createComputerTool } from "./computer-tools.js";
@@ -59,6 +61,7 @@ import type { WorkspaceMutationJournalBridge } from "../workspace-mutation-journ
 import { withToolExecutionResources } from "./tool-execution-resources.js";
 
 export interface SelectHarnessToolsDeps {
+  questionUi?: ExtensionUiBridge;
   bridge: HostServicesBridge;
   sessionId: string;
   cwd: string;
@@ -153,6 +156,7 @@ export function selectHarnessTools(
     sessionToolAllowlist,
   } = deps;
   const result: ToolDefinition[] = [];
+  if (deps.questionUi) result.push(createQuestionTool(deps.questionUi, sessionId, tools.ask_question !== false));
 
   if (tools.pi_docs !== false) result.push(createPiDocsTool());
 

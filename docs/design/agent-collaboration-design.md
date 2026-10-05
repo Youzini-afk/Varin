@@ -186,7 +186,7 @@ Rust 内核管理不可变工作状态、受控文件操作及 Integration，Doc
 
 | 能力 | 已交付行为 | 主要实现入口 |
 | --- | --- | --- |
-| 职责与入口 | 常规 Worker/检索，主线持续负责整体实现和整合；Worker 默认继承主模型，保留旧配置及关闭状态 | protocol/harness-presets.ts、harness-model-slots.ts |
+| 职责与入口 | 常规 Worker/检索，主线持续负责整体实现和整合；Worker 默认继承主模型，保留旧配置及关闭状态；提示词按实际启用的组合和工具刷新 | protocol/harness-presets.ts、harness-model-slots.ts |
 | 同任务会话 | 按真实任务祖先发现主线、同级和后代；按记录范围、最近记录、稳定 ID 续读、关键词/路径读取；互读不授予控制权 | thread-registry.ts、thread-services.ts、Pi thread-tools.ts |
 | 事件等待 | 无期限或显式期限等待；Run 让出模型名额，事件满足后重新准入；普通进度不唤醒 | thread-services.ts、thread-wait-runtime.ts |
 | 普通主线接续 | 普通会话登记同一 Thread/Run 身份；等待对象、位置和期限持久化；重启只接续符合真实等待条件的丢失/空闲执行 | attached-root-runtime.ts、thread-wait-runtime.ts |
@@ -197,6 +197,7 @@ Rust 内核管理不可变工作状态、受控文件操作及 Integration，Doc
 | 写入与物化 | 接收者生命周期协调应用和确认；分支写票据在打开 store 前获取，已持有票据不重复获取；文件仍受原生 gates/CAS 保护 | thread-runtime.ts、integration-coordinator.ts |
 | 所属任务与目录 | 会话/Bot 的存储所属范围与实际 Documents 目录资源分开；普通/科研侧重切换保留原任务及子线程；沿用根会话生效权限 | attached-root-runtime.ts、kernel/storage-adapter.ts、Host index.ts |
 | UI | 现有子线程会话面板显示选定文件、应用状态、冲突及错误；任务树复用普通主线和科研主线投影 | HarnessThreadConversation.tsx、ResearchWorkbenchShell.tsx |
+| 工具呈现与用户问题 | submit_code 纳入实际工具摘要；ask_question 支持不等待/最长 600 秒等待、底部 60 秒卡片和概览未回答项；晚到回答进入原会话或原子线程接续 | Pi question-tool.ts、extension-ui-bridge.ts、runtime-broker.ts、PiQuestionPopup.tsx |
 | 基线成本 | 完整原始内容身份一致、无草稿/忽略复制且原生根仍有效时复用；不同源内容重新捕获 | thread-worktree.ts、working-state/workspace-baseline.ts |
 
 上述文件位于 [Host harness](../../packages/web/application-host/lib/harness/DOCUMENTATION.md)、

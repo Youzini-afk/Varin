@@ -13,6 +13,7 @@ import { Input } from '@/components/ui/input';
 import { Textarea } from '@/components/ui/textarea';
 import { toast } from '@/components/ui/toast';
 import { useI18n } from '@/lib/i18n';
+import { PiQuestionPopup } from './PiQuestionPopup';
 import {
   piDialogResponseKey,
   piTrustResponseKey,
@@ -39,7 +40,7 @@ const stringList = (record: Record<string, JsonValue>, key: string): string[] =>
 export const PiInteractionHost: React.FC = () => {
   const { t } = useI18n();
   const trust = usePiInteractionStore((state) => state.trustRequests[0]);
-  const dialog = usePiInteractionStore((state) => state.dialogs[0]);
+  const dialog = usePiInteractionStore((state) => state.dialogs.find(dialog => dialog.method !== 'question'));
   const notice = usePiInteractionStore((state) => state.notices[0]);
   const lastError = usePiInteractionStore((state) => state.lastError);
   const responding = usePiInteractionStore((state) => state.responding);
@@ -107,6 +108,7 @@ export const PiInteractionHost: React.FC = () => {
 
   return (
     <>
+      <PiQuestionPopup />
       <Dialog
         open={Boolean(trust)}
         onOpenChange={(open) => {

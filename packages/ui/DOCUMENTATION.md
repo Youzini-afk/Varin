@@ -254,6 +254,13 @@ excerpt previews retain the retrieval revision instead of rereading the current 
 stays under an expanded raw-details disclosure. Only new receipts animate, respecting reduced motion;
 the elapsed clock runs only while mounted and running. No renderer retrieval polling or inference occurs.
 
+`PiQuestionPopup` presents native Agent questions in a compact bottom card without a blocking backdrop.
+Nonwaiting cards stay for 60 seconds; an explicit Agent wait uses its remaining deadline. Answers can
+be submitted later from the work overview's Unanswered questions section. Closing the popup hides it
+and retains drafts; closing a question in the overview cancels it. Selecting another question brings
+that card forward. Pending question records survive worker shutdown in the interaction projection;
+Pi snapshots and native responses remain authoritative. Permission/plugin dialogs keep their modal UI.
+
 The chat timeline provides object-sensitive context menus through `ChatContextMenu`: selection actions,
 whole-turn/message operations, code, file/link actions and image viewing/copy/save. Selection identity is
 captured before popup focus changes; `chatSelection` maps rendered Markdown to native source offsets.

@@ -7,6 +7,7 @@ import {
   VARIN_PROTOCOL_VERSION,
 } from "@varin/protocol";
 import { ExtensionUiBridge } from "../src/extension-ui-bridge.js";
+import { SessionManager } from "@earendil-works/pi-coding-agent";
 
 function createHarness() {
   const events: EventEnvelope[] = [];
@@ -27,6 +28,38 @@ function createHarness() {
 }
 
 describe("ExtensionUiBridge", () => {
+  it("retains a nonblocking question across rebinding and delivers a later answer once", async () => {
+    const { bridge } = createHarness();
+    const journal = SessionManager.inMemory();
+    bridge.bindQuestions(journal);
+    const question = { id: "choice", type: "confirm" as const, question: "Use the proposed approach?" };
+    const submitted = bridge.postQuestion("question-1", [question]);
+    assert.equal((await submitted.result).status, "pending");
+    assert.equal(submitted.request.popupUntil - submitted.request.createdAt, 60_000);
+    bridge.cancelAll(); bridge.bindQuestions(journal);
+    assert.equal(bridge.questionRequests().length, 1);
+    const response = { requestId: "question-1", value: [{ id: "choice", value: false }] };
+    const replied = bridge.respondWithContinuation(response);
+    assert.ok(replied.continuation);
+    assert.match(replied.continuation.text, /false/);
+    assert.deepEqual(bridge.respondWithContinuation(response), replied);
+    assert.equal(bridge.questionRequests().length, 0);
+  });
+
+  it("ends a bounded wait without losing the unanswered question, and does not continue twice for an immediate answer", async () => {
+    const { bridge } = createHarness();
+    bridge.bindQuestions(SessionManager.inMemory());
+    const question = { id: "name", type: "input" as const, question: "What is the project name?" };
+    const timed = bridge.postQuestion("timed", [question], 0.005);
+    assert.equal((await timed.result).status, "pending");
+    assert.equal(bridge.questionRequests().length, 1);
+    assert.ok(bridge.respondWithContinuation({ requestId: "timed", value: [{ id: "name", value: "Sample" }] }).continuation);
+    const waiting = bridge.postQuestion("waiting", [question], 600);
+    assert.equal(bridge.respondWithContinuation({ requestId: "waiting", value: [{ id: "name", value: "Sample" }] }).continuation, undefined);
+    assert.equal((await waiting.result).status, "answered");
+    assert.throws(() => bridge.postQuestion("too-long", [question], 601), /wait_seconds/);
+  });
+
   it("round-trips interactive confirmation requests", async () => {
     const { bridge, events } = createHarness();
     const result = bridge.createContext().confirm("Proceed?", "Apply changes");
