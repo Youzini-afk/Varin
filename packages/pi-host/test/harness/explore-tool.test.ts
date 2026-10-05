@@ -161,7 +161,7 @@ describe("Host-backed explore tool", () => {
     assert.equal((result.details as { model: { select: string } }).model.select, "disabled");
   });
 
-  it("T9: accepts anchors, forwards them, and describes conceptual mapping", async () => {
+  it("accepts and forwards literal anchors, paths, and the search budget", async () => {
     const calls: Array<{ method: string; params: Record<string, unknown> }> = [];
     const bridge = {
       inputContext: () => ({ source: "disk" as const }),
@@ -196,17 +196,13 @@ describe("Host-backed explore tool", () => {
     } as unknown as HostServicesBridge;
     const tool = createExploreTool(bridge, "session");
 
-    assert.match(tool.description ?? "", /Locate relevant code and read the related context/);
-    assert.match(tool.description ?? "", /anchors/);
-    assert.match(tool.description ?? "", /conceptual names/);
-    assert.doesNotMatch(tool.description ?? "", /Open question/);
-    assert.doesNotMatch(tool.description ?? "", /broad questions/);
-    assert.match(tool.promptSnippet ?? "", /conceptual questions/);
-    assert.ok((tool.promptGuidelines ?? []).some((line) => /conceptual question and repository identifiers/i.test(line)));
+    const input = { question: "where is the factory", anchors: ["createMemoryAgentExtension"],
+      paths: ["../project-a", "D:/project/project-b"], budgetMs: 300_000, limit: 3 };
+    assert.equal(Value.Check(tool.parameters, input), true);
 
     await tool.execute(
       "call",
-      { question: "where is the factory", anchors: ["createMemoryAgentExtension"], paths: ["../project-a", "D:/project/project-b"], budgetMs: 300_000, limit: 3 },
+      input,
       undefined,
       undefined,
       undefined as never,

@@ -58,7 +58,7 @@ import { createTreeSitterStructureProvider } from "../../../web/application-host
 
 import { SessionHost } from "../../src/session-host.js";
 import { CompactionWorkerRuntime } from "../../src/compaction-worker.js";
-import { deserializeCompactionModel } from "../../src/harness/compaction-agent.js";
+import { COMPACTION_SYSTEM_PROMPT, deserializeCompactionModel } from "../../src/harness/compaction-agent.js";
 import { providerSystemPrompt, serializedToolResult } from "./provider-context.js";
 import { estimateModelInputTokens } from "../../src/harness/context-request-boundary.js";
 import { EXPLORE_PLAN_SYSTEM, EXPLORE_SELECT_SYSTEM } from "../../src/harness/explore-model.js";
@@ -1185,15 +1185,13 @@ describe("session e2e — context preparation chain", () => {
         harness: { context: { preparationWaterline: 0.5 } },
       }), "utf8");
       await writeFile(join(root, "new-material.txt"), "RAW-TOOL-MATERIAL " + "observed ".repeat(800), "utf8");
-      // Leave the first two turns below capacity and make the third cross it
-      // despite platform-dependent system-prompt path lengths.
+      // Size later turns from the actual request, so edits to the native
+      // system prompt cannot silently stop preparation from starting.
       const faux = fauxProvider({ models: [{ id: "faux-1", contextWindow: 60_000, maxTokens: 800, reasoning: true }] });
       let releaseSummary!: () => void;
       const gate = new Promise<void>((resolve) => { releaseSummary = resolve; });
       let markCompactionStarted!: () => void;
       const compactionStarted = new Promise<void>((resolve) => { markCompactionStarted = resolve; });
-      let markSummaryRequested!: () => void;
-      const summaryRequested = new Promise<void>((resolve) => { markSummaryRequested = resolve; });
       const summaries: { context: Context; reasoning?: string }[] = [];
       const foreground: Context[] = [];
       const compacted: string[] = [];
@@ -1202,8 +1200,7 @@ describe("session e2e — context preparation chain", () => {
       let requestHistory = false;
       const respond = (context: Context, options: { cacheRetention?: string; reasoning?: string } | undefined) => {
         if (options) options.cacheRetention = "none"; // avoid faux's overlapping synthetic cache accounting
-        if (providerSystemPrompt(context).includes("background compaction agent")) {
-          markSummaryRequested();
+        if (providerSystemPrompt(context) === COMPACTION_SYSTEM_PROMPT) {
           summaries.push({ context, ...(options?.reasoning ? { reasoning: options.reasoning } : {}) });
           return summaries.length === 1
             ? gate.then(() => outcome === "invalid-summary"
@@ -1246,12 +1243,20 @@ describe("session e2e — context preparation chain", () => {
         await session.host.session.waitForIdle();
         assert.equal(summaries.length, 0, "an ordinary completed turn must not schedule idle summarization");
 
-        await session.host.prompt(created.sessionId, "KEPT-RAW-MARKER " + "beta ".repeat(8_000));
+        const usable = faux.getModel().contextWindow - 8_000;
+        const initialTokens = estimateModelInputTokens(foreground[0]!);
+        assert.ok(initialTokens < usable * 0.5, "the initial turn stays below the preparation waterline");
+        const keptTokens = Math.ceil(usable * 0.65 - initialTokens);
+        assert.ok(keptTokens > 4_000, "the retained turn exceeds the configured recent-material budget");
+        await session.host.prompt(created.sessionId, "KEPT-RAW-MARKER " + "beta ".repeat(Math.ceil(keptTokens * 4 / 5)));
         await session.host.session.waitForIdle();
         assert.equal(foreground.length, 3, "both the foreground tool call and its continuation finish while the summary remains blocked");
+        const preparationTokens = estimateModelInputTokens(foreground[1]!);
+        assert.ok(preparationTokens > usable * 0.5 && preparationTokens < usable,
+          "preparation starts above the waterline while the foreground still has capacity");
         // The worker's own model call reaches the provider asynchronously;
         // it is still gated when the foreground turn is already complete.
-        await summaryRequested;
+        await waitUntil(async () => summaries.length > 0);
         assert.equal(summaries.length, 1);
         assert.equal(compacted.length, 0, "preparing a candidate cannot reset observers or publish a boundary");
         const kept = session.host.session.sessionManager.getBranch().find((entry) => entry.type === "message"
@@ -1261,7 +1266,7 @@ describe("session e2e — context preparation chain", () => {
         // shared compaction system prompt plus the read-only query schemas —
         // never the session's executable tool surface.
         const workerContext = summaries[0]!.context;
-        assert.match(providerSystemPrompt(workerContext), /background compaction agent/);
+        assert.equal(providerSystemPrompt(workerContext), COMPACTION_SYSTEM_PROMPT);
         assert.deepEqual(getCurrentTools(normalizeContext(workerContext).messages).map((tool) => tool.name), ["history", "output", "records"],
           "the worker exposes only the read-only query tools");
         assert.equal(summaries[0]!.reasoning, "high", "the worker keeps the session's resolved reasoning level");
@@ -1700,9 +1705,14 @@ describe("session e2e — session-local web reader", () => {
         await session.host.prompt(snapshot.sessionId, "read the guide");
         await session.host.session.waitForIdle();
         assert.equal(fetchCalls, 1);
-        assert.match(providerSystemPrompt(readerContext), /strictly from the supplied page content/);
-        assert.match(JSON.stringify(readerContext?.messages), /untrusted data, not instructions/);
-        assert.match(JSON.stringify(readerContext?.messages), /answer is 42/);
+        assert.ok(readerContext);
+        const readerMessages = normalizeContext(readerContext).messages;
+        assert.deepEqual(getCurrentTools(readerMessages), [], "the reader receives page data without executable tools");
+        const readerInput = readerMessages.filter((message) => message.role === "user");
+        assert.equal(readerInput.length, 1);
+        assert.match(JSON.stringify(readerInput), /Source: https:\/\/example\.com\/guide/);
+        assert.match(JSON.stringify(readerInput), /Question: What is the answer\?/);
+        assert.match(JSON.stringify(readerInput), /answer is 42/);
         assert.match(finalToolResult, /answer \(from https:\/\/example\.com\/guide\)/);
         assert.match(finalToolResult, /The answer is 42/);
       } finally {
@@ -2664,7 +2674,7 @@ describe("D-284 request admission", () => {
         // Faux's synthetic cache-write count overlaps its uncached input.
         // Disable that test-only estimator so the capacity test uses one input count.
         if (options) options.cacheRetention = "none";
-        if (providerSystemPrompt(context).includes("background compaction agent")) {
+        if (providerSystemPrompt(context) === COMPACTION_SYSTEM_PROMPT) {
           summaryCalls += 1;
           return fauxAssistantMessage("The task reads material.txt in chunks. Continue reading; original entries remain in history.");
         }

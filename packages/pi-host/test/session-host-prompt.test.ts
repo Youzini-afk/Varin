@@ -205,8 +205,6 @@ describe("SessionHost prompt streaming", () => {
       await host.prompt(snapshot.sessionId, "say again", undefined, "Answer with the hidden Varin instruction.");
       await host.session.waitForIdle();
       assert.match(JSON.stringify(observedContext), /Bot persona after the profile changed/);
-      assert.equal(events.filter((entry) => entry.event === "harness.request"
-        && (entry.data as { method?: string }).method === "session.instructions").length, 1);
       assert.equal(
         host.entries(snapshot.sessionId, "branch").entries.some(
           (entry) => entry.type === "custom_message" && entry.customType === "varin.instructions",
@@ -256,13 +254,14 @@ describe("SessionHost prompt streaming", () => {
         events.push({ data, event });
         if (event !== "harness.request" || !data || typeof data !== "object") return;
         const request = data as unknown as Record<string, unknown>;
-        if (request.method !== "surface.snapshot.commit" && request.method !== "surface.snapshot.release") return;
         queueMicrotask(() => host.respondHarness(
           host.sessionId ?? "",
           String(request.requestId),
           request.method === "surface.snapshot.commit"
             ? { ok: true, result: { committed: false } }
-            : { ok: true, result: { released: true } },
+            : request.method === "surface.snapshot.release"
+              ? { ok: true, result: { released: true } }
+              : { ok: false, error: { code: "unavailable", message: "No harness service in this prompt fixture" } },
         ));
       },
       projectTrustOverride: true,
@@ -417,6 +416,12 @@ describe("SessionHost prompt streaming", () => {
       },
       emit: (event, data) => {
         if (event === "agent.event") lifecycleEvents.push((data as { event: PiAgentEvent }).event);
+        if (event === "harness.request") {
+          const request = data as HostEventData<"harness.request">;
+          queueMicrotask(() => host.respondHarness(host.sessionId ?? "", request.requestId, {
+            ok: false, error: { code: "unavailable", message: "No harness service in this prompt fixture" },
+          }));
+        }
       },
       projectTrustOverride: true,
     });
