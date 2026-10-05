@@ -24,7 +24,7 @@ export class VarinAgentProvider implements AgentProviderAdapter {
     const selected = this.context.session.model;
     const main = selected ? { providerId: selected.provider, modelId: selected.id } : null;
     const agents: PiAgentDescriptor[] = [];
-    const addBuiltin = (slot: HarnessModelRole, name: string, description: string, tools: string[], instructions: string, worktree: string, focus: "code" | "research" | undefined, dispatch: Record<string, JsonValue>) => {
+    const addBuiltin = (slot: HarnessModelRole, name: string, description: string, tools: string[], instructions: string, worktree: string, workFocus: Array<"code" | "research"> | undefined, dispatch: Record<string, JsonValue>) => {
       const model = resolveHarnessModelSlot(slot, settings.models, main);
       const binding = settings.models[slot];
       const displayedModel = binding?.providerId && binding.modelId ? { providerId: binding.providerId, modelId: binding.modelId } : model;
@@ -32,7 +32,7 @@ export class VarinAgentProvider implements AgentProviderAdapter {
       const overrides = binding?.agent;
       agents.push({ id: `varin:builtin:${slot}`, providerId: "varin", kind: "delegatable", name: overrides?.name ?? name, description: overrides?.description ?? description,
         source: { scope: "builtin" }, status: !enabled ? "disabled" : model ? "available" : "unconfigured",
-        ...(focus ? { workFocus: [focus] } : {}),
+        ...(workFocus?.length ? { workFocus } : {}),
         ...(displayedModel ? { model: `${displayedModel.providerId}/${displayedModel.modelId}` } : {}),
         definition: { revision: snapshot.globalRevision,
           config: { kind: "builtin", slot, binding: { ...settings.models[slot] } as unknown as JsonValue,
@@ -44,9 +44,9 @@ export class VarinAgentProvider implements AgentProviderAdapter {
       });
     };
     for (const preset of Object.values(EXECUTION_PRESETS)) addBuiltin(preset.slot, preset.id, preset.teamDescription,
-      preset.tools, preset.systemPromptFragment, preset.worktree, preset.id === "retrieval" || preset.id === "review" || preset.id === "check" ? undefined : "code", { preset: preset.id });
+      preset.tools, preset.systemPromptFragment, preset.worktree, preset.workFocus, { preset: preset.id });
     for (const entry of Object.values(RESEARCH_CAPABILITY_DEFINITIONS)) addBuiltin(entry.slot, entry.capability, entry.systemPromptFragment,
-      entry.tools, entry.systemPromptFragment, entry.worktree, "research", { capability: entry.capability });
+      entry.tools, entry.systemPromptFragment, entry.worktree, ["research"], { capability: entry.capability });
     for (const [id, agent] of Object.entries(settings.agents)) {
       const model = agent.model ?? main;
       agents.push({ id: `varin:custom:${id}`, providerId: "varin", kind: "delegatable", name: agent.name, description: agent.description,

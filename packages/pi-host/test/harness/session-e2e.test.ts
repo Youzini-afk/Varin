@@ -491,10 +491,38 @@ describe("session e2e — work focus", () => {
         (context) => { contexts.push(structuredClone(context)); return fauxAssistantMessage("research turn"); },
         (context) => { contexts.push(structuredClone(context)); return fauxAssistantMessage("code again"); },
         (context) => { contexts.push(structuredClone(context)); return fauxAssistantMessage("research again"); },
+        (context) => { contexts.push(structuredClone(context)); return fauxAssistantMessage("code with updated agents"); },
       ]);
       const session = await setupSession({ root, faux, harnessWebSearch: true });
       session.host.setHarnessMaterialsEnabled(true);
       session.host.setHarnessExperimentsEnabled(true);
+      session.host.setHarnessThreadRuntimeEnabled(true);
+      const mainModel = faux.getModel();
+      const binding = { providerId: mainModel.provider, modelId: mainModel.id };
+      const models = {
+        quickImplement: { ...binding, agent: { name: "Code implementer" } },
+        researchInvestigation: { ...binding, agent: { name: "Research investigator" } },
+        researchExperimentalDesign: { ...binding, enabled: false, agent: { name: "Disabled researcher" } },
+      };
+      await writeFile(join(root, "agent", "settings.json"), JSON.stringify({ harness: { models } }), "utf8");
+      const assertRequestAgents = (context: Context, research: boolean, enabled = true) => {
+        const system = providerSystemPrompt(context);
+        assert.equal(system.includes("Code implementer"), !research && enabled);
+        assert.equal(system.includes("Research investigator"), research && enabled);
+        assert.ok(!system.includes("Disabled researcher"));
+        const tools = getCurrentTools(normalizeContext(context).messages);
+        for (const name of ["dispatch", "send"]) {
+          const tool = tools.find(entry => entry.name === name);
+          assert.ok(tool, `${name} is declared in the real model request`);
+          const parameters = tool.parameters as { properties: Record<string, unknown> };
+          assert.equal(Object.hasOwn(parameters.properties, "capability"), research);
+          if (research) {
+            const choices = JSON.stringify(parameters.properties.capability);
+            assert.equal(choices.includes('"investigation"'), enabled);
+            assert.ok(!choices.includes('"experimental-design"'));
+          }
+        }
+      };
       try {
         const snapshot = await session.host.create(
           root,
@@ -523,6 +551,7 @@ describe("session e2e — work focus", () => {
         await session.host.prompt(snapshot.sessionId, "implement a small change");
         await session.host.session.waitForIdle();
         const defaultSystem = getCurrentSystemMessage(normalizeContext(contexts[0]!).messages)!;
+        assertRequestAgents(contexts[0]!, false);
         assert.ok(defaultSystem.sections, "the default uses native sections rather than a forced string");
 
         assert.equal(session.host.applyWorkFocus(snapshot.sessionId, { id: "research", source: "explicit" }, 2), true);
@@ -530,6 +559,7 @@ describe("session e2e — work focus", () => {
         await session.host.prompt(snapshot.sessionId, "investigate the observation");
         await session.host.session.waitForIdle();
         const researchSystem = getCurrentSystemMessage(normalizeContext(contexts[1]!).messages)!;
+        assertRequestAgents(contexts[1]!, true);
         assert.equal(researchSystem.sections?.preamble, defaultSystem.sections!.preamble);
         assert.equal(providerSystemPrompt(contexts[2]), providerSystemPrompt(contexts[1]));
         assert.equal(session.host.snapshot().workFocus?.active.id, "research");
@@ -540,6 +570,15 @@ describe("session e2e — work focus", () => {
         await session.host.session.waitForIdle();
         assert.equal(getCurrentSystemMessage(normalizeContext(contexts[3]!).messages)?.sections?.preamble,
           defaultSystem.sections!.preamble);
+        assertRequestAgents(contexts[3]!, false);
+
+        const settings = await session.host.getSettings();
+        await session.host.updateSettings("global", { harness: { models: {
+          ...models,
+          quickImplement: { ...models.quickImplement, enabled: false },
+          researchInvestigation: { ...models.researchInvestigation, enabled: false },
+        } } }, [], settings.globalRevision);
+        assert.ok(!(await session.host.systemPrompt(snapshot.sessionId)).content.includes("Code implementer"));
 
         assert.equal(session.host.applyWorkFocus(snapshot.sessionId, { id: "research", source: "explicit" }, 4), true);
         assertResearchTools(true);
@@ -547,6 +586,11 @@ describe("session e2e — work focus", () => {
         await session.host.session.waitForIdle();
         assert.equal(getCurrentSystemMessage(normalizeContext(contexts[4]!).messages)?.sections?.preamble,
           defaultSystem.sections!.preamble);
+        assertRequestAgents(contexts[4]!, true, false);
+        assert.equal(session.host.applyWorkFocus(snapshot.sessionId, { id: "code", source: "explicit" }, 5), true);
+        await session.host.prompt(snapshot.sessionId, "continue implementation");
+        await session.host.session.waitForIdle();
+        assertRequestAgents(contexts[5]!, false, false);
       } finally {
         await session.dispose();
       }

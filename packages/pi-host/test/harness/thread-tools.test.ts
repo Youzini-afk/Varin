@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { describe, it } from "node:test";
-import { resolvePresets, resolveResearchCapabilities, type HarnessRequestData } from "@varin/protocol";
+import { resolvePresets, resolveResearchCapabilityOptions, type HarnessRequestData } from "@varin/protocol";
 import { HostServicesBridge } from "../../src/harness/host-services-bridge.js";
 import { createDispatchTool, createSendTool } from "../../src/harness/thread-tools.js";
 
@@ -13,7 +13,10 @@ describe("Native thread dispatch", () => {
     } });
     let modelId = "first-choice";
     let enabled = true;
-    const options = { getResearchCapabilities: async () => resolveResearchCapabilities({ researchExperimentalDesign: { enabled, providerId: "user", modelId } }) };
+    let configured = true;
+    const options = { getResearchCapabilities: async () => resolveResearchCapabilityOptions({
+      researchExperimentalDesign: configured ? { enabled, providerId: "user", modelId } : { enabled },
+    }) };
     const dispatch = createDispatchTool(bridge, "caller", [], options);
     const send = createSendTool(bridge, "caller", options);
     for (const tool of [dispatch, send]) {
@@ -24,10 +27,23 @@ describe("Native thread dispatch", () => {
     }
     enabled = false;
     request = undefined;
-    const result = await dispatch.execute("disabled", { task: "Compare mechanisms", capability: "experimental-design" } as never,
-      undefined, undefined, {} as never);
-    assert.equal((result as { isError?: boolean }).isError, true);
-    assert.equal(request, undefined);
+    for (const tool of [dispatch, send]) {
+      const result = await tool.execute("disabled", { task: "Compare mechanisms", message: "Compare mechanisms", kind: "request", threadId: "child",
+        capability: "experimental-design", model: "inherit" } as never,
+        undefined, undefined, { model: { provider: "caller", id: "main" } } as never);
+      assert.equal((result as { isError?: boolean }).isError, true);
+      assert.equal(request, undefined);
+    }
+    enabled = true;
+    configured = false;
+    for (const tool of [dispatch, send]) {
+      const result = await tool.execute("inherit", { task: "Compare mechanisms", message: "Compare mechanisms", kind: "request", threadId: "child",
+        capability: "experimental-design", model: "inherit" } as never,
+        undefined, undefined, { model: { provider: "caller", id: "main" } } as never);
+      assert.equal((result as { isError?: boolean }).isError, undefined);
+      assert.deepEqual((request?.params as { model?: unknown }).model,
+        tool.name === "send" ? "inherit" : { providerId: "caller", modelId: "main" });
+    }
   });
   it("passes the current caller model for inheritance instead of a cached startup model", async () => {
     let request: HarnessRequestData | undefined;

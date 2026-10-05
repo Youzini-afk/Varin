@@ -305,8 +305,9 @@ export function createThreadDispatchService(host: HarnessServiceHost): HarnessSe
         }
         if (definition && !definition.model && !params.model) throw new HarnessServiceError("unavailable", `Agent requires a caller model: ${params.preset}`);
       }
-      const customPreset = liveSettings ? resolvePresets(liveSettings.models, params.model ?? null,
-        liveSettings.agents, owner?.execution.workFocus ?? "code").find(entry => entry.id === params.preset) : undefined;
+      const availablePresets = liveSettings ? resolvePresets(liveSettings.models, params.model ?? null,
+        liveSettings.agents, owner?.execution.workFocus ?? "code") : [];
+      const customPreset = availablePresets.find(entry => entry.id === params.preset);
       const preset: ExecutionPreset | null = params.preset === undefined
         ? null
         : customPreset?.definition ?? (isPresetId(params.preset)
@@ -314,8 +315,11 @@ export function createThreadDispatchService(host: HarnessServiceHost): HarnessSe
       if (preset?.slot && liveSettings?.models[preset.slot]?.enabled === false) {
         throw new HarnessServiceError("unavailable", `Agent is disabled: ${preset.id}`);
       }
+      if (preset?.workFocus?.length && !preset.workFocus.includes(owner?.execution.workFocus ?? "code")) {
+        throw new HarnessServiceError("unavailable", `Agent is unavailable in this work focus: ${preset.id}`);
+      }
       if (params.preset !== undefined && !preset) {
-        throw new HarnessServiceError("invalid-params", `Unknown preset: ${params.preset}. Available presets: ${Object.keys(EXECUTION_PRESETS).join(", ")}`);
+        throw new HarnessServiceError("invalid-params", `Unknown preset: ${params.preset}. Available presets: ${availablePresets.map(entry => entry.id).join(", ") || "(none configured)"}`);
       }
       if (preset?.id === "retrieval" && !customPreset?.model && !params.model) {
         throw new HarnessServiceError("unavailable", "retrieval is not configured; models.retrievalAgent is empty");

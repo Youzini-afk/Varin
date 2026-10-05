@@ -46,6 +46,13 @@ export interface ResolvedResearchCapability {
   definition: ResearchCapabilityDefinition;
 }
 
+/** An enabled capability can explicitly inherit a model without a dedicated slot. */
+export interface ResearchCapabilityOption {
+  capability: ResearchCapability;
+  model: ModelSelection | null;
+  definition: ResearchCapabilityDefinition;
+}
+
 export const RESEARCH_CAPABILITY_DEFINITIONS: Readonly<Record<ResearchCapability, ResearchCapabilityDefinition>> = {
   investigation: {
     capability: 'investigation',
@@ -85,11 +92,17 @@ export const isResearchCapability = (value: unknown): value is ResearchCapabilit
   typeof value === 'string' && RESEARCH_CAPABILITIES.includes(value as ResearchCapability)
 );
 
-export const resolveResearchCapabilities = (
+export const resolveResearchCapabilityOptions = (
   slots: Partial<Record<HarnessModelRole, HarnessModelBinding | null>>,
-): ResolvedResearchCapability[] => RESEARCH_CAPABILITIES.flatMap((capability) => {
+): ResearchCapabilityOption[] => RESEARCH_CAPABILITIES.flatMap((capability) => {
   const base = RESEARCH_CAPABILITY_DEFINITIONS[capability];
+  if (slots[base.slot]?.enabled === false) return [];
   const definition = customizeHarnessAgent(base, slots[base.slot]?.agent);
   const model = resolveHarnessModelSlot(definition.slot, slots, null);
-  return model ? [{ capability, model, definition }] : [];
+  return [{ capability, model, definition }];
 });
+
+export const resolveResearchCapabilities = (
+  slots: Partial<Record<HarnessModelRole, HarnessModelBinding | null>>,
+): ResolvedResearchCapability[] => resolveResearchCapabilityOptions(slots)
+  .flatMap(option => option.model ? [{ ...option, model: option.model }] : []);

@@ -1,5 +1,5 @@
 import type { ToolDefinition } from "@earendil-works/pi-coding-agent";
-import type { HarnessSettings, ResolvedPreset, ResolvedResearchCapability } from "@varin/protocol";
+import type { HarnessSettings, ResolvedPreset, ResearchCapabilityOption } from "@varin/protocol";
 import { createBashTool } from "./bash-tool.js";
 import { createGrepTool } from "./grep-tool.js";
 import { createApplyPatchTool } from "./apply-patch-tool.js";
@@ -97,9 +97,9 @@ export interface SelectHarnessToolsDeps {
   /** Execution presets for the initial team prompt; the Host resolves new dispatches. */
   resolvedPresets?: readonly ResolvedPreset[];
   /** Research capability model slots resolved for this worker. */
-  resolvedResearchCapabilities?: readonly ResolvedResearchCapability[];
+  researchCapabilities?: readonly ResearchCapabilityOption[];
   /** Read current user choices when assigning a research capability to new work. */
-  getResearchCapabilities?: () => Promise<readonly ResolvedResearchCapability[]>;
+  getResearchCapabilities?: () => Promise<readonly ResearchCapabilityOption[]>;
   /** Active tool names of the dispatching session; the normal-dispatch tool default. */
   getActiveToolNames?: () => string[];
   /** Frozen session tool allowlist; submit_facts registers only when this includes it. */
@@ -146,7 +146,7 @@ export function selectHarnessTools(
     followUpAvailable,
     scheduledTasksAvailable,
     resolvedPresets,
-    resolvedResearchCapabilities,
+    researchCapabilities,
     getResearchCapabilities,
     getActiveToolNames,
     sessionToolAllowlist,
@@ -254,7 +254,7 @@ export function selectHarnessTools(
       result.push(createDispatchTool(bridge, sessionId, resolvedPresets ?? [], {
         concurrency: settings.dispatch.concurrency,
         ...(getActiveToolNames ? { getActiveToolNames } : {}),
-        ...(resolvedResearchCapabilities ? { resolvedResearchCapabilities } : {}),
+        ...(researchCapabilities ? { researchCapabilities } : {}),
         ...(getResearchCapabilities ? { getResearchCapabilities } : {}),
       }));
     }
@@ -266,7 +266,7 @@ export function selectHarnessTools(
     }
     if (tools.send !== false) {
       result.push(createSendTool(bridge, sessionId, {
-        ...(resolvedResearchCapabilities ? { resolvedResearchCapabilities } : {}),
+        ...(researchCapabilities ? { researchCapabilities } : {}),
         ...(getResearchCapabilities ? { getResearchCapabilities } : {}),
       }));
     }

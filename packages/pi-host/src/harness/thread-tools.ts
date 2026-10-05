@@ -1,11 +1,11 @@
-import { Type } from "typebox";
+import { Type, type TSchema } from "typebox";
 import { defineTool, type ToolDefinition } from "@earendil-works/pi-coding-agent";
 import type { HostServicesBridge } from "./host-services-bridge.js";
 import { HarnessRequestError } from "./host-services-bridge.js";
 import type {
   ResearchCapability,
   ResearchResourceManifest,
-  ResolvedResearchCapability,
+  ResearchCapabilityOption,
   ResolvedPreset,
   ThreadDispatchResult,
   ThreadListResult,
@@ -16,7 +16,7 @@ import type {
   ThreadUpdateResult,
   ThreadKillResult,
 } from "@varin/protocol";
-import { HARNESS_MAX_REQUEST_TIMEOUT_MS, RESEARCH_CAPABILITY_DEFINITIONS, buildTeamPrompt, isPresetId } from "@varin/protocol";
+import { HARNESS_MAX_REQUEST_TIMEOUT_MS, buildTeamPrompt, isPresetId } from "@varin/protocol";
 
 /**
  * Build an error result for a thread tool failure.
@@ -107,6 +107,42 @@ const ThreadSendParams = Type.Object({
   wait: Type.Optional(Type.Number({ description: "Seconds to wait for this request's correlated reply after acceptance (default 0). A timeout ends only this wait — the message and the target's work continue; retry with the same requestId to keep waiting without re-sending" })),
 });
 
+function threadToolParameters<T extends typeof DispatchParams | typeof ThreadSendParams>(
+  base: T, capabilities: readonly ResearchCapabilityOption[],
+): T {
+  const properties: Record<string, TSchema> = { ...base.properties };
+  delete properties.capability;
+  delete properties.model;
+  delete properties.resources;
+  if (capabilities.length) {
+    properties.capability = Type.Optional(Type.Union(capabilities.map(entry => Type.Literal(entry.capability)), {
+      description: "Enabled research sub-agent role for this work focus.",
+    }));
+    properties.model = base.properties.model;
+    properties.resources = base.properties.resources;
+  }
+  // Only optional fields vary; execution still accepts the complete internal shape.
+  return Type.Object(properties) as T;
+}
+
+export function dispatchToolPresentation(
+  presets: readonly ResolvedPreset[], capabilities: readonly ResearchCapabilityOption[],
+) {
+  const research = capabilities.map(entry => `${entry.capability}${entry.definition.name ? ` (${entry.definition.name})` : ''}`).join(', ');
+  return {
+    parameters: threadToolParameters(DispatchParams, capabilities),
+    promptGuidelines: [buildTeamPrompt([...presets]) + (research ? ` Available research capabilities: ${research}.` : '')],
+  };
+}
+
+export function sendToolPresentation(capabilities: readonly ResearchCapabilityOption[]) {
+  return {
+    parameters: threadToolParameters(ThreadSendParams, capabilities),
+    description: "Send a message to a related thread (child, sibling, or parent). kind: 'inform' delivers without waking a waiting thread; 'request' asks for execution — on a settled thread it starts a new Run (context: 'continue' resumes its session; 'fresh' rebuilds the input). replyTo answers a request and completes the requester's wait."
+      + (capabilities.length ? " capability re-routes the new Run under that capability's frozen configuration." : ''),
+  };
+}
+
 const ThreadReadParams = Type.Object({
   threadId: Type.String(),
   runId: Type.Optional(Type.String({ description: "Read a fixed Run's delivery and transcript, even while a later attempt is running or failed." })),
@@ -160,8 +196,7 @@ const ThreadKillParams = Type.Object({
  * an explicit inherit; presets whose slot is unconfigured are omitted from
  * the team prompt and rejected rather than silently borrowing the main
  * model. The team prompt is generated from that preset set at session
- * creation, so it is static for the session and does not invalidate the
- * prefix cache.
+ * creation and refreshed at an idle/run boundary when focus or settings change.
  */
 export function createDispatchTool(
   bridge: HostServicesBridge,
@@ -171,22 +206,17 @@ export function createDispatchTool(
     concurrency?: number;
     /** Active tool names of the dispatching session (normal-dispatch default). */
     getActiveToolNames?: () => string[];
-    resolvedResearchCapabilities?: readonly ResolvedResearchCapability[];
-    getResearchCapabilities?: () => Promise<readonly ResolvedResearchCapability[]>;
+    researchCapabilities?: readonly ResearchCapabilityOption[];
+    getResearchCapabilities?: () => Promise<readonly ResearchCapabilityOption[]>;
   } = {},
 ): ToolDefinition {
-  const available = presets.map((p) => p.id);
-  const teamPrompt = buildTeamPrompt([...presets]);
-  const researchCapabilities = options.resolvedResearchCapabilities ?? [];
+  const researchCapabilities = options.researchCapabilities ?? [];
   return defineTool({
     name: "dispatch",
     label: "Dispatch",
     description: "Dispatch a sub-agent thread for a task. kind:\"discussion\" starts a read-only consult thread that answers against memory and reports back. Optional preset picks a fixed execution configuration. Asynchronous — returns immediately, never blocks.",
     promptSnippet: "dispatch: spawn a sub-agent thread for a task",
-    promptGuidelines: [
-      teamPrompt,
-    ],
-    parameters: DispatchParams,
+    ...dispatchToolPresentation(presets, researchCapabilities),
     executionMode: "parallel",
     execute: async (_toolCallId, params, _signal, _onUpdate, ctx) => {
         let model: { providerId: string; modelId: string } | undefined;
@@ -212,7 +242,11 @@ export function createDispatchTool(
             if (options.getResearchCapabilities) currentCapabilities = await options.getResearchCapabilities();
           } catch (error) { return threadErrorResult("dispatch", error); }
           const resolved = currentCapabilities.find((entry) => entry.capability === params.capability);
-          const definition = RESEARCH_CAPABILITY_DEFINITIONS[params.capability];
+          if (!resolved) {
+            return { content: [{ type: 'text' as const, text: `research capability unavailable in this work focus or disabled: ${params.capability}` }],
+              isError: true, details: { code: 'unavailable', capability: params.capability } };
+          }
+          const definition = resolved.definition;
           if (params.preset !== undefined) {
             return {
               content: [{ type: 'text' as const, text: 'dispatch failed: capability cannot be combined with preset' }],
@@ -230,7 +264,7 @@ export function createDispatchTool(
               };
             }
             model = { providerId: current.provider, modelId: current.id };
-          } else if (resolved) {
+          } else if (resolved.model) {
             model = resolved.model;
           } else {
             return {
@@ -257,10 +291,10 @@ export function createDispatchTool(
           return {
             content: [{
               type: "text" as const,
-              text: `unknown preset: ${params.preset}. Available presets: ${available.join(", ") || "(none configured)"}`,
+              text: `unknown preset: ${params.preset}. Inspect the current agent settings for available presets.`,
             }],
             isError: true,
-            details: { code: "invalid-params", availablePresets: available },
+            details: { code: "invalid-params" },
           };
         }
         // The catalog in the prompt is a snapshot. The Host resolves the current
@@ -393,16 +427,15 @@ export function createWaitTool(bridge: HostServicesBridge, _sessionId: string): 
 }
 
 export function createSendTool(bridge: HostServicesBridge, _sessionId: string, options: {
-  resolvedResearchCapabilities?: readonly ResolvedResearchCapability[];
-  getResearchCapabilities?: () => Promise<readonly ResolvedResearchCapability[]>;
+  researchCapabilities?: readonly ResearchCapabilityOption[];
+  getResearchCapabilities?: () => Promise<readonly ResearchCapabilityOption[]>;
 } = {}): ToolDefinition {
-  const researchCapabilities = options.resolvedResearchCapabilities ?? [];
+  const researchCapabilities = options.researchCapabilities ?? [];
   return defineTool({
     name: "send",
     label: "Send",
-    description: "Send a message to a related thread (child, sibling, or parent). kind: 'inform' delivers without waking a waiting thread; 'request' asks for execution — on a settled thread it starts a new Run (context: 'continue' resumes its session; 'fresh' rebuilds the input). replyTo answers a request and completes the requester's wait. capability re-routes the new Run under that capability's frozen configuration.",
+    ...sendToolPresentation(researchCapabilities),
     promptSnippet: "send: inform a teammate; kind=request resumes a settled thread",
-    parameters: ThreadSendParams,
     executionMode: "parallel",
     execute: async (_toolCallId, params, signal, _onUpdate, _ctx) => {
       try {
@@ -411,15 +444,19 @@ export function createSendTool(bridge: HostServicesBridge, _sessionId: string, o
         if (params.capability !== undefined) {
           const currentCapabilities = options.getResearchCapabilities ? await options.getResearchCapabilities() : researchCapabilities;
           const resolved = currentCapabilities.find((entry) => entry.capability === params.capability);
-          const definition = RESEARCH_CAPABILITY_DEFINITIONS[params.capability];
-          if (resolved === undefined && params.model !== "inherit") {
+          if (!resolved) {
+            return { content: [{ type: 'text' as const, text: `research capability unavailable in this work focus or disabled: ${params.capability}` }],
+              isError: true, details: { code: 'unavailable', capability: params.capability } };
+          }
+          const definition = resolved.definition;
+          if (!resolved.model && params.model !== "inherit") {
             return {
               content: [{ type: 'text' as const, text: `research capability unavailable: ${params.capability}. Configure its dedicated model slot first, or pass model:"inherit" to keep the thread's model.` }],
               isError: true,
               details: { code: 'unavailable', capability: params.capability },
             };
           }
-          model = params.model === "inherit" ? "inherit" : resolved!.model;
+          model = params.model === "inherit" ? "inherit" : resolved.model!;
           research = {
             capability: definition.capability,
             resources: { ...definition.defaultResources, ...(params.resources ?? {}) },

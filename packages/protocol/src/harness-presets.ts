@@ -51,6 +51,8 @@ export interface ExecutionPreset {
   teamDescription: string;
   name?: string;
   modelSettings?: HarnessAgentModelSettings;
+  /** Empty or unset means shared across work focuses. */
+  workFocus?: WorkFocusId[];
 }
 
 // ── Preset definitions ─────────────────────────────────────────────
@@ -59,6 +61,7 @@ export const EXECUTION_PRESETS: Readonly<Record<PresetId, ExecutionPreset & { sl
   "quick-implement": {
     id: "quick-implement",
     slot: "quickImplement",
+    workFocus: ["code"],
     tools: ["read", "edit", "write", "apply_patch", "bash", "grep", "glob", "get_output", "write_to_process", "kill_shell"],
     worktree: "isolated",
     systemPromptFragment:
@@ -68,6 +71,7 @@ export const EXECUTION_PRESETS: Readonly<Record<PresetId, ExecutionPreset & { sl
   "hard-implement": {
     id: "hard-implement",
     slot: "hardImplement",
+    workFocus: ["code"],
     tools: ["read", "edit", "write", "apply_patch", "bash", "grep", "glob", "get_output", "write_to_process", "kill_shell", "explore", "recall", "todo", "dispatch", "threads", "wait", "send", "read_thread", "merge", "update", "kill"],
     worktree: "isolated",
     systemPromptFragment:
@@ -77,6 +81,7 @@ export const EXECUTION_PRESETS: Readonly<Record<PresetId, ExecutionPreset & { sl
   "frontend": {
     id: "frontend",
     slot: "frontend",
+    workFocus: ["code"],
     tools: ["read", "edit", "write", "apply_patch", "bash", "grep", "glob", "get_output", "write_to_process", "kill_shell", "explore", "dispatch", "threads", "wait", "send", "read_thread", "merge", "update", "kill"],
     worktree: "isolated",
     systemPromptFragment:
@@ -154,6 +159,7 @@ export function resolvePresets(
 ): ResolvedPreset[] {
   const resolved: ResolvedPreset[] = [];
   for (const preset of Object.values(EXECUTION_PRESETS)) {
+    if (focus && preset.workFocus?.length && !preset.workFocus.includes(focus)) continue;
     const model = resolveHarnessModelSlot(preset.slot, slots, mainModel);
     const definition = customizeHarnessAgent(preset, slots[preset.slot]?.agent);
     if (definition.description !== undefined) definition.teamDescription = definition.description;
@@ -174,9 +180,8 @@ export function resolvePresets(
 // ── Team prompt ────────────────────────────────────────────────────
 
 /**
- * The team prompt is static for a given preset set, so it can live in the
- * `dispatch` tool's promptGuidelines without invalidating the prefix cache
- * mid-session.
+ * The team prompt is stable for a given available preset set. Its owner refreshes
+ * the set at run boundaries when settings, model, or work focus changes.
  */
 export function buildTeamPrompt(presets: ResolvedPreset[]): string {
   const presetList = presets

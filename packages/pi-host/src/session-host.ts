@@ -103,7 +103,7 @@ import type {
   WorkFocusSelection,
 } from "@varin/protocol";
 import {
-  resolveResearchCapabilities,
+  resolveResearchCapabilityOptions,
   resolveHarnessModelSlot,
 } from "@varin/protocol";
 import {
@@ -177,6 +177,7 @@ import {
 } from "./harness/context-preparation.js";
 import { createPermissionGateExtension, buildPermissionPolicy } from "./harness/permission-gate-extension.js";
 import { excludedWorkFocusTools } from "./harness/work-focus.js";
+import { dispatchToolPresentation, sendToolPresentation } from "./harness/thread-tools.js";
 import type { ToolDefinition } from "@earendil-works/pi-coding-agent";
 import {
   HarnessSettingsValidationError,
@@ -960,10 +961,28 @@ export class SessionHost {
     if (this.#workFocus.id === selection.id
       && this.#workFocus.source === selection.source
       && this.#workFocusGeneration === generation) return true;
+    this.#refreshThreadAgentTools(selection.id);
     this.session.setToolExclusions([...excludedWorkFocusTools(selection.id), ...(this.#memoryMode === "agent" ? ["recall"] : [])]);
     this.#workFocus = structuredClone(selection);
     this.#workFocusGeneration = generation;
     return true;
+  }
+
+  #refreshThreadAgentTools(focus = this.#workFocus.id): void {
+    // SDK-owned definitions are rewrapped by setToolExclusions at the boundary.
+    // Keep plugin-owned tools under their own owner.
+    const session = this.session;
+    const global = this.runtime.services.settingsManager.getGlobalSettings() as { harness?: HarnessSettingsInput };
+    const settings = mergeHarnessSettings(global.harness ?? {}, {});
+    const model = session.model;
+    const presets = resolvePresets(settings.models, model ? { providerId: model.provider, modelId: model.id } : null,
+      settings.agents, focus);
+    const research = focus === "research" ? resolveResearchCapabilityOptions(settings.models) : [];
+    const owned = new Set(session.getAllTools().filter(tool => tool.sourceInfo.source === "sdk").map(tool => tool.name));
+    const dispatch = session.getToolDefinition("dispatch");
+    if (dispatch && owned.has("dispatch")) Object.assign(dispatch, dispatchToolPresentation(presets, research));
+    const send = session.getToolDefinition("send");
+    if (send && owned.has("send")) Object.assign(send, sendToolPresentation(research));
   }
 
   publishWorkFocus(sessionId: string): boolean {
@@ -988,6 +1007,7 @@ export class SessionHost {
   async systemPrompt(sessionId: string) {
     this.assertSession(sessionId);
     if (!this.#agentPromptRuntime) throw new HostError("unavailable", "System prompt inspection is unavailable");
+    if (this.session.isIdle) await this.#applyPendingSettingsReload();
     return this.#agentPromptRuntime.inspect(this.session);
   }
 
@@ -3215,6 +3235,8 @@ export class SessionHost {
           if (this.#runtime !== expectedRuntime) return;
           await expectedRuntime.session.reload();
           if (this.#runtime !== expectedRuntime) return;
+          this.#refreshThreadAgentTools();
+          expectedRuntime.session.setToolExclusions([...excludedWorkFocusTools(this.#workFocus.id), ...(this.#memoryMode === "agent" ? ["recall"] : [])]);
           // A second settings write can commit while either reload is awaiting.
           // Keep its candidate visible and loop until the latest generation has
           // crossed this prompt boundary too.
@@ -3567,10 +3589,13 @@ export class SessionHost {
           noPromptTemplates: true,
           extensionFactories: [
             { hidden: true, name: "varin-agent-personalization", factory: (pi) => {
-              pi.on("before_agent_start", async () => {
+              pi.on("before_agent_start", async (event) => {
                 const context = await promptRuntime.preferences(sessionManager.getSessionId());
                 this.#memoryMode = context.mode;
+                this.#refreshThreadAgentTools();
                 this.session.setToolExclusions([...excludedWorkFocusTools(this.#workFocus.id), ...(context.mode === "agent" ? ["recall"] : [])]);
+                const dispatch = this.session.getToolDefinition("dispatch");
+                if (dispatch) event.systemPromptOptions.toolGuidelines.dispatch = [...(dispatch.promptGuidelines ?? [])];
               });
             } },
             { builtin: true, replaceable: true, factory: createCodemodeExtension({
@@ -3904,8 +3929,8 @@ export class SessionHost {
         harnessSettings.agents,
         this.#workFocus.id,
       );
-      const resolvedResearchCapabilities = this.#workFocus.id === "research"
-        ? resolveResearchCapabilities(harnessSettings.models ?? {}) : [];
+      const researchCapabilities = this.#workFocus.id === "research"
+        ? resolveResearchCapabilityOptions(harnessSettings.models ?? {}) : [];
       customTools.push(...selectHarnessTools(harnessSettings, {
         bridge: hostServicesBridge,
         sessionId: sessionManager.getSessionId(),
@@ -3927,12 +3952,12 @@ export class SessionHost {
         followUpAvailable: this.#harnessFollowUpsEnabled && this.#harnessThreadRuntimeEnabled,
         scheduledTasksAvailable: this.#harnessScheduledTasksEnabled,
         resolvedPresets,
-        resolvedResearchCapabilities,
+        researchCapabilities,
         getResearchCapabilities: async () => {
           if (this.#workFocus.id !== "research") return [];
           const snapshot = await this.getSettings();
           const settings = mergeHarnessSettings((snapshot.global?.harness ?? {}) as HarnessSettingsInput, {});
-          return resolveResearchCapabilities(settings.models);
+          return resolveResearchCapabilityOptions(settings.models);
         },
         getActiveToolNames: () => this.runtime?.session.getActiveToolNames() ?? [],
         ...(this.#sessionToolAllowlist ? { sessionToolAllowlist: this.#sessionToolAllowlist } : {}),

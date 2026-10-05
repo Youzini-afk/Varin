@@ -1755,6 +1755,25 @@ describe("thread services", () => {
     return { thread: child, run };
   };
 
+  it("rejects a code-only preset from a research caller before spawning", async () => {
+    const dataDir = mkdtempSync(join(tmpdir(), "thread-mode-dispatch-"));
+    const registry = createThreadRegistry({ dataDir, hostId: "host-1" });
+    const spawn = vi.fn(async () => ({ sessionId: "child" }));
+    const service = dispatchService({ threadRegistry: registry, threadSpawnSession: spawn,
+      harnessSettings: async () => ({ global: { harness: {} } }),
+    });
+    try {
+      const caller = await researchCaller(registry);
+      await expect(service.handle({ task: "Implement", preset: "hard-implement",
+        model: { providerId: "caller", modelId: "main" },
+      }, threadCtx(caller.sessionId))).rejects.toMatchObject({ harnessCode: "unavailable" });
+      expect(spawn).not.toHaveBeenCalled();
+    } finally {
+      await registry.dispose();
+      rmSync(dataDir, { recursive: true, force: true });
+    }
+  });
+
   it("re-routes a settled Thread's next Run under a research capability", async () => {
     const dataDir = mkdtempSync(join(tmpdir(), "thread-send-capability-"));
     const registry = createThreadRegistry({ dataDir, hostId: "host-1" });
