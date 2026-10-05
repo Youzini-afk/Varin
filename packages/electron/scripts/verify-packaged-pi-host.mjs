@@ -44,7 +44,7 @@ try {
   const createBroker = (options) => new runtimeBroker.PiRuntimeBroker({
     ...options,
     agentDir,
-    client: { clientName: 'varin-package-verifier', clientVersion: '0.1.0', mode: 'test' },
+    client: { clientName: 'varin-package-verifier', clientVersion: '0.1.0', mode: 'test', capabilities: { harnessThreads: true } },
     foundationalPackages: [],
     emit: (event) => {
       if (event.kind !== 'diagnostic') return;
@@ -70,7 +70,13 @@ try {
     throw new Error(`Packaged Pi Host did not start the expected bundled runtime ${piVersion}`);
   }
   await lifecycle.listSessions(agentDir);
-  console.log(`[varin-package] verified default bundled Pi ${handshake.runtime.piVersion} startup and catalog from packaged dependencies`);
+  const session = await lifecycle.createSession(agentDir, 'Packaged startup check');
+  if (!session.activeTools.includes('dispatch') || !session.activeTools.includes('wait')) {
+    throw new Error('Packaged Pi session did not activate the Host thread tools');
+  }
+  await lifecycle.openSession({ sessionId: session.sessionId });
+  await lifecycle.closeSession(session.sessionId);
+  console.log(`[varin-package] verified bundled Pi ${handshake.runtime.piVersion} startup, catalog and session creation with thread tools`);
 } finally {
   await lifecycle?.dispose().catch(() => {});
   process.chdir(previousCwd);

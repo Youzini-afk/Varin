@@ -233,7 +233,9 @@ export function createDispatchTool(
     label: "Dispatch",
     description: "Dispatch a sub-agent thread for a task. kind:\"discussion\" starts a read-only consult thread that answers against memory and reports back. Optional preset picks a fixed execution configuration. Asynchronous — returns immediately, never blocks.",
     promptSnippet: "dispatch: spawn a sub-agent thread for a task",
-    ...dispatchToolPresentation(presets, researchCapabilities, options.getActiveToolNames?.()),
+    // The live session does not exist while its custom tools are being built.
+    // SessionHost refreshes presentation from actual active tools after binding.
+    ...dispatchToolPresentation(presets, researchCapabilities),
     executionMode: "parallel",
     execute: async (_toolCallId, params, _signal, _onUpdate, ctx) => {
         let model: { providerId: string; modelId: string } | undefined;

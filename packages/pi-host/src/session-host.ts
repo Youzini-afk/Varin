@@ -942,7 +942,7 @@ export class SessionHost {
     const research = focus === "research" ? resolveResearchCapabilityOptions(settings.models) : [];
     const owned = new Set(session.getAllTools().filter(tool => tool.sourceInfo.source === "sdk").map(tool => tool.name));
     const dispatch = session.getToolDefinition("dispatch");
-    if (dispatch && owned.has("dispatch")) Object.assign(dispatch, dispatchToolPresentation(presets, research));
+    if (dispatch && owned.has("dispatch")) Object.assign(dispatch, dispatchToolPresentation(presets, research, session.getActiveToolNames()));
     const send = session.getToolDefinition("send");
     if (send && owned.has("send")) Object.assign(send, sendToolPresentation(research));
   }
@@ -3889,7 +3889,7 @@ export class SessionHost {
           const settings = mergeHarnessSettings((snapshot.global?.harness ?? {}) as HarnessSettingsInput, {});
           return resolveResearchCapabilityOptions(settings.models);
         },
-        getActiveToolNames: () => this.runtime?.session.getActiveToolNames() ?? [],
+        getActiveToolNames: () => this.session.getActiveToolNames(),
         ...(this.#sessionToolAllowlist ? { sessionToolAllowlist: this.#sessionToolAllowlist } : {}),
       }));
       // The frozen launch selection must reach the session: options.model wins
@@ -3974,6 +3974,8 @@ export class SessionHost {
       },
       uiContext: this.ui.createContext(),
     });
+    this.#refreshThreadAgentTools();
+    session.setToolExclusions([...excludedWorkFocusTools(this.#workFocus.id), ...(this.#memoryMode === "agent" ? ["recall"] : [])]);
     this.#unsubscribe = session.subscribe((event) => {
       // The request adapter emits real automatic commit boundaries. Pi's
       // cancelled post-turn probe must not lock input or flash a false boundary.

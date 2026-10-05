@@ -147,6 +147,8 @@ SDK-only sources/types. They do not blanket-remove `src`, TypeScript runtime inp
 which electron-builder otherwise excludes. `afterPack` compiles a small Array/String/Promise program
 with the packaged TypeScript runtime, in addition to the Pi handshake and PDF/Canvas checks.
 The kernel resource filter ships only the current executable and manifest, not stale build outputs.
+The packaged Pi check enables Host thread tools and creates a real session before reading and closing
+it; catalog readiness alone cannot establish that a conversation can open successfully.
 Pi workers and native/runtime assets remain outside ASAR; reducing installation file count is not
 permission to make external Node processes depend on Electron's virtual filesystem.
 

@@ -46,6 +46,8 @@ and the conversation UI. Its default identity includes the session, history leaf
 `submissionId` retries retain the original selection. Full integration advances the acknowledged source
 baseline, so later changes and reversions are distinct from recipient edits. Disabling a tool removes
 its team-prompt guidance.
+Thread tools are constructed before the native session exists. Their live tool-selection callback is
+used during execution; SessionHost refreshes team presentation from actual active tools after binding.
 General work focus removes `research_search`, `research_decide`, `materials`, `experiment`, `resources`
 and `research_source` from the native Pi registry, including discovery and nested tool execution.
 Switching focus updates the registry before the next user run; current runs keep their selected focus.
