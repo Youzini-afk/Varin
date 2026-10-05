@@ -37,7 +37,7 @@ Status: append-only decision log; entries live in the domain volumes under decis
 | [permissions](permissions.md) | 3b.x 权限三层、交互确认门、插件共存与范围边界。 | 4 |
 | [retrieval](retrieval.md) | 3.2/3.3/3.15/3.16 explore、related、快速检索接线与返工、语义索引、embedding/rerank、阶段 F 快速决策、阶段 L Web/科研搜索与检索量具。 | 63 |
 | [structure-symbol-graph](structure-symbol-graph.md) | 3.1/3.8/3.11/3.12 符号图采集与验收、tree-sitter 结构切片、语法 wasm、LSP 导航。 | 52 |
-| [workingstate-threads](workingstate-threads.md) | 3.4/3.4a/3.5/3.6/3.7/3.10/3.18 工作状态、任务线程/协作、Integration/恢复应用、P0 存储形状与 T 纵切。 | 58 |
+| [workingstate-threads](workingstate-threads.md) | 3.4/3.4a/3.5/3.6/3.7/3.10/3.18 工作状态、任务线程/协作、Integration/恢复应用、P0 存储形状与 T 纵切、D-339 协作收敛。 | 59 |
 | [stage-r-kernel](stage-r-kernel.md) | D-252~D-283 Rust 系统内核迁移全程（R0–R6）与 D-283 权限/Web 收口。 | 32 |
 | [research-cluster](research-cluster.md) | D-291/D-297–D-301/D-303–D-304 科研集群、工作台与侧重、能力路由、实验执行、通用协作、请求上下文、验收及受管远程/运维。 | 8 |
 | [runtime-reliability](runtime-reliability.md) | RR 专项及 HR 替代设计：恢复/停止、shell/联网、工作上下文及其向任务资源与持续检索的解耦。 | 10 |
@@ -375,3 +375,4 @@ Status: append-only decision log; entries live in the domain volumes under decis
 | D-336 | 2026-09-26 | RR2/RR5 收口：子 Agent 冻结继承、可续页项目发现、执行 Host 的可信代理委托、授权句柄读取磁盘字节 | implemented / focused acceptance | 四项原代码缺口完成实际消费者接线与交错验证；真实代理和安装包、对抗性父目录 ABA 仍按证据保留边界 | thread-runtime；work-context；egress/settings；document.readSource；status RR | [runtime-reliability](runtime-reliability.md) |
 | D-337 | 2026-09-27 | 面向任务与资源的 Harness：工作区回归分类，执行参数固定目标，索引按资源与内容版本持续复用 | implemented / wired（HR0–HR5 全部接线；逐场景证据与未测边界见 status HR 段） | 替代 D-330 及 D-332 的目录上下文、检索/存储归属目标；保留恢复、输出、资源修订与现有算法 | protocol；Pi/Host/Rust；Documents；Thread/knowledge；search/semantic；UI；plan/status/architecture/development | [runtime-reliability](runtime-reliability.md) |
 | D-338 | 2026-09-30 | 可组合执行环境：独立部署、精简模板、应用接口、跨环境联动与 Harness 生命周期协调 | accepted design / incremental implementation pending | — | [execution-environment-design.md](../design/execution-environment-design.md)；Bot/Computer Use 关联与架构入口 | [tool-environment](tool-environment.md) |
+| D-339 | 2026-10-05 | 综合主线与 Worker/检索、同任务会话互读、事件等待及选定代码提交 | accepted design / not implemented | 修订 D-285 预设保留目标，扩展同任务读取与局部代码协作；沿用现有运行和存储权威 | [agent-collaboration-design.md](../design/agent-collaboration-design.md)；agent-harness；harness-verification；status；development | [workingstate-threads](workingstate-threads.md) |

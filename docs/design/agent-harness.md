@@ -17,6 +17,10 @@ takeover 已删除，新链按 2.4A/B、2.6A/B 接线并经真 Pi+faux 纵切验
 D-285 接受以工作为中心的可续做线程、可选预设、定向通信与分段成果；D-286 补齐整套上下文原则及“工作可延续、上下文可重建”。
 D-287 已按真实 Pi/Host/Rust 消费者验收并修正上下文收据、Run 准入、消息提交边界和物化 baseline handoff；证据见 status 与验收记录。
 
+D-339 的[多 Agent 协作设计](agent-collaboration-design.md)于 2026-10-05 确认，尚未实施：主线持续负责整体实现，
+常规子 Agent 收敛为 Worker/检索，同任务成员可按范围互读会话，等待按事件恢复，代码可按文件或片段直接提交给目标。
+它修订 D-285 的预设保留与协作范围目标；已有 Thread/Run、Pi、WorkingState/Integration 权威继续沿用。
+
 D-292 的全仓工程阶段 Q：[测试与 CI 体系重整](testing-ci-design.md) 与 D-296 的旧伴侧插件清理已完成。
 D-297 明确 AI4S 的工作台 UIUX 与 Agent 工作侧重独立，设计见第 10 节；科研执行与协作已推进至 D-305，实际交付见 status。
 D-312 的快速决策模型与渐进检索已交付并接线（F0–F4），`explore` 为首个消费者；实测边界见 status。

@@ -1,7 +1,7 @@
 # Documentation index
 
 Status: navigation index — keep current as documents move or change role.
-Last updated: 2026-10-04
+Last updated: 2026-10-05
 
 `docs/` 按角色分目录。文档与代码冲突时以代码与测试为准，并在同一改动里修正失效的一侧。
 
@@ -26,6 +26,7 @@ Harness 总体与模块专卷：
 领域设计（各文件头部 Status 行标注 implemented / design-only / superseded）：
 
 - [design/resource-oriented-harness-design.md](design/resource-oriented-harness-design.md) — HR0–HR5 资源寻址模型（已交付）
+- [design/agent-collaboration-design.md](design/agent-collaboration-design.md) — D-339 综合主线、Worker/检索、同任务会话互读、事件等待与选定代码提交（设计已确认，未实施）
 - [design/research-cluster-design.md](design/research-cluster-design.md) — AI4S 科研集群（Phase 11）
 - [design/rust-kernel-design.md](design/rust-kernel-design.md) — Rust 内核边界
 - [design/testing-ci-design.md](design/testing-ci-design.md) — Stage Q 测试与 CI 规范
