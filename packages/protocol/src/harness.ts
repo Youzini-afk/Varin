@@ -1499,6 +1499,8 @@ export interface ExploreQueryReleaseParams {
 }
 
 export interface HarnessCancelData {
+  /** A new input ends dependency watching normally instead of cancelling execution. */
+  wake?: boolean;
   requestId?: string;
   queryId?: string;
 }

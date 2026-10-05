@@ -1613,6 +1613,26 @@ describe("thread services", () => {
     } finally { await registry.dispose(); rmSync(dataDir, { recursive: true, force: true }); }
   });
 
+  it("delivers requests to a settled main conversation through its native input boundary", async () => {
+    const dataDir = mkdtempSync(join(tmpdir(), "thread-main-request-"));
+    const registry = createThreadRegistry({ dataDir, hostId: "host-1" });
+    try {
+      const main = await registry.createThread({ scopeId: "workspace-1", parent: { kind: "session", id: "main" }, brief: "Overall task",
+        purpose: "agent-root", kind: "discussion", createdBy: "user", concurrency: 2, autoRun: false, worktree: "none", tools: ["dispatch"], permissions: {} });
+      const run = await registry.startRun("workspace-1", main.id);
+      await registry.markRunRunning("workspace-1", main.id, run.id, "main");
+      const child = await runningThread(registry, { kind: "thread", id: main.id }, "Implementation", 2);
+      await registry.endRun("workspace-1", main.id, run.id, "success");
+      const deliver = vi.fn(async () => undefined);
+      const continueRun = vi.fn();
+      const service = createThreadSendService({ threadRegistry: registry, threadSendToSession: deliver, threadContinueRun: continueRun } as never);
+      const result = await service.handle({ to: "parent", kind: "request", message: "Resolve the shared interface", requestId: "interface-question", from: "parent-agent" }, threadCtx(child.sessionId));
+      expect(result.delivery).toBe("delivered");
+      expect(deliver).toHaveBeenCalledWith("main", "Resolve the shared interface", expect.objectContaining({ requestId: "interface-question" }));
+      expect(continueRun).not.toHaveBeenCalled();
+    } finally { await registry.dispose(); rmSync(dataDir, { recursive: true, force: true }); }
+  });
+
   it("records a parked request behind a full shared budget and reports scheduled", async () => {
     const dataDir = mkdtempSync(join(tmpdir(), "thread-send-parked-"));
     const registry = createThreadRegistry({ dataDir, hostId: "host-1" });

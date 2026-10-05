@@ -101,6 +101,9 @@ import { createExploreFileReader } from './lib/harness/explore-file-reader.js';
 import { createThreadWorktreeRuntime } from './lib/harness/thread-worktree.js';
 import { createThreadRuntime } from './lib/harness/thread-runtime.js';
 import { createResearchRootRuntime } from './lib/harness/research-root-runtime.js';
+import { createAgentRootRuntime } from './lib/harness/agent-root-runtime.js';
+import { createThreadWaitRuntime } from './lib/harness/thread-wait-runtime.js';
+import { isAttachedRootPurpose } from '@varin/protocol';
 import { createBotRootRuntime } from './lib/harness/bot-root-runtime.js';
 import { createBotService } from './lib/bots/bot-service.js';
 import { createBotLifecycleRuntime } from './lib/bots/bot-lifecycle-runtime.js';
@@ -1689,6 +1692,7 @@ async function main(options: StartWebUiServerOptions = {}): Promise<WebUiServerC
   };
   const sessionSnapshots = new Map<string, Record<string, unknown>>();
   const memoryOrganizerRef: { current?: ReturnType<typeof createMemoryOrganizer> } = {};
+  const threadWaitRuntimeRef: { current?: ReturnType<typeof createThreadWaitRuntime> } = {};
   let botAdmissionReady = false;
   let botLifecycleRuntime: ReturnType<typeof createBotLifecycleRuntime> | null = null;
   const canExecuteBotScope = async (scopeId: string): Promise<boolean> => !isBotScopeId(scopeId)
@@ -1701,6 +1705,7 @@ async function main(options: StartWebUiServerOptions = {}): Promise<WebUiServerC
       console.error('[HarnessThreads] Observer failed:', errorMessage(error));
     },
     onThreadChanged: (workspaceId, parent, thread, activeRun) => {
+      threadWaitRuntimeRef.current?.observe(workspaceId, thread, activeRun);
       broadcastGlobalUiEvent?.({
         type: 'varin:harness-thread-changed',
         properties: { workspaceId, parent, thread, activeRun },
@@ -2680,6 +2685,20 @@ async function main(options: StartWebUiServerOptions = {}): Promise<WebUiServerC
     },
   });
   // BC0: the same attached-root lifecycle, specialized for Bot entry chats —
+  const agentRootRuntime = createAgentRootRuntime({
+    registry: threadRegistry,
+    getSessionSnapshot: sessionId => (sessionSnapshots.get(sessionId) as unknown as SessionSnapshot | undefined) ?? null,
+    sessions: {
+      snapshot: sessionId => piRuntimeBroker.requestForSession(sessionId, 'session.snapshot', { sessionId }),
+      stats: sessionId => piRuntimeBroker.requestForSession(sessionId, 'session.stats', { sessionId }),
+      entries: (sessionId, scope = 'branch') => piRuntimeBroker.requestForSession(sessionId, 'session.entries', { sessionId, scope }),
+    },
+    onError: error => console.error('[AgentRoot] Runtime failed:', errorMessage(error)),
+    rejectHarnessRequest: async (sessionId, requestId, message) => {
+      await piRuntimeBroker.requestForSession(sessionId, 'harness.respond', buildHarnessRespondParams(sessionId, requestId,
+        { ok: false, error: { code: 'unavailable', message, retryable: true } }));
+    },
+  });
   // a session whose durable `bot.profile` points at it attaches a `bot-root`
   // Thread under the `bot:<id>` scope instead of a project workspace.
   const botRootRuntime = createBotRootRuntime({
@@ -2707,6 +2726,23 @@ async function main(options: StartWebUiServerOptions = {}): Promise<WebUiServerC
       );
     },
   });
+  const threadWaitRuntime = createThreadWaitRuntime({
+    registry: threadRegistry,
+    onError: error => console.error('[ThreadWait] Recovery failed:', errorMessage(error)),
+    resume: async (scopeId, thread, wait) => {
+      if (!await threadRegistry.canExecuteScope(scopeId)) throw new Error('The task execution scope is unavailable');
+      const text = `${wait.reason ?? 'The dependency wait ended'}. Resume the overall task: ${thread.brief}\nInspect relevant teammate work and continue implementation or integration.`;
+      if (isAttachedRootPurpose(thread.purpose)) {
+        await piRuntimeBroker.openSession({ sessionId: wait.sessionId });
+        const result = await piRuntimeBroker.requestForSession(wait.sessionId, 'agent.threadRequest', { sessionId: wait.sessionId, messageId: wait.id, text });
+        if (!result.accepted) throw new Error('The waiting session did not accept its continuation');
+      } else {
+        await threadRuntime!.continueRun({ scopeId, parent: thread.parent, threadId: thread.id, mode: 'continue',
+          resumeSuspended: true, task: text, requestId: wait.id, from: { kind: 'thread', id: thread.id } });
+      }
+    },
+  });
+  threadWaitRuntimeRef.current = threadWaitRuntime;
   piRuntimeBroker.setSessionRunCoordinator(async ({ snapshot }) => {
     if (snapshot.workFocus?.active.id !== 'research' || snapshot.workspace?.kind === 'workspace') return;
     try {
@@ -2809,16 +2845,17 @@ async function main(options: StartWebUiServerOptions = {}): Promise<WebUiServerC
     ...(uiAuthController ? { requireAuth: uiAuthController.requireAuth } : {}),
   });
   piRuntimeBroker.setSessionDeleteCoordinator(async ({ sessionId, summary }) => {
-    if (summary.workspace?.kind === 'workspace') {
-      const workspaceId = summary.workspace.authorityId ?? summary.workspace.id;
-      const researchRoot = (await threadRegistry.listThreads(
-        workspaceId,
+    const rootScope = await threadRuntime!.rootScopeForSession(sessionId);
+    if (rootScope) {
+      const roots = (await threadRegistry.listThreads(
+        rootScope.scopeId,
         { kind: 'session', id: sessionId },
         true,
-      )).find((thread) => thread.purpose === 'research-root');
-      if (researchRoot) {
+      )).filter((thread) => isAttachedRootPurpose(thread.purpose) && thread.purpose !== 'bot-root');
+      if (roots.length) {
         await researchRootRuntime.cancelSession(sessionId, 'user session deleted');
-        await threadRuntime!.kill(researchRoot.id, false, workspaceId);
+        await agentRootRuntime.cancelSession(sessionId, 'user session deleted');
+        for (const root of roots) await threadRuntime!.kill(root.id, false, rootScope.scopeId);
       }
     }
     // A Bot entry chat is disposable: deleting it cancels the attached Run and
@@ -3700,7 +3737,10 @@ async function main(options: StartWebUiServerOptions = {}): Promise<WebUiServerC
     threadUpdateBaseline: (workspaceId, parent, threadId, resultRevision, extras) => (
       threadRuntime!.updateBaseline(workspaceId, parent, threadId, resultRevision, extras)
     ),
-    threadSendToSession: (sessionId, message, meta) => threadRuntime!.send(sessionId, message, meta),
+    threadSendToSession: async (sessionId, message, meta) => {
+      if (!piRuntimeBroker.activeSessionIds.includes(sessionId)) await piRuntimeBroker.openSession({ sessionId });
+      await threadRuntime!.send(sessionId, message, meta);
+    },
     threadCaptureInputContext: (input) => threadRuntime!.captureInputContext(input.sessionId),
     threadHistoryEntries: (sessionId) => piRuntimeBroker.previewSessionEntries(sessionId, undefined, "branch"),
     runCompactionTask: (actor, spec, signal) => piRuntimeBroker.runCompactionTask(actor.sessionId, spec, {
@@ -3917,8 +3957,10 @@ async function main(options: StartWebUiServerOptions = {}): Promise<WebUiServerC
     void recoveryTurnCoordinator.processEvent(event);
     void botRootRuntime.processEvent(event, async () => {
       await researchRootRuntime.processEvent(event, async () => {
-        await harnessRouter.processEvent(event);
-        threadRuntime.processEvent(event);
+        await agentRootRuntime.processEvent(event, async () => {
+          await harnessRouter.processEvent(event);
+          threadRuntime.processEvent(event);
+        });
       });
     }).catch((error) => {
       console.error('[ResearchRoot] Event routing failed:', errorMessage(error));
@@ -4042,6 +4084,7 @@ async function main(options: StartWebUiServerOptions = {}): Promise<WebUiServerC
       });
     })();
   });
+  void threadWaitRuntime.reconcile().catch(error => console.error('[ThreadWait] Reconcile failed:', errorMessage(error)));
   const piRuntimeGateway = createPiRuntimeGateway({
     server,
     broker: piRuntimeBroker,
@@ -4224,6 +4267,7 @@ async function main(options: StartWebUiServerOptions = {}): Promise<WebUiServerC
       piSessionAutomation.stop();
       experimentService.detachObservers();
       brokerUnsubscribe();
+      harnessRouter.dispose();
       await harnessSessionRegistration.dispose();
       await unregisterWorkbenchLayoutService();
       if (ownsExtensionRuntime) await extensionRuntime.stop();
@@ -4252,7 +4296,7 @@ async function main(options: StartWebUiServerOptions = {}): Promise<WebUiServerC
       // One refused exit must not prevent the other domains from shutting down.
       await memoryOrganizer.dispose();
       const processShutdown = await Promise.allSettled([
-        researchRootRuntime.dispose(), botRootRuntime.dispose(), threadRuntime.dispose(), terminalRuntime?.shutdown(), languageSupervisor.dispose(), managedLanguageServers.dispose(), runRuntime.dispose(),
+        threadWaitRuntime?.dispose(), agentRootRuntime.dispose(), researchRootRuntime.dispose(), botRootRuntime.dispose(), threadRuntime.dispose(), terminalRuntime?.shutdown(), languageSupervisor.dispose(), managedLanguageServers.dispose(), runRuntime.dispose(),
         // Release every supervised native driver so no synthesized input is
         // left held down when the Host exits.
         computerService.dispose(),
@@ -4296,7 +4340,6 @@ async function main(options: StartWebUiServerOptions = {}): Promise<WebUiServerC
         processShutdownErrors.push(error);
         console.error('[KnowledgeStore] User-store shutdown incomplete:', errorMessage(error));
       }
-      harnessRouter.dispose();
       await harnessServiceHost.dispose();
       try {
         await egressRuntime.close();

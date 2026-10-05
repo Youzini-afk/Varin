@@ -38,6 +38,7 @@ export interface HarnessServiceContext {
   workspaceScope?: readonly string[];
   inputContext?: AgentInputContext;
   signal: AbortSignal;
+  interruptSignal?: AbortSignal;
   /** Register state that advances only after the Host response reaches pi-host. */
   deferResponseDelivery?(commit: () => void, abort: () => void): void;
 }
@@ -280,6 +281,8 @@ export const createHarnessRouter = (options: HarnessRouterOptions) => {
   const defaultTimeoutMs = options.defaultTimeoutMs ?? 30_000;
   const inflight = new Map<string, {
     controller: AbortController;
+    interrupt: AbortController;
+    method: HarnessMethod;
     identity: HarnessActorIdentity;
     sessionId: string;
     queryId?: string;
@@ -331,7 +334,10 @@ export const createHarnessRouter = (options: HarnessRouterOptions) => {
     if (typeof data.requestId === "string" && data.requestId) {
       const key = requestKey(actor, data.requestId);
       const pending = inflight.get(key);
-      if (pending && sameRequestActor(pending.identity, actor)) abortInflight(key);
+      if (pending && sameRequestActor(pending.identity, actor)) {
+        if (data.wake === true && pending.method === "thread.wait") pending.interrupt.abort();
+        else abortInflight(key);
+      }
     }
     if (typeof data.queryId === "string" && data.queryId) {
       if (!actor.grantedCapabilities.includes(HARNESS_METHOD_CAPABILITY["explore.query.cancel"])) return;
@@ -384,6 +390,7 @@ export const createHarnessRouter = (options: HarnessRouterOptions) => {
       } catch { /* diagnostics cannot change an operation's outcome */ }
     };
     const controller = new AbortController();
+    const interrupt = new AbortController();
     // The worker's deadline can cancel before the Host timer fires. Capture
     // that path too, without mislabelling explicit user cancellation as timeout.
     controller.signal.addEventListener("abort", () => {
@@ -395,6 +402,8 @@ export const createHarnessRouter = (options: HarnessRouterOptions) => {
       : undefined;
     const inflightKey = requestKey(identity, data.requestId);
     inflight.set(inflightKey, {
+      interrupt,
+      method,
       controller,
       identity,
       sessionId: identity.sessionId,
@@ -512,6 +521,7 @@ export const createHarnessRouter = (options: HarnessRouterOptions) => {
         inputContext,
         ...(actor.workspaceScope ? { workspaceScope: actor.workspaceScope } : {}),
         signal: controller.signal,
+        interruptSignal: interrupt.signal,
         deferResponseDelivery: (commit, abort) => {
           deferredDeliveries.push({ commit, abort });
         },

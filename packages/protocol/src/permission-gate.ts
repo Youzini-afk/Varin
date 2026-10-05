@@ -231,6 +231,9 @@ export function evaluateGate(
   params: Record<string, unknown>,
   policy: PermissionPolicy,
 ): GateResult {
+  if (tool === "dispatch" && params.preset === undefined && params.capability === undefined && params.kind !== "discussion") {
+    params = { ...params, preset: "worker" };
+  }
   for (const rule of policy.rules) {
     if (rule.tool !== "*" && rule.tool !== tool) continue;
 

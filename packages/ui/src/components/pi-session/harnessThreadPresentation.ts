@@ -10,8 +10,8 @@ export interface HarnessThreadProjection {
   parent: ThreadParent;
   includeArchived: boolean;
   threads: HarnessThreadSnapshot[];
-  researchRoot: HarnessThreadSnapshot | null;
-  researchBranches: HarnessThreadSnapshot[];
+  rootThreads: HarnessThreadSnapshot[];
+  branches: HarnessThreadSnapshot[];
 }
 
 export type HarnessThreadState =
@@ -36,7 +36,7 @@ export const projectHarnessThreadState = ({ thread, activeRun }: HarnessThreadSn
   if (thread.integration === 'merged') return 'merged';
   if (thread.integration === 'conflict') return 'conflict';
   if (thread.lifecycle === 'queued') return 'queued';
-  if (thread.attention === 'user' || thread.attention === 'permission') return 'waiting';
+  if (thread.attention === 'user' || thread.attention === 'permission' || thread.attention === 'thread') return 'waiting';
   if (thread.attention === 'stalled') return 'stalled';
   if (thread.attention === 'looping') return 'looping';
   if (thread.lifecycle === 'settled') {
@@ -133,21 +133,19 @@ export const parseHarnessThreadProjection = (
     throw new Error('Malformed thread list response');
   }
   const includeArchived = options?.includeArchived === true || value.includeArchived === true;
-  const researchRoot = value.researchRoot == null ? null : parseSnapshot(value.researchRoot);
-  if (value.researchBranches !== undefined && !Array.isArray(value.researchBranches)) {
-    throw new Error('Malformed research branch list');
+  if ((value.rootThreads !== undefined && !Array.isArray(value.rootThreads)) || (value.branches !== undefined && !Array.isArray(value.branches))) {
+    throw new Error('Malformed task branch list');
   }
-  const researchBranches = (Array.isArray(value.researchBranches) ? value.researchBranches : []).map(parseSnapshot);
-  if (researchBranches.some(({ thread }) => (
-    !researchRoot || thread.workspaceId !== value.workspaceId
-      || thread.parent.kind !== 'thread' || thread.parent.id !== researchRoot.thread.id
-  ))) throw new Error('Research branches do not belong to the reported root');
+  const rootThreads = (Array.isArray(value.rootThreads) ? value.rootThreads : []).map(parseSnapshot);
+  const branches = (Array.isArray(value.branches) ? value.branches : []).map(parseSnapshot);
+  if (branches.some(({ thread }) => thread.workspaceId !== value.workspaceId || thread.parent.kind !== 'thread'
+    || !rootThreads.some(root => thread.parent.id === root.thread.id))) throw new Error('Task branches do not belong to the reported roots');
   return {
     workspaceId: value.workspaceId,
     parent: parseParent(value.parent),
     includeArchived,
-    researchRoot,
-    researchBranches: researchBranches.filter((item) => (
+    rootThreads,
+    branches: branches.filter((item) => (
       !item.thread.hidden && (includeArchived || item.thread.lifecycle !== 'archived')
     )),
     threads: value.threads.map(parseSnapshot).filter((item) => (
@@ -241,8 +239,8 @@ export const parseHarnessThreadMutation = (value: unknown): HarnessThreadProject
     parent: parseParent(value.parent),
     includeArchived: isRecord(value.thread) && value.thread.lifecycle === 'archived',
     threads: [snapshot],
-    researchRoot: null,
-    researchBranches: [],
+    rootThreads: [],
+    branches: [],
     ...snapshot,
   };
 };

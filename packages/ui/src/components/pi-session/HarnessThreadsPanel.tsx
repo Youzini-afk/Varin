@@ -72,8 +72,8 @@ export const HarnessThreadsPanel: React.FC<{
   const threadState = useHarnessThreadState();
   const threads = React.useMemo(() => [
     ...threadState.threads,
-    ...threadState.researchBranches,
-  ], [threadState.threads, threadState.researchBranches]);
+    ...threadState.branches,
+  ], [threadState.threads, threadState.branches]);
   const webSources = useWebSources(parentSessionId);
   const openContextSurface = useUIStore((state) => state.openContextSurface);
   const toggleContextPanel = useUIStore((state) => state.toggleContextPanel);

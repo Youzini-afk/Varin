@@ -2963,6 +2963,7 @@ export function createThreadRuntime(options: ThreadRuntimeOptions) {
       // applies to bot entry chats — reopening the entry re-attaches.
       if (isAttachedRootPurpose(thread.purpose) || previous?.sessionOwner === "attached-root") continue;
       if (thread.lifecycle !== "active" || previous?.outcome !== "lost") continue;
+      if (thread.dependencyWait) continue;
       if (resuming.has(thread.id)) continue;
       resuming.add(thread.id);
       const task = (async () => {
@@ -4231,7 +4232,7 @@ export function createThreadRuntime(options: ThreadRuntimeOptions) {
     const thread = await options.registry.getThreadById(workspaceId, threadId);
     const report = thread?.report;
     const transcript = report?.transcriptRef.sessionId;
-    if (transcript && thread?.purpose !== "research-root") sessionIds.add(transcript);
+    if (transcript && !isAttachedRootPurpose(thread?.purpose)) sessionIds.add(transcript);
     if (sessionIds.size === 0) return [];
     if (!options.deleteSession) {
       throw new ThreadRuntimeError("unavailable", "Session deletion is unavailable; the thread's transcripts would be left behind");

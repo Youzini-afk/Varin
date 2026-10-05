@@ -9,6 +9,7 @@ import type {
 } from "@varin/protocol";
 
 interface PendingRequest {
+  method: HarnessMethod;
   cleanup?: () => void;
   resolve: (value: unknown) => void;
   reject: (error: HarnessRequestError) => void;
@@ -63,6 +64,10 @@ export class HostServicesBridge {
     this.#emitCancel(data);
   }
 
+  wakeDependencyWaits(): void {
+    for (const [requestId, pending] of this.#pending) if (pending.method === "thread.wait") this.#emitCancel({ requestId, wake: true });
+  }
+
   request<M extends HarnessMethod>(
     method: M,
     params: HarnessServiceMap[M]["params"],
@@ -96,6 +101,7 @@ export class HostServicesBridge {
       pending.reject(new HarnessRequestError("timeout", `harness request timed out after ${timeoutMs}ms`));
     }, timeoutMs);
     const pending: PendingRequest = {
+      method,
       resolve: resolveResponse,
       reject: rejectResponse,
       sessionId: this.#sessionId,

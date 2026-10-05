@@ -58,14 +58,14 @@ const run = (overrides: Partial<ThreadRun> = {}): ThreadRun => ({
 });
 
 describe('HarnessThreadsPanel projection', () => {
-  test('projects the attached root and its branches without treating unrelated sessions as research', () => {
-    const root = { thread: thread({ id: 'root', purpose: 'research-root', hidden: true }), activeRun: run({ sessionId: 'parent-1', sessionOwner: 'attached-root' }) };
+  test.each(['agent-root', 'research-root'] as const)('projects %s and its branches without unrelated sessions', purpose => {
+    const root = { thread: thread({ id: 'root', purpose, hidden: true }), activeRun: run({ sessionId: 'parent-1', sessionOwner: 'attached-root' }) };
     const branch = { thread: thread({ parent: { kind: 'thread', id: 'root' } }), activeRun: run() };
-    const response = { workspaceId: 'workspace-1', parent: { kind: 'session', id: 'parent-1' }, threads: [], researchRoot: root, researchBranches: [branch] };
-    expect(parseHarnessThreadProjection(response).researchRoot).toEqual(root);
-    expect(parseHarnessThreadProjection(response).researchBranches).toEqual([branch]);
-    expect(() => parseHarnessThreadProjection({ ...response, researchBranches: [{ ...branch, thread: thread() }] })).toThrow(/research branch/i);
-    expect(parseHarnessThreadProjection({ ...response, researchRoot: null, researchBranches: [] }).researchRoot).toBeNull();
+    const response = { workspaceId: 'workspace-1', parent: { kind: 'session', id: 'parent-1' }, threads: [], rootThreads: [root], branches: [branch] };
+    expect(parseHarnessThreadProjection(response).rootThreads).toEqual([root]);
+    expect(parseHarnessThreadProjection(response).branches).toEqual([branch]);
+    expect(() => parseHarnessThreadProjection({ ...response, branches: [{ ...branch, thread: thread() }] })).toThrow(/task branch/i);
+    expect(parseHarnessThreadProjection({ ...response, rootThreads: [], branches: [] }).rootThreads).toEqual([]);
   });
 
   test('keeps execution, attention, and integration states distinct', () => {

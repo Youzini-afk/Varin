@@ -424,8 +424,9 @@ export function mergeHarnessSettings(
     key,
     user.dispatch?.askBefore?.[key] === true || workspace.dispatch?.askBefore?.[key] === true,
   ]));
-  for (const id of ["quick-implement", "hard-implement", "frontend", "review", "check"]) {
+  for (const [id, role] of [["quick-implement", "quickImplement"], ["hard-implement", "hardImplement"], ["frontend", "frontend"], ["review", "review"], ["check", "check"]] as const) {
     if (askBefore[id]) askBefore.worker = true;
+    if (askBefore[id]) askBefore[`custom:saved-${role}`] = true;
     delete askBefore[id];
   }
   const permissions = mergePolicies(

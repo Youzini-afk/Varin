@@ -620,6 +620,25 @@ describe("harness router", () => {
 
 
 describe("scheduler wait admission transport", () => {
+  it("accepts new input as a normal wait interruption without aborting execution", async () => {
+    let ready!: () => void;
+    const armed = new Promise<void>(resolve => { ready = resolve; });
+    const respond = vi.fn(async (_identity: unknown, _requestId: string, _outcome: unknown) => undefined);
+    const router = createHarnessRouter({ respond, resolveActor: async () => resolvedActor(["control.thread"]) });
+    router.register("thread.wait", { handle: async (_params, ctx) => {
+      const notified = new Promise<void>(resolve => ctx.interruptSignal!.addEventListener("abort", () => resolve(), { once: true }));
+      ready(); await notified;
+      expect(ctx.signal.aborted).toBe(false);
+      return { text: "new input available", done: 0, running: 1, waiting: 0, queued: 0, timedOut: false };
+    } });
+    const request = harnessEvent("thread.wait", {}, { timeoutMs: 0 });
+    const pending = router.processEvent(request);
+    await armed;
+    await router.processEvent({ actor: ACTOR, kind: "host", envelope: { kind: "event", event: "harness.cancel", data: { requestId: request.envelope.data.requestId, wake: true } } });
+    await pending;
+    expect(respond.mock.calls[0]?.[2]).toMatchObject({ ok: true, result: { text: "new input available", timedOut: false } });
+    router.dispose();
+  });
   it("does not time out thread.wait admission but disposal cancels the handler", async () => {
     let signal: AbortSignal | undefined;
     const router = createHarnessRouter({

@@ -248,22 +248,17 @@ export function registerHarnessThreadRoutes(
         thread,
         activeRun: await registry.getActiveRun(scopeId, thread.id),
       })));
-      const researchRootThread = (await registry.listThreads(scopeId, parent, true))
-        .find((thread) => thread.purpose === "research-root") ?? null;
-      const researchRoot = researchRootThread
-        ? { thread: researchRootThread, activeRun: await registry.getActiveRun(scopeId, researchRootThread.id) }
-        : null;
-      const researchBranches = researchRootThread
-        ? (await registry.listThreadSnapshots(scopeId, { kind: "thread", id: researchRootThread.id }))
-          .filter(({ thread }) => includeArchived || thread.lifecycle !== "archived")
-        : [];
+      const roots = (await registry.listThreads(scopeId, parent, true)).filter(thread => isAttachedRootPurpose(thread.purpose));
+      const rootThreads = await Promise.all(roots.map(async thread => ({ thread, activeRun: await registry.getActiveRun(scopeId, thread.id) })));
+      const branches = (await Promise.all(roots.map(root => registry.listThreadSnapshots(scopeId, { kind: "thread", id: root.id }))))
+        .flat().filter(({ thread }) => includeArchived || thread.lifecycle !== "archived");
       response.json({
         workspaceId: scopeId,
         parent,
         includeArchived,
         threads: projected,
-        researchRoot,
-        researchBranches,
+        rootThreads,
+        branches,
       });
     } catch (error) {
       sendError(response, error, "Unable to read harness threads");

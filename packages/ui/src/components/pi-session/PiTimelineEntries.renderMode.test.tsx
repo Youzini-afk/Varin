@@ -78,7 +78,7 @@ const renderTimeline = (
             parent: { kind: 'session', id: 'session' },
             reload: async () => {},
             threads,
-            researchRoot: null, researchBranches: [], loadError: null,
+            rootThreads: [], branches: [], loadError: null,
             workspaceId: 'workspace',
           }}>
             <PiTimelineEntryList

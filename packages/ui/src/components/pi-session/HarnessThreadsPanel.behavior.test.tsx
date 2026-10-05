@@ -124,7 +124,7 @@ beforeEach(() => {
     workspaceId: 'workspace-1', parent: { kind: 'session', id: 'parent-1' },
     merge: vi.fn(), reload: vi.fn(async () => {}),
     threads: [snapshot()],
-    researchRoot: null, researchBranches: [], loadError: null,
+    rootThreads: [], branches: [], loadError: null,
   };
   mocks.openSession.mockResolvedValue(undefined);
   mocks.prefetchSession.mockImplementation(() => new Promise<SessionEntriesResult>((resolve, reject) => {
@@ -158,7 +158,7 @@ describe('thread panel transcript is inspection, not execution', () => {
     const branch = snapshot();
     branch.thread.parent = { kind: 'thread', id: 'research-root' };
     state.threads = [];
-    state.researchBranches = [branch];
+    state.branches = [branch];
     await act(async () => root.render(
       <HarnessThreadStateContext.Provider value={state}>
         <HarnessThreadsPanel workspaceId="workspace-1" parentSessionId="parent-1" presentation="inline" title="Research branches" />

@@ -28,8 +28,8 @@ describe("harness thread routes", () => {
       parent: { kind: "session", id: "session-1" },
       includeArchived: false,
       threads: [{ thread, activeRun: { id: "run-1", workerState: "running" } }],
-      researchRoot: null,
-      researchBranches: [],
+      rootThreads: [],
+      branches: [],
     });
   });
 

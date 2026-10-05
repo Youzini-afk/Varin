@@ -77,6 +77,7 @@ export class VarinAgentProvider implements AgentProviderAdapter {
     const settings = mergeHarnessSettings(harness as HarnessSettingsInput, {});
     harness.models = settings.models;
     harness.agents = settings.agents;
+    harness.dispatch = settings.dispatch;
     const profiles = { ...settings.agents };
     let resultId = agentId;
     if (action === "create-agent") {

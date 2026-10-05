@@ -11,10 +11,10 @@ import type { WorkFocusId } from "./work-focus.js";
 import type { ResearchCapability, ResearchResourceManifest, ThreadResearchManifest } from "./research-capabilities.js";
 
 export type ThreadKind = "discussion" | "implementation";
-export type ThreadPurpose = "task" | "research-root" | "bot-root";
+export type ThreadPurpose = "task" | "agent-root" | "research-root" | "bot-root";
 /** Root threads bound to a user's real session via `attached-root` runs. */
 export const isAttachedRootPurpose = (purpose: ThreadPurpose | undefined | null): boolean => (
-  purpose === "research-root" || purpose === "bot-root"
+  purpose === "agent-root" || purpose === "research-root" || purpose === "bot-root"
 );
 export type ThreadSessionOwner = "spawned-child" | "attached-root";
 export type ThreadCreatedBy = "user" | "agent";
@@ -279,6 +279,19 @@ export interface TranscriptRef {
 export interface ThreadWaitingFor {
   kind: "user" | "permission" | "thread" | "experiment" | "followup";
   text: string;
+}
+
+export interface ThreadDependencyWait {
+  id: string;
+  runId: string;
+  sessionId: string;
+  deadline?: number;
+  state: "watching" | "ready" | "resuming";
+  targets: Array<{ id: string; runId: string | null; resultRevision: number | null;
+    lifecycle: ThreadLifecycle; attention: ThreadAttention; integration: ThreadIntegration; outcome: ThreadRunOutcome | null }>;
+  requestIds: string[];
+  reason?: string;
+  error?: string;
 }
 
 export interface ThreadBaselineUpdate {
@@ -612,6 +625,7 @@ export interface Thread {
   lifecycle: ThreadLifecycle;
   attention: ThreadAttention;
   waitingFor: ThreadWaitingFor | null;
+  dependencyWait?: ThreadDependencyWait;
   integration: ThreadIntegration;
   diffStats: ThreadDiffStats | null;
   report: ThreadReport | null;

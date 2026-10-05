@@ -1435,6 +1435,7 @@ export class SessionHost {
       const disposition = await this.session.steer(text, images === undefined ? undefined : toImages(images), {
         beforeMessages: message ? [{ ...message, role: "custom", timestamp: Date.now() }] : [],
       });
+      this.#hostServicesBridge?.wakeDependencyWaits();
       await this.#commitInputContext(inputContext, previousContext);
       if (disposition === "queued") await this.#resumeQueueIfIdle(this.session);
       return true;
@@ -1460,6 +1461,7 @@ export class SessionHost {
       const disposition = await this.session.followUp(text, images === undefined ? undefined : toImages(images), {
         beforeMessages: message ? [{ ...message, role: "custom", timestamp: Date.now() }] : [],
       });
+      this.#hostServicesBridge?.wakeDependencyWaits();
       await this.#commitInputContext(inputContext, previousContext);
       if (disposition === "queued") await this.#resumeQueueIfIdle(this.session);
       return true;

@@ -157,8 +157,8 @@ export const isPiComposerPdfUploadUnsupportedForSession = async (
     const projection = parseHarnessThreadProjection(await response.json());
     const snapshots = [
       ...projection.threads,
-      ...(projection.researchRoot ? [projection.researchRoot] : []),
-      ...projection.researchBranches,
+      ...projection.rootThreads,
+      ...projection.branches,
     ];
     const current = snapshots.find(({ activeRun }) => activeRun?.sessionId === input.sessionId);
     return current?.thread.worktree?.viewMode === 'virtual';

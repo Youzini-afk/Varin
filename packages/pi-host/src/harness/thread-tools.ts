@@ -388,7 +388,7 @@ export function createWaitTool(bridge: HostServicesBridge, _sessionId: string): 
   return defineTool({
     name: "wait",
     label: "Wait",
-    description: "Wait for a thread result, an addressed request/reply, actionable attention, or timeout. Routine progress and inform messages do not wake the model. A yielded Run resumes only after reacquiring the shared execution slot.",
+    description: "Rest without polling until a task dependency, addressed request/reply or actionable issue arrives. Without timeout_ms this waits indefinitely; an explicit timeout selects how long to wait. Routine progress and inform messages do not wake the model. Waiting releases the execution slot and survives Host restart.",
     promptSnippet: "wait: await a result or addressed dependency (timeout is normal)",
     promptGuidelines: [
       "wait ignores routine progress and ordinary inform messages. Timeout ends dependency watching, but resuming model work still waits for shared execution admission.",
@@ -397,16 +397,12 @@ export function createWaitTool(bridge: HostServicesBridge, _sessionId: string): 
     executionMode: "sequential",
     execute: async (_toolCallId, params, signal, _onUpdate, _ctx) => {
       try {
-        const waitTimeout = Math.min(
-          params.timeout_ms ?? (HARNESS_MAX_REQUEST_TIMEOUT_MS - 5_000),
-          HARNESS_MAX_REQUEST_TIMEOUT_MS - 5_000,
-        );
         // The Host applies waitTimeout to dependency watching, then reacquires
         // execution admission. Cancellation/disposal, not a second fixed timer,
         // bounds that latter wait.
         const result = await bridge.request<"thread.wait">("thread.wait", {
           ...(params.ids !== undefined ? { ids: params.ids } : {}),
-          timeoutMs: waitTimeout,
+          ...(params.timeout_ms !== undefined ? { timeoutMs: params.timeout_ms } : {}),
         }, { timeoutMs: 0, ...(signal ? { signal } : {}) });
         const typed = result as ThreadWaitResult;
         return {

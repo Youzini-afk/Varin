@@ -7,8 +7,8 @@ export interface HarnessThreadStateValue {
   parent: ThreadParent;
   reload(): Promise<void>;
   threads: HarnessThreadSnapshot[];
-  researchRoot: HarnessThreadSnapshot | null;
-  researchBranches: HarnessThreadSnapshot[];
+  rootThreads: HarnessThreadSnapshot[];
+  branches: HarnessThreadSnapshot[];
   loadError: string | null;
   workspaceId: string;
 }
@@ -18,8 +18,8 @@ const EMPTY_STATE: HarnessThreadStateValue = {
   parent: { kind: 'session', id: '' },
   reload: async () => {},
   threads: [],
-  researchRoot: null,
-  researchBranches: [],
+  rootThreads: [],
+  branches: [],
   loadError: null,
   workspaceId: '',
 };

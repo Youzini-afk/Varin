@@ -4,7 +4,7 @@ The host-side harness provides task and resource services that the pi-host
 agent tools call via the `HostServicesBridge`. All services are registered
 on the `HarnessRouter` and dispatched from the broker event stream.
 
-Attached Bot/research roots order request admission after their lifecycle changes, then release the
+Attached Agent/Bot/research roots order request admission after their lifecycle changes, then release the
 lifecycle queue while the Router executes the service. A slow handler must not serialize later tools or
 the same session's compaction-worker queries. Cancellation still goes directly to the Router, and root
 shutdown drains both lifecycle work and admitted requests.
@@ -47,6 +47,23 @@ broker event stream ──→ HarnessRouter.processEvent()
 ```
 
 ## Components
+
+### Task collaboration (D-339)
+
+Common dispatch profiles are Worker and retrieval; an ordinary dispatch carries the Worker collaboration
+instructions while inheriting the caller's authorized tools and current model. Existing customized old
+profiles are retained as editable user profiles. Same-task discovery and history reads follow the durable
+task ancestry; read access does not grant sibling lifecycle control.
+
+`agent-root-runtime.ts` attaches ordinary main conversations to the existing Thread/Run authority.
+`wait` without a duration is an event subscription, not a periodic model call. Its targets, initial
+result/message positions, optional deadline and owning Run are persisted in `Thread.dependencyWait`.
+`thread-wait-runtime.ts` rebuilds those subscriptions after restart and resumes lost executions only
+when a result, addressed request/reply, actionable failure or requested deadline satisfies the wait.
+The live service owns its response; durable recovery owns only lost/idle continuation. New user input
+interrupts the live wait through the Router and readmits the execution slot before returning. Shutdown
+aborts admitted Router services before draining attached-root queues. Task UI projects all attached
+roots and their branches; deleting a root cannot delete the user's native Pi transcript as a child asset.
 
 ### Bot sleep and wake
 

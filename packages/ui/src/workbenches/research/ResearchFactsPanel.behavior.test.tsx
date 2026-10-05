@@ -81,8 +81,8 @@ const state = (overrides: Partial<HarnessThreadStateValue> = {}): HarnessThreadS
   merge: vi.fn(),
   reload: vi.fn(async () => {}),
   threads: [],
-  researchRoot: null,
-  researchBranches: [],
+  rootThreads: [],
+  branches: [],
   loadError: null,
   ...overrides,
 });

@@ -1,4 +1,4 @@
-import type { Thread, ThreadParent } from "@varin/protocol";
+import { isAttachedRootPurpose, type Thread, type ThreadParent } from "@varin/protocol";
 import type { ExperimentCaller } from "./experiments.js";
 import type { ThreadRegistry } from "./thread-registry.js";
 import { HarnessServiceError } from "./service-error.js";
@@ -53,7 +53,7 @@ export async function resolveResearchCaller(
     }
   } else {
     for (const thread of await children({ kind: "session", id: input.sessionId })) {
-      if (input.user && (thread.purpose === "research-root" || thread.purpose === "bot-root")) await descendants(thread);
+      if (input.user && isAttachedRootPurpose(thread.purpose)) await descendants(thread);
       else include(thread);
     }
   }

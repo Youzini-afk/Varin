@@ -509,7 +509,9 @@ export function createThreadDispatchService(host: HarnessServiceHost): HarnessSe
           modelSettings: { ...(researchDefinition?.modelSettings ?? preset?.modelSettings) },
         }),
         ...(environment ? { environment } : {}),
-        ...(preset?.systemPromptFragment ? { systemPromptFragment: preset.systemPromptFragment } : {}),
+        ...((preset ?? (!research && params.kind !== "discussion"
+          ? customizeHarnessAgent(EXECUTION_PRESETS.worker, liveSettings?.models.worker?.agent) : null))?.systemPromptFragment
+          ? { systemPromptFragment: (preset ?? customizeHarnessAgent(EXECUTION_PRESETS.worker, liveSettings?.models.worker?.agent)).systemPromptFragment } : {}),
         ...(researchDefinition ? {
           research: {
             capability: research!.capability,
@@ -759,10 +761,14 @@ export function createThreadWaitService(host: HarnessServiceHost): HarnessServic
       const { workspaceId, parent, owner } = owning;
       assertOwnerTool(owner, "wait");
       const observer = ctx.sessionId;
-      const timeoutMs = Math.min(
-        params.timeoutMs ?? (HARNESS_MAX_REQUEST_TIMEOUT_MS - 5_000),
-        HARNESS_MAX_REQUEST_TIMEOUT_MS - 5_000,
-      );
+      const timeoutMs = params.timeoutMs;
+      if (timeoutMs !== undefined && (!Number.isFinite(timeoutMs) || timeoutMs <= 0)) throw new HarnessServiceError("invalid-params", "Wait duration must be positive");
+      const deadline = timeoutMs === undefined ? undefined : Date.now() + timeoutMs;
+      const dependencySnapshots = async () => params.ids === undefined ? snapshotsFor(host, owning, true)
+        : (await taskSnapshotsFor(host, owning, true)).filter(snapshot => params.ids!.includes(snapshot.thread.id));
+      const initialTargets = await dependencySnapshots();
+      if (params.ids?.some(id => !initialTargets.some(snapshot => snapshot.thread.id === id))) throw new HarnessServiceError("not-found", "A requested dependency is outside this task or unavailable");
+      const waitId = randomUUID();
       // A Thread caller also watches its own record: inbound replies and
       // messages land on it and complete dependency waits (3.18C).
       const selfSnapshot = async (): Promise<ThreadSnapshot | null> => {
@@ -798,7 +804,8 @@ export function createThreadWaitService(host: HarnessServiceHost): HarnessServic
       };
       const hasChanges = async (): Promise<boolean> => {
         ctx.signal.throwIfAborted();
-        const snapshots = await snapshotsFor(host, owning, true);
+        if (ctx.interruptSignal?.aborted) return true;
+        const snapshots = await dependencySnapshots();
         if (snapshots.some((snapshot) => (!params.ids || params.ids.includes(snapshot.thread.id))
           && relevantChildChange(snapshot))) return true;
         const self = await selfSnapshot();
@@ -814,6 +821,13 @@ export function createThreadWaitService(host: HarnessServiceHost): HarnessServic
       let timedOut = false;
       if (!await hasChanges()) {
         if (owner?.activeRunId) {
+          if (!await registry.setDependencyWait(workspaceId, owner.id, { id: waitId, runId: owner.activeRunId, sessionId: ctx.sessionId,
+            ...(deadline === undefined ? {} : { deadline }), state: "watching", requestIds: [...initialRequests],
+            targets: initialTargets.map(({ thread, activeRun }) => ({ id: thread.id, runId: thread.activeRunId,
+              resultRevision: thread.resultRevision ?? null, lifecycle: thread.lifecycle, attention: thread.attention,
+              integration: thread.integration, outcome: activeRun?.outcome ?? null })) })) {
+            throw new HarnessServiceError("unavailable", "The waiting Run could not retain its dependency subscription");
+          }
           // Yield only because this tool is actually blocking. Failure to
           // establish that durable fact is not a successful empty wait.
           const marked = await registry.yieldExecutionSlot(workspaceId, owner.id, owner.activeRunId, {
@@ -822,30 +836,32 @@ export function createThreadWaitService(host: HarnessServiceHost): HarnessServic
           });
           if (!marked) throw new HarnessServiceError("unavailable", "The waiting Run could not yield its execution slot");
         }
-        const deadline = Date.now() + timeoutMs;
         while (true) {
           ctx.signal.throwIfAborted();
-          let wake!: (reason: "change" | "timeout" | "abort") => void;
-          const notification = new Promise<"change" | "timeout" | "abort">((resolve) => { wake = resolve; });
+          let wake!: (reason: "change" | "timeout" | "abort" | "input") => void;
+          const notification = new Promise<"change" | "timeout" | "abort" | "input">((resolve) => { wake = resolve; });
           // Registry listeners are one-shot. Resubscribe before rechecking,
           // keeping the original deadline even when routine activity arrives.
-          const watchedParents: ThreadParent[] = owning.family
-            ? [...owning.family].map((id) => ({ kind: "thread" as const, id }))
-            : [parent];
+          const watchedParents: ThreadParent[] = [...new Map([parent, ...initialTargets.map(snapshot => snapshot.thread.parent)]
+            .map(watched => [`${watched.kind}:${watched.id}`, watched])).values()];
           const unsubscribe = watchedParents.map((watched) => registry.subscribeToChanges(workspaceId, watched, () => wake("change")));
           if (owner) unsubscribe.push(registry.subscribeToChanges(workspaceId, owner.parent, () => wake("change")));
           const abort = () => wake("abort");
+          const newInput = () => wake("input");
           ctx.signal.addEventListener("abort", abort, { once: true });
-          const timer = setTimeout(() => wake("timeout"), Math.max(0, deadline - Date.now()));
+          ctx.interruptSignal?.addEventListener("abort", newInput, { once: true });
+          const timer = deadline === undefined ? undefined : setTimeout(() => wake("timeout"), Math.min(2_147_483_647, Math.max(0, deadline - Date.now())));
           try {
             if (await hasChanges()) break;
-            if (Date.now() >= deadline) { timedOut = true; break; }
+            if (deadline !== undefined && Date.now() >= deadline) { timedOut = true; break; }
             const reason = await notification;
             if (reason === "abort") ctx.signal.throwIfAborted();
-            if (reason === "timeout") { timedOut = !await hasChanges(); break; }
+            if (reason === "input") break;
+            if (reason === "timeout" && deadline !== undefined && Date.now() >= deadline) { timedOut = !await hasChanges(); break; }
           } finally {
             clearTimeout(timer);
             ctx.signal.removeEventListener("abort", abort);
+            ctx.interruptSignal?.removeEventListener("abort", newInput);
             for (const stop of unsubscribe) stop();
           }
         }
@@ -854,6 +870,9 @@ export function createThreadWaitService(host: HarnessServiceHost): HarnessServic
       // timeout may finish dependency watching, but cannot bypass root admission.
       if (owner?.activeRunId) {
         await registry.awaitExecutionSlot(workspaceId, owner.id, owner.activeRunId, ctx.signal);
+        const clear = () => { void registry.setDependencyWait(workspaceId, owner.id, null, waitId).catch(error => console.error("[ThreadWait] Failed to acknowledge wait completion", error instanceof Error ? error.message : String(error))); };
+        if (ctx.deferResponseDelivery) ctx.deferResponseDelivery(clear, () => undefined);
+        else clear();
       }
       // Messages held while the caller waited flush at this normal boundary.
       if (owner && host.threadSendToSession) {
@@ -867,7 +886,7 @@ export function createThreadWaitService(host: HarnessServiceHost): HarnessServic
           await registry.acknowledgeThreadMessages(workspaceId, owner.id, [heldMessage.id], owner.activeRunId ?? undefined);
         }
       }
-      const all = await snapshotsFor(host, owning, true);
+      const all = await dependencySnapshots();
       const ids = params.ids ?? all.map(({ thread }) => thread.id);
       const targets = all.filter(({ thread }) => ids.includes(thread.id));
       const self = await selfSnapshot();
@@ -883,7 +902,7 @@ export function createThreadWaitService(host: HarnessServiceHost): HarnessServic
       const occupied = new Set([...done, ...queued, ...running].map(({ thread }) => thread.id));
       const waiting = targets.filter(({ thread }) => !occupied.has(thread.id));
       const counts = `${done.length} done · ${running.length} running · ${waiting.length} waiting · ${queued.length} queued`;
-      const lines = [timedOut ? `timed out after ${Math.round(timeoutMs / 1000)}s — ${counts}` : counts];
+      const lines = [ctx.interruptSignal?.aborted ? `new input available — ${counts}` : timedOut ? `wait duration elapsed after ${Math.round(timeoutMs! / 1000)}s — ${counts}` : counts];
       for (const snapshot of done) {
         const { thread } = snapshot;
         if (thread.report) {
@@ -1051,6 +1070,13 @@ export const deliverAuthorizedThreadRequest = async (
         ...(runId ? { runId } : {}),
       })
     );
+    if (isAttachedRootPurpose(thread.purpose)) {
+      const sessionId = thread.parent.kind === "session" ? thread.parent.id : (await deps.registry.getActiveRun(input.scopeId, thread.id))?.sessionId;
+      if (!sessionId || !deps.sendToSession) throw new HarnessServiceError("unavailable", "Main conversation delivery is unavailable");
+      await deps.sendToSession(sessionId, input.text, { from: messagePeerLabel(input.from), requestId: input.requestId, messageId: input.requestId });
+      await patch("delivered");
+      return { accepted: true, lifecycle: thread.lifecycle, attention: thread.attention, messageId: input.requestId, delivery: "delivered", route: "active" };
+    }
     if (thread.lifecycle === "queued") {
       return { accepted: true, lifecycle: thread.lifecycle, attention: thread.attention,
         messageId: input.requestId, delivery: "scheduled" };
@@ -1427,6 +1453,17 @@ export function createThreadSendService(host: HarnessServiceHost): HarnessServic
       if (thread.deletion) {
         throw new HarnessServiceError("unavailable", `Thread is being deleted: ${thread.id}`);
       }
+      if (isAttachedRootPurpose(thread.purpose)) {
+        if (upgradeRequested) throw new HarnessServiceError("invalid-params", "A main conversation keeps its user-selected execution configuration");
+        const rootSessionId = thread.parent.kind === "session" ? thread.parent.id
+          : (await registry.getActiveRun(workspaceId, thread.id))?.sessionId;
+        if (!rootSessionId) throw new HarnessServiceError("unavailable", "The attached conversation identity is unavailable");
+        await recordState("pending");
+        await host.threadSendToSession!(rootSessionId, params.message, { from: fromLabel, messageId: requestId,
+          ...(kind === "request" ? { requestId } : {}) });
+        await recordState("delivered");
+        return { accepted: true, lifecycle: thread.lifecycle, attention: thread.attention, messageId: requestId, delivery: "delivered" };
+      }
       if (thread.lifecycle === "queued") {
         if (upgradeRequested) {
           throw new HarnessServiceError("invalid-params", "capability/model re-routing needs a Thread that has completed a Run; dispatch carries the initial configuration");
@@ -1701,6 +1738,7 @@ export function createThreadReadService(host: HarnessServiceHost): HarnessServic
         lines.push(`Steps: ${run?.steps ?? 0} · Last activity: ${run?.lastActivityAt ?? thread.updatedAt}`);
         if (run?.lastToolCall) lines.push(`Last tool: ${run.lastToolCall.name} at ${run.lastToolCall.at}`);
         if (thread.waitingFor) lines.push(`Waiting for: ${thread.waitingFor.kind} — ${thread.waitingFor.text}`);
+        if (thread.dependencyWait?.error) lines.push(`Wait recovery needs attention: ${thread.dependencyWait.error}`);
         if (thread.attention !== "none") lines.push(`Attention: ${thread.attention}`);
         if (run?.workerState === "lost") lines.push("Run: worker-lost");
         if (delivery?.blocksSnapshot) {

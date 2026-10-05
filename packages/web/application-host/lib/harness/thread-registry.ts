@@ -605,7 +605,7 @@ const isThread = (value: unknown): value is Thread => {
     && (value.manifest.draftBaselineId === null || value.manifest.worktree === "isolated")
     && (value.createdBy === "user" || value.createdBy === "agent")
     && (value.kind === "discussion" || value.kind === "implementation")
-    && (value.purpose === "task" || value.purpose === "research-root" || value.purpose === "bot-root")
+    && (value.purpose === "task" || value.purpose === "agent-root" || value.purpose === "research-root" || value.purpose === "bot-root")
     && (value.worktree === null || (isRecord(value.worktree)
       && isString(value.worktree.path)
       && (value.worktree.managedRoot === undefined || isString(value.worktree.managedRoot))
@@ -629,6 +629,15 @@ const isThread = (value: unknown): value is Thread => {
     && LIFECYCLES.has(value.lifecycle as ThreadLifecycle)
     && ATTENTIONS.has(value.attention as ThreadAttention)
     && isWaitingFor(value.waitingFor)
+    && (value.dependencyWait === undefined || (isRecord(value.dependencyWait)
+      && isString(value.dependencyWait.id) && isString(value.dependencyWait.runId) && isString(value.dependencyWait.sessionId)
+      && ["watching", "ready", "resuming"].includes(String(value.dependencyWait.state))
+      && (value.dependencyWait.deadline === undefined || (typeof value.dependencyWait.deadline === "number" && Number.isFinite(value.dependencyWait.deadline)))
+      && Array.isArray(value.dependencyWait.targets) && value.dependencyWait.targets.every(target => isRecord(target) && isString(target.id)
+        && (target.runId === null || isString(target.runId)) && (target.resultRevision === null || Number.isSafeInteger(target.resultRevision))
+        && LIFECYCLES.has(target.lifecycle as ThreadLifecycle) && ATTENTIONS.has(target.attention as ThreadAttention)
+        && INTEGRATIONS.has(target.integration as ThreadIntegration) && (target.outcome === null || OUTCOMES.has(target.outcome as ThreadRunOutcome)))
+      && Array.isArray(value.dependencyWait.requestIds) && value.dependencyWait.requestIds.every(isString)))
     && INTEGRATIONS.has(value.integration as ThreadIntegration)
     && isDiffStats(value.diffStats)
     && isReport(value.report)
@@ -1817,6 +1826,16 @@ export function createThreadRegistry(options: ThreadRegistryOptions) {
     return updated;
   };
 
+  const setDependencyWait = async (scopeId: string, threadId: string, wait: import("@varin/protocol").ThreadDependencyWait | null, expectedId?: string): Promise<boolean> => mutateWorkspace(scopeId, catalog => {
+    const thread = findThread(catalog, threadId);
+    if (!thread || (expectedId !== undefined && thread.dependencyWait?.id !== expectedId)
+      || (wait && wait.runId !== thread.activeRunId)) return { value: false, changed: [], write: false };
+    if (wait) thread.dependencyWait = structuredClone(wait);
+    else delete thread.dependencyWait;
+    touchThread(catalog, thread);
+    return { value: true, changed: [thread] };
+  });
+
   /** Reacquisition and clearing the yield are one catalog transaction. */
   const awaitExecutionSlot = async (
     scopeId: string, threadId: string, runId: string, signal: AbortSignal,
@@ -1962,6 +1981,7 @@ export function createThreadRegistry(options: ThreadRegistryOptions) {
       }
       catalog.runs.push(run);
       thread.activeRunId = run.id;
+      delete thread.dependencyWait;
       thread.lifecycle = "active";
       // A dependency wait belongs to the preceding execution attempt. Leaving
       // it on a newly admitted Run would make that Run invisible to counting.
@@ -2045,6 +2065,7 @@ export function createThreadRegistry(options: ThreadRegistryOptions) {
       run.workerState = outcome === "lost" ? "lost" : "exited";
       run.outcome = outcome;
       run.exitReason = exitReason;
+      if (outcome === "cancelled") delete thread.dependencyWait;
       run.endedAt = nowISO();
       run.lastActivityAt = run.endedAt;
       thread.lifecycle = outcome === "lost" ? "active" : "settled";
@@ -2582,6 +2603,7 @@ export function createThreadRegistry(options: ThreadRegistryOptions) {
       candidate.lifecycle = "settled";
       candidate.attention = "none";
       candidate.waitingFor = null;
+      delete candidate.dependencyWait;
       touchThread(draft, candidate);
       return { value: candidate, changed: [candidate] };
     });
@@ -2598,6 +2620,7 @@ export function createThreadRegistry(options: ThreadRegistryOptions) {
         throw new Error(`Cannot archive a thread with an active Run: ${threadId}`);
       }
       thread.lifecycle = "archived";
+      delete thread.dependencyWait;
       thread.attention = "none";
       thread.waitingFor = null;
       if (keepWorktree !== undefined) thread.keepWorktree = keepWorktree;
@@ -2720,6 +2743,7 @@ export function createThreadRegistry(options: ThreadRegistryOptions) {
       // A Bot entry is replaceable; its durable root remains an ancestor of
       // independent work. Archiving it would make every child unresumable.
       thread.lifecycle = thread.purpose === "bot-root" ? "settled" : "archived";
+      delete thread.dependencyWait;
       thread.attention = "none";
       thread.waitingFor = null;
       // The report's TranscriptRef points at the file being deleted. Retaining
@@ -3140,6 +3164,7 @@ export function createThreadRegistry(options: ThreadRegistryOptions) {
     unbindRunSession,
     countActiveInRoot,
     yieldExecutionSlot,
+    setDependencyWait,
     awaitExecutionSlot,
     startRun,
     admitRun,

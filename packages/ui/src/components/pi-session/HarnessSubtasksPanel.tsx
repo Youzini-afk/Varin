@@ -17,7 +17,7 @@ function SubtasksContent({ sessionId, cwd }: { sessionId: string; cwd?: string }
   const [selected, setSelected] = React.useState<string | null>(null);
   const [search, setSearch] = React.useState('');
   const [filter, setFilter] = React.useState<'all' | 'active' | 'attention' | 'ended'>('all');
-  const entries = [...state.threads, ...state.researchBranches];
+  const entries = [...state.threads, ...state.branches];
   const entry = entries.find((item) => item.thread.id === selected);
   if (entry) return <HarnessThreadConversation key={entry.thread.id} entry={entry} parentSessionId={sessionId} cwd={cwd} onClose={() => setSelected(null)} />;
   const query = search.trim().toLocaleLowerCase();

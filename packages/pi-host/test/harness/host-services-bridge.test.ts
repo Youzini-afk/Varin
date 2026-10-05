@@ -157,6 +157,22 @@ describe("HostServicesBridge", () => {
 
 
 describe("scheduler wait transport lifetime", () => {
+  it("wakes dependency watching for new input while leaving other requests active", async () => {
+    const events: Array<{ event: string; data: HarnessRequestData | HarnessCancelData }> = [];
+    const bridge = new HostServicesBridge({ sessionId: "session", emit: (event, data) => { events.push({ event, data }); } });
+    const waiting = bridge.request("thread.wait", {}, { timeoutMs: 0 });
+    const output = bridge.request("output.read", { handle: "out" });
+    bridge.wakeDependencyWaits();
+    const wake = events.find(entry => entry.event === "harness.cancel")!.data as HarnessCancelData;
+    assert.equal(wake.wake, true);
+    assert.equal(wake.requestId, (events[0]!.data as HarnessRequestData).requestId);
+    assert.equal(events.filter(entry => entry.event === "harness.cancel").length, 1);
+    bridge.respond("session", wake.requestId!, { ok: true, result: { text: "new input", timedOut: false } });
+    assert.equal((await waiting).timedOut, false);
+    bridge.respond("session", (events[1]!.data as HarnessRequestData).requestId, { ok: true, result: { text: "retained output" } });
+    assert.equal((await output).text, "retained output");
+    bridge.dispose();
+  });
   it("lets scheduler admission outlive a dependency deadline and still cancels", async () => {
     const controller = new AbortController();
     const emitted: Array<{ event: string; data: HarnessRequestData | HarnessCancelData }> = [];

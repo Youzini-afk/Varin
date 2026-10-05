@@ -1,6 +1,6 @@
 # Varin 多 Agent 协作：综合主线、Worker 与检索
 
-Status: implementation in progress（D-339）。Worker/检索入口与同任务会话发现/范围读取已接线并完成定向验证。持续等待、重启唤醒及选定代码提交继续实施；第 8 节保留初次设计时的现状对照，不能据此宣称全量交付。
+Status: implementation in progress（D-339）。Worker/检索入口、同任务会话发现/范围读取、普通主线的持久依赖等待与重启接续已接线并完成定向验证。选定代码提交继续实施；第 8 节保留初次设计时的现状对照。
 
 Last updated: 2026-10-05
 

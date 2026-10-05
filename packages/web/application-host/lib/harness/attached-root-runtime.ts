@@ -117,7 +117,7 @@ const userInputFromEntries = (entries: SessionEntriesResult): { entryId: string;
  */
 export function createAttachedRootRuntime(options: AttachedRootRuntimeOptions) {
   const purpose = options.purpose;
-  const noun = purpose === "research-root" ? "Research" : "Bot";
+  const noun = purpose === "research-root" ? "Research" : purpose === "bot-root" ? "Bot" : "Agent";
   const active = new Map<string, ActiveAttachedRoot>();
   const blocked = new Map<string, string>();
   const tails = new Map<string, Promise<void>>();
