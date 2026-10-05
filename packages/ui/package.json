@@ -14,7 +14,7 @@
     "lint": "eslint \"./src/**/*.{ts,tsx}\" --config ../../eslint.config.js"
   },
   "dependencies": {
-    "@aparajita/capacitor-secure-storage": "^8.0.0",
+    "@aparajita/capacitor-secure-storage": "^8.0.1",
     "@base-ui/react": "^1.7.0",
     "@capacitor/app": "^8.1.1",
     "@capacitor/core": "^8.5.2",
