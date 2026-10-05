@@ -169,11 +169,14 @@ benchmark. Do not disable antivirus or replace installation safety checks to imp
 
 ### Optional local semantic component
 
-The base installer does not include MiniLM, transformers.js, or ONNX Runtime. Lexical and structural
+The base installer does not include Bekko model weights, transformers.js, or ONNX Runtime. Lexical and structural
 retrieval remain available; configured remote embedding keeps its existing path. Settings → Agent
 Harness → Retrieval installs local inference only when requested, or imports a downloaded `.tar.gz`.
 Installation checks the platform, file digests and a real vector before activating the component in
 the current Host. It does not require npm, Bun or Python on the user's machine.
+The release default is the pinned multilingual Bekko a8m encoder (384 dimensions);
+custom model archives remain explicit imports. Local CPU settings offer automatic,
+lower-CPU and faster-indexing modes plus an optional inference-thread ceiling.
 
 Build its separate native archive with `bun run --cwd packages/electron package:local-semantic`.
 This is the only build path that downloads the pinned model and prepares Node ONNX. It emits
@@ -198,7 +201,7 @@ These recipes run for their respective base or optional component builds. They v
 dependency version, build from the fixed source revision, and check the resulting architecture.
 Verified payloads and hash receipts are cached under `~/.cache/varin-native`; release jobs cache
 only those outputs, not source checkouts or build directories. The optional component build runs real
-MiniLM inference through Electron, so successful compilation alone does not establish runtime support.
+Bekko inference through Electron, so successful compilation alone does not establish runtime support.
 
 macOS builds produce `dmg` and `zip` artifacts. Windows builds produce an NSIS installer. Linux builds produce an AppImage for the native x64 or arm64 host.
 

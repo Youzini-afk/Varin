@@ -97,6 +97,7 @@ export function IndexSettings(props: Partial<HarnessSettingsPageProps>) {
   };
   const validDraft = draft && Number.isSafeInteger(draft.concurrentRequests) && draft.concurrentRequests > 0
     && Number.isSafeInteger(draft.requestIntervalMs) && draft.requestIntervalMs >= 0
+    && (draft.localCpuThreads == null || (Number.isSafeInteger(draft.localCpuThreads) && draft.localCpuThreads > 0))
     && (draft.storageDirectory === null || draft.storageDirectory.trim().length > 0);
 
   return <>
@@ -136,6 +137,24 @@ export function IndexSettings(props: Partial<HarnessSettingsPageProps>) {
       {status?.restartRequired ? <p role="status" className="break-all typography-meta text-[var(--status-warning)]">
         {t('settings.page.harness.index.restartRequired')} {status.configuredDirectory}
       </p> : null}
+    </SettingsSection>
+    <SettingsSection title={t('settings.page.harness.index.cpu.title')}
+      description={t('settings.page.harness.index.cpu.description')} settingsItem="harness.semanticIndex.cpu">
+      <SettingsFieldRow label={t('settings.page.harness.index.cpu.mode')}>
+        <Select value={draft?.localCpuMode ?? 'auto'} onValueChange={value => edit({ localCpuMode: value as SemanticIndexConfig['localCpuMode'] })}>
+          <SelectTrigger size="settings" className="w-64"><SelectValue /></SelectTrigger>
+          <SelectContent>
+            {(['auto', 'efficient', 'performance'] as const).map(mode => <SelectItem key={mode} value={mode}>
+              {t(`settings.page.harness.index.cpu.${mode}`)}
+            </SelectItem>)}
+          </SelectContent>
+        </Select>
+      </SettingsFieldRow>
+      <SettingsFieldRow label={t('settings.page.harness.index.cpu.threads')} description={t('settings.page.harness.index.cpu.threadsDescription')}>
+        <Input type="number" min={1} step={1} className="w-40" value={draft?.localCpuThreads ?? ''}
+          placeholder={t('settings.page.harness.index.cpu.auto')}
+          onChange={event => edit({ localCpuThreads: event.target.value === '' ? null : Number(event.target.value) })} />
+      </SettingsFieldRow>
     </SettingsSection>
     <SettingsSection title={t('settings.page.harness.index.requests.title')}
       description={t('settings.page.harness.index.requests.description')} settingsItem="harness.semanticIndex.requests">

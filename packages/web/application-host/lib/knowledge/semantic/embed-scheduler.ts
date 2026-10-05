@@ -4,6 +4,7 @@
  */
 
 import type { SemanticEmbedder, SemanticEmbedPurpose } from './embedder.js';
+import { setImmediate as yieldToHost } from 'node:timers/promises';
 
 export type EmbedPriority = "foreground" | "background";
 
@@ -80,23 +81,39 @@ export async function embedInScheduledBatches(options: {
   const grain = embedder.inferenceBatchSize ?? texts.length;
   if (!Number.isSafeInteger(grain) || grain < 1) throw new RangeError('Invalid embedding inference grain');
   const order = texts.map((_, index) => index);
+  const lengths: number[] = [];
+  if (embedder.batchByLength || embedder.selectBatchSize) {
+    let started = performance.now();
+    for (const text of texts) {
+      lengths.push(embedder.countTokens(text));
+      // Packing uses the Host tokenizer. Yield during large preparation work,
+      // instead of blocking request admission until every length is known.
+      if (performance.now() - started >= 16) {
+        await yieldToHost(); signal?.throwIfAborted(); started = performance.now();
+      }
+    }
+  }
   if (embedder.batchByLength && texts.length > grain) {
-    const lengths = texts.map(text => embedder.countTokens(text));
     order.sort((left, right) => lengths[left]! - lengths[right]!);
   }
   const vectors: number[][] = new Array(texts.length);
-  for (let offset = 0; offset < order.length; offset += grain) {
+  for (let offset = 0; offset < order.length;) {
     signal?.throwIfAborted();
-    const indices = order.slice(offset, offset + grain);
+    if (options.priority === 'background') await embedder.waitForBackground?.(signal);
+    const size = embedder.selectBatchSize?.(order.slice(offset, offset + grain).map(index => lengths[index]!)) ?? grain;
+    if (!Number.isSafeInteger(size) || size < 1 || size > grain) throw new RangeError('Invalid selected inference batch');
+    const indices = order.slice(offset, offset + size);
     const batch = indices.map(index => texts[index]!);
     const work = async () => {
       signal?.throwIfAborted();
-      return embedder.embed(batch, { purpose: options.purpose, priority: options.priority, ...(signal ? { signal } : {}) });
+      return embedder.embed(batch, { purpose: options.purpose, priority: options.priority, scheduled: true,
+        ...(lengths.length ? { tokenLengths: indices.map(index => lengths[index]!) } : {}), ...(signal ? { signal } : {}) });
     };
-    const rows = options.scheduler ? await options.scheduler.enqueue(options.priority, work) : await work();
+    const rows = options.scheduler && !embedder.ownsScheduling ? await options.scheduler.enqueue(options.priority, work) : await work();
     signal?.throwIfAborted();
     if (rows.length !== batch.length) throw new Error(`Semantic embedder returned ${rows.length} vectors for ${batch.length} chunks`);
     rows.forEach((row, index) => { vectors[indices[index]!] = row; });
+    offset += indices.length;
   }
   return vectors;
 }

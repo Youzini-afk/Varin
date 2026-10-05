@@ -1,120 +1,49 @@
 #!/usr/bin/env node
-/**
- * Fetch the default MiniLM pack into the Host semantic runtime directory.
- * Weights are not checked in; the recipe is. Only explicit component builds
- * invoke this helper. Ordinary Application Host builds do not download models.
- *
- *   bun run --cwd packages/web semantic:copy-model
- */
-import { createWriteStream } from "node:fs";
-import { mkdir, readFile, rename, rm, stat, writeFile } from "node:fs/promises";
-import { dirname, join } from "node:path";
-import { fileURLToPath } from "node:url";
-import { Readable } from "node:stream";
-import { pipeline } from "node:stream/promises";
+/** Fetch the pinned release-default Bekko pack only during an explicit component
+ * build. Ordinary Host builds and startup never download a model. */
+import { createReadStream, createWriteStream } from 'node:fs';
+import { mkdir, readFile, rename, rm } from 'node:fs/promises';
+import { createHash } from 'node:crypto';
+import { dirname, join } from 'node:path';
+import { fileURLToPath } from 'node:url';
+import { Readable } from 'node:stream';
+import { pipeline } from 'node:stream/promises';
 
-const destDir = join(
-  dirname(fileURLToPath(import.meta.url)),
-  "..",
-  "application-host",
-  "lib",
-  "knowledge",
-  "semantic",
-  "runtime",
-  "all-minilm-l6-v2",
-);
-const files = [
-  "tokenizer.json",
-  "tokenizer_config.json",
-  "config.json",
-  "special_tokens_map.json",
-  "onnx/model_quantized.onnx",
-];
-const SOURCE_MARKER_NAME = ".source-revision.json";
-
-const log = (message) => process.stdout.write(`[copy-semantic-model] ${message}\n`);
-
-const destinationFor = (name) => join(destDir, ...name.split("/"));
-const recipePath = destinationFor("recipe.json");
-const markerPath = destinationFor(SOURCE_MARKER_NAME);
-const readRecipe = async () => {
-  try {
-    const recipe = JSON.parse(await readFile(recipePath, "utf8"));
-    if (recipe?.schemaVersion !== 1 || !/^[0-9a-f]{40}$/iu.test(recipe?.modelRevision ?? "")) {
-      throw new Error(`modelRevision must be a full pinned commit hash: ${recipe?.modelRevision ?? "missing"}`);
-    }
-    return recipe;
-  } catch (error) {
-    throw new Error(`Semantic model recipe is missing or invalid at ${recipePath}: ${error instanceof Error ? error.message : String(error)}`, { cause: error });
-  }
+const destDir = join(dirname(fileURLToPath(import.meta.url)), '..',
+  'application-host/lib/knowledge/semantic/runtime/bekko-embedding-v1-a8m');
+const recipe = JSON.parse(await readFile(join(destDir, 'recipe.json'), 'utf8'));
+const source = JSON.parse(await readFile(join(destDir, 'source.json'), 'utf8'));
+if (!/^[0-9a-f]{40}$/u.test(source.revision) || source.revision !== recipe.modelRevision) {
+  throw new Error('Default model source must match the pinned recipe revision');
+}
+const sha256 = async file => {
+  const hash = createHash('sha256');
+  for await (const chunk of createReadStream(file)) hash.update(chunk);
+  return hash.digest('hex');
 };
-const markerMatchesRecipe = async (modelRevision) => {
-  try {
-    const marker = JSON.parse(await readFile(markerPath, "utf8"));
-    const markerFiles = Array.isArray(marker?.files) ? marker.files : [];
-    return marker?.schemaVersion === 1
-      && marker?.revision === modelRevision
-      && JSON.stringify([...markerFiles].sort()) === JSON.stringify([...files].sort());
-  } catch {
-    return false;
+for (const [name, expected] of Object.entries(source.files)) {
+  if (typeof expected !== 'string' || !/^[0-9a-f]{64}$/u.test(expected)
+    || name.startsWith('/') || name.includes('\\') || name.split('/').some(part => !part || part === '..')) {
+    throw new Error('Invalid pinned model source file');
   }
-};
-const isCompleteFile = async (name) => {
-  try {
-    const details = await stat(destinationFor(name));
-    return details.isFile() && details.size > 0;
-  } catch {
-    return false;
-  }
-};
-
-const recipe = await readRecipe();
-const modelRevision = recipe.modelRevision;
-const base = `https://huggingface.co/Xenova/all-MiniLM-L6-v2/resolve/${modelRevision}`;
-await mkdir(destDir, { recursive: true });
-const markerMatches = await markerMatchesRecipe(modelRevision);
-const filesComplete = markerMatches
-  && (await Promise.all(files.map(isCompleteFile))).every(Boolean);
-const refreshRequired = !filesComplete;
-if (refreshRequired) log(`refreshing pack for model revision ${modelRevision}`);
-for (const name of files) {
-  const url = `${base}/${name}`;
-  const dest = destinationFor(name);
-  if (filesComplete && await isCompleteFile(name)) {
-    log(`reuse ${name}`);
+  const target = join(destDir, ...name.split('/'));
+  if (await sha256(target).catch(() => null) === expected) {
+    console.log(`[copy-semantic-model] verified reuse ${name}`);
     continue;
   }
-  // Keep the upstream layout: transformers.js resolves weights as
-  // `<pack>/onnx/<file>`, so flattening the path hides them (D-172).
-  await mkdir(dirname(dest), { recursive: true });
-  log(`fetch ${name}`);
-  const temporary = `${dest}.${process.pid}.download`;
+  await mkdir(dirname(target), { recursive: true });
+  const temporary = `${target}.${process.pid}.download`;
+  const url = `https://huggingface.co/${source.repository}/resolve/${source.revision}/${name}`;
   try {
+    console.log(`[copy-semantic-model] fetch ${name}`);
     const response = await fetch(url);
-    if (!response.ok || !response.body) {
-      throw new Error(`HTTP ${response.status}`);
-    }
+    if (!response.ok || !response.body) throw new Error(`HTTP ${response.status}`);
     await pipeline(Readable.fromWeb(response.body), createWriteStream(temporary));
-    await rename(temporary, dest);
+    if (await sha256(temporary) !== expected) throw new Error('Downloaded bytes differ from the pinned source');
+    await rename(temporary, target);
   } catch (error) {
-    await rm(temporary, { force: true }).catch(() => undefined);
-    throw new Error(`Failed to download semantic model file ${name} from ${url}: ${error instanceof Error ? error.message : String(error)}`, { cause: error });
+    await rm(temporary, { force: true });
+    throw new Error(`Failed to prepare ${name}: ${error instanceof Error ? error.message : String(error)}`, { cause: error });
   }
 }
-if (!(await Promise.all(files.map(isCompleteFile))).every(Boolean)) {
-  throw new Error(`Semantic model pack is incomplete after download at ${destDir}`);
-}
-const markerTemporary = `${markerPath}.${process.pid}.tmp`;
-try {
-  await writeFile(markerTemporary, `${JSON.stringify({
-    schemaVersion: 1,
-    revision: modelRevision,
-    files: [...files].sort(),
-  }, null, 2)}\n`, "utf8");
-  await rename(markerTemporary, markerPath);
-} catch (error) {
-  await rm(markerTemporary, { force: true }).catch(() => undefined);
-  throw new Error(`Failed to record semantic model source marker at ${markerPath}: ${error instanceof Error ? error.message : String(error)}`, { cause: error });
-}
-await writeFile(join(destDir, ".gitkeep"), "", "utf8");
-log(`pack ready in ${destDir}`);
+console.log(`[copy-semantic-model] pinned ${recipe.model} pack ready in ${destDir}`);

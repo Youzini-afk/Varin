@@ -62,4 +62,5 @@ packages/intellij/
 src/main/resources/webview/
 
 .observe/
+packages/web/application-host/lib/knowledge/semantic/runtime/all-minilm-l6-v2/
 packages/computer-driver/linux/guest-bundle-x64/

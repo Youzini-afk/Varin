@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import {
-  LOCAL_MINILM_MAX_TOKENS,
+  LOCAL_DEFAULT_MAX_TOKENS,
   blockIdentity,
   intraOpThreads,
   parentUnitIdentity,
@@ -8,7 +8,7 @@ import {
   semanticGenerationDir,
   spaceIdOf,
   workspaceScope,
-  LOCAL_MINILM_SPACE,
+  LOCAL_DEFAULT_SPACE,
   defaultRecipeIdentity,
 } from "./identity.js";
 
@@ -32,11 +32,11 @@ describe("semantic identity", () => {
     expect(parentUnitIdentity("mail:abc123", "Handler", "class")).toContain(encodeURIComponent("mail:abc123"));
   });
 
-  it("puts effective length 512 into the MiniLM space identity", () => {
-    expect(LOCAL_MINILM_MAX_TOKENS).toBe(512);
-    expect(LOCAL_MINILM_SPACE.maxTokens).toBe(512);
-    expect(LOCAL_MINILM_SPACE.dim).toBe(384);
-    expect(spaceIdOf(LOCAL_MINILM_SPACE)).not.toBe(spaceIdOf({ ...LOCAL_MINILM_SPACE, maxTokens: 256 }));
+  it("puts effective source packing length into the default space identity", () => {
+    expect(LOCAL_DEFAULT_MAX_TOKENS).toBe(512);
+    expect(LOCAL_DEFAULT_SPACE.maxTokens).toBe(512);
+    expect(LOCAL_DEFAULT_SPACE.dim).toBe(384);
+    expect(spaceIdOf(LOCAL_DEFAULT_SPACE)).not.toBe(spaceIdOf({ ...LOCAL_DEFAULT_SPACE, maxTokens: 256 }));
     expect(recipeIdOf()).toBe(recipeIdOf(defaultRecipeIdentity()));
   });
 

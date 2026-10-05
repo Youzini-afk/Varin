@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 import type { StructureUnit } from "../../structure/types.js";
 import { packStructuralUnits } from "./chunker.js";
-import { LOCAL_MINILM_MAX_TOKENS } from "./identity.js";
+import { LOCAL_DEFAULT_MAX_TOKENS } from "./identity.js";
 
 const wordCount = (text: string): number => Math.max(1, text.split(/\s+/u).filter(Boolean).length);
 
@@ -86,7 +86,7 @@ describe("packStructuralUnits", () => {
     const chunks = packStructuralUnits({
       documentId: "keep.ts",
       units: [unit(text, { parentName: "keep", parentKind: "function", fallback: false })],
-      maxTokens: LOCAL_MINILM_MAX_TOKENS,
+      maxTokens: LOCAL_DEFAULT_MAX_TOKENS,
       countTokens,
     });
     expect(chunks).toHaveLength(1);

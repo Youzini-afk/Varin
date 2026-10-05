@@ -3,7 +3,7 @@
  *
  * The component manager owns archive validation and the active pointer. This
  * module only turns an already enabled component into the pack shape consumed
- * by MiniLM, so normal Host startup never scans or imports the runtime.
+ * by the local encoder, so normal Host startup never scans or imports the runtime.
  */
 
 import { existsSync, readFileSync } from "node:fs";
@@ -25,6 +25,8 @@ export interface SemanticModelRecipe {
   inferenceBatchSize?: number;
   batchByLength?: boolean;
   preferredCpuThreads?: number;
+  /** Enable timing-based grains only for exports verified across batch sizes. */
+  adaptiveBatching?: boolean;
 }
 
 export interface ResolvedModelPack {
@@ -53,7 +55,8 @@ const readRecipe = (file: string): SemanticModelRecipe | null => {
       || typeof raw.onnxFile !== "string" || typeof raw.tokenizerFile !== "string"
       || (raw.inferenceBatchSize !== undefined && (!Number.isSafeInteger(raw.inferenceBatchSize) || raw.inferenceBatchSize < 1))
       || (raw.preferredCpuThreads !== undefined && (!Number.isSafeInteger(raw.preferredCpuThreads) || raw.preferredCpuThreads < 1))
-      || (raw.batchByLength !== undefined && typeof raw.batchByLength !== "boolean")) return null;
+      || (raw.batchByLength !== undefined && typeof raw.batchByLength !== "boolean")
+      || (raw.adaptiveBatching !== undefined && typeof raw.adaptiveBatching !== 'boolean')) return null;
     return raw as SemanticModelRecipe;
   } catch {
     return null;

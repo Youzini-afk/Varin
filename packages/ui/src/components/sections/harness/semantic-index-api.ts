@@ -6,6 +6,8 @@ export interface SemanticIndexConfig {
   storageDirectory: string | null;
   concurrentRequests: number;
   requestIntervalMs: number;
+  localCpuMode?: 'auto' | 'efficient' | 'performance';
+  localCpuThreads?: number | null;
   includeIgnoredDirectories?: string[];
 }
 

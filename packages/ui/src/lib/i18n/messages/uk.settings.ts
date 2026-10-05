@@ -1,4 +1,12 @@
 export const settingsDict = {
+  "settings.page.harness.index.cpu.title": "Використання локального CPU",
+  "settings.page.harness.index.cpu.description": "Підлаштовує пакети й фонову роботу під навантаження, надаючи пріоритет пошуку. Зміни діють після перезапуску Host.",
+  "settings.page.harness.index.cpu.mode": "Використання ресурсів",
+  "settings.page.harness.index.cpu.auto": "Автоматично",
+  "settings.page.harness.index.cpu.efficient": "Менше використання CPU",
+  "settings.page.harness.index.cpu.performance": "Швидше індексування",
+  "settings.page.harness.index.cpu.threads": "Максимум потоків обчислення",
+  "settings.page.harness.index.cpu.threadsDescription": "Залиште порожнім для автоматичного вибору. Керує паралельними обчисленнями, а не кількістю запитів.",
   "index.directories.preparingFile": "Підготовка · {path}",
   "index.directories.embeddingFile": "Створення векторів · {path}",
   "settings.bots.delete": "Видалити Bot",

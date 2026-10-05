@@ -8,9 +8,10 @@ import os from "node:os";
 import { basename, dirname } from "node:path";
 import { pathToFileURL } from "node:url";
 import { Worker } from "node:worker_threads";
-import { intraOpThreads, LOCAL_MINILM_SPACE, type VectorSpaceIdentity } from "./identity.js";
+import { intraOpThreads, LOCAL_DEFAULT_SPACE, type VectorSpaceIdentity } from "./identity.js";
 import type { SemanticEmbedder, SemanticEmbedderStatus } from "./embedder.js";
 import { resolveInstalledModelPack, type ResolvedModelPack } from "./model-store.js";
+import { createLocalCpuPolicy, type LocalCpuSettings } from './local-cpu-policy.js';
 
 type Encoded = { length: number } | ArrayLike<number>;
 
@@ -55,25 +56,32 @@ export function createLocalSemanticEmbedder(options: {
   dataDir: string;
   pack?: ResolvedModelPack | null;
   parallelism?: number;
+  cpu?: LocalCpuSettings;
 }): SemanticEmbedder {
   // A query keeps one model identity for its entire lifetime. The workspace
   // owner replaces this instance when a new component is enabled.
   const packSnapshot = options.pack !== undefined ? options.pack : resolveInstalledModelPack(options.dataDir);
   const currentPack = (): ResolvedModelPack | null => packSnapshot;
   const inferenceBatchSize = packSnapshot?.recipe.inferenceBatchSize ?? INFERENCE_BATCH_SIZE;
+  const adaptive = packSnapshot?.recipe.adaptiveBatching ?? false;
+  const policy = createLocalCpuPolicy({ parallelism: options.parallelism ?? os.availableParallelism(),
+    ...(options.cpu ? { settings: options.cpu } : {}), maxBatchSize: inferenceBatchSize, maxTokens: packSnapshot?.space.maxTokens ?? 512,
+    ...(packSnapshot?.recipe.preferredCpuThreads ? { initialThreads: packSnapshot.recipe.preferredCpuThreads } : {}) });
   let encode: ((text: string) => number) | null = null;
   let prepared = false;
   let preparedRoot: string | null = null;
   let preparePromise: Promise<void> | null = null;
-  let extractor: ((texts: readonly string[], signal?: AbortSignal, priority?: "foreground" | "background") => Promise<number[][]>) | null = null;
+  let extractor: ((texts: readonly string[], signal?: AbortSignal, priority?: "foreground" | "background", scheduled?: boolean, tokenLengths?: readonly number[]) => Promise<number[][]>) | null = null;
   let worker: Worker | null = null;
   let workerFailure: Error | null = null;
   let disposed = false;
   let requestId = 0;
-  const requests = new Map<number, { resolve(vectors: number[][]): void; reject(error: Error): void }>();
+  const requests = new Map<number, { resolve(vectors: number[][]): void; reject(error: Error): void;
+    lengths: number[]; priority: 'foreground' | 'background'; cleanup(): void }>();
 
-  const threadCount = (): number => Math.min(packSnapshot?.recipe.preferredCpuThreads ?? Infinity,
-    intraOpThreads(options.parallelism ?? os.availableParallelism()));
+  const threadCount = (): number => adaptive || options.cpu
+    ? policy.initialThreads : Math.min(packSnapshot?.recipe.preferredCpuThreads ?? Infinity,
+      intraOpThreads(options.parallelism ?? os.availableParallelism()));
 
   const configureThreads = (mod: TransformersModule): number => {
     const threads = threadCount();
@@ -84,11 +92,14 @@ export function createLocalSemanticEmbedder(options: {
   const embedder: SemanticEmbedder = {
     inferenceBatchSize,
     batchByLength: packSnapshot?.recipe.batchByLength ?? false,
+    ownsScheduling: true,
+    ...(adaptive ? { selectBatchSize: policy.selectBatchSize, waitForBackground: policy.waitForBackground,
+      executionStatus: policy.snapshot } : {}),
     get status(): SemanticEmbedderStatus {
       return currentPack()?.onnxPath ? "ready" : "unavailable";
     },
     get space(): VectorSpaceIdentity {
-      return currentPack()?.space ?? LOCAL_MINILM_SPACE;
+      return currentPack()?.space ?? LOCAL_DEFAULT_SPACE;
     },
     prepare: async () => {
       if (disposed) throw new Error("Local encoder is disposed.");
@@ -130,49 +141,73 @@ export function createLocalSemanticEmbedder(options: {
             const activeWorker = new Worker(pathToFileURL(pack.inferenceWorkerEntry!), { execArgv: [], workerData: {
               entry: pack.transformersEntry, modelRoot: pack.root, modelFileName: basename(pack.onnxPath!, ".onnx"),
               pooling: pack.space.pooling, normalize: pack.space.normalize, dim: pack.space.dim, threads,
+              maxBatchSize: inferenceBatchSize, coalesceQueries: adaptive,
             } });
             worker = activeWorker;
             const fail = (error: Error) => {
               workerFailure = error;
               reject(error);
-              for (const request of requests.values()) request.reject(error);
+              for (const request of requests.values()) { request.cleanup(); request.reject(error); }
               requests.clear();
               activeWorker.unref();
             };
             activeWorker.on("error", fail);
             activeWorker.on("exit", () => fail(new Error("Local encoder worker exited.")));
-            activeWorker.on("message", (message: { type?: string; id?: number; vectors?: number[][]; error?: string }) => {
+            activeWorker.on("message", (message: { type?: string; id?: number; vectors?: number[][]; error?: string;
+              durationMs?: number; cpuMs?: number; threads?: number; loadMs?: number }) => {
               if (message.type === "ready") { activeWorker.unref(); resolve(); return; }
               const request = message.id === undefined ? undefined : requests.get(message.id);
               if (!request || message.id === undefined) return;
               requests.delete(message.id);
+              request.cleanup();
+              if (adaptive && message.durationMs !== undefined && message.threads !== undefined && message.cpuMs !== undefined) {
+                policy.record({ lengths: request.lengths, priority: request.priority,
+                  durationMs: message.durationMs, cpuMs: message.cpuMs, threads: message.threads,
+                  ...(message.loadMs === undefined ? {} : { loadMs: message.loadMs }) });
+              }
               if (message.error) request.reject(new Error(message.error));
               else if (message.vectors) request.resolve(message.vectors);
               else request.reject(new Error("Local encoder worker returned an incomplete response."));
               if (requests.size === 0) activeWorker.unref();
             });
           });
-          const run = (texts: readonly string[], priority: "foreground" | "background"): Promise<number[][]> => {
+          const run = (texts: readonly string[], lengths: number[], priority: "foreground" | "background", signal?: AbortSignal): Promise<number[][]> => {
             if (!worker || workerFailure || disposed) return Promise.reject(workerFailure ?? new Error("Local encoder is disposed."));
             const activeWorker = worker;
             const id = ++requestId;
             return new Promise((resolve, reject) => {
-              requests.set(id, { resolve, reject });
+              const abort = () => {
+                requests.delete(id);
+                signal?.removeEventListener('abort', abort);
+                activeWorker.postMessage({ cancel: id });
+                if (requests.size === 0) activeWorker.unref();
+                reject(signal?.reason ?? new DOMException('The operation was aborted.', 'AbortError'));
+              };
+              if (signal?.aborted) { reject(signal.reason); return; }
+              signal?.addEventListener('abort', abort, { once: true });
+              requests.set(id, { resolve, reject, lengths, priority,
+                cleanup: () => signal?.removeEventListener('abort', abort) });
               activeWorker.ref();
-              activeWorker.postMessage({ id, texts, priority });
+              activeWorker.postMessage({ id, texts, priority,
+                threads: adaptive ? policy.nextThreads(priority) : threads });
             });
           };
-          extractor = async (texts, signal, priority = "background") => {
+          extractor = async (texts, signal, priority = "background", scheduled = false, tokenLengths) => {
             const vectors: number[][] = [];
-            for (let offset = 0; offset < texts.length; offset += inferenceBatchSize) {
+            const lengths = adaptive ? tokenLengths ?? texts.map(text => encode!(text)) : [];
+            for (let offset = 0; offset < texts.length;) {
               signal?.throwIfAborted();
-              const batch = texts.slice(offset, offset + inferenceBatchSize);
-              const rows = await run(batch, priority);
+              if (adaptive && priority === 'background' && !scheduled) await policy.waitForBackground(signal);
+              const candidates = texts.slice(offset, offset + inferenceBatchSize);
+              const size = adaptive && !scheduled ? policy.selectBatchSize(lengths.slice(offset, offset + candidates.length)) : candidates.length;
+              const batch = candidates.slice(0, size);
+              const rows = await run(batch, lengths.slice(offset, offset + batch.length), priority, signal);
               signal?.throwIfAborted();
               if (rows.length !== batch.length || rows.some((row) => row.length !== pack.space.dim)) {
                 throw new Error(`Local encoder returned ${rows.length} vectors for ${batch.length} inputs in ${pack.space.dim} dimensions.`);
               }
               vectors.push(...rows);
+              offset += batch.length;
             }
             return vectors;
           };
@@ -195,7 +230,7 @@ export function createLocalSemanticEmbedder(options: {
       if (!pack?.onnxPath || !extractor || preparedRoot !== pack.root) {
         throw new Error("Local encoder model pack is unavailable.");
       }
-      return extractor(texts, request?.signal, request?.priority ?? (request?.purpose === "query" ? "foreground" : "background"));
+      return extractor(texts, request?.signal, request?.priority ?? (request?.purpose === "query" ? "foreground" : "background"), request?.scheduled, request?.tokenLengths);
     },
     embedBatch: async (request) => {
       request.signal?.throwIfAborted();
@@ -222,7 +257,7 @@ export function createLocalSemanticEmbedder(options: {
       const activeWorker = worker;
       worker = null;
       const error = new Error("Local encoder is disposed.");
-      for (const request of requests.values()) request.reject(error);
+      for (const request of requests.values()) { request.cleanup(); request.reject(error); }
       requests.clear();
       await activeWorker?.terminate();
     },

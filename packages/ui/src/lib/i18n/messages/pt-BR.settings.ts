@@ -1,4 +1,12 @@
 export const settingsDict = {
+  "settings.page.harness.index.cpu.title": "Uso de CPU local",
+  "settings.page.harness.index.cpu.description": "Ajusta os lotes e o trabalho em segundo plano à carga e prioriza as consultas. As alterações entram em vigor após reiniciar o Host.",
+  "settings.page.harness.index.cpu.mode": "Preferência de recursos",
+  "settings.page.harness.index.cpu.auto": "Automático",
+  "settings.page.harness.index.cpu.efficient": "Menor uso de CPU",
+  "settings.page.harness.index.cpu.performance": "Indexação mais rápida",
+  "settings.page.harness.index.cpu.threads": "Máximo de threads de inferência",
+  "settings.page.harness.index.cpu.threadsDescription": "Deixe em branco para seleção automática. Controla o cálculo paralelo, não o número de consultas recebidas.",
   'assistant.memory.title': 'Memory',
   'assistant.memory.description': 'Notes included in ordinary assistant conversations.',
   'assistant.memory.content': 'Memory content',

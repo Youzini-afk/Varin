@@ -1,4 +1,12 @@
 export const settingsDict = {
+  "settings.page.harness.index.cpu.title": "Użycie lokalnego CPU",
+  "settings.page.harness.index.cpu.description": "Dostosowuje partie i pracę w tle do obciążenia, nadając priorytet wyszukiwaniu. Zmiany wymagają ponownego uruchomienia Host.",
+  "settings.page.harness.index.cpu.mode": "Preferencja zasobów",
+  "settings.page.harness.index.cpu.auto": "Automatycznie",
+  "settings.page.harness.index.cpu.efficient": "Mniejsze użycie CPU",
+  "settings.page.harness.index.cpu.performance": "Szybsze indeksowanie",
+  "settings.page.harness.index.cpu.threads": "Maksymalna liczba wątków inferencji",
+  "settings.page.harness.index.cpu.threadsDescription": "Puste pole oznacza wybór automatyczny. Steruje obliczeniami równoległymi, nie liczbą zapytań.",
   "index.directories.preparingFile": "Przygotowanie · {path}",
   "index.directories.embeddingFile": "Tworzenie wektorów · {path}",
   "settings.bots.delete": "Usuń Bota",

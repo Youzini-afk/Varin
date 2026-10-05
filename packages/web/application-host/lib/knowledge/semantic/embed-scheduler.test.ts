@@ -9,6 +9,23 @@ const deferred = () => {
 };
 
 describe('embedding scheduler', () => {
+  it('keeps local inference independent of busy HTTP slots and preserves varying adaptive grains', async () => {
+    const scheduler = createEmbedScheduler();
+    const gate = deferred();
+    const remote = scheduler.enqueue('background', () => gate.promise);
+    const embedder = createHashEmbedder();
+    embedder.ownsScheduling = true;
+    embedder.inferenceBatchSize = 4;
+    embedder.batchByLength = true;
+    embedder.countTokens = text => text.length;
+    embedder.selectBatchSize = lengths => lengths[0]! > 20 ? 1 : Math.min(3, lengths.length);
+    const texts = ['tiny', 'a much longer document that must remain whole', 'x', 'medium'];
+    const original = await embedder.embed(texts);
+    try {
+      expect(await embedInScheduledBatches({ embedder, texts, scheduler, priority: 'foreground', purpose: 'query' })).toEqual(original);
+    } finally { gate.resolve(); await remote; }
+  });
+
   it('admits an interactive query during a large local index request and preserves every result', async () => {
     const scheduler = createEmbedScheduler();
     const firstStarted = deferred();

@@ -2,6 +2,14 @@ import { settingsDict as englishSettingsDict } from './en.settings';
 
 export const settingsDict = {
   ...englishSettingsDict,
+  "settings.page.harness.index.cpu.title": "ローカル CPU 使用量",
+  "settings.page.harness.index.cpu.description": "負荷に合わせてバッチとバックグラウンド処理を調整し、検索を優先します。変更は Host の再起動後に適用されます。",
+  "settings.page.harness.index.cpu.mode": "リソース設定",
+  "settings.page.harness.index.cpu.auto": "自動",
+  "settings.page.harness.index.cpu.efficient": "CPU 使用量を抑える",
+  "settings.page.harness.index.cpu.performance": "索引作成を優先",
+  "settings.page.harness.index.cpu.threads": "推論スレッド数の上限",
+  "settings.page.harness.index.cpu.threadsDescription": "空欄で自動選択。計算の並列度を設定します。検索リクエスト数の制限ではありません。",
   "index.directories.preparingFile": "ファイルを準備中 · {path}",
   "index.directories.embeddingFile": "埋め込みを生成中 · {path}",
   "settings.bots.delete": "Bot を削除",

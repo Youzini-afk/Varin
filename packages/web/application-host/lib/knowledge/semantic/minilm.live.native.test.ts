@@ -15,7 +15,7 @@ import { createStructureSource } from "../../structure/source.js";
 import { createTreeSitterStructureProvider } from "../../structure/native-provider.test-helper.js";
 import { createLocalSemanticEmbedder } from "./local-embedder.js";
 import { resolveInstalledModelPack } from "./model-store.js";
-import { LOCAL_MINILM_SPACE, workspaceScope } from "./identity.js";
+import { workspaceScope } from "./identity.js";
 import { createSemanticIndexRuntime } from "./runtime.js";
 
 const disposes: Array<() => Promise<void>> = [];
@@ -46,8 +46,8 @@ describe.skipIf(!hasPack)("installed local encoder", () => {
     const decoy = "export const CSS_RESET = \"margin:0;padding:0\";";
 
     const [queryVector, targetVector, decoyVector] = await embedder.embed([query, target, decoy]);
-    expect(queryVector).toHaveLength(LOCAL_MINILM_SPACE.dim);
-    expect(targetVector).toHaveLength(LOCAL_MINILM_SPACE.dim);
+    expect(queryVector).toHaveLength(embedder.space.dim);
+    expect(targetVector).toHaveLength(embedder.space.dim);
 
     // Normalized vectors, so cosine is the dot product and lives in [-1, 1].
     const norm = Math.sqrt(cosine(queryVector!, queryVector!));

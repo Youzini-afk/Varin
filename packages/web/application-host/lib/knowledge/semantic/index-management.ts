@@ -4,6 +4,7 @@ import path from "node:path";
 import express, { type Express, type RequestHandler } from "express";
 import type { createWorkspaceSemanticRuntime } from "./workspace-runtime.js";
 import { semanticRootDir } from "./identity.js";
+import type { LocalCpuMode } from './local-cpu-policy.js';
 import type { createIndexDirectoryManager, IndexDirectoryAction } from '../index-directories.js';
 
 export interface SemanticIndexConfiguration {
@@ -11,6 +12,8 @@ export interface SemanticIndexConfiguration {
   storageDirectory: string | null;
   concurrentRequests: number;
   requestIntervalMs: number;
+  localCpuMode?: LocalCpuMode;
+  localCpuThreads?: number | null;
   /** Directory-scoped overrides; all other activated roots retain Git filtering. */
   includeIgnoredDirectories?: string[];
 }
@@ -19,6 +22,8 @@ export const DEFAULT_SEMANTIC_INDEX_CONFIGURATION: SemanticIndexConfiguration = 
   storageDirectory: null,
   concurrentRequests: 1,
   requestIntervalMs: 0,
+  localCpuMode: 'auto',
+  localCpuThreads: null,
   includeIgnoredDirectories: [],
 };
 
@@ -28,6 +33,8 @@ const parseConfiguration = (value: unknown): SemanticIndexConfiguration => {
   const storageDirectory = input.storageDirectory ?? null;
   const concurrentRequests = input.concurrentRequests ?? 1;
   const requestIntervalMs = input.requestIntervalMs ?? 0;
+  const localCpuMode = input.localCpuMode ?? 'auto';
+  const localCpuThreads = input.localCpuThreads ?? null;
   const includeIgnoredDirectories = input.includeIgnoredDirectories ?? [];
   if (storageDirectory !== null && (typeof storageDirectory !== "string" || !path.isAbsolute(storageDirectory))) {
     throw new Error("Index storage directory must be an absolute path");
@@ -41,8 +48,15 @@ const parseConfiguration = (value: unknown): SemanticIndexConfiguration => {
   if (!Array.isArray(includeIgnoredDirectories) || includeIgnoredDirectories.some(directory => typeof directory !== 'string' || !path.isAbsolute(directory))) {
     throw new Error('Directories including ignored files must be absolute paths');
   }
+  if (typeof localCpuMode !== 'string' || !['auto', 'efficient', 'performance'].includes(localCpuMode)) {
+    throw new Error('Invalid local CPU mode');
+  }
+  if (localCpuThreads !== null && (!Number.isSafeInteger(localCpuThreads) || Number(localCpuThreads) < 1)) {
+    throw new Error('Local CPU thread budget must be a positive integer or automatic');
+  }
   return { storageDirectory: storageDirectory ? path.resolve(storageDirectory as string) : null,
     concurrentRequests: Number(concurrentRequests), requestIntervalMs: Number(requestIntervalMs),
+    localCpuMode: localCpuMode as LocalCpuMode, localCpuThreads: localCpuThreads as number | null,
     includeIgnoredDirectories: [...new Set((includeIgnoredDirectories as string[]).map(directory => path.resolve(directory)))],
   };
 };

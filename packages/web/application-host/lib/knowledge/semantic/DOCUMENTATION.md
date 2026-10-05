@@ -2,13 +2,13 @@
 
 Code-semantic index for explore’s third recall path (design 6.1 / 3.16, D-166–D-193).
 Host-only writer. Not the authoritative workspace `.tdb`. Knowledge-base vectors are a sibling
-derived store (`../vectors/`); they reuse `harness.embed` but never this MiniLM fallback.
+derived store (`../vectors/`); they reuse `harness.embed` but never this local-model fallback.
 
 - Identities: `identity.ts` — vector space, index recipe, `{ scopeKind, scopeId }`. Remote spaces use
   `remoteEmbeddingSpaceId` from protocol parts (no credentials).
-- Embedder: `backend.ts` — unconfigured → local MiniLM only when the optional component is installed;
+- Embedder: `backend.ts` — unconfigured → the installed local encoder only when the optional component is installed;
   otherwise the semantic source is unavailable. `harness.embedding` set → `remote-embedder.ts`
-  via workspace `harness.embed`. Configured remote never falls back to MiniLM in the same query.
+  via workspace `harness.embed`. Configured remote never falls back to the local model in the same query.
 - Chunking: `chunker.ts` — tree-sitter containers, backend input length, continue-split of long lines.
   Semantic eligibility follows recognized text language identities, independently of the tree-sitter
   grammar list. Languages such as Scala use native text units with path, line range and content
@@ -22,7 +22,7 @@ derived store (`../vectors/`); they reuse `harness.embed` but never this MiniLM 
 - Cache / schedule: `vector-cache.ts` (space + purpose + embedText, byte soft budget);
   `embed-scheduler.ts` (configurable concurrent request slots and background start interval;
   waiting foreground work takes the next free slot without an artificial interval). This
-  scheduler is shared with knowledge-vector embeddings, so its concurrency setting covers both.
+  scheduler is shared with remote knowledge-vector embeddings. Local model work uses its own single-model queue and does not consume HTTP request slots.
   Local backends expose their actual inference grain. Document publication and
   fixed-view vector work release the shared slot between those model calls, so
   a large input request cannot hide many local batches inside one background slot.
@@ -34,11 +34,25 @@ derived store (`../vectors/`); they reuse `harness.embed` but never this MiniLM 
   admits query batches ahead of queued background calls; an active forward runs
   to completion. Idle workers do not keep a process alive. Retained model
   bindings close with the semantic Host owner after pending work shuts down.
-  Recipes can tune `inferenceBatchSize`, `batchByLength` and
-  `preferredCpuThreads`. Length grouping restores results to caller order;
-  these are measured execution defaults, not text count quotas. The current
-  Bekko research pack uses a two-input grain, length grouping and up to four
-  inference threads within the Host's available-parallelism policy.
+  The default Bekko export enables adaptive batching (its FP32 transformer was
+  verified across batch compositions). Batch size follows padded token work and
+  observed inference duration, within the measured 32-input working grain; every
+  input is processed. Host token-length preparation yields between short work
+  intervals. Already queued foreground requests can share an immediate inference
+  batch without waiting to fill it. Cancellation removes queued calls and rejects
+  the caller immediately; a native forward already in progress completes.
+  `local-cpu-policy.ts` owns auto/efficient/performance preferences and an optional
+  user thread ceiling. The model's four-thread hint is a measured starting point,
+  not a reserved core count or a universal ceiling. Auto starts within half of
+  available parallelism, efficient within one quarter, performance within 90%;
+  an explicit thread ceiling replaces that automatic ceiling. Background duty
+  follows CPU time and sampled competing system load. Queries bypass the duty
+  delay. Stable competing load can reduce threads and recovery restores them at
+  background boundaries; changing an ORT session is amortized against its measured
+  load time. This does not benchmark all thread counts at startup or claim an
+  optimal hardware profile. CPU settings apply after Host restart. Length grouping
+  restores caller order. Quantized custom exports without `adaptiveBatching` keep
+  fixed grains because their vectors may depend on batch composition.
 - Overlay: `query-view.ts` pins surface/thread drafts at query start; masked disk paths cannot leak
   old vectors. Thread view is fixed baseline + this branch’s delta.
 - Storage: `store.ts` — Host embedding orchestration over the private semantic
@@ -142,7 +156,7 @@ derived store (`../vectors/`); they reuse `harness.embed` but never this MiniLM 
   restart: an active TriviumDB is never moved while open. A different storage directory begins a
   new derived index; the previous cache is preserved until explicitly cleaned up. This storage
   choice affects the code-semantic index, not the authoritative knowledge database, symbol graph,
-  or installed local MiniLM component.
+  or installed local encoder component.
 - Remote embedding: Pi sends OpenAI-compatible requests. A provider's 400/413 response to a batch
   causes that rejected batch to split recursively; results retain input order and vector-space
   identity. A single rejected input remains an error and the scan reports partial/failed coverage.
@@ -164,7 +178,7 @@ derived store (`../vectors/`); they reuse `harness.embed` but never this MiniLM 
   `--model-source <directory>` builds from a prepared `recipe.json`, tokenizer,
   config, ONNX graph and upstream license/NOTICE. It verifies real inference in
   the staged Electron runtime before writing the archive. The release's default
-  build still fetches the pinned MiniLM source; research model packs are explicit
+  build fetches pinned Bekko a8m source with per-file SHA256 checks; other model packs are explicit
   imports until their release model choice is updated.
   Component manifest v2 includes the worker entry and its file hash. Activation
   checks the real worker transport and inference in a child before committing

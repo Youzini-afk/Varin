@@ -1,11 +1,11 @@
 /**
- * Embedder surface for the semantic index. Production MiniLM and test
+ * Embedder surface for the semantic index. Production local encoders and test
  * hash-embedders share this shape so the store never talks to transformers
  * directly.
  */
 
 import type { VectorSpaceIdentity } from "./identity.js";
-import { LOCAL_MINILM_SPACE } from "./identity.js";
+import { LOCAL_DEFAULT_SPACE } from "./identity.js";
 
 export type SemanticEmbedderStatus = "ready" | "unavailable";
 export type SemanticEmbedPurpose = "document" | "query";
@@ -41,12 +41,18 @@ export interface SemanticEmbedder {
    * slot between these calls. Remote backends retain their transport batching. */
   inferenceBatchSize?: number;
   batchByLength?: boolean;
+  /** Local CPU work has its own shared model queue, independent of HTTP slots. */
+  ownsScheduling?: boolean;
+  selectBatchSize?(tokenLengths: readonly number[]): number;
+  waitForBackground?(signal?: AbortSignal): Promise<void>;
+  executionStatus?(): { mode: string; threadCeiling: number; threads: number; batches: number;
+    lastBatchSize: number; quantumMs: number; predictedMsPerWork: number; backgroundWaitMs: number };
   dispose?(): Promise<void>;
   prepare(): Promise<void>;
   countTokens(text: string): number;
   embed(
     texts: readonly string[],
-    request?: { purpose?: SemanticEmbedPurpose; signal?: AbortSignal; batchId?: string; priority?: "foreground" | "background" },
+    request?: { purpose?: SemanticEmbedPurpose; signal?: AbortSignal; batchId?: string; priority?: "foreground" | "background"; scheduled?: boolean; tokenLengths?: readonly number[] },
   ): Promise<number[][]>;
   embedBatch(request: SemanticEmbedRequest): Promise<SemanticEmbedResult>;
 }
@@ -92,7 +98,7 @@ export function hashEmbed(text: string, dim: number): number[] {
 }
 
 export function createHashEmbedder(space: VectorSpaceIdentity = {
-  ...LOCAL_MINILM_SPACE,
+  ...LOCAL_DEFAULT_SPACE,
   modelRevision: "test-hash",
 }): SemanticEmbedder {
   const embedder: SemanticEmbedder = {

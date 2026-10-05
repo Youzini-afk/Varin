@@ -14,16 +14,17 @@ export const SEMANTIC_CHUNKER_VERSION = 4;
 export const SEMANTIC_TEXT_DECORATION_VERSION = 1;
 
 /** Effective word-piece window written into the space id (D-166). */
-export const LOCAL_MINILM_MAX_TOKENS = 512;
+export const LOCAL_DEFAULT_MAX_TOKENS = 512;
 
-export const LOCAL_MINILM_SPACE = {
+export const LOCAL_DEFAULT_SPACE = {
   provider: "local",
-  model: "all-MiniLM-L6-v2",
-  modelRevision: "751bff37182d3f1213fa05d7196b954e230abad9",
+  model: "bekko-embedding-v1-a8m",
+  modelRevision: "c721113d59a1d91b447450324f51c4b3332c924a",
   dim: 384,
   pooling: "mean" as const,
   normalize: true,
-  maxTokens: LOCAL_MINILM_MAX_TOKENS,
+  maxTokens: LOCAL_DEFAULT_MAX_TOKENS,
+  configurationId: "local-onnx:onnx/model.onnx",
 };
 
 export type VectorSpaceIdentity = {

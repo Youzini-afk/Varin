@@ -1,0 +1,7 @@
+Bekko Embedding v1 a8m
+Publisher: hotchpotch
+Source: https://huggingface.co/hotchpotch/bekko-embedding-v1-a8m/tree/c721113d59a1d91b447450324f51c4b3332c924a
+License: MIT, as declared in the upstream model card (README.md included).
+Artifact: onnx/model.onnx; static token embedding table INT8, transformer FP32.
+Varin packs source into complete 512-token pieces; the native model context is 8192.
+Runtime dependencies retain their own licenses under runtime/node_modules.

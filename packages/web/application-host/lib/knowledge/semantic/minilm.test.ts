@@ -1,7 +1,11 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
-import { LOCAL_MINILM_SPACE } from "./identity.js";
+import { LOCAL_DEFAULT_SPACE as DEFAULT_SPACE } from "./identity.js";
 import type { ResolvedModelPack } from "./model-store.js";
 import { fileURLToPath } from 'node:url';
+
+const MINILM_TEST_SPACE = { ...DEFAULT_SPACE, model: 'all-MiniLM-L6-v2',
+  modelRevision: '751bff37182d3f1213fa05d7196b954e230abad9',
+  configurationId: 'local-onnx:onnx/model_quantized.onnx' };
 
 vi.mock('node:worker_threads', async () => {
   const { EventEmitter } = await import('node:events');
@@ -20,8 +24,8 @@ vi.mock('node:worker_threads', async () => {
       transformerState().batches.push([...request.texts]);
       transformerState().options.push({ pooling: this.data.pooling, normalize: this.data.normalize });
       const vectors = request.texts.map(text => {
-        const vector = new Array<number>(LOCAL_MINILM_SPACE.dim).fill(0);
-        vector[Number.parseInt(text.slice(1),10) % LOCAL_MINILM_SPACE.dim] = 1;
+        const vector = new Array<number>(MINILM_TEST_SPACE.dim).fill(0);
+        vector[Number.parseInt(text.slice(1),10) % MINILM_TEST_SPACE.dim] = 1;
         return vector;
       });
       queueMicrotask(() => this.emit('message', { id:request.id, vectors }));
@@ -50,16 +54,16 @@ const pack: ResolvedModelPack = {
   recipe: {
     schemaVersion: 1,
     provider: "local",
-    model: LOCAL_MINILM_SPACE.model,
-    modelRevision: LOCAL_MINILM_SPACE.modelRevision,
-    dim: LOCAL_MINILM_SPACE.dim,
-    pooling: LOCAL_MINILM_SPACE.pooling,
-    normalize: LOCAL_MINILM_SPACE.normalize,
-    maxTokens: LOCAL_MINILM_SPACE.maxTokens,
+    model: MINILM_TEST_SPACE.model,
+    modelRevision: MINILM_TEST_SPACE.modelRevision,
+    dim: MINILM_TEST_SPACE.dim,
+    pooling: MINILM_TEST_SPACE.pooling,
+    normalize: MINILM_TEST_SPACE.normalize,
+    maxTokens: MINILM_TEST_SPACE.maxTokens,
     onnxFile: "model_quantized.onnx",
     tokenizerFile: "tokenizer.json",
   },
-  space: LOCAL_MINILM_SPACE,
+  space: MINILM_TEST_SPACE,
   onnxPath: "C:/model/all-minilm-l6-v2/onnx/model_quantized.onnx",
   tokenizerPath: "C:/model/all-minilm-l6-v2/tokenizer.json",
   source: "bundled",
@@ -83,14 +87,14 @@ describe("local MiniLM batching", () => {
 
     expect(transformer.batches.map((batch) => batch.length)).toEqual([32, 32, 6]);
     expect(vectors).toHaveLength(70);
-    expect(vectors.every((vector) => vector.length === LOCAL_MINILM_SPACE.dim)).toBe(true);
+    expect(vectors.every((vector) => vector.length === MINILM_TEST_SPACE.dim)).toBe(true);
     expect(vectors[0]?.[0]).toBe(1);
     expect(vectors[69]?.[69]).toBe(1);
     expect(transformer.options.every((options) => options.normalize === true && options.pooling === "mean")).toBe(true);
 
     const [query] = await embedder.embed(["v7"]);
     expect(transformer.batches.at(-1)).toEqual(["v7"]);
-    expect(query).toHaveLength(LOCAL_MINILM_SPACE.dim);
+    expect(query).toHaveLength(MINILM_TEST_SPACE.dim);
     expect(query?.[7]).toBe(1);
     expect(transformer.sessionOptions[0]).toMatchObject({
       intraOpNumThreads: expect.any(Number),

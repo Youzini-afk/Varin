@@ -1,7 +1,7 @@
 /**
  * Chooses the live embedding backend from user-owned harness.embedding.
  * A configured remote binding is used for both index and query. There is no
- * silent fallback to MiniLM for that query.
+ * silent fallback to a local model for that query.
  */
 
 import {

@@ -2,6 +2,14 @@ import { settingsDict as englishSettingsDict } from './en.settings';
 
 export const settingsDict = {
   ...englishSettingsDict,
+  "settings.page.harness.index.cpu.title": "Utilisation du CPU local",
+  "settings.page.harness.index.cpu.description": "Adapte les lots et les tâches de fond à la charge, en donnant priorité aux recherches. Les modifications prennent effet après redémarrage du Host.",
+  "settings.page.harness.index.cpu.mode": "Préférence de ressources",
+  "settings.page.harness.index.cpu.auto": "Automatique",
+  "settings.page.harness.index.cpu.efficient": "Réduire le CPU utilisé",
+  "settings.page.harness.index.cpu.performance": "Indexation plus rapide",
+  "settings.page.harness.index.cpu.threads": "Nombre maximal de threads d’inférence",
+  "settings.page.harness.index.cpu.threadsDescription": "Laisser vide pour le choix automatique. Contrôle le calcul parallèle, pas le nombre de recherches reçues.",
   "index.directories.preparingFile": "Préparation · {path}",
   "index.directories.embeddingFile": "Vectorisation · {path}",
   "settings.bots.delete": "Supprimer le Bot",

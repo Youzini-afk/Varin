@@ -1,0 +1,11 @@
+{
+  "repository": "hotchpotch/bekko-embedding-v1-a8m",
+  "revision": "c721113d59a1d91b447450324f51c4b3332c924a",
+  "files": {
+    "config.json": "950f344b034bb96a6ac3da045b1cd5ba037c08d8e4978471d407324622f8878e",
+    "tokenizer.json": "8bd47075711f75a143d1b78e01a41cc65c1c591b00d3cfeffc23db07adce1392",
+    "tokenizer_config.json": "2ee40d1066ac855e1ea38ac422dbe1f3ddf84c9d415e79272adce569668f3de4",
+    "onnx/model.onnx": "96d8cc6199e96357b21b2fb12f6d7ffd2d4abc7b182fe94b5468fbd6dc819af7",
+    "README.md": "4509853d1e2d544701fc4b22c85fa7128bce5436308cbdfac686788675b12b42"
+  }
+}

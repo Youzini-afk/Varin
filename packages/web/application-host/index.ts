@@ -3139,19 +3139,21 @@ async function main(options: StartWebUiServerOptions = {}): Promise<WebUiServerC
     ),
     onError: (error) => console.error('[HarnessKnowledge] Symbol graph observer failed:', errorMessage(error)),
   });
-  const semanticRuntimeHolder: { current?: ReturnType<typeof createWorkspaceSemanticRuntime> } = {};
-  const localSemanticComponent = createLocalSemanticComponentManager({
-    dataDir: VARIN_DATA_DIR,
-    version: VARIN_VERSION,
-    onEnabled: () => semanticRuntimeHolder.current?.refreshLocalSemantic(createLocalSemanticEmbedder({ dataDir: VARIN_DATA_DIR })),
-  });
-  const localEmbedder = createLocalSemanticEmbedder({ dataDir: VARIN_DATA_DIR });
   const semanticIndexManagement = createSemanticIndexManagement(VARIN_DATA_DIR, hostId);
   const semanticIndexLoad = await semanticIndexManagement.load().catch((error: unknown) => ({
     config: DEFAULT_SEMANTIC_INDEX_CONFIGURATION, error: errorMessage(error),
   }));
   if (semanticIndexLoad.error) console.error('[HarnessKnowledge] Index settings need repair:', semanticIndexLoad.error);
   const semanticIndexConfig = semanticIndexLoad.config;
+  const makeLocalEmbedder = () => createLocalSemanticEmbedder({ dataDir: VARIN_DATA_DIR,
+    cpu: { mode: semanticIndexConfig.localCpuMode ?? 'auto', maxThreads: semanticIndexConfig.localCpuThreads ?? null } });
+  const semanticRuntimeHolder: { current?: ReturnType<typeof createWorkspaceSemanticRuntime> } = {};
+  const localSemanticComponent = createLocalSemanticComponentManager({
+    dataDir: VARIN_DATA_DIR,
+    version: VARIN_VERSION,
+    onEnabled: () => semanticRuntimeHolder.current?.refreshLocalSemantic(makeLocalEmbedder()),
+  });
+  const localEmbedder = makeLocalEmbedder();
   const semanticScheduler = createEmbedScheduler({
     concurrency: semanticIndexConfig.concurrentRequests,
     backgroundIntervalMs: semanticIndexConfig.requestIntervalMs,

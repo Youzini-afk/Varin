@@ -100,7 +100,7 @@ try {
   prepareOnnxRuntime();
   await copyPackage('@huggingface/transformers', path.join(webRoot, 'package.json'));
   await fsp.copyFile(path.join(repository, 'scripts/local-embedding-worker.mjs'), path.join(staging, 'runtime/local-embedding-worker.mjs'));
-  const sourceModel = customModelSource ?? path.join(webRoot, 'application-host/lib/knowledge/semantic/runtime/all-minilm-l6-v2');
+  const sourceModel = customModelSource ?? path.join(webRoot, 'application-host/lib/knowledge/semantic/runtime/bekko-embedding-v1-a8m');
   const recipe = readJson(path.join(sourceModel, 'recipe.json'));
   const modelFiles = [...new Set(['recipe.json', recipe.tokenizerFile, 'tokenizer_config.json', 'config.json', recipe.onnxFile,
     ...['special_tokens_map.json', 'LICENSE', 'NOTICE.txt', 'README.md'].filter(file => fs.existsSync(path.join(sourceModel, file)))])];
@@ -112,16 +112,7 @@ try {
     await fsp.mkdir(path.dirname(destination), { recursive: true });
     await fsp.copyFile(path.join(sourceModel, file), destination);
   }
-  if (!customModelSource) {
-    await fsp.copyFile(path.join(modules, '@huggingface/transformers/LICENSE'), path.join(staging, 'model/LICENSE'));
-    await fsp.writeFile(path.join(staging, 'model/NOTICE.txt'), [
-    'all-MiniLM-L6-v2 ONNX weights: Xenova/all-MiniLM-L6-v2',
-    `Source revision: https://huggingface.co/Xenova/all-MiniLM-L6-v2/tree/${recipe.modelRevision}`,
-    'Base model: https://huggingface.co/sentence-transformers/all-MiniLM-L6-v2',
-    'License: Apache-2.0 (see LICENSE in this directory).',
-    '',
-    ].join('\n'));
-  } else if (!fs.existsSync(path.join(staging, 'model/NOTICE.txt')) && !fs.existsSync(path.join(staging, 'model/LICENSE'))) {
+  if (!fs.existsSync(path.join(staging, 'model/NOTICE.txt')) && !fs.existsSync(path.join(staging, 'model/LICENSE'))) {
     throw new Error('Custom model source must include its upstream license or NOTICE, separate from runtime licenses');
   }
   const transformersEntry = 'runtime/node_modules/@huggingface/transformers/dist/transformers.node.mjs';

@@ -1,4 +1,12 @@
 export const settingsDict = {
+  "settings.page.harness.index.cpu.title": "로컬 CPU 사용",
+  "settings.page.harness.index.cpu.description": "부하에 맞춰 배치와 백그라운드 작업을 조절하고 검색을 우선합니다. Host를 다시 시작하면 적용됩니다.",
+  "settings.page.harness.index.cpu.mode": "리소스 설정",
+  "settings.page.harness.index.cpu.auto": "자동",
+  "settings.page.harness.index.cpu.efficient": "CPU 사용 줄이기",
+  "settings.page.harness.index.cpu.performance": "색인 속도 우선",
+  "settings.page.harness.index.cpu.threads": "최대 추론 스레드",
+  "settings.page.harness.index.cpu.threadsDescription": "비워 두면 자동 선택합니다. 계산 병렬도를 조절하며 검색 요청 수를 제한하지 않습니다.",
   "index.directories.preparingFile": "파일 준비 · {path}",
   "index.directories.embeddingFile": "임베딩 생성 · {path}",
   "settings.bots.delete": "Bot 삭제",

@@ -1,0 +1,16 @@
+{
+  "schemaVersion": 1,
+  "provider": "local",
+  "model": "bekko-embedding-v1-a8m",
+  "modelRevision": "c721113d59a1d91b447450324f51c4b3332c924a",
+  "dim": 384,
+  "pooling": "mean",
+  "normalize": true,
+  "maxTokens": 512,
+  "onnxFile": "onnx/model.onnx",
+  "tokenizerFile": "tokenizer.json",
+  "inferenceBatchSize": 32,
+  "batchByLength": true,
+  "adaptiveBatching": true,
+  "preferredCpuThreads": 4
+}
