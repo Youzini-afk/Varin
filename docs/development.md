@@ -154,8 +154,9 @@ publishing, deployment, and credential changes still require the authority given
 
 ## Dependency update review
 
-Dependabot checks Bun, Cargo, and GitHub Actions dependencies hourly, including weekends, with no
-additional release cooldown. Discovery is scheduled, not an upstream-release webhook, so GitHub's
+Dependabot checks Bun, Cargo, and GitHub Actions dependencies once every 24 hours at 00:00 UTC,
+including weekends, with no additional release cooldown. Discovery is scheduled, not an upstream-release
+webhook, so GitHub's
 queue and the configured open-PR limit can delay proposals. Major versions remain visible; for example,
 an `@types/node` major upgrade should be evaluated with the actual Node runtime instead of being hidden.
 
@@ -164,7 +165,7 @@ opens, reopens, changes head, or edits its description. It updates one report co
 ranges, upstream excerpts, and migration hints found in the text. Shared release notes are deduplicated;
 missing or truncated material is called out. The run's `dependency-report` artifact contains the report
 and original API data. Existing PRs can be covered with `gh workflow run dependency-report.yml -f pull-request=NUMBER`.
-An hourly check with no update produces no report message. Rebases, title edits, and workflow reruns
+A scheduled check with no update produces no report message. Rebases, title edits, and workflow reruns
 leave the existing comment untouched when dependency versions and collected material are unchanged.
 
 This is automatic evidence collection, not model-generated compatibility analysis. When reviewing an

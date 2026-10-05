@@ -1,5 +1,5 @@
 version: 2
-# Check for releases every 12 hours (00:00 and 12:00 UTC), including weekends.
+# Check for releases every 24 hours (00:00 UTC), including weekends.
 # Proposing an update does not approve it:
 # keep major upgrades visible and review their migration notes before merging.
 updates:
@@ -7,7 +7,7 @@ updates:
     directory: /kernel
     schedule:
       interval: cron
-      cronjob: '0 */12 * * *'
+      cronjob: '0 0 * * *'
     cooldown:
       default-days: 0
     groups:
@@ -23,7 +23,7 @@ updates:
     directory: /
     schedule:
       interval: cron
-      cronjob: '0 */12 * * *'
+      cronjob: '0 0 * * *'
     cooldown:
       default-days: 0
     groups:
@@ -46,7 +46,7 @@ updates:
     directory: /
     schedule:
       interval: cron
-      cronjob: '0 */12 * * *'
+      cronjob: '0 0 * * *'
     cooldown:
       default-days: 0
     open-pull-requests-limit: 10
