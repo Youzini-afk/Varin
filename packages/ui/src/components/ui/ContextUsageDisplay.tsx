@@ -4,7 +4,7 @@ import { cn } from '@/lib/utils';
 import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip';
 import { MobileOverlayPanel } from '@/components/ui/MobileOverlayPanel';
 import { useI18n } from '@/lib/i18n';
-import { clampPercent, resolveUsageTone } from '@/lib/quota';
+import { clampPercent, resolveUsageTone } from '@/lib/pi-runtime/sessionStats';
 
 interface ContextUsageDisplayProps {
   totalTokens: number;

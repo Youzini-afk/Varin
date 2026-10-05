@@ -5,6 +5,10 @@ private runtime protocol and product surfaces still move together.
 
 ## Unreleased
 
+- Replace provider quota tracking with current-conversation token consumption by provider/model,
+  including input, output, cache reads and cache writes. Remove its settings, credential/query APIs,
+  polling, tray quota summaries and unused helpers.
+
 - Keep child conversations beneath their parent across execution workspaces, with expanded sidebar
   trees, branch connectors and search that reveals matching descendants.
 

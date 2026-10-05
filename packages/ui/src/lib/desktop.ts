@@ -102,19 +102,6 @@ export type DesktopSettings = {
   summaryLength?: number;
   maxLastMessageLength?: number;
 
-  usageAutoRefresh?: boolean;
-  usageRefreshIntervalMs?: number;
-  usageDisplayMode?: 'usage' | 'remaining';
-  usageShowPredValues?: boolean;
-  usageDropdownProviders?: string[];
-  usageSelectedModels?: Record<string, string[]>;  // Map of providerId -> selected model names
-  usageCollapsedFamilies?: Record<string, string[]>;  // Map of providerId -> collapsed family IDs (UsagePage)
-  usageExpandedFamilies?: Record<string, string[]>;  // Map of providerId -> EXPANDED family IDs (header dropdown - inverted)
-  usageModelGroups?: Record<string, {
-    customGroups?: Array<{id: string; label: string; models: string[]; order: number}>;
-    modelAssignments?: Record<string, string>;  // modelName -> groupId
-    renamedGroups?: Record<string, string>;  // groupId -> custom label
-  }>;  // Per-provider custom model groups configuration
   autoDeleteEnabled?: boolean;
   autoSaveEnabled?: boolean;
   autoDeleteAfterDays?: number;

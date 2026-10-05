@@ -349,17 +349,17 @@
           }
         },
         {
-          "label": "Usage & Quotas",
+          "label": "Session token usage",
           "link": "/usage/",
           "translations": {
-            "zh-CN": "用量与配额",
-            "uk": "Використання та квоти",
-            "es": "Uso y cuotas",
-            "pt-BR": "Uso e cotas",
-            "ko": "사용량 및 할당량",
-            "pl": "Zużycie i limity",
-            "fr": "Utilisation et quotas",
-            "ja": "使用量とクォータ"
+            "zh-CN": "本会话 Token 用量",
+            "uk": "Токени цієї розмови",
+            "es": "Tokens de esta conversación",
+            "pt-BR": "Tokens desta conversa",
+            "ko": "이 대화의 토큰 사용량",
+            "pl": "Tokeny tej rozmowy",
+            "fr": "Tokens de cette conversation",
+            "ja": "この会話のトークン使用量"
           }
         }
       ]

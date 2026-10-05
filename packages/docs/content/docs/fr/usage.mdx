@@ -1,28 +1,15 @@
 ---
-title: Utilisation et quotas
-description: Suivez la part de votre forfait fournisseur déjà utilisée.
+title: Tokens de cette conversation
+description: Ouvrez Utilisation dans le menu des services de l’en-tête pour voir les tokens de la conversation actuelle par fournisseur et modèle.
 ---
 
-# Utilisation et quotas
+# Tokens de cette conversation
 
-La page Utilisation montre quelle part du forfait de chaque fournisseur vous avez consommée, pour savoir à quel point vous approchez d’une limite. Ouvrez-la dans **Paramètres → Utilisation**.
+Ouvrez **Utilisation** dans le menu des services de l’en-tête pour voir les tokens de la conversation actuelle par fournisseur et modèle.
 
-## Ce que vous voyez
+- **Entrée** : tokens d’entrée hors cache.
+- **Sortie** : tokens générés.
+- **Lecture du cache** : entrée réutilisée depuis le cache du fournisseur.
+- **Écriture du cache** : entrée enregistrée dans ce cache.
 
-Pour chaque fournisseur connecté, Varin affiche :
-
-- la part de la fenêtre actuelle déjà utilisée, sous forme de barre
-- une répartition par modèle
-- un indicateur de rythme, pour savoir si vous êtes en voie d’épuiser le quota
-
-Vous pouvez choisir les fournisseurs affichés, et le même résumé est disponible depuis un menu déroulant dans l’en-tête de l’application.
-
-## Fournisseurs pris en charge
-
-L’utilisation fonctionne pour les fournisseurs qui publient un quota, notamment Claude, Codex, GitHub Copilot, Google, OpenRouter, Kimi, NanoGPT, z.ai, Zhipu, MiniMax, Ollama Cloud et Wafer.
-
-Un fournisseur n’affiche l’utilisation qu’après connexion sur la page [Fournisseurs](/fr/providers/). Quelques fournisseurs demandent une étape supplémentaire — par exemple, Ollama Cloud lit un fichier de session que vous configurez séparément. Si un fournisseur n’affiche aucune donnée, cela signifie généralement que cet identifiant supplémentaire manque.
-
-## Pages liées
-
-- [Fournisseurs, modèles et agents](/fr/providers/) — connectez-vous avant que l’utilisation apparaisse
+Les totaux proviennent du journal de session Pi et incluent les messages antérieurs à la compression, les branches inactives et les appels auxiliaires enregistrés. Les usages sans information de modèle sont affichés séparément. Chaque conversation enfant possède ses propres statistiques.

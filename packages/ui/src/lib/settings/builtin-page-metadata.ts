@@ -17,7 +17,6 @@ export type BuiltinSettingsRenderer =
   | 'remote-instances'
   | 'runtime'
   | 'skills'
-  | 'usage'
   | 'varin:general'
   | 'varin:visual'
   | 'varin:chat'
@@ -50,7 +49,6 @@ export const BUILTIN_SETTINGS_PAGE_SPECS: readonly BuiltinSettingsPageSpec[] = [
   spec({ slug: 'sessions', title: 'Sessions', titleKey: 'settings.page.sessions.title', group: 'general', kind: 'single', icon: 'chat-history', order: 4, keywords: ['defaults', 'default agent', 'default model', 'retention', 'memory', 'zen', 'recovery', 'rollback', 'undo', 'checkpoint', 'workspace snapshot'] }, 'varin:sessions'),
   spec({ slug: 'shortcuts', title: 'Shortcuts', titleKey: 'settings.page.shortcuts.title', group: 'general', kind: 'single', icon: 'command', order: 5, keywords: ['keyboard', 'hotkeys', 'shortcuts', 'bindings'] }, 'varin:shortcuts', 'not-mobile'),
   spec({ slug: 'voice', title: 'Voice', titleKey: 'settings.page.voice.title', group: 'general', kind: 'single', icon: 'mic', order: 6, keywords: ['tts', 'speech', 'voice'] }, 'varin:voice'),
-  spec({ slug: 'usage', title: 'Usage', titleKey: 'settings.page.usage.title', group: 'general', kind: 'split', icon: 'bar-chart-2', order: 7, keywords: ['quota', 'billing', 'tokens', 'usage', 'limits'] }, 'usage'),
   spec({ slug: 'about', title: 'About', titleKey: 'settings.page.about.title', group: 'general', kind: 'single', icon: 'information', order: 8, keywords: ['about', 'version', 'updates', 'release', 'changelog'] }, 'about'),
   spec({ slug: 'projects', title: 'Projects', titleKey: 'settings.page.projects.title', group: 'projects', kind: 'split', icon: 'folders', order: 20, keywords: ['project', 'projects', 'worktree', 'worktrees', 'repo', 'repository', 'directory'] }, 'projects'),
   spec({ slug: 'remote-instances', title: 'Remote Instances', titleKey: 'settings.page.remoteInstances.title', group: 'projects', kind: 'single', icon: 'computer', order: 21, keywords: ['ssh', 'remote', 'instances', 'tunnels', 'forwarding', 'connection'] }, 'remote-instances'),

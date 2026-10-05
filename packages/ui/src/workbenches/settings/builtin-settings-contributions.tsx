@@ -16,8 +16,6 @@ import { RemoteInstancesPage } from '@/components/sections/remote-instances/Remo
 import { PiRuntimeSettingsPage } from '@/components/sections/runtime/PiRuntimeSettingsPage';
 import { SkillsPage } from '@/components/sections/skills/SkillsPage';
 import { SkillsSidebar } from '@/components/sections/skills/SkillsSidebar';
-import { UsagePage } from '@/components/sections/usage/UsagePage';
-import { UsageSidebar } from '@/components/sections/usage/UsageSidebar';
 import {
   BUILTIN_SETTINGS_PAGE_SPECS,
   BUILTIN_SETTINGS_EXTENSION_ID,
@@ -51,7 +49,6 @@ const implementationFor = (spec: BuiltinSettingsPageSpec): SettingsPageImplement
       case 'remote-instances': implementation = { renderContent: () => <RemoteInstancesPage /> }; break;
       case 'runtime': implementation = { renderContent: () => <PiRuntimeSettingsPage /> }; break;
       case 'skills': implementation = { renderContent: () => <SkillsPage />, renderSidebar: (options) => <SkillsSidebar onItemSelect={options.onItemSelect} /> }; break;
-      case 'usage': implementation = { renderContent: () => <UsagePage />, renderSidebar: (options) => <UsageSidebar onItemSelect={options.onItemSelect} /> }; break;
     }
   }
   if (!implementation) throw new Error(`Unknown built-in Settings renderer: ${spec.renderer}`);

@@ -1,28 +1,15 @@
 ---
-title: Usage & Quotas
-description: Track how much of your provider plan you've used.
+title: Session token usage
+description: Open Usage in the header services menu to see the current conversation’s token consumption, grouped by provider and model.
 ---
 
-# Usage & Quotas
+# Session token usage
 
-The Usage page shows how much of each provider's plan you've used, so you can see how close you are to a limit. Open it at **Settings → Usage**.
+Open **Usage** in the header services menu to see the current conversation’s token consumption, grouped by provider and model.
 
-## What you see
+- **Input**: uncached input tokens.
+- **Output**: generated output tokens.
+- **Cache read**: input tokens reused from the provider cache.
+- **Cache write**: input tokens written to that cache.
 
-For each connected provider, Varin shows:
-
-- how much of the current window you've used, as a bar
-- a breakdown by model
-- a pace indicator, so you can tell if you're on track to run out
-
-You can choose which providers appear, and the same summary is available from a dropdown in the app header.
-
-## Supported providers
-
-Usage works for the providers that publish a quota, including Claude, Codex, GitHub Copilot, Google, OpenRouter, Kimi, NanoGPT, z.ai, Zhipu, MiniMax, Ollama Cloud, and Wafer.
-
-A provider only shows usage once you've signed in to it on the [Providers](/providers/) page. A few providers need an extra step — for example, Ollama Cloud reads a session file you set up separately. If a provider shows no data, it usually means that extra credential is missing.
-
-## Related
-
-- [Providers, Models & Agents](/providers/) — sign in before usage appears
+Totals come from the native Pi session journal, including messages before compaction, inactive branches and recorded auxiliary calls. Usage without model information has its own row. Each child conversation has its own statistics.

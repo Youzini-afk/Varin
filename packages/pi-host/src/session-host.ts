@@ -24,6 +24,7 @@ import {
   SettingsManager,
 } from "@earendil-works/pi-coding-agent";
 import { getSupportedThinkingLevels } from "@earendil-works/pi-ai";
+import { sessionUsageByModel } from "./session-usage.js";
 import { attachAgentModelSettings, resolveAgentModelSettings } from "./agent-model-settings.js";
 import {
   VARIN_RECOVERY_NAVIGATION_MARKER_SCHEMA_VERSION,
@@ -1067,6 +1068,7 @@ export class SessionHost {
       ...(stats.sessionFile === undefined ? {} : { sessionFile: stats.sessionFile }),
       sessionId: stats.sessionId,
       tokens: { ...stats.tokens },
+      usageByModel: sessionUsageByModel(this.session.sessionManager.getEntries()),
       toolCalls: stats.toolCalls,
       toolResults: stats.toolResults,
       totalMessages: stats.totalMessages,

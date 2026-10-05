@@ -13,7 +13,6 @@ import { registerExtensionRoutes } from '../extensions/routes.js';
 import { registerFsRoutes } from '../fs/routes.js';
 import { registerGitRoutes } from '../git/routes.js';
 import { registerGitHubRoutes } from '../github/routes.js';
-import { registerQuotaRoutes } from '../quota/routes.js';
 import { registerVarinEventRoutes, registerScheduledTaskRoutes } from '../scheduled-tasks/routes.js';
 import { registerSessionFoldersRoutes } from '../session-folders/routes.js';
 import { registerSmallModelRoutes } from '../small-model/routes.js';
@@ -110,17 +109,11 @@ export const createPlatformRoutesRuntime = ({
 }: {
   clientReloadDelayMs: number;
 }) => {
-  let quotaProviders: typeof import('../quota/index.js') | null = null;
   let smallModelService: typeof import('../small-model/index.js') | null = null;
   let walkthroughService: (
     typeof import('../walkthrough/index.js')
     & { getPullRequestDiff: typeof import('../walkthrough/pull-request.js').getPullRequestDiff }
   ) | null = null;
-
-  const getQuotaProviders = async (): Promise<typeof import('../quota/index.js')> => {
-    quotaProviders ??= await import('../quota/index.js');
-    return quotaProviders;
-  };
 
   const getSmallModelService = async (): Promise<typeof import('../small-model/index.js')> => {
     smallModelService ??= await import('../small-model/index.js');
@@ -280,7 +273,6 @@ export const createPlatformRoutesRuntime = ({
       ...(resolveSurfaceSession ? { resolveSurfaceSession } : {}),
       ...(resolveAuthContext ? { resolveAuthContext } : {}),
     });
-    registerQuotaRoutes(app, { getQuotaProviders });
     registerSmallModelRoutes(app, { getSmallModelService });
     registerWalkthroughRoutes(app, { getWalkthroughService });
     registerGitHubRoutes(app);

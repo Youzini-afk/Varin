@@ -27,7 +27,7 @@ export type SettingsOwnerKind = 'app' | 'pi-settings' | 'client' | 'action';
 export type SettingsCategory =
   | 'appearance' | 'notifications' | 'chat' | 'sessions' | 'editor' | 'terminal'
   | 'model' | 'harness' | 'retrieval' | 'web' | 'extensions' | 'agents'
-  | 'git' | 'tunnel' | 'projects' | 'usage' | 'voice' | 'runtime'
+  | 'git' | 'tunnel' | 'projects' | 'voice' | 'runtime'
   | 'providers' | 'knowledge' | 'language' | 'remote' | 'productivity';
 
 export type SettingsValueKind =
@@ -1091,42 +1091,6 @@ export const SETTINGS_CATALOG: readonly SettingsCatalogEntry[] = [
     apply: 'immediate',
     ui: { page: 'git', titleKey: 'settings.varin.git.showGitignored',
       keywords: ['ignored', 'files', 'gitignore'] },
-  },
-
-  // ── Usage ────────────────────────────────────────────────────────────────
-  {
-    id: 'usage.header-menu', category: 'usage', owner: 'app',
-    field: { path: 'usageDropdownProviders', kind: 'string-list',
-      note: 'provider ids shown in the header usage dropdown; empty hides the menu' },
-    apply: 'immediate',
-    ui: { page: 'usage', titleKey: 'settings.usage.page.options.showInHeader',
-      descriptionKey: 'settings.usage.page.options.showInHeaderTooltip',
-      keywords: ['quota', 'header', 'dropdown'] },
-  },
-  {
-    id: 'usage.display', category: 'usage', owner: 'app',
-    fields: [
-      { path: 'usageAutoRefresh', kind: 'boolean' },
-      { path: 'usageRefreshIntervalMs', kind: 'number', min: 30000, integer: true, unit: 'ms' },
-      { path: 'usageDisplayMode', kind: 'enum',
-        options: [{ value: 'usage' }, { value: 'remaining' }] },
-      { path: 'usageShowPredValues', kind: 'boolean' },
-    ],
-    apply: 'immediate',
-    ui: { page: 'usage', titleKey: 'settings.usage.page.section.modelQuotas',
-      keywords: ['refresh', 'display', 'usage', 'remaining'] },
-  },
-  {
-    id: 'usage.model-quotas', category: 'usage', owner: 'app',
-    fields: [
-      { path: 'usageSelectedModels', kind: 'json',
-        note: 'providerId → selected model names shown in quota tracking' },
-      { path: 'usageModelGroups', kind: 'json',
-        note: 'providerId → custom grouping/assignment/rename config' },
-    ],
-    apply: 'immediate',
-    ui: { page: 'usage', titleKey: 'settings.usage.page.section.modelQuotas',
-      keywords: ['models', 'quota', 'limits', 'tokens'] },
   },
 
   // ── Projects ─────────────────────────────────────────────────────────────

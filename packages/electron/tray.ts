@@ -40,13 +40,10 @@ interface TrayApproval {
   sessionTitle?: string | undefined;
 }
 
-interface TrayUsageRow { label: string; value: string }
-interface TrayUsageGroup { provider: string; rows?: TrayUsageRow[]; status?: string }
 interface TraySnapshot {
   approvals?: TrayApproval[];
   instanceName?: string;
   sessions?: TraySession[];
-  usage?: { groups?: TrayUsageGroup[]; mode?: string };
 }
 
 interface TrayCounts {
@@ -375,32 +372,6 @@ export const createTrayController = ({ idleIconPath, unseenIconPath, breathIconP
       template.push({ label: 'No active sessions', enabled: false });
     }
 
-    // Usage submenu — only when the user has enabled providers for the dropdown
-    // (same "configured to show" rule as the header/mobile); omitted otherwise.
-    const usage = snapshot.usage && typeof snapshot.usage === 'object' ? snapshot.usage : null;
-    const usageGroups = usage && Array.isArray(usage.groups) ? usage.groups : [];
-    if (usageGroups.length > 0) {
-      const modeLabel = usage?.mode === 'remaining' ? 'Remaining' : 'Used';
-      const usageSubmenu: MenuItemConstructorOptions[] = [];
-      usageGroups.forEach((group, index) => {
-        if (index > 0) usageSubmenu.push({ type: 'separator' });
-        // Read-only info rows. NSMenu only offers greyed-out for non-clickable
-        // items (no custom text contrast), so these render dimmed — at the mercy
-        // of macOS's menu contrast choices. Provider flush, rows indented.
-        usageSubmenu.push({ label: group.provider, enabled: false });
-        if (group.status) {
-          usageSubmenu.push({ label: `    ${truncate(group.status, 40)}`, enabled: false });
-        }
-        for (const row of (Array.isArray(group.rows) ? group.rows : [])) {
-          usageSubmenu.push({ label: `    ${row.label}  —  ${row.value}`, enabled: false });
-        }
-      });
-      template.push(
-        { type: 'separator' },
-        { label: `Usage (${modeLabel})`, submenu: usageSubmenu },
-      );
-    }
-
     template.push(
       { type: 'separator' },
       { label: 'New Session', click: () => onAction({ type: 'new-session' }) },
@@ -432,14 +403,10 @@ export const createTrayController = ({ idleIconPath, unseenIconPath, breathIconP
   const menuKey = (snapshot: TraySnapshot): string => {
     const sessions = Array.isArray(snapshot.sessions) ? snapshot.sessions : [];
     const approvals = Array.isArray(snapshot.approvals) ? snapshot.approvals : [];
-    const usage = snapshot.usage && typeof snapshot.usage === 'object' ? snapshot.usage : {};
-    const groups = Array.isArray(usage.groups) ? usage.groups : [];
     return JSON.stringify({
       h: typeof snapshot.instanceName === 'string' ? snapshot.instanceName : '',
       s: sessions.map((s) => `${s.id}|${s.title}|${s.status}|${s.unseen}|${s.hasError}|${s.subtitle}|${s.directory}`),
       a: approvals.map((a) => `${a.id}|${a.kind}|${a.sessionId}|${a.sessionTitle}|${a.label}|${a.directory}`),
-      u: usage.mode || '',
-      g: groups.map((g) => `${g.provider}|${g.status}|${(Array.isArray(g.rows) ? g.rows : []).map((r) => `${r.label}|${r.value}`).join(',')}`),
     });
   };
 

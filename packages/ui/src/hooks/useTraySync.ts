@@ -7,8 +7,6 @@ import {
   locationMatchesHost,
   redactSensitiveUrl,
 } from '@/lib/desktopHosts';
-import { useQuotaStore } from '@/stores/useQuotaStore';
-import { QUOTA_PROVIDERS, formatWindowLabel, formatQuotaValueLabel } from '@/lib/quota';
 import { useProjectsStore } from '@/stores/useProjectsStore';
 import { usePiSessionStore } from '@/stores/usePiSessionStore';
 import { projectPiTraySessions, type PiTraySession } from '@/lib/pi-runtime/piTraySnapshot';
@@ -25,16 +23,12 @@ type TrayApproval = {
   directory: string;
 };
 
-type TrayUsageRow = { label: string; value: string };
-type TrayUsageGroup = { provider: string; rows: TrayUsageRow[]; status: string | null };
-type TrayUsage = { mode: 'usage' | 'remaining'; groups: TrayUsageGroup[] };
 
 type TraySnapshot = {
   approvals: TrayApproval[];
   dockBadgeCount: number;
   instanceName: string;
   sessions: PiTraySession[];
-  usage: TrayUsage;
 };
 
 const isTrayPlatform = (): boolean => {
@@ -47,36 +41,6 @@ const isTrayEnabled = (): boolean => (
   typeof window !== 'undefined' && window.__VARIN_ELECTRON__?.trayEnabled !== false
 );
 
-const buildUsage = (): TrayUsage => {
-  const { results, dropdownProviderIds, displayMode } = useQuotaStore.getState();
-  const mode: TrayUsage['mode'] = displayMode === 'remaining' ? 'remaining' : 'usage';
-  if (dropdownProviderIds.length === 0) return { mode, groups: [] };
-
-  const byProvider = new Map(results.map((result) => [result.providerId, result]));
-  const groups: TrayUsageGroup[] = [];
-  for (const meta of QUOTA_PROVIDERS) {
-    if (!dropdownProviderIds.includes(meta.id)) continue;
-    const result = byProvider.get(meta.id);
-    if (!result || result.configured !== true) continue;
-
-    const rows: TrayUsageRow[] = [];
-    for (const [label, window] of Object.entries(result.usage?.windows ?? {})) {
-      const percent = mode === 'remaining' ? window.remainingPercent : window.usedPercent;
-      rows.push({
-        label: formatWindowLabel(label),
-        value: formatQuotaValueLabel(window.valueLabel, percent),
-      });
-    }
-
-    const status = !result.ok && result.error
-      ? result.error
-      : rows.length === 0
-        ? 'No rate limits reported'
-        : null;
-    groups.push({ provider: meta.name, rows, status });
-  }
-  return { mode, groups };
-};
 
 const resolveInstanceName = async (): Promise<string> => {
   try {
@@ -109,7 +73,6 @@ const buildSnapshot = (instanceName: string): TraySnapshot => {
       sessionState.records,
       useProjectsStore.getState().projects,
     ),
-    usage: buildUsage(),
   };
 };
 
@@ -148,7 +111,6 @@ export const useTraySync = (options: { enabled?: boolean } = {}): void => {
 
     const unsubscribeSessions = usePiSessionStore.subscribe(() => scheduleFlush());
     const unsubscribeProjects = useProjectsStore.subscribe(() => scheduleFlush());
-    const unsubscribeQuota = useQuotaStore.subscribe(() => scheduleFlush());
 
     const sessionState = usePiSessionStore.getState();
     if (!sessionState.catalogLoaded && !sessionState.catalogLoading) refreshCatalog();
@@ -160,28 +122,14 @@ export const useTraySync = (options: { enabled?: boolean } = {}): void => {
       flushNow();
     });
 
-    void useQuotaStore.getState().loadSettings().then(() => {
-      if (disposed) return;
-      const quota = useQuotaStore.getState();
-      const needsFetch = quota.dropdownProviderIds.length > 0
-        && quota.dropdownProviderIds.some((id) => !quota.results.some((result) => result.providerId === id));
-      if (needsFetch) void quota.fetchAllQuotas();
-    });
-    const usageRefreshTimer = window.setInterval(() => {
-      const quota = useQuotaStore.getState();
-      if (quota.autoRefresh && quota.dropdownProviderIds.length > 0) void quota.fetchAllQuotas();
-    }, Math.max(30_000, useQuotaStore.getState().refreshIntervalMs || 60_000));
-
     flushNow();
 
     return () => {
       disposed = true;
       if (flushTimer !== null) window.clearTimeout(flushTimer);
       window.clearInterval(catalogRefreshTimer);
-      window.clearInterval(usageRefreshTimer);
       unsubscribeSessions();
       unsubscribeProjects();
-      unsubscribeQuota();
     };
   }, [enabled]);
 };

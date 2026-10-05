@@ -71,7 +71,7 @@ other runtime API.
 
 ## Registration
 
-Mounted lazily from `feature-routes-runtime.js` (same pattern as quota): the
+Mounted lazily from `feature-routes-runtime.js`: the
 module is imported on first request, not at server startup.
 
 ## Known limitations

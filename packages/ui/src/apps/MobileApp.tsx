@@ -11,7 +11,6 @@ import { AboutSettings } from '@/components/sections/varin/AboutSettings';
 import { MobileAppUpdateToast } from '@/components/update/MobileAppUpdateToast';
 import { Button } from '@/components/ui/button';
 import { VarinLogo } from '@/components/ui/VarinLogo';
-import { ProviderLogo } from '@/components/ui/ProviderLogo';
 import { ChatView } from '@/components/views/ChatView';
 import { SettingsView } from '@/components/views/SettingsView';
 import { TerminalView } from '@/components/views/TerminalView';
@@ -26,7 +25,6 @@ import { subscribeDefaultDirectoryToRuntimeChanges } from '@/lib/directoryPersis
 import { TooltipProvider } from '@/components/ui/tooltip';
 import { Toaster } from '@/components/ui/sonner';
 import { usePushVisibilityBeacon } from '@/hooks/usePushVisibilityBeacon';
-import { preloadProviderLogos } from '@/hooks/useProviderLogo';
 import { useRuntimeAPIs } from '@/hooks/useRuntimeAPIs';
 import { useRouter } from '@/hooks/useRouter';
 import { useUpdatePolling } from '@/hooks/useUpdatePolling';
@@ -37,9 +35,8 @@ import { useI18n } from '@/lib/i18n';
 import { isIPadApp } from '@/lib/platform';
 import { readStoredThemeState } from '@/lib/theme/themeStorage';
 import { resolveProjectForDirectory } from '@/lib/projectResolution';
-import { piSessionContextUsage } from '@/lib/pi-runtime/sessionStats';
-import { clampPercent, formatQuotaResetLabel, formatQuotaValueLabel, formatWindowLabel, QUOTA_PROVIDERS, resolveUsageTone } from '@/lib/quota';
-import { getDisplayModelName } from '@/lib/quota/model-families';
+import { piSessionContextUsage, clampPercent, resolveUsageTone } from '@/lib/pi-runtime/sessionStats';
+import { SessionTokenUsage } from '@/components/pi-session/SessionTokenUsage';
 import { runtimeFetch } from '@varin/application-client';
 import { getRuntimeApiBaseUrl, subscribeRuntimeEndpointChanged, switchRuntimeEndpointSafely } from '@varin/application-client';
 import { workspaceEvents } from '@/lib/workspaceEvents';
@@ -53,9 +50,7 @@ import { useGitHubAuthStore } from '@/stores/useGitHubAuthStore';
 import { useGitStatus, useGitStore, useIsGitRepo } from '@/stores/useGitStore';
 import { usePiSessionStore } from '@/stores/usePiSessionStore';
 import { useProjectsStore } from '@/stores/useProjectsStore';
-import { useQuotaAutoRefresh, useQuotaStore } from '@/stores/useQuotaStore';
-import type { QuotaProviderId, UsageWindow } from '@/types';
-import { useUIStore, type TimeFormatPreference } from '@/stores/useUIStore';
+import { useUIStore } from '@/stores/useUIStore';
 import { useUpdateStore } from '@/stores/useUpdateStore';
 
 import { PiAppEffects } from './PiAppEffects';
@@ -1350,28 +1345,6 @@ const MobileInstancesSurface: React.FC<{
   );
 };
 
-type MobileUsageLimitRow = {
-  key: string;
-  label: string;
-  subtitle?: string;
-  window: UsageWindow;
-};
-
-type MobileUsageProviderGroup = {
-  providerId: QuotaProviderId;
-  providerName: string;
-  rows: MobileUsageLimitRow[];
-  status: string | null;
-};
-
-const getWindowValueClass = (window: UsageWindow): string => {
-  const usedPercent = window.usedPercent;
-  if (typeof usedPercent !== 'number' || !Number.isFinite(usedPercent)) return 'text-foreground';
-  if (usedPercent >= 80) return 'text-[var(--status-error)]';
-  if (usedPercent >= 50) return 'text-[var(--status-warning)]';
-  return 'text-foreground';
-};
-
 const ContextProgressIcon: React.FC<{ percentage: number }> = ({ percentage }) => {
   const progressPct = clampPercent(percentage) ?? 0;
   const tone = resolveUsageTone(percentage);
@@ -1441,11 +1414,7 @@ const SessionMetadataOverlay: React.FC<{
   anchorRef: React.RefObject<HTMLElement | null>;
   contextDisplay: ContextDisplay;
   branchLabel: string;
-  usageGroups: MobileUsageProviderGroup[];
-  usageDisplayMode: 'usage' | 'remaining';
-  isUsageLoading: boolean;
-  timeFormatPreference: TimeFormatPreference;
-}> = ({ open, onClose, anchorRef, contextDisplay, branchLabel, usageGroups, usageDisplayMode, isUsageLoading, timeFormatPreference }) => {
+}> = ({ open, onClose, anchorRef, contextDisplay, branchLabel }) => {
   const { t } = useI18n();
   const panelRef = React.useRef<HTMLDivElement>(null);
   const [shouldRender, setShouldRender] = React.useState(open);
@@ -1574,12 +1543,7 @@ const SessionMetadataOverlay: React.FC<{
               </span>
             </MetadataRow>
           ) : null}
-          <MobileUsageLimits
-            groups={usageGroups}
-            displayMode={usageDisplayMode}
-            isLoading={isUsageLoading}
-            timeFormatPreference={timeFormatPreference}
-          />
+          <SessionTokenUsage />
         </div>
       </div>
       <style>{`
@@ -1596,83 +1560,6 @@ const SessionMetadataOverlay: React.FC<{
   );
 };
 
-const MobileUsageLimits: React.FC<{
-  groups: MobileUsageProviderGroup[];
-  displayMode: 'usage' | 'remaining';
-  isLoading: boolean;
-  timeFormatPreference: TimeFormatPreference;
-}> = ({ groups, displayMode, isLoading, timeFormatPreference }) => {
-  const { t } = useI18n();
-  const modeLabel = displayMode === 'remaining' ? t('header.services.remaining') : t('header.services.used');
-
-  if (groups.length === 0) return null;
-
-  return (
-    <div className="pt-2.5">
-      <div className="flex min-w-0 items-center gap-3 px-2.5 pb-1.5">
-        <span className="flex size-5 shrink-0 items-center justify-center text-muted-foreground">
-          <Icon name="timer" className="size-[18px]" />
-        </span>
-        <span className="shrink-0 typography-ui-label text-muted-foreground">
-          {t('mobile.header.metadata.usage')}
-        </span>
-        <span className="inline-flex min-w-0 flex-1 items-center justify-end gap-1.5 typography-ui-label text-muted-foreground">
-          {isLoading ? <Icon name="refresh" className="size-3.5 animate-spin" /> : null}
-          <span className="truncate">{modeLabel}</span>
-        </span>
-      </div>
-
-      <div className="space-y-1.5">
-        {groups.map((group) => (
-          <div key={group.providerId} className="min-w-0 rounded-xl bg-[var(--surface-muted)] p-2.5">
-            <div className="flex min-w-0 items-center gap-2">
-              <ProviderLogo providerId={group.providerId} className="size-4 shrink-0" />
-              <span className="min-w-0 flex-1 truncate typography-ui-label font-medium text-foreground">
-                {group.providerName}
-              </span>
-              {group.status && group.rows.length === 0 ? (
-                <span className="shrink-0 truncate typography-micro text-muted-foreground">
-                  {group.status}
-                </span>
-              ) : null}
-            </div>
-            {group.rows.length > 0 ? (
-              <div className="mt-1.5 space-y-1">
-                {group.rows.map((row) => {
-                  const displayPercent = displayMode === 'remaining' ? row.window.remainingPercent : row.window.usedPercent;
-                  const metricLabel = formatQuotaValueLabel(row.window.valueLabel, displayPercent);
-                  const resetLabel = formatQuotaResetLabel(
-                    row.window.resetAt,
-                    row.window.resetAfterFormatted ?? row.window.resetAtFormatted,
-                    timeFormatPreference,
-                  );
-                  return (
-                    <div key={row.key} className="flex min-w-0 items-baseline justify-between gap-3">
-                      <span className="inline-flex min-w-0 flex-1 items-baseline gap-1.5">
-                        <span className="truncate typography-ui-label text-muted-foreground">
-                          {row.subtitle ? `${row.subtitle} · ${row.label}` : row.label}
-                        </span>
-                        {resetLabel ? (
-                          <span className="shrink-0 truncate typography-micro text-muted-foreground/70">{resetLabel}</span>
-                        ) : null}
-                      </span>
-                      <span className={cn('shrink-0 typography-ui-label font-semibold tabular-nums', getWindowValueClass(row.window))}>
-                        {metricLabel === '-' ? '' : metricLabel}
-                      </span>
-                    </div>
-                  );
-                })}
-              </div>
-            ) : null}
-            {group.status && group.rows.length > 0 ? (
-              <div className="mt-1.5 typography-micro text-muted-foreground">{group.status}</div>
-            ) : null}
-          </div>
-        ))}
-      </div>
-    </div>
-  );
-};
 
 const MobileOverflowMenu: React.FC<{
   open: boolean;
@@ -1764,16 +1651,7 @@ const MobileSessionMetadataButton = React.memo(function MobileSessionMetadataBut
   const gitStatus = useGitStatus(gitDirectory);
   const ensureStatus = useGitStore((state) => state.ensureStatus);
   const fetchStatus = useGitStore((state) => state.fetchStatus);
-  const quotaResults = useQuotaStore((state) => state.results);
-  const loadQuotaSettings = useQuotaStore((state) => state.loadSettings);
-  const fetchAllQuotas = useQuotaStore((state) => state.fetchAllQuotas);
-  const isQuotaLoading = useQuotaStore((state) => state.isLoading);
-  const quotaDisplayMode = useQuotaStore((state) => state.displayMode);
-  const dropdownProviderIds = useQuotaStore((state) => state.dropdownProviderIds);
-  const selectedQuotaModels = useQuotaStore((state) => state.selectedModels);
-  const timeFormatPreference = useUIStore((state) => state.timeFormatPreference);
 
-  useQuotaAutoRefresh();
 
   React.useEffect(() => {
     if (!gitDirectory) return;
@@ -1788,27 +1666,13 @@ const MobileSessionMetadataButton = React.memo(function MobileSessionMetadataBut
     });
   }, [fetchStatus, git, gitDirectory]);
 
-  React.useEffect(() => {
-    void loadQuotaSettings();
-  }, [loadQuotaSettings]);
 
-  React.useEffect(() => {
-    preloadProviderLogos(dropdownProviderIds);
-  }, [dropdownProviderIds]);
 
   React.useEffect(() => {
     if (!currentSessionId || currentRecord?.snapshot?.busy) return;
     void refreshStats(currentSessionId).catch(() => undefined);
   }, [currentRecord?.snapshot?.busy, currentRecord?.snapshot?.leafId, currentSessionId, refreshStats]);
 
-  React.useEffect(() => {
-    if (!open || isQuotaLoading) return;
-    const missingEnabledProvider = dropdownProviderIds.some((providerId) => (
-      !quotaResults.some((result) => result.providerId === providerId)
-    ));
-    if (!missingEnabledProvider) return;
-    void fetchAllQuotas();
-  }, [dropdownProviderIds, fetchAllQuotas, isQuotaLoading, open, quotaResults]);
 
   const contextUsage = piSessionContextUsage(currentRecord?.stats, currentRecord?.snapshot);
   const contextPercentage = contextUsage && contextUsage.totalTokens > 0 && contextUsage.contextLimit > 0
@@ -1833,59 +1697,7 @@ const MobileSessionMetadataButton = React.memo(function MobileSessionMetadataBut
     ? (gitStatus?.current?.trim() || t('gitView.branch.detachedHead'))
     : t('common.unavailable');
 
-  const usageGroups = React.useMemo<MobileUsageProviderGroup[]>(() => {
-    const resultsByProvider = new Map(quotaResults.map((result) => [result.providerId, result]));
-    return QUOTA_PROVIDERS
-      .filter((providerMeta) => dropdownProviderIds.includes(providerMeta.id))
-      .filter((providerMeta) => resultsByProvider.get(providerMeta.id)?.configured === true)
-      .map((providerMeta) => {
-        const result = resultsByProvider.get(providerMeta.id)!;
-        const rows: MobileUsageLimitRow[] = [];
 
-        for (const [label, window] of Object.entries(result?.usage?.windows ?? {})) {
-          rows.push({
-            key: `window-${label}`,
-            label: formatWindowLabel(label),
-            window,
-          });
-        }
-
-        const modelEntries = Object.entries(result?.usage?.models ?? {});
-        const providerSelectedModels = selectedQuotaModels[providerMeta.id] ?? [];
-        const visibleModelEntries = providerSelectedModels.length > 0
-          ? modelEntries.filter(([modelName]) => providerSelectedModels.includes(modelName))
-          : modelEntries;
-        for (const [modelName, modelUsage] of visibleModelEntries) {
-          const entries = Object.entries(modelUsage.windows ?? {});
-          if (entries.length === 0) continue;
-          const [label, window] = entries[0];
-          rows.push({
-            key: `model-${modelName}-${label}`,
-            label: formatWindowLabel(label),
-            subtitle: getDisplayModelName(modelName),
-            window,
-          });
-        }
-
-        const status = !result.ok && result.error
-          ? result.error
-          : rows.length === 0
-            ? t('header.services.noRateLimitsReported')
-            : null;
-
-        return {
-          providerId: providerMeta.id,
-          providerName: providerMeta.name,
-          rows,
-          status,
-        };
-      });
-  }, [dropdownProviderIds, quotaResults, selectedQuotaModels, t]);
-
-  React.useEffect(() => {
-    if (!open || usageGroups.length === 0) return;
-    preloadProviderLogos(usageGroups.map((group) => group.providerId));
-  }, [open, usageGroups]);
 
   return (
     <>
@@ -1921,10 +1733,6 @@ const MobileSessionMetadataButton = React.memo(function MobileSessionMetadataBut
         anchorRef={metadataTriggerRef}
         contextDisplay={contextDisplay}
         branchLabel={branchLabel}
-        usageGroups={usageGroups}
-        usageDisplayMode={quotaDisplayMode}
-        isUsageLoading={isQuotaLoading}
-        timeFormatPreference={timeFormatPreference}
       />
     </>
   );

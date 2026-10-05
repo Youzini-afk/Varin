@@ -30,6 +30,13 @@ own execution directory. The sidebar expands children initially, retains explici
 while mounted, and reveals matching descendants during search. Native parent links remain the
 authority; sessions whose parent is unavailable remain accessible as roots.
 
+The header services menu and mobile conversation metadata show the current session's token usage
+by provider and model from `SessionStats.usageByModel`. Pi Host reads the complete native journal,
+including inactive branches, messages before compaction and auxiliary usage. Calls lacking model
+metadata get a separate row. Input, output, cache reads and cache writes are shown as exact counts;
+each child conversation has its own statistics. Provider quota settings, credential adapters,
+network polling and tray quota summaries have been removed.
+
 `ProjectCreateDialog` collects a name and folders, reusing `DirectoryPickerDialog` for browsing,
 native directory access, directory creation and Git cloning. `ProjectFoldersSettings` is shared
 by desktop settings and the mobile project editor. Folder edits preserve project/session IDs and

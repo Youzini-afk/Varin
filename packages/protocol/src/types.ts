@@ -626,7 +626,15 @@ export interface SessionSnapshot extends SessionRuntimeState {
   workFocus?: SessionWorkFocusSnapshot;
 }
 
+export interface SessionModelUsage {
+  provider: string | null;
+  model: string | null;
+  tokens: SessionStats['tokens'];
+}
+
 export interface SessionStats {
+  /** Billed usage across the complete native session journal, including inactive branches. */
+  usageByModel?: SessionModelUsage[];
   contextUsage?: JsonValue;
   cost: number;
   sessionFile?: string;

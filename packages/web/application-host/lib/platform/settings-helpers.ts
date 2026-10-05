@@ -384,21 +384,6 @@ export const createSettingsHelpers = (dependencies: SettingsHelpersDependencies)
     if (typeof candidate.maxLastMessageLength === 'number' && Number.isFinite(candidate.maxLastMessageLength)) {
       result.maxLastMessageLength = Math.max(10, Math.round(candidate.maxLastMessageLength));
     }
-    if (typeof candidate.usageAutoRefresh === 'boolean') {
-      result.usageAutoRefresh = candidate.usageAutoRefresh;
-    }
-    if (typeof candidate.usageRefreshIntervalMs === 'number' && Number.isFinite(candidate.usageRefreshIntervalMs)) {
-      result.usageRefreshIntervalMs = Math.max(30000, Math.min(300000, Math.round(candidate.usageRefreshIntervalMs)));
-    }
-    if (candidate.usageDisplayMode === 'usage' || candidate.usageDisplayMode === 'remaining') {
-      result.usageDisplayMode = candidate.usageDisplayMode;
-    }
-    if (typeof candidate.usageShowPredValues === 'boolean') {
-      result.usageShowPredValues = candidate.usageShowPredValues;
-    }
-    if (Array.isArray(candidate.usageDropdownProviders)) {
-      result.usageDropdownProviders = normalizeStringArray(candidate.usageDropdownProviders);
-    }
     if (typeof candidate.autoDeleteEnabled === 'boolean') {
       result.autoDeleteEnabled = candidate.autoDeleteEnabled;
     }
@@ -719,115 +704,6 @@ export const createSettingsHelpers = (dependencies: SettingsHelpersDependencies)
     const skillCatalogs = sanitizeSkillCatalogs(candidate.skillCatalogs);
     if (skillCatalogs) {
       result.skillCatalogs = skillCatalogs;
-    }
-
-    // Usage model selections - which models appear in dropdown
-    if (candidate.usageSelectedModels && typeof candidate.usageSelectedModels === 'object') {
-      const sanitized: Record<string, string[]> = {};
-      for (const [providerId, models] of Object.entries(candidate.usageSelectedModels)) {
-        if (typeof providerId === 'string' && Array.isArray(models)) {
-          const validModels = models.filter((m) => typeof m === 'string' && m.length > 0);
-          if (validModels.length > 0) {
-            sanitized[providerId] = validModels;
-          }
-        }
-      }
-      if (Object.keys(sanitized).length > 0) {
-        result.usageSelectedModels = sanitized;
-      }
-    }
-
-    // Usage page collapsed families - for "Other Models" section
-    if (candidate.usageCollapsedFamilies && typeof candidate.usageCollapsedFamilies === 'object') {
-      const sanitized: Record<string, string[]> = {};
-      for (const [providerId, families] of Object.entries(candidate.usageCollapsedFamilies)) {
-        if (typeof providerId === 'string' && Array.isArray(families)) {
-          const validFamilies = families.filter((f) => typeof f === 'string' && f.length > 0);
-          if (validFamilies.length > 0) {
-            sanitized[providerId] = validFamilies;
-          }
-        }
-      }
-      if (Object.keys(sanitized).length > 0) {
-        result.usageCollapsedFamilies = sanitized;
-      }
-    }
-
-    // Header dropdown expanded families (inverted - stores EXPANDED, default all collapsed)
-    if (candidate.usageExpandedFamilies && typeof candidate.usageExpandedFamilies === 'object') {
-      const sanitized: Record<string, string[]> = {};
-      for (const [providerId, families] of Object.entries(candidate.usageExpandedFamilies)) {
-        if (typeof providerId === 'string' && Array.isArray(families)) {
-          const validFamilies = families.filter((f) => typeof f === 'string' && f.length > 0);
-          if (validFamilies.length > 0) {
-            sanitized[providerId] = validFamilies;
-          }
-        }
-      }
-      if (Object.keys(sanitized).length > 0) {
-        result.usageExpandedFamilies = sanitized;
-      }
-    }
-
-    // Custom model groups configuration
-    if (candidate.usageModelGroups && typeof candidate.usageModelGroups === 'object') {
-      const sanitized: Record<string, SettingsRecord> = {};
-      for (const [providerId, config] of Object.entries(candidate.usageModelGroups)) {
-        if (typeof providerId !== 'string' || !isRecord(config)) continue;
-
-        const providerConfig: SettingsRecord = {};
-
-        // customGroups: array of {id, label, models, order}
-        if (Array.isArray(config.customGroups)) {
-          const validGroups = config.customGroups
-            .filter((group): group is SettingsRecord => isRecord(group)
-              && typeof group.id === 'string' && typeof group.label === 'string')
-            .map((g) => ({
-              id: (g.id as string).slice(0, 64),
-              label: (g.label as string).slice(0, 128),
-              models: Array.isArray(g.models)
-                ? g.models.filter((model): model is string => typeof model === 'string').slice(0, 500)
-                : [],
-              order: typeof g.order === 'number' ? g.order : 0,
-            }));
-          if (validGroups.length > 0) {
-            providerConfig.customGroups = validGroups;
-          }
-        }
-
-        // modelAssignments: Record<modelName, groupId>
-        if (config.modelAssignments && typeof config.modelAssignments === 'object') {
-          const assignments: Record<string, string> = {};
-          for (const [model, groupId] of Object.entries(config.modelAssignments)) {
-            if (typeof model === 'string' && typeof groupId === 'string') {
-              assignments[model] = groupId;
-            }
-          }
-          if (Object.keys(assignments).length > 0) {
-            providerConfig.modelAssignments = assignments;
-          }
-        }
-
-        // renamedGroups: Record<groupId, label>
-        if (config.renamedGroups && typeof config.renamedGroups === 'object') {
-          const renamed: Record<string, string> = {};
-          for (const [groupId, label] of Object.entries(config.renamedGroups)) {
-            if (typeof groupId === 'string' && typeof label === 'string') {
-              renamed[groupId] = label.slice(0, 128);
-            }
-          }
-          if (Object.keys(renamed).length > 0) {
-            providerConfig.renamedGroups = renamed;
-          }
-        }
-
-        if (Object.keys(providerConfig).length > 0) {
-          sanitized[providerId] = providerConfig;
-        }
-      }
-      if (Object.keys(sanitized).length > 0) {
-        result.usageModelGroups = sanitized;
-      }
     }
 
     // Varin-owned global behavior prompt.

@@ -20,13 +20,13 @@ import { useUIStore, type ContextPanelMode, type MainTab } from '@/stores/useUIS
 import { ContextPanelControls } from './ContextPanelControls';
 import { usePiSessionStore } from '@/stores/usePiSessionStore';
 import { useProjectsStore } from '@/stores/useProjectsStore';
-import { useQuotaAutoRefresh, useQuotaStore } from '@/stores/useQuotaStore';
 import { useGitBranchLabel } from '@/stores/useGitStore';
 import { streamPerfCount } from '@/stores/utils/streamDebug';
 
 import { useGitHubAuthStore } from '@/stores/useGitHubAuthStore';
 import { useRuntimeAPIs } from '@/hooks/useRuntimeAPIs';
 import { useDesktopWindowControlsLayout } from '@/hooks/useDesktopWindowControlsLayout';
+import { SessionTokenUsage } from '@/components/pi-session/SessionTokenUsage';
 import { ContextUsageDisplay } from '@/components/ui/ContextUsageDisplay';
 import { WindowsWindowControls } from '@/components/desktop/WindowsWindowControls';
 import { UpdateDialog } from '@/components/ui/UpdateDialog';
@@ -34,27 +34,8 @@ import { useDeviceInfo, useTabletStandalonePwaRuntime } from '@/lib/device';
 import { cn, hasModifier } from '@/lib/utils';
 import { McpDropdownContent } from '@/components/mcp/McpDropdown';
 import { McpIcon } from '@/components/icons/McpIcon';
-import { ProviderLogo } from '@/components/ui/ProviderLogo';
-import { formatQuotaValueLabel, formatQuotaResetLabel, formatWindowLabel, QUOTA_PROVIDERS, calculatePace, calculateExpectedUsagePercent } from '@/lib/quota';
-import { UsageProgressBar } from '@/components/sections/usage/UsageProgressBar';
-import { PaceIndicator } from '@/components/sections/usage/PaceIndicator';
-import { updateDesktopSettings } from '@/lib/persistence';
-import { formatTimeForPreference } from '@/lib/timeFormat';
 import { eventMatchesShortcut, formatShortcutForDisplay, getEffectiveShortcutCombo } from '@/lib/shortcuts';
-import type { TimeFormatPreference } from '@/stores/useUIStore';
-import {
-  getAllModelFamilies,
-  getDisplayModelName,
-  groupModelsByFamily,
-  sortModelFamilies,
-} from '@/lib/quota/model-families';
 
-import {
-  Collapsible,
-  CollapsibleContent,
-  CollapsibleTrigger,
-} from '@/components/ui/collapsible';
-import type { UsageWindow } from '@/types';
 import type { GitHubAuthStatus } from '@varin/application-client';
 import { DesktopHostSwitcherDialog } from '@/components/desktop/DesktopHostSwitcher';
 import { OpenInAppButton } from '@/components/desktop/OpenInAppButton';
@@ -219,20 +200,7 @@ type DesktopServicesMenuProps = {
   refreshCurrentInstanceLabel: () => Promise<void>;
   desktopServicesTab: 'instance' | 'usage' | 'mcp';
   setDesktopServicesTab: React.Dispatch<React.SetStateAction<'instance' | 'usage' | 'mcp'>>;
-  quotaResultsLength: number;
-  fetchAllQuotas: () => Promise<unknown>;
   servicesTabItems: SortableTabsStripItem[];
-  quotaLastUpdated: number | null;
-  quotaDisplayMode: 'usage' | 'remaining';
-  quotaDisplayTabItems: SortableTabsStripItem[];
-  handleDisplayModeChange: (mode: 'usage' | 'remaining') => Promise<void>;
-  handleUsageRefresh: () => void;
-  isQuotaLoading: boolean;
-  isUsageRefreshSpinning: boolean;
-  hasRateLimits: boolean;
-  rateLimitGroups: RateLimitGroup[];
-  expandedFamilies: Record<string, string[]>;
-  toggleFamilyExpanded: (providerId: string, familyId: string) => void;
   shortcutLabel: (actionId: string) => string;
   showDevShutdown: boolean;
   isDevShutdownInFlight: boolean;
@@ -241,8 +209,6 @@ type DesktopServicesMenuProps = {
   remoteUpdateChecking: boolean;
   remoteUpdateError: string | null;
   onOpenRemoteUpdate: () => void;
-  showPredValues: boolean;
-  timeFormatPreference: TimeFormatPreference;
 };
 
 const DesktopServicesMenu = React.memo(function DesktopServicesMenu({
@@ -255,20 +221,7 @@ const DesktopServicesMenu = React.memo(function DesktopServicesMenu({
   refreshCurrentInstanceLabel,
   desktopServicesTab,
   setDesktopServicesTab,
-  quotaResultsLength,
-  fetchAllQuotas,
   servicesTabItems,
-  quotaLastUpdated,
-  quotaDisplayMode,
-  quotaDisplayTabItems,
-  handleDisplayModeChange,
-  handleUsageRefresh,
-  isQuotaLoading,
-  isUsageRefreshSpinning,
-  hasRateLimits,
-  rateLimitGroups,
-  expandedFamilies,
-  toggleFamilyExpanded,
   shortcutLabel,
   showDevShutdown,
   isDevShutdownInFlight,
@@ -277,8 +230,6 @@ const DesktopServicesMenu = React.memo(function DesktopServicesMenu({
   remoteUpdateChecking,
   remoteUpdateError,
   onOpenRemoteUpdate,
-  showPredValues,
-  timeFormatPreference,
 }: DesktopServicesMenuProps) {
   const { t } = useI18n();
   return (
@@ -288,9 +239,6 @@ const DesktopServicesMenu = React.memo(function DesktopServicesMenu({
         setIsDesktopServicesOpen(open);
         if (open) {
           void refreshCurrentInstanceLabel();
-          if (desktopServicesTab === 'usage' && quotaResultsLength === 0) {
-            void fetchAllQuotas();
-          }
         }
       }}
     >
@@ -341,9 +289,6 @@ const DesktopServicesMenu = React.memo(function DesktopServicesMenu({
               onSelect={(tabID) => {
                 const value = tabID as 'instance' | 'usage' | 'mcp';
                 setDesktopServicesTab(value);
-                if (value === 'usage' && quotaResultsLength === 0) {
-                  void fetchAllQuotas();
-                }
               }}
               layoutMode="fit"
               variant="active-pill"
@@ -394,158 +339,7 @@ const DesktopServicesMenu = React.memo(function DesktopServicesMenu({
           <McpDropdownContent active={isDesktopServicesOpen && desktopServicesTab === 'mcp'} />
         ) : null}
 
-        {desktopServicesTab === 'usage' ? (
-          <div className="overflow-x-hidden">
-            <div className="flex items-center justify-between gap-3 border-b border-[var(--interactive-border)] px-4 py-2.5">
-              <div className="flex min-w-0 items-baseline gap-2">
-                <span className="typography-ui-header font-semibold text-foreground">{t('header.services.rateLimits')}</span>
-                <span className="truncate typography-micro text-muted-foreground">{formatTime(quotaLastUpdated, timeFormatPreference)}</span>
-              </div>
-              <div className="flex items-center gap-1.5">
-                <div className="h-7 w-[10.5rem]">
-                  <SortableTabsStrip
-                    items={quotaDisplayTabItems}
-                    activeId={quotaDisplayMode}
-                    onSelect={(tabID) => void handleDisplayModeChange(tabID as 'usage' | 'remaining')}
-                    layoutMode="fit"
-                    variant="active-pill"
-                    activePillInsetClassName="gap-0.5 px-px py-0"
-                    className="h-full"
-                  />
-                </div>
-                <button
-                  type="button"
-                  className={cn(
-                    'inline-flex h-7 w-7 items-center justify-center rounded-md text-muted-foreground transition-colors',
-                    'hover:text-foreground hover:bg-interactive-hover',
-                    'focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary'
-                  )}
-                  onClick={handleUsageRefresh}
-                  disabled={isQuotaLoading || isUsageRefreshSpinning}
-                  aria-label={t('header.services.refreshRateLimitsAria')}
-                >
-                  <Icon name="refresh" className={cn('h-4 w-4', isUsageRefreshSpinning && 'animate-spin')} />
-                </button>
-              </div>
-            </div>
-
-            {!hasRateLimits ? (
-              <div className="px-4 py-5 text-center">
-                <span className="typography-ui-label text-muted-foreground">{t('header.services.noRateLimits')}</span>
-              </div>
-            ) : null}
-
-            {/* One elevated card per provider (same card language as the mobile
-                usage popover) instead of a flat run of divider-separated rows. */}
-            <div className="space-y-2 px-3 py-2.5">
-              {rateLimitGroups.map((group) => {
-                const providerExpandedFamilies = expandedFamilies[group.providerId] ?? [];
-                return (
-                  <div key={group.providerId} className="min-w-0 rounded-xl bg-[var(--surface-muted)] p-3">
-                    <div className="flex items-center gap-2 pb-2">
-                      <ProviderLogo providerId={group.providerId} className="h-4 w-4" />
-                      <span className="typography-ui-label font-medium text-foreground">{group.providerName}</span>
-                    </div>
-                    {group.entries.length === 0 && (!group.modelFamilies || group.modelFamilies.length === 0) ? (
-                      <div>
-                        <span className="typography-ui-label text-muted-foreground">{group.error ?? t('header.services.noRateLimitsReported')}</span>
-                      </div>
-                    ) : (
-                      <div className="space-y-3">
-                        {group.entries.map(([label, window]) => {
-                          const displayPercent = quotaDisplayMode === 'remaining' ? window.remainingPercent : window.usedPercent;
-                          const paceInfo = calculatePace(window.usedPercent, window.resetAt, window.windowSeconds, label);
-                          const expectedMarker = paceInfo?.dailyAllocationPercent != null
-                            ? (quotaDisplayMode === 'remaining'
-                                ? 100 - calculateExpectedUsagePercent(paceInfo.elapsedRatio)
-                                : calculateExpectedUsagePercent(paceInfo.elapsedRatio))
-                            : null;
-                          const metricLabel = formatQuotaValueLabel(window.valueLabel, displayPercent);
-                          const resetLabel = formatQuotaResetLabel(window.resetAt, window.resetAfterFormatted ?? window.resetAtFormatted, timeFormatPreference);
-                          return (
-                            <div key={`${group.providerId}-${label}`} className="flex flex-col gap-1.5">
-                              <div className="flex min-w-0 items-center justify-between gap-3">
-                                <div className="min-w-0 flex items-center gap-2">
-                                  <span className="truncate typography-ui-label text-foreground">{formatWindowLabel(label)}</span>
-                                  {resetLabel ? (
-                                    <span className="truncate typography-micro text-muted-foreground">
-                                      {resetLabel}
-                                    </span>
-                                  ) : null}
-                                </div>
-                                <span className="typography-ui-label tabular-nums text-foreground">
-                                  {metricLabel === '-' ? '' : metricLabel}
-                                </span>
-                              </div>
-                              <UsageProgressBar
-                                percent={displayPercent}
-                                tonePercent={window.usedPercent}
-                                className="h-1.5"
-                                expectedMarkerPercent={expectedMarker}
-                              />
-                              {paceInfo && showPredValues ? <PaceIndicator paceInfo={paceInfo} compact /> : null}
-                            </div>
-                          );
-                        })}
-                        {group.modelFamilies && group.modelFamilies.length > 0 ? (
-                          <div className="space-y-0.5">
-                            {group.modelFamilies.map((family) => {
-                              const familyKey = family.familyId ?? 'other';
-                              const isExpanded = providerExpandedFamilies.includes(familyKey);
-                              return (
-                                <Collapsible
-                                  key={familyKey}
-                                  open={isExpanded}
-                                  onOpenChange={() => toggleFamilyExpanded(group.providerId, familyKey)}
-                                >
-                                  <CollapsibleTrigger className="flex w-full items-center justify-between rounded-md px-1 py-1.5 text-left hover:bg-[var(--interactive-hover)]/50 transition-colors">
-                                    <span className="typography-ui-label font-medium text-foreground">{family.familyLabel}</span>
-                                    {isExpanded ? <Icon name="arrow-down-s" className="h-4 w-4 text-muted-foreground" /> : <Icon name="arrow-right-s" className="h-4 w-4 text-muted-foreground" />}
-                                  </CollapsibleTrigger>
-                                  <CollapsibleContent>
-                                    <div className="space-y-2.5 pb-1 pl-1 pt-1">
-                                      {family.models.map(([modelName, window]) => {
-                                        const displayPercent = quotaDisplayMode === 'remaining' ? window.remainingPercent : window.usedPercent;
-                                        const paceInfo = calculatePace(window.usedPercent, window.resetAt, window.windowSeconds);
-                                        const expectedMarker = paceInfo?.dailyAllocationPercent != null
-                                          ? (quotaDisplayMode === 'remaining'
-                                              ? 100 - calculateExpectedUsagePercent(paceInfo.elapsedRatio)
-                                              : calculateExpectedUsagePercent(paceInfo.elapsedRatio))
-                                          : null;
-                                        const metricLabel = formatQuotaValueLabel(window.valueLabel, displayPercent);
-                                        return (
-                                          <div key={`${group.providerId}-${modelName}`} className="flex flex-col gap-1.5">
-                                            <div className="flex min-w-0 items-center justify-between gap-3">
-                                              <span className="truncate typography-micro text-muted-foreground">{getDisplayModelName(modelName)}</span>
-                                              <span className="typography-ui-label tabular-nums text-foreground">
-                                                {metricLabel === '-' ? '' : metricLabel}
-                                              </span>
-                                            </div>
-                                            <UsageProgressBar
-                                              percent={displayPercent}
-                                              tonePercent={window.usedPercent}
-                                              className="h-1.5"
-                                              expectedMarkerPercent={expectedMarker}
-                                            />
-                                            {paceInfo && showPredValues ? <PaceIndicator paceInfo={paceInfo} compact /> : null}
-                                          </div>
-                                        );
-                                      })}
-                                    </div>
-                                  </CollapsibleContent>
-                                </Collapsible>
-                              );
-                            })}
-                          </div>
-                        ) : null}
-                      </div>
-                    )}
-                  </div>
-                );
-              })}
-            </div>
-          </div>
-        ) : null}
+        {desktopServicesTab === 'usage' ? <SessionTokenUsage /> : null}
 
         {showDevShutdown ? (
           <>
@@ -587,14 +381,6 @@ const formatCompactHeaderLabel = (value: string): string => {
   return trimmed.length > 12 ? `${trimmed.slice(0, 9).trimEnd()}...` : trimmed;
 };
 
-const formatTime = (timestamp: number | null, timeFormatPreference: 'auto' | '12h' | '24h') => {
-  if (!timestamp) return '-';
-  try {
-    return formatTimeForPreference(timestamp, timeFormatPreference, { fallback: '-' });
-  } catch {
-    return '-';
-  }
-};
 
 const normalize = (value: string): string => {
   if (!value) return '';
@@ -623,17 +409,6 @@ interface TabConfig {
   showDot?: boolean;
 }
 
-interface RateLimitGroup {
-  providerId: string;
-  providerName: string;
-  entries: Array<[string, UsageWindow]>;
-  error?: string;
-  modelFamilies?: Array<{
-    familyId: string | null;
-    familyLabel: string;
-    models: Array<[string, UsageWindow]>;
-  }>;
-}
 
 interface HeaderProps {
   navigationTitle?: string;
@@ -661,7 +436,6 @@ export const Header: React.FC<HeaderProps> = ({
   const activeMainTab = useUIStore((state) => state.activeMainTab);
   const setActiveMainTab = useUIStore((state) => state.setActiveMainTab);
   const shortcutOverrides = useUIStore((state) => state.shortcutOverrides);
-  const timeFormatPreference = useUIStore((state) => state.timeFormatPreference);
 
   const runtimeApis = useRuntimeAPIs();
   const [isDevShutdownInFlight, setIsDevShutdownInFlight] = React.useState(false);
@@ -703,15 +477,6 @@ export const Header: React.FC<HeaderProps> = ({
     const pathSegments = activeProject.path.split(/[\\/]/).filter(Boolean);
     return pathSegments[pathSegments.length - 1] ?? null;
   }, [activeProject]);
-  const quotaResults = useQuotaStore((state) => state.results);
-  const fetchAllQuotas = useQuotaStore((state) => state.fetchAllQuotas);
-  const isQuotaLoading = useQuotaStore((state) => state.isLoading);
-  const quotaLastUpdated = useQuotaStore((state) => state.lastUpdated);
-  const quotaDisplayMode = useQuotaStore((state) => state.displayMode);
-  const showPredValues = useQuotaStore((state) => state.showPredValues);
-  const dropdownProviderIds = useQuotaStore((state) => state.dropdownProviderIds);
-  const loadQuotaSettings = useQuotaStore((state) => state.loadSettings);
-  const setQuotaDisplayMode = useQuotaStore((state) => state.setDisplayMode);
 
   const { isMobile } = useDeviceInfo();
   const githubAuthStatus = useGitHubAuthStore((state) => state.status);
@@ -791,9 +556,8 @@ export const Header: React.FC<HeaderProps> = ({
   const githubLogin = githubAuthStatus?.connected ? (githubAuthStatus.user?.login ?? null) : null;
   const githubAccounts = githubAuthStatus?.accounts ?? [];
   const [isSwitchingGitHubAccount, setIsSwitchingGitHubAccount] = React.useState(false);
-  const [isMobileRateLimitsOpen, setIsMobileRateLimitsOpen] = React.useState(false);
+  const [isMobileServicesOpen, setIsMobileServicesOpen] = React.useState(false);
   const [isDesktopServicesOpen, setIsDesktopServicesOpen] = React.useState(false);
-  const [isUsageRefreshSpinning, setIsUsageRefreshSpinning] = React.useState(false);
   const [currentInstanceLabel, setCurrentInstanceLabel] = React.useState('Local');
   const [currentInstanceIsLocal, setCurrentInstanceIsLocal] = React.useState(true);
   const [remoteUpdateDialogOpen, setRemoteUpdateDialogOpen] = React.useState(false);
@@ -943,127 +707,8 @@ export const Header: React.FC<HeaderProps> = ({
     void checkRemoteInstanceUpdate();
   }, [checkRemoteInstanceUpdate, remoteUpdateInfo?.available]);
 
-  useQuotaAutoRefresh();
-  const selectedModels = useQuotaStore((state) => state.selectedModels);
-  const expandedFamilies = useQuotaStore((state) => state.expandedFamilies);
-  const toggleFamilyExpanded = useQuotaStore((state) => state.toggleFamilyExpanded);
 
-  const rateLimitGroups = React.useMemo(() => {
-    const groups: RateLimitGroup[] = [];
 
-    for (const provider of QUOTA_PROVIDERS) {
-      if (!dropdownProviderIds.includes(provider.id)) {
-        continue;
-      }
-      const result = quotaResults.find((entry) => entry.providerId === provider.id);
-      const windows = (result?.usage?.windows ?? {}) as Record<string, UsageWindow>;
-      const models = result?.usage?.models;
-      const entries = Object.entries(windows);
-
-      const group: RateLimitGroup = {
-        providerId: provider.id,
-        providerName: provider.name,
-        entries,
-        error: (result && !result.ok && result.configured) ? result.error : undefined,
-      };
-
-      // Add model families if provider has per-model quotas
-      if (models && Object.keys(models).length > 0) {
-        const providerSelectedModels = selectedModels[provider.id] ?? [];
-        // hasExplicitSelection = true means user has selected specific models to show
-        // If the array exists but is empty, treat as "show all" (user cleared selection)
-        const hasExplicitSelection = providerSelectedModels.length > 0;
-        const modelGroups = groupModelsByFamily(models, provider.id);
-        const families = getAllModelFamilies(provider.id);
-        const sortedFamilies = sortModelFamilies(families);
-
-        group.modelFamilies = [];
-
-        // Add predefined families first
-        for (const family of sortedFamilies) {
-          const modelNames = modelGroups.get(family.id) ?? [];
-          if (modelNames.length === 0) continue;
-
-          // Filter to selected models only, OR show all if nothing selected
-          const selectedModelNames = hasExplicitSelection
-            ? modelNames.filter((m: string) => providerSelectedModels.includes(m))
-            : modelNames;
-          if (selectedModelNames.length === 0) continue;
-
-          const familyModels: Array<[string, UsageWindow]> = [];
-          for (const modelName of selectedModelNames) {
-            const modelUsage = models[modelName] as { windows?: Record<string, UsageWindow> } | undefined;
-            if (modelUsage?.windows) {
-              const windowEntries = Object.entries(modelUsage.windows);
-              if (windowEntries.length > 0) {
-                familyModels.push([modelName, windowEntries[0][1]]);
-              }
-            }
-          }
-
-          if (familyModels.length > 0) {
-            group.modelFamilies.push({
-              familyId: family.id,
-              familyLabel: family.label,
-              models: familyModels,
-            });
-          }
-        }
-
-        // Add "Other" family for remaining models
-        const otherModelNames = modelGroups.get(null) ?? [];
-        const selectedOtherModels = hasExplicitSelection
-          ? otherModelNames.filter((m: string) => providerSelectedModels.includes(m))
-          : otherModelNames;
-        if (selectedOtherModels.length > 0) {
-          const otherModels: Array<[string, UsageWindow]> = [];
-          for (const modelName of selectedOtherModels) {
-            const modelUsage = models[modelName] as { windows?: Record<string, UsageWindow> } | undefined;
-            if (modelUsage?.windows) {
-              const windowEntries = Object.entries(modelUsage.windows);
-              if (windowEntries.length > 0) {
-                otherModels.push([modelName, windowEntries[0][1]]);
-              }
-            }
-          }
-          if (otherModels.length > 0) {
-            group.modelFamilies.push({
-              familyId: null,
-              familyLabel: t('header.services.modelFamily.other'),
-              models: otherModels,
-            });
-          }
-        }
-      }
-
-      if (entries.length > 0 || (group.modelFamilies && group.modelFamilies.length > 0) || group.error) {
-        groups.push(group);
-      }
-    }
-
-    return groups;
-  }, [dropdownProviderIds, quotaResults, selectedModels, t]);
-  const hasRateLimits = rateLimitGroups.length > 0;
-  React.useEffect(() => {
-    void loadQuotaSettings();
-  }, [loadQuotaSettings]);
-  const handleDisplayModeChange = React.useCallback(async (mode: 'usage' | 'remaining') => {
-    setQuotaDisplayMode(mode);
-    try {
-      await updateDesktopSettings({ usageDisplayMode: mode });
-    } catch (error) {
-      console.warn('Failed to update usage display mode:', error);
-    }
-  }, [setQuotaDisplayMode]);
-
-  const handleUsageRefresh = React.useCallback(() => {
-    if (isUsageRefreshSpinning) return;
-    setIsUsageRefreshSpinning(true);
-    const minSpinPromise = new Promise(resolve => setTimeout(resolve, 500));
-    Promise.all([fetchAllQuotas(), minSpinPromise]).finally(() => {
-      setIsUsageRefreshSpinning(false);
-    });
-  }, [fetchAllQuotas, isUsageRefreshSpinning]);
 
   // The Pi snapshot is authoritative for the active session directory.
   const sessionDirectory = React.useMemo(() => {
@@ -1391,7 +1036,7 @@ export const Header: React.FC<HeaderProps> = ({
   const desktopHeaderIconButtonClass = DESKTOP_HEADER_ICON_BUTTON_CLASS;
   const mobileHeaderIconButtonClass = MOBILE_HEADER_ICON_BUTTON_CLASS;
   const mobileActiveHeaderItem = React.useMemo(() => {
-    if (isMobileRateLimitsOpen) {
+    if (isMobileServicesOpen) {
       return 'services';
     }
     if (leftDrawerOpen) {
@@ -1401,10 +1046,10 @@ export const Header: React.FC<HeaderProps> = ({
       return 'git';
     }
     return activeMainTab;
-  }, [activeMainTab, isMobileRateLimitsOpen, leftDrawerOpen, rightDrawerOpen]);
+  }, [activeMainTab, isMobileServicesOpen, leftDrawerOpen, rightDrawerOpen]);
 
   const closeMobileHeaderPanels = React.useCallback(() => {
-    setIsMobileRateLimitsOpen(false);
+    setIsMobileServicesOpen(false);
     if (leftDrawerOpen && onToggleLeftDrawer) {
       onToggleLeftDrawer();
     }
@@ -1418,14 +1063,14 @@ export const Header: React.FC<HeaderProps> = ({
 
   const handleMobileLeftDrawerToggle = React.useCallback(() => {
     if (!leftDrawerOpen) {
-      setIsMobileRateLimitsOpen(false);
+      setIsMobileServicesOpen(false);
     }
     onToggleLeftDrawer?.();
   }, [leftDrawerOpen, onToggleLeftDrawer]);
 
   const handleMobileRightDrawerToggle = React.useCallback(() => {
     if (!rightDrawerOpen) {
-      setIsMobileRateLimitsOpen(false);
+      setIsMobileServicesOpen(false);
     }
     onToggleRightDrawer?.();
   }, [onToggleRightDrawer, rightDrawerOpen]);
@@ -1689,16 +1334,7 @@ export const Header: React.FC<HeaderProps> = ({
     }
   }, [isDevShutdownInFlight, runtimeApis.terminal, setIsDesktopServicesOpen]);
 
-  const quotaDisplayTabs = React.useMemo(() => {
-    return [
-      { value: 'usage' as const, label: t('header.services.used') },
-      { value: 'remaining' as const, label: t('header.services.remaining') },
-    ];
-  }, [t]);
 
-  const quotaDisplayTabItems = React.useMemo(() => {
-    return quotaDisplayTabs.map((tab) => ({ id: tab.value, label: tab.label }));
-  }, [quotaDisplayTabs]);
 
   const mobileServicesTabItems = React.useMemo<SortableTabsStripItem[]>(() => {
     return [
@@ -1736,9 +1372,6 @@ export const Header: React.FC<HeaderProps> = ({
         } else {
           setIsDesktopServicesOpen(true);
           void refreshCurrentInstanceLabel();
-          if (desktopServicesTab === 'usage' && quotaResults.length === 0) {
-            void fetchAllQuotas();
-          }
         }
         return;
       }
@@ -1758,9 +1391,6 @@ export const Header: React.FC<HeaderProps> = ({
         setDesktopServicesTab(nextTab);
         setIsDesktopServicesOpen(true);
         void refreshCurrentInstanceLabel();
-        if (nextTab === 'usage' && quotaResults.length === 0) {
-          void fetchAllQuotas();
-        }
         return;
       }
 
@@ -1778,8 +1408,6 @@ export const Header: React.FC<HeaderProps> = ({
     isDesktopServicesOpen,
     desktopServicesTab,
     servicesTabs,
-    quotaResults.length,
-    fetchAllQuotas,
     refreshCurrentInstanceLabel,
     handleOpenContextPlan,
   ]);
@@ -1846,21 +1474,7 @@ export const Header: React.FC<HeaderProps> = ({
         refreshCurrentInstanceLabel={refreshCurrentInstanceLabel}
         desktopServicesTab={desktopServicesTab}
         setDesktopServicesTab={setDesktopServicesTab}
-        quotaResultsLength={quotaResults.length}
-        fetchAllQuotas={fetchAllQuotas}
         servicesTabItems={servicesTabItems}
-        quotaLastUpdated={quotaLastUpdated}
-        quotaDisplayMode={quotaDisplayMode}
-        showPredValues={showPredValues}
-        quotaDisplayTabItems={quotaDisplayTabItems}
-        handleDisplayModeChange={handleDisplayModeChange}
-        handleUsageRefresh={handleUsageRefresh}
-        isQuotaLoading={isQuotaLoading}
-        isUsageRefreshSpinning={isUsageRefreshSpinning}
-        hasRateLimits={hasRateLimits}
-        rateLimitGroups={rateLimitGroups}
-        expandedFamilies={expandedFamilies}
-        toggleFamilyExpanded={toggleFamilyExpanded}
         shortcutLabel={shortcutLabel}
         showDevShutdown={showDevShutdown}
         isDevShutdownInFlight={isDevShutdownInFlight}
@@ -1869,7 +1483,6 @@ export const Header: React.FC<HeaderProps> = ({
         remoteUpdateChecking={remoteUpdateChecking}
         remoteUpdateError={remoteUpdateError}
         onOpenRemoteUpdate={openRemoteInstanceUpdate}
-        timeFormatPreference={timeFormatPreference}
       />
       <DesktopGitHubControl
         isMobile={isMobile}
@@ -2182,7 +1795,7 @@ export const Header: React.FC<HeaderProps> = ({
 
             {/* Mobile Services Menu (Usage + MCP) */}
             <DropdownMenu
-              open={isMobileRateLimitsOpen}
+              open={isMobileServicesOpen}
               onOpenChange={(open) => {
                 if (open) {
                   if (leftDrawerOpen && onToggleLeftDrawer) {
@@ -2192,10 +1805,7 @@ export const Header: React.FC<HeaderProps> = ({
                     onToggleRightDrawer();
                   }
                 }
-                setIsMobileRateLimitsOpen(open);
-                if (open && quotaResults.length === 0) {
-                  fetchAllQuotas();
-                }
+                setIsMobileServicesOpen(open);
               }}
             >
               <Tooltip>
@@ -2233,9 +1843,6 @@ export const Header: React.FC<HeaderProps> = ({
                           onSelect={(tabID) => {
                             const value = tabID as 'usage' | 'mcp';
                             setMobileServicesTab(value);
-                            if (value === 'usage' && quotaResults.length === 0) {
-                              fetchAllQuotas();
-                            }
                           }}
                           layoutMode="fit"
                           variant="active-pill"
@@ -2246,7 +1853,7 @@ export const Header: React.FC<HeaderProps> = ({
                       </div>
                       <button
                         type="button"
-                        onClick={() => setIsMobileRateLimitsOpen(false)}
+                        onClick={() => setIsMobileServicesOpen(false)}
                         className="inline-flex h-8 w-8 items-center justify-center rounded-md text-muted-foreground hover:text-foreground hover:bg-interactive-hover"
                         aria-label={t('header.services.closeAria')}
                       >
@@ -2256,204 +1863,10 @@ export const Header: React.FC<HeaderProps> = ({
                   </div>
 
                   {mobileServicesTab === 'mcp' && (
-                    <McpDropdownContent active={isMobileRateLimitsOpen && mobileServicesTab === 'mcp'} />
+                    <McpDropdownContent active={isMobileServicesOpen && mobileServicesTab === 'mcp'} />
                   )}
 
-                  {mobileServicesTab === 'usage' && (
-                    <div className="flex-1 overflow-y-auto overflow-x-hidden pb-[calc(4rem+env(safe-area-inset-bottom))]">
-                      {/* Mobile usage header */}
-                      <div className="border-b border-[var(--interactive-border)]">
-                        <div className="flex items-center justify-between gap-3 px-4 py-3">
-                          <div className="flex flex-col min-w-0 gap-0.5">
-                            <span className="typography-ui-header font-semibold text-foreground">{t('header.services.rateLimits')}</span>
-                            <span className="truncate typography-micro text-muted-foreground">
-                              {formatTime(quotaLastUpdated, timeFormatPreference)}
-                            </span>
-                          </div>
-                          <div className="flex items-center gap-2 shrink-0">
-                            <div className="flex items-center h-6">
-                              <button
-                                type="button"
-                                onClick={() => handleDisplayModeChange('usage')}
-                                className={cn(
-                                  'typography-ui-label px-1 pb-0.5 transition-colors',
-                                  quotaDisplayMode === 'usage'
-                                    ? 'text-foreground border-b-2 border-[var(--primary-base)]'
-                                    : 'text-muted-foreground hover:text-foreground'
-                                )}
-                              >
-                                {t('header.services.used')}
-                              </button>
-                              <span className="text-muted-foreground typography-ui-label px-0.5">·</span>
-                              <button
-                                type="button"
-                                onClick={() => handleDisplayModeChange('remaining')}
-                                className={cn(
-                                  'typography-ui-label px-1 pb-0.5 transition-colors',
-                                  quotaDisplayMode === 'remaining'
-                                    ? 'text-foreground border-b-2 border-[var(--primary-base)]'
-                                    : 'text-muted-foreground hover:text-foreground'
-                                )}
-                              >
-                                {t('header.services.remaining')}
-                              </button>
-                            </div>
-                            <button
-                              type="button"
-                              className={cn(
-                                'inline-flex h-7 w-7 items-center justify-center rounded-md text-muted-foreground transition-colors',
-                                'hover:text-foreground hover:bg-interactive-hover',
-                                'focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary'
-                              )}
-                              onClick={handleUsageRefresh}
-                              disabled={isQuotaLoading || isUsageRefreshSpinning}
-                              aria-label={t('header.services.refreshRateLimitsAria')}
-                            >
-                              <Icon name="refresh" className={cn('h-4 w-4', isUsageRefreshSpinning && 'animate-spin')} />
-                            </button>
-                          </div>
-                        </div>
-                      </div>
-
-                      {!hasRateLimits && (
-                        <div className="px-4 py-6 text-center">
-                          <span className="typography-ui-label text-muted-foreground">{t('header.services.noRateLimits')}</span>
-                        </div>
-                      )}
-
-                      {/* Mobile provider groups */}
-                      <div className="py-1">
-                        {rateLimitGroups.map((group, index) => (
-                          <React.Fragment key={group.providerId}>
-                            {index > 0 ? (
-                              <div className="mx-4 my-1 border-t border-[var(--interactive-border)]" />
-                            ) : null}
-
-                            {/* Provider header */}
-                            <div className="flex items-center gap-2 px-4 py-2">
-                              <ProviderLogo providerId={group.providerId} className="h-4 w-4" />
-                              <span className="typography-ui-label font-medium text-foreground">{group.providerName}</span>
-                            </div>
-
-                            {group.entries.length === 0 && (!group.modelFamilies || group.modelFamilies.length === 0) ? (
-                              <div className="px-4 pb-2">
-                                <span className="typography-ui-label text-muted-foreground">
-                                  {group.error ?? t('header.services.noRateLimitsReported')}
-                                </span>
-                              </div>
-                            ) : (
-                              <div className="space-y-3 px-4 pb-2">
-                                {/* Window-level entries */}
-                                {group.entries.map(([label, window]) => {
-                                  const displayPercent = quotaDisplayMode === 'remaining'
-                                    ? window.remainingPercent
-                                    : window.usedPercent;
-                                  const paceInfo = calculatePace(window.usedPercent, window.resetAt, window.windowSeconds, label);
-                                  const expectedMarker = paceInfo?.dailyAllocationPercent != null
-                                    ? (quotaDisplayMode === 'remaining'
-                                        ? 100 - calculateExpectedUsagePercent(paceInfo.elapsedRatio)
-                                        : calculateExpectedUsagePercent(paceInfo.elapsedRatio))
-                                    : null;
-                                  const metricLabel = formatQuotaValueLabel(window.valueLabel, displayPercent);
-                                  const resetLabel = formatQuotaResetLabel(window.resetAt, window.resetAfterFormatted ?? window.resetAtFormatted, timeFormatPreference);
-                                  return (
-                                    <div key={`${group.providerId}-${label}`} className="flex flex-col gap-1.5">
-                                      <div className="flex min-w-0 items-center justify-between gap-3">
-                                        <div className="min-w-0 flex items-center gap-2">
-                                          <span className="truncate typography-ui-label text-foreground">{formatWindowLabel(label)}</span>
-                                          {resetLabel ? (
-                                            <span className="truncate typography-micro text-muted-foreground">
-                                              {resetLabel}
-                                            </span>
-                                          ) : null}
-                                        </div>
-                                        <span className="typography-ui-label text-foreground tabular-nums">
-                                          {metricLabel === '-' ? '' : metricLabel}
-                                        </span>
-                                      </div>
-                                      <UsageProgressBar
-                                        percent={displayPercent}
-                                        tonePercent={window.usedPercent}
-                                        className="h-1.5"
-                                        expectedMarkerPercent={expectedMarker}
-                                      />
-                                      {paceInfo && showPredValues ? (
-                                        <PaceIndicator paceInfo={paceInfo} compact />
-                                      ) : null}
-                                    </div>
-                                  );
-                                })}
-
-                                {/* Model family collapsibles */}
-                                {group.modelFamilies && group.modelFamilies.length > 0 && (
-                                  <div className="space-y-0.5">
-                                    {group.modelFamilies.map((family) => {
-                                      const providerExpandedFamilies = expandedFamilies[group.providerId] ?? [];
-                                      const isExpanded = providerExpandedFamilies.includes(family.familyId ?? 'other');
-
-                                      return (
-                                        <Collapsible
-                                          key={family.familyId ?? 'other'}
-                                          open={isExpanded}
-                                          onOpenChange={() => toggleFamilyExpanded(group.providerId, family.familyId ?? 'other')}
-                                        >
-                                          <CollapsibleTrigger className="flex w-full items-center justify-between rounded-md px-1 py-1.5 text-left hover:bg-[var(--interactive-hover)]/50 transition-colors">
-                                            <span className="typography-ui-label font-medium text-foreground">
-                                              {family.familyLabel}
-                                            </span>
-                                            {isExpanded ? (
-                                              <Icon name="arrow-down-s" className="h-4 w-4 text-muted-foreground" />
-                                            ) : (
-                                              <Icon name="arrow-right-s" className="h-4 w-4 text-muted-foreground" />
-                                            )}
-                                          </CollapsibleTrigger>
-                                          <CollapsibleContent>
-                                            <div className="space-y-2.5 pb-1 pl-1 pt-1">
-                                              {family.models.map(([modelName, window]) => {
-                                                const displayPercent = quotaDisplayMode === 'remaining'
-                                                  ? window.remainingPercent
-                                                  : window.usedPercent;
-                                                const paceInfo = calculatePace(window.usedPercent, window.resetAt, window.windowSeconds);
-                                                const expectedMarker = paceInfo?.dailyAllocationPercent != null
-                                                  ? (quotaDisplayMode === 'remaining'
-                                                      ? 100 - calculateExpectedUsagePercent(paceInfo.elapsedRatio)
-                                                      : calculateExpectedUsagePercent(paceInfo.elapsedRatio))
-                                                  : null;
-                                                const metricLabel = formatQuotaValueLabel(window.valueLabel, displayPercent);
-                                                return (
-                                                  <div key={`${group.providerId}-${modelName}`} className="flex flex-col gap-1.5">
-                                                    <div className="flex min-w-0 items-center justify-between gap-3">
-                                                      <span className="truncate typography-micro text-muted-foreground">{getDisplayModelName(modelName)}</span>
-                                                      <span className="typography-ui-label text-foreground tabular-nums">
-                                                        {metricLabel === '-' ? '' : metricLabel}
-                                                      </span>
-                                                    </div>
-                                                    <UsageProgressBar
-                                                      percent={displayPercent}
-                                                      tonePercent={window.usedPercent}
-                                                      className="h-1.5"
-                                                      expectedMarkerPercent={expectedMarker}
-                                                    />
-                                                    {paceInfo && showPredValues ? (
-                                                      <PaceIndicator paceInfo={paceInfo} compact />
-                                                    ) : null}
-                                                  </div>
-                                                );
-                                              })}
-                                            </div>
-                                          </CollapsibleContent>
-                                        </Collapsible>
-                                      );
-                                    })}
-                                  </div>
-                                )}
-                              </div>
-                            )}
-                          </React.Fragment>
-                        ))}
-                      </div>
-                    </div>
-                  )}
+                  {mobileServicesTab === 'usage' && <div className="flex-1 overflow-y-auto pb-[calc(4rem+env(safe-area-inset-bottom))]"><SessionTokenUsage /></div>}
                 </div>
               </DropdownMenuContent>
             </DropdownMenu>
