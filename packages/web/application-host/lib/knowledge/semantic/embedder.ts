@@ -37,6 +37,9 @@ export interface SemanticEmbedResult {
 export interface SemanticEmbedder {
   status: SemanticEmbedderStatus;
   space: VectorSpaceIdentity;
+  /** Local inference grain, not an input quota. Shared scheduling releases its
+   * slot between these calls. Remote backends retain their transport batching. */
+  inferenceBatchSize?: number;
   prepare(): Promise<void>;
   countTokens(text: string): number;
   embed(

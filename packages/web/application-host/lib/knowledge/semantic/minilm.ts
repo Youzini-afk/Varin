@@ -80,7 +80,7 @@ export function createLocalMinilmEmbedder(options: {
   let prepared = false;
   let preparedRoot: string | null = null;
   let preparePromise: Promise<void> | null = null;
-  let extractor: ((texts: readonly string[]) => Promise<number[][]>) | null = null;
+  let extractor: ((texts: readonly string[], signal?: AbortSignal) => Promise<number[][]>) | null = null;
 
   const threadCount = (): number => intraOpThreads(options.parallelism ?? os.availableParallelism());
 
@@ -91,6 +91,7 @@ export function createLocalMinilmEmbedder(options: {
   };
 
   const embedder: SemanticEmbedder = {
+    inferenceBatchSize: INFERENCE_BATCH_SIZE,
     get status(): SemanticEmbedderStatus {
       return currentPack()?.onnxPath ? "ready" : "unavailable";
     },
@@ -142,11 +143,13 @@ export function createLocalMinilmEmbedder(options: {
               inter_op_num_threads: 1,
             },
           });
-          extractor = async (texts) => {
+          extractor = async (texts, signal) => {
             const vectors: number[][] = [];
             for (let offset = 0; offset < texts.length; offset += INFERENCE_BATCH_SIZE) {
+              signal?.throwIfAborted();
               const batch = texts.slice(offset, offset + INFERENCE_BATCH_SIZE);
               const output = await pipe(batch, { pooling: pack.space.pooling, normalize: pack.space.normalize });
+              signal?.throwIfAborted();
               const listed = typeof (output as { tolist?: () => number[] | number[][] }).tolist === "function"
                 ? (output as { tolist: () => number[] | number[][] }).tolist()
                 : output as number[][];
@@ -172,16 +175,18 @@ export function createLocalMinilmEmbedder(options: {
       if (encode) return encode(text);
       throw new Error("MiniLM tokenizer is not prepared.");
     },
-    embed: async (texts) => {
+    embed: async (texts, request) => {
       const pack = currentPack();
       if (!pack?.onnxPath || !extractor || preparedRoot !== pack.root) {
         throw new Error("MiniLM model pack is unavailable.");
       }
-      return extractor(texts);
+      return extractor(texts, request?.signal);
     },
     embedBatch: async (request) => {
       request.signal?.throwIfAborted();
-      const vectors = await embedder.embed(request.items.map((item) => item.text));
+      const vectors = await embedder.embed(request.items.map((item) => item.text), {
+        purpose: request.purpose, ...(request.signal ? { signal: request.signal } : {}),
+      });
       request.signal?.throwIfAborted();
       const space = embedder.space;
       if (vectors.length !== request.items.length || vectors.some((vector) => vector.length !== space.dim)) {

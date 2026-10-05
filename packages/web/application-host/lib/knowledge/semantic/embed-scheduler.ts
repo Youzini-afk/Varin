@@ -3,6 +3,8 @@
  * background batches. Work is not pre-queued for the whole repo.
  */
 
+import type { SemanticEmbedder, SemanticEmbedPurpose } from './embedder.js';
+
 export type EmbedPriority = "foreground" | "background";
 
 export function createEmbedScheduler(options: { concurrency?: number; backgroundIntervalMs?: number } = {}) {
@@ -60,3 +62,35 @@ export function createEmbedScheduler(options: { concurrency?: number; background
 }
 
 export type EmbedScheduler = ReturnType<typeof createEmbedScheduler>;
+
+/** Schedule actual local inference calls rather than holding a request slot
+ * across a whole repository. The next batch is admitted only after the current
+ * one finishes, leaving queued foreground work a chance to take the slot. */
+export async function embedInScheduledBatches(options: {
+  embedder: SemanticEmbedder;
+  texts: readonly string[];
+  scheduler?: EmbedScheduler;
+  priority: EmbedPriority;
+  purpose: SemanticEmbedPurpose;
+  signal?: AbortSignal;
+}): Promise<number[][]> {
+  const { embedder, texts, signal } = options;
+  signal?.throwIfAborted();
+  if (texts.length === 0) return [];
+  const grain = embedder.inferenceBatchSize ?? texts.length;
+  if (!Number.isSafeInteger(grain) || grain < 1) throw new RangeError('Invalid embedding inference grain');
+  const vectors: number[][] = [];
+  for (let offset = 0; offset < texts.length; offset += grain) {
+    signal?.throwIfAborted();
+    const batch = texts.slice(offset, offset + grain);
+    const work = async () => {
+      signal?.throwIfAborted();
+      return embedder.embed(batch, { purpose: options.purpose, ...(signal ? { signal } : {}) });
+    };
+    const rows = options.scheduler ? await options.scheduler.enqueue(options.priority, work) : await work();
+    signal?.throwIfAborted();
+    if (rows.length !== batch.length) throw new Error(`Semantic embedder returned ${rows.length} vectors for ${batch.length} chunks`);
+    vectors.push(...rows);
+  }
+  return vectors;
+}

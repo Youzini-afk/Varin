@@ -19,6 +19,11 @@ derived store (`../vectors/`); they reuse `harness.embed` but never this MiniLM 
   `embed-scheduler.ts` (configurable concurrent request slots and background start interval;
   waiting foreground work takes the next free slot without an artificial interval). This
   scheduler is shared with knowledge-vector embeddings, so its concurrency setting covers both.
+  Local backends expose their actual inference grain. Document publication and
+  fixed-view vector work release the shared slot between those model calls, so
+  a large input request cannot hide many local batches inside one background slot.
+  Cancellation is checked between calls; a currently running native forward is
+  allowed to finish. Transport backends retain their own batch protocol.
 - Overlay: `query-view.ts` pins surface/thread drafts at query start; masked disk paths cannot leak
   old vectors. Thread view is fixed baseline + this branch’s delta.
 - Storage: `store.ts` — Host embedding orchestration over the private semantic

@@ -1,5 +1,6 @@
 import { describe, expect, it, vi } from 'vitest';
-import { createEmbedScheduler } from './embed-scheduler.js';
+import { createEmbedScheduler, embedInScheduledBatches } from './embed-scheduler.js';
+import { createHashEmbedder } from './embedder.js';
 
 const deferred = () => {
   let resolve!: () => void;
@@ -8,6 +9,50 @@ const deferred = () => {
 };
 
 describe('embedding scheduler', () => {
+  it('admits an interactive query during a large local index request and preserves every result', async () => {
+    const scheduler = createEmbedScheduler();
+    const firstStarted = deferred();
+    const releaseFirst = deferred();
+    const calls: string[][] = [];
+    const embedder = createHashEmbedder();
+    embedder.inferenceBatchSize = 2;
+    const originalEmbed = embedder.embed;
+    embedder.embed = async (texts) => {
+      calls.push([...texts]);
+      if (calls.length === 1) { firstStarted.resolve(); await releaseFirst.promise; }
+      return originalEmbed(texts);
+    };
+    const documents = ['first document', 'second document', 'third document', 'fourth document', 'fifth document'];
+    const background = embedInScheduledBatches({ embedder, texts: documents, scheduler,
+      priority: 'background', purpose: 'document' });
+    await firstStarted.promise;
+    const query = embedInScheduledBatches({ embedder, texts: ['interactive query'], scheduler,
+      priority: 'foreground', purpose: 'query' });
+    releaseFirst.resolve();
+    await query;
+    expect(calls[1]).toEqual(['interactive query']);
+    expect(await background).toEqual(await originalEmbed(documents));
+    expect(calls.flat().filter(text => text !== 'interactive query')).toEqual(documents);
+  });
+
+  it('stops cancelled local work between inference calls and releases the shared slot', async () => {
+    const scheduler = createEmbedScheduler();
+    const controller = new AbortController();
+    const embedder = createHashEmbedder();
+    embedder.inferenceBatchSize = 2;
+    const originalEmbed = embedder.embed;
+    const calls: string[][] = [];
+    embedder.embed = async texts => {
+      calls.push([...texts]);
+      controller.abort(new Error('index cancelled'));
+      return originalEmbed(texts);
+    };
+    await expect(embedInScheduledBatches({ embedder, texts: ['a', 'b', 'c', 'd'], scheduler,
+      priority: 'background', purpose: 'document', signal: controller.signal })).rejects.toThrow('index cancelled');
+    expect(calls).toEqual([['a', 'b']]);
+    await expect(scheduler.enqueue('foreground', () => originalEmbed(['query']))).resolves.toHaveLength(1);
+  });
+
   it('spaces background starts without delaying foreground work', async () => {
     vi.useFakeTimers();
     try {

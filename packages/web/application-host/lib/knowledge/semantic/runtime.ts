@@ -14,7 +14,7 @@ import { pathInRoots } from "../../workspace/path-scope.js";
 import { CATALOG_SCAN_BATCH } from "../symbol-runtime.js";
 import { packStructuralUnits } from "./chunker.js";
 import type { SemanticEmbedder } from "./embedder.js";
-import { createEmbedScheduler, type EmbedScheduler } from "./embed-scheduler.js";
+import { createEmbedScheduler, embedInScheduledBatches, type EmbedScheduler } from "./embed-scheduler.js";
 import { workspaceScope, spaceIdOf, semanticSpaceDir, type SemanticScopeKey } from "./identity.js";
 import {
   createSemanticGenerationStore,
@@ -774,12 +774,13 @@ export function createSemanticIndexRuntime(options: SemanticIndexRuntimeOptions)
         // Captured fixed text becomes workspace-owned background vector work.
         // Returning/finishing a query does not cancel a claimed embedding.
         const backgroundSignal = lifecycleController.signal;
-        const work = scheduler.enqueue("background", async () => {
+        const work = (async () => {
           try {
             backgroundSignal.throwIfAborted();
             await embedder.prepare();
             backgroundSignal.throwIfAborted();
-            const fresh = await embedder.embed(owners.map((item) => item.text), { purpose: "document", signal: backgroundSignal });
+            const fresh = await embedInScheduledBatches({ embedder, texts: owners.map((item) => item.text),
+              scheduler, priority: "background", purpose: "document", signal: backgroundSignal });
             backgroundSignal.throwIfAborted();
             if (fresh.length !== owners.length || fresh.some((vector) => vector.length !== embedder.space.dim)) {
               throw new Error("Fixed-view embedding returned an incomplete batch");
@@ -793,7 +794,7 @@ export function createSemanticIndexRuntime(options: SemanticIndexRuntimeOptions)
             for (const item of owners) item.claim.reject(error);
             throw error;
           }
-        });
+        })();
         track(waitWithSignal(work, backgroundSignal));
       }
       return { extras: [], gaps: [{ path, reason: origin === "thread" ? "thread-vector-pending" : "draft-vector-pending" }] };

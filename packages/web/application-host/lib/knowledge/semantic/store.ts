@@ -5,7 +5,7 @@ import { readSemanticCheckpoint } from "./checkpoint.js";
 import { defaultRecipeIdentity, recipeIdOf, semanticSpaceDir, spaceIdOf,
   type IndexRecipeIdentity, type SemanticScopeKey, type VectorSpaceIdentity } from "./identity.js";
 import { createVectorCache, type SemanticVectorCache } from "./vector-cache.js";
-import type { EmbedPriority, EmbedScheduler } from "./embed-scheduler.js";
+import { embedInScheduledBatches, type EmbedPriority, type EmbedScheduler } from "./embed-scheduler.js";
 import type { SemanticEmbedder } from "./embedder.js";
 import { waitWithSignal } from "../../cancellation.js";
 import type { SemanticStoreMethod } from "./store-protocol.js";
@@ -95,16 +95,12 @@ export function createSemanticGenerationStore(options: {
       }
       try {
         if (owners.length > 0) {
-          const embed = async () => {
-            signal?.throwIfAborted();
-            const vectors = await options.embedder.embed(owners.map(owner => owner.text), { purpose: "document", ...(signal ? { signal } : {}) });
-            signal?.throwIfAborted();
-            if (vectors.length !== owners.length || vectors.some(vector => vector.length !== space.dim || vector.some(value => !Number.isFinite(value)))) {
-              throw new Error(`Semantic embedder returned ${vectors.length} vectors for ${owners.length} chunks in ${space.dim} dimensions.`);
-            }
-            return vectors;
-          };
-          const fresh = options.scheduler ? await options.scheduler.enqueue(options.embedPriority ?? "background", embed) : await embed();
+          const fresh = await embedInScheduledBatches({ embedder: options.embedder,
+            texts: owners.map(owner => owner.text), ...(options.scheduler ? { scheduler: options.scheduler } : {}),
+            priority: options.embedPriority ?? "background", purpose: "document", ...(signal ? { signal } : {}) });
+          if (fresh.length !== owners.length || fresh.some(vector => vector.length !== space.dim || vector.some(value => !Number.isFinite(value)))) {
+            throw new Error(`Semantic embedder returned ${fresh.length} vectors for ${owners.length} chunks in ${space.dim} dimensions.`);
+          }
           for (const [index, entry] of owners.entries()) {
             vectorCache.set({ spaceId, purpose: "document", embedText: entry.text }, fresh[index]!);
             entry.claim.resolve(fresh[index]!);
