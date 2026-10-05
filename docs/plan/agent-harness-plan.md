@@ -832,7 +832,8 @@ provider 允许的工具配对与上下文边界仍保持；跨平台、真实�
 
 ## 阶段 S：对话式设置与 Agent 管理（D-306）
 状态：**S0–S4 已完成并经 D-308/D-310/D-311 收口**（2026-09-21）。共用目录、查询披露、
-app/Pi/client/action 写入、session→Surface 绑定、typed action-operation、组合更新与产品 Skill 已接线。
+app/Pi/client/action 写入、session→Surface 绑定、typed action-operation 与组合更新已接线。
+2026-10-05 已移除官方配置 Skill 及启动生成逻辑，配置说明沿设置工具按需提供。
 同一 session 同时连接多个 Surface 时明确返回 ambiguous，不允许模型猜选本地窗口；无 owner API 的条目如实 unavailable。
 外部登录/安装与跨平台 Surface 现场未实测，但不构成当前生产通路的未实现项。设计 authority 为
 [agent-settings-design.md](../design/agent-settings-design.md)，本节只规定实施责任和完成边界。

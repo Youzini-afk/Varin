@@ -174,8 +174,7 @@ import { checkDesktopHttpUrl, checkSsrf, isSameHost } from './lib/harness/ssrf-p
 import { createEgressRuntime } from './lib/harness/egress.js';
 import { readEgressHostConfiguration } from './lib/harness/egress-settings.js';
 import { registerEgressRoutes } from './lib/harness/egress-routes.js';
-import { readPiAuthFile, removePiProviderAuth, resolvePiAgentDir, savePiProviderAuth } from './lib/pi-config/storage.js';
-import { seedProductSkills } from './lib/pi-runtime/product-skills.js';
+import { readPiAuthFile, removePiProviderAuth, savePiProviderAuth } from './lib/pi-config/storage.js';
 
 import { createUiAuth } from './lib/ui-auth/ui-auth.js';
 import { createManagedTunnelConfigRuntime } from './lib/tunnels/managed-config.js';
@@ -1578,16 +1577,6 @@ async function main(options: StartWebUiServerOptions = {}): Promise<WebUiServerC
     },
   });
   void managedRemoteExecution.reconcile().catch((error) => console.error("[VarinManagedRemote]", error.message));
-  // Seed product skills into the user-scope resource root. Managed-marker
-  // semantics keep user edits authoritative — see product-skills.ts.
-  try {
-    const seeded = seedProductSkills(resolvePiAgentDir());
-    if (seeded.seeded.length || seeded.updated.length) {
-      console.log(`[VarinSkills] seeded ${seeded.seeded.length}, updated ${seeded.updated.length} product skills`);
-    }
-  } catch (error) {
-    console.warn('[VarinSkills] seeding skipped:', error instanceof Error ? error.message : error);
-  }
   const workspaceContentSearch = createWorkspaceContentSearch({ documents: documentsAuthority, compute: nativeCompute });
   // ── Harness service host ──────────────────────────────────────────
   // Global services (output store, path locks, search, diagnostics) plus
