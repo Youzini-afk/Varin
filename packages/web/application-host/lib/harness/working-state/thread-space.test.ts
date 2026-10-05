@@ -13,7 +13,7 @@ const thread = (overrides: Partial<Thread> = {}): Thread => ({
   workspaceId: "workspace-1",
   forkPoint: null,
   brief: "work",
-  preset: "check",
+  preset: "worker",
   model: null,
   manifest: { carryBlocks: true, concurrency: 1, draftBaselineId: null, scope: [], systemPromptFragment: "", tools: [], workFocus: "code", worktree: "isolated" },
   createdBy: "agent",

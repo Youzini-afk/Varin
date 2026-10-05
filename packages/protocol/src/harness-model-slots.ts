@@ -1,5 +1,5 @@
 import { HarnessSettingsValidationError, type HarnessModelRole, type ModelSelection } from "./harness-settings.js";
-import { parseHarnessAgentOverrides, type HarnessAgentOverrides } from "./harness-agents.js";
+import { parseHarnessAgents, parseHarnessAgentOverrides, type HarnessAgentOverrides } from "./harness-agents.js";
 
 /** An enabled flag preserves the selected model while the user turns a role off. */
 export interface HarnessModelBinding {
@@ -15,11 +15,7 @@ export type HarnessModelSlots = Partial<Record<HarnessModelRole, HarnessModelBin
 export const HARNESS_MODEL_ROLES: readonly HarnessModelRole[] = [
   "explore",
   "retrievalAgent",
-  "quickImplement",
-  "hardImplement",
-  "frontend",
-  "review",
-  "check",
+  "worker",
   "reader",
   "nextStep",
   "permissionJudge",
@@ -30,7 +26,7 @@ export const HARNESS_MODEL_ROLES: readonly HarnessModelRole[] = [
   "memoryOrganizer",
 ];
 
-const DEFAULTING_TO_MAIN = new Set<HarnessModelRole>(["hardImplement", "review"]);
+const DEFAULTING_TO_MAIN = new Set<HarnessModelRole>(["worker"]);
 
 export const resolveHarnessModelSlot = (
   slot: HarnessModelRole,
@@ -77,9 +73,6 @@ const PRESET_PATTERNS: Record<HarnessModelPreset, readonly string[]> = {
 const PRESET_SLOTS: readonly HarnessModelRole[] = [
   "explore",
   "retrievalAgent",
-  "quickImplement",
-  "frontend",
-  "check",
   "reader",
   "permissionJudge",
   "memoryOrganizer",
@@ -88,6 +81,39 @@ const PRESET_SLOTS: readonly HarnessModelRole[] = [
   "researchFastExploration",
   "researchHighThroughputExecution",
 ];
+
+/** Preserve externally configured profiles when retiring the old built-in categories. */
+export function normalizeHarnessAgentConfiguration(models: unknown, agents: unknown) {
+  const profiles = parseHarnessAgents(agents);
+  const source = models === undefined ? {} : models;
+  if (!source || typeof source !== "object" || Array.isArray(source)) throw new HarnessSettingsValidationError("harness.models must be an object");
+  const bindings = { ...source } as Record<string, unknown>;
+  const legacy = ["hardImplement", "quickImplement", "frontend", "review", "check"] as const;
+  const tools = ["read", "edit", "write", "apply_patch", "bash", "grep", "find", "ls", "explore", "related", "get_output", "write_to_process", "kill_shell", "threads", "wait", "send", "read_thread", "merge", "update", "dispatch", "kill"];
+  for (const role of legacy) {
+    const raw = bindings[role];
+    delete bindings[role];
+    if (raw === undefined) continue;
+    const binding = parseHarnessModelSlots({ worker: raw }).worker!;
+    if (role === "hardImplement" && bindings.worker === undefined) { bindings.worker = binding; continue; }
+    const overrides = binding.agent;
+    const readOnly = role === "review" || role === "check";
+    const id = `saved-${role}`;
+    if (profiles[id]) throw new HarnessSettingsValidationError(`Saved profile identity conflicts with harness.agents.${id}`);
+    profiles[id] = {
+      name: overrides?.name ?? ({ hardImplement: "Saved implementation profile", quickImplement: "Saved implementation profile", frontend: "Saved UI profile", review: "Saved review profile", check: "Saved verification profile" }[role]),
+      description: overrides?.description ?? "User configuration retained from a former built-in profile.",
+      instructions: overrides?.instructions ?? "Complete the assigned task, coordinate relevant decisions, and report the actual result.",
+      enabled: binding.enabled !== false && (Boolean(binding.providerId && binding.modelId) || role === "hardImplement" || role === "review"),
+      ...(binding.providerId && binding.modelId ? { model: { providerId: binding.providerId, modelId: binding.modelId } } : {}),
+      ...(overrides?.modelSettings ? { modelSettings: overrides.modelSettings } : {}),
+      tools: overrides?.tools ?? (readOnly ? ["read", "grep", "find", "ls", "bash", "get_output", "write_to_process", "kill_shell", "threads", "send", "wait", "read_thread"] : tools),
+      worktree: overrides?.worktree ?? (role === "review" ? "none" : "isolated"),
+      workFocus: readOnly ? [] : ["code"],
+    };
+  }
+  return { models: parseHarnessModelSlots(bindings), agents: profiles };
+}
 
 export const applyHarnessModelPreset = (
   preset: HarnessModelPreset,

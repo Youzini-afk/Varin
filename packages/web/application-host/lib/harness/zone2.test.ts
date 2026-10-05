@@ -210,7 +210,7 @@ describe("assembleZone2Content", () => {
         items: [{
           id: "thread-1",
           brief: "check recovery",
-          preset: "check",
+          preset: "worker",
           lifecycle: "active",
           attention: "user",
           integration: "dirty",
@@ -255,7 +255,7 @@ describe("assembleZone2Content", () => {
     const items = Array.from({ length: 20 }, (_, index) => ({
       id: `thread-${index}`,
       brief: `work item ${index} ${"detail ".repeat(20)}`,
-      preset: "check",
+      preset: "worker",
       lifecycle: "active" as const,
       attention: "none" as const,
       integration: "none" as const,
@@ -299,7 +299,7 @@ describe("assembleZone2Content", () => {
         items: [{
           id: "thread-1",
           brief: "implement",
-          preset: "hardImplement",
+          preset: "worker",
           lifecycle: "settled",
           attention: "none",
           integration: "merge-ready",

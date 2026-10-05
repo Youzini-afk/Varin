@@ -1748,6 +1748,14 @@ export function createThreadRegistry(options: ThreadRegistryOptions) {
     return current.id;
   };
 
+  const listTaskThreadSnapshots = async (scopeId: string, parent: ThreadParent, includeHidden = false) => {
+    const catalog = await catalogForScope(scopeId, parent);
+    const root = rootSessionFor(catalog, parent);
+    if (root === null) throw new ThreadRegistryError("stale-binding", "Task ancestry is unavailable", scopeId);
+    return structuredClone(catalog.threads.filter(thread => (includeHidden || !thread.hidden)
+      && rootSessionFor(catalog, thread.parent) === root).map(thread => ({ thread, activeRun: activeRunFor(catalog, thread) })));
+  };
+
   const countActiveInCatalog = (catalog: ThreadCatalogDocument, root: string | null): number => {
     if (root === null) return 0;
     return catalog.threads.filter((thread) => {
@@ -3116,6 +3124,7 @@ export function createThreadRegistry(options: ThreadRegistryOptions) {
     listThreads,
     listWorkspaceThreads,
     listWorkspaceThreadSnapshots,
+    listTaskThreadSnapshots,
     listWorkspaceRunSessionIds,
     withThreadRetentionSnapshot,
     listWorkspaceIds,

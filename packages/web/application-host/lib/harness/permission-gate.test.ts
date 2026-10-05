@@ -63,9 +63,9 @@ describe("evaluateGate", () => {
   it("dispatch respects askBefore", () => {
     const policy: PermissionPolicy = {
       mode: "normal",
-      rules: defaultRules("normal", { "hard-implement": true }),
+      rules: defaultRules("normal", { "worker": true }),
     };
-    expect(evaluateGate("dispatch", { preset: "hard-implement" }, policy).decision).toBe("ask");
+    expect(evaluateGate("dispatch", { preset: "worker" }, policy).decision).toBe("ask");
   });
 
   it("treats askBefore preset names as literals rather than regular expressions", () => {

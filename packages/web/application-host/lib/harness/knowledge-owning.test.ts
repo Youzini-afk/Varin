@@ -52,7 +52,7 @@ describe("thread knowledge owning workspace", () => {
       scopeId: "owning-ws",
       parent: { kind: "session", id: "root-session" },
       brief: "nested worker",
-      preset: "hard-implement",
+      preset: "worker",
       kind: "implementation",
       createdBy: "agent",
       concurrency: 2,

@@ -7,6 +7,6 @@ describe("runNeedsMaterializedDirectory", () => {
     expect(runNeedsMaterializedDirectory(["read", "edit", "write", "apply_patch"])).toBe(false);
     expect(runNeedsMaterializedDirectory(["bash"])).toBe(true);
     expect(runNeedsMaterializedDirectory(["symbols"])).toBe(true);
-    expect(runNeedsMaterializedDirectory(["hard-implement"])).toBe(false);
+    expect(runNeedsMaterializedDirectory(["worker"])).toBe(false);
   });
 });

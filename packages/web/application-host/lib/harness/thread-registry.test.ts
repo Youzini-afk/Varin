@@ -24,7 +24,7 @@ const createInput = (overrides: Partial<CreateThreadInput> = {}): CreateThreadIn
   scopeId: WORKSPACE,
   parent: PARENT,
   brief: "write tests",
-  preset: "check",
+  preset: "worker",
   kind: "implementation",
   createdBy: "agent",
   concurrency: 12,

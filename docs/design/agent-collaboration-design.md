@@ -1,6 +1,6 @@
 # Varin 多 Agent 协作：综合主线、Worker 与检索
 
-Status: accepted design / not implemented（D-339）。本文记录 2026-10-05 已确认的设计；现有基础和缺口见第 8 节。此次交付仅为文档，不代表角色收敛、自动唤醒、同任务互读或片段提交已经实现。
+Status: implementation in progress（D-339）。Worker/检索入口与同任务会话发现/范围读取已接线并完成定向验证。持续等待、重启唤醒及选定代码提交继续实施；第 8 节保留初次设计时的现状对照，不能据此宣称全量交付。
 
 Last updated: 2026-10-05
 

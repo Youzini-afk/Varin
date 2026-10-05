@@ -385,7 +385,7 @@ processes, or a second Host.
 
 ### ThreadRegistry / ThreadRuntime
 
-Native built-in profiles keep optional user customizations in `harness.models[role].agent`; custom
+Native built-in Worker/retrieval profiles keep optional user customizations in `harness.models[role].agent`; custom
 profiles use `harness.agents`. The protocol resolver supplies the same effective names, instructions,
 tools, worktree and model parameters to the catalog, ordinary dispatch and research routing.
 Review agents are dispatched on demand through that same path; publishing a result never schedules
@@ -434,9 +434,10 @@ walks descendants in stable createdAt/id post-order and enters each child's own
 lifecycle serialization; restore is refused while an ancestor is archived or the
 cascade is in progress. Scope rejects a complete `..` segment, absolute paths,
 and drive-letter paths, not names such as `src/foo..bar`. Sibling threads may
-exchange directed messages inside their root task (below); they still cannot
-read each other's transcripts or control each other's Runs, and the root
-session list and Zone 2 projection stay on direct children. After a successful publish, only same-Run observations whose start/end
+exchange directed messages inside their root task (below). D-339 task-family discovery and read access include siblings,
+ancestors and nested descendants using the catalog's actual root-session ancestry. Read access does not grant control
+of another member's Run. `read_thread` supports recent records, one-based inclusive ranges, stable entry-id continuation,
+entry expansion and search; it never starts the target. Zone 2 stays focused on direct children. After a successful publish, only same-Run observations whose start/end
 identity matches the fixed result are bound to that `resultRevision`. The
 result is available to the caller without creating another review Thread.
 Draft merge records that disk commands cannot verify unsaved buffers.

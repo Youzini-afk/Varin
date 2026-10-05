@@ -79,7 +79,7 @@ const createInput = (): CreateThreadInput => ({
   scopeId: WORKSPACE,
   parent: PARENT,
   brief: "Implement the feature",
-  preset: "hard-implement",
+  preset: "worker",
   kind: "implementation",
   createdBy: "agent",
   concurrency: 12,

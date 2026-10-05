@@ -144,7 +144,11 @@ export function sendToolPresentation(capabilities: readonly ResearchCapabilityOp
 }
 
 const ThreadReadParams = Type.Object({
-  threadId: Type.String(),
+  threadId: Type.String({ description: "Any thread in this task family, or parent for the caller's parent conversation." }),
+  start: Type.Optional(Type.Integer({ minimum: 1, description: "First record to read (one-based, inclusive)." })),
+  end: Type.Optional(Type.Integer({ minimum: 1, description: "Last record to read (inclusive)." })),
+  tail: Type.Optional(Type.Boolean({ description: "Read the newest records; limit selects the count." })),
+  afterEntry: Type.Optional(Type.String({ description: "Continue after this immutable record id." })),
   runId: Type.Optional(Type.String({ description: "Read a fixed Run's delivery and transcript, even while a later attempt is running or failed." })),
   resultRevision: Type.Optional(Type.Integer({ minimum: 1, description: "Read the report bound to this published result revision." })),
   what: Type.Optional(Type.Union([
@@ -157,9 +161,9 @@ const ThreadReadParams = Type.Object({
   offset: Type.Optional(Type.Integer({ minimum: 0, description: "UTF-8 byte offset for report paging, or match offset for transcript search" })),
   length: Type.Optional(Type.Integer({ minimum: 1, description: "UTF-8 byte length for report paging" })),
   entry: Type.Optional(Type.String({ description: "transcript: locate one immutable session entry id — e.g. the reference a status excerpt carries — with before/after neighbours" })),
-  before: Type.Optional(Type.Integer({ minimum: 0, maximum: 20 })),
-  after: Type.Optional(Type.Integer({ minimum: 0, maximum: 20 })),
-  limit: Type.Optional(Type.Integer({ minimum: 1, maximum: 50 })),
+  before: Type.Optional(Type.Integer({ minimum: 0 })),
+  after: Type.Optional(Type.Integer({ minimum: 0 })),
+  limit: Type.Optional(Type.Integer({ minimum: 1 })),
   query: Type.Optional(Type.String({ description: "transcript: search the branch for entries containing this text" })),
   path: Type.Optional(Type.String({ description: "transcript: narrow the search to entries mentioning this path" })),
 });
@@ -506,7 +510,7 @@ export function createReadThreadTool(bridge: HostServicesBridge, _sessionId: str
   return defineTool({
     name: "read_thread",
     label: "Read Thread",
-    description: "Read a teammate's notes, delivery report, transcript slice, or transcript entries. Use runId or resultRevision for an immutable earlier delivery; what:'transcript' with an entry id expands the exact passage a status excerpt cites; viewing never executes work.",
+    description: "Read a task-family teammate's status, report or conversation without starting work. Conversation reads support newest records (tail/limit), an inclusive start/end range, afterEntry continuation, entry expansion and query/path search. Parent, siblings and nested teammates can inspect each other's work. Use runId for an earlier execution.",
     promptSnippet: "read_thread: read a teammate's notes (blocks), report, steps, or transcript entries",
     parameters: ThreadReadParams,
     executionMode: "parallel",
@@ -514,6 +518,10 @@ export function createReadThreadTool(bridge: HostServicesBridge, _sessionId: str
       try {
         const result = await bridge.request<"thread.read">("thread.read", {
           threadId: params.threadId,
+          ...(params.start !== undefined ? { start: params.start } : {}),
+          ...(params.end !== undefined ? { end: params.end } : {}),
+          ...(params.tail !== undefined ? { tail: params.tail } : {}),
+          ...(params.afterEntry !== undefined ? { afterEntry: params.afterEntry } : {}),
           ...(params.runId === undefined ? {} : { runId: params.runId }),
           ...(params.resultRevision === undefined ? {} : { resultRevision: params.resultRevision }),
           ...(params.what !== undefined ? { what: params.what } : {}),
@@ -531,6 +539,7 @@ export function createReadThreadTool(bridge: HostServicesBridge, _sessionId: str
         return {
           content: [{ type: "text", text: typed.text }],
           details: {
+            ...typed.details,
             hasReport: typed.report !== null,
             transcriptRef: typed.transcriptRef,
             ...(typed.nextOffset === undefined ? {} : { nextOffset: typed.nextOffset }),

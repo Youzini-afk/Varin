@@ -240,13 +240,11 @@ export const SETTINGS_CATALOG: readonly SettingsCatalogEntry[] = [
   {
     id: 'harness.models.execution', category: 'agents', owner: 'pi-settings',
     fields: [
-      { path: 'harness.models.quickImplement', kind: 'json', scope: 'user', note: '{enabled?: boolean, providerId?: string, modelId?: string}; false disables the role while retaining its model' },
-      { path: 'harness.models.hardImplement', kind: 'json', scope: 'user', note: '{enabled?: boolean, providerId?: string, modelId?: string}; false disables the role while retaining its model' },
-      { path: 'harness.models.frontend', kind: 'json', scope: 'user', note: '{enabled?: boolean, providerId?: string, modelId?: string}; false disables the role while retaining its model' },
+      { path: 'harness.models.worker', kind: 'json', scope: 'user', note: '{enabled?: boolean, providerId?: string, modelId?: string}; false disables the role while retaining its model' },
       { path: 'harness.models.retrievalAgent', kind: 'json', scope: 'user', note: '{enabled?: boolean, providerId?: string, modelId?: string}; false disables the role while retaining its model' },
     ],
     apply: 'next-run',
-    ui: { page: 'agents', titleKey: 'settings.harness.models.execution', keywords: ["quickImplement", "hardImplement", "frontend", "retrievalAgent", "agent", "model", "enable", "disable"] },
+    ui: { page: 'agents', titleKey: 'settings.harness.models.execution', keywords: ["worker", "retrievalAgent", "agent", "model", "enable", "disable"] },
   },
   {
     id: 'harness.models.research', category: 'agents', owner: 'pi-settings',
@@ -258,15 +256,6 @@ export const SETTINGS_CATALOG: readonly SettingsCatalogEntry[] = [
     ],
     apply: 'next-run',
     ui: { page: 'agents', titleKey: 'settings.harness.models.research', keywords: ["researchInvestigation", "researchExperimentalDesign", "researchFastExploration", "researchHighThroughputExecution", "agent", "model", "enable", "disable"] },
-  },
-  {
-    id: 'harness.models.assistance', category: 'agents', owner: 'pi-settings',
-    fields: [
-      { path: 'harness.models.review', kind: 'json', scope: 'user', note: '{enabled?: boolean, providerId?: string, modelId?: string}; false disables the role while retaining its model' },
-      { path: 'harness.models.check', kind: 'json', scope: 'user', note: '{enabled?: boolean, providerId?: string, modelId?: string}; false disables the role while retaining its model' },
-    ],
-    apply: 'next-run',
-    ui: { page: 'agents', titleKey: 'settings.harness.models.assistance', keywords: ["review", "check", "agent", "model", "enable", "disable"] },
   },
   {
     id: 'harness.models.reader', category: 'web', owner: 'pi-settings',

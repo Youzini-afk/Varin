@@ -15,8 +15,8 @@ import {
   type HarnessFastDecisionSettings,
 } from "./harness-fast-decision.js";
 import { mergePolicies, type PermissionMode, type PermissionRule } from "./permission-gate.js";
-import { parseHarnessAgents, type HarnessCustomAgent } from "./harness-agents.js";
-import { parseHarnessModelSlots, type HarnessModelBinding } from "./harness-model-slots.js";
+import { type HarnessCustomAgent } from "./harness-agents.js";
+import { normalizeHarnessAgentConfiguration, type HarnessModelBinding } from "./harness-model-slots.js";
 
 /** A provider + model pair, as stored in a model slot. */
 export interface ModelSelection {
@@ -307,11 +307,7 @@ export interface HarnessSettings {
 export type HarnessModelRole =
   | "explore"
   | "retrievalAgent"
-  | "quickImplement"
-  | "hardImplement"
-  | "frontend"
-  | "review"
-  | "check"
+  | "worker"
   | "reader"
   | "nextStep"
   | "permissionJudge"
@@ -428,6 +424,10 @@ export function mergeHarnessSettings(
     key,
     user.dispatch?.askBefore?.[key] === true || workspace.dispatch?.askBefore?.[key] === true,
   ]));
+  for (const id of ["quick-implement", "hard-implement", "frontend", "review", "check"]) {
+    if (askBefore[id]) askBefore.worker = true;
+    delete askBefore[id];
+  }
   const permissions = mergePolicies(
     {
       mode: user.permissions?.mode ?? DEFAULT_HARNESS_SETTINGS.permissions?.mode ?? "normal",
@@ -447,6 +447,7 @@ export function mergeHarnessSettings(
     // setting before attempting to launch an optional process.
     documentReading = { ...DEFAULT_HARNESS_DOCUMENT_READING_SETTINGS };
   }
+  const agentConfiguration = normalizeHarnessAgentConfiguration(user.models, user.agents);
   const merged: HarnessSettings = {
     ...DEFAULT_HARNESS_SETTINGS,
     ...userRest,
@@ -457,8 +458,8 @@ export function mergeHarnessSettings(
     bash: { ...DEFAULT_HARNESS_SETTINGS.bash, ...user.bash, ...workspace.bash },
     // Model/provider selection is user-owned. A repository cannot redirect
     // auxiliary requests to another provider.
-    models: parseHarnessModelSlots(user.models),
-    agents: parseHarnessAgents(user.agents),
+    models: agentConfiguration.models,
+    agents: agentConfiguration.agents,
     // An optional, externally edited judgment choice must not prevent chat
     // creation. Its direct consumer reports the invalid choice and keeps source
     // ranking; settings.update validates new writes separately.

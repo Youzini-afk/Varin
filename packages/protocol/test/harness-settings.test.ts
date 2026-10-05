@@ -141,10 +141,10 @@ describe("harness settings", () => {
 
   it("does not let workspace settings redirect model slots", () => {
     const merged = mergeHarnessSettings(
-      { models: { check: { providerId: "trusted", modelId: "user-model" } } },
-      { models: { check: { providerId: "workspace", modelId: "redirected" } } },
+      { models: { worker: { providerId: "trusted", modelId: "user-model" } } },
+      { models: { worker: { providerId: "workspace", modelId: "redirected" } } },
     );
-    assert.deepEqual(merged.models.check, { providerId: "trusted", modelId: "user-model" });
+    assert.deepEqual(merged.models.worker, { providerId: "trusted", modelId: "user-model" });
   });
 
   it("defaults background preparation on and maps the legacy memory opt-out", () => {

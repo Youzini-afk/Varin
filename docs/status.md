@@ -12,7 +12,7 @@ Last updated: 2026-10-05
 | 阶段 | 状态 | 明细入口 |
 | --- | --- | --- |
 | Harness 能力（0.x–3b、T4、工作分支/Integration） | 逐行状态与证据 | [design/harness-capability-matrix.md](design/harness-capability-matrix.md) |
-| 多 Agent 协作收敛 | D-339 设计已确认，未实施。Worker/检索入口、同任务会话互读、持久事件等待与按文件/片段提交仍待交付；既有基础和缺口已按源码区分。 | [设计与现状对照](design/agent-collaboration-design.md) |
+| 多 Agent 协作收敛 | D-339 实施中。Worker/检索入口、主线综合职责提示、同任务线程发现/互读与记录范围读取已接线，定向服务验证通过；持续事件等待、重启唤醒和按文件/片段提交继续实施。 | [设计与现状对照](design/agent-collaboration-design.md) |
 | 阶段 Q 测试与 CI | 已验收收口（D-292） | [design/testing-ci-design.md](design/testing-ci-design.md)、[plan/agent-harness-plan.md](plan/agent-harness-plan.md) |
 | 阶段 R Rust 系统内核 | D-282 收口；kernel 为转移面生产权威 | [design/rust-kernel-design.md](design/rust-kernel-design.md)、[plan/rust-kernel-audit.md](plan/rust-kernel-audit.md) |
 | 阶段 RR 运行时可靠性 | RR0–RR5 代码路径与定向行为已复核；RR6 真实安装包/外部代理平台纵切仍待验证 | [plan/agent-runtime-reliability-plan.md](plan/agent-runtime-reliability-plan.md)；RR2/RR4 旧机制已被 HR 移除 |

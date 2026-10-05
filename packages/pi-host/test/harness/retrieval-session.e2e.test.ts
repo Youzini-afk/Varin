@@ -402,7 +402,7 @@ describe("retrieval thread public slice", () => {
         scopeId: identity.workspaceId,
         parent: { kind: "session", id: parent.sessionId },
         brief: "Parent implementation view",
-        preset: "hard-implement",
+        preset: "worker",
         kind: "implementation",
         createdBy: "agent",
         // The parent Run occupies one root execution slot while it dispatches.

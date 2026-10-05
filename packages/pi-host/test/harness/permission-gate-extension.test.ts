@@ -105,7 +105,7 @@ describe("native permission gate integration", () => {
     const policy = buildPermissionPolicy("normal", { check: true, retrieval: false }, [
       { tool: "read", decision: "deny" },
     ]);
-    assert.equal(evaluateGate("dispatch", { preset: "check", task: "inspect" }, policy).decision, "ask");
+    assert.equal(evaluateGate("dispatch", { preset: "worker", task: "inspect" }, policy).decision, "ask");
     assert.equal(evaluateGate("dispatch", { preset: "retrieval", task: "find" }, policy).decision, "allow");
     assert.equal(evaluateGate("read", { path: "private.txt" }, policy).decision, "deny");
   });

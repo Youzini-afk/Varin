@@ -24,13 +24,7 @@ import type { WorkFocusId } from "./work-focus.js";
 
 // ── Types ──────────────────────────────────────────────────────────
 
-export type PresetId =
-  | "quick-implement"
-  | "hard-implement"
-  | "frontend"
-  | "review"
-  | "check"
-  | "retrieval";
+export type PresetId = "worker" | "retrieval";
 
 /**
  * Preset materialization policy. Write-capable work defaults to an
@@ -58,52 +52,12 @@ export interface ExecutionPreset {
 // ── Preset definitions ─────────────────────────────────────────────
 
 export const EXECUTION_PRESETS: Readonly<Record<PresetId, ExecutionPreset & { slot: HarnessModelRole }>> = {
-  "quick-implement": {
-    id: "quick-implement",
-    slot: "quickImplement",
-    workFocus: ["code"],
-    tools: ["read", "edit", "write", "apply_patch", "bash", "grep", "glob", "get_output", "write_to_process", "kill_shell"],
+  worker: {
+    id: "worker", slot: "worker",
+    tools: ["read", "edit", "write", "apply_patch", "bash", "grep", "find", "ls", "get_output", "write_to_process", "kill_shell", "explore", "related", "diagnostics", "symbols", "definition", "references", "hover", "webfetch", "document_read", "websearch", "todo", "dispatch", "threads", "wait", "send", "read_thread", "merge", "update", "kill"],
     worktree: "isolated",
-    systemPromptFragment:
-      "Preset focus: well-specified implementation tasks.",
-    teamDescription: "mechanical, well-specified changes",
-  },
-  "hard-implement": {
-    id: "hard-implement",
-    slot: "hardImplement",
-    workFocus: ["code"],
-    tools: ["read", "edit", "write", "apply_patch", "bash", "grep", "glob", "get_output", "write_to_process", "kill_shell", "explore", "recall", "todo", "dispatch", "threads", "wait", "send", "read_thread", "merge", "update", "kill"],
-    worktree: "isolated",
-    systemPromptFragment:
-      "Preset focus: complex implementation tasks.",
-    teamDescription: "ambiguous or cross-cutting work",
-  },
-  "frontend": {
-    id: "frontend",
-    slot: "frontend",
-    workFocus: ["code"],
-    tools: ["read", "edit", "write", "apply_patch", "bash", "grep", "glob", "get_output", "write_to_process", "kill_shell", "explore", "dispatch", "threads", "wait", "send", "read_thread", "merge", "update", "kill"],
-    worktree: "isolated",
-    systemPromptFragment:
-      "Preset focus: frontend implementation.",
-    teamDescription: "UI specialist",
-  },
-  "review": {
-    id: "review",
-    slot: "review",
-    tools: ["read", "grep", "glob", "bash", "get_output", "write_to_process", "kill_shell"],
-    worktree: "none",
-    systemPromptFragment: "Preset focus: review.",
-    teamDescription: "independent review of a diff",
-  },
-  "check": {
-    id: "check",
-    slot: "check",
-    tools: ["read", "bash", "grep", "glob", "get_output", "write_to_process", "kill_shell"],
-    worktree: "isolated",
-    systemPromptFragment:
-      "Preset focus: checks and validation.",
-    teamDescription: "run tests/lint and report",
+    systemPromptFragment: "Complete the assigned work with awareness of the overall goal and related tasks. Read teammates' relevant work, coordinate shared interfaces directly, and inform the main agent of decisions affecting the overall design. Revisit the task boundary when evidence calls for it. Verify the actual result in proportion to its risk.",
+    teamDescription: "independent implementation or other assigned work, including coordination and relevant verification",
   },
   "retrieval": {
     id: "retrieval",
@@ -126,6 +80,7 @@ export const EXECUTION_PRESETS: Readonly<Record<PresetId, ExecutionPreset & { sl
       "research_search",
       "research_decide",
       "materials",
+      "threads",
       "send",
       "read_thread",
       "wait",
@@ -188,13 +143,13 @@ export function buildTeamPrompt(presets: ResolvedPreset[]): string {
     .map((p) => `${p.definition.id} (${p.definition.name ? `${p.definition.name}: ` : ''}${p.definition.teamDescription})`)
     .join(", ");
   const base =
-    "You can hand work to a sub-agent thread with dispatch(task). Without a preset it runs on your " +
-    "current model and tools; an optional preset picks a fixed execution configuration.";
-  const list = presetList ? ` Available presets: ${presetList}.` : "";
-  return (
-    `${base}${list} ` +
-    "Dispatch is asynchronous: wait blocks until a teammate changes state, threads is a quick glance, " +
-    "send passes a teammate new information, read_thread shows their notes. " +
-    "The user may also open and talk to teammates directly; their final report tells you what actually happened."
-  );
+    "You remain responsible for the overall goal, design, implementation consistency, integration and final delivery. " +
+    "Work directly by default; delegate independent work when it has a concrete benefit, rather than whenever a problem is difficult. " +
+    "Give workers the overall goal, relevant decisions, responsibilities and collaborators. Continue global design and unassigned work while they run. " +
+    "Inspect important implementations and integrate their actual changes; a teammate's report alone is not proof that the overall task is complete. " +
+    (presets.some(p => p.id === "worker")
+      ? "Use dispatch(task) for a worker on your current model and authorized tools, or an optional configured profile."
+      : "Choose an available configured profile explicitly with dispatch(task, preset).");
+  const list = presetList ? ` Available profiles: ${presetList}.` : "";
+  return base + list + " Threads run independently. Use threads/read_thread to inspect relevant task-family work, send to coordinate interfaces or request help, and wait for dependencies when no useful independent work remains. Routine progress does not require polling or a response.";
 }

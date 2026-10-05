@@ -163,7 +163,7 @@ describe("thread runtime with real Pi sessions", () => {
         scopeId: "workspace-1",
         parent: { kind: "session" as const, id: parent.sessionId },
         brief: "Check the implementation",
-        preset: "check",
+        preset: "worker",
         kind: "implementation" as const,
         createdBy: "agent" as const,
         concurrency: 12,

@@ -100,7 +100,7 @@ const createInput = (): CreateThreadInput => ({
   scopeId: WORKSPACE,
   parent: PARENT,
   brief: "Implement the feature",
-  preset: "hard-implement",
+  preset: "worker",
   kind: "implementation",
   createdBy: "agent",
   concurrency: 12,
@@ -201,7 +201,7 @@ describe("thread runtime", () => {
   };
 
   it.each([
-    { preset: "hard-implement", kind: "implementation" },
+    { preset: "worker", kind: "implementation" },
     { preset: "retrieval", kind: "implementation" },
     { preset: undefined, kind: "discussion" },
   ] as const)("delivers the captured parent input to $preset/$kind", async ({ preset, kind }) => {

@@ -30,7 +30,7 @@ The pi-host harness tools are custom tools registered in the Pi session's
 | `research_search` | OpenAlex / Semantic Scholar paper search, details, and paged relation expansion (references/citations/related) | `research.search` |
 | `materials` | Named collections of snapshot/URL/paper references with collection-scoped keyword search and explicit cross-thread `share` grants | `materials.collections` |
 | `research_decide` | Batch fast-decision scoring/selection over real URL/snapshot/paper/section/query candidates | `research.decide` |
-| `dispatch`, `threads`, `wait`, `send`, `read_thread`, `merge`, `kill` | Operate Host-owned durable child threads | `thread.*` |
+| `dispatch`, `threads`, `wait`, `send`, `read_thread`, `merge`, `update`, `kill` | Delegate Worker/retrieval tasks, inspect task-family conversations by range, and coordinate Host-owned threads | `thread.*` |
 | `submit_facts` | Retrieval child delivers Host-validated facts | `thread.facts.set` |
 | `experiment` | Submit and manage attempts, page logs and collected text artifacts | `experiment.submit/list/get/logs/artifact/wait/cancel/collect` |
 | `resources` | Read machine capacity, commitments, observations and queued work | `resource.list` |

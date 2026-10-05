@@ -855,6 +855,7 @@ export interface ThreadListParams {
 
 export interface ThreadListItem {
   id: string;
+  parent?: ThreadParent;
   lifecycle: ThreadLifecycle;
   attention: ThreadAttention;
   integration: ThreadIntegration;
@@ -978,6 +979,11 @@ export type ThreadReadWhat = "blocks" | "report" | "steps" | "transcript";
 
 export interface ThreadReadParams {
   threadId: string;
+  /** One-based inclusive record range, newest records, or resume after an immutable entry id. */
+  start?: number;
+  end?: number;
+  tail?: boolean;
+  afterEntry?: string;
   /** Select an attempt or its published result instead of the latest projection. */
   runId?: string;
   resultRevision?: number;

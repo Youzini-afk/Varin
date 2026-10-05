@@ -37,7 +37,7 @@ export function NativeAgentEditor({ agent, cwd, drafts, onSave, onCancel, busy, 
   const knownSlot = HARNESS_MODEL_ROLES.includes(slot as HarnessModelRole);
   const defaultName = knownSlot ? t(`settings.harness.role.${slot as HarnessModelRole}`) : String(defaults.name ?? '');
   const defaultDescription = knownSlot ? t(`settings.harness.role.${slot as HarnessModelRole}.description`) : String(defaults.description ?? '');
-  const emptyModelLabel = t(builtin && !['hardImplement', 'review'].includes(slot) ? 'settings.harness.models.noModel' : 'settings.varin.agents.detail.inherited');
+  const emptyModelLabel = t(builtin && slot !== 'worker' ? 'settings.harness.models.noModel' : 'settings.varin.agents.detail.inherited');
   const makeDraft = React.useCallback(() => {
     const original = builtin ? record(config?.binding) : record(config?.agent);
     const profile = builtin ? record(config) : original;

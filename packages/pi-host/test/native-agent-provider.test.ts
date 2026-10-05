@@ -10,7 +10,7 @@ test("native agents use revisioned user settings, preserve models on disable, an
   const agentDir = join(root, "agent");
   await mkdir(agentDir);
   await writeFile(join(agentDir, "settings.json"), JSON.stringify({ harness: {
-    models: { quickImplement: { providerId: "test", modelId: "small" } }, nextStep: { enabled: true },
+    models: { worker: { providerId: "test", modelId: "small" } }, nextStep: { enabled: true },
   } }));
   const host = new SessionHost({ agentDir, projectTrustOverride: true, emit: () => {} });
   try {
@@ -18,7 +18,7 @@ test("native agents use revisioned user settings, preserve models on disable, an
     const catalog = await host.listAgentProviders();
     assert.ok(catalog.providers.some(provider => provider.id === "varin"));
     assert.ok(!catalog.agents.some(agent => agent.definition?.config.slot === "explore" || agent.definition?.config.slot === "memoryOrganizer"));
-    const quick = catalog.agents.find(agent => agent.id === "varin:builtin:quickImplement")!;
+    const quick = catalog.agents.find(agent => agent.id === "varin:builtin:worker")!;
     const override = { name: "Patch specialist", description: "Small exact patches", instructions: "Read first, change only the requested lines.",
       tools: ["read", "apply_patch"], worktree: "none", modelSettings: { temperature: 0.35, thinkingLevel: "low" } };
     await host.runAgentProviderAction("varin", "update", quick.id, { expectedRevision: quick.definition!.revision!, config: {
@@ -49,7 +49,7 @@ test("native agents use revisioned user settings, preserve models on disable, an
     const edited = (await host.listAgentProviders()).agents.find(agent => agent.id === custom.id)!;
     assert.equal(edited.name, "Fact reader");
     const document = JSON.parse(await readFile(join(agentDir, "settings.json"), "utf8"));
-    assert.deepEqual(document.harness.models.quickImplement, { enabled: false, providerId: "test", modelId: "small", agent: override });
+    assert.deepEqual(document.harness.models.worker, { enabled: false, providerId: "test", modelId: "small", agent: override });
     assert.equal(document.harness.nextStep.enabled, true);
     await host.runAgentProviderAction("varin", "delete", edited.id, { expectedRevision: edited.definition!.revision! });
     assert.ok(!(await host.listAgentProviders()).agents.some(agent => agent.id === edited.id));

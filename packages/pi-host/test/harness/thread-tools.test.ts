@@ -53,7 +53,7 @@ describe("Native thread dispatch", () => {
       queueMicrotask(() => bridge.respond("caller", request!.requestId, { ok: true, result: { text: "started", threadId: "child", queued: false } }));
     } });
     const tool = createDispatchTool(bridge, "caller", resolvePresets({}, { providerId: "old", modelId: "startup" }));
-    await tool.execute("call", { task: "Implement", preset: "hard-implement" } as never, undefined, undefined,
+    await tool.execute("call", { task: "Implement", preset: "worker" } as never, undefined, undefined,
       { model: { provider: "selected", id: "current" } } as never);
     assert.deepEqual((request?.params as { model?: unknown }).model, { providerId: "selected", modelId: "current" });
   });

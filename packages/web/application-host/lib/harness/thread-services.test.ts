@@ -61,7 +61,7 @@ describe("thread services", () => {
     let enabled = true;
     const service = dispatchService({
       threadRegistry: registry, threadSpawnSession: vi.fn(async () => ({ sessionId: "custom-child" })),
-      harnessSettings: async () => ({ global: { harness: { models: { hardImplement: { enabled: false } }, agents: {
+      harnessSettings: async () => ({ global: { harness: { models: { worker: { enabled: false } }, agents: {
         source: { name: "Reader", description: "Trace facts", instructions: "Cite exact lines.", enabled,
           tools: ["read", "grep"], worktree: "none", workFocus: [], model: { providerId: "selected", modelId: "reader" } },
       } } }, project: {}, projectTrusted: true }),
@@ -75,7 +75,7 @@ describe("thread services", () => {
       expect(thread?.manifest.systemPromptFragment).toBe("Cite exact lines.");
       enabled = false;
       await expect(service.handle(params, serviceContext())).rejects.toMatchObject({ harnessCode: "unavailable" });
-      await expect(service.handle({ ...params, preset: "hard-implement" }, serviceContext())).rejects.toMatchObject({ harnessCode: "unavailable" });
+      await expect(service.handle({ ...params, preset: "worker" }, serviceContext())).rejects.toMatchObject({ harnessCode: "unavailable" });
       expect((await registry.getThread("workspace-1", { kind: "session", id: "parent-1" }, dispatched.threadId))?.manifest.tools).toEqual(["read", "grep"]);
     } finally { await registry.dispose(); rmSync(dataDir, { recursive: true, force: true }); }
   });
@@ -126,7 +126,7 @@ describe("thread services", () => {
     try {
       const result = await service.handle({
         concurrency: 1,
-        preset: "hard-implement",
+        preset: "worker",
         task: "Implement the vertical slice",
         model: { providerId: "openai", modelId: "gpt-test" },
       }, {
@@ -154,7 +154,7 @@ describe("thread services", () => {
       });
       const queued = await service.handle({
         concurrency: 1,
-        preset: "hard-implement",
+        preset: "worker",
         task: "Wait for the slot",
         model: { providerId: "openai", modelId: "gpt-test" },
       }, {
@@ -180,7 +180,7 @@ describe("thread services", () => {
     }
   });
 
-  it.each(["quick-implement", "retrieval"])("promotes %s to an isolated launch when dirty drafts are captured", async (preset) => {
+  it.each(["worker", "retrieval"])("promotes %s to an isolated launch when dirty drafts are captured", async (preset) => {
     const dataDir = mkdtempSync(join(tmpdir(), "thread-draft-dispatch-"));
     const registry = createThreadRegistry({ dataDir, hostId: "host-1" });
     const spawn = vi.fn(async () => ({ sessionId: "child" }));
@@ -223,7 +223,7 @@ describe("thread services", () => {
       threadPrepareIsolatedBranch: prepareIsolatedBranch,
     } as never);
     try {
-      const result = await service.handle({ preset: "hard-implement", task: "Use the draft" }, serviceContext({
+      const result = await service.handle({ preset: "worker", task: "Use the draft" }, serviceContext({
         source: "surface",
         roots: [{ workspaceId: "workspace-1", dirtyPaths: ["draft.ts"] }],
         snapshot: { status: "ready", ref: "snapshot-ref" },
@@ -251,7 +251,7 @@ describe("thread services", () => {
       threadPrepareIsolatedBranch: prepareIsolatedBranch,
     } as never);
     try {
-      await expect(service.handle({ preset: "hard-implement", task: "Use the draft" }, serviceContext({
+      await expect(service.handle({ preset: "worker", task: "Use the draft" }, serviceContext({
         source: "surface",
         roots: [{ workspaceId: "workspace-1", dirtyPaths: ["draft.ts"] }],
         snapshot: { status: "unavailable", reason: "surface-unavailable" },
@@ -507,7 +507,7 @@ describe("thread services", () => {
       threadCaptureDraftBaseline: vi.fn(async () => ({ draftBaselineId: "draft-orphan", cleanup })),
       threadPrepareIsolatedBranch: prepareIsolatedBranch,
     } as never);
-    await expect(service.handle({ preset: "hard-implement", task: "Use the draft" }, serviceContext({
+    await expect(service.handle({ preset: "worker", task: "Use the draft" }, serviceContext({
       source: "surface",
       roots: [{ workspaceId: "workspace-1", dirtyPaths: ["draft.ts"] }],
       snapshot: { status: "ready", ref: "snapshot-ref" },
@@ -526,7 +526,7 @@ describe("thread services", () => {
       threadPrepareIsolatedBranch: prepareIsolatedBranch,
     } as never);
     try {
-      const result = await service.handle({ preset: "hard-implement", task: "Read the external draft" }, serviceContext({
+      const result = await service.handle({ preset: "worker", task: "Read the external draft" }, serviceContext({
         source: "surface",
         roots: [{ workspaceId: "external-root", dirtyPaths: ["draft.ts"] }],
         snapshot: { status: "ready", ref: "parent-snapshot" },
@@ -554,7 +554,7 @@ describe("thread services", () => {
         scopeId: "workspace-1",
         parent: { kind: "session", id: "root-session" },
         brief: "parent implementer",
-        preset: "hard-implement",
+        preset: "worker",
         kind: "implementation",
         createdBy: "agent",
         concurrency: 1,
@@ -571,8 +571,8 @@ describe("thread services", () => {
         workspaceId: "execution-ws",
         actor: { ...serviceContext().actor, sessionId: "child-session", workspaceId: "execution-ws" },
       };
-      const first = await service.handle({ concurrency: 1, preset: "check", task: "Run the suite" }, nestedCtx);
-      const queued = await service.handle({ concurrency: 1, preset: "check", task: "Second check" }, nestedCtx);
+      const first = await service.handle({ concurrency: 1, preset: "worker", task: "Run the suite" }, nestedCtx);
+      const queued = await service.handle({ concurrency: 1, preset: "worker", task: "Second check" }, nestedCtx);
       const queuedRetrieval = await service.handle({
         concurrency: 1,
         preset: "retrieval",
@@ -597,7 +597,7 @@ describe("thread services", () => {
       }));
       expect(await registry.getThread("workspace-1", { kind: "thread", id: parent.id }, first.threadId)).toMatchObject({
         parent: { kind: "thread", id: parent.id },
-        preset: "check",
+        preset: "worker",
         manifest: { permissions: { mode: "accept-edits" } },
       });
       expect(await registry.listThreads("workspace-1", { kind: "session", id: "root-session" })).toEqual([
@@ -624,7 +624,7 @@ describe("thread services", () => {
         scopeId: "workspace-1",
         parent: { kind: "session", id: "root-session" },
         brief: "scoped parent",
-        preset: "hard-implement",
+        preset: "worker",
         kind: "implementation",
         createdBy: "agent",
         concurrency: 2,
@@ -637,7 +637,7 @@ describe("thread services", () => {
       const scopedRun = await registry.startRun("workspace-1", scoped.id);
       await registry.markRunRunning("workspace-1", scoped.id, scopedRun.id, "scoped-session");
       await expect(service.handle({
-        preset: "check",
+        preset: "worker",
         task: "Leave src",
         scope: ["docs"],
       }, { ...serviceContext(), sessionId: "scoped-session", actor: { ...serviceContext().actor, sessionId: "scoped-session" } }))
@@ -647,7 +647,7 @@ describe("thread services", () => {
         scopeId: "workspace-1",
         parent: { kind: "session", id: "root-session" },
         brief: "review parent",
-        preset: "review",
+        preset: "worker",
         kind: "implementation",
         createdBy: "agent",
         concurrency: 2,
@@ -659,7 +659,7 @@ describe("thread services", () => {
       const reviewRun = await registry.startRun("workspace-1", review.id);
       await registry.markRunRunning("workspace-1", review.id, reviewRun.id, "review-session");
       await expect(service.handle({
-        preset: "hard-implement",
+        preset: "worker",
         task: "Should not nest",
       }, { ...serviceContext(), sessionId: "review-session", actor: { ...serviceContext().actor, sessionId: "review-session" } }))
         .rejects.toMatchObject({ harnessCode: "denied" });
@@ -683,7 +683,7 @@ describe("thread services", () => {
     try {
       await expect(service.handle({
         concurrency: 1,
-        preset: "hard-implement",
+        preset: "worker",
         task: "Capture must finish",
       }, serviceContext())).rejects.toMatchObject({ harnessCode: "unavailable" });
       expect(spawn).not.toHaveBeenCalled();
@@ -712,7 +712,7 @@ describe("thread services", () => {
     try {
       await expect(service.handle({
         concurrency: 1,
-        preset: "hard-implement",
+        preset: "worker",
         task: "Capture must stay honest",
       }, serviceContext())).rejects.toMatchObject({
         harnessCode: "unavailable",
@@ -837,7 +837,7 @@ describe("thread services", () => {
     } as never);
     try {
       const result = await service.handle({
-        preset: "check",
+        preset: "worker",
         task: "Names with dots",
         scope: ["src/foo..bar", "version...txt"],
       }, serviceContext());
@@ -848,7 +848,7 @@ describe("thread services", () => {
         scopeId: "workspace-1",
         parent: { kind: "session", id: "root-session" },
         brief: "scoped parent",
-        preset: "hard-implement",
+        preset: "worker",
         kind: "implementation",
         createdBy: "agent",
         concurrency: 2,
@@ -861,7 +861,7 @@ describe("thread services", () => {
       const run = await registry.startRun("workspace-1", scoped.id);
       await registry.markRunRunning("workspace-1", scoped.id, run.id, "dotted-parent");
       const nested = await service.handle({
-        preset: "check",
+        preset: "worker",
         task: "Nested dotted name",
         scope: ["src/foo..bar"],
       }, {
@@ -893,7 +893,7 @@ describe("thread services", () => {
         scopeId: "workspace-1",
         parent: { kind: "session", id: "root-session" },
         brief: "scoped parent",
-        preset: "hard-implement",
+        preset: "worker",
         kind: "implementation",
         createdBy: "agent",
         concurrency: 2,
@@ -906,7 +906,7 @@ describe("thread services", () => {
       const run = await registry.startRun("workspace-1", scoped.id);
       await registry.markRunRunning("workspace-1", scoped.id, run.id, "scoped-session");
       await expect(service.handle({
-        preset: "check",
+        preset: "worker",
         task: "Leave src",
         scope: ["docs"],
       }, {
@@ -1013,7 +1013,7 @@ describe("thread services", () => {
       scopeId: "workspace-1",
       parent,
       brief,
-      preset: "hard-implement" as const,
+      preset: "worker" as const,
       kind: "implementation" as const,
       createdBy: "agent" as const,
       concurrency: 2,
@@ -1131,7 +1131,7 @@ describe("thread services", () => {
       threadPrepareIsolatedBranch: prepareIsolatedBranch,
     } as never);
     await expect(service.handle({
-      preset: "check",
+      preset: "worker",
       task: "Should not skip the owner allowlist",
     }, {
       ...serviceContext(),
@@ -1280,7 +1280,7 @@ describe("thread services", () => {
       concurrency,
       autoRun: true,
       worktree: "isolated" as const,
-      tools: ["send", "wait", "dispatch", "read", "edit"],
+      tools: ["send", "wait", "dispatch", "threads", "read_thread", "read", "edit"],
       permissions: {},
     });
     const run = await registry.startRun("workspace-1", thread.id);
@@ -1592,6 +1592,27 @@ describe("thread services", () => {
     }
   });
 
+  it("lets task-family workers discover and inspect siblings and nested work without gaining control", async () => {
+    const dataDir = mkdtempSync(join(tmpdir(), "thread-family-read-"));
+    const registry = createThreadRegistry({ dataDir, hostId: "host-1" });
+    try {
+      const parent = await runningThread(registry, { kind: "session", id: "root-1" }, "Overall task", 6);
+      const left = await runningThread(registry, { kind: "thread", id: parent.thread.id }, "Backend", 6);
+      const right = await runningThread(registry, { kind: "thread", id: parent.thread.id }, "Frontend", 6);
+      const nested = await runningThread(registry, { kind: "thread", id: left.thread.id }, "API evidence", 6);
+      const foreign = await runningThread(registry, { kind: "session", id: "root-2" }, "Other task", 6);
+      const host = { threadRegistry: registry } as never;
+      const ctx = threadCtx(right.sessionId);
+      const listed = await createThreadListService(host).handle({}, ctx);
+      expect(listed.threads.map(thread => thread.id)).toEqual(expect.arrayContaining([parent.thread.id, left.thread.id, nested.thread.id]));
+      expect(listed.threads.some(thread => thread.id === foreign.thread.id)).toBe(false);
+      expect((await createThreadReadService(host).handle({ threadId: left.thread.id }, ctx)).text).toContain("Backend");
+      expect((await createThreadReadService(host).handle({ threadId: nested.thread.id }, ctx)).text).toContain("API evidence");
+      await expect(createThreadReadService(host).handle({ threadId: foreign.thread.id }, ctx)).rejects.toMatchObject({ harnessCode: "not-found" });
+      expect(await registry.getThread("workspace-1", { kind: "thread", id: right.thread.id }, left.thread.id)).toBeNull();
+    } finally { await registry.dispose(); rmSync(dataDir, { recursive: true, force: true }); }
+  });
+
   it("records a parked request behind a full shared budget and reports scheduled", async () => {
     const dataDir = mkdtempSync(join(tmpdir(), "thread-send-parked-"));
     const registry = createThreadRegistry({ dataDir, hostId: "host-1" });
@@ -1764,7 +1785,7 @@ describe("thread services", () => {
     });
     try {
       const caller = await researchCaller(registry);
-      await expect(service.handle({ task: "Implement", preset: "hard-implement",
+      await expect(service.handle({ task: "Implement", preset: "worker",
         model: { providerId: "caller", modelId: "main" },
       }, threadCtx(caller.sessionId))).rejects.toMatchObject({ harnessCode: "unavailable" });
       expect(spawn).not.toHaveBeenCalled();

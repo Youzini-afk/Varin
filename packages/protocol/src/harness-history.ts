@@ -2,6 +2,10 @@ import type { PiSessionEntry, PiMessage, PiUserContent } from "./session.js";
 import type { JsonValue } from "./types.js";
 
 export interface HistoryReadParams {
+  start?: number;
+  end?: number;
+  tail?: boolean;
+  afterEntry?: string;
   query?: string;
   path?: string;
   entry?: string;
@@ -55,14 +59,26 @@ function result(text: string, details: HistoryReadResult["details"], selected: r
 }
 
 export function readHistoryPage(entries: readonly PiSessionEntry[], params: HistoryReadParams): HistoryReadResult {
-  for (const [name, maximum] of [["before", 20], ["after", 20], ["offset", Number.MAX_SAFE_INTEGER], ["limit", 50]] as const) {
+  for (const name of ["before", "after", "offset", "limit", "start", "end"] as const) {
     const value = params[name];
-    if (value !== undefined && (!Number.isSafeInteger(value) || value < (name === "limit" ? 1 : 0) || value > maximum)) {
+    if (value !== undefined && (!Number.isSafeInteger(value) || value < (["limit", "start", "end"].includes(name) ? 1 : 0))) {
       throw new Error(`Invalid history ${name}`);
     }
   }
   const offset = params.offset ?? 0;
   const limit = params.limit ?? 8;
+  if (params.end !== undefined && params.start !== undefined && params.end < params.start) throw new Error("History end precedes start");
+  if (params.start !== undefined || params.end !== undefined || params.tail || params.afterEntry !== undefined) {
+    const anchor = params.afterEntry === undefined ? undefined : entries.findIndex(entry => entry.id === params.afterEntry);
+    if (anchor === -1) return result(`history: no entry ${params.afterEntry} in this branch`, { found: false });
+    const from = anchor !== undefined ? anchor + 1 : params.tail ? Math.max(0, entries.length - limit) : (params.start ?? 1) - 1;
+    const to = Math.min(entries.length, params.end ?? from + limit);
+    const selected = entries.slice(from, to);
+    return result(selected.length ? selected.map((entry, index) => formatEntry(entry, `record ${from + index + 1}`)).join("\n\n") : "history: no records in this range", {
+      from: from + 1, to, total: entries.length, ...(selected.length ? { afterEntry: selected[selected.length - 1]!.id } : {}),
+      more: to < entries.length,
+    }, selected);
+  }
   if (params.entry !== undefined) {
     const index = entries.findIndex((entry) => entry.id === params.entry);
     if (index < 0) return result(`history: no entry ${params.entry} in this branch`, { found: false, entry: params.entry });

@@ -270,6 +270,20 @@ const visibleThread = async (
   return thread && parentVisible(owning, thread.parent) ? thread : null;
 };
 
+const taskSnapshotsFor = async (host: HarnessServiceHost, owning: OwningContext, includeHidden = false) => {
+  if (owning.family) {
+    const groups = await Promise.all([...owning.family].map(id => host.threadRegistry!.listTaskThreadSnapshots(
+      owning.workspaceId, { kind: "thread", id }, includeHidden)));
+    return [...new Map(groups.flat().map(snapshot => [snapshot.thread.id, snapshot])).values()];
+  }
+  return host.threadRegistry!.listTaskThreadSnapshots(owning.workspaceId, owning.parent, includeHidden);
+};
+
+const readableThread = async (host: HarnessServiceHost, owning: OwningContext, id: string): Promise<Thread | null> => {
+  const target = id === "parent" && owning.owner?.parent.kind === "thread" ? owning.owner.parent.id : id;
+  return (await taskSnapshotsFor(host, owning, true)).find(snapshot => snapshot.thread.id === target)?.thread ?? null;
+};
+
 const agentSettingsFor = async (host: HarnessServiceHost, workspaceId: string) => {
   if (!host.harnessSettings) return undefined;
   const snapshot = await host.harnessSettings(workspaceId);
@@ -295,8 +309,10 @@ export function createThreadDispatchService(host: HarnessServiceHost): HarnessSe
       // allowlist. A preset freezes its declared tools; retrieval still
       // requires its configured slot (never the main model silently).
       const { workspaceId, parent, owner } = await resolveOwningContext(host, ctx);
-      const liveSettings = (params.preset !== undefined || params.research !== undefined)
-        ? await agentSettingsFor(host, workspaceId) : undefined;
+      const liveSettings = await agentSettingsFor(host, workspaceId);
+      if (params.preset === undefined && params.research === undefined && params.kind !== "discussion" && liveSettings?.models.worker?.enabled === false) {
+        throw new HarnessServiceError("unavailable", "Worker is disabled");
+      }
       if (params.preset?.startsWith("custom:") && liveSettings) {
         const key = params.preset.slice("custom:".length);
         const definition = Object.hasOwn(liveSettings.agents, key) ? liveSettings.agents[key] : undefined;
@@ -693,7 +709,7 @@ export function createThreadListService(host: HarnessServiceHost): HarnessServic
       const { owner } = owning;
       assertOwnerTool(owner, "threads");
       const observer = ctx.sessionId;
-      let snapshots = await snapshotsFor(host, owning);
+      let snapshots = await taskSnapshotsFor(host, owning);
       if (params.ids) snapshots = snapshots.filter(({ thread }) => params.ids!.includes(thread.id));
       const full = params.full ?? false;
       let changed = 0;
@@ -702,7 +718,7 @@ export function createThreadListService(host: HarnessServiceHost): HarnessServic
         const cursor = registry.getCursor(observer, snapshot.thread.id);
         if (full || cursorChanged(snapshot, cursor)) {
           changed += 1;
-          const line = formatThreadLine(snapshot, cursor, full);
+          const line = `${formatThreadLine(snapshot, cursor, full)}\n  parent: ${snapshot.thread.parent.kind} ${snapshot.thread.parent.id}${snapshot.thread.id === owner?.id ? " (this thread)" : ""}`;
           if (!full) cursorUpdates.push(snapshot);
           return line;
         }
@@ -717,6 +733,7 @@ export function createThreadListService(host: HarnessServiceHost): HarnessServic
         text: snapshots.length === 0 ? "no threads" : `${header}\n${lines.join("\n")}`,
         threads: snapshots.map(({ thread, activeRun }) => ({
           id: thread.id,
+          parent: thread.parent,
           lifecycle: thread.lifecycle,
           attention: thread.attention,
           integration: thread.integration,
@@ -1647,7 +1664,18 @@ export function createThreadReadService(host: HarnessServiceHost): HarnessServic
       const owning = await resolveOwningContext(host, ctx);
       const { workspaceId, owner } = owning;
       assertOwnerTool(owner, "read_thread");
-      const thread = await visibleThread(host, owning, params.threadId);
+      const conversationSelected = [params.start, params.end, params.tail, params.afterEntry, params.entry,
+        params.query, params.path, params.limit, params.before, params.after].some(value => value !== undefined);
+      const historyParams = { ...params, ...(!conversationSelected && params.offset === undefined ? { tail: true } : {}) };
+      if (params.threadId === "parent" && owner?.parent.kind === "session") {
+        if (!host.threadHistoryEntries) throw new HarnessServiceError("unavailable", "Parent conversation history is unavailable");
+        const history = await host.threadHistoryEntries(owner.parent.id);
+        if (history.sessionId !== owner.parent.id || history.scope !== "branch") throw new HarnessServiceError("unavailable", "Parent history identity did not match");
+        const page = readHistoryPage(history.entries, historyParams);
+        return { text: page.content.filter(part => part.type === "text").map(part => part.text).join("\n"), report: null,
+          transcriptRef: null, details: { ...page.details, sessionId: owner.parent.id } };
+      }
+      const thread = await readableThread(host, owning, params.threadId);
       if (!thread) throw new HarnessServiceError("not-found", `Thread not found: ${params.threadId}`);
       let run = await registry.getActiveRun(workspaceId, thread.id);
       let delivery = thread.report;
@@ -1664,7 +1692,7 @@ export function createThreadReadService(host: HarnessServiceHost): HarnessServic
         run = selected;
         delivery = selected.report ?? null;
       }
-      const what: ThreadReadWhat = params.what ?? "blocks";
+      const what: ThreadReadWhat = params.what ?? (conversationSelected ? "transcript" : "blocks");
       const lines: string[] = [];
       if (params.runId !== undefined || params.resultRevision !== undefined) lines.push(`Fixed delivery: Run ${run!.id}${delivery?.resultRevision ? ` / result r${delivery.resultRevision}` : ""}`);
       if (what === "blocks") {
@@ -1766,15 +1794,7 @@ export function createThreadReadService(host: HarnessServiceHost): HarnessServic
         }
         let page: ReturnType<typeof readHistoryPage>;
         try {
-          page = readHistoryPage(scopedEntries, {
-            ...(params.entry !== undefined ? { entry: params.entry } : {}),
-            ...(params.before !== undefined ? { before: params.before } : {}),
-            ...(params.after !== undefined ? { after: params.after } : {}),
-            ...(params.limit !== undefined ? { limit: params.limit } : {}),
-            ...(params.query !== undefined ? { query: params.query } : {}),
-            ...(params.path !== undefined ? { path: params.path } : {}),
-            ...(params.offset !== undefined ? { offset: params.offset } : {}),
-          });
+          page = readHistoryPage(scopedEntries, historyParams);
         } catch (error) {
           throw new HarnessServiceError("invalid-params", error instanceof Error ? error.message : String(error));
         }

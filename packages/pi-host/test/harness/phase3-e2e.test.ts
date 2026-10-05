@@ -28,13 +28,13 @@ const PARENT = { kind: "session", id: SESSION_ID } as const;
 const ACTOR = { authorityInstanceId: "test-authority", sessionId: SESSION_ID, workerId: "test-worker", workerGeneration: 1 } as const;
 const CAPABILITIES = ["context.session", "control.thread", "read.lsp", "read.output"] as const;
 const TEST_MAIN_MODEL = { providerId: "anthropic", modelId: "claude-sonnet-4" };
-const TEST_PRESETS = resolvePresets({ check: TEST_MAIN_MODEL }, TEST_MAIN_MODEL);
+const TEST_PRESETS = resolvePresets({ worker: TEST_MAIN_MODEL }, TEST_MAIN_MODEL);
 
 const threadInput = (brief: string) => ({
   scopeId: WORKSPACE_ID,
   parent: PARENT,
   brief,
-  preset: "check",
+  preset: "worker",
   kind: "implementation" as const,
   createdBy: "agent" as const,
   concurrency: 12,
@@ -211,7 +211,7 @@ describe("Phase 3 Thread/ThreadRun e2e", () => {
     const harness = await setup();
     try {
       const result = await executeTool(createDispatchTool(harness.bridge, SESSION_ID, TEST_PRESETS), {
-        preset: "check",
+        preset: "worker",
         task: "run tests",
       });
       assert.match(result.text, /dispatched/);

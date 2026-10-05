@@ -500,14 +500,14 @@ describe("session e2e — work focus", () => {
       const mainModel = faux.getModel();
       const binding = { providerId: mainModel.provider, modelId: mainModel.id };
       const models = {
-        quickImplement: { ...binding, agent: { name: "Code implementer" } },
+        worker: { ...binding, agent: { name: "Code implementer" } },
         researchInvestigation: { ...binding, agent: { name: "Research investigator" } },
         researchExperimentalDesign: { ...binding, enabled: false, agent: { name: "Disabled researcher" } },
       };
       await writeFile(join(root, "agent", "settings.json"), JSON.stringify({ harness: { models } }), "utf8");
       const assertRequestAgents = (context: Context, research: boolean, enabled = true) => {
         const system = providerSystemPrompt(context);
-        assert.equal(system.includes("Code implementer"), !research && enabled);
+        assert.equal(system.includes("Code implementer"), enabled);
         assert.equal(system.includes("Research investigator"), research && enabled);
         assert.ok(!system.includes("Disabled researcher"));
         const tools = getCurrentTools(normalizeContext(context).messages);
@@ -575,7 +575,7 @@ describe("session e2e — work focus", () => {
         const settings = await session.host.getSettings();
         await session.host.updateSettings("global", { harness: { models: {
           ...models,
-          quickImplement: { ...models.quickImplement, enabled: false },
+          worker: { ...models.worker, enabled: false },
           researchInvestigation: { ...models.researchInvestigation, enabled: false },
         } } }, [], settings.globalRevision);
         assert.ok(!(await session.host.systemPrompt(snapshot.sessionId)).content.includes("Code implementer"));

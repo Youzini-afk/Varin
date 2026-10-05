@@ -10,7 +10,7 @@ export function HarnessModelField({ harness, update, slot, enableControl = true 
   const { t } = useI18n();
   const cwd = useDirectoryStore((state) => state.currentDirectory);
   const selected = harness.models[slot];
-  const inherited = slot === 'hardImplement' || slot === 'review';
+  const inherited = slot === 'worker';
   const emptyLabel = t(inherited ? 'settings.page.harness.models.mainModel' : 'settings.harness.models.noModel');
   return <div className="flex min-w-0 flex-col gap-2 py-2 @xl:flex-row @xl:items-center @xl:justify-between @xl:gap-6" data-settings-item={`harness.models.${slot}`}>
     <div className="min-w-0 flex-1">

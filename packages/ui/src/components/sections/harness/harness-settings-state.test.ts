@@ -12,7 +12,7 @@ describe('Harness automatic saving', () => {
   it('reports invalid settings without rejecting the load and recovers after the document is corrected', async () => {
     const read = vi.fn()
       .mockResolvedValueOnce(snapshot({ models: { unknownRole: { providerId: 'one', modelId: 'model' } } }, 'invalid'))
-      .mockResolvedValueOnce(snapshot({ models: { review: { providerId: 'one', modelId: 'model' } } }, 'corrected'));
+      .mockResolvedValueOnce(snapshot({ models: { worker: { providerId: 'one', modelId: 'model' } } }, 'corrected'));
     const write = vi.fn();
     const controller = new HarnessSettingsController({ read, write });
     await expect(controller.load()).resolves.toBeUndefined();
@@ -21,7 +21,7 @@ describe('Harness automatic saving', () => {
     });
     await controller.retry();
     expect(controller.getSnapshot()).toMatchObject({
-      harness: { models: { review: { providerId: 'one', modelId: 'model' } } }, status: 'idle', error: null,
+      harness: { models: { worker: { providerId: 'one', modelId: 'model' } } }, status: 'idle', error: null,
     });
     expect(write).not.toHaveBeenCalled();
   });
@@ -65,11 +65,11 @@ describe('Harness automatic saving', () => {
   it('removes only the chosen override and preserves empty domain restrictions and explicit false', async () => {
     const write = vi.fn(async (harness: JsonValue) => snapshot(harness, 'b'));
     const controller = new HarnessSettingsController({ read: async () => snapshot({
-      models: { review: { providerId: 'one', modelId: 'model' }, explore: { providerId: 'two', modelId: 'other' } },
+      models: { worker: { providerId: 'one', modelId: 'model' }, explore: { providerId: 'two', modelId: 'other' } },
       web: { domains: { block: ['blocked.test'] } }, nextStep: { enabled: true },
     }, 'a'), write });
     await controller.load();
-    controller.update({ models: { review: undefined }, web: { domains: { allow: [] } }, nextStep: { enabled: false } });
+    controller.update({ models: { worker: undefined }, web: { domains: { allow: [] } }, nextStep: { enabled: false } });
     await controller.load();
     expect(write.mock.calls[0]![0]).toEqual({ models: { explore: { providerId: 'two', modelId: 'other' } }, web: { domains: { block: ['blocked.test'], allow: [] } }, nextStep: { enabled: false } });
   });
