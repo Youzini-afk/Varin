@@ -7,6 +7,7 @@ import { create as createTar } from "tar";
 import {
   createLocalSemanticComponentManager,
   LOCAL_SEMANTIC_TRANSFORMERS_ENTRY,
+  LOCAL_SEMANTIC_WORKER_ENTRY,
 } from "./local-component.js";
 import { resolveInstalledModelPack } from "./model-store.js";
 
@@ -36,6 +37,7 @@ async function makeArchive(options: { extra?: string } = {}): Promise<string> {
     "model/tokenizer.json": new TextEncoder().encode("{}"),
     "model/onnx/model_quantized.onnx": new TextEncoder().encode("test-onnx"),
     [LOCAL_SEMANTIC_TRANSFORMERS_ENTRY]: new TextEncoder().encode("export default {};"),
+    [LOCAL_SEMANTIC_WORKER_ENTRY]: new TextEncoder().encode("export default {};"),
   };
   for (const [name, bytes] of Object.entries(files)) {
     const file = join(source, ...name.split("/"));
@@ -48,13 +50,14 @@ async function makeArchive(options: { extra?: string } = {}): Promise<string> {
     await writeFile(extraFile, "unexpected");
   }
   const manifest = {
-    schemaVersion: 1,
+    schemaVersion: 2,
     id: "local-semantic",
     version: "test-version",
     platform: process.platform,
     arch: process.arch,
     modelPath: "model",
     transformersEntry: LOCAL_SEMANTIC_TRANSFORMERS_ENTRY,
+    workerEntry: LOCAL_SEMANTIC_WORKER_ENTRY,
     files: Object.fromEntries(Object.entries(files).map(([name, bytes]) => [name, { sha256: sha256(bytes), bytes: bytes.byteLength }])),
   };
   await writeFile(join(source, "manifest.json"), `${JSON.stringify(manifest)}\n`);
@@ -69,8 +72,8 @@ describe("local semantic component manager", () => {
     roots.push(dataDir);
     const manager = createLocalSemanticComponentManager({ dataDir, version: "test" });
     expect(manager.status()).toEqual({ status: "not-installed" });
-    const embedderModule = await import("./minilm.js");
-    expect(embedderModule.createLocalMinilmEmbedder({ dataDir }).status).toBe("unavailable");
+    const embedderModule = await import("./local-embedder.js");
+    expect(embedderModule.createLocalSemanticEmbedder({ dataDir }).status).toBe("unavailable");
     await manager.dispose();
   });
 

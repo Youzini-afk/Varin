@@ -10,8 +10,6 @@ import { existsSync, readFileSync } from "node:fs";
 import { join, resolve } from "node:path";
 import { type VectorSpaceIdentity } from "./identity.js";
 
-export const SEMANTIC_MODEL_ID = "all-minilm-l6-v2";
-
 export interface SemanticModelRecipe {
   schemaVersion: 1;
   provider: "local";
@@ -23,6 +21,10 @@ export interface SemanticModelRecipe {
   maxTokens: number;
   onnxFile: string;
   tokenizerFile: string;
+  /** Actual local inference grain. Every input is still encoded. */
+  inferenceBatchSize?: number;
+  batchByLength?: boolean;
+  preferredCpuThreads?: number;
 }
 
 export interface ResolvedModelPack {
@@ -35,6 +37,7 @@ export interface ResolvedModelPack {
   source: "bundled" | "component";
   /** Absolute path to the component's transformers.node.mjs entry. */
   transformersEntry?: string;
+  inferenceWorkerEntry?: string;
 }
 
 const RECIPE_NAME = "recipe.json";
@@ -47,7 +50,10 @@ const readRecipe = (file: string): SemanticModelRecipe | null => {
       || typeof raw.model !== "string" || typeof raw.modelRevision !== "string"
       || typeof raw.dim !== "number" || typeof raw.pooling !== "string"
       || typeof raw.normalize !== "boolean" || typeof raw.maxTokens !== "number"
-      || typeof raw.onnxFile !== "string" || typeof raw.tokenizerFile !== "string") return null;
+      || typeof raw.onnxFile !== "string" || typeof raw.tokenizerFile !== "string"
+      || (raw.inferenceBatchSize !== undefined && (!Number.isSafeInteger(raw.inferenceBatchSize) || raw.inferenceBatchSize < 1))
+      || (raw.preferredCpuThreads !== undefined && (!Number.isSafeInteger(raw.preferredCpuThreads) || raw.preferredCpuThreads < 1))
+      || (raw.batchByLength !== undefined && typeof raw.batchByLength !== "boolean")) return null;
     return raw as SemanticModelRecipe;
   } catch {
     return null;
@@ -62,6 +68,9 @@ const spaceFromRecipe = (recipe: SemanticModelRecipe): VectorSpaceIdentity => ({
   pooling: recipe.pooling,
   normalize: recipe.normalize,
   maxTokens: recipe.maxTokens,
+  // Different graphs (e.g. FP32 versus an INT8 export) at one upstream model
+  // revision must not share persisted vectors. The manifest verifies bytes.
+  configurationId: `local-onnx:${recipe.onnxFile}`,
 });
 
 const safeComponentPath = (root: string, relativePath: string): string | null => {
@@ -74,19 +83,20 @@ const safeComponentPath = (root: string, relativePath: string): string | null =>
 /** Resolve one extracted component without loading its optional runtime. */
 export const resolveModelPackAtComponentRoot = (
   componentRoot: string,
-  manifest: { modelPath: string; transformersEntry: string },
+  manifest: { modelPath: string; transformersEntry: string; workerEntry: string },
   pathExists: (candidate: string) => boolean = existsSync,
 ): ResolvedModelPack | null => {
   const modelRoot = safeComponentPath(componentRoot, manifest.modelPath);
   const transformersEntry = safeComponentPath(componentRoot, manifest.transformersEntry);
-  if (!modelRoot || !transformersEntry || !pathExists(transformersEntry)) return null;
+  const inferenceWorkerEntry = safeComponentPath(componentRoot, manifest.workerEntry);
+  if (!modelRoot || !transformersEntry || !inferenceWorkerEntry || !pathExists(transformersEntry) || !pathExists(inferenceWorkerEntry)) return null;
   const recipe = readRecipe(join(modelRoot, RECIPE_NAME));
   if (!recipe) return null;
   const onnxPath = safeComponentPath(modelRoot, recipe.onnxFile);
   const tokenizerPath = safeComponentPath(modelRoot, recipe.tokenizerFile);
   if (!onnxPath || !tokenizerPath) return null;
   return {
-    id: SEMANTIC_MODEL_ID,
+    id: recipe.model,
     root: modelRoot,
     recipe,
     space: spaceFromRecipe(recipe),
@@ -94,10 +104,11 @@ export const resolveModelPackAtComponentRoot = (
     tokenizerPath: pathExists(tokenizerPath) ? tokenizerPath : null,
     source: "component",
     transformersEntry,
+    inferenceWorkerEntry,
   };
 };
 
-const activeComponentRoot = (dataDir: string): { root: string; manifest: { modelPath: string; transformersEntry: string } } | null => {
+const activeComponentRoot = (dataDir: string): { root: string; manifest: { modelPath: string; transformersEntry: string; workerEntry: string } } | null => {
   const parent = join(dataDir, COMPONENT_ROOT);
   let raw: { root?: unknown };
   try {
@@ -114,9 +125,10 @@ const activeComponentRoot = (dataDir: string): { root: string; manifest: { model
     const manifest = JSON.parse(readFileSync(join(root, "manifest.json"), "utf8")) as {
       modelPath?: unknown;
       transformersEntry?: unknown;
+      workerEntry?: unknown;
     };
-    if (typeof manifest.modelPath !== "string" || typeof manifest.transformersEntry !== "string") return null;
-    return { root, manifest: { modelPath: manifest.modelPath, transformersEntry: manifest.transformersEntry } };
+    if (typeof manifest.modelPath !== "string" || typeof manifest.transformersEntry !== "string" || typeof manifest.workerEntry !== "string") return null;
+    return { root, manifest: { modelPath: manifest.modelPath, transformersEntry: manifest.transformersEntry, workerEntry: manifest.workerEntry } };
   } catch {
     return null;
   }

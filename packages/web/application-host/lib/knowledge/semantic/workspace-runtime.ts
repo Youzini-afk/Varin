@@ -86,6 +86,9 @@ export function createWorkspaceSemanticRuntime(options: WorkspaceSemanticRuntime
     return scope ? resolveScopedIndexRoots(root, scope) : resolveSemanticScanRoots(root, options.indexDirectories);
   };
   let localEmbedder = options.embedder;
+  // Retained query bindings keep their model identity across component changes.
+  // All local runtimes are released after workspace work closes at Host shutdown.
+  const localEmbedders = new Set([localEmbedder]);
   const states = new Map<string, WorkspaceState>();
   const loads = new Map<string, Promise<WorkspaceState>>();
   const maintenance = new Map<string, Promise<unknown>>();
@@ -616,6 +619,7 @@ export function createWorkspaceSemanticRuntime(options: WorkspaceSemanticRuntime
       finally { if (maintenance.get(workspaceId) === task) maintenance.delete(workspaceId); }
     },
     refreshLocalSemantic: (next: SemanticEmbedder): void => {
+      localEmbedders.add(next);
       localEmbedder = next;
       for (const state of states.values()) {
         state.backend.replaceLocal(next);
@@ -649,6 +653,8 @@ export function createWorkspaceSemanticRuntime(options: WorkspaceSemanticRuntime
         await unwatch(state);
       }));
       states.clear();
+      await Promise.allSettled([...localEmbedders].map(embedder => embedder.dispose?.()));
+      localEmbedders.clear();
     },
   };
 }

@@ -20,6 +20,8 @@ const version = JSON.parse(fs.readFileSync(path.join(electronRoot, 'package.json
 const architecture = process.env.VARIN_TARGET_ARCH || process.arch;
 if (architecture !== process.arch) throw new Error('Build local inference components on a matching native runner');
 const outputArgument = process.argv.indexOf('--output');
+const modelSourceArgument = process.argv.indexOf('--model-source');
+const customModelSource = modelSourceArgument >= 0 ? path.resolve(process.argv[modelSourceArgument + 1]) : null;
 const outputDirectory = path.resolve(outputArgument >= 0 ? process.argv[outputArgument + 1] : path.join(electronRoot, 'dist'));
 await fsp.mkdir(outputDirectory, { recursive: true });
 const artifact = path.join(outputDirectory, `Varin-local-semantic-${version}-${process.platform}-${architecture}.tar.gz`);
@@ -92,39 +94,53 @@ async function copyPackage(name, importerManifest, parentModules = modules) {
 }
 
 try {
-  execFileSync(process.execPath, [path.join(webRoot, 'scripts/copy-semantic-model.mjs')], { stdio: 'inherit', windowsHide: true });
+  if (!customModelSource) {
+    execFileSync(process.execPath, [path.join(webRoot, 'scripts/copy-semantic-model.mjs')], { stdio: 'inherit', windowsHide: true });
+  }
   prepareOnnxRuntime();
   await copyPackage('@huggingface/transformers', path.join(webRoot, 'package.json'));
-  const sourceModel = path.join(webRoot, 'application-host/lib/knowledge/semantic/runtime/all-minilm-l6-v2');
-  const modelFiles = ['recipe.json', 'tokenizer.json', 'tokenizer_config.json', 'config.json', 'special_tokens_map.json', 'onnx/model_quantized.onnx'];
+  await fsp.copyFile(path.join(repository, 'scripts/local-embedding-worker.mjs'), path.join(staging, 'runtime/local-embedding-worker.mjs'));
+  const sourceModel = customModelSource ?? path.join(webRoot, 'application-host/lib/knowledge/semantic/runtime/all-minilm-l6-v2');
+  const recipe = readJson(path.join(sourceModel, 'recipe.json'));
+  const modelFiles = [...new Set(['recipe.json', recipe.tokenizerFile, 'tokenizer_config.json', 'config.json', recipe.onnxFile,
+    ...['special_tokens_map.json', 'LICENSE', 'NOTICE.txt', 'README.md'].filter(file => fs.existsSync(path.join(sourceModel, file)))])];
   for (const file of modelFiles) {
+    if (typeof file !== 'string' || path.isAbsolute(file) || file.includes('\\') || file.split('/').some(part => !part || part === '..')) {
+      throw new Error('Model recipe files must remain inside the model source and component directory');
+    }
     const destination = path.join(staging, 'model', file);
     await fsp.mkdir(path.dirname(destination), { recursive: true });
     await fsp.copyFile(path.join(sourceModel, file), destination);
   }
-  await fsp.copyFile(path.join(modules, '@huggingface/transformers/LICENSE'), path.join(staging, 'model/LICENSE'));
-  const recipe = readJson(path.join(sourceModel, 'recipe.json'));
-  await fsp.writeFile(path.join(staging, 'model/NOTICE.txt'), [
+  if (!customModelSource) {
+    await fsp.copyFile(path.join(modules, '@huggingface/transformers/LICENSE'), path.join(staging, 'model/LICENSE'));
+    await fsp.writeFile(path.join(staging, 'model/NOTICE.txt'), [
     'all-MiniLM-L6-v2 ONNX weights: Xenova/all-MiniLM-L6-v2',
     `Source revision: https://huggingface.co/Xenova/all-MiniLM-L6-v2/tree/${recipe.modelRevision}`,
     'Base model: https://huggingface.co/sentence-transformers/all-MiniLM-L6-v2',
     'License: Apache-2.0 (see LICENSE in this directory).',
     '',
-  ].join('\n'));
+    ].join('\n'));
+  } else if (!fs.existsSync(path.join(staging, 'model/NOTICE.txt')) && !fs.existsSync(path.join(staging, 'model/LICENSE'))) {
+    throw new Error('Custom model source must include its upstream license or NOTICE, separate from runtime licenses');
+  }
   const transformersEntry = 'runtime/node_modules/@huggingface/transformers/dist/transformers.node.mjs';
   const check = `
     import assert from 'node:assert/strict';
     const { pipeline, env } = await import(${JSON.stringify(pathToFileURL(path.join(staging, transformersEntry)).href)});
     env.allowRemoteModels = false;
     env.localModelPath = ${JSON.stringify(staging)};
-    const extract = await pipeline('feature-extraction', 'model', { local_files_only: true, dtype: 'q8' });
-    const result = await extract(['Varin optional local inference'], { pooling: 'mean', normalize: true });
+    const extract = await pipeline('feature-extraction', 'model', {
+      local_files_only: true, dtype: 'fp32', model_file_name: ${JSON.stringify(path.basename(recipe.onnxFile, '.onnx'))},
+      session_options: { intraOpNumThreads: 1, interOpNumThreads: 1, intra_op_num_threads: 1, inter_op_num_threads: 1 },
+    });
+    const result = await extract(['Varin optional local inference'], { pooling: ${JSON.stringify(recipe.pooling)}, normalize: ${JSON.stringify(recipe.normalize)} });
     const vectors = result.tolist();
-    assert.equal(vectors[0].length, 384);
+    assert.equal(vectors[0].length, ${JSON.stringify(recipe.dim)});
     assert.ok(vectors[0].every(Number.isFinite));
     assert.ok(vectors[0].some(value => value !== 0));
     await extract.dispose();
-    console.log('[local-semantic] staged component produced a real 384-dimensional vector');
+    console.log('[local-semantic] staged component produced a real ${recipe.dim}-dimensional vector');
   `;
   execFileSync(electronRequire('electron'), ['--input-type=module', '-e', check], {
     cwd: staging, env: { ...process.env, ELECTRON_RUN_AS_NODE: '1', NODE_PATH: '' }, stdio: 'inherit', windowsHide: true,
@@ -142,8 +158,8 @@ try {
   }
   await recordFiles(staging);
   await fsp.writeFile(path.join(staging, 'manifest.json'), JSON.stringify({
-    schemaVersion: 1, id: 'local-semantic', version, platform: process.platform, arch: architecture,
-    modelPath: 'model', transformersEntry, files,
+    schemaVersion: 2, id: 'local-semantic', version, platform: process.platform, arch: architecture,
+    modelPath: 'model', transformersEntry, workerEntry: 'runtime/local-embedding-worker.mjs', files,
   }, null, 2) + '\n');
   await tar.c({ cwd: staging, file: `${artifact}.tmp`, gzip: true, portable: true }, ['manifest.json', 'model', 'runtime']);
   await fsp.rename(`${artifact}.tmp`, artifact);

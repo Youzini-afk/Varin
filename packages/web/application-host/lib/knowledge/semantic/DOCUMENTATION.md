@@ -28,6 +28,17 @@ derived store (`../vectors/`); they reuse `harness.embed` but never this MiniLM 
   a large input request cannot hide many local batches inside one background slot.
   Cancellation is checked between calls; a currently running native forward is
   allowed to finish. Transport backends retain their own batch protocol.
+  Local ONNX inference runs in one component-private worker, keeping native
+  forward passes and inference tokenization off the Application Host event loop.
+  The Host retains the synchronous tokenizer used for source packing. The worker
+  admits query batches ahead of queued background calls; an active forward runs
+  to completion. Idle workers do not keep a process alive. Retained model
+  bindings close with the semantic Host owner after pending work shuts down.
+  Recipes can tune `inferenceBatchSize`, `batchByLength` and
+  `preferredCpuThreads`. Length grouping restores results to caller order;
+  these are measured execution defaults, not text count quotas. The current
+  Bekko research pack uses a two-input grain, length grouping and up to four
+  inference threads within the Host's available-parallelism policy.
 - Overlay: `query-view.ts` pins surface/thread drafts at query start; masked disk paths cannot leak
   old vectors. Thread view is fixed baseline + this branch’s delta.
 - Storage: `store.ts` — Host embedding orchestration over the private semantic
@@ -142,11 +153,22 @@ derived store (`../vectors/`); they reuse `harness.embed` but never this MiniLM 
   verification, a short native inference check process, and atomic activation under
   `dataDir/optional-components/local-semantic`. `local-component-routes.ts` exposes authenticated
   status/install/import/cancel routes. Startup neither downloads components nor loads native inference.
-  `model-store.ts` resolves the active package; `minilm.ts` imports its absolute runtime entry and sets
+  `model-store.ts` resolves the active package; `local-embedder.ts` imports its absolute runtime entry and sets
   Node ORT session threads. Installation replaces the local embedder for new workspace operations,
   retaining the model identity held by an in-flight query. Remote bindings are not replaced.
+  The encoder loads the exact ONNX graph named by the recipe, with the recipe's
+  pooling and dimensions; an installed multilingual graph is not routed to a
+  hardcoded MiniLM Q8 filename. Graph filenames distinguish local vector spaces.
 - `scripts/build-local-semantic-component.mjs` builds and verifies the separate target-specific archive.
   Its Node inference dependencies and model weights never enter the normal Host or desktop build.
+  `--model-source <directory>` builds from a prepared `recipe.json`, tokenizer,
+  config, ONNX graph and upstream license/NOTICE. It verifies real inference in
+  the staged Electron runtime before writing the archive. The release's default
+  build still fetches the pinned MiniLM source; research model packs are explicit
+  imports until their release model choice is updated.
+  Component manifest v2 includes the worker entry and its file hash. Activation
+  checks the real worker transport and inference in a child before committing
+  the pointer; it retains the previous package if that check fails.
 
 Checkpoint scheduling is shared with `../persistence.ts`: dirty state clears only after successful
 native persistence, a failed checkpoint remains retryable, and native close supplies the final flush.

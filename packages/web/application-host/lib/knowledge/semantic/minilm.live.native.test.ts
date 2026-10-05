@@ -1,8 +1,10 @@
 /**
- * The one test that exercises the real MiniLM pack: tokenizer, ONNX session,
+ * Exercises an explicitly installed local pack: tokenizer, ONNX worker,
  * pooling, normalization, and a nearest neighbour whose query shares no word
- * with the target body. Skipped when the pack is absent, because weights are
- * fetched by `semantic:copy-model` rather than checked in (D-172).
+ * with the target body. The lexical-gap example was originally a MiniLM
+ * quality check; other models can regress on it and should be reported as such.
+ * Set VARIN_LOCAL_SEMANTIC_TEST_DATA_DIR to a separate installed component data
+ * directory. Skipped when no component is installed; weights are not checked in.
  */
 
 import { afterEach, describe, expect, it } from "vitest";
@@ -11,7 +13,7 @@ import { join } from "node:path";
 import { createDocumentAuthorityHarness } from "../../documents/contract-fixtures.js";
 import { createStructureSource } from "../../structure/source.js";
 import { createTreeSitterStructureProvider } from "../../structure/native-provider.test-helper.js";
-import { createLocalMinilmEmbedder } from "./minilm.js";
+import { createLocalSemanticEmbedder } from "./local-embedder.js";
 import { resolveInstalledModelPack } from "./model-store.js";
 import { LOCAL_MINILM_SPACE, workspaceScope } from "./identity.js";
 import { createSemanticIndexRuntime } from "./runtime.js";
@@ -21,7 +23,7 @@ afterEach(async () => {
   for (const dispose of disposes.splice(0).reverse()) await dispose();
 });
 
-const pack = resolveInstalledModelPack("");
+const pack = resolveInstalledModelPack(process.env.VARIN_LOCAL_SEMANTIC_TEST_DATA_DIR ?? "");
 const hasPack = Boolean(pack?.onnxPath);
 
 const cosine = (left: readonly number[], right: readonly number[]): number => {
@@ -30,9 +32,10 @@ const cosine = (left: readonly number[], right: readonly number[]): number => {
   return dot;
 };
 
-describe.skipIf(!hasPack)("local MiniLM pack", () => {
+describe.skipIf(!hasPack)("installed local encoder", () => {
   it("tokenizes, embeds at the space dimension, and ranks a lexical-gap body first", async () => {
-    const embedder = createLocalMinilmEmbedder({ dataDir: "", pack });
+    const embedder = createLocalSemanticEmbedder({ dataDir: "", pack });
+    disposes.push(async () => { await embedder.dispose?.(); });
     expect(embedder.status).toBe("ready");
     await embedder.prepare();
 
@@ -77,6 +80,8 @@ describe.skipIf(!hasPack)("local MiniLM pack", () => {
       writeFileSync(join(documents.workspaceRoot, name), body, "utf8");
     }
 
+    const embedder = createLocalSemanticEmbedder({ dataDir: documents.dataDir, pack });
+    disposes.push(async () => { await embedder.dispose?.(); });
     const runtime = createSemanticIndexRuntime({
       dataDir: documents.dataDir,
       hostId: "minilm-live",
@@ -87,7 +92,7 @@ describe.skipIf(!hasPack)("local MiniLM pack", () => {
         path: join(documents.workspaceRoot, name),
         relativePath: name,
       })),
-      embedder: createLocalMinilmEmbedder({ dataDir: documents.dataDir, pack }),
+      embedder,
     });
     disposes.push(() => runtime.dispose());
 

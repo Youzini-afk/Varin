@@ -71,7 +71,7 @@ import { createProjectIndexScope, insideDirectory, excludedFromIndex, indexPathA
 import { createIndexDirectoryManager } from './lib/knowledge/index-directories.js';
 import { purgeSemanticWorkspaceCache } from './lib/knowledge/semantic/cache-maintenance.js';
 import { projectFolders, projectContainsPath } from '@varin/application-client';
-import { createLocalMinilmEmbedder } from './lib/knowledge/semantic/minilm.js';
+import { createLocalSemanticEmbedder } from './lib/knowledge/semantic/local-embedder.js';
 import { createLocalSemanticComponentManager } from './lib/knowledge/semantic/local-component.js';
 import { registerLocalSemanticComponentRoutes } from './lib/knowledge/semantic/local-component-routes.js';
 import { createSemanticIndexManagement, DEFAULT_SEMANTIC_INDEX_CONFIGURATION, registerSemanticIndexRoutes } from './lib/knowledge/semantic/index-management.js';
@@ -3143,9 +3143,9 @@ async function main(options: StartWebUiServerOptions = {}): Promise<WebUiServerC
   const localSemanticComponent = createLocalSemanticComponentManager({
     dataDir: VARIN_DATA_DIR,
     version: VARIN_VERSION,
-    onEnabled: () => semanticRuntimeHolder.current?.refreshLocalSemantic(createLocalMinilmEmbedder({ dataDir: VARIN_DATA_DIR })),
+    onEnabled: () => semanticRuntimeHolder.current?.refreshLocalSemantic(createLocalSemanticEmbedder({ dataDir: VARIN_DATA_DIR })),
   });
-  const localEmbedder = createLocalMinilmEmbedder({ dataDir: VARIN_DATA_DIR });
+  const localEmbedder = createLocalSemanticEmbedder({ dataDir: VARIN_DATA_DIR });
   const semanticIndexManagement = createSemanticIndexManagement(VARIN_DATA_DIR, hostId);
   const semanticIndexLoad = await semanticIndexManagement.load().catch((error: unknown) => ({
     config: DEFAULT_SEMANTIC_INDEX_CONFIGURATION, error: errorMessage(error),

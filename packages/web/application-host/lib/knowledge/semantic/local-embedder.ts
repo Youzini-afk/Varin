@@ -1,5 +1,5 @@
 /**
- * Host-local MiniLM via the optional local semantic component. The runtime is
+ * Host-local encoder via the optional local semantic component. The runtime is
  * loaded from the component's absolute entry only after a package is enabled;
  * missing weights are `unavailable`, not an empty ready index.
  */
@@ -7,6 +7,7 @@
 import os from "node:os";
 import { basename, dirname } from "node:path";
 import { pathToFileURL } from "node:url";
+import { Worker } from "node:worker_threads";
 import { intraOpThreads, LOCAL_MINILM_SPACE, type VectorSpaceIdentity } from "./identity.js";
 import type { SemanticEmbedder, SemanticEmbedderStatus } from "./embedder.js";
 import { resolveInstalledModelPack, type ResolvedModelPack } from "./model-store.js";
@@ -28,23 +29,6 @@ type TransformersModule = {
       encode: (text: string) => Encoded | Promise<Encoded>;
     }>;
   };
-  pipeline: (
-    task: "feature-extraction",
-    model: string,
-    options?: {
-      local_files_only?: boolean;
-      dtype?: string;
-      session_options?: {
-        intraOpNumThreads?: number;
-        interOpNumThreads?: number;
-        intra_op_num_threads?: number;
-        inter_op_num_threads?: number;
-      };
-    },
-  ) => Promise<(
-    texts: string | string[],
-    options?: { pooling?: string; normalize?: boolean },
-  ) => Promise<{ tolist: () => number[] | number[][] } | number[][]>>;
 };
 
 const encodedLength = (value: Encoded): number => (
@@ -67,7 +51,7 @@ const loadTransformers = async (entry?: string): Promise<TransformersModule> => 
   await import(/* @vite-ignore */ (entry ? pathToFileURL(entry).href : TRANSFORMERS_MODULE_ID)) as TransformersModule
 );
 
-export function createLocalMinilmEmbedder(options: {
+export function createLocalSemanticEmbedder(options: {
   dataDir: string;
   pack?: ResolvedModelPack | null;
   parallelism?: number;
@@ -76,13 +60,20 @@ export function createLocalMinilmEmbedder(options: {
   // owner replaces this instance when a new component is enabled.
   const packSnapshot = options.pack !== undefined ? options.pack : resolveInstalledModelPack(options.dataDir);
   const currentPack = (): ResolvedModelPack | null => packSnapshot;
+  const inferenceBatchSize = packSnapshot?.recipe.inferenceBatchSize ?? INFERENCE_BATCH_SIZE;
   let encode: ((text: string) => number) | null = null;
   let prepared = false;
   let preparedRoot: string | null = null;
   let preparePromise: Promise<void> | null = null;
-  let extractor: ((texts: readonly string[], signal?: AbortSignal) => Promise<number[][]>) | null = null;
+  let extractor: ((texts: readonly string[], signal?: AbortSignal, priority?: "foreground" | "background") => Promise<number[][]>) | null = null;
+  let worker: Worker | null = null;
+  let workerFailure: Error | null = null;
+  let disposed = false;
+  let requestId = 0;
+  const requests = new Map<number, { resolve(vectors: number[][]): void; reject(error: Error): void }>();
 
-  const threadCount = (): number => intraOpThreads(options.parallelism ?? os.availableParallelism());
+  const threadCount = (): number => Math.min(packSnapshot?.recipe.preferredCpuThreads ?? Infinity,
+    intraOpThreads(options.parallelism ?? os.availableParallelism()));
 
   const configureThreads = (mod: TransformersModule): number => {
     const threads = threadCount();
@@ -91,7 +82,8 @@ export function createLocalMinilmEmbedder(options: {
   };
 
   const embedder: SemanticEmbedder = {
-    inferenceBatchSize: INFERENCE_BATCH_SIZE,
+    inferenceBatchSize,
+    batchByLength: packSnapshot?.recipe.batchByLength ?? false,
     get status(): SemanticEmbedderStatus {
       return currentPack()?.onnxPath ? "ready" : "unavailable";
     },
@@ -99,6 +91,8 @@ export function createLocalMinilmEmbedder(options: {
       return currentPack()?.space ?? LOCAL_MINILM_SPACE;
     },
     prepare: async () => {
+      if (disposed) throw new Error("Local encoder is disposed.");
+      if (workerFailure) throw workerFailure;
       const current = currentPack();
       if (prepared && preparedRoot === (current?.root ?? null)) return;
       if (preparePromise) return preparePromise;
@@ -131,31 +125,52 @@ export function createLocalMinilmEmbedder(options: {
           };
         }
         if (pack.onnxPath) {
-          // `dtype` picks the weight filename: q8 resolves `onnx/model_quantized.onnx`,
-          // which is the file the pack recipe names (D-172).
-          const pipe = await mod.pipeline("feature-extraction", source, {
-            local_files_only: true,
-            dtype: "q8",
-            session_options: {
-              intraOpNumThreads: threads,
-              interOpNumThreads: 1,
-              intra_op_num_threads: threads,
-              inter_op_num_threads: 1,
-            },
+          if (!pack.transformersEntry || !pack.inferenceWorkerEntry) throw new Error("Local encoder worker runtime is unavailable.");
+          await new Promise<void>((resolve, reject) => {
+            const activeWorker = new Worker(pathToFileURL(pack.inferenceWorkerEntry!), { execArgv: [], workerData: {
+              entry: pack.transformersEntry, modelRoot: pack.root, modelFileName: basename(pack.onnxPath!, ".onnx"),
+              pooling: pack.space.pooling, normalize: pack.space.normalize, dim: pack.space.dim, threads,
+            } });
+            worker = activeWorker;
+            const fail = (error: Error) => {
+              workerFailure = error;
+              reject(error);
+              for (const request of requests.values()) request.reject(error);
+              requests.clear();
+              activeWorker.unref();
+            };
+            activeWorker.on("error", fail);
+            activeWorker.on("exit", () => fail(new Error("Local encoder worker exited.")));
+            activeWorker.on("message", (message: { type?: string; id?: number; vectors?: number[][]; error?: string }) => {
+              if (message.type === "ready") { activeWorker.unref(); resolve(); return; }
+              const request = message.id === undefined ? undefined : requests.get(message.id);
+              if (!request || message.id === undefined) return;
+              requests.delete(message.id);
+              if (message.error) request.reject(new Error(message.error));
+              else if (message.vectors) request.resolve(message.vectors);
+              else request.reject(new Error("Local encoder worker returned an incomplete response."));
+              if (requests.size === 0) activeWorker.unref();
+            });
           });
-          extractor = async (texts, signal) => {
+          const run = (texts: readonly string[], priority: "foreground" | "background"): Promise<number[][]> => {
+            if (!worker || workerFailure || disposed) return Promise.reject(workerFailure ?? new Error("Local encoder is disposed."));
+            const activeWorker = worker;
+            const id = ++requestId;
+            return new Promise((resolve, reject) => {
+              requests.set(id, { resolve, reject });
+              activeWorker.ref();
+              activeWorker.postMessage({ id, texts, priority });
+            });
+          };
+          extractor = async (texts, signal, priority = "background") => {
             const vectors: number[][] = [];
-            for (let offset = 0; offset < texts.length; offset += INFERENCE_BATCH_SIZE) {
+            for (let offset = 0; offset < texts.length; offset += inferenceBatchSize) {
               signal?.throwIfAborted();
-              const batch = texts.slice(offset, offset + INFERENCE_BATCH_SIZE);
-              const output = await pipe(batch, { pooling: pack.space.pooling, normalize: pack.space.normalize });
+              const batch = texts.slice(offset, offset + inferenceBatchSize);
+              const rows = await run(batch, priority);
               signal?.throwIfAborted();
-              const listed = typeof (output as { tolist?: () => number[] | number[][] }).tolist === "function"
-                ? (output as { tolist: () => number[] | number[][] }).tolist()
-                : output as number[][];
-              const rows = Array.isArray(listed[0]) ? listed as number[][] : [listed as number[]];
               if (rows.length !== batch.length || rows.some((row) => row.length !== pack.space.dim)) {
-                throw new Error(`MiniLM returned ${rows.length} vectors for ${batch.length} inputs in ${pack.space.dim} dimensions.`);
+                throw new Error(`Local encoder returned ${rows.length} vectors for ${batch.length} inputs in ${pack.space.dim} dimensions.`);
               }
               vectors.push(...rows);
             }
@@ -173,14 +188,14 @@ export function createLocalMinilmEmbedder(options: {
     },
     countTokens: (text) => {
       if (encode) return encode(text);
-      throw new Error("MiniLM tokenizer is not prepared.");
+      throw new Error("Local encoder tokenizer is not prepared.");
     },
     embed: async (texts, request) => {
       const pack = currentPack();
       if (!pack?.onnxPath || !extractor || preparedRoot !== pack.root) {
-        throw new Error("MiniLM model pack is unavailable.");
+        throw new Error("Local encoder model pack is unavailable.");
       }
-      return extractor(texts, request?.signal);
+      return extractor(texts, request?.signal, request?.priority ?? (request?.purpose === "query" ? "foreground" : "background"));
     },
     embedBatch: async (request) => {
       request.signal?.throwIfAborted();
@@ -190,7 +205,7 @@ export function createLocalMinilmEmbedder(options: {
       request.signal?.throwIfAborted();
       const space = embedder.space;
       if (vectors.length !== request.items.length || vectors.some((vector) => vector.length !== space.dim)) {
-        throw new Error(`MiniLM returned ${vectors.length} vectors for ${request.items.length} inputs in ${space.dim} dimensions.`);
+        throw new Error(`Local encoder returned ${vectors.length} vectors for ${request.items.length} inputs in ${space.dim} dimensions.`);
       }
       return {
         batchId: request.batchId,
@@ -201,6 +216,15 @@ export function createLocalMinilmEmbedder(options: {
           vector: vectors[index]!,
         })),
       };
+    },
+    dispose: async () => {
+      disposed = true;
+      const activeWorker = worker;
+      worker = null;
+      const error = new Error("Local encoder is disposed.");
+      for (const request of requests.values()) request.reject(error);
+      requests.clear();
+      await activeWorker?.terminate();
     },
   };
   return embedder;

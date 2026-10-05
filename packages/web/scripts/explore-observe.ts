@@ -45,7 +45,7 @@ import { createTreeSitterStructureProvider } from "../application-host/lib/struc
 import { openWorkspaceKnowledge, type KnowledgeStore } from "../application-host/lib/knowledge/store.js";
 import { createSymbolGraphRuntime } from "../application-host/lib/knowledge/symbol-runtime.js";
 import { createFsSearchRuntime } from "../application-host/lib/fs/search.js";
-import { createLocalMinilmEmbedder } from "../application-host/lib/knowledge/semantic/minilm.js";
+import { createLocalSemanticEmbedder } from "../application-host/lib/knowledge/semantic/local-embedder.js";
 import { workspaceScope } from "../application-host/lib/knowledge/semantic/identity.js";
 import { createSemanticIndexRuntime } from "../application-host/lib/knowledge/semantic/runtime.js";
 import {
@@ -380,7 +380,7 @@ const main = async (): Promise<void> => {
     documents,
     structureSource,
     searchFilesystemFiles: fileSearch.searchFilesystemFiles,
-    embedder: createLocalMinilmEmbedder({ dataDir }),
+    embedder: createLocalSemanticEmbedder({ dataDir }),
     onError: (error) => process.stderr.write(`semantic: ${String(error)}\n`),
   });
   // The semantic index is a separate generation store from the catalog, so it

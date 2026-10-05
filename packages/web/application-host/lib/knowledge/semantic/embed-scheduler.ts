@@ -79,18 +79,24 @@ export async function embedInScheduledBatches(options: {
   if (texts.length === 0) return [];
   const grain = embedder.inferenceBatchSize ?? texts.length;
   if (!Number.isSafeInteger(grain) || grain < 1) throw new RangeError('Invalid embedding inference grain');
-  const vectors: number[][] = [];
-  for (let offset = 0; offset < texts.length; offset += grain) {
+  const order = texts.map((_, index) => index);
+  if (embedder.batchByLength && texts.length > grain) {
+    const lengths = texts.map(text => embedder.countTokens(text));
+    order.sort((left, right) => lengths[left]! - lengths[right]!);
+  }
+  const vectors: number[][] = new Array(texts.length);
+  for (let offset = 0; offset < order.length; offset += grain) {
     signal?.throwIfAborted();
-    const batch = texts.slice(offset, offset + grain);
+    const indices = order.slice(offset, offset + grain);
+    const batch = indices.map(index => texts[index]!);
     const work = async () => {
       signal?.throwIfAborted();
-      return embedder.embed(batch, { purpose: options.purpose, ...(signal ? { signal } : {}) });
+      return embedder.embed(batch, { purpose: options.purpose, priority: options.priority, ...(signal ? { signal } : {}) });
     };
     const rows = options.scheduler ? await options.scheduler.enqueue(options.priority, work) : await work();
     signal?.throwIfAborted();
     if (rows.length !== batch.length) throw new Error(`Semantic embedder returned ${rows.length} vectors for ${batch.length} chunks`);
-    vectors.push(...rows);
+    rows.forEach((row, index) => { vectors[indices[index]!] = row; });
   }
   return vectors;
 }

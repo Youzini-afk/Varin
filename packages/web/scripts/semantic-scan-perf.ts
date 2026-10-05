@@ -12,7 +12,7 @@ import {
   spaceIdOf,
   workspaceScope,
 } from "../application-host/lib/knowledge/semantic/identity.js";
-import { createLocalMinilmEmbedder } from "../application-host/lib/knowledge/semantic/minilm.js";
+import { createLocalSemanticEmbedder } from "../application-host/lib/knowledge/semantic/local-embedder.js";
 import { resolveInstalledModelPack } from "../application-host/lib/knowledge/semantic/model-store.js";
 import { createSemanticIndexRuntime, isSemanticIndexPath } from "../application-host/lib/knowledge/semantic/runtime.js";
 
@@ -47,7 +47,7 @@ const files = tracked.map((resourceId) => {
   };
 });
 const largest = files.toSorted((left, right) => right.bytes - left.bytes)[0]!;
-const embedder = createLocalMinilmEmbedder({ dataDir: harness.dataDir, pack });
+const embedder = createLocalSemanticEmbedder({ dataDir: harness.dataDir, pack });
 const errors: string[] = [];
 const runtime = createSemanticIndexRuntime({
   dataDir: harness.dataDir,

@@ -1,6 +1,34 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { LOCAL_MINILM_SPACE } from "./identity.js";
 import type { ResolvedModelPack } from "./model-store.js";
+import { fileURLToPath } from 'node:url';
+
+vi.mock('node:worker_threads', async () => {
+  const { EventEmitter } = await import('node:events');
+  class Worker extends EventEmitter {
+    data: { pooling: string; normalize: boolean; threads: number };
+    constructor(_url: unknown, options: { workerData: Worker['data'] }) {
+      super();
+      this.data = options.workerData;
+      transformerState().sessionOptions.push({ intraOpNumThreads: this.data.threads, intra_op_num_threads: this.data.threads });
+      queueMicrotask(() => this.emit('message', { type: 'ready' }));
+    }
+    ref() {}
+    unref() {}
+    terminate() { return Promise.resolve(0); }
+    postMessage(request: { id:number; texts:string[] }) {
+      transformerState().batches.push([...request.texts]);
+      transformerState().options.push({ pooling: this.data.pooling, normalize: this.data.normalize });
+      const vectors = request.texts.map(text => {
+        const vector = new Array<number>(LOCAL_MINILM_SPACE.dim).fill(0);
+        vector[Number.parseInt(text.slice(1),10) % LOCAL_MINILM_SPACE.dim] = 1;
+        return vector;
+      });
+      queueMicrotask(() => this.emit('message', { id:request.id, vectors }));
+    }
+  }
+  return { Worker };
+});
 
 type TransformerTestState = {
   batches: string[][];
@@ -14,31 +42,7 @@ const transformerState = (): TransformerTestState => {
   return target.__varinMinilmTestState;
 };
 
-vi.mock("@huggingface/transformers", () => ({
-  env: { backends: { onnx: { wasm: {} } } },
-  AutoTokenizer: {
-    from_pretrained: vi.fn(async () => ({ encode: (text: string) => ({ length: text.length }) })),
-  },
-  pipeline: vi.fn(async (_task: string, _model: string, pipelineOptions?: { session_options?: unknown }) => {
-    transformerState().sessionOptions.push(pipelineOptions?.session_options);
-    return async (
-    texts: string[],
-    options: { pooling?: string; normalize?: boolean },
-  ) => {
-    transformerState().batches.push([...texts]);
-    transformerState().options.push(options);
-    return {
-      tolist: () => texts.map((text) => {
-        const vector = new Array<number>(LOCAL_MINILM_SPACE.dim).fill(0);
-        vector[Number.parseInt(text.slice(1), 10) % LOCAL_MINILM_SPACE.dim] = 1;
-        return vector;
-      }),
-    };
-  };
-  }),
-}));
-
-import { createLocalMinilmEmbedder } from "./minilm.js";
+import { createLocalSemanticEmbedder } from "./local-embedder.js";
 
 const pack: ResolvedModelPack = {
   id: "all-minilm-l6-v2",
@@ -59,6 +63,8 @@ const pack: ResolvedModelPack = {
   onnxPath: "C:/model/all-minilm-l6-v2/onnx/model_quantized.onnx",
   tokenizerPath: "C:/model/all-minilm-l6-v2/tokenizer.json",
   source: "bundled",
+  transformersEntry: fileURLToPath(new URL('./fixtures/embedding-tokenizer.mjs', import.meta.url)),
+  inferenceWorkerEntry: "C:/model/runtime/local-embedding-worker.mjs",
 };
 
 describe("local MiniLM batching", () => {
@@ -71,7 +77,7 @@ describe("local MiniLM batching", () => {
 
   it("embeds every input as ordered array batches and keeps single queries array-shaped", async () => {
     const transformer = transformerState();
-    const embedder = createLocalMinilmEmbedder({ dataDir: "", pack });
+    const embedder = createLocalSemanticEmbedder({ dataDir: "", pack });
     await embedder.prepare();
     const vectors = await embedder.embed(Array.from({ length: 70 }, (_, index) => `v${index}`));
 

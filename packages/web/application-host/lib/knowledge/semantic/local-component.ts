@@ -11,18 +11,20 @@ import { resolveModelPackAtComponentRoot, type ResolvedModelPack } from "./model
 
 export const LOCAL_SEMANTIC_COMPONENT_ID = "local-semantic";
 export const LOCAL_SEMANTIC_TRANSFORMERS_ENTRY = "runtime/node_modules/@huggingface/transformers/dist/transformers.node.mjs";
+export const LOCAL_SEMANTIC_WORKER_ENTRY = "runtime/local-embedding-worker.mjs";
 const LOCAL_SEMANTIC_ROOT_NAME = "optional-components/local-semantic";
 const ACTIVE_NAME = "active.json";
 const MANIFEST_NAME = "manifest.json";
 
 export interface LocalSemanticComponentManifest {
-  schemaVersion: 1;
+  schemaVersion: 2;
   id: typeof LOCAL_SEMANTIC_COMPONENT_ID;
   version: string;
   platform: "win32" | "linux" | "darwin";
   arch: "x64" | "arm64";
   modelPath: "model";
   transformersEntry: typeof LOCAL_SEMANTIC_TRANSFORMERS_ENTRY;
+  workerEntry: typeof LOCAL_SEMANTIC_WORKER_ENTRY;
   files: Record<string, { sha256: string; bytes: number }>;
 }
 
@@ -82,12 +84,13 @@ const pathInRoot = (root: string, relativePath: string): string => {
 const parseManifest = (raw: unknown): LocalSemanticComponentManifest => {
   if (!raw || typeof raw !== "object" || Array.isArray(raw)) throw new Error("Local semantic manifest is malformed.");
   const value = raw as Record<string, unknown>;
-  if (value.schemaVersion !== 1 || value.id !== LOCAL_SEMANTIC_COMPONENT_ID
+  if (value.schemaVersion !== 2 || value.id !== LOCAL_SEMANTIC_COMPONENT_ID
     || typeof value.version !== "string" || !value.version.trim()
     || (value.platform !== "win32" && value.platform !== "linux" && value.platform !== "darwin")
     || (value.arch !== "x64" && value.arch !== "arm64")
     || value.modelPath !== "model"
     || value.transformersEntry !== LOCAL_SEMANTIC_TRANSFORMERS_ENTRY
+    || value.workerEntry !== LOCAL_SEMANTIC_WORKER_ENTRY
     || !value.files || typeof value.files !== "object" || Array.isArray(value.files)) {
     throw new Error("Local semantic manifest has an unsupported shape.");
   }
@@ -104,17 +107,18 @@ const parseManifest = (raw: unknown): LocalSemanticComponentManifest => {
     }
     files[normalized] = { sha256: row.sha256.toLowerCase(), bytes: row.bytes };
   }
-  if (!files["model/recipe.json"] || !files["model/tokenizer.json"] || !files[LOCAL_SEMANTIC_TRANSFORMERS_ENTRY]) {
+  if (!files["model/recipe.json"] || !files["model/tokenizer.json"] || !files[LOCAL_SEMANTIC_TRANSFORMERS_ENTRY] || !files[LOCAL_SEMANTIC_WORKER_ENTRY]) {
     throw new Error("Local semantic manifest is missing the model recipe, tokenizer, or runtime entry.");
   }
   return {
-    schemaVersion: 1,
+    schemaVersion: 2,
     id: LOCAL_SEMANTIC_COMPONENT_ID,
     version: value.version.trim(),
     platform: value.platform,
     arch: value.arch,
     modelPath: "model",
     transformersEntry: LOCAL_SEMANTIC_TRANSFORMERS_ENTRY,
+    workerEntry: LOCAL_SEMANTIC_WORKER_ENTRY,
     files,
   };
 };
@@ -201,7 +205,7 @@ const validateExtractedComponent = async (
   }
   const pack = resolveModelPackAtComponentRoot(root, manifest);
   if (!pack?.onnxPath || !pack.tokenizerPath || !pack.transformersEntry) {
-    throw new Error("Local semantic component does not contain a complete MiniLM model and runtime.");
+    throw new Error("Local semantic component does not contain a complete encoder model and runtime.");
   }
   return { manifest, pack, installedBytes };
 };
@@ -209,33 +213,41 @@ const validateExtractedComponent = async (
 const defaultValidatePack = async (pack: ResolvedModelPack, signal?: AbortSignal): Promise<void> => {
   signal?.throwIfAborted();
   const entry = pack.transformersEntry;
-  if (!entry || !pack.root || !pack.onnxPath) throw new Error("Local semantic component runtime entry is unavailable.");
+  if (!entry || !pack.inferenceWorkerEntry || !pack.root || !pack.onnxPath) throw new Error("Local semantic component runtime entry is unavailable.");
+  const modelFileName = basename(pack.onnxPath, ".onnx");
   const script = `
-    import { basename, dirname } from "node:path";
+    import { Worker } from "node:worker_threads";
     import { pathToFileURL } from "node:url";
     const entry = process.argv[1];
     const modelRoot = process.argv[2];
     const dim = Number(process.argv[3]);
     const pooling = process.argv[4];
     const normalize = process.argv[5] === "true";
-    const mod = await import(pathToFileURL(entry).href);
-    mod.env.allowRemoteModels = false;
-    mod.env.localModelPath = dirname(modelRoot);
-    const pipe = await mod.pipeline("feature-extraction", basename(modelRoot), {
-      local_files_only: true,
-      dtype: "q8",
-      session_options: { intraOpNumThreads: 1, interOpNumThreads: 1, intra_op_num_threads: 1, inter_op_num_threads: 1 },
+    const modelFileName = process.argv[6];
+    const worker = new Worker(pathToFileURL(process.argv[7]), {
+      execArgv: [],
+      workerData: { entry, modelRoot, modelFileName, dim, pooling, normalize, threads: 1 },
     });
-    const output = await pipe(["Varin local semantic component validation"], { pooling, normalize });
-    const listed = typeof output?.tolist === "function" ? output.tolist() : output;
-    const row = Array.isArray(listed?.[0]) ? listed[0] : listed;
-    if (!Array.isArray(row) || row.length !== dim || row.some((value) => !Number.isFinite(value)) || !row.some(value => value !== 0)) {
-      throw new Error("Local semantic component inference returned an invalid vector.");
-    }
-    await pipe.dispose?.();
+    try {
+      await new Promise((resolve, reject) => {
+        worker.on("error", reject);
+        worker.on("exit", () => reject(new Error("Local component validation worker exited")));
+        worker.on("message", message => {
+          if (message.type === "ready") {
+            worker.postMessage({ id: 1, texts: ["Varin local semantic component validation"], priority: "foreground" });
+            return;
+          }
+          if (message.error) { reject(new Error(message.error)); return; }
+          const row = message.vectors?.[0];
+          if (!Array.isArray(row) || row.length !== dim || row.some(value => !Number.isFinite(value)) || !row.some(value => value !== 0)) {
+            reject(new Error("Local semantic component inference returned an invalid vector."));
+          } else resolve();
+        });
+      });
+    } finally { await worker.terminate(); }
   `.trim();
   await new Promise<void>((resolvePromise, reject) => {
-    const child = spawn(process.execPath, ["--input-type=module", "-e", script, entry, pack.root, String(pack.space.dim), pack.space.pooling, String(pack.space.normalize)], {
+    const child = spawn(process.execPath, ["--input-type=module", "-e", script, entry, pack.root, String(pack.space.dim), pack.space.pooling, String(pack.space.normalize), modelFileName, pack.inferenceWorkerEntry!], {
       env: { ...process.env, ELECTRON_RUN_AS_NODE: "1" },
       stdio: ["ignore", "ignore", "pipe"],
       windowsHide: true,

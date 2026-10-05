@@ -16,6 +16,8 @@ describe('embedding scheduler', () => {
     const calls: string[][] = [];
     const embedder = createHashEmbedder();
     embedder.inferenceBatchSize = 2;
+    embedder.batchByLength = true;
+    embedder.countTokens = text => text.length;
     const originalEmbed = embedder.embed;
     embedder.embed = async (texts) => {
       calls.push([...texts]);
@@ -32,7 +34,7 @@ describe('embedding scheduler', () => {
     await query;
     expect(calls[1]).toEqual(['interactive query']);
     expect(await background).toEqual(await originalEmbed(documents));
-    expect(calls.flat().filter(text => text !== 'interactive query')).toEqual(documents);
+    expect(calls.flat().filter(text => text !== 'interactive query').sort()).toEqual([...documents].sort());
   });
 
   it('stops cancelled local work between inference calls and releases the shared slot', async () => {

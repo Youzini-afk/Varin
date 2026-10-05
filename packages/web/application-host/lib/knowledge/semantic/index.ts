@@ -41,7 +41,7 @@ export {
   resolveInstalledModelPack,
 } from "./model-store.js";
 export type { ResolvedModelPack, SemanticModelRecipe } from "./model-store.js";
-export { createLocalMinilmEmbedder } from "./minilm.js";
+export { createLocalSemanticEmbedder } from "./local-embedder.js";
 export {
   LOCAL_SEMANTIC_COMPONENT_ID,
   LOCAL_SEMANTIC_TRANSFORMERS_ENTRY,
