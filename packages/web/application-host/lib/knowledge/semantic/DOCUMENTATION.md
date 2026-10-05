@@ -15,6 +15,10 @@ derived store (`../vectors/`); they reuse `harness.embed` but never this MiniLM 
   revision; `fallback: true` and file-level parents distinguish these from parsed structure.
   Unsupported file identities remain visible in scan coverage and cannot turn a partial repository
   into a claim of complete coverage merely because its supported auxiliary files finished indexing.
+  Continue-splitting probes a bounded prefix near the model window instead of
+  re-tokenizing the entire remaining suffix for each piece of a generated line.
+  The chunk recipe records this partitioning change; source bytes and offsets
+  remain complete.
 - Cache / schedule: `vector-cache.ts` (space + purpose + embedText, byte soft budget);
   `embed-scheduler.ts` (configurable concurrent request slots and background start interval;
   waiting foreground work takes the next free slot without an artificial interval). This

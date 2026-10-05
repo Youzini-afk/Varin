@@ -113,6 +113,22 @@ describe("packStructuralUnits", () => {
     expect(chunks.every((chunk) => countCharacters(chunk.body) <= 32)).toBe(true);
   });
 
+  it('splits a generated long line without re-tokenizing the remaining file for every piece', () => {
+    const text = 'entry '.repeat(100_000);
+    let tokenizedCharacters = 0;
+    const countTokens = (value: string) => {
+      tokenizedCharacters += value.length;
+      return value.split(/\s+/u).filter(Boolean).length;
+    };
+    const chunks = packStructuralUnits({ documentId: 'large-generated.txt', units: [unit(text)],
+      maxTokens: 128, countTokens });
+    expect(chunks.map(chunk => chunk.body).join('')).toBe(text);
+    // Bounded prefix probes plus decoration checks are linear in source size;
+    // repeated full-suffix scans in the old splitter exceed this by orders.
+    expect(tokenizedCharacters).toBeLessThan(text.length * 25);
+    expect(chunks.every(chunk => wordCount(chunk.embedText) <= 128)).toBe(true);
+  });
+
   it("finds a large overlapping line window without probing each rejected size", () => {
     const lineCount = 8_192;
     const text = Array.from({ length: lineCount }, () => "token").join("\n");

@@ -23,9 +23,16 @@ export type SemanticChunk = {
 
 const prefixThatFits = (text: string, maxTokens: number, countTokens: TokenCounter): number => {
   if (text.length === 0) return 0;
-  if (countTokens(text) <= maxTokens) return text.length;
-  let low = 1;
-  let high = text.length;
+  // Probe near one model window. Re-tokenizing the entire unconsumed suffix
+  // for every piece made long generated lines quadratic in source length.
+  let low = 0;
+  let high = Math.min(text.length, maxTokens);
+  while (countTokens(text.slice(0, high)) <= maxTokens) {
+    low = high;
+    if (high === text.length) return high;
+    high = Math.min(text.length, high * 2);
+  }
+  high -= 1;
   while (low < high) {
     const middle = Math.ceil((low + high) / 2);
     if (countTokens(text.slice(0, middle)) <= maxTokens) low = middle;
