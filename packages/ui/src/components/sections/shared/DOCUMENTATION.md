@@ -21,6 +21,10 @@ Boolean, exclusive-choice, and short segmented-choice controls use `SettingsChec
 keyboard and accessibility behavior. `SettingsInfoHint` is the hover-and-click helper disclosure used
 by the `info` props, including touch devices where hover alone is unavailable.
 
+The shared `Select` supplies inline `SelectItem` labels to Base UI before its popup mounts. A plain
+`SelectValue` shows the same localized label as the menu; configuration values remain their native
+IDs. Explicit `items`, value children and custom value renderers retain their caller-owned display.
+
 Explanatory prose can stay behind `info` so the default page remains scannable. Text needed to make a
 current operation safe or usable—validation errors, destructive consequences, security warnings,
 required syntax, dynamic state, and active wizard instructions—remains visible.

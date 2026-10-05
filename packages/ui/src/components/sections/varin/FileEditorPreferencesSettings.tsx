@@ -61,7 +61,7 @@ export const FileEditorPreferencesSettings: React.FC = () => {
         <SettingsStackedField label={t('settings.varin.editor.field.wordWrap')}>
           <Select value={settings.wordWrap} onValueChange={(value) => update({ wordWrap: value as FileEditorProfileToggle })}>
             <SelectTrigger className={SETTINGS_SELECT_TRIGGER_CLASS} size={SETTINGS_SELECT_SIZE}>
-              <SelectValue>{profileToggleLabel(settings.wordWrap)}</SelectValue>
+              <SelectValue />
             </SelectTrigger>
             <SelectContent>
               {PROFILE_TOGGLE_VALUES.map((value) => <SelectItem key={value} value={value}>{profileToggleLabel(value)}</SelectItem>)}
@@ -72,7 +72,7 @@ export const FileEditorPreferencesSettings: React.FC = () => {
         <SettingsStackedField label={t('settings.varin.editor.field.minimap')}>
           <Select value={settings.minimap} onValueChange={(value) => update({ minimap: value as FileEditorProfileToggle })}>
             <SelectTrigger className={SETTINGS_SELECT_TRIGGER_CLASS} size={SETTINGS_SELECT_SIZE}>
-              <SelectValue>{profileToggleLabel(settings.minimap)}</SelectValue>
+              <SelectValue />
             </SelectTrigger>
             <SelectContent>
               {PROFILE_TOGGLE_VALUES.map((value) => <SelectItem key={value} value={value}>{profileToggleLabel(value)}</SelectItem>)}
@@ -83,7 +83,7 @@ export const FileEditorPreferencesSettings: React.FC = () => {
         <SettingsStackedField label={t('settings.varin.editor.field.stickyScroll')}>
           <Select value={settings.stickyScroll} onValueChange={(value) => update({ stickyScroll: value as FileEditorProfileToggle })}>
             <SelectTrigger className={SETTINGS_SELECT_TRIGGER_CLASS} size={SETTINGS_SELECT_SIZE}>
-              <SelectValue>{profileToggleLabel(settings.stickyScroll)}</SelectValue>
+              <SelectValue />
             </SelectTrigger>
             <SelectContent>
               {PROFILE_TOGGLE_VALUES.map((value) => <SelectItem key={value} value={value}>{profileToggleLabel(value)}</SelectItem>)}
@@ -94,11 +94,7 @@ export const FileEditorPreferencesSettings: React.FC = () => {
         <SettingsStackedField label={t('settings.varin.editor.field.lineNumbers')}>
           <Select value={settings.lineNumbers} onValueChange={(value) => update({ lineNumbers: value as FileEditorLineNumbers })}>
             <SelectTrigger className={SETTINGS_SELECT_TRIGGER_CLASS} size={SETTINGS_SELECT_SIZE}>
-              <SelectValue>
-                {settings.lineNumbers === 'relative'
-                  ? t('settings.varin.editor.option.relative')
-                  : profileToggleLabel(settings.lineNumbers)}
-              </SelectValue>
+              <SelectValue />
             </SelectTrigger>
             <SelectContent>
               <SelectItem value="profile">{t('settings.varin.editor.option.followProfile')}</SelectItem>
@@ -112,7 +108,7 @@ export const FileEditorPreferencesSettings: React.FC = () => {
         <SettingsStackedField label={t('settings.varin.editor.field.whitespace')}>
           <Select value={settings.renderWhitespace} onValueChange={(value) => update({ renderWhitespace: value as FileEditorWhitespace })}>
             <SelectTrigger className={SETTINGS_SELECT_TRIGGER_CLASS} size={SETTINGS_SELECT_SIZE}>
-              <SelectValue>{t(`settings.varin.editor.option.whitespace.${settings.renderWhitespace}`)}</SelectValue>
+              <SelectValue />
             </SelectTrigger>
             <SelectContent>
               {WHITESPACE_VALUES.map((value) => (
@@ -125,11 +121,7 @@ export const FileEditorPreferencesSettings: React.FC = () => {
         <SettingsStackedField label={t('settings.varin.editor.field.accessibility')}>
           <Select value={settings.accessibilitySupport} onValueChange={(value) => update({ accessibilitySupport: value as FileEditorAccessibilitySupport })}>
             <SelectTrigger className={SETTINGS_SELECT_TRIGGER_CLASS} size={SETTINGS_SELECT_SIZE}>
-              <SelectValue>
-                {settings.accessibilitySupport === 'auto'
-                  ? t('settings.varin.editor.option.auto')
-                  : profileToggleLabel(settings.accessibilitySupport)}
-              </SelectValue>
+              <SelectValue />
             </SelectTrigger>
             <SelectContent>
               <SelectItem value="auto">{t('settings.varin.editor.option.auto')}</SelectItem>

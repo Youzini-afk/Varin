@@ -38,9 +38,28 @@ type SelectRootProps<Value extends string = string> = Omit<
   onValueChange?: (value: Value, eventDetails: SelectRootChangeEventDetails) => void;
 };
 
+// Make inline option labels available before the popup mounts.
+function collectSelectItems(children: React.ReactNode) {
+  const items: Array<{ value: string; label: React.ReactNode }> = [];
+  const visit = (nodes: React.ReactNode): void => {
+    React.Children.forEach(nodes, (child) => {
+      if (!React.isValidElement<{ children?: React.ReactNode; value?: unknown }>(child) || child.type === Select) return;
+      if (child.type === SelectItem && typeof child.props.value === "string") {
+        items.push({ value: child.props.value, label: child.props.children });
+      } else {
+        visit(child.props.children);
+      }
+    });
+  };
+  visit(children);
+  return items.length > 0 ? items : undefined;
+}
+
 function Select<Value extends string = string>({
   onValueChange,
   modal = false,
+  children,
+  items,
   ...props
 }: SelectRootProps<Value>) {
   const [portalContainer, setPortalContainer] = React.useState<HTMLElement | null>(null);
@@ -48,6 +67,7 @@ function Select<Value extends string = string>({
     portalContainer,
     setPortalContainer,
   }), [portalContainer]);
+  const labeledItems = React.useMemo(() => items ?? collectSelectItems(children), [children, items]);
 
   const handleValueChange = React.useCallback(
     (value: unknown, eventDetails: SelectRootChangeEventDetails) => {
@@ -60,7 +80,9 @@ function Select<Value extends string = string>({
 
   return (
     <SelectPortalContext.Provider value={portalContextValue}>
-      <BaseSelect.Root {...props} modal={modal} onValueChange={handleValueChange} />
+      <BaseSelect.Root {...props} items={labeledItems} modal={modal} onValueChange={handleValueChange}>
+        {children}
+      </BaseSelect.Root>
     </SelectPortalContext.Provider>
   )
 }
@@ -78,8 +100,8 @@ type SelectValueProps = Omit<React.ComponentProps<typeof BaseSelect.Value>, "chi
 
 function SelectValue({ placeholder, children, ...props }: SelectValueProps) {
   return (
-    <BaseSelect.Value data-slot="select-value" {...props}>
-      {(value: unknown) => {
+    <BaseSelect.Value data-slot="select-value" placeholder={placeholder} {...props}>
+      {typeof children === "function" ? (value: unknown) => {
         const resolvedValue =
           typeof value === "string" || value === undefined
             ? value
@@ -87,15 +109,8 @@ function SelectValue({ placeholder, children, ...props }: SelectValueProps) {
               ? undefined
               : String(value);
 
-        if (typeof children === "function") {
-          return children(resolvedValue);
-        }
-        if (children !== undefined && children !== null) return children;
-        if (resolvedValue === undefined || resolvedValue === "") {
-          return placeholder as React.ReactNode;
-        }
-        return resolvedValue;
-      }}
+        return children(resolvedValue);
+      } : children}
     </BaseSelect.Value>
   )
 }

@@ -295,6 +295,7 @@ export const DefaultsSettings: React.FC = () => {
   const summaryModel = effectiveProviderId && effectiveModelId
     ? `${effectiveProviderId}/${effectiveModelId}`
     : t('settings.varin.defaults.option.piDefault');
+  const thinkingLabel = (level: ThinkingLevel): string => t(`settings.varin.pluginSettings.subagents.thinking.${level}`);
 
   return (
     <SettingsSection title={t('settings.varin.defaults.title')} divider={false}>
@@ -303,7 +304,7 @@ export const DefaultsSettings: React.FC = () => {
           {t('settings.varin.defaults.summaryPrefix')}{' '}
           <span className="text-foreground">
             {summaryModel}
-            {effectiveThinking ? ` (${effectiveThinking})` : ''}
+            {effectiveThinking ? ` (${isThinkingLevel(effectiveThinking) ? thinkingLabel(effectiveThinking) : effectiveThinking})` : ''}
           </span>
         </div>
 
@@ -354,7 +355,7 @@ export const DefaultsSettings: React.FC = () => {
                 <SelectItem value={DEFAULT_VALUE}>{defaultPlaceholder}</SelectItem>
                 {availableThinkingLevels.map((level) => (
                   <SelectItem key={level} value={level}>
-                    {level.charAt(0).toUpperCase() + level.slice(1)}
+                    {thinkingLabel(level)}
                   </SelectItem>
                 ))}
               </SelectContent>
