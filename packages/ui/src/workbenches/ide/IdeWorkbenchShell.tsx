@@ -22,7 +22,8 @@ import { WorkbenchServices } from '@/components/layout/WorkbenchServices';
 import { OpenInAppButton } from '@/components/desktop/OpenInAppButton';
 import { IdeSessionHeader } from './IdeSessionHeader';
 import { IdeSidebar } from './IdeSidebar';
-import { AnimatePresence } from 'motion/react';
+import { AnimatePresence, motion } from 'motion/react';
+import { usePrefersReducedMotion } from '@/hooks/usePrefersReducedMotion';
 import { SidebarFilesTree } from '@/components/layout/SidebarFilesTree';
 import { RegularChatView } from '@/components/views/RegularChatView';
 import { PiInteractionHost } from '@/components/pi-session/PiInteractionHost';
@@ -78,10 +79,12 @@ import { useUIStore } from '@/stores/useUIStore';
 import type { FileSearchResult, WorkspaceContentSearchHit } from '@varin/application-client';
 import { openWorkbenchEditor } from '@/lib/workbench/editors/session';
 import { activeEditorTab } from '@/lib/workbench/editors/groups';
+import { useEditorWorkbench } from '@/lib/workbench/editors/hooks';
 import { BUILTIN_EDITOR_PROVIDER_IDS } from '@/lib/workbench/editors/types';
 import { IdeRunPanel } from '@/components/workbench/IdeRunPanel';
 import { EditorWorkbenchArea } from '@/components/workbench/EditorWorkbenchArea';
 import { WorkbenchPanelArea } from '@/components/workbench/WorkbenchPanelArea';
+import { IdeEditorStatus } from './IdeEditorStatus';
 import { resourceIdFromWorkspacePath } from '@/lib/documents/path';
 import { resolveGitTopLevel } from '@/lib/gitApi';
 import {
@@ -452,6 +455,56 @@ export const IdeWorkbenchShell: React.FC<Record<string, unknown>> = () => {
   React.useEffect(() => () => resizeCleanupRef.current?.(), []);
   const shellRootRef = React.useRef<HTMLDivElement>(null);
   const mainAreaRef = React.useRef<HTMLDivElement>(null);
+  const reducedMotion = usePrefersReducedMotion();
+  const [contentWidth, setContentWidth] = React.useState<number | null>(null);
+  const [readingFocus, setReadingFocus] = React.useState<'primary' | 'editor' | 'secondary' | null>(null);
+  React.useLayoutEffect(() => {
+    const area = mainAreaRef.current;
+    if (!area) return;
+    const update = () => setContentWidth(area.clientWidth || null);
+    update();
+    if (typeof ResizeObserver === 'undefined') return;
+    const observer = new ResizeObserver(update);
+    observer.observe(area);
+    return () => observer.disconnect();
+  }, []);
+  // Offer a local focus action when allocated content is narrow; never change the chosen layout.
+  const visibleWeight = layout.mainWeights[1] + (layout.primaryVisible ? layout.mainWeights[0] : 0)
+    + (layout.secondaryVisible ? layout.mainWeights[2] : 0);
+  const usableWidth = contentWidth === null ? null : contentWidth - (layout.activityVisible ? 44 : 0);
+  const compact = usableWidth !== null && visibleWeight > 0 && (
+    usableWidth * layout.mainWeights[1] / visibleWeight < 480
+    || (layout.secondaryVisible && usableWidth * layout.mainWeights[2] / visibleWeight < 320)
+  );
+  const selectedPane = readingFocus;
+  const primaryDisplayed = selectedPane === null ? layout.primaryVisible : selectedPane === 'primary';
+  const secondaryDisplayed = selectedPane === null ? layout.secondaryVisible : selectedPane === 'secondary';
+  const editorDisplayed = selectedPane === null || selectedPane === 'editor';
+  React.useEffect(() => {
+    const showAgent = () => {
+      if (!shellRootRef.current?.isConnected || shellRootRef.current.closest('[data-varin-workbench-shell-staging]')) return;
+      setReadingFocus('secondary');
+    };
+    const showEditor = () => {
+      if (!shellRootRef.current?.isConnected || shellRootRef.current.closest('[data-varin-workbench-shell-staging]')) return;
+      setReadingFocus(current => current ? 'editor' : null);
+    };
+    window.addEventListener('varin:ide-focus-agent', showAgent);
+    window.addEventListener('varin:ide-focus-editor', showEditor);
+    return () => {
+      window.removeEventListener('varin:ide-focus-agent', showAgent);
+      window.removeEventListener('varin:ide-focus-editor', showEditor);
+    };
+  }, []);
+  const editorWorkbench = useEditorWorkbench(workspaceId);
+  const activeViewId = editorWorkbench ? activeEditorTab(editorWorkbench)?.viewId : undefined;
+  const previousViewRef = React.useRef(activeViewId);
+  React.useEffect(() => {
+    if (previousViewRef.current && activeViewId && previousViewRef.current !== activeViewId) {
+      setReadingFocus(current => current ? 'editor' : null);
+    }
+    previousViewRef.current = activeViewId;
+  }, [activeViewId]);
   const searchDirectoryKey = directory || '__no-workspace__';
   const searchDraft = searchDraftByDirectory[searchDirectoryKey] ?? { mode: 'files', query: '' };
 
@@ -527,10 +580,11 @@ export const IdeWorkbenchShell: React.FC<Record<string, unknown>> = () => {
     const root = shellRootRef.current;
     if (!root?.isConnected || root.closest('[data-varin-workbench-shell-staging]')) return false;
     patchLayout({ activity: 'search', primaryVisible: true });
+    if (readingFocus) setReadingFocus('primary');
     updateSearchDraft({ mode });
     setSearchFocusRequestId((current) => current + 1);
     return true;
-  }), [patchLayout, updateSearchDraft]);
+  }), [patchLayout, updateSearchDraft, readingFocus]);
 
   // The picker covers the Agent column rather than floating over the workbench, so it only has
   // somewhere to render once that column is visible. Opening it reveals the column; hiding the
@@ -561,7 +615,8 @@ export const IdeWorkbenchShell: React.FC<Record<string, unknown>> = () => {
         diffRepositoryResourceId: resourceIdFromWorkspacePath(directory, gitDirectory) ?? '',
       },
     });
-  }, [directory, gitDirectory, workspaceId]);
+    if (readingFocus) setReadingFocus('editor');
+  }, [directory, gitDirectory, workspaceId, readingFocus]);
 
   const startResize = React.useCallback((side: 'primary' | 'secondary') => (event: React.MouseEvent<HTMLDivElement>) => {
     event.preventDefault();
@@ -572,14 +627,16 @@ export const IdeWorkbenchShell: React.FC<Record<string, unknown>> = () => {
     const startWeights = layout.mainWeights;
     const onMove = (moveEvent: MouseEvent) => {
       if (!workspaceId || size <= 0) return;
-      const delta = (moveEvent.clientX - startX) / size;
+      const delta = (moveEvent.clientX - startX) / size * visibleWeight;
       patchIdeWorkbenchLayout(workspaceId, (document) => {
         const rootNode = document.nodes[IDE_LAYOUT_NODE_IDS.root];
         if (!rootNode || rootNode.kind !== 'split' || rootNode.weights.length !== 3) return document;
         const [primaryWeight, centerWeight, secondaryWeight] = startWeights;
+        const boundedDelta = side === 'primary' ? Math.max(-primaryWeight, Math.min(centerWeight, delta))
+          : Math.max(-centerWeight, Math.min(secondaryWeight, delta));
         const weights = side === 'primary'
-          ? [Math.max(0, primaryWeight + delta), Math.max(0, centerWeight - delta), secondaryWeight]
-          : [primaryWeight, Math.max(0, centerWeight + delta), Math.max(0, secondaryWeight - delta)];
+          ? [primaryWeight + boundedDelta, centerWeight - boundedDelta, secondaryWeight]
+          : [primaryWeight, centerWeight + boundedDelta, secondaryWeight - boundedDelta];
         if (weights.every((weight) => weight === 0)) return document;
         return updateIdeLayoutNode(document, { ...rootNode, weights });
       });
@@ -597,12 +654,28 @@ export const IdeWorkbenchShell: React.FC<Record<string, unknown>> = () => {
     resizeCleanupRef.current = cleanup;
     window.addEventListener('mousemove', onMove);
     window.addEventListener('mouseup', onUp);
-  }, [layout.mainWeights, workspaceId]);
+  }, [layout.mainWeights, visibleWeight, workspaceId]);
 
   const workspaceLabel = directory
     ? formatDirectoryName(directory, homeDirectory)
     : t('workbench.ide.status.noWorkspace');
-  const showPrimarySidebar = layout.primaryVisible;
+  const showPrimarySidebar = primaryDisplayed;
+  const resizeWithKeyboard = (side: 'primary' | 'secondary') => (event: React.KeyboardEvent<HTMLDivElement>) => {
+    if (event.key !== 'ArrowLeft' && event.key !== 'ArrowRight') return;
+    event.preventDefault();
+    if (!workspaceId || !contentWidth) return;
+    const delta = (event.key === 'ArrowRight' ? 1 : -1) * (event.shiftKey ? 40 : 12) / contentWidth * visibleWeight;
+    patchIdeWorkbenchLayout(workspaceId, document => {
+      const root = document.nodes[IDE_LAYOUT_NODE_IDS.root];
+      if (!root || root.kind !== 'split') return document;
+      const [left, center, right] = root.weights;
+      const boundedDelta = side === 'primary' ? Math.max(-left, Math.min(center, delta))
+        : Math.max(-center, Math.min(right, delta));
+      return updateIdeLayoutNode(document, { ...root, weights: side === 'primary'
+        ? [left + boundedDelta, center - boundedDelta, right]
+        : [left, center + boundedDelta, right - boundedDelta] });
+    });
+  };
 
   const handleOpenWindowsAppMenu = React.useCallback((event: React.MouseEvent<HTMLButtonElement>) => {
     const rect = event.currentTarget.getBoundingClientRect();
@@ -660,12 +733,15 @@ export const IdeWorkbenchShell: React.FC<Record<string, unknown>> = () => {
           <Tooltip>
             <TooltipTrigger asChild>
               <Button type="button" variant="ghost" size="icon" className="app-region-no-drag"
-                aria-label={t(layout.primaryVisible ? 'contextPanel.actions.closePanel' : 'contextPanel.actions.openPanel')}
-                aria-pressed={layout.primaryVisible} onClick={() => patchLayout({ primaryVisible: !layout.primaryVisible })}>
+                aria-label={t(primaryDisplayed ? 'contextPanel.actions.closePanel' : 'contextPanel.actions.openPanel')}
+                aria-pressed={primaryDisplayed} onClick={() => {
+                  if (readingFocus) setReadingFocus(primaryDisplayed ? 'editor' : 'primary');
+                  else patchLayout({ primaryVisible: !layout.primaryVisible });
+                }}>
                 <Icon name="layout-left" className="size-4" />
               </Button>
             </TooltipTrigger>
-            <TooltipContent>{t(layout.primaryVisible ? 'contextPanel.actions.closePanel' : 'contextPanel.actions.openPanel')}</TooltipContent>
+            <TooltipContent>{t(primaryDisplayed ? 'contextPanel.actions.closePanel' : 'contextPanel.actions.openPanel')}</TooltipContent>
           </Tooltip>
           <WorkbenchProfileSwitcher />
           {projectActionsContext ? (
@@ -691,15 +767,18 @@ export const IdeWorkbenchShell: React.FC<Record<string, unknown>> = () => {
                           type="button"
                           variant="ghost"
                           size="icon"
-                          aria-label={layout.secondaryVisible ? t('workbench.ide.sidebar.hideSecondary') : t('workbench.ide.sidebar.showSecondary')}
-                          aria-pressed={layout.secondaryVisible}
-                          onClick={() => patchLayout({ secondaryVisible: !layout.secondaryVisible })}
+                          aria-label={secondaryDisplayed ? t('workbench.ide.sidebar.hideSecondary') : t('workbench.ide.sidebar.showSecondary')}
+                          aria-pressed={secondaryDisplayed}
+                          onClick={() => {
+                            if (readingFocus) setReadingFocus(secondaryDisplayed ? 'editor' : 'secondary');
+                            else patchLayout({ secondaryVisible: !layout.secondaryVisible });
+                          }}
                         >
                           <Icon name="layout-right" className="size-4" />
                         </Button>
                       </TooltipTrigger>
                       <TooltipContent side="right">
-                        {layout.secondaryVisible ? t('workbench.ide.sidebar.hideSecondary') : t('workbench.ide.sidebar.showSecondary')}
+                        {secondaryDisplayed ? t('workbench.ide.sidebar.hideSecondary') : t('workbench.ide.sidebar.showSecondary')}
                       </TooltipContent>
                     </Tooltip>
 
@@ -732,6 +811,18 @@ export const IdeWorkbenchShell: React.FC<Record<string, unknown>> = () => {
           </div>
         ) : null}
 
+        {compact || readingFocus ? <nav className="ide-region-navigation flex shrink-0 items-center gap-1 px-2 pb-1" aria-label={t('workbench.ide.title')}>
+          {(['primary', 'editor', 'secondary'] as const).map(pane => <button key={pane} type="button"
+            aria-pressed={selectedPane === pane} className={cn('workbench-icon-button flex items-center gap-1.5 rounded-md px-2 py-1 typography-meta text-muted-foreground hover:bg-interactive-hover hover:text-foreground', selectedPane === pane && 'bg-interactive-selection text-foreground')}
+            onClick={() => setReadingFocus(current => current === pane ? null : pane)}>
+            <Icon name={pane === 'primary' ? 'folder' : pane === 'editor' ? 'file-code' : 'chat-1'} className="size-3.5" />
+            {pane === 'primary' ? t('layout.rightSidebar.files') : pane === 'editor' ? t('workbench.ide.editorLabel') : 'Agent'}
+          </button>)}
+          <button type="button" className="workbench-icon-button ml-auto flex items-center gap-1.5 rounded-md px-2 py-1 typography-meta text-muted-foreground hover:bg-interactive-hover hover:text-foreground"
+            onClick={() => setReadingFocus(null)} disabled={!readingFocus}>
+            <Icon name="layout-column" className="size-3.5" />{t(readingFocus ? 'workbench.ide.restoreLayout' : 'workbench.ide.columns')}
+          </button>
+        </nav> : null}
         <div ref={mainAreaRef} className="ide-workspace-row flex min-h-0 flex-1 overflow-hidden">
           {layout.activityVisible ? (
           <nav className="ide-activity flex w-11 shrink-0 flex-col items-center gap-1 py-2" aria-label={t('workbench.ide.title')}>
@@ -747,9 +838,14 @@ export const IdeWorkbenchShell: React.FC<Record<string, unknown>> = () => {
                           variant="ghost"
                           size="icon"
                           aria-label={t(item.ariaKey)}
-                          aria-pressed={layout.activity === item.id && layout.primaryVisible}
-                          className={cn(layout.activity === item.id && layout.primaryVisible && 'bg-[var(--interactive-selection)]')}
+                          aria-pressed={layout.activity === item.id && primaryDisplayed}
+                          className={cn(layout.activity === item.id && primaryDisplayed && 'bg-[var(--interactive-selection)]')}
                           onClick={() => {
+                            if (selectedPane !== null) {
+                              setReadingFocus(layout.activity === item.id && primaryDisplayed ? 'editor' : 'primary');
+                              patchLayout({ activity: item.id });
+                              return;
+                            }
                             if (layout.activity === item.id) {
                               patchLayout({ primaryVisible: !layout.primaryVisible });
                               return;
@@ -808,7 +904,8 @@ export const IdeWorkbenchShell: React.FC<Record<string, unknown>> = () => {
 
           <AnimatePresence initial={false}>
           {showPrimarySidebar ? (
-            <IdeSidebar key="primary" side="primary" weight={growWeights[0]} resizing={resizing} onResize={startResize('primary')}>
+            <IdeSidebar key="primary" side="primary" weight={selectedPane ? 1 : growWeights[0]} resizing={resizing} onResize={startResize('primary')}
+              onResizeKeyDown={resizeWithKeyboard('primary')} resizeLabel={t('sidebar.resize.leftPanelAria')} resizable={selectedPane === null}>
                 <WorkbenchReplacement
                   target={WORKBENCH_REPLACEMENT_TARGETS.primarySidebar}
                   fallback={(
@@ -823,7 +920,7 @@ export const IdeWorkbenchShell: React.FC<Record<string, unknown>> = () => {
                           } satisfies VarinWorkbenchPrimarySidebarViewsSlotProps}
                         />
                       ) : null}
-                      {layout.activity === 'explorer' ? <SidebarFilesTree openTarget="editor" /> : null}
+                      {layout.activity === 'explorer' ? <SidebarFilesTree openTarget="editor" onEditorOpen={() => setReadingFocus(current => current ? 'editor' : null)} /> : null}
                       {layout.activity === 'search' ? (
                         <IdeSearchPanel
                           key={searchDirectoryKey}
@@ -859,9 +956,11 @@ export const IdeWorkbenchShell: React.FC<Record<string, unknown>> = () => {
           ) : null}
           </AnimatePresence>
 
-          <div
+          <motion.div
             className="ide-editor-canvas relative flex min-h-0 min-w-0 flex-col overflow-hidden"
-            style={{ flex: `${growWeights[1] || (!showPrimarySidebar && !layout.secondaryVisible ? 1 : 0)} 1 0%` }}
+            initial={false} animate={{ flexGrow: editorDisplayed ? (selectedPane ? 1 : growWeights[1]) : 0, opacity: editorDisplayed ? 1 : 0 }}
+            transition={{ duration: resizing || reducedMotion ? 0 : 0.28, ease: [0.22, 1, 0.36, 1] }}
+            style={{ flexBasis: 0, flexShrink: 1 }} inert={!editorDisplayed} aria-hidden={!editorDisplayed}
           >
             <main className="relative min-h-0 flex-1 overflow-hidden">
               <WorkbenchReplacement
@@ -897,12 +996,19 @@ export const IdeWorkbenchShell: React.FC<Record<string, unknown>> = () => {
             {workspace.status === 'ready' && workspaceId && directory ? (
               <WorkbenchPanelArea workspaceId={workspaceId} directory={directory} replaceable />
             ) : null}
-          </div>
+          </motion.div>
 
           <AnimatePresence initial={false}>
-          {layout.secondaryVisible ? (
-            <IdeSidebar key="secondary" side="secondary" weight={growWeights[2]} resizing={resizing} onResize={startResize('secondary')}>
+          {secondaryDisplayed ? (
+            <IdeSidebar key="secondary" side="secondary" weight={selectedPane ? 1 : growWeights[2]} resizing={resizing} onResize={startResize('secondary')}
+              onResizeKeyDown={resizeWithKeyboard('secondary')} resizeLabel={t('sidebar.resize.rightPanelAria')} resizable={selectedPane === null}>
                 <IdeSessionHeader>
+                  <button type="button" className="workbench-icon-button flex size-7 shrink-0 items-center justify-center rounded-md text-muted-foreground hover:bg-interactive-hover hover:text-foreground"
+                    aria-label={t(readingFocus === 'secondary' ? 'workbench.ide.restoreLayout' : 'workbench.ide.focusAgent')}
+                    title={t(readingFocus === 'secondary' ? 'workbench.ide.restoreLayout' : 'workbench.ide.focusAgent')}
+                    onClick={() => setReadingFocus(current => current === 'secondary' ? null : 'secondary')}>
+                    <Icon name={readingFocus === 'secondary' ? 'fullscreen-exit' : 'fullscreen'} className="size-3.5" />
+                  </button>
             <Tooltip>
               <TooltipTrigger asChild>
                 <Button
@@ -991,6 +1097,7 @@ export const IdeWorkbenchShell: React.FC<Record<string, unknown>> = () => {
               <>
                 <span className="truncate">{workspaceLabel}</span>
                 <span className="truncate">{branchLabel || t('workbench.ide.status.noBranch')}</span>
+                <IdeEditorStatus workspaceId={workspaceId} />
                 {workspaceId ? (
                   <Button
                     type="button"

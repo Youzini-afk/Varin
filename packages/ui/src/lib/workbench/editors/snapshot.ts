@@ -75,6 +75,23 @@ const migrateLegacyViewState = (value: Record<string, unknown>): EditorProviderV
 const normalizeViewState = (value: unknown, snapshotVersion: number): EditorViewState => {
   if (!isObject(value)) return {};
   const viewState: EditorViewState = {};
+  const previewScrollTop = nonNegativeNumber(value.previewScrollTop);
+  if (previewScrollTop !== undefined) viewState.previewScrollTop = previewScrollTop;
+  if (typeof value.browserTabId === 'string') viewState.browserTabId = value.browserTabId;
+  if (typeof value.browserUrl === 'string') viewState.browserUrl = value.browserUrl;
+  if (isObject(value.browserPosition) && typeof value.browserPosition.x === 'number' && Number.isFinite(value.browserPosition.x)
+    && typeof value.browserPosition.y === 'number' && Number.isFinite(value.browserPosition.y)) {
+    viewState.browserPosition = { x: value.browserPosition.x, y: value.browserPosition.y };
+  }
+  if (value.diffLayout === 'auto' || value.diffLayout === 'inline' || value.diffLayout === 'split') viewState.diffLayout = value.diffLayout;
+  const info = value.editorInfo;
+  if (isObject(info) && Number.isInteger(info.line) && Number(info.line) > 0
+    && Number.isInteger(info.column) && Number(info.column) > 0 && typeof info.languageId === 'string'
+    && Number.isInteger(info.tabSize) && Number(info.tabSize) > 0 && typeof info.insertSpaces === 'boolean') {
+    viewState.editorInfo = { line: Number(info.line), column: Number(info.column), languageId: info.languageId,
+      ...(typeof info.languageName === 'string' ? { languageName: info.languageName } : {}),
+      tabSize: Number(info.tabSize), insertSpaces: info.insertSpaces };
+  }
   if (value.diffScope === 'working' || value.diffScope === 'staged') viewState.diffScope = value.diffScope;
   if (typeof value.diffRepositoryResourceId === 'string') {
     const repositoryResourceId = value.diffRepositoryResourceId.replace(/\\/g, '/').replace(/^\/+|\/+$/g, '');

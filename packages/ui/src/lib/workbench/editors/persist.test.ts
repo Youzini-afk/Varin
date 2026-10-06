@@ -1,4 +1,4 @@
-import { afterEach, describe, expect, test } from 'vitest';
+import { afterEach, describe, expect, test, vi } from 'vitest';
 import {
   editorWorkbenchPersistKey,
   flushPersistedEditorWorkbench,
@@ -12,6 +12,8 @@ import {
   peekEditorWorkbench,
   resetEditorWorkbenchForRuntimeSwitch,
   resetEditorWorkbenchForTests,
+  subscribeEditorWorkbench,
+  subscribeEditorViewState,
 } from './session';
 import { restoreEditorWorkbenchSnapshot } from './snapshot';
 import { activeEditorTab } from './groups';
@@ -59,7 +61,13 @@ describe('editor workbench persist', () => {
     const before = store.get(editorWorkbenchPersistKey(workspaceId));
     const tab = activeEditorTab(ensureEditorWorkbench(workspaceId));
     if (!tab) throw new Error('expected tab');
+    const layoutUpdated = vi.fn();
+    const viewUpdated = vi.fn();
+    const disposeLayout = subscribeEditorWorkbench(layoutUpdated);
+    const disposeView = subscribeEditorViewState(viewUpdated);
     patchEditorViewState(workspaceId, tab.viewId, createLegacyTextEditorViewState({ cursorLine: 12, cursorColumn: 4 }));
+    expect(viewUpdated).toHaveBeenCalledTimes(1);
+    expect(layoutUpdated).not.toHaveBeenCalled();
     expect(store.get(editorWorkbenchPersistKey(workspaceId))).toBe(before);
     flushPersistedEditorWorkbench(workspaceId);
     const after = store.get(editorWorkbenchPersistKey(workspaceId));
@@ -70,6 +78,14 @@ describe('editor workbench persist', () => {
       const active = activeEditorTab(restored.state);
       expect(active ? textEditorSummaryFromViewState(active.viewState)?.cursor.line : undefined).toBe(12);
     }
+    patchEditorViewState(workspaceId, tab.viewId, { diffLayout: 'inline' }, { notify: true });
+    expect(layoutUpdated).toHaveBeenCalledTimes(1);
+    flushPersistedEditorWorkbench(workspaceId);
+    const preferredLayout = restoreEditorWorkbenchSnapshot(store.get(editorWorkbenchPersistKey(workspaceId)), workspaceId);
+    if (preferredLayout.status !== 'ready') throw new Error('expected saved editor preference');
+    expect(activeEditorTab(preferredLayout.state)?.viewState.diffLayout).toBe('inline');
+    disposeLayout();
+    disposeView();
   });
 
   test('failure restore keeps last-good and does not write empty over the failed snapshot', () => {

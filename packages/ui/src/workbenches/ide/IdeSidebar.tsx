@@ -1,14 +1,17 @@
-import { useRef, useState, type ReactNode, type MouseEventHandler } from 'react';
+import { useRef, useState, type ReactNode, type MouseEventHandler, type KeyboardEventHandler } from 'react';
 import { motion, useIsPresent } from 'motion/react';
 import { usePrefersReducedMotion } from '@/hooks/usePrefersReducedMotion';
 
 /** Animates the existing layout weight; content unmounts only after the closing transition. */
-export function IdeSidebar({ children, side, weight, resizing, onResize }: {
+export function IdeSidebar({ children, side, weight, resizing, onResize, onResizeKeyDown, resizeLabel, resizable = true }: {
   children: ReactNode;
   side: 'primary' | 'secondary';
   weight: number;
   resizing: boolean;
   onResize: MouseEventHandler<HTMLDivElement>;
+  onResizeKeyDown?: KeyboardEventHandler<HTMLDivElement>;
+  resizeLabel?: string;
+  resizable?: boolean;
 }) {
   const present = useIsPresent();
   const reducedMotion = usePrefersReducedMotion();
@@ -21,7 +24,8 @@ export function IdeSidebar({ children, side, weight, resizing, onResize }: {
     exit={{ flexGrow: 0, opacity: 0, paddingLeft: 0 }}
     transition={{ duration: reducedMotion || resizing ? 0 : 0.28, ease: [0.22, 1, 0.36, 1] }}
     onAnimationStart={() => {
-      if (present || reducedMotion || resizing) return;
+      if (present) { setHeldWidth(null); return; }
+      if (reducedMotion || resizing) return;
       const width = contentRef.current?.getBoundingClientRect().width;
       // Clip the departing content instead of wrapping its text through a zero-width column.
       if (width) setHeldWidth(current => current ?? width);
@@ -33,8 +37,8 @@ export function IdeSidebar({ children, side, weight, resizing, onResize }: {
       style={{ width: reducedMotion || resizing ? undefined : heldWidth ?? undefined }}>
       {children}
     </div>
-    <div role="separator" aria-orientation="vertical"
+    {resizable ? <div role="separator" aria-orientation="vertical" tabIndex={0} aria-label={resizeLabel}
       className={`ide-sidebar-resizer absolute inset-y-0 z-20 w-1 cursor-col-resize ${side === 'primary' ? 'right-0' : 'left-0'}`}
-      onMouseDown={onResize} />
+      onMouseDown={onResize} onKeyDown={onResizeKeyDown} /> : null}
   </motion.aside>;
 }

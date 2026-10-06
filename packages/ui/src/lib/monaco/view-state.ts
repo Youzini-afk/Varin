@@ -20,8 +20,10 @@ const jsonClone = (value: unknown): JsonValue | undefined => {
 
 export const captureMonacoEditorViewState = (
   editorInstance: editor.IStandaloneCodeEditor,
+  languageName?: string,
 ): EditorViewState => {
   const position = editorInstance.getPosition();
+  const model = editorInstance.getModel();
   const selection = editorInstance.getSelection();
   const summary: JsonObject = {
     cursor: {
@@ -39,6 +41,13 @@ export const captureMonacoEditorViewState = (
   const state = jsonClone(editorInstance.saveViewState());
   if (state !== undefined) value.state = state;
   return {
+    ...(position && model ? { editorInfo: {
+      line: position.lineNumber, column: position.column,
+      languageId: model.getLanguageId(),
+      ...(languageName ? { languageName } : {}),
+      tabSize: model.getOptions().tabSize,
+      insertSpaces: model.getOptions().insertSpaces,
+    } } : {}),
     providerState: {
       providerId: TEXT_EDITOR_VIEW_STATE_PROVIDER_ID,
       schemaVersion: MONACO_TEXT_EDITOR_VIEW_STATE_SCHEMA_VERSION,

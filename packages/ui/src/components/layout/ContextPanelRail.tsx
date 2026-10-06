@@ -22,6 +22,7 @@ import { useEffectiveDirectory } from '@/hooks/useEffectiveDirectory';
 import { useI18n } from '@/lib/i18n';
 import {
   sortContextSurfaces,
+  availableContextSurfaces,
   getContextRailMode,
   type ContextSurfaceDescriptor,
 } from '@/lib/surfaces/registry';
@@ -148,15 +149,7 @@ export const ContextPanelRail: React.FC = () => {
   // Content-driven surfaces are hidden (not disabled) until content exists;
   // an existing tab keeps them visible even if the content source went away.
   const surfaces = React.useMemo(() => {
-    return sortContextSurfaces(contextRailOrder).filter((surface) => {
-      if (surface.id === 'plan' && !planModeEnabled) {
-        return false;
-      }
-      if (surface.availability === 'has-content') {
-        return tabs.some((tab) => tab.mode === surface.mode);
-      }
-      return true;
-    });
+    return availableContextSurfaces(contextRailOrder, tabs, planModeEnabled);
   }, [contextRailOrder, planModeEnabled, tabs]);
 
   const handleDragEnd = React.useCallback((event: DragEndEvent) => {

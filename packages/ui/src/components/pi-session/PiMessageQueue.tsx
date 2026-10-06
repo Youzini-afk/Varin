@@ -93,8 +93,8 @@ export function PiMessageQueue({ messages, working, onUpdate, onClear }: Props) 
     <AnimatePresence initial={false}>
     {messages.length > 0 || editing || error ? <motion.section
       key="queue" initial={{ opacity: 0, height: 0 }} animate={{ opacity: 1, height: 'auto' }}
-      exit={{ opacity: 0, height: 0 }} transition={{ duration: reducedMotion ? 0 : 0.28, ease: [0.22, 1, 0.36, 1] }} className="mb-2 overflow-hidden rounded-xl border border-border/60 bg-muted/15" data-pi-runtime-queue="true" aria-busy={pending} aria-label={t('chat.queuedMessage.title')}>
-      <div className="flex items-center justify-between gap-3 border-b border-border/50 px-3 py-1.5">
+      exit={{ opacity: 0, height: 0 }} transition={{ duration: reducedMotion ? 0 : 0.28, ease: [0.22, 1, 0.36, 1] }} className="pi-composer-queue relative mx-2 -mb-px overflow-hidden rounded-t-xl border border-border/60 bg-background" data-pi-runtime-queue="true" aria-busy={pending} aria-label={t('chat.queuedMessage.title')}>
+      <div className="flex items-center justify-between gap-3 px-3 py-1.5">
         <span className="typography-meta font-medium text-foreground">{t('chat.queuedMessage.title')} · {messages.length}</span>
         <button type="button" className={actionClass} disabled={pending || messages.length === 0} onClick={() => void run(onClear)}>{t('chat.queuedMessage.clearAll')}</button>
       </div>
@@ -103,13 +103,13 @@ export function PiMessageQueue({ messages, working, onUpdate, onClear }: Props) 
         {messages.map((message) => (
           <QueueRow key={message.id} id={message.id} editor={editing?.id === message.id ? editor : null}>
             <div className="flex flex-wrap items-start gap-x-2 gap-y-1 px-3 py-2">
-              <div className="min-w-0 flex-1 basis-40">
-                <div className="mb-0.5 flex items-center gap-2 typography-micro text-muted-foreground">
-                  <Icon name={message.mode === 'steer' ? 'arrow-up' : 'time'} className="size-3" />
-                  <span>{t(message.mode === 'steer' ? 'chat.queuedMessage.steering' : 'chat.queuedMessage.waiting')}</span>
-                  {message.imageCount > 0 && <span>{t('chat.queuedMessage.images', { count: message.imageCount })}</span>}
-                </div>
-                {editing?.id !== message.id && <p className="line-clamp-3 whitespace-pre-wrap break-words typography-meta text-foreground">{message.text || t('chat.queuedMessage.empty')}</p>}
+              <div className="flex min-w-0 flex-1 items-center gap-2">
+                <span title={t(message.mode === 'steer' ? 'chat.queuedMessage.steering' : 'chat.queuedMessage.waiting')}>
+                  <Icon name={message.mode === 'steer' ? 'arrow-up' : 'time'} className="size-3 shrink-0 text-muted-foreground" />
+                  <span className="sr-only">{t(message.mode === 'steer' ? 'chat.queuedMessage.steering' : 'chat.queuedMessage.waiting')}</span>
+                </span>
+                {editing?.id !== message.id && <p title={message.text} className="line-clamp-1 min-w-0 flex-1 break-words typography-meta text-foreground">{message.text || t('chat.queuedMessage.empty')}</p>}
+                {message.imageCount > 0 && <span className="shrink-0 typography-micro text-muted-foreground">{t('chat.queuedMessage.images', { count: message.imageCount })}</span>}
               </div>
               <div className="ml-auto flex items-center gap-0.5">
                 {(message.mode === 'followUp' || !working) && <button type="button" className={actionClass} disabled={pending || editing !== null} title={t('chat.queuedMessage.sendHint')} onClick={() => void update(message, 'steer')}><Icon name="arrow-up" className="size-3.5" />{t('chat.queuedMessage.sendNow')}</button>}

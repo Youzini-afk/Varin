@@ -6,6 +6,10 @@ import { activeEditorTab } from '@/lib/workbench/editors/groups';
 import { openWorkbenchEditor, patchEditorViewState, peekEditorWorkbench } from '@/lib/workbench/editors/session';
 import { createLegacyTextEditorViewState } from '@/lib/workbench/editors/view-state-core';
 import type { EditorSessionLink } from './types';
+import { getVarinExtensionCatalogState } from '@/lib/extensions/catalog-store';
+import { resolveVarinWorkbenchLayout, VARIN_WORKBENCH_IDE_PROFILE_ID } from '@varin/extension-contract';
+import { varinSurfaceRuntime } from '@/lib/extensions/surface-runtime';
+import { useUIStore } from '@/stores/useUIStore';
 
 const byResource = new Map<string, EditorSessionLink>();
 
@@ -38,7 +42,19 @@ export const revealResourceInEditor = (input: {
     rememberEditorSessionLink(link);
   }
   const path = workspacePathFromResourceId(input.workspaceRoot, input.resourceId);
-  const openedInMain = openFileInMainEditor(input.workspaceRoot, path, {
+  const workbenchLayout = getVarinExtensionCatalogState().snapshot?.workbench;
+  const inAgent = workbenchLayout?.authoritative && resolveVarinWorkbenchLayout(workbenchLayout.document, {
+    surface: varinSurfaceRuntime.surface, userId: 'default',
+  }).profileId !== VARIN_WORKBENCH_IDE_PROFILE_ID;
+  if (inAgent) {
+    const opened = openWorkbenchEditor(input.workspaceId, input.resourceId, undefined, { preview: true });
+    const tab = activeEditorTab(opened);
+    useUIStore.getState().openContextPanelTab(input.workspaceRoot, {
+      mode: 'file', targetPath: path, targetDirectory: input.workspaceRoot,
+      ...(tab ? { editorViewId: tab.viewId } : {}),
+    });
+  }
+  const openedInMain = inAgent || openFileInMainEditor(input.workspaceRoot, path, {
     ...(typeof input.line === 'number' ? { line: input.line } : {}),
     ...(typeof input.column === 'number' ? { column: input.column } : {}),
     focus: true,

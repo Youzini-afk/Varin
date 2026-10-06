@@ -15,7 +15,7 @@ import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigge
 import { useI18n } from '@/lib/i18n';
 import { isIMECompositionEvent } from '@/lib/ime';
 import { cn } from '@/lib/utils';
-import type { FollowUpBehavior } from '@/stores/messageQueueStore';
+import { useMessageQueueStore, type FollowUpBehavior } from '@/stores/messageQueueStore';
 import { useUIStore } from '@/stores/useUIStore';
 import { usePiSessionStore } from '@/stores/usePiSessionStore';
 import { projectPiSessionActivity } from '@/lib/pi-runtime/sessionActivity';
@@ -243,6 +243,7 @@ export const PiComposer: React.FC<PiComposerProps> = ({
   const isExpandedInput = useUIStore((state) => state.isExpandedInput);
   const toggleExpandedInput = useUIStore((state) => state.toggleExpandedInput);
   const busy = snapshot ? projectPiSessionActivity(snapshot).isWorking : false;
+  const setFollowUpBehavior = useMessageQueueStore(state => state.setFollowUpBehavior);
   const inlineDraftKey = snapshot && sessionId
     ? getInlineCommentDraftKey(getRuntimeKey(), cwd, sessionId)
     : null;
@@ -266,7 +267,7 @@ export const PiComposer: React.FC<PiComposerProps> = ({
     knownSlashNames: new Set(varinCommands.map((command) => command.name.toLowerCase())),
   }), [confirmedMentions, knownAgentNames, varinCommands]);
   const modelControls = (
-    <div className="flex min-w-0 items-center justify-end gap-2.5">
+    <div className="pi-composer-configuration flex min-w-0 flex-wrap items-center justify-end gap-x-2 gap-y-0.5">
       <PiComposerModelControls
         active={active}
         allowInherit={allowModelInheritance}
@@ -559,8 +560,25 @@ export const PiComposer: React.FC<PiComposerProps> = ({
           />
         )}
 
+        <div
+          className={cn(
+            'relative flex flex-col overflow-visible rounded-xl border border-border bg-muted transition-[border-color,box-shadow] duration-150 focus-within:border-[var(--interactive-border-focus)] focus-within:ring-1 focus-within:ring-[var(--interactive-focus-ring)]',
+            sending && 'opacity-80',
+          )}
+          data-pi-composer-input-frame="true"
+          data-working={busy && active}
+          onDragOver={(event) => {
+            if ([...event.dataTransfer.items].some((item) => item.kind === 'file')) event.preventDefault();
+          }}
+          onDrop={(event) => {
+            const files = [...event.dataTransfer.files];
+            if (files.length === 0) return;
+            event.preventDefault();
+            void addFiles(files);
+          }}
+        >
         {images.length > 0 && (
-          <div className="mb-2 flex flex-wrap gap-2">
+          <div className="flex flex-wrap gap-2 px-3 pt-3">
             {images.map((image, index) => (
               <div key={`${image.mimeType}:${index}`} className="pi-composer-attachment group/image relative overflow-hidden rounded-lg border border-border bg-muted/20">
                 <img src={attachmentUrl(image)} alt={image.mimeType} className="size-20 object-cover" />
@@ -577,26 +595,11 @@ export const PiComposer: React.FC<PiComposerProps> = ({
           </div>
         )}
 
-        {snapshot ? <EditorContextAttachmentChips sessionId={snapshot.sessionId} /> : null}
-        {snapshot ? <PiActiveEditorContextSuggestion snapshot={snapshot} /> : null}
+        <div className="pi-composer-context">
+          {snapshot ? <EditorContextAttachmentChips sessionId={snapshot.sessionId} /> : null}
+          {snapshot ? <PiActiveEditorContextSuggestion snapshot={snapshot} /> : null}
+        </div>
 
-        <div
-          className={cn(
-            'relative flex flex-col overflow-visible rounded-xl border border-border bg-[var(--surface-elevated)] transition-[border-color,box-shadow] duration-150 focus-within:border-[var(--interactive-border-focus)] focus-within:ring-1 focus-within:ring-[var(--interactive-focus-ring)]',
-            sending && 'opacity-80',
-          )}
-          data-pi-composer-input-frame="true"
-          data-working={busy && active}
-          onDragOver={(event) => {
-            if ([...event.dataTransfer.items].some((item) => item.kind === 'file')) event.preventDefault();
-          }}
-          onDrop={(event) => {
-            const files = [...event.dataTransfer.files];
-            if (files.length === 0) return;
-            event.preventDefault();
-            void addFiles(files);
-          }}
-        >
           {isMobile ? (
             <div className="flex min-w-0 items-center justify-end border-b border-border/40 px-2 py-1">
               {modelControls}
@@ -635,13 +638,19 @@ export const PiComposer: React.FC<PiComposerProps> = ({
             }}
             onKeyDown={handleEditorKeyDown}
             languageContext={languageContext}
-            placeholder={t('chat.chatInput.placeholder.chat')}
+            placeholder={t('chat.chatInput.placeholder.task')}
             className={cn(
               'min-h-[48px] w-full px-3 pb-1 pt-3 typography-markdown text-foreground md:typography-ui-label',
               isExpandedInput ? 'min-h-[40vh]' : 'max-h-[40vh]',
             )}
             maxLines={isExpandedInput ? 24 : 9}
           />
+
+          <div className="pi-composer-hints" data-empty={!draft.trim()}>
+            <p className="min-h-0 overflow-hidden px-3 typography-micro text-muted-foreground">
+              {t('chat.chatInput.placeholder.chat')}
+            </p>
+          </div>
 
           {autocomplete?.kind === 'command' ? (
             <CommandAutocomplete
@@ -724,16 +733,33 @@ export const PiComposer: React.FC<PiComposerProps> = ({
                   {t('chat.piComposer.attachedContext', { count: inlineDraftCount })}
                 </span>
               )}
-              {busy && (
-                <span className="truncate px-1 typography-micro text-muted-foreground">
-                  {followUpBehavior === 'queue'
-                    ? t('chat.piComposer.queueFollowUp')
-                    : t('chat.piComposer.steerCurrentRun')}
-                </span>
-              )}
             </div>
 
             {!isMobile ? <div className="pi-composer-models">{modelControls}</div> : null}
+            {busy ? <div className="pi-composer-send-mode">
+              <DropdownMenu modal={false}>
+                <DropdownMenuTrigger asChild>
+                  <button type="button" disabled={sending} title={t('settings.varin.visual.field.followUpBehaviorDescription')}
+                    className="flex min-w-0 items-center gap-1 rounded-md px-1.5 py-1 typography-micro text-muted-foreground hover:bg-interactive-hover hover:text-foreground disabled:opacity-40"
+                    aria-label={t('settings.chat.busySend')}>
+                    <Icon name={followUpBehavior === 'queue' ? 'time' : 'arrow-up'} className="size-3 shrink-0" />
+                    <span className="truncate">{t(followUpBehavior === 'queue' ? 'chat.piComposer.queueFollowUp' : 'chat.piComposer.steerCurrentRun')}</span>
+                    <Icon name="arrow-down-s" className="size-3 shrink-0" />
+                  </button>
+                </DropdownMenuTrigger>
+                <DropdownMenuContent side="top" align="end" className="w-64" portalToBody>
+                  {(['queue', 'steer'] as const).map(mode => <DropdownMenuItem key={mode}
+                    onSelect={() => setFollowUpBehavior(mode)} className="gap-2">
+                    <Icon name={mode === 'queue' ? 'time' : 'arrow-up'} className="size-3.5 shrink-0" />
+                    <span className="flex-1">{t(mode === 'queue' ? 'chat.piComposer.queueFollowUp' : 'chat.piComposer.steerCurrentRun')}</span>
+                    {mode === followUpBehavior ? <Icon name="check" className="size-3.5" /> : null}
+                  </DropdownMenuItem>)}
+                  <p className="border-t border-border/50 px-2 py-2 typography-micro text-muted-foreground">
+                    {t('settings.varin.visual.field.followUpBehaviorDescription')}
+                  </p>
+                </DropdownMenuContent>
+              </DropdownMenu>
+            </div> : null}
             <div className="pi-composer-actions">
               <WorkbenchContributionSlot
                 kind="composer-action"
@@ -781,7 +807,7 @@ export const PiComposer: React.FC<PiComposerProps> = ({
                     }}
                     disabled={composerActions.primary === 'stop' ? aborting : !canSend || sending}
                     className={cn(
-                      'flex size-8 items-center justify-center rounded-lg transition-colors',
+                      'flex size-8 items-center justify-center rounded-full transition-colors',
                       composerActions.primary === 'stop'
                         ? aborting
                           ? 'cursor-wait bg-primary/70 text-primary-foreground'

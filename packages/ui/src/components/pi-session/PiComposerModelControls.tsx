@@ -156,7 +156,7 @@ export const PiComposerModelControls: React.FC<PiComposerModelControlsProps> = (
             className={cn(
               'order-1 flex h-8 max-w-[140px] min-w-0 items-center gap-1.5 px-1 typography-meta transition-opacity hover:opacity-70',
               explicitThinking && selectedThinkingLevel !== 'off'
-                ? 'text-[var(--status-info)]'
+                ? 'text-foreground'
                 : 'text-muted-foreground',
               disabled && 'cursor-not-allowed opacity-60',
             )}
@@ -222,7 +222,7 @@ export const PiComposerModelControls: React.FC<PiComposerModelControlsProps> = (
               className={cn(
                 'order-1 flex h-8 max-w-[140px] min-w-0 items-center gap-1.5 px-1 typography-meta transition-opacity hover:opacity-70',
                 explicitThinking && selectedThinkingLevel !== 'off'
-                  ? 'text-[var(--status-info)]'
+                  ? 'text-foreground'
                   : 'text-muted-foreground',
                 disabled && 'cursor-not-allowed opacity-60',
               )}

@@ -14,7 +14,7 @@ export const HarnessOverviewSection: React.FC<{
 }> = ({ title, icon, status, open, onOpenChange, attention = false, children }) => {
   return (
     <details
-      className="group border-b border-border/45 last:border-b-0"
+      className="workbench-disclosure group border-b border-border/45 last:border-b-0"
       open={open}
       onToggle={(event) => {
         if (event.target === event.currentTarget && event.currentTarget.open !== open) {

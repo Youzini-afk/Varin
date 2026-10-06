@@ -56,7 +56,7 @@ export const CONTEXT_SURFACES: readonly ContextSurfaceDescriptor[] = [
   {
     id: 'context',
     descriptionKey: 'contextRail.surface.context.description',
-    defaultWidthFraction: 0.45,
+    defaultWidthFraction: 0.32,
     mode: 'context',
     icon: 'donut-chart-fill',
     labelKey: 'contextPanel.mode.context',
@@ -139,7 +139,7 @@ export const CONTEXT_SURFACES: readonly ContextSurfaceDescriptor[] = [
   {
     id: 'plan',
     descriptionKey: 'contextRail.surface.plan.description',
-    defaultWidthFraction: 0.45,
+    defaultWidthFraction: 0.32,
     mode: 'plan',
     icon: 'file-text',
     labelKey: 'contextPanel.mode.plan',
@@ -194,6 +194,13 @@ export const getContextRailMode = (mode: ContextPanelMode): ContextPanelMode => 
 export const getContextSurfaceWidthFraction = (mode: ContextPanelMode): number => {
   return FRACTION_BY_MODE.get(mode) ?? 1 / 2;
 };
+
+export const availableContextSurfaces = (
+  railOrder: readonly string[], tabs: readonly { mode: ContextPanelMode }[], planModeEnabled: boolean,
+): ContextSurfaceDescriptor[] => sortContextSurfaces(railOrder).filter(surface => (
+  (surface.id !== 'plan' || planModeEnabled)
+  && (surface.availability !== 'has-content' || tabs.some(tab => tab.mode === surface.mode))
+));
 
 const isContextSurfaceId = (value: unknown): value is ContextSurfaceId => {
   return typeof value === 'string' && SURFACE_BY_ID.has(value as ContextSurfaceId);

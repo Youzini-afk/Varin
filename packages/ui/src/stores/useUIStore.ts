@@ -39,6 +39,7 @@ function normalizeFileEditorKeymap(value: unknown): FileEditorKeymap {
 
 type ContextPanelTab = {
   id: string;
+  editorViewId?: string;
   mode: ContextPanelMode;
   targetPath: string | null;
   targetDirectory: string | null;
@@ -53,6 +54,7 @@ type ContextPanelTab = {
 
 type ContextPanelTabDescriptor = {
   mode: ContextPanelMode;
+  editorViewId?: string;
   targetPath?: string | null;
   targetDirectory?: string | null;
   dedupeKey?: string | null;
@@ -98,7 +100,7 @@ const EMPTY_NOTIFICATION_TEMPLATES = {
 } as const;
 
 const CONTEXT_PANEL_DEFAULT_WIDTH = 380;
-const CONTEXT_PANEL_MIN_WIDTH = 380;
+const CONTEXT_PANEL_MIN_WIDTH = 1;
 const CONTEXT_PANEL_MAX_WIDTH = 1400;
 const CONTEXT_PANEL_MAX_TABS = 12;
 const CONTEXT_PANEL_MAX_LABEL_LENGTH = 120;
@@ -217,6 +219,7 @@ const createContextPanelTab = (descriptor: ContextPanelTabDescriptor): ContextPa
   return {
     id: buildContextPanelTabID(descriptor.mode, dedupeKey),
     mode: descriptor.mode,
+    ...(descriptor.editorViewId ? { editorViewId: descriptor.editorViewId } : {}),
     targetPath: normalizedTargetPath,
     targetDirectory: normalizeDirectoryPath(descriptor.targetDirectory?.trim() ?? '') || null,
     dedupeKey,
@@ -260,6 +263,7 @@ const sanitizeContextPanelTabs = (tabs: unknown): ContextPanelTab[] => {
 
     const candidate = entry as {
       mode?: unknown;
+      editorViewId?: unknown;
       targetPath?: unknown;
       targetDirectory?: unknown;
       dedupeKey?: unknown;
@@ -290,6 +294,7 @@ const sanitizeContextPanelTabs = (tabs: unknown): ContextPanelTab[] => {
     result.push({
       id,
       mode: candidate.mode,
+      ...(typeof candidate.editorViewId === 'string' && candidate.editorViewId ? { editorViewId: candidate.editorViewId } : {}),
       targetPath,
       dedupeKey,
       targetDirectory: normalizeDirectoryPath(typeof candidate.targetDirectory === 'string' ? candidate.targetDirectory.trim() : '') || null,
@@ -358,6 +363,7 @@ const upsertContextPanelTab = (
           ...tab,
           mode: nextTab.mode,
           targetPath: nextTab.targetPath || tab.targetPath,
+          ...(nextTab.editorViewId ? { editorViewId: nextTab.editorViewId } : {}),
           targetDirectory: nextTab.targetDirectory,
           dedupeKey: nextTab.dedupeKey,
           label: nextTab.label,

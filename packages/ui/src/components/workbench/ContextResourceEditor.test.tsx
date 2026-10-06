@@ -3,10 +3,13 @@ import { createRoot, type Root } from 'react-dom/client';
 import { parseHTML } from 'linkedom';
 import { afterEach, beforeEach, expect, it, vi } from 'vitest';
 import { ContextResourceEditor } from './ContextResourceEditor';
+import { openWorkbenchEditor, patchEditorViewState, resetEditorWorkbenchForTests } from '@/lib/workbench/editors/session';
+import { activeEditorTab } from '@/lib/workbench/editors/groups';
 
 const mocks = vi.hoisted(() => ({ documents: { resolveWorkspace: vi.fn() }, editor: vi.fn() }));
 vi.mock('@/hooks/useRuntimeAPIs', () => ({ useRuntimeAPIs: () => ({ documents: mocks.documents }) }));
-vi.mock('@varin/application-client', () => ({
+vi.mock('@varin/application-client', async (importOriginal) => ({
+  ...await importOriginal<typeof import('@varin/application-client')>(),
   getRuntimeEndpointGeneration: () => 1,
   subscribeRuntimeEndpointChanged: () => () => {},
 }));
@@ -19,6 +22,7 @@ vi.mock('./ResourceEditorHost', () => ({ ResourceEditorHost: (props: { workspace
 let root: Root;
 let container: HTMLElement;
 beforeEach(() => {
+  resetEditorWorkbenchForTests();
   const dom = parseHTML('<!doctype html><html><body></body></html>');
   vi.stubGlobal('window', dom.window);
   vi.stubGlobal('document', dom.document);
@@ -31,6 +35,18 @@ afterEach(async () => {
   await act(async () => root.unmount());
   vi.unstubAllGlobals();
   vi.resetAllMocks();
+  resetEditorWorkbenchForTests();
+});
+
+it('opens the same editor view in the adjacent surface with its saved location and preview mode', async () => {
+  mocks.documents.resolveWorkspace.mockResolvedValue({ workspaceId: 'shared-workspace' });
+  const workbench = openWorkbenchEditor('shared-workspace', 'paper.md');
+  const tab = activeEditorTab(workbench)!;
+  patchEditorViewState('shared-workspace', tab.viewId, { previewMode: 'edit', diffLayout: 'inline' });
+  await act(async () => root.render(<ContextResourceEditor filePath="/selected/paper.md" workspaceRoot="/selected" viewId="adjacent" editorViewId={tab.viewId} />));
+  expect(mocks.editor).toHaveBeenLastCalledWith(expect.objectContaining({
+    workspaceId: 'shared-workspace', tab: expect.objectContaining({ viewId: tab.viewId, viewState: expect.objectContaining({ previewMode: 'edit', diffLayout: 'inline' }) }),
+  }));
 });
 
 it('resolves the file repository through DocumentsAPI and ignores a late previous repository', async () => {
