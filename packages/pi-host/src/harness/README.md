@@ -47,6 +47,17 @@ and the conversation UI. Its default identity includes the session, history leaf
 `submissionId` retries retain the original selection. Full integration advances the acknowledged source
 baseline, so later changes and reversions are distinct from recipient edits. Disabling a tool removes
 its team-prompt guidance.
+
+`send` exchanges information, requests handling, or replies to a received message.
+`replyTo` alone routes to the actual sender; ordinary messages can be replied to
+without requiring acknowledgement. Writing an answer only in the recipient's
+conversation does not send it back. `wait` on a request is optional; omitting it
+lets the caller continue other work. Reply waits persist their original message
+and deadline in the Host and are interrupted by addressed new input through the
+same bridge as dependency waits. Default message identities include session,
+history leaf and tool call; failed results expose that identity for safe retries.
+Native thread notifications retain the message ID for the UI's exchange card.
+
 Thread tools are constructed before the native session exists. Their live tool-selection callback is
 used during execution; SessionHost refreshes team presentation from actual active tools after binding.
 Team instructions distinguish Worker-only, retrieval-only, both and neither, using the current

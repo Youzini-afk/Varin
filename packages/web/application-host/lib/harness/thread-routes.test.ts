@@ -11,6 +11,8 @@ describe("harness thread routes", () => {
     registerHarnessThreadRoutes(app, {
       registry: {
         listThreads: vi.fn(async () => [thread]),
+        resolveSessionOwner: vi.fn(async () => null),
+        listTaskThreadSnapshots: vi.fn(async () => []),
         getActiveRun: vi.fn(async () => ({ id: "run-1", workerState: "running" })),
       } as never,
       runtime: {
@@ -23,7 +25,7 @@ describe("harness thread routes", () => {
     });
     const response = await request(app).get("/api/harness/sessions/session-1/threads").expect(200);
     expect(response.headers["cache-control"]).toBe("no-store");
-    expect(response.body).toEqual({
+    expect(response.body).toMatchObject({
       workspaceId: "workspace-1",
       parent: { kind: "session", id: "session-1" },
       includeArchived: false,
@@ -231,6 +233,8 @@ describe("harness thread routes", () => {
       registry: {
         listThreads,
         getActiveRun: vi.fn(async () => null),
+        resolveSessionOwner: vi.fn(async () => null),
+        listTaskThreadSnapshots: vi.fn(async () => []),
         setKeepWorktree: vi.fn(async () => ({ ...archived, keepWorktree: true })),
       } as never,
       runtime: {
@@ -414,7 +418,7 @@ describe("harness thread routes", () => {
     failing.use(express.json());
     registerHarnessThreadRoutes(failing, {
       registry: {} as never,
-      runtime: { scopeForSession: vi.fn() } as never,
+      runtime: { scopeForSession: vi.fn(async () => ({ scopeId: "workspace-1", parent: { kind: "session", id: "session-1" } })) } as never,
       sendToThread: vi.fn(async () => { throw new ThreadRuntimeError("not-found", "Thread not found: thread-9"); }),
     });
     await request(failing)

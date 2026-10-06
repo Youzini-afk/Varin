@@ -16,6 +16,9 @@ export const HarnessThreadStateProvider: React.FC<{ children: React.ReactNode; p
   const [rootThreads, setRootThreads] = React.useState<HarnessThreadSnapshot[]>([]);
   const rootsRef = React.useRef<HarnessThreadSnapshot[]>([]);
   const [branches, setBranches] = React.useState<HarnessThreadSnapshot[]>([]);
+  const [peers, setPeers] = React.useState<HarnessThreadSnapshot[]>([]);
+  const peersRef = React.useRef<HarnessThreadSnapshot[]>([]);
+  const commitPeers = React.useCallback((next: HarnessThreadSnapshot[]) => { peersRef.current = next; setPeers(next); }, []);
   const [loadError, setLoadError] = React.useState<string | null>(null);
   const [scope, setScope] = React.useState<{ parent: ThreadParent; workspaceId: string }>({ parent: { kind: 'session', id: parentSessionId }, workspaceId: workspaceId ?? '' });
   const scopeRef = React.useRef(scope);
@@ -28,11 +31,14 @@ export const HarnessThreadStateProvider: React.FC<{ children: React.ReactNode; p
   const commitRoots = React.useCallback((next: HarnessThreadSnapshot[]) => { rootsRef.current = next; setRootThreads(next); }, []);
   const merge = React.useCallback((snapshot: HarnessThreadSnapshot) => {
     eventRevision.current += 1;
+    commitPeers(mergeRoots(peersRef.current, [snapshot]));
     if (isAttachedRootPurpose(snapshot.thread.purpose)) { commitRoots(mergeRoots(rootsRef.current, [snapshot])); return; }
     if (snapshot.thread.parent.kind === 'thread' && rootsRef.current.some(root => root.thread.id === snapshot.thread.parent.id)) {
       setBranches(current => mergeHarnessThreadSnapshot(current, snapshot, { includeArchived: true }));
-    } else setThreads(current => mergeHarnessThreadSnapshot(current, snapshot, { includeArchived: true }));
-  }, [commitRoots]);
+    } else if (sameHarnessThreadParent(snapshot.thread.parent, scopeRef.current.parent)) {
+      setThreads(current => mergeHarnessThreadSnapshot(current, snapshot, { includeArchived: true }));
+    }
+  }, [commitRoots, commitPeers]);
 
   const reload = React.useCallback(async (signal?: AbortSignal) => {
     const revisionAtStart = eventRevision.current;
@@ -42,16 +48,17 @@ export const HarnessThreadStateProvider: React.FC<{ children: React.ReactNode; p
     setLoadError(null);
     commitScope({ workspaceId: projection.workspaceId, parent: projection.parent });
     commitRoots(eventRevision.current === revisionAtStart ? projection.rootThreads : mergeRoots(rootsRef.current, projection.rootThreads));
+    commitPeers(eventRevision.current === revisionAtStart ? projection.peers : mergeRoots(peersRef.current, projection.peers));
     setBranches(current => eventRevision.current === revisionAtStart ? projection.branches : projection.branches.reduce((list, snapshot) => mergeHarnessThreadSnapshot(list, snapshot, { includeArchived: true }), current));
     setThreads(current => {
       const ordinary = projection.threads.filter(({ thread }) => !isAttachedRootPurpose(thread.purpose));
       return eventRevision.current === revisionAtStart ? ordinary : ordinary.reduce((list, snapshot) => mergeHarnessThreadSnapshot(list, snapshot, { includeArchived: true }), current);
     });
-  }, [commitRoots, commitScope, parentSessionId]);
+  }, [commitRoots, commitPeers, commitScope, parentSessionId]);
 
   React.useEffect(() => {
     const controller = new AbortController();
-    eventRevision.current = 0; setThreads([]); commitRoots([]); setBranches([]); setLoadError(null);
+    eventRevision.current = 0; setThreads([]); commitRoots([]); commitPeers([]); setBranches([]); setLoadError(null);
     commitScope({ workspaceId: workspaceId ?? '', parent: { kind: 'session', id: parentSessionId } });
     const load = () => { void reload(controller.signal).catch(error => { if (!controller.signal.aborted) setLoadError(error instanceof Error ? error.message : String(error)); }); };
     load();
@@ -59,13 +66,14 @@ export const HarnessThreadStateProvider: React.FC<{ children: React.ReactNode; p
       if (event.type === 'stream-ready') { load(); return; }
       if (event.type !== 'harness-thread-changed' || event.workspaceId !== scopeRef.current.workspaceId
         || (!sameHarnessThreadParent(event.parent, scopeRef.current.parent)
-          && !(event.parent.kind === 'thread' && rootsRef.current.some(root => root.thread.id === event.parent.id)))) return;
+          && !(event.parent.kind === 'thread' && [...rootsRef.current, ...peersRef.current].some(root => root.thread.id === event.parent.id))
+          && !peersRef.current.some(peer => peer.thread.id === event.thread.id))) return;
       merge({ thread: event.thread, activeRun: event.activeRun });
     });
     return () => { controller.abort(); unsubscribe(); };
-  }, [commitRoots, commitScope, merge, parentSessionId, reload, workspaceId]);
+  }, [commitRoots, commitPeers, commitScope, merge, parentSessionId, reload, workspaceId]);
 
-  const value = React.useMemo<HarnessThreadStateValue>(() => ({ merge, parent: scope.parent, reload, threads, rootThreads, branches, loadError, workspaceId: scope.workspaceId }),
-    [merge, reload, scope.parent, scope.workspaceId, threads, rootThreads, branches, loadError]);
+  const value = React.useMemo<HarnessThreadStateValue>(() => ({ merge, parent: scope.parent, reload, threads, rootThreads, branches, peers, loadError, workspaceId: scope.workspaceId }),
+    [merge, reload, scope.parent, scope.workspaceId, threads, rootThreads, branches, peers, loadError]);
   return <HarnessThreadStateContext.Provider value={value}>{children}</HarnessThreadStateContext.Provider>;
 };

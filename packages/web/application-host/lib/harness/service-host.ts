@@ -435,7 +435,7 @@ export interface HarnessServiceHost {
     conflicts: { path: string; reason?: string }[];
     message?: string;
   }>) | null;
-  threadSendToSession: ((sessionId: string, message: string, meta: { from: string; requestId?: string; messageId?: string }) => Promise<void>) | null;
+  threadSendToSession: ((sessionId: string, message: string, meta: import("./thread-message.js").ThreadMessageDelivery) => Promise<void>) | null;
   threadTranscriptReader: ThreadTranscriptReader | null;
   threadHistoryEntries: ((sessionId: string) => Promise<import("@varin/protocol").SessionEntriesResult>) | null;
   registerSession(ctx: HarnessSessionContext): void;
@@ -630,7 +630,7 @@ export interface HarnessServiceHostOptions {
   threadApplyWorktreeDiff?: HarnessServiceHost["threadApplyWorktreeDiff"];
   threadUpdateBaseline?: HarnessServiceHost["threadUpdateBaseline"];
   requireThreadMergeJournal?: boolean;
-  threadSendToSession?: (sessionId: string, message: string, meta: { from: string; requestId?: string; messageId?: string }) => Promise<void>;
+  threadSendToSession?: (sessionId: string, message: string, meta: import("./thread-message.js").ThreadMessageDelivery) => Promise<void>;
   threadTranscriptReader?: ThreadTranscriptReader;
   threadHistoryEntries?: NonNullable<HarnessServiceHost["threadHistoryEntries"]>;
   /** D-314: dedicated compaction worker subprocess runner (broker wiring). */

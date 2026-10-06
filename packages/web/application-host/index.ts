@@ -102,7 +102,7 @@ import { createThreadWorktreeRuntime } from './lib/harness/thread-worktree.js';
 import { createThreadRuntime } from './lib/harness/thread-runtime.js';
 import { createResearchRootRuntime } from './lib/harness/research-root-runtime.js';
 import { createAgentRootRuntime } from './lib/harness/agent-root-runtime.js';
-import { createThreadWaitRuntime } from './lib/harness/thread-wait-runtime.js';
+import { correlatedReply, createThreadWaitRuntime } from './lib/harness/thread-wait-runtime.js';
 import { isAttachedRootPurpose } from '@varin/protocol';
 import { createBotRootRuntime } from './lib/harness/bot-root-runtime.js';
 import { createBotService } from './lib/bots/bot-service.js';
@@ -2746,7 +2746,18 @@ async function main(options: StartWebUiServerOptions = {}): Promise<WebUiServerC
     onError: error => console.error('[ThreadWait] Recovery failed:', errorMessage(error)),
     resume: async (scopeId, thread, wait) => {
       if (!await threadRegistry.canExecuteScope(scopeId)) throw new Error('The task execution scope is unavailable');
-      const text = `${wait.reason ?? 'The dependency wait ended'}. Resume the overall task: ${thread.brief}\nInspect relevant teammate work and continue implementation or integration.`;
+      const original = wait.replyTo ? thread.messages?.find(message => message.id === wait.replyTo && message.direction === 'out') : undefined;
+      const otherRequests = (thread.dependencyWaits ?? []).filter(other => other.replyTo && other.replyTo !== wait.replyTo).flatMap(other => {
+        const request = thread.messages?.find(message => message.id === other.replyTo && message.direction === 'out');
+        if (!request) return [];
+        const reply = correlatedReply(thread, request.id);
+        return [`Request ${request.id} to ${request.to.kind} ${request.to.id}:\n${request.text}\n`
+          + (reply ? `Reply already recorded:\n${reply.text}` : 'No reply was recorded at recovery. Reuse the original requestId if this answer is still needed.')];
+      });
+      const text = `${wait.reason ?? 'The dependency wait ended'}. Resume the overall task: ${thread.brief}\n`
+        + (original ? `Original request ${original.id} to ${original.to.kind} ${original.to.id}:\n${original.text}\nIf still waiting for its answer, reuse this requestId rather than sending it again.\n` : '')
+        + (otherRequests.length ? `Other reply waits from the interrupted execution:\n${otherRequests.join('\n\n')}\n` : '')
+        + 'Inspect relevant teammate work and continue implementation or integration.';
       if (isAttachedRootPurpose(thread.purpose)) {
         await piRuntimeBroker.openSession({ sessionId: wait.sessionId });
         const result = await piRuntimeBroker.requestForSession(wait.sessionId, 'agent.threadRequest', { sessionId: wait.sessionId, messageId: wait.id, text });

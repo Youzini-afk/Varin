@@ -191,10 +191,21 @@ export function registerHarnessThreadRoutes(
   const isRootAnchor = (thread: Pick<Thread, "purpose"> | null | undefined): boolean => (
     isAttachedRootPurpose(thread?.purpose)
   );
-  const scopeForThread = async (sessionId: string, threadId: string) => {
+  const scopeForThread = async (sessionId: string, threadId: string, messageOnly = false) => {
     const liveScope = await runtime.scopeForSession(sessionId);
     if (typeof registry.getThreadById !== "function") return liveScope;
-    const candidate = await registry.getThreadById(liveScope.scopeId, threadId);
+    const owner = await registry.resolveSessionOwner(sessionId);
+    const candidate = await registry.getThreadById(owner?.owningScopeId ?? liveScope.scopeId, threadId);
+    if (candidate && owner?.threadId === candidate.id) {
+      return { ...liveScope, scopeId: owner.owningScopeId, parent: candidate.parent };
+    }
+    if (messageOnly && candidate && owner) {
+      const family = await registry.listTaskThreadSnapshots(owner.owningScopeId, { kind: "thread", id: owner.threadId }, true);
+      if (family.some(entry => entry.thread.id === threadId)) {
+        return { ...liveScope, scopeId: owner.owningScopeId, parent: candidate.parent };
+      }
+      throw new HarnessServiceError("denied", `Thread is outside the session's task: ${threadId}`);
+    }
     if (candidate && !isRootAnchor(candidate)) {
       if (candidate.parent.kind === liveScope.parent.kind && candidate.parent.id === liveScope.parent.id) {
         return liveScope;
@@ -239,7 +250,10 @@ export function registerHarnessThreadRoutes(
       return;
     }
     try {
-      const { scopeId, parent } = await rootScopeForSession(sessionId);
+      const rootScope = await rootScopeForSession(sessionId);
+      const owner = await registry.resolveSessionOwner(sessionId);
+      const scopeId = owner?.owningScopeId ?? rootScope.scopeId;
+      const parent = owner?.owner === "spawned-child" ? { kind: "thread" as const, id: owner.threadId } : rootScope.parent;
       const includeArchived = request.query.archived === "1" || request.query.archived === "true";
       const threads = (await registry.listThreads(scopeId, parent))
         .filter((thread) => !isRootAnchor(thread))
@@ -252,6 +266,10 @@ export function registerHarnessThreadRoutes(
       const rootThreads = await Promise.all(roots.map(async thread => ({ thread, activeRun: await registry.getActiveRun(scopeId, thread.id) })));
       const branches = (await Promise.all(roots.map(root => registry.listThreadSnapshots(scopeId, { kind: "thread", id: root.id }))))
         .flat().filter(({ thread }) => includeArchived || thread.lifecycle !== "archived");
+      const visible = new Set([...projected, ...rootThreads, ...branches].map(entry => entry.thread.id));
+      const peers = (await registry.listTaskThreadSnapshots(owner?.owningScopeId ?? scopeId,
+        owner ? { kind: "thread", id: owner.threadId } : parent, true))
+        .filter(({ thread }) => (!thread.hidden || isRootAnchor(thread)) && !visible.has(thread.id));
       response.json({
         workspaceId: scopeId,
         parent,
@@ -259,6 +277,7 @@ export function registerHarnessThreadRoutes(
         threads: projected,
         rootThreads,
         branches,
+        peers,
       });
     } catch (error) {
       sendError(response, error, "Unable to read harness threads");
@@ -530,6 +549,7 @@ export function registerHarnessThreadRoutes(
       try {
         const cancellation = requestAbort(request, response);
         const parsed = parseSendBody(request.body);
+        const { scopeId, parent } = await scopeForThread(parentSessionId, threadId, true);
         const result = await sendToThread({
           parentSessionId,
           threadId,
@@ -537,7 +557,6 @@ export function registerHarnessThreadRoutes(
           signal: cancellation.signal,
         });
         cancellation.dispose();
-        const { scopeId, parent } = await scopeForThread(parentSessionId, threadId);
         response.json({
           workspaceId: scopeId,
           parent,

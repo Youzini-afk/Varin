@@ -65,7 +65,7 @@ export class HostServicesBridge {
   }
 
   wakeDependencyWaits(): void {
-    for (const [requestId, pending] of this.#pending) if (pending.method === "thread.wait") this.#emitCancel({ requestId, wake: true });
+    for (const [requestId, pending] of this.#pending) if (pending.method === "thread.wait" || pending.method === "thread.send") this.#emitCancel({ requestId, wake: true });
   }
 
   request<M extends HarnessMethod>(

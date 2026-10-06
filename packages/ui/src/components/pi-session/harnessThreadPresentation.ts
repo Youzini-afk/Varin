@@ -12,6 +12,7 @@ export interface HarnessThreadProjection {
   threads: HarnessThreadSnapshot[];
   rootThreads: HarnessThreadSnapshot[];
   branches: HarnessThreadSnapshot[];
+  peers: HarnessThreadSnapshot[];
 }
 
 export type HarnessThreadState =
@@ -36,7 +37,7 @@ export const projectHarnessThreadState = ({ thread, activeRun }: HarnessThreadSn
   if (thread.integration === 'merged') return 'merged';
   if (thread.integration === 'conflict') return 'conflict';
   if (thread.lifecycle === 'queued') return 'queued';
-  if (thread.attention === 'user' || thread.attention === 'permission' || thread.attention === 'thread') return 'waiting';
+  if (thread.attention === 'user' || thread.attention === 'permission' || thread.attention === 'thread' || activeRun?.executionYielded) return 'waiting';
   if (thread.attention === 'stalled') return 'stalled';
   if (thread.attention === 'looping') return 'looping';
   if (thread.lifecycle === 'settled') {
@@ -138,6 +139,8 @@ export const parseHarnessThreadProjection = (
   }
   const rootThreads = (Array.isArray(value.rootThreads) ? value.rootThreads : []).map(parseSnapshot);
   const branches = (Array.isArray(value.branches) ? value.branches : []).map(parseSnapshot);
+  if (!Array.isArray(value.peers)) throw new Error('Malformed task peer list');
+  const peers = value.peers.map(parseSnapshot);
   if (branches.some(({ thread }) => thread.workspaceId !== value.workspaceId || thread.parent.kind !== 'thread'
     || !rootThreads.some(root => thread.parent.id === root.thread.id))) throw new Error('Task branches do not belong to the reported roots');
   return {
@@ -145,6 +148,7 @@ export const parseHarnessThreadProjection = (
     parent: parseParent(value.parent),
     includeArchived,
     rootThreads,
+    peers,
     branches: branches.filter((item) => (
       !item.thread.hidden && (includeArchived || item.thread.lifecycle !== 'archived')
     )),
@@ -241,6 +245,7 @@ export const parseHarnessThreadMutation = (value: unknown): HarnessThreadProject
     threads: [snapshot],
     rootThreads: [],
     branches: [],
+    peers: [snapshot],
     ...snapshot,
   };
 };

@@ -9,6 +9,7 @@ export interface HarnessThreadStateValue {
   threads: HarnessThreadSnapshot[];
   rootThreads: HarnessThreadSnapshot[];
   branches: HarnessThreadSnapshot[];
+  peers?: HarnessThreadSnapshot[];
   loadError: string | null;
   workspaceId: string;
 }

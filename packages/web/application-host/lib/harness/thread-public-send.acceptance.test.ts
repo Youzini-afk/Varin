@@ -9,6 +9,7 @@ import { createThreadRegistry, type CreateThreadInput } from "./thread-registry.
 import { createThreadRuntime, type ThreadRuntimeOptions, type ThreadSessionAdapter } from "./thread-runtime.js";
 import { createUserThreadSendAdapter } from "./thread-ui-adapter.js";
 import { registerHarnessThreadRoutes } from "./thread-routes.js";
+import { createThreadSendService } from "./thread-services.js";
 import type { HarnessServiceHost } from "./service-host.js";
 
 const WORKSPACE = "workspace-1";
@@ -170,8 +171,8 @@ describe("harness thread public send chain", () => {
     rmSync(dataDir, { recursive: true, force: true });
   });
 
-  const start = async () => {
-    const input = createInput();
+  const start = async (overrides: Partial<CreateThreadInput> = {}) => {
+    const input = { ...createInput(), ...overrides };
     const thread = await registry.createThread(input);
     const run = await registry.startRun(WORKSPACE, thread.id);
     await runtime.spawn({ ...input, threadId: thread.id, runId: run.id });
@@ -226,6 +227,42 @@ describe("harness thread public send chain", () => {
     expect(sessionAdapter.notify).toHaveBeenCalledTimes(1);
     expect(sessionAdapter.prompt).toHaveBeenCalledTimes(1); // initial task only
     expect(sessionAdapter.send).not.toHaveBeenCalled();
+  });
+
+  it("keeps messages from a child conversation user-originated and within its actual task family", async () => {
+    await start();
+    const sibling = await registry.createThread({ ...createInput(), autoRun: false });
+    const cousin = await registry.createThread({ ...createInput(), autoRun: false, parent: { kind: "thread", id: sibling.id } });
+    const otherTask = await registry.createThread({ ...createInput(), autoRun: false, parent: { kind: "session", id: "unrelated-session" } });
+    const roster = await request(app).get("/api/harness/sessions/child-1/threads").expect(200);
+    expect(roster.body.peers.some((entry: { thread: { id: string } }) => entry.thread.id === cousin.id)).toBe(true);
+    expect(roster.body.peers.some((entry: { thread: { id: string } }) => entry.thread.id === otherTask.id)).toBe(false);
+
+    const response = await request(app).post(`/api/harness/sessions/child-1/threads/${cousin.id}/send`)
+      .send({ message: "A note from the user", kind: "inform", requestId: "child-ui-message" }).expect(200);
+    expect(response.body.thread.messages).toContainEqual(expect.objectContaining({
+      id: "child-ui-message", from: { kind: "user", id: "child-1" }, originSessionId: "child-1", status: "held",
+    }));
+    await request(app).post(`/api/harness/sessions/child-1/threads/${otherTask.id}/send`)
+      .send({ message: "Outside task", kind: "inform" }).expect(403);
+    await request(app).delete(`/api/harness/sessions/child-1/threads/${cousin.id}`).expect(403);
+  });
+
+  it("lets the user reply to an ordinary message addressed to their conversation", async () => {
+    const { thread } = await start({ tools: ["send"] });
+    await createThreadSendService({ threadRegistry: registry, threadSendToSession: vi.fn(async () => {}) } as never).handle({
+      to: "parent", from: "parent-agent", kind: "inform", message: "The interface is ready", requestId: "worker-note",
+    }, {
+      actor: { authorityInstanceId: "host-1", sessionId: "child-1", workerId: "worker", workerGeneration: 1,
+        workspaceId: WORKSPACE, grantedCapabilities: ["control.thread"] },
+      authorizedPaths: [], sessionId: "child-1", workspaceId: WORKSPACE, signal: new AbortController().signal,
+    });
+    const response = await request(app).post(`/api/harness/sessions/parent-1/threads/${thread.id}/send`)
+      .send({ message: "Use it in the implementation", kind: "inform", replyTo: "worker-note", requestId: "user-answer" }).expect(200);
+    expect(response.body.thread.messages).toContainEqual(expect.objectContaining({
+      id: "user-answer", replyTo: "worker-note", from: { kind: "user", id: "parent-1" }, status: "delivered",
+    }));
+    expect(response.body.thread.messages.find((message: { id: string }) => message.id === "worker-note").status).toBe("delivered");
   });
 
   it("replays an idempotent requestId without scheduling a second Run", async () => {

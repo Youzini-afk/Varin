@@ -1614,6 +1614,7 @@ export class SessionHost {
           // follow-up would manufacture an extra turn after a dependency wait.
           await session.sendCustomMessage({ customType: "varin.thread.execution", content: trigger,
             display: false, details: { messageId } }, { deliverAs: "steer" });
+          this.#hostServicesBridge?.wakeDependencyWaits();
         } else {
           const accepted = await this.prompt(sessionId, trigger);
           if (!accepted.accepted) throw new Error("Pi did not accept the execution request");

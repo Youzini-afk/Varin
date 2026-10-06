@@ -70,7 +70,7 @@ task ancestry; read access does not grant sibling lifecycle control.
 
 `agent-root-runtime.ts` attaches ordinary main conversations to the existing Thread/Run authority.
 `wait` without a duration is an event subscription, not a periodic model call. Its targets, initial
-result/message positions, optional deadline and owning Run are persisted in `Thread.dependencyWait`.
+result/message positions, optional deadline and owning Run are persisted in `Thread.dependencyWaits`.
 `thread-wait-runtime.ts` rebuilds those subscriptions after restart and resumes lost executions only
 when a result, addressed request/reply, actionable failure or requested deadline satisfies the wait.
 The live service owns its response; durable recovery owns only lost/idle continuation. New user input
@@ -512,9 +512,9 @@ never re-reads later parent state.
 The capture now comes from Pi's actual active context, preserving legal tool-call/result pairs, images and copied durable output bodies while excluding unfinished calls and future parent appends. A `fresh` Run gets a new session; its `history(run)` source is authorized only to retained Runs of that same Thread. Spawn, dequeue, lost resume, restore and continuation consume the new Run's frozen model/tools/permissions/scope rather than reconstructing them from long-lived Thread fields.
 
 `thread.send` carries directed messages inside one root task (3.18C). Reachable
-targets are relationship-bound: a Thread caller reaches its children, its
-parent (`to: "parent"` resolves the parent Thread or session), and same-parent
-siblings; a session caller reaches its direct children; cross-root and
+targets are relationship-bound: a Thread caller reaches actual members of its
+root task, including ancestors, siblings and descendants. `to: "parent"` resolves
+the parent Thread or session. A session caller reaches its task's descendants; cross-root and
 unrelated targets are denied. `inform` only delivers — to a running session it
 lands at the next input boundary, to a waiting target it stays `held`, and to a
 settled or queued Thread it is recorded durably for the next Run's input; it
@@ -527,9 +527,20 @@ session and prompts the new task, `fresh` reads the closed transcript through
 request on an active Thread delivers like inform and never starts a second
 Run. Messages persist as `in`/`out` records on the Thread; `requestId` makes
 retries observe the recorded outcome instead of duplicating delivery or
-execution, and `replyTo` resolves both ledgers and clears the requester's
-`waitingFor: "thread"` mark.
+execution. `replyTo` accepts either an ordinary received message or a request;
+with no explicit recipient the Host routes to the retained original sender. Only
+request replies resolve the original request on both ledgers. A held reply is
+already a durable answer and can satisfy the matching wait without waking unrelated work.
 Pi accepts `inform` through a persistent non-waking custom message and accepts `request` through an idempotent native execution receipt. Host commits delivery only after that input boundary accepts it; failed delivery cannot resolve a dependency. The authenticated UI and Pi tools use the same message service and stable request identity.
+
+`send(wait)` subscribes to the caller's exact message ledger and watches only its
+correlated reply. The original message ID and absolute deadline are durable; each
+parallel wait has its own identity. Live waits release the execution slot and all
+must become ready before reacquisition. New input interrupts waiting without
+revoking delivery; expiry and interruption remain message receipts. Recovery
+resumes lost/idle executions once on a correlated reply or retained deadline,
+includes other interrupted requests, and preserves late answers. Delivery text
+explains `send({replyTo, message})`; replying in one's own conversation is not delivery.
 
 Execution admission is root-wide (`countActiveInRoot`): every implementation
 Run under the same root session — including nested Threads — shares the
@@ -898,7 +909,10 @@ archived. The Documents reclaim guard remains held through deletion. Thread pane
 parent session through the same `thread.send` service the Pi Host tools use: the
 caller acts as the user, relationship authorization, the durable ledger, requestId
 idempotency, held/delivered semantics, and `continue`/`fresh` scheduling are
-identical. Service failures map `HarnessServiceError` codes to HTTP
+identical. Child-session UI messages remain user-originated. Message receipts
+can address the actual task family without expanding lifecycle/integration controls.
+The list projection adds a deduplicated peer roster for message identities and
+native-session navigation. Service failures map `HarnessServiceError` codes to HTTP
 (400/403/404/503) instead of collapsing to 500.
 `GET .../threads/:threadId/history` and `POST .../history/release` manage selected
 old WorkingResult versions for the authenticated parent. Release holds the Thread

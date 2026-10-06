@@ -335,7 +335,7 @@ export const createHarnessRouter = (options: HarnessRouterOptions) => {
       const key = requestKey(actor, data.requestId);
       const pending = inflight.get(key);
       if (pending && sameRequestActor(pending.identity, actor)) {
-        if (data.wake === true && pending.method === "thread.wait") pending.interrupt.abort();
+        if (data.wake === true && (pending.method === "thread.wait" || pending.method === "thread.send")) pending.interrupt.abort();
         else abortInflight(key);
       }
     }

@@ -31,7 +31,6 @@ import { useWorkbenchWorkspaceId } from '@/lib/extensions/workbench-workspace';
 import { resourceIdFromWorkspacePath } from '@/lib/documents/path';
 import { revealResourceInEditor } from '@/lib/agent-editor/navigation';
 import { PatchHunkReview } from '@/components/workbench/PatchHunkReview';
-import { usePiSessionStore } from '@/stores/usePiSessionStore';
 import { useUIStore } from '@/stores/useUIStore';
 import type {
   PiSessionSubmissionStatus,
@@ -68,6 +67,8 @@ import { fileChangePhase, isFileChangeTool, projectFileChanges } from './fileCha
 import { PiExploreCard, PiExploreScope } from './PiExploreCard';
 import { explorePresentation } from './explorePresentation';
 import { HarnessThreadMarkers } from './HarnessThreadMarkers';
+import { PiThreadMessageCard } from './PiThreadMessageCard';
+import { PiReceivedThreadMessage } from './PiReceivedThreadMessage';
 import { PiTurnUsageFooter } from './PiTurnUsageFooter';
 import { PiCollapsibleUserContent } from './PiCollapsibleUserContent';
 import { PiTurnChangedFiles } from './PiTurnChangedFiles';
@@ -416,12 +417,13 @@ const ToolResultContent: React.FC<{
 // entry, or when an adjacent read makes it part of a group. This cache belongs
 // to the mounted turn, never to execution state or the native session history.
 const ToolDisclosureContext = React.createContext<Map<string, boolean> | null>(null);
+const TimelineSessionContext = React.createContext<string | undefined>(undefined);
 
-const PiToolDisclosureScope: React.FC<{ children: React.ReactNode }> = ({ children }) => {
+const PiToolDisclosureScope: React.FC<{ children: React.ReactNode; sessionId: string }> = ({ children, sessionId }) => {
   const [choices] = React.useState(() => new Map<string, boolean>());
-  return <ToolDisclosureContext.Provider value={choices}>
+  return <TimelineSessionContext.Provider value={sessionId}><ToolDisclosureContext.Provider value={choices}>
     <PiExploreScope><PiFileChangePreviewScope>{children}</PiFileChangePreviewScope></PiExploreScope>
-  </ToolDisclosureContext.Provider>;
+  </ToolDisclosureContext.Provider></TimelineSessionContext.Provider>;
 };
 
 const PiToolDisclosure: React.FC<{
@@ -472,7 +474,7 @@ const PiToolCard: React.FC<{
     result?: PiToolResultMessage;
   }>('tool-renderer', 'chat.timeline.tools');
   const workspaceId = useWorkbenchWorkspaceId();
-  const sessionId = usePiSessionStore((state) => state.currentSessionId);
+  const sessionId = React.useContext(TimelineSessionContext);
   const extensionRendered = renderFirstWorkbenchMatch(toolRenderers, { call, cwd, execution, result });
   const fileChanges = React.useMemo(() => extensionRendered === undefined ? projectFileChanges(call, generating) : [], [call, generating, extensionRendered]);
   const nested = Object.values(executionById ?? {}).filter(child => child.parentToolCallId === call.id);
@@ -503,6 +505,7 @@ const PiToolCard: React.FC<{
   const command = typeof call.arguments === 'object' && call.arguments && !Array.isArray(call.arguments)
     ? String((call.arguments as Record<string, unknown>).command ?? '')
     : '';
+  if (call.name === 'send') return <PiThreadMessageCard call={call} result={result} sessionId={sessionId} failed={status === 'error'} />;
   if (call.name === 'explore') return <PiExploreCard call={call} cwd={cwd} execution={execution}
     result={result} generating={generating} rawDetails={<>
       <pre className="overflow-auto whitespace-pre-wrap break-words font-mono typography-micro">{jsonText(call.arguments)}</pre>
@@ -1146,7 +1149,7 @@ export const PiTimelineEntryList: React.FC<Omit<
   )).at(-1);
 
   return (
-    <PiToolDisclosureScope key={sessionId}>
+    <PiToolDisclosureScope key={sessionId} sessionId={sessionId}>
     <div className="flex flex-col gap-3">
         {projection.visibleEntries.map((entry) => {
           if (extensionEntries.has(entry.id)) {
@@ -1239,6 +1242,11 @@ export const PiTimelineEntryList: React.FC<Omit<
               );
             }
             if (message.role === 'custom') {
+              if (message.customType === 'varin.thread.notification') {
+                const details = message.details && typeof message.details === 'object' && !Array.isArray(message.details) ? message.details as Record<string, unknown> : {};
+                return <PiReceivedThreadMessage key={entry.id} entryId={entry.id} sessionId={sessionId}
+                  id={typeof details.messageId === 'string' ? details.messageId : undefined} content={piContentText(message.content)} />;
+              }
               const notifications = message.customType === 'subagent-notify'
                 ? parseSubagentNotifications(piContentText(message.content), message.details)
                 : undefined;
@@ -1295,6 +1303,11 @@ export const PiTimelineEntryList: React.FC<Omit<
           }
 
           if (entry.type === 'custom_message') {
+            if (entry.customType === 'varin.thread.notification') {
+              const details = entry.details && typeof entry.details === 'object' && !Array.isArray(entry.details) ? entry.details as Record<string, unknown> : {};
+              return <PiReceivedThreadMessage key={entry.id} entryId={entry.id} sessionId={sessionId}
+                id={typeof details.messageId === 'string' ? details.messageId : undefined} content={piContentText(entry.content)} />;
+            }
             const notifications = entry.customType === 'subagent-notify'
               ? parseSubagentNotifications(piContentText(entry.content), entry.details)
               : undefined;

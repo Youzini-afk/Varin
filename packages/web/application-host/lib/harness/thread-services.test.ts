@@ -1409,7 +1409,7 @@ describe("thread services", () => {
         threadCtx(answerer.sessionId),
       );
       expect(reply).toMatchObject({ accepted: true, delivery: "delivered", attention: "none" });
-      expect(sendToSession).toHaveBeenLastCalledWith(asker.sessionId, "count is 3", { messageId: expect.any(String), from: `thread ${answerer.thread.id}` });
+      expect(sendToSession).toHaveBeenLastCalledWith(asker.sessionId, "count is 3", expect.objectContaining({ messageId: expect.any(String), from: `thread ${answerer.thread.id}`, replyTo: "req-1" }));
       const askerNow = await registry.getThreadById("workspace-1", asker.thread.id);
       expect(askerNow?.attention).toBe("none");
       expect(askerNow?.waitingFor).toBeNull();
@@ -1423,6 +1423,47 @@ describe("thread services", () => {
   });
 
   // --- send(wait): correlated reply waiting (7E/D-300) ---
+
+  it("exchanges ordinary messages across task ancestry and routes replies to the actual sender", async () => {
+    const dataDir = mkdtempSync(join(tmpdir(), "thread-exchange-"));
+    const registry = createThreadRegistry({ dataDir, hostId: "host-1" });
+    const service = createThreadSendService({ threadRegistry: registry, threadSendToSession: vi.fn(async () => {}) } as never);
+    try {
+      const root = await runningThread(registry, { kind: "session", id: "task" }, "main", 4);
+      const worker = await runningThread(registry, { kind: "thread", id: root.thread.id }, "worker", 4);
+      const nested = await runningThread(registry, { kind: "thread", id: worker.thread.id }, "nested", 4);
+      const unrelated = await runningThread(registry, { kind: "session", id: "other-task" }, "other", 4);
+      const sent = await service.handle({ threadId: nested.thread.id, message: "The interface is ready", from: "parent-agent", requestId: "notice" }, threadCtx(root.sessionId));
+      const reply = await service.handle({ replyTo: sent.messageId!, message: "I will use it", from: "parent-agent" }, threadCtx(nested.sessionId));
+      expect(reply).toMatchObject({ accepted: true, to: { kind: "thread", id: root.thread.id } });
+      const messages = (await registry.getThreadById("workspace-1", root.thread.id))!.messages!;
+      expect(messages.find(message => message.id === "notice")?.status).toBe("delivered");
+      expect(messages.find(message => message.replyTo === "notice")).toMatchObject({ from: { kind: "thread", id: nested.thread.id }, text: "I will use it" });
+      await expect(service.handle({ replyTo: "notice", message: "spoofed answer", from: "parent-agent" }, threadCtx(worker.sessionId))).rejects.toMatchObject({ harnessCode: "denied" });
+      await expect(service.handle({ threadId: unrelated.thread.id, message: "outside this task", from: "parent-agent" }, threadCtx(nested.sessionId))).rejects.toMatchObject({ harnessCode: "denied" });
+    } finally { await registry.dispose(); rmSync(dataDir, { recursive: true, force: true }); }
+  });
+
+  it("retains parallel reply waits until both dependencies are ready before taking a model slot back", async () => {
+    const dataDir = mkdtempSync(join(tmpdir(), "thread-parallel-replies-"));
+    const registry = createThreadRegistry({ dataDir, hostId: "host-1" });
+    const service = createThreadSendService({ threadRegistry: registry, threadSendToSession: vi.fn(async () => {}) } as never);
+    try {
+      const parent = { kind: "session", id: "task" } as const;
+      const sender = await runningThread(registry, parent, "sender", 3);
+      const first = await runningThread(registry, parent, "first", 3);
+      const second = await runningThread(registry, parent, "second", 3);
+      const pending = [first, second].map((target, index) => service.handle({ threadId: target.thread.id, message: "Please answer", kind: "request", from: "parent-agent", requestId: `question-${index}`, wait: 30 }, threadCtx(sender.sessionId)));
+      await vi.waitFor(async () => expect((await registry.getThreadById("workspace-1", sender.thread.id))?.dependencyWaits).toHaveLength(2));
+      await service.handle({ replyTo: "question-0", message: "First answer", from: "parent-agent" }, threadCtx(first.sessionId));
+      await vi.waitFor(async () => expect((await registry.getThreadById("workspace-1", sender.thread.id))?.dependencyWaits?.find(wait => wait.replyTo === "question-0")?.state).toBe("ready"));
+      expect((await registry.getActiveRun("workspace-1", sender.thread.id))?.executionYielded).toBe(true);
+      await service.handle({ replyTo: "question-1", message: "Second answer", from: "parent-agent" }, threadCtx(second.sessionId));
+      expect((await Promise.all(pending)).map(result => result.reply?.text)).toEqual(["First answer", "Second answer"]);
+      expect((await registry.getThreadById("workspace-1", sender.thread.id))?.dependencyWaits).toBeUndefined();
+      expect((await registry.getActiveRun("workspace-1", sender.thread.id))?.executionYielded).toBe(false);
+    } finally { await registry.dispose(); rmSync(dataDir, { recursive: true, force: true }); }
+  });
 
   it("send with wait returns the correlated reply and reclaims the yielded slot", async () => {
     const dataDir = mkdtempSync(join(tmpdir(), "thread-send-wait-"));
@@ -1443,7 +1484,7 @@ describe("thread services", () => {
         expect((await registry.getThreadById("workspace-1", asker.thread.id))?.waitingFor?.kind).toBe("thread");
       });
       const reply = await service.handle(
-        { threadId: asker.thread.id, message: "count is 3", from: "parent-agent", replyTo: "req-w1" },
+        { message: "count is 3", from: "parent-agent", replyTo: "req-w1" },
         threadCtx(answerer.sessionId),
       );
       expect(reply).toMatchObject({ accepted: true, delivery: "delivered" });

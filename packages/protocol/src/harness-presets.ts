@@ -159,7 +159,7 @@ export function buildTeamPrompt(presets: ResolvedPreset[], activeTools?: readonl
   return guidance + "Threads run independently. "
     + (available("read_thread") ? "Use read_thread to inspect relevant task-family conversations. " : "")
     + (available("threads") ? "Use threads to discover related work. " : "")
-    + (available("send") ? "Use send to coordinate interfaces or request help. " : "")
+    + (available("send") ? "Use send to exchange information or request help with task teammates. Reply to a received message with send(replyTo=its message ID, message=your response); omitting the recipient routes to its actual sender. Answering only in your own conversation does not deliver a reply. Informational updates need no acknowledgement. Omit wait to continue independent work; wait on a request only when its answer is needed now. " : "")
     + (writing && available("submit_code") ? "Use submit_code to send selected files or original/replacement snippets directly to a teammate or parent. Queued acceptance is not application; its receipt arrives through task state and passive messages. " : "")
     + (available("wait") ? "Use wait for dependencies when no useful independent work remains; omit its duration for indefinite event waiting. " : "")
     + "Routine progress does not require polling or a response.";

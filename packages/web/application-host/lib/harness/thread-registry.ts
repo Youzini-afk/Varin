@@ -414,6 +414,7 @@ const isMessagePeer = (value: unknown): value is ThreadMessagePeer => (
 const isMessageRecord = (value: unknown): value is ThreadMessageRecord => (
   isRecord(value)
   && isString(value.id)
+  && (value.originSessionId === undefined || isString(value.originSessionId))
   && (value.direction === "in" || value.direction === "out")
   && isMessagePeer(value.from)
   && isMessagePeer(value.to)
@@ -421,6 +422,8 @@ const isMessageRecord = (value: unknown): value is ThreadMessageRecord => (
   && isString(value.text)
   && (value.context === undefined || (value.kind === "request" && (value.context === "continue" || value.context === "fresh")))
   && (value.replyTo === undefined || isString(value.replyTo))
+  && (value.wait === undefined || (isRecord(value.wait) && typeof value.wait.deadline === "number" && Number.isFinite(value.wait.deadline)
+    && ["waiting", "elapsed", "interrupted"].includes(String(value.wait.state))))
   && (value.status === "pending" || value.status === "held" || value.status === "delivered" || value.status === "resolved" || value.status === "failed")
   && (value.failure === undefined || isString(value.failure))
   && (value.runId === undefined || isString(value.runId))
@@ -644,15 +647,17 @@ const isThread = (value: unknown): value is Thread => {
     && LIFECYCLES.has(value.lifecycle as ThreadLifecycle)
     && ATTENTIONS.has(value.attention as ThreadAttention)
     && isWaitingFor(value.waitingFor)
-    && (value.dependencyWait === undefined || (isRecord(value.dependencyWait)
-      && isString(value.dependencyWait.id) && isString(value.dependencyWait.runId) && isString(value.dependencyWait.sessionId)
-      && ["watching", "ready", "resuming"].includes(String(value.dependencyWait.state))
-      && (value.dependencyWait.deadline === undefined || (typeof value.dependencyWait.deadline === "number" && Number.isFinite(value.dependencyWait.deadline)))
-      && Array.isArray(value.dependencyWait.targets) && value.dependencyWait.targets.every(target => isRecord(target) && isString(target.id)
+    && (value.dependencyWaits === undefined || (Array.isArray(value.dependencyWaits) && value.dependencyWaits.every(wait => isRecord(wait)
+      && isString(wait.id) && isString(wait.runId) && isString(wait.sessionId)
+      && ["watching", "ready", "resuming"].includes(String(wait.state))
+      && (wait.replyTo === undefined || isString(wait.replyTo))
+      && (wait.replyOutcome === undefined || ["elapsed", "interrupted"].includes(String(wait.replyOutcome)))
+      && (wait.deadline === undefined || (typeof wait.deadline === "number" && Number.isFinite(wait.deadline)))
+      && Array.isArray(wait.targets) && wait.targets.every(target => isRecord(target) && isString(target.id)
         && (target.runId === null || isString(target.runId)) && (target.resultRevision === null || Number.isSafeInteger(target.resultRevision))
         && LIFECYCLES.has(target.lifecycle as ThreadLifecycle) && ATTENTIONS.has(target.attention as ThreadAttention)
         && INTEGRATIONS.has(target.integration as ThreadIntegration) && (target.outcome === null || OUTCOMES.has(target.outcome as ThreadRunOutcome)))
-      && Array.isArray(value.dependencyWait.requestIds) && value.dependencyWait.requestIds.every(isString)))
+      && Array.isArray(wait.requestIds) && wait.requestIds.every(isString))))
     && INTEGRATIONS.has(value.integration as ThreadIntegration)
     && isDiffStats(value.diffStats)
     && isReport(value.report)
@@ -929,6 +934,7 @@ export function createThreadRegistry(options: ThreadRegistryOptions) {
   const cursorEpochs = new Map<string, number>();
   const waiters = new Map<string, Set<() => void>>();
   const admissionWaiters = new Map<string, Set<() => void>>();
+  const threadRecordWaiters = new Map<string, Set<() => void>>();
   let disposed = false;
   const draining = new Set<string>();
   const retiredParents = new Set<string>();
@@ -1404,6 +1410,10 @@ export function createThreadRegistry(options: ThreadRegistryOptions) {
         }
         callbacks.clear();
       }
+      const recordCallbacks = threadRecordWaiters.get(JSON.stringify([catalog.scopeId, thread.id]));
+      if (recordCallbacks) for (const callback of [...recordCallbacks]) {
+        try { callback(); } catch (error) { reportObserverError(error); }
+      }
     }
     for (const parent of mutation.wakeParents ?? []) {
       const callbacks = waiters.get(scopeKey(catalog.scopeId, parent));
@@ -1847,12 +1857,23 @@ export function createThreadRegistry(options: ThreadRegistryOptions) {
 
   const setDependencyWait = async (scopeId: string, threadId: string, wait: import("@varin/protocol").ThreadDependencyWait | null, expectedId?: string): Promise<boolean> => mutateWorkspace(scopeId, catalog => {
     const thread = findThread(catalog, threadId);
-    if (!thread || (expectedId !== undefined && thread.dependencyWait?.id !== expectedId)
+    if (!thread || (expectedId !== undefined && !thread.dependencyWaits?.some(entry => entry.id === expectedId))
       || (wait && wait.runId !== thread.activeRunId)) return { value: false, changed: [], write: false };
-    if (wait) thread.dependencyWait = structuredClone(wait);
-    else delete thread.dependencyWait;
-    touchThread(catalog, thread);
-    return { value: true, changed: [thread] };
+    const waits = (thread.dependencyWaits ?? []).filter(entry => entry.id !== (wait?.id ?? expectedId));
+    if (wait) waits.push(structuredClone(wait));
+    if (waits.length && (wait || expectedId !== undefined)) thread.dependencyWaits = waits;
+    else delete thread.dependencyWaits;
+    let changed = [thread];
+    if (wait?.replyTo && wait.deadline !== undefined) {
+      const original = thread.messages?.find(message => message.id === wait.replyTo && message.direction === "out" && message.kind === "request");
+      if (original) {
+        const { direction: _direction, ...message } = original;
+        changed = [...new Set([...changed, ...writeDirectedMessage(catalog, { ...message,
+          wait: { deadline: wait.deadline, state: wait.replyOutcome ?? "waiting" } }).changed])];
+      }
+    }
+    for (const entry of changed) touchThread(catalog, entry);
+    return { value: true, changed };
   });
 
   /** Reacquisition and clearing the yield are one catalog transaction. */
@@ -1879,6 +1900,11 @@ export function createThreadRegistry(options: ThreadRegistryOptions) {
             throw new Error("The Run awaiting execution admission is no longer active");
           }
           if (!run.executionYielded) return { value: true, changed: [], write: false };
+          // Parallel tool waits all finish before this Run takes a model slot
+          // back. Otherwise an early reply can block another queued answerer.
+          if (thread.dependencyWaits?.some(wait => wait.runId === runId && wait.state === "watching")) {
+            return { value: false, changed: [], write: false };
+          }
           const root = rootSessionFor(catalog, thread.parent);
           if (root === null) throw new Error("The waiting Run has no root task");
           if (countActiveInCatalog(catalog, root) >= thread.manifest.concurrency) {
@@ -2000,7 +2026,7 @@ export function createThreadRegistry(options: ThreadRegistryOptions) {
       }
       catalog.runs.push(run);
       thread.activeRunId = run.id;
-      delete thread.dependencyWait;
+      delete thread.dependencyWaits;
       thread.lifecycle = "active";
       // A dependency wait belongs to the preceding execution attempt. Leaving
       // it on a newly admitted Run would make that Run invisible to counting.
@@ -2084,7 +2110,7 @@ export function createThreadRegistry(options: ThreadRegistryOptions) {
       run.workerState = outcome === "lost" ? "lost" : "exited";
       run.outcome = outcome;
       run.exitReason = exitReason;
-      if (outcome === "cancelled") delete thread.dependencyWait;
+      if (outcome === "cancelled") delete thread.dependencyWaits;
       run.endedAt = nowISO();
       run.lastActivityAt = run.endedAt;
       thread.lifecycle = outcome === "lost" ? "active" : "settled";
@@ -2259,6 +2285,7 @@ export function createThreadRegistry(options: ThreadRegistryOptions) {
     const canonical = prior[0];
     const next = {
       ...message,
+      ...(canonical?.wait && !message.wait ? { wait: canonical.wait } : {}),
       ...(canonical ? { at: canonical.at } : {}),
       ...(canonical?.runId && !message.runId ? { runId: canonical.runId } : {}),
       ...(canonical?.status === "resolved" ? { status: "resolved" as const }
@@ -2278,7 +2305,7 @@ export function createThreadRegistry(options: ThreadRegistryOptions) {
     }
     // A successful reply resolves both sides of precisely its original request.
     // Merely accepting a pending message does not satisfy a dependency.
-    if (next.replyTo && (next.status === "delivered" || next.status === "resolved")) {
+    if (next.replyTo && (next.status === "held" || next.status === "delivered" || next.status === "resolved")) {
       for (const { thread } of copies) {
         for (const request of thread.messages ?? []) {
           if (request.id !== next.replyTo || request.kind !== "request" || request.status === "resolved"
@@ -2670,7 +2697,7 @@ export function createThreadRegistry(options: ThreadRegistryOptions) {
       candidate.lifecycle = "settled";
       candidate.attention = "none";
       candidate.waitingFor = null;
-      delete candidate.dependencyWait;
+      delete candidate.dependencyWaits;
       touchThread(draft, candidate);
       return { value: candidate, changed: [candidate] };
     });
@@ -2687,7 +2714,7 @@ export function createThreadRegistry(options: ThreadRegistryOptions) {
         throw new Error(`Cannot archive a thread with an active Run: ${threadId}`);
       }
       thread.lifecycle = "archived";
-      delete thread.dependencyWait;
+      delete thread.dependencyWaits;
       thread.attention = "none";
       thread.waitingFor = null;
       if (keepWorktree !== undefined) thread.keepWorktree = keepWorktree;
@@ -2810,7 +2837,7 @@ export function createThreadRegistry(options: ThreadRegistryOptions) {
       // A Bot entry is replaceable; its durable root remains an ancestor of
       // independent work. Archiving it would make every child unresumable.
       thread.lifecycle = thread.purpose === "bot-root" ? "settled" : "archived";
-      delete thread.dependencyWait;
+      delete thread.dependencyWaits;
       thread.attention = "none";
       thread.waitingFor = null;
       // The report's TranscriptRef points at the file being deleted. Retaining
@@ -3066,6 +3093,13 @@ export function createThreadRegistry(options: ThreadRegistryOptions) {
     };
   };
 
+  const subscribeToThreadChanges = (scopeId: string, threadId: string, callback: () => void): (() => void) => {
+    const key = JSON.stringify([scopeId, threadId]);
+    const callbacks = threadRecordWaiters.get(key) ?? new Set<() => void>();
+    callbacks.add(callback); threadRecordWaiters.set(key, callbacks);
+    return () => { callbacks.delete(callback); if (!callbacks.size) threadRecordWaiters.delete(key); };
+  };
+
   async function tryDequeue(scopeId: string, parent: ThreadParent): Promise<Thread | null> {
     if (options.canExecuteScope && !await options.canExecuteScope(scopeId)) return null;
     const catalog = await catalogForScope(scopeId, parent);
@@ -3192,6 +3226,7 @@ export function createThreadRegistry(options: ThreadRegistryOptions) {
     admissionWaiters.clear();
     await Promise.allSettled([...mutationTails.values(), sessionBindingTail]);
     waiters.clear();
+    threadRecordWaiters.clear();
     cursors.clear();
     cursorEpochs.clear();
     cache.clear();
@@ -3279,6 +3314,7 @@ export function createThreadRegistry(options: ThreadRegistryOptions) {
     clearCursorsForSession,
     retainCursorsForSession,
     subscribeToChanges,
+    subscribeToThreadChanges,
     tryDequeue,
     reconcileWorkspace,
     reconcileAfterHostRestart,

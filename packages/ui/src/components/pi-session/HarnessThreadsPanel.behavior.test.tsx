@@ -6,10 +6,11 @@ import { runtimeFetch } from '@varin/application-client';
 import { HarnessThreadsPanel } from './HarnessThreadsPanel';
 import { HarnessThreadStateContext, type HarnessThreadStateValue } from './HarnessThreadStateContext';
 import type { PiSessionViewState } from '@/stores/usePiSessionStore';
-import type { SessionEntriesResult } from '@varin/protocol';
+import type { SessionEntriesResult, ThreadMessageRecord } from '@varin/protocol';
 import type { HarnessThreadSnapshot } from './harnessThreadPresentation';
 import type { WebSource } from '@/stores/useWebSourcesStore';
 import { useWorkOverviewStore } from '@/stores/useWorkOverviewStore';
+import { THREAD_EXCHANGE_OPEN_EVENT } from './threadMessages';
 
 const mocks = vi.hoisted(() => ({
   runtimeKey: 'runtime-1',
@@ -30,6 +31,11 @@ vi.mock('@varin/application-client', async (importOriginal) => ({
 vi.mock('@/lib/pi-runtime/sessionNavigation', () => ({ openPiSessionFromNavigation: mocks.openSession }));
 vi.mock('@/lib/gitApiHttp', () => ({ getGitStatus: mocks.getGitStatus }));
 vi.mock('@/components/icon/Icon', () => ({ Icon: () => null }));
+vi.mock('@/components/chat/MarkdownRenderer', () => ({ MarkdownRenderer: ({ content }: { content: string }) => <p>{content}</p> }));
+vi.mock('@legendapp/list/react', () => ({ LegendList: ({ data, renderItem }: {
+  data: Array<{ id: string; messages: ThreadMessageRecord[] }>;
+  renderItem(item: { item: { id: string; messages: ThreadMessageRecord[] }; index: number }): React.ReactNode;
+}) => <div>{data.map((item, index) => <React.Fragment key={item.id}>{renderItem({ item, index })}</React.Fragment>)}</div> }));
 vi.mock('@/components/ui', () => ({ toast: { error: vi.fn(), success: vi.fn() } }));
 vi.mock('@/lib/i18n', () => ({ useI18n: () => ({ t: mocks.translate }) }));
 vi.mock('@/lib/device', () => ({ useDeviceInfo: () => ({ breakpoint: 'xl' }) }));
@@ -157,6 +163,32 @@ const clickOpen = async () => {
 };
 
 describe('thread panel transcript is inspection, not execution', () => {
+  it('opens a correlated exchange directly and lets the user navigate to its real conversation', async () => {
+    state.threads[0]!.thread.messages = [
+      { id: 'question', direction: 'in', from: { kind: 'user', id: 'parent-1' }, to: { kind: 'thread', id: 'thread-1' }, kind: 'request',
+        text: 'Which interface should we use?', status: 'resolved', at: '2026-09-10T00:01:00.000Z' },
+      { id: 'answer', direction: 'out', from: { kind: 'thread', id: 'thread-1' }, to: { kind: 'user', id: 'parent-1' }, kind: 'inform',
+        text: 'Use the existing interface.', replyTo: 'question', status: 'delivered', at: '2026-09-10T00:02:00.000Z' },
+    ];
+    await act(async () => root.render(<HarnessThreadStateContext.Provider value={state}>
+      <HarnessThreadsPanel workspaceId="workspace-1" parentSessionId="parent-1" />
+    </HarnessThreadStateContext.Provider>));
+    const event = new window.Event(THREAD_EXCHANGE_OPEN_EVENT);
+    Object.assign(event, { detail: { threadId: 'thread-1', messageId: 'answer' } });
+    await act(async () => window.dispatchEvent(event));
+    const dialog = container.querySelector('[role="dialog"]')!;
+    expect(dialog.querySelector('[role="tab"][aria-selected="true"]')?.textContent).toContain('harness.messages.exchange');
+    expect(dialog.textContent).toContain('Which interface should we use?');
+    expect(dialog.textContent).toContain('Use the existing interface.');
+    expect(dialog.textContent).toContain('harness.messages.state.replied');
+    expect(mocks.prefetchSession).not.toHaveBeenCalled();
+    const sender = [...dialog.querySelectorAll<HTMLButtonElement>('button')].find(button => button.textContent === state.threads[0]!.thread.brief)!;
+    await act(async () => sender.click());
+    expect(mocks.openSession).toHaveBeenCalledWith({ sessionId: 'old-session', directory: '/old-cwd' });
+    expect(container.querySelector('[role="dialog"]')).toBeNull();
+    expect(vi.mocked(runtimeFetch).mock.calls.filter(([, init]) => init?.method === 'POST')).toEqual([]);
+  });
+
   it('keeps retained research branches inspectable in the inline research workspace', async () => {
     const branch = snapshot();
     branch.thread.parent = { kind: 'thread', id: 'research-root' };

@@ -91,7 +91,7 @@ const ThreadSendParams = Type.Object({
     Type.Literal("fresh"),
   ], { description: "For a request on a settled thread: continue resumes its retained session (default); fresh rebuilds the input on a new session" })),
   requestId: Type.Optional(Type.String({ description: "Idempotency key — a retry with the same id returns the recorded outcome instead of duplicating delivery" })),
-  replyTo: Type.Optional(Type.String({ description: "The requestId of a request you are answering — completes the requester's wait" })),
+  replyTo: Type.Optional(Type.String({ description: "ID of a received message to reply to. Omit threadId/to and the Host routes to its actual sender. Replies to requests satisfy the matching reply wait; ordinary messages can also have replies." })),
   capability: Type.Optional(Type.Union([
     Type.Literal('investigation'),
     Type.Literal('experimental-design'),
@@ -139,7 +139,7 @@ export function dispatchToolPresentation(
 export function sendToolPresentation(capabilities: readonly ResearchCapabilityOption[]) {
   return {
     parameters: threadToolParameters(ThreadSendParams, capabilities),
-    description: "Send a message to a related thread (child, sibling, or parent). kind: 'inform' delivers without waking a waiting thread; 'request' asks for execution — on a settled thread it starts a new Run (context: 'continue' resumes its session; 'fresh' rebuilds the input). replyTo answers a request and completes the requester's wait."
+    description: "Exchange messages with task teammates. kind=inform shares information without starting idle work; kind=request asks the recipient to respond or act and can resume a settled thread. Reply with replyTo=the received message ID; the Host routes to its actual sender when threadId/to are omitted. wait is optional seconds for a request's correlated reply; omit it to continue other work."
       + (capabilities.length ? " capability re-routes the new Run under that capability's frozen configuration." : ''),
   };
 }
@@ -450,9 +450,10 @@ export function createSendTool(bridge: HostServicesBridge, _sessionId: string, o
     name: "send",
     label: "Send",
     ...sendToolPresentation(researchCapabilities),
-    promptSnippet: "send: inform a teammate; kind=request resumes a settled thread",
+    promptSnippet: "send: exchange information, request help, or reply to a teammate",
     executionMode: "parallel",
     execute: async (_toolCallId, params, signal, _onUpdate, _ctx) => {
+      const requestId = params.requestId ?? `${_sessionId}:message:${_ctx?.sessionManager?.getLeafId() ?? "root"}:${_toolCallId}`;
       try {
         let research: { capability: ResearchCapability; resources: ResearchResourceManifest } | undefined;
         let model: { providerId: string; modelId: string } | "inherit" | undefined;
@@ -488,9 +489,9 @@ export function createSendTool(bridge: HostServicesBridge, _sessionId: string, o
           ...(params.to !== undefined ? { to: params.to } : {}),
           message: params.message,
           from: "parent-agent",
+          requestId,
           ...(params.kind !== undefined ? { kind: params.kind } : {}),
           ...(params.context !== undefined ? { context: params.context } : {}),
-          ...(params.requestId !== undefined ? { requestId: params.requestId } : {}),
           ...(params.replyTo !== undefined ? { replyTo: params.replyTo } : {}),
           ...(params.capability !== undefined ? { capability: params.capability } : {}),
           ...(research !== undefined ? { resources: research.resources } : {}),
@@ -502,16 +503,21 @@ export function createSendTool(bridge: HostServicesBridge, _sessionId: string, o
         const typed = result as ThreadSendResult;
         const state = `${typed.lifecycle}/${typed.attention}`;
         const receipt = typed.accepted
-          ? `message ${typed.messageId ?? ""} to ${params.to === "parent" ? "parent" : params.threadId}: ${typed.delivery ?? "accepted"} (${state})${typed.runId ? `; Run ${typed.runId}` : ""}`
+          ? `message ${typed.messageId ?? ""} to ${typed.to ? `${typed.to.kind} ${typed.to.id}` : params.to === "parent" ? "parent" : params.threadId ?? "original sender"}: ${typed.delivery ?? "accepted"} (${state})${typed.runId ? `; Run ${typed.runId}` : ""}`
           : "not accepted";
         const outcome = typed.reply
           ? `reply ${typed.reply.messageId} from ${typed.reply.from.kind} ${typed.reply.from.id} at ${typed.reply.at}:\n${typed.reply.text}`
+          : typed.interrupted
+            ? `waiting ended because new input arrived; message ${typed.messageId ?? ""} stays recorded`
           : typed.timedOut
             ? `timed out waiting for a reply — the message ${typed.messageId ?? ""} stays recorded; retry with the same requestId to keep waiting without re-sending`
             : "Delivery is not execution completion.";
         return { content: [{ type: "text", text: `${receipt}. ${outcome}` }], details: typed };
       } catch (error) {
-        return threadErrorResult("send", error);
+        const failure = threadErrorResult("send", error);
+        return { ...failure, content: failure.content.map(content => ({ ...content,
+          text: `${content.text}\nMessage ID: ${requestId}. If retrying, reuse this requestId with the same recipient and content to avoid duplicating a recorded send.` })),
+          details: { ...failure.details, messageId: requestId } };
       }
     },
   });

@@ -1,4 +1,5 @@
 import { createHash, randomUUID } from "node:crypto";
+import { formatThreadMessage, type ThreadMessageDelivery } from "./thread-message.js";
 import fs from "node:fs";
 import path from "node:path";
 import type { ThreadResultHistory, ThreadResultHistoryReleaseParams, ThreadResultHistoryReleaseResult } from "@varin/application-client";
@@ -434,7 +435,8 @@ const messagePeerLabel = (peer: import("@varin/protocol").ThreadMessagePeer): st
 
 const pendingMessagesSection = (messages: readonly import("@varin/protocol").ThreadMessageRecord[]): string => (
   messages.map((message) => (
-    `- ${messagePeerLabel(message.from)}${message.kind === "request" ? ` (request ${message.id})` : ""}: ${message.text}`
+    formatThreadMessage(message.text, { from: messagePeerLabel(message.from), messageId: message.id,
+      ...(message.kind === "request" ? { requestId: message.id } : {}), ...(message.replyTo ? { replyTo: message.replyTo } : {}) })
   )).join("\n")
 );
 
@@ -2987,7 +2989,7 @@ export function createThreadRuntime(options: ThreadRuntimeOptions) {
       // applies to bot entry chats — reopening the entry re-attaches.
       if (isAttachedRootPurpose(thread.purpose) || previous?.sessionOwner === "attached-root") continue;
       if (thread.lifecycle !== "active" || previous?.outcome !== "lost") continue;
-      if (thread.dependencyWait) continue;
+      if (thread.dependencyWaits?.length) continue;
       if (resuming.has(thread.id)) continue;
       resuming.add(thread.id);
       const task = (async () => {
@@ -3315,14 +3317,11 @@ export function createThreadRuntime(options: ThreadRuntimeOptions) {
   const send = async (
     sessionId: string,
     message: string,
-    meta: { from: string; requestId?: string; messageId?: string },
+    meta: ThreadMessageDelivery,
   ): Promise<void> => {
     // `from` is a Host-derived sender label; `requestId` travels in the
     // delivered text so the receiver can bind a replyTo to the real request.
-    const header = meta.requestId
-      ? `Message from ${meta.from} (request ${meta.requestId})`
-      : `Message from ${meta.from}`;
-    const text = `${header}:\n${message}`;
+    const text = formatThreadMessage(message, meta);
     if (!meta.requestId) {
       if (!options.sessions.notify) {
         throw new ThreadRuntimeError("unavailable", "The session adapter does not support passive message delivery");

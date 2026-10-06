@@ -30,6 +30,17 @@ own execution directory. The sidebar expands children initially, retains explici
 while mounted, and reveals matching descendants during search. Native parent links remain the
 authority; sessions whose parent is unavailable remain accessible as roots.
 
+`HarnessThreadConversation` keeps the existing task-overview popup and offers
+conversation and exchange views. `HarnessThreadMessages` groups original messages
+with replies, shows actual peer names and native-session links, and exposes the
+user's send/reply composer. `PiThreadMessageCard` and `PiReceivedThreadMessage`
+present sent and received messages in the native timeline and open that exchange.
+The authenticated Host retains user identity and task-family authorization;
+client state only projects its ledgers, wait receipts and deduplicated peer roster.
+Each timeline supplies its own session identity, including a child conversation
+preview. Pending requests, explicit reply waits and failures appear in the work
+overview. Technical identities and timestamps remain in expandable details.
+
 The header services menu and mobile conversation metadata show the current session's token usage
 by provider and model from `SessionStats.usageByModel`. Pi Host reads the complete native journal,
 including inactive branches, messages before compaction and auxiliary usage. Calls lacking model

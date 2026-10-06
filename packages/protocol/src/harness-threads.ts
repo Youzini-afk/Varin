@@ -291,6 +291,9 @@ export interface ThreadDependencyWait {
     lifecycle: ThreadLifecycle; attention: ThreadAttention; integration: ThreadIntegration; outcome: ThreadRunOutcome | null;
     codeSubmissionStates?: Record<string, string> }>;
   requestIds: string[];
+  /** A correlated reply wait; other messages/results do not satisfy it. */
+  replyTo?: string;
+  replyOutcome?: "elapsed" | "interrupted";
   reason?: string;
   error?: string;
 }
@@ -473,6 +476,8 @@ export type ThreadMessageStatus = "pending" | "held" | "delivered" | "resolved" 
 export interface ThreadMessageRecord {
   /** Caller-supplied requestId for idempotent retries; Host-generated otherwise. */
   id: string;
+  /** Actual calling conversation, supplied by the Host rather than the model. */
+  originSessionId?: string;
   direction: "in" | "out";
   from: ThreadMessagePeer;
   to: ThreadMessagePeer;
@@ -481,6 +486,8 @@ export interface ThreadMessageRecord {
   /** Execution context policy is part of the idempotent request identity. */
   context?: "continue" | "fresh";
   replyTo?: string;
+  /** Receipt for an explicit reply wait; expiry does not cancel this message. */
+  wait?: { deadline: number; state: "waiting" | "elapsed" | "interrupted" };
   status: ThreadMessageStatus;
   /** A known rejected execution attempt; not an uncertain transport acknowledgement. */
   failure?: string;
@@ -663,7 +670,7 @@ export interface Thread {
   lifecycle: ThreadLifecycle;
   attention: ThreadAttention;
   waitingFor: ThreadWaitingFor | null;
-  dependencyWait?: ThreadDependencyWait;
+  dependencyWaits?: ThreadDependencyWait[];
   integration: ThreadIntegration;
   diffStats: ThreadDiffStats | null;
   report: ThreadReport | null;
@@ -975,9 +982,9 @@ export interface ThreadSendParams {
    */
   requestId?: string;
   /**
-   * Binds this message to a request the caller previously received. The reply
-   * resolves the outstanding request records and completes the requester's
-   * dependency wait.
+   * Associates a reply with a received message. With no explicit recipient,
+   * the Host routes to that message's actual sender. Only replies to requests
+   * resolve an outstanding dependency; ordinary messages can also be replied to.
    */
   replyTo?: string;
   /**
@@ -1007,6 +1014,8 @@ export interface ThreadSendParams {
 }
 
 export interface ThreadSendResult {
+  from?: ThreadMessagePeer;
+  to?: ThreadMessagePeer;
   accepted: boolean;
   lifecycle: ThreadLifecycle;
   attention: ThreadAttention;
@@ -1029,6 +1038,7 @@ export interface ThreadSendResult {
   };
   /** True when wait elapsed without a correlated reply. */
   timedOut?: boolean;
+  interrupted?: boolean;
 }
 
 export type ThreadReadWhat = "blocks" | "report" | "steps" | "transcript";

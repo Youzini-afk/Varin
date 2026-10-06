@@ -8,6 +8,8 @@ import {
   harnessThreadTitle, isEndedHarnessThread, projectHarnessThreadState,
   type HarnessThreadSnapshot,
 } from './harnessThreadPresentation';
+import { useHarnessThreadState } from './HarnessThreadStateContext';
+import { collectThreadPeers, threadPeerLabel } from './threadMessages';
 
 export function HarnessThreadStatus({ entry }: { entry: HarnessThreadSnapshot }) {
   const { t } = useI18n();
@@ -29,15 +31,26 @@ export function HarnessThreadList({ entries, parentSessionId, onSelect }: {
   const key = workOverviewStateKey(runtimeKey, parentSessionId);
   const endedOpen = useWorkOverviewStore((state) => state.bySession[key]?.endedThreads ?? true);
   const setDisclosure = useWorkOverviewStore((state) => state.setDisclosure);
+  const context = useHarnessThreadState();
+  const peers = collectThreadPeers(context.peers, context.rootThreads, context.threads, context.branches);
   const active = entries.filter((entry) => !isEndedHarnessThread(entry));
   const ended = entries.filter(isEndedHarnessThread);
   const row = (entry: HarnessThreadSnapshot, compact: boolean) => {
     const state = projectHarnessThreadState(entry);
     const running = state === 'running' || state === 'starting';
-    const detail = entry.thread.waitingFor?.text || entry.activeRun?.exitReason
+    const waitingReply = entry.thread.dependencyWaits?.find(wait => wait.state === 'watching' && wait.replyTo);
+    const request = waitingReply ? entry.thread.messages?.find(message => message.id === waitingReply.replyTo && message.direction === 'out') : undefined;
+    const pending = entry.thread.messages?.filter(message => message.direction === 'in' && message.kind === 'request'
+      && ['pending', 'held', 'delivered'].includes(message.status)).length ?? 0;
+    const latest = entry.thread.messages?.at(-1);
+    const messageError = entry.thread.dependencyWaits?.find(wait => wait.error)?.error
+      || (latest?.status === 'failed' ? latest.failure : undefined);
+    const detail = messageError || (request ? t('harness.messages.waitingOn', { peer: threadPeerLabel(request.to, peers,
+      { user: t('harness.messages.you'), main: t('harness.messages.main'), thread: t('harness.messages.thread') }) })
+      : pending ? t('harness.messages.pending', { count: pending }) : entry.thread.waitingFor?.text || entry.activeRun?.exitReason
       || (running && entry.activeRun?.lastToolCall
         ? t('harness.threads.usingTool', { tool: entry.activeRun.lastToolCall.name })
-        : entry.thread.report?.conclusion);
+        : entry.thread.report?.conclusion));
     return <button key={entry.thread.id} type="button" onClick={() => onSelect(entry)}
       title={entry.thread.brief}
       aria-label={`${t('harness.threads.viewConversation')}: ${harnessThreadTitle(entry)}`}
@@ -47,7 +60,7 @@ export function HarnessThreadList({ entries, parentSessionId, onSelect }: {
         <span className="min-w-0 flex-1 truncate typography-meta font-medium text-foreground">{harnessThreadTitle(entry)}</span>
         <HarnessThreadStatus entry={entry} />
       </div>
-      {!compact && detail ? <p className="mt-1 pl-5.5 line-clamp-2 typography-meta leading-5 text-muted-foreground">{detail}</p> : null}
+      {(!compact || messageError) && detail ? <p className={cn('mt-1 pl-5.5 line-clamp-2 typography-meta leading-5', messageError ? 'text-destructive' : 'text-muted-foreground')}>{detail}</p> : null}
     </button>;
   };
   return <div className="space-y-1">

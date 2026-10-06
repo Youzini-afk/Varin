@@ -16,6 +16,7 @@ import {
   type RetrievalArtifactRef,
   type RetrievalEvidence,
   type Thread,
+  type ThreadDependencyWait,
   type ThreadMessagePeer,
   type ThreadMessageRecord,
   type ThreadParent,
@@ -134,7 +135,7 @@ const threadState = ({ thread, activeRun }: ThreadSnapshot): string => {
   if (thread.integration === "merged") return "merged";
   if (thread.integration === "conflict") return "conflict";
   if (thread.lifecycle === "queued") return "queued";
-  if (thread.attention === "user" || thread.attention === "permission" || thread.attention === "thread") return "waiting-for-input";
+  if (thread.attention === "user" || thread.attention === "permission" || thread.attention === "thread" || activeRun?.executionYielded) return "waiting-for-input";
   if (thread.attention === "stalled" || thread.attention === "looping") return thread.attention;
   if (thread.lifecycle === "settled") {
     if (thread.integration === "merge-ready" && activeRun?.outcome === "success") return "merge-ready";
@@ -879,6 +880,8 @@ export function createThreadWaitService(host: HarnessServiceHost): HarnessServic
       // Returning a tool result permits the next model request. A reply or
       // timeout may finish dependency watching, but cannot bypass root admission.
       if (owner?.activeRunId) {
+        const retained = (await registry.getThreadById(workspaceId, owner.id))?.dependencyWaits?.find(wait => wait.id === waitId);
+        if (retained) await registry.setDependencyWait(workspaceId, owner.id, { ...retained, state: "ready" }, waitId);
         await registry.awaitExecutionSlot(workspaceId, owner.id, owner.activeRunId, ctx.signal);
         const clear = () => { void registry.setDependencyWait(workspaceId, owner.id, null, waitId).catch(error => console.error("[ThreadWait] Failed to acknowledge wait completion", error instanceof Error ? error.message : String(error))); };
         if (ctx.deferResponseDelivery) ctx.deferResponseDelivery(clear, () => undefined);
@@ -891,6 +894,7 @@ export function createThreadWaitService(host: HarnessServiceHost): HarnessServic
           await host.threadSendToSession(ctx.sessionId, heldMessage.text, {
             from: messagePeerLabel(heldMessage.from),
             messageId: heldMessage.id,
+            ...(heldMessage.replyTo ? { replyTo: heldMessage.replyTo } : {}),
             ...(heldMessage.kind === "request" ? { requestId: heldMessage.id } : {}),
           });
           await registry.acknowledgeThreadMessages(workspaceId, owner.id, [heldMessage.id], owner.activeRunId ?? undefined);
@@ -1003,6 +1007,7 @@ const continueError = (error: unknown): never => {
 };
 
 export interface AuthorizedThreadRequestInput {
+  originSessionId?: string;
   scopeId: string;
   threadId: string;
   text: string;
@@ -1065,6 +1070,7 @@ export const deliverAuthorizedThreadRequest = async (
     if (!previous) {
       await deps.registry.recordDirectedMessage(input.scopeId, {
         id: input.requestId,
+        ...(input.originSessionId ? { originSessionId: input.originSessionId } : {}),
         from: input.from,
         to,
         kind: "request",
@@ -1139,6 +1145,7 @@ export const deliverAuthorizedThreadRequest = async (
       await deps.sendToSession(run.sessionId!, heldMessage.text, {
         from: messagePeerLabel(heldMessage.from),
         messageId: heldMessage.id,
+            ...(heldMessage.replyTo ? { replyTo: heldMessage.replyTo } : {}),
         ...(heldMessage.kind === "request" ? { requestId: heldMessage.id } : {}),
       });
       await deps.registry.acknowledgeThreadMessages(input.scopeId, thread.id, [heldMessage.id], run.id);
@@ -1167,10 +1174,13 @@ export function createThreadSendService(host: HarnessServiceHost): HarnessServic
       const owning = await resolveOwningContext(host, ctx);
       const { workspaceId, family } = owning;
       const initialOwner = owning.owner;
+      const userOwner = ctx.requestSource === "user" ? await registry.resolveSessionOwner(ctx.sessionId) : null;
+      const peers = userOwner ? await registry.listTaskThreadSnapshots(userOwner.owningScopeId, { kind: "thread", id: userOwner.threadId }, true)
+        : await taskSnapshotsFor(host, owning, true);
       // Authenticated UI calls stay user-originated while the same Pi session
       // is temporarily attached to its principal root (research or Bot entry).
       // Worker calls still act with the root Thread's frozen authority.
-      let owner = ctx.requestSource === "user" && isAttachedRootPurpose(initialOwner?.purpose)
+      let owner = ctx.requestSource === "user"
         ? null
         : initialOwner;
       assertOwnerTool(owner, "send");
@@ -1215,8 +1225,8 @@ export function createThreadSendService(host: HarnessServiceHost): HarnessServic
       if (params.to === "parent" && params.threadId !== undefined) {
         throw new HarnessServiceError("invalid-params", "to: \"parent\" and threadId are mutually exclusive");
       }
-      if (params.to !== "parent" && params.threadId === undefined) {
-        throw new HarnessServiceError("invalid-params", "send requires a threadId or to: \"parent\"");
+      if (params.to !== "parent" && params.threadId === undefined && params.replyTo === undefined) {
+        throw new HarnessServiceError("invalid-params", "send requires a threadId, to: \"parent\", or replyTo");
       }
       const waitSeconds = params.wait ?? 0;
       if (!Number.isFinite(waitSeconds) || waitSeconds < 0) {
@@ -1251,7 +1261,14 @@ export function createThreadSendService(host: HarnessServiceHost): HarnessServic
       // Resolve the target: own parent, or a relationship-bound Thread.
       let targetSessionId: string | null = null;
       let target: Thread | null = null;
-      if (params.to === "parent") {
+      const original = params.replyTo && params.threadId === undefined && params.to === undefined
+        ? owner?.messages?.find(message => message.id === params.replyTo && message.direction === "in") : undefined;
+      if (params.replyTo && params.threadId === undefined && params.to === undefined && !original) {
+        throw new HarnessServiceError("denied", "replyTo does not identify a message received by this thread");
+      }
+      if (original && original.from.kind !== "thread") {
+        targetSessionId = original.from.id;
+      } else if (params.to === "parent") {
         if (!owner) throw new HarnessServiceError("invalid-params", "A root session has no parent to send to");
         if (owner.parent.kind === "session") targetSessionId = owner.parent.id;
         else {
@@ -1259,18 +1276,19 @@ export function createThreadSendService(host: HarnessServiceHost): HarnessServic
           if (!target) throw new HarnessServiceError("not-found", `Thread not found: ${owner.parent.id}`);
         }
       } else {
-        const candidate = await registry.getThreadById(workspaceId, params.threadId!);
-        if (!candidate) throw new HarnessServiceError("not-found", `Thread not found: ${params.threadId}`);
+        const targetId = params.threadId ?? original!.from.id;
+        const candidate = await registry.getThreadById(workspaceId, targetId);
+        if (!candidate) throw new HarnessServiceError("not-found", `Thread not found: ${targetId}`);
         // Reachability follows actual root-task relationships, not shared
         // workspace membership: children, the parent, and same-parent
         // siblings for a Thread caller; direct children for a session.
-        const related = owner
+        const related = peers.some(peer => peer.thread.id === candidate.id) || (owner
           ? (candidate.parent.kind === "thread" && candidate.parent.id === owner.id)
             || (owner.parent.kind === "thread" && owner.parent.id === candidate.id)
             || peerEquals(candidate.parent, owner.parent)
             || (family !== null && candidate.parent.kind === "thread" && family.has(candidate.parent.id))
           : (candidate.parent.kind === "session" && candidate.parent.id === ctx.sessionId)
-            || await isUserResearchBranch(candidate);
+            || await isUserResearchBranch(candidate));
         if (!related) {
           throw new HarnessServiceError("denied", `Thread is outside the caller's root-task relationships: ${candidate.id}`);
         }
@@ -1279,7 +1297,7 @@ export function createThreadSendService(host: HarnessServiceHost): HarnessServic
 
       if (target && kind === "request" && !upgradeRequested && params.replyTo === undefined
         && waitSeconds === 0 && (params.context ?? "continue") === "continue") {
-        return deliverAuthorizedThreadRequest({
+        const delivered = await deliverAuthorizedThreadRequest({
           registry,
           ...(host.threadContinueRun ? { continueRun: host.threadContinueRun } : {}),
           ...(host.threadSendToSession ? { sendToSession: (sessionId, message, meta) => host.threadSendToSession!(sessionId, message, meta) } : {}),
@@ -1289,7 +1307,9 @@ export function createThreadSendService(host: HarnessServiceHost): HarnessServic
           text: params.message,
           requestId: params.requestId ?? `msg-${randomUUID()}`,
           from: fromPeer,
+          originSessionId: ctx.sessionId,
         });
+        return { ...delivered, from: fromPeer, to: { kind: "thread", id: target.id } };
       }
 
       const sent = await registry.withMessageDelivery(workspaceId, target ? "thread:" + target.id : "session:" + targetSessionId,
@@ -1298,7 +1318,7 @@ export function createThreadSendService(host: HarnessServiceHost): HarnessServic
       // Refresh after waiting for another input operation; its Run and ledger
       // may have changed. The owning actor is rechecked, not accepted from a stale snapshot.
       const currentOwner = await resolveOwningContext(host, ctx);
-      owner = ctx.requestSource === "user" && isAttachedRootPurpose(currentOwner.owner?.purpose)
+      owner = ctx.requestSource === "user"
         ? null
         : currentOwner.owner;
       assertOwnerTool(owner, "send");
@@ -1424,26 +1444,28 @@ export function createThreadSendService(host: HarnessServiceHost): HarnessServic
 
       const recordState = (status: ThreadMessageRecord["status"], runId?: string) => registry.recordDirectedMessage(workspaceId, {
         id: requestId, from: fromPeer, to: toPeer, kind, text: params.message,
+        originSessionId: ctx.sessionId,
         ...(kind === "request" ? { context: requestedMode } : {}),
         ...(params.replyTo !== undefined ? { replyTo: params.replyTo } : {}),
         status, ...(runId ? { runId } : {}), at: recordedAt,
       });
       // A request id is not a bearer capability. A sibling may answer only
       // requests actually addressed to it, not another sibling's dependency.
+      const sameParticipant = (left: ThreadMessagePeer, right: ThreadMessagePeer): boolean => peerEquals(left, right)
+        || (left.id === right.id && left.kind !== "thread" && right.kind !== "thread");
       const matchingReplyRequest = (message: ThreadMessageRecord): boolean => (
-        message.id === params.replyTo && message.kind === "request"
-        && peerEquals(message.to, fromPeer)
-        && (peerEquals(message.from, toPeer)
-          || (toPeer.kind === "session" && message.from.kind === "user" && message.from.id === toPeer.id))
+        message.id === params.replyTo
+        && sameParticipant(message.to, fromPeer)
+        && sameParticipant(message.from, toPeer)
       );
       const replyMine = params.replyTo === undefined ? undefined
         : owner?.messages?.find((message) => message.direction === "in" && matchingReplyRequest(message));
       const replyTheirs = params.replyTo === undefined ? undefined
         : target?.messages?.find((message) => message.direction === "out" && matchingReplyRequest(message));
       if (params.replyTo !== undefined && !replyMine && !replyTheirs) {
-        throw new HarnessServiceError("denied", "replyTo does not identify a request between these actual peers");
+        throw new HarnessServiceError("denied", "replyTo does not identify a message between these actual peers");
       }
-      const dependencySatisfied = replyTheirs !== undefined && replyTheirs.status !== "resolved";
+      const dependencySatisfied = replyTheirs?.kind === "request" && replyTheirs.status !== "resolved";
       // Session target — the caller Thread's parent session. Sessions carry
       // no message ledger; delivery goes straight to the input boundary.
       if (targetSessionId !== null) {
@@ -1451,6 +1473,7 @@ export function createThreadSendService(host: HarnessServiceHost): HarnessServic
         await host.threadSendToSession!(targetSessionId, params.message, {
           from: fromLabel,
           messageId: requestId,
+          ...(params.replyTo ? { replyTo: params.replyTo } : {}),
           ...(kind === "request" ? { requestId } : {}),
         });
         await recordState("delivered");
@@ -1468,8 +1491,14 @@ export function createThreadSendService(host: HarnessServiceHost): HarnessServic
         const rootSessionId = thread.parent.kind === "session" ? thread.parent.id
           : (await registry.getActiveRun(workspaceId, thread.id))?.sessionId;
         if (!rootSessionId) throw new HarnessServiceError("unavailable", "The attached conversation identity is unavailable");
+        const rootRun = await registry.getActiveRun(workspaceId, thread.id);
+        if (kind === "inform" && rootRun?.workerState === "lost") {
+          await recordState("held");
+          return { accepted: true, lifecycle: thread.lifecycle, attention: thread.attention, messageId: requestId, delivery: "held" };
+        }
         await recordState("pending");
         await host.threadSendToSession!(rootSessionId, params.message, { from: fromLabel, messageId: requestId,
+          ...(params.replyTo ? { replyTo: params.replyTo } : {}),
           ...(kind === "request" ? { requestId } : {}) });
         await recordState("delivered");
         return { accepted: true, lifecycle: thread.lifecycle, attention: thread.attention, messageId: requestId, delivery: "delivered" };
@@ -1556,6 +1585,7 @@ export function createThreadSendService(host: HarnessServiceHost): HarnessServic
           await host.threadSendToSession!(run.sessionId!, heldMessage.text, {
             from: messagePeerLabel(heldMessage.from),
             messageId: heldMessage.id,
+            ...(heldMessage.replyTo ? { replyTo: heldMessage.replyTo } : {}),
             ...(heldMessage.kind === "request" ? { requestId: heldMessage.id } : {}),
           });
           await registry.acknowledgeThreadMessages(workspaceId, thread.id, [heldMessage.id], run.id);
@@ -1563,6 +1593,7 @@ export function createThreadSendService(host: HarnessServiceHost): HarnessServic
         await host.threadSendToSession!(run.sessionId!, params.message, {
           from: fromLabel,
           messageId: requestId,
+          ...(params.replyTo ? { replyTo: params.replyTo } : {}),
           ...(kind === "request" ? { requestId } : {}),
         });
       };
@@ -1580,7 +1611,9 @@ export function createThreadSendService(host: HarnessServiceHost): HarnessServic
       // the wait it was bound to. User/permission waits stay — a person is
       // still owed an answer.
       let attention = thread.attention;
-      if (waiting?.kind === "thread" && (kind === "request" || dependencySatisfied)) {
+      const otherWaits = waiting?.kind === "thread" && (await registry.getThreadById(workspaceId, thread.id))?.dependencyWaits?.some(wait =>
+        wait.state === "watching" && wait.replyTo !== params.replyTo);
+      if (waiting?.kind === "thread" && (kind === "request" || dependencySatisfied) && !otherWaits) {
         const updated = await registry.setAttention(workspaceId, thread.id, "none");
         attention = updated?.attention ?? "none";
       }
@@ -1593,6 +1626,8 @@ export function createThreadSendService(host: HarnessServiceHost): HarnessServic
         delivery: "delivered",
       };
       });
+      sent.from = fromPeer;
+      sent.to = target ? { kind: "thread", id: target.id } : { kind: "session", id: targetSessionId! };
 
       // Correlated wait (7E/D-300): only a message whose replyTo names this
       // request satisfies it — unrelated arrivals never impersonate the
@@ -1603,14 +1638,13 @@ export function createThreadSendService(host: HarnessServiceHost): HarnessServic
       // session caller watches the target's ledger for the outbound copy.
       const observedId = owner ? owner.id : target?.id;
       if (!observedId) return sent;
-      const observedScope = owner ? owner.parent : target!.parent;
       const awaitedId = sent.messageId ?? params.requestId;
       if (!awaitedId) return sent;
       const replyOf = (record: { messages?: ThreadMessageRecord[] } | null | undefined): ThreadMessageRecord | undefined => (
         record?.messages?.find((message) => (
           message.direction === (owner ? "in" : "out")
           && message.replyTo === awaitedId
-          && (message.status === "delivered" || message.status === "resolved")
+          && (message.status === "held" || message.status === "delivered" || message.status === "resolved")
         ))
       );
       const currentReply = async (): Promise<ThreadMessageRecord | undefined> => (
@@ -1618,29 +1652,42 @@ export function createThreadSendService(host: HarnessServiceHost): HarnessServic
       );
       let reply = await currentReply();
       let timedOut = false;
+      let interrupted = false;
+      let retainedReplyWait = false;
+      const replyWait: ThreadDependencyWait = { id: randomUUID(), runId: owner?.activeRunId ?? "", sessionId: ctx.sessionId,
+        deadline: Date.now() + Math.min(waitSeconds * 1000, HARNESS_MAX_REQUEST_TIMEOUT_MS - 5_000),
+        state: "watching", targets: [], requestIds: [], replyTo: awaitedId };
       if (!reply) {
         if (owner?.activeRunId) {
+          if (!await registry.setDependencyWait(workspaceId, owner.id, replyWait)) {
+            throw new HarnessServiceError("unavailable", "The reply wait could not be retained");
+          }
+          retainedReplyWait = true;
           const marked = await registry.yieldExecutionSlot(workspaceId, owner.id, owner.activeRunId, {
             kind: "thread",
             text: `Waiting for a reply to ${awaitedId}`,
           });
           if (!marked) throw new HarnessServiceError("unavailable", "The waiting Run could not yield its execution slot");
         }
-        const deadline = Date.now() + Math.min(waitSeconds * 1000, HARNESS_MAX_REQUEST_TIMEOUT_MS - 5_000);
+        const deadline = replyWait.deadline!;
         while (true) {
           ctx.signal.throwIfAborted();
-          let wake!: (reason: "change" | "timeout" | "abort") => void;
-          const notification = new Promise<"change" | "timeout" | "abort">((resolve) => { wake = resolve; });
-          const unsubscribe = registry.subscribeToChanges(workspaceId, observedScope, () => wake("change"));
+          let wake!: (reason: "change" | "timeout" | "abort" | "input") => void;
+          const notification = new Promise<"change" | "timeout" | "abort" | "input">((resolve) => { wake = resolve; });
+          const unsubscribe = registry.subscribeToThreadChanges(workspaceId, observedId, () => wake("change"));
           const abort = () => wake("abort");
           ctx.signal.addEventListener("abort", abort, { once: true });
+          const input = () => wake("input");
+          ctx.interruptSignal?.addEventListener("abort", input, { once: true });
           const timer = setTimeout(() => wake("timeout"), Math.max(0, deadline - Date.now()));
           try {
             reply = await currentReply();
             if (reply) break;
+            if (ctx.interruptSignal?.aborted) { interrupted = true; break; }
             if (Date.now() >= deadline) { timedOut = true; break; }
             const reason = await notification;
             if (reason === "abort") ctx.signal.throwIfAborted();
+            if (reason === "input") { interrupted = true; break; }
             if (reason === "timeout") {
               reply = await currentReply();
               timedOut = !reply;
@@ -1649,12 +1696,21 @@ export function createThreadSendService(host: HarnessServiceHost): HarnessServic
           } finally {
             clearTimeout(timer);
             ctx.signal.removeEventListener("abort", abort);
+            ctx.interruptSignal?.removeEventListener("abort", input);
             unsubscribe();
           }
         }
       }
       if (owner?.activeRunId) {
+        if (retainedReplyWait) {
+          await registry.setDependencyWait(workspaceId, owner.id, { ...replyWait, state: "ready",
+            ...(timedOut ? { replyOutcome: "elapsed" } : interrupted ? { replyOutcome: "interrupted" } : {}) }, replyWait.id);
+        }
         await registry.awaitExecutionSlot(workspaceId, owner.id, owner.activeRunId, ctx.signal);
+        const ownerId = owner.id;
+        const clear = () => { void registry.setDependencyWait(workspaceId, ownerId, null, replyWait.id).catch(error => console.error("[ThreadWait] Failed to acknowledge reply delivery", error instanceof Error ? error.message : String(error))); };
+        if (ctx.deferResponseDelivery) ctx.deferResponseDelivery(clear, () => undefined);
+        else await registry.setDependencyWait(workspaceId, owner.id, null, replyWait.id);
       }
       // Messages held while the caller waited flush at this boundary.
       if (owner) {
@@ -1663,6 +1719,7 @@ export function createThreadSendService(host: HarnessServiceHost): HarnessServic
           await host.threadSendToSession(ctx.sessionId, heldMessage.text, {
             from: messagePeerLabel(heldMessage.from),
             messageId: heldMessage.id,
+            ...(heldMessage.replyTo ? { replyTo: heldMessage.replyTo } : {}),
             ...(heldMessage.kind === "request" ? { requestId: heldMessage.id } : {}),
           });
           await registry.acknowledgeThreadMessages(workspaceId, owner.id, [heldMessage.id], owner.activeRunId ?? undefined);
@@ -1674,6 +1731,7 @@ export function createThreadSendService(host: HarnessServiceHost): HarnessServic
           reply: { messageId: reply.id, text: reply.text, from: reply.from, at: reply.at },
         } : {}),
         ...(timedOut ? { timedOut: true } : {}),
+        ...(interrupted ? { interrupted: true } : {}),
       };
     },
   };
@@ -1748,7 +1806,7 @@ export function createThreadReadService(host: HarnessServiceHost): HarnessServic
         lines.push(`Steps: ${run?.steps ?? 0} · Last activity: ${run?.lastActivityAt ?? thread.updatedAt}`);
         if (run?.lastToolCall) lines.push(`Last tool: ${run.lastToolCall.name} at ${run.lastToolCall.at}`);
         if (thread.waitingFor) lines.push(`Waiting for: ${thread.waitingFor.kind} — ${thread.waitingFor.text}`);
-        if (thread.dependencyWait?.error) lines.push(`Wait recovery needs attention: ${thread.dependencyWait.error}`);
+        for (const wait of thread.dependencyWaits ?? []) if (wait.error) lines.push(`Wait recovery needs attention: ${wait.error}`);
         if (thread.attention !== "none") lines.push(`Attention: ${thread.attention}`);
         if (run?.workerState === "lost") lines.push("Run: worker-lost");
         if (delivery?.blocksSnapshot) {

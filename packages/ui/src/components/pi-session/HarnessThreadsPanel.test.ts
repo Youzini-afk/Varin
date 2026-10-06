@@ -61,7 +61,7 @@ describe('HarnessThreadsPanel projection', () => {
   test.each(['agent-root', 'research-root'] as const)('projects %s and its branches without unrelated sessions', purpose => {
     const root = { thread: thread({ id: 'root', purpose, hidden: true }), activeRun: run({ sessionId: 'parent-1', sessionOwner: 'attached-root' }) };
     const branch = { thread: thread({ parent: { kind: 'thread', id: 'root' } }), activeRun: run() };
-    const response = { workspaceId: 'workspace-1', parent: { kind: 'session', id: 'parent-1' }, threads: [], rootThreads: [root], branches: [branch] };
+    const response = { workspaceId: 'workspace-1', parent: { kind: 'session', id: 'parent-1' }, threads: [], rootThreads: [root], branches: [branch], peers: [root, branch] };
     expect(parseHarnessThreadProjection(response).rootThreads).toEqual([root]);
     expect(parseHarnessThreadProjection(response).branches).toEqual([branch]);
     expect(() => parseHarnessThreadProjection({ ...response, branches: [{ ...branch, thread: thread() }] })).toThrow(/task branch/i);
@@ -90,6 +90,7 @@ describe('HarnessThreadsPanel projection', () => {
     const response = {
       workspaceId: 'workspace-1',
       parent: { kind: 'session', id: 'parent-1' },
+      peers: [],
       threads: [{ thread: thread(), activeRun: run() }],
     };
     expect(parseHarnessThreadList(response)).toHaveLength(1);
@@ -119,6 +120,7 @@ describe('HarnessThreadsPanel projection', () => {
     const hidden = parseHarnessThreadList({
       workspaceId: 'workspace-1',
       parent: { kind: 'session', id: 'parent-1' },
+      peers: [],
       includeArchived: false,
       threads: [archived],
     });
@@ -126,6 +128,7 @@ describe('HarnessThreadsPanel projection', () => {
     const shown = parseHarnessThreadList({
       workspaceId: 'workspace-1',
       parent: { kind: 'session', id: 'parent-1' },
+      peers: [],
       includeArchived: true,
       threads: [archived],
     });
@@ -167,6 +170,7 @@ describe('HarnessThreadsPanel projection', () => {
     const parsed = parseHarnessThreadList({
       workspaceId: 'workspace-1',
       parent: { kind: 'session', id: 'parent-1' },
+      peers: [],
       includeArchived: true,
       threads: [{ thread: deleting, activeRun: null }],
     });

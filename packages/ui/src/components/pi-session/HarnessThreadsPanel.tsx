@@ -24,6 +24,7 @@ import { HarnessSessionStateTrigger } from './HarnessSessionStateTrigger';
 import { useHarnessThreadState } from './HarnessThreadStateContext';
 import { HarnessThreadList } from './HarnessThreadList';
 import { HarnessThreadDialog } from './HarnessThreadConversation';
+import { THREAD_EXCHANGE_OPEN_EVENT, type ThreadExchangeLocation } from './threadMessages';
 import { useWebSources, useWebSourcesStore } from '@/stores/useWebSourcesStore';
 import { PdfMaterialReader } from './PdfMaterialReader';
 import { getGitStatus } from '@/lib/gitApiHttp';
@@ -69,8 +70,19 @@ export const HarnessThreadsPanel: React.FC<{
   const setOverviewOpen = (open: boolean) => setDisclosure(overviewKey, 'overview', open);
   const setNarrowOpen = (open: boolean) => setDisclosure(overviewKey, 'mobile', open);
   const [selectedThreadId, setSelectedThreadId] = React.useState<string | null>(null);
-  React.useEffect(() => { setSelectedThreadId(null); }, [workspaceId, parentSessionId]);
+  const [messageFocus, setMessageFocus] = React.useState<ThreadExchangeLocation | null>(null);
+  React.useEffect(() => { setSelectedThreadId(null); setMessageFocus(null); }, [workspaceId, parentSessionId]);
   const threadState = useHarnessThreadState();
+  React.useEffect(() => {
+    const openExchange = (event: Event) => {
+      const location = (event as CustomEvent<ThreadExchangeLocation>).detail;
+      if (!location || ![...(threadState.peers ?? []), ...threadState.threads, ...threadState.branches, ...threadState.rootThreads].some(entry => entry.thread.id === location.threadId)) return;
+      setSelectedThreadId(location.threadId);
+      setMessageFocus(location);
+    };
+    window.addEventListener(THREAD_EXCHANGE_OPEN_EVENT, openExchange);
+    return () => window.removeEventListener(THREAD_EXCHANGE_OPEN_EVENT, openExchange);
+  }, [threadState.peers, threadState.threads, threadState.branches, threadState.rootThreads]);
   const threads = React.useMemo(() => [
     ...threadState.threads,
     ...threadState.branches,
@@ -763,8 +775,9 @@ export const HarnessThreadsPanel: React.FC<{
           onOpenChange={(open) => { if (!open) setActivePdfMaterial(null); }}
         />
       ) : null}
-      <HarnessThreadDialog entry={threads.find((entry) => entry.thread.id === selectedThreadId) ?? null}
-        parentSessionId={parentSessionId} cwd={fallbackCwd} onClose={() => setSelectedThreadId(null)} />
+      <HarnessThreadDialog entry={[...threads, ...threadState.rootThreads, ...(threadState.peers ?? [])].find((entry) => entry.thread.id === selectedThreadId) ?? null}
+        parentSessionId={parentSessionId} cwd={fallbackCwd} messageFocus={messageFocus?.threadId === selectedThreadId ? messageFocus : null}
+        onClose={() => { setSelectedThreadId(null); setMessageFocus(null); }} />
       {presentation === 'inline' ? (
         <details
           key={overviewKey}
