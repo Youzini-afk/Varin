@@ -29,8 +29,8 @@ function OverviewSurface({ compact, label, children }: {
     transition={{ duration: reduced ? 0 : 0.18, ease: [0.22, 1, 0.36, 1] }}
     style={{ transformOrigin: 'top right' }}
     className={cn('pointer-events-auto mt-3 flex flex-col overflow-hidden rounded-xl border border-border/70 shadow-lg',
-      compact ? 'workbench-overview-peek max-h-[min(55dvh,24rem)] w-[min(16rem,calc(100cqi-1.5rem))]'
-        : 'max-h-[min(72dvh,46rem)] w-[min(20rem,calc(100cqi-1.5rem))] bg-background/96 backdrop-blur-xl')}
+      compact ? 'workbench-overview-peek max-h-[min(55dvh,24rem)]'
+        : 'workbench-overview-full max-h-[min(72dvh,46rem)] bg-background/96 backdrop-blur-xl')}
     {...(compact ? { 'data-harness-overview-peek': true } : { 'data-harness-overview-floating': true })}>
     {children}
   </motion.section>;
@@ -68,9 +68,9 @@ export function HarnessOverviewControl({ open, compactOpen, attention, onOpenCha
       <Tooltip>
         <TooltipTrigger asChild>
           <button ref={fullTrigger} type="button" onClick={() => onOpenChange(!open)} aria-expanded={open} aria-label={label}
-            className={cn('workbench-icon-button relative flex size-8 items-center justify-center rounded-lg text-muted-foreground hover:bg-interactive-hover hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring',
+            className={cn('workbench-icon-button relative flex size-9 items-center justify-center rounded-lg text-muted-foreground hover:bg-interactive-hover hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring',
               open && 'bg-interactive-selection text-foreground')}>
-            <Icon name="stack" className="size-4" />
+            <Icon name="stack" className="size-5" />
             {attention ? <span aria-hidden="true" className="absolute right-1 top-1 size-1 rounded-full bg-[var(--status-warning)]" /> : null}
           </button>
         </TooltipTrigger>

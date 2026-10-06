@@ -5,6 +5,8 @@
   --wb-panel-duration: 280ms;
   --wb-state-duration: 170ms;
   --wb-travel-duration: 520ms;
+  --wb-overview-compact-width: 12rem;
+  --wb-overview-full-width: 20rem;
 }
 
 .pi-message-handoff {
@@ -176,7 +178,7 @@
   display: flex;
   align-items: center;
   justify-content: center;
-  width: 28px;
+  width: 32px;
   height: 16px;
   z-index: -1;
   padding-top: 2px;
@@ -200,7 +202,11 @@
 .workbench-overview-peek-trigger:hover,
 .workbench-overview-peek-trigger:focus-visible { color: var(--foreground); }
 .workbench-overview-peek-trigger:focus-visible { outline: 2px solid var(--ring); outline-offset: 2px; }
-.workbench-overview-peek { background: var(--surface-elevated); }
+.workbench-overview-peek {
+  width: min(var(--wb-overview-compact-width), calc(100cqi - 1.5rem));
+  background: var(--surface-elevated);
+}
+.workbench-overview-full { width: min(var(--wb-overview-full-width), calc(100cqi - 1.5rem)); }
 .workbench-overview-peek-progress > span { transition: width var(--wb-state-duration) ease; }
 @media (hover: none) {
   .workbench-overview-peek-trigger { opacity: 1; transform: none; pointer-events: auto; }
@@ -228,8 +234,9 @@
 }
 
 .pi-chat-layout { transition: padding-right var(--wb-panel-duration) var(--wb-ease); }
+.pi-chat-layout[data-overview-view="compact"] { padding-right: calc(var(--wb-overview-compact-width) + 1rem); }
 @container (min-width: 900px) {
-  .pi-chat-layout[data-overview-open="true"] { padding-right: 21rem; }
+  .pi-chat-layout[data-overview-view="full"] { padding-right: calc(var(--wb-overview-full-width) + 1rem); }
 }
 @media (min-width: 768px) {
   [data-workbench-chrome="agent"] [data-pi-pending-draft] {
