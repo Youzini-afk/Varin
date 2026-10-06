@@ -18,6 +18,7 @@ async function fixture(t: TestContext, mode: "all" | "one-at-a-time" = "one-at-a
   }));
   const faux = fauxProvider();
   const model = faux.getModel();
+  const deliveredQueueIds: Array<string | undefined> = [];
   const host = new SessionHost({ agentDir, projectTrustOverride: true,
     configureServices: async services => {
       services.modelRuntime.registerProvider(model.provider, {
@@ -30,6 +31,12 @@ async function fixture(t: TestContext, mode: "all" | "one-at-a-time" = "one-at-a
       return { model };
     },
     emit: <E extends HostEvent>(event: E, data: HostEventData<E>) => {
+      if (event === "agent.event") {
+        const projected = (data as HostEventData<"agent.event">).event;
+        if (projected.type === "message_start" && projected.message.role === "user") {
+          deliveredQueueIds.push(projected.queuedMessageId);
+        }
+      }
       if (event !== "harness.request") return;
       const request = data as { requestId: string };
       queueMicrotask(() => host.respondHarness(host.sessionId ?? "", request.requestId, {
@@ -43,11 +50,11 @@ async function fixture(t: TestContext, mode: "all" | "one-at-a-time" = "one-at-a
     assert.equal(dirname(resolve(root)), resolve(tmpdir()));
     await rm(root, { recursive: true, force: true });
   });
-  return { host, sessionId, faux };
+  return { host, sessionId, faux, deliveredQueueIds };
 }
 
 for (const mode of ["one-at-a-time", "all"] as const) test(`native ${mode} queue edits and sends one delivery unit without losing images or instructions`, async t => {
-  const { host, sessionId, faux } = await fixture(t, mode);
+  const { host, sessionId, faux, deliveredQueueIds } = await fixture(t, mode);
   let release!: () => void;
   let started!: () => void;
   const entered = new Promise<void>(resolve => { started = resolve; });
@@ -93,6 +100,8 @@ for (const mode of ["one-at-a-time", "all"] as const) test(`native ${mode} queue
   assert.equal(faux.state.callCount, 3, "sending a consumed identity must never duplicate it");
   const users = host.session.messages.filter(message => message.role === "user");
   assert.equal(users.length, 3);
+  assert.deepEqual(deliveredQueueIds, [undefined, selected!.id, last!.id],
+    "native consumption preserves queue identity through editing and promotion");
 });
 
 test("late queue admission resumes after an idle boundary without a duplicate user prompt", async t => {

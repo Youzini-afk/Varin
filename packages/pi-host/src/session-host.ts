@@ -4032,8 +4032,13 @@ export class SessionHost {
         ...(eventRunId === undefined ? {} : { runId: eventRunId }),
         turnIndex: this.#turnIndex,
       };
+      const userMessage = (event.type === "message_start" || event.type === "message_end") && event.message.role === "user"
+        ? event.message
+        : event.type === "entry_appended" && event.entry.type === "message" && event.entry.message.role === "user"
+          ? event.entry.message : undefined;
+      const queuedMessageId = userMessage ? session.getQueuedUserMessageId(userMessage) : undefined;
       this.#emit("agent.event", {
-        event: { ...projectAgentEvent(event, position), ...(position.runId === undefined ? {} : { runId: position.runId }) },
+        event: { ...projectAgentEvent(event, position, queuedMessageId), ...(position.runId === undefined ? {} : { runId: position.runId }) },
         sessionId: session.sessionId,
       });
       if (event.type === "message_end") {
@@ -4048,6 +4053,7 @@ export class SessionHost {
             event: projectAgentEvent(
               { entry, type: "entry_appended" },
               { leafId, ...(position.runId === undefined ? {} : { runId: position.runId }), turnIndex: this.#turnIndex },
+              queuedMessageId,
             ),
             sessionId: session.sessionId,
           });

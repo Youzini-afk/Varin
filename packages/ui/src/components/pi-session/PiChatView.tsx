@@ -54,6 +54,7 @@ import { DraftPresetChips } from '@/components/chat/DraftPresetChips';
 import { AutoReviewBanner } from '@/components/chat/AutoReviewBanner';
 import type { ResolvedStarter } from '@/components/chat/useDraftStarters';
 import { PiComposer } from './PiComposer';
+import { usePiMessageHandoff } from './usePiMessageHandoff';
 import { PiAssistBar } from './PiAssistBar';
 import { PiExtensionUiChrome } from './PiExtensionUiChrome';
 import { PiGoalStrip } from './PiGoalControls';
@@ -359,6 +360,7 @@ export const PiChatView: React.FC<PiChatViewProps> = ({
     return () => window.removeEventListener(PDF_MATERIAL_OPEN_EVENT, openMaterial);
   }, [active, t]);
   const submission = currentRecord?.submission;
+  const messageHandoff = usePiMessageHandoff(runtimeKey, currentSessionId, active && !readOnly);
   const sending = changingWorkFocus || submission?.status === 'preparing' || submission?.status === 'dispatching';
   const updateDraft = React.useCallback((sessionId: string, update: Partial<PiDraftState>) => {
     setPiDraft(sessionId, update, runtimeKey);
@@ -421,6 +423,7 @@ export const PiChatView: React.FC<PiChatViewProps> = ({
     const submissionMode: PiSessionSubmissionMode = activity.isWorking
       ? (followUpBehavior === 'queue' ? 'followUp' : 'steer')
       : 'prompt';
+    const messageSource = submissionMode === 'prompt' ? messageHandoff.captureDraft(sessionId) : null;
     const submissionId = beginSubmission(
       sessionId,
       pendingUserMessage(currentDraft),
@@ -470,6 +473,7 @@ export const PiChatView: React.FC<PiChatViewProps> = ({
       });
       clearPiDraft(sessionId, draftRuntimeKey);
       draftCleared = true;
+      if (submissionMode === 'prompt') messageHandoff.submit(submissionId, sessionId, messageSource);
       consumedGoalArm = useSessionGoalArmStore.getState().consume();
       if (consumedGoalArm.armed) {
         const settings = useUIStore.getState();
@@ -503,6 +507,7 @@ export const PiChatView: React.FC<PiChatViewProps> = ({
       const owner = usePiSessionStore.getState().records[sessionId]?.submission;
       if (getRuntimeKey() !== draftRuntimeKey || owner?.id !== submissionId) return;
       const ambiguous = isPiRequestOutcomeUnknown(error);
+      if (!ambiguous) messageHandoff.cancelSubmission(submissionId);
       updateSubmission(sessionId, submissionId, {
         error: error instanceof Error ? error.message : String(error),
         status: ambiguous ? 'uncertain' : 'failed',
@@ -531,7 +536,7 @@ export const PiChatView: React.FC<PiChatViewProps> = ({
             : t('chat.chatInput.toast.messageSendFailed'),
       );
     }
-  }, [beginSubmission, clearPiDraft, clearSubmission, followUp, followUpBehavior, mutateFeatures, prompt, runtimeKey, setPiDraft, steer, t, updateSubmission]);
+  }, [beginSubmission, clearPiDraft, clearSubmission, followUp, followUpBehavior, messageHandoff, mutateFeatures, prompt, runtimeKey, setPiDraft, steer, t, updateSubmission]);
 
   const handleSend = React.useCallback(async () => {
     if (!currentSessionId) return;
@@ -849,9 +854,10 @@ export const PiChatView: React.FC<PiChatViewProps> = ({
       <TooltipProvider>
         <div
           className={cn(
-            'flex h-full min-h-0 flex-col bg-background',
+            'relative flex h-full min-h-0 flex-col bg-background',
             !active && 'pointer-events-none',
           )}
+          ref={messageHandoff.ref}
           data-pi-pending-draft="true"
           data-pi-chat-view="true"
           data-pi-draft-cwd={pendingCwd}
@@ -999,7 +1005,7 @@ export const PiChatView: React.FC<PiChatViewProps> = ({
   return (
     <TooltipProvider>
       <HarnessThreadStateProvider parentSessionId={currentSessionId} workspaceId={threadWorkspaceId}>
-      <div data-pi-chat-view="true" className={cn('@container relative flex h-full min-h-0 bg-background', !active && 'pointer-events-none')}>
+      <div ref={messageHandoff.ref} data-pi-chat-view="true" className={cn('@container relative flex h-full min-h-0 bg-background', !active && 'pointer-events-none')}>
         <div className="pi-chat-layout flex min-h-0 min-w-0 flex-1 flex-col" data-overview-open={workOverviewOpen}>
         {conversationHeader}
         <HarnessThreadParentLink sessionId={currentSessionId} />

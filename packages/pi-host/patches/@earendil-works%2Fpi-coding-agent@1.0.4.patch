@@ -1,5 +1,5 @@
 diff --git a/dist/core/agent-session.d.ts b/dist/core/agent-session.d.ts
-index 03f811e..3720eb9 100644
+index 03f811e..fb04e56 100644
 --- a/dist/core/agent-session.d.ts
 +++ b/dist/core/agent-session.d.ts
 @@ -43,6 +43,13 @@ type WithParentToolCallId<E> = E extends {
@@ -86,17 +86,19 @@ index 03f811e..3720eb9 100644
          source?: InputSource;
      }): Promise<QueuedInputDisposition>;
      /**
-@@ -611,6 +624,9 @@ export declare class AgentSession {
+@@ -611,6 +624,11 @@ export declare class AgentSession {
       * Useful for restoring to editor when user aborts.
       * @returns Object with steering and followUp arrays
       */
++    /** Identity of an admitted queue object, including after native consumption. */
++    getQueuedUserMessageId(message: AgentMessage): string | undefined;
 +    getQueuedUserMessages(): QueuedUserMessage[];
 +    updateQueuedUserMessage(id: string, revision: number, action: "edit" | "remove" | "steer", text?: string): "updated" | "missing" | "conflict";
 +    resumeQueuedMessages(): Promise<void>;
      clearQueue(): {
          steering: string[];
          followUp: string[];
-@@ -906,4 +922,4 @@ export declare class AgentSession {
+@@ -906,4 +924,4 @@ export declare class AgentSession {
      get extensionRunner(): ExtensionRunner;
  }
  export {};
@@ -104,7 +106,7 @@ index 03f811e..3720eb9 100644
 \ No newline at end of file
 +//# sourceMappingURL=agent-session.d.ts.map
 diff --git a/dist/core/agent-session.js b/dist/core/agent-session.js
-index ec5f44e..3009dfc 100644
+index ec5f44e..92fb20c 100644
 --- a/dist/core/agent-session.js
 +++ b/dist/core/agent-session.js
 @@ -12,6 +12,7 @@
@@ -284,7 +286,7 @@ index ec5f44e..3009dfc 100644
      }
      /**
       * Queue a follow-up message to be processed after the agent finishes.
-@@ -1721,35 +1725,69 @@ export class AgentSession {
+@@ -1721,35 +1725,72 @@ export class AgentSession {
       * @throws Error if text is an extension command
       */
      async followUp(text, images, options) {
@@ -336,6 +338,9 @@ index ec5f44e..3009dfc 100644
 +        }
 +        return identity;
 +    }
++    getQueuedUserMessageId(message) {
++        return this._queuedMessageIdentity.get(message)?.id;
++    }
 +    getQueuedUserMessages() {
 +        return this._queuedUserMessages().map(({ message, mode }) => ({
 +            ...this._queueIdentity(message), mode,
@@ -376,7 +381,7 @@ index ec5f44e..3009dfc 100644
      }
      /**
       * Throw an error if the text is an extension command.
-@@ -1876,25 +1914,23 @@ export class AgentSession {
+@@ -1876,25 +1917,23 @@ export class AgentSession {
       * @returns Object with steering and followUp arrays
       */
      clearQueue() {
@@ -407,7 +412,7 @@ index ec5f44e..3009dfc 100644
      }
      get resourceLoader() {
          return this._resourceLoader;
-@@ -1903,6 +1939,7 @@ export class AgentSession {
+@@ -1903,6 +1942,7 @@ export class AgentSession {
       * Abort current operation and wait for agent to become idle.
       */
      async abort() {
@@ -415,7 +420,7 @@ index ec5f44e..3009dfc 100644
          if (this._isAgentRunActive) {
              this._agentRunAbortRequested = true;
          }
-@@ -1940,6 +1977,7 @@ export class AgentSession {
+@@ -1940,6 +1980,7 @@ export class AgentSession {
       * @throws Error if no auth is configured for the model
       */
      async setModel(model, options = {}) {
@@ -423,7 +428,7 @@ index ec5f44e..3009dfc 100644
          if (!(await this._modelRuntime.checkAuth(model.provider))) {
              throw new Error(`No API key for ${model.provider}/${model.id}`);
          }
-@@ -3566,4 +3604,4 @@ export class AgentSession {
+@@ -3566,4 +3607,4 @@ export class AgentSession {
          return this._extensionRunner;
      }
  }
