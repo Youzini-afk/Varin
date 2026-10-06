@@ -21,6 +21,9 @@ factory only when `loadMonacoRuntime()` is called.
 - `diff-model-registry.ts` owns reference-counted immutable snapshot models. File diffs keep the
   original/staged side immutable, while a working side reuses the live Document Registry model so
   unsaved edits, language features, editor commands, Agent context, and debug decorations stay aligned.
+  `MonacoFileDiffEditor` detaches its binding before releasing either model lease or disposing the widget.
+  The same idempotent teardown captures view state and removes listeners, regardless of React effect
+  cleanup order; changing a workbench or diff revision never leaves the widget bound to a disposed model.
 - `language-bridge.ts` keeps the existing Host language service authoritative. It projects generation-
   scoped diagnostics and rich language features, including rename and code actions. Cross-file edits go
   through the Document Registry preview/transaction path, completion additional edits stay in Monaco's

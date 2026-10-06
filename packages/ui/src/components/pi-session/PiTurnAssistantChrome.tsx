@@ -58,7 +58,8 @@ export const PiTurnAssistantChrome: React.FC<{
         <VarinLogo
           width={14}
           height={14}
-          className={cn('shrink-0', working && 'animate-pulse')}
+          className="shrink-0"
+          isAnimated={working}
           decorative
         />
       ) : (

@@ -68,7 +68,7 @@ export const MonacoFileDiffEditor: React.FC<MonacoFileDiffEditorProps> = ({
   path,
   providerId,
   readOnly,
-  renderSideBySide = true,
+  renderSideBySide,
   viewId,
   viewState,
   wrapLines,
@@ -92,6 +92,12 @@ export const MonacoFileDiffEditor: React.FC<MonacoFileDiffEditorProps> = ({
   const [diffEditor, setDiffEditor] = React.useState<editor.IStandaloneDiffEditor | null>(null);
   const [originalHandle, setOriginalHandle] = React.useState<MonacoDiffSnapshotModelHandle | null>(null);
   const [modifiedHandle, setModifiedHandle] = React.useState<MonacoDiffSnapshotModelHandle | null>(null);
+  const modelBinding = React.useRef<{
+    editor: editor.IStandaloneDiffEditor;
+    original: editor.ITextModel;
+    modified: editor.ITextModel;
+    dispose(): void;
+  } | null>(null);
   const models = getFileEditorModelRegistry();
   const usesLiveDocument = modifiedContent === undefined;
   const onViewStateChangeRef = React.useRef(onViewStateChange);
@@ -118,7 +124,12 @@ export const MonacoFileDiffEditor: React.FC<MonacoFileDiffEditorProps> = ({
   React.useEffect(() => {
     if (!usesLiveDocument) return undefined;
     models.acquire(identity, modelOwnerId);
-    return () => models.release(modelOwnerId);
+    return () => {
+      const snapshot = models.getSnapshot(identity);
+      const binding = modelBinding.current;
+      if (snapshot.status === 'ready' && binding?.modified === snapshot.model) binding.dispose();
+      models.release(modelOwnerId);
+    };
   }, [identity, modelOwnerId, models, usesLiveDocument]);
 
   const liveSnapshot = React.useSyncExternalStore(
@@ -149,6 +160,7 @@ export const MonacoFileDiffEditor: React.FC<MonacoFileDiffEditorProps> = ({
     });
     setOriginalHandle(handle);
     return () => {
+      if (modelBinding.current?.original === handle.model) modelBinding.current.dispose();
       setOriginalHandle((current) => current === handle ? null : current);
       handle.release();
     };
@@ -166,6 +178,7 @@ export const MonacoFileDiffEditor: React.FC<MonacoFileDiffEditorProps> = ({
     });
     setModifiedHandle(handle);
     return () => {
+      if (modelBinding.current?.modified === handle.model) modelBinding.current.dispose();
       setModifiedHandle((current) => current === handle ? null : current);
       handle.release();
     };
@@ -185,7 +198,9 @@ export const MonacoFileDiffEditor: React.FC<MonacoFileDiffEditorProps> = ({
       enableSplitViewResizing: true,
       originalEditable: false,
       readOnly,
-      renderSideBySide,
+      renderSideBySide: renderSideBySide ?? true,
+      useInlineViewWhenSpaceIsLimited: renderSideBySide === undefined,
+      renderSideBySideInlineBreakpoint: 720,
       theme,
       ...(wrapLines === undefined ? {} : { wordWrap: wrapLines ? 'on' : 'off' }),
     });
@@ -200,6 +215,7 @@ export const MonacoFileDiffEditor: React.FC<MonacoFileDiffEditorProps> = ({
     return () => {
       resizeObserver?.disconnect();
       if (!resizeObserver) window.removeEventListener('resize', handleWindowResize);
+      if (modelBinding.current?.editor === instance) modelBinding.current.dispose();
       setDiffEditor((current) => current === instance ? null : current);
       instance.dispose();
     };
@@ -219,7 +235,9 @@ export const MonacoFileDiffEditor: React.FC<MonacoFileDiffEditorProps> = ({
       }),
       originalEditable: false,
       readOnly,
-      renderSideBySide,
+      renderSideBySide: renderSideBySide ?? true,
+      useInlineViewWhenSpaceIsLimited: renderSideBySide === undefined,
+      renderSideBySideInlineBreakpoint: 720,
       ...(wrapLines === undefined ? {} : { wordWrap: wrapLines ? 'on' : 'off' }),
     });
   }, [currentTheme, diffEditor, editorFontSize, fileEditorSettings, monaco, path, profileId, readOnly, renderSideBySide, wrapLines]);
@@ -361,18 +379,31 @@ export const MonacoFileDiffEditor: React.FC<MonacoFileDiffEditorProps> = ({
         },
       }),
     ];
-    capture();
-    return () => {
-      if (captureFrame !== null) cancelAnimationFrame(captureFrame);
-      capture();
-      releasePiEditorContextOwner(contextOwnerId);
-      disposeExtensionView();
-      disposeCommandTarget();
-      runDebugAdapter?.dispose();
-      if (bridge) bridge.release(languageOwnerId);
-      for (const disposable of disposables) disposable.dispose();
-      diffEditor.setModel(null);
+    // A lease cleanup may run before this effect's cleanup. Keep one idempotent
+    // binding teardown so its view state and listeners are settled before either model is released.
+    let disposed = false;
+    const binding = {
+      editor: diffEditor,
+      original: originalHandle.model,
+      modified: modifiedModel,
+      dispose: (): void => {
+        if (disposed) return;
+        disposed = true;
+        if (modelBinding.current === binding) modelBinding.current = null;
+        if (captureFrame !== null) cancelAnimationFrame(captureFrame);
+        capture();
+        releasePiEditorContextOwner(contextOwnerId);
+        disposeExtensionView();
+        disposeCommandTarget();
+        runDebugAdapter?.dispose();
+        if (bridge) bridge.release(languageOwnerId);
+        for (const disposable of disposables) disposable.dispose();
+        diffEditor.setModel(null);
+      },
     };
+    modelBinding.current = binding;
+    capture();
+    return binding.dispose;
   }, [
     contextOwnerId,
     diffEditor,

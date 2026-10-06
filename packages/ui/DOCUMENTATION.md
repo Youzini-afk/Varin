@@ -9,6 +9,34 @@ Pi thinking disclosures render received visible text or an explicit redacted blo
 thinking stays out of both live disclosures and sorted activity counts. Opaque replay signatures remain
 owned by the native session and are never rendered as reasoning text.
 
+## Agent / IDE presentation
+
+The 2026-10-06 handoff is implemented through the existing shells and theme system, not through the
+standalone prototype state. The built-in Varin themes supply warm-light and neutral-dark surfaces;
+`styles/workbench.css` gives the frame, conversation canvas, editor and resource rail their shared
+spacing and transitions. Custom theme selection and the native window-control boundary are unchanged.
+
+`components/layout/WorkbenchServices` owns the shared Local/usage/MCP popover and GitHub actions. Both
+shells use that component and the existing `OpenInAppButton`. Agent's header controls panel and rail
+visibility independently through `useUIStore`; the work overview retains only its own lightweight
+heading and disclosure. IDE's quick-open/settings controls live in the activity footer, while the
+session picker and current context usage live inside the Agent pane's `IdeSessionHeader`.
+
+`IdeSidebar` animates the actual persisted layout weight and retains exiting content until the
+transition finishes. Relative grow factors fill the row when a sidebar closes; outgoing content keeps
+its width instead of reflowing into a collapsing column. Reversing a toggle continues from the current
+position; resizing updates directly.
+Hidden/exiting controls are inert. Resource-panel default widths adapt to remaining space without
+replacing an explicit user resize. Native Monaco diff views use inline layout in a narrow editor
+unless their caller explicitly selects a presentation.
+
+The composer adapts to its own width, keeping primary actions at the lower-right edge. Its pending and
+live instances share a motion identity scoped to their `PiChatView`, while draft/session state remains
+in its existing stores. Queue rows animate native identities; an exiting row stops rendering its edit
+form before a consumed message's retained draft is shown. Working marks, input-frame sweeps, attachment
+arrival and panel movement honor reduced-motion preferences. These presentation changes do not add
+model calls, task states, prompt settings or a second document/queue authority.
+
 ## Module map
 
 `components/sections/assistant` owns the ordinary Agent memory and system-prompt settings pages.
@@ -229,9 +257,9 @@ Sections default to expanded except Sources. Explicit section choices and panel 
 persisted per runtime and conversation, including the narrow-screen overlay. Closing/reopening,
 session navigation and data refreshes retain those choices; plan/task completion does not change them.
 
-The desktop Agent shell uses double chevrons in `ContextPanelControls` to show/hide the right icon rail;
-the work-overview control row toggles the last workspace panel directly. Rail
-visibility is a persisted UI preference and never changes panel visibility. The existing per-workspace
+The desktop Agent shell has independent panel and icon-rail controls in `ContextPanelControls`.
+The rail-only icon identifies the strip without implying another navigation action; the work overview
+controls only its own disclosure. Rail visibility is a persisted UI preference and never changes panel visibility. The existing per-workspace
 panel state retains tabs, widths, expanded layout and the active tab across close/reopen; only a workspace
 without retained tabs starts with the file view. The rail switches surfaces and displays Git change
 counts. Explicit file/terminal/review actions still open the panel directly. Extension slots remain available.
@@ -245,11 +273,12 @@ Host-owned workspace identity; it never borrows the session workspace identity f
 Closing the PR panel stops its refresh watchers and timers while retaining its page state and drafts.
 
 Default desktop navigation is 256px wide (manual widths are retained). New session and search stay
-visible; project/session management and display choices share one labeled menu. The titlebar is 40px except
+visible; project/session management and display choices share one labeled menu. The titlebar is 44px except
 where native macOS or window-control-overlay insets require more. Composer attachment/fullscreen
 actions share a menu; model, permission and send controls stay directly available. Activity traces
 are expandable rows rather than another enclosing card. Keep readable content spacious while making
-tool chrome compact, and let narrow composer footers wrap rather than clip their actions.
+tool chrome compact. Narrow composers move configuration controls to their own row while keeping
+send/stop at the lower-right edge.
 
 `PiFileChangePreview` renders live `write`, native multi-`edit`, and Codex `apply_patch` arguments as
 compact file cards. Its virtualized inner viewport follows actual deltas and preserves user pause and

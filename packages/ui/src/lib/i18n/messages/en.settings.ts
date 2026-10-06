@@ -3968,7 +3968,7 @@ export const settingsDict = {
 
   "settings.harness.models.noModel": "No auxiliary model",
   "settings.theme.preset.varin.name": "Varin",
-  "settings.theme.preset.varin.description": "Neutral grays with copper accents.",
+  "settings.theme.preset.varin.description": "Warm light and neutral dark surfaces.",
   "settings.theme.preset.flexoki.name": "Flexoki",
   "settings.theme.preset.flexoki.description": "Warm accents and ink-inspired syntax colors.",
   "settings.theme.preset.fields-of-the-shire.name": "Fields of the Shire",

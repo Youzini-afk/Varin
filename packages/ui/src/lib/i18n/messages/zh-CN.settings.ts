@@ -3966,7 +3966,7 @@ export const settingsDict = {
 
   "settings.harness.models.noModel": "不使用辅助模型",
   "settings.theme.preset.varin.name": "Varin（默认）",
-  "settings.theme.preset.varin.description": "中性灰底色，铜橙色点缀。",
+  "settings.theme.preset.varin.description": "暖白浅色与中性深灰。",
   "settings.theme.preset.flexoki.name": "墨韵 · Flexoki",
   "settings.theme.preset.flexoki.description": "暖色强调，纸墨风格的语法配色。",
   "settings.theme.preset.fields-of-the-shire.name": "夏尔田野 · Fields of the Shire",

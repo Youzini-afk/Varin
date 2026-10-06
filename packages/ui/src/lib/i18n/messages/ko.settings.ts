@@ -3922,7 +3922,7 @@ export const settingsDict = {
 
   "settings.harness.models.noModel": "보조 모델 사용 안 함",
   "settings.theme.preset.varin.name": "Varin (기본)",
-  "settings.theme.preset.varin.description": "중성 회색과 구릿빛 강조색.",
+  "settings.theme.preset.varin.description": "따뜻한 밝은 색상과 중성 짙은 회색.",
   "settings.theme.preset.flexoki.name": "Flexoki · 종이와 잉크",
   "settings.theme.preset.flexoki.description": "따뜻한 강조색과 종이·잉크에서 영감을 받은 구문 색상.",
   "settings.theme.preset.fields-of-the-shire.name": "샤이어의 들판",

@@ -333,9 +333,7 @@ describe('work overview presentation', () => {
     await render();
 
     const expand = container.querySelector<HTMLButtonElement>('button[aria-label="harness.overview.expand"]');
-    const openPanel = container.querySelector<HTMLButtonElement>('button[aria-label="contextPanel.actions.openPanel"]');
     expect(expand).not.toBeNull();
-    expect(openPanel).not.toBeNull();
 
     expect(container.querySelector('[data-harness-overview-floating="true"]')).toBeNull();
 
@@ -389,9 +387,9 @@ describe('work overview presentation', () => {
     expect(section('harness.overview.threads').hasAttribute('open')).toBe(false);
     expect(section('harness.overview.sources').hasAttribute('open')).toBe(true);
 
-    const workspacePanel = container.querySelector<HTMLButtonElement>('button[aria-label="contextPanel.actions.openPanel"]')!;
-    await act(async () => workspacePanel.click());
-    expect(mocks.toggleContextPanel).toHaveBeenCalledWith('/parent');
+    const collapse = container.querySelector<HTMLButtonElement>('button[aria-label="harness.overview.collapse"]')!;
+    await act(async () => collapse.click());
+    expect(mocks.toggleContextPanel).not.toHaveBeenCalled();
     expect(container.querySelector('[data-harness-overview-floating="true"]')).toBeNull();
     await render('parent-2');
     await render();

@@ -57,7 +57,7 @@ export const CommitSection: React.FC<CommitSectionProps> = ({
   return (
     <section className={containerClassName}>
       <div className={headerClassName}>
-        <h3 className="typography-ui-header font-semibold text-foreground">{t('gitView.commit.title')}</h3>
+        <h3 className="shrink-0 whitespace-nowrap typography-ui-header font-semibold text-foreground">{t('gitView.commit.title')}</h3>
         {!hasStagedFiles ? (
           <span className="min-w-0 truncate typography-meta text-muted-foreground">
             {t('gitView.commit.stageFilesHint')}

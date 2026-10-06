@@ -29,7 +29,7 @@ import { useWebSources, useWebSourcesStore } from '@/stores/useWebSourcesStore';
 import { PdfMaterialReader } from './PdfMaterialReader';
 import { getGitStatus } from '@/lib/gitApiHttp';
 import { workspaceEvents } from '@/lib/workspaceEvents';
-import { normalizeContextPanelDirectoryKey, useUIStore } from '@/stores/useUIStore';
+import { useUIStore } from '@/stores/useUIStore';
 import { HarnessOverviewSection } from './HarnessOverviewSection';
 import {
   groupOverviewBlocks,
@@ -94,13 +94,6 @@ export const HarnessThreadsPanel: React.FC<{
   const questions = dialogs.filter(dialog => dialog.method === 'question' && questionSessions.has(dialog.sessionId));
   const webSources = useWebSources(parentSessionId);
   const openContextSurface = useUIStore((state) => state.openContextSurface);
-  const toggleContextPanel = useUIStore((state) => state.toggleContextPanel);
-  const contextDirectoryKey = fallbackCwd ? normalizeContextPanelDirectoryKey(fallbackCwd) : '';
-  const contextPanelOpen = useUIStore((state) => {
-    if (!contextDirectoryKey) return false;
-    const panel = state.contextPanelByDirectory[contextDirectoryKey];
-    return Boolean(panel?.isOpen && panel.tabs.length > 0);
-  });
   const pinSource = useWebSourcesStore((state) => state.pinSource);
   const unpinSource = useWebSourcesStore((state) => state.unpinSource);
   const deleteSource = useWebSourcesStore((state) => state.deleteSource);
@@ -789,7 +782,7 @@ export const HarnessThreadsPanel: React.FC<{
             }
           }}
         >
-          <summary className="flex cursor-pointer list-none items-center gap-2 px-4 py-2 typography-meta text-muted-foreground hover:text-foreground sm:px-6">
+          <summary className="workbench-overview-heading flex cursor-pointer list-none items-center gap-2 px-4 py-2 typography-meta text-muted-foreground hover:text-foreground sm:px-6">
             <Icon name="arrow-right-s" className="size-3.5 transition-transform group-open:rotate-90" />
             <span>{title ?? t('harness.overview.title')}</span>
             <span className="ml-auto min-w-0 truncate typography-micro text-muted-foreground/80">{overviewSummary}</span>
@@ -801,7 +794,7 @@ export const HarnessThreadsPanel: React.FC<{
         className="pointer-events-none absolute right-3 top-2 z-40 hidden flex-col items-end xl:flex"
       >
         <div
-          className="pointer-events-auto flex items-center gap-0.5 rounded-xl border border-border/70 bg-background/90 p-1 shadow-sm backdrop-blur-xl"
+          className="pointer-events-auto flex max-w-full items-center gap-0.5"
           data-harness-overview-controls="true"
         >
           <Tooltip>
@@ -812,43 +805,19 @@ export const HarnessThreadsPanel: React.FC<{
                 aria-expanded={overviewOpen}
                 aria-label={t(overviewOpen ? 'harness.overview.collapse' : 'harness.overview.expand')}
                 className={cn(
-                  'relative flex size-8 items-center justify-center rounded-lg text-muted-foreground transition-colors hover:bg-interactive-hover hover:text-foreground',
+                  'workbench-overview-heading relative inline-flex h-7 max-w-full items-center justify-center gap-1.5 rounded-lg px-2 text-muted-foreground hover:bg-interactive-hover hover:text-foreground',
                   overviewOpen && 'bg-interactive-selection text-foreground',
                 )}
               >
                 <Icon name="stack" className="size-4" />
-                {activityCount > 0 ? (
-                  <span className={cn(
-                    'absolute -right-0.5 -top-0.5 flex h-4 min-w-4 items-center justify-center rounded-full bg-muted px-1 text-[8px] font-semibold tabular-nums text-muted-foreground',
-                    attentionCount > 0 && 'bg-[var(--status-warning)] text-white',
-                  )}>{activityCount}</span>
-                ) : null}
+                {hasOverviewData ? <span key={overviewSummary} data-overview-value className="min-w-0 max-w-[min(16rem,55cqi)] truncate typography-micro">{overviewSummary}</span> : null}
+                <Icon name="arrow-down-s" className={cn('size-3 shrink-0 transition-transform duration-200', overviewOpen && 'rotate-180')}>
+                </Icon>
               </button>
             </TooltipTrigger>
             <TooltipContent side="bottom">{t(overviewOpen ? 'harness.overview.collapse' : 'harness.overview.expand')}</TooltipContent>
           </Tooltip>
-          <Tooltip>
-            <TooltipTrigger asChild>
-              <button
-                type="button"
-                disabled={!contextDirectoryKey}
-                onClick={() => {
-                  if (!contextDirectoryKey) return;
-                  setOverviewOpen(false);
-                  toggleContextPanel(contextDirectoryKey);
-                }}
-                aria-expanded={contextPanelOpen}
-                aria-label={t(contextPanelOpen ? 'contextPanel.actions.closePanel' : 'contextPanel.actions.openPanel')}
-                className={cn(
-                  'flex size-8 items-center justify-center rounded-lg text-muted-foreground transition-colors hover:bg-interactive-hover hover:text-foreground disabled:cursor-default disabled:opacity-40',
-                  contextPanelOpen && 'bg-interactive-selection text-primary',
-                )}
-              >
-                <Icon name="layout-right" className="size-4" />
-              </button>
-            </TooltipTrigger>
-            <TooltipContent side="bottom">{t(contextPanelOpen ? 'contextPanel.actions.closePanel' : 'contextPanel.actions.openPanel')}</TooltipContent>
-          </Tooltip>
+
         </div>
         <AnimatePresence initial={false}>
         {overviewOpen ? (
@@ -859,7 +828,7 @@ export const HarnessThreadsPanel: React.FC<{
             exit={{ opacity: 0, y: -5, scale: 0.99 }}
             transition={{ duration: 0.18, ease: [0.22, 0.8, 0.2, 1] }}
             style={{ transformOrigin: 'top right' }}
-            className="pointer-events-auto mt-2 flex max-h-[min(72dvh,46rem)] w-[min(20rem,calc(100vw-6rem))] flex-col overflow-hidden rounded-xl border border-border/70 bg-background/96 shadow-lg backdrop-blur-xl will-change-transform"
+            className="pointer-events-auto mt-2 flex max-h-[min(72dvh,46rem)] w-[min(20rem,calc(100cqi-1.5rem))] flex-col overflow-hidden rounded-xl border border-border/70 bg-background/96 shadow-lg backdrop-blur-xl will-change-transform"
             data-harness-overview-floating="true"
           >
             {content}

@@ -1,4 +1,6 @@
 import React from 'react';
+import { motion } from 'motion/react';
+import { usePrefersReducedMotion } from '@/hooks/usePrefersReducedMotion';
 import type {
   ImageAttachment,
   SessionSnapshot,
@@ -68,6 +70,8 @@ import {
 } from './piComposerPdfAttachments';
 
 interface PiComposerProps {
+  /** Scoped to the enclosing chat view, including its pending-to-live transition. */
+  motionId?: string;
   active: boolean;
   allowModelInheritance: boolean;
   cwd: string;
@@ -129,6 +133,7 @@ type PiComposerAutocomplete = {
 } | null;
 
 export const PiComposer: React.FC<PiComposerProps> = ({
+  motionId,
   active,
   allowModelInheritance,
   cwd,
@@ -161,6 +166,7 @@ export const PiComposer: React.FC<PiComposerProps> = ({
   inheritedWorkFocus,
 }) => {
   const { t } = useI18n();
+  const reducedMotion = usePrefersReducedMotion();
   const { documents, workspace: workspaceApi } = useRuntimeAPIs();
   const runtimeKey = getRuntimeKey();
   const parentSessionId = usePiSessionStore((state) => (
@@ -535,7 +541,10 @@ export const PiComposer: React.FC<PiComposerProps> = ({
   }, [applyHistoryText, autocomplete, canSend, draft, messageHistory, sending, submit]);
 
   return (
-    <div className={cn(
+    <motion.div layout={reducedMotion ? false : 'position'} layoutId={motionId}
+      layoutDependency={`${sessionId ?? 'pending'}:${isExpandedInput}:${images.length}:${snapshot?.queuedMessages.length ?? 0}`}
+      initial={false} transition={{ layout: { duration: reducedMotion ? 0 : 0.52, ease: [0.22, 1, 0.36, 1] } }}
+      className={cn(
       'bottom-safe-area oc-mobile-composer shrink-0 bg-background pb-3',
       isExpandedInput && 'fixed inset-0 z-40 flex items-end bg-background/95',
     )} data-pi-composer-shell="true">
@@ -553,7 +562,7 @@ export const PiComposer: React.FC<PiComposerProps> = ({
         {images.length > 0 && (
           <div className="mb-2 flex flex-wrap gap-2">
             {images.map((image, index) => (
-              <div key={`${image.mimeType}:${index}`} className="group/image relative overflow-hidden rounded-lg border border-border bg-muted/20">
+              <div key={`${image.mimeType}:${index}`} className="pi-composer-attachment group/image relative overflow-hidden rounded-lg border border-border bg-muted/20">
                 <img src={attachmentUrl(image)} alt={image.mimeType} className="size-20 object-cover" />
                 <button
                   type="button"
@@ -577,6 +586,7 @@ export const PiComposer: React.FC<PiComposerProps> = ({
             sending && 'opacity-80',
           )}
           data-pi-composer-input-frame="true"
+          data-working={busy && active}
           onDragOver={(event) => {
             if ([...event.dataTransfer.items].some((item) => item.kind === 'file')) event.preventDefault();
           }}
@@ -667,8 +677,8 @@ export const PiComposer: React.FC<PiComposerProps> = ({
           ) : null}
 
 
-          <div data-chat-input-footer="true" className="flex flex-wrap items-center justify-between gap-x-2 gap-y-1 px-2 pb-2 pt-0.5">
-            <div className="flex min-w-0 items-center gap-0.5">
+          <div data-chat-input-footer="true" className="pi-composer-footer px-2 pb-2 pt-0.5">
+            <div className="pi-composer-options">
               <input
                 ref={fileInputRef}
                 type="file"
@@ -723,8 +733,8 @@ export const PiComposer: React.FC<PiComposerProps> = ({
               )}
             </div>
 
-            <div className="ml-auto flex min-w-0 items-center justify-end gap-1">
-              {!isMobile ? modelControls : null}
+            {!isMobile ? <div className="pi-composer-models">{modelControls}</div> : null}
+            <div className="pi-composer-actions">
               <WorkbenchContributionSlot
                 kind="composer-action"
                 slot="chat.composer.actions.trailing"
@@ -787,6 +797,7 @@ export const PiComposer: React.FC<PiComposerProps> = ({
                     data-pi-composer-primary-action={composerActions.primary}
                   >
                     <Icon
+                      key={`${composerActions.primary}:${aborting}:${sending}`}
                       name={composerActions.primary === 'stop'
                         ? aborting ? 'loader-4' : 'stop'
                         : sending ? 'loader-4' : 'arrow-up'}
@@ -809,6 +820,6 @@ export const PiComposer: React.FC<PiComposerProps> = ({
           </div>
         </div>
       </div>
-    </div>
+    </motion.div>
   );
 };

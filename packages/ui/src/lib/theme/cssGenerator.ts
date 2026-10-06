@@ -65,6 +65,7 @@ export class CSSVariableGenerator {
 
   private generateTailwindVariables(theme: Theme): string[] {
     const vars: string[] = [];
+    vars.push(`  --workbench-frame: ${theme.colors.header?.background ?? theme.colors.surface.muted};`);
 
     vars.push(`  --background: ${theme.colors.surface.background} !important;`);
     vars.push(`  --foreground: ${theme.colors.surface.foreground} !important;`);
@@ -95,11 +96,12 @@ export class CSSVariableGenerator {
 
     vars.push(`  --ring: ${theme.colors.interactive.focusRing} !important;`);
 
-const sidebarBaseRgb = hexToRgb(theme.colors.surface.muted);
+    const sidebarBase = theme.colors.sidebar?.background ?? theme.colors.surface.muted;
+    const sidebarBaseRgb = hexToRgb(sidebarBase);
     const sidebarAccentRgb = hexToRgb(theme.colors.surface.subtle);
     const sidebarBorderRgb = hexToRgb(theme.colors.interactive.border);
 
-    vars.push(`  --sidebar-base: ${theme.colors.surface.muted} !important;`);
+    vars.push(`  --sidebar-base: ${sidebarBase} !important;`);
     if (sidebarBaseRgb) {
       vars.push(`  --sidebar-base-rgb: ${sidebarBaseRgb} !important;`);
     }

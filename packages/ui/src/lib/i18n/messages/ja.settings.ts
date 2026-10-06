@@ -3499,7 +3499,7 @@ export const settingsDict = {
 
   "settings.harness.models.noModel": "補助モデルを使用しない",
   "settings.theme.preset.varin.name": "Varin（既定）",
-  "settings.theme.preset.varin.description": "ニュートラルなグレーと銅色のアクセント。",
+  "settings.theme.preset.varin.description": "暖かい白とニュートラルなダークグレー。",
   "settings.theme.preset.flexoki.name": "Flexoki・紙とインク",
   "settings.theme.preset.flexoki.description": "暖色のアクセントと紙とインクを思わせる構文配色。",
   "settings.theme.preset.fields-of-the-shire.name": "ホビット庄の野原",
