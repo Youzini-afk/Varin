@@ -49,6 +49,12 @@ private runtime protocol and product surfaces still move together.
 - 同一起点的隔离 Worker 在原始内容身份一致且原生根仍有效时复用基线，
   内容变化时重新捕获，避免反复建立相同的工作起点。
 
+#### 工程与安全
+
+- Bot PR 的 CI、Docker 验证和依赖报告共用后台队列，减少批量更新对主线与发布构建的资源争抢。
+- 更新受影响的 Git、HTTP 压缩、代理地址及源码映射依赖，统一移动端 Capacitor 运行库。
+  为尚无上游修复版的 `sprintf-js` 应用并验证精度处理补丁；合并和变基仍无需打开编辑器。
+
 ---
 
 ### Release highlights
@@ -93,6 +99,12 @@ Varin 0.9.24 improves Agent collaboration, user questions, conversation navigati
   CPU scheduling. Run native encoding/tokenization in a separate Worker and yield between background batches.
 - Reduce repeated tokenization probes for generated long lines and reuse verified native work baselines when
   source identities match. Changed contents still require a new capture.
+
+#### Engineering and security
+
+- Queue Bot PR CI, Docker verification and dependency reports in one background slot to reduce runner contention.
+- Update affected Git, HTTP compression, proxy-address and source-map dependencies, and align mobile Capacitor runtimes.
+  Apply and verify the local `sprintf-js` precision repair pending an upstream fix; merge/rebase continuation remains noninteractive.
 
 [完整提交记录 / Full changelog](https://github.com/Youzini-afk/Varin/compare/v0.9.23...v0.9.24)
 

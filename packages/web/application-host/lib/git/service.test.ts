@@ -10,6 +10,8 @@ import {
   checkoutCommit,
   cherryPick,
   cloneRepository,
+  continueMerge,
+  continueRebase,
   createWorktree,
   getWorktreeBootstrapStatus,
   getStatus,
@@ -183,6 +185,32 @@ describe('setLocalIdentity', () => {
       "ssh -i '/tmp/test key' -o IdentitiesOnly=yes"
     );
   });
+});
+
+it.each(['merge', 'rebase'] as const)('continues resolved %s conflicts without opening an editor', async (operation) => {
+  const { tmpDir, git } = await createTempRepo();
+  const file = path.join(tmpDir, 'shared.txt');
+  fs.writeFileSync(file, 'base\n');
+  await git.add('shared.txt');
+  await git.commit('base');
+  await git.checkoutBranch('topic', 'main');
+  fs.writeFileSync(file, 'topic\n');
+  await git.add('shared.txt');
+  await git.commit('topic');
+  await git.checkout('main');
+  fs.writeFileSync(file, 'main\n');
+  await git.add('shared.txt');
+  await git.commit('main');
+  runGitMaybe(tmpDir, [operation, 'topic']);
+  expect(runGit(tmpDir, ['diff', '--name-only', '--diff-filter=U']).trim()).toBe('shared.txt');
+
+  fs.writeFileSync(file, 'resolved\n');
+  await git.add('shared.txt');
+  const result = await (operation === 'merge' ? continueMerge(tmpDir) : continueRebase(tmpDir));
+
+  expect(result).toMatchObject({ success: true, conflict: false });
+  expect(runGit(tmpDir, ['status', '--porcelain']).trim()).toBe('');
+  expect(runGit(tmpDir, ['show', 'HEAD:shared.txt']).trim()).toBe('resolved');
 });
 
 // ---------------------------------------------------------------------------

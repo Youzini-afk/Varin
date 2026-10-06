@@ -397,7 +397,10 @@ const buildGitEnv = async (): Promise<NodeJS.ProcessEnv> => {
 
 const createGit = async (
   directory: unknown,
-  { allowUnsafeSshCommand = false }: { allowUnsafeSshCommand?: boolean } = {},
+  { allowUnsafeSshCommand = false, nonInteractiveEditor = false }: {
+    allowUnsafeSshCommand?: boolean;
+    nonInteractiveEditor?: boolean;
+  } = {},
 ): Promise<SimpleGit> => {
   const baseDir = normalizeDirectoryPath(directory);
   if (typeof baseDir !== 'string' || !baseDir.trim()) {
@@ -408,10 +411,11 @@ const createGit = async (
   const spawnOptions: SimpleGitOptions['spawnOptions'] & { windowsHide: boolean } = { windowsHide: true };
   const binary = getGitBinary();
   const hasCustomBinary = Boolean(binary.trim() && binary !== 'git' && binary !== 'git.exe');
-  const unsafe = hasCustomBinary || allowUnsafeSshCommand
+  const unsafe = hasCustomBinary || allowUnsafeSshCommand || nonInteractiveEditor
     ? {
       ...(hasCustomBinary && { allowUnsafeCustomBinary: true }),
       ...(allowUnsafeSshCommand && { allowUnsafeSshCommand: true }),
+      ...(nonInteractiveEditor && { allowUnsafeEditor: true }),
     }
     : undefined;
   return createSimpleGit({
@@ -419,6 +423,7 @@ const createGit = async (
     env,
     spawnOptions,
     binary,
+    ...(nonInteractiveEditor ? { allowEnvironment: ['GIT_EDITOR'] } : {}),
     ...(unsafe ? { unsafe } : {}),
   });
 };
@@ -523,14 +528,17 @@ const resolveGitRepositoryRoot = async (directoryPath: string, git: GitClient): 
     : path.resolve(directoryPath, normalizedTopLevel);
 };
 
-const createRepositoryGitContext = async (directory: unknown): Promise<RepositoryGitContext> => {
+const createRepositoryGitContext = async (
+  directory: unknown,
+  options?: Parameters<typeof createGit>[1],
+): Promise<RepositoryGitContext> => {
   const directoryPath = normalizeDirectoryPath(directory);
   if (typeof directoryPath !== 'string' || !directoryPath.trim()) {
     throw new Error('Git directory is required');
   }
-  const directoryGit = await createGit(directoryPath);
+  const directoryGit = await createGit(directoryPath, options);
   const repoRoot = await resolveGitRepositoryRoot(directoryPath, directoryGit);
-  const git = path.resolve(directoryPath) === repoRoot ? directoryGit : await createGit(repoRoot);
+  const git = path.resolve(directoryPath) === repoRoot ? directoryGit : await createGit(repoRoot, options);
   return { directoryPath, directoryGit, repoRoot, git };
 };
 
@@ -5106,7 +5114,7 @@ export async function abortMerge(directory: string) {
 }
 
 export async function continueRebase(directory: string) {
-  const { git } = await createRepositoryGitContext(directory);
+  const { git } = await createRepositoryGitContext(directory, { nonInteractiveEditor: true });
 
   try {
     // Set GIT_EDITOR to prevent editor prompts
@@ -5146,7 +5154,7 @@ export async function continueRebase(directory: string) {
 }
 
 export async function continueMerge(directory: string) {
-  const { git } = await createRepositoryGitContext(directory);
+  const { git } = await createRepositoryGitContext(directory, { nonInteractiveEditor: true });
 
   try {
     // Check if there are still unmerged files

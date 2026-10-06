@@ -155,6 +155,12 @@ publishing, deployment, and credential changes still require the authority given
 
 ## Dependency update review
 
+The dependency audit prefers published fixes. The remaining pinned local repairs for `braces`,
+`http-cache-semantics`, and `sprintf-js` must pass behavior checks through their actual installed
+consumers before their version-based advisories are excluded. `sprintf-js` has no published fixed
+version; its patch keeps numeric precision within the ECMAScript-supported range while preserving
+normal formatting. Every other advisory still fails the audit.
+
 Dependabot checks Bun, Cargo, and GitHub Actions dependencies once every 24 hours at 00:00 UTC,
 including weekends, with no additional release cooldown. Discovery is scheduled, not an upstream-release
 webhook, so GitHub's

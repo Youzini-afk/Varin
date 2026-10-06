@@ -1,0 +1,23 @@
+diff --git a/src/sprintf.js b/src/sprintf.js
+index 65d6324645ef1d0133614a71497751009dc5c912..03b61453b08c82ff0929e4dbddac16fc6fd333e1 100644
+--- a/src/sprintf.js
++++ b/src/sprintf.js
+@@ -81,13 +81,15 @@
+                         arg = JSON.stringify(arg, null, ph.width ? parseInt(ph.width) : 0)
+                         break
+                     case 'e':
+-                        arg = ph.precision ? parseFloat(arg).toExponential(ph.precision) : parseFloat(arg).toExponential()
++                        // GHSA-hp3w-g68c-fv3c: use the ECMAScript precision range
++                        // so an untrusted format cannot trigger a native RangeError.
++                        arg = ph.precision ? parseFloat(arg).toExponential(Math.min(Number(ph.precision), 100)) : parseFloat(arg).toExponential()
+                         break
+                     case 'f':
+-                        arg = ph.precision ? parseFloat(arg).toFixed(ph.precision) : parseFloat(arg)
++                        arg = ph.precision ? parseFloat(arg).toFixed(Math.min(Number(ph.precision), 100)) : parseFloat(arg)
+                         break
+                     case 'g':
+-                        arg = ph.precision ? String(Number(arg.toPrecision(ph.precision))) : parseFloat(arg)
++                        arg = ph.precision ? String(Number(arg.toPrecision(Math.max(1, Math.min(Number(ph.precision), 100))))) : parseFloat(arg)
+                         break
+                     case 'o':
+                         arg = (parseInt(arg, 10) >>> 0).toString(8)

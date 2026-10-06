@@ -7,6 +7,7 @@ const manifest = JSON.parse(readFileSync(new URL('../package.json', import.meta.
 const repairs = [
   ['braces@3.0.3', 'GHSA-vfj7-8cjw-p6xm'],
   ['http-cache-semantics@4.2.0', 'GHSA-ch52-4w7c-c8xp'],
+  ['sprintf-js@1.1.3', 'GHSA-hp3w-g68c-fv3c'],
 ];
 for (const [dependency] of repairs) {
   if (manifest.patchedDependencies?.[dependency] !== `bun-patches/${dependency}.patch`) {
@@ -20,7 +21,7 @@ function run(command, args) {
   if (result.status !== 0) process.exit(result.status ?? 1);
 }
 // Bun's advisory database only sees published versions. Verify the installed repairs before
-// excluding these two version-based reports; every other advisory still fails the audit.
+// excluding their version-based reports; every other advisory still fails the audit.
 run(process.execPath, ['--test', 'scripts/dependency-security.test.mjs']);
 for (const [dependency, advisory] of repairs) console.log(`[audit] Verified local repair: ${dependency}; exclude version report ${advisory}`);
 run('bun', ['audit', ...repairs.flatMap(([, advisory]) => ['--ignore', advisory])]);

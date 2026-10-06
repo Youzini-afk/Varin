@@ -14,10 +14,23 @@ const get = createRequire(electron.resolve('@electron/get'));
 const got = createRequire(get.resolve('got'));
 const cache = createRequire(got.resolve('cacheable-request'));
 const CachePolicy = cache('http-cache-semantics');
+const transformers = createRequire(web.resolve('@huggingface/transformers'));
+const { sprintf, vsprintf } = transformers('sprintf-js');
 
 test('security exceptions apply only to the pinned, behavior-verified dependency versions', () => {
   assert.equal(micromatch('braces/package.json').version, '3.0.3');
   assert.equal(cache('http-cache-semantics/package.json').version, '4.2.0');
+  assert.equal(transformers('sprintf-js/package.json').version, '1.1.3');
+});
+
+test('floating-point formatting handles hostile precision without losing normal formatting', () => {
+  for (const type of ['e', 'f', 'g']) {
+    for (const precision of ['101', '9999999999999999999999999999999999999999']) {
+      assert.equal(sprintf(`%.${precision}${type}`, 1.25), sprintf(`%.100${type}`, 1.25));
+    }
+  }
+  assert.equal(sprintf('%.0g', 1.25), '1');
+  assert.equal(vsprintf('%+08.2f / %.3e / %.3g / %.3s', [1.25, 1.25, 1.25, 'hello']), '+0001.25 / 1.250e+0 / 1.25 / hel');
 });
 
 test('brace compilation, expansion and stringification survive deeply nested legal patterns', () => {

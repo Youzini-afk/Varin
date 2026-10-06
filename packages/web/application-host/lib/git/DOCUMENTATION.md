@@ -90,6 +90,9 @@ The following functions are internal helpers used by exported functions:
 - `buildGitEnv()`: Build Git environment with SSH_AUTH_SOCK resolution.
 - `createGit(directory)`: Create a simple-git instance pinned to the explicit repository directory.
   Global configuration reads use the user's home directory as their stable non-repository base.
+  The simple-git 4 environment guard stays enabled. Merge/rebase continuation explicitly permits
+  only the Host's `GIT_EDITOR=true` override and the corresponding editor operation so it does not
+  wait for an interactive editor. User-selected SSH configuration retains its separate opt-in.
 - `normalizeDirectoryPath(value)`: Normalize directory paths (supports ~ expansion).
 - `cleanBranchName(branch)`: Remove refs/heads/ or refs/ prefixes.
 - `parseWorktreePorcelain(raw)`: Parse `git worktree list --porcelain` output.
