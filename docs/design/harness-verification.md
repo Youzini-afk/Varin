@@ -1,6 +1,6 @@
 # Agent harness — 验证与多 agent
 
-Status: 模块专卷，自 [agent-harness.md](agent-harness.md) 拆出（原文第 验证 节起）；本文保留原节标题层级与锚点。
+Status: domain contract with superseded collaboration sections — 常规角色、通信、等待和代码协作以 [D-339](agent-collaboration-design.md) 为准；本文保留基础验证和工作状态契约。
 交付事实见 [../status.md](../status.md)，计划骨架见 [../plan/agent-harness-plan.md](../plan/agent-harness-plan.md)。
 
 ## 9. 验证与多 agent
@@ -213,7 +213,7 @@ root/parent 能读取实际问题与结论，用户仍可进入支线纠正。�
 
 状态变化只维护可读取事实。模型执行由用户或 Agent 的明确交流、已有 wait/订阅续接，Host 不根据异常、产物或关键词
 判定“值得叫强模型综合”；也不自动为每个回复生成确认和再次唤醒。内容的重要性与下一步由阅读材料的 Agent 判断。
-详细交互与验收见 [plan 7.5](../plan/agent-harness-plan.md#75-自然语言消息等待与唤醒)。
+详细交互与验收见 [plan 7.5](../archive/agent-harness-plan-2026-10-06.md#75-自然语言消息等待与唤醒)。
 
 #### 9.2.5b 工作分支、按需物化与版本化集成（正式架构，D-078）
 

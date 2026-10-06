@@ -272,7 +272,7 @@ invalid-summary）与 D-284 admission 经真实 in-process worker Agent 验证�
 
 **D-306 / 阶段 S：对话式设置与 Agent 管理（2026-09-20），经 D-308/D-310/D-311 收口，当前产品范围已完成并进入生产调用链。**
 设计见 [agent-settings-design.md](../design/agent-settings-design.md)，实施顺序见
-[plan S0–S4](../plan/agent-harness-plan.md#阶段-s对话式设置与-agent-管理d-306)。
+[plan S0–S4](agent-harness-plan-2026-10-06.md#阶段-s对话式设置与-agent-管理d-306)。
 
 已接线：
 
@@ -313,7 +313,7 @@ invalid-summary）与 D-284 admission 经真实 in-process worker Agent 验证�
 
 **D-307 / 阶段 W：会话等待、触发与续接（2026-09-20），经 D-308/D-310/D-311 收口，W0–W4 当前产品范围已完成并进入生产调用链。**
 设计见 [agent-follow-up-design.md](../design/agent-follow-up-design.md)，任务见
-[plan W0–W4](../plan/agent-harness-plan.md#阶段-w会话等待触发与续接d-307)。
+[plan W0–W4](agent-harness-plan-2026-10-06.md#阶段-w会话等待触发与续接d-307)。
 
 已接线：
 
@@ -459,7 +459,7 @@ D-304 将受管远程、多机器执行、轻量批量操作与材料复用排�
 目标：传统环境观察在每次实际模型请求前检查，新事实送达后留在历史；每个授权 Agent 同时获得当前关系范围内的完整短表，
 作为临时尾部附页，不只推变化行、不只给主 Agent、不把历次表写入历史。固定协作说明放稳定系统提示，动态材料默认为标明来源的
 `user` 内容；内部消息类型/权限保持区分。历史前缀不重排，快照成本计入实际请求容量；普通状态与消息/结果正文不混淆交付。
-详细实施和定向验收见 [plan 7.11 的 7G](../plan/agent-harness-plan.md#711-分阶段交付) 与 [Harness 8.1.1](../design/harness-context.md#811-d-301环境增量留史团队现状作为请求尾部快照后续-7g)。
+详细实施和定向验收见 [plan 7.11 的 7G](agent-harness-plan-2026-10-06.md#711-分阶段交付) 与 [Harness 8.1.1](../design/harness-context.md#811-d-301环境增量留史团队现状作为请求尾部快照d-305-已实施)。
 生产 `ContextRequestBoundary` 在每次 Agent provider 请求前准备两类材料，先计入容量；环境材料在 provider 真正开始后写入 Pi 原生历史并确认收据，
 团队表每次完整重建但不留史。压缩后重新准备；请求未开始、Host 不可用和空团队分别表达。团队进展取真实最后可见段落及 Run/entry 来源，无状态总结模型。
 
@@ -469,7 +469,7 @@ Pi 的真实执行入口现在消费工具在权限确认后给出的资源计�
 
 `bash` 默认短等待并支持 `waitMs:0`，RPC 期限覆盖观察窗口但不是进程期限；`get_output` 可事件等待，输入/终止控制不被等待占住。
 真实完成、失败和取消按 executionId 去重后进入 7G，已由工具结果保留的终态不会重复。普通本地 shell 仍不冒充跨 Host 重启耐久实验。
-详见 [Harness 5.9](../design/harness-tools.md#59-并发) 和 [plan 7.11 的 7H](../plan/agent-harness-plan.md#711-分阶段交付)。
+详见 [Harness 5.9](../design/harness-tools.md#59-并发) 和 [plan 7.11 的 7H](agent-harness-plan-2026-10-06.md#711-分阶段交付)。
 原交付验收与 D-305 的 7G/7H 实施分别记录。
 
 **D-304 / 7I（2026-09-20，D-305 已实施）：受管远程、多机器执行与按需运维线程。**

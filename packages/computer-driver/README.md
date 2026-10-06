@@ -163,5 +163,5 @@ Windows app-name matching prefers a same-name process with a visible, nonzero-ar
 Default window selection prefers such windows before auxiliary handles; explicit PID and window
 handle selectors retain their exact targets.
 
-See the [BC acceptance record](../../docs/plan/bot-computer-use-review.md)
+See the [BC acceptance record](../../docs/reviews/bot-computer-use.md)
 for remaining native platform and packaging work.

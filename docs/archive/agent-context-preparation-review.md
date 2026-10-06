@@ -1,7 +1,7 @@
 # Agent 上下文准备问题复核与修复
 
-Status: implemented; locally verified, remote CI not checked.
-Last updated: 2026-10-01
+Status: historical fix review — 结果属于下述基线，不作为当前待执行计划。
+Last updated: 2026-10-06
 
 2026-10-01（北京时间）。基准为 Varin-FC 报告中的 `7c7e17f9`；复核当前 Varin 后，在本仓库直接修复。
 

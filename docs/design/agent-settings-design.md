@@ -4,7 +4,7 @@ Status: Stage S delivered through D-311: owner-backed fields/actions, session-bo
 
 Last updated: 2026-09-21
 
-实施顺序见 [Harness plan 的阶段 S](../plan/agent-harness-plan.md#阶段-s对话式设置与-agent-管理d-306)，
+实施顺序见 [Harness plan 的阶段 S](../archive/agent-harness-plan-2026-10-06.md#阶段-s对话式设置与-agent-管理d-306)，
 交付事实见 [Harness status](../status.md)，决策见 [D-306](../decisions/tool-environment.md#d-306--2026-09-20--阶段-s对话式设置与-agent-管理)。
 本文同时定义完整目标和当前实现边界；字段目录、查询/修改、UI 同步、领域动作、客户端 Surface 操作、
 跨 owner 组合更新和 S4 组合指南已经接线；认证 Surface、逐项 CAS、secret 投影与初轮验收修订见 D-310，
@@ -259,7 +259,7 @@ Pi 包、Varin 扩展和原生 UI 能力仍保留各自权威；第三方设置�
 
 ## 10. 验收与交付边界
 
-实施与验证按 [阶段 S](../plan/agent-harness-plan.md#阶段-s对话式设置与-agent-管理d-306) 推进。
+实施与验证按 [阶段 S](../archive/agent-harness-plan-2026-10-06.md#阶段-s对话式设置与-agent-管理d-306) 推进。
 核心判断是设置能否被找到、正确理解、写回原 owner 并实际应用，以及界面和 Agent 能否读到同一结果。
 以下是应核对的行为，不是要求每项建立独立测试或重新跑完整平台矩阵：
 

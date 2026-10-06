@@ -77,7 +77,7 @@ Agent Profile 在产品中称“工作侧重”，管理提示词、默认激活
 
 7A 已交付这些选择语义以及 `varin.research` 基础 Shell。科研 Shell 复用共享窗口、导航、权限和资源框架，
 中央显示真实研究主线、结果和可展开的分支/材料；后续实验与综合视图在 7B–7E 接入。交付顺序见
-[plan 7A](../plan/agent-harness-plan.md#711-分阶段交付)，产品行为以
+[plan 7A](../archive/agent-harness-plan-2026-10-06.md#711-分阶段交付)，产品行为以
 [科研集群设计第 10 节](research-cluster-design.md#10-产品入口工作台与工作侧重) 为准。办公只复用这一边界，不是科研实施前置。
 
 ## 3. 当前实现

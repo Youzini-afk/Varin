@@ -1,6 +1,6 @@
 # 后台压缩 Agent 与语义续接设计
 
-Status: implemented — D-314；实施顺序见 [阶段 C](../plan/agent-harness-plan.md#阶段-c后台压缩-agent-与语义续接d-314)，交付事实以 [status.md](../status.md) 为准
+Status: implemented — D-314；实施顺序见 [阶段 C](../archive/agent-harness-plan-2026-10-06.md#阶段-c后台压缩-agent-与语义续接d-314)，交付事实以 [status.md](../status.md) 为准
 
 Last updated: 2026-09-28
 

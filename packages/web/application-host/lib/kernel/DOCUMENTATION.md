@@ -186,7 +186,7 @@ an unbound file store or Documents resource gate fails instead of writing the ke
 
 ## D-278 authority audit and acceptance boundary
 
-The independent D-278 audit is recorded in [rust-kernel-audit.md](../../../../../docs/plan/rust-kernel-audit.md).
+The independent D-278 audit is recorded in [rust-kernel-audit.md](../../../../../docs/archive/rust-kernel-audit.md).
 It historically reopened R2/R3 after GC/owner/pin repairs. D-279 closed those findings by exposing pending file
 operation disposition/reconcile and durably joining kernel promotion to Git executionBaseline and Thread Registry/
 view binding. The audit remains evidence provenance, not the current delivery status.

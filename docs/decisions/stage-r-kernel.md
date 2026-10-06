@@ -452,7 +452,7 @@ Rust catalog `user_version` 与握手 storage format 同为 v9。R1 仍为 Parti
 
 状态修正：R1 核心 production metadata cutover 保持 Complete，本轮修复其 GC/pin 正确性。R2 改为 Partial（生产文件权威已接通，低层 pending operation 到 Host 可见处置仍待闭环）；R3 改为 Partial（kernel 原语/主要消费者已接通，kernel promotion→Git executionBaseline→Thread Registry/execution view 尚无贯穿的 durable switch intent/receipt，setup 停止与真实退出也需验收）。这不是新增签名、本地跨平台或物理断电门槛，也不恢复 TS writer。R0 保持 Partial，R4–R6 不变。
 
-证据与未决项详见 [rust-kernel-audit.md](../plan/rust-kernel-audit.md)。新增反例在真实 release kernel 上运行；真实 DocumentAuthority 的保存/移动/删除、独立 owning/execution 的 materialize/publish/restore，以及去掉 no-op gate 的 combined Recovery/restart/undo 均纳入同一验收。更新 workflow 不冒充远端 CI 已绿，legacy seam 单测不冒充 native 生命周期证明。
+证据与未决项详见 [rust-kernel-audit.md](../archive/rust-kernel-audit.md)。新增反例在真实 release kernel 上运行；真实 DocumentAuthority 的保存/移动/删除、独立 owning/execution 的 materialize/publish/restore，以及去掉 no-op gate 的 combined Recovery/restart/undo 均纳入同一验收。更新 workflow 不冒充远端 CI 已绿，legacy seam 单测不冒充 native 生命周期证明。
 
 ### D-279 · 2026-09-14 · R2/R3 复核收口：未决文件操作可处置，物化跨域 handoff 可重入
 

@@ -1,6 +1,6 @@
 # Agent harness — 工具集（code profile v1）
 
-Status: 模块专卷，自 [agent-harness.md](agent-harness.md) 拆出（原文第 工具 节起）；本文保留原节标题层级与锚点。
+Status: domain contract — 工具与执行语义；当前注册集合和参数以 Pi harness 实现为准。
 交付事实见 [../status.md](../status.md)，计划骨架见 [../plan/agent-harness-plan.md](../plan/agent-harness-plan.md)。
 
 ## 5. 工具集（code profile v1）
@@ -369,7 +369,7 @@ Web / 云 host 无 Chromium 时返回 `unavailable (no renderer)`；检测到空
 
 #### 5.9.3 会话等待、触发与续接（D-307，待实施）
 
-在 7G/7H/7I 基础上，后续 [阶段 W](../plan/agent-harness-plan.md#阶段-w会话等待触发与续接d-307) 让 Agent 自然登记
+在 7G/7H/7I 基础上，后续 [阶段 W](../archive/agent-harness-plan-2026-10-06.md#阶段-w会话等待触发与续接d-307) 让 Agent 自然登记
 “条件满足后在原工作中继续”的意图。完整设计见 [agent-follow-up-design.md](agent-follow-up-design.md)。
 时间、执行/实验事件、产物/指标/日志条件由程序观察；明确条件成立或约定评估时点到达才交付后续，
 不通过无变化的模型轮询维持等待。简单场景沿长任务返回的身份直接登记，复杂来源按需披露说明。
@@ -424,7 +424,7 @@ v1 工具在 pi-host 内，不是 Pi 包，因此不出现在 Plugin Settings。
 ### 5.11 对话式设置与 Agent 管理（D-306，待实施）
 
 设置页与对话管理同一套配置，目标覆盖现有大部分设置及相关管理动作。完整设计见
-[agent-settings-design.md](agent-settings-design.md)，实施见 [plan 阶段 S](../plan/agent-harness-plan.md#阶段-s对话式设置与-agent-管理d-306)。
+[agent-settings-design.md](agent-settings-design.md)，实施见 [plan 阶段 S](../archive/agent-harness-plan-2026-10-06.md#阶段-s对话式设置与-agent-管理d-306)。
 共用设置描述与真实 owner 的读取、校验、写入和生效逻辑，UI 搜索与 Agent 目录从同一来源派生。
 原生查询/修改工具提供实时配置、来源、支持范围、动态选项及实际结果；Skills 按需解释组合方法。
 

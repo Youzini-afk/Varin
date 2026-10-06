@@ -20,7 +20,7 @@ Status: current acceptance — BC0–BC9 remain Partial.
 
 第六批核对平台接口与全量回归：Wayland 的单次 Screenshot portal 结果无法证明与 AT-SPI 请求窗口相同，且逐帧调用不是持续授权会话，故撤下自动窗口图与观看帧的错误能力声明；正式 RemoteDesktop/ScreenCast 会话仍需实现。远端 URL 保留代理前缀后，修正运行时鉴权必须同时匹配 origin 与挂载路径，避免漏发凭据或将凭据发给同源其他服务。Pi 握手明确声明 Host 是否提供会话指令，未声明时不再等待无人处理的可选请求。首次全套测试揭示上述接口旧断言与两项 Pi 超时；修复后 UI **2,050 项通过**、Pi 受影响 **16 项通过**、Application Client **7 项通过**，Web 全套 **2,901 项通过、5 项跳过**。全仓类型和 lint、Host 构建、文档校验通过。CI 安全审计发现的既有依赖版本已定向更新；源码与云运行时两份锁均为零项。云发行包现携带 Pi 的两份版本补丁，隔离安装后核对了实际补丁代码和 `undici` 解析版本；云合同测试 **10 项通过**。Pi 全套未在这些修复后再跑一遍，不能将首次失败记成全量通过。
 
-**结论：不能接受“BC0–BC9 全部完成”。** Bot、记忆、Computer Use、桌面视图、远端转发与 libvirt 的生产路径确实存在；但基线有控制交接、磁盘归属、配置保存、入口生命周期等实际错误，且 BC6–BC9 的若干交付条件根本尚未实现。功能存在、行为正确和安装后可用是不同证据。下文是本次验收结论；[旧验收记录](bot-computer-use-acceptance.md)保留历史，不覆盖本报告。
+**结论：不能接受“BC0–BC9 全部完成”。** Bot、记忆、Computer Use、桌面视图、远端转发与 libvirt 的生产路径确实存在；但基线有控制交接、磁盘归属、配置保存、入口生命周期等实际错误，且 BC6–BC9 的若干交付条件根本尚未实现。功能存在、行为正确和安装后可用是不同证据。下文是本次验收结论；[旧验收记录](../archive/bot-computer-use-acceptance.md)保留历史，不覆盖本报告。
 
 ## 分阶段判断
 
@@ -61,16 +61,22 @@ Status: current acceptance — BC0–BC9 remain Partial.
 
 ## 仍须实现的合同
 
-这些是源码中的功能缺口，不是因缺少真机而暂缓作结论：
+macOS JXA 路线尚未替代为计划中的稳定 bundle/ScreenCaptureKit 组件；能力声明和权限身份仍需对应平台实现。
+Wayland 正式 RemoteDesktop/ScreenCast 会话也未实现，已停止在自动路径使用无法确认目标身份的单次 Screenshot portal。
+这些属于实现缺口，不与“缺少机器验证”混列。
 
-5. **真实 VM 验收。** 自动创建、guest 引导、桌面操作、观看和关机后升级已有产品链路，但当前环境没有 KVM/libvirt，尚无真实虚拟机运行证据。托管配方目前要求 Linux x64 Host 与本地 `qemu:///system`；远端已有 VM 可按 BC6 接入，不能把这等同于托管生命周期。
-7. **正式平台组件。** Debian/Ubuntu 的显式准备已提供 Python/GI/AT-SPI/Gdk、Xvnc、xfce4 与浏览器安装路径，仍需 Linux 实机运行及其他发行版选择。macOS JXA 不等同于计划中的稳定 bundle/ScreenCaptureKit 组件，能力声明和权限检查还需实际平台实现与运行验证；Wayland 正式 RemoteDesktop/ScreenCast 会话也未实现。Screenshot portal 的单次结果无法证明与请求窗口或连续观看画面同一目标，已停止在自动路径使用。
+## 待补的原生证据
+
+托管 VM 的创建、guest 引导、桌面操作、观看和关机后升级已有产品接线，记录中尚无真实 KVM/libvirt 运行证据。
+配方目前要求 Linux x64 Host 与本地 `qemu:///system`；按 BC6 接入已有远端 VM 不等同于托管其生命周期。
+Debian/Ubuntu 显式准备、Xvnc/桌面、浏览器、远端 Host 及安装/升级也仍需实际环境验证。
+上表 BC1–BC3 已记录补齐共同来源覆盖和原始片段追读，不再把这些旧缺口列为尚未实现。
 
 ## 工程判断
 
 保留现有 Pi、Host、TDB、Rust 的职责划分是合适的。Bot 和记忆大体沿既有 owner 扩展，prepared 记录比仅保存模型结果可靠。ComputerService 把 catalog、driver、控制、媒体、remote 和 VM 装配集中在一个大文件，后续补齐远端/VM 时应按这些实际职责拆开，继续由同一 Host 统一授权；不应再增加一套电脑或 Bot 后端。
 
-目前的完成报告把“文件存在/函数已接线”提升成了完整阶段交付，尤其掩盖了 BC6–BC9 的缺失消费者。应按上表验收，不沿旧标题宣布完成，也不把模拟 virsh 或静态 JXA 检查解释为真实平台通过。
+早期交付报告曾把接线提升为完整阶段交付；后续补齐和当前边界以上表为准。模拟 virsh 或静态 JXA 检查不代表真实平台已通过。
 
 ## 验证
 

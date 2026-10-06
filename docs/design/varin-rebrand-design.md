@@ -1,11 +1,11 @@
 # Varin 全面更名设计
 
-Status: implemented product/source cutover; D-313; first Varin distribution pending publication
+Status: historical naming decision; product/source cutover implemented at D-313. Publication state belongs to release records, not this design.
 
-Last updated: 2026-09-21
+Last updated: 2026-10-06
 
 本设计确定产品由 **Piarium 全面更名为 Varin**。实施顺序见
-[阶段 B](../plan/agent-harness-plan.md#阶段-bvarin-全面更名d-313)，实际完成情况只记入
+[阶段 B](../archive/agent-harness-plan-2026-10-06.md#阶段-bvarin-全面更名d-313)，实际完成情况只记入
 [能力状态](../status.md)。产品源码、品牌资源和 GitHub 仓库已切换；新发行资产与 npm 发布状态单独记录。
 
 ## 1. 产品决定与边界

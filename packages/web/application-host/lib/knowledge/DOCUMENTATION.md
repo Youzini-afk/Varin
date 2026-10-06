@@ -175,7 +175,7 @@ a valid result; unconfigured models, invalid envelopes/citations and changed sou
 the persisted ranges authorized by the selected memory. They report changed or
 missing originals instead of presenting another revision as the cited evidence.
 Current delivery evidence is in the
-[BC acceptance record](../../../../../docs/plan/bot-computer-use-review.md).
+[BC acceptance record](../../../../../docs/reviews/bot-computer-use.md).
 
 ### Runtime build
 

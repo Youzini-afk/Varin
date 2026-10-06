@@ -4,7 +4,7 @@ Status: Stage W delivered through D-311: durable composite/source observations, 
 
 Last updated: 2026-09-21
 
-实施顺序见 [Harness plan 阶段 W](../plan/agent-harness-plan.md#阶段-w会话等待触发与续接d-307)，交付事实见
+实施顺序见 [Harness plan 阶段 W](../archive/agent-harness-plan-2026-10-06.md#阶段-w会话等待触发与续接d-307)，交付事实见
 [Harness status](../status.md)，决策见 [D-307](../decisions/tool-environment.md#d-307--2026-09-20--阶段-w会话等待触发与续接)。
 阶段 W 排在 [阶段 S](agent-settings-design.md) 之后，复用 7G 请求前增量、7H 后台工具与事件等待、7I 实验/远程事实。
 本文同时定义完整目标和当前实现边界；时间、耐久 experiment、artifact、file、metric、log、external、ordinary shell

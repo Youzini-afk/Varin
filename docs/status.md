@@ -1,46 +1,63 @@
-# Varin 项目状态
+# Varin 当前状态
 
-Status: living document — 项目阶段进度与当前缺口的权威入口。Harness 能力逐行交付明细在
-[design/harness-capability-matrix.md](design/harness-capability-matrix.md)（implemented / wired / proven / default-on 四级定义见其文件头）；
-阶段合同在 [plan/](plan)，设计边界在 [design/](design)，逐阶段交付叙述已归档至 [archive/](archive) 不再更新。
-本文件不追加工作日志：新阶段交付事实更新下表与矩阵，历史叙述进归档。
+Status: maintained delivery summary — 汇总实现边界，具体证据由链接的模块或验收记录保留。
+Last updated: 2026-10-06
 
-Last updated: 2026-10-05
+本页以 `27c30f35` 的代码、近期变更和既有验收记录为整理基线。
+版本号、发布任务和在线 CI 结果分别由包清单、发布记录和工作流负责，不从文档中的“完成”推断。
+[架构](architecture.md) · [后续路线](roadmap.md) · [验收与证据](reviews/README.md)
 
-## 阶段进度
+## 当前能力
 
-| 阶段 | 状态 | 明细入口 |
-| --- | --- | --- |
-| Harness 能力（0.x–3b、T4、工作分支/Integration） | 逐行状态与证据 | [design/harness-capability-matrix.md](design/harness-capability-matrix.md) |
-| 多 Agent 协作收敛 | D-339 已实施并接线：Worker/检索、同任务互读、普通主线持久事件等待、选定代码提交与原生三方整合、基线复用及回执 UI。相关行为回归与真实 Rust 分支 CAS/重启回执验证通过；未打包，未验证付费模型协作质量。 | [设计与交付证据](design/agent-collaboration-design.md) |
-| 阶段 Q 测试与 CI | 已验收收口（D-292） | [design/testing-ci-design.md](design/testing-ci-design.md)、[plan/agent-harness-plan.md](plan/agent-harness-plan.md) |
-| 阶段 R Rust 系统内核 | D-282 收口；kernel 为转移面生产权威 | [design/rust-kernel-design.md](design/rust-kernel-design.md)、[plan/rust-kernel-audit.md](plan/rust-kernel-audit.md) |
-| 阶段 RR 运行时可靠性 | RR0–RR5 代码路径与定向行为已复核；RR6 真实安装包/外部代理平台纵切仍待验证 | [plan/agent-runtime-reliability-plan.md](plan/agent-runtime-reliability-plan.md)；RR2/RR4 旧机制已被 HR 移除 |
-| 阶段 7 AI4S 科研集群（7A–7I） | 主体已交付为 Partial（D-298/D-303/D-305）；D-300 修订的 7C–7E 远程执行与资源管理部分仍未作为产品代码交付，Slurm 延后 | [design/research-cluster-design.md](design/research-cluster-design.md) |
-| 阶段 S / W / B / F / C / L / N | 已接线；逐能力证据在矩阵 | [plan/agent-harness-plan.md](plan/agent-harness-plan.md) 同名节 |
-| 阶段 O 办公连续性 | 设计已接受（D-327），O0–O4 未实施 | [design/office-work-continuity-design.md](design/office-work-continuity-design.md) |
-| 阶段 BC Bot、记忆与 Computer Use | BC0–BC9 均有生产路径，深入验收结论仍为 Partial。已修复 Bot 生命周期、记忆来源/分支恢复、控制交接、远端 Host/桌面与成果续接；Linux 持久桌面及 Debian/libvirt 托管 guest 的创建、注册、关机升级路径已接线。真实 KVM/Linux 图形会话、macOS 稳定原生组件、Wayland 正式输入会话和发行包实装仍缺证据或实现，不能接受“全部落地”。 | [实施计划](plan/bot-computer-use-plan.md)、[当前深入验收](plan/bot-computer-use-review.md) |
-| 阶段 HR 面向任务与资源的 Harness | D-337，HR0–HR5 已接线并收口（2026-09-27）：资源根寻址、会话 cwd 锚定、多资源检索、持续索引、可变 work-context 移除、§12 场景证据 | [design/resource-oriented-harness-design.md](design/resource-oriented-harness-design.md)；交付叙述在归档日志 |
-| 可组合执行环境（EE） | 实施中。已交付：Thread 环境绑定与工作目标固定（EE1）、跨环境 open/受管文件写入与 artifact 修订（EE2）、服务访问 forward/list/close 经 Host↔Host 字节桥（EE3a）、`desktop` 持久 follow-up 源回源事件（EE3b）、组件配方与安装入口（EE4）、Chromium CDP 桥与 LibreOffice UNO 桥同一真实现场（EE5a/b）、操作证据日志与诊断入口（EE6）。未交付：VM/Guest Host 组成与各桥的原生实测、§13 余项收敛 | [design/execution-environment-design.md](design/execution-environment-design.md)、[验收记录](plan/execution-environment-review.md) |
-| 默认模型输入精简 | 主提示、模式、子 Agent、内置动作、工具与 Skills 已更新；原生装配、自由报告、输入传递与后台消费者定向验证通过。真实模型质量、延迟和发行包验证仍未进行。 | [architecture.md](architecture.md)、[Pi harness README](../packages/pi-host/src/harness/README.md) |
-| Phase 0–10、D-296 companion 退役 | 完成 | [archive/roadmap-history.md](archive/roadmap-history.md) |
+| 领域 | 当前实现 | 仍需区分的边界 | 依据 |
+| --- | --- | --- | --- |
+| 工作台、Pi 与 Rust 内核 | Agent/IDE/Research 共享工作台基础；稳定 Pi SDK 会话；Host 与 Rust 的职责分离已实现 | 平台与发行验收按具体构建判断 | [架构](architecture.md)、[Kernel](../kernel/README.md) |
+| 常规多 Agent 协作 | Worker/检索、同任务会话互读、持久事件等待、选定代码提交和原生整合已接线 | 相关原生/行为验证不等于付费模型协作质量或完整安装包点击流程 | [D-339 设计与证据](design/agent-collaboration-design.md) |
+| 模型输入与工具 | 原生分段装配、动态工具、现有指令/轻记忆、启用团队指导和非阻塞提问有实际入口 | 工具、模式和用户配置共同决定可用能力 | [Pi harness](../packages/pi-host/src/harness/README.md)、[工具选择](../packages/pi-host/src/harness/select-tools.ts) |
+| 上下文、知识与检索 | 固定范围后台压缩、原文回读、知识/语义索引、增量 Explore，以及 Web/学术搜索和材料复用已有接线 | 真实 provider 的选材质量与延迟需要独立于模拟调用链证据判断 | [能力明细](reviews/harness-capabilities.md)、[性能](performance.md) |
+| 设置、等待与续接 | owner-backed 设置目录、领域动作、耐久条件等待和日历任务已有生产路径 | 配置生效时机、普通 shell 寿命和耐久实验不能混为一谈 | [设置设计](design/agent-settings-design.md)、[续接设计](design/agent-follow-up-design.md) |
+| Bot 和记忆 | BC0–BC3 的身份、主动/后台共同来源覆盖、分支恢复、召回及原始片段读取已补齐生产路径 | 真实模型提炼质量、长期运行及缓存效果未由这些定向测试证明 | [Bot 当前验收](reviews/bot-computer-use.md) |
+| Computer Use 与虚拟机 | BC4–BC9 有本机控制、观看/交接、远端连接、Linux guest 配方与成果接线 | 正式平台组件仍有实现缺口；完整真机与安装/升级流程未验收 | [BC 分阶段判断](reviews/bot-computer-use.md#分阶段判断) |
+| 可组合执行环境 | EE1–EE6 的环境绑定、文件/服务桥、软件配方、浏览器/办公桥和元数据日志已有底层候选实现 | 普通根会话、跨环境资源定位、跨机服务可达性等合同仍未完成 | [EE 当前验收](reviews/execution-environments.md#剩余产品缺口与原生验证) |
+| 办公连续性与新工作台体验 | O0–O4 是已接受但未实施的方向；视觉/交互方案仍为候选 | 不把应用桥或候选界面图当成完整办公产品已交付 | [办公设计](design/office-work-continuity-design.md)、[体验候选](design/varin-product-experience.md) |
 
-## 当前缺口
+## 未完成的产品合同
 
-| 缺口 | 现状 |
-| --- | --- |
-| Explore快速检索改造 | 2026-10-01主体已接入：增量取材/等待、读取与结构队列分离、输出limit解耦、可选模型按职责补位、完整必需组交付、warm结构与显式准备、后台语义扫描。四类模型16配置已在公开工具—Host模拟服务联调；新版本真实provider的延迟、噪声和任务收益尚未实测。没有新增训练或整批测评。见[设计§6.1](design/harness-retrieval.md)与[实施计划](plan/agent-harness-plan.md#快速检索改造2026-10-01)。 |
-| AI4S 7C–7E 剩余合同 | 远程执行与资源管理部分未交付为产品代码；Slurm/原生集群后端延后 |
-| 阶段 O | O0–O4 未实施 |
-| 阶段 BC | 实现缺口与环境证据分别见[当前验收](plan/bot-computer-use-review.md)。BC1–BC3 尚缺主动/自动共同来源覆盖、分支来源恢复与完整来源追读；BC6–BC9 尚缺独立桌面准备、VM guest 引导、成果/续接整合和正式平台依赖。Linux/macOS 真机、真实 libvirt、完整远端图形操作及正式安装包未验证。 |
-| 可组合执行环境 | 未交付批次与未验证边界见[验收记录](plan/execution-environment-review.md)：双机 Host↔Host 联调、真机桌面事件到 Thread 续行纵切、Linux/macOS `open` op 与符号链接封堵原生证据、forward 跨机字节桥、默认模板/应用桥/诊断批次未实施。 |
-| 平台与真实环境验收 | 打包桌面端的会话重开、目录离线、并发 Agent、跨根草稿完整 Agent 交互纵切；真实代理/fake-IP/远端 CI；macOS/Linux 真机；真实付费模型质量与延迟——均未测，不以源码测试宣称 |
-| HR 已知边界 | 外部根未保存草稿不能安全物化进单根隔离子任务（明确返回不可用而非读旧盘）；语义索引仍可能静默漏外部新文件需重扫，大目录资源成本未测；混合 A 虚拟分支+B 独立编辑器的单补丁需拆两次提交；结果不明的编辑器操作需人工处理，无自动跨提交域回滚或完整桌面重启证明 |
-| 性能数字 | 无测量不写提升倍数或毫秒承诺 |
+### 执行环境与跨机工作
 
-## 文档入口
+已有组件安装入口和浏览器/办公桥，不应再标成“整个批次未实施”。当前差距是普通根会话的完整环境入口、
+文件/搜索等工具统一按环境资源定位、协调 Host 上的 forward URL 如何被另一台操作电脑使用、
+按 Bot scope 取消受理操作、应用进程与可见桌面的身份核验，以及模板的版本/升级合同。
+操作证据目前是元数据日志，不是带动作前后画面的完整重演系统。
+详见 [EE 剩余合同](reviews/execution-environments.md#剩余产品缺口与原生验证)。
 
-- [architecture.md](architecture.md) — 系统架构（权威）；[development.md](development.md) — 开发入口与验证命令
-- [design/](design) — 领域设计与 Harness 模块专卷；[plan/](plan) — 实施计划骨架与在途阶段
-- [decisions/](decisions) — D-xxx 决策日志索引与领域分卷；[ops/](ops) — 部署与使用指南
-- [archive/](archive) — 已收口阶段的交付叙述与历史快照（不再更新，冲突时以本文件与矩阵为准）
+### 平台组件与研究资源管理
+
+macOS 稳定原生组件和 Wayland 正式输入/屏幕会话仍有实现工作；这些不是单纯缺少测试机器。
+Linux 托管 guest 已有配方和生命周期接线，但其适用范围与原生运行证据仍受限。
+详见 [BC 验收](reviews/bot-computer-use.md)。
+
+科研已有本地与受管远端执行路径，但 D-300 修订后的 7C–7E 资源管理/调度合同并未因此全部完成。
+Slurm 等原生集群适配继续延后。完整目标见 [科研设计](design/research-cluster-design.md)，
+原实施分解见 [阶段 7 历史计划](archive/agent-harness-plan-2026-10-06.md#阶段-7ai4s-科研集群d-291d-297d-300分阶段实施)。
+
+### 尚未进入实现的方向
+
+办公连续性 O0–O4、候选工作台体验，以及动效设计中仍标为未来工作的部分，不混入已交付清单。
+选择下一项工作时从 [路线图](roadmap.md) 和各主题合同进入，不延续旧文档中的“下一阶段是 L”等时序描述。
+
+## 尚待补充的运行证据
+
+既有验收记录仍缺完整 Linux/macOS 图形会话、真实 KVM/libvirt guest、跨机浏览器/办公/forward、
+安装与升级流程，以及真实付费模型质量/延迟的相应证据。RR6 的安装包与外部代理纵切也未闭合。
+代码存在、定向测试通过、原生组件测试和完整产品场景是不同层次的证据。
+
+HR 的跨根未保存草稿物化、混合写入域、来源失效与结果不明操作等场景继续保留在
+[任务/资源设计](design/resource-oriented-harness-design.md)和[能力明细](reviews/harness-capabilities.md)中。
+本次文档整理没有把这些历史边界重新宣称为已复现或已消除；新的场景验证应回写对应记录。
+
+## 历史阶段如何查
+
+R、Q、S、W、B、F、C、L、N、HR 等编号是定位实施历史的索引，不另维护第二张完成度表。
+[Harness 阶段导航](plan/agent-harness-plan.md)连接设计、交付记录和原计划；
+[归档目录](archive/README.md)保留 Phase 0–10、Rust 审计、测试治理和上下文修复记录。

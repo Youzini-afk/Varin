@@ -1,6 +1,6 @@
 # Agent harness — 上下文与缓存契约
 
-Status: 模块专卷，自 [agent-harness.md](agent-harness.md) 拆出（原文第 上下 节起）；本文保留原节标题层级与锚点。
+Status: domain contract — 上下文、压缩与缓存；沿用原 §8 章节编号。
 交付事实见 [../status.md](../status.md)，计划骨架见 [../plan/agent-harness-plan.md](../plan/agent-harness-plan.md)。
 
 ## 8. 上下文与缓存契约

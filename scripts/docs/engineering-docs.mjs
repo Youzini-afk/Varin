@@ -1,14 +1,4 @@
-/**
- * Contract checks for the repository's engineering documentation.
- *
- * The docs site under `packages/docs` has its own frontmatter and sidebar validation. The
- * engineering docs (`AGENTS.md`, the READMEs, and `docs/**`) had no gate at all, which is how the
- * delivery roadmap fell 48 commits behind an entire new subsystem without anything failing.
- *
- * These checks are deliberately deterministic. They assert properties that are wrong in a way a
- * reader can act on, and they avoid time- or commit-count thresholds that would fail a document
- * for merely being stable.
- */
+/** Shared Markdown helpers for the engineering documentation graph check. */
 
 /** Documents that state their delivery status at the top. */
 export const REQUIRED_STATUS_HEADER_DOCS = ["docs/architecture.md", "docs/roadmap.md"]
@@ -21,10 +11,21 @@ export const REQUIRED_STATUS_HEADER_DOCS = ["docs/architecture.md", "docs/roadma
  */
 export const ORPHAN_ALLOWLIST = Object.freeze({})
 
-const stripCodeFences = (text) => text.replace(/```[\s\S]*?```/g, (block) => block.replace(/[^\n]/g, " "))
+const stripCodeFences = (text) => {
+  let fence = null
+  return text.split("\n").map((line) => {
+    const marker = /^ {0,3}(`{3,}|~{3,})/.exec(line)?.[1]
+    if (fence) {
+      if (marker && marker[0] === fence[0] && marker.length >= fence.length && /^ {0,3}(?:`+|~+)\s*$/.test(line)) fence = null
+      return ""
+    }
+    if (marker) { fence = marker; return "" }
+    return line.replace(/(?<!`)(`+)(?!`)[^\n]*?\1(?!`)/g, " ")
+  }).join("\n")
+}
 
 /**
- * Collect link targets from inline links, reference definitions, and bare autolinks.
+ * Collect link targets from inline links and reference definitions.
  * Returns targets with any `#fragment` removed and external schemes filtered out.
  */
 export const collectLocalLinkTargets = (markdown) => {

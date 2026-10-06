@@ -1,12 +1,12 @@
 # Varin extension platform
 
-Status: implemented; the authoring toolchain is prepared for npm but not published yet
+Status: implemented extension ownership contract; package publication state is maintained by release records.
 
 Current boundary (D-296): supported application-host surfaces are Web, Electron, hosted mobile,
 Capacitor, and headless consumers. The former VS Code companion and its host bridge are retired;
 historical references in delivery notes do not define a current target.
 
-Last updated: 2026-09-02
+Last updated: 2026-10-06
 
 ## 1. Decision
 

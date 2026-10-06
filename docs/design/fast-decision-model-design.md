@@ -4,8 +4,8 @@ Status: 通用能力及 `explore` / `web` / `scholarly` 接线为 implemented/wi
 
 Last updated: 2026-10-01
 
-本设计由 [Agent Harness](agent-harness.md) 第 6.1、8.5 节引用，实施顺序见
-[阶段 F](../plan/agent-harness-plan.md#阶段-f快速决策模型与渐进检索d-312)，实际交付只记入
+本设计由 [检索专卷 §6.1](harness-retrieval.md)和 [上下文专卷 §8.5](harness-context.md)引用，原实施分解见
+[阶段 F](../archive/agent-harness-plan-2026-10-06.md#阶段-f快速决策模型与渐进检索d-312)，实际交付只记入
 [能力状态](../status.md)。本文定义通用能力与首个检索消费者。2026-09-28 源码核查确认
 [Pi 原生分类适配](../../packages/pi-host/src/harness/native-classifier.ts) 已实现；
 [用途合同](../../packages/protocol/src/harness-fast-decision.ts) 已注册 `explore/web/scholarly`。

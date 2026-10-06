@@ -355,13 +355,13 @@ CI は責務の異なる 3 つの安定したゲートを公開しています�
 - [エンジニアリングガイド](../../docs/development.md)
 - [ロードマップ](../../docs/roadmap.md)
 - [エージェントハーネス契約](../../docs/design/agent-harness.md)（中国語）、[デリバリーステータス](../../docs/status.md)、[計画](../../docs/plan/agent-harness-plan.md)、[決定ログ](../../docs/decisions/README.md)付き
-- [Rust システムカーネル設計](../../docs/design/rust-kernel-design.md)と[監査記録](../../docs/plan/rust-kernel-audit.md)
+- [Rust システムカーネル設計](../../docs/design/rust-kernel-design.md)と[監査記録](../../docs/archive/rust-kernel-audit.md)
 - [コンポーザブルワークベンチと IDE 契約](../../docs/design/composable-workbench.md)（中国語）
 - [統合ファイルエディタプラットフォーム](../../docs/design/unified-file-editor-platform.md)
 - [Varin 拡張プラットフォーム](../../docs/design/varin-extension-platform.md)
 - [OpenChamber から Pi への移行契約](../../docs/ops/openchamber-pi-migration.md)
 - [プラグイン GUI と所有権設計](../../docs/design/plugin-gui-design.md)
-- [リカバリモデル](../../docs/design/recovery.md)
+- [リカバリモデル](../../docs/ops/recovery.md)
 - [クラウドデプロイ](../../docs/ops/cloud-deployment.md)
 - [セキュリティモデル](../../docs/design/security.md)
 

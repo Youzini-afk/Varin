@@ -1,10 +1,12 @@
 # Recovery and rollback
 
+Status: user operation guide — recovery choices and coverage.
+
 Varin provides two related actions from every recoverable message:
 
 - **conversation only** moves Pi's native session branch and restores editable prompt text/images;
-- **conversation and files** also reverses the exact `write` and `edit` changes made by the turns that
-  leave the active branch.
+- **conversation and files** also applies the recorded file-recovery plan for the turns that leave
+  the active branch, subject to its coverage and conflict checks.
 
 The default can be set to conversation only, conversation and files, or always ask.
 
@@ -35,4 +37,4 @@ Varin does not hide that gap behind a slow full-workspace fallback. Conversation
 available.
 
 The complete mechanism and provider contract are documented in
-[Varin native recovery journal](native-workspace-recovery-design.md).
+[Varin native recovery journal](../design/native-workspace-recovery-design.md).

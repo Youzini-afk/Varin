@@ -57,7 +57,7 @@ one current pre-release runtime contract.
    cancellation, partial failure, cleanup, retry, rollback, and unavailable capabilities visible.
 
 Read [Architecture](../docs/architecture.md), [Plugin GUI design](../docs/design/plugin-gui-design.md),
-[Recovery](../docs/design/recovery.md), and [Security model](../docs/design/security.md) when those boundaries apply.
+[Recovery](../docs/ops/recovery.md), and [Security model](../docs/design/security.md) when those boundaries apply.
 
 ## Development setup
 

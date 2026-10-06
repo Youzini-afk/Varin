@@ -53,7 +53,7 @@ Varin は複数のコーディングエージェント CLI をまとめる汎用
    失敗、クリーンアップ、リトライ、ロールバック、利用できない機能を明示してください。
 
 該当する境界に関わる場合は、[アーキテクチャ](../../docs/architecture.md)、[プラグイン GUI 設計](../../docs/design/plugin-gui-design.md)、
-[リカバリー](../../docs/design/recovery.md)、[セキュリティモデル](../../docs/design/security.md)を読んでください。
+[リカバリー](../../docs/ops/recovery.md)、[セキュリティモデル](../../docs/design/security.md)を読んでください。
 
 ## 開発環境のセットアップ
 

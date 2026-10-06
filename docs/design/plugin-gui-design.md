@@ -437,7 +437,7 @@ Acceptance:
 
 ### 5.5 Native recovery, pi-workspace-history, and pi-wtf
 
-Authority and detailed semantics are defined in [recovery.md](recovery.md). The normal rollback
+Authority and detailed semantics are defined in [recovery.md](../ops/recovery.md). The normal rollback
 entry point remains attached to a user message. The right sidebar reports current-session native
 recovery health and operations. Settings owns policy, storage location, retention, cleanup, and
 workspace-history deletion without becoming a second file or conversation authority.

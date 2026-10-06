@@ -1,8 +1,8 @@
 # Varin 科研集群设计
 
-Status: implemented production slices through D-305 (7G/7H/7I); local and managed-remote execution, collaboration, request context, resource-aware tools and multi-machine placement are wired; Slurm deferred
+Status: partially implemented design — 本地与受管远端执行等切片已有接线；D-300 的完整资源管理/远程执行合同仍有剩余项，Slurm 延后。当前边界见 [status](../status.md)。
 
-Last updated: 2026-09-20
+Last updated: 2026-10-06
 
 本文定义 Varin AI4S（AI for Science）方向的产品中心、研究集群协作形态和第一阶段实施边界。
 它建立在现有 Varin Agent Harness、Thread/Run、Rust kernel、检索、上下文和权限能力之上，不另建一套
@@ -371,7 +371,7 @@ Host 用已有输出、消息、Run 和结果事件维护可重建投影。流�
 
 固定协作说明放稳定系统提示，介绍现状表和查看/发送/等待能力，不要求逐行回应或每步沟通。动态材料默认以标注来源的
 `user` 内容传给 provider；内部仍区分真实用户消息、环境观察和团队快照，不能把别的 Agent 原话提升为系统指令或本 Agent 输出。
-工具结果配对和 provider 合法续接边界优先。具体上下文结构、缓存和容量契约见 [Harness 8.1.1](harness-context.md#811-d-301环境增量留史团队现状作为请求尾部快照后续-7g)。
+工具结果配对和 provider 合法续接边界优先。具体上下文结构、缓存和容量契约见 [Harness 8.1.1](harness-context.md#811-d-301环境增量留史团队现状作为请求尾部快照d-305-已实施)。
 
 历史前缀及在途请求保持不动；快照通常每次需要处理，是持续感知的明确成本，通过短表和按需展开控制呈现，不引入猜测的配额。
 容量计算包含快照与环境增量。环境事件按实际接收者确认送达，UI 展开不推进模型游标，准备/失败不冒充交付；

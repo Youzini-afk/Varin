@@ -42,7 +42,7 @@ Varin 不是圍繞多個程式設計代理 CLI 的通用包裝器。它有一個
 6. **讓失敗如實呈現。** 權威來源的失敗不是成功的空回應。請讓取消、部分失敗、清理、重試、回滾和不可用的功能都清楚可見。
 
 在適用的邊界涉及這些內容時，請閱讀[架構](../../docs/architecture.md)、[外掛程式 GUI 設計](../../docs/design/plugin-gui-design.md)、
-[復原](../../docs/design/recovery.md)和[安全性模型](../../docs/design/security.md)。
+[復原](../../docs/ops/recovery.md)和[安全性模型](../../docs/design/security.md)。
 
 ## 開發環境設定
 

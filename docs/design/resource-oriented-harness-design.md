@@ -1,8 +1,8 @@
 # 面向任务与资源的 Harness：工作区解耦与持续检索
 
-Status: accepted direction / HR0–HR5 wired; corrective verification in progress (D-337)
+Status: implemented task/resource foundation — HR0–HR5 已接线；具体场景证据和保留边界见 [能力记录](../reviews/harness-capabilities.md)与 [status](../status.md)。
 
-Last updated: 2026-09-27
+Last updated: 2026-10-06
 
 设计时的源码核查基线：`19c010d7`，Varin `0.9.19`。本文记录维护者确认的重设计方向、替代合同及验收场景。HR0–HR5 已接入代码；后续验收发现的跨根草稿、检索和执行边界正在按实际行为修正。当前交付与未测范围统一记入 [能力状态矩阵](../status.md)。
 

@@ -36,8 +36,8 @@ Browser URLs cannot attach the normal authorization header. Varin therefore mint
 `varin_url_token` values through the runtime auth helper. Long-lived bearer tokens never belong in a
 URL, and callers do not append the scoped token manually. The application host admits only explicit
 browser-readable and realtime paths; see
-[the UI auth module](../../../../web/server/lib/ui-auth/DOCUMENTATION.md) and
-[the relay module](../../../../web/server/lib/relay/DOCUMENTATION.md).
+[the UI auth module](../../../../web/application-host/lib/ui-auth/DOCUMENTATION.md) and
+[the relay module](../../../../web/application-host/lib/relay/DOCUMENTATION.md).
 
 Object-URL caches include runtime identity and their real content/version inputs, revoke evicted URLs,
 and are bounded when assets can grow. Browser URLs and asset caches are re-resolved after a runtime

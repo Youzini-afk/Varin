@@ -1,6 +1,6 @@
 # Agent harness — 知识库（优先保留 TriviumDB）
 
-Status: 模块专卷，自 [agent-harness.md](agent-harness.md) 拆出（原文第 知识 节起）；本文保留原节标题层级与锚点。
+Status: domain contract — 知识领域与存储边界；沿用原 §7 章节编号。
 交付事实见 [../status.md](../status.md)，计划骨架见 [../plan/agent-harness-plan.md](../plan/agent-harness-plan.md)。
 
 ## 7. 知识库（优先保留 TriviumDB）

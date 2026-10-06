@@ -6,7 +6,7 @@ Last updated: 2026-10-06
 
 正文为中文。English readers: this document specifies the Varin-owned agent harness (tools, retrieval,
 knowledge store, context and cache contract, verification, profiles) layered on the Pi agent kernel.
-Section 4 of [architecture.md](../architecture.md) gives the process model this document extends.
+The [current process model](../architecture.md#process-model) locates this contract within the system.
 
 本文档是**边界**。哪项能力做到了哪一级（implemented / wired / proven / default-on）看
 [status.md](../status.md)；未完成的纵切与实施规则看 [agent-harness-plan.md](../plan/agent-harness-plan.md)；

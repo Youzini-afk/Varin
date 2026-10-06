@@ -2,7 +2,7 @@
 
 Status: independent acceptance complete for available local evidence — EE1–EE6 是底层候选实现；设计中的任意部署组合尚未验收通过。
 基线：设计提交 `7e3baa14` 之上的当前 main。BC0–BC9 既有覆盖与原生证据缺口仍以
-[bot-computer-use-review.md](bot-computer-use-review.md) 为准，本文件只记录执行环境新增交付。
+[bot-computer-use-review.md](bot-computer-use.md) 为准，本文件只记录执行环境新增交付。
 
 前六批保留执行代理交付时的检查口径；末尾「独立验收修复」和「剩余产品缺口」覆盖其中后来证伪的结论。
 定向测试证明相应代码路径；没有真实 Linux 桌面、跨机或 guest VM 的证据时，不把它们写成已经跑通。

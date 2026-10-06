@@ -1,16 +1,7 @@
-import { execFile } from "node:child_process"
 import { readdir, readFile, stat } from "node:fs/promises"
 import path from "node:path"
-import { promisify } from "node:util"
 
-import {
-  REQUIRED_STATUS_HEADER_DOCS,
-  collectLocalLinkTargets,
-  findOrphanDocs,
-  readStatusHeader,
-} from "./engineering-docs.mjs"
-
-const execFileAsync = promisify(execFile)
+import { checkEngineeringDocs, engineeringDocPaths, engineeringDocErrors } from "./check-engineering-docs.mjs"
 
 const repoRoot = path.resolve(import.meta.dirname, "..", "..")
 const docsRoot = path.join(repoRoot, "packages", "docs")
@@ -51,33 +42,6 @@ function hasFrontmatterKey(content, key) {
   return new RegExp(`^${key}:\\s*.+$`, "m").test(hit[1])
 }
 
-async function git(args) {
-  try {
-    const { stdout } = await execFileAsync("git", args, { cwd: repoRoot })
-    return stdout
-  } catch {
-    return null
-  }
-}
-
-/**
- * Engineering docs are the repo-level contracts, not the user-facing docs site.
- *
- * README translations live in `.github/readme/` rather than the repository root, which GitHub would
- * otherwise list five near-identical files in. GitHub community files and docs-package guides are
- * included for the same reason: their language switchers and relative policy links must not drift.
- */
-async function engineeringDocPaths() {
-  const tracked = await git([
-    "ls-files", "--", "AGENTS.md", "README.md", ".github", "docs",
-  ])
-  if (tracked === null) return null
-  return tracked
-    .split("\n")
-    .map((line) => line.trim())
-    .filter((line) => line.endsWith(".md"))
-}
-
 async function exists(absolutePath) {
   try {
     await stat(absolutePath)
@@ -85,80 +49,6 @@ async function exists(absolutePath) {
   } catch {
     return false
   }
-}
-
-/**
- * Validate the engineering docs: link integrity, honest status headers, and no orphaned documents.
- * Skipped with a notice when git is unavailable, since file discovery depends on it.
- */
-async function validateEngineeringDocs(errors) {
-  const files = await engineeringDocPaths()
-  if (files === null || files.length === 0) {
-    console.log("Engineering docs validation skipped: git file listing unavailable.")
-    return { checked: 0, links: 0 }
-  }
-
-  const referencedPaths = new Set()
-  let linkCount = 0
-
-  for (const file of files) {
-    const body = await readFile(path.join(repoRoot, file), "utf8")
-    const fileDir = path.posix.dirname(file)
-
-    for (const target of collectLocalLinkTargets(body)) {
-      linkCount += 1
-      const resolved = path.posix.normalize(path.posix.join(fileDir, target))
-      if (!(await exists(path.join(repoRoot, resolved)))) {
-        errors.push(`${file}: link target does not exist: ${target}`)
-        continue
-      }
-      // A self-link must not let a document vouch for its own reachability.
-      if (resolved !== file) referencedPaths.add(resolved)
-    }
-
-    const status = readStatusHeader(body)
-    if (REQUIRED_STATUS_HEADER_DOCS.includes(file)) {
-      if (status === null) errors.push(`${file}: missing a 'Status:' header line`)
-    }
-
-  }
-
-  // A document nothing links to cannot be noticed when it goes stale. `docs/` is the index surface,
-  // so only require inbound references there; READMEs and AGENTS.md are entry points by definition.
-  const candidates = files.filter((file) => file.startsWith("docs/"))
-  const reachable = new Set(referencedPaths)
-  for (const extra of await extraReferenceSources()) reachable.add(extra)
-
-  for (const orphan of findOrphanDocs({ candidates, referencedPaths: reachable })) {
-    errors.push(
-      `${orphan}: no other document, page, or source file links to it. `
-      + "Link it from docs/roadmap.md, docs/architecture.md, or a README so it cannot drift unnoticed.",
-    )
-  }
-
-  return { checked: files.length, links: linkCount }
-}
-
-/**
- * Reference targets from outside the engineering docs: the docs site and GitHub-maintained metadata
- * can also legitimately anchor a document.
- */
-async function extraReferenceSources() {
-  const listed = await git(["ls-files", "packages/docs", ".github"])
-  if (listed === null) return []
-  const paths = listed.split("\n").map((line) => line.trim()).filter((line) => line.length > 0)
-  const referenced = new Set()
-
-  for (const file of paths) {
-    if (!/\.(md|mdx|json|ts|tsx|js|mjs|yml|yaml)$/.test(file)) continue
-    const body = await readFile(path.join(repoRoot, file), "utf8").catch(() => null)
-    if (body === null) continue
-    for (const match of body.matchAll(/(?:\.\.\/)*(?:docs\/)?([A-Za-z0-9._-]+\.md)\b/g)) {
-      referenced.add(`docs/${match[1]}`)
-    }
-  }
-
-  return [...referenced]
 }
 
 /**
@@ -258,7 +148,8 @@ async function run() {
     }
   }
 
-  const engineering = await validateEngineeringDocs(errors)
+  const engineering = checkEngineeringDocs({ root: repoRoot, paths: engineeringDocPaths(repoRoot) })
+  errors.push(...engineeringDocErrors(engineering))
 
   if (errors.length > 0) {
     console.error("Docs validation failed:")
@@ -270,7 +161,7 @@ async function run() {
 
   console.log(
     `Docs validation passed: ${filePaths.length} pages, ${links.length} sidebar links, `
-    + `${engineering.checked} engineering docs, ${engineering.links} local links.`,
+    + `${engineering.checkedDocuments} engineering docs, ${engineering.checkedLinks} local links.`,
   )
 }
 

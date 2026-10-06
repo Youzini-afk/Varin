@@ -47,7 +47,7 @@ Varin 不是套在多个编程智能体 CLI 外面的通用壳。它只有一套
    不可用都应被明确呈现。
 
 改动涉及相应边界时，请阅读[架构](../../docs/architecture.md)、[插件 GUI 设计](../../docs/design/plugin-gui-design.md)、
-[恢复](../../docs/design/recovery.md)和[安全模型](../../docs/design/security.md)。
+[恢复](../../docs/ops/recovery.md)和[安全模型](../../docs/design/security.md)。
 
 ## 开发环境
 

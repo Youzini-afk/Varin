@@ -1,6 +1,8 @@
 # BC0–BC9 implementation history
 
-Current acceptance: [2026-09-29 deep review](bot-computer-use-review.md). The implementation claims below describe earlier delivery reports. They do not establish completion of BC0–BC9; the current review records concrete repairs and outstanding implementation contracts separately from untested environments.
+Status: historical implementation record — later judgments are maintained in the current BC review.
+
+Current acceptance: [2026-09-29 deep review](../reviews/bot-computer-use.md). The implementation claims below describe earlier delivery reports. They do not establish completion of BC0–BC9; the current review records concrete repairs and outstanding implementation contracts separately from untested environments.
 
 Date: 2026-09-29. Reviewed baseline: `eb14dea3` (BC0–BC4, following `6283a4bd`).
 

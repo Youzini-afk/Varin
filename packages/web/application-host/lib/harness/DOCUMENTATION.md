@@ -1122,7 +1122,7 @@ The harness is wired in `packages/web/application-host/index.ts`:
 
 ## D-278 native lifecycle acceptance correction
 
-See [the authority audit](../../../../../docs/plan/rust-kernel-audit.md). At the D-278 audit point, native materialization,
+See [the authority audit](../../../../../docs/archive/rust-kernel-audit.md). At the D-278 audit point, native materialization,
 capture, and root publication primitives were wired but the cross-domain execution-generation transition was not yet
 accepted. The audit required a durable Host switch intent connecting selected root/writeRevision, kernel
 operationId/receipt, Git executionBaseline, and Registry/view binding; a failed Git attachment or Host exit after

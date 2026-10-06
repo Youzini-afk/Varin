@@ -13,7 +13,7 @@ Last updated: 2026-10-03
 [审计补充](../archive/testing-ci-audit.md#11-test-content-reduction-2026-09-21)。本设计中的历史基线不代表现存文件或待执行的固定清单。
 
 本文定义全仓测试、测试装配、构建与 CI 的重整目标。实施顺序见
-[agent-harness-plan.md 的阶段 Q](../plan/agent-harness-plan.md#阶段-q测试与-ci-体系重整d-292已验收收口)，
+[agent-harness-plan.md 的阶段 Q](../archive/agent-harness-plan-2026-10-06.md#阶段-q测试与-ci-体系重整d-292已验收收口)，
 交付事实仍记在 [status.md](../status.md)。这是 AI4S 实施前的独立工程阶段；
 实施结果与每项处置的实际去向记录在 [testing-ci-audit.md](../archive/testing-ci-audit.md)。
 

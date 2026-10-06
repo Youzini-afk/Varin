@@ -1,83 +1,53 @@
-# Documentation index
+# Varin 文档
 
-Status: navigation index — keep current as documents move or change role.
-Last updated: 2026-10-05
+Status: navigation — 按要解决的问题选择入口，不以目录位置推断功能已经交付。
+Last updated: 2026-10-06
 
-`docs/` 按角色分目录。文档与代码冲突时以代码与测试为准，并在同一改动里修正失效的一侧。
+## 从这里开始
 
-## 根目录（现状权威）
+| 要解决的问题 | 入口 | 这里负责什么 |
+| --- | --- | --- |
+| 安装、启动和使用 Varin | [项目 README](../README.md)、[用户文档源](../packages/docs/README.md) | 产品使用；用户站以英文原文维护多语言内容 |
+| 理解系统如何运行 | [架构总览](architecture.md) | 进程、状态归属、请求流和信任边界 |
+| 修改代码或选择验证方式 | [开发指南](development.md) | 开发环境、代码入口、构建与测试 |
+| 确认已实现什么、还缺什么 | [当前状态](status.md) | 跨主题的交付概况与未完成边界 |
+| 看接下来的工作方向 | [路线图](roadmap.md)、[实施计划](plan/README.md) | 后续范围、依赖与具体执行入口 |
+| 理解某个领域的契约和取舍 | [设计目录](design/README.md) | 工具、上下文、协作、工作台、恢复和执行环境 |
+| 查某次判断由什么验证支撑 | [验收与证据](reviews/README.md) | 基线、覆盖场景、结果与尚未验证的环境 |
+| 部署、运维或维护依赖 | [操作指南](ops/README.md) | 配置和操作步骤，不承担实现进度台账 |
+| 查为什么曾经这样决定 | [决策日志](decisions/README.md)、[历史归档](archive/README.md) | 决策原因、已结束阶段与当时的验证记录 |
+| 定位性能证据 | [性能说明](performance.md) | 关键路径、测量方法与保留数据 |
 
-- [architecture.md](architecture.md) — 系统架构总览与边界（权威）
-- [development.md](development.md) — 开发入口、验证命令、knowledge map
-- [performance.md](performance.md) — 关键路径性能设计、可复现测量与验证边界（2026-10-04）
-- [status.md](status.md) — 项目阶段进度与当前缺口（权威；不记工作日志）
-- [roadmap.md](roadmap.md) — 交付路线图与 Phase status 表
+## 按领域找实现
 
-## [design/](design/) — 领域设计与契约
+开发时先读实际 owner 附近的 `README.md` / `DOCUMENTATION.md`，再按需进入设计。
+这些模块文档保留在源码旁，不复制到 `docs/` 再维护一份。
 
-Harness 总体与模块专卷：
+| 领域 | 实现入口 | 设计入口 |
+| --- | --- | --- |
+| Pi 会话、工具、模型输入 | [Pi harness](../packages/pi-host/src/harness/README.md) | [Harness 总边界](design/agent-harness.md) |
+| Thread、Run、协作与工作状态 | [Host harness](../packages/web/application-host/lib/harness/DOCUMENTATION.md) | [协作](design/agent-collaboration-design.md)、[任务与资源](design/resource-oriented-harness-design.md) |
+| 文件、草稿和编辑器 | [Host Documents](../packages/web/application-host/lib/documents/DOCUMENTATION.md)、[客户端 Registry](../packages/ui/src/lib/documents/DOCUMENTATION.md) | [统一编辑器](design/unified-file-editor-platform.md) |
+| Rust、恢复和进程 | [Kernel](../kernel/README.md)、[Recovery](../packages/web/application-host/lib/recovery/DOCUMENTATION.md)、[Terminal](../packages/web/application-host/lib/terminal/DOCUMENTATION.md) | [Rust 边界](design/rust-kernel-design.md)、[原生恢复](design/native-workspace-recovery-design.md) |
+| 检索、知识与记忆 | [Search](../packages/web/application-host/lib/search/DOCUMENTATION.md)、[Knowledge](../packages/web/application-host/lib/knowledge/DOCUMENTATION.md)、[Memory](../packages/web/application-host/lib/memory/DOCUMENTATION.md) | [检索](design/harness-retrieval.md)、[上下文](design/harness-context.md) |
+| 工作台与扩展 | [UI](../packages/ui/DOCUMENTATION.md)、[扩展 Host](../packages/extension-host/README.md)、[内置扩展](../packages/extension-builtins/README.md) | [工作台](design/composable-workbench.md)、[扩展平台](design/varin-extension-platform.md) |
+| 客户端与跨进程 API | [Application client](../packages/application-client/README.md)、[Protocol](../packages/protocol/README.md) | [架构与信任边界](architecture.md#protocol-trust-and-failures) |
+| 桌面、远端和 Computer Use | [Electron](../packages/electron/README.md)、[连接](../packages/web/application-host/lib/connections/README.md)、[电脑驱动](../packages/computer-driver/README.md) | [Computer Use](design/computer-use-design.md)、[执行环境](design/execution-environment-design.md) |
 
-- [design/agent-harness.md](design/agent-harness.md) — 总边界与文档关系；§5–9 已拆为专卷：
-  [harness-tools](design/harness-tools.md)（工具集）、[harness-retrieval](design/harness-retrieval.md)（检索三层；§6.1 增量执行与可选模型补位已接入，真实效果未测）、
-  [harness-knowledge](design/harness-knowledge.md)（知识库）、[harness-context](design/harness-context.md)（上下文与缓存）、
-  [harness-verification](design/harness-verification.md)（验证与多 agent）
-- [design/harness-capability-matrix.md](design/harness-capability-matrix.md) — Harness 能力逐行交付明细（唯一权威）
+## 信息放在哪里
 
-领域设计（各文件头部 Status 行标注 implemented / design-only / superseded）：
+`architecture.md` 解释当前系统，`design/` 解释领域契约，`plan/` 记录尚需执行的工作，
+`reviews/` 记录验证依据，`archive/` 保存已经结束或被替代的材料。
+`status.md` 汇总当前边界，`roadmap.md` 只列后续方向；它们引用依据，不重复复制交付日志。
+`decisions/` 保存当时的理由，决策中的“已实施”不等于今天所有环境均可用。
 
-- [design/resource-oriented-harness-design.md](design/resource-oriented-harness-design.md) — HR0–HR5 资源寻址模型（已交付）
-- [design/agent-collaboration-design.md](design/agent-collaboration-design.md) — D-339 综合主线、Worker/检索、同任务会话互读、事件等待与选定代码提交（已接线，定向行为与原生内核验证见 §8–9）
-- [design/research-cluster-design.md](design/research-cluster-design.md) — AI4S 科研集群（Phase 11）
-- [design/rust-kernel-design.md](design/rust-kernel-design.md) — Rust 内核边界
-- [design/testing-ci-design.md](design/testing-ci-design.md) — Stage Q 测试与 CI 规范
-- [design/web-research-search-design.md](design/web-research-search-design.md) — 阶段 L Web/科研检索
-- [design/agent-settings-design.md](design/agent-settings-design.md) / [design/agent-follow-up-design.md](design/agent-follow-up-design.md) — Agent 设置与续接
-- [design/context-compaction-agent-design.md](design/context-compaction-agent-design.md) / [design/fast-decision-model-design.md](design/fast-decision-model-design.md) — 压缩 Agent 与快速决策模型；后者§4.4与Explore按职责补位设计同步，既有接线与待改造范围分开
-- [design/native-workspace-recovery-design.md](design/native-workspace-recovery-design.md) / [design/recovery.md](design/recovery.md) — 恢复模型
-- [design/office-work-continuity-design.md](design/office-work-continuity-design.md) — 阶段 O 办公连续性（设计已接受，未实施）
-- [design/bot-operated-workbench-design.md](design/bot-operated-workbench-design.md) — 单 Bot、主动/自动记忆、咨询与缓存的设计依据；BC 部分实现，进度见当前验收
-- [design/computer-use-design.md](design/computer-use-design.md) — 共享电脑控制与持久桌面设计；BC 部分实现，不能等同于全部阶段已交付
-- [design/execution-environment-design.md](design/execution-environment-design.md) — D-338 可组合执行环境：独立部署、精简镜像、应用接口、跨环境联动与生命周期（设计已确认，增量实现待完成）
-- [design/composable-workbench.md](design/composable-workbench.md) — 工作台 profile 与扩展组合
-- [design/plugin-gui-design.md](design/plugin-gui-design.md) / [design/varin-extension-platform.md](design/varin-extension-platform.md) — 插件 GUI 与扩展平台
-- [design/unified-file-editor-platform.md](design/unified-file-editor-platform.md) — 统一文件编辑器平台
-- [design/varin-motion-platform.md](design/varin-motion-platform.md) — 动效平台
-- [design/varin-product-experience.md](design/varin-product-experience.md) — 工作台视觉与交互候选（布局重组、排版、状态动效及完整功能对照；待评审，未实施）
-- [design/varin-rebrand-design.md](design/varin-rebrand-design.md) — 阶段 B 更名
-- [design/extension-compatibility.md](design/extension-compatibility.md) — 扩展兼容边界
-- [design/chat-experience.md](design/chat-experience.md) — 聊天体验
-- [design/security.md](design/security.md) — 安全模型
+代码、类型、schema、测试和 `package.json` 脚本定义可执行行为。文档说明与之不符时，
+核对实际调用链和后续变更，在责任文档中修正；没有重新验证的历史结果保留原基线。
+设计文件头部应说明是当前契约、部分实现的目标，还是候选方案，而不是统一写“已完成”。
 
-## [plan/](plan/) — 实施计划
+新增主题从所属目录入口接入。结束的计划移入归档，仍然有效的契约留在设计或模块文档中。
+移动文档时更新仓库内引用及章节链接，历史正文只做引用修复，不改写当时判断。
+本地可运行 `bun run docs:check` 检查工程文档路径与入口可达性；用户文档另用
+`bun run docs:validate`，该总入口同时复用工程检查。两项检查不代替内容核验。
 
-- [plan/agent-context-preparation-review.md](plan/agent-context-preparation-review.md) — Varin-FC 实测问题复核与七项产品修复、验证边界
-
-- [plan/agent-harness-plan.md](plan/agent-harness-plan.md) — Harness 阶段骨架（锚点稳定；已收口阶段细节在 archive）
-- [plan/agent-runtime-reliability-plan.md](plan/agent-runtime-reliability-plan.md) — RR0–RR6（RR6 平台纵切未测）
-- [plan/bot-computer-use-plan.md](plan/bot-computer-use-plan.md) — BC0–BC9 实施合同；[深入验收](plan/bot-computer-use-review.md)记录当前 Partial 判断、修复和剩余项
-- [plan/rust-kernel-audit.md](plan/rust-kernel-audit.md) — Rust 内核审计（进行中）
-
-## [decisions/](decisions/) — 决策日志
-
-- [decisions/README.md](decisions/README.md) — D-xxx 追加式日志索引与条目格式
-- 领域分卷：context-knowledge / foundation-governance / permissions / research-cluster / retrieval /
-  runtime-reliability / stage-r-kernel / structure-symbol-graph / tool-environment / workingstate-threads
-
-## [ops/](ops/) — 部署与使用指南
-
-- [ops/cloud-deployment.md](ops/cloud-deployment.md) — 云部署与容器合同
-- [ops/REVERSE_PROXY.md](ops/REVERSE_PROXY.md) — 反向代理
-- [ops/CUSTOM_THEMES.md](ops/CUSTOM_THEMES.md) — 自定义主题
-- [ops/varin-extension-authoring.md](ops/varin-extension-authoring.md) — 扩展作者指南
-- [ops/openchamber-pi-migration.md](ops/openchamber-pi-migration.md) — OpenChamber→Pi 迁移合同与能力边界
-
-## [archive/](archive/) — 历史归档（不再更新，与现状冲突时以根目录权威为准）
-
-- [archive/harness-delivery-log.md](archive/harness-delivery-log.md) — 逐阶段交付叙述与 D-xxx 证据（原 status 主体 + RR/HR 叙述）
-- [archive/tool-health-repair-2026-10-04.md](archive/tool-health-repair-2026-10-04.md) — 材料快照、记忆句柄、参数与工具链体检修复记录
-- [archive/agent-harness-plan-detail.md](archive/agent-harness-plan-detail.md) — 已收口阶段的完整计划细节
-- [archive/roadmap-history.md](archive/roadmap-history.md) — Phase 0–10 / Stage Q / D-296 历史明细
-- [archive/phase-2-desktop.md](archive/phase-2-desktop.md)、[archive/testing-ci-audit.md](archive/testing-ci-audit.md)、
-  [archive/openchamber-upstream-20260813.md](archive/openchamber-upstream-20260813.md)
-
-## [references/](references/) — 图片资源
+`references/` 存放文档图片；候选界面图随其设计说明解释，不代表已经应用到产品。

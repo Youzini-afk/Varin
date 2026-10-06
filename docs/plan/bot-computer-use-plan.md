@@ -1,6 +1,6 @@
 # Bot、长期记忆与 Computer Use 实施计划
 
-Status: partially implemented；BC0–BC9 均有生产实现，但尚未满足全部阶段交付条件。深入验收已补记忆来源覆盖、远端 Host 连接、独立 Linux 桌面、托管 VM guest 配方及工作成果/续接整合；真实 Linux KVM/桌面运行、macOS 稳定组件、Wayland 正式输入会话和发行包实装仍未验收或实现。以[当前验收](bot-computer-use-review.md)为准；[旧记录](bot-computer-use-acceptance.md)保留实施历史。
+Status: partially implemented；BC0–BC9 均有生产实现，但尚未满足全部阶段交付条件。深入验收已补记忆来源覆盖、远端 Host 连接、独立 Linux 桌面、托管 VM guest 配方及工作成果/续接整合；真实 Linux KVM/桌面运行、macOS 稳定组件、Wayland 正式输入会话和发行包实装仍未验收或实现。以[当前验收](../reviews/bot-computer-use.md)为准；[旧记录](../archive/bot-computer-use-acceptance.md)保留实施历史。
 
 Last updated: 2026-09-30
 

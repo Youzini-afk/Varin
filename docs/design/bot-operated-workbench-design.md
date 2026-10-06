@@ -1,6 +1,6 @@
 # Varin Bot 操作工作台：长期记忆与人机共同工作环境
 
-Status: accepted design direction；BC0–BC9 部分实现，实际交付及未完成合同见[当前验收](../plan/bot-computer-use-review.md)。本文保留设计依据，不以设计条目代表已交付。
+Status: accepted design direction；BC0–BC9 部分实现，实际交付及未完成合同见[当前验收](../reviews/bot-computer-use.md)。本文保留设计依据，不以设计条目代表已交付。
 
 Last updated: 2026-09-30
 

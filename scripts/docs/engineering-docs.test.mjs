@@ -1,5 +1,10 @@
 import assert from "node:assert/strict"
 import { test } from "node:test"
+import { execFileSync } from "node:child_process"
+import { mkdirSync, mkdtempSync, renameSync, rmSync, writeFileSync } from "node:fs"
+import { tmpdir } from "node:os"
+import path from "node:path"
+import { checkEngineeringDocs, engineeringDocPaths } from "./check-engineering-docs.mjs"
 
 import {
   collectLocalLinkTargets,
@@ -60,4 +65,89 @@ test("findOrphanDocs honors an explicit allowlist", () => {
     allowlist: { "docs/orphan-plan.md": "intentionally unindexed" },
   })
   assert.deepEqual(orphans, [])
+})
+
+const withDocumentation = (extraFiles, run) => {
+  const root = mkdtempSync(path.join(tmpdir(), "varin-docs-check-"))
+  const files = {
+    "docs/README.md": "[Architecture](architecture.md) [Roadmap](roadmap.md)\n",
+    "docs/architecture.md": "# Architecture\nStatus: current overview\n",
+    "docs/roadmap.md": "# Roadmap\nStatus: future work\n",
+    ...extraFiles,
+  }
+  try {
+    for (const [name, text] of Object.entries(files)) {
+      mkdirSync(path.dirname(path.join(root, name)), { recursive: true })
+      writeFileSync(path.join(root, name), text)
+    }
+    run(root, Object.keys(files))
+  } finally {
+    rmSync(root, { recursive: true, force: true })
+  }
+}
+
+test("repository check follows directory indexes and detects a moved target until its incoming link is repaired", () => {
+  withDocumentation({
+    "docs/README.md": "[Architecture](architecture.md) [Roadmap](roadmap.md) [Design](design/)\n",
+    "docs/design/README.md": "[Topic](topic.md)\n",
+    "docs/design/topic.md": "# Topic\n",
+  }, (root, paths) => {
+    assert.deepEqual(checkEngineeringDocs({ root, paths }).brokenLinks, [])
+    assert.deepEqual(checkEngineeringDocs({ root, paths }).unreachableDocs, [])
+    renameSync(path.join(root, "docs/design/topic.md"), path.join(root, "docs/design/renamed.md"))
+    const moved = paths.map(name => name === "docs/design/topic.md" ? "docs/design/renamed.md" : name)
+    const broken = checkEngineeringDocs({ root, paths: moved })
+    assert.deepEqual(broken.brokenLinks, [{ source: "docs/design/README.md", target: "topic.md", reason: "missing target" }])
+    assert.deepEqual(broken.unreachableDocs, ["docs/design/renamed.md"])
+    writeFileSync(path.join(root, "docs/design/README.md"), "[Topic](renamed.md)\n")
+    const repaired = checkEngineeringDocs({ root, paths: moved })
+    assert.deepEqual(repaired.brokenLinks, [])
+    assert.deepEqual(repaired.unreachableDocs, [])
+  })
+})
+
+test("mutually linked documents are still orphaned when no entrance reaches them", () => {
+  withDocumentation({
+    "docs/a.md": "[B](b.md)\n",
+    "docs/b.md": "[A](a.md)\n",
+  }, (root, paths) => {
+    const result = checkEngineeringDocs({ root, paths })
+    assert.deepEqual(result.brokenLinks, [])
+    assert.deepEqual(result.unreachableDocs, ["docs/a.md", "docs/b.md"])
+  })
+})
+
+test("repository check reports a missing entrance and required overview status", () => {
+  withDocumentation({ "docs/architecture.md": "# Architecture\n" }, (root, paths) => {
+    rmSync(path.join(root, "docs/README.md"))
+    const result = checkEngineeringDocs({ root, paths })
+    assert.deepEqual(result.missingStatuses, ["docs/architecture.md"])
+    assert.ok(result.brokenLinks.some(link => link.reason === "missing documentation entrance"))
+  })
+})
+
+test("link discovery ignores inline examples and tilde fences but retains links with code in their labels", () => {
+  const markdown = [
+    "`[example](missing.md)`",
+    "~~~md", "[example](also-missing.md)", "~~~",
+    "[The `real` document](present.md)",
+  ].join("\n")
+  assert.deepEqual(collectLocalLinkTargets(markdown), ["present.md"])
+})
+
+test("Git discovery checks new documents and unstaged moves without reading deleted index paths", () => {
+  withDocumentation({
+    "docs/README.md": "[Architecture](architecture.md) [Roadmap](roadmap.md) [Topic](topic.md)\n",
+    "docs/topic.md": "# Topic\n",
+  }, (root) => {
+    execFileSync("git", ["init", "--quiet", root])
+    execFileSync("git", ["-C", root, "add", "."])
+    renameSync(path.join(root, "docs/topic.md"), path.join(root, "docs/moved.md"))
+    writeFileSync(path.join(root, "docs/README.md"), "[Architecture](architecture.md) [Roadmap](roadmap.md) [Topic](moved.md)\n")
+    const discovered = engineeringDocPaths(root)
+    assert.ok(discovered.includes("docs/moved.md"))
+    const result = checkEngineeringDocs({ root, paths: discovered })
+    assert.deepEqual(result.brokenLinks, [])
+    assert.deepEqual(result.unreachableDocs, [])
+  })
 })

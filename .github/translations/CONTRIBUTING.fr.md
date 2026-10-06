@@ -59,7 +59,7 @@ unique et un seul contrat d'exécution préliminaire actuel.
    capacités indisponibles.
 
 Lisez [Architecture](../../docs/architecture.md), [Conception de l'interface graphique des plugins](../../docs/design/plugin-gui-design.md),
-[Récupération](../../docs/design/recovery.md) et [Modèle de sécurité](../../docs/design/security.md) lorsque ces limites s'appliquent.
+[Récupération](../../docs/ops/recovery.md) et [Modèle de sécurité](../../docs/design/security.md) lorsque ces limites s'appliquent.
 
 ## Configuration du développement
 

@@ -1,8 +1,8 @@
 # Varin 可组合执行环境：Harness、工作环境与操作电脑
 
-Status: accepted design direction / incremental implementation pending（D-338）。本文记录维护者已确认的产品方向；既有实现基础见第 12 节，不能据此宣称任意部署组合、应用接口或环境模板已经交付。
+Status: accepted design with partial implementation — EE1–EE6 有底层候选实现；完整部署组合及剩余产品合同见 [当前验收](../reviews/execution-environments.md)。
 
-Last updated: 2026-09-30
+Last updated: 2026-10-06
 
 本文汇总关于本机、本地虚拟机、远端环境、系统镜像与 Agent 操作能力的设计讨论。前端、Harness、工作环境和
 Computer Use 环境分别选择位置，用户通过 Harness 管理工作与环境。默认提供实用、适度精简的组合，允许用户扩展。
@@ -333,7 +333,7 @@ Agent 遇到结果不符、重复失败或需要追查时，可以查询有关�
 - [Bot lifecycle](../../packages/web/application-host/lib/bots/bot-lifecycle-runtime.ts)：工作停止、机器判断与恢复。
 - [Managed remote contracts](../../packages/web/application-host/lib/harness/managed-remote-types.ts)：远端身份、材料与作业。
 - [Application client](../../packages/application-client/README.md)：框架无关 API 与客户端边界。
-- [BC 验收记录](../plan/bot-computer-use-review.md)：既有实现覆盖和原生环境证据缺口。
+- [BC 验收记录](../reviews/bot-computer-use.md)：既有实现覆盖和原生环境证据缺口。
 
 连接已有远端 Host、在 Linux 上创建本地 libvirt guest 和通过云平台创建远端虚拟机是不同能力。
 脚本化 provider 测试不证明真实 KVM 启动成功；macOS 原生驱动等未实测项继续如实保留，本文不改变其交付状态。
@@ -341,7 +341,7 @@ Agent 遇到结果不符、重复失败或需要追查时，可以查询有关�
 ## 13. 后续需要收敛的选择
 
 以下选择在实施中已逐项收敛（交付证据见
-[验收记录](../plan/execution-environment-review.md)；未验证的原生边界在各批
+[验收记录](../reviews/execution-environments.md)；未验证的原生边界在各批
 "未验证边界"段如实保留）：
 
 | 选择 | 收敛结果 |
