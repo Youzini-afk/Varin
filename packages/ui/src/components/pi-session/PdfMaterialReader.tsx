@@ -26,6 +26,9 @@ import { normalizePdfMaterialRegion } from '@/lib/pi-runtime/pdfMaterialCitation
 import { usePiSessionStore } from '@/stores/usePiSessionStore';
 
 type ReaderView = 'page' | 'text' | 'structure';
+export type PdfReaderLocation = {
+  page: number; view: ReaderView; scale: number; snapshotId: string; sourceHash: string;
+};
 
 export interface PdfMaterialReaderProps {
   sessionId: string | null;
@@ -37,6 +40,9 @@ export interface PdfMaterialReaderProps {
   open?: boolean;
   onOpenChange?: (open: boolean) => void;
   initialPage?: number;
+  initialView?: ReaderView;
+  initialScale?: number;
+  onLocationChange?: (location: PdfReaderLocation) => void;
   initialRegion?: WebDocumentRegion;
   analysisId?: string;
   originalUrl?: string;
@@ -131,6 +137,9 @@ export const PdfMaterialReader: React.FC<PdfMaterialReaderProps> = ({
   open = true,
   onOpenChange,
   initialPage = 1,
+  initialView = 'page',
+  initialScale = 1,
+  onLocationChange,
   initialRegion,
   originalUrl,
   presentation = 'dialog',
@@ -165,8 +174,11 @@ export const PdfMaterialReader: React.FC<PdfMaterialReaderProps> = ({
   const [structure, setStructure] = React.useState<WebSnapshotStructure | null>(null);
   const [page, setPage] = React.useState(Math.max(1, initialPage));
   const [pageDraft, setPageDraft] = React.useState(String(Math.max(1, initialPage)));
-  const [view, setView] = React.useState<ReaderView>('page');
-  const [scale, setScale] = React.useState(1);
+  const [view, setView] = React.useState<ReaderView>(initialView);
+  const [scale, setScale] = React.useState(initialScale);
+  const restoreTextRef = React.useRef(initialView === 'text');
+  const onLocationChangeRef = React.useRef(onLocationChange);
+  onLocationChangeRef.current = onLocationChange;
   const [pageSrc, setPageSrc] = React.useState('');
   const [pageLoading, setPageLoading] = React.useState(false);
   const [loading, setLoading] = React.useState(false);
@@ -187,6 +199,11 @@ export const PdfMaterialReader: React.FC<PdfMaterialReaderProps> = ({
   const [viewportSize, setViewportSize] = React.useState({ width: 0, height: 0 });
   const [pageRaster, setPageRaster] = React.useState<{ page: number; width: number; height: number; scale: number } | null>(null);
   const canRead = Boolean(sessionId && currentSessionId === sessionId);
+  React.useEffect(() => {
+    if (canRead && currentSnapshotId && !loading) onLocationChangeRef.current?.({
+      page, view, scale, snapshotId: currentSnapshotId, sourceHash: currentSourceHash,
+    });
+  }, [canRead, currentSnapshotId, currentSourceHash, loading, page, scale, view]);
 
   const requestRead = React.useCallback(async (
     request: DocumentReadRequest,
@@ -244,7 +261,8 @@ export const PdfMaterialReader: React.FC<PdfMaterialReaderProps> = ({
     setPageRaster(null);
     setCellsView(false);
     setStructureScope('page');
-    setScale(1);
+    setScale(initialScale);
+    restoreTextRef.current = initialView === 'text';
     setSearchText('');
     setPageSrc('');
     setPageLoading(false);
@@ -256,7 +274,7 @@ export const PdfMaterialReader: React.FC<PdfMaterialReaderProps> = ({
     setSelectedRegionPage(initialRegionValue ? Math.max(1, initialPage) : null);
     setPage(Math.max(1, initialPage));
     setPageDraft(String(Math.max(1, initialPage)));
-    setView('page');
+    setView(initialView);
     if (!sessionId) {
       setFailure(t('harness.pdf.sessionMissing'));
       return () => controller.abort();
@@ -323,6 +341,8 @@ export const PdfMaterialReader: React.FC<PdfMaterialReaderProps> = ({
     artifactReference,
     currentSessionId,
     initialPage,
+    initialScale,
+    initialView,
     initialRegionValue,
     inputSnapshotId,
     inputSourceHash,
@@ -515,6 +535,12 @@ export const PdfMaterialReader: React.FC<PdfMaterialReaderProps> = ({
       finishAction(action);
     }
   }, [beginAction, currentSnapshotId, finishAction, isActionCurrent, page, requestRead, structure, text, textPage, updateSnapshotFrom]);
+
+  React.useEffect(() => {
+    if (!restoreTextRef.current || !currentSnapshotId || loading) return;
+    restoreTextRef.current = false;
+    void loadText();
+  }, [currentSnapshotId, loadText, loading]);
 
   const runCurrentPageOcr = React.useCallback(async () => {
     if (!currentSnapshotId) return;

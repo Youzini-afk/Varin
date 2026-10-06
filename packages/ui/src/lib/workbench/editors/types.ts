@@ -7,11 +7,17 @@ export type EditorProviderViewState = {
 };
 
 export type EditorViewState = {
+  diffLayout?: 'auto' | 'inline' | 'split';
+  browserTabId?: string;
+  browserUrl?: string;
+  browserPosition?: { x: number; y: number };
+  editorInfo?: { line: number; column: number; languageId: string; languageName?: string; tabSize: number; insertSpaces: boolean };
   /** Which Git revision the diff viewer compares against, for diff-provider tabs. */
   diffScope?: 'working' | 'staged';
   /** Repository root relative to the workspace, so nested Git repositories remain addressable. */
   diffRepositoryResourceId?: string;
   previewMode?: 'preview' | 'edit' | 'tree' | 'text';
+  previewScrollTop?: number;
   providerState?: EditorProviderViewState;
 };
 
@@ -73,6 +79,7 @@ export type EditorProviderContribution = {
 };
 
 export const BUILTIN_EDITOR_PROVIDER_IDS = {
+  browser: 'varin.builtin.browser',
   text: 'varin.builtin.text',
   markdown: 'varin.builtin.markdown',
   json: 'varin.builtin.json',

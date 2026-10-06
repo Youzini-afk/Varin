@@ -438,7 +438,7 @@ const PiToolDisclosure: React.FC<{
     if (!choices?.has(disclosureId)) setExpanded(initiallyExpanded);
   }, [choices, disclosureId, initiallyExpanded]);
   return (
-    <details className={className} open={expanded} data-pi-tool-disclosure={disclosureId}
+    <details className={cn('workbench-disclosure', className)} open={expanded} data-pi-tool-disclosure={disclosureId}
       onToggle={(event) => {
         const open = event.currentTarget.open;
         choices?.set(disclosureId, open);
@@ -451,7 +451,7 @@ const PiToolDisclosure: React.FC<{
 
 const PiToolStatus: React.FC<{ status: PiToolExecutionState['status'] }> = ({ status }) => {
   const { t } = useI18n();
-  return <span className={cn('shrink-0 typography-micro', status === 'success' && 'sr-only', status === 'error' && 'text-[var(--status-error)]')}>
+  return <span key={status} className={cn('workbench-status-arrival shrink-0 typography-micro', status === 'success' && 'sr-only', status === 'error' && 'text-[var(--status-error)]')}>
     {t(`chat.timeline.tools.${status}`)}
   </span>;
 };

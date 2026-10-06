@@ -18,7 +18,7 @@ import {
 import { DocumentConflictBanner } from '@/components/workbench/DocumentConflictBanner';
 import { JsonTreeView } from '@/components/ui/JsonTreeView';
 import { ErrorBoundary } from '@/components/ui/ErrorBoundary';
-import { SimpleMarkdownRenderer } from '@/components/chat/MarkdownRenderer';
+import { MarkdownResourcePreview } from './MarkdownResourcePreview';
 import { DiagramEditor } from '@/components/diagram';
 import { useRuntimeAPIs } from '@/hooks/useRuntimeAPIs';
 import { getDocumentRegistry } from '@/lib/documents/session';
@@ -36,7 +36,7 @@ import {
   setUserEditorAssociation,
   subscribeEditorProviders,
 } from '@/lib/workbench/editors/providers';
-import { patchEditorViewState, setEditorPreviewMode } from '@/lib/workbench/editors/session';
+import { patchEditorViewState, pinWorkbenchEditor, setEditorPreviewMode } from '@/lib/workbench/editors/session';
 import { applyEditorViewState, captureEditorViewState } from '@/lib/workbench/editors/view-state';
 import {
   activatePiEditorContextOwner,
@@ -54,8 +54,15 @@ import { listEditorProviders } from '@/lib/workbench/editors/providers';
 import { useDeviceInfo } from '@/lib/device';
 import { getRuntimeKey } from '@varin/application-client';
 import { createEditorDocumentController } from '@/lib/extensions/editor-document-controller';
-import { PdfMaterialReader } from '@/components/pi-session/PdfMaterialReader';
+import { WorkbenchPdfReader } from './WorkbenchPdfReader';
 import { usePiSessionStore } from '@/stores/usePiSessionStore';
+import { usePiDraftStore } from '@/stores/usePiDraftStore';
+import { BrowserResourceView } from './BrowserResourceView';
+import { attachEditorContext } from '@/lib/agent-editor/attach';
+import { focusChatInput } from '@/components/chat/composer/editor/dom';
+import { MaterialViewActions } from './MaterialViewActions';
+import { DiffLayoutControl } from './DiffLayoutControl';
+import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger } from '@/components/ui/dropdown-menu';
 
 type ResourceEditorHostProps = {
   excludedProviderIds?: readonly string[];
@@ -84,7 +91,7 @@ const HostFrame: React.FC<{
   toolbar?: React.ReactNode;
   children: React.ReactNode;
 }> = ({ chooser, toolbar, children }) => (
-  <div className="flex h-full min-h-0 flex-col">
+  <div className="workbench-material-frame flex h-full min-h-0 flex-col">
     {chooser}
     {toolbar}
     <div className="min-h-0 flex-1 overflow-hidden">{children}</div>
@@ -108,6 +115,7 @@ export const ResourceEditorHost: React.FC<ResourceEditorHostProps> = ({
     return workspace?.kind === 'workspace' ? workspace.id : null;
   });
   const path = workspacePathFromResourceId(workspaceRoot, tab.resourceId);
+  const displayPath = tab.providerId === BUILTIN_EDITOR_PROVIDER_IDS.browser ? tab.viewState.browserUrl ?? t('contextPanel.mode.browser') : tab.resourceId;
   const identity = React.useMemo<DocumentIdentity>(
     () => ({ workspaceId, resourceId: tab.resourceId }),
     [tab.resourceId, workspaceId],
@@ -176,6 +184,10 @@ export const ResourceEditorHost: React.FC<ResourceEditorHostProps> = ({
     resource: identity,
     viewId: tab.viewId,
   }), [activeProviderId, identity, tab.viewId]);
+
+  React.useEffect(() => {
+    if (record?.dirty && tab.preview) pinWorkbenchEditor(workspaceId, tab.tabId);
+  }, [record?.dirty, tab.preview, tab.tabId, workspaceId]);
 
   React.useEffect(() => {
     if (!autoSaveEnabled || !record?.dirty || record.saving || record.status !== 'ready') return;
@@ -308,8 +320,8 @@ export const ResourceEditorHost: React.FC<ResourceEditorHostProps> = ({
     }
     return null;
   })();
-  const toolbar = activeProviderId === BUILTIN_EDITOR_PROVIDER_IDS.gitDiff ? (
-    <div className="flex min-h-9 shrink-0 items-center gap-1 border-b border-border/40 px-2">
+  const editorActions = activeProviderId === BUILTIN_EDITOR_PROVIDER_IDS.gitDiff ? (
+    <div className="flex shrink-0 items-center gap-1">
       <Button
         type="button"
         variant="ghost"
@@ -328,7 +340,7 @@ export const ResourceEditorHost: React.FC<ResourceEditorHostProps> = ({
       >
         {t('diffView.scope.staged')}
       </Button>
-      {(tab.viewState.diffScope ?? 'working') === 'working' ? (
+      {(tab.viewState.diffScope ?? 'working') === 'working' && (record?.dirty || record?.saving) ? (
         <Button
           type="button"
           variant="ghost"
@@ -348,7 +360,7 @@ export const ResourceEditorHost: React.FC<ResourceEditorHostProps> = ({
       ) : null}
     </div>
   ) : needsText ? (
-    <div className="flex min-h-9 shrink-0 items-center gap-1 border-b border-border/40 px-2">
+    <div className="flex shrink-0 items-center gap-1">
       {modeToggle}
       {expandedEditorToolbar && !isMobile ? (
         <>
@@ -387,7 +399,7 @@ export const ResourceEditorHost: React.FC<ResourceEditorHostProps> = ({
           </Button>
         </>
       ) : null}
-      <Button
+      {record?.dirty || record?.saving ? <Button
         type="button"
         variant="ghost"
         size="xs"
@@ -402,21 +414,54 @@ export const ResourceEditorHost: React.FC<ResourceEditorHostProps> = ({
         }}
       >
         <Icon name={record?.saving ? 'loader-4' : 'save-3'} className={record?.saving ? 'size-4 animate-spin' : 'size-4'} />
-      </Button>
-      <Button
-        type="button"
-        variant="ghost"
-        size="xs"
-        className="size-7 p-0"
-        aria-pressed={autoSaveEnabled}
-        title={t(autoSaveEnabled ? 'filesView.editor.autoSaveOn' : 'filesView.editor.manualSave')}
-        aria-label={t(autoSaveEnabled ? 'filesView.editor.autoSaveOn' : 'filesView.editor.manualSave')}
-        onClick={() => setAutoSaveEnabled(!autoSaveEnabled)}
-      >
-        <Icon name={autoSaveEnabled ? 'file-check-fill' : 'file-check'} className="size-4" />
-      </Button>
+      </Button> : null}
     </div>
   ) : null;
+
+  const toolbar = <div className="workbench-editor-location flex min-h-8 shrink-0 flex-wrap items-center gap-1 border-b border-border/50 px-2">
+    <nav aria-label={displayPath} title={displayPath} className="flex min-w-0 flex-1 items-center gap-1 overflow-hidden typography-micro text-muted-foreground">
+      {tab.providerId === BUILTIN_EDITOR_PROVIDER_IDS.browser ? <><Icon name="global" className="size-3 shrink-0" /><span className="truncate">{displayPath}</span></> : <>
+        <span className="min-w-0 truncate">{tab.resourceId.split('/').slice(0, -1).join(' / ')}</span>
+        {tab.resourceId.includes('/') ? <Icon name="arrow-right-s" className="size-3 shrink-0" /> : null}
+        <span className="min-w-0 truncate text-foreground/85">{tab.resourceId.split('/').at(-1)}</span>
+      </>}
+    </nav>
+    {editorActions}
+    {activeProviderId === BUILTIN_EDITOR_PROVIDER_IDS.diff || activeProviderId === BUILTIN_EDITOR_PROVIDER_IDS.gitDiff
+      ? <DiffLayoutControl value={tab.viewState.diffLayout} onChange={diffLayout => {
+        if (onViewStateChange) onViewStateChange({ diffLayout }); else patchEditorViewState(workspaceId, tab.viewId, { diffLayout }, { notify: true });
+      }} /> : null}
+    {needsText || activeProviderId === BUILTIN_EDITOR_PROVIDER_IDS.browser ? <button type="button" disabled={!currentSessionId} aria-label={t('chat.fileAttachment.activeEditor.addFile', { name: displayPath })} title={t('chat.fileAttachment.activeEditor.addFile', { name: displayPath })}
+      onMouseDown={event => event.preventDefault()}
+      className="workbench-icon-button flex size-7 shrink-0 items-center justify-center rounded-md text-muted-foreground hover:bg-interactive-hover hover:text-foreground disabled:opacity-40"
+      onClick={() => {
+        if (!currentSessionId) return;
+        if (activeProviderId === BUILTIN_EDITOR_PROVIDER_IDS.browser) usePiDraftStore.getState().appendText(currentSessionId, tab.viewState.browserUrl ?? '');
+        else {
+          const result = attachEditorContext({ sessionId: currentSessionId, workspaceId, resourceId: tab.resourceId, kind: 'editor' });
+          if ('status' in result) { toast.error(t(result.status === 'missing-document' ? 'workbench.attachment.missing-document' : 'workbench.attachment.wrong-runtime')); return; }
+        }
+        window.dispatchEvent(new Event('varin:ide-focus-agent'));
+        requestAnimationFrame(focusChatInput);
+      }}><Icon name="attachment-2" className="size-3.5" /></button> : null}
+    <MaterialViewActions workspaceId={workspaceId} workspaceRoot={workspaceRoot} tab={tab} />
+    {needsText ? <DropdownMenu modal={false}>
+      <DropdownMenuTrigger asChild><button type="button" aria-label={t('chat.piComposer.options')} title={t('chat.piComposer.options')}
+        className="workbench-icon-button flex size-7 shrink-0 items-center justify-center rounded-md text-muted-foreground hover:bg-interactive-hover hover:text-foreground">
+        <Icon name="more" className="size-3.5" />
+      </button></DropdownMenuTrigger>
+      <DropdownMenuContent align="end">
+        {!expandedEditorToolbar || isMobile ? <>
+          <DropdownMenuItem onSelect={() => void executeFileEditorCommand(identity, FILE_EDITOR_COMMAND_IDS.find, tab.viewId)}>{t('filesView.editor.findInFile')}</DropdownMenuItem>
+          <DropdownMenuItem onSelect={() => void executeFileEditorCommand(identity, FILE_EDITOR_COMMAND_IDS.goToLine, tab.viewId)}>{t('filesView.editor.goToLine')}</DropdownMenuItem>
+          <DropdownMenuItem onSelect={() => void executeFileEditorCommand(identity, FILE_EDITOR_COMMAND_IDS.toggleWrap, tab.viewId)}>{t('commandPalette.item.toggleEditorWrap')}</DropdownMenuItem>
+        </> : null}
+        <DropdownMenuItem onSelect={() => setAutoSaveEnabled(!autoSaveEnabled)}>
+          <span className="flex-1">{t('filesView.editor.autoSaveOn')}</span>{autoSaveEnabled ? <Icon name="check" className="size-3.5" /> : null}
+        </DropdownMenuItem>
+      </DropdownMenuContent>
+    </DropdownMenu> : null}
+  </div>;
 
   if (needsDocument && (!record || record.status === 'loading' || record.status === 'unloaded')) {
     return (
@@ -471,6 +516,14 @@ export const ResourceEditorHost: React.FC<ResourceEditorHostProps> = ({
     );
   }
 
+  if (activeProviderId === BUILTIN_EDITOR_PROVIDER_IDS.browser) {
+    return <HostFrame chooser={ambiguousChooser} toolbar={toolbar}>
+      <BrowserResourceView key={tab.viewId} initialUrl={tab.viewState.browserUrl ?? ''} directory={workspaceRoot}
+        initialPosition={tab.viewState.browserPosition}
+        tabID={tab.viewState.browserTabId ?? tab.viewId} onNavigate={browserUrl => patchEditorViewState(workspaceId, tab.viewId, { browserUrl }, { notify: true })} />
+    </HostFrame>;
+  }
+
   if (activeProviderId === BUILTIN_EDITOR_PROVIDER_IDS.image) {
     const src = runtime.isDesktop && !isSvgFile(path)
       ? desktopImageSrc
@@ -500,10 +553,11 @@ export const ResourceEditorHost: React.FC<ResourceEditorHostProps> = ({
     }
     return (
       <HostFrame chooser={ambiguousChooser} toolbar={toolbar}>
-        <PdfMaterialReader
-          presentation="inline"
+        <WorkbenchPdfReader
+          key={`${tab.viewId}:${currentSessionId}`}
+          workspaceId={workspaceId}
           sessionId={currentSessionId}
-          title={tab.resourceId.split('/').pop() || tab.resourceId}
+          tab={tab}
           path={path}
           onOpenOriginal={() => {
             window.open(originalPdf, '_blank', 'noopener,noreferrer');
@@ -518,11 +572,9 @@ export const ResourceEditorHost: React.FC<ResourceEditorHostProps> = ({
   if (activeProviderId === BUILTIN_EDITOR_PROVIDER_IDS.markdown && tab.viewState.previewMode !== 'edit') {
     return (
       <HostFrame chooser={ambiguousChooser} toolbar={toolbar}>
-        <div className="h-full overflow-auto p-3">
-          <ErrorBoundary fallback={<div className="p-3 typography-ui text-status-error">{t('filesView.error.previewUnavailable')}</div>}>
-            <SimpleMarkdownRenderer content={buffer} className="typography-markdown-body" stripFrontmatter enableFileReferences={false} />
-          </ErrorBoundary>
-        </div>
+        <ErrorBoundary fallback={<div className="p-3 typography-ui text-status-error">{t('filesView.error.previewUnavailable')}</div>}>
+          <MarkdownResourcePreview key={tab.viewId} workspaceId={workspaceId} tab={tab} content={buffer} />
+        </ErrorBoundary>
       </HostFrame>
     );
   }

@@ -112,12 +112,30 @@
 [data-pi-composer-input-frame]:focus-within {
   box-shadow: 0 3px 14px color-mix(in srgb, var(--foreground) 5%, transparent);
 }
+.pi-composer-hints {
+  display: grid;
+  grid-template-rows: 0fr;
+  opacity: 0;
+  transition: grid-template-rows 220ms var(--wb-ease), opacity var(--wb-state-duration) ease;
+}
+[data-pi-composer-input-frame]:focus-within .pi-composer-hints[data-empty="true"] {
+  grid-template-rows: 1fr;
+  opacity: 1;
+}
+.pi-composer-hints p { margin: 0; }
+.pi-composer-queue { z-index: 0; }
+.pi-composer-queue + [data-pi-composer-input-frame] { z-index: 1; }
 .pi-composer-footer {
   display: grid;
   grid-template-columns: auto minmax(0, 1fr) auto;
   align-items: end;
   gap: 6px;
 }
+.pi-composer-send-mode { grid-column: 1 / -1; grid-row: 1; justify-self: end; min-width: 0; max-width: 100%; }
+.pi-composer-send-mode button { max-width: 100%; }
+.pi-composer-footer:has(.pi-composer-send-mode) .pi-composer-options { grid-column: 1; grid-row: 2; }
+.pi-composer-footer:has(.pi-composer-send-mode) .pi-composer-models { grid-column: 2; grid-row: 2; }
+.pi-composer-footer:has(.pi-composer-send-mode) .pi-composer-actions { grid-column: 3; grid-row: 2; }
 .pi-composer-options,
 .pi-composer-models,
 .pi-composer-actions { display: flex; min-width: 0; align-items: center; gap: 2px; }
@@ -127,7 +145,7 @@
 [data-pi-composer-primary-action] {
   position: relative;
   flex-shrink: 0;
-  border-radius: 10px;
+  border-radius: 50%;
   transition: background-color 200ms ease, color 200ms ease, transform 220ms var(--wb-ease-settle), box-shadow 200ms ease;
 }
 [data-pi-composer-primary-action]:hover:not(:disabled) { transform: translateY(-1px); }
@@ -140,6 +158,9 @@
   .pi-composer-models { grid-column: 1 / -1; grid-row: 1; justify-content: flex-start; }
   .pi-composer-options { grid-column: 1; grid-row: 2; }
   .pi-composer-actions { grid-column: 2; grid-row: 2; }
+  .pi-composer-footer:has(.pi-composer-send-mode) .pi-composer-models { grid-column: 1 / -1; grid-row: 2; }
+  .pi-composer-footer:has(.pi-composer-send-mode) .pi-composer-options { grid-column: 1; grid-row: 3; }
+  .pi-composer-footer:has(.pi-composer-send-mode) .pi-composer-actions { grid-column: 2; grid-row: 3; }
   .pi-composer-models button { max-width: 100%; }
 }
 @container composer (max-width: 360px) {
@@ -299,4 +320,43 @@
 }
 .workbench-resource-canvas {
   transition-property: width, margin-left, background-color, border-color;
+}
+
+/* The content owns density; a narrow material does not change the saved pane arrangement. */
+.workbench-material-frame { container: material-editor / inline-size; }
+.workbench-editor-location { row-gap: 2px; padding-block: 2px; }
+.workbench-editor-location > div { min-width: 0; flex-shrink: 1; flex-wrap: wrap; }
+@container material-editor (max-width: 520px) {
+  .workbench-editor-location > nav { flex-basis: 100%; padding-block: 2px; }
+}
+.pi-composer-context { padding: 10px 12px 0; }
+.pi-composer-context:empty { display: none; }
+.pi-composer-context > :last-child { margin-bottom: 0; }
+.workbench-editor-tab > :not(.workbench-editor-tab-selection) { position: relative; z-index: 1; }
+.workbench-editor-tab:focus-within { outline: 2px solid var(--ring); outline-offset: 1px; }
+.ide-sidebar-resizer:focus-visible { background: var(--interactive-border-focus); outline: 2px solid var(--ring); outline-offset: -2px; }
+.ide-region-navigation { container: ide-regions / inline-size; }
+.ide-region-navigation button:disabled { opacity: .55; }
+.ide-statusbar { container: ide-status / inline-size; }
+@container ide-status (max-width: 720px) {
+  .ide-editor-indent, .ide-editor-eol { display: none; }
+  .ide-editor-status { gap: 8px; }
+}
+.workbench-diff-preview-viewport { transition: height var(--wb-panel-duration) var(--wb-ease); }
+.workbench-status-arrival { animation: wb-action-arrive var(--wb-state-duration) var(--wb-ease) both; }
+/* Native disclosure keeps its focus, scroll and tool identity throughout a reversible transition. */
+@supports (interpolate-size: allow-keywords) {
+  .workbench-disclosure::details-content {
+    interpolate-size: allow-keywords;
+    height: 0;
+    opacity: 0;
+    overflow: clip;
+    transition: height var(--wb-panel-duration) var(--wb-ease), opacity var(--wb-state-duration) ease,
+      content-visibility var(--wb-panel-duration) allow-discrete;
+  }
+  .workbench-disclosure[open]::details-content { height: auto; opacity: 1; }
+}
+@media (prefers-reduced-motion: reduce) {
+  .pi-composer-hints, .workbench-diff-preview-viewport, .workbench-disclosure::details-content { transition: none; }
+  .workbench-status-arrival { animation: none; }
 }

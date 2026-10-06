@@ -171,7 +171,7 @@ export const PiFileChangePreview: React.FC<{
       </button>
     </header>
     {file.lines.length ? <div ref={viewport} role="region" data-pi-tool-scroll="true" aria-label={t('chat.fileChange.previewLabel', { path: file.path })}
-      tabIndex={0} className="overflow-auto overscroll-contain font-mono typography-code outline-offset-[-2px]"
+      tabIndex={0} className="workbench-diff-preview-viewport overflow-auto overscroll-contain font-mono typography-code outline-offset-[-2px]"
       style={{ height: Math.min(file.lines.length, expanded ? 24 : 8) * rowHeight, overflowAnchor: 'none' }}
       onWheel={event => { if (event.deltaY < 0) pause(); }}
       onPointerDown={pause}
@@ -208,7 +208,7 @@ export const PiFileChangePreview: React.FC<{
       </div>
     </div> : <p className="px-3 py-2 typography-meta text-muted-foreground">{t(file.operation === 'delete' ? 'chat.fileChange.deleteFile' : 'chat.fileChange.empty')}</p>}
     <footer className="flex flex-wrap items-center gap-x-3 gap-y-1 px-3 py-1.5 typography-micro text-muted-foreground">
-      <span role="status" className={cn(failed && 'text-[var(--status-error)]')}>{t(`chat.fileChange.${phase}`)}</span>
+      <span key={phase} role="status" className={cn('workbench-status-arrival', failed && 'text-[var(--status-error)]')}>{t(`chat.fileChange.${phase}`)}</span>
       {file.operation === 'write' ? <span title={t('chat.fileChange.writeHint')}>{t('chat.fileChange.writeContent')}</span> : null}
       <span className="ml-auto flex items-center gap-2">
         {paused && file.lines.length > 0 ? <button type="button" className="hover:text-foreground" onClick={follow}>{t('chat.fileChange.latest')}</button> : null}

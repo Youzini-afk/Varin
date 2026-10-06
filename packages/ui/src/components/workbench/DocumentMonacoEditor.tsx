@@ -116,7 +116,8 @@ export const DocumentMonacoEditor: React.FC<DocumentMonacoEditorProps> = ({
   const closeInlineCommentRef = React.useRef<(() => void) | null>(null);
   const inlineCommentDecorationIdsRef = React.useRef<string[]>([]);
   const models = getFileEditorModelRegistry();
-  const ownerId = `view:${viewId}`;
+  const instanceOwner = React.useId();
+  const ownerId = `view:${viewId}:${instanceOwner}`;
 
   viewStateRef.current = viewState;
   onViewStateChangeRef.current = onViewStateChange;
@@ -124,6 +125,7 @@ export const DocumentMonacoEditor: React.FC<DocumentMonacoEditorProps> = ({
   tRef.current = t;
 
   React.useEffect(() => {
+    if (hostRef.current?.closest('[data-varin-workbench-shell-staging]')) return;
     models.acquire(identity, ownerId);
     return () => models.release(ownerId);
   }, [identity, models, ownerId]);
@@ -164,7 +166,7 @@ export const DocumentMonacoEditor: React.FC<DocumentMonacoEditorProps> = ({
 
   React.useEffect(() => {
     const host = hostRef.current;
-    if (!host || !monaco || modelSnapshot.status !== 'ready') return undefined;
+    if (!host || host.closest('[data-varin-workbench-shell-staging]') || !monaco || modelSnapshot.status !== 'ready') return undefined;
     const themeName = registerVarinMonacoTheme(monaco, currentTheme);
     applyMonacoModelSettings(modelSnapshot.model, fileEditorSettings);
     const editorInstance = monaco.editor.create(host, {
@@ -183,7 +185,7 @@ export const DocumentMonacoEditor: React.FC<DocumentMonacoEditorProps> = ({
     editorInstance.layout();
 
     const bridge = getMonacoLanguageBridge(monaco, models);
-    const languageOwnerId = `language:${viewId}`;
+    const languageOwnerId = `language:${viewId}:${instanceOwner}`;
     bridge.acquire(modelSnapshot.model, identity, languageOwnerId);
     const runDebugAdapter = createRunDebugEditorAdapter({ editor: editorInstance, identity, monaco });
     const disposeExtensionView = registerMonacoExtensionView({
@@ -198,7 +200,8 @@ export const DocumentMonacoEditor: React.FC<DocumentMonacoEditorProps> = ({
     let captureFrame: number | null = null;
     const capture = (): void => {
       captureFrame = null;
-      const next = captureMonacoEditorViewState(editorInstance);
+      const languageName = monaco.languages.getLanguages().find(language => language.id === editorInstance.getModel()?.getLanguageId())?.aliases?.[0];
+      const next = captureMonacoEditorViewState(editorInstance, languageName);
       if (onViewStateChangeRef.current) onViewStateChangeRef.current(next);
       else patchEditorViewState(identity.workspaceId, viewId, next);
       const selection = editorInstance.getSelection();
@@ -313,7 +316,7 @@ export const DocumentMonacoEditor: React.FC<DocumentMonacoEditorProps> = ({
     };
     // Theme, profile presentation and settings update the live editor separately; none may recreate the view/model.
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [identity, modelSnapshot.status === 'ready' ? modelSnapshot.model : null, models, monaco, path, providerId, viewId]);
+  }, [identity, instanceOwner, modelSnapshot.status === 'ready' ? modelSnapshot.model : null, models, monaco, path, providerId, viewId]);
 
   React.useEffect(() => {
     captureContextRef.current?.();

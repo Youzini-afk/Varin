@@ -1,4 +1,6 @@
 import React from 'react';
+import { motion } from 'motion/react';
+import { usePrefersReducedMotion } from '@/hooks/usePrefersReducedMotion';
 
 import {
   DropdownMenu,
@@ -18,7 +20,7 @@ import { Icon } from '@/components/icon/Icon';
 import { cn } from '@/lib/utils';
 import { useI18n } from '@/lib/i18n';
 import { workspacePathFromResourceId } from '@/lib/documents/path';
-import type { EditorGroupLeaf } from '@/lib/workbench/editors/types';
+import { BUILTIN_EDITOR_PROVIDER_IDS, type EditorGroupLeaf, type EditorTab } from '@/lib/workbench/editors/types';
 import { ScrollingFileName } from '@/components/workbench/FilesExplorer';
 import {
   VARIN_WORKBENCH_SLOTS,
@@ -57,13 +59,22 @@ export const EditorGroupTabs: React.FC<EditorGroupTabsProps> = ({
 }) => {
   const { t } = useI18n();
   const scrollRef = React.useRef<HTMLDivElement>(null);
+  const selectionId = React.useId();
+  const reducedMotion = usePrefersReducedMotion();
+  const nameOf = (tab: EditorTab): string => {
+    if (tab.providerId === BUILTIN_EDITOR_PROVIDER_IDS.browser) {
+      try { return new URL(tab.viewState.browserUrl ?? '').hostname || t('contextPanel.mode.browser'); }
+      catch { return t('contextPanel.mode.browser'); }
+    }
+    return tab.resourceId.split('/').pop() ?? tab.resourceId;
+  };
 
   if (isMobile) {
     const active = group.tabs.find((tab) => tab.tabId === group.activeTabId) ?? group.tabs[0];
     if (!active) {
       return <div className="typography-ui-label font-medium truncate">{t('filesView.editor.selectFile')}</div>;
     }
-    const name = active.resourceId.split('/').pop() ?? active.resourceId;
+    const name = nameOf(active);
     return (
       <DropdownMenu>
         <DropdownMenuTrigger asChild>
@@ -79,7 +90,7 @@ export const EditorGroupTabs: React.FC<EditorGroupTabsProps> = ({
         </DropdownMenuTrigger>
         <DropdownMenuContent align="start" className="w-[min(24rem,calc(100vw-2rem))] max-w-[calc(100vw-2rem)]">
           {group.tabs.map((tab) => {
-            const tabName = tab.resourceId.split('/').pop() ?? tab.resourceId;
+            const tabName = nameOf(tab);
             const isActive = tab.tabId === group.activeTabId;
             return (
               <DropdownMenuItem
@@ -131,8 +142,8 @@ export const EditorGroupTabs: React.FC<EditorGroupTabsProps> = ({
       >
         {group.tabs.map((tab) => {
           const isActive = tab.tabId === group.activeTabId;
-          const tabName = tab.resourceId.split('/').pop() ?? tab.resourceId;
-          const path = workspacePathFromResourceId(workspaceRoot, tab.resourceId);
+          const tabName = nameOf(tab);
+          const path = tab.providerId === BUILTIN_EDITOR_PROVIDER_IDS.browser ? tab.viewState.browserUrl : workspacePathFromResourceId(workspaceRoot, tab.resourceId);
           return (
             <ContextMenu key={tab.tabId}>
               <ContextMenuTrigger
@@ -154,18 +165,21 @@ export const EditorGroupTabs: React.FC<EditorGroupTabsProps> = ({
                     }}
                     title={path}
                     className={cn(
-                      'group inline-flex items-center gap-1 rounded-md border px-2 py-1 typography-ui-label transition-colors whitespace-nowrap',
+                      'workbench-editor-tab group relative inline-flex items-center gap-1 rounded-md border px-2 py-1 typography-meta transition-colors whitespace-nowrap',
                       tab.preview && 'italic',
                       isActive
-                        ? 'bg-[var(--interactive-selection)] border-[var(--primary-muted)] text-[var(--interactive-selection-foreground)]'
+                        ? 'bg-transparent border-transparent text-[var(--interactive-selection-foreground)]'
                         : 'bg-transparent border-[var(--interactive-border)] text-[var(--surface-muted-foreground)] hover:bg-[var(--interactive-hover)] hover:text-[var(--surface-foreground)]',
                     )}
                   />
                 )}
               >
+                {isActive ? <motion.span layoutId={`editor-selection:${selectionId}`} aria-hidden="true"
+                  className="workbench-editor-tab-selection pointer-events-none absolute inset-0 rounded-md border border-[var(--primary-muted)] bg-interactive-selection"
+                  transition={{ duration: reducedMotion ? 0 : .24, ease: [.22, 1, .36, 1] }} /> : null}
                 {tab.pinned ? <Icon name="pushpin-2" className="size-3 shrink-0" /> : null}
-                <FileTypeIcon filePath={tab.resourceId} className="size-3.5 flex-shrink-0" />
-                <button type="button" onClick={() => onActivate(tab.tabId)} className="max-w-[12rem] truncate text-left">
+                {tab.providerId === BUILTIN_EDITOR_PROVIDER_IDS.browser ? <Icon name="global" className="size-3.5 shrink-0" /> : <FileTypeIcon filePath={tab.resourceId} className="size-3.5 flex-shrink-0" />}
+                <button type="button" onClick={() => onActivate(tab.tabId)} onDoubleClick={() => onPin(tab.tabId, true)} className="max-w-[12rem] truncate text-left">
                   {tabName}
                 </button>
                 {dirtyResourceIds.has(tab.resourceId) ? (

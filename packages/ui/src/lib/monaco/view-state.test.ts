@@ -6,6 +6,7 @@ import { applyMonacoEditorViewState, captureMonacoEditorViewState, createMonacoN
 
 const editorStub = (overrides: Partial<editor.IStandaloneCodeEditor> = {}): editor.IStandaloneCodeEditor => ({
   getPosition: () => ({ lineNumber: 4, column: 7 }),
+  getModel: () => null,
   getSelection: () => ({
     startLineNumber: 3,
     startColumn: 2,

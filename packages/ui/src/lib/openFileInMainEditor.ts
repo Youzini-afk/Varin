@@ -76,5 +76,6 @@ export const openFileInMainEditor = (
   }
 
   uiStore.setActiveMainTab('files');
+  if (typeof window !== 'undefined') window.dispatchEvent(new Event('varin:ide-focus-editor'));
   return true;
 };

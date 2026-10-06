@@ -20,6 +20,7 @@ const matches = (provider: EditorProviderContribution, resourceId: string): bool
 };
 
 export const BUILTIN_EDITOR_PROVIDERS: EditorProviderContribution[] = [
+  { id: BUILTIN_EDITOR_PROVIDER_IDS.browser, extensionId: 'varin.builtin.editors', enabled: true, priority: 0 },
   {
     id: BUILTIN_EDITOR_PROVIDER_IDS.markdown,
     extensionId: 'varin.builtin.editors',

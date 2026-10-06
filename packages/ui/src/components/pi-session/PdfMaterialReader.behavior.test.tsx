@@ -246,4 +246,26 @@ describe('PDF reader async state and page selection', () => {
     expect(Array.from(container.querySelectorAll('button')).some((button) => button.textContent?.includes('harness.pdf.askAboutSelection'))).toBe(false);
     expect(vi.mocked(runtimeFetch).mock.calls.some(([route]) => String(route).includes('/materials/snapshot-a/page?page=3'))).toBe(true);
   });
+
+  it('restores reading location without repeating overview reads when location is saved', async () => {
+    const locationChanged = vi.fn();
+    vi.mocked(runtimeFetch).mockImplementation((route, init) => {
+      if (!String(route).endsWith('/materials/read')) return Promise.resolve(pngResponse());
+      const request = JSON.parse(String(init?.body)) as DocumentReadRequest;
+      return Promise.resolve(jsonResponse({ ...okOverview('snapshot-a', 'hash-a'),
+        ...(request.view === 'text' ? { markdown: 'Restored page text' } : {}),
+      } as FetchResult));
+    });
+    await act(async () => root.render(<PdfMaterialReader sessionId="session-1" title="Paper" snapshotId="snapshot-a"
+      sourceHash="hash-a" initialPage={2} initialView="text" initialScale={1.25} onLocationChange={locationChanged} presentation="inline" />));
+    await act(settle);
+    await act(settle);
+    expect(container.querySelector('[data-testid="pdf-text"]')?.textContent).toBe('Restored page text');
+    expect(locationChanged).toHaveBeenLastCalledWith(expect.objectContaining({ page: 2, view: 'text', scale: 1.25, snapshotId: 'snapshot-a', sourceHash: 'hash-a' }));
+    const reads = vi.mocked(runtimeFetch).mock.calls.filter(([route]) => String(route).endsWith('/materials/read'))
+      .map(([, init]) => JSON.parse(String(init?.body)) as DocumentReadRequest);
+    expect(reads.filter(request => request.view === 'overview')).toHaveLength(1);
+    expect(reads.filter(request => request.view === 'text').map(request => request.pages)).toEqual([[2]]);
+    expect(reads.some(request => request.ocr)).toBe(false);
+  });
 });

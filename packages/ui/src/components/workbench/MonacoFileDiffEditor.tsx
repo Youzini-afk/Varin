@@ -86,7 +86,7 @@ export const MonacoFileDiffEditor: React.FC<MonacoFileDiffEditorProps> = ({
   const hostRef = React.useRef<HTMLDivElement | null>(null);
   const instanceOwner = React.useId();
   const modelOwnerId = `diff-model:${viewId}:${instanceOwner}`;
-  const contextOwnerId = `view:${viewId}`;
+  const contextOwnerId = `view:${viewId}:${instanceOwner}`;
   const languageOwnerId = `diff-language:${viewId}:${instanceOwner}`;
   const [monaco, setMonaco] = React.useState<MonacoRuntime | null>(null);
   const [diffEditor, setDiffEditor] = React.useState<editor.IStandaloneDiffEditor | null>(null);
@@ -100,6 +100,7 @@ export const MonacoFileDiffEditor: React.FC<MonacoFileDiffEditorProps> = ({
   } | null>(null);
   const models = getFileEditorModelRegistry();
   const usesLiveDocument = modifiedContent === undefined;
+  const sideBySide = renderSideBySide ?? (viewState.diffLayout === 'split' ? true : viewState.diffLayout === 'inline' ? false : undefined);
   const onViewStateChangeRef = React.useRef(onViewStateChange);
   const viewStateRef = React.useRef(viewState);
   const sessionIdRef = React.useRef(sessionId);
@@ -186,7 +187,7 @@ export const MonacoFileDiffEditor: React.FC<MonacoFileDiffEditorProps> = ({
 
   React.useEffect(() => {
     const host = hostRef.current;
-    if (!host || !monaco) return undefined;
+    if (!host || host.closest('[data-varin-workbench-shell-staging]') || !monaco) return undefined;
     const theme = registerVarinMonacoTheme(monaco, currentTheme);
     const instance = monaco.editor.createDiffEditor(host, {
       ...createMonacoEditorOptions({
@@ -198,8 +199,8 @@ export const MonacoFileDiffEditor: React.FC<MonacoFileDiffEditorProps> = ({
       enableSplitViewResizing: true,
       originalEditable: false,
       readOnly,
-      renderSideBySide: renderSideBySide ?? true,
-      useInlineViewWhenSpaceIsLimited: renderSideBySide === undefined,
+      renderSideBySide: sideBySide ?? true,
+      useInlineViewWhenSpaceIsLimited: sideBySide === undefined,
       renderSideBySideInlineBreakpoint: 720,
       theme,
       ...(wrapLines === undefined ? {} : { wordWrap: wrapLines ? 'on' : 'off' }),
@@ -235,12 +236,12 @@ export const MonacoFileDiffEditor: React.FC<MonacoFileDiffEditorProps> = ({
       }),
       originalEditable: false,
       readOnly,
-      renderSideBySide: renderSideBySide ?? true,
-      useInlineViewWhenSpaceIsLimited: renderSideBySide === undefined,
+      renderSideBySide: sideBySide ?? true,
+      useInlineViewWhenSpaceIsLimited: sideBySide === undefined,
       renderSideBySideInlineBreakpoint: 720,
       ...(wrapLines === undefined ? {} : { wordWrap: wrapLines ? 'on' : 'off' }),
     });
-  }, [currentTheme, diffEditor, editorFontSize, fileEditorSettings, monaco, path, profileId, readOnly, renderSideBySide, wrapLines]);
+  }, [currentTheme, diffEditor, editorFontSize, fileEditorSettings, monaco, path, profileId, readOnly, sideBySide, wrapLines]);
 
   const modifiedModel = usesLiveDocument
     ? liveSnapshot.status === 'ready' ? liveSnapshot.model : null
@@ -292,6 +293,12 @@ export const MonacoFileDiffEditor: React.FC<MonacoFileDiffEditorProps> = ({
       const saved = diffEditor.saveViewState();
       if (saved) {
         const nextViewState: EditorViewState = {
+          editorInfo: {
+            line: modifiedEditor.getPosition()?.lineNumber ?? 1, column: modifiedEditor.getPosition()?.column ?? 1,
+            languageId: modifiedModel.getLanguageId(), tabSize: modifiedModel.getOptions().tabSize,
+            languageName: monaco.languages.getLanguages().find(language => language.id === modifiedModel.getLanguageId())?.aliases?.[0],
+            insertSpaces: modifiedModel.getOptions().insertSpaces,
+          },
           providerState: {
             providerId,
             schemaVersion: 1,

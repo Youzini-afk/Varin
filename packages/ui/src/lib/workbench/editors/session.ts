@@ -41,10 +41,18 @@ let session: EditorWorkbenchSession = {
 };
 
 const listeners = new Set<() => void>();
+const viewStateListeners = new Set<() => void>();
 const createId: EditorIdFactory = () => crypto.randomUUID();
 
 const emit = (): void => {
   for (const listener of listeners) listener();
+  for (const listener of viewStateListeners) listener();
+};
+
+/** Cursor/status consumers subscribe without rerendering the entire editor layout. */
+export const subscribeEditorViewState = (listener: () => void): (() => void) => {
+  viewStateListeners.add(listener);
+  return () => { viewStateListeners.delete(listener); };
 };
 
 export const subscribeEditorWorkbench = (listener: () => void): (() => void) => {
@@ -252,12 +260,23 @@ export const patchEditorViewState = (
   workspaceId: string,
   viewId: string,
   viewState: EditorViewState,
+  options?: { notify?: boolean },
 ): void => {
   const current = session.byWorkspace.get(workspaceId);
   if (!current) return;
+  const previousInfo = listEditorGroups(current.tree).flatMap(group => group.tabs)
+    .find(tab => tab.viewId === viewId)?.viewState.editorInfo;
+  const nextInfo = viewState.editorInfo;
+  if (previousInfo && nextInfo && previousInfo.line === nextInfo.line && previousInfo.column === nextInfo.column
+    && previousInfo.languageId === nextInfo.languageId && previousInfo.languageName === nextInfo.languageName
+    && previousInfo.tabSize === nextInfo.tabSize && previousInfo.insertSpaces === nextInfo.insertSpaces) {
+    viewState = { ...viewState, editorInfo: previousInfo };
+  }
   const next = updateEditorViewState(current, viewId, viewState);
   session.byWorkspace.set(workspaceId, next);
   rememberLastGoodEditorWorkbench(next);
+  if (options?.notify) { schedulePersistedEditorWorkbench(workspaceId); emit(); }
+  else for (const listener of viewStateListeners) listener();
 };
 
 export const setEditorPreviewMode = (

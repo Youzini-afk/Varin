@@ -1,4 +1,7 @@
 import React from 'react';
+import { ContextBrowserView } from '@/components/workbench/ContextBrowserView';
+import { BrowserMaterialAction } from '@/components/workbench/MaterialViewActions';
+import { getPreviewProxyOrigin, postPreviewBridgeMessage, stripPreviewTokenFromUrl, type PreviewConsoleEvent, type PreviewConsoleFilter, type PreviewBridgeMessage, type PreviewProxyState } from '@/lib/preview/browser-view';
 import { lazyWithChunkRecovery } from '@/lib/chunkLoadRecovery';
 
 import { FileTypeIcon } from '@/components/icons/FileTypeIcon';
@@ -30,8 +33,6 @@ import { getRuntimeApiBaseUrl, getRuntimeKey } from '@varin/application-client';
 import { getActiveRelayDescriptor } from '@/lib/relay/runtime-tunnel';
 import { getPreviewTargetRecoveryAction } from '@/lib/preview/proxy-response';
 import { Icon } from "@/components/icon/Icon";
-import { VarinLogo } from "@/components/ui/VarinLogo";
-import { invokeDesktopCommand } from '@/lib/desktopNative';
 import {
   EMBEDDED_RUNTIME_BOOTSTRAP_REQUEST,
   EMBEDDED_RUNTIME_BOOTSTRAP_RESPONSE,
@@ -40,16 +41,16 @@ import {
   type EmbeddedSessionChatURLCacheEntry,
   type EmbeddedSessionRuntimeBootstrap,
 } from './contextPanelEmbeddedChat';
-import { getContextSurfaceWidthFraction } from '@/lib/surfaces/registry';
+import { availableContextSurfaces, getContextRailMode, getContextSurfaceWidthFraction } from '@/lib/surfaces/registry';
+import { useFeatureFlagsStore } from '@/stores/useFeatureFlagsStore';
+import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger } from '@/components/ui/dropdown-menu';
 import { isTerminalEventTarget } from '@/lib/terminalFocus';
 import {
   type PreviewElementMetadata,
   isPreviewElementMetadata,
   formatPreviewAnnotationMarkdown,
   renderPreviewScreenshot,
-  desktopAnnotationToFile,
   getCachedProxyTarget,
-  getBrowserProxyTargetKey,
   previewProxyTargetCache,
 } from '@/lib/preview/screenshot-capture';
 
@@ -66,44 +67,13 @@ const PlanView = lazyWithChunkRecovery(() => import('@/components/views/PlanView
 const ComputerWorkSurface = lazyWithChunkRecovery(() => import('@/components/sections/computers/ComputerWorkSurface').then((module) => ({ default: module.ComputerWorkSurface })));
 const HarnessSubtasksPanel = lazyWithChunkRecovery(() => import('@/components/pi-session/HarnessSubtasksPanel').then((module) => ({ default: module.HarnessSubtasksPanel })));
 
-const CONTEXT_PANEL_MIN_WIDTH = 380;
+const CONTEXT_PANEL_MIN_WIDTH = 1;
 const CONTEXT_PANEL_MAX_WIDTH = 1400;
 const CONTEXT_PANEL_DEFAULT_WIDTH = 600;
 const RESIZE_FOLLOW_INTERVAL_MS = 100;
 const CONTEXT_TAB_LABEL_MAX_CHARS = 24;
 type TranslateFn = ReturnType<typeof useI18n>['t'];
 const EMPTY_SESSION_TITLE_MAP = new Map<string, string>();
-
-type PreviewConsoleEvent = {
-  id: number;
-  level: 'log' | 'info' | 'warn' | 'error' | 'debug' | 'resource' | 'runtime';
-  message: string;
-  details?: string;
-  ts: number;
-};
-
-type PreviewConsoleFilter = 'all' | 'errors' | 'warnings' | 'logs';
-
-type PreviewBridgeMessage = {
-  source?: string;
-  version?: number;
-  type?: string;
-  level?: PreviewConsoleEvent['level'];
-  args?: unknown[];
-  message?: unknown;
-  stack?: unknown;
-  filename?: unknown;
-  line?: unknown;
-  column?: unknown;
-  tag?: unknown;
-  url?: unknown;
-  outerHTML?: unknown;
-  title?: unknown;
-  ts?: unknown;
-  target?: unknown;
-  navigation?: unknown;
-};
-
 
 const PREVIEW_CONSOLE_EVENT_LIMIT = 200;
 
@@ -468,159 +438,6 @@ const useSessionTitleMap = (sessionIDs: readonly string[]): ReadonlyMap<string, 
   );
 };
 
-const DESKTOP_BROWSER_INSPECT_SCRIPT = `new Promise((resolve) => {
-  const existing = document.getElementById('__varin_desktop_browser_overlay');
-  if (existing) existing.remove();
-  if (typeof window.__varinDesktopBrowserCancelInspect === 'function') {
-    try { window.__varinDesktopBrowserCancelInspect(); } catch { /* webview not ready */ }
-  }
-  const overlay = document.createElement('div');
-  overlay.id = '__varin_desktop_browser_overlay';
-  overlay.style.cssText = 'position:fixed;z-index:2147483647;pointer-events:none;border:2px solid #60a5fa;background:rgba(96,165,250,.24);border-radius:3px;display:none;box-sizing:border-box;';
-  document.documentElement.appendChild(overlay);
-  const cssEscape = (value) => {
-    try { return CSS.escape(value); } catch { return String(value).replace(/[^a-zA-Z0-9_-]/g, '\\\\$&'); }
-  };
-  const selectorPart = (element) => {
-    const tag = element.tagName.toLowerCase();
-    if (element.id) return tag + '#' + cssEscape(element.id);
-    const className = String(element.className || '').trim().split(/\\s+/).filter(Boolean).slice(0, 3).map((part) => '.' + cssEscape(part)).join('');
-    return tag + className;
-  };
-  const metadata = (element) => {
-    const rect = element.getBoundingClientRect();
-    const style = getComputedStyle(element);
-    const ancestry = [];
-    let current = element;
-    while (current && current.nodeType === Node.ELEMENT_NODE && ancestry.length < 8) {
-      ancestry.unshift({ tag: current.tagName.toLowerCase(), id: current.id || undefined, className: typeof current.className === 'string' ? current.className : undefined, selectorPart: selectorPart(current) });
-      current = current.parentElement;
-    }
-    const attrs = {};
-    for (const attr of Array.from(element.attributes || []).slice(0, 16)) attrs[attr.name] = attr.value.slice(0, 300);
-    const path = ancestry.map((entry) => entry.selectorPart).join(' > ');
-    return {
-      frame: 'top',
-      tag: element.tagName.toLowerCase(),
-      text: String(element.innerText || element.textContent || '').replace(/\\s+/g, ' ').trim().slice(0, 500),
-      selector: element.id ? '#' + cssEscape(element.id) : path,
-      path,
-      bounds: { x: rect.x, y: rect.y, width: rect.width, height: rect.height },
-      center: { x: rect.x + rect.width / 2, y: rect.y + rect.height / 2 },
-      attributes: attrs,
-      computedStyle: { display: style.display, position: style.position, fontWeight: style.fontWeight, fontSize: style.fontSize, lineHeight: style.lineHeight, fontFamily: style.fontFamily, color: style.color, backgroundColor: style.backgroundColor, zIndex: style.zIndex },
-      ancestry,
-    };
-  };
-  const move = (event) => {
-    const element = document.elementFromPoint(event.clientX, event.clientY);
-    if (!element || element === overlay || element === document.documentElement || element === document.body) return;
-    const rect = element.getBoundingClientRect();
-    overlay.style.display = 'block';
-    overlay.style.left = rect.left + 'px';
-    overlay.style.top = rect.top + 'px';
-    overlay.style.width = rect.width + 'px';
-    overlay.style.height = rect.height + 'px';
-  };
-  const cleanup = () => {
-    window.removeEventListener('mousemove', move, true);
-    window.removeEventListener('click', click, true);
-    window.removeEventListener('keydown', keydown, true);
-    if (window.__varinDesktopBrowserCancelInspect === cancel) {
-      delete window.__varinDesktopBrowserCancelInspect;
-    }
-  };
-  const cancel = () => {
-    cleanup();
-    overlay.remove();
-    resolve(null);
-  };
-  const click = (event) => {
-    event.preventDefault();
-    event.stopPropagation();
-    const element = document.elementFromPoint(event.clientX, event.clientY);
-    const result = element ? metadata(element) : null;
-    cleanup();
-    overlay.remove();
-    resolve(result);
-  };
-  const keydown = (event) => {
-    if (event.key !== 'Escape') return;
-    cancel();
-  };
-  window.__varinDesktopBrowserCancelInspect = cancel;
-  window.addEventListener('mousemove', move, true);
-  window.addEventListener('click', click, true);
-  window.addEventListener('keydown', keydown, true);
-});`;
-
-const DESKTOP_BROWSER_CANCEL_INSPECT_SCRIPT = `(() => {
-  if (typeof window.__varinDesktopBrowserCancelInspect === 'function') {
-    window.__varinDesktopBrowserCancelInspect();
-    return;
-  }
-  const overlay = document.getElementById('__varin_desktop_browser_overlay');
-  if (overlay) overlay.remove();
-})()`;
-
-const DESKTOP_BROWSER_SAME_WEBVIEW_NAVIGATION_SCRIPT = `(() => {
-  if (window.__varinSameWebviewNavigationInstalled) return;
-  window.__varinSameWebviewNavigationInstalled = true;
-
-  const navigate = (rawUrl) => {
-    if (typeof rawUrl !== 'string' || rawUrl.length === 0) return false;
-    try {
-      const url = new URL(rawUrl, window.location.href);
-      if (url.protocol !== 'http:' && url.protocol !== 'https:') return false;
-      window.location.assign(url.href);
-      return true;
-    } catch (_error) {
-      return false;
-    }
-  };
-
-  const originalOpen = window.open.bind(window);
-  window.open = (url, target, features) => {
-    if (navigate(url)) return null;
-    return originalOpen(url, target, features);
-  };
-
-  document.addEventListener('click', (event) => {
-    if (event.defaultPrevented) return;
-    const target = event.target;
-    if (!(target instanceof Element)) return;
-    const anchor = target.closest('a[target="_blank"][href]');
-    if (!(anchor instanceof HTMLAnchorElement)) return;
-    if (!navigate(anchor.href)) return;
-    event.preventDefault();
-    event.stopPropagation();
-  }, true);
-})()`;
-
-const normalizeBrowserUrl = (value: string): string => {
-  const trimmed = value.trim();
-  if (!trimmed) return 'about:blank';
-  try {
-    const parsed = new URL(trimmed.includes('://') ? trimmed : `https://${trimmed}`);
-    if (parsed.protocol !== 'http:' && parsed.protocol !== 'https:') return 'about:blank';
-    return parsed.toString();
-  } catch {
-    return 'about:blank';
-  }
-};
-
-const runIframeScript = async <T,>(iframe: HTMLIFrameElement, script: string): Promise<T> => {
-  const frameWindow = iframe.contentWindow;
-  if (!frameWindow) {
-    throw new Error('Iframe window is not available');
-  }
-
-  const evaluate = (frameWindow as Window & { eval: (code: string) => unknown }).eval;
-  const result = evaluate.call(frameWindow, script) as unknown;
-  return await Promise.resolve(result) as T;
-};
-
-
 const truncateTabLabel = (value: string, maxChars: number): string => {
   if (value.length <= maxChars) {
     return value;
@@ -632,53 +449,6 @@ const truncateTabLabel = (value: string, maxChars: number): string => {
 type PreviewPaneProps = {
   rawUrl: string;
   onNavigate: (url: string) => void;
-};
-
-type PreviewProxyState =
-  | { status: 'idle' }
-  | { status: 'loading' }
-  | { status: 'ready'; proxyBasePath: string; previewToken?: string; expiresAt: number }
-  | { status: 'error'; message: string };
-
-const getPreviewProxyOrigin = (proxySrc: string): string => {
-  if (typeof window === 'undefined') return '';
-  try {
-    return new URL(proxySrc || window.location.href, window.location.href).origin;
-  } catch {
-    return window.location.origin;
-  }
-};
-
-const postPreviewBridgeMessage = (frameWindow: Window, proxySrc: string, payload: Record<string, unknown>): void => {
-  const targetOrigin = getPreviewProxyOrigin(proxySrc);
-  frameWindow.postMessage(payload, targetOrigin);
-};
-
-const stripPreviewTokenFromUrl = (value: string): string => {
-  if (!value) return value;
-  try {
-    const parsed = new URL(value);
-    parsed.searchParams.delete('varin_preview_token');
-    parsed.searchParams.delete('varin_client_token');
-    parsed.searchParams.delete('varin_url_token');
-    return parsed.toString();
-  } catch {
-    return value;
-  }
-};
-
-const stripPreviewQueryParams = (value: string): string => {
-  if (!value) return value;
-  try {
-    const parsed = new URL(value);
-    parsed.searchParams.delete('ocPreview');
-    parsed.searchParams.delete('varin_preview_token');
-    parsed.searchParams.delete('varin_client_token');
-    parsed.searchParams.delete('varin_url_token');
-    return parsed.toString();
-  } catch {
-    return value;
-  }
 };
 
 const PreviewPane: React.FC<PreviewPaneProps> = ({ rawUrl, onNavigate }) => {
@@ -1452,752 +1222,6 @@ const PreviewPane: React.FC<PreviewPaneProps> = ({ rawUrl, onNavigate }) => {
   );
 };
 
-type DesktopBrowserPaneProps = {
-  initialUrl: string;
-  directory: string;
-  tabID: string;
-};
-
-const isElectronBrowserRuntime = (): boolean => {
-  return typeof window !== 'undefined' && Boolean(window.__VARIN_ELECTRON__);
-};
-
-const IframeBrowserPane: React.FC<DesktopBrowserPaneProps> = ({ initialUrl, directory, tabID }) => {
-  const { t } = useI18n();
-  const iframeRef = React.useRef<HTMLIFrameElement | null>(null);
-  const setContextPanelTabTargetPath = useUIStore((state) => state.setContextPanelTabTargetPath);
-  const normalized = normalizeBrowserUrl(initialUrl);
-  const startUrl = normalized !== 'about:blank' ? normalized : '';
-  const [urlInput, setUrlInput] = React.useState(startUrl);
-  const [currentUrl, setCurrentUrl] = React.useState(startUrl);
-  const [loadedUrl, setLoadedUrl] = React.useState(startUrl);
-  const [history, setHistory] = React.useState<string[]>(() => startUrl ? [startUrl] : []);
-  const [historyIndex, setHistoryIndex] = React.useState(() => startUrl ? 0 : -1);
-  const [reloadNonce, bumpReload] = React.useReducer((value: number) => value + 1, 0);
-  const [isLoading, setIsLoading] = React.useState(Boolean(startUrl));
-  const [isInspecting, setIsInspecting] = React.useState(false);
-  const [hoverTarget, setHoverTarget] = React.useState<PreviewElementMetadata | null>(null);
-  const [proxyState, setProxyState] = React.useState<PreviewProxyState>({ status: 'idle' });
-  const [urlAuthReadyKey, setUrlAuthReadyKey] = React.useState('');
-  const currentSessionId = usePiSessionStore((state) => state.currentSessionId);
-  const appendPiDraftText = usePiDraftStore((state) => state.appendText);
-
-  const persistUrl = React.useCallback((url: string) => {
-    if (!url || url === 'about:blank' || !directory || !tabID) return;
-    setContextPanelTabTargetPath(directory, tabID, url);
-  }, [directory, tabID, setContextPanelTabTargetPath]);
-
-  const applyUrl = React.useCallback((url: string, options?: { replaceHistory?: boolean; inFrame?: boolean }) => {
-    const normalizedUrl = normalizeBrowserUrl(url);
-    const nextUrl = normalizedUrl !== 'about:blank' ? normalizedUrl : '';
-    setCurrentUrl(nextUrl);
-    setUrlInput(nextUrl);
-    if (!options?.inFrame) {
-      setLoadedUrl(nextUrl);
-      setIsLoading(Boolean(nextUrl));
-    } else {
-      setIsLoading(false);
-    }
-    persistUrl(nextUrl);
-
-    setHistory((current) => {
-      if (!nextUrl) {
-        setHistoryIndex(-1);
-        return [];
-      }
-
-      if (options?.replaceHistory) {
-        return current;
-      }
-
-      const kept = historyIndex >= 0 ? current.slice(0, historyIndex + 1) : [];
-      const previous = kept[kept.length - 1];
-      if (previous === nextUrl) {
-        setHistoryIndex(kept.length - 1);
-        return kept;
-      }
-
-      const nextHistory = [...kept, nextUrl];
-      setHistoryIndex(nextHistory.length - 1);
-      return nextHistory;
-    });
-  }, [historyIndex, persistUrl]);
-
-  const goToHistory = React.useCallback((nextIndex: number) => {
-    const nextUrl = history[nextIndex];
-    if (!nextUrl) return;
-    setHistoryIndex(nextIndex);
-    setCurrentUrl(nextUrl);
-    setLoadedUrl(nextUrl);
-    setUrlInput(nextUrl);
-    setIsLoading(true);
-    persistUrl(nextUrl);
-  }, [history, persistUrl]);
-
-  const handleReload = React.useCallback(() => {
-    if (!currentUrl) return;
-    setIsLoading(true);
-    try {
-      iframeRef.current?.contentWindow?.location.reload();
-    } catch {
-      bumpReload();
-    }
-  }, [currentUrl]);
-
-  React.useEffect(() => {
-    if (!loadedUrl) {
-      setProxyState({ status: 'idle' });
-      return;
-    }
-
-    const proxyTargetKey = getBrowserProxyTargetKey(loadedUrl);
-    const cached = getCachedProxyTarget(proxyTargetKey);
-    if (cached?.previewToken) {
-      setProxyState({ status: 'ready', proxyBasePath: cached.proxyBasePath, previewToken: cached.previewToken, expiresAt: cached.expiresAt });
-      return;
-    }
-    if (cached) {
-      previewProxyTargetCache.delete(proxyTargetKey);
-    }
-
-    let cancelled = false;
-    setProxyState({ status: 'loading' });
-    setIsLoading(true);
-
-    void (async () => {
-      try {
-        const response = await runtimeFetch('/api/preview/targets', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          credentials: 'include',
-          body: JSON.stringify({ url: loadedUrl, allowExternal: true }),
-        });
-
-        if (!response.ok) {
-          const errorBody = await response.json().catch(() => ({}));
-          const message = typeof errorBody?.error === 'string'
-            ? errorBody.error
-            : `HTTP ${response.status}`;
-          if (!cancelled) {
-            setProxyState({ status: 'error', message });
-          }
-          return;
-        }
-
-        const body = await response.json() as { proxyBasePath?: unknown; previewToken?: unknown; expiresAt?: unknown };
-        const proxyBasePath = typeof body.proxyBasePath === 'string' ? body.proxyBasePath : '';
-        const previewToken = typeof body.previewToken === 'string' ? body.previewToken : '';
-        const expiresAt = typeof body.expiresAt === 'number' ? body.expiresAt : 0;
-        if (!proxyBasePath || !previewToken) {
-          if (!cancelled) {
-            setProxyState({ status: 'error', message: t('contextPanel.preview.proxyError') });
-          }
-          return;
-        }
-
-        previewProxyTargetCache.set(proxyTargetKey, { proxyBasePath, previewToken, expiresAt });
-        if (!cancelled) {
-          setProxyState({ status: 'ready', proxyBasePath, previewToken, expiresAt });
-        }
-      } catch (error) {
-        if (!cancelled) {
-          const message = error instanceof Error ? error.message : String(error);
-          setProxyState({ status: 'error', message });
-        }
-      }
-    })();
-
-    return () => {
-      cancelled = true;
-    };
-  }, [loadedUrl, t]);
-
-  const proxyUrlAuthKey = loadedUrl && proxyState.status === 'ready'
-    ? `${proxyState.proxyBasePath}|${proxyState.previewToken || ''}|${reloadNonce}`
-    : '';
-
-  React.useEffect(() => {
-    if (!proxyUrlAuthKey) {
-      setUrlAuthReadyKey('');
-      return;
-    }
-
-    let cancelled = false;
-    setUrlAuthReadyKey('');
-    void refreshRuntimeUrlAuthToken(getRuntimeApiBaseUrl())
-      .then((token) => {
-        if (!cancelled && token) setUrlAuthReadyKey(proxyUrlAuthKey);
-      })
-      .catch(() => {});
-
-    return () => {
-      cancelled = true;
-    };
-  }, [proxyUrlAuthKey]);
-
-  const proxySrc = React.useMemo(() => {
-    if (urlAuthReadyKey !== proxyUrlAuthKey) return '';
-    if (!loadedUrl || proxyState.status !== 'ready') return '';
-    try {
-      const parsed = new URL(loadedUrl);
-      const path = parsed.pathname || '/';
-      const searchParams = new URLSearchParams(parsed.search);
-      searchParams.delete('varin_url_token');
-      searchParams.delete('varin_client_token');
-      searchParams.set('ocPreview', String(reloadNonce));
-      searchParams.set('varin_preview_token', proxyState.previewToken || '');
-      const search = searchParams.toString();
-      return getRuntimeUrlResolver().authenticatedAsset(`${proxyState.proxyBasePath}${path}${search ? `?${search}` : ''}${parsed.hash}`);
-    } catch {
-      return '';
-    }
-  }, [loadedUrl, proxyState, proxyUrlAuthKey, reloadNonce, urlAuthReadyKey]);
-
-  const iframeSrc = proxySrc || (proxyState.status === 'error' ? loadedUrl : '');
-
-  const getCurrentUrlFromFrameUrl = React.useCallback((frameUrl: string): string => {
-    if (!frameUrl || !loadedUrl || proxyState.status !== 'ready') return '';
-    try {
-      const parsedFrameUrl = new URL(frameUrl, window.location.origin);
-      const proxyBasePath = proxyState.proxyBasePath.endsWith('/')
-        ? proxyState.proxyBasePath.slice(0, -1)
-        : proxyState.proxyBasePath;
-      if (parsedFrameUrl.origin !== window.location.origin || !parsedFrameUrl.pathname.startsWith(proxyBasePath)) {
-        return '';
-      }
-
-      const rest = parsedFrameUrl.pathname.slice(proxyBasePath.length) || '/';
-      const upstreamOrigin = new URL(loadedUrl).origin;
-      return stripPreviewQueryParams(new URL(`${rest}${parsedFrameUrl.search}${parsedFrameUrl.hash}`, upstreamOrigin).toString());
-    } catch {
-      return '';
-    }
-  }, [loadedUrl, proxyState]);
-
-  const getUpstreamUrlFromLocalFrameUrl = React.useCallback((frameUrl: string): string => {
-    if (!frameUrl || !loadedUrl || proxyState.status !== 'ready') return '';
-    try {
-      const parsedFrameUrl = new URL(frameUrl, window.location.origin);
-      const upstreamOrigin = new URL(loadedUrl).origin;
-      if (parsedFrameUrl.origin !== window.location.origin || upstreamOrigin === window.location.origin) {
-        return '';
-      }
-
-      const proxyBasePath = proxyState.proxyBasePath.endsWith('/')
-        ? proxyState.proxyBasePath.slice(0, -1)
-        : proxyState.proxyBasePath;
-      if (parsedFrameUrl.pathname.startsWith(proxyBasePath)) {
-        return '';
-      }
-
-      return stripPreviewQueryParams(new URL(`${parsedFrameUrl.pathname}${parsedFrameUrl.search}${parsedFrameUrl.hash}`, upstreamOrigin).toString());
-    } catch {
-      return '';
-    }
-  }, [loadedUrl, proxyState]);
-
-  const postInspectMode = React.useCallback((enabled: boolean) => {
-    const frameWindow = iframeRef.current?.contentWindow;
-    if (!frameWindow) return;
-    frameWindow.postMessage({
-      source: 'varin-preview-parent',
-      version: 1,
-      type: 'set-inspect-mode',
-      enabled,
-    }, window.location.origin);
-  }, []);
-
-  const attachBrowserAnnotation = React.useCallback(async (target: PreviewElementMetadata) => {
-    const sessionKey = currentSessionId;
-    if (!sessionKey) {
-      toast.error(t('contextPanel.preview.inspect.attachNoSession'));
-      return;
-    }
-
-    const iframe = iframeRef.current;
-    const frameWindow = iframe?.contentWindow;
-    const rect = iframe?.getBoundingClientRect();
-    const viewport = {
-      width: Number.isFinite(frameWindow?.innerWidth) ? frameWindow?.innerWidth ?? rect?.width ?? 0 : rect?.width ?? 0,
-      height: Number.isFinite(frameWindow?.innerHeight) ? frameWindow?.innerHeight ?? rect?.height ?? 0 : rect?.height ?? 0,
-    };
-
-    const file = iframe ? await renderPreviewScreenshot(iframe, target) : null;
-    const screenshotAttached = Boolean(file);
-    if (file) {
-      await addPiDraftImageFile(sessionKey, file);
-    }
-
-    appendPiDraftText(sessionKey, formatPreviewAnnotationMarkdown({
-        pageUrl: currentUrl,
-        viewport,
-        devicePixelRatio: window.devicePixelRatio || 1,
-        target,
-        screenshotAttached,
-        intro: t(screenshotAttached
-          ? 'contextPanel.preview.inspect.attachAnnotationWithScreenshot'
-          : 'contextPanel.preview.inspect.attachAnnotation'),
-      }));
-    toast.success(t('contextPanel.preview.inspect.attached'));
-  }, [appendPiDraftText, currentSessionId, currentUrl, t]);
-
-  const cancelInspect = React.useCallback(() => {
-    const iframe = iframeRef.current;
-    setHoverTarget(null);
-    postInspectMode(false);
-    if (!iframe) return;
-    void runIframeScript<unknown>(iframe, DESKTOP_BROWSER_CANCEL_INSPECT_SCRIPT).catch(() => {});
-  }, [postInspectMode]);
-
-  React.useEffect(() => {
-    if (!isInspecting) return;
-    const handler = (event: KeyboardEvent) => {
-      if (event.key !== 'Escape') return;
-      event.preventDefault();
-      event.stopImmediatePropagation();
-      setIsInspecting(false);
-      cancelInspect();
-    };
-    window.addEventListener('keydown', handler, true);
-    return () => window.removeEventListener('keydown', handler, true);
-  }, [cancelInspect, isInspecting]);
-
-  React.useEffect(() => () => cancelInspect(), [cancelInspect]);
-
-  React.useEffect(() => {
-    const handler = (event: MessageEvent<PreviewBridgeMessage>) => {
-      if (event.source !== iframeRef.current?.contentWindow) return;
-      const data = event.data;
-      if (!data || data.source !== 'varin-preview-bridge' || data.version !== 1) return;
-
-      if (data.type === 'ready') {
-        const frameUrl = typeof data.url === 'string' ? data.url : '';
-        const nextUrl = getCurrentUrlFromFrameUrl(frameUrl);
-        if (nextUrl && nextUrl !== currentUrl) {
-          applyUrl(nextUrl, { inFrame: true });
-        }
-        return;
-      }
-
-      if (data.type === 'hover') {
-        setHoverTarget(isPreviewElementMetadata(data.target) ? data.target : null);
-        return;
-      }
-
-      if (data.type === 'select' && isPreviewElementMetadata(data.target)) {
-        setHoverTarget(null);
-        setIsInspecting(false);
-        postInspectMode(false);
-        void attachBrowserAnnotation(data.target);
-        return;
-      }
-
-      if (data.type === 'navigate-preview') {
-        const nextUrl = typeof data.url === 'string' ? data.url : '';
-        const upstreamUrl = getUpstreamUrlFromLocalFrameUrl(nextUrl);
-        if (upstreamUrl) {
-          applyUrl(upstreamUrl);
-          return;
-        }
-        if (nextUrl) {
-          applyUrl(nextUrl);
-        }
-      }
-    };
-
-    window.addEventListener('message', handler);
-    return () => window.removeEventListener('message', handler);
-  }, [applyUrl, attachBrowserAnnotation, currentUrl, getCurrentUrlFromFrameUrl, getUpstreamUrlFromLocalFrameUrl, postInspectMode]);
-
-  const handleInspect = React.useCallback(() => {
-    const iframe = iframeRef.current;
-    if (!iframe || !currentUrl) return;
-
-    if (isInspecting) {
-      setIsInspecting(false);
-      cancelInspect();
-      return;
-    }
-
-    if (proxySrc) {
-      setHoverTarget(null);
-      setIsInspecting(true);
-      postInspectMode(true);
-      return;
-    }
-
-    setIsInspecting(true);
-    void (async () => {
-      try {
-        const target = await runIframeScript<unknown>(iframe, DESKTOP_BROWSER_INSPECT_SCRIPT);
-        setIsInspecting(false);
-        if (!target || !isPreviewElementMetadata(target)) return;
-        await attachBrowserAnnotation(target);
-      } catch {
-        setIsInspecting(false);
-        toast.error(t('contextPanel.browser.inspectUnavailable'));
-      }
-    })();
-  }, [attachBrowserAnnotation, cancelInspect, currentUrl, isInspecting, postInspectMode, proxySrc, t]);
-
-  const handleIframeLoad = React.useCallback(() => {
-    try {
-      const frameUrl = iframeRef.current?.contentWindow?.location.href || '';
-      const upstreamUrl = getUpstreamUrlFromLocalFrameUrl(frameUrl);
-      if (upstreamUrl) {
-        applyUrl(upstreamUrl, { inFrame: true });
-        return;
-      }
-    } catch {
-      // Cross-origin direct iframe fallback; regular load handling still applies.
-    }
-
-    setIsLoading(false);
-    if (isInspecting && proxySrc) {
-      postInspectMode(true);
-    }
-  }, [applyUrl, getUpstreamUrlFromLocalFrameUrl, isInspecting, postInspectMode, proxySrc]);
-
-  return (
-    <div className="absolute inset-0 flex flex-col bg-background">
-      <div className="flex items-center gap-1 border-b border-border bg-[var(--surface-background)] px-2 py-1">
-        <Button type="button" variant="ghost" size="sm" className="h-7 w-7 p-0" disabled={historyIndex <= 0} onClick={() => goToHistory(historyIndex - 1)}>
-          <Icon name="arrow-left" className="h-3.5 w-3.5" />
-        </Button>
-        <Button type="button" variant="ghost" size="sm" className="h-7 w-7 p-0" disabled={historyIndex < 0 || historyIndex >= history.length - 1} onClick={() => goToHistory(historyIndex + 1)}>
-          <Icon name="arrow-right" className="h-3.5 w-3.5" />
-        </Button>
-        <Button type="button" variant="ghost" size="sm" className="h-7 w-7 p-0" disabled={!currentUrl} onClick={handleReload}>
-          <Icon name="refresh" className="h-3.5 w-3.5" />
-        </Button>
-        <form className="min-w-0 flex-1" onSubmit={(event) => { event.preventDefault(); applyUrl(urlInput); }}>
-          <input
-            value={urlInput}
-            onChange={(event) => setUrlInput(event.target.value)}
-            className="h-7 w-full rounded-md border border-border/50 bg-[var(--surface-elevated)] px-2 typography-micro text-foreground outline-none focus:border-[var(--interactive-focus-ring)]"
-            aria-label={t('contextPanel.browser.addressAria')}
-          />
-        </form>
-        <Button
-          type="button"
-          variant={isInspecting ? 'secondary' : 'ghost'}
-          size="sm"
-          className="h-7 w-7 p-0"
-          disabled={!currentUrl}
-          onClick={handleInspect}
-          title={t('contextPanel.preview.inspect.toggle')}
-          aria-label={t('contextPanel.preview.inspect.toggle')}
-        >
-          <Icon name="cursor" className="h-3.5 w-3.5" />
-        </Button>
-        <Button type="button" variant="ghost" size="sm" className="h-7 w-7 p-0" disabled={!currentUrl} onClick={() => void openExternalUrl(currentUrl)}>
-          <Icon name="external-link" className="h-3.5 w-3.5" />
-        </Button>
-      </div>
-      <div className="relative min-h-0 flex-1 bg-background">
-        {iframeSrc ? (
-          <div className="absolute inset-0">
-            <iframe
-              key={`${tabID}:${reloadNonce}`}
-              ref={iframeRef}
-              src={iframeSrc}
-              title={t('contextPanel.browser.empty')}
-              className="absolute inset-0 h-full w-full border-0 bg-background"
-              allow="clipboard-read; clipboard-write; fullscreen"
-              allowFullScreen
-              onLoad={handleIframeLoad}
-            />
-            {isInspecting && hoverTarget ? (
-              <div
-                className="pointer-events-none absolute rounded-sm border-2 border-[var(--interactive-focus-ring)] bg-[var(--interactive-focus-ring)]/35"
-                style={{
-                  left: hoverTarget.bounds.x,
-                  top: hoverTarget.bounds.y,
-                  width: hoverTarget.bounds.width,
-                  height: hoverTarget.bounds.height,
-                }}
-              >
-                <div className="absolute -top-6 left-0 max-w-64 truncate rounded bg-[var(--surface-elevated)] px-2 py-0.5 typography-micro text-foreground shadow">
-                  {hoverTarget.tag}{hoverTarget.text ? ` · ${hoverTarget.text}` : ''}
-                </div>
-              </div>
-            ) : null}
-          </div>
-        ) : (
-          <div className="absolute inset-0 flex flex-col items-center justify-center gap-6 bg-background p-6 text-center">
-            <VarinLogo width={140} height={140} className="opacity-20" />
-            <span className="typography-ui-header text-muted-foreground">{t('contextPanel.browser.empty')}</span>
-            <span className="max-w-sm typography-micro text-muted-foreground">{t('contextPanel.browser.emptyHint')}</span>
-            <span className="max-w-md typography-micro leading-relaxed text-status-warning/70">{t('contextPanel.browser.trustNotice')}</span>
-          </div>
-        )}
-        {isLoading ? (
-          <div className="absolute inset-0 flex items-center justify-center bg-background/70 typography-micro text-muted-foreground">
-            {t('common.loading')}
-          </div>
-        ) : null}
-      </div>
-    </div>
-  );
-};
-
-const DesktopBrowserPane: React.FC<DesktopBrowserPaneProps> = ({ initialUrl, directory, tabID }) => {
-  const { t } = useI18n();
-  const webviewRef = React.useRef<WebviewElement | null>(null);
-  const setContextPanelTabTargetPath = useUIStore((state) => state.setContextPanelTabTargetPath);
-  const normalized = normalizeBrowserUrl(initialUrl);
-  const startUrl = normalized !== 'about:blank' ? normalized : '';
-  const initialWebviewSrcRef = React.useRef(normalizeBrowserUrl(initialUrl));
-  const [urlInput, setUrlInput] = React.useState(startUrl);
-  const [currentUrl, setCurrentUrl] = React.useState(startUrl);
-  const [isInspecting, setIsInspecting] = React.useState(false);
-  const [isLoading, setIsLoading] = React.useState(true);
-  const loadingTimerRef = React.useRef<ReturnType<typeof setTimeout> | null>(null);
-  const showLoading = isLoading;
-
-  const persistUrl = React.useCallback((url: string) => {
-    if (!url || url === 'about:blank' || !directory || !tabID) return;
-    setContextPanelTabTargetPath(directory, tabID, url);
-  }, [directory, tabID, setContextPanelTabTargetPath]);
-  const currentSessionId = usePiSessionStore((state) => state.currentSessionId);
-  const appendPiDraftText = usePiDraftStore((state) => state.appendText);
-
-  // Listen to webview navigation events
-  React.useEffect(() => {
-    const webview = webviewRef.current;
-    if (!webview) return;
-
-    const syncUrl = () => {
-      try {
-        const url = webview.getURL();
-        if (url && url !== 'about:blank') {
-          setCurrentUrl(url);
-          setUrlInput(url);
-          persistUrl(url);
-        }
-      } catch { /* webview not ready */ }
-    };
-
-    const onNavigate = (event: Event) => {
-      const detail = (event as CustomEvent<{ url: string }>).detail;
-      if (typeof detail?.url === 'string' && detail.url) {
-        setCurrentUrl(detail.url);
-        setUrlInput(detail.url);
-        persistUrl(detail.url);
-      }
-    };
-
-    const onStartLoading = () => {
-      if (loadingTimerRef.current) clearTimeout(loadingTimerRef.current);
-      loadingTimerRef.current = setTimeout(() => setIsLoading(true), 200);
-    };
-    const onStopLoading = () => {
-      if (loadingTimerRef.current) clearTimeout(loadingTimerRef.current);
-      setIsLoading(false);
-      syncUrl();
-    };
-
-    const onNewWindow = (event: Event) => {
-      const detail = (event as CustomEvent<{ url: string; disposition: string }>).detail;
-      if (detail?.disposition === 'new-window' || detail?.disposition === 'foreground-tab' || detail?.disposition === 'background-tab') {
-        event.preventDefault();
-        const w = webviewRef.current;
-        if (typeof w?.loadURL === 'function' && detail.url) {
-          w.loadURL(detail.url);
-        }
-      }
-    };
-
-    const installSameWebviewNavigation = () => {
-      try {
-        webview.executeJavaScript?.(DESKTOP_BROWSER_SAME_WEBVIEW_NAVIGATION_SCRIPT, true).catch(() => {});
-      } catch { /* webview not ready */ }
-    };
-
-    webview.addEventListener('did-navigate', onNavigate);
-    webview.addEventListener('did-navigate-in-page', onNavigate);
-    webview.addEventListener('did-start-loading', onStartLoading);
-    webview.addEventListener('did-stop-loading', onStopLoading);
-    webview.addEventListener('new-window', onNewWindow);
-    webview.addEventListener('dom-ready', installSameWebviewNavigation);
-
-    // Check current loading state imperatively — we may have missed the event
-    try {
-      if (!webview.isLoading()) {
-        setIsLoading(false);
-        syncUrl();
-      }
-    } catch { /* webview not ready */ }
-    installSameWebviewNavigation();
-
-    return () => {
-      if (loadingTimerRef.current) clearTimeout(loadingTimerRef.current);
-      webview.removeEventListener('did-navigate', onNavigate);
-      webview.removeEventListener('did-navigate-in-page', onNavigate);
-      webview.removeEventListener('did-start-loading', onStartLoading);
-      webview.removeEventListener('did-stop-loading', onStopLoading);
-      webview.removeEventListener('new-window', onNewWindow);
-      webview.removeEventListener('dom-ready', installSameWebviewNavigation);
-    };
-  }, [persistUrl]);
-
-  // Safety timeout: hide loading overlay after 30s even if events fire late
-  React.useEffect(() => {
-    const safety = setTimeout(() => setIsLoading(false), 30_000);
-    return () => clearTimeout(safety);
-  }, []);
-
-  // Escape key cancels inspect mode
-  React.useEffect(() => {
-    if (!isInspecting) return;
-    const handler = (event: KeyboardEvent) => {
-      if (event.key !== 'Escape') return;
-      event.preventDefault();
-      event.stopImmediatePropagation();
-      setIsInspecting(false);
-      const webview = webviewRef.current;
-      try { webview?.executeJavaScript?.(DESKTOP_BROWSER_CANCEL_INSPECT_SCRIPT).catch(() => {}); } catch { /* webview not ready */ }
-    };
-    window.addEventListener('keydown', handler, true);
-    return () => window.removeEventListener('keydown', handler, true);
-  }, [isInspecting]);
-
-  // Cancel inspect on unmount
-  React.useEffect(() => {
-    const webview = webviewRef.current;
-    return () => {
-      try {
-        const url = webview?.getURL?.();
-        if (url && url !== 'about:blank') {
-          setContextPanelTabTargetPath(directory, tabID, url);
-        }
-      } catch { /* webview not ready */ }
-      try { webview?.executeJavaScript?.(DESKTOP_BROWSER_CANCEL_INSPECT_SCRIPT).catch(() => {}); } catch { /* webview not ready */ }
-    };
-  }, [directory, tabID, setContextPanelTabTargetPath]);
-
-  const loadUrl = React.useCallback((value: string) => {
-    const webview = webviewRef.current;
-    if (typeof webview?.loadURL !== 'function') return;
-    const nextUrl = normalizeBrowserUrl(value);
-    try { webview.loadURL(nextUrl); } catch { /* webview may not be ready */ }
-  }, []);
-
-  const handleInspect = React.useCallback(() => {
-    const webview = webviewRef.current;
-    if (!webview) return;
-
-    if (isInspecting) {
-      setIsInspecting(false);
-      try { webview.executeJavaScript?.(DESKTOP_BROWSER_CANCEL_INSPECT_SCRIPT).catch(() => {}); } catch { /* webview not ready */ }
-      return;
-    }
-
-    setIsInspecting(true);
-    webview.executeJavaScript?.(DESKTOP_BROWSER_INSPECT_SCRIPT, true)
-      .then(async (target: unknown) => {
-        setIsInspecting(false);
-        if (!target || !isPreviewElementMetadata(target)) return;
-
-        const sessionKey = currentSessionId;
-        if (!sessionKey) {
-          toast.error(t('contextPanel.preview.inspect.attachNoSession'));
-          return;
-        }
-
-        const wcId = typeof webview.getWebContentsId === 'function' ? webview.getWebContentsId() : null;
-        if (wcId === null || wcId === undefined) return;
-
-        const capture = await invokeDesktopCommand(
-          'desktop_browser_capture_page', { webContentsId: wcId }
-        );
-        if (!capture) throw new Error('Desktop screenshot capture is not available');
-
-        const cssViewport = await webview.executeJavaScript?.(
-          '({ width: window.innerWidth, height: window.innerHeight })', true
-        ).catch(() => null) as { width: number; height: number } | null | undefined;
-
-        const cssWidth = Number.isFinite(cssViewport?.width) ? (cssViewport as { width: number }).width : capture.width;
-        const cssHeight = Number.isFinite(cssViewport?.height) ? (cssViewport as { height: number }).height : capture.height;
-
-        const file = await desktopAnnotationToFile(capture.base64, capture.width, capture.height, cssWidth, cssHeight, target);
-        const screenshotAttached = Boolean(file);
-        if (file) {
-          await addPiDraftImageFile(sessionKey, file);
-        }
-
-        appendPiDraftText(sessionKey, formatPreviewAnnotationMarkdown({
-            pageUrl: currentUrl,
-            viewport: { width: cssWidth, height: cssHeight },
-            devicePixelRatio: window.devicePixelRatio || 1,
-            target,
-            screenshotAttached,
-            intro: t('contextPanel.preview.inspect.attachAnnotationWithScreenshot'),
-          }));
-        toast.success(t('contextPanel.preview.inspect.attached'));
-      })
-      .catch(() => setIsInspecting(false));
-  }, [appendPiDraftText, currentSessionId, currentUrl, isInspecting, t]);
-
-  return (
-    <div className="absolute inset-0 flex flex-col bg-background">
-      <div className="flex items-center gap-1 border-b border-border bg-[var(--surface-background)] px-2 py-1">
-        <Button type="button" variant="ghost" size="sm" className="h-7 w-7 p-0" onClick={() => { try { webviewRef.current?.goBack?.(); } catch { /* webview not ready */ } }}>
-          <Icon name="arrow-left" className="h-3.5 w-3.5" />
-        </Button>
-        <Button type="button" variant="ghost" size="sm" className="h-7 w-7 p-0" onClick={() => { try { webviewRef.current?.goForward?.(); } catch { /* webview not ready */ } }}>
-          <Icon name="arrow-right" className="h-3.5 w-3.5" />
-        </Button>
-        <Button type="button" variant="ghost" size="sm" className="h-7 w-7 p-0" onClick={() => { try { webviewRef.current?.reload?.(); } catch { /* webview not ready */ } }}>
-          <Icon name="refresh" className="h-3.5 w-3.5" />
-        </Button>
-        <form className="min-w-0 flex-1" onSubmit={(event) => { event.preventDefault(); loadUrl(urlInput); }}>
-          <input
-            value={urlInput}
-            onChange={(event) => setUrlInput(event.target.value)}
-            className="h-7 w-full rounded-md border border-border/50 bg-[var(--surface-elevated)] px-2 typography-micro text-foreground outline-none focus:border-[var(--interactive-focus-ring)]"
-            aria-label={t('contextPanel.browser.addressAria')}
-          />
-        </form>
-        <Button
-          type="button"
-          variant={isInspecting ? 'secondary' : 'ghost'}
-          size="sm"
-          className="h-7 w-7 p-0"
-          onClick={handleInspect}
-          title={t('contextPanel.preview.inspect.toggle')}
-          aria-label={t('contextPanel.preview.inspect.toggle')}
-        >
-          <Icon name="cursor" className="h-3.5 w-3.5" />
-        </Button>
-        <Button type="button" variant="ghost" size="sm" className="h-7 w-7 p-0" onClick={() => void openExternalUrl(currentUrl)}>
-          <Icon name="external-link" className="h-3.5 w-3.5" />
-        </Button>
-      </div>
-      <div className="relative min-h-0 flex-1 bg-background">
-        <webview
-          ref={webviewRef}
-          src={initialWebviewSrcRef.current}
-          partition="persist:varin-browser"
-          allowpopups
-          style={{ width: '100%', height: '100%', border: 'none' }}
-        />
-        {(!currentUrl || currentUrl === 'about:blank') && !isLoading ? (
-          <div className="absolute inset-0 flex flex-col items-center justify-center gap-6 bg-background p-6 text-center">
-            <VarinLogo width={140} height={140} className="opacity-20" />
-            <span className="typography-ui-header text-muted-foreground">{t('contextPanel.browser.empty')}</span>
-          </div>
-        ) : null}
-        {showLoading ? (
-          <div className="absolute inset-0 flex items-center justify-center bg-background/70 typography-micro text-muted-foreground">
-            {t('common.loading')}
-          </div>
-        ) : null}
-      </div>
-    </div>
-  );
-};
-
 export const ContextPanel: React.FC = () => {
   const { t } = useI18n();
   const projectActionsContext = useProjectActionsContext();
@@ -2250,6 +1274,9 @@ export const ContextPanel: React.FC = () => {
   const { themeMode, setThemeMode, lightThemeId, darkThemeId, currentTheme } = useThemeSystem();
 
   const tabs = React.useMemo(() => panelState?.tabs ?? [], [panelState?.tabs]);
+  const contextRailOrder = useUIStore(state => state.contextRailOrder);
+  const planModeEnabled = useFeatureFlagsStore(state => state.planModeEnabled);
+  const surfaces = React.useMemo(() => availableContextSurfaces(contextRailOrder, tabs, planModeEnabled), [contextRailOrder, tabs, planModeEnabled]);
   const activeTab = tabs.find((tab) => tab.id === panelState?.activeTabId) ?? tabs[tabs.length - 1] ?? null;
   const gitPageMode = activeTab?.mode === 'git' || activeTab?.mode === 'pr' || activeTab?.mode === 'diff'
     ? activeTab.mode : null;
@@ -2265,7 +1292,7 @@ export const ContextPanel: React.FC = () => {
   const preferredWidth = clampWidth(manualWidth ?? Math.round(widthFraction * widthFallbackBase));
   // A default fits the remaining work area; a user resize remains their choice.
   const width = manualWidth === undefined && availablePanelAreaWidth !== null
-    ? Math.min(preferredWidth, Math.round(availablePanelAreaWidth * 0.54))
+    ? Math.min(preferredWidth, Math.round(availablePanelAreaWidth * 0.48))
     : preferredWidth;
   const chatSessionIDs = React.useMemo(() => {
     const ids: string[] = [];
@@ -2705,7 +1732,6 @@ export const ContextPanel: React.FC = () => {
     () => tabs.some((tab) => tab.mode === 'walkthrough'),
     [tabs],
   );
-  const BrowserPane = isElectronBrowserRuntime() ? DesktopBrowserPane : IframeBrowserPane;
   const hasFileTabs = React.useMemo(
     () => tabs.some((tab) => tab.mode === 'file'),
     [tabs],
@@ -2719,6 +1745,21 @@ export const ContextPanel: React.FC = () => {
 
   const header = (
     <header className="flex h-10 items-stretch border-b border-border">
+      <DropdownMenu modal={false}>
+        <DropdownMenuTrigger asChild>
+          <button type="button" aria-label={t('workbench.material.switchResource')} title={t('workbench.material.switchResource')}
+            className="workbench-icon-button flex shrink-0 items-center gap-1 rounded-md px-2 text-muted-foreground hover:bg-interactive-hover hover:text-foreground">
+            <Icon name="stack" className="size-3.5" /><Icon name="arrow-down-s" className="size-3" />
+          </button>
+        </DropdownMenuTrigger>
+        <DropdownMenuContent align="start" className="min-w-48">
+          {surfaces.map(surface => <DropdownMenuItem key={surface.id} className="gap-2"
+            onSelect={() => useUIStore.getState().openContextSurface(directoryKey, surface.mode)}>
+            <Icon name={surface.icon} className="size-3.5 shrink-0" /><span className="flex-1">{t(surface.labelKey)}</span>
+            {activeTab && getContextRailMode(activeTab.mode) === surface.mode ? <Icon name="check" className="size-3.5" /> : null}
+          </DropdownMenuItem>)}
+        </DropdownMenuContent>
+      </DropdownMenu>
       {isMultiInstanceMode ? (
         <SortableTabsStrip
           items={tabItems}
@@ -2760,6 +1801,7 @@ export const ContextPanel: React.FC = () => {
         </div>
       )}
       <div className="flex items-center gap-1 px-1.5">
+        {activeTab?.mode === 'browser' ? <BrowserMaterialAction workspaceRoot={directoryKey} tabId={activeTab.id} url={activeTab.targetPath ?? ''} /> : null}
         {isFileTabActive ? (
           <Button
             type="button"
@@ -2906,6 +1948,7 @@ export const ContextPanel: React.FC = () => {
                     <ContextResourceEditor
                       filePath={activeTab.targetPath}
                       viewId={activeTab.id}
+                      editorViewId={activeTab.editorViewId}
                       workspaceRoot={activeTab.targetDirectory ?? directoryKey}
                     />
                   ) : null}
@@ -2948,7 +1991,7 @@ export const ContextPanel: React.FC = () => {
               activeTab?.id !== tab.id && 'hidden'
             )}
           >
-            <BrowserPane initialUrl={tab.targetPath ?? ''} directory={directoryKey} tabID={tab.id} />
+            <ContextBrowserView initialUrl={tab.targetPath ?? ''} directory={directoryKey} tabID={tab.id} editorViewId={tab.editorViewId} />
           </div>
         ))}
         {diffTabs.map((tab) => (

@@ -19,6 +19,9 @@ import { useEffectiveDirectory } from '@/hooks/useEffectiveDirectory';
 import { isDesktopLocalOriginActive, isDesktopShell } from '@/lib/desktop';
 import { isMobileSurfaceRuntime } from '@/lib/runtimeSurface';
 import { ensureOutsideFileGrantForDesktop } from '@/lib/outsideFileGrants';
+import { openFileInMainEditor } from '@/lib/openFileInMainEditor';
+import { useWorkbenchProfileId } from '@/lib/workbench/profile-context';
+import { VARIN_WORKBENCH_IDE_PROFILE_ID } from '@varin/extension-contract';
 import { getDirectoryForFilePath, isFilePathWithinDirectory, toAbsoluteFilePath } from '@/lib/path-utils';
 import { renderMarkdownBlocks, renderMarkdownSync } from './markdown/markdownCore';
 import { getMarkdownSyntaxVars } from './markdown/markdownSyntaxVars';
@@ -413,6 +416,7 @@ const useFileReferenceInteractions = ({
   enabled: boolean;
 }) => {
   const annotationDebounceRef = React.useRef<number | null>(null);
+  const profileId = useWorkbenchProfileId();
 
   React.useEffect(() => {
     const container = containerRef.current;
@@ -538,6 +542,9 @@ const useFileReferenceInteractions = ({
       }
 
       const uiStore = useUIStore.getState();
+      if (profileId === VARIN_WORKBENCH_IDE_PROFILE_ID && openFileInMainEditor(contextDirectory, resolved.resolvedPath, {
+        line: resolved.line, column: resolved.column, focus: true,
+      })) return;
       if (Number.isFinite(resolved.line ?? Number.NaN)) {
         uiStore.openContextFileAtLine(
           contextDirectory,
@@ -608,7 +615,7 @@ const useFileReferenceInteractions = ({
       container.removeEventListener('click', handleClick);
       container.removeEventListener('keydown', handleKeyDown);
     };
-  }, [containerRef, effectiveDirectory, enabled]);
+  }, [containerRef, effectiveDirectory, enabled, profileId]);
 };
 
 const useMermaidInlineInteractions = ({
