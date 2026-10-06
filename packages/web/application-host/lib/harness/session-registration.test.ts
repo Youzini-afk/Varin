@@ -1,9 +1,10 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
-import type { HarnessActorIdentity, PiSettingsSnapshot, WebFetchRequest } from "@varin/protocol";
+import type { HarnessActorIdentity, PiSettingsSnapshot } from "@varin/protocol";
 import { createHarnessServiceHost, type HarnessSessionContext } from "./service-host.js";
 import { createHarnessSessionRegistration } from "./session-registration.js";
 import { createHarnessRouter } from "./router.js";
 import { registerHarnessServices } from "./harness-services.js";
+import { createWebFetch } from "./web-fetch.js";
 
 const actor: HarnessActorIdentity = { authorityInstanceId: "host", sessionId: "session", workerId: "worker", workerGeneration: 1 };
 const snapshot: PiSettingsSnapshot = { global: {}, globalRevision: "g1", project: {}, projectRevision: "p1", projectTrusted: false };
@@ -231,15 +232,21 @@ describe("asynchronous Harness registration", () => {
   });
 
   it("enforces the frozen renderer switch and domain policy before web.fetch execution", async () => {
-    const fetch = vi.fn(async (input: string | WebFetchRequest) => {
-      const url = typeof input === "string" ? input : input.url ?? "";
-      return { status: "failed" as const, url, reason: "stub" };
+    const renderer = vi.fn(async () => '<html><body><p>Rendered app content</p></body></html>');
+    const network = vi.spyOn(globalThis, "fetch").mockImplementation(async () => new Response(
+      '<html><head><script src="app.js"></script></head><body><div id="root"></div></body></html>',
+      { headers: { "content-type": "text/html" } },
+    ));
+    cleanup.push(() => network.mockRestore());
+    const webFetchService = createWebFetch({
+      ssrf: { check: async () => ({ blocked: false }), isSameHost: () => true },
+      renderer,
     });
     const host = createHarnessServiceHost({
       search: async () => ({ status: "empty", generation: undefined }),
       resolveWorkspaceRoot: async () => "D:/workspace",
       discoveredShells: {},
-      webFetchService: { fetch },
+      webFetchService,
     });
     cleanup.push(() => host.dispose());
     const responses: Array<{ ok: boolean; result?: unknown }> = [];
@@ -267,8 +274,9 @@ describe("asynchronous Harness registration", () => {
         data: { requestId: "render-off", method: "web.fetch", params: { url: "https://example.com", render: true } },
       },
     });
-    expect(fetch).not.toHaveBeenCalled();
-    expect(responses.at(-1)).toMatchObject({ ok: true, result: { status: "renderer-unavailable" } });
+    expect(network).not.toHaveBeenCalled();
+    expect(renderer).not.toHaveBeenCalled();
+    expect(responses.at(-1)).toMatchObject({ ok: true, result: { status: "renderer-unavailable", reason: "disabled" } });
 
     const next = { ...actor, workerGeneration: 2 };
     host.registerSession({
@@ -288,9 +296,13 @@ describe("asynchronous Harness registration", () => {
         data: { requestId: "render-on", method: "web.fetch", params: { url: "https://example.com", render: true } },
       },
     });
-    expect(fetch).toHaveBeenCalledWith(expect.objectContaining({ url: "https://example.com" }), expect.objectContaining({
-      render: true,
-      domainPolicy: { allow: ["example.com"], block: ["ads.example.com"] },
-    }));
+    expect(renderer).toHaveBeenCalledWith("https://example.com", expect.any(AbortSignal));
+    expect(responses.at(-1)).toMatchObject({ ok: true, result: { status: "ok", rendered: true, markdown: "Rendered app content" } });
+    await router.processEvent({
+      actor: next, kind: "host",
+      envelope: { kind: "event", event: "harness.request", data: { requestId: "blocked", method: "web.fetch", params: { url: "https://ads.example.com", render: true } } },
+    });
+    expect(responses.at(-1)).toMatchObject({ ok: true, result: { status: "blocked", reason: "domain-blocked" } });
+    expect(renderer).toHaveBeenCalledTimes(1);
   });
 });

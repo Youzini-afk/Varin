@@ -13,6 +13,13 @@ Tool-set snapshots refresh grants for the same worker generation, including a wo
 Registration keeps that worker's live shell and retrieval/input contexts; only a replacement generation
 retires them. Pending first registration uses the latest grants received while settings are loading.
 
+Scheduled-task grants follow the active `scheduled_task` tool and the Host's scheduler availability.
+They use the same project scheduler as the GUI; tool exposure alone must not leave every call forbidden.
+Web rendering separately requires the session's user-owned `harness.web.render` setting and a Host
+renderer. A disabled setting and an unsupported Host report distinct reasons. Static short pages remain
+readable; scripts alone do not establish that a page requires rendering, and script/style contents are
+excluded from extracted HTML text.
+
 Late native user-question replies reuse the broker's addressed-input path. For a settled child,
 the Host's question continuation callback resolves its durable session owner and starts a normal
 `continueRun` using the recorded model/tools/worktree configuration. The reply identity is the

@@ -135,6 +135,9 @@ describe('built-in TypeScript language extension', () => {
       expect(await language.references({ resource: main, languageId: 'typescript', documentVersion: 2, position })).toMatchObject({
         status: 'ready', value: expect.arrayContaining([expect.objectContaining({ resource: utility })]),
       });
+      expect(await language.workspaceSymbols({ resource: main, languageId: 'typescript', documentVersion: 2, query: 'greet' })).toMatchObject({
+        status: 'ready', value: expect.arrayContaining([expect.objectContaining({ name: 'greet', resource: utility })]),
+      });
       const renamed = await language.rename({
         resource: utility,
         languageId: 'typescript',

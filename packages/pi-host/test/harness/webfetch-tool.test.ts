@@ -249,6 +249,25 @@ describe("webfetch tool", () => {
     bridge.dispose();
   });
 
+  it("distinguishes a disabled rendering setting from a Host without a renderer", async () => {
+    const { bridge, emitted } = createTestBridge("test");
+    try {
+      const tool = createWebFetchTool(bridge, "test");
+      for (const reason of ["disabled", "unsupported"] as const) {
+        const pending = tool.execute(reason, { url: "https://example.com/", render: true } as never, undefined as never, undefined as never, undefined as never);
+        await new Promise((resolve) => setImmediate(resolve));
+        bridge.respond("test", emitted.at(-1)!.requestId, { ok: true, result: { status: "renderer-unavailable", url: "https://example.com/", reason } });
+        const result = await pending;
+        assert.equal(result.isError, true);
+        assert.equal((result.details as { reason: string }).reason, reason);
+        const text = (result.content[0] as { text: string }).text;
+        assert.match(text, reason === "disabled" ? /harness\.web\.render/ : /Host does not provide/);
+      }
+    } finally {
+      bridge.dispose();
+    }
+  });
+
   it("returns a requested PDF page as model-visible image content", async () => {
     const { bridge, emitted } = createTestBridge("test");
     const resultPromise = createWebFetchTool(bridge, "test").execute(

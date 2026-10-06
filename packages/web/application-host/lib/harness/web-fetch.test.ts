@@ -120,7 +120,7 @@ describe("web-fetch service", () => {
       domainPolicy: noDomainPolicy,
     });
     const result = await service.fetch("https://example.com/", { ...fetchContext, render: true });
-    expect(result.status).toBe("renderer-unavailable");
+    expect(result).toMatchObject({ status: "renderer-unavailable", reason: "unsupported" });
   });
 
   it("fetches and extracts HTML content", async () => {
@@ -152,25 +152,18 @@ describe("web-fetch service", () => {
     }
   });
 
-  it("detects empty shell SPA pages", async () => {
-    // Minimal HTML with script but no readable content — text/plain pass-through
-    // won't trigger empty-shell; we test the detector directly via HTML content type
-    const html = "<html><head><script src=\"app.js\"></script></head><body><div id=\"root\"></div></body></html>";
-
-    globalThis.fetch = vi.fn().mockResolvedValue({
-      ok: true,
-      status: 200,
-      headers: new Headers({ "content-type": "text/html" }),
-      text: async () => html,
-    }) as never;
-
-    const service = createWebFetch({
-      ssrf: createMockSsrf(),
-      domainPolicy: noDomainPolicy,
-    });
-    const result = await service.fetch("https://example.com/", fetchContext);
-    // With linkedom, readability may return null → fallback strips tags → very short text → empty-shell
-    expect(["empty-shell", "ok"]).toContain(result.status);
+  it("keeps short static content and distinguishes a genuinely empty script shell", async () => {
+    globalThis.fetch = vi.fn()
+      .mockResolvedValueOnce(new Response('<html><head><title>Example</title><script>window.TRACKING_SECRET = "not body text";</script></head><body><h1>Example Domain</h1><p>Short static page.</p><a href="https://iana.org/domains/example">Learn more</a></body></html>', { headers: { "content-type": "text/html" } }))
+      .mockResolvedValueOnce(new Response('<html><head><title>App</title><script>window.APP_SECRET = "not body text";</script></head><body><div id="root"></div></body></html>', { headers: { "content-type": "text/html" } }));
+    const service = createWebFetch({ ssrf: createMockSsrf(), domainPolicy: noDomainPolicy });
+    const page = await service.fetch("https://example.com/", fetchContext);
+    expect(page).toMatchObject({ status: "ok", rendered: false, title: "Example" });
+    if (page.status !== "ok") throw new Error(page.status);
+    expect(page.markdown).toContain("Short static page.");
+    expect(page.markdown).toContain("https://iana.org/domains/example");
+    expect(page.markdown).not.toContain("TRACKING_SECRET");
+    expect(await service.fetch("https://example.com/app", fetchContext)).toMatchObject({ status: "empty-shell" });
   });
 
   it("serves from cache on second request", async () => {
