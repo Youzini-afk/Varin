@@ -325,9 +325,9 @@ export type PiAgentEvent = (
   | ({ type: "agent_settled" } & PiAgentEventPosition)
   | ({ type: "turn_start" } & PiAgentEventPosition)
   | ({ message: PiMessage; toolResults: PiToolResultMessage[]; type: "turn_end" } & PiAgentEventPosition)
-  | { message: PiMessage; type: "message_start" }
+  | { message: PiMessage; queuedMessageId?: string; type: "message_start" }
   | { message: PiMessage; type: "message_update"; update: PiAssistantStreamUpdate }
-  | { message: PiMessage; type: "message_end" }
+  | { message: PiMessage; queuedMessageId?: string; type: "message_end" }
   | { args: JsonValue; toolCallId: string; parentToolCallId?: string; toolName: string; type: "tool_execution_start" }
   | {
       args: JsonValue;
@@ -346,7 +346,7 @@ export type PiAgentEvent = (
       type: "tool_execution_end";
     }
   | { followUp: string[]; steering: string[]; queuedMessages: QueuedUserMessage[]; type: "queue_update" }
-  | ({ entry: PiSessionEntry; type: "entry_appended" } & PiAgentEventPosition)
+  | ({ entry: PiSessionEntry; queuedMessageId?: string; type: "entry_appended" } & PiAgentEventPosition)
   | { name?: string; type: "session_info_changed" }
   | { level: ThinkingLevel; type: "thinking_level_changed" }
   | { reason: "manual" | "threshold" | "overflow"; type: "compaction_start" }

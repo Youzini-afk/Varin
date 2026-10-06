@@ -343,6 +343,7 @@ function projectCompactionResult(result: CompactionResult): PiCompactionResult {
 export function projectAgentEvent(
   event: AgentSessionEvent,
   position: PiAgentEventPosition = { leafId: null, turnIndex: 0 },
+  queuedMessageId?: string,
 ): PiAgentEvent {
   switch (event.type) {
     case "agent_start":
@@ -367,7 +368,8 @@ export function projectAgentEvent(
       };
     case "message_start":
     case "message_end":
-      return { message: projectMessage(event.message), type: event.type };
+      return { message: projectMessage(event.message), type: event.type,
+        ...(event.message.role === "user" && queuedMessageId !== undefined ? { queuedMessageId } : {}) };
     case "message_update":
       return {
         message: projectMessage(event.message),
@@ -404,7 +406,9 @@ export function projectAgentEvent(
       return { followUp: [...event.followUp], steering: [...event.steering],
         queuedMessages: event.queuedMessages.map((message) => ({ ...message })), type: "queue_update" };
     case "entry_appended":
-      return { ...position, entry: projectSessionEntry(event.entry), type: "entry_appended" };
+      return { ...position, entry: projectSessionEntry(event.entry), type: "entry_appended",
+        ...(event.entry.type === "message" && event.entry.message.role === "user" && queuedMessageId !== undefined
+          ? { queuedMessageId } : {}) };
     case "session_info_changed":
       return {
         ...(event.name === undefined ? {} : { name: event.name }),

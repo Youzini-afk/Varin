@@ -7,6 +7,16 @@
   --wb-travel-duration: 520ms;
 }
 
+.pi-message-handoff {
+  position: absolute;
+  z-index: 50;
+  pointer-events: none;
+  overflow: hidden;
+  contain: layout paint;
+  box-sizing: border-box;
+  will-change: transform, width, height;
+}
+
 [data-workbench-chrome].workbench-frame {
   background: var(--workbench-frame, var(--sidebar));
 }

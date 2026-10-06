@@ -65,6 +65,13 @@ transition. Text, selection, queued revisions and attachments retain the owners 
 Native queue changes animate by message identity. An exiting queue row is inert and releases its edit
 form immediately, so a draft retained after dequeue is not displayed or editable twice.
 
+`usePiMessageHandoff` binds paint-only transfers to the enclosing view. Draft transfers use the existing
+submission ID and its native timeline anchor; queue transfers use the admitted queue ID forwarded on
+native user-message events, including the persisted entry handoff. Equal message text never selects an
+origin. The short overlay clips the visible content without scaling text, receives no input and leaves
+submission, draft recovery and scrolling with their existing owners. Navigation, manual scrolling,
+resize, failure and reduced motion release the projection. Offscreen sources use destination arrival.
+
 ## PDF attachments
 
 Pi Composer accepts PDFs through its file picker and drop target. It uploads
