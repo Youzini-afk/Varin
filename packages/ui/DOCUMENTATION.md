@@ -19,11 +19,12 @@ spacing and transitions. Custom theme selection and the native window-control bo
 `components/layout/WorkbenchServices` owns the shared Local/usage/MCP popover and GitHub actions. Both
 shells use that component and the existing `OpenInAppButton`. Agent's header controls panel and rail
 visibility independently through `useUIStore`; the work overview retains only its own lightweight
-icon and disclosure. Its lower hover/focus handle opens a compact monitor of the same plan, task,
-change and source projections without reserving chat width. Compact and full views are mutually
-exclusive session choices; selecting a compact row opens its full section. IDE's quick-open/settings
-controls live in the activity footer, while the session picker and current context usage live inside
-the Agent pane's `IdeSessionHeader`.
+icon and disclosure. Its lower hover/focus handle opens a narrow monitor of the same plan, task,
+change and source projections. On desktop, the compact view reserves its narrow width beside the
+chat; the full view keeps its existing wide-canvas reservation. Both remain mutually exclusive
+session choices; selecting a compact row opens its full section. IDE's quick-open/settings controls
+live in the activity footer, while the session picker and current context usage live inside the
+Agent pane's `IdeSessionHeader`.
 
 `IdeSidebar` animates the actual persisted layout weight and retains exiting content until the
 transition finishes. Relative grow factors fill the row when a sidebar closes; outgoing content keeps

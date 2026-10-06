@@ -269,7 +269,7 @@ describe('thread panel transcript is inspection, not execution', () => {
 describe('work overview presentation', () => {
   it('turns raw session blocks into plan, progress and decisions instead of exposing block metadata', async () => {
     state.threads = [];
-    const desktopOpen = vi.fn();
+    const desktopView = vi.fn();
     vi.mocked(runtimeFetch).mockImplementation(async (input) => {
       const url = String(input);
       if (url.endsWith('/blocks')) {
@@ -291,7 +291,7 @@ describe('work overview presentation', () => {
     await act(async () => {
       root.render(
         <HarnessThreadStateContext.Provider value={state}>
-          <HarnessThreadsPanel workspaceId="workspace-1" parentSessionId="parent-1" onDesktopOpenChange={desktopOpen} />
+          <HarnessThreadsPanel workspaceId="workspace-1" parentSessionId="parent-1" onDesktopViewChange={desktopView} />
         </HarnessThreadStateContext.Provider>,
       );
       await new Promise((resolve) => setTimeout(resolve, 0));
@@ -302,13 +302,13 @@ describe('work overview presentation', () => {
     expect(container.querySelector('[data-harness-overview-peek]')).not.toBeNull();
     expect(container.querySelector('[data-harness-overview-floating]')).toBeNull();
     expect(container.textContent).not.toContain('Inspect');
-    expect(desktopOpen).not.toHaveBeenCalledWith(true);
+    expect(desktopView).toHaveBeenLastCalledWith('compact');
     const full = [...container.querySelectorAll<HTMLButtonElement>('[data-harness-overview-peek] button')]
       .find(button => button.textContent === 'harness.overview.details')!;
     await act(async () => full.click());
     expect(container.querySelector('[data-harness-overview-peek]')).toBeNull();
     expect(container.querySelector('[data-harness-overview-floating]')).not.toBeNull();
-    expect(desktopOpen).toHaveBeenCalledWith(true);
+    expect(desktopView).toHaveBeenLastCalledWith('full');
     expect(container.textContent).toContain('harness.overview.plan');
     expect(container.textContent).toContain('Inspect');
     expect(container.textContent).toContain('Implement');

@@ -48,14 +48,16 @@ interface ActivePdfMaterial {
   originalUrl?: string;
 }
 
+export type WorkOverviewView = 'compact' | 'full' | null;
+
 export const HarnessThreadsPanel: React.FC<{
   workspaceId: string;
   parentSessionId: string;
   fallbackCwd?: string;
   presentation?: 'sidebar' | 'inline';
   title?: string;
-  onDesktopOpenChange?: (open: boolean) => void;
-}> = ({ workspaceId, parentSessionId, fallbackCwd, presentation = 'sidebar', title, onDesktopOpenChange }) => {
+  onDesktopViewChange?: (view: WorkOverviewView) => void;
+}> = ({ workspaceId, parentSessionId, fallbackCwd, presentation = 'sidebar', title, onDesktopViewChange }) => {
   const { t } = useI18n();
   const { breakpoint } = useDeviceInfo();
   const narrowScreen = breakpoint !== 'xl' && breakpoint !== '2xl';
@@ -362,17 +364,18 @@ export const HarnessThreadsPanel: React.FC<{
 
   React.useEffect(() => {
     if (presentation !== 'sidebar') return;
-    if (overviewOpen) {
-      onDesktopOpenChange?.(true);
+    const view: WorkOverviewView = narrowScreen ? null : overviewOpen ? 'full' : compactOpen ? 'compact' : null;
+    if (view) {
+      onDesktopViewChange?.(view);
       return;
     }
-    const release = window.setTimeout(() => onDesktopOpenChange?.(false), 190);
+    const release = window.setTimeout(() => onDesktopViewChange?.(null), 190);
     return () => window.clearTimeout(release);
-  }, [onDesktopOpenChange, overviewOpen, presentation]);
+  }, [onDesktopViewChange, overviewOpen, compactOpen, narrowScreen, presentation]);
 
   React.useEffect(() => () => {
-    if (presentation === 'sidebar') onDesktopOpenChange?.(false);
-  }, [onDesktopOpenChange, presentation]);
+    if (presentation === 'sidebar') onDesktopViewChange?.(null);
+  }, [onDesktopViewChange, presentation]);
 
   const hasThreadRecords = threads.length > 0;
   const hasWorkspaceChanges = (gitStatus?.files.length ?? 0) > 0;

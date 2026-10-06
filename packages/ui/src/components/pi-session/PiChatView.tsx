@@ -74,7 +74,7 @@ import { projectPiAssistantWaiting } from './piAssistantWaiting';
 import { PiRecoveryDialog } from './PiRecoveryDialog';
 import { parsePiLocalCommand } from './piLocalCommands';
 import { shouldOpenRecoveryDialog } from './piRecoveryPolicy';
-import { HarnessThreadsPanel } from './HarnessThreadsPanel';
+import { HarnessThreadsPanel, type WorkOverviewView } from './HarnessThreadsPanel';
 import { HarnessThreadStateProvider } from './HarnessThreadState';
 import { parseHarnessThreadMutation } from './harnessThreadPresentation';
 import { projectHarnessWebSources } from './harnessWebSources';
@@ -190,7 +190,7 @@ export const PiChatView: React.FC<PiChatViewProps> = ({
   const chatScrollTrackRef = React.useRef<HTMLDivElement | null>(null);
   const timelineScrollRef = React.useRef<HTMLElement | null>(null);
   const [timelineScrollReady, setTimelineScrollReady] = React.useState(false);
-  const [workOverviewOpen, setWorkOverviewOpen] = React.useState(false);
+  const [workOverviewView, setWorkOverviewView] = React.useState<WorkOverviewView>(null);
   const handleTimelineScrollContainerChange = React.useCallback((element: HTMLElement | null) => {
     timelineScrollRef.current = element;
     setTimelineScrollReady(Boolean(element));
@@ -1006,7 +1006,7 @@ export const PiChatView: React.FC<PiChatViewProps> = ({
     <TooltipProvider>
       <HarnessThreadStateProvider parentSessionId={currentSessionId} workspaceId={threadWorkspaceId}>
       <div ref={messageHandoff.ref} data-pi-chat-view="true" className={cn('@container relative flex h-full min-h-0 bg-background', !active && 'pointer-events-none')}>
-        <div className="pi-chat-layout flex min-h-0 min-w-0 flex-1 flex-col" data-overview-open={workOverviewOpen}>
+        <div className="pi-chat-layout flex min-h-0 min-w-0 flex-1 flex-col" data-overview-view={workOverviewView ?? undefined}>
         {conversationHeader}
         <HarnessThreadParentLink sessionId={currentSessionId} />
         {threadWorkspaceId && threadPanelMode === 'inline' ? (
@@ -1161,7 +1161,7 @@ export const PiChatView: React.FC<PiChatViewProps> = ({
             fallbackCwd={sessionCwd}
             parentSessionId={currentSessionId}
             workspaceId={threadWorkspaceId}
-            onDesktopOpenChange={setWorkOverviewOpen}
+            onDesktopViewChange={setWorkOverviewView}
           />
         ) : null}
       </div>
