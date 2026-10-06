@@ -14,12 +14,12 @@
     "@varin/protocol": "workspace:*",
     "@varin/runtime-broker": "workspace:*",
     "@varin/settings-store": "workspace:*",
-    "electron-context-menu": "^5.0.0",
+    "electron-context-menu": "^5.1.0",
     "electron-log": "^5.4.4",
     "electron-updater": "^6.8.9"
   },
   "devDependencies": {
-    "electron": "^44.4.1",
+    "electron": "^44.5.1",
     "electron-builder": "^26.17.0",
     "node-abi": "^4.36.0"
   },
@@ -98,7 +98,11 @@
       {
         "from": "resources/kernel",
         "to": "kernel",
-        "filter": ["manifest.json", "varin-kernel", "varin-kernel.exe"]
+        "filter": [
+          "manifest.json",
+          "varin-kernel",
+          "varin-kernel.exe"
+        ]
       },
       {
         "from": "../../kernel/THIRD_PARTY_NOTICES.md",
@@ -159,11 +163,16 @@
       ],
       "verifyUpdateCodeSignature": false,
       "artifactName": "${productName}-${version}-win-${arch}.${ext}",
-      "extraResources": [{
-        "from": "resources/installer-tools",
-        "to": "legal/installer-7zip",
-        "filter": ["LICENSE.txt", "COPYING"]
-      }]
+      "extraResources": [
+        {
+          "from": "resources/installer-tools",
+          "to": "legal/installer-7zip",
+          "filter": [
+            "LICENSE.txt",
+            "COPYING"
+          ]
+        }
+      ]
     },
     "linux": {
       "target": [
