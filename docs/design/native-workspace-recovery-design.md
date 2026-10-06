@@ -2,7 +2,7 @@
 
 Status: built-in kernel provider delivered; Rust system-kernel Stage R complete through D-282.
 
-Last updated: 2026-09-15
+Last updated: 2026-10-06
 
 ## Decision
 
@@ -15,17 +15,11 @@ package.
 The recovery unit is an affected-file change set. A message checkpoint is not a complete manifest of
 the workspace and does not schedule a background archive.
 
-D-252 accepts the [Rust system-kernel stage](rust-kernel-design.md) as the implementation owner of the built-in
-provider's file resources, content/reference storage, and recovery operations. D-274/D-275 completed the R1
-metadata cutover: immutable roots/objects/revisions and typed Recovery/Integration/agent-mutation records have
-one Rust durable writer. D-276 completed the R2 file-resource cutover: affected-path capture, conditional
-apply/compensation, exact/subtree overlap leases and restart reconciliation use the Rust file authority.
-The public recovery service and affected-path semantics remain; Document Registry remains the mutable buffer
-owner and Pi remains the conversation owner. Current milestone evidence is recorded in
-[status.md](../status.md) and [agent-harness-plan.md](../plan/agent-harness-plan.md).
-D-282 completes the surrounding R0/R6 release boundary: production artifacts carry the manifest-verified
-kernel, the old TS file writer is test-only, and the cross-domain Registry+disk apply/undo vertical runs
-against the real Rust storage/file/recovery authority.
+The built-in provider delegates immutable objects, recovery records, conditional file operations and
+process-writer gates to the private Rust kernel. Stage R is complete; it has no production TS storage
+fallback. The Host coordinates Pi navigation and Documents, whose Registry remains the buffer owner.
+Current resource ownership is in [the Rust design](rust-kernel-design.md); implementation and capability
+flags are in [the Recovery module](../../packages/web/application-host/lib/recovery/DOCUMENTATION.md).
 
 `pi-workspace-history` and `pi-wtf` are ordinary optional Pi packages. They are neither provisioned nor
 consulted by Varin's native rollback path.
@@ -67,7 +61,8 @@ Returning to a user message removes that message and later entries from the acti
 the exact file change sets bound to those entries. Returning to an assistant message keeps that turn and
 reverses only later turns.
 
-When all affected paths still equal their recorded after-state, combined rollback executes directly.
+When all affected paths still equal their recorded after-state and the dirty-state checks pass,
+combined rollback executes directly.
 The normal UI does not open a restore planner.
 
 The chooser appears only when:
@@ -77,7 +72,8 @@ The chooser appears only when:
 - the turn contains unjournalled external/shell changes.
 
 It offers the relevant decision only: restore the affected paths, return the conversation alone, or
-cancel. There is no normal new-workspace mode.
+cancel. Affected dirty buffers must currently be saved or discarded before file restore can apply;
+confirmation alone does not bypass that check. There is no normal new-workspace mode.
 
 ### Redo
 
@@ -87,30 +83,19 @@ created.
 
 ## Capture protocol
 
-The Web Host advertises `HostHandshakeParams.capabilities.workspaceMutationJournal`. A Pi worker enables
-the bridge only when this value is explicitly true, so other Pi Hosts cannot be left waiting for an
-acknowledgement they do not implement.
+The Host negotiates `workspaceMutationJournal` and document-source capabilities with Pi. In Varin's
+Host-backed path, same-name `write`/`edit` definitions first try the caller's isolated branch, then
+`document.surfaceWrite` for admitted disk or fixed Registry targets. The Host persists mutation intent
+and coordinates the corresponding Rust or Registry authority. `apply_patch` uses the same boundary.
+An unavailable Host mutation backend is an error, never permission for a parallel Pi-worker disk write.
 
-When enabled, Varin supplies same-name custom definitions for Pi's built-in `write` and `edit` tools.
-They reuse Pi's original schemas, rendering, validation, and execution. Only the execution boundary is
-wrapped:
+The generic journal-only Pi path can wrap native execution with before/after observations; it is not
+the production Host-backed disk writer. Journal observation failure and mutation-backend failure have
+different consequences and must not be described as one fail-open operation.
 
-```text
-tool execute
-  -> workspace.mutation.request(before, absolute path)
-  -> Host stores path before-image and acknowledges
-  -> original Pi tool executes
-  -> workspace.mutation.request(after, outcome)
-  -> Host stores final path state and acknowledges
-  -> tool result continues
-```
-
-Requests are isolated by request ID and tool-call ID. A provider failure acknowledges `false` and lets
-the tool continue; the turn checkpoint becomes incomplete instead of breaking the agent. Session
-replacement or worker disposal releases all pending requests.
-
-The first before-image and final after-image are authoritative when one path is written repeatedly in a
-turn. A write that returns the file to its original state removes its change record.
+The first before-image and final after-image are authoritative when one path is written repeatedly in
+a turn. A write returning the file to its original state removes its change record. Unsaved surface
+writes remain unsaved and require their fixed owner/revision; a disk watcher is not their authority.
 
 ## Turn binding and branch selection
 
@@ -142,24 +127,11 @@ WorkingState's kernel root at `<VARIN_DATA_DIR>/kernel/<hostId>`, reports `appli
 `storageManagement: false`; it has no project override or independent transfer because R1 keeps WorkingState,
 Recovery, and their object references in one transaction authority.
 
-The v5 replacement-provider contract retains the four optional locations below when a provider advertises
-`storageManagement: true`:
-
-| Mode | Replacement-provider location |
-| --- | --- |
-| application data | provider storage below `VARIN_DATA_DIR` |
-| workspace local | `<workspace>/.varin/recovery/v1` |
-| workspace adjacent | `<workspace-parent>/.varin-recovery/<workspaceId>/v1` |
-| custom | `<selected-root>/<authorityId>/<workspaceId>/v1` |
-
-For such a provider, project choice overrides its global default and verified transfer switches its own
-registry only after the destination is readable. Cleanup remains provider-owned. Optional per-workspace
-retention limits cover automatic checkpoint count, completed-operation
-count, logical history bytes, and age. No guessed limit is enabled by default; when configured, the rule
-runs after settled turns. Named checkpoints, pending checkpoints, unfinished operations, and
-`needs-attention` evidence are protected. Deleting workspace history remains an explicit destructive
-action. Status reports the oldest protected operation so an unresolved record cannot become an invisible
-permanent pin.
+Replacement providers may advertise `storageManagement` and the v5 application-data, workspace-local,
+workspace-adjacent or custom location contract. Their transfer, retention and cleanup remain provider-owned.
+The built-in provider advertises neither storage management nor configurable history retention or
+workspace-history deletion. Shared kernel size is Host-wide, not reclaimable per-workspace history size.
+Object GC still respects all WorkingState, recovery, result and temporary references.
 
 ## Restore algorithm
 
@@ -184,176 +156,62 @@ exact path. No global workspace maintenance bit survives a crash.
 On Host startup, a planned operation stays inert. An interrupted file operation is compensated from its
 recorded affected-path safety set before new recovery work is accepted.
 
-Every content-object/journal write takes a shared durable workspace lease. Restore, compensation,
-retention, deletion, storage transfer, and crash reconciliation take an exclusive lease for the complete
-logical operation. The lease is a sidecar of the selected storage root, so independent Hosts that share a
-workspace-local catalog coordinate across processes. Only a confirmed-dead PID is reclaimed; permission
-or platform liveness uncertainty keeps the fence.
+The built-in kernel has one OS-held storage-owner lock and Rust file-resource gates; it does not use the
+retired TS recovery engine's shared-root sidecar lease. Optional replacement-provider lease contracts do
+not make the built-in kernel independently relocatable or safe for a second writer.
 
 ## External and shell boundary
 
 A generic native process can choose paths dynamically and bypass Varin APIs. Portable filesystem
 watchers report those changes after the write and cannot recreate bytes that were never observed before
 the write. Varin therefore does not claim exact combined rollback for an unjournalled `bash`, terminal,
-Git, extension, or unrelated-process change. The watcher records the affected path; today that marks the
-whole turn incomplete, and under revision R1 it marks only that path uncovered while journaled paths stay
-restorable. Conversation-only rollback remains immediate in both cases.
+Git, extension, or unrelated-process change. The watcher records affected paths as uncovered; a turn
+with incomplete observation cannot claim full coverage. Journalled paths can remain restorable under
+partial coverage. Conversation-only rollback does not depend on file coverage.
 
 Improving this boundary requires a real mechanism—Documents/VFS pre-write integration, a tool-declared
 mutation intent, a copy-on-write filesystem provider, or operating-system interception. Reintroducing a
 full turn-start scan is not an acceptable fallback.
 
-## Replaceability
+## Replaceability and remaining design targets
 
-The service contract is version 5. A replacement provider implements the same checkpoint, mutation,
-combined recovery, operation, retention, and storage-management methods. Fixed Host code owns workspace identity,
-path containment, the negotiated Pi tool boundary, and Pi conversation navigation. Provider code owns
-the catalog, content objects, change-set folding, conflict policy, and UI contributions.
+The public recovery service remains version 5, with capability-negotiated checkpoint, mutation,
+combined recovery, operation, retention and storage-management methods. Fixed Host code owns identity,
+path admission, Documents coordination and Pi navigation; a selected provider owns its advertised
+recovery implementation. Disabling it never removes Pi-native conversation rollback.
 
-Version 4 adds: per-file `operation_files` phase tracking (pending → apply-intent → target-observed →
-compensate-intent → safety-observed, with needs-attention as a blocking terminal), crash-window
-reconciliation in `resumeUnfinished` that compares on-disk state against target/safety before deciding
-to abort or compensate, confirmed-conflict-only `overwrite-confirmed` policy, scoped workspace-history
-deletion via row-level SQL instead of removing the storage root, and a read-only
-`inspectRecoveryJournalCatalog` path for status and inspection that never runs migrations or schema
-writes.
+Public service version and private catalog format are separate. The production Rust catalog has no
+v4-to-v5 migration path: obsolete internal formats are recreated under the kernel lock; corrupt,
+unknown or future formats fail. Workspace files, Git, native Pi data and external configuration are
+outside that recreation. The old local-SQLite migration narrative belongs to retired implementation
+history, not the current provider contract.
 
-Version 5 adds the cross-surface dirty-state barrier, shared/exclusive process-owned workspace leases,
-configurable retention with protected record classes, and workspace-scoped `object_references` that are
-maintained in the same database transactions as checkpoints and operations. Catalog v4 activates through
-a transactional v5 migration that rebuilds those references; read-only status inspection still does not
-activate or migrate a catalog.
+Two earlier accepted improvements are still **design targets**, not current combined-restore behavior:
 
-Provider selection remains revisioned and scope-aware. Disabling a provider removes file recovery but
-never removes Pi-native conversation rollback.
+- Restore through an affected dirty buffer after confirmation, preserving that buffer for undo. The
+  current journal engine reports the conflict but requires saving or discarding the buffer first
+- Degrade an unresponsive surface into a confirmable `unknown-dirty-state` conflict. The current engine
+  returns retryable `dirty-state-unavailable` when synchronization or inspection cannot establish state
 
-## Accepted boundary revisions
-
-A design review on 2026-09-02 found the core architecture sound — affected-file journal, tool-boundary
-before/after images, content-addressed objects, verify-after-write, compensation, direct apply on the
-happy path — and the defensiveness concentrated at four boundaries where a fail-closed default produces
-refusal instead of partial success. The revisions below are accepted and ordered by delivery. None
-changes the per-file state machine, the catalog schema versioning rules, or the compensation model.
-
-### R1. Coverage is per path, not per plan (implemented 2026-09-03)
-
-The plan-level `coverage: 'ready' | 'incomplete'` binary is replaced by per-path coverage. A path with a
-contiguous journaled before/after chain is restorable. A path observed only by the watcher, or inferred
-from a `process` writer window, is reported in `uncoveredPaths` with its source (`shell`, `external`,
-`unknown`) and is not restored. The combined action remains available whenever at least one path is
-restorable; the direct-apply result and the chooser both list the uncovered paths.
-
-The `coverage` field is now `'ready' | 'partial' | 'none'`:
-- `ready` — all checkpoints in range are `ready` (no incomplete checkpoint, no uncovered paths)
-- `partial` — some paths are restorable, but at least one checkpoint is incomplete or has uncovered paths
-- `none` — no restorable paths (all changes were unjournaled or no journaled changes exist)
-
-A checkpoint is `incomplete` when the turn settles without confirmed coverage (`observationComplete=false`,
-worker exit, host stop, or out-of-journal activity). An incomplete checkpoint with empty
-`unrecorded_resource_ids` still disqualifies `ready` because the journal cannot prove it captured
-everything. The failure message from each incomplete binding is collected into `uncoveredReasons: string[]`
-on the plan so the UI can show why coverage is not `ready`.
-
-Source attribution uses the `writerScope` format `${mode}/${kind}:${id}@gen`:
-- `process/` prefix → `shell`
-- `external/` prefix → `external`
-- any other prefix or legacy format without a mode → `unknown`
-
-`applyLocatedOperation` rejects only when `coverage === 'none'`. The `PiRecoveryDialog` shows the
-uncovered paths list with source attribution and the uncovered reasons, and offers the combined action
-for `ready` and `partial` plans. The `piRecoveryPolicy.shouldOpenRecoveryDialog` opens the dialog for any
-non-`ready` plan.
-
-Rationale: the agent harness registers its `bash` tool as a `process` writer for every command
-([agent-harness.md](agent-harness.md) §5.2). Under the binary rule nearly every turn that runs a
-command becomes incomplete and combined rollback disappears in practice. The host shell supervisor
-knows each command's execution window, so watcher changes inside that window are attributed to the
-command; attribution improves, restoration of those paths does not. This revision is a prerequisite
-for harness phase 1.
-
-### R2. Dirty buffers are conflicts, not refusals
-
-The `dirty-buffers` hard rejection in conflict confirmation is removed. A dirty buffer on an affected
-path becomes a `dirty-buffer` conflict the user confirms like a content conflict. On confirmation the
-buffer content published through the barrier is stored in the operation's safety set, so undo restores
-the unsaved text, and the path is then replaced on disk. Connected surfaces observe the disk change
-through the existing watch; the Document Registry presents its three-way conflict when the buffer was
-not discarded. The chooser may additionally offer "discard unsaved changes in these paths".
-
-Rationale: the current rejection is a shipped TODO ("not yet implemented") and duplicates protection
-the Document Registry already provides by modelling ancestor plus disk against the live buffer.
-
-### R3. The dirty barrier degrades per surface
-
-An unresponsive or disconnected document surface no longer fails the operation with
-`dirty-state-unavailable`. Surfaces that acknowledge are fenced as today. Each surface that does not
-acknowledge within the deadline contributes an `unknown-dirty-state` conflict for the affected paths it
-may hold, which the user can confirm. The retryable hard failure remains only when the barrier primitive
-itself is unavailable.
-
-Rationale: a mobile client that went to sleep while attached must not block a desktop rollback.
-
-### R4. The lease is scoped to shared storage
-
-The cross-process workspace lease applies only to storage modes that can be shared between Hosts:
-workspace local, workspace adjacent, and custom. The default application-data mode is single-Host and
-takes no lease. In shared modes, lease holders refresh a heartbeat; a lease whose PID liveness cannot be
-confirmed is reclaimed after the heartbeat window instead of being fenced indefinitely.
-
-Rationale: `process.kill(pid, 0)` commonly returns `EPERM` on Windows, which the current rule treats as
-"keep the fence". One crashed Host could pin a workspace until manual intervention, protecting against a
-two-Host overlap that cannot occur in the default mode.
-
-### R5. Retry re-prepares
-
-After a `stale-plan` failure the chooser's retry prepares a new plan and revision instead of re-applying
-the stale one, which cannot succeed.
-
-### R6. Scope freeze
-
-No further storage location modes, retention dimensions, or per-file phases are added. The six-phase
-file state machine, verified storage transfer, and retention with protected record classes stay as built
-and tested; they are not refactored for size.
-
-### R7. Single per-path edit record shared with the knowledge store
-
-The harness knowledge store's `edit` events reference journal before/after content objects instead of
-storing a second copy of the change ([agent-harness.md](agent-harness.md) §7.3). The journal remains
-the only per-path edit record. Knowledge-store references are registered in `object_references` so
-cleanup and retention never remove an object the knowledge store still points to.
+These targets do not authorize bypassing the current barrier. See `validateConflicts` and `dirtyBarrier`
+in [journal-engine.ts](../../packages/web/application-host/lib/recovery/journal-engine.ts).
+Storage transfer/retention features of replacement providers likewise cannot be inferred from a v5 label.
 
 ## Verification
 
-Required evidence is based on affected paths, not synthetic full-workspace archives:
+Useful behavior evidence follows the affected paths and actual authority:
 
-- a no-op turn opens, settles, and rolls back without reading any workspace file;
-- a large workspace with one touched file reads only that file;
-- repeated writes retain the first before-image and final after-image;
-- later user edits produce a per-path conflict and are not overwritten under `abort`;
-- explicit overwrite stores a redo state before replacing the affected path;
-- interrupted multi-path apply compensates only completed paths;
-- stale Pi leaf navigation compensates files and does not report success;
-- unjournalled shell paths produce an incomplete checkpoint rather than a scan;
-- Windows replacement, Unicode/case paths, symlinks, read-only files, and locked paths retain explicit
-  tested outcomes;
-- storage migration verifies before switching and cleanup never removes a referenced object.
-- two Hosts sharing workspace-local storage cannot overlap an exclusive restore with journal/object work;
-- dirty revisions from all connected surfaces are acknowledged before file inspection and remain fenced
-  through apply;
-- retention removes oldest eligible records while preserving named and nonterminal recovery evidence.
+- an unchanged turn opens and settles without a recursive file scan
+- repeated journalled writes preserve the first before-state and final after-state
+- partial coverage restores only supported paths and reports unjournalled shell/external paths
+- changed paths, dirty buffers and unavailable surface state retain distinct failures
+- interrupted apply or failed Pi navigation compensates only this operation's unchanged outputs
+- pending operations and retained results prevent premature object collection
+- platform replacement, Unicode/case, symlink and locked-file behavior use native evidence
 
-Evidence required by the accepted revisions:
-
-- a turn with one journaled path and one shell-written path offers restoration of the journaled path and
-  reports the shell-written path as uncovered with its source (R1);
-- a dirty buffer on an affected path is presented as a confirmable conflict; after confirmation, undo
-  restores the unsaved text from the safety set (R2);
-- a surface that does not acknowledge the barrier produces an `unknown-dirty-state` conflict rather than
-  an operation failure; the operation completes for acknowledged surfaces (R3);
-- application-data storage creates no lease file; in a shared mode an uncertain PID is reclaimed after
-  the heartbeat window and a live holder is not (R4);
-- retry after `stale-plan` produces a new plan revision (R5);
-- an object referenced only by the knowledge store survives cleanup and retention (R7).
+Production tests must exercise the Rust adapter rather than the retired TS database fixture. Installed
+runtime, power loss, model quality and other platform runs need their own evidence. Delivery results
+remain in [status](../status.md) and existing acceptance records; this design is not a test-run receipt.
 
 ## Native process writers (D-280)
 

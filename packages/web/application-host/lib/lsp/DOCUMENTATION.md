@@ -6,14 +6,14 @@ Rust kernel. Renderers never spawn language servers.
 
 ## Entrypoints
 
-- `supervisor.js`: `createLanguageSupervisor({ documents, spawn, pathModule, env, isTrusted, hostViewIdleMs, hostViewDocumentLimit, now })`
-- `language-view.js`: `createLanguageViewBinder({ documents, supervisor })` — binds one document in the
+- `supervisor.ts`: `createLanguageSupervisor({ documents, spawn, pathModule, env, isTrusted, hostViewIdleMs, hostViewDocumentLimit, now })`
+- `language-view.ts`: `createLanguageViewBinder({ documents, supervisor })` — binds one document in the
   Host-owned view to a named text identity (fixed editor draft or disk revision)
-- `jsonrpc.js`: Content-Length framed JSON-RPC client/server
-- `routes.js`: authenticated `/api/language/*` routes and SSE events, pinned to the `surface` view
-- `capability.js`: `workspace.language` Host capability
-- `fixture-server.js` / `typescript-server.js`: test servers, not production providers
-- `managed-servers.js`: on-demand native Go (`gopls`), Rust (`rust-analyzer`), C/C++ (`clangd`), and independent Markdown (`marksman`) preparation
+- `jsonrpc.ts`: Content-Length framed JSON-RPC client/server
+- `routes.ts`: authenticated `/api/language/*` routes and SSE events, pinned to the `surface` view
+- `capability.ts`: `workspace.language` Host capability
+- `fixture-server.ts` / `typescript-server.ts`: test servers, not production providers
+- `managed-servers.ts`: on-demand native Go (`gopls`), Rust (`rust-analyzer`), C/C++ (`clangd`), and independent Markdown (`marksman`) preparation
 - the distribution TypeScript/JavaScript provider and the Python/HTML/CSS/JSON/YAML/Bash providers are
   brokered Varin extensions in `@varin/extension-builtins`. Their self-contained program assets are
   materialized on `workspace-match` activation; actual language processes still start on demand.

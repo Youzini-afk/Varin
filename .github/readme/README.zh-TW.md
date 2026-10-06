@@ -17,10 +17,13 @@
 仍由 Pi 提供，而 Varin 負責周圍的工具環境、工作狀態、復原、檢索、上下文策略、任務治理與工作台介面。
 它直接使用 Pi 的公開 SDK，而不是擷取終端輸出。
 
-它的介面不是固定外殼。Varin 內建兩套官方工作形態：**Agent Workspace** 以工作階段、任務與
-上下文為中心，**IDE Workbench** 以編輯器、搜尋、Git、診斷與偵錯為中心，並把智慧體作為可停駐
-面板。兩者都是普通的 Varin 擴充，由 Workbench Profile 選擇，因此你可以整體替換其中任意一套，
-也可以只替換其中某一個部分。
+Workbench Profile 可選擇四套內建外殼：**Agent Workspace**、**IDE Workbench**、
+**Research Workbench** 與 **Varin Bot**。它們都是普通的 Varin 擴充，可以整體替換，也可以
+只替換其中的部分。Agent Workspace 以工作階段與任務為中心；IDE Workbench 將編輯器、搜尋、Git、
+診斷與偵錯和可停駐的智慧體面板結合。
+
+Agent Workspace、Research Workbench 與 Varin Bot 支援桌面、Web 與行動端；IDE Workbench
+支援桌面與 Web。工作側重與所選外殼彼此獨立。
 
 > [!IMPORTANT]
 > Varin 目前仍處於 1.0 之前的活躍開發階段。各產品端與私有執行時協定會同步演進，較舊組建
@@ -95,7 +98,7 @@ IDE Profile 將工作區導覽與編輯器基礎設施，和完整的 Pi 智慧�
   尚未專門適配的擴充仍可使用通用的命令、工具、條目、通知與 UI 橋接。
 - **常用外掛的專用設定介面：** 已維護的外掛擁有針對性的 GUI，同時繼續以外掛自己的原生
   JSON/JSONC 檔案、命令、資料庫與遷移邏輯為權威。
-- **可重組的工作台：** 選擇 Agent 或 IDE Profile，也可以自建。既能替換整個外殼，也能只替換導覽、
+- **可重組的工作台：** 選擇 Agent、IDE、Research 或 Bot Profile，也可以自建。既能替換整個外殼，也能只替換導覽、
   編輯器、面板、Composer、Timeline 或狀態列，並混用官方與社群貢獻。切換是即時的，不重新整理文件、
   不重啟 Pi 執行時、不遺失共用的工作區狀態。
 - **多個產品端：** Electron、Web 與 Capacitor 行動端外殼共用一套 React UI，並透過明確的執行時
@@ -276,7 +279,7 @@ Electron 在主處理序裡執行同一個宿主，而不是再造一套桌面�
 | `packages/extension-sdk`、`-react`、`-cli` | 公開的作者 SDK、React 配接器與作者工具鏈 |
 | `packages/extension-host` | 可信應用宿主的目錄、構件、儲存與服務 |
 | `packages/extension-loader` | 帶認證的 managed Surface 模組載入器與隔離執行域 |
-| `packages/extension-builtins` | Varin 內建擴充的清單，含兩套官方外殼 |
+| `packages/extension-builtins` | Varin 內建擴充的清單，含四套官方外殼 |
 | `packages/docs` | 面向使用者的文件站原始碼 |
 | `docs` | 架構、harness、內核、工作台、遷移、復原、雲端與安全約定 |
 | `scripts` | 開發、內核組建/測量、發布、雲端、部署與校驗工具 |
@@ -297,8 +300,8 @@ bun run test:pi:dist
 ```
 
 `bun run kernel:check` 是 Rust 快速編譯檢查；`bun run test:kernel` 針對組建出的發行可執行檔
-執行不可略過的原生權威套件。`bun run test:docs` 與 `bun run docs:validate` 分別校驗工程文件與
-文件站內容。
+執行不可略過的原生權威套件。`bun run test:docs` 測試文件校驗器；
+`bun run docs:validate` 一次檢查使用者文件與工程文件內容。
 
 CI 固定為三條職責不同的門禁：Ubuntu 原始碼品質、Windows 執行時行為與 Ubuntu 生產組建。
 型別檢查、lint 與全倉測試只在權威門禁中執行一次；Windows 只補充平台相關測試。雲端/執行時輸入

@@ -9,22 +9,21 @@ Local TTS (Kokoro via sherpa-onnx OfflineTts) runs in the same worker process
 and is exposed as `POST /api/dictation/tts/speak` (JSON `{text, speakerId?,
 speed?, model?}` → WAV bytes; 503 with `reasonCode` while the model is
 downloading). TTS models live in the same catalog/downloader as STT models
-(`local/model-catalog.js` `LOCAL_TTS_MODEL_CATALOG`) and are managed by the
+(`local/model-catalog.ts` `LOCAL_TTS_MODEL_CATALOG`) and are managed by the
 same status/download/delete routes.
 
 ## Ownership
 
-- `runtime.js` — registers `GET /api/dictation/status`,
+- `runtime.ts` — registers `GET /api/dictation/status`,
   `POST /api/dictation/models/:modelId/download`, and the
   `/api/dictation/ws` WebSocket endpoint (auth-gated the same way as the
-  terminal WS: UI session token or `oc_url_token`, plus origin check).
-  Created from the startup pipeline (`startup-pipeline-runtime.js`) before
-  the generic OpenCode proxy so routes are not shadowed.
-- `stream-manager.js` — `DictationStreamManager`, one per WS connection.
+  terminal WS: authenticated client or scoped `varin_url_token`, plus origin check).
+  Created by `../platform/startup-pipeline-runtime.ts` and stopped with the Host.
+- `stream-manager.ts` — `DictationStreamManager`, one per WS connection.
   Chunk reordering by `seq` + ack, resampling to the provider rate,
   auto-commit every ~15 s of audio, silence suppression by PCM peak,
   partial-transcript concatenation, adaptive finalization timeout.
-- `service.js` — provider resolution and readiness. Providers:
+- `service.ts` — provider resolution and readiness. Providers:
   - `local` (default): sherpa-onnx recognition in a forked worker process.
     The shared default is multilingual Whisper large-v3 Turbo. The Host catalog
     also offers Qwen3-ASR 0.6B, SenseVoice Small, Parakeet v2/v3 and Whisper base/tiny.
@@ -33,7 +32,7 @@ same status/download/delete routes.
     status route reports per-model install/download state.
   - `openai-compatible`: buffered per-segment transcription against any
     OpenAI-compatible `/v1/audio/transcriptions` endpoint
-    (`openai-compatible-session.js`, reuses `../tts/stt.js`).
+    (`openai-compatible-session.ts`, reuses `../tts/stt.ts`).
 - `local/` — worker process + client (IPC, idle shutdown TTL), sherpa
   recognizer engine and realtime session (throttled re-decode for partials),
   model catalog and downloader. The native `sherpa-onnx-node` addon is only
@@ -45,7 +44,7 @@ same status/download/delete routes.
   features, SenseVoice a single ONNX model, and Qwen its frontend/encoder/decoder
   plus verified tokenizer assets. Native runtime 1.13.8 supplies the Qwen stream
   language option and the current Kokoro generationConfig API.
-- `audio.js` — PCM16 helpers: format parsing, peak, WAV wrapping, streaming
+- `audio.ts` — PCM16 helpers: format parsing, peak, WAV wrapping, streaming
   linear resampler.
 
 ## WebSocket protocol (JSON text frames)

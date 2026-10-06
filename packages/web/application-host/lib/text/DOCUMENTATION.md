@@ -4,7 +4,7 @@
 This module provides shared text transformation helpers that are not owned by a single product surface. It previously proxied model-backed summarization through the opencode.ai Zen provider; that provider is no longer available for this use, so summarization now returns local sanitized/distilled fallback text only.
 
 ## Entrypoints and structure
-- `packages/web/application-host/lib/text/summarization.js`: Shared summarize stub + sanitize helpers. It performs no external model calls.
+- `packages/web/application-host/lib/text/summarization.ts`: Shared summarize stub + sanitize helpers. It performs no external model calls.
 
 ## Public exports
 

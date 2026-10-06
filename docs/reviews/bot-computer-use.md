@@ -1,26 +1,23 @@
 # BC0–BC9 深入验收
 
-Status: current acceptance — BC0–BC9 remain Partial.
+Status: current acceptance — BC0–BC9 已有生产路径，平台实现与完整产品验收仍未完成。
+Last updated: 2026-10-06
 
-日期：2026-09-29。审查基线：`a4aae30d`；验收修复提交 `107912fa`。随后按用户要求继续补齐，进度见下节。
+既有审查日期：2026-09-29，基线 `a4aae30d`，修复提交 `107912fa`；后续包括 `4894f7cb` 的 guest 配方。
+本次文档核对以 `4b6c604b` 为代码基线，没有重跑下列测试、真机或付费模型。
 
-## 后续补齐进度
+## 既有证据范围
 
-第一批完成记忆缺口：主动记录与自动整理共享带修订的原始来源范围；主动改写提供原文片段，后台每项提案也必须引用明确片段。遗忘抑制对应证据，其他句子仍可整理。后台按 Pi 全部原生分支的逐片段覆盖恢复，来源修订变化后重新处理，不依赖当前分支游标。Agent 的 `memory get(includeSource)` 和记忆设置的“查看原始片段”读取同一授权来源；原文变化/不可用明确区分。
+来源覆盖、后台整理、Host SSH、Linux 桌面、成果交还、guest 配方与平台能力声明均已有后续修复。
+阶段表记录现在可以依赖的边界；逐批数字和执行过程见[整理前记录](https://github.com/Youzini-afk/Varin/blob/4b6c604b45bc5adb4582638431cd1af84e1c2773/docs/reviews/bot-computer-use.md)。
 
-验证：Host 记忆/来源/catalog/context 定向 **47 项通过**，包括真实 TDB 关闭重开、主动遗忘后的其他句子、分支变化、原文修订、迟到提案和中断恢复；Pi memory **8 项通过**；UI knowledge/i18n **8 项通过**；protocol 构建、Host 产品/测试类型、Pi/UI 类型及变更文件 lint 通过。此批没有调用真实模型，不能据此判断提炼质量或缓存命中。电脑、远端、VM 与分发继续进行。
+- 记忆证据含真实 TDB 重开、分支/来源修订、遗忘、迟到提案与中断恢复，没有真实模型效果或缓存命中证据
+- 连接/桌面证据含真实 HTTP/WebSocket/Unix socket、Node REPL 和注入 runtime 行为，没有完整双机图形场景
+- `4894f7cb` 的 [Linux CI 构建](https://github.com/Youzini-afk/Varin/actions/runs/36631489354)包含 guest bundle；没有真实 KVM/libvirt 启动或升级证据
+- 后续记录的 UI 2,050 项、Web 2,901 项通过及 5 项跳过属于当时回归；Pi 全套没有在所有修复后重跑，不能报告为全套通过
 
-第二批把 SSH 生命周期和连接设置移入共享 Host，Electron 只保留调用与原生事件适配。Web 设置接同一 Host 路由；实际 HTTP/WebSocket 网关让浏览器使用服务器侧 SSH 隧道，局部凭据不转交远端，运行时 URL 保留连接路径。已加入 Host 启动恢复连接意图、断开/关闭时阻断迟到启动，以及切换 Host 后的界面归属清理。Host 连接测试 **10 项通过**（含真实 HTTP/WebSocket 端口），UI 运行时/事件 **9 项通过**，Host/UI/Electron 类型与 lint 通过。真实 SSH/Linux 桌面尚未运行。
-
-第三批接入显式 Linux 桌面准备：Debian/Ubuntu 的安装脚本配置原生包与 Firefox ESR，systemd 管理独立用户的 Xvnc/xfce4/浏览器及持久 profile。RFB 只走私有 Unix socket，并在 Xvnc 禁用键鼠与剪贴板输入；Host 以认证 WebSocket 桥接 noVNC 观看，人工输入继续走控制归属和代次检查。观看采集与动作各有原生 helper，长动作不再阻塞画面；断开观看会释放该观看者持有的拖拽。Host computer 定向 **58 项通过**，Pi computer **8 项通过**，真实 WebSocket/本地套接字往返、Host 构建、类型检查、Python 语法与 shell 语法通过。当前 Windows 环境没有 Linux 图形会话，Xvnc/systemd/安装仍需实机验证；普通用户准备需要 root 或非交互 sudo 权限。
-
-第四批把电脑使用记录关联到真实 Thread，保留同一桌面的多个工作关系；Bot 工作列表能回到关联桌面。人工交还把事件先持久记录，再用现有 Thread 消息账本续接，失败后保持相同事件 ID 恢复。Agent 可将受管桌面用户目录里的成果文件登记为 SHA-256 版本引用，远端 Host 按其桌面用户身份读取，Bot 工作列表提供下载；旧文件修订不被当成原版本，浏览器复核实际下载字节。Host 定向 computer/routes/Bot **68 项通过**，Pi computer **9 项通过**；Python 文件检查/读取/版本改变序列在本机 Python 运行。远端真实桌面与大文件传输仍未实测，成果引用依赖原远端在线，不是本地复制。
-
-第五批补上托管 libvirt guest 配方：Linux x64 本地 libvirt Host 从 Debian 官方目录锁定日期镜像并核验 SHA-512，准备带版本/散列校验的 NoCloud 配置盘及发行包内的 Node/Bun/Host runtime，在 guest 内安装持久 Xvnc 桌面和 Host。Host 等待 guest 身份、版本与桌面能力成立后，才把它登记到原有远端电脑目录。创建步骤、域 UUID、卷归属和 guest 状态持久化；Host 重启继续协调。受管 VM 关机后可替换配置盘，guest 在下次启动前验证并安装新运行组件，用户文件、浏览器 profile 与 Bot 数据位于独立的持久目录。界面默认选择自动准备，Host 路由现传递该选项；失联或版本不匹配不再维持虚假的 ready 状态。Host VM/路由/guest 定向 **76 项通过**，Host/UI 类型及 shell 语法通过。提交 `4894f7cb` 的 [Linux CI 生产构建](https://github.com/Youzini-afk/Varin/actions/runs/36631489354)成功，包含 guest bundle 构建；这只验证打包，不验证 KVM 启动。当前 Windows 环境没有 KVM/libvirt，真实镜像上传、NoCloud 启动、Xvnc 与升级仍未实机验证。
-
-第六批核对平台接口与全量回归：Wayland 的单次 Screenshot portal 结果无法证明与 AT-SPI 请求窗口相同，且逐帧调用不是持续授权会话，故撤下自动窗口图与观看帧的错误能力声明；正式 RemoteDesktop/ScreenCast 会话仍需实现。远端 URL 保留代理前缀后，修正运行时鉴权必须同时匹配 origin 与挂载路径，避免漏发凭据或将凭据发给同源其他服务。Pi 握手明确声明 Host 是否提供会话指令，未声明时不再等待无人处理的可选请求。首次全套测试揭示上述接口旧断言与两项 Pi 超时；修复后 UI **2,050 项通过**、Pi 受影响 **16 项通过**、Application Client **7 项通过**，Web 全套 **2,901 项通过、5 项跳过**。全仓类型和 lint、Host 构建、文档校验通过。CI 安全审计发现的既有依赖版本已定向更新；源码与云运行时两份锁均为零项。云发行包现携带 Pi 的两份版本补丁，隔离安装后核对了实际补丁代码和 `undici` 解析版本；云合同测试 **10 项通过**。Pi 全套未在这些修复后再跑一遍，不能将首次失败记成全量通过。
-
-**结论：不能接受“BC0–BC9 全部完成”。** Bot、记忆、Computer Use、桌面视图、远端转发与 libvirt 的生产路径确实存在；但基线有控制交接、磁盘归属、配置保存、入口生命周期等实际错误，且 BC6–BC9 的若干交付条件根本尚未实现。功能存在、行为正确和安装后可用是不同证据。下文是本次验收结论；[旧验收记录](../archive/bot-computer-use-acceptance.md)保留历史，不覆盖本报告。
+功能存在、定向行为正确和安装后可用分别判断，不能据此接受“BC0–BC9 全部完成”。
+[更早验收](../archive/bot-computer-use-acceptance.md)只保存历史判断。
 
 ## 分阶段判断
 

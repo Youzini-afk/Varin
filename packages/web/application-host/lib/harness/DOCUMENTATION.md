@@ -47,9 +47,9 @@ broker event stream ──→ HarnessRouter.processEvent()
                            ├── fs.lock      → Rust kernel file-resource lease + Documents identity
                            ├── lsp.diagnostics → LspDiagnosticsService
                            ├── lsp.diagnosticsSnapshot → LspDiagnosticsService
-                           ├── memory.* → shared MemoryService + scoped KnowledgeStore
-                           ├── zone2.assemble → Knowledge material + ThreadRegistry projection + source-thread <review>
-                           └── thread.*     → ThreadRegistry + ThreadRuntime + native working state + verification bind / auto review / retrieval facts
+                           ├── memory.* → Agent personalization (ordinary notes) or Bot MemoryService/KnowledgeStore
+                           ├── zone2.assemble → admitted environment observations; Bot recall follows its memory owner
+                           └── thread.*     → ThreadRegistry + ThreadRuntime + native working state + verification binding / retrieval facts
 ```
 
 ## Components
@@ -351,15 +351,15 @@ unavailable interpreter rather than silently selecting `auto`.
 
 ### ShellSupervisor (`shell-supervisor.ts`)
 
-PTY-based persistent shell per session. Production creates those PTYs through
+Each ordinary command starts independently at its admitted cwd. Production creates its PTY through
 the terminal runtime (`createTerminalSession`); tests may inject a `ptyProvider`
 seam that wraps the same handle contract. There is not a second production
 process manager.
 
-- One login shell (git-bash / bash / wsl / powershell) per session
+- The session selects its interpreter; each command gets its own execution identity
 - Commands separated by sentinel markers (`__VARIN_SENTINEL_`)
-- cwd/env/venv maintained between commands
-- `wait_ms` starts when the Host accepts the call and includes shell setup and
+- Explicit or request-frozen default cwd; cd/env/venv changes do not carry to the next call
+- `waitMs` starts when the Host accepts the call and includes shell setup and
   the foreground observation. If it expires before a PTY is ready, `shell.exec`
   returns `kind: "preparing"` with an `exec_…` identity for read-only
   `get_output`; that identity is not a runtime shell and cannot be written to or
@@ -441,7 +441,7 @@ settings travel through the existing session adapter and broker on create/open, 
 restore and continuation. Pi records them in a branch custom entry and applies temperature through
 its native stream seam; no alternate model loop or provider registry is involved.
 
-The registry persists one versioned atomic catalog per workspace. `Thread` is
+The registry persists a versioned atomic catalog in the owning task scope; a scope is not necessarily a directory workspace. `Thread` is
 durable work; `ThreadRun` is one execution attempt, and
 `ThreadLaunchManifest` freezes model-adjacent launch inputs.
 
@@ -489,12 +489,10 @@ identity matches the fixed result are bound to that `resultRevision`. The
 result is available to the caller without creating another review Thread.
 Draft merge records that disk commands cannot verify unsaved buffers.
 
-`thread.dispatch` also freezes the Host-confirmed parent operation directory and query scope
-before its first asynchronous step. The launch manifest carries that snapshot through queueing
-and restart; spawn maps it only to a child authority with a proven source/clone relationship and
-writes the child's own Pi work-context journal before its first model or tool request. A narrowed
-scope that excludes the inherited paths, or a virtual parent that cannot materialize a selected
-subdirectory, fails explicitly. Later parent and child switches remain independent.
+`thread.dispatch` captures its admitted cwd, scope, fixed source view and branch baseline. Queueing and
+restart reuse those recorded identities rather than the parent's later directory or editor state.
+It does not restore a mutable operation-directory mirror or write a Pi work-context journal.
+Task ownership and Documents resource roots remain distinct; see [source views](../../../../../docs/design/resource-oriented-harness-design.md).
 
 Input origins are frozen per Run (`task`/`inherit`/`continue`/`fresh`). An
 `input: "inherit"` dispatch captures the parent session's committed input at
@@ -527,7 +525,7 @@ Pi accepts `inform` through a persistent non-waking custom message and accepts `
 Execution admission is root-wide (`countActiveInRoot`): every implementation
 Run under the same root session — including nested Threads — shares the
 configured concurrency budget, and dispatch, dequeue, lost-run resume,
-continuations, and auto-review all pass through the same count. A Thread
+and continuations pass through the same count. A Thread
 waiting on a real dependency (`waitingFor: "thread"`) relinquishes its slot;
 `setAttention` and `endRun` re-evaluate `tryDequeue`, which promotes the oldest
 queued Thread or parked `pendingContinuation` in FIFO order. A `request` that
@@ -918,24 +916,16 @@ without interpreting a missing catalog as empty (D-239).
 The session-state sidebar reads/updates blocks through authenticated context
 routes. Block writes broadcast only an invalidation identity over SSE, never
 the block body. Thread metadata routes use the same UI-auth middleware.
-Blocks can be explicitly promoted into workspace or user knowledge suggestions.
-The authenticated review API keeps `(scope, id)` identities distinct, uses the
-complete opened content/trigger/status/invalidAt revision for every mutation, validates same-scope supersedes before
-mutation, and broadcasts only invalidation identities over SSE.
-Settings catalog routes list/edit/retire the same workspace and user `.tdb`
-rows after Documents workspace resolution. Delete sets `invalidAt` on one id;
-it does not cascade to other scopes or supersede neighbors. Derived vectors
-are notified through the existing knowledge-change hook.
-`memory.remember` and the background organizer write effective memory through
-the shared MemoryService and scoped KnowledgeStore. The organizer is the sole
-automatic producer: it persists prepared proposals and source coverage before
-advancing a cursor, and replays a prepared range after interruption. Existing
-`suggested` rows retain their explicit review actions; ordinary conversation
-does not invoke the retired `knowledge.suggest` model path. Catalog mutations
-send the complete opened content/trigger/status/invalidAt revision;
-workspace/scope changes retire the UI request generation so late responses
-cannot replace the active catalog. Suggested, dismissed, and superseded
-identities do not enter public recall.
+Ordinary Agent notes and scoped system-prompt edits use `agent-personalization` and its Rust typed
+record. Host `memory.*` routing resolves the actual session owner on each request. Bot calls retain
+MemoryService/KnowledgeStore and optional background organization; ordinary calls do not invoke
+semantic recall, automatic extraction or the retired `knowledge.suggest` model path.
+
+Bot knowledge mutations retain their source, revision, effective/suggested/dismissed states and
+same-scope checks. Source coverage and prepared proposals are durable; changed owners invalidate
+late UI results. These contracts and the ordinary-Agent distinction are maintained in
+[Memory ownership](../memory/DOCUMENTATION.md) and [Knowledge storage](../knowledge/DOCUMENTATION.md),
+rather than a second memory catalog description here.
 
 Interactive UI inputs carry a content-free `AgentInputContext`. The Documents
 authority has already validated and frozen any dirty buffers behind its opaque

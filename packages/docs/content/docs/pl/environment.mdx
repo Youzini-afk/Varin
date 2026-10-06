@@ -25,7 +25,7 @@ Uruchamia Varin w trybie headless, gdy ustawione na `true` lub `1`. Trasy API po
 
 ### `VARIN_DATA_DIR`
 
-Nadpisuje katalog danych Varin. Domyślnie jest to `~/.config/varin`.
+Zmienia katalog danych Varin. Domyślnie Linux używa `$XDG_CONFIG_HOME/varin` (lub `~/.config/varin`), macOS `~/Library/Application Support/Varin`, a Windows `%APPDATA%/Varin`.
 
 ### `VARIN_COMPRESS_API`
 
@@ -60,10 +60,6 @@ Plik wykonywalny Git używany przez funkcje Git w Varin.
 ### `GIT_BINARY`
 
 Alternatywne nadpisanie pliku wykonywalnego Git. Do konfiguracji specyficznej dla Varin preferuj `VARIN_GIT_BINARY`.
-
-### `VARIN_GIT_READ_CACHE_TTL_MS`
-
-Czas życia, w milisekundach, buforowanych odczytów plików opartych na Git. Ustaw `0`, aby wyłączyć ten cache podczas debugowania.
 
 ## Głos i tunele
 

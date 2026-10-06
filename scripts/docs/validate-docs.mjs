@@ -1,7 +1,8 @@
-import { readdir, readFile, stat } from "node:fs/promises"
+import { readdir, readFile } from "node:fs/promises"
 import path from "node:path"
 
 import { checkEngineeringDocs, engineeringDocPaths, engineeringDocErrors } from "./check-engineering-docs.mjs"
+import { collectLocalLinkTargets } from "./engineering-docs.mjs"
 
 const repoRoot = path.resolve(import.meta.dirname, "..", "..")
 const docsRoot = path.join(repoRoot, "packages", "docs")
@@ -42,55 +43,22 @@ function hasFrontmatterKey(content, key) {
   return new RegExp(`^${key}:\\s*.+$`, "m").test(hit[1])
 }
 
-async function exists(absolutePath) {
-  try {
-    await stat(absolutePath)
-    return true
-  } catch {
-    return false
-  }
-}
-
-/**
- * Locale directories are the ones that carry their own landing page. `troubleshooting/` is nested
- * content that every locale repeats, not a locale, so it must not be mistaken for one.
- */
-async function siteLocales() {
-  const entries = await readdir(contentRoot, { withFileTypes: true })
-  const locales = []
-  for (const entry of entries) {
-    if (!entry.isDirectory()) continue
-    if (await exists(path.join(contentRoot, entry.name, "index.mdx"))) locales.push(entry.name)
-  }
-  return locales
-}
-
-/** Absolute route targets from inline Markdown links, which is how the site cross-references pages. */
-function collectRouteLinks(body) {
-  return [...body.matchAll(/\[[^\]]*\]\((\/[^)\s]*)\)/g)].map((match) => match[1])
-}
-
 async function run() {
   const filePaths = (await walk(contentRoot)).filter((p) => p.endsWith(".mdx"))
   const routeSet = new Set()
   const errors = []
-  const locales = await siteLocales()
   const pages = []
-
-  if (locales.includes("en")) {
-    errors.push("English is the default docs locale and must live at content/docs/, not content/docs/en/")
-  }
-  if (!locales.includes("zh-cn")) {
-    errors.push("Simplified Chinese must live at the translated locale path content/docs/zh-cn/")
-  }
 
   for (const filePath of filePaths) {
     const body = await readFile(filePath, "utf8")
     const relative = toPosix(path.relative(repoRoot, filePath))
     const route = routeFromFile(filePath)
     routeSet.add(route)
-    pages.push({ body, relative, route })
+    pages.push({ body, relative })
 
+    if (route.startsWith("/en/")) {
+      errors.push(`${relative}: English is the default locale and must live at content/docs/, not content/docs/en/`)
+    }
     if (!hasFrontmatterKey(body, "title")) {
       errors.push(`${relative}: missing frontmatter key 'title'`)
     }
@@ -99,23 +67,13 @@ async function run() {
     }
   }
 
-  // A translated page that links to another locale silently drops the reader into a language they
-  // did not choose. Every locale carries the same page set, so the correct target always exists and
-  // a cross-locale link is always a mistake rather than a deliberate reference.
-  for (const { body, relative, route } of pages) {
-    const owner = locales.find((locale) => route.startsWith(`/${locale}/`)) ?? null
-    for (const target of collectRouteLinks(body)) {
+  // Check destinations, not language choices. A source-language reference is valid when a
+  // translation is unavailable; translation coverage and quality belong in editorial review.
+  for (const { body, relative } of pages) {
+    for (const target of collectLocalLinkTargets(body).filter((target) => target.startsWith("/"))) {
       if (!routeSet.has(target)) {
         errors.push(`${relative}: link target is not a page: ${target}`)
-        continue
       }
-      const linked = locales.find((locale) => target.startsWith(`/${locale}/`)) ?? null
-      if (linked === owner) continue
-      const expected = owner === null ? target.replace(`/${linked}/`, "/") : `/${owner}${target}`
-      errors.push(
-        `${relative}: links to the ${linked ?? "default"} locale: ${target}`
-        + `${routeSet.has(expected) ? ` (use ${expected})` : ""}`,
-      )
     }
   }
 
@@ -127,13 +85,8 @@ async function run() {
       return
     }
     if (value === null || typeof value !== "object") return
-    if (typeof value.label === "string") {
-      if (typeof value.translations?.["zh-CN"] !== "string") {
-        errors.push(`${owner}: missing Simplified Chinese sidebar translation`)
-      }
-      if (Object.hasOwn(value.translations ?? {}, "en")) {
-        errors.push(`${owner}: English is the default sidebar label and must not remain in translations.en`)
-      }
+    if (typeof value.label === "string" && Object.hasOwn(value.translations ?? {}, "en")) {
+      errors.push(`${owner}: English is the default sidebar label and must not remain in translations.en`)
     }
     for (const [key, child] of Object.entries(value)) validateSidebarLocales(child, `${owner}.${key}`)
   }

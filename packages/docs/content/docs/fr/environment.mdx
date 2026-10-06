@@ -25,7 +25,7 @@ Démarre Varin en mode headless quand la valeur est `true` ou `1`. Les routes AP
 
 ### `VARIN_DATA_DIR`
 
-Remplace le répertoire de données Varin. La valeur par défaut est `~/.config/varin`.
+Remplace le dossier de données Varin. Par défaut : Linux utilise `$XDG_CONFIG_HOME/varin` (ou `~/.config/varin`) ; macOS, `~/Library/Application Support/Varin` ; Windows, `%APPDATA%/Varin`.
 
 ### `VARIN_COMPRESS_API`
 
@@ -60,10 +60,6 @@ Exécutable Git utilisé par les fonctionnalités Git de Varin.
 ### `GIT_BINARY`
 
 Autre remplacement d’exécutable Git. Préférez `VARIN_GIT_BINARY` pour une configuration spécifique à Varin.
-
-### `VARIN_GIT_READ_CACHE_TTL_MS`
-
-Durée de vie, en millisecondes, des lectures de fichiers Git mises en cache. Définissez `0` pour désactiver ce cache pendant le débogage.
 
 ## Voix et tunnels
 

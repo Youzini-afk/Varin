@@ -25,7 +25,7 @@ Varin Web 服务器的绑定地址。使用 `0.0.0.0` 可允许其他机器访�
 
 ### `VARIN_DATA_DIR`
 
-覆盖 Varin 数据目录。默认是 `~/.config/varin`。
+覆盖 Varin 数据目录。默认值：Linux 为 `$XDG_CONFIG_HOME/varin`（或 `~/.config/varin`）；macOS 为 `~/Library/Application Support/Varin`；Windows 为 `%APPDATA%/Varin`。
 
 ### `VARIN_COMPRESS_API`
 
@@ -60,10 +60,6 @@ Varin Git 功能使用的 Git 可执行文件。
 ### `GIT_BINARY`
 
 备用的 Git 可执行文件覆盖。Varin 专用配置请优先使用 `VARIN_GIT_BINARY`。
-
-### `VARIN_GIT_READ_CACHE_TTL_MS`
-
-缓存的 Git 文件读取的存活时间（毫秒）。设为 `0` 可在调试时禁用此缓存。
 
 ## 语音和隧道
 

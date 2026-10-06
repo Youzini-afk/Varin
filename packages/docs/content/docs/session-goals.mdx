@@ -64,7 +64,7 @@ In **Settings → Chat → Goal** you can set a default token budget for new goa
 ## Keep in mind
 
 - The goal loop runs in the Varin server, not in your browser tab. Close the tab, lock the phone — the agent keeps working, and you get a notification when the goal settles. The server (desktop app or `varin` process) must stay running.
-- Goals use your session's own provider and model, including the auditor calls — nothing leaves the providers you already use.
+- The agent continues with the session’s model. Progress audits normally select a utility model from the same provider; an explicit small-model override in Varin or Pi settings can select another provider/model.
 - One goal per session at a time.
 
 ## Related

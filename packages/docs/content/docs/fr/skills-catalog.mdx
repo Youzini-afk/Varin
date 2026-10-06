@@ -1,27 +1,10 @@
 ---
 title: Catalogue de skills
-description: Parcourez et installez des skills prêts à l’emploi.
+description: Installez des skills via les paquets Pi et gérez les skills chargées.
 ---
 
 # Catalogue de skills
 
-Le catalogue de skills vous permet d’installer des skills publiés par d’autres personnes au lieu d’écrire les vôtres. Ouvrez-le dans **Paramètres → Skills → Catalog**.
+L’ancien catalogue autonome de skills n’est plus disponible. Pour installer des skills distribuées dans un paquet Pi, ouvrez **Paramètres → Paquets Pi**, saisissez une source prise en charge par Pi PackageManager (npm, URL Git ou chemin local), puis choisissez la portée utilisateur ou projet. Installez uniquement des paquets de confiance : ils peuvent contenir des extensions exécutables.
 
-Pour écrire vos propres skills, voir [Skills](/fr/skills/).
-
-## Installer un skill
-
-1. Ouvrez le catalogue.
-2. Parcourez les sources intégrées — le dépôt de skills Anthropic et le registre communautaire ClawdHub — ou lancez une recherche.
-3. Choisissez un skill et installez-le.
-4. Choisissez où l’installer : pour tout ce que vous faites, ou seulement pour le projet actuel.
-
-Si un skill du même nom existe déjà, Varin vous demande quoi faire — l’ignorer, l’écraser ou décider skill par skill.
-
-## Ajouter votre propre source
-
-Vous pouvez ajouter n’importe quel dépôt Git comme source avec son nom `owner/repo` ou une URL Git complète. Les dépôts privés nécessitent un accès configuré sur votre machine (clé SSH ou identifiants enregistrés) ; si une source ne peut pas s’authentifier, le catalogue l’indique au lieu d’échouer silencieusement.
-
-## Pages liées
-
-- [Skills](/fr/skills/) — créer et gérer les skills installés
+Utilisez [Skills](/fr/skills/) pour créer, modifier et invoquer les skills chargées par le runtime actif.

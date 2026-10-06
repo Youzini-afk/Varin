@@ -30,7 +30,7 @@ element names are part of this contract.
 
 `@varin/extension-sdk/testing` exports managed Surface, isolated Surface, and Host conformance
 harnesses with real owner cleanup semantics. See the complete
-[authoring guide](https://github.com/Youzini-afk/Varin/blob/main/docs/varin-extension-authoring.md).
+[authoring guide](https://github.com/Youzini-afk/Varin/blob/main/docs/ops/varin-extension-authoring.md).
 
 Granted Host extensions can call `workspace.documents` through `callWorkspaceDocuments` or
 `createWorkspaceDocumentsClient` for resource-scoped, revisioned document access. The capability never

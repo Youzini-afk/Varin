@@ -2,11 +2,10 @@
 
 Status: current unified editor architecture and acceptance contract
 
-Current boundary (D-296): this contract covers the supported Web, Electron, mobile, and embedded
-editor surfaces. The former VS Code companion material below is retained only as historical rationale
-for the editor boundary; it is not a supported integration or compatibility target.
+Current boundary: Web/Electron use Monaco; mobile and embedded editors use purpose-specific
+CodeMirror adapters. The former VS Code companion is retired.
 
-Last updated: 2026-09-02
+Last updated: 2026-10-06
 
 本文规定 Varin 文件编辑能力的产品目标、权威边界、桌面/Web 与移动端分工、Monaco
 集成方式、语言智能契约、扩展边界、性能约束和实施顺序。它取代
@@ -32,9 +31,7 @@ Varin 不维护 Agent 一套文件编辑器、IDE 另一套文件编辑器。官
 - 不 fork Code OSS，不把外部编辑器扩展误当成 Varin 扩展；
 - 社区扩展仍可通过 `editor` contribution 完整替换官方文件编辑器，使用任意框架或渲染技术。
 
-这不是“把 CodeMirror 组件换成 Monaco 组件”。目标是把现有已经正确的 Varin 文档权威接到
-一个足以承载 VS Code 级交互的文件编辑器平台上，并把当前只接通三项的语言服务补成真实可用的
-能力链。
+引擎切换复用已有文档权威，把文件编辑、语言智能和 Agent 协作接到同一条编辑路径。
 
 ## 2. 为什么现在改引擎决定
 
@@ -55,16 +52,11 @@ Varin 不维护 Agent 一套文件编辑器、IDE 另一套文件编辑器。官
 因此迁移对象只是官方 text/code/diff renderer 和其语言客户端，不是工作区、文件、保存或扩展
 系统。
 
-### 2.2 当前文件编辑能力与产品定位不匹配
+### 2.2 引擎切换的理由
 
-当前 `ResourceEditorHost` 给文件编辑器传入的核心扩展只有 view-state adapter；仓库里已有的语法
-加载、主题、搜索和 Vim 设置并未形成完整工作台能力。现有语言客户端只消费 diagnostics、
-completion 和 hover，而且 DTO 会丢弃 completion range、snippet、additional edits、Markdown、
-WorkspaceEdit 与 code-action command。Host 虽有 definition、references、symbols、rename 和 code
-actions 路由，渲染层没有完整消费者，rename 与 code actions 也缺少可执行编辑内容。
-
-继续在两套 Shell 上分别补这些缺口，会把相同的编辑语义、语言行为和调试装饰维护两遍；继续把
-CodeMirror 扩成完整 IDE，则需要在已经存在成熟交互模型的地方重新实现大量编辑器产品能力。
+早期 CodeMirror 文件路径只消费少量语言功能，Agent 与 IDE 容易各自补出一套编辑行为。
+现在两种 desktop/Web Shell 共用 Monaco model、命令和 Host language bridge，包含导航、rename、code actions
+及 revision-safe WorkspaceEdit。历史缺口解释切换原因，不是当前功能清单。
 
 ### 2.3 采用 Monaco 的准确边界
 
@@ -555,342 +547,41 @@ Phase 1 建立以下 performance marks 和诊断计数：
 work、无 owner leak。真实数据再决定警告、按需关闭昂贵 feature 或内存压力回收；正文读取/保存
 能力不因语法/semantic feature 降级而被一并禁止。
 
-## 14. 实施 Phase
+## 14. 交付与历史测量
 
-每个 Phase 独立 commit/push。不得用长期 feature flag 保留 desktop/web 的 CodeMirror 与 Monaco
-双实现；迁移期间只有在当前 Phase 尚未提交前可以用内部开关做对照。进入 `main` 时必须有一个
-明确 owner。
+desktop/Web 已使用官方 Monaco 路径，mobile/embedded 保留各自 CodeMirror adapter。
+当前实现分别由 [Monaco 模块](../../packages/ui/src/lib/monaco/DOCUMENTATION.md)、
+[Document Registry](../../packages/ui/src/lib/documents/DOCUMENTATION.md)和
+[Editor Workbench](../../packages/ui/src/lib/workbench/editors/DOCUMENTATION.md)说明。
+已完成的逐阶段任务表不再作为重复实施计划；当前验证选择按实际改动风险确定。
 
-### Phase 0 — 决策与基线（本文）
+以下保留引擎切换时的独有测量，**不是当前提交重新运行的结果，也不是性能门槛**：
 
-交付：
+- 2026-08-25，Windows packaged Electron 的 50,000 行、1,627,779 字符样本：CodeMirror 的
+  model/首绘/编辑到绘制为 4.9/19.9/10.9 ms，Monaco 为 14.6/26.6/8.6 ms；当时 Monaco chunk
+  为 3,848.70 kB（gzip 995.25 kB），不进入首屏
+- 2026-08-26，Windows 11 x64 最终构建：Monaco chunk 4,278,374 bytes，editor worker
+  272,811 bytes，semantic worker 0；普通三个入口没有直接预加载 Monaco
+- 同轮 packaged Electron 样本：cold runtime 211.9 ms、model 12.3 ms、first paint 82.3 ms、
+  edit-to-paint 9.2 ms；同 model 的 warm view 为 28.6/2.6 ms。created/disposed model 均为 1，
+  editor worker 1，unexpected worker request 0
+- 同轮 Web/PWA、Electron worker/diff/dispose 与 Windows 包路径有运行记录；mobile HTML 可挂载且不加载
+  Monaco。没有 iOS Simulator、Android SDK/真机 touch journey 或 hosted-cloud 手工旅程证据，不能从
+  Windows 结果推断这些平台通过
 
-- 固定本文的产品和 ownership 决策；
-- 修正旧 CodeMirror-only 文档；
-- 记录现有文件路径、当前 bundle、first-file/warm-switch 行为与关键功能缺口；
-- 不安装依赖、不改生产 renderer。
-
-验收：docs validation；工作树只包含文档。
-
-### Phase 1 — Monaco runtime、worker、theme 与 build contract
-
-写入边界：
-
-- `monaco-editor@0.56.0` 精确依赖；
-- lazy runtime loader、公开 feature/language entrypoints、worker factory；
-- Varin theme projection 与基础 host component；
-- Web/Electron/PWA asset 与 CSP 适配；
-- bundle/module-graph assertion 和 performance marks；
-- Vim candidate adapter 的源码、依赖、私有 Monaco API 与打包审查；
-- 已退休的 5,000 行打开限制不再出现，并记录代表性大文件在现有 CodeMirror 与 Monaco fixture
-  中的 model、首绘、输入和 feature 成本。
-
-暂不接 Document Registry，不改默认文件 provider。用 fixture model 验证 editor、diff、theme、worker
-和 dispose。
-
-验收：主 entry/preload graph 不含 Monaco；Monaco chunk 不含 `monaco-editor/languages/features/*`
-注册，构建不产出 TS/JS/JSON/CSS/HTML semantic worker；dev HMR、Web base/PWA/cloud CSP 与 packaged
-Electron `varin-ui://` worker 矩阵全部通过后才能退出 Phase 1，不能把它们后移到 cutover 之后。
-再跑 UI focused tests/type-check/lint 和 production Web build；无需跑与编辑器无关的全仓 suite。
-
-完成证据（2026-08-25）：
-
-- 普通 `index.html`、`mobile.html` 与 `mini-chat.html` 的静态入口均不引用 Monaco；仅条件 smoke
-  entry 生成 Monaco chunk。该 chunk 为 3,848.70 kB（gzip 995.25 kB），不进入首屏；
-- source-map module graph 包含公开 editor API、find feature 与 editor worker，不含 root
-  `editor.main`、`languages/features/*` 或 TS/JS/JSON/CSS/HTML semantic worker；
-- Vite dev/reload、严格同源 CSP 的 production preview、PWA build 以及 packaged Electron
-  `varin-ui://` 均完成真实 worker、diff、dispose smoke。Electron 中只创建一个 editor worker，
-  semantic worker 请求为 0；
-- 50,000 行、1,627,779 字符的诊断样本没有成为产品限制。一次 Windows packaged Electron 基线中，
-  CodeMirror 的 model/首绘/编辑到绘制分别为 4.9/19.9/10.9 ms，Monaco 为
-  14.6/26.6/8.6 ms。该单次数据只证明样本可用并建立后续比较基线，不作为跨设备性能阈值；
-- Vim 候选审查结论见 §8：不采用依赖 Monaco 私有 API 的 `monaco-vim@0.4.4`，Phase 2 在切换
-  默认 renderer 前交付 Varin-owned adapter。
-
-### Phase 2 — Model Registry 与 desktop/web cutover
-
-写入边界：
-
-- `documentInstanceId` 与 `FileEditorModelRegistry`；
-- incremental `DocumentRegistry.applyEdits`；
-- model ↔ Registry binding、origin/revision/stale 协议；
-- provider-owned view state v2 和一次迁移；
-- Agent/IDE 的 `varin.builtin.text` desktop/web renderer 改为 Monaco；
-- 使用现有 `LanguageServicesAPI` DTO 的 baseline Monaco bridge：diagnostics registry → model markers、
-  当前 completion 和 hover。Phase 4 在同一 bridge owner 上扩展 rich DTO，不等到 Phase 4 才恢复
-  现有能力；
-- 已持久化 `fileEditorKeymap=vim` 的真实 Monaco adapter 与状态栏/命令接线；
-- save/didSave、conflict、recovery、move、multi-view 与 runtime switch；
-- 删除 desktop/web `DocumentCodeMirror` 调用路径；mobile/embedded CodeMirror 不动。
-
-验收重点：同文档双 view、多个 dirty 文件、save in flight 输入、clean reload、dirty conflict、move、
-Profile 切换、runtime endpoint 切换、worker failure；Problems 与 editor markers、completion、hover
-不得低于 cutover 前的 CodeMirror 路径；普通与 Vim keymap 均可输入、搜索、保存并在 disable/re-enable
-后清理 owner。聚焦 model/registry/workbench tests，加 UI type-check/lint 与一次 Web build。
-
-完成证据（2026-08-25）：
-
-- Document record 增加不公开的 `documentInstanceId`；`applyEdits` 按 captured local revision 校验
-  range/overlap，一组增量只推进一次 revision。并发首次 `open()` 合并为一次 Host read；
-- `FileEditorModelRegistry` 以 runtime key + document instance ID 生成无工作区路径的虚拟 URI。
-  Workbench tab 持有 model，visible view 只持有 editor/listener；同文档双 view 共享 model 与 undo，
-  clean close 释放，dirty close 由 recovery owner 保留，runtime 切换统一 dispose；
-- model ↔ Document Registry 使用增量事件和 origin/version 抑制回声。stale/非法同步不丢用户已经输入
-  的 model 内容，并保留 model/registry 两份 snapshot 供可见告警；clean reload、dirty conflict、move
-  与 save-in-flight 的既有文档语义保持；
-- workbench snapshot 升级为 v2，视图状态由 provider ID + schema version + JSON payload 持有；v1
-  cursor/selection/scroll/fold 字段一次迁移并回写，坏 provider state 只被丢弃，不使工作台快照失效；
-- desktop/Web official text renderer 已切到 Monaco；mobile 使用明确的 CodeMirror adapter，VS Code
-  companion 继续由宿主 editor 持有文件正文且不挂载 Varin 文件 editor。baseline bridge 恢复
-  accepted diagnostics markers、completion、hover、增量
-  `didChange` 与成功保存后的 `didSave`，且 completion 不再产生 `docdocument` 前缀重复；
-- `fileEditorKeymap=vim` 由只使用 Monaco 0.56 公共 API 的 Varin adapter 消费，覆盖 normal/insert/
-  visual 基础行为、移动、删除/复制/粘贴、undo/redo、find、`:w`、状态栏和 dispose/re-enable；
-- 聚焦文档/model/workbench/language/Vim 测试通过，UI type-check/lint、i18n parity 与 production Web
-  build 通过。三个 HTML 入口仍不静态引用 Monaco，产物只有 editor worker，没有 Monaco semantic
-  worker。
-
-### Phase 3 — 文件编辑基础体验与设置
-
-写入边界：
-
-- 官方 editor features、language definitions、syntax、find/replace、fold、多光标、bracket、indent、
-  wrap、whitespace、minimap、sticky scroll；
-- Varin command/shortcut/menu/context-key bridge；
-- editor settings projection 与 Agent/IDE presentation presets；
-- accessibility、IME、high contrast；
-- Vim 的扩展配置与高级行为；基础可用性已经是 Phase 2 cutover gate；
-- current fake/dead editor settings 要么成为真实消费者，要么删除并迁移，不留无效开关。
-
-验收使用真实用户 journey 与 targeted interaction tests；不因新增若干 commands 重跑 Docker 或
-桌面安装矩阵。
-
-完成证据（2026-08-25）：
-
-- lazy Monaco runtime 同时装载公开 editor features 与 basic language definitions；TSX/JSX 只在
-  Monaco tokenization 侧映射为 `typescript`/`javascript`，Host 请求仍保留原始 language ID。构建
-  继续拒绝 `editor.main`、`languages/features/*` 与 TS/JS/JSON/CSS/HTML semantic worker；
-- `default` 与 `varin.ide` 分别投影 `agent-compact`、`ide-full` 呈现预设。word wrap、minimap、
-  sticky scroll、line numbers、whitespace、indentation、folding、auto closing、ligatures、smooth
-  scrolling、format-on-type/save 与 accessibility 由同一设置对象覆盖，切换 Profile 只更新 editor
-  options，不重建 model 或清空 undo；
-- 文件编辑设置通过现有 Settings authority 在 Web/Electron 间同步。malformed 字段只被丢弃并保留
-  上次有效字段；缺失字段使用产品默认。Agent/mobile/VS Code 不显示无消费者的 Monaco 设置；
-- active editor target 被投影到 Varin command catalog、legacy workbench menu/context adapter 与
-  用户 shortcut override。save/save all、find/replace、line/symbol、format、rename、quick fix、
-  definition/references、fold、wrap/minimap、多光标和 editor-group focus 不维护第二套命令元数据；
-- expanded editor toolbar 成为真实消费者，提供 find、go-to-line 与 wrap；所有可见保存入口（手动、
-  自动、Vim、extension document save）共用 format-on-save 后再写 Document Registry 的路径；
-- Monaco theme 支持 Varin `high-contrast` tag；编辑器启用 ARIA、bracket/indent guides、IME-safe
-  Vim handling。Vim 增加 mode cursor、counted motion/edit/paste、相对行号兼容与 clean restore；
-- 聚焦 settings/persistence/options/command/language/theme/Vim 测试通过，UI type-check 与 i18n parity
-  通过；production Web build 和 Monaco module-graph assertion 继续只产出 editor worker。
-
-### Phase 4 — Rich LanguageServicesAPI 与 Monaco bridge
-
-写入边界：
-
-- 扩展 UI/Web 与 VS Code extension-host bridge 的 shared DTO/contract fixtures；VS Code companion
-  webview 不注册 Monaco provider；
-- Host LSP capabilities、result mapper、resolve、format、signature、semantic/inlay 等路由；
-- Monaco providers、markers、owner/generation cleanup；
-- rich hover、completion textEdit/snippet/additional edits；
-- definition/references/symbol/outline/breadcrumbs；
-- typed absent/stale/failure 在 UI 中可见。
-
-Phase 2 的 baseline Monaco bridge 在原 owner 上扩展，不重新注册第二套 provider。CodeMirror
-language client 只保留 mobile/embedded 的适用子集并消费同一 DTO。
-
-验收：Host fixture LSP contract、stale/provider-disable/runtime-switch、Monaco provider conversion、
-Web/UI type-check/lint。只有协议或构建入口改变时跑对应 production build。
-
-完成证据（2026-08-25）：
-
-- `LanguageServicesAPI` 保留 completion text/insert-replace edit、snippet、untrusted Markdown、resolve
-  token、LocationLink、递归 symbols、完整 WorkspaceEdit/code action、formatting、semantic tokens、
-  inlay hints、highlight/folding/selection range、document link 与 color DTO；每个 feature result 携带
-  provider ID、generation 和 document version，unsupported 不再把 provider 错标为 degraded；
-- Host 初始化能力与请求参数按 LSP capability 对齐，未声明能力返回 typed `unsupported`。WorkspaceEdit
-  只要包含无法纳入当前 workspace authority 的目标，就整体失败，不再静默丢掉一部分编辑；
-- 同一个 Monaco bridge owner 注册 completion/resolve、hover、signature、definition、references、
-  quick outline、format、semantic、inlay、highlight、folding、selection、link 和 color provider。Markdown
-  保持不可信，内部资源使用 `varin-resource` URI 交给 Workbench opener，外部链接只经过 Varin
-  HTTP(S) opener；VS Code companion 仍保持宿主编辑器权威且不加载 Monaco；
-- diagnostics markers 按 provider/generation 分组。provider disable、restart、runtime switch 会清除旧
-  markers/status；新 generation 就绪时，所有已打开文档以当前内存 buffer 精确补发一次 `didOpen`，
-  不退回旧磁盘内容，也不重复打开初始 generation；
-- Host rich fixture/mapping/lifecycle、Monaco DTO/provider/view-state、CodeMirror compatibility subset、
-  provider status 与 i18n parity 聚焦测试通过；UI/Web/VS Code type-check 和改动文件 lint 通过。此
-  Phase 改变了共享语言协议，因此 production Web/PWA build 与 Monaco bundle audit 通过；普通入口
-  仍不 eager-load Monaco，审计产物的 semantic worker 为 0。未重复运行无关的 Electron/Docker
-  构建。
-
-### Phase 5 — WorkspaceEdit、rename、code actions 与第一方 TS/JS
-
-写入边界：
-
-- `DocumentRegistry.applyWorkspaceEdit`、preview 与 transaction undo group；
-- rename、format、quick fix、source action、completion additional edits；
-- language command 的 Host-owned execution；
-- 第一方 TypeScript/JavaScript Varin language extension、immutable server asset 与 lazy Host
-  registration；
-- enable/disable/update、workspace trust、server crash 与 owner generation 处理。
-
-验收：真实 TypeScript 项目 smoke 覆盖 completion、auto-import、hover、definition、references、
-rename、format、diagnostics、quick fix；扩展 pack/install/enable/disable；Web remote Host 与 Electron
-各一次，不重复跑无关插件矩阵。
-
-完成证据（2026-08-26）：
-
-- `DocumentRegistry` 的 prepare/apply/discard/undo transaction 会先加载并验证所有目标，再一次性
-  发布所有 buffer；任一目标陈旧、冲突、保存中、越界或不受支持时整体拒绝。未打开文件会进入
-  dirty/recovery/watch 生命周期，磁盘仍等用户保存；resource operation 在 Host batch mutation 落地前
-  明确返回 unsupported；
-- Monaco rename 与 code action 只返回 Varin 内部命令，跨文件或带确认注解的变更进入全局预览，
-  单文件 quick fix 直接走同一事务。completion additional edits 保持 Monaco 单 model 原子编辑；语言
-  命令等待最新 document sync，再由 Host 校验 provider/generation、document version 和服务器声明的
-  `executeCommandProvider` 后执行；
-- 第一方 `varin.builtin.typescript-language` 是可停用的 brokered Host extension。分发构建将
-  `typescript-language-server@5.3.0` 与 `typescript@5.9.3` fallback、许可证和 notices 放进 immutable
-  artifact；首次 workspace language 请求才 materialize/activate，最后一个文档关闭即停止 server；
-- 真实 TypeScript 项目 smoke 覆盖 completion resolve + auto-import、hover、definition、references、
-  跨文件 rename、format、diagnostics 和 quick fix；扩展 artifact/activate/disable/unregister、Host rich
-  fixture、WorkspaceEdit stale/atomic/undo、Web request fidelity 与 Monaco conversion 聚焦测试通过。
-  Production Web/PWA、含 immutable language assets 的 cloud runtime、Windows x64 package 与 unpacked
-  Electron health/terminal smoke 均通过；没有重复运行无关的 Pi 插件或 Docker 矩阵。
-
-### Phase 6 — Diff、debug、test、Git 与 Agent 协作
-
-写入边界：
-
-- Monaco file diff provider；
-- breakpoints、current frame、Problems、test failure、stack navigation；
-- Agent selection/attachment/inline comment/patch review 的统一 editor context；
-- editor actions 与 Workbench panels/navigation；
-- inactive integration cleanup。
-
-聊天/PR 只读 diff renderer 不因本 Phase 被强行替换。验收聚焦各 authority 的 dispatch、stale
-session、dirty patch conflict 和 visible-owner lifecycle。
-
-完成证据（2026-08-26）：
-
-- desktop/Web 文件与 Git diff 使用 Monaco：working modified side 复用 Document Registry model，
-  original/staged side 使用按内容 revision、visible owner 引用计数的 immutable snapshot；嵌套 Git
-  repository root 以 workspace-relative view state 持久化。聊天、PR、历史提交与 mobile/VS Code
-  仍保留各自适用的轻量只读 renderer；
-- breakpoint 设置携带期望 debug session/generation，Host 在 owner 已变化时返回 authoritative
-  `stale`；paused frame 通过 threads/stack 的同 owner 结果投影到 Monaco。test/output/finished 事件
-  同样携带 run generation，旧运行的延迟事件不会覆盖新运行；隐藏或最后一个 consumer 释放后
-  subscriptions、decorations 与 snapshot models 均清理；
-- Problems、breakpoints、stack frames 与 failed tests 统一按精确 resource/line/column 打开；debug
-  program 和 language 从当前 editor resource 推导，不再硬编码 JavaScript；
-- active editor context 由 visible view owner 选择，并携带 runtime/workspace/document-instance/view
-  identity。file/selection/diff attachment、Monaco inline comment 与 patch review 共用该身份；patch
-  review 通过 Document Registry WorkspaceEdit 原子进入 dirty buffer，dirty/conflict/saving/stale 时
-  拒绝，不再绕过 registry 直接写盘；
-- Git stage/unstage/discard 在 live buffer dirty 时拒绝，防止磁盘与编辑器分叉。聚焦 ownership、
-  stale session、snapshot lifecycle、nested repository、attachment 与 patch transaction 测试通过；
-  UI/Web/VS Code type-check、i18n parity、Web run supervisor 测试与 production Web build 通过。
-
-### Phase 7 — Mobile、公共 editor contract 与扩展增强
-
-写入边界：
-
-- mobile CodeMirror adapter 对齐新的 Document/Language DTO；
-- public framework-neutral `applyEdits`（如 Phase 2 证明需要）与 SDK fixtures；
-- `varin.editor.monaco/v1` optional service、owner cleanup 和 Inspector；
-- custom editor replacement/disable/update conformance；
-- authoring docs 与 CLI editor template 更新。
-
-验收：mobile build/关键触屏 journey、public package build/test/pack、managed/isolated/trusted editor
-conformance。没有授权不发布 npm。
-
-完成证据（2026-08-26）：
-
-- shared Workbench 与 dedicated Mobile Files 的文本入口都以 Document Registry 为正文、dirty、
-  conflict、recovery 和保存 authority；CodeMirror 以捕获的 `localEditRevision` 提交 offset edits，
-  stale/invalid/unsupported 会恢复最新权威 buffer，只在 applied 后通知 language session。移动端不再
-  截断可编辑正文，也不维护第二份 `fileContent`；图片、PDF 和二进制仍走适用的专门预览；
-- public `VarinEditorDocumentController` 提供 framework-neutral `applyEdits`，并保留同 authority 的
-  `replaceContent`/`save`。SDK editor fixture 与 CLI template 覆盖 applied、stale、conflict、invalid
-  range、overlap 和 unsupported；custom editor 的 managed/isolated/trusted mount、candidate rollback、
-  disable 与 owner cleanup 使用现有 Surface transaction 验证；
-- desktop/Web 注入 owner-bound `varin.editor.monaco@1` optional service。它只暴露序列化的 view
-  identity、selection、focus/reveal/action 和声明式 decorations；`getState`/`waitForState` 以 revisioned
-  long poll 跟随后续 view 生命周期，不暴露 raw Monaco/DOM/callback。旧 owner 句柄返回
-  `stale: owner-generation-changed`，candidate failure、generation replacement 和 disable 会清理等待者
-  与 registrations；Inspector 显示 consumer generation、registration 和 active view；
-- contract 40、Surface 14、SDK 14、loader 19、CLI 5 项测试及新增 UI adapter/service 聚焦测试通过；
-  涉及公共包 build/type-check/lint 和 npm pack dry-run 通过。production Web + mobile assets build
-  通过，`mobile.html` preload 图不含 Monaco，Monaco 仍是独立 lazy chunk。未发布 npm。
-
-### Phase 8 — 收敛、性能与发布门槛
-
-交付：
-
-- 删除 desktop/web 文件编辑遗留 CodeMirror language/view-state/feature 代码；
-- 保留并标明 CodeMirror 的 mobile/embedded 消费者；
-- dead exports、重复设置和旧文档清理；
-- Web/Electron cold/warm 性能证据、bundle/preload/worker 图、owner leak 证据；
-- final cross-surface journey：Agent file → IDE edit → LSP rename → Agent attachment → save/conflict →
-  Profile switch；
-- architecture/roadmap/authoring/release notes 收敛。
-
-最后一次做全仓 type-check/lint、公共 package 验证、production Web build、Electron package/smoke、
-mobile smoke 和 dead-code。前面各 Phase 不机械重复这套收敛矩阵。
-
-完成：
-
-- `ResourceEditorHost` 的官方文件路由只剩 mobile CodeMirror 与 desktop/Web Monaco；VS Code
-  companion 的不可达 CodeMirror 分支已删除。Plan、Pi resource、MCP/插件配置等嵌入式消费者保留，
-  并在源码与模块文档中明确其用途；无消费者的 Elixir 声明和动态 language loader 已删除；
-- 迁移期 50,000 行 CodeMirror/Monaco 对照夹具退役。生产 smoke 现在分别记录 Monaco cold runtime、
-  model、first paint、edit-to-paint，以及复用同一 model 的 warm view remount；同时验证 model 创建/
-  回收数量。Web bundle audit 输出普通入口的直接 preload assets、Monaco chunks 与 editor worker
-  尺寸，并继续拒绝 eager Monaco 和 semantic workers；
-- 新增组合式跨 Surface 回归矩阵：journey 使用真实 Profile transition 状态机，同时验证稳定的
-  Workbench tab owner 在 Agent/IDE 间复用同一 Monaco model、增量输入、真实 Agent attachment
-  projection、保存、外部磁盘冲突以及最后一个 owner 释放后的 model dispose；language bridge 测试
-  通过实际注册的 Monaco rename provider 调用 Host rename，并以原子 WorkspaceEdit 提交结果；
-- architecture、roadmap、authoring、模块文档和 changelog 已收敛到同一个 ownership 结论。最终命令
-  与实测数据如下。
-
-最终证据（Windows 11 x64，2026-08-26）：
-
-- 新增/直接相关的 Document adapter、model/runtime、optional service 与跨 Surface journey 共 17 项
-  测试通过；全 workspace type-check 与 lint 通过；docs validation 为 378 pages、42 sidebar links、
-  25 engineering docs、167 local links；
-- 公共 npm tooling 的 release harness 与 contract/Surface/SDK/CLI 共 77 项测试、五个 package build
-  和五个 `npm pack --dry-run` 通过。没有 tag/output 的 `release:npm:package` 按接口拒绝执行；未发布
-  npm；
-- production Monaco audit build 通过。`index.html`、`mobile.html`、`mini-chat.html` 的直接入口 assets
-  均无 Monaco；Monaco chunk 为 4,278,374 bytes，唯一 editor worker 为 272,811 bytes，semantic
-  worker 为 0；
-- packaged Electron Monaco smoke 在 50,000 行、1,627,779 字符样本上记录：cold runtime
-  211.9 ms、model 12.3 ms、first paint 82.3 ms、edit-to-paint 9.2 ms；复用同一 model 的 warm
-  view first paint 28.6 ms、edit-to-paint 2.6 ms。这是单机证据，不是产品硬阈值；created/disposed
-  model 均为 1，editor worker 为 1，unexpected worker request 为 0；NSIS x64 package、health、
-  terminal create/close 与 runtime-setup renderer smoke 通过；
-- packaged `mobile.html` 挂载出可见 Surface，没有 renderer exception，也没有加载 Monaco resource；
-  mobile assets 从同一 production dist 生成，native identity 3 项测试通过。本 Windows 主机无法运行
-  iOS Simulator，且没有 Android SDK/真机，因此两端 native touch journey 仍属于对应平台的 release
-  verification；本次也没有执行 hosted-cloud 手工旅程；
-- 根脚本的 Bun `bunx` 缓存仍缺 `formatly/lib/types.js`。用独立 npm 安装的同版 Knip 5.80.0 完成
-  等价全扫描，并在收敛后确认 unused files 为 0；报告中的大量历史/public/dynamic export 候选未在
-  没有真实消费者证据时批量删除。本 Phase 只删除了核实无消费者的声明、loader 与导出。
+迁移期 CodeMirror/Monaco 对照夹具已退役；现有 smoke 记录 Monaco cold/warm 与 model 生命周期。
+旧测试数量、文档页数和构建产物大小都不作为必须复现的固定契约。
 
 ## 15. 迁移与失败处理
 
-- Phase 2 提交后，desktop/web official text provider 只有 Monaco；不保留运行时“失败就退回
+- desktop/web official text provider 只有 Monaco；不保留运行时“失败就退回
   CodeMirror”的长期双实现。Monaco 加载失败显示局部 failure、retry、open externally 与恢复入口；
   文档 buffer 不丢；
 - mobile/embedded CodeMirror 是明确的不同 Surface/用途 adapter，不是 desktop 兼容层；
 - provider view-state schema 迁移失败只重置 view state；
-- language DTO 升级先同一 commit 更新 Host、Web、UI、VS Code companion 和 fixtures，不发布半套
-  版本；
+- language DTO 变更同步更新 Host、Web、UI 和实际 fixture 消费者，不恢复退休的 VS Code companion；
 - first-party language extension failure 不使基础 editor 不可用；
-- dependency、worker 或 package 版本回滚使用每 Phase Git commit，不在产品中堆积 v1/v2 双协议；
+- dependency、worker 或 package 回滚沿 Git 和发行产物，不在产品中堆积内部双协议；
 - 任何未实现能力返回明确 absent/unsupported/failed，不做空数组、空字符串或无效按钮的假成功。
 
 ## 16. 明确不做

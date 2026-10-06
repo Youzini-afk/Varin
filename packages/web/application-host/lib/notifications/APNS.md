@@ -19,7 +19,7 @@ them, so a leaked device token alone cannot be used to push.
    needs permission" / "Agent hit an error") + the **session name** as the body, no model/project/
    message content — plus a **`badge`** count (see below) — and POSTs `{ tokens, title, body,
    badge, env, data:{sessionId}, publicKeyJwk, ts, sig }` to `POST /v1/push/send`
-   (`apns-runtime.js` → `sendViaRelay`). Direct mode builds the equivalent APNs payload locally. It
+   (`apns-runtime.ts` → `sendViaRelay`). Direct mode builds the equivalent APNs payload locally. It
    does **not** gate on UI visibility (see below).
 4. A configured **push relay** verifies the signature +
    `ts` freshness, derives `serverId`, and only delivers to tokens bound to that server. It holds
@@ -62,7 +62,7 @@ so they are the dependable reset — the visibility beacon alone proved unreliab
 mirrors the device zeroing its icon badge on `sceneDidBecomeActive` (`AppDelegate.swift`), keeping
 server and device in sync.
 
-The value flows `runtime.js` (`toApnsGenericPayload`) → `apns-runtime.js` (`sendViaRelay` body /
+The value flows `runtime.js` (`toApnsGenericPayload`) → `apns-runtime.ts` (`sendViaRelay` body /
 direct-mode `aps.badge`) → relay (`pushSendSchema.badge` → `aps.badge`). It is **not** signed (like
 `body`/`data`); the relay still only delivers to bound tokens. The set is server-global, so every
 device token of a server sees the same badge.
@@ -76,7 +76,7 @@ device token of a server sees the same badge.
 
 ## Config
 
-Server (`apns-runtime.js`):
+Server (`apns-runtime.ts`):
 - `VARIN_PUSH_RELAY_URL` (optional explicit relay), `VARIN_APNS_ENVIRONMENT`
   (optional override forcing every send to `sandbox` or `production`; normally unset — each
   token is delivered to the environment it registered with: the iOS shell reads the

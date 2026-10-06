@@ -1,15 +1,17 @@
 ---
 title: Private Relay
-description: Dotrzyj do swojego serwera Varin z dowolnego miejsca przez szyfrowany end-to-end relay — bez portów, tuneli i konfiguracji.
+description: Połącz sparowane urządzenia przez dostępny przekaźnik z szyfrowaniem end-to-end.
 ---
 
 # Private Relay
 
-Varin Private Relay pozwala Twoim sparowanym urządzeniom dotrzeć do serwera z dowolnego miejsca — z sieci komórkowej, kawiarnianego Wi-Fi, innego miasta — bez otwierania portów, konfigurowania tunelu czy wystawiania maszyny do internetu. Zarządza sobą sam: wystarczy sparować urządzenie z opcją **Wszędzie** w [Połącz urządzenie](/pl/connect-devices/).
+Wymaganie wdrożenia: skonfiguruj zaufany endpoint przekaźnika przez `VARIN_RELAY_URL`. Domyślna wartość w kodzie pochodzi z odziedziczonej infrastruktury OpenChamber; repozytorium nie potwierdza dostępności hostowanego przekaźnika Varin. Opisane poniżej parowanie i szyfrowanie wymagają dostępnego skonfigurowanego przekaźnika.
+
+Varin Private Relay pozwala Twoim sparowanym urządzeniom dotrzeć do serwera z dowolnego miejsca — z sieci komórkowej, kawiarnianego Wi-Fi, innego miasta — bez otwierania portów, konfigurowania tunelu czy wystawiania maszyny do internetu. Gdy endpoint relay serwera jest skonfigurowany i dostępny, sparuj urządzenie z opcją **Wszędzie** w [Połącz urządzenie](/pl/connect-devices/), aby z niego korzystać.
 
 ## Jak to działa
 
-Twój serwer otwiera wychodzące połączenie do infrastruktury relay Varin i utrzymuje je aktywne. Gdy jedno z Twoich urządzeń jest poza Twoją siecią, również łączy się z relayem, a relay przekazuje zaszyfrowany ruch między nimi. Nic na Twojej maszynie nie nasłuchuje na połączenia przychodzące z internetu.
+Twój serwer otwiera wychodzące połączenie do skonfigurowanego serwera relay i utrzymuje je aktywne. Gdy jedno z Twoich urządzeń jest poza Twoją siecią, również łączy się z relayem, a relay przekazuje zaszyfrowany ruch między nimi. Nic na Twojej maszynie nie nasłuchuje na połączenia przychodzące z internetu.
 
 Gdy dostępne jest połączenie bezpośrednie — jesteś z powrotem w domu, w tej samej sieci Wi-Fi — Twoje urządzenia wybierają je i całkowicie pomijają relay.
 
@@ -33,7 +35,7 @@ Relay sam zarządza swoim cyklem życia — nie ma przełącznika, o którym trz
 
 ## Relay czy tunel?
 
-- Użyj **relaya**, aby docierać do własnego serwera z własnych sparowanych urządzeń. Zero konfiguracji i nic nie jest wystawione publicznie.
+- Użyj **relaya**, aby docierać do własnego serwera z własnych sparowanych urządzeń. Gdy endpoint relay serwera jest skonfigurowany i dostępny, nie potrzebujesz przekierowania portów ani konfiguracji osobnego tunelu.
 - Użyj [tunelu](/pl/tunnels/), gdy potrzebujesz zwykłego **publicznego adresu URL** — na przykład by otworzyć Varin w zwykłej przeglądarce na maszynie, której nie możesz sparować, albo udostępnić dostęp za [hasłem UI](/pl/security/).
 
 ## Powiązane

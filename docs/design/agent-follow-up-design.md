@@ -24,11 +24,11 @@ Agent 自然使用工具登记后续意图，用户不必另开调度器、填�
 原有每日/每周新建任务继续有用。时间、事件和条件检查共用触发与结果管理，
 但“新建一次工作”和“续接已有会话/线程”的目标必须显式区分，不能互相替换。
 
-## 2. 当前实现基础与缺口
+## 2. 实现与生命周期
 
-以下来自源码核对，没有执行新的任务实测。
+以下区分调度、命令观察与耐久续接；运行证据统一见状态记录。
 
-| 现有能力 | 入口 | 本阶段需要收口的边界 |
+| 能力 | 入口 | 当前边界 |
 | --- | --- | --- |
 | 项目定时任务、daily/weekly/once/cron、队列和计时器 | [runtime.ts](../../packages/web/application-host/lib/scheduled-tasks/runtime.ts) | 已按任务时区、真实终态、准入、missed slot 和启动/停止 generation 收口；跨进程文件 CAS 不作保证 |
 | 新会话、模型/思考选择、prompt/命令/Goal 启动 | [pi-executor.ts](../../packages/web/application-host/lib/scheduled-tasks/pi-executor.ts) | 每次新建会话；普通 prompt 与 slash-command Goal 均等待真实终态 |
@@ -37,9 +37,6 @@ Agent 自然使用工具登记后续意图，用户不必另开调度器、填�
 | 后台命令与事件等待 | [Harness 5.9](harness-tools.md#59-并发) | 可在当前工作中等待/读结果，但不等于持久登记后自动恢复已空闲的会话 |
 | Goal 自动续做 | [pi-session-automation 模块](../../packages/web/application-host/lib/pi-session-automation/DOCUMENTATION.md) | 需要识别明确等待，避免 settled 后继续审计/唤醒一个正在等外部条件的 Agent |
 | 实验、远程重附着与状态事实 | [research-cluster-design.md](research-cluster-design.md) | 已提供耐久来源与重附着；普通 shell 仍不因此获得跨 Host 生存保证 |
-
-已有代码的全局 4/项目 2 调度默认和 30 分钟 watchdog 针对当前派发路径，不能当作真正 Agent/实验执行的完整限制。
-实施时按实际职责清理无效控制、复用运行时准入与真实执行状态；不简单增加超时或为续接另设固定额度。
 
 ## 3. 触发方式
 

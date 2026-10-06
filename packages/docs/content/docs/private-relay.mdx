@@ -1,15 +1,17 @@
 ---
 title: Private Relay
-description: Reach your Varin server from anywhere over an end-to-end encrypted relay — no ports, no tunnels, no setup.
+description: Connect paired devices through an available end-to-end encrypted relay.
 ---
 
 # Private Relay
 
-The Varin Private Relay lets your paired devices reach your server from anywhere — cellular, a café network, another city — without opening ports, setting up a tunnel, or exposing your machine to the internet. It manages itself: pairing a device with **Anywhere** in [Connect a Device](/connect-devices/) is all it takes.
+Deployment requirement: configure a trusted relay endpoint with `VARIN_RELAY_URL`. The current source default is inherited OpenChamber infrastructure; this repository does not establish the availability of a hosted Varin relay. The pairing and encryption behavior below applies when the configured relay is available.
+
+The Varin Private Relay lets your paired devices reach your server from anywhere — cellular, a café network, another city — without opening ports, setting up a tunnel, or exposing your machine to the internet. Once the server’s relay endpoint is configured and available, pair a device with **Anywhere** in [Connect a Device](/connect-devices/) to use it.
 
 ## How it works
 
-Your server opens an outbound connection to Varin's relay infrastructure and keeps it alive. When one of your devices is away from your network, it connects to the relay too, and the relay passes encrypted traffic between the two. Nothing on your machine listens for incoming connections from the internet.
+Your server opens an outbound connection to the configured relay server and keeps it alive. When one of your devices is away from your network, it connects to the relay too, and the relay passes encrypted traffic between the two. Nothing on your machine listens for incoming connections from the internet.
 
 When a direct connection is available — you're back home on the same Wi-Fi — your devices prefer it and skip the relay entirely.
 
@@ -33,7 +35,7 @@ The relay manages its own lifecycle — there is no switch to remember:
 
 ## Relay or a tunnel?
 
-- Use the **relay** to reach your own server from your own paired devices. It's zero-setup and nothing is exposed publicly.
+- Use the **relay** to reach your own server from your own paired devices. Once the server’s relay endpoint is configured and available, no port forwarding or separate tunnel setup is needed.
 - Use a [tunnel](/tunnels/) when you need a plain **public URL** — for example to open Varin in an ordinary browser on a machine you can't pair, or to share access behind a [UI password](/security/).
 
 ## Related

@@ -1,92 +1,64 @@
-# Small Model
+# Small model utility calls
 
-Server-side direct LLM calls that reuse the user's existing OpenCode provider
-logins (`~/.local/share/opencode/auth.json`). OpenCode uses a "small model"
-internally (titles, summaries) but does not expose it through the SDK or
-plugins — this module replicates that mechanism as an OpenChamber runtime API.
+This Host module makes short, direct provider calls for features such as goal progress audits.
+It uses Pi configuration and credentials through `../pi-config/storage.ts`; it does not read an
+OpenCode auth store or run a second agent runtime.
 
-## Security boundary
+## Ownership and credentials
 
-Credentials never leave the server process. The client sends only a prompt;
-auth resolution, OAuth refresh, and provider dispatch all happen server-side.
-Routes live under `/api/*` and are gated by the ui-auth middleware like every
-other runtime API.
+- `index.ts` owns `generateSmallModelText()` and `describeSmallModel()`, input/output budgets,
+  request cancellation, and the Varin small-model settings override.
+- `resolve.ts` selects the model. An explicit request model wins, followed by the Varin override,
+  Pi's `smallModel` setting, then authenticated utility-model candidates. With session context,
+  resolution prefers that provider and can fall back to the session model.
+- `call.ts` resolves the configured provider connection, handles provider-specific requests and
+  OAuth refresh, and returns text. A Pi `models.json` provider key takes precedence over its
+  `auth.json` entry. Configured keys support environment-variable expansion; this utility adapter
+  does not execute command-valued keys.
+- `catalog.ts` reads the shared models.dev metadata cache from `../platform/models-metadata.ts`.
+- `routes.ts` exposes authenticated `GET /api/small-model` and `POST /api/small-model/generate`.
 
-## Files
+The Pi agent directory comes from `VARIN_AGENT_DIR`, then `PI_CODING_AGENT_DIR`, otherwise
+`~/.pi/agent`. User and project `settings.json`/`models.json` are read through the Pi storage helper.
+The Varin override is stored in `settings.json` under the platform's Varin data directory.
+Credentials stay on the Host except when authorizing requests to their configured provider;
+renderer metadata must not include them.
 
-- `index.js` — orchestration: `generateSmallModelText()` / `describeSmallModel()`.
-- `resolve.js` — model selection, mirroring OpenCode's `getSmallModel` chain:
-  0. OpenChamber's own settings override (Settings → Sessions → Small Model):
-     when `smallModelUseDefault` is `false`, `smallModelOverride`
-     (`provider/model`) outranks everything below. Sanitized in
-     `settings-helpers.js` (server) and `persistence.ts` (client).
-  1. `small_model` from the merged OpenCode config layers (`provider/model`).
-  2. Family-priority scan (`gemini-flash` → `gpt-nano` → `claude-haiku`)
-     **within the session's provider first** (`preferredProviderID`, like
-     OpenCode resolves within the current provider), then over the other
-     providers with a usable auth entry, newest `release_date` first.
-  3. GitHub Copilot hidden utility models (`gpt-*-nano/mini`) — these never
-     appear in the catalog, so they participate as the `gpt-nano` family entry
-     and as a final utility fallback.
-  4. Last resort: the session's own model (`preferredModelID`) when no small
-     model resolves anywhere — costlier, but always valid.
-- Input clamp: the prompt is truncated to the resolved model's catalog
-  `limit.context` (minus an output reserve, ~4 chars/token estimate;
-  conservative default when the model is not in the catalog). Truncation is
-  reported as `inputTruncated: true` in the response.
-- `call.js` — wire formats and per-provider auth, replicating OpenCode's
-  plugin auth loaders:
-  - **GitHub Copilot**: fetches the requested model's authenticated `/models`
-    metadata from `https://api.githubcopilot.com` (or
-    `copilot-api.<enterprise>`) and honors its advertised endpoint, preferring
-    Anthropic-compatible `/v1/messages`, then OpenAI `/responses`, then
-    `/chat/completions`. Models without `supported_endpoints` retain the legacy
-    Chat Completions default; metadata, missing-model, and unsupported-endpoint
-    failures are surfaced instead of guessing. The stored device-OAuth token is
-    used as the bearer with no token exchange or expiry.
-  - **OpenAI OAuth (ChatGPT plan)**: streaming Responses API on
-    `https://chatgpt.com/backend-api/codex/responses` with
-    `ChatGPT-Account-Id`; expired tokens are refreshed against
-    `auth.openai.com` (single-flight) and written back to `auth.json`.
-  - **Anthropic** (`type: api`): `/v1/messages` with `x-api-key`.
-  - **Google** (`type: api`): `generateContent` with `x-goog-api-key`; Gemini 3
-    uses `thinkingLevel` while older Flash models use `thinkingBudget: 0`.
-  - Everything else: OpenAI-compatible `/chat/completions` against the
-    provider's base URL, resolved from (1) `provider.<id>.options.baseURL`
-    in the OpenCode config, (2) the hardcoded `https://api.openai.com/v1`
-     endpoint, or (3) the provider's `api` field from the models.dev catalog.
-    Configured API keys honor OpenCode's `{env:NAME}` and `{file:path}`
-    substitutions; file contents and resolved credentials remain server-side.
-  - `[small-model:diagnostic]` logs record provider/model, input character
-    counts, output budget, thinking toggle, HTTP/finish status, and
-    content/reasoning lengths without logging prompts, response text, or
-    credentials. Goal audit parsing similarly emits
-    `[session-goal:diagnostic]` structural verdict metadata.
-- `catalog.js` — models.dev catalog via the shared in-process cache
-  (`../opencode/models-metadata.js`, also serving
-  `/api/varin/models-metadata`).
-- `routes.js` — `GET /api/small-model` (resolution preview) and
-  `POST /api/small-model/generate` (`{ prompt, system?, maxOutputTokens?,
-  model?, directory? }` → `{ text, providerID, modelID, source }`).
+`restrictToPreferredProvider` prevents an implicit fallback to another provider. An explicit
+request, Varin settings override, or Pi small-model setting remains an intentional selection and
+can name a different provider. A caller must not promise that utility calls always use the exact
+session model.
 
-## Registration
+## Provider adapter boundaries
 
-Mounted lazily from `feature-routes-runtime.js`: the
-module is imported on first request, not at server startup.
+The utility adapter supports GitHub Copilot endpoint discovery, the ChatGPT-plan OpenAI OAuth
+Responses path, Anthropic and Google request formats, and an OpenAI-compatible fallback using the
+configured `providers.<id>.baseUrl`. OAuth refresh is single-flight and persists to the Pi auth
+store. This direct-call adapter is narrower than Pi's complete provider runtime: do not infer
+support for every Pi credential chain or model protocol from the main chat catalog.
 
-## Known limitations
+Copilot metadata and endpoint errors remain errors rather than guessed success. The ChatGPT-plan
+adapter rejects structured-output requests. Other structured-output support follows the adapter's
+actual request format; callers must handle unsupported or malformed results.
 
-- OpenCode's free models (`opencode/big-pickle`, `*-free`) work without a
-  token only through OpenCode's own server — direct calls are rejected, and
-  piggybacking on their subsidized infra is out of bounds by design. Every
-  resolution step therefore requires a usable auth entry for the provider:
-  a session on an unauthenticated `opencode` provider falls through to the
-  global scan (or a clean 404 on a vanilla setup with no logins).
+## Budgets and failures
 
-- Anthropic OAuth (Claude Pro/Max) entries are not supported — OpenCode itself
-  keeps those outside `auth.json` in this generation; only `type: api` keys
-  work for Anthropic.
-- Amazon Bedrock, GitLab, Azure and other credential-chain providers are out
-  of scope; they need more than a key/token (regions, resource names).
-- Responses from the codex backend are collected from the SSE stream; the
-  endpoint itself is non-streaming by design (small utility calls).
+Input size is estimated from catalog context limits with an output reserve, or a conservative
+fallback when metadata is missing. The default overflow behavior truncates the prompt and reports
+`inputTruncated`; callers can request `onOverflow: 'error'` for a `413` instead. System text is part
+of the same budget. Provider timeouts and cancellation propagate to the request.
+
+No resolved model yields `404`; a selected provider without a usable credential fails rather than
+using an unrelated login. Structural diagnostics may include provider/model identifiers and sizes,
+but must not log prompts, generated text, or credentials.
+
+## Verification
+
+Run the focused source suite through the Web package's Vitest command:
+
+```sh
+bun run --cwd packages/web test application-host/lib/small-model
+```
+
+These tests establish selection, serialization and error behavior with controlled responses.
+They do not establish live provider availability, model quality, or subscription eligibility.

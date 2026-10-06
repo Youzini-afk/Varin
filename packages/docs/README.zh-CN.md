@@ -36,6 +36,7 @@ bun run docs:validate
 
 - 每个 MDX 页都有 `title`、`description` frontmatter
 - 侧边栏链接能对应到默认（英文）路由
+- 正文 Markdown 页面链接有目标；同时检查工程文档的本地链接
 
 它不检查品牌、翻译质量，也不检查命令是否仍与代码一致。
 

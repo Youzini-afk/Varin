@@ -4,9 +4,9 @@ Server-owned Pi scheduled task runtime, Markdown loops, and HTTP routes.
 
 ## Ownership
 
-- GUI-created task definitions and all runtime state live in the Varin project config owned by `projects/project-config.js`.
+- GUI-created task definitions and all runtime state live in the Varin project config owned by `../projects/project-config.ts`.
 - A loop definition lives in its `.agents/loops/*.md` file. Its JSON row is only the scheduler projection and runtime-state record.
-- Pi sessions, model selection, thinking, goals, commands, and prompts are executed through `pi-executor.js`; this module has no OpenCode runtime owner or compatibility route.
+- Pi sessions, model selection, thinking, goals, commands, and prompts are executed through `pi-executor.ts`; this module has no OpenCode runtime owner or compatibility route.
 
 ## Markdown loops
 

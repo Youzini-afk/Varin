@@ -25,7 +25,7 @@ Varin вбудовує runtime Pi. Окремого сервера OpenCode не
 
 ### `VARIN_DATA_DIR`
 
-Перевизначає каталог даних Varin. Типове значення — `~/.config/varin`.
+Змінює каталог даних Varin. Типові значення: Linux — `$XDG_CONFIG_HOME/varin` (або `~/.config/varin`), macOS — `~/Library/Application Support/Varin`, Windows — `%APPDATA%/Varin`.
 
 ### `VARIN_COMPRESS_API`
 
@@ -60,10 +60,6 @@ Varin вбудовує runtime Pi. Окремого сервера OpenCode не
 ### `GIT_BINARY`
 
 Альтернативне перевизначення виконуваного файлу Git. Для конфігурації саме Varin надавайте перевагу `VARIN_GIT_BINARY`.
-
-### `VARIN_GIT_READ_CACHE_TTL_MS`
-
-Час життя, у мілісекундах, кешованих читань файлів через Git. Встановіть `0`, щоб вимкнути цей кеш під час налагодження.
 
 ## Голос і тунелі
 

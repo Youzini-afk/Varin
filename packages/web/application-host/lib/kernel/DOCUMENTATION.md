@@ -16,7 +16,8 @@ an explicit Host failure; it never selects the old backend as a fallback.
 | Thread/Run product catalog | TS `ThreadRegistry` | remains TS; kernel receives an actor/grant and operation IDs |
 | Pi sessions, models, credentials, extensions | Pi worker/native Pi | remains Pi; kernel never reads provider secrets |
 | Unsaved editor buffers and grouped undo | Document Registry | remains Registry; surface receipts are not kernel text authority |
-| Knowledge graph/vector stores | TriviumDB + TS adapters | remains the existing single writer |
+| Knowledge graph/vector stores | Separate private Node storage owners + Host facades | TriviumDB remains authoritative for its domain; native database work does not run in the Host thread |
+| Ordinary Agent notes and prompt edits | Rust typed `agent.personalization` record + Host service | separate from Bot knowledge and automatic organization |
 | Working roots, immutable nodes, blobs, revisions, pins, GC | Rust kernel SQLite/object store | Production `KernelStorageAdapter` uses actor-scoped `branch.*`, paged roots and CAS; no TS WorkingState catalog write |
 | Product records and object references (results, drafts, verification/review, retrieval artifact/receipt) | Rust kernel typed `domain_records`/`domain_record_refs` | `working.*` owns fixed result/draft/verification/review records; retrieval uses exact record identities; branch metadata is stored atomically with the branch rather than as a generic record |
 | Recovery checkpoint/turn/mutation records | Rust kernel typed recovery tables and references | Production checkpoint/turn/mutation use `KernelRecoveryStore` directly |
@@ -67,7 +68,10 @@ The shared wire source is `kernel/protocol/schema.json`; it generates both the T
 `node scripts/generate-kernel-protocol.mjs` and check drift with
 `node scripts/generate-kernel-protocol.mjs --check`. Request/response and cancel have separate envelopes; upload chunks are typed, sequenced
 requests and receive ordinary acknowledgements. Rust rejects unknown envelope/method fields before dispatch. The current storage/catalog format is v10; startup validates
-its schema fingerprint plus the complete table/index/column shape and never upgrades or repairs a mismatched catalog.
+its schema fingerprint plus the complete table/index/column shape. Under the storage lock, an older numeric
+internal format is discarded and recreated; a current-format mismatch, missing/invalid version, future format or corrupt
+catalog fails rather than being repaired or opened as empty. This never touches workspace files, Git, native Pi data
+or external configuration and does not add an internal-format upgrade/import path.
 
 The old TS `WorkingStateStore` remains only for unit fixtures. Application Host production assembly uses
 `KernelStorageAdapter` and kernel root/path/range APIs for branch reads, writes, pins, history, materializer/delete and result consumers.
