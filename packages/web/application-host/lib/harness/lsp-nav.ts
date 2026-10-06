@@ -212,6 +212,10 @@ export function createLspNavigationServices(deps: LspNavigationDeps): {
       if (result.status === "ready") return { prepared, value: result.value };
       lastStatus = typeof result.status === "string" ? result.status : "unavailable";
       if (lastStatus === "stale") continue;
+      if (result.reason === "unsupported") {
+        const provider = typeof result.providerId === "string" ? `, provider: ${result.providerId}` : "";
+        return unavailable(`LSP unavailable: ${String(result.message)} (language: ${prepared.languageId}${provider}, file: ${path}). Select a representative file for the language you intend to query.`);
+      }
       return unavailable(`LSP unavailable: ${String(result.message ?? `language service ${lastStatus}`)}`);
     }
     return unavailable(`LSP unavailable: ${path} changed while the language view was answering`);

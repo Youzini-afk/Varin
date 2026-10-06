@@ -95,7 +95,7 @@ export const performHarnessWebFetch = async (
       }
     : { block: [] };
   if (params.render === true && webBinding?.settings?.render !== true) {
-    return { status: "renderer-unavailable", url };
+    return { status: "renderer-unavailable", url, reason: "disabled" };
   }
   return host.webFetchService!.fetch(
     {

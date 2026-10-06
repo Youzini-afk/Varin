@@ -376,7 +376,7 @@ export type FetchResult =
   | { status: "redirect-cross-host"; url: string; location: string; statusCode: number }
   | { status: "blocked"; url: string; reason: "private-network" | "domain-blocked" | "scheme" | "special-purpose" }
   | { status: "empty-shell"; url: string; hint: string }
-  | { status: "renderer-unavailable"; url: string }
+  | { status: "renderer-unavailable"; url: string; reason: "disabled" | "unsupported" }
   | { status: "page-image-unavailable"; snapshotId: string; page?: number; reason: string }
   | { status: "snapshot-missing"; snapshotId: string }
   | { status: "failed"; url: string; reason: string; errorClass?: FetchErrorClass };

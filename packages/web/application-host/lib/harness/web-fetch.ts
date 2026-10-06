@@ -57,7 +57,6 @@ interface SharedFetch {
 const DEFAULT_CACHE_TTL_MS = 900_000; // 15 minutes
 const DEFAULT_MAX_BYTES = 10 * 1024 * 1024; // 10 MiB
 const MAX_REDIRECTS = 5;
-const EMPTY_SHELL_THRESHOLD = 200; // characters
 
 export function createWebFetch(deps: WebFetchDeps) {
   const cacheTtlMs = deps.cacheTtlMs ?? DEFAULT_CACHE_TTL_MS;
@@ -143,6 +142,12 @@ export function createWebFetch(deps: WebFetchDeps) {
       // linkedom provides a DOM implementation compatible with @mozilla/readability
       const { parseHTML } = await import("linkedom");
       const { document } = parseHTML(html);
+      const pageTitle = document.querySelector("title")?.textContent?.trim();
+      // Executable and presentation text is not page content. Keep the body
+      // before Readability mutates the DOM so short/non-article pages retain
+      // their text, links and headings through the same Markdown converter.
+      for (const node of document.querySelectorAll("script, style, template")) node.remove();
+      const bodyHtml = document.querySelector("body")?.innerHTML ?? document.toString();
 
       const { Readability } = await import("@mozilla/readability");
       const Turndown = (await import("turndown")).default;
@@ -150,18 +155,14 @@ export function createWebFetch(deps: WebFetchDeps) {
       const reader = new Readability(document);
       const article = reader.parse();
 
-      if (!article) {
-        const text = html.replace(/<[^>]*>/g, "").trim();
-        return { markdown: text };
-      }
-
       const turndown = new Turndown({ headingStyle: "atx", codeBlockStyle: "fenced" });
-      const markdown = turndown.turndown(article.content || html);
-      const title = article.title ?? undefined;
+      const markdown = turndown.turndown(article?.content || bodyHtml);
+      const title = article?.title || pageTitle;
       return { markdown, ...(title !== undefined ? { title } : {}) };
     } catch {
       // Fallback: strip HTML tags
-      const text = html.replace(/<[^>]*>/g, "").trim();
+      const text = html.replace(/<(head|script|style|template)\b[^>]*>[\s\S]*?<\/\1\s*>/gi, "")
+        .replace(/<[^>]*>/g, "").trim();
       const titleMatch = html.match(/<title[^>]*>([^<]*)<\/title>/i);
       const title = titleMatch?.[1]?.trim();
       return { markdown: text, ...(title !== undefined ? { title } : {}) };
@@ -272,9 +273,9 @@ export function createWebFetch(deps: WebFetchDeps) {
 
   const detectEmptyShell = (html: string, markdown: string, render: boolean): boolean => {
     if (render) return false;
-    if (markdown.length >= EMPTY_SHELL_THRESHOLD) return false;
-    // Check if original HTML has script tags but very little content
-    return html.includes("<script") && markdown.trim().length < EMPTY_SHELL_THRESHOLD;
+    // Length cannot tell an app shell from a legitimate short page. Only
+    // suggest rendering when extraction found no body content at all.
+    return markdown.trim().length === 0 && /<script(?:\s|>)/i.test(html);
   };
 
   const representationFor = (contentType: string, rendered: boolean): string => (
@@ -468,7 +469,7 @@ export function createWebFetch(deps: WebFetchDeps) {
 
       if (ctx.render && !deps.renderer && !contentType.includes("application/pdf")) {
         finishRequest();
-        return { status: "renderer-unavailable", url };
+        return { status: "renderer-unavailable", url, reason: "unsupported" };
       }
 
       // If render requested, use renderer
@@ -567,7 +568,7 @@ export function createWebFetch(deps: WebFetchDeps) {
         return {
           status: "empty-shell",
           url,
-          hint: "page appears to be a JS-rendered app; retry with render: true on desktop",
+          hint: "The HTML contains scripts but no readable body content. If content requires JavaScript, retry with render: true on a Host with web rendering enabled.",
         };
       }
 

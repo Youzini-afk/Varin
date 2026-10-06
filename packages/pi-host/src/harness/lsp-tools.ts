@@ -10,8 +10,8 @@ const PositionParams = Type.Object({
 }, { additionalProperties: false });
 
 const SymbolsParams = Type.Object({
-  path: Type.String(),
-  query: Type.String(),
+  path: Type.String({ description: "An existing representative file for the language to query. This selects the language provider: use a .ts/.js source file for TypeScript/JavaScript symbols, not package.json. Not every provider supports workspace symbol search." }),
+  query: Type.String({ description: "Symbol name or name fragment to search for in that language's workspace." }),
 }, { additionalProperties: false });
 
 const resultContent = (result: LspNavigationResult) => ({

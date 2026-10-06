@@ -4078,6 +4078,7 @@ async function main(options: StartWebUiServerOptions = {}): Promise<WebUiServerC
             experiments: Boolean(harnessServiceHost.experimentService),
             settings: Boolean(harnessServiceHost.settingsService),
             followUps: Boolean(harnessServiceHost.followUpService),
+            scheduledTasks: Boolean(harnessServiceHost.scheduledTaskService),
             computer: Boolean(harnessServiceHost.computerService),
           }),
         }).catch((error) => {

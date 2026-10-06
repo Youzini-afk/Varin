@@ -3,7 +3,7 @@ import os from 'node:os';
 import path from 'node:path';
 import { mkdtemp, mkdir, rm, writeFile } from 'node:fs/promises';
 import { createHarnessRouter } from './router.js';
-import { createHarnessServiceHost } from './service-host.js';
+import { createHarnessServiceHost, deriveHarnessCapabilities } from './service-host.js';
 import { registerHarnessServices } from './harness-services.js';
 import { createProjectConfigRuntime } from '../projects/project-config.js';
 import { createScheduledTasksRuntime } from '../scheduled-tasks/runtime.js';
@@ -80,7 +80,7 @@ describe('harness scheduled task services', () => {
         workerId: identity.workerId,
         workerGeneration: identity.workerGeneration,
         workspaceId: identity.sessionId === 'session-2' ? 'ws-unknown' : 'ws-1',
-        grantedCapabilities: ['read.schedule', 'control.schedule'],
+        grantedCapabilities: deriveHarnessCapabilities(['scheduled_task'], { threadRuntime: false, scheduledTasks: true }),
       }),
       respond: async (_sessionId, _requestId, result) => { lastResponse = result; },
     });
