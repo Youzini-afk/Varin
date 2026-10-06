@@ -6,7 +6,7 @@ Status: contributor operations — dependency reports, SDK seams, and lockfile u
 
 ## Dependency update review
 
-The dependency audit prefers published fixes. The remaining pinned local repairs for `braces`,
+[`scripts/audit-dependencies.mjs`](../../scripts/audit-dependencies.mjs) owns the current advisory exceptions and their behavior checks. The dependency audit prefers published fixes. The remaining pinned local repairs for `braces`,
 `http-cache-semantics`, and `sprintf-js` must pass behavior checks through their actual installed
 consumers before their version-based advisories are excluded. `sprintf-js` has no published fixed
 version; its patch keeps numeric precision within the ECMAScript-supported range while preserving
@@ -40,7 +40,8 @@ including intermediate releases; summarize the relevant features, fixes, removal
 and changes to Varin's actual consumers. Separate confirmed upstream facts from inferred project impact
 and give a recommendation with any concrete migration work. Do not interpret missing release notes as
 no changes, or a patch/minor version as proof of compatibility. Keep these judgments distinct from CI
-results. Production dependency changes may also need the cloud runtime lockfile refreshed as above.
+results. Production dependency changes may also need the cloud runtime lockfile refreshed; see
+[Cloud deployment](cloud-deployment.md#building-the-canonical-runtime-directly).
 
 The bundled Pi packages are pinned to 1.0.0. Review its
 [release](https://github.com/earendil-works/pi/releases/tag/v1.0.0) and
@@ -76,7 +77,7 @@ of workspace scope/machine placement. Keep `docs/codemode.md`, `docs/models.md` 
 installed runtime. Native image fixtures mock only the paid provider response and exercise the real
 sandbox, reference reader, image journal and protocol projection. UI checks cover zero-token cost and
 combined model/tool receipts. The experimental durable runtime assessment is recorded in
-[architecture](../reviews/pi-durable-runtime.md#pi-10-durable-runtime-assessment); it is not part of this production dependency change.
+[Pi durable-runtime assessment](../reviews/pi-durable-runtime.md#pi-10-durable-runtime-assessment); it is not part of this production dependency change.
 
 The report only runs default-branch code and reads PR metadata; it neither installs PR dependencies nor
 executes PR code or project tests. `node --test scripts/dependabot-report.test.mjs` exercises its parsing.

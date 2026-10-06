@@ -16,7 +16,7 @@ architecture is retained as a [historical snapshot](archive/architecture-2026-10
 ## Process model
 
 ```text
-React workbench — Agent / IDE / Research shell selected by Workbench Profile
+React workbench — Agent / IDE / Research / Bot shell selected by Workbench Profile
     |
     | authenticated HTTP + SSE: documents, search, language, tasks, settings
     | authenticated Varin v1 surface protocol: Pi session interaction
@@ -49,7 +49,8 @@ Host services; connecting to a remote Host changes placement, not ownership. See
 | Task relationships, Runs, messages, waits and code-transfer coordination | Application Host harness | [Harness services](../packages/web/application-host/lib/harness/DOCUMENTATION.md) |
 | Immutable work branches, file objects, recovery transactions and managed processes | Rust kernel | [Kernel](../kernel/README.md) |
 | Open documents, save coordination and admitted file mutations | Host Documents authority; client Document Registry projects it | [Host Documents](../packages/web/application-host/lib/documents/DOCUMENTATION.md), [client registry](../packages/ui/src/lib/documents/DOCUMENTATION.md) |
-| Knowledge, plans and memory records | Host domain services and private TriviumDB storage owner | [Knowledge](../packages/web/application-host/lib/knowledge/DOCUMENTATION.md), [memory](../packages/web/application-host/lib/memory/DOCUMENTATION.md) |
+| Plans, observations, symbol graph and Bot/user knowledge | Host domain services and private TriviumDB storage owner | [Knowledge](../packages/web/application-host/lib/knowledge/DOCUMENTATION.md), [memory](../packages/web/application-host/lib/memory/DOCUMENTATION.md) |
+| Ordinary Agent notes and scoped prompt edits | Host personalization service and Rust typed record | [Memory ownership](../packages/web/application-host/lib/memory/DOCUMENTATION.md) |
 | Semantic indexes and vector generations | Derived semantic storage, keyed by resource/content/model identity | [Semantic indexing](../packages/web/application-host/lib/knowledge/semantic/DOCUMENTATION.md) |
 | Workbench shell, panels, editor groups and view state | Shared UI kernel and selected shell extension | [UI](../packages/ui/DOCUMENTATION.md), [editor workbench](../packages/ui/src/lib/workbench/editors/DOCUMENTATION.md) |
 | Public client contracts and transport DTOs | Framework-neutral application-client and protocol packages | [Runtime APIs](../packages/application-client/README.md), [wire protocol](../packages/protocol/README.md) |
@@ -107,7 +108,7 @@ silently replaced by task metadata. [Recovery operations](ops/recovery.md) expla
 
 ## Workbench and extension boundaries
 
-Agent Workspace, IDE Workbench and Research Workbench are extension-provided shells selected through
+Agent Workspace, IDE Workbench, Research Workbench and Bot Workspace are extension-provided shells selected through
 Workbench Profiles. They reuse the Document Registry, editor kernel, terminals, Git and Pi session
 state. Changing a project or work focus does not implicitly switch the shell.
 

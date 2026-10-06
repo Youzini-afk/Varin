@@ -6,9 +6,9 @@ recursive scanner for production search.
 
 ## Entrypoints
 
-- `content.js`: `createWorkspaceContentSearch({ documents, compute })` — cancellable native content
+- `content.ts`: `createWorkspaceContentSearch({ documents, compute })` — cancellable native content
   search over a Host-admitted live root, with optional Registry-owned fixed draft overlays.
-- `routes.js`: `registerWorkspaceSearchRoutes(app, deps)` — authenticated search routes.
+- `routes.ts`: `registerWorkspaceSearchRoutes(app, deps)` — authenticated search routes.
 
 ## Routes
 

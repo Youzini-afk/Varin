@@ -25,7 +25,7 @@ Varin 웹 서버의 바인드 주소입니다. 다른 컴퓨터에서 접근하�
 
 ### `VARIN_DATA_DIR`
 
-Varin 데이터 디렉터리를 재정의합니다. 기본값은 `~/.config/varin`입니다.
+Varin 데이터 디렉터리를 변경합니다. 기본값은 Linux의 `$XDG_CONFIG_HOME/varin`(또는 `~/.config/varin`), macOS의 `~/Library/Application Support/Varin`, Windows의 `%APPDATA%/Varin`입니다.
 
 ### `VARIN_COMPRESS_API`
 
@@ -60,10 +60,6 @@ Varin Git 기능이 사용하는 Git 실행 파일입니다.
 ### `GIT_BINARY`
 
 대체 Git 실행 파일 재정의입니다. Varin 전용 구성에는 `VARIN_GIT_BINARY`를 우선하세요.
-
-### `VARIN_GIT_READ_CACHE_TTL_MS`
-
-캐시된 Git 기반 파일 읽기의 유효 시간(밀리초)입니다. 디버깅 중 이 캐시를 끄려면 `0`으로 설정하세요.
 
 ## 음성과 터널
 

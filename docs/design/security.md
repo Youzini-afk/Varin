@@ -2,7 +2,7 @@
 
 Status: Pi-native host, desktop, recovery, and extension boundaries in place; release verification active
 
-Last updated: 2026-10-03
+Last updated: 2026-10-06
 
 ## Protected assets
 
@@ -25,7 +25,9 @@ Last updated: 2026-10-03
 
 - Context isolation enabled and Node integration disabled in every renderer window.
 - Explicit preload methods with input validation; no generic `send(channel, payload)` escape hatch.
-- Pi and extension execution restricted to isolated worker processes.
+- Pi extensions execute in Pi workers. Brokered Varin Host extensions use owned child processes;
+  managed/isolated Surface code has only its scoped capabilities. Trusted-native Host code has explicit
+  trust and restart semantics, never implicit renderer privilege.
 - Renderer logs redact credential values, prompt bodies, file contents, authorization headers, and
   environment values.
 - Project trust approval includes executable paths, command lines, cwd, environment key names, and
@@ -33,28 +35,21 @@ Last updated: 2026-10-03
 - Credential storage uses Pi's auth runtime or an operating-system credential store.
 - Local HTTP helpers bind loopback, use unpredictable bearer/session tokens, and are not exposed to
   remote renderers without a brokered tunnel.
-- Recovery actions use session/workspace writer leases and explicit user confirmation for data
-  deletion or hard restore.
+- Recovery uses admitted Rust file-resource gates and Documents surface barriers. Data deletion and
+  hard restore retain explicit user confirmation; a failed barrier cannot be treated as an empty dirty set.
 - Web fetch keeps private/reserved network ranges blocked by default. Browser-cookie access is
   explicit opt-in.
 
 ## Dependency repairs and audit
 
-`bun run audit:dependencies` verifies installed dependency behavior, then runs Bun's advisory
-audit. Two advisories have no published fixed version as of 2026-10-03 and use pinned Bun patches:
+`bun run audit:dependencies` verifies installed repair behavior before Bun's advisory audit.
+The exact pinned patches and permitted advisory exceptions are owned by
+[`scripts/audit-dependencies.mjs`](../../scripts/audit-dependencies.mjs) and the package/lockfiles.
+A missing patch or failed regression blocks before exclusions are applied; unrelated advisories still fail.
 
-- [GHSA-vfj7-8cjw-p6xm](https://github.com/advisories/GHSA-vfj7-8cjw-p6xm), `braces@3.0.3`:
-  compile, stringify, expansion traversal and flattening use explicit stacks. Existing pattern/range
-  semantics and limits remain. The patch ships in desktop, Web and cloud dependency graphs.
-- [GHSA-ch52-4w7c-c8xp](https://github.com/advisories/GHSA-ch52-4w7c-c8xp), `http-cache-semantics@4.2.0`:
-  request `max-stale` cannot override non-storable or mandatory-revalidation responses or the shared
-  cache's cookie protection. Normal stale reuse and explicit public/private cookie caching remain.
-
-Bun reports published versions and cannot recognize these local repairs. CI and desktop release
-exclude only these advisory IDs after the installed-version and exploit regression checks pass.
-Other advisories still block. A missing patch or failed repair test blocks before the audit. When
-upstream publishes fixes, replace the pins/patches and remove the corresponding exception and repair
-tests in the same change. Development and canonical cloud locks both retain the relevant patches.
+[Dependency maintenance](../ops/dependency-updates.md) records current repairs and upgrades. An exception
+is tied to the verified installed repair, not a blanket claim that an affected published version is safe.
+Remove its pin, exception and repair test together when the patched dependency is replaced.
 
 ## Extension capability labels
 
@@ -112,11 +107,9 @@ deleting the security boundary that module currently enforces.
 
 ## Upstream dependency baseline
 
-Pi `0.84.3` publishes `brace-expansion` `5.0.9` and `undici` `8.9.0` in its npm shrinkwrap, so
-Varin no longer mutates Pi's installed dependency tree after installation. The root and cloud
-lockfiles keep those resolved versions reproducible. Confirm both resolutions
-when the bundled Pi moves; the floor is the requirement, and the exact Pi release is only where it
-currently comes from.
+The bundled Pi version comes from `packages/pi-host/package.json`; development and cloud lockfiles
+own their resolved dependency graphs. Historical Pi release numbers and transitive versions are not
+current security floors. Validate the installed graph through the dependency checks when updating it.
 
 The root `allowScripts` policy pins approval to esbuild `0.28.1`, whose postinstall validates its
 platform binary. The no-op Google GenAI preinstall and protobufjs postinstall are explicitly denied;

@@ -12,19 +12,23 @@ Varin admite temas integrados y archivos JSON de tema personalizados.
 1. Crea el directorio de temas:
 
 ```bash
-mkdir -p ~/.config/varin/themes
+# Linux (default data directory)
+mkdir -p "${XDG_CONFIG_HOME:-$HOME/.config}/varin/themes"
 ```
 
 2. Añade tu archivo JSON a ese directorio (por ejemplo, `my-theme.json`).
-3. Abre Varin y ve a **Settings -> Theme -> Reload themes**.
+3. Abre Varin y ve a **Settings → Appearance → Reload themes**.
 4. Elige tu tema en el desplegable. Se aplica de inmediato.
 
 ## Ubicación de los temas
 
-- macOS/Linux: `~/.config/varin/themes/`
+- Linux: `$XDG_CONFIG_HOME/varin/themes/` (`~/.config/varin/themes/`)
+- macOS: `~/Library/Application Support/Varin/themes/`
+- Windows: `%APPDATA%/Varin/themes/`
+- `VARIN_DATA_DIR`: `$VARIN_DATA_DIR/themes/`
 
 ## Referencia completa del formato JSON
 
 Usa la guía completa del formato en la documentación del repositorio principal:
 
-- [`docs/CUSTOM_THEMES.md`](https://github.com/Youzini-afk/Varin/blob/main/docs/CUSTOM_THEMES.md)
+- [`docs/ops/CUSTOM_THEMES.md`](https://github.com/Youzini-afk/Varin/blob/main/docs/ops/CUSTOM_THEMES.md)

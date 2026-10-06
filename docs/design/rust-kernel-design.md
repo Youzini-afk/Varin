@@ -2,10 +2,10 @@
 
 Status: implemented architecture; R0–R6 and Stage R complete through D-282.
 
-Last updated: 2026-09-15
+Last updated: 2026-10-06
 
 本文规定 Varin Rust 系统内核的当前职责和跨进程契约。R0–R6 的实施记录见
-[agent-harness-plan.md](../plan/agent-harness-plan.md) 阶段 R，实际交付只看
+[历史计划的阶段 R](../archive/agent-harness-plan-2026-10-06.md)，实际交付只看
 [status.md](../status.md)。本阶段以长期稳定性、工作区规模、并发执行和可维护性为目标；
 不是原生加速函数试验，也不以完成一个存储 helper 宣告整体迁移完成。
 
@@ -264,71 +264,18 @@ R0–R6 都是本阶段交付范围。每个里程碑记录生产消费者、已
 - [SQLite atomic commit](https://www.sqlite.org/atomiccommit.html)：数据库事务的原子性依赖其存储/刷新协议，不自动覆盖数据库外文件。
 - [Child process transport](https://nodejs.org/api/child_process.html)：Node Host 的子进程与 stdio 传输机制；实现按仓库钉住的 Node/Electron 验证。
 
-## D-280 原生进程的实际交付边界
+## 历史验收与当前实现入口
 
-catalog v10 的 process records 与既有 root/recovery 共用一个 Storage。主 kernel 授权后启动
-同一 executable 的私有 guardian，后者不拥有数据库，负责原生 PTY/pipe 和树退出回执。
-控制面是生成的 `process.*` DTO，原始字节按有界 cursor 通道传递；stdin 用 sequence/content
-identity 与实际 write receipt，release 留 tombstone 防重放。命令/env 正文不写入 catalog。
+D-280、D-281、D-282 分别收口进程权威、原生计算与发行/传输边界。当前实现细节分别由
+[进程模块](../../packages/web/application-host/lib/process/DOCUMENTATION.md)和
+[Host kernel 模块](../../packages/web/application-host/lib/kernel/DOCUMENTATION.md)维护；
+本设计不再追加第二份按提交排列的消费者和测试清单。
 
-Host 持有产品请求、版本和 stream projection，不再创建目标 OS 进程。异步启动被取消时包含
-未交付 child 的停止；RPC 关闭不能伪造 native close，writer 清理失败仍可重试。kernel loss
-向 terminal 和 shell 投影明确 error/unknown，既不返回 code 0 也不静默再启动 shell。
-受管 Thread 凭 retained ownership admission 而不是 application-data 前缀取得 cwd 权限。
-
-Windows ConPTY 先关闭 master 并排完最后输出，再清理 Job 残余成员；不能提前杀 console host
-导致丢字节/exit receipt。Linux subreaper 处理 reparented descendants；其他 Unix 用会话证据。
-这些是管理进程生命周期，不构成恶意进程 sandbox。跨平台实际结果交由 native CI，本文不以
-Windows 用例外推所有平台。完整消费者图和测试边界见
-[process module](../../packages/web/application-host/lib/process/DOCUMENTATION.md)。
-
-## D-281 原生文件与结构计算的实际交付边界
-
-R5 的 `compute.*` 是既有 root/file authority 上的 read-only job，不是新的持久 store。Storage 在 admission
-阶段验证 grant、workspace、path scopes 与 source identity；immutable WorkingState pin 会复制 reader pin，live
-workspace 使用 Host-admitted root，Registry draft 则以 fixed object/tombstone overlay 进入。worker 只读已准入的
-tree/object/file handle，不能自行扩大 scope 或回写 workspace/catalog。
-
-两个 foreground worker 与独立 background worker 分开交互式 read/search/explore 和目录/索引建设；bounded record
-queue + cursor ack 提供背压。取消会到实际 job，caller 观察 terminal 后才 release reader。native grep/ignore + Git
-inventory 负责文件候选和文本 search；native tree-sitter 接受已注册 grammar/query recipe，输出 revision-bound
-symbols/hits/imports/calls/structural units。live source 若在读取窗口变化，结果只能 partial/failed；只有 immutable pin
-可称固定视图。
-
-生产消费者已经统一：workspace content search、file find、Harness grep/explore、language catalog、symbol graph 和
-semantic disk index 使用 `KernelComputeService`；virtual Thread semantic 在同一 WorkingState pin 上先列 path/revision，
-再调用 `unitsFixed`，不把整分支正文搬到 TS。surface draft 仍由 Registry 捕获并作为固定 text object，因为未保存
-正文的 authority 不属于 Rust。tokenizer、embedding/vector store、TriviumDB、Pi inference 与 LSP 协议仍保持原职责。
-Host 的 `web-tree-sitter` 只用于 grammar 安装 ABI admission，不解析 workspace source。
-
-生产旧路径已退出：Host ripgrep child、递归 file-search scanner、WorkingBranch corpus/body mirror、Host JSON outline/
-chunk discovery 无生产 caller。Windows release kernel 的 R5 native suite 10/10 以及 focused consumer 13 files / 118
-tests 验证 pin/live drift、scope、draft/tombstone、Git ignore、前后台 backpressure/cancel、disk/pin structure/chunks 与
-semantic/symbol consumer。R5 因此 Complete；其后的 R0/R6 收口见 D-282。
-
-## D-282 R0/R6 与阶段 R 的实际完成边界
-
-R0 transport 现在以握手返回的 `requestWindow` 为 acknowledgement-backed credit。Host 在编码普通请求、blob chunk 和
-branch builder batch 前取得 credit，只在匹配响应或连接终止时释放；请求被调用方取消后仍保留 credit，直到 Rust 确认实际停止。
-cancel 是独立控制帧，因此 serial Storage 忙或输出背压时仍能到达。Rust admission queue 与握手窗口使用同一常量，拒绝重复在飞 id、
-畸形 request 和超窗发送；截断/损坏输入终结该 epoch，取消剩余工作并完成 worker/writer 排空。关闭不凭固定等待推断成功。
-
-发行树是生产事实。Web/云包包含 `packages/web/kernel/{manifest,binary}` 与独立 verify 脚本；Electron 把 kernel 放在
-`resources/kernel`，在打包前和 after-pack/unpacked smoke 中核对 target、架构、build identity 与 SHA-256。支持矩阵由 Windows x64/ARM64、Linux x64/ARM64、
-macOS x64/ARM64 的 native runner 构建与 smoke，当前本机只声明 Windows x64 实测。复制 release 目录后的新安装可用新 epoch 重开
-同一 current-format catalog；坏 manifest 不能启动。客户端不安装 Cargo/Rust，也没有 source/Cargo/ripgrep production fallback。
-
-R6 清理同时删除 Web/Electron 生产 `node-pty`、`bun-pty`、`better-sqlite3` 依赖和 rebuild 脚本；TriviumDB、sherpa 与 Pi
-仍按各自领域验证。Application Host 构建从实际 emitted `index.js`/`public-contract.js` 追踪 import/worker URL，任何可达旧 store 或
-test helper 都失败；不可达测试/旧实现不进入 release，并生成 production-boundary manifest。旧 TS file writer 只在显式 test-helper
-文件中存在，生产 `journal-files` 只保留 path/hash reader。Web watch 传递 surface-operation，Document Registry dispose
-等待最后 journal 与 dirty-owner release，真实 Rust+Registry surface/disk Integration 覆盖 apply/undo。
-
-`scripts/measure-kernel.mjs` 使用固定 corpus hash、同机交替顺序、独立进程、首调/预热/8 次热样本比较已验收的 TS baseline 与
-当前产品路径，并记录 startup、inventory/search/structure、event-loop delay、Host+kernel RSS、固定 root 读写、节点增量、WAL 文件长度
-变化和 cancel→terminal/release。结果只支持结构与实际负载判断：Rust search 在 128/1024 文件更快、4096 文件接近持平；native
-inventory 和逐文件 structure 在该夹具更慢但保持有界；单路径写约 4–5 ms 且新增节点随树深而非兄弟数增长；后台背压下前台固定读
-约 11 ms。瞬时 RSS 未覆盖 baseline 短命 rg 子进程，WAL 文件长度也不是物理写放大，因此不据此宣称统一语言倍数。
+D-282 的同机夹具比较记录了不同成本：Rust search 在 128/1024 文件更快、4096 文件接近持平；
+native inventory 和逐文件 structure 较慢但保持有界；单路径写约 4–5 ms，新增节点随树深增长；
+后台背压下前台固定读约 11 ms。这是历史负载证据，非当前提交重测、跨平台承诺或统一语言提速。
+瞬时 RSS 未覆盖基线短命 rg 子进程，WAL 文件长度也不等于物理写放大。测量入口仍为
+`scripts/measure-kernel.mjs`，完整经过见[交付记录](../archive/harness-delivery-log.md)。
 
 由此第 10 节的六类完成条件均有生产实现与相称证据，Stage R 完成。真实 ReFS/APFS extent sharing、物理断电 campaign、付费模型
 质量和尚未运行的其他平台 release workflow 结果继续按各自环境登记，不恢复旧实现或把已验证平台置回候选状态。

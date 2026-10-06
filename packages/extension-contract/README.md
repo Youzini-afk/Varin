@@ -65,4 +65,4 @@ unknown `contractVersion` is still parsed (structure, id, kind, supports) but it
 not validated. Use `checkVarinContributionCompatibility` and `isVarinContributionCompatible`
 to determine whether a contribution is executable on the current runtime.
 
-See the complete [authoring guide](https://github.com/Youzini-afk/Varin/blob/main/docs/varin-extension-authoring.md).
+See the complete [authoring guide](https://github.com/Youzini-afk/Varin/blob/main/docs/ops/varin-extension-authoring.md).

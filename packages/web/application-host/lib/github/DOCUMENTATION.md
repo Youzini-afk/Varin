@@ -7,14 +7,14 @@
 
 ## Entrypoints and structure
 
-- `packages/web/application-host/lib/github/index.js`: public server entrypoint.
-- `packages/web/application-host/lib/github/routes.js`: Express route registration for `/api/github/*` endpoints.
-- `packages/web/application-host/lib/github/auth.js`: auth storage, multi-account support, client id, scope config.
-- `packages/web/application-host/lib/github/device-flow.js`: OAuth device flow.
-- `packages/web/application-host/lib/github/octokit.js`: Octokit factory for the current auth.
-- `packages/web/application-host/lib/github/repo/index.js`: remote URL parsing and directory-to-repo resolution.
-- `packages/web/application-host/lib/github/pr-status.js`: PR lookup across remotes, forks, and upstreams.
-- `packages/web/application-host/index.js`: API route layer that calls this module.
+- `packages/web/application-host/lib/github/index.ts`: public server entrypoint.
+- `packages/web/application-host/lib/github/routes.ts`: Express route registration for `/api/github/*` endpoints.
+- `packages/web/application-host/lib/github/auth.ts`: auth storage, multi-account support, client id, scope config.
+- `packages/web/application-host/lib/github/device-flow.ts`: OAuth device flow.
+- `packages/web/application-host/lib/github/octokit.ts`: Octokit factory for the current auth.
+- `packages/web/application-host/lib/github/repo/index.ts`: remote URL parsing and directory-to-repo resolution.
+- `packages/web/application-host/lib/github/pr-status.ts`: PR lookup across remotes, forks, and upstreams.
+- `packages/web/application-host/index.ts`: API route layer that calls this module.
 - `packages/web/src/api/github.ts`: web client wrapper for GitHub endpoints.
 
 ## Public exports
@@ -55,18 +55,24 @@
 ## PR integration overview
 
 - The UI asks `github.prStatus(directory, branch, remote?)` from `packages/web/src/api/github.ts`.
-- That hits `GET /api/github/pr/status` in `packages/web/application-host/index.js`.
-- The route calls `resolveGitHubPrStatus(...)` in `packages/web/application-host/lib/github/pr-status.js`.
+- That hits `GET /api/github/pr/status` in this module’s `routes.ts`.
+- The route calls `resolveGitHubPrStatus(...)` in `packages/web/application-host/lib/github/pr-status.ts`.
 - The resolver finds the most likely repo and PR for a local branch.
 - The route then enriches that result with checks, mergeability, and permission-related fields.
-- The client caches and shares the result between sidebar and Git view.
+- The shared client store caches the result for its current visible consumers.
 
-## Consumers of PR data
+## Client ownership
 
-- `packages/ui/src/components/session/SessionSidebar.tsx` reads all PR entries and maps them to `directory::branch`.
-- `packages/ui/src/components/session/sidebar/SessionGroupSection.tsx` renders the compact badge, PR number, title, checks summary, and GitHub link.
-- `packages/ui/src/components/views/git/PullRequestSection.tsx` uses the same shared entry for the full PR workflow.
-- `packages/ui/src/components/ui/MemoryDebugPanel.tsx` reads request counters for debugging.
+`packages/web/src/api/github.ts` is the typed HTTP adapter. The shared
+`useGitHubPrStatusStore.ts` cache is consumed by `GitView`, `PullRequestSection`, and
+`WalkthroughView`. It keys entries by runtime, directory, branch and requested remote, so one
+server or fork cannot supply another target's PR state.
+
+Cache lifecycle, refresh ownership and selector rules are documented in
+[UI Stores](../../../../ui/src/stores/DOCUMENTATION.md#usegithubprstatusstorets).
+Keep those rules there rather than maintaining a second polling specification in this Host module.
+Visible consumers start and stop watchers; there is no global background repository scanner or
+legacy session-sidebar PR aggregator to restore.
 
 ## How PR resolution works
 
@@ -79,94 +85,12 @@
 - If that fails, it falls back to broader GitHub search for the branch name.
 - `403` and `404` during repo lookups are treated as expected gaps, not hard errors.
 
-## Shared client state model
+## Failure handling and changes
 
-- Client key is effectively `directory::branch`.
-- One entry stores last known status, loading state, error, timestamps, watcher count, identity, and resolved remote.
-- Requests are deduplicated by branch signature, not by component instance.
-- This keeps sidebar and Git view aligned and avoids duplicated fetches.
+Disconnected GitHub accounts are reported as `connected: false`. A missing or inaccessible PR is
+distinct from a successful mutation; the Git view presents actionable failures. Preserve remote
+ranking and fork/upstream lookup instead of assuming `origin` is always the correct repository.
 
-## Persistence
-
-- PR state is persisted in local storage under `varin.githubPrStatus.v1`.
-- Persisted fields include status, timestamps, identity, and resolved remote.
-- Runtime-only details are not persisted.
-- Persisted entries expire after 12 hours.
-- On reload, users get last known state first, then background refresh resumes.
-
-## Polling and refresh model
-
-- There are two layers: entry-level polling in `useGitHubPrStatusStore` and repo scanning in `useGitHubPrBackgroundTracking`.
-- Entry-level polling decides when a known branch should revalidate PR state.
-- Background tracking decides which directories and branches should even be watched.
-
-## Entry-level polling rules
-
-- Start watching -> immediate refresh.
-- If no PR is found yet -> retry after `2s` and `5s`.
-- Still no PR -> discovery refresh every `5m`.
-- Open PR with pending checks -> refresh about every `1m`.
-- Open PR with non-pending checks -> refresh about every `5m`.
-- Open PR without a stable checks signal -> refresh about every `2m`.
-- Closed or merged PR -> stop regular polling.
-- Hidden tab -> skip polling.
-- Non-forced refreshes use a `90s` TTL.
-- Failed non-forced attempts also observe the `90s` TTL so transient server or rate-limit failures cannot retry on every sidebar update. Forced user/action refreshes bypass this guard.
-
-## Background tracking rules
-
-- Track up to `50` likely directories.
-- Sources are current directory, projects, worktrees, active sessions, and archived sessions.
-- Active directory branch TTL is `15s`.
-- Background directory branch TTL is `2m`.
-- Background scan wakes every `15s`, but only fetches directories whose TTL expired.
-- Each scan reads `branch`, `tracking`, `ahead`, and `behind` from git status.
-- If any of those branch signals change, that branch's PR status refreshes immediately.
-- After that, one more delayed refresh runs after `5s` to catch GitHub eventual consistency.
-
-## UI refresh triggers
-
-- App or tab becomes visible.
-- Window regains focus.
-- Current branch changes.
-- Tracking branch changes.
-- Ahead or behind changes.
-- User selects a different remote in Git view.
-- GitHub auth state changes.
-
-## Action-based refreshes in Git view
-
-- After `Create PR` -> refresh now, then after `2s` and `5s`.
-- After `Merge PR` -> refresh now, then after `2s` and `5s`.
-- After `Mark ready for review` -> refresh now, then after `2s` and `5s`.
-- After `Update PR` -> refresh now, then after `2s` and `5s`.
-
-## Sidebar behavior
-
-- Sidebar shows only compact PR state.
-- Aggregation is by `directory::branch`, so multiple sessions on one branch share one signal.
-- If multiple entries exist, sidebar keeps the strongest visible PR state.
-- Visual state is based on PR health, not merge permissions.
-
-## Git view behavior
-
-- Git view watches one branch directly.
-- It supports create, edit, mark ready, and merge.
-- It can probe alternate remotes so fork-heavy setups still find the right PR.
-- It uses the same shared store as the sidebar.
-
-## Failure handling
-
-- If GitHub is disconnected, API returns `connected: false`.
-- If a repo is private or inaccessible, resolver calls may quietly return no PR.
-- Sidebar stays quiet on missing or inaccessible PR state.
-- Git view is where explicit PR-level problems should be shown.
-
-## Notes for contributors
-
-- Keep the UI calm. Do not add noisy diagnostics to the sidebar.
-- Prefer shared state over per-component fetches.
-- Prefer event-shaped refreshes over blind frequent polling.
-- Prefer correctness for fork and multi-remote setups over assuming `origin` is enough.
-- Device flow handles GitHub `authorization_pending` at caller level.
-- Repo parser supports `git@github.com:`, `ssh://git@github.com/`, and `https://github.com/`.
+Device flow handles GitHub `authorization_pending` at the caller. Repository parsing supports
+`git@github.com:`, `ssh://git@github.com/`, and `https://github.com/` URLs. Credential writes remain
+Host-owned; never copy tokens into UI caches or diagnostics.

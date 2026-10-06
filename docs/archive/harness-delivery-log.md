@@ -1,8 +1,8 @@
 # Harness 阶段交付日志（自 status.md 迁入）
 
 Status: historical delivery record — archived 2026-09-27. 本文件是从
-[能力状态矩阵](../status.md) 抽出的逐阶段交付叙述与实施证据，**不再更新**；
-现行能力状态以矩阵为准，两者冲突时以矩阵为准。
+原 status 抽出的逐阶段交付叙述与实施证据，正文保留当时基线。
+当前概况见[状态](../status.md)，按能力证据见[Harness 验收](../reviews/harness-capabilities.md)；旧任务式语气不构成当前工作指令。
 
 原始位置说明：第一段为各阶段交付叙述（原 status 历史交付记录区），第二段为阶段 R 交付明细，
 第三段为当时的缺口叙述、未完成项台账与阶段 1 历史快照。

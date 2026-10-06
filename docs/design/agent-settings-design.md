@@ -28,11 +28,11 @@ session→Surface 绑定及 typed action-operation 收口见 D-311，
 - “把刚才的文献筛选办法保存为这个项目的 Skill。”
 - “帮我调整科研工作环境。”后者可以按需读取组合指南，再查询实际配置并操作。
 
-## 2. 现有基础与需要补齐的部分
+## 2. 实现归属
 
-源码核对入口如下。它们是实现起点，不是已完成的统一 Agent 管理通路。
+统一设置工具沿以下 owner 接线；字段覆盖与平台限制由实际目录返回，不能从页面存在推断全部可操作。
 
-| 现有责任 | 入口 | 本阶段的处理 |
+| 责任 | 入口 | 处理边界 |
 | --- | --- | --- |
 | 应用设置保存与副作用 | [settings-runtime.ts](../../packages/web/application-host/lib/platform/settings-runtime.ts) | 复用保存 authority，补齐语义化操作、并发条件与变更通知 |
 | 应用设置客户端 | [settings.ts](../../packages/web/src/api/settings.ts) | UI 与 Agent 汇入同一操作服务 |

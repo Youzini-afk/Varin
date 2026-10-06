@@ -238,18 +238,15 @@ Markdown formatting, links, entities, lists, tables and code to exact UTF-16 sou
 rendered regions and an unsaved live reply remain copyable/quotable, but cannot claim a verified memory
 source. An open menu keeps a highlight over its captured selection.
 
-The authenticated Host validates every passage against the current native branch before asking the
-existing memory-organizer model (or its existing Bot-model fallback) for editable drafts. Explicit
-extraction does not require automatic memory to be enabled, does not advance background coverage and
-does not write memories. Empty results and malformed/failed results are distinct. Closing the preview
-cancels inference through the existing batch cancellation path.
+The authenticated Host validates passages against the current native branch. Ordinary Agent selection
+previews return editable source text without model inference; saving writes explicit scoped notes to
+Agent personalization. Bot selections use the existing organizer to prepare editable drafts and the
+Bot MemoryService to save them. Explicit extraction does not require automatic organization or advance
+its background coverage. Empty results and failed or malformed results remain distinct.
 
-The preview shows content, recall cue, original passages and the actual destination: project, Bot or
-session memory, with personal memory as an explicit alternative. Save uses the unified MemoryService,
-rechecks the source revisions and owner, and commits accepted user-extracted records. Successful rows
-remain visible if a later save fails. Undo is offered only for newly created rows and checks the saved
-revision; duplicates are never silently retired. No second knowledge store or per-row review queue is
-introduced.
+Both paths recheck the selected owner and source at save time. Undo checks the saved note/record and
+originating session rather than removing a later edit. The [memory owner document](../../packages/web/application-host/lib/memory/DOCUMENTATION.md)
+maintains their persistence and scope differences; the menu does not create another store.
 
 ## 9. Delivery phases
 

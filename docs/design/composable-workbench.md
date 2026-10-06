@@ -11,7 +11,7 @@ Last updated: 2026-09-19
 这份文档规定 Varin 工作台已经交付的架构、固定产品决策，以及文档、编辑器、Profile、语言服务和
 调试各自的归属边界。实现进度与历史阶段不在这里保存；当前行为以代码、契约测试和模块文档为准。
 
-正文为中文。英文读者可先看 [architecture.md](../architecture.md) 第 4 节的工作台概述。
+正文为中文。英文概述见 [architecture.md](../architecture.md#workbench-and-extension-boundaries)。
 跨 Shell 动画、首帧启动投影和不规定页面元素的 Motion 边界见
 [varin-motion-platform.md](varin-motion-platform.md)。
 desktop/web 官方文件编辑器的新目标、Monaco 与移动 CodeMirror 的分工以及语言智能实施顺序见
@@ -21,14 +21,16 @@ Profile 或 Host ownership。
 
 ## 1. 目标
 
-Varin 是一套可由 Varin 扩展重新组合乃至替换完整 UI/UX 的工作空间平台，当前已交付两套官方工作形态：
+Varin 是一套可由 Varin 扩展重新组合乃至替换完整 UI/UX 的工作空间平台，当前官方 Shell 包括：
 
 - **Agent Workspace**：会话、任务、上下文与恢复工作流居中；任务呈现在所属会话与工作概览中；
-- **IDE Workbench**：项目、编辑器、搜索、Git、终端、诊断与调试居中，Agent 是可停靠的一等工作面板。
+- **IDE Workbench**：项目、编辑器、搜索、Git、终端、诊断与调试居中，Agent 是可停靠的一等工作面板
+- **Research Workbench**：研究主线、分支与实验/材料投影
+- **Bot Workspace**：持久 Bot 的工作与电脑入口；具体能力边界见 Bot/Computer Use 验收记录
 
-二者不是 Varin Core 中的两个硬编码 mode，也不是两套应用。它们是普通的第一方 Varin 扩展和 Workbench Profile。用户可以：
+这些 Shell 是第一方 Varin 扩展和 Workbench Profile，复用同一内核。用户可以：
 
-- 选择 Agent、IDE 或自建 Profile；
+- 选择官方或自建 Profile；
 - 替换完整 `workbench.shell`；
 - 只替换导航、页面、编辑器、面板、Composer、Timeline 或状态栏；
 - 混合使用官方与社区贡献，例如 IDE 中央编辑器、社区 Explorer、官方 Agent 右栏；
@@ -38,12 +40,12 @@ Pi Packages 与 Varin Extensions 继续是两个系统。前者扩展 Pi Agent�
 
 ## 2. 已确定的产品决策
 
-以下决定已经固定,改动它们需要先改这张表：
+以下约定由共享内核与对应 owner 保持：
 
 | 主题 | 决定 |
 | --- | --- |
 | 产品模型 | Profile + Varin 扩展组合，不增加全局 `ideMode` 或 `agentMode` |
-| 官方形态 | Agent Workspace、IDE Workbench、Research Workbench 都是第一方 Varin 扩展 |
+| 官方形态 | Agent Workspace、IDE Workbench、Research Workbench、Bot Workspace 都是第一方 Varin 扩展 |
 | 默认形态与选择 | `default` 是 Agent Workspace 的稳定 ID；所选工作台按 `user → active` 解析，导航项目/会话不自动换 Shell |
 | IDE Profile ID | `varin.ide` |
 | 编辑器引擎 | desktop/web 官方文件编辑统一使用 Monaco；mobile/embedded 使用 CodeMirror adapter；不 fork Code OSS，不维护 Agent/IDE 两套文件能力 |
@@ -578,22 +580,21 @@ interface VarinEditorContextAttachment {
 }
 ```
 
-- saved attachment 可让 Pi 工具读取磁盘；
-- unsaved attachment 的实际文本作为明确的 prompt/context payload 发送，UI 标记“未保存快照”；
-- 不创建隐藏 shadow workspace，也不声称 Pi 文件工具能看到未保存 buffer；
-- 用户决定附加 selection、完整 buffer 或仅 path；
-- provider/model context 上限通过现有 token/usage 反馈呈现，不新增猜测性的固定字符上限。
+显式 attachment 保留来源、修订和选区；未保存正文作为明确快照交付，不能被另一版磁盘内容替换。
+Host-backed 文件读取还可使用固定 Document Registry 来源或隔离工作分支。它们经认证的
+`document.readSource` 选择字节，不使 Pi worker 成为另一套 buffer owner。
+固定来源、跨根草稿和别名的细节见[任务/资源设计](resource-oriented-harness-design.md#14-后续修正固定来源视图与索引盘点)。
 
 ### 12.2 Agent 文件修改
 
-Pi 和 Pi 插件继续写真实 workspace 文件。Document watcher 负责协调：
+Varin 的 `write`、`edit` 和 `apply_patch` 经 Host 分支/文档 mutation 入口执行。
+固定草稿写回同一 Registry owner，并核对修订；磁盘变更经 Documents/Rust file authority。
+backend 不可用或来源过期时返回失败，不改由 Pi worker 写盘。外部程序和第三方插件的直接写入仍由 watcher 观察，
+不能保证它们具备 Varin 工具的逐路径 before/after 覆盖。
 
-- clean open document：载入新 revision，并在 UI 标明 Agent 修改来源（可从 session/tool hint 补充，但文件事件仍是权威）；
-- dirty open document：进入 conflict，不 autosave 覆盖；
-- closed document：更新 tree/Git/search invalidation；
-- rename/delete：保留 dirty buffer 并提供 save as/compare/discard；
-- tool diff、timeline changed files 和 editor diff 可以互相导航；
-- Patch review 支持逐文件/逐 hunk 接受、拒绝或手工合并，但最终写入仍走 DocumentsAPI revision precondition。
+clean 文档可接受已确认的新磁盘 revision；dirty 文档遇外部写入保留缓冲并进入 conflict。
+Agent patch review 通过 Registry transaction 更新 dirty buffer，保存仍是显式 Documents 操作。
+rename/delete 保留需要用户处理的 dirty 内容。聊天变更、diff 与文件编辑器共用资源身份和导航。
 
 选中的 `varin.workspace-recovery@5` Host 服务拥有受影响文件日志和联合恢复；Document conflict
 不复制其日志，也不读取可选 `pi-workspace-history` 包的私有状态。

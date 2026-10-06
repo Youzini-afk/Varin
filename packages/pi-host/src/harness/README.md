@@ -7,15 +7,10 @@ The pi-host harness tools are custom tools registered in the Pi session's
 
 | Tool | Description | Host Service |
 |------|-------------|--------------|
-| `bash` | Execute shell commands (PTY, persistent shell) | `shell.exec` |
-
-> **Note**: Under PTY-based shells (git-bash, wsl, bash), stdout and stderr
-> are merged into a single stream. The `stderr` field in `ShellExecResult`
-> will be empty; all output appears in `stdout`. PowerShell is the only
-> interpreter that separates the streams (but it is not yet wired).
+| `bash` | Independent commands at explicit or frozen default cwd; real PTY/background handles | `shell.exec` |
 | `read` | Pi-native paging/truncation/images with fixed editor-draft or working-branch source selection | `document.readSource` |
 | `find` / `ls` | Pi-native glob/list rendering with fixed dirty-only or exclusive working-branch paths | `document.pathOverlay` |
-| `grep` | Bounded rg plus fixed editor-draft overlay, or exclusive working-branch corpus | `search.content` |
+| `grep` | Native kernel search over authorized live roots, fixed editor drafts or a working-branch pin | `search.content` |
 | `apply_patch` | Codex-format multi-file patch (OpenAI only); Varin mutations go through Host branch/surface write authority | `document.branchWrite` + `document.surfaceWrite` |
 | `get_output` | Retrieve stored/shell output by handle; optionally wait for new bytes or exit | `output.read` / `shell.read` |
 | `write_to_process` | Write stdin to background shell | `shell.write` |
@@ -37,6 +32,10 @@ The pi-host harness tools are custom tools registered in the Pi session's
 | `experiment` | Submit and manage attempts, page logs and collected text artifacts | `experiment.submit/list/get/logs/artifact/wait/cancel/collect` |
 | `resources` | Read machine capacity, commitments, observations and queued work | `resource.list` |
 | `research_source` | Register or inspect provenance and retained source objects | `source.register/list` |
+
+PTY stdout/stderr share the terminal stream, including PowerShell’s ConPTY path. Each `bash` call starts
+in its explicit or request-frozen default cwd; cd/env/venv changes do not carry into another call.
+Use the returned runtime handle to continue a still-running process.
 
 Research tools require the Host's actual services, research work focus and the session's tool selection.
 `wait` without `timeout_ms` holds an event subscription with no periodic model calls. New user input

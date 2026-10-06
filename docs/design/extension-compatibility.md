@@ -41,7 +41,7 @@ test state. It invokes no network, model, recovery, or destructive commands, so 
 loading and command registration and nothing more. Published tarballs work when their `pi.extensions`
 entries and production dependencies are present.
 
-## Current upstream source audit
+## Historical upstream source audit (2026-08-23)
 
 The versions below are the sources reviewed on 2026-08-23, not a promise that every runtime path was
 exercised on every operating system. They record which upstream contract changed and why an adapter

@@ -52,4 +52,4 @@ with revisioned storage and no privileged capabilities. These public harnesses a
 from `@varin/extension-sdk/testing` for an extension's own test suite.
 
 The complete manifest, lifecycle, update, distribution-profile, and publishing workflow is in the
-[Varin extension authoring guide](https://github.com/Youzini-afk/Varin/blob/main/docs/varin-extension-authoring.md).
+[Varin extension authoring guide](https://github.com/Youzini-afk/Varin/blob/main/docs/ops/varin-extension-authoring.md).

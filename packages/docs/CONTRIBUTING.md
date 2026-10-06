@@ -101,8 +101,8 @@ running.
    - `foo.mdx` -> `/foo/`
    - `folder/index.mdx` -> `/folder/`
    - `folder/bar.mdx` -> `/folder/bar/`
-4. Add translations for the page — see [Localization](#localization). New pages
-   must include translated files for every supported locale before they ship.
+4. Review translation coverage — see [Localization](#localization). Keep existing
+   translations accurate; link to the English source when a translation is not available.
 5. If the page is linked from the sidebar, add its localized labels too — see
    [Translate the sidebar](#translate-the-sidebar).
 6. Run validation:
@@ -132,13 +132,13 @@ Rules:
 - use trailing slash in links (`/page/`)
 - every sidebar link must map to an existing English MDX file
 - keep section labels short and task-oriented
-- put Chinese in `label`; put English and other locales in `translations`
+- put English in `label`; put other locales in `translations`
 
 ## Images
 
-Images live inside the docs content tree so they sync to the website with the
-pages (the sync copies all of `content/docs/`, not just `.mdx`). Reference them
-with a **relative path**; Astro optimizes them at build time.
+Keep images inside the docs content tree and reference them with a **relative path**.
+There is no renderer or sync workflow in this repository yet. A future Astro integration
+should copy the complete content tree and configure image optimization.
 
 ```
 content/docs/
@@ -150,24 +150,24 @@ content/docs/
 Rules:
 
 - co-locate images under `content/docs/` (e.g. `content/docs/images/`); a
-  relative `./images/...` reference is resolved and optimized at build
+  relative `./images/...` reference lets a future renderer resolve the asset
 - always set meaningful `alt` text (and translate it in localized pages)
 - do **not** put docs images in the website repo's `public/` — it is not the
-  source of truth and the sync will not pick them up
-- keep originals reasonably sized; the build generates responsive variants
+  source of truth for this content
+- keep originals reasonably sized; configure responsive variants in the future renderer
 
 For translations, reuse the same shared image when it carries no text. If a
 screenshot contains localized UI text, add a per-locale copy under that locale's
 folder (e.g. `uk/images/...`) and point the translated page at it.
 
-`docs:validate` only checks `.mdx`, so images never block validation.
+Check that image files exist and render correctly when previewing a site; the current
+content validator does not render images.
 
 ### Light / dark variants
 
 To show a different screenshot per theme, add a `-light` / `-dark` pair and tag
-each with `oc-light-only` / `oc-dark-only`. The website ships CSS for these
-classes (keyed on Starlight's `data-theme`), so the right one shows and follows
-the in-page theme toggle.
+each with `oc-light-only` / `oc-dark-only`. A future renderer must supply CSS for these
+classes, keyed on Starlight's `data-theme`; the class names alone do not switch images.
 
 Use the `<Image>` component so the images stay optimized while taking a class.
 Add the imports right under the frontmatter:
@@ -188,7 +188,7 @@ import desktopDark from "./images/desktop-dark.png";
 
 Notes:
 
-- both files live under `content/docs/` like any other image and sync normally
+- both files live under `content/docs/` like any other image
 - give both the same `alt` (and translate it in localized pages)
 - if you only have one image, just use the normal `![alt](./path.png)` form
 
@@ -249,13 +249,15 @@ Each translated file needs its **own translated frontmatter** (`title` and
 ```mdx
 ---
 title: Встановлення
-description: Встановіть Varin для десктопа, вебу або VS Code.
+description: Встановіть Varin для десктопа або вебу.
 ---
 ```
 
-Every new page must include translated files for all supported locales before it
-ships. Starlight can fall back to English when a translation is missing, but do
-not rely on that fallback for new docs pages.
+Translation coverage and quality are review concerns, not blocking validator rules.
+Preserve each locale’s useful content and update changed facts consistently. When a
+translation is missing, an explicit link to the English source is acceptable; do not
+create placeholder translations just to satisfy a file count. Renderer fallback behavior
+must be checked when a site is integrated.
 
 ### Translate the sidebar
 
@@ -296,8 +298,9 @@ to each section and item in `sidebar.config.json`:
 }
 ```
 
-A label with no translation for the active locale falls back to the English
-`label`.
+Translations are optional in this source schema. When a renderer is added,
+configure it to use the English `label` where a locale label is missing; this
+repository does not yet run that rendering behavior.
 
 ### What not to translate
 
@@ -311,8 +314,10 @@ A label with no translation for the active locale falls back to the English
 
 `bun run docs:validate` walks every `.mdx` under `content/docs/` — **including
 translations** — and fails if any page is missing `title` or `description`
-frontmatter, or if a sidebar `link` does not resolve to a default (English) page. Run it
-after adding or translating pages.
+frontmatter, or if an inline page link or sidebar `link` has no target. It also runs
+the engineering documentation local-link check. English stays at the root of the content
+tree. Run it after adding or translating pages; review command accuracy and localization
+separately.
 
 ## Publishing
 

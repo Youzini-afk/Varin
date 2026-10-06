@@ -27,13 +27,13 @@ Traffic is modeled as three stacked layers. The relay understands only Layer 1; 
 ## Entrypoints and structure
 
 Host side (`packages/web/application-host/lib/relay/`):
-- `service.js` — thin entrypoint: relay config (enabled flag + relay URL), the management routes (`GET/POST /api/varin/relay/{status,enable,disable}`), a `getPairingCandidate()` accessor (the relay transport candidate folded into pairing-v2 links when enabled, consumed by the pairing-session route in `core-routes.js`), and lifecycle wiring. Started from `packages/web/application-host/index.js` only when the user has explicitly enabled the relay. `VARIN_RELAY_URL` (which must use `ws://` or `wss://`) pins an operator-selected endpoint and overrides the stored setting for the host connection, pairing candidate, and status, so paired clients inherit it automatically. The current fallback hostname is legacy deployment infrastructure and must be replaced with a Varin-owned endpoint before it is presented as a public production service.
-- `identity.js` — the host's stable identity: the long-lived signing keypair (shared with the push relay, defines the routing id) plus a long-lived encryption keypair (the E2EE trust anchor). Reused across restarts; never rotated implicitly.
-- `signing-key.js` — storage/derivation of the signing keypair and the routing id, shared with the notifications runtime.
-- `host-client.js` — the long-lived connection manager: one outbound control connection to the relay, a per-client data connection for each connected device, reconnect/backoff, and the E2EE responder handshake per connection.
-- `host-lock.js` — the per-machine host claim. Every local instance sharing the data dir shares the relay identity (same serverId), so concurrent relay hosts evict each other at the relay worker (`4001: Control replaced`) and paired devices land on whichever local process won last. The claim file (`<data-dir>/relay-host.lock`, `{ pid }`) makes this deterministic: `service.js` only starts the host when no LIVE process holds the claim (stale claims from dead pids are ignored), goes to `standby` otherwise, and a 30s watcher both takes over when the claimant dies and stands down when another process claims. Explicit user intent — creating a pairing link or hitting `/relay/enable` — force-claims; the previous holder's watcher sees the takeover and backs off instead of fighting. The claim is cooperative (the relay worker still enforces the single host slot); it only decides which process keeps retrying.
-- `tunnel-host.js` — the per-connection dispatcher: decrypts tunnel frames and forwards HTTP/SSE/WS to the local server over loopback, then streams responses back. Enforces a path allowlist and never injects credentials.
-- `e2ee.js`, `tunnel-codec.js` — host-side (JS) mirrors of the shared crypto and framing (see "Two implementations" below).
+- `service.ts` — thin entrypoint: relay config (enabled flag + relay URL), the management routes (`GET/POST /api/varin/relay/{status,enable,disable}`), a `getPairingCandidate()` accessor (the relay transport candidate folded into pairing-v2 links when enabled, consumed by the pairing-session route in `../platform/core-routes.ts`), and lifecycle wiring. Started from `packages/web/application-host/index.ts` only when the user has explicitly enabled the relay. `VARIN_RELAY_URL` (which must use `ws://` or `wss://`) pins an operator-selected endpoint and overrides the stored setting for the host connection, pairing candidate, and status, so paired clients inherit it automatically. The current fallback hostname is legacy deployment infrastructure and must be replaced with a Varin-owned endpoint before it is presented as a public production service.
+- `identity.ts` — the host's stable identity: the long-lived signing keypair (shared with the push relay, defines the routing id) plus a long-lived encryption keypair (the E2EE trust anchor). Reused across restarts; never rotated implicitly.
+- `signing-key.ts` — storage/derivation of the signing keypair and the routing id, shared with the notifications runtime.
+- `host-client.ts` — the long-lived connection manager: one outbound control connection to the relay, a per-client data connection for each connected device, reconnect/backoff, and the E2EE responder handshake per connection.
+- `host-lock.ts` — the per-machine host claim. Every local instance sharing the data dir shares the relay identity (same serverId), so concurrent relay hosts evict each other at the relay worker (`4001: Control replaced`) and paired devices land on whichever local process won last. The claim file (`<data-dir>/relay-host.lock`, `{ pid }`) makes this deterministic: `service.ts` only starts the host when no LIVE process holds the claim (stale claims from dead pids are ignored), goes to `standby` otherwise, and a 30s watcher both takes over when the claimant dies and stands down when another process claims. Explicit user intent — creating a pairing link or hitting `/relay/enable` — force-claims; the previous holder's watcher sees the takeover and backs off instead of fighting. The claim is cooperative (the relay worker still enforces the single host slot); it only decides which process keeps retrying.
+- `tunnel-host.ts` — the per-connection dispatcher: decrypts tunnel frames and forwards HTTP/SSE/WS to the local server over loopback, then streams responses back. Enforces a path allowlist and never injects credentials.
+- `e2ee.ts`, `tunnel-codec.ts` — host-side TypeScript implementations of the shared crypto and framing (see "Two implementations" below).
 
 Client side (`packages/ui/src/lib/relay/`):
 - `protocol.ts` — the shared contract: constants, frame types, message shapes. The normative source both implementations follow.
@@ -93,7 +93,7 @@ belong to a different machine.
 
 ## Two implementations, kept in sync
 
-The E2EE and framing logic exists twice: TypeScript in `packages/ui/src/lib/relay/` (shared by the client and the normative reference) and a JavaScript mirror in this module (the host, which is plain JS ESM). They **must stay byte-compatible** — a client encrypted by one must decrypt on the other. A cross-compatibility test (`cross-compat.test.js`) imports the TS modules directly and exercises a full TS-client ↔ JS-host exchange. Any change to the wire format, frame codec, handshake, or batching must update both sides and keep that test green.
+The E2EE and framing logic exists twice: TypeScript in `packages/ui/src/lib/relay/` (the client and normative reference) and a separate TypeScript implementation in this Host module. They **must stay byte-compatible** — a client encrypted by one must decrypt on the other. A cross-compatibility test (`cross-compat.test.ts`) imports the TS modules directly and exercises a full client ↔ Host exchange. Any change to the wire format, frame codec, handshake, or batching must update both sides and keep that test green.
 
 ## Runtime integration (client)
 
@@ -107,8 +107,8 @@ uses the runtime auth layer to mint the short-lived URL token.
 
 A new WebSocket path has two independent admission points:
 
-1. `ALLOWED_WS_PATHS` in `tunnel-host.js` permits it through the encrypted relay dispatcher.
-2. `isUrlAuthWebSocketPath` in `../ui-auth/ui-auth.js` permits the scoped URL token on the real server
+1. `ALLOWED_WS_PATHS` in `tunnel-host.ts` permits it through the encrypted relay dispatcher.
+2. `isUrlAuthWebSocketPath` in `../ui-auth/ui-auth.ts` permits the scoped URL token on the real server
    upgrade.
 
 Both gates remain narrow. The dispatcher does not add credentials, and the server still checks its
@@ -117,7 +117,7 @@ client-supplied `window.location.origin` is not forwarded because Capacitor cust
 have a null origin.
 
 Wire-format, frame-type, handshake, encryption-counter, fragmentation, or batching changes update the
-TypeScript client and JavaScript host together and keep `cross-compat.test.js` green. Reconnect loops
+client and Host implementations together and keep `cross-compat.test.ts` green. Reconnect loops
 use failure-aware backoff and respond to online/visibility/abort lifecycle rather than polling forever
 at one short interval.
 

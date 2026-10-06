@@ -10,25 +10,25 @@ has to ask for it.
 
 ## Files
 
-- `hunks.js` — parses a unified diff into files and hunks and assigns each hunk
+- `hunks.ts` — parses a unified diff into files and hunks and assigns each hunk
   a stable id.
-- `generated.js` — recognises tool-produced files that are kept out of the
+- `generated.ts` — recognises tool-produced files that are kept out of the
   model's input.
-- `sources.js` — turns a source descriptor into diff *sections*.
-- `digest.js` — builds the model-facing digest and the alias↔id mapping.
-- `prompt.js` — system prompt, size guidance, previous-walkthrough section, and
+- `sources.ts` — turns a source descriptor into diff *sections*.
+- `digest.ts` — builds the model-facing digest and the alias↔id mapping.
+- `prompt.ts` — system prompt, size guidance, previous-walkthrough section, and
   `PROMPT_VERSION`.
-- `schema.js` — response schema, response normalization, tolerant JSON parsing.
-- `store.js` — content-addressed cache entries plus mutable pointers.
-- `pull-request.js` — PR diffs via the shared GitHub octokit helper.
-- `model-settings.js` — the feature's own model override.
-- `languages.js` — the languages the prose may be written in.
-- `index.js` — orchestration.
-- `routes.js` — `/api/walkthrough*`.
+- `schema.ts` — response schema, response normalization, tolerant JSON parsing.
+- `store.ts` — content-addressed cache entries plus mutable pointers.
+- `pull-request.ts` — PR diffs via the shared GitHub octokit helper.
+- `model-settings.ts` — the feature's own model override.
+- `languages.ts` — the languages the prose may be written in.
+- `index.ts` — orchestration.
+- `routes.ts` — `/api/walkthrough*`.
 
 ## Hunk identity
 
-`hunks.js` is the only place that decides what a hunk is or what its id is. The
+`hunks.ts` is the only place that decides what a hunk is or what its id is. The
 client never recomputes ids; it receives the current hunk index (id → patch)
 alongside the walkthrough and matches ids to ids. Two implementations of the
 same hash would have to agree byte-for-byte forever, and the first one to drift
@@ -83,7 +83,7 @@ than no walkthrough.
 
 ## Generated files
 
-`generated.js` excludes tool-produced files — lockfiles, minified bundles,
+`generated.ts` excludes tool-produced files — lockfiles, minified bundles,
 codegen, snapshots — from the digest by **name, never by size**. A lockfile can
 be larger than the entire change around it and carries no intent, so sending it
 wastes context that real code needs.
@@ -101,7 +101,7 @@ When a change consists only of generated files, generation is refused with
 ## Model selection
 
 The walkthrough has its own model setting (Settings → Sessions → Changes
-Walkthrough Model), read by `model-settings.js`:
+Walkthrough Model), read by `model-settings.ts`:
 
 `walkthroughModelOverride` (`provider/model`) is the whole contract: set, that
 model is used for this feature and nothing else; unset or empty, generation
@@ -156,7 +156,7 @@ and `icon`/`importance` are validated against fixed English values, so a
 translated one is dropped by the normalizer — losing an anchor or a style
 silently. The prompt says so explicitly.
 
-`languages.js` owns the accepted tags; they match the UI's `Locale` union, and
+`languages.ts` owns the accepted tags; they match the UI's `Locale` union, and
 anything else — unknown, malformed, absent — resolves to English rather than
 failing the request. The two lists cannot be one, because the server cannot
 import from `packages/ui`; the test imports the UI locale values and checks the
@@ -389,7 +389,7 @@ endpoint nothing calls is a maintenance surface that rots untested.
 
 Registered from Varin's platform route runtime while the service itself stays
 lazy. `/api/walkthrough` is in the
-JSON body-parser allowlist in `core-routes.js`.
+JSON body-parser allowlist in `../platform/core-routes.ts`.
 
 ## A server that does not have these routes
 
