@@ -23,7 +23,10 @@ const mocks = vi.hoisted(() => ({
   toggleContextPanel: vi.fn(),
   translate: (key: string) => key,
 }));
-vi.mock('@varin/application-client', () => ({ runtimeFetch: vi.fn() }));
+vi.mock('@varin/application-client', async (importOriginal) => ({
+  ...await importOriginal<typeof import('@varin/application-client')>(),
+  runtimeFetch: vi.fn(),
+}));
 vi.mock('@/lib/pi-runtime/sessionNavigation', () => ({ openPiSessionFromNavigation: mocks.openSession }));
 vi.mock('@/lib/gitApiHttp', () => ({ getGitStatus: mocks.getGitStatus }));
 vi.mock('@/components/icon/Icon', () => ({ Icon: () => null }));

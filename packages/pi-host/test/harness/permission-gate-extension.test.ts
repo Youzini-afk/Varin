@@ -102,7 +102,7 @@ const normal = () => ({ mode: "normal" as const, rules: defaultRules("normal") }
 
 describe("native permission gate integration", () => {
   it("keeps preset approval choices and user rules ahead of mode defaults", () => {
-    const policy = buildPermissionPolicy("normal", { check: true, retrieval: false }, [
+    const policy = buildPermissionPolicy("normal", { worker: true, retrieval: false }, [
       { tool: "read", decision: "deny" },
     ]);
     assert.equal(evaluateGate("dispatch", { preset: "worker", task: "inspect" }, policy).decision, "ask");

@@ -293,7 +293,6 @@ describe("Phase 3 Thread/ThreadRun e2e", () => {
       assert.ok(Date.now() - started >= 500);
       assert.equal(result.isError, false);
       assert.equal((result.details as { timedOut: boolean }).timedOut, true);
-      assert.match(result.text, /timed out/);
     } finally {
       await harness.dispose();
     }

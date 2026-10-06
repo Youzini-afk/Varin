@@ -57,8 +57,6 @@ describe("root execution admission — service/registry acceptance", () => {
         sessionId: "waiting-session",
         signal: controller.signal,
       };
-      // Commit the initial observation so the next call waits for a change.
-      await wait.handle({ timeoutMs: 0 }, ctx);
       let returned = false;
       pending = wait.handle({ timeoutMs: 1_000 }, ctx).then((result) => { returned = true; return result; });
       await vi.waitFor(async () => {

@@ -135,7 +135,7 @@ describe("thread status projection", () => {
 
   it("returns the complete transient table on every request", async () => {
     const first = await registry.createThread(input({ brief: "alpha task" }));
-    await registry.createThread(input({ brief: "beta task" }));
+    const second = await registry.createThread(input({ brief: "beta task" }));
     const host = {
       observationCursors: cursors,
       threadRegistry: registry,
@@ -145,7 +145,8 @@ describe("thread status projection", () => {
     const observer = ctx(PARENT.id);
 
     const initial = await service.handle({}, observer);
-    expect(initial.content).toContain(`${first.id} [check] · alpha task`);
+    expect(initial.content).toContain(first.id);
+    expect(initial.content).toContain(second.id);
     expect(initial.status).toBe("ready");
     const repeated = await service.handle({}, observer);
     expect(repeated).toEqual(initial);

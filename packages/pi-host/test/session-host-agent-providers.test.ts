@@ -326,7 +326,7 @@ export default function (pi: any) {
     try {
       await host.openCatalogContext(cwd);
       const catalog = await host.listAgentProviders();
-      const byName = new Map(catalog.agents.map((agent) => [agent.name, agent]));
+      const byName = new Map(catalog.agents.filter((agent) => agent.providerId === "pi-subagents").map((agent) => [agent.name, agent]));
       const custom = byName.get("custom");
       const worker = byName.get("worker");
       const disabled = byName.get("disabled");
