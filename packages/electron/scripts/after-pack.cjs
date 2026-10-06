@@ -63,6 +63,8 @@ module.exports = (context) => {
     path.join('legacy', 'build', 'pdf.worker.mjs'),
     path.join('cmaps', 'Adobe-GB1-0.bcmap'),
     path.join('standard_fonts', 'FoxitDingbats.pfb'),
+    path.join('wasm', 'openjpeg.wasm'),
+    path.join('wasm', 'qcms_bg.wasm'),
   ]) {
     const packagedPath = path.join(packagedPdfjsRoot, relativePath);
     let complete = false;
@@ -170,8 +172,8 @@ module.exports = (context) => {
     const packageRoot = path.resolve(path.dirname(pdfjsEntry), '..', '..');
     const unpackedRoot = packageRoot.replace('app.asar' + sep, 'app.asar.unpacked' + sep);
     const assetRoot = existsSync(path.join(unpackedRoot, 'standard_fonts')) ? unpackedRoot : packageRoot;
-    const cMapUrl = path.join(assetRoot, 'cmaps') + sep;
-    const standardFontDataUrl = path.join(assetRoot, 'standard_fonts') + sep;
+    const cMapUrl = pathToFileURL(path.join(assetRoot, 'cmaps') + sep).href;
+    const standardFontDataUrl = pathToFileURL(path.join(assetRoot, 'standard_fonts') + sep).href;
     const content = 'q\\n0 0 1 rg\\n20 20 60 40 re\\nf\\nBT /F1 14 Tf 20 90 Td (packaged PDF render) Tj ET\\nQ\\n';
     const objects = [
       '<< /Type /Catalog /Pages 2 0 R >>',
@@ -195,6 +197,8 @@ module.exports = (context) => {
       cMapUrl,
       data: new Uint8Array(Buffer.from(source, 'ascii')),
       standardFontDataUrl,
+      wasmUrl: pathToFileURL(path.join(assetRoot, 'wasm') + sep).href,
+      iccUrl: pathToFileURL(path.join(assetRoot, 'iccs') + sep).href,
     });
     let document;
     try {

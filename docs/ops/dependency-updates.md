@@ -43,13 +43,27 @@ no changes, or a patch/minor version as proof of compatibility. Keep these judgm
 results. Production dependency changes may also need the cloud runtime lockfile refreshed; see
 [Cloud deployment](cloud-deployment.md#building-the-canonical-runtime-directly).
 
-The bundled Pi packages are pinned to 1.0.0. Review its
-[release](https://github.com/earendil-works/pi/releases/tag/v1.0.0) and
-[coding-agent changelog](https://github.com/earendil-works/pi/blob/v1.0.0/packages/coding-agent/CHANGELOG.md)
+The bundled Pi packages are pinned to 1.0.4. Review its
+[release](https://github.com/earendil-works/pi/releases/tag/v1.0.4) and
+[coding-agent changelog](https://github.com/earendil-works/pi/blob/v1.0.4/packages/coding-agent/CHANGELOG.md)
 alongside the previous-to-target interval. Host integration patches live in `packages/pi-host/patches`
 and ship with that package. Bun applies them to bundled dependencies; the selected external SDK loader
 applies the same hunks in memory, accepts an already adapted source and rejects a changed required seam.
 Never patch a user's external installation or copy its native configuration into another authority.
+
+The October 6 dependency integration rebases the three Pi patches against the published 1.0.4
+files, preserving Varin's execution scheduling, tool exclusions, Responses parsing, system sections
+and native MCP ownership. Upstream tool-pattern and hidden-tool behavior remains intact. Project
+MCP overrides write their actual project file and keep explicit values when overriding global
+defaults. The SDK's new SSH environment API does not by itself add a Varin SSH workspace UI.
+
+The same integration updates cron-parser callers to `CronExpressionParser.parse`; supplies PDF.js 6
+with file URLs, WASM/ICC assets and an explicit render canvas; and retains CONNECT proxy routing
+after Undici 8 changed its HTTP forwarding default. SnapDOM 3 uses its own declarations instead of
+Varin's old ambient types. Its existing clone plugins, capture/export calls and DPR options remain
+supported. The NSIS extraction hook is rebased onto app-builder-lib 26.17.0. Both Bun lockfiles must
+describe the resulting graph, including updated overrides; successful installation or type checking
+does not replace native import, provider, PDF rendering and transport checks.
 
 The Responses parser seam consumes reasoning deltas, completed summary/content parts and terminal
 response output. Completed parts replace their streamed prefix rather than duplicating it; encrypted

@@ -1,9 +1,20 @@
 diff --git a/templates/nsis/include/extractAppPackage.nsh b/templates/nsis/include/extractAppPackage.nsh
+index f5470bf..0512f99 100644
 --- a/templates/nsis/include/extractAppPackage.nsh
 +++ b/templates/nsis/include/extractAppPackage.nsh
-@@ -92,0 +93,3 @@
+@@ -90,6 +90,9 @@
+ !macroend
+ 
+ !macro extractUsing7za FILE
 +  !ifmacrodef customExtractUsing7za
 +    !insertmacro customExtractUsing7za "${FILE}"
 +  !else
-@@ -137,0 +141 @@
+   Push $OUTDIR
+   CreateDirectory "$PLUGINSDIR\7z-out"
+   ClearErrors
+@@ -135,4 +138,5 @@
+     Goto LoopExtract7za
+ 
+   DoneExtract7za:
 +  !endif
+ !macroend

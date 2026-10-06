@@ -297,8 +297,8 @@ shell/thread controls use their actual target identity. Independent resources ov
 unknown third-party sequential tool stays an ordered barrier, with calls on either side still
 parallel inside their side. The Host Documents/WorkingState gates remain the final mutation
 and alias authority; scheduling does not replace revision checks or recovery.
-The upstream seams are tracked in `packages/pi-host/patches/@earendil-works%2Fpi-agent-core@1.0.0.patch`
-and `packages/pi-host/patches/@earendil-works%2Fpi-coding-agent@1.0.0.patch`: the core builds the
+The upstream seams are tracked in `packages/pi-host/patches/@earendil-works%2Fpi-agent-core@1.0.4.patch`
+and `packages/pi-host/patches/@earendil-works%2Fpi-coding-agent@1.0.4.patch`: the core builds the
 resource dependency graph in the actual tool-call batch path, while coding-agent
 preserves effect declarations through `ToolDefinition` wrapping and carries the
 permission hook's Host-authoritative plan. There is no second Agent loop.

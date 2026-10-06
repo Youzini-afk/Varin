@@ -9,6 +9,7 @@ import type { ManagedSpawn } from "../process/types.js";
 import { createPdfEngine, mapDoclingDocument, parseTesseractTsv } from "./pdf-engine.js";
 
 import { makePdf } from "./pdf-test-fixture.js";
+const pdfjsVersion = (await import("pdfjs-dist/legacy/build/pdf.mjs")).version;
 
 describe("PDF engine", () => {
   it("extracts separate same-baseline columns and renders a cropped rotated page", async () => {
@@ -41,7 +42,7 @@ describe("PDF engine", () => {
   it("honors cancellation and reports absent optional components", async () => {
     const engine = createPdfEngine({ doclingCommand: "does-not-exist-docling", tesseractCommand: "does-not-exist-tesseract" });
     const source = makePdf();
-    await expect(engine.versions({ parser: "native", ocr: false })).resolves.toEqual({ pdfjs: "4.10.38" });
+    await expect(engine.versions({ parser: "native", ocr: false })).resolves.toEqual({ pdfjs: pdfjsVersion });
     const controller = new AbortController();
     controller.abort();
     await expect(engine.renderPage({ source, page: 1, signal: controller.signal })).rejects.toBeTruthy();
@@ -139,7 +140,7 @@ describe("PDF engine", () => {
     };
     try {
       const engine = createPdfEngine({ doclingCommand: process.execPath, tesseractCommand: process.execPath }, { spawn, temporaryRoot });
-      expect(await engine.versions({ parser: "docling", ocr: true })).toEqual({ pdfjs: "4.10.38", docling: "2.130.0" });
+      expect(await engine.versions({ parser: "docling", ocr: true })).toEqual({ pdfjs: pdfjsVersion, docling: "2.130.0" });
       expect(commands).toEqual([["--version"]]);
       const source = makePdf();
       const forced = await engine.parseStructure({ source, pageRange: { start: 1, end: 1 }, ocr: true });

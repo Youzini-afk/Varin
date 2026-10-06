@@ -1,6 +1,6 @@
 import crypto from 'node:crypto';
 import { DateTime, IANAZone } from 'luxon';
-import parser from 'cron-parser';
+import { CronExpressionParser } from 'cron-parser';
 import type fsPromisesModule from 'node:fs/promises';
 import type pathModule from 'node:path';
 
@@ -236,7 +236,7 @@ const normalizeTimezone = (value: unknown, fallback = resolveDefaultTimezone()):
 
 const validateCronExpression = (expression: string, timezone: string): boolean => {
   try {
-    const iterator = parser.parseExpression(expression, {
+    const iterator = CronExpressionParser.parse(expression, {
       tz: timezone,
       currentDate: new Date(),
     });

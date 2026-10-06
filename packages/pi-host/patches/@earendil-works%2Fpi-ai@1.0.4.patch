@@ -1,17 +1,8 @@
---- a/dist/api/openai-responses.js
-+++ b/dist/api/openai-responses.js
-@@ -65,7 +65,7 @@
-         supportsMidConvoSystemMessages: model.compat?.supportsMidConvoSystemMessages ?? false,
-         sessionAffinityFormat: model.compat?.sessionAffinityFormat ?? detectSessionAffinityFormat(model),
-         supportsLongCacheRetention: model.compat?.supportsLongCacheRetention ?? true,
--        supportsStrictMode: model.compat?.supportsStrictMode ?? false,
-+        supportsStrictMode: model.compat?.supportsStrictMode ?? true,
-         supportsOpenAIGrammarTools: model.compat?.supportsOpenAIGrammarTools ?? false,
-         supportsAdditionalTools: model.compat?.supportsAdditionalTools ?? false,
-         supportsToolSearch: model.compat?.supportsToolSearch ?? false,
+diff --git a/dist/api/openai-responses-shared.js b/dist/api/openai-responses-shared.js
+index f413fe5..8916443 100644
 --- a/dist/api/openai-responses-shared.js
 +++ b/dist/api/openai-responses-shared.js
-@@ -270,7 +270,7 @@
+@@ -270,7 +270,7 @@ export function convertResponsesMessages(model, context, allowedToolCallProvider
  // Tool conversion
  // =============================================================================
  export function convertResponsesTools(tools, options) {
@@ -20,7 +11,7 @@
      const supportsStrictMode = options?.supportsStrictMode ?? true;
      const supportsOpenAIGrammarTools = options?.supportsOpenAIGrammarTools ?? false;
      return tools.map((tool) => {
-@@ -321,7 +321,7 @@
+@@ -321,7 +321,7 @@ function appendCustomToolCallInput(block, nextInput, close) {
  export async function processResponsesStream(openaiStream, output, stream, model, options) {
      let sawTerminalResponseEvent = false;
      const outputSlots = new Map();
@@ -29,7 +20,7 @@
      const applyMessagePhaseStopReason = (item) => {
          if (item.type === "message" && item.phase === "final_answer") {
              output.stopReason = "stop";
-@@ -349,8 +349,12 @@
+@@ -349,8 +349,12 @@ export async function processResponsesStream(openaiStream, output, stream, model
                  type: "thinking",
                  block,
                  contentIndex: output.content.length - 1,
@@ -42,7 +33,7 @@
              stream.push({ type: "thinking_start", contentIndex: slot.contentIndex, partial: output });
              return slot;
          }
-@@ -411,29 +415,57 @@
+@@ -411,29 +415,57 @@ export async function processResponsesStream(openaiStream, output, stream, model
      const getOrCreateSlot = (outputIndex, item) => {
          return outputSlots.get(outputIndex) ?? createSlot(outputIndex, item);
      };
@@ -118,7 +109,7 @@
          if (response?.id) {
              output.responseId = response.id;
          }
-@@ -487,37 +519,29 @@
+@@ -487,37 +519,29 @@ export async function processResponsesStream(openaiStream, output, stream, model
              const slot = getSlot(event.output_index, "thinking");
              if (!slot)
                  continue;
@@ -169,7 +160,7 @@
          }
          else if (event.type === "response.output_text.delta") {
              const slot = getSlot(event.output_index, "text");
-@@ -581,17 +605,7 @@
+@@ -581,17 +605,7 @@ export async function processResponsesStream(openaiStream, output, stream, model
              applyMessagePhaseStopReason(item);
              const slot = getOrCreateSlot(event.output_index, item);
              if (item.type === "reasoning" && slot?.type === "thinking") {
@@ -188,3 +179,16 @@
                  outputSlots.delete(event.output_index);
              }
              else if (item.type === "message" && slot?.type === "text") {
+diff --git a/dist/api/openai-responses.js b/dist/api/openai-responses.js
+index 2a6b4e4..5a9354f 100644
+--- a/dist/api/openai-responses.js
++++ b/dist/api/openai-responses.js
+@@ -65,7 +65,7 @@ function getCompat(model) {
+         supportsMidConvoSystemMessages: model.compat?.supportsMidConvoSystemMessages ?? false,
+         sessionAffinityFormat: model.compat?.sessionAffinityFormat ?? detectSessionAffinityFormat(model),
+         supportsLongCacheRetention: model.compat?.supportsLongCacheRetention ?? true,
+-        supportsStrictMode: model.compat?.supportsStrictMode ?? false,
++        supportsStrictMode: model.compat?.supportsStrictMode ?? true,
+         supportsOpenAIGrammarTools: model.compat?.supportsOpenAIGrammarTools ?? false,
+         supportsAdditionalTools: model.compat?.supportsAdditionalTools ?? false,
+         supportsToolSearch: model.compat?.supportsToolSearch ?? false,
