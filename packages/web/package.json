@@ -103,7 +103,7 @@
     "tar": "^7.5.13",
     "triviumdb": "0.8.8",
     "turndown": "7.2.4",
-    "undici": "7.29.1",
+    "undici": "8.11.2",
     "web-push": "^3.6.7",
     "web-tree-sitter": "^0.27.0",
     "ws": "^8.18.3",
