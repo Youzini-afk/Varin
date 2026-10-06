@@ -78,6 +78,7 @@
 .ide-agent-canvas [data-pi-composer-shell],
 .ide-agent-canvas [data-pi-composer-region] { background: transparent; }
 .ide-agent-canvas .chat-input-column { padding-inline: 8px; }
+.ide-agent-canvas .pi-user-message-sticky { background: var(--workbench-frame, var(--sidebar)); }
 .ide-workspace-row > [role="separator"] {
   width: 6px;
   background: transparent;

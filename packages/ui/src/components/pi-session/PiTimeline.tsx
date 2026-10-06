@@ -162,7 +162,7 @@ const PiTimelineItemView = React.memo(({
       data-turn-entry={turn.id}
     >
       <div className={cn(
-        !isMobile && stickyUserHeader && 'sticky top-0 z-10 -mx-1 bg-background/95 px-1 py-1 backdrop-blur-sm',
+        !isMobile && stickyUserHeader && 'pi-user-message-sticky sticky top-0 z-10 -mx-1 bg-background/95 px-1 py-1 backdrop-blur-sm',
       )}>
         <PiTurnUserMessage
           cwd={cwd}
