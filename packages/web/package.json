@@ -70,7 +70,7 @@
     "@clack/prompts": "^1.8.1",
     "@konbakuyomu/smart-search": "^0.1.25",
     "@mozilla/readability": "0.6.0",
-    "@napi-rs/canvas": "0.1.100",
+    "@napi-rs/canvas": "1.0.10",
     "@octokit/rest": "^22.0.1",
     "@simplewebauthn/server": "14.0.3",
     "@varin/application-client": "workspace:*",
