@@ -8,9 +8,9 @@ Last updated: 2026-10-06
 
 | 记录 | 负责什么 |
 | --- | --- |
-| [Harness 能力明细](harness-capabilities.md) | 逐能力的实现、接线、默认配置和保留证据；历史测试简称与数量按当时记录解释 |
+| [Harness 能力明细](harness-capabilities.md) | 按能力定位当前 owner、启用条件和证据边界；旧逐项清单与测量通过历史入口保留 |
 | [Bot 与 Computer Use](bot-computer-use.md) | BC0–BC9 的后续补齐、当前实现缺口与原生平台证据 |
-| [可组合执行环境](execution-environments.md) | EE1–EE6 候选实现、独立验收修正及剩余产品/跨机合同 |
+| [可组合执行环境](execution-environments.md) | EE1–EE6 当前接线、已记录的独立验收及剩余产品/跨机合同 |
 | [Pi durable runtime](pi-durable-runtime.md) | 针对 Pi 1.0 的已记录评估，不代表采用了另一套生产 runtime |
 | [性能记录](../performance.md) | 当前关键路径与可复现数据；性能不是按测试数量推算 |
 | [协作设计中的验证节](../design/agent-collaboration-design.md) | D-339 角色、等待、会话互读和选定代码提交的已有验证 |

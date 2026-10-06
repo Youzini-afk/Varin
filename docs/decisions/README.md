@@ -44,3 +44,7 @@ Last updated: 2026-10-06
 更新[追踪索引](index.md)即可连接到分卷；索引不是不可变的决策正文。
 旧记录引用 Agent Harness §5–9 时，到设计目录的 tools / retrieval / knowledge / context /
 verification 专卷按原节号查找。历史阶段细节见[计划快照](../archive/agent-harness-plan-2026-10-06.md)。
+
+历史条目中的 status 编号定位到[能力证据](../reviews/harness-capabilities.md)及其整理前版本；
+RR、HR 和“阶段 1 小结”定位到[交付日志](../archive/harness-delivery-log.md)。这些旧位置不再要求当前 status 复制原表。
+D-293–D-295 仅有既有索引与审计记录，按 D-296 保留，不补写成事后决定；D-327 的正文在办公设计。

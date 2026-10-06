@@ -6,10 +6,10 @@ The mobile module owns the server-side contract for a single-server Varin mobile
 
 ## Entrypoints and structure
 
-- `packages/web/application-host/lib/mobile/routes.js`: Express routes for pairing, mobile devices, push-token registration, test push, and `/mobile-login`.
-- `packages/web/application-host/lib/mobile/device-store.js`: JSON-backed mobile device registry under the Varin data directory.
-- `packages/web/application-host/lib/mobile/pairing-runtime.js`: short-lived pairing tokens and one-time mobile login tokens.
-- `packages/web/application-host/lib/mobile/push-runtime.js`: Expo push delivery channel for registered mobile devices.
+- `packages/web/application-host/lib/mobile/routes.ts`: Express routes for pairing, mobile devices, push-token registration, test push, and `/mobile-login`.
+- `packages/web/application-host/lib/mobile/device-store.ts`: JSON-backed mobile device registry under the Varin data directory.
+- `packages/web/application-host/lib/mobile/pairing-runtime.ts`: short-lived pairing tokens and one-time mobile login tokens.
+- `packages/web/application-host/lib/mobile/push-runtime.ts`: Expo push delivery channel for registered mobile devices.
 
 ## Route contracts
 
@@ -31,6 +31,6 @@ The mobile module owns the server-side contract for a single-server Varin mobile
 
 ## Notification integration
 
-`packages/web/application-host/index.js` consumes Pi runtime broker events and fans session
+`packages/web/application-host/index.ts` consumes Pi runtime broker events and fans session
 completion notifications out through `sendMobilePushToAllDevices` together with
 desktop, UI SSE, Web Push, and APNs channels.

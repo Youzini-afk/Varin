@@ -18,7 +18,7 @@ exposes every compatible candidate.
 
 Most extension authors use `@varin/extension-sdk`; this lower-level package is public for alternate
 Surface hosts and advanced lifecycle tests. See the
-[authoring guide](https://github.com/Youzini-afk/Varin/blob/main/docs/varin-extension-authoring.md).
+[authoring guide](https://github.com/Youzini-afk/Varin/blob/main/docs/ops/varin-extension-authoring.md).
 
 An injected `SurfaceExternalService` may carry a disposer. The runtime attaches it to the consumer
 owner scope, so candidate rollback, generation replacement, and disable clean up the exact service

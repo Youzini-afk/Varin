@@ -39,6 +39,7 @@ This validates:
 
 - frontmatter (`title`, `description`) exists for every MDX page
 - sidebar links resolve to default (English) MDX routes
+- inline Markdown page links resolve; engineering documentation local links are also checked
 
 It does not check branding, translation quality, or whether commands still match the code.
 

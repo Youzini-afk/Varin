@@ -16,20 +16,14 @@ Harness 的目标是减少 Agent 为环境做的准备工作：明确目标就�
 
 本设计替代 D-330 及 RR2 的可变会话操作上下文目标，并替代 D-332/RR4 中以 `workspaceId → queryScope → operationDir` 组织检索和数据归属的部分。RR1 的恢复与停止、RR3 的命令执行/输出记录、RR5 的联网，以及已修复的数据正确性问题继续保留。RR 记录是既有实现事实，不表示其目录模型仍是下一阶段的设计目标。
 
-## 2. 当前耦合与证据
+## 2. 被替换的耦合
 
-以下是基线源码事实；这里没有重新运行性能或安装包测试。
+设计基线 `19c010d7` 曾让 Harness 注册、操作目录镜像和索引生命周期依赖 workspace。
+HR 已移除 `work_context` 工具与 Pi work-context journal 门槛，按会话/任务 owner 装配服务，
+在操作入口解析 cwd 和资源。Pi 历史、Documents 修订、Thread/Run、Rust 文件/进程及既有检索算法继续复用。
 
-| 当前事实 | 影响 | 源码入口 |
-| --- | --- | --- |
-| Broker 打开会话后等待 `session.workContext.sync`，Host 注册前恢复工作上下文 | 文件目录准备进入聊天激活的关键路径；上一轮修复解决了顺序死锁，但依赖仍在 | [runtime-broker](../../packages/runtime-broker/src/runtime-broker.ts)、[service-host](../../packages/web/application-host/lib/harness/service-host.ts) |
-| Host actor 注册、会话知识库定位、普通子任务需要 workspace | 无项目聊天无法自然获得同等完整的 Harness；科研入口还会按 cwd 补注册 workspace | [Host 装配](../../packages/web/application-host/index.ts)、[thread-services](../../packages/web/application-host/lib/harness/thread-services.ts) |
-| Documents 资源键含 workspaceId，同一实际文件可由不同目录注册得到不同键 | 项目组织方式进入文件身份、编辑协调及派生状态 | [authority](../../packages/web/application-host/lib/documents/authority.ts)、[workspace-registry](../../packages/web/application-host/lib/documents/workspace-registry.ts) |
-| 关键词搜索首先要求 workspaceId，再取得根目录 | 原本可直接搜索的新目录必须先被工作区系统接纳 | [search/content](../../packages/web/application-host/lib/search/content.ts) |
-| 语义运行实例、扫描、配置读取及持久索引按 workspace 组织 | 会话/工作区装配影响检索初始化；重叠目录容易重复维护 | [workspace-runtime](../../packages/web/application-host/lib/knowledge/semantic/workspace-runtime.ts)、[identity](../../packages/web/application-host/lib/knowledge/semantic/identity.ts) |
-| Host 状态、Pi 镜像、journal、响应修订和 shell anchor 共同维护操作目录 | 一个路径默认值需要跨进程收敛，工具准备与执行还需处理状态变更 | `pi-host/src/harness/work-context.ts`（HR4 已删）、[tool-execution-resources](../../packages/pi-host/src/harness/tool-execution-resources.ts) |
-
-现有实现并非全部需要重写。Documents 的内容与修订处理、Rust 文件/进程/计算能力、固定材料快照、Pi 原生历史、Thread/Run 和检索算法继续使用。已有 [向量缓存](../../packages/web/application-host/lib/knowledge/semantic/vector-cache.ts) 按向量空间、用途和实际输入文本复用计算，可作为新索引复用的基础。
+这一替换不等于所有存储都不再使用 workspace 字段。语义分片与固定来源的实际剩余边界见 §14，
+场景证据见[能力记录](../reviews/harness-capabilities.md)。
 
 ## 3. 用户与 Agent 应获得的行为
 
@@ -220,41 +214,25 @@ embedding、rerank、快速决策配置通过已有设置和 Pi 推理/凭据接
 
 Host/远程连接身份、已有明确用户决策和实际部署环境边界继续生效，但不再由会话分类推导。此轮不建设新的权限产品、审计系统或沙箱，也不把解除目录耦合变成删除写入冲突、进程归属和来源版本检查。它们直接关系到任务正确性与已有成果。
 
-## 10. 需要替换、删除和保留的机制
+## 10. 当前替代边界
 
-| 现有机制 | 处理 |
-| --- | --- |
-| 必须有 workspace 才能注册 Harness、使用 todo/Thread/材料 | 由稳定会话/任务身份装配；资源能力按实际操作准备 |
-| 可变 `operationDir`、`queryScope`、WorkContextMirror、目录 CAS 与响应 piggyback | 在实际消费者切换后删除；本次执行参数和查询范围接替职责 |
-| 用 Pi 自定义 work-context journal 决定工具能否运行 | 移除该运行门槛与恢复协议；保留 Pi 原生历史，不改写历史正文 |
-| `work_context` 的 get/select/scope/reset 控制流程 | 从 Agent 常规工具面移除；目录发现能力并入现有文件查找/资源浏览，保留可续查能力 |
-| workspace-relative 路径在多层来回转换 | 在操作入口确定资源；后端若用相对存储路径，由后端局部映射 |
-| workspaceId 决定 Documents 可变资源键 | 资源身份独立，项目树引用资源；编辑器与 Agent 共用协调路径 |
-| workspace-scoped 语义实例和扫描生命周期 | 改为资源/配置驱动的持续服务，物理分片由内部管理 |
-| shell anchor 与会话目录联动、目录多级静默回退 | 普通命令显式 cwd，持久进程明确句柄，缺失目标局部报错 |
-| 关键词、符号、结构、语义及快速决策能力 | 保留算法与已有效的组合，统一资源输入、输出和生命周期 |
-| 文档修订、草稿视图、固定原件、输出句柄、恢复与结果集成 | 保留实际语义；解除项目目录身份依赖 |
+可变 `operationDir`、`queryScope`、WorkContextMirror 与 Pi work-context journal 已退出常规工具链。
+一次命令使用本次 cwd，持久进程使用真实句柄；查询范围按请求确定，项目导航不改变已受理操作。
+会话/任务身份与目录资源分开，但底层相对路径映射和语义 workspace-root 分片仍有实际用途。
+不能仅给字段改名就宣称这些剩余耦合已经消失。
 
-不能只在旧架构外套一个接受绝对路径的门面，内部仍通过临时 workspace 注册完成全部操作。也不能把原 workspaceId 整体改名为 resourceSpaceId，继续让会话、目录与索引共享同一个生命周期。
+Documents 修订、固定草稿、原件、输出句柄、恢复和结果集成保留原语义。
+内部格式可替换，源文件、Git、Pi 历史、外部配置和尚未写回的真实成果须保全。
 
-## 11. 实施顺序与源码归属
+## 11. 实现归属
 
-使用独立阶段前缀 **HR**（Harness resources），避免与已交付的 Rust R、可靠性 RR 混淆。阶段按用户行为形成纵切；每阶段替换实际生产消费者，不先建设一套无人使用的新框架。
+- protocol/application-client：owner、资源引用和共享 DTO
+- Host Documents、Thread/knowledge 与装配：准入、任务身份、固定来源与目录资源协调
+- Pi 工具与 broker：请求受理时绑定 cwd/范围，原生会话和工具调用
+- Rust kernel：已授权的文件、不可变对象、进程与检索计算
+- semantic/structure：发布索引、修订核对和后台维护；当前盘点边界见 §14
 
-| 阶段 | 交付行为与改动范围 | 主要归属 |
-| --- | --- | --- |
-| HR0：资源与归属基础 | 确定与项目无关的资源、session/thread 存储合同；以一个真实外部文件读写贯通 Host、Rust 和 Documents，并让无项目 todo/子任务找到稳定 owner | protocol、application-client、Host 装配、Documents、Thread/knowledge、kernel 合同 |
-| HR1：会话与操作纵切 | 无项目聊天完整注册；文件工具/锁/恢复共用一次资源解析；命令 cwd 与持久进程分清；目录不可用不阻塞历史与其他工具 | broker、pi-host 工具与 mutation journal、service-host/router、shell、UI |
-| HR2：直接检索与多资源范围 | 去掉关键词/文件名/结构查询的 workspace 前置，跨目录范围组合与统一结果引用可用 | search/content、文件发现、structure、explore/related、LSP 适配、kernel compute |
-| HR3：持续索引 | 资源与版本驱动索引、配置复用、增量失效、冷/热混合查询、分片合并及草稿视图进入真实 explore 链 | knowledge/semantic、symbol graph、query views、Pi inference、Host 生命周期 |
-| HR4：产品与旧机制收口 | 项目分类与执行位置分别呈现，子任务/科研/材料/后续工作/远程消费者完整切换，移除 work-context 同步和旧索引 owner | UI、runtime、研究与材料服务、follow-up、工作状态/集成 |
-| HR5：真实使用验收 | 用下面的场景验证完整路径；核对阶段内仍保留的旧目录依赖，更新实现文档与状态，按实际差距返工 | 对应生产入口与平台夹具 |
-
-HR0 应优先做可运行的窄纵切，借它检验合同后再推广。共享资源身份、操作受理合同和存储归属必须由明确整合者负责，不能分别改出几套形似但不相容的方案。相关内部协议变更连同客户端、Host、Rust 生成协议及测试夹具同步修改。
-
-已有 [办公连续性设计](office-work-continuity-design.md)、[Web 与科研检索设计](web-research-search-design.md)、[Rust 内核设计](rust-kernel-design.md) 的领域目标保留；实施时把它们对目录型 workspace 的消费改为对应资源或数据 owner。不要为办公、科研各复制一套索引、存储或任务运行时。
-
-内部格式按仓库约定直接替换，不建设永久双写、旧 schema reader 或兼容后端。派生索引可以重建；源文件、Git、Pi 历史、外部配置及尚未写回的真实成果不是可丢弃缓存。受影响成果在切换前具体保全，不能为了简化 owner 重构删除用户内容。
+HR0–HR5 的概况见 [status](../status.md)，详细证据见[能力记录](../reviews/harness-capabilities.md)；这里不重复已完成阶段的任务表。
 
 ## 12. 验收场景与证据
 
@@ -279,7 +257,7 @@ HR0 应优先做可运行的窄纵切，借它检验合同后再推广。共享�
 
 ## 13. 交付边界
 
-本文定义设计与 HR 实施顺序；HR0–HR5 已接线（资源与归属、会话与操作、直接检索、持续索引、旧机制收口、场景验收），逐阶段事实、§12 证据映射与未测边界记入 [能力状态矩阵](../status.md)。最终交付标准是用户和 Agent 减少目录准备、跨位置工作直接可用、计算持续复用，以及旧状态确实被删除，而不是新增类型和服务数量。
+本文定义设计与 HR 实施顺序；HR0–HR5 已接线（资源与归属、会话与操作、直接检索、持续索引、旧机制收口、场景验收），逐阶段事实、§12 证据映射与未测边界见[能力记录](../reviews/harness-capabilities.md)和[历史交付记录](../archive/harness-delivery-log.md)。最终交付标准是用户和 Agent 减少目录准备、跨位置工作直接可用、计算持续复用，以及旧状态确实被删除，而不是新增类型和服务数量。
 
 ## 14. 后续修正：固定来源视图与索引盘点
 

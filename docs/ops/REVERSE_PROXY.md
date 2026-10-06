@@ -18,8 +18,8 @@ WebSocket routes. A proxy for the current Pi-native product must preserve:
 
 | Transport | Routes | Requirement |
 | --- | --- | --- |
-| WebSocket | `/api/varin/runtime/ws`, `/api/terminal/ws`, `/api/dictation/ws` | Forward the HTTP/1.1 upgrade and keep long read timeouts |
-| SSE | `/api/varin/events`, `/api/notifications/stream` | Disable proxy buffering, caching, and response transformation |
+| WebSocket | `/api/varin/runtime/ws`, `/api/terminal/ws`, `/api/dictation/ws`, `/api/varin/realtime-proxy/ws` | Forward the HTTP/1.1 upgrade and keep long read timeouts |
+| SSE | `/api/varin/events`, `/api/notifications/stream`, `/api/varin/runtime-manager/events`, `/api/varin/realtime-proxy/sse` | Disable proxy buffering, caching, and response transformation |
 | HTTP | `/api/*`, `/auth/*`, `/health`, application assets | Preserve method, body, cookies, authorization, and normal forwarded headers |
 
 The application authenticates these routes and checks WebSocket origins. Do not strip cookies,
@@ -50,7 +50,7 @@ server {
     # Configure ssl_certificate / ssl_certificate_key for your deployment.
     client_max_body_size 100m;
 
-    location ~ ^/api/(varin/runtime|terminal|dictation)/ws$ {
+    location ~ ^/api/(varin/runtime|varin/realtime-proxy|terminal|dictation)/ws$ {
         proxy_pass http://varin;
         proxy_http_version 1.1;
         proxy_set_header Upgrade $http_upgrade;
@@ -64,7 +64,7 @@ server {
         proxy_send_timeout 1h;
     }
 
-    location ~ ^/api/(varin/events|notifications/stream)$ {
+    location ~ ^/api/(notifications/stream|varin/(events|runtime-manager/events|realtime-proxy/sse))$ {
         proxy_pass http://varin;
         proxy_http_version 1.1;
         proxy_set_header Connection '';

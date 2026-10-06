@@ -3,26 +3,26 @@
 ## Purpose
 This module owns Varin UI authentication for browser access, including password session auth, WebAuthn passkeys, and trusted-device session handling.
 
-Trusted-device access has one durable credential model: a remote client bearer token stored by `packages/web/application-host/lib/client-auth/remote-clients.js`. Password, passkey, and Pairing v2 are issuance methods for that credential, not separate credential systems. Issued client tokens are returned once, stored server-side only as hashes, and are later authenticated via `Authorization: Bearer varin_client_...`.
+Trusted-device access has one durable credential model: a remote client bearer token stored by `packages/web/application-host/lib/client-auth/remote-clients.ts`. Password, passkey, and Pairing v2 are issuance methods for that credential, not separate credential systems. Issued client tokens are returned once, stored server-side only as hashes, and are later authenticated via `Authorization: Bearer varin_client_...`.
 
-Pairing v2 is implemented by `packages/web/application-host/lib/client-auth/pairing.js`. It stores short-lived one-time pairing sessions with hashed secrets, exposes create/cancel/redeem routes under `/api/client-auth/pairing/*`, and redeems a valid pairing secret into the same remote client token used by password/passkey trusted-device flows.
+Pairing v2 is implemented by `packages/web/application-host/lib/client-auth/pairing.ts`. It stores short-lived one-time pairing sessions with hashed secrets, exposes create/cancel/redeem routes under `/api/client-auth/pairing/*`, and redeems a valid pairing secret into the same remote client token used by password/passkey trusted-device flows.
 
 Browser-owned URLs are a separate presentation of the same authenticated authority. Elements such as
 iframes, downloads, SSE, and WebSocket upgrades cannot attach the normal `Authorization` header, so
-`ui-auth.js` can mint short-lived `varin_url_token` credentials scoped to explicit readable or
+`ui-auth.ts` can mint short-lived `varin_url_token` credentials scoped to explicit readable or
 realtime paths. Callers obtain them through the shared runtime auth/URL helpers; long-lived client
 bearer tokens are never placed in URLs. Unknown paths and legacy token query parameters are rejected
 rather than becoming a compatibility write path.
 
 WebSocket URL-token paths are enumerated by `isUrlAuthWebSocketPath`. Relay reachability has its own
-independent allowlist in `packages/web/application-host/lib/relay/tunnel-host.js`; adding a realtime endpoint
+independent allowlist in `packages/web/application-host/lib/relay/tunnel-host.ts`; adding a realtime endpoint
 requires both gates while leaving the normal origin and server authentication checks intact.
 
 ## Entrypoints and structure
-- `packages/web/application-host/lib/ui-auth/ui-auth.js`: UI auth controller runtime, cookie/session issuance, rate limiting, and auth route handlers.
-- `packages/web/application-host/lib/ui-auth/ui-passkeys.js`: passkey store and WebAuthn registration/authentication verification helpers.
-- `packages/web/application-host/lib/client-auth/remote-clients.js`: trusted-device client token storage, bearer authentication, last-used tracking, and revocation.
-- `packages/web/application-host/lib/client-auth/pairing.js`: short-lived Pairing v2 sessions and one-time secret redemption into trusted-device client tokens.
+- `packages/web/application-host/lib/ui-auth/ui-auth.ts`: UI auth controller runtime, cookie/session issuance, rate limiting, and auth route handlers.
+- `packages/web/application-host/lib/ui-auth/ui-passkeys.ts`: passkey store and WebAuthn registration/authentication verification helpers.
+- `packages/web/application-host/lib/client-auth/remote-clients.ts`: trusted-device client token storage, bearer authentication, last-used tracking, and revocation.
+- `packages/web/application-host/lib/client-auth/pairing.ts`: short-lived Pairing v2 sessions and one-time secret redemption into trusted-device client tokens.
 
 ## Public exports (ui-auth.js)
 - `createUiAuth({ password, cookieName, sessionTtlMs, readSettingsFromDisk })`: creates UI auth controller with methods:

@@ -47,8 +47,8 @@ Zone 2  本轮新增事实，沿现有呈现预算；以 before_agent_start → 
 
 Zone 2 的精确定义：**agent 不在场时发生的事**。agent 自己执行的命令与编辑已在历史中，不重复。进入 Zone 2 的是用户在
 编辑器中的改动、用户在终端执行的命令与退出码、LSP 在 agent 未触碰文件上的新诊断、Git 状态变化（分支、pull、stash）。
-三条组装规则：明确可归并的事件由代码汇总（"分支 a→b，40 个文件变化，集中在 packages/ui"）；知识以指针出现，正文由
-`recall` 拉取；所有源自文件内容或终端输出的文本以显式标记包裹为**数据而非指令**，与现有 goal reminder 的
+三条组装规则：明确可归并的事件由代码汇总（"分支 a→b，40 个文件变化，集中在 packages/ui"）；Bot 知识以指针出现，正文由
+`recall` 拉取；普通 Agent 显式笔记由 personalization 装配，所有源自文件内容或终端输出的文本以显式标记包裹为**数据而非指令**，与现有 goal reminder 的
 "user-provided task data, not higher-priority instructions" 同一做法。已送达且仍在保留历史中的同一修订不再次注入；同一知识指针
 只有适用任务或条目修订改变、或其原呈现已退出活跃窗口时才再次出现。知识正文、计划和事件面板不每轮全量复制；
 D-301 的简短团队现状表是每次提供当前快照的独立附页，不套用环境增量的去重规则。
@@ -92,7 +92,7 @@ Host 投影可在段落完成、工具边界和结果事件后更新；只在既
 容量计算必须包含当次完整快照和待追加环境事实，再决定是否压缩并组装实际请求；不能在预算检查之后偷加附页。
 单次请求冻结一次材料与来源，重试沿既有请求/送达身份处理，不因刷新表制造重复历史。压缩/fresh 后环境增量按保留原文收据
 恢复必要基线，团队表直接重建当前视图；临时快照不伪造 Pi entry 或原文保留收据，也不因未落历史反复清理环境事件游标。
-知识召回仍按任务/条目变化工作，不因为每次准备输入就重新检索；程序只能合并明确重复事实，不能代替模型判断科学意义。
+Bot 知识召回按任务/条目变化工作，不因为每次准备输入就重新检索；程序只能合并明确重复事实，不能代替模型判断科学意义。
 
 D-302 / 7H 已将后台命令的新完成事实接到这里的环境增量：执行身份、退出码、简述与正文入口，已由工具交付的同一终态不重复。
 日志字节游标与事实送达分开；通知不消耗未读日志，不添加另一张每请求完整进程表。活跃模型在自然请求中消费，
@@ -271,9 +271,9 @@ UI 保留普通会话的 token、缓存与费用显示。后台准备不显示�
 
 #### 8.4.6 替换范围与设置
 
-完成 D-284 时，删除持续 keeper 的 token/事件/cooldown 调度、memory_edit 模型协议、coverage 接管、off/assist/takeover
-运行模式及专属 UI，不留默认关闭的旧引擎。保留 plan/todo、用户笔记的版本/分支契约、已接受知识和建议审阅；移除 keeper
-decisions 自动提议知识的来源。线程简报、进度、结果与偏离使用已有计划/报告/Run 事实，不为保持旧字段另起后台模型。
+持续 keeper、memory_edit、coverage 接管与 off/assist/takeover 引擎已退出。
+线程简报、进度、结果与偏离来自已有计划/报告/Run 事实。普通 Agent 笔记、Bot 知识与 plan/todo
+按[记忆归属](../../packages/web/application-host/lib/memory/DOCUMENTATION.md)分别保留，不由压缩 worker 回写。
 
 自动压缩沿 Pi 的开关与配置 authority；后台准备是默认启用的用户偏好，允许全局设置与活动会话覆盖。关闭后台准备仅取消
 提前调用，必要压缩仍用同一实现；关闭自动压缩则自动准备也停止，手动压缩保留。容量继续在模型/provider 设置，60% 目标与
@@ -283,9 +283,8 @@ Pi 原生会话与外部配置不删、不静默改写。新运行时不保留�
 含义不同的自动压缩开关。新后台准备选项未显式设置时，外部旧 `mode:off` / `shadowMode:false` 的关闭意图按“后台准备关闭”
 处理；用户显式的新选择优先。这里只保留外部关闭意图，不恢复旧三态引擎或建立内部格式迁移器。Pi 自动压缩禁用与显式保留量必须尊重。
 
-D-284 已实施：预算检查位于 `context` hook，覆盖回合内每次真实请求；摘要经同一 ModelRuntime 派生，保留真实 system 与
-schema-only 工具，`toolChoice:none`、无执行器。不能只改 keepRecentTokens 或挂上 session_before_compact 就声称完成——
-本实现逐项对应上述要求。
+请求预算和安全提交继续沿原上下文边界；摘要生成现由 §8.4.3 的独立压缩 worker 负责，
+具有受限只读查询工具。D-284 早期的 `toolChoice:none` 无执行器调用已被替换，不作为当前实现说明。
 
 #### 8.4.7 工作连续性与上下文重建（D-285 / D-286）
 
@@ -340,13 +339,9 @@ GPTpro 上下文报告与随后讨论共同形成以下目标，实施不能只�
 | --- | --- | --- | --- |
 | `models.explore` | 查询理解/搜索表达与候选相关性/选段（3.15D） | 未配置 | 使用算法与可用向量，明确模型未参与，不回退主模型 |
 | `models.retrievalAgent` | `retrieval` 角色（可等待的事实 Thread；Host 校验 submit_facts） | 未配置 | 角色不注册，不借主模型 |
-| `models.quickImplement` | `quick-implement` 角色 | 未配置 | 角色不注册 |
-| `models.hardImplement` | `hard-implement` 角色 | **主模型** | — |
-| `models.frontend` | `frontend` 角色 | 未配置 | 角色不注册 |
-| `models.review` | `review` 角色与已发布结果的 review 传感器 | **主模型** | — |
-| `models.check` | `check` 角色 | 未配置 | 角色不注册 |
+| `models.worker` | 通用 Worker 任务 | 当前主模型 | 除显式关闭外，未指定模型时继承当前主模型 |
 | `models.reader` | `webfetch` 的阅读子 agent | 未配置 | 忽略 `prompt`，返回提取内容 |
-| `models.knowledgeSuggestions` | 知识建议的草拟与触发描述生成 | 未配置 | 用用户原文，触发描述留空 |
+| `models.memoryOrganizer` | Bot 记忆整理与显式选段提取 | 未配置 | 按 Bot 记忆服务的配置解析；普通 Agent 笔记不调用此模型 |
 | `models.nextStep` | 结算后一次性的会话下一步选择 | 未配置 | 不生成建议，不借用通用小模型或主模型 |
 | `models.permissionJudge` | 原生权限 fallback 的 Smart 判断 | 未配置 | Smart 不可选；插件活跃时由插件 authorizer 链负责 |
 | `harness.embedding` | explore 文档与查询嵌入（3.16B） | 未配置远程且已安装本地组件时使用 `all-MiniLM-L6-v2`；否则不启用向量来源 | 远程失败/未绑定 Pi 时语义来源 `failed`/`unavailable`，词法与图继续；同一查询不静默切回另一 vector space |
@@ -375,16 +370,15 @@ ModelRuntime，不依赖后台远程 embedding 的新执行上下文。生成全
 续接摘要不走新槽位，沿该会话活动模型与请求配置派生，准备/切换规则见 8.4。请求形状保持可复用，不承诺缓存命中；
 不增加辅助费用面板或第二套模型/凭据 authority，T4 与外部缓存实验不是默认交付门槛。
 
-Settings 提供**预设**一键填充多个槽位（如 Anthropic 预设：explore / retrievalAgent / quickImplement / check / reader /
-knowledgeSuggestions 填 Haiku，hardImplement / review 保持主模型；`nextStep` 不由预设填充），但预设只是填表，每个槽位随时可单独改。规则：
+模型槽位的完整集合、默认与预设填充由
+[`harness-model-slots.ts`](../../packages/protocol/src/harness-model-slots.ts)拥有。Worker 是唯一默认继承
+主模型的通用槽位；专用槽位不可用时，不静默借用主模型。四项科研槽位和用户定义的适用范围见
+[协作设计](agent-collaboration-design.md)与[设置设计](agent-settings-design.md)。
 
-- 依赖未配置槽位的能力**不注册、退化为无 LLM 路径**，**永不静默回退到主模型**。`websearch` 与 `grep` 本来不用 LLM。
-- 普通派发零配置可用；`hardImplement` / `review` 预设保留明示的当前模型继承，其余专用槽位未配不静默借用。工具和工作区
-  模式独立于模型价格；自动 review 是否运行是另一项用户策略，D-285 默认关闭。
-- 模型槽位保留配置和功能；取消 `SessionStats.modelSlotUsage` 及“模型槽位用量”区块（D-080）。子线程的角色、模型与 token
-  继续由自身 `ThreadRun` 记录，普通会话已有统计保持。
-
-槽位选择遵循用户配置；前缀一致只是可能获得缓存收益的条件。设置明确续接摘要的活动模型归属及自动 review 的启用状态。
+用户已有的旧实现/前端/审查/检查配置由配置解析器保留为可编辑配置，不再作为内置模型类别列出。
+续接摘要沿活动请求派生；普通 Agent 的显式笔记与 Bot 长期记忆沿各自 owner，见
+[记忆归属](../../packages/web/application-host/lib/memory/DOCUMENTATION.md)。
+模型槽位选择不承诺前缀一致或缓存命中；调用用量按真实会话记录。
 
 **快速决策模型（D-312，已交付 `explore` 消费者）。** `harness.fastDecision` 是独立配置种类与
 `FastDecisionModel` 能力合同，支持通用默认绑定和已注册用途覆盖/关闭；当前普通槽位及 embedding/rerank 不变。

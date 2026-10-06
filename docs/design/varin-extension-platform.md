@@ -19,12 +19,12 @@ The target customization ceiling is deliberately high:
 - extensions may add, decorate, reorder, hide, or replace product contributions;
 - the session navigator, chat timeline, composer, Agents, MCP, settings, panels, and workbench shell
   are replaceable above a narrow recovery kernel;
-- built-in product features ultimately use the same contribution and lifecycle contracts as
+- built-in product features use the same contribution and lifecycle contracts as
   external Varin extensions;
 - an extension may provide UI only, host services only, or coordinated host and surface entrypoints;
 - declarative, managed-code, isolated-app, and trusted-native UI modes coexist instead of forcing
   every extension into one framework or one reversibility model;
-- service selection may later vary by workspace, session, agent, model, or invocation without
+- service routing uses revisioned scope rules, including workspace, session, agent, model and invocation, without
   hard-coding package-to-package coexistence rules.
 
 This platform is separate from Pi's package and extension system. A Pi package extends the Pi agent
@@ -152,7 +152,7 @@ The target contribution families cover the complete workbench:
 - session navigator rows, badges, grouping, actions, and a replaceable navigator implementation;
 - chat timeline items, message/tool/custom-entry renderers, composer actions, attachments, and a
   replaceable timeline or composer;
-- Agents, MCP, Provider, Recovery, Commands, Prompts, Skills, package, and integration views;
+- Agents, MCP, Provider, Recovery, Commands, Agent instructions, Skills, package, and integration views;
 - file, Git, terminal, walkthrough, diagram, and project/workspace surfaces;
 - notifications, background status, scheduled-work UI, and diagnostics;
 - an alternative `workbench.shell` that replaces the default product organization.
@@ -160,7 +160,7 @@ The target contribution families cover the complete workbench:
 The contribution API provides Varin-native primitives for consistent integrations, but a
 contribution may also mount an arbitrary framework-neutral Surface within its granted region.
 
-## 6. Target architecture
+## 6. Runtime architecture
 
 ```text
                          Varin application host
@@ -191,17 +191,20 @@ contribution may also mount an arbitrary framework-neutral Surface within its gr
 └──────────────────────────────────────────────────────────────────────┘
 ```
 
-### 6.1 Proposed package ownership
+### 6.1 Package ownership
 
-The exact package names may be finalized during implementation, but ownership remains separated:
+The production packages separate data contracts, execution owners and browser loading:
 
 | Package | Responsibility |
 | --- | --- |
 | `@varin/extension-contract` | Browser-safe manifest, lifecycle, contribution, service, and wire DTOs |
-| `@varin/extension-host` | Installation records, desired-state store, supervisor, host entrypoints, asset catalog, and migrations |
-| `@varin/extension-surface` | Surface supervisor, owner scopes, contribution registry, module/iframe lifecycle, and layout resolution |
+| `@varin/extension-host` | Installation records, desired state, Host supervisor/entrypoints, capability grants and immutable assets |
+| `@varin/extension-surface` | Framework-neutral Surface supervisor, owner scopes, contributions, services and layout resolution |
+| `@varin/extension-loader` | Authenticated artifact loading, module/iframe lifecycle and Surface activation |
 | `@varin/extension-sdk` | Framework-neutral extension author API and build-time types |
-| `@varin/extension-react` | Optional React 19 adapter; not the core contract |
+| `@varin/extension-react` | Optional React adapter |
+| `@varin/extension-builtins` | Distribution manifests and built-in contributions |
+| `@varin/extension-cli` | Authoring, validation and package tooling |
 
 `@varin/protocol` remains the Pi worker/surface contract. Varin extension contracts are not
 renamed Pi extension messages and do not make Pi workers aware of Varin UI modules.
@@ -546,18 +549,9 @@ Current hard-coded registries such as the settings `pageOrder`, `renderPageSideb
 
 ### 11.2 Workbench ownership points
 
-Replacement-capable ownership points include at least:
-
-```text
-workbench.shell
-sessions.navigator
-chat.timeline
-chat.composer
-agents.workbench
-mcp.workbench
-workspace.explorer
-settings.workbench
-```
+Stable replacement targets and contribution slots are exported by `@varin/extension-contract`.
+[Workbench composition](composable-workbench.md#6-公开-workbench-契约) explains the owning consumers;
+this document does not maintain another identifier catalog.
 
 Smaller additive/augmentation points remain available within them. A replacement implementation
 receives a documented model and capability clients, not private component state from the previous

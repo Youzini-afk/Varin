@@ -84,7 +84,7 @@
    - `foo.mdx` -> `/foo/`
    - `folder/index.mdx` -> `/folder/`
    - `folder/bar.mdx` -> `/folder/bar/`
-4. 补齐译本——见[本地化](#本地化)。新页面上线前必须包含所有支持语种。
+4. 检查翻译覆盖——见[本地化](#本地化)。保持现有译本准确；缺少译本时可以明确链接到英文源文。
 5. 如果侧边栏要链到这一页，同时补侧边栏译文——见[翻译侧边栏](#翻译侧边栏)。
 6. 跑校验：
 
@@ -113,11 +113,12 @@
 - 链接带尾部斜杠（`/page/`）
 - 每个侧边栏链接都必须对应已有的英文 MDX 文件
 - 分组标题要短，并且面向任务
+- `label` 使用英文，其他语言放在 `translations`
 
 ## 图片
 
-图片放在文档内容树里，才会和页面一起同步（同步会复制整个 `content/docs/`，不只是 `.mdx`）。
-用**相对路径**引用；Astro 会在构建时优化。
+图片放在文档内容树里，用**相对路径**引用。目前仓库没有渲染器或同步流程；未来接入 Astro 时，
+应复制完整内容树，并配置图片优化。
 
 ```
 content/docs/
@@ -128,21 +129,21 @@ content/docs/
 
 规则：
 
-- 图片和文档放在一起（例如 `content/docs/images/`）；相对路径 `./images/...` 会在构建时解析并优化
+- 图片和文档放在一起（例如 `content/docs/images/`）；相对路径 `./images/...` 便于未来渲染器定位图片
 - 必须写有意义的 `alt`（并在各语种页面里翻译）
-- **不要**把文档图片放到网站仓库的 `public/`——那不是权威源，同步也不会带走
-- 原图保持合理大小；构建会生成响应式变体
+- **不要**把文档图片放到网站仓库的 `public/`——那不是本包内容的权威源
+- 原图保持合理大小；未来渲染器应配置响应式变体
 
 译本在图片没有文字时复用同一张共享图。截图里有本地化 UI 文字时，把该语种的图放进对应
-locale 目录（例如 `en/images/...`），并让译本指向它。
+locale 目录（例如 `uk/images/...`），并让译本指向它。
 
-`docs:validate` 只检查 `.mdx`，图片不会挡住校验。
+预览站点时检查图片文件是否存在、能否正确显示；当前内容校验器不会渲染图片。
 
 ### 浅色 / 深色变体
 
 要按主题显示不同截图时，准备 `-light` / `-dark` 一对，并分别加上 `oc-light-only` /
-`oc-dark-only`。网站已有对应 CSS（跟着 Starlight 的 `data-theme`），正确的那张会显示，
-并跟随页内主题切换。
+`oc-dark-only`。未来的渲染器需要为这些类提供跟随 Starlight `data-theme` 的 CSS；
+仅添加类名不会自动切换图片。
 
 用 `<Image>` 组件，这样图片仍会被优化，同时能加 class。把 import 写在 frontmatter 下面：
 
@@ -162,7 +163,7 @@ import desktopDark from "./images/desktop-dark.png";
 
 说明：
 
-- 两张图都和其他文档图片一样放在 `content/docs/`，同步方式相同
+- 两张图都和其他文档图片一样放在 `content/docs/`，便于未来渲染器一起读取
 - 两张图用同一句 `alt`（并在译本里翻译）
 - 只有一张图时，用普通的 `![alt](./path.png)` 即可
 
@@ -218,11 +219,12 @@ content/docs/
 ```mdx
 ---
 title: Install
-description: Install Varin for desktop, web, or VS Code.
+description: Install Varin for desktop or web.
 ---
 ```
 
-新页面上线前必须补齐所有支持语种。Starlight 在缺译本时可能回退到英文，但新文档页不要依赖这个回退。
+翻译覆盖和质量由内容审查处理，不作为新增的阻断校验规则。保留各语言的有效内容，并同步修正变化的事实。
+缺少译本时可以明确链接到英文源文，不必为满足文件数量而创建占位译文。未来接入站点时再验证渲染器的回退行为。
 
 ### 翻译侧边栏
 
@@ -261,7 +263,8 @@ description: Install Varin for desktop, web, or VS Code.
 }
 ```
 
-当前语种没有译文时，会回退到英文 `label`。
+文档源允许缺少部分语种的标签。接入渲染器时，应为缺失译文配置英文 `label` 回退；
+本仓库目前尚未运行这一渲染行为。
 
 ### 不要翻译这些
 
@@ -273,7 +276,8 @@ description: Install Varin for desktop, web, or VS Code.
 ### 校验
 
 `bun run docs:validate` 会遍历 `content/docs/` 下每一个 `.mdx`——**包括译本**——如果缺
-`title` 或 `description`，或侧边栏 `link` 对不上默认（英文）页面，就会失败。加页或翻译后请运行它。
+`title` 或 `description`，或正文页面链接、侧边栏 `link` 没有目标，就会失败；同时运行工程文档的
+本地链接检查。英文保留在内容根目录。加页或翻译后请运行它，并单独审查命令准确性和翻译质量。
 
 ## 发布
 

@@ -16,15 +16,15 @@ Nginx、Nginx Proxy Manager、Caddy、Cloudflare、その他のリバースプ�
 ## プロキシが対応すべきもの
 
 - ライブメッセージ転送用の WebSocket:
-  - `/api/event/ws`
-  - `/api/global/event/ws`
+  - `/api/varin/runtime/ws`
+  - `/api/dictation/ws`
   - `/api/terminal/ws`
+  - `/api/varin/realtime-proxy/ws`
 - バッファリングなしの SSE:
-  - `/api/event`
-  - `/api/global/event`
   - `/api/notifications/stream`
   - `/api/varin/events`
-  - `/api/terminal/:sessionId/stream`
+  - `/api/varin/runtime-manager/events`
+  - `/api/varin/realtime-proxy/sse`
 - 添付ファイルとファイル操作向けの大きなリクエストボディ
 - ライブストリームとターミナルセッション向けの長い read timeout
 
@@ -66,51 +66,26 @@ proxy_set_header X-Forwarded-Host $host;
 
 gzip off;
 
-location = /api/terminal/ws {
+location ~ ^/api/(varin/runtime|varin/realtime-proxy|terminal|dictation)/ws$ {
     proxy_pass http://127.0.0.1:3000;
     proxy_set_header Upgrade $http_upgrade;
     proxy_set_header Connection "upgrade";
+    proxy_set_header Host $host;
+    proxy_set_header X-Real-IP $remote_addr;
+    proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+    proxy_set_header X-Forwarded-Proto $scheme;
     proxy_buffering off;
     proxy_cache off;
     proxy_read_timeout 3600s;
     proxy_send_timeout 3600s;
 }
 
-location = /api/global/event/ws {
+location ~ ^/api/(notifications/stream|varin/(events|runtime-manager/events|realtime-proxy/sse))$ {
     proxy_pass http://127.0.0.1:3000;
-    proxy_set_header Upgrade $http_upgrade;
-    proxy_set_header Connection "upgrade";
-    proxy_buffering off;
-    proxy_cache off;
-    proxy_read_timeout 3600s;
-    proxy_send_timeout 3600s;
-}
-
-location = /api/event/ws {
-    proxy_pass http://127.0.0.1:3000;
-    proxy_set_header Upgrade $http_upgrade;
-    proxy_set_header Connection "upgrade";
-    proxy_buffering off;
-    proxy_cache off;
-    proxy_read_timeout 3600s;
-    proxy_send_timeout 3600s;
-}
-
-location ~ ^/api/(event|global/event|notifications/stream|varin/events)$ {
-    proxy_pass http://127.0.0.1:3000;
-    proxy_set_header Accept "text/event-stream";
-    proxy_set_header Cache-Control "no-cache";
-    proxy_buffering off;
-    proxy_cache off;
-    gzip off;
-    add_header X-Accel-Buffering "no" always;
-    add_header Cache-Control "no-cache, no-transform" always;
-    proxy_read_timeout 3600s;
-    proxy_send_timeout 3600s;
-}
-
-location ~ ^/api/terminal/.+/stream$ {
-    proxy_pass http://127.0.0.1:3000;
+    proxy_set_header Host $host;
+    proxy_set_header X-Real-IP $remote_addr;
+    proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+    proxy_set_header X-Forwarded-Proto $scheme;
     proxy_set_header Accept "text/event-stream";
     proxy_set_header Cache-Control "no-cache";
     proxy_buffering off;
@@ -137,149 +112,14 @@ location / {
 
 ## 例: Nginx Proxy Manager
 
-<details>
-<summary>Advanced タブの例を表示</summary>
-
-```nginx
-client_max_body_size 50M;
-client_body_buffer_size 50M;
-proxy_request_buffering off;
-
-proxy_http_version 1.1;
-proxy_set_header Connection "";
-proxy_set_header Host $host;
-proxy_set_header X-Real-IP $remote_addr;
-proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
-proxy_set_header X-Forwarded-Proto $scheme;
-proxy_set_header X-Forwarded-Host $host;
-
-gzip off;
-
-location = /api/terminal/ws {
-    proxy_pass http://127.0.0.1:3000;
-    proxy_set_header Upgrade $http_upgrade;
-    proxy_set_header Connection "upgrade";
-    proxy_buffering off;
-    proxy_cache off;
-    proxy_read_timeout 3600s;
-    proxy_send_timeout 3600s;
-    proxy_connect_timeout 30s;
-}
-
-location = /api/global/event/ws {
-    proxy_pass http://127.0.0.1:3000;
-    proxy_set_header Upgrade $http_upgrade;
-    proxy_set_header Connection "upgrade";
-    proxy_buffering off;
-    proxy_cache off;
-    proxy_read_timeout 3600s;
-    proxy_send_timeout 3600s;
-    proxy_connect_timeout 30s;
-}
-
-location = /api/event/ws {
-    proxy_pass http://127.0.0.1:3000;
-    proxy_set_header Upgrade $http_upgrade;
-    proxy_set_header Connection "upgrade";
-    proxy_buffering off;
-    proxy_cache off;
-    proxy_read_timeout 3600s;
-    proxy_send_timeout 3600s;
-    proxy_connect_timeout 30s;
-}
-
-location = /api/event {
-    proxy_pass http://127.0.0.1:3000;
-    proxy_set_header Accept "text/event-stream";
-    proxy_set_header Cache-Control "no-cache";
-    proxy_buffering off;
-    proxy_cache off;
-    gzip off;
-    add_header X-Accel-Buffering "no" always;
-    add_header Cache-Control "no-cache, no-transform" always;
-    proxy_read_timeout 3600s;
-    proxy_send_timeout 3600s;
-    proxy_connect_timeout 30s;
-}
-
-location = /api/global/event {
-    proxy_pass http://127.0.0.1:3000;
-    proxy_set_header Accept "text/event-stream";
-    proxy_set_header Cache-Control "no-cache";
-    proxy_buffering off;
-    proxy_cache off;
-    gzip off;
-    add_header X-Accel-Buffering "no" always;
-    add_header Cache-Control "no-cache, no-transform" always;
-    proxy_read_timeout 3600s;
-    proxy_send_timeout 3600s;
-    proxy_connect_timeout 30s;
-}
-
-location = /api/notifications/stream {
-    proxy_pass http://127.0.0.1:3000;
-    proxy_set_header Accept "text/event-stream";
-    proxy_set_header Cache-Control "no-cache";
-    proxy_buffering off;
-    proxy_cache off;
-    gzip off;
-    add_header X-Accel-Buffering "no" always;
-    add_header Cache-Control "no-cache, no-transform" always;
-    proxy_read_timeout 3600s;
-    proxy_send_timeout 3600s;
-    proxy_connect_timeout 30s;
-}
-
-location = /api/varin/events {
-    proxy_pass http://127.0.0.1:3000;
-    proxy_set_header Accept "text/event-stream";
-    proxy_set_header Cache-Control "no-cache";
-    proxy_buffering off;
-    proxy_cache off;
-    gzip off;
-    add_header X-Accel-Buffering "no" always;
-    add_header Cache-Control "no-cache, no-transform" always;
-    proxy_read_timeout 3600s;
-    proxy_send_timeout 3600s;
-    proxy_connect_timeout 30s;
-}
-
-location ~ ^/api/terminal/.+/stream$ {
-    proxy_pass http://127.0.0.1:3000;
-    proxy_set_header Accept "text/event-stream";
-    proxy_set_header Cache-Control "no-cache";
-    proxy_buffering off;
-    proxy_cache off;
-    gzip off;
-    add_header X-Accel-Buffering "no" always;
-    add_header Cache-Control "no-cache, no-transform" always;
-    proxy_read_timeout 3600s;
-    proxy_send_timeout 3600s;
-    proxy_connect_timeout 30s;
-}
-
-location /api {
-    proxy_pass http://127.0.0.1:3000;
-    proxy_read_timeout 3600s;
-    proxy_send_timeout 3600s;
-    proxy_connect_timeout 30s;
-}
-
-location / {
-    proxy_pass http://127.0.0.1:3000;
-}
-```
-
-</details>
-
-このホストでは Nginx Proxy Manager の `Websockets Support` も有効にしてください。
+Nginx Proxy Manager で **Websockets Support** を有効にしてください。ホストの Advanced 設定には、上の Nginx 例のバッファリング、リクエストサイズ、タイムアウト設定を使用し、同じ現行の WebSocket と SSE パスを維持してください。
 
 ## よくある失敗の兆候
 
 ### ページは読み込まれるが、メッセージ送信に失敗する
 
 - プロキシで WebSocket が有効になっていません
-- `/api/event/ws` または `/api/global/event/ws` が正しく通っていません
+- `/api/varin/runtime/ws` が正しく通っていません
 
 ### 通知またはライブ状態が更新されない
 

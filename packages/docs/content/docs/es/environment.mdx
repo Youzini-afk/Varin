@@ -25,7 +25,7 @@ Inicia Varin en modo headless cuando vale `true` o `1`. Las rutas de API siguen 
 
 ### `VARIN_DATA_DIR`
 
-Sustituye el directorio de datos de Varin. El valor predeterminado es `~/.config/varin`.
+Cambia el directorio de datos de Varin. Valores predeterminados: Linux usa `$XDG_CONFIG_HOME/varin` (o `~/.config/varin`); macOS, `~/Library/Application Support/Varin`; Windows, `%APPDATA%/Varin`.
 
 ### `VARIN_COMPRESS_API`
 
@@ -60,10 +60,6 @@ Ejecutable de Git usado por las funciones de Git de Varin.
 ### `GIT_BINARY`
 
 Otra sustitución del ejecutable de Git. Prefiere `VARIN_GIT_BINARY` para la configuración específica de Varin.
-
-### `VARIN_GIT_READ_CACHE_TTL_MS`
-
-Tiempo de vida, en milisegundos, de las lecturas de archivos respaldadas por Git en caché. Pon `0` para desactivar esta caché al depurar.
 
 ## Voz y túneles
 

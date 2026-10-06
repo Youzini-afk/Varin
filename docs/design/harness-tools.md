@@ -92,7 +92,7 @@ research 与 knowledge-work profile 再评估）。
 形如路径的参数，`MSYS_NO_PATHCONV=1` 可关；CRLF；fork 慢）由 shell 监督器的默认环境处理，不暴露给模型。
 
 当前公开工具参数包括 `command`、`waitMs?`、可选受管 `target` 与目标 `cwd`；普通本机调用沿用会话目录。
-Pi 工具等待默认 10 s，bridge 请求期限覆盖所选观察窗口并受协议上界约束；该期限只控制本次观察，不终止进程。
+Pi 工具等待默认 10 s；bridge 为观察窗口预留返回时间，超出通用请求上界时不另设更短的传输期限。观察取消不等于进程终止。
 **等待期限不等于进程期限**：命令在 `waitMs` 内结束则同步返回；否则**自动转后台**，返回"已等待 N 秒，仍在运行，shell id X"与截至此刻的输出，
 模型继续工作，稍后用 `get_output(X)` 取结果、`write_to_process(X, text)` 喂 stdin、`kill_shell(X)` 终止。这是
 Devin CLI `exec` / `get_output` / `write_to_process` / `kill_shell` 与 Codex `exec_command(yield_time_ms)` /
@@ -111,12 +111,10 @@ Devin CLI `exec` / `get_output` / `write_to_process` / `kill_shell` 与 Codex `e
 - **stdin 开着，harness 永不代写。** 等输入的程序会停在提示上；`waitMs` 到了它转后台，模型在输出里看到提示文本，
   用 `write_to_process` 回答或 `kill_shell` 放弃。Pi 内置 bash 的 stdin 是 ignore，与 `write_to_process` 不相容，
   因此这里不沿用。
-- **持久会话 shell，以 login shell 启动。** 一个 PTY shell 跑所有前台命令，先 source 用户的 `.bash_profile` /
-  `.bashrc`——nvm、pyenv、conda、自定义 PATH 全部就位，agent 用的就是用户平时的环境（Claude Code 与 Codex 均如此）。
-  cwd、环境变量、`source .venv/bin/activate`、`nvm use` 跨调用保持；Pi 内置 bash 每次 `spawn` 则不保持，`source
-  venv` 后 `pytest` 报"not found"正是要消灭的那类工具错误。命令以哨兵标记包裹以分隔输出并捕获退出码。前台命令超过
-  `waitMs` 时，**它所在的 shell 整个转为后台 shell**（拿到 id），host 起一个新的会话 shell 继承 cwd 服务后续前台
-  命令——模型不被阻塞，后台命令也不失去它的 shell 状态。
+- **每次 `bash` 是独立命令。** cwd 来自本次显式参数或请求受理时冻结的默认目录；`cd`、环境变量、
+  venv 和 `nvm use` 不跨调用继承。需要同一命令环境时在该命令中准备；需要继续交互时使用返回的实际进程句柄。
+  超过 `waitMs` 只结束前台观察，不启动一条继承其状态的替代 shell。Bash 家族仍按所选解释器加载用户启动配置，
+  具体启动与结果形状见 [bash tool](../../packages/pi-host/src/harness/bash-tool.ts)。
 - **环境变量只改交互与显示，不改工具语义。** 叠加在用户环境之上：`GIT_TERMINAL_PROMPT=0`（git 不弹凭据框）、
   `PAGER=cat GIT_PAGER=cat`（不弹分页器）、`NO_COLOR=1`（减少 ANSI 噪音）、`PYTHONUNBUFFERED=1`、Linux 上
   `DEBIAN_FRONTEND=noninteractive`。**不设 `CI=1`**：许多构建工具在 `CI` 下改变语义（Create React App 把 warning 当
@@ -222,7 +220,7 @@ Cursor 为每个前沿模型单独调工具。Varin 支持任意 provider，因�
 
 ### 5.5 `get_output`、`write_to_process`、`kill_shell`、`diagnostics`
 
-`get_output(handle, offset?, length?)` 统一读取两类东西：已完成输出的句柄（`out_x`）与仍在后台运行的 shell（`bash`
+`get_output(handle, offset?, length?, waitMs?)` 统一读取两类东西：已完成输出的句柄（`out_x`）与仍在后台运行的 shell（`bash`
 返回的 shell id）。没有它句柄是死的。`write_to_process(id, text)` 与 `kill_shell(id)` 服务后台 shell。
 `diagnostics(path?)` 供 `pending` 态后按需查询。
 
@@ -233,7 +231,7 @@ Cursor 为每个前沿模型单独调工具。Varin 支持任意 provider，因�
 没有增量语义，仍按 `offset` / `length` 分页。
 
 D-302 / 7H 已在同一工具上增加可取消的事件等待，保留默认立即读取和显式历史分页；后台完成事实接入 7G 环境增量。
-当前 `get_output` 尚不提供这项等待，Agent 后台 shell 的完成也没有通用 Zone 2 通知链；不能把用户终端事件或验证记录当成已接通的替代。
+等待只结束本次观察，不终止进程；普通 shell 仍不承诺跨 Host 重启生存。
 具体启动、等待、通知和生命周期设计见 5.9.2。
 
 ### 5.6 `todo`（新增，主 agent 自己的计划）
@@ -256,12 +254,12 @@ confidence? })`——整表替换语义，Claude Code TodoWrite 的形状，模�
 必需源码范围，跨进程阶段延续同一次查询。扩散模型与后训练留后续，不推迟当前 LLM 接线（D-174/D-175）。
 来源、版本、草稿与输出句柄沿既有实际 authority；接线与未观察项只记在 status，不能把真实 provider 延迟、质量或完整冷扫时间写成已验证。
 
-`dispatch(task, { context?, preset?, scope?, worktree? })` 异步开一条工作线程，父继续推进。默认普通模型执行，不强制选择角色；
+`dispatch(task, { input?, preset?, scope?, worktree? })` 异步开一条工作线程，父继续推进。默认普通模型执行，不强制选择角色；
 预设配置、背景起点与工作分支分别表达（9.2）。成果形状按用途：review 给发现与依据，检索给事实/来源，实现给实际变更与
 说明。过程中有用的问题和信息可以定向交流，普通过程不广播。已有工作可继续或 fresh，不因返回过一次结果就必须重建线程。
 
 父 agent 通过增量观察和定向消息协调工作（第 9.3.6 节）：`threads(ids?)` 非阻塞返回一张增量状态表；
-`wait(ids?, timeout_ms?)` 等待所选线程的结果、对应答复或需处理的状态变化，超时返回当前观察，**超时是正常结果**，默认只受 Host 请求时限约束，
+`wait(ids?, timeout_ms?)` 等待所选线程的结果、对应答复或需处理的状态变化，超时返回当前观察，**超时是正常结果**；省略期限时持续事件等待，
 不按缓存 TTL 唤醒（第 9.2.6 节）；`read_thread(id, what?)` 默认读线程状态与已有报告，需要时读取计划/用户笔记或转录切片；
 不为提供 progress/decisions 块启动 keeper。send 给线程传话；kill 终止执行并保留工作结果，目录按 9.3.4 回收。
 merge 集成选定的不可变子结果，返回应用、冲突和恢复状态；文本冲突保留标记，非文本提供父/子版本选择（9.2.5b）。
@@ -269,9 +267,10 @@ merge 集成选定的不可变子结果，返回应用、冲突和恢复状态�
 
 ### 5.8 `webfetch` / `websearch`（新增）
 
-**阶段 L 增强（D-315，部分已实施）。** [Web 与科研检索](web-research-search-design.md) 定义目标驱动的连续搜索、
-固定原文视图、材料复用及学术发现/关系/结构阅读；当前 retrieval 报告合同和 `research_search` 的 OpenAlex/Semantic Scholar
-发现/详情已接入，其他 L1–L6 能力沿现有工具和线程继续实施，不把普通调用改成必经深度研究。本节现有 Web 行为与新增能力分开记，实际交付见 status。
+**Web 与科研材料。** 当前 `research_search` 支持发现、详情和分页关系；`document_read` 提供固定 PDF 原件的
+文本、页图与结构视图，`materials` 管理授权材料集合，`research_decide` 复用快速决策配置。
+注册按 Host 能力和工具设置生效；解析器、provider 和平台可用性分别报告。领域合同见
+[Web 与科研检索](web-research-search-design.md)，实际交付及未测边界见 status。
 
 web 能力由 Harness 原生提供，搜索与模型账户无关（D-289）。普通用户无需再申请搜索密钥或安装 MCP。
 搜索找到来源，`webfetch` 读取来源正文、查找片段并按行展开；来源面板沿同一工具结果展示 URL。
@@ -290,12 +289,14 @@ Curator 变成工作台的"来源"面板（可审阅、钉住、删除，走已�
 **`webfetch(url, { prompt?, find?, start_line?, end_line? })`**：Host 抓取，`find` 对提取正文做不区分大小写的字面查找，返回命中行与相邻上下文；行范围按一开始的提取 Markdown 行号包含两端，未指定范围时沿原正文呈现。查无结果是正常观察，非法范围是明确参数错误。SSRF 策略复用 [security.md](security.md) 已有规则——私有与保留网段默认阻断、
 浏览器 cookie 默认不带、显式 opt-in；工作区级域名允许 / 阻断列表；同域重定向自动跟随，跨域重定向返回元数据；正文提取
 （readability 类算法 + Markdown 转换；PDF 转文本，research profile 同样需要）；15 分钟缓存。无 `prompt` 时返回提取后的
-Markdown 走句柄。有 `prompt` 时**仅当配置了 `models.reader` 槽位**（第 8.5 节）才由阅读子 agent 回答、主上下文只收
+Markdown 走句柄。有 `prompt` 时**仅当配置了 `models.reader` 槽位**（见[模型槽位](harness-context.md#85-子-agent模型槽位与模型切换)）才由阅读子 agent 回答、主上下文只收
 回答；未配置则忽略 `prompt`、返回提取内容并注明"reader unavailable: no reader model configured"——**永不回退到主
 模型**。
-**JS 渲染是 Varin 的独有能力**：桌面端用 Electron 的 Chromium 离屏渲染（隐藏窗口，不带用户 cookie 除非显式开启）；
-Web / 云 host 无 Chromium 时返回 `unavailable (no renderer)`；检测到空壳 SPA（极小 body + 脚本标签）时明说，永不把
-空页面当成功。
+**JS 渲染**需要 `render: true`、会话的 `harness.web.render` 设置和可用的 Host renderer。
+桌面端使用 Electron Chromium 离屏渲染；用户 cookie 仍需显式开启。设置关闭时返回
+`renderer-unavailable` / `disabled`，Host 没有 renderer 时返回 `renderer-unavailable` / `unsupported`。
+未渲染的 HTML 只有在提取正文为空且包含脚本标记时才返回 `empty-shell`；正常短页面保留正文、链接和标题，
+脚本、样式与模板内容不作为正文。
 
 **`websearch(query, { allowed_domains?, blocked_domains?, recency?, limit? })`**：有用户选择时使用其搜索 API（Brave、Exa、Tavily、Jina、自托管 SearXNG）；否则默认直接调用 Exa 免密钥 MCP，明确失败时顺序改用 Parallel。真实 provider 与换源说明随结果返回；空结果不换源，取消立即停止；自配服务缺凭据/失败明确报错，不改用其他服务。工具默认注册，显式关闭仍生效。设置与普通模型账户分离，不探测或复用模型搜索能力。
 
@@ -346,7 +347,7 @@ Web / 云 host 无 Chromium 时返回 `unavailable (no renderer)`；检测到空
 2. **等待期限统一。** 协调工具、bridge、router 与进程启动/等待责任，修复当前 30 s 请求期限早于 60 s 后台返回的路径；
    不只是把超时改成更大的固定数。等待结束返回 running/退出事实，取消观察只结束观察，显式 `kill_shell` 才请求终止。
    进程执行期限只有明确产品配置/用户请求才存在；审计并删除未被执行端消费的 `runMs` 等空参数，不把等待超时变成暗中的杀进程。
-3. **按需读与事件等待。** 沿用 `get_output(handle, offset?, length?)`，增加可选 `waitMs`：默认立即读；指定等待时，
+3. **按需读与事件等待。** 沿用 `get_output(handle, offset?, length?, waitMs?)`，增加可选 `waitMs`：默认立即读；指定等待时，
    已有未读输出/终态直接返回，否则由新输出、实际退出、取消或本次观察期限结束唤醒。静态输出/显式历史切片直接读取，
    不为已存在的字节等待。返回运行状态、退出码或“无新输出，仍运行”，不用循环轮询或“没有输出=卡死”的推断。
    长期等待复用执行准入的让出/恢复接缝；让出模型名额不释放仍被进程占用的机器、writer 或目录责任。

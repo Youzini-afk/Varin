@@ -12,20 +12,9 @@ The [current process model](../architecture.md#process-model) locates this contr
 [status.md](../status.md)；未完成的纵切与实施规则看 [agent-harness-plan.md](../plan/agent-harness-plan.md)；
 每个偏离的理由看 [decisions/README.md](../decisions/README.md)——日志不是规格，被采纳的决定都已回写到本文。
 
-D-284 将上下文管理改为容量驱动的后台摘要准备与按需切换，保留前台无明显整理停顿的目标，已实施：持续 keeper /
-takeover 已删除，新链按 2.4A/B、2.6A/B 接线并经真 Pi+faux 纵切验证，当前事实见 status。
-D-285 接受以工作为中心的可续做线程、可选预设、定向通信与分段成果；D-286 补齐整套上下文原则及“工作可延续、上下文可重建”。
-D-287 已按真实 Pi/Host/Rust 消费者验收并修正上下文收据、Run 准入、消息提交边界和物化 baseline handoff；证据见 status 与验收记录。
-
-D-339 的[多 Agent 协作设计](agent-collaboration-design.md)于 2026-10-05 确认，2026-10-06 已接线并完成定向验证：主线持续负责整体实现，
-常规子 Agent 收敛为 Worker/检索，同任务成员可按范围互读会话，等待按事件恢复，代码可按文件或片段直接提交给目标。
-它修订 D-285 的预设保留与协作范围目标；已有 Thread/Run、Pi、WorkingState/Integration 权威继续沿用。
-
-D-292 的全仓工程阶段 Q：[测试与 CI 体系重整](testing-ci-design.md) 与 D-296 的旧伴侧插件清理已完成。
-D-297 明确 AI4S 的工作台 UIUX 与 Agent 工作侧重独立，设计见第 10 节；科研执行与协作已推进至 D-305，实际交付见 status。
-D-312 的快速决策模型与渐进检索已交付并接线（F0–F4），`explore` 为首个消费者；实测边界见 status。
-D-313 的 [Varin 全面更名](varin-rebrand-design.md) 已落地：自有产品/代码/配置/发行配置与 GitHub 仓库
-一次切换，不留旧名兼容；Pi 的实际依赖与原生数据保留。首次新品牌发行边界见 status，下一实施阶段为 F。
+当前上下文、协作和资源合同分别由[上下文](harness-context.md)、[多 Agent 协作](agent-collaboration-design.md)
+和 [Rust 内核](rust-kernel-design.md)专卷负责。已完成阶段的时间线留在[交付记录](../archive/harness-delivery-log.md)，
+这里不重复阶段清单或把历史缺口当成当前任务。
 
 ## 1. 决定
 
@@ -75,11 +64,11 @@ repo map 的符号引用图 PageRank。Varin 不复制它们的实现，只采�
 
 ## 2. 已确定的决策
 
-以下决定已经固定，改动它们需要先改这张表：
+以下是跨模块的当前约定：
 
 | 主题 | 决定 |
 | --- | --- |
-| 产品边界 | Varin = 工作台 + harness；Pi = agent 内核；其他 agent 是能力协商的 bring-your-own runtime |
+| 产品边界 | Varin 拥有工作台与 harness，Pi 拥有 Agent loop；其他 Agent runtime 的接入仍是能力协商设计，不是当前 Pi 的兼容后端 |
 | 系统内核 | 阶段 R 已由 D-282 完成：Rust 系统内核 + TS Application Host/产品与 Agent 编排 + 内置 Node/Pi worker；每类系统资源只有一个生产权威，不保留双写、shadow 或旧后端 fallback |
 | harness 形态 | 通用内核 + 领域 profile；不是每个领域一套 harness |
 | profile 作用域 | Workbench Profile 属于 surface 展示；Agent Profile 属于执行配置。工具与 system 在同一执行配置世代内冻结；同一持久 Pi session 可经用户操作进入新 Run/配置世代，切工作台布局不改变执行配置（D-063/D-072） |
@@ -87,24 +76,24 @@ repo map 的符号引用图 PageRank。Varin 不复制它们的实现，只采�
 | 重活归属 | Host 服务保持统一入口；工作状态/磁盘恢复/物化、PTY/受管进程、文件与结构计算位于私有 Rust 内核。TS 保留知识库 adapter、LSP 协议/视图、结果呈现与策略；pi-host 保留模型调用、薄工具和钩子 |
 | worker→host 通道 | 类型化协议请求（`@varin/protocol`），沿 `workspace.mutation.request` 先例；worker 不持有 host 凭据、不直接打 HTTP |
 | 检索分层 | 精确匹配用 grep；快速发现和原文获取用 explore；开放事实追踪用 retrieval。文件/结构/索引操作归 Host，较长语义判断归 agent，持久记忆检索归知识库；三种工具不要求逐级失败后才可使用（D-173） |
-| 知识库 | 优先保留 TriviumDB 嵌入式，每 host 每 workspace 一个 `.tdb`；Application Host 是唯一写者。TriviumDB 非不可替换依赖，具体问题先交用户联系作者处理；当前不迁移 SQLite、不建双写权威（D-071） |
+| 知识库 | 知识/计划由 Host 的私有 TriviumDB storage owner 持有，派生语义库独立；普通 Agent 笔记由 Rust personalization 记录持有。TriviumDB 非不可替换依赖，具体问题先交用户联系作者处理；当前不迁移 SQLite、不建双写权威（D-071） |
 | embedding | 后端可替换，远程接入独立于重排。`harness.embedding` / `harness.rerank` 是用户所有的配置种类，不是聊天模型槽位。未配置远程且用户已安装本地组件时代码语义走 MiniLM，否则语义来源不可用，词法与结构/图检索继续（D-288）；配置有效即按同一 vector space 索引与查询。知识库仍可无向量。来源身份、用途、编码文本与维度决定向量复用，后台建设和查询分别调度；不从模型体积推断速度或跨语言质量（D-173/D-190） |
-| shell 形态 | PTY（复用终端运行时，后台 shell 即终端 tab）；持久会话 shell 保持 cwd / env / venv；stdin 开放且 harness 永不代写；等默认时长后**自动转后台**而非超时杀死；配套 `get_output` / `write_to_process` / `kill_shell`（Devin CLI 与 Codex `unified_exec` 的共同形状）；Git Bash 为默认解释器但 Windows 原生工具可从中调用 |
+| shell 形态 | PTY（复用终端运行时，后台 shell 即终端 tab）；每次命令使用显式或请求冻结的 cwd，跨调用不继承 cd / env / venv；stdin 开放且 harness 永不代写；等默认时长后**自动转后台**而非超时杀死；配套 `get_output` / `write_to_process` / `kill_shell`（Devin CLI 与 Codex `unified_exec` 的共同形状）；Git Bash 为默认解释器但 Windows 原生工具可从中调用 |
 | 工具并发 | D-305 已把 D-302 / 7H 接入真实 Pi 执行入口：按权限确认后的资源读写关系排序，独立工具并行，未知副作用保留屏障；写入仍经过 Host authority，不做 apply model（5.9） |
 | shell 环境 | 解释器按工作区环境选定（原生 Windows → Git Bash，WSL → wsl bash，远程 → 远端 shell），用户可覆盖，模型不按次选；login shell 继承用户工具链；环境变量只改交互与显示，**不设 `CI=1`**，locale 探测不硬编码 |
 | web | harness 自做 `webfetch` / `websearch`，参照 `pi-web-access` 能力清单原生实现（来源面板、凭据进 Pi auth、独立浏览器 profile、GitHub 走 octokit）；SSRF 复用 security.md；跨域重定向不跟随；搜索默认走 Exa/Parallel 免密钥服务，用户自配 API provider 优先，不复用模型账户（D-289）；桌面端 Electron 离屏渲染 JS。provider / render / domain policy 按 worker generation 冻结，credential 每次调用实时解析；第三方包存在不会自动替换原生工具（D-283） |
-| 模型与预设 | 普通线程明确继承当前模型，不要求 role。专用能力/预设沿现有独立槽位或明示的 inherit 解析，未配置不冒充可用；hardImplement/review 的当前模型继承明确展示。续接摘要沿活动请求派生，不新增凭据栈或费用面板（D-284/D-285） |
+| 模型与预设 | 普通线程明确继承当前模型，不要求 role。专用能力/预设沿现有独立槽位或明示的 inherit 解析，未配置不冒充可用；Worker 默认继承当前模型，旧用户配置保留为可编辑配置。续接摘要沿活动请求派生，不新增凭据栈或费用面板（D-284/D-285） |
 | 可关可换 | 每项 harness 能力的关闭行为明确；默认不按插件存在与否偷偷改变行为，同名第三方工具替换必须由用户显式关闭原生工具。设置按**字段所有权**决定用户级与工作区级谁说了算（第 5.10 节），能力可用性由 host 注入。自动压缩沿 Pi 开关，后台准备可由用户关闭；两者与长期知识策略分开，不再暴露 keeper 三态 |
 | 编辑格式 | 跟模型家族走：`edit`（str_replace）与 `apply_patch`（Codex 语法）并存，按会话模型启用；两者走同一 mutation boundary |
 | OS 沙箱 | Windows 沙箱不在交付计划中（用户选择，D-071）；macOS/Linux 留作后续候选。现有权限与路径边界保持，不把工具限制或 worktree 称为 OS 隔离 |
-| 缓存契约 | Zone 0 会话内冻结；Zone 1 只追加、序列化确定；所有前缀失效操作批处理到压缩时刻 |
+| 缓存契约 | system/tools 在同一执行配置世代内稳定，原始历史只追加；压缩、用户改配置与权限失效按各自边界处理，不以缓存收益代替正确性 |
 | 工作状态归属 | 主 agent 对上下文维护零义务；plan/todo 与用户笔记保持自身所有权，Host 维护事实，Pi 会话历史保持原文。后台摘要只产出固定历史区间的续接表示，不编辑工作块、计划或知识库（D-284） |
 | 压缩 | 接近容量时后台准备一次摘要，前台继续追加；真正需要空间时沿 Pi 安全切点切换到新摘要与保留原文。候选绑定被收束的历史前缀，正常新增消息不使其失效；准备与切换分开，不再持续 keeper / coverage 接管（D-284） |
 | 长任务连续性 | 正常路径前台无明显整理窗口期；摘要与近期原文承接工作，缺细节按需回读 Pi 历史。provider 慢或输入突增时真实呈现必要等待，不隐蔽裁剪；不以压缩次数强制委派或 Handoff |
-| 持久知识治理 | agent 只提议（带触发描述），用户审阅接受；自动接受按作用域显式开启；更新用双时态取代不覆盖；召回按触发相关性；保留由用户裁剪 |
+| 持久知识治理 | 普通 Agent 管理显式笔记；Bot 使用同一记忆服务处理显式记录与用户启用的自动整理，保留来源、纠正和遗忘语义。见[知识合同](harness-knowledge.md) |
 | 多 agent | code profile 由主线按独立成果/探索路线派发；research profile 增加首席研究主线、动态研究分支和按结果升级模型的集群调度。预设可选，允许 task/inherit 与定向父子/兄弟通信；写入线程默认独立 WorkingState，shared 明示选择；同根嵌套共享执行预算，等待让出名额；不建永久管理层或默认群聊（D-285/D-291） |
 | 线程与上下文 | Thread 保留工作身份、成果与关系，Run 冻结当次执行和输入。工作相关可继续；背景大半过期可 fresh 而不清成果，无关工作新开线程。结果固定修订，依赖代码须实际纳入，不能仅靠消息同步（D-285/D-286） |
-| 审查 | 实施者正常验证、主线关键验收、按任务安排独立 review/check。自动 review 默认关闭，用户明确开启的选择保留；绑定固定结果与真实 Run，不固定追加审查链（D-285） |
+| 审查 | 实施者正常验证、主线关键验收；需要独立审查时派发具有相应工具权限的任务，不固定追加自动审查链。历史 verification/review 记录仍绑定实际结果修订（D-339） |
 | 观察类工具 | 可能被反复调用的观察工具（`threads` / `wait` / `read_thread` / `get_output` 对运行中 shell / `diagnostics`）**默认返回自上次查看以来的增量**，全量要显式要；游标由 host 按（观察者，对象）持有，压缩时重置；结果只追加不回改（第 8.7 节） |
 | 防过度委派 | 不增加调用配额、任务打分门槛或派发前费用估算；主线判断独立委派是否值得，自己更快更省就自己做。同根线程共享用户配置的执行名额，默认 12、超出排队；"派发前询问"是默认不生效的用户设置 |
 | 长时间委派 | wait 默认因真实状态变化、用户输入/中止或调用方时限返回，超时是正常结果。缓存保活是用户可选的额外请求，按实际 provider 契约与用量执行；生命周期不依赖保活。等待中的已有摘要准备可完成，TTL、空闲和子返回本身不启动新的摘要任务 |
@@ -115,13 +104,13 @@ repo map 的符号引用图 PageRank。Varin 不复制它们的实现，只采�
 | harness 的 UI 投影 | 后台 shell 成为可附着的终端 tab；输出句柄在工具卡片内可展开全文；Zone 2 默认折叠、可查看；压缩边界在时间线可见；线程在父会话侧栏成列、点开即完整聊天、可从父对话任意位置"从这里开一条线"（第 9.3.8 节） |
 | 检索 | explore 由 Host 持有同一次查询，算法执行搜索/读取，向量提供语义候选，LLM 通过 models.explore 生成分组搜索计划、成组选段并指出具体补查；这些是当前交付项，不等待扩散模型。完整自主调查仍归 retrieval。来源机会、当前原文与必需范围贯穿最终呈现（D-173–D-175） |
 | 未保存内容 | 用户输入自动固化发起窗口的 dirty buffers，无显式开启/绑定操作；来源引用由内部协议传播，其他窗口仅打开或聚焦不抢占。Host 读取不可变快照，surface 保持可变缓冲所有权；`explore`、`grep`、同名 `read`/`find`/`ls` 与 thread 基线已消费同一引用，语言服务按视图隔离后消费同一引用（第 6.1 / 6.4 节，D-071/D-082/D-085/D-086/D-087） |
-| 结构来源 | 语言服务器回答"这个名字指什么"，tree-sitter 回答"这段文字的形状是什么"，两者在 Application Host 长期共存、不替代。结构来源是带修订绑定的可插拔 provider，接口先行，首个实现是 agent 视图 `documentSymbol`，第二个是 web-tree-sitter；语法包 = 语法 wasm + Varin 查询，随版本锁定 ABI，常用语言捆绑（首刀 TS/TSX）、其余按需下载，目标覆盖大部分常用语言；语言 ≥ 3 时才做设置页（第 6.1 / 6.2 节，D-091） |
-| 检查角色 | `check` 有读取与执行能力，测试/构建可能写缓存和生成物；不称只读 agent，不规定 bash 只能执行无写入命令，不强制一律使用独立副本（D-071） |
+| 结构来源 | LSP 提供语言语义；Rust tree-sitter 提供修订绑定的结构/单元。Host 的 web-tree-sitter 仅作安装时 grammar ABI admission，不再解析工作区正文。见[内核设计](rust-kernel-design.md)与[检索合同](harness-retrieval.md) |
+| 检查与执行工具 | 验证任务可能使用读取与命令执行能力，测试/构建可能写缓存和生成物；不因任务叫“检查”就声称其只读，实际权限由工具配置与工作状态决定 |
 | 模型家族适配 | 一份基础 + 极薄 overlay；先做 Anthropic 与 OpenAI 两档，其他 provider 走通用 |
 | Pi 上游 | 不贡献回上游；Pi 更新后重新适配。能 wrap 的 wrap（`read` / `edit` / `write` / `grep` 装饰 Pi 实现），只有 `bash` 重写 |
 | 权限 | Varin 原生 `tool_call` 门是唯一交互式权限权威，覆盖 Harness、Pi 内置、MCP、Pi 包与嵌套线程工具；Host 只验身份/能力/规范路径，不弹窗。未知/证据不完整的第三方动作必须询问，不能靠工具名或 annotation 自授予；会话授权绑定规范化 source/action/workspace/resource 范围（9.1.2，D-283） |
 | 知识库保留 | 可配置；默认按时间自动清理原始 `event` 与已结束会话的 `block`，`knowledge` 不按时间过期；删除会话级联删除其 event 与 block |
-| 用户级记忆 | 存在但轻：独立 `user.tdb`，只放 `knowledge`，不放 event / block；写入需经审阅；在 Settings 中可见、可编辑、可审计 |
+| 用户级记忆 | 普通 Agent 全局笔记归 personalization；Bot 的用户层知识归 `user.tdb`。设置、来源、纠正与遗忘使用对应 owner，见[知识合同](harness-knowledge.md) |
 
 ## 3. 内核与 profile 的边界
 
@@ -153,25 +142,13 @@ harness 拆成层之后，大部分层在所有领域里不变，少数层变，
 
 ## 4. 进程与代码归属
 
-以下为当前生产形态；Rust 的已完成责任与证据见 4.3、plan 阶段 R 和 status。
+进程布局统一见[架构总览](../architecture.md#process-model)。Pi 工具经 `HostServicesBridge` 到达
+Application Host，Host 再调用私有 Rust kernel；Pi worker 不直接调用 kernel。知识和派生语义存储
+分别由 Host 管理的私有 Node 进程持有，不能把同步数据库工作重新放进 Electron 主线程。
 
-```text
-Application Host（packages/web/application-host）
-  TS：产品策略、公开服务、Thread/Run、Documents/Registry 协调、LSP、知识/模型 adapter
-      |
-      | 私有生成协议（varin.kernel.v1）
-      v
-  Rust kernel：WorkingState/Recovery、文件/物化、PTY/受管进程、文件/结构计算
-      ^
-      | 类型化 worker→host 请求（@varin/protocol，requestId 关联）
-      v
-pi-host session worker（packages/pi-host）
-  harness-tools.ts + 进程内 ExtensionFactory → Pi SDK（用户级或内置安装）
-```
-
-pi-host 已经通过 `customTools` 同名覆盖了 Pi 的 `write` / `edit`（恢复日志的 mutation boundary），
-并以进程内 `ExtensionFactory` 挂载 `before_agent_start` 等钩子。工具仍沿这两个机制进入 Host，
-不新增 Pi 包或 MCP 跳板。Rust kernel 是 Host 私有实现，不向 renderer/Pi 开第二端口；ACP agent 的 MCP 门面仍是后续交付，使用相同 Host 服务。
+Pi 同名工具定义、原生扩展钩子与 Host 服务是现有接缝，不增加 Pi 包或 MCP 跳板。
+具体注册与调用归 [Pi harness](../../packages/pi-host/src/harness/README.md) 和
+[Host harness](../../packages/web/application-host/lib/harness/DOCUMENTATION.md)。
 
 ### 4.1 Pi 钩子到 harness 机制的映射
 
@@ -186,7 +163,7 @@ pi-host 已经通过 `customTools` 同名覆盖了 Pi 的 `write` / `edit`（恢
 | 提交压缩 | `session_before_compact` → 返回 `compaction` | 提交已准备的摘要与固定 firstKeptEntryId，保留准备期间新增的原文；尚未准备好时沿同一摘要路径等待或生成 |
 | 主 agent 意图 | `customTools`：`todo`（第 5.6 节） | 服务主 agent 自身注意力；主 agent 无块编辑与标记工具，对记忆系统零义务 |
 | 请求预算 | 每次真实模型请求前，包括回合内工具继续 | 按当前有效窗口、实际请求输出预留和新输入计量；不能只依赖 Pi 的 agent_end 或用户 prompt 前检查 |
-| 后台摘要准备 | 请求/步骤边界的容量检查 | 固定历史前缀与切点，沿当前 ModelRuntime 单次生成续接摘要；主会话继续，没有 memory_edit 或工具执行循环 |
+| 后台摘要准备 | 请求/步骤边界的容量检查 | 固定历史前缀与切点，由独立压缩 worker 沿活动请求配置生成续接摘要；可按授权查询历史/事实，不执行工作工具或写知识，主会话继续 |
 | 异常容量压力 | 候选未就绪、失败、模型窗口缩小或新材料过大 | 复用在飞任务或同一摘要机制处理可容纳的旧前缀；保留新原文，不静默切回旧 keeper，也不忙循环重试 |
 | 压缩后续接 | `session_compact` | 更新实际失去基线的观察游标与 UI 边界；不默认重注入最近文件、技能正文或整个状态面板 |
 | 缓存断点 | `before_provider_request`（如需） | pi-ai 的 Anthropic provider 已在 system、tools、最后一条 user 消息设 `cache_control`；仅在 provider 缺失时补 |
@@ -198,34 +175,17 @@ pi-host 已经通过 `customTools` 同名覆盖了 Pi 的 `write` / `edit`（恢
 `session-features.ts` 曾在 before_agent_start 把变化的目标 token 计数写进 systemPrompt；现已按 status 1.2 修复。
 动态目标与运行状态使用尾部消息，不回改静态前缀。修改相关装配时运行现有 Zone 0 契约测试，不把已修缺陷重新列为前置任务。
 
-### 4.3 Rust 系统内核（正式架构，D-252；D-282 完成）
+### 4.3 Rust 系统内核（D-282 完成）
 
-内核是 Application Host 管理的私有子进程，沿同一生成协议服务 Electron/Web/远程，不向 renderer 或 Pi 扩展开放新端口。
-它统一拥有实际文件资源、分支/对象/引用/恢复事务、物化和进程/PTY 后端，并承担固定视图文件搜索与结构计算。
-TS 保留 Thread/Run 与模型策略、公开 API、知识领域、语言协议与 UI 投影；Pi 会话、凭据和扩展继续归原 worker。
-
-恢复与 WorkingState 复用现有 SQLite/对象库模式，在同一存储位置的事务域中发布根/引用/operation，
-不继续整份 JSON 加另一引用库的双权威。根成为真实读取/CAS/diff/pin 入口，节点增量持久化；
-持久身份保留完整字段，平台磁盘比较不能改变哈希。文件外部写者与 surface 回执仍须按可观察事实恢复。
-
-Document Registry 继续拥有未保存缓冲。混合操作在内核记录同一 operationId 的逐目标阶段，经 TS Documents adapter
-调用真实 Registry 的修订检查与 grouped undo，不隐式保存、不建第二缓冲权威。Thread/Pi/知识的跨域清理按持久操作与幂等回执协调。
-
-真实链路是 `Application Host → 私有 KernelClient → varin-kernel 子进程 → framed protocol → kernel SQLite/object store`；
-Electron/Web/serve/云从自己的发行目录使用 manifest-verified executable，kernel 不监听公共端口。
-R1–R5 已分别接管 immutable root/trie、blob/branch/revision/CAS/pin/Recovery/GC、文件资源与物化、PTY/pipe、固定视图搜索和
-tree-sitter 结构计算。所有生产消费者走 root/path/domain/file/process/compute API；旧 TS writer 只保留为明确测试 helper，发行树会
-审计并删掉不可达测试/旧实现。
-
-D-282 完成 R0/R6：传输用 acknowledgement-backed request credits，取消可越过数据背压；release smoke 覆盖任意 cwd、安装目录替换、
-同一 current-format catalog 重开、坏 manifest、固定 root、条件磁盘写与真实 shell 退出。受控 128/1024/4096 文件对照记录冷/热、
-事件循环、RSS、节点和取消，既保留搜索收益，也如实记录 inventory/逐文件 structure 的额外成本。完整契约、数值与平台边界见
-[rust-kernel-design.md](rust-kernel-design.md) 和 status。阶段 R 已完成，后续能力直接复用该边界。
-
+Rust 是文件资源、不可变工作状态、物化、进程/PTY 和文件/结构计算的唯一生产权威。
+Documents/Registry、Thread/Run、模型策略和 Pi 原生数据继续由原 owner 负责。
+[内核设计](rust-kernel-design.md)拥有资源与事务合同，
+[Host kernel 模块](../../packages/web/application-host/lib/kernel/DOCUMENTATION.md)拥有生产装配、协议和平台边界。
+旧 TS 后端仅能作为明确的测试 helper，不能成为生产失败时的 fallback 或双写者。
 
 ## 模块专卷
 
-原 §5–§9 已拆分为独立模块文档，标题与锚点不变：
+原 §5–§9 已拆分为以下领域文档；当前主题从这些入口定位：
 
 - [harness-tools.md](harness-tools.md) — 原 §5 工具集（code profile v1）
 - [harness-retrieval.md](harness-retrieval.md) — 原 §6 检索：三层，两个归属
@@ -259,7 +219,7 @@ D-298 已接通独立入口、项目默认/对话覆盖和基础科研 UIUX；D-
 
 ### 10.2 `code`（v1）
 
-本文档第 5–9 节即其规格。工作区形态：仓库；验证器：编辑后诊断、可选测试门、review 传感器；权限由 Varin 原生
+上面的[模块专卷](#模块专卷)定义其工具、检索、上下文与验证合同。工作区形态：仓库；验证器：编辑后诊断、可选测试门及按需审查；权限由 Varin 原生
 `tool_call` gate 统一管理，并叠加 Host 的非交互 actor/capability/path enforcement（第 9.1.2 节）。
 
 ### 10.3 `research` 工作侧重（第二个）
@@ -301,7 +261,7 @@ SaaS 连接器（邮件、日历、聊天）本质是 MCP server 加不可逆动
 只需在打包时放入 Pi 包树并设置 `packageRoot`；`nodePath` 使用 Electron 自带 Node。三条约束：
 
 - **runtime 代码内置，数据目录共享。** 内置 Pi 使用用户的 `~/.pi/agent`；CLI 与 GUI 看到同一批会话、包与设置。
-  这是 [architecture.md](../architecture.md) 第 10 节既有的分离。
+  运行时代码与用户数据的分离见[部署边界](../architecture.md#runtime-and-deployment)。
 - **用户自有 Pi 是显式选项。** Runtime Manager 的 system / standalone / source / custom 来源保留在 Settings；选择的
   版本超出已测试范围时显示诊断，不阻止。
 - **短滞后跟随上游。** 内置版本由与 `cloud-runtime.bun.lock` 相同的流水线更新，避免社区扩展要求的 Pi 版本高于内置
@@ -310,81 +270,19 @@ SaaS 连接器（邮件、日历、聊天）本质是 MCP server 加不可逆动
 内置 Pi 不内置 Git Bash：Windows 上 `bash` 工具依赖 Git for Windows，Runtime Manager 的就绪检查必须包含它并给出
 安装指引，否则"内置 runtime 开箱即用"在 Windows 上不成立。
 
-当前 harness 的具体 Pi 版本依赖已经形成，bundled runtime 直接按阶段 4 交付，不再等待其他能力全部完成。
+当前 bundled runtime 已是默认路径；打包与运行细节见[部署边界](../architecture.md#runtime-and-deployment)。
 
-## 12. 交付顺序与待决问题
+## 12. 实施与证据入口
 
-### 12.1 顺序
-
-交付单位是用户可用的实际调用链。跨进程工具贯通协议、Host、worker 与实际请求验证；纯 UI 或存储按自己的调用链验证，不强制
-走无关层。implemented / wired / proven / default-on 记录在 status。proven 的正式能力随交付默认提供，用户选择继续有效；
-不再附加统一的回放批准阶段（D-078）。文件入口与验收要点见 plan。
-
-P0、T1/T2/T3 核心和 D-076 已交付；工作状态/集成、默认记忆、窗口读取/explore 的具体进度见 status。
-D-282 已完成 D-252 的阶段 R，后续外部 runtime 和新领域直接复用当前 Rust kernel/TS Host 边界。单会话配置与归因随相关能力完成，
-T4、完整 RunManifest、知识数据库迁移或沙箱不作为共同前置。下面是总体范围，实际顺序按 plan 0.7。
-
-0. **前置**：对齐 Pi 版本并在该版本上复核第 4.1 节的钩子形状（已完成，D-001：0.84.3）；恢复的 coverage 从计划级二值改为路径级（见
-   [native-workspace-recovery-design.md](native-workspace-recovery-design.md) R1），否则 `bash` 注册为 `process`
-   writer 后几乎每一轮都会被标为 incomplete，组合回滚在实践中消失。
-1. **工具与 host 服务**：`harness-tools.ts`（`bash` / `grep` / `edit` / `write` 覆盖，`apply_patch`、`get_output` /
-   `write_to_process` / `kill_shell`、`diagnostics`）、shell 监督器（按环境选解释器、PTY、login 会话 shell、自动转
-   后台）、按路径的编辑锁、`tool_result` 层的通用句柄截断、worker→host 类型化请求、第 4.2 节违规修复、第 8.6 节计数器。
-   `bash` 优先——在 Windows 上一天内可感。（`todo` 依赖 `block` 存储，随第 2 阶段交付。）
-1b. **web**：`webfetch` / `websearch`、抓取服务（SSRF、提取、PDF 转文本、缓存、Electron 离屏渲染）、搜索 provider 抽象、
-   来源面板。可与 2 并行。
-2. **上下文层（D-284/D-286/D-287，已完成）**：真实请求前预算、缓存友好的后台摘要准备、固定切点提交与较长近期原文、
-   当前/同 Thread 历史回读及 receipt-bound Zone 2 增量。`todo`、用户笔记、知识库与 suggestions 保持各自权威；持续 keeper 与三态接管已删除。
-3. **检索与子 agent 层**：`explore` 管线（多路召回、当前原文读取、单元排序与一次呈现；按 D-173 收敛职责与调度）、
-   `file` / `symbol` 节点与 LSP / Git 采集器、`related`、LSP 导航工具（`symbols` / `definition` /
-   `references` / `hover`）；原生子会话 worker 运行时按**线程**形态（第 9.3 节）交付：host 持久化的线程注册表与状态机、
-   worker 丢失恢复、host 观察的活性与循环检测、`dispatch` / `threads` / `wait` / `send` / `read_thread` / `kill`、角色目录
-   与独立模型槽位、原生工作分支与按需物化、集成与回收、事件驱动等待、观察游标、线程侧栏与讨论线。D-285/D-287 已接通普通
-   派发、task/inherit/continue/fresh、定向消息、分段成果与共享执行调度；自动 review 默认关闭，仅在用户显式启用后运行。
-3b. **权限纵切（D-283，已完成）**：Host 静态授权与 scope、Varin 原生唯一 `tool_call` 门、规范化权限对象、session grant / audit、Settings 与 Smart；旧 permission-system 双轨已删除。
-R. **Rust 系统内核与 Host 分层（D-252/D-282，已完成）**：R0–R6 已接管工作状态/恢复、磁盘/物化、进程/终端、文件/结构计算，
-   并完成数据保留、取消/崩溃恢复、性能定标与发行矩阵接线。TS/Pi 保留上层职责；外部 runtime 和领域扩展沿此边界继续。
-4. **默认 runtime**：内置钉住的 Pi。
-5. **外部 agent**：host 服务的 MCP 门面、ACP host、能力协商；届时重新评估协议兼容策略。
-6. **research profile**：复用已具备的工具/知识库/文档能力，直接建设文献采集、引用核验与 Shell 面，不等 1–3 全部长尾任务结束。
-
-### 12.2 历史决定与实施选择
-
-历史决定（后续修订以当前正文为准）：2026-09-02 的 edit v1 使用直接写盘 + reconcile，后续按 5.4/9.2.5b 实施版本化视图；
-`varin serve` 检测到桌面 host 在运行时复用它而不起第二个（第 7.1 节）；子 agent worktree 由父 agent 的 `merge` 工具
-合并、Git 面板可选审阅（第 9.2.5b 节）；`event` 默认保留 30 天（第 7.2.1 节）。
-
-2026-09-04 的决定（D-030–D-038，其中默认和回放政策已由 D-078 修订）：Pi 0.84.3 消费 `session_before_compact` 返回的
-`{ compaction }` 并跳过自身摘要，`session_compact` 随后触发且 `fromExtension: true`（D-022，前置实验结论，8.4.4 的提交复用此接缝）；
-线程对象拆为 Thread + ThreadRun、状态正交（第 9.3.1 节）；wait 默认事件驱动、缓存保活可选
-（第 9.2.6 节）；输出引用分 `OutputRef` / `TranscriptRef` 两级、偏移统一 UTF-8 字节（第 5.1 节）；权限三层与 Host 静态
-授权（第 9.1.2 节）；设置按字段所有权（第 5.10 节）；D-081 曾交付记忆三态与默认 takeover，D-284 已确定替换目标但尚未改代码；父会话删除
-时线程停下并归档、不弹第二个模态（第 9.3.4 节）。
-
-**D-078 的交付政策保持**：正式能力完成后直接提供，不加回放门禁。上下文与线程的新默认分别按D-284–D-286；自动review改为
-用户选择，不以“默认交付”推导必须常驻调用。以下列实施选择：
-
-| 范围 | 已确定方向与实施选择 |
-| --- | --- |
-| Rust 内核 | D-252 已采用、D-282 已完成 R0–R6；完整契约与实际性能边界见 rust-kernel-design/status。生产只有 Rust 系统资源权威；修复后的 TS 路径只作为历史验收/性能 baseline 或显式测试 helper |
-| 上下文续接 | D-284：活动请求配置派生摘要，容量临近时后台准备，前台继续，需空间才提交；原文保留随窗口缩放，history 回读；完整替换 keeper/coverage/三态与其消费者。当前实现仍见 status 的 D-081 行 |
-| 工作状态与结果 | Host 原生内容对象/树/分支/Integration，Git 基线与物化可复用；独立引用、真实执行写回；旧内部格式按 D-253 直接替换，不建升级导入器 |
-| RunManifest | Host 执行意图、runtime 解析模型/工具、Host 确认能力、worker 报实际装配；沿 launch 消费者收敛，不复制凭据权威 |
-| 外部 runtime | 对实际 adapter 做版本和能力协商，不先解决全部未来版本兼容问题 |
-| 本地 embedding | 按可部署模型与 runtime 选型，显式下载；远端和稀疏模式不等它 |
-| 结构来源与语法包 | tree-sitter 作 Host 第二结构来源，wasm 版、接口先行、TS/TSX 首刀；常用语言随应用捆绑、其余按需下载（点安装即同意，Host 不自发网络，与本地 embedding 各走各的，D-124）；发布期清单自算 wasm 与查询摘要，运行期只按摘要装（D-125/D-128）；用户自带 wasm 过 ABI 闸门并标未验证（D-123）；语言 ≥ 3 时设置页（D-091） |
-| TriviumDB | 优先保留；按实际版本核实无向量/文本查询，具体数据库问题交用户联系作者，不迁移 SQLite |
-| Pi 接口缺口 | 钩子与 provider 能力按本机真实版本适配，缺可选能力仅影响对应路径 |
-| explore 增强 | 确定性路径默认；已配槽位后按查询需要 intent/judge/修复，失败保留已有结果；反馈优化不另设研究门禁 |
-| 缓存保活 | 用户可选的额外请求策略，直接实现实际 provider 路径，生命周期不依赖保活 |
-| 批量修改 | 可沿 quickImplement 与相同 mutation 边界实现正则定位批改；按实际使用价值安排，不先造通用工作图 |
+当前剩余工作见[实施计划](../plan/agent-harness-plan.md)，能力和验证边界见[状态](../status.md)。
+已完成的阶段顺序、旧模型预设及 keeper 迁移过程保留在[历史计划](../archive/agent-harness-plan-2026-10-06.md)。
+它们不要求恢复旧运行时、旧内部格式或旧产品入口。
 
 ## 13. 与其他文档的关系
 
-- [architecture.md](../architecture.md)：本文档扩展其第 4 节进程模型（新增 host 服务与 worker→host 请求族）与第 7
-  节（harness 是 Varin 拥有的进程内扩展，不是 Pi 包适配器）。
+- [进程模型](../architecture.md#process-model)和[权威归属](../architecture.md#authority-map)：定位 Host 服务、worker 请求与 Pi 原生运行时的分工。
 - [rust-kernel-design.md](rust-kernel-design.md)：阶段 R 的最终资源归属、私有协议、存储与恢复、物化/进程/检索计算及发行性能契约。
-- [composable-workbench.md](composable-workbench.md)：profile 对象在此扩展为同时承载 harness 绑定。
+- [composable-workbench.md](composable-workbench.md)：Workbench Profile 负责界面组合；工作侧重与 Harness 执行配置独立。
 - [native-workspace-recovery-design.md](native-workspace-recovery-design.md)：`bash` 的 `process` writer 注册与
   `edit` / `write` 覆盖共存于同一 mutation boundary。
 - [security.md](security.md)：知识库内容按工作区数据对待；`webfetch` 复用其私有网段阻断与 cookie opt-in 规则；worker
@@ -392,23 +290,6 @@ R. **Rust 系统内核与 Host 分层（D-252/D-282，已完成）**：R0–R6 �
 - [extension-compatibility.md](extension-compatibility.md)：第三方 Pi 扩展不受本契约约束，也不由 harness 管理；可继续通过普通 package
   surface 安装，但 package 存在不会让原生 web 工具或权限 owner 自动让位。
 
-### D-224 补充：集成、级联与查询身份
-
-集成撤销以当前父 authority 为准：virtual parent 在 `VirtualWriteGate` 内做 branch CAS；materialized parent
-解析 execution directory 后经该 workspace 的 Documents resource gate，以 after→before 条件恢复。纯 disk、virtual
-branch 与 branch→materialized 的撤销都先持久化 `undoing`，再执行条件变更并观察 before；branch→materialized 只有磁盘与
-WorkingState branch cache 都同步到 before 后才写 `undone`，启动对账能区分仍是 after、已经 before 与未知状态。父 gate
-返回后重新读取 authority；物化目录已回收时，WorkingBranch 重新成为读写真相。
-
-级联准入由 ThreadRegistry 持有。cascade 进入 registry mutation tail 后，目标 Thread 子树的新 create/dispatch/start/restore
-按父与祖先的 archived/cascading 状态拒绝；dispatch 准备期间若准入失效，会清理 surface draft。尚未进入 lifecycle 的失败
-Thread 可删除，已经被 cascade 接管的 Thread 由该生命周期归档，准备失败路径不得同时删除。session
-bindings 是一次启动重建的派生索引，按当前 `thread.activeRunId` 的 Run/session 建立，并按 sessionId 与 threadId 去重；坏
-索引可覆盖重建，坏 workspace catalog 不遮蔽健康 catalog，历史 session 不回落为 root owner。
-
-带 `workBranchId` 的默认 merge 只消费当前 settled Run 成功发布的 native resultRevision；遗留 `resultCommit` 只用于没有
-WorkingBranch 的导入。新 Run 把上一 revision 记为 `inputRevision` 后立即撤下默认指针；目录 inspect 或 native publish
-失败也都会在独立 Git snapshot 前清除默认 revision 并保留
-needs-attention/conflict；snapshot 失败也不能让旧 revision 复活。Git baseline 捕获前后重列冻结
-`captureScopes` 并比较路径和内容身份；explore pin 接收 effective authorized roots 与同一 signal/deadline，只固定授权范围。
-默认新文件 mode 的合法 0 保持不变。上述实现与证据记录在 D-224；3.4、3.4a、3.6 仍按真实桌面重启和付费嵌套 Pi 的未测范围保持 Partial。
+集成、级联删除、固定来源和历史结果的实现细节统一见
+[Host harness](../../packages/web/application-host/lib/harness/DOCUMENTATION.md)及
+[任务/资源设计](resource-oriented-harness-design.md)。D-224 的修复经过保留在决策和交付记录中。

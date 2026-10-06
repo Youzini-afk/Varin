@@ -25,7 +25,7 @@ Starts Varin in headless mode when set to `true` or `1`. API routes stay availab
 
 ### `VARIN_DATA_DIR`
 
-Overrides the Varin data directory. The default is `~/.config/varin`.
+Overrides the Varin data directory. Defaults: Linux uses `$XDG_CONFIG_HOME/varin` (or `~/.config/varin`); macOS uses `~/Library/Application Support/Varin`; Windows uses `%APPDATA%/Varin`.
 
 ### `VARIN_COMPRESS_API`
 
@@ -60,10 +60,6 @@ Git executable used by Varin Git features.
 ### `GIT_BINARY`
 
 Alternative Git executable override. Prefer `VARIN_GIT_BINARY` for Varin-specific configuration.
-
-### `VARIN_GIT_READ_CACHE_TTL_MS`
-
-Time-to-live, in milliseconds, for cached Git-backed file reads. Set `0` to disable this cache while debugging.
 
 ## Voice and tunnels
 
