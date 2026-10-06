@@ -214,6 +214,7 @@ describe('Pi Composer PDF attachments', () => {
       workspaceId: 'workspace-authority',
       parent: { kind: 'session', id: 'parent-session' },
       includeArchived: false,
+      peers: [],
       threads: [{
         thread: {
           id: 'thread-1',
@@ -253,6 +254,7 @@ describe('Pi Composer PDF attachments', () => {
       workspaceId: 'workspace-authority',
       parent: { kind: 'session', id: 'parent-session' },
       includeArchived: false,
+      peers: [],
       threads: [{
         thread: {
           id: 'thread-1',
