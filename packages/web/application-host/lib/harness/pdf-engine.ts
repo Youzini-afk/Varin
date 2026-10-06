@@ -3,6 +3,7 @@ import { existsSync } from "node:fs";
 import { createRequire } from "node:module";
 import { tmpdir } from "node:os";
 import { delimiter, dirname, isAbsolute, join, sep } from "node:path";
+import { pathToFileURL } from "node:url";
 import type { PDFDocumentProxy, PDFPageProxy, PageViewport } from "pdfjs-dist";
 import type { TextItem } from "pdfjs-dist/types/src/display/api.js";
 import { launchOwnedProcess, managedExitConfirmed, terminateOwnedProcess, waitForManagedExit,
@@ -104,12 +105,14 @@ const awaitWithAbort = <T>(promise: Promise<T>, signal?: AbortSignal, onAbort?: 
   });
 };
 
-const pdfAssets = (): { cMapUrl: string; standardFontDataUrl: string } => {
+const pdfAssets = (): { cMapUrl: string; standardFontDataUrl: string; wasmUrl: string; iccUrl: string } => {
   const require = createRequire(import.meta.url);
   const packageRoot = join(dirname(require.resolve("pdfjs-dist/legacy/build/pdf.mjs")), "..", "..");
   const unpackedRoot = packageRoot.replace(`app.asar${sep}`, `app.asar.unpacked${sep}`);
   const root = existsSync(join(unpackedRoot, "standard_fonts")) ? unpackedRoot : packageRoot;
-  return { cMapUrl: join(root, "cmaps") + sep, standardFontDataUrl: join(root, "standard_fonts") + sep };
+  const assetUrl = (directory: string) => pathToFileURL(join(root, directory) + sep).href;
+  return { cMapUrl: assetUrl("cmaps"), standardFontDataUrl: assetUrl("standard_fonts"),
+    wasmUrl: assetUrl("wasm"), iccUrl: assetUrl("iccs") };
 };
 
 const withDocument = async <T>(input: PdfInput, action: (doc: PDFDocumentProxy, version: string) => Promise<T>): Promise<T> => {
@@ -238,13 +241,13 @@ const renderPageFromDoc = async (doc: PDFDocumentProxy, input: PdfRenderInput, v
   const width = right - left;
   const height = bottom - top;
   const canvasFactory = doc.canvasFactory as {
-    create(width: number, height: number): { canvas: { toBuffer(mimeType: "image/png"): Buffer }; context: Parameters<PDFPageProxy["render"]>[0]["canvasContext"] };
+    create(width: number, height: number): { canvas: NonNullable<Parameters<PDFPageProxy["render"]>[0]["canvas"]> & { toBuffer(mimeType: "image/png"): Buffer }; context: Parameters<PDFPageProxy["render"]>[0]["canvasContext"] };
     destroy(value: { canvas: unknown; context: unknown }): void;
   };
   const canvasAndContext = canvasFactory.create(width, height);
   try {
     const viewport = page.getViewport({ scale, offsetX: -left, offsetY: -top });
-    const task = page.render({ canvasContext: canvasAndContext.context, viewport, background: "#ffffff" });
+    const task = page.render({ canvas: canvasAndContext.canvas, canvasContext: canvasAndContext.context, viewport, background: "#ffffff" });
     try {
       await awaitWithAbort(task.promise, input.signal, () => task.cancel());
     } catch (error) {
@@ -558,7 +561,7 @@ export const mapDoclingDocument = (raw: unknown, targetPages?: PdfPageInfo[]): {
 };
 
 /** Also used by the material cache before loading an individual PDF. */
-export const PDF_ENGINE_VERSION = "pdfjs:4.10.38/adapter:2";
+export const PDF_ENGINE_VERSION = "pdfjs:6.4.299/adapter:3";
 
 export const createPdfEngine = (options: PdfEngineOptions = {}, runtime: PdfEngineRuntime = {}) => {
   const identity = JSON.stringify({

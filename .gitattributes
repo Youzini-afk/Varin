@@ -2,6 +2,8 @@
 
 *.cmd text eol=crlf
 *.ps1 text eol=crlf
+# Unified diffs use a single space for blank context lines.
+*.patch whitespace=-blank-at-eol
 *.png binary
 *.jpg binary
 *.jpeg binary

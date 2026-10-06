@@ -148,7 +148,7 @@ export class PiMcpConfigBridge {
       credentials: new McpOAuthCredentialStore(new FileAuthStorageBackend(join(agentDir, "mcp-auth.json")), agentDir),
       logPath: join(agentDir, "mcp.log"),
       updateConfig: async (entry, patch) => {
-        const source = sources.find(candidate => candidate.displayPath === entry.source);
+        const source = sources.find(candidate => candidate.displayPath === (entry.override ?? entry.source));
         if (!source) throw new Error("MCP configuration source is no longer active");
         const location = await resolveConfigDocumentPath(source.scope === "user" ? agentDir : this.#cwd!, source.target.path, { extensions: [".json"] });
         const editor = new ConfigTextFileEditor(location.path, "json");
@@ -156,7 +156,7 @@ export class PiMcpConfigBridge {
         let content = current.content;
         for (const [key, value] of Object.entries(patch)) {
           content = applyEdits(content, modify(content, ["mcpServers", entry.name, key],
-            key === "enabled" && value === true || key === "exposure" && value === "codemode" ? undefined : value,
+            !entry.override && (key === "enabled" && value === true || key === "exposure" && value === "codemode") ? undefined : value,
             { formattingOptions: { insertSpaces: true, tabSize: 2 } }));
         }
         await editor.update(content, current.revision);
@@ -169,7 +169,7 @@ export class PiMcpConfigBridge {
           { id: "native:user", displayPath: join(agentDir, "mcp.json"), order: 0, scope: "user",
             serverNames: globalConfig.servers.map(entry => entry.name), target: { root: "agent", path: "mcp.json", format: "json" } },
           { id: "native:project", displayPath: join(ctx.cwd, ".pi", "mcp.json"), order: 1, scope: "project",
-            serverNames: loaded.servers.filter(entry => entry.scope === "project").map(entry => entry.name),
+            serverNames: loaded.servers.filter(entry => entry.scope === "project" || entry.override !== undefined).map(entry => entry.name),
             target: { root: "project", path: ".pi/mcp.json", format: "json" } },
         ];
         return loaded;

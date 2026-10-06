@@ -1,6 +1,34 @@
+diff --git a/dist/agent-loop.d.ts b/dist/agent-loop.d.ts
+index 7edd52b..26b5969 100644
+--- a/dist/agent-loop.d.ts
++++ b/dist/agent-loop.d.ts
+@@ -3,7 +3,7 @@
+  * Transforms to Message[] only at the LLM call boundary.
+  */
+ import { type AssistantMessage, EventStream } from "@earendil-works/pi-ai";
+-import type { AgentContext, AgentEvent, AgentLoopConfig, AgentMessage, AgentTool, AgentToolCall, AgentToolCallOutcome, AgentToolResult, StreamFn } from "./types.ts";
++import type { AgentContext, AgentEvent, AgentLoopConfig, AgentMessage, AgentTool, AgentToolCall, AgentToolCallOutcome, AgentToolResult, StreamFn, ToolExecutionPlan } from "./types.ts";
+ export type AgentEventSink = (event: AgentEvent) => Promise<void> | void;
+ /**
+  * Start an agent loop with a new prompt message.
+@@ -25,7 +25,12 @@ export declare function runAgentLoopContinue(context: AgentContext, config: Agen
+ export type ToolCallHooks = Pick<AgentLoopConfig, "beforeToolCall" | "afterToolCall">;
+ type ToolUpdateSink = (partialResult: AgentToolResult<any>) => Promise<void> | void;
+ /** Options for {@link runToolCall}. */
++export declare class ToolExecutionScheduler {
++    run<T>(prepare: () => Promise<ToolExecutionPlan>, execute: () => Promise<T>): Promise<T>;
++}
+ export interface RunToolCallOptions extends ToolCallHooks {
++    executionScheduler?: ToolExecutionScheduler;
++    forceSequential?: boolean;
+     /** Tools the call resolves against. */
+     tools: readonly AgentTool<any>[];
+     /** Passed to the hooks as the message that issued the call. */
+diff --git a/dist/agent-loop.js b/dist/agent-loop.js
+index edcfba7..1e31796 100644
 --- a/dist/agent-loop.js
 +++ b/dist/agent-loop.js
-@@ -365,11 +365,10 @@
+@@ -365,11 +365,10 @@ async function failToolCallsFromTruncatedMessage(toolCalls, emit) {
   */
  async function executeToolCalls(currentContext, assistantMessage, config, signal, emit) {
      const toolCalls = assistantMessage.content.filter((c) => c.type === "toolCall");
@@ -14,7 +42,7 @@
  }
  async function executeToolCallsSequential(currentContext, assistantMessage, toolCalls, config, signal, emit) {
      const finalizedCalls = [];
-@@ -408,8 +407,8 @@
+@@ -408,8 +407,8 @@ async function executeToolCallsSequential(currentContext, assistantMessage, tool
          terminate: shouldTerminateToolBatch(finalizedCalls),
      };
  }
@@ -25,7 +53,7 @@
      for (const toolCall of toolCalls) {
          await emit({
              type: "tool_execution_start",
-@@ -419,38 +418,70 @@
+@@ -419,38 +418,70 @@ async function executeToolCallsParallel(currentContext, assistantMessage, toolCa
          });
          const preparation = await prepareToolCall(currentContext, assistantMessage, toolCall, config, signal);
          if (preparation.kind === "immediate") {
@@ -106,20 +134,18 @@
 -        if (signal?.aborted) {
 -            break;
 -        }
--    }
--    const orderedFinalizedCalls = await Promise.all(finalizedCalls.map((entry) => (typeof entry === "function" ? entry() : Promise.resolve(entry))));
 +        })();
 +        executions.push(execution);
-+    }
+     }
+-    const orderedFinalizedCalls = await Promise.all(finalizedCalls.map((entry) => (typeof entry === "function" ? entry() : Promise.resolve(entry))));
 +    const orderedFinalizedCalls = await Promise.all(executions);
      const messages = [];
      for (const finalized of orderedFinalizedCalls) {
          const toolResultMessage = createToolResultMessage(finalized);
-@@ -461,6 +492,62 @@
-         messages,
+@@ -462,6 +493,62 @@ async function executeToolCallsParallel(currentContext, assistantMessage, toolCa
          terminate: shouldTerminateToolBatch(orderedFinalizedCalls),
      };
-+}
+ }
 +async function prepareToolExecution(prepared) {
 +    const candidates = [];
 +    if (prepared.hookExecutionPlan) candidates.push(prepared.hookExecutionPlan);
@@ -175,10 +201,11 @@
 +        this.entries.add(entry);
 +        return entry.done;
 +    }
- }
++}
  function shouldTerminateToolBatch(finalizedCalls) {
      return finalizedCalls.length > 0 && finalizedCalls.every((finalized) => finalized.result.terminate === true);
-@@ -490,6 +577,7 @@
+ }
+@@ -490,6 +577,7 @@ async function prepareToolCall(currentContext, assistantMessage, toolCall, confi
      try {
          const preparedToolCall = prepareToolCallArguments(tool, toolCall);
          const validatedArgs = validateToolArguments(tool, preparedToolCall);
@@ -186,7 +213,7 @@
          if (config.beforeToolCall) {
              const beforeResult = await config.beforeToolCall({
                  assistantMessage,
-@@ -515,6 +603,7 @@
+@@ -515,6 +603,7 @@ async function prepareToolCall(currentContext, assistantMessage, toolCall, confi
                      isError: true,
                  };
              }
@@ -194,7 +221,7 @@
          }
          if (signal?.aborted) {
              return {
-@@ -528,6 +617,7 @@
+@@ -528,6 +617,7 @@ async function prepareToolCall(currentContext, assistantMessage, toolCall, confi
              toolCall,
              tool,
              args: validatedArgs,
@@ -202,16 +229,13 @@
          };
      }
      catch (error) {
-@@ -558,12 +648,25 @@
+@@ -558,12 +648,25 @@ function emitToolExecutionUpdate(toolCall, emit) {
   */
  export async function runToolCall(toolCall, options) {
      const { assistantMessage, context, signal } = options;
 -    const preparation = await prepareToolCall(context, assistantMessage, toolCall, options, signal, options.tools);
 -    if (preparation.kind === "immediate") {
 -        return { toolCall, result: preparation.result, isError: preparation.isError };
--    }
--    const executed = await executePreparedToolCall(preparation, signal, options.onUpdate ?? (() => { }));
--    return finalizeExecutedToolCall(context, assistantMessage, preparation, executed, options, signal);
 +    let preparation;
 +    const prepare = async () => {
 +        preparation = await prepareToolCall(context, assistantMessage, toolCall, options, signal, options.tools);
@@ -230,66 +254,17 @@
 +        return await execute();
 +    } catch (error) {
 +        return { toolCall, result: createErrorToolResult(error instanceof Error ? error.message : String(error)), isError: true };
-+    }
+     }
+-    const executed = await executePreparedToolCall(preparation, signal, options.onUpdate ?? (() => { }));
+-    return finalizeExecutedToolCall(context, assistantMessage, preparation, executed, options, signal);
  }
  async function executePreparedToolCall(prepared, signal, onUpdate) {
      const updateEvents = [];
---- a/dist/types.d.ts
-+++ b/dist/types.d.ts
-@@ -41,7 +41,18 @@
-  * Returning `{ block: true }` prevents the tool from executing. The loop emits an error tool result instead.
-  * `reason` becomes the text shown in that error result. If omitted, a default blocked message is used.
-  */
-+export interface ToolExecutionResource {
-+    id: string;
-+    access: "read" | "write";
-+    scope?: "exact" | "subtree";
-+    ancestors?: readonly string[];
-+}
-+export interface ToolExecutionPlan {
-+    barrier?: boolean;
-+    resources?: readonly ToolExecutionResource[];
-+}
- export interface BeforeToolCallResult {
-+    executionPlan?: ToolExecutionPlan;
-     block?: boolean;
-     reason?: string;
-     /**
-@@ -412,6 +423,7 @@
-      * Must return an object that matches `TParameters`.
-      */
-     prepareArguments?: (args: unknown) => Static<TParameters>;
-+    prepareExecution?: (args: Static<TParameters>) => ToolExecutionPlan | Promise<ToolExecutionPlan>;
-     /**
-      * JSON Schema of `structuredContent` in successful results. Tools that declare it should always
-      * set `structuredContent`.
---- a/dist/agent-loop.d.ts
-+++ b/dist/agent-loop.d.ts
-@@ -3,7 +3,7 @@
-  * Transforms to Message[] only at the LLM call boundary.
-  */
- import { type AssistantMessage, EventStream } from "@earendil-works/pi-ai";
--import type { AgentContext, AgentEvent, AgentLoopConfig, AgentMessage, AgentTool, AgentToolCall, AgentToolCallOutcome, AgentToolResult, StreamFn } from "./types.ts";
-+import type { AgentContext, AgentEvent, AgentLoopConfig, AgentMessage, AgentTool, AgentToolCall, AgentToolCallOutcome, AgentToolResult, StreamFn, ToolExecutionPlan } from "./types.ts";
- export type AgentEventSink = (event: AgentEvent) => Promise<void> | void;
- /**
-  * Start an agent loop with a new prompt message.
-@@ -25,7 +25,12 @@
- export type ToolCallHooks = Pick<AgentLoopConfig, "beforeToolCall" | "afterToolCall">;
- type ToolUpdateSink = (partialResult: AgentToolResult<any>) => Promise<void> | void;
- /** Options for {@link runToolCall}. */
-+export declare class ToolExecutionScheduler {
-+    run<T>(prepare: () => Promise<ToolExecutionPlan>, execute: () => Promise<T>): Promise<T>;
-+}
- export interface RunToolCallOptions extends ToolCallHooks {
-+    executionScheduler?: ToolExecutionScheduler;
-+    forceSequential?: boolean;
-     /** Tools the call resolves against. */
-     tools: readonly AgentTool<any>[];
-     /** Passed to the hooks as the message that issued the call. */
+diff --git a/dist/agent.d.ts b/dist/agent.d.ts
+index 2429a21..9a79ca9 100644
 --- a/dist/agent.d.ts
 +++ b/dist/agent.d.ts
-@@ -87,9 +87,13 @@
+@@ -87,9 +87,13 @@ export declare class Agent {
      set followUpMode(mode: QueueMode);
      get followUpMode(): QueueMode;
      /** Queue a message to be injected after the current assistant turn finishes. */
@@ -305,9 +280,11 @@
      /** Remove all queued steering messages. */
      clearSteeringQueue(): void;
      /** Remove all queued follow-up messages. */
+diff --git a/dist/agent.js b/dist/agent.js
+index a8ccfc0..57e6ca7 100644
 --- a/dist/agent.js
 +++ b/dist/agent.js
-@@ -63,21 +63,21 @@
+@@ -63,21 +63,21 @@ class PendingMessageQueue {
      constructor(mode) {
          this.mode = mode;
      }
@@ -335,7 +312,7 @@
          return drained;
      }
      clear() {
-@@ -181,12 +181,40 @@
+@@ -181,12 +181,40 @@ export class Agent {
          return this.followUpQueue.mode;
      }
      /** Queue a message to be injected after the current assistant turn finishes. */
@@ -380,7 +357,7 @@
      }
      /** Remove all queued steering messages. */
      clearSteeringQueue() {
-@@ -253,10 +281,8 @@
+@@ -253,10 +281,8 @@ export class Agent {
              throw new Error("Agent is already processing. Wait for completion before continuing.");
          }
          const lastMessage = this._state.messages[this._state.messages.length - 1];
@@ -393,7 +370,7 @@
              const queuedSteering = this.steeringQueue.drain();
              if (queuedSteering.length > 0) {
                  await this.runPromptMessages(queuedSteering, { skipInitialSteeringPoll: true });
-@@ -267,7 +293,7 @@
+@@ -267,7 +293,7 @@ export class Agent {
                  await this.runPromptMessages(queuedFollowUps);
                  return;
              }
@@ -402,3 +379,34 @@
          }
          await this.runContinuation();
      }
+diff --git a/dist/types.d.ts b/dist/types.d.ts
+index fb62346..48837eb 100644
+--- a/dist/types.d.ts
++++ b/dist/types.d.ts
+@@ -41,7 +41,18 @@ export type AgentToolCall = Extract<AssistantMessage["content"][number], {
+  * Returning `{ block: true }` prevents the tool from executing. The loop emits an error tool result instead.
+  * `reason` becomes the text shown in that error result. If omitted, a default blocked message is used.
+  */
++export interface ToolExecutionResource {
++    id: string;
++    access: "read" | "write";
++    scope?: "exact" | "subtree";
++    ancestors?: readonly string[];
++}
++export interface ToolExecutionPlan {
++    barrier?: boolean;
++    resources?: readonly ToolExecutionResource[];
++}
+ export interface BeforeToolCallResult {
++    executionPlan?: ToolExecutionPlan;
+     block?: boolean;
+     reason?: string;
+     /**
+@@ -412,6 +423,7 @@ export interface AgentTool<TParameters extends TSchema = TSchema, TDetails = any
+      * Must return an object that matches `TParameters`.
+      */
+     prepareArguments?: (args: unknown) => Static<TParameters>;
++    prepareExecution?: (args: Static<TParameters>) => ToolExecutionPlan | Promise<ToolExecutionPlan>;
+     /**
+      * JSON Schema of `structuredContent` in successful results. Tools that declare it should always
+      * set `structuredContent`.

@@ -1,5 +1,8 @@
 import assert from "node:assert/strict";
 import { describe, it } from "node:test";
+import { mkdtempSync, mkdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import type { ExtensionAPI, ExtensionContext } from "@earendil-works/pi-coding-agent";
 import {
   createPiMcpConfigBridgeExtension,
@@ -58,6 +61,31 @@ const emptyCatalog = {
 };
 
 describe("pi-mcp-adapter config bridge", () => {
+  it("saves a global server's project override without changing global configuration or dropping explicit defaults", async () => {
+    const root = mkdtempSync(join(tmpdir(), "varin-native-mcp-override-"));
+    const agentDir = join(root, "agent");
+    const cwd = join(root, "project");
+    mkdirSync(agentDir); mkdirSync(join(cwd, ".pi"), { recursive: true });
+    const globalPath = join(agentDir, "mcp.json");
+    const projectPath = join(cwd, ".pi", "mcp.json");
+    const global = JSON.stringify({ mcpServers: { docs: { command: "node", enabled: false, exposure: "direct" } } });
+    writeFileSync(globalPath, global); writeFileSync(projectPath, '{"mcpServers":{}}');
+    const bridge = new PiMcpConfigBridge();
+    bridge.startSession("main", cwd);
+    try {
+      const options = bridge.nativeOptions(agentDir, () => {});
+      const ctx = { ...context("main", cwd), isProjectTrusted: () => true };
+      const loaded = await options.loadConfig!(ctx);
+      const entry = loaded.servers.find(server => server.name === "docs")!;
+      await options.updateConfig!({ ...entry, override: projectPath }, { enabled: true, exposure: "codemode" });
+      assert.equal(readFileSync(globalPath, "utf8"), global);
+      assert.deepEqual(JSON.parse(readFileSync(projectPath, "utf8")).mcpServers.docs, { enabled: true, exposure: "codemode" });
+      const refreshed = await options.loadConfig!(ctx);
+      assert.equal(refreshed.servers.find(server => server.name === "docs")?.config.enabled, true);
+      assert.equal(refreshed.servers.find(server => server.name === "docs")?.override, projectPath);
+    } finally { bridge.endSession(); rmSync(root, { recursive: true, force: true }); }
+  });
+
   it("distinguishes unavailable from an authoritative empty catalog", async () => {
     const bridge = new PiMcpConfigBridge();
     const runtime = createFakeExtensionRuntime();

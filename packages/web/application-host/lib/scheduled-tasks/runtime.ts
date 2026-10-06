@@ -1,5 +1,5 @@
 import { DateTime, type Zone } from 'luxon';
-import parser from 'cron-parser';
+import { CronExpressionParser } from 'cron-parser';
 import { watch } from 'node:fs';
 import { dirname as pathDirname } from 'node:path';
 import { discoverLoops, loopDirectoriesFor } from './loops.js';
@@ -228,7 +228,7 @@ export const computeNextRunAt = (task: {
   if (schedule.kind === 'cron') {
     if (typeof schedule.cron !== 'string' || !schedule.cron) return null;
     try {
-      const iterator = parser.parseExpression(schedule.cron, {
+      const iterator = CronExpressionParser.parse(schedule.cron, {
         tz: zone,
         currentDate: new Date(nowMs),
       });

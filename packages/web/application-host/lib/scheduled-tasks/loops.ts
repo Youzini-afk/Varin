@@ -3,7 +3,7 @@ import fsPromisesDefault from 'node:fs/promises';
 import osDefault from 'node:os';
 import pathDefault from 'node:path';
 import YAML from 'yaml';
-import parser from 'cron-parser';
+import { CronExpressionParser } from 'cron-parser';
 import { IANAZone } from 'luxon';
 import { resolveWorktreeTopLevel } from '../git/service.js';
 import type { ScheduledTaskExecution } from '../projects/project-config.js';
@@ -177,7 +177,7 @@ export const parseLoopContent = (content: unknown): ParsedLoopContent => {
     return { definition: null, error: 'Frontmatter "timezone" must be a valid IANA timezone', name };
   }
   try {
-    parser.parseExpression(cron, { ...(timezone ? { tz: timezone } : {}), currentDate: new Date() }).next();
+    CronExpressionParser.parse(cron, { ...(timezone ? { tz: timezone } : {}), currentDate: new Date() }).next();
   } catch {
     return { definition: null, error: 'Frontmatter "schedule" must be a valid cron expression', name };
   }

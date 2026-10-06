@@ -134,7 +134,7 @@ directly against `$INSTDIR`, checks its exit status, and retries a failed intera
 shutdown, old-version uninstall, registry/shortcut handling, updater cache and archive production remain
 electron-builder-owned.
 
-`bun-patches/app-builder-lib@26.15.7.patch` adds only the extraction-hook seam to the regular NSIS
+`bun-patches/app-builder-lib@26.17.0.patch` adds only the extraction-hook seam to the regular NSIS
 template. `prepare-installer-tool.cjs` stages the checksum-pinned Windows 7-Zip binary and its licenses;
 the installer embeds that helper in its private plugin directory rather than requiring 7-Zip on the
 user's machine. `scripts/nsis-archive.test.mjs` exercises real 7z creation, differential blockmaps,

@@ -464,6 +464,8 @@ export const createEgressRuntime = (options: {
     };
     const dispatcher = new ProxyAgent({
       uri: policy.proxyOrigin!,
+      // Undici 8 forwards plain HTTP by default; retain the existing CONNECT path.
+      proxyTunnel: true,
       ...(token ? { token } : {}),
       proxyTls: { lookup: proxyLookup as never },
     });
@@ -614,8 +616,7 @@ export const createEgressRuntime = (options: {
         dispatch: (opts: Dispatcher.DispatchOptions, handler: Dispatcher.DispatchHandler): boolean => {
           const hop = resolveWithEnv(String(opts.origin ?? targetUrl), override, requestEnv, resolved.policy.version, true, hostConfig);
           if (hop.failure || hop.policy.mode === "system") {
-            queueMicrotask(() => handler.onError?.(hop.failure ?? new EgressError("connect", "network route changed during redirect")));
-            return true;
+            throw hop.failure ?? new EgressError("connect", "network route changed during redirect");
           }
           return hop.dispatcher!.dispatch(opts, handler);
         },
