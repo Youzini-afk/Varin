@@ -5,9 +5,10 @@ folder and reload it without restarting the application.
 
 ## Quick start
 
-1. Create the themes directory:
+1. Create the themes directory for the Host’s platform (see [Theme location](#theme-location)).
+   For the default Linux data directory:
    ```bash
-   mkdir -p ~/.config/varin/themes
+   mkdir -p "${XDG_CONFIG_HOME:-$HOME/.config}/varin/themes"
    ```
 
 2. Create a theme JSON file (e.g., `my-theme.json`) with the format below.

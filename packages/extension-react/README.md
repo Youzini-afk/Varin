@@ -11,4 +11,4 @@ Using React is optional; managed and isolated extensions may use any framework o
 `defineReactShell`, `defineReactView`, and `defineReactEditor` are typed aliases of the same adapter.
 `defineReactTransitionScene` and `useVarinTransitionScene` adapt the stable transition controller
 without sharing Varin's own React root or prescribing a Shell DOM structure.
-See the complete [authoring guide](https://github.com/Youzini-afk/Varin/blob/main/docs/varin-extension-authoring.md).
+See the complete [authoring guide](https://github.com/Youzini-afk/Varin/blob/main/docs/ops/varin-extension-authoring.md).

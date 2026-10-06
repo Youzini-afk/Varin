@@ -20,11 +20,15 @@ tandis que Varin possède l'environnement d'outils, l'état de travail, la resta
 politique de contexte, la gouvernance des tâches et les surfaces de workbench. Il utilise directement le
 SDK public de Pi plutôt que de parser une sortie de terminal.
 
-Son interface n'est pas une coque figée. Varin fournit deux formes de travail officielles : un
-**Agent Workspace** centré sur les sessions, les tâches et le contexte, et un **IDE Workbench** centré
-sur les éditeurs, la recherche, Git, les diagnostics et le débogage, avec l'agent comme panneau
-ancrable. Les deux sont des extensions Varin ordinaires sélectionnées par un Workbench Profile,
-donc vous pouvez remplacer l'une ou l'autre, ou n'importe laquelle de leurs parties.
+Les Workbench Profiles sélectionnent quatre interfaces intégrées : **Agent Workspace**,
+**IDE Workbench**, **Research Workbench** et **Varin Bot**. Ce sont des extensions Varin ordinaires ;
+vous pouvez remplacer une interface complète ou certaines de ses parties. Agent Workspace se
+concentre sur les sessions et les tâches ; IDE Workbench réunit éditeurs, recherche, Git,
+diagnostics et débogage avec un agent dans un panneau ancrable.
+
+Agent Workspace, Research Workbench et Varin Bot prennent en charge le bureau, le web et le mobile.
+IDE Workbench prend en charge le bureau et le web. L’orientation du travail reste indépendante
+de l’interface sélectionnée.
 
 > [!IMPORTANT]
 > Varin est en pré-1.0 et en développement actif. Les surfaces produit et le protocole d'exécution
@@ -124,7 +128,7 @@ le compositeur sur un écran de téléphone.
 - **Configuration de plugins de première classe :** les plugins maintenus disposent d'interfaces
   dédiées, tandis que leurs propres fichiers JSON/JSONC natifs, commandes, bases de données et
   logiques de migration restent la référence.
-- **Un workbench recomposable :** choisissez le profil Agent ou IDE, ou construisez le vôtre.
+- **Un workbench recomposable :** choisissez un profil Agent, IDE, Research ou Bot, ou construisez le vôtre.
   Remplacez la coque entière, ou seulement la navigation, l'éditeur, un panneau, le composeur, la
   timeline ou la barre d'état, et mélangez contributions officielles et communautaires. Le
   changement est immédiat, sans rechargement des documents, sans redémarrage de l'exécution Pi et
@@ -339,7 +343,7 @@ d'exposer une instance distante ou d'installer du code inconnu.
 | `packages/extension-sdk`, `-react`, `-cli` | SDK public d'écriture, adaptateur React et outillage auteur |
 | `packages/extension-host` | Catalogue, artefacts, stockage et services de l'hôte applicatif de confiance |
 | `packages/extension-loader` | Chargeur de modules Surface managés authentifié et realms isolés |
-| `packages/extension-builtins` | Manifestes des extensions intégrées à Varin, dont les deux coques |
+| `packages/extension-builtins` | Manifestes des extensions intégrées à Varin, dont les quatre interfaces |
 | `packages/docs` | Sources du site de documentation destiné aux utilisateurs |
 | `docs` | Contrats d'architecture, de harness, de noyau, de workbench, de migration, de restauration, de cloud et de sécurité |
 | `scripts` | Outillage de développement, build/mesure du noyau, publication, cloud, déploiement et validation |
@@ -362,8 +366,8 @@ bun run test:pi:dist
 
 `bun run kernel:check` est la vérification de compilation Rust rapide ; `bun run test:kernel` exécute
 la suite d'autorité native non ignorant contre l'exécutable de publication construit.
-`bun run test:docs` et `bun run docs:validate` vérifient respectivement la documentation d'ingénierie
-et le contenu du site de documentation.
+`bun run test:docs` teste le vérificateur de documentation ; `bun run docs:validate` vérifie
+ensemble les contenus publics et la documentation d’ingénierie.
 
 La CI expose trois barrières stables aux responsabilités distinctes : qualité des sources sous
 Ubuntu, comportement d'exécution sous Windows et build de production sous Ubuntu. La vérification de

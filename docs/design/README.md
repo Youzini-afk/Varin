@@ -13,7 +13,7 @@ Status: topic index — 设计的实施状态由各文件说明，交付概况�
 | 工具参数、执行与反馈 | [工具](harness-tools.md) |
 | 源码检索、结构和语义来源 | [检索](harness-retrieval.md)、[快速决策](fast-decision-model-design.md) |
 | Web、论文与材料复用 | [Web 与科研检索](web-research-search-design.md) |
-| 知识、上下文与压缩 | [知识库](harness-knowledge.md)、[上下文](harness-context.md)、[压缩 Agent](context-compaction-agent-design.md) |
+| Agent 笔记、Bot 知识与上下文 | [记忆归属](../../packages/web/application-host/lib/memory/DOCUMENTATION.md)、[知识库](harness-knowledge.md)、[上下文](harness-context.md)、[压缩 Agent](context-compaction-agent-design.md) |
 | 常规多 Agent 的角色、通信和代码协作 | [协作设计](agent-collaboration-design.md)；[验证专卷](harness-verification.md)保留基础验证与工作状态合同 |
 | 对话设置和会话等待 | [设置](agent-settings-design.md)、[续接](agent-follow-up-design.md) |
 

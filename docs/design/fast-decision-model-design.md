@@ -33,15 +33,10 @@ Jev 是首个适配器。Computer Use、工具/技能选择和上下文材料选
 
 ## 2. 当前实现与改变范围
 
-当前 `explore` 是一次公开工具调用：Host 持有短生命周期 query，pi-host 可用 `models.explore` 生成搜索计划、
-从当前原文中成组选段，并做一轮可选补查。词法、图和可用向量同时提供候选；LLM 选材状态为 skipped/unconfigured 时，
-已配置的 `harness.rerank` 可以重排，失败/取消不触发另一模型。代码入口为：
-
-- `packages/pi-host/src/harness/explore-tool.ts`、`explore-model.ts`：公开编排和生成式计划/选择。
-- `packages/web/application-host/lib/harness/explore-query-services.ts`、`explore.ts`：query、召回、读取、选段、结束。
-- 同目录 `explore-rerank.ts`：当前专用重排消费者。
-- `packages/web/application-host/lib/knowledge/semantic/workspace-runtime.ts`：范围推理绑定与语义生产装配。
-- `packages/pi-host/src/session-host.ts` 与后台推理 runtime：模型/provider/凭据所有权。
+`explore` 是一次公开工具调用，Host 持有同一短生命周期 query，Pi 编排已配置的模型职责。
+词法、图与可用向量提供候选；生成式计划、动作选择和联合选材按 §4.4 分工，不以一个 query 级开关排斥其他职责。
+生产入口为 [Pi explore tool](../../packages/pi-host/src/harness/explore-tool.ts)、
+[Host query services](../../packages/web/application-host/lib/harness/explore-query-services.ts)及各职责消费者。
 
 D-312 将候选语义判断抽成独立能力，并让同一个 query 可以根据判断迭代展开真实代码关系。
 保留生成式搜索表达入口；不把 Jev 塞进要求返回自由文本的 `completeExplore`，也不把它的接口冒充 HTTP `/rerank`。
@@ -75,7 +70,7 @@ D-312 将候选语义判断抽成独立能力，并让同一个 query 可以根�
 
 ### 3.2 用户配置
 
-拟使用独立的 `harness.fastDecision` 配置种类，与 embedding/rerank 并列，不增加一个假装能聊天的普通模型槽位。
+使用独立的 `harness.fastDecision` 配置种类，与 embedding/rerank 并列，不增加一个假装能聊天的普通模型槽位。
 提供一个默认绑定，并允许已注册消费者按用途显式覆盖或关闭。解析顺序是用途覆盖、通用默认、未配置；
 用户显式关闭不会被默认绑定重新启用。未知 provider 的模型名不构成能力证明。
 
@@ -92,7 +87,7 @@ Host 只持有去凭据绑定和已授权材料，通过 broker/Pi inference 请
 不静默换用主模型或其他付费 provider；设置改变作用于下一次 query，当前 query 保持开始时解析的绑定，
 凭据或访问能力撤销沿原有实时失效规则处理。
 
-### 3.3 Jev 首个适配器
+### 3.3 Pi 原生 classifier 适配
 
 当前通过 Pi 1.0.0 原生 classifier API 调用 TypeSafe、Cloudflare System One 或 llama.cpp，
 保留通用判断、选择、评分及部分回答语义。传输、认证、重试和供应商限制归原生 API；
@@ -196,7 +191,7 @@ Host 从已读正文、符号/关系服务和目录清单动态生成可执行�
 
 后续改造还须绑定实际被模型看见的正文范围和判断上下文。较长材料拆分时产生明确的范围身份，不能裁剪输入后把评价附在整段未见正文上；已有材料的新增贡献判断带入必要的已选依据。上下文变化可以重新考虑旧动作，精确执行缓存避免重复I/O。
 
-交付按[检索专卷](harness-retrieval.md)中的 DeliveryPlan 一次决定：必需范围在实际展示预算内成组保留，renderer不再独立截去判断依据。现有可见计数修复保留，但不等于联合选材已经实现。
+交付按[检索专卷](harness-retrieval.md)中的 DeliveryPlan 一次决定：必需范围在实际展示预算内成组保留，renderer不再独立截去判断依据。可见计数与联合选材分别记录，计数修复本身不证明材料组合质量。
 
 ## 5. 通用复用和工程归属
 

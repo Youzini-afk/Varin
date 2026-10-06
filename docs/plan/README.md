@@ -8,8 +8,8 @@ Last updated: 2026-10-06
 | 需要推进的工作 | 计划/合同 | 阅读时注意 |
 | --- | --- | --- |
 | Harness 的当前与历史阶段 | [工作与阶段导航](agent-harness-plan.md) | 已结束阶段的详细任务在归档，不重新执行 |
-| 运行时可靠性 | [RR 计划](agent-runtime-reliability-plan.md) | 当前未闭合项是 RR6；RR2/RR4 的旧目录模型已被 HR 替代 |
-| Bot 与持久电脑 | [BC 计划](bot-computer-use-plan.md) | 从[最新验收](../reviews/bot-computer-use.md)的剩余合同进入，不重复已补齐批次 |
+| 运行时可靠性 | [RR6 剩余验收](agent-runtime-reliability-plan.md) | 当前未闭合项是 RR6；RR2/RR4 的旧目录模型已被 HR 替代 |
+| Bot 与持久电脑 | [BC 剩余交付](bot-computer-use-plan.md) | 从[最新验收](../reviews/bot-computer-use.md)的剩余合同进入，不重复已补齐批次 |
 | 可组合执行环境 | [环境设计](../design/execution-environment-design.md) | 从[EE 剩余产品缺口](../reviews/execution-environments.md#剩余产品缺口与原生验证)确定下一项 |
 | 科研执行、资源与办公连续性 | [科研设计](../design/research-cluster-design.md)、[办公设计](../design/office-work-continuity-design.md) | 已接线的研究路径与尚未实现的完整目标分开 |
 

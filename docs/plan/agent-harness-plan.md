@@ -13,9 +13,9 @@ Last updated: 2026-10-06
 | 工作范围 | 合同或计划 | 当前缺口与证据 |
 | --- | --- | --- |
 | 可组合执行环境 | [环境设计](../design/execution-environment-design.md) | [EE 验收](../reviews/execution-environments.md) |
-| Bot / Computer Use / 持久电脑 | [BC 计划](bot-computer-use-plan.md) | [BC 验收](../reviews/bot-computer-use.md) |
+| Bot / Computer Use / 持久电脑 | [BC 剩余交付](bot-computer-use-plan.md) | [BC 验收](../reviews/bot-computer-use.md) |
 | 科研执行与资源管理剩余项 | [科研设计](../design/research-cluster-design.md) | [当前状态](../status.md#平台组件与研究资源管理)；原分解见下表阶段 7 |
-| 运行时平台纵切 | [RR 计划](agent-runtime-reliability-plan.md) | RR6；旧 RR2/RR4 已被 HR 任务/资源模型替代 |
+| 运行时平台纵切 | [RR6 验收](agent-runtime-reliability-plan.md) | RR6；旧 RR2/RR4 已被 HR 任务/资源模型替代 |
 | 办公连续性 | [O0–O4 设计](../design/office-work-continuity-design.md) | 尚未实施，与既有浏览器/办公桥分开 |
 
 具体推进从对应主题的未完成合同开始。已结束阶段不会因为旧计划里还有任务式语气就重新进入工作队列。

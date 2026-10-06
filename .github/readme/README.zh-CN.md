@@ -17,10 +17,13 @@
 Pi 提供，而 Varin 负责周围的工具环境、工作状态、恢复、检索、上下文策略、任务治理和工作台界面。
 它直接使用 Pi 的公开 SDK，而不是抓取终端输出。
 
-它的界面不是固定外壳。Varin 自带两套官方工作形态：**Agent Workspace** 以会话、任务和上下文
-为中心，**IDE Workbench** 以编辑器、搜索、Git、诊断和调试为中心并把智能体作为可停靠面板。两者
-都是普通的 Varin 扩展，由 Workbench Profile 选择，因此你可以整体替换其中任意一套，也可以只
-替换其中某一个部分。
+Workbench Profile 可选择四套内置外壳：**Agent Workspace**、**IDE Workbench**、
+**Research Workbench** 和 **Varin Bot**。它们都是普通的 Varin 扩展，可以整体替换，也可以
+只替换其中的部分。Agent Workspace 以会话和任务为中心；IDE Workbench 将编辑器、搜索、Git、
+诊断和调试与可停靠的智能体面板结合。
+
+Agent Workspace、Research Workbench 和 Varin Bot 支持桌面、Web 与移动端；IDE Workbench
+支持桌面与 Web。工作侧重与所选外壳相互独立。
 
 > [!IMPORTANT]
 > Varin 目前仍处于 1.0 之前的活跃开发阶段。各产品端和私有运行时协议会同步演进，较旧构建
@@ -94,7 +97,7 @@ IDE Profile 将工作区导航和编辑器基础设施与完整的 Pi 智能体�
   尚未专门适配的扩展仍可使用通用的命令、工具、条目、通知和 UI 桥接。
 - **常用插件的专用配置界面：** 已维护的插件拥有针对性的 GUI，同时继续以插件自己的原生
   JSON/JSONC 文件、命令、数据库和迁移逻辑为权威。
-- **可重组的工作台：** 选择 Agent 或 IDE Profile，也可以自建。既能替换整个外壳，也能只替换导航、
+- **可重组的工作台：** 选择 Agent、IDE、Research 或 Bot Profile，也可以自建。既能替换整个外壳，也能只替换导航、
   编辑器、面板、Composer、Timeline 或状态栏，并混用官方与社区贡献。切换是实时的，不刷新文档、
   不重启 Pi 运行时、不丢失共享的工作区状态。
 - **多个产品端：** Electron、Web 和 Capacitor 移动端外壳共享一套 React UI，并通过明确的运行时
@@ -275,7 +278,7 @@ Electron 在主进程里运行同一个宿主，而不是再造一套桌面后�
 | `packages/extension-sdk`、`-react`、`-cli` | 公开的作者 SDK、React 适配器和作者工具链 |
 | `packages/extension-host` | 可信应用宿主的目录、构件、存储与服务 |
 | `packages/extension-loader` | 带认证的 managed Surface 模块加载器与隔离运行域 |
-| `packages/extension-builtins` | Varin 内置扩展的清单，含两套官方外壳 |
+| `packages/extension-builtins` | Varin 内置扩展的清单，含四套官方外壳 |
 | `packages/docs` | 面向用户的文档站源码 |
 | `docs` | 架构、harness、内核、工作台、迁移、恢复、云端和安全约定 |
 | `scripts` | 开发、内核构建/测量、发布、云端、部署和校验工具 |
@@ -296,8 +299,8 @@ bun run test:pi:dist
 ```
 
 `bun run kernel:check` 是 Rust 快速编译检查；`bun run test:kernel` 针对构建出的发行可执行文件
-运行不可跳过的原生权威套件。`bun run test:docs` 与 `bun run docs:validate` 分别校验工程文档和
-文档站内容。
+运行不可跳过的原生权威套件。`bun run test:docs` 测试文档校验器；
+`bun run docs:validate` 一次检查用户文档和工程文档内容。
 
 CI 固定为三条职责不同的门禁：Ubuntu 源码质量、Windows 运行时行为和 Ubuntu 生产构建。
 类型检查、lint 和全仓测试只在权威门禁中执行一次；Windows 只补充平台相关测试。云端/运行时输入

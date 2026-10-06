@@ -1,8 +1,5 @@
 # Varin development guide
 
-Status: contributor guide — source setup, code ownership and useful verification.
-Last updated: 2026-10-06
-
 Start here when changing the repository. [Architecture](architecture.md) explains the system;
 [the documentation index](README.md) routes domain questions; [AGENTS.md](../AGENTS.md) keeps the
 cross-project contribution and trust boundaries.
@@ -55,7 +52,7 @@ Choose verification by the failure a change could introduce:
 
 | Change | Useful evidence |
 | --- | --- |
-| Documentation or navigation | Actual local-link/reachability check; review changed facts and old chapter links |
+| Documentation or navigation | Local-path and public-route checks; review changed facts and section links |
 | Local implementation | Focused behavior tests; type/lint checks when the static shape changes |
 | Shared contract or persistence | Actual consumers and changed data behavior, not literal DTO snapshots |
 | Processes, native code, packaging or platform behavior | Relevant native suite, installed-runtime check or platform smoke |
@@ -81,7 +78,12 @@ requirement to run every command on every change.
 | Rust compile check / release binary | `bun run kernel:check` / `bun run kernel:build` |
 | Native authority suite | `bun run test:kernel` |
 | Engineering docs / public docs plus engineering checks | `bun run docs:check` / `bun run docs:validate` |
-| Documentation checker tests plus repository check | `bun run test:docs` |
+| Documentation checker behavior tests | `bun run test:docs` |
+
+`docs:validate` includes the engineering link scan. CI runs `test:docs` and then `docs:validate`, so
+the repository is scanned once. Documentation checks do not prescribe status headers, index layout,
+wording or translation coverage. Review those against the intended reader and current implementation;
+do not encode an editorial preference as another build gate.
 
 **Build output and running code.** `test:dist` consumes already built output. Build the owning package
 first; do not silently test an earlier build. Electron type checking uses generated Host declarations

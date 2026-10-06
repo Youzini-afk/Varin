@@ -8,7 +8,7 @@ Last updated: 2026-09-23
 [阶段 L](../archive/agent-harness-plan-2026-10-06.md#阶段-lweb-与科研检索d-315)，实际交付只记入
 [能力状态](../status.md)。复用 [Harness](agent-harness.md)、
 [科研集群](research-cluster-design.md) 和 [快速决策模型](fast-decision-model-design.md) 的现有生产通路。
-下文区分当前实现、目标契约和后续探索；已接线的 `research_search` 与 retrieval 报告合同以代码和 status 为准，其他接口示例仍是设计形状。
+§2 标明当前入口；其他目标与后续探索不能仅凭示例接口推断已经交付。
 
 ## 1. 产品目标
 
@@ -28,40 +28,27 @@ Last updated: 2026-09-23
 - 实践推进：从论文继续追到附录、代码、数据集、issue 和运行说明，取得实际操作需要的信息。
 - 持续工作：后续讨论、实验与写作能够复用先前读到的材料，并按需要检查新变化。
 
-## 2. 当前代码基线与职责纠正
+## 2. 当前实现与职责
 
-本轮对照 Varin `e98c39e3` 的生产代码。普通场景已经有检索子线程，不能以“新增搜索 Agent”为本阶段起点。
+| 能力 | 生产入口与边界 |
+| --- | --- |
+| `websearch` | Host 搜索 provider，默认与显式配置保持各自失败语义；结果是发现材料，不是已读全文 |
+| `webfetch` / `document_read` | 网页正文与固定 PDF 原件/文本/页图/结构视图；原件、派生视图和解析器可用性分别表达 |
+| `research_search` | OpenAlex/Semantic Scholar 的发现、详情和分页 references/citations/related 关系 |
+| `materials` | Host 授权的材料集合与版本引用；共享引用不扩大接收方资源权限 |
+| `research_decide` | `web`/`scholarly` 快速判断消费者，沿 Pi inference 配置与凭据 owner |
+| `retrieval` / `investigation` | 既有 Thread/Run 上的通用检索与科研调查；自然语言报告可用，`submit_facts` 是可选结构化交付 |
+| `research_source` | 来源登记与对象引用；登记 URI 不等于下载、解析或核实内容 |
 
-| 现有能力 | 已有行为 | 本阶段补充 |
-| --- | --- | --- |
-| `websearch` | 默认 Exa MCP，失败后 Parallel；可配置 Brave/Exa/Tavily/Jina/SearXNG；返回 URL/标题/片段与 provider 状态 | 目标、批量查询、能力披露、可继续使用的来源身份与互补检索 |
-| `webfetch` | HTML 正文、PDF 文本、桌面可选渲染、find/行范围、可选 reader；进程内缓存 | 固定内容视图、原文位置、结构/图表读取与按目标选段 |
-| `retrieval` 预设 | 通用事实检索 Thread，本地+Web；专用 `models.retrievalAgent`，未配置不提供；只读、无 shell；当前允许自然语言报告与可选 `submit_facts` | 沿同一线程增强工具与交流，继续按需结构化事实 |
-| `research_search` | Host 只读学术发现/详情；OpenAlex 或 Semantic Scholar；返回元数据、摘要、身份和开放获取入口 | 论文关系、固定阅读材料和结构解析在后续 L2/L3 扩展 |
-| `investigation` | 科研调查 capability，含 Web/本地检索、消息与派发；要求 research 工作侧重 | 复用增强后的搜索/阅读，继续承担竞争解释与调查分支 |
-| 普通 `dispatch(task)` | 继承发起者当前模型和获准工具，可承担搜索 | 仍可用，不因专用 retrieval 未配置而丧失委派能力 |
-| `research_source` | 登记 URI、路径或对象引用，不自动取得或解析材料 | 关联实际材料与论文元数据，保持登记与获取的区别 |
-| `harness.fastDecision` | 只有 `explore` 消费者，判断/选择通路已经存在 | 新增实际 Web/学术消费者，不复制模型与凭据体系 |
+公开工具的当前参数见 [Pi harness](../../packages/pi-host/src/harness/README.md)，Host provider、材料与授权实现见
+[Host harness](../../packages/web/application-host/lib/harness/DOCUMENTATION.md)。`research_search`、`research_decide`、
+`materials` 等科研工具按当前 work focus 和工具选择装配；Shell 选择不代替该执行配置。
+普通 Web 搜索和 PDF 阅读保持共享能力。
 
-代码入口：
-
-- [搜索 provider 与 Host 服务](../../packages/web/application-host/lib/harness/web-search.ts)、
-  [网页读取](../../packages/web/application-host/lib/harness/web-fetch.ts)、
-  [公开读取工具](../../packages/pi-host/src/harness/webfetch-tool.ts)。
-- [通用预设](../../packages/protocol/src/harness-presets.ts)、
-  [科研能力](../../packages/protocol/src/research-capabilities.ts)、
-  [派发工具](../../packages/pi-host/src/harness/thread-tools.ts)、
-  [线程服务](../../packages/web/application-host/lib/harness/thread-services.ts)。
-- [来源登记](../../packages/web/application-host/lib/harness/sources.ts)、
-  [来源核对](../../packages/web/application-host/lib/harness/retrieval-evidence.ts)、
-  [快速决策消费者定义](../../packages/protocol/src/harness-fast-decision.ts)。
-
-当前 retrieval 报告可以直接使用自然语言；`submit_facts` 只为需要逐项、Host 核验的结构化事实提供补充。
-URL 来源回执仅由获准的 active retrieval Run 铸造并绑定 workspace/session/thread/run；普通获取正文不自动得到同等权威。
-`source-checked` 表示来源位置与身份已核对，不表示 Host 证明了句子为真。搜索工具历史已有来源展示，
-但这不等于共享全文库；现有抓取缓存也不等于持久材料索引。
-
-主要缺口是连续检索与材料复用、专门学术数据和结构化阅读，而非基本的搜索工具或多 Agent runtime。
+URL 来源回执只由获准的 active retrieval Run 铸造，绑定实际 owner/session/thread/run、URL 与正文身份。
+`source-checked` 说明位置与身份经过核对，不表示 Host 证明句子为真。缓存、持久材料和索引是不同能力。
+L0–L5 已接线不代表全部 provider、解析器、真实模型效果或 L6 产品整合完成；具体边界见 status。
+下文没有对应当前工具/消费者的接口示例继续作为设计目标。
 
 ## 3. 调研结论及证据边界
 

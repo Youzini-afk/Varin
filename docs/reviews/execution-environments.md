@@ -1,324 +1,80 @@
-# 可组合执行环境：实施与验收记录
+# 可组合执行环境：当前实现与验收边界
 
-Status: independent acceptance complete for available local evidence — EE1–EE6 是底层候选实现；设计中的任意部署组合尚未验收通过。
-基线：设计提交 `7e3baa14` 之上的当前 main。BC0–BC9 既有覆盖与原生证据缺口仍以
-[bot-computer-use-review.md](bot-computer-use.md) 为准，本文件只记录执行环境新增交付。
+Status: current acceptance map — EE1–EE6 有生产路径；任意部署组合和完整原生应用场景尚未验收。
+Last updated: 2026-10-06
 
-前六批保留执行代理交付时的检查口径；末尾「独立验收修复」和「剩余产品缺口」覆盖其中后来证伪的结论。
-定向测试证明相应代码路径；没有真实 Linux 桌面、跨机或 guest VM 的证据时，不把它们写成已经跑通。
+代码复核基线：`4b6c604b`。既有独立验收记录于 2026-10-01；本次只重新核对文档与源码，
+没有新增 Linux 桌面、Chromium/UNO、apt、跨机或 guest VM 运行证据。
+[环境设计](../design/execution-environment-design.md)负责合同，[BC 验收](bot-computer-use.md)负责共享平台边界。
 
-## 交付批次
+## 当前实现
 
-### 第一批：目标与职责（环境绑定，EE1）
+| 范围 | 生产路径与已保留的行为 | 边界 |
+| --- | --- | --- |
+| EE1 环境绑定 | Thread catalog 持久化 workTarget/desktopId；子 Thread 按字段继承；environment.get/set 校验真实目标；后续受理操作才使用新位置 | 不迁移已受理操作或已有资源 |
+| 普通主线 | agent-root-runtime 已在 agent_start 将普通会话接入同一 Thread/Run；computer 的 environment 动作调用同一 get/set | 不再由“仅 Thread 可 set”推断普通活动主线不能配置；完整根会话环境纵切未运行，独立 UI 选择入口仍未找到 |
+| EE2 打开与文件传递 | open 在目标 Host 解析 URL/路径；受管 Linux 桌面 fileWrite 原子写入 home，返回 hash/字节数/修订 | 单次复制，不是持续同步；写入没有版本前置条件；unknown 不自动重放 |
+| EE3 服务访问 | environment.forward 在协调 Host 建 loopback listener，经认证 Host↔Host WebSocket 桥接目标服务；查询/关闭按调用 session 隔离 | 返回地址只在协调机有效；live handle 不持久化 |
+| EE3 事件续接 | desktop/artifact follow-up 复用现有 source、occurrence、Thread 投递与恢复；源 revision 处理重复变化和 ABA | 真实桌面变化到 Bot 续行的原生场景未验证 |
+| EE4 软件配方 | desktop/dev/docs/data 组件清单、受管 Linux 安装入口与耐久 software 状态；apt 请求排队，bootstrap 状态可导入 | 安装状态独立于机器能力；真实 apt/cloud-init 未验证；不是版本化镜像模板 |
+| EE5 浏览器 | 受管 Linux Chromium + 持久 profile；标准库 CDP 桥支持 tabs、层级 AX snapshot 与导航/输入/截图；跟随同一 lane 和控制代次 | Page.navigate 回执不保证加载完成；点击仍需坐标；Windows/macOS 无对应桥 |
+| EE5 办公 | 同用户命名 pipe 连接实际 LibreOffice profile；RuntimeUID 定位活文档，modified 为事实字段；Writer/Calc 读写、另存与 PDF 导出有入口 | 无 UNO 或无法附着如实 unavailable；真实应用语义与可见进程身份未验收 |
+| EE6 证据 | Rust cursor + 不可变 step 记录并发序号、分页、重启续写与 outcome；远端日志由拥有 Host 写入，协调端查询转发 | 仅元数据与 observation id；不提供完整画面轨迹、重演或自动恢复 |
 
-Thread 获得耐久 `environment` 绑定 `{workTarget?, desktopId?, updatedAt}`：
+### 生产定位
 
-- 存放于 Thread catalog（`thread-registry.ts`），子 Thread 默认继承父绑定，`thread.dispatch` 可显式覆盖。
-- `environment.get` / `environment.set` Harness 方法（`context.session` / `control.environment`）。
-  `set` 在写入前验证目标真实存在（受管执行目标经 `managedRemoteTargets.targetFor`，桌面经 computer 目录），
-  返回 `handoff` 说明真实效果：此后受理的操作使用新位置，已受理操作保留其固定目标，不发生资源迁移。
-- 消费方每次受理时解析一次并固定：`shell.exec` 的 `target`（显式参数 > 绑定 > 本机），
-  computer 服务的 observe/act/apps/control/cancel/release/artifact 的 `desktopId`
-  （显式参数 > 绑定 > 已配置默认）。`computer` REPL 沿用既有每求值快照，自动吃到绑定默认。
-- Agent 入口：`computer` 工具 `action=environment`（get/set/clear），`bash` 工具 `target` 说明更新，
-  `thread.dispatch` 新增 `environment` 参数。
-- 会话无 Thread 绑定时：`get` 如实返回空，`set` 拒绝（绑定属于工作 Thread）。
+- [环境服务](../../packages/web/application-host/lib/harness/environment-services.ts)、[forward](../../packages/web/application-host/lib/harness/environment-forwards.ts)和[协议](../../packages/protocol/src/harness.ts)
+- [普通根生命周期](../../packages/web/application-host/lib/harness/agent-root-runtime.ts)、[事件准入](../../packages/web/application-host/lib/harness/attached-root-runtime.ts)、[Host 装配](../../packages/web/application-host/index.ts)
+- [ComputerService](../../packages/web/application-host/lib/computer/computer-service.ts)与[Pi computer 工具](../../packages/pi-host/src/harness/computer-tools.ts)
+- [Linux runtime](../../packages/computer-driver/linux/runtime.py)、[浏览器桥](../../packages/computer-driver/linux/browser_bridge.py)、[办公桥](../../packages/computer-driver/linux/office_bridge.py)
 
-验证：`environment-services.test.ts` 7 项聚焦测试（持久化重启重读、handoff 文案、逐调用固定、
-显式覆盖、非法目标拒绝、null 清除、无绑定会话、dispatch 携带与继承）；
-computer/thread 回归 116 项通过；protocol/pi-host/Host 类型与变更文件 lint 通过。
-pi-host `computer-tools` 有 3 项与本改动无关的既有环境失败（bun `REPLServer` 不可用），干净 HEAD 同现。
-
-未验证边界：远端真实 `targetFor` 联调未测；无 UI 消费面（后续批次）。
-
-### 第二批：跨环境联动（open + 文件写入，EE2）
-
-跨环境"应用打开"与"一次性文件传递"成为正式能力，全部沿既有桌面所有权：
-
-- 驱动词汇新增 `open` op：Linux `xdg-open`/`Popen`（detached）、Windows `Start-Process -PassThru`、
-  macOS `NSTask`/`/usr/bin/open`（均不等待被启动应用退出；返回 `pid`）。
-- `computer.open` 服务：恰好一个 url/path/command 目标；`javascript:`/`data:`/`vbscript:` 等
-  执行型 scheme 拒绝；人工控制中拒绝（与 `act` 同一归属门）；远端转发把 URL/路径原样送达
-  目标 Host —— `localhost` 与文件路径在**目标机**解析，绝不改写到协调端。传输丢失返回
-  `outcome: unknown`（open 可能已过线，绝不重放）；代际/归属门槛与 act 一致。
-- `computer.fileWrite`：一次性写文件到受管桌面用户 home，原子 temp+rename，
-  返回存储修订 `{sha256, byteLength, modifiedAt}`；远端经认证 HTTP 转发；
-  本地仅 `linux-xvnc` 受管桌面（非受管如实 unavailable）；符号链接逃逸经
-  "最深存在祖先解析"封堵；`..`/绝对路径/反斜杠拒绝。单次复制 ≠ 持续同步。
-- 路由：`POST …/desktops/:id/open`、`POST …/desktops/:id/artifacts/write`
-  （Host↔Host 同一组端点）；Harness 方法 `computer.open`/`computer.fileWrite`
-  走绑定解析（显式 > 绑定 > 默认）；
-  `computer` 工具 `action=open`/`action=put` + REPL `open()`。
-
-验证：computer-service 50 项（新增 7：pid 回传、目标互斥、scheme 拒绝、人工控制拒绝、
-远端原样转发 localhost、传输 unknown、远端/本地写入路径）、computer-routes 21 项
-（新增 3：open 转发/错误映射、write 转发）；
-artifact.py 本机真实往返：write→info→read 字节与 sha256 一致，`..`/绝对路径拒绝；
-Windows/macOS 驱动语法零错误，Linux runtime/artifact `py_compile` 通过；
-protocol/pi-host/web 类型与变更文件 ESLint 全绿。
-
-未验证边界：Linux/macOS `open` op 仅语法级（无对应桌面真机）；
-Host↔Host open/write 为假 fetch 聚焦测试，非真实双机联调；
-`mklink` 符号链接逃逸用例在 Windows 开发机无特权构造，路径封堵靠代码审查
-（Linux 目标平台上 `resolve()` 语义成立）；文件写入尚无版本前置条件
-（`--sha256` 仅 read 支持），并发覆盖靠原子 rename 保证最后写入者可见。
-
-### 第三批：服务访问与事件回源（EE3a/EE3b）
-
-EE3a——跨环境"服务访问"落成正式能力，沿既有 Host↔Host 通道，没有新增生命周期概念：
-
-- 协议：`environment.forward / forward.list / forward.close`（harness-forwards），
-  返回 forwardId 与实际监听地址；协调端 `localhost:PORT` 即目标机服务，
-  调用方拿到的永远是本机回环地址，远端 `localhost` 不再被误递给本地浏览器。
-- 传输：协调端 `environment-forwards.ts` 开本地 TCP 监听，按连接经认证
-  WebSocket 升级到目标 Host；目标侧 `environment-forward-server.ts` 校验
-  Bearer（`ensureSessionToken`）、Origin 与升级回执中的 Host 身份
-  （`X-Varin-Host`），把字节桥到目标机解析的地址。本地目标走同一入口的
-  进程内直连（无环回 WS）。
-- 语义：forward 与 Thread/调用方绑定并随 disarm/会话收尾关闭；升级回执
-  Host 身份不符即拒绝桥接；`list`/`close` 如实反映协调端在管转发。
-- Pi 工具：`computer` `action=forward|forwardList|forwardClose`，可选端口收窄；
-  转发结果经 `unknown` 安全收窄进 detail。
-
-EE3b——"事件回源"复用持久 follow-up 体系（拒绝另立事件台账）：
-
-- 新 `desktop` 叶源（协议 + 内核 `source_kinds` + 组合子校验均扩展）：
-  `condition: "status"` 观察桌面 catalog 状态（含远端镜像，随最后一次
-  可达同步的真实新鲜度），`states` 必填；`condition: "artifact"` 观察受管
-  桌面 home 文件——`path` 必填（拒绝绝对/逃逸/反斜杠），可绑 `sha256`
-  基线，`exists`/`changed` 复用既有 file 语义（出现即触发；修订不同于
-  基线即触发）。
-- 观察走 ComputerService（`observeDesktop` → catalog `list()`，远端桌面即
-  其镜像状态；`inspectDesktopArtifact` → EE2 的受管 artifact 读取），不越层
-  直读驱动/文件系统；依赖缺失如实 `unavailable`。
-- 轮询 2s 独立 timer map——不与 time/deadline 共用 `timers`（修掉
-  `fallbackAt` 覆盖 poll tick 的死轮询缺陷）；基线（上次状态/sha）随
-  `fire()` 的 `sourceStatePatch` 与 occurrence **同一事务**写入——修掉
-  "先提 revision 再 fire 被守卫拒"与"fire 后补基线被 state 门挡、重启后
-  同修订重复投递"两个缺陷。
-- 事件固定回原 `workspace/session/thread`：触发即 `fire()` →
-  `deliverRecordedOccurrence`，settled Thread 续行、活跃会话 inform、
-  queued 排队，全部既有投递语义；`followup.check` 返回观察事实
-  （status/baselineSha256/observedAt 或 `observed:"unavailable"`）。
-- Pi `followup` 工具：desktop 源 schema、摘要渲染与说明同步更新；
-  校验先行（空 desktopId / 缺 states / 逃逸 path / 非 sha256 一律拒绝，
-  不武装死等）。
-
-验证：followups 真核套件 49/51——5 个新 desktop 用例全过（状态迁移触发、
-null 状态不臆造、artifact 到达即触发且 sha256 入事实、基线 sha 等修订、
-非法源拒绝）；2 个失败为 `vi.advanceTimersByTimeAsync` 在 bun 下不存在的
-既有环境失败（干净 HEAD 同现，非本次引入）。environment-forwards 3 项
-（真实 TCP 字节贯通、Host 身份不符拒绝、目标端鉴权）+ environment-services
-10 项 vitest 全过；内核 release 二进制已按新校验重建；
-protocol/pi-host/application-host 类型与变更文件 ESLint 全绿。
-
-未验证边界：端到端"桌面真实变化 → Bot Thread 续行"未在真机跑通
-（poll 路径为聚焦测试）；forward 字节桥为单机真实 TCP 自环，跨机联调未测；
-远端桌面状态的新鲜度受镜像同步节流约束（文档已声明），桌面原生推流
-（替代轮询）留待后续。
-
-### 第四批：默认组件配方与安装入口（EE4，§6.2/6.3）
-
-- `linux/components.json`：声明式组件配方（desktop/dev/docs 三组），
-  对应 §6.2 默认组合；图像视频与工程游戏软件按合同不在配方内，
-  仍可经显式 `packages` 逐任务安装。
-- `linux/install-components.py`：目标机本地安装器——manifest 组校验、
-  包名注入校验、`sudo -n` apt 执行、逐组件真实结果（installed/failed+detail），
-  结果原子落 `<data-dir>/software.status.json`；无 apt 环境如实报错。
-- `linuxDesktop.install`：命令经注入 exec 通道执行，串行化单条 apt 流水线，
-  参数白名单先行，脚本无结果如实 unavailable。
-- `computer.installSoftware`：绑定解析同 observe/act（显式 > 绑定 > 默认）；
-  远端目标经认证 HTTP 转发到拥有 Host 自身执行；本地仅 `linux-xvnc` 受管
-  环境（其他桌面如实 unavailable，各管各的软件栈）。结果按组件并入桌面
-  记录 `software` 字段——installed/failed 状态与 `status`/`capabilities`
-  严格分开，catalog 重写时保留（与 usage/work 同一保护）。
-- 路由 `POST …/desktops/:id/software`（Host↔Host 同端点）、Harness 方法
-  `computer.installSoftware`（control.computer 权限）、Pi 工具 `action=install`。
-- VM 通用模板：`guest-init.sh` 在桌面准备后预装 dev+docs（`|| true`——apt 级
-  失败已记入 software.status.json，阻断云初始化不应因可选组失败而宣告
-  整机失败）；运行时升级仍走既有 guest-upgrade.sh，机器删除/磁盘删除
-  已由 `deleteVm(deleteDisks)` 分开。
-
-验证：computer-service 54/54（新增 4：组安装并入记录、失败状态可见、
-远端转发、非受管/空参拒绝）；computer-routes 22/22（新增 1）；
-install-components.py 真机执行验证校验路径（未知组/注入包名拒绝、
-无 apt 如实报错）；`py_compile`/`sh -n` 通过；类型/ESLint 全绿。
-
-未验证边界：真实 Linux 环境的 apt 安装未跑（开发机无 apt）；包名清单
-对 Debian 13 的解析正确性待首个真实 guest 验证；guest-init 的 dev/docs
-预装路径同样未在真实 cloud-init 下执行；`software` 字段暂无 UI 消费面。
-
-### 第五批：浏览器桥——同一真实现场（EE5a，§7.2，§13 收敛）
-
-§13"默认浏览器和连接协议"收敛：**Chromium + CDP**。CDP 能把 Agent 操作绑定到
-人工可见的同一持久会话；Playwright
-的 `connectOverCDP` 复用同一协议但其 Python wheel 需联网获取且对纯 CDP
-附着为过重依赖，故桥体以 Python 标准库直接实现 RFC6455/CDP 客户端，
-零新增依赖；firefox-esr 保留既有安装和数据，chromium 成为受管桌面的默认浏览器。
-
-- `browser_bridge.py`：stdlib CDP 桥（_CdpSocket 手写握手/帧掩码/请求关联）。
-  ops：`status`（/json/version 探活）、`launch`（chromium
-  `--remote-debugging-port` + 托管 `--user-data-dir`——登录态/标签页随
-  profile 持久，§6.3）、`tabs`、`snapshot`（Accessibility.getFullAXTree
-  扁平化）、`act`（navigate/evaluate/click 视口坐标/type/screenshot）。
-  所有异常收敛为 `{ok:false}`——驱动协议不允许裸异常。
-- `runtime.py` `tool:"browser"` 分发到桥——**同一 lane**：串行化、取消
-  检查点、agent-vs-human 控制门全部继承；写 op（launch/act）与 `open`/`act`
-  同一 forbidden 门，读 op（status/tabs/snapshot）走 observe lane，
-  人工持有期间仍可观（读≠输入）。
-- `computer.browser`：显式 > 绑定 > 默认解析；远端经认证 HTTP 转发到
-  拥有 Host 自身执行；传输丢失如实 `outcome:"unknown"`（op 可能已过线，
-  绝不重放——先查页面状态再决定）。路由 `POST …/desktops/:id/browser`、
-  Harness `computer.browser`（control.computer）、Pi `action=browser`
-  （browserOp/browserAct）。
-
-验证：computer-service 57/57（新增 3：driver 分发同 lane、人工控制写门/
-读通行、远端转发+传输 unknown）；`test_browser_bridge.py` 对假 CDP 端点
-全过——真实验证 HTTP/WS 握手、帧掩码、命令/响应关联、tabs/snapshot/
-navigate/evaluate/click/缺参拒/未知 tab 拒；类型/ESLint/py_compile 全绿。
-
-未验证边界：真实 Chromium 会话未跑过（假服务器验证协议层，不证明
-Chromium 行为）；Page.navigate 返回即发不代表加载完成（事实边界，
-等待语义由 followup/观察承担）；AX 树扁平化为行文本，元素↔视口坐标
-映射尚未提供（click 仍需坐标来源）；Windows/macOS 桌面暂无桥
-（managed linux only，与驱动同一边界）。
-
-### 第五批补：LibreOffice 桥——同一实例与未保存状态（EE5b，§7.2，§13 收敛）
-
-§13"LibreOffice/办公桥"收敛：**python3-uno + 同用户命名 pipe attach**。
-soffice 以 `--accept=pipe,name=varin-office-<uid>;urp;` 常驻，沿用户默认 profile；
-若用户已自行运行无 accept 的实例，桥如实不可连接，不另起
-隐藏 profile 冒充同一现场。
-
-- `office_bridge.py`：UNO 桥，ops `status`（连接探活+文档枚举）、
-  `launch`（带 accept 启动+30s 等待）、`docs`（title/kind/url/
-  **modified**——未保存状态是协议字段而非推断）、`open`
-  （loadComponentFromURL 进同一实例，文件在人工视野内可见）、
-  `act`：read/write（Sheet 单元格范围，write 强制 values 形状与
-  range 完全匹配）、insert（Writer 文末插入）、save（无位置文档如实
-  拒绝而非静默另存）。uno 缺失（python3-uno 未装）→诚实
-  `{ok:false}`。python3-uno 已入 docs 配方组。
-- `runtime.py` `tool:"office"` 分发到同一 lane；`computer.office`
-  服务方法/status·docs 走 observe lane、launch·open·act 与人工控制门
-  互斥；远端认证转发+传输丢失 `outcome:"unknown"`；路由
-  `POST …/office`、Harness `computer.office`、Pi `action=office`。
-
-验证：79/79 service+routes 测试全绿；`office_bridge` 无 uno 环境下
-状态诚实（status→not running、其余→unavailable 而非异常）；
-类型/ESLint/py_compile 全绿。
-
-未验证边界：真实 LibreOffice 会话未跑过——UNO 服务名/接口语义来自
-官方组件模型但未经原生实例验证（Calc/Writer/Presentation 分支、
-modified 标志、shape 校验行为）；Windows/macOS 无桥。
-
-### 第六批：操作证据与诊断入口（EE6，§10）
-
-设计要点是"可回看的证据 + 现有 Agent 的诊断入口"，不引入诊断 Agent、
-外部框架或每个动作固定加一轮诊断。沿此落地：
-
-- **`computer.evidence` 证据日志**：原候选 recordType `computer.evidence`
-  未进入 Rust 内核允许列表，实际写入失败；独立验收改为每桌面 cursor 记录
-  与逐条不可变 step 记录（`computer.evidence.cursor` / `computer.evidence.step`）。
-  条目含 seq/at/sessionId/lane/tool/op/target/outcome(ok|error|
-  cancelled|unknown|rejected)/error/observationId。全部 op funnel
-  （observe/act/open/fileWrite/installSoftware/browser/office）与
-  控制转移（takeover/handback/cancel/release）经 `journaledOp` 包装——
-  日志随 op 写入，持久化会增加响应等待；日志失败不翻转操作结果。
-- **内容纪律（§10）**：只记标识符——固定词汇的 tool/op、目标选择器的
-  SHA-256 摘要；
-  **键入文本、JS 表达式、单元格值、文件字节、凭据永不入日志**。
-- **权威侧归属**：本地 op 记本地 journal；远端 op 由拥有 Host 自己记，
-  协调端 `evidence` 查询转发到拥有者——不双写、不冒名。
-- **拒绝也记**：forbidden/invalid-params → `rejected`；取消 →
-  `cancelled`；响应丢失 → `unknown`——诊断能区分"没跑"、"被拒"、
-  "可能已生效"。
-- **诊断入口**：路由 `POST …/evidence`、Harness `computer.evidence`
-  （read.computer）、Pi `action=evidence`（evidenceSince/evidenceLimit/
-  evidenceSession 续读过滤）。工具描述明确诊断回路：查证据→提出带证据
-  的假设→以后续真实 op 结果验证→`memory remember`（nature:experience +
-  trigger）固化已验证修正——经验记忆机制已存在，不另造。
-- **明确不做**：无检查点/回放/自动恢复承诺（§10 历史回看与状态恢复
-  分别实现）；无每动作强制诊断轮；无全量截图留存。
-
-验证：原 61 项是假内核测试，不能证明持久写入。独立验收新增真实 Rust
-kernel 的并发写入、分页、重启续写与敏感字段测试，已通过。
-
-未验证边界：远端 evidence 经假 fetch 验证转发形状，未跨真机；日志目前仅存
-操作元数据与关联 observation id，没有自动保存动作前后截图、DOM/AX 状态或完整轨迹。
+普通根接入来自 `c152a1e7`，晚于原 EE 独立验收。`environment.set` 仍拒绝真正没有 Thread owner 的会话；
+这条拒绝测试只覆盖无绑定情形，不足以证明普通活动根会话没有工具入口。
+本次源码检查没有找到 UI 对 workTarget/environment.set 的直接消费者，也没有执行普通根到环境服务的完整验收。
 
 ## 剩余产品缺口与原生验证
 
-独立验收已修正本文件末尾列出的底层缺陷。以下仍是**功能范围或接口缺口**，不能写成「只缺真机测试」：
+### 功能与接口缺口
 
-- `environment.set` 依附有 Thread 的会话；普通工作台根会话尚无完整的环境配置入口。
-  现有 workTarget 主要用于 shell/process；读写、搜索等文件工具尚未统一按环境资源定位。
-- forward 的监听在协调 Harness 所在机，返回的 loopback URL 也只在该机有效。
-  所选操作电脑若在另一台机器，尚不能直接用该 URL 打开跨机器服务。
-- Bot 休眠会停止自身工作并关闭所属会话、forward；共享桌面不能整条 lane 取消，当前采取
-  保守保留以保护其他工作。按 Bot scope 精确取消已受理的远端 GUI/安装操作仍需协议和准入实现。
-- 浏览器显式指定 CDP port 或 profile、办公通过用户默认 profile 连接时，尚无对「当前可见
-  桌面中的那个进程」的原生身份核验。协议桥已有同一 profile/UNO 连接方式，但同现场承诺仍要实机确认。
-- EE6 是可分页的元数据日志；动作前后画面和应用状态没有随步骤持久关联。记忆经验使用现有入口，
-  尚无自动诊断或可靠的失败重演。
-- 默认配方是软件清单与安装入口，尚非带版本/能力声明和升级迁移合同的完整镜像模板。
+- 环境选择的独立 UI、idle/未附着会话行为及普通主线完整流程需要按新根生命周期核对；
+  不重新实施已有 agent-root 或工具 get/set
+- workTarget 主要消费于 shell/process；文件读写、搜索等尚未统一按环境资源定位
+- forward 的协调机 loopback 地址尚不能直接供另一台操作电脑访问
+- 共享桌面不能以整条 lane 取消代替 Bot scope；精确取消已受理远端 GUI/安装操作仍需协议与准入
+- 显式 CDP port/profile 与默认 UNO profile 尚无完整的“当前可见桌面中那个进程”原生身份核验
+- EE6 未把动作前后画面和应用状态随步骤持久关联；现有记忆入口不等于自动诊断或可靠重演
+- 默认软件配方尚无完整版本、能力声明与升级迁移合同
 
-以下**原生边界**也仍待验证：
+### 尚待取得的原生证据
 
-- 真实 Linux 桌面上的端到端纵切：Chromium 真实会话的 CDP 附着/持久
-  profile/下载即桌面可见、LibreOffice live 实例的 UNO 附着与未保存状态、
-  Xvnc 桌面准备与组件安装的真实 apt 行为。
-- 真实跨机路径：Host↔Host forward 字节桥、remote 桌面镜像下的浏览器/
-  办公/证据操作、guest VM 从 NoCloud 种子到 Varin Host 注册的全链。
-- Windows/macOS 平台的浏览器/办公桥与本地 VM 后端（当前边界如实保留）。
-- Bot 休眠/唤醒对新入口（浏览器/办公/forward）的覆盖在真机验收——
-  接线复用同一车道与取消语义，断电窗口下的实际行为待原生验证。
+- Linux：Xvnc/systemd 准备、真实 apt 安装、Chromium 持久 profile/下载可见性、UNO 活实例与未保存状态
+- 双机：Host↔Host forward 字节桥、远端桌面的浏览器/办公/证据操作，以及另一操作机实际可达性
+- VM：NoCloud 种子、guest Host 注册、持久桌面与升级的完整链路
+- 生命周期：Bot 休眠/唤醒、HTTP 断开、取消与进程退出在真实浏览器/办公/安装中的效果；副作用结果不明时保持 unknown/partial
+- Windows/macOS 的浏览器/办公桥与本地 VM 后端没有由 Linux 组件获得支持；按实际产品范围另行设计或验证
 
-## 独立验收修复（2026-10-01）
+缺少原生证据与尚未实现的产品合同分别关闭，不用定向测试通过替换任一类。
 
-### 目标准入与 forward 生命周期
+## 既有独立验收证据（2026-10-01）
 
-环境读取失败现在阻止依赖操作；子 Thread 按字段继承并验证显式配置。`local` 是可显式选择的本机目标。
-Pi 在权限检查与调度前固定 bash 的目标，Host Router 对直接请求也固定目标后再决定由哪台机器校验 cwd。
-forward 由 Harness Host 持有，查询与关闭按请求会话隔离；会话退休、Bot 停止和 Host 关闭销毁相关监听与连接，
-准备中的 listener 也受取消及会话关闭代际检查，避免关闭后晚到的操作重新开口。
+以下是当时记录，未在本次重跑；测试组有交集，不相加为新的总数。
 
-验证：环境/转发/Router/Host 聚焦测试通过（50 项），Thread 服务回归 58 项、Pi 权限测试 9 项通过；
-Host 源码类型、变更文件 ESLint 通过。测试含真实 TCP listener 的会话隔离与关闭；没有真实跨机或 VM 证明。
+| 范围 | 当时观察到的结果 | 不支持的外推 |
+| --- | --- | --- |
+| 目标准入与 forward | 环境/转发/Router/Host 50 项、Thread 58 项、Pi 权限 9 项通过；含真实 TCP listener 的 session 隔离、关闭与迟到准入 | 未做真实跨机或 VM |
+| 发布与配方 | 发布目录独立加载浏览器/办公模块；组件与 computer service 65 项、假 CDP 往返通过；包名按 Debian trixie 清单核对 | 未运行 apt、systemd/Xvnc 或真实 Chromium |
+| 取消与证据持久化 | 真实 Rust kernel 26 项及 evidence 接受测试 1 项通过；并发、分页、重启续写和敏感字段得到覆盖 | 假 fetch 的远端转发不证明双机行为 |
+| follow-up 与驱动 | Node runner 下真核 follow-up 53 项通过；Python 假 CDP、独立导入、人工手势模拟通过 | 模拟手势不证明原生输入；未运行真实 UNO |
 
-### 桌面发布与软件配方
+这些验收修复保留了以下不变量：
 
-修复了受管桌面发布遗漏应用桥的断路。发布生成完整 Python 组件集合，内容摘要也包含文件名；从发布目录独立加载
-浏览器与办公模块已验证。桌面准备正式消费 desktop 配方，新建桌面使用一个持久 Chromium，URL handler 和 CDP
-共用 profile，端口取 profile 的 `DevToolsActivePort` 并校验浏览器身份。保留用户既有 Firefox 数据与安装。
-CDP 并非控制可见浏览器的唯一协议；原报告的排他选型依据不成立。
+- 准入前固定操作目标；环境读取失败阻止依赖操作，取消/关闭代次阻止迟到 listener 重新开口
+- 只读浏览器/办公操作不释放人工持有的键鼠；写动作受控制 owner/epoch 约束
+- 文件写入和安装只有子进程实际退出后确认取消；浏览器/办公 helper 取消不虚构应用回滚
+- evidence 只保存固定操作词、目标摘要、身份与结果；不保存键入文本、JS、单元格、文件字节、凭据或任意异常正文
+- 日志写入失败不翻转已经发生的动作结果；预留序号空洞不伪造操作
+- 远端保留原 session 标识，日志与动作归拥有 Host，避免协调端双写或冒名
 
-不同安装请求排队执行，结束当前请求后才运行下一个；结果按组件合并到耐久状态，Host 会导入 bootstrap 结果，
-保留实际包名。默认文档组合补齐 docx/openpyxl/pypdf/reportlab 和 Poppler；包名依据 Debian trixie 官方清单，
-PPT 脚本库不臆造 apt 包名，仍可按任务安装。使用 `--no-install-recommends` 保持显式配方范围。
-
-验证：desktop 发布目录独立导入测试、CDP 假端点往返通过；Linux 组件与 computer service 65 项通过。
-未执行 apt 安装、systemd/Xvnc、真实 Chromium。开发机无已安装 WSL/Linux 环境。
-
-### 操作接线、取消和真实内核日志
-
-- `computer.open/fileWrite/installSoftware/browser/office` 现在贯通 HTTP 断开、工具取消和桌面代际；
-  文件写入与 apt 安装在子进程退出后才确认取消。浏览器/办公阻塞调用放到可取消 helper，helper
-  绑定驱动父进程生命期；取消后的应用效果仍按 `unknown/partial` 表达，不假称回滚。
-- 只读浏览器/办公查询不会触发驱动的 `release_input`，避免松开人工保持的键鼠手势。
-  Browser 点击尝试在失败路径释放鼠标；真实应用效果需重观测。
-- 证据日志的 Rust recordType 已接入内核：每桌面 cursor 分配序号，独立 step 持久化；
-  并发序号、跨重启续写、`since` 正向分页与无截断读取通过真核测试。保留可能的预留空洞；
-  目标摘要和固定 op 名称避免把 URL、标题、路径或任意异常文本当作日志内容。
-- CDP 无障碍树按 `nodeId/childIds` 还原层级并标记截断；WS 升级后紧邻的数据帧不再遗失。
-  办公桥使用同用户命名 pipe、活文档 `RuntimeUID`，支持 Writer 读取与指定路径另存/PDF 导出。
-  工具直达入口提供浏览器 profile/port/limit 和办公 URL。
-- follow-up 的重复 desktop 源按变化重新武装，ABA 循环使用源 revision 去重；释放 timer、
-  短暂探测错误继续轮询。`control.environment` 权限给能操作 computer/bash 的 worker，
-  不再误要求完整 Thread 控制权。
-- 远端 observe/act 透传原会话标识；桌面最近使用记录在发给驱动前写入，避免旧动作晚完成
-  覆盖新工作的归属。共享桌面上的 Bot 休眠不再调用整个桌面的 cancel。
-
-证据：真实 Rust kernel 测试 26 项 + evidence 接受测试 1 项通过；Node runner 下 follow-up
-真核套件 53 项通过；当前 computer/routes/linux-desktop/Host/Bot 定向测试与 TypeScript 类型检查通过。
-Python 假 CDP、发布目录独立导入、人工手势模拟测试通过。开发机无可运行的 Linux 桌面、
-真实 Chromium/UNO、apt 或双机/VM 环境，因此这些结果不证明实际应用与跨机链路。
+原批次说明中的 AX 扁平化限制、办公不能另存、未接入 Rust recordType 等描述已被上述修复替代，
+不再列为当前缺口。需要逐批追踪时，使用[整理前记录](https://github.com/Youzini-afk/Varin/blob/4b6c604b45bc5adb4582638431cd1af84e1c2773/docs/reviews/execution-environments.md)
+及其对应提交；不另复制一份交付流水账。

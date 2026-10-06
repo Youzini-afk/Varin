@@ -18,11 +18,13 @@ session tree, package manager, and extension model remain Pi-owned. Varin owns t
 environment, working state, recovery, retrieval, context policy, task governance, and workbench surfaces.
 It uses Pi's public SDK directly rather than scraping a terminal UI.
 
-Its interface is not a fixed shell. Varin ships two first-party working shapes — an **Agent
-Workspace** centered on sessions, tasks, and context, and an **IDE Workbench** centered on editors,
-search, Git, diagnostics, and debugging with the agent as a dockable panel — and both are ordinary
-Varin extensions selected by a Workbench Profile, so you can replace either one or any individual
-part of it.
+Workbench Profiles select four bundled shells: **Agent Workspace**, **IDE Workbench**,
+**Research Workbench**, and **Varin Bot**. They are ordinary Varin extensions; you can replace
+an entire shell or individual parts. Agent Workspace centers on sessions and tasks, while IDE
+Workbench combines editors, search, Git, diagnostics, and debugging with a dockable agent.
+
+Agent Workspace, Research Workbench, and Varin Bot support desktop, web, and mobile. IDE Workbench
+supports desktop and web. Work focus is separate from the selected shell.
 
 > [!IMPORTANT]
 > Varin is pre-1.0 and under active development. Product surfaces and the private runtime protocol
@@ -109,7 +111,7 @@ phone-sized screen.
   notification, and UI handling.
 - **First-class plugin configuration:** maintained plugins get focused GUI surfaces while their own
   native JSON/JSONC files, commands, databases, and migration logic remain authoritative.
-- **A recomposable workbench:** pick the Agent or IDE profile, or build your own. Replace the whole
+- **A recomposable workbench:** pick an Agent, IDE, Research, or Bot profile, or build your own. Replace the whole
   shell or just the navigation, editor, panel, composer, timeline, or status bar, and mix first-party
   with community contributions. Switching happens live, without reloading documents, restarting the
   Pi runtime, or losing shared workspace state.
@@ -306,7 +308,7 @@ turn trusted extensions into a complete sandbox. Read the [security policy](.git
 | `packages/extension-sdk`, `-react`, `-cli` | Public authoring SDK, React adapter, and author tooling |
 | `packages/extension-host` | Trusted application-host catalog, artifacts, storage, and services |
 | `packages/extension-loader` | Authenticated managed Surface module loader and isolated realms |
-| `packages/extension-builtins` | Manifests for Varin's built-in extensions, including both shells |
+| `packages/extension-builtins` | Manifests for Varin's built-in extensions, including all four shells |
 | `packages/docs` | User-facing documentation site source |
 | `docs` | Architecture, harness, kernel, workbench, migration, recovery, cloud, and security contracts |
 | `scripts` | Development, kernel build/measurement, release, cloud, deployment, and validation tooling |
@@ -328,8 +330,8 @@ bun run test:pi:dist
 ```
 
 `bun run kernel:check` is the fast Rust compile check; `bun run test:kernel` runs the non-skipping
-native authority suite against the built release executable. `bun run test:docs` and
-`bun run docs:validate` check engineering and docs-site content.
+native authority suite against the built release executable. `bun run test:docs` tests the
+documentation checker; `bun run docs:validate` checks public and engineering content together.
 
 CI exposes three stable gates with distinct responsibilities: Ubuntu source quality, Windows runtime
 behavior, and the Ubuntu production build. Type checking, lint, and the full workspace tests run once

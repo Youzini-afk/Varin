@@ -37,8 +37,8 @@ factory only when `loadMonacoRuntime()` is called.
 - `performance.ts` emits privacy-safe marks for runtime import, worker creation, model readiness, and
   first paint.
 - `fixture.ts` is used by the conditional Web/Electron smoke entry. It is not the production file
-  adapter. Its 50,000-line CodeMirror/Monaco comparison is
-  a diagnostic sample, not an editor file-size or line-count limit.
+  adapter. It records Monaco cold/warm view timing and model ownership on a 50,000-line
+  diagnostic sample, not an editor file-size or line-count limit. The former CodeMirror comparison is retired.
 
 Do not import the `monaco-editor` root entrypoint, `editor.main`, or
 `monaco-editor/languages/features/*`. Language definitions used for tokenization are distinct from

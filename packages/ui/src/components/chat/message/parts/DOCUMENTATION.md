@@ -1,95 +1,56 @@
-# Chat Message Parts: Rendering Architecture
+# Chat message presentation helpers
 
-This folder contains renderers for chat message parts (text, tools, reasoning, placeholders) and shared tool presentation helpers.
+The current Pi timeline is rendered by `components/pi-session/PiTimelineEntries.tsx`.
+This directory holds shared parsing, summaries and small presentation helpers; it no longer owns
+the former `MessageBody`, `ProgressiveGroup`, or `ToolPart` renderer components.
 
-Use this doc when you ask an agent to change tool/header/description behavior.
+## Current owners
 
-## High-level flow
+- `toolSummary.ts` produces compact tool descriptions from arguments and structured details.
+  `PiTimelineEntries` uses these summaries and groups consecutive read-only calls; writes and shell
+  execution stay separate. Keep model-facing output distinct from presentation metadata.
+- `toolOutput.ts` normalizes terminal control sequences and computes streamed appends versus
+  rewritten snapshots. Its helper tests cover authoritative output, transient bash output and
+  bounded handling of terminal cursor coordinates.
+- `toolDiffUtils.ts` holds file-change/diff helpers.
+- `generatedJsonResult.ts` and `JsonSummaryView.tsx` handle structured-result recognition and
+  compact JSON presentation; `../toolRenderers.tsx` owns shared output parsing.
+- `userTextPartContent.ts` recognizes known native skill invocations and attachment links.
+  Unknown bare slash text must stay ordinary text.
+- `taskSessionIdParser.ts` parses task-tag identities from text. It is not an authority for matching
+  live child sessions by title, order, or timestamp.
 
-- Message parts are rendered from `MessageBody.tsx`.
-- There are two tool rendering paths:
-  - **Static grouped tools** -> `StaticToolRow` in `ProgressiveGroup.tsx`
-  - **Expandable tools** -> `ToolPart.tsx`
-- Shared tool icon mapping is centralized in `toolPresentation.tsx` (`getToolIcon`).
+Some helpers remain covered by historical test filenames such as `ToolPart.test.ts`; a test filename
+is not evidence that the corresponding old renderer still exists. Inspect live consumers before
+changing presentation. Do not restore removed OpenCode message contracts or a tool-specific
+OpenChamber renderer.
 
-## Which file controls what
+## Timeline projection
 
-- `ProgressiveGroup.tsx`
-  - Renders grouped Activity rows and grouped static tools.
-  - Contains `StaticToolRow`.
-  - Contains static tool short description logic (`getToolShortDescription`).
-  - If you want to change how `read/grep/perplexity/webfetch/...` look in compact/grouped mode, edit here.
+The Pi timeline reuses its immutable history projection while live text changes.
+Its virtual-list rows retain their array identity during text deltas; one separate
+live item supplies the current payload to the mounted row and explicit chat actions.
+New persisted entries or live tool-call identities rebuild the history projection;
+completed virtual rows keep their item identity. Live tool results reuse the
+unchanged persistent source and are refreshed on result or call membership changes.
+Projection source state is weakly owned by the prior view result and is released
+with that view, not accumulated in a global history cache.
 
-- `ToolPart.tsx`
-  - Renders expandable tool rows (bash/edit/write/question/task + fallback).
-  - Controls expandable header title/description/diff stats/timer and expanded output body.
-  - If you want to change expandable tool layout, edit here.
+Prompt navigation projects only structural row changes and reads prompt text only
+while its menu is open. Streaming must not rebuild closed menu elements or run
+full-history anchor lookups. `PiTimeline.streaming.test.tsx` exercises 2,000 turns
+and 100 live updates with deterministic history-read and list-data identity checks.
+Set `VARIN_PERF_UI=1` when running that focused test to print the isolated component
+timing; it is not a browser frame-rate or packaged-desktop measurement.
 
-- `taskToolModel.ts`
-  - Owns Task metadata parsing and child-session summary projection.
-  - `part.state.metadata.sessionId` is the only live identity contract between a Task and its child session.
-  - A running Task may briefly have no `sessionId`; render it as waiting until the authoritative part update arrives. Never match parallel children by order, title, timestamp, or status.
-  - Part-level metadata and output parsing exist only for older persisted records and never override state metadata.
+## Verification
 
-- `toolPresentation.tsx`
-  - Shared icon mapping for tool names (`getToolIcon`).
-  - Used by both `ProgressiveGroup.tsx` and `ToolPart.tsx`.
+Use the focused UI package tests for the behavior being changed, for example:
 
-- `toolRenderUtils.ts`
-  - Core classification helpers:
-    - `isExpandableTool`
-    - `isStaticTool`
-    - `isStandaloneTool`
-    - `getStaticGroupToolName`
-  - If a tool should switch between static vs expandable, change it here.
+```sh
+bun run --cwd packages/ui test src/components/chat/message/parts/toolSummary.test.ts
+```
 
-- `ReasoningPart.tsx`
-  - Thinking block UI (`ReasoningTimelineBlock`), summary + optional duration.
-
-- `JustificationBlock.tsx`
-  - Justification block wrapper over `ReasoningTimelineBlock`.
-
-## Current important behavior
-
-- `read` and `skill` are **static navigation tools** and render via `StaticToolRow`.
-- Every other tool, including search/fetch, OpenCode built-ins, custom tools, plugins, and MCP tools, is **expandable** and renders through `ToolPart`.
-- The managed `openchamber` plugin tool uses the expandable path and hides its broad protocol input. The plugin supplies the selected action's human description as the native tool title; the UI renders that metadata without owning an action map. The full versioned result envelope renders through the same neutral JSON summary/tree/raw views as other tools, without a tool-specific output card.
-- `ToolPart` defers expanded content after a user toggle, preventing large tool input/output payloads from mounting during the initial chat render.
-- Running bash output falls back to `state.metadata.output` until canonical `state.output` arrives. Its fixed-height output viewport follows new output until the user scrolls up, then resumes following when the user returns to the bottom. Live output appends or replaces rewritten snapshots as plain text without worker highlighting; finalized output bypasses the throttle and receives the normal one-time highlighted rendering.
-- Thinking/Justification duration is hidden in `sorted` mode (handled in `ReasoningPart.tsx` + `JustificationBlock.tsx`).
-
-## "I want to change description for Perplexity" (example recipe)
-
-If task is: "change text shown near Read or Skill in compact mode":
-
-1. Edit `ProgressiveGroup.tsx` -> `getToolShortDescription(activity)`.
-2. Update the branch that handles `read` or `skill` in `StaticToolRow`.
-3. Keep all other tool header/output behavior in `ToolPart.tsx`.
-4. Keep icon changes (if any) in `toolPresentation.tsx`.
-
-Why: only navigation tools use the compact static path; all other tools need observable input and output.
-
-## "I want tool to become expandable" (example)
-
-1. Update `toolRenderUtils.ts`:
-   - add/remove a tool name from `STATIC_TOOL_NAMES` only when it has a reliable direct in-app navigation action
-2. Ensure `ToolPart.tsx` supports desired header + expanded output format for that tool.
-3. Validate both modes (`sorted` and `live`).
-
-## Safe editing checklist
-
-- Do not duplicate icon logic; keep it in `toolPresentation.tsx`.
-- For static tool copy changes, prefer `ProgressiveGroup.tsx` first.
-- For expanded output changes, edit `ToolPart.tsx`.
-- After edits run:
-  - `bun run type-check`
-  - `bun run lint`
-  - `bun run build`
-
-## Quick map of files in this folder
-
-- Text: `AssistantTextPart.tsx`, `UserTextPart.tsx`
-- Tools: `ToolPart.tsx`, `ProgressiveGroup.tsx`, `toolPresentation.tsx`, `toolRenderUtils.ts`, `ToolRevealOnMount.tsx`
-- Reasoning/justification: `ReasoningPart.tsx`, `JustificationBlock.tsx`
-- Status/placeholders: `WorkingPlaceholder.tsx`, `SessionActiveSpinner.tsx`, `MigratingPart.tsx`, `BusyDots.tsx`
-- Utility renderers: `VirtualizedCodeBlock.tsx`, `MinDurationShineText.tsx`
+For timeline behavior, include its actual Pi timeline consumers. Choose broader type, lint or build
+checks when the change reaches shared contracts or bundling; simple copy edits do not need a full
+product build.

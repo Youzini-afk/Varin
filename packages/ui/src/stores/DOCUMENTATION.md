@@ -26,7 +26,7 @@ These are the most performance-sensitive.
 - `useGitStore.ts`
 - `useGitRepositorySelectionStore.ts`
 - `useGitHubPrStatusStore.ts`
-- `useFilesViewTabsStore.ts`
+- `useFileSearchStore.ts`
 
 These stores act like centralized keyed caches. UI should consume narrow slices from them instead of re-fetching the same data in multiple places.
 
@@ -56,7 +56,7 @@ their current branch. Runtime changes clear the projection and drafts along with
 Examples:
 
 - `useProjectsStore.ts`
-- `useGlobalSessionsStore.ts`
+- `usePiSessionStore.ts`
 - `useSessionFoldersStore.ts`
 
 These stores coordinate persistent project/session metadata across multiple views.
@@ -66,36 +66,14 @@ Workbench/IDE navigation waits for this authority before showing conversations; 
 visible as an error. Entering those modes from Bot refreshes the index, while ordinary mode switches
 reuse the cached result.
 
-The Pi timeline reuses its immutable history projection while live text changes.
-Its virtual-list rows retain their array identity during text deltas; one separate
-live item supplies the current payload to the mounted row and explicit chat actions.
-New persisted entries or live tool-call identities rebuild the history projection;
-completed virtual rows keep their item identity. Live tool results reuse the
-unchanged persistent source and are refreshed on result or call membership changes.
-Projection source state is weakly owned by the prior view result and is released
-with that view, not accumulated in a global history cache.
+`usePiSessionStore.ts` loads the native `session.list` catalog and owns live session snapshots,
+entries and submission state. Catalog requests use a generation and runtime identity; an older
+completion cannot replace a newer catalog. Failed reads keep the existing summaries and expose an
+error. Display grouping and sorting belong to `components/pi-session/sessionPresentation.ts`,
+not the incidental catalog array order.
 
-Prompt navigation projects only structural row changes and reads prompt text only
-while its menu is open. Streaming must not rebuild closed menu elements or run
-full-history anchor lookups. `PiTimeline.streaming.test.tsx` exercises 2,000 turns
-and 100 live updates with deterministic history-read and list-data identity checks.
-Set `VARIN_PERF_UI=1` when running that focused test to print the isolated component
-timing; it is not a browser frame-rate or packaged-desktop measurement.
-
-`useGlobalSessionsStore.ts` owns cold/global active and archived session coverage, including `sessionsByDirectory`. It is complementary to directory child stores: it is not the source of live busy/retry status or session messages.
-
-User-visible session ordering is also not owned by the global cache array order. `sync/session-ordering.ts` combines lifecycle rank with timestamp fallbacks, and session surfaces must use that shared comparator instead of independently sorting global sessions by `time.updated`.
-
-Global refresh rules:
-
-- Per-directory refresh is bounded to two requests across callers and prioritizes the current directory.
-- Each directory is an independent completeness scope. A failed directory preserves its previous sessions while successful directories reconcile normally.
-- Fetch failure must remain distinguishable from a successful empty list; failed scopes cannot destructively clear cached sessions.
-- Runtime switch increments the load generation and clears the previous runtime's snapshot so stale in-flight work cannot commit.
-- Live session mutations update the cache directly after successful SDK actions; they preserve stable directory metadata when lighter event payloads omit it.
-- Full and per-directory loads capture a mutation revision. At commit time they overlay only per-session create/update/archive/delete/move mutations newer than that baseline, including no-op deletion tombstones, so an older response cannot undo newer local authority.
-
-Permission auto-accept policy is authoritative in the active Application Host. Owner snapshots carry a monotonic revision; the UI rejects lower revisions and any hydration or mutation completion captured before a runtime reset. Persisted UI policy is not live authority. The version-2 store retains an old unscoped policy only as a one-runtime legacy migration candidate, then removes it after successful migration.
+Permission grants remain authoritative in the Application Host; renderer preferences are not a
+second permission store. See [the security contract](../../../../docs/design/security.md).
 
 Shared safe storage treats durable failures per key. A quota or access failure creates an ephemeral override or tombstone for that key without disabling reads and writes for unrelated keys; later writes retry the durable backend. Deferred adapters retain failed operations for a later flush, and malformed Zustand JSON is removed and treated as missing so hydration can recover.
 
@@ -107,15 +85,23 @@ that store; there is no independent dictation preference cache. The Host supplie
 the downloadable STT catalog and its supported languages. Shared client defaults
 select Whisper large-v3 Turbo without replacing an explicitly saved model.
 
-Project ordering defaults to manual. Session display persistence v3 migrates the previously shipped `recent` project order to `manual` while preserving every other explicit sort mode.
+Project ordering defaults to manual. `useSessionDisplayStore.ts` persists the selected order and
+disclosure preferences under `varin.sessionDisplay.v1`; it does not migrate an older order.
 
-Session folders persist in runtime-specific v2 browser keys without silently evicting older runtime namespaces. Runtime switch, page hide, app freeze, and unload synchronously flush the pending browser snapshot before lifecycle suspension or namespace replacement. A runtime switch then cancels stale old-runtime disk work and starts generation-owned disk hydration. Missing or malformed server files are not authoritative empty snapshots; disk data may replace browser state only when it carries a real revision and no newer local folder mutation occurred. Server writes are serialized and reject non-newer revisions so delayed or duplicate requests cannot overwrite the current state. File-search cache and in-flight keys include runtime plus directory and are cleared on endpoint reset.
+Session folders persist in runtime-specific v1 browser keys without silently evicting older runtime namespaces. Runtime switch, page hide, app freeze, and unload synchronously flush the pending browser snapshot before lifecycle suspension or namespace replacement. A runtime switch then cancels stale old-runtime disk work and starts generation-owned disk hydration. Missing or malformed server files are not authoritative empty snapshots; disk data may replace browser state only when it carries a real revision and no newer local folder mutation occurred. Server writes are serialized and reject non-newer revisions so delayed or duplicate requests cannot overwrite the current state. File-search cache and in-flight keys include runtime plus directory and are cleared on endpoint reset.
 
-Persisted session todos use a bounded composite key of runtime, normalized directory, and session ID. Ambiguous legacy todo entries are discarded rather than claimed by whichever runtime starts first. Authoritative deletion uses an explicit runtime identity, and session-folder deletion scans every scope in the active runtime so archived assignments cannot survive after their session is gone.
+`usePiDraftStore.ts` keeps prompt text, images, instructions and staged model/thinking choices in
+memory. Existing-session keys contain runtime and session ID; pending-session keys contain runtime
+and normalized workspace path. Creating a session transfers its pending draft rather than copying
+it into a second persistent chat store. See [Composer](../components/chat/composer/DOCUMENTATION.md)
+for submission ownership and attachment behavior.
 
-Chat composer drafts, confirmed mentions, inline-comment drafts, and pinned sessions use the same runtime/directory/session ownership rule. Chat drafts use a bounded shared envelope and notify mounted composers when authoritative deletion clears their identity, preventing unmount autosave from resurrecting deleted text. Inline drafts enforce per-session, global-session, and serialized-byte bounds. Pins retain every valid composite key across runtimes without silent age/count eviction and are never pruned from the first startup list. Confirmed local deletion and routed deletion events clear immediately; after an authoritative baseline exists, a later complete omission also cleans persisted state. Ambiguous session-only legacy drafts and pins are not claimed.
+Inline-comment drafts and pinned sessions have their own persisted, scoped stores. Do not infer
+that every chat-related store has the same persistence or migration behavior. Authoritative session
+deletion must clear the relevant scoped state without resurrecting it during a later lifecycle flush.
 
-Composer draft edits remain immediate in memory and use a trailing durable-write debounce. Pending text and confirmed mentions flush synchronously when the document becomes hidden, freezes, receives `pagehide`, switches identity, or unmounts; authoritative deletion cancels pending work before any lifecycle flush can run. The shared chat-draft envelope reuses its parsed snapshot until the storage value changes. Inline-comment draft byte accounting indexes serialized buckets and recalculates only the changed session bucket during normal edits; deferred storage still performs the final full-envelope serialization and lifecycle flush.
+Timeline projection and streaming identity rules belong to
+[chat presentation](../components/chat/message/parts/DOCUMENTATION.md#timeline-projection).
 
 ### `useTerminalStore.ts`
 
@@ -240,8 +226,8 @@ These rules are important. Breaking them tends to reintroduce idle CPU churn, st
 6. Header should not depend on PR store.
 7. A closed context panel (or hidden git surface) should not create live PR work.
 8. File tree Git status should update only when the file tree is visible.
-9. Global session refresh must remain bounded and failure-isolated per directory.
-10. Global session cache must not drive live activity indicators or message-loading state.
+9. Session catalog refresh must preserve runtime and request-generation ownership.
+10. Catalog summaries must not replace authoritative live session activity or submission state.
 
 ## Selector Rules
 

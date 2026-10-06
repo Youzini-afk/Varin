@@ -1,15 +1,17 @@
 ---
 title: Private Relay
-description: Alcanza tu servidor de Varin desde cualquier lugar a través de un relay cifrado de extremo a extremo, sin puertos, sin túneles y sin configuración.
+description: Conecta dispositivos vinculados mediante un relay disponible con cifrado de extremo a extremo.
 ---
 
 # Private Relay
 
-El Private Relay de Varin permite que tus dispositivos vinculados alcancen tu servidor desde cualquier lugar —datos móviles, la red de una cafetería, otra ciudad— sin abrir puertos, montar un túnel ni exponer tu máquina a internet. Se gestiona solo: basta con vincular un dispositivo con **En cualquier lugar** en [Conectar un dispositivo](/es/connect-devices/).
+Requisito de despliegue: configura un endpoint de relay de confianza con `VARIN_RELAY_URL`. El valor predeterminado del código procede de la infraestructura heredada de OpenChamber; este repositorio no confirma la disponibilidad de un relay alojado de Varin. El emparejamiento y cifrado descritos abajo requieren que el relay configurado esté disponible.
+
+El Private Relay de Varin permite que tus dispositivos vinculados alcancen tu servidor desde cualquier lugar —datos móviles, la red de una cafetería, otra ciudad— sin abrir puertos, montar un túnel ni exponer tu máquina a internet. Una vez que el endpoint de relay del servidor esté configurado y disponible, vincula un dispositivo con **En cualquier lugar** en [Conectar un dispositivo](/es/connect-devices/) para usarlo.
 
 ## Cómo funciona
 
-Tu servidor abre una conexión saliente hacia la infraestructura de relay de Varin y la mantiene activa. Cuando uno de tus dispositivos está fuera de tu red, también se conecta al relay, y el relay pasa el tráfico cifrado entre ambos. Nada en tu máquina escucha conexiones entrantes desde internet.
+Tu servidor abre una conexión saliente hacia el servidor de relay configurado y la mantiene activa. Cuando uno de tus dispositivos está fuera de tu red, también se conecta al relay, y el relay pasa el tráfico cifrado entre ambos. Nada en tu máquina escucha conexiones entrantes desde internet.
 
 Cuando hay una conexión directa disponible —vuelves a casa y estás en la misma Wi-Fi—, tus dispositivos la prefieren y se saltan el relay por completo.
 
@@ -33,7 +35,7 @@ El relay gestiona su propio ciclo de vida: no hay ningún interruptor que record
 
 ## ¿Relay o túnel?
 
-- Usa el **relay** para alcanzar tu propio servidor desde tus propios dispositivos vinculados. No requiere configuración y nada se expone públicamente.
+- Usa el **relay** para alcanzar tu propio servidor desde tus propios dispositivos vinculados. Una vez que el endpoint de relay del servidor esté configurado y disponible, no necesitas reenvío de puertos ni configurar un túnel aparte.
 - Usa un [túnel](/es/tunnels/) cuando necesites una **URL pública** normal, por ejemplo para abrir Varin en un navegador corriente en una máquina que no puedes vincular, o para compartir acceso detrás de una [contraseña de UI](/es/security/).
 
 ## Relacionado

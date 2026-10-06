@@ -41,7 +41,7 @@ package's current schema, commands, public events, and documented lifecycle.
 
 This document describes graphical integration for Pi packages. It does not make those packages
 Varin extensions. Pi packages remain owned by Pi's `PackageManager` and extension runner; the
-future Varin extension platform has a separate application-host manager, lifecycle, manifest,
+Varin extension platform has a separate application-host manager, lifecycle, manifest,
 state, and Surface contribution model.
 
 The current first-class adapters are built into Varin. During the migration defined by
@@ -59,7 +59,7 @@ package must not silently mutate the Varin extension's installation or layout st
 | Agents | Unified provider catalog and provider-advertised lifecycle actions | A universal agent schema that overrides providers |
 | Conversation / work overview | Native child work, progress, results and controls; shell messages attach existing terminals | Reusable agent definitions or a separate settings task monitor |
 | Commands | Read-only live slash-command catalog and provenance | A second command registry |
-| Prompts | Pi-native `.md` prompt templates through the resource loader | OpenCode command files or extension commands |
+| Agent instructions | Scoped system-prompt edits through Agent personalization | Pi command templates or extension commands |
 | Skills | Pi resource discovery/management when supported by the loader | An OpenCode skills store |
 | Recovery sidebar | Current-session health, undo/redo/checkpoints/repair | Workspace snapshot storage |
 | Recovery settings | Default rollback policy, package/configuration entry points | Per-message rollback itself |
@@ -77,20 +77,12 @@ The current catalog surfaces follow those boundaries directly:
   Pi's update operation is
   truthfully described as source-wide across user and project scopes; the scope selector applies to
   installation and removal, not to a fictional scoped update implementation.
-- Pi Packages also presents the four global foundational integrations maintained by Varin: MCP,
-  permission policy, workspace history, and prompt repair. Missing items are installed in the
-  background on first observation, but they remain normal Pi packages with the same enable, disable,
-  update, configuration, and removal controls. User removal is sticky until Restore; an existing
-  disabled item is never treated as missing; a configured source with missing files is diagnosed
-  instead of overwritten. Foundational items do not also appear in Recommended Integrations.
-  “Automatically add future foundational integrations” applies only to entries added by later
-  manifest revisions and does not update, enable, or reinstall current entries.
-- Commands projects each extension, prompt, or skill command's native source path, scope, origin,
-  source identifier, and prompt argument hint. It remains read-only and links resource commands to
-  Prompts or Skills instead of editing them in place.
-- Prompts renders the filename-derived `/command` invocation and native `argument-hint` while all
-  Markdown/frontmatter parsing, collision decisions, package read-only state, and project trust
-  remain owned by Pi's resource loader.
+- The foundational integration manifest currently retains optional MCP, with `defaultProvision: false`.
+  Only an explicit Restore installs it. Permission handling and native recovery belong to Varin's
+  current owners; workspace-history and prompt-repair packages remain optional Pi extensions
+- Commands projects registered extension and skill commands and their native provenance. Skills remain
+  editable Pi resources. Prompt-template loading and the old Prompts resource page are removed;
+  scoped Agent system instructions use [Agent personalization](../../packages/web/application-host/lib/memory/DOCUMENTATION.md)
 - Agents displays provider/source/package/invocation facts and calls only provider-advertised
   actions. A missing model is labelled as a provider default or unreported value, never guessed to
   be an inherited common setting.
@@ -119,8 +111,7 @@ that can accidentally become a second configuration system.
 
 The cleanup removes only the unreachable OpenCode pages, their private HTTP stores, their schema
 normalizers, and tests/translations that existed solely for those pages. It deliberately retains
-the Pi-native Agents provider registry, Plugin Settings adapters, Prompts and Skills resource
-pages, generic extension UI bridge, and the target-keyed Pi runtime catalog used by chat.
+the Pi-native Agents provider registry, Plugin Settings adapters, Skills resource pages and scoped Agent instructions, generic extension UI bridge, and the target-keyed Pi runtime catalog used by chat.
 
 ## 4. Shared adapter shell
 
@@ -587,27 +578,12 @@ means the extension loaded. It does not establish that the external `rtk` binary
 Varin may dispatch `/rtk show`, `/rtk verify`, `/rtk stats`, and `/rtk clear-stats`, but does not
 parse their notification text into status or copy metrics into Varin state.
 
-## 6. Implementation order
+## 6. Maintenance boundary
 
-1. Recovery correctness and sidebar controls, because the host operations already exist and the
-   message-level contract is user-facing today.
-2. Shared adapter shell and capability states.
-3. Subagents settings and provider lifecycle actions; live work stays in the owning conversation.
-4. Magic Context schema-complete settings and command operations.
-5. Web Access advanced routing/security and public runtime status when available.
-6. MCP provenance improvements without replacing its native panel.
-7. pi-lens settings and command actions over its native JSON and public command catalog.
-8. AFT settings over its native CortexKit JSONC authorities and command-only runtime observation.
-9. Permission-system policy and runtime settings over its native scoped JSONC documents and native
-   command catalog.
-10. Hermes Memory settings over its single native agent-root JSON authority and command-only
-   runtime observation.
-11. Removed: the standalone Fleet workbench and its dedicated task-provider aggregation.
-12. RTK Optimizer over its one native strict-JSON authority, with command-only runtime observation
-   and no fork or old-Pi compatibility layer.
-13. Cross-page navigation, unknown-plugin discovery, and final removal of superseded pages after
-   capability parity or an explicit rejection is documented and tested. This retirement is now
-   complete for the imported Magic Context, OpenAgent, and Agent Orchestration pages.
+Adapter implementation belongs to its package schema and public command/event contract. The earlier
+page-migration order is complete and is not a standing checklist for every plugin change.
+[Maintained integration contracts](extension-compatibility.md) identify the exact external seams;
+package presence or command registration alone does not prove provider or binary health.
 
-Each step is independently type-checked, linted, tested, committed, and pushed. File deletion occurs
-only after its capability has a Pi-native home or is explicitly rejected as obsolete.
+Remove a retired adapter only after its useful capability has a current owner or an explicit disposition.
+Do not restore OpenCode pages, protocol aliases or private plugin-state readers to preserve old UI shapes.

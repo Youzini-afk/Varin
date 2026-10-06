@@ -25,7 +25,7 @@ Varin Web サーバーのバインドアドレス。他のマシンからのア�
 
 ### `VARIN_DATA_DIR`
 
-Varin のデータディレクトリを上書きします。デフォルトは `~/.config/varin` です。
+Varin のデータディレクトリを変更します。既定値は Linux が `$XDG_CONFIG_HOME/varin`（または `~/.config/varin`）、macOS が `~/Library/Application Support/Varin`、Windows が `%APPDATA%/Varin` です。
 
 ### `VARIN_COMPRESS_API`
 
@@ -60,10 +60,6 @@ Varin の Git 機能が使う Git 実行ファイルです。
 ### `GIT_BINARY`
 
 別の Git 実行ファイル上書きです。Varin 専用の設定には `VARIN_GIT_BINARY` を優先してください。
-
-### `VARIN_GIT_READ_CACHE_TTL_MS`
-
-Git 経由のファイル読み取りキャッシュの有効期間（ミリ秒）。デバッグ中にこのキャッシュを無効にするには `0` を設定します。
 
 ## 音声とトンネル
 

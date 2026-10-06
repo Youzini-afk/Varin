@@ -5,16 +5,14 @@ Varin message recovery is an operation journal, not a workspace archive.
 ## Normal turn path
 
 1. A bound user turn creates one lightweight checkpoint row. No workspace path is read.
-2. The Web Host negotiates `workspaceMutationJournal` with the Pi worker.
-3. Pi's built-in `write` and `edit` tools are wrapped without changing their parameters or behavior.
-   Before the original tool executes, the worker sends `workspace.mutation.request` and waits.
-4. The recovery service resolves that one path, stores its old state and content-addressed bytes, then
-   acknowledges the worker. The tool can now write.
-5. After the tool returns or throws, the worker waits while Varin records the final state. Repeated
-   writes to one path preserve the first before-image and the last after-image.
-6. Turn settlement compares watcher paths with the exact journal. An unchanged turn is a ready
-   zero-path checkpoint. A path changed only by `bash`, a terminal, Git, or another uncontrolled process
-   is reported as incomplete rather than triggering a full-workspace fallback.
+2. Host-backed Pi `write`/`edit` first resolve an isolated branch or the admitted
+   `document.surfaceWrite` path; `apply_patch` shares that authority.
+3. The Host records intent and before-state, then applies through Rust disk operations or the fixed
+   Registry owner/revision. It records the actual final state before returning the mutation result.
+4. An unavailable mutation backend fails instead of allowing a parallel Pi-worker disk writer.
+   The generic journal-only native-tool wrapper is not this production disk path.
+5. Repeated writes preserve the first before-image and last after-image. Settlement compares actual
+   watcher observations with the journal; uncontrolled shell/Git/external writes remain uncovered.
 
 New sessions, ordinary prompts, and unchanged turns therefore perform no recursive scan. Work scales
 with the files actually written by the journalled tools.
@@ -28,7 +26,9 @@ turn checkpoints bound to those entries and folds their path operations into:
 - the state to restore before the selected message.
 
 Preparation hashes only those paths. Matching paths restore immediately. A later user edit or dirty
-buffer becomes a path conflict and is the only normal reason to show the recovery chooser. Before any
+buffer becomes a path conflict. Current combined restore requires an affected dirty buffer to be saved
+or discarded first; a failed dirty-state synchronization returns retryable `dirty-state-unavailable`.
+The proposed confirmable dirty-buffer/per-surface fallback is not implemented. Before any
 write, Varin stores the current version of the affected paths as the redo/compensation state. It does
 not create a whole-workspace safety checkpoint or enter global maintenance mode.
 
@@ -106,6 +106,6 @@ Integration owns its own safety/target objects, so undo does not depend on retai
 WorkingState publication installs and flushes new objects before a Rust SQLite transaction publishes the
 immutable root, domain record and references. Old revisions/results/pins keep independent references until
 their explicit release; GC only schedules objects that are unreachable from every live root, recovery
-operation and temporary owner. A missing or malformed node/object/catalog fails open rather than authorizing
+operation and temporary owner. A missing or malformed node/object/catalog makes the operation fail rather than authorizing
 deletion. Metadata release and physical cleanup have separate outcomes; cleanup failure keeps a retryable
 request and does not report zero bytes as success (D-239/D-282).
