@@ -1,5 +1,4 @@
 import React from 'react';
-import { AnimatePresence, motion } from 'motion/react';
 import { runtimeFetch, type GitStatus } from '@varin/application-client';
 import { Icon } from '@/components/icon/Icon';
 import { toast } from '@/components/ui';
@@ -10,7 +9,6 @@ import { useDeviceInfo } from '@/lib/device';
 import { usePiSessionStore } from '@/stores/usePiSessionStore';
 import { usePiInteractionStore, userQuestionRequest } from '@/stores/usePiInteractionStore';
 import { EMPTY_WORK_OVERVIEW_CHOICES, useWorkOverviewStore, workOverviewStateKey } from '@/stores/useWorkOverviewStore';
-import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip';
 import { parseHarnessSessionBlockResponse, type HarnessSessionBlock } from './harnessBlockPresentation';
 import {
   harnessKnowledgeKey,
@@ -20,7 +18,7 @@ import {
 } from './harnessKnowledgePresentation';
 import { HarnessKnowledgeReviewSection, type KnowledgeDraft } from './HarnessKnowledgeReviewSection';
 import { MobileOverlayPanel } from '@/components/ui/MobileOverlayPanel';
-import { HarnessSessionStateTrigger } from './HarnessSessionStateTrigger';
+import { HarnessOverviewControl, type OverviewPeekRow, type OverviewPeekSection } from './HarnessOverviewControl';
 import { useHarnessThreadState } from './HarnessThreadStateContext';
 import { HarnessThreadList } from './HarnessThreadList';
 import { HarnessThreadDialog } from './HarnessThreadConversation';
@@ -67,8 +65,10 @@ export const HarnessThreadsPanel: React.FC<{
   const setDisclosure = useWorkOverviewStore((state) => state.setDisclosure);
   const overviewOpen = choices.overview ?? false;
   const narrowOpen = choices.mobile ?? false;
+  const compactOpen = Boolean(choices.compact && !overviewOpen && !narrowOpen);
   const setOverviewOpen = (open: boolean) => setDisclosure(overviewKey, 'overview', open);
   const setNarrowOpen = (open: boolean) => setDisclosure(overviewKey, 'mobile', open);
+  const setCompactOpen = (open: boolean) => setDisclosure(overviewKey, 'compact', open);
   const [selectedThreadId, setSelectedThreadId] = React.useState<string | null>(null);
   const [messageFocus, setMessageFocus] = React.useState<ThreadExchangeLocation | null>(null);
   React.useEffect(() => { setSelectedThreadId(null); setMessageFocus(null); }, [workspaceId, parentSessionId]);
@@ -392,7 +392,6 @@ export const HarnessThreadsPanel: React.FC<{
   ];
   const hasOutputs = gitDiff.files > 0 || pendingThreadDiff.files > 0;
   const attentionCount = questions.length + suggestions.length + planSummary.blocked + threadSummary.attention;
-  const activityCount = attentionCount || planSummary.open + threadSummary.active + threadSummary.integrationPending;
   const overviewSummary = questions.length > 0 ? t('pi.question.pending') + ' · ' + questions.length : threadSummary.attention > 0
     ? t('harness.overview.summary.attention', { count: threadSummary.attention })
     : planSummary.blocked > 0
@@ -408,6 +407,32 @@ export const HarnessThreadsPanel: React.FC<{
               : hasOutputs
                 ? t('harness.overview.summary.changed', { count: gitDiff.files || pendingThreadDiff.files })
                 : t('harness.overview.summary.context');
+  const peekRows: OverviewPeekRow[] = [];
+  const planProgress = { done: planSummary.done, total: planSummary.total };
+  if (blockGroups.plan) peekRows.push({
+    id: 'plan', section: 'plan',
+    icon: planSummary.total > 0 && planSummary.done === planSummary.total ? 'checkbox-circle' : 'file-text',
+    label: planSummary.total === 0 ? t('harness.overview.plan')
+      : planSummary.done === planSummary.total ? t('harness.overview.summary.done', planProgress)
+        : planSummary.blocked > 0 ? t('harness.overview.summary.blocked', { count: planSummary.blocked }) + ' · '
+          + t('harness.overview.planProgress', planProgress) : t('harness.overview.summary.plan', planProgress),
+    ...(planSummary.total > 0 ? { progress: planSummary.done / planSummary.total } : {}),
+    ...(planSummary.blocked > 0 ? { tone: 'attention' as const } : planSummary.total > 0 && planSummary.done === planSummary.total ? { tone: 'success' as const } : {}),
+  });
+  if (questions.length) peekRows.push({ id: 'questions', section: 'questions', icon: 'question', label: t('pi.question.pending'), value: questions.length, tone: 'attention' });
+  if (suggestions.length) peekRows.push({ id: 'review', section: 'review', icon: 'error-warning', label: t('harness.overview.review'), value: suggestions.length, tone: 'attention' });
+  if (threadSummary.total) peekRows.push({ id: 'threads', section: 'threads', icon: 'git-branch', label: t('harness.overview.threads'),
+    value: t('harness.overview.threadCounts', { active: threadSummary.active, done: threadSummary.completed }) });
+  if (threadSummary.attention) peekRows.push({ id: 'threadAttention', section: 'threads', icon: 'error-warning',
+    label: t('harness.overview.summary.attention', { count: threadSummary.attention }), tone: 'attention' });
+  if (gitDiff.files) peekRows.push({ id: 'workspace', section: 'outputs', icon: 'file-code', label: t('harness.overview.workspaceChanges'), value: t('harness.overview.outputFiles', { count: gitDiff.files }) });
+  if (pendingThreadDiff.files) peekRows.push({ id: 'pendingChanges', section: 'outputs', icon: 'git-branch', label: t('harness.overview.pendingThreadChanges'), value: t('harness.overview.outputFiles', { count: pendingThreadDiff.files }) });
+  if (webSources.length) peekRows.push({ id: 'sources', section: 'sources', icon: 'global', label: t('harness.overview.sources'), value: webSources.length });
+  if (memoryBlocks.length) peekRows.push({ id: 'memory', section: 'memory', icon: 'file-text', label: t('harness.overview.memory'), value: memoryBlocks.length });
+  const openDetails = (section?: OverviewPeekSection) => {
+    if (section) setDisclosure(overviewKey, section, true);
+    if (narrowScreen) setNarrowOpen(true); else setOverviewOpen(true);
+  };
   const content = (
     <div className="min-h-0 flex-1 overflow-y-auto">
       {!hasOverviewData ? (
@@ -790,53 +815,11 @@ export const HarnessThreadsPanel: React.FC<{
           <div className="max-h-[40dvh] overflow-auto">{content}</div>
         </details>
       ) : <>
-      <div
-        className="pointer-events-none absolute right-3 top-2 z-40 hidden flex-col items-end xl:flex"
-      >
-        <div
-          className="pointer-events-auto flex max-w-full items-center gap-0.5"
-          data-harness-overview-controls="true"
-        >
-          <Tooltip>
-            <TooltipTrigger asChild>
-              <button
-                type="button"
-                onClick={() => setOverviewOpen(!overviewOpen)}
-                aria-expanded={overviewOpen}
-                aria-label={t(overviewOpen ? 'harness.overview.collapse' : 'harness.overview.expand')}
-                className={cn(
-                  'workbench-overview-heading relative inline-flex h-7 max-w-full items-center justify-center gap-1.5 rounded-lg px-2 text-muted-foreground hover:bg-interactive-hover hover:text-foreground',
-                  overviewOpen && 'bg-interactive-selection text-foreground',
-                )}
-              >
-                <Icon name="stack" className="size-4" />
-                {hasOverviewData ? <span key={overviewSummary} data-overview-value className="min-w-0 max-w-[min(16rem,55cqi)] truncate typography-micro">{overviewSummary}</span> : null}
-                <Icon name="arrow-down-s" className={cn('size-3 shrink-0 transition-transform duration-200', overviewOpen && 'rotate-180')}>
-                </Icon>
-              </button>
-            </TooltipTrigger>
-            <TooltipContent side="bottom">{t(overviewOpen ? 'harness.overview.collapse' : 'harness.overview.expand')}</TooltipContent>
-          </Tooltip>
-
-        </div>
-        <AnimatePresence initial={false}>
-        {overviewOpen ? (
-          <motion.section
-            aria-label={t('harness.overview.title')}
-            initial={{ opacity: 0, y: -8, scale: 0.985 }}
-            animate={{ opacity: 1, y: 0, scale: 1 }}
-            exit={{ opacity: 0, y: -5, scale: 0.99 }}
-            transition={{ duration: 0.18, ease: [0.22, 0.8, 0.2, 1] }}
-            style={{ transformOrigin: 'top right' }}
-            className="pointer-events-auto mt-2 flex max-h-[min(72dvh,46rem)] w-[min(20rem,calc(100cqi-1.5rem))] flex-col overflow-hidden rounded-xl border border-border/70 bg-background/96 shadow-lg backdrop-blur-xl will-change-transform"
-            data-harness-overview-floating="true"
-          >
-            {content}
-          </motion.section>
-        ) : null}
-        </AnimatePresence>
-      </div>
-      <HarnessSessionStateTrigger count={activityCount} attention={attentionCount > 0} onOpen={() => setNarrowOpen(true)} />
+      <HarnessOverviewControl open={narrowScreen ? narrowOpen : overviewOpen} compactOpen={compactOpen}
+        attention={attentionCount > 0} rows={peekRows} onSelect={openDetails}
+        onOpenChange={narrowScreen ? setNarrowOpen : setOverviewOpen} onCompactChange={setCompactOpen}>
+        {!narrowScreen ? content : null}
+      </HarnessOverviewControl>
       <MobileOverlayPanel
         open={narrowOpen && narrowScreen}
         onClose={() => setNarrowOpen(false)}

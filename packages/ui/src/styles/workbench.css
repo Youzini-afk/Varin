@@ -162,7 +162,49 @@
   transition: color 180ms ease, background-color 180ms ease;
   font-variant-numeric: tabular-nums;
 }
-.workbench-overview-heading [data-overview-value] { animation: wb-state-arrive 260ms var(--wb-ease) both; }
+.workbench-overview-launcher { isolation: isolate; }
+.workbench-overview-launcher::before {
+  content: '';
+  position: absolute;
+  inset: -4px -4px -14px;
+  z-index: -2;
+}
+.workbench-overview-peek-trigger {
+  position: absolute;
+  top: calc(100% - 2px);
+  left: 2px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 28px;
+  height: 16px;
+  z-index: -1;
+  padding-top: 2px;
+  border: 1px solid var(--border);
+  border-top: 0;
+  border-radius: 0 0 8px 8px;
+  background: var(--surface-elevated);
+  color: var(--muted-foreground);
+  opacity: 0;
+  transform: translateY(-7px);
+  pointer-events: none;
+  transition: transform var(--wb-state-duration) var(--wb-ease), opacity var(--wb-state-duration) ease;
+}
+.workbench-overview-launcher:hover .workbench-overview-peek-trigger,
+.workbench-overview-launcher:focus-within .workbench-overview-peek-trigger,
+.workbench-overview-launcher[data-peek-open="true"] .workbench-overview-peek-trigger {
+  opacity: 1;
+  transform: translateY(0);
+  pointer-events: auto;
+}
+.workbench-overview-peek-trigger:hover,
+.workbench-overview-peek-trigger:focus-visible { color: var(--foreground); }
+.workbench-overview-peek-trigger:focus-visible { outline: 2px solid var(--ring); outline-offset: 2px; }
+.workbench-overview-peek { background: var(--surface-elevated); }
+.workbench-overview-peek-progress > span { transition: width var(--wb-state-duration) ease; }
+@media (hover: none) {
+  .workbench-overview-peek-trigger { opacity: 1; transform: none; pointer-events: auto; }
+}
 
 @keyframes wb-action-arrive {
   from { opacity: 0; transform: translateY(3px) scale(.65); }
@@ -170,10 +212,6 @@
 }
 @keyframes wb-material-arrive {
   from { opacity: 0; transform: translateY(7px) scale(.97); }
-  to { opacity: 1; transform: none; }
-}
-@keyframes wb-state-arrive {
-  from { opacity: 0; transform: translateY(3px); }
   to { opacity: 1; transform: none; }
 }
 @keyframes wb-composer-sweep {
@@ -186,7 +224,7 @@
   .workbench-titlebar button, .ide-activity button, .workbench-resource-rail button,
   [data-pi-composer-input-frame], [data-pi-composer-primary-action] { transition: none; }
   [data-pi-composer-input-frame]::after, [data-pi-composer-primary-action] > svg,
-  .pi-composer-attachment, .workbench-overview-heading [data-overview-value] { animation: none; }
+  .pi-composer-attachment { animation: none; }
 }
 
 .pi-chat-layout { transition: padding-right var(--wb-panel-duration) var(--wb-ease); }

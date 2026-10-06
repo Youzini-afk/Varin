@@ -40,6 +40,7 @@ vi.mock('@/components/ui', () => ({ toast: { error: vi.fn(), success: vi.fn() } 
 vi.mock('@/lib/i18n', () => ({ useI18n: () => ({ t: mocks.translate }) }));
 vi.mock('@/lib/device', () => ({ useDeviceInfo: () => ({ breakpoint: 'xl' }) }));
 vi.mock('motion/react', () => ({
+  useIsPresent: () => true,
   AnimatePresence: ({ children }: { children: React.ReactNode }) => <>{children}</>,
   motion: {
     section: ({ children, initial: _initial, animate: _animate, exit: _exit, transition: _transition, ...props }: React.HTMLAttributes<HTMLElement> & {
@@ -73,7 +74,6 @@ vi.mock('@/stores/useWebSourcesStore', () => ({
   useWebSourcesStore: () => () => {},
 }));
 vi.mock('./HarnessKnowledgeReviewSection', () => ({ HarnessKnowledgeReviewSection: () => null }));
-vi.mock('./HarnessSessionStateTrigger', () => ({ HarnessSessionStateTrigger: () => null }));
 vi.mock('./HarnessThreadIntegrationPanel', () => ({ HarnessThreadIntegrationPanel: () => null }));
 vi.mock('@/components/ui/MobileOverlayPanel', () => ({ MobileOverlayPanel: () => null }));
 vi.mock('@/components/ui/dialog', () => ({
@@ -269,6 +269,7 @@ describe('thread panel transcript is inspection, not execution', () => {
 describe('work overview presentation', () => {
   it('turns raw session blocks into plan, progress and decisions instead of exposing block metadata', async () => {
     state.threads = [];
+    const desktopOpen = vi.fn();
     vi.mocked(runtimeFetch).mockImplementation(async (input) => {
       const url = String(input);
       if (url.endsWith('/blocks')) {
@@ -290,15 +291,24 @@ describe('work overview presentation', () => {
     await act(async () => {
       root.render(
         <HarnessThreadStateContext.Provider value={state}>
-          <HarnessThreadsPanel workspaceId="workspace-1" parentSessionId="parent-1" />
+          <HarnessThreadsPanel workspaceId="workspace-1" parentSessionId="parent-1" onDesktopOpenChange={desktopOpen} />
         </HarnessThreadStateContext.Provider>,
       );
       await new Promise((resolve) => setTimeout(resolve, 0));
     });
 
-    const overview = container.querySelector<HTMLButtonElement>('button[aria-label="harness.overview.expand"]')!;
-    await act(async () => overview.click());
-
+    const peek = container.querySelector<HTMLButtonElement>('button[aria-label="harness.overview.peek"]')!;
+    await act(async () => peek.click());
+    expect(container.querySelector('[data-harness-overview-peek]')).not.toBeNull();
+    expect(container.querySelector('[data-harness-overview-floating]')).toBeNull();
+    expect(container.textContent).not.toContain('Inspect');
+    expect(desktopOpen).not.toHaveBeenCalledWith(true);
+    const full = [...container.querySelectorAll<HTMLButtonElement>('[data-harness-overview-peek] button')]
+      .find(button => button.textContent === 'harness.overview.details')!;
+    await act(async () => full.click());
+    expect(container.querySelector('[data-harness-overview-peek]')).toBeNull();
+    expect(container.querySelector('[data-harness-overview-floating]')).not.toBeNull();
+    expect(desktopOpen).toHaveBeenCalledWith(true);
     expect(container.textContent).toContain('harness.overview.plan');
     expect(container.textContent).toContain('Inspect');
     expect(container.textContent).toContain('Implement');
@@ -394,6 +404,16 @@ describe('work overview presentation', () => {
     await render('parent-2');
     await render();
     expect(container.querySelector('[data-harness-overview-floating="true"]')).toBeNull();
+    const peek = container.querySelector<HTMLButtonElement>('button[aria-label="harness.overview.peek"]')!;
+    await act(async () => peek.click());
+    await render('parent-2');
+    expect(container.querySelector('[data-harness-overview-peek]')).toBeNull();
+    await render();
+    expect(container.querySelector('[data-harness-overview-peek]')).not.toBeNull();
+    expect(container.querySelector('[data-harness-overview-floating]')).toBeNull();
+    await act(async () => container.querySelector<HTMLButtonElement>('button[aria-label="harness.overview.expand"]')!.click());
+    expect(container.querySelector('[data-harness-overview-peek]')).toBeNull();
+    expect(container.querySelector('[data-harness-overview-floating]')).not.toBeNull();
   });
 
   it('still appears for real workspace changes when no plan, memory, source or subtask exists', async () => {
