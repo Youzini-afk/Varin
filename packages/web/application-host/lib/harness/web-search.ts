@@ -607,7 +607,9 @@ const mapFetchStatus = (fetch: FetchResult): Pick<WebSearchItem, "status" | "det
     case "redirect-cross-host": return { status: "partial", detail: `redirected to another host: ${fetch.location}` };
     case "blocked": return { status: "denied", detail: `fetch blocked: ${fetch.reason}` };
     case "empty-shell": return { status: "unavailable", detail: fetch.hint };
-    case "renderer-unavailable": return { status: "unavailable", detail: "renderer is unavailable for this page" };
+    case "renderer-unavailable": return fetch.reason === "disabled"
+      ? { status: "denied", detail: "Web rendering is disabled in this session's settings (harness.web.render)" }
+      : { status: "unavailable", detail: "This Host does not provide a web renderer" };
     case "page-image-unavailable": return { status: "unavailable", detail: fetch.reason };
     case "snapshot-missing": return { status: "unavailable", detail: `snapshot is missing: ${fetch.snapshotId}` };
     case "structure-unsupported": return { status: "unsupported", detail: `snapshot cannot express ${fetch.kind}` };

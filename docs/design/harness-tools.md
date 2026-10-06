@@ -289,12 +289,14 @@ Curator 变成工作台的"来源"面板（可审阅、钉住、删除，走已�
 **`webfetch(url, { prompt?, find?, start_line?, end_line? })`**：Host 抓取，`find` 对提取正文做不区分大小写的字面查找，返回命中行与相邻上下文；行范围按一开始的提取 Markdown 行号包含两端，未指定范围时沿原正文呈现。查无结果是正常观察，非法范围是明确参数错误。SSRF 策略复用 [security.md](security.md) 已有规则——私有与保留网段默认阻断、
 浏览器 cookie 默认不带、显式 opt-in；工作区级域名允许 / 阻断列表；同域重定向自动跟随，跨域重定向返回元数据；正文提取
 （readability 类算法 + Markdown 转换；PDF 转文本，research profile 同样需要）；15 分钟缓存。无 `prompt` 时返回提取后的
-Markdown 走句柄。有 `prompt` 时**仅当配置了 `models.reader` 槽位**（第 8.5 节）才由阅读子 agent 回答、主上下文只收
+Markdown 走句柄。有 `prompt` 时**仅当配置了 `models.reader` 槽位**（见[模型槽位](harness-context.md#85-子-agent模型槽位与模型切换)）才由阅读子 agent 回答、主上下文只收
 回答；未配置则忽略 `prompt`、返回提取内容并注明"reader unavailable: no reader model configured"——**永不回退到主
 模型**。
-**JS 渲染是 Varin 的独有能力**：桌面端用 Electron 的 Chromium 离屏渲染（隐藏窗口，不带用户 cookie 除非显式开启）；
-Web / 云 host 无 Chromium 时返回 `unavailable (no renderer)`；检测到空壳 SPA（极小 body + 脚本标签）时明说，永不把
-空页面当成功。
+**JS 渲染**需要 `render: true`、会话的 `harness.web.render` 设置和可用的 Host renderer。
+桌面端使用 Electron Chromium 离屏渲染；用户 cookie 仍需显式开启。设置关闭时返回
+`renderer-unavailable` / `disabled`，Host 没有 renderer 时返回 `renderer-unavailable` / `unsupported`。
+未渲染的 HTML 只有在提取正文为空且包含脚本标记时才返回 `empty-shell`；正常短页面保留正文、链接和标题，
+脚本、样式与模板内容不作为正文。
 
 **`websearch(query, { allowed_domains?, blocked_domains?, recency?, limit? })`**：有用户选择时使用其搜索 API（Brave、Exa、Tavily、Jina、自托管 SearXNG）；否则默认直接调用 Exa 免密钥 MCP，明确失败时顺序改用 Parallel。真实 provider 与换源说明随结果返回；空结果不换源，取消立即停止；自配服务缺凭据/失败明确报错，不改用其他服务。工具默认注册，显式关闭仍生效。设置与普通模型账户分离，不探测或复用模型搜索能力。
 

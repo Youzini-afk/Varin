@@ -73,7 +73,7 @@ interface SessionEntry {
 
 export function deriveHarnessCapabilities(
   activeTools: readonly string[],
-  availability: { documentRead?: boolean; documentPathOverlay?: boolean; threadRuntime: boolean; experiments?: boolean; settings?: boolean; followUps?: boolean; computer?: boolean },
+  availability: { documentRead?: boolean; documentPathOverlay?: boolean; threadRuntime: boolean; experiments?: boolean; settings?: boolean; followUps?: boolean; scheduledTasks?: boolean; computer?: boolean },
 ): readonly HarnessCapability[] {
   const tools = new Set(activeTools);
   const capabilities = new Set<HarnessCapability>([
@@ -120,6 +120,10 @@ export function deriveHarnessCapabilities(
   if (availability.computer && tools.has("computer")) {
     capabilities.add("read.computer");
     capabilities.add("control.computer");
+  }
+  if (availability.scheduledTasks && tools.has("scheduled_task")) {
+    capabilities.add("read.schedule");
+    capabilities.add("control.schedule");
   }
   if (tools.has('computer') || tools.has('bash')) capabilities.add('control.environment');
   return [...capabilities];

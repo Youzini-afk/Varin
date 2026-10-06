@@ -111,13 +111,15 @@ function formatFetchResult(result: FetchResult, hasPrompt: boolean): { text: str
     }
     case "empty-shell": {
       return {
-        text: `page appears to be a JS-rendered app (${result.hint})`,
+        text: `page has no readable content: ${result.hint}`,
         isError: true,
       };
     }
     case "renderer-unavailable": {
       return {
-        text: `renderer unavailable: no offscreen renderer on this platform. Retry without render: true.`,
+        text: result.reason === "disabled"
+          ? "Web rendering is disabled in this session's settings (harness.web.render). Enable Browser rendering in Settings → Web access, or retry without render: true."
+          : "This Host does not provide a web renderer. Retry without render: true, or use a desktop Host with background web rendering enabled.",
         isError: true,
       };
     }
@@ -277,6 +279,7 @@ export function createWebFetchTool(
             kind: "webfetch",
             status: result.status,
             reader: false,
+            ...(result.status === "renderer-unavailable" ? { reason: result.reason } : {}),
             ...(result.status === "ok"
               ? {
                 sources: [{
