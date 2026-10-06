@@ -44,6 +44,6 @@
   },
   "devDependencies": {
     "@types/semver": "^7.8.0",
-    "ajv": "^8.18.0"
+    "ajv": "^8.20.0"
   }
 }
