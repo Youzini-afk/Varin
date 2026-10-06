@@ -177,7 +177,7 @@ describe("directed messages — authenticated identity and replies", () => {
     } finally { await f.dispose(); }
   });
 
-  it("does not turn an ordinary inform into a request by replying to its id", async () => {
+  it("accepts replies to notifications without turning them into requests or waking unrelated waits", async () => {
     const f = await fixture();
     try {
       const sender = await f.create("sender");
@@ -186,10 +186,21 @@ describe("directed messages — authenticated identity and replies", () => {
         threadId: receiver.thread.id, message: "fyi", from: "parent-agent", requestId: "plain-note",
       }, sender.context);
       f.deliver.mockClear();
-      await expect(f.service.handle({
-        threadId: sender.thread.id, message: "not an answer", from: "parent-agent", replyTo: "plain-note",
-      }, receiver.context)).rejects.toMatchObject({ harnessCode: "denied" });
+      const reply = await f.service.handle({ message: "received", replyTo: "plain-note" }, receiver.context);
+      expect(reply).toMatchObject({ accepted: true, delivery: "delivered", to: { kind: "thread", id: sender.thread.id } });
+      expect(f.deliver).toHaveBeenCalledOnce();
+      const messages = (await f.registry.getThreadById("workspace", sender.thread.id))!.messages!;
+      expect(messages.find((message) => message.id === "plain-note")).toMatchObject({ kind: "inform", status: "delivered" });
+      expect(messages.find((message) => message.id === reply.messageId)).toMatchObject({
+        kind: "inform", replyTo: "plain-note", from: { kind: "thread", id: receiver.thread.id }, status: "delivered",
+      });
+
+      await f.registry.setAttention("workspace", sender.thread.id, "thread", { kind: "thread", text: "Waiting for other work" });
+      f.deliver.mockClear();
+      const held = await f.service.handle({ message: "more information", replyTo: "plain-note" }, receiver.context);
+      expect(held).toMatchObject({ accepted: true, delivery: "held" });
       expect(f.deliver).not.toHaveBeenCalled();
+      expect((await f.registry.getThreadById("workspace", sender.thread.id))!.waitingFor?.kind).toBe("thread");
     } finally { await f.dispose(); }
   });
 });
