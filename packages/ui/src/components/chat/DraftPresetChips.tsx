@@ -77,8 +77,8 @@ const SortableChip: React.FC<{
     const { currentTheme } = useThemeSystem();
     const { attributes, listeners, setNodeRef, transform, transition, isDragging } = useSortable({ id: item.id });
     const chipStyle: React.CSSProperties = {
-        backgroundColor: currentTheme?.colors?.surface?.elevated,
-        borderColor: currentTheme?.colors?.interactive?.border,
+        backgroundColor: `var(--draft-starter-background, ${currentTheme.colors.surface.elevated})`,
+        borderColor: currentTheme.colors.interactive.border,
     };
 
     return (
@@ -94,7 +94,7 @@ const SortableChip: React.FC<{
                 {...attributes}
                 {...listeners}
                 onClick={() => onSubmit(item)}
-                className="group inline-flex touch-none select-none items-center gap-1.5 rounded-full border px-3 py-1.5 text-sm text-muted-foreground transition-colors hover:bg-[var(--interactive-hover)] hover:text-foreground"
+                className="draft-starter-trigger group inline-flex touch-none select-none items-center gap-1.5 rounded-full border px-3 py-1.5 text-sm text-muted-foreground transition-colors hover:bg-[var(--interactive-hover)] hover:text-foreground"
                 style={chipStyle}
             >
                 <Icon name={item.icon} className="h-3.5 w-3.5 shrink-0 opacity-70 transition-opacity group-hover:opacity-100" />

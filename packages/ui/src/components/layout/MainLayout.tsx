@@ -266,9 +266,10 @@ export const MainLayout: React.FC<MainLayoutProps> = ({ renderConversation, rend
         <DiffWorkerProvider>
             <div
                 data-page-scroll-lock="true"
+                data-workbench-chrome={isMobile ? undefined : 'agent'}
                 className={cn(
                     'main-content-safe-area',
-                    isMobile ? 'flex h-[100dvh] flex-col' : 'relative flex h-[100dvh] flex-col',
+                    isMobile ? 'flex h-[100dvh] flex-col' : 'workbench-frame relative flex h-[100dvh] flex-col',
                     'bg-background'
                 )}
             >
@@ -409,7 +410,7 @@ export const MainLayout: React.FC<MainLayoutProps> = ({ renderConversation, rend
                 <>
                     <Header navigationTitle={navigationTitle} />
                     {/* Desktop navigation and work area share the row below the titlebar. */}
-                    <div className="flex min-h-0 min-w-0 flex-1 overflow-hidden" data-page-scroll-lock="true">
+                    <div className="agent-workspace-row flex min-h-0 min-w-0 flex-1 overflow-hidden" data-page-scroll-lock="true">
                         <Sidebar
                             isOpen={isSidebarOpen}
                             isMobile={isMobile}
@@ -420,12 +421,12 @@ export const MainLayout: React.FC<MainLayoutProps> = ({ renderConversation, rend
                                 fallback={renderNavigator ? renderNavigator(isSidebarOpen) : <PiSessionSidebar isVisible={isSidebarOpen} />}
                             />
                         </Sidebar>
-                        <div className="relative flex flex-1 min-w-0 flex-col overflow-hidden bg-background" data-page-scroll-lock="true">
-                            <div className="relative flex flex-1 min-h-0 overflow-hidden bg-background" data-page-scroll-lock="true">
-                                <div className="relative flex flex-1 min-w-0 flex-col overflow-hidden border-t border-border bg-background" data-page-scroll-lock="true">
+                        <div className="agent-workspace-area relative flex flex-1 min-w-0 flex-col overflow-hidden" data-page-scroll-lock="true">
+                            <div className="agent-surface-layout relative flex flex-1 min-h-0 overflow-hidden" data-page-scroll-lock="true">
+                                <div className="agent-content-row relative flex flex-1 min-w-0 flex-col overflow-hidden" data-page-scroll-lock="true">
                                     <div className="flex flex-1 min-h-0 overflow-hidden" data-page-scroll-lock="true">
                                         <div className="relative flex flex-1 min-h-0 min-w-0 overflow-hidden" data-page-scroll-lock="true">
-                                            <main className="flex-1 overflow-hidden bg-background relative" data-page-scroll-lock="true">
+                                            <main className="agent-conversation-canvas min-w-0 flex-1 overflow-hidden bg-background relative" data-page-scroll-lock="true">
                                                 <div className={cn('absolute inset-0', (!isChatActive || isSurfacePageOpen) && 'invisible')}>
                                                     <ErrorBoundary>{conversation}</ErrorBoundary>
                                                 </div>
@@ -463,7 +464,9 @@ export const MainLayout: React.FC<MainLayoutProps> = ({ renderConversation, rend
                                 </div>
                                 <div data-page-scroll-lock="true">
                                     <WorkbenchContributionSlot kind="panel" slot="workbench.bottom.before" />
-                                    {isContextRailOpen ? <ErrorBoundary><ContextPanelRail /></ErrorBoundary> : null}
+                                    <div className="workbench-rail-reveal" data-open={isContextRailOpen} aria-hidden={!isContextRailOpen} inert={!isContextRailOpen}>
+                                        <ErrorBoundary><ContextPanelRail /></ErrorBoundary>
+                                    </div>
                                     <WorkbenchContributionSlot kind="panel" slot="workbench.bottom.after" />
                                 </div>
                             </div>

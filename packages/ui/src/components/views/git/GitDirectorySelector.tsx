@@ -18,9 +18,9 @@ export const GitDirectorySelector: React.FC<{
 
   return (
     <div className="shrink-0 border-b border-border/60 bg-sidebar px-3 py-2">
-      <div className="flex min-w-0 items-center gap-2">
+      <div className="git-directory-row flex min-w-0 items-center gap-2">
         <Icon name="folder" className="size-4 shrink-0 text-muted-foreground" />
-        <div className="min-w-0 flex-1">
+        <div className="git-directory-summary min-w-0 flex-1">
           <div className="typography-micro font-medium text-muted-foreground">{t('gitView.directorySelector.label')}</div>
           <div className="flex min-w-0 items-center gap-1">
             <span className="truncate typography-ui-label text-foreground" title={directory || undefined}>

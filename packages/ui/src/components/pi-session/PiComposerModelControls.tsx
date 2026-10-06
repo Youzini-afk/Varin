@@ -121,13 +121,13 @@ export const PiComposerModelControls: React.FC<PiComposerModelControlsProps> = (
 
   return (
     <div
-      className="flex min-w-0 items-center justify-end gap-1"
+      className="flex min-w-0 flex-wrap items-center justify-end gap-1"
       data-pi-composer-model-controls="true"
     >
       <ModelSelector
         align="end"
         allowNone={allowInherit}
-        className="order-2 max-w-[min(220px,42vw)]"
+        className="order-2 min-w-0 max-w-[min(220px,55cqi)]"
         cwd={cwd}
         disabled={disabled}
         displayModelId={effectiveModel?.id}

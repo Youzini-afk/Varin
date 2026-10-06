@@ -3921,7 +3921,7 @@ export const settingsDict = {
   "settings.harness.role.permissionJudge.description": "Ocenia żądania narzędzi w trybie inteligentnym.",
   "settings.harness.models.noModel": "Bez modelu pomocniczego",
   "settings.theme.preset.varin.name": "Varin",
-  "settings.theme.preset.varin.description": "Neutralne szarości z miedzianymi akcentami.",
+  "settings.theme.preset.varin.description": "Ciepłe jasne i neutralne ciemne powierzchnie.",
   "settings.theme.preset.flexoki.name": "Flexoki",
   "settings.theme.preset.flexoki.description": "Ciepłe akcenty i składnia inspirowana papierem i atramentem.",
   "settings.theme.preset.fields-of-the-shire.name": "Pola Shire",

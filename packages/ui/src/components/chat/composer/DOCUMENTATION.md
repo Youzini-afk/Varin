@@ -55,6 +55,16 @@ chooses a model that cannot run it.
 The global `open_model_selector` shortcut controls the picker anchored to the
 active composer. Inactive profile surfaces must not mount a competing modal.
 
+## Layout and motion
+
+The footer separates configuration controls from the action corner. Container queries use the
+composer's actual width in either shell; a narrow model row moves above the leading/actions row rather
+than moving Send between columns. `PiChatView` supplies a view-scoped motion identity for the first-send
+transition. Text, selection, queued revisions and attachments retain the owners listed above.
+
+Native queue changes animate by message identity. An exiting queue row is inert and releases its edit
+form immediately, so a draft retained after dequeue is not displayed or editable twice.
+
 ## PDF attachments
 
 Pi Composer accepts PDFs through its file picker and drop target. It uploads

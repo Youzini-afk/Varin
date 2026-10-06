@@ -1,4 +1,6 @@
 import React from 'react';
+import { AnimatePresence, motion, useIsPresent } from 'motion/react';
+import { usePrefersReducedMotion } from '@/hooks/usePrefersReducedMotion';
 import type { QueuedUserMessage, RuntimeMethodParams, RuntimeMethodResult } from '@varin/protocol';
 import { Icon } from '@/components/icon/Icon';
 import { useI18n } from '@/lib/i18n';
@@ -15,9 +17,20 @@ interface Props {
 
 const actionClass = 'flex shrink-0 items-center gap-1 rounded-md px-1.5 py-1 typography-meta text-muted-foreground hover:bg-foreground/5 hover:text-foreground focus-visible:outline focus-visible:outline-2 focus-visible:outline-primary disabled:opacity-40';
 
+function QueueRow({ id, children, editor }: { id: string; children: React.ReactNode; editor?: React.ReactNode }) {
+  const present = useIsPresent();
+  const reducedMotion = usePrefersReducedMotion();
+  return <motion.div layout="position" data-pi-queued-message={id} inert={!present}
+    initial={{ opacity: 0, height: 0, y: -5 }} animate={{ opacity: 1, height: 'auto', y: 0 }}
+    exit={{ opacity: 0, height: 0, y: -4 }}
+    transition={{ duration: reducedMotion ? 0 : 0.26, ease: [0.22, 1, 0.36, 1] }}
+    className="overflow-hidden">{children}{present ? editor : null}</motion.div>;
+}
+
 /** Presentation of the native Pi queue; no local admission/dequeue authority. */
 export function PiMessageQueue({ messages, working, onUpdate, onClear }: Props) {
   const { t } = useI18n();
+  const reducedMotion = usePrefersReducedMotion();
   const [editing, setEditing] = React.useState<QueuedUserMessage | null>(null);
   const [pending, setPending] = React.useState(false);
   const [error, setError] = React.useState<string | null>(null);
@@ -76,16 +89,19 @@ export function PiMessageQueue({ messages, working, onUpdate, onClear }: Props) 
     </div>
   ) : null;
 
-  if (!messages.length && !editing && !error) return null;
   return (
-    <section className="mb-2 overflow-hidden rounded-xl border border-border/60 bg-muted/15" data-pi-runtime-queue="true" aria-busy={pending} aria-label={t('chat.queuedMessage.title')}>
+    <AnimatePresence initial={false}>
+    {messages.length > 0 || editing || error ? <motion.section
+      key="queue" initial={{ opacity: 0, height: 0 }} animate={{ opacity: 1, height: 'auto' }}
+      exit={{ opacity: 0, height: 0 }} transition={{ duration: reducedMotion ? 0 : 0.28, ease: [0.22, 1, 0.36, 1] }} className="mb-2 overflow-hidden rounded-xl border border-border/60 bg-muted/15" data-pi-runtime-queue="true" aria-busy={pending} aria-label={t('chat.queuedMessage.title')}>
       <div className="flex items-center justify-between gap-3 border-b border-border/50 px-3 py-1.5">
         <span className="typography-meta font-medium text-foreground">{t('chat.queuedMessage.title')} · {messages.length}</span>
         <button type="button" className={actionClass} disabled={pending || messages.length === 0} onClick={() => void run(onClear)}>{t('chat.queuedMessage.clearAll')}</button>
       </div>
       <div className="max-h-[40vh] divide-y divide-border/40 overflow-y-auto overscroll-contain">
+        <AnimatePresence initial={false}>
         {messages.map((message) => (
-          <div key={message.id} data-pi-queued-message={message.id}>
+          <QueueRow key={message.id} id={message.id} editor={editing?.id === message.id ? editor : null}>
             <div className="flex flex-wrap items-start gap-x-2 gap-y-1 px-3 py-2">
               <div className="min-w-0 flex-1 basis-40">
                 <div className="mb-0.5 flex items-center gap-2 typography-micro text-muted-foreground">
@@ -101,12 +117,13 @@ export function PiMessageQueue({ messages, working, onUpdate, onClear }: Props) 
                 <button type="button" className={actionClass} disabled={pending || editing !== null} aria-label={t('chat.queuedMessage.removeAria')} title={t('chat.queuedMessage.removeAria')} onClick={() => void update(message, 'remove')}><Icon name="close" className="size-3.5" /></button>
               </div>
             </div>
-            {editing?.id === message.id && editor}
-          </div>
+          </QueueRow>
         ))}
+        </AnimatePresence>
         {editing && !messages.some((message) => message.id === editing.id) && editor}
       </div>
       {error && <div role="alert" className="flex items-center justify-between gap-2 border-t border-border/40 px-3 py-2 typography-meta text-destructive"><span>{error}</span><button type="button" className={actionClass} aria-label={t('dialog.common.actions.close')} onClick={() => setError(null)}><Icon name="close" className="size-3.5" /></button></div>}
-    </section>
+    </motion.section> : null}
+    </AnimatePresence>
   );
 }

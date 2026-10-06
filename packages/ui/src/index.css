@@ -3,6 +3,7 @@
 @import "./styles/design-system.css";
 @import "./styles/typography.css";
 @import "./styles/mobile.css";
+@import "./styles/workbench.css";
 @source "./**/*.{ts,tsx,css}";
 
 /* KaTeX theme overrides for light/dark mode */

@@ -39,14 +39,31 @@ const click = async (label: string) => {
   await act(async () => button!.click());
 };
 
-it('toggles only the icon rail; panel opening is owned by the chat work-overview controls', async () => {
-  expect(container.querySelector('button[aria-label="contextPanel.actions.openPanel"]')).toBeNull();
+it('opens the panel with the rail hidden, then toggles either without losing the other view', async () => {
+  await click('contextPanel.actions.openPanel');
+  expect(useUIStore.getState().isContextRailOpen).toBe(false);
+  const opened = useUIStore.getState().contextPanelByDirectory['/repo'];
+  expect(opened?.isOpen).toBe(true);
+  expect(opened?.tabs.length).toBeGreaterThan(0);
 
   await click('contextRail.actions.expand');
   expect(useUIStore.getState().isContextRailOpen).toBe(true);
-  expect(useUIStore.getState().contextPanelByDirectory['/repo']).toBeUndefined();
+  expect(useUIStore.getState().contextPanelByDirectory['/repo']).toBe(opened);
+
+  await click('contextPanel.actions.closePanel');
+  expect(useUIStore.getState().contextPanelByDirectory['/repo']?.isOpen).toBe(false);
+  expect(useUIStore.getState().isContextRailOpen).toBe(true);
 
   await click('contextRail.actions.collapse');
   expect(useUIStore.getState().isContextRailOpen).toBe(false);
+  await click('contextPanel.actions.openPanel');
+  expect(useUIStore.getState().contextPanelByDirectory['/repo']?.activeTabId).toBe(opened?.activeTabId);
+  expect(useUIStore.getState().contextPanelByDirectory['/repo']?.tabs.map(tab => [tab.id, tab.mode, tab.targetPath]))
+    .toEqual(opened?.tabs.map(tab => [tab.id, tab.mode, tab.targetPath]));
+});
+
+it('opening only the rail does not create or select a resource tab', async () => {
+  await click('contextRail.actions.expand');
+  expect(useUIStore.getState().isContextRailOpen).toBe(true);
   expect(useUIStore.getState().contextPanelByDirectory['/repo']).toBeUndefined();
 });

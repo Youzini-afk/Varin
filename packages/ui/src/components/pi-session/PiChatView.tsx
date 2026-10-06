@@ -185,6 +185,7 @@ export const PiChatView: React.FC<PiChatViewProps> = ({
   threadPanelTitle,
 }) => {
   const { t } = useI18n();
+  const composerMotionId = React.useId();
   const chatScrollTrackRef = React.useRef<HTMLDivElement | null>(null);
   const timelineScrollRef = React.useRef<HTMLElement | null>(null);
   const [timelineScrollReady, setTimelineScrollReady] = React.useState(false);
@@ -852,12 +853,16 @@ export const PiChatView: React.FC<PiChatViewProps> = ({
             !active && 'pointer-events-none',
           )}
           data-pi-pending-draft="true"
+          data-pi-chat-view="true"
           data-pi-draft-cwd={pendingCwd}
         >
           <div className="oc-draft-center flex min-h-0 flex-1 flex-col items-center justify-center px-6 text-center">
-            <h1 className="text-balance text-3xl font-normal tracking-tight text-foreground">
-              {renderDraftTitle(draftTitle, projectLabel)}
-            </h1>
+            <div className="pi-draft-heading">
+              <VarinLogo width={28} height={28} decorative className="mx-auto mb-5 hidden md:block" />
+              <h1 className="text-balance text-3xl font-normal tracking-tight text-foreground">
+                {renderDraftTitle(draftTitle, projectLabel)}
+              </h1>
+            </div>
             <DraftPresetChips
               className="oc-draft-starters mt-8 max-w-md"
               cwd={pendingCwd}
@@ -869,6 +874,7 @@ export const PiChatView: React.FC<PiChatViewProps> = ({
             target={WORKBENCH_REPLACEMENT_TARGETS.chatComposer}
             fallback={(
               <PiComposer
+                 motionId={composerMotionId}
                 active={active}
                 allowModelInheritance
                 cwd={pendingCwd}
@@ -993,11 +999,8 @@ export const PiChatView: React.FC<PiChatViewProps> = ({
   return (
     <TooltipProvider>
       <HarnessThreadStateProvider parentSessionId={currentSessionId} workspaceId={threadWorkspaceId}>
-      <div className={cn('@container relative flex h-full min-h-0 bg-background', !active && 'pointer-events-none')}>
-        <div className={cn(
-          'flex min-h-0 min-w-0 flex-1 flex-col transition-[padding-right] duration-200 ease-out',
-          workOverviewOpen && 'xl:pr-[21rem] 2xl:pr-[22rem]',
-        )}>
+      <div data-pi-chat-view="true" className={cn('@container relative flex h-full min-h-0 bg-background', !active && 'pointer-events-none')}>
+        <div className="pi-chat-layout flex min-h-0 min-w-0 flex-1 flex-col" data-overview-open={workOverviewOpen}>
         {conversationHeader}
         <HarnessThreadParentLink sessionId={currentSessionId} />
         {threadWorkspaceId && threadPanelMode === 'inline' ? (
@@ -1100,6 +1103,7 @@ export const PiChatView: React.FC<PiChatViewProps> = ({
             target={WORKBENCH_REPLACEMENT_TARGETS.chatComposer}
             fallback={(
               <PiComposer
+                 motionId={composerMotionId}
                 active={active}
                 allowModelInheritance={false}
                 cwd={snapshot.cwd}

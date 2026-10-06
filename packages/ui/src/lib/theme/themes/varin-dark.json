@@ -2,9 +2,9 @@
   "metadata": {
     "id": "varin-dark",
     "name": "Varin",
-    "description": "Neutral surfaces, copper accents and Vitesse syntax (dark variant)",
+    "description": "Neutral charcoal workbench surfaces with monochrome controls and Vitesse syntax",
     "author": "Varin",
-    "version": "1.0.0",
+    "version": "1.1.0",
     "variant": "dark",
     "tags": [
       "dark",
@@ -16,34 +16,34 @@
   },
   "colors": {
     "primary": {
-      "base": "#da7c47",
-      "hover": "#eb8c57",
-      "active": "#fd9b66",
-      "foreground": "#000000",
-      "muted": "#da7c4780",
-      "emphasis": "#fd9b66"
+      "base": "#ededed",
+      "hover": "#ffffff",
+      "active": "#d4d4d4",
+      "foreground": "#141414",
+      "muted": "#ededed66",
+      "emphasis": "#ededed"
     },
     "surface": {
-      "background": "#171717",
-      "foreground": "#e7e7e7",
-      "muted": "#1e1e1e",
-      "mutedForeground": "#a3a3a3",
-      "elevated": "#282828",
-      "elevatedForeground": "#e7e7e7",
+      "background": "#161616",
+      "foreground": "#ededed",
+      "muted": "#1c1c1c",
+      "mutedForeground": "#a5a5a5",
+      "elevated": "#242424",
+      "elevatedForeground": "#ededed",
       "overlay": "#00000099",
-      "subtle": "#242424"
+      "subtle": "#ffffff0e"
     },
     "interactive": {
-      "border": "#333333",
-      "borderHover": "#525252",
-      "borderFocus": "#da7c47",
-      "selection": "#da7c4726",
-      "selectionForeground": "#e7e7e7",
-      "focus": "#da7c47",
-      "focusRing": "#da7c4755",
-      "cursor": "#e7e7e7",
-      "hover": "#ffffff0c",
-      "active": "#ffffff18"
+      "border": "#ffffff12",
+      "borderHover": "#ffffff1f",
+      "borderFocus": "#ffffff55",
+      "selection": "#ffffff12",
+      "selectionForeground": "#ededed",
+      "focus": "#ededed",
+      "focusRing": "#ffffff38",
+      "cursor": "#ededed",
+      "hover": "#ffffff0b",
+      "active": "#ffffff13"
     },
     "status": {
       "error": "#da5b4a",
@@ -72,8 +72,8 @@
     },
     "syntax": {
       "base": {
-        "background": "#1e1e1e",
-        "foreground": "#e7e7e7",
+        "background": "#161616",
+        "foreground": "#ededed",
         "comment": "#728772",
         "keyword": "#34983a",
         "string": "#d58373",
@@ -131,33 +131,33 @@
       }
     },
     "markdown": {
-      "heading1": "#e7e7e7",
-      "heading2": "#e7e7e7",
-      "heading3": "#e7e7e7",
-      "heading4": "#e7e7e7",
+      "heading1": "#ededed",
+      "heading2": "#ededed",
+      "heading3": "#ededed",
+      "heading4": "#ededed",
       "link": "#5d99a9",
       "linkHover": "#6ba7b8",
-      "inlineCode": "#e7e7e7",
-      "inlineCodeBackground": "#242424",
-      "blockquote": "#a3a3a3",
-      "blockquoteBorder": "#333333",
+      "inlineCode": "#ededed",
+      "inlineCodeBackground": "#ffffff0e",
+      "blockquote": "#a5a5a5",
+      "blockquoteBorder": "#ffffff12",
       "listMarker": "#a3a3a3"
     },
     "chat": {
-      "userMessage": "#e7e7e7",
-      "userMessageBackground": "#292929",
-      "assistantMessage": "#e7e7e7",
-      "assistantMessageBackground": "#171717",
-      "timestamp": "#a3a3a3",
-      "divider": "#333333"
+      "userMessage": "#ededed",
+      "userMessageBackground": "#242424",
+      "assistantMessage": "#ededed",
+      "assistantMessageBackground": "#161616",
+      "timestamp": "#a5a5a5",
+      "divider": "#ffffff12"
     },
     "tools": {
-      "background": "#1e1e1e",
-      "border": "#333333",
-      "headerHover": "#ffffff0c",
-      "icon": "#a3a3a3",
-      "title": "#e7e7e7",
-      "description": "#a3a3a3",
+      "background": "#1c1c1c",
+      "border": "#ffffff12",
+      "headerHover": "#ffffff0b",
+      "icon": "#a5a5a5",
+      "title": "#ededed",
+      "description": "#a5a5a5",
       "edit": {
         "added": "#4d934e",
         "addedBackground": "#4d934e25",
@@ -165,13 +165,19 @@
         "removedBackground": "#cb767625",
         "lineNumber": "#3c3a37"
       }
+    },
+    "header": {
+      "background": "#0c0c0c"
+    },
+    "sidebar": {
+      "background": "#0c0c0c"
     }
   },
   "config": {
     "transitions": {
-      "fast": "150ms ease",
-      "normal": "250ms ease",
-      "slow": "350ms ease"
+      "fast": "170ms cubic-bezier(0.22, 1, 0.36, 1)",
+      "normal": "280ms cubic-bezier(0.22, 1, 0.36, 1)",
+      "slow": "520ms cubic-bezier(0.22, 1, 0.36, 1)"
     }
   }
 }

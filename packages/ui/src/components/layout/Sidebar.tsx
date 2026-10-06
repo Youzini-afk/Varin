@@ -128,7 +128,7 @@ export const Sidebar: React.FC<SidebarProps> = ({ isOpen, isMobile, children, cl
             ref={sidebarRef}
             className={cn(
                 'relative flex h-full overflow-hidden border-r border-border will-change-[width] motion-reduce:transition-none',
-                'bg-sidebar varin-vibrancy-surface',
+                'workbench-sidebar bg-sidebar varin-vibrancy-surface',
                 isOpen && 'border-r border-sidebar-border',
                 !isOpen && 'border-r-0',
                 className,
@@ -140,9 +140,10 @@ export const Sidebar: React.FC<SidebarProps> = ({ isOpen, isMobile, children, cl
                 ['--oc-left-sidebar-width' as string]: `${isResizing ? currentWidth : openWidth}px`,
                 overflowX: 'clip',
                 transitionProperty: isResizing ? 'none' : 'width, min-width, max-width',
-                transitionDuration: '200ms',
+                transitionDuration: 'var(--wb-panel-duration, 280ms)',
                 transitionTimingFunction: 'cubic-bezier(0.22, 1, 0.36, 1)',
             }}
+            inert={!isOpen}
             aria-hidden={!isOpen || appliedWidth === 0}
         >
             {isOpen && (

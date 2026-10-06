@@ -18,7 +18,11 @@ import type { IconName } from '@/components/icon/icons';
 import { WindowsWindowControls } from '@/components/desktop/WindowsWindowControls';
 import { ProjectActionsButton } from '@/components/layout/ProjectActionsButton';
 import { WorkbenchProfileSwitcher } from '@/components/layout/WorkbenchProfileSwitcher';
-import { McpQuickPopover } from '@/components/sections/mcp/McpQuickPopover';
+import { WorkbenchServices } from '@/components/layout/WorkbenchServices';
+import { OpenInAppButton } from '@/components/desktop/OpenInAppButton';
+import { IdeSessionHeader } from './IdeSessionHeader';
+import { IdeSidebar } from './IdeSidebar';
+import { AnimatePresence } from 'motion/react';
 import { SidebarFilesTree } from '@/components/layout/SidebarFilesTree';
 import { RegularChatView } from '@/components/views/RegularChatView';
 import { PiInteractionHost } from '@/components/pi-session/PiInteractionHost';
@@ -439,6 +443,13 @@ export const IdeWorkbenchShell: React.FC<Record<string, unknown>> = () => {
   const layoutState = useIdeWorkbenchLayout(workspaceId);
   const layoutDocument = layoutState?.document ?? DEFAULT_IDE_WORKBENCH_LAYOUT;
   const layout = React.useMemo(() => projectIdeWorkbenchLayout(layoutDocument), [layoutDocument]);
+  // CSS leaves free space unused when the remaining grow factors sum to less than one.
+  // Convert the persisted ratios to relative factors; toggling a pane then fills the row.
+  const smallestWeight = Math.min(...layout.mainWeights.filter(weight => weight > 0));
+  const growWeights = layout.mainWeights.map(weight => weight / smallestWeight);
+  const [resizing, setResizing] = React.useState(false);
+  const resizeCleanupRef = React.useRef<(() => void) | null>(null);
+  React.useEffect(() => () => resizeCleanupRef.current?.(), []);
   const shellRootRef = React.useRef<HTMLDivElement>(null);
   const mainAreaRef = React.useRef<HTMLDivElement>(null);
   const searchDirectoryKey = directory || '__no-workspace__';
@@ -554,6 +565,8 @@ export const IdeWorkbenchShell: React.FC<Record<string, unknown>> = () => {
 
   const startResize = React.useCallback((side: 'primary' | 'secondary') => (event: React.MouseEvent<HTMLDivElement>) => {
     event.preventDefault();
+    resizeCleanupRef.current?.();
+    setResizing(true);
     const startX = event.clientX;
     const size = mainAreaRef.current?.clientWidth ?? 0;
     const startWeights = layout.mainWeights;
@@ -571,11 +584,17 @@ export const IdeWorkbenchShell: React.FC<Record<string, unknown>> = () => {
         return updateIdeLayoutNode(document, { ...rootNode, weights });
       });
     };
-    const onUp = () => {
+    const cleanup = () => {
       window.removeEventListener('mousemove', onMove);
       window.removeEventListener('mouseup', onUp);
+      resizeCleanupRef.current = null;
+    };
+    const onUp = () => {
+      cleanup();
+      setResizing(false);
       if (workspaceId) void flushPersistedIdeWorkbenchLayout(workspaceId);
     };
+    resizeCleanupRef.current = cleanup;
     window.addEventListener('mousemove', onMove);
     window.addEventListener('mouseup', onUp);
   }, [layout.mainWeights, workspaceId]);
@@ -600,7 +619,8 @@ export const IdeWorkbenchShell: React.FC<Record<string, unknown>> = () => {
       <div
         ref={shellRootRef}
         data-page-scroll-lock="true"
-        className="flex h-[100dvh] min-h-0 flex-col bg-background"
+        data-workbench-chrome="ide"
+        className="workbench-frame flex h-[100dvh] min-h-0 flex-col"
       >
         <CommandPalette fileOpenTarget="editor" />
         <PiInteractionHost />
@@ -613,7 +633,7 @@ export const IdeWorkbenchShell: React.FC<Record<string, unknown>> = () => {
         />
 
         <header
-          className="app-region-drag flex h-12 shrink-0 items-center gap-2 border-b border-border px-2"
+          className="workbench-titlebar app-region-drag flex h-11 shrink-0 items-center gap-2 px-2"
           onMouseDown={(event) => {
             const target = event.target as HTMLElement;
             if (event.button !== 0) return;
@@ -637,6 +657,16 @@ export const IdeWorkbenchShell: React.FC<Record<string, unknown>> = () => {
               <Icon name="menu-2" className="size-4" />
             </Button>
           ) : null}
+          <Tooltip>
+            <TooltipTrigger asChild>
+              <Button type="button" variant="ghost" size="icon" className="app-region-no-drag"
+                aria-label={t(layout.primaryVisible ? 'contextPanel.actions.closePanel' : 'contextPanel.actions.openPanel')}
+                aria-pressed={layout.primaryVisible} onClick={() => patchLayout({ primaryVisible: !layout.primaryVisible })}>
+                <Icon name="layout-left" className="size-4" />
+              </Button>
+            </TooltipTrigger>
+            <TooltipContent>{t(layout.primaryVisible ? 'contextPanel.actions.closePanel' : 'contextPanel.actions.openPanel')}</TooltipContent>
+          </Tooltip>
           <WorkbenchProfileSwitcher />
           {projectActionsContext ? (
             <ProjectActionsButton
@@ -651,51 +681,29 @@ export const IdeWorkbenchShell: React.FC<Record<string, unknown>> = () => {
             />
           ) : <div className="min-w-0 truncate typography-ui-label text-foreground">{workspaceLabel}</div>}
           <div className="ml-auto flex shrink-0 app-region-no-drag items-center gap-1">
+
+            <OpenInAppButton directory={directory ?? ''} />
+            <WorkbenchServices />
+
             <Tooltip>
-              <TooltipTrigger asChild>
-                <Button
-                  type="button"
-                  variant="ghost"
-                  size="icon"
-                  aria-label={t('workbench.ide.commandPaletteAria')}
-                  onClick={() => setCommandPaletteOpen(true)}
-                >
-                  <Icon name="command" className="size-4" />
-                </Button>
-              </TooltipTrigger>
-              <TooltipContent>{t('workbench.ide.commandPalette')}</TooltipContent>
-            </Tooltip>
-            <McpQuickPopover />
-            <Tooltip>
-              <TooltipTrigger asChild>
-                <Button
-                  type="button"
-                  variant="ghost"
-                  size="icon"
-                  aria-label={t('workbench.ide.sessionsAria')}
-                  aria-expanded={sessionPickerOpen}
-                  aria-controls={SESSION_PICKER_REGION_ID}
-                  onClick={toggleSessionPicker}
-                >
-                  <Icon name="list-unordered" className="size-4" />
-                </Button>
-              </TooltipTrigger>
-              <TooltipContent>{t('workbench.ide.sessions')}</TooltipContent>
-            </Tooltip>
-            <Tooltip>
-              <TooltipTrigger asChild>
-                <Button
-                  type="button"
-                  variant="ghost"
-                  size="icon"
-                  aria-label={t('workbench.ide.settingsAria')}
-                  onClick={() => setSettingsDialogOpen(true)}
-                >
-                  <Icon name="settings-3" className="size-4" />
-                </Button>
-              </TooltipTrigger>
-              <TooltipContent>{t('workbench.ide.settings')}</TooltipContent>
-            </Tooltip>
+                      <TooltipTrigger asChild>
+                        <Button
+                          type="button"
+                          variant="ghost"
+                          size="icon"
+                          aria-label={layout.secondaryVisible ? t('workbench.ide.sidebar.hideSecondary') : t('workbench.ide.sidebar.showSecondary')}
+                          aria-pressed={layout.secondaryVisible}
+                          onClick={() => patchLayout({ secondaryVisible: !layout.secondaryVisible })}
+                        >
+                          <Icon name="layout-right" className="size-4" />
+                        </Button>
+                      </TooltipTrigger>
+                      <TooltipContent side="right">
+                        {layout.secondaryVisible ? t('workbench.ide.sidebar.hideSecondary') : t('workbench.ide.sidebar.showSecondary')}
+                      </TooltipContent>
+                    </Tooltip>
+
+
             {usesFramelessChrome && windowControlsSide === 'right' ? (
               <WindowsWindowControls visible position="right" />
             ) : null}
@@ -724,9 +732,9 @@ export const IdeWorkbenchShell: React.FC<Record<string, unknown>> = () => {
           </div>
         ) : null}
 
-        <div ref={mainAreaRef} className="flex min-h-0 flex-1 overflow-hidden">
+        <div ref={mainAreaRef} className="ide-workspace-row flex min-h-0 flex-1 overflow-hidden">
           {layout.activityVisible ? (
-          <nav className="flex w-12 shrink-0 flex-col items-center gap-1 border-r border-border py-2" aria-label={t('workbench.ide.title')}>
+          <nav className="ide-activity flex w-11 shrink-0 flex-col items-center gap-1 py-2" aria-label={t('workbench.ide.title')}>
             <WorkbenchReplacement
               target={WORKBENCH_REPLACEMENT_TARGETS.activity}
               fallback={(
@@ -763,23 +771,34 @@ export const IdeWorkbenchShell: React.FC<Record<string, unknown>> = () => {
                     />
                   ) : null}
                   <div className="mt-auto flex flex-col gap-1">
-                    <Tooltip>
-                      <TooltipTrigger asChild>
-                        <Button
-                          type="button"
-                          variant="ghost"
-                          size="icon"
-                          aria-label={layout.secondaryVisible ? t('workbench.ide.sidebar.hideSecondary') : t('workbench.ide.sidebar.showSecondary')}
-                          aria-pressed={layout.secondaryVisible}
-                          onClick={() => patchLayout({ secondaryVisible: !layout.secondaryVisible })}
-                        >
-                          <Icon name="robot-2" className="size-4" />
-                        </Button>
-                      </TooltipTrigger>
-                      <TooltipContent side="right">
-                        {layout.secondaryVisible ? t('workbench.ide.sidebar.hideSecondary') : t('workbench.ide.sidebar.showSecondary')}
-                      </TooltipContent>
-                    </Tooltip>
+            <Tooltip>
+              <TooltipTrigger asChild>
+                <Button
+                  type="button"
+                  variant="ghost"
+                  size="icon"
+                  aria-label={t('workbench.ide.commandPaletteAria')}
+                  onClick={() => setCommandPaletteOpen(true)}
+                >
+                  <Icon name="command" className="size-4" />
+                </Button>
+              </TooltipTrigger>
+              <TooltipContent>{t('workbench.ide.commandPalette')}</TooltipContent>
+            </Tooltip>
+            <Tooltip>
+              <TooltipTrigger asChild>
+                <Button
+                  type="button"
+                  variant="ghost"
+                  size="icon"
+                  aria-label={t('workbench.ide.settingsAria')}
+                  onClick={() => setSettingsDialogOpen(true)}
+                >
+                  <Icon name="settings-3" className="size-4" />
+                </Button>
+              </TooltipTrigger>
+              <TooltipContent>{t('workbench.ide.settings')}</TooltipContent>
+            </Tooltip>
                   </div>
                 </>
               )}
@@ -787,12 +806,9 @@ export const IdeWorkbenchShell: React.FC<Record<string, unknown>> = () => {
           </nav>
           ) : null}
 
+          <AnimatePresence initial={false}>
           {showPrimarySidebar ? (
-            <>
-              <aside
-                className="flex min-h-0 min-w-0 flex-col border-r border-border bg-sidebar"
-                style={{ flex: `${layout.mainWeights[0]} 1 0%` }}
-              >
+            <IdeSidebar key="primary" side="primary" weight={growWeights[0]} resizing={resizing} onResize={startResize('primary')}>
                 <WorkbenchReplacement
                   target={WORKBENCH_REPLACEMENT_TARGETS.primarySidebar}
                   fallback={(
@@ -839,19 +855,13 @@ export const IdeWorkbenchShell: React.FC<Record<string, unknown>> = () => {
                     </>
                   )}
                 />
-              </aside>
-              <div
-                role="separator"
-                aria-orientation="vertical"
-                className="w-1 shrink-0 cursor-col-resize bg-border/40 hover:bg-interactive-hover"
-                onMouseDown={startResize('primary')}
-              />
-            </>
+            </IdeSidebar>
           ) : null}
+          </AnimatePresence>
 
           <div
-            className="relative flex min-h-0 min-w-0 flex-col overflow-hidden"
-            style={{ flex: `${layout.mainWeights[1]} 1 0%` }}
+            className="ide-editor-canvas relative flex min-h-0 min-w-0 flex-col overflow-hidden"
+            style={{ flex: `${growWeights[1] || (!showPrimarySidebar && !layout.secondaryVisible ? 1 : 0)} 1 0%` }}
           >
             <main className="relative min-h-0 flex-1 overflow-hidden">
               <WorkbenchReplacement
@@ -889,18 +899,27 @@ export const IdeWorkbenchShell: React.FC<Record<string, unknown>> = () => {
             ) : null}
           </div>
 
+          <AnimatePresence initial={false}>
           {layout.secondaryVisible ? (
-            <>
-              <div
-                role="separator"
-                aria-orientation="vertical"
-                className="w-1 shrink-0 cursor-col-resize bg-border/40 hover:bg-interactive-hover"
-                onMouseDown={startResize('secondary')}
-              />
-              <aside
-                className="flex min-h-0 min-w-0 flex-col border-l border-border bg-sidebar"
-                style={{ flex: `${layout.mainWeights[2]} 1 0%` }}
-              >
+            <IdeSidebar key="secondary" side="secondary" weight={growWeights[2]} resizing={resizing} onResize={startResize('secondary')}>
+                <IdeSessionHeader>
+            <Tooltip>
+              <TooltipTrigger asChild>
+                <Button
+                  type="button"
+                  variant="ghost"
+                  size="icon"
+                  aria-label={t('workbench.ide.sessionsAria')}
+                  aria-expanded={sessionPickerOpen}
+                  aria-controls={SESSION_PICKER_REGION_ID}
+                  onClick={toggleSessionPicker}
+                >
+                  <Icon name="list-unordered" className="size-4" />
+                </Button>
+              </TooltipTrigger>
+              <TooltipContent>{t('workbench.ide.sessions')}</TooltipContent>
+            </Tooltip>
+                </IdeSessionHeader>
                 <div className="relative min-h-0 flex-1 overflow-hidden">
                   <WorkbenchReplacement
                     target={WORKBENCH_REPLACEMENT_TARGETS.secondarySidebar}
@@ -959,13 +978,13 @@ export const IdeWorkbenchShell: React.FC<Record<string, unknown>> = () => {
                     </div>
                   ) : null}
                 </div>
-              </aside>
-            </>
+            </IdeSidebar>
           ) : null}
+          </AnimatePresence>
         </div>
 
         {layout.statusVisible ? (
-        <footer className="flex h-8 shrink-0 items-center gap-3 border-t border-border px-3 typography-micro text-muted-foreground">
+        <footer className="ide-statusbar flex h-7 shrink-0 items-center gap-3 px-3 typography-micro text-muted-foreground">
           <WorkbenchReplacement
             target={WORKBENCH_REPLACEMENT_TARGETS.status}
             fallback={(

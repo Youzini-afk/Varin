@@ -2262,7 +2262,11 @@ export const ContextPanel: React.FC = () => {
   const widthFraction = activeModeForWidth ? getContextSurfaceWidthFraction(activeModeForWidth) : 0.5;
   const widthFallbackBase = availablePanelAreaWidth
     ?? (typeof window !== 'undefined' ? window.innerWidth : CONTEXT_PANEL_DEFAULT_WIDTH * 2);
-  const width = clampWidth(manualWidth ?? Math.round(widthFraction * widthFallbackBase));
+  const preferredWidth = clampWidth(manualWidth ?? Math.round(widthFraction * widthFallbackBase));
+  // A default fits the remaining work area; a user resize remains their choice.
+  const width = manualWidth === undefined && availablePanelAreaWidth !== null
+    ? Math.min(preferredWidth, Math.round(availablePanelAreaWidth * 0.54))
+    : preferredWidth;
   const chatSessionIDs = React.useMemo(() => {
     const ids: string[] = [];
     for (const tab of tabs) {
@@ -2824,10 +2828,13 @@ export const ContextPanel: React.FC = () => {
     <aside
       ref={panelRef}
       data-context-panel="true"
+      data-open={isOpen}
+      data-expanded={isExpanded}
+      data-resizing={isResizing}
       tabIndex={-1}
       inert={!isOpen || undefined}
       className={cn(
-        'flex min-h-0 flex-col overflow-hidden bg-background',
+        'workbench-resource-canvas flex min-h-0 flex-col overflow-hidden bg-background',
         // Right-anchored while expanded: `inset-0` would teleport the left
         // edge instantly (position does not transition), so only the width
         // animates and the panel grows leftwards from its docked position.

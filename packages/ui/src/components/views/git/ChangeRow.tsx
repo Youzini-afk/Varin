@@ -165,7 +165,7 @@ export const ChangeRow = React.memo<ChangeRowProps>(function ChangeRow({
             </span>
           );
         })()}
-        <span className="shrink-0 typography-micro">
+        <span className="git-change-stats shrink-0 typography-micro">
           <span style={{ color: 'var(--status-success)' }}>+{insertions}</span>
           <span className="text-muted-foreground mx-0.5">/</span>
           <span style={{ color: 'var(--status-error)' }}>-{deletions}</span>

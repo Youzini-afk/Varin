@@ -3919,7 +3919,7 @@ export const settingsDict = {
   "settings.harness.role.permissionJudge.description": "Оцінює запити інструментів у розумному режимі.",
   "settings.harness.models.noModel": "Без допоміжної моделі",
   "settings.theme.preset.varin.name": "Varin",
-  "settings.theme.preset.varin.description": "Нейтральні сірі тони з мідними акцентами.",
+  "settings.theme.preset.varin.description": "Теплі світлі й нейтральні темні поверхні.",
   "settings.theme.preset.flexoki.name": "Flexoki",
   "settings.theme.preset.flexoki.description": "Теплі акценти та кольори синтаксису, натхненні папером і чорнилом.",
   "settings.theme.preset.fields-of-the-shire.name": "Поля Ширу",
