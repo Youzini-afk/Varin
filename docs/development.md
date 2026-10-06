@@ -161,6 +161,14 @@ webhook, so GitHub's
 queue and the configured open-PR limit can delay proposals. Major versions remain visible; for example,
 an `@types/node` major upgrade should be evaluated with the actual Node runtime instead of being hidden.
 
+Dependabot PR jobs in CI, Docker PR verification, and dependency reports share one job-level
+`varin-dependabot-background` concurrency group with `queue: max`. This keeps a batch of Bot updates
+from occupying multiple runners at once, while preserving queued checks for different PRs. The
+existing per-PR workflow cancellation still supersedes obsolete checks. Human PRs, main, release tags,
+and desktop/npm releases use separate groups and retain parallel execution. This reduces Bot runner
+contention; GitHub does not expose strict workflow priority or preemption. Dependabot's platform-generated
+update jobs are outside these repository workflow groups, so this does not serialize dependency discovery.
+
 The [dependency report workflow](../.github/workflows/dependency-report.yml) runs when a Dependabot PR
 opens, reopens, changes head, or edits its description. It updates one report comment with version
 ranges, upstream excerpts, and migration hints found in the text. Shared release notes are deduplicated;
