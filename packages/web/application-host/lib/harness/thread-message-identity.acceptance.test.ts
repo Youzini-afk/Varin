@@ -186,7 +186,7 @@ describe("directed messages — authenticated identity and replies", () => {
         threadId: receiver.thread.id, message: "fyi", from: "parent-agent", requestId: "plain-note",
       }, sender.context);
       f.deliver.mockClear();
-      const reply = await f.service.handle({ message: "received", replyTo: "plain-note" }, receiver.context);
+      const reply = await f.service.handle({ message: "received", from: "parent-agent", replyTo: "plain-note" }, receiver.context);
       expect(reply).toMatchObject({ accepted: true, delivery: "delivered", to: { kind: "thread", id: sender.thread.id } });
       expect(f.deliver).toHaveBeenCalledOnce();
       const messages = (await f.registry.getThreadById("workspace", sender.thread.id))!.messages!;
@@ -197,7 +197,7 @@ describe("directed messages — authenticated identity and replies", () => {
 
       await f.registry.setAttention("workspace", sender.thread.id, "thread", { kind: "thread", text: "Waiting for other work" });
       f.deliver.mockClear();
-      const held = await f.service.handle({ message: "more information", replyTo: "plain-note" }, receiver.context);
+      const held = await f.service.handle({ message: "more information", from: "parent-agent", replyTo: "plain-note" }, receiver.context);
       expect(held).toMatchObject({ accepted: true, delivery: "held" });
       expect(f.deliver).not.toHaveBeenCalled();
       expect((await f.registry.getThreadById("workspace", sender.thread.id))!.waitingFor?.kind).toBe("thread");
