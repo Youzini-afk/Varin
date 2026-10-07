@@ -29,10 +29,10 @@
 .agent-content-row {
   background: var(--workbench-frame, var(--sidebar));
 }
-.agent-workspace-row { padding-bottom: 6px; }
 .agent-conversation-canvas {
   border: 1px solid var(--border);
-  border-radius: 10px;
+  border-bottom: 0;
+  border-radius: 10px 10px 0 0;
   isolation: isolate;
 }
 .workbench-sidebar { border-right-color: transparent; }
