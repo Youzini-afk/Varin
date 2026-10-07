@@ -239,13 +239,14 @@ describe("background shell output", () => {
     };
     const outputStore = createOutputStore();
     const completedEvents: ShellCommandCompletedEvent[] = [];
+    const startedEvents: ShellCommandStartedEvent[] = [];
     const supervisor = createShellSupervisor({
       interpreter: { kind: "bash", command: "bash", args: [], env: {} },
       outputStore,
       sessionId: `split-markers-${mode}`,
       cwd: tmpdir(),
       ptyProvider: { backend: "fake", spawn: () => process },
-      commandLifecycle: { completed: (event) => { completedEvents.push(event); } },
+      commandLifecycle: { started: (event) => { startedEvents.push(event); }, completed: (event) => { completedEvents.push(event); } },
     });
     try {
       const execution = supervisor.exec("command", { waitMs: mode === "background" ? 0 : 10_000 });
@@ -256,8 +257,15 @@ describe("background shell output", () => {
         if (result.kind !== "preparing" && result.kind !== "background") throw new Error("expected pending execution");
         await waitForRuntimeShellId(supervisor, result.id);
       }
-      emit(`__VARIN_SENTINEL_${token}:B\nbody\n__VARIN_SENTINEL_${token}:C:`);
-      emit(`1\r\n__VARIN_SENTINEL_${token}:E:2`);
+      // ConPTY can echo a large wrapper, repaint it, and split/color records.
+      // None of those bytes can become a cursor into the later payload body.
+      emit("echoed input ".repeat(1000) + "\x1b[3");
+      emit("1m__VARIN_SENT");
+      expect((await supervisor.read(startedEvents[0]!.executionId)).text).toBe("");
+      emit(`INEL_${token}:B\r\nbody\n__VARIN_SENTINEL_${token}:C:`);
+      const firstOutput = await supervisor.read(startedEvents[0]!.executionId);
+      expect(firstOutput.text).toBe("body\n");
+      emit(`1\r\nmore output\n__VARIN_SENTINEL_${token}:\x1b[0mE:2`);
       expect(completedEvents).toHaveLength(0);
       emit("7\r");
       expect(completedEvents).toHaveLength(0);
@@ -271,6 +279,7 @@ describe("background shell output", () => {
       expect(output).toMatchObject({ running: false, exitCode: 27 });
       expect(output.text).toContain("body");
       expect(output.text).not.toContain("VARIN_SENTINEL");
+      expect((await supervisor.read(completedEvents[0]!.executionId, firstOutput.nextOffset)).text).toBe("more output\n");
     } finally {
       await supervisor.dispose();
       outputStore.dispose();
@@ -815,6 +824,8 @@ describe("shell-supervisor disposal protection", () => {
           if (options.readyDelayMs) setTimeout(emitReady, options.readyDelayMs);
           else queueMicrotask(emitReady);
         }
+        const token = data.match(/__VARIN_SENTINEL_([0-9a-f]+)/)?.[1];
+        if (token) queueMicrotask(() => { for (const handler of dataHandlers) handler(`__VARIN_SENTINEL_${token}:B\n`); });
       },
     };
   };
@@ -1190,7 +1201,7 @@ describe("RR3 command payload framing and execution identity", () => {
       // real newline appended inside the eval string.
       expect(commandWrite).toContain("cat <<EOF\\nbody\\nEOF # done\\n");
       // Control framing lives outside the payload on the same line.
-      expect(commandWrite).toContain(':B"; eval $\'');
+      expect(commandWrite).toContain(':C:1"; eval $\'');
       expect(commandWrite).toContain("__ec=$?");
     } finally {
       await supervisor.dispose();

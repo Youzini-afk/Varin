@@ -408,6 +408,11 @@ process manager.
 - An explicitly longer `shell.exec` or `shell.read` wait is not shortened by
   the generic one-hour Harness RPC ceiling. The requested wait owns its
   deadline; cancellation and actor disposal still end the observation.
+- Foreground and background commands share a streaming control-record parser.
+  Input echo before the begin record and partial begin/cwd/exit records never enter
+  command output or advance its UTF-8 cursor. ANSI state survives PTY chunks;
+  actual process exit flushes remaining payload bytes. Both shells emit the begin
+  record before switching cwd, retaining real directory-error output too.
 - `shell.read(waitMs)` waits on output/exit events only when an incremental read
   has no unread bytes. Explicit byte slices and static outputs remain immediate.
   Request cancellation removes the observer without terminating the process;

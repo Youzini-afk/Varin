@@ -143,6 +143,52 @@ const commandSentinelPattern = (token: string): RegExp => (
   new RegExp(`${SENTINEL}${token}:(B|C:[01]|E:\\d+)(?=\\r?\\n)`, "g")
 );
 
+interface CommandOutputFrame {
+  token: string;
+  frameBuffer: string;
+  outputStarted: boolean;
+  outputControlState: OutputControlState;
+}
+
+/** Commit only payload bytes: echoed input and incomplete records are not output. */
+function parseCommandOutput(command: CommandOutputFrame, chunk: string): { text: string; cwdEntered?: boolean; exitCode?: number } {
+  const normalized = stripOutputChunk(chunk, command.outputControlState);
+  command.outputControlState = normalized.state;
+  command.frameBuffer += normalized.text;
+  const result: { text: string; cwdEntered?: boolean; exitCode?: number } = { text: "" };
+  const pattern = commandSentinelPattern(command.token);
+  let match: RegExpExecArray | null;
+  while ((match = pattern.exec(command.frameBuffer)) !== null) {
+    if (command.outputStarted) result.text += command.frameBuffer.slice(0, match.index);
+    const record = match[1]!;
+    const end = match.index + match[0].length;
+    command.frameBuffer = command.frameBuffer.slice(end + (command.frameBuffer[end] === "\r" ? 2 : 1));
+    pattern.lastIndex = 0;
+    if (record === "B") command.outputStarted = true;
+    else if (record.startsWith("C:")) result.cwdEntered = record === "C:1";
+    else if (record.startsWith("E:")) {
+      result.exitCode = Number(record.slice(2));
+      command.frameBuffer = "";
+      return result;
+    }
+  }
+  // Records can be split anywhere across PTY chunks. Before B, input echo
+  // cannot advance a read cursor; afterward, only a possible record is held.
+  const marker = `${SENTINEL}${command.token}`;
+  let keepFrom = command.frameBuffer.length;
+  const lastMarker = command.frameBuffer.lastIndexOf(marker);
+  if (lastMarker >= 0 && /^(?::(?:B|C(?::[01]?)?|E(?::\d*)?)?)?\r?$/.test(command.frameBuffer.slice(lastMarker + marker.length))) {
+    keepFrom = lastMarker;
+  } else {
+    for (let size = Math.min(marker.length - 1, command.frameBuffer.length); size > 0; size--) {
+      if (command.frameBuffer.endsWith(marker.slice(0, size))) { keepFrom -= size; break; }
+    }
+  }
+  if (command.outputStarted) result.text += command.frameBuffer.slice(0, keepFrom);
+  command.frameBuffer = command.frameBuffer.slice(keepFrom);
+  return result;
+}
+
 const quotePowerShell = (value: string): string => `'${value.replace(/'/g, "''")}'`;
 const quotePosixShell = (value: string): string => `'${value.replace(/'/g, "'\\''")}'`;
 
@@ -188,7 +234,6 @@ function buildCommandWrapper(command: string, token: string, kind: ShellInterpre
     // success for a native command that returned a nonzero exit code.
     const payload = Buffer.from(`${command}\n; ${commandSuccess} = $?; ${commandExit} = $LASTEXITCODE`, "utf8").toString("base64");
     const invoke = [
-      `Write-Output ${beginMarker}`,
       `& { try { Invoke-Expression $__varin_payload } catch { ${commandSuccess} = $false; ${commandExit} = 1; Write-Output $_ } }`,
       `$__varin_success = ${commandSuccess}`,
       `$__varin_exit = ${commandExit}`,
@@ -203,6 +248,7 @@ function buildCommandWrapper(command: string, token: string, kind: ShellInterpre
       "$__varin_original_location = (Get-Location).ProviderPath; $__varin_original_environment = [System.Environment]::GetEnvironmentVariables(); $__varin_cwd_entered = 0",
       "$__varin_success = $true; $__varin_exit = 0; $global:LASTEXITCODE = 0",
       `${beginMarker} = ${markerBase} + ':B'; ${cwdMarker} = ${markerBase} + ':C:'; ${endMarker} = ${markerBase} + ':E:'`,
+      `Write-Output ${beginMarker}`,
       execute,
       "$__varin_code = if ($__varin_success) { 0 } elseif ($__varin_exit -is [int] -and $__varin_exit -ne 0) { [int]$__varin_exit } else { 1 }",
       "try { Set-Location -LiteralPath $__varin_original_location -ErrorAction Stop } catch { $__varin_success = $false; $__varin_code = 1; Write-Output $_ }",
@@ -221,7 +267,7 @@ function buildCommandWrapper(command: string, token: string, kind: ShellInterpre
   // Construct full markers only when executing, so echoed wrapper text cannot
   // be mistaken for command output. Emit the directory result before eval:
   // even a payload that calls exit/exec cannot suppress that confirmation.
-  return `__varin_marker='${SENTINEL}${token}'; ( if cd -- ${quotePosixShell(cwd)}; then echo "$__varin_marker:C:1"; echo "$__varin_marker:B"; eval ${payload}; else __ec=$?; echo "$__varin_marker:C:0"; exit "$__ec"; fi ); __ec=$?; printf '\\n%s\\n' "$__varin_marker:E:$__ec"`;
+  return `__varin_marker='${SENTINEL}${token}'; echo "$__varin_marker:B"; ( if cd -- ${quotePosixShell(cwd)}; then echo "$__varin_marker:C:1"; eval ${payload}; else __ec=$?; echo "$__varin_marker:C:0"; exit "$__ec"; fi ); __ec=$?; printf '\\n%s\\n' "$__varin_marker:E:$__ec"`;
 }
 
 // ── PTY Provider ────────────────────────────────────────────────────
@@ -383,7 +429,7 @@ export interface ShellCommandLifecycle {
   completed?(event: ShellCommandCompletedEvent): void | Promise<void>;
 }
 
-interface BackgroundShell {
+interface BackgroundShell extends CommandOutputFrame {
   id: string;
   token: string;
   executionId: string;
@@ -518,7 +564,7 @@ export function createShellSupervisor(deps: ShellSupervisorOptions) {
   let shellReadyReject: ((error: unknown) => void) | null = null;
   // Pending command state
   type ShellWriter = { close: () => Promise<void> };
-  interface PendingCommand {
+  interface PendingCommand extends CommandOutputFrame {
     token: string;
     executionId: string;
     commandRunId: string;
@@ -618,17 +664,15 @@ export function createShellSupervisor(deps: ShellSupervisorOptions) {
 
   const publishOutputDelta = (
     command: Pick<ShellCommandStartedEvent, "command" | "commandRunId" | "executionId" | "cwd" | "startedAt" | "toolCallId">
-      & { observedOutputBytes: number; outputControlState: OutputControlState; timing?: ShellExecTiming },
+      & { observedOutputBytes: number; timing?: ShellExecTiming },
     chunk: string,
   ): void => {
-    const normalized = stripOutputChunk(chunk, command.outputControlState);
-    command.outputControlState = normalized.state;
-    if (!normalized.text) return;
+    if (!chunk) return;
     if (command.timing && command.timing.firstOutputAt === undefined) {
       command.timing.firstOutputAt = Date.now();
     }
     const offset = command.observedOutputBytes;
-    command.observedOutputBytes += Buffer.byteLength(normalized.text, "utf8");
+    command.observedOutputBytes += Buffer.byteLength(chunk, "utf8");
     void notifyCommandOutput({
       command: command.command,
       commandRunId: command.commandRunId,
@@ -636,7 +680,7 @@ export function createShellSupervisor(deps: ShellSupervisorOptions) {
       cwd: command.cwd,
       startedAt: command.startedAt,
       offset,
-      text: normalized.text,
+      text: chunk,
       at: Date.now(),
       ...(command.toolCallId === undefined ? {} : { toolCallId: command.toolCallId }),
     });
@@ -663,6 +707,11 @@ export function createShellSupervisor(deps: ShellSupervisorOptions) {
     background.lifecycleCompleted = true;
     background.exited = true;
     background.exitCode = exitCode;
+    if (background.outputStarted && background.frameBuffer) {
+      background.output += background.frameBuffer;
+      publishOutputDelta(background, background.frameBuffer);
+      background.frameBuffer = "";
+    }
     background.timing.endedAt = Date.now();
     const accepted = acceptedExecution(background.executionId);
     if (accepted) accepted.phase = "completed";
@@ -801,16 +850,25 @@ export function createShellSupervisor(deps: ShellSupervisorOptions) {
     trackDisposable(handle, handle.onData((data: string) => {
       if (pendingCommand && isCurrentSession()) {
         const command = pendingCommand;
-        outputBuffer += data;
-        parsePendingOutput();
-        if (pendingCommand === command) publishOutputDelta(command, data);
+        const parsed = parseCommandOutput(command, data);
+        outputBuffer += parsed.text;
+        if (parsed.cwdEntered === false) command.cwd = handle.cwd;
+        if (parsed.cwdEntered !== undefined) lastCwd = command.cwd;
+        publishOutputDelta(command, parsed.text);
+        if (parsed.exitCode !== undefined) completeCommand(parsed.exitCode, disposeRequested);
         return;
       }
       const background = backgroundShells.get(handle.id);
       if (background && !background.exited) {
-        background.output += data;
-        parseBackgroundOutput(background);
-        if (!background.exited) publishOutputDelta(background, data);
+        const parsed = parseCommandOutput(background, data);
+        background.output += parsed.text;
+        if (parsed.cwdEntered === false) background.cwd = handle.cwd;
+        if (parsed.cwdEntered !== undefined) lastCwd = background.cwd;
+        publishOutputDelta(background, parsed.text);
+        if (parsed.exitCode !== undefined) {
+          void completeBackgroundCommand(background, parsed.exitCode).catch(() => undefined);
+          if (activeBackground === background) activeBackground = null;
+        }
         background.lastOutputAt = Date.now();
         notifyShellChanged(background.id);
         return;
@@ -943,63 +1001,18 @@ export function createShellSupervisor(deps: ShellSupervisorOptions) {
     }
   };
 
-  const parsePendingOutput = (): void => {
-    if (!pendingCommand) return;
-    const { token } = pendingCommand;
-    const sentinelPattern = commandSentinelPattern(token);
-    let match: RegExpExecArray | null;
-    sentinelPattern.lastIndex = 0;
-    while ((match = sentinelPattern.exec(outputBuffer)) !== null) {
-      const sentinelLine = match[1];
-      if (sentinelLine === "B") {
-        // Begin sentinel — remove everything up to and including it
-        outputBuffer = outputBuffer.slice(match.index + match[0].length);
-        sentinelPattern.lastIndex = 0;
-      } else if (sentinelLine?.startsWith("C:")) {
-        if (sentinelLine === "C:0") pendingCommand.cwd = sessionHandle?.cwd ?? pendingCommand.cwd;
-        lastCwd = pendingCommand.cwd;
-        outputBuffer = outputBuffer.slice(0, match.index) + outputBuffer.slice(match.index + match[0].length);
-        sentinelPattern.lastIndex = 0;
-      } else if (sentinelLine?.startsWith("E:")) {
-        const exitCode = parseInt(sentinelLine.slice(2), 10);
-        // Remove the sentinel from output
-        outputBuffer = outputBuffer.slice(0, match.index) + outputBuffer.slice(match.index + match[0].length);
-        completeCommand(exitCode, disposeRequested);
-        return;
-      }
-    }
-  };
-
-  const parseBackgroundOutput = (background: BackgroundShell): void => {
-    const sentinelPattern = commandSentinelPattern(background.token);
-    let match: RegExpExecArray | null;
-    sentinelPattern.lastIndex = 0;
-    while ((match = sentinelPattern.exec(background.output)) !== null) {
-      const sentinelLine = match[1];
-      if (sentinelLine === "B") {
-        background.output = background.output.slice(match.index + match[0].length);
-        sentinelPattern.lastIndex = 0;
-      } else if (sentinelLine?.startsWith("C:")) {
-        if (sentinelLine === "C:0") background.cwd = background.handle.cwd;
-        lastCwd = background.cwd;
-        background.output = background.output.slice(0, match.index) + background.output.slice(match.index + match[0].length);
-        sentinelPattern.lastIndex = 0;
-      } else if (sentinelLine?.startsWith("E:")) {
-        background.exitCode = parseInt(sentinelLine.slice(2), 10);
-        background.output = background.output.slice(0, match.index) + background.output.slice(match.index + match[0].length);
-        void completeBackgroundCommand(background, background.exitCode).catch(() => undefined);
-        if (activeBackground === background) activeBackground = null;
-        return;
-      }
-    }
-  };
-
   const completeCommand = (exitCode: number | null, cancelled: boolean, disposedResult = false): void => {
     if (!pendingCommand) return;
     pendingCommand.cancelTimeout();
     pendingCommand.abortCleanup?.();
     const cmd = pendingCommand;
     pendingCommand = null;
+
+    if (cmd.outputStarted && cmd.frameBuffer) {
+      outputBuffer += cmd.frameBuffer;
+      publishOutputDelta(cmd, cmd.frameBuffer);
+      cmd.frameBuffer = "";
+    }
 
     const cleanedOutput = stripControlSequences(outputBuffer);
     outputBuffer = "";
@@ -1227,6 +1240,8 @@ export function createShellSupervisor(deps: ShellSupervisorOptions) {
             lastOutputAt: stripControlSequences(outputBuffer).length > 0 ? Date.now() : null,
             observedOutputBytes: pendingCommand?.observedOutputBytes ?? 0,
             outputControlState: pendingCommand?.outputControlState ?? "text",
+            frameBuffer: pendingCommand?.frameBuffer ?? "",
+            outputStarted: pendingCommand?.outputStarted ?? false,
             writer,
             handle,
             timing,
@@ -1277,6 +1292,8 @@ export function createShellSupervisor(deps: ShellSupervisorOptions) {
           timing,
           observedOutputBytes: 0,
           outputControlState: "text",
+          frameBuffer: "",
+          outputStarted: false,
           ...(options.toolCallId === undefined ? {} : { toolCallId: options.toolCallId }),
           ...(options.signal === undefined ? {} : {
             abortCleanup: () => options.signal?.removeEventListener("abort", onAbort),

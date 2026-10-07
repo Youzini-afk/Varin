@@ -5,7 +5,7 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import type { HarnessActorContext, HarnessActorIdentity, HarnessServiceMap } from "@varin/protocol";
 import { createDocumentAuthority } from "../documents/authority.js";
 import { createHarnessPathAuthority } from "./path-authority.js";
-import { createShellExecService, registerHarnessServices } from "./harness-services.js";
+import { createShellExecService, createShellReadService, registerHarnessServices } from "./harness-services.js";
 import { createHarnessRouter, type HarnessServiceContext } from "./router.js";
 import { createIsolatedTerminalSessionApi } from "../terminal/isolated-session-api.test-helper.js";
 import { discoverShells } from "./shell-discovery.js";
@@ -288,7 +288,7 @@ describe("production shell assembly", () => {
   it.skipIf(process.env.VARIN_REQUIRE_RELEASE_KERNEL !== "1" || process.platform !== "win32")("executes consecutive commands and preserves non-zero exit through PowerShell", async () => {
     const discovered = discoverShells();
     expect(discovered.hasPowerShell, "PowerShell should be discovered on this Windows machine").toBe(true);
-    // Keep the real path long enough to wrap a path-bearing PTY control record.
+    // Exercise long paths and wrapped PowerShell output through the real PTY.
     const workspace = mkdtempSync(join(tmpdir(), "shell-powershell-directory-long-enough-to-wrap-the-control-record-"));
     const nested = join(workspace, "nested"); mkdirSync(nested);
     const envName = `VARIN_TEST_PS_SCOPE_${process.pid}`;
@@ -311,23 +311,36 @@ describe("production shell assembly", () => {
       shellSetting: "powershell",
     });
     const ctx = serviceContext("session-powershell", "ws-powershell");
-    const first = await createShellExecService(host).handle(
-      { command: `Remove-Item Env:${envName} -ErrorAction SilentlyContinue; $env:${envName} = 'retained'; Set-Location -LiteralPath '${nested.replace(/'/g, "''")}' ; Set-Content -LiteralPath cwd-proof.txt -Value varin-powershell-one; Write-Output varin-powershell-one; (Get-Location).Path`, cwd: workspace, waitMs: 15_000 },
-      ctx,
-    );
-    const second = await createShellExecService(host).handle(
-      { command: `if (Test-Path Env:${envName}) { Write-Output "leaked:$env:${envName}" } else { Write-Output clean }; (Get-Location).Path`, waitMs: 15_000 },
-      ctx,
-    );
-    const failed = await createShellExecService(host).handle(
-      { command: "cmd.exe /c exit 7", waitMs: 15_000 },
-      ctx,
-    );
-    expect(first).toMatchObject({ kind: "completed", exitCode: 0 });
-    expect(second).toMatchObject({ kind: "completed", exitCode: 0, stdout: expect.stringContaining("clean") });
+    const exec = createShellExecService(host);
+    const read = createShellReadService(host);
+    const run = async (command: string, cwd?: string) => {
+      // waitMs bounds observation, not execution. Await the accepted command's
+      // real completion before dispatching the next command on this shell.
+      const deadline = Date.now() + 30_000;
+      const started = await exec.handle({ command, ...(cwd ? { cwd } : {}), waitMs: 0 }, ctx);
+      if (started.kind === "spawn-failed") throw new Error(started.hint);
+      if (started.kind === "completed") return started;
+      let stdout = started.kind === "background" ? started.outputSoFar : "";
+      while (true) {
+        const remaining = deadline - Date.now();
+        if (remaining <= 0) throw new Error(`PowerShell did not complete the accepted command: ${stdout}`);
+        const observed = await read.handle({ id: started.id, waitMs: remaining }, ctx);
+        stdout += observed.text;
+        if (!observed.running) {
+          expect(observed.spawnFailed, stdout).toBeUndefined();
+          expect(observed.unavailable, stdout).toBeUndefined();
+          return { ...observed, stdout };
+        }
+      }
+    };
+    const first = await run(`Remove-Item Env:${envName} -ErrorAction SilentlyContinue; $env:${envName} = 'retained'; Set-Location -LiteralPath '${nested.replace(/'/g, "''")}' ; Set-Content -LiteralPath cwd-proof.txt -Value varin-powershell-one; Write-Output varin-powershell-one; (Get-Location).Path`, workspace);
+    const second = await run(`if (Test-Path Env:${envName}) { Write-Output "leaked:$env:${envName}" } else { Write-Output clean }; (Get-Location).Path`);
+    const failed = await run("cmd.exe /c exit 7");
+    expect(first).toMatchObject({ exitCode: 0 });
+    expect(second).toMatchObject({ exitCode: 0, stdout: expect.stringContaining("clean") });
     expectCwd(first, workspace);
     expectCwd(second, workspace);
-    expect(failed).toMatchObject({ kind: "completed", exitCode: 7 });
+    expect(failed).toMatchObject({ exitCode: 7 });
     const supervisor = host.getShellSupervisor("session-powershell")!;
     expect(await supervisor.exec("Write-Output after-native-error", { waitMs: 10_000 }))
       .toMatchObject({ kind: "completed", exitCode: 0 });
@@ -338,11 +351,9 @@ describe("production shell assembly", () => {
     expect(missingCwd).toMatchObject({ kind: "completed", exitCode: 1 });
     expectCwd(missingCwd, workspace);
     expect(existsSync(join(workspace, "marker.txt"))).toBe(false);
-    if (first.kind === "completed") {
-      expect(first.stdout).toContain("varin-powershell-one");
-      expect(readFileSync(join(nested, "cwd-proof.txt"), "utf8").trim()).toBe("varin-powershell-one");
-    }
-    if (second.kind === "completed") expect(second.stdout).toContain("clean");
+    expect(first.stdout).toContain("varin-powershell-one");
+    expect(readFileSync(join(nested, "cwd-proof.txt"), "utf8").trim()).toBe("varin-powershell-one");
+    expect(second.stdout).toContain("clean");
   }, 45_000);
 
   nativeAuthorityIt("completes background verification from the real command lifecycle without shell.read", async () => {

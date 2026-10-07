@@ -244,14 +244,14 @@ describe('useUIStore computer surface (BC8)', () => {
 describe('useUIStore per-surface panel widths', () => {
   const directory = '/repo';
 
-  test('setContextPanelWidth stores a clamped manual width for one mode only', () => {
+  test('setContextPanelWidth preserves narrow manual widths without changing other modes', () => {
     useUIStore.getState().openContextPanelTab(directory, { mode: 'diff' });
     useUIStore.getState().setContextPanelWidth(directory, 'diff', 700);
     useUIStore.getState().setContextPanelWidth(directory, 'git', 100);
 
     const state = useUIStore.getState().contextPanelByDirectory[directory];
     expect(state?.widthByMode.diff).toBe(700);
-    expect(state?.widthByMode.git).toBe(380);
+    expect(state?.widthByMode.git).toBe(100);
     expect(state?.widthByMode.browser).toBe(undefined);
   });
 });
