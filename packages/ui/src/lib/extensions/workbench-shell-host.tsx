@@ -1,4 +1,5 @@
 import React from 'react';
+import { getRuntimeEndpointGeneration } from '@varin/application-client';
 import { WorkbenchRecoveryShell } from '@/components/layout/WorkbenchRecoveryShell';
 import { Button } from '@/components/ui/button';
 import { useI18n } from '@/lib/i18n';
@@ -69,18 +70,38 @@ export const WorkbenchShellHost: React.FC<{
     contributionInstanceKey: string;
   } | null>(null);
   const workspaceId = workspace.status === 'ready' ? workspace.workspaceId : undefined;
-  const { resolved, view } = resolveWorkbenchShellView(
+  const target = resolveWorkbenchShellView(
     catalog.snapshot,
     varinSurfaceRuntime.surface,
     workspaceId,
     surfaceSnapshot,
   );
-  const resolvedProfileId = resolved?.profileId;
-  const resolvedShellContributionId = resolved?.shellContributionId;
   const selectedShell = surfaceSnapshot.visibleContributions.find((contribution) => (
     contribution.descriptor.replacement?.target === WORKBENCH_REPLACEMENT_TARGETS.shell
   ));
   const selectedShellInstanceKey = selectedShell ? workbenchContributionInstanceKey(selectedShell) : null;
+  const owner = JSON.stringify([getRuntimeEndpointGeneration(), catalog.snapshot?.catalog.hostId]);
+  const paintedShell = React.useRef<{
+    owner: string;
+    resolved: NonNullable<typeof target.resolved>;
+    workspaceId?: string;
+    contributionInstanceKey: string;
+  } | null>(null);
+  if (paintedShell.current?.owner !== owner) paintedShell.current = null;
+  if (workspace.status !== 'loading' && workspace.status !== 'error' && target.view === 'ready'
+    && target.resolved && selectedShellInstanceKey
+    && selectedShell?.descriptor.id === target.resolved.shellContributionId) {
+    paintedShell.current = { owner, resolved: target.resolved, workspaceId, contributionInstanceKey: selectedShellInstanceKey };
+  }
+  const previous = paintedShell.current;
+  const retainShell = workspace.status === 'loading' && previous
+    && previous.contributionInstanceKey === selectedShellInstanceKey
+    && resolveWorkbenchShellView(catalog.snapshot, varinSurfaceRuntime.surface, previous.workspaceId, surfaceSnapshot).view === 'ready';
+  // Only the presentation continues. Consumers still see the unresolved target workspace.
+  const resolved = retainShell ? previous.resolved : target.resolved;
+  const view = retainShell ? 'ready' : target.view;
+  const resolvedProfileId = resolved?.profileId;
+  const resolvedShellContributionId = resolved?.shellContributionId;
   const handleShellMountReady = React.useCallback((
     contributionId: string,
     contributionInstanceKey: string,
@@ -136,7 +157,7 @@ export const WorkbenchShellHost: React.FC<{
   ]);
 
   let content: React.ReactNode;
-  if (workspace.status === 'loading') content = fallback;
+  if (workspace.status === 'loading' && !retainShell) content = fallback;
   else if (workspace.status === 'error') {
     content = <WorkspaceResolutionFailure errorMessage={workspace.errorMessage} retry={workspace.retry} />;
   } else if (view === 'loading' || !resolved) content = fallback;

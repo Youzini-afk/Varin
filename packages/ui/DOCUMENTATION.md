@@ -34,12 +34,20 @@ Hidden/exiting controls are inert. Resource-panel default widths adapt to remain
 replacing an explicit user resize. Native Monaco diff views use inline layout in a narrow editor
 unless their caller explicitly selects a presentation.
 
-The composer adapts to its own width, keeping primary actions at the lower-right edge. Its pending and
-live instances share a motion identity scoped to their `PiChatView`, while draft/session state remains
-in its existing stores. Queue rows animate native identities; an exiting row stops rendering its edit
-form before a consumed message's retained draft is shown. Working marks, input-frame sweeps, attachment
+The composer adapts to its own width, keeping primary actions at the lower-right edge. Pending drafts,
+history hydration and live conversations share one mounted composer scoped to their `PiChatView`,
+while draft/session state remains in its existing stores. Queue rows animate native identities; an
+exiting row stops rendering its edit form before a consumed message's retained draft is shown. Working marks, input-frame sweeps, attachment
 arrival and panel movement honor reduced-motion preferences. These presentation changes do not add
 model calls, task states, prompt settings or a second document/queue authority.
+
+`WorkbenchShellHost` keeps an already rendered shell mounted while a different directory resolves
+within the same Host and contribution generation. This includes the sidebar's general new draft,
+returning to a project conversation, and navigation between projects. The workspace resolver still
+reports the target as loading; the previous workspace ID is never supplied as that target's identity.
+Resolution errors, Host changes, and revoked/replaced contributions do not retain the old shell.
+Once resolution is ready the selected layout updates, and the chat/composer can finish their own
+continuous transition without being recreated by a temporary blank outer shell.
 
 ## Module map
 
