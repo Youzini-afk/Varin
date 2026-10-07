@@ -696,7 +696,7 @@ export function createExploreQueryStartService(
           inputSource: stored.inputContext.source,
           decisionMode,
           duties: stored.duties,
-          ...(fastDecision ? { fastDecision: { status: fastDecision.status, ...('message' in fastDecision && fastDecision.message ? { message: fastDecision.message } : {}) } } : {}),
+          ...(fastDecision ? { fastDecision: { status: fastDecision.status } } : {}),
         };
       } catch (error) {
         if (stored) host.exploreQueryStore.release(ctx.actor, stored.id);
@@ -810,7 +810,6 @@ export function createExploreQueryFinishService(
     handle: async (params: ExploreQueryFinishParams & { model?: ExploreModelParticipation }, ctx) => {
       const stored = requireQuery(host, ctx, params.queryId, "finish");
       const model = params.model;
-      if (model && stored.duties) model.duties = stored.duties;
       const inferenceScopeId = stored.workspaceId ?? sessionScopeId(stored.sessionId);
       const coverage = queryCoverage.get(stored);
       const packOptions = {
@@ -862,7 +861,7 @@ export function createExploreQueryFinishService(
               ? "unconfigured"
               : "failed";
           if (fastDecision.status === "invalid" || fastDecision.status === "unavailable") {
-            model.note = `${model.note ? `${model.note} ` : ""}${fastDecision.message ?? `Fast decision is ${fastDecision.status}.`} Material selection: ${stored.duties?.selection ?? 'source'}.`;
+            model.note = `${model.note ? `${model.note} ` : ""}${fastDecision.message ?? `Fast decision is ${fastDecision.status}.`}`;
           }
         }
         const shouldRerank = stored.duties?.selection === 'rerank' && (stored.decisionMode === 'rerank' || model?.select !== 'used');

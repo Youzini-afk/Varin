@@ -253,7 +253,7 @@ export function RetrievalSettings(props: HarnessSettingsPageProps) {
             <SelectItem key={decision} value={decision}>{t(`settings.page.harness.codeRetrieval.mode.${decision}`)}</SelectItem>)}</SelectContent>
         </Select>
       </SettingsFieldRow>
-      <p className="typography-meta text-muted-foreground">{t(`settings.page.harness.codeRetrieval.mode.${props.harness.codeRetrieval.decision}.description`)}</p>
+      <p className="whitespace-pre-line typography-meta text-muted-foreground">{t(`settings.page.harness.codeRetrieval.mode.${props.harness.codeRetrieval.decision}.description`)}</p>
       <HarnessModelField {...props} slot="explore" />
     </SettingsSection>
     <InferenceSettings {...props} kind="rerank" localSemanticStatus={null} />
