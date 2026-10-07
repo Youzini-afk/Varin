@@ -60,7 +60,8 @@ export function createRequestContextInjector(bridge: HostServicesBridge): NonNul
     return {
       request: { ...request, context: { ...request.context, messages: [...request.context.messages, ...additions] } },
       ...(material?.content && environmentContent ? {
-        retained: {
+        retained: [{
+          customType: 'varin-context',
           content: environmentContent,
           details: {
             deliveryId: material.deliveryId,
@@ -70,7 +71,7 @@ export function createRequestContextInjector(bridge: HostServicesBridge): NonNul
             materialRevisions: material.materialRevisions ?? {},
             gitObserved: material.content.includes("<git>"),
           },
-        },
+        }],
         confirm: async () => {
           if (material.deliveryId) {
             // Native history is the durable receipt if this acknowledgement is lost.

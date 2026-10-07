@@ -9,7 +9,7 @@ const item = (note: AgentMemoryNote): MemoryItem => ({ id: note.id, content: not
   createdAt: Date.parse(note.updatedAt), recallCount: 0,
   ...(note.source ? { source: { kind: note.source.label, ...(note.source.sessionId ? { sessionId: note.source.sessionId } : {}) } } : {}),
 });
-/** Ordinary notes are always present in context; only Bot calls use the recall store. */
+/** Ordinary notes use the scoped note store; only Bot calls use the recall store. */
 export function withAgentMemory<M extends Method>(host: HarnessServiceHost, method: M, botService: HarnessService<M>): HarnessService<M> {
   return { ...botService, handle: async (params, ctx) => {
     const service = host.agentPersonalization;
@@ -33,10 +33,12 @@ export function withAgentMemory<M extends Method>(host: HarnessServiceHost, meth
       case 'memory.remember': {
         const target = scope();
         const duplicate = notes.find(note => note.content === input.content?.trim() && JSON.stringify(note.scope) === JSON.stringify(target));
-        if (duplicate) result = { created: false, duplicate: true, item: item(duplicate) };
+        if (duplicate) result = { created: false, duplicate: true, item: item(duplicate),
+          agentMemoryMutation: { revision: context.revision, changes: [{ id: duplicate.id, note: duplicate }] } };
         else {
           const saved = await service.saveNote({ scope: target, content: input.content ?? '', source: { label: 'agent', sessionId: ctx.sessionId } });
-          result = { created: true, item: item(saved.result) };
+          result = { created: true, item: item(saved.result),
+            agentMemoryMutation: { revision: saved.revision, changes: [{ id: saved.result.id, note: saved.result }] } };
         }
         break;
       }
@@ -51,14 +53,16 @@ export function withAgentMemory<M extends Method>(host: HarnessServiceHost, meth
       case 'memory.correct': {
         if (!found) throw new HarnessServiceError('not-found', 'Memory is not in this conversation’s scopes');
         const saved = await service.saveNote({ id: found.id, scope: found.scope, content: input.content ?? '' });
-        result = { corrected: true, id: saved.result.id };
+        result = { corrected: true, id: saved.result.id,
+          agentMemoryMutation: { revision: saved.revision, changes: [{ id: saved.result.id, note: saved.result }] } };
         break;
       }
-      case 'memory.forget':
+      case 'memory.forget': {
         if (!found) throw new HarnessServiceError('not-found', 'Memory is not in this conversation’s scopes');
-        await service.removeNote(found.id);
-        result = { forgotten: true };
+        const saved = await service.removeNote(found.id);
+        result = { forgotten: true, agentMemoryMutation: { revision: saved.revision, changes: [{ id: found.id, note: null }] } };
         break;
+      }
     }
     return result as HarnessServiceMap[M]['result'];
   } };

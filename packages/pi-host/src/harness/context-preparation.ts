@@ -135,6 +135,7 @@ export interface ContextPreparationOptions {
   /** Per-request injection seam forwarded to the request boundary (D-300). */
   inject?: ContextRequestBoundaryOptions["inject"];
   sent?: ContextRequestBoundaryOptions["sent"];
+  prepareCompaction?: (result: CompactionResult, signal: AbortSignal, request?: ContextModelRequest) => Promise<CompactionResult>;
   onFailure?: (phase: "prepare" | "commit", message: string) => void;
   onSuccess?: (phase: "prepare" | "commit") => void;
   onStatus?: () => void;
@@ -736,13 +737,14 @@ export function createContextPreparationExtension(
       if (event.signal.aborted) return undefined;
       if (cand.status === "ready" && candidateValid(cand, ctx, ctx.sessionManager.getBranch())) {
         options.onSuccess?.("commit");
-        return {
+        const result = {
           firstKeptEntryId: cand.firstKeptEntryId,
           summary: cand.summary!,
           tokensBefore: event.preparation.tokensBefore,
           ...(cand.usage === undefined ? {} : { usage: cand.usage }),
           details: { varinCompactionTrace: cand.trace ?? { taskId: cand.id, entries: [] } },
         };
+        return options.prepareCompaction ? await options.prepareCompaction(result, event.signal, latestRequest) : result;
       }
       options.onFailure?.("commit", cand.error ?? "The prepared source was cancelled or changed");
       return undefined;
@@ -795,13 +797,14 @@ export function createContextPreparationExtension(
         throw new ContextCapacityError("The summary source changed while preparation was running");
       }
       options.onSuccess?.("commit");
-      return {
+      const compaction = {
         firstKeptEntryId: fixed.firstKeptEntryId,
         summary: result.summary,
         tokensBefore: event.preparation.tokensBefore,
         ...(result.usage === undefined ? {} : { usage: result.usage as unknown as Usage }),
         ...(result.trace === undefined ? {} : { details: { varinCompactionTrace: result.trace } }),
       };
+      return options.prepareCompaction ? await options.prepareCompaction(compaction, event.signal, latestRequest) : compaction;
     } catch (error) {
       const message = error instanceof Error ? error.message : String(error);
       options.onFailure?.("commit", message);

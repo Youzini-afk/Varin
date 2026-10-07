@@ -12,8 +12,8 @@ export function createRecallTool(bridge: HostServicesBridge, _sessionId: string)
   return defineTool({
     name: "recall",
     label: "Recall",
-    description: "Search this workspace's memory of past sessions and decisions",
-    promptSnippet: "recall: search this workspace's memory of past sessions and decisions",
+    description: "Retrieve relevant memories from this Bot’s memory and user memory. query describes the information to find; results include matching entries and their sources.",
+    promptSnippet: "recall: retrieve this Bot’s relevant memories",
     parameters: RecallParams,
     executionMode: "parallel",
     execute: async (_toolCallId, params, _signal, _onUpdate, _ctx) => {

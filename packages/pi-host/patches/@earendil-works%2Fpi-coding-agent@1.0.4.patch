@@ -428,6 +428,15 @@ index ec5f44e..92fb20c 100644
          if (!(await this._modelRuntime.checkAuth(model.provider))) {
              throw new Error(`No API key for ${model.provider}/${model.id}`);
          }
+@@ -2228,7 +2269,7 @@ export class AgentSession {
+             if (this._compactionAbortController.signal.aborted) {
+                 throw new Error("Compaction cancelled");
+             }
+-            this.sessionManager.appendCompaction(summary, firstKeptEntryId, tokensBefore, details, fromExtension, usage);
++            this.sessionManager.appendCompaction(summary, firstKeptEntryId, tokensBefore, details, fromExtension, usage, extensionCompaction?.systemMessage);
+             const newEntries = this.sessionManager.getEntries();
+             this._refreshFinalizedContext();
+             const estimatedTokensAfter = estimateMessagesTokens(this.sessionManager.buildSessionProjection().messages);
 @@ -3566,4 +3607,4 @@ export class AgentSession {
          return this._extensionRunner;
      }
@@ -701,7 +710,7 @@ index 83bf108..46ca872 100644
      return rules.map((rule) => `- ${rule}`).join("\n");
  }
  /** Build the ordered, independently replaceable sections of the structured system prompt. */
-@@ -80,19 +62,16 @@ export function buildSystemPromptSections(input) {
+@@ -80,19 +62,11 @@ export function buildSystemPromptSections(input) {
      }
      else {
          promptSections.preamble =
@@ -713,20 +722,17 @@ index 83bf108..46ca872 100644
 +        promptSections.tools = tools;
          promptSections.rules = buildRules(declaredTools, toolGuidelines, promptGuidelines);
 -        promptSections.docs = `Pi documentation (read only when the user asks about pi itself, its SDK, extensions, themes, skills, or TUI):
-+        promptSections.docs = `Pi SDK reference files:
- - Main documentation: ${getReadmePath()}
- - Additional docs: ${getDocsPath()}
+-- Main documentation: ${getReadmePath()}
+-- Additional docs: ${getDocsPath()}
 -- Examples: ${getExamplesPath()} (extensions, custom tools, SDK)
 -- When reading pi docs or examples, resolve docs/... under Additional docs and examples/... under Examples, not the current working directory
 -- When asked about: extensions (docs/extensions.md, examples/extensions/), themes (docs/themes.md), skills (docs/skills.md), prompt templates (docs/prompt-templates.md), TUI components (docs/tui.md), keybindings (docs/keybindings.md), SDK integrations (docs/sdk.md), custom providers (docs/custom-provider.md), adding models (docs/models.md), pi packages (docs/packages.md), environment variables (docs/environment-variables.md), MCP servers (docs/mcp.md), codemode scripts and non-LLM models such as classifiers and image models (docs/codemode.md)
 -- When working on pi topics, read the docs and examples, and follow .md cross-references before implementing
 -- Always read pi .md files completely and follow links to related docs (e.g., tui.md for TUI API details)`;
-+- Examples: ${getExamplesPath()}
-+Paths beginning with docs/ and examples/ are relative to the SDK directories above.`;
      }
      if (appendSystemPrompt)
          promptSections.addendum = appendSystemPrompt;
-@@ -149,4 +128,4 @@ export function diffSystemPromptSections(previous, current) {
+@@ -149,4 +123,4 @@ export function diffSystemPromptSections(previous, current) {
      }
      return Object.keys(patch).length > 0 ? patch : undefined;
  }
@@ -1154,3 +1160,71 @@ index d79f987..cc00c96 100644
  - MCP tools resolve to their `CallToolResult`, including `isError` and `structuredContent`.
  - `read` resolves to the file's text, or for an image to an image block `{ type: "image", data, mimeType, note }` that `image()` shows. `data` is the base64 image the model would see and `note` the text that goes with it, such as resize hints.
  - Other tools, such as `edit` and `write`, resolve to their text output.
+diff --git a/dist/core/tools/read.js b/dist/core/tools/read.js
+--- a/dist/core/tools/read.js
++++ b/dist/core/tools/read.js
+@@ -15,4 +15,4 @@
+ export const readToolSystemPromptContribution = {
+     snippet: "Read file contents",
+-    guidelines: ["Use read to examine files instead of cat or sed."],
++    guidelines: ["read returns file text or image content. offset/limit select a line range; truncated text includes a continuation offset."],
+ };
+diff --git a/dist/core/tools/write.js b/dist/core/tools/write.js
+--- a/dist/core/tools/write.js
++++ b/dist/core/tools/write.js
+@@ -12,4 +12,4 @@
+ export const writeToolSystemPromptContribution = {
+     snippet: "Create or overwrite files",
+-    guidelines: ["Use write only for new files or complete rewrites."],
++    guidelines: ["write creates a file or replaces its complete contents; missing parent directories are created."],
+ };
+diff --git a/dist/core/tools/edit.js b/dist/core/tools/edit.js
+--- a/dist/core/tools/edit.js
++++ b/dist/core/tools/edit.js
+@@ -18,13 +18,11 @@
+     edits: Type.Array(replaceEditSchema, {
+-        description: "One or more targeted replacements. Each edit is matched against the original file, not incrementally. Do not include overlapping or nested edits. If two changes touch the same block or nearby lines, merge them into one edit instead.",
++        description: "One or more replacements, all matched against the original file. Each oldText must match uniquely; overlapping or nested matches are rejected.",
+     }),
+ }, {});
+ export const editToolSystemPromptContribution = {
+     snippet: "Make precise file edits with exact text replacement, including multiple disjoint edits in one call",
+     guidelines: [
+-        "Use edit for precise changes (edits[].oldText must match exactly)",
+-        "When changing multiple separate locations in one file, use one edit call with multiple entries in edits[] instead of multiple edit calls",
+-        "Each edits[].oldText is matched against the original file, not after earlier edits are applied. Do not emit overlapping or nested edits. Merge nearby changes into one edit.",
+-        "Keep edits[].oldText as small as possible while still being unique in the file. Do not pad with large unchanged regions.",
++        "edit applies one or more disjoint text replacements to a file in one call. All oldText values are matched against the original contents.",
++        "Each oldText must match exactly and uniquely. Missing, ambiguous or overlapping matches fail before the file is changed.",
+     ],
+ };
+diff --git a/dist/core/session-manager.js b/dist/core/session-manager.js
+--- a/dist/core/session-manager.js
++++ b/dist/core/session-manager.js
+@@ -879,6 +879,6 @@
+     /** Append a compaction summary as child of current leaf, then advance leaf. Returns entry id. */
+-    appendCompaction(summary, firstKeptEntryId, tokensBefore, details, fromHook, usage) {
++    appendCompaction(summary, firstKeptEntryId, tokensBefore, details, fromHook, usage, checkpointSystemMessage) {
+         const timestamp = new Date().toISOString();
+-        const systemMessage = getCurrentSystemMessage(this.buildSessionProjection().messages);
++        const systemMessage = checkpointSystemMessage ?? getCurrentSystemMessage(this.buildSessionProjection().messages);
+         const id = generateId(this.byId);
+         const entry = {
+diff --git a/dist/core/session-manager.d.ts b/dist/core/session-manager.d.ts
+--- a/dist/core/session-manager.d.ts
++++ b/dist/core/session-manager.d.ts
+@@ -270,3 +270,3 @@
+     /** Append a compaction summary as child of current leaf, then advance leaf. Returns entry id. */
+-    appendCompaction<T = unknown>(summary: string, firstKeptEntryId: string | null, tokensBefore: number, details?: T, fromHook?: boolean, usage?: Usage): string;
++    appendCompaction<T = unknown>(summary: string, firstKeptEntryId: string | null, tokensBefore: number, details?: T, fromHook?: boolean, usage?: Usage, checkpointSystemMessage?: SystemMessage): string;
+     /** Append a custom entry (for extensions) as child of current leaf, then advance leaf. Returns entry id. */
+diff --git a/dist/core/compaction/compaction.d.ts b/dist/core/compaction/compaction.d.ts
+--- a/dist/core/compaction/compaction.d.ts
++++ b/dist/core/compaction/compaction.d.ts
+@@ -25,4 +25,6 @@
+     /** Extension-specific data (e.g., ArtifactIndex, version markers for structured compaction) */
+     details?: T;
++    /** Effective system state published atomically with the summary and extension details. */
++    systemMessage?: import("@earendil-works/pi-ai").SystemMessage;
+ }
+ export interface CompactionSettings {

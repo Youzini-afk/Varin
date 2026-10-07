@@ -83,10 +83,11 @@ export function AgentPromptPage() {
     ...(sessionId ? [{ kind: 'session' as const, id: sessionId }] : [])];
   const activeKeys = new Set(scopes.map(agentScopeKey));
   const preview = snapshot ? renderAgentSystemPrompt(personalizeAgentSystemPrompt(snapshot.original, {
-    mode: snapshot.mode, sessionId: sessionId ?? snapshot.sessionId,
+    mode: snapshot.mode, revision: snapshot.memorySnapshot?.revision ?? settings.catalog?.revision ?? 0,
+    threadRole: snapshot.personalization.threadRole, sessionId: sessionId ?? snapshot.sessionId,
     profiles: scopes.map(owner => ({ scope: owner, profile: agentScopeKey(owner) === agentScopeKey(scope)
       ? { sections: overrides } : settings.catalog?.prompts[agentScopeKey(owner)] ?? { sections: {} } })),
-    memories: settings.catalog?.memories.filter(note => activeKeys.has(agentScopeKey(note.scope))) ?? [],
+    memories: snapshot.memorySnapshot?.memories ?? settings.catalog?.memories.filter(note => activeKeys.has(agentScopeKey(note.scope))) ?? [],
   })) : '';
   const save = async (reset = false) => {
     if (!settings.catalog) return;

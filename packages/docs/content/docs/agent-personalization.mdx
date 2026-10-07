@@ -6,8 +6,10 @@ description: Manage scoped notes and edit the system instructions used by ordina
 # Agent memory and instructions
 
 Open **Settings → Memory** to add, edit, delete or move a note between global,
-project and conversation scopes. All matching notes are included in subsequent model
-requests. The Agent's `memory` tool uses the same notes; ordinary Agents do not use `recall`.
+project and conversation scopes. Changes save immediately. New conversations load matching
+notes; active conversations receive changes in tool results or appended messages. Their system
+memory snapshot updates when context compaction commits, reducing prefix changes during execution.
+The Agent's `memory` tool uses the same notes; ordinary Agents do not use `recall`.
 
 Open **Settings → System prompt** to edit the built-in instructions in the main text box.
 The density, style and autonomy selectors below it insert editable instructions. Manual text
@@ -15,7 +17,9 @@ is preserved. Global edits apply across ordinary Agent chats, with project and c
 edits taking precedence for sections they change. **Restore defaults** removes the selected
 scope's edits. Changes apply on the next model request, including within an ongoing chat.
 
-The complete preview includes project instructions, skills and matching memory notes.
+The complete preview includes project instructions, skills and the conversation's memory snapshot.
+Newly saved notes arrive at the conversation tail and join that snapshot when compaction commits.
+Restart and branch navigation restore the corresponding checkpoint.
 The last-request panel shows the system text observed at the last actual model request in
 the active runtime; it does not persist after the worker stops. Generated context continues
 to follow its source files and memory entries. Native instruction files keep their normal

@@ -8,7 +8,7 @@ export function installComputerAppSdk(
 ): void {
   type Options = { desktopId?: string; window?: number | string };
   type ReadOptions = { fresh?: boolean; emit?: boolean; textLimit?: number | 'max' };
-  type Binding = { observation: ComputerObservation; automationEpoch: string };
+  type Binding = { observation: ComputerObservation; automationEpoch: string; readOnly?: boolean };
   computer.getApp = async (selector: string | { pid: number; window?: number | string }, options: Options = {}) => {
     const app = typeof selector === 'string' ? selector : String(selector.pid);
     const bound = await call('getApp', [app, { ...options, ...(typeof selector === 'object' && selector.window !== undefined ? { window: selector.window } : {}) }]) as Binding;
@@ -70,19 +70,21 @@ export function installComputerAppSdk(
         return imageResult(observation, options);
       },
       async elements(options: ReadOptions = {}) { return (await read(false, options)).elements; },
-      async click(value: number | [number, number], options: Pick<ComputerAction, 'clickCount' | 'mouseButton' | 'clickMethod'> = {}) {
-        return act({ ...options, kind: 'click', ...point(value) }, Array.isArray(value));
-      },
-      async setValue(index: number, value: string) { return act({ kind: 'set_value', elementIndex: index, value }); },
-      async typeText(text: string) { return act({ kind: 'type', text }); },
-      async pressKey(key: string) { return act({ kind: 'key', key }); },
-      async scroll(value: number | [number, number], direction: NonNullable<ComputerAction['direction']>, pages = 1) {
-        return act({ kind: 'scroll', ...point(value), direction, pages }, Array.isArray(value));
-      },
-      async drag(from: [number, number], to: [number, number]) {
-        return act({ kind: 'drag', fromX: from[0], fromY: from[1], toX: to[0], toY: to[1] }, true);
-      },
-      async performSecondaryAction(index: number, action: string) { return act({ kind: 'secondary', elementIndex: index, action }); },
+      ...(bound.readOnly ? {} : {
+        async click(value: number | [number, number], options: Pick<ComputerAction, 'clickCount' | 'mouseButton' | 'clickMethod'> = {}) {
+          return act({ ...options, kind: 'click', ...point(value) }, Array.isArray(value));
+        },
+        async setValue(index: number, value: string) { return act({ kind: 'set_value', elementIndex: index, value }); },
+        async typeText(text: string) { return act({ kind: 'type', text }); },
+        async pressKey(key: string) { return act({ kind: 'key', key }); },
+        async scroll(value: number | [number, number], direction: NonNullable<ComputerAction['direction']>, pages = 1) {
+          return act({ kind: 'scroll', ...point(value), direction, pages }, Array.isArray(value));
+        },
+        async drag(from: [number, number], to: [number, number]) {
+          return act({ kind: 'drag', fromX: from[0], fromY: from[1], toX: to[0], toY: to[1] }, true);
+        },
+        async performSecondaryAction(index: number, action: string) { return act({ kind: 'secondary', elementIndex: index, action }); },
+      }),
     });
   };
 }

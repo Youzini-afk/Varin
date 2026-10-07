@@ -162,6 +162,8 @@ import {
 } from "./harness/counter-tracker.js";
 import { selectHarnessTools } from "./harness/select-tools.js";
 import { createAgentPromptRuntime } from "./harness/agent-personalization.js";
+import { memoryToolPresentation } from './harness/memory-tools.js';
+import { computerToolPresentation } from './harness/computer-tools.js';
 import { PI_CODEMODE_REFERENCE } from "./harness/pi-docs-tool.js";
 import { createToolResultTruncationExtension } from "./harness/tool-result-truncation.js";
 import { activeCompactionMessages } from "./harness/compaction-context.js";
@@ -589,6 +591,7 @@ export class SessionHost {
   #hostServicesBridge: HostServicesBridge | undefined;
   #agentPromptRuntime: ReturnType<typeof createAgentPromptRuntime> | undefined;
   #memoryMode: "agent" | "bot" = "agent";
+  #toolContext: Pick<import('@varin/protocol').AgentPersonalizationContext, 'mode' | 'projectId' | 'threadRole'> = { mode: 'agent', threadRole: 'main' };
   #harnessCounters: HarnessCounterTracker | undefined;
   #sessionToolAllowlist: string[] | undefined;
   #sessionModelSelection: ModelSelection | undefined;
@@ -951,9 +954,20 @@ export class SessionHost {
     const research = focus === "research" ? resolveResearchCapabilityOptions(settings.models) : [];
     const owned = new Set(session.getAllTools().filter(tool => tool.sourceInfo.source === "sdk").map(tool => tool.name));
     const dispatch = session.getToolDefinition("dispatch");
-    if (dispatch && owned.has("dispatch")) Object.assign(dispatch, dispatchToolPresentation(presets, research, session.getActiveToolNames()));
+    if (dispatch && owned.has("dispatch")) Object.assign(dispatch, dispatchToolPresentation(presets, research, session.getActiveToolNames(), this.#toolContext.threadRole));
     const send = session.getToolDefinition("send");
     if (send && owned.has("send")) Object.assign(send, sendToolPresentation(research));
+    const memory = session.getToolDefinition('memory');
+    if (memory && owned.has('memory')) Object.assign(memory, memoryToolPresentation(this.#toolContext));
+    const computer = session.getToolDefinition('computer');
+    if (computer && owned.has('computer')) Object.assign(computer, computerToolPresentation(this.#toolContext.threadRole));
+  }
+
+  #applyToolContext(context: import('@varin/protocol').AgentPersonalizationContext): void {
+    this.#memoryMode = context.mode;
+    this.#toolContext = { mode: context.mode, threadRole: context.threadRole, ...(context.projectId ? { projectId: context.projectId } : {}) };
+    this.#refreshThreadAgentTools();
+    this.session.setToolExclusions([...excludedWorkFocusTools(this.#workFocus.id), ...(context.mode === 'agent' ? ['recall'] : [])]);
   }
 
   publishWorkFocus(sessionId: string): boolean {
@@ -979,6 +993,12 @@ export class SessionHost {
     this.assertSession(sessionId);
     if (!this.#agentPromptRuntime) throw new HostError("unavailable", "System prompt inspection is unavailable");
     if (this.session.isIdle) await this.#applyPendingSettingsReload();
+    if (this.session.isIdle) {
+      const context = await this.#agentPromptRuntime.preferences(sessionId);
+      this.assertSession(sessionId);
+      this.#applyToolContext(context);
+      return this.#agentPromptRuntime.inspect(this.session, context);
+    }
     return this.#agentPromptRuntime.inspect(this.session);
   }
 
@@ -3492,6 +3512,7 @@ export class SessionHost {
       const promptRuntime = createAgentPromptRuntime(hostServicesBridge, () => this.#sessionInstructionsAvailable);
       this.#agentPromptRuntime = promptRuntime;
       this.#memoryMode = "agent";
+      this.#toolContext = { mode: 'agent', threadRole: 'main' };
       // Tool admission awaits the first read after the worker has been bound.
       // Issuing it while creating an unbound worker races Host registration.
       const harnessCounters = createHarnessCounterTracker();
@@ -3541,13 +3562,21 @@ export class SessionHost {
           noPromptTemplates: true,
           extensionFactories: [
             { hidden: true, name: "varin-agent-personalization", factory: (pi) => {
+              pi.on('tool_result', event => promptRuntime.toolResult(event));
+              pi.on('agent_end', () => promptRuntime.clearToolReceipts());
               pi.on("before_agent_start", async (event) => {
                 const context = await promptRuntime.preferences(sessionManager.getSessionId());
-                this.#memoryMode = context.mode;
-                this.#refreshThreadAgentTools();
-                this.session.setToolExclusions([...excludedWorkFocusTools(this.#workFocus.id), ...(context.mode === "agent" ? ["recall"] : [])]);
-                const dispatch = this.session.getToolDefinition("dispatch");
-                if (dispatch) event.systemPromptOptions.toolGuidelines.dispatch = [...(dispatch.promptGuidelines ?? [])];
+                this.#applyToolContext(context);
+                const sections = event.systemPromptOptions.sections;
+                for (const name of Object.keys(sections)) if (name.startsWith('agent_memory_')) delete sections[name];
+                Object.assign(sections, promptRuntime.memorySections(this.session, context));
+                for (const name of ['dispatch', 'memory', 'computer']) {
+                  const tool = this.session.getToolDefinition(name);
+                  if (tool) {
+                    event.systemPromptOptions.toolGuidelines[name] = [...(tool.promptGuidelines ?? [])];
+                    if (tool.promptSnippet) event.systemPromptOptions.toolSnippets[name] = tool.promptSnippet;
+                  }
+                }
               });
             } },
             { builtin: true, replaceable: true, factory: createCodemodeExtension({
@@ -3606,9 +3635,11 @@ export class SessionHost {
                   getProjectTrusted: () => settingsManager.isProjectTrusted(),
                   inject: async (request, session) => {
                     const personalized = await promptRuntime.inject(request, session);
-                    return createRequestContextInjector(hostServicesBridge)(personalized, session);
+                    const environment = await createRequestContextInjector(hostServicesBridge)(personalized?.request ?? request, session);
+                    return { ...environment, retained: [...(personalized?.retained ?? []), ...(environment?.retained ?? [])] };
                   },
                   sent: promptRuntime.sent,
+                  prepareCompaction: (result, signal, request) => promptRuntime.prepareCompaction(result, this.session, signal, request),
                   runCompactionTask: (spec, signal) =>
                     hostServicesBridge.request<"compaction.run">("compaction.run", spec, {
                       signal,
@@ -3908,6 +3939,7 @@ export class SessionHost {
           return resolveResearchCapabilityOptions(settings.models);
         },
         getActiveToolNames: () => this.session.getActiveToolNames(),
+        getThreadRole: () => this.#toolContext.threadRole,
         ...(this.#sessionToolAllowlist ? { sessionToolAllowlist: this.#sessionToolAllowlist } : {}),
       }));
       // The frozen launch selection must reach the session: options.model wins

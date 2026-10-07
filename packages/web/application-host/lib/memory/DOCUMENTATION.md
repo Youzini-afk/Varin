@@ -16,12 +16,33 @@ a conflict stays visible instead of silently overwriting another edit.
 The personalization path participates in the production JSON-body middleware for memory saves,
 deletes and prompt saves. Its HTTP regression uses that middleware rather than a test-only global parser.
 
-`session.instructions` resolves the actor's current ownership on each model request.
-Pi applies global, project, then session prompt section overrides and includes all matching
-notes as named system sections. Unchanged official sections continue to follow the runtime;
+`session.instructions` resolves the actor's current ownership, project, catalog revision and
+thread role. Tool presentation uses that identity at the run boundary: ordinary memory has
+global/project/session note parameters; Bot memory has provenance and revision-chain parameters.
+Main/Worker/read-only Computer and team presentation describes the calling role. A project scope
+is only offered when the conversation has a project. Host authorization remains authoritative.
+
+Pi applies global, project, then session prompt section overrides. Matching notes establish a
+system memory snapshot when the first run starts. The snapshot and its system sections are recorded in the native Pi branch;
+it stays unchanged while memory mutations arrive at the conversation tail. Direct memory results
+carry saved text/deletion and the committed revision. Nested calls, including Codemode, forward
+the same receipts through the enclosing tool result without relying on the script to print them.
+External/UI changes are retained as `varin-memory` messages only after the provider starts responding;
+failed requests retry undelivered changes. Per-entry receipt revisions handle out-of-order parallel
+results. Writes still commit immediately to the Rust authority; new conversations see current notes.
+
+A successful compaction stores the new `agentMemorySnapshot` and effective `systemMessage` in the same native compaction entry.
+Request-boundary capacity validation includes the new snapshot before publication. Preparing, cancelling or failing a
+summary never advances the snapshot. Reopening or navigating a branch reconstructs its checkpoint
+and delivered changes from Pi history; this is not another memory database. The next request renders
+the stored snapshot and appends any newer changes. Deleting the last note removes every memory section
+at the next committed snapshot. Compaction can change the cached prefix; this design avoids memory
+mutations rewriting that prefix between compactions, without promising provider cache hits.
+
+Unchanged official sections continue to follow the runtime;
 explicit edits remain user-owned. Reset removes only that scope's overrides. `SYSTEM.md`,
 `APPEND_SYSTEM.md`, project instructions, extensions and skills retain native Pi loading.
-The settings page shows the complete assembled preview and the last system text observed at
+The settings page shows the current memory snapshot in the assembled preview and the last system text observed at
 the actual model-request boundary. The latter is an in-memory observation of an attempted
 request, not evidence of provider delivery, and is lost when the worker stops.
 

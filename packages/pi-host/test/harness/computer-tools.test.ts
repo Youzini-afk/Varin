@@ -53,6 +53,23 @@ const observation = (id: string) => ({
 });
 
 describe("computer tool", () => {
+  it('requests observation by default for a read-only thread and exposes an observation-only bound app', async () => {
+    const { bridge, requests } = scriptedBridge({
+      'computer.access': () => ({ state: { leases: [], requests: [] } }),
+      'computer.control': () => ({ control: { desktopId: 'local-console', automationEpoch: 'epoch:read', executionId: 'read-run', owner: 'agent', reachable: true, since: 'now' } }),
+      'computer.observe': () => observation('read-1'),
+    });
+    const tool = createComputerTool(bridge, SESSION, () => 'read-only');
+    try {
+      assert.equal(isError(await execute(tool, { action: 'request', reason: 'inspect UI' })), undefined);
+      assert.equal((requests.find(request => request.method === 'computer.access')!.params as { access: string }).access, 'observe');
+      const result = await execute(tool, { action: 'run', script: "const readApp = await computer.getApp('notepad'); console.log(typeof readApp.click, typeof readApp.getAXState); await readApp.getAXState();" });
+      assert.equal(isError(result), undefined);
+      assert.match((result.content[0] as { text: string }).text, /undefined function/);
+      assert.equal(requests.some(request => request.method === 'computer.act'), false);
+    } finally { await execute(tool, { action: 'reset' }); }
+  });
+
   it('revokes a sleeping Computer evaluation without stopping other Agent work, and ignores cleanup from an older execution', async () => {
     let runId = 'first';
     let ready!: () => void;

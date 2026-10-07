@@ -111,8 +111,8 @@ export interface ContextRequestBoundaryOptions {
   /** Prepare candidate input before capacity admission; refresh after compaction. */
   inject?(request: ContextModelRequest, session: AgentSession): Promise<{
     request?: ContextModelRequest;
-    /** Only environment facts enter native history; the team snapshot remains transient. */
-    retained?: { content: string; details: Record<string, unknown> };
+    /** Delivered memory/environment changes enter history; the team snapshot remains transient. */
+    retained?: Array<{ customType: string; content: string; details: Record<string, unknown> }>;
     confirm?(): void | Promise<void>;
   } | undefined>;
   onEvent?(event: AgentSessionEvent): void;
@@ -186,7 +186,7 @@ export function attachContextRequestBoundary(session: AgentSession, options: Con
       if (!branch.some((entry) => entry.id === result.firstKeptEntryId)) {
         throw new ContextCapacityError("The prepared context boundary no longer belongs to the active branch");
       }
-      const systemMessage = getCurrentSystemMessage(normalizeContext(next.context).messages);
+      const systemMessage = result.systemMessage ?? getCurrentSystemMessage(normalizeContext(next.context).messages);
       const preview = buildSessionContext([...branch, {
         type: "compaction", id: "varin-context-preview", parentId: session.sessionManager.getLeafId(),
         timestamp: new Date().toISOString(), summary: result.summary,
@@ -207,7 +207,7 @@ export function attachContextRequestBoundary(session: AgentSession, options: Con
         throw new ContextCapacityError("The compaction source branch changed before application");
       }
       const id = session.sessionManager.appendCompaction(result.summary, result.firstKeptEntryId,
-        before, result.details, true, result.usage);
+        before, result.details, true, result.usage, result.systemMessage);
       const entry = session.sessionManager.getEntry(id);
       if (!entry || entry.type !== "compaction") throw new Error("Pi did not publish the compaction entry");
       session.refreshContext();
@@ -288,9 +288,9 @@ export function attachContextRequestBoundary(session: AgentSession, options: Con
           for await (const event of result) {
             if (!delivered && event.type !== "error") {
               delivered = true;
-              if (delivery.retained) {
+              for (const retained of delivery.retained ?? []) {
                 const id = session.sessionManager.appendCustomMessageEntry(
-                  "varin-context", delivery.retained.content, false, delivery.retained.details,
+                  retained.customType, retained.content, false, retained.details,
                 );
                 const entry = session.sessionManager.getEntry(id);
                 if (!entry) throw new Error("Pi did not retain the delivered environment observations");

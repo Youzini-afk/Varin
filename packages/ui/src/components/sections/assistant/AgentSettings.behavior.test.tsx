@@ -35,7 +35,7 @@ beforeEach(() => {
     { id: 2, scope: { kind: 'project', id: 'project-a' }, content: 'Project note', updatedAt: '' },
   ] };
   fixture.snapshot = { mode: 'agent', sessionId: 'chat', original: { preamble: 'Official identity', rules: 'Official rules', project_context: 'Project instructions', cwd: '/repo' },
-    sections: {}, content: '', personalization: { mode: 'agent', sessionId: 'chat', profiles: [], memories: [] } };
+    sections: {}, content: '', personalization: { mode: 'agent', revision: 0, threadRole: 'main', sessionId: 'chat', profiles: [], memories: [] } };
   fixture.update.mockReset().mockResolvedValue(true);
   container = document.createElement('div'); document.body.append(container); root = createRoot(container);
 });
@@ -70,4 +70,15 @@ test('shows scope-specific notes and keeps an edit on its selected project', asy
   await click('assistant.edit'); await type('Updated project decision');
   await click('assistant.save');
   expect(fixture.update).toHaveBeenCalledWith('memory', { id: 2, scope: { kind: 'project', id: 'project-a' }, content: 'Updated project decision', revision: 4 });
+});
+
+test('previews the conversation memory checkpoint while newly saved notes remain in the catalog', async () => {
+  fixture.snapshot.memorySnapshot = { revision: 2, sessionId: 'chat', memories: [{ id: 1, scope: { kind: 'global' }, content: 'Checkpoint note', updatedAt: '' }] };
+  await act(async () => root.render(<AgentPromptPage />));
+  expect(container.querySelector('pre')?.textContent).toContain('Checkpoint note');
+  expect(container.querySelector('pre')?.textContent).not.toContain('Global note');
+  fixture.catalog = { ...fixture.catalog, revision: 5, memories: [{ ...fixture.catalog.memories[0]!, content: 'Newly saved note' }] };
+  await act(async () => root.render(<AgentPromptPage />));
+  expect(container.querySelector('pre')?.textContent).toContain('Checkpoint note');
+  expect(container.querySelector('pre')?.textContent).not.toContain('Newly saved note');
 });

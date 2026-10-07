@@ -128,11 +128,12 @@ function threadToolParameters<T extends typeof DispatchParams | typeof ThreadSen
 
 export function dispatchToolPresentation(
   presets: readonly ResolvedPreset[], capabilities: readonly ResearchCapabilityOption[], activeTools?: readonly string[],
+  role: import('@varin/protocol').AgentPersonalizationContext['threadRole'] = 'main',
 ) {
   const research = capabilities.map(entry => `${entry.capability}${entry.definition.name ? ` (${entry.definition.name})` : ''}`).join(', ');
   return {
     parameters: threadToolParameters(DispatchParams, capabilities),
-    promptGuidelines: [buildTeamPrompt([...presets], activeTools, capabilities.map(capability => capability.definition)) + (research ? ` Available research capabilities: ${research}.` : '')],
+    promptGuidelines: [buildTeamPrompt([...presets], activeTools, capabilities.map(capability => capability.definition), role) + (research ? ` Available research capabilities: ${research}.` : '')],
   };
 }
 

@@ -108,6 +108,7 @@ export interface SelectHarnessToolsDeps {
   getActiveToolNames?: () => string[];
   /** Frozen session tool allowlist; submit_facts registers only when this includes it. */
   sessionToolAllowlist?: readonly string[];
+  getThreadRole?: () => import('./computer-tools.js').ComputerThreadRole;
 }
 
 /**
@@ -241,7 +242,7 @@ export function selectHarnessTools(
   // desktop/driver is available the service reports it honestly rather than
   // silently hiding the tool.
   if (tools.computer !== false) {
-    result.push(createComputerTool(bridge, sessionId));
+    result.push(createComputerTool(bridge, sessionId, deps.getThreadRole));
   }
   if (tools.explore !== false) {
     result.push(createExploreTool(bridge, sessionId, deps.completeExplore ? { complete: deps.completeExplore } : undefined));

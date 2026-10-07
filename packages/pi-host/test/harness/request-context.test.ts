@@ -89,7 +89,7 @@ describe("per-request environment and team context", () => {
     const boundary = attachContextRequestBoundary(bound, {
       getCompactionSettings: () => ({ enabled: true, reserveTokens: 100, keepRecentTokens: 50 }),
       observe: () => undefined, compact: async () => { throw new Error("unexpected"); },
-      inject: async (request) => ({ request, retained: { content: "not sent", details: {} }, confirm: () => { confirmed = true; } }),
+      inject: async (request) => ({ request, retained: [{ customType: 'varin-context', content: "not sent", details: {} }], confirm: () => { confirmed = true; } }),
     });
     const stream = await bound.agent.streamFunction(MODEL, contextFor(bound), {});
     assert.equal((await stream.result()).stopReason, "error");
