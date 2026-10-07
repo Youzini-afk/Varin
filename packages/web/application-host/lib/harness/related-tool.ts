@@ -360,12 +360,6 @@ function formatRelatedText(result: RelatedQueryResult, focusOmitted: number): st
   if (focusOmitted > 0) {
     lines.push(`Anchor matched ${focusOmitted} more file(s) than were walked; the first ${RELATED_FOCUS_LIMIT} in path order are below. Narrow the anchor to a path for the rest.`);
   }
-  if (result.roles.length > 0) {
-    lines.push("Roles (query-time, not stored on the graph):");
-    const shown = capped(result.roles, RELATED_SECTION_LIMIT);
-    for (const item of shown.shown) lines.push(`- ${item.path} ${item.role} · ${item.ground}`);
-    if (shown.omitted > 0) lines.push(`- … ${shown.omitted} more (full list in details)`);
-  }
   const note = (omitted: number): void => {
     if (omitted > 0) lines.push(`- … ${omitted} more (full list in details)`);
   };
@@ -473,5 +467,16 @@ function formatRelatedText(result: RelatedQueryResult, focusOmitted: number): st
     }
     if (result.calls.incomplete) lines.push("- the resolved call set may be incomplete for this anchor");
   }
+  // Import graphs can touch thousands of ordinary source paths. Keep their
+  // filename-based role guesses behind the actual definitions and edges.
+  const distinctiveRoles = result.roles.filter(item => item.ground !== 'filename-pattern' || item.role !== 'source');
+  if (distinctiveRoles.length) {
+    lines.push("File roles (query-time):");
+    const shown = capped(distinctiveRoles, RELATED_SECTION_LIMIT);
+    for (const item of shown.shown) lines.push(`- ${item.path} ${item.role} · ${item.ground}`);
+    note(shown.omitted);
+  }
+  const ordinaryRoles = result.roles.length - distinctiveRoles.length;
+  if (ordinaryRoles) lines.push(`File roles: ${ordinaryRoles} ordinary source path(s) inferred from filenames; full list in details.`);
   return lines.join("\n");
 }

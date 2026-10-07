@@ -26,7 +26,7 @@ import type { ExploreQueryRun } from "./explore.js";
 /** What `explore.query.start` freezes onto the query and reports to callers. */
 export type ExploreFastDecisionState =
   | { status: "ready"; binding: HarnessResolvedFastDecisionBinding }
-  | { status: "disabled" | "unconfigured" | "invalid" | "unavailable" };
+  | { status: "disabled" | "unconfigured" | "invalid" | "unavailable"; message?: string };
 
 /**
  * Map the Pi-described purpose status onto the state a query freezes at
@@ -37,7 +37,7 @@ export function resolveExploreFastDecision(
 ): ExploreFastDecisionState {
   if (!status) return { status: "unavailable" };
   if (status.status === "ready") return { status: "ready", binding: status.binding };
-  return { status: status.status };
+  return { status: status.status, ...("message" in status && status.message ? { message: status.message } : {}) };
 }
 
 export function fastDecisionStageStatus(details: ExploreFastDecisionDetails | undefined): ExploreModelStageStatus {
@@ -126,7 +126,6 @@ export async function runExploreFastDecisionLoop(
   try {
     while (input.run.terminal() === "active") {
       input.signal.throwIfAborted();
-      if (input.closing.requested()) break;
       if (now() >= input.deadlineAt) break;
       const capacity = fastDecisionCapabilities(input.binding.protocol).maxStateTokens;
       const retained = input.run.selectedViews();
@@ -136,11 +135,14 @@ export async function runExploreFastDecisionLoop(
       const canAct = !closing && !input.run.signal.aborted;
       const { views, unevaluated } = snapshot;
       const fresh = views.filter(view => !view.unevaluated);
-      if (!judged.size && !fresh.length && snapshot.pending) {
+      if (!closing && !judged.size && !fresh.length && snapshot.pending) {
         await Promise.race([input.run.waitForProgress(snapshot.sequence, input.signal), input.closing.promise]);
         continue;
       }
       const contextKey = retained.map(view => view.viewId).sort().join('|');
+      // Action discovery is asynchronous. Keep the public collector waiting
+      // while this round discovers/judges candidates, even if sources settled.
+      input.run.setJudgmentPending(true);
       const pending = canAct ? (await input.run.actionCandidates()).filter(candidate =>
         !details.executed.includes(candidate.actionId) && !judgedActions.has(`${candidate.actionId}@${contextKey}`)) : [];
       if (fresh.length === 0 && pending.length === 0) {
@@ -184,8 +186,11 @@ export async function runExploreFastDecisionLoop(
       ];
 
       for (const view of fresh) judged.add(view.viewId);
-      if (!questions.length) continue;
-      input.run.setJudgmentPending(true);
+      if (!questions.length) {
+        input.run.setJudgmentPending(false);
+        if (closing) break;
+        continue;
+      }
       const result = await input.call({
         goal: input.run.question,
         materials,
@@ -193,7 +198,7 @@ export async function runExploreFastDecisionLoop(
         signal: input.signal,
       });
       details.batches += 1;
-      details.viewsJudged += fresh.length;
+      if (input.judgeMaterials !== false) details.viewsJudged += fresh.length;
       details.actionsOffered += pending.length;
       details.missing += result.missing.length;
       if (result.servedModelId) details.servedModelId = result.servedModelId;

@@ -33,6 +33,8 @@ const statusTooltip = (
   switch (status) {
     case 'connected':
       return t('mcpDropdown.status.connected');
+    case 'cached':
+      return t('mcpDropdown.status.cached');
     case 'failed':
       return t('mcpDropdown.status.failed', {
         error: t('mcpDropdown.status.unknownError'),
@@ -49,7 +51,6 @@ const statusTone = (
 ): 'default' | 'success' | 'warning' | 'error' => {
   switch (status) {
     case 'connected':
-    case 'cached':
       return 'success';
     case 'failed':
       return 'error';

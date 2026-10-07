@@ -35,6 +35,16 @@ The pi-host harness tools are custom tools registered in the Pi session's
 | `research_source` | Register or inspect provenance and retained source objects | `source.register/list` |
 | `computer` | Observe/control a bound desktop application through structured calls or the persistent REPL | `computer.*` |
 
+`grep` exposes `hidden` and `noIgnore`. Broad searches skip dot paths and ignored/generated files;
+explicit dot paths enable hidden traversal unless `hidden:false`; ignore rules still apply. Disk and fixed-view searches retain the same
+hidden-file choice. An interrupted search reports incomplete coverage rather than a clean zero.
+Search/related transport waits remain cancellable through the worker and Host lifecycle; source work
+owns its own deadlines, so cold initialization is not cut off by a separate 30-second transport timer.
+
+`document_read` uses `page` for one page, `pages:number[]` for selected pages, or `all:true` for the
+whole original. The public schema keeps arrays separate from the all-pages flag; the Host receives
+the same native PDF selection contract.
+
 ## Computer application bindings
 
 `computer.run` uses the existing persistent Node worker. `computer.getApp(name

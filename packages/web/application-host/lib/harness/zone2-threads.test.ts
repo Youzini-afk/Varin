@@ -5,7 +5,7 @@ import { tmpdir } from "node:os";
 import type { ThreadReport } from "@varin/protocol";
 import { createObservationCursorStore } from "./observation-cursors.js";
 import { createThreadRegistry, ThreadRegistryError, type CreateThreadInput } from "./thread-registry.js";
-import { projectZone2Threads } from "./zone2-threads.js";
+import { prepareZone2Threads, projectZone2Threads } from "./zone2-threads.js";
 import { createZone2StatusService } from "./harness-services.js";
 import type { HarnessServiceHost } from "./service-host.js";
 
@@ -124,6 +124,35 @@ describe("Zone 2 thread projection", () => {
     expect(result.status).toBe("unavailable");
     expect(result.content).toBeNull();
     expect(result.reason).toBeTruthy();
+  });
+
+  it("keeps child results without replaying directed messages from either peer's ledger", async () => {
+    const owner = await registry.createThread(input());
+    const ownerRun = await registry.startRun(WORKSPACE, owner.id);
+    await registry.markRunRunning(WORKSPACE, owner.id, ownerRun.id, "owner-session");
+    const child = await registry.createThread(input({ parent: { kind: "thread", id: owner.id } }));
+    const childRun = await registry.startRun(WORKSPACE, child.id);
+    await registry.markRunRunning(WORKSPACE, child.id, childRun.id, "child-session");
+    await registry.recordDirectedMessage(WORKSPACE, {
+      id: "outgoing", from: { kind: "thread", id: owner.id }, to: { kind: "thread", id: child.id },
+      kind: "request", text: "Work on the assigned task", status: "delivered", at: new Date().toISOString(),
+    });
+    await registry.recordDirectedMessage(WORKSPACE, {
+      id: "incoming", from: { kind: "thread", id: child.id }, to: { kind: "thread", id: owner.id },
+      kind: "inform", text: "A question for the parent", status: "delivered", at: new Date().toISOString(),
+    });
+    await registry.completeThread(WORKSPACE, child.id, report());
+    const options = { registry, cursors };
+    const first = await prepareZone2Threads(options, { sessionId: "owner-session", scopeId: WORKSPACE });
+    expect(first.result.status === "ready" ? first.result.items.flatMap(item => item.messages ?? []) : [])
+      .toEqual([]);
+    expect(first.result.status === "ready" ? first.result.items : [])
+      .toMatchObject([{ id: child.id, conclusion: "all checks pass", includeResult: true }]);
+    expect(first.result.status === "ready" ? first.result.items : []).not.toContainEqual(expect.objectContaining({ includeResult: true, id: owner.id }));
+    first.commit();
+    const unchanged = await prepareZone2Threads(options, { sessionId: "owner-session", scopeId: WORKSPACE });
+    expect(unchanged.result).toEqual({ status: "ready", items: [] });
+    unchanged.abort();
   });
 
   it("calculates overlapWarning when multiple active threads touch overlapping paths", async () => {

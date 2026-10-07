@@ -285,6 +285,9 @@ export function createHarnessSearchService(deps: HarnessSearchDeps) {
           }
         }
         const request={query:params.pattern,workspaceId:unit.rootWorkspaceId,
+          includeHidden:params.hidden??[...unit.prefixes,...(params.paths??(params.path?[params.path]:[]))]
+            .some(prefix=>prefix.replaceAll('\\','/').split('/').some(segment=>segment.startsWith('.')&&segment!=='.'&&segment!=='..')),
+          ...(params.noIgnore===undefined?{}:{respectGitignore:!params.noIgnore}),
           ...(unit.prefixes.length===1&&unit.prefixes[0]===""?{}:{paths:unit.prefixes}),before,after,
           ...(backendLimit===undefined?{}:{maxResults:backendLimit}),...(glob.rgPatterns.length?{glob:glob.rgPatterns}:{}),
           ...(params.ignoreCase===undefined?{}:{ignoreCase:params.ignoreCase}),...(params.fixedStrings===undefined?{}:{fixedStrings:params.fixedStrings})};

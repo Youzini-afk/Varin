@@ -24,7 +24,7 @@ export function createRelatedTool(bridge: HostServicesBridge, _sessionId: string
         const result = await bridge.request<"related.query">(
           "related.query",
           { anchor: params.anchor },
-          ...(signal ? [{ signal }] : []),
+          { ...(signal ? { signal } : {}), timeoutMs: 0 },
         );
         return {
           content: [{ type: "text", text: result.text }],

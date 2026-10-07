@@ -254,6 +254,8 @@ export const PI_CATALOG_METHODS = [
   "settings.update",
   "harness.embed",
   "harness.rerank",
+  "harness.fastDecision",
+  "harness.memoryOrganize",
   "harness.inference.describe",
   "harness.inference.cancel",
 ] as const;

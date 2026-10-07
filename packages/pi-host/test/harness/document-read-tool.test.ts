@@ -13,6 +13,23 @@ const pageResult: FetchResult = {
 };
 
 describe("document_read tool", () => {
+  it("keeps page arrays intact and maps the explicit all-pages flag at the Host boundary", async () => {
+    const emitted: HarnessRequestData[] = [];
+    const bridge = new HostServicesBridge({ sessionId: "s", emit: (_event, data) => { emitted.push(data); } });
+    try {
+      for (const [params, pages] of [[{ pages: [2, 3] }, [2, 3]], [{ all: true }, "all"]] as const) {
+        const task = createDocumentReadTool(bridge).execute("read", { path: "paper.pdf", view: "text", ...params } as never, undefined, undefined, undefined as never);
+        const request = emitted.at(-1)!;
+        assert.deepEqual(request.params, { path: "paper.pdf", view: "text", pages });
+        bridge.respond("s", request.requestId, { ok: true, result: pageResult });
+        await task;
+      }
+      const conflict = await createDocumentReadTool(bridge).execute("read", { path: "paper.pdf", all: true, page: 2 } as never, undefined, undefined, undefined as never);
+      assert.equal(conflict.isError, true);
+      assert.equal(emitted.length, 2);
+    } finally { bridge.dispose(); }
+  });
+
   it("keeps long reads cancellable without a zero-ms timeout and delivers image pixels with a live reference", async () => {
     const emitted: HarnessRequestData[] = [];
     const bridge = new HostServicesBridge({ sessionId: "s", emit: (_event, data) => { emitted.push(data); } });

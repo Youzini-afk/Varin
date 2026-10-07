@@ -1091,6 +1091,8 @@ export function createHarnessServiceHost(options: HarnessServiceHostOptions): Ha
     ...(pinWorkingBranchQuery ? { pinWorkingBranchQuery } : {}),
     ...(harnessSettings ? { harnessSettings } : {}),
     ...(rerankExploreViews ? { rerankExploreViews } : {}),
+    ...(options.fastDecisionStatus ? { fastDecisionStatus: options.fastDecisionStatus } : {}),
+    ...(options.fastDecision ? { fastDecision: options.fastDecision } : {}),
     permissionAudit,
     webFetchService,
     webSearchService,

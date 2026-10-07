@@ -35,7 +35,7 @@ export function createWorkingBranchQuery(store:WorkingStateRootStore,pin:Working
     const files=request.files?.map(file=>{const path=normalize(file.path);if(!roots.some(root=>within(path,root)))throw new Error("Query file is outside the fixed view");return {...file,path};});
     const excludePaths=request.excludePaths?.map(normalize);
     const signal=AbortSignal.any([lifecycle.signal,...(options.signal?[options.signal]:[]),...(opts.signal?[opts.signal]:[])]);
-    const work=store.queryFiles(pin,{...request,paths,...(files?{files}:{}),...(excludePaths?{excludePaths}:{}),includeHidden:true},{...opts,signal});active.add(work);
+    const work=store.queryFiles(pin,{...request,paths,...(files?{files}:{}),...(excludePaths?{excludePaths}:{}),includeHidden:request.includeHidden??true},{...opts,signal});active.add(work);
     void work.then(()=>active.delete(work),()=>active.delete(work));return work;
   };
   const release=():Promise<void>=>{
@@ -72,6 +72,8 @@ export function createWorkingBranchQuery(store:WorkingStateRootStore,pin:Working
       if(opts.signal?.aborted)return {status:"cancelled",generation};
       const hits:import("../../search/content.js").WorkspaceSearchHit[]=[];let count=0;
       const result=await run({lane:"foreground",operation:"search",query:request.query??"",paths:request.paths??roots,
+        includeHidden:request.includeHidden??false,
+        ...(request.respectGitignore===undefined?{}:{respectGitignore:request.respectGitignore}),
         ...(request.glob?{globs:request.glob}:{}),...(request.fixedStrings===undefined?{}:{fixedStrings:request.fixedStrings}),
         ...(request.ignoreCase===undefined?{}:{ignoreCase:request.ignoreCase}),...(request.maxResults===undefined?{}:{maxResults:request.maxResults}),
         ...(request.before===undefined?{}:{before:request.before}),...(request.after===undefined?{}:{after:request.after}),

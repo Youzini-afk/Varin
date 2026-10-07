@@ -190,7 +190,7 @@ export function createWorkspaceSemanticRuntime(options: WorkspaceSemanticRuntime
   };
   const refreshNow = async (state: WorkspaceState, scanWhenChanged: boolean): Promise<void> => {
     if (disposed) return;
-    const retrying = state.needsRefresh;
+    const retrying = state.needsRefresh && state.binding.embedding.status === 'unavailable';
     const startedEpoch = epoch;
     const broker = options.getBroker();
     if (!broker) { markUnavailable(state); return; }
@@ -203,6 +203,10 @@ export function createWorkspaceSemanticRuntime(options: WorkspaceSemanticRuntime
     state.snapshot = settings.status === 'fulfilled' ? settings.value : null;
     state.needsRefresh = settings.status !== 'fulfilled' || binding.status !== 'fulfilled';
     const next = resolveInferenceBinding(settings, binding);
+    // A describe response can succeed while a provider could not yet bind.
+    // Do not cache that transient failure until the next settings edit.
+    state.needsRefresh ||= next.embedding.status === 'unavailable' || next.rerank.status === 'unavailable'
+      || Object.values(next.fastDecision?.purposes ?? {}).some(status => status.status === 'unavailable');
     const key = JSON.stringify(next.embedding);
     const changed = key !== state.bindingKey;
     state.binding = next;

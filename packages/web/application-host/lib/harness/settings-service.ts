@@ -328,8 +328,19 @@ export function createSettingsService(deps: SettingsServiceDeps): SettingsServic
     });
     const offset = Math.max(0, params.offset ?? 0);
     const limit = Math.max(1, Math.min(params.limit ?? 20, 100));
+    const terms = [...new Set((params.query ?? '').trim().toLocaleLowerCase().split(/\s+/).filter(Boolean))];
+    const relatedScores = new Map<SettingsCatalogEntry, number>();
+    if (!matches.length && !params.id && terms.length > 1) {
+      for (const term of terms) {
+        for (const entry of querySettingsCatalog({ query: term, ...(params.category ? { category: params.category as never } : {}), ...(params.owner ? { owner: params.owner } : {}) })) {
+          relatedScores.set(entry, (relatedScores.get(entry) ?? 0) + 1);
+        }
+      }
+    }
+    const related = [...relatedScores].sort((a, b) => b[1] - a[1] || a[0].id.localeCompare(b[0].id))
+      .slice(0, limit).map(([entry]) => toSearchItem(entry));
     const categories = new Map<string, number>();
-    for (const entry of matches) {
+    for (const entry of matches.length ? matches : querySettingsCatalog(params.owner ? { owner: params.owner } : {})) {
       categories.set(entry.category, (categories.get(entry.category) ?? 0) + 1);
     }
     const page = matches.slice(offset, offset + limit);
@@ -341,6 +352,7 @@ export function createSettingsService(deps: SettingsServiceDeps): SettingsServic
         return summary ? { ...item, summary } : item;
       }),
       total: matches.length,
+      ...(related.length ? { related } : {}),
       categories: [...categories.entries()]
         .map(([category, count]) => ({ category, count }))
         .sort((a, b) => a.category.localeCompare(b.category)),

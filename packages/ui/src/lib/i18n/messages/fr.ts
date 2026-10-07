@@ -3049,6 +3049,7 @@ export const dict = {
   'mcpDropdown.statusAria': 'Statut MCP',
   'mcpDropdown.status.unknown': 'Inconnu',
   'mcpDropdown.status.connected': 'Connecté',
+  'mcpDropdown.status.cached': 'Catalogue en cache ; connexion lors de l’utilisation',
   'mcpDropdown.status.failed': 'Échec : {error}',
   'mcpDropdown.status.unknownError': 'Erreur inconnue',
   'mcpDropdown.status.needsAuth': 'Nécessite une authentification',

@@ -83,6 +83,7 @@ export type ScheduleListParams = Record<string, never>;
 
 export interface ScheduleListResult {
   projectId: string;
+  projectPath?: string;
   tasks: ScheduledTaskView[];
 }
 

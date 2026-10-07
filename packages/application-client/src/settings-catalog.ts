@@ -314,7 +314,7 @@ export const SETTINGS_CATALOG: readonly SettingsCatalogEntry[] = [
       options: [
         { value: 'auto' }, { value: 'llm' }, { value: 'fast-decision' },
         { value: 'rerank' }, { value: 'source' },
-      ], note: 'one result judgment method per explore query; configured model failures retain source ranking' },
+      ], note: 'auto: LLM selects material when enabled, otherwise Fast Decision, then rerank, then source ranking. Fast Decision can choose next actions alongside LLM selection. A query does not run multiple material judges; explicit modes select the engine.' },
     apply: 'immediate',
     ui: { page: 'harness-retrieval', titleKey: 'settings.page.harness.codeRetrieval.title',
       keywords: ['explore', 'LLM', 'fast decision', 'rerank', 'ranking'] },

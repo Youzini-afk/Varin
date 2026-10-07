@@ -43,6 +43,7 @@ export interface StoredExploreQuery {
    */
   fastDecision?: {
     status: "ready" | "disabled" | "unconfigured" | "invalid" | "unavailable";
+    message?: string;
     /** Frozen resolved binding — carries the credential-free configurationId. */
     binding?: HarnessResolvedFastDecisionBinding;
     /** `finish` asks the loop to stop offering actions and settle. */

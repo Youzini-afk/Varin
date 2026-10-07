@@ -2351,7 +2351,7 @@ async function main(options: StartWebUiServerOptions = {}): Promise<WebUiServerC
     inspectBaselineWriters: async (workspaceId, root) => {
       const writersOf = async (id: string) => {
         const inspected = await documentsAuthority.inspectWorkspace(id) as {
-          activeWriters?: Array<{ writerId?: string; id?: string; purpose?: string }>;
+          activeWriters?: Array<{ writerId?: string; id?: string; purpose?: string; owner?: { kind: string; id: string }; startedAt?: string }>;
         };
         return Array.isArray(inspected.activeWriters) ? inspected.activeWriters : [];
       };
@@ -2365,6 +2365,8 @@ async function main(options: StartWebUiServerOptions = {}): Promise<WebUiServerC
       return writers.map((writer) => ({
         id: writer.writerId ?? writer.id ?? "writer",
         ...(writer.purpose === undefined ? {} : { purpose: writer.purpose }),
+        ...(writer.owner === undefined ? {} : { owner: writer.owner }),
+        ...(writer.startedAt === undefined ? {} : { startedAt: writer.startedAt }),
       }));
     },
     readBlocks: async (sessionId) => {

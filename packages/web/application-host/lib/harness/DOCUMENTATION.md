@@ -74,6 +74,11 @@ profiles are retained as editable user profiles. Same-task discovery and history
 task ancestry; read access does not grant sibling lifecycle control.
 
 `agent-root-runtime.ts` attaches ordinary main conversations to the existing Thread/Run authority.
+The request-local teammate roster and automatic teammate material exclude the observer's own Thread.
+Directed inbound messages already enter native Pi history through its idempotent notification or
+continuation path; neither the sender nor recipient ledger is replayed as teammate material. Another
+Thread's conversations remain available through explicit history reads. Child results retain their
+independent cursors, and omitted material is not acknowledged as delivered.
 `wait` without a duration is an event subscription, not a periodic model call. Its targets, initial
 result/message positions, optional deadline and owning Run are persisted in `Thread.dependencyWaits`.
 `thread-wait-runtime.ts` rebuilds those subscriptions after restart and resumes lost executions only

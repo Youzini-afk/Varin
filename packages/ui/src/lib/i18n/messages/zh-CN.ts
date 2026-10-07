@@ -3371,6 +3371,7 @@ export const dict: Record<I18nKey, string> = {
   'mcpDropdown.statusAria': 'MCP 状态',
   'mcpDropdown.status.unknown': '未知',
   'mcpDropdown.status.connected': '已连接',
+  'mcpDropdown.status.cached': '工具目录已缓存，使用时连接',
   'mcpDropdown.status.failed': '失败：{error}',
   'mcpDropdown.status.unknownError': '未知错误',
   'mcpDropdown.status.needsAuth': '需要认证',

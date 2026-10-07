@@ -6,6 +6,8 @@ import {
   createHarnessServiceHost,
   deriveHarnessCapabilities,
 } from "./service-host.js";
+import { createExploreQueryStartService, createExploreQueryViewsService, createExploreQueryFinishService } from "./explore-query-services.js";
+import type { HarnessServiceContext } from "./router.js";
 
 const ACTOR: HarnessActorIdentity = {
   authorityInstanceId: "authority-1",
@@ -15,6 +17,45 @@ const ACTOR: HarnessActorIdentity = {
 };
 
 describe("harness service host authorization", () => {
+  it("connects configured fast decision through the assembled Host into an Explore query", async () => {
+    const batches: string[][] = [];
+    const host = createHarnessServiceHost({
+      resolveWorkspaceRoot: async () => "/workspace",
+      discoveredShells: { hasBash: true },
+      search: async () => ({ status: "ready", generation: undefined, hits: [{
+        resource: { workspaceId: "workspace-1", resourceId: "a.ts" }, line: 1, column: 1,
+        preview: "needle", revision: "rev-1", before: [], after: [],
+      }] }),
+      readExploreFile: async () => ({ status: "ready", content: "needle\n", revision: "rev-1", source: "disk" }),
+      fastDecisionStatus: async () => ({ status: "ready", binding: {
+        protocol: "pi-classifier", providerId: "decision", modelId: "judge", configurationId: "cfg-1",
+      } }),
+      fastDecision: async input => {
+        batches.push(input.questions.map(question => question.id));
+        return { batchId: "batch-1", providerId: "decision", modelId: "judge", missing: [],
+          answers: input.questions.map(question => ({ id: question.id, kind: "judge", value: 0.9 })),
+        };
+      },
+    });
+    const ctx: HarnessServiceContext = {
+      actor: { ...ACTOR, workspaceId: "workspace-1", grantedCapabilities: ["read.search"] },
+      sessionId: ACTOR.sessionId, workspaceId: "workspace-1", authorizedPaths: [], inputContext: { source: "disk" },
+      signal: new AbortController().signal,
+    };
+    try {
+      const started = await createExploreQueryStartService(host).handle({ question: "needle" }, ctx);
+      expect(started.fastDecision?.status).toBe("ready");
+      expect(started.duties?.selection).toBe("fast-decision");
+      await host.exploreQueryStore.get(ctx.sessionId, started.queryId)!.run.waitForViews();
+      await createExploreQueryViewsService(host).handle({ queryId: started.queryId }, ctx);
+      const result = await createExploreQueryFinishService(host).handle({ queryId: started.queryId,
+        model: { plan: "unconfigured", select: "unconfigured", followup: "unconfigured" },
+      }, ctx);
+      expect(batches.some(batch => batch.some(id => id.startsWith("m:")))).toBe(true);
+      expect(result.details.model?.fastDecision).toBe("used");
+    } finally { await host.dispose(); }
+  });
+
   it("does not gate command start or completion on slow knowledge observations", async () => {
     const createShell = vi.spyOn(shellRuntime, "createShellSupervisor");
     let release!: () => void;

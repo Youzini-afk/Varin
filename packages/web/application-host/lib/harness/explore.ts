@@ -3433,11 +3433,17 @@ function planExploreDelivery(
     header.push("Graph partial: one or more selected resource roots had no current symbol catalog.");
   }
   if (result.semantic?.note) header.push(`Semantic index: ${result.semantic.note}`);
+  if (result.model?.duties) {
+    header.push(`Explore duties: material selection ${result.model.duties.selection}; next actions ${result.model.duties.actions}.`);
+  }
+  if (result.model) {
+    header.push(`Model stages: plan ${result.model.plan}; select ${result.model.select}; rerank ${result.model.rerank ?? 'skipped'}; fast decision ${result.model.fastDecision ?? 'disabled'}.`);
+  }
   if (result.skippedQueries?.reason === "direct-verified") {
     header.push(`Skipped ${result.skippedQueries.patterns.length} broad term(s) after a direct clue was verified.`);
   }
   if (result.model && (result.model.plan === "unconfigured" || result.model.select === "unconfigured")) {
-    header.push(result.model.note ?? "Explore model did not participate; excerpts are from algorithm and vector sources.");
+    header.push(result.model.note ?? "Explore LLM did not participate; excerpts come from the available retrieval sources.");
   } else if (result.model?.note) {
     header.push(result.model.note);
   }

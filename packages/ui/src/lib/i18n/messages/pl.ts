@@ -3179,6 +3179,7 @@ export const dict: Record<I18nKey, string> = {
   'mcpDropdown.actions.refreshAria': 'Odśwież',
   'mcpDropdown.empty.configureInConfig': 'Skonfiguruj serwery MCP w Ustawieniach.',
   'mcpDropdown.status.connected': 'Połączono',
+  'mcpDropdown.status.cached': 'Katalog w pamięci podręcznej; połączenie przy użyciu',
   'mcpDropdown.status.failed': 'Błąd: {error}',
   'mcpDropdown.status.needsAuth': 'Wymaga uwierzytelnienia',
   'mcpDropdown.status.needsRegistration': 'Wymaga rejestracji: {error}',
