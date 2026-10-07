@@ -17,6 +17,7 @@ const mocks = vi.hoisted(() => ({
   scrollToOffset: vi.fn().mockResolvedValue(undefined),
   viewport: null as HTMLElement | null,
   onScroll: undefined as ((event: NativeSyntheticEvent<NativeScrollEvent>) => void) | undefined,
+  chatRenderMode: 'live' as 'live' | 'sorted',
   store: {
     currentSessionId: 'session-1',
     records: {} as Record<string, unknown>,
@@ -63,8 +64,8 @@ vi.mock('@legendapp/list/react', () => ({
 vi.mock('@/components/icon/Icon', () => ({ Icon: () => null }));
 vi.mock('@/lib/i18n', () => ({ useI18n: () => ({ t: (key: string) => key }) }));
 vi.mock('@/stores/useUIStore', () => ({
-  useUIStore: (select: (state: Record<string, boolean>) => unknown) => select({
-    isMobile: false, promptNavigatorEnabled: true, stickyUserHeader: false,
+  useUIStore: (select: (state: Record<string, boolean | string>) => unknown) => select({
+    isMobile: false, promptNavigatorEnabled: true, stickyUserHeader: false, chatRenderMode: mocks.chatRenderMode,
   }),
 }));
 vi.mock('@/stores/usePiSessionStore', () => {
@@ -116,6 +117,7 @@ describe('PiTimeline streaming work', () => {
     mocks.scrollToIndex.mockClear();
     mocks.scrollToOffset.mockClear();
     mocks.viewport = null;
+    mocks.chatRenderMode = 'live';
     mocks.store.cancelTimelineAutomation.mockClear();
     mocks.store.currentSessionId = 'session-1';
     mocks.store.records = {
@@ -158,7 +160,7 @@ describe('PiTimeline streaming work', () => {
       listDataReplacements: mocks.dataReplacements, promptReads,
     }));
     expect(container.querySelector('[data-live-answer]')?.textContent).toBe('delta-99');
-    expect(container.querySelectorAll('[data-pi-turn-marker]')).toHaveLength(turns * 2 + 1);
+    expect(container.querySelectorAll('[data-pi-turn-marker]')).toHaveLength(turns * 2);
     expect(container.querySelector('[role="tooltip"]')).toBeNull();
     expect(promptReads).toBe(0);
     expect(mocks.dataReplacements).toBe(0);
@@ -207,16 +209,31 @@ describe('PiTimeline streaming work', () => {
     expect(marker(0).getAttribute('aria-current')).toBe('location');
   });
 
-  it('tracks reading within a turn and jumps to the Agent message instead of its user prompt', async () => {
-    await render(history(1, () => {}), undefined);
+  it.each(['live', 'sorted'] as const)('groups a complete Agent round and tracks its reading/jump in %s mode', async mode => {
+    mocks.chatRenderMode = mode;
+    const entries = history(1, () => {});
+    entries.splice(1, 0, ...['Checking files', 'Checking runtime'].map((progress, index): PiSessionEntry => ({
+      type: 'message', id: `progress-${index}`, parentId: null, timestamp: String(index),
+      message: { ...assistant(progress, index), stopReason: 'toolUse', content: [
+        { type: 'text', text: progress }, { type: 'toolCall', id: `call-${index}`, name: 'read', arguments: { path: 'file.ts' } },
+      ] },
+    })));
+    await render(entries, undefined);
+    expect(container.querySelectorAll('[data-pi-turn-marker]')).toHaveLength(2);
+    await act(async () => marker(1).dispatchEvent(new window.Event('pointerover', { bubbles: true })));
+    expect(container.querySelector('[role="tooltip"]')?.textContent).toContain('Completed answer');
+    expect(container.querySelector('[role="tooltip"]')?.textContent).not.toContain('Checking');
     const viewport = document.createElement('div');
-    viewport.innerHTML = '<div data-turn-entry="turn:user-0"><article data-pi-user-message data-pi-message-role="user" data-pi-entry-id="user-0"></article><article data-pi-message-role="assistant" data-pi-entry-id="assistant-0"></article></div>';
+    viewport.innerHTML = '<div data-turn-entry="turn:user-0"><article data-pi-user-message data-pi-message-role="user" data-pi-entry-id="user-0"></article><article data-pi-message-role="assistant" data-pi-entry-id="progress-0"></article><article data-pi-message-role="assistant" data-pi-entry-id="assistant-0"></article></div>';
     const rect = (top: number) => ({ top, bottom: top + 100, height: 100, left: 0, right: 100, width: 100, x: 0, y: top, toJSON: () => ({}) });
     viewport.getBoundingClientRect = () => rect(0);
     const user = viewport.querySelector<HTMLElement>('[data-pi-user-message]')!;
-    const answer = viewport.querySelector<HTMLElement>('[data-pi-message-role="assistant"]')!;
+    const start = viewport.querySelector<HTMLElement>('[data-pi-entry-id="progress-0"]')!;
+    const answer = viewport.querySelector<HTMLElement>('[data-pi-entry-id="assistant-0"]')!;
     user.getBoundingClientRect = () => rect(-50);
-    let answerTop = 150;
+    let startTop = 150;
+    start.getBoundingClientRect = () => rect(startTop);
+    let answerTop = 500;
     answer.getBoundingClientRect = () => rect(answerTop);
     container.querySelector<HTMLElement>('[data-pi-timeline-end-space]')!.getBoundingClientRect = () => ({ ...rect(0), height: 0 });
     mocks.viewport = viewport;
@@ -225,6 +242,7 @@ describe('PiTimeline streaming work', () => {
     const frames: FrameRequestCallback[] = [];
     vi.stubGlobal('requestAnimationFrame', (callback: FrameRequestCallback) => { frames.push(callback); return frames.length; });
     answerTop = -4;
+    startTop = -200;
     await act(async () => {
       mocks.onScroll!({ nativeEvent: { contentOffset: { x: 0, y: 400 }, contentSize: { width: 600, height: 3000 }, layoutMeasurement: { width: 600, height: 600 } } } as NativeSyntheticEvent<NativeScrollEvent>);
       while (frames.length) frames.shift()!(0);
@@ -233,7 +251,7 @@ describe('PiTimeline streaming work', () => {
     await act(async () => marker(1).click());
     expect(mocks.store.cancelTimelineAutomation).toHaveBeenCalledWith('session-1');
     expect(mocks.scrollToIndex).not.toHaveBeenCalled();
-    expect(mocks.scrollToOffset).toHaveBeenLastCalledWith({ offset: 380, animated: true });
+    expect(mocks.scrollToOffset).toHaveBeenLastCalledWith({ offset: 184, animated: true });
   });
 
   it.each(['withdraw', 'persist', 'replace'] as const)(

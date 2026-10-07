@@ -2576,7 +2576,7 @@ export const dict: Record<I18nKey, string> = {
   'chat.draftStarters.remove': 'Remove',
   'chat.scrollToBottom.aria': '捲動到底部',
   'chat.promptNavigator.aria': '對話訊息導覽',
-  'chat.promptNavigator.message': '第 {number} 則訊息',
+  'chat.promptNavigator.turn': '第 {number} 輪',
   'chat.promptNavigator.currentPrompt': '目前提示',
   'chat.promptNavigator.loadMore': '載入更多提示',
   'chat.timeline.relative.justNow': '剛剛',

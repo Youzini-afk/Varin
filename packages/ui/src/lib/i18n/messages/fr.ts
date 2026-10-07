@@ -2408,7 +2408,7 @@ export const dict = {
   'chat.piComposer.pdfAttachment.unsupported': 'PDF upload is not supported for this session workspace.',
   'chat.scrollToBottom.aria': 'Faire défiler vers le bas',
   'chat.promptNavigator.aria': 'Messages de la conversation',
-  'chat.promptNavigator.message': 'Message {number}',
+  'chat.promptNavigator.turn': 'Tour {number}',
   'chat.promptNavigator.currentPrompt': 'Prompt actuel',
   'chat.promptNavigator.loadMore': 'Charger plus de prompts',
   'chat.timeline.relative.justNow': 'à l’instant',

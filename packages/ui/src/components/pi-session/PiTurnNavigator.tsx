@@ -3,12 +3,12 @@ import { AnimatePresence, motion } from 'motion/react';
 import { usePrefersReducedMotion } from '@/hooks/usePrefersReducedMotion';
 import { useI18n } from '@/lib/i18n';
 import type { PiTimelineItem, PiTimelineRow } from './piTimelineProjection';
-import { projectPiMessageNavigation, readPiMessageNavigationText, type PiMessageMarker, type PiMessageNavigationTarget, type PiLiveNavigationSources } from './piMessageNavigation';
+import { projectPiMessageNavigation, readPiMessageNavigationText, type PiMessageMarker, type PiMessageNavigationTarget, type PiLiveNavigationState } from './piMessageNavigation';
 
 type TurnMarker = PiMessageMarker;
-export type PiTurnNavigatorHandle = { setVisibleIndex(index: number, sourceId?: string): void };
-type PreviewHandle = { show(marker: TurnMarker, ordinal: number, anchor: HTMLElement): void; hide(): void; reconcile(markers: readonly TurnMarker[]): void };
-type TurnPreview = { id: string; ordinal: number; text: string; role: PiMessageMarker['role']; anchor: HTMLElement };
+export type PiTurnNavigatorHandle = { setVisibleIndex(index: number, role?: PiMessageMarker['role']): void };
+type PreviewHandle = { show(marker: TurnMarker, anchor: HTMLElement): void; hide(): void; reconcile(markers: readonly TurnMarker[]): void };
+type TurnPreview = { id: string; round: number; text: string; role: PiMessageMarker['role']; anchor: HTMLElement };
 const excerpt = (text: string): string => {
   const compact = text.trim().replace(/\s+/g, ' ');
   return compact.length > 240 ? `${compact.slice(0, 240)}…` : compact;
@@ -24,12 +24,12 @@ const TurnPreview = React.forwardRef<PreviewHandle, {
   const [preview, setPreview] = React.useState<TurnPreview>();
   const popup = React.useRef<HTMLDivElement>(null);
   React.useImperativeHandle(ref, () => ({
-    show(marker, ordinal, anchor) {
+    show(marker, anchor) {
       setPreview(current => {
         if (current?.id === marker.id && current.anchor === anchor) return current;
         const item = readItem(marker.index);
         if (!item || item.id !== marker.rowId) return undefined;
-        return { id: marker.id, ordinal, anchor, role: marker.role, text: excerpt(readPiMessageNavigationText(item, marker)) };
+        return { id: marker.id, round: marker.round, anchor, role: marker.role, text: excerpt(readPiMessageNavigationText(item, marker)) };
       });
     },
     hide() { setPreview(undefined); },
@@ -39,7 +39,7 @@ const TurnPreview = React.forwardRef<PreviewHandle, {
         const ordinal = markers.findIndex(marker => marker.id === current.id);
         const marker = markers[ordinal], item = marker && readItem(marker.index);
         if (!marker || !item || item.id !== marker.rowId) return undefined;
-        return { ...current, ordinal, role: marker.role, text: excerpt(readPiMessageNavigationText(item, marker)) };
+        return { ...current, round: marker.round, role: marker.role, text: excerpt(readPiMessageNavigationText(item, marker)) };
       });
     },
   }), [readItem]);
@@ -57,33 +57,33 @@ const TurnPreview = React.forwardRef<PreviewHandle, {
       initial={{ opacity: 0, x: -4 }} animate={{ opacity: 1, x: 0 }} exit={{ opacity: 0, x: -2 }}
       transition={{ duration: reducedMotion ? 0 : .15, ease: [.22, 1, .36, 1] }}>
       <div className="mb-1.5 typography-micro tabular-nums text-muted-foreground">
-        {preview.role === 'user' ? t('harness.messages.you') : 'Varin'} · {t('chat.promptNavigator.message', { number: preview.ordinal + 1 })}
+        {preview.role === 'user' ? t('harness.messages.you') : 'Varin'} · {t('chat.promptNavigator.turn', { number: preview.round })}
       </div>
       <p className="line-clamp-3 break-words typography-meta text-foreground">{preview.text || '…'}</p>
     </motion.div> : null}
   </AnimatePresence>;
 });
 
-const markerAtIndex = (markers: readonly TurnMarker[], index: number, sourceId?: string): TurnMarker | undefined => {
+const markerAtIndex = (markers: readonly TurnMarker[], index: number, role?: PiMessageMarker['role']): TurnMarker | undefined => {
   let low = 0, high = markers.length;
   while (low < high) {
     const middle = (low + high) >>> 1;
     if (markers[middle]!.index <= index) low = middle + 1; else high = middle;
   }
   const fallback = markers[Math.max(0, low - 1)];
-  if (sourceId && fallback?.index === index) {
+  if (role && fallback?.index === index) {
     for (let ordinal = low - 1; ordinal >= 0 && markers[ordinal]!.index === index; ordinal -= 1) {
-      if (markers[ordinal]!.sourceId === sourceId) return markers[ordinal];
+      if (markers[ordinal]!.role === role) return markers[ordinal];
     }
   }
   return fallback;
 };
 
-/** One pointer per displayed user or Agent message; stream text does not rebuild the rail. */
+/** Separate pointers for the user's prompt and the Agent's complete response round. */
 export const PiTurnNavigator = React.memo(React.forwardRef<PiTurnNavigatorHandle, {
   items: readonly PiTimelineRow[];
   sorted: boolean;
-  liveSources?: PiLiveNavigationSources;
+  liveSources?: PiLiveNavigationState;
   initialIndex: number;
   readItem(index: number): PiTimelineItem | undefined;
   onSelect(target: PiMessageNavigationTarget): void;
@@ -102,7 +102,7 @@ export const PiTurnNavigator = React.memo(React.forwardRef<PiTurnNavigatorHandle
   const waved = React.useRef(new Set<HTMLButtonElement>());
   const displayedId = markers.some(marker => marker.id === activeId) ? activeId : markerAtIndex(markers, initialIndex)?.id;
   const activeOrdinal = markers.findIndex(marker => marker.id === displayedId);
-  React.useImperativeHandle(ref, () => ({ setVisibleIndex(index, sourceId) { setActiveId(markerAtIndex(markers, index, sourceId)?.id); } }), [markers]);
+  React.useImperativeHandle(ref, () => ({ setVisibleIndex(index, role) { setActiveId(markerAtIndex(markers, index, role)?.id); } }), [markers]);
 
   const revealActive = React.useCallback(() => {
     const viewport = scroll.current;
@@ -147,7 +147,7 @@ export const PiTurnNavigator = React.memo(React.forwardRef<PiTurnNavigatorHandle
   }, [markers.length]);
   const showPreview = (ordinal: number) => {
     const marker = markers[ordinal], button = buttons.current.get(ordinal);
-    if (marker && button) preview.current?.show(marker, ordinal, button);
+    if (marker && button) preview.current?.show(marker, button);
   };
   if (!markers.length) return null;
   return <nav ref={root} className="pi-turn-navigation" aria-label={t('chat.promptNavigator.aria')}
@@ -169,7 +169,7 @@ export const PiTurnNavigator = React.memo(React.forwardRef<PiTurnNavigatorHandle
         {markers.map((marker, ordinal) => <button key={marker.id} type="button" data-pi-turn-marker={ordinal}
           ref={button => { if (button) buttons.current.set(ordinal, button); else buttons.current.delete(ordinal); }}
           className="pi-turn-marker" data-message-role={marker.role}
-          aria-label={`${marker.role === 'user' ? t('harness.messages.you') : 'Varin'} · ${t('chat.promptNavigator.message', { number: ordinal + 1 })}`}
+          aria-label={`${marker.role === 'user' ? t('harness.messages.you') : 'Varin'} · ${t('chat.promptNavigator.turn', { number: marker.round })}`}
           aria-current={marker.id === displayedId ? 'location' : undefined}
           tabIndex={ordinal === (activeOrdinal >= 0 ? activeOrdinal : 0) ? 0 : -1}
           onPointerEnter={event => { if (event.pointerType !== 'touch') showPreview(ordinal); }}
@@ -185,6 +185,5 @@ export const PiTurnNavigator = React.memo(React.forwardRef<PiTurnNavigatorHandle
   if (previous.items !== next.items || previous.sorted !== next.sorted || previous.initialIndex !== next.initialIndex
     || previous.readItem !== next.readItem || previous.onSelect !== next.onSelect) return false;
   const left = previous.liveSources, right = next.liveSources;
-  return left === right || Boolean(left && right && left.rowId === right.rowId && left.sourceIds.length === right.sourceIds.length
-    && left.sourceIds.every((source, index) => source === right.sourceIds[index]));
+  return left === right || Boolean(left && right && left.rowId === right.rowId && left.hasAssistant === right.hasAssistant);
 });
