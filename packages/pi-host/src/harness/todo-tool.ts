@@ -8,9 +8,9 @@ const TodoParams = Type.Object({
     Type.Object({
       text: Type.String(),
       status: Type.Union([
-        Type.Literal("open"),
-        Type.Literal("done"),
-        Type.Literal("blocked"),
+        Type.Literal("open", { description: "Unfinished item" }),
+        Type.Literal("done", { description: "Completed item" }),
+        Type.Literal("blocked", { description: "Item currently unable to proceed" }),
       ]),
     }),
   ),
@@ -21,7 +21,7 @@ export function createTodoTool(bridge: HostServicesBridge): ToolDefinition {
   return defineTool({
     name: "todo",
     label: "Todo",
-    description: "Update the session plan with a list of todo items and their statuses",
+    description: "Replace the conversation's plan with items using open (unfinished), done (completed) or blocked (unable to proceed). The saved plan is shown in the work overview.",
     promptSnippet: "todo: update the session plan with a list of todo items and their statuses",
     parameters: TodoParams,
     outputSchema: Type.Object({ text: Type.String(), materialRevisions: Type.Optional(Type.Record(Type.String(), Type.String())) }),

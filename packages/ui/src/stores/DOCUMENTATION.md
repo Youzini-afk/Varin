@@ -45,6 +45,18 @@ These stores coordinate visible app state, navigation, selected tabs, dialogs, a
 Plan, task and other content updates do not write these preferences. Missing choices use the view's
 defaults: the overview is closed, content sections are expanded, and Sources is collapsed.
 
+The overview reads plan/progress/decision blocks by conversation ID, independently of their
+knowledge owner or execution directory. Block events and successful `todo` completion both
+refresh that projection; branch navigation reloads the visible revisions. Blocks, review items,
+Git status and task-list reads reject superseded responses. Reconnecting the event stream
+refreshes these projections without changing disclosure choices. Pending questions include
+the reachable task family's sessions; Computer Use keeps its own revision-aware event projection.
+
+`useWebSourcesStore` reconciles source metadata with the active native transcript. Unpinned
+sources removed by branch navigation disappear; explicit pins remain. User dismissals are
+preserved during reconciliation. A runtime change clears this transient projection so material
+from another Host cannot appear under the same conversation ID.
+
 `usePiInteractionStore` projects native questions separately from generic extension dialogs. Popup
 visibility, expiration overrides and answer drafts are transient UI choices. Hiding a popup sends no
 runtime response; answering or explicitly closing the overview item uses `extension.ui.respond`.

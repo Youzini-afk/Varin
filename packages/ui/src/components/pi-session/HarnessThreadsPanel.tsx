@@ -64,8 +64,16 @@ export const HarnessThreadsPanel: React.FC<{
   const { breakpoint } = useDeviceInfo();
   const narrowScreen = breakpoint !== 'xl' && breakpoint !== '2xl';
   const runtimeKey = usePiSessionStore((state) => state.runtimeKey);
+  const branch = usePiSessionStore(state => state.records[parentSessionId]?.branchEntries);
+  const todoCommits = usePiSessionStore(state => Object.values(state.records[parentSessionId]?.toolExecutions ?? {})
+    .filter(tool => tool.name === 'todo' && tool.status === 'success').map(tool => tool.toolCallId).join('\0'));
   const computer = useComputerAutomation(parentSessionId);
   const overviewKey = workOverviewStateKey(runtimeKey, parentSessionId);
+  const selectedOverviewRef = React.useRef(overviewKey);
+  selectedOverviewRef.current = overviewKey;
+  const blocksRead = React.useRef(0);
+  const knowledgeRead = React.useRef(0);
+  const gitRead = React.useRef(0);
   const choices = useWorkOverviewStore((state) => state.bySession[overviewKey] ?? EMPTY_WORK_OVERVIEW_CHOICES);
   const setDisclosure = useWorkOverviewStore((state) => state.setDisclosure);
   const overviewOpen = choices.overview ?? false;
@@ -78,6 +86,8 @@ export const HarnessThreadsPanel: React.FC<{
   const [messageFocus, setMessageFocus] = React.useState<ThreadExchangeLocation | null>(null);
   React.useEffect(() => { setSelectedThreadId(null); setMessageFocus(null); }, [workspaceId, parentSessionId]);
   const threadState = useHarnessThreadState();
+  const threadScopeRef = React.useRef(threadState.workspaceId);
+  threadScopeRef.current = threadState.workspaceId;
   React.useEffect(() => {
     const openExchange = (event: Event) => {
       const location = (event as CustomEvent<ThreadExchangeLocation>).detail;
@@ -95,7 +105,8 @@ export const HarnessThreadsPanel: React.FC<{
   const dialogs = usePiInteractionStore(state => state.dialogs);
   const showQuestion = usePiInteractionStore(state => state.showQuestion);
   const respondQuestion = usePiInteractionStore(state => state.respondDialog);
-  const questionSessions = new Set([parentSessionId, ...threads.map(thread => thread.activeRun?.sessionId)]);
+  const questionSessions = new Set([parentSessionId, ...[...threads, ...threadState.rootThreads, ...(threadState.peers ?? [])]
+    .map(thread => thread.activeRun?.sessionId)]);
   const questions = dialogs.filter(dialog => dialog.method === 'question' && questionSessions.has(dialog.sessionId));
   const webSources = useWebSources(parentSessionId);
   const openContextSurface = useUIStore((state) => state.openContextSurface);
@@ -116,6 +127,8 @@ export const HarnessThreadsPanel: React.FC<{
   gitTargetRef.current = fallbackCwd ?? '';
 
   const reloadGitStatus = React.useCallback(async () => {
+    if (selectedOverviewRef.current !== overviewKey) return;
+    const read = ++gitRead.current;
     const target = fallbackCwd?.trim() ?? '';
     if (!target) {
       setGitStatus(null);
@@ -123,21 +136,25 @@ export const HarnessThreadsPanel: React.FC<{
     }
     try {
       const next = await getGitStatus(target);
-      if (gitTargetRef.current === target) setGitStatus(next);
+      if (read === gitRead.current && selectedOverviewRef.current === overviewKey && gitTargetRef.current === target) setGitStatus(next);
     } catch {
       // Work overview is useful outside Git repositories too. A missing or
       // temporarily unavailable Git status must not hide the rest of it.
-      if (gitTargetRef.current === target) setGitStatus(null);
+      if (read === gitRead.current && selectedOverviewRef.current === overviewKey && gitTargetRef.current === target) setGitStatus(null);
     }
-  }, [fallbackCwd]);
+  }, [fallbackCwd, overviewKey]);
 
   const reloadBlocks = React.useCallback(async (signal?: AbortSignal) => {
+    if (signal?.aborted || selectedOverviewRef.current !== overviewKey) return;
+    const read = ++blocksRead.current;
+    const current = () => !signal?.aborted && read === blocksRead.current && selectedOverviewRef.current === overviewKey;
     const response = await runtimeFetch(`/api/harness/sessions/${encodeURIComponent(parentSessionId)}/blocks`, {
       cache: 'no-store',
       ...(signal ? { signal } : {}),
     });
     if (!response.ok) {
       if (response.status === 404) {
+        if (!current()) return;
         setBlocks([]);
         setBlocksBranchLeafId(null);
         return;
@@ -146,17 +163,22 @@ export const HarnessThreadsPanel: React.FC<{
     }
     const body = await response.json();
     const parsed = parseHarnessSessionBlockResponse(body);
+    if (!current()) return;
     setBlocks(parsed.blocks);
     setBlocksBranchLeafId(parsed.branchLeafId);
-  }, [parentSessionId]);
+  }, [overviewKey, parentSessionId]);
 
   const reloadKnowledge = React.useCallback(async (signal?: AbortSignal) => {
+    if (signal?.aborted || selectedOverviewRef.current !== overviewKey) return;
+    const read = ++knowledgeRead.current;
+    const current = () => !signal?.aborted && read === knowledgeRead.current && selectedOverviewRef.current === overviewKey;
     const response = await runtimeFetch(`/api/harness/sessions/${encodeURIComponent(parentSessionId)}/knowledge/suggestions`, {
       cache: 'no-store',
       ...(signal ? { signal } : {}),
     });
     if (!response.ok) {
       if (response.status === 404) {
+        if (!current()) return;
         setSuggestions([]);
         setKnowledgeDrafts({});
         return;
@@ -164,12 +186,13 @@ export const HarnessThreadsPanel: React.FC<{
       throw new Error(`Unable to load knowledge suggestions (${response.status})`);
     }
     const incoming = parseHarnessKnowledgeSuggestions(await response.json());
+    if (!current()) return;
     setSuggestions(incoming);
     setKnowledgeDrafts(Object.fromEntries(incoming.map((suggestion) => [
       harnessKnowledgeKey(suggestion),
       { content: suggestion.content, trigger: suggestion.trigger, supersedes: [] },
     ])));
-  }, [parentSessionId]);
+  }, [overviewKey, parentSessionId]);
 
   const rememberBlock = React.useCallback(async (block: HarnessSessionBlock, scope: HarnessKnowledgeScope) => {
     const busyKey = `create:${scope}:${block.label}`;
@@ -331,12 +354,14 @@ export const HarnessThreadsPanel: React.FC<{
         void reloadGitStatus();
         return;
       }
-      if (event.type === 'harness-blocks-changed' && event.workspaceId === workspaceId && event.sessionId === parentSessionId) {
+      // Blocks are session-addressed. Their knowledge owner can differ from
+      // the current execution workspace (for example a Bot or isolated child).
+      if (event.type === 'harness-blocks-changed' && event.sessionId === parentSessionId) {
         void reloadBlocks(controller.signal).catch(() => undefined);
         void reloadGitStatus();
         return;
       }
-      if (event.type === 'harness-thread-changed' && event.workspaceId === workspaceId) {
+      if (event.type === 'harness-thread-changed' && event.workspaceId === threadScopeRef.current) {
         void reloadGitStatus();
         return;
       }
@@ -353,7 +378,24 @@ export const HarnessThreadsPanel: React.FC<{
       controller.abort();
       unsubscribe();
     };
-  }, [parentSessionId, reloadBlocks, reloadGitStatus, reloadKnowledge, workspaceId]);
+  }, [parentSessionId, reloadBlocks, reloadGitStatus, reloadKnowledge]);
+
+  React.useEffect(() => {
+    if (todoCommits) void reloadBlocks().catch(error => console.warn('[HarnessThreadsPanel] Failed to load updated plan:', error));
+  }, [todoCommits, reloadBlocks]);
+
+  const viewedBranch = React.useRef<{ key: string; leafId: string | null } | null>(null);
+  React.useEffect(() => {
+    if (!branch) return;
+    const previous = viewedBranch.current;
+    viewedBranch.current = { key: overviewKey, leafId: branch.leafId };
+    // Appends keep their ancestor. Navigation replaces the active path and
+    // therefore changes which plan/progress/decision revisions are visible.
+    if (previous?.key === overviewKey && previous.leafId && !branch.entries.some(entry => entry.id === previous.leafId)) {
+      void reloadBlocks().catch(error => console.warn('[HarnessThreadsPanel] Failed to load branch blocks:', error));
+      void reloadGitStatus();
+    }
+  }, [branch, overviewKey, reloadBlocks, reloadGitStatus]);
 
   React.useEffect(() => {
     const target = fallbackCwd?.trim();
