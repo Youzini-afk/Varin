@@ -37,7 +37,6 @@ import type {
   ThinkingLevel,
   AgentInputContext,
 } from "./types.js";
-import type { PackageBootstrapResult } from "./foundational-pi-packages.js";
 import type { PiMcpConfigSnapshot } from "./mcp.js";
 import type { ProviderAuthResponse, ProviderDescriptor } from "./auth.js";
 import type {
@@ -369,10 +368,6 @@ export interface HostMethodMap {
   "package.install": {
     params: { scope: PiPackageScope; source: string };
     result: PackageDescriptor;
-  };
-  "package.bootstrap": {
-    params: { sources: string[] };
-    result: PackageBootstrapResult;
   };
   "package.list": {
     params: Record<string, never>;

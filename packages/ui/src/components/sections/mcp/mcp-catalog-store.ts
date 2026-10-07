@@ -80,11 +80,11 @@ export const refreshMcpCatalog = async (
   options: { force?: boolean } = {},
 ): Promise<void> => {
   const previousTargetKey = state.targetKey;
-  const requestGeneration = ++generation;
   const runtimeKey = getRuntimeKey();
   const sameTarget = previousTargetKey === targetKey;
   if (sameTarget && state.editorDirty && !options.force) return;
   if (sameTarget && state.loading && !options.force) return;
+  const requestGeneration = ++generation;
   publish({
     ...state,
     error: null,

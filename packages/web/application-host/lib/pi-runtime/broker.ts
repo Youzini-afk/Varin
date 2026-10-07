@@ -3,7 +3,6 @@ import type {
   PiRuntimeBrokerOptions,
   PiSessionExecutionAdmission,
 } from '@varin/runtime-broker';
-import { FOUNDATIONAL_PI_PACKAGE_MANIFEST } from '@varin/protocol';
 
 export function attachPiSessionExecutionAdmission<Broker extends Pick<PiRuntimeBroker, 'setSessionExecutionAdmission'>>(
   broker: Broker,
@@ -34,7 +33,6 @@ export function createWebPiRuntimeBroker({
   clientVersion,
   cwd,
   emit = () => {},
-  foundationalPackages = FOUNDATIONAL_PI_PACKAGE_MANIFEST.integrations,
   hostEntry,
   harnessDocumentRead = false,
   harnessDocumentPathOverlay = false,
@@ -51,7 +49,6 @@ export function createWebPiRuntimeBroker({
   clientVersion?: string | undefined;
   cwd?: string | undefined;
   emit?: PiRuntimeBrokerOptions['emit'] | undefined;
-  foundationalPackages?: PiRuntimeBrokerOptions['foundationalPackages'] | undefined;
   hostEntry?: string | undefined;
   harnessDocumentRead?: boolean | undefined;
   harnessDocumentPathOverlay?: boolean | undefined;
@@ -79,7 +76,6 @@ export function createWebPiRuntimeBroker({
     },
     ...(typeof cwd === 'string' && cwd ? { cwd } : {}),
     emit,
-    foundationalPackages,
     hostEntry: hostEntry || resolveBundledPiHostEntry(),
     ...(nodePath ? { nodePath } : {}),
     ...(packageRoot ? { packageRoot } : {}),

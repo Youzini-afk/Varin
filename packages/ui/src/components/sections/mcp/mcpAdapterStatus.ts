@@ -3,6 +3,7 @@ import type { JsonValue } from '@varin/protocol';
 export const MCP_ADAPTER_STATUS_CHANNEL = 'varin.mcp/status/v1';
 
 export type McpAdapterServerStatus =
+  | 'connecting'
   | 'connected'
   | 'cached'
   | 'failed'
@@ -30,6 +31,7 @@ export interface McpAdapterStatusSnapshot {
 }
 
 const STATUSES = new Set<McpAdapterServerStatus>([
+  'connecting',
   'connected',
   'cached',
   'failed',

@@ -23,6 +23,7 @@ const INTEGRATION_BY_PLUGIN_ID: Readonly<Record<string, PluginSettingsIntegratio
   'pi-magic-context': 'magic-context',
   'magic-context': 'magic-context',
   'pi-mcp-adapter': 'mcp',
+  '@varin/pi-mcp-adapter': 'mcp',
   'pi-observational-memory': 'observational-memory',
   'pi-openai-codex-compat': 'openai-codex-compat',
   'context-mode': 'context-mode',

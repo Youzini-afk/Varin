@@ -21,6 +21,7 @@ import { Icon } from '@/components/icon/Icon';
 import { useI18n } from '@/lib/i18n';
 import {
   MCP_ADAPTER_STATUS_CHANNEL,
+  mcpServerCommandArgument,
   parseMcpAdapterStatus,
   type McpAdapterServerSnapshot,
   type McpAdapterServerStatus,
@@ -31,6 +32,12 @@ const statusTooltip = (
   t: ReturnType<typeof useI18n>['t'],
 ): string => {
   switch (status) {
+    case 'connecting':
+      return t('settings.varin.mcp.runtime.status.connecting');
+    case 'disabled':
+      return t('settings.varin.mcp.runtime.status.disabled');
+    case 'not-connected':
+      return t('settings.varin.mcp.runtime.status.notConnected');
     case 'connected':
       return t('mcpDropdown.status.connected');
     case 'cached':
@@ -60,8 +67,6 @@ const statusTone = (
       return 'default';
   }
 };
-
-const safeCommandArgument = (value: string): string => value.replace(/[\r\n]+/g, ' ').trim();
 
 const useMcpAdapterRuntime = () => {
   const { t } = useI18n();
@@ -95,9 +100,11 @@ const useMcpAdapterRuntime = () => {
   }, [currentSessionId, executeCommand, t]);
 
   const reconnect = React.useCallback(() => runCommand('/mcp reconnect'), [runCommand]);
-  const setServerEnabled = React.useCallback((serverName: string, enabled: boolean) => (
-    runCommand(`/mcp ${enabled ? 'enable' : 'disable'} ${safeCommandArgument(serverName)}`, status?.owner !== 'native')
-  ), [runCommand, status?.owner]);
+  const setServerEnabled = React.useCallback((serverName: string, enabled: boolean) => {
+    const argument = mcpServerCommandArgument(serverName);
+    if (argument === null) return Promise.resolve(false);
+    return runCommand(`/mcp ${enabled ? 'enable' : 'disable'} ${argument}`, status?.owner !== 'native');
+  }, [runCommand, status?.owner]);
 
   return {
     currentSessionId,
@@ -177,7 +184,7 @@ const McpServerRows: React.FC<McpServerRowsProps> = ({
             </div>
             <Switch
               checked={!server.disabled}
-              disabled={busyName !== null}
+              disabled={busyName !== null || mcpServerCommandArgument(server.name) === null}
               className="data-[checked]:bg-status-info"
               onCheckedChange={(enabled) => onToggle(server, enabled)}
             />

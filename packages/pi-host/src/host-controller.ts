@@ -159,7 +159,6 @@ const CATALOG_ROLE_METHODS = new Set<HostMethod>([
 ]);
 const PACKAGE_ROLE_METHODS = new Set<HostMethod>([
   ...COMMON_ROLE_METHODS,
-  "package.bootstrap",
   "package.install",
   "package.list",
   "package.remove",
@@ -173,7 +172,6 @@ const COMPACTION_ROLE_METHODS = new Set<HostMethod>([
   "harness.respond",
 ]);
 const CONTEXT_FORBIDDEN_METHODS = new Set<HostMethod>([
-  "package.bootstrap",
   "session.entries.read",
   "session.list",
   "session.question.respond",
@@ -1469,10 +1467,6 @@ export class HostController {
         return this.#packageAuthority
           ? this.#packageAuthority.refreshPackages()
           : this.#sessionHost.refreshPackages();
-      case "package.bootstrap":
-        return this.#packageAuthority
-          ? this.#packageAuthority.bootstrapPackages(readStringList(params, "sources"))
-          : this.#sessionHost.bootstrapPackages(readStringList(params, "sources"));
       case "package.install": {
         const scope = readPackageScope(params);
         if (this.#packageAuthority) {

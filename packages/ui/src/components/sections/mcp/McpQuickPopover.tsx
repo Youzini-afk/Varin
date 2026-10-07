@@ -61,7 +61,9 @@ export const McpQuickPopover: React.FC = () => {
       ? 'bg-[var(--status-error)]'
       : status.servers.some((server) => server.status === 'needs-auth')
         ? 'bg-[var(--status-warning)]'
-        : 'bg-[var(--status-success)]';
+        : status.connectedCount > 0
+          ? 'bg-[var(--status-success)]'
+          : 'bg-muted-foreground';
 
   return (
     <Popover.Root open={open} onOpenChange={setOpen}>

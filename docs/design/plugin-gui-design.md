@@ -322,55 +322,36 @@ Acceptance:
   provider-reported status entries;
 - no memory or SQLite content is copied into Varin storage.
 
-### 5.3 pi-mcp-adapter
+### 5.3 MCP
 
-Authority:
+Pi native MCP is the default session owner. Varin observes its state callback and config loader;
+connections, tool discovery, resource access, OAuth credentials and cleanup remain in Pi. The
+settings page is available from the active provider catalog, without an installed adapter package.
+An explicitly installed replacement extension can own MCP through Pi discovery; the maintained
+adapter's public status/configCatalog contracts remain supported for that choice.
 
-- the adapter-owned effective source catalog and merge order (normally six native sources, or the
-  single Pi source while exclusive mode is active);
-- `pi-mcp-adapter/status/v1` for effective runtime state;
-- its registered panel, reconnect, authentication, logout, enable, and disable commands;
-- the adapter's OS keyring/OAuth implementation for credentials.
+Native configuration uses the selected agent directory's `mcp.json` and the trusted project's
+`.pi/mcp.json`. The editor reads and writes one revisioned JSON source at a time, preserves unknown
+fields, and reloads the native owner after saving. An untrusted project's source is not offered.
+Project entries without a transport can override only enabled state, default tool exposure and
+per-tool exposure. Per-tool names/patterns use the native `toolExposure` mapping; other native fields
+remain available in the raw editor. Servers registered by extensions have runtime actions but no
+invented editable file.
 
-The dedicated MCP page is visible only while `package.list` reports an installed and enabled
-`pi-mcp-adapter`. Its split view uses the adapter's read-only `configCatalog/v1` RPC as the left-hand
-catalog: one row per deduplicated effective server, with runtime state joined by server name. The
-right pane shows the selected server, its runtime actions, and the highest-precedence native source
-that directly defines it. New-server and adapter-settings actions choose an explicit native source;
-source-local edits still use the revisioned `config.text` contract and preserve the raw JSON/JSONC
-draft. Varin never folds source documents in the renderer.
+Runtime snapshots distinguish connecting, connected, disconnected, disabled, authentication-needed
+and failed states. Catalog/config issues remain visible even when some servers loaded successfully.
+The page and sidebar share one in-flight catalog read; a duplicate read cannot invalidate the first
+response. Refreshes preserve unsaved drafts. Commands and saves refresh the authoritative catalog.
 
-The public catalog contains only server identity, disabled state, transport kind and sanitized
-command/URL/socket display data, plus direct native-source membership. It does not expose arguments,
-environment, headers, bearer material, OAuth data, URL user information, query strings, or
-fragments. Imported or programmatic effective servers may therefore have no editable source. The
-adapter remains the sole owner of merge order, imports, URL credential binding, and effective
-transport selection. Varin edits one selected native document and re-reads the adapter-owned
-catalog after save.
+The public catalog contains server identity, disabled state, sanitized transport display data and
+source membership. It excludes arguments, environment, headers, tokens, OAuth data and URL
+credentials. Native per-server actions call `/mcp`; the optional adapter keeps its own authentication
+commands and JSON/JSONC source semantics, including URL-bound credential cleanup on save. Names that
+cannot be represented by its whitespace-separated command syntax remain editable in configuration.
 
-Saving a changed existing server URL clears URL-bound credentials present in that selected source,
-matching the adapter's cross-source credential binding instead of carrying old endpoint secrets
-forward. The cleanup happens at the revisioned Save boundary, so temporary typing is reversible and
-restoring the loaded URL preserves its credentials. Switching transport clears fields owned by the
-previous transport while preserving unrelated and unknown server fields. Partial server overrides
-remain valid, so the GUI does not require a transport when a lower-precedence source supplies it.
-Host-config discovery stays explicit and defaults off. Socket configuration keeps a local trust
-warning beside the path. OpenCode is available only as an explicit compatibility import supported
-by the adapter; it is never an authoritative Varin source.
-
-The public `status/v1` snapshot remains the runtime authority and does not expose config provenance
-or failure text. The separate `configCatalog/v1` projection supplies effective identity and direct
-source membership, computed inside the adapter with the same loader used at runtime. Server actions
-remain command-backed; names containing whitespace are shown but their per-server buttons stay
-disabled because the adapter's current command parser has no quoting contract. The extension panel
-remains available for those servers.
-
-Acceptance:
-
-- all status and actions use public adapter contracts;
-- the effective catalog and runtime snapshots never add credential material to renderer state or logs;
-- each effective server appears once and native source selection never requires a renderer-side merge;
-- absent status support yields configuration-only/degraded UI.
+MCP adapters are ordinary optional Pi packages. There is no foundational-package auto-install or
+restore service. Package management preserves the user's installed/enabled choices and uses Pi's
+package authority with broker serialization and a shared filesystem lock.
 
 ### 5.4 pi-web-access
 

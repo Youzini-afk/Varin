@@ -621,7 +621,7 @@ const pluginAdapter = (
 };
 
 export const VARIN_BUILTIN_PLUGIN_ADAPTER_EXTENSIONS = [
-  pluginAdapter("mcp", "pi-mcp-adapter Settings Adapter", "mcp", "server", ["pi-mcp-adapter"]),
+  pluginAdapter("mcp", "MCP Settings Adapter", "mcp", "server", ["@varin/pi-mcp-adapter", "pi-mcp-adapter"]),
   pluginAdapter("subagents", "pi-subagents Settings Adapter", "subagents", "robot-2", ["pi-subagents"]),
   pluginAdapter("magic-context", "Magic Context Settings Adapter", "magic-context", "brain", ["@cortexkit/pi-magic-context"]),
   pluginAdapter("web-access", "Web Access Settings Adapter", "web-access", "global", ["pi-web-access"]),

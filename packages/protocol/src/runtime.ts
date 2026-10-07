@@ -15,10 +15,6 @@ import {
 import type { ProviderAuthResponse } from "./auth.js";
 import type { SessionWorkspaceBinding } from "./types.js";
 import type { WorkFocusId } from "./work-focus.js";
-import type {
-  FoundationalPiPackageId,
-  FoundationalPiPackageStatusSnapshot,
-} from "./foundational-pi-packages.js";
 
 type DirectRuntimeMethod =
   | "agent.compact"
@@ -134,18 +130,6 @@ export type RuntimeMethodMap = Omit<Pick<HostMethodMap, DirectRuntimeMethod>, "s
       result: HostHandshakeResult;
     };
     "model.select": HostMethodMap["model.select"];
-    "package.foundation.restore": {
-      params: { ids?: FoundationalPiPackageId[] };
-      result: FoundationalPiPackageStatusSnapshot;
-    };
-    "package.foundation.setAutoInstallNew": {
-      params: { enabled: boolean };
-      result: FoundationalPiPackageStatusSnapshot;
-    };
-    "package.foundation.status": {
-      params: Record<string, never>;
-      result: FoundationalPiPackageStatusSnapshot;
-    };
     "project.trust.respond": {
       params: {
         remember: boolean;
@@ -224,9 +208,6 @@ export const RUNTIME_METHODS = [
   "model.select",
   "thinking.select",
   "package.install",
-  "package.foundation.restore",
-  "package.foundation.setAutoInstallNew",
-  "package.foundation.status",
   "package.list",
   "package.remove",
   "package.setEnabled",

@@ -168,9 +168,9 @@ export class PiMcpConfigBridge {
         sources = [
           { id: "native:user", displayPath: join(agentDir, "mcp.json"), order: 0, scope: "user",
             serverNames: globalConfig.servers.map(entry => entry.name), target: { root: "agent", path: "mcp.json", format: "json" } },
-          { id: "native:project", displayPath: join(ctx.cwd, ".pi", "mcp.json"), order: 1, scope: "project",
+          ...(ctx.isProjectTrusted() ? [{ id: "native:project", displayPath: join(ctx.cwd, ".pi", "mcp.json"), order: 1, scope: "project" as const,
             serverNames: loaded.servers.filter(entry => entry.scope === "project" || entry.override !== undefined).map(entry => entry.name),
-            target: { root: "project", path: ".pi/mcp.json", format: "json" } },
+            target: { root: "project" as const, path: ".pi/mcp.json", format: "json" as const } }] : []),
         ];
         return loaded;
       },
@@ -190,7 +190,7 @@ export class PiMcpConfigBridge {
         } } };
         const servers = state.servers.map(server => ({ name: server.name, disabled: server.disabled,
           toolCount: server.toolCount, resourceCount: server.resourceCount,
-          status: server.status === "disconnected" || server.status === "closed" || server.status === "connecting"
+          status: server.status === "disconnected" || server.status === "closed"
             ? "not-connected" : server.status,
         }));
         emit("extension.state", { channel: MCP_STATUS_CHANNEL, sessionId: state.sessionId, value: {

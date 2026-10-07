@@ -4,6 +4,7 @@ import { cn } from '@/lib/utils';
 import type { McpAdapterServerStatus } from './mcpAdapterStatus';
 
 const STATUS_LABEL_KEYS: Readonly<Record<McpAdapterServerStatus, I18nKey>> = {
+  connecting: 'settings.varin.mcp.runtime.status.connecting',
   cached: 'settings.varin.mcp.runtime.status.cached',
   connected: 'settings.varin.mcp.runtime.status.connected',
   disabled: 'settings.varin.mcp.runtime.status.disabled',

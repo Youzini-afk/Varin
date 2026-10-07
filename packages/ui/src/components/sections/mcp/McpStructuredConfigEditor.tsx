@@ -357,6 +357,38 @@ const SourceKeyValueField: React.FC<SourceFieldProps & {
   );
 };
 
+const SourceToolExposureField: React.FC<SourceFieldProps> = (props) => {
+  const { t } = useI18n();
+  const [pattern, setPattern] = React.useState('');
+  const entries = asJsonObject(readJsonPath(props.document, props.path));
+  const options = ['codemode', 'deferred', 'direct', 'hidden'].map(value => ({
+    value, label: t(`settings.varin.mcp.native.exposure.${value}` as never),
+  }));
+  const add = () => {
+    const name = pattern.trim();
+    if (!name || props.disabled || Object.hasOwn(entries, name)) return;
+    props.onSet([...props.path, name], 'codemode');
+    setPattern('');
+  };
+  return <div className="space-y-3">
+    <div className="typography-ui-label text-foreground">{props.label}</div>
+    {Object.keys(entries).map(name => (
+      <SourceOptionalSelectField key={name} {...props} label={name}
+        path={[...props.path, name]} options={options} />
+    ))}
+    <div className="flex gap-2">
+      <Input value={pattern} disabled={props.disabled} placeholder="read_*"
+        aria-label={t('settings.varin.mcp.native.toolPattern')}
+        onChange={event => setPattern(event.target.value)}
+        onKeyDown={event => { if (event.key === 'Enter') { event.preventDefault(); add(); } }} />
+      <Button type="button" variant="outline" size="sm" onClick={add}
+        disabled={props.disabled || !pattern.trim() || Object.hasOwn(entries, pattern.trim())}>
+        {t('settings.varin.mcp.structured.add')}
+      </Button>
+    </div>
+  </div>;
+};
+
 const SourceOptionalNumberField: React.FC<SourceFieldProps & {
   min?: number;
   unit?: React.ReactNode;
@@ -487,6 +519,9 @@ export const McpStructuredConfigEditor: React.FC<McpStructuredConfigEditorProps>
     if (native) updated = next === 'unconfigured'
       ? removeMcpConfigValue(updated, [...serverPath, 'type'])
       : setMcpConfigValue(updated, [...serverPath, 'type'], next);
+    if (native && next === 'unconfigured') {
+      for (const field of ['timeout', 'description']) updated = removeMcpConfigValue(updated, [...serverPath, field]);
+    }
     onChange(updated);
   };
 
@@ -676,11 +711,13 @@ export const McpStructuredConfigEditor: React.FC<McpStructuredConfigEditorProps>
                 label={text('settings.varin.mcp.native.exposure')}
                 options={['codemode', 'deferred', 'direct', 'hidden'].map(value => ({ value,
                   label: text(`settings.varin.mcp.native.exposure.${value}`) }))} />
-              <SourceOptionalNumberField {...sourceFields} path={[...serverPath, 'timeout']}
+              <SourceToolExposureField {...sourceFields} path={[...serverPath, 'toolExposure']}
+                label={text('settings.varin.mcp.native.toolExposure')} />
+              {transport !== 'unconfigured' ? <><SourceOptionalNumberField {...sourceFields} path={[...serverPath, 'timeout']}
                 label={text('settings.varin.mcp.structured.server.requestTimeout')}
                 min={0} unit={text('settings.varin.mcp.native.seconds')} />
               <SourceStringField {...sourceFields} path={[...serverPath, 'description']}
-                label={text('settings.varin.mcp.native.description')} />
+                label={text('settings.varin.mcp.native.description')} /></> : null}
               {transport === 'http' ? <>
                 {!project ? <SourceStringField {...sourceFields} path={[...serverPath, 'auth', 'provider']}
                   label={text('settings.varin.mcp.native.authProvider')} /> : null}

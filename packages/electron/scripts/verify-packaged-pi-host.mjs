@@ -45,7 +45,6 @@ try {
     ...options,
     agentDir,
     client: { clientName: 'varin-package-verifier', clientVersion: '0.1.0', mode: 'test', capabilities: { harnessThreads: true } },
-    foundationalPackages: [],
     emit: (event) => {
       if (event.kind !== 'diagnostic') return;
       const writer = event.level === 'error' ? console.error : console.log;

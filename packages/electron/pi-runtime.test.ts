@@ -132,7 +132,6 @@ test('desktop broker handshakes with the compiled Pi host', async () => {
     agentDir,
     clientVersion: '0.1.0-test',
     emit: (event) => events.push(event),
-    foundationalPackages: [],
     hostEntry: fileURLToPath(new URL('../pi-host/dist/host-bootstrap.js', import.meta.url)),
     packaged: false,
     resourcesPath: '',
