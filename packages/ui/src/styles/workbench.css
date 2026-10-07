@@ -148,7 +148,7 @@
   transition: width 140ms var(--wb-ease), opacity 140ms ease, transform 140ms var(--wb-ease), background-color var(--wb-state-duration) ease;
 }
 .pi-turn-marker[aria-current="location"] { --turn-base-width: 11px; }
-.pi-turn-marker[aria-current="location"] .pi-turn-marker-stroke { background: var(--foreground); opacity: 1; }
+.pi-turn-marker[aria-current="location"] .pi-turn-marker-stroke { background: var(--muted-foreground); opacity: .72; }
 .pi-turn-marker:focus-visible .pi-turn-marker-stroke { background: var(--foreground); opacity: 1; width: 18px; outline: 2px solid var(--ring); outline-offset: 3px; }
 .pi-turn-preview {
   position: absolute; top: var(--turn-preview-top, 8px); left: calc(100% + 6px); width: min(260px, calc(100cqi - 46px));
