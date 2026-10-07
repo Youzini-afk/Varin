@@ -590,7 +590,7 @@ export const PiComposer: React.FC<PiComposerProps> = ({
 
         <div
           className={cn(
-            'relative flex flex-col overflow-visible rounded-xl border border-border bg-muted transition-[border-color,box-shadow] duration-150 focus-within:border-[var(--interactive-border-focus)] focus-within:ring-1 focus-within:ring-[var(--interactive-focus-ring)]',
+            'relative flex flex-col overflow-visible rounded-xl border border-border bg-muted',
             sending && 'opacity-80',
           )}
           data-pi-composer-input-frame="true"
