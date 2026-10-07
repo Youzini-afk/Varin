@@ -21,6 +21,23 @@ const remixPath = resolve(dirname(uiRequire.resolve("@remixicon/react")), "index
 const outPath = resolve(repoRoot, "packages/ui/src/components/icon/sprite.ts")
 
 const customIconData = new Map([
+  // Workbench navigation glyphs share a 1.8px rounded stroke and clear small-size silhouettes.
+  [
+    "workbench-agent",
+    `<g fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M8 4h10a2 2 0 0 1 2 2v9"/><path d="M6 7h9a2 2 0 0 1 2 2v7a2 2 0 0 1-2 2H8l-4 3V9a2 2 0 0 1 2-2Z"/><path d="M8 11h5m-5 3h3"/></g>`,
+  ],
+  [
+    "workbench-bot",
+    `<g fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><rect x="4" y="8" width="16" height="12" rx="4"/><path d="M12 8V4m-2 0h4"/><path d="M8.5 13v2m7-2v2"/></g>`,
+  ],
+  [
+    "workspace-general",
+    `<g fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M8 4H6a2 2 0 0 0-2 2v2m12-4h2a2 2 0 0 1 2 2v2m0 8v2a2 2 0 0 1-2 2h-2m-8 0H6a2 2 0 0 1-2-2v-2"/><circle cx="12" cy="12" r="2.5"/></g>`,
+  ],
+  [
+    "workspace-research",
+    `<g fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><circle cx="10.5" cy="10.5" r="6.5"/><path d="m15.2 15.2 5.3 5.3M8 9h5m-5 3h3"/></g>`,
+  ],
   [
     "varin",
     `<polygon points="12 2.5 3.5 7.4 3.5 17.2 12 22.1 20.5 17.2 20.5 7.4" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/><polyline points="3.5 7.4 12 12.3 20.5 7.4" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/><line x1="12" y1="12.3" x2="12" y2="22.1" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/><path d="m12 5.5 3.7 2.1L12 9.7 8.3 7.6 12 5.5Zm0 1.5-1 .6 1 .6 1-.6-1-.6Z" fill="currentColor" fill-rule="evenodd"/>`,

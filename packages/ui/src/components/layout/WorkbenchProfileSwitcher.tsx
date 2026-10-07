@@ -67,9 +67,9 @@ export const WorkbenchProfileSwitcher: React.FC<{ className?: string }> = ({ cla
     ?? agentProfiles[0];
   if (!agentProfile) return null;
   const modes = ([
-    { id: 'workbench', label: t('settings.varin.extensions.workbench.profile.agent'), icon: 'layout-grid', profileId: agentProfile.id },
+    { id: 'workbench', label: t('settings.varin.extensions.workbench.profile.agent'), icon: 'workbench-agent', profileId: agentProfile.id },
     { id: 'ide', label: t('settings.varin.extensions.workbench.profile.ide'), icon: 'code-box', profileId: VARIN_WORKBENCH_IDE_PROFILE_ID },
-    { id: 'bot', label: 'Varin bot', icon: 'robot', profileId: VARIN_WORKBENCH_BOT_PROFILE_ID },
+    { id: 'bot', label: 'Varin bot', icon: 'workbench-bot', profileId: VARIN_WORKBENCH_BOT_PROFILE_ID },
   ] satisfies { id: string; label: string; icon: IconName; profileId: string }[])
     .filter((mode) => workbench.document.profiles.some((profile) => profile.id === mode.profileId)
       && (mode.id !== 'ide' || varinSurfaceRuntime.surface !== 'mobile'));
@@ -99,7 +99,7 @@ export const WorkbenchProfileSwitcher: React.FC<{ className?: string }> = ({ cla
             aria-label={`${t('workbench.switcher.presentation')}: ${selectedMode.label}`}
             className={cn('h-7 shrink-0 gap-1.5 rounded-md bg-interactive-hover px-2 typography-meta font-medium', className)}
           >
-            <Icon name={selectedMode.icon} className="size-3.5 shrink-0" />
+            <Icon name={selectedMode.icon} className="size-4 shrink-0" />
             <span>{selectedMode.label}</span>
             <Icon name="arrow-down-s" className="size-3.5 shrink-0 opacity-60" />
           </Button>
@@ -130,7 +130,7 @@ export const WorkbenchProfileSwitcher: React.FC<{ className?: string }> = ({ cla
               aria-label={`${t('workbench.switcher.workspace')}: ${workbenchWorkspaceLabel(agentProfile, t)}`}
               className="h-7 min-w-0 max-w-40 gap-1 px-1.5"
             >
-              <Icon name={agentProfile.id === VARIN_WORKBENCH_RESEARCH_PROFILE_ID ? 'flask' : 'layout-column'} className="size-3.5 shrink-0" />
+              <Icon name={agentProfile.id === VARIN_WORKBENCH_RESEARCH_PROFILE_ID ? 'workspace-research' : 'workspace-general'} className="size-4 shrink-0" />
               <span className="truncate">{workbenchWorkspaceLabel(agentProfile, t)}</span>
               <Icon name="arrow-down-s" className="size-4 shrink-0 opacity-60" />
             </Button>
@@ -145,7 +145,7 @@ export const WorkbenchProfileSwitcher: React.FC<{ className?: string }> = ({ cla
             >
               {agentProfiles.map((profile) => (
                 <DropdownMenuRadioItem key={profile.id} value={profile.id} disabled={busy} className="gap-2.5">
-                  <Icon name={profile.id === VARIN_WORKBENCH_RESEARCH_PROFILE_ID ? 'flask' : 'layout-column'} className="size-4 shrink-0 text-muted-foreground" />
+                  <Icon name={profile.id === VARIN_WORKBENCH_RESEARCH_PROFILE_ID ? 'workspace-research' : 'workspace-general'} className="size-4 shrink-0 text-muted-foreground" />
                   {workbenchWorkspaceLabel(profile, t)}
                 </DropdownMenuRadioItem>
               ))}
