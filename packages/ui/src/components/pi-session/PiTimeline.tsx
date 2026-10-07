@@ -43,7 +43,8 @@ import {
 } from './piAssistantWaiting';
 import { PiTurnAssistantChrome } from './PiTurnAssistantChrome';
 import { ChatContextMenu } from './ChatContextMenu';
-import { PiPromptNavigator } from './PiPromptNavigator';
+import { PiTurnNavigator, type PiTurnNavigatorHandle } from './PiTurnNavigator';
+import { prefersReducedMotion } from '@/hooks/usePrefersReducedMotion';
 
 interface PiTimelineItemViewProps extends Omit<
   PiTimelineProps,
@@ -233,6 +234,7 @@ export const PiTimeline: React.FC<PiTimelineProps> = (props) => {
   const isMobile = useUIStore((state) => state.isMobile);
   const onScrollContainerChange = props.onScrollContainerChange;
   const listRef = React.useRef<LegendListRef>(null);
+  const turnNavigatorRef = React.useRef<PiTurnNavigatorHandle>(null);
   const endSpaceRef = React.useRef<HTMLDivElement>(null);
   const projectionRef = React.useRef<PiTimelineProjection | undefined>(undefined);
   const projectionSessionRef = React.useRef(props.sessionId);
@@ -247,6 +249,11 @@ export const PiTimeline: React.FC<PiTimelineProps> = (props) => {
     projectionRef.current,
   ), [props.entries, props.liveAssistant, props.liveUser]);
   projectionRef.current = projection;
+  const readNavigatorItem = React.useCallback((index: number) => {
+    const current = projectionRef.current;
+    const row = current?.items[index];
+    return current && row ? resolvePiTimelineItem(row, current.liveItem) : undefined;
+  }, []);
   const assistantWaitingTurnId = React.useMemo(() => findPiAssistantWaitingTurnId(
     projection.items,
     props.assistantWaiting !== undefined,
@@ -640,7 +647,7 @@ export const PiTimeline: React.FC<PiTimelineProps> = (props) => {
 
   const selectPrompt = React.useCallback((index: number) => {
     takeManualOwnership();
-    void listRef.current?.scrollToIndex({ index, viewPosition: 0, animated: false });
+    void listRef.current?.scrollToIndex({ index, viewPosition: 0, animated: !prefersReducedMotion() });
   }, [takeManualOwnership]);
 
   return (
@@ -678,12 +685,14 @@ export const PiTimeline: React.FC<PiTimelineProps> = (props) => {
         await list.scrollToOffset({ animated: false, offset: Math.max(0,
           list.getState().scroll + element.getBoundingClientRect().top - container.getBoundingClientRect().top - inset - PI_TIMELINE_ANCHOR_OFFSET_PX) });
       }}>
-    <div className="relative flex min-h-0 flex-1">
-      {promptNavigatorEnabled ? <PiPromptNavigator items={projection.items} onSelect={selectPrompt} /> : null}
+    <div className="pi-timeline-surface relative flex min-h-0 flex-1">
+      {promptNavigatorEnabled ? <PiTurnNavigator ref={turnNavigatorRef} items={projection.items}
+        initialIndex={initialScrollAtEnd ? projection.items.length - 1 : entryTargetIndex}
+        readItem={readNavigatorItem} onSelect={selectPrompt} /> : null}
       <LegendList
         ref={listRef}
         anchoredEndSpace={anchoredEndSpace}
-        className="overlay-scrollbar-target overlay-scrollbar-container min-h-0 flex-1 overscroll-contain"
+        className="overlay-scrollbar-target overlay-scrollbar-container min-h-0 min-w-0 flex-1 overscroll-contain"
         contentContainerClassName="py-5"
         data={projection.items}
         dataKey={props.sessionId}
@@ -708,6 +717,7 @@ export const PiTimeline: React.FC<PiTimelineProps> = (props) => {
           : { data: true, size: true }}
         onFirstVisibleItemChanged={({ index }) => {
           firstVisibleIndexRef.current = index;
+          turnNavigatorRef.current?.setVisibleIndex(index);
           captureViewport();
         }}
         onItemSizeChanged={({ itemKey }) => {
