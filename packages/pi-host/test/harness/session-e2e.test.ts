@@ -22,7 +22,7 @@ import { spawn } from "node:child_process";
 import { randomUUID } from "node:crypto";
 import { describe, it } from "node:test";
 import { fauxAssistantMessage, fauxToolCall } from "@earendil-works/pi-ai/compat";
-import type { AgentSessionServices } from "@earendil-works/pi-coding-agent";
+import { convertToLlm, type AgentSessionServices } from "@earendil-works/pi-coding-agent";
 import type { Context } from "@earendil-works/pi-ai";
 import type { HarnessError, HostEvent, HostEventData } from "@varin/protocol";
 
@@ -629,12 +629,18 @@ describe("session e2e — work focus", () => {
 
   it("sends edited system instructions and current notes to the model while keeping Bot recall independent", async () => {
     await withTempRoot("varin-agent-personalization-", async (root) => {
-      let context: import("@varin/protocol").AgentPersonalizationContext = { mode: "agent", sessionId: "current", profiles: [
+      await mkdir(join(root, 'agent'), { recursive: true });
+      await writeFile(join(root, 'agent', 'settings.json'), JSON.stringify({
+        compaction: { enabled: true, reserveTokens: 8_000, keepRecentTokens: 1 },
+        harness: { context: { backgroundPreparation: false } },
+      }));
+      let context: import("@varin/protocol").AgentPersonalizationContext = { mode: "agent", revision: 1, threadRole: 'main', projectId: 'p', sessionId: "current", profiles: [
         { scope: { kind: "global" }, profile: { sections: { preamble: "User-edited assistant identity.", rules: "User-edited official rules." } } },
       ], memories: [{ id: 1, content: "Project uses PostgreSQL.", scope: { kind: "project", id: "p" }, updatedAt: "" }] };
       const contexts: Context[] = [];
-      const faux = fauxProvider();
-      faux.setResponses(Array.from({ length: 3 }, () => (value: Context) => {
+      const faux = fauxProvider({ models: [{ id: 'faux-1', contextWindow: 60_000, maxTokens: 800 }] });
+      faux.setResponses(Array.from({ length: 4 }, () => (value: Context) => {
+        if (providerSystemPrompt(value) === COMPACTION_SYSTEM_PROMPT) return fauxAssistantMessage('Earlier conversation has established the task.');
         contexts.push(structuredClone(value)); return fauxAssistantMessage("done");
       }));
       const session = await setupSession({ root, faux, serviceHostOptions: {
@@ -644,22 +650,115 @@ describe("session e2e — work focus", () => {
       session.host.setSessionInstructionsAvailable(true);
       try {
         const snapshot = await session.host.create(root);
-        await session.host.prompt(snapshot.sessionId, "first"); await session.host.session.waitForIdle();
+        await session.host.prompt(snapshot.sessionId, "Earlier task detail. ".repeat(500)); await session.host.session.waitForIdle();
         assert.match(providerSystemPrompt(contexts[0]), /User-edited assistant identity/);
         assert.match(providerSystemPrompt(contexts[0]), /User-edited official rules/);
         assert.match(providerSystemPrompt(contexts[0]), /Project uses PostgreSQL/);
+        assert.match(providerSystemPrompt({ messages: convertToLlm(session.host.session.sessionManager.buildSessionContext().messages) }), /Project uses PostgreSQL/);
         assert.equal(session.host.session.getAllTools().some(tool => tool.name === "recall"), false);
+        const agentMemory = session.host.session.getToolDefinition('memory')!;
+        assert.doesNotMatch(agentMemory.description + agentMemory.promptGuidelines?.join(' '), /Bot/);
+        assert.equal(Object.hasOwn((agentMemory.parameters as { properties: object }).properties, 'includeSource'), false);
         const inspected = await session.host.systemPrompt(snapshot.sessionId);
         assert.equal(inspected.lastRequest?.content, providerSystemPrompt(contexts[0]));
         assert.equal(inspected.content, providerSystemPrompt(contexts[0]));
-        context = { ...context, memories: [{ ...context.memories[0]!, content: "Project now uses SQLite." }] };
+        context = { ...context, revision: 2, memories: [{ ...context.memories[0]!, content: "Project now uses SQLite." }] };
         await session.host.prompt(snapshot.sessionId, "second"); await session.host.session.waitForIdle();
-        assert.match(providerSystemPrompt(contexts[1]), /Project now uses SQLite/);
-        assert.doesNotMatch(providerSystemPrompt(contexts[1]), /Project uses PostgreSQL/);
+        assert.equal(providerSystemPrompt(contexts[1]), providerSystemPrompt(contexts[0]));
+        assert.match(JSON.stringify(contexts[1]!.messages.filter(message => message.role !== 'system')), /Project now uses SQLite/);
+        await session.host.compact(snapshot.sessionId);
+        const compacted = session.host.session.sessionManager.getBranch().findLast(entry => entry.type === 'compaction');
+        assert.ok(compacted && compacted.type === 'compaction');
+        assert.match(providerSystemPrompt({ messages: [compacted.systemMessage!] }), /Project now uses SQLite/);
+        assert.doesNotMatch(providerSystemPrompt({ messages: [compacted.systemMessage!] }), /Project uses PostgreSQL/);
+        assert.equal((compacted.details as { agentMemorySnapshot: { revision: number } }).agentMemorySnapshot.revision, 2);
         context = { ...context, mode: "bot", profiles: [], memories: [] };
         await session.host.prompt(snapshot.sessionId, "third"); await session.host.session.waitForIdle();
         assert.equal(session.host.session.getAllTools().some(tool => tool.name === "recall"), true);
+        const botMemory = session.host.session.getToolDefinition('memory')!;
+        assert.match(botMemory.description, /this Bot/);
+        assert.equal(Object.hasOwn((botMemory.parameters as { properties: object }).properties, 'includeSource'), true);
         assert.doesNotMatch(providerSystemPrompt(contexts[2]), /User-edited|Project now uses SQLite/);
+      } finally { await session.dispose(); }
+    });
+  });
+
+  it('keeps memory writes in direct and codemode results while the system prefix stays stable', async () => {
+    await withTempRoot('varin-memory-tool-prefix-', async root => {
+      let revision = 0;
+      let memories: import('@varin/protocol').AgentMemoryNote[] = [];
+      const contexts: Context[] = [];
+      const faux = fauxProvider();
+      const capture = (value: Context) => { contexts.push(structuredClone(value)); };
+      faux.setResponses([
+        value => { capture(value); return fauxAssistantMessage([fauxToolCall('memory', { action: 'remember', scope: 'workspace', content: 'Project builds with Bun.' })]); },
+        value => { capture(value); return fauxAssistantMessage([fauxToolCall('codemode', { code: 'await tools.memory({action:"correct",id:1,content:"Project builds with Node."});' })]); },
+        value => { capture(value); return fauxAssistantMessage([fauxToolCall('memory', { action: 'forget', id: 1 })]); },
+        value => { capture(value); return fauxAssistantMessage('done'); },
+      ]);
+      const session = await setupSession({ root, faux, answerDialog: () => 'Allow once', serviceHostOptions: {
+        sessionInstructionsFor: async () => null,
+        memoryService: {} as never,
+        agentPersonalization: {
+          context: async (sessionId: string) => ({ mode: 'agent', threadRole: 'main', projectId: 'p', sessionId, revision, profiles: [], memories: structuredClone(memories) }),
+          saveNote: async (input: { id?: number; scope: import('@varin/protocol').AgentMemoryScope; content: string }) => {
+            const result = { id: input.id ?? 1, scope: input.scope, content: input.content, updatedAt: 'now' };
+            memories = [result]; return { result, revision: ++revision };
+          },
+          removeNote: async () => { memories = []; return { result: { removed: true }, revision: ++revision }; },
+        } as never,
+      } });
+      session.host.setSessionInstructionsAvailable(true);
+      try {
+        const snapshot = await session.host.create(root, undefined, undefined, undefined, undefined, { mode: 'bypass', rules: [] });
+        session.host.session.setActiveToolsByName([...session.host.session.getActiveToolNames(), 'codemode']);
+        await session.host.prompt(snapshot.sessionId, 'Save and update a project memory.'); await session.host.session.waitForIdle();
+        assert.equal(contexts.length, 4);
+        assert.ok(contexts.every(value => providerSystemPrompt(value) === providerSystemPrompt(contexts[0])));
+        const results = contexts.slice(1).map(value => value.messages.filter(message => message.role === 'toolResult').at(-1)!);
+        for (const result of results) assert.equal(result.isError, false, JSON.stringify(result.content));
+        assert.match(JSON.stringify(results[0]!.content), /Project builds with Bun/);
+        assert.match(JSON.stringify(results[1]!.content), /Project builds with Node/);
+        assert.match(JSON.stringify(results[2]!.content), /\[1\] deleted/);
+        const branch = session.host.session.sessionManager.getBranch();
+        assert.equal(branch.some(entry => entry.type === 'custom_message' && entry.customType === 'varin-memory'), false);
+        assert.equal(revision, 3);
+        const memory = session.host.session.getToolDefinition('memory')!;
+        assert.doesNotMatch(memory.description + memory.promptGuidelines?.join(' '), /Bot/);
+        const properties = (memory.parameters as { properties: Record<string, unknown> }).properties;
+        assert.equal(Object.hasOwn(properties, 'sourceText'), false);
+        assert.equal(Object.hasOwn(properties, 'trigger'), false);
+      } finally { await session.dispose(); }
+    });
+  });
+
+  it('projects current thread authority into tools before the first model request', async () => {
+    await withTempRoot('varin-thread-presentation-', async root => {
+      let role: import('@varin/protocol').AgentPersonalizationContext['threadRole'] = 'main';
+      const contexts: Context[] = [];
+      const faux = fauxProvider();
+      faux.setResponses(Array.from({ length: 3 }, () => (value: Context) => { contexts.push(structuredClone(value)); return fauxAssistantMessage('done'); }));
+      const session = await setupSession({ root, faux, serviceHostOptions: {
+        sessionInstructionsFor: async () => null,
+        agentPersonalization: { context: async (sessionId: string) => ({ mode: 'agent', threadRole: role, revision: 0, sessionId, profiles: [], memories: [] }) } as never,
+      } });
+      session.host.setSessionInstructionsAvailable(true);
+      session.host.setHarnessThreadRuntimeEnabled(true);
+      try {
+        const snapshot = await session.host.create(root);
+        for (const next of ['main', 'worker', 'read-only'] as const) {
+          role = next; await session.host.prompt(snapshot.sessionId, 'Inspect the available tools.'); await session.host.session.waitForIdle();
+          const declarations = getCurrentTools(normalizeContext(contexts.at(-1)!).messages);
+          const computer = declarations.find(tool => tool.name === 'computer')!;
+          const parameters = computer.parameters as { properties: Record<string, unknown> };
+          const actions = JSON.stringify(parameters.properties.action);
+          assert.equal(actions.includes('"grant"'), next === 'main');
+          assert.equal(actions.includes('"act"'), next !== 'read-only');
+          assert.equal(providerSystemPrompt(contexts.at(-1)).includes('This is the main thread.'), next === 'main');
+          if (next === 'read-only') assert.ok(!JSON.stringify(parameters.properties.access).includes('control'));
+          const memory = declarations.find(tool => tool.name === 'memory')!;
+          assert.ok(!JSON.stringify(memory.parameters).includes('workspace'), 'unbound conversations offer no project scope');
+        }
       } finally { await session.dispose(); }
     });
   });

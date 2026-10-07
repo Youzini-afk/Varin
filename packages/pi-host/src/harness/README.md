@@ -118,15 +118,22 @@ Native thread notifications retain the message ID for the UI's exchange card.
 
 Thread tools are constructed before the native session exists. Their live tool-selection callback is
 used during execution; SessionHost refreshes team presentation from actual active tools after binding.
-Team instructions distinguish Worker-only, retrieval-only, both and neither, using the current
-enabled profiles and tool set. Custom profiles and research capabilities retain their own choices.
+Team presentation distinguishes main/child/read-only callers and Worker-only, retrieval-only, both
+and neither configurations, using the enabled profiles and tool set. Tool descriptions explain
+capabilities, arguments and outcomes; they do not prescribe a delegation workflow.
+Custom profiles and research capabilities retain their own choices.
 Model selection refreshes this presentation as well. Tool list entries require Pi's `promptSnippet`;
 `submit_code` supplies it rather than relying on its description alone.
 General work focus removes `research_search`, `research_decide`, `materials`, `experiment`, `resources`
 and `research_source` from the native Pi registry, including discovery and nested tool execution.
 Switching focus updates the registry before the next user run; current runs keep their selected focus.
 `memory`, ordinary web search and PDF reading remain shared capabilities. Ordinary Agent
-`memory` calls manage explicit global/project/session notes loaded on every model request;
+`memory` calls manage persistent global/project/session notes. A branch checkpoint supplies the
+stable system memory snapshot; committed changes enter tool results or retained tail messages,
+and a successful compaction captures the new snapshot together with the effective system text. Native Pi entries retain checkpoints and
+delivered change receipts across restart and branch navigation. Codemode forwards nested memory
+receipts into its outer result, including when the script does not print them. Memory and Computer
+schemas/guidelines are projected from the Host's mode/project/thread role before a new run;
 `recall` is registered only for Bot sessions. Bot instructions and long-term memory remain
 independent. `agent-personalization.ts` applies user edits to native system sections and
 records the last system text at the model-request boundary. Native prompt templates are
@@ -233,7 +240,9 @@ const customTools = selectHarnessTools(settings, {
 
 The selected Pi SDK keeps its native system-section assembly and tool-loadout updates.
 Varin's shipped SDK patch gives the default preamble the identity `You are an agent running in Varin.`
-and keeps runtime tool descriptions, contributed tool/extension guidelines and SDK reference paths.
+It keeps runtime tool descriptions and contributed tool/extension guidelines.
+File-tool contributions describe their real read/create/replace/match behavior. SDK reference paths
+are available through `pi_docs` rather than a permanent system-prompt docs section.
 It does not add response style, a research persona or a prescribed task workflow.
 User `SYSTEM.md` prefix replacement, `APPEND_SYSTEM.md`, context files, skills and extension
 forced prompts keep their native semantics. Work focus changes tool availability without adding system text.

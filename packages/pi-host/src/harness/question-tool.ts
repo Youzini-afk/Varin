@@ -25,8 +25,8 @@ export function createQuestionTool(ui: ExtensionUiBridge, sessionId: string, ena
     description: "Ask one or more questions through the user interface. Submit and continue by default, or set wait_seconds for a bounded wait. The user can answer later; unanswered choices are not approvals.",
     promptSnippet: "ask_question: ask the user, either waiting briefly or continuing independent work",
     promptGuidelines: [
-      "Use ask_question for user input. Omit wait_seconds to continue independent work; set a positive wait_seconds only when the answer is needed now (maximum 600 seconds). Questions stay available after the popup closes or the wait ends, and later answers arrive as addressed input.",
-      "Use select with options for choices, confirm for a yes/no decision, input for short text and editor for multi-line text. Batch related questions in questions[]. No answer is not approval; continue only work that does not depend on the missing decision.",
+      "Omitted/zero wait_seconds returns immediately; a positive value waits up to the specified duration (maximum 600 seconds). Questions remain available after the popup closes or the wait ends; later answers arrive as addressed input.",
+      "select displays options, confirm accepts yes/no, input accepts short text and editor accepts multi-line text. questions[] submits a batch. A missing answer supplies no choice or approval.",
     ],
     execute: async (toolCallId, params, signal, _update, ctx) => {
       try {
@@ -46,7 +46,7 @@ export function createQuestionTool(ui: ExtensionUiBridge, sessionId: string, ena
         const result = await submitted.result;
         const text = result.status === "answered" ? "User answers:\n" + questions.map(question => question.question + "\n" + String(result.answers?.find(answer => answer.id === question.id)?.value)).join("\n\n")
           : result.status === "cancelled" ? "The user closed this question without answering."
-          : "Question " + id + " is awaiting an answer. Continue independent work; do not assume a choice or approval. Later answers will arrive as addressed input.";
+          : "Question " + id + " is awaiting an answer. No choice or approval was received. Later answers arrive as addressed input.";
         return { content: [{ type: "text", text }], details: { requestId: id, status: result.status, questions, ...(result.answers ? { answers: result.answers } : {}) } };
       } catch (error) {
         return { content: [{ type: "text", text: error instanceof Error ? error.message : String(error) }], isError: true, details: {} };

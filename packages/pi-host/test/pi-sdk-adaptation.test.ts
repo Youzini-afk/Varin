@@ -11,7 +11,7 @@ test("SDK adaptation is idempotent for the shipped SDK and rejects a changed req
   assert.equal(adaptPiSdkSource("@earendil-works/pi-coding-agent", "dist/core/agent-session.js", source), source);
   assert.throws(() => adaptPiSdkSource("@earendil-works/pi-coding-agent", "dist/core/agent-session.js", "export class ChangedSession {}"), /required seam/);
   assert.equal(adaptPiSdkSource("@earendil-works/pi-ai", "dist/index.js", "unchanged"), "unchanged");
-  for (const file of ["core/system-prompt.js", "../docs/codemode.md"]) {
+  for (const file of ["core/system-prompt.js", "core/session-manager.js", "core/session-manager.d.ts", "core/compaction/compaction.d.ts", "core/tools/read.js", "core/tools/edit.js", "core/tools/write.js", "../docs/codemode.md"]) {
     const sourcePath = join(directory, file);
     const sdkPath = file.startsWith("../") ? file.slice(3) : `dist/${file}`;
     const original = readFileSync(sourcePath, "utf8");

@@ -1,5 +1,5 @@
 import { ComputerRepl } from "./computer-repl.js";
-import { Type } from "typebox";
+import { Type, type TSchema } from "typebox";
 import { defineTool, type ToolDefinition } from "@earendil-works/pi-coding-agent";
 import type { HostServicesBridge } from "./host-services-bridge.js";
 import { HarnessRequestError } from "./host-services-bridge.js";
@@ -157,6 +157,42 @@ const ComputerParams = Type.Object({
   timeoutMs: Type.Optional(Type.Integer({ minimum: 1, description: "run: evaluation budget in milliseconds; cancellation clears bindings" })),
 });
 
+export type ComputerThreadRole = 'main' | 'worker' | 'read-only';
+
+export function computerToolPresentation(role: ComputerThreadRole) {
+  const readOnly = role === 'read-only';
+  const properties: Record<string, TSchema> = { ...ComputerParams.properties };
+  const readActions = new Set(['access', 'request', 'releaseAssignment', 'list', 'apps', 'observe', 'run', 'reset', 'environment', 'forwards', 'browser', 'office', 'evidence']);
+  properties.action = Type.Union(ComputerParams.properties.action.anyOf.filter(action =>
+    (role === 'main' || !['grant', 'deny'].includes(action.const)) && (!readOnly || readActions.has(action.const))));
+  if (role !== 'main') delete properties.requestId;
+  if (readOnly) {
+    properties.access = Type.Optional(Type.Literal('observe', { description: 'request: observation access (default)' }));
+    for (const key of ['operation', 'workTarget', 'clear', 'url', 'path', 'command', 'args', 'contentBase64', 'port', 'host', 'target', 'forwardId', 'groups', 'packages', 'browserBinary', 'browserProfile', 'browserPort', 'officePath', 'officeUrl', 'connectionId', 'width', 'height', 'relativePath']) delete properties[key];
+    properties.browserOp = Type.Optional(Type.Union(['status', 'tabs', 'snapshot', 'act'].map(value => Type.Literal(value))));
+    properties.browserAct = Type.Optional(Type.Object({ kind: Type.Literal('screenshot') }));
+    properties.officeOp = Type.Optional(Type.Union(['status', 'docs', 'act'].map(value => Type.Literal(value))));
+    properties.officeAct = Type.Optional(Type.Object({ doc: OfficeOperation.properties.doc, sheet: OfficeOperation.properties.sheet,
+      range: OfficeOperation.properties.range, kind: Type.Literal('read') }));
+  }
+  return {
+    parameters: Type.Object(properties) as typeof ComputerParams,
+    description: readOnly
+      ? 'Observe desktop applications: list machines/windows, read accessibility trees and screenshots, inspect browser pages or live Office documents, and run persistent JavaScript for observation.'
+      : 'Observe and operate desktop applications: list windows, read accessibility trees and screenshots, click, type, press keys, scroll or drag. run evaluates persistent JavaScript for multi-step operations.',
+    promptSnippet: readOnly ? 'computer: observe assigned desktop applications' : 'computer: observe and operate desktop applications',
+    promptGuidelines: [
+      role === 'main'
+        ? 'access lists task-family desktop assignments and pending requests. grant/deny decide a child’s requestId. Each desktop has one input controller; observers can coexist and different desktops can operate in parallel. Multiple windows of one desktop share input.'
+        : 'request asks the main thread for a desktop assignment; wait=true waits for its decision, otherwise it returns immediately. ' + (readOnly ? 'This thread has observation access.' : 'Assignments provide observation or exclusive input control.') + ' releaseAssignment ends the assignment.',
+      'A user stop revokes Computer Use for the rest of the current round, including script calls. The stop notification describes the resulting access state.',
+      'Element indexes and coordinates belong to observationId; stale observations are rejected. ' + (readOnly ? '' : 'act reports driver dispatch; application completion or partial outcomes are reported separately.'),
+      'run preserves JavaScript bindings between cells. computer.getApp(app, {desktopId?, window?}) provides getAXState/getScreenshot/getAXStateAndScreenshot/elements' + (readOnly ? '.' : ', click(index or [x,y]), setValue, typeText, pressKey, scroll, drag and performSecondaryAction.') + ' Bound apps retain their desktop/window and access generation; handoff invalidates old bindings. Reads display their result by default; emit:false returns data without displaying it, fresh:true refreshes the cached tree. Image reads return metadata after display; emit:false returns the full observation for computer.emitImage(observation).',
+      'Browser coordinates use CSS viewport pixels; desktop coordinates use pixels of the returned screenshot. URLs, files and localhost resolve on the target machine.',
+    ],
+  };
+}
+
 const errorResult = (error: unknown) => {
   const message = error instanceof Error ? error.message : String(error);
   const extra = error as { code?: string; actionSent?: boolean; retry?: string };
@@ -188,7 +224,7 @@ const summarizeObservation = (observation: ComputerObservation): string => {
   return lines.join("\n");
 };
 
-export function createComputerTool(bridge: HostServicesBridge, _sessionId: string): ToolDefinition {
+export function createComputerTool(bridge: HostServicesBridge, _sessionId: string, getRole: () => ComputerThreadRole = () => 'main'): ToolDefinition {
   const repl = new ComputerRepl();
   const evaluations = new Set<AbortController>();
   let executionId: string | undefined;
@@ -205,15 +241,7 @@ export function createComputerTool(bridge: HostServicesBridge, _sessionId: strin
   return defineTool({
     name: "computer",
     label: "Computer",
-    description: "Observe and operate real desktop applications: list computers/desktops, read the accessibility tree, click, type, press keys, scroll, drag — or run a persistent JavaScript REPL for multi-step GUI orchestration",
-    promptSnippet: "computer: observe and operate desktop apps (list/apps/observe/act/cancel/run scripts)",
-    promptGuidelines: [
-      'Subthreads must request an assigned desktop before observing or operating it. The main thread coordinates assignments with grant/deny and also respects exclusive desktop ownership. Different desktops can run in parallel; multiple windows of one desktop share input. Retrieval/discussion threads may request observe only. Release the assignment after a work segment. If the user stops Computer Use, do not bypass the stop through scripts or another tool; continue other authorized work.',
-      "Element indexes and coordinates bind to observationId; the Host rejects stale observations. act reports driver acceptance, and uncertain or partial outcomes remain explicit.",
-      "run supports persistent bindings and computer.getApp(app, {desktopId?, window?}). An app exposes getAXState/getScreenshot/getAXStateAndScreenshot/elements, click(index or [x,y]), setValue, typeText, pressKey, scroll, drag and performSecondaryAction. getApp resolves once; batch deterministic actions, then observe. Bound apps retain their desktop/window and control epoch across cells; handoff invalidates old bindings. Reads display their result by default; emit:false returns data without displaying it, fresh:true refreshes a cached tree. Image reads return metadata after display; emit:false returns the full observation for computer.emitImage(observation).",
-      "Browser actions use CSS viewport coordinates; desktop coordinate targets use pixels of the exact returned screenshot. The Host maps raster pixels to the bound window and checks geometry before dispatch. URLs, files, and localhost resolve on the target machine.",
-    ],
-    parameters: ComputerParams,
+    ...computerToolPresentation(getRole()),
     execute: async (_toolCallId, params, signal, _onUpdate, _ctx) => {
       const request: HostServicesBridge["request"] = (method, values, options) => {
         const operationSignal = options?.signal ?? signal;
@@ -232,7 +260,7 @@ export function createComputerTool(bridge: HostServicesBridge, _sessionId: strin
           case 'releaseAssignment': {
             const result = await request('computer.access', { op: params.action === 'access' ? 'status' : params.action === 'releaseAssignment' ? 'release' : params.action,
               ...(desktop ? { desktopId: desktop } : {}), ...(params.requestId ? { requestId: params.requestId } : {}),
-              ...(params.access ? { access: params.access } : {}), ...(params.reason !== undefined ? { reason: params.reason } : {}), ...(params.wait !== undefined ? { wait: params.wait } : {}) },
+              ...(params.action === 'request' ? { access: params.access ?? (getRole() === 'read-only' ? 'observe' : 'control') } : {}), ...(params.reason !== undefined ? { reason: params.reason } : {}), ...(params.wait !== undefined ? { wait: params.wait } : {}) },
               params.wait ? { timeoutMs: 0 } : undefined);
             return { content: [{ type: 'text', text: JSON.stringify(result) }], details: result };
           }
@@ -385,7 +413,7 @@ export function createComputerTool(bridge: HostServicesBridge, _sessionId: strin
               const api = {
                 list: () => bridge.request("computer.list", {}, requestOptions),
                 access: () => request('computer.access', { op: 'status' }, requestOptions),
-                request: (opts: { desktopId?: string; access?: 'observe' | 'control'; reason: string; wait?: boolean }) => request('computer.access', { ...opts, op: 'request' }, { ...requestOptions, ...(opts.wait ? { timeoutMs: 0 } : {}) }),
+                request: (opts: { desktopId?: string; access?: 'observe' | 'control'; reason: string; wait?: boolean }) => request('computer.access', { ...opts, access: opts.access ?? (getRole() === 'read-only' ? 'observe' : 'control'), op: 'request' }, { ...requestOptions, ...(opts.wait ? { timeoutMs: 0 } : {}) }),
                 grant: (requestId: string) => request('computer.access', { op: 'grant', requestId }, requestOptions),
                 deny: (requestId: string, reason?: string) => request('computer.access', { op: 'deny', requestId, ...(reason ? { reason } : {}) }, requestOptions),
                 releaseAssignment: (desktopId?: string) => request('computer.access', { op: 'release', ...(desktopId ? { desktopId } : {}) }, requestOptions),
@@ -395,7 +423,7 @@ export function createComputerTool(bridge: HostServicesBridge, _sessionId: strin
                 getApp: async (app: string, opts?: { desktopId?: string; window?: number | string }) => {
                   const target = await field(opts?.desktopId);
                   const observation = (await request("computer.observe", { ...target, app, ...(opts?.window !== undefined ? { window: opts.window } : {}), includeScreenshot: false }, requestOptions)).observation;
-                  return { observation, automationEpoch: epochs.get(target.desktopId)! };
+                  return { observation, automationEpoch: epochs.get(target.desktopId)!, readOnly: getRole() === 'read-only' };
                 },
                 act: async (action: ComputerAction, opts?: { desktopId?: string; automationEpoch?: string }) => {
                   const target = await field(opts?.desktopId);

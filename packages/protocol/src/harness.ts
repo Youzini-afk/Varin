@@ -748,6 +748,7 @@ export interface MemoryRememberResult {
   created: boolean;
   duplicate?: boolean;
   item?: MemoryItem;
+  agentMemoryMutation?: import("./agent-personalization.js").AgentMemoryMutation;
 }
 
 export interface MemoryCorrectParams {
@@ -762,8 +763,9 @@ export interface MemoryCorrectParams {
 
 export interface MemoryCorrectResult {
   corrected: boolean;
-  /** Id of the new accepted revision. */
+  /** Saved entry id; Bot correction creates a new accepted revision. */
   id?: number;
+  agentMemoryMutation?: import("./agent-personalization.js").AgentMemoryMutation;
 }
 
 export interface MemoryForgetParams {
@@ -773,6 +775,7 @@ export interface MemoryForgetParams {
 
 export interface MemoryForgetResult {
   forgotten: boolean;
+  agentMemoryMutation?: import("./agent-personalization.js").AgentMemoryMutation;
 }
 
 export interface MemoryGetParams {

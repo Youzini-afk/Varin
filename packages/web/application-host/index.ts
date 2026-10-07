@@ -1950,13 +1950,18 @@ async function main(options: StartWebUiServerOptions = {}): Promise<WebUiServerC
   const agentPersonalization = createAgentPersonalization({
     client: kernelClient,
     context: async (sessionId) => {
+      const binding = await threadRegistry.getSessionBinding(sessionId);
+      const thread = binding?.owner === 'spawned-child' ? await threadRegistry.getThreadById(binding.owningScopeId, binding.threadId) : null;
+      if (binding?.owner === 'spawned-child' && !thread) throw new Error('The session thread configuration is unavailable');
+      const threadRole = binding?.owner !== 'spawned-child' ? 'main' as const
+        : thread?.preset === 'retrieval' || thread?.kind === 'discussion' ? 'read-only' as const : 'worker' as const;
       const scopeId = await owningKnowledgeScopeIdForSession(sessionId);
-      if (scopeId && isBotScopeId(scopeId)) return { bot: true };
+      if (scopeId && isBotScopeId(scopeId)) return { bot: true, threadRole };
       const snapshot = sessionSnapshots.get(sessionId);
       const cwd = typeof snapshot?.cwd === 'string' ? snapshot.cwd : '';
       const projects = sanitizeProjects((await readSettingsFromDisk()).projects) ?? [];
       const project = projects.find(entry => cwd && projectContainsPath(entry, cwd));
-      return { bot: false, ...(project ? { projectId: project.id } : {}) };
+      return { bot: false, threadRole, ...(project ? { projectId: project.id } : {}) };
     },
     onChanged: () => broadcastGlobalUiEvent?.({ type: 'varin:agent-personalization-changed', properties: {} }),
   });

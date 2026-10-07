@@ -1,4 +1,4 @@
-/** Ordinary assistants have explicit, always-loaded notes; Bot memory has its own owner. */
+/** Ordinary assistants have scoped persistent notes; Bot memory has its own owner. */
 export type AgentMemoryScope = { kind: "global" } | { kind: "project" | "session"; id: string };
 export interface AgentMemoryNote {
   id: number;
@@ -18,10 +18,32 @@ export interface AgentPersonalizationCatalog {
 }
 export interface AgentPersonalizationContext {
   mode: "agent" | "bot";
+  revision: number;
+  threadRole: "main" | "worker" | "read-only";
   projectId?: string;
   sessionId: string;
   profiles: Array<{ scope: AgentMemoryScope; profile: AgentPromptProfile }>;
   memories: AgentMemoryNote[];
+}
+/** A conversation checkpoint, not another writable memory authority. */
+export interface AgentMemorySnapshot {
+  revision: number;
+  sessionId: string;
+  projectId?: string;
+  memories: AgentMemoryNote[];
+}
+export interface AgentMemoryChange {
+  id: number;
+  note: AgentMemoryNote | null;
+}
+export interface AgentMemoryMutation {
+  revision: number;
+  changes: AgentMemoryChange[];
+}
+export function renderAgentMemoryMutation(receipt: AgentMemoryMutation): string {
+  return `Persistent memory receipt at revision ${receipt.revision}:\n${receipt.changes.map(change => change.note
+    ? `- [${change.id}] [${change.note.scope.kind}] ${change.note.content}`
+    : `- [${change.id}] deleted; this entry is no longer active.`).join('\n')}`;
 }
 export interface AgentSystemPromptSnapshot {
   sessionId: string;
@@ -31,6 +53,8 @@ export interface AgentSystemPromptSnapshot {
   sections: Record<string, string>;
   content: string;
   personalization: AgentPersonalizationContext;
+  memorySnapshot?: AgentMemorySnapshot;
+  pendingMemoryChanges?: AgentMemoryChange[];
   lastRequest?: { content: string; timestamp: number };
 }
 export const agentScopeKey = (scope: AgentMemoryScope): string => scope.kind === "global" ? "global" : `${scope.kind}:${scope.id}`;
@@ -63,8 +87,15 @@ export function personalizeAgentSystemPrompt(original: Record<string, string>, c
     if (value === null) delete sections[key];
     else sections[key] = value;
   }
+  return applyAgentMemorySnapshot(sections, context);
+}
+
+export function applyAgentMemorySnapshot(original: Record<string, string>, snapshot: Pick<AgentMemorySnapshot, "revision" | "memories">): Record<string, string> {
+  const sections = { ...original };
+  for (const key of Object.keys(sections)) if (key.startsWith("agent_memory_")) delete sections[key];
+  if (snapshot.memories.length) sections.agent_memory_snapshot = `Persistent memory snapshot at revision ${snapshot.revision}. It contains the active entries at that revision. Higher-revision receipts replace or remove entries by ID; older receipts are historical.`;
   for (const kind of ["global", "project", "session"] as const) {
-    const notes = context.memories.filter(note => note.scope.kind === kind);
+    const notes = snapshot.memories.filter(note => note.scope.kind === kind);
     if (notes.length) sections[`agent_memory_${kind}`] = notes.map(note => `- [${note.id}] ${note.content}`).join("\n");
   }
   return sections;

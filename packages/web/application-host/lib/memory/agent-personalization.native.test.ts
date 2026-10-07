@@ -42,7 +42,18 @@ it('persists scoped assistant notes and prompt edits, isolates Bots, and rejects
     });
     const receipt = await remember.handle({ content: 'Explicit global note', scope: 'user' }, { sessionId: 'chat' } as HarnessServiceContext);
     expect(receipt.item?.scope).toBe('user');
+    expect(receipt.agentMemoryMutation).toEqual({ revision: (await service.catalog()).revision,
+      changes: [{ id: receipt.item!.id, note: (await service.context('chat')).memories.find(note => note.id === receipt.item!.id) }] });
     expect((await service.context('other')).memories.map(note => note.content)).toContain('Explicit global note');
+    const correct = withAgentMemory({ agentPersonalization: service } as never, 'memory.correct', { handle: async () => { throw new Error('Wrong owner'); } });
+    const corrected = await correct.handle({ id: receipt.item!.id, content: 'Corrected global note' }, { sessionId: 'chat' } as HarnessServiceContext);
+    expect(corrected.agentMemoryMutation).toEqual({ revision: (await service.catalog()).revision,
+      changes: [{ id: receipt.item!.id, note: (await service.context('chat')).memories.find(note => note.id === receipt.item!.id) }] });
+    const forget = withAgentMemory({ agentPersonalization: service } as never, 'memory.forget', { handle: async () => { throw new Error('Wrong owner'); } });
+    const forgotten = await forget.handle({ id: receipt.item!.id }, { sessionId: 'chat' } as HarnessServiceContext);
+    expect(forgotten.agentMemoryMutation).toEqual({ revision: (await service.catalog()).revision,
+      changes: [{ id: receipt.item!.id, note: null }] });
+    expect((await service.context('chat')).memories.some(note => note.id === receipt.item!.id)).toBe(false);
 
     const app = express(); app.use(express.json());
     registerSelectionMemoryRoutes(app, { agentPersonalization: service, memory: {} as never,

@@ -20,7 +20,7 @@ export function parseAgentScope(value: unknown): AgentMemoryScope {
 }
 export function createAgentPersonalization(options: {
   client: KernelClient;
-  context(sessionId: string): Promise<{ bot: boolean; projectId?: string }>;
+  context(sessionId: string): Promise<{ bot: boolean; projectId?: string; threadRole?: AgentPersonalizationContext['threadRole'] }>;
   onChanged?(): void;
 }) {
   let connection: Promise<KernelScopedClient> | undefined;
@@ -62,11 +62,11 @@ export function createAgentPersonalization(options: {
   };
   const context = async (sessionId: string): Promise<AgentPersonalizationContext> => {
     const owner = await options.context(sessionId);
-    if (owner.bot) return { mode: 'bot', sessionId, profiles: [], memories: [] };
+    if (owner.bot) return { mode: 'bot', revision: 0, threadRole: owner.threadRole ?? 'main', sessionId, profiles: [], memories: [] };
     const scopes: AgentMemoryScope[] = [{ kind: 'global' }, ...(owner.projectId ? [{ kind: 'project' as const, id: owner.projectId }] : []), { kind: 'session', id: sessionId }];
     const keys = new Set(scopes.map(agentScopeKey));
-    const { document } = await read();
-    return structuredClone({ mode: 'agent', sessionId, ...(owner.projectId ? { projectId: owner.projectId } : {}),
+    const { document, revision } = await read();
+    return structuredClone({ mode: 'agent', revision, threadRole: owner.threadRole ?? 'main', sessionId, ...(owner.projectId ? { projectId: owner.projectId } : {}),
       profiles: scopes.flatMap(scope => document.prompts[agentScopeKey(scope)] ? [{ scope, profile: document.prompts[agentScopeKey(scope)]! }] : []),
       memories: document.memories.filter(note => keys.has(agentScopeKey(note.scope))),
     });
