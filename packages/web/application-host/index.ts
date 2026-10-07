@@ -1521,12 +1521,6 @@ async function main(options: StartWebUiServerOptions = {}): Promise<WebUiServerC
     languageSupport: () => languageSupportRuntime,
     runtimeLifecycle: () => piRuntimeLifecycle,
     agentPersonalization: () => agentPersonalization,
-    foundational: () => ({
-      status: () => piRuntimeBroker.foundationalPackageStatus(),
-      restore: (ids) => piRuntimeBroker.restoreFoundationalPackages(
-        ids as Parameters<typeof piRuntimeBroker.restoreFoundationalPackages>[0],
-      ),
-    }),
     gitIdentities: gitIdentityStorage,
     surfaceHint: () => {
       const surfaces = clientSurfaceBridge.list();

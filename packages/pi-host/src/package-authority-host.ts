@@ -8,7 +8,6 @@ import {
 } from "@earendil-works/pi-coding-agent";
 import type {
   HostEventData,
-  PackageBootstrapResult,
   PackageDescriptor,
   PiPackageScope,
 } from "@varin/protocol";
@@ -29,7 +28,7 @@ interface PackageAuthorityHostOptions {
 
 /**
  * Pi package authority that never creates an AgentSession or executes extensions.
- * A broken package must remain removable and foundation reconciliation must remain observable
+ * A broken package must remain removable and package management must remain available
  * even when that package cannot be imported by a real workspace/session worker.
  */
 export class PackageAuthorityHost {
@@ -78,38 +77,6 @@ export class PackageAuthorityHost {
   async refreshPackages(): Promise<PackageDescriptor[]> {
     await this.#reloadSettings();
     return this.listPackages();
-  }
-
-  async bootstrapPackages(sources: readonly string[]): Promise<PackageBootstrapResult> {
-    await this.#reloadSettings();
-    const manager = this.#packageManager();
-    const results: PackageBootstrapResult["results"] = [];
-    let changed = false;
-    for (const source of sources) {
-      const sourceIdentity = packageNameFromSource(source).toLowerCase();
-      const configured = this.listPackages().some((entry) => (
-        entry.source === source
-        || entry.name.toLowerCase() === sourceIdentity
-        || packageNameFromSource(entry.source).toLowerCase() === sourceIdentity
-      ));
-      if (configured) {
-        results.push({ source, status: "already_configured" });
-        continue;
-      }
-      try {
-        await manager.installAndPersist(source, { local: false });
-        changed = true;
-        results.push({ source, status: "installed" });
-      } catch (error) {
-        results.push({
-          error: error instanceof Error ? error.message : String(error),
-          source,
-          status: "failed",
-        });
-      }
-    }
-    if (changed) await this.#flushSettings();
-    return { packages: this.listPackages(), results };
   }
 
   async installPackage(source: string, scope: PiPackageScope): Promise<PackageDescriptor> {

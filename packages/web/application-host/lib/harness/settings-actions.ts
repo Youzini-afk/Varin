@@ -8,7 +8,7 @@
  * `unavailable`; nothing here fakes an install, login, or connection.
  */
 
-import type { SettingsCatalogEntry } from '@varin/application-client';
+import { RECOMMENDED_PACKAGES, type SettingsCatalogEntry } from '@varin/application-client';
 import type { SettingsActionResult } from '@varin/protocol';
 import { randomUUID } from 'node:crypto';
 import { HarnessServiceError } from './service-error.js';
@@ -126,11 +126,6 @@ export interface RuntimeLifecycleHandle {
 
 
 
-export interface FoundationalHandle {
-  status(): { entries?: { id: string; observed?: string }[] };
-  restore(ids?: readonly string[]): Promise<unknown>;
-}
-
 /** Profiles carry sshKey/signingKey secrets — never hand raw rows to callers. */
 export interface GitIdentityStore {
   getProfiles(): import('../git/identity-storage.js').GitIdentityProfile[];
@@ -160,7 +155,6 @@ export interface SettingsActionDeps {
   remoteClients?(): RemoteClientsHandle | null;
   languageSupport?(): LanguageSupportHandle | null;
   runtimeLifecycle?(): RuntimeLifecycleHandle | null;
-  foundational?(): FoundationalHandle | null;
   gitIdentities?: GitIdentityStore;
   gitHubAuthStatus?(): Promise<Record<string, unknown>>;
   /** Single connected surface kind when unambiguous (web/desktop/mobile). */
@@ -600,7 +594,11 @@ const resourcesAdapter = (deps: SettingsActionDeps): SettingsActionAdapter => ({
 
 const piPackagesAdapter = (deps: SettingsActionDeps): SettingsActionAdapter => ({
   verbs: ['list', 'install', 'remove', 'update', 'read', 'write'],
-  async describe(ctx) {
+  async describe(ctx, entry) {
+    if (entry.id === 'plugins.recommended') {
+      return { summary: `${RECOMMENDED_PACKAGES.length} recommended packages`,
+        data: RECOMMENDED_PACKAGES.map(({ name, source }) => ({ name, source })) };
+    }
     const root = await needWorkspace(ctx, deps).catch(() => null);
     if (!root) return { unavailable: 'requires a workspace-bound session' };
     const list = await deps.requestWorkspace(root, 'package.list', {}).catch(() => null);
@@ -614,19 +612,11 @@ const piPackagesAdapter = (deps: SettingsActionDeps): SettingsActionAdapter => (
       switch (verb) {
         case 'list': {
           if (entry.id === 'plugins.recommended') {
-            const foundation = deps.foundational?.();
-            if (!foundation) return unavailable('foundational package status unavailable');
-            return { status: 'applied', data: foundation.status() };
+            return { status: 'applied', data: RECOMMENDED_PACKAGES.map(({ name, source }) => ({ name, source })) };
           }
           return { status: 'applied', data: sanitizePackageResult(await deps.requestWorkspace(root, 'package.list', {})) };
         }
         case 'install': {
-          if (entry.id === 'plugins.recommended') {
-            const foundation = deps.foundational?.();
-            if (!foundation) return unavailable('foundational package restore unavailable');
-            const ids = Array.isArray(args.ids) ? args.ids.filter((v): v is string => typeof v === 'string') : undefined;
-            return { status: 'applied', detail: 'foundational package restore completed at the Pi package owner', data: await foundation.restore(ids) };
-          }
           const source = needString(args, 'source');
           const scope = str(args, 'scope') === 'project' ? 'project' : 'global';
           const result = await deps.requestWorkspace(root, 'package.install', { source, scope });

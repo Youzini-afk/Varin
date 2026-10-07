@@ -38,7 +38,6 @@ import type {
   ImageAttachment,
   JsonValue,
   ModelDescriptor,
-  PackageBootstrapResult,
   PackageDescriptor,
   PiCommandDescriptor,
   PiPackageScope,
@@ -2565,44 +2564,6 @@ export class SessionHost {
   async refreshPackages(): Promise<PackageDescriptor[]> {
     await this.#reloadPackageSettings();
     return this.listPackages();
-  }
-
-  async bootstrapPackages(sources: readonly string[]): Promise<PackageBootstrapResult> {
-    await this.#reloadPackageSettings();
-    const manager = this.#packageManager();
-    const results: PackageBootstrapResult["results"] = [];
-    let changed = false;
-    for (const source of sources) {
-      const sourceIdentity = packageNameFromSource(source).toLowerCase();
-      const configured = this.listPackages().some((entry) => (
-        entry.scope === "global"
-        && (
-          entry.source === source
-          || entry.name.toLowerCase() === sourceIdentity
-          || packageNameFromSource(entry.source).toLowerCase() === sourceIdentity
-        )
-      ));
-      if (configured) {
-        results.push({ source, status: "already_configured" });
-        continue;
-      }
-      try {
-        await manager.installAndPersist(source, { local: false });
-        changed = true;
-        results.push({ source, status: "installed" });
-      } catch (error) {
-        results.push({
-          error: error instanceof Error ? error.message : String(error),
-          source,
-          status: "failed",
-        });
-      }
-    }
-    if (changed) {
-      await this.#flushPackageSettings();
-      await this.session.reload();
-    }
-    return { packages: this.listPackages(), results };
   }
 
   async installPackage(source: string, scope: PiPackageScope): Promise<PackageDescriptor> {

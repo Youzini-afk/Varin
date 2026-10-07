@@ -1,6 +1,4 @@
 import type {
-  FoundationalPiPackageId,
-  FoundationalPiPackageStatusSnapshot,
   PackageDescriptor,
   PiPackageScope,
   RuntimeContextTarget,
@@ -82,23 +80,4 @@ export const setPiPackageEnabled = async (
 ) => {
   const { client } = await getPiRuntimeConnection();
   return client.request('package.setEnabled', { ...target, enabled, scope, source });
-};
-
-export const getPiFoundationalPackageStatus = async (): Promise<FoundationalPiPackageStatusSnapshot> => {
-  const { client } = await getPiRuntimeConnection();
-  return client.request('package.foundation.status', {});
-};
-
-export const restorePiFoundationalPackages = async (
-  ids?: readonly FoundationalPiPackageId[],
-): Promise<FoundationalPiPackageStatusSnapshot> => {
-  const { client } = await getPiRuntimeConnection();
-  return client.request('package.foundation.restore', ids === undefined ? {} : { ids: [...ids] });
-};
-
-export const setPiFoundationalAutoInstallNew = async (
-  enabled: boolean,
-): Promise<FoundationalPiPackageStatusSnapshot> => {
-  const { client } = await getPiRuntimeConnection();
-  return client.request('package.foundation.setAutoInstallNew', { enabled });
 };

@@ -85,6 +85,12 @@ fixtures; UI consumers use Vitest. Controlled local MCP/provider fixtures need n
 Production packaging must include the Host patch directory and native QuickJS worker/WASM dependencies,
 and refresh `scripts/cloud-runtime.bun.lock` after the final dependency/patch change.
 
+Native MCP is the default without an external package. The former foundational-package provisioning
+and restore APIs have been retired; already installed adapters remain ordinary Pi packages. Package
+mutations retain broker serialization and a shared agent-directory filesystem lock. The UI preserves
+native connecting state, refreshes the authoritative catalog after actions, and exposes per-tool
+access overrides. Project overlays expose only the fields accepted by Pi's overlay schema.
+
 The 1.0 upgrade retains stable AgentSession and rebases the existing Host seams. The additional codemode
 `docsReference` option points to `pi_docs`, which reads actual assets from the selected SDK independently
 of workspace scope/machine placement. Keep `docs/codemode.md`, `docs/models.md` and `docs/mcp.md` in the

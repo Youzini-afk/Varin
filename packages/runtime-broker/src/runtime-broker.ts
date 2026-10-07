@@ -1,6 +1,6 @@
 import { randomUUID } from "node:crypto";
 import { lstat, realpath, rm, stat } from "node:fs/promises";
-import { isAbsolute, relative, resolve, sep } from "node:path";
+import { isAbsolute, join, relative, resolve, sep } from "node:path";
 import type {
   CompactionRunResult,
   CompactionTaskSpec,
@@ -29,26 +29,13 @@ import type {
   WorkFocusSelection,
 } from "@varin/protocol";
 import {
-  findFoundationalPackageBySource,
-  FOUNDATIONAL_PI_PACKAGE_MANIFEST_REVISION,
-  matchesFoundationalPackage,
   isRuntimeMethod,
   productDefaultWorkFocus,
-  type FoundationalPiPackageId,
-  type FoundationalPiPackageManifestEntry,
-  type FoundationalPiPackageStatusSnapshot,
-  type PackageDescriptor,
 } from "@varin/protocol";
 import { PiHostClient, type PiHostExit } from "./host-client.js";
 import { PiRuntimeBrokerError } from "./errors.js";
 import { SessionMetadataStore } from "./session-metadata-store.js";
-import {
-  createPackageProvisioningReceiptStore,
-  type PackageProvisioningReceiptDocument,
-  type PackageProvisioningReceiptEntry,
-  type PackageProvisioningReceiptStore,
-} from "./package-provisioning-receipt-store.js";
-import { reconcileFoundationalPackages } from "./foundational-package-provisioner.js";
+import { createSettingsFileStore } from "@varin/settings-store";
 
 export interface ProjectTrustDecision {
   remember: boolean;
@@ -200,7 +187,6 @@ export interface PiRuntimeBrokerOptions {
   emit?(event: PiRuntimeBrokerEvent): void;
   environment?: NodeJS.ProcessEnv;
   execArgv?: string[];
-  foundationalPackages?: readonly FoundationalPiPackageManifestEntry[];
   hostEntry: string;
   nodePath?: string;
   packageRoot?: string;
@@ -269,9 +255,6 @@ export const isPiCatalogMethod = (value: unknown): value is PiCatalogMethod => (
 
 type SessionDynamicMethod = Extract<RuntimeMethod, HostMethod>;
 const BROKER_ONLY_RUNTIME_METHODS: Record<Exclude<RuntimeMethod, HostMethod>, true> = {
-  "package.foundation.restore": true,
-  "package.foundation.setAutoInstallNew": true,
-  "package.foundation.status": true,
   "session.archive": true,
   "session.delete": true,
   "session.entries.preview": true,
@@ -366,18 +349,13 @@ export class PiRuntimeBroker {
   readonly #runtimeGeneration: number;
   readonly #sessionExecutionAdmissions = new Map<PiHostClient, SessionExecutionAdmissionState>();
   readonly #workerCwds = new Map<PiHostClient, string>();
-  readonly #foundationalPackages: readonly FoundationalPiPackageManifestEntry[];
   readonly #workspaceContexts = new Map<string, WorkspaceWorkerContext>();
   readonly #workspaceSessions = new Map<string, PiHostClient>();
   #catalog: PiHostClient | undefined;
   #catalogPromise: Promise<PiHostClient> | undefined;
   #disposed = false;
-  #foundationalBootstrapStarted = false;
-  #foundationalStatus: FoundationalPiPackageStatusSnapshot;
-  #foundationalTail: Promise<void> = Promise.resolve();
   #metadata: SessionMetadataStore | undefined;
   #packageMutationTail: Promise<void> = Promise.resolve();
-  #receiptPromise: Promise<PackageProvisioningReceiptStore> | undefined;
   #sessionExecutionAdmission: PiSessionExecutionAdmission | undefined;
   #sessionDeleteCoordinator: PiSessionDeleteCoordinator | undefined;
   #sessionRunCoordinator: PiSessionRunCoordinator | undefined;
@@ -392,21 +370,6 @@ export class PiRuntimeBroker {
       throw new TypeError("Pi runtime generation must be a positive safe integer");
     }
     this.#sessionExecutionAdmission = options.admitSessionExecution;
-    this.#foundationalPackages = [...(options.foundationalPackages ?? [])];
-    this.#foundationalStatus = {
-      autoInstallNew: true,
-      entries: this.#foundationalPackages.map((entry) => ({
-        id: entry.id,
-        intent: "eligible",
-        observed: "missing",
-        operation: "idle",
-        provenance: "none",
-        source: entry.source,
-      })),
-      manifestRevision: FOUNDATIONAL_PI_PACKAGE_MANIFEST_REVISION,
-      revision: 0,
-      state: "idle",
-    };
     if (options.emit) this.#listeners.add(options.emit);
   }
 
@@ -462,33 +425,11 @@ export class PiRuntimeBroker {
 
   async warmup(): Promise<HostHandshakeResult> {
     const worker = await this.#getCatalog();
-    this.#startFoundationalBootstrap();
     return worker.handshake;
   }
 
   setQuestionContinuation(coordinate: PiQuestionContinuation | undefined): void {
     this.#questionContinuation = coordinate;
-  }
-
-  foundationalPackageStatus(): FoundationalPiPackageStatusSnapshot {
-    return structuredClone(this.#foundationalStatus);
-  }
-
-  async restoreFoundationalPackages(
-    ids?: readonly FoundationalPiPackageId[],
-  ): Promise<FoundationalPiPackageStatusSnapshot> {
-    await this.#ensureFoundationalBootstrap();
-    const selected = new Set(ids ?? this.#foundationalPackages.map((entry) => entry.id));
-    await this.#enqueueFoundationalReconcile({ restoreIds: selected });
-    return this.foundationalPackageStatus();
-  }
-
-  async setAutoInstallNewFoundationalPackages(
-    enabled: boolean,
-  ): Promise<FoundationalPiPackageStatusSnapshot> {
-    await this.#ensureFoundationalBootstrap();
-    await this.#enqueueFoundationalReconcile({ setAutoInstallNew: enabled });
-    return this.foundationalPackageStatus();
   }
 
   async requestCatalog<M extends PiCatalogMethod>(
@@ -628,7 +569,6 @@ export class PiRuntimeBroker {
       workFocus?: WorkFocusId;
     },
   ): Promise<SessionSnapshot> {
-    await this.#ensureFoundationalBootstrap();
     const normalizedCwd = resolve(cwd);
     const workFocus = await this.#resolveInitialWorkFocus(
       normalizedCwd,
@@ -703,7 +643,6 @@ export class PiRuntimeBroker {
       }
     }
 
-    await this.#ensureFoundationalBootstrap();
 
     const explicitCwd = input.cwd === undefined ? undefined : resolve(input.cwd);
     const explicitSessionFile = input.sessionFile === undefined
@@ -807,12 +746,6 @@ export class PiRuntimeBroker {
     method: M,
     params: HostMethodParams<M>,
   ): Promise<HostMethodResult<M>> {
-    if ((method as HostMethod) === "package.bootstrap") {
-      throw new PiRuntimeBrokerError(
-        "unsupported_method",
-        "package.bootstrap is private to the broker provisioner",
-      );
-    }
     for (const client of this.#clients) {
       if (client.id === workerId) return client.request(method, params);
     }
@@ -892,15 +825,9 @@ export class PiRuntimeBroker {
 
   requestForSession<M extends HostMethod>(
     sessionId: string,
-    method: M extends "package.bootstrap" ? never : M,
+    method: M,
     params: HostMethodParams<M>,
   ): Promise<HostMethodResult<M>> {
-    if ((method as HostMethod) === "package.bootstrap") {
-      throw new PiRuntimeBrokerError(
-        "unsupported_method",
-        "package.bootstrap is private to the broker provisioner",
-      );
-    }
     if (PACKAGE_MUTATION_METHODS.has(method)) {
       return this.mutatePackage(
         { sessionId },
@@ -1148,89 +1075,41 @@ export class PiRuntimeBroker {
   ): Promise<HostMethodResult<M>> {
     const operation = this.#packageMutationTail.then(async () => {
       if (this.#disposed) throw new Error("Pi runtime broker is disposed");
-      const receipt = await this.#receiptFor();
-      const source = "source" in params && typeof params.source === "string"
-        ? params.source
-        : undefined;
-      const scope = "scope" in params ? params.scope : undefined;
-      const reconcileAfterMutation = method !== "settings.update"
-        || ("set" in params && Object.hasOwn(params.set, "packages"))
-        || ("remove" in params && params.remove.includes("packages"));
-      const invalidatesGlobalPackages = method === "package.update"
-        || (scope === "global" && reconcileAfterMutation);
-      try {
-        if (method !== "settings.update" && scope === "global") {
-          return await this.#withPackageAuthority(async (worker) => {
-            const foundational = source === undefined
-              ? undefined
-              : await this.#foundationalPackageForMutation(worker, source);
-            return this.#coordinatePackageMutation(
-              receipt,
-              method,
-              scope,
-              foundational,
-              source,
-              () => worker.request(method, params),
-            );
-          });
-        }
-        if ("sessionId" in target) {
-          const worker = this.#workerForSession(target.sessionId);
-          const cwd = this.#workerCwds.get(worker);
-          if (!cwd) {
-            throw new PiRuntimeBrokerError(
-              "session_context_unavailable",
-              `Workspace context is unavailable for Pi session: ${target.sessionId}`,
-            );
+      const catalog = await this.#getCatalog();
+      const agentDir = await realpath(catalog.handshake.runtime.agentDir);
+      // Share the package mutation lock across brokers using the same Pi directory.
+      // Pi remains the settings/package owner; this transaction writes no document.
+      const lock = createSettingsFileStore({ filePath: join(agentDir, "varin", "package-mutations.json") });
+      return lock.transact(async () => {
+        const scope = "scope" in params ? params.scope : undefined;
+        const changesPackages = method !== "settings.update"
+          || ("set" in params && Object.hasOwn(params.set, "packages"))
+          || ("remove" in params && params.remove.includes("packages"));
+        const invalidatesGlobalPackages = method === "package.update"
+          || (scope === "global" && changesPackages);
+        try {
+          let result: HostMethodResult<M>;
+          if (method !== "settings.update" && scope === "global") {
+            result = await this.#withPackageAuthority(worker => worker.request(method, params));
+          } else if ("sessionId" in target) {
+            const worker = this.#workerForSession(target.sessionId);
+            const cwd = this.#workerCwds.get(worker);
+            if (!cwd) throw new PiRuntimeBrokerError("session_context_unavailable",
+              `Workspace context is unavailable for Pi session: ${target.sessionId}`);
+            result = await (requiresWorkspaceAdmission(method, params)
+              ? this.#requestWithExecutionAdmission(worker, cwd, target.sessionId, method, params, "workspace-mutation")
+              : worker.request(method, params));
+          } else {
+            const cwd = resolve(target.cwd);
+            result = await this.#withWorkspaceContext(cwd, worker => requiresWorkspaceAdmission(method, params)
+              ? this.#requestWithExecutionAdmission(worker, cwd, undefined, method, params, "workspace-mutation")
+              : worker.request(method, params));
           }
-          const foundational = source === undefined || scope !== "global"
-            ? undefined
-            : await this.#foundationalPackageForMutation(worker, source);
-          return await this.#coordinatePackageMutation(
-            receipt,
-            method,
-            scope,
-            foundational,
-            source,
-            () => requiresWorkspaceAdmission(method, params)
-              ? this.#requestWithExecutionAdmission(
-                  worker,
-                  cwd,
-                  target.sessionId,
-                  method,
-                  params,
-                  "workspace-mutation",
-                )
-              : worker.request(method, params),
-          );
+          return { result, write: false };
+        } finally {
+          if (invalidatesGlobalPackages) this.#invalidateWorkspaceContexts();
         }
-        const workspaceCwd = resolve(target.cwd);
-        return await this.#withWorkspaceContext(workspaceCwd, async (worker) => {
-          const foundational = source === undefined || scope !== "global"
-            ? undefined
-            : await this.#foundationalPackageForMutation(worker, source);
-          return this.#coordinatePackageMutation(
-            receipt,
-            method,
-            scope,
-            foundational,
-            source,
-            () => requiresWorkspaceAdmission(method, params)
-              ? this.#requestWithExecutionAdmission(
-                  worker,
-                  workspaceCwd,
-                  undefined,
-                  method,
-                  params,
-                  "workspace-mutation",
-                )
-              : worker.request(method, params),
-          );
-        });
-      } finally {
-        if (invalidatesGlobalPackages) this.#invalidateWorkspaceContexts();
-        if (reconcileAfterMutation) await this.#enqueueFoundationalReconcile({});
-      }
+      });
     });
     this.#packageMutationTail = operation.then(
       () => undefined,
@@ -1468,7 +1347,6 @@ export class PiRuntimeBroker {
     const clients = [...this.#clients];
     const stoppingClients = Promise.allSettled(clients.map((client) => client.dispose()));
     await Promise.allSettled([
-      this.#foundationalTail,
       this.#packageMutationTail,
       stoppingClients,
     ]);
@@ -1505,7 +1383,6 @@ export class PiRuntimeBroker {
           throw new Error("Pi runtime broker was disposed during startup");
         }
         this.#catalog = client;
-        this.#startFoundationalBootstrap();
         return client;
       } catch (error) {
         this.#clients.delete(client);
@@ -1581,113 +1458,6 @@ export class PiRuntimeBroker {
     return this.#metadata;
   }
 
-  #startFoundationalBootstrap(): void {
-    if (this.#foundationalBootstrapStarted || this.#disposed) return;
-    this.#foundationalBootstrapStarted = true;
-    if (this.#foundationalPackages.length === 0) {
-      this.#foundationalStatus = {
-        ...this.#foundationalStatus,
-        revision: this.#foundationalStatus.revision + 1,
-        state: "ready",
-      };
-      return;
-    }
-    void this.#enqueueFoundationalReconcile({});
-  }
-
-  async #ensureFoundationalBootstrap(): Promise<void> {
-    if (this.#disposed) throw new Error("Pi runtime broker is disposed");
-    if (this.#foundationalPackages.length === 0) {
-      if (!this.#foundationalBootstrapStarted) {
-        this.#foundationalBootstrapStarted = true;
-        this.#foundationalStatus = {
-          ...this.#foundationalStatus,
-          revision: this.#foundationalStatus.revision + 1,
-          state: "ready",
-        };
-      }
-      return;
-    }
-    await this.#getCatalog();
-    this.#startFoundationalBootstrap();
-    await this.#foundationalTail;
-  }
-
-  async #enqueueFoundationalReconcile(
-    options: {
-      restoreIds?: ReadonlySet<FoundationalPiPackageId>;
-      setAutoInstallNew?: boolean;
-    },
-  ): Promise<void> {
-    if (this.#foundationalPackages.length === 0) {
-      if (options.setAutoInstallNew !== undefined) {
-        this.#foundationalStatus = {
-          ...this.#foundationalStatus,
-          autoInstallNew: options.setAutoInstallNew,
-          revision: this.#foundationalStatus.revision + 1,
-          state: "ready",
-        };
-      }
-      return;
-    }
-    const run = this.#foundationalTail.then(async () => {
-      if (this.#disposed) return;
-      this.#foundationalStatus = {
-        ...this.#foundationalStatus,
-        entries: this.#foundationalStatus.entries.map((entry) => ({
-          ...entry,
-          ...(entry.observed === "missing" && entry.intent === "eligible"
-            ? { operation: "planned" as const }
-            : {}),
-        })),
-        revision: this.#foundationalStatus.revision + 1,
-        state: "running",
-      };
-      try {
-        const result = await this.#withPackageAuthority(async (worker) => {
-          const receipt = await this.#receiptFor(worker);
-          return reconcileFoundationalPackages({
-            bootstrapPackages: (sources) => worker.request("package.bootstrap", { sources }),
-            integrations: this.#foundationalPackages,
-            listPackages: () => worker.request("package.list", {}),
-            manifestRevision: FOUNDATIONAL_PI_PACKAGE_MANIFEST_REVISION,
-            receiptStore: receipt,
-            ...(options.restoreIds === undefined ? {} : { restoreIds: options.restoreIds }),
-            ...(options.setAutoInstallNew === undefined
-              ? {}
-              : { setAutoInstallNew: options.setAutoInstallNew }),
-          });
-        });
-        if (this.#disposed) return;
-        this.#foundationalStatus = {
-          autoInstallNew: result.autoInstallNew,
-          entries: result.entries,
-          manifestRevision: FOUNDATIONAL_PI_PACKAGE_MANIFEST_REVISION,
-          revision: this.#foundationalStatus.revision + 1,
-          state: result.state,
-        };
-      } catch (error) {
-        if (this.#disposed) return;
-        const message = error instanceof Error ? error.message : String(error);
-        this.#foundationalStatus = {
-          ...this.#foundationalStatus,
-          entries: this.#foundationalStatus.entries.map((entry) => ({
-            ...entry,
-            error: message,
-            operation: "failed_retryable",
-          })),
-          revision: this.#foundationalStatus.revision + 1,
-          state: "degraded",
-        };
-      }
-    });
-    this.#foundationalTail = run.then(
-      () => undefined,
-      () => undefined,
-    );
-    await this.#foundationalTail;
-  }
-
   async #withWorkspaceContext<Result>(
     cwd: string,
     operation: (worker: PiHostClient) => Promise<Result>,
@@ -1732,97 +1502,6 @@ export class PiRuntimeBroker {
         });
       });
     }
-  }
-
-  async #receiptFor(worker?: PiHostClient): Promise<PackageProvisioningReceiptStore> {
-    if (this.#receiptPromise) return this.#receiptPromise;
-    const authority = worker ?? await this.#getCatalog();
-    this.#receiptPromise = createPackageProvisioningReceiptStore(
-      authority.handshake.runtime.agentDir,
-    );
-    try {
-      return await this.#receiptPromise;
-    } catch (error) {
-      this.#receiptPromise = undefined;
-      throw error;
-    }
-  }
-
-  async #coordinatePackageMutation<M extends PiPackageMutationMethod>(
-    receipt: PackageProvisioningReceiptStore,
-    method: M,
-    scope: string | undefined,
-    foundational: FoundationalPiPackageManifestEntry | undefined,
-    source: string | undefined,
-    request: () => Promise<HostMethodResult<M>>,
-  ): Promise<HostMethodResult<M>> {
-    if (method === "package.remove" && foundational) {
-      await receipt.markSuppressed(foundational.id);
-    }
-    if (method !== "package.install" || scope !== "global") {
-      return receipt.transact(async (current) => ({
-        document: current,
-        result: await request(),
-        write: false,
-      }));
-    }
-    return receipt.transact(async (current) => {
-      const result = await request();
-      const descriptor = result as PackageDescriptor;
-      const installedFoundation = findFoundationalPackageBySource(
-        this.#foundationalPackages,
-        descriptor.source || source || "",
-      ) ?? this.#foundationalPackages.find((entry) => (
-        matchesFoundationalPackage(entry, descriptor)
-      )) ?? foundational;
-      if (!installedFoundation) return { document: current, result, write: false };
-      return {
-        document: this.#receiptWithInstalledFoundation(
-          current,
-          installedFoundation.id,
-          descriptor.source,
-        ),
-        result,
-      };
-    });
-  }
-
-  async #foundationalPackageForMutation(
-    worker: PiHostClient,
-    source: string,
-  ): Promise<FoundationalPiPackageManifestEntry | undefined> {
-    const direct = findFoundationalPackageBySource(this.#foundationalPackages, source);
-    if (direct) return direct;
-    const descriptor = (await worker.request("package.list", {})).find((entry) => (
-      entry.scope === "global" && entry.source === source
-    ));
-    if (!descriptor) return undefined;
-    return this.#foundationalPackages.find((entry) => matchesFoundationalPackage(entry, descriptor));
-  }
-
-  #receiptWithInstalledFoundation(
-    current: PackageProvisioningReceiptDocument,
-    id: FoundationalPiPackageId,
-    source: string,
-  ): PackageProvisioningReceiptDocument {
-    const existing = current.entries[id];
-    const entry: PackageProvisioningReceiptEntry = {
-      ...(typeof existing === "object" && existing !== null && !Array.isArray(existing)
-        ? existing
-        : {}),
-      intent: "eligible",
-      lastObservedPresent: true,
-      provenance: "auto_managed",
-      source,
-    };
-    return {
-      ...current,
-      entries: { ...current.entries, [id]: entry },
-      manifestRevisionSeen: Math.max(
-        current.manifestRevisionSeen,
-        FOUNDATIONAL_PI_PACKAGE_MANIFEST_REVISION,
-      ),
-    };
   }
 
   async #rememberSummary(worker: PiHostClient, sessionId: string): Promise<SessionSummary> {

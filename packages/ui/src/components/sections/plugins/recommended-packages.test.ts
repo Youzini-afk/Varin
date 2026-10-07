@@ -1,14 +1,7 @@
 import { describe, expect, test } from 'vitest';
-import { FOUNDATIONAL_PI_PACKAGE_MANIFEST } from '@varin/protocol';
 import { RECOMMENDED_PACKAGES } from './recommended-packages';
 
 describe('recommended Pi packages', () => {
-
-  test('keeps foundational integrations out of the recommended catalog', () => {
-    for (const integration of FOUNDATIONAL_PI_PACKAGE_MANIFEST.integrations) {
-      expect(RECOMMENDED_PACKAGES.some((item) => item.name === integration.packageName)).toBe(false);
-    }
-  });
 
   test('does not render duplicate package identities or install sources', () => {
     const names = RECOMMENDED_PACKAGES.map((entry) => entry.name);

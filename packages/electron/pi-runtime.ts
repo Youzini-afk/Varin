@@ -7,8 +7,6 @@ import {
   applicationHostClientCapabilities,
   resolveBundledPiHostEntry,
 } from '@varin/runtime-broker';
-import { FOUNDATIONAL_PI_PACKAGE_MANIFEST } from '@varin/protocol';
-import type { FoundationalPiPackageManifestEntry } from '@varin/protocol';
 import type { PiRuntimeBrokerEvent, PiRuntimeBrokerOptions } from '@varin/runtime-broker';
 
 const PI_HOST_PACKAGE_ENTRY = path.join(
@@ -77,7 +75,6 @@ export interface DesktopPiRuntimeBrokerOptions {
   clientVersion: string;
   cwd?: string;
   emit: (event: PiRuntimeBrokerEvent) => void;
-  foundationalPackages?: readonly FoundationalPiPackageManifestEntry[];
   hostEntry?: string;
   nodePath?: string;
   packageRoot?: string;
@@ -94,7 +91,6 @@ export const createDesktopPiRuntimeBroker = ({
   clientVersion,
   cwd,
   emit,
-  foundationalPackages = FOUNDATIONAL_PI_PACKAGE_MANIFEST.integrations,
   hostEntry,
   nodePath,
   packaged,
@@ -125,7 +121,6 @@ export const createDesktopPiRuntimeBroker = ({
       mode: 'desktop',
     },
     emit,
-    foundationalPackages,
     hostEntry: resolvedHostEntry,
     ...(cwd ? { cwd } : {}),
     ...(nodePath ? { nodePath } : {}),

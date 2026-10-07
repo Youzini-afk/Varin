@@ -61,6 +61,16 @@ describe('MCP catalog selection and dirty guards', () => {
     expect(store.getMcpCatalogStateForTests().catalogRevision).toBe(revision);
   });
 
+  test('keeps the in-flight read valid when the page and sidebar request the same catalog', async () => {
+    deferSnapshot = true;
+    const pending = store.refreshMcpCatalog({ cwd: '/workspace' }, 'target-a');
+    await store.refreshMcpCatalog({ cwd: '/workspace' }, 'target-a');
+    resolveSnapshot?.(nextSnapshot);
+    await pending;
+    expect(store.getMcpCatalogStateForTests().loading).toBe(false);
+    expect(store.getMcpCatalogStateForTests().snapshot).toEqual(nextSnapshot);
+  });
+
   test('allows the editor save path to force refresh and select its created server', async () => {
     await store.refreshMcpCatalog({ cwd: '/workspace' }, 'target-a');
     store.setMcpCatalogEditorDirty(true);

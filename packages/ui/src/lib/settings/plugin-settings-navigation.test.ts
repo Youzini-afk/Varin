@@ -28,6 +28,11 @@ describe('plugin settings navigation', () => {
   });
 
   test('maps adapted packages and preserves unadapted provider ownership', () => {
+    requestPluginSettingsTarget('npm:@varin/pi-mcp-adapter@2.29.0-varin.1');
+    expect(consumePluginSettingsTarget()).toEqual({
+      integrationId: 'mcp',
+      pluginId: 'npm:@varin/pi-mcp-adapter@2.29.0-varin.1',
+    });
     requestPluginSettingsTarget('@cortexkit/pi-magic-context', 'agents');
     expect(consumePluginSettingsTarget()).toEqual({
       integrationId: 'magic-context',

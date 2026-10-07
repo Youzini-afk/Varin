@@ -124,9 +124,6 @@ describe("surface runtime protocol", () => {
     assert.equal(isRuntimeMethod("harness.rerank"), false);
     assert.equal(isRuntimeMethod("harness.inference.cancel"), false);
     assert.equal(isRuntimeMethod("package.setEnabled"), true);
-    assert.equal(isRuntimeMethod("package.foundation.status"), true);
-    assert.equal(isRuntimeMethod("package.foundation.restore"), true);
-    assert.equal(isRuntimeMethod("package.foundation.setAutoInstallNew"), true);
     assert.equal(isRuntimeMethod("session.tree"), true);
     assert.equal(isRuntimeMethod("session.features.get"), true);
     assert.equal(isRuntimeMethod("session.features.mutate"), true);

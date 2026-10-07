@@ -457,6 +457,13 @@ export const McpPage: React.FC = () => {
   const executeCommand = usePiSessionStore((state) => state.executeCommand);
   const status = React.useMemo(() => parseMcpAdapterStatus(extensionState), [extensionState]);
   const [commandAction, setCommandAction] = React.useState<string | null>(null);
+  const commandGenerationRef = React.useRef(0);
+  const targetKeyRef = React.useRef(targetKey);
+  targetKeyRef.current = targetKey;
+  React.useEffect(() => {
+    commandGenerationRef.current += 1;
+    setCommandAction(null);
+  }, [targetKey]);
   const snapshot = catalogState.targetKey === targetKey ? catalogState.snapshot : null;
   const catalog = snapshot?.catalog;
   const selectedServerName = catalogState.selection.kind === 'server'
@@ -481,19 +488,31 @@ export const McpPage: React.FC = () => {
     }
   }, [catalogState.error, catalogState.loading, catalogState.snapshot, catalogState.targetKey, runtimeTarget, targetKey]);
 
+  React.useEffect(() => {
+    if (extensionState) void refreshMcpCatalog(runtimeTarget, targetKey);
+  }, [extensionState, runtimeTarget, targetKey]);
+
   const runCommand = React.useCallback(async (action: string, command: string, reload = false) => {
     if (!currentSessionId) return;
+    const actionTargetKey = targetKey;
+    const actionRuntimeKey = getRuntimeKey();
+    const generation = ++commandGenerationRef.current;
+    const isCurrent = () => generation === commandGenerationRef.current
+      && actionTargetKey === targetKeyRef.current && actionRuntimeKey === getRuntimeKey();
     setCommandAction(action);
     try {
       await executeCommand(currentSessionId, command);
       if (reload) await executeCommand(currentSessionId, '/reload');
+      if (isCurrent()) {
+        await refreshMcpCatalog(runtimeTarget, targetKey);
+      }
     } catch (error) {
       console.error(`Failed to execute Pi MCP command ${command}:`, error);
-      toast.error(error instanceof Error ? error.message : t('settings.varin.mcp.toast.commandFailed'));
+      if (isCurrent()) toast.error(error instanceof Error ? error.message : t('settings.varin.mcp.toast.commandFailed'));
     } finally {
-      setCommandAction(null);
+      if (isCurrent()) setCommandAction(null);
     }
-  }, [currentSessionId, executeCommand, t]);
+  }, [currentSessionId, executeCommand, runtimeTarget, t, targetKey]);
 
   const title = selectedServer?.name
     ?? (catalogState.selection.kind === 'new'
@@ -530,6 +549,11 @@ export const McpPage: React.FC = () => {
         </SettingsSection>
       ) : (
         <>
+          {snapshot?.provider.issue || catalogState.error ? (
+            <p role="status" className="whitespace-pre-line break-words typography-meta text-[var(--status-warning)]">
+              {catalogState.error ?? snapshot?.provider.issue}
+            </p>
+          ) : null}
           {selectedServer ? (
             <SettingsSection
               title={t('settings.varin.mcp.runtime.title')}
@@ -556,7 +580,9 @@ export const McpPage: React.FC = () => {
             </SettingsSection>
           ) : null}
 
-          <McpConfigEditor
+          {selectedServer && selectedServer.sourceIds.length === 0 ? (
+            <p className="typography-meta text-muted-foreground">{t('settings.varin.mcp.native.extensionManaged')}</p>
+          ) : <McpConfigEditor
             native={snapshot?.provider.owner === 'native'}
             mode={catalogState.selection.kind}
             runtimeTarget={runtimeTarget}
@@ -564,7 +590,7 @@ export const McpPage: React.FC = () => {
             refreshRevision={catalogState.catalogRevision}
             sources={catalog.sources}
             preferredServerName={selectedServer?.name}
-          />
+          />}
         </>
       )}
     </SettingsPageLayout>

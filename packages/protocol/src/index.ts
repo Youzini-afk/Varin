@@ -3,7 +3,6 @@ export * from "./agent-personalization.js";
 export * from "./codec.js";
 export * from "./envelopes.js";
 export * from "./events.js";
-export * from "./foundational-pi-packages.js";
 export * from "./harness.js";
 export * from "./language-id.js";
 export * from "./harness-settings.js";

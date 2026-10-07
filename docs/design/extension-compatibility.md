@@ -2,7 +2,7 @@
 
 Status: integration contract, not a per-release certification
 
-Last updated: 2026-09-15
+Last updated: 2026-10-07
 
 ## What this document is
 
@@ -69,12 +69,18 @@ source checkouts used for the audit were fast-forwarded to their tracked upstrea
 
 Each row is the public contract Varin consumes. Varin owns none of these files or commands.
 
+MCP defaults to Pi's bundled native extension. `@varin/pi-mcp-adapter` is an optional user package;
+it has no foundational badge, automatic installation, or restore path. Existing package choices and
+configuration remain under Pi's package manager. An enabled replacement extension can still own MCP
+through Pi discovery. The MCP settings page observes whichever owner is active.
+
 | Extension | Varin consumes | Native authority |
 | --- | --- | --- |
 | `pi-wtf` | Registered prompt-repair commands | Plugin-owned `wtf.json` |
 | `pi-workspace-history` | Focused native configuration plus ordinary registered commands, independent of Varin recovery | Plugin-owned history store |
 | `pi-subagents` | Provider-owned agent management tool, registered tools/commands and public entries | Scoped Pi `settings.json`, Agent Markdown, and global runtime JSON |
 | `pi-background-tasks` | Ordinary Pi tools/commands and plugin UI when explicitly installed; no task-state aggregation | Plugin-owned task store |
+| Pi native MCP | Native state callback, registered `/mcp` commands, revisioned config edits | User `mcp.json`, trusted project `.pi/mcp.json`, Pi OAuth storage |
 | `pi-mcp-adapter` | Public `status/v1` snapshots and read-only `configCatalog/v1`; adapter commands | Adapter-reported JSON/JSONC sources (six in normal mode, one in exclusive mode) |
 | `pi-web-access` | Registered command catalog for Curator, account diagnostics, stored results | Agent-level `web-search.json` |
 | `@cortexkit/pi-magic-context` | Registered `ctx-*` commands; native Pi status component; public custom entries | CortexKit user/project JSONC |
@@ -95,7 +101,7 @@ Each row is the public contract Varin consumes. Varin owns none of these files o
 - **Live work** appears in the owning conversation and work overview. Native child tasks use the
   Harness registry and events; background shell tools expose their existing terminal. Pi plugin
   tasks use their ordinary registered tools/UI, without a parallel settings task monitor.
-- **MCP** consumes the adapter's status and effective-server projection and edits one revisioned
+- **MCP** consumes the active native or replacement owner's status and effective-server projection and edits one revisioned
   native source at a time. Varin never merges the sources in the renderer and never handles
   transports, OAuth, or the credential store. The catalog excludes arguments, environment, headers,
   tokens, OAuth data, and URL credentials.

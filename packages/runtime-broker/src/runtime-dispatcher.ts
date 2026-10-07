@@ -1,7 +1,5 @@
 import {
   VARIN_PROTOCOL_VERSION,
-  FOUNDATIONAL_PI_PACKAGE_IDS,
-  type FoundationalPiPackageId,
   type ExtensionUiResponse,
   type HostMode,
   type HostMethodParams,
@@ -140,17 +138,6 @@ function optionalPermissionPolicy(record: Record<string, unknown>): PermissionPo
   }
 }
 
-function optionalFoundationalPackageIds(
-  record: Record<string, unknown>,
-): FoundationalPiPackageId[] | undefined {
-  if (record.ids === undefined) return undefined;
-  const ids = requireStringList(record, "ids");
-  if (ids.some((id) => !FOUNDATIONAL_PI_PACKAGE_IDS.includes(id as FoundationalPiPackageId))) {
-    throw new RuntimeDispatchError("invalid_params", "ids contains an unknown foundational package id");
-  }
-  return ids as FoundationalPiPackageId[];
-}
-
 function requireEnum<T extends string>(
   record: Record<string, unknown>,
   key: string,
@@ -287,19 +274,6 @@ function requireSessionFeatureMutation(value: unknown) {
       throw new RuntimeDispatchError("invalid_params", error.message);
     }
     throw error;
-  }
-}
-
-function rejectUnknownKeys(
-  record: Record<string, unknown>,
-  allowed: readonly string[],
-  label: string,
-): void {
-  const permitted = new Set(allowed);
-  for (const key of Object.keys(record)) {
-    if (!permitted.has(key)) {
-      throw new RuntimeDispatchError("invalid_params", `Unknown ${label} field ${key}`);
-    }
   }
 }
 
@@ -810,18 +784,7 @@ async function dispatchRuntimeRequestUnchecked(
     case "package.list": {
       return requestForRuntimeContext(broker, requireRuntimeContext(input), "package.list", {});
     }
-    case "package.foundation.status": {
-      rejectUnknownKeys(input, [], "package.foundation.status");
-      return broker.foundationalPackageStatus();
-    }
-    case "package.foundation.restore": {
-      rejectUnknownKeys(input, ["ids"], "package.foundation.restore");
-      return broker.restoreFoundationalPackages(optionalFoundationalPackageIds(input));
-    }
-    case "package.foundation.setAutoInstallNew": {
-      rejectUnknownKeys(input, ["enabled"], "package.foundation.setAutoInstallNew");
-      return broker.setAutoInstallNewFoundationalPackages(requireBoolean(input, "enabled"));
-    }
+
     case "package.install":
     case "package.remove": {
       return broker.mutatePackage(requireRuntimeContext(input), method, {
