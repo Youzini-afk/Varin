@@ -155,7 +155,7 @@ export function createExploreTool(
         if (started.fastDecision && started.fastDecision.status !== "ready") {
           participation.fastDecision = started.fastDecision.status === "invalid" || started.fastDecision.status === "unavailable" ? "failed" : started.fastDecision.status;
         }
-        if (!complete && useExploreModel) participation.note = "Explore LLM is not configured; available retrieval sources are used.";
+        if (!complete && decisionMode === "llm") participation.note = "The selected Explore LLM is unavailable; source ranking was kept.";
 
         const shouldPlan = useExploreModel && Boolean(complete) && exploreShouldPlanWithModel(params.question, started.parsed.objects);
         if (complete && shouldPlan) {

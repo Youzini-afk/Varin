@@ -1209,8 +1209,6 @@ export interface ExploreModelParticipation {
    * loop judges material and chooses follow-up actions inside one query.
    */
   fastDecision?: ExploreModelStageStatus;
-  /** Which configured engine owns each responsibility in this query. */
-  duties?: NonNullable<ExploreQueryStartResult['duties']>;
   note?: string;
 }
 
@@ -1331,7 +1329,7 @@ export interface ExploreQueryStartResult {
    * means the Host runs the progressive selection/action loop inside this
    * query; other states leave the query on the existing algorithmic path.
    */
-  fastDecision?: { status: "ready" | "disabled" | "unconfigured" | "invalid" | "unavailable"; message?: string };
+  fastDecision?: { status: "ready" | "disabled" | "unconfigured" | "invalid" | "unavailable" };
   /** Frozen responsibility assignment; no runtime provider cascade. */
   duties?: { actions: "source" | "llm" | "fast-decision"; selection: "source" | "llm" | "fast-decision" | "rerank" };
 }
