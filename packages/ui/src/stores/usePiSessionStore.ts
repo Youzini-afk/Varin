@@ -23,6 +23,7 @@ import type {
   PiUserMessage,
   AgentInputContext,
   WorkFocusId,
+  UserQuestionRequest,
 } from '@varin/protocol';
 import type { PiRuntimeClient, RuntimeSequenceGap } from '@varin/runtime-client';
 import { PiRuntimeAmbiguousRequestError, PiRuntimeRequestTimeoutError } from '@varin/runtime-client';
@@ -1041,6 +1042,40 @@ export const createPiSessionStore = (
       if (lastApplied !== undefined && envelope.seq <= lastApplied) return;
       lastAppliedSequences.set(envelope.source.workerId, envelope.seq);
       switch (envelope.event) {
+        case 'extension.ui.request': {
+          const request = envelope.data;
+          const payload = request.payload;
+          if (request.method !== 'question' || !request.id || request.sessionId !== sessionIdForSource || typeof payload !== 'object'
+            || payload === null || Array.isArray(payload) || payload.id !== request.id
+            || payload.sessionId !== request.sessionId || !Array.isArray(payload.questions)) return;
+          const question = payload as unknown as UserQuestionRequest;
+          // Keep questions on the same snapshot/event cut as the conversation.
+          // A reconnect read must not erase a newer question replayed after it.
+          set((state) => ({
+            records: upsertRecord(state.records, request.sessionId, (current) => ({
+              ...current,
+              snapshot: updateSnapshot(current.snapshot, { questions: [
+                ...(current.snapshot?.questions ?? []).filter(item => item.id !== request.id), question,
+              ] }),
+            })),
+          }));
+          return;
+        }
+        case 'extension.ui.dismiss': {
+          const { requestId, sessionId } = envelope.data;
+          if (sessionId !== sessionIdForSource) return;
+          const questions = get().records[sessionId]?.snapshot?.questions;
+          if (!questions?.some(question => question.id === requestId)) return;
+          set((state) => ({
+            records: upsertRecord(state.records, sessionId, (current) => ({
+              ...current,
+              snapshot: updateSnapshot(current.snapshot, {
+                questions: current.snapshot?.questions?.filter(question => question.id !== requestId),
+              }),
+            })),
+          }));
+          return;
+        }
         case 'session.snapshot': {
           const snapshot = {
             ...envelope.data,

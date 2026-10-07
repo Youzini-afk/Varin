@@ -62,6 +62,11 @@ visibility, expiration overrides and answer drafts are transient UI choices. Hid
 runtime response; answering or explicitly closing the overview item uses `extension.ui.respond`.
 Question dialogs remain available after a session worker closes, while native snapshots reconcile
 their current branch. Runtime changes clear the projection and drafts along with other interaction state.
+The interaction subscription follows replacement runtime clients after reconnect. Native question
+events also update the session snapshot projection, including buffered events replayed after a resync.
+The interaction store follows changes to that snapshot's question list, so authoritative RPC reads
+restore questions missed during a disconnect without resetting hidden choices or answer drafts.
+The `varin.user-question` journal stays in native history but is not a visible conversation entry.
 
 ### Session / project coordination stores
 
