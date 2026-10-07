@@ -29,6 +29,7 @@ The pi-host harness tools are custom tools registered in the Pi session's
 | `submit_code` | Submit selected file changes or unique original/replacement snippets directly to a writable task peer or parent; automatic native integration and durable application receipts | `thread.submitCode` |
 | `submit_facts` | Retrieval child delivers Host-validated facts | `thread.facts.set` |
 | `ask_question` | Submit user questions without waiting, or wait up to 600 seconds; preserve unanswered questions for later replies | Native Pi question journal + ExtensionUiBridge |
+| `todo` | Replace the conversation plan using `open`, `done` or `blocked`; committed content appears in the work overview | `todo.upsert` |
 | `experiment` | Submit and manage attempts, page logs and collected text artifacts | `experiment.submit/list/get/logs/artifact/wait/cancel/collect` |
 | `resources` | Read machine capacity, commitments, observations and queued work | `resource.list` |
 | `research_source` | Register or inspect provenance and retained source objects | `source.register/list` |

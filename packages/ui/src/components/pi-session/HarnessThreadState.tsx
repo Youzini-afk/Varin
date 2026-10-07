@@ -4,6 +4,7 @@ import { runtimeFetch } from '@varin/application-client';
 import { subscribeVarinEvents } from '@/lib/varinEvents';
 import { mergeHarnessThreadSnapshot, parseHarnessThreadProjection, sameHarnessThreadParent, type HarnessThreadSnapshot } from './harnessThreadPresentation';
 import { HarnessThreadStateContext, type HarnessThreadStateValue } from './HarnessThreadStateContext';
+import { usePiSessionStore } from '@/stores/usePiSessionStore';
 
 const mergeRoots = (current: HarnessThreadSnapshot[], additions: HarnessThreadSnapshot[]) => {
   const byId = new Map(current.map(snapshot => [snapshot.thread.id, snapshot]));
@@ -12,6 +13,8 @@ const mergeRoots = (current: HarnessThreadSnapshot[], additions: HarnessThreadSn
 };
 
 export const HarnessThreadStateProvider: React.FC<{ children: React.ReactNode; parentSessionId: string | null; workspaceId: string | null }> = ({ children, parentSessionId, workspaceId }) => {
+  const runtimeKey = usePiSessionStore(state => state.runtimeKey);
+  const selectionKey = JSON.stringify([runtimeKey, parentSessionId]);
   const [threads, setThreads] = React.useState<HarnessThreadSnapshot[]>([]);
   const [rootThreads, setRootThreads] = React.useState<HarnessThreadSnapshot[]>([]);
   const rootsRef = React.useRef<HarnessThreadSnapshot[]>([]);
@@ -23,8 +26,9 @@ export const HarnessThreadStateProvider: React.FC<{ children: React.ReactNode; p
   const [scope, setScope] = React.useState<{ parent: ThreadParent; workspaceId: string }>({ parent: { kind: 'session', id: parentSessionId ?? '' }, workspaceId: workspaceId ?? '' });
   const scopeRef = React.useRef(scope);
   const eventRevision = React.useRef(0);
-  const selectedParentRef = React.useRef(parentSessionId);
-  selectedParentRef.current = parentSessionId;
+  const readSequence = React.useRef(0);
+  const selectedScopeRef = React.useRef(selectionKey);
+  selectedScopeRef.current = selectionKey;
 
   const commitScope = React.useCallback((next: { parent: ThreadParent; workspaceId: string }) => {
     scopeRef.current = next;
@@ -44,21 +48,27 @@ export const HarnessThreadStateProvider: React.FC<{ children: React.ReactNode; p
 
   const reload = React.useCallback(async (signal?: AbortSignal) => {
     if (!parentSessionId) return;
+    const read = ++readSequence.current;
+    const current = () => !signal?.aborted && read === readSequence.current && selectedScopeRef.current === selectionKey;
     const revisionAtStart = eventRevision.current;
-    const response = await runtimeFetch('/api/harness/sessions/' + encodeURIComponent(parentSessionId) + '/threads?archived=1', { signal });
-    if (!response.ok) throw new Error(await response.text() || 'Unable to read tasks');
-    const projection = parseHarnessThreadProjection(await response.json(), { includeArchived: true });
-    if (signal?.aborted || selectedParentRef.current !== parentSessionId) return;
-    setLoadError(null);
-    commitScope({ workspaceId: projection.workspaceId, parent: projection.parent });
-    commitRoots(eventRevision.current === revisionAtStart ? projection.rootThreads : mergeRoots(rootsRef.current, projection.rootThreads));
-    commitPeers(eventRevision.current === revisionAtStart ? projection.peers : mergeRoots(peersRef.current, projection.peers));
-    setBranches(current => eventRevision.current === revisionAtStart ? projection.branches : projection.branches.reduce((list, snapshot) => mergeHarnessThreadSnapshot(list, snapshot, { includeArchived: true }), current));
-    setThreads(current => {
-      const ordinary = projection.threads.filter(({ thread }) => !isAttachedRootPurpose(thread.purpose));
-      return eventRevision.current === revisionAtStart ? ordinary : ordinary.reduce((list, snapshot) => mergeHarnessThreadSnapshot(list, snapshot, { includeArchived: true }), current);
-    });
-  }, [commitRoots, commitPeers, commitScope, parentSessionId]);
+    try {
+      const response = await runtimeFetch('/api/harness/sessions/' + encodeURIComponent(parentSessionId) + '/threads?archived=1', { signal });
+      if (!response.ok) throw new Error(await response.text() || 'Unable to read tasks');
+      const projection = parseHarnessThreadProjection(await response.json(), { includeArchived: true });
+      if (!current()) return;
+      setLoadError(null);
+      commitScope({ workspaceId: projection.workspaceId, parent: projection.parent });
+      commitRoots(eventRevision.current === revisionAtStart ? projection.rootThreads : mergeRoots(rootsRef.current, projection.rootThreads));
+      commitPeers(eventRevision.current === revisionAtStart ? projection.peers : mergeRoots(peersRef.current, projection.peers));
+      setBranches(current => eventRevision.current === revisionAtStart ? projection.branches : projection.branches.reduce((list, snapshot) => mergeHarnessThreadSnapshot(list, snapshot, { includeArchived: true }), current));
+      setThreads(current => {
+        const ordinary = projection.threads.filter(({ thread }) => !isAttachedRootPurpose(thread.purpose));
+        return eventRevision.current === revisionAtStart ? ordinary : ordinary.reduce((list, snapshot) => mergeHarnessThreadSnapshot(list, snapshot, { includeArchived: true }), current);
+      });
+    } catch (error) {
+      if (current()) throw error;
+    }
+  }, [commitRoots, commitPeers, commitScope, parentSessionId, selectionKey]);
 
   React.useEffect(() => {
     const controller = new AbortController();
@@ -69,6 +79,12 @@ export const HarnessThreadStateProvider: React.FC<{ children: React.ReactNode; p
     load();
     const unsubscribe = subscribeVarinEvents(event => {
       if (event.type === 'stream-ready') { load(); return; }
+      if (event.type === 'harness-thread-changed' && event.workspaceId !== scopeRef.current.workspaceId
+        && (event.activeRun?.sessionId === parentSessionId || event.parent.kind === 'session' && event.parent.id === parentSessionId)) {
+        // The API resolves the durable task owner; the displayed directory
+        // is only an initial hint and can name a different resource scope.
+        load(); return;
+      }
       if (event.type !== 'harness-thread-changed' || event.workspaceId !== scopeRef.current.workspaceId
         || (!sameHarnessThreadParent(event.parent, scopeRef.current.parent)
           && !(event.parent.kind === 'thread' && [...rootsRef.current, ...peersRef.current].some(root => root.thread.id === event.parent.id))

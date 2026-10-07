@@ -1,5 +1,6 @@
 import { create } from 'zustand';
 import { useShallow } from 'zustand/react/shallow';
+import { getRuntimeKey, subscribeRuntimeEndpointChanged } from '@varin/application-client';
 
 export interface WebSource {
   id: string;
@@ -27,6 +28,7 @@ interface WebSourcesState {
   sources: WebSource[];
   dismissedIds: string[];
   addSource: (source: Omit<WebSource, 'id' | 'pinned'>) => void;
+  syncSessionSources: (sessionId: string, sources: Array<Omit<WebSource, 'id' | 'pinned'>>) => void;
   pinSource: (id: string) => void;
   unpinSource: (id: string) => void;
   deleteSource: (id: string) => void;
@@ -45,6 +47,22 @@ export const useWebSourcesStore = create<WebSourcesState>()((set) => ({
     if (state.dismissedIds.includes(id) || state.sources.some((entry) => entry.id === id)) return state;
     return { sources: [...state.sources, { ...source, id, pinned: false }] };
   }),
+  syncSessionSources: (sessionId, incoming) => set(state => {
+    const existing = new Map(state.sources.filter(source => source.sessionId === sessionId).map(source => [source.id, source]));
+    const projected = new Map<string, WebSource>();
+    for (const source of incoming) {
+      const id = sourceId(source);
+      if (state.dismissedIds.includes(id)) continue;
+      const previous = existing.get(id);
+      const next = { ...source, id, pinned: previous?.pinned ?? false };
+      projected.set(id, previous && JSON.stringify(previous) === JSON.stringify(next) ? previous : next);
+    }
+    // Explicitly pinned materials survive branch navigation. Unpinned rows
+    // follow the current transcript, including removals and metadata updates.
+    const sources = [...state.sources.filter(source => source.sessionId !== sessionId
+      || source.pinned && !projected.has(source.id)), ...projected.values()];
+    return sources.length === state.sources.length && sources.every((source, index) => source === state.sources[index]) ? state : { sources };
+  }),
   pinSource: (id) => set((state) => ({
     sources: state.sources.map((s) => s.id === id ? { ...s, pinned: true } : s),
   })),
@@ -60,6 +78,14 @@ export const useWebSourcesStore = create<WebSourcesState>()((set) => ({
     dismissedIds: state.dismissedIds.filter((id) => !id.startsWith(`${sessionId}\0`)),
   })),
 }));
+
+let sourceRuntimeKey = getRuntimeKey();
+subscribeRuntimeEndpointChanged(() => {
+  const next = getRuntimeKey();
+  if (next === sourceRuntimeKey) return;
+  sourceRuntimeKey = next;
+  useWebSourcesStore.setState({ sources: [], dismissedIds: [] });
+});
 
 // Leaf selectors per stores/DOCUMENTATION.md selector rules
 export const useWebSources = (sessionId: string): WebSource[] =>

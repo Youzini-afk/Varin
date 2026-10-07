@@ -811,9 +811,10 @@ export const PiChatView: React.FC<PiChatViewProps> = ({
       : []
   ), [currentRecord?.branchEntries?.entries, currentSessionId]);
   React.useEffect(() => {
-    const addSource = useWebSourcesStore.getState().addSource;
-    for (const source of projectedWebSources) addSource(source);
-  }, [projectedWebSources]);
+    if (currentSessionId && currentRecord?.branchEntries) {
+      useWebSourcesStore.getState().syncSessionSources(currentSessionId, projectedWebSources);
+    }
+  }, [currentRecord?.branchEntries, currentSessionId, projectedWebSources]);
   const transientUser = currentRecord?.liveUser ?? (
     submission?.mode === 'prompt'
       ? submission.message

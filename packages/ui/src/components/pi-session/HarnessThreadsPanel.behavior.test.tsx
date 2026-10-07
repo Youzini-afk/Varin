@@ -11,6 +11,7 @@ import type { HarnessThreadSnapshot } from './harnessThreadPresentation';
 import type { WebSource } from '@/stores/useWebSourcesStore';
 import { useWorkOverviewStore } from '@/stores/useWorkOverviewStore';
 import { THREAD_EXCHANGE_OPEN_EVENT } from './threadMessages';
+import type { VarinEvent } from '@/lib/varinEvents';
 
 const mocks = vi.hoisted(() => ({
   runtimeKey: 'runtime-1',
@@ -23,6 +24,7 @@ const mocks = vi.hoisted(() => ({
   openContextSurface: vi.fn(),
   toggleContextPanel: vi.fn(),
   translate: (key: string) => key,
+  events: new Set<(event: VarinEvent) => void>(),
   computer: { state: null as ComputerAutomationState | null, activities: [], busy: false, error: null, stop: vi.fn() },
 }));
 vi.mock('@varin/application-client', async (importOriginal) => ({
@@ -54,7 +56,9 @@ vi.mock('@/components/ui/tooltip', () => ({
   TooltipTrigger: ({ children }: { children: React.ReactNode }) => <>{children}</>,
   TooltipContent: ({ children }: { children: React.ReactNode }) => <>{children}</>,
 }));
-vi.mock('@/lib/varinEvents', () => ({ subscribeVarinEvents: () => () => {} }));
+vi.mock('@/lib/varinEvents', () => ({ subscribeVarinEvents: (listener: (event: VarinEvent) => void) => {
+  mocks.events.add(listener); return () => { mocks.events.delete(listener); };
+} }));
 vi.mock('@/stores/useComputerAutomation', () => ({ useComputerAutomation: () => mocks.computer }));
 vi.mock('@/stores/useUIStore', () => ({
   normalizeContextPanelDirectoryKey: (value: string) => value,
@@ -119,6 +123,7 @@ let failPreview: (error: Error) => void;
 
 beforeEach(() => {
   mocks.runtimeKey = 'runtime-1';
+  mocks.events.clear();
   mocks.computer.state = null; mocks.computer.stop.mockReset();
   mocks.records = {};
   mocks.webSources = [];
@@ -270,6 +275,65 @@ describe('thread panel transcript is inspection, not execution', () => {
 });
 
 describe('work overview presentation', () => {
+  it('refreshes committed blocks by conversation identity and rejects an older empty response', async () => {
+    state.threads = [];
+    let finishInitial!: (response: Response) => void;
+    let reads = 0;
+    vi.mocked(runtimeFetch).mockImplementation(async input => {
+      if (!String(input).endsWith('/blocks')) return new Response(null, { status: 404 });
+      if (++reads === 1) return new Promise<Response>(resolve => { finishInitial = resolve; });
+      return new Response(JSON.stringify({ branchLeafId: 'new-leaf', blocks: [
+        { label: 'plan', content: '- [ ] Updated plan', updatedBy: 'agent', updatedAt: 2 },
+      ] }));
+    });
+    const render = () => root.render(<HarnessThreadStateContext.Provider value={state}>
+      <HarnessThreadsPanel workspaceId="workspace-1" parentSessionId="parent-1" />
+    </HarnessThreadStateContext.Provider>);
+    await act(async () => render());
+    await act(async () => container.querySelector<HTMLButtonElement>('button[aria-label="harness.overview.expand"]')!.click());
+    await act(async () => {
+      for (const listener of mocks.events) listener({ type: 'harness-blocks-changed', workspaceId: 'workspace-1', sessionId: 'other-chat' });
+    });
+    expect(reads).toBe(1);
+    await act(async () => {
+      for (const listener of mocks.events) listener({ type: 'harness-blocks-changed', workspaceId: 'session:parent-1', sessionId: 'parent-1' });
+    });
+    expect(container.textContent).toContain('Updated plan');
+    await act(async () => finishInitial(new Response(JSON.stringify({ blocks: [], branchLeafId: 'old-leaf' }))));
+    expect(container.textContent).toContain('Updated plan');
+  });
+
+  it('refreshes successful todo changes without an SSE event and reloads a replaced branch', async () => {
+    state.threads = [];
+    let content: string | null = null;
+    vi.mocked(runtimeFetch).mockImplementation(async input => String(input).endsWith('/blocks')
+      ? new Response(JSON.stringify({ branchLeafId: 'leaf', blocks: content === null ? [] : [
+        { label: 'plan', content, updatedBy: 'agent', updatedAt: 2 },
+      ] })) : new Response(null, { status: 404 }));
+    const render = () => root.render(<HarnessThreadStateContext.Provider value={state}>
+      <HarnessThreadsPanel workspaceId="workspace-1" parentSessionId="parent-1" />
+    </HarnessThreadStateContext.Provider>);
+    await act(async () => render());
+    await act(async () => container.querySelector<HTMLButtonElement>('button[aria-label="harness.overview.expand"]')!.click());
+    content = '- [ ] Written by todo';
+    mocks.records['parent-1'] = { toolExecutions: { 'todo-call': {
+      args: {}, name: 'todo', toolCallId: 'todo-call', status: 'success',
+    } }, branchEntries: { sessionId: 'parent-1', scope: 'branch', leafId: 'old', entries: [{
+      type: 'custom', id: 'old', parentId: null, timestamp: 'now', customType: 'branch', data: null,
+    }] } };
+    await act(async () => render());
+    expect(container.textContent).toContain('Written by todo');
+    content = '- [x] Other branch plan';
+    mocks.records['parent-1'] = { ...mocks.records['parent-1'], branchEntries: {
+      sessionId: 'parent-1', scope: 'branch', leafId: 'new', entries: [{
+        type: 'custom', id: 'new', parentId: null, timestamp: 'now', customType: 'branch', data: null,
+      }],
+    } };
+    await act(async () => render());
+    expect(container.textContent).toContain('Other branch plan');
+    expect(container.textContent).not.toContain('Written by todo');
+  });
+
   it('turns raw session blocks into plan, progress and decisions instead of exposing block metadata', async () => {
     state.threads = [];
     const desktopView = vi.fn();

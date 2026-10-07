@@ -6,6 +6,24 @@ describe('useWebSourcesStore', () => {
     useWebSourcesStore.setState({ sources: [], dismissedIds: [] });
   });
 
+  it('reconciles transcript sources, updates metadata and retains explicit pins and dismissals', () => {
+    const source = { sessionId: 's1', url: 'https://example.com/page', title: 'Initial', fetchedAt: 1, toolCallId: 'call', tool: 'webfetch' as const };
+    const store = useWebSourcesStore.getState();
+    store.syncSessionSources('s1', [source]);
+    const id = useWebSourcesStore.getState().sources[0]!.id;
+    store.pinSource(id);
+    store.syncSessionSources('s1', [{ ...source, title: 'Updated', snapshotId: 'snapshot' }]);
+    expect(useWebSourcesStore.getState().sources[0]).toMatchObject({ id, pinned: true, title: 'Updated', snapshotId: 'snapshot' });
+    const second = { ...source, url: 'https://example.com/other', toolCallId: 'other' };
+    store.syncSessionSources('s1', [second]);
+    expect(useWebSourcesStore.getState().sources).toHaveLength(2);
+    store.syncSessionSources('s1', []);
+    expect(useWebSourcesStore.getState().sources.map(source => source.id)).toEqual([id]);
+    store.deleteSource(id);
+    store.syncSessionSources('s1', [source]);
+    expect(useWebSourcesStore.getState().sources).toHaveLength(0);
+  });
+
   it('adds a source', () => {
     useWebSourcesStore.getState().addSource({
       sessionId: 's1',
