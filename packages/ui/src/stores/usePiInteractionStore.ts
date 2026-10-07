@@ -8,12 +8,14 @@ import type {
   RuntimeMethodParams,
   RuntimeMethodResult,
   RuntimeWorkerRole,
+  SessionSnapshot,
   UserQuestionRequest,
 } from '@varin/protocol';
 import type { PiRuntimeClient } from '@varin/runtime-client';
 import { create, type StoreApi, type UseBoundStore } from 'zustand';
-import { getPiRuntimeConnection } from '@/lib/pi-runtime/client';
 import { getRuntimeKey, subscribeRuntimeEndpointChanged } from '@varin/application-client';
+import { getPiRuntimeConnection, subscribePiRuntimeReconnected } from '@/lib/pi-runtime/client';
+import { usePiSessionStore } from './usePiSessionStore';
 
 export interface PiProjectTrustPrompt extends ProjectTrustRequest {
   role: RuntimeWorkerRole;
@@ -69,6 +71,8 @@ export interface PiInteractionStoreRuntime {
   connect(): Promise<PiInteractionRuntimeConnection>;
   currentKey(): string;
   subscribeChanged(listener: () => void): () => void;
+  subscribeReconnected?(listener: () => void): () => void;
+  subscribeQuestions?(listener: (snapshot: SessionSnapshot, runtimeKey: string) => void): () => void;
 }
 
 export interface PiInteractionStoreState {
@@ -90,6 +94,7 @@ export interface PiInteractionStoreState {
   showQuestion(id: string): void;
   setQuestionDraft(id: string, questionId: string, value: string | boolean): void;
   reset(): void;
+  reconcileQuestions(snapshot: Pick<SessionSnapshot, 'sessionId' | 'questions'>, runtimeKey: string): void;
   respondDialog(requestId: string, value?: JsonValue, cancelled?: boolean): Promise<boolean>;
   respondTrust(requestId: string, trusted: boolean, remember: boolean): Promise<boolean>;
 }
@@ -100,6 +105,28 @@ const DEFAULT_RUNTIME: PiInteractionStoreRuntime = {
   connect: getPiRuntimeConnection,
   currentKey: getRuntimeKey,
   subscribeChanged: subscribeRuntimeEndpointChanged,
+  subscribeReconnected: subscribePiRuntimeReconnected,
+  subscribeQuestions: (listener) => {
+    const reconcile = (
+      state: ReturnType<typeof usePiSessionStore.getState>,
+      previous?: ReturnType<typeof usePiSessionStore.getState>,
+    ) => {
+      if (state.records === previous?.records) return;
+      for (const sessionId in state.records) {
+        const record = state.records[sessionId];
+        if (record === previous?.records[sessionId]) continue;
+        const snapshot = record.snapshot;
+        // Agent deltas patch the snapshot but retain this list. Only native
+        // question events and authoritative reads replace it.
+        if (snapshot?.questions !== undefined && snapshot.questions !== previous?.records[sessionId]?.snapshot?.questions) {
+          listener(snapshot, state.runtimeKey);
+        }
+      }
+    };
+    const unsubscribe = usePiSessionStore.subscribe(reconcile);
+    reconcile(usePiSessionStore.getState());
+    return unsubscribe;
+  },
 };
 
 const INTERACTIVE_METHODS = new Set<ExtensionUiMethod>([
@@ -211,6 +238,15 @@ export const createPiInteractionStore = (
 
     const malformedPayload = (method: ExtensionUiMethod): void => {
       set({ lastError: `Malformed Pi extension UI payload for ${method}` });
+    };
+
+    const reconcileQuestions = (snapshot: Pick<SessionSnapshot, 'sessionId' | 'questions'>, runtimeKey: string): void => {
+      const { sessionId, questions } = snapshot;
+      if (!contextIsCurrent(runtimeKey) || questions === undefined) return;
+      set((state) => ({ dialogs: [
+        ...state.dialogs.filter(dialog => dialog.sessionId !== sessionId || dialog.method !== 'question'),
+        ...questions.map(question => ({ id: question.id, method: 'question' as const, sessionId: question.sessionId, payload: question as unknown as JsonValue })),
+      ] }));
     };
 
     const applyExtensionRequest = (
@@ -410,10 +446,7 @@ export const createPiInteractionStore = (
           }));
           return;
         case 'session.snapshot': {
-          if (envelope.data.questions) set((state) => ({ dialogs: [
-            ...state.dialogs.filter(dialog => dialog.sessionId !== envelope.data.sessionId || dialog.method !== 'question'),
-            ...envelope.data.questions!.map(question => ({ id: question.id, method: 'question' as const, sessionId: question.sessionId, payload: question as unknown as JsonValue })),
-          ] }));
+          reconcileQuestions(envelope.data, runtimeKey);
           if (envelope.source.role !== 'workspace') return;
           const previousSessionId = workspaceSessionByWorker.get(envelope.source.workerId);
           const nextSessionId = envelope.data.sessionId;
@@ -519,6 +552,8 @@ export const createPiInteractionStore = (
         set(initialFields(runtime.currentKey()));
       },
 
+      reconcileQuestions,
+
       respondDialog: async (requestId, value, cancelled = false) => {
         const responseRuntimeKey = get().runtimeKey;
         const dialog = get().dialogs.find((candidate) => candidate.id === requestId);
@@ -582,6 +617,18 @@ export const createPiInteractionStore = (
 
   runtime.subscribeChanged(() => {
     store.getState().reset();
+  });
+
+  runtime.subscribeReconnected?.(() => {
+    const runtimeKey = runtime.currentKey();
+    void store.getState().connect().catch((error) => {
+      if (store.getState().runtimeKey === runtimeKey && runtime.currentKey() === runtimeKey) {
+        store.setState({ connected: false, lastError: errorMessage(error) });
+      }
+    });
+  });
+  runtime.subscribeQuestions?.((snapshot, runtimeKey) => {
+    store.getState().reconcileQuestions(snapshot, runtimeKey);
   });
 
   return store;

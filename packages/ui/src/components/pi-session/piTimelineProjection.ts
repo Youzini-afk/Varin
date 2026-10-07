@@ -113,6 +113,7 @@ const isVisibleTimelineEntry = (
 ): entry is PiTimelineEntry => {
   if (isTimelineControlEntry(entry)) return false;
   if (entry.type === 'custom' && entry.customType === 'varin.session-features/v1') return false;
+  if (entry.type === 'custom' && entry.customType === 'varin.user-question') return false;
   if (entry.type === 'custom' && entry.customType === VARIN_RECOVERY_NAVIGATION_MARKER_TYPE) return false;
   if (entry.type === 'custom_message' && !entry.display) return false;
   if (entry.type === 'message' && entry.message.role === 'custom' && !entry.message.display) return false;
