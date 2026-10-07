@@ -75,6 +75,11 @@ projection. It does not introduce another history, draft or scroll authority.
 Native queue changes animate by message identity. An exiting queue row is inert and releases its edit
 form immediately, so a draft retained after dequeue is not displayed or editable twice.
 
+The input surface uses a subtle top highlight and soft downward shadows for elevation in both themes.
+Focus adds a low-opacity blurred halo without changing the border or adding a sharp focus ring.
+The working sweep is diffuse as well; it does not use a masked outline around rounded corners.
+These effects are paint-only and retain the composer dimensions and existing reduced-motion behavior.
+
 `usePiMessageHandoff` binds paint-only transfers to the enclosing view. Draft transfers use the existing
 submission ID and its native timeline anchor; queue transfers use the admitted queue ID forwarded on
 native user-message events, including the persisted entry handoff. Equal message text never selects an
