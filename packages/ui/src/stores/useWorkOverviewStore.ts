@@ -2,7 +2,7 @@ import { create } from 'zustand';
 import { persist } from 'zustand/middleware';
 import { createDeferredSafeJSONStorage } from './utils/safeStorage';
 
-type OverviewDisclosure = 'overview' | 'mobile' | 'compact' | 'questions' | 'review' | 'plan' | 'outputs' | 'threads' | 'endedThreads' | 'sources' | 'memory';
+type OverviewDisclosure = 'overview' | 'mobile' | 'compact' | 'questions' | 'review' | 'plan' | 'outputs' | 'threads' | 'endedThreads' | 'sources' | 'memory' | 'computer';
 type OverviewChoices = Partial<Record<OverviewDisclosure, boolean>>;
 
 interface WorkOverviewStore {

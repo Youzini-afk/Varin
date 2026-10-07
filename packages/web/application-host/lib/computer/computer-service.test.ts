@@ -3,7 +3,11 @@ import { mkdtempSync, rmSync, existsSync, readFileSync, mkdirSync, writeFileSync
 import { createHash } from "node:crypto";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
-import { createComputerService } from "./computer-service.js";
+import { createComputerService, type ComputerServiceOptions } from "./computer-service.js";
+import type { ComputerActor } from '@varin/protocol';
+import express from 'express';
+import type { AddressInfo } from 'node:net';
+import { registerComputerRoutes } from './computer-routes.js';
 import type { DriverResponse, DriverSpawnSpec, ComputerDriverSession } from "./driver-host.js";
 import type { KernelRecordResult } from "../kernel/protocol.generated.js";
 
@@ -117,7 +121,7 @@ afterEach(() => {
   for (const dir of dirs) if (existsSync(dir)) rmSync(dir, { recursive: true, force: true });
 });
 
-const makeService = (driver?: FakeDriver) => {
+const makeService = (driver?: FakeDriver, extra: Partial<ComputerServiceOptions> = {}) => {
   const kernel = fakeKernel();
   let spec: DriverSpawnSpec | null = null;
   const service = createComputerService({
@@ -126,11 +130,65 @@ const makeService = (driver?: FakeDriver) => {
     platform: "windows",
     dataDir: newDataDir(),
     createDriver: (s) => { spec = s; return driver ?? makeDriver(async () => okResponse()); },
+    ...extra,
   });
   return { service, kernel, getSpec: () => spec };
 };
 
 describe("computer service (BC4)", () => {
+  it('enforces assignments on the actual remote Host, keeps independent observers, and releases it on user stop', async () => {
+    const driver = makeDriver(async op => op.tool === 'get_app_state' ? okResponse({ snapshot: appSnapshot() }) : okResponse());
+    const { service: target } = makeService(driver, { hostId: 'target' });
+    const app = express(); app.use(express.json()); registerComputerRoutes(app, { computers: target, hostId: 'target' });
+    const server = app.listen(0, '127.0.0.1');
+    await new Promise<void>(resolve => server.once('listening', resolve));
+    const apiUrl = `http://127.0.0.1:${(server.address() as AddressInfo).port}`;
+    const main: ComputerActor = { sessionId: 'main', runId: 'run', threadId: 'main', scopeId: 'scope', rootSessionId: 'main', rootRunId: 'run', label: 'Main', readOnly: false };
+    const source = () => makeService(undefined, { resolveActor: async () => main, notifyActor: async () => {},
+      remoteHosts: async () => [{ id: 'target', label: 'VM', apiUrl }] }).service;
+    const a = source(), b = source();
+    try {
+      const remoteId = (await a.list()).desktops.find(desktop => desktop.remote)?.id;
+      expect(remoteId).toBeDefined(); await b.list();
+      const id = remoteId!;
+      const call = <T>(service: typeof a, access: 'control' | 'observe', run: () => Promise<T>) => service.automation.authorize('main', access, id, run);
+      const control = await call(a, 'observe', () => a.control(id));
+      const observed = await call(a, 'observe', () => a.observe({ desktopId: id, app: 'notepad' }));
+      await call(a, 'control', () => a.act({ desktopId: id, action: { kind: 'key', app: 'notepad', key: 'enter' }, automationEpoch: control.automationEpoch }));
+      await call(b, 'observe', () => b.observe({ desktopId: id, app: 'notepad' }));
+      await b.automation.release('main');
+      expect((await call(a, 'control', () => a.act({ desktopId: id, action: { kind: 'click', app: 'notepad', observationId: observed.id, elementIndex: 1 }, automationEpoch: control.automationEpoch }))).accepted).toBe(true);
+      await expect(call(b, 'control', () => b.act({ desktopId: id, action: { kind: 'key', app: 'notepad', key: 'enter' } }))).rejects.toMatchObject({ harnessCode: 'forbidden' });
+      expect((await a.automation.stop('main')).status).toBe('stopped');
+      expect((await call(b, 'control', () => b.act({ desktopId: id, action: { kind: 'key', app: 'notepad', key: 'enter' } }))).accepted).toBe(true);
+    } finally {
+      await Promise.allSettled([a.automation.release('main'), b.automation.release('main')]);
+      await Promise.all([a.dispose(), b.dispose(), target.dispose()]);
+      server.closeAllConnections(); await new Promise<void>(resolve => server.close(() => resolve()));
+    }
+  });
+  it('keeps observations isolated per execution, fences old app epochs, and prevents resumed calls after user stop', async () => {
+    const actors = new Map<string, ComputerActor>(['main', 'lookup'].map(id => [id, { sessionId: id, runId: `${id}:run`, threadId: id, scopeId: 'scope', rootSessionId: 'main', rootRunId: 'main:run', label: id, readOnly: id === 'lookup' }]));
+    const driver = makeDriver(async op => op.tool === 'get_app_state' ? okResponse({ snapshot: appSnapshot() }) : okResponse());
+    const { service } = makeService(driver, { resolveActor: async id => actors.get(id) ?? null, notifyActor: async () => {} });
+    const c = service.automation;
+    try {
+      const call = <T>(session: string, access: 'control' | 'observe', run: () => Promise<T>) => c.authorize(session, access, 'local-console', run);
+      const control = await call('main', 'observe', () => service.control('local-console'));
+      const observation = await call('main', 'observe', () => service.observe({ desktopId: 'local-console', app: 'notepad' }));
+      const requested = await c.request('lookup', 'local-console', 'observe', 'Read UI'); await c.decide('main', requested.id, true);
+      await call('lookup', 'observe', () => service.observe({ desktopId: 'local-console', app: 'notepad' }));
+      expect((await call('main', 'control', () => service.act({ desktopId: 'local-console', automationEpoch: control.automationEpoch,
+        action: { kind: 'click', app: 'notepad', observationId: observation.id, elementIndex: 1 } }))).accepted).toBe(true);
+      await c.stop('main');
+      const before = driver.calls.length;
+      await expect(call('main', 'control', () => service.act({ desktopId: 'local-console', action: { kind: 'key', app: 'notepad', key: 'enter' } }))).rejects.toMatchObject({ harnessCode: 'forbidden' });
+      expect(driver.calls.length).toBe(before);
+      actors.set('main', { ...actors.get('main')!, runId: 'next', rootRunId: 'next' });
+      await expect(call('main', 'control', () => service.act({ desktopId: 'local-console', automationEpoch: control.automationEpoch,
+        action: { kind: 'key', app: 'notepad', key: 'enter' } }))).rejects.toMatchObject({ harnessCode: 'forbidden' });
+    } finally { await service.dispose(); }
+  });
   it("automation cancel/release cannot lift buttons owned by a human viewer", async () => {
     const driver = makeDriver(async () => okResponse());
     const { service } = makeService(driver);

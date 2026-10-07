@@ -10,6 +10,7 @@ import type {
 import type { HarnessService, HarnessServiceContext } from "./router.js";
 import type { HarnessServiceHost } from "./service-host.js";
 import { HarnessServiceError } from "./service-error.js";
+import { isAttachedRootPurpose } from '@varin/protocol';
 import { createEnvironmentForwardRuntime, type EnvironmentForwardRuntime } from "./environment-forwards.js";
 
 /**
@@ -36,6 +37,13 @@ export const sessionEnvironment = async (
   const registry = host.threadRegistry;
   if (!registry) return null;
   return registry.threadEnvironmentForSession(sessionId);
+};
+const assertWritableEnvironment = async (host: HarnessServiceHost, sessionId: string) => {
+  const registry = host.threadRegistry;
+  const owner = await registry?.resolveSessionOwner(sessionId);
+  if (!registry || !owner) return;
+  const thread = await registry.getThreadById(owner.owningScopeId, owner.threadId);
+  if (thread?.preset === 'retrieval' || thread?.kind === 'discussion' && !isAttachedRootPurpose(thread.purpose)) throw new HarnessServiceError('forbidden', 'Read-only threads cannot change execution placement or service forwards');
 };
 
 export const validateEnvironment = async (
@@ -86,6 +94,7 @@ export function createEnvironmentSetService(host: HarnessServiceHost): HarnessSe
       if (!owner) {
         throw new HarnessServiceError("unavailable", "This session carries no Thread; environment bindings live on work Threads");
       }
+      await assertWritableEnvironment(host, ctx.sessionId);
       const patch: { workTarget?: string | null; desktopId?: string | null } = {};
       const invalid = (field: string) => {
         throw new HarnessServiceError("invalid-params", `environment.${field} must be a string or null`);
@@ -175,6 +184,7 @@ export function createEnvironmentForwardServices(
 ): { forward: HarnessService<"environment.forward">; forwards: HarnessService<"environment.forwards">; forwardClose: HarnessService<"environment.forwardClose">; runtime: EnvironmentForwardRuntime } {
   const forward: HarnessService<"environment.forward"> = {
     handle: async (params, ctx) => {
+      await assertWritableEnvironment(host, ctx.sessionId);
       const port = Number(params.port);
       if (!Number.isSafeInteger(port) || port < 1 || port > 65535) {
         throw new HarnessServiceError("invalid-params", "environment.forward requires a port between 1 and 65535");
@@ -218,6 +228,7 @@ export function createEnvironmentForwardServices(
   };
   const forwardClose: HarnessService<"environment.forwardClose"> = {
     handle: async (params, ctx) => {
+      await assertWritableEnvironment(host, ctx.sessionId);
       if (typeof params.id !== "string" || !params.id) throw new HarnessServiceError("invalid-params", "environment.forwardClose requires an access id");
       const closed = await runtime.close(params.id, ctx.sessionId);
       return { closed } satisfies EnvironmentForwardCloseResult;

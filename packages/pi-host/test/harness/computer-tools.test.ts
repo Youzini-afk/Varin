@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import { describe, it } from "node:test";
 import { validateToolArguments } from "@earendil-works/pi-ai";
 import { HostServicesBridge } from "../../src/harness/host-services-bridge.js";
-import { createComputerTool } from "../../src/harness/computer-tools.js";
+import { createComputerTool, cancelComputerEvaluations } from "../../src/harness/computer-tools.js";
 import { selectHarnessTools } from "../../src/harness/select-tools.js";
 import { DEFAULT_HARNESS_SETTINGS, type HarnessRequestData } from "@varin/protocol";
 
@@ -53,6 +53,27 @@ const observation = (id: string) => ({
 });
 
 describe("computer tool", () => {
+  it('revokes a sleeping Computer evaluation without stopping other Agent work, and ignores cleanup from an older execution', async () => {
+    let runId = 'first';
+    let ready!: () => void;
+    let started = new Promise<void>(resolve => { ready = resolve; });
+    const { bridge, requests } = scriptedBridge({
+      'computer.control': () => ({ control: { desktopId: 'local-console', automationEpoch: `epoch:${runId}`, executionId: runId, owner: 'agent', reachable: true, since: 'now' } }),
+      'computer.apps': () => { ready(); return { apps: [] }; },
+      'computer.act': () => ({ result: { accepted: true } }),
+    });
+    const tool = createComputerTool(bridge, SESSION);
+    const pending = execute(tool, { action: 'run', script: "await computer.apps(); await sleep(300); await computer.act({kind:'key',app:'editor',key:'enter'})" });
+    await started; cancelComputerEvaluations(SESSION, 'first');
+    assert.equal(isError(await pending), true);
+    assert.equal(requests.filter(item => item.method === 'computer.act').length, 0);
+    runId = 'second'; started = new Promise<void>(resolve => { ready = resolve; });
+    const next = execute(tool, { action: 'run', script: "await computer.apps(); await sleep(100); await computer.act({kind:'key',app:'editor',key:'enter'})" });
+    await started; cancelComputerEvaluations(SESSION, 'first');
+    assert.equal(isError(await next), undefined);
+    assert.equal(requests.filter(item => item.method === 'computer.act').length, 1);
+    await execute(tool, { action: 'reset' }); bridge.dispose();
+  });
   it("validates and forwards desktop, browser, and office operation arguments", async () => {
     const { bridge, requests } = scriptedBridge({
       "computer.act": () => ({ result: { accepted: true } }),

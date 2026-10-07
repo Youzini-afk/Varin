@@ -14,6 +14,19 @@ import type {
   ComputerReleaseResult,
 } from "@varin/protocol";
 
+const computerControllers = new Map<string, Set<WeakRef<{ cancel(runId?: string): boolean }>>>();
+const controllerCleanup = new FinalizationRegistry<{ sessionId: string; reference: WeakRef<{ cancel(runId?: string): boolean }> }>(entry => {
+  const references = computerControllers.get(entry.sessionId);
+  references?.delete(entry.reference); if (!references?.size) computerControllers.delete(entry.sessionId);
+});
+export function cancelComputerEvaluations(sessionId: string, runId?: string): boolean {
+  let found = false;
+  for (const reference of computerControllers.get(sessionId) ?? []) {
+    const controller = reference.deref(); if (controller?.cancel(runId)) found = true;
+  }
+  return found;
+}
+
 /**
  * Computer Use tool (BC4): structured observe/act calls plus a persistent
  * JavaScript REPL for multi-step orchestration. Both paths go through the
@@ -71,6 +84,11 @@ const OfficeOperation = Type.Object({
 
 const ComputerParams = Type.Object({
   action: Type.Union([
+    Type.Literal('access', { description: 'Read task-family desktop assignments and pending requests' }),
+    Type.Literal('request', { description: 'Request observation/control of a desktop from the main thread' }),
+    Type.Literal('grant', { description: 'Main thread: approve requestId after coordinating the desktop' }),
+    Type.Literal('deny', { description: 'Main thread: decline requestId with reason' }),
+    Type.Literal('releaseAssignment', { description: 'End the assigned work segment and release the desktop' }),
     Type.Literal("list", { description: "List registered machines and desktops" }),
     Type.Literal("prepare", { description: "Install a persistent Linux desktop and browser on this Host or a saved connection" }),
     Type.Literal("start", { description: "Start desktopId" }),
@@ -95,6 +113,10 @@ const ComputerParams = Type.Object({
     Type.Literal("evidence", { description: "Read the durable operation journal's identifiers and outcomes" }),
   ]),
   desktopId: Type.Optional(Type.String({ description: "Target desktop; defaults to the work's binding or configured default. Required for start/stop." })),
+  requestId: Type.Optional(Type.String({ description: 'Desktop assignment request identity' })),
+  access: Type.Optional(Type.Union([Type.Literal('observe'), Type.Literal('control')])),
+  reason: Type.Optional(Type.String({ description: 'Work requiring this desktop, or reason for declining' })),
+  wait: Type.Optional(Type.Boolean({ description: 'request: await the decision using events; default false lets you do other work' })),
   workTarget: Type.Optional(Type.String({ description: "environment: managed shell target; empty string resets to this Host" })),
   clear: Type.Optional(Type.Boolean({ description: "environment: clear both the shell target and desktop binding" })),
   url: Type.Optional(Type.String({ description: "open: destination URL; localhost refers to the target machine" })),
@@ -169,6 +191,16 @@ const summarizeObservation = (observation: ComputerObservation): string => {
 export function createComputerTool(bridge: HostServicesBridge, _sessionId: string): ToolDefinition {
   const repl = new ComputerRepl();
   const evaluations = new Set<AbortController>();
+  let executionId: string | undefined;
+  const controller = { cancel(runId?: string) {
+    if (runId !== undefined && runId !== executionId) return false;
+    for (const evaluation of evaluations) evaluation.abort(new Error('User stopped Computer Use; bindings cleared'));
+    repl.reset();
+    return true;
+  } };
+  const reference = new WeakRef(controller);
+  const references = computerControllers.get(_sessionId) ?? new Set(); references.add(reference); computerControllers.set(_sessionId, references);
+  controllerCleanup.register(controller, { sessionId: _sessionId, reference });
 
   return defineTool({
     name: "computer",
@@ -176,6 +208,7 @@ export function createComputerTool(bridge: HostServicesBridge, _sessionId: strin
     description: "Observe and operate real desktop applications: list computers/desktops, read the accessibility tree, click, type, press keys, scroll, drag — or run a persistent JavaScript REPL for multi-step GUI orchestration",
     promptSnippet: "computer: observe and operate desktop apps (list/apps/observe/act/cancel/run scripts)",
     promptGuidelines: [
+      'Subthreads must request an assigned desktop before observing or operating it. The main thread coordinates assignments with grant/deny and also respects exclusive desktop ownership. Different desktops can run in parallel; multiple windows of one desktop share input. Retrieval/discussion threads may request observe only. Release the assignment after a work segment. If the user stops Computer Use, do not bypass the stop through scripts or another tool; continue other authorized work.',
       "Element indexes and coordinates bind to observationId; the Host rejects stale observations. act reports driver acceptance, and uncertain or partial outcomes remain explicit.",
       "run supports persistent bindings and computer.getApp(app, {desktopId?, window?}). An app exposes getAXState/getScreenshot/getAXStateAndScreenshot/elements, click(index or [x,y]), setValue, typeText, pressKey, scroll, drag and performSecondaryAction. getApp resolves once; batch deterministic actions, then observe. Bound apps retain their desktop/window and control epoch across cells; handoff invalidates old bindings. Reads display their result by default; emit:false returns data without displaying it, fresh:true refreshes a cached tree. Image reads return metadata after display; emit:false returns the full observation for computer.emitImage(observation).",
       "Browser actions use CSS viewport coordinates; desktop coordinate targets use pixels of the exact returned screenshot. The Host maps raster pixels to the bound window and checks geometry before dispatch. URLs, files, and localhost resolve on the target machine.",
@@ -192,6 +225,17 @@ export function createComputerTool(bridge: HostServicesBridge, _sessionId: strin
       try {
         const desktop = params.desktopId?.trim() || undefined;
         switch (params.action) {
+          case 'access':
+          case 'request':
+          case 'grant':
+          case 'deny':
+          case 'releaseAssignment': {
+            const result = await request('computer.access', { op: params.action === 'access' ? 'status' : params.action === 'releaseAssignment' ? 'release' : params.action,
+              ...(desktop ? { desktopId: desktop } : {}), ...(params.requestId ? { requestId: params.requestId } : {}),
+              ...(params.access ? { access: params.access } : {}), ...(params.reason !== undefined ? { reason: params.reason } : {}), ...(params.wait !== undefined ? { wait: params.wait } : {}) },
+              params.wait ? { timeoutMs: 0 } : undefined);
+            return { content: [{ type: 'text', text: JSON.stringify(result) }], details: result };
+          }
           case "prepare": {
             const result = await request("computer.prepare", {
               ...(params.connectionId ? { connectionId: params.connectionId } : {}),
@@ -292,7 +336,7 @@ export function createComputerTool(bridge: HostServicesBridge, _sessionId: strin
             };
           }
           case "cancel": {
-            for (const evaluation of evaluations) evaluation.abort(new Error("Computer evaluation cancelled"));
+            controller.cancel();
             const result = await request<"computer.cancel">("computer.cancel", {
               ...(desktop ? { desktopId: desktop } : {}),
             }) as ComputerCancelResult;
@@ -326,6 +370,8 @@ export function createComputerTool(bridge: HostServicesBridge, _sessionId: strin
               // change while the script awaits must not redirect its next click.
               const requestOptions = { signal: controller.signal };
               const initial = (await request("computer.control", desktop ? { desktopId: desktop } : {}, requestOptions)).control;
+              if (executionId !== initial.executionId) repl.reset();
+              executionId = initial.executionId;
               const epochs = new Map([[initial.desktopId, initial.automationEpoch]]);
               const images: Array<{ type: "image"; data: string; mimeType: string }> = [];
               const field = async (requested?: string) => {
@@ -338,6 +384,11 @@ export function createComputerTool(bridge: HostServicesBridge, _sessionId: strin
               };
               const api = {
                 list: () => bridge.request("computer.list", {}, requestOptions),
+                access: () => request('computer.access', { op: 'status' }, requestOptions),
+                request: (opts: { desktopId?: string; access?: 'observe' | 'control'; reason: string; wait?: boolean }) => request('computer.access', { ...opts, op: 'request' }, { ...requestOptions, ...(opts.wait ? { timeoutMs: 0 } : {}) }),
+                grant: (requestId: string) => request('computer.access', { op: 'grant', requestId }, requestOptions),
+                deny: (requestId: string, reason?: string) => request('computer.access', { op: 'deny', requestId, ...(reason ? { reason } : {}) }, requestOptions),
+                releaseAssignment: (desktopId?: string) => request('computer.access', { op: 'release', ...(desktopId ? { desktopId } : {}) }, requestOptions),
                 apps: async (id?: string) => bridge.request("computer.apps", await field(id), requestOptions).then((r) => r.apps),
                 observe: async (app: string, opts?: { desktopId?: string; window?: number | string; includeScreenshot?: boolean; textLimit?: number | "max" }) =>
                   bridge.request("computer.observe", { ...opts, ...await field(opts?.desktopId), app }, requestOptions).then((r) => r.observation),

@@ -29,6 +29,8 @@ import { getGitStatus } from '@/lib/gitApiHttp';
 import { workspaceEvents } from '@/lib/workspaceEvents';
 import { useUIStore } from '@/stores/useUIStore';
 import { HarnessOverviewSection } from './HarnessOverviewSection';
+import { ComputerAutomationSection } from './ComputerAutomationSection';
+import { useComputerAutomation } from '@/stores/useComputerAutomation';
 import {
   groupOverviewBlocks,
   parseOverviewPlan,
@@ -62,6 +64,7 @@ export const HarnessThreadsPanel: React.FC<{
   const { breakpoint } = useDeviceInfo();
   const narrowScreen = breakpoint !== 'xl' && breakpoint !== '2xl';
   const runtimeKey = usePiSessionStore((state) => state.runtimeKey);
+  const computer = useComputerAutomation(parentSessionId);
   const overviewKey = workOverviewStateKey(runtimeKey, parentSessionId);
   const choices = useWorkOverviewStore((state) => state.bySession[overviewKey] ?? EMPTY_WORK_OVERVIEW_CHOICES);
   const setDisclosure = useWorkOverviewStore((state) => state.setDisclosure);
@@ -379,8 +382,10 @@ export const HarnessThreadsPanel: React.FC<{
 
   const hasThreadRecords = threads.length > 0;
   const hasWorkspaceChanges = (gitStatus?.files.length ?? 0) > 0;
+  const computerRequests = computer.state?.requests.filter(item => item.status === 'pending').length ?? 0;
+  const hasComputer = Boolean(computer.state?.leases.length || computerRequests || computer.activities.length || computer.state && computer.state.status !== 'enabled');
   const hasOverviewData = questions.length > 0 || threads.length > 0 || hasThreadRecords || blocks.length > 0 || suggestions.length > 0
-    || webSources.length > 0 || hasWorkspaceChanges;
+    || webSources.length > 0 || hasWorkspaceChanges || hasComputer;
   if (presentation === 'inline' && !hasOverviewData && !activePdfMaterial) return null;
 
   const blockGroups = groupOverviewBlocks(blocks);
@@ -394,7 +399,7 @@ export const HarnessThreadsPanel: React.FC<{
     ...blockGroups.other,
   ];
   const hasOutputs = gitDiff.files > 0 || pendingThreadDiff.files > 0;
-  const attentionCount = questions.length + suggestions.length + planSummary.blocked + threadSummary.attention;
+  const attentionCount = questions.length + suggestions.length + planSummary.blocked + threadSummary.attention + computerRequests + (computer.state?.status === 'stop-unconfirmed' ? 1 : 0);
   const overviewSummary = questions.length > 0 ? t('pi.question.pending') + ' · ' + questions.length : threadSummary.attention > 0
     ? t('harness.overview.summary.attention', { count: threadSummary.attention })
     : planSummary.blocked > 0
@@ -411,6 +416,12 @@ export const HarnessThreadsPanel: React.FC<{
                 ? t('harness.overview.summary.changed', { count: gitDiff.files || pendingThreadDiff.files })
                 : t('harness.overview.summary.context');
   const peekRows: OverviewPeekRow[] = [];
+  if (hasComputer) peekRows.push({ id: 'computer', section: 'computer', icon: 'computer', label: t('computer.automation.title'),
+    value: computerRequests ? t('computer.automation.pending', { count: computerRequests })
+      : computer.state?.status !== 'enabled' ? t(`computer.automation.${computer.state?.status ?? 'stopped'}`)
+        : computer.activities.find(entry => entry.activity.status === 'running')?.activity.app ?? computer.state?.leases.length,
+    ...(computerRequests || computer.state?.status === 'stop-unconfirmed' ? { tone: 'attention' as const } : {}),
+    ...(computer.state?.active && computer.state.status !== 'stopped' ? { action: { label: t('computer.automation.stop'), disabled: computer.busy || computer.state.status === 'stopping', run: () => void computer.stop() } } : {}) });
   const planProgress = { done: planSummary.done, total: planSummary.total };
   if (blockGroups.plan) peekRows.push({
     id: 'plan', section: 'plan',
@@ -441,6 +452,10 @@ export const HarnessThreadsPanel: React.FC<{
       {!hasOverviewData ? (
         <p className="px-3 py-4 typography-meta text-muted-foreground">{t('harness.overview.empty')}</p>
       ) : null}
+      {hasComputer ? <HarnessOverviewSection title={t('computer.automation.title')} icon="computer" status={computerRequests || undefined}
+        attention={computerRequests > 0 || computer.state?.status === 'stop-unconfirmed'} open={choices.computer ?? true} onOpenChange={open => setDisclosure(overviewKey, 'computer', open)}>
+        <ComputerAutomationSection view={computer} directory={fallbackCwd ?? ''} />
+      </HarnessOverviewSection> : null}
       {questions.length > 0 ? <HarnessOverviewSection title={t('pi.question.pending')} icon="question" status={questions.length} attention open={choices.questions ?? true} onOpenChange={open => setDisclosure(overviewKey, 'questions', open)}>
         <div className="space-y-2">{questions.map(dialog => <div key={dialog.id} className="flex items-start gap-2 rounded-md bg-muted/25 px-2 py-2">
           <button type="button" className="min-w-0 flex-1 text-left typography-meta hover:text-primary" onClick={() => showQuestion(dialog.id)}>{userQuestionRequest(dialog)?.questions.map(question => question.question).join(' · ')}</button>

@@ -15,7 +15,8 @@ import { fileURLToPath } from "node:url";
 import { existsSync, mkdirSync, rmSync, writeFileSync } from "node:fs";
 import os from "node:os";
 import path from "node:path";
-import type { ComputerCapabilities, ComputerPlatform } from "@varin/protocol";
+import type { ComputerCapabilities, ComputerPlatform, ComputerGesture } from "@varin/protocol";
+export type DriverGesture = Pick<ComputerGesture, 'phase' | 'point' | 'to' | 'target'>;
 import { remapAsarUnpackedPath } from "../structure/runtime-path.js";
 
 const DEFAULT_REQUEST_TIMEOUT_MS = 45_000;
@@ -154,11 +155,13 @@ interface PendingDriverRequest {
   resolve(response: DriverResponse): void;
   reject(error: Error): void;
   timeout?: ReturnType<typeof setTimeout>;
+  onGesture?: (event: DriverGesture) => void;
+  beforeDispatch?: () => void;
 }
 
 export interface ComputerDriverSession {
   /** Serialize ops: one request in flight at a time — the desktop input stream is inherently ordered. */
-  request(op: Omit<DriverRequest, "id">, options?: { timeoutMs?: number }): Promise<DriverResponse>;
+  request(op: Omit<DriverRequest, "id">, options?: { timeoutMs?: number; onGesture?: (event: DriverGesture) => void; beforeDispatch?: () => void }): Promise<DriverResponse>;
   /**
    * Interrupt the in-flight request at the driver's next internal checkpoint
    * (BC4.A). stdin stays sequential, so cancellation travels through a flag
@@ -205,6 +208,21 @@ export function createDriverSession(spec: DriverSpawnSpec): ComputerDriverSessio
     if (typeof message.id !== "string" || message.id === null) return;
     const p = active;
     if (!p || message.id !== p.id) return;
+    const progress = message as unknown as Record<string, unknown>;
+    if (progress.type === 'gesture') {
+      if (!['target', 'dispatched'].includes(String(progress.phase))) return;
+      const point = (value: unknown) => {
+        if (!value || typeof value !== 'object') return undefined;
+        const v = value as Record<string, unknown>;
+        return typeof v.x === 'number' && Number.isFinite(v.x) && typeof v.y === 'number' && Number.isFinite(v.y) ? { x: v.x, y: v.y } : undefined;
+      };
+      const at = point(progress.point); const to = point(progress.to); const rect = point(progress.target);
+      const bounds = progress.target as Record<string, unknown> | undefined;
+      const target = rect && typeof bounds?.width === 'number' && Number.isFinite(bounds.width) && bounds.width > 0
+        && typeof bounds.height === 'number' && Number.isFinite(bounds.height) && bounds.height > 0 ? { ...rect, width: bounds.width, height: bounds.height } : undefined;
+      try { p.onGesture?.({ phase: progress.phase as DriverGesture['phase'], ...(at ? { point: at } : {}), ...(to ? { to } : {}), ...(target ? { target } : {}) }); } catch { /* effects never change native input */ }
+      return;
+    }
     if (typeof message.ok !== "boolean") {
       stop(new Error("Computer driver returned a malformed response"));
       return;
@@ -219,6 +237,10 @@ export function createDriverSession(spec: DriverSpawnSpec): ComputerDriverSessio
     if (disposed || active || queue.length === 0) return;
     const next = queue.shift()!;
     active = next;
+    try { next.beforeDispatch?.(); }
+    catch (error) {
+      active = null; next.reject(error instanceof Error ? error : new Error(String(error))); pump(); return;
+    }
     try {
       const target = ensureChild();
       // Waiting in the queue must never expire and later send a rejected op.
@@ -302,7 +324,8 @@ export function createDriverSession(spec: DriverSpawnSpec): ComputerDriverSessio
       reject(new Error("Computer driver session is disposed"));
       return;
     }
-    queue.push({ id: randomUUID(), op: structuredClone(op), timeoutMs: options.timeoutMs ?? DEFAULT_REQUEST_TIMEOUT_MS, resolve, reject });
+    queue.push({ id: randomUUID(), op: structuredClone(op), timeoutMs: options.timeoutMs ?? DEFAULT_REQUEST_TIMEOUT_MS, resolve, reject,
+      ...(options.onGesture ? { onGesture: options.onGesture } : {}), ...(options.beforeDispatch ? { beforeDispatch: options.beforeDispatch } : {}) });
     pump();
   });
 

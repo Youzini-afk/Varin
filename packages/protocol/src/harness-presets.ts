@@ -54,7 +54,7 @@ export interface ExecutionPreset {
 export const EXECUTION_PRESETS: Readonly<Record<PresetId, ExecutionPreset & { slot: HarnessModelRole }>> = {
   worker: {
     id: "worker", slot: "worker",
-    tools: ["read", "edit", "write", "apply_patch", "bash", "grep", "find", "ls", "get_output", "write_to_process", "kill_shell", "explore", "related", "diagnostics", "symbols", "definition", "references", "hover", "webfetch", "document_read", "websearch", "todo", "dispatch", "threads", "wait", "send", "read_thread", "merge", "submit_code", "update", "kill"],
+    tools: ["read", "edit", "write", "apply_patch", "bash", "computer", "grep", "find", "ls", "get_output", "write_to_process", "kill_shell", "explore", "related", "diagnostics", "symbols", "definition", "references", "hover", "webfetch", "document_read", "websearch", "todo", "dispatch", "threads", "wait", "send", "read_thread", "merge", "submit_code", "update", "kill"],
     worktree: "isolated",
     systemPromptFragment: "Complete the assigned work with awareness of the overall goal and related tasks. Read teammates' relevant work, coordinate shared interfaces directly, and inform the main agent of decisions affecting the overall design. Revisit the task boundary when evidence calls for it. Verify the actual result in proportion to its risk.",
     teamDescription: "independent implementation or other assigned work, including coordination and relevant verification",
@@ -64,6 +64,7 @@ export const EXECUTION_PRESETS: Readonly<Record<PresetId, ExecutionPreset & { sl
     slot: "retrievalAgent",
     tools: [
       "read",
+      "computer",
       "grep",
       "find",
       "ls",

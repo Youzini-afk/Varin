@@ -380,6 +380,7 @@ function Send-Drag([IntPtr]$hwnd, [int]$fromX, [int]$fromY, [int]$toX, [int]$toY
             $x = [int][math]::Round($start.X + (($end.X - $start.X) * $i / $steps))
             $y = [int][math]::Round($start.Y + (($end.Y - $start.Y) * $i / $steps))
             Send-PostedMessage $hwnd $WM_MOUSEMOVE ([IntPtr]1) (ConvertTo-LParam $x $y)
+            Send-ComputerGesture "dispatched" @{ x = $fromX + (($toX - $fromX) * $i / $steps); y = $fromY + (($toY - $fromY) * $i / $steps) }
             Start-Sleep -Milliseconds 20
         }
     } finally {
@@ -518,6 +519,7 @@ function Send-GlobalDrag([int]$fromX, [int]$fromY, [int]$toX, [int]$toY) {
         $move = [VarinWin32]::MouseInput($x, $y, ([VarinWin32]::MOUSEEVENTF_MOVE -bor [VarinWin32]::MOUSEEVENTF_ABSOLUTE), 0)
         # Absolute moves need 0..65535-normalized coordinates; use relative here.
         [void][VarinWin32]::SetCursorPos($x, $y)
+        Send-ComputerGesture "dispatched" @{ x = $x; y = $y }
         Start-Sleep -Milliseconds 20
     }
     $up = [VarinWin32]::MouseInput($toX, $toY, [VarinWin32]::MOUSEEVENTF_LEFTUP, 0)
@@ -1582,7 +1584,17 @@ function Invoke-TypeText($process, [string]$text, $rootOverride = $null) {
 # interpreter.
 # ---------------------------------------------------------------------------
 
+function Send-ComputerGesture([string]$phase, $point = $null, $to = $null, $target = $null) {
+    if (-not $script:GestureOperation.visual_feedback) { return }
+    $payload = @{ id = [string]$script:GestureOperation.id; type = "gesture"; phase = $phase }
+    if ($null -ne $point) { $payload.point = $point }
+    if ($null -ne $to) { $payload.to = $to }
+    if ($null -ne $target) { $payload.target = $target }
+    try { [Console]::Out.WriteLine(($payload | ConvertTo-Json -Depth 6 -Compress)); [Console]::Out.Flush() } catch {}
+}
+
 function Invoke-ComputerOperation($operation) {
+    $script:GestureOperation = $operation
     $tool = [string]$operation.tool
 
     if ($tool -eq "ping") {
@@ -1683,6 +1695,23 @@ function Invoke-ComputerOperation($operation) {
         $script:InputWindow = $hwnd
     }
 
+    if ($operation.visual_feedback) {
+        $target = $windowBounds
+        if ($null -ne $element) {
+            $frame = $operation.element.frame
+            $target = @{ x = $windowBounds.x + $frame.x; y = $windowBounds.y + $frame.y; width = $frame.width; height = $frame.height }
+        }
+        $gesturePoint = $null
+        $gestureTo = $null
+        if ($tool -eq "click" -or $tool -eq "scroll" -or $tool -eq "perform_secondary_action") {
+            if ($null -ne $element) { $gesturePoint = Get-ScreenPoint $operation.element.frame $windowBounds }
+            elseif ($null -ne $operation.x -and $null -ne $operation.y) { $gesturePoint = @{ x = $windowBounds.x + $operation.x; y = $windowBounds.y + $operation.y } }
+        } elseif ($tool -eq "drag") {
+            $gesturePoint = @{ x = $windowBounds.x + $operation.from_x; y = $windowBounds.y + $operation.from_y }
+            $gestureTo = @{ x = $windowBounds.x + $operation.to_x; y = $windowBounds.y + $operation.to_y }
+        }
+        Send-ComputerGesture "target" $gesturePoint $gestureTo $target
+    }
     try {
     switch ($tool) {
         "click" {
@@ -1795,6 +1824,7 @@ function Invoke-ComputerOperation($operation) {
             throw "unsupportedTool(`"$tool`")"
         }
     }
+    Send-ComputerGesture "dispatched"
     } catch [System.OperationCanceledException] {
         # The cancel side-channel fired mid-operation. The finally below still
         # releases any input this driver had pressed; the message carries how

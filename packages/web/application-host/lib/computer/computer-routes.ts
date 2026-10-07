@@ -1,6 +1,7 @@
 import type { Express, Request, RequestHandler, Response } from "express";
 import { HarnessServiceError } from "../harness/service-error.js";
 import type { ComputerService } from "./computer-service.js";
+import type { ComputerActor, ComputerAccess } from '@varin/protocol';
 
 /**
  * Computer catalog routes (BC4): environment selection surfaces read machines
@@ -53,6 +54,52 @@ export function registerComputerRoutes(app: Express, { computers, requireAuth = 
   app.get("/api/computers/activity", requireAuth, (request: Request, response: Response) => {
     response.setHeader("Cache-Control", "no-store");
     response.json({ activities: computers.activities(typeof request.query.sessionId === "string" ? request.query.sessionId : undefined) });
+  });
+
+  app.get('/api/computers/automation', requireAuth, async (request, response) => {
+    response.setHeader('Cache-Control', 'no-store');
+    try {
+      const sessionId = String(request.query.sessionId ?? '');
+      const state = await computers.automation.snapshot(sessionId);
+      const sessions = new Set([sessionId, state.rootSessionId, ...state.leases.map(lease => lease.actor.sessionId), ...state.requests.map(item => item.actor.sessionId)]);
+      response.json({ state, activities: computers.activities().filter(entry => entry.activity.sessionId && sessions.has(entry.activity.sessionId)) });
+    }
+    catch (error) { sendError(response, error, 'Unable to read Computer Use state'); }
+  });
+  app.post('/api/computers/automation/stop', requireAuth, async (request, response) => {
+    try { response.json({ state: await computers.automation.stop(String(request.body?.sessionId ?? '')) }); }
+    catch (error) { sendError(response, error, 'Unable to confirm Computer Use stop'); }
+  });
+  app.post('/api/computers/desktops/:desktopId/assignment', requireAuth, async (request, response) => {
+    try {
+      const body = request.body;
+      const actor = body?.actor;
+      if (typeof body?.origin !== 'string' || !body.origin.trim() || typeof body.assignmentId !== 'string' || !body.assignmentId.trim() || !actor || typeof actor.readOnly !== 'boolean'
+        || ['sessionId', 'runId', 'threadId', 'scopeId', 'rootSessionId', 'rootRunId', 'label'].some(field => typeof actor[field] !== 'string' || !actor[field].trim())) {
+        throw new HarnessServiceError('invalid-params', 'A trusted Host execution identity is required');
+      }
+      const desktopId = String(request.params.desktopId);
+      if (body.op === 'drop' && ['observe', 'control'].includes(body.access)) { await computers.dropDesktopClaim(body.origin, body.assignmentId, actor as ComputerActor, desktopId, body.access as ComputerAccess); response.json({ released: true }); }
+      else if (body.op === 'claim' && ['observe', 'control'].includes(body.access)) {
+        response.json({ token: await computers.claimDesktop(body.origin, body.assignmentId, actor as ComputerActor, desktopId, body.access as ComputerAccess) });
+      } else throw new HarnessServiceError('invalid-params', 'Unknown desktop assignment operation');
+    } catch (error) { sendError(response, error, 'Unable to coordinate desktop assignment'); }
+  });
+  // The authenticated peer must carry a Host-issued assignment. Human viewer input has its own
+  // takeover identity; a raw automatic endpoint is never a second bypass around Thread admission.
+  app.use('/api/computers/desktops/:desktopId', requireAuth, (request, response, next) => {
+    const operation = request.path.slice(1);
+    const automatic = request.method === 'POST' && ['observe', 'act', 'open', 'cancel', 'release', 'browser', 'office', 'software', 'artifacts/write'].includes(operation);
+    const token = request.get('X-Varin-Computer-Lease');
+    if (!automatic && !token) { next(); return; }
+    if (!token) { sendError(response, new HarnessServiceError('forbidden', 'Automatic input requires a Host desktop assignment'), 'Assignment required'); return; }
+    const body = request.body;
+    const read = request.method === 'GET' || operation === 'observe'
+      || operation === 'browser' && (['status', 'tabs', 'snapshot'].includes(body?.op) || body?.op === 'act' && body?.act?.kind === 'screenshot')
+      || operation === 'office' && (['status', 'docs'].includes(body?.op) || body?.op === 'act' && body?.act?.kind === 'read');
+    void computers.automation.delegated(token, String(request.params.desktopId), read ? 'observe' : 'control', () => new Promise<void>(resolve => {
+      response.once('finish', resolve); response.once('close', resolve); next();
+    })).catch(error => { if (!response.headersSent) sendError(response, error, 'Desktop assignment ended'); });
   });
 
   const sendArtifact = (response: Response, source: Awaited<ReturnType<ComputerService["openDesktopArtifact"]>>) => {

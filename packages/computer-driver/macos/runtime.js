@@ -23,6 +23,15 @@ var MAX_ELEMENTS = 1200;
 var MAX_DEPTH = 48;
 var DEFAULT_TEXT_LIMIT = 500;
 var LAST_INPUT_TIMES = {};
+var GESTURE_OPERATION = {};
+function emitGesture(phase, point, to, target) {
+    if (!GESTURE_OPERATION.visual_feedback || typeof writeResponse !== 'function') return;
+    var payload = { type: 'gesture', phase: phase };
+    if (point) payload.point = point;
+    if (to) payload.to = to;
+    if (target) payload.target = target;
+    try { writeResponse(GESTURE_OPERATION.id, payload); } catch (e) { /* visual feedback is optional */ }
+}
 
 // ---------------------------------------------------------------------------
 // Cancellation (BC4.A): stdin is serialized, so a cancel request cannot be
@@ -410,6 +419,7 @@ function sendDrag(fromX, fromY, toX, toY) {
             var x = fromX + ((toX - fromX) * i / steps);
             var y = fromY + ((toY - fromY) * i / steps);
             postMouse(types.drag, x, y, types.button);
+            emitGesture('dispatched', { x: x, y: y });
             $.NSThread.sleepForTimeInterval(0.02);
         }
     } finally {
@@ -765,6 +775,7 @@ function activateObservedWindow(app, windowInfo) {
 }
 
 function performOperation(operation) {
+    GESTURE_OPERATION = operation;
     var tool = operation.tool;
     if (tool === "ping") return { ok: true };
     if (tool === "open") {
@@ -858,6 +869,17 @@ function performOperation(operation) {
     }
 
     var inputPath = operation.input || "auto";
+    if (operation.visual_feedback) {
+        var gestureTarget = element ? axFrame(element) : bounds;
+        var gesturePoint = null, gestureTo = null;
+        if (['click', 'scroll', 'perform_secondary_action'].indexOf(tool) >= 0 && (element || operation.x !== undefined)) {
+            gesturePoint = screenPoint(bounds, elementRecord, operation.x, operation.y);
+        } else if (tool === 'drag') {
+            gesturePoint = screenPoint(bounds, null, operation.from_x, operation.from_y);
+            gestureTo = screenPoint(bounds, null, operation.to_x, operation.to_y);
+        }
+        emitGesture('target', gesturePoint, gestureTo, gestureTarget);
+    }
     switch (tool) {
         case "click": {
             var method = String(operation.click_method || "auto").toLowerCase();
@@ -928,6 +950,7 @@ function performOperation(operation) {
             throw new Error('unsupportedTool("' + tool + '")');
     }
 
+    emitGesture('dispatched');
     LAST_INPUT_TIMES[app.pid] = Date.now();
     if (!operation.return_state || operation.return_state === "none") return { ok: true };
     try {

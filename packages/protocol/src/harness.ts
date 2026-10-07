@@ -1652,6 +1652,7 @@ export interface HarnessServiceMap {
   "memory.get": { params: MemoryGetParams; result: MemoryGetResult };
   "memory.search": { params: MemorySearchParams; result: MemorySearchResult };
   "computer.list": { params: ComputerListParams; result: ComputerListResult };
+  "computer.access": { params: import('./harness-computer.js').ComputerAccessParams & { op: "status" | "request" | "grant" | "deny" | "release" }; result: { state: import('./harness-computer.js').ComputerAutomationState; request?: import('./harness-computer.js').ComputerAccessRequest } };
   "computer.prepare": { params: import('./harness-computer.js').ComputerDesktopPrepareParams; result: { desktop: import('./harness-computer.js').ComputerDesktop } };
   "computer.desktopLifecycle": { params: { desktopId: string; action: "start" | "stop" }; result: { desktop: import('./harness-computer.js').ComputerDesktop } };
   "computer.artifact": { params: { desktopId?: string; relativePath: string }; result: { artifact: import('./harness-computer.js').ComputerArtifact } };
@@ -1858,6 +1859,7 @@ export const HARNESS_METHOD_CAPABILITY = {
   "memory.get": "context.session",
   "memory.search": "context.session",
   "computer.list": "read.computer",
+  "computer.access": "read.computer",
   "computer.prepare": "control.computer",
   "computer.desktopLifecycle": "control.computer",
   "computer.artifact": "control.computer",
@@ -2023,6 +2025,7 @@ const HARNESS_METHODS: ReadonlySet<string> = new Set<string>([
   "memory.get",
   "memory.search",
   "computer.list",
+  "computer.access",
   "computer.prepare",
   "computer.desktopLifecycle",
   "computer.artifact",

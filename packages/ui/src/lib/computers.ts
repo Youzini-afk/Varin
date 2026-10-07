@@ -3,6 +3,8 @@ import { sha256 } from '@noble/hashes/sha2.js';
 import type {
   ComputerControlState,
   ComputerActivityEntry,
+  ComputerAutomationState,
+  ComputerGesture,
   ComputerArtifact,
   ComputerDesktop,
   ComputerDesktopFrame,
@@ -38,6 +40,11 @@ export const readComputerActivity = async (sessionId: string): Promise<ComputerA
     await runtimeFetch(`/api/computers/activity?sessionId=${encodeURIComponent(sessionId)}`), 'Unable to read computer activity',
   )
 ).activities;
+export interface ComputerAutomationProjection { state: ComputerAutomationState; activities: ComputerActivityEntry[] }
+export const readComputerAutomation = async (sessionId: string): Promise<ComputerAutomationProjection> => readJson(
+  await runtimeFetch(`/api/computers/automation?sessionId=${encodeURIComponent(sessionId)}`, { cache: 'no-store' }), 'Unable to read Computer Use state');
+export const stopComputerAutomation = async (sessionId: string): Promise<{ state: ComputerAutomationState }> => readJson(
+  await runtimeFetch('/api/computers/automation/stop', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ sessionId }) }), 'Unable to confirm Computer Use stop');
 
 /** Re-probe a desktop's driver; the response carries the real capability table. */
 export const probeComputerDesktop = async (desktopId: string): Promise<ComputerDesktop> => {
@@ -92,6 +99,7 @@ export const sendDesktopInput = (desktopId: string, holderId: string, input: Com
 
 /** One frame/control event from a desktop view stream (BC5.B). */
 export type DesktopStreamEvent =
+  | { type: 'gesture'; gesture: ComputerGesture }
   | { type: 'control'; control: ComputerControlState }
   | { type: 'frame'; frame: ComputerDesktopFrame }
   | { type: 'error'; error: string };

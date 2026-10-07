@@ -42,7 +42,19 @@ image and returns an application object fixed to the resolved desktop, PID,
 window and control epoch. Bindings survive script cells. Human takeover,
 handback or cancellation invalidates the original input epoch: reacquire an
 application object after inspecting the current scene. Reads do not grant
-control or silently renew an old object's epoch.
+control or silently renew an old object's epoch. Bindings survive cells within one Thread Run;
+the next Run obtains a fresh execution identity and script context.
+
+Child threads first request a desktop through the structured `computer` action `request` with
+`desktopId`, `access`, `reason` and optional `wait:true`. The main agent approves with `grant` or declines
+with `deny` using `requestId`. The default request returns immediately; an explicit wait is event-driven
+and yields the Thread slot. `access` reads the family state and `releaseAssignment` ends the work segment.
+Inside an already admitted script these are also `computer.request(options)`, `grant(requestId)`,
+`deny(requestId, reason?)`, `access()` and `releaseAssignment(desktopId?)`. Retrieval/discussion children
+observe only. Main and child controllers respect one physical desktop owner; different desktops can
+run concurrently. The user can revoke Computer Use for the current main round from the work overview.
+The Host cancels only Computer evaluations and sends a passive stop notification, leaving other Agent
+work available. See [Computer admission](../../../web/application-host/lib/computer/DOCUMENTATION.md).
 
 ```js
 const editor = await computer.getApp('notepad');

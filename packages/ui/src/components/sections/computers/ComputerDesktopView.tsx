@@ -12,6 +12,7 @@ import {
 import type { ComputerControlState, ComputerDesktop, ComputerDesktopFrame } from '@varin/protocol';
 import { desktopKey, desktopPoint } from '@/lib/computerInput';
 import { VncDesktop } from './VncDesktop';
+import { ComputerFeedback, type ComputerFeedbackHandle } from './ComputerFeedback';
 
 const newViewerId = () => `viewer-${Math.random().toString(36).slice(2)}-${Date.now().toString(36)}`;
 
@@ -30,6 +31,7 @@ export function ComputerDesktopPane({ desktop }: { desktop: ComputerDesktop }) {
   const [streamError, setStreamError] = React.useState<string | null>(null);
   const [inputError, setInputError] = React.useState<string | null>(null);
   const [busy, setBusy] = React.useState(false);
+  const feedback = React.useRef<ComputerFeedbackHandle>(null);
   const [textDraft, setTextDraft] = React.useState('');
   const frameRef = React.useRef<HTMLImageElement | null>(null);
   const vncRef = React.useRef<HTMLDivElement | null>(null);
@@ -50,6 +52,7 @@ export function ComputerDesktopPane({ desktop }: { desktop: ComputerDesktop }) {
     setControl(null);
     setStreamError(null);
     setInputError(null);
+    feedback.current?.clear();
     const source = subscribeDesktopStream(desktop.id, viewerId, !useVnc);
     source.onmessage = (message) => {
       try {
@@ -60,6 +63,8 @@ export function ComputerDesktopPane({ desktop }: { desktop: ComputerDesktop }) {
           setStreamError(null);
         } else if (event.type === 'control') {
           setControl(event.control);
+        } else if (event.type === 'gesture') {
+          feedback.current?.show(event.gesture);
         } else if (event.type === 'error') {
           setStreamError(event.error);
         }
@@ -225,7 +230,7 @@ export function ComputerDesktopPane({ desktop }: { desktop: ComputerDesktop }) {
       {streamError ? <p role="alert" className="typography-meta text-destructive">{streamError}</p> : null}
       {useVnc && vncStatus === 'disconnected' ? <p role="alert" className="typography-meta text-destructive">{t('settings.computers.view.streamLost')}</p> : null}
       {inputError ? <p role="alert" className="typography-meta text-destructive">{inputError}</p> : null}
-      <div className="rounded-lg border border-border/60 bg-black/80 overflow-hidden flex items-center justify-center min-h-[240px]">
+      <div className="relative rounded-lg border border-border/60 bg-black/80 overflow-hidden flex items-center justify-center min-h-[240px]">
         {useVnc ? <div {...inputHandlers} className="h-[60vh] w-full select-none touch-none" aria-label={desktop.label}>
           <VncDesktop ref={vncRef} desktopId={desktop.id} onGeometry={vncGeometry} onConnected={vncConnected} />
         </div> : frameUrl ? (
@@ -240,6 +245,7 @@ export function ComputerDesktopPane({ desktop }: { desktop: ComputerDesktop }) {
         ) : (
           <p role="status" className="typography-meta text-muted-foreground p-8">{t('settings.computers.view.waiting')}</p>
         )}
+        <ComputerFeedback ref={feedback} bounds={frame?.bounds} upscale={useVnc} disabled={control?.owner !== 'agent' || Boolean(streamError)} />
       </div>
       {weHoldControl ? (
         <form className="flex gap-2" onSubmit={(event) => {

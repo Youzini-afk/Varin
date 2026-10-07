@@ -35,12 +35,18 @@ const fixture = () => {
     setDefaultDesktop: vi.fn(async () => undefined),
   };
   const app = express();
+  Object.defineProperty(computers, 'automation', { value: { delegated: async (_token: string, _desktopId: string, _access: string, run: () => Promise<unknown>) => run() } });
   app.use(express.json());
   registerComputerRoutes(app, { computers: computers as never, hostId: 'host-1' });
   return { app, computers };
 };
 
 describe("computer routes (BC4)", () => {
+  it('rejects automatic input without an assignment even on an authenticated route', async () => {
+    const { app, computers } = fixture(); computers.act = vi.fn();
+    const response = await request(app).post('/api/computers/desktops/local-console/act').send({ action: { kind: 'key', app: 'editor', key: 'enter' } });
+    expect(response.status).toBe(409); expect(computers.act).not.toHaveBeenCalled();
+  });
   it('reads the session activity projection without probing the catalog or desktop', async () => {
     const { app, computers } = fixture();
     computers.activities = vi.fn(() => [{ desktopId: 'local-console', activity: { sessionId: 's1', app: 'notepad', operation: 'key', status: 'idle', updatedAt: 'now' } }]);
@@ -56,8 +62,10 @@ describe("computer routes (BC4)", () => {
     computers.observe = vi.fn(async () => ({ id: 'observation' }));
     computers.act = vi.fn(async () => ({ accepted: true }));
     expect((await request(app).post('/api/computers/desktops/local-console/observe')
+      .set('X-Varin-Computer-Lease', 'assigned')
       .send({ app: 'editor', sessionId: 'origin' })).status).toBe(200);
     expect((await request(app).post('/api/computers/desktops/local-console/act')
+      .set('X-Varin-Computer-Lease', 'assigned')
       .send({ action: { kind: 'key', app: 'editor', key: 'enter' }, sessionId: 'origin' })).status).toBe(200);
     expect(computers.observe).toHaveBeenCalledWith(expect.objectContaining({ sessionId: 'origin' }));
     expect(computers.act).toHaveBeenCalledWith(expect.objectContaining({ sessionId: 'origin' }));
@@ -323,6 +331,7 @@ describe("computer routes (EE open + file write)", () => {
     computers.open = vi.fn(async () => ({ accepted: true, pid: 5 }));
     const response = await request(app)
       .post("/api/computers/desktops/local-console/open")
+      .set('X-Varin-Computer-Lease', 'assigned')
       .send({ url: "http://localhost:3000/", args: ["--new-window"] });
     expect(response.status).toBe(200);
     expect(response.body.result).toEqual({ accepted: true, pid: 5 });
@@ -338,6 +347,7 @@ describe("computer routes (EE open + file write)", () => {
     computers.open = vi.fn(async () => { throw new HarnessServiceError("forbidden", "under human control"); });
     const response = await request(app)
       .post("/api/computers/desktops/local-console/open")
+      .set('X-Varin-Computer-Lease', 'assigned')
       .send({ url: "http://x/" });
     expect(response.status).toBe(409);
   });
@@ -347,6 +357,7 @@ describe("computer routes (EE open + file write)", () => {
     computers.fileWrite = vi.fn(async () => ({ version: { sha256: "b".repeat(64), byteLength: 2, modifiedAt: "1" } }));
     const response = await request(app)
       .post("/api/computers/desktops/local-console/artifacts/write")
+      .set('X-Varin-Computer-Lease', 'assigned')
       .send({ relativePath: "Downloads/in.csv", contentBase64: "aGk=" });
     expect(response.status).toBe(200);
     expect(response.body.version.sha256).toBe("b".repeat(64));
@@ -363,6 +374,7 @@ describe("computer routes (EE open + file write)", () => {
     computers.installSoftware = vi.fn(async () => ({ results: [{ id: "dev", state: "installed" }] }));
     const response = await request(app)
       .post("/api/computers/desktops/local-console/software")
+      .set('X-Varin-Computer-Lease', 'assigned')
       .send({ groups: ["dev"], packages: ["mypkg"] });
     expect(response.status).toBe(200);
     expect(computers.installSoftware).toHaveBeenCalledWith({
