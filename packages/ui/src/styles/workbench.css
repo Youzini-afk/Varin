@@ -31,8 +31,9 @@
 }
 .agent-conversation-canvas {
   border: 1px solid var(--border);
+  border-right: 0;
   border-bottom: 0;
-  border-radius: 10px 10px 0 0;
+  border-radius: 10px 0 0 0;
   isolation: isolate;
 }
 .workbench-sidebar { border-right-color: transparent; }
