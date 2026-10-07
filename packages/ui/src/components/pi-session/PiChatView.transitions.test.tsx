@@ -3,13 +3,22 @@ import { createRoot, type Root } from 'react-dom/client';
 import { parseHTML } from 'linkedom';
 import { afterEach, beforeEach, expect, it, vi } from 'vitest';
 import type { PiSessionEntry, SessionSnapshot } from '@varin/protocol';
+import type { ProjectEntry } from '@varin/application-client';
+import type { WorkbenchWorkspaceState } from '@/lib/extensions/workbench-workspace';
 import type { PiSessionStoreState, PiSessionViewState } from '@/stores/usePiSessionStore';
 import { readPiDraft, usePiDraftStore } from '@/stores/usePiDraftStore';
 import { PiChatView } from './PiChatView';
+import { WorkbenchShellHost } from '@/lib/extensions/workbench-shell-host';
 
 const mocks = vi.hoisted(() => ({
   state: {} as PiSessionStoreState,
   mounts: 0,
+  runtimeEpoch: 1,
+  projectId: null as string | null,
+  projects: [] as ProjectEntry[],
+  directory: '/repo',
+  home: '/repo',
+  workspace: {} as WorkbenchWorkspaceState,
   composer: {} as {
     sessionId: string | null; loading: boolean; placement: string; draft: string;
     effectiveModel?: { id: string }; onChangeDraft(text: string): void;
@@ -23,9 +32,10 @@ vi.mock('@/stores/usePiSessionStore', () => {
 vi.mock('@varin/application-client', async (original) => ({
   ...await original<typeof import('@varin/application-client')>(),
   getRuntimeKey: () => mocks.state.runtimeKey,
+  getRuntimeEndpointGeneration: () => mocks.runtimeEpoch,
 }));
-vi.mock('@/stores/useProjectsStore', () => ({ useProjectsStore: (select: (state: unknown) => unknown) => select({ projects: [], activeProjectId: null }) }));
-vi.mock('@/stores/useDirectoryStore', () => ({ useDirectoryStore: (select: (state: unknown) => unknown) => select({ currentDirectory: '/repo', homeDirectory: '/repo', setDirectory: vi.fn() }) }));
+vi.mock('@/stores/useProjectsStore', () => ({ useProjectsStore: (select: (state: unknown) => unknown) => select({ projects: mocks.projects, activeProjectId: mocks.projectId }) }));
+vi.mock('@/stores/useDirectoryStore', () => ({ useDirectoryStore: (select: (state: unknown) => unknown) => select({ currentDirectory: mocks.directory, homeDirectory: mocks.home, setDirectory: vi.fn() }) }));
 vi.mock('@/stores/messageQueueStore', () => ({ useMessageQueueStore: (select: (state: unknown) => unknown) => select({ followUpBehavior: 'queue' }) }));
 vi.mock('@/stores/usePiInteractionStore', () => ({ usePiInteractionStore: (select: (state: unknown) => unknown) => select({ sessions: {} }) }));
 vi.mock('@/stores/useUIStore', () => ({ useUIStore: (select: (state: unknown) => unknown) => select({ isTimelineDialogOpen: false, recoveryPreference: 'conversation', setTimelineDialogOpen: vi.fn() }) }));
@@ -36,9 +46,15 @@ vi.mock('@/components/ui/tooltip', () => ({ TooltipProvider: ({ children }: Reac
 vi.mock('@/components/ui/VarinLogo', () => ({ VarinLogo: () => null }));
 vi.mock('@/components/ui/OverlayScrollbar', () => ({ OverlayScrollbar: () => null }));
 vi.mock('@/lib/extensions/workbench-registry', () => ({
-  WorkbenchReplacement: ({ fallback }: { fallback: React.ReactNode }) => fallback,
-  WORKBENCH_REPLACEMENT_TARGETS: { chatTimeline: 'timeline', chatComposer: 'composer' },
+  WorkbenchReplacement: ({ fallback, target }: { fallback: React.ReactNode; target: string }) => target === 'workbench.shell' ? <PiChatView /> : fallback,
+  WORKBENCH_REPLACEMENT_TARGETS: { shell: 'workbench.shell', chatTimeline: 'timeline', chatComposer: 'composer' },
+  useSurfaceRegistrySnapshot: () => ({ visibleContributions: [{ descriptor: { id: 'agent-shell', replacement: { target: 'workbench.shell' } }, owner: { generation: 1 } }] }),
+  workbenchContributionInstanceKey: () => 'agent-shell:1',
 }));
+vi.mock('@/lib/extensions/catalog-store', () => ({ useVarinExtensionCatalog: () => ({ snapshot: { catalog: { hostId: mocks.state.runtimeKey } } }) }));
+vi.mock('@/lib/extensions/workbench-workspace', () => ({ useWorkbenchWorkspace: () => mocks.workspace }));
+vi.mock('@/lib/extensions/workbench-shell-staging', () => ({ WorkbenchShellStagingHost: () => null }));
+vi.mock('@/lib/extensions/workbench-shell-view', () => ({ resolveWorkbenchShellView: () => ({ view: 'ready', resolved: { profileId: 'default', shellContributionId: 'agent-shell' } }) }));
 vi.mock('motion/react', () => ({
   AnimatePresence: ({ children }: React.PropsWithChildren) => children,
   useIsPresent: () => true,
@@ -90,6 +106,12 @@ beforeEach(() => {
   document.body.append(container);
   root = createRoot(container);
   mocks.mounts = 0;
+  mocks.runtimeEpoch = 1;
+  mocks.projectId = null;
+  mocks.projects = [];
+  mocks.directory = '/repo';
+  mocks.home = '/repo';
+  mocks.workspace = { status: 'ready', workspaceId: 'repo', directory: '/repo', key: 'repo', retry: vi.fn() };
   mocks.state = { runtimeKey: 'host-a', currentSessionId: null, openingSessionId: null,
     summaries: [], records: {}, connectionPhase: 'connected', catalogLoaded: true } as unknown as PiSessionStoreState;
   usePiDraftStore.setState({ drafts: {} });
@@ -159,4 +181,67 @@ it('retains an inert old scene during navigation and clears it on a runtime chan
   await render();
   expect(container.textContent).not.toContain('Second history');
   expect(container.querySelector('[role="status"]')).not.toBeNull();
+});
+
+it('keeps the chat mounted when leaving a project for a new draft and entering another project', async () => {
+  const renderHost = () => act(async () => { root.render(<WorkbenchShellHost fallback={<div role="status">Loading workspace</div>} />); });
+  mocks.home = '/home';
+  mocks.projects = [{ id: 'project-a', path: '/project-a' }, { id: 'project-b', path: '/project-b' }];
+  mocks.projectId = 'project-a';
+  mocks.directory = '/project-a';
+  mocks.workspace = { ...mocks.workspace, status: 'ready', workspaceId: 'project-a', directory: '/project-a' };
+  mocks.state.currentSessionId = 'first';
+  mocks.state.records.first = history('first', 'First project history');
+  await renderHost();
+  const input = container.querySelector('textarea');
+  expect(input).not.toBeNull();
+
+  mocks.projectId = null;
+  mocks.directory = '/home';
+  mocks.state.currentSessionId = null;
+  mocks.workspace = { status: 'loading', directory: '/home', key: 'home', retry: vi.fn() };
+  usePiDraftStore.getState().setPendingDraft('/home', { text: 'General draft' }, 'host-a');
+  await renderHost();
+  expect(container.querySelector('textarea')).toBe(input);
+  expect(mocks.composer.draft).toBe('General draft');
+  expect(mocks.composer.placement).toBe('center');
+  mocks.workspace = { ...mocks.workspace, status: 'ready', workspaceId: 'home' };
+  await renderHost();
+
+  mocks.projectId = 'project-b';
+  mocks.directory = '/project-b';
+  mocks.state.currentSessionId = 'second';
+  mocks.state.openingSessionId = 'second';
+  mocks.workspace = { status: 'loading', directory: '/project-b', key: 'project-b', retry: vi.fn() };
+  await renderHost();
+  expect(container.querySelector('textarea')).toBe(input);
+  mocks.workspace = { ...mocks.workspace, status: 'ready', workspaceId: 'project-b' };
+  mocks.state.records.second = history('second', 'Second project history');
+  await renderHost();
+  expect(container.querySelector('textarea')).toBe(input);
+  expect(container.textContent).toContain('Second project history');
+  expect(mocks.mounts).toBe(1);
+
+  mocks.projectId = 'project-a';
+  mocks.directory = '/project-a';
+  mocks.state.currentSessionId = 'first';
+  mocks.workspace = { status: 'loading', directory: '/project-a', key: 'project-a', retry: vi.fn() };
+  await renderHost();
+  expect(container.querySelector('textarea')).toBe(input);
+  expect(container.textContent).toContain('First project history');
+  expect(mocks.mounts).toBe(1);
+
+  mocks.workspace = { ...mocks.workspace, status: 'error', errorMessage: 'Project resolution failed' };
+  await renderHost();
+  expect(container.querySelector('textarea')).toBeNull();
+  expect(container.textContent).toContain('Project resolution failed');
+  mocks.workspace = { ...mocks.workspace, status: 'ready', workspaceId: 'project-a' };
+  await renderHost();
+  mocks.workspace = { status: 'loading', directory: '/project-b', key: 'project-b', retry: vi.fn() };
+
+  mocks.runtimeEpoch += 1;
+  mocks.state.runtimeKey = 'host-b';
+  await renderHost();
+  expect(container.querySelector('textarea')).toBeNull();
+  expect(container.textContent).toContain('Loading workspace');
 });
