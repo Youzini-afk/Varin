@@ -7,6 +7,7 @@ import {
 } from '@varin/protocol';
 import { parseModelIdentifier } from '@/lib/modelIdentifier';
 import { getPiSettings } from '@/lib/pi-runtime/settings';
+import { getRuntimeKey } from '@varin/application-client';
 import type { PiComposerModelSelection } from './piComposerSessionConfig';
 
 export interface PiComposerDefaults {
@@ -49,26 +50,30 @@ export const resolvePiComposerDefaults = (
 export const usePiComposerDefaults = (
   cwd: string,
   projectDefaultModel?: string,
-): PiComposerDefaults => {
-  const [snapshot, setSnapshot] = React.useState<PiSettingsSnapshot | null>(null);
+  runtimeKey = getRuntimeKey(),
+): PiComposerDefaults & { loading: boolean } => {
+  const [settings, setSettings] = React.useState<{ cwd: string; runtimeKey: string; snapshot: PiSettingsSnapshot | null } | null>(null);
 
   React.useEffect(() => {
     let cancelled = false;
-    setSnapshot(null);
     if (!cwd.trim()) return () => { cancelled = true; };
     void getPiSettings({ cwd })
       .then((next) => {
-        if (!cancelled) setSnapshot(next);
+        if (!cancelled) setSettings({ cwd, runtimeKey, snapshot: next });
       })
       .catch(() => {
         // Session creation still resolves the runtime defaults. The composer
         // keeps working when settings inspection is temporarily unavailable.
+        if (!cancelled) setSettings({ cwd, runtimeKey, snapshot: null });
       });
     return () => { cancelled = true; };
-  }, [cwd]);
+  }, [cwd, runtimeKey]);
 
   return React.useMemo(
-    () => resolvePiComposerDefaults(snapshot, projectDefaultModel),
-    [projectDefaultModel, snapshot],
+    () => ({
+      ...resolvePiComposerDefaults(settings?.cwd === cwd && settings.runtimeKey === runtimeKey ? settings.snapshot : null, projectDefaultModel),
+      loading: Boolean(cwd.trim()) && (settings?.cwd !== cwd || settings.runtimeKey !== runtimeKey),
+    }),
+    [cwd, projectDefaultModel, runtimeKey, settings],
   );
 };

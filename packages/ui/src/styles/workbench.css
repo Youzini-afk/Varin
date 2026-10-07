@@ -281,21 +281,32 @@
 }
 
 .pi-chat-layout { transition: padding-right var(--wb-panel-duration) var(--wb-ease); }
+.pi-conversation-layout { display: grid; grid-template-rows: minmax(0, 1fr) auto auto; }
+.pi-conversation-content { grid-row: 1; overflow: hidden; }
+.pi-conversation-scene { display: flex; flex-direction: column; height: 100%; min-height: 0; }
+.pi-conversation-composer { grid-row: 3; }
+.pi-conversation-starters { grid-row: 2; padding: 0 16px 18px; }
+.pi-conversation-starters .oc-draft-starters { margin: 0 auto; }
+.pi-conversation-loading {
+  position: absolute; top: 12px; left: 50%; z-index: 1; transform: translateX(-50%);
+  max-width: calc(100% - 32px); padding: 5px 10px; border-radius: 8px;
+  background: var(--background); pointer-events: none;
+}
 .pi-chat-layout[data-overview-view="compact"] { padding-right: calc(var(--wb-overview-compact-width) + 1rem); }
 @container (min-width: 900px) {
   .pi-chat-layout[data-overview-view="full"] { padding-right: calc(var(--wb-overview-full-width) + 1rem); }
 }
 @media (min-width: 768px) {
-  [data-workbench-chrome="agent"] [data-pi-pending-draft] {
-    display: grid;
+  [data-workbench-chrome="agent"] .pi-conversation-layout[data-centered] {
     grid-template-rows: minmax(1rem, 1fr) auto auto auto minmax(1rem, 1.15fr);
     align-content: center;
     overflow-y: auto;
   }
-  [data-workbench-chrome="agent"] .oc-draft-center { display: contents; }
-  [data-workbench-chrome="agent"] .pi-draft-heading { grid-row: 2; padding-inline: 24px; text-align: center; }
-  [data-workbench-chrome="agent"] [data-pi-pending-draft] [data-pi-composer-shell] { grid-row: 3; margin-top: 26px; padding-bottom: 0; }
-  [data-workbench-chrome="agent"] .oc-draft-starters { grid-row: 4; width: min(100% - 48px, var(--chat-content-width, 960px) - 48px); max-width: none; margin: 14px auto 0; }
+  [data-workbench-chrome="agent"] .pi-conversation-layout[data-centered] .pi-conversation-content { grid-row: 2; overflow: visible; }
+  [data-workbench-chrome="agent"] .pi-conversation-layout[data-centered] .pi-conversation-composer { grid-row: 3; margin-top: 26px; }
+  [data-workbench-chrome="agent"] .pi-conversation-layout[data-centered] [data-pi-composer-shell] { padding-bottom: 0; }
+  [data-workbench-chrome="agent"] .pi-conversation-starters { grid-row: 4; padding: 0; margin-top: 14px; }
+  [data-workbench-chrome="agent"] .oc-draft-starters { width: min(100% - 48px, var(--chat-content-width, 960px) - 48px); max-width: none; }
 }
 
 .workbench-resource-canvas { transition-property: width, margin-left; }

@@ -62,6 +62,16 @@ composer's actual width in either shell; a narrow model row moves above the lead
 than moving Send between columns. `PiChatView` supplies a view-scoped motion identity for the first-send
 transition. Text, selection, queued revisions and attachments retain the owners listed above.
 
+The pending draft, history hydration and live conversation share one mounted composer shell.
+Its placement moves between the centered Agent start screen and the bottom of the conversation;
+the inner editor resets only when its runtime/session draft owner changes. Loading does not replace
+the input with a skeleton: the selected draft remains editable, known configuration stays visible,
+and unresolved configuration shows a local loading label. Sending into an existing session waits
+for its native worker, while a pending draft can still create a session using runtime defaults.
+`PiConversationSurface` retains only the previous painted scene while the target history is pending,
+keeps that scene inert, and crossfades when the target is available. Runtime changes discard that
+projection. It does not introduce another history, draft or scroll authority.
+
 Native queue changes animate by message identity. An exiting queue row is inert and releases its edit
 form immediately, so a draft retained after dequeue is not displayed or editable twice.
 

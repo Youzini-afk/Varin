@@ -24,6 +24,7 @@ interface PiComposerAgentControlProps {
   active: boolean;
   cwd: string;
   disabled?: boolean;
+  loading?: boolean;
   onChange(agent: PiComposerAgentSelection | undefined): void;
   selectedAgent?: PiComposerAgentSelection;
   sessionId?: string | null;
@@ -33,6 +34,7 @@ export const PiComposerAgentControl: React.FC<PiComposerAgentControlProps> = ({
   active,
   cwd,
   disabled = false,
+  loading: configurationLoading = false,
   onChange,
   selectedAgent,
   sessionId,
@@ -78,7 +80,7 @@ export const PiComposerAgentControl: React.FC<PiComposerAgentControlProps> = ({
       className={cn(
         'flex h-8 min-w-0 max-w-[180px] items-center gap-1.5 px-1 typography-meta font-medium transition-opacity hover:opacity-70',
         selectedAgent ? 'text-foreground' : 'text-muted-foreground',
-        disabled && 'cursor-not-allowed opacity-40',
+        disabled && !configurationLoading && 'cursor-not-allowed opacity-40',
       )}
       aria-label={t('chat.autocomplete.tabs.agents')}
     >
@@ -88,6 +90,7 @@ export const PiComposerAgentControl: React.FC<PiComposerAgentControlProps> = ({
         <VarinLogo width={16} height={16} decorative className="size-4 shrink-0" />
       )}
       <span className="truncate">{selectedAgent?.name ?? 'Varin'}</span>
+      {configurationLoading ? <Icon name="loader-4" className="size-3 shrink-0 animate-spin" /> : null}
     </button>
   );
 

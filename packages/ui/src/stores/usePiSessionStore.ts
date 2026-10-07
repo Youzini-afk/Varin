@@ -207,6 +207,7 @@ export interface PiSessionStoreState {
     parentSession?: string,
     workspace?: SessionWorkspaceBinding,
     workFocus?: WorkFocusId,
+    onCreated?: (snapshot: SessionSnapshot) => void,
   ): Promise<SessionSnapshot>;
   deleteSession(sessionId: string): Promise<boolean>;
   executeCommand(sessionId: string, command: string): Promise<JsonValue>;
@@ -1772,7 +1773,7 @@ export const createPiSessionStore = (
         }));
       },
 
-      createSession: async (cwd, name, parentSession, workspace, workFocus) => {
+      createSession: async (cwd, name, parentSession, workspace, workFocus, onCreated) => {
         const selectionIntent = beginSelectionIntent();
         try {
           const resolvedWorkspace = await canonicalWorkspaceBinding(cwd, workspace);
@@ -1797,6 +1798,7 @@ export const createPiSessionStore = (
               view: preparePiTimelineEnd(current.view),
             })),
           }));
+          onCreated?.(result);
           await get().refreshEntries(result.sessionId);
           await refreshCatalogAfterMutation();
           return result;
