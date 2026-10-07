@@ -6,7 +6,7 @@ import { runtimeFetch } from '@varin/application-client';
 import { HarnessThreadsPanel } from './HarnessThreadsPanel';
 import { HarnessThreadStateContext, type HarnessThreadStateValue } from './HarnessThreadStateContext';
 import type { PiSessionViewState } from '@/stores/usePiSessionStore';
-import type { SessionEntriesResult, ThreadMessageRecord } from '@varin/protocol';
+import type { SessionEntriesResult, ThreadMessageRecord, ComputerAutomationState } from '@varin/protocol';
 import type { HarnessThreadSnapshot } from './harnessThreadPresentation';
 import type { WebSource } from '@/stores/useWebSourcesStore';
 import { useWorkOverviewStore } from '@/stores/useWorkOverviewStore';
@@ -23,6 +23,7 @@ const mocks = vi.hoisted(() => ({
   openContextSurface: vi.fn(),
   toggleContextPanel: vi.fn(),
   translate: (key: string) => key,
+  computer: { state: null as ComputerAutomationState | null, activities: [], busy: false, error: null, stop: vi.fn() },
 }));
 vi.mock('@varin/application-client', async (importOriginal) => ({
   ...await importOriginal<typeof import('@varin/application-client')>(),
@@ -54,6 +55,7 @@ vi.mock('@/components/ui/tooltip', () => ({
   TooltipContent: ({ children }: { children: React.ReactNode }) => <>{children}</>,
 }));
 vi.mock('@/lib/varinEvents', () => ({ subscribeVarinEvents: () => () => {} }));
+vi.mock('@/stores/useComputerAutomation', () => ({ useComputerAutomation: () => mocks.computer }));
 vi.mock('@/stores/useUIStore', () => ({
   normalizeContextPanelDirectoryKey: (value: string) => value,
   useUIStore: (select: (state: {
@@ -117,6 +119,7 @@ let failPreview: (error: Error) => void;
 
 beforeEach(() => {
   mocks.runtimeKey = 'runtime-1';
+  mocks.computer.state = null; mocks.computer.stop.mockReset();
   mocks.records = {};
   mocks.webSources = [];
   useWorkOverviewStore.setState({ bySession: {}, parentBySession: {} });
@@ -415,6 +418,19 @@ describe('work overview presentation', () => {
     await act(async () => container.querySelector<HTMLButtonElement>('button[aria-label="harness.overview.expand"]')!.click());
     expect(container.querySelector('[data-harness-overview-peek]')).toBeNull();
     expect(container.querySelector('[data-harness-overview-floating]')).not.toBeNull();
+  });
+
+  it('lets the user stop Computer Use from the compact overview without opening a large panel', async () => {
+    mocks.computer.state = { rootSessionId: 'parent-1', runId: 'run', active: true, status: 'enabled', requests: [], leases: [{ id: 'lease', desktopId: 'desktop', access: 'control', grantedAt: 'now', actor: {
+      sessionId: 'parent-1', runId: 'run', rootSessionId: 'parent-1', rootRunId: 'run', scopeId: 'workspace-1', threadId: 'root', label: 'Main', readOnly: false,
+    } }] };
+    await act(async () => root.render(<HarnessThreadStateContext.Provider value={state}><HarnessThreadsPanel workspaceId="workspace-1" parentSessionId="parent-1" fallbackCwd="/parent" /></HarnessThreadStateContext.Provider>));
+    await act(async () => container.querySelector<HTMLButtonElement>('button[aria-label="harness.overview.peek"]')!.click());
+    const stop = container.querySelector<HTMLButtonElement>('button[aria-label="computer.automation.stop"]')!;
+    expect(stop.closest('button')?.parentElement?.closest('button')).toBeNull();
+    await act(async () => stop.click());
+    expect(mocks.computer.stop).toHaveBeenCalledTimes(1);
+    expect(container.querySelector('[data-harness-overview-floating]')).toBeNull();
   });
 
   it('still appears for real workspace changes when no plan, memory, source or subtask exists', async () => {

@@ -55,6 +55,28 @@ const echoSpec = () => ({
 });
 
 describe("computer driver host (BC4)", () => {
+  it('rejects revoked input at transport dispatch even when it waited behind another native request', async () => {
+    const driver = createDriverSession(echoSpec());
+    try {
+      const first = driver.request({ tool: 'ping' });
+      let revoked = false;
+      const queued = driver.request({ tool: 'click' }, { beforeDispatch: () => { if (revoked) throw new Error('Assignment revoked'); } });
+      const rejected = expect(queued).rejects.toThrow('Assignment revoked');
+      revoked = true; await first; await rejected;
+      expect((await driver.request({ tool: 'ping' })).ok).toBe(true);
+    } finally { await driver.dispose(); }
+  });
+  it('delivers native progress without resolving early or forwarding input text', async () => {
+    const driver = createDriverSession({ command: process.execPath, args: ['-e', `
+      const rl=require('readline').createInterface({input:process.stdin});
+      rl.on('line',line=>{const op=JSON.parse(line);console.log(JSON.stringify({id:op.id,type:'gesture',phase:'target',point:{x:42,y:73},text:'private input'}));
+        console.log(JSON.stringify({id:op.id,type:'gesture',phase:'dispatched'}));console.log(JSON.stringify({id:op.id,ok:true}));});`] });
+    const progress: unknown[] = [];
+    try {
+      expect((await driver.request({ tool: 'click', visual_feedback: true }, { onGesture: event => progress.push(event) })).ok).toBe(true);
+      expect(progress).toEqual([{ phase: 'target', point: { x: 42, y: 73 } }, { phase: 'dispatched' }]);
+    } finally { await driver.dispose(); }
+  });
   it.skipIf(process.platform !== 'win32')('checks Windows relocation, geometry and capture modes without native desktop input', () => {
     const script = fileURLToPath(new URL('../../../../computer-driver/windows/test-targeting.ps1', import.meta.url));
     expect(execFileSync('powershell.exe', ['-NoProfile', '-File', script], { encoding: 'utf8' })).toContain('Windows targeting checks passed');

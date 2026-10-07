@@ -1,6 +1,6 @@
 import { getRuntimeUrlResolver } from '@varin/application-client';
 import { subscribeRuntimeEndpointChanged } from '@varin/application-client';
-import type { Thread, ThreadParent, ThreadRun, ComputerActivityEntry } from '@varin/protocol';
+import type { Thread, ThreadParent, ThreadRun, ComputerActivityEntry, ComputerAutomationState } from '@varin/protocol';
 import { bindClientSurfaceSession, clientSurfaceQuery, handleClientSettingsRequest } from '@/lib/client-settings-bridge';
 import { usePiSessionStore } from '@/stores/usePiSessionStore';
 
@@ -68,7 +68,8 @@ export type VarinEvent = StreamReadyEvent | ScheduledTaskRanEvent | SessionCreat
   | { type: 'agent-personalization-changed' }
   | { type: 'ssh-instance-status'; status: unknown }
   | { type: 'bot-changed'; botId: string }
-  | ({ type: 'computer-activity' } & ComputerActivityEntry);
+  | ({ type: 'computer-activity' } & ComputerActivityEntry)
+  | { type: 'computer-automation'; state: ComputerAutomationState };
 type Listener = (event: VarinEvent) => void;
 
 let eventSource: EventSource | null = null;
@@ -232,6 +233,14 @@ const dispatchFromEnvelope = (envelope: { type: string; properties: unknown }) =
     return;
   }
 
+  if (envelope.type === 'varin:computer-automation') {
+    const state = getEventProperties(envelope.properties);
+    if (typeof state?.rootSessionId === 'string' && typeof state.runId === 'string' && typeof state.active === 'boolean' && ['enabled', 'stopping', 'stopped', 'stop-unconfirmed'].includes(String(state.status))
+      && Array.isArray(state.leases) && Array.isArray(state.requests)) {
+      for (const listener of listeners) listener({ type: 'computer-automation', state: state as unknown as ComputerAutomationState });
+    }
+    return;
+  }
   if (envelope.type === 'varin:computer-activity') {
     const properties = getEventProperties(envelope.properties);
     const activity = getEventProperties(properties?.activity);

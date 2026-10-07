@@ -5,7 +5,7 @@
 #   in : {"id":"<request>","tool":"<op>", ...params}
 #   out: {"id":"<request>","ok":true|false, ...}
 #
-# One line in, one line out; the UIA assemblies and Win32 bindings are loaded
+# One request in, a final reply plus optional gesture progress out; the UIA assemblies and Win32 bindings are loaded
 # once, so actions never pay interpreter startup. Managed by the Varin Host
 # computer service — do not run interactively.
 #

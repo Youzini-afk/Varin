@@ -4,6 +4,11 @@ The host-side harness provides task and resource services that the pi-host
 agent tools call via the `HostServicesBridge`. All services are registered
 on the `HarnessRouter` and dispatched from the broker event stream.
 
+[Computer Use admission](../computer/DOCUMENTATION.md) derives desktop grants from these real Thread/Run
+identities. Children request work-segment access from the main agent; exclusive control is enforced on
+the physical desktop's Host too. The work overview can revoke the root round and its descendants while
+preserving other tool execution. Assignment waits use decision events and the existing execution slots.
+
 Attached Agent/Bot/research roots order request admission after their lifecycle changes, then release the
 lifecycle queue while the Router executes the service. A slow handler must not serialize later tools or
 the same session's compaction-worker queries. Cancellation still goes directly to the Router, and root

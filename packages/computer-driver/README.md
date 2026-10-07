@@ -18,6 +18,12 @@ out: {"id":"<request>","ok":true|false, "error"?:string, "cancelled"?:bool, "rej
 
 Operations:
 
+For an automatic input request with `visual_feedback:true`, the same stdout stream may first emit
+`{id,type:"gesture",phase:"target"|"dispatched",point?,to?,target?}`. These are native relocation/input
+progress, not final receipts. They omit typed text. The Host correlates progress, rejects obsolete
+execution generations, and feeds the existing viewer stream and Windows click-through feedback layer.
+See [Computer admission and feedback](../web/application-host/lib/computer/DOCUMENTATION.md).
+
 | tool | purpose |
 | --- | --- |
 | `ping` | liveness probe |

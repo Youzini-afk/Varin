@@ -5,7 +5,7 @@ $tokens = $null
 $parseErrors = $null
 $ast = [System.Management.Automation.Language.Parser]::ParseFile((Join-Path $PSScriptRoot "runtime.ps1"), [ref]$tokens, [ref]$parseErrors)
 if ($parseErrors.Count -gt 0) { throw $parseErrors[0].Message }
-foreach ($name in @("Same-RuntimeId", "Find-Element", "Invoke-ComputerOperation", "Find-TextEntryElement", "Find-TextEntryWindowHandle", "Test-TextWindowHandleCandidate", "Invoke-TypeText")) {
+foreach ($name in @("Same-RuntimeId", "Find-Element", "Send-ComputerGesture", "Invoke-ComputerOperation", "Find-TextEntryElement", "Find-TextEntryWindowHandle", "Test-TextWindowHandleCandidate", "Invoke-TypeText")) {
     $definition = $ast.Find({ param($node) $node -is [System.Management.Automation.Language.FunctionDefinitionAst] -and $node.Name -eq $name }, $true)
     if ($null -eq $definition) { throw "Missing production function $name" }
     Invoke-Expression $definition.Extent.Text
@@ -100,4 +100,13 @@ $script:Root = [pscustomobject]@{ Name = "Bound window"; Controls = @($boundInpu
 [Windows.Automation.AutomationElement]::FocusedElement = $otherInput
 $response = Invoke-ComputerOperation ([pscustomobject]@{ tool = "type_text"; app = "42"; window = 73; text = "hello" })
 if (-not $response.ok -or $script:TypedHandle -ne [IntPtr]74) { throw "Text input escaped the bound window to the same app's focused/main window" }
+$capture = New-Object System.IO.StringWriter
+$output = [Console]::Out
+try {
+    [Console]::SetOut($capture)
+    $response = Invoke-ComputerOperation ([pscustomobject]@{ id = "visual"; visual_feedback = $true; tool = "type_text"; app = "42"; window = 73; text = "private input" })
+} finally { [Console]::SetOut($output) }
+$events = @($capture.ToString().Trim() -split "`n" | ForEach-Object { $_ | ConvertFrom-Json })
+if (-not $response.ok -or $events.Count -ne 2 -or $events[0].phase -ne "target" -or $events[0].target.x -ne $script:Bounds.x -or $events[1].phase -ne "dispatched") { throw "Native gesture feedback did not carry the relocated target and dispatch" }
+if ($capture.ToString() -like "*private input*") { throw "Gesture feedback leaked typed text" }
 Write-Output "Windows targeting checks passed (fake controls/input; no desktop access)."

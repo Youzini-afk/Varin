@@ -1,4 +1,4 @@
-import type { HarnessServiceMap } from "@varin/protocol";
+import type { HarnessServiceMap, ComputerAccess } from "@varin/protocol";
 import type { HarnessService, HarnessServiceContext } from "./router.js";
 import type { HarnessServiceHost } from "./service-host.js";
 import { HarnessServiceError } from "./service-error.js";
@@ -105,19 +105,58 @@ export function registerComputerServices(
   host: HarnessServiceHost,
 ): void {
   if (!host.computerService) return;
-  router.register("computer.list", createComputerListService(host));
-  router.register("computer.prepare", { handle: async (params) => ({ desktop: await requireService(host).prepareDesktop(params, true) }) });
-  router.register("computer.desktopLifecycle", { handle: async (params) => ({ desktop: await requireService(host).desktopLifecycle(params.desktopId, params.action, true) }) });
-  router.register("computer.artifact", { handle: async (params, ctx) => ({ artifact: await requireService(host).registerArtifact(ctx.sessionId, await desktopIdFor(host, ctx, params), params.relativePath) }) });
-  router.register("computer.control", { handle: async (params, ctx) => ({ control: await requireService(host).control(await desktopIdFor(host, ctx, params)) }) });
-  router.register("computer.apps", createComputerAppsService(host));
-  router.register("computer.observe", createComputerObserveService(host));
-  router.register("computer.act", createComputerActService(host));
-  router.register("computer.cancel", createComputerCancelService(host));
-  router.register("computer.release", createComputerReleaseService(host));
+  const computers = host.computerService;
+  router.register('computer.access', { handle: async (params, ctx) => {
+    const coordinator = computers.automation;
+    let request;
+    if (params.op === 'request') {
+      const access: ComputerAccess = params.access ?? 'control';
+      if (!['observe', 'control'].includes(access)) throw new HarnessServiceError('invalid-params', 'Unknown desktop access mode');
+      const desktopId = await computers.resolveDesktop(await desktopIdFor(host, ctx, params));
+      request = await coordinator.request(ctx.sessionId, desktopId, access, params.reason ?? '');
+      if (params.wait && request.status === 'pending') {
+        const binding = await host.threadRegistry?.getSessionBinding(ctx.sessionId);
+        if (binding && host.threadRegistry) await host.threadRegistry.yieldExecutionSlot(binding.owningScopeId, binding.threadId, binding.runId,
+          { kind: 'thread', text: `Waiting for the main thread to assign desktop ${desktopId}` });
+        try { request = await coordinator.wait(ctx.sessionId, request.id, ctx.signal); }
+        finally { if (binding && !ctx.signal.aborted) await host.threadRegistry?.awaitExecutionSlot(binding.owningScopeId, binding.threadId, binding.runId, ctx.signal); }
+      }
+    } else if (params.op === 'grant' || params.op === 'deny') {
+      if (!ctx.actor.grantedCapabilities.includes('control.computer')) throw new HarnessServiceError('forbidden', 'Desktop grants require Computer Use control authorization');
+      if (!params.requestId) throw new HarnessServiceError('invalid-params', 'Supply requestId');
+      request = await coordinator.decide(ctx.sessionId, params.requestId, params.op === 'grant', params.reason);
+    } else if (params.op === 'release') await coordinator.release(ctx.sessionId, params.desktopId);
+    else if (params.op !== 'status') throw new HarnessServiceError('invalid-params', 'Unknown access operation');
+    return { state: await coordinator.snapshot(ctx.sessionId), ...(request ? { request } : {}) };
+  } });
+  const register: typeof router.register = (method, service) => router.register(method, {
+    handle: (params, ctx) => computers.automation.authorize(ctx.sessionId, 'observe', undefined, async () => {
+      const metadata = ['computer.list', 'computer.evidence'].includes(method);
+      const bridge = params as { op?: string; act?: { kind?: string } };
+      const bridgeRead = method === 'computer.browser' && (['status', 'tabs', 'snapshot'].includes(bridge.op ?? '') || bridge.op === 'act' && bridge.act?.kind === 'screenshot')
+        || method === 'computer.office' && (['status', 'docs'].includes(bridge.op ?? '') || bridge.op === 'act' && bridge.act?.kind === 'read');
+      const access: ComputerAccess = bridgeRead || ['computer.apps', 'computer.observe', 'computer.list', 'computer.control', 'computer.evidence'].includes(method) ? 'observe' : 'control';
+      const requested = params as { desktopId?: string };
+      const desktopId = metadata || method === 'computer.prepare' ? undefined
+        : await computers.resolveDesktop(await desktopIdFor(host, ctx, requested));
+      return computers.automation.authorize(ctx.sessionId, access, desktopId, () => service.handle(
+        desktopId ? { ...params, desktopId } : params, ctx,
+      ));
+    }),
+  });
+  register("computer.list", createComputerListService(host));
+  register("computer.prepare", { handle: async (params) => ({ desktop: await requireService(host).prepareDesktop(params, true) }) });
+  register("computer.desktopLifecycle", { handle: async (params) => ({ desktop: await requireService(host).desktopLifecycle(params.desktopId, params.action, true) }) });
+  register("computer.artifact", { handle: async (params, ctx) => ({ artifact: await requireService(host).registerArtifact(ctx.sessionId, await desktopIdFor(host, ctx, params), params.relativePath) }) });
+  register("computer.control", { handle: async (params, ctx) => ({ control: await requireService(host).control(await desktopIdFor(host, ctx, params)) }) });
+  register("computer.apps", createComputerAppsService(host));
+  register("computer.observe", createComputerObserveService(host));
+  register("computer.act", createComputerActService(host));
+  register("computer.cancel", createComputerCancelService(host));
+  register("computer.release", createComputerReleaseService(host));
   // EE: cross-environment open + one-shot file write resolve the bound
   // desktop the same way as observe/act.
-  router.register("computer.open", {
+  register("computer.open", {
     handle: async (params, ctx) => {
       const desktopId = await desktopIdFor(host, ctx, params);
       return requireService(host).open({
@@ -132,7 +171,7 @@ export function registerComputerServices(
       });
     },
   });
-  router.register("computer.fileWrite", {
+  register("computer.fileWrite", {
     handle: async (params, ctx) => {
       const desktopId = await desktopIdFor(host, ctx, params);
       return requireService(host).fileWrite({
@@ -146,7 +185,7 @@ export function registerComputerServices(
   });
   // EE §6.2: recipe component install — the environment owning the bound
   // desktop receives the request (remote targets forward to their own Host).
-  router.register("computer.installSoftware", {
+  register("computer.installSoftware", {
     handle: async (params, ctx) => {
       const desktopId = await desktopIdFor(host, ctx, params);
       return requireService(host).installSoftware({
@@ -159,7 +198,7 @@ export function registerComputerServices(
     },
   });
   // EE §7.2: browser bridge — same lane/ownership gate as observe/act.
-  router.register("computer.browser", {
+  register("computer.browser", {
     handle: async (params, ctx) => {
       const desktopId = await desktopIdFor(host, ctx, params);
       return requireService(host).browser({
@@ -178,7 +217,7 @@ export function registerComputerServices(
     },
   });
   // EE §7.2: LibreOffice bridge — same live instance, same ownership gate.
-  router.register("computer.office", {
+  register("computer.office", {
     handle: async (params, ctx) => {
       const desktopId = await desktopIdFor(host, ctx, params);
       return requireService(host).office({
@@ -194,7 +233,7 @@ export function registerComputerServices(
     },
   });
   // EE6 (§10): evidence journal — read-only review of executed steps.
-  router.register("computer.evidence", {
+  register("computer.evidence", {
     handle: async (params, ctx) => {
       const desktopId = await desktopIdFor(host, ctx, params);
       return requireService(host).evidence({

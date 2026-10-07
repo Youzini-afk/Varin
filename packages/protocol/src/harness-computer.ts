@@ -100,6 +100,71 @@ export interface ComputerActivity {
 
 export interface ComputerActivityEntry { desktopId: string; activity: ComputerActivity }
 
+/** Host-resolved execution identity; worker parameters never supply this authority. */
+export interface ComputerActor {
+  sessionId: string;
+  runId: string;
+  threadId: string;
+  scopeId: string;
+  rootSessionId: string;
+  rootRunId: string;
+  label: string;
+  readOnly: boolean;
+}
+
+export type ComputerAccess = "observe" | "control";
+export interface ComputerLease {
+  id: string;
+  desktopId: string;
+  desktopLabel?: string;
+  actor: ComputerActor;
+  access: ComputerAccess;
+  grantedAt: string;
+}
+export interface ComputerAccessRequest {
+  id: string;
+  desktopId: string;
+  desktopLabel?: string;
+  actor: ComputerActor;
+  access: ComputerAccess;
+  reason: string;
+  status: "pending" | "granted" | "denied" | "released";
+  createdAt: string;
+  detail?: string;
+}
+export interface ComputerAutomationState {
+  rootSessionId: string;
+  runId: string;
+  active: boolean;
+  status: "enabled" | "stopping" | "stopped" | "stop-unconfirmed";
+  leases: ComputerLease[];
+  requests: ComputerAccessRequest[];
+}
+export interface ComputerAccessParams {
+  desktopId?: string;
+  requestId?: string;
+  access?: ComputerAccess;
+  reason?: string;
+  /** Wait for the request's decision using events; omit to continue other work. */
+  wait?: boolean;
+}
+/** Transient visual feedback from an actual driver operation. Never includes typed text. */
+export interface ComputerGesture {
+  id: string;
+  desktopId: string;
+  sessionId?: string;
+  actorLabel?: string;
+  kind: ComputerAction["kind"] | "move";
+  phase: "target" | "dispatched" | "completed" | "cancelled" | "failed";
+  at: string;
+  /** Absolute physical desktop coordinates, after native element relocation. */
+  point?: { x: number; y: number };
+  to?: { x: number; y: number };
+  target?: ComputerFrame;
+  key?: string;
+  direction?: "up" | "down" | "left" | "right";
+}
+
 /** A versioned reference to a file in a managed desktop user's home. */
 export interface ComputerArtifact {
   id: string;
@@ -580,6 +645,8 @@ export type ComputerControlOwner = "agent" | "human";
  * transfers control again.
  */
 export interface ComputerControlState {
+  /** Model-facing execution identity, absent on human viewer receipts. */
+  executionId?: string;
   desktopId: string;
   owner: ComputerControlOwner;
   /** Viewer id holding human control; absent while the agent owns it. */

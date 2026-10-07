@@ -45,6 +45,7 @@ export interface StartWebUiServerOptions {
   hostEntry?: string | undefined;
   onDesktopNotification?: ((payload: DesktopNotificationPayload) => void) | undefined;
   onConnectionStatus?: ((status: import('@varin/application-client').DesktopSshInstanceStatus) => void) | undefined;
+  onComputerGesture?: ((gesture: import('@varin/protocol').ComputerGesture) => void) | undefined;
   onTunnelReady?: ((publicUrl: string, connectUrl: string | null) => void) | undefined;
   openFilesystemPath?: ((targetPath: string) => void | Promise<void>) | undefined;
   piRuntimeBroker?: PiRuntimeBroker | undefined;

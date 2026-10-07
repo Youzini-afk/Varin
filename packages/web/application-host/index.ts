@@ -109,6 +109,7 @@ import { createBotService } from './lib/bots/bot-service.js';
 import { createBotLifecycleRuntime } from './lib/bots/bot-lifecycle-runtime.js';
 import { registerBotRoutes } from './lib/bots/bot-routes.js';
 import { createComputerService } from './lib/computer/computer-service.js';
+import { resolveComputerActor } from './lib/computer/computer-actor.js';
 import { HostSshManager } from './lib/connections/ssh-manager.js';
 import { registerConnectionRoutes } from './lib/connections/connection-routes.js';
 import { attachConnectionProxy } from './lib/connections/host-proxy.js';
@@ -1704,6 +1705,7 @@ async function main(options: StartWebUiServerOptions = {}): Promise<WebUiServerC
     closeSessionShell: async (_sessionId: string): Promise<void> => {},
   };
   const sessionSnapshots = new Map<string, Record<string, unknown>>();
+  const computerServiceRef: { current?: ReturnType<typeof createComputerService> } = {};
   const memoryOrganizerRef: { current?: ReturnType<typeof createMemoryOrganizer> } = {};
   const threadWaitRuntimeRef: { current?: ReturnType<typeof createThreadWaitRuntime> } = {};
   let botAdmissionReady = false;
@@ -1743,6 +1745,9 @@ async function main(options: StartWebUiServerOptions = {}): Promise<WebUiServerC
         properties: { workspaceId, parent, threadId, report },
       });
       if (isBotScopeId(workspaceId)) memoryOrganizerRef.current?.noteScope(workspaceId);
+    },
+    onThreadReturned: (_scopeId, _parent, _threadId, run) => {
+      void computerServiceRef.current?.finishExecution(run.id).catch(error => console.error('[Computer] Run cleanup failed:', errorMessage(error)));
     },
 
     onThreadDequeued: createOnThreadDequeued({
@@ -1863,7 +1868,21 @@ async function main(options: StartWebUiServerOptions = {}): Promise<WebUiServerC
     updateSettings: (mutator) => updateSettingsOnDisk((current) => mutator(current as Record<string, unknown>) as typeof current),
   });
   const computerService = createComputerService({
+    resolveActor: (sessionId) => resolveComputerActor(threadRegistry, sessionId),
+    bindDesktop: (actor, desktopId) => threadRegistry.setThreadEnvironment(actor.scopeId, actor.threadId, { desktopId }).then(() => {}),
+    revokeSession: (actor) => piRuntimeBroker.requestForSession(actor.sessionId, 'session.computer.cancel', { sessionId: actor.sessionId, runId: actor.runId }).then(() => {}),
+    notifyActor: async (actor, text, wake, id) => {
+      await piRuntimeBroker.requestForSession(actor.sessionId, wake ? 'agent.threadRequest' : 'agent.notify', { sessionId: actor.sessionId, messageId: `computer:${id}`, text });
+    },
+    onAutomationChange: (state) => {
+      // A previous Run can finish releasing input after the next one has started. Project the
+      // registry's current root execution, never publish that old cleanup as the new round's state.
+      void computerServiceRef.current?.automation.snapshot(state.rootSessionId).then(current => {
+        broadcastGlobalUiEvent?.({ type: 'varin:computer-automation', properties: current });
+      }).catch(error => console.error('[Computer] State projection failed:', errorMessage(error)));
+    },
     onActivityChange: (entry) => broadcastGlobalUiEvent?.({ type: 'varin:computer-activity', properties: entry }),
+    onGesture: (gesture, localConsole) => { if (localConsole) options.onComputerGesture?.(gesture); },
     client: kernelClient,
     hostId,
     dataDir: VARIN_DATA_DIR,
@@ -1893,6 +1912,7 @@ async function main(options: StartWebUiServerOptions = {}): Promise<WebUiServerC
     // (qemu:///system or qemu+ssh://…); virsh auth stays in the environment.
     vmProviders: async () => configuredVmProviders(await readSettingsFromDisk() as unknown as Record<string, unknown>),
   });
+  computerServiceRef.current = computerService;
   // BC1: unified memory domain. The same service backs the harness memory.*
   // methods, the UI routes, and later the background organizer — one writer
   // semantics for accepted/suggested, dedupe, correction, and forgetting.

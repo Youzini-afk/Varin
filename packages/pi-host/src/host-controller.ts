@@ -1,4 +1,5 @@
 import { stat } from "node:fs/promises";
+import { cancelComputerEvaluations } from './harness/computer-tools.js';
 import { resolve } from "node:path";
 import {
   type FileEntry,
@@ -1184,6 +1185,8 @@ export class HostController {
           readString(params, "messageId"),
           readString(params, "text", { allowEmpty: true }),
         );
+      case 'session.computer.cancel':
+        return { cancelled: cancelComputerEvaluations(readString(params, 'sessionId'), readString(params, 'runId')) };
       case "agent.followUp":
         return {
           accepted: await this.#sessionHost.followUp(

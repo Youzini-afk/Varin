@@ -15,6 +15,11 @@ import { mkdir, readFile, rename, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import type {
   ComputerAction,
+  ComputerActor,
+  ComputerLease,
+  ComputerAccess,
+  ComputerGesture,
+  ComputerAutomationState,
   ComputerActivity,
   ComputerActivityEntry,
   ComputerArtifact,
@@ -63,6 +68,7 @@ import {
 import { createLibvirtProvider } from "./libvirt-provider.js";
 import { createDesktopDriverPool } from "./desktop-drivers.js";
 import { createComputerEvidence } from "./computer-evidence.js";
+import { createComputerAutomation } from './computer-automation.js';
 import { createLinuxDesktop, type LinuxDesktopState, type LinuxSoftwareResult } from "./linux-desktop.js";
 import { inspectDesktopFile, openDesktopFile, writeDesktopFile, type DesktopArtifactVersion } from "./desktop-artifact-files.js";
 import { prepareVmGuestSeed } from "./vm-guest-seed.js";
@@ -360,6 +366,7 @@ interface DesktopControl {
 
 /** A viewer's frame/control subscription callback (BC5.B). */
 export type DesktopViewEvent =
+  | { type: 'gesture'; gesture: ComputerGesture }
   | { type: "control"; control: ComputerControlState }
   | { type: "frame"; frame: ComputerDesktopFrame }
   | { type: "error"; error: string; terminal?: boolean };
@@ -375,6 +382,7 @@ interface DesktopViewers {
 }
 
 interface DesktopLane {
+  inputReleaseUnconfirmed: boolean;
   activity?: ComputerActivity;
   queue: QueuedOp[];
   running: boolean;
@@ -415,6 +423,11 @@ export interface ComputerRemoteHost {
 }
 
 export interface ComputerServiceOptions {
+  resolveActor?: (sessionId: string) => Promise<ComputerActor | null>;
+  notifyActor?: (actor: ComputerActor, text: string, wake: boolean, id: string) => Promise<void>;
+  onAutomationChange?: (state: ComputerAutomationState) => void;
+  revokeSession?: (actor: ComputerActor) => Promise<void>;
+  bindDesktop?: (actor: ComputerActor, desktopId: string) => Promise<void>;
   client: KernelClient;
   hostId: string;
   /** Host data dir — the default-target selection persists under it. */
@@ -452,9 +465,15 @@ export interface ComputerServiceOptions {
   onHandback?: (event: PendingHandback) => Promise<void>;
   /** Ephemeral app-operation metadata for the existing UI event stream; never carries typed content. */
   onActivityChange?: (entry: ComputerActivityEntry) => void;
+  onGesture?: (gesture: ComputerGesture, localConsole: boolean) => void;
 }
 
 export interface ComputerService {
+  automation: ReturnType<typeof createComputerAutomation>;
+  resolveDesktop(desktopId?: string): Promise<string>;
+  finishExecution(runId: string): Promise<void>;
+  claimDesktop(origin: string, assignmentId: string, actor: ComputerActor, desktopId: string, access: ComputerAccess): Promise<string>;
+  dropDesktopClaim(origin: string, assignmentId: string, actor: ComputerActor, desktopId: string, access: ComputerAccess): Promise<void>;
   activities(sessionId?: string): ComputerActivityEntry[];
   prepareDesktop(params: ComputerDesktopPrepareParams, automation?: boolean): Promise<ComputerDesktop>;
   desktopLifecycle(desktopId: string, action: "start" | "stop", automation?: boolean): Promise<ComputerDesktop>;
@@ -566,6 +585,17 @@ export interface ComputerService {
 }
 
 export function createComputerService(options: ComputerServiceOptions): ComputerService {
+  const automation = createComputerAutomation({
+    resolveActor: options.resolveActor ?? (async () => null),
+    notify: options.notifyActor ?? (async () => { throw new HarnessServiceError('unavailable', 'Computer Use message delivery is unavailable'); }),
+    revokeSession: options.revokeSession ?? (async () => {}),
+    bindDesktop: options.bindDesktop ?? (async () => {}),
+    onChange: options.onAutomationChange ?? (() => {}),
+    reserve: (lease, signal) => reserveDesktop(lease, signal),
+    describeDesktop: async (id) => (await desktopRecord(id)).desktop.label,
+    release: (lease) => releaseDesktop(lease),
+    controlAvailable: (id) => laneFor(id).control.owner === 'agent' && !laneFor(id).transitioning,
+  });
   const platform = options.platform ?? localPlatform();
   let scopedClient: Promise<KernelScopedClient> | null = null;
   const lanes = new Map<string, DesktopLane>();
@@ -575,6 +605,9 @@ export function createComputerService(options: ComputerServiceOptions): Computer
   let localProbe: Promise<ComputerDesktop> | null = null;
   /** Latest observation per desktop+app — the reference frame for element indexes. */
   const observations = new Map<string, Map<string, ComputerObservation>>();
+  const observationOwners = new Map<string, { key: string; runId: string; rootRunId: string }>();
+  const remoteClaims = new Map<string, { lease: ComputerLease; target: NonNullable<Awaited<ReturnType<typeof remoteTargetFor>>>; token: string | undefined; ready: Promise<void> }>();
+  const claimKey = (lease: ComputerLease) => `${lease.actor.sessionId}:${lease.actor.runId}:${lease.desktopId}:${lease.access}`;
   const linuxDesktop = createLinuxDesktop({ dataDir: options.dataDir ?? process.cwd(),
     driverDir: options.driverDir ?? computerDriverDir(), platform,
     ...(options.vmExec ? { exec: options.vmExec } : {}) });
@@ -803,6 +836,7 @@ export function createComputerService(options: ComputerServiceOptions): Computer
     const existing = lanes.get(desktopId);
     if (existing) return existing;
     const lane: DesktopLane = {
+      inputReleaseUnconfirmed: false,
       queue: [],
       running: false,
       generation: 0,
@@ -826,6 +860,17 @@ export function createComputerService(options: ComputerServiceOptions): Computer
       ...(laneFor(desktopId).transitioning ? { transitioning: true } : {}),
       ...(laneFor(desktopId).activity ? { activity: laneFor(desktopId).activity } : {}),
     };
+  };
+  const scopedEpoch = (epoch: string) => {
+    const admission = automation.context.getStore();
+    return admission ? `${epoch}:${admission.key}` : epoch;
+  };
+  const modelEpoch = (id: string) => scopedEpoch(controlState(id).automationEpoch);
+  const clearFeedback = (id: string) => {
+    const gesture: ComputerGesture = { id: '*', desktopId: id, kind: 'move', phase: 'cancelled', at: new Date().toISOString() };
+    for (const listener of viewers.get(id)?.viewers.values() ?? []) { try { listener({ type: 'gesture', gesture }); } catch { /* visual only */ } }
+    // Only the owning Host reaches this local cancellation path.
+    if (id === 'local-console') options.onGesture?.(gesture, true);
   };
 
   const persistControl = async (desktopId: string, handback = false, localControl = true): Promise<void> => {
@@ -937,12 +982,24 @@ export function createComputerService(options: ComputerServiceOptions): Computer
     body?: unknown,
     signal?: AbortSignal,
   ): Promise<Response> => {
+    const admission = automation.context.getStore();
+    admission?.assert();
+    if (admission) signal = signal ? AbortSignal.any([signal, admission.signal]) : admission.signal;
     const url = `${connection.apiUrl.replace(/\/$/, "")}${path}`;
+    let leaseToken: string | undefined;
+    if (admission) {
+      const remoteId = /^\/api\/computers\/desktops\/([^/]+)/u.exec(path)?.[1];
+      const claims = [...remoteClaims.values()].filter(claim => claim.lease.actor.sessionId === admission.actor.sessionId
+        && claim.lease.actor.runId === admission.actor.runId && claim.target.connection.id === connection.id
+        && encodeURIComponent(claim.target.remoteId) === remoteId);
+      const claim = claims.find(item => item.lease.access === 'control') ?? claims[0];
+      if (claim) { await claim.ready; admission.assert(); leaseToken = claim.token; }
+    }
     let response: Response;
     try {
       response = await fetchImpl(url, {
         method,
-        headers: remoteHeaders(connection, body === undefined ? { Accept: "application/json" } : { Accept: "application/json", "Content-Type": "application/json" }),
+        headers: remoteHeaders(connection, { Accept: 'application/json', ...(body === undefined ? {} : { 'Content-Type': 'application/json' }), ...(leaseToken ? { 'X-Varin-Computer-Lease': leaseToken } : {}) }),
         ...(body !== undefined ? { body: JSON.stringify(body) } : {}),
         ...(signal ? { signal } : {}),
         redirect: "error",
@@ -987,6 +1044,38 @@ export function createComputerService(options: ComputerServiceOptions): Computer
       throw new HarnessServiceError("unavailable", `Remote Host "${desktop.remote.connectionId}" is no longer configured`);
     }
     return { connection: { ...connection, expectedHostId: desktop.remote.hostId }, remoteId: desktop.remote.desktopId, desktop };
+  };
+
+  const origin = `${options.hostId}:${controlEpoch}`;
+  const reserveDesktop = async (lease: ComputerLease, signal: AbortSignal) => {
+    const target = await remoteTargetFor(lease.desktopId);
+    lease.desktopLabel = target?.desktop.label ?? (await desktopRecord(lease.desktopId)).desktop.label;
+    if (!target) return;
+    const key = claimKey(lease);
+    const entry = { lease, target, token: undefined as string | undefined, ready: Promise.resolve() };
+    remoteClaims.set(key, entry);
+    entry.ready = automation.context.exit(async () => {
+      const result = await remoteJson<{ token: string }>(target.connection, 'POST', `/api/computers/desktops/${encodeURIComponent(target.remoteId)}/assignment`,
+        { op: 'claim', origin, assignmentId: lease.id, actor: lease.actor, access: lease.access }, signal);
+      if (!asString(result.token)) throw new RemoteTransportError('Remote Host returned no desktop assignment');
+      entry.token = result.token;
+    });
+    await entry.ready;
+  };
+  const releaseDesktop = async (lease: ComputerLease): Promise<{ released: boolean }> => {
+    const claim = remoteClaims.get(claimKey(lease));
+    const target = claim?.target ?? await remoteTargetFor(lease.desktopId);
+    if (!target) return lease.access === 'control' ? cancelImpl(lease.desktopId) : { released: true };
+    // Release by origin and execution identity too: a lost claim receipt must not orphan a remote lock.
+    await claim?.ready.catch(() => undefined);
+    await remoteJson(target.connection, 'POST', `/api/computers/desktops/${encodeURIComponent(target.remoteId)}/assignment`,
+      { op: 'drop', origin, assignmentId: lease.id, actor: lease.actor, access: lease.access });
+    remoteClaims.delete(claimKey(lease));
+    return { released: true };
+  };
+  const clearObservations = (id: string) => {
+    for (const key of observations.get(id)?.keys() ?? []) observationOwners.delete(key);
+    observations.delete(id);
   };
 
   /**
@@ -1142,13 +1231,14 @@ export function createComputerService(options: ComputerServiceOptions): Computer
   /** Serialize every driver-bound op per desktop so cancel() owns the queue. */
   const enqueue = <T>(desktopId: string, kind: QueuedOp["kind"], op: () => Promise<T>, generation?: number): Promise<T> => {
     const lane = laneFor(desktopId);
+    const admission = automation.context.getStore();
     return new Promise<T>((resolve, reject) => {
       lane.queue.push({
         kind,
         generation: generation ?? lane.generation,
         run: async () => {
           try {
-            resolve(await op());
+            resolve(await (admission ? automation.context.run(admission, async () => { admission.assert(); return op(); }) : op()));
           } catch (error) {
             reject(error);
           }
@@ -1166,9 +1256,15 @@ export function createComputerService(options: ComputerServiceOptions): Computer
     driver: ComputerDriverSession,
     op: Omit<DriverRequest, "id">,
     signal?: AbortSignal,
+    onGesture?: Parameters<ComputerDriverSession['request']>[1],
   ): Promise<DriverResponse> => {
+    const admission = automation.context.getStore();
+    admission?.assert();
+    if (admission) signal = signal ? AbortSignal.any([signal, admission.signal]) : admission.signal;
     signal?.throwIfAborted();
-    const pending = driver.request(op);
+    const pending = driver.request(op, { ...onGesture, beforeDispatch() {
+      admission?.assert(); signal?.throwIfAborted(); onGesture?.beforeDispatch?.();
+    } });
     if (!signal) return pending;
     // The bridge/router aborts its wait on script timeout or client cancel.
     // Interrupt the native operation too; otherwise it could keep typing after
@@ -1203,7 +1299,7 @@ export function createComputerService(options: ComputerServiceOptions): Computer
     }
     return { spec, desktop };
   };
-  const driverPool = createDesktopDriverPool({ resolve: resolveDriver, onInputReset: (id) => observations.delete(id),
+  const driverPool = createDesktopDriverPool({ resolve: resolveDriver, onInputReset: (id) => clearObservations(id),
     ...(options.createDriver ? { createDriver: options.createDriver } : {}) });
   const drivers = driverPool.inputs;
   const driverFor = driverPool.acquire;
@@ -1432,14 +1528,17 @@ export function createComputerService(options: ComputerServiceOptions): Computer
   };
 
   const rememberObservation = (observation: ComputerObservation) => {
+    const admission = automation.context.getStore();
     const map = observations.get(observation.desktopId) ?? new Map<string, ComputerObservation>();
     const liveWindows = observation.windows?.length ? new Set(observation.windows.map(window => window.handle)) : undefined;
     for (const [key, previous] of map) {
       if (previous.app.pid !== observation.app.pid) continue;
+      if (observationOwners.get(previous.id)?.key !== admission?.key) continue;
       if (liveWindows && previous.windowHandle !== undefined && !liveWindows.has(previous.windowHandle)
         || previous.windowHandle === observation.windowHandle && (observation.screenshot || !previous.screenshot)) map.delete(key);
     }
     map.set(observation.id, observation);
+    if (admission) observationOwners.set(observation.id, { key: admission.key, runId: admission.actor.runId, rootRunId: admission.actor.rootRunId });
     observations.set(observation.desktopId, map);
   };
 
@@ -1526,9 +1625,11 @@ export function createComputerService(options: ComputerServiceOptions): Computer
         "Pass a current observationId from this desktop before using element indexes or screenshot coordinates",
       );
     }
+    if (observationOwners.get(observation.id)?.key !== automation.context.getStore()?.key) throw new HarnessServiceError('forbidden', 'This observation belongs to another execution; observe the assigned desktop from this thread');
     if (action.elementIndex !== undefined) {
       const newest = [...(observations.get(desktopId)?.values() ?? [])]
-        .filter(item => item.app.pid === observation.app.pid && item.windowHandle === observation.windowHandle).at(-1);
+        .filter(item => item.app.pid === observation.app.pid && item.windowHandle === observation.windowHandle
+          && observationOwners.get(item.id)?.key === observationOwners.get(observation.id)?.key).at(-1);
       if (newest?.id !== observation.id) throw new HarnessServiceError("invalid-params", "Element index belongs to an older tree; use the latest observed elements");
     }
     if (![observation.app.name.toLowerCase(), String(observation.app.pid), observation.app.windowTitle?.toLowerCase(), observation.windowTitle?.toLowerCase()]
@@ -1720,7 +1821,7 @@ export function createComputerService(options: ComputerServiceOptions): Computer
       if (generation !== lane.generation) throw new CancelledActionError();
       if (lane.control.owner !== "agent" || lane.transitioning) throw new HarnessServiceError("forbidden", "Desktop control is changing or held by a human");
       if (lane.needsObservation) throw new HarnessServiceError("invalid-params", "Observe the desktop after handback before resuming input");
-      if (params.automationEpoch !== undefined && params.automationEpoch !== controlState(id).automationEpoch) {
+      if (params.automationEpoch !== undefined && params.automationEpoch !== modelEpoch(id)) {
         throw new HarnessServiceError("forbidden", "This computer script was invalidated by a control change; start a new evaluation from the current scene");
       }
     };
@@ -1739,7 +1840,19 @@ export function createComputerService(options: ComputerServiceOptions): Computer
         submitted = true;
         const observed = action.observationId ? observations.get(id)?.get(action.observationId) : undefined;
         const finish = beginActivity(id, params.sessionId, observed?.app.name ?? action.app, action.kind);
-        const response = await requestWithAbort(driver, op, params.signal).catch(error => { finish(false); throw error; });
+        const admission = automation.context.getStore();
+        const gestureId = randomUUID();
+        const sendGesture = (event: Pick<ComputerGesture, 'phase' | 'point' | 'to' | 'target'>) => {
+          if (generation !== laneGeneration(id)) return;
+          try { admission?.assert(); } catch { return; }
+          const gesture: ComputerGesture = { ...event, id: gestureId, desktopId: id, kind: action.kind, at: new Date().toISOString(),
+            ...(params.sessionId ? { sessionId: params.sessionId } : {}), ...(admission ? { actorLabel: admission.actor.label } : {}),
+            ...(action.kind === 'key' ? { key: action.key } : {}), ...(action.kind === 'scroll' ? { direction: action.direction } : {}) };
+          for (const listener of viewers.get(id)?.viewers.values() ?? []) { try { listener({ type: 'gesture', gesture }); } catch { /* presentation only */ } }
+          try { options.onGesture?.(gesture, desktop.kind === 'console' && !desktop.managed); } catch { /* presentation only */ }
+        };
+        const response = await requestWithAbort(driver, { ...op, visual_feedback: true }, params.signal, { onGesture: sendGesture, beforeDispatch: assertAdmission }).catch(error => { finish(false); sendGesture({ phase: 'failed' }); throw error; });
+        sendGesture({ phase: response.cancelled ? 'cancelled' : response.ok ? 'completed' : 'failed' });
         finish(response.ok && !response.cancelled && generation === laneGeneration(id));
         return { response, desktop };
       }, generation);
@@ -1765,7 +1878,7 @@ export function createComputerService(options: ComputerServiceOptions): Computer
         return { accepted: false, cancelled: true };
       }
       if (submitted) {
-        observations.delete(id);
+        clearObservations(id);
         return { accepted: false, outcome: "unknown", detail: error instanceof Error ? error.message : String(error) };
       }
       throw error;
@@ -1782,8 +1895,10 @@ export function createComputerService(options: ComputerServiceOptions): Computer
     }
     const lane = laneFor(id);
     if (lane.control.owner === "human" && !lane.transitioning) return { cancelled: 0, released: false };
+    lane.inputReleaseUnconfirmed = true;
     lane.generation += 1;
     lane.externalAbort?.abort();
+    clearFeedback(id);
     // Drop queued actions (their callers get cancelled results); a cancel can
     // never preempt a burst already inside the driver, so release_input runs
     // after it to lift anything the interrupted sequence left held.
@@ -1805,7 +1920,9 @@ export function createComputerService(options: ComputerServiceOptions): Computer
       // cancellation reports a completed transfer of control.
       await enqueue(id, "observe", async () => undefined);
     }
-    observations.delete(id);
+    clearObservations(id);
+    broadcastControl(id);
+    lane.inputReleaseUnconfirmed = !released;
     return { cancelled: dropped.length, released };
   };
 
@@ -1879,7 +1996,7 @@ export function createComputerService(options: ComputerServiceOptions): Computer
       const lane = laneFor(id);
       if (generation !== lane.generation) throw new CancelledActionError();
       if (lane.control.owner !== "agent" || lane.transitioning) throw new HarnessServiceError("forbidden", "Desktop control is changing or held by a human");
-      if (params.automationEpoch !== undefined && params.automationEpoch !== controlState(id).automationEpoch) throw new HarnessServiceError('forbidden', 'This open belongs to an earlier control generation');
+      if (params.automationEpoch !== undefined && params.automationEpoch !== modelEpoch(id)) throw new HarnessServiceError('forbidden', 'This open belongs to an earlier control generation');
     };
     assertAdmission();
     let submitted = false;
@@ -2042,7 +2159,8 @@ export function createComputerService(options: ComputerServiceOptions): Computer
     const lane = laneFor(id);
     if (generation !== lane.generation) throw new CancelledActionError();
     if (lane.control.owner !== "agent" || lane.transitioning) throw new HarnessServiceError("forbidden", "Desktop control is changing or held by a human");
-    if (epoch !== undefined && epoch !== controlState(id).automationEpoch) throw new HarnessServiceError("forbidden", "This operation belongs to an earlier control generation");
+    automation.context.getStore()?.assert();
+    if (epoch !== undefined && epoch !== modelEpoch(id)) throw new HarnessServiceError("forbidden", "This operation belongs to an earlier control generation");
     if (needsScene && lane.needsObservation) throw new HarnessServiceError("invalid-params", "Observe the current scene after handback before resuming input");
   };
 
@@ -2098,7 +2216,7 @@ export function createComputerService(options: ComputerServiceOptions): Computer
         laneFor(id).needsObservation = false;
       }
       if (generation !== laneGeneration(id)) result.cancelled = true;
-      return { ...result, automationEpoch: `${controlEpoch}:${generation}` } as unknown as R;
+      return { ...result, automationEpoch: scopedEpoch(`${controlEpoch}:${generation}`) } as unknown as R;
     } catch (error) {
       if (error instanceof CancelledActionError) return { ok: false, cancelled: true, error: "Cancelled before dispatch" } as unknown as R;
       if (submitted) return { ok: false, outcome: "unknown", error: error instanceof Error ? error.message : String(error) } as R;
@@ -2137,10 +2255,12 @@ export function createComputerService(options: ComputerServiceOptions): Computer
         remote.connection, "GET", `/api/computers/desktops/${encodeURIComponent(remote.remoteId)}/control`,
       );
       if (!result.control) throw new HarnessServiceError("unavailable", "Remote Host returned no control state");
-      return { ...result.control, desktopId: id };
+      const actor = automation.context.getStore()?.actor;
+      return { ...result.control, desktopId: id, ...(actor ? { executionId: actor.runId } : {}) };
     }
     await desktopRecord(id); // control state exists only for real desktops
-    return controlState(id);
+    const actor = automation.context.getStore()?.actor;
+    return { ...controlState(id), automationEpoch: modelEpoch(id), ...(actor ? { executionId: actor.runId } : {}) };
   };
 
   const takeoverImpl: ComputerService["takeover"] = async (params) => {
@@ -2165,6 +2285,9 @@ export function createComputerService(options: ComputerServiceOptions): Computer
     // Fence input before the first await. The previous implementation left
     // owner=agent while draining, admitting fresh automation into the handoff.
     lane.transitioning = true;
+    automation.resetDesktop(id);
+    clearFeedback(id);
+    lane.inputReleaseUnconfirmed = true;
     lane.generation += 1;
     lane.externalAbort?.abort();
     lane.needsObservation = true;
@@ -2177,7 +2300,7 @@ export function createComputerService(options: ComputerServiceOptions): Computer
       reachable: false,
       since: new Date().toISOString(),
     };
-    observations.delete(id);
+    clearObservations(id);
     broadcastControl(id);
     drivers.get(id)?.cancel();
     try {
@@ -2189,6 +2312,7 @@ export function createComputerService(options: ComputerServiceOptions): Computer
         }
       });
       lane.control.reachable = viewers.get(id)?.viewers.has(params.holderId) ?? false;
+      lane.inputReleaseUnconfirmed = false;
       return { control: { ...controlState(id), transitioning: false }, cancelled: dropped.filter((entry) => entry.kind === "action").length, released: true };
     } finally {
       lane.transitioning = false;
@@ -2224,7 +2348,7 @@ export function createComputerService(options: ComputerServiceOptions): Computer
     const dropped = lane.queue.filter((entry) => entry.kind !== "observe");
     lane.queue = lane.queue.filter((entry) => entry.kind === "observe");
     for (const entry of dropped) entry.cancel();
-    observations.delete(id);
+    clearObservations(id);
     drivers.get(id)?.cancel();
     broadcastControl(id);
     const previous = lane.control;
@@ -2236,10 +2360,12 @@ export function createComputerService(options: ComputerServiceOptions): Computer
           throw new HarnessServiceError("unavailable", "Input release was not confirmed; control remains human-owned");
         }
         lane.control = { owner: "agent", reachable: true, since: new Date().toISOString() };
+        automation.resetDesktop(id);
         try { await persistControl(id, true); }
         catch (error) { lane.control = previous; throw error; }
       });
       result = { control: { ...controlState(id), transitioning: false }, requiresObservation: true };
+      lane.inputReleaseUnconfirmed = false;
     } finally {
       lane.transitioning = false;
       broadcastControl(id);
@@ -2410,6 +2536,8 @@ export function createComputerService(options: ComputerServiceOptions): Computer
                 const event = JSON.parse(dataLine.slice(5).trim()) as DesktopViewEvent;
                 if (event.type === "control") {
                   listener({ ...event, control: { ...event.control, desktopId: id } });
+                } else if (event.type === 'gesture') {
+                  listener({ ...event, gesture: { ...event.gesture, desktopId: id } });
                 } else {
                   listener(event);
                 }
@@ -2522,7 +2650,7 @@ export function createComputerService(options: ComputerServiceOptions): Computer
     const pending = lane.queue.filter((op) => op.kind !== "observe");
     lane.queue = lane.queue.filter((op) => op.kind === "observe");
     for (const op of pending) op.cancel();
-    observations.delete(id); broadcastControl(id);
+    clearObservations(id); broadcastControl(id);
     try {
       await cancel(id);
       await change();
@@ -3108,6 +3236,23 @@ export function createComputerService(options: ComputerServiceOptions): Computer
   };
 
   return {
+    automation, resolveDesktop: resolveDesktopId,
+    async finishExecution(runId) {
+      await automation.finishRun(runId);
+      for (const [id, owner] of observationOwners) if (owner.runId === runId || owner.rootRunId === runId) {
+        for (const map of observations.values()) map.delete(id);
+        observationOwners.delete(id);
+      }
+    },
+    async claimDesktop(origin, assignmentId, actor, desktopId, access) {
+      await desktopRecord(desktopId);
+      if (await remoteTargetFor(desktopId)) throw new HarnessServiceError('invalid-params', 'Request the owning Host of this desktop');
+      return automation.claim(origin, assignmentId, actor, desktopId, access);
+    },
+    async dropDesktopClaim(origin, assignmentId, actor, desktopId, access) {
+      await automation.dropClaim(origin, assignmentId, actor, desktopId, access);
+      if (access === 'control' && laneFor(desktopId).inputReleaseUnconfirmed) throw new HarnessServiceError('unavailable', 'Assignment is revoked, but native input release is still unconfirmed');
+    },
     activities: (sessionId) => [...lanes.entries()].flatMap(([desktopId, lane]) => lane.activity && (!sessionId || lane.activity.sessionId === sessionId) ? [{ desktopId, activity: { ...lane.activity } }] : []),
     prepareDesktop, desktopLifecycle, mediaTarget,
     inspectArtifact, registerArtifact, listArtifacts, openDesktopArtifact, openArtifact,

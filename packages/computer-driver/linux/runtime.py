@@ -52,6 +52,21 @@ DEFAULT_TEXT_LIMIT = 500
 
 CANCEL_DIR = os.environ.get("VARIN_DRIVER_CANCEL_DIR") or None
 ACTIVE_REQUEST_ID = None
+GESTURE_OPERATION = {}
+
+
+def emit_gesture(phase, point=None, to=None, target=None):
+    if not GESTURE_OPERATION.get('visual_feedback'):
+        return
+    payload = {'id': GESTURE_OPERATION.get('id'), 'type': 'gesture', 'phase': phase}
+    for key, value in (('point', point), ('to', to), ('target', target)):
+        if value is not None:
+            payload[key] = value
+    try:
+        sys.stdout.write(json.dumps(payload, separators=(',', ':')) + '\n')
+        sys.stdout.flush()
+    except Exception:
+        pass
 
 
 class CancelledError(Exception):
@@ -737,6 +752,7 @@ def send_drag(from_x, from_y, to_x, to_y):
         x = from_x + ((to_x - from_x) * step / steps)
         y = from_y + ((to_y - from_y) * step / steps)
         emit_mouse(int(round(x)), int(round(y)), "abs")
+        emit_gesture('dispatched', {'x': x, 'y': y})
         time.sleep(0.02)
     emit_mouse(int(round(to_x)), int(round(to_y)), "b1r")
 
@@ -1100,6 +1116,8 @@ def open_target(operation):
 
 
 def perform_operation(operation):
+    global GESTURE_OPERATION
+    GESTURE_OPERATION = operation
     global PENDING_BROWSER_RELEASE
     tool = operation.get("tool")
     if tool == "ping":
@@ -1177,6 +1195,17 @@ def perform_operation(operation):
     if element is not None:
         element_record = {**element_record, "frame": relative_frame(element, bounds)}
 
+    if operation.get('visual_feedback'):
+        target = extents(element) if element is not None and tool != 'scroll' else bounds
+        point, to = None, None
+        if tool in ('click', 'perform_secondary_action') and (element is not None or operation.get('x') is not None):
+            x, y = screen_point(bounds, element_record, operation.get('x'), operation.get('y'))
+            point = {'x': x, 'y': y}
+        elif tool == 'drag':
+            x, y = screen_point(bounds, None, operation.get('from_x'), operation.get('from_y'))
+            tx, ty = screen_point(bounds, None, operation.get('to_x'), operation.get('to_y'))
+            point, to = {'x': x, 'y': y}, {'x': tx, 'y': ty}
+        emit_gesture('target', point, to, target)
     if tool == "click":
         click_method = (operation.get("click_method") or "auto").lower()
         if click_method == "accessibility":
@@ -1249,6 +1278,7 @@ def perform_operation(operation):
     else:
         raise RuntimeError('unsupportedTool("{}")'.format(tool))
 
+    emit_gesture('dispatched')
     LAST_INPUT_TIMES[node_pid(app)] = time.monotonic()
     if operation.get("return_state", "none") == "none":
         return {"ok": True}

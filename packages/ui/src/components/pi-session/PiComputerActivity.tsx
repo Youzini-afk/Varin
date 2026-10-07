@@ -1,8 +1,6 @@
 import React from 'react';
-import type { ComputerActivityEntry } from '@varin/protocol';
 import { Icon } from '@/components/icon/Icon';
-import { readComputerActivity } from '@/lib/computers';
-import { subscribeVarinEvents } from '@/lib/varinEvents';
+import { useComputerAutomation } from '@/stores/useComputerAutomation';
 import { useUIStore } from '@/stores/useUIStore';
 import { useI18n } from '@/lib/i18n';
 
@@ -10,29 +8,7 @@ import { useI18n } from '@/lib/i18n';
 export function PiComputerActivity({ sessionId, directory }: { sessionId: string; directory: string }) {
   const { t } = useI18n();
   const openTab = useUIStore(state => state.openContextPanelTab);
-  const [entries, setEntries] = React.useState<ComputerActivityEntry[]>([]);
-  React.useEffect(() => {
-    let active = true, revision = 0, readRevision = 0;
-    const refresh = async () => {
-      const started = revision;
-      const read = ++readRevision;
-      try {
-        const snapshot = await readComputerActivity(sessionId);
-        if (active && started === revision && read === readRevision) setEntries(snapshot);
-      } catch { /* A failed lightweight read leaves normal chat and the manual computer entry usable. */ }
-    };
-    const unsubscribe = subscribeVarinEvents(event => {
-      if (event.type === 'stream-ready') { void refresh(); return; }
-      if (event.type !== 'computer-activity') return;
-      revision += 1;
-      setEntries(current => [
-        ...current.filter(entry => entry.desktopId !== event.desktopId),
-        ...(event.activity.sessionId === sessionId ? [{ desktopId: event.desktopId, activity: event.activity }] : []),
-      ]);
-    });
-    void refresh();
-    return () => { active = false; unsubscribe(); };
-  }, [sessionId]);
+  const { activities: entries } = useComputerAutomation(sessionId);
   if (!entries.length) return null;
   return <div className="chat-input-column flex flex-wrap gap-1.5 pb-1.5">
     {entries.map(({ desktopId, activity }) => <button key={desktopId} type="button"

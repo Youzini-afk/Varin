@@ -7,7 +7,7 @@ import { usePrefersReducedMotion } from '@/hooks/usePrefersReducedMotion';
 import { useI18n } from '@/lib/i18n';
 import { cn } from '@/lib/utils';
 
-export type OverviewPeekSection = 'questions' | 'review' | 'plan' | 'outputs' | 'threads' | 'sources' | 'memory';
+export type OverviewPeekSection = 'questions' | 'review' | 'plan' | 'outputs' | 'threads' | 'sources' | 'memory' | 'computer';
 export interface OverviewPeekRow {
   id: string;
   section: OverviewPeekSection;
@@ -16,6 +16,7 @@ export interface OverviewPeekRow {
   value?: React.ReactNode;
   tone?: 'attention' | 'success';
   progress?: number;
+  action?: { label: string; disabled?: boolean; run(): void };
 }
 
 function OverviewSurface({ compact, label, children }: {
@@ -86,8 +87,9 @@ export function HarnessOverviewControl({ open, compactOpen, attention, onOpenCha
     <AnimatePresence initial={false}>
       {compactOpen ? <OverviewSurface key="compact" compact label={t('harness.overview.peek')}>
         <div id={id} className="min-h-0 overflow-y-auto p-1.5">
-          {rows.length ? rows.map(row => <button key={row.id} type="button" onClick={() => openFull(row.section)}
-            className="group flex w-full items-start gap-2.5 rounded-lg px-2 py-2 text-left hover:bg-interactive-hover focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-ring">
+          {rows.length ? rows.map(row => <div key={row.id} className="flex items-center">
+            <button type="button" onClick={() => openFull(row.section)}
+            className="group flex min-w-0 flex-1 items-start gap-2.5 rounded-lg px-2 py-2 text-left hover:bg-interactive-hover focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-ring">
             <Icon name={row.icon} className={cn('mt-0.5 size-3.5 shrink-0 text-muted-foreground',
               row.tone === 'success' && 'text-[var(--status-success)]', row.tone === 'attention' && 'text-[var(--status-warning)]')} />
             <span className="min-w-0 flex-1">
@@ -100,7 +102,8 @@ export function HarnessOverviewControl({ open, compactOpen, attention, onOpenCha
                   style={{ width: `${row.progress * 100}%` }} />
               </span> : null}
             </span>
-          </button>) : <p className="px-2 py-3 typography-meta text-muted-foreground">{t('harness.overview.empty')}</p>}
+          </button>{row.action ? <button type="button" disabled={row.action.disabled} onClick={row.action.run} aria-label={row.action.label} title={row.action.label}
+            className="mr-1 flex size-7 shrink-0 items-center justify-center rounded-md text-muted-foreground hover:bg-interactive-hover hover:text-foreground disabled:opacity-50"><Icon name="stop" className="size-3.5" /></button> : null}</div>) : <p className="px-2 py-3 typography-meta text-muted-foreground">{t('harness.overview.empty')}</p>}
         </div>
         <div className="flex shrink-0 items-center gap-1 border-t border-border/50 px-2 py-1.5">
           <button type="button" onClick={() => openFull()}

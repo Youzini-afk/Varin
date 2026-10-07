@@ -153,6 +153,11 @@ export interface HostMethodMap {
     params: { sessionId: string; messageId: string; text: string };
     result: { accepted: boolean; alreadyDelivered: boolean };
   };
+  /** Host-only revocation of computer scripts; leaves the Agent and other tools running. */
+  "session.computer.cancel": {
+    params: { sessionId: string; runId: string };
+    result: { cancelled: boolean };
+  };
   /** Host-only idempotent execution request; receipt lives in the native Pi session. */
   "agent.threadRequest": {
     params: { sessionId: string; messageId: string; text: string };
