@@ -37,6 +37,12 @@ the scanned React tree, so adding an icon does not remove another surface's regi
 
 Custom product glyphs are registered in `scripts/generate-icon-sprite.mjs`. They must use the shared `24x24` viewbox and `currentColor` so they match Remixicon sizing and theme behavior.
 
+The presentation switcher uses `workbench-agent` (conversation with materials), the existing
+`code-box` (IDE), and `workbench-bot` (rounded Bot face). Its workspace selector uses
+`workspace-general` (open canvas) and `workspace-research` (observation lens). The custom navigation
+glyphs share a 1.8px rounded stroke and render at 16px in both the titlebar and menu; mode and workspace
+keep distinct silhouettes. These glyphs describe the workspace presentation, not session work focus.
+
 ## Sizing
 
 The `Icon` component does not have a `size` prop. Use Tailwind classes instead:
