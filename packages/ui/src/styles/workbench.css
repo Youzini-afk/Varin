@@ -111,7 +111,6 @@
   --composer-elevation-shadow: 0 2px 5px rgb(0 0 0 / .035), 0 12px 28px -10px rgb(0 0 0 / .12);
   --composer-focus-shadow: 0 0 10px 1px color-mix(in srgb, var(--interactive-focus, var(--ring)) 14%, transparent),
     0 0 28px 5px color-mix(in srgb, var(--interactive-focus, var(--ring)) 7%, transparent);
-  --composer-working-glow: color-mix(in srgb, var(--interactive-focus, var(--ring)) 18%, transparent);
   isolation: isolate;
   border-radius: 15px;
   border-color: color-mix(in srgb, var(--border) 75%, transparent);
@@ -123,7 +122,6 @@
   --composer-elevation-shadow: 0 3px 8px rgb(0 0 0 / .18), 0 14px 30px -10px rgb(0 0 0 / .38);
   --composer-focus-shadow: 0 0 12px 2px color-mix(in srgb, var(--interactive-focus, var(--ring)) 26%, transparent),
     0 0 30px 6px color-mix(in srgb, var(--interactive-focus, var(--ring)) 14%, transparent);
-  --composer-working-glow: color-mix(in srgb, var(--interactive-focus, var(--ring)) 26%, transparent);
 }
 [data-pi-composer-input-frame]:focus-within {
   box-shadow: inset 0 1px 0 rgb(255 255 255 / .04), var(--composer-elevation-shadow), var(--composer-focus-shadow);
@@ -210,20 +208,6 @@
   .pi-composer-models { column-gap: 0; }
 }
 
-/* A diffuse paint-only sweep; no masked outline at the rounded corners. */
-[data-pi-composer-input-frame][data-working="true"]::after {
-  content: "";
-  position: absolute;
-  inset: -6px;
-  z-index: -1;
-  border-radius: inherit;
-  background: linear-gradient(110deg, transparent 25%, var(--composer-working-glow) 48%, transparent 65%);
-  background-size: 300% 100%;
-  filter: blur(10px);
-  opacity: .7;
-  pointer-events: none;
-  animation: wb-composer-sweep 3s linear infinite;
-}
 .workbench-overview-heading {
   transition: color 180ms ease, background-color 180ms ease;
   font-variant-numeric: tabular-nums;
@@ -281,16 +265,12 @@
   from { opacity: 0; transform: translateY(7px) scale(.97); }
   to { opacity: 1; transform: none; }
 }
-@keyframes wb-composer-sweep {
-  from { background-position: 150% 0; }
-  to { background-position: -150% 0; }
-}
 @media (prefers-reduced-motion: reduce) {
   :root { --wb-panel-duration: 0ms; --wb-state-duration: 0ms; --wb-travel-duration: 0ms; }
   [data-workbench-chrome] .workbench-icon-button,
   .workbench-titlebar button, .ide-activity button, .workbench-resource-rail button,
   [data-pi-composer-input-frame], [data-pi-composer-primary-action] { transition: none; }
-  [data-pi-composer-input-frame]::after, [data-pi-composer-primary-action] > svg,
+  [data-pi-composer-primary-action] > svg,
   .pi-composer-attachment { animation: none; }
 }
 
