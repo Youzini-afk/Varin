@@ -11,6 +11,15 @@ owned by the native session and are never rendered as reasoning text.
 
 ## Agent / IDE presentation
 
+`PiComputerActivity` projects the Host's current application operation above the
+shared Composer. It reads `/api/computers/activity` once and on stream reconnect,
+then follows `varin:computer-activity` on the existing global SSE. No native
+probe, frame capture, polling timer or control acquisition occurs for the
+launcher. Clicking it opens the existing Computer context-panel tab for that
+desktop, sharing the normal viewer and human takeover/handback authority.
+Activity is ephemeral and session-scoped; a newer event cannot be overwritten
+by an older delayed initial read. Agent and IDE use the same component.
+
 The 2026-10-06 handoff is implemented through the existing shells and theme system, not through the
 standalone prototype state. The built-in Varin themes supply warm-light and neutral-dark surfaces;
 `styles/workbench.css` gives the frame, conversation canvas, editor and resource rail their shared

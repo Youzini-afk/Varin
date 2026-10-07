@@ -30,12 +30,12 @@ const ComputerOperation = Type.Object({
   window: Type.Optional(Type.Union([Type.Integer(), Type.String()], { description: "Native window handle or title within the app" })),
   observationId: Type.Optional(Type.String({ description: "Observation supplying elementIndex or coordinates; stale observations are rejected" })),
   elementIndex: Type.Optional(Type.Integer({ description: "Element index from observationId" })),
-  x: Type.Optional(Type.Number({ description: "Window-relative pointer x coordinate" })),
-  y: Type.Optional(Type.Number({ description: "Window-relative pointer y coordinate" })),
-  fromX: Type.Optional(Type.Number({ description: "Drag start x in window coordinates" })),
-  fromY: Type.Optional(Type.Number({ description: "Drag start y in window coordinates" })),
-  toX: Type.Optional(Type.Number({ description: "Drag end x in window coordinates" })),
-  toY: Type.Optional(Type.Number({ description: "Drag end y in window coordinates" })),
+  x: Type.Optional(Type.Number({ description: "Pointer x pixel in the screenshot from observationId" })),
+  y: Type.Optional(Type.Number({ description: "Pointer y pixel in the screenshot from observationId" })),
+  fromX: Type.Optional(Type.Number({ description: "Drag start x pixel in the screenshot from observationId" })),
+  fromY: Type.Optional(Type.Number({ description: "Drag start y pixel in the screenshot from observationId" })),
+  toX: Type.Optional(Type.Number({ description: "Drag end x pixel in the screenshot from observationId" })),
+  toY: Type.Optional(Type.Number({ description: "Drag end y pixel in the screenshot from observationId" })),
   clickCount: Type.Optional(Type.Number()),
   mouseButton: Type.Optional(Type.Union([Type.Literal("left"), Type.Literal("right"), Type.Literal("middle")])),
   clickMethod: Type.Optional(Type.Union([Type.Literal("auto"), Type.Literal("accessibility"), Type.Literal("app_post"), Type.Literal("global")])),
@@ -45,6 +45,7 @@ const ComputerOperation = Type.Object({
   key: Type.Optional(Type.String({ description: "key: chord such as enter, ctrl+s, or f5" })),
   value: Type.Optional(Type.String({ description: "set_value: replacement element value" })),
   action: Type.Optional(Type.String({ description: "secondary: name from the element's actions list" })),
+  returnState: Type.Optional(Type.Union(["none", "tree", "screenshot"].map(value => Type.Literal(value)), { description: "Post-action capture; default none. Observe at decision points." })),
 }, { additionalProperties: true });
 
 const BrowserOperation = Type.Object({
@@ -136,14 +137,15 @@ const ComputerParams = Type.Object({
 
 const errorResult = (error: unknown) => {
   const message = error instanceof Error ? error.message : String(error);
-  const code = (error as { code?: string }).code ?? "failed";
-  const uncertainEffect = code === "timeout" || /abort|budget exhausted/i.test(message);
+  const extra = error as { code?: string; actionSent?: boolean; retry?: string };
+  const code = extra.code ?? "failed";
+  const uncertainEffect = extra.actionSent === true || code === "timeout" || /abort|budget exhausted/i.test(message);
   return {
     content: [{ type: "text" as const, text: `computer failed (${code}): ${message}${uncertainEffect
       ? ". A submitted GUI action may have partly reached the desktop."
       : ""}` }],
     isError: true as const,
-    details: { code },
+    details: { code, ...(extra.actionSent !== undefined ? { actionSent: extra.actionSent } : {}), ...(extra.retry ? { retry: extra.retry } : {}) },
   };
 };
 
@@ -175,8 +177,8 @@ export function createComputerTool(bridge: HostServicesBridge, _sessionId: strin
     promptSnippet: "computer: observe and operate desktop apps (list/apps/observe/act/cancel/run scripts)",
     promptGuidelines: [
       "Element indexes and coordinates bind to observationId; the Host rejects stale observations. act reports driver acceptance, and uncertain or partial outcomes remain explicit.",
-      "run supports top-level await, lexical bindings, and computer.list/apps/observe/act/open/browser/office/evidence/cancel/release. computer.emitImage(observation) attaches its screenshot. Bindings persist until reset or evaluation cancellation; desktop handoff invalidates the evaluation.",
-      "Browser actions use CSS viewport coordinates; desktop actions use window-relative coordinates. URLs, files, and localhost resolve on the target machine.",
+      "run supports persistent bindings and computer.getApp(app, {desktopId?, window?}). An app exposes getAXState/getScreenshot/getAXStateAndScreenshot/elements, click(index or [x,y]), setValue, typeText, pressKey, scroll, drag and performSecondaryAction. getApp resolves once; batch deterministic actions, then observe. Bound apps retain their desktop/window and control epoch across cells; handoff invalidates old bindings. Reads display their result by default; emit:false returns data without displaying it, fresh:true refreshes a cached tree. Image reads return metadata after display; emit:false returns the full observation for computer.emitImage(observation).",
+      "Browser actions use CSS viewport coordinates; desktop coordinate targets use pixels of the exact returned screenshot. The Host maps raster pixels to the bound window and checks geometry before dispatch. URLs, files, and localhost resolve on the target machine.",
     ],
     parameters: ComputerParams,
     execute: async (_toolCallId, params, signal, _onUpdate, _ctx) => {
@@ -279,6 +281,7 @@ export function createComputerTool(bridge: HostServicesBridge, _sessionId: strin
             const blocks: Array<{ type: "text"; text: string } | { type: "image"; data: string; mimeType: string }> = [
               { type: "text", text },
             ];
+            if (r.observation) blocks.push({ type: 'text', text: summarizeObservation(r.observation) });
             if (r.observation?.screenshot) {
               blocks.push({ type: "image", data: r.observation.screenshot.base64, mimeType: r.observation.screenshot.mime });
             }
@@ -338,11 +341,20 @@ export function createComputerTool(bridge: HostServicesBridge, _sessionId: strin
                 apps: async (id?: string) => bridge.request("computer.apps", await field(id), requestOptions).then((r) => r.apps),
                 observe: async (app: string, opts?: { desktopId?: string; window?: number | string; includeScreenshot?: boolean; textLimit?: number | "max" }) =>
                   bridge.request("computer.observe", { ...opts, ...await field(opts?.desktopId), app }, requestOptions).then((r) => r.observation),
-                act: async (action: ComputerAction, opts?: { desktopId?: string }) => {
+                getApp: async (app: string, opts?: { desktopId?: string; window?: number | string }) => {
                   const target = await field(opts?.desktopId);
-                  const result = (await request("computer.act", { ...target, action, automationEpoch: epochs.get(target.desktopId)! }, requestOptions)).result;
+                  const observation = (await request("computer.observe", { ...target, app, ...(opts?.window !== undefined ? { window: opts.window } : {}), includeScreenshot: false }, requestOptions)).observation;
+                  return { observation, automationEpoch: epochs.get(target.desktopId)! };
+                },
+                act: async (action: ComputerAction, opts?: { desktopId?: string; automationEpoch?: string }) => {
+                  const target = await field(opts?.desktopId);
+                  const result = (await request("computer.act", { ...target, action, automationEpoch: opts?.automationEpoch ?? epochs.get(target.desktopId)! }, requestOptions)).result;
                   if (!result.accepted || result.cancelled || result.outcome) {
-                    throw new Error(`Computer action did not complete normally (${result.outcome ?? (result.cancelled ? "cancelled" : "rejected")}): ${result.detail ?? "observe the desktop before continuing"}`);
+                    throw Object.assign(new Error(`Computer action did not complete normally (${result.outcome ?? (result.cancelled ? "cancelled" : "rejected")}): ${result.detail ?? "observe the desktop before continuing"}`), {
+                      code: result.outcome === "unknown" ? "ACTION_UNKNOWN" : result.outcome === "partial" ? "ACTION_PARTIAL" : "ACTION_REJECTED",
+                      actionSent: result.accepted || result.outcome === "unknown" || result.outcome === "partial",
+                      retry: result.accepted || result.outcome ? "reobserve" : "never",
+                    });
                   }
                   return result;
                 },

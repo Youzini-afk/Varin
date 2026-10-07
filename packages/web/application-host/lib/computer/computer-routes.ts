@@ -49,6 +49,12 @@ export function registerComputerRoutes(app: Express, { computers, requireAuth = 
     }
   });
 
+  // Pure in-memory projection: opening a chat must not probe or capture a desktop.
+  app.get("/api/computers/activity", requireAuth, (request: Request, response: Response) => {
+    response.setHeader("Cache-Control", "no-store");
+    response.json({ activities: computers.activities(typeof request.query.sessionId === "string" ? request.query.sessionId : undefined) });
+  });
+
   const sendArtifact = (response: Response, source: Awaited<ReturnType<ComputerService["openDesktopArtifact"]>>) => {
     response.setHeader("Cache-Control", "no-store");
     response.setHeader("Content-Type", "application/octet-stream");

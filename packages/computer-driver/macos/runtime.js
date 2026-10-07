@@ -22,6 +22,7 @@ var DRIVER_VERSION = "0.1.0";
 var MAX_ELEMENTS = 1200;
 var MAX_DEPTH = 48;
 var DEFAULT_TEXT_LIMIT = 500;
+var LAST_INPUT_TIMES = {};
 
 // ---------------------------------------------------------------------------
 // Cancellation (BC4.A): stdin is serialized, so a cancel request cannot be
@@ -653,6 +654,12 @@ function axSetValue(element, value) {
 
 function buildSnapshot(query, textLimit, maxNodes, maxDepth, screenshot, windowSelector) {
     var app = resolveApp(query);
+    var lastInput = LAST_INPUT_TIMES[app.pid];
+    if (lastInput !== undefined) {
+        var remaining = 120 - (Date.now() - lastInput);
+        if (remaining > 0) $.NSThread.sleepForTimeInterval(remaining / 1000);
+        delete LAST_INPUT_TIMES[app.pid];
+    }
     var windows = windowsForPid(app.pid);
     var windowInfo = selectWindow(app, windowSelector === undefined ? null : windowSelector, windows);
     checkCancel("resolved the target window");
@@ -681,6 +688,7 @@ function buildSnapshot(query, textLimit, maxNodes, maxDepth, screenshot, windowS
         windows: descriptors,
         windowBounds: windowInfo.bounds || null,
         screenshotPngBase64: screenshot ? captureWindowPngBase64(windowInfo) : null,
+        screenshotSource: screenshot ? "window" : null,
         treeLines: rendered.lines,
         elements: rendered.records,
     };
@@ -827,6 +835,11 @@ function performOperation(operation) {
     var windowInfo = selectWindow(app, operation.window === undefined ? null : operation.window, windows);
     checkCancel("resolved the target window");
     var bounds = windowInfo.bounds || { x: 0, y: 0, width: 0, height: 0 };
+    if (operation.expected_bounds) {
+        for (var geometryKey of ["x", "y", "width", "height"]) {
+            if (bounds[geometryKey] !== operation.expected_bounds[geometryKey]) return { ok: false, rejected: true, error: "Window geometry changed since the screenshot; observe again" };
+        }
+    }
     var elementRecord = operation.element || null;
     var element = null;
     if (elementRecord) {
@@ -915,11 +928,12 @@ function performOperation(operation) {
             throw new Error('unsupportedTool("' + tool + '")');
     }
 
-    $.NSThread.sleepForTimeInterval(0.12);
+    LAST_INPUT_TIMES[app.pid] = Date.now();
+    if (!operation.return_state || operation.return_state === "none") return { ok: true };
     try {
         return {
             ok: true,
-            snapshot: buildSnapshot(operation.app || "", DEFAULT_TEXT_LIMIT, 0, 0, operation.screenshot !== false, operation.window),
+            snapshot: buildSnapshot(operation.app || "", DEFAULT_TEXT_LIMIT, 0, 0, operation.return_state === "screenshot", operation.window),
         };
     } catch (e) {
         return {

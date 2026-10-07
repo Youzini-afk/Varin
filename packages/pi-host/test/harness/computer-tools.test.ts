@@ -143,6 +143,65 @@ describe("computer tool", () => {
     assert.equal((requests.find((r) => r.method === "computer.act")!.params as { automationEpoch: string }).automationEpoch, "epoch-1");
   });
 
+  it("binds an app across cells, batches actions without captures and carries the original control epoch", async () => {
+    let reads = 0;
+    let epoch = 'epoch-1';
+    const { bridge, requests } = scriptedBridge({
+      "computer.control": () => ({ control: { desktopId: 'local-console', automationEpoch: epoch, owner: 'agent', reachable: true, since: 'now' } }),
+      "computer.observe": () => observation(`bound-${++reads}`),
+      "computer.act": (params: { automationEpoch: string }) => ({ result: params.automationEpoch === epoch ? { accepted: true } : { accepted: false, detail: 'Control changed' } }),
+    });
+    const tool = createComputerTool(bridge, SESSION);
+    const first = await execute(tool, { action: "run", script: "const app = await computer.getApp('notepad'); await app.getAXState(); await app.click(0); await app.setValue(0, 'hello'); app.name" });
+    assert.notEqual(isError(first), true, JSON.stringify(first));
+    assert.match((first.content[0] as { text: string }).text, /window x/, 'the tree is returned through the worker log channel');
+    assert.equal(reads, 1, 'binding and first displayed tree share one observation');
+    const second = await execute(tool, { action: "run", script: "await app.pressKey('enter'); await app.getAXState(); 'done'" });
+    assert.notEqual(isError(second), true, JSON.stringify(second));
+    assert.equal(reads, 2, 'only the explicit decision-point read refreshes the tree');
+    const actions = requests.filter(request => request.method === 'computer.act').map(request => request.params as { action: { kind: string; app: string; observationId?: string; returnState: string }; automationEpoch: string });
+    assert.equal(actions.length, 3);
+    for (const action of actions) {
+      assert.equal(action.action.app, '7');
+      assert.equal(action.action.observationId, action.action.kind === 'key' ? undefined : 'bound-1');
+      assert.equal(action.action.returnState, 'none');
+      assert.equal(action.automationEpoch, 'epoch-1');
+    }
+    epoch = 'epoch-2';
+    const stale = await execute(tool, { action: 'run', script: "try { await app.pressKey('enter') } catch (error) { console.log(error.code, error.actionSent, error.retry) }; await app.getAXState(); 'checked'" });
+    assert.match((stale.content[0] as { text: string }).text, /ACTION_REJECTED false never/);
+    assert.equal(reads, 3, 'a failed action invalidates the cached read');
+    const rebound = await execute(tool, { action: 'run', script: "const currentApp = await computer.getApp('notepad'); await currentApp.pressKey('enter'); 'sent'" });
+    assert.notEqual(isError(rebound), true, JSON.stringify(rebound));
+    assert.equal((requests.at(-1)!.params as { automationEpoch: string }).automationEpoch, 'epoch-2');
+    await execute(tool, { action: 'reset' });
+    bridge.dispose();
+  });
+
+  it('emits one image without duplicating base64 and keeps uncertain action effects explicit', async () => {
+    const imageData = Buffer.from('opaque-image-payload').toString('base64');
+    const { bridge } = scriptedBridge({
+      'computer.observe': (params: { includeScreenshot?: boolean }) => ({ observation: { ...observation('raster').observation,
+        ...(params.includeScreenshot ? { screenshot: { mime: 'image/png', base64: imageData, width: 1600, height: 1200 } } : {}) } }),
+      'computer.act': () => ({ result: { accepted: false, outcome: 'unknown', detail: 'lost response' } }),
+    });
+    const tool = createComputerTool(bridge, SESSION);
+    const capture = await execute(tool, { action: 'run', script: "const app = await computer.getApp('notepad'); await app.getScreenshot()" });
+    assert.equal(capture.content.filter(item => item.type === 'image').length, 1);
+    assert.match((capture.content[0] as { text: string }).text, /1600/);
+    assert.ok(!(capture.content[0] as { text: string }).text.includes(imageData));
+    const uncertain = await execute(tool, { action: 'run', script: "try { await app.click([120, 80]) } catch (error) { console.log(error.code, error.actionSent, error.retry) }; 'checked'" });
+    assert.match((uncertain.content[0] as { text: string }).text, /ACTION_UNKNOWN true reobserve/);
+    const uncaught = await execute(tool, { action: 'run', script: "await app.pressKey('enter')" });
+    assert.equal(isError(uncaught), true);
+    assert.deepEqual(uncaught.details, { code: 'ACTION_UNKNOWN', actionSent: true, retry: 'reobserve' });
+    const withoutImage = await execute(tool, { action: 'run', script: "await app.click([120, 80])" });
+    assert.equal(isError(withoutImage), true);
+    assert.match((withoutImage.content[0] as { text: string }).text, /Take a screenshot/);
+    await execute(tool, { action: 'reset' });
+    bridge.dispose();
+  });
+
   it("reset clears REPL bindings", async () => {
     const { bridge } = scriptedBridge({ "computer.observe": () => observation("o") });
     const tool = createComputerTool(bridge, SESSION);

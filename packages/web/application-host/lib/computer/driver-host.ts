@@ -63,6 +63,8 @@ export interface DriverRequest {
 }
 
 export interface DriverResponse {
+  /** Preflight rejection proved no input was sent; other failed responses remain uncertain. */
+  rejected?: boolean;
   id: string | null;
   ok: boolean;
   /** The driver aborted the operation at an internal checkpoint (BC4.A). */

@@ -1,4 +1,5 @@
 import { Worker } from "node:worker_threads";
+import { installComputerAppSdk } from './computer-app-sdk.js';
 
 // Node's own REPL parser supports persistent lexical bindings and top-level
 // await. Running it in a worker lets cancellation also stop synchronous loops
@@ -9,6 +10,8 @@ const { REPLServer } = require('node:repl');
 const { PassThrough } = require('node:stream');
 const { AsyncLocalStorage } = require('node:async_hooks');
 const { inspect } = require('node:util');
+// tsx/esbuild may retain function names in the serialized SDK function.
+const __name = (fn, name) => Object.defineProperty(fn, 'name', { value: name, configurable: true });
 const context = new AsyncLocalStorage();
 const pending = new Map();
 let nextId = 0;
@@ -17,7 +20,7 @@ const finish = (run, error, value) => {
   if (!run || run.closed) return;
   let result;
   try {
-    result = error ? { error: error.message || String(error) }
+    result = error ? { error: error.message || String(error), errorDetails: { code: error.code, actionSent: error.actionSent, retry: error.retry } }
       : { value: value === undefined ? undefined : typeof value === 'string' ? value : inspect(value, { depth: 6 }) };
   } catch (failure) { result = { error: failure.message || String(failure) }; }
   run.closed = true;
@@ -42,12 +45,13 @@ server.context.console = Object.fromEntries(['log','warn','error'].map(method =>
   const run = context.getStore();
   if (run && !run.closed) run.logs.push(args.map(value => typeof value === 'string' ? value : inspect(value)).join(' '));
 }]));
+(${installComputerAppSdk.toString()})(server.context.computer, call, text => server.context.console.log(text));
 parentPort.on('message', message => {
   if (message.type === 'response') {
     const request = pending.get(message.id);
     if (!request) return;
     pending.delete(message.id);
-    if (message.error) request.reject(new Error(message.error));
+    if (message.error) request.reject(Object.assign(new Error(message.error), message.errorDetails));
     else request.resolve(message.value);
     return;
   }
@@ -89,7 +93,7 @@ export class ComputerRepl {
         const failed = (error: Error) => { cleanup(); this.reset(); reject(error); };
         const exited = () => failed(new Error("Computer REPL stopped; bindings were cleared"));
         const abort = () => failed(signal.reason instanceof Error ? signal.reason : new Error("Computer evaluation cancelled; bindings were cleared"));
-        const message = (event: { type: string; id: number; runId?: number; method?: string; args?: unknown[]; logs?: string[]; value?: string; error?: string }) => {
+        const message = (event: { type: string; id: number; runId?: number; method?: string; args?: unknown[]; logs?: string[]; value?: string; error?: string; errorDetails?: { code?: string; actionSent?: boolean; retry?: string } }) => {
           if (event.type === "call" && event.runId === id) {
             void (async () => {
               try {
@@ -97,13 +101,15 @@ export class ComputerRepl {
                 const value = await call(event.method!, event.args!);
                 if (!signal.aborted) worker.postMessage({ type: "response", id: event.id, value });
               } catch (error) {
-                if (!signal.aborted) worker.postMessage({ type: "response", id: event.id, error: error instanceof Error ? error.message : String(error) });
+                const extra = error as { code?: string; actionSent?: boolean; retry?: string };
+                if (!signal.aborted) worker.postMessage({ type: "response", id: event.id, error: error instanceof Error ? error.message : String(error),
+                  errorDetails: { code: extra?.code, actionSent: extra?.actionSent, retry: extra?.retry } });
               }
             })();
           } else if (event.type === "result" && event.id === id) {
             cleanup();
             worker.unref();
-            if (event.error) reject(new Error(event.error));
+            if (event.error) reject(Object.assign(new Error(event.error), event.errorDetails));
             else resolve({ logs: event.logs ?? [], ...(event.value !== undefined ? { value: event.value } : {}) });
           }
         };

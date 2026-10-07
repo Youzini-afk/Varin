@@ -72,6 +72,8 @@ export interface ComputerDesktop {
   managed?: "linux-xvnc";
   /** Live framebuffer transport; input still uses the same Host control lane. */
   media?: { kind: "vnc"; width: number; height: number };
+  /** Ephemeral current/last application operation. Comes from the owning Host, not durable work state. */
+  activity?: ComputerActivity;
   /**
    * Component recipe state (EE §6.2): what the environment's install path
    * last reported per component id or ad-hoc package set. `installed` means
@@ -87,6 +89,16 @@ export interface ComputerWorkAssociation {
   sessionId: string;
   at: string;
 }
+
+export interface ComputerActivity {
+  sessionId?: string;
+  app: string;
+  operation: "observe" | ComputerAction["kind"];
+  status: "running" | "idle" | "error";
+  updatedAt: string;
+}
+
+export interface ComputerActivityEntry { desktopId: string; activity: ComputerActivity }
 
 /** A versioned reference to a file in a managed desktop user's home. */
 export interface ComputerArtifact {
@@ -210,7 +222,7 @@ export interface ComputerObservation {
   elements: ComputerElement[];
   focusedSummary?: string;
   selectedText?: string;
-  screenshot?: { mime: "image/png"; base64: string; width?: number; height?: number };
+  screenshot?: { mime: "image/png"; base64: string; width?: number; height?: number; source?: "window" | "screen" };
   capturedAt: string;
 }
 
@@ -222,14 +234,14 @@ export interface ComputerAction {
   /** Window selector within the app: native handle number or window title. */
   window?: number | string;
   /**
-   * Observation whose element indexes this action may reference. When the
-   * desktop's latest observation for the app is newer, the Host rejects the
-   * action so stale coordinates/indexes cannot fire blindly.
+   * Elements require the newest tree for this app/window. Coordinates require
+   * the retained latest screenshot; a tree-only read does not discard it.
+   * Native dispatch validates screenshot geometry before sending coordinates.
    */
   observationId?: string;
   /** Element index from the referenced observation. */
   elementIndex?: number;
-  /** Window-relative coordinates for pointer actions. */
+  /** Pixels of the exact screenshot in observationId, before any UI display scaling. */
   x?: number;
   y?: number;
   fromX?: number;
@@ -248,6 +260,8 @@ export interface ComputerAction {
   value?: string;
   /** Secondary action name from the element's `actions` list. */
   action?: string;
+  /** Capture after input only when requested. Default none supports deterministic action batches. */
+  returnState?: "none" | "tree" | "screenshot";
 }
 
 export interface ComputerActionResult {
@@ -578,6 +592,7 @@ export interface ComputerControlState {
   automationEpoch: string;
   /** Input is fenced while an ownership transfer drains and releases it. */
   transitioning?: boolean;
+  activity?: ComputerActivity;
 }
 
 /**

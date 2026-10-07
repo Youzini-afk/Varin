@@ -15,6 +15,8 @@ import { mkdir, readFile, rename, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import type {
   ComputerAction,
+  ComputerActivity,
+  ComputerActivityEntry,
   ComputerArtifact,
   ComputerActionResult,
   ComputerAppDescriptor,
@@ -310,6 +312,7 @@ const observationOf = (
       mime: "image/png",
       base64: snapshot.screenshotPngBase64 as string,
       ...dimensions,
+      ...(snapshot.screenshotSource === "window" || snapshot.screenshotSource === "screen" ? { source: snapshot.screenshotSource } : {}),
     };
   }
   return observation;
@@ -372,6 +375,7 @@ interface DesktopViewers {
 }
 
 interface DesktopLane {
+  activity?: ComputerActivity;
   queue: QueuedOp[];
   running: boolean;
   /** Bumped on cancel; actions stamped with an older generation report cancelled. */
@@ -446,9 +450,12 @@ export interface ComputerServiceOptions {
   resolveWork?: (sessionId: string) => Promise<{ scopeId: string; threadId: string } | null>;
   /** Deliver an idempotent work continuation through the existing Thread ledger. */
   onHandback?: (event: PendingHandback) => Promise<void>;
+  /** Ephemeral app-operation metadata for the existing UI event stream; never carries typed content. */
+  onActivityChange?: (entry: ComputerActivityEntry) => void;
 }
 
 export interface ComputerService {
+  activities(sessionId?: string): ComputerActivityEntry[];
   prepareDesktop(params: ComputerDesktopPrepareParams, automation?: boolean): Promise<ComputerDesktop>;
   desktopLifecycle(desktopId: string, action: "start" | "stop", automation?: boolean): Promise<ComputerDesktop>;
   mediaTarget(desktopId: string): Promise<{ socketPath: string } | { url: string; headers: Record<string, string> }>;
@@ -817,6 +824,7 @@ export function createComputerService(options: ComputerServiceOptions): Computer
       since: control.since,
       automationEpoch: `${controlEpoch}:${laneFor(desktopId).generation}`,
       ...(laneFor(desktopId).transitioning ? { transitioning: true } : {}),
+      ...(laneFor(desktopId).activity ? { activity: laneFor(desktopId).activity } : {}),
     };
   };
 
@@ -883,6 +891,24 @@ export function createComputerService(options: ComputerServiceOptions): Computer
     for (const listener of entry.viewers.values()) {
       try { listener(event); } catch { /* a broken viewer must not block others */ }
     }
+  };
+
+  const beginActivity = (desktopId: string, sessionId: string | undefined, app: string, operation: ComputerActivity["operation"]) => {
+    const lane = laneFor(desktopId);
+    const knownApp = [...(observations.get(desktopId)?.values() ?? [])]
+      .find(observation => String(observation.app.pid) === app || observation.app.name.toLowerCase() === app.toLowerCase());
+    const activity: ComputerActivity = { app: knownApp?.app.name ?? app, operation, status: "running", updatedAt: new Date().toISOString(), ...(sessionId ? { sessionId } : {}) };
+    const publish = () => {
+      broadcastControl(desktopId);
+      try { options.onActivityChange?.({ desktopId, activity: lane.activity! }); } catch { /* presentation cannot interrupt input */ }
+    };
+    lane.activity = activity;
+    publish();
+    return (ok: boolean, resolvedApp?: string) => {
+      if (lane.activity !== activity) return;
+      lane.activity = { ...activity, ...(resolvedApp ? { app: resolvedApp } : {}), status: ok ? "idle" : "error", updatedAt: new Date().toISOString() };
+      publish();
+    };
   };
 
   // --- BC6: remote Host routing --------------------------------------------
@@ -1205,7 +1231,8 @@ export function createComputerService(options: ComputerServiceOptions): Computer
     }
     return {
       machines: machines.map(parseMachine).filter((m): m is ComputerMachine => m !== null && (!listOptions?.localOnly || m.provider !== "remote")),
-      desktops: desktops.map(parseDesktop).filter((d): d is ComputerDesktop => d !== null && (!listOptions?.localOnly || !d.remote)),
+      desktops: desktops.map(parseDesktop).filter((d): d is ComputerDesktop => d !== null && (!listOptions?.localOnly || !d.remote))
+        .map(desktop => ({ ...desktop, ...(lanes.get(desktop.id)?.activity ? { activity: lanes.get(desktop.id)!.activity } : {}) })),
       defaultDesktopId: await defaultDesktop(),
     };
   };
@@ -1406,8 +1433,11 @@ export function createComputerService(options: ComputerServiceOptions): Computer
 
   const rememberObservation = (observation: ComputerObservation) => {
     const map = observations.get(observation.desktopId) ?? new Map<string, ComputerObservation>();
+    const liveWindows = observation.windows?.length ? new Set(observation.windows.map(window => window.handle)) : undefined;
     for (const [key, previous] of map) {
-      if (previous.app.pid === observation.app.pid) map.delete(key);
+      if (previous.app.pid !== observation.app.pid) continue;
+      if (liveWindows && previous.windowHandle !== undefined && !liveWindows.has(previous.windowHandle)
+        || previous.windowHandle === observation.windowHandle && (observation.screenshot || !previous.screenshot)) map.delete(key);
     }
     map.set(observation.id, observation);
     observations.set(observation.desktopId, map);
@@ -1430,6 +1460,7 @@ export function createComputerService(options: ComputerServiceOptions): Computer
     const remote = await remoteTargetFor(id);
     if (remote) {
       await recordUsage(id, params.sessionId).catch(() => undefined);
+      const finish = beginActivity(id, params.sessionId, params.app, "observe");
       const result = await remoteJson<{ observation?: ComputerObservation }>(
         remote.connection, "POST", `/api/computers/desktops/${encodeURIComponent(remote.remoteId)}/observe`, {
           app: params.app,
@@ -1440,8 +1471,12 @@ export function createComputerService(options: ComputerServiceOptions): Computer
           ...(params.maxTreeDepth !== undefined ? { maxTreeDepth: params.maxTreeDepth } : {}),
           ...(params.sessionId !== undefined ? { sessionId: params.sessionId } : {}),
         }, params.signal,
-      );
-      if (!result.observation) throw new HarnessServiceError("unavailable", "Remote Host returned no observation");
+      ).catch(error => { finish(false); throw error; });
+      if (!result.observation) {
+        finish(false);
+        throw new HarnessServiceError("unavailable", "Remote Host returned no observation");
+      }
+      finish(true, result.observation.app.name);
       // Keep the remote observation id — a later remote act must reference
       // the remote service's own freshness record. Only the desktop/machine
       // binding is mirrored locally.
@@ -1455,6 +1490,7 @@ export function createComputerService(options: ComputerServiceOptions): Computer
       const { driver, desktop } = await driverFor(id);
       await recordUsage(id, params.sessionId).catch(() => undefined);
       params.signal?.throwIfAborted();
+      const finish = beginActivity(id, params.sessionId, params.app, "observe");
       const response = await requestWithAbort(driver, {
         tool: "get_app_state",
         app: params.app,
@@ -1463,7 +1499,8 @@ export function createComputerService(options: ComputerServiceOptions): Computer
         ...(params.textLimit !== undefined ? { text_limit: params.textLimit } : {}),
         ...(params.maxTreeNodes !== undefined ? { max_tree_nodes: params.maxTreeNodes } : {}),
         ...(params.maxTreeDepth !== undefined ? { max_tree_depth: params.maxTreeDepth } : {}),
-      }, params.signal);
+      }, params.signal).catch(error => { finish(false); throw error; });
+      finish(response.ok && Boolean(response.snapshot), isObject(response.snapshot?.app) ? asString(response.snapshot.app.name) : undefined);
       params.signal?.throwIfAborted();
       if (!response.ok || !response.snapshot) throw new HarnessServiceError("unavailable", response.error ?? "Observe failed");
       const observation = observationOf(response.snapshot, desktop);
@@ -1486,8 +1523,13 @@ export function createComputerService(options: ComputerServiceOptions): Computer
     if (!observation) {
       throw new HarnessServiceError(
         "invalid-params",
-        "Pass a current observationId from this desktop before using element indexes or window-relative coordinates",
+        "Pass a current observationId from this desktop before using element indexes or screenshot coordinates",
       );
+    }
+    if (action.elementIndex !== undefined) {
+      const newest = [...(observations.get(desktopId)?.values() ?? [])]
+        .filter(item => item.app.pid === observation.app.pid && item.windowHandle === observation.windowHandle).at(-1);
+      if (newest?.id !== observation.id) throw new HarnessServiceError("invalid-params", "Element index belongs to an older tree; use the latest observed elements");
     }
     if (![observation.app.name.toLowerCase(), String(observation.app.pid), observation.app.windowTitle?.toLowerCase(), observation.windowTitle?.toLowerCase()]
       .some((selector) => selector === action.app.toLowerCase())) {
@@ -1510,7 +1552,18 @@ export function createComputerService(options: ComputerServiceOptions): Computer
     const element = action.elementIndex !== undefined && latest
       ? elementRecordFor(latest, action.elementIndex)
       : undefined;
+    const rasterCoordinates = action.kind === "drag" || !element && (action.x !== undefined || action.y !== undefined);
+    const screenshot = latest?.screenshot;
+    const pixel = (value: number | undefined, axis: "x" | "y"): number | undefined => {
+      if (value === undefined || !rasterCoordinates) return value;
+      const size = axis === "x" ? screenshot?.width : screenshot?.height;
+      const extent = axis === "x" ? windowBounds?.width : windowBounds?.height;
+      if (!size || !extent || value < 0 || value >= size) throw new HarnessServiceError("invalid-params", "Coordinate must lie inside the screenshot from observationId; take a fresh screenshot");
+      return value * extent / size;
+    };
+    const x = pixel(action.x, "x"), y = pixel(action.y, "y");
     const base = {
+      return_state: action.returnState ?? "none",
       app: latest ? String(latest.app.pid) : action.app,
       // An observation pins the window too. Never let an explicit selector
       // redirect observed element indexes or coordinates into another window.
@@ -1518,14 +1571,15 @@ export function createComputerService(options: ComputerServiceOptions): Computer
         : action.window !== undefined ? { window: action.window } : {}),
       ...(element ? { element } : {}),
       ...(windowBounds ? { windowBounds } : {}),
+      ...(rasterCoordinates ? { expected_bounds: windowBounds, expected_dpi: latest?.dpiScale, capture_source: screenshot?.source } : {}),
     };
     switch (action.kind) {
       case "click":
         return {
           ...base,
           tool: "click" as const,
-          ...(action.x !== undefined ? { x: action.x } : {}),
-          ...(action.y !== undefined ? { y: action.y } : {}),
+          ...(x !== undefined ? { x } : {}),
+          ...(y !== undefined ? { y } : {}),
           ...(action.clickCount !== undefined ? { click_count: action.clickCount } : {}),
           ...(action.mouseButton ? { mouse_button: action.mouseButton } : {}),
           ...(action.clickMethod ? { click_method: action.clickMethod } : {}),
@@ -1539,17 +1593,17 @@ export function createComputerService(options: ComputerServiceOptions): Computer
           direction: action.direction ?? "down",
           pages: action.pages ?? 1,
           input: action.clickMethod === "global" ? "global" : "auto",
-          ...(action.x !== undefined ? { x: action.x } : {}),
-          ...(action.y !== undefined ? { y: action.y } : {}),
+          ...(x !== undefined ? { x } : {}),
+          ...(y !== undefined ? { y } : {}),
         };
       case "drag":
         return {
           ...base,
           tool: "drag" as const,
-          from_x: action.fromX ?? 0,
-          from_y: action.fromY ?? 0,
-          to_x: action.toX ?? 0,
-          to_y: action.toY ?? 0,
+          from_x: pixel(action.fromX, "x") ?? 0,
+          from_y: pixel(action.fromY, "y") ?? 0,
+          to_x: pixel(action.toX, "x") ?? 0,
+          to_y: pixel(action.toY, "y") ?? 0,
           input: action.clickMethod === "global" ? "global" : "auto",
         };
       case "type":
@@ -1584,6 +1638,7 @@ export function createComputerService(options: ComputerServiceOptions): Computer
     if (action.mouseButton !== undefined && !["left", "right", "middle"].includes(action.mouseButton)) throw new HarnessServiceError("invalid-params", "Unknown mouse button");
     if (action.clickMethod !== undefined && !["auto", "accessibility", "app_post", "global"].includes(action.clickMethod)) throw new HarnessServiceError("invalid-params", "Unknown input method");
     if (action.direction !== undefined && !["up", "down", "left", "right"].includes(action.direction)) throw new HarnessServiceError("invalid-params", "Unknown scroll direction");
+    if (action.returnState !== undefined && !["none", "tree", "screenshot"].includes(action.returnState)) throw new HarnessServiceError("invalid-params", "Unknown post-action capture mode");
     for (const key of ["text", "key", "value", "action", "observationId"] as const) {
       if (action[key] !== undefined && typeof action[key] !== "string") throw new HarnessServiceError("invalid-params", `${key} must be a string`);
     }
@@ -1632,6 +1687,8 @@ export function createComputerService(options: ComputerServiceOptions): Computer
     if (remote) {
       // The remote Host owns its lane and control state — forward the action
       // verbatim; element indexes resolve against its own observation record.
+      const observed = action.observationId ? observations.get(id)?.get(action.observationId) : undefined;
+      const finish = beginActivity(id, params.sessionId, observed?.app.name ?? action.app, action.kind);
       try {
         await recordUsage(id, params.sessionId).catch(() => undefined);
         const payload = await remoteJson<{ result?: ComputerActionResult }>(
@@ -1639,8 +1696,10 @@ export function createComputerService(options: ComputerServiceOptions): Computer
           { action, automationEpoch: params.automationEpoch, sessionId: params.sessionId }, params.signal,
         );
         if (!payload.result || typeof payload.result.accepted !== "boolean") throw new RemoteTransportError("Remote Host returned no valid action receipt");
+        finish(payload.result.accepted && !payload.result.cancelled && !payload.result.outcome);
         return payload.result;
       } catch (error) {
+        finish(false);
         if (error instanceof RemoteTransportError) {
           // The request may have crossed the wire — never replay; report the
           // effect as unknown and let the caller re-observe (BC6 contract).
@@ -1678,10 +1737,14 @@ export function createComputerService(options: ComputerServiceOptions): Computer
         params.signal?.throwIfAborted();
         assertAdmission();
         submitted = true;
-        const response = await requestWithAbort(driver, op, params.signal);
+        const observed = action.observationId ? observations.get(id)?.get(action.observationId) : undefined;
+        const finish = beginActivity(id, params.sessionId, observed?.app.name ?? action.app, action.kind);
+        const response = await requestWithAbort(driver, op, params.signal).catch(error => { finish(false); throw error; });
+        finish(response.ok && !response.cancelled && generation === laneGeneration(id));
         return { response, desktop };
       }, generation);
       if (!response.ok) {
+        if (response.rejected) return { accepted: false, ...(response.error ? { detail: response.error } : {}) };
         if (response.cancelled) {
           // Mid-operation cancel: part of the input may already have reached
           // the desktop — report the driver's progress detail, not a failure.
@@ -3045,6 +3108,7 @@ export function createComputerService(options: ComputerServiceOptions): Computer
   };
 
   return {
+    activities: (sessionId) => [...lanes.entries()].flatMap(([desktopId, lane]) => lane.activity && (!sessionId || lane.activity.sessionId === sessionId) ? [{ desktopId, activity: { ...lane.activity } }] : []),
     prepareDesktop, desktopLifecycle, mediaTarget,
     inspectArtifact, registerArtifact, listArtifacts, openDesktopArtifact, openArtifact,
     list, workDesktops, reconcileHandbacks,

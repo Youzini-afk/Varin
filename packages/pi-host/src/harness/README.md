@@ -32,6 +32,53 @@ The pi-host harness tools are custom tools registered in the Pi session's
 | `experiment` | Submit and manage attempts, page logs and collected text artifacts | `experiment.submit/list/get/logs/artifact/wait/cancel/collect` |
 | `resources` | Read machine capacity, commitments, observations and queued work | `resource.list` |
 | `research_source` | Register or inspect provenance and retained source objects | `source.register/list` |
+| `computer` | Observe/control a bound desktop application through structured calls or the persistent REPL | `computer.*` |
+
+## Computer application bindings
+
+`computer.run` uses the existing persistent Node worker. `computer.getApp(name
+or {pid, window?}, {desktopId?, window?})` observes once without capturing an
+image and returns an application object fixed to the resolved desktop, PID,
+window and control epoch. Bindings survive script cells. Human takeover,
+handback or cancellation invalidates the original input epoch: reacquire an
+application object after inspecting the current scene. Reads do not grant
+control or silently renew an old object's epoch.
+
+```js
+const editor = await computer.getApp('notepad');
+await editor.getAXState(); // consumes the binding's first tree
+await editor.click(0);
+await editor.typeText('Hello');
+await editor.pressKey('ctrl+s');
+await editor.getAXState(); // read at the point where the next decision needs the result
+```
+
+The app exposes `getAXState`, `elements`, `getScreenshot`,
+`getAXStateAndScreenshot`, `click(index | [x,y], options?)`, `setValue(index,
+value)`, `typeText(text)`, `pressKey(chord)`, `scroll(index | [x,y], direction,
+pages?)`, `drag([x,y], [x,y])` and `performSecondaryAction(index, action)`.
+Tree reads reuse the last observation until an action, `fresh:true` or an explicit
+`textLimit` requires a refresh. Action failure also invalidates the cached
+read. An image read captures the current state; coordinate actions require
+that app's last screenshot and use its original PNG pixels, before display
+scaling. Elements use the latest tree's indexes.
+
+Read options include `emit:false` for silent data access. `getAXState` returns
+tree text; `elements` returns records. Image methods emit images by default and
+return `{observationId, desktopId, app, windowHandle, width, height}` metadata,
+so REPL final-expression output does not duplicate base64. With `emit:false`
+they return the full observation for `computer.emitImage(observation)`.
+
+Actions default to no post-action capture; structured calls can request
+`returnState:"tree" | "screenshot"`. A receipt confirms dispatch, not
+application completion. REPL errors preserve `code`, `actionSent` and `retry`
+for rejected versus uncertain/partial receipts. Re-observe an uncertain effect
+before deciding what to do; no automatic input replay is introduced.
+
+The Host publishes ephemeral app/status metadata on its existing UI event
+stream. It carries no typed text or screenshot. Opening a chat reads that
+in-memory projection without probing a desktop; opening the viewer reuses the
+existing control/capture services.
 
 PTY stdout/stderr share the terminal stream, including PowerShell’s ConPTY path. Each `bash` call starts
 in its explicit or request-frozen default cwd; cd/env/venv changes do not carry into another call.

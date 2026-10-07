@@ -24,6 +24,7 @@ $script:VarinComputerDriverVersion = "0.1.0"
 $DefaultTextLimit = 500
 $AccessibilityTreeMaxNodeCount = 1200
 $AccessibilityTreeMaxDepth = 64
+$script:LastInputTimes = @{}
 
 [Console]::OutputEncoding = [System.Text.Encoding]::UTF8
 
@@ -124,6 +125,12 @@ public static class VarinWin32 {
 
     [DllImport("user32.dll")]
     public static extern IntPtr GetForegroundWindow();
+
+    [DllImport("user32.dll")]
+    public static extern IntPtr WindowFromPoint(POINT point);
+
+    [DllImport("user32.dll")]
+    public static extern bool IsChild(IntPtr parent, IntPtr child);
 
     [DllImport("user32.dll", SetLastError = true)]
     public static extern uint SendInput(uint nInputs, INPUT[] pInputs, int cbSize);
@@ -1079,6 +1086,7 @@ function Capture-WindowPngBase64([IntPtr]$hwnd, $bounds) {
                 $bitmap.Dispose()
                 $bytes = $stream.ToArray()
                 $stream.Dispose()
+                $script:LastCaptureSource = "window"
                 return [Convert]::ToBase64String($bytes)
             }
             $graphics.Dispose()
@@ -1097,6 +1105,7 @@ function Capture-WindowPngBase64([IntPtr]$hwnd, $bounds) {
         $bitmap.Dispose()
         $bytes = $stream.ToArray()
         $stream.Dispose()
+        $script:LastCaptureSource = "screen"
         return [Convert]::ToBase64String($bytes)
     } catch {
         return $null
@@ -1211,6 +1220,11 @@ function Get-SelectedText($processId, $TextLimit = $script:DefaultTextLimit) {
 
 function Build-Snapshot([string]$query, $TextLimit = $script:DefaultTextLimit, [int]$MaxTreeNodes = $script:AccessibilityTreeMaxNodeCount, [int]$MaxTreeDepth = $script:AccessibilityTreeMaxDepth, [bool]$Screenshot = $true, $WindowSelector = $null) {
     $process = Resolve-App $query
+    if ($script:LastInputTimes.ContainsKey($process.Id)) {
+        $remaining = 120 - ([DateTime]::UtcNow - $script:LastInputTimes[$process.Id]).TotalMilliseconds
+        if ($remaining -gt 0) { Start-Sleep -Milliseconds ([int][math]::Ceiling($remaining)) }
+        $script:LastInputTimes.Remove($process.Id)
+    }
     $hwnd = Resolve-AppWindow $process $WindowSelector
     $element = Get-MainElement $process $hwnd
     $bounds = Get-WindowBounds $process $element $hwnd
@@ -1223,6 +1237,8 @@ function Build-Snapshot([string]$query, $TextLimit = $script:DefaultTextLimit, [
         $window | Add-Member -NotePropertyName "main" -NotePropertyValue ($window.handle -eq [int64]$process.MainWindowHandle) -Force
         if ($window.handle -eq [int64]$hwnd) { $selectedTitle = $window.title }
     }
+    $script:LastCaptureSource = $null
+    $raster = if ($Screenshot) { Capture-WindowPngBase64 $hwnd $bounds } else { $null }
     [pscustomobject]@{
         app = [pscustomobject]@{
             name = $process.ProcessName
@@ -1234,7 +1250,8 @@ function Build-Snapshot([string]$query, $TextLimit = $script:DefaultTextLimit, [
         windowBounds = $bounds
         dpiScale = Get-WindowDpiScale $hwnd
         windows = @($windows)
-        screenshotPngBase64 = $(if ($Screenshot) { Capture-WindowPngBase64 $hwnd $bounds } else { $null })
+        screenshotPngBase64 = $raster
+        screenshotSource = $script:LastCaptureSource
         treeLines = @($rendered.lines)
         focusedSummary = Get-FocusedSummary $process.Id $TextLimit
         selectedText = Get-SelectedText $process.Id $TextLimit
@@ -1331,7 +1348,8 @@ function Find-Element($process, $record, $rootOverride = $null) {
         return $null
     }
     $root = if ($null -ne $rootOverride) { $rootOverride } else { Get-MainElement $process }
-    foreach ($element in (Get-AllElements $root)) {
+    $elements = @(Get-AllElements $root)
+    foreach ($element in $elements) {
         Assert-NotCancelled "matching the observed element in the live tree"
         try {
             if (Same-RuntimeId @($element.GetRuntimeId()) @($record.runtimeId)) {
@@ -1340,17 +1358,26 @@ function Find-Element($process, $record, $rootOverride = $null) {
         } catch {
         }
     }
-    foreach ($element in (Get-AllElements $root)) {
+    $idCandidates = New-Object System.Collections.Generic.List[object]
+    $nameCandidates = New-Object System.Collections.Generic.List[object]
+    foreach ($element in $elements) {
+        Assert-NotCancelled "relocating the observed element in the live tree"
         try {
             $sameAutomationId = -not [string]::IsNullOrWhiteSpace($record.automationId) -and $element.Current.AutomationId -eq $record.automationId
             $sameName = -not [string]::IsNullOrWhiteSpace($record.name) -and $element.Current.Name -eq $record.name
             $sameType = $element.Current.ControlType.ProgrammaticName -eq $record.controlType
-            if (($sameAutomationId -or $sameName) -and $sameType) {
-                return $element
-            }
+            if ($sameAutomationId -and $sameType) { $idCandidates.Add($element) }
+            if ($sameName -and $sameType) { $nameCandidates.Add($element) }
         } catch {
         }
     }
+    $candidates = @(if ($idCandidates.Count -gt 0) { $idCandidates } else { $nameCandidates })
+    if ($idCandidates.Count -gt 1 -and -not [string]::IsNullOrWhiteSpace($record.name)) {
+        $namedIds = @($idCandidates | Where-Object { $_.Current.Name -eq $record.name })
+        if ($namedIds.Count -gt 0) { $candidates = $namedIds }
+    }
+    if ($candidates.Count -eq 1) { return $candidates[0] }
+    if ($candidates.Count -gt 1) { throw "Observed element has multiple matching controls; observe again and choose a distinguishable element" }
     return $null
 }
 
@@ -1438,20 +1465,23 @@ function Invoke-Scroll($element, [string]$direction, [double]$pages) {
     return $true
 }
 
-function Find-TextEntryElement($process) {
+function Find-TextEntryElement($process, $rootOverride = $null) {
+    $root = if ($null -ne $rootOverride) { $rootOverride } else { Get-MainElement $process }
+    $elements = @(Get-AllElements $root)
     try {
         $focused = [Windows.Automation.AutomationElement]::FocusedElement
         if ($null -ne $focused -and $focused.Current.ProcessId -eq $process.Id) {
             $focusedValue = Get-CurrentPatternOrNull $focused ([Windows.Automation.ValuePattern]::Pattern)
             if ($null -ne $focusedValue -and -not $focusedValue.Current.IsReadOnly) {
-                return $focused
+                foreach ($candidate in $elements) {
+                    if (Same-RuntimeId @($candidate.GetRuntimeId()) @($focused.GetRuntimeId())) { return $candidate }
+                }
             }
         }
     } catch {
     }
 
-    $root = Get-MainElement $process
-    foreach ($element in (Get-AllElements $root)) {
+    foreach ($element in $elements) {
         $valuePattern = Get-CurrentPatternOrNull $element ([Windows.Automation.ValuePattern]::Pattern)
         if ($null -eq $valuePattern -or $valuePattern.Current.IsReadOnly) {
             continue
@@ -1462,7 +1492,7 @@ function Find-TextEntryElement($process) {
         }
     }
 
-    foreach ($element in (Get-AllElements $root)) {
+    foreach ($element in $elements) {
         $valuePattern = Get-CurrentPatternOrNull $element ([Windows.Automation.ValuePattern]::Pattern)
         if ($null -ne $valuePattern -and -not $valuePattern.Current.IsReadOnly) {
             return $element
@@ -1499,12 +1529,12 @@ function Test-TextWindowHandleCandidate($process, $element) {
     )
 }
 
-function Find-TextEntryWindowHandle($process, $preferredElement) {
+function Find-TextEntryWindowHandle($process, $preferredElement, $rootOverride = $null) {
     if (Test-TextWindowHandleCandidate $process $preferredElement) {
         return Get-NativeWindowHandle $preferredElement
     }
 
-    $root = Get-MainElement $process
+    $root = if ($null -ne $rootOverride) { $rootOverride } else { Get-MainElement $process }
     foreach ($element in (Get-AllElements $root)) {
         if (-not (Test-TextWindowHandleCandidate $process $element)) {
             continue
@@ -1524,9 +1554,9 @@ function Find-TextEntryWindowHandle($process, $preferredElement) {
     return [IntPtr]::Zero
 }
 
-function Invoke-TypeText($process, [string]$text) {
-    $element = Find-TextEntryElement $process
-    $targetHwnd = Find-TextEntryWindowHandle $process $element
+function Invoke-TypeText($process, [string]$text, $rootOverride = $null) {
+    $element = Find-TextEntryElement $process $rootOverride
+    $targetHwnd = Find-TextEntryWindowHandle $process $element $rootOverride
     if ($targetHwnd -ne [IntPtr]::Zero -and (Send-TextToEditHandle $targetHwnd $text $element)) {
         return $true
     }
@@ -1612,8 +1642,31 @@ function Invoke-ComputerOperation($operation) {
     $hwnd = Resolve-AppWindow $process $operation.window
     $rootElement = Get-MainElement $process $hwnd
     $windowBounds = Get-WindowBounds $process $rootElement $hwnd
-    $element = Find-Element $process $operation.element $rootElement
-    if ($null -ne $operation.element -and $null -eq $element) { throw "Observed element no longer exists; observe again" }
+    try {
+        if ($null -ne $operation.expected_bounds) {
+            foreach ($axis in @("x", "y", "width", "height")) {
+                if ([double]$windowBounds.$axis -ne [double]$operation.expected_bounds.$axis) { throw "Window geometry changed since the screenshot; observe again" }
+            }
+            if ($null -ne $operation.expected_dpi -and (Get-WindowDpiScale $hwnd) -ne [double]$operation.expected_dpi) { throw "Window DPI changed since the screenshot; observe again" }
+            if ($operation.capture_source -eq "screen") {
+                $points = New-Object System.Collections.Generic.List[object]
+                if ($tool -eq "drag") {
+                    $points.Add(@($operation.from_x, $operation.from_y))
+                    $points.Add(@($operation.to_x, $operation.to_y))
+                } else { $points.Add(@($operation.x, $operation.y)) }
+                foreach ($point in $points) {
+                    $screenPoint = New-Object VarinWin32+POINT
+                    $screenPoint.X = [int][math]::Round($windowBounds.x + [double]$point[0])
+                    $screenPoint.Y = [int][math]::Round($windowBounds.y + [double]$point[1])
+                    $owner = [VarinWin32]::WindowFromPoint($screenPoint)
+                    if ($owner -ne $hwnd -and -not [VarinWin32]::IsChild($hwnd, $owner)) { throw "Screenshot coordinate is occluded by another window; use an accessibility element or observe again" }
+                }
+            }
+        }
+        $element = Find-Element $process $operation.element $rootElement
+        if ($null -ne $operation.element -and $null -eq $element) { throw "Observed element no longer exists; observe again" }
+    } catch [System.OperationCanceledException] { throw }
+    catch { return [pscustomobject]@{ ok = $false; rejected = $true; error = $_.Exception.Message } }
     if ($null -ne $element) { $operation.element.frame = Get-ElementFrame $element $windowBounds }
     # PostMessage paths target the element's own HWND when the UIA record
     # carries one 鈥?child-window controls receive their own messages.
@@ -1719,7 +1772,7 @@ function Invoke-ComputerOperation($operation) {
         "type_text" {
             if ($inputPath -eq "global") {
                 Send-GlobalText $operation.text
-            } elseif (-not (Invoke-TypeText $process $operation.text)) {
+            } elseif (-not (Invoke-TypeText $process $operation.text $rootElement)) {
                 Send-Text $postHwnd $operation.text
             }
         }
@@ -1752,9 +1805,10 @@ function Invoke-ComputerOperation($operation) {
         $script:InputWindow = [IntPtr]::Zero
     }
 
-    Start-Sleep -Milliseconds 120
+    $script:LastInputTimes[$process.Id] = [DateTime]::UtcNow
+    if (-not $operation.return_state -or $operation.return_state -eq "none") { return [pscustomobject]@{ ok = $true } }
     try {
-        return [pscustomobject]@{ ok = $true; snapshot = (Build-Snapshot $operation.app (Resolve-TextLimit $null) 0 0 $true $operation.window) }
+        return [pscustomobject]@{ ok = $true; snapshot = (Build-Snapshot $operation.app (Resolve-TextLimit $null) 0 0 ($operation.return_state -eq "screenshot") $operation.window) }
     } catch {
         return [pscustomobject]@{ ok = $true; text = "Input was dispatched; post-action observation failed. Observe again before deciding another action." }
     }

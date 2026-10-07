@@ -84,6 +84,18 @@ describe('Varin events', () => {
     delete (globalThis as { EventSource?: unknown }).EventSource;
   });
 
+  test('dispatches application activity on the shared stream and rejects malformed events', async () => {
+    const { subscribeVarinEvents } = await import('./varinEvents');
+    const events: unknown[] = [];
+    const unsubscribe = subscribeVarinEvents(event => events.push(event));
+    const source = MockEventSource.instances[0];
+    const properties = { desktopId: 'd1', activity: { sessionId: 's1', app: 'Editor', operation: 'click', status: 'running', updatedAt: 'now' } };
+    source.onmessage?.({ data: JSON.stringify({ type: 'varin:computer-activity', properties }) });
+    source.onmessage?.({ data: JSON.stringify({ type: 'varin:computer-activity', properties: { ...properties, activity: { ...properties.activity, status: 'unrecognized' } } }) });
+    expect(events).toEqual([{ type: 'computer-activity', ...properties }]);
+    unsubscribe();
+  });
+
   test('dispatches externally created session events', async () => {
     const { subscribeVarinEvents } = await import('./varinEvents');
     const events: unknown[] = [];

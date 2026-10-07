@@ -79,6 +79,7 @@ vi.mock('./PiAssistBar', () => ({ PiAssistBar: () => null }));
 vi.mock('./PiExtensionUiChrome', () => ({ PiExtensionUiChrome: () => null }));
 vi.mock('./PiGoalControls', () => ({ PiGoalStrip: () => null }));
 vi.mock('./PiFollowUpsStrip', () => ({ PiFollowUpsStrip: () => null }));
+vi.mock('./PiComputerActivity', () => ({ PiComputerActivity: () => null }));
 vi.mock('./PiRecoveryDialog', () => ({ PiRecoveryDialog: () => null }));
 vi.mock('./PiCompactionTraceDialog', () => ({ PiCompactionTraceDialog: () => null }));
 vi.mock('./PdfMaterialReader', () => ({ PdfMaterialReader: () => null }));
