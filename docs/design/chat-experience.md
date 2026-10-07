@@ -173,6 +173,12 @@ are consumed by the Pi timeline. File summary lists only applied file mutations;
 still distinguish drafts, branch commits and failures. Diagram-format changes also invalidate the
 Markdown renderer's decoration context. Font, spacing and theme preferences remain on Appearance.
 
+Turn navigation is a slim left-hand rail, with one marker for each user/Agent turn. Its active marker
+follows the virtual list's first visible turn, not the latest execution. Nearby marks respond to pointer
+proximity; hover or keyboard focus reads only that turn's short user/answer preview. Marker clicks use
+the existing manual-scroll ownership and index navigation. Long rails scroll independently; streaming
+text never rebuilds their markers or reads every prompt.
+
 The obsolete per-fragment action setting is removed; actions remain once per turn. The old subagent
 prompting display toggle and its unconsumed iframe message are removed as well; native session execution
 and permission rules continue to own whether a session accepts input.

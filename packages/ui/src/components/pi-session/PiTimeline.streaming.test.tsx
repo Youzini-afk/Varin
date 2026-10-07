@@ -11,6 +11,8 @@ const mocks = vi.hoisted(() => ({
   dataReplacements: 0,
   retainAssignedGeneration: false,
   handoffs: [] as Array<{ id: string; rendered: boolean }>,
+  firstVisibleChanged: undefined as ((input: { index: number }) => void) | undefined,
+  scrollToIndex: vi.fn().mockResolvedValue(undefined),
   store: {
     currentSessionId: 'session-1',
     records: {} as Record<string, unknown>,
@@ -25,13 +27,15 @@ vi.mock('@legendapp/list/react', () => ({
     data: readonly { id: string }[];
     renderItem(input: { item: unknown; index: number }): React.ReactNode;
     ListFooterComponent?: React.ReactNode;
+    onFirstVisibleItemChanged?(input: { index: number }): void;
   }, ref) => {
     if (mocks.data !== props.data) mocks.dataReplacements += 1;
     mocks.data = props.data;
+    mocks.firstVisibleChanged = props.onFirstVisibleItemChanged;
     React.useImperativeHandle(ref, () => ({
-      getState: () => ({ contentLength: 1000, scroll: 400, scrollLength: 600 }),
+      getState: () => ({ contentLength: 1000, scroll: 400, scrollLength: 600, data: props.data, positionAtIndex: (index: number) => index * 200 }),
       getScrollableNode: () => null,
-      scrollToIndex: vi.fn().mockResolvedValue(undefined),
+      scrollToIndex: mocks.scrollToIndex,
       scrollToOffset: vi.fn().mockResolvedValue(undefined),
     }));
     // LegendList may render an old container assignment through the current
@@ -71,26 +75,6 @@ vi.mock('./PiTimelineEntries', () => ({
   PiTurnUserMessage: () => null,
 }));
 vi.mock('./PiTurnAssistantChrome', () => ({ PiTurnAssistantChrome: () => null }));
-vi.mock('@/components/ui/dropdown-menu', () => {
-  const Menu = React.createContext({ open: false, toggle: () => {} });
-  return {
-    DropdownMenu: ({ children, open, onOpenChange }: {
-      children: React.ReactNode; open?: boolean; onOpenChange?(open: boolean): void;
-    }) => {
-      const [localOpen, setLocalOpen] = React.useState(false);
-      const actualOpen = open ?? localOpen;
-      return <Menu.Provider value={{ open: actualOpen, toggle: () => {
-        setLocalOpen(!actualOpen); onOpenChange?.(!actualOpen);
-      } }}>{children}</Menu.Provider>;
-    },
-    DropdownMenuTrigger: ({ children }: { children: React.ReactElement<{ onClick?: () => void }> }) =>
-      React.cloneElement(children, { onClick: React.useContext(Menu).toggle }),
-    DropdownMenuContent: ({ children }: { children: React.ReactNode }) =>
-      React.useContext(Menu).open ? <div role="menu">{children}</div> : null,
-    DropdownMenuItem: ({ children, onSelect }: { children: React.ReactNode; onSelect?(): void }) =>
-      <button type="button" role="menuitem" onClick={onSelect}>{children}</button>,
-  };
-});
 
 const assistant = (text: string, timestamp: number): PiAssistantMessage => ({
   api: 'messages', content: [{ type: 'text', text }], model: 'model', provider: 'provider',
@@ -122,6 +106,9 @@ describe('PiTimeline streaming work', () => {
     mocks.dataReplacements = 0;
     mocks.retainAssignedGeneration = false;
     mocks.handoffs = [];
+    mocks.firstVisibleChanged = undefined;
+    mocks.scrollToIndex.mockClear();
+    mocks.store.cancelTimelineAutomation.mockClear();
     mocks.store.currentSessionId = 'session-1';
     mocks.store.records = {
       'session-1': { view: DEFAULT_PI_TIMELINE_VIEW, toolExecutions: {}, assistantOutputDurationsMs: {} },
@@ -143,7 +130,9 @@ describe('PiTimeline streaming work', () => {
     ));
   };
 
-  it('updates the live answer without rebuilding list data or reading prompts for a closed navigator', async () => {
+  const marker = (ordinal: number) => container.querySelector<HTMLButtonElement>(`[data-pi-turn-marker="${ordinal}"]`)!;
+
+  it('updates the live answer without rebuilding list data or reading messages for the idle turn rail', async () => {
     let promptReads = 0;
     const turns = 2000;
     const updates = 100;
@@ -161,31 +150,49 @@ describe('PiTimeline streaming work', () => {
       listDataReplacements: mocks.dataReplacements, promptReads,
     }));
     expect(container.querySelector('[data-live-answer]')?.textContent).toBe('delta-99');
-    expect(container.querySelector('[role="menu"]')).toBeNull();
+    expect(container.querySelectorAll('[data-pi-turn-marker]')).toHaveLength(turns);
+    expect(container.querySelector('[role="tooltip"]')).toBeNull();
     expect(promptReads).toBe(0);
     expect(mocks.dataReplacements).toBe(0);
   });
 
-  it('opens current prompts on demand and discards an open navigator when the session changes', async () => {
-    const entries = history(3, () => {});
+  it('reads only the previewed turn and discards that preview when the session changes', async () => {
+    let reads = 0;
+    const entries = history(3, () => { reads += 1; });
     await render(entries, assistant('first session', 20));
-    const trigger = container.querySelector<HTMLButtonElement>('button[aria-label="settings.chat.navigator"]')!;
-    await act(async () => trigger.click());
-    expect([...container.querySelectorAll('[role="menuitem"]')].map((element) => element.textContent))
-      .toEqual(['Prompt 0', 'Prompt 1', 'Prompt 2']);
+    reads = 0;
+    await act(async () => marker(1).dispatchEvent(new window.Event('pointerover', { bubbles: true })));
+    expect(container.querySelector('[role="tooltip"]')?.textContent).toContain('Prompt 1');
+    expect(container.querySelector('[role="tooltip"]')?.textContent).toContain('Completed answer');
+    expect(reads).toBe(1);
     await render(entries, assistant('another delta', 20));
-    expect(container.querySelector('[role="menu"]')).not.toBeNull();
+    expect(container.querySelector('[role="tooltip"]')).not.toBeNull();
+    expect(reads).toBe(1);
     await render(history(2, () => {}), assistant('second session', 30), 'session-2');
-    expect(container.querySelector('[role="menu"]')).toBeNull();
+    expect(container.querySelector('[role="tooltip"]')).toBeNull();
     expect(container.querySelector('[data-live-answer]')?.textContent).toBe('second session');
   });
   it('drops old live content and navigation state when another Host has the same session ID', async () => {
     await render(history(2, () => {}), assistant('old Host answer', 10));
-    await act(async () => container.querySelector<HTMLButtonElement>('button[aria-label="settings.chat.navigator"]')!.click());
-    expect(container.querySelector('[role="menu"]')).not.toBeNull();
+    await act(async () => marker(0).dispatchEvent(new window.Event('focusin', { bubbles: true })));
+    expect(container.querySelector('[role="tooltip"]')).not.toBeNull();
     await render(history(2, () => {}), assistant('new Host answer', 10), 'session-1', 'host-b');
-    expect(container.querySelector('[role="menu"]')).toBeNull();
+    expect(container.querySelector('[role="tooltip"]')).toBeNull();
     expect(container.querySelector('[data-live-answer]')?.textContent).toBe('new Host answer');
+  });
+
+  it('highlights the viewed turn and gives an explicit marker jump ownership of scrolling', async () => {
+    await render(history(3, () => {}), undefined);
+    await act(async () => mocks.firstVisibleChanged!({ index: 1 }));
+    expect(marker(1).getAttribute('aria-current')).toBe('location');
+    expect(marker(0).getAttribute('aria-current')).toBeNull();
+    await act(async () => marker(0).click());
+    expect(mocks.store.cancelTimelineAutomation).toHaveBeenCalledWith('session-1');
+    expect(mocks.scrollToIndex).toHaveBeenLastCalledWith({ index: 0, viewPosition: 0, animated: true });
+    // Highlight follows the list's actual location, rather than assuming a clicked jump has finished.
+    expect(marker(1).getAttribute('aria-current')).toBe('location');
+    await act(async () => mocks.firstVisibleChanged!({ index: 0 }));
+    expect(marker(0).getAttribute('aria-current')).toBe('location');
   });
 
   it.each(['withdraw', 'persist', 'replace'] as const)(

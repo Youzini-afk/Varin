@@ -133,6 +133,32 @@
 }
 .pi-composer-send-mode { grid-column: 1 / -1; grid-row: 1; justify-self: end; min-width: 0; max-width: 100%; }
 .pi-composer-send-mode button { max-width: 100%; }
+
+/* Turn navigation sits beside the conversation; it has no streaming-content subscriptions. */
+.pi-timeline-surface { container: pi-timeline / inline-size; }
+.pi-turn-navigation { position: relative; z-index: 20; flex: 0 0 24px; min-height: 0; margin-block: 18px; }
+.pi-turn-navigation-scroll { height: 100%; overflow-y: auto; overscroll-behavior: contain; scrollbar-width: none; padding-block: 8px; }
+.pi-turn-navigation-scroll::-webkit-scrollbar { display: none; }
+.pi-turn-navigation-list { position: relative; display: flex; flex-direction: column; justify-content: center; min-height: 100%; }
+.pi-turn-marker { --turn-proximity: 0; --turn-base-width: 6px; display: flex; flex: 0 0 10px; align-items: center; width: 24px; padding: 0 0 0 6px; outline: none; cursor: pointer; }
+.pi-turn-marker-stroke {
+  width: calc(var(--turn-base-width) + 12px * var(--turn-proximity)); height: 2px; flex-shrink: 0; border-radius: 2px;
+  background: var(--muted-foreground); opacity: calc(.32 + .68 * var(--turn-proximity));
+  transform: translateX(calc(1px * var(--turn-proximity)));
+  transition: width 140ms var(--wb-ease), opacity 140ms ease, transform 140ms var(--wb-ease), background-color var(--wb-state-duration) ease;
+}
+.pi-turn-marker[aria-current="location"] { --turn-base-width: 11px; }
+.pi-turn-marker[aria-current="location"] .pi-turn-marker-stroke { background: var(--foreground); opacity: 1; }
+.pi-turn-marker:focus-visible .pi-turn-marker-stroke { background: var(--foreground); opacity: 1; width: 18px; outline: 2px solid var(--ring); outline-offset: 3px; }
+.pi-turn-preview {
+  position: absolute; top: var(--turn-preview-top, 8px); left: calc(100% + 6px); width: min(260px, calc(100cqi - 46px));
+  overflow: hidden; pointer-events: none; border: 1px solid var(--border); border-radius: 10px; padding: 10px 12px;
+  background: var(--surface-elevated); box-shadow: 0 6px 22px color-mix(in srgb, var(--foreground) 9%, transparent);
+  transition: top 140ms var(--wb-ease);
+}
+@media (prefers-reduced-motion: reduce) {
+  .pi-turn-marker-stroke, .pi-turn-preview { transition: none; }
+}
 .pi-composer-footer:has(.pi-composer-send-mode) .pi-composer-options { grid-column: 1; grid-row: 2; }
 .pi-composer-footer:has(.pi-composer-send-mode) .pi-composer-models { grid-column: 2; grid-row: 2; }
 .pi-composer-footer:has(.pi-composer-send-mode) .pi-composer-actions { grid-column: 3; grid-row: 2; }
