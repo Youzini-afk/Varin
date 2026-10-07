@@ -1972,9 +1972,9 @@ export function createThreadMergeService(host: HarnessServiceHost): HarnessServi
       if (!hasPublishedResult) {
         const changedFiles = thread.report?.changedFiles ?? thread.worktree?.changedFiles;
         if (!thread.workBranchId && thread.report && changedFiles?.length === 0) {
-          return { text: `Thread ${thread.id} completed with a report and no file changes. Read its report with read_thread; there is no code to merge.`, merged: 0, conflicts: [] };
+          return { text: `Thread ${thread.id} has no file changes to merge. Its report is available through read_thread.`, merged: 0, conflicts: [] };
         }
-        throw new HarnessServiceError("unavailable", `Thread ${thread.id} has no published code revision to merge. Its report and history are still available through read_thread; inspect the thread's publication state before retrying.`);
+        throw new HarnessServiceError("unavailable", `Thread ${thread.id} has no published code revision to merge. Check its status with read_thread.`);
       }
       if (host.requireThreadMergeJournal && !ctx.actor.runId) {
         throw new HarnessServiceError("unavailable", "Thread integration requires an active parent turn recovery binding");

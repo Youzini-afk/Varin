@@ -1776,9 +1776,8 @@ export function createThreadRuntime(options: ThreadRuntimeOptions) {
       const writers = await options.inspectBaselineWriters(captureWorkspaceId, sourceRoot);
       if (writers.length > 0) {
         throw new ThreadRuntimeError("unavailable",
-          `An isolated baseline cannot be captured while the parent workspace has active writers: ${writers.map(writer =>
-            `${writer.purpose ?? "writer"}${writer.owner ? ` (${writer.owner.kind} ${writer.owner.id})` : ""}${writer.startedAt ? ` since ${writer.startedAt}` : ""} [${writer.id}]`).join(", ")}. `
-          + 'Wait for these operations to finish, or explicitly use worktree:"shared" to work directly in the parent workspace.',
+          `Cannot create an isolated workspace while parent operations are active: ${[...new Set(writers.map(writer => writer.purpose ?? "file write"))].join(", ")}. `
+          + 'Wait for them to finish, or use worktree:"shared" to edit the parent workspace directly.',
           { retryable: true });
       }
     };

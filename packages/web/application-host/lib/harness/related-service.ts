@@ -22,7 +22,7 @@ const unavailable = (anchor: string, message: string): RelatedQueryResult => ({
 });
 
 export function createRelatedQueryService(
-  host: Pick<HarnessServiceHost, "graphRecall" | "relationCollector">,
+  host: Pick<HarnessServiceHost, "graphRecall" | "relationCollector" | "outputStore">,
 ): HarnessService<"related.query"> {
   return {
     handle: async (params: RelatedParams, ctx) => {
@@ -52,7 +52,7 @@ export function createRelatedQueryService(
         throw new HarnessServiceError("forbidden", "Related scope does not overlap the actor's authorized workspace scope.");
       }
       if (!workspaceId || !host.graphRecall) {
-        return unavailable(anchor, "related unavailable: the symbol graph is not wired.");
+        return unavailable(anchor, "related unavailable: no symbol graph for this workspace.");
       }
       ctx.signal.throwIfAborted();
       let graph: Awaited<ReturnType<NonNullable<typeof host.graphRecall>>> | null;
@@ -68,7 +68,7 @@ export function createRelatedQueryService(
       if (!graph) {
         return unavailable(
           anchor,
-          "related unavailable: the symbol graph is not open for this workspace. related does not open a database on the read path.",
+          "related unavailable: no symbol graph for this workspace.",
         );
       }
       const hasUnsavedFixedView = ctx.inputContext?.source === "surface"
@@ -92,6 +92,7 @@ export function createRelatedQueryService(
           graph.store,
           {
             workspaceId,
+            storeOutput: text => host.outputStore.store(ctx.sessionId, text, "related").ref.handle,
             ...(host.relationCollector ? { collector: host.relationCollector } : {}),
             // RR4: query scope and operation dir are defaults, then the pinned
             // workspace scope intersects them before any graph reads.

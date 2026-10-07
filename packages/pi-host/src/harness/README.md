@@ -67,6 +67,10 @@ run concurrently. The user can revoke Computer Use for the current main round fr
 The Host cancels only Computer evaluations and sends a passive stop notification, leaving other Agent
 work available. See [Computer admission](../../../web/application-host/lib/computer/DOCUMENTATION.md).
 
+Failure messages distinguish reads from desktop mutations. Read timeouts and cancellation before
+dispatch do not imply a desktop change. An interrupted mutation, unknown receipt, or script failure
+after dispatched actions includes an effect warning so callers can inspect before retrying.
+
 ```js
 const editor = await computer.getApp('notepad');
 await editor.getAXState(); // consumes the binding's first tree

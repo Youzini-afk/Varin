@@ -352,15 +352,7 @@ export async function packExploreSearchResult(
   const prefix = options?.resourceUnits?.length
     ? `Search scope: ${[...new Set(options.resourceUnits.map((unit) => path.resolve(unit.root, unit.resourcePrefix)))].join(", ")}` : '';
   const preview = formatExploreOutput(formatted, { byteBudget: DEFAULT_BYTE_BUDGET, prefix });
-  const fullDetails = {
-    notRequested: result.notRequested,
-    omitted: result.omitted,
-    previewOmitted: preview.omitted,
-    details: resolvedDetails,
-    ...(relations ? { relations } : {}),
-  };
-  const storedBody = `${preview.storedBody}\n\nExplore structured details (JSON):\n${JSON.stringify(fullDetails)}`;
-  const stored = host.outputStore.store(ctx.sessionId, storedBody, "explore");
+  const stored = host.outputStore.store(ctx.sessionId, preview.storedBody, "explore");
   const summaryFormatted = {
     ...formatted,
     notRequested: { count: result.notRequested.count, paths: [] },

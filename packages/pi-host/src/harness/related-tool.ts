@@ -12,10 +12,10 @@ export function createRelatedTool(bridge: HostServicesBridge, _sessionId: string
   return defineTool({
     name: "related",
     label: "Related",
-    description: "Topology and resolved relations from the symbol graph: what a path or symbol defines, what it imports, who imports it, the other ends of its connection literals — and, for a symbol name, language-server-resolved reference sites and call edges (who calls it, what it calls). Resolution is bounded to the anchor's own definitions, so related is not a positional lsp.references replacement; sites marked [unpinned] came from the server's own file read, not a bound revision.",
+    description: "Find definitions, imports, connection endpoints, references and calls for a file path or symbol name.",
     promptSnippet: "related: file-level topology plus resolved references/calls for a symbol name from the symbol graph",
     promptGuidelines: [
-      "Graph ranges identify indexed locations. related resolves around the anchor's own definitions; references uses an exact file position. Unpinned sites come from the language server's file read.",
+      "Graph ranges identify indexed locations; [unpinned] locations have no bound file revision. references resolves references at an exact file position.",
     ],
     parameters: RelatedParams,
     executionMode: "parallel",

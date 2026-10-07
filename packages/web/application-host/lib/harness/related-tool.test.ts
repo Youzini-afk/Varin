@@ -4,6 +4,7 @@ import { join } from "node:path";
 import { tmpdir } from "node:os";
 import { openWorkspaceKnowledge, type KnowledgeStore } from "../knowledge/store.js";
 import { executeRelated } from "./related-tool.js";
+import { createOutputStore } from "./output-store.js";
 import { createRelatedQueryService } from "./related-service.js";
 import type { HarnessActorContext } from "@varin/protocol";
 import type { HarnessServiceContext } from "./router.js";
@@ -86,7 +87,7 @@ describe("related tool", () => {
     expect(byName.text).not.toContain("rank ");
   });
 
-  it("caps each text section and says how much it left out", async () => {
+  it("keeps capped relation lists readable through a session output handle", async () => {
     const many = Array.from({ length: 120 }, (_, index) => ({
       name: `sym${index}`,
       kind: "function",
@@ -98,12 +99,24 @@ describe("related tool", () => {
         { name: `consumer${index}`, kind: "function", range },
       ], "disk-r1", [{ kind: "import", value: "./hub.js", line: 1 }]);
     }
-    const result = await executeRelated({ anchor: "lib/hub.ts" }, store);
+    const outputStore = createOutputStore();
+    let handle = '';
+    const result = await executeRelated({ anchor: "lib/hub.ts" }, store, {
+      storeOutput: text => (handle = outputStore.store('session', text, 'related').ref.handle),
+    });
     expect(result.definitions).toHaveLength(120);
     expect(result.importers.items).toHaveLength(60);
-    expect(result.text).toContain("… 80 more (full list in details)");
-    expect(result.text).toContain("… 20 more (full list in details)");
+    expect(result.text).toContain("… 80 more");
+    expect(result.text).toContain("… 20 more");
     expect(Buffer.byteLength(result.text, "utf8")).toBeLessThan(24 * 1024);
+    expect(result.text).toContain(`get_output({handle: "${handle}"})`);
+    const full = outputStore.read('session', handle, 0, 100_000);
+    expect(full.status).toBe('ready');
+    if (full.status === 'ready') {
+      for (const symbol of many) expect(full.slice.text).toContain(`lib/hub.ts ${symbol.name} `);
+      for (let index = 0; index < 60; index++) expect(full.slice.text).toContain(`lib/consumer-${index}.ts`);
+    }
+    outputStore.dispose();
   });
 
   it("walks a bounded number of paths when a name matches many files", async () => {
@@ -239,7 +252,7 @@ describe("related tool", () => {
     }
     const service = createRelatedQueryService({
       graphRecall: async () => ({ workspaceId: "ws", store, directFactsCompatible: true }),
-      relationCollector: null,
+      relationCollector: null, outputStore: createOutputStore(),
     });
     const contextFor = (actorFields: Partial<HarnessActorContext> = {}, resourceIds: string[] = []): HarnessServiceContext => {
       const actor: HarnessActorContext = {
@@ -298,7 +311,7 @@ describe("related tool", () => {
     ], "disk-r1");
     const service = createRelatedQueryService({
       graphRecall: async () => ({ workspaceId: "ws", store, directFactsCompatible: true }),
-      relationCollector: null,
+      relationCollector: null, outputStore: createOutputStore(),
     });
     const actor: HarnessActorContext = {
       authorityInstanceId: "host",
@@ -340,7 +353,7 @@ describe("related tool", () => {
       store,
       directFactsCompatible: true,
     }));
-    const service = createRelatedQueryService({ graphRecall, relationCollector: null });
+    const service = createRelatedQueryService({ graphRecall, relationCollector: null, outputStore: createOutputStore() });
     const actor: HarnessActorContext = {
       authorityInstanceId: "host", sessionId: "session", workerId: "worker", workerGeneration: 1,
       workspaceId: "actor-workspace", grantedCapabilities: ["read.search"], workspaceScope: ["local"],

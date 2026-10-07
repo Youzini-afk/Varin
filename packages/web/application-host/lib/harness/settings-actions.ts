@@ -401,7 +401,7 @@ const providersAdapter = (deps: SettingsActionDeps): SettingsActionAdapter => ({
           });
           return {
             status: 'applied',
-            detail: 'provider login request accepted by the owning session; recheck provider status/list for authentication state',
+            detail: 'Sign-in started; authentication is not complete yet.',
             data: { providerId, started: true },
           };
         }
@@ -622,7 +622,6 @@ const piPackagesAdapter = (deps: SettingsActionDeps): SettingsActionAdapter => (
           const result = await deps.requestWorkspace(root, 'package.install', { source, scope });
           return {
             status: 'applied',
-            detail: `package install completed for ${source}; recheck package list for the owner state`,
             data: sanitizePackageResult(result),
           };
         }
@@ -637,7 +636,6 @@ const piPackagesAdapter = (deps: SettingsActionDeps): SettingsActionAdapter => (
         case 'update':
           return {
             status: 'applied',
-            detail: 'package update completed at the Pi package owner; recheck package list for the owner state',
             data: sanitizePackageResult(await deps.requestWorkspace(root, 'package.update', {
               ...(str(args, 'source') ? { source: str(args, 'source')! } : {}),
             })),
@@ -1117,7 +1115,6 @@ const languageSupportAdapter = (deps: SettingsActionDeps): SettingsActionAdapter
           const languageId = needString(args, 'languageId');
           return {
             status: 'applied',
-            detail: `language server preparation completed for ${languageId}; recheck language status for the owner state`,
             data: await support.prepareServer({ workspaceId, languageId }),
           };
         }
@@ -1158,12 +1155,12 @@ const runtimeUpdateAdapter = (deps: SettingsActionDeps): SettingsActionAdapter =
           return { status: 'applied', data: lifecycle.snapshot };
         case 'install':
           return {
-            status: 'applied', detail: 'runtime install completed at the runtime lifecycle owner',
+            status: 'applied',
             data: await lifecycle.install(),
           };
         case 'upgrade':
           return {
-            status: 'applied', detail: 'runtime upgrade completed at the runtime lifecycle owner',
+            status: 'applied',
             data: await lifecycle.upgrade(),
           };
         case 'rediscover':
@@ -1217,7 +1214,6 @@ const tunnelAdapter = (deps: SettingsActionDeps): SettingsActionAdapter => ({
           if (str(args, 'mode')) input.mode = str(args, 'mode');
           return {
             status: 'applied',
-            detail: 'tunnel start completed at the tunnel owner; recheck tunnel status for the live endpoint',
             data: await tunnel.start(input),
           };
         }

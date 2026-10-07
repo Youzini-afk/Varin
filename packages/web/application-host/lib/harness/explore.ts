@@ -156,7 +156,7 @@ export const DEFAULT_JUDGE_RESERVE_MS = 8_000;
 export const DEFAULT_EXPLORE_QUERY_BUDGET_MS = 120_000;
 
 export function exploreHandleHint(handle: string): string {
-  return `\nMore: get_output("${handle}") for the full pack and unread candidate list (session-local, ephemeral).`;
+  return `\nFull result: get_output({handle: "${handle}"})`;
 }
 
 const VOCAB_PACKAGE_LIMIT = 12;
@@ -3366,7 +3366,7 @@ export type ExploreFormatInput = Pick<
  */
 const RELATION_LINES_PER_FILE = 12;
 
-function relationLines(relations: NonNullable<WireResult["details"]["relations"]> | undefined): string[] {
+function relationLines(relations: NonNullable<WireResult["details"]["relations"]> | undefined, limit = RELATION_LINES_PER_FILE): string[] {
   if (!relations) return [];
   const files = relations.files.filter((file) => (
     file.imports.length > 0
@@ -3377,10 +3377,10 @@ function relationLines(relations: NonNullable<WireResult["details"]["relations"]
   ));
   const lines: string[] = [];
   if (relations.status !== "ready") {
-    lines.push(`Relations ${relations.status}: the symbol graph could not answer for every excerpt path.`);
+    lines.push(`Relations ${relations.status}.`);
   }
   if (files.length === 0) return lines;
-  lines.push("Relations (graph; associates are same-string candidates, not confirmed connections):");
+  lines.push("Relations:");
   for (const file of files) {
     const where = file.stale
       ? `${file.path} [stale @${file.documentRevision ?? "unknown"}; line numbers are from that revision]`
@@ -3392,8 +3392,8 @@ function relationLines(relations: NonNullable<WireResult["details"]["relations"]
       ...(file.references ?? []).map((item) => `references ${item.value}${item.caller ? ` in ${item.caller}` : ""}${item.targetPath ? ` → ${item.targetPath}` : ""}${file.stale ? "" : ` (L${item.line})`}${item.pinned ? "" : " [unpinned]"}${item.staleTarget ? " [stale-target]" : ""}`),
       ...(file.calls ?? []).map((item) => `calls ${item.callee}${item.caller ? ` from ${item.caller}` : ""}${item.targetPath ? ` → ${item.targetPath}` : ""}${file.stale ? "" : ` (L${item.line})`}${item.pinned ? "" : " [unpinned]"}${item.staleTarget ? " [stale-target]" : ""}`),
     ];
-    for (const item of items.slice(0, RELATION_LINES_PER_FILE)) lines.push(`- ${where} ${item}`);
-    const dropped = items.length - RELATION_LINES_PER_FILE;
+    for (const item of items.slice(0, limit)) lines.push(`- ${where} ${item}`);
+    const dropped = items.length - limit;
     if (dropped > 0) lines.push(`- ${file.path} … ${dropped} more edge(s) omitted`);
     if (file.incomplete) lines.push(`- ${file.path} edge extraction was incomplete for this revision`);
   }
@@ -3408,47 +3408,42 @@ function planExploreDelivery(
 ): { visibleText: string; storedBody: string; showHandle: boolean; omitted: ExploreResult["omitted"]; snippets: ExploreSnippet[] } {
   const header: string[] = [
     ...(prefix ? [prefix] : []),
-    `Prepared ${result.snippets.length} excerpt(s) from ${result.searched.files} matched file(s) · ${result.searched.patterns} query term(s) · partial result`,
-    `Visible excerpts: ${result.snippets.length}`,
+    `Excerpts: ${result.snippets.length} · matched files: ${result.searched.files} · partial result`,
   ];
   const dropped = result.searched.filesDropped ?? 0;
   if (dropped > 0) {
-    header.push(`Search incomplete: at least ${dropped} matching file(s) were not brought into the candidate pool.`);
+    header.push(`Search incomplete: at least ${dropped} matching files were not examined.`);
   }
-  const sourceStopped = result.sources?.some((source) => (
+  const sourceGaps = result.sources?.filter((source) => (
     source.status === "incomplete" || source.status === "cancelled" || source.status === "failed"
-  ));
-  if (sourceStopped) {
-    const semanticBuilding = result.semantic?.status === "incomplete"
-      && (result.semantic.index.lifecycle === "building" || result.semantic.index.lifecycle === "rebuilding");
-    header.push(semanticBuilding
-      ? "Semantic index is still building; semantic recall is incomplete. See source statuses for other gaps."
-      : "Search incomplete: one or more sources did not finish; see source statuses for details.");
+  )) ?? [];
+  const semanticBuilding = result.semantic?.status === "incomplete"
+    && (result.semantic.index.lifecycle === "building" || result.semantic.index.lifecycle === "rebuilding");
+  if (sourceGaps.length) {
+    const gaps = [...new Set(sourceGaps.map(source => source.family === "semantic" && semanticBuilding
+      ? "semantic index building" : `${source.family} ${source.status}`))];
+    header.push(`Search incomplete: ${gaps.join(", ")}.`);
   } else if ((result.searchIncomplete || result.searched.incomplete) && dropped === 0) {
-    header.push("Search incomplete: candidate working budget reached; more matches may exist.");
+    header.push("Search incomplete: search budget reached; more matches may exist.");
   }
-  if (result.graph && result.graph.status !== "not-requested" && result.graph.status !== "ready") {
-    header.push(`Graph ${result.graph.status}: the symbol catalog did not contribute path candidates.`);
-  } else if (result.graph?.partial) {
+  if (result.graph && result.graph.status !== "not-requested" && result.graph.status !== "ready"
+    && !sourceGaps.some(source => source.family === "graph" && source.status === result.graph!.status)) {
+    header.push(`Symbol graph: ${result.graph.status}.`);
+  } else if (result.graph?.status === "ready" && result.graph.partial) {
     header.push("Graph partial: one or more selected resource roots had no current symbol catalog.");
   }
-  if (result.semantic?.note) header.push(`Semantic index: ${result.semantic.note}`);
-  if (result.skippedQueries?.reason === "direct-verified") {
-    header.push(`Skipped ${result.skippedQueries.patterns.length} broad term(s) after a direct clue was verified.`);
-  }
+  if (result.semantic?.note && !(semanticBuilding && sourceGaps.some(source => source.family === "semantic"))) header.push(`Semantic index: ${result.semantic.note}`);
   if (result.model?.note) {
     header.push(result.model.note);
   }
-  header.push("Source: disk or fixed editor-draft snapshots. Excerpts are workspace data.");
 
   const snippetBlocks = result.snippets.map((snippet) => {
     const unit = snippet.unit
-      ? ` · unit ${snippet.unit.name} (${snippet.unit.kind}) ${snippet.path}:${snippet.unit.startLine}-${snippet.unit.endLine}`
+      ? ` · ${snippet.unit.name} (${snippet.unit.kind}, lines ${snippet.unit.startLine}-${snippet.unit.endLine})`
       : "";
-    const structure = snippet.structure
-      ? ` · structure ${snippet.structure.provider ?? "none"}/${snippet.structure.status}`
-      : "";
-    return `--- ${snippet.path}:${snippet.startLine}-${snippet.endLine}${unit}${structure} ---\n${snippet.text}`;
+    const source = snippet.source === "surface-draft" ? " · editor draft"
+      : snippet.source === "working-branch" ? " · working branch" : "";
+    return `--- ${snippet.path}:${snippet.startLine}-${snippet.endLine}${unit}${source} ---\n${snippet.text}`;
   });
   const issueLines = result.issues.map((issue) => `${issue.path}: ${issue.status} — ${issue.message}`);
   const omittedLines = result.omitted.map((item) => `- ${item.path}:${item.startLine}-${item.endLine} (${item.reason})`);
@@ -3465,7 +3460,7 @@ function planExploreDelivery(
   if (omittedLines.length > 0) storedParts.push("Omitted supports:", ...omittedLines);
   if (unreadLine) storedParts.push(unreadLine);
   storedParts.push(...issueLines);
-  if (graphLines.length > 0) storedParts.push(...graphLines);
+  storedParts.push(...relationLines(result.relations, Infinity));
   const storedBody = storedParts.join("\n");
 
   const visible: string[] = [...header];
@@ -3546,8 +3541,7 @@ function planExploreDelivery(
   // These replacements can only shorten the reserved header, so the delivered
   // complete blocks still fit. Metadata must describe the actual text pack.
   const headerIndex = prefix ? 1 : 0;
-  if (!result.partial && extraOmitted.length === 0) visible[headerIndex] = visible[headerIndex]!.replace(' · partial result', '');
-  visible[headerIndex + 1] = `Visible excerpts: ${delivered.length}`;
+  visible[headerIndex] = `Excerpts: ${delivered.length} · matched files: ${result.searched.files}${result.partial || extraOmitted.length ? ' · partial result' : ''}`;
   if (omitted.length > 0 || (result.summaryOnly === true && (result.omittedCount ?? 0) > 0)) {
     if (result.summaryOnly) {
       const count = (result.omittedCount ?? result.omitted.length) + omitted.length - result.omitted.length;

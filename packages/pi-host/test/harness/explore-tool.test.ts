@@ -138,6 +138,7 @@ describe("Host-backed explore tool", () => {
   });
   it("does not call the explore LLM when the user selected dedicated rerank", async () => {
     let completions = 0;
+    let submittedModel: { select?: string } | undefined;
     const bridge = {
       inputContext: () => ({ source: "disk" as const }),
       cancel: () => undefined,
@@ -149,8 +150,10 @@ describe("Host-backed explore tool", () => {
           decisionMode: "rerank",
         };
         if (method === "explore.query.views") return { views: [{}], sequence: 1, pending: false, actions: [], outputByteBudget: 24576, unevaluated: 0 };
-        if (method === "explore.query.finish") return { ...finishResult,
-          details: { ...finishResult.details, model: params.model } };
+        if (method === "explore.query.finish") {
+          submittedModel = params.model as { select?: string };
+          return finishResult;
+        }
         if (method === "explore.query.release") return { released: true };
         throw new Error(`unexpected ${method}`);
       },
@@ -158,7 +161,8 @@ describe("Host-backed explore tool", () => {
     const tool = createExploreTool(bridge, "session", { complete: async () => { completions += 1; return ""; } });
     const result = await tool.execute("call", { question: "where is service" }, undefined, undefined, undefined as never);
     assert.equal(completions, 0);
-    assert.equal((result.details as { model: { select: string } }).model.select, "disabled");
+    assert.equal(submittedModel?.select, "disabled");
+    assert.equal((result.details as Record<string, unknown>).model, undefined);
   });
 
   it("accepts and forwards literal anchors, paths, and the search budget", async () => {
@@ -259,7 +263,7 @@ describe("Host-backed explore tool", () => {
     assert.equal(result.content[0]?.type, "text");
     assert.equal((result.details as { handle: string }).handle, finishResult.handle);
     assert.equal((result.details as { partial: boolean }).partial, true);
-    assert.match((result.details as { model: { note: string } }).model.note, /budget exhausted \(500ms\)/);
+    assert.equal((result.details as { budgetExhausted: boolean }).budgetExhausted, true);
     assert.deepEqual(calls.map((call) => call.method), ["explore.query.start", "explore.query.finish", "explore.query.release"]);
     assert.ok(calls.every((call) => call.timeoutMs !== undefined && call.timeoutMs > 1));
   });
@@ -312,7 +316,8 @@ describe("Host-backed explore tool", () => {
     assert.equal(details.partial, true);
     assert.equal(details.notRequestedCount, 700);
     assert.equal(details.omittedCount, 600);
-    assert.equal((details.provenanceCounts as Record<string, number>)["not-requested"], 900);
+    assert.equal(details.provenance, undefined);
+    assert.equal(details.model, undefined);
     const textContent = result.content.find((block) => block.type === "text");
     assert.match(textContent?.text ?? "", /get_output\("out_large"\)/);
     assert.doesNotMatch(serialized, /unread-0\.ts|omitted-0\.ts|provenance-0\.ts/);
@@ -393,8 +398,8 @@ describe("Host-backed explore tool", () => {
     );
     const finish = calls.find((call) => call.method === "explore.query.finish");
     assert.equal((finish?.params.model as { select?: string } | undefined)?.select, "skipped");
-    assert.equal((result.details as { model?: { select?: string } }).model?.select, "skipped");
-    assert.match((result.details as { model: { note: string } }).model.note, /required group exceeds excerpt limit/);
+    assert.equal((result.details as Record<string, unknown>).model, undefined);
+    assert.match((finish?.params.model as { note: string }).note, /required group exceeds excerpt limit/);
   });
 
   it("keeps an accepted selection when the optional incremental follow-up fails", async () => {

@@ -53,14 +53,10 @@ export interface RelatedQueryDeps {
    */
   roots?: readonly string[];
   signal?: AbortSignal;
+  storeOutput?(text: string): string;
 }
 
-/**
- * Visible caps so a hub file or a common name cannot hand the generic 32 KiB
- * tool-result truncation the decision of which section disappears. `details`
- * still carries every item; only the text is capped, and it says how many it
- * left out (D-139).
- */
+/** Preview cap; omitted results remain readable through get_output. */
 export const RELATED_SECTION_LIMIT = 40;
 export const RELATED_FOCUS_LIMIT = 8;
 /**
@@ -145,7 +141,7 @@ export async function executeRelated(
     return empty(
       "empty",
       looksLikePath(anchor) ? "path" : "name",
-      "related empty: the symbol catalog has no files. Catalog languages are TypeScript and JavaScript (including JSX); other languages are not missing, they are not collected.",
+      "related empty: no indexed files in this scope.",
     );
   }
 
@@ -328,7 +324,12 @@ export async function executeRelated(
     },
   };
   result.roles = rolesForRelated(result);
-  result.text = formatRelatedText(result, focus.omitted);
+  const fullText = formatRelatedText(result, focus.omitted, Infinity);
+  result.text = deps.storeOutput ? formatRelatedText(result, focus.omitted, RELATED_SECTION_LIMIT) : fullText;
+  if (deps.storeOutput && result.text !== fullText) {
+    const handle = deps.storeOutput(fullText);
+    result.text += `\nFull result: get_output({handle: "${handle}"})`;
+  }
   return result;
 }
 
@@ -352,21 +353,20 @@ function rolesForRelated(result: RelatedQueryResult): HarnessFileRoleDecision[] 
   });
 }
 
-function formatRelatedText(result: RelatedQueryResult, focusOmitted: number): string {
+function formatRelatedText(result: RelatedQueryResult, focusOmitted: number, sectionLimit: number): string {
   const lines: string[] = [
     `related ${result.anchor.value} (${result.anchor.kind}) · ${result.status}`,
-    "File-level import topology, connection endpoints, and language-server-resolved reference/call edges from the symbol graph. Sites marked [unpinned] came from the server's own read of another file — re-read them before acting.",
   ];
   if (focusOmitted > 0) {
-    lines.push(`Anchor matched ${focusOmitted} more file(s) than were walked; the first ${RELATED_FOCUS_LIMIT} in path order are below. Narrow the anchor to a path for the rest.`);
+    lines.push(`${focusOmitted} matching files were not examined. Query a file path to narrow the scope.`);
   }
   const note = (omitted: number): void => {
-    if (omitted > 0) lines.push(`- … ${omitted} more (full list in details)`);
+    if (omitted > 0) lines.push(`- … ${omitted} more`);
   };
   if (result.definitions.length === 0) lines.push("Defines: none");
   else {
     lines.push("Defines:");
-    const shown = capped(result.definitions, RELATED_SECTION_LIMIT);
+    const shown = capped(result.definitions, sectionLimit);
     for (const item of shown.shown) lines.push(`- ${item.path} ${item.name} (${item.kind})`);
     note(shown.omitted);
   }
@@ -374,12 +374,12 @@ function formatRelatedText(result: RelatedQueryResult, focusOmitted: number): st
     lines.push(result.imports.incomplete ? "Imports: incomplete (edge extraction was blocked for this revision)" : "Imports: none");
   } else {
     lines.push("Imports:");
-    const shown = capped(result.imports.items, RELATED_SECTION_LIMIT);
+    const shown = capped(result.imports.items, sectionLimit);
     for (const item of shown.shown) {
       lines.push(`- ${item.path} ${item.specifier} → ${item.resolvedPath ?? "resolved"}`);
     }
     note(shown.omitted);
-    const unresolved = capped(result.imports.unresolved, RELATED_SECTION_LIMIT);
+    const unresolved = capped(result.imports.unresolved, sectionLimit);
     for (const item of unresolved.shown) {
       lines.push(`- ${item.path} ${item.specifier} [unresolved: ${item.reason}]`);
     }
@@ -390,7 +390,7 @@ function formatRelatedText(result: RelatedQueryResult, focusOmitted: number): st
     lines.push(result.importers.incomplete ? "Imported by: incomplete" : "Imported by: none");
   } else {
     lines.push("Imported by:");
-    const shown = capped(result.importers.items, RELATED_SECTION_LIMIT);
+    const shown = capped(result.importers.items, sectionLimit);
     for (const item of shown.shown) lines.push(`- ${item.path} via ${item.specifier}`);
     note(shown.omitted);
     if (result.importers.incomplete) lines.push("- reverse imports may be incomplete");
@@ -399,9 +399,9 @@ function formatRelatedText(result: RelatedQueryResult, focusOmitted: number): st
     lines.push(result.connections.incomplete ? "Connections: incomplete" : "Connections: none");
   } else {
     lines.push("Connections:");
-    const shown = capped(result.connections.items, RELATED_SECTION_LIMIT);
+    const shown = capped(result.connections.items, sectionLimit);
     for (const item of shown.shown) {
-      const ends = capped(item.otherEnds, RELATED_SECTION_LIMIT);
+      const ends = capped(item.otherEnds, sectionLimit);
       const rendered = ends.shown.map((end) => `${end.path}${end.callee ? ` ${end.callee}` : ""}`).join(", ");
       const text = item.otherEnds.length === 0
         ? "no other end in the catalog"
@@ -417,18 +417,18 @@ function formatRelatedText(result: RelatedQueryResult, focusOmitted: number): st
   if (result.references.items.length === 0) {
     lines.push(
       result.references.status === "unsupported"
-        ? "References: unsupported (the language provider does not answer references/call-hierarchy for this file type)"
+        ? "References: unsupported for this file type"
         : result.references.status === "unavailable"
-          ? "References: unavailable (no language service or collector is wired — lsp.references resolves a position on demand)"
+          ? "References: unavailable"
           : result.references.status === "failed"
-            ? "References: failed (the language service could not resolve this anchor)"
+            ? "References: failed to resolve this anchor"
             : result.references.status === "partial"
-              ? "References: partial (some definitions could not be resolved)"
-              : "References: none resolved yet — lsp.references at a position resolves them on demand",
+              ? "References: partial"
+              : "References: none resolved",
     );
   } else {
     lines.push(`References (resolved, ${result.references.status}):`);
-    const shown = capped(result.references.items, RELATED_SECTION_LIMIT);
+    const shown = capped(result.references.items, sectionLimit);
     for (const item of shown.shown) {
       const target = item.targetPath ? ` → ${item.targetPath}${item.targetName ? ` ${item.targetName}` : ""}` : "";
       lines.push(`- ${item.path}:${item.line} references ${item.targetName ?? item.caller ?? result.anchor.value}${item.caller ? ` — in ${item.caller}` : ""}${target}${pinMark(item)}`);
@@ -439,19 +439,19 @@ function formatRelatedText(result: RelatedQueryResult, focusOmitted: number): st
   if (result.calls.callers.length === 0 && result.calls.callees.length === 0) {
     lines.push(
       result.calls.status === "unsupported"
-        ? "Calls: unsupported (the language provider does not answer call-hierarchy for this file type)"
+        ? "Calls: unsupported for this file type"
         : result.calls.status === "unavailable"
-          ? "Calls: unavailable (no language service or collector is wired)"
+          ? "Calls: unavailable"
           : result.calls.status === "failed"
-            ? "Calls: failed (the language service could not resolve this anchor)"
+            ? "Calls: failed to resolve this anchor"
             : result.calls.status === "partial"
-              ? "Calls: partial (some definitions could not be resolved)"
-              : "Calls: none resolved yet",
+              ? "Calls: partial"
+              : "Calls: none resolved",
     );
   } else {
     if (result.calls.callers.length > 0) {
       lines.push(`Callers of ${result.anchor.value} (resolved, ${result.calls.status}):`);
-      const shown = capped(result.calls.callers, RELATED_SECTION_LIMIT);
+      const shown = capped(result.calls.callers, sectionLimit);
       for (const item of shown.shown) {
         lines.push(`- ${item.caller ?? "?"} — ${item.path}:${item.line} calls ${item.callee}${pinMark(item)}`);
       }
@@ -459,7 +459,7 @@ function formatRelatedText(result: RelatedQueryResult, focusOmitted: number): st
     }
     if (result.calls.callees.length > 0) {
       lines.push(`Calls made by ${result.anchor.value} (resolved, ${result.calls.status}):`);
-      const shown = capped(result.calls.callees, RELATED_SECTION_LIMIT);
+      const shown = capped(result.calls.callees, sectionLimit);
       for (const item of shown.shown) {
         lines.push(`- ${item.path}:${item.line} calls ${item.callee}${item.targetPath ? ` (→ ${item.targetPath})` : ""}${pinMark(item)}`);
       }
@@ -471,12 +471,10 @@ function formatRelatedText(result: RelatedQueryResult, focusOmitted: number): st
   // filename-based role guesses behind the actual definitions and edges.
   const distinctiveRoles = result.roles.filter(item => item.ground !== 'filename-pattern' || item.role !== 'source');
   if (distinctiveRoles.length) {
-    lines.push("File roles (query-time):");
-    const shown = capped(distinctiveRoles, RELATED_SECTION_LIMIT);
-    for (const item of shown.shown) lines.push(`- ${item.path} ${item.role} · ${item.ground}`);
+    lines.push("File roles:");
+    const shown = capped(distinctiveRoles, sectionLimit);
+    for (const item of shown.shown) lines.push(`- ${item.path} ${item.role}`);
     note(shown.omitted);
   }
-  const ordinaryRoles = result.roles.length - distinctiveRoles.length;
-  if (ordinaryRoles) lines.push(`File roles: ${ordinaryRoles} ordinary source path(s) inferred from filenames; full list in details.`);
   return lines.join("\n");
 }
