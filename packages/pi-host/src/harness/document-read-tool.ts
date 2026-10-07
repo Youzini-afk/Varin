@@ -92,7 +92,9 @@ export function createDocumentReadTool(bridge: HostServicesBridge): ToolDefiniti
       const lines = [`Document: ${result.title ?? result.finalUrl}`];
       if (snapshot) lines.push(`snapshot_id: ${snapshot.snapshotId}`);
       if (result.overview) lines.push(`Pages: ${result.overview.pageCount ?? "unknown"}; text: ${result.overview.textStatus}`);
-      if (result.analysis) lines.push(`Analysis: ${result.analysis.parser} ${result.analysis.version}; ${result.analysis.status}; pages ${result.analysis.pages.join(", ")}`);
+      if (result.analysis && result.analysis.status !== 'ok') {
+        lines.push(`Text extraction: ${result.analysis.status}${result.analysis.failedPages?.length ? `; failed pages: ${result.analysis.failedPages.join(', ')}` : ''}`);
+      }
       if (result.ocr) lines.push(`OCR: ${result.ocr.status}${result.ocr.detail ? ` — ${result.ocr.detail}` : ""}`);
       if (result.findHits) {
         lines.push(`${result.findHits.length} text matches:`);

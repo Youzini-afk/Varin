@@ -3407,7 +3407,7 @@ export class SessionHost {
     if (!this.#runtime || this.#runtime.session.sessionId !== sessionId) {
       throw new HostError(
         "session_not_active",
-        `Session is not active in this worker: ${sessionId}. Open or resume this conversation before invoking session tools; read_thread can inspect retained task results.`,
+        `Session is not active: ${sessionId}.`,
       );
     }
   }

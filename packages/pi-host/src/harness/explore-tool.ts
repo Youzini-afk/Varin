@@ -60,8 +60,8 @@ export function createExploreTool(
   return defineTool({
     name: "explore",
     label: "Explore",
-    description: "Locate relevant code and read the related context in the same call (definitions, registration sites, callers, and the excerpts needed to judge). Optional anchors prioritize literal symbols, method names, error text, and path fragments. Natural-language questions can be rewritten into repository search expressions when models.explore is configured; conceptual names do not have to match identifiers literally.",
-    promptSnippet: "explore: locate and read related source context with optional literal anchors and model-assisted query mapping",
+    description: "Find code relevant to a question and return source excerpts with file paths and line numbers. Optional anchors prioritize known symbols, error text, and path fragments.",
+    promptSnippet: "explore: find and read related code",
     parameters: ExploreParams,
     executionMode: "parallel",
     execute: async (_toolCallId, params, signal, onUpdate, _ctx) => {
@@ -106,9 +106,7 @@ export function createExploreTool(
             snippets: result.snippets, searched: result.searched, handle: result.handle,
             snippetCount: result.snippets.length, issueCount: result.issueCount,
             partial, notRequestedCount: result.notRequestedCount,
-            omittedCount: result.omittedCount, provenance: result.details,
-            provenanceCounts: result.details.provenance.statusCounts,
-            model: result.details.model ?? participation,
+            omittedCount: result.omittedCount,
             budgetMs, budgetExhausted: exhausted,
             progress: completed,
           },

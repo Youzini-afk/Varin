@@ -71,8 +71,7 @@ export function createWebSearchTool(bridge: HostServicesBridge, _sessionId: stri
           if (item.kind === "url" && item.fetch?.status === "ok") {
             const fetch = item.fetch;
             lines.push(`- ${label}: ok — ${fetch.finalUrl} (${fetch.bytes} bytes${fetch.rendered ? ", rendered" : ""})`);
-            if (fetch.snapshot) lines.push(`    snapshot ${fetch.snapshot.snapshotId} hash ${fetch.snapshot.contentHash}`);
-            if (fetch.receipt) lines.push(`    receipt ${fetch.receipt.receiptId}`);
+            if (fetch.snapshot) lines.push(`    snapshot_id: ${fetch.snapshot.snapshotId}`);
             sources.push({ title: fetch.title ?? fetch.finalUrl, url: fetch.finalUrl, ...(fetch.snapshot ? { snapshotId: fetch.snapshot.snapshotId } : {}) });
             continue;
           }
@@ -86,7 +85,6 @@ export function createWebSearchTool(bridge: HostServicesBridge, _sessionId: stri
           }
           lines.push(`- ${label}: ${item.status}${item.detail ? ` — ${item.detail}` : ""}`);
         }
-        lines.push('Read a source with webfetch({url: "..."}) or re-read a pinned snapshot with webfetch({snapshot_id: "..."}).');
 
         const usable = result.items.some((item) => item.status === "ok" || item.status === "empty");
         return {

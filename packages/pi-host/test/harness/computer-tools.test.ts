@@ -53,6 +53,29 @@ const observation = (id: string) => ({
 });
 
 describe("computer tool", () => {
+  it('reports uncertain changes only for interrupted mutation requests', async () => {
+    const bridge = new HostServicesBridge({
+      sessionId: SESSION,
+      emit: (_event, data) => queueMicrotask(() => bridge.respond(SESSION, data.requestId, {
+        ok: false, error: { code: 'timeout', message: 'request timed out' },
+      })),
+    });
+    const tool = createComputerTool(bridge, SESSION);
+    try {
+      for (const [params, changed] of [
+        [{ action: 'list' }, false],
+        [{ action: 'observe', app: 'editor' }, false],
+        [{ action: 'browser', browserOp: 'act', browserAct: { kind: 'screenshot' } }, false],
+        [{ action: 'office', officeOp: 'act', officeAct: { kind: 'read' } }, false],
+        [{ action: 'act', operation: { kind: 'key', app: 'editor', key: 'enter' } }, true],
+        [{ action: 'open', url: 'https://example.com' }, true],
+      ] as const) {
+        const result = await execute(tool, params);
+        assert.equal(isError(result), true);
+        assert.equal((result.content[0] as { text: string }).text.includes('desktop may have changed'), changed);
+      }
+    } finally { bridge.dispose(); }
+  });
   it('requests observation by default for a read-only thread and exposes an observation-only bound app', async () => {
     const { bridge, requests } = scriptedBridge({
       'computer.access': () => ({ state: { leases: [], requests: [] } }),
@@ -256,6 +279,7 @@ describe("computer tool", () => {
     const result = await execute(tool, { action: "run", desktopId: "local-console", timeoutMs: 100,
       script: "await sleep(300); await computer.act({kind:'key',app:'notepad',key:'enter'})" });
     assert.equal(isError(result), true);
+    assert.ok(!(result.content[0] as { text: string }).text.includes('desktop may have changed'));
     await new Promise((resolve) => setTimeout(resolve, 400));
     assert.equal(requests.filter((r) => r.method !== "computer.control").length, 0);
     const loop = await execute(tool, { action: "run", timeoutMs: 150, script: "await Promise.resolve(); while (true) {}" });

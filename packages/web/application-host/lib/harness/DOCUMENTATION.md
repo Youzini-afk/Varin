@@ -723,16 +723,17 @@ before the backend counts hits; explore does not match drafts itself. Candidates
 hit metadata, then materialized on demand with bounded parallelism. Unread files are
 `not-requested`, never `empty`. Packing prefers complementary windows across files, then applies
 an explore byte budget below the generic 32 KiB truncation, including any `get_output` hint.
-The resolved search-scope prefix is inside that budget. The body distinguishes prepared and
-visible excerpt counts; `query.finish.snippets` describes the complete blocks actually delivered,
+The resolved search-scope prefix is inside that budget. The body reports the visible excerpt count;
+`query.finish.snippets` describes the complete blocks actually delivered,
 not every excerpt selected before packing. It first preserves the priority pack, then removes child
 ranges whose exact text is already present in a delivered range of the same path, revision and source.
 A child intersecting a parent's omitted interval, or a required child, is not deduplicated. Recovered space fills omitted blocks
 without evicting the remaining priority pack. Actual byte omissions mark the result partial; covered
 ranges are distinguished from byte omissions. Concurrent/repeated finish calls reuse the same pack and handle.
-Provenance stays in `details`; the model-visible body is `path:start-end`, code, and actionable
-gaps. OutputStore keeps the full pack plus unread-candidate refs, and the tool text mentions the
-handle only when more content remains. Symbol expansion and optional model enrichment remain
+The model-visible body is `path:start-end`, code, relevant source differences and actionable gaps.
+Internal model stages and retrieval diagnostics are not copied into the Pi tool result.
+OutputStore keeps the full text pack, all relation rows and unread-candidate refs without a diagnostic
+JSON appendix. The tool text mentions the handle only when more content remains. Symbol expansion and optional model enrichment remain
 separate planned sources.
 
 `harness.codeRetrieval.decision` is frozen at query start. In `auto`, the configured explore LLM owns
@@ -1103,7 +1104,8 @@ connection endpoints. It is not `lsp.references`. A missing open store is
 `unavailable`; the read path does not open a database. The text caps each
 section and a name anchor's walked paths, saying how many it left out, so a hub
 file cannot hand the generic tool-result truncation the choice of which section
-disappears; `details` still carries every item (D-139).
+disappears. Truncated lists link to a session-bound `get_output` handle containing the full formatted
+relations. Filename-only guesses for ordinary source files do not add output rows.
 
 ### LspNavigationServices (`lsp-nav.ts`)
 

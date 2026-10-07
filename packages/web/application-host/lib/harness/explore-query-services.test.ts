@@ -258,16 +258,16 @@ describe("explore query services", () => {
       expect(packed.details.provenance.statusCounts).toEqual({ ready: 1, "not-requested": 1 });
       expect(JSON.stringify(packed)).not.toMatch(/unread-secret|omitted-secret/);
       expect(packed.text).toContain("listed in output store");
-      expect(packed.text).toContain(`get_output("${packed.handle}")`);
+      expect(packed.text).toContain(`get_output({handle: "${packed.handle}"})`);
 
       const full = outputStore.read(actor.sessionId, packed.handle, 0, 100_000);
       expect(full.status).toBe("ready");
       if (full.status !== "ready") throw new Error("expected full explore output");
       expect(full.slice.text).toContain("unread-secret.ts");
       expect(full.slice.text).toContain("omitted-secret.ts");
-      expect(full.slice.text).toContain('"path":"read.ts","revision":"rev-1","source":"disk","status":"ready","matchedGroups":["question:needle"]');
-      expect(full.slice.text).toContain('"path":"unread-secret.ts","revision":"","source":null,"status":"not-requested","matchedGroups":[]');
-      expect(full.slice.text).toContain('"status":"not-requested"');
+      expect(full.slice.text).toContain('--- read.ts:');
+      expect(full.slice.text).not.toContain('Explore structured details');
+      expect(full.slice.text).not.toContain('matchedGroups');
     } finally {
       outputStore.dispose();
     }

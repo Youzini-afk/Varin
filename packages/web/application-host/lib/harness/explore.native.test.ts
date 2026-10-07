@@ -280,7 +280,7 @@ describe("explore D-090 candidate ranking and materialization", () => {
     const packed = formatExploreOutput({ snippets, issues: [], omitted: [], notRequested: { count: 0, paths: [] },
       partial: false, searchIncomplete: false, searched: { files: 4, patterns: 1, ms: 1, incomplete: false } }, { byteBudget: 6000, prefix: 'Search scope: /workspace' });
     expect(packed.snippets.map(snippet => snippet.path)).toEqual(['parent.ts', 'key.cs']);
-    expect(packed.visibleText).toContain('Visible excerpts: 2');
+    expect(packed.visibleText).toContain('Excerpts: 2');
     expect(packed.visibleText).toContain(snippets[3]!.text);
     expect(packed.storedBody).toContain(snippets[2]!.text);
     expect(Buffer.byteLength(packed.visibleText)).toBeLessThanOrEqual(6000);
@@ -351,8 +351,8 @@ describe("explore D-090 candidate ranking and materialization", () => {
     expect(result.searched.incomplete).toBe(true);
     expect(result.searched.filesDropped).toBe(13);
     const packed = formatExploreOutput(result);
-    expect(packed.visibleText).toMatch(/at least 13 matching file\(s\) were not brought into the candidate pool/);
-    expect(packed.visibleText).not.toMatch(/candidate working budget reached/);
+    expect(packed.visibleText).toMatch(/at least 13 matching files were not examined/);
+    expect(packed.visibleText).not.toMatch(/search budget reached/);
   });
 
   it("identifies a building semantic index without claiming the query deadline expired", async () => {
@@ -365,7 +365,7 @@ describe("explore D-090 candidate ranking and materialization", () => {
       semantic: { status: "incomplete", coverage: "partial", index: { lifecycle: "building" } },
       sources: [{ id: "semantic-original", family: "semantic", status: "incomplete" }],
     });
-    expect(packed.visibleText).toContain("Semantic index is still building");
+    expect(packed.visibleText).toContain("semantic index building");
     expect(packed.visibleText).not.toContain("shared deadline");
   });
 

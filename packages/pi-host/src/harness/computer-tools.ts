@@ -193,14 +193,22 @@ export function computerToolPresentation(role: ComputerThreadRole) {
   };
 }
 
-const errorResult = (error: unknown) => {
+const requestChangesDesktop = (method: string, values: unknown): boolean => {
+  if (method === 'computer.act' || method === 'computer.open') return true;
+  const params = values as { op?: string; act?: { kind?: string } };
+  if (method === 'computer.browser') return params.op === 'launch' || (params.op === 'act' && params.act?.kind !== 'screenshot');
+  if (method === 'computer.office') return params.op === 'launch' || params.op === 'open' || (params.op === 'act' && params.act?.kind !== 'read');
+  return false;
+};
+
+const errorResult = (error: unknown, pendingEffect = false) => {
   const message = error instanceof Error ? error.message : String(error);
   const extra = error as { code?: string; actionSent?: boolean; retry?: string };
   const code = extra.code ?? "failed";
-  const uncertainEffect = extra.actionSent === true || code === "timeout" || /abort|budget exhausted/i.test(message);
+  const uncertainEffect = extra.actionSent === true || pendingEffect;
   return {
     content: [{ type: "text" as const, text: `computer failed (${code}): ${message}${uncertainEffect
-      ? ". A submitted GUI action may have partly reached the desktop."
+      ? ". The desktop may have changed; check it before retrying."
       : ""}` }],
     isError: true as const,
     details: { code, ...(extra.actionSent !== undefined ? { actionSent: extra.actionSent } : {}), ...(extra.retry ? { retry: extra.retry } : {}) },
@@ -243,12 +251,31 @@ export function createComputerTool(bridge: HostServicesBridge, _sessionId: strin
     label: "Computer",
     ...computerToolPresentation(getRole()),
     execute: async (_toolCallId, params, signal, _onUpdate, _ctx) => {
-      const request: HostServicesBridge["request"] = (method, values, options) => {
+      let pendingChanges = 0;
+      let uncertainChange = false;
+      const request: HostServicesBridge["request"] = async (method, values, options) => {
         const operationSignal = options?.signal ?? signal;
-        return bridge.request(method, values, {
-          ...(method === "computer.installSoftware" ? { timeoutMs: 0 } : {}), ...options,
-          ...(operationSignal ? { signal: operationSignal } : {}),
-        });
+        operationSignal?.throwIfAborted();
+        const changesDesktop = requestChangesDesktop(method, values);
+        if (changesDesktop) pendingChanges += 1;
+        try {
+          const result = await bridge.request(method, values, {
+            ...(method === "computer.installSoftware" ? { timeoutMs: 0 } : {}), ...options,
+            ...(operationSignal ? { signal: operationSignal } : {}),
+          });
+          if (changesDesktop) {
+            const receipt = (method === 'computer.act' ? (result as ComputerActResult).result : result) as { outcome?: string; accepted?: boolean; ok?: boolean };
+            // A later script failure must still account for earlier dispatched actions.
+            if (receipt.accepted || receipt.ok || receipt.outcome === 'unknown' || receipt.outcome === 'partial') uncertainChange = true;
+          }
+          return result;
+        } catch (error) {
+          if (changesDesktop && (operationSignal?.aborted || (error instanceof HarnessRequestError
+            && (error.code === 'timeout' || error.message === 'disposed')))) uncertainChange = true;
+          throw error;
+        } finally {
+          if (changesDesktop) pendingChanges -= 1;
+        }
       };
       try {
         const desktop = params.desktopId?.trim() || undefined;
@@ -565,7 +592,7 @@ export function createComputerTool(bridge: HostServicesBridge, _sessionId: strin
             });
             const r = result;
             if (r.outcome === "unknown") {
-              return errorResult(new HarnessRequestError("unavailable", `browser op may have reached the target — verify page state before retrying (${r.error ?? "response lost"})`));
+              return errorResult(new HarnessRequestError("unavailable", `Browser response lost: ${r.error ?? "outcome unknown"}`), uncertainChange);
             }
             const text = op === "status" || op === "launch"
               ? (r.status?.running ? `browser interface connected${r.status.browser ? `: ${r.status.browser}` : ""}` : `browser interface unavailable${r.status?.detail ? `: ${r.status.detail}` : ""}`)
@@ -574,7 +601,7 @@ export function createComputerTool(bridge: HostServicesBridge, _sessionId: strin
                 : op === "snapshot"
                   ? `${(r.lines ?? []).join("\n") || "empty snapshot"}${r.truncated ? "\n[more AX nodes omitted; request a larger limit or inspect a specific tab]" : ""}`
                   : op === "act" && (params.browserAct as { kind?: string })?.kind === "screenshot"
-                    ? "frame captured (see details.image)"
+                    ? "frame captured"
                     : r.error ?? (r.result !== undefined ? JSON.stringify(r.result) : "ok");
             const blocks: Array<{ type: 'text'; text: string } | { type: 'image'; data: string; mimeType: string }> = [{ type: 'text', text: r.ok === false ? r.error ?? text : text }];
             const frame = r.image?.match(/^data:(image\/[^;]+);base64,(.+)$/u);
@@ -592,7 +619,7 @@ export function createComputerTool(bridge: HostServicesBridge, _sessionId: strin
             });
             const r = result;
             if (r.outcome === "unknown") {
-              return errorResult(new HarnessRequestError("unavailable", `office op may have reached the target — verify document state before retrying (${r.error ?? "response lost"})`));
+              return errorResult(new HarnessRequestError("unavailable", `Office response lost: ${r.error ?? "outcome unknown"}`), uncertainChange);
             }
             const text = op === "status" || op === "launch"
               ? (r.status?.running ? "LibreOffice interface connected" : `LibreOffice interface unavailable${r.status?.detail ? `: ${r.status.detail}` : ""}`)
@@ -649,7 +676,7 @@ export function createComputerTool(bridge: HostServicesBridge, _sessionId: strin
           }
         }
       } catch (error) {
-        return errorResult(error);
+        return errorResult(error, uncertainChange || pendingChanges > 0);
       }
     },
   });

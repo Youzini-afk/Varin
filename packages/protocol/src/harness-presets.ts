@@ -142,28 +142,21 @@ export function resolvePresets(
 export function buildTeamPrompt(presets: ResolvedPreset[], activeTools?: readonly string[], additionalProfiles: readonly { tools: readonly string[] }[] = [], role: import('./agent-personalization.js').AgentPersonalizationContext['threadRole'] = 'main'): string {
   const available = (tool: string) => activeTools === undefined || activeTools.includes(tool);
   const worker = presets.some(preset => preset.id === "worker");
-  const retrieval = presets.some(preset => preset.id === "retrieval");
   const canDispatch = available("dispatch") && (presets.length > 0 || additionalProfiles.length > 0);
   const responsibility = role === 'main'
-    ? 'This is the main thread. It owns the overall goal, design, implementation consistency, integration and final delivery. '
+    ? 'This is the main thread, responsible for the overall task and final delivery. '
     : role === 'worker'
-      ? 'This is a child thread with its own assigned work and conversation. The parent retains overall integration and final delivery; send exchanges decisions and interface information with task teammates. '
+      ? 'This child thread has its own task and conversation; the parent handles integration and final delivery. '
       : 'This is a read-only child thread for information retrieval or consultation. Its findings return to the requesting thread. ';
   if (!canDispatch) return responsibility + 'No execution profile is enabled for new sub-agent dispatch.'
     + (available('read_thread') ? ' read_thread can still inspect existing task-family conversations.' : '');
   const writing = worker || [...presets.map(preset => preset.definition), ...additionalProfiles].some(profile => profile.tools.some(tool => ["write", "edit", "apply_patch", "bash", "experiment"].includes(tool)));
   let guidance = responsibility;
-  if (!writing) guidance += 'The enabled profiles provide read-only investigation; no implementation worker is enabled. ';
+  if (!writing) guidance += 'The enabled profiles are read-only. ';
   if (worker) guidance += 'dispatch(task) starts a worker using the current model and authorized tools; preset selects a configured profile. ';
   else if (presets.length) guidance += 'dispatch(task, preset) starts a configured profile. ';
   if (additionalProfiles.length) guidance += 'dispatch(task, capability) starts an enabled research capability. ';
-  if (retrieval && writing) guidance += 'retrieval provides multi-step fact finding in an independent context. ';
   const profiles = presets.map(preset => `${preset.id} (${preset.definition.name ? `${preset.definition.name}: ` : ""}${preset.definition.teamDescription})`).join(", ");
   if (profiles) guidance += `Available profiles: ${profiles}. `;
-  return guidance + "Threads run independently. "
-    + (available('read_thread') ? 'read_thread reads task-family conversations, reports and status. ' : '')
-    + (available('threads') ? 'threads lists related work without blocking. ' : '')
-    + (available('send') ? 'send exchanges information or requests a response. send(replyTo=message ID, message=response) routes a reply to its sender and satisfies its correlated reply wait; text in this conversation alone is not delivered to that sender. Omitted wait returns immediately; a positive wait awaits the reply. Inform updates do not start idle work or require acknowledgement. ' : '')
-    + (writing && available('submit_code') ? 'submit_code transfers selected files or original/replacement snippets to a teammate or parent. Queued acceptance is not application; the applied receipt arrives through task state and passive messages. ' : '')
-    + (available('wait') ? 'wait suspends this thread until an addressed dependency or actionable message arrives and releases its execution slot. An omitted duration waits indefinitely; routine progress does not wake it. ' : '');
+  return guidance + 'Threads run independently with separate conversations.';
 }
