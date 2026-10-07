@@ -2601,7 +2601,7 @@ export const dict = {
   'chat.draftStarters.remove': 'Remove',
   'chat.scrollToBottom.aria': 'Scroll to bottom',
   'chat.promptNavigator.aria': 'Conversation messages',
-  'chat.promptNavigator.message': 'Message {number}',
+  'chat.promptNavigator.turn': 'Turn {number}',
   'chat.promptNavigator.currentPrompt': 'Current prompt',
   'chat.promptNavigator.loadMore': 'Load more prompts',
   'chat.timeline.relative.justNow': 'just now',

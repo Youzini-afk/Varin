@@ -2675,7 +2675,7 @@ export const dict: Record<I18nKey, string> = {
   "chat.draftStarters.remove": "Remove",
   "chat.scrollToBottom.aria": "Ir ao final",
   'chat.promptNavigator.aria': 'Mensagens da conversa',
-  'chat.promptNavigator.message': 'Mensagem {number}',
+  'chat.promptNavigator.turn': 'Rodada {number}',
   "chat.promptNavigator.currentPrompt": "Prompt atual",
   "chat.promptNavigator.loadMore": "Carregar mais prompts",
   "chat.timeline.relative.justNow": "agora mesmo",

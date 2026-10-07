@@ -2662,7 +2662,7 @@ export const dict: Record<I18nKey, string> = {
   'chat.draftStarters.remove': 'Remove',
   'chat.scrollToBottom.aria': '滚动到底部',
   'chat.promptNavigator.aria': '会话消息导航',
-  'chat.promptNavigator.message': '第 {number} 条消息',
+  'chat.promptNavigator.turn': '第 {number} 轮',
   'chat.promptNavigator.currentPrompt': '当前提示',
   'chat.promptNavigator.loadMore': '加载更多提示',
   'chat.timeline.relative.justNow': '刚刚',

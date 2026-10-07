@@ -44,8 +44,7 @@ import {
 import { PiTurnAssistantChrome } from './PiTurnAssistantChrome';
 import { ChatContextMenu } from './ChatContextMenu';
 import { PiTurnNavigator, type PiTurnNavigatorHandle } from './PiTurnNavigator';
-import { piNavigationAssistantSources, piNavigationMessageElement, piNavigationRowElement, type PiMessageNavigationTarget } from './piMessageNavigation';
-import { PI_SORTED_LIVE_ASSISTANT_ID } from './piSortedTurnProjection';
+import { piNavigationHasAssistant, piNavigationMessageElement, piNavigationRowElement, type PiMessageNavigationTarget } from './piMessageNavigation';
 import { prefersReducedMotion } from '@/hooks/usePrefersReducedMotion';
 
 interface PiTimelineItemViewProps extends Omit<
@@ -255,8 +254,7 @@ export const PiTimeline: React.FC<PiTimelineProps> = (props) => {
   const liveNavigationItem = projection.liveItem?.item;
   const liveNavigationSources = promptNavigatorEnabled && liveNavigationItem && liveNavigationItem.kind !== 'entry' ? {
     rowId: liveNavigationItem.id,
-    sourceIds: piNavigationAssistantSources(liveNavigationItem.kind === 'turn' ? liveNavigationItem.turn.entries : [],
-      liveNavigationItem.kind === 'turn' ? liveNavigationItem.turn.liveAssistant : liveNavigationItem.message, sortedMessages),
+    hasAssistant: piNavigationHasAssistant([], liveNavigationItem.kind === 'turn' ? liveNavigationItem.turn.liveAssistant : liveNavigationItem.message, sortedMessages),
   } : undefined;
   const readNavigatorItem = React.useCallback((index: number) => {
     const current = projectionRef.current;
@@ -329,18 +327,19 @@ export const PiTimeline: React.FC<PiTimelineProps> = (props) => {
     const index = firstVisibleIndexRef.current;
     const row = projectionRef.current?.items[index];
     if (!row) return;
-    let sourceId = row.kind === 'turn' ? row.turn.userEntry?.id ?? 'user'
-      : row.kind === 'entry' ? row.entry.id : PI_SORTED_LIVE_ASSISTANT_ID;
+    let role: PiMessageNavigationTarget['role'] | undefined = row.kind === 'turn' ? 'user'
+      : row.kind === 'live-assistant' ? 'assistant'
+        : row.entry.type === 'message' && (row.entry.message.role === 'user' || row.entry.message.role === 'assistant') ? row.entry.message.role : undefined;
     const viewport = listRef.current?.getScrollableNode();
     const element = viewport && piNavigationRowElement(viewport, row.id);
     if (element && viewport) {
       const readingLine = viewport.getBoundingClientRect().top + PI_TIMELINE_ANCHOR_OFFSET_PX;
       for (const message of element.querySelectorAll<HTMLElement>('[data-pi-message-role]')) {
         if (message.getBoundingClientRect().top > readingLine) break;
-        sourceId = message.dataset.piEntryId ?? 'user';
+        if (message.dataset.piMessageRole === 'user' || message.dataset.piMessageRole === 'assistant') role = message.dataset.piMessageRole;
       }
     }
-    turnNavigatorRef.current?.setVisibleIndex(index, sourceId);
+    turnNavigatorRef.current?.setVisibleIndex(index, role);
   }, []);
   const scheduleViewportCapture = React.useCallback(() => {
     if (viewportFrameRef.current !== null) return;
