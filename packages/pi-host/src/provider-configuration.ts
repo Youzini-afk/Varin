@@ -817,6 +817,9 @@ export class ProviderConfigurationManager {
         modelsPath: join(this.#agentDir, "models.json"),
       }).then(async native => { await this.apply(native, cwd, false); return native; });
       this.#inferenceCatalog = { key, runtime: catalog };
+      void catalog.catch(() => {
+        if (this.#inferenceCatalog?.runtime === catalog) this.#inferenceCatalog = undefined;
+      });
     }
     return this.#inferenceCatalog.runtime;
   }

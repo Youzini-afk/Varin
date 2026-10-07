@@ -214,6 +214,9 @@ const quoteAnsiC = (value: string): string => {
     else if (char === "\r") out += "\\r";
     else if (char === "\t") out += "\\t";
     else if (code < 0x20 || code === 0x7f) out += `\\x${code.toString(16).padStart(2, "0")}`;
+    // Keep PTY command input ASCII. Bash reconstructs the UTF-8 bytes before
+    // eval, avoiding Windows console/code-page conversion of Unicode input.
+    else if (code > 0x7f) out += [...Buffer.from(char, "utf8")].map(byte => `\\x${byte.toString(16).padStart(2, "0")}`).join("");
     else out += char;
   }
   return `${out}'`;
@@ -267,7 +270,8 @@ function buildCommandWrapper(command: string, token: string, kind: ShellInterpre
   // Construct full markers only when executing, so echoed wrapper text cannot
   // be mistaken for command output. Emit the directory result before eval:
   // even a payload that calls exit/exec cannot suppress that confirmation.
-  return `__varin_marker='${SENTINEL}${token}'; echo "$__varin_marker:B"; ( if cd -- ${quotePosixShell(cwd)}; then echo "$__varin_marker:C:1"; eval ${payload}; else __ec=$?; echo "$__varin_marker:C:0"; exit "$__ec"; fi ); __ec=$?; printf '\\n%s\\n' "$__varin_marker:E:$__ec"`;
+  const directory = Buffer.byteLength(cwd, "utf8") > cwd.length ? quoteAnsiC(cwd) : quotePosixShell(cwd);
+  return `__varin_marker='${SENTINEL}${token}'; echo "$__varin_marker:B"; ( if cd -- ${directory}; then echo "$__varin_marker:C:1"; eval ${payload}; else __ec=$?; echo "$__varin_marker:C:0"; exit "$__ec"; fi ); __ec=$?; printf '\\n%s\\n' "$__varin_marker:E:$__ec"`;
 }
 
 // ── PTY Provider ────────────────────────────────────────────────────

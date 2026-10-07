@@ -74,6 +74,8 @@ export interface SettingsSearchResult {
   items: SettingsSearchItem[];
   total: number;
   categories: { category: string; count: number }[];
+  /** Partial keyword matches when the full query had no match. */
+  related?: SettingsSearchItem[];
 }
 
 export interface SettingsFieldValue {

@@ -1081,7 +1081,7 @@ describe("thread runtime", () => {
         threadId: blocked.id,
       })).rejects.toMatchObject({
         retryable: true,
-        message: expect.stringContaining("baseline-changed"),
+        message: expect.stringContaining('worktree:"shared"'),
       });
       await workingStates.withStore(identity.workspaceId, "assert-no-branch-after-writer", async (store) => {
         expect(store.getBranch(`thread-${blocked.id}`)).toBeNull();

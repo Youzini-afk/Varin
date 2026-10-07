@@ -3,6 +3,7 @@ import type {
   Thread,
   ThreadParent,
   ThreadRun,
+  ThreadMessagePeer,
 } from "@varin/protocol";
 import { summarizeRetrievalEvidence } from "@varin/protocol";
 import type { ObservationCursorEntry, ObservationCursorStore, PendingObservation } from "./observation-cursors.js";
@@ -79,7 +80,13 @@ const priority = (thread: Thread): number => {
   return 4;
 };
 
-const projectThread = (thread: Thread, activeRun: ThreadRun | null): Zone2Thread => ({
+const addressedMessages = (thread: Thread, observer: ThreadMessagePeer) => (thread.messages ?? [])
+  .filter((message) => message.direction === "in"
+    && (message.status === "delivered" || message.status === "resolved")
+    && message.to.kind === observer.kind && message.to.id === observer.id
+    && !(message.from.kind === observer.kind && message.from.id === observer.id));
+
+const projectThread = (thread: Thread, activeRun: ThreadRun | null, observer: ThreadMessagePeer): Zone2Thread => ({
   id: thread.id,
   brief: thread.brief,
   preset: thread.preset,
@@ -102,8 +109,7 @@ const projectThread = (thread: Thread, activeRun: ThreadRun | null): Zone2Thread
   deviations: [...(thread.report?.deviations ?? [])],
   ...(thread.messages
     ? {
-        messages: thread.messages
-          .filter((message) => message.direction === "in" && (message.status === "delivered" || message.status === "resolved"))
+        messages: addressedMessages(thread, observer)
           .map((message) => ({
             id: message.id,
             from: `${message.from.kind} ${message.from.id}`,
@@ -119,12 +125,12 @@ const projectThread = (thread: Thread, activeRun: ThreadRun | null): Zone2Thread
 });
 
 /** Identity of durable message/result material, excluding transient state. */
-const materialParts = (thread: Thread): { messages: Array<[string, string]>; result: unknown | null } => {
-  const messages = (thread.messages ?? [])
-    .filter((message) => message.direction === "in" && (message.status === "delivered" || message.status === "resolved"))
+const materialParts = (thread: Thread, observer: ThreadMessagePeer): { messages: Array<[string, string]>; result: unknown | null } => {
+  const messages = addressedMessages(thread, observer)
     .map((message) => [message.id, message.text] as [string, string]);
   const review = thread.verification?.review;
-  const result = thread.resultRevision === undefined && !thread.report && (!review || review.status === "none")
+  const result = (observer.kind === "thread" && thread.id === observer.id)
+    || (thread.resultRevision === undefined && !thread.report && (!review || review.status === "none"))
     ? null
     : {
         revision: thread.resultRevision ?? thread.report?.resultRevision ?? null,
@@ -138,8 +144,8 @@ const materialParts = (thread: Thread): { messages: Array<[string, string]>; res
   return { messages, result };
 };
 
-const materialIdentity = (thread: Thread): string | null => {
-  const parts = materialParts(thread);
+const materialIdentity = (thread: Thread, observer: ThreadMessagePeer): string | null => {
+  const parts = materialParts(thread, observer);
   if (parts.messages.length === 0 && parts.result === null) return null;
   return JSON.stringify(parts);
 };
@@ -193,27 +199,31 @@ const zone2ThreadTask = (
   options: Zone2ThreadProjectionOptions,
   workspaceId: string,
   parent: ThreadParent,
+  observer: ThreadMessagePeer,
   prepared?: (cursor: Zone2ThreadCursor, previous: Zone2ThreadCursor | undefined) => void,
   materialOnly = false,
   family?: { rootIds: Set<string>; sessionParent: ThreadParent },
 ) => async (previous: ObservationCursorEntry<Zone2ThreadCursor> | null): Promise<{ cursor: Zone2ThreadCursor; result: Zone2Threads }> => {
   // BC0: every bot-root in the scope shares one family — a replaced entry
   // session must still see work dispatched under its predecessor.
-  const snapshots = family
+  const snapshots = (family
     ? (await options.registry.listWorkspaceThreadSnapshots(workspaceId)).filter(({ thread }) => (
       !thread.hidden
       && ((thread.parent.kind === "thread" && family.rootIds.has(thread.parent.id))
         || (thread.parent.kind === family.sessionParent.kind && thread.parent.id === family.sessionParent.id))
     ))
-    : await options.registry.listThreadSnapshots(workspaceId, parent);
+    : await options.registry.listThreadSnapshots(workspaceId, parent))
+    .filter(({ thread }) => observer.kind !== "thread" || thread.id !== observer.id);
+  // The observer's inbound messages are already persisted through Pi's
+  // idempotent notification/continuation path. Do not replay its own ledger.
   const eventSeqByThread = Object.fromEntries(snapshots.map(({ thread }) => [thread.id, thread.eventSeq]));
-  const materialByThread = Object.fromEntries(snapshots.map(({ thread }) => [thread.id, materialIdentity(thread)]));
+  const materialByThread = Object.fromEntries(snapshots.map(({ thread }) => [thread.id, materialIdentity(thread, observer)]));
   const messageIdsByThread = Object.fromEntries(snapshots.map(({ thread }) => [
     thread.id,
-    materialParts(thread).messages.map(([id]) => id),
+    materialParts(thread, observer).messages.map(([id]) => id),
   ]));
   const resultByThread = Object.fromEntries(snapshots.map(({ thread }) => {
-    const result = materialParts(thread).result;
+    const result = materialParts(thread, observer).result;
     return [thread.id, result === null ? null : JSON.stringify(result)];
   }));
   const selected = snapshots.filter(({ thread }) => materialOnly
@@ -239,7 +249,7 @@ const zone2ThreadTask = (
     result: {
       status: "ready",
       items: selected.map(({ thread, activeRun }) => {
-        const item = projectThread(thread, activeRun);
+        const item = projectThread(thread, activeRun, observer);
         if (!materialOnly) return item;
         const previousMessages = new Set(previous?.value.messageIdsByThread?.[thread.id] ?? []);
         const currentMessages = item.messages ?? [];
@@ -261,12 +271,15 @@ const zone2Scope = async (
 ): Promise<{
   objectId: string;
   parent: ThreadParent;
+  observer: ThreadMessagePeer;
   scopeId: string;
   family?: { rootIds: Set<string>; sessionParent: ThreadParent };
 }> => {
-  const binding = typeof options.registry.getSessionBinding === "function"
+  const activeBinding = typeof options.registry.getSessionBinding === "function"
     ? await options.registry.getSessionBinding(input.sessionId)
     : null;
+  const binding = activeBinding ?? (typeof options.registry.resolveSessionOwner === "function"
+    ? await options.registry.resolveSessionOwner(input.sessionId) : null);
   if (binding) {
     const parent: ThreadParent = { kind: "thread", id: binding.threadId };
     const owner = await options.registry.getThreadById(binding.owningScopeId, binding.threadId);
@@ -278,6 +291,7 @@ const zone2Scope = async (
       return {
         objectId: `${binding.owningScopeId}\0bot-root-family`,
         parent,
+        observer: parent,
         scopeId: binding.owningScopeId,
         family: { rootIds, sessionParent: owner.parent },
       };
@@ -285,11 +299,12 @@ const zone2Scope = async (
     return {
       objectId: `${binding.owningScopeId}\0${parent.kind}\0${parent.id}`,
       parent,
+      observer: parent,
       scopeId: binding.owningScopeId,
     };
   }
   const parent: ThreadParent = { kind: "session", id: input.sessionId };
-  return { objectId: `${input.scopeId}\0${parent.kind}\0${parent.id}`, parent, scopeId: input.scopeId };
+  return { objectId: `${input.scopeId}\0${parent.kind}\0${parent.id}`, parent, observer: parent, scopeId: input.scopeId };
 };
 
 export async function projectZone2Threads(
@@ -301,7 +316,7 @@ export async function projectZone2Threads(
     input.sessionId,
     "zone2-threads",
     scope.objectId,
-    zone2ThreadTask(options, scope.scopeId, scope.parent, undefined, false, scope.family),
+    zone2ThreadTask(options, scope.scopeId, scope.parent, scope.observer, undefined, false, scope.family),
   );
 }
 
@@ -318,7 +333,7 @@ export async function prepareZone2Threads(
     input.sessionId,
     "zone2-threads",
     scope.objectId,
-    zone2ThreadTask(options, scope.scopeId, scope.parent, (cursor, baseline) => {
+    zone2ThreadTask(options, scope.scopeId, scope.parent, scope.observer, (cursor, baseline) => {
       next = cursor;
       previous = baseline;
     }, true, scope.family),

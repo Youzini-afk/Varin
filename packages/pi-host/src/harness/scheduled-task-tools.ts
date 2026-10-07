@@ -148,14 +148,15 @@ export function createScheduledTaskTool(bridge: HostServicesBridge): ToolDefinit
         switch (params.action) {
           case "list": {
             const result = await request("schedule.list", {}) as ScheduleListResult;
+            const project = result.projectPath ?? result.projectId;
             if (result.tasks.length === 0) {
               return {
-                content: [{ type: "text", text: `No scheduled tasks in project ${result.projectId}.` }],
+                content: [{ type: "text", text: `No scheduled tasks in project ${project}.` }],
                 details: { projectId: result.projectId, total: 0 },
               };
             }
             return {
-              content: [{ type: "text", text: `Project ${result.projectId} — ${result.tasks.length} task(s):\n${result.tasks.map(describeTask).join("\n")}` }],
+              content: [{ type: "text", text: `Project ${project} — ${result.tasks.length} task(s):\n${result.tasks.map(describeTask).join("\n")}` }],
               details: { projectId: result.projectId, total: result.tasks.length, tasks: result.tasks as unknown as Record<string, unknown>[] },
             };
           }

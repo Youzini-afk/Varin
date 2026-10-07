@@ -217,6 +217,10 @@ export interface SearchContentParams {
   glob?: string[];
   ignoreCase?: boolean;
   fixedStrings?: boolean;
+  /** Include dotfiles/directories. Explicit dot paths are included by default. */
+  hidden?: boolean;
+  /** Bypass Git/ignore rules and the default generated-directory exclusions. */
+  noIgnore?: boolean;
   before?: number;
   after?: number;
   context?: number;
@@ -1205,6 +1209,8 @@ export interface ExploreModelParticipation {
    * loop judges material and chooses follow-up actions inside one query.
    */
   fastDecision?: ExploreModelStageStatus;
+  /** Which configured engine owns each responsibility in this query. */
+  duties?: NonNullable<ExploreQueryStartResult['duties']>;
   note?: string;
 }
 
@@ -1325,7 +1331,7 @@ export interface ExploreQueryStartResult {
    * means the Host runs the progressive selection/action loop inside this
    * query; other states leave the query on the existing algorithmic path.
    */
-  fastDecision?: { status: "ready" | "disabled" | "unconfigured" | "invalid" | "unavailable" };
+  fastDecision?: { status: "ready" | "disabled" | "unconfigured" | "invalid" | "unavailable"; message?: string };
   /** Frozen responsibility assignment; no runtime provider cascade. */
   duties?: { actions: "source" | "llm" | "fast-decision"; selection: "source" | "llm" | "fast-decision" | "rerank" };
 }

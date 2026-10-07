@@ -29,7 +29,7 @@ describe("resolveExploreFastDecision", () => {
     expect(resolveExploreFastDecision(undefined)).toEqual({ status: "unavailable" });
     expect(resolveExploreFastDecision({ status: "disabled" })).toEqual({ status: "disabled" });
     expect(resolveExploreFastDecision({ status: "unconfigured" })).toEqual({ status: "unconfigured" });
-    expect(resolveExploreFastDecision({ status: "invalid", message: "bad" })).toEqual({ status: "invalid" });
+    expect(resolveExploreFastDecision({ status: "invalid", message: "bad" })).toEqual({ status: "invalid", message: "bad" });
     const readyStatus = resolveExploreFastDecision({ status: "ready", binding });
     expect(readyStatus).toEqual({ status: "ready", binding });
   });

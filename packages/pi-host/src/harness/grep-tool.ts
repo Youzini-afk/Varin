@@ -10,6 +10,8 @@ const GrepParams = Type.Object({
   glob: Type.Optional(Type.Array(Type.String())),
   ignoreCase: Type.Optional(Type.Boolean()),
   fixedStrings: Type.Optional(Type.Boolean()),
+  hidden: Type.Optional(Type.Boolean({ description: "Include dotfiles and dot directories. Explicit dot paths are included by default." })),
+  noIgnore: Type.Optional(Type.Boolean({ description: "Search ignored files and generated directories as well. Default false." })),
   before: Type.Optional(Type.Integer({ minimum: 0 })),
   after: Type.Optional(Type.Integer({ minimum: 0 })),
   context: Type.Optional(Type.Integer({ minimum: 0 })),
@@ -21,7 +23,9 @@ function formatSearchResult(result: SearchContentResult, pattern: string): strin
     // searchedFiles is the kernel's real scanned count when present; absent
     // means the backend did not report one — never present a fabricated zero.
     const scanned = result.searchedFiles !== undefined ? ` (searched ${result.searchedFiles} files)` : "";
-    return `0 hits — no matches in the requested scope${scanned}`;
+    return result.partial
+      ? `Search incomplete — no verified matches returned${scanned}. This does not establish that the scope has no matches.`
+      : `0 hits — no matches in the requested scope${scanned}`;
   }
   if (result.status === "unavailable") {
     return `search unavailable`;
@@ -54,7 +58,7 @@ export function createGrepTool(bridge: HostServicesBridge, _sessionId: string): 
   return defineTool({
     name: "grep",
     label: "Grep",
-    description: "Search file contents with ripgrep semantics",
+    description: "Search file contents with ripgrep semantics. Broad searches skip dot paths and ignored/generated files by default; hidden and noIgnore opt into them. Explicit dot paths enable hidden traversal unless hidden:false; ignored files still require noIgnore:true.",
     promptSnippet: "grep: search file contents with ripgrep semantics",
     parameters: GrepParams,
     execute: async (_toolCallId, params, signal, _onUpdate, _ctx) => {
@@ -66,17 +70,20 @@ export function createGrepTool(bridge: HostServicesBridge, _sessionId: string): 
           ...(params.glob !== undefined ? { glob: params.glob } : {}),
           ...(params.ignoreCase !== undefined ? { ignoreCase: params.ignoreCase } : {}),
           ...(params.fixedStrings !== undefined ? { fixedStrings: params.fixedStrings } : {}),
+          ...(params.hidden !== undefined ? { hidden: params.hidden } : {}),
+          ...(params.noIgnore !== undefined ? { noIgnore: params.noIgnore } : {}),
           ...(params.before !== undefined ? { before: params.before } : {}),
           ...(params.after !== undefined ? { after: params.after } : {}),
           ...(params.context !== undefined ? { context: params.context } : {}),
           ...(params.limit !== undefined ? { limit: params.limit } : {}),
-        }, signal === undefined ? {} : { signal });
+        }, { ...(signal ? { signal } : {}), timeoutMs: 0 });
         const text = formatSearchResult(result, params.pattern);
         return {
           content: [{ type: "text", text }],
           details: { status: result.status, totalHits: result.totalHits, totalFiles: result.totalFiles, partial: result.partial },
         };
       } catch (error) {
+        signal?.throwIfAborted();
         const message = error instanceof Error ? error.message : String(error);
         return {
           content: [{ type: "text", text: `search failed: ${message}` }],

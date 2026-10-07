@@ -11,8 +11,9 @@ const DocumentReadParams = Type.Object({
   view: Type.Optional(Type.Union([Type.Literal("overview"), Type.Literal("text"), Type.Literal("page-image"), Type.Literal("structure")],
     { description: "Overview opens the original without parsing its full text. Text, page images and structure are independent views." })),
   page: Type.Optional(Type.Integer({ minimum: 1 })),
-  pages: Type.Optional(Type.Union([Type.Array(Type.Integer({ minimum: 1 }), { minItems: 1 }), Type.Literal("all")],
-    { description: "Selected one-based page numbers, or all pages of the original document." })),
+  pages: Type.Optional(Type.Array(Type.Integer({ minimum: 1 }),
+    { minItems: 1, description: "Selected one-based page numbers. Supply page, pages, or all — only one." })),
+  all: Type.Optional(Type.Boolean({ description: "Read all pages of the original document. Cannot be combined with page or pages." })),
   region: Type.Optional(Type.Object({
     x: Type.Number({ minimum: 0, maximum: 1 }), y: Type.Number({ minimum: 0, maximum: 1 }),
     width: Type.Number({ exclusiveMinimum: 0, maximum: 1 }), height: Type.Number({ exclusiveMinimum: 0, maximum: 1 }),
@@ -51,6 +52,9 @@ export function createDocumentReadTool(bridge: HostServicesBridge): ToolDefiniti
       details: Record<string, unknown>;
       isError?: boolean;
     }> => {
+      if (params.all && (params.page !== undefined || params.pages !== undefined)) {
+        return { content: [{ type: "text", text: "Supply only one of page, pages, or all:true." }], details: { kind: "document_read", status: "failed" }, isError: true };
+      }
       const position: DocumentReadRequest["position"] = params.section !== undefined
         ? { kind: "section", title: params.section }
         : params.element !== undefined
@@ -64,7 +68,7 @@ export function createDocumentReadTool(bridge: HostServicesBridge): ToolDefiniti
         ...(params.artifact ? { artifact: params.artifact } : {}),
         view: params.view ?? (params.find || params.ocr || position ? "text" : params.parser === "docling" ? "structure" : "overview"),
         ...(params.page === undefined ? {} : { page: params.page }),
-        ...(params.pages ? { pages: params.pages } : params.find && params.page === undefined ? { pages: "all" as const } : {}),
+        ...(params.all ? { pages: "all" as const } : params.pages ? { pages: params.pages } : params.find && params.page === undefined ? { pages: "all" as const } : {}),
         ...(params.region ? { region: params.region } : {}),
         ...(params.scale === undefined ? {} : { scale: params.scale }),
         ...(params.find === undefined ? {} : { find: params.find }),

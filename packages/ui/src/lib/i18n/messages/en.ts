@@ -3283,6 +3283,7 @@ export const dict = {
   'mcpDropdown.statusAria': 'MCP status',
   'mcpDropdown.status.unknown': 'Unknown',
   'mcpDropdown.status.connected': 'Connected',
+  'mcpDropdown.status.cached': 'Tool catalog cached; connects when used',
   'mcpDropdown.status.failed': 'Failed: {error}',
   'mcpDropdown.status.unknownError': 'Unknown error',
   'mcpDropdown.status.needsAuth': 'Needs authentication',

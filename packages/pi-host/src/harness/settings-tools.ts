@@ -60,9 +60,11 @@ export function createSettingsSearchTool(bridge: HostServicesBridge): ToolDefini
       try {
         const result = await bridge.request<"settings.search">("settings.search", params, signal ? { signal } : undefined) as SettingsSearchResult;
         if (result.items.length === 0) {
+          const categories = result.categories.map(item => `${item.category} (${item.count})`).join(', ');
+          const related = result.related?.map(item => `- ${item.id} → ${item.paths.join(', ')}`).join('\n');
           return {
-            content: [{ type: "text", text: `No settings matched${params.query ? ` "${params.query}"` : ""}. Total catalog coverage is browsable by category — try a broader term or a category name.` }],
-            details: { total: 0, categories: result.categories },
+            content: [{ type: "text", text: `No settings matched the full query${params.query ? ` "${params.query}"` : ""}.${related ? `\nRelated keyword matches:\n${related}` : ''}\nBrowse with category: ${categories || '(none available)'}.` }],
+            details: { total: 0, categories: result.categories, ...(result.related ? { related: result.related } : {}) },
           };
         }
         const lines = result.items.map((item) => {

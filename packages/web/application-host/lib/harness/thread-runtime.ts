@@ -143,7 +143,7 @@ export interface ThreadRuntimeOptions {
   resolveRuntimeWorkspaceId(cwd: string): Promise<string>;
   /** Production R3 measurement of a managed execution directory through the kernel. */
   measureManagedDirectory?(workspaceId: string, worktree: NonNullable<Thread["worktree"]>): Promise<ThreadSpaceMeasurement>;
-  inspectBaselineWriters?(workspaceId: string, root: string): Promise<Array<{ id: string; purpose?: string }>>;
+  inspectBaselineWriters?(workspaceId: string, root: string): Promise<Array<{ id: string; purpose?: string; owner?: { kind: string; id: string }; startedAt?: string }>>;
   beginBaselineCapture?(workspaceId: string): Promise<unknown>;
   completeBaselineCapture?(capture: unknown): Promise<{ stable: boolean; reasons: string[] }>;
   beginDirtyStateBarrier?(workspaceId: string, paths: string[]): Promise<{
@@ -1775,7 +1775,11 @@ export function createThreadRuntime(options: ThreadRuntimeOptions) {
       if (typeof options.inspectBaselineWriters !== "function") return;
       const writers = await options.inspectBaselineWriters(captureWorkspaceId, sourceRoot);
       if (writers.length > 0) {
-        throw baselineChanged(`active writer ${writers.map((writer) => writer.id).join(", ")}`);
+        throw new ThreadRuntimeError("unavailable",
+          `An isolated baseline cannot be captured while the parent workspace has active writers: ${writers.map(writer =>
+            `${writer.purpose ?? "writer"}${writer.owner ? ` (${writer.owner.kind} ${writer.owner.id})` : ""}${writer.startedAt ? ` since ${writer.startedAt}` : ""} [${writer.id}]`).join(", ")}. `
+          + 'Wait for these operations to finish, or explicitly use worktree:"shared" to work directly in the parent workspace.',
+          { retryable: true });
       }
     };
     const rejectGitlinks = (gitlinks: readonly string[]): void => {

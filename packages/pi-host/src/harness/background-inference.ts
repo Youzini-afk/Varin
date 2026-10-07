@@ -4,8 +4,7 @@
  * trusted project's provider layer never participates in background inference.
  */
 import { createHash } from "node:crypto";
-import { join } from "node:path";
-import { ModelRuntime, SettingsManager } from "@earendil-works/pi-coding-agent";
+import { SettingsManager, type ModelRuntime } from "@earendil-works/pi-coding-agent";
 import { classify as classifySystemOne } from "@earendil-works/pi-ai/api/typesafe-system-one";
 import type { ClassifierModel, ClassifierApi } from "@earendil-works/pi-ai";
 import {
@@ -65,6 +64,15 @@ type ResolvedProviderBinding = {
 const digest = (value: unknown): string => createHash("sha256")
   .update(JSON.stringify(value)).digest("hex").slice(0, 16);
 
+// Binding diagnostics contain only known configuration failures and identity.
+// Never surface arbitrary provider exceptions, URLs, headers or credentials.
+const bindingFailure = (kind: string, providerId: string, modelId: string, error: unknown): string => {
+  const reason = error instanceof HostError ? error.code
+    : error instanceof Error && error.name === "ProviderConfigValidationError" ? "provider_config_invalid"
+    : "provider_binding_failed";
+  return `${kind} binding ${providerId}/${modelId} is unavailable (${reason}). Check the provider connection and capability configuration.`;
+};
+
 const credentialFreeUrl = (value: string): string => {
   try {
     const url = new URL(value);
@@ -115,7 +123,6 @@ const harnessFromSettings = (manager: SettingsManager): HarnessSettingsInput => 
 };
 
 export class BackgroundInferenceRuntime {
-  readonly #agentDir: string;
   readonly #cwd: string;
   readonly #fetchImpl: typeof fetch | undefined;
   readonly #settings: SettingsManager;
@@ -127,12 +134,9 @@ export class BackgroundInferenceRuntime {
     state: "reserved" | "cancelled" | "rejected";
   }>();
   readonly #reservedByBatch = new Map<string, string>();
-  #configRuntime: ModelRuntime | undefined;
-  #configRuntimePromise: Promise<ModelRuntime> | undefined;
   #disposed = false;
 
   constructor(options: BackgroundInferenceOptions) {
-    this.#agentDir = options.agentDir;
     this.#cwd = options.cwd;
     this.#fetchImpl = options.fetchImpl;
     this.#authRuntime = options.modelRuntime;
@@ -175,8 +179,8 @@ export class BackgroundInferenceRuntime {
       try {
         const provider = await this.#resolveProviderBinding(settings.providerId, settings.modelId, false, "embedding");
         return { status: "ready", binding: { ...settings, configurationId: provider.configurationId } };
-      } catch {
-        return { status: "unavailable", message: "Embedding provider binding is unavailable" };
+      } catch (error) {
+        return { status: "unavailable", message: bindingFailure("Embedding", settings.providerId, settings.modelId, error) };
       }
     })();
     const rerank = await (async (): Promise<HarnessInferenceBindingSnapshot["rerank"]> => {
@@ -188,8 +192,8 @@ export class BackgroundInferenceRuntime {
         const provider = await this.#resolveProviderBinding(settings.providerId, settings.modelId, false, "rerank");
         const endpoint = settings.endpoint ?? provider.endpoint;
         return { status: "ready", binding: { ...settings, ...(endpoint ? { endpoint } : {}), configurationId: provider.configurationId } };
-      } catch {
-        return { status: "unavailable", message: "Rerank provider binding is unavailable" };
+      } catch (error) {
+        return { status: "unavailable", message: bindingFailure("Rerank", settings.providerId, settings.modelId, error) };
       }
     })();
     const fastDecision = await (async (): Promise<NonNullable<HarnessInferenceBindingSnapshot["fastDecision"]>> => {
@@ -223,8 +227,8 @@ export class BackgroundInferenceRuntime {
             status: "ready",
             binding: { ...resolution.binding, ...(endpoint ? { endpoint } : {}), configurationId: provider.configurationId },
           };
-        } catch {
-          purposes[purpose] = { status: "unavailable", message: "Fast decision provider binding is unavailable" };
+        } catch (error) {
+          purposes[purpose] = { status: "unavailable", message: bindingFailure("Fast decision", resolution.binding.providerId, resolution.binding.modelId, error) };
         }
       }
       return { purposes };
@@ -572,23 +576,10 @@ export class BackgroundInferenceRuntime {
   }
 
   async #runtime(): Promise<ModelRuntime> {
-    if (this.#configRuntime) {
-      await this.#providers.apply(this.#configRuntime, this.#cwd, false);
-      return this.#configRuntime;
-    }
-    this.#configRuntimePromise ??= (async () => {
-      const runtime = await ModelRuntime.create({
-        allowModelNetwork: false,
-        authPath: join(this.#agentDir, "auth.json"),
-        modelsPath: join(this.#agentDir, "models.json"),
-      });
-      // ModelRuntime loaded the user layer; projectTrusted=false adds only operator config.
-      await this.#providers.apply(runtime, this.#cwd, false);
-      this.#configRuntime = runtime;
-      return runtime;
-    })();
-    try { return await this.#configRuntimePromise; }
-    finally { this.#configRuntimePromise = undefined; }
+    // Reapplying providers on every embedding/describe call mutates their
+    // registrations beneath concurrent inference. The configuration owner
+    // shares a catalog and builds a fresh one when its document changes.
+    return this.#providers.inferenceRuntime(this.#cwd);
   }
 
   async #resolveProviderBinding(providerId: string, modelId: string, withAuth: boolean, kind: ProviderInferenceCapability): Promise<ResolvedProviderBinding> {

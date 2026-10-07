@@ -90,6 +90,21 @@ async function setup(hooks: {
 }
 
 describe('production workspace semantic assembly lifecycle', () => {
+  it('rechecks an unavailable provider binding on the next query without requiring a settings edit', async () => {
+    let attempts = 0;
+    const harness = await setup({ describe: async () => {
+      attempts += 1;
+      return attempts === 1
+        ? { ...binding('initial'), fastDecision: { purposes: { explore: { status: 'unavailable', message: 'provider endpoint missing' } } } }
+        : { ...binding('ready'), fastDecision: { purposes: { explore: { status: 'ready', binding: {
+          protocol: 'pi-classifier', providerId: 'remote', modelId: 'decision', configurationId: 'ready',
+        } } } } };
+    } });
+    expect((await harness.runtime.fastDecisionStatus(harness.workspaceId, 'explore')).status).toBe('unavailable');
+    expect((await harness.runtime.fastDecisionStatus(harness.workspaceId, 'explore')).status).toBe('ready');
+    expect(attempts).toBe(2);
+  });
+
   it('reconciles watcher resets without rereading stable files and discovers missed edits', async () => {
     let notify: Parameters<WorkspaceSemanticRuntimeOptions['documents']['watch']>[1] = () => {};
     let file = '';

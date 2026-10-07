@@ -19,6 +19,7 @@ export type WorkspaceContentSearchResult =
 export interface WorkspaceContentSearchRequest {
   glob?: string[];
   includeHidden?: boolean;
+  respectGitignore?: boolean;
   maxResults?: number | undefined;
   ignoreCase?: boolean;
   fixedStrings?: boolean;
@@ -86,9 +87,10 @@ export function createWorkspaceContentSearch({ documents, compute, pathModule = 
           return {...overlay,path:fileRoot?fileName!:resourceId};
         });
         const result=await compute.directory(computeRoot,{operation:"search",lane:"foreground",query:request.query.trim(),
-          excludeDirectories:CONTENT_SEARCH_EXCLUDED_DIRS,excludePaths:fileRoot?excludes.map(()=>fileName!):excludes,
+          excludeDirectories:request.respectGitignore===false?[]:CONTENT_SEARCH_EXCLUDED_DIRS,excludePaths:fileRoot?excludes.map(()=>fileName!):excludes,
           ...(fileRoot?{paths:[fileName!]}:requestedPaths?{paths:requestedPaths}:{}),...(request.glob?{globs:request.glob}:{}),
           ...(request.includeHidden===undefined?{}:{includeHidden:request.includeHidden}),
+          ...(request.respectGitignore===undefined?{}:{respectGitignore:request.respectGitignore}),
           ...(request.ignoreCase===undefined?{}:{ignoreCase:request.ignoreCase}),
           ...(request.fixedStrings===undefined?{}:{fixedStrings:request.fixedStrings}),
           ...(request.maxResults===undefined?{}:{maxResults:request.maxResults}),

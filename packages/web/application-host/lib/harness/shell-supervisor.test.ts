@@ -1191,7 +1191,7 @@ describe("RR3 command payload framing and execution identity", () => {
     try {
       // A heredoc without a trailing newline followed by a tail comment — the
       // old `{ …; }` interpolation glued the epilogue onto the delimiter line.
-      const heredoc = "cat <<EOF\nbody\nEOF # done";
+      const heredoc = "cat <<EOF\nbody 🎉\nEOF # done";
       await supervisor.exec(heredoc, { waitMs: 1000 });
       const commandWrite = writes.find((write) => write.includes(":B"));
       expect(commandWrite).toBeDefined();
@@ -1199,7 +1199,8 @@ describe("RR3 command payload framing and execution identity", () => {
       expect(commandWrite).not.toContain("{ cat <<EOF");
       // The payload keeps the literal heredoc inside the quoted unit, with a
       // real newline appended inside the eval string.
-      expect(commandWrite).toContain("cat <<EOF\\nbody\\nEOF # done\\n");
+      expect(commandWrite).toContain("cat <<EOF\\nbody \\xf0\\x9f\\x8e\\x89\\nEOF # done\\n");
+      expect(commandWrite).not.toContain("🎉");
       // Control framing lives outside the payload on the same line.
       expect(commandWrite).toContain(':C:1"; eval $\'');
       expect(commandWrite).toContain("__ec=$?");

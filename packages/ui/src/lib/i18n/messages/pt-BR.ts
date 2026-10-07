@@ -3370,6 +3370,7 @@ export const dict: Record<I18nKey, string> = {
   "mcpDropdown.statusAria": "Status MCP",
   "mcpDropdown.status.unknown": "Desconhecido",
   "mcpDropdown.status.connected": "Conectado",
+  "mcpDropdown.status.cached": "Catálogo em cache; conecta ao usar",
   "mcpDropdown.status.failed": "Falhou: {error}",
   "mcpDropdown.status.unknownError": "Erro desconhecido",
   "mcpDropdown.status.needsAuth": "Precisa de autenticação",
