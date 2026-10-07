@@ -52,7 +52,7 @@
   transition: width var(--wb-panel-duration) var(--wb-ease), opacity var(--wb-state-duration) ease;
 }
 .workbench-rail-reveal[data-open="false"] { width: 0; opacity: 0; pointer-events: none; }
-.workbench-resource-rail { background: var(--workbench-frame, var(--sidebar)); }
+.workbench-resource-rail { background: var(--background); }
 
 .ide-workspace-row { padding: 0 6px 4px 0; }
 .ide-primary,

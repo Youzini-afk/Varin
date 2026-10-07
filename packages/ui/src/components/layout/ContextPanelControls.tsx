@@ -41,7 +41,7 @@ export const ContextPanelControls: React.FC = () => {
         <button type="button" aria-label={railLabel} aria-expanded={railOpen}
           aria-controls={railOpen ? 'context-panel-rail' : undefined}
           onClick={toggleRail}
-          className={cn(buttonClass, railOpen && 'bg-interactive-selection text-foreground')}>
+          className={buttonClass}>
           <ContextRailIcon className="size-4" />
         </button>
       </TooltipTrigger>
