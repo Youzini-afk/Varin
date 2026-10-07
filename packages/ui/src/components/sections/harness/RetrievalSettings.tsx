@@ -115,7 +115,7 @@ export function InferenceSettings({ harness, update, kind, localSemanticStatus }
     ? t(localSemanticStatus?.installedBytes !== undefined ? 'settings.harness.retrieval.local' : 'settings.harness.retrieval.localUnavailable')
     : t('settings.harness.retrieval.off');
   return <SettingsSection title={t(`settings.page.harness.section.${kind}`)} settingsItem={`harness.${kind}`} contentClassName="space-y-5">
-    <SettingsFieldRow label={t('settings.harness.retrieval.source')} description={t(`settings.page.harness.section.${kind}.description`)}>
+    <SettingsFieldRow label={t('settings.harness.retrieval.source')} description={kind === 'embedding' ? t('settings.page.harness.section.embedding.description') : undefined}>
       <Select value={remote ? 'remote' : 'default'} onValueChange={(value) => { remoteRef.current = value === 'remote'; setRemote(value === 'remote'); if (value === 'default') update({ [kind]: undefined }); else commit({}); }}>
         <SelectTrigger size="settings" className="w-64" aria-label={t('settings.harness.retrieval.source')}><SelectValue>{remote ? t('settings.harness.retrieval.remote') : defaultLabel}</SelectValue></SelectTrigger>
         <SelectContent><SelectItem value="default">{defaultLabel}</SelectItem><SelectItem value="remote">{t('settings.harness.retrieval.remote')}</SelectItem></SelectContent>
@@ -178,7 +178,7 @@ function FastDecisionSettings({ harness, update }: HarnessSettingsPageProps) {
     return override === 'off' ? 'off' : override === undefined ? 'default' : 'custom';
   };
   return <SettingsSection title={t('settings.page.harness.section.fastDecision')} settingsItem="harness.fastDecision" contentClassName="space-y-5">
-    <SettingsFieldRow label={t('settings.harness.retrieval.source')} description={t('settings.page.harness.section.fastDecision.description')}>
+    <SettingsFieldRow label={t('settings.harness.retrieval.source')}>
       <Select value={remote ? 'remote' : 'default'} onValueChange={(value) => {
         remoteRef.current = value === 'remote';
         setRemote(value === 'remote');
@@ -216,7 +216,7 @@ function FastDecisionSettings({ harness, update }: HarnessSettingsPageProps) {
       </SettingsFieldRow>
       {(['explore', 'web', 'scholarly', 'memory-organization', 'memory-recall'] as const).map((purpose) => {
         const overrideValue = purposeOverrideValue(purpose);
-        return <SettingsFieldRow key={purpose} label={t(`settings.page.harness.fastDecision.${purpose}`)} description={t(`settings.page.harness.fastDecision.${purpose}.description`)}>
+        return <SettingsFieldRow key={purpose} label={t(`settings.page.harness.fastDecision.${purpose}`)} description={purpose === 'explore' ? undefined : t(`settings.page.harness.fastDecision.${purpose}.description`)}>
           <Select value={overrideValue} onValueChange={(value) => {
             if (value === 'custom') return;
             update({ fastDecision: { purposes: { [purpose]: value === 'off' ? 'off' : undefined } } });
@@ -253,7 +253,7 @@ export function RetrievalSettings(props: HarnessSettingsPageProps) {
             <SelectItem key={decision} value={decision}>{t(`settings.page.harness.codeRetrieval.mode.${decision}`)}</SelectItem>)}</SelectContent>
         </Select>
       </SettingsFieldRow>
-      <p className="whitespace-pre-line typography-meta text-muted-foreground">{t(`settings.page.harness.codeRetrieval.mode.${props.harness.codeRetrieval.decision}.description`)}</p>
+      {props.harness.codeRetrieval.decision !== 'source' ? <p className="whitespace-pre-line typography-meta text-muted-foreground">{t(`settings.page.harness.codeRetrieval.mode.${props.harness.codeRetrieval.decision}.description`)}</p> : null}
       <HarnessModelField {...props} slot="explore" />
     </SettingsSection>
     <InferenceSettings {...props} kind="rerank" localSemanticStatus={null} />
