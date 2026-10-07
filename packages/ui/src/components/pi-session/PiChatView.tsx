@@ -57,6 +57,7 @@ import { PiComposer } from './PiComposer';
 import { PiConversationSurface } from './PiConversationSurface';
 import { usePiMessageHandoff } from './usePiMessageHandoff';
 import { PiAssistBar } from './PiAssistBar';
+import { PiComputerActivity } from './PiComputerActivity';
 import { PiExtensionUiChrome } from './PiExtensionUiChrome';
 import { PiGoalStrip } from './PiGoalControls';
 import { PiFollowUpsStrip } from './PiFollowUpsStrip';
@@ -944,6 +945,7 @@ export const PiChatView: React.FC<PiChatViewProps> = ({
                 <WorkbenchReplacement target={WORKBENCH_REPLACEMENT_TARGETS.chatTimeline} fallback={conversationBody} />
               </PiConversationSurface>
               <section className="pi-conversation-composer min-w-0 shrink-0" data-pi-composer-region="true">
+                {currentSessionId && active && !previewOnly ? <PiComputerActivity key={`${runtimeKey}:${currentSessionId}`} sessionId={currentSessionId} directory={sessionCwd} /> : null}
                 {currentSessionId && !previewOnly ? <PiExtensionUiChrome placement="aboveEditor" sessionId={currentSessionId} /> : null}
                 {currentSessionId && !previewOnly && snapshot ? (
                   <>

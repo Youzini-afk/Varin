@@ -55,6 +55,10 @@ const echoSpec = () => ({
 });
 
 describe("computer driver host (BC4)", () => {
+  it.skipIf(process.platform !== 'win32')('checks Windows relocation, geometry and capture modes without native desktop input', () => {
+    const script = fileURLToPath(new URL('../../../../computer-driver/windows/test-targeting.ps1', import.meta.url));
+    expect(execFileSync('powershell.exe', ['-NoProfile', '-File', script], { encoding: 'utf8' })).toContain('Windows targeting checks passed');
+  });
   it("correlates concurrent requests and serializes them on the wire", async () => {
     const driver = createDriverSession(echoSpec());
     try {

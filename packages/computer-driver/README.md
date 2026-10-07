@@ -11,7 +11,7 @@ never changes the Agent's stored observations or input ownership.
 
 ```
 in : {"id":"<request>","tool":"<op>", ...params}
-out: {"id":"<request>","ok":true|false, "error"?:string, "cancelled"?:bool,
+out: {"id":"<request>","ok":true|false, "error"?:string, "cancelled"?:bool, "rejected"?:bool,
       "snapshot"?:{...}, "text"?:string,
       "apps"?:[{name,pid,windowTitle,windows}], "capabilities"?:{...}}
 ```
@@ -24,20 +24,42 @@ Operations:
 | `capabilities` | honest driver capability table (see `ComputerCapabilities` in `packages/protocol/src/harness-computer.ts`) |
 | `list_apps` | running top-level apps on this desktop |
 | `get_app_state` | snapshot: window bounds, UIA/AT-SPI tree lines + element records, optional screenshot |
-| `click`, `perform_secondary_action`, `scroll`, `drag`, `type_text`, `press_key`, `set_value` | actions; return a fresh snapshot after the input settles |
+| `click`, `perform_secondary_action`, `scroll`, `drag`, `type_text`, `press_key`, `set_value` | actions; return dispatch acceptance, optionally a fresh tree or screenshot |
 | `release_input` | release the synthetic buttons/keys this driver pressed, rather than every desktop modifier |
 | `capture_frame` / `inject_input` | viewer frames and human input; successful down/move/up requests preserve a gesture across frame requests until explicit release, cancellation, failure or EOF |
 
 Action params mirror the Open Computer Use schema (`app`, `element`,
 `x`/`y`, `from_x`/`from_y`/`to_x`/`to_y`, `click_count`, `mouse_button`,
 `click_method`, `direction`, `pages`, `text`, `key`, `value`, `action`,
-`windowBounds`, `text_limit`, `max_tree_nodes`, `max_tree_depth`). Two Varin
+`windowBounds`, `text_limit`, `max_tree_nodes`, `max_tree_depth`). Varin
 additions: `input: "global"` selects real session input (SendInput / AT-SPI
 synthesis / CGEvent) where the backend message path cannot reach, `screenshot:
 false` skips image capture on an observation, and `window` selects one of the
 app's windows by handle or title (see `windows` in `list_apps`/snapshots;
 the handle is HWND on Windows, CGWindowNumber on macOS, and the AT-SPI child
 index on Linux).
+
+`return_state` defaults to `none`: a deterministic batch does not capture or
+sleep after every action. `tree` and `screenshot` request an explicit post-action
+read. The existing 120ms input-settle allowance now applies only at a subsequent
+read, measured from the last input; it is not application-completion proof.
+
+The public API accepts coordinates in the exact PNG's pixels. Host converts
+those pixels to window units using PNG dimensions and the recorded bounds;
+native helpers reject changed geometry before input. Windows also compares DPI
+and checks point ownership for screen-copy captures. This does not establish
+unchanged UI content: observe again when the next step depends on the previous
+action's result. A tree-only read retains the latest raster, while element
+indexes must use the newest tree for that window. Live viewer frames never
+replace either Agent observation.
+
+Windows relocates by runtime identity first, then a unique AutomationId/type,
+then a unique name/type. Ambiguous matches do not choose the first control.
+Text entry searches only the selected window's subtree; another window in the
+same process holding global focus cannot redirect the bound application's text.
+`rejected:true` means preflight proved no input was sent; other failed native
+responses retain uncertain/partial semantics. Native Linux/macOS behavior
+still needs validation on those platforms.
 
 Cancellation (BC4.A): stdin stays sequential, so the Host cannot interrupt a
 running op through it. Instead it writes

@@ -1863,6 +1863,7 @@ async function main(options: StartWebUiServerOptions = {}): Promise<WebUiServerC
     updateSettings: (mutator) => updateSettingsOnDisk((current) => mutator(current as Record<string, unknown>) as typeof current),
   });
   const computerService = createComputerService({
+    onActivityChange: (entry) => broadcastGlobalUiEvent?.({ type: 'varin:computer-activity', properties: entry }),
     client: kernelClient,
     hostId,
     dataDir: VARIN_DATA_DIR,

@@ -41,6 +41,16 @@ const fixture = () => {
 };
 
 describe("computer routes (BC4)", () => {
+  it('reads the session activity projection without probing the catalog or desktop', async () => {
+    const { app, computers } = fixture();
+    computers.activities = vi.fn(() => [{ desktopId: 'local-console', activity: { sessionId: 's1', app: 'notepad', operation: 'key', status: 'idle', updatedAt: 'now' } }]);
+    const response = await request(app).get('/api/computers/activity?sessionId=s1');
+    expect(response.status).toBe(200);
+    expect(response.body.activities[0].activity.app).toBe('notepad');
+    expect(computers.activities).toHaveBeenCalledWith('s1');
+    expect(computers.list).not.toHaveBeenCalled();
+    expect(computers.probe).not.toHaveBeenCalled();
+  });
   it('preserves the originating session on remote observation and action requests', async () => {
     const { app, computers } = fixture();
     computers.observe = vi.fn(async () => ({ id: 'observation' }));

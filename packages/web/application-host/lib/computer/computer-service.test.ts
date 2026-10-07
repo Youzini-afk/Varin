@@ -246,6 +246,63 @@ describe("computer service (BC4)", () => {
     expect(driver.calls.filter((c) => c.tool === "click")).toHaveLength(0);
   });
 
+  it('maps exact raster pixels, retains the raster across tree reads, and rejects stale tree indexes and native preflight failures', async () => {
+    // The native helper supplies PNG bytes; its IHDR dimensions differ from window units at 2x scale.
+    const png = Buffer.from('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+aZr8AAAAASUVORK5CYII=', 'base64');
+    png.writeUInt32BE(1600, 16); png.writeUInt32BE(1200, 20);
+    const snapshot = { ...appSnapshot(), windowHandle: 73, dpiScale: 2 };
+    const driver = makeDriver(async op => op.tool === 'get_app_state'
+      ? okResponse({ snapshot: { ...snapshot, ...(op.screenshot ? { screenshotPngBase64: png.toString('base64'), screenshotSource: 'window' } : {}) } })
+      : op.tool === 'click' ? { id: 'x', ok: false, rejected: true, error: 'Window geometry changed' } : okResponse());
+    const { service } = makeService(driver);
+    const raster = await service.observe({ app: 'notepad' });
+    const tree = await service.observe({ app: 'notepad', includeScreenshot: false });
+    const result = await service.act({ action: { kind: 'click', app: '42', x: 240, y: 160, observationId: raster.id } });
+    expect(driver.calls.find(op => op.tool === 'click')).toMatchObject({ x: 120, y: 80, window: 73, expected_bounds: snapshot.windowBounds, expected_dpi: 2, capture_source: 'window', return_state: 'none' });
+    expect(result).toEqual({ accepted: false, detail: 'Window geometry changed' });
+    await expect(service.act({ action: { kind: 'click', app: '42', elementIndex: 0, observationId: raster.id } })).rejects.toMatchObject({ harnessCode: 'invalid-params' });
+    await expect(service.act({ action: { kind: 'click', app: '42', x: 1, y: 1, observationId: tree.id } })).rejects.toMatchObject({ harnessCode: 'invalid-params' });
+    await expect(service.act({ action: { kind: 'click', app: '42', x: 1600, y: 1, observationId: raster.id } })).rejects.toMatchObject({ harnessCode: 'invalid-params' });
+    expect(driver.calls.filter(op => op.tool === 'click')).toHaveLength(1);
+    await service.act({ action: { kind: 'drag', app: '42', fromX: 100, fromY: 80, toX: 900, toY: 700, observationId: raster.id } });
+    expect(driver.calls.find(op => op.tool === 'drag')).toMatchObject({ from_x: 50, from_y: 40, to_x: 450, to_y: 350 });
+    await service.dispose();
+  });
+
+  it('projects application activity without creating a driver, probing, or capturing', async () => {
+    const changes: unknown[] = [];
+    const kernel = fakeKernel();
+    let started!: () => void, finish!: () => void;
+    const running = new Promise<void>(resolve => { started = resolve; });
+    const driver = makeDriver(async op => {
+      if (op.tool === 'get_app_state') return okResponse({ snapshot: appSnapshot() });
+      if (op.tool === 'press_key') { started(); await new Promise<void>(resolve => { finish = resolve; }); }
+      return okResponse();
+    });
+    const createDriver = vi.fn(() => driver);
+    const service = createComputerService({ client: kernel.client as never, hostId: 'host-1', platform: 'windows', dataDir: newDataDir(), createDriver,
+      onActivityChange: entry => changes.push(entry) });
+    expect(service.activities('s1')).toEqual([]);
+    expect(createDriver).not.toHaveBeenCalled();
+    const tree = await service.observe({ app: 'notepad', includeScreenshot: false, sessionId: 's1' });
+    const probes = driver.calls.filter(op => op.tool === 'capabilities').length;
+    const action = service.act({ sessionId: 's1', action: { kind: 'key', app: '42', key: 'enter', observationId: tree.id } });
+    await running;
+    const before = driver.calls.length;
+    expect(service.activities('s1')).toMatchObject([{ desktopId: 'local-console', activity: { sessionId: 's1', app: 'notepad', operation: 'key', status: 'running' } }]);
+    expect(service.activities('other')).toEqual([]);
+    expect(driver.calls).toHaveLength(before);
+    finish(); await action;
+    expect(service.activities('s1')[0]?.activity.status).toBe('idle');
+    expect(changes).toHaveLength(4);
+    expect(driver.calls.filter(op => op.tool === 'get_app_state')).toHaveLength(1);
+    expect(driver.calls.filter(op => op.tool === 'capture_frame')).toHaveLength(0);
+    expect(driver.calls.filter(op => op.tool === 'capabilities')).toHaveLength(probes);
+    await service.observe({ app: '42', includeScreenshot: false, sessionId: 's1' });
+    expect(changes.at(-2)).toMatchObject({ activity: { app: 'notepad', operation: 'observe', status: 'running' } });
+    await service.dispose();
+  });
+
   it("element actions without any observation are rejected", async () => {
     const { service } = makeService(makeDriver(async () => okResponse()));
     await service.ensureLocal();
@@ -545,6 +602,8 @@ describe("computer service (BC5 control + view)", () => {
     await expect(first.handback({ desktopId, holderId: "v1" })).rejects.toThrow(/release/i);
     await first.dispose();
     const restarted = createComputerService(options);
+    expect(restarted.activities()).toEqual([]);
+    await restarted.list({ localOnly: true });
     expect(await restarted.control(desktopId)).toMatchObject({ owner: "human", holderId: "v1", reachable: false });
     await expect(restarted.act({ desktopId, action: { kind: "key", app: "notepad", key: "enter" } })).rejects.toMatchObject({ harnessCode: "forbidden" });
     await restarted.dispose();

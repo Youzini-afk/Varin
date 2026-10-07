@@ -2,6 +2,7 @@ import { getRuntimeUrlResolver, runtimeFetch } from '@varin/application-client';
 import { sha256 } from '@noble/hashes/sha2.js';
 import type {
   ComputerControlState,
+  ComputerActivityEntry,
   ComputerArtifact,
   ComputerDesktop,
   ComputerDesktopFrame,
@@ -30,6 +31,13 @@ const readJson = async <T>(response: Response, fallback: string): Promise<T> => 
 export const listComputers = async (): Promise<ComputerCatalog> => (
   readJson<ComputerCatalog>(await runtimeFetch('/api/computers'), 'Unable to list computers')
 );
+
+/** No probing, screenshot capture or persistent desktop subscription. */
+export const readComputerActivity = async (sessionId: string): Promise<ComputerActivityEntry[]> => (
+  await readJson<{ activities: ComputerActivityEntry[] }>(
+    await runtimeFetch(`/api/computers/activity?sessionId=${encodeURIComponent(sessionId)}`), 'Unable to read computer activity',
+  )
+).activities;
 
 /** Re-probe a desktop's driver; the response carries the real capability table. */
 export const probeComputerDesktop = async (desktopId: string): Promise<ComputerDesktop> => {

@@ -1,6 +1,6 @@
 import { getRuntimeUrlResolver } from '@varin/application-client';
 import { subscribeRuntimeEndpointChanged } from '@varin/application-client';
-import type { Thread, ThreadParent, ThreadRun } from '@varin/protocol';
+import type { Thread, ThreadParent, ThreadRun, ComputerActivityEntry } from '@varin/protocol';
 import { bindClientSurfaceSession, clientSurfaceQuery, handleClientSettingsRequest } from '@/lib/client-settings-bridge';
 import { usePiSessionStore } from '@/stores/usePiSessionStore';
 
@@ -67,7 +67,8 @@ type SessionCreatedEvent = {
 export type VarinEvent = StreamReadyEvent | ScheduledTaskRanEvent | SessionCreatedEvent | HarnessThreadChangedEvent | HarnessBlocksChangedEvent | HarnessKnowledgeChangedEvent | HarnessExperimentChangedEvent | SettingsChangedEvent
   | { type: 'agent-personalization-changed' }
   | { type: 'ssh-instance-status'; status: unknown }
-  | { type: 'bot-changed'; botId: string };
+  | { type: 'bot-changed'; botId: string }
+  | ({ type: 'computer-activity' } & ComputerActivityEntry);
 type Listener = (event: VarinEvent) => void;
 
 let eventSource: EventSource | null = null;
@@ -228,6 +229,20 @@ const dispatchFromEnvelope = (envelope: { type: string; properties: unknown }) =
   if (envelope.type === 'varin:harness-thread-changed') {
     const nextEvent = parseHarnessThreadChanged(envelope.properties);
     if (nextEvent) for (const listener of listeners) listener(nextEvent);
+    return;
+  }
+
+  if (envelope.type === 'varin:computer-activity') {
+    const properties = getEventProperties(envelope.properties);
+    const activity = getEventProperties(properties?.activity);
+    if (typeof properties?.desktopId === 'string' && typeof activity?.app === 'string'
+      && typeof activity.operation === 'string' && ['observe', 'click', 'type', 'key', 'scroll', 'drag', 'set_value', 'secondary'].includes(activity.operation)
+      && typeof activity.updatedAt === 'string' && ['running', 'idle', 'error'].includes(String(activity.status))) {
+      const nextEvent = { type: 'computer-activity', desktopId: properties.desktopId,
+        activity: { app: activity.app, operation: activity.operation, status: activity.status, updatedAt: activity.updatedAt,
+          ...(typeof activity.sessionId === 'string' ? { sessionId: activity.sessionId } : {}) } } as Extract<VarinEvent, { type: 'computer-activity' }>;
+      for (const listener of listeners) listener(nextEvent);
+    }
     return;
   }
 

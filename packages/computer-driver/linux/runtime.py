@@ -21,6 +21,7 @@ import warnings
 from datetime import datetime, timezone
 
 PENDING_BROWSER_RELEASE = None
+LAST_INPUT_TIMES = {}
 
 warnings.filterwarnings("ignore", category=DeprecationWarning)
 
@@ -536,6 +537,11 @@ def selected_text(app_pid, text_limit=DEFAULT_TEXT_LIMIT):
 
 def build_snapshot(query, text_limit=DEFAULT_TEXT_LIMIT, max_tree_nodes=MAX_ELEMENTS, max_tree_depth=MAX_DEPTH, screenshot=True, window=None):
     app = resolve_app(query)
+    previous_input = LAST_INPUT_TIMES.pop(node_pid(app), None)
+    if previous_input is not None:
+        remaining = 0.12 - (time.monotonic() - previous_input)
+        if remaining > 0:
+            time.sleep(remaining)
     window_index, window_node = select_window(app, window)
     check_cancel("resolved the target window")
     bounds = extents(window_node)
@@ -562,6 +568,7 @@ def build_snapshot(query, text_limit=DEFAULT_TEXT_LIMIT, max_tree_nodes=MAX_ELEM
         "windows": window_descriptors(app, window_index),
         "windowBounds": bounds,
         "screenshotPngBase64": capture_window_png(bounds) if screenshot else None,
+        "screenshotSource": "screen" if screenshot else None,
         "treeLines": lines,
         "focusedSummary": focused_summary(pid, text_limit=text_limit),
         "selectedText": selected_text(pid, text_limit=text_limit),
@@ -1161,6 +1168,8 @@ def perform_operation(operation):
     window_index, window = select_window(app, operation.get("window"))
     check_cancel("resolved the target window")
     bounds = extents(window)
+    if operation.get("expected_bounds") and any(bounds[key] != operation["expected_bounds"][key] for key in ("x", "y", "width", "height")):
+        return {"ok": False, "rejected": True, "error": "Window geometry changed since the screenshot; observe again"}
     element_record = operation.get("element")
     element = find_element(app, element_record, operation.get("window"))
     if element_record and element is None:
@@ -1240,13 +1249,15 @@ def perform_operation(operation):
     else:
         raise RuntimeError('unsupportedTool("{}")'.format(tool))
 
-    time.sleep(0.12)
+    LAST_INPUT_TIMES[node_pid(app)] = time.monotonic()
+    if operation.get("return_state", "none") == "none":
+        return {"ok": True}
     try:
         return {
             "ok": True,
             "snapshot": build_snapshot(
                 operation.get("app", ""),
-                screenshot=bool(operation.get("screenshot", True)),
+                screenshot=operation.get("return_state") == "screenshot",
                 window=operation.get("window"),
             ),
         }
