@@ -240,7 +240,7 @@
   transition: transform var(--wb-state-duration) var(--wb-ease), opacity var(--wb-state-duration) ease;
 }
 .workbench-overview-launcher:hover .workbench-overview-peek-trigger,
-.workbench-overview-launcher:focus-within .workbench-overview-peek-trigger,
+.workbench-overview-launcher:has(button:focus-visible) .workbench-overview-peek-trigger,
 .workbench-overview-launcher[data-peek-open="true"] .workbench-overview-peek-trigger {
   opacity: 1;
   transform: translateY(0);
@@ -255,9 +255,6 @@
 }
 .workbench-overview-full { width: min(var(--wb-overview-full-width), calc(100cqi - 1.5rem)); }
 .workbench-overview-peek-progress > span { transition: width var(--wb-state-duration) ease; }
-@media (hover: none) {
-  .workbench-overview-peek-trigger { opacity: 1; transform: none; pointer-events: auto; }
-}
 
 @keyframes wb-action-arrive {
   from { opacity: 0; transform: translateY(3px) scale(.65); }

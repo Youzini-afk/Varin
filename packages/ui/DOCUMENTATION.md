@@ -26,6 +26,16 @@ session choices; selecting a compact row opens its full section. IDE's quick-ope
 live in the activity footer, while the session picker and current context usage live inside the
 Agent pane's `IdeSessionHeader`.
 
+The lower overview handle remains visible only while the compact monitor is open. A full overview
+removes it; when both panels are closed, hover or keyboard focus reveals it temporarily. Pointer clicks
+do not pin the handle through lingering button focus.
+
+The conversation rail indexes displayed user and Agent messages independently. Each preview reads
+only its source message, and a jump targets that message inside the existing virtual row. Sorted
+activity uses its actual display anchor rather than adding ticks for hidden tool steps. Current-reading
+highlight follows mounted message positions, including scrolling within a long turn. Stream deltas
+keep the marker identities and virtual-list data stable.
+
 `IdeSidebar` animates the actual persisted layout weight and retains exiting content until the
 transition finishes. Relative grow factors fill the row when a sidebar closes; outgoing content keeps
 its width instead of reflowing into a collapsing column. Reversing a toggle continues from the current

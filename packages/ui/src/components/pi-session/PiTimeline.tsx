@@ -44,6 +44,8 @@ import {
 import { PiTurnAssistantChrome } from './PiTurnAssistantChrome';
 import { ChatContextMenu } from './ChatContextMenu';
 import { PiTurnNavigator, type PiTurnNavigatorHandle } from './PiTurnNavigator';
+import { piNavigationAssistantSources, piNavigationMessageElement, piNavigationRowElement, type PiMessageNavigationTarget } from './piMessageNavigation';
+import { PI_SORTED_LIVE_ASSISTANT_ID } from './piSortedTurnProjection';
 import { prefersReducedMotion } from '@/hooks/usePrefersReducedMotion';
 
 interface PiTimelineItemViewProps extends Omit<
@@ -231,6 +233,7 @@ const piTimelineKeyIntent = (key: string, shiftKey: boolean): PiTimelineScrollIn
 export const PiTimeline: React.FC<PiTimelineProps> = (props) => {
   const { t } = useI18n();
   const promptNavigatorEnabled = useUIStore(state => state.promptNavigatorEnabled);
+  const sortedMessages = useUIStore(state => state.chatRenderMode === 'sorted');
   const isMobile = useUIStore((state) => state.isMobile);
   const onScrollContainerChange = props.onScrollContainerChange;
   const listRef = React.useRef<LegendListRef>(null);
@@ -249,6 +252,12 @@ export const PiTimeline: React.FC<PiTimelineProps> = (props) => {
     projectionRef.current,
   ), [props.entries, props.liveAssistant, props.liveUser]);
   projectionRef.current = projection;
+  const liveNavigationItem = projection.liveItem?.item;
+  const liveNavigationSources = promptNavigatorEnabled && liveNavigationItem && liveNavigationItem.kind !== 'entry' ? {
+    rowId: liveNavigationItem.id,
+    sourceIds: piNavigationAssistantSources(liveNavigationItem.kind === 'turn' ? liveNavigationItem.turn.entries : [],
+      liveNavigationItem.kind === 'turn' ? liveNavigationItem.turn.liveAssistant : liveNavigationItem.message, sortedMessages),
+  } : undefined;
   const readNavigatorItem = React.useCallback((index: number) => {
     const current = projectionRef.current;
     const row = current?.items[index];
@@ -293,6 +302,8 @@ export const PiTimeline: React.FC<PiTimelineProps> = (props) => {
   const positionedAnchorRef = React.useRef<string | null>(null);
   const touchYRef = React.useRef<number | null>(null);
   const manualOwnershipClaimedRef = React.useRef(false);
+  const navigationRequestRef = React.useRef<symbol | null>(null);
+  const navigationFrameRef = React.useRef<number | null>(null);
   if (timelineView.scrollMode !== 'free-scrolling') {
     manualOwnershipClaimedRef.current = false;
   }
@@ -313,13 +324,32 @@ export const PiTimeline: React.FC<PiTimelineProps> = (props) => {
     };
   }, []);
 
+  const updateNavigationPosition = React.useCallback(() => {
+    if (!turnNavigatorRef.current) return;
+    const index = firstVisibleIndexRef.current;
+    const row = projectionRef.current?.items[index];
+    if (!row) return;
+    let sourceId = row.kind === 'turn' ? row.turn.userEntry?.id ?? 'user'
+      : row.kind === 'entry' ? row.entry.id : PI_SORTED_LIVE_ASSISTANT_ID;
+    const viewport = listRef.current?.getScrollableNode();
+    const element = viewport && piNavigationRowElement(viewport, row.id);
+    if (element && viewport) {
+      const readingLine = viewport.getBoundingClientRect().top + PI_TIMELINE_ANCHOR_OFFSET_PX;
+      for (const message of element.querySelectorAll<HTMLElement>('[data-pi-message-role]')) {
+        if (message.getBoundingClientRect().top > readingLine) break;
+        sourceId = message.dataset.piEntryId ?? 'user';
+      }
+    }
+    turnNavigatorRef.current?.setVisibleIndex(index, sourceId);
+  }, []);
   const scheduleViewportCapture = React.useCallback(() => {
     if (viewportFrameRef.current !== null) return;
     viewportFrameRef.current = requestAnimationFrame(() => {
       viewportFrameRef.current = null;
       captureViewport();
+      updateNavigationPosition();
     });
-  }, [captureViewport]);
+  }, [captureViewport, updateNavigationPosition]);
 
   React.useEffect(() => {
     if (atEndRef.current && props.leafId !== undefined) {
@@ -332,6 +362,8 @@ export const PiTimeline: React.FC<PiTimelineProps> = (props) => {
     if (viewportFrameRef.current !== null) cancelAnimationFrame(viewportFrameRef.current);
     if (anchorCorrectionFrameRef.current !== null) cancelAnimationFrame(anchorCorrectionFrameRef.current);
     if (followEndFrameRef.current !== null) cancelAnimationFrame(followEndFrameRef.current);
+    if (navigationFrameRef.current !== null) cancelAnimationFrame(navigationFrameRef.current);
+    navigationRequestRef.current = null;
     captureViewport();
     if (observedLeafIdRef.current !== undefined) {
       saveTimelineCheckpoint(
@@ -645,10 +677,30 @@ export const PiTimeline: React.FC<PiTimelineProps> = (props) => {
     takeManualOwnership();
   }, [takeManualOwnership]);
 
-  const selectPrompt = React.useCallback((index: number) => {
+  const selectMessage = React.useCallback(async (target: PiMessageNavigationTarget) => {
     takeManualOwnership();
-    void listRef.current?.scrollToIndex({ index, viewPosition: 0, animated: !prefersReducedMotion() });
-  }, [takeManualOwnership]);
+    const request = Symbol();
+    navigationRequestRef.current = request;
+    if (navigationFrameRef.current !== null) cancelAnimationFrame(navigationFrameRef.current);
+    navigationFrameRef.current = null;
+    const list = listRef.current;
+    if (!list) return;
+    const revealMessage = (): boolean => {
+      if (navigationRequestRef.current !== request || list !== listRef.current
+        || usePiSessionStore.getState().currentSessionId !== props.sessionId) return true;
+      const viewport = list.getScrollableNode();
+      const message = viewport && piNavigationMessageElement(viewport, target);
+      if (!viewport || !message) return false;
+      const offset = list.getState().scroll + message.getBoundingClientRect().top - viewport.getBoundingClientRect().top - PI_TIMELINE_ANCHOR_OFFSET_PX;
+      void list.scrollToOffset({ offset, animated: !prefersReducedMotion() });
+      return true;
+    };
+    if (target.role === 'assistant' && revealMessage()) return;
+    await list.scrollToIndex({ index: target.index, viewPosition: 0, animated: target.role === 'user' && !prefersReducedMotion() });
+    if (target.role === 'assistant' && navigationRequestRef.current === request && list === listRef.current) {
+      navigationFrameRef.current = requestAnimationFrame(() => { navigationFrameRef.current = null; revealMessage(); });
+    }
+  }, [props.sessionId, takeManualOwnership]);
 
   return (
     <ChatContextMenu key={props.sessionId} {...props} projection={projection}
@@ -687,8 +739,9 @@ export const PiTimeline: React.FC<PiTimelineProps> = (props) => {
       }}>
     <div className="pi-timeline-surface relative flex min-h-0 flex-1">
       {promptNavigatorEnabled ? <PiTurnNavigator ref={turnNavigatorRef} items={projection.items}
+        sorted={sortedMessages} liveSources={liveNavigationSources}
         initialIndex={initialScrollAtEnd ? projection.items.length - 1 : entryTargetIndex}
-        readItem={readNavigatorItem} onSelect={selectPrompt} /> : null}
+        readItem={readNavigatorItem} onSelect={selectMessage} /> : null}
       <LegendList
         ref={listRef}
         anchoredEndSpace={anchoredEndSpace}
@@ -717,7 +770,7 @@ export const PiTimeline: React.FC<PiTimelineProps> = (props) => {
           : { data: true, size: true }}
         onFirstVisibleItemChanged={({ index }) => {
           firstVisibleIndexRef.current = index;
-          turnNavigatorRef.current?.setVisibleIndex(index);
+          updateNavigationPosition();
           captureViewport();
         }}
         onItemSizeChanged={({ itemKey }) => {
@@ -736,6 +789,7 @@ export const PiTimeline: React.FC<PiTimelineProps> = (props) => {
           listLoadedRef.current = true;
           onScrollContainerChange?.(listRef.current?.getScrollableNode() ?? null);
           applyEntryIntent();
+          updateNavigationPosition();
         }}
         onScroll={handleScroll}
         onTouchMoveCapture={(event) => {
