@@ -29,6 +29,7 @@ const fixture = (options: { bound?: boolean; authenticated?: boolean } = {}) => 
   const bound = options.bound ?? true;
   const registry = {
     getSessionBinding: vi.fn(async () => bound ? { threadId: "thread-1", runId: "run-1" } : null),
+    resolveSessionOwner: vi.fn(async () => bound ? { owningScopeId: "workspace-1", threadId: "thread-1", runId: "run-1", owner: "spawned-child" } : null),
     getThreadById: vi.fn(async () => bound
       ? { id: "thread-1", lifecycle: "settled", parent: { kind: "session", id: "session-1" } }
       : null),
@@ -56,7 +57,7 @@ const fixture = (options: { bound?: boolean; authenticated?: boolean } = {}) => 
       else next();
     },
   });
-  return { app, followUps, registry };
+  return { app, followUps, registry, runtime };
 };
 
 describe("harness follow-up routes", () => {
@@ -140,6 +141,20 @@ describe("harness follow-up routes", () => {
       .expect(200);
     expect(response.body.followUp.status).toBe("cancelled");
     expect(followUps.cancel).toHaveBeenCalledWith(expect.anything(), { id: "fu-1" });
+  });
+
+  it("lists and cancels a settled child's registration through durable ownership", async () => {
+    const { app, followUps, registry, runtime } = fixture();
+    registry.getSessionBinding.mockRejectedValue(new Error("Thread session binding is no longer the current owner"));
+    runtime.scopeForSession.mockRejectedValue(new Error("Pi worker is closed"));
+    await request(app).get("/api/harness/sessions/session-1/follow-ups").expect(200);
+    await request(app).post("/api/harness/sessions/session-1/follow-ups/fu-1/cancel").send({ expectedRevision: "3" }).expect(200);
+    expect(followUps.cancel).toHaveBeenCalledWith(
+      expect.objectContaining({ workspaceId: "workspace-1", sessionId: "session-1", threadId: "thread-1" }),
+      { id: "fu-1", expectedRevision: "3" },
+    );
+    expect(registry.getSessionBinding).not.toHaveBeenCalled();
+    expect(runtime.scopeForSession).not.toHaveBeenCalled();
   });
 
   it("updates the instruction with a CAS revision", async () => {

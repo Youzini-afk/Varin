@@ -402,7 +402,8 @@ const isWaitingFor = (value: unknown): value is ThreadWaitingFor | null => (
   value === null
   || (isRecord(value)
     && (value.kind === "user" || value.kind === "permission" || value.kind === "thread" || value.kind === "experiment" || value.kind === "followup")
-      && isString(value.text))
+    && (value.reason === undefined || (value.reason === "discussion-ready" && value.kind === "user"))
+    && isString(value.text))
 );
 
 const isMessagePeer = (value: unknown): value is ThreadMessagePeer => (
@@ -2110,6 +2111,13 @@ export function createThreadRegistry(options: ThreadRegistryOptions) {
       run.workerState = outcome === "lost" ? "lost" : "exited";
       run.outcome = outcome;
       run.exitReason = exitReason;
+      run.executionYielded = false;
+      // A closed Run has no live input dialog, tool wait or stall. A durable
+      // follow-up can still wait independently and owns its own attention.
+      if (outcome !== "lost" && (thread.waitingFor?.kind !== "followup" || outcome === "cancelled")) {
+        thread.attention = "none";
+        thread.waitingFor = null;
+      }
       if (outcome === "cancelled") delete thread.dependencyWaits;
       run.endedAt = nowISO();
       run.lastActivityAt = run.endedAt;

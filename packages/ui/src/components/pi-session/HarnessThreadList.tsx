@@ -17,7 +17,7 @@ export function HarnessThreadStatus({ entry }: { entry: HarnessThreadSnapshot })
   return <span className={cn('shrink-0 typography-meta',
     state === 'running' || state === 'starting' ? 'text-[var(--status-info)]'
       : state === 'failed' || state === 'interrupted' ? 'text-[var(--status-error)]'
-        : !isEndedHarnessThread(entry) ? 'text-[var(--status-warning)]' : 'text-muted-foreground',
+        : state !== 'idle' && !isEndedHarnessThread(entry) ? 'text-[var(--status-warning)]' : 'text-muted-foreground',
   )}>{t(`harness.threads.state.${state}`)}</span>;
 }
 

@@ -2515,7 +2515,7 @@ export function createThreadRuntime(options: ThreadRuntimeOptions) {
         binding.scopeId,
         binding.threadId,
         "user",
-        { kind: "user", text: "Ready for the next discussion message" },
+        { kind: "user", text: "Ready for the next discussion message", reason: "discussion-ready" },
       );
     }
   };

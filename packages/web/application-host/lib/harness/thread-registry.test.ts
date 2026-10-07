@@ -297,9 +297,13 @@ describe("thread registry", () => {
     const thread = await registry.createThread(createInput());
     const run = await registry.startRun(WORKSPACE, thread.id);
     await registry.markRunRunning(WORKSPACE, thread.id, run.id, "child-session-1");
+    await registry.yieldExecutionSlot(WORKSPACE, thread.id, run.id, { kind: "thread", text: "Wait for a reply" });
+    await registry.setAttention(WORKSPACE, thread.id, "permission", { kind: "permission", text: "Old input" });
     const first = await registry.completeThread(WORKSPACE, thread.id, report());
     const second = await registry.completeThread(WORKSPACE, thread.id, report("ignored"));
     expect(first?.lifecycle).toBe("settled");
+    expect(first).toMatchObject({ attention: "none", waitingFor: null });
+    expect((await registry.getActiveRun(WORKSPACE, thread.id))?.executionYielded).toBe(false);
     expect(first?.integration).toBe("dirty");
     expect(second).toEqual(first);
     await registry.mergeThread(WORKSPACE, thread.id);

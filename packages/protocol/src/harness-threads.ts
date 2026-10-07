@@ -279,6 +279,8 @@ export interface TranscriptRef {
 export interface ThreadWaitingFor {
   kind: "user" | "permission" | "thread" | "experiment" | "followup";
   text: string;
+  /** An idle discussion can accept another message; no answer is required. */
+  reason?: "discussion-ready";
 }
 
 export interface ThreadDependencyWait {

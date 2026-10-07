@@ -15,7 +15,7 @@ import type { FollowUpSource } from "@varin/protocol";
  */
 export interface HarnessFollowUpRoutesOptions {
   runtime: Pick<ThreadRuntime, "scopeForSession">;
-  registry: Pick<ThreadRegistry, "getSessionBinding" | "getThreadById" | "listThreads">;
+  registry: Pick<ThreadRegistry, "getSessionBinding" | "resolveSessionOwner" | "getThreadById" | "listThreads">;
   followUps: FollowUpService;
   requireAuth?: RequestHandler;
 }
@@ -50,7 +50,8 @@ export function registerHarnessFollowUpRoutes(
   { runtime, registry, followUps, requireAuth = noAuth }: HarnessFollowUpRoutesOptions,
 ): void {
   const callerFor = async (sessionId: string) => {
-    const scope = await runtime.scopeForSession(sessionId);
+    const owner = await registry.resolveSessionOwner(sessionId);
+    const scope = owner ? { scopeId: owner.owningScopeId } : await runtime.scopeForSession(sessionId);
     const caller = await resolveResearchCaller(registry, {
       workspaceId: scope.scopeId,
       executionWorkspaceId: scope.scopeId,

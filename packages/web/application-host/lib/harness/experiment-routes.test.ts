@@ -40,6 +40,7 @@ const scope = {
 
 const emptyRegistry = () => ({
   getSessionBinding: vi.fn(async () => null),
+  resolveSessionOwner: vi.fn(async () => null),
   getThreadById: vi.fn(async () => null),
   listThreads: vi.fn(async () => []),
 });

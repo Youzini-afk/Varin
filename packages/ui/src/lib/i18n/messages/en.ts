@@ -507,6 +507,7 @@ export const dict = {
   'harness.threads.state.queued': 'Queued',
   'harness.threads.state.starting': 'Starting',
   'harness.threads.state.running': 'Running',
+  'harness.threads.state.idle': 'Idle',
   'harness.threads.state.waiting': 'Waiting',
   'harness.threads.state.stalled': 'Stalled',
   'harness.threads.state.looping': 'Looping',

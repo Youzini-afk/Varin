@@ -75,7 +75,7 @@ describe('follow-up task overview', () => {
         expect(String(url)).toBe('/api/harness/sessions/s-1/follow-ups/wait-1/cancel');
         expect(JSON.parse(String(init.body))).toEqual({ expectedRevision: '3' });
         cancelled = true;
-        return new Response('{}', { status: 200 });
+        return new Response(JSON.stringify({ followUp: entry({ status: 'cancelled' }), occurrences: [] }), { status: 200 });
       }
       expect(String(url)).toBe('/api/harness/follow-ups?includeInactive=true');
       return response([entry({ status: cancelled ? 'cancelled' : 'waiting' })]);

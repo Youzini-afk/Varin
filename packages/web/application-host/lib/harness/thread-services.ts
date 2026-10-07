@@ -135,13 +135,15 @@ const threadState = ({ thread, activeRun }: ThreadSnapshot): string => {
   if (thread.integration === "merged") return "merged";
   if (thread.integration === "conflict") return "conflict";
   if (thread.lifecycle === "queued") return "queued";
-  if (thread.attention === "user" || thread.attention === "permission" || thread.attention === "thread" || activeRun?.executionYielded) return "waiting-for-input";
-  if (thread.attention === "stalled" || thread.attention === "looping") return thread.attention;
+  if (thread.attention === "followup") return "waiting-for-followup";
   if (thread.lifecycle === "settled") {
     if (thread.integration === "merge-ready" && activeRun?.outcome === "success") return "merge-ready";
     if (activeRun?.outcome === "success") return "done";
     return activeRun?.outcome ?? "settled";
   }
+  if (thread.kind === "discussion" && thread.attention === "user" && thread.waitingFor?.reason === "discussion-ready") return "idle";
+  if (thread.attention === "user" || thread.attention === "permission" || thread.attention === "thread" || activeRun?.executionYielded) return "waiting-for-input";
+  if (thread.attention === "stalled" || thread.attention === "looping") return thread.attention;
   if (activeRun?.workerState === "lost") return "worker-lost";
   if (activeRun?.workerState === "starting" || activeRun?.workerState === "running") return activeRun.workerState;
   return "idle";
@@ -177,7 +179,10 @@ const formatThreadLine = (snapshot: ThreadSnapshot, cursor: ThreadViewCursor | n
   if (cursor && cursorChanged(snapshot, cursor)) line += " (changed)";
   if (full || !cursor || steps > 0) line += ` · ${full || !cursor ? steps : `+${steps}`} steps`;
   line += ` · last activity ${lastActivityAt}`;
-  if (thread.waitingFor) line += `\n  ? waiting for ${thread.waitingFor.kind}: ${thread.waitingFor.text}`;
+  if (state === "idle") line += "\n  Ready for another discussion message";
+  else if (thread.waitingFor && state !== "done" && state !== "failure" && state !== "cancelled") {
+    line += `\n  ? waiting for ${thread.waitingFor.kind}: ${thread.waitingFor.text}`;
+  }
   if (thread.diffStats && (full || !cursor || JSON.stringify(thread.diffStats) !== JSON.stringify(cursor.diffStats))) {
     line += `\n  Δ ${thread.diffStats.files} files (+${thread.diffStats.insertions} −${thread.diffStats.deletions})`;
   }

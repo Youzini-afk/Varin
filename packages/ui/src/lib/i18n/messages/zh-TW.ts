@@ -513,6 +513,7 @@ export const dict: Record<I18nKey, string> = {
   'harness.threads.state.queued': '排隊中',
   'harness.threads.state.starting': '啟動中',
   'harness.threads.state.running': '執行中',
+  'harness.threads.state.idle': '閒置',
   'harness.threads.state.waiting': '等待輸入',
   'harness.threads.state.stalled': '可能停滯',
   'harness.threads.state.looping': '可能循環',
