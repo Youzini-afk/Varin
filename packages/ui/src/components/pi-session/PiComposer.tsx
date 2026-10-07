@@ -594,7 +594,6 @@ export const PiComposer: React.FC<PiComposerProps> = ({
             sending && 'opacity-80',
           )}
           data-pi-composer-input-frame="true"
-          data-working={busy && active}
           onDragOver={(event) => {
             if ([...event.dataTransfer.items].some((item) => item.kind === 'file')) event.preventDefault();
           }}
