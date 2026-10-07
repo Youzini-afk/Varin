@@ -13,6 +13,8 @@ the chosen text for user editing without calling the memory organizer. The setti
 and authenticated `/api/agent-personalization` routes expose CRUD, scope changes, and prompt
 edits. Writes publish only after the Rust receipt. UI edits carry their opened revision;
 a conflict stays visible instead of silently overwriting another edit.
+The personalization path participates in the production JSON-body middleware for memory saves,
+deletes and prompt saves. Its HTTP regression uses that middleware rather than a test-only global parser.
 
 `session.instructions` resolves the actor's current ownership on each model request.
 Pi applies global, project, then session prompt section overrides and includes all matching
