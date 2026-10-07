@@ -54,6 +54,7 @@ import { DraftPresetChips } from '@/components/chat/DraftPresetChips';
 import { AutoReviewBanner } from '@/components/chat/AutoReviewBanner';
 import type { ResolvedStarter } from '@/components/chat/useDraftStarters';
 import { PiComposer } from './PiComposer';
+import { PiConversationSurface } from './PiConversationSurface';
 import { usePiMessageHandoff } from './usePiMessageHandoff';
 import { PiAssistBar } from './PiAssistBar';
 import { PiExtensionUiChrome } from './PiExtensionUiChrome';
@@ -84,10 +85,15 @@ import { PDF_MATERIAL_OPEN_EVENT, parsePdfMaterialCitationUrl } from '@/lib/pi-r
 import { PI_COMPACTION_TRACE_OPEN_EVENT } from '@/lib/pi-runtime/compactionTrace';
 import { PiCompactionTraceDialog } from './PiCompactionTraceDialog';
 
-const LazyPiTimeline = React.lazy(async () => {
-  const module = await import('./PiTimeline');
-  return { default: module.PiTimeline };
-});
+let loadedTimeline: typeof import('./PiTimeline')['PiTimeline'] | undefined;
+let timelineModule: Promise<{ default: typeof import('./PiTimeline')['PiTimeline'] }> | undefined;
+const loadPiTimeline = () => {
+  timelineModule ??= import('./PiTimeline').then((module) => {
+    loadedTimeline = module.PiTimeline;
+    return { default: module.PiTimeline };
+  });
+  return timelineModule;
+};
 
 const LazyPiTreeDialog = React.lazy(async () => {
   const module = await import('./PiTreeDialog');
@@ -140,42 +146,6 @@ const renderDraftTitle = (title: string, projectLabel: string | null): React.Rea
   );
 };
 
-const PiTimelineHydrationSkeleton: React.FC<{ label: string }> = ({ label }) => (
-  <div
-    className="flex min-h-0 flex-1 flex-col bg-background"
-    aria-busy="true"
-    aria-label={label}
-    data-pi-conversation-hydrating="true"
-  >
-    <div className="flex min-h-0 flex-1 flex-col gap-6 overflow-hidden px-6 py-10 sm:px-10">
-      <div className="ml-auto h-16 w-[min(72%,34rem)] animate-pulse rounded-2xl rounded-br-md bg-muted/45" />
-      <div className="w-[min(88%,46rem)] space-y-3">
-        <div className="h-3 w-24 animate-pulse rounded bg-muted/45" />
-        <div className="h-3 w-full animate-pulse rounded bg-muted/40" />
-        <div className="h-3 w-4/5 animate-pulse rounded bg-muted/35" />
-        <div className="h-3 w-2/3 animate-pulse rounded bg-muted/30" />
-      </div>
-      <div className="ml-auto h-12 w-[min(58%,28rem)] animate-pulse rounded-2xl rounded-br-md bg-muted/30" />
-    </div>
-  </div>
-);
-
-const PiComposerHydrationSkeleton: React.FC<{ label: string }> = ({ label }) => (
-  <div className="bottom-safe-area shrink-0 bg-background pb-4" aria-busy="true" aria-label={label}>
-    <div className="chat-input-column">
-      <div className="flex h-[7.5rem] animate-pulse flex-col justify-between rounded-2xl border border-border/60 bg-[var(--surface-subtle)]/70 p-3">
-        <div className="h-3 w-1/2 rounded bg-muted/40" />
-        <div className="flex items-center justify-between">
-          <div className="h-7 w-28 rounded-lg bg-muted/35" />
-          <div className="flex items-center gap-2">
-            <div className="h-7 w-24 rounded-lg bg-muted/35" />
-            <div className="size-8 rounded-lg bg-muted/45" />
-          </div>
-        </div>
-      </div>
-    </div>
-  </div>
-);
 
 export const PiChatView: React.FC<PiChatViewProps> = ({
   active = true,
@@ -187,14 +157,12 @@ export const PiChatView: React.FC<PiChatViewProps> = ({
 }) => {
   const { t } = useI18n();
   const composerMotionId = React.useId();
+  const [Timeline, setTimeline] = React.useState<typeof loadedTimeline>(() => loadedTimeline);
+  const [timelineLoadError, setTimelineLoadError] = React.useState<unknown>();
   const chatScrollTrackRef = React.useRef<HTMLDivElement | null>(null);
   const timelineScrollRef = React.useRef<HTMLElement | null>(null);
-  const [timelineScrollReady, setTimelineScrollReady] = React.useState(false);
+  const [timelineScrollOwner, setTimelineScrollOwner] = React.useState<string | null>(null);
   const [workOverviewView, setWorkOverviewView] = React.useState<WorkOverviewView>(null);
-  const handleTimelineScrollContainerChange = React.useCallback((element: HTMLElement | null) => {
-    timelineScrollRef.current = element;
-    setTimelineScrollReady(Boolean(element));
-  }, []);
   const currentSessionId = usePiSessionStore((state) => state.currentSessionId);
   const currentRecord = usePiSessionStore((state) => (
     state.currentSessionId === null ? undefined : state.records[state.currentSessionId]
@@ -209,6 +177,24 @@ export const PiChatView: React.FC<PiChatViewProps> = ({
   const connectionPhase = usePiSessionStore((state) => state.connectionPhase);
   const catalogLoaded = usePiSessionStore((state) => state.catalogLoaded);
   const runtimeKey = usePiSessionStore((state) => state.runtimeKey);
+  React.useEffect(() => {
+    if (!active || currentSessionId === null || Timeline) return;
+    let cancelled = false;
+    // Load alongside native history, keeping the painted scene until both are ready.
+    void loadPiTimeline().then((module) => { if (!cancelled) setTimeline(() => module.default); },
+      (error) => { if (!cancelled) setTimelineLoadError(error); });
+    return () => { cancelled = true; };
+  }, [active, currentSessionId, Timeline]);
+  const conversationIdentity = JSON.stringify([runtimeKey, currentSessionId]);
+  const latestConversationIdentity = React.useRef(conversationIdentity);
+  latestConversationIdentity.current = conversationIdentity;
+  const handleTimelineScrollContainerChange = React.useCallback((element: HTMLElement | null) => {
+    // An outgoing scene can finish after the next timeline has mounted.
+    if (latestConversationIdentity.current !== conversationIdentity) return;
+    timelineScrollRef.current = element;
+    setTimelineScrollOwner(element ? conversationIdentity : null);
+  }, [conversationIdentity]);
+  const lastPlacement = React.useRef({ owner: runtimeKey, centered: false });
   const createSession = usePiSessionStore((state) => state.createSession);
   const openSession = usePiSessionStore((state) => state.openSession);
   const beginSubmission = usePiSessionStore((state) => state.beginSubmission);
@@ -250,6 +236,7 @@ export const PiChatView: React.FC<PiChatViewProps> = ({
   const pendingDefaults = usePiComposerDefaults(
     pendingDraftOpen ? pendingCwd : '',
     activeProject?.defaultModel,
+    runtimeKey,
   );
   const projectDefaultModel = React.useMemo(() => {
     const parsed = parseModelIdentifier(activeProject?.defaultModel);
@@ -617,12 +604,9 @@ export const PiChatView: React.FC<PiChatViewProps> = ({
     setCreating(true);
     try {
       setDirectory(pendingCwd, { showOverlay: false });
-      const snapshot = await createSession(pendingCwd, undefined, undefined, pendingWorkspace, pendingDraft.workFocus);
-      const transferredDraft = transferPendingPiDraft(
-        pendingCwd,
-        snapshot.sessionId,
-        draftRuntimeKey,
-      );
+      const snapshot = await createSession(pendingCwd, undefined, undefined, pendingWorkspace, pendingDraft.workFocus,
+        (created) => { transferPendingPiDraft(pendingCwd, created.sessionId, draftRuntimeKey); });
+      const transferredDraft = readPiDraft(snapshot.sessionId, draftRuntimeKey);
       await configureNewSession(snapshot, transferredDraft);
       await sendDraft(snapshot.sessionId, transferredDraft, draftRuntimeKey);
     } catch (error) {
@@ -842,329 +826,204 @@ export const PiChatView: React.FC<PiChatViewProps> = ({
     });
   }, [currentRecord?.liveUser, currentRecord?.snapshot, submission]);
   const sessionOpening = openingSessionId !== null && openingSessionId === currentSessionId;
-
-  if (pendingDraftOpen) {
-    const projectLabel = activeProject
-      ? activeProject.label?.trim() || formatDirectoryName(activeProject.path, null)
-      : null;
-    const draftTitle = projectLabel
-      ? t('chat.emptyState.draftTitleWithProject', { project: DRAFT_PROJECT_MARKER })
-      : t('chat.emptyState.draftTitle');
-    return (
-      <TooltipProvider>
-        <div
-          className={cn(
-            'relative flex h-full min-h-0 flex-col bg-background',
-            !active && 'pointer-events-none',
-          )}
-          ref={messageHandoff.ref}
-          data-pi-pending-draft="true"
-          data-pi-chat-view="true"
-          data-pi-draft-cwd={pendingCwd}
-        >
-          <div className="oc-draft-center flex min-h-0 flex-1 flex-col items-center justify-center px-6 text-center">
-            <div className="pi-draft-heading">
-              <VarinLogo width={28} height={28} decorative className="mx-auto mb-5 hidden md:block" />
-              <h1 className="text-balance text-3xl font-normal tracking-tight text-foreground">
-                {renderDraftTitle(draftTitle, projectLabel)}
-              </h1>
-            </div>
-            <DraftPresetChips
-              className="oc-draft-starters mt-8 max-w-md"
-              cwd={pendingCwd}
-              sessionId={null}
-              onSubmit={(starter) => { void handlePendingStarterSubmit(starter); }}
-            />
-          </div>
-          <WorkbenchReplacement
-            target={WORKBENCH_REPLACEMENT_TARGETS.chatComposer}
-            fallback={(
-              <PiComposer
-                 motionId={composerMotionId}
-                active={active}
-                allowModelInheritance
-                cwd={pendingCwd}
-                draft={draft.text}
-                effectiveModel={draft.model ?? pendingDefaults.model}
-                effectiveThinkingLevel={draft.thinkingLevel ?? pendingDefaults.thinkingLevel}
-                images={draft.images}
-                messageHistory={EMPTY_PI_MESSAGE_HISTORY}
-                followUpBehavior={followUpBehavior}
-                selectedAgent={draft.agent}
-                selectedModel={draft.model}
-                selectedThinkingLevel={draft.thinkingLevel}
-                workFocus={draft.workFocus ?? activeProject?.defaultWorkFocus ?? 'code'}
-                defaultWorkFocus={activeProject ? activeProject.defaultWorkFocus ?? 'code' : undefined}
-                inheritedWorkFocus={draft.workFocus === undefined && activeProject !== null}
-                sending={creating || sending}
-                sessionId={null}
-                workspace={pendingWorkspace}
-                onChangeAgent={(agent) => updatePendingDraft({ agent })}
-                onChangeDraft={(text) => updatePendingDraft({ text })}
-                onChangeImages={(images) => updatePendingDraft({ images })}
-                onChangeModel={(model) => updatePendingDraft({ model })}
-                onChangeThinkingLevel={(thinkingLevel) => updatePendingDraft({ thinkingLevel })}
-                onChangeWorkFocus={(workFocus) => updatePendingDraft({ workFocus })}
-                onSendText={handlePendingDictationSend}
-                onSend={submitPendingDraft}
-              />
-            )}
-          />
-        </div>
-      </TooltipProvider>
-    );
-  }
-
-  if (currentSessionId === null) {
-    return (
-      <div className={cn('flex h-full items-center justify-center bg-background px-6', !active && 'pointer-events-none')}>
-        <div className="max-w-md text-center">
-          <div className="mx-auto mb-4 flex size-12 items-center justify-center rounded-2xl bg-primary/10 text-primary">
-            <Icon name="chat-new" className="size-6" />
-          </div>
-          <h2 className="typography-markdown font-semibold text-foreground">
-            {t('chat.emptyState.draftTitle')}
-          </h2>
-          <p className="mt-2 typography-ui-label text-muted-foreground">
-            {t('sessions.sidebar.empty.noSessions.description')}
-          </p>
-          {!readOnly && (
-            <button
-              type="button"
-              onClick={() => void handleCreate()}
-              disabled={creating}
-              className="mt-5 inline-flex h-9 items-center justify-center gap-2 rounded-md bg-primary px-4 typography-ui-label text-primary-foreground hover:bg-primary/90 disabled:opacity-50"
-            >
-              <Icon name={creating ? 'loader-4' : 'add'} className={cn('size-4', creating && 'animate-spin')} />
-              {t('sessions.sidebar.header.actions.newSession')}
-            </button>
-          )}
-        </div>
-      </div>
-    );
-  }
-
-  if (!currentRecord?.branchEntries && lastError && !sessionOpening) {
-    return (
-      <div className="flex h-full items-center justify-center bg-background px-6">
-        <div className="max-w-sm text-center">
-          <h2 className="typography-ui-label font-semibold text-foreground">
-            {t('chat.container.sessionLoadError.title')}
-          </h2>
-          <p className="mt-2 typography-meta text-muted-foreground">
-            {t('chat.container.sessionLoadError.description')}
-          </p>
-          <button
-            type="button"
-            onClick={() => void refreshEntries(currentSessionId).catch((error) => {
-              toast.error(error instanceof Error ? error.message : String(error));
-            })}
-            className="mt-4 inline-flex h-8 items-center justify-center rounded-md border border-border px-3 typography-ui-label text-foreground hover:bg-interactive-hover"
-          >
-            {t('chat.container.sessionLoadError.retry')}
-          </button>
-        </div>
-      </div>
-    );
-  }
-
-  if (!currentRecord?.branchEntries) {
-    return (
-      <TooltipProvider>
-        <div className="flex h-full min-h-0 flex-col bg-background">
-          <WorkbenchReplacement
-            target={WORKBENCH_REPLACEMENT_TARGETS.chatTimeline}
-            fallback={(
-              <PiTimelineHydrationSkeleton
-                label={t('sessions.sidebar.group.empty.loadingSessions')}
-              />
-            )}
-          />
-          {!readOnly ? (
-            <WorkbenchReplacement
-              target={WORKBENCH_REPLACEMENT_TARGETS.chatComposer}
-              fallback={(
-                <PiComposerHydrationSkeleton
-                  label={t('sessions.sidebar.group.empty.loadingSessions')}
-                />
-              )}
-            />
-          ) : null}
-        </div>
-      </TooltipProvider>
-    );
-  }
-
-  const snapshot = currentRecord.snapshot;
-  const entries = currentRecord.branchEntries.entries;
+  const snapshot = currentRecord?.snapshot;
+  const entries = currentRecord?.branchEntries?.entries ?? [];
   const previewOnly = !isPiSessionWorkerReady(currentRecord);
-  const sessionCwd = snapshot?.cwd ?? currentSummary?.cwd ?? currentDirectory;
-  const threadWorkspaceId = snapshot?.workspace?.kind === 'workspace'
-    ? snapshot.workspace.authorityId ?? snapshot.workspace.id
+  const historyReady = currentRecord?.branchEntries !== undefined
+    || Boolean(transientUser || currentRecord?.liveAssistant || currentRecord?.stoppedAssistant);
+  const loadFailed = Boolean(currentSessionId && !historyReady && lastError && !sessionOpening);
+  const emptyConversation = Boolean(currentSessionId && historyReady && entries.length === 0
+    && !currentRecord?.liveAssistant && !currentRecord?.stoppedAssistant && !transientUser);
+  const bodyReady = pendingDraftOpen || currentSessionId === null || loadFailed
+    || (historyReady && (emptyConversation || Boolean(Timeline)));
+  if (lastPlacement.current.owner !== runtimeKey) lastPlacement.current = { owner: runtimeKey, centered: false };
+  if (bodyReady) lastPlacement.current.centered = pendingDraftOpen || emptyConversation;
+  const centered = lastPlacement.current.centered;
+  const sessionCwd = pendingDraftOpen ? pendingCwd : snapshot?.cwd ?? currentSummary?.cwd ?? '';
+  const threadWorkspaceId = currentWorkspace?.kind === 'workspace'
+    ? currentWorkspace.authorityId ?? currentWorkspace.id
     : null;
+  const composerAvailable = !readOnly && (pendingDraftOpen || currentSessionId !== null);
+  const project = pendingDraftOpen ? activeProject : conversationProject;
+  const projectLabel = project ? project.label?.trim() || formatDirectoryName(project.path, null) : null;
+  const draftTitle = projectLabel
+    ? t('chat.emptyState.draftTitleWithProject', { project: DRAFT_PROJECT_MARKER })
+    : t('chat.emptyState.draftTitle');
+  const updateVisibleDraft = (partial: Partial<PiDraftState>) => {
+    if (currentSessionId) updateDraft(currentSessionId, partial);
+    else if (pendingDraftOpen) updatePendingDraft(partial);
+  };
+  const effectiveWorkFocus = pendingDraftOpen
+    ? draft.workFocus ?? activeProject?.defaultWorkFocus ?? 'code'
+    : snapshot?.workFocus?.selected.id ?? currentSummary?.workFocus?.selected.id;
+  if (timelineLoadError && historyReady && !emptyConversation) throw timelineLoadError;
+  const conversationBody = loadFailed ? (
+    <div className="flex min-h-0 flex-1 items-center justify-center px-6">
+      <div className="max-w-sm text-center">
+        <h2 className="typography-ui-label font-semibold text-foreground">{t('chat.container.sessionLoadError.title')}</h2>
+        <p className="mt-2 typography-meta text-muted-foreground">{t('chat.container.sessionLoadError.description')}</p>
+        <button type="button"
+          onClick={() => { if (currentSessionId) void refreshEntries(currentSessionId).catch((error) => {
+            toast.error(error instanceof Error ? error.message : String(error));
+          }); }}
+          className="mt-4 inline-flex h-8 items-center justify-center rounded-md border border-border px-3 typography-ui-label text-foreground hover:bg-interactive-hover">
+          {t('chat.container.sessionLoadError.retry')}
+        </button>
+      </div>
+    </div>
+  ) : centered ? (
+    <div className="oc-draft-center flex min-h-0 flex-1 flex-col items-center justify-center px-6 text-center">
+      <div className="pi-draft-heading">
+        <VarinLogo width={28} height={28} decorative className="mx-auto mb-5 hidden md:block" />
+        <h1 className="text-balance text-3xl font-normal tracking-tight text-foreground">
+          {renderDraftTitle(draftTitle, projectLabel)}
+        </h1>
+      </div>
+    </div>
+  ) : currentSessionId === null ? (
+    <div className="flex min-h-0 flex-1 items-center justify-center px-6">
+      <div className="max-w-md text-center">
+        <div className="mx-auto mb-4 flex size-12 items-center justify-center rounded-2xl bg-primary/10 text-primary">
+          <Icon name="chat-new" className="size-6" />
+        </div>
+        <h2 className="typography-markdown font-semibold text-foreground">{t('chat.emptyState.draftTitle')}</h2>
+        <p className="mt-2 typography-ui-label text-muted-foreground">{t('sessions.sidebar.empty.noSessions.description')}</p>
+        {!readOnly ? <button type="button" onClick={() => void handleCreate()} disabled={creating}
+          className="mt-5 inline-flex h-9 items-center justify-center gap-2 rounded-md bg-primary px-4 typography-ui-label text-primary-foreground hover:bg-primary/90 disabled:opacity-50">
+          <Icon name={creating ? 'loader-4' : 'add'} className={cn('size-4', creating && 'animate-spin')} />
+          {t('sessions.sidebar.header.actions.newSession')}
+        </button> : null}
+      </div>
+    </div>
+  ) : historyReady && Timeline ? (
+      <Timeline
+        key={conversationIdentity}
+        {...(assistantWaiting ? { assistantWaiting } : {})}
+        {...(!previewOnly && compactionStatus ? { compactionStatus } : {})}
+        cwd={sessionCwd}
+        entries={entries}
+        hiddenThinkingLabel={extensionUi?.hiddenThinkingLabel}
+        leafId={currentRecord?.branchEntries?.leafId}
+        liveAssistant={currentRecord?.stoppedAssistant ?? currentRecord?.liveAssistant}
+        liveUser={transientUser}
+        liveUserStatus={currentRecord?.liveUser ? undefined : submission?.status}
+        forkBusyEntryId={forkBusyEntryId}
+        onFork={previewOnly ? undefined : handleFork}
+        onOpenCompaction={openActiveCompaction}
+        onApplyCompaction={!readOnly && !previewOnly && candidateTaskId && currentPreparation?.candidate === 'ready' && !currentPreparation.applicationRequested
+          ? () => { void applyPreparedCompaction(candidateTaskId); } : undefined}
+        onOpenThread={previewOnly || !threadWorkspaceId ? undefined : handleOpenThread}
+        onRecover={previewOnly ? undefined : handleRecover}
+        onScrollContainerChange={handleTimelineScrollContainerChange}
+        recoveryBusyEntryId={recoveryBusyEntryId}
+        sessionId={currentSessionId}
+        threadBusyEntryId={threadBusyEntryId}
+        toolExecutions={currentRecord?.toolExecutions ?? {}}
+      />
+  ) : null;
+
   return (
     <TooltipProvider>
-      <HarnessThreadStateProvider parentSessionId={currentSessionId} workspaceId={threadWorkspaceId}>
-      <div ref={messageHandoff.ref} data-pi-chat-view="true" className={cn('@container relative flex h-full min-h-0 bg-background', !active && 'pointer-events-none')}>
-        <div className="pi-chat-layout flex min-h-0 min-w-0 flex-1 flex-col" data-overview-view={workOverviewView ?? undefined}>
-        {conversationHeader}
-        <HarnessThreadParentLink sessionId={currentSessionId} />
-        {threadWorkspaceId && threadPanelMode === 'inline' ? (
-          <HarnessThreadsPanel presentation="inline" title={threadPanelTitle}
-            fallbackCwd={sessionCwd} parentSessionId={currentSessionId} workspaceId={threadWorkspaceId} />
-        ) : null}
-        <div ref={chatScrollTrackRef} className="relative flex min-h-0 flex-1 flex-col">
-        <WorkbenchReplacement
-          target={WORKBENCH_REPLACEMENT_TARGETS.chatTimeline}
-          fallback={entries.length === 0 && !currentRecord.liveAssistant && !transientUser ? (
-            <div className="flex min-h-0 flex-1 items-center justify-center px-6 text-center">
-              <div className="max-w-md">
-                <VarinLogo width={140} height={140} className="mx-auto size-[140px] opacity-20" />
-                <p className="mt-4 typography-ui-label text-muted-foreground">
-                  {t('chat.emptyState.startNewChat')}
-                </p>
-              </div>
-            </div>
-          ) : (
-              <React.Suspense fallback={(
-                <div className="flex min-h-0 flex-1 items-center justify-center text-muted-foreground">
-                  <Icon name="loader-4" className="size-4 animate-spin" />
+      <HarnessThreadStateProvider key={runtimeKey} parentSessionId={currentSessionId} workspaceId={threadWorkspaceId}>
+        <div ref={messageHandoff.ref} data-pi-chat-view="true"
+          data-pi-pending-draft={pendingDraftOpen || undefined}
+          data-pi-draft-cwd={pendingDraftOpen ? pendingCwd : undefined}
+          className={cn('@container relative flex h-full min-h-0 bg-background', !active && 'pointer-events-none')}>
+          <div className="pi-chat-layout flex min-h-0 min-w-0 flex-1 flex-col"
+            data-overview-view={currentSessionId && threadWorkspaceId && threadPanelMode === 'sidebar' ? workOverviewView ?? undefined : undefined}>
+            {conversationHeader}
+            {currentSessionId ? <HarnessThreadParentLink sessionId={currentSessionId} /> : null}
+            {currentSessionId && threadWorkspaceId && threadPanelMode === 'inline' ? (
+              <HarnessThreadsPanel presentation="inline" title={threadPanelTitle}
+                fallbackCwd={sessionCwd} parentSessionId={currentSessionId} workspaceId={threadWorkspaceId} />
+            ) : null}
+            <div className="pi-conversation-layout relative min-h-0 min-w-0 flex-1" data-centered={centered || undefined}>
+              <PiConversationSurface ref={chatScrollTrackRef} owner={runtimeKey}
+                identity={pendingDraftOpen ? JSON.stringify([runtimeKey, 'draft', pendingCwd]) : conversationIdentity}
+                ready={bodyReady} loadingLabel={t('sessions.sidebar.group.empty.loadingSessions')}>
+                <WorkbenchReplacement target={WORKBENCH_REPLACEMENT_TARGETS.chatTimeline} fallback={conversationBody} />
+              </PiConversationSurface>
+              <section className="pi-conversation-composer min-w-0 shrink-0" data-pi-composer-region="true">
+                {currentSessionId && !previewOnly ? <PiExtensionUiChrome placement="aboveEditor" sessionId={currentSessionId} /> : null}
+                {currentSessionId && !previewOnly && snapshot ? (
+                  <>
+                    <PiAssistBar draftEmpty={draft.text.trim().length === 0 && draft.images.length === 0}
+                      entries={entries} onApplySuggestion={(text) => updateDraft(currentSessionId, { text })} snapshot={snapshot} />
+                    <div className="px-3 sm:px-5">
+                      <PiGoalStrip snapshot={snapshot} />
+                      <PiFollowUpsStrip sessionId={snapshot.sessionId} />
+                    </div>
+                  </>
+                ) : null}
+                {currentSessionId && !previewOnly ? <div className="chat-input-column"><AutoReviewBanner /></div> : null}
+                {!previewOnly && connectionPhase !== 'connected' && catalogLoaded ? (
+                  <div className="chat-input-column px-3 pb-2 sm:px-5" role="status">
+                    <div className="flex items-center gap-2 rounded-md border border-border/60 bg-muted/40 px-3 py-1.5 text-xs text-muted-foreground">
+                      <span className={connectionPhase === 'reconnecting' ? 'animate-pulse' : undefined}>
+                        {connectionPhase === 'reconnecting' ? t('chat.connection.reconnecting')
+                          : connectionPhase === 'connecting' ? t('chat.connection.connecting') : t('chat.connection.disconnected')}
+                      </span>
+                    </div>
+                  </div>
+                ) : null}
+                {composerAvailable ? (
+                  <WorkbenchReplacement target={WORKBENCH_REPLACEMENT_TARGETS.chatComposer} fallback={(
+                    <PiComposer motionId={composerMotionId} placement={centered ? 'center' : 'bottom'} active={active}
+                      loading={!pendingDraftOpen && previewOnly}
+                      configurationLoading={pendingDraftOpen ? pendingDefaults.loading : previewOnly}
+                      allowModelInheritance={pendingDraftOpen} cwd={sessionCwd}
+                      draft={draft.text} images={draft.images}
+                      effectiveModel={pendingDraftOpen ? draft.model ?? pendingDefaults.model : snapshot?.routedModel?.model ?? snapshot?.model}
+                      effectiveThinkingLevel={pendingDraftOpen ? draft.thinkingLevel ?? pendingDefaults.thinkingLevel : snapshot?.routedModel?.thinkingLevel ?? snapshot?.thinkingLevel}
+                      messageHistory={pendingDraftOpen ? EMPTY_PI_MESSAGE_HISTORY : sentMessageHistory}
+                      followUpBehavior={followUpBehavior} selectedAgent={draft.agent}
+                      selectedModel={pendingDraftOpen ? draft.model : snapshot?.model}
+                      selectedThinkingLevel={pendingDraftOpen ? draft.thinkingLevel : snapshot?.thinkingLevel}
+                      workFocus={effectiveWorkFocus}
+                      defaultWorkFocus={project ? project.defaultWorkFocus ?? 'code' : undefined}
+                      inheritedWorkFocus={pendingDraftOpen && draft.workFocus === undefined && activeProject !== null}
+                      sending={creating || sending}
+                      sessionId={currentSessionId} snapshot={snapshot}
+                      workspace={pendingDraftOpen ? pendingWorkspace : currentWorkspace}
+                      onAbort={currentSessionId && !previewOnly ? async () => { await abort(currentSessionId); } : undefined}
+                      onClearQueue={currentSessionId && !previewOnly ? async () => { await clearQueue(currentSessionId, runtimeKey); } : undefined}
+                      onUpdateQueue={currentSessionId && !previewOnly ? (update) => updateQueue({ ...update, sessionId: currentSessionId }, runtimeKey) : undefined}
+                      onChangeAgent={(agent) => updateVisibleDraft({ agent })}
+                      onChangeDraft={(text) => updateVisibleDraft({ text })}
+                      onChangeImages={(images) => updateVisibleDraft({ images })}
+                      onChangeModel={pendingDraftOpen ? (model) => updatePendingDraft({ model }) : handleCurrentModelChange}
+                      onChangeThinkingLevel={pendingDraftOpen ? (thinkingLevel) => updatePendingDraft({ thinkingLevel }) : handleCurrentThinkingChange}
+                      onChangeWorkFocus={pendingDraftOpen ? (workFocus) => updatePendingDraft({ workFocus }) : handleCurrentWorkFocusChange}
+                      onSendText={pendingDraftOpen ? handlePendingDictationSend : handleDictationSend}
+                      onSend={pendingDraftOpen ? submitPendingDraft : handleSend}
+                    />
+                  )} />
+                ) : null}
+                {currentSessionId && !previewOnly ? <PiExtensionUiChrome placement="belowEditor" sessionId={currentSessionId} /> : null}
+              </section>
+              {centered && bodyReady && composerAvailable ? (
+                <div className="pi-conversation-starters min-w-0">
+                  <DraftPresetChips className="oc-draft-starters" cwd={sessionCwd} sessionId={currentSessionId}
+                    onSubmit={(starter) => {
+                      if (pendingDraftOpen) void handlePendingStarterSubmit(starter);
+                      else if (!previewOnly) {
+                        updateVisibleDraft({ text: starter.submitText });
+                        void handleSend();
+                      }
+                    }} />
                 </div>
-              )}>
-                <LazyPiTimeline
-                  key={`${runtimeKey}:${currentSessionId}`}
-                  {...(assistantWaiting ? { assistantWaiting } : {})}
-                  {...(!previewOnly && compactionStatus ? { compactionStatus } : {})}
-                  cwd={sessionCwd}
-                  entries={entries}
-                  hiddenThinkingLabel={extensionUi?.hiddenThinkingLabel}
-                  leafId={currentRecord.branchEntries.leafId}
-                  liveAssistant={currentRecord.stoppedAssistant ?? currentRecord.liveAssistant}
-                  liveUser={transientUser}
-                  liveUserStatus={currentRecord.liveUser ? undefined : submission?.status}
-                  forkBusyEntryId={forkBusyEntryId}
-                  onFork={previewOnly ? undefined : handleFork}
-                  onOpenCompaction={openActiveCompaction}
-                  onApplyCompaction={!readOnly && !previewOnly && candidateTaskId && currentPreparation?.candidate === 'ready' && !currentPreparation.applicationRequested
-                    ? () => { void applyPreparedCompaction(candidateTaskId); } : undefined}
-                  onOpenThread={previewOnly || !threadWorkspaceId ? undefined : handleOpenThread}
-                  onRecover={previewOnly ? undefined : handleRecover}
-                  onScrollContainerChange={handleTimelineScrollContainerChange}
-                  recoveryBusyEntryId={recoveryBusyEntryId}
-                  sessionId={currentSessionId}
-                  threadBusyEntryId={threadBusyEntryId}
-                  toolExecutions={currentRecord.toolExecutions}
-                />
-              </React.Suspense>
-          )}
-        />
-
-        <section className="shrink-0" data-pi-composer-region="true">
-        {!previewOnly ? <PiExtensionUiChrome placement="aboveEditor" sessionId={currentSessionId} /> : null}
-
-        {!previewOnly && snapshot ? (
-          <>
-            <PiAssistBar
-              draftEmpty={draft.text.trim().length === 0 && draft.images.length === 0}
-              entries={entries}
-              onApplySuggestion={(value) => updateDraft(currentSessionId, { text: value })}
-              snapshot={snapshot}
-            />
-            <div className="px-3 sm:px-5">
-              <PiGoalStrip snapshot={snapshot} />
-              <PiFollowUpsStrip sessionId={snapshot.sessionId} />
-            </div>
-          </>
-        ) : null}
-
-        {!previewOnly ? (
-          <div className="chat-input-column">
-            <AutoReviewBanner />
-          </div>
-        ) : null}
-
-        {!previewOnly && connectionPhase !== 'connected' && catalogLoaded ? (
-          <div className="chat-input-column px-3 pb-2 sm:px-5" role="status">
-            <div className="flex items-center gap-2 rounded-md border border-border/60 bg-muted/40 px-3 py-1.5 text-xs text-muted-foreground">
-              <span className={connectionPhase === 'reconnecting' ? 'animate-pulse' : undefined}>
-                {connectionPhase === 'reconnecting'
-                  ? t('chat.connection.reconnecting')
-                  : connectionPhase === 'connecting'
-                    ? t('chat.connection.connecting')
-                    : t('chat.connection.disconnected')}
-              </span>
+              ) : null}
+              {bodyReady && !centered && timelineScrollOwner === conversationIdentity ? (
+                <OverlayScrollbar containerRef={timelineScrollRef} trackRef={chatScrollTrackRef}
+                  disableHorizontal userIntentOnly className="z-30" />
+              ) : null}
             </div>
           </div>
-        ) : null}
-
-        {!readOnly && previewOnly ? (
-          <WorkbenchReplacement
-            target={WORKBENCH_REPLACEMENT_TARGETS.chatComposer}
-            fallback={(
-              <PiComposerHydrationSkeleton label={t('sessions.sidebar.group.empty.loadingSessions')} />
-            )}
-          />
-        ) : !readOnly && snapshot ? (
-          <WorkbenchReplacement
-            target={WORKBENCH_REPLACEMENT_TARGETS.chatComposer}
-            fallback={(
-              <PiComposer
-                 motionId={composerMotionId}
-                active={active}
-                allowModelInheritance={false}
-                cwd={snapshot.cwd}
-                draft={draft.text}
-                effectiveModel={snapshot.routedModel?.model ?? snapshot.model}
-                effectiveThinkingLevel={snapshot.routedModel?.thinkingLevel ?? snapshot.thinkingLevel}
-                images={draft.images}
-                messageHistory={sentMessageHistory}
-                followUpBehavior={followUpBehavior}
-                selectedAgent={draft.agent}
-                selectedModel={snapshot.model}
-                selectedThinkingLevel={snapshot.thinkingLevel}
-                workFocus={snapshot.workFocus?.selected.id ?? 'code'}
-                defaultWorkFocus={conversationProject ? conversationProject.defaultWorkFocus ?? 'code' : undefined}
-                sending={creating || sending || sessionOpening}
-                sessionId={snapshot.sessionId}
-                snapshot={snapshot}
-                workspace={snapshot.workspace}
-                onAbort={async () => { await abort(currentSessionId); }}
-                onClearQueue={async () => { await clearQueue(currentSessionId, runtimeKey); }}
-                onUpdateQueue={(update) => updateQueue({ ...update, sessionId: currentSessionId }, runtimeKey)}
-                onChangeAgent={(agent) => updateDraft(currentSessionId, { agent })}
-                onChangeDraft={(text) => updateDraft(currentSessionId, { text })}
-                onChangeImages={(images) => updateDraft(currentSessionId, { images })}
-                onChangeModel={handleCurrentModelChange}
-                onChangeThinkingLevel={handleCurrentThinkingChange}
-                onChangeWorkFocus={handleCurrentWorkFocusChange}
-                onSendText={handleDictationSend}
-                onSend={handleSend}
-              />
-            )}
-          />
-        ) : null}
-          {!previewOnly ? <PiExtensionUiChrome placement="belowEditor" sessionId={currentSessionId} /> : null}
-        </section>
-        {timelineScrollReady ? (
-          <OverlayScrollbar
-            containerRef={timelineScrollRef}
-            trackRef={chatScrollTrackRef}
-            disableHorizontal
-            userIntentOnly
-            className="z-30"
-          />
-        ) : null}
+          {currentSessionId && threadWorkspaceId && threadPanelMode === 'sidebar' ? (
+            <HarnessThreadsPanel fallbackCwd={sessionCwd} parentSessionId={currentSessionId} workspaceId={threadWorkspaceId}
+              onDesktopViewChange={setWorkOverviewView} />
+          ) : null}
         </div>
-        </div>
-        {threadWorkspaceId && threadPanelMode === 'sidebar' ? (
-          <HarnessThreadsPanel
-            fallbackCwd={sessionCwd}
-            parentSessionId={currentSessionId}
-            workspaceId={threadWorkspaceId}
-            onDesktopViewChange={setWorkOverviewView}
-          />
-        ) : null}
-      </div>
 
       {treeDialogOpen && currentSessionId && snapshot ? (
         <React.Suspense fallback={null}>

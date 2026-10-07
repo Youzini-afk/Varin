@@ -5,6 +5,7 @@ import {
 } from '@varin/protocol';
 import { Icon } from '@/components/icon/Icon';
 import { ModelSelector } from '@/components/sections/agents/ModelSelector';
+import { ProviderLogo } from '@/components/ui/ProviderLogo';
 import { MobileOverlayPanel } from '@/components/ui/MobileOverlayPanel';
 import {
   DropdownMenu,
@@ -27,6 +28,7 @@ interface PiComposerModelControlsProps {
   allowInherit: boolean;
   cwd: string;
   disabled?: boolean;
+  loading?: boolean;
   effectiveModel?: PiComposerModelSelection;
   effectiveThinkingLevel?: ThinkingLevel;
   onModelChange(model: PiComposerModelSelection | undefined): Promise<void> | void;
@@ -46,6 +48,7 @@ export const PiComposerModelControls: React.FC<PiComposerModelControlsProps> = (
   allowInherit,
   cwd,
   disabled = false,
+  loading = false,
   effectiveModel,
   effectiveThinkingLevel,
   onModelChange,
@@ -74,12 +77,13 @@ export const PiComposerModelControls: React.FC<PiComposerModelControlsProps> = (
   }, [effectiveDescriptor]);
 
   const displayedThinking = React.useMemo<ThinkingLevel | undefined>(() => {
+    if (loading && effectiveThinkingLevel === undefined) return undefined;
     if (effectiveThinkingLevel && thinkingOptions.includes(effectiveThinkingLevel)) {
       return effectiveThinkingLevel;
     }
     if (thinkingOptions.includes('off')) return 'off';
     return thinkingOptions[0];
-  }, [effectiveThinkingLevel, thinkingOptions]);
+  }, [effectiveThinkingLevel, loading, thinkingOptions]);
 
   const handleModelChange = React.useCallback(async (provider: string, id: string) => {
     const next = provider && id ? { id, provider } : undefined;
@@ -117,14 +121,21 @@ export const PiComposerModelControls: React.FC<PiComposerModelControlsProps> = (
   const displayedThinkingLabel = thinkingLabel(displayedThinking);
   const thinkingTriggerLabel = explicitThinking
     ? thinkingLabel(selectedThinkingLevel)
-    : displayedThinkingLabel || t('chat.modelControls.default');
+    : displayedThinkingLabel || t(loading ? 'common.loading' : 'chat.modelControls.default');
 
   return (
     <div
       className="flex min-w-0 flex-wrap items-center justify-end gap-1"
       data-pi-composer-model-controls="true"
     >
-      <ModelSelector
+      {loading ? (
+        <button type="button" disabled aria-label={t('chat.modelControls.selectModel')}
+          className="order-2 flex h-8 min-w-0 max-w-[min(220px,55cqi)] items-center gap-1.5 px-1 typography-meta text-foreground">
+          {effectiveModel ? <ProviderLogo providerId={effectiveModel.provider} className="size-3.5 shrink-0" />
+            : <Icon name="loader-4" className="size-3.5 shrink-0 animate-spin text-muted-foreground" />}
+          <span className="truncate">{effectiveDescriptor?.name || effectiveModel?.id || t('common.loading')}</span>
+        </button>
+      ) : <ModelSelector
         align="end"
         allowNone={allowInherit}
         className="order-2 min-w-0 max-w-[min(220px,55cqi)]"
@@ -144,7 +155,7 @@ export const PiComposerModelControls: React.FC<PiComposerModelControlsProps> = (
           : t('chat.modelControls.selectModel')}
         providerId={selectedModel?.provider ?? ''}
         variant="composer"
-      />
+      />}
 
       {isMobile ? (
         <>
@@ -158,7 +169,7 @@ export const PiComposerModelControls: React.FC<PiComposerModelControlsProps> = (
               explicitThinking && selectedThinkingLevel !== 'off'
                 ? 'text-foreground'
                 : 'text-muted-foreground',
-              disabled && 'cursor-not-allowed opacity-60',
+              disabled && !loading && 'cursor-not-allowed opacity-60',
             )}
             aria-label={t('chat.modelControls.thinking')}
           >
@@ -224,7 +235,7 @@ export const PiComposerModelControls: React.FC<PiComposerModelControlsProps> = (
                 explicitThinking && selectedThinkingLevel !== 'off'
                   ? 'text-foreground'
                   : 'text-muted-foreground',
-                disabled && 'cursor-not-allowed opacity-60',
+                disabled && !loading && 'cursor-not-allowed opacity-60',
               )}
               aria-label={t('chat.modelControls.thinking')}
             >

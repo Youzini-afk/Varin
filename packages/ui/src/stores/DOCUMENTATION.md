@@ -72,6 +72,11 @@ completion cannot replace a newer catalog. Failed reads keep the existing summar
 error. Display grouping and sorting belong to `components/pi-session/sessionPresentation.ts`,
 not the incidental catalog array order.
 
+Session creation commits the native snapshot, then notifies the optional `onCreated` caller before
+waiting for history/catalog hydration. The pending composer uses this phase to transfer its draft
+to the real runtime/session key in the same paint as selection; slow hydration never clears the input.
+The draft store continues to own the transfer, and creation still waits for the native reads before returning.
+
 Permission grants remain authoritative in the Application Host; renderer preferences are not a
 second permission store. See [the security contract](../../../../docs/design/security.md).
 

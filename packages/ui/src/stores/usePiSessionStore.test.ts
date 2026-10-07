@@ -4,6 +4,7 @@ import type { RuntimeAPIs } from '@varin/application-client';
 import type { DocumentsAPI, VarinAgentInputSnapshotCaptureRequest } from '@varin/application-client';
 import { bindDocumentRegistry, getDocumentRegistry, resetDocumentRegistry } from '@/lib/documents/session';
 import { subscribePiRuntimeCatalogChanged } from '@/lib/pi-runtime/catalog-events';
+import { usePiDraftStore, readPiDraft } from './usePiDraftStore';
 import {
   VARIN_PROTOCOL_VERSION,
   type PiAgentEvent,
@@ -854,6 +855,34 @@ describe('Pi session store', () => {
       kind: 'workspace',
     });
     expect(store.getState().records['session-a']?.snapshot?.workspacePersistence).toBe('pending');
+  });
+
+  test('hands off the pending draft on creation, while native history is still loading', async () => {
+    const history = deferred<SessionEntriesResult>();
+    const runtime = new FakeRuntime();
+    runtime.handler = (method) => {
+      if (method === 'session.create') return snapshot('created', 'D:/handoff');
+      if (method === 'session.entries') return history.promise;
+      if (method === 'session.list') return [];
+      if (method === 'recovery.status') return recoveryStatus;
+      throw new Error(`Unexpected ${method}`);
+    };
+    const store = createPiSessionStore(runtime);
+    usePiDraftStore.getState().setPendingDraft('D:/handoff', { text: 'Keep this prompt' }, runtime.key);
+    let handedOff = false;
+    const creation = store.getState().createSession('D:/handoff', undefined, undefined, { kind: 'unbound' }, undefined,
+      (created) => {
+        expect(store.getState().currentSessionId).toBe(created.sessionId);
+        usePiDraftStore.getState().transferPendingDraft('D:/handoff', created.sessionId, runtime.key);
+        handedOff = true;
+      });
+    await flushAsync();
+    expect(handedOff).toBe(true);
+    expect(store.getState().records.created?.branchEntries).toBeUndefined();
+    expect(readPiDraft('created', runtime.key).text).toBe('Keep this prompt');
+    history.resolve(branch('created'));
+    await creation;
+    usePiDraftStore.getState().clear('created', runtime.key);
   });
 
   test('keeps the active focus while a new selection waits for its execution boundary', async () => {

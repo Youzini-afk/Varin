@@ -14,11 +14,12 @@ import { useI18n } from '@/lib/i18n';
 import { cn } from '@/lib/utils';
 
 interface PiWorkFocusControlProps {
-  value: WorkFocusId;
+  value?: WorkFocusId;
   state?: SessionSnapshot['workFocus'];
   projectDefault?: WorkFocusId;
   inherited?: boolean;
   disabled?: boolean;
+  loading?: boolean;
   onChange(value: WorkFocusId | undefined): void | Promise<void>;
 }
 
@@ -28,6 +29,7 @@ export const PiWorkFocusControl: React.FC<PiWorkFocusControlProps> = ({
   projectDefault,
   inherited = false,
   disabled = false,
+  loading = false,
   onChange,
 }) => {
   const { t } = useI18n();
@@ -36,6 +38,7 @@ export const PiWorkFocusControl: React.FC<PiWorkFocusControlProps> = ({
   const pending = state?.status === 'pending';
   const failed = state?.status === 'failed';
   const label = (focus: WorkFocusId) => t(focus === 'research' ? 'workFocus.research' : 'workFocus.code');
+  const triggerLabel = value === undefined && loading ? t('common.loading') : label(value ?? 'code');
   const select = async (next: WorkFocusId | undefined) => {
     setSaving(true);
     try {
@@ -56,14 +59,15 @@ export const PiWorkFocusControl: React.FC<PiWorkFocusControlProps> = ({
           disabled={disabled || saving}
           onMouseDown={(event) => event.preventDefault()}
           className={cn(
-            'flex h-8 shrink-0 items-center gap-1.5 px-1 typography-meta font-medium text-muted-foreground transition-colors hover:text-foreground disabled:opacity-40',
+            'flex h-8 shrink-0 items-center gap-1.5 px-1 typography-meta font-medium text-muted-foreground transition-colors hover:text-foreground',
+            !loading && 'disabled:opacity-40',
             failed && 'text-destructive',
           )}
-          aria-label={`${t('workFocus.label')}: ${label(value)}`}
+          aria-label={`${t('workFocus.label')}: ${triggerLabel}`}
           title={failed ? state?.failure?.message : pending ? t('workFocus.pending') : t('workFocus.label')}
         >
           <Icon name={saving ? 'loader-4' : value === 'research' ? 'flask' : 'compass-3'} className={cn('size-4', saving && 'animate-spin')} />
-          <span>{label(value)}</span>
+          <span>{triggerLabel}</span>
           {pending || failed ? <Icon name={failed ? 'error-warning' : 'time'} className="size-3" /> : null}
         </button>
       </DropdownMenuTrigger>

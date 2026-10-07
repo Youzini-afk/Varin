@@ -72,6 +72,9 @@ import {
 interface PiComposerProps {
   /** Scoped to the enclosing chat view, including its pending-to-live transition. */
   motionId?: string;
+  placement?: 'center' | 'bottom';
+  loading?: boolean;
+  configurationLoading?: boolean;
   active: boolean;
   allowModelInheritance: boolean;
   cwd: string;
@@ -99,7 +102,7 @@ interface PiComposerProps {
   sessionId?: string | null;
   snapshot?: SessionSnapshot;
   workspace?: SessionWorkspaceBinding;
-  workFocus: WorkFocusId;
+  workFocus?: WorkFocusId;
   defaultWorkFocus?: WorkFocusId;
   inheritedWorkFocus?: boolean;
 }
@@ -134,6 +137,9 @@ type PiComposerAutocomplete = {
 
 export const PiComposer: React.FC<PiComposerProps> = ({
   motionId,
+  placement = 'bottom',
+  loading = false,
+  configurationLoading = loading,
   active,
   allowModelInheritance,
   cwd,
@@ -223,6 +229,20 @@ export const PiComposer: React.FC<PiComposerProps> = ({
   const [knownAgentNames, setKnownAgentNames] = React.useState<ReadonlySet<string>>(() => new Set());
   const [aborting, setAborting] = React.useState(false);
   const messageHistory = useMessageHistory(sentMessageHistory);
+  const resetMessageHistory = messageHistory.reset;
+  const sourceIdentity = JSON.stringify([runtimeKey, sessionId ?? cwd]);
+  const previousSource = React.useRef(sourceIdentity);
+  React.useEffect(() => {
+    if (previousSource.current === sourceIdentity) return;
+    previousSource.current = sourceIdentity;
+    setAutocomplete(null);
+    setConfirmedMentions(new Set());
+    setKnownAgentNames(new Set());
+    setAborting(false);
+    pendingHistoryTextRef.current = null;
+    resetMessageHistory();
+    if (active) useUIStore.getState().setModelSelectorOpen(false);
+  }, [active, resetMessageHistory, sourceIdentity]);
   const varinCommands = React.useMemo<readonly CommandInfo[]>(() => [
     ...(sessionId
       ? [{
@@ -255,7 +275,7 @@ export const PiComposer: React.FC<PiComposerProps> = ({
     aborting,
     busy,
     canAbort: Boolean(onAbort),
-    canSend,
+    canSend: canSend && !loading,
     sending,
   });
   const footerIconButtonClass = 'flex size-8 shrink-0 items-center justify-center rounded-md text-muted-foreground transition-colors hover:bg-interactive-hover hover:text-foreground disabled:cursor-not-allowed disabled:opacity-35';
@@ -267,12 +287,13 @@ export const PiComposer: React.FC<PiComposerProps> = ({
     knownSlashNames: new Set(varinCommands.map((command) => command.name.toLowerCase())),
   }), [confirmedMentions, knownAgentNames, varinCommands]);
   const modelControls = (
-    <div className="pi-composer-configuration flex min-w-0 flex-wrap items-center justify-end gap-x-2 gap-y-0.5">
+    <div key={sourceIdentity} className="pi-composer-configuration flex min-w-0 flex-wrap items-center justify-end gap-x-2 gap-y-0.5">
       <PiComposerModelControls
         active={active}
         allowInherit={allowModelInheritance}
         cwd={cwd}
-        disabled={sending}
+        disabled={sending || loading}
+        loading={configurationLoading}
         effectiveModel={effectiveModel}
         effectiveThinkingLevel={effectiveThinkingLevel}
         onModelChange={onChangeModel}
@@ -281,9 +302,10 @@ export const PiComposer: React.FC<PiComposerProps> = ({
         selectedThinkingLevel={selectedThinkingLevel}
       />
       <PiComposerAgentControl
-        active={active}
+        active={active && !loading}
         cwd={cwd}
-        disabled={sending}
+        disabled={sending || loading}
+        loading={loading}
         onChange={onChangeAgent}
         selectedAgent={selectedAgent}
         sessionId={sessionId}
@@ -293,7 +315,8 @@ export const PiComposer: React.FC<PiComposerProps> = ({
         state={snapshot?.workFocus}
         projectDefault={defaultWorkFocus}
         inherited={inheritedWorkFocus}
-        disabled={sending}
+        disabled={sending || loading}
+        loading={loading}
         onChange={onChangeWorkFocus}
       />
     </div>
@@ -320,11 +343,12 @@ export const PiComposer: React.FC<PiComposerProps> = ({
   const addPdfFiles = React.useCallback(async (files: Iterable<File>) => {
     const pdfFiles = [...files];
     if (pdfFiles.length === 0) return;
+    const target = latestAttachmentRef.current.target;
+    if (!target.cwd) { toast.error(t('common.loading')); return; }
     if (!workspaceApi) {
       toast.error(t('chat.piComposer.pdfAttachment.unsupported'));
       return;
     }
-    const target = latestAttachmentRef.current.target;
     const isCurrentTarget = (): boolean => (
       getRuntimeKey() === target.runtimeKey
       && usePiSessionStore.getState().currentSessionId === target.sessionId
@@ -373,13 +397,14 @@ export const PiComposer: React.FC<PiComposerProps> = ({
 
   const handleAbort = React.useCallback(async () => {
     if (!onAbort || aborting) return;
+    const target = latestAttachmentRef.current.target;
     setAborting(true);
     try {
       await onAbort();
     } catch (error) {
       if (!isPiAbortError(error)) toast.error(error instanceof Error ? error.message : String(error));
     } finally {
-      setAborting(false);
+      if (isSamePiComposerAttachmentTarget(latestAttachmentRef.current.target, target)) setAborting(false);
     }
   }, [aborting, onAbort]);
 
@@ -477,14 +502,17 @@ export const PiComposer: React.FC<PiComposerProps> = ({
   }, [onChangeDraft]);
 
   const submit = React.useCallback(() => {
+    if (sending || loading) return;
     messageHistory.reset();
     return onSend();
-  }, [messageHistory, onSend]);
+  }, [loading, messageHistory, onSend, sending]);
 
   const submitText = React.useCallback((value: string) => {
+    if (loading) { insertTranscript(value); return; }
+    if (sending) return;
     messageHistory.reset();
     return onSendText(value);
-  }, [messageHistory, onSendText]);
+  }, [insertTranscript, loading, messageHistory, onSendText, sending]);
 
   const handleEditorKeyDown = React.useCallback((event: KeyboardEvent): boolean => {
     if (autocomplete?.kind === 'command'
@@ -493,7 +521,7 @@ export const PiComposer: React.FC<PiComposerProps> = ({
       && !isIMECompositionEvent(event)
       && parsePiLocalCommand(draft)?.kind === 'compact') {
       setAutocomplete(null);
-      if (canSend && !sending) void submit();
+      if (canSend && !sending && !loading) void submit();
       return true;
     }
     if (
@@ -537,13 +565,13 @@ export const PiComposer: React.FC<PiComposerProps> = ({
       || event.shiftKey
       || isIMECompositionEvent(event)
     ) return false;
-    if (canSend && !sending) void submit();
+    if (canSend && !sending && !loading) void submit();
     return true;
-  }, [applyHistoryText, autocomplete, canSend, draft, messageHistory, sending, submit]);
+  }, [applyHistoryText, autocomplete, canSend, draft, loading, messageHistory, sending, submit]);
 
   return (
     <motion.div layout={reducedMotion ? false : 'position'} layoutId={motionId}
-      layoutDependency={`${sessionId ?? 'pending'}:${isExpandedInput}:${images.length}:${snapshot?.queuedMessages.length ?? 0}`}
+      layoutDependency={`${placement}:${sessionId ?? 'pending'}:${isExpandedInput}:${images.length}:${snapshot?.queuedMessages.length ?? 0}`}
       initial={false} transition={{ layout: { duration: reducedMotion ? 0 : 0.52, ease: [0.22, 1, 0.36, 1] } }}
       className={cn(
       'bottom-safe-area oc-mobile-composer shrink-0 bg-background pb-3',
@@ -606,6 +634,7 @@ export const PiComposer: React.FC<PiComposerProps> = ({
             </div>
           ) : null}
           <ComposerEditor
+            key={sourceIdentity}
             ref={inputRef}
             value={draft}
             onChange={(change) => {
@@ -767,6 +796,7 @@ export const PiComposer: React.FC<PiComposerProps> = ({
                 props={{ cwd, draft, effectiveModel, effectiveThinkingLevel, images, onChangeAgent, onChangeDraft, onChangeImages, onChangeModel, onChangeThinkingLevel, onSend: submit, selectedAgent, selectedModel, selectedThinkingLevel, sending, sessionId, snapshot, workspace, workFocus, defaultWorkFocus, inheritedWorkFocus, onChangeWorkFocus }}
               />
               <ComposerDictation
+                key={sourceIdentity}
                 disabled={sending}
                 footerIconButtonClass={footerIconButtonClass}
                 footerPaddingClass="px-3 pb-2.5"
@@ -805,31 +835,31 @@ export const PiComposer: React.FC<PiComposerProps> = ({
                       if (composerActions.primary === 'stop') void handleAbort();
                       else void submit();
                     }}
-                    disabled={composerActions.primary === 'stop' ? aborting : !canSend || sending}
+                    disabled={composerActions.primary === 'stop' ? aborting : !canSend || sending || loading}
                     className={cn(
                       'flex size-8 items-center justify-center rounded-full transition-colors',
                       composerActions.primary === 'stop'
                         ? aborting
                           ? 'cursor-wait bg-primary/70 text-primary-foreground'
                           : 'bg-primary text-primary-foreground hover:bg-primary/90'
-                        : canSend && !sending
+                        : canSend && !sending && !loading
                           ? 'bg-primary text-primary-foreground hover:bg-primary/90'
                           : 'cursor-not-allowed bg-transparent text-muted-foreground/35',
                     )}
-                    aria-label={composerActions.primary === 'stop'
+                    aria-label={loading ? t('common.loading') : composerActions.primary === 'stop'
                       ? t('chat.chatInput.actions.stopGeneratingAria')
                       : t('chat.chatInput.actions.sendMessageAria')}
-                    aria-busy={composerActions.primary === 'stop' ? aborting : undefined}
+                    aria-busy={loading || (composerActions.primary === 'stop' ? aborting : undefined)}
                     data-pi-composer-primary-action={composerActions.primary}
                   >
                     <Icon
-                      key={`${composerActions.primary}:${aborting}:${sending}`}
-                      name={composerActions.primary === 'stop'
+                      key={`${composerActions.primary}:${aborting}:${sending}:${loading}`}
+                      name={loading ? 'loader-4' : composerActions.primary === 'stop'
                         ? aborting ? 'loader-4' : 'stop'
                         : sending ? 'loader-4' : 'arrow-up'}
                       className={cn(
                         'size-4',
-                        ((composerActions.primary === 'stop' && aborting)
+                        (loading || (composerActions.primary === 'stop' && aborting)
                           || (composerActions.primary === 'send' && sending))
                           && 'animate-spin',
                       )}
@@ -837,7 +867,7 @@ export const PiComposer: React.FC<PiComposerProps> = ({
                   </button>
                 </TooltipTrigger>
                 <TooltipContent side="top">
-                  {composerActions.primary === 'stop'
+                  {loading ? t('common.loading') : composerActions.primary === 'stop'
                     ? t('chat.chatInput.actions.stopGeneratingAria')
                     : t('chat.chatInput.actions.sendMessageAria')}
                 </TooltipContent>
