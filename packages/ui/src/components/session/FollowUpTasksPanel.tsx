@@ -53,7 +53,7 @@ function FollowUpTasksList({ createOpen = false, onCreateOpenChange }: Props) {
     mounted.current = true;
     void refresh();
     const unsubscribe = subscribeVarinEvents((event) => {
-      if (event.type === 'harness-experiment-changed' && event.fact === 'followup') void refresh();
+      if (event.type === 'stream-ready' || event.type === 'harness-experiment-changed' && event.fact === 'followup') void refresh();
     });
     return () => {
       mounted.current = false;

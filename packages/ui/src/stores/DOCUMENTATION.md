@@ -68,6 +68,11 @@ The interaction store follows changes to that snapshot's question list, so autho
 restore questions missed during a disconnect without resetting hidden choices or answer drafts.
 The `varin.user-question` journal stays in native history but is not a visible conversation entry.
 
+The composer follow-up strip is scoped by runtime and session, reads again on event-stream reconnect,
+and invalidates older in-flight reads. It shows only waiting/triggered registrations. Actions use the
+registration's session and revision, apply the returned state immediately, and refresh even after a
+rejection. Completed registrations remain in the task hub's history instead of above the composer.
+
 ### Session / project coordination stores
 
 Examples:

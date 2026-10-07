@@ -24,7 +24,7 @@ export interface HarnessExperimentRoutesOptions {
   experiments: ExperimentService;
   resources: ResourceService;
   sources: SourceService;
-  registry: Pick<ThreadRegistry, "getSessionBinding" | "getThreadById" | "listThreads">;
+  registry: Pick<ThreadRegistry, "getSessionBinding" | "resolveSessionOwner" | "getThreadById" | "listThreads">;
   requireAuth?: RequestHandler;
 }
 
@@ -72,7 +72,8 @@ export function registerHarnessExperimentRoutes(
   { runtime, registry, experiments, resources, sources, requireAuth = noAuth }: HarnessExperimentRoutesOptions,
 ): void {
   const callerFor = async (sessionId: string) => {
-    const scope = await runtime.scopeForSession(sessionId);
+    const owner = await registry.resolveSessionOwner(sessionId);
+    const scope = owner ? { scopeId: owner.owningScopeId } : await runtime.scopeForSession(sessionId);
     return resolveResearchCaller(registry, {
       workspaceId: scope.scopeId,
       executionWorkspaceId: scope.scopeId,

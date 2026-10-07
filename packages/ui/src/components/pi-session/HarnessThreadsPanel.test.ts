@@ -72,6 +72,14 @@ describe('HarnessThreadsPanel projection', () => {
     expect(projectHarnessThreadState({ thread: thread(), activeRun: run() })).toBe('running');
     expect(projectHarnessThreadState({ thread: thread({ attention: 'user' }), activeRun: run() })).toBe('waiting');
     expect(projectHarnessThreadState({
+      thread: thread({ kind: 'discussion', attention: 'user', waitingFor: { kind: 'user', text: 'Continue the discussion', reason: 'discussion-ready' } }),
+      activeRun: run(),
+    })).toBe('idle');
+    expect(projectHarnessThreadState({
+      thread: thread({ lifecycle: 'settled', attention: 'permission', waitingFor: { kind: 'permission', text: 'Old input' } }),
+      activeRun: run({ workerState: 'exited', outcome: 'success', executionYielded: true }),
+    })).toBe('completed');
+    expect(projectHarnessThreadState({
       thread: thread({ lifecycle: 'settled', integration: 'dirty' }),
       activeRun: run({ workerState: 'exited', outcome: 'success', endedAt: '2026-09-04T00:01:00.000Z' }),
     })).toBe('dirty');

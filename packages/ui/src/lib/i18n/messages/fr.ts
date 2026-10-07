@@ -511,6 +511,7 @@ export const dict = {
   'harness.threads.state.queued': 'En file',
   'harness.threads.state.starting': 'Démarrage',
   'harness.threads.state.running': 'En cours',
+  'harness.threads.state.idle': 'Au repos',
   'harness.threads.state.waiting': 'En attente',
   'harness.threads.state.stalled': 'Bloquée',
   'harness.threads.state.looping': 'En boucle',

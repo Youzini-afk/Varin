@@ -1370,7 +1370,7 @@ describe("thread runtime", () => {
     expect(await registry.getThread(WORKSPACE, PARENT, created.thread.id)).toMatchObject({
       lifecycle: "active",
       attention: "user",
-      waitingFor: { kind: "user", text: "Ready for the next discussion message" },
+      waitingFor: { kind: "user", text: "Ready for the next discussion message", reason: "discussion-ready" },
       report: null,
     });
     expect(await registry.getActiveRun(WORKSPACE, created.thread.id)).toMatchObject({

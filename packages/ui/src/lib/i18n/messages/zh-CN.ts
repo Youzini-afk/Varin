@@ -511,6 +511,7 @@ export const dict: Record<I18nKey, string> = {
   'harness.threads.state.queued': '排队中',
   'harness.threads.state.starting': '启动中',
   'harness.threads.state.running': '运行中',
+  'harness.threads.state.idle': '空闲',
   'harness.threads.state.waiting': '等待输入',
   'harness.threads.state.stalled': '可能停滞',
   'harness.threads.state.looping': '可能循环',

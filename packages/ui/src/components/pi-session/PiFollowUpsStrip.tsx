@@ -1,5 +1,6 @@
 import * as React from 'react';
 import type { FollowUpDefinitionView } from '@varin/protocol';
+import { getRuntimeKey, subscribeRuntimeEndpointChanged } from '@varin/application-client';
 import { fetchFollowUps, postFollowUpAction } from '@/lib/followUpsApi';
 import { Icon } from '@/components/icon/Icon';
 import { useI18n } from '@/lib/i18n';
@@ -23,50 +24,80 @@ const STATUS_TONE: Record<string, string> = {
 };
 
 export const PiFollowUpsStrip: React.FC<{ sessionId: string }> = ({ sessionId }) => {
+  const runtimeKey = React.useSyncExternalStore(subscribeRuntimeEndpointChanged, getRuntimeKey, getRuntimeKey);
+  return <SessionFollowUpsStrip key={JSON.stringify([runtimeKey, sessionId])} sessionId={sessionId} runtimeKey={runtimeKey} />;
+};
+
+const isActive = (entry: FollowUpDefinitionView) => entry.status === 'waiting' || entry.status === 'triggered';
+
+const SessionFollowUpsStrip: React.FC<{ sessionId: string; runtimeKey: string }> = ({ sessionId, runtimeKey }) => {
   const { t } = useI18n();
   const [followUps, setFollowUps] = React.useState<FollowUpDefinitionView[] | null>(null);
-  const [busyId, setBusyId] = React.useState<string | null>(null);
+  const [busyIds, setBusyIds] = React.useState<Record<string, true>>({});
+  const [error, setError] = React.useState<string | null>(null);
+  const mounted = React.useRef(false);
+  const request = React.useRef<AbortController | null>(null);
+  const current = React.useCallback(() => mounted.current && getRuntimeKey() === runtimeKey, [runtimeKey]);
 
-  const refresh = React.useCallback(async (signal?: AbortSignal) => {
+  const refresh = React.useCallback(async () => {
+    if (!current()) return;
+    request.current?.abort();
+    const controller = new AbortController();
+    request.current = controller;
     try {
-      const result = await fetchFollowUps({ sessionId, signal });
-      if (!signal?.aborted) setFollowUps(result);
-    } catch {
-      if (!signal?.aborted) setFollowUps(null);
+      const result = await fetchFollowUps({ sessionId, signal: controller.signal });
+      if (!controller.signal.aborted && current()) {
+        setFollowUps(result?.filter(isActive) ?? []);
+        setError(null);
+      }
+    } catch (cause) {
+      if (!controller.signal.aborted && current()) setError(cause instanceof Error ? cause.message : String(cause));
     }
-  }, [sessionId]);
+  }, [current, sessionId]);
 
   React.useEffect(() => {
-    const controller = new AbortController();
-    void refresh(controller.signal);
+    mounted.current = true;
+    void refresh();
     const unsubscribe = subscribeVarinEvents((event) => {
-      if (event.type === 'harness-experiment-changed' && event.fact === 'followup') {
+      if (event.type === 'stream-ready' || event.type === 'harness-experiment-changed' && event.fact === 'followup') {
         void refresh();
       }
     });
     return () => {
-      controller.abort();
+      mounted.current = false;
+      request.current?.abort();
       unsubscribe();
     };
   }, [refresh]);
 
-  const act = React.useCallback(async (id: string, action: 'cancel' | 'check' | 'fire') => {
-    setBusyId(id);
+  const act = React.useCallback(async (entry: FollowUpDefinitionView, action: 'cancel' | 'check' | 'fire') => {
+    if (!current() || busyIds[entry.id]) return;
+    setBusyIds(ids => ({ ...ids, [entry.id]: true }));
     try {
-      await postFollowUpAction(sessionId, id, action);
-      await refresh();
-    } catch (error) {
-      toast.error(error instanceof Error ? error.message : String(error));
+      const updated = await postFollowUpAction(entry.sessionId, entry.id, action, entry.revision);
+      if (current()) {
+        request.current?.abort();
+        setFollowUps(entries => entries?.map(item => item.id === entry.id ? updated : item).filter(isActive) ?? null);
+      }
+    } catch (cause) {
+      if (current()) toast.error(cause instanceof Error ? cause.message : String(cause));
     } finally {
-      setBusyId(null);
+      // A rejected action can mean the displayed registration already ended.
+      // Re-read on both outcomes instead of leaving its stale cancel button.
+      await refresh();
+      if (current()) setBusyIds(ids => { const next = { ...ids }; delete next[entry.id]; return next; });
     }
-  }, [refresh, sessionId]);
+  }, [busyIds, current, refresh]);
 
-  if (!followUps || followUps.length === 0) return null;
+  if (!followUps?.length && !error) return null;
 
   return (
     <div className="mx-auto mb-2 flex w-full max-w-4xl min-w-0 flex-col gap-1 rounded-lg border border-border/70 bg-muted/15 px-3 py-2">
-      {followUps.map((entry) => (
+      {error ? <div role="alert" className="flex items-center gap-2 typography-meta text-[var(--status-error)]">
+        <span className="min-w-0 flex-1 break-words">{error}</span>
+        <button type="button" className="shrink-0 text-muted-foreground hover:text-foreground" onClick={() => void refresh()}>{t('tasksHub.refresh')}</button>
+      </div> : null}
+      {followUps?.map((entry) => (
         <div key={entry.id} className="flex min-w-0 items-center gap-2">
           <Icon name="timer" className="size-3.5 shrink-0 text-muted-foreground" />
           <span
@@ -83,8 +114,8 @@ export const PiFollowUpsStrip: React.FC<{ sessionId: string }> = ({ sessionId })
             <span className="flex shrink-0 items-center gap-0.5">
               <button
                 type="button"
-                disabled={busyId === entry.id}
-                onClick={() => void act(entry.id, 'check')}
+                disabled={busyIds[entry.id]}
+                onClick={() => void act(entry, 'check')}
                 title={t('chat.followup.action.checkHint')}
                 className="rounded px-1.5 py-0.5 typography-meta text-muted-foreground hover:bg-interactive-hover hover:text-foreground disabled:opacity-50"
               >
@@ -92,8 +123,8 @@ export const PiFollowUpsStrip: React.FC<{ sessionId: string }> = ({ sessionId })
               </button>
               <button
                 type="button"
-                disabled={busyId === entry.id}
-                onClick={() => void act(entry.id, 'fire')}
+                disabled={busyIds[entry.id]}
+                onClick={() => void act(entry, 'fire')}
                 title={t('chat.followup.action.fireHint')}
                 className="rounded px-1.5 py-0.5 typography-meta text-muted-foreground hover:bg-interactive-hover hover:text-foreground disabled:opacity-50"
               >
@@ -101,8 +132,8 @@ export const PiFollowUpsStrip: React.FC<{ sessionId: string }> = ({ sessionId })
               </button>
               <button
                 type="button"
-                disabled={busyId === entry.id}
-                onClick={() => void act(entry.id, 'cancel')}
+                disabled={busyIds[entry.id]}
+                onClick={() => void act(entry, 'cancel')}
                 title={t('chat.followup.action.cancelHint')}
                 className="rounded px-1.5 py-0.5 typography-meta text-muted-foreground hover:bg-interactive-hover hover:text-foreground disabled:opacity-50"
               >

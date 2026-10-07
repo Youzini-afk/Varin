@@ -3,7 +3,7 @@ import type { ExperimentCaller } from "./experiments.js";
 import type { ThreadRegistry } from "./thread-registry.js";
 import { HarnessServiceError } from "./service-error.js";
 
-type ResearchRegistry = Pick<ThreadRegistry, "getSessionBinding" | "getThreadById" | "listThreads">;
+type ResearchRegistry = Pick<ThreadRegistry, "getSessionBinding" | "resolveSessionOwner" | "getThreadById" | "listThreads">;
 
 /** Derive research access from the same durable relationships as thread messaging. */
 export async function resolveResearchCaller(
@@ -16,7 +16,11 @@ export async function resolveResearchCaller(
     user?: boolean;
   },
 ): Promise<ExperimentCaller> {
-  const binding = await registry.getSessionBinding(input.sessionId);
+  // Host-user management addresses durable work after its execution binding
+  // has closed. Agent tools still require their active Run binding.
+  const binding = input.user
+    ? await registry.resolveSessionOwner(input.sessionId)
+    : await registry.getSessionBinding(input.sessionId);
   const workspaceId = binding?.owningScopeId ?? input.workspaceId;
   const visible = new Map<string, Thread>();
   let rootSessionId = input.sessionId;

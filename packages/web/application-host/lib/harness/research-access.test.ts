@@ -13,6 +13,7 @@ const tree = [
 ];
 const registry = (binding: ThreadSessionBinding | null) => ({
   getSessionBinding: async () => binding,
+  resolveSessionOwner: async () => binding,
   getThreadById: async (_workspace: string, id: string) => tree.find((item) => item.id === id) ?? null,
   listThreads: async (_workspace: string, parent: Thread["parent"]) => tree.filter((item) => item.parent.kind === parent.kind && item.parent.id === parent.id),
 });

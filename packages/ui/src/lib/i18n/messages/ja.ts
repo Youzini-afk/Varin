@@ -459,6 +459,7 @@ export const dict: Record<I18nKey, string> = {
   'harness.threads.state.queued': '待機中',
   'harness.threads.state.starting': '起動中',
   'harness.threads.state.running': '実行中',
+  'harness.threads.state.idle': 'アイドル',
   'harness.threads.state.waiting': '入力待ち',
   'harness.threads.state.stalled': '停滞中',
   'harness.threads.state.looping': '反復中',

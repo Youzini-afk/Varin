@@ -15,6 +15,7 @@ const stateKey: Record<HarnessThreadState, `harness.threads.state.${HarnessThrea
   queued: 'harness.threads.state.queued',
   starting: 'harness.threads.state.starting',
   running: 'harness.threads.state.running',
+  idle: 'harness.threads.state.idle',
   waiting: 'harness.threads.state.waiting',
   stalled: 'harness.threads.state.stalled',
   looping: 'harness.threads.state.looping',

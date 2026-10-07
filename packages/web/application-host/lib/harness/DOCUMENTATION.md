@@ -995,6 +995,15 @@ service does not leave a synthetic operation running across restart.
 
 ### Follow-up sources and delivery
 
+Run settlement clears execution yield and live input/stall attention. A retained follow-up wait has
+its own lifetime; worker loss retains recovery attention. An idle discussion uses the typed
+`discussion-ready` reason and is presented as idle, rather than as a pending user answer. Settled Run
+outcomes take precedence over old live input flags in both thread tools and workbench projections.
+Authenticated user routes resolve a session's durable catalog owner for follow-up and experiment
+management. A settled child's retired execution binding is not a missing registration. Agent tool
+access continues to resolve the live Run binding; historical management does not authorize execution
+as that retired Run.
+
 `followups.ts` stores definition, occurrence and compact observation identities
 through the kernel record boundary. `any`/`all` parents own hidden leaf
 definitions; compatible file, metric, attempt and external observers share the

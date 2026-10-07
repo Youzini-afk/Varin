@@ -21,6 +21,13 @@ const isRecord = (value: unknown): value is Record<string, unknown> => (
   Boolean(value) && typeof value === 'object' && !Array.isArray(value)
 );
 
+const isFollowUp = (entry: unknown): entry is FollowUpDefinitionView => (
+  isRecord(entry) && typeof entry.id === 'string' && typeof entry.sessionId === 'string'
+  && typeof entry.status === 'string' && ['waiting', 'triggered', 'delivered', 'cancelled', 'superseded', 'unavailable'].includes(entry.status)
+  && typeof entry.revision === 'string'
+  && typeof entry.waitingSummary === 'string' && typeof entry.instruction === 'string'
+);
+
 export async function fetchFollowUps(options: { sessionId?: string; includeInactive?: boolean; signal?: AbortSignal } = {}): Promise<FollowUpDefinitionView[] | null> {
   const path = options.sessionId
     ? `/api/harness/sessions/${encodeURIComponent(options.sessionId)}/follow-ups`
@@ -31,10 +38,7 @@ export async function fetchFollowUps(options: { sessionId?: string; includeInact
   if (response.status === 404 && options.sessionId) return null;
   if (!response.ok) throw new Error(`Follow-up list failed (${response.status})`);
   const body: unknown = await response.json();
-  if (!isRecord(body) || !Array.isArray(body.followUps) || body.followUps.some((entry: unknown) => (
-    !isRecord(entry) || typeof entry.id !== 'string' || typeof entry.sessionId !== 'string'
-    || typeof entry.status !== 'string' || typeof entry.waitingSummary !== 'string' || typeof entry.instruction !== 'string'
-  ))) throw new Error('Invalid follow-up list response');
+  if (!isRecord(body) || !Array.isArray(body.followUps) || !body.followUps.every(isFollowUp)) throw new Error('Invalid follow-up list response');
   return body.followUps as FollowUpDefinitionView[];
 }
 
@@ -43,7 +47,7 @@ export async function postFollowUpAction(
   id: string,
   action: 'cancel' | 'check' | 'fire',
   expectedRevision?: string,
-): Promise<void> {
+): Promise<FollowUpDefinitionView> {
   const response = await runtimeFetch(
     `/api/harness/sessions/${encodeURIComponent(sessionId)}/follow-ups/${encodeURIComponent(id)}/${action}`,
     {
@@ -54,8 +58,10 @@ export async function postFollowUpAction(
       }),
     },
   );
+  const body: unknown = await response.json().catch(() => null);
   if (!response.ok) {
-    const body: unknown = await response.json().catch(() => null);
     throw new Error(isRecord(body) && typeof body.error === 'string' ? body.error : `${action} failed (${response.status})`);
   }
+  if (!isRecord(body) || !isFollowUp(body.followUp) || body.followUp.id !== id) throw new Error('Invalid follow-up action response');
+  return body.followUp;
 }

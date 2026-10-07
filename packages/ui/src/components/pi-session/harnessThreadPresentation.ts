@@ -19,6 +19,7 @@ export type HarnessThreadState =
   | 'queued'
   | 'starting'
   | 'running'
+  | 'idle'
   | 'waiting'
   | 'stalled'
   | 'looping'
@@ -37,9 +38,7 @@ export const projectHarnessThreadState = ({ thread, activeRun }: HarnessThreadSn
   if (thread.integration === 'merged') return 'merged';
   if (thread.integration === 'conflict') return 'conflict';
   if (thread.lifecycle === 'queued') return 'queued';
-  if (thread.attention === 'user' || thread.attention === 'permission' || thread.attention === 'thread' || activeRun?.executionYielded) return 'waiting';
-  if (thread.attention === 'stalled') return 'stalled';
-  if (thread.attention === 'looping') return 'looping';
+  if (thread.attention === 'followup') return 'waiting';
   if (thread.lifecycle === 'settled') {
     if (activeRun?.outcome === 'failure') return 'failed';
     if (activeRun?.outcome === 'cancelled') return 'cancelled';
@@ -48,6 +47,10 @@ export const projectHarnessThreadState = ({ thread, activeRun }: HarnessThreadSn
     if (thread.integration === 'dirty') return 'dirty';
     return 'completed';
   }
+  if (thread.kind === 'discussion' && thread.attention === 'user' && thread.waitingFor?.reason === 'discussion-ready') return 'idle';
+  if (thread.attention === 'user' || thread.attention === 'permission' || thread.attention === 'thread' || activeRun?.executionYielded) return 'waiting';
+  if (thread.attention === 'stalled') return 'stalled';
+  if (thread.attention === 'looping') return 'looping';
   if (activeRun?.workerState === 'lost') return 'interrupted';
   if (activeRun?.workerState === 'starting') return 'starting';
   return 'running';

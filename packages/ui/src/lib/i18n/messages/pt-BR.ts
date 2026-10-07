@@ -494,6 +494,7 @@ export const dict: Record<I18nKey, string> = {
   'harness.threads.state.queued': 'Na fila',
   'harness.threads.state.starting': 'Iniciando',
   'harness.threads.state.running': 'Em execução',
+  'harness.threads.state.idle': 'Ocioso',
   'harness.threads.state.waiting': 'Aguardando',
   'harness.threads.state.stalled': 'Parada',
   'harness.threads.state.looping': 'Em repetição',
