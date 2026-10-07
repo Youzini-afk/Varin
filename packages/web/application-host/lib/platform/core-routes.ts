@@ -1268,6 +1268,7 @@ export const registerCommonRequestMiddleware = (
       express.json({ limit: '256kb' })(req, res, next);
     } else if (
       req.path.startsWith('/api/config/settings') ||
+      req.path.startsWith('/api/agent-personalization') ||
       req.path.startsWith('/api/auth') ||
       req.path.startsWith('/api/external') ||
       req.path.startsWith('/api/projects') ||
