@@ -24,7 +24,9 @@ const createFakeProcess = (): FakeProcess => {
         queueMicrotask(() => { for (const handler of dataHandlers) handler(`${ready}\n`); });
         return;
       }
-      const token = data.match(/__VARIN_SENTINEL_([0-9a-f]+):B/)?.[1];
+      // The submitted wrapper constructs records at execution time, so its
+      // echoed input contains the marker base without a complete :B record.
+      const token = data.match(/__VARIN_SENTINEL_([0-9a-f]+)/)?.[1];
       if (!token) return;
       queueMicrotask(() => { for (const handler of dataHandlers) handler(`__VARIN_SENTINEL_${token}:B\nprompt>`); });
     },
