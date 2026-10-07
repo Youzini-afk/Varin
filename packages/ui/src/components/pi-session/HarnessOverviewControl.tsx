@@ -76,12 +76,12 @@ export function HarnessOverviewControl({ open, compactOpen, attention, onOpenCha
         </TooltipTrigger>
         <TooltipContent side="left">{label}</TooltipContent>
       </Tooltip>
-      <button ref={compactTrigger} type="button" className="workbench-overview-peek-trigger"
+      {!open ? <button ref={compactTrigger} type="button" className="workbench-overview-peek-trigger"
         aria-expanded={compactOpen} aria-controls={compactOpen ? id : undefined}
         aria-label={t('harness.overview.peek')}
         onClick={() => onCompactChange(!compactOpen)}>
         <Icon name="arrow-down-s" className={cn('size-3 transition-transform', compactOpen && 'rotate-180')} />
-      </button>
+      </button> : null}
     </div>
     <AnimatePresence initial={false}>
       {compactOpen ? <OverviewSurface key="compact" compact label={t('harness.overview.peek')}>

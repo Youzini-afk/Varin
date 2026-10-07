@@ -308,6 +308,7 @@ describe('work overview presentation', () => {
     await act(async () => full.click());
     expect(container.querySelector('[data-harness-overview-peek]')).toBeNull();
     expect(container.querySelector('[data-harness-overview-floating]')).not.toBeNull();
+    expect(container.querySelector('button.workbench-overview-peek-trigger')).toBeNull();
     expect(desktopView).toHaveBeenLastCalledWith('full');
     expect(container.textContent).toContain('harness.overview.plan');
     expect(container.textContent).toContain('Inspect');

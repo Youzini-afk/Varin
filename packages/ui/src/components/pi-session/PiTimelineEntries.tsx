@@ -980,7 +980,7 @@ export const PiTurnUserMessage: React.FC<{
     });
   }, [messageText, t]);
   return (
-    <article id={entry ? `pi-entry-${entry.id}` : undefined} data-pi-user-message data-pi-entry-id={entry?.id} className="group/message ml-auto max-w-[85%]">
+    <article id={entry ? `pi-entry-${entry.id}` : undefined} data-pi-user-message data-pi-message-role="user" data-pi-entry-id={entry?.id} className="group/message ml-auto max-w-[85%]">
       <div className="rounded-xl bg-[var(--chat-user-message-bg)] px-4 py-3 text-[var(--chat-user-message)]">
         <PiCollapsibleUserContent><PiUserContentView content={message.content} messageId={messageId} plain={plain} /></PiCollapsibleUserContent>
       </div>
@@ -1181,7 +1181,7 @@ export const PiTimelineEntryList: React.FC<Omit<
                 && sortedProjection.activity.length > 0;
               if (!displayedMessage && !showsActivity) return null;
               return (
-                <article id={`pi-entry-${entry.id}`} data-pi-entry-id={entry.id} key={entry.id} className="group/message w-full space-y-3">
+                <article id={`pi-entry-${entry.id}`} data-pi-entry-id={entry.id} data-pi-message-role="assistant" key={entry.id} className="group/message w-full space-y-3">
                   {showsActivity && sortedProjection ? (
                     <PiSortedActivityGroup
                       cwd={cwd}
@@ -1402,7 +1402,7 @@ export const PiTimelineEntryList: React.FC<Omit<
             && sortedProjection.activity.length > 0;
           if (!displayedMessage && !showsActivity) return null;
           return (
-            <article className="w-full space-y-3" aria-live="polite">
+            <article className="w-full space-y-3" aria-live="polite" data-pi-entry-id={PI_SORTED_LIVE_ASSISTANT_ID} data-pi-message-role="assistant">
               {showsActivity && sortedProjection ? (
                 <PiSortedActivityGroup
                   cwd={cwd}
