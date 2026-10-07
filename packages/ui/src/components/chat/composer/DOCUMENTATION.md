@@ -76,8 +76,9 @@ Native queue changes animate by message identity. An exiting queue row is inert 
 form immediately, so a draft retained after dequeue is not displayed or editable twice.
 
 The input surface uses a subtle top highlight and soft downward shadows for elevation in both themes.
-Focus adds a low-opacity blurred halo without changing the border or adding a sharp focus ring.
-The working sweep is diffuse as well; it does not use a masked outline around rounded corners.
+Focus adds two diffuse layers: a brighter halo close to the surface and a soft outer falloff.
+Dark themes use stronger light; light themes keep a gentler shadow. The working sweep shares the
+theme-aware glow and broader blur, with the existing border and rounded corners retained.
 These effects are paint-only and retain the composer dimensions and existing reduced-motion behavior.
 
 `usePiMessageHandoff` binds paint-only transfers to the enclosing view. Draft transfers use the existing

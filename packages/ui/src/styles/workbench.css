@@ -109,6 +109,9 @@
 [data-pi-composer-shell] { container: composer / inline-size; }
 [data-pi-composer-input-frame] {
   --composer-elevation-shadow: 0 2px 5px rgb(0 0 0 / .035), 0 12px 28px -10px rgb(0 0 0 / .12);
+  --composer-focus-shadow: 0 0 10px 1px color-mix(in srgb, var(--interactive-focus, var(--ring)) 14%, transparent),
+    0 0 28px 5px color-mix(in srgb, var(--interactive-focus, var(--ring)) 7%, transparent);
+  --composer-working-glow: color-mix(in srgb, var(--interactive-focus, var(--ring)) 18%, transparent);
   isolation: isolate;
   border-radius: 15px;
   border-color: color-mix(in srgb, var(--border) 75%, transparent);
@@ -118,10 +121,12 @@
 }
 .dark [data-pi-composer-input-frame] {
   --composer-elevation-shadow: 0 3px 8px rgb(0 0 0 / .18), 0 14px 30px -10px rgb(0 0 0 / .38);
+  --composer-focus-shadow: 0 0 12px 2px color-mix(in srgb, var(--interactive-focus, var(--ring)) 26%, transparent),
+    0 0 30px 6px color-mix(in srgb, var(--interactive-focus, var(--ring)) 14%, transparent);
+  --composer-working-glow: color-mix(in srgb, var(--interactive-focus, var(--ring)) 26%, transparent);
 }
 [data-pi-composer-input-frame]:focus-within {
-  box-shadow: inset 0 1px 0 rgb(255 255 255 / .04), var(--composer-elevation-shadow),
-    0 0 18px 2px color-mix(in srgb, var(--interactive-focus, var(--ring)) 10%, transparent);
+  box-shadow: inset 0 1px 0 rgb(255 255 255 / .04), var(--composer-elevation-shadow), var(--composer-focus-shadow);
 }
 .pi-composer-hints {
   display: grid;
@@ -209,13 +214,13 @@
 [data-pi-composer-input-frame][data-working="true"]::after {
   content: "";
   position: absolute;
-  inset: -4px;
+  inset: -6px;
   z-index: -1;
   border-radius: inherit;
-  background: linear-gradient(110deg, transparent 25%, color-mix(in srgb, var(--interactive-focus, var(--ring)) 10%, transparent) 48%, transparent 65%);
+  background: linear-gradient(110deg, transparent 25%, var(--composer-working-glow) 48%, transparent 65%);
   background-size: 300% 100%;
-  filter: blur(8px);
-  opacity: .55;
+  filter: blur(10px);
+  opacity: .7;
   pointer-events: none;
   animation: wb-composer-sweep 3s linear infinite;
 }
