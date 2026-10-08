@@ -18,7 +18,7 @@ export const isAttachedRootPurpose = (purpose: ThreadPurpose | undefined | null)
 );
 export type ThreadSessionOwner = "spawned-child" | "attached-root";
 export type ThreadCreatedBy = "user" | "agent";
-export type ThreadLifecycle = "queued" | "active" | "settled" | "archived";
+export type ThreadLifecycle = "preparing" | "queued" | "active" | "settled" | "archived";
 export type ThreadAttention = "none" | "user" | "permission" | "thread" | "experiment" | "followup" | "stalled" | "looping";
 export type ThreadIntegration = "none" | "dirty" | "merge-ready" | "conflict" | "merged";
 export type ThreadRunWorkerState = "starting" | "running" | "lost" | "exited";

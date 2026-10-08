@@ -44,7 +44,7 @@ export interface ThreadWorktreeRuntimeOptions {
   spawnProcess?: ManagedSpawn;
   fsPromises?: Pick<typeof fs.promises, "chmod" | "copyFile" | "lstat" | "mkdir" | "readdir" | "readFile" | "readlink" | "realpath" | "rename" | "rm" | "stat" | "symlink" | "unlink" | "writeFile">;
   pathModule?: typeof path;
-  runGit?: (cwd: string, args: string[], input?: Buffer | string) => Promise<{ stdout: string; stderr: string; stdoutBuffer?: Buffer }>;
+  runGit?: (cwd: string, args: string[], input?: Buffer | string, signal?: AbortSignal) => Promise<{ stdout: string; stderr: string; stdoutBuffer?: Buffer }>;
   interpreter?: ShellInterpreter | undefined;
   /** Host/backend authority used to revalidate persisted roots after restart. */
   authorizeManagedRoot?: (managedRoot: string) => boolean | Promise<boolean>;
@@ -141,20 +141,28 @@ const parseNumstat = (value: string): ThreadDiffStats => {
 const defaultRunGit = (
   gitBinary: string,
   env: NodeJS.ProcessEnv,
-) => (cwd: string, args: string[], input?: Buffer | string): Promise<{ stdout: string; stderr: string; stdoutBuffer: Buffer }> => new Promise((resolve, reject) => {
+) => (cwd: string, args: string[], input?: Buffer | string, signal?: AbortSignal): Promise<{ stdout: string; stderr: string; stdoutBuffer: Buffer }> => new Promise((resolve, reject) => {
+  signal?.throwIfAborted();
   const child = spawn(gitBinary, args, {
     cwd,
     env,
     shell: false,
     stdio: [input === undefined ? "ignore" : "pipe", "pipe", "pipe"],
     windowsHide: true,
+    signal,
   });
   const stdout: Buffer[] = [];
   const stderr: Buffer[] = [];
   child.stdout?.on("data", (chunk: Buffer) => stdout.push(Buffer.from(chunk)));
   child.stderr?.on("data", (chunk: Buffer) => stderr.push(Buffer.from(chunk)));
-  child.once("error", reject);
+  let failure: Error | undefined;
+  child.once("error", (error) => { failure = error; });
+  child.stdin?.on("error", (error) => { failure ??= error; });
   child.once("close", (code) => {
+    // Cleanup may reclaim the prepared directory once this promise settles.
+    // Wait for process exit even when abort emits an earlier error event.
+    if (signal?.aborted) { reject(signal.reason); return; }
+    if (failure) { reject(failure); return; }
     const stdoutBuffer = Buffer.concat(stdout);
     const result = {
       stdout: stdoutBuffer.toString("utf8"),
@@ -439,6 +447,7 @@ export function createThreadWorktreeRuntime(options: ThreadWorktreeRuntimeOption
     signal: AbortSignal | undefined,
     onWorktreeState: PrepareThreadWorktreeInput["onWorktreeState"],
   ): Promise<PreparedThreadWorktree> => {
+    signal?.throwIfAborted();
     const allocated = options.createScratch
       ? await options.createScratch(sourceRoot, threadId)
       : {
@@ -453,7 +462,7 @@ export function createThreadWorktreeRuntime(options: ThreadWorktreeRuntimeOption
     registerManagedRoot(managedRoot);
     let base = "zero-commit";
     try {
-      const head = (await runGit(sourceRoot, ["rev-parse", "HEAD"])).stdout.trim();
+      const head = (await runGit(sourceRoot, ["rev-parse", "HEAD"], undefined, signal)).stdout.trim();
       if (head) base = head;
     } catch {
       base = "zero-commit";
@@ -671,7 +680,7 @@ export function createThreadWorktreeRuntime(options: ThreadWorktreeRuntimeOption
     if (signal?.aborted) throw abortError();
     let inside: string;
     try {
-      inside = (await runGit(directory, ["rev-parse", "--is-inside-work-tree"])).stdout.trim();
+      inside = (await runGit(directory, ["rev-parse", "--is-inside-work-tree"], undefined, signal)).stdout.trim();
     } catch (error) {
       if (isNotGitRepositoryError(error)) return { kind: "directory" };
       throw error;
@@ -681,7 +690,7 @@ export function createThreadWorktreeRuntime(options: ThreadWorktreeRuntimeOption
     let unborn = false;
     try {
       if (signal?.aborted) throw abortError();
-      const head = (await runGit(directory, ["rev-parse", "HEAD"])).stdout.trim();
+      const head = (await runGit(directory, ["rev-parse", "HEAD"], undefined, signal)).stdout.trim();
       if (head && head !== "HEAD") baseRef = head;
     } catch (error) {
       if (!isUnbornHeadError(error)) throw error;
@@ -690,7 +699,7 @@ export function createThreadWorktreeRuntime(options: ThreadWorktreeRuntimeOption
     }
     const collect = async (args: string[]): Promise<string> => {
       if (signal?.aborted) throw abortError();
-      return (await runGit(directory, args)).stdout;
+      return (await runGit(directory, args, undefined, signal)).stdout;
     };
     const [tracked, deleted, untracked, unstaged, staged, stagedMeta] = await Promise.all([
       collect(["ls-files", "-z"]),
@@ -722,7 +731,7 @@ export function createThreadWorktreeRuntime(options: ThreadWorktreeRuntimeOption
       lstat: fsPromises.lstat,
       readlink: fsPromises.readlink,
       join: pathModule.join,
-    });
+    }, signal);
     const rawPaths = [...new Set([...parseGitNullList(tracked), ...parseGitNullList(untracked)])].filter(file => {
       const identity = contentIdentities[file];
       return identity ? identity.startsWith("file:") : indexModes[file] === "100644" || indexModes[file] === "100755";
@@ -731,7 +740,7 @@ export function createThreadWorktreeRuntime(options: ThreadWorktreeRuntimeOption
     // C-quoted UTF-8 input handles spaces, quotes and control characters without a shell.
     const quoted = (file: string) => '"' + [...Buffer.from(file)].map(byte => byte >= 32 && byte < 127 && byte !== 34 && byte !== 92
       ? String.fromCharCode(byte) : `\\${byte.toString(8).padStart(3, "0")}`).join("") + '"';
-    const rawHashes = rawPaths.length ? (await runGit(directory, ["hash-object", "--no-filters", "--stdin-paths"], rawPaths.map(quoted).join("\n") + "\n")).stdout.trim().split(/\r?\n/u) : [];
+    const rawHashes = rawPaths.length ? (await runGit(directory, ["hash-object", "--no-filters", "--stdin-paths"], rawPaths.map(quoted).join("\n") + "\n", signal)).stdout.trim().split(/\r?\n/u) : [];
     if (rawHashes.length !== rawPaths.length || rawHashes.some(hash => !/^[0-9a-f]+$/u.test(hash))) throw new Error("Git returned an incomplete raw baseline identity");
     const rawFileHashes = Object.fromEntries(rawPaths.map((file, index) => [file, rawHashes[index]!]));
     return {

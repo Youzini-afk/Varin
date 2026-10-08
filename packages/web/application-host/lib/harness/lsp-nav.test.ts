@@ -77,7 +77,7 @@ describe("LSP navigation services", () => {
     expect(deps.supervisor.workspaceSymbols).toHaveBeenCalledWith(expect.objectContaining({
       view: AGENT_LANGUAGE_VIEW,
       expectedRevision: "r1",
-    }));
+    }), { signal: context.signal });
   });
 
   it("binds an authorized external file by its resource root in a projectless session", async () => {
@@ -98,7 +98,7 @@ describe("LSP navigation services", () => {
 
     const result = await services.symbols.handle({ path: "/external/src/a.ts", query: "value" }, outside);
     expect(result.status).toBe("ready");
-    expect(deps.documents.read).toHaveBeenCalledWith({ workspaceId: "external-root", resourceId: "src/a.ts" });
+    expect(deps.documents.read).toHaveBeenCalledWith({ workspaceId: "external-root", resourceId: "src/a.ts" }, expect.objectContaining({ signal: outside.signal }));
     expect(deps.supervisor.syncDocument).toHaveBeenCalledWith(expect.objectContaining({
       resource: { workspaceId: "external-root", resourceId: "src/a.ts" },
     }), { signal: context.signal });
@@ -164,7 +164,7 @@ describe("LSP navigation services", () => {
     };
     const result = await services.hover.handle({ path: "src/a.ts", line: 1 }, fixedContext);
     expect(result).toMatchObject({ status: "ready", revision: "working-branch:child@4", source: "working-branch" });
-    expect(readSource).toHaveBeenCalledWith(context.sessionId, fixedContext.inputContext, "src/a.ts", "workspace-1");
+    expect(readSource).toHaveBeenCalledWith(context.sessionId, fixedContext.inputContext, "src/a.ts", "workspace-1", expect.objectContaining({ signal: fixedContext.signal }));
     expect(deps.documents.read).not.toHaveBeenCalled();
     expect(deps.supervisor.syncDocument).toHaveBeenCalledWith(expect.objectContaining({
       content: "export const value = 3;", contentRevision: "working-branch:child@4",
@@ -203,7 +203,7 @@ describe("LSP navigation services", () => {
       }],
     };
     await services.hover.handle({ path: "/workspace/src/a.ts", line: 1 }, absoluteContext);
-    expect(deps.documents.read).toHaveBeenCalledWith({ workspaceId: "workspace-1", resourceId: "src/a.ts" });
+    expect(deps.documents.read).toHaveBeenCalledWith({ workspaceId: "workspace-1", resourceId: "src/a.ts" }, expect.objectContaining({ signal: absoluteContext.signal }));
   });
 
   it("converts agent-facing one-based positions and marks positions in other files unpinned", async () => {
@@ -214,7 +214,7 @@ describe("LSP navigation services", () => {
     expect(definition).toMatchObject({ unpinnedPaths: ["src/b.ts"] });
     expect(deps.supervisor.definition).toHaveBeenCalledWith(expect.objectContaining({
       position: { line: 6, character: 2 },
-    }));
+    }), { signal: context.signal });
     const references = await services.references.handle({ path: "src/a.ts", line: 7 }, context);
     expect(references.text).toContain("1 references · queried src/a.ts @ r1 (disk)");
     expect(references.text).toContain("src/c.ts:9:2 [unpinned]");

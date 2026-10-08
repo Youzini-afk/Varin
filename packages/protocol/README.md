@@ -101,7 +101,7 @@ waiting on a concurrency slot.
 ### Thread lifecycle
 
 ```
-Thread.lifecycle: queued → active → settled → archived
+Thread.lifecycle: preparing → queued/active → settled → archived
 Thread.attention: none | user | permission | stalled | looping
 Thread.integration: none | dirty | merge-ready | conflict | merged
 ThreadRun.workerState: starting → running → exited | lost

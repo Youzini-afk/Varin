@@ -223,8 +223,8 @@ export function formatZone2Thread(thread: Zone2Thread, now: number): string {
         ? "waiting for a thread"
       : thread.attention === "stalled" || thread.attention === "looping"
         ? thread.attention
-        : thread.lifecycle === "queued"
-          ? "queued"
+        : thread.lifecycle === "preparing" || thread.lifecycle === "queued"
+          ? thread.lifecycle
           : thread.lifecycle === "settled"
             ? thread.outcome === "success" ? "completed" : thread.outcome ?? "settled"
             : thread.lifecycle === "archived"

@@ -67,7 +67,7 @@ export interface HostResourceOperation {
 }
 
 export interface HostResourceOperationGate {
-  run<Result>(resources: readonly HostResourceOperation[], operation: () => Promise<Result>): Promise<Result>;
+  run<Result>(resources: readonly HostResourceOperation[], operation: () => Promise<Result>, options?: { signal?: AbortSignal }): Promise<Result>;
 }
 
 export interface HostFileResourceBackend {

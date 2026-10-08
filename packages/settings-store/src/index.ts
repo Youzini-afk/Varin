@@ -2,6 +2,7 @@ import { randomUUID } from 'node:crypto';
 import fs from 'node:fs';
 import fsPromisesDefault from 'node:fs/promises';
 import pathDefault from 'node:path';
+import { setTimeout as delay } from 'node:timers/promises';
 
 // ── Public types ─────────────────────────────────────────────────────────
 
@@ -22,6 +23,7 @@ export interface SettingsFileStore {
     mutator: (
       current: VarinSettingsDocument,
     ) => SettingsFileTransaction<Result> | Promise<SettingsFileTransaction<Result>>,
+    options?: { signal?: AbortSignal },
   ): Promise<Result>;
   update(
     mutator: (
@@ -140,9 +142,11 @@ export const createSettingsFileStore = ({
     }
   };
 
-  const acquireLock = async (): Promise<ReleaseLock> => {
+  const acquireLock = async (signal?: AbortSignal): Promise<ReleaseLock> => {
+    signal?.throwIfAborted();
     await fsPromises.mkdir(directory, { recursive: true, mode: 0o700 });
     for (;;) {
+      signal?.throwIfAborted();
       let handle: import('node:fs/promises').FileHandle | undefined;
       try {
         handle = await fsPromises.open(lockPath, 'wx', 0o600);
@@ -196,7 +200,7 @@ export const createSettingsFileStore = ({
         await fsPromises.rm(moved, { force: true });
         continue;
       }
-      await new Promise((resolve) => setTimeout(resolve, LOCK_RETRY_MS));
+      await delay(LOCK_RETRY_MS, undefined, { signal });
     }
   };
 
@@ -244,9 +248,10 @@ export const createSettingsFileStore = ({
     }
   };
 
-  const withMutationLock = <Result>(operation: () => Promise<Result>): Promise<Result> => enqueueMutation(resolvedPath, async () => {
-    const release = await acquireLock();
+  const withMutationLock = <Result>(operation: () => Promise<Result>, signal?: AbortSignal): Promise<Result> => enqueueMutation(resolvedPath, async () => {
+    const release = await acquireLock(signal);
     try {
+      signal?.throwIfAborted();
       return await operation();
     } finally {
       await release();
@@ -260,8 +265,12 @@ export const createSettingsFileStore = ({
 
   const transact = <Result>(
     mutator: (current: VarinSettingsDocument) => SettingsFileTransaction<Result> | Promise<SettingsFileTransaction<Result>>,
+    options: { signal?: AbortSignal } = {},
   ): Promise<Result> => withMutationLock(async () => {
     const current = await read();
+    // Once the mutator starts, finish its atomic commit before releasing the
+    // lock. Cancellation while queued or acquiring a lock never starts it.
+    options.signal?.throwIfAborted();
     const transaction = await mutator(structuredClone(current));
     if (transaction === null || typeof transaction !== 'object' || Array.isArray(transaction)) {
       throw new Error('Settings transaction must return an object');
@@ -269,7 +278,7 @@ export const createSettingsFileStore = ({
     const next = assertObject(transaction.document ?? current);
     if (transaction.write !== false) await writeUnlocked(next);
     return transaction.result;
-  });
+  }, options.signal);
 
   const update = (
     mutator: (current: VarinSettingsDocument) => VarinSettingsDocument | void | Promise<VarinSettingsDocument | void>,

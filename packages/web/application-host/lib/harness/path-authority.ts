@@ -3,6 +3,7 @@ import path from "node:path";
 import type { HarnessActorContext, DocumentReadPageRequest } from "@varin/protocol";
 import { readHandlePage, readStableFile } from './read-page.js';
 import type { HarnessAuthorizedPath } from "./router.js";
+import { waitWithSignal } from "../cancellation.js";
 import {
   assertAbsolutePathInWorkspace,
   canonicalizePathIdentity,
@@ -16,7 +17,7 @@ import {
 export interface HarnessPathAuthorityOptions {
   authorityId: string;
   documents: {
-    inspectWorkspace(workspaceId: string): Promise<{ root: string }>;
+    inspectWorkspace(workspaceId: string, options?: { signal?: AbortSignal; reportPhase?: (phase: string) => void }): Promise<{ root: string }>;
     /**
      * HR0 resource addressing: the longest registered directory root
      * containing this canonical path (never a file root).
@@ -42,7 +43,7 @@ export interface HarnessPathAuthorityOptions {
   readFsPromises?: Pick<typeof fs.promises, "open" | "stat">;
   pathModule?: typeof path;
   platform?: string;
-  resolveInputPath?(actor: HarnessActorContext, input: string): Promise<string>;
+  resolveInputPath?(actor: HarnessActorContext, input: string, signal?: AbortSignal): Promise<string>;
 }
 
 export function createHarnessPathAuthority({
@@ -136,28 +137,36 @@ export function createHarnessPathAuthority({
   const resolve = async (
       actor: HarnessActorContext,
       inputPath: string,
-      options: { allowMissing: boolean },
+      options: { allowMissing: boolean; signal?: AbortSignal; reportPhase?: (phase: string) => void },
     ): Promise<HarnessAuthorizedPath | null> => {
+      const stage = (phase: string): void => {
+        options.signal?.throwIfAborted();
+        options.reportPhase?.(`authorize:${phase}`);
+      };
+      stage("workspace");
       const workspace = actor.workspaceId
-        ? await documents.inspectWorkspace(actor.workspaceId)
+        ? await waitWithSignal(documents.inspectWorkspace(actor.workspaceId, options), options.signal)
         : null;
       const authorityRoot = workspace?.root ?? actor.authorityRoot ?? null;
       const baseDir = actor.cwd ?? authorityRoot;
-      const resolvedInput = resolveInputPath ? await resolveInputPath(actor, inputPath) : inputPath;
+      stage("normalize");
+      const resolvedInput = resolveInputPath ? await resolveInputPath(actor, inputPath, options.signal) : inputPath;
       const absolutePath = isAbsoluteInput(resolvedInput)
         ? resolvedInput
         : baseDir ? pathModule.resolve(baseDir, resolvedInput) : null;
       if (!absolutePath || absolutePath.includes("\0")) return null;
 
+      stage("path");
       if (workspace) {
         try {
-          const resolved = await assertAbsolutePathInWorkspace(absolutePath, {
+          const resolved = await waitWithSignal(assertAbsolutePathInWorkspace(absolutePath, {
             root: workspace.root,
             fsPromises,
             pathModule,
             allowMissing: options.allowMissing,
-          });
-          if (!await scopedPermits(actor, workspace.root, normalizePathIdentity(resolved.realPath, { pathModule, platform }))) {
+          }), options.signal);
+          stage("scope");
+          if (!await waitWithSignal(scopedPermits(actor, workspace.root, normalizePathIdentity(resolved.realPath, { pathModule, platform })), options.signal)) {
             return null;
           }
           return {
@@ -176,22 +185,25 @@ export function createHarnessPathAuthority({
         }
       }
 
-      const canonical = await canonicalizePathIdentity(absolutePath, {
+      stage("path");
+      const canonical = await waitWithSignal(canonicalizePathIdentity(absolutePath, {
         allowMissing: options.allowMissing,
         fsPromises,
         pathModule,
-      });
+      }), options.signal);
       let stat: { isDirectory(): boolean } | null = null;
       try {
-        stat = await fsPromises.stat(canonical);
+        stat = await waitWithSignal(fsPromises.stat(canonical), options.signal);
       } catch (error) {
         if ((error as NodeJS.ErrnoException)?.code !== "ENOENT" && (error as NodeJS.ErrnoException)?.code !== "ENOTDIR") throw error;
         if (!options.allowMissing) throw error;
       }
-      if (!await scopedPermits(actor, authorityRoot, normalizePathIdentity(canonical, { pathModule, platform }))) {
+      stage("scope");
+      if (!await waitWithSignal(scopedPermits(actor, authorityRoot, normalizePathIdentity(canonical, { pathModule, platform })), options.signal)) {
         return null;
       }
-      return resolveResourceRooted(inputPath, canonical, stat);
+      stage("resource");
+      return waitWithSignal(resolveResourceRooted(inputPath, canonical, stat), options.signal);
     };
 
   const withAuthorizedFile = async <T>(
@@ -207,7 +219,7 @@ export function createHarnessPathAuthority({
     }
     if (!authorized.resolvedPath) throw new Error("Authorized disk target has no resolved filesystem path");
     signal?.throwIfAborted();
-    const before = await resolve(actor, authorized.inputPath, { allowMissing: false });
+    const before = await resolve(actor, authorized.inputPath, { allowMissing: false, ...(signal ? { signal } : {}) });
     if (!before || before.workspaceId !== authorized.workspaceId || before.canonicalResourceId !== authorized.canonicalResourceId
       || before.resourceId !== authorized.resourceId || before.resolvedPath !== authorized.resolvedPath) {
       throw new Error("Document path changed before reading");
@@ -216,7 +228,7 @@ export function createHarnessPathAuthority({
     // Open the admitted canonical target; re-resolving the caller's alias is
     // only an identity check, never a second content selection.
     return readStableFile(authorized.resolvedPath, read, signal, async () => {
-      const after = await resolve(actor, authorized.inputPath, { allowMissing: false });
+      const after = await resolve(actor, authorized.inputPath, { allowMissing: false, ...(signal ? { signal } : {}) });
       if (!after || after.workspaceId !== authorized.workspaceId || after.canonicalResourceId !== authorized.canonicalResourceId
         || after.resourceId !== authorized.resourceId || after.resolvedPath !== authorized.resolvedPath) {
         throw new Error("Document path changed while reading");

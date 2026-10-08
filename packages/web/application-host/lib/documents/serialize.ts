@@ -1,3 +1,5 @@
+import { waitWithSignal } from '../cancellation.js';
+
 export const createSerialQueues = () => {
   const queues = new Map<string, Promise<unknown>>();
   const scoped = new Set<{
@@ -27,6 +29,7 @@ export const createSerialQueues = () => {
   const runResources = <Result>(
     resources: readonly SerialQueueResource[],
     work: () => Promise<Result>,
+    signal?: AbortSignal,
   ): Promise<Result> => {
     const normalized = [...new Map(resources.map((resource) => [
       resource.key,
@@ -40,7 +43,12 @@ export const createSerialQueues = () => {
     const blockers = [...scoped]
       .filter((entry) => entry.resources.some((active) => normalized.some((requested) => resourcesOverlap(active, requested))))
       .map((entry) => entry.completion.catch(() => undefined));
-    const completion = Promise.all(blockers).then(work);
+    // Cancellation removes a waiting entry, but an operation that already
+    // owns the resources keeps them until its work actually settles.
+    const completion = waitWithSignal(Promise.all(blockers), signal).then(() => {
+      signal?.throwIfAborted();
+      return work();
+    });
     const entry = { resources: normalized, completion: completion as Promise<unknown> };
     scoped.add(entry);
     void completion.finally(() => scoped.delete(entry)).catch(() => undefined);

@@ -37,9 +37,11 @@ export const projectHarnessThreadState = ({ thread, activeRun }: HarnessThreadSn
   if (thread.lifecycle === 'archived') return 'archived';
   if (thread.integration === 'merged') return 'merged';
   if (thread.integration === 'conflict') return 'conflict';
+  if (thread.lifecycle === 'preparing') return 'starting';
   if (thread.lifecycle === 'queued') return 'queued';
   if (thread.attention === 'followup') return 'waiting';
   if (thread.lifecycle === 'settled') {
+    if (!activeRun && thread.attention === 'stalled') return 'interrupted';
     if (activeRun?.outcome === 'failure') return 'failed';
     if (activeRun?.outcome === 'cancelled') return 'cancelled';
     if (activeRun?.outcome === 'lost') return 'interrupted';

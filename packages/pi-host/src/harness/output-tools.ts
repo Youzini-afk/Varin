@@ -235,12 +235,12 @@ export function createDiagnosticsTool(bridge: HostServicesBridge, _sessionId: st
     ],
     parameters: DiagnosticsParams,
     executionMode: "parallel",
-    execute: async (_toolCallId, params, _signal, _onUpdate, _ctx) => {
+    execute: async (_toolCallId, params, signal, _onUpdate, _ctx) => {
       try {
         const result = await bridge.request("lsp.diagnosticsSnapshot", {
           path: params.path,
           ...(params.full === undefined ? {} : { full: params.full }),
-        });
+        }, signal ? { signal } : {});
         const formatted = formatDiagnosticsResult(result, params.path);
         return { ...formatted, details: { ...(formatted.details as Record<string, unknown>),
           ...(result.observationRef ? { observationRef: result.observationRef } : {}) } };

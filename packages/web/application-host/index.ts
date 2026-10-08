@@ -1255,7 +1255,7 @@ async function main(options: StartWebUiServerOptions = {}): Promise<WebUiServerC
     documents: documentsAuthority,
     fsPromises,
     pathModule: path,
-    resolveInputPath: (actor, input) => shellPathResolver(actor, input),
+    resolveInputPath: (actor, input, signal) => shellPathResolver(actor, input, signal),
   });
   piWriterTracker = createPiWorkspaceWriterTracker({ documents: documentsAuthority });
   const workspaceRecoveryEngines = new Map<string, WorkspaceRecoveryEngine>();
@@ -3798,6 +3798,11 @@ async function main(options: StartWebUiServerOptions = {}): Promise<WebUiServerC
     threadRegistry,
     threadCaptureDraftBaseline: (sessionId, workspaceId, context) => threadRuntime!.captureDraftBaseline(sessionId, workspaceId, context),
     threadPrepareIsolatedBranch: (input) => threadRuntime!.prepareIsolatedBranch(input),
+    threadDiscardPreparation: async (scopeId, parent, threadId) => {
+      // Use durable deletion so a failed cleanup keeps its branch/directory
+      // ownership and can resume after restart.
+      await threadRuntime!.deleteUser(scopeId, parent, threadId);
+    },
     agentInputSurfaceOwner: documentsAuthority.agentInputSurfaceOwner,
     threadTranscriptReader,
     threadSpawnSession: (input) => threadRuntime!.spawn(input),

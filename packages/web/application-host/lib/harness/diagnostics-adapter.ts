@@ -107,11 +107,11 @@ export function createLanguageSupervisorDiagnosticsProvider(
     return cached.items;
   };
 
-  const bindDocument: DiagnosticsProvider["bindDocument"] = async (workspaceId, path) => {
+  const bindDocument: DiagnosticsProvider["bindDocument"] = async (workspaceId, path, options = {}) => {
     ensureSubscription(workspaceId);
     const languageId = languageIdForPath(path);
     if (!languageId) return { status: "unsupported" };
-    const bound = await binder.bind({ workspaceId, resourceId: path, languageId, text: "disk" });
+    const bound = await binder.bind({ workspaceId, resourceId: path, languageId, text: "disk", ...options });
     if (bound.status !== "bound") return { status: "unavailable", message: bound.message };
     return { status: "bound", revision: bound.revision, source: bound.source };
   };

@@ -192,6 +192,7 @@ export function createLspNavigationServices(deps: LspNavigationDeps): {
       ...(ctx.sessionId ? { sessionId: ctx.sessionId } : {}),
       ...(ctx.inputContext ? { inputContext: ctx.inputContext } : {}),
       signal: ctx.signal,
+      ...(ctx.reportPhase ? { reportPhase: ctx.reportPhase } : {}),
     }).catch((error: unknown) => {
       const message = error instanceof Error ? error.message : String(error);
       if (message.includes('file resource is busy under lease')) return { status: 'unavailable' as const, message };
@@ -215,6 +216,8 @@ export function createLspNavigationServices(deps: LspNavigationDeps): {
     for (let attempt = 0; attempt < 2; attempt += 1) {
       const prepared = await prepareDocument(path, ctx);
       if ("status" in prepared) return prepared;
+      ctx.signal.throwIfAborted();
+      ctx.reportPhase?.('lsp:request');
       const result = recordOf(await run(prepared));
       if (result.status === "ready") return { prepared, value: result.value };
       lastStatus = typeof result.status === "string" ? result.status : "unavailable";
@@ -252,7 +255,7 @@ export function createLspNavigationServices(deps: LspNavigationDeps): {
     const workspaceId = prepared.resource.workspaceId;
     const anchorPath = prepared.resource.resourceId;
     void (async () => {
-      const snapshot = await deps.documents.read({ workspaceId, resourceId: anchorPath });
+      const snapshot = await deps.documents.read({ workspaceId, resourceId: anchorPath }, { signal: ctx.signal });
       if (snapshot.status !== "ready" || snapshot.revision !== prepared.revision) return;
       const name = identifierAt(snapshot.content, params.line, params.character ?? 1)?.name;
       if (!name) return;
@@ -296,7 +299,7 @@ export function createLspNavigationServices(deps: LspNavigationDeps): {
         const outcome = await query(params.path, ctx, (prepared) => deps.supervisor.workspaceSymbols({
           ...requestFor(prepared),
           query: params.query,
-        }));
+        }, { signal: ctx.signal }));
         if ("status" in outcome) return outcome;
         const scoped = scopedSymbols(outcome.value, ctx.actor.workspaceScope);
         const { lines, unpinnedPaths } = annotate(symbolEntries(scoped, params.path), outcome.prepared);
@@ -314,7 +317,7 @@ export function createLspNavigationServices(deps: LspNavigationDeps): {
         const outcome = await query(params.path, ctx, (prepared) => deps.supervisor.definition({
           ...requestFor(prepared),
           position: { line: params.line - 1, character: (params.character ?? 1) - 1 },
-        }));
+        }, { signal: ctx.signal }));
         if ("status" in outcome) return outcome;
         const scoped = scopedLocations(outcome.value, ctx.actor.workspaceScope);
         persistResolved(outcome.prepared, ctx, params, "lsp.definition", scoped);
@@ -333,7 +336,7 @@ export function createLspNavigationServices(deps: LspNavigationDeps): {
         const outcome = await query(params.path, ctx, (prepared) => deps.supervisor.references({
           ...requestFor(prepared),
           position: { line: params.line - 1, character: (params.character ?? 1) - 1 },
-        }));
+        }, { signal: ctx.signal }));
         if ("status" in outcome) return outcome;
         const scoped = scopedLocations(outcome.value, ctx.actor.workspaceScope);
         persistResolved(outcome.prepared, ctx, params, "lsp.references", scoped);
@@ -352,7 +355,7 @@ export function createLspNavigationServices(deps: LspNavigationDeps): {
         const outcome = await query(params.path, ctx, (prepared) => deps.supervisor.hover({
           ...requestFor(prepared),
           position: { line: params.line - 1, character: (params.character ?? 1) - 1 },
-        }));
+        }, { signal: ctx.signal }));
         if ("status" in outcome) return outcome;
         const text = hoverText(outcome.value);
         if (!text) return empty("No hover information");

@@ -28,6 +28,7 @@ export interface BindLanguageDocumentInput {
   sessionId?: string;
   inputContext?: AgentInputContext;
   signal?: AbortSignal;
+  reportPhase?: (phase: string) => void;
 }
 
 interface LanguageViewBinderDeps {
@@ -54,7 +55,7 @@ export function createLanguageViewBinder(deps: LanguageViewBinderDeps) {
     const resource = { workspaceId: input.workspaceId, resourceId: input.resourceId };
     if (input.text === 'input-context' && input.sessionId && input.inputContext) {
       const draft = deps.readSource
-        ? await deps.readSource(input.sessionId, input.inputContext, input.resourceId, input.workspaceId)
+        ? await deps.readSource(input.sessionId, input.inputContext, input.resourceId, input.workspaceId, input)
         : deps.documents.readAgentInputSnapshot(input.sessionId, input.inputContext, input.resourceId, input.workspaceId);
       if (draft.status === 'unavailable') return draft;
       if (draft.status === 'working-branch') {
@@ -67,7 +68,7 @@ export function createLanguageViewBinder(deps: LanguageViewBinderDeps) {
         return { content: draft.content, revision: draft.revision, source: 'surface-draft' };
       }
     }
-    const snapshot = await deps.documents.read(resource);
+    const snapshot = await deps.documents.read(resource, input);
     if (snapshot.status !== 'ready') {
       return { status: 'unavailable', message: `Document cannot be read (${snapshot.status}).` };
     }
@@ -76,9 +77,11 @@ export function createLanguageViewBinder(deps: LanguageViewBinderDeps) {
 
   const bind = async (input: BindLanguageDocumentInput): Promise<BindLanguageDocumentResult> => {
     input.signal?.throwIfAborted();
+    input.reportPhase?.('lsp:source');
     const text = await waitWithSignal(resolveText(input), input.signal);
     input.signal?.throwIfAborted();
     if ('status' in text) return text;
+    input.reportPhase?.('lsp:sync');
     const request = {
       view: AGENT_LANGUAGE_VIEW,
       resource: { workspaceId: input.workspaceId, resourceId: input.resourceId },

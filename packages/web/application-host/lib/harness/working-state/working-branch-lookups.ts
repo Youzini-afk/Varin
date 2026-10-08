@@ -12,7 +12,7 @@ export type { WorkingBranchPinOptions, WorkingBranchQuerySnapshot } from "./work
 
 export interface WorkingBranchLookups {
   readSource(sessionId: string, resourceId: string, workspaceId: string,
-    options?: { page: import('@varin/protocol').DocumentReadPageRequest; signal?: AbortSignal }): Promise<HarnessDocumentReadLookup | null>;
+    options?: { page?: import('@varin/protocol').DocumentReadPageRequest; signal?: AbortSignal }): Promise<HarnessDocumentReadLookup | null>;
   pathOverlay(sessionId: string, resourceId: string, workspaceId: string): Promise<HarnessDocumentPathOverlayLookup | null>;
   exploreFile(sessionId: string, resourceId: string, workspaceId: string): Promise<ExploreFileSnapshot | null>;
   pinQuery(sessionId: string, options?: WorkingBranchPinOptions): Promise<WorkingBranchQuerySnapshot | null>;
@@ -52,10 +52,12 @@ export function createWorkingBranchLookups(options: {
 
   return {
     async readSource(sessionId, resourceId, workspaceId, readOptions) {
+      readOptions?.signal?.throwIfAborted();
       if (options.views.get(sessionId)?.workspaceId !== workspaceId) return null;
       return withView(sessionId, async (view, store) => {
         if (view.workspaceId !== workspaceId) return null;
-        if (readOptions) {
+        readOptions?.signal?.throwIfAborted();
+        if (readOptions?.page) {
           const signalOptions = readOptions.signal ? { signal: readOptions.signal } : {};
           const pin = await store.pinBranch(view.branchId, signalOptions);
           try {
@@ -73,7 +75,7 @@ export function createWorkingBranchLookups(options: {
             return { status: 'working-branch', revision: resolved.revision, provenance, page };
           } finally { await pin.release(); }
         }
-        const result = await readBranchFile(store, view.branchId, resourceId);
+        const result = await readBranchFile(store, view.branchId, resourceId, undefined, readOptions ? { read: readOptions } : {});
         if ("unavailable" in result) {
           return {
             status: "working-branch" as const,

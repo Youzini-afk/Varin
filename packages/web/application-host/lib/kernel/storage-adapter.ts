@@ -1295,10 +1295,12 @@ export class KernelWorkingStateRootStore implements WorkingStateRootStore {
       const leaseId = `capture-lease:${randomUUID()}`;
       for (;;) {
         options?.signal?.throwIfAborted();
+        // Keep the acquisition receipt across cancellation; the capture's
+        // finally block must release any lease the kernel actually granted.
         const lease = await this.context.client.fileLeaseAcquire({
           workspaceId: this.context.identity.workspaceId, rootId: root.rootId, leaseId,
           resources: [{ path: targetPath, scope: "exact" }],
-        }, options?.signal);
+        });
         if (lease.status === "acquired") break;
         if (lease.status !== "busy") throw new Error("Kernel returned an invalid capture lease result");
         await new Promise(resolve => setTimeout(resolve, 5));
@@ -1332,12 +1334,12 @@ export class KernelWorkingStateRootStore implements WorkingStateRootStore {
     return applyIndexModes(result, options?.indexModes);
   }
 
-  async listCaptureScopePaths(directory: string, scopes: readonly string[]): Promise<string[]> {
-    return this.kernelScanPaths(directory, scopes);
+  async listCaptureScopePaths(directory: string, scopes: readonly string[], signal?: AbortSignal): Promise<string[]> {
+    return this.kernelScanPaths(directory, scopes, signal);
   }
 
-  async listWorkspaceBaselinePaths(directory: string): Promise<string[]> {
-    return this.kernelScanPaths(directory);
+  async listWorkspaceBaselinePaths(directory: string, signal?: AbortSignal): Promise<string[]> {
+    return this.kernelScanPaths(directory, undefined, signal);
   }
 
   private async publishCaptured(branchId: string, captured: Record<string, RecoveryState>, changedPaths?: string[], fixedPin?: WorkingStatePin): Promise<WorkingResult> {

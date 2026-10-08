@@ -372,6 +372,7 @@ export const createWorkspaceMutationAuthority = ({
   const mutateWorkspace = (
     workspaceId: string,
     operation: (entry: WorkspaceMutationEntry) => MutationOperationResult | void = () => ({ changed: false }),
+    signal?: AbortSignal,
   ) => store.transact((raw) => {
     const normalized = assertDocument(raw, hostId);
     const { document } = normalized;
@@ -394,14 +395,15 @@ export const createWorkspaceMutationAuthority = ({
       },
       write: changed,
     };
-  });
+  }, signal ? { signal } : {});
 
-  const run = <Result>(workspaceId: string, operation: (runtime: WorkspaceRuntime) => Promise<Result>): Promise<Result> => {
+  const run = <Result>(workspaceId: string, operation: (runtime: WorkspaceRuntime) => Promise<Result>, signal?: AbortSignal): Promise<Result> => {
     if (typeof workspaceId !== 'string' || !workspaceId) {
       return Promise.reject(new DocumentAuthorityError('workspaceId is required', { code: 'failed', statusCode: 400 }));
     }
     const previous = queues.get(workspaceId) ?? Promise.resolve();
     const current = previous.catch(() => undefined).then(() => {
+      signal?.throwIfAborted();
       assertAvailable();
       return operation(ensureRuntime(workspaceId));
     });
@@ -438,11 +440,11 @@ export const createWorkspaceMutationAuthority = ({
     }
   };
 
-  const inspect = (workspaceId: string) => run(workspaceId, async (runtime) => {
-    const { entry } = await mutateWorkspace(workspaceId);
+  const inspect = (workspaceId: string, signal?: AbortSignal) => run(workspaceId, async (runtime) => {
+    const { entry } = await mutateWorkspace(workspaceId, undefined, signal);
     syncRuntime(runtime, entry);
     return publicState(runtime, entry);
-  });
+  }, signal);
 
   const registerWriter = (token: MutationToken | undefined, options: RegisterWriterOptions = {}) => run(token?.workspaceId ?? '', async (runtime) => {
     const owner = validateTokenShape(runtime.workspaceId, token);

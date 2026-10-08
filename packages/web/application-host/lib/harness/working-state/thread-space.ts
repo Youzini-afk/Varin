@@ -34,7 +34,7 @@ export const assembleKeepReasons = (input: {
     reasons.push("Directory setup is incomplete");
   }
   if (input.runActive) reasons.push("Thread still has an active run");
-  if (input.thread.lifecycle === "active" || input.thread.lifecycle === "queued") {
+  if (input.thread.lifecycle === "preparing" || input.thread.lifecycle === "active" || input.thread.lifecycle === "queued") {
     reasons.push(`Thread lifecycle is ${input.thread.lifecycle}`);
   }
   reasons.push(...input.unfinishedIntegration);

@@ -153,8 +153,8 @@ export interface WorkingStateRootStore {
   createBranch(workspaceId: string, branchId: string, baseState: Record<string, RecoveryState>, baseRef?: string, draftBasePaths?: string[], captureScopes?: string[]): Promise<WorkingBranchRoot>;
   createBranchFromPin(workspaceId: string, branchId: string, pin: WorkingStatePin, parentRef: string, draftBaselineId?: string | null, captureScopes?: string[]): Promise<WorkingBranchRoot>;
   captureDirectory(directory: string, relativePaths?: string[], options?: { signal?: AbortSignal; onProgress?: (done: number, total: number) => void; store?: boolean; indexModes?: Map<string, string> | Record<string, string> }): Promise<Record<string, RecoveryState>>;
-  listCaptureScopePaths(directory: string, scopes: readonly string[]): Promise<string[]>;
-  listWorkspaceBaselinePaths(directory: string): Promise<string[]>;
+  listCaptureScopePaths(directory: string, scopes: readonly string[], signal?: AbortSignal): Promise<string[]>;
+  listWorkspaceBaselinePaths(directory: string, signal?: AbortSignal): Promise<string[]>;
   commitVirtualWrites(
     branchId: string,
     expectedWriteRevision: number,
