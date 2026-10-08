@@ -14,7 +14,7 @@ impl RunState {
                 | (Preparing, Runnable | Waiting | Cancelled | Failed)
                 | (
                     Runnable,
-                    Generating | Waiting | Completed | Cancelled | Failed
+                    Generating | Executing | Waiting | Completed | Cancelled | Failed
                 )
                 | (
                     Generating,

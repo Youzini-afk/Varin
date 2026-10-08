@@ -151,6 +151,7 @@ impl Catalog {
                     ));
                 }
                 if !bound || intent.bound_epoch == Some(self.epoch) {
+                    intent.requires_rebind = intent.bound_epoch != Some(self.epoch);
                     return Ok(intent);
                 }
                 intent.revision += 1;

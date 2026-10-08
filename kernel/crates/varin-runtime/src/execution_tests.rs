@@ -1046,3 +1046,149 @@ fn interrupt_during_request_serialization_prevents_stale_generation() {
     );
     assert_eq!(provider.calls.load(Ordering::SeqCst), 1);
 }
+
+#[test]
+fn recovered_completed_output_never_resends_model_or_reexecutes_cached_receipts() {
+    for cut in 0..3 {
+        let fixture = Fixture::new();
+        let db = fixture.catalog();
+        let original_input = input(&db);
+        let run_id = original_input.run_id.clone();
+        let epoch = original_input.owner_generation;
+        let snapshot = RequestSnapshot {
+            view: RequestView {
+                request_id: "saved-first".into(),
+                run_id: run_id.clone(),
+                step: 1,
+                binding: original_input.binding.clone(),
+                history: original_input.history.clone(),
+            },
+            serialized: json!({"request":"must never send again"}),
+        };
+        let calls: Vec<ToolCall> = (1..=2)
+            .map(|n| ToolCall {
+                call_id: format!("call-{n}"),
+                name: "read".into(),
+                schema_version: "1".into(),
+                arguments: json!({}),
+            })
+            .collect();
+        let mut items = vec![ProviderItem {
+            id: "opaque".into(),
+            content: Content::ProviderOnly,
+            opaque: Some(OpaqueProviderItem {
+                connection_identity: "fixture-connection".into(),
+                family: "test".into(),
+                adapter_version: "1".into(),
+                value: json!({"signature":[null,42,"unaltered"]}),
+            }),
+        }];
+        items.extend(calls.iter().enumerate().map(|(n, call)| ProviderItem {
+            id: format!("saved-call-{n}"),
+            content: Content::ToolCall { call: call.clone() },
+            opaque: None,
+        }));
+        let commit = |record: ExecutionRecord| {
+            db.lock()
+                .unwrap()
+                .commit_execution(&run_id, epoch, &record)
+                .unwrap();
+        };
+        commit(ExecutionRecord::RequestPrepared {
+            snapshot: snapshot.clone(),
+        });
+        commit(ExecutionRecord::ModelDispatched {
+            request_id: "saved-first".into(),
+        });
+        commit(ExecutionRecord::ModelFinished {
+            request_id: "saved-first".into(),
+            outcome: ModelOutcome::Completed,
+            finish_reason: Some(FinishReason::ToolCalls),
+            items,
+            interrupted_deltas: vec![],
+            usage: UsageReceipt::default(),
+            failure: None,
+        });
+        if cut >= 1 {
+            let contract = ToolContract {
+                name: "read".into(),
+                schema_version: "1".into(),
+                read_only: false,
+                completion: CompletionKind::Result,
+                lifetime: Lifetime::Run,
+                resources: vec![],
+            };
+            commit(ExecutionRecord::ToolsAdmitted {
+                request_id: "saved-first".into(),
+                tools: vec![AdmittedTool {
+                    call: calls[0].clone(),
+                    contract,
+                }],
+            });
+            commit(ExecutionRecord::ToolDispatched {
+                request_id: "saved-first".into(),
+                call_id: "call-1".into(),
+            });
+        }
+        if cut == 1 {
+            commit(ExecutionRecord::ToolSettled {
+                result: ToolResult {
+                    request_id: "saved-first".into(),
+                    call_id: "call-1".into(),
+                    completion: ToolCompletion::Result {
+                        outcome: Outcome::Succeeded,
+                        effect: Effect::Confirmed,
+                        content: json!("cached first result"),
+                    },
+                },
+            });
+        }
+        drop(db);
+        let db = fixture.catalog();
+        let prepared = db.lock().unwrap().prepare_recovered_execution(
+            &run_id,
+            original_input.binding,
+            DefaultAgentPolicy.identity(),
+            Value::Null,
+        );
+        if cut == 2 {
+            assert!(
+                prepared.is_err(),
+                "dispatched effect without receipt cannot be replayed"
+            );
+            assert_eq!(
+                db.lock()
+                    .unwrap()
+                    .operation("saved-first:tool:call-1")
+                    .unwrap()
+                    .effect,
+                Effect::Unknown
+            );
+            continue;
+        }
+        let (input, recovery) = prepared.unwrap();
+        assert!(recovery.is_some());
+        let cancel = CancellationToken::default();
+        let (progress, _receiver) = ProgressSink::channel(1);
+        let engine = engine(db.clone(), Mode::ToolThenAnswer, cancel.clone(), progress);
+        engine.provider.calls.store(1, Ordering::SeqCst);
+        let report = engine.run_recovered(input, cancel, recovery).unwrap();
+        assert_eq!(report.state, RunState::Completed);
+        assert_eq!(
+            engine.provider.calls.load(Ordering::SeqCst),
+            2,
+            "only the new continuation request may be sent"
+        );
+        assert_eq!(
+            engine.tools.calls.load(Ordering::SeqCst),
+            if cut == 1 { 1 } else { 2 }
+        );
+        let history = db.lock().unwrap().execution_history("main").unwrap();
+        for call in &calls {
+            assert_eq!(history.iter().filter(|item|matches!(&item.content,Content::ToolResult{result} if result.call_id==call.call_id)).count(),1);
+        }
+        if cut == 1 {
+            assert!(history.iter().any(|item|matches!(&item.content,Content::ToolResult{result} if matches!(&result.completion,ToolCompletion::Result{content,..} if content==&json!("cached first result")))));
+        }
+    }
+}

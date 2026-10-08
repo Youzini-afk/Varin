@@ -1063,3 +1063,6 @@ pub mod inputs;
 
 #[path="catalog_launch.rs"]
 pub mod launches;
+
+#[path="catalog_recovery.rs"]
+pub mod recovery;

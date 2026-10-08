@@ -692,6 +692,14 @@ impl<
         input: ExecutionInput,
         cancel: CancellationToken,
     ) -> Result<ExecutionReport, ExecutionError> {
+        self.run_recovered(input, cancel, None)
+    }
+    pub fn run_recovered(
+        &self,
+        input: ExecutionInput,
+        cancel: CancellationToken,
+        recovery: Option<crate::catalog::recovery::ExecutionRecovery>,
+    ) -> Result<ExecutionReport, ExecutionError> {
         if input.binding.connection_identity.is_empty() {
             return Err(ExecutionError::new(
                 "connection_identity_required",
@@ -708,9 +716,20 @@ impl<
         )?;
         let mut history = input.history.clone();
         let mut policy_state = input.policy_state.clone();
-        let mut event = PolicyEvent::Started;
+        let (mut event, mut pending, mut recovered_results, mut recovered_decision) = match recovery
+        {
+            Some(recovery) => (
+                recovery.event,
+                recovery.pending,
+                recovery.receipts,
+                recovery.decision,
+            ),
+            None => (PolicyEvent::Started, None, BTreeMap::new(), None),
+        };
+        if pending.is_none() {
+            recovered_results.clear();
+        }
         let mut steps = input.completed_model_steps;
-        let mut pending: Option<(RequestSnapshot, Vec<ToolCall>)> = None;
         let mut interrupted_generation = false;
         macro_rules! finish {
             ($label:lifetime,$next:expr,$waiting:expr,$failure:expr)=>{{
@@ -730,6 +749,7 @@ impl<
                         &snapshot,
                         calls,
                         &mut history,
+                        &recovered_results,
                         ToolCompletion::cancelled(),
                     )?;
                 }
@@ -754,6 +774,7 @@ impl<
                         .collect();
                     history.extend(incoming);
                     event = PolicyEvent::InputDelivered { input_ids };
+                    recovered_decision = None;
                     interrupted_generation = false;
                     if state != RunState::Runnable {
                         state = RunState::Runnable;
@@ -773,8 +794,10 @@ impl<
                 history: &history,
                 pending_tool_calls: pending.as_ref().map_or(0, |(_, calls)| calls.len()),
             };
-            let decision = match guarded("policy_panicked", || {
-                self.policy.decide(&view, &event, &policy_state)
+            let decision = match recovered_decision.take().map(Ok).unwrap_or_else(|| {
+                guarded("policy_panicked", || {
+                    self.policy.decide(&view, &event, &policy_state)
+                })
             }) {
                 Ok(decision) => decision,
                 Err(error) => {
@@ -784,6 +807,7 @@ impl<
                             &snapshot,
                             calls,
                             &mut history,
+                            &recovered_results,
                             ToolCompletion::failure(&error.code, &error.message, Effect::None),
                         )?;
                     }
@@ -805,6 +829,7 @@ impl<
                         &snapshot,
                         calls,
                         &mut history,
+                        &recovered_results,
                         ToolCompletion::failure(
                             "illegal_policy_action",
                             "policy did not execute the registered tool batch",
@@ -858,7 +883,7 @@ impl<
                             &input.binding.connection_identity,
                         ),
                     };
-                    let model_cancel=cancel.child(&format!("model:{}",view.request_id));
+                    let model_cancel = cancel.child(&format!("model:{}", view.request_id));
                     let serialized = match guarded("provider_serialize_panicked", || {
                         self.provider.serialize(&view)
                     }) {
@@ -866,10 +891,20 @@ impl<
                         Err(error) => finish!('agent, RunState::Failed, None, Some(error)),
                     };
                     let snapshot = RequestSnapshot { view, serialized };
-                    match self.commit(&input,ExecutionRecord::RequestPrepared{snapshot:snapshot.clone()}) {
-                        Ok(())=>{},
-                        Err(error) if error.code=="input_pending"||model_cancel.is_cancelled()=>{steps-=1;continue 'agent;},
-                        Err(error)=>return Err(error),
+                    match self.commit(
+                        &input,
+                        ExecutionRecord::RequestPrepared {
+                            snapshot: snapshot.clone(),
+                        },
+                    ) {
+                        Ok(()) => {}
+                        Err(error)
+                            if error.code == "input_pending" || model_cancel.is_cancelled() =>
+                        {
+                            steps -= 1;
+                            continue 'agent;
+                        }
+                        Err(error) => return Err(error),
                     }
                     if model_cancel.is_cancelled() {
                         interrupted_generation = !cancel.is_cancelled();
@@ -899,14 +934,36 @@ impl<
                             waiting_on: None,
                         },
                     )?;
-                    match self.commit(&input,ExecutionRecord::ModelDispatched{request_id:snapshot.view.request_id.clone()}) {
-                        Ok(())=>{},
-                        Err(error) if error.code=="input_pending"||model_cancel.is_cancelled()=>{
-                            interrupted_generation=!cancel.is_cancelled();
-                            self.commit(&input,ExecutionRecord::ModelFinished{request_id:snapshot.view.request_id.clone(),outcome:if interrupted_generation{ModelOutcome::Interrupted}else{ModelOutcome::Cancelled},finish_reason:None,items:vec![],interrupted_deltas:vec![],usage:UsageReceipt::default(),failure:None})?;
-                            continue 'agent;
+                    match self.commit(
+                        &input,
+                        ExecutionRecord::ModelDispatched {
+                            request_id: snapshot.view.request_id.clone(),
                         },
-                        Err(error)=>return Err(error),
+                    ) {
+                        Ok(()) => {}
+                        Err(error)
+                            if error.code == "input_pending" || model_cancel.is_cancelled() =>
+                        {
+                            interrupted_generation = !cancel.is_cancelled();
+                            self.commit(
+                                &input,
+                                ExecutionRecord::ModelFinished {
+                                    request_id: snapshot.view.request_id.clone(),
+                                    outcome: if interrupted_generation {
+                                        ModelOutcome::Interrupted
+                                    } else {
+                                        ModelOutcome::Cancelled
+                                    },
+                                    finish_reason: None,
+                                    items: vec![],
+                                    interrupted_deltas: vec![],
+                                    usage: UsageReceipt::default(),
+                                    failure: None,
+                                },
+                            )?;
+                            continue 'agent;
+                        }
+                        Err(error) => return Err(error),
                     }
                     let (items, deltas, usage, mut result) =
                         self.generate(&input.run_id, &snapshot, &model_cancel);
@@ -1000,7 +1057,9 @@ impl<
                             waiting_on: None,
                         },
                     )?;
-                    let results = self.execute_batch(&input, &snapshot, calls, &cancel)?;
+                    let results =
+                        self.execute_batch(&input, &snapshot, calls, &cancel, &recovered_results)?;
+                    recovered_results.clear();
                     self.commit(
                         &input,
                         ExecutionRecord::ToolBatchCommitted {
@@ -1049,14 +1108,20 @@ impl<
         snapshot: &RequestSnapshot,
         calls: Vec<ToolCall>,
         history: &mut Vec<ConversationItem>,
+        cached: &BTreeMap<String, ToolResult>,
         completion: ToolCompletion,
     ) -> Result<(), ExecutionError> {
         let results: Vec<_> = calls
             .into_iter()
-            .map(|call| ToolResult {
-                request_id: snapshot.view.request_id.clone(),
-                call_id: call.call_id,
-                completion: completion.clone(),
+            .map(|call| {
+                cached
+                    .get(&call.call_id)
+                    .cloned()
+                    .unwrap_or_else(|| ToolResult {
+                        request_id: snapshot.view.request_id.clone(),
+                        call_id: call.call_id,
+                        completion: completion.clone(),
+                    })
             })
             .collect();
         self.commit(
@@ -1129,11 +1194,15 @@ impl<
         snapshot: &RequestSnapshot,
         calls: Vec<ToolCall>,
         cancel: &CancellationToken,
+        cached: &BTreeMap<String, ToolResult>,
     ) -> Result<Vec<ToolResult>, ExecutionError> {
         let mut admitted = Vec::new();
         let mut rejected = BTreeMap::new();
         // All contracts are resolved first; no effect can begin while the graph is still being built.
         for (index, call) in calls.iter().enumerate() {
+            if cached.contains_key(&call.call_id) {
+                continue;
+            }
             match guarded("tool_prepare_panicked", || {
                 self.tools.prepare(call, snapshot)
             }) {
@@ -1185,7 +1254,10 @@ impl<
                 tools: admitted.iter().map(|(_, tool)| tool.clone()).collect(),
             },
         )?;
-        let mut results: Vec<Option<ToolResult>> = vec![None; calls.len()];
+        let mut results: Vec<Option<ToolResult>> = calls
+            .iter()
+            .map(|call| cached.get(&call.call_id).cloned())
+            .collect();
         for (index, completion) in rejected {
             let result = ToolResult {
                 request_id: snapshot.view.request_id.clone(),

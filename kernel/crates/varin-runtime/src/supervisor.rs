@@ -162,11 +162,11 @@ impl RunSupervisor {
                     ExecutionError::new("supervisor_stopped", "worker reservation is gone")
                 })?
         };
-        let input = self
+        let (input, recovery) = self
             .catalog
             .lock()
             .map_err(error)?
-            .prepare_execution(
+            .prepare_recovered_execution(
                 run_id,
                 pending.start.binding,
                 pending.start.policy.identity(),
@@ -189,7 +189,7 @@ impl RunSupervisor {
             .name(format!("native-run-{run_id}"))
             .spawn(move || {
                 let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
-                    engine.run(input, cancel)
+                    engine.run_recovered(input, cancel, recovery)
                 }))
                 .unwrap_or_else(|_| {
                     Err(ExecutionError::new(
