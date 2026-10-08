@@ -948,6 +948,14 @@ export const createDocumentAuthority = (options: DocumentAuthorityOptions) => {
     }
   }, options);
 
+  const readSnapshot = (resource: DocumentResource, options: { signal?: AbortSignal; reportPhase?: (phase: string) => void } = {}): Promise<SnapshotResult> => withResolvedResourceOperation([
+    { resource, scope: 'exact' },
+  ], async ([target]) => {
+    options.signal?.throwIfAborted();
+    options.reportPhase?.('document:read');
+    return snapshotFile(resource, target!.resolved.absolutePath, options.signal);
+  }, options);
+
   const write = (request: WriteRequest): Promise<DocumentWriteResult> => withResolvedResourceOperation([
     { resource: request.resource, scope: 'subtree' },
   ], async ([target]) => {
@@ -2287,6 +2295,8 @@ export const createDocumentAuthority = (options: DocumentAuthorityOptions) => {
   return {
     hostId,
     resolveWorkspace,
+    /** Resource location and trust only; does not enter the mutation ledger. */
+    getWorkspace: (workspaceId: string, signal?: AbortSignal) => waitWithSignal(loadWorkspace(workspaceId), signal),
     resolveResourceIdentity,
     listWorkspaceRegistrations: () => registry.list(),
     inspectWorkspace: async (workspaceId: string, options: { signal?: AbortSignal; reportPhase?: (phase: string) => void } = {}) => {
@@ -2317,6 +2327,7 @@ export const createDocumentAuthority = (options: DocumentAuthorityOptions) => {
     runMutationForScope,
     runResourceOperation,
     read,
+    readSnapshot,
     write,
     move,
     delete: remove,

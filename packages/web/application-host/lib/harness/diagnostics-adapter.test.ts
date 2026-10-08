@@ -46,7 +46,6 @@ describe("LanguageSupervisor diagnostics adapter", () => {
       });
       const provider = createLanguageSupervisorDiagnosticsProvider(language, {
         documents: harness.authority,
-        resolveWorkspaceId: async () => harness.identity.workspaceId,
       });
       const service = createLspDiagnosticsService(provider);
 
@@ -80,11 +79,9 @@ describe("LanguageSupervisor diagnostics adapter", () => {
   it("does not answer with another file's diagnostics for a shared path suffix", async () => {
     const items = [{ line: 1, character: 0, severity: "error", message: "nested", source: "fixture" }];
     const suffixed: DiagnosticsProvider = {
-      getDiagnostics: async (_workspaceId, pathValue) => (pathValue === "src/lib/a.ts" ? items : []),
       getDiagnosticsForRevision: async (_workspaceId, pathValue) => (pathValue === "src/lib/a.ts" ? items : []),
       bindDocument: async () => ({ status: "bound", revision: "r1", source: "disk" }),
       getSnapshot: async () => "0:1",
-      isAvailable: async () => true,
     };
     const service = createLspDiagnosticsService(suffixed);
     await expect(service.handle({ path: "a.ts", waitMs: 10 }, contextFor("workspace")))
@@ -93,13 +90,11 @@ describe("LanguageSupervisor diagnostics adapter", () => {
 
   it("keeps an available server with no publication distinct from an unavailable file type", async () => {
     const silent: DiagnosticsProvider = {
-      getDiagnostics: async () => [],
       getDiagnosticsForRevision: async () => null,
       bindDocument: async (_workspaceId, pathValue) => (pathValue.endsWith(".ts")
         ? { status: "bound", revision: "r1", source: "disk" }
         : { status: "unsupported" }),
       getSnapshot: async () => null,
-      isAvailable: async (_workspaceId, pathValue) => pathValue.endsWith(".ts"),
     };
     const service = createLspDiagnosticsService(silent);
     await expect(service.handle({ path: "slow.ts", waitMs: 10 }, contextFor("workspace")))

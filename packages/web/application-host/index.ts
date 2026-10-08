@@ -42,6 +42,7 @@ import { RecoveryPrimitiveError } from './lib/recovery/errors.js';
 import { createPiWorkspaceWriterTracker } from './lib/recovery/pi-writer-tracker.js';
 import { createRecoveryTurnCoordinator } from './lib/recovery/turn-coordinator.js';
 import { createLanguageSupervisor, SURFACE_LANGUAGE_VIEW } from './lib/lsp/supervisor.js';
+import { createLanguagePrewarm } from './lib/lsp/prewarm.js';
 import { createManagedLanguageServers } from './lib/lsp/managed-servers.js';
 import { canonicalizePathIdentity, isPathWithinRoot } from './lib/workspace/path-safety.js';
 import { createLanguageCapabilityHandler, createWorkspaceSearchCapabilityHandler } from './lib/lsp/capability.js';
@@ -2211,6 +2212,7 @@ async function main(options: StartWebUiServerOptions = {}): Promise<WebUiServerC
     branchWrites: workingBranchWrites,
     worktrees: threadWorktreeRuntime,
     sourceViews,
+    materializeExecutionView: (sessionId, signal) => threadRuntime!.materializeExecutionView(sessionId, signal),
   });
   const verificationCoordinator = createVerificationCoordinator({
     workingStates: harnessWorkingStates,
@@ -3206,7 +3208,7 @@ async function main(options: StartWebUiServerOptions = {}): Promise<WebUiServerC
   });
   const languageSupportRuntime = createLanguageSupportRuntime({
     searchFilesystemFiles: catalogFileSearch.searchFilesystemFiles,
-    inspectWorkspace: async (workspaceId) => documentsAuthority.inspectWorkspace(workspaceId),
+    inspectWorkspace: async (workspaceId) => documentsAuthority.getWorkspace(workspaceId),
     manifest: grammarManifest,
     store: grammarStore,
     installer: grammarInstaller,
@@ -3229,9 +3231,51 @@ async function main(options: StartWebUiServerOptions = {}): Promise<WebUiServerC
       documents: documentsAuthority,
       supervisor: languageSupervisor,
       readSource: sourceViewRuntime.readSource,
+      resolveTarget: sourceViewRuntime.resolveLanguageTarget,
     }),
   ]);
   const projectDirectories = (settings: { projects?: unknown }) => (sanitizeProjects(settings.projects) ?? []).flatMap(projectFolders);
+  const languagePrewarm = createLanguagePrewarm({
+    documents: documentsAuthority, languages: languageSupportRuntime, supervisor: languageSupervisor,
+    onError: error => console.error('[LanguagePrewarm]', errorMessage(error)),
+  });
+  const prewarmSessions = new Map<string, { cwd: string }>();
+  const releaseSessionPrewarm = (sessionId: string): void => {
+    prewarmSessions.delete(sessionId);
+    languagePrewarm.releaseOwner(`session:${sessionId}`);
+  };
+  const prewarmSession = (sessionId: string, cwd: unknown, refresh = false): void => {
+    if (typeof cwd !== 'string' || !cwd) { releaseSessionPrewarm(sessionId); return; }
+    if (prewarmSessions.get(sessionId)?.cwd === cwd && !refresh) return;
+    const entry = { cwd };
+    prewarmSessions.set(sessionId, entry);
+    void documentsAuthority.resolveWorkspace({ path: cwd }).then(workspace => {
+      if (prewarmSessions.get(sessionId) !== entry) return;
+      languagePrewarm.setWorkspace(`session:${sessionId}`, workspace.workspaceId);
+      if (refresh) languagePrewarm.refreshWorkspace(workspace.workspaceId);
+    }).catch(error => {
+      if (prewarmSessions.get(sessionId) === entry) {
+        releaseSessionPrewarm(sessionId);
+        console.error('[LanguagePrewarm]', errorMessage(error));
+      }
+    });
+  };
+  let prewarmProjectGeneration = 0;
+  let prewarmProjectOwners = new Set<string>();
+  const prewarmProject = (settings: { projects?: unknown; activeProjectId?: unknown }): void => {
+    const generation = ++prewarmProjectGeneration;
+    const project = (sanitizeProjects(settings.projects) ?? []).find(entry => entry.id === settings.activeProjectId);
+    void Promise.all((project ? projectFolders(project) : []).map(async directory => ({
+      owner: `project:${directory}`, workspace: await documentsAuthority.resolveWorkspace({ path: directory }),
+    }))).then(entries => {
+      if (generation !== prewarmProjectGeneration) return;
+      const next = new Set(entries.map(entry => entry.owner));
+      for (const owner of prewarmProjectOwners) if (!next.has(owner)) languagePrewarm.releaseOwner(owner);
+      for (const entry of entries) languagePrewarm.setWorkspace(entry.owner, entry.workspace.workspaceId);
+      prewarmProjectOwners = next;
+    }).catch(error => console.error('[LanguagePrewarm]', errorMessage(error)));
+  };
+  prewarmProject(await readSettingsFromDisk());
   const projectIndexScope = createProjectIndexScope([],
     [path.join(await fsPromises.realpath(VARIN_DATA_DIR), 'bots')]);
   const symbolGraphRuntime = createSymbolGraphRuntime({
@@ -3366,6 +3410,7 @@ async function main(options: StartWebUiServerOptions = {}): Promise<WebUiServerC
     onError: (error) => console.error('[ProjectIndex]', errorMessage(error)),
   });
   const unsubscribeProjectIndex = settingsRuntime.subscribe((settings) => {
+    prewarmProject(settings);
     void indexDirectories.syncProjects(projectDirectories(settings).filter((directory) =>
       !excludedFromIndex(projectIndexScope.get(), directory))).catch((error) => {
       console.error('[ProjectIndex] Scope refresh failed:', errorMessage(error));
@@ -3419,6 +3464,7 @@ async function main(options: StartWebUiServerOptions = {}): Promise<WebUiServerC
     onError: (error) => console.error('[HarnessKnowledge] Git status observer failed:', errorMessage(error)),
   });
   observeKnowledgeDocumentMutation = (event) => {
+    languageSupervisor.observeDocumentMutation(event);
     knowledgeContextRuntime.observeDocumentMutation(event);
     symbolGraphRuntime.observeDocumentMutation(event);
     semanticRuntime.observeDocumentMutation(event);
@@ -3449,7 +3495,10 @@ async function main(options: StartWebUiServerOptions = {}): Promise<WebUiServerC
       });
     }));
   };
-  bindThreadKnowledgeSession = bindKnowledgeSession;
+  bindThreadKnowledgeSession = (sessionId, workspaceId) => {
+    bindKnowledgeSession(sessionId, workspaceId);
+    prewarmSession(sessionId, sessionSnapshots.get(sessionId)?.cwd, true);
+  };
 
   const terminalCommandProjector = createTerminalCommandProjector({
     resolveWorkspaceId: (cwd) => documentsAuthority.resolveScopeId(cwd),
@@ -3589,7 +3638,7 @@ async function main(options: StartWebUiServerOptions = {}): Promise<WebUiServerC
     }, options),
     resolveWorkspaceRoot: async (workspaceId) => {
       try {
-        const workspace = await documentsAuthority.inspectWorkspace(workspaceId);
+        const workspace = await documentsAuthority.getWorkspace(workspaceId);
         return workspace.root;
       } catch {
         return null;
@@ -3636,19 +3685,13 @@ async function main(options: StartWebUiServerOptions = {}): Promise<WebUiServerC
     diagnosticsProvider: createLanguageSupervisorDiagnosticsProvider(languageSupervisor, {
       documents: documentsAuthority,
       readSource: sourceViewRuntime.readSource,
-      resolveWorkspaceId: async (workspaceRoot) => {
-        try {
-          const workspace = await documentsAuthority.inspectWorkspace(workspaceRoot);
-          return workspace.workspaceId;
-        } catch {
-          return null;
-        }
-      },
+      resolveTarget: sourceViewRuntime.resolveLanguageTarget,
     }),
     lspNavigationServices: createLspNavigationServices({
       documents: documentsAuthority,
       supervisor: languageSupervisor,
       readSource: sourceViewRuntime.readSource,
+      resolveTarget: sourceViewRuntime.resolveLanguageTarget,
       // Write-behind (D-240): a disk-bound lsp.references/lsp.definition answer
       // becomes graph rows so later related/explore queries reuse the
       // resolution instead of re-asking the language view.
@@ -3936,6 +3979,8 @@ async function main(options: StartWebUiServerOptions = {}): Promise<WebUiServerC
     },
     observeToolWrite: async (workspaceId, absolutePath) => {
       await documentsAuthority.observeAgentWrite(workspaceId, absolutePath);
+      const workspace = await documentsAuthority.getWorkspace(workspaceId);
+      languageSupervisor.observeDocumentMutation({ workspaceId, resourceId: path.relative(workspace.root, absolutePath), kind: 'modified' });
       await semanticRuntime.observeToolWrite(workspaceId, absolutePath);
     },
     writerTracker: piWriterTracker,
@@ -4064,6 +4109,7 @@ async function main(options: StartWebUiServerOptions = {}): Promise<WebUiServerC
         // organizer cover whatever the session wrote before it went away.
         memoryOrganizer.noteSessionSettled(event.sessionId);
         if (ownsRegisteredSession) {
+          releaseSessionPrewarm(event.sessionId);
           clientSurfaceBridge.dropSession(event.sessionId);
           sessionSnapshots.delete(event.sessionId);
           sessionNames.delete(event.sessionId);
@@ -4083,6 +4129,7 @@ async function main(options: StartWebUiServerOptions = {}): Promise<WebUiServerC
       kernelSessionActors.delete(sessionId);
       memoryOrganizer.noteSessionSettled(sessionId);
       if (ownsRegisteredSession) {
+        releaseSessionPrewarm(sessionId);
         clientSurfaceBridge.dropSession(sessionId);
         knowledgeContextRuntime.dropSession(sessionId);
       }
@@ -4106,6 +4153,7 @@ async function main(options: StartWebUiServerOptions = {}): Promise<WebUiServerC
             ? workspace.id
             : ''
         : '';
+      prewarmSession(sessionId, snapshot.cwd);
       if (event.actor && typeof envelopeData.cwd === 'string' && envelopeData.cwd) {
         void owningKnowledgeScopeIdForSession(sessionId, harnessWorkspaceId || null).then((scopeId) => {
           bindKnowledgeSession(
@@ -4374,6 +4422,9 @@ async function main(options: StartWebUiServerOptions = {}): Promise<WebUiServerC
       // document event can race a disposed mutation authority during shutdown.
       catalogScan.start = () => undefined;
       unsubscribeProjectIndex();
+      prewarmProjectGeneration += 1;
+      prewarmSessions.clear();
+      await languagePrewarm.dispose();
       projectIndexScope.dispose();
       await indexDirectories.dispose();
       observeKnowledgeDocumentMutation = () => undefined;

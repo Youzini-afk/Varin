@@ -361,7 +361,7 @@ describe("session e2e — authorized path boundary", () => {
       ]);
       const authority = createHarnessPathAuthority({
         authorityId: "desktop-path-boundary",
-        documents: { inspectWorkspace: async () => ({ root }) },
+        documents: { getWorkspace: async () => ({ root }) },
       });
       const committed: string[] = [];
       const session = await setupSession({
@@ -436,7 +436,7 @@ describe("session e2e — cross-directory access", () => {
       const authority = createHarnessPathAuthority({
         authorityId: "cross-dir-authority",
         documents: {
-          inspectWorkspace: async (id) => {
+          getWorkspace: async (id) => {
             if (id === externalRoot.workspaceId) return { root: externalRoot.canonicalPath };
             return { root };
           },
@@ -2546,13 +2546,13 @@ describe("session e2e — real LSP diagnostics", () => {
       });
       const diagnosticsProvider = createLanguageSupervisorDiagnosticsProvider(language, {
         documents: harness.authority,
-        resolveWorkspaceId: async () => harness.identity.workspaceId,
       });
       // The provider binds the file's disk text in the Host language view; the
       // editor view is not involved (D-087).
-      await diagnosticsProvider.bindDocument(harness.identity.workspaceId, resourceId);
+      const bound = await diagnosticsProvider.bindDocument(harness.identity.workspaceId, resourceId);
+      assert.equal(bound.status, "bound");
       await waitUntil(async () => (
-        (await diagnosticsProvider.getDiagnostics(harness.identity.workspaceId, resourceId))
+        (await diagnosticsProvider.getDiagnosticsForRevision(harness.identity.workspaceId, resourceId, bound.revision, bound.binding) ?? [])
           .some((diagnostic) => diagnostic.message === "fixture error")
       ));
 

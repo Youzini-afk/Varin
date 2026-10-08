@@ -23,7 +23,7 @@ describe("harness path authority", () => {
     writeFileSync(file, "x");
     const authority = createHarnessPathAuthority({
       authorityId: "host-1",
-      documents: { inspectWorkspace: async () => ({ root }) },
+      documents: { getWorkspace: async () => ({ root }) },
     });
     try {
       const relative = await authority.resolve(actor(), "file.ts", { allowMissing: false });
@@ -57,7 +57,7 @@ describe("harness path authority", () => {
     } as unknown as Pick<typeof fs.promises, "open" | "stat">;
     const authority = createHarnessPathAuthority({
       authorityId: "host-1",
-      documents: { inspectWorkspace: async () => ({ root: "D:\\Workspace" }) },
+      documents: { getWorkspace: async () => ({ root: "D:\\Workspace" }) },
       fsPromises: fakeFs,
       readFsPromises: fakeReadFs,
       pathModule,
@@ -82,7 +82,7 @@ describe("harness path authority", () => {
     const failure = Object.assign(new Error("registry unreadable"), { code: "EACCES" });
     const authority = createHarnessPathAuthority({
       authorityId: "host-1",
-      documents: { inspectWorkspace: async () => { throw failure; } },
+      documents: { getWorkspace: async () => { throw failure; } },
       fsPromises: fs.promises,
     });
     await expect(authority.resolve(actor(), "file.ts", { allowMissing: false })).rejects.toBe(failure);
@@ -96,7 +96,7 @@ describe("harness path authority", () => {
     writeFileSync(join(root, "outside.ts"), "outside");
     const authority = createHarnessPathAuthority({
       authorityId: "host-1",
-      documents: { inspectWorkspace: async () => ({ root }) },
+      documents: { getWorkspace: async () => ({ root }) },
     });
     const scoped = { ...actor(), workspaceScope: ["packages/web"] };
     try {
@@ -116,7 +116,7 @@ describe("harness path authority", () => {
     writeFileSync(join(root, "root-only.ts"), "root");
     const authority = createHarnessPathAuthority({
       authorityId: "host-1",
-      documents: { inspectWorkspace: async () => ({ root }) },
+      documents: { getWorkspace: async () => ({ root }) },
     });
     const anchored = { ...actor(), cwd: join(root, "packages", "web") };
     try {
@@ -155,7 +155,7 @@ describe("harness path authority", () => {
       const norm = (value: string) => path.resolve(value);
       return {
         registered,
-        inspectWorkspace: async () => { throw new Error("no project workspace"); },
+        getWorkspace: async () => { throw new Error("no project workspace"); },
         findExactResourceRoot: async (canonicalPath: string, kind?: "directory" | "file") => {
           const hit = roots.get(norm(canonicalPath));
           return hit && (!kind || hit.kind === kind) ? hit : null;
@@ -263,7 +263,7 @@ describe("harness path authority", () => {
       const external = mkdtempSync(join(tmpdir(), "harness-external-"));
       const authority = createHarnessPathAuthority({
         authorityId: "host-1",
-        documents: { inspectWorkspace: async () => { throw new Error("none"); } },
+        documents: { getWorkspace: async () => { throw new Error("none"); } },
       });
       try {
         writeFileSync(join(external, "x.txt"), "x");

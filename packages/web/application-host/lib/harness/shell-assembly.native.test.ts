@@ -248,7 +248,7 @@ describe("production shell assembly", () => {
     const first = join(root, "first"), second = join(root, "second");
     mkdirSync(first); mkdirSync(second); mkdirSync(join(second, "nested"));
     const envName = `VARIN_TEST_SHELL_SCOPE_${process.pid}`;
-    const pathAuthority = createHarnessPathAuthority({ authorityId: "host", documents: { inspectWorkspace: async () => ({ root }) } });
+    const pathAuthority = createHarnessPathAuthority({ authorityId: "host", documents: { getWorkspace: async () => ({ root }) } });
     const host = createHost({ search: async () => ({ status: "empty", generation: undefined }),
       resolveWorkspaceRoot: async () => root, pathAuthority });
     host.registerSession({ actor: actor("session-context"), grantedCapabilities: ["process.shell", "context.session"],

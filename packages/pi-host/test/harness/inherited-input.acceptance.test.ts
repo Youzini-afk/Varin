@@ -47,7 +47,7 @@ describe("inherit — Pi capture through Host dispatch and dequeue", () => {
     const sourceServices = createHarnessServiceHost({ search: async () => ({ status: "empty" as const, generation: undefined }),
       resolveWorkspaceRoot: async () => workspace,
       pathAuthority: createHarnessPathAuthority({ authorityId: "inherit-test",
-        documents: { inspectWorkspace: async () => ({ root: workspace }) } }),
+        documents: { getWorkspace: async () => ({ root: workspace }) } }),
     });
     const sourceRouter = createHarnessRouter({
       respond: async (identity, requestId, outcome) => { parentHost.respondHarness(identity.sessionId, requestId, outcome); },

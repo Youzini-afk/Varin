@@ -396,11 +396,9 @@ describe("harness e2e integration", () => {
     };
     let diagnostics = [issue];
     const provider: DiagnosticsProvider = {
-      getDiagnostics: async () => diagnostics,
       getDiagnosticsForRevision: async () => diagnostics,
       bindDocument: async () => ({ status: "bound", revision: "disk-r1", source: "disk" }),
       getSnapshot: async () => "1",
-      isAvailable: async () => true,
     };
     const { workspaceRoot, bridge, dispose } = await setupE2E({ diagnosticsProvider: provider });
     try {

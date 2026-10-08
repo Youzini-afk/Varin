@@ -2,34 +2,32 @@ import type { HarnessService, HarnessServiceContext } from "./router.js";
 import type { DiagnosticItem, LanguageTextProvenance } from "@varin/protocol";
 import type { ObservationCursorStore } from "./observation-cursors.js";
 import { setTimeout as delay } from "node:timers/promises";
+import type { BoundLanguageDocument } from "../lsp/language-view.js";
 
 export type BindDocumentResult =
-  | { status: "bound"; revision: string; source: LanguageTextProvenance }
+  | { status: "bound"; revision: string; source: LanguageTextProvenance; binding?: BoundLanguageDocument }
   | { status: "unavailable"; message: string }
   | { status: "unsupported" };
 
 export interface DiagnosticsProvider {
-  getDiagnostics(workspaceId: string, path: string): Promise<DiagnosticItem[]>;
   /**
-   * Bind the path in the Host language view to its current disk text and report
+   * Bind the path in the Host language view to the caller's selected text and report
    * the revision the answer will describe (D-087).
    */
-  bindDocument(workspaceId: string, path: string, options?: { signal?: AbortSignal; reportPhase?: (phase: string) => void }): Promise<BindDocumentResult>;
+  bindDocument(workspaceId: string, path: string, options?: Partial<Pick<HarnessServiceContext, 'signal' | 'reportPhase' | 'sessionId' | 'inputContext'>>): Promise<BindDocumentResult>;
   /**
    * Diagnostics the language server published for exactly this text identity,
    * or null while it has not answered for that revision yet.
    */
-  getDiagnosticsForRevision(workspaceId: string, path: string, revision: string): Promise<DiagnosticItem[] | null>;
-  getSnapshot(workspaceId: string, path: string): Promise<string | null>;
-  /** Check if a language server is available for the given workspace + path. */
-  isAvailable(workspaceId: string, path: string): Promise<boolean>;
+  getDiagnosticsForRevision(workspaceId: string, path: string, revision: string, binding?: BoundLanguageDocument): Promise<DiagnosticItem[] | null>;
+  getSnapshot(workspaceId: string, path: string, binding?: BoundLanguageDocument): Promise<string | null>;
 }
 
 /**
  * Diagnostics service semantics (D-087):
  * - No language server for this file type → unavailable.
- * - Otherwise the path is bound in the Host language view to its current disk
- *   text — the text an agent just wrote, never the editor's buffer — and the
+ * - Otherwise the path is bound in the Host language view to the caller's
+ *   selected text (disk, fixed draft, or materialized child workspace), and the
  *   answer waits for the publication computed from that exact revision, up to
  *   waitMs (default 5000). An authoritative empty list is a clean result.
  * - No publication for that revision within waitMs → pending.
@@ -58,9 +56,9 @@ export function createLspDiagnosticsService(provider: DiagnosticsProvider): Harn
         ctx.reportPhase?.('lsp:diagnostics-publication');
         for (;;) {
           ctx.signal.throwIfAborted();
-          const diagnostics = await provider.getDiagnosticsForRevision(providerWorkspaceId, resourcePath, bound.revision);
+          const diagnostics = await provider.getDiagnosticsForRevision(providerWorkspaceId, resourcePath, bound.revision, bound.binding);
           if (diagnostics) {
-            const snapshot = await provider.getSnapshot(providerWorkspaceId, resourcePath);
+            const snapshot = await provider.getSnapshot(providerWorkspaceId, resourcePath, bound.binding);
             return {
               status: "ready",
               ...(snapshot !== null ? { snapshot } : {}),
@@ -128,7 +126,7 @@ export function createLspDiagnosticsSnapshotService(
         return { status: "unavailable", diagnostics: [], reason: "no workspace" };
       }
       // Binding both starts the Host view on demand and reports the text the
-      // observation describes; an incremental observer never waits for it.
+      // observation describes. Missing publications remain pending.
       // The provider keys documents by workspace-relative resource id.
       const resourcePath = ctx.authorizedPaths[0]?.resourceId ?? params.path;
       const bound = await provider.bindDocument(providerWorkspaceId, resourcePath, ctx);
@@ -140,9 +138,11 @@ export function createLspDiagnosticsSnapshotService(
       }
       const provenance = { revision: bound.revision, source: bound.source };
       try {
+        const diagnostics = await provider.getDiagnosticsForRevision(providerWorkspaceId, resourcePath, bound.revision, bound.binding);
+        if (diagnostics === null) return { status: 'pending', diagnostics: [], ...provenance,
+          reason: 'diagnostics not yet published for this revision' };
+        const snapshot = await provider.getSnapshot(providerWorkspaceId, resourcePath, bound.binding);
         if (params.full === true) {
-          const diagnostics = await provider.getDiagnostics(providerWorkspaceId, resourcePath);
-          const snapshot = await provider.getSnapshot(providerWorkspaceId, resourcePath);
           return {
             status: "ready",
             ...(snapshot !== null ? { snapshot } : {}),
@@ -155,14 +155,12 @@ export function createLspDiagnosticsSnapshotService(
         // not the actor's session classification (which may be null for an
         // unbound session reading an external file).
         const resourceWorkspaceId = ctx.authorizedPaths[0]?.workspaceId ?? ctx.workspaceId!;
-        const objectId = `${resourceWorkspaceId}\0${canonicalResourceId}`;
+        const objectId = `${resourceWorkspaceId}\0${canonicalResourceId}\0${bound.binding?.view ?? 'agent'}`;
         const pending = await cursors.prepare<DiagnosticsCursor, import("@varin/protocol").DiagnosticsResult>(
           ctx.sessionId,
           "diagnostics",
           objectId,
           async (previous) => {
-            const diagnostics = await provider.getDiagnostics(resourceWorkspaceId, resourcePath);
-            const snapshot = await provider.getSnapshot(resourceWorkspaceId, resourcePath);
             const added = previous === null
               ? diagnostics
               : subtractDiagnostics(diagnostics, previous.value.diagnostics);

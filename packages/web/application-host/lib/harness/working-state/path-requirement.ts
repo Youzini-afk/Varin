@@ -9,8 +9,13 @@ const MATERIALIZED_DIRECTORY_TOOLS = new Set([
   "definition",
   "references",
   "hover",
+  "diagnostics",
 ]);
 
 export function runNeedsMaterializedDirectory(tools: readonly string[]): boolean {
   return tools.some((tool) => MATERIALIZED_DIRECTORY_TOOLS.has(tool));
+}
+
+export function runUsesLanguageService(tools: readonly string[]): boolean {
+  return tools.some(tool => tool !== 'bash' && MATERIALIZED_DIRECTORY_TOOLS.has(tool));
 }

@@ -119,7 +119,7 @@ export const registerLanguageRoutes = (app: Express, {
 
   app.post('/api/language/dispose-workspace', requireAuth, async (req, res) => {
     try {
-      await language.disposeWorkspace(stringField(readBody(req).workspaceId));
+      await language.disposeWorkspace(stringField(readBody(req).workspaceId), undefined, SURFACE_LANGUAGE_VIEW);
       return res.json({ status: 'disposed' });
     } catch (error) {
       return sendError(res, error);

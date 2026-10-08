@@ -13,6 +13,7 @@ import type { ThreadWorktreeRuntime } from "./thread-worktree.js";
 import type { ThreadExecutionViewRegistry } from "./working-state/execution-view.js";
 import type { WorkingBranchLookups } from "./working-state/working-branch-lookups.js";
 import type { createWorkingBranchWriteServices } from "./working-state/working-branch-writes.js";
+import type { ResolveLanguageTarget } from '../lsp/language-view.js';
 
 type SourceViewStore = ReturnType<typeof createSourceViewStore>;
 type BranchWrites = ReturnType<typeof createWorkingBranchWriteServices>;
@@ -26,6 +27,7 @@ export function createSourceViewRuntime(options: {
   branchWrites: Pick<BranchWrites, "branchWrite">;
   worktrees: Pick<ThreadWorktreeRuntime, "assertOwnership">;
   sourceViews: SourceViewStore;
+  materializeExecutionView?: (sessionId: string, signal?: AbortSignal) => Promise<{ status: string; message?: string }>;
 }) {
   const { documents, registry, views, branchLookups, branchWrites, worktrees, sourceViews } = options;
 
@@ -269,6 +271,31 @@ export function createSourceViewRuntime(options: {
     return branchWrites.branchWrite(sessionId, mapped, expectedRevision, signal);
   };
 
+  const resolveLanguageTarget: ResolveLanguageTarget = async (input) => {
+    const context = input.inputContext ?? { source: 'disk' as const };
+    if (!input.sessionId) return { ...input };
+    const execution = views.get(input.sessionId);
+    if (!execution) return { ...input };
+    if (execution.mode === 'virtual') {
+      const result = await options.materializeExecutionView?.(input.sessionId, input.signal);
+      if (!result || result.status !== 'materialized') throw new Error(result?.message ?? 'Working branch is not materialized');
+    }
+    const viewId = await viewForSession(input.sessionId, context);
+    const alias = viewId ? await aliasFor(viewId, input.workspaceId, input.resourceId) : null;
+    const resource = alias ?? { workspaceId: input.workspaceId, resourceId: input.resourceId };
+    if (resource.workspaceId === execution.workspaceId) {
+      const root = await materializedThreadRoot(input.sessionId);
+      if (!root) throw new Error('The language workspace is unavailable');
+      return {
+        workspaceId: root.workspaceId, resourceId: resource.resourceId, source: 'working-branch', inputContext: { source: 'disk' },
+        // Preserve the identity exposed by readSource for a materialized alias.
+        ...(alias ? { sourceRevision: (revision: string) => `materialized:${execution.branchId}:${revision}` } : {}),
+      };
+    }
+    const root = await materializedThreadRoot(input.sessionId);
+    return { ...input, ...(root?.workspaceId === input.workspaceId ? { source: 'working-branch' as const } : {}) };
+  };
+
   const commitContext: NonNullable<HarnessServiceHost["commitAgentInputContext"]> = async (sessionId, context) => sourceViewIdFromContext(context)
     ? { committed: Boolean(await viewForSession(sessionId, context)) }
     : documents.commitAgentInputSnapshot(sessionId, context);
@@ -277,7 +304,7 @@ export function createSourceViewRuntime(options: {
     : documents.releaseAgentInputSnapshot(sessionId, context);
 
   return {
-    contextForSession, readSource, readExploreSource, pathOverlay, writeGuard, surfaceWrite, branchWrite,
+    contextForSession, readSource, readExploreSource, pathOverlay, writeGuard, surfaceWrite, branchWrite, resolveLanguageTarget,
     commitContext, releaseContext,
   };
 }

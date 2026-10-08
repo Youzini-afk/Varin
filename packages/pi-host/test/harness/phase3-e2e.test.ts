@@ -66,7 +66,7 @@ async function setup(options: { transportTimeoutMs?: number; artifactBody?: Buff
     search: async () => ({ status: "empty" as const, generation: undefined }),
     resolveWorkspaceRoot: async () => workspaceRoot,
     pathAuthority: createHarnessPathAuthority({ authorityId: ACTOR.authorityInstanceId,
-      documents: { inspectWorkspace: async () => ({ root: workspaceRoot }) } }),
+      documents: { getWorkspace: async () => ({ root: workspaceRoot }) } }),
     discoveredShells: { hasBash: process.platform !== "win32", hasPowerShell: process.platform === "win32" },
     threadRegistry,
     threadPrepareIsolatedBranch: async (input) => ({
