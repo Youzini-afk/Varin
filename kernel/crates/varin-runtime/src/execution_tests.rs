@@ -41,6 +41,7 @@ fn input(db: &Arc<Mutex<Catalog>>) -> ExecutionInput {
         run_id: receipt.run_id,
         owner_generation: db.epoch(),
         binding: RequestBinding {
+            connection_identity: "fixture-connection".into(),
             provider_family: "test".into(),
             model: "test-model".into(),
             credential_ref: None,
@@ -168,6 +169,7 @@ impl ModelProvider for Provider {
                         id: "opaque".into(),
                         content: Content::ProviderOnly,
                         opaque: Some(OpaqueProviderItem {
+                            connection_identity: "fixture-connection".into(),
                             family: "test".into(),
                             adapter_version: "1".into(),
                             value: json!({"signature":[null,42,"unaltered"]}),
@@ -786,4 +788,259 @@ fn cancelling_one_queued_operation_does_not_fail_its_run_or_execute_it() {
             .outcome,
         Some(Outcome::Cancelled)
     );
+}
+
+#[test]
+fn cancelling_an_admitted_unstarted_run_releases_its_branch() {
+    let f = Fixture::new();
+    let db = f.catalog();
+    let input = input(&db);
+    let run_id = input.run_id;
+    let catalog = match Arc::try_unwrap(db) {
+        Ok(db) => db.into_inner().unwrap(),
+        Err(_) => panic!("unexpected shared catalog"),
+    };
+    let supervisor = crate::supervisor::RunSupervisor::new(catalog);
+    let cancelled = supervisor.cancel(&run_id).unwrap();
+    assert_eq!(
+        cancelled.state,
+        RunState::Cancelled,
+        "unstarted cancellation became a permanent request flag with no worker able to settle it"
+    );
+    let db = supervisor.catalog();
+    let mut db = db.lock().unwrap();
+    let head = db.head("main").unwrap();
+    assert!(db
+        .submit(&SubmitInput {
+            key: "next".into(),
+            thread_id: "thread".into(),
+            branch_id: "main".into(),
+            expected_head: head,
+            input: json!({"text":"next work"}),
+            configuration: json!({"provider":"test"})
+        })
+        .is_ok());
+}
+
+#[test]
+fn input_arriving_between_completion_decision_and_commit_is_not_lost() {
+    struct AnswerProvider(AtomicUsize);
+    impl ModelProvider for AnswerProvider {
+        fn serialize(&self, v: &RequestView) -> Result<Value, ExecutionError> {
+            Ok(serde_json::to_value(v).unwrap())
+        }
+        fn generate(
+            &self,
+            request: &RequestSnapshot,
+            _: &CancellationToken,
+            emit: &mut dyn FnMut(ProviderEvent) -> Result<(), ExecutionError>,
+        ) -> Result<FinishReason, ModelFailure> {
+            let count = self.0.fetch_add(1, Ordering::SeqCst);
+            if count == 1 {
+                assert!(request.view.history.iter().any(
+                    |item| matches!(&item.content,Content::Text{text} if text=="late correction")
+                ));
+            }
+            emit(ProviderEvent::ItemCompleted {
+                item: ProviderItem {
+                    id: format!("answer-{count}"),
+                    content: Content::Text {
+                        text: format!("answer {count}"),
+                    },
+                    opaque: None,
+                },
+            })
+            .unwrap();
+            Ok(FinishReason::Stop)
+        }
+    }
+    struct GatedDecision {
+        paused: AtomicBool,
+        ready: std::sync::mpsc::Sender<()>,
+        release: Mutex<std::sync::mpsc::Receiver<()>>,
+    }
+    impl AgentPolicy for GatedDecision {
+        fn identity(&self) -> PolicyIdentity {
+            PolicyIdentity {
+                name: "default".into(),
+                version: "1".into(),
+            }
+        }
+        fn decide(
+            &self,
+            view: &PolicyView<'_>,
+            event: &PolicyEvent,
+            state: &Value,
+        ) -> Result<PolicyDecision, ExecutionError> {
+            if matches!(event, PolicyEvent::ModelCompleted { .. })
+                && !self.paused.swap(true, Ordering::SeqCst)
+            {
+                self.ready.send(()).unwrap();
+                self.release.lock().unwrap().recv().unwrap();
+            }
+            DefaultAgentPolicy.decide(view, event, state)
+        }
+    }
+    let f = Fixture::new();
+    let db = f.catalog();
+    let input = input(&db);
+    let run_id = input.run_id.clone();
+    let catalog = match Arc::try_unwrap(db) {
+        Ok(db) => db.into_inner().unwrap(),
+        Err(_) => panic!("unexpected shared catalog"),
+    };
+    let supervisor = crate::supervisor::RunSupervisor::new(catalog);
+    let (ready_tx, ready_rx) = std::sync::mpsc::channel();
+    let (release_tx, release_rx) = std::sync::mpsc::channel();
+    let provider = Arc::new(AnswerProvider(AtomicUsize::new(0)));
+    let handle = supervisor
+        .start(
+            &run_id,
+            crate::supervisor::RunStart {
+                binding: input.binding,
+                policy_state: Value::Null,
+                provider: provider.clone(),
+                tools: Arc::new(Tools::default()),
+                policy: Arc::new(GatedDecision {
+                    paused: AtomicBool::new(false),
+                    ready: ready_tx,
+                    release: Mutex::new(release_rx),
+                }),
+                progress: ProgressSink::default(),
+            },
+        )
+        .unwrap();
+    ready_rx
+        .recv_timeout(std::time::Duration::from_secs(3))
+        .unwrap();
+    let queued = supervisor
+        .catalog()
+        .lock()
+        .unwrap()
+        .enqueue_input(&crate::catalog::inputs::EnqueueInput {
+            key: "late".into(),
+            thread_id: "thread".into(),
+            branch_id: "main".into(),
+            mode: crate::InputMode::Boundary,
+            input: json!({"text":"late correction"}),
+            configuration: None,
+        })
+        .unwrap();
+    release_tx.send(()).unwrap();
+    let result = handle.wait();
+    supervisor.shutdown().unwrap();
+    assert_eq!(result.unwrap().state, RunState::Completed);
+    assert_eq!(provider.0.load(Ordering::SeqCst), 2);
+    assert_eq!(
+        supervisor
+            .catalog()
+            .lock()
+            .unwrap()
+            .queued_input(&queued.input_id)
+            .unwrap()
+            .state,
+        crate::InputState::Delivered
+    );
+}
+
+#[test]
+fn interrupt_during_request_serialization_prevents_stale_generation() {
+    struct GatedSerializer {
+        first: AtomicBool,
+        entered: std::sync::mpsc::Sender<()>,
+        release: Mutex<std::sync::mpsc::Receiver<()>>,
+        calls: AtomicUsize,
+        stale: AtomicUsize,
+    }
+    impl ModelProvider for GatedSerializer {
+        fn serialize(&self, view: &RequestView) -> Result<Value, ExecutionError> {
+            if !self.first.swap(true, Ordering::SeqCst) {
+                self.entered.send(()).unwrap();
+                self.release.lock().unwrap().recv().unwrap();
+            }
+            Ok(serde_json::to_value(view).unwrap())
+        }
+        fn generate(
+            &self,
+            request: &RequestSnapshot,
+            _: &CancellationToken,
+            emit: &mut dyn FnMut(ProviderEvent) -> Result<(), ExecutionError>,
+        ) -> Result<FinishReason, ModelFailure> {
+            let n = self.calls.fetch_add(1, Ordering::SeqCst);
+            if !request.view.history.iter().any(
+                |item| matches!(&item.content,Content::Text{text} if text=="corrected before send"),
+            ) {
+                self.stale.fetch_add(1, Ordering::SeqCst);
+            }
+            emit(ProviderEvent::ItemCompleted {
+                item: ProviderItem {
+                    id: format!("answer-{n}"),
+                    content: Content::Text {
+                        text: "answer".into(),
+                    },
+                    opaque: None,
+                },
+            })
+            .unwrap();
+            Ok(FinishReason::Stop)
+        }
+    }
+    let f = Fixture::new();
+    let db = f.catalog();
+    let input = input(&db);
+    let run_id = input.run_id.clone();
+    let catalog = match Arc::try_unwrap(db) {
+        Ok(db) => db.into_inner().unwrap(),
+        Err(_) => panic!("unexpected shared catalog"),
+    };
+    let supervisor = crate::supervisor::RunSupervisor::new(catalog);
+    let (entered_tx, entered_rx) = std::sync::mpsc::channel();
+    let (release_tx, release_rx) = std::sync::mpsc::channel();
+    let provider = Arc::new(GatedSerializer {
+        first: AtomicBool::new(false),
+        entered: entered_tx,
+        release: Mutex::new(release_rx),
+        calls: AtomicUsize::new(0),
+        stale: AtomicUsize::new(0),
+    });
+    let handle = supervisor
+        .start(
+            &run_id,
+            crate::supervisor::RunStart {
+                binding: input.binding,
+                policy_state: Value::Null,
+                provider: provider.clone(),
+                tools: Arc::new(Tools::default()),
+                policy: Arc::new(DefaultAgentPolicy),
+                progress: ProgressSink::default(),
+            },
+        )
+        .unwrap();
+    entered_rx
+        .recv_timeout(std::time::Duration::from_secs(3))
+        .unwrap();
+    supervisor
+        .catalog()
+        .lock()
+        .unwrap()
+        .enqueue_input(&crate::catalog::inputs::EnqueueInput {
+            key: "interrupt".into(),
+            thread_id: "thread".into(),
+            branch_id: "main".into(),
+            mode: crate::InputMode::Interrupt,
+            input: json!({"text":"corrected before send"}),
+            configuration: None,
+        })
+        .unwrap();
+    supervisor.interrupt_generation(&run_id);
+    release_tx.send(()).unwrap();
+    let report = handle.wait();
+    supervisor.shutdown().unwrap();
+    assert_eq!(report.unwrap().state, RunState::Completed);
+    assert_eq!(
+        provider.stale.load(Ordering::SeqCst),
+        0,
+        "accepted interrupt missed the candidate being serialized and sent stale user instructions"
+    );
+    assert_eq!(provider.calls.load(Ordering::SeqCst), 1);
 }

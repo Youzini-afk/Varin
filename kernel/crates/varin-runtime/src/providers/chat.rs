@@ -4,6 +4,8 @@ use serde_json::json;
 use std::collections::{BTreeMap, BTreeSet};
 pub const FAMILY: &str = "openai-completions";
 pub struct ChatProvider {
+    family: &'static str,
+    mistral: bool,
     pub connection: Connection,
     pub max_output_tokens: Option<u64>,
     pub legacy_max_tokens: bool,
@@ -13,6 +15,8 @@ pub struct ChatProvider {
 impl ChatProvider {
     pub fn new(connection: Connection) -> Self {
         Self {
+            family: FAMILY,
+            mistral: false,
             connection,
             max_output_tokens: None,
             legacy_max_tokens: false,
@@ -20,13 +24,25 @@ impl ChatProvider {
             reasoning_effort: None,
         }
     }
+    pub(super) fn mistral(connection: Connection) -> Self {
+        let mut provider = Self::new(connection);
+        provider.family = super::mistral::FAMILY;
+        provider.mistral = true;
+        provider.legacy_max_tokens = true;
+        provider.include_stream_usage = false;
+        provider
+    }
 }
 impl ModelProvider for ChatProvider {
     fn serialize(&self, view: &RequestView) -> Result<Value, ExecutionError> {
-        validate_view(view, FAMILY)?;
+        validate_view(view, self.family)?;
         let mut messages = Vec::<Value>::new();
         let mut replayed = BTreeSet::new();
-        for item in compile_history(&view.history, FAMILY) {
+        for item in compile_history(
+            &view.history,
+            self.family,
+            &view.binding.connection_identity,
+        ) {
             if let Some(original) = item.opaque {
                 if original.adapter_version != "1" {
                     return Err(ExecutionError::new(
@@ -93,14 +109,31 @@ impl ModelProvider for ChatProvider {
         cancel: &CancellationToken,
         emit: &mut dyn FnMut(ProviderEvent) -> Result<(), ExecutionError>,
     ) -> Result<FinishReason, ModelFailure> {
-        if request.view.binding.provider_family != FAMILY {
+        if request.view.binding.provider_family != self.family {
             return Err(failure("provider_family_mismatch", "wrong adapter family"));
         }
-        let mut state = StreamState::default();
-        self.connection
-            .run_events(request, cancel, &[], &mut |event| {
-                state.event(event, &request.view, emit)
-            })?;
+        let mut state = StreamState {
+            mistral: self.mistral,
+            ..StreamState::default()
+        };
+        let headers = if self.mistral {
+            request.serialized["prompt_cache_key"]
+                .as_str()
+                .map(|key| vec![("x-affinity", key)])
+                .unwrap_or_default()
+        } else {
+            Vec::new()
+        };
+        self.connection.run_events_mode(
+            request,
+            cancel,
+            &headers,
+            &mut |event| state.event(event, &request.view, emit),
+            self.mistral,
+        )?;
+        if self.mistral && !state.done {
+            state.event(None, &request.view, emit)?;
+        }
         if !state.done {
             return Err(failure(
                 "stream_interrupted",
@@ -120,6 +153,7 @@ struct Call {
 }
 #[derive(Default)]
 struct StreamState {
+    mistral: bool,
     id: Option<String>,
     message: serde_json::Map<String, Value>,
     calls: BTreeMap<u64, Call>,
@@ -127,6 +161,97 @@ struct StreamState {
     done: bool,
 }
 impl StreamState {
+    fn mistral_content(
+        &mut self,
+        value: &Value,
+        id: &str,
+        emit: &mut dyn FnMut(ProviderEvent) -> Result<(), ExecutionError>,
+    ) -> Result<(), ModelFailure> {
+        let incoming = if let Some(text) = value.as_str() {
+            vec![json!({"type":"text","text":text})]
+        } else {
+            value
+                .as_array()
+                .ok_or_else(|| {
+                    failure(
+                        "unsupported_content_delta",
+                        "Mistral content is neither text nor typed chunks",
+                    )
+                })?
+                .clone()
+        };
+        let content = self
+            .message
+            .entry("content")
+            .or_insert_with(|| json!([]))
+            .as_array_mut()
+            .ok_or_else(|| {
+                failure(
+                    "invalid_content_delta",
+                    "mixed incompatible Mistral content encodings",
+                )
+            })?;
+        for part in incoming {
+            match part["type"].as_str() {
+                Some("text") => {
+                    let text = part["text"].as_str().ok_or_else(|| {
+                        failure("invalid_content_delta", "Mistral text chunk lacks text")
+                    })?;
+                    if text.is_empty() {
+                        continue;
+                    }
+                    emit_event(
+                        emit,
+                        ProviderEvent::TextDelta {
+                            item_id: format!("{id}:message"),
+                            text: text.into(),
+                        },
+                    )?;
+                    if part.as_object().is_some_and(|v| v.len() == 2)
+                        && content.last().is_some_and(|last| {
+                            last["type"] == "text" && last.as_object().is_some_and(|v| v.len() == 2)
+                        })
+                    {
+                        let last = content.last_mut().unwrap();
+                        let mut combined = last["text"].as_str().unwrap_or("").to_owned();
+                        combined.push_str(text);
+                        last["text"] = json!(combined);
+                    } else {
+                        content.push(part);
+                    }
+                }
+                Some("thinking") => {
+                    let thinking = part["thinking"].as_array().ok_or_else(|| {
+                        failure(
+                            "invalid_content_delta",
+                            "Mistral thinking chunk lacks parts",
+                        )
+                    })?;
+                    if part.as_object().is_some_and(|v| v.len() == 2)
+                        && content.last().is_some_and(|last| {
+                            last["type"] == "thinking"
+                                && last.as_object().is_some_and(|v| v.len() == 2)
+                        })
+                    {
+                        content.last_mut().unwrap()["thinking"]
+                            .as_array_mut()
+                            .expect("validated thinking")
+                            .extend(thinking.iter().cloned());
+                    } else {
+                        content.push(part);
+                    }
+                }
+                Some("reference") => content.push(part),
+                _ => {
+                    return Err(failure(
+                        "unsupported_content_delta",
+                        "unsupported Mistral output content type",
+                    ))
+                }
+            }
+        }
+        Ok(())
+    }
     fn event(
         &mut self,
         event: Option<Value>,
@@ -147,7 +272,15 @@ impl StreamState {
             let mut tool_items = Vec::new();
             let mut raw_calls = Vec::new();
             let mut seen = BTreeSet::new();
-            for (index, call) in &self.calls {
+            for (index, call) in &mut self.calls {
+                if self.mistral
+                    && call
+                        .id
+                        .as_deref()
+                        .is_none_or(|id| id.is_empty() || id == "null")
+                {
+                    call.id = Some(super::mistral::derive_id(&format!("{id}:{index}"), 0));
+                }
                 let call_id = call
                     .id
                     .as_ref()
@@ -199,12 +332,27 @@ impl StreamState {
             if !raw_calls.is_empty() {
                 self.message.insert("tool_calls".into(), json!(raw_calls));
             }
-            let text = self
-                .message
-                .get("content")
-                .and_then(Value::as_str)
-                .unwrap_or("")
-                .to_owned();
+            let text = if let Some(text) = self.message.get("content").and_then(Value::as_str) {
+                text.to_owned()
+            } else {
+                self.message
+                    .get("content")
+                    .and_then(Value::as_array)
+                    .map(|parts| {
+                        parts
+                            .iter()
+                            .filter_map(|part| {
+                                if part["type"] == "text" {
+                                    part["text"].as_str()
+                                } else {
+                                    None
+                                }
+                            })
+                            .collect::<Vec<_>>()
+                            .join("")
+                    })
+                    .unwrap_or_default()
+            };
             if !self.message.contains_key("content") {
                 self.message.insert("content".into(), Value::Null);
             }
@@ -227,7 +375,7 @@ impl StreamState {
                     item: ProviderItem {
                         id: format!("{id}:message"),
                         content,
-                        opaque: opaque(FAMILY, Value::Object(self.message.clone())),
+                        opaque: opaque(view, Value::Object(self.message.clone())),
                     },
                 },
             )?;
@@ -257,7 +405,16 @@ impl StreamState {
                         input_tokens: usage["prompt_tokens"].as_u64(),
                         output_tokens: usage["completion_tokens"].as_u64(),
                         cached_input_tokens: usage["prompt_tokens_details"]["cached_tokens"]
-                            .as_u64(),
+                            .as_u64()
+                            .or_else(|| {
+                                if self.mistral {
+                                    usage["prompt_token_details"]["cached_tokens"]
+                                        .as_u64()
+                                        .or_else(|| usage["num_cached_tokens"].as_u64())
+                                } else {
+                                    None
+                                }
+                            }),
                         reasoning_tokens: usage["completion_tokens_details"]["reasoning_tokens"]
                             .as_u64(),
                         raw: Some(usage.clone()),
@@ -299,6 +456,10 @@ impl StreamState {
                         if value.is_null() {
                             continue;
                         }
+                        if self.mistral && key == "content" {
+                            self.mistral_content(value, id, emit)?;
+                            continue;
+                        }
                         let text = value.as_str().ok_or_else(|| {
                             failure("unsupported_content_delta", "Chat text field is not text")
                         })?;
@@ -317,6 +478,9 @@ impl StreamState {
                         }
                     }
                     "tool_calls" => {
+                        if self.mistral && value.is_null() {
+                            continue;
+                        }
                         for value in value.as_array().ok_or_else(|| {
                             failure("invalid_tool_call", "tool delta is not a list")
                         })? {
@@ -332,7 +496,10 @@ impl StreamState {
                                     ));
                                 }
                             }
-                            if let Some(id) = value["id"].as_str() {
+                            if let Some(id) = value["id"]
+                                .as_str()
+                                .filter(|id| !self.mistral || (*id != "null" && !id.is_empty()))
+                            {
                                 if call.id.as_deref().is_some_and(|old| old != id) {
                                     return Err(failure(
                                         "conflicting_tool_id",
@@ -342,9 +509,20 @@ impl StreamState {
                                 call.id = Some(id.into());
                             }
                             if let Some(name) = value["function"]["name"].as_str() {
-                                call.name.push_str(name);
+                                if !self.mistral || call.name != name {
+                                    call.name.push_str(name);
+                                }
                             }
-                            if let Some(fragment) = value["function"]["arguments"].as_str() {
+                            let arguments = value["function"].get("arguments");
+                            let object_arguments = if self.mistral {
+                                arguments.filter(|v| v.is_object()).map(Value::to_string)
+                            } else {
+                                None
+                            };
+                            if let Some(fragment) = arguments
+                                .and_then(Value::as_str)
+                                .or(object_arguments.as_deref())
+                            {
                                 call.arguments.push_str(fragment);
                                 if let Some(id) = &call.id {
                                     emit_event(
@@ -372,6 +550,13 @@ impl StreamState {
                     "stop" => FinishReason::Stop,
                     "tool_calls" => FinishReason::ToolCalls,
                     "length" => FinishReason::Length,
+                    "model_length" if self.mistral => FinishReason::Length,
+                    "error" if self.mistral => {
+                        return Err(failure(
+                            "provider_error",
+                            "Mistral reported generation failure",
+                        ))
+                    }
                     "content_filter" => FinishReason::ContentFilter,
                     _ => {
                         return Err(failure(

@@ -29,7 +29,11 @@ impl ModelProvider for ResponsesProvider {
     fn serialize(&self, view: &RequestView) -> Result<Value, ExecutionError> {
         validate_view(view, self.family)?;
         let mut input = Vec::new();
-        for item in compile_history(&view.history, self.family) {
+        for item in compile_history(
+            &view.history,
+            self.family,
+            &view.binding.connection_identity,
+        ) {
             if let Some(original) = item.opaque {
                 if original.adapter_version != "1" {
                     return Err(ExecutionError::new(
@@ -81,13 +85,25 @@ impl ModelProvider for ResponsesProvider {
         cancel: &CancellationToken,
         emit: &mut dyn FnMut(ProviderEvent) -> Result<(), ExecutionError>,
     ) -> Result<FinishReason, ModelFailure> {
+        self.generate_headers(request, cancel, emit, &[])
+    }
+}
+impl ResponsesProvider {
+    pub(super) fn generate_headers(
+        &self,
+        request: &RequestSnapshot,
+        cancel: &CancellationToken,
+        emit: &mut dyn FnMut(ProviderEvent) -> Result<(), ExecutionError>,
+        headers: &[(&str, &str)],
+    ) -> Result<FinishReason, ModelFailure> {
         if request.view.binding.provider_family != self.family {
             return Err(failure("provider_family_mismatch", "wrong adapter family"));
         }
         let mut state = StreamState::default();
-        self.connection.run(request, cancel, &[], &mut |event| {
-            state.event(event, &request.view, emit)
-        })?;
+        self.connection
+            .run(request, cancel, headers, &mut |event| {
+                state.event(event, &request.view, emit)
+            })?;
         state.finished.ok_or_else(|| {
             failure(
                 "stream_interrupted",
@@ -184,7 +200,7 @@ impl StreamState {
                 item: ProviderItem {
                     id,
                     content,
-                    opaque: opaque(&view.binding.provider_family, raw),
+                    opaque: opaque(view, raw),
                 },
             },
         )

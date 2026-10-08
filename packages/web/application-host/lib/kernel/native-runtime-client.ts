@@ -1,7 +1,7 @@
 import type { KernelClient } from './kernel-client.js';
 import type {
   NativeInputSubmitParams, NativeReceipt, NativeRun, NativeOperation,
-  NativeHistoryItem, NativeEvent, NativeStatus, NativeRunStartReceipt,
+  NativeHistoryItem, NativeEvent, NativeStatus, NativeRunStartReceipt, NativeInputEnqueueParams, NativeInputReceipt, NativeQueuedInput,
 } from './protocol.generated.js';
 
 /** Explicit native-authority client. Existing Pi thread routes are not silently redirected. */
@@ -16,6 +16,21 @@ export class NativeRuntimeClient {
   }
   submit(input: NativeInputSubmitParams, signal?: AbortSignal): Promise<NativeReceipt> {
     return this.kernel.nativeRuntimeRequest('runtime.input.submit', input, signal);
+  }
+  enqueue(input: NativeInputEnqueueParams, signal?: AbortSignal): Promise<NativeInputReceipt> {
+    return this.kernel.nativeRuntimeRequest('runtime.input.enqueue', input, signal);
+  }
+  editInput(inputId: string, expectedRevision: number, content: unknown, signal?: AbortSignal): Promise<NativeQueuedInput> {
+    return this.kernel.nativeRuntimeRequest('runtime.input.edit', { inputId, expectedRevision, content }, signal);
+  }
+  cancelInput(inputId: string, expectedRevision: number, signal?: AbortSignal): Promise<NativeQueuedInput> {
+    return this.kernel.nativeRuntimeRequest('runtime.input.cancel', { inputId, expectedRevision }, signal);
+  }
+  input(inputId: string, signal?: AbortSignal): Promise<NativeQueuedInput> {
+    return this.kernel.nativeRuntimeRequest('runtime.input.inspect', { inputId }, signal);
+  }
+  inputs(branchId: string, signal?: AbortSignal): Promise<NativeQueuedInput[]> {
+    return this.kernel.nativeRuntimeRequest('runtime.input.list', { branchId }, signal);
   }
   startRun(runId: string, signal?: AbortSignal, toolBinding?: unknown): Promise<NativeRunStartReceipt> {
     return this.kernel.nativeRuntimeRequest('runtime.run.start', { runId, ...(toolBinding === undefined ? {} : { toolBinding }) }, signal);

@@ -293,3 +293,187 @@ it('native and Storage negotiated windows remain independent during real concurr
   expect(statuses).toHaveLength(100);
   expect((await f.host.health()).integrity).toBe('ok');
 }, 30_000);
+
+function completeLocalResponse(response: ServerResponse, id: string, text: string) {
+  response.writeHead(200, { 'content-type': 'text/event-stream' });
+  response.end(`data: ${JSON.stringify({ type: 'response.completed', response: { output: [{ id, type: 'message', content: [{ type: 'output_text', text }] }] } })}\n\n`);
+}
+
+it('native boundary input edits and cancellation remain outside history until a legal model boundary', async () => {
+  const f = await fixture();
+  let firstResponse: ServerResponse | undefined;
+  let turn = 0;
+  const provider = await localProvider((_body, response) => {
+    if (++turn === 1) firstResponse = response;
+    else completeLocalResponse(response, `boundary-output-${turn}`, 'updated answer');
+  });
+  await f.native.createThread('boundary-thread', 'boundary-branch');
+  const run = await f.native.submit({ key: 'boundary-initial', threadId: 'boundary-thread', branchId: 'boundary-branch', expectedHead: null, input: { text: 'first question' }, configuration: provider.configuration });
+  await f.native.startRun(run.run_id);
+  await expect.poll(() => provider.requests.length).toBe(1);
+  const command = { key: 'boundary-queued', threadId: 'boundary-thread', branchId: 'boundary-branch', mode: 'boundary' as const, input: { text: 'unrevised queued content' } };
+  const queued = await f.native.enqueue(command);
+  expect(queued.run_id).toBe(run.run_id);
+  const edited = await f.native.editInput(queued.input_id, 1, { text: 'revised boundary content' });
+  expect(edited.revision).toBe(2);
+  await expect(f.native.editInput(queued.input_id, 1, { text: 'stale write' })).rejects.toThrow(/conflict/i);
+  expect(await f.native.enqueue(command)).toEqual(queued);
+  const cancelled = await f.native.enqueue({ ...command, key: 'boundary-cancelled', input: { text: 'cancelled content' } });
+  expect((await f.native.cancelInput(cancelled.input_id, 1)).state).toBe('cancelled');
+  expect(await f.native.history('boundary-branch')).toHaveLength(1);
+  expect((await f.native.input(queued.input_id)).state).toBe('queued');
+  completeLocalResponse(firstResponse!, 'boundary-output-1', 'original answer');
+  await expect.poll(async () => (await f.native.run(run.run_id)).state, { timeout: 8_000 }).toBe('completed');
+  expect(provider.requests).toHaveLength(2);
+  const secondInput = JSON.stringify(provider.requests[1]!.input);
+  expect(secondInput).toContain('revised boundary content');
+  expect(secondInput).not.toContain('unrevised queued content');
+  expect(secondInput).not.toContain('cancelled content');
+  expect((await f.native.input(queued.input_id)).state).toBe('delivered');
+  expect((await f.native.inputs('boundary-branch')).map(input => input.state)).toEqual(['delivered', 'cancelled']);
+}, 30_000);
+
+it('native interrupt replaces only the active model step and continues the same Run', async () => {
+  const f = await fixture();
+  let turn = 0;
+  const provider = await localProvider((_body, response) => {
+    if (++turn === 1) {
+      response.writeHead(200, { 'content-type': 'text/event-stream' });
+      response.write(`data: ${JSON.stringify({ type: 'response.output_text.delta', item_id: 'interrupted-message', delta: 'unfinished first answer' })}\n\n`);
+    } else completeLocalResponse(response, `interrupt-output-${turn}`, 'answer after interrupt');
+  });
+  await f.native.createThread('interrupt-thread', 'interrupt-branch');
+  const run = await f.native.submit({ key: 'interrupt-initial', threadId: 'interrupt-thread', branchId: 'interrupt-branch', expectedHead: null, input: { text: 'initial prompt' }, configuration: provider.configuration });
+  await f.native.startRun(run.run_id);
+  await expect.poll(() => provider.requests.length).toBe(1);
+  const queued = await f.native.enqueue({ key: 'interrupt-queued', threadId: 'interrupt-thread', branchId: 'interrupt-branch', mode: 'interrupt', input: { text: 'correct the current task' } });
+  expect(queued.run_id).toBe(run.run_id);
+  await expect.poll(async () => (await f.native.run(run.run_id)).state, { timeout: 8_000 }).toBe('completed');
+  expect((await f.native.run(run.run_id)).cancel_requested).toBe(false);
+  expect(provider.requests).toHaveLength(2);
+  expect(JSON.stringify(provider.requests[1]!.input)).toContain('correct the current task');
+  const history = JSON.stringify(await f.native.history('interrupt-branch'));
+  expect(history).toContain('answer after interrupt');
+  expect(history).not.toContain('unfinished first answer');
+  expect((await f.native.input(queued.input_id)).state).toBe('delivered');
+}, 30_000);
+
+it('native next-run inputs promote in FIFO order, skipping a cancelled queued Run', async () => {
+  const f = await fixture();
+  let firstResponse: ServerResponse | undefined;
+  let turn = 0;
+  const provider = await localProvider((_body, response) => {
+    if (++turn === 1) firstResponse = response;
+    else completeLocalResponse(response, `next-output-${turn}`, `answer for queued Run ${turn}`);
+  });
+  await f.native.createThread('next-thread', 'next-branch');
+  const run = await f.native.submit({ key: 'next-initial', threadId: 'next-thread', branchId: 'next-branch', expectedHead: null, input: { text: 'initial turn' }, configuration: provider.configuration });
+  await f.native.startRun(run.run_id);
+  await expect.poll(() => provider.requests.length).toBe(1);
+  const enqueue = (key: string) => f.native.enqueue({ key, threadId: 'next-thread', branchId: 'next-branch', mode: 'next_run', input: { text: key } });
+  const cancelled = await enqueue('skip queued turn');
+  const first = await enqueue('first queued turn');
+  const second = await enqueue('second queued turn');
+  await f.native.cancelInput(cancelled.input_id, 1);
+  expect((await f.native.startRun(first.run_id)).runId).toBe(first.run_id);
+  expect((await f.native.startRun(second.run_id)).runId).toBe(second.run_id);
+  expect(provider.requests).toHaveLength(1);
+  expect(await f.native.history('next-branch')).toHaveLength(1);
+  completeLocalResponse(firstResponse!, 'next-output-1', 'initial answer');
+  await expect.poll(async () => (await f.native.run(second.run_id)).state, { timeout: 8_000 }).toBe('completed');
+  expect((await f.native.run(first.run_id)).state).toBe('completed');
+  expect((await f.native.run(cancelled.run_id)).state).toBe('cancelled');
+  expect(provider.requests).toHaveLength(3);
+  expect(JSON.stringify(provider.requests[1]!.input)).toContain('first queued turn');
+  expect(JSON.stringify(provider.requests[1]!.input)).not.toContain('second queued turn');
+  expect(JSON.stringify(provider.requests[2]!.input)).toContain('second queued turn');
+  expect(JSON.stringify(await f.native.history('next-branch'))).not.toContain('skip queued turn');
+}, 30_000);
+
+it('process push subscription rejects another actor ack and supports explicit unsubscribe', async () => {
+  const f = await fixture();
+  const workspace = path.join(f.root, 'subscription-workspace');
+  await fs.mkdir(workspace);
+  const grant = await f.host.issueGrant({ grantId: 'subscription-owner', owningWorkspace: 'subscription-workspace', executionWorkspace: 'subscription-workspace', capabilities: ['storage.read', 'storage.write', 'process'], pathScopes: [''] });
+  const other = await f.host.issueGrant({ grantId: 'subscription-other', owningWorkspace: 'subscription-workspace', executionWorkspace: 'subscription-workspace', capabilities: ['storage.read', 'storage.write', 'process'], pathScopes: [''] });
+  const actor = f.host.scoped(grant);
+  const root = await actor.fileRootRegister({ workspaceId: 'subscription-workspace', executionWorkspaceId: 'subscription-workspace', canonicalRoot: workspace });
+  const identity = { workspaceId: 'subscription-workspace', processId: 'subscription-process' };
+  await actor.processSpawn({ ...identity, rootId: String(root.rootId), cwd: '', command: process.execPath, args: ['-e', 'process.stdout.write("pushed fixture output")'], env: [], mode: 'pipe' });
+  const events: Array<{ stream: string; sequence: number; subscriptionId: string }> = [];
+  const chunks: Buffer[] = [];
+  const subscription = await actor.processSubscribe({ ...identity, cursor: 0 }, event => {
+    events.push(event);
+    if (event.stream === 'data') for (const chunk of event.result?.chunks ?? []) chunks.push(Buffer.from(chunk.bytesBase64, 'base64'));
+  });
+  try {
+    await expect.poll(() => Buffer.concat(chunks).toString()).toBe('pushed fixture output');
+    const data = events.find(event => event.stream === 'data')!;
+    expect(data.sequence).toBe(1);
+    const wrongActor = await f.raw({ method: 'process.subscription.ack', grantId: other.grantId, params: { subscriptionId: data.subscriptionId, stream: 'data', sequence: data.sequence } });
+    expect(wrongActor.ok).toBe(false);
+    await subscription.acknowledge('data', data.sequence);
+    const control = events.find(event => event.stream === 'control');
+    if (control) await subscription.acknowledge('control', control.sequence);
+    await subscription.close();
+    await expect(subscription.closed).resolves.toBeUndefined();
+    const afterClose = events.length;
+    const closedAck = await f.raw({ method: 'process.subscription.ack', grantId: grant.grantId, params: { subscriptionId: data.subscriptionId, stream: 'data', sequence: data.sequence } });
+    expect(closedAck.ok).toBe(false);
+    expect(events).toHaveLength(afterClose);
+    const revoked = await actor.processSubscribe({ ...identity, cursor: 0 }, () => undefined);
+    await f.host.revokeGrant(grant.grantId);
+    let timer: ReturnType<typeof setTimeout> | undefined;
+    try {
+      const settlement = await Promise.race([
+        revoked.closed.then(() => 'resolved', () => 'rejected'),
+        new Promise<string>(resolve => { timer = setTimeout(() => resolve('still pending'), 2_000); }),
+      ]);
+      expect(settlement).toBe('rejected');
+    } finally { if (timer) clearTimeout(timer); }
+    expect((await f.native.status()).epoch).toBeGreaterThan(0);
+  } finally { await subscription.close(); }
+}, 30_000);
+
+it('native model interrupt preserves an accepted background process job until explicit operation cancellation', async () => {
+  const f = await fixture();
+  const workspace = path.join(f.root, 'interrupt-job-workspace');
+  await fs.mkdir(workspace);
+  let turn = 0;
+  const provider = await localProvider((_body, response) => {
+    turn++;
+    if (turn === 1) {
+      response.writeHead(200, { 'content-type': 'text/event-stream' });
+      response.end(`data: ${JSON.stringify({ type: 'response.completed', response: { output: [{ id: 'interrupt-job-call', type: 'function_call', call_id: 'interrupt-job-spawn', name: 'native_process_spawn', arguments: JSON.stringify({ cwd: '', command: process.execPath, args: ['-e', 'setInterval(() => {}, 1000)'], mode: 'pipe' }) }] } })}\n\n`);
+    } else if (turn === 2) {
+      response.writeHead(200, { 'content-type': 'text/event-stream' });
+      response.write(': awaiting model interrupt\n\n');
+    } else completeLocalResponse(response, `interrupt-job-answer-${turn}`, 'foreground changed; background retained');
+  });
+  await f.native.createThread('interrupt-job-thread', 'interrupt-job-branch');
+  const run = await f.native.submit({ key: 'interrupt-job-initial', threadId: 'interrupt-job-thread', branchId: 'interrupt-job-branch', expectedHead: null, input: { text: 'start background fixture' }, configuration: provider.configuration });
+  const grant = await f.host.issueGrant({ grantId: 'interrupt-job-owner', threadId: 'interrupt-job-thread', runId: run.run_id, owningWorkspace: 'interrupt-job-workspace', executionWorkspace: 'interrupt-job-workspace', capabilities: ['storage.read', 'storage.write', 'process'], pathScopes: [''] });
+  const actor = f.host.scoped(grant);
+  const root = await actor.fileRootRegister({ workspaceId: 'interrupt-job-workspace', executionWorkspaceId: 'interrupt-job-workspace', canonicalRoot: workspace });
+  await f.native.startRun(run.run_id, undefined, { grantId: grant.grantId, runId: run.run_id, threadId: 'interrupt-job-thread', workspaceId: 'interrupt-job-workspace', executionWorkspaceId: 'interrupt-job-workspace', rootId: root.rootId, enabledTools: ['process_spawn'] });
+  await expect.poll(() => provider.requests.length).toBe(2);
+  const secondInput = provider.requests[1]!.input as Array<Record<string, unknown>>;
+  const receipt = JSON.parse(String(secondInput.find(item => item.type === 'function_call_output')?.output)) as { operation_id: string };
+  const identity = { workspaceId: 'interrupt-job-workspace', processId: receipt.operation_id };
+  try {
+    expect((await actor.processInspect(identity)).writerActive).toBe(true);
+    await f.native.enqueue({ key: 'interrupt-job-new-input', threadId: 'interrupt-job-thread', branchId: 'interrupt-job-branch', mode: 'interrupt', input: { text: 'change foreground response' } });
+    await expect.poll(async () => (await f.native.run(run.run_id)).state, { timeout: 8_000 }).toBe('completed');
+    expect(provider.requests).toHaveLength(3);
+    expect((await actor.processInspect(identity)).writerActive).toBe(true);
+    expect((await f.native.operation(receipt.operation_id)).cancel_requested).toBe(false);
+    await f.native.cancelOperation(receipt.operation_id);
+    await expect.poll(async () => (await f.native.operation(receipt.operation_id)).phase, { timeout: 8_000 }).toBe('terminal');
+    expect((await actor.processInspect(identity)).writerActive).toBe(false);
+  } finally {
+    if ((await actor.processInspect(identity)).writerActive) {
+      await actor.processKill({ ...identity, force: true });
+      await expect.poll(async () => (await actor.processInspect(identity)).writerActive, { timeout: 8_000 }).toBe(false);
+    }
+  }
+}, 30_000);

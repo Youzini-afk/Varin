@@ -58,6 +58,7 @@ fn branch_cas_and_opaque_history_survive_restart() {
     let receipt = submit(&mut db);
     let epoch = db.epoch();
     let original = ProviderOriginal {
+        connection_identity: "fixture-connection".into(),
         adapter: "responses".into(),
         version: "1".into(),
         item: json!({"type":"reasoning","encrypted_content":"opaque","signature":{"nested":[null,42]}}),
@@ -300,6 +301,7 @@ fn request_snapshot(receipt: &Receipt) -> crate::execution::RequestSnapshot {
             run_id: receipt.run_id.clone(),
             step: 1,
             binding: RequestBinding {
+                connection_identity: "fixture-connection".into(),
                 provider_family: "test".into(),
                 model: "mock".into(),
                 credential_ref: None,
@@ -351,6 +353,7 @@ fn model_output_and_history_are_one_commit_and_reject_stale_heads() {
             text: "hello back".into(),
         },
         opaque: Some(OpaqueProviderItem {
+            connection_identity: "fixture-connection".into(),
             family: "test".into(),
             adapter_version: "1".into(),
             value: json!({"signature":"original"}),
@@ -414,6 +417,7 @@ fn completed_model_history_is_durable_without_a_second_append() {
             text: "hello back".into(),
         },
         opaque: Some(OpaqueProviderItem {
+            connection_identity: "fixture-connection".into(),
             family: "test".into(),
             adapter_version: "1".into(),
             value: original.clone(),
@@ -853,4 +857,143 @@ fn later_external_confirmation_resolves_lost_acceptance_receipt_without_handoff(
     assert_eq!(confirmed.outcome,Some(Outcome::Succeeded),"actual resource confirmation was stored but the original uncertain outcome was never resolved");
     assert_eq!(confirmed.effect, Effect::Confirmed);
     assert_eq!(confirmed.phase, OperationPhase::Terminal);
+}
+
+#[test]
+fn queued_input_is_durable_editable_and_only_enters_a_closed_model_boundary() {
+    use crate::catalog::inputs::EnqueueInput;
+    let f = Fixture::new();
+    let mut db = f.open();
+    let r = submit(&mut db);
+    let epoch = db.epoch();
+    db.prepare_model_step("active-step", &r.run_id, epoch, json!({"input":"original"}))
+        .unwrap();
+    db.dispatch_model_step("active-step", epoch).unwrap();
+    let command = EnqueueInput {
+        key: "queued".into(),
+        thread_id: "thread".into(),
+        branch_id: "main".into(),
+        mode: InputMode::Boundary,
+        input: json!({"text":"first draft"}),
+        configuration: None,
+    };
+    let queued = db.enqueue_input(&command).unwrap();
+    assert_eq!(db.enqueue_input(&command).unwrap(), queued);
+    assert_eq!(
+        db.head("main").unwrap().as_deref(),
+        Some(r.input_id.as_str())
+    );
+    let edited = db
+        .edit_queued_input(&queued.input_id, 1, json!({"text":"actual correction"}))
+        .unwrap();
+    assert_eq!(edited.revision, 2);
+    assert!(db
+        .edit_queued_input(&queued.input_id, 1, json!({"text":"stale"}))
+        .is_err());
+    assert!(db
+        .consume_inputs(&r.run_id, epoch, Some(&r.input_id))
+        .is_err());
+    db.settle_model_step(
+        "active-step",
+        epoch,
+        ModelStepState::Interrupted,
+        vec![],
+        None,
+    )
+    .unwrap();
+    drop(db);
+    let mut db = f.open();
+    let epoch = db.epoch();
+    assert_eq!(
+        db.queued_input(&queued.input_id).unwrap().content,
+        json!({"text":"actual correction"})
+    );
+    let delivered = db
+        .consume_inputs(&r.run_id, epoch, Some(&r.input_id))
+        .unwrap();
+    assert_eq!(delivered.len(), 1);
+    assert!(
+        matches!(&delivered[0].content,crate::execution::Content::Text{text} if text=="actual correction")
+    );
+    assert_eq!(
+        db.queued_input(&queued.input_id).unwrap().state,
+        InputState::Delivered
+    );
+    assert!(db
+        .edit_queued_input(&queued.input_id, 2, json!({"text":"too late"}))
+        .is_err());
+    assert!(db
+        .consume_inputs(&r.run_id, epoch, Some(&queued.input_id))
+        .unwrap()
+        .is_empty());
+    assert_eq!(
+        db.model_step("active-step")
+            .unwrap()
+            .superseded_by_input
+            .as_deref(),
+        Some(queued.input_id.as_str())
+    );
+}
+#[test]
+fn boundary_input_cannot_be_lost_to_run_completion_and_next_run_skips_cancelled_entry() {
+    use crate::catalog::inputs::EnqueueInput;
+    let f = Fixture::new();
+    let mut db = f.open();
+    let r = submit(&mut db);
+    let epoch = db.epoch();
+    let run = db
+        .transition_run(&r.run_id, epoch, 1, RunState::Runnable)
+        .unwrap();
+    let boundary = db
+        .enqueue_input(&EnqueueInput {
+            key: "boundary".into(),
+            thread_id: "thread".into(),
+            branch_id: "main".into(),
+            mode: InputMode::Boundary,
+            input: json!({"text":"do this too"}),
+            configuration: None,
+        })
+        .unwrap();
+    assert!(db
+        .transition_run(&r.run_id, epoch, run.revision, RunState::Completed)
+        .is_err());
+    db.consume_inputs(&r.run_id, epoch, Some(&r.input_id))
+        .unwrap();
+    let queued = |key: &str| EnqueueInput {
+        key: key.into(),
+        thread_id: "thread".into(),
+        branch_id: "main".into(),
+        mode: InputMode::NextRun,
+        input: json!({"text":key}),
+        configuration: None,
+    };
+    let removed = db.enqueue_input(&queued("removed")).unwrap();
+    let next = db.enqueue_input(&queued("next")).unwrap();
+    db.cancel_queued_input(&removed.input_id, 1).unwrap();
+    let run = db.run(&r.run_id).unwrap();
+    db.transition_run(&r.run_id, epoch, run.revision, RunState::Completed)
+        .unwrap();
+    assert_eq!(
+        db.queued_input(&next.input_id).unwrap().state,
+        InputState::Delivered
+    );
+    assert_eq!(db.run(&removed.run_id).unwrap().state, RunState::Cancelled);
+    assert_eq!(
+        db.head("main").unwrap().as_deref(),
+        Some(next.input_id.as_str())
+    );
+    let history = db.history("main").unwrap();
+    assert!(history.iter().any(|i| i.id == boundary.input_id));
+    assert!(!history.iter().any(|i| i.id == removed.input_id));
+    assert!(db
+        .prepare_execution(
+            &next.run_id,
+            request_snapshot(&r).view.binding,
+            crate::execution::PolicyIdentity {
+                name: "default".into(),
+                version: "1".into()
+            },
+            Value::Null
+        )
+        .is_ok());
 }

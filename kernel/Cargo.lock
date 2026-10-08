@@ -1369,6 +1369,7 @@ checksum = "eddd3ca559203180a307f12d114c268abf583f59b03cb906fd0b3ff8646c1147"
 dependencies = [
  "base64 0.22.1",
  "bytes",
+ "futures-channel",
  "futures-core",
  "futures-util",
  "http",
@@ -2029,10 +2030,12 @@ name = "varin-runtime"
 version = "0.1.0"
 dependencies = [
  "fs2",
+ "hex",
  "reqwest",
  "rusqlite",
  "serde",
  "serde_json",
+ "sha2 0.11.0",
  "thiserror 2.0.21",
  "tokio",
  "uuid",

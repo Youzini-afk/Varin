@@ -207,8 +207,18 @@ it("raw output above the native buffer bound reaches real exit before any reader
   assert.equal(result.stderr.toString(), "done");
 }, 30_000);
 
-it("the Host stream adapter keeps binary I/O and delivers close before completion", async () => {
+it("the Host stream adapter uses native push delivery and closes after complete binary I/O", async () => {
   const f = await fixture();
+  const methods: string[] = [];
+  const originalWrite = f.kernelChild.stdin.write;
+  f.kernelChild.stdin.write = ((...values: unknown[]) => {
+    const bytes = values[0];
+    if (Buffer.isBuffer(bytes) && bytes.length >= 4 && bytes.readUInt32BE(0) === bytes.length - 4) {
+      const envelope = JSON.parse(bytes.subarray(4).toString()) as { method?: string };
+      if (envelope.method) methods.push(envelope.method);
+    }
+    return Reflect.apply(originalWrite, f.kernelChild.stdin, values);
+  }) as typeof f.kernelChild.stdin.write;
   const service = createKernelProcessService({ client: f.host, resolveIdentity: async () => ({ workspaceId: "ws", executionWorkspaceId: "ws", canonicalRoot: f.workspace }) });
   try {
     const child = await service.spawn(process.execPath, ["-e", "process.stdin.pipe(process.stdout)"], { cwd: path.join(f.workspace, "child"), env: process.env, stdio: "pipe" });
@@ -223,6 +233,8 @@ it("the Host stream adapter keeps binary I/O and delivers close before completio
     assert.equal(closed, true);
     assert.deepEqual(Buffer.concat(chunks), bytes);
     assert.equal(child.exitCode, 0);
+    assert.ok(methods.includes("process.subscribe"));
+    assert.equal(methods.includes("process.read"), false, "Host output delivery must not poll process.read");
     assert.equal((await service.list(f.workspace))[0]?.writerActive, false);
   } finally { await service.dispose(); }
 }, 30_000);
@@ -302,7 +314,7 @@ it("kernel restart reconciles an interrupted native tree without replaying its c
   await reopened.start();
   const maintenance=reopened.scoped(await reopened.issueGrant({grantId:"restart-maintenance",owningWorkspace:"ws",executionWorkspace:"ws",pathScopes:[""],capabilities:["storage.read","storage.write","process","process.maintenance"]}));
   const receipt=await waitFor(maintenance,"restart",r=>!r.writerActive);
-  assert.equal(receipt.outputAvailable,false);
+  assert.equal(receipt.outputAvailable,true);
   assert.equal(await fs.readFile(counter,"utf8"),"once\n");
   await maintenance.processRelease({workspaceId:"ws",processId:"restart"});
   assert.equal((await maintenance.processInspect({workspaceId:"ws",processId:"restart"})).status,"released");
@@ -398,7 +410,7 @@ it("abrupt Host death closes its private kernel pipe and drains the native proce
     const maintenance=reopened.scoped(await reopened.issueGrant({grantId:"host-loss-maintenance",owningWorkspace:"ws",executionWorkspace:"ws",pathScopes:[""],capabilities:["storage.read","storage.write","process","process.maintenance"]}));
     const record=await waitFor(maintenance,"host-loss",value=>!value.writerActive);
     assert.ok(record.status==="exited"||record.status==="failed");
-    assert.equal(record.outputAvailable,false);
+    assert.equal(record.outputAvailable,true);
   } finally {
     if(host.exitCode===null&&host.signalCode===null){const stopped=new Promise<void>(resolve=>host.once("exit",()=>resolve()));host.kill("SIGKILL");await stopped;}
   }
@@ -544,7 +556,13 @@ it("immediate stop after spawn admission retains a provable tree exit even befor
     const terminal = await waitFor(f.client, processId, snapshot => !snapshot.writerActive);
     assert.ok(terminal.status === "exited" || terminal.status === "failed");
     await f.client.processRelease({ workspaceId: "ws", processId });
+    const files = outputFiles(f, processId);
+    assert.equal(await fs.stat(files.spool).then(() => true, () => false), false);
+    assert.equal(await fs.stat(files.marker).then(() => true, () => false), false);
   }
+  await f.host.close();
+  const retained = await fs.readdir(path.join(f.storageRoot, "process-receipts"));
+  assert.equal(retained.some(name => name.endsWith(".output") || name.endsWith(".output.complete") || name.endsWith(".complete.tmp")), false);
 }, 30_000);
 
 
@@ -586,4 +604,219 @@ it("Host log-drain loss preserves an already confirmed real process exit", async
     assert.equal(child.snapshot.writerActive, false);
     assert.equal(child.exitCode, 7);
   } finally { await service.dispose().catch(() => undefined); }
+}, 30_000);
+
+function outputFiles(f: { storageRoot: string }, processId: string) {
+  const prefix = path.join(f.storageRoot, "process-receipts", createHash("sha256").update(processId).digest("hex"));
+  return { spool: prefix + ".output", marker: prefix + ".output.complete", receipt: prefix + ".json" };
+}
+async function reopenProcessFixture(f: { storageRoot: string }) {
+  const host = createKernelClient({ hostId: "process-test", storageRoot: f.storageRoot, kernelPath, buildVersion, allowCargoDevRunner: false });
+  clients.push(host);
+  await host.start();
+  const client = host.scoped(await host.issueGrant({ grantId: "reopened-process-maintenance", owningWorkspace: "ws", executionWorkspace: "ws", pathScopes: [""], capabilities: ["storage.read", "storage.write", "process", "process.maintenance"] }));
+  return { host, client };
+}
+
+it("completed output reopens byte-exact after kernel restart while old process writes stay forbidden", async () => {
+  const f = await fixture();
+  const processId = "durable-complete";
+  const expected = Buffer.from(Array.from({ length: 131_079 }, (_, index) => index % 251));
+  await f.client.processSpawn(f.spawn(processId, "process.stdout.write(Buffer.from(Array.from({length:131079},(_,i)=>i%251)));process.stderr.write('durable-stderr');process.exitCode=7"));
+  const before = await drain(f.client, processId);
+  assert.deepEqual(before.stdout, expected);
+  await f.host.close();
+  const reopened = await reopenProcessFixture(f);
+  const after = await drain(reopened.client, processId);
+  assert.deepEqual(after.stdout, expected);
+  assert.equal(after.stderr.toString(), "durable-stderr");
+  assert.equal(after.process.writerActive, false);
+  assert.equal(after.process.exitCode, 7);
+  await assert.rejects(reopened.client.processWrite({ workspaceId: "ws", processId, sequence: 0, bytesBase64: "" }), /stale kernel epoch/);
+  await assert.rejects(reopened.client.processKill({ workspaceId: "ws", processId, force: true }), /stale kernel epoch/);
+  const files = outputFiles(f, processId);
+  await reopened.client.processRelease({ workspaceId: "ws", processId });
+  assert.equal(await fs.stat(files.spool).then(() => true, () => false), false);
+  assert.equal(await fs.stat(files.marker).then(() => true, () => false), false);
+}, 30_000);
+
+it("interrupted retained output exposes only its valid prefix and never reports a complete log", async () => {
+  for (const truncated of [false, true]) {
+    const f = await fixture();
+    const processId = "interrupted-output";
+    await f.client.processSpawn(f.spawn(processId, "process.stdout.write('verified-prefix')"));
+    await drain(f.client, processId);
+    await f.host.close();
+    const files = outputFiles(f, processId);
+    const spool = await fs.readFile(files.spool);
+    const marker = await fs.readFile(files.marker);
+    try {
+      await fs.rm(files.marker);
+      if (truncated) await fs.appendFile(files.spool, Buffer.from([0, 0]));
+      const reopened = await reopenProcessFixture(f);
+      const read = await reopened.client.processRead({ workspaceId: "ws", processId, cursor: 0 });
+      assert.equal(Buffer.concat(read.chunks.map(chunk => Buffer.from(chunk.bytesBase64, "base64"))).toString(), "verified-prefix");
+      assert.equal(read.outputComplete, false);
+      assert.match(read.outputError ?? "", truncated ? /interrupted.*frame/ : /completion marker/);
+      assert.equal(read.process.writerActive, false);
+      assert.equal(read.process.status, "exited");
+      await reopened.host.close();
+    } finally {
+      await fs.writeFile(files.spool, spool);
+      await fs.writeFile(files.marker, marker);
+    }
+  }
+}, 30_000);
+
+it("corrupt frames or completion identities reject retained logs instead of returning successful empty output", async () => {
+  for (const fault of ["frame", "marker", "truncated-marked"] as const) {
+    const f = await fixture();
+    const processId = "corrupt-output";
+    await f.client.processSpawn(f.spawn(processId, "process.stdout.write('durable-evidence')"));
+    await drain(f.client, processId);
+    await f.host.close();
+    const files = outputFiles(f, processId);
+    const spool = await fs.readFile(files.spool);
+    const marker = await fs.readFile(files.marker);
+    try {
+      if (fault === "frame") { const corrupt = Buffer.from(spool); corrupt.writeUInt32LE(0, 0); await fs.writeFile(files.spool, corrupt); }
+      else if (fault === "marker") { const corrupt = JSON.parse(marker.toString()); corrupt.kernelEpoch = "wrong-epoch"; await fs.writeFile(files.marker, JSON.stringify(corrupt)); }
+      else await fs.truncate(files.spool, spool.length - 1);
+      const reopened = await reopenProcessFixture(f);
+      const snapshot = await reopened.client.processInspect({ workspaceId: "ws", processId });
+      assert.equal(snapshot.outputAvailable, false);
+      assert.equal(snapshot.writerActive, false);
+      assert.equal(snapshot.status, "exited");
+      assert.match(snapshot.outputError ?? "", /corrupt|mismatched/);
+      await assert.rejects(reopened.client.processRead({ workspaceId: "ws", processId, cursor: 0 }), /corrupt|mismatched/);
+      await reopened.host.close();
+    } finally {
+      await fs.writeFile(files.spool, spool);
+      await fs.writeFile(files.marker, marker);
+    }
+  }
+}, 30_000);
+
+it("a missing retained spool is explicit unavailability without erasing the proven process exit", async () => {
+  const f = await fixture();
+  const processId = "missing-output";
+  await f.client.processSpawn(f.spawn(processId, "process.stdout.write('retained')"));
+  await drain(f.client, processId);
+  await f.host.close();
+  const files = outputFiles(f, processId);
+  const spool = await fs.readFile(files.spool);
+  try {
+    await fs.rm(files.spool);
+    const reopened = await reopenProcessFixture(f);
+    const snapshot = await reopened.client.processInspect({ workspaceId: "ws", processId });
+    assert.equal(snapshot.outputAvailable, false);
+    assert.equal(snapshot.writerActive, false);
+    assert.equal(snapshot.status, "exited");
+    await assert.rejects(reopened.client.processRead({ workspaceId: "ws", processId, cursor: 0 }), /output|storage|unavailable/);
+    await reopened.host.close();
+  } finally { await fs.writeFile(files.spool, spool); }
+}, 30_000);
+
+vitestIt.skipIf(!available || process.platform !== "linux")("a complete retained log cannot substitute for missing native tree-exit evidence", async () => {
+  const f = await fixture();
+  const processId = "complete-log-unknown-writer";
+  const initial = await f.client.processSpawn(f.spawn(processId, "process.stdin.once('data',()=>{process.stdout.write('complete-log');process.stdin.destroy()});process.stdin.resume()"));
+  assert.equal(initial.writerActive, true);
+  await f.client.processWrite({ workspaceId: "ws", processId, sequence: 0, bytesBase64: Buffer.from("go").toString("base64") });
+  const files = outputFiles(f, processId);
+  const deadline = Date.now() + 15_000;
+  // Inspect durable evidence directly, leaving the Storage process snapshot
+  // unrefreshed. This is an abrupt restart with separately missing exit proof.
+  while (!(await fs.stat(files.marker).then(() => true, () => false)) || !(await fs.stat(files.receipt).then(() => true, () => false))) {
+    if (Date.now() > deadline) throw new Error("Durable output and tree receipt did not arrive");
+    await pause();
+  }
+  const receipt = await fs.readFile(files.receipt);
+  const exited = new Promise<void>(resolve => f.kernelChild.once("exit", () => resolve()));
+  f.kernelChild.kill("SIGKILL");
+  await exited;
+  try {
+    await fs.rm(files.receipt);
+    const reopened = await reopenProcessFixture(f);
+    const read = await reopened.client.processRead({ workspaceId: "ws", processId, cursor: 0 });
+    assert.equal(read.outputComplete, true);
+    assert.equal(read.outputError, null);
+    assert.equal(Buffer.concat(read.chunks.map(chunk => Buffer.from(chunk.bytesBase64, "base64"))).toString(), "complete-log");
+    assert.equal(read.process.status, "unknown");
+    assert.equal(read.process.writerActive, true);
+    await assert.rejects(reopened.client.processRelease({ workspaceId: "ws", processId }), /unconfirmed|in use/);
+    const registered = await reopened.client.fileRootRegister({ workspaceId: "ws", executionWorkspaceId: "ws", canonicalRoot: f.workspace });
+    await assert.rejects(reopened.client.fileRemove({ workspaceId: "ws", rootId: String(registered.rootId), operationId: "unknown-log-reclaim", path: "child", recursive: true, force: true }), /writer|exit/);
+    await reopened.host.close();
+  } finally { await fs.writeFile(files.receipt, receipt); }
+}, 30_000);
+
+it("a held subscription data credit cannot block stdin acknowledgements or native tree termination", async () => {
+  const f = await fixture();
+  const processId = "slow-subscription";
+  const marker = path.join(f.workspace, "child", "subscription-output-ready");
+  await f.client.processSpawn(f.spawn(processId, "const fs=require('node:fs'),b=Buffer.alloc(65536,61);for(let i=0;i<128;i++)fs.writeSync(1,b);fs.writeFileSync("+JSON.stringify(marker)+",'ready');process.stdin.resume();setInterval(()=>{},1000)"));
+  let dataEvents = 0;
+  let inputSequence = -1;
+  let terminal: KernelProcessSnapshot | undefined;
+  let observerFailure: unknown;
+  const subscription = await f.client.processSubscribe({ workspaceId: "ws", processId, cursor: 0 }, (event, acknowledge) => {
+    if (event.stream === "data") {
+      assert.ok(event.result);
+      const byteLength = event.result.chunks.reduce((sum, chunk) => sum + Buffer.from(chunk.bytesBase64, "base64").length, 0);
+      assert.ok(byteLength > 0 && byteLength <= 64 * 1024);
+      dataEvents += 1;
+      // Deliberately keep the single data credit until this observer closes.
+    } else if (event.stream === "control") {
+      assert.ok(event.result);
+      inputSequence = event.result.inputSequence;
+      if (!event.result.process.writerActive) terminal = event.result.process;
+      void acknowledge().catch(error => { observerFailure = error; });
+    }
+  });
+  try {
+    const deadline = Date.now() + 15_000;
+    while (dataEvents === 0 || !(await fs.stat(marker).then(() => true, () => false))) {
+      if (observerFailure) throw observerFailure;
+      if (Date.now() > deadline) throw new Error("Subscription did not deliver initial output");
+      await pause();
+    }
+    const input = { workspaceId: "ws", processId, sequence: 0, bytesBase64: Buffer.from("ack-me").toString("base64") };
+    await f.client.processWrite(input);
+    while (inputSequence < 0) {
+      if (observerFailure) throw observerFailure;
+      if (Date.now() > deadline) throw new Error("Held data credit blocked stdin acknowledgement");
+      await pause();
+    }
+    assert.equal(dataEvents, 1);
+    assert.equal((await f.client.health()).integrity, "ok");
+    await f.client.processKill({ workspaceId: "ws", processId, force: true });
+    while (!terminal) {
+      if (observerFailure) throw observerFailure;
+      if (Date.now() > deadline) throw new Error("Held data credit blocked terminal control event");
+      await pause();
+    }
+    assert.equal(terminal.status, "exited");
+    assert.equal(dataEvents, 1);
+  } finally { await subscription.close(); }
+  if (process.platform === "linux") {
+    const deadline = Date.now() + 15_000;
+    // No process.inspect/read request follows terminal control before this
+    // assertion: guardian collection must not depend on a later observer.
+    const taskRoot = `/proc/${f.kernelChild.pid}/task`;
+    const childIds = async () => {
+      const tids = await fs.readdir(taskRoot);
+      const children = await Promise.all(tids.map(tid => fs.readFile(path.join(taskRoot, tid, "children"), "utf8").catch(error => {
+        if ((error as NodeJS.ErrnoException).code === "ENOENT") return ""; // A worker thread ended during the snapshot.
+        throw error;
+      })));
+      return children.join(" ").trim();
+    };
+    while (await childIds()) {
+      if (Date.now() > deadline) throw new Error("Terminated guardian was not reaped without polling process state");
+      await pause();
+    }
+  }
+  const read = await drain(f.client, processId);
+  assert.deepEqual(read.stdout, Buffer.alloc(8*1024*1024,61));
 }, 30_000);

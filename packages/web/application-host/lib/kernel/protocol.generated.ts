@@ -8,6 +8,11 @@ export const KERNEL_REQUEST_WINDOW = 2 as const;
 export const KERNEL_PROTOCOL_SCHEMA = "varin.kernel.v1" as const;
 
 export type KernelMethod =
+  | "runtime.input.enqueue"
+  | "runtime.input.edit"
+  | "runtime.input.cancel"
+  | "runtime.input.inspect"
+  | "runtime.input.list"
   | "runtime.run.start"
   | "runtime.status"
   | "runtime.thread.create"
@@ -18,6 +23,9 @@ export type KernelMethod =
   | "runtime.operation.cancel"
   | "runtime.history.read"
   | "runtime.events.read"
+  | "process.subscribe"
+  | "process.subscription.ack"
+  | "process.subscription.unsubscribe"
   | "process.spawn"
   | "process.read"
   | "process.write"
@@ -114,6 +122,89 @@ export type KernelMethod =
   | "compute.release"
   | "compute.grammar.register";
 
+export interface KernelProcessSubscribeParams {
+  workspaceId: string;
+  processId: string;
+  subscriptionId: string;
+  cursor: number;
+}
+
+export interface KernelProcessSubscriptionParams {
+  subscriptionId: string;
+}
+
+export interface KernelProcessSubscriptionAckParams {
+  subscriptionId: string;
+  stream: string;
+  sequence: number;
+}
+
+export interface KernelProcessSubscribeResult {
+  subscriptionId: string;
+  processId: string;
+  kernelEpoch: string;
+}
+
+export interface KernelProcessStreamEvent {
+  v: typeof KERNEL_PROTOCOL_VERSION;
+  kind: "process-event";
+  kernelEpoch: string;
+  subscriptionId: string;
+  grantId: string;
+  processId: string;
+  stream: "control" | "data" | "closed";
+  sequence: number;
+  result: KernelProcessReadResult | null;
+  error: string | null;
+}
+
+export type NativeInputMode = "boundary" | "interrupt" | "next_run";
+
+export type NativeInputState = "queued" | "delivered" | "cancelled";
+
+export interface NativeInputEnqueueParams {
+  key: string;
+  threadId: string;
+  branchId: string;
+  mode: NativeInputMode;
+  input: unknown;
+  configuration?: unknown;
+}
+
+export interface NativeInputEditParams {
+  inputId: string;
+  expectedRevision: number;
+  content: unknown;
+}
+
+export interface NativeInputCancelParams {
+  inputId: string;
+  expectedRevision: number;
+}
+
+export interface NativeInputHandleParams {
+  inputId: string;
+}
+
+export interface NativeInputReceipt {
+  input_id: string;
+  run_id: string;
+  mode: NativeInputMode;
+  cursor: number;
+}
+
+export interface NativeQueuedInput {
+  id: string;
+  thread_id: string;
+  branch_id: string;
+  run_id: string;
+  mode: NativeInputMode;
+  state: NativeInputState;
+  revision: number;
+  content: unknown;
+  cursor: number;
+}
+
 export interface NativeExternalReceipt {
   executor: string;
   identity: string;
@@ -136,6 +227,11 @@ export interface NativeModelSessionConfiguration {
   allowAnonymous: boolean;
   configurationGeneration: number;
   maxOutputTokens: number;
+  azureDeployment?: string | null;
+  azureApiVersion?: string | null;
+  legacyMaxTokens?: boolean;
+  includeStreamUsage?: boolean;
+  reasoningEffort?: string | null;
 }
 
 export interface NativeRunStartReceipt {
@@ -233,6 +329,7 @@ export interface NativeOperation {
 }
 
 export interface NativeProviderOriginal {
+  connection_identity: string;
   adapter: string;
   version: string;
   item: unknown;
@@ -332,6 +429,8 @@ export interface KernelProcessSnapshot {
   reason: string | null;
   writerActive: boolean;
   outputAvailable: boolean;
+  outputComplete?: boolean;
+  outputError?: string | null;
 }
 
 export interface KernelProcessOutputChunk {
@@ -1367,6 +1466,11 @@ export interface KernelComputeReadResult {
 }
 
 export type KernelMethodParams = {
+  "runtime.input.enqueue": NativeInputEnqueueParams;
+  "runtime.input.edit": NativeInputEditParams;
+  "runtime.input.cancel": NativeInputCancelParams;
+  "runtime.input.inspect": NativeInputHandleParams;
+  "runtime.input.list": NativeHistoryParams;
   "runtime.run.start": NativeRunStartParams;
   "runtime.status": KernelEmptyParams;
   "runtime.thread.create": NativeThreadCreateParams;
@@ -1377,6 +1481,9 @@ export type KernelMethodParams = {
   "runtime.operation.cancel": NativeOperationParams;
   "runtime.history.read": NativeHistoryParams;
   "runtime.events.read": NativeEventsParams;
+  "process.subscribe": KernelProcessSubscribeParams;
+  "process.subscription.ack": KernelProcessSubscriptionAckParams;
+  "process.subscription.unsubscribe": KernelProcessSubscriptionParams;
   "process.spawn": KernelProcessSpawnParams;
   "process.read": KernelProcessReadParams;
   "process.write": KernelProcessWriteParams;
@@ -1479,6 +1586,51 @@ export type KernelRequest =
       v: typeof KERNEL_PROTOCOL_VERSION;
       kind: "request";
       id: string;
+      method: "runtime.input.enqueue";
+      params: NativeInputEnqueueParams;
+      epoch?: string;
+      grantId?: string;
+    }
+  | {
+      v: typeof KERNEL_PROTOCOL_VERSION;
+      kind: "request";
+      id: string;
+      method: "runtime.input.edit";
+      params: NativeInputEditParams;
+      epoch?: string;
+      grantId?: string;
+    }
+  | {
+      v: typeof KERNEL_PROTOCOL_VERSION;
+      kind: "request";
+      id: string;
+      method: "runtime.input.cancel";
+      params: NativeInputCancelParams;
+      epoch?: string;
+      grantId?: string;
+    }
+  | {
+      v: typeof KERNEL_PROTOCOL_VERSION;
+      kind: "request";
+      id: string;
+      method: "runtime.input.inspect";
+      params: NativeInputHandleParams;
+      epoch?: string;
+      grantId?: string;
+    }
+  | {
+      v: typeof KERNEL_PROTOCOL_VERSION;
+      kind: "request";
+      id: string;
+      method: "runtime.input.list";
+      params: NativeHistoryParams;
+      epoch?: string;
+      grantId?: string;
+    }
+  | {
+      v: typeof KERNEL_PROTOCOL_VERSION;
+      kind: "request";
+      id: string;
       method: "runtime.run.start";
       params: NativeRunStartParams;
       epoch?: string;
@@ -1562,6 +1714,33 @@ export type KernelRequest =
       id: string;
       method: "runtime.events.read";
       params: NativeEventsParams;
+      epoch?: string;
+      grantId?: string;
+    }
+  | {
+      v: typeof KERNEL_PROTOCOL_VERSION;
+      kind: "request";
+      id: string;
+      method: "process.subscribe";
+      params: KernelProcessSubscribeParams;
+      epoch?: string;
+      grantId?: string;
+    }
+  | {
+      v: typeof KERNEL_PROTOCOL_VERSION;
+      kind: "request";
+      id: string;
+      method: "process.subscription.ack";
+      params: KernelProcessSubscriptionAckParams;
+      epoch?: string;
+      grantId?: string;
+    }
+  | {
+      v: typeof KERNEL_PROTOCOL_VERSION;
+      kind: "request";
+      id: string;
+      method: "process.subscription.unsubscribe";
+      params: KernelProcessSubscriptionParams;
       epoch?: string;
       grantId?: string;
     }

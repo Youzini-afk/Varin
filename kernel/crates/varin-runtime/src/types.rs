@@ -88,12 +88,16 @@ pub struct HistoryItem {
 }
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 pub struct ProviderOriginal {
+    #[serde(default)]
+    pub connection_identity:String,
     pub adapter: String,
     pub version: String,
     pub item: Value,
 }
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 pub struct ModelStep {
+    #[serde(default)]
+    pub superseded_by_input:Option<String>,
     pub id: String,
     pub run_id: String,
     pub epoch: u64,

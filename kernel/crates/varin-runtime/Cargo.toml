@@ -6,11 +6,13 @@ license.workspace = true
 description = "Varin native durable agent coordination and execution"
 
 [dependencies]
+sha2.workspace = true
+hex.workspace = true
 fs2.workspace = true
 rusqlite.workspace = true
 serde.workspace = true
 serde_json.workspace = true
 thiserror.workspace = true
 uuid.workspace = true
-reqwest = { version = "0.12", default-features = false, features = ["rustls-tls", "json", "stream"] }
+reqwest = { version = "0.12", default-features = false, features = ["rustls-tls", "json", "stream", "blocking"] }
 tokio = { version = "1", features = ["rt", "rt-multi-thread", "time", "net", "macros", "sync"] }
