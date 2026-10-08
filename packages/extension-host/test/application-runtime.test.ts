@@ -49,7 +49,7 @@ module.exports = {
       read() { return context.storage.snapshot.document.data.value || '${version}'; },
       generation() { return '${version}'; },
       assetPath() { return context.assets.path('runtime/tool.mjs'); },
-      async write(value) { await context.storage.update({ value }); return value; },
+      async write([value]) { await context.storage.update({ value }); return value; },
       crash() { setTimeout(() => process.exit(17), 100); return 'crashing'; }
     });
   }
@@ -620,3 +620,69 @@ test("persistent routes select different real providers by session and isolate p
     await runtime.stop();
   }
 });
+
+for (const mode of ["brokered", "native"] as const) {
+  test(`${mode} service cancellation reaches the call context without inventing completion`, { timeout: 30_000 }, async () => {
+    const dataDir = await temporaryDirectory(`varin-cancel-${mode}-`);
+    const source = await temporaryDirectory(`varin-cancel-source-${mode}-`);
+    await writeHostExtension(source, "1.0.0", 1, "ok", mode);
+    await writeFile(join(source, "host.cjs"), `
+module.exports = {
+  migrate({ data }) { return data; },
+  activate(context) {
+    let pending = null;
+    let started = false;
+    let observedAbort = false;
+    let callId = null;
+    context.services.provide({ id: '${serviceId}', version: 1 }, {
+      state() { return { started, observedAbort, callId }; },
+      wait([cooperative], call) {
+        started = true;
+        callId = call.callId;
+        return new Promise((resolve, reject) => {
+          pending = resolve;
+          const abort = () => {
+            observedAbort = true;
+            if (cooperative) { pending = null; reject(new Error('handler confirmed cancellation')); }
+          };
+          if (call.signal.aborted) abort();
+          else call.signal.addEventListener('abort', abort, { once: true });
+        });
+      },
+      release() { pending?.('actual completion'); pending = null; return null; }
+    });
+  }
+};`, "utf8");
+    const runtime = await ApplicationExtensionRuntime.create({
+      brokerScript: fileURLToPath(new URL("../broker/broker-child.mjs", import.meta.url)), dataDir, varinVersion,
+    });
+    try {
+      const started = await runtime.start();
+      await runtime.installOrStage({ expectedRevision: started.catalog.revision,
+        source: { display: "Cancellation fixture", kind: "local", specifier: source } });
+      const invoke = (method: string, args: boolean[] = [], signal?: AbortSignal) => (
+        runtime.invokeService({ args, method, serviceId, version: 1 }, signal)
+      );
+      const readState = async () => await invoke("state") as { started: boolean; observedAbort: boolean; callId: string };
+      const controller = new AbortController();
+      let settled = false;
+      const waiting = invoke("wait", [false], controller.signal).finally(() => { settled = true; });
+      while (!(await readState()).started) await delay(5);
+      controller.abort();
+      while (!(await readState()).observedAbort) await delay(5);
+      assert.equal(settled, false, "request remains owned while the handler still runs");
+      assert.equal(typeof (await readState()).callId, "string");
+      await invoke("release");
+      assert.equal(await waiting, "actual completion");
+
+      const cooperative = new AbortController();
+      const cooperativelyWaiting = invoke("wait", [true], cooperative.signal);
+      const rejected = assert.rejects(cooperativelyWaiting, /handler confirmed cancellation/);
+      // A separate state request ensures the worker has accepted the preceding invocation.
+      await invoke("state");
+      cooperative.abort();
+      await rejected;
+      await assert.rejects(invoke("wait", [true], AbortSignal.abort(new Error("not dispatched"))), /not dispatched/);
+    } finally { await runtime.stop(); }
+  });
+}

@@ -52,11 +52,13 @@ interface BrokerEventMessage {
   kind: "event";
 }
 
-type BrokerMessage = BrokerRequestMessage | BrokerResponseMessage | BrokerEventMessage;
+interface BrokerCancelMessage { kind: "cancel"; id: string; }
+
+type BrokerMessage = BrokerRequestMessage | BrokerResponseMessage | BrokerEventMessage | BrokerCancelMessage;
 
 export interface BrokeredHostTransport {
   forceTerminate(): void;
-  request(method: string, params?: unknown): Promise<unknown>;
+  request(method: string, params?: unknown, signal?: AbortSignal): Promise<unknown>;
   terminate(): Promise<void>;
 }
 
@@ -141,7 +143,7 @@ const diagnosticState = (
   updatedAt: new Date().toISOString(),
 });
 
-class ChildBrokeredHostTransport implements BrokeredHostTransport {
+export class ChildBrokeredHostTransport implements BrokeredHostTransport {
   readonly #child: ChildProcess;
   readonly #childRequests = new Map<string, AbortController>();
   readonly #onCrash: (error: Error) => void;
@@ -154,12 +156,13 @@ class ChildBrokeredHostTransport implements BrokeredHostTransport {
 
   constructor(options: {
     brokerScript: string;
+    forkProcess?: typeof fork;
     onCrash(error: Error): void;
     requestFromChild(method: string, params: unknown, signal: AbortSignal): Promise<JsonValue>;
   }) {
     this.#onCrash = options.onCrash;
     this.#requestFromChild = options.requestFromChild;
-    this.#child = fork(options.brokerScript, [], {
+    this.#child = (options.forkProcess ?? fork)(options.brokerScript, [], {
       env: process.env,
       serialization: "json",
       stdio: ["ignore", "ignore", "ignore", "ipc"],
@@ -193,17 +196,40 @@ class ChildBrokeredHostTransport implements BrokeredHostTransport {
     });
   }
 
-  async request(method: string, params?: unknown): Promise<unknown> {
-    await this.#ready;
+  async request(method: string, params?: unknown, signal?: AbortSignal): Promise<unknown> {
+    signal?.throwIfAborted();
+    if (signal) {
+      await new Promise<void>((resolve, reject) => {
+        const abort = () => { signal.removeEventListener("abort", abort); reject(signal.reason); };
+        signal.addEventListener("abort", abort, { once: true });
+        void this.#ready.then(resolve, reject).finally(() => signal.removeEventListener("abort", abort));
+      });
+    } else await this.#ready;
+    signal?.throwIfAborted();
     if (!this.#child.connected) throw new Error("Brokered Host process is disconnected");
     const id = `parent-${process.pid}-${++this.#requestId}`;
     return new Promise((resolveRequest, reject) => {
-      this.#pending.set(id, { reject, resolve: resolveRequest });
-      this.#child.send({ kind: "request", id, method, params } satisfies BrokerRequestMessage, (error) => {
-        if (!error) return;
-        this.#pending.delete(id);
-        reject(error);
-      });
+      const cleanup = () => signal?.removeEventListener("abort", abort);
+      const rejectRequest = (error: Error) => { cleanup(); reject(error); };
+      // Cancellation requests cooperative stopping; retain pending ownership until the worker
+      // settles or exits. Rejecting locally would incorrectly let lifecycle drain finish early.
+      const send = (message: BrokerRequestMessage | BrokerCancelMessage) => {
+        const failed = (error: Error | null) => {
+          if (!error || message.kind === "cancel") return;
+          this.#pending.delete(id);
+          rejectRequest(error);
+        };
+        // A failed cancel delivery says nothing about whether the original handler stopped.
+        // Preserve its pending ownership until the original response or actual process exit.
+        try { this.#child.send(message, failed); }
+        catch (error) { failed(error instanceof Error ? error : new Error(String(error))); }
+      };
+      const abort = () => {
+        if (this.#child.connected) send({ kind: "cancel", id });
+      };
+      this.#pending.set(id, { reject: rejectRequest, resolve: (value) => { cleanup(); resolveRequest(value); } });
+      signal?.addEventListener("abort", abort, { once: true });
+      send({ kind: "request", id, method, params });
     });
   }
 
@@ -236,6 +262,10 @@ class ChildBrokeredHostTransport implements BrokeredHostTransport {
         this.#crashed = true;
         this.#onCrash(new Error(message.error || "Brokered Host process failed"));
       }
+      return;
+    }
+    if (message.kind === "cancel") {
+      this.#childRequests.get(message.id)?.abort(new Error("Brokered Host call cancelled"));
       return;
     }
     const controller = new AbortController();
@@ -786,12 +816,12 @@ export class BrokeredHostSupervisor {
       if (!descriptor) throw new Error(`Host provided undeclared service: ${key}`);
       return {
         descriptor: { ...descriptor },
-        handler: (method, args) => broker.request("service.invoke", {
+        handler: (method, args, context) => broker.request("service.invoke", {
           args,
           method,
           serviceId: descriptor.id,
           version: descriptor.version,
-        }).then(asJsonValue),
+        }, context.signal).then(asJsonValue),
       };
     });
   }
