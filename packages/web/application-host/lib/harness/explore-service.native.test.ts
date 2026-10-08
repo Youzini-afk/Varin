@@ -355,7 +355,7 @@ describe("explore through Host router, real ripgrep, and Documents", () => {
     expect(stored.slice.text).not.toContain("Unread candidates");
     expect(Buffer.byteLength(response.result.text, "utf8")).toBeLessThanOrEqual(response.result.details.byteBudget);
     expect(response.result.text).not.toContain("Unread candidates");
-    expect(response.result.text).toContain(`get_output("${response.result.handle}")`);
+    expect(response.result.text).toContain(`get_output({handle: "${response.result.handle}"})`);
 
     const complete = await f.request({ question: "needle", limit: 8 });
     expect(complete.ok).toBe(true);
@@ -386,7 +386,7 @@ describe("explore through Host router, real ripgrep, and Documents", () => {
     const response = await f.request({ question: "needle", limit: 6 });
     expect(response.ok).toBe(true);
     if (!response.ok) throw new Error(response.error.message);
-    expect(response.result.text).toContain(`get_output("${response.result.handle}")`);
+    expect(response.result.text).toContain(`get_output({handle: "${response.result.handle}"})`);
     expect(Buffer.byteLength(response.result.text, "utf8")).toBeLessThanOrEqual(response.result.details.byteBudget);
   });
 
@@ -403,7 +403,7 @@ describe("explore through Host router, real ripgrep, and Documents", () => {
     expect(response.ok).toBe(true);
     if (!response.ok) throw new Error(response.error.message);
     expect(response.result.searched.filesDropped).toBe(50);
-    expect(response.result.text).toMatch(/at least 50 matching file\(s\) were not brought into the candidate pool/);
+    expect(response.result.text).toMatch(/at least 50 matching files were not examined/);
   });
 
   it("returns a structure unit and source status on the explore.search result", async () => {
@@ -440,7 +440,7 @@ describe("explore through Host router, real ripgrep, and Documents", () => {
     });
     expect(response.result.snippets[0]?.text).toContain("read large.ts:1-50");
     expect(response.result.details.structure?.files).toEqual([{ path: "large.ts", provider: "lsp", status: "ready" }]);
-    expect(response.result.text).toMatch(/structure lsp\/ready/);
+    expect(response.result.text).toContain("largeTarget (function, lines 1-50)");
   });
 
   it("attaches graph relations for excerpt paths without expanding the candidate pool", async () => {

@@ -294,7 +294,7 @@ describe("Host-backed explore tool", () => {
         };
         if (method === "explore.query.finish") return {
           ...finishResult,
-          text: 'partial result; get_output("out_large") for all details',
+          text: 'partial result; Full result: get_output({handle: "out_large"})',
           partial: true,
           notRequestedCount: 700,
           omittedCount: 600,
@@ -319,7 +319,7 @@ describe("Host-backed explore tool", () => {
     assert.equal(details.provenance, undefined);
     assert.equal(details.model, undefined);
     const textContent = result.content.find((block) => block.type === "text");
-    assert.match(textContent?.text ?? "", /get_output\("out_large"\)/);
+    assert.match(textContent?.text ?? "", /get_output\(\{handle: "out_large"\}\)/);
     assert.doesNotMatch(serialized, /unread-0\.ts|omitted-0\.ts|provenance-0\.ts/);
     assert.ok(calls.includes("explore.query.release"));
   });

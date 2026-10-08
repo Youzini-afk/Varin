@@ -331,7 +331,7 @@ describe("Phase 3 Thread/ThreadRun e2e", () => {
       assert.match(steps.text, /child-1: durable transcript/);
       const unpublished = await executeTool(createMergeTool(harness.bridge, SESSION_ID), { threadId: thread.id });
       assert.equal(unpublished.isError, true);
-      assert.match(unpublished.text, /no published result/);
+      assert.match(unpublished.text, /no published code revision/);
       assert.equal(harness.getMergeCalls(), 0);
       await harness.threadRegistry.setWorkingState(WORKSPACE_ID, thread.id, { branchId: `branch-${thread.id}`, resultRevision: 1 });
       const mergeResult = await executeTool(createMergeTool(harness.bridge, SESSION_ID), { threadId: thread.id });

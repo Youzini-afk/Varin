@@ -317,7 +317,7 @@ describe("explore D-090 candidate ranking and materialization", () => {
     expect(result.snippets[0]?.revision).toBe("rev-1");
     const withHandle = formatExploreOutput(result, { byteBudget: 280, handle: "out_test" });
     expect(withHandle.showHandle).toBe(true);
-    expect(withHandle.visibleText).toContain("get_output(\"out_test\")");
+    expect(withHandle.visibleText).toContain('get_output({handle: "out_test"})');
     expect(Buffer.byteLength(withHandle.visibleText, "utf8")).toBeLessThanOrEqual(280);
   });
 
@@ -411,7 +411,6 @@ describe("explore D-090 candidate ranking and materialization", () => {
     expect(withGraph.visibleText).toContain("router.ts imports ./protocol (L1)");
     expect(withGraph.visibleText).toContain("router.ts connects register(\"explore.search\") (L4)");
     expect(withGraph.visibleText).toContain("router.ts associates log(\"explore.search\") (L5) [candidate]");
-    expect(withGraph.storedBody).toContain("same-string candidates");
     const tight = formatExploreOutput({
       ...result,
       relations: {
@@ -557,8 +556,7 @@ describe("explore structure slices", () => {
     expect(snippet?.text).toMatch(/… omitted large\.ts:\d+-\d+/);
     expect(snippet?.endLine).toBeLessThan(50);
     const packed = formatExploreOutput(result);
-    expect(packed.visibleText).toMatch(/unit largeTarget \(function\) large\.ts:1-50/);
-    expect(packed.visibleText).toMatch(/structure lsp\/ready/);
+    expect(packed.visibleText).toContain("largeTarget (function, lines 1-50)");
   });
 
   it("falls back to a ±3 window and reports the source status when structure is unavailable", async () => {

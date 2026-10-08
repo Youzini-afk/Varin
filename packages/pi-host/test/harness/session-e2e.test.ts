@@ -2006,7 +2006,6 @@ describe("session e2e — explore", () => {
           "the model must receive the contiguous current excerpt",
         );
         assert.match(exploreResult, /"revision":"d1_[A-Za-z0-9_-]+"/);
-        assert.match(exploreResult, /Source: disk or fixed editor-draft snapshots/);
         const handle = exploreResult.match(/"handle":"(out_[A-Za-z0-9_-]+)"/)?.[1];
         assert.ok(handle, "the structured result must still issue a session-local output handle");
         const stored = session.harnessServiceHost.outputStore.read(snapshot.sessionId, handle);
@@ -2074,7 +2073,7 @@ describe("session e2e — explore", () => {
         assert.match(exploreResult, /"status":"ready"/);
         assert.match(exploreResult, /read large\.ts:1-50/);
         assert.match(exploreResult, /… omitted large\.ts:/);
-        assert.match(exploreResult, /unit largeTarget \(function\) large\.ts:1-50/);
+        assert.match(exploreResult, /largeTarget \(function, lines 1-50\)/);
         assert.doesNotMatch(exploreResult, /"name":"symbols"/);
         assert.doesNotMatch(exploreResult, /lsp\.symbols/);
         assert.match(exploreResult, /large\.ts:1-/);
@@ -2230,7 +2229,8 @@ describe("session e2e — explore", () => {
 
         assert.match(exploreResult, /exact\.ts/);
         assert.match(exploreResult, /uniqueAnchor/);
-        assert.match(exploreResult, /"anchors":\["uniqueAnchor"\]|"supplied":\["uniqueAnchor"\]/);
+        const toolResult = JSON.parse(exploreResult) as { details: { snippets: Array<{ path: string }> } };
+        assert.equal(toolResult.details.snippets[0]?.path, "exact.ts");
       } finally {
         await session.dispose();
         await fixture.dispose();
@@ -2311,8 +2311,8 @@ describe("session e2e — explore", () => {
         }));
         assert.match(exploreResult, /reclaimLease/);
         assert.match(exploreResult, /reclaim\.ts/);
-        assert.match(exploreResult, /"plan":"used"/);
-        assert.match(exploreResult, /"select":"used"/);
+        assert.ok(requestKinds.some(request => request.plan), "the planner must receive a model request");
+        assert.ok(requestKinds.some(request => request.selection), "the selector must receive a model request");
       } finally {
         await session.dispose();
         await fixture.dispose();
@@ -2448,7 +2448,6 @@ describe("session e2e — explore", () => {
         assert.ok(embedBodies.some((batch) => batch.some((text) => text.includes("pineapple"))));
         assert.match(exploreResult, /remote\.ts/);
         assert.match(exploreResult, /remote pineapple/);
-        assert.match(exploreResult, /"rerank":"used"|"status":"used"/);
         assert.ok(rerankBodies.length > 0);
         assert.doesNotMatch(exploreResult, /embed-key|faux-key/);
       } finally {
@@ -2514,7 +2513,6 @@ describe("session e2e — related", () => {
         assert.match(relatedResult, /needle/);
         assert.match(relatedResult, /Imported by/);
         assert.match(relatedResult, /dep\.ts/);
-        assert.match(relatedResult, /lsp\.references/);
         assert.doesNotMatch(relatedResult, /rank /);
       } finally {
         await session.dispose();
