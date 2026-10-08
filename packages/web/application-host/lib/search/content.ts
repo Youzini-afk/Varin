@@ -40,7 +40,7 @@ export interface WorkspaceContentSearchOptions {
   signal?: AbortSignal;
 }
 export interface WorkspaceContentSearchDependencies {
-  documents: { inspectWorkspace(workspaceId: string): Promise<{ root: string; kind?: 'directory' | 'file' }> };
+  documents: { getWorkspace(workspaceId: string, signal?: AbortSignal): Promise<{ root: string; kind?: 'directory' | 'file' }> };
   compute: Pick<KernelComputeService, "directory">;
   pathModule?: typeof path;
 }
@@ -66,7 +66,7 @@ export function createWorkspaceContentSearch({ documents, compute, pathModule = 
       if(!workspaceId)return {status:"failure",generation,message:"workspaceId is required"};
       if(typeof request.query!=="string"||!request.query.trim())return {status:"empty",generation};
       try {
-        const {root,kind}=await documents.inspectWorkspace(workspaceId);
+        const {root,kind}=await documents.getWorkspace(workspaceId,options.signal);
         const fileRoot=kind==='file';
         const computeRoot=fileRoot?pathModule.dirname(root):root;
         const fileName=fileRoot?pathModule.basename(root):null;

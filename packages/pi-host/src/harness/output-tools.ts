@@ -231,7 +231,7 @@ export function createDiagnosticsTool(bridge: HostServicesBridge, _sessionId: st
     description: "Get diagnostic changes for a file. Set full=true for the complete current snapshot.",
     promptSnippet: "diagnostics: get LSP diagnostics for a file (errors, warnings, hints)",
     promptGuidelines: [
-      "Diagnostics describe the file on disk. Repeated reads return added/resolved diagnostics; full=true returns the complete current snapshot.",
+      "Diagnostics follow the current code view. Repeated reads return added/resolved diagnostics; full=true returns the complete current snapshot.",
     ],
     parameters: DiagnosticsParams,
     executionMode: "parallel",
@@ -240,7 +240,7 @@ export function createDiagnosticsTool(bridge: HostServicesBridge, _sessionId: st
         const result = await bridge.request("lsp.diagnosticsSnapshot", {
           path: params.path,
           ...(params.full === undefined ? {} : { full: params.full }),
-        }, signal ? { signal } : {});
+        }, { timeoutMs: 0, ...(signal ? { signal } : {}) });
         const formatted = formatDiagnosticsResult(result, params.path);
         return { ...formatted, details: { ...(formatted.details as Record<string, unknown>),
           ...(result.observationRef ? { observationRef: result.observationRef } : {}) } };
@@ -257,6 +257,10 @@ export function createDiagnosticsTool(bridge: HostServicesBridge, _sessionId: st
 }
 
 function formatDiagnosticsResult(result: DiagnosticsResult, path: string): { content: Array<{ type: "text"; text: string }>; details: unknown; isError?: true } {
+  if (result.status === 'pending') return {
+    content: [{ type: 'text', text: `${path}: diagnostics pending` }],
+    details: { path, status: 'pending', diagnostics: [] },
+  };
   if (result.status === "unavailable") {
     return {
       content: [{ type: "text", text: `diagnostics unavailable for ${path}` }],

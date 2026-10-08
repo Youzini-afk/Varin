@@ -167,11 +167,9 @@ describe("incremental diagnostics observation", () => {
     const b: DiagnosticItem = { line: 2, character: 1, severity: "warning", code: "B", message: "second", source: "ts" };
     let diagnostics = [a];
     const provider: DiagnosticsProvider = {
-      getDiagnostics: async () => diagnostics,
       getDiagnosticsForRevision: async () => diagnostics,
       bindDocument: async () => ({ status: "bound", revision: "r1", source: "disk" }),
       getSnapshot: async () => "1",
-      isAvailable: async () => true,
     };
     const cursors = createObservationCursorStore();
     const service = createLspDiagnosticsSnapshotService(provider, cursors);

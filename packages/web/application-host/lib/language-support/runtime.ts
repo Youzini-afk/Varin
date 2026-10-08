@@ -44,6 +44,7 @@ export interface LanguageSupportRuntimeOptions {
 }
 
 export interface LanguageSupportRuntime extends LanguageSupportAPI {
+  warmupDocuments(workspaceId: string, signal?: AbortSignal, refresh?: boolean): Promise<Array<{ languageId: string; resourceId: string }>>;
   noteRequest(languageId: string, workspaceId?: string): void;
   peekWanted(workspaceId: string): readonly string[];
   /**
@@ -86,6 +87,7 @@ export function createLanguageSupportRuntime(options: LanguageSupportRuntimeOpti
   const now = options.now ?? Date.now;
   const wantedByWorkspace = new Map<string, Set<string>>();
   const cache = new Map<string, { expiresAt: number; status: LanguageSupportStatus }>();
+  const samples = new Map<string, Map<string, string>>();
   const serverPreparations = new Map<string, { controller: AbortController; result: Promise<LanguageSupportServerInfo> }>();
 
   const installableLanguageIds = options.installableLanguageIds ?? (() => {
@@ -165,7 +167,8 @@ export function createLanguageSupportRuntime(options: LanguageSupportRuntimeOpti
     }))) };
   };
 
-  const getStatus = async (request: { workspaceId: string }): Promise<LanguageSupportStatus> => {
+  const getStatus = async (request: { workspaceId: string; signal?: AbortSignal }): Promise<LanguageSupportStatus> => {
+    request.signal?.throwIfAborted();
     const workspaceId = request.workspaceId.trim();
     if (!workspaceId) {
       return { workspaceId, languages: [], partial: false, scannedFiles: 0, fileLimit, grammarStore: "ready" };
@@ -187,14 +190,17 @@ export function createLanguageSupportRuntime(options: LanguageSupportRuntimeOpti
       query: "",
       respectGitignore: true,
       limit: fileLimit + 1,
+      ...(request.signal ? { signal: request.signal } : {}),
     });
     const partial = files.length > fileLimit;
     const scanned = files.slice(0, fileLimit);
     const counts = new Map<string, number>();
+    const representatives = new Map<string, string>();
     for (const file of scanned) {
       const languageId = languageIdForPath(file.relativePath);
       if (!languageId) continue;
       counts.set(languageId, (counts.get(languageId) ?? 0) + 1);
+      if (!representatives.has(languageId)) representatives.set(languageId, file.relativePath);
     }
 
     const wanted = wantedByWorkspace.get(workspaceId) ?? new Set<string>();
@@ -235,10 +241,19 @@ export function createLanguageSupportRuntime(options: LanguageSupportRuntimeOpti
       grammarStore,
     };
     cache.set(workspaceId, { expiresAt: now() + cacheTtlMs, status });
+    samples.set(workspaceId, representatives);
     return withServers(status);
   };
 
   return {
+    async warmupDocuments(workspaceId, signal, refresh) {
+      if (refresh) cache.delete(workspaceId);
+      const status = await getStatus({ workspaceId, ...(signal ? { signal } : {}) });
+      return status.languages.flatMap(language => {
+        const resourceId = samples.get(workspaceId)?.get(language.languageId);
+        return resourceId ? [{ languageId: language.languageId, resourceId }] : [];
+      });
+    },
     noteRequest,
     peekWanted: (workspaceId) => [...(wantedByWorkspace.get(workspaceId) ?? [])],
     installedStructureSpec,

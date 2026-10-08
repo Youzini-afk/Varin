@@ -166,19 +166,17 @@ describe("createLspStructureProvider", () => {
   });
 
   it("does not bind a cold language session when warmOnly is set", async () => {
-    const getStatus = vi.fn((workspaceId: string, languageId: string, view = "agent") => ({
-      status: "absent",
-      workspaceId,
-      languageId,
-      view,
-    }));
     const documentSymbols = vi.fn();
-    const syncDocument = vi.fn();
-    const read = vi.fn();
+    const syncDocument = vi.fn(async () => ({ status: "absent", message: "Language server is not already running for this view." }));
+    const read = vi.fn(async () => ({
+      status: "ready" as const, content: "export function x() {}", revision: "rev-1",
+      resource: { workspaceId: "ws-1", resourceId: "a.ts" },
+      encoding: "utf8", bom: false, byteLength: 22, modifiedAt: "2026-01-01T00:00:00Z",
+    }));
     const readAgentInputSnapshot = vi.fn();
     const provider = createLspStructureProvider({
-      documents: { read, readAgentInputSnapshot },
-      supervisor: { getStatus, documentSymbols, syncDocument },
+      documents: { readSnapshot: read, readAgentInputSnapshot },
+      supervisor: { documentSymbols, syncDocument },
     });
     const result = await provider.outline({
       path: "a.ts",
@@ -190,10 +188,8 @@ describe("createLspStructureProvider", () => {
     });
     expect(result.status).toBe("unavailable");
     expect(result.message).toMatch(/not already running/i);
-    expect(getStatus).toHaveBeenCalledWith("ws-1", "typescript", "agent");
     expect(documentSymbols).not.toHaveBeenCalled();
-    expect(syncDocument).not.toHaveBeenCalled();
-    expect(read).not.toHaveBeenCalled();
+    expect(syncDocument).toHaveBeenCalledWith(expect.objectContaining({ view: "agent", warmOnly: true }));
   });
 
   it("marks an unknown language unsupported instead of unavailable", async () => {

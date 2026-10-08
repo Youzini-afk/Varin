@@ -15,7 +15,7 @@ The pi-host harness tools are custom tools registered in the Pi session's
 | `get_output` | Retrieve stored/shell output by handle; optionally wait for new bytes or exit | `output.read` / `shell.read` |
 | `write_to_process` | Write stdin to background shell | `shell.write` |
 | `kill_shell` | Terminate a background shell | `shell.kill` |
-| `diagnostics` | Get LSP diagnostics for a file, bound to its disk revision | `lsp.diagnosticsSnapshot` |
+| `diagnostics` | Get LSP diagnostics for a file in the turn's code view | `lsp.diagnosticsSnapshot` |
 | `symbols`, `definition`, `references`, `hover` | Navigate a real language server with one-based positions, bound to this turn's fixed text | `lsp.*` |
 | `explore` | Locate and read related context in one call; `question` plus optional literal `anchors` | `explore.query.*` (algorithm-only `explore.search` is the same engine) |
 | `related` | File-level import topology and connection endpoints from the symbol graph | `related.query` |

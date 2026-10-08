@@ -1,7 +1,7 @@
 import { languageIdForPath } from "@varin/protocol";
 import type { DocumentAuthority } from "../documents/authority.js";
-import { AGENT_LANGUAGE_VIEW, type createLanguageSupervisor } from "../lsp/supervisor.js";
-import { createLanguageViewBinder } from "../lsp/language-view.js";
+import type { createLanguageSupervisor } from "../lsp/supervisor.js";
+import { createLanguageViewBinder, type ResolveLanguageTarget } from "../lsp/language-view.js";
 import type { HarnessDocumentReadSource } from "../harness/service-host.js";
 import { structureKindFromLsp } from "./kinds.js";
 import { lspRangeToLines, type LspLikeRange } from "./ranges.js";
@@ -19,12 +19,13 @@ import {
   type StructureSymbol,
 } from "./types.js";
 
-type LanguageSupervisor = Pick<ReturnType<typeof createLanguageSupervisor>, "documentSymbols" | "syncDocument" | "getStatus">;
+type LanguageSupervisor = Pick<ReturnType<typeof createLanguageSupervisor>, "documentSymbols" | "syncDocument">;
 
 export interface LspStructureProviderOptions {
-  documents: Pick<DocumentAuthority, "read" | "readAgentInputSnapshot">;
+  documents: Pick<DocumentAuthority, "readSnapshot" | "readAgentInputSnapshot">;
   supervisor: LanguageSupervisor;
   readSource?: HarnessDocumentReadSource;
+  resolveTarget?: ResolveLanguageTarget;
 }
 
 const recordOf = (value: unknown): Record<string, unknown> => (
@@ -99,7 +100,7 @@ const unusedCapability = (
  * Cold, missing-capability, and revision mismatch stay distinct statuses.
  */
 export function createLspStructureProvider(options: LspStructureProviderOptions): StructureProvider {
-  const binder = createLanguageViewBinder({ documents: options.documents, supervisor: options.supervisor, ...(options.readSource ? { readSource: options.readSource } : {}) });
+  const binder = createLanguageViewBinder(options);
 
   return {
     id: "lsp",
@@ -117,23 +118,12 @@ export function createLspStructureProvider(options: LspStructureProviderOptions)
       if (!request.workspaceId) {
         return { status: "unavailable", provider: "lsp", revision: request.revision, symbols: [], message: "Workspace is unavailable for language binding." };
       }
-      if (request.warmOnly) {
-        const status = options.supervisor.getStatus(request.workspaceId, languageId, AGENT_LANGUAGE_VIEW).status;
-        if (status !== "ready" && status !== "degraded") {
-          return {
-            status: "unavailable",
-            provider: "lsp",
-            revision: request.revision,
-            symbols: [],
-            message: "Language server is not already running for this view.",
-          };
-        }
-      }
       const bound = await binder.bind({
         workspaceId: request.workspaceId,
         resourceId: request.path,
         languageId,
         text: "input-context",
+        ...(request.warmOnly ? { warmOnly: true } : {}),
         ...(request.sessionId ? { sessionId: request.sessionId } : {}),
         ...(request.inputContext ? { inputContext: request.inputContext } : {}),
         ...(request.signal ? { signal: request.signal } : {}),
@@ -148,10 +138,14 @@ export function createLspStructureProvider(options: LspStructureProviderOptions)
         return { status: "cancelled", provider: "lsp", revision: request.revision, symbols: [], message: "Structure request was cancelled." };
       }
       const symbolsRequest = {
-        view: AGENT_LANGUAGE_VIEW,
-        resource: { workspaceId: request.workspaceId, resourceId: request.path },
+        view: bound.view,
+        resource: bound.resource,
         languageId,
-        expectedRevision: request.revision,
+        expectedRevision: bound.languageRevision,
+        generation: bound.generation,
+        documentVersion: bound.documentVersion,
+        expectedViewRevision: bound.viewRevision,
+        ...(request.warmOnly ? { warmOnly: true } : {}),
       };
       const response = recordOf(await (request.signal
         ? options.supervisor.documentSymbols(symbolsRequest, { signal: request.signal })

@@ -17,7 +17,7 @@ import {
 export interface HarnessPathAuthorityOptions {
   authorityId: string;
   documents: {
-    inspectWorkspace(workspaceId: string, options?: { signal?: AbortSignal; reportPhase?: (phase: string) => void }): Promise<{ root: string }>;
+    getWorkspace(workspaceId: string, signal?: AbortSignal): Promise<{ root: string }>;
     /**
      * HR0 resource addressing: the longest registered directory root
      * containing this canonical path (never a file root).
@@ -145,7 +145,7 @@ export function createHarnessPathAuthority({
       };
       stage("workspace");
       const workspace = actor.workspaceId
-        ? await waitWithSignal(documents.inspectWorkspace(actor.workspaceId, options), options.signal)
+        ? await documents.getWorkspace(actor.workspaceId, options.signal)
         : null;
       const authorityRoot = workspace?.root ?? actor.authorityRoot ?? null;
       const baseDir = actor.cwd ?? authorityRoot;

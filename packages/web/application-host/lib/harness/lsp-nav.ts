@@ -1,8 +1,7 @@
 import type { JsonValue, LspNavigationResult } from "@varin/protocol";
 import type { DocumentAuthority } from "../documents/authority.js";
 import type { createLanguageSupervisor } from "../lsp/supervisor.js";
-import { AGENT_LANGUAGE_VIEW } from "../lsp/supervisor.js";
-import { createLanguageViewBinder, type LanguageTextSource } from "../lsp/language-view.js";
+import { createLanguageViewBinder, type LanguageTextSource, type BoundLanguageDocument, type ResolveLanguageTarget } from "../lsp/language-view.js";
 import type { HarnessDocumentReadSource } from "./service-host.js";
 import type { HarnessService, HarnessServiceContext } from "./router.js";
 import { languageIdForPath } from "./language-id.js";
@@ -13,9 +12,10 @@ type LanguageSupervisor = Pick<ReturnType<typeof createLanguageSupervisor>,
   "syncDocument" | "workspaceSymbols" | "definition" | "references" | "hover">;
 
 interface LspNavigationDeps {
-  documents: Pick<DocumentAuthority, "read" | "readAgentInputSnapshot">;
+  documents: Pick<DocumentAuthority, "readSnapshot" | "readAgentInputSnapshot">;
   supervisor: LanguageSupervisor;
   readSource?: HarnessDocumentReadSource;
+  resolveTarget?: ResolveLanguageTarget;
   /**
    * Persist already-obtained resolution results into the workspace knowledge
    * graph (D-240). Called only for disk-bound documents — a surface-draft
@@ -34,9 +34,14 @@ interface LspNavigationDeps {
 }
 
 interface PreparedDocument {
+  view: BoundLanguageDocument['view'];
+  generation: number;
+  viewRevision: number;
+  documentVersion: number;
   languageId: string;
   resource: { workspaceId: string; resourceId: string };
   revision: string;
+  languageRevision: string;
   source: LanguageTextSource;
 }
 
@@ -169,7 +174,7 @@ export function createLspNavigationServices(deps: LspNavigationDeps): {
   references: HarnessService<"lsp.references">;
   hover: HarnessService<"lsp.hover">;
 } {
-  const binder = createLanguageViewBinder({ documents: deps.documents, supervisor: deps.supervisor, ...(deps.readSource ? { readSource: deps.readSource } : {}) });
+  const binder = createLanguageViewBinder(deps);
 
   const prepareDocument = async (
     path: string,
@@ -181,7 +186,6 @@ export function createLspNavigationServices(deps: LspNavigationDeps): {
     const resourceId = authorized?.resourceId ?? path;
     const languageId = languageIdForPath(resourceId);
     if (!languageId) return unavailable(`LSP unavailable: unsupported file type for ${path}`);
-    const resource = { workspaceId, resourceId };
     // Navigation follows the same fixed source as read/grep for this turn, so a
     // reported position refers to text the agent can actually obtain.
     const bound = await binder.bind({
@@ -199,7 +203,8 @@ export function createLspNavigationServices(deps: LspNavigationDeps): {
       throw error;
     });
     if (bound.status !== "bound") return unavailable(`LSP unavailable: ${bound.message}`);
-    return { languageId, resource, revision: bound.revision, source: bound.source };
+    const { status: _status, ...document } = bound;
+    return { ...document, languageId };
   };
 
   /**
@@ -232,10 +237,13 @@ export function createLspNavigationServices(deps: LspNavigationDeps): {
   };
 
   const requestFor = (prepared: PreparedDocument) => ({
-    view: AGENT_LANGUAGE_VIEW,
+    view: prepared.view,
     resource: prepared.resource,
     languageId: prepared.languageId,
-    expectedRevision: prepared.revision,
+    expectedRevision: prepared.languageRevision,
+    generation: prepared.generation,
+    documentVersion: prepared.documentVersion,
+    expectedViewRevision: prepared.viewRevision,
   });
 
   /**
@@ -255,7 +263,7 @@ export function createLspNavigationServices(deps: LspNavigationDeps): {
     const workspaceId = prepared.resource.workspaceId;
     const anchorPath = prepared.resource.resourceId;
     void (async () => {
-      const snapshot = await deps.documents.read({ workspaceId, resourceId: anchorPath }, { signal: ctx.signal });
+      const snapshot = await deps.documents.readSnapshot({ workspaceId, resourceId: anchorPath }, { signal: ctx.signal });
       if (snapshot.status !== "ready" || snapshot.revision !== prepared.revision) return;
       const name = identifierAt(snapshot.content, params.line, params.character ?? 1)?.name;
       if (!name) return;

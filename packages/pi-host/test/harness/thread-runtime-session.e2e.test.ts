@@ -576,7 +576,7 @@ describe("thread runtime with native working-state integration", () => {
       search: async () => ({ status: "empty" as const, generation: undefined }),
       resolveWorkspaceRoot: async (id) => (await documents.inspectWorkspace(id)).root,
       pathAuthority: createHarnessPathAuthority({ authorityId: authorityInstanceId,
-        documents: { inspectWorkspace: (id) => documents.inspectWorkspace(id) } }),
+        documents: { getWorkspace: (id) => documents.inspectWorkspace(id) } }),
       discoveredShells: {
         hasBash: process.platform !== "win32",
         hasPowerShell: process.platform === "win32",

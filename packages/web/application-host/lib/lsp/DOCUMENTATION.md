@@ -33,7 +33,7 @@ and acknowledges progress setup. Unsolicited `workspace/applyEdit` is rejected: 
 Documents. A pending preparation belongs to the session's launch cancellation and cannot spawn after
 the workspace is disposed.
 
-Internal `syncDocument` and `documentSymbols` calls accept a separate `{ signal }` option, kept out of
+Internal synchronization and Host navigation calls accept a separate `{ signal }` option, kept out of
 the public JSON request. Text binding and session activation can stop this caller's wait without retiring
 shared language startup. An active document-symbol request passes the signal into JSON-RPC: its waiter
 and abort listener are released, a `$/cancelRequest` notification names that request ID, and late responses
@@ -43,15 +43,54 @@ terminated. The notification follows the [LSP cancellation contract](https://git
 
 ## Views
 
-A session is keyed by `(workspaceId, languageId, viewId)` because one server cannot be both the
+A session is keyed by `(workspaceId, providerId, viewId)` because one server cannot be both the
 editor's live buffer and an agent turn's fixed text (D-087):
 
 - `surface` — owned by the renderer. Versions are the editor's `localEditRevision`, the process stops
-  after the last editor document closes, and a replacement server is handed the current buffers.
-- `agent` — owned by the Host. Versions are assigned per `(view, resource)`, each open document
+  after the last editor document closes unless retained for prewarming, and a replacement server receives the current buffers.
+- `agent` — the workspace's disk view, owned by the Host. Versions increase throughout the server generation, each open document
   records the `contentRevision` it was synchronized from, and callers assert that revision with
   `expectedRevision`. It starts on the first Host request, closes least-recently-used documents past
   `hostViewDocumentLimit`, releases after `hostViewIdleMs`, and never replays documents on restart.
+- `agent:<content hash>` — a fixed draft view. Its captured buffers are synchronized together; identical
+  draft contents can share the same view across sessions. Fixed buffers and active query documents are
+  not LRU-evicted. These views expire independently of a retained project disk view.
+
+Language-capable child runs materialize their existing WorkingState execution directory before the
+first prompt. Navigation, diagnostics and LSP structure fallback resolve source aliases to that
+directory, so imports and project files are read from the child's workspace. Editor draft views use LSP
+buffer overlays; as with an editor, project configuration and unopened files remain server-managed.
+The protocol does not provide a whole-project historical snapshot, and cross-file locations remain
+unpinned rather than being stamped with the queried document's revision.
+
+Provider language families share a process (for example TS/TSX/JS). Document versions are assigned only
+after shared startup finishes, in the synchronous notification step. A view revision detects changes to
+other synchronized files while a query is answering. Filesystem/Document mutation events invalidate
+diagnostics and return changed disk buffers to server filesystem ownership; fixed drafts remain fixed.
+
+## Preparation and prewarming
+
+`prewarm.ts` retains the active project's workspaces and live session workspaces. Project selection and
+session snapshots start the same provider activation, preparation and initialization used by queries.
+Language inventory supplies representative source files, which are opened in the disk view to load
+lazy projects. The surface view is initialized without taking ownership of editor buffers. The existing
+project-index manager still owns persisted semantic/structure index recovery and incremental updates.
+
+Cancelling one waiter leaves other callers intact; the final cancelled startup waiter aborts its owned
+preparation. Initialization has a configurable 45-second default handshake deadline so a silent server
+cannot leave one shared startup promise pending forever. Failed startup closes the owned process before
+a later call can replace it. LSP Harness transport follows this lifecycle, rather than applying the generic
+deadline over installation and startup. Text acquisition and actual feature requests retain separate
+30-second budgets. Project/session release cancels unwanted warmup; idle cleanup preserves active
+requests and retained project views, and reclaims unused prewarmed surface views too.
+
+## Diagnostic results
+
+Diagnostics use the caller's code view and exact document binding. Servers with `diagnosticProvider`
+are queried through pull diagnostics; others use versioned publications. Unversioned push results may
+still be displayed by the editor, but are not labelled as a verified current Agent result. Missing or
+stale results are `pending`, never a successful empty list. Incremental cursors advance only after a
+current report is returned and delivered. Cache keys include the view and server generation.
 
 `inspectViews()` reports live processes, open documents, and idle time; `releaseIdleHostViews()` is the
 asynchronous release, completed only after actual process stop. Both views emit `view` on status and diagnostics events, and the renderer routes
@@ -68,7 +107,7 @@ only for the provider/document generation that produced them, and only when the 
 command in `executeCommandProvider`.
 
 Project-provided (`source: 'workspace'`) commands run only when `isTrusted(root)` is true.
-Production Web sets `isTrusted` to false. There is no HTTP route that registers providers.
+Production uses the Host workspace-root guard for this decision. There is no HTTP route that registers providers.
 
 ## Routes
 
@@ -76,7 +115,8 @@ Production Web sets `isTrusted` to false. There is no HTTP route that registers 
   generation-bound `executeCommand`
 - `GET /api/language/events?workspaceId=` SSE (credentials in headers). Payloads must not include file bodies.
 
-Application-host endpoint/workspace switch disposes sessions. Electron reuses this Web host.
+Renderer endpoint/workspace switches release only the surface view. A retained project keeps its
+prewarmed process without editor buffers; Agent queries keep their own lifetime. Electron reuses this Web host.
 
 ## Managed native servers
 

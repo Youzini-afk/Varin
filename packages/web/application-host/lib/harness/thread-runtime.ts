@@ -70,7 +70,7 @@ import { normalizePathIdentity } from "../workspace/path-safety.js";
 import { sameState } from "../recovery/journal-files.js";
 import { createCodeSubmissionRuntime, submittedCodeBaseline } from "./working-state/code-submission.js";
 import type { VerificationCoordinator } from "./verification-coordinator.js";
-import { runNeedsMaterializedDirectory } from "./working-state/path-requirement.js";
+import { runNeedsMaterializedDirectory, runUsesLanguageService } from "./working-state/path-requirement.js";
 import {
   directoryBaselineFingerprint,
   gitBaselineFingerprint,
@@ -2376,6 +2376,13 @@ export function createThreadRuntime(options: ThreadRuntimeOptions) {
         threadId: input.threadId,
         runId: input.runId,
       });
+      if (virtualIsolated && runUsesLanguageService(input.tools)) {
+        pendingMaterializeReservations.set(input.threadId, releaseSpaceReservation);
+        releaseSpaceReservation = async () => undefined;
+        setPreparationStage('materializing');
+        const prepared = await materializeExecutionView(sessionId, preparationSignal);
+        if (prepared.status === 'failed') throw new ThreadRuntimeError('unavailable', prepared.message);
+      }
       checkPreparation();
       scheduleStallTimer(binding);
       await options.registry.markRunRunning(input.scopeId, input.threadId, input.runId, sessionId);
@@ -2399,7 +2406,7 @@ export function createThreadRuntime(options: ThreadRuntimeOptions) {
       );
       await options.registry.acknowledgeThreadMessages(input.scopeId, input.threadId, heldMessages.map((message) => message.id), input.runId);
       checkPreparation();
-      if (virtualIsolated && mayMaterialize && effectiveSettings?.budget) {
+      if (virtualIsolated && mayMaterialize && !runUsesLanguageService(input.tools) && effectiveSettings?.budget) {
         pendingMaterializeReservations.set(input.threadId, releaseSpaceReservation);
         releaseSpaceReservation = async () => undefined;
       }

@@ -53,7 +53,7 @@ export function createLspNavigationTools(bridge: HostServicesBridge): ToolDefini
           path: params.path,
           line: params.line,
           ...(params.character === undefined ? {} : { character: params.character }),
-        } as never, signal ? { signal } : {});
+        } as never, { timeoutMs: 0, ...(signal ? { signal } : {}) });
         return resultContent(result as LspNavigationResult);
       } catch (error) {
         return failedContent(name, error);
@@ -71,7 +71,7 @@ export function createLspNavigationTools(bridge: HostServicesBridge): ToolDefini
       executionMode: "parallel",
       execute: async (_toolCallId, params, signal) => {
         try {
-          return resultContent(await bridge.request("lsp.symbols", { path: params.path, query: params.query }, signal ? { signal } : {}));
+          return resultContent(await bridge.request("lsp.symbols", { path: params.path, query: params.query }, { timeoutMs: 0, ...(signal ? { signal } : {}) }));
         } catch (error) {
           return failedContent("symbols", error);
         }

@@ -32,7 +32,7 @@ export const CATALOG_SCAN_BATCH = 8;
 
 export interface SymbolGraphRuntimeOptions {
   getStore(workspaceId: string): Promise<KnowledgeStore | null>;
-  documents: Pick<DocumentAuthority, "read" | "readAgentInputSnapshot"> & {
+  documents: Pick<DocumentAuthority, "read" | "readSnapshot" | "readAgentInputSnapshot"> & {
     inspectWorkspace?: DocumentAuthority["inspectWorkspace"];
   };
   supervisor: LanguageSupervisor;
