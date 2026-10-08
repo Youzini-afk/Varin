@@ -156,7 +156,7 @@
     "KernelProcessListResult": {"fields":{"processes":{"type":"KernelProcessSnapshot[]"},"nextCursor":{"type":"number | null"}}},
     "KernelProcessSnapshot": {"fields":{"processId":{"type":"string"},"kernelEpoch":{"type":"string"},"workspaceId":{"type":"string"},"cwd":{"type":"string"},"mode":{"type":"string"},"status":{"type":"\"starting\" | \"running\" | \"exited\" | \"failed\" | \"unknown\" | \"released\""},"pid":{"type":"number | null"},"exitCode":{"type":"number | null"},"signal":{"type":"string | null"},"reason":{"type":"string | null"},"writerActive":{"type":"boolean"},"outputAvailable":{"type":"boolean"}}},
     "KernelProcessOutputChunk": {"fields":{"channel":{"type":"\"stdout\" | \"stderr\""},"offset":{"type":"number"},"bytesBase64":{"type":"string"}}},
-    "KernelProcessReadResult": {"fields":{"process":{"type":"KernelProcessSnapshot"},"chunks":{"type":"KernelProcessOutputChunk[]"},"nextCursor":{"type":"number"},"endCursor":{"type":"number"},"inputSequence":{"type":"number"},"inputError":{"type":"string | null"}}},
+    "KernelProcessReadResult": {"fields":{"process":{"type":"KernelProcessSnapshot"},"chunks":{"type":"KernelProcessOutputChunk[]"},"nextCursor":{"type":"number"},"endCursor":{"type":"number"},"inputSequence":{"type":"number"},"inputError":{"type":"string | null"},"outputComplete":{"type":"boolean"},"outputError":{"type":"string | null"}}},
     "KernelProcessWriteResult": {"fields":{"sequence":{"type":"number"},"queued":{"type":"boolean"}}},
     "KernelEmptyParams": {"fields": {}},
     "KernelHandshakeParams": {"fields": {

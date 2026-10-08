@@ -390,7 +390,7 @@ impl Catalog {
                         op.result = Some(json!({"operation_id":operation_id,"phase":phase}));
                     }
                 }
-                if op.handed_off {
+                if op.handed_off || (op.phase==OperationPhase::Terminal&&op.outcome==Some(Outcome::Indeterminate)) {
                     if let Some(receipt)=op.external_receipt.clone(){
                         apply_external_terminal(&mut op,&receipt);
                     }
@@ -655,12 +655,27 @@ impl Catalog {
             }
         }
         if op.phase==OperationPhase::Terminal&&op.outcome!=Some(Outcome::Indeterminate){return Err(RuntimeError::Conflict("job is already settled with another receipt".into()));}
+        let settle=op.handed_off||(op.phase==OperationPhase::Terminal&&op.outcome==Some(Outcome::Indeterminate));
         op.external_receipt=Some(receipt.clone());op.revision+=1;
-        if op.handed_off {apply_external_terminal(&mut op,&receipt);}
+        if settle {apply_external_terminal(&mut op,&receipt);}
         put(&tx,"operations",operation_id,&op)?;
-        event(&tx,operation_id,op.revision,if op.handed_off{"operation.settled"}else{"operation.external_receipt"},serde_json::to_value(&op)?)?;
+        event(&tx,operation_id,op.revision,if settle{"operation.settled"}else{"operation.external_receipt"},serde_json::to_value(&op)?)?;
         tx.commit()?;
         self.reconcile_waits()?;
         Ok(op)
+    }
+}
+
+impl Catalog {
+    /// Resource recovery queries only the native jobs whose facts are still unresolved.
+    pub fn pending_external_operations(&self,executor:&str)->Result<Vec<String>> {
+        let mut statement=self.db.prepare("SELECT id FROM operations WHERE json_extract(body,'$.executor')=?1 AND (json_extract(body,'$.phase')!='terminal' OR json_extract(body,'$.outcome')='indeterminate') ORDER BY id")?;
+        let rows=statement.query_map([executor],|row|row.get(0))?;
+        Ok(rows.collect::<std::result::Result<Vec<_>,_>>()?)
+    }
+    pub fn record_recovery_failure(&mut self,source:&str,reason:&str)->Result<()> {
+        let tx=self.db.transaction()?;
+        event(&tx,source,0,"recovery.unavailable",json!({"reason":reason}))?;
+        tx.commit()?;Ok(())
     }
 }

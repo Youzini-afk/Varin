@@ -4,6 +4,7 @@ use std::collections::BTreeMap;
 pub const FAMILY: &str = "openai-responses";
 
 pub struct ResponsesProvider {
+    family: &'static str,
     pub connection: Connection,
     pub max_output_tokens: Option<u64>,
     /// Provider-native reasoning settings, fixed when the adapter generation is constructed.
@@ -12,17 +13,23 @@ pub struct ResponsesProvider {
 impl ResponsesProvider {
     pub fn new(connection: Connection) -> Self {
         Self {
+            family: FAMILY,
             connection,
             max_output_tokens: None,
             reasoning: None,
         }
     }
+    pub(super) fn for_family(connection: Connection, family: &'static str) -> Self {
+        let mut provider = Self::new(connection);
+        provider.family = family;
+        provider
+    }
 }
 impl ModelProvider for ResponsesProvider {
     fn serialize(&self, view: &RequestView) -> Result<Value, ExecutionError> {
-        validate_view(view, FAMILY)?;
+        validate_view(view, self.family)?;
         let mut input = Vec::new();
-        for item in compile_history(&view.history, FAMILY) {
+        for item in compile_history(&view.history, self.family) {
             if let Some(original) = item.opaque {
                 if original.adapter_version != "1" {
                     return Err(ExecutionError::new(
@@ -74,7 +81,7 @@ impl ModelProvider for ResponsesProvider {
         cancel: &CancellationToken,
         emit: &mut dyn FnMut(ProviderEvent) -> Result<(), ExecutionError>,
     ) -> Result<FinishReason, ModelFailure> {
-        if request.view.binding.provider_family != FAMILY {
+        if request.view.binding.provider_family != self.family {
             return Err(failure("provider_family_mismatch", "wrong adapter family"));
         }
         let mut state = StreamState::default();
@@ -177,7 +184,7 @@ impl StreamState {
                 item: ProviderItem {
                     id,
                     content,
-                    opaque: opaque(FAMILY, raw),
+                    opaque: opaque(&view.binding.provider_family, raw),
                 },
             },
         )

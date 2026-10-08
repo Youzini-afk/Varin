@@ -828,3 +828,29 @@ fn early_external_terminal_and_model_job_acceptance_converge() {
         settled
     );
 }
+
+#[test]
+fn later_external_confirmation_resolves_lost_acceptance_receipt_without_handoff() {
+    let f = Fixture::new();
+    let mut db = f.open();
+    let r = submit(&mut db);
+    let epoch = db.epoch();
+    db.admit_operation("job", &r.run_id, epoch, Lifetime::Thread, Value::Null)
+        .unwrap();
+    db.dispatch_operation("job", epoch, "process-executor", true)
+        .unwrap();
+    db.settle_operation(
+        "job",
+        epoch,
+        Outcome::Indeterminate,
+        Effect::Unknown,
+        json!({"reason":"acceptance response lost"}),
+    )
+    .unwrap();
+    assert!(!db.operation("job").unwrap().handed_off);
+    let receipt = external("job", Outcome::Succeeded, Effect::Confirmed);
+    let confirmed = db.record_external_receipt("job", receipt).unwrap();
+    assert_eq!(confirmed.outcome,Some(Outcome::Succeeded),"actual resource confirmation was stored but the original uncertain outcome was never resolved");
+    assert_eq!(confirmed.effect, Effect::Confirmed);
+    assert_eq!(confirmed.phase, OperationPhase::Terminal);
+}

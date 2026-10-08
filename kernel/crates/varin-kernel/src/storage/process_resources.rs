@@ -40,6 +40,26 @@ fn contains(parent: &Path, child: &Path) -> bool {
     }
 }
 impl Storage {
+    pub(crate) fn set_process_controls(&mut self, controls: process::ProcessControlRegistry) {
+        self.processes.set_controls(controls);
+    }
+
+    pub(crate) fn set_process_terminal_sender(&mut self, sender: std::sync::mpsc::Sender<process::ProcessTerminal>) {
+        self.processes.set_terminal_sender(sender);
+    }
+    /// Replay only the native Catalog's unresolved process IDs. Completed Storage rows can
+    /// precede Catalog receipt delivery, so this must not filter solely on writerActive.
+    pub(crate) fn replay_process_terminals(&self, process_ids: &[String]) -> Result<(), KernelError> {
+        for id in process_ids {
+            let Some(record) = self.process_record(id)? else { continue; };
+            let epoch = string(&record, "kernelEpoch")?;
+            if let Some(receipt) = process::read_receipt(&self.root, id, epoch)? {
+                self.processes.replay_terminal(id, epoch, receipt);
+            }
+        }
+        Ok(())
+    }
+
     fn process_record(&self, id: &str) -> Result<Option<Value>, KernelError> {
         let raw: Option<String> = self
             .conn
@@ -85,6 +105,7 @@ impl Storage {
                 let gone = receipt.is_some();
                 if gone {
                     if let Some(receipt) = receipt {
+                        self.processes.replay_terminal(id, epoch, receipt.clone());
                         for key in ["status", "pid", "exitCode", "signal", "reason"] {
                             record[key] = receipt[key].clone();
                         }
@@ -277,7 +298,7 @@ impl Storage {
         if let Err(error)=self.processes.spawn(id,json!({"processId":id,"kernelEpoch":grant.kernel_epoch,
             "receiptPath":receipt_path,"jobName":job_name,"cwd":cwd,"command":command,"args":params_value["args"],
             "windowsRawArguments":params_value["windowsRawArguments"],
-            "env":params_value["env"],"mode":mode,"cols":cols,"rows":rows})){
+            "env":params_value["env"],"mode":mode,"cols":cols,"rows":rows,"nativeRunId":params_value["__nativeRunId"]})){
             let mut failed=record;
             failed["status"]=json!("failed");failed["writerActive"]=json!(false);failed["reason"]=json!(error.to_string());
             self.persist_process_record(id,&failed)?;
@@ -350,6 +371,11 @@ impl Storage {
                 ));
             }
             self.processes.release(id);
+            match fs::remove_file(process::output_path(&self.root, id)) {
+                Ok(()) => {},
+                Err(error) if error.kind() == io::ErrorKind::NotFound => {},
+                Err(error) => return Err(error.into()),
+            }
             let mut record = record;
             record["status"] = json!("released");
             record["outputAvailable"] = json!(false);

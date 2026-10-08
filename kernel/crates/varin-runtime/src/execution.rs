@@ -25,16 +25,34 @@ impl ExecutionError {
 
 /// Cancellation is a control fact, not a synthetic tool-effect receipt.
 #[derive(Debug, Default)]
-struct CancellationState { cancelled: Arc<AtomicBool>, changed: tokio::sync::Notify }
+struct CancellationState {
+    cancelled:Arc<AtomicBool>, changed:tokio::sync::Notify,
+    children:std::sync::Mutex<std::collections::HashMap<String,std::sync::Weak<CancellationState>>>,
+}
 #[derive(Debug, Clone, Default)]
 pub struct CancellationToken(Arc<CancellationState>);
 impl CancellationToken {
     pub fn cancel(&self) {
-        self.0.cancelled.store(true, Ordering::Release);
-        self.0.changed.notify_waiters();
+        let mut pending=vec![self.0.clone()];
+        while let Some(state)=pending.pop(){
+            state.cancelled.store(true,Ordering::Release);state.changed.notify_waiters();
+            let children=state.children.lock().unwrap_or_else(|poison|poison.into_inner());
+            pending.extend(children.values().filter_map(std::sync::Weak::upgrade));
+        }
     }
     pub fn is_cancelled(&self) -> bool { self.0.cancelled.load(Ordering::Acquire) }
     pub fn shared_flag(&self)->Arc<AtomicBool>{self.0.cancelled.clone()}
+    pub fn child(&self,identity:&str)->Self {
+        let mut children=self.0.children.lock().unwrap_or_else(|poison|poison.into_inner());
+        if let Some(child)=children.get(identity).and_then(std::sync::Weak::upgrade){return Self(child);}
+        children.retain(|_,child|child.strong_count()>0);
+        let child=Self::default();children.insert(identity.into(),Arc::downgrade(&child.0));
+        if self.is_cancelled(){child.cancel();}child
+    }
+    pub fn cancel_child(&self,identity:&str)->bool {
+        let child=self.0.children.lock().unwrap_or_else(|poison|poison.into_inner()).get(identity).and_then(std::sync::Weak::upgrade);
+        if let Some(child)=child{Self(child).cancel();true}else{false}
+    }
     pub async fn cancelled(&self) {
         loop {
             let notified = self.0.changed.notified();
@@ -677,6 +695,9 @@ impl<P: Persistence + ?Sized, M: ModelProvider + ?Sized, T: ToolExecutor + ?Size
                 Err(error) => { rejected.insert(index, ToolCompletion::failure(&error.code, &error.message, Effect::None)); }
             }
         }
+        // Register and retain every accepted call's control handle before publishing admission.
+        // A resource-queued call can be cancelled without waiting until execute_one starts.
+        let _operation_tokens:Vec<_>=admitted.iter().map(|(_,tool)|cancel.child(&format!("{}:tool:{}",snapshot.view.request_id,tool.call.call_id))).collect();
         self.commit(input, ExecutionRecord::ToolsAdmitted {
             request_id: snapshot.view.request_id.clone(), tools: admitted.iter().map(|(_, tool)| tool.clone()).collect(),
         })?;
@@ -731,6 +752,8 @@ impl<P: Persistence + ?Sized, M: ModelProvider + ?Sized, T: ToolExecutor + ?Size
             run_id: input.run_id.clone(), request_id: snapshot.view.request_id.clone(),
             operation_id: format!("{}:tool:{}", snapshot.view.request_id, tool.call.call_id),
         };
+        let operation_cancel=cancel.child(&context.operation_id);
+        let cancel=&operation_cancel;
         let completion = if cancel.is_cancelled() { ToolCompletion::cancelled() }
         else if let Err(error) = guarded("tool_authorize_panicked", || self.tools.authorize(&context, &tool.call, &tool.contract, cancel)) {
             ToolCompletion::failure(&error.code, &error.message, Effect::None)

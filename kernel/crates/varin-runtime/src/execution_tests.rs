@@ -625,3 +625,165 @@ fn independent_fast_tool_finishes_while_another_tool_is_still_running() {
     );
     assert_eq!(report.state, RunState::Completed);
 }
+
+#[test]
+fn cancelling_one_queued_operation_does_not_fail_its_run_or_execute_it() {
+    struct TwoWrites(AtomicUsize);
+    impl ModelProvider for TwoWrites {
+        fn serialize(&self, v: &RequestView) -> Result<Value, ExecutionError> {
+            Ok(serde_json::to_value(v).unwrap())
+        }
+        fn generate(
+            &self,
+            _: &RequestSnapshot,
+            _: &CancellationToken,
+            emit: &mut dyn FnMut(ProviderEvent) -> Result<(), ExecutionError>,
+        ) -> Result<FinishReason, ModelFailure> {
+            if self.0.fetch_add(1, Ordering::SeqCst) == 0 {
+                for name in ["first", "queued"] {
+                    emit(ProviderEvent::ItemCompleted {
+                        item: ProviderItem {
+                            id: format!("item-{name}"),
+                            content: Content::ToolCall {
+                                call: ToolCall {
+                                    call_id: name.into(),
+                                    name: name.into(),
+                                    schema_version: "1".into(),
+                                    arguments: json!({}),
+                                },
+                            },
+                            opaque: None,
+                        },
+                    })
+                    .unwrap();
+                }
+                Ok(FinishReason::ToolCalls)
+            } else {
+                emit(ProviderEvent::ItemCompleted {
+                    item: ProviderItem {
+                        id: "answer".into(),
+                        content: Content::Text {
+                            text: "first completed, second cancelled".into(),
+                        },
+                        opaque: None,
+                    },
+                })
+                .unwrap();
+                Ok(FinishReason::Stop)
+            }
+        }
+    }
+    struct Writes {
+        started: std::sync::mpsc::Sender<()>,
+        release: Mutex<std::sync::mpsc::Receiver<()>>,
+        queued_calls: AtomicUsize,
+    }
+    impl ToolExecutor for Writes {
+        fn prepare(
+            &self,
+            call: &ToolCall,
+            _: &RequestSnapshot,
+        ) -> Result<ToolContract, ExecutionError> {
+            Ok(ToolContract {
+                name: call.name.clone(),
+                schema_version: "1".into(),
+                read_only: false,
+                completion: CompletionKind::Result,
+                lifetime: Lifetime::Run,
+                resources: vec![ResourceClaim {
+                    key: "same-file".into(),
+                    access: Access::Write,
+                }],
+            })
+        }
+        fn authorize(
+            &self,
+            _: &ToolExecutionContext,
+            _: &ToolCall,
+            _: &ToolContract,
+            _: &CancellationToken,
+        ) -> Result<(), ExecutionError> {
+            Ok(())
+        }
+        fn execute(
+            &self,
+            _: &ToolExecutionContext,
+            call: &ToolCall,
+            _: &ToolContract,
+            _: &CancellationToken,
+        ) -> ToolCompletion {
+            if call.name == "first" {
+                self.started.send(()).unwrap();
+                self.release.lock().unwrap().recv().unwrap();
+            } else {
+                self.queued_calls.fetch_add(1, Ordering::SeqCst);
+            }
+            ToolCompletion::Result {
+                outcome: Outcome::Succeeded,
+                effect: Effect::Confirmed,
+                content: json!(call.name),
+            }
+        }
+    }
+    let f = Fixture::new();
+    let db = f.catalog();
+    let mut input = input(&db);
+    input.binding.tools = ["first", "queued"]
+        .into_iter()
+        .map(|name| ToolSchema {
+            name: name.into(),
+            version: "1".into(),
+            schema: json!({"type":"object"}),
+        })
+        .collect();
+    let queued_id = format!("{}:{}:1:tool:queued", input.run_id, input.owner_generation);
+    let catalog = match Arc::try_unwrap(db) {
+        Ok(db) => db.into_inner().unwrap(),
+        Err(_) => panic!("unexpected shared catalog"),
+    };
+    let supervisor = crate::supervisor::RunSupervisor::new(catalog);
+    let (started_tx, started_rx) = std::sync::mpsc::channel();
+    let (release_tx, release_rx) = std::sync::mpsc::channel();
+    let tools = Arc::new(Writes {
+        started: started_tx,
+        release: Mutex::new(release_rx),
+        queued_calls: AtomicUsize::new(0),
+    });
+    let handle = supervisor
+        .start(
+            &input.run_id,
+            crate::supervisor::RunStart {
+                binding: input.binding,
+                policy_state: Value::Null,
+                provider: Arc::new(TwoWrites(AtomicUsize::new(0))),
+                tools: tools.clone(),
+                policy: Arc::new(DefaultAgentPolicy),
+                progress: ProgressSink::default(),
+            },
+        )
+        .unwrap();
+    started_rx
+        .recv_timeout(std::time::Duration::from_secs(3))
+        .unwrap();
+    let cancelled = supervisor.cancel_operation(&queued_id).unwrap();
+    assert!(cancelled.cancel_requested);
+    release_tx.send(()).unwrap();
+    let report = handle.wait();
+    supervisor.shutdown().unwrap();
+    assert!(
+        report.is_ok(),
+        "queued-operation cancellation aborted the whole worker: {report:?}"
+    );
+    assert_eq!(report.unwrap().state, RunState::Completed);
+    assert_eq!(tools.queued_calls.load(Ordering::SeqCst), 0);
+    assert_eq!(
+        supervisor
+            .catalog()
+            .lock()
+            .unwrap()
+            .operation(&queued_id)
+            .unwrap()
+            .outcome,
+        Some(Outcome::Cancelled)
+    );
+}

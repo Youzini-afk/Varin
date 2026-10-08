@@ -238,14 +238,14 @@ it('native tool loop reads a grant-scoped fixed file revision and returns its re
   expect((await f.native.history('tool-branch')).some(item => item.source === 'tool')).toBe(true);
 }, 30_000);
 
-it('native tool loop spawns a real process only through its registered workspace grant', async () => {
+it.each([false, true])('native tool process settles OS and durable operation evidence (cancel=%s)', async (cancelProcess) => {
   const f = await fixture();
   const workspace = path.join(f.root, 'process-workspace');
   await fs.mkdir(workspace);
   let turn = 0;
   const provider = await localProvider((_body, response) => {
     const output = ++turn === 1
-      ? [{ id: 'process-call', type: 'function_call', call_id: 'spawn-1', name: 'native_process_spawn', arguments: JSON.stringify({ cwd: '', command: process.execPath, args: ['-e', 'require("node:fs").writeFileSync("native-test-marker.txt", "real native process")'], mode: 'pipe' }) }]
+      ? [{ id: 'process-call', type: 'function_call', call_id: 'spawn-1', name: 'native_process_spawn', arguments: JSON.stringify({ cwd: '', command: process.execPath, args: ['-e', 'require("node:fs").writeFileSync("native-test-marker.txt", "real native process");' + (cancelProcess ? 'setInterval(() => {}, 1000)' : '')], mode: 'pipe' }) }]
       : [{ id: 'process-answer', type: 'message', content: [{ type: 'output_text', text: 'spawn accepted' }] }];
     response.writeHead(200, { 'content-type': 'text/event-stream' });
     response.end(`data: ${JSON.stringify({ type: 'response.completed', response: { output } })}\n\n`);
@@ -258,13 +258,38 @@ it('native tool loop spawns a real process only through its registered workspace
   await f.native.startRun(receipt.run_id, undefined, { grantId: grant.grantId, runId: receipt.run_id, threadId: 'process-thread', workspaceId: 'process-workspace', executionWorkspaceId: 'process-workspace', rootId: registered.rootId, enabledTools: ['process_spawn'] });
   await expect.poll(async () => (await f.native.run(receipt.run_id)).state, { timeout: 10_000 }).toBe('completed');
   expect(provider.requests).toHaveLength(2);
-  await expect.poll(async () => fs.readFile(path.join(workspace, 'native-test-marker.txt'), 'utf8').catch(() => ''), { timeout: 8_000 }).toBe('real native process');
-  await expect(actor.processList({ workspaceId: 'process-workspace', rootId: String(registered.rootId) })).rejects.toThrow(/process maintenance/i);
   const continuation = provider.requests[1]!.input as Array<Record<string, unknown>>;
   const result = continuation.find(item => item.type === 'function_call_output');
   const accepted = JSON.parse(String(result?.output)) as { operation_id: string };
   expect(typeof accepted.operation_id).toBe('string');
-  await expect.poll(async () => (await actor.processInspect({ workspaceId: 'process-workspace', processId: accepted.operation_id })).writerActive, { timeout: 8_000 }).toBe(false);
-  await expect.poll(async () => (await f.native.operation(accepted.operation_id)).phase, { timeout: 8_000 }).toBe('terminal');
-  expect((await f.native.operation(accepted.operation_id)).outcome).toBe('succeeded');
+  const processIdentity = { workspaceId: 'process-workspace', processId: accepted.operation_id };
+  try {
+    await expect.poll(async () => fs.readFile(path.join(workspace, 'native-test-marker.txt'), 'utf8').catch(() => ''), { timeout: 8_000 }).toBe('real native process');
+    await expect(actor.processList({ workspaceId: 'process-workspace', rootId: String(registered.rootId) })).rejects.toThrow(/process maintenance/i);
+    if (cancelProcess) {
+      expect((await actor.processInspect(processIdentity)).writerActive).toBe(true);
+      await f.native.cancelOperation(accepted.operation_id);
+    }
+    await expect.poll(async () => (await actor.processInspect(processIdentity)).writerActive, { timeout: 8_000 }).toBe(false);
+    await expect.poll(async () => (await f.native.operation(accepted.operation_id)).phase, { timeout: 8_000 }).toBe('terminal');
+    expect((await f.native.operation(accepted.operation_id)).outcome).toBe(cancelProcess ? 'cancelled' : 'succeeded');
+  } finally {
+    if ((await actor.processInspect(processIdentity)).writerActive) {
+      await actor.processKill({ ...processIdentity, force: true });
+      await expect.poll(async () => (await actor.processInspect(processIdentity)).writerActive, { timeout: 8_000 }).toBe(false);
+    }
+  }
+}, 30_000);
+
+it('native and Storage negotiated windows remain independent during real concurrent uploads', async () => {
+  const f = await fixture();
+  const actor = f.host.scoped(await f.host.issueGrant({ grantId: 'concurrent-owner', owningWorkspace: 'concurrent-workspace', executionWorkspace: 'concurrent-workspace', capabilities: ['storage.read', 'storage.write'], pathScopes: [''] }));
+  const body = Buffer.alloc(2 * 1024 * 1024, 37);
+  const uploads = [actor.putBlob(body, 'concurrent-blob-a'), actor.putBlob(Buffer.from(body).fill(38), 'concurrent-blob-b')] as const;
+  const controls = Promise.all(Array.from({ length: 100 }, () => f.native.status()));
+  const [first, second, statuses] = await Promise.all([...uploads, controls] as const);
+  expect(first?.byteLength).toBe(body.length);
+  expect(second?.byteLength).toBe(body.length);
+  expect(statuses).toHaveLength(100);
+  expect((await f.host.health()).integrity).toBe('ok');
 }, 30_000);

@@ -287,17 +287,20 @@ pub fn session_members(session: u32) -> io::Result<Vec<i32>> {
     }
 }
 #[cfg(unix)]
-pub fn terminate_session(session: u32, force: bool) -> io::Result<()> {
+pub fn terminate_session(session: u32, force: bool) -> io::Result<bool> {
     let signal = if force { libc::SIGKILL } else { libc::SIGTERM };
+    let mut applied = false;
     for pid in session_members(session)? {
         if unsafe { libc::kill(pid, signal) } != 0 {
             let error = io::Error::last_os_error();
             if error.raw_os_error() != Some(libc::ESRCH) {
                 return Err(error);
             }
+        } else {
+            applied = true;
         }
     }
-    Ok(())
+    Ok(applied)
 }
 
 #[cfg(target_os = "linux")]
