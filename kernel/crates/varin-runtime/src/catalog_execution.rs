@@ -379,6 +379,14 @@ impl Catalog {
                     }
                     if !tool.contract.read_only || tool.contract.completion == CompletionKind::Job {
                         let key = operation_id(request_id, &tool.call.call_id);
+                        if let Some(mut previous) = optional_record::<Operation>(&tx, "operations", &key)? {
+                            if previous.run_id != run_id || previous.phase != OperationPhase::Accepted || previous.effect != Effect::None || previous.intent != serde_json::to_value(tool)? {
+                                return Err(RuntimeError::Conflict("tool admission cannot replace an existing effect or contract".into()));
+                            }
+                            previous.epoch=epoch;
+                            put(&tx,"operations",&key,&previous)?;
+                            continue;
+                        }
                         let op = Operation {
                             external_receipt: None,
                             id: key.clone(),
@@ -537,6 +545,17 @@ impl Catalog {
                     {
                         return Err(RuntimeError::Conflict("tool receipt changed".into()));
                     }
+                    let key=operation_id(request_id,&result.call_id);
+                    if let Some(mut op)=optional_record::<Operation>(&tx,"operations",&key)? {
+                        if op.phase==OperationPhase::Accepted && op.effect==Effect::None {
+                            let closure=match &result.completion {
+                                ToolCompletion::NotDispatched{reason} => Some((Outcome::Failed,json!({"not_dispatched":reason}))),
+                                ToolCompletion::Result{outcome: outcome @ (Outcome::Cancelled|Outcome::Failed),effect:Effect::None,content} => Some((*outcome,content.clone())),
+                                _=>None,
+                            };
+                            if let Some((outcome,content))=closure {op.phase=OperationPhase::Terminal;op.outcome=Some(outcome);op.result=Some(content);op.revision+=1;put(&tx,"operations",&key,&op)?;event(&tx,&key,op.revision,"operation.settled",serde_json::to_value(&op)?)?;}
+                        }
+                    }
                     tx.execute("UPDATE tool_calls SET receipt=?3,committed=1 WHERE request_id=?1 AND call_id=?2",params![request_id,result.call_id,encode(result)?])?;
                     append_item(
                         &tx,
@@ -577,7 +596,7 @@ impl Catalog {
             json!({"kind":serde_json::to_value(record)?.get("kind")}),
         )?;
         tx.commit()?;
-        if matches!(record, ExecutionRecord::ToolSettled { .. }) {
+        if matches!(record, ExecutionRecord::ToolSettled { .. } | ExecutionRecord::ToolBatchCommitted { .. }) {
             self.reconcile_waits()?;
         }
         Ok(())
@@ -592,10 +611,16 @@ impl Catalog {
     pub fn prepare_execution(
         &self,
         run_id: &str,
-        mut binding: RequestBinding,
+        binding: RequestBinding,
         policy: PolicyIdentity,
         initial_policy_state: Value,
     ) -> Result<ExecutionInput> {
+        self.prepare_execution_inner(run_id, binding, policy, initial_policy_state, false)
+    }
+    pub(super) fn prepare_execution_with_completed_tools(&self, run_id: &str, binding: RequestBinding, policy: PolicyIdentity, initial_policy_state: Value) -> Result<ExecutionInput> {
+        self.prepare_execution_inner(run_id, binding, policy, initial_policy_state, true)
+    }
+    fn prepare_execution_inner(&self, run_id: &str, mut binding: RequestBinding, policy: PolicyIdentity, initial_policy_state: Value, completed_tools: bool) -> Result<ExecutionInput> {
         let run = self.run(run_id)?;
         if run.epoch != self.epoch
             || run.cancel_requested
@@ -619,7 +644,7 @@ impl Catalog {
             |r| r.get(0),
         )?;
         let unpaired:i64=self.db.query_row("SELECT count(*) FROM tool_calls c JOIN model_steps m ON m.id=c.request_id WHERE m.run_id=?1 AND c.committed=0",[run_id],|r|r.get(0))?;
-        if unresolved != 0 || unpaired != 0 {
+        if unresolved != 0 || (unpaired != 0 && !completed_tools) {
             return Err(RuntimeError::Conflict(
                 "execution needs explicit model/tool recovery".into(),
             ));
