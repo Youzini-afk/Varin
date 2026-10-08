@@ -81,7 +81,14 @@ The native kernel rendezvous carries only scope/request metadata outward and tra
 inward. Host HTTP credential writes and utility OAuth refresh also use the shared owner. Standalone
 Pi launches retain their existing owner because they have no parent Application Host channel.
 Credential helper/env keys preserve existing Pi resolution in the child; native bindings to dynamic
-or separately configured models.json key sources remain explicitly gated pending source-owned identity.
+command/env output remain explicitly gated pending source-owned continuity. Literal `models.json`
+keys use the same Host authority and the existing configuration lock/JSONC writer. Their provider
+record receives a durable local handle; the scope combines it with a nonsecret filesystem revision
+(device/inode/size/mtime/ctime), never a key digest. An edit anywhere in that file invalidates its
+configured-key bindings, including unrelated provider edits. Stored `auth.json` bindings are unaffected
+and retain SDK precedence. Per-provider revision precision is a future optimization. Dispatch refreshes
+the catalog and checks scope again before returning transient headers; a changed source cannot reuse
+a prior opaque-history identity.
 
 Reviewer evidence includes temporary fake-store refresh/relink/reopen, a real Pi worker through the
 production parent client proving the worker's decoy credential file is untouched, and native private

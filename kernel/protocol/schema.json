@@ -1,6 +1,6 @@
 {
   "protocolVersion": 1,
-  "nativeRuntimeStructs": {"ModelSessionConfiguration": {"fields": {"providerId": {"type": "string", "optional": true}, "providerFamily": {"type": "string"}, "model": {"type": "string"}, "endpoint": {"type": "string"}, "credentialEnvironment": {"type": "string | null"}, "allowAnonymous": {"type": "boolean"}, "configurationGeneration": {"type": "number"}, "maxOutputTokens": {"type": "number | null"}, "azureDeployment": {"type": "string | null", "optional": true}, "azureApiVersion": {"type": "string | null", "optional": true}, "legacyMaxTokens": {"type": "boolean", "optional": true}, "includeStreamUsage": {"type": "boolean", "optional": true}, "reasoningEffort": {"type": "string | null", "optional": true}}}},
+  "nativeRuntimeStructs": {"ModelSessionConfiguration": {"fields": {"providerId": {"type": "string", "optional": true}, "providerFamily": {"type": "string"}, "model": {"type": "string"}, "endpoint": {"type": "string"}, "credentialEnvironment": {"type": "string | null"}, "allowAnonymous": {"type": "boolean"}, "acceptsImages": {"type": "boolean", "optional": true}, "configurationGeneration": {"type": "number"}, "maxOutputTokens": {"type": "number | null"}, "azureDeployment": {"type": "string | null", "optional": true}, "azureApiVersion": {"type": "string | null", "optional": true}, "legacyMaxTokens": {"type": "boolean", "optional": true}, "includeStreamUsage": {"type": "boolean", "optional": true}, "reasoningEffort": {"type": "string | null", "optional": true}}}},
   "nativeRuntimeEnums": {"RunState": ["Accepted", "Preparing", "Runnable", "Generating", "Executing", "Waiting", "Completed", "Failed", "Cancelled"], "OperationPhase": ["Accepted", "Preparing", "Queued", "Running", "Waiting", "Settling", "Terminal"], "Outcome": ["Succeeded", "Failed", "Cancelled", "Indeterminate"], "Effect": ["None", "Dispatched", "Partial", "Confirmed", "Unknown"], "Lifetime": ["Call", "Run", "Thread", "Environment"], "HistorySource": ["User", "Assistant", "Tool", "Agent", "Environment", "Compaction"], "ModelStepState": ["Prepared", "Dispatched", "Completed", "Interrupted", "Failed", "Cancelled"], "DeliveryState": ["Selected", "Sent", "Committed"], "InputMode": ["Boundary", "Interrupt", "NextRun"], "InputState": ["Queued", "Delivered", "Cancelled"]},
   "kernelEpoch": "per-process",
   "framing": "u32be-json",
@@ -11,6 +11,7 @@
   "response": {"v": 1, "kind": "response", "id": "request-id", "ok": true, "result": {}},
   "requestUnion": true,
   "methodParams": {
+    "runtime.run.reconcile": "NativeRunReconcileParams",
     "runtime.launch.fail": "NativeLaunchFailedParams",
     "runtime.thread.inspect": "NativeThreadParams",
     "runtime.thread.list": "KernelEmptyParams",
@@ -135,6 +136,8 @@
     "compute.grammar.register": "KernelComputeGrammarParams"
   },
   "dto": {
+    "NativeRunReconcileParams": {"fields":{"runId":{"type":"string"},"toolBinding":{"type":"unknown"}}},
+    "NativeRunReconcileResult": {"fields":{"reconciled":{"type":"string[]"},"unresolved":{"type":"string[]"}}},
     "NativeSubmitLaunch": {"fields":{"source":{"type":"NativeLaunchSourceParams | null"},"enabledTools":{"type":"string[]"},"credentialScope":{"type":"NativeCredentialScope","optional":true}}},
     "NativeLaunchFailedParams": {"fields":{"runId":{"type":"string"},"code":{"type":"string"}}},
     "NativeThreadParams": {"fields":{"threadId":{"type":"string"}}},
@@ -165,7 +168,7 @@
     "NativeExternalReceipt":{"fields":{"executor":{"type":"string"},"identity":{"type":"string"},"epoch":{"type":"string"},"outcome":{"type":"NativeOutcome"},"effect":{"type":"NativeEffect"},"result":{"type":"unknown"}}},
     "NativeRunStartParams": {"fields":{"runId":{"type":"string"},"toolBinding":{"type":"unknown","optional":true},"credentialScope":{"type":"NativeCredentialScope","optional":true}}},
     "NativeCredentialScope": {"fields":{"reference":{"type":"string"},"authority":{"type":"string"},"account":{"type":"string"},"generation":{"type":"number"}}},
-    "NativeModelSessionConfiguration": {"fields": {"providerId": {"type": "string", "optional": true}, "providerFamily": {"type": "string"}, "model": {"type": "string"}, "endpoint": {"type": "string"}, "credentialEnvironment": {"type": "string | null"}, "allowAnonymous": {"type": "boolean"}, "configurationGeneration": {"type": "number"}, "maxOutputTokens": {"type": "number | null"}, "azureDeployment": {"type": "string | null", "optional": true}, "azureApiVersion": {"type": "string | null", "optional": true}, "legacyMaxTokens": {"type": "boolean", "optional": true}, "includeStreamUsage": {"type": "boolean", "optional": true}, "reasoningEffort": {"type": "string | null", "optional": true}}},
+    "NativeModelSessionConfiguration": {"fields": {"providerId": {"type": "string", "optional": true}, "providerFamily": {"type": "string"}, "model": {"type": "string"}, "endpoint": {"type": "string"}, "credentialEnvironment": {"type": "string | null"}, "allowAnonymous": {"type": "boolean"}, "acceptsImages": {"type": "boolean", "optional": true}, "configurationGeneration": {"type": "number"}, "maxOutputTokens": {"type": "number | null"}, "azureDeployment": {"type": "string | null", "optional": true}, "azureApiVersion": {"type": "string | null", "optional": true}, "legacyMaxTokens": {"type": "boolean", "optional": true}, "includeStreamUsage": {"type": "boolean", "optional": true}, "reasoningEffort": {"type": "string | null", "optional": true}}},
     "NativeRunStartReceipt": {"fields": {"runId": {"type": "string"}, "epoch": {"type": "number"}}},
     "NativeRunState": {"raw": "export type NativeRunState = \"accepted\" | \"preparing\" | \"runnable\" | \"generating\" | \"executing\" | \"waiting\" | \"completed\" | \"failed\" | \"cancelled\";"},
     "NativeOperationPhase": {"raw": "export type NativeOperationPhase = \"accepted\" | \"preparing\" | \"queued\" | \"running\" | \"waiting\" | \"settling\" | \"terminal\";"},
@@ -567,6 +570,7 @@
     "KernelComputeReadResult": {"fields":{"jobId":{"type":"string"},"kernelEpoch":{"type":"string"},"workspaceId":{"type":"string"},"status":{"type":"\"queued\" | \"running\" | \"ready\" | \"empty\" | \"partial\" | \"failed\" | \"cancelled\""},"root":{"type":"string | null"},"records":{"type":"KernelComputeRecord[]"},"nextCursor":{"type":"number"},"endCursor":{"type":"number"},"scannedFiles":{"type":"number"},"message":{"type":"string | null"}}}
   },
   "methods": {
+    "runtime.run.reconcile": "Observe exact existing file operation journals under fresh authority",
     "runtime.launch.fail": "Record a selected Run preparation failure without claiming execution stopped",
     "runtime.thread.inspect": "Inspect native thread branches and durable runs",
     "runtime.thread.list": "List native conversation threads",

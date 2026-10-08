@@ -2,6 +2,7 @@ import React, { act } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
 import { parseHTML } from 'linkedom';
 import { afterEach, beforeEach, expect, it, vi } from 'vitest';
+import { NativeThreadRequestError } from '@varin/application-client';
 import type { NativeThreadIdentity, NativeThreadSnapshot, NativeThreadSubmit, NativeThreadsAPI } from '@varin/application-client';
 import { NativeThreadConversation } from './NativeThreadConversation';
 import { AgentWorkspaceShell } from '@/workbenches/agent/AgentWorkspaceShell';
@@ -14,6 +15,8 @@ vi.mock('@/components/views/RegularChatView', () => ({ RegularChatView: () => <d
 vi.mock('@/apps/mobileWorkspaceShell', () => ({ MobileWorkspaceShell: () => null }));
 vi.mock('@/lib/extensions/surface-runtime', () => ({ varinSurfaceRuntime: { surface: 'web' } }));
 
+vi.mock('@/lib/i18n', () => ({ useI18n: () => ({ t: (key: string) => key }) }));
+vi.mock('@/components/icon/Icon', () => ({ Icon: () => <span /> }));
 vi.mock('@/components/chat/MarkdownRenderer', () => ({ MarkdownRenderer: ({ content }: { content: string }) => <div>{content}</div> }));
 vi.mock('@/components/ui/textarea', () => ({ Textarea: ({ onChange, ...props }: React.TextareaHTMLAttributes<HTMLTextAreaElement>) => <textarea {...props} onInput={onChange as React.FormEventHandler<HTMLTextAreaElement>} /> }));
 
@@ -51,6 +54,12 @@ beforeEach(() => {
   runtimeState.api = undefined;
   const { document, window } = parseHTML('<!doctype html><html><body></body></html>');
   vi.stubGlobal('document', document); vi.stubGlobal('window', window); vi.stubGlobal('IS_REACT_ACT_ENVIRONMENT', true);
+  vi.stubGlobal('FileReader', class {
+    result: string | null = null; error: Error | null = null; onload: (() => void) | null = null; onerror: (() => void) | null = null;
+    readAsDataURL(file: File) {
+      void file.arrayBuffer().then(bytes => { this.result = `data:${file.type};base64,${Buffer.from(bytes).toString('base64')}`; this.onload?.(); }, error => { this.error = error; this.onerror?.(); });
+    }
+  });
   vi.stubGlobal('FormData', class { constructor(private form: HTMLFormElement) {} get(name: string) { return this.form.querySelector<HTMLTextAreaElement>(`[name="${name}"]`)?.value ?? null; } });
   container = document.createElement('div'); document.body.append(container); root = createRoot(container);
 });
@@ -116,4 +125,41 @@ it('Agent workspace entry opens an explicit native conversation and switches bac
   await edit('[aria-label="Conversation runtime"]', '', 'change');
   expect(container.querySelector('[aria-label="Native thread conversation"]')).toBeNull();
   expect(container.querySelector('[data-testid="existing-conversations"]')).not.toBeNull();
+});
+
+
+it('shared file picker previews image-only input, retains bytes/key on failure, and supports removing a selected image', async () => {
+  const f = fixture();
+  f.submit.mockRejectedValueOnce(new NativeThreadRequestError(400, 'kernel-frame-too-large'));
+  f.submit.mockImplementationOnce(async input => {
+    f.view.history.push({ id: 'accepted-image', thread_id: identity.threadId, parent: null, source: 'user', provider: null, content: { text: input.text, attachments: input.images?.map(image => ({ media_type: image.mimeType, content_ref: `data:${image.mimeType};base64,${image.data}`, source: 'user-upload' })) } });
+    return { thread_id: identity.threadId, branch_id: identity.branchId, run_id: 'ui-run', input_id: 'sent', cursor: 1 };
+  });
+  const data = 'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+jhC0AAAAASUVORK5CYII=';
+  const file = new File([Uint8Array.from(Buffer.from(data, 'base64'))], 'fixture.png', { type: 'image/png' });
+  await act(async () => { root.render(<NativeThreadConversation api={f.api} identity={identity} />); });
+  await edit('[aria-label="Registered model"]', JSON.stringify(['fixture-provider', 'fixture-model']), 'change');
+  const choose = async () => {
+    const picker = container.querySelector<HTMLInputElement>('[aria-label="Choose image attachments"]')!;
+    await act(async () => {
+      Object.defineProperty(picker, 'files', { configurable: true, value: [file] });
+      picker.dispatchEvent(new window.Event('change', { bubbles: true }));
+      await new Promise(resolve => setTimeout(resolve, 0));
+    });
+  };
+  await choose();
+  expect(container.querySelector('img')?.getAttribute('src')).toBe(`data:image/png;base64,${data}`);
+  expect(button('Send').disabled).toBe(false);
+  await submitForm(container.querySelector('form')!);
+  expect(container.querySelector('[role="alert"]')?.textContent).toContain('attachments are still here');
+  expect(container.querySelector('img')).not.toBeNull();
+  await submitForm(container.querySelector('form')!);
+  expect(f.submit.mock.calls[1]![0]).toEqual(f.submit.mock.calls[0]![0]);
+  expect(f.submit.mock.calls[0]![0]).toMatchObject({ text: '', images: [{ mimeType: 'image/png', data }] });
+  expect(container.querySelector('form img')).toBeNull();
+  expect(container.querySelector('article img')?.getAttribute('src')).toBe(`data:image/png;base64,${data}`);
+  await choose();
+  await act(async () => { container.querySelector<HTMLButtonElement>('[aria-label="chat.fileAttachment.actions.removeImage"]')!.click(); });
+  expect(container.querySelector('form img')).toBeNull();
+  expect(button('Send').disabled).toBe(true);
 });

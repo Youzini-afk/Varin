@@ -932,10 +932,9 @@ impl Catalog {
         if receipt.identity != op.id
             || op.executor.as_deref() != Some(receipt.executor.as_str())
             || receipt.epoch.is_empty()
-            || !matches!(op.lifetime, Lifetime::Thread | Lifetime::Environment)
         {
             return Err(RuntimeError::Conflict(
-                "external receipt does not identify this admitted job".into(),
+                "external receipt does not identify this admitted operation".into(),
             ));
         }
         if receipt.effect == Effect::Unknown && receipt.outcome != Outcome::Indeterminate {
@@ -991,6 +990,11 @@ impl Catalog {
 
 impl Catalog {
     /// Resource recovery queries only the native jobs whose facts are still unresolved.
+    pub fn pending_run_operations(&self, run_id:&str) -> Result<Vec<Operation>> {
+        let mut statement=self.db.prepare("SELECT body FROM operations WHERE run_id=?1 AND (json_extract(body,'$.phase')!='terminal' OR json_extract(body,'$.outcome')='indeterminate') ORDER BY id")?;
+        let rows=statement.query_map([run_id],|row|row.get::<_,String>(0))?;
+        rows.map(|row|Ok(serde_json::from_str(&row?)?)).collect()
+    }
     pub fn pending_external_operations(&self, executor: &str) -> Result<Vec<String>> {
         let mut statement=self.db.prepare("SELECT id FROM operations WHERE json_extract(body,'$.executor')=?1 AND (json_extract(body,'$.phase')!='terminal' OR json_extract(body,'$.outcome')='indeterminate') ORDER BY id")?;
         let rows = statement.query_map([executor], |row| row.get(0))?;

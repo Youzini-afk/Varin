@@ -29,6 +29,7 @@ fn push_block(messages: &mut Vec<Value>, role: &str, block: Value) {
 impl ModelProvider for AnthropicProvider {
     fn serialize(&self, view: &RequestView) -> Result<Value, ExecutionError> {
         validate_view(view, FAMILY)?;
+        validate_images(view, &self.connection)?;
         if self.max_tokens == 0 {
             return Err(ExecutionError::new(
                 "invalid_max_tokens",

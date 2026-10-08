@@ -318,7 +318,7 @@ impl Storage {
             };
             let params = json!({"workspaceId":workspace_id,"operationId":operation_id,"rootId":root_id,"path":resource.path,
                 "leaseId":lease_id,"targetJson":serde_json::to_string(&target)?,"expectedJson":serde_json::to_string(&expected)?,
-                "ownerId":owner,"__nativeRequestHash":request_hash});
+                "ownerId":owner,"__nativeRequestHash":request_hash,"__nativeGrantId":grant.grant_id,"__nativeEpoch":grant.kernel_epoch});
             if let Err(error) = self.check_cancelled() {
                 let _ = self.release_object_owner(
                     &json!({"ownerId":owner}),
@@ -365,6 +365,8 @@ impl Storage {
         }
         if let Some(object) = receipt.as_object_mut() {
             object.remove("__nativeRequestHash");
+            object.remove("__nativeGrantId");
+            object.remove("__nativeEpoch");
         }
         receipt["path"] = json!(path);
         Ok(receipt)

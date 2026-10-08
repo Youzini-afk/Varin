@@ -94,3 +94,18 @@ export function nativeHistoryText(content: unknown): string {
   if (value.blocks !== undefined) return nativeHistoryText(value.blocks);
   return '';
 }
+
+/** UI projection of accepted inline images; never fetch arbitrary provider URLs as a fallback. */
+export function nativeHistoryImages(content: unknown): import('@varin/protocol').ImageAttachment[] {
+  if (!content || typeof content !== 'object') return [];
+  const value = content as Record<string, unknown>;
+  if (value.content !== undefined) return nativeHistoryImages(value.content);
+  const attachments = Array.isArray(value.attachments) ? value.attachments : value.kind === 'attachment' ? [value] : [];
+  return attachments.flatMap(attachment => {
+    if (!attachment || typeof attachment !== 'object') return [];
+    const item = attachment as { media_type?: unknown; content_ref?: unknown };
+    if (typeof item.media_type !== 'string' || !item.media_type.startsWith('image/') || typeof item.content_ref !== 'string') return [];
+    const prefix = `data:${item.media_type};base64,`;
+    return item.content_ref.startsWith(prefix) ? [{ mimeType: item.media_type, data: item.content_ref.slice(prefix.length) }] : [];
+  });
+}

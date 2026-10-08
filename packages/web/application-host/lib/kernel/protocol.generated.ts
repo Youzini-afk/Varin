@@ -8,6 +8,7 @@ export const KERNEL_REQUEST_WINDOW = 2 as const;
 export const KERNEL_PROTOCOL_SCHEMA = "varin.kernel.v1" as const;
 
 export type KernelMethod =
+  | "runtime.run.reconcile"
   | "runtime.launch.fail"
   | "runtime.thread.inspect"
   | "runtime.thread.list"
@@ -128,6 +129,16 @@ export type KernelMethod =
   | "compute.cancel"
   | "compute.release"
   | "compute.grammar.register";
+
+export interface NativeRunReconcileParams {
+  runId: string;
+  toolBinding: unknown;
+}
+
+export interface NativeRunReconcileResult {
+  reconciled: string[];
+  unresolved: string[];
+}
 
 export interface NativeSubmitLaunch {
   source: NativeLaunchSourceParams | null;
@@ -327,6 +338,7 @@ export interface NativeModelSessionConfiguration {
   endpoint: string;
   credentialEnvironment: string | null;
   allowAnonymous: boolean;
+  acceptsImages?: boolean;
   configurationGeneration: number;
   maxOutputTokens: number | null;
   azureDeployment?: string | null;
@@ -1578,6 +1590,7 @@ export interface KernelComputeReadResult {
 }
 
 export type KernelMethodParams = {
+  "runtime.run.reconcile": NativeRunReconcileParams;
   "runtime.launch.fail": NativeLaunchFailedParams;
   "runtime.thread.inspect": NativeThreadParams;
   "runtime.thread.list": KernelEmptyParams;
@@ -1701,6 +1714,15 @@ export type KernelMethodParams = {
 };
 
 export type KernelRequest =
+  | {
+      v: typeof KERNEL_PROTOCOL_VERSION;
+      kind: "request";
+      id: string;
+      method: "runtime.run.reconcile";
+      params: NativeRunReconcileParams;
+      epoch?: string;
+      grantId?: string;
+    }
   | {
       v: typeof KERNEL_PROTOCOL_VERSION;
       kind: "request";

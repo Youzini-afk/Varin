@@ -102,6 +102,7 @@ export async function startNativeRunFromSource(
       ...(selection.environmentRunId ? { environmentRunId: selection.environmentRunId } : {}),
       ...(selection.mode === 'fixed_branch' ? { fileSource: fixed } : { rootId, materializedSource: fixed }),
     };
+    await runtime.reconcileRun(run.id, toolBinding, signal);
     return options.credentialOwner
       ? await runtime.startRunWithCredentialOwner(run.id, options.credentialOwner, signal, toolBinding)
       : await runtime.startRun(run.id, signal, toolBinding);

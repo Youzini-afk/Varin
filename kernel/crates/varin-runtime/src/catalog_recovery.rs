@@ -221,7 +221,7 @@ impl Catalog {
                     RuntimeError::Conflict("Run has no recovery condition".into())
                 })?,
             )?;
-            if wait.kind != "recovery.reconciled" {
+            if !matches!(wait.kind.as_str(), "recovery.reconciled" | "execution.reconciled") {
                 return Err(RuntimeError::Conflict(
                     "Run is waiting on another durable condition".into(),
                 ));

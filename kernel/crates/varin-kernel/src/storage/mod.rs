@@ -39,6 +39,7 @@ mod gc;
 mod maintenance;
 mod objects;
 pub(crate) mod native_file_mutations;
+mod native_file_reconciliation;
 mod operations;
 mod process_resources;
 mod records;

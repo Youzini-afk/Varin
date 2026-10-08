@@ -845,13 +845,13 @@ export class KernelClient {
     if (terminate && this.child && !this.child.killed) this.child.kill();
   }
 
-  private async write(request: KernelRequest | PrivateCredentialResponse): Promise<void> {
+  private async write(request: KernelRequest | PrivateCredentialResponse, encoded?: Buffer): Promise<void> {
     const stdin = this.child?.stdin;
     if (!stdin || stdin.destroyed) throw new KernelClientError({ code: "kernel-disconnected", message: "Rust kernel stdin is unavailable", retryable: true });
     const writable = stdin as Writable;
     // The callback settles on delivery or stream failure, including destruction
     // while backpressured. Waiting only for 'drain' can hang after disconnect.
-    await new Promise<void>((resolve, reject) => writable.write(frame(JSON.stringify(request)), error => error ? reject(error) : resolve()));
+    await new Promise<void>((resolve, reject) => writable.write(encoded ?? frame(JSON.stringify(request)), error => error ? reject(error) : resolve()));
   }
 
   private async requestRaw<T, M extends KernelMethod = KernelMethod>(method: M, params: KernelMethodParams[M], options: { signal?: AbortSignal | undefined; grant?: KernelGrantHandle | undefined; allowBootstrap?: boolean | undefined; settleCancellation?: boolean | undefined } = {}): Promise<T> {
@@ -869,6 +869,8 @@ export class KernelClient {
       }
       const identity = { ...(this.epoch ? { epoch: this.epoch } : {}), ...(grant ? { grantId: grant.grantId } : {}) };
       const request = { v: KERNEL_PROTOCOL_VERSION, kind: "request", id, method, params, ...identity } as KernelRequest;
+      // Local encoding/size rejection has sent nothing; it must not fail the shared transport.
+      const encoded = frame(JSON.stringify(request));
       let rejectPending!: (error: unknown) => void;
       let cancelSent = false;
       const abort = () => {
@@ -887,7 +889,7 @@ export class KernelClient {
       void promise.catch(() => undefined);
       options.signal?.addEventListener("abort", abort, { once: true });
       try {
-        await this.write(request);
+        await this.write(request, encoded);
         return await promise;
       } catch (error) {
         if (!cancelSent && this.pending.has(id)) this.failAll(error instanceof Error ? error : new Error(String(error)), true);

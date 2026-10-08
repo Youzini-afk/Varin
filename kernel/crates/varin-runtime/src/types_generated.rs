@@ -110,6 +110,7 @@ pub struct ModelSessionConfiguration {
     pub endpoint: String,
     pub credential_environment: Option<String>,
     pub allow_anonymous: bool,
+    pub accepts_images: Option<bool>,
     pub configuration_generation: u64,
     pub max_output_tokens: Option<u64>,
     pub azure_deployment: Option<String>,

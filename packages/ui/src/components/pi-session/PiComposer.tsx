@@ -1,3 +1,5 @@
+import { fileToImageAttachment } from '@/components/chat/composer/imageAttachments';
+import { ImageAttachmentStrip } from '@/components/chat/composer/ImageAttachmentStrip';
 import React from 'react';
 import { motion } from 'motion/react';
 import { usePrefersReducedMotion } from '@/hooks/usePrefersReducedMotion';
@@ -106,29 +108,6 @@ interface PiComposerProps {
   defaultWorkFocus?: WorkFocusId;
   inheritedWorkFocus?: boolean;
 }
-
-const attachmentUrl = (attachment: ImageAttachment): string => (
-  `data:${attachment.mimeType};base64,${attachment.data}`
-);
-
-const fileToAttachment = (file: File): Promise<ImageAttachment> => new Promise((resolve, reject) => {
-  const reader = new FileReader();
-  reader.onerror = () => reject(reader.error ?? new Error(`Could not read ${file.name}`));
-  reader.onload = () => {
-    const value = typeof reader.result === 'string' ? reader.result : '';
-    const separator = value.indexOf(',');
-    if (separator === -1) {
-      reject(new Error(`Could not decode ${file.name}`));
-      return;
-    }
-    resolve({
-      data: value.slice(separator + 1),
-      mimeType: file.type || 'application/octet-stream',
-    });
-  };
-  reader.readAsDataURL(file);
-});
-
 
 type PiComposerAutocomplete = {
   kind: 'command' | 'mention' | 'skill';
@@ -332,7 +311,7 @@ export const PiComposer: React.FC<PiComposerProps> = ({
     const imageFiles = [...files].filter((file) => file.type.startsWith('image/'));
     if (imageFiles.length === 0) return;
     try {
-      const attachments = await Promise.all(imageFiles.map(fileToAttachment));
+      const attachments = await Promise.all(imageFiles.map(fileToImageAttachment));
       onChangeImages([...images, ...attachments]);
     } catch (error) {
       console.error('Failed to attach image to Pi prompt:', error);
@@ -604,23 +583,8 @@ export const PiComposer: React.FC<PiComposerProps> = ({
             void addFiles(files);
           }}
         >
-        {images.length > 0 && (
-          <div className="flex flex-wrap gap-2 px-3 pt-3">
-            {images.map((image, index) => (
-              <div key={`${image.mimeType}:${index}`} className="pi-composer-attachment group/image relative overflow-hidden rounded-lg border border-border bg-muted/20">
-                <img src={attachmentUrl(image)} alt={image.mimeType} className="size-20 object-cover" />
-                <button
-                  type="button"
-                  onClick={() => onChangeImages(images.filter((_, candidate) => candidate !== index))}
-                  className="absolute right-1 top-1 flex size-5 items-center justify-center rounded-full bg-background/90 text-muted-foreground opacity-0 shadow-sm transition-opacity hover:text-foreground group-hover/image:opacity-100 focus:opacity-100"
-                  aria-label={t('chat.fileAttachment.actions.removeImage')}
-                >
-                  <Icon name="close" className="size-3.5" />
-                </button>
-              </div>
-            ))}
-          </div>
-        )}
+        <ImageAttachmentStrip images={images} removeLabel={t('chat.fileAttachment.actions.removeImage')}
+          onRemove={index => onChangeImages(images.filter((_, candidate) => candidate !== index))} />
 
         <div className="pi-composer-context">
           {snapshot ? <EditorContextAttachmentChips sessionId={snapshot.sessionId} /> : null}

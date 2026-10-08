@@ -1,4 +1,4 @@
-import type { NativeEvent, NativeHistoryItem, NativeInputMode, NativeInputReceipt, NativeQueuedInput, NativeReceipt, NativeRun, NativeOperation, NativeRuntimeStreamEvent, NativeThreadSummary, NativeLaunchIntent } from '@varin/protocol';
+import type { NativeEvent, NativeHistoryItem, NativeInputMode, NativeInputReceipt, NativeQueuedInput, NativeReceipt, NativeRun, NativeOperation, NativeRuntimeStreamEvent, NativeThreadSummary, NativeLaunchIntent, ImageAttachment } from '@varin/protocol';
 
 /** Explicit authority selection. A nativeThread never opens a Pi session. */
 export interface NativeThreadIdentity { runtime: 'nativeThread'; threadId: string; branchId: string }
@@ -15,6 +15,7 @@ export interface NativeThreadSubmit extends NativeThreadIdentity {
   key: string;
   expectedHead: string | null;
   text: string;
+  images?: ImageAttachment[];
   model: NativeThreadModel;
   source?: NativeThreadSource;
 }
@@ -28,12 +29,12 @@ export interface NativeThreadSnapshot {
   launch: NativeLaunchIntent | null;
 }
 export interface NativeThreadsAPI {
-  listModels(): Promise<Array<NativeThreadModel & { name?: string }>>;
+  listModels(): Promise<Array<NativeThreadModel & { name?: string; acceptsImages?: boolean }>>;
   list(): Promise<NativeThreadSummary[]>;
   create(key: string): Promise<NativeThreadIdentity>;
   submit(input: NativeThreadSubmit): Promise<NativeReceipt>;
-  enqueue(input: NativeThreadIdentity & { key: string; text: string; mode: NativeInputMode }): Promise<NativeInputReceipt>;
-  editInput(inputId: string, expectedRevision: number, text: string): Promise<NativeQueuedInput>;
+  enqueue(input: NativeThreadIdentity & { key: string; text: string; images?: ImageAttachment[]; mode: NativeInputMode }): Promise<NativeInputReceipt>;
+  editInput(inputId: string, expectedRevision: number, text: string, images?: ImageAttachment[]): Promise<NativeQueuedInput>;
   cancelInput(inputId: string, expectedRevision: number): Promise<NativeQueuedInput>;
   snapshot(identity: NativeThreadIdentity): Promise<NativeThreadSnapshot>;
   run(runId: string): Promise<NativeRun>;

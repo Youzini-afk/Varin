@@ -17,6 +17,9 @@ use varin_runtime::execution::{
 };
 use varin_runtime::{Effect, Lifetime, Outcome};
 
+#[path = "native_tools_reconciliation.rs"]
+mod reconciliation;
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Deserialize, Serialize)]
 #[serde(rename_all = "snake_case")]
 pub(crate) enum NativeToolKind {
@@ -126,6 +129,10 @@ struct ProcessSpawnArgs {
 enum ResourceOperation {
     FileRead(FileReadArgs),
     FileMutation(NativeTextMutation),
+    ReconcileMutation {
+        mutation: NativeTextMutation,
+        executor: String,
+    },
     ProcessInspect(ProcessInspectArgs),
     ProcessRead(ProcessReadArgs),
     ProcessSpawn(ProcessSpawnArgs),
@@ -209,6 +216,11 @@ impl ResourceOperation {
         context: &ToolExecutionContext,
     ) -> (&'static str, Value) {
         match self {
+            Self::ReconcileMutation { mutation, .. } => (
+                "file.operation.reconcile",
+                json!({"workspaceId":binding.workspace_id,"rootId":binding.root_id,
+                    "path":mutation.path(),"operationId":context.operation_id}),
+            ),
             Self::FileMutation(mutation) => (
                 "file.apply",
                 json!({"workspaceId":binding.workspace_id,"rootId":binding.root_id,
@@ -478,6 +490,9 @@ impl NativeToolExecutor {
     }
     fn contract(&self, call: &ToolCall, operation: &ResourceOperation) -> ToolContract {
         let (resource, access, job) = match operation {
+            ResourceOperation::ReconcileMutation { .. } => {
+                unreachable!("private receipt queries have no model contract")
+            }
             ResourceOperation::FileMutation(_) => (
                 format!("environment:{}", self.binding.execution_workspace_id),
                 Access::Write,
@@ -761,6 +776,23 @@ pub(crate) fn serve_resource(
             &params,
         )?;
         validate_binding(&grant, &request.binding, &request.context)?;
+        if let ResourceOperation::ReconcileMutation { mutation, executor } = &request.operation {
+            let root_id =
+                request.binding.root_id.as_deref().ok_or_else(|| {
+                    KernelError::Authorization("materialized root missing".into())
+                })?;
+            storage.set_cancellation(request.cancellation.shared_flag());
+            let result = storage.reconcile_native_mutation(
+                &request.binding.workspace_id,
+                root_id,
+                &request.context.operation_id,
+                mutation,
+                &grant,
+                executor,
+            );
+            storage.clear_cancellation();
+            return result.and_then(|receipt| serde_json::to_value(receipt).map_err(Into::into));
+        }
         if let ResourceOperation::FileMutation(mutation) = &request.operation {
             storage.set_cancellation(request.cancellation.shared_flag());
             let result = storage.native_file_mutate(

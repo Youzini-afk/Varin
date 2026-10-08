@@ -1,5 +1,15 @@
 // Generated from kernel/protocol/schema.json. Do not hand-edit.
 
+export interface NativeRunReconcileParams {
+  runId: string;
+  toolBinding: unknown;
+}
+
+export interface NativeRunReconcileResult {
+  reconciled: string[];
+  unresolved: string[];
+}
+
 export interface NativeSubmitLaunch {
   source: NativeLaunchSourceParams | null;
   enabledTools: string[];
@@ -162,6 +172,7 @@ export interface NativeModelSessionConfiguration {
   endpoint: string;
   credentialEnvironment: string | null;
   allowAnonymous: boolean;
+  acceptsImages?: boolean;
   configurationGeneration: number;
   maxOutputTokens: number | null;
   azureDeployment?: string | null;
