@@ -12,7 +12,7 @@ export function createRelatedTool(bridge: HostServicesBridge, _sessionId: string
   return defineTool({
     name: "related",
     label: "Related",
-    description: "Find definitions, imports, connection endpoints, references and calls for a file path or symbol name.",
+    description: "Find definitions, imports, resolved references and calls for a file path or symbol name. Shared literals provide additional candidate connections.",
     promptSnippet: "related: file-level topology plus resolved references/calls for a symbol name from the symbol graph",
     promptGuidelines: [
       "Graph ranges identify indexed locations; [unpinned] locations have no bound file revision. references resolves references at an exact file position.",
@@ -31,13 +31,6 @@ export function createRelatedTool(bridge: HostServicesBridge, _sessionId: string
           details: {
             status: result.status,
             anchor: result.anchor,
-            roles: result.roles,
-            definitions: result.definitions,
-            imports: result.imports,
-            importers: result.importers,
-            connections: result.connections,
-            references: result.references,
-            calls: result.calls,
           },
         };
       } catch (error) {

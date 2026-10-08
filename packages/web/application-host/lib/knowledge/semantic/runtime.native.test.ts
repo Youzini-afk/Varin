@@ -598,6 +598,8 @@ describe("semantic index runtime", () => {
     const documents = await createDocumentAuthorityHarness();
     disposes.push(() => documents.cleanup());
     const base = createHashEmbedder();
+    writeFileSync(join(documents.workspaceRoot, 'indexed.ts'), 'export const indexed = true;');
+    const entered = gate();
     let resolveEmbedding!: (vectors: number[][]) => void;
     const embedding = new Promise<number[][]>((resolve) => { resolveEmbedding = resolve; });
     const runtime = createSemanticIndexRuntime({
@@ -605,16 +607,25 @@ describe("semantic index runtime", () => {
       hostId: "semantic-host-cancel",
       documents: documents.authority,
       structureSource: parsingSource(),
-      embedder: { ...base, embed: async () => embedding },
+      searchFilesystemFiles: async () => [{ name: 'indexed.ts', path: join(documents.workspaceRoot, 'indexed.ts'), relativePath: 'indexed.ts' }],
+      embedder: { ...base, embed: async (texts, request) => {
+        if (request?.purpose !== 'query') return base.embed(texts, request);
+        entered.resolve();
+        return embedding;
+      } },
     });
     disposes.push(() => runtime.dispose());
+    const scope = workspaceScope(documents.identity.workspaceId);
+    expect((await runtime.search(scope, 'no indexed content yet', 8)).hits).toEqual([]);
+    await runtime.scanScope(scope);
     const controller = new AbortController();
     const pending = runtime.search(
-      workspaceScope(documents.identity.workspaceId),
+      scope,
       "cancel this query",
       8,
       { signal: controller.signal },
     );
+    await entered.promise;
     controller.abort();
     await expect(pending).rejects.toMatchObject({ name: "AbortError" });
     resolveEmbedding([new Array(base.space.dim).fill(0)]);

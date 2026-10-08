@@ -55,6 +55,9 @@ derived store (`../vectors/`); they reuse `harness.embed` but never this local-m
   fixed grains because their vectors may depend on batch composition.
 - Overlay: `query-view.ts` pins surface/thread drafts at query start; masked disk paths cannot leak
   old vectors. Thread view is fixed baseline + this branch’s delta.
+  An empty index with no searchable fixed-view content returns before query embedding. Remote dimension
+  discovery can still start the background scan; a building index remains incomplete. Published indexes
+  and fixed-view overlays continue through the normal query path.
 - Storage: `store.ts` — Host embedding orchestration over the private semantic
   storage process, separate from plan and memory writes. `store-engine.ts` holds one native TriviumDB generation per
   scope/space, scoped Top-K (D-189) and `publishToken`; open/recovery, queries,

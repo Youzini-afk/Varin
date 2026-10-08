@@ -3,6 +3,7 @@ import { relative, resolve } from "node:path";
 import { describe, it } from "node:test";
 import { defaultRules, evaluateGate, type PermissionAuditRecord, type PermissionInspectParams } from "@varin/protocol";
 import { buildPermissionPolicy, createPermissionGateExtension } from "../../src/harness/permission-gate-extension.js";
+import { applyInspectedPaths } from '../../src/harness/permission-target.js';
 
 const workspaceRoot = resolve("permission-gate-workspace");
 
@@ -101,6 +102,19 @@ const mcpTool = (name: string) => ({
 const normal = () => ({ mode: "normal" as const, rules: defaultRules("normal") });
 
 describe("native permission gate integration", () => {
+  it('pins Git Bash paths without rewriting command text or replacement content', () => {
+    const params = { path: '/d/work/file.ts', oldText: '/d/work/file.ts', command: 'cat /d/work/file.ts' };
+    const target = { ...inspect({ tool: 'edit', source: { kind: 'harness', id: 'harness:edit' }, action: 'write',
+      cwd: workspaceRoot, paths: [], networkTargets: [], threadScopes: [], evidenceComplete: true }),
+      paths: [{ inputPath: '/d/work/file.ts', resolvedPath: 'D:\\work\\file.ts', workspaceId: 'ws', resourceId: 'file.ts', canonicalResourceId: 'd:\\work\\file.ts' }] };
+    applyInspectedPaths(params, target);
+    assert.equal(params.path, 'D:\\work\\file.ts');
+    assert.equal(params.oldText, '/d/work/file.ts');
+    assert.equal(params.command, 'cat /d/work/file.ts');
+    const external = { path: '/d/work/file.ts' };
+    applyInspectedPaths(external, { ...target, source: { kind: 'mcp', id: 'mcp:edit' } });
+    assert.equal(external.path, '/d/work/file.ts');
+  });
   it("keeps preset approval choices and user rules ahead of mode defaults", () => {
     const policy = buildPermissionPolicy("normal", { worker: true, retrieval: false }, [
       { tool: "read", decision: "deny" },

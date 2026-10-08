@@ -168,6 +168,18 @@ describe("thread status projection", () => {
     expect(status.content).toContain(child.id);
   });
 
+  it('omits settled reports from current teammates while retaining results that need integration', async () => {
+    const thread = await registry.createThread(input());
+    const run = await registry.startRun(WORKSPACE, thread.id);
+    await registry.markRunRunning(WORKSPACE, thread.id, run.id, 'child-1');
+    await registry.endRun(WORKSPACE, thread.id, run.id, 'success');
+    const projector = createThreadStatusProjector({ registry: () => registry, readEntries: async () => entriesResult([]) });
+    expect((await projector.build(WORKSPACE, PARENT, null, undefined, true)).rows).toEqual([]);
+    expect((await projector.build(WORKSPACE, PARENT, null)).rows).toHaveLength(1);
+    await registry.setIntegration(WORKSPACE, thread.id, 'merge-ready');
+    expect((await projector.build(WORKSPACE, PARENT, null, undefined, true)).rows).toHaveLength(1);
+  });
+
   it("does not consume inbound message bodies", async () => {
     const sender = await registry.createThread(input({ brief: "sender" }));
     const target = await registry.createThread(input({ brief: "target" }));

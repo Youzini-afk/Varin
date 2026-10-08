@@ -15,6 +15,7 @@ import {
 import type { HostServicesBridge } from "./host-services-bridge.js";
 import {
   buildPermissionInspection,
+  applyInspectedPaths,
   permissionGrantKey,
   permissionPolicyGeneration,
   type PiToolInfoLike,
@@ -173,7 +174,10 @@ export function createPermissionGateExtension(options: PermissionGateOptions): E
           candidate,
           ctx.signal ? { signal: ctx.signal } : undefined,
         );
-      } catch {
+      } catch (error) {
+        if (process.platform === "win32" && candidate.paths.some((path) => /^\/(?!\/)/.test(path))) {
+          return { block: true, reason: `Cannot resolve file path: ${error instanceof Error ? error.message : String(error)}` };
+        }
         target = fallbackInspection(candidate);
       }
 
@@ -215,6 +219,7 @@ export function createPermissionGateExtension(options: PermissionGateOptions): E
           target,
           reason: "session-scoped grant",
         }, ctx.signal);
+        applyInspectedPaths(params, target);
         return { executionPlan: permissionExecutionPlan(target) };
       }
 
@@ -235,6 +240,7 @@ export function createPermissionGateExtension(options: PermissionGateOptions): E
         if (decision === "deny") {
           return { block: true, reason: reason ?? `denied: ${toolName}` };
         }
+        applyInspectedPaths(params, target);
         return { executionPlan: permissionExecutionPlan(target) };
       };
 

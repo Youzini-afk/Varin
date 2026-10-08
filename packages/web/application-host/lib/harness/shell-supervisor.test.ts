@@ -219,7 +219,10 @@ describe("stripControlSequences", () => {
 });
 
 describe("background shell output", () => {
-  it.each(["foreground", "background"] as const)("waits for complete cwd and exit markers in %s output", async (mode) => {
+  it.each([
+    ['foreground', 'marker'], ['background', 'marker'],
+    ['foreground', 'terminal-exit'], ['background', 'terminal-exit'],
+  ] as const)("keeps control frames out of %s output ending with %s", async (mode, ending) => {
     const dataHandlers = new Set<(data: string) => void>();
     const exitHandlers = new Set<(event: { exitCode: number; signal: number }) => void>();
     const emit = (data: string) => { for (const handler of dataHandlers) handler(data); };
@@ -265,11 +268,16 @@ describe("background shell output", () => {
       emit(`INEL_${token}:B\r\nbody\n__VARIN_SENTINEL_${token}:C:`);
       const firstOutput = await supervisor.read(startedEvents[0]!.executionId);
       expect(firstOutput.text).toBe("body\n");
-      emit(`1\r\nmore output\n__VARIN_SENTINEL_${token}:\x1b[0mE:2`);
-      expect(completedEvents).toHaveLength(0);
-      emit("7\r");
-      expect(completedEvents).toHaveLength(0);
-      emit("\n");
+      if (ending === 'terminal-exit') {
+        emit('1');
+        for (const handler of exitHandlers) handler({ exitCode: 27, signal: 0 });
+      } else {
+        emit(`1\r\nmore output\n__VARIN_SENTINEL_${token}:\x1b[0mE:2`);
+        expect(completedEvents).toHaveLength(0);
+        emit("7\r");
+        expect(completedEvents).toHaveLength(0);
+        emit("\n");
+      }
       if (mode === "foreground") {
         expect(await execution).toMatchObject({ kind: "completed", cwd: tmpdir(), exitCode: 27 });
       }
@@ -279,7 +287,7 @@ describe("background shell output", () => {
       expect(output).toMatchObject({ running: false, exitCode: 27 });
       expect(output.text).toContain("body");
       expect(output.text).not.toContain("VARIN_SENTINEL");
-      expect((await supervisor.read(completedEvents[0]!.executionId, firstOutput.nextOffset)).text).toBe("more output\n");
+      expect((await supervisor.read(completedEvents[0]!.executionId, firstOutput.nextOffset)).text).toBe(ending === 'terminal-exit' ? '' : "more output\n");
     } finally {
       await supervisor.dispose();
       outputStore.dispose();

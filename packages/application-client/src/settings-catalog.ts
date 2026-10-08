@@ -91,7 +91,7 @@ export interface SettingsActionRef {
     | 'runtime:extensions' | 'runtime:resources' | 'runtime:providers'
     | 'runtime:mcp' | 'runtime:language-support' | 'runtime:runtime-update'
     | 'service:git' | 'service:tunnel' | 'service:agent-personalization'
-    | 'service:extensions' | 'service:agents'
+    | 'service:extensions' | 'service:agents' | 'service:semantic-index'
     | 'service:notifications' | 'service:projects' | 'service:remote-instances'
     | 'tool:resource' | 'tool:extension' | 'page:ui';
   /** What the agent can actually do without opening the UI. */
@@ -329,7 +329,7 @@ export const SETTINGS_CATALOG: readonly SettingsCatalogEntry[] = [
   },
   {
     id: 'harness.semanticIndex', category: 'retrieval', owner: 'action',
-    actionRef: { domain: 'page:ui', note: 'Host-owned index storage, request pacing and progress' },
+    actionRef: { domain: 'service:semantic-index', verbs: ['read', 'write'], note: 'write replaces config; supply config and revision from read' },
     apply: 'restart',
     ui: { page: 'harness-index', titleKey: 'settings.page.harness.page.index.title',
       keywords: ['index', 'storage', 'progress', 'concurrency', 'embedding'] },

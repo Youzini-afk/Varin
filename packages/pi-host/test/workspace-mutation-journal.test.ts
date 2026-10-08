@@ -268,6 +268,7 @@ describe("workspace mutation journal", () => {
     assert.deepEqual(surfaceWrites, ["draft.txt", "other.txt", "disk.txt"]);
 
     const conflict = await write.execute("conflict", { content: "never written", path: "conflict.txt" }, undefined, undefined, undefined as never);
+    assert.equal(conflict.isError, true);
     assert.deepEqual(conflict.details, { mutation: { status: "conflict", results: [{ path: "conflict.txt", target: "disk", status: "conflict", message: "Source changed" }] } });
     await assert.rejects(readFile(join(root, "conflict.txt")), { code: "ENOENT" });
 

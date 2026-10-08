@@ -475,6 +475,9 @@ describe("normalization and budget", () => {
     expect(organized.text).toContain("src/a.ts(1,1): error TS1234");
     expect(organized.text).toContain("src/b.ts(2,2): error TS1111");
     expect(organized.text).not.toContain("\x1b");
+    const completed = organizeShellOutput({ command: 'printf result', output: 'result', complete: true, exitCode: 42 });
+    expect(completed.partial).toBe(false);
+    expect(completed.text).toContain('result');
   });
 
   it("states omission when failures exceed the existing display budget", () => {

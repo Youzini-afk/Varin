@@ -42,6 +42,7 @@ export interface HarnessPathAuthorityOptions {
   readFsPromises?: Pick<typeof fs.promises, "open" | "stat">;
   pathModule?: typeof path;
   platform?: string;
+  resolveInputPath?(actor: HarnessActorContext, input: string): Promise<string>;
 }
 
 export function createHarnessPathAuthority({
@@ -51,6 +52,7 @@ export function createHarnessPathAuthority({
   readFsPromises = fs.promises,
   pathModule = path,
   platform = process.platform,
+  resolveInputPath,
 }: HarnessPathAuthorityOptions) {
   const isAbsoluteInput = (value: string): boolean => (
     pathModule.isAbsolute(value) || isWinDriveAbsolute(value)
@@ -141,9 +143,10 @@ export function createHarnessPathAuthority({
         : null;
       const authorityRoot = workspace?.root ?? actor.authorityRoot ?? null;
       const baseDir = actor.cwd ?? authorityRoot;
-      const absolutePath = isAbsoluteInput(inputPath)
-        ? inputPath
-        : baseDir ? pathModule.resolve(baseDir, inputPath) : null;
+      const resolvedInput = resolveInputPath ? await resolveInputPath(actor, inputPath) : inputPath;
+      const absolutePath = isAbsoluteInput(resolvedInput)
+        ? resolvedInput
+        : baseDir ? pathModule.resolve(baseDir, resolvedInput) : null;
       if (!absolutePath || absolutePath.includes("\0")) return null;
 
       if (workspace) {

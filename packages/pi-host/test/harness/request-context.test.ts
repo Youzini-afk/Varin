@@ -141,5 +141,10 @@ describe("per-request environment and team context", () => {
     const candidate = await inject({ model: MODEL, context: contextFor(bound), options: {}, inputTokens: 0, reserveTokens: 0, needsSpace: false }, bound);
     assert.ok(textOf(candidate!.request!.context).includes('status=\\"unavailable\\"'));
     assert.equal(candidate!.retained, undefined);
+    const empty = createRequestContextInjector({ request: async (method: string) => method === 'zone2.status'
+      ? { status: 'empty', content: null } : { content: null } } as unknown as HostServicesBridge);
+    const noTeam = await empty({ model: MODEL, context: contextFor(bound), options: {}, inputTokens: 0, reserveTokens: 0, needsSpace: false }, bound);
+    assert.ok(!textOf(noTeam!.request!.context).includes('varin-status'));
+    assert.equal(noTeam!.retained, undefined);
   });
 });

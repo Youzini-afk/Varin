@@ -249,6 +249,7 @@ export function createThreadStatusProjector(options: ThreadStatusProjectorOption
       parent: ThreadParent,
       cursor: ThreadStatusCursor | null,
       threadIds?: readonly string[],
+      currentOnly = false,
     ): Promise<{ rows: ThreadStatusRow[]; cursor: ThreadStatusCursor; removed: string[] }> {
       const registry = options.registry();
       if (!registry) throw new Error("Thread registry not configured");
@@ -259,6 +260,8 @@ export function createThreadStatusProjector(options: ThreadStatusProjectorOption
       const next: ThreadStatusCursor = { cells: {}, inboundSeen: {}, resultSeen: {} };
       const rows: ThreadStatusRow[] = [];
       for (const { thread, activeRun } of snapshots) {
+        if (currentOnly && (thread.lifecycle === "settled" || thread.lifecycle === "archived")
+          && thread.attention === "none" && !["dirty", "merge-ready", "conflict"].includes(thread.integration)) continue;
         const runs = await registry.listRuns(workspaceId, thread.id);
         const seenInbound = cursor?.inboundSeen[thread.id] ?? [];
         const seenResult = cursor?.resultSeen[thread.id];

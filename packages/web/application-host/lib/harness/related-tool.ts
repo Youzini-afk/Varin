@@ -234,7 +234,7 @@ export async function executeRelated(
     const importers = await store.findImporters(path);
     importerItems.push(...importers.resolved.filter((item) => pathInRoots(item.path, roots)));
     for (const connection of relations.connections) {
-      const ends = (await store.findLinks(connection.literal)).filter((end) => pathInRoots(end.path, roots));
+      const ends = (await store.findLinks(connection.literal)).filter((end) => end.kind !== "import" && pathInRoots(end.path, roots));
       connectionItems.push({
         literal: connection.literal,
         callee: connection.callee,
@@ -395,22 +395,6 @@ function formatRelatedText(result: RelatedQueryResult, focusOmitted: number, sec
     note(shown.omitted);
     if (result.importers.incomplete) lines.push("- reverse imports may be incomplete");
   }
-  if (result.connections.items.length === 0) {
-    lines.push(result.connections.incomplete ? "Connections: incomplete" : "Connections: none");
-  } else {
-    lines.push("Connections:");
-    const shown = capped(result.connections.items, sectionLimit);
-    for (const item of shown.shown) {
-      const ends = capped(item.otherEnds, sectionLimit);
-      const rendered = ends.shown.map((end) => `${end.path}${end.callee ? ` ${end.callee}` : ""}`).join(", ");
-      const text = item.otherEnds.length === 0
-        ? "no other end in the catalog"
-        : ends.omitted > 0 ? `${rendered}, … ${ends.omitted} more` : rendered;
-      lines.push(`- ${item.path} ${item.callee}("${item.literal}") — ${text}`);
-    }
-    note(shown.omitted);
-    if (result.connections.incomplete) lines.push("- connection edges are incomplete for this revision");
-  }
   const pinMark = (item: { pinned: boolean; staleTarget?: boolean }): string => (
     `${item.pinned ? "" : " [unpinned]"}${item.staleTarget ? " [stale-target]" : ""}`
   );
@@ -466,6 +450,25 @@ function formatRelatedText(result: RelatedQueryResult, focusOmitted: number, sec
       note(shown.omitted);
     }
     if (result.calls.incomplete) lines.push("- the resolved call set may be incomplete for this anchor");
+  }
+  if (result.connections.items.length === 0) {
+    lines.push(result.connections.incomplete ? "Connections: incomplete" : "Connections: none");
+  } else {
+    lines.push("Shared literals (candidates):");
+    const shown = capped(result.connections.items, sectionLimit);
+    const neighbours = new Set([
+      ...result.imports.items.flatMap(item => item.resolvedPath ? [item.resolvedPath] : []),
+      ...result.importers.items.map(item => item.path),
+    ]);
+    for (const item of shown.shown) {
+      const ends = capped(Number.isFinite(sectionLimit)
+        ? item.otherEnds.filter(end => neighbours.has(end.path)) : item.otherEnds, sectionLimit);
+      const rendered = ends.shown.map(end => `${end.path}${end.callee ? ` ${end.callee}` : ''}`).join(', ');
+      const omitted = item.otherEnds.length - ends.shown.length;
+      lines.push(`- ${item.path} ${item.callee}("${item.literal}") — ${rendered || (omitted ? 'no directly imported peer' : 'no other candidate site')}${omitted ? `; ${omitted} more candidate sites` : ''}`);
+    }
+    note(shown.omitted);
+    if (result.connections.incomplete) lines.push("- connection edges are incomplete for this revision");
   }
   // Import graphs can touch thousands of ordinary source paths. Keep their
   // filename-based role guesses behind the actual definitions and edges.

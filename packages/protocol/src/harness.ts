@@ -315,7 +315,7 @@ export interface DiagnosticsResult {
 }
 
 export interface LspNavigationResult {
-  status: "ready" | "empty" | "unavailable";
+  status: "ready" | "empty" | "busy" | "unavailable";
   text: string;
   value?: JsonValue;
   /** Text identity the queried document was bound to (D-087). */

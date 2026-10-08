@@ -51,6 +51,15 @@ const createDeps = () => {
 };
 
 describe("LSP navigation services", () => {
+  it('distinguishes file contention from a missing language server', async () => {
+    const deps = createDeps();
+    deps.documents.read.mockRejectedValueOnce(new Error('operation error: file resource is busy under lease file-lease:other'));
+    const services = createLspNavigationServices(deps as never);
+    const result = await services.definition.handle({ path: 'src/a.ts', line: 1 }, context);
+    expect(result.status).toBe('busy');
+    expect(result.text).not.toContain('unavailable');
+    expect((await services.definition.handle({ path: 'src/a.ts', line: 1 }, context)).status).toBe('ready');
+  });
   it("binds the queried document in the Host view and reports its revision", async () => {
     const deps = createDeps();
     const services = createLspNavigationServices(deps as never);
@@ -64,7 +73,7 @@ describe("LSP navigation services", () => {
       languageId: "typescript",
       contentRevision: "r1",
       reason: "open",
-    }));
+    }), { signal: context.signal });
     expect(deps.supervisor.workspaceSymbols).toHaveBeenCalledWith(expect.objectContaining({
       view: AGENT_LANGUAGE_VIEW,
       expectedRevision: "r1",
@@ -92,7 +101,7 @@ describe("LSP navigation services", () => {
     expect(deps.documents.read).toHaveBeenCalledWith({ workspaceId: "external-root", resourceId: "src/a.ts" });
     expect(deps.supervisor.syncDocument).toHaveBeenCalledWith(expect.objectContaining({
       resource: { workspaceId: "external-root", resourceId: "src/a.ts" },
-    }));
+    }), { signal: context.signal });
   });
 
   it("passes the authorized root when consulting a fixed editor draft", async () => {
@@ -137,7 +146,7 @@ describe("LSP navigation services", () => {
     expect(deps.supervisor.syncDocument).toHaveBeenCalledWith(expect.objectContaining({
       content: "export const value = 2;",
       contentRevision: "surface-draft:ref-1:4",
-    }));
+    }), { signal: context.signal });
   });
 
   it("binds an aliased child working-branch source through the shared read callback", async () => {
@@ -159,7 +168,7 @@ describe("LSP navigation services", () => {
     expect(deps.documents.read).not.toHaveBeenCalled();
     expect(deps.supervisor.syncDocument).toHaveBeenCalledWith(expect.objectContaining({
       content: "export const value = 3;", contentRevision: "working-branch:child@4",
-    }));
+    }), { signal: context.signal });
   });
 
   it("never falls back to disk when a known dirty path has no fixed draft", async () => {

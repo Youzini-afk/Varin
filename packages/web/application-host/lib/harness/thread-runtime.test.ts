@@ -902,6 +902,7 @@ describe("thread runtime", () => {
     const baselineRuntime = createThreadRuntime({
       registry,
       workingStates,
+      inspectBaselineWriters: async () => [{ id: 'round-1', owner: { kind: 'pi-worker', id: 'dispatching-worker' }, purpose: 'pi-agent-run:agent.prompt' }],
       resolveWorkspaceRoot: async () => workspace,
       resolveRuntimeWorkspaceId: async () => identity.workspaceId,
       sessions: sessionAdapter,
@@ -923,14 +924,15 @@ describe("thread runtime", () => {
         scopeId: identity.workspaceId,
         parent: PARENT,
         threadId: thread.id,
+        callerWorkerId: 'dispatching-worker',
       });
       const capturedOnce = captureCount;
       const sibling = await registry.createThread(input);
-      await baselineRuntime.prepareIsolatedBranch({ scopeId: identity.workspaceId, parent: PARENT, threadId: sibling.id });
+      await baselineRuntime.prepareIsolatedBranch({ scopeId: identity.workspaceId, parent: PARENT, threadId: sibling.id, callerWorkerId: 'dispatching-worker' });
       expect(captureCount).toBe(capturedOnce);
       await fs.promises.writeFile(join(workspace, "kept.txt"), "parent after dispatch\n");
       const later = await registry.createThread(input);
-      await baselineRuntime.prepareIsolatedBranch({ scopeId: identity.workspaceId, parent: PARENT, threadId: later.id });
+      await baselineRuntime.prepareIsolatedBranch({ scopeId: identity.workspaceId, parent: PARENT, threadId: later.id, callerWorkerId: 'dispatching-worker' });
       expect(captureCount).toBeGreaterThan(capturedOnce);
       await workingStates.withStore(identity.workspaceId, "assert-new-baseline", async store => {
         const state = store.getBranch(`thread-${later.id}`)!.baseState["kept.txt"];
@@ -1059,7 +1061,10 @@ describe("thread runtime", () => {
       const writerRuntime = createThreadRuntime({
         registry,
         workingStates,
-        inspectBaselineWriters: async () => [{ id: "writer-1", purpose: "documents-write" }],
+        inspectBaselineWriters: async () => [
+          { id: 'round-1', owner: { kind: 'pi-worker', id: 'dispatching-worker' }, purpose: 'pi-agent-run:agent.prompt' },
+          { id: "writer-1", owner: { kind: 'pi-worker', id: 'dispatching-worker' }, purpose: "documents-write" },
+        ],
         resolveWorkspaceRoot: async () => workspace,
         resolveRuntimeWorkspaceId: async () => identity.workspaceId,
         sessions: sessionAdapter,
@@ -1079,6 +1084,7 @@ describe("thread runtime", () => {
         scopeId: identity.workspaceId,
         parent: PARENT,
         threadId: blocked.id,
+        callerWorkerId: 'dispatching-worker',
       })).rejects.toMatchObject({
         retryable: true,
         message: expect.stringContaining('worktree:"shared"'),

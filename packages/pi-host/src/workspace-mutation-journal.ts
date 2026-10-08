@@ -115,7 +115,9 @@ export function formatSurfaceWriteResult(
       ? `patch applied successfully (${results.length} file(s))\n${lines.join("\n")}`
       : lines.join("\n");
   }
-  return `${result.message ?? `surface mutation ${result.status}`}${lines.length > 0 ? `\n${lines.join("\n")}` : ""}`;
+  const detail = lines.join("\n");
+  if (result.message === detail) return detail;
+  return `${result.message ?? `surface mutation ${result.status}`}${detail ? `\n${detail}` : ""}`;
 }
 
 export async function trySurfaceWrite(
@@ -252,7 +254,7 @@ export function createWorkspaceMutationJournalTools(
             content: params.content,
           }, signal);
           if (planned !== "disk") {
-            return { content: [{ type: "text" as const, text: planned.text }],
+            return { content: [{ type: "text" as const, text: planned.text }], isError: planned.status !== "applied",
               details: { mutation: { status: planned.status, results: planned.results } } };
           }
         }
@@ -291,7 +293,7 @@ export function createWorkspaceMutationJournalTools(
             edits: params.edits,
           }, signal);
           if (planned !== "disk") {
-            return { content: [{ type: "text" as const, text: planned.text }],
+            return { content: [{ type: "text" as const, text: planned.text }], isError: planned.status !== "applied",
               details: { mutation: { status: planned.status, results: planned.results } } };
           }
         }

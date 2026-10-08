@@ -62,6 +62,7 @@ describe("harness path authority", () => {
       readFsPromises: fakeReadFs,
       pathModule,
       platform: "win32",
+      resolveInputPath: async (_actor, input) => input.startsWith('/d/') ? `D:/${input.slice(3)}` : input,
     });
     const first = await authority.resolve(actor(), "D:\\A\\..\\Workspace\\File.ts", { allowMissing: false });
     const second = await authority.resolve(actor(), "d:\\workspace\\file.TS", { allowMissing: false });
@@ -71,6 +72,10 @@ describe("harness path authority", () => {
     expect(second?.resolvedPath).toBe("D:\\Workspace\\file.TS");
     expect(await authority.readAuthorizedFile(actor(), first!)).toEqual(Buffer.from("upper"));
     expect(openedPath).toBe("D:\\Workspace\\File.ts");
+    const shellPath = await authority.resolve(actor(), '/d/Workspace/File.ts', { allowMissing: false });
+    expect(shellPath?.resolvedPath).toBe(first?.resolvedPath);
+    expect(shellPath?.inputPath).toBe('/d/Workspace/File.ts');
+    expect(await authority.resolve({ ...actor(), workspaceScope: ['allowed'] }, '/d/Workspace/File.ts', { allowMissing: false })).toBeNull();
   });
 
   it("does not convert document authority failures into an outside-workspace answer", async () => {

@@ -151,17 +151,24 @@ export const applyTextEdits = (
   text: string,
   edits: ReadonlyArray<{ oldText: string; newText: string }>,
 ): string => {
-  let next = text;
-  for (const edit of edits) {
+  const matches = edits.map((edit) => {
     if (!edit.oldText) throw new Error("Edit oldText must not be empty");
-    const index = next.indexOf(edit.oldText);
+    const index = text.indexOf(edit.oldText);
     if (index < 0) throw new Error("Could not find the exact text to replace");
-    if (next.indexOf(edit.oldText, index + edit.oldText.length) >= 0) {
+    if (text.indexOf(edit.oldText, index + 1) >= 0) {
       throw new Error("Edit oldText matched more than once; make the text unique");
     }
-    next = `${next.slice(0, index)}${edit.newText}${next.slice(index + edit.oldText.length)}`;
+    return { start: index, end: index + edit.oldText.length, newText: edit.newText };
+  }).sort((left, right) => left.start - right.start);
+  const parts: string[] = [];
+  let cursor = 0;
+  for (const match of matches) {
+    if (match.start < cursor) throw new Error("Edit matches overlap; combine them into one replacement");
+    parts.push(text.slice(cursor, match.start), match.newText);
+    cursor = match.end;
   }
-  return next;
+  parts.push(text.slice(cursor));
+  return parts.join("");
 };
 
 export const applySurfaceEdits = (

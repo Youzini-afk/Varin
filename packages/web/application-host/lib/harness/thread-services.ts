@@ -556,6 +556,7 @@ export function createThreadDispatchService(host: HarnessServiceHost): HarnessSe
             scopeId: workspaceId,
             parent,
             threadId: thread.id,
+            callerWorkerId: ctx.actor.workerId,
             draftBaselineId: captured.draftBaselineId,
             signal: ctx.signal,
           });

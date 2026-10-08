@@ -1299,6 +1299,25 @@ it('allows only an explicit restore capture to validate under maintenance', asyn
   }
 });
 
+it('excludes the dispatching round admission without ignoring real writer activity during capture', async () => {
+  const harness = await createDocumentAuthorityHarness();
+  const round = await harness.authority.registerWriter(harness.token(), { purpose: 'pi-agent-run:agent.prompt' });
+  try {
+    const options = { ignoredWriterIds: [round.writerId] };
+    const quiet = await harness.authority.beginCapture(harness.identity.workspaceId, options);
+    expect(await harness.authority.completeCapture(quiet)).toMatchObject({ stable: true });
+    const capture = await harness.authority.beginCapture(harness.identity.workspaceId, options);
+    const writer = await harness.authority.registerWriter(harness.token(), { purpose: 'documents-write' });
+    await writer.close();
+    expect(await harness.authority.completeCapture(capture)).toMatchObject({
+      stable: false, reasons: expect.arrayContaining(['writer-activity']),
+    });
+  } finally {
+    await round.close();
+    await harness.cleanup();
+  }
+});
+
 it('coordinates a dirty-state barrier with every connected document surface', async () => {
   const harness = await createDocumentAuthorityHarness();
   const events: Record<string, unknown>[] = [];

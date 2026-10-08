@@ -1291,13 +1291,28 @@ export class KernelWorkingStateRootStore implements WorkingStateRootStore {
     let done = 0;
     for (const file of files) {
       options?.signal?.throwIfAborted();
+      const targetPath = root.basePath ? `${root.basePath}/${file}` : file;
+      const leaseId = `capture-lease:${randomUUID()}`;
+      for (;;) {
+        options?.signal?.throwIfAborted();
+        const lease = await this.context.client.fileLeaseAcquire({
+          workspaceId: this.context.identity.workspaceId, rootId: root.rootId, leaseId,
+          resources: [{ path: targetPath, scope: "exact" }],
+        }, options?.signal);
+        if (lease.status === "acquired") break;
+        if (lease.status !== "busy") throw new Error("Kernel returned an invalid capture lease result");
+        await new Promise(resolve => setTimeout(resolve, 5));
+      }
       const value = await this.context.client.fileCapture({
         operationId: `working-capture:${randomUUID()}`,
         workspaceId: this.context.identity.workspaceId,
         rootId: root.rootId,
-        path: root.basePath ? `${root.basePath}/${file}` : file,
+        path: targetPath,
+        leaseId,
         store: options?.store !== false,
-      }, options?.signal);
+      }, options?.signal).finally(() => this.context.client.fileLeaseRelease({
+        workspaceId: this.context.identity.workspaceId, rootId: root.rootId, leaseId,
+      }));
       if (typeof value.stateJson !== "string") {
         throw new Error(`Kernel returned an invalid baseline state for ${file}`);
       }

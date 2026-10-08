@@ -28,8 +28,7 @@ export function organizeShellOutput(input: {
 }): OrganizedShellOutput {
   const normalized = normalizeShellText(input.output);
   const budget = organizeBudget(input.budget ?? SHELL_DISPLAY_BUDGET);
-  const dangling = normalized.length > 0 && !input.output.endsWith("\n") && !input.output.endsWith("\r\n");
-  const partial = !input.complete || dangling;
+  const partial = !input.complete;
   const identified = identifyShellOutput(input.command, normalized);
   const pmOrganized = identified.kind === "package-manager"
     ? organizePackageManager(normalized, budget, input.exitCode)

@@ -16,18 +16,24 @@ const SymbolsParams = Type.Object({
 
 const resultContent = (result: LspNavigationResult) => ({
   content: [{ type: "text" as const, text: result.text }],
-  ...(result.status === "unavailable" ? { isError: true as const } : {}),
+  ...(result.status === "unavailable" || result.status === "busy" ? { isError: true as const } : {}),
   details: {
     status: result.status,
     ...(result.value === undefined ? {} : { value: result.value }),
   },
 });
 
-const failedContent = (name: string, error: unknown) => ({
-  content: [{ type: "text" as const, text: `${name} unavailable: ${error instanceof Error ? error.message : String(error)}` }],
-  isError: true as const,
-  details: { status: "unavailable" },
-});
+const failedContent = (name: string, error: unknown) => {
+  const message = error instanceof Error ? error.message : String(error);
+  if (message.includes("file resource is busy under lease")) {
+    return resultContent({ status: "busy", text: "LSP busy: the file is in use. Retry this request." });
+  }
+  return {
+    content: [{ type: "text" as const, text: `${name} unavailable: ${message}` }],
+    isError: true as const,
+    details: { status: "unavailable" },
+  };
+};
 
 export function createLspNavigationTools(bridge: HostServicesBridge): ToolDefinition[] {
   const positionTool = (
