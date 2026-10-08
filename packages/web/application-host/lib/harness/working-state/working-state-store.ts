@@ -1371,12 +1371,12 @@ export class WorkingStateStore {
     return applyIndexModes(result, options?.indexModes);
   }
 
-  async listCaptureScopePaths(directory: string, scopes: readonly string[]): Promise<string[]> {
-    return this.scanCaptureScopes(directory, scopes);
+  async listCaptureScopePaths(directory: string, scopes: readonly string[], signal?: AbortSignal): Promise<string[]> {
+    return this.scanCaptureScopes(directory, scopes, signal);
   }
 
-  async listWorkspaceBaselinePaths(directory: string): Promise<string[]> {
-    return this.scanDirectoryRelative(directory);
+  async listWorkspaceBaselinePaths(directory: string, signal?: AbortSignal): Promise<string[]> {
+    return this.scanDirectoryRelative(directory, directory, signal);
   }
 
   private async defaultNewFileMode(): Promise<number> {
@@ -1397,7 +1397,8 @@ export class WorkingStateStore {
     return state;
   }
 
-  private async scanDirectoryRelative(directory: string, base = directory): Promise<string[]> {
+  private async scanDirectoryRelative(directory: string, base = directory, signal?: AbortSignal): Promise<string[]> {
+    signal?.throwIfAborted();
     const result: string[] = [];
     const entries = await this.fsPromises.readdir(directory, { withFileTypes: true });
     for (const entry of entries) {
@@ -1406,7 +1407,7 @@ export class WorkingStateStore {
       const relative = normalizeRelative(this.pathModule.relative(base, absolute));
       if (entry.isDirectory()) {
         result.push(relative);
-        result.push(...await this.scanDirectoryRelative(absolute, base));
+        result.push(...await this.scanDirectoryRelative(absolute, base, signal));
       } else {
         result.push(relative);
       }
@@ -1414,13 +1415,15 @@ export class WorkingStateStore {
     return result.sort();
   }
 
-  private async scanCaptureScopes(directory: string, scopes: readonly string[]): Promise<string[]> {
+  private async scanCaptureScopes(directory: string, scopes: readonly string[], signal?: AbortSignal): Promise<string[]> {
+    signal?.throwIfAborted();
     const normalizedScopes = [...new Set(scopes.map(normalizeRelative))].sort();
     const minimalScopes = normalizedScopes.filter((scope, index) => (
       !normalizedScopes.slice(0, index).some((parent) => scope.startsWith(`${parent}/`))
     ));
     const result = new Set<string>();
     const visit = async (relative: string): Promise<void> => {
+      signal?.throwIfAborted();
       const absolute = this.pathModule.resolve(directory, ...relative.split("/"));
       await assertAbsolutePathInWorkspace(absolute, {
         root: directory,

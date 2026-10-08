@@ -134,9 +134,11 @@ const threadState = ({ thread, activeRun }: ThreadSnapshot): string => {
   if (thread.lifecycle === "archived") return "archived";
   if (thread.integration === "merged") return "merged";
   if (thread.integration === "conflict") return "conflict";
+  if (thread.lifecycle === "preparing") return "preparing";
   if (thread.lifecycle === "queued") return "queued";
   if (thread.attention === "followup") return "waiting-for-followup";
   if (thread.lifecycle === "settled") {
+    if (!activeRun && thread.attention === "stalled") return "interrupted";
     if (thread.integration === "merge-ready" && activeRun?.outcome === "success") return "merge-ready";
     if (activeRun?.outcome === "success") return "done";
     return activeRun?.outcome ?? "settled";
@@ -509,6 +511,7 @@ export function createThreadDispatchService(host: HarnessServiceHost): HarnessSe
         createdBy: "agent" as const,
         concurrency,
         autoRun: true,
+        preparing: true,
         worktree: params.kind === "discussion" ? "none" as const : worktree,
         ...(captured.draftBaselineId && params.kind !== "discussion" ? { draftBaselineId: captured.draftBaselineId } : {}),
         ...(captured.sourceViewId && params.kind !== "discussion" ? { sourceViewId: captured.sourceViewId } : {}),
@@ -540,18 +543,28 @@ export function createThreadDispatchService(host: HarnessServiceHost): HarnessSe
       };
       let thread: Thread;
       try {
+        ctx.signal.throwIfAborted();
         thread = await registry.createThread(input);
       } catch (error) {
         await captured.cleanup().catch(() => undefined);
         throw error;
       }
-      if (input.worktree === "isolated") {
-        if (!host.threadPrepareIsolatedBranch) {
+      const discardPreparation = async (): Promise<void> => {
+        if (host.threadDiscardPreparation) {
+          await host.threadDiscardPreparation(workspaceId, parent, thread.id).catch(() => undefined);
+        } else {
           await captured.cleanup().catch(() => undefined);
           await registry.deleteThread(workspaceId, parent, thread.id).catch(() => undefined);
+        }
+      };
+      if (input.worktree === "isolated") {
+        if (!host.threadPrepareIsolatedBranch) {
+          await discardPreparation();
           throw new HarnessServiceError("unavailable", "Isolated thread baseline capture is not configured");
         }
         try {
+          ctx.signal.throwIfAborted();
+          ctx.reportPhase?.("dispatch:baseline");
           await host.threadPrepareIsolatedBranch({
             scopeId: workspaceId,
             parent,
@@ -561,8 +574,7 @@ export function createThreadDispatchService(host: HarnessServiceHost): HarnessSe
             signal: ctx.signal,
           });
         } catch (error) {
-          await captured.cleanup().catch(() => undefined);
-          await registry.deleteThread(workspaceId, parent, thread.id).catch(() => undefined);
+          await discardPreparation();
           if (error instanceof ThreadRuntimeError) {
             const code = error.code === "not-found"
               ? "not-found"
@@ -581,17 +593,19 @@ export function createThreadDispatchService(host: HarnessServiceHost): HarnessSe
         }
       }
       try {
+        ctx.signal.throwIfAborted();
         if (typeof registry.assertDispatchAllowed === "function") {
           await registry.assertDispatchAllowed(workspaceId, thread.id);
         }
       } catch (error) {
-        await captured.cleanup().catch(() => undefined);
-        await registry.deleteThread(workspaceId, parent, thread.id).catch(() => undefined);
+        await discardPreparation();
         throw error;
       }
       let run: ThreadRun;
       try {
-        run = await registry.startRun(workspaceId, thread.id);
+        ctx.signal.throwIfAborted();
+        ctx.reportPhase?.("dispatch:admission");
+        run = await registry.startRun(workspaceId, thread.id, "pi", { preparationComplete: true, signal: ctx.signal });
       } catch (error) {
         if (error instanceof ThreadAdmissionError) {
           // The immutable baseline is already captured. Keep this queued
@@ -602,8 +616,7 @@ export function createThreadDispatchService(host: HarnessServiceHost): HarnessSe
             queued: true,
           };
         }
-        await captured.cleanup().catch(() => undefined);
-        await registry.deleteThread(workspaceId, parent, thread.id).catch(() => undefined);
+        await discardPreparation();
         throw error;
       }
       void host.threadSpawnSession({ ...input, threadId: thread.id, runId: run.id }).catch(async (error) => {
@@ -912,7 +925,7 @@ export function createThreadWaitService(host: HarnessServiceHost): HarnessServic
       const self = await selfSnapshot();
       if (self && cursorChanged(self, registry.getCursor(observer, self.thread.id))) targets.push(self);
       const done = targets.filter(({ thread }) => thread.lifecycle === "settled" || thread.lifecycle === "archived");
-      const queued = targets.filter(({ thread }) => thread.lifecycle === "queued");
+      const queued = targets.filter(({ thread }) => thread.lifecycle === "queued" || thread.lifecycle === "preparing");
       const running = targets.filter(({ thread, activeRun }) => (
         thread.lifecycle === "active"
         && thread.attention !== "user"
@@ -1099,7 +1112,7 @@ export const deliverAuthorizedThreadRequest = async (
       await patch("delivered");
       return { accepted: true, lifecycle: thread.lifecycle, attention: thread.attention, messageId: input.requestId, delivery: "delivered", route: "active" };
     }
-    if (thread.lifecycle === "queued") {
+    if (thread.lifecycle === "queued" || thread.lifecycle === "preparing") {
       return { accepted: true, lifecycle: thread.lifecycle, attention: thread.attention,
         messageId: input.requestId, delivery: "scheduled" };
     }
@@ -1509,7 +1522,7 @@ export function createThreadSendService(host: HarnessServiceHost): HarnessServic
         await recordState("delivered");
         return { accepted: true, lifecycle: thread.lifecycle, attention: thread.attention, messageId: requestId, delivery: "delivered" };
       }
-      if (thread.lifecycle === "queued") {
+      if (thread.lifecycle === "queued" || thread.lifecycle === "preparing") {
         if (upgradeRequested) {
           throw new HarnessServiceError("invalid-params", "capability/model re-routing needs a Thread that has completed a Run; dispatch carries the initial configuration");
         }

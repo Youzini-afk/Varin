@@ -1,5 +1,6 @@
 import fs from 'node:fs';
 import { AsyncLocalStorage } from 'node:async_hooks';
+import { isAbortError, waitWithSignal } from '../cancellation.js';
 import path from 'node:path';
 import { createHash, randomUUID } from 'node:crypto';
 import {
@@ -540,6 +541,7 @@ export const createDocumentAuthority = (options: DocumentAuthorityOptions) => {
   };
 
   const fail = (error: unknown): never => {
+    if (isAbortError(error)) throw error;
     if (isDocumentAuthorityError(error)) throw error;
     if (error instanceof WorkspacePathError) {
       throw new DocumentPathError(
@@ -624,12 +626,15 @@ export const createDocumentAuthority = (options: DocumentAuthorityOptions) => {
   const withResolvedResourceOperation = async <Result>(
     requests: ReadonlyArray<{ resource: DocumentResource; scope: 'exact' | 'subtree' }>,
     operation: (resolved: readonly ResolveResourceResult[]) => Promise<Result>,
+    options: { signal?: AbortSignal; reportPhase?: (phase: string) => void } = {},
   ): Promise<Result> => {
-    const resolved = await Promise.all(requests.map(({ resource }) => resolveResourcePath(resource, true)));
-    const canonicalPaths = await Promise.all(resolved.map((entry) => canonicalizePathIdentity(
+    options.signal?.throwIfAborted();
+    options.reportPhase?.('document:resolve');
+    const resolved = await waitWithSignal(Promise.all(requests.map(({ resource }) => resolveResourcePath(resource, true))), options.signal);
+    const canonicalPaths = await waitWithSignal(Promise.all(resolved.map((entry) => canonicalizePathIdentity(
       entry.resolved.absolutePath,
       { allowMissing: true, fsPromises, pathModule },
-    ))).catch((error) => fail(error));
+    ))), options.signal).catch((error) => fail(error));
     const queueResources: SerialQueueResource[] = resolved.map((_entry, index) => ({
       key: resourceKey(hostId, canonicalPaths[index]!, pathModule, platform),
       scope: requests[index]!.scope,
@@ -650,24 +655,34 @@ export const createDocumentAuthority = (options: DocumentAuthorityOptions) => {
         });
       }
       const keys = new Set(queueResources.map((resource) => resource.key));
-      const execute = () => activeResourceKeys.run(keys, () => storage(workspaceId, (context) => context.resourceOperationGate.run(
-        requests.map((request, index) => {
-          const relative = pathModule.relative(resolved[index]!.workspace.root, canonicalPaths[index]!);
-          if (pathModule.isAbsolute(relative) || relative === '..' || relative.startsWith(`..${pathModule.sep}`)) {
-            throw new DocumentPathError('Path is outside workspace');
-          }
-          return { resourceId: relative.split(pathModule.sep).join('/'), scope: request.scope };
-        }),
-        () => operation(resolved),
-      )));
+      const execute = () => activeResourceKeys.run(keys, () => {
+        options.signal?.throwIfAborted();
+        options.reportPhase?.('document:storage');
+        return storage(workspaceId, (context) => {
+          options.signal?.throwIfAborted();
+          options.reportPhase?.('document:lease');
+          return context.resourceOperationGate.run(
+            requests.map((request, index) => {
+              const relative = pathModule.relative(resolved[index]!.workspace.root, canonicalPaths[index]!);
+              if (pathModule.isAbsolute(relative) || relative === '..' || relative.startsWith(`..${pathModule.sep}`)) {
+                throw new DocumentPathError('Path is outside workspace');
+              }
+              return { resourceId: relative.split(pathModule.sep).join('/'), scope: request.scope };
+            }),
+            () => operation(resolved),
+            options,
+          );
+        });
+      });
       // The kernel lease is scoped to one Documents workspace. The host queue
       // joins aliases from overlapping workspace roots before entering it.
-      return nested ? execute() : queues.runResources(queueResources, execute);
+      options.reportPhase?.('document:queue');
+      return nested ? execute() : queues.runResources(queueResources, execute, options.signal);
     }
     return queues.runResources(queueResources, () => activeResourceKeys.run(
       new Set(queueResources.map((resource) => resource.key)),
       () => operation(resolved),
-    ));
+    ), options.signal);
   };
 
   const runResourceOperation = <Result>(
@@ -691,7 +706,8 @@ export const createDocumentAuthority = (options: DocumentAuthorityOptions) => {
     }
   };
 
-  const snapshotFile = async (resource: DocumentResource, absolutePath: string): Promise<SnapshotResult> => {
+  const snapshotFile = async (resource: DocumentResource, absolutePath: string, signal?: AbortSignal): Promise<SnapshotResult> => {
+    signal?.throwIfAborted();
     let stat: import('node:fs').Stats;
     try {
       stat = await fsPromises.lstat(absolutePath);
@@ -721,7 +737,7 @@ export const createDocumentAuthority = (options: DocumentAuthorityOptions) => {
     if (stat.size > maxReadBytes) {
       throw new DocumentAuthorityError('Document is too large to read', { code: 'failed', statusCode: 413 });
     }
-    const bytes = await fsPromises.readFile(absolutePath);
+    const bytes = await fsPromises.readFile(absolutePath, { signal });
     const revision = revisionFromBytes(bytes);
     const inspected = inspectDocumentBytes(bytes);
     const modifiedAt = toIso(stat.mtimeMs);
@@ -917,17 +933,20 @@ export const createDocumentAuthority = (options: DocumentAuthorityOptions) => {
     }
   };
 
-  const read = (resource: DocumentResource): Promise<DocumentReadResult> => withResolvedResourceOperation([
+  const read = (resource: DocumentResource, options: { signal?: AbortSignal; reportPhase?: (phase: string) => void } = {}): Promise<DocumentReadResult> => withResolvedResourceOperation([
     { resource, scope: 'exact' },
   ], async ([target]) => {
     try {
-      const mutation = await mutations.inspect(resource.workspaceId);
+      options.reportPhase?.('document:mutation-state');
+      const mutation = await waitWithSignal(mutations.inspect(resource.workspaceId, options.signal), options.signal);
       const { resolved } = target!;
-      return { ...(await snapshotFile(resource, resolved.absolutePath)), epoch: mutation.epoch };
+      options.signal?.throwIfAborted();
+      options.reportPhase?.('document:read');
+      return { ...(await snapshotFile(resource, resolved.absolutePath, options.signal)), epoch: mutation.epoch };
     } catch (error) {
       return fail(error);
     }
-  });
+  }, options);
 
   const write = (request: WriteRequest): Promise<DocumentWriteResult> => withResolvedResourceOperation([
     { resource: request.resource, scope: 'subtree' },
@@ -2270,10 +2289,14 @@ export const createDocumentAuthority = (options: DocumentAuthorityOptions) => {
     resolveWorkspace,
     resolveResourceIdentity,
     listWorkspaceRegistrations: () => registry.list(),
-    inspectWorkspace: async (workspaceId: string) => {
+    inspectWorkspace: async (workspaceId: string, options: { signal?: AbortSignal; reportPhase?: (phase: string) => void } = {}) => {
       try {
-        const workspace = await loadWorkspace(workspaceId);
-        const rest = { ...await mutations.inspect(workspaceId) } as Record<string, unknown>;
+        options.signal?.throwIfAborted();
+        options.reportPhase?.('workspace:resolve');
+        const workspace = await waitWithSignal(loadWorkspace(workspaceId), options.signal);
+        options.signal?.throwIfAborted();
+        options.reportPhase?.('workspace:mutation-state');
+        const rest = { ...await waitWithSignal(mutations.inspect(workspaceId, options.signal), options.signal) } as Record<string, unknown>;
         delete rest.workspaceId;
         return {
           ...rest,

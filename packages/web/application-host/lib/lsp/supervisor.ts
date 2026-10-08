@@ -881,7 +881,7 @@ export const createLanguageSupervisor = ({
       : 0;
     let absolutePath;
     try {
-      const inspected = await waitWithSignal(documents.inspectWorkspace(workspaceId), options.signal);
+      const inspected = await waitWithSignal(documents.inspectWorkspace(workspaceId, options), options.signal);
       const resolved = pathModule.resolve(inspected.root, resourceId);
       const relative = pathModule.relative(inspected.root, resolved);
       if (!relative || relative.startsWith('..') || pathModule.isAbsolute(relative)) {
@@ -1162,7 +1162,7 @@ export const createLanguageSupervisor = ({
     if (open) open.usedAt = now();
     let uri;
     if (resourceId) {
-      const inspected = await waitWithSignal(documents.inspectWorkspace(workspaceId), options.signal);
+      const inspected = await waitWithSignal(documents.inspectWorkspace(workspaceId, options), options.signal);
       const resolved = pathModule.resolve(inspected.root, resourceId);
       const relative = pathModule.relative(inspected.root, resolved);
       if (!relative || relative.startsWith('..') || pathModule.isAbsolute(relative)) {
@@ -1383,16 +1383,16 @@ export const createLanguageSupervisor = ({
       'completionResolveItems',
       (raw) => mapCompletionItem(raw, request.resolveToken),
     ),
-    hover: (request: LanguageRequest) => requestFeature('textDocument/hover', request, mapHover),
+    hover: (request: LanguageRequest, options: { signal?: AbortSignal } = {}) => requestFeature('textDocument/hover', request, mapHover, options),
     signatureHelp: (request: LanguageRequest) => requestFeature('textDocument/signatureHelp', request, mapSignatureHelp),
-    definition: (request: LanguageRequest) => requestFeature('textDocument/definition', request, (raw, record) => {
+    definition: (request: LanguageRequest, options: { signal?: AbortSignal } = {}) => requestFeature('textDocument/definition', request, (raw, record) => {
       const values = Array.isArray(raw) ? raw : raw ? [raw] : [];
       return values.map((value) => mapLocationLink(value, record.workspaceId, record.root, pathModule)).filter(Boolean);
-    }),
-    references: (request: LanguageRequest) => requestFeature('textDocument/references', request, (raw, record) => {
+    }, options),
+    references: (request: LanguageRequest, options: { signal?: AbortSignal } = {}) => requestFeature('textDocument/references', request, (raw, record) => {
       const values = Array.isArray(raw) ? raw : [];
       return values.map((value) => mapLocation(value, record.workspaceId, record.root, pathModule)).filter(Boolean);
-    }),
+    }, options),
     prepareCallHierarchy: (request: LanguageRequest) => requestFeature('textDocument/prepareCallHierarchy', request, (raw, record) => {
       const values = Array.isArray(raw) ? raw : [];
       record.callHierarchyItems.clear();
@@ -1450,9 +1450,9 @@ export const createLanguageSupervisor = ({
     documentSymbols: (request: LanguageRequest, options: { signal?: AbortSignal } = {}) => requestFeature('textDocument/documentSymbol', request, (raw, record) => (
       mapSymbols(raw, mappingContext(record))
     ), options),
-    workspaceSymbols: (request: LanguageRequest) => requestFeature('workspace/symbol', request, (raw, record) => (
+    workspaceSymbols: (request: LanguageRequest, options: { signal?: AbortSignal } = {}) => requestFeature('workspace/symbol', request, (raw, record) => (
       mapSymbols(raw, mappingContext(record))
-    )),
+    ), options),
     rename: (request: LanguageRequest) => requestFeature('textDocument/rename', request, (raw, record) => (
       mapWorkspaceEdit(raw, mappingContext(record))
     )),

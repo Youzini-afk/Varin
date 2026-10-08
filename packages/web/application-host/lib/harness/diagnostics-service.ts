@@ -1,6 +1,7 @@
 import type { HarnessService, HarnessServiceContext } from "./router.js";
 import type { DiagnosticItem, LanguageTextProvenance } from "@varin/protocol";
 import type { ObservationCursorStore } from "./observation-cursors.js";
+import { setTimeout as delay } from "node:timers/promises";
 
 export type BindDocumentResult =
   | { status: "bound"; revision: string; source: LanguageTextProvenance }
@@ -13,7 +14,7 @@ export interface DiagnosticsProvider {
    * Bind the path in the Host language view to its current disk text and report
    * the revision the answer will describe (D-087).
    */
-  bindDocument(workspaceId: string, path: string): Promise<BindDocumentResult>;
+  bindDocument(workspaceId: string, path: string, options?: { signal?: AbortSignal; reportPhase?: (phase: string) => void }): Promise<BindDocumentResult>;
   /**
    * Diagnostics the language server published for exactly this text identity,
    * or null while it has not answered for that revision yet.
@@ -45,7 +46,7 @@ export function createLspDiagnosticsService(provider: DiagnosticsProvider): Harn
         // authorizedPaths already reduced absolute/operation-dir-anchored
         // inputs to that form (RR4/E08).
         const resourcePath = ctx.authorizedPaths[0]?.resourceId ?? params.path;
-        const bound = await provider.bindDocument(providerWorkspaceId, resourcePath);
+        const bound = await provider.bindDocument(providerWorkspaceId, resourcePath, ctx);
         if (bound.status === "unsupported") {
           return { status: "unavailable", diagnostics: [], reason: "no language server for this file type" };
         }
@@ -54,7 +55,9 @@ export function createLspDiagnosticsService(provider: DiagnosticsProvider): Harn
         }
         const waitMs = params.waitMs ?? 5000;
         const deadline = Date.now() + waitMs;
+        ctx.reportPhase?.('lsp:diagnostics-publication');
         for (;;) {
+          ctx.signal.throwIfAborted();
           const diagnostics = await provider.getDiagnosticsForRevision(providerWorkspaceId, resourcePath, bound.revision);
           if (diagnostics) {
             const snapshot = await provider.getSnapshot(providerWorkspaceId, resourcePath);
@@ -75,9 +78,10 @@ export function createLspDiagnosticsService(provider: DiagnosticsProvider): Harn
               reason: "diagnostics not yet published for this revision",
             };
           }
-          await new Promise((resolve) => setTimeout(resolve, 50));
+          await delay(50, undefined, { signal: ctx.signal });
         }
       } catch {
+        ctx.signal.throwIfAborted();
         return { status: "unavailable", diagnostics: [], reason: "diagnostics request failed" };
       }
     },
@@ -127,7 +131,7 @@ export function createLspDiagnosticsSnapshotService(
       // observation describes; an incremental observer never waits for it.
       // The provider keys documents by workspace-relative resource id.
       const resourcePath = ctx.authorizedPaths[0]?.resourceId ?? params.path;
-      const bound = await provider.bindDocument(providerWorkspaceId, resourcePath);
+      const bound = await provider.bindDocument(providerWorkspaceId, resourcePath, ctx);
       if (bound.status === "unsupported") {
         return { status: "unavailable", diagnostics: [], reason: "no language server for this file type" };
       }
@@ -189,6 +193,7 @@ export function createLspDiagnosticsSnapshotService(
         else pending.commit();
         return { ...pending.result, observationRef: pending.observationRef };
       } catch {
+        ctx.signal.throwIfAborted();
         return { status: "unavailable", diagnostics: [], reason: "diagnostics request failed" };
       }
     },

@@ -220,7 +220,7 @@ describe("harness router", () => {
     });
     router.register("document.readSource", { handle: async () => ({ source: "disk", base64: "dGVzdA==" }) });
     await router.processEvent(harnessEvent("document.readSource", { path: "new.ts" }));
-    expect(authorize).toHaveBeenCalledWith(expect.anything(), "new.ts", { allowMissing: true });
+    expect(authorize).toHaveBeenCalledWith(expect.anything(), "new.ts", expect.objectContaining({ allowMissing: true, signal: expect.any(AbortSignal) }));
     expect(responses).toEqual([{ ok: true, result: { source: "disk", base64: "dGVzdA==" } }]);
     router.dispose();
   });
@@ -244,7 +244,7 @@ describe("harness router", () => {
     });
     router.register("document.pathOverlay", { handle: async () => ({ status: "disk" as const }) });
     await router.processEvent(harnessEvent("document.pathOverlay", { path: "src" }));
-    expect(authorize).toHaveBeenCalledWith(expect.anything(), "src", { allowMissing: true });
+    expect(authorize).toHaveBeenCalledWith(expect.anything(), "src", expect.objectContaining({ allowMissing: true, signal: expect.any(AbortSignal) }));
     expect(responses).toEqual([{ ok: true, result: { status: "disk" } }]);
     router.dispose();
   });
@@ -333,7 +333,7 @@ describe("harness router", () => {
       task: "inspect",
       scope: ["src/new-file.ts", "../outside"],
     }));
-    expect(authorize).toHaveBeenCalledWith(expect.anything(), "src/new-file.ts", { allowMissing: true });
+    expect(authorize).toHaveBeenCalledWith(expect.anything(), "src/new-file.ts", expect.objectContaining({ allowMissing: true, signal: expect.any(AbortSignal) }));
     expect(handle).not.toHaveBeenCalled();
     expect(responses).toEqual([{ ok: false, code: "forbidden" }]);
     router.dispose();

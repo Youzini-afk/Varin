@@ -15,6 +15,7 @@ import {
 } from "@varin/protocol";
 import { HarnessServiceError } from "./service-error.js";
 import { looksLikePathObject } from "./explore-query.js";
+import { waitWithSignal } from "../cancellation.js";
 
 export { buildHarnessRespondParams };
 
@@ -39,6 +40,8 @@ export interface HarnessServiceContext {
   inputContext?: AgentInputContext;
   signal: AbortSignal;
   interruptSignal?: AbortSignal;
+  /** Internal request diagnostics only; never included in tool results. */
+  reportPhase?(phase: string): void;
   /** Register state that advances only after the Host response reaches pi-host. */
   deferResponseDelivery?(commit: () => void, abort: () => void): void;
 }
@@ -73,7 +76,7 @@ export interface HarnessRouterOptions {
   authorizeWorkspacePath?: (
     actor: HarnessActorContext,
     path: string,
-    options: { allowMissing: boolean },
+    options: { allowMissing: boolean; signal?: AbortSignal; reportPhase?: (phase: string) => void },
   ) => Promise<HarnessAuthorizedPath | null>;
   defaultTimeoutMs?: number;
   cancelExploreQuery?: (actor: HarnessActorContext, queryId: string) => boolean;
@@ -430,7 +433,7 @@ export const createHarnessRouter = (options: HarnessRouterOptions) => {
     // Scheduler waits and shell observations may own their requested wait
     // duration. Worker cancellation, generation replacement, and Host disposal
     // still abort these zero-transport-timeout requests.
-    const timer = (data.method === "thread.wait" || data.method === "thread.send" || data.method === "computer.access" || data.method === "experiment.wait" || data.method === "compaction.run" || data.method === "materials.read" || data.method === "shell.exec" || data.method === "shell.read" || data.method === "search.content" || data.method === "related.query" || data.method === "computer.installSoftware") && data.timeoutMs === 0
+    const timer = (data.method === "thread.dispatch" || data.method === "thread.wait" || data.method === "thread.send" || data.method === "computer.access" || data.method === "experiment.wait" || data.method === "compaction.run" || data.method === "materials.read" || data.method === "shell.exec" || data.method === "shell.read" || data.method === "search.content" || data.method === "related.query" || data.method === "computer.installSoftware") && data.timeoutMs === 0
       ? undefined : setTimeout(() => {
         deadlineExpired = true;
         diagnose("deadline");
@@ -491,7 +494,7 @@ export const createHarnessRouter = (options: HarnessRouterOptions) => {
         const authorized = await options.authorizeWorkspacePath?.(
           actor,
           scopedPath.path,
-          { allowMissing: scopedPath.allowMissing },
+          { allowMissing: scopedPath.allowMissing, signal: controller.signal, reportPhase: (value) => { phase = value; } },
         ) ?? null;
         if (!authorized) {
           await respond({
@@ -511,7 +514,9 @@ export const createHarnessRouter = (options: HarnessRouterOptions) => {
         return;
       }
       phase = "execution-admission";
-      await options.assertExecution?.(actor.sessionId);
+      controller.signal.throwIfAborted();
+      if (options.assertExecution) await waitWithSignal(options.assertExecution(actor.sessionId), controller.signal);
+      controller.signal.throwIfAborted();
       phase = "service";
       const result = await service.handle(operationParams as never, {
         actor,
@@ -522,6 +527,7 @@ export const createHarnessRouter = (options: HarnessRouterOptions) => {
         ...(actor.workspaceScope ? { workspaceScope: actor.workspaceScope } : {}),
         signal: controller.signal,
         interruptSignal: interrupt.signal,
+        reportPhase: (value) => { phase = value; },
         deferResponseDelivery: (commit, abort) => {
           deferredDeliveries.push({ commit, abort });
         },

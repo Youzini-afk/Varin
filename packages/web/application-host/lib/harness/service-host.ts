@@ -147,7 +147,7 @@ export type HarnessDocumentReadSource = (
   context: AgentInputContext,
   resourceId: string,
   workspaceId: string,
-  options?: { page: import("@varin/protocol").DocumentReadPageRequest; signal?: AbortSignal },
+  options?: { page?: import("@varin/protocol").DocumentReadPageRequest; signal?: AbortSignal },
 ) => HarnessDocumentReadLookup | Promise<HarnessDocumentReadLookup>;
 
 /** Write admission for native Pi write/edit/apply_patch wrappers (D-089). */
@@ -356,6 +356,7 @@ export interface HarnessServiceHost {
   threadRegistry: ThreadRegistry | null;
   threadCaptureDraftBaseline: ((sessionId: string, workspaceId: string, context: import("@varin/protocol").AgentInputContext) => Promise<CapturedThreadDraftBaseline>) | null;
   threadPrepareIsolatedBranch: ((input: PrepareIsolatedBranchInput) => Promise<{ branchId: string; worktree: import("@varin/protocol").ThreadWorktree }>) | null;
+  threadDiscardPreparation?: (scopeId: string, parent: import("@varin/protocol").ThreadParent, threadId: string) => Promise<void>;
   threadSpawnSession: ((input: import("./thread-registry.js").CreateThreadInput & { threadId: string; runId: string }) => Promise<{ sessionId: string }>) | null;
   /**
    * Capture the parent session's committed input at dispatch time for an
@@ -621,6 +622,7 @@ export interface HarnessServiceHostOptions {
   threadRegistry?: ThreadRegistry;
   threadCaptureDraftBaseline?: HarnessServiceHost["threadCaptureDraftBaseline"];
   threadPrepareIsolatedBranch?: HarnessServiceHost["threadPrepareIsolatedBranch"];
+  threadDiscardPreparation?: HarnessServiceHost["threadDiscardPreparation"];
   threadSpawnSession?: (input: import("./thread-registry.js").CreateThreadInput & { threadId: string; runId: string }) => Promise<{ sessionId: string }>;
   threadCaptureInputContext?: HarnessServiceHost["threadCaptureInputContext"];
   threadContinueRun?: HarnessServiceHost["threadContinueRun"];
@@ -1127,6 +1129,7 @@ export function createHarnessServiceHost(options: HarnessServiceHostOptions): Ha
     threadRegistry,
     threadCaptureDraftBaseline,
     threadPrepareIsolatedBranch,
+    ...(options.threadDiscardPreparation ? { threadDiscardPreparation: options.threadDiscardPreparation } : {}),
     threadSpawnSession,
     threadCaptureInputContext,
     threadContinueRun,

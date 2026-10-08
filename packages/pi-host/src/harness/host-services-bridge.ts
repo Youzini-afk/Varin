@@ -92,7 +92,7 @@ export class HostServicesBridge {
     // the parent may legitimately block on it for minutes while capacity waits.
     // Shell execution/observation owns its requested wait budget and returns
     // an accepted handle or output when that budget expires.
-    const timer = (method === "thread.wait" || method === "thread.send" || method === "experiment.wait" || method === "compaction.run" || method === "materials.read" || method === "shell.exec" || method === "shell.read" || method === "search.content" || method === "related.query" || method === "computer.installSoftware" || method === 'computer.access') && timeoutMs === 0 ? undefined : setTimeout(() => {
+    const timer = (method === "thread.dispatch" || method === "thread.wait" || method === "thread.send" || method === "experiment.wait" || method === "compaction.run" || method === "materials.read" || method === "shell.exec" || method === "shell.read" || method === "search.content" || method === "related.query" || method === "computer.installSoftware" || method === 'computer.access') && timeoutMs === 0 ? undefined : setTimeout(() => {
       const pending = this.#pending.get(requestId);
       if (!pending) return;
       this.#emitCancel({ requestId });

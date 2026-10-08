@@ -100,9 +100,11 @@ export async function workdirContentIdentities(
   directory: string,
   paths: readonly string[],
   io: WorkdirIdentityIo,
+  signal?: AbortSignal,
 ): Promise<Record<string, string>> {
   const identities: Record<string, string> = {};
   for (const relative of [...new Set(paths)].sort()) {
+    signal?.throwIfAborted();
     if (!relative || relative === ".") continue;
     const absolute = io.join(directory, ...relative.split("/"));
     try {
@@ -115,7 +117,7 @@ export async function workdirContentIdentities(
         identities[relative] = `directory:${(stat.mode & 0o7777).toString(8)}`;
         continue;
       }
-      const bytes = await io.readFile(absolute);
+      const bytes = await io.readFile(absolute, { signal });
       identities[relative] = `file:${createHash("sha256").update(bytes).digest("hex")}:${(stat.mode & 0o7777).toString(8)}`;
     } catch (error) {
       if ((error as NodeJS.ErrnoException).code === "ENOENT") {

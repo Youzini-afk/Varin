@@ -47,7 +47,7 @@ export async function projectThreadResultHistory(input: {
   for (const snapshot of snapshots) {
     const review = snapshot.thread.reviewOf;
     if (review && ownerIds.has(review.sourceThreadId)
-      && (snapshot.thread.lifecycle === "queued" || snapshot.thread.lifecycle === "active")) {
+      && (snapshot.thread.lifecycle === "preparing" || snapshot.thread.lifecycle === "queued" || snapshot.thread.lifecycle === "active")) {
       keep(review.resultRevision, "review");
     }
   }

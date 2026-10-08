@@ -1,6 +1,8 @@
 import { AsyncLocalStorage } from "node:async_hooks";
 import { randomUUID } from "node:crypto";
 import path from "node:path";
+import { setTimeout as delay } from "node:timers/promises";
+import { waitWithSignal } from "../cancellation.js";
 import type {
   CapturedState,
   CaptureStateOptions,
@@ -114,6 +116,7 @@ export class KernelFileResourceBackend implements RecoveryFileStore {
   private async acquire(
     context: BoundFileContext,
     resources: readonly HostResourceOperation[],
+    signal?: AbortSignal,
   ): Promise<string> {
     const leaseId = `file-lease:${randomUUID()}`;
     const translated = resources.map((resource) => ({
@@ -121,6 +124,9 @@ export class KernelFileResourceBackend implements RecoveryFileStore {
       scope: resource.scope,
     }));
     for (;;) {
+      signal?.throwIfAborted();
+      // Receive the acquire result even if cancellation races it. Otherwise
+      // an acquired native lease could outlive its caller without a receipt.
       const result = await context.client.fileLeaseAcquire({
         workspaceId: context.owningWorkspaceId,
         rootId: context.rootId,
@@ -129,15 +135,16 @@ export class KernelFileResourceBackend implements RecoveryFileStore {
       });
       if (result.status === "acquired") return leaseId;
       if (result.status !== "busy") throw new Error("Kernel returned an invalid file lease result");
-      await new Promise((resolve) => setTimeout(resolve, this.busyRetryMs));
+      await delay(this.busyRetryMs, undefined, { signal });
     }
   }
 
   gateFor(identity: RecoveryIdentity): HostResourceOperationGate {
     return {
-      run: async <Result>(resources: readonly HostResourceOperation[], operation: () => Promise<Result>): Promise<Result> => {
+      run: async <Result>(resources: readonly HostResourceOperation[], operation: () => Promise<Result>, options: { signal?: AbortSignal } = {}): Promise<Result> => {
+        options.signal?.throwIfAborted();
         if (resources.length === 0) return operation();
-        const context = await this.bind(identity);
+        const context = await waitWithSignal(this.bind(identity), options.signal);
         const existing = this.leaseFor(context);
         if (existing) {
           await context.client.fileLeaseCheck({
@@ -148,18 +155,20 @@ export class KernelFileResourceBackend implements RecoveryFileStore {
               path: this.translated(context, resource.resourceId), scope: resource.scope,
             })),
           });
+          options.signal?.throwIfAborted();
           return operation();
         }
         if (this.leaseContext.getStore()) {
           throw new Error("Nested file operation cannot rebind its active resource lease to another root");
         }
-        const leaseId = await this.acquire(context, resources);
+        const leaseId = await this.acquire(context, resources, options.signal);
         const lease: LeaseContext = {
           key: `${context.owningWorkspaceId}\0${context.rootId}`,
           leaseId,
           observed: new Map(),
         };
         try {
+          options.signal?.throwIfAborted();
           return await this.leaseContext.run(lease, operation);
         } finally {
           await context.client.fileLeaseRelease({

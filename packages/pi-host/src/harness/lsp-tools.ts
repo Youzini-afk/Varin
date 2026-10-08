@@ -47,13 +47,13 @@ export function createLspNavigationTools(bridge: HostServicesBridge): ToolDefini
     promptSnippet: `${name}: ${description}`,
     parameters: PositionParams,
     executionMode: "parallel",
-    execute: async (_toolCallId, params) => {
+    execute: async (_toolCallId, params, signal) => {
       try {
         const result = await bridge.request(method, {
           path: params.path,
           line: params.line,
           ...(params.character === undefined ? {} : { character: params.character }),
-        } as never);
+        } as never, signal ? { signal } : {});
         return resultContent(result as LspNavigationResult);
       } catch (error) {
         return failedContent(name, error);
@@ -69,9 +69,9 @@ export function createLspNavigationTools(bridge: HostServicesBridge): ToolDefini
       promptSnippet: "symbols: find typed workspace symbols",
       parameters: SymbolsParams,
       executionMode: "parallel",
-      execute: async (_toolCallId, params) => {
+      execute: async (_toolCallId, params, signal) => {
         try {
-          return resultContent(await bridge.request("lsp.symbols", { path: params.path, query: params.query }));
+          return resultContent(await bridge.request("lsp.symbols", { path: params.path, query: params.query }, signal ? { signal } : {}));
         } catch (error) {
           return failedContent("symbols", error);
         }

@@ -1800,9 +1800,9 @@ export function createThreadRuntime(options: ThreadRuntimeOptions) {
         `Thread baseline cannot capture Git submodule paths: ${gitlinks.join(", ")}`,
       );
     };
-    const directoryWindow = async (store: { listWorkspaceBaselinePaths?(directory: string): Promise<string[]> }): Promise<string | null> => {
+    const directoryWindow = async (store: { listWorkspaceBaselinePaths?(directory: string, signal?: AbortSignal): Promise<string[]> }): Promise<string | null> => {
       if (typeof store.listWorkspaceBaselinePaths !== "function") return null;
-      const paths = await store.listWorkspaceBaselinePaths(sourceRoot);
+      const paths = await store.listWorkspaceBaselinePaths(sourceRoot, preparationSignal);
       return directoryBaselineFingerprint(paths);
     };
     const inspectInventory = async (): Promise<GitBaselineInventory | { kind: "directory" } | null> => {
@@ -1888,7 +1888,7 @@ export function createThreadRuntime(options: ThreadRuntimeOptions) {
         if (beforeInventory?.kind === "git") {
           rejectGitlinks(beforeInventory.gitlinks);
           const scopePaths = captureScopes.length > 0 && canListCaptureScopes
-            ? await store.listCaptureScopePaths(sourceRoot, captureScopes)
+            ? await store.listCaptureScopePaths(sourceRoot, captureScopes, preparationSignal)
             : [];
           frozenCaptureScopePaths = [...new Set(scopePaths)].sort();
           relativePaths = withAncestorDirectories([...beforeInventory.paths, ...scopePaths]);
@@ -1921,7 +1921,7 @@ export function createThreadRuntime(options: ThreadRuntimeOptions) {
           }
         } else {
           if (captureScopes.length > 0 && canListCaptureScopes) {
-            frozenCaptureScopePaths = [...new Set(await store.listCaptureScopePaths(sourceRoot, captureScopes))].sort();
+            frozenCaptureScopePaths = [...new Set(await store.listCaptureScopePaths(sourceRoot, captureScopes, preparationSignal))].sort();
           }
           directoryBefore = await directoryWindow(store);
         }
@@ -1960,7 +1960,7 @@ export function createThreadRuntime(options: ThreadRuntimeOptions) {
           }
         }
         if (canListCaptureScopes && (frozenCaptureScopePaths.length > 0 || captureScopes.length > 0)) {
-          const afterScopePaths = [...new Set(await store.listCaptureScopePaths(sourceRoot, captureScopes))].sort();
+          const afterScopePaths = [...new Set(await store.listCaptureScopePaths(sourceRoot, captureScopes, preparationSignal))].sort();
           if (afterScopePaths.length !== frozenCaptureScopePaths.length
             || afterScopePaths.some((file, index) => file !== frozenCaptureScopePaths[index])) {
             throw baselineChanged("captureScopes paths");
@@ -3560,7 +3560,7 @@ export function createThreadRuntime(options: ThreadRuntimeOptions) {
       const latest = await options.registry.getThreadById(scopeId, target.id);
       if (!latest || latest.deletion || latest.lifecycle === "archived") throw new Error("Recipient is no longer writable");
       if (submission.recipientAuthority && await codeRecipientAuthority(scopeId, latest) !== submission.recipientAuthority) throw new Error("Recipient changed its working authority after code acceptance");
-      if (latest.lifecycle === "queued" && !latest.workBranchId) return null;
+      if ((latest.lifecycle === "preparing" || latest.lifecycle === "queued") && !latest.workBranchId) return null;
       const receiving = await receivingAuthority(scopeId, { kind: "thread", id: latest.id }, signal);
       try {
         const coordinator = await options.resolveIntegrationCoordinator?.(scopeId);
@@ -4813,7 +4813,7 @@ export function createThreadRuntime(options: ThreadRuntimeOptions) {
         throw new ThreadRuntimeError("unavailable", "The previous thread session binding is unavailable to close safely");
       }
       if (existingBinding) await closeBinding(existingBinding, false);
-      if (existing.lifecycle === "queued") {
+      if (existing.lifecycle === "preparing" || existing.lifecycle === "queued") {
         throw new ThreadRuntimeError("conflict", "A queued thread must finish its existing launch before it can be reopened");
       }
       const wasArchived = existing.lifecycle === "archived";

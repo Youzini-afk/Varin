@@ -232,13 +232,13 @@ export function createDispatchTool(
   return defineTool({
     name: "dispatch",
     label: "Dispatch",
-    description: "Dispatch a sub-agent thread for a task. kind:\"discussion\" starts a read-only consult thread that answers against memory and reports back. Optional preset picks a fixed execution configuration. Asynchronous — returns immediately, never blocks.",
+    description: "Dispatch a sub-agent thread for a task. kind:\"discussion\" starts a read-only consult thread that answers against memory and reports back. Optional preset picks a fixed execution configuration. Returns after input preparation and admission; the child runs in the background.",
     promptSnippet: "dispatch: spawn a sub-agent thread for a task",
     // The live session does not exist while its custom tools are being built.
     // SessionHost refreshes presentation from actual active tools after binding.
     ...dispatchToolPresentation(presets, researchCapabilities),
     executionMode: "parallel",
-    execute: async (_toolCallId, params, _signal, _onUpdate, ctx) => {
+    execute: async (_toolCallId, params, signal, _onUpdate, ctx) => {
         let model: { providerId: string; modelId: string } | undefined;
         let tools: string[] | undefined;
         let research: { capability: ResearchCapability; resources: ResearchResourceManifest } | undefined;
@@ -366,7 +366,7 @@ export function createDispatchTool(
           ...(params.scope !== undefined ? { scope: params.scope } : {}),
           ...(params.environment !== undefined ? { environment: params.environment } : {}),
           ...(research === undefined ? {} : { research }),
-        });
+        }, { timeoutMs: 0, ...(signal ? { signal } : {}) });
         const typed = result as ThreadDispatchResult;
         return { content: [{ type: "text", text: typed.text }], details: { threadId: typed.threadId, queued: typed.queued } };
       } catch (error) {

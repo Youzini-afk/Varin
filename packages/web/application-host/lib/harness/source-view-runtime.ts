@@ -91,6 +91,7 @@ export function createSourceViewRuntime(options: {
   const readSource: NonNullable<HarnessServiceHost["documentReadSource"]> = async (
     sessionId, context, resourceId, workspaceId, readOptions,
   ): Promise<HarnessDocumentReadLookup> => {
+    readOptions?.signal?.throwIfAborted();
     const branch = await branchLookups.readSource(sessionId, resourceId, workspaceId, readOptions);
     if (branch) return branch;
     const viewId = await viewForSession(sessionId, context);
@@ -109,8 +110,9 @@ export function createSourceViewRuntime(options: {
     }
     const childRoot = await materializedThreadRoot(sessionId);
     if (!childRoot) return { status: "unavailable", message: "The materialized child directory is unavailable" };
-    if (readOptions) {
-      const canonicalRoot = (await documents.inspectWorkspace(childRoot.workspaceId)).root;
+    if (readOptions?.page) {
+      const page = readOptions.page;
+      const canonicalRoot = (await documents.inspectWorkspace(childRoot.workspaceId, readOptions)).root;
       const target = await assertAbsolutePathInWorkspace(path.resolve(canonicalRoot, alias.resourceId),
         { root: canonicalRoot, fsPromises: fs.promises, pathModule: path, allowMissing: false }).catch(error => {
           if ((error as NodeJS.ErrnoException).code === 'ENOENT') return null;
@@ -119,7 +121,7 @@ export function createSourceViewRuntime(options: {
       if (!target) return { status: 'working-branch', revision: `materialized:${view.branchId}:missing`,
         provenance: { branchId: view.branchId, revision: view.writeRevision, origin: 'materialized' }, missing: true };
       const result = await readStableFile(target.realPath,
-        (handle, stat) => readHandlePage(handle, Number(stat.size), readOptions.page, readOptions.signal), readOptions.signal,
+        (handle, stat) => readHandlePage(handle, Number(stat.size), page, readOptions.signal), readOptions.signal,
         async () => {
           if (views.get(sessionId) !== view) throw new Error('The materialized child view changed while reading');
           const current = await assertAbsolutePathInWorkspace(path.resolve(canonicalRoot, alias.resourceId),
@@ -131,7 +133,7 @@ export function createSourceViewRuntime(options: {
       return { status: 'working-branch', revision: `materialized:${view.branchId}:${result.revision}`,
         provenance: { branchId: view.branchId, revision: view.writeRevision, origin: 'materialized' }, page: result.value };
     }
-    const snapshot = await documents.read({ workspaceId: childRoot.workspaceId, resourceId: alias.resourceId });
+    const snapshot = await documents.read({ workspaceId: childRoot.workspaceId, resourceId: alias.resourceId }, readOptions);
     const provenance = { branchId: view.branchId, revision: view.writeRevision, origin: "materialized" as const };
     if (snapshot.status === "missing") return {
       status: "working-branch", revision: `materialized:${view.branchId}:missing`, provenance, missing: true,

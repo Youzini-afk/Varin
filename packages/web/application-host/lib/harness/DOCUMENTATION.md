@@ -14,6 +14,17 @@ lifecycle queue while the Router executes the service. A slow handler must not s
 the same session's compaction-worker queries. Cancellation still goes directly to the Router, and root
 shutdown drains both lifecycle work and admitted requests.
 
+Dispatch owns its input preparation before Run admission: `preparing` threads are visible but cannot
+be dequeued. Once the fixed baseline is ready, admission atomically starts a Run or marks the thread
+`queued` for capacity. Dispatch preparation follows caller cancellation and actor lifetime rather than
+the generic transport deadline. Failed preparation uses durable thread cleanup; an interrupted Host
+restart marks unfinished preparation as stalled for recovery.
+
+LSP navigation and diagnostics carry request cancellation through document queues, resource leases,
+document synchronization and language-server requests. Cancelled queue entries never start file work;
+an acquired lease is released after the operation settles. Request phases appear only in the existing
+Host deadline diagnostics, not tool results.
+
 Tool-set snapshots refresh grants for the same worker generation, including a work-focus change.
 Registration keeps that worker's live shell and retrieval/input contexts; only a replacement generation
 retires them. Pending first registration uses the latest grants received while settings are loading.

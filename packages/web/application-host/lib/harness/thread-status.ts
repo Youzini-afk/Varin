@@ -126,6 +126,7 @@ export const threadStatusState = (thread: Thread, activeRun: ThreadRun | null): 
   if (thread.lifecycle === "archived") return "archived";
   if (thread.integration === "merged") return "merged";
   if (thread.integration === "conflict") return "conflict";
+  if (thread.lifecycle === "preparing") return "preparing";
   if (thread.lifecycle === "queued") return "queued";
   if (thread.attention === "user" || thread.attention === "permission" || thread.attention === "thread" || thread.attention === "experiment") return "waiting";
   if (thread.attention === "stalled" || thread.attention === "looping") return thread.attention;

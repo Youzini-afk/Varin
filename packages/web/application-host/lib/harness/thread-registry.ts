@@ -163,6 +163,8 @@ export interface CreateThreadInput {
   /** Bespoke first-Run prompt that survives queuing. */
   promptText?: string;
   autoRun: boolean;
+  /** The caller owns initial input/baseline preparation until startRun completes admission. */
+  preparing?: boolean;
   hidden?: boolean;
   /** BC3: a discussion Thread bound to consult this Bot. */
   consultBotId?: string;
@@ -217,7 +219,7 @@ interface MutationResult<T> {
   write?: boolean;
 }
 
-const LIFECYCLES = new Set<ThreadLifecycle>(["queued", "active", "settled", "archived"]);
+const LIFECYCLES = new Set<ThreadLifecycle>(["preparing", "queued", "active", "settled", "archived"]);
 const ATTENTIONS = new Set<ThreadAttention>([
   "none",
   "user",
@@ -1576,7 +1578,7 @@ export function createThreadRegistry(options: ThreadRegistryOptions) {
         kind: input.kind,
         purpose: input.purpose ?? "task",
         worktree: null,
-        lifecycle: input.autoRun ? "queued" : "active",
+        lifecycle: input.preparing ? "preparing" : input.autoRun ? "queued" : "active",
         attention: "none",
         waitingFor: null,
         integration: "none",
@@ -1939,10 +1941,14 @@ export function createThreadRegistry(options: ThreadRegistryOptions) {
       inputOrigin?: ThreadRunInputOrigin;
       request?: ThreadPendingContinuation;
       sessionOwner?: ThreadSessionOwner;
+      preparationComplete?: boolean;
+      signal?: AbortSignal;
     } = {},
-  ): Promise<{ run: ThreadRun; started: boolean }> => (
-    mutateWorkspace<{ run: ThreadRun; started: boolean }>(scopeId, async (catalog) => {
+  ): Promise<{ run: ThreadRun; started: boolean }> => {
+    const result = await mutateWorkspace<{ run: ThreadRun; started: boolean } | { queued: true; rootSessionId: string; concurrency: number }>(scopeId, async (catalog) => {
+      options.signal?.throwIfAborted();
       await assertScopeExecution(scopeId);
+      options.signal?.throwIfAborted();
       const thread = findThread(catalog, threadId);
       if (!thread) throw new Error(`Unknown thread: ${threadId}`);
       const parentKey = scopeKey(scopeId, thread.parent);
@@ -1969,12 +1975,22 @@ export function createThreadRegistry(options: ThreadRegistryOptions) {
       if ((thread.lifecycle === "settled" && !options.allowSettled) || thread.lifecycle === "archived") {
         throw new Error(`Cannot start a run for ${thread.lifecycle} thread: ${threadId}`);
       }
+      if (thread.lifecycle === "preparing" && !options.preparationComplete) {
+        throw new Error(`Thread input is still being prepared: ${threadId}`);
+      }
       // Admission and the starting Run are one catalog mutation. A count
       // observed before async capture/open work is not a slot reservation.
       // Every producer (dispatch, dequeue, continuation, recovery, review)
       // reaches this same authority; none can overbook the last root slot.
       if (thread.kind === "implementation") {
-        assertRootAdmission(catalog, thread);
+        try {
+          assertRootAdmission(catalog, thread);
+        } catch (error) {
+          if (!(error instanceof ThreadAdmissionError) || !options.preparationComplete) throw error;
+          thread.lifecycle = "queued";
+          touchThread(catalog, thread);
+          return { value: { queued: true, rootSessionId: error.rootSessionId, concurrency: error.concurrency }, changed: [thread] };
+        }
       }
       const inputRevision = thread.resultRevision;
       const attempt = catalog.runs
@@ -2050,8 +2066,12 @@ export function createThreadRegistry(options: ThreadRegistryOptions) {
       }
       touchThread(catalog, thread);
       return { value: { run, started: true }, changed: [thread] };
-    })
-  );
+    });
+    // A prepared dispatch enters the runnable queue in the same transaction
+    // that observes a full slot. No other caller may launch unfinished input.
+    if ("queued" in result) throw new ThreadAdmissionError(result.rootSessionId, result.concurrency);
+    return result;
+  };
 
   const startRun = async (...args: Parameters<typeof admitRun>): Promise<ThreadRun> => (await admitRun(...args)).run;
 
@@ -2992,8 +3012,8 @@ export function createThreadRegistry(options: ThreadRegistryOptions) {
     try {
       const threads = await listThreads(scopeId, parent, true);
       for (const thread of threads) {
-        if (thread.lifecycle === "queued" || thread.lifecycle === "active") {
-          if (thread.lifecycle === "active") await stopActive?.(thread);
+        if (thread.lifecycle === "preparing" || thread.lifecycle === "queued" || thread.lifecycle === "active") {
+          if (thread.lifecycle === "active" || thread.lifecycle === "preparing") await stopActive?.(thread);
           await cancelThread(scopeId, thread.id, "parent session deleted");
         }
         await archiveThread(scopeId, thread.id);
@@ -3150,6 +3170,15 @@ export function createThreadRegistry(options: ThreadRegistryOptions) {
   ): Promise<number> => mutateWorkspace(scopeId, (catalog) => {
     let reconciled = 0;
     const changed: Thread[] = [];
+    for (const thread of catalog.threads) {
+      if (thread.lifecycle !== "preparing") continue;
+      thread.lifecycle = "settled";
+      thread.attention = "stalled";
+      if (thread.worktree) thread.worktree.retentionReason = "Preparation was interrupted by a Host restart";
+      touchThread(catalog, thread);
+      changed.push(thread);
+      reconciled += 1;
+    }
     for (const run of catalog.runs) {
       if (run.workerState !== "starting" && run.workerState !== "running") continue;
       if (run.sessionId && activeSessionIds.has(run.sessionId)) continue;
