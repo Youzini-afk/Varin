@@ -16,6 +16,7 @@ enum WorkerRequest {
     Wire(Value, Arc<AtomicBool>),
     Native(crate::native_tools::ResourceCall),
     ReplayProcessTerminals(Vec<String>),
+    CaptureDone { request: Value, task: crate::storage::capture_resources::CaptureTask, result: Result<crate::storage::capture_resources::CapturedBatch, KernelError> },
     Stop,
 }
 
@@ -92,6 +93,14 @@ struct Kernel {
     storage_root: Option<PathBuf>,
     storage: Option<Storage>,
     handshaken: bool,
+    capture_workers: Vec<(Arc<AtomicBool>, thread::JoinHandle<()>)>,
+}
+
+impl Drop for Kernel {
+    fn drop(&mut self) {
+        for (cancel, _) in &self.capture_workers { cancel.store(true, Ordering::Release); }
+        for (_, worker) in self.capture_workers.drain(..) { let _ = worker.join(); }
+    }
 }
 
 impl Kernel {
@@ -104,6 +113,7 @@ impl Kernel {
             storage_root: None,
             storage: None,
             handshaken: false,
+            capture_workers: Vec::new(),
         }
     }
 
@@ -111,6 +121,7 @@ impl Kernel {
         &mut self,
         request: &Value,
         cancellation: Arc<AtomicBool>,
+        completions: &mpsc::Sender<WorkerRequest>,
     ) -> Result<Option<Value>, KernelError> {
         if cancellation.load(Ordering::Acquire) {
             return Err(KernelError::Cancelled);
@@ -336,6 +347,23 @@ impl Kernel {
             method,
             &params_value,
         )?;
+        if method == "file.captureBatch" {
+            let task = storage.prepare_capture_batch(&authorized_params, &authorized_grant, cancellation.clone())?;
+            let lease_id = task.lease_id().to_string();
+            let request = request.clone();
+            let completed = completions.clone();
+            self.capture_workers.retain(|(_, worker)| !worker.is_finished());
+            let spawned = thread::Builder::new().name("file-capture".into()).spawn(move || {
+                let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| task.run()))
+                    .unwrap_or_else(|_| Err(KernelError::Storage("capture worker panicked".into())));
+                let _ = completed.send(WorkerRequest::CaptureDone { request, task, result });
+            });
+            match spawned {
+                Ok(worker) => self.capture_workers.push((cancellation, worker)),
+                Err(error) => { storage.finish_capture_lease(&lease_id); return Err(error.into()); }
+            }
+            return Ok(None);
+        }
         storage.set_cancellation(cancellation);
         let result = storage.dispatch(method, &authorized_params, grant_id, &authorized_grant);
         storage.clear_cancellation();
@@ -352,6 +380,7 @@ pub(crate) fn run() -> Result<(), Box<dyn std::error::Error>> {
     let cancellations = Arc::new(Mutex::new(HashMap::<String, ActiveRequest>::new()));
     let revoked_grants = Arc::new(Mutex::new(HashSet::<String>::new()));
     let admission_epoch = Arc::new(Mutex::new(None::<String>));
+    let credential_bridge = crate::credential_bridge::CredentialBridge::new(response_tx.clone());
     let writer_failed = Arc::new(AtomicBool::new(false));
     let subscriptions=crate::process::subscriptions::ProcessSubscriptions::new(response_tx.clone());
     let (subscription_tx,subscription_rx)=mpsc::channel();
@@ -400,21 +429,40 @@ pub(crate) fn run() -> Result<(), Box<dyn std::error::Error>> {
             .map_err(|_| KernelError::Storage("resource authority stopped before receipt replay".into()))
     }, process_controls.clone());
     let native_control = crate::native_runtime::NativeControl::default();
-    let native_worker = crate::native_runtime::spawn(native_rx, native_tx.clone(), native_control.clone(), resources, response_tx.clone(), move |id| {
+    let native_worker = crate::native_runtime::spawn(native_rx, native_tx.clone(), native_control.clone(), resources, credential_bridge.clone(), response_tx.clone(), move |id| {
         if let Ok(mut active) = native_cancellations.lock() { active.remove(id); }
     });
     let worker_native_tx = native_tx.clone();
     let worker_cancellations = cancellations.clone();
     let worker_revoked_grants = revoked_grants.clone();
     let worker_admission_epoch = admission_epoch.clone();
+    let worker_credentials = credential_bridge.clone();
     let worker_response_tx = response_tx.clone();
     let worker_writer_failed = writer_failed.clone();
+    let capture_completions = request_tx.clone();
     let worker = thread::spawn(move || {
         let mut kernel = Kernel::new();
         for message in request_rx {
             let (request, cancellation) = match message {
                 WorkerRequest::Wire(request, cancellation) => (request, cancellation),
                 WorkerRequest::Stop => break,
+                WorkerRequest::CaptureDone { request, task, result } => {
+                    let id = request["id"].as_str().unwrap_or("");
+                    let published = (|| {
+                        let storage = kernel.storage.as_mut().ok_or_else(|| KernelError::Authorization("kernel stopped".into()))?;
+                        let (grant, _) = storage.authorize(request["grantId"].as_str(), &kernel.epoch,
+                            kernel.host_id.as_deref().unwrap_or(""), kernel.host_generation.as_deref().unwrap_or(""),
+                            "file.captureBatch", &request["params"])?;
+                        let denied = worker_revoked_grants.lock().map(|revoked| revoked.contains(&grant.grant_id)).unwrap_or(true);
+                        if denied { return Err(KernelError::Authorization("grant is revoked".into())); }
+                        storage.publish_capture_batch(&task, result?, &grant)
+                    })();
+                    if let Some(storage) = kernel.storage.as_mut() { storage.finish_capture_lease(task.lease_id()); }
+                    worker_cancellations.lock().ok().map(|mut active| active.remove(id));
+                    let response = match published { Ok(value) => response_ok(id, value), Err(error) => response_error(id, &error) };
+                    if worker_response_tx.send(response).is_err() { break; }
+                    continue;
+                },
                 WorkerRequest::ReplayProcessTerminals(ids) => {
                     let result = kernel.storage.as_ref().ok_or_else(|| KernelError::Authorization("kernel handshake required".into()))
                         .and_then(|storage| storage.replay_process_terminals(&ids));
@@ -462,11 +510,12 @@ pub(crate) fn run() -> Result<(), Box<dyn std::error::Error>> {
             let handled = if revoked {
                 Err(KernelError::Authorization("grant is revoked".to_string()))
             } else {
-                kernel.handle(&request, cancellation)
+                kernel.handle(&request, cancellation, &capture_completions)
             };
             let response = match handled {
                 Ok(Some(response)) => response,
                 Ok(None) => {
+                    if method.as_deref() == Some("file.captureBatch") { continue; }
                     worker_cancellations
                         .lock()
                         .ok()
@@ -484,6 +533,7 @@ pub(crate) fn run() -> Result<(), Box<dyn std::error::Error>> {
                     .and_then(|result| result.get("kernelEpoch"))
                     .and_then(Value::as_str)
                 {
+                    let _ = worker_credentials.initialize(epoch);
                     if let Some(storage) = kernel.storage.as_mut() { storage.set_process_terminal_sender(process_terminals.clone()); storage.set_process_controls(process_controls.clone()); storage.set_process_subscriptions(storage_subscriptions.clone()); }
                     if let Some(root) = kernel.storage_root.as_ref() {
                         if worker_native_tx.send(crate::native_runtime::Command::Initialize { root: root.clone(), epoch: epoch.to_string() }).is_err() { break; }
@@ -565,6 +615,12 @@ pub(crate) fn run() -> Result<(), Box<dyn std::error::Error>> {
                 break;
             }
         };
+        // Private secret-bearing replies must never enter method validation, durable queues,
+        // public tool grants, or diagnostic formatting. Malformed/old replies are discarded.
+        if request.get("kind").and_then(Value::as_str) == Some("credential-response") {
+            credential_bridge.receive(request);
+            continue;
+        }
         let id = request
             .get("id")
             .and_then(Value::as_str)
@@ -665,6 +721,7 @@ pub(crate) fn run() -> Result<(), Box<dyn std::error::Error>> {
     if let Ok(active) = cancellations.lock() {
         for request in active.values() { request.cancel(); }
     }
+    credential_bridge.close();
     subscriptions.shutdown();
     let _=subscription_tx.send(crate::process::subscriptions::ControlCommand::Stop);
     drop(subscription_tx);

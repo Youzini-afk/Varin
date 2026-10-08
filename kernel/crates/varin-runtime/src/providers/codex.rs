@@ -22,8 +22,12 @@ impl CredentialResolver for AccountCredentials {
             .get(reqwest::header::AUTHORIZATION)
             .and_then(|v| v.to_str().ok());
         if !bearer.is_some_and(|v| {
-            v.strip_prefix("Bearer ")
-                .is_some_and(|token| !token.is_empty())
+            v.split_once(' ').is_some_and(|(scheme, token)| {
+                let token = token.trim_start_matches(' ');
+                scheme.eq_ignore_ascii_case("Bearer")
+                    && !token.is_empty()
+                    && !token.chars().any(char::is_whitespace)
+            })
         }) || !headers
             .get("chatgpt-account-id")
             .and_then(|v| v.to_str().ok())

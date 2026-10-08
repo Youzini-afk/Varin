@@ -8,6 +8,9 @@ export const KERNEL_REQUEST_WINDOW = 2 as const;
 export const KERNEL_PROTOCOL_SCHEMA = "varin.kernel.v1" as const;
 
 export type KernelMethod =
+  | "runtime.launch.select"
+  | "runtime.launch.inspect"
+  | "runtime.launch.list"
   | "runtime.input.enqueue"
   | "runtime.input.edit"
   | "runtime.input.cancel"
@@ -55,6 +58,7 @@ export type KernelMethod =
   | "file.lease.check"
   | "file.lease.release"
   | "file.capture"
+  | "file.captureBatch"
   | "file.apply"
   | "file.mkdir"
   | "file.remove"
@@ -121,6 +125,59 @@ export type KernelMethod =
   | "compute.cancel"
   | "compute.release"
   | "compute.grammar.register";
+
+export interface NativeLaunchSourceParams {
+  materialized: boolean;
+  workspaceId: string;
+  executionWorkspaceId: string;
+  branchId: string | null;
+  revision: number | null;
+}
+
+export interface NativeLaunchSelectParams {
+  runId: string;
+  source: NativeLaunchSourceParams;
+  enabledTools: string[];
+  credentialScope?: NativeCredentialScope;
+}
+
+export interface NativeLaunchSource {
+  materialized: boolean;
+  workspace_id: string;
+  execution_workspace_id: string;
+  branch_id: string | null;
+  revision: number | null;
+}
+
+export interface NativeLaunchTool {
+  name: string;
+  version: string;
+  schema: unknown;
+}
+
+export interface NativeLaunchPolicy {
+  name: string;
+  version: string;
+}
+
+export interface NativeLaunchSelection {
+  connection_identity: string;
+  provider_family: string;
+  model: string;
+  configuration_generation: number;
+  tool_schema_generation: number;
+  tools: NativeLaunchTool[];
+  policy: NativeLaunchPolicy;
+  source: NativeLaunchSource | null;
+}
+
+export interface NativeLaunchIntent {
+  run_id: string;
+  revision: number;
+  selection: NativeLaunchSelection;
+  bound_epoch: number | null;
+  requires_rebind: boolean;
+}
 
 export interface KernelProcessSubscribeParams {
   workspaceId: string;
@@ -217,6 +274,14 @@ export interface NativeExternalReceipt {
 export interface NativeRunStartParams {
   runId: string;
   toolBinding?: unknown;
+  credentialScope?: NativeCredentialScope;
+}
+
+export interface NativeCredentialScope {
+  reference: string;
+  authority: string;
+  account: string;
+  generation: number;
 }
 
 export interface NativeModelSessionConfiguration {
@@ -588,6 +653,15 @@ export interface KernelFileCaptureParams {
   path: string;
   store: boolean;
   leaseId?: string;
+}
+
+export interface KernelFileCaptureBatchParams {
+  operationId: string;
+  workspaceId: string;
+  rootId: string;
+  paths: string[];
+  store: boolean;
+  leaseId: string;
 }
 
 export interface KernelFileApplyParams {
@@ -1471,6 +1545,9 @@ export type KernelMethodParams = {
   "runtime.input.cancel": NativeInputCancelParams;
   "runtime.input.inspect": NativeInputHandleParams;
   "runtime.input.list": NativeHistoryParams;
+  "runtime.launch.select": NativeLaunchSelectParams;
+  "runtime.launch.inspect": NativeRunParams;
+  "runtime.launch.list": KernelEmptyParams;
   "runtime.run.start": NativeRunStartParams;
   "runtime.status": KernelEmptyParams;
   "runtime.thread.create": NativeThreadCreateParams;
@@ -1513,6 +1590,7 @@ export type KernelMethodParams = {
   "file.lease.check": KernelFileLeaseAcquireParams;
   "file.lease.release": KernelFileLeaseReleaseParams;
   "file.capture": KernelFileCaptureParams;
+  "file.captureBatch": KernelFileCaptureBatchParams;
   "file.apply": KernelFileApplyParams;
   "file.mkdir": KernelFileMkdirParams;
   "file.remove": KernelFileRemoveParams;
@@ -1624,6 +1702,33 @@ export type KernelRequest =
       id: string;
       method: "runtime.input.list";
       params: NativeHistoryParams;
+      epoch?: string;
+      grantId?: string;
+    }
+  | {
+      v: typeof KERNEL_PROTOCOL_VERSION;
+      kind: "request";
+      id: string;
+      method: "runtime.launch.select";
+      params: NativeLaunchSelectParams;
+      epoch?: string;
+      grantId?: string;
+    }
+  | {
+      v: typeof KERNEL_PROTOCOL_VERSION;
+      kind: "request";
+      id: string;
+      method: "runtime.launch.inspect";
+      params: NativeRunParams;
+      epoch?: string;
+      grantId?: string;
+    }
+  | {
+      v: typeof KERNEL_PROTOCOL_VERSION;
+      kind: "request";
+      id: string;
+      method: "runtime.launch.list";
+      params: KernelEmptyParams;
       epoch?: string;
       grantId?: string;
     }
@@ -2002,6 +2107,15 @@ export type KernelRequest =
       id: string;
       method: "file.capture";
       params: KernelFileCaptureParams;
+      epoch?: string;
+      grantId?: string;
+    }
+  | {
+      v: typeof KERNEL_PROTOCOL_VERSION;
+      kind: "request";
+      id: string;
+      method: "file.captureBatch";
+      params: KernelFileCaptureBatchParams;
       epoch?: string;
       grantId?: string;
     }

@@ -127,6 +127,7 @@ fn write_input(tx: &Transaction<'_>, input: &QueuedInput) -> Result<()> {
 impl Catalog {
     pub fn enqueue_input(&mut self, command: &EnqueueInput) -> Result<InputReceipt> {
         execution_persistence::user_input_items("admission", &command.input)?;
+        let history_content = self.content.save_history(&command.input, &None)?;
         let encoded = encode(command)?;
         let tx = self.db.transaction()?;
         let previous: Option<(String, String)> = tx
@@ -189,6 +190,7 @@ impl Catalog {
             cursor,
         };
         tx.execute("INSERT INTO input_queue(id,branch_id,run_id,mode,state,cursor,body) VALUES(?1,?2,?3,?4,'queued',?5,?6)",params![input.id,input.branch_id,input.run_id,encode(&input.mode)?.trim_matches('"'),sql_number(cursor)?,encode(&input)?])?;
+        tx.execute("INSERT INTO input_history_content(input_id,body) VALUES(?1,?2)", params![input.id, encode(&history_content)?])?;
         if immediate {
             let run:Run=record(&tx,"runs",&run_id)?;
             deliver(&tx,&run,&input)?;
@@ -229,6 +231,7 @@ impl Catalog {
         content: Value,
     ) -> Result<QueuedInput> {
         execution_persistence::user_input_items(id, &content)?;
+        let history_content = self.content.save_history(&content, &None)?;
         let tx = self.db.transaction()?;
         let mut input: QueuedInput = record(&tx, "input_queue", id)?;
         if input.state != InputState::Queued || input.revision != revision {
@@ -239,6 +242,9 @@ impl Catalog {
         input.content = content;
         input.revision += 1;
         write_input(&tx, &input)?;
+        if tx.execute("UPDATE input_history_content SET body=?2 WHERE input_id=?1", params![id, encode(&history_content)?])? != 1 {
+            return Err(RuntimeError::Invalid("queued history reference missing".into()));
+        }
         event(&tx, id, input.revision, "input.edited", Value::Null)?;
         tx.commit()?;
         Ok(input)
@@ -327,6 +333,8 @@ impl Catalog {
     }
 }
 fn deliver(tx: &Transaction<'_>, run: &Run, input: &QueuedInput) -> Result<Vec<ConversationItem>> {
+    let reference: String = tx.query_row("SELECT body FROM input_history_content WHERE input_id=?1", [&input.id], |row| row.get(0))?;
+    let history_content: Value = serde_json::from_str(&reference)?;
     let parent: Option<String> = tx.query_row(
         "SELECT head FROM branches WHERE id=?1",
         [&run.branch_id],
@@ -337,7 +345,7 @@ fn deliver(tx: &Transaction<'_>, run: &Run, input: &QueuedInput) -> Result<Vec<C
         thread_id: run.thread_id.clone(),
         parent,
         source: HistorySource::User,
-        content: input.content.clone(),
+        content: history_content,
         provider: None,
     };
     tx.execute(

@@ -8,6 +8,7 @@ import { fileURLToPath } from 'node:url';
 import { afterEach, expect, it } from 'vitest';
 import { createKernelClient } from './kernel-client.js';
 import { NativeRuntimeClient } from './native-runtime-client.js';
+import { ExistingHostCredentialOwner } from './native-credential-owner.js';
 import { KERNEL_PROTOCOL_VERSION, KERNEL_REQUEST_WINDOW } from './protocol.generated.js';
 
 const repository = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../../../../..');
@@ -59,6 +60,7 @@ async function fixture() {
   cleanups.push(async () => { releaseHeld(); await host.close(); await fs.rm(root, { recursive: true, force: true }); });
   await host.start();
   return { host, native: new NativeRuntimeClient(host), root, options, requests, responses, held, hold(method: string) { holdMethod = method; }, release: () => releaseHeld(),
+    async crash() { const exited = once(child, 'exit'); child.kill('SIGKILL'); await exited; },
     async raw(value: Record<string, unknown>) { const id = `review-${requests.length}`; child.stdin.write(frame({ v: KERNEL_PROTOCOL_VERSION, kind: 'request', id, epoch: host.kernelEpoch, ...value })); await expect.poll(() => responses.has(id)).toBe(true); return responses.get(id)!; },
   };
 }
@@ -143,7 +145,7 @@ it('native abort retains wire credit until receipt and cancels queued admission 
 }, 30_000);
 
 
-async function localProvider(reply: (body: Record<string, unknown>, response: ServerResponse) => void) {
+async function localProvider(reply: (body: Record<string, unknown>, response: ServerResponse, request: IncomingMessage) => void) {
   const requests: Record<string, unknown>[] = [];
   const server = createServer((request: IncomingMessage, response: ServerResponse) => {
     const chunks: Buffer[] = [];
@@ -151,7 +153,7 @@ async function localProvider(reply: (body: Record<string, unknown>, response: Se
     request.on('end', () => {
       const body = JSON.parse(Buffer.concat(chunks).toString()) as Record<string, unknown>;
       requests.push(body);
-      reply(body, response);
+      reply(body, response, request);
     });
   });
   server.listen(0, '127.0.0.1');
@@ -476,4 +478,156 @@ it('native model interrupt preserves an accepted background process job until ex
       await expect.poll(async () => (await actor.processInspect(identity)).writerActive, { timeout: 8_000 }).toBe(false);
     }
   }
+}, 30_000);
+
+
+it('private credential rendezvous uses a fake existing owner without persisting its secret headers', async () => {
+  const f = await fixture();
+  const fakeKey = 'fake-private-ipc-credential-do-not-persist';
+  let authorization: string | undefined;
+  const provider = await localProvider((_body, response, request) => {
+    authorization = request.headers.authorization;
+    completeLocalResponse(response, 'credential-answer', 'authenticated local fixture');
+  });
+  let lookups = 0;
+  const owner = new ExistingHostCredentialOwner({ providerId: 'fixture-provider', providerFamily: 'openai-responses', endpoint: provider.configuration.endpoint,
+    currentScope: async () => ({ reference: 'fake-reference', authority: 'fake-host-owner', account: 'fake-account', generation: 1 }),
+    runtime: { getAuth: async () => { lookups++; return { auth: { apiKey: fakeKey } }; } },
+  });
+  await f.native.createThread('credential-thread', 'credential-branch');
+  const run = await f.native.submit({ key: 'credential-input', threadId: 'credential-thread', branchId: 'credential-branch', expectedHead: null, input: { text: 'credential fixture prompt' }, configuration: { ...provider.configuration, allowAnonymous: false } });
+  await f.native.startRunWithCredentialOwner(run.run_id, owner);
+  await expect.poll(async () => (await f.native.run(run.run_id)).state, { timeout: 8_000 }).toBe('completed');
+  expect(lookups).toBe(1);
+  expect(authorization).toBe(`Bearer ${fakeKey}`);
+  expect(f.requests.some(request => request.kind === 'credential-response')).toBe(true);
+  expect(JSON.stringify(f.requests.filter(request => request.kind === 'request'))).not.toContain(fakeKey);
+  expect(JSON.stringify(await f.native.history('credential-branch'))).not.toContain(fakeKey);
+  expect(JSON.stringify(await f.native.events(0, 100))).not.toContain(fakeKey);
+  await f.host.close();
+  const scan = async (directory: string): Promise<void> => {
+    for (const entry of await fs.readdir(directory, { withFileTypes: true })) {
+      const filename = path.join(directory, entry.name);
+      if (entry.isDirectory()) await scan(filename);
+      else if (entry.isFile()) expect((await fs.readFile(filename)).includes(Buffer.from(fakeKey))).toBe(false);
+    }
+  };
+  await scan(f.root);
+}, 30_000);
+
+it('cancelling a model awaiting fake credentials preserves owner refresh and ignores its late answer', async () => {
+  const f = await fixture();
+  const provider = await localProvider((_body, response) => completeLocalResponse(response, 'late-credential-output', 'unexpected late dispatch'));
+  let resolveRefresh!: (value: { auth: { apiKey: string } }) => void;
+  const refresh = new Promise<{ auth: { apiKey: string } }>(resolve => { resolveRefresh = resolve; });
+  let entered = false;
+  let persisted = false;
+  const owner = new ExistingHostCredentialOwner({ providerId: 'fixture-provider', providerFamily: 'openai-responses', endpoint: provider.configuration.endpoint,
+    currentScope: async () => ({ reference: 'cancel-fake-ref', authority: 'fake-host-owner', account: 'fake-account', generation: 1 }),
+    runtime: { getAuth: async () => { entered = true; const result = await refresh; persisted = true; return result; } },
+  });
+  await f.native.createThread('credential-cancel-thread', 'credential-cancel-branch');
+  const run = await f.native.submit({ key: 'credential-cancel-input', threadId: 'credential-cancel-thread', branchId: 'credential-cancel-branch', expectedHead: null, input: { text: 'cancel credential wait' }, configuration: { ...provider.configuration, allowAnonymous: false } });
+  await f.native.startRunWithCredentialOwner(run.run_id, owner);
+  await expect.poll(() => entered).toBe(true);
+  await f.native.cancelRun(run.run_id);
+  await expect.poll(async () => (await f.native.run(run.run_id)).state, { timeout: 8_000 }).toBe('cancelled');
+  resolveRefresh({ auth: { apiKey: 'fake-late-key-must-not-dispatch' } });
+  await expect.poll(() => persisted).toBe(true);
+  expect(provider.requests).toHaveLength(0);
+  expect(JSON.stringify(f.requests)).not.toContain('fake-late-key-must-not-dispatch');
+  expect((await f.native.status()).epoch).toBeGreaterThan(0);
+}, 30_000);
+
+async function publishSource(host: ReturnType<typeof createKernelClient>, branchId: string, text: string) {
+  const actor = host.scoped(await host.issueGrant({ grantId: `source-owner-${branchId}`, owningWorkspace: 'source-workspace', executionWorkspace: 'source-workspace', capabilities: ['storage.read', 'storage.write'], pathScopes: [''] }));
+  const bytes = Buffer.from(text);
+  const blob = await actor.putBlob(bytes, `blob-${branchId}`);
+  await actor.createBranch({ operationId: `create-${branchId}`, branchId, workspaceId: 'source-workspace', draftBasePaths: [], captureScopes: [], entries: [{ path: 'source.txt', state: { kind: 'regular-file', objectHash: blob.hash, byteLength: bytes.length, mode: 0o644 }, ownerId: blob.ownerId }] });
+  const branch = await actor.readBranch({ branchId });
+  const published = await actor.publishBranch({ operationId: `publish-${branchId}`, branchId, expectedRoot: branch.root, expectedWriteRevision: branch.writeRevision });
+  return Number(published.revision);
+}
+function toolResponse(response: ServerResponse, name: string, args: Record<string, unknown>, serial: number) {
+  response.writeHead(200, { 'content-type': 'text/event-stream' });
+  response.end(`data: ${JSON.stringify({ type: 'response.completed', response: { output: [{ id: `item-${serial}`, type: 'function_call', call_id: `${name}-${serial}`, name, arguments: JSON.stringify(args) }] } })}\n\n`);
+}
+
+it('source launch reads shell changes from materialized disk while fixed-branch reads retain the selected revision', async () => {
+  const f = await fixture();
+  const revision = await publishSource(f.host, 'selected-source', 'immutable original source');
+  let serial = 0;
+  let processId = '';
+  let materializedRead = '';
+  let fixedRead = '';
+  const provider = await localProvider((body, response) => {
+    const fixed = body.model === 'fixed-source-model';
+    const output = (body.input as Array<Record<string, unknown>>).findLast(item => item.type === 'function_call_output');
+    const result = output ? JSON.parse(String(output.output)) as { operation_id?: string; content?: { writerActive?: boolean } } : undefined;
+    if (!output) {
+      if (fixed) toolResponse(response, 'native_file_read', { path: 'source.txt' }, ++serial);
+      else toolResponse(response, 'native_process_spawn', { cwd: '', command: process.execPath, args: ['-e', 'require("node:fs").writeFileSync("source.txt", "changed by actual shell")'], mode: 'pipe' }, ++serial);
+    } else if (String(output.call_id).startsWith('native_process_spawn-')) {
+      processId = result!.operation_id!;
+      toolResponse(response, 'native_process_inspect', { processId }, ++serial);
+    } else if (String(output.call_id).startsWith('native_process_inspect-')) {
+      if (result!.content!.writerActive) toolResponse(response, 'native_process_inspect', { processId }, ++serial);
+      else toolResponse(response, 'native_file_read', { path: 'source.txt' }, ++serial);
+    } else {
+      if (fixed) fixedRead = String(output.output); else materializedRead = String(output.output);
+      completeLocalResponse(response, `source-answer-${++serial}`, 'source read finished');
+    }
+  });
+  for (const mode of ['materialized', 'fixed_branch'] as const) {
+    const threadId = `source-${mode}-thread`;
+    const branchId = `source-${mode}-conversation`;
+    await f.native.createThread(threadId, branchId);
+    const run = await f.native.submit({ key: `source-${mode}-input`, threadId, branchId, expectedHead: null, input: { text: 'read selected source' }, configuration: { ...provider.configuration, model: mode === 'fixed_branch' ? 'fixed-source-model' : 'materialized-source-model' } });
+    await f.native.startFromSource({ runId: run.run_id, workspaceId: 'source-workspace', executionWorkspaceId: 'source-workspace', branchId: 'selected-source', revision, mode, tools: mode === 'materialized' ? ['file_read', 'process_spawn', 'process_inspect'] : ['file_read'] });
+    await expect.poll(async () => (await f.native.run(run.run_id)).state, { timeout: 10_000 }).toBe('completed');
+    expect((await f.native.launch(run.run_id))?.selection.source).toMatchObject({ branch_id: 'selected-source', revision, materialized: mode === 'materialized' });
+  }
+  expect(materializedRead).toContain('changed by actual shell');
+  expect(fixedRead).toContain('immutable original source');
+  expect(fixedRead).not.toContain('changed by actual shell');
+}, 30_000);
+
+it('queued source launch survives kernel loss and rebinds fresh authority to the saved revision', async () => {
+  const f = await fixture();
+  const revision = await publishSource(f.host, 'rebind-source', 'source survives restart');
+  let serial = 0;
+  const provider = await localProvider((body, response) => {
+    if (!JSON.stringify(body.input).includes('queued source request')) {
+      response.writeHead(200, { 'content-type': 'text/event-stream' });
+      response.write(': active predecessor\n\n');
+      return;
+    }
+    const output = (body.input as Array<Record<string, unknown>>).findLast(item => item.type === 'function_call_output');
+    if (!output) toolResponse(response, 'native_file_read', { path: 'source.txt' }, ++serial);
+    else completeLocalResponse(response, `rebound-answer-${++serial}`, 'rebound source read finished');
+  });
+  await f.native.createThread('rebind-thread', 'rebind-conversation');
+  const predecessor = await f.native.submit({ key: 'rebind-predecessor', threadId: 'rebind-thread', branchId: 'rebind-conversation', expectedHead: null, input: { text: 'held predecessor' }, configuration: provider.configuration });
+  await f.native.startRun(predecessor.run_id);
+  await expect.poll(() => provider.requests.length).toBe(1);
+  const next = await f.native.enqueue({ key: 'rebind-next', threadId: 'rebind-thread', branchId: 'rebind-conversation', mode: 'next_run', input: { text: 'queued source request' } });
+  const selection = { runId: next.run_id, workspaceId: 'source-workspace', executionWorkspaceId: 'source-workspace', branchId: 'rebind-source', revision, mode: 'fixed_branch' as const, tools: ['file_read'] as const };
+  await f.native.startFromSource(selection);
+  const oldEpoch = f.host.kernelEpoch;
+  await f.crash();
+  await f.host.close();
+  const restarted = createKernelClient(f.options);
+  try {
+    const native = new NativeRuntimeClient(restarted);
+    const launch = await native.launch(next.run_id);
+    expect(restarted.kernelEpoch).not.toBe(oldEpoch);
+    expect(launch?.requires_rebind).toBe(true);
+    expect((await native.pendingLaunches()).some(item => item.run_id === next.run_id)).toBe(true);
+    await expect(native.startFromSource({ ...selection, revision: revision + 1 })).rejects.toThrow(/source selection/i);
+    await native.rebindLaunch(next.run_id);
+    await native.cancelRun(predecessor.run_id);
+    await expect.poll(async () => (await native.run(next.run_id)).state, { timeout: 10_000 }).toBe('completed');
+    expect(JSON.stringify(await native.history('rebind-conversation'))).toContain('source survives restart');
+    expect((await native.launch(next.run_id))?.requires_rebind).toBe(false);
+  } finally { await restarted.close(); }
 }, 30_000);

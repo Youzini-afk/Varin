@@ -6,6 +6,7 @@ pub mod azure;
 pub mod chat;
 pub mod codex;
 pub mod google;
+pub mod host_auth;
 pub mod mistral;
 pub mod responses;
 mod sse;
@@ -440,3 +441,6 @@ impl CredentialResolver for EnvironmentCredentialResolver {
         Ok(headers)
     }
 }
+
+/// Header types for private credential bridges; values remain dispatch-only.
+pub use reqwest::header as header_types;

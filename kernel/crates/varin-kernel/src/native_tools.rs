@@ -48,6 +48,13 @@ pub(crate) struct FixedFileSource {
     pub branch_id: String,
     pub revision: i64,
 }
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Deserialize, Serialize)]
+#[serde(rename_all = "snake_case")]
+pub(crate) enum NativeSourceMode {
+    #[default]
+    FixedBranch,
+    Materialized,
+}
 /// Supplied by the trusted Host after resolving its environment/source view, never by model args.
 /// A binding is not itself a grant: the Storage owner revalidates the persisted grant on every call.
 #[derive(Debug, Clone, Deserialize, Serialize)]
@@ -60,6 +67,9 @@ pub(crate) struct NativeToolBinding {
     pub execution_workspace_id: String,
     pub root_id: Option<String>,
     pub file_source: Option<FixedFileSource>,
+    #[serde(default)]
+    pub source_mode: NativeSourceMode,
+    pub materialized_source: Option<FixedFileSource>,
     pub enabled_tools: BTreeSet<NativeToolKind>,
 }
 #[derive(Debug, Clone, Deserialize)]
@@ -172,6 +182,14 @@ impl ResourceOperation {
         context: &ToolExecutionContext,
     ) -> (&'static str, Value) {
         match self {
+            Self::FileRead(args) if binding.source_mode == NativeSourceMode::Materialized => {
+                let mut params = json!({"workspaceId":binding.workspace_id,"rootId":binding.root_id,
+                    "path":args.path,"offset":args.offset});
+                if let Some(length) = args.length {
+                    params["length"] = json!(length);
+                }
+                ("file.read", params)
+            }
             Self::FileRead(args) => {
                 let source = binding.file_source.as_ref().expect("binding validated");
                 (
@@ -334,6 +352,7 @@ impl NativeToolExecutor {
             ));
         }
         if binding.enabled_tools.contains(&NativeToolKind::FileRead)
+            && binding.source_mode == NativeSourceMode::FixedBranch
             && !binding
                 .file_source
                 .as_ref()
@@ -342,6 +361,25 @@ impl NativeToolExecutor {
             return Err(ExecutionError::new(
                 "invalid_tool_binding",
                 "file read requires a fixed branch revision",
+            ));
+        }
+        if binding.source_mode == NativeSourceMode::Materialized
+            && (binding.file_source.is_some()
+                || binding.root_id.as_deref().is_none_or(str::is_empty))
+        {
+            return Err(ExecutionError::new(
+                "invalid_tool_binding",
+                "materialized source requires a registered root and no fixed branch source",
+            ));
+        }
+        if binding.materialized_source.as_ref().is_some_and(|source| {
+            binding.source_mode != NativeSourceMode::Materialized
+                || source.branch_id.is_empty()
+                || source.revision < 0
+        }) {
+            return Err(ExecutionError::new(
+                "invalid_tool_binding",
+                "invalid materialization provenance",
             ));
         }
         if binding
@@ -357,8 +395,10 @@ impl NativeToolExecutor {
         Ok(Self { binding, resources })
     }
     pub(crate) fn schemas(&self) -> Vec<ToolSchema> {
-        self.binding
-            .enabled_tools
+        Self::selected_schemas(&self.binding.enabled_tools)
+    }
+    pub(crate) fn selected_schemas(enabled_tools: &BTreeSet<NativeToolKind>) -> Vec<ToolSchema> {
+        enabled_tools
             .iter()
             .map(|kind| ToolSchema {
                 name: kind.name().into(),
@@ -395,6 +435,15 @@ impl NativeToolExecutor {
     }
     fn contract(&self, call: &ToolCall, operation: &ResourceOperation) -> ToolContract {
         let (resource, access, job) = match operation {
+            ResourceOperation::FileRead(_)
+                if self.binding.source_mode == NativeSourceMode::Materialized =>
+            {
+                (
+                    format!("environment:{}", self.binding.execution_workspace_id),
+                    Access::Read,
+                    false,
+                )
+            }
             ResourceOperation::FileRead(args) => (
                 format!(
                     "file:{}:{}:{}",
@@ -630,6 +679,13 @@ pub(crate) fn serve_resource(
             &params,
         )?;
         validate_binding(&grant, &request.binding, &request.context)?;
+        if method == "file.read" {
+            storage.set_cancellation(request.cancellation.shared_flag());
+            let result = storage.native_file_read(&authorized, &grant, !request.authorize_only);
+            storage.clear_cancellation();
+            dispatched = !request.authorize_only;
+            return result;
+        }
         if request.authorize_only {
             return Ok(Value::Null);
         }

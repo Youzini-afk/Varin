@@ -459,6 +459,7 @@ fn worker_commit_conflict_cannot_leave_a_workerless_run_generating() {
     );
     assert!(supervisor.execution_failure(&run_id).unwrap().is_some());
     assert!(run.waiting_on.is_some());
+    db.lock().unwrap().collect_content_objects().unwrap();
     let retained = db
         .lock()
         .unwrap()
@@ -477,6 +478,7 @@ fn worker_commit_conflict_cannot_leave_a_workerless_run_generating() {
     drop(db);
     drop(supervisor);
     let reopened = f.catalog();
+    reopened.lock().unwrap().collect_content_objects().unwrap();
     assert_eq!(
         reopened.lock().unwrap().run(&run_id).unwrap().state,
         RunState::Waiting

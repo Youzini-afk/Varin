@@ -93,6 +93,7 @@ pub(crate) fn spawn(
     self_sender: mpsc::Sender<Command>,
     control: NativeControl,
     resources: crate::native_tools::NativeResourceClient,
+    credential_bridge: crate::credential_bridge::CredentialBridge,
     responses: mpsc::SyncSender<Value>,
     finished: impl Fn(&str) + Send + 'static,
 ) -> JoinHandle<()> {
@@ -267,8 +268,22 @@ pub(crate) fn spawn(
                                 .map_err(|e| KernelError::Operation(e.to_string()))?;
                             return Ok(serde_json::to_value(input)?);
                         }
-                        if method == "runtime.run.start" {
-                            let p: NativeRunStartParams = serde_json::from_value(params)?;
+                        if matches!(method, "runtime.run.start" | "runtime.launch.select") {
+                            let selected: Option<NativeLaunchSelectParams> =
+                                if method == "runtime.launch.select" {
+                                    Some(serde_json::from_value(params.clone())?)
+                                } else {
+                                    None
+                                };
+                            let p: NativeRunStartParams = if let Some(selected) = &selected {
+                                NativeRunStartParams {
+                                    run_id: selected.run_id.clone(),
+                                    credential_scope: selected.credential_scope.clone(),
+                                    tool_binding: None,
+                                }
+                            } else {
+                                serde_json::from_value(params)?
+                            };
                             let run = {
                                 let catalog = runtime.catalog();
                                 let catalog = catalog.lock().map_err(|_| {
@@ -276,9 +291,78 @@ pub(crate) fn spawn(
                                 })?;
                                 catalog.run(&p.run_id).map_err(domain)?
                             };
-                            let mut start =
-                                model_session::bind(serde_json::from_value(run.configuration)?)
-                                    .map_err(|e| KernelError::Operation(e.to_string()))?;
+                            let configuration = serde_json::from_value(run.configuration)?;
+                            let mut start = if let Some(scope) = p.credential_scope {
+                                let scope = varin_runtime::providers::auth::CredentialScope {
+                                    reference: scope.reference,
+                                    authority: scope.authority,
+                                    account: scope.account,
+                                    generation: scope.generation.try_into().map_err(|_| {
+                                        KernelError::Protocol(
+                                            "credential generation must be nonnegative".into(),
+                                        )
+                                    })?,
+                                };
+                                let resolver = credential_bridge
+                                    .resolver(&p.run_id, scope.clone())
+                                    .map_err(|_| {
+                                        KernelError::Authorization(
+                                            "private Host credential owner unavailable".into(),
+                                        )
+                                    })?;
+                                model_session::bind_with_credentials(configuration, resolver, scope)
+                            } else {
+                                model_session::bind(configuration)
+                            }
+                            .map_err(|e| KernelError::Operation(e.to_string()))?;
+                            if let Some(selected) = selected {
+                                let kinds: std::collections::BTreeSet<
+                                    crate::native_tools::NativeToolKind,
+                                > = selected
+                                    .enabled_tools
+                                    .into_iter()
+                                    .map(|kind| serde_json::from_value(Value::String(kind)))
+                                    .collect::<std::result::Result<_, _>>()?;
+                                start.binding.tools =
+                                    crate::native_tools::NativeToolExecutor::selected_schemas(
+                                        &kinds,
+                                    );
+                                start.binding.tool_schema_generation =
+                                    start.binding.configuration_generation;
+                                let source = varin_runtime::catalog::launches::SourceSelection {
+                                    materialized: selected.source.materialized,
+                                    workspace_id: selected.source.workspace_id,
+                                    execution_workspace_id: selected.source.execution_workspace_id,
+                                    branch_id: selected.source.branch_id.0,
+                                    revision: selected
+                                        .source
+                                        .revision
+                                        .0
+                                        .map(u64::try_from)
+                                        .transpose()
+                                        .map_err(|_| {
+                                            KernelError::Protocol(
+                                                "source revision must be nonnegative".into(),
+                                            )
+                                        })?,
+                                };
+                                let selection =
+                                    varin_runtime::catalog::launches::LaunchSelection::from_binding(
+                                        &start.binding,
+                                        start.policy.identity(),
+                                        Some(source),
+                                    );
+                                let intent = runtime
+                                    .catalog()
+                                    .lock()
+                                    .map_err(|_| {
+                                        KernelError::Storage("native catalog owner failed".into())
+                                    })?
+                                    .select_launch(&p.run_id, selection)
+                                    .map_err(domain)?;
+                                return Ok(serde_json::to_value(intent)?);
+                            }
+                            let mut launch_source = None;
                             if let Some(binding) = p.tool_binding {
                                 let binding: crate::native_tools::NativeToolBinding =
                                     serde_json::from_value(binding)?;
@@ -288,6 +372,31 @@ pub(crate) fn spawn(
                                         "tool binding does not belong to the admitted Run".into(),
                                     ));
                                 }
+                                launch_source =
+                                    Some(varin_runtime::catalog::launches::SourceSelection {
+                                        materialized: binding.source_mode
+                                            == crate::native_tools::NativeSourceMode::Materialized,
+                                        workspace_id: binding.workspace_id.clone(),
+                                        execution_workspace_id: binding
+                                            .execution_workspace_id
+                                            .clone(),
+                                        branch_id: binding
+                                            .file_source
+                                            .as_ref()
+                                            .or(binding.materialized_source.as_ref())
+                                            .map(|source| source.branch_id.clone()),
+                                        revision: binding
+                                            .file_source
+                                            .as_ref()
+                                            .or(binding.materialized_source.as_ref())
+                                            .map(|source| u64::try_from(source.revision))
+                                            .transpose()
+                                            .map_err(|_| {
+                                                KernelError::Protocol(
+                                                    "source revision must be nonnegative".into(),
+                                                )
+                                            })?,
+                                    });
                                 let tools = crate::native_tools::NativeToolExecutor::new(
                                     binding,
                                     resources.clone(),
@@ -297,6 +406,22 @@ pub(crate) fn spawn(
                                 start.binding.tool_schema_generation =
                                     start.binding.configuration_generation;
                                 start.tools = Arc::new(tools);
+                            }
+                            {
+                                let selection =
+                                    varin_runtime::catalog::launches::LaunchSelection::from_binding(
+                                        &start.binding,
+                                        start.policy.identity(),
+                                        launch_source,
+                                    );
+                                runtime
+                                    .catalog()
+                                    .lock()
+                                    .map_err(|_| {
+                                        KernelError::Storage("native catalog owner failed".into())
+                                    })?
+                                    .bind_launch(&p.run_id, selection)
+                                    .map_err(domain)?;
                             }
                             let handle = runtime
                                 .start(&p.run_id, start)
@@ -364,6 +489,18 @@ pub(crate) fn spawn(
     })
 }
 fn dispatch(catalog: &mut Catalog, method: &str, params: Value) -> Result<Value, KernelError> {
+    if method == "runtime.launch.inspect" {
+        let p: NativeRunParams = serde_json::from_value(params)?;
+        return Ok(serde_json::to_value(
+            catalog.launch_intent(&p.run_id).map_err(domain)?,
+        )?);
+    }
+    if method == "runtime.launch.list" {
+        return Ok(serde_json::to_value(
+            catalog.pending_launches().map_err(domain)?,
+        )?);
+    }
+
     match method {
         "runtime.status" => Ok(json!({"epoch":catalog.epoch()})),
         "runtime.thread.create" => {

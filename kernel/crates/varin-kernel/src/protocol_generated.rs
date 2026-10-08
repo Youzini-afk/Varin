@@ -51,14 +51,30 @@ pub(crate) struct NativeHistoryParams {
 
 #[derive(Clone, Debug, Deserialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
-pub(crate) struct NativeRunStartParams {
+pub(crate) struct NativeLaunchSelectParams {
     pub(crate) run_id: String,
-    pub(crate) tool_binding: Option<Value>,
+    pub(crate) source: NativeLaunchSourceParams,
+    pub(crate) enabled_tools: Vec<String>,
+    pub(crate) credential_scope: Option<NativeCredentialScope>,
+}
+
+#[derive(Clone, Debug, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub(crate) struct NativeRunParams {
+    pub(crate) run_id: String,
 }
 
 #[derive(Clone, Debug, Deserialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub(crate) struct KernelEmptyParams {}
+
+#[derive(Clone, Debug, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub(crate) struct NativeRunStartParams {
+    pub(crate) run_id: String,
+    pub(crate) tool_binding: Option<Value>,
+    pub(crate) credential_scope: Option<NativeCredentialScope>,
+}
 
 #[derive(Clone, Debug, Deserialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
@@ -76,12 +92,6 @@ pub(crate) struct NativeInputSubmitParams {
     pub(crate) expected_head: RequiredNullable<String>,
     pub(crate) input: Value,
     pub(crate) configuration: Value,
-}
-
-#[derive(Clone, Debug, Deserialize)]
-#[serde(rename_all = "camelCase", deny_unknown_fields)]
-pub(crate) struct NativeRunParams {
-    pub(crate) run_id: String,
 }
 
 #[derive(Clone, Debug, Deserialize)]
@@ -350,6 +360,17 @@ pub(crate) struct KernelFileCaptureParams {
     pub(crate) path: String,
     pub(crate) store: bool,
     pub(crate) lease_id: Option<String>,
+}
+
+#[derive(Clone, Debug, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub(crate) struct KernelFileCaptureBatchParams {
+    pub(crate) operation_id: String,
+    pub(crate) workspace_id: String,
+    pub(crate) root_id: String,
+    pub(crate) paths: Vec<String>,
+    pub(crate) store: bool,
+    pub(crate) lease_id: String,
 }
 
 #[derive(Clone, Debug, Deserialize)]
@@ -1044,6 +1065,25 @@ pub(crate) struct KernelComputeGrammarParams {
 
 #[derive(Clone, Debug, Deserialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub(crate) struct NativeLaunchSourceParams {
+    pub(crate) materialized: bool,
+    pub(crate) workspace_id: String,
+    pub(crate) execution_workspace_id: String,
+    pub(crate) branch_id: RequiredNullable<String>,
+    pub(crate) revision: RequiredNullable<i64>,
+}
+
+#[derive(Clone, Debug, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub(crate) struct NativeCredentialScope {
+    pub(crate) reference: String,
+    pub(crate) authority: String,
+    pub(crate) account: String,
+    pub(crate) generation: i64,
+}
+
+#[derive(Clone, Debug, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub(crate) struct KernelProcessEnvironmentEntry {
     pub(crate) name: String,
     pub(crate) value: String,
@@ -1282,6 +1322,17 @@ pub(crate) fn validate_generated_method_params(method: &str, params: &Value) -> 
         "runtime.input.list" => serde_json::from_value::<NativeHistoryParams>(params.clone())
             .map(|_| ())
             .map_err(|error| error.to_string()),
+        "runtime.launch.select" => {
+            serde_json::from_value::<NativeLaunchSelectParams>(params.clone())
+                .map(|_| ())
+                .map_err(|error| error.to_string())
+        }
+        "runtime.launch.inspect" => serde_json::from_value::<NativeRunParams>(params.clone())
+            .map(|_| ())
+            .map_err(|error| error.to_string()),
+        "runtime.launch.list" => serde_json::from_value::<KernelEmptyParams>(params.clone())
+            .map(|_| ())
+            .map_err(|error| error.to_string()),
         "runtime.run.start" => serde_json::from_value::<NativeRunStartParams>(params.clone())
             .map(|_| ())
             .map_err(|error| error.to_string()),
@@ -1444,6 +1495,11 @@ pub(crate) fn validate_generated_method_params(method: &str, params: &Value) -> 
         "file.capture" => serde_json::from_value::<KernelFileCaptureParams>(params.clone())
             .map(|_| ())
             .map_err(|error| error.to_string()),
+        "file.captureBatch" => {
+            serde_json::from_value::<KernelFileCaptureBatchParams>(params.clone())
+                .map(|_| ())
+                .map_err(|error| error.to_string())
+        }
         "file.apply" => serde_json::from_value::<KernelFileApplyParams>(params.clone())
             .map(|_| ())
             .map_err(|error| error.to_string()),

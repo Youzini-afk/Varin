@@ -90,6 +90,25 @@ and prunes unreachable helpers before publication. See D-282 and the status matr
 R2 adds `fileResources` without exposing a generic arbitrary-filesystem escape hatch. The Host registers a
 Documents-authorized canonical execution root for an owning/execution workspace pair, then Rust resolves every
 relative path against that root and the caller grant. Exact/subtree leases are the production overlap gate.
+`file.captureBatch` is the WorkingState directory-capture path: one admitted batch lease covers
+selected paths, and a background worker copies, double-hashes, and syncs staged bodies. The Storage
+actor rechecks grant/root ownership before atomically installing verified objects and publishing their
+owners in one transaction. Final rename/directory durability still runs in the Storage actor; body I/O
+does not. This preserves stable per-file capture, not a simultaneous filesystem snapshot. Cancellation
+keeps the request credit and actual lease exclusion until worker completion. Lease release and grant
+revocation defer exclusion cleanup while that reader remains active; mutations cannot reuse its lease.
+The Host batches paths for bounded protocol responses and waits for the capture's actual receipt before
+abandoning owners. Inventory selection, Documents authority, and task isolation remain unchanged.
+
+The selected native tool adapter binds file reads explicitly. `sourceMode: "fixed_branch"`
+(the default when omitted) reads the bound immutable `fileSource` revision. `"materialized"`
+requires a registered `rootId` and reads that environment's current filesystem through the same
+Storage grant/root/lease authority; it rejects a simultaneous `fileSource`. Optional
+`materializedSource` records the original branch/revision only and never redirects reads.
+Materialized reads share the execution-environment resource claim with process spawning, return
+bounded byte ranges, and reject detected concurrent file changes rather than claiming immutable
+snapshot consistency. The Host coordinator owns when an exact revision is materialized and bound.
+
 `file.capture` returns typed missing/file/directory/symlink/unsupported state and installs regular-file bytes as
 kernel content objects; `file.apply` is conditional on an expected state and can consume only an authorized
 object owner. `file.mkdir`, `file.remove`, and `file.rename` use the same root and lease authority. Started file

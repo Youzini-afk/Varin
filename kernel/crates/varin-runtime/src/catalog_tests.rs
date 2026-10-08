@@ -908,10 +908,16 @@ fn queued_input_is_durable_editable_and_only_enters_a_closed_model_boundary() {
         db.queued_input(&queued.input_id).unwrap().content,
         json!({"text":"actual correction"})
     );
+    db.collect_content_objects().unwrap();
     let delivered = db
         .consume_inputs(&r.run_id, epoch, Some(&r.input_id))
         .unwrap();
     assert_eq!(delivered.len(), 1);
+    db.collect_content_objects().unwrap();
+    assert_eq!(
+        db.history("main").unwrap().last().unwrap().content,
+        json!({"text":"actual correction"})
+    );
     assert!(
         matches!(&delivered[0].content,crate::execution::Content::Text{text} if text=="actual correction")
     );
@@ -1092,4 +1098,123 @@ fn missing_request_content_does_not_mark_unsent_public_dispatch_as_dispatched() 
         .is_err());
     let after_settle: ModelStep = record(&db.db, "model_steps", "missing-content").unwrap();
     assert_eq!(after_settle.state, ModelStepState::Prepared);
+}
+
+#[test]
+fn durable_launch_rebind_is_exact_idempotent_and_carries_no_live_credentials() {
+    use super::launches::LaunchSelection;
+    let f = Fixture::new();
+    let mut db = f.open();
+    let receipt = submit(&mut db);
+    let selection: LaunchSelection = serde_json::from_value(json!({"connection_identity":"pinned-public-digest","provider_family":"fixture","model":"test-model","configuration_generation":1,"tool_schema_generation":1,"tools":[{"name":"read","version":"1","schema":{"type":"object"}}],"policy":{"name":"agent","version":"1"},"source":{"workspace_id":"workspace","execution_workspace_id":"execution","branch_id":"branch","revision":5,"materialized":false}})).unwrap();
+    let first = db.bind_launch(&receipt.run_id, selection.clone()).unwrap();
+    assert_eq!(
+        first,
+        db.bind_launch(&receipt.run_id, selection.clone()).unwrap()
+    );
+    for field in [
+        "connection_identity",
+        "model",
+        "configuration_generation",
+        "tool_schema_generation",
+        "tools",
+        "source",
+    ] {
+        let mut changed = serde_json::to_value(&selection).unwrap();
+        match field {
+            "connection_identity" | "model" => changed[field] = json!("changed"),
+            "configuration_generation" | "tool_schema_generation" => changed[field] = json!(2),
+            "tools" => changed[field][0]["schema"] = json!({"type":"string"}),
+            "source" => changed[field]["revision"] = json!(6),
+            _ => unreachable!(),
+        }
+        assert!(
+            db.bind_launch(&receipt.run_id, serde_json::from_value(changed).unwrap())
+                .is_err(),
+            "changed {field} must reject"
+        );
+    }
+    let raw: String = db
+        .db
+        .query_row(
+            "SELECT body FROM run_launches WHERE id=?1",
+            [&receipt.run_id],
+            |r| r.get(0),
+        )
+        .unwrap();
+    for forbidden in ["credential_ref", "grant_id", "root_id", "access_token"] {
+        assert!(!raw.contains(forbidden));
+    }
+    drop(db);
+    let mut db = f.open();
+    let reopened = db.launch_intent(&receipt.run_id).unwrap().unwrap();
+    assert!(reopened.requires_rebind);
+    assert_eq!(reopened.selection, selection);
+    assert_eq!(db.pending_launches().unwrap().len(), 1);
+    let rebound = db.bind_launch(&receipt.run_id, selection).unwrap();
+    assert!(!rebound.requires_rebind);
+    assert_eq!(rebound.revision, first.revision + 1);
+    assert_eq!(rebound.bound_epoch, Some(db.epoch()));
+    let epoch = db.epoch();
+    db.prepare_model_step(
+        "ambiguous-model",
+        &receipt.run_id,
+        epoch,
+        json!({"request":"already sent"}),
+    )
+    .unwrap();
+    db.dispatch_model_step("ambiguous-model", epoch).unwrap();
+    drop(db);
+    let mut db = f.open();
+    db.bind_launch(&receipt.run_id, rebound.selection.clone())
+        .unwrap();
+    assert!(
+        db.prepare_execution(
+            &receipt.run_id,
+            request_snapshot(&receipt).view.binding,
+            rebound.selection.policy,
+            Value::Null
+        )
+        .is_err(),
+        "trusted rebind cannot authorize re-sending an ambiguous model request"
+    );
+    assert_eq!(
+        db.model_step("ambiguous-model").unwrap().state,
+        ModelStepState::Interrupted
+    );
+}
+
+#[test]
+fn launch_selection_survives_restart_before_materialization_and_binding() {
+    use super::launches::LaunchSelection;
+    let f = Fixture::new();
+    let mut db = f.open();
+    let receipt = submit(&mut db);
+    let selection = LaunchSelection::from_binding(
+        &request_snapshot(&receipt).view.binding,
+        crate::execution::PolicyIdentity {
+            name: "agent".into(),
+            version: "1".into(),
+        },
+        None,
+    );
+    let selected = db
+        .select_launch(&receipt.run_id, selection.clone())
+        .unwrap();
+    assert!(selected.requires_rebind);
+    assert_eq!(selected.bound_epoch, None);
+    assert_eq!(
+        db.select_launch(&receipt.run_id, selection.clone())
+            .unwrap(),
+        selected
+    );
+    drop(db);
+    let mut db = f.open();
+    let pending = db.pending_launches().unwrap();
+    assert_eq!(pending.len(), 1);
+    assert_eq!(pending[0].selection, selection);
+    assert_eq!(pending[0].bound_epoch, None);
+    let bound = db.bind_launch(&receipt.run_id, selection).unwrap();
+    assert_eq!(bound.bound_epoch, Some(db.epoch()));
+    assert!(!bound.requires_rebind);
 }

@@ -235,6 +235,7 @@ impl Storage {
             verified_objects: BTreeSet::new(),
             file_roots: HashMap::new(),
             file_leases: HashMap::new(),
+            capture_leases: HashMap::new(),
             processes: crate::process::ProcessManager::default(),
             computations: crate::compute::ComputeManager::default(),
         };

@@ -22,6 +22,7 @@ pub(crate) fn required_capability(method: &str) -> &'static str {
         | "working.verification.list"
         | "working.review.list"
         | "file.scan"
+        | "file.read"
         | "file.measure"
         | "file.operation.list" => "storage.read",
         "storage.putBlob.begin"
@@ -48,6 +49,7 @@ pub(crate) fn required_capability(method: &str) -> &'static str {
         | "file.lease.check"
         | "file.lease.release"
         | "file.capture"
+        | "file.captureBatch"
         | "file.apply"
         | "file.mkdir"
         | "file.remove"

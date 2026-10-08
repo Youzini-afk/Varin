@@ -46,7 +46,7 @@ impl Persistence for Mutex<Catalog> {
         }
     }
 }
-fn append_item(tx: &Transaction<'_>, run: &Run, item: &ConversationItem) -> Result<()> {
+fn append_item(tx: &Transaction<'_>, run: &Run, item: &ConversationItem, body_reference: &Value) -> Result<()> {
     let (head, active): (Option<String>, Option<String>) = tx.query_row(
         "SELECT head,active_run FROM branches WHERE id=?1",
         [&run.branch_id],
@@ -66,19 +66,13 @@ fn append_item(tx: &Transaction<'_>, run: &Run, item: &ConversationItem) -> Resu
         Provenance::AgentMessage { .. } => HistorySource::Agent,
         _ => HistorySource::Environment,
     };
-    let provider = item.opaque.as_ref().map(|o| ProviderOriginal {
-        connection_identity: o.connection_identity.clone(),
-        adapter: o.family.clone(),
-        version: o.adapter_version.clone(),
-        item: o.value.clone(),
-    });
     let stored = HistoryItem {
         id: item.id.clone(),
         thread_id: run.thread_id.clone(),
         parent: head,
         source,
-        content: serde_json::to_value(item)?,
-        provider,
+        content: body_reference.clone(),
+        provider: None,
     };
     tx.execute(
         "INSERT INTO history(id,thread_id,parent,body) VALUES(?1,?2,?3,?4)",
@@ -89,6 +83,25 @@ fn append_item(tx: &Transaction<'_>, run: &Run, item: &ConversationItem) -> Resu
         params![run.branch_id, stored.id],
     )?;
     Ok(())
+}
+fn provider_originals(items: &[ProviderItem]) -> Vec<ProviderOriginal> {
+    items.iter().filter_map(|item| item.opaque.as_ref().map(|o| ProviderOriginal {
+        connection_identity: o.connection_identity.clone(),
+        adapter: o.family.clone(), version: o.adapter_version.clone(), item: o.value.clone(),
+    })).collect()
+}
+fn history_items(record: &ExecutionRecord) -> Vec<ConversationItem> {
+    match record {
+        ExecutionRecord::ModelFinished { outcome: ModelOutcome::Completed, items, .. } => items.iter().map(|item| ConversationItem {
+            id: item.id.clone(), provenance: Provenance::Assistant, content: item.content.clone(), opaque: item.opaque.clone(),
+        }).collect(),
+        ExecutionRecord::ToolBatchCommitted { request_id, results } => results.iter().map(|result| ConversationItem {
+            id: format!("{}:result:{}", request_id, result.call_id),
+            provenance: Provenance::ToolData { call_id: result.call_id.clone() },
+            content: Content::ToolResult { result: result.clone() }, opaque: None,
+        }).collect(),
+        _ => Vec::new(),
+    }
 }
 fn operation_id(request: &str, call: &str) -> String {
     format!("{request}:tool:{call}")
@@ -126,6 +139,18 @@ impl Catalog {
         } else {
             None
         };
+        let mut prepared_history = std::collections::HashMap::new();
+        for item in history_items(record) {
+            let provider = item.opaque.as_ref().map(|o| ProviderOriginal {
+                connection_identity: o.connection_identity.clone(), adapter: o.family.clone(),
+                version: o.adapter_version.clone(), item: o.value.clone(),
+            });
+            prepared_history.insert(item.id.clone(), self.content.save_history(&serde_json::to_value(&item)?, &provider)?);
+        }
+        let (prepared_originals, prepared_output) = if let ExecutionRecord::ModelFinished { items, .. } = record {
+            (Some(self.content.save_originals(&provider_originals(items))?),
+             Some(self.content.save(&json!({"status":"committed","record":record}))?))
+        } else { (None, None) };
         let tx = self.db.transaction()?;
         let mut run: Run = record_value(&tx, run_id)?;
         fence(&run, epoch)?;
@@ -303,17 +328,7 @@ impl Catalog {
                     ModelOutcome::Failed => ModelStepState::Failed,
                     ModelOutcome::Cancelled => ModelStepState::Cancelled,
                 };
-                step.original = items
-                    .iter()
-                    .filter_map(|item| {
-                        item.opaque.as_ref().map(|o| ProviderOriginal {
-                            connection_identity: o.connection_identity.clone(),
-                            adapter: o.family.clone(),
-                            version: o.adapter_version.clone(),
-                            item: o.value.clone(),
-                        })
-                    })
-                    .collect();
+                step.original = prepared_originals.ok_or_else(|| RuntimeError::Invalid("prepared model originals missing".into()))?;
                 step.usage = Some(serde_json::to_value(usage)?);
                 put(&tx, "model_steps", request_id, &step)?;
                 tx.execute(
@@ -332,6 +347,7 @@ impl Catalog {
                                 content: item.content.clone(),
                                 opaque: item.opaque.clone(),
                             },
+                            prepared_history.get(&item.id).ok_or_else(|| RuntimeError::Invalid("prepared history body missing".into()))?,
                         )?;
                         if let Content::ToolCall { call } = &item.content {
                             tx.execute(
@@ -345,7 +361,7 @@ impl Catalog {
                     "INSERT INTO model_outputs(request_id,body) VALUES(?1,?2)",
                     params![
                         request_id,
-                        encode(&json!({"status":"committed","record":record}))?
+                        encode(&prepared_output.ok_or_else(|| RuntimeError::Invalid("prepared model output missing".into()))?)?
                     ],
                 )?;
             }
@@ -535,6 +551,7 @@ impl Catalog {
                             },
                             opaque: None,
                         },
+                        prepared_history.get(&format!("{}:result:{}", request_id, result.call_id)).ok_or_else(|| RuntimeError::Invalid("prepared tool history body missing".into()))?,
                     )?;
                 }
             }
@@ -828,6 +845,8 @@ impl Catalog {
         else {
             return Ok(());
         };
+        let originals = self.content.save_originals(&provider_originals(items))?;
+        let output = self.content.save(&json!({"status":"rejected","record":record}))?;
         let tx = self.db.transaction()?;
         let Some(mut step) = optional_record::<ModelStep>(&tx, "model_steps", request_id)? else {
             return Ok(());
@@ -841,20 +860,10 @@ impl Catalog {
         {
             return Ok(());
         }
-        step.original = items
-            .iter()
-            .filter_map(|item| {
-                item.opaque.as_ref().map(|o| ProviderOriginal {
-                    connection_identity: o.connection_identity.clone(),
-                    adapter: o.family.clone(),
-                    version: o.adapter_version.clone(),
-                    item: o.value.clone(),
-                })
-            })
-            .collect();
+        step.original = originals;
         step.usage = Some(serde_json::to_value(usage)?);
         put(&tx, "model_steps", request_id, &step)?;
-        tx.execute("INSERT INTO model_outputs(request_id,body) VALUES(?1,?2) ON CONFLICT(request_id) DO NOTHING",params![request_id,encode(&json!({"status":"rejected","record":record}))?])?;
+        tx.execute("INSERT INTO model_outputs(request_id,body) VALUES(?1,?2) ON CONFLICT(request_id) DO NOTHING",params![request_id,encode(&output)?])?;
         event(
             &tx,
             request_id,
@@ -874,8 +883,7 @@ impl Catalog {
                 |r| r.get(0),
             )
             .optional()?;
-        raw.map(|raw| serde_json::from_str(&raw).map_err(Into::into))
-            .transpose()
+        raw.map(|raw| self.content.load(&serde_json::from_str(&raw)?)).transpose()
     }
 }
 

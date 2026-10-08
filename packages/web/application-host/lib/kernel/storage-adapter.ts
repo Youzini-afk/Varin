@@ -1285,47 +1285,54 @@ export class KernelWorkingStateRootStore implements WorkingStateRootStore {
     const root = await this.kernelFileRoot(directory);
     const result: Record<string, RecoveryState> = {};
     let done = 0;
-    for (const file of files) {
+    // Keep each response comfortably below the 16 MiB transport frame, allowing
+    // metadata (including symlink targets) for each entry. This is a batching
+    // granularity, not a limit on the directory or a per-file RPC loop.
+    const batchSize = 256;
+    const uniqueFiles = [...new Set(files)];
+    for (let offset = 0; offset < uniqueFiles.length; offset += batchSize) {
       options?.signal?.throwIfAborted();
-      const targetPath = root.basePath ? `${root.basePath}/${file}` : file;
+      const batch = uniqueFiles.slice(offset, offset + batchSize);
+      const paths = batch.map(file => root.basePath ? `${root.basePath}/${file}` : file);
       const leaseId = `capture-lease:${randomUUID()}`;
       for (;;) {
         options?.signal?.throwIfAborted();
-        // Keep the acquisition receipt across cancellation; the capture's
-        // finally block must release any lease the kernel actually granted.
+        // Admission receipts are not abandoned on cancellation. The kernel also
+        // retains exclusion if release arrives before a capture actually stops.
         const lease = await this.context.client.fileLeaseAcquire({
           workspaceId: this.context.identity.workspaceId, rootId: root.rootId, leaseId,
-          resources: [{ path: targetPath, scope: "exact" }],
+          resources: paths.map(path => ({ path, scope: "exact" })),
         });
         if (lease.status === "acquired") break;
         if (lease.status !== "busy") throw new Error("Kernel returned an invalid capture lease result");
         await new Promise(resolve => setTimeout(resolve, 5));
       }
-      const value = await this.context.client.fileCapture({
+      const value = await this.context.client.fileCaptureBatch({
         operationId: `working-capture:${randomUUID()}`,
         workspaceId: this.context.identity.workspaceId,
-        rootId: root.rootId,
-        path: targetPath,
-        leaseId,
-        store: options?.store !== false,
+        rootId: root.rootId, paths, leaseId, store: options?.store !== false,
       }, options?.signal).finally(() => this.context.client.fileLeaseRelease({
         workspaceId: this.context.identity.workspaceId, rootId: root.rootId, leaseId,
       }));
-      if (typeof value.stateJson !== "string") {
-        throw new Error(`Kernel returned an invalid baseline state for ${file}`);
+      if (!Array.isArray(value.entries) || value.entries.length !== batch.length) {
+        throw new Error("Kernel returned an invalid capture batch");
       }
-      const state = parseRecoveryState(JSON.parse(value.stateJson));
-      if (state.kind === "regular-file" && options?.store !== false && typeof value.ownerId === "string") {
-        const existingOwner = this.ownerByHash.get(state.objectHash);
-        if (existingOwner && existingOwner !== value.ownerId) {
-          await this.context.client.releaseBlob(value.ownerId);
-        } else {
-          this.ownerByHash.set(state.objectHash, value.ownerId);
+      for (const [index, raw] of value.entries.entries()) {
+        const entry = raw as { path?: unknown; stateJson?: unknown; ownerId?: unknown };
+        const file = batch[index]!;
+        if (entry.path !== paths[index] || typeof entry.stateJson !== "string") {
+          throw new Error(`Kernel returned an invalid baseline state for ${file}`);
         }
+        const state = parseRecoveryState(JSON.parse(entry.stateJson));
+        if (state.kind === "regular-file" && options?.store !== false && typeof entry.ownerId === "string") {
+          const existingOwner = this.ownerByHash.get(state.objectHash);
+          if (existingOwner && existingOwner !== entry.ownerId) await this.context.client.releaseBlob(entry.ownerId);
+          else this.ownerByHash.set(state.objectHash, entry.ownerId);
+        }
+        result[file] = state;
+        done += 1;
+        options?.onProgress?.(done, uniqueFiles.length);
       }
-      result[file] = state;
-      done += 1;
-      options?.onProgress?.(done, files.length);
     }
     return applyIndexModes(result, options?.indexModes);
   }
