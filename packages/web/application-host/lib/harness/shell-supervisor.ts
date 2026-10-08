@@ -189,6 +189,17 @@ function parseCommandOutput(command: CommandOutputFrame, chunk: string): { text:
   return result;
 }
 
+function finishCommandOutput(command: CommandOutputFrame): string {
+  const tail = command.frameBuffer;
+  command.frameBuffer = "";
+  if (!command.outputStarted) return "";
+  // Only discard an unfinished record for this command's private token.
+  // Ordinary output, including text without a final newline, remains intact.
+  const marker = `${SENTINEL}${command.token}`;
+  return tail.startsWith(marker) && /^(?::(?:B|C(?::[01]?)?|E(?::\d*)?)?)?\r?$/.test(tail.slice(marker.length))
+    ? "" : tail;
+}
+
 const quotePowerShell = (value: string): string => `'${value.replace(/'/g, "''")}'`;
 const quotePosixShell = (value: string): string => `'${value.replace(/'/g, "'\\''")}'`;
 
@@ -711,10 +722,10 @@ export function createShellSupervisor(deps: ShellSupervisorOptions) {
     background.lifecycleCompleted = true;
     background.exited = true;
     background.exitCode = exitCode;
-    if (background.outputStarted && background.frameBuffer) {
-      background.output += background.frameBuffer;
-      publishOutputDelta(background, background.frameBuffer);
-      background.frameBuffer = "";
+    const tail = finishCommandOutput(background);
+    if (tail) {
+      background.output += tail;
+      publishOutputDelta(background, tail);
     }
     background.timing.endedAt = Date.now();
     const accepted = acceptedExecution(background.executionId);
@@ -1012,10 +1023,10 @@ export function createShellSupervisor(deps: ShellSupervisorOptions) {
     const cmd = pendingCommand;
     pendingCommand = null;
 
-    if (cmd.outputStarted && cmd.frameBuffer) {
-      outputBuffer += cmd.frameBuffer;
-      publishOutputDelta(cmd, cmd.frameBuffer);
-      cmd.frameBuffer = "";
+    const tail = finishCommandOutput(cmd);
+    if (tail) {
+      outputBuffer += tail;
+      publishOutputDelta(cmd, tail);
     }
 
     const cleanedOutput = stripControlSequences(outputBuffer);

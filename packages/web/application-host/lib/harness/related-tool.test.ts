@@ -84,6 +84,17 @@ describe("related tool", () => {
     expect(byName.anchor.kind).toBe("name");
     expect(byName.definitions[0]?.name).toBe("explore");
     expect(byName.text).not.toContain("rank ");
+    await store.replaceFileSymbols('unrelated/other.ts', 'typescript', [], 'disk-r1', [
+      { kind: 'connects', value: 'explore.search', callee: 'request', line: 1 },
+    ]);
+    let full = '';
+    const preview = await executeRelated({ anchor: 'lib/harness/explore.ts' }, store, {
+      storeOutput: text => { full = text; return 'related-full'; },
+    });
+    expect(preview.text).toContain('lib/harness/explore-service.ts request');
+    expect(preview.text).not.toContain('unrelated/other.ts request');
+    expect(preview.text.indexOf('References:')).toBeLessThan(preview.text.indexOf('Shared literals'));
+    expect(full).toContain('unrelated/other.ts request');
   });
 
   it("keeps capped relation lists readable through a session output handle", async () => {

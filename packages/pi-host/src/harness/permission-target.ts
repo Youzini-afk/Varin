@@ -197,7 +197,8 @@ export function buildPermissionInspection(input: {
       : { paths: [] as string[], complete: true };
   const remoteTarget = Boolean(routedExecutionTarget(input.params));
   const paths = (remoteTarget ? [] : [...new Set([...directPaths(input.toolName, input.params), ...shell.paths])])
-    .map((path) => path.startsWith("~/") ? path : resolve(input.cwd, path));
+    .map((path) => path.startsWith("~/") || (process.platform === "win32" && /^\/(?!\/)/.test(path))
+      ? path : resolve(input.cwd, path));
   const networkTargets = networkOrigins(input.toolName, input.params);
   const scopes = threadScopes(input.toolName, input.params);
   const evidenceComplete = shell.complete
@@ -213,6 +214,26 @@ export function buildPermissionInspection(input: {
     threadScopes: scopes,
     evidenceComplete,
   };
+}
+
+/** Pin owned tool path arguments to the exact Host-inspected target before scheduling/execution. */
+export function applyInspectedPaths(params: Record<string, unknown>, target: PermissionInspectResult): void {
+  if (target.source.kind !== "harness" && target.source.kind !== "builtin") return;
+  const paths = new Map(target.paths.filter(entry => entry.resolvedPath && /^(?:[a-zA-Z]:[\\/]|\\\\)/.test(entry.resolvedPath)
+    && /^\/(?!\/)/.test(entry.inputPath))
+    .map(entry => [entry.inputPath, entry.resolvedPath!]));
+  if (!paths.size) return;
+  const replace = (value: unknown) => typeof value === "string" ? paths.get(value) ?? value : value;
+  for (const key of ["path", "file_path", "cwd"]) if (key in params) params[key] = replace(params[key]);
+  if (Array.isArray(params.paths)) params.paths = params.paths.map(replace);
+  for (const key of ["files", "changes"]) if (Array.isArray(params[key])) {
+    params[key] = params[key].map(entry => entry && typeof entry === "object" && "path" in entry
+      ? { ...entry, path: replace(entry.path) } : entry);
+  }
+  if (typeof params.patch === "string") params.patch = params.patch.replace(
+    /^(\*\*\* (?:Add|Update|Delete) File: )(.+)$/gm,
+    (_line, prefix: string, value: string) => `${prefix}${paths.get(value.trim()) ?? value}`,
+  );
 }
 
 export function permissionPolicyGeneration(policy: PermissionPolicy): string {

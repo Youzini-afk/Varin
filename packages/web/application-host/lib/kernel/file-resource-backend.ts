@@ -182,13 +182,17 @@ export class KernelFileResourceBackend implements RecoveryFileStore {
     const context = await this.bind(identity);
     const relative = this.translated(context, resolved.relative);
     const lease = this.leaseFor(context);
+    if (!lease) {
+      return this.gateFor(identity).run([{ resourceId: resolved.relative, scope: "exact" }],
+        () => this.captureDetailed(identity, inputPath, options, operationId));
+    }
     const value = await context.client.fileCapture({
       operationId,
       workspaceId: context.owningWorkspaceId,
       rootId: context.rootId,
       path: relative,
       store: options.store !== false,
-      ...(lease ? { leaseId: lease.leaseId } : {}),
+      leaseId: lease.leaseId,
     });
     const captured = parseCaptured(value);
     const result: CapturedState & { ownerId?: string } = {
@@ -196,7 +200,7 @@ export class KernelFileResourceBackend implements RecoveryFileStore {
       state: captured.state,
       ...(typeof value.ownerId === "string" ? { ownerId: value.ownerId } : {}),
     };
-    lease?.observed.set(relative, result.state);
+    lease.observed.set(relative, result.state);
     return result;
   }
 

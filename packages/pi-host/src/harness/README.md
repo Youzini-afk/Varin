@@ -41,6 +41,13 @@ hidden-file choice. An interrupted search reports incomplete coverage rather tha
 Search/related transport waits remain cancellable through the worker and Host lifecycle; source work
 owns its own deadlines, so cold initialization is not cut off by a separate 30-second transport timer.
 
+On Windows, file paths from a selected local Git Bash session use that installation's `cygpath`
+mapping before authorization. The permission gate pins owned tool arguments to the inspected Windows
+path, so `/d/...` and `/tmp/...` agree with the shell without changing command or replacement text.
+
+`history` searches return matching excerpts and entry ids by default. An entry read or `view:"full"`
+returns the original text and images; pagination and retained Run permissions are unchanged.
+
 `document_read` uses `page` for one page, `pages:number[]` for selected pages, or `all:true` for the
 whole original. The public schema keeps arrays separate from the all-pages flag; the Host receives
 the same native PDF selection contract.
@@ -294,8 +301,9 @@ The source installation remains unchanged; paging uses the adapted reference tex
   continuations. Environment facts are appended to native Pi history only when
   the provider starts responding, with receipts acknowledged to Host; a stream
   that fails before starting does not claim delivery. The current teammate table
-  remains transient and unchanged teammates remain visible. Unavailable and empty
-  observations are distinct. No snapshot receipt or status-summary model is used.
+  remains transient and unchanged active teammates remain visible. Settled threads
+  stay only when attention or integration is pending; an empty team adds no status
+  block. Unavailable status remains explicit. No status-summary model is used.
 - `createContextPreparationExtension` and `attachContextRequestBoundary` — account
   for the full candidate input (including both additions) before admission, reuse
   a fixed background summary candidate and commit through Pi's SessionManager.

@@ -25,14 +25,18 @@ describe("LSP navigation tools", () => {
     assert.equal(result.content[0]?.type === "text" ? result.content[0].text : "", "src/a.ts:2:3");
   });
   it("distinguishes unavailable navigation from an empty ready response", async () => {
-    for (const response of [{ status: "ready", text: "no references", value: [] }, { status: "unavailable", text: "no server" }, new Error("offline")]) {
+    for (const response of [{ status: "ready", text: "no references", value: [] }, { status: "unavailable", text: "no server" },
+      { status: 'busy', text: 'file in use' }, new Error("offline"), new Error('file resource is busy under lease file-lease:other')]) {
       const tools = createLspNavigationTools({ request: async () => {
         if (response instanceof Error) throw response;
         return response;
       } } as never);
       for (const tool of tools) {
         const result = await tool.execute("call", { path: "file.ts", line: 1, query: "name" } as never, undefined, undefined, undefined as never);
-        assert.equal(result.isError === true, response instanceof Error || response.status === "unavailable", tool.name);
+        assert.equal(result.isError === true, response instanceof Error || response.status !== "ready", tool.name);
+        if (response instanceof Error && response.message.includes('busy under lease')) {
+          assert.equal((result.details as { status: string }).status, 'busy');
+        }
       }
     }
   });

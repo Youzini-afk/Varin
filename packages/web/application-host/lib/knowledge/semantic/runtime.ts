@@ -886,6 +886,17 @@ export function createSemanticIndexRuntime(options: SemanticIndexRuntimeOptions)
       if (scanFailures.has(scopeId)) {
         return { status: { ...status, status: "stale" }, hits: [], gaps: [] };
       }
+      if (status.coverage === "empty" && !status.publishedDocuments
+        && !searchOptions?.threadQuery && !searchOptions?.overlays?.some(overlay => overlay.content !== null)) {
+        // Dimension discovery above can start the background scan. With no
+        // published documents or fixed-view overlays, another embedding request
+        // cannot produce a hit for this query.
+        const gaps = (searchOptions?.overlays ?? []).flatMap(overlay => overlay.gap && pathInRoots(overlay.path, searchOptions?.roots)
+          ? [{ path: overlay.path, reason: overlay.gap }] : []);
+        const incomplete = Boolean(activeScan && !activeScan.resolved) || gaps.length > 0
+          || status.lifecycle === 'building' || status.lifecycle === 'rebuilding';
+        return { status: { ...status, status: incomplete ? "incomplete" : status.status }, hits: [], gaps };
+      }
       signal?.throwIfAborted();
       await waitWithSignal(embedder.prepare(), signal);
       signal?.throwIfAborted();

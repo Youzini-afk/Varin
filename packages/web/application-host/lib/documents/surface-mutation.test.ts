@@ -25,6 +25,17 @@ describe("applyTextEdits", () => {
     expect(() => applyTextEdits("B", [{ oldText: "", newText: "C" }])).toThrow(/empty/i);
     expect(() => applyTextEdits("B and B", [{ oldText: "B", newText: "C" }])).toThrow(/more than once/i);
     expect(() => applyTextEdits("A", [{ oldText: "B", newText: "C" }])).toThrow(/exact text/i);
+    expect(() => applyTextEdits("aaa", [{ oldText: "aa", newText: "b" }])).toThrow(/more than once/i);
+  });
+
+  it("matches every replacement against the original text and rejects overlapping regions", () => {
+    expect(applyTextEdits("X\nY", [{ oldText: "X", newText: "Y" }, { oldText: "Y", newText: "Z" }])).toBe("Y\nZ");
+    expect(() => applyTextEdits("alpha / beta", [
+      { oldText: "alpha", newText: "ALPHA" }, { oldText: "ALPHA", newText: "OMEGA" },
+    ])).toThrow(/exact text/i);
+    expect(() => applyTextEdits("alpha beta", [
+      { oldText: "alpha beta", newText: "whole" }, { oldText: "beta", newText: "part" },
+    ])).toThrow(/overlap/i);
   });
 });
 

@@ -144,7 +144,7 @@ export interface ThreadRuntimeOptions {
   /** Production R3 measurement of a managed execution directory through the kernel. */
   measureManagedDirectory?(workspaceId: string, worktree: NonNullable<Thread["worktree"]>): Promise<ThreadSpaceMeasurement>;
   inspectBaselineWriters?(workspaceId: string, root: string): Promise<Array<{ id: string; purpose?: string; owner?: { kind: string; id: string }; startedAt?: string }>>;
-  beginBaselineCapture?(workspaceId: string): Promise<unknown>;
+  beginBaselineCapture?(workspaceId: string, ignoredWriterIds?: readonly string[]): Promise<unknown>;
   completeBaselineCapture?(capture: unknown): Promise<{ stable: boolean; reasons: string[] }>;
   beginDirtyStateBarrier?(workspaceId: string, paths: string[]): Promise<{
     release(): Promise<void>;
@@ -187,6 +187,8 @@ export interface PrepareIsolatedBranchInput {
   parent: ThreadParent;
   threadId: string;
   draftBaselineId?: string | null;
+  /** Trusted broker actor performing this dispatch, never a model-supplied identity. */
+  callerWorkerId?: string;
   signal?: AbortSignal;
 }
 
@@ -1766,6 +1768,15 @@ export function createThreadRuntime(options: ThreadRuntimeOptions) {
     if (preparationSignal.aborted) throw new DOMException("Thread baseline capture aborted", "AbortError");
     setPreparationStage("capturing-baseline");
     const branchId = `thread-${input.threadId}`;
+    // The caller's round admission remains live until agent_settled. Its
+    // concrete shell/document writes have separate leases; those still block
+    // capture, as do any writer/revision/watch changes during the snapshot.
+    const ignoredWriterIds = new Set(input.callerWorkerId && options.inspectBaselineWriters
+      ? (await options.inspectBaselineWriters(captureWorkspaceId, sourceRoot))
+        .filter(writer => writer.owner?.kind === "pi-worker" && writer.owner.id === input.callerWorkerId
+          && writer.purpose?.startsWith("pi-agent-run:"))
+        .map(writer => writer.id)
+      : []);
     const baselineChanged = (detail: string): ThreadRuntimeError => new ThreadRuntimeError(
       "unavailable",
       `Thread baseline is unavailable because the parent workspace changed during capture (baseline-changed): ${detail}`,
@@ -1773,7 +1784,8 @@ export function createThreadRuntime(options: ThreadRuntimeOptions) {
     );
     const assertNoActiveBaselineWriters = async (): Promise<void> => {
       if (typeof options.inspectBaselineWriters !== "function") return;
-      const writers = await options.inspectBaselineWriters(captureWorkspaceId, sourceRoot);
+      const writers = (await options.inspectBaselineWriters(captureWorkspaceId, sourceRoot))
+        .filter(writer => !ignoredWriterIds.has(writer.id));
       if (writers.length > 0) {
         throw new ThreadRuntimeError("unavailable",
           `Cannot create an isolated workspace while parent operations are active: ${[...new Set(writers.map(writer => writer.purpose ?? "file write"))].join(", ")}. `
@@ -1831,7 +1843,7 @@ export function createThreadRuntime(options: ThreadRuntimeOptions) {
         dirtyBarrier = await options.beginDirtyStateBarrier(captureWorkspaceId, ["."]);
       }
       if (typeof options.beginBaselineCapture === "function") {
-        baselineCapture = await options.beginBaselineCapture(captureWorkspaceId);
+        baselineCapture = await options.beginBaselineCapture(captureWorkspaceId, [...ignoredWriterIds]);
       }
       await assertNoActiveBaselineWriters();
       await options.workingStates.withBranchStore(input.scopeId, "thread-baseline-capture", async (store) => {

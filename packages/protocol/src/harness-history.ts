@@ -13,6 +13,7 @@ export interface HistoryReadParams {
   after?: number;
   offset?: number;
   limit?: number;
+  view?: "snippet" | "full";
 }
 export interface HistoryReadResult {
   content: PiUserContent[];
@@ -46,6 +47,17 @@ function formatEntry(entry: PiSessionEntry, marker?: string): string {
   const head = `[entry ${entry.id} · ${entry.type}${role !== entry.type ? `/${role}` : ""} · ${entry.timestamp}${marker ? ` · ${marker}` : ""}]`;
   return text.length ? `${head}\n${text}` : head;
 }
+
+function formatMatch(entry: PiSessionEntry, index: number, needle: string | undefined): string {
+  const { role, text } = entryText(entry);
+  // A search hit is a paragraph-sized preview; entry reads retain the full original.
+  const hit = needle ? Math.max(0, text.toLowerCase().indexOf(needle)) : 0;
+  let start = Math.max(0, hit - 100);
+  let end = Math.min(text.length, Math.max(start + 400, hit + (needle?.length ?? 0)));
+  if (start > 0 && /[\uDC00-\uDFFF]/.test(text[start]!)) start--;
+  if (end < text.length && /[\uD800-\uDBFF]/.test(text[end - 1]!)) end++;
+  return `[entry ${entry.id} · ${entry.type}${role !== entry.type ? `/${role}` : ''} · #${index}]\n${start ? '…' : ''}${text.slice(start, end)}${end < text.length ? '…' : ''}`;
+}
 function result(text: string, details: HistoryReadResult["details"], selected: readonly PiSessionEntry[] = []): HistoryReadResult {
   const content: PiUserContent[] = [{ type: "text", text }];
   for (const entry of selected) {
@@ -59,6 +71,7 @@ function result(text: string, details: HistoryReadResult["details"], selected: r
 }
 
 export function readHistoryPage(entries: readonly PiSessionEntry[], params: HistoryReadParams): HistoryReadResult {
+  if (params.view !== undefined && params.view !== 'snippet' && params.view !== 'full') throw new Error('Invalid history view');
   for (const name of ["before", "after", "offset", "limit", "start", "end"] as const) {
     const value = params[name];
     if (value !== undefined && (!Number.isSafeInteger(value) || value < (["limit", "start", "end"].includes(name) ? 1 : 0))) {
@@ -106,9 +119,10 @@ export function readHistoryPage(entries: readonly PiSessionEntry[], params: Hist
   if (matches.length === 0) return result("history: no matching entries", { matches: 0, total: entries.length });
   const shown = matches.slice(offset, offset + limit);
   const nextOffset = offset + shown.length < matches.length ? offset + shown.length : undefined;
-  const lines = shown.map(({ entry, index }) => formatEntry(entry, `#${index}`));
+  const full = params.view === "full";
+  const lines = shown.map(({ entry, index }) => full ? formatEntry(entry, `#${index}`) : formatMatch(entry, index, query ?? path));
   if (nextOffset !== undefined) lines.push(`[${matches.length - nextOffset} more match(es) — continue with offset: ${nextOffset} and the same query/path, or narrow the query]`);
   if (!shown.length) lines.push("history: end of matching entries");
   return result(lines.join("\n\n"), { matches: matches.length, shown: shown.length, offset, total: entries.length,
-    ...(nextOffset === undefined ? {} : { nextOffset }) }, shown.map(({ entry }) => entry));
+    ...(nextOffset === undefined ? {} : { nextOffset }) }, full ? shown.map(({ entry }) => entry) : []);
 }

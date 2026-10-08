@@ -90,6 +90,7 @@ export interface CaptureToken {
   mutationRevision: number;
   writerRevision: number;
   activeWriterIds: string[];
+  ignoredWriterIds?: string[];
   allowMaintenance?: boolean;
   maintenance: boolean;
   watchRevision: number;
@@ -538,7 +539,7 @@ export const createWorkspaceMutationAuthority = ({
     return publicState(runtime, entry);
   });
 
-  const beginCapture = (workspaceId: string, options: { allowMaintenance?: boolean } = {}) => run(workspaceId, async (runtime) => {
+  const beginCapture = (workspaceId: string, options: { allowMaintenance?: boolean; ignoredWriterIds?: readonly string[] } = {}) => run(workspaceId, async (runtime) => {
     const { entry } = await mutateWorkspace(workspaceId);
     syncRuntime(runtime, entry);
     return {
@@ -548,6 +549,7 @@ export const createWorkspaceMutationAuthority = ({
       mutationRevision: entry.mutationRevision,
       writerRevision: entry.writerRevision,
       activeWriterIds: Object.keys(entry.activeWriters).sort(),
+      ...(options.ignoredWriterIds?.length ? { ignoredWriterIds: [...options.ignoredWriterIds] } : {}),
       allowMaintenance: options.allowMaintenance === true,
       maintenance: entry.maintenance,
       watchRevision: runtime.watchRevision,
@@ -567,7 +569,9 @@ export const createWorkspaceMutationAuthority = ({
     if (capture.mutationRevision !== entry.mutationRevision) reasons.push('mutation-observed');
     if (capture.writerRevision !== entry.writerRevision) reasons.push('writer-activity');
     if ((capture.maintenance || entry.maintenance) && capture.allowMaintenance !== true) reasons.push('maintenance');
-    if (capture.activeWriterIds.length > 0 || Object.keys(entry.activeWriters).length > 0) reasons.push('active-writer');
+    const ignored = new Set(capture.ignoredWriterIds ?? []);
+    if (capture.activeWriterIds.some(id => !ignored.has(id))
+      || Object.keys(entry.activeWriters).some(id => !ignored.has(id))) reasons.push('active-writer');
     const beforeWatch = capture.watch;
     const afterWatch = runtime.watch;
     if (beforeWatch?.sourceId !== afterWatch?.sourceId) reasons.push('watch-source-changed');

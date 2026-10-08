@@ -111,7 +111,7 @@ export function createSurfaceAwareReadTool(
             nextOffset: page.nextOffset, truncatedBy: page.truncatedBy,
           } };
         if (page.kind === 'binary') return {
-          content: [{ type: 'text', text: `This is a ${page.format} binary file (${page.byteLength} bytes). Read cannot display it as source text; use a tool for this file format.` }],
+          content: [{ type: 'text', text: `This is a ${page.format === 'binary' ? '' : `${page.format} `}binary file (${page.byteLength} bytes). Read cannot display it as source text; use a tool for this file format.` }],
           details,
         } as Awaited<ReturnType<typeof native.execute>>;
         if (page.kind === 'text') {

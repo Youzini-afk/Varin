@@ -59,6 +59,7 @@ import { createHarnessRouter, buildHarnessRespondParams } from './lib/harness/ro
 import { createHarnessServiceHost, deriveHarnessCapabilities } from './lib/harness/service-host.js';
 import { createSourceViewRuntime } from './lib/harness/source-view-runtime.js';
 import { discoverShells } from './lib/harness/shell-discovery.js';
+import { createShellPathResolver } from './lib/harness/shell-path.js';
 import { createHarnessSessionRegistration } from './lib/harness/session-registration.js';
 import { performHarnessWebFetch, registerHarnessServices } from './lib/harness/harness-services.js';
 import { createUserThreadSendAdapter } from './lib/harness/thread-ui-adapter.js';
@@ -1253,6 +1254,7 @@ async function main(options: StartWebUiServerOptions = {}): Promise<WebUiServerC
     documents: documentsAuthority,
     fsPromises,
     pathModule: path,
+    resolveInputPath: (actor, input) => shellPathResolver(actor, input),
   });
   piWriterTracker = createPiWorkspaceWriterTracker({ documents: documentsAuthority });
   const workspaceRecoveryEngines = new Map<string, WorkspaceRecoveryEngine>();
@@ -1510,6 +1512,7 @@ async function main(options: StartWebUiServerOptions = {}): Promise<WebUiServerC
   // owners — the app settings store and the Pi settings protocol — so the
   // catalog the agent sees is the same one the settings UI edits.
   const settingsActionRegistry = createSettingsActionRegistry({
+    semanticIndex: () => semanticIndexManagement,
     requestWorkspace: (cwd, method, params) => piRuntimeBroker.requestForWorkspace(cwd, method as never, params as never),
     requestSession: (sessionId, method, params) => piRuntimeBroker.requestForSession(sessionId, method as never, params as never),
     resolveWorkspaceRoot: async (workspaceId) => (
@@ -2336,7 +2339,7 @@ async function main(options: StartWebUiServerOptions = {}): Promise<WebUiServerC
     // there is no registered project workspace behind it.
     resolveWorkspaceRoot: scopeDirectory,
     resolveRuntimeWorkspaceId: async (cwd) => (await documentsAuthority.resolveWorkspace({ path: cwd })).workspaceId,
-    beginBaselineCapture: (workspaceId) => documentsAuthority.beginCapture(workspaceId),
+    beginBaselineCapture: (workspaceId, ignoredWriterIds) => documentsAuthority.beginCapture(workspaceId, { ignoredWriterIds }),
     completeBaselineCapture: async (capture) => {
       const completed = await documentsAuthority.completeCapture(capture);
       return { stable: completed.stable, reasons: completed.reasons };
@@ -3503,6 +3506,10 @@ async function main(options: StartWebUiServerOptions = {}): Promise<WebUiServerC
   });
 
   const discoveredShells = discoverShells();
+  const shellPathResolver = createShellPathResolver({
+    interpreter: (sessionId) => harnessServiceHost.getInterpreter(sessionId),
+    spawn: nativeProcesses.spawn,
+  });
   const harnessServiceHost = createHarnessServiceHost({
     agentPersonalization,
     discoveredShells,

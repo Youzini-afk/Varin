@@ -142,6 +142,7 @@ export interface GitIdentityStore {
 }
 
 export interface SettingsActionDeps {
+  semanticIndex?(): Pick<ReturnType<typeof import('../knowledge/semantic/index-management.js').createSemanticIndexManagement>, 'read' | 'save' | 'active' | 'activeDirectory' | 'configuredDirectory'>;
   agentPersonalization?(): AgentPersonalization;
   /** Worker-scoped Pi RPC on the caller's workspace. */
   requestWorkspace(cwd: string, method: string, params: Record<string, unknown>): Promise<unknown>;
@@ -1275,6 +1276,30 @@ const agentPersonalizationAdapter = (deps: SettingsActionDeps): SettingsActionAd
 
 export function createSettingsActionRegistry(deps: SettingsActionDeps) {
   const adapters = new Map<string, SettingsActionAdapter>([
+    ['service:semantic-index', {
+      verbs: ['read', 'write'],
+      async describe() {
+        const owner = deps.semanticIndex?.();
+        if (!owner) return { unavailable: 'Index settings are unavailable' };
+        const saved = await owner.read();
+        return { data: { config: saved.config, revision: saved.revision, activeConfig: owner.active(),
+          activeDirectory: owner.activeDirectory(), configuredDirectory: owner.configuredDirectory(saved.config) },
+          ...(saved.error ? { unavailable: saved.error } : {}) };
+      },
+      async invoke(_ctx, _entry, verb, args) {
+        const owner = deps.semanticIndex?.();
+        if (!owner) return unavailable('Index settings are unavailable');
+        try {
+          if (verb === 'read') {
+            const saved = await owner.read();
+            return saved.error ? { status: 'failed', detail: saved.error, data: saved } : { status: 'applied', data: saved };
+          }
+          if (verb !== 'write') return unavailable(`Unsupported index action: ${verb}`);
+          const saved = await owner.save(args.config, needString(args, 'revision'));
+          return { status: 'applied', data: { ...saved, activeConfig: owner.active() } };
+        } catch (error) { return wrapError(error); }
+      },
+    }],
     ['service:agent-personalization', agentPersonalizationAdapter(deps)],
     ['runtime:providers', providersAdapter(deps)],
     ['runtime:mcp', mcpAdapter(deps)],

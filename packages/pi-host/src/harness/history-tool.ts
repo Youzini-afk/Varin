@@ -13,6 +13,9 @@ const HistoryParams = Type.Object({
   query: Type.Optional(Type.String({
     description: "Case-insensitive substring matched against each entry's text.",
   })),
+  view: Type.Optional(Type.Union([Type.Literal("snippet"), Type.Literal("full")], {
+    description: "Search result detail; defaults to snippet. Reading an entry id returns its original content.",
+  })),
   path: Type.Optional(Type.String({
     description: "Restrict matches to entries whose text mentions this path fragment.",
   })),
@@ -42,12 +45,12 @@ export function createHistoryTool(bridge?: HostServicesBridge): ToolDefinition {
   return defineTool({
     name: "history",
     label: "History",
-    description: "Read raw session entries by keyword, path, or entry id with neighbours and pagination. "
+    description: "Search session history by keyword or path, returning excerpts and entry ids. Read an entry id for its original content with optional neighbours, or use view:full for complete search matches. "
       + "Use run to read a retained earlier Run of this same Thread; parent and sibling transcripts are not accessible.",
     promptSnippet: "history: read original entries from this session or an authorized earlier Run of the same Thread",
     promptGuidelines: [
       "run selects a retained earlier Run of this same Thread; entry ids belong to that selected transcript. Parent and sibling transcripts are not accessible.",
-      "Images retain their original bytes. Output handles for large text are ephemeral; the history query can retrieve the retained entry again.",
+      "Entry and full reads retain original images. Output handles for large text are ephemeral; the history query can retrieve the retained entry again.",
     ],
     parameters: HistoryParams,
     executionMode: "parallel",

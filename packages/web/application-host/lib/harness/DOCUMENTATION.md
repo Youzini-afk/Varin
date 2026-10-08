@@ -75,6 +75,8 @@ task ancestry; read access does not grant sibling lifecycle control.
 
 `agent-root-runtime.ts` attaches ordinary main conversations to the existing Thread/Run authority.
 The request-local teammate roster and automatic teammate material exclude the observer's own Thread.
+The roster omits settled threads without attention or pending integration; explicit thread/history
+queries retain them. An empty roster adds no message to the model request.
 Directed inbound messages already enter native Pi history through its idempotent notification or
 continuation path; neither the sender nor recipient ledger is replayed as teammate material. Another
 Thread's conversations remain available through explicit history reads. Child results retain their
@@ -111,6 +113,8 @@ the same task root and children.
 For Git baselines without drafts/ignored-copy scopes, a fresh raw-byte Git identity can reuse a retained
 immutable native baseline. Git filters and EOL conversion are bypassed; changed identities or lost/
 rebased roots return to capture. The derived cache retains a root reference and fingerprint, not file trees.
+Baseline admission excludes only the dispatching worker's recorded round writer. Concrete file/shell
+writers still block capture, and writer, mutation, epoch and filesystem-watch changes still invalidate it.
 
 ### Bot sleep and wake
 

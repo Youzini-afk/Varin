@@ -35,6 +35,7 @@ export interface PermissionInspectParams {
 
 export interface PermissionCanonicalPath {
   inputPath: string;
+  resolvedPath?: string;
   workspaceId: string;
   resourceId: string;
   canonicalResourceId: string;

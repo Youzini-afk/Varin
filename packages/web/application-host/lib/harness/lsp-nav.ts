@@ -44,7 +44,9 @@ const recordOf = (value: unknown): Record<string, unknown> => (
   value && typeof value === "object" && !Array.isArray(value) ? value as Record<string, unknown> : {}
 );
 
-const unavailable = (message: string): LspNavigationResult => ({ status: "unavailable", text: message });
+const unavailable = (message: string): LspNavigationResult => message.includes("file resource is busy under lease")
+  ? { status: "busy", text: "LSP busy: the file is in use. Retry this request." }
+  : { status: "unavailable", text: message };
 const empty = (message: string): LspNavigationResult => ({ status: "empty", text: message });
 
 const startOf = (value: unknown): { line: number; character: number } | null => {
@@ -189,6 +191,11 @@ export function createLspNavigationServices(deps: LspNavigationDeps): {
       text: "input-context",
       ...(ctx.sessionId ? { sessionId: ctx.sessionId } : {}),
       ...(ctx.inputContext ? { inputContext: ctx.inputContext } : {}),
+      signal: ctx.signal,
+    }).catch((error: unknown) => {
+      const message = error instanceof Error ? error.message : String(error);
+      if (message.includes('file resource is busy under lease')) return { status: 'unavailable' as const, message };
+      throw error;
     });
     if (bound.status !== "bound") return unavailable(`LSP unavailable: ${bound.message}`);
     return { languageId, resource, revision: bound.revision, source: bound.source };

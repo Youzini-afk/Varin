@@ -52,11 +52,9 @@ export function createRequestContextInjector(bridge: HostServicesBridge): NonNul
     else if (environment.status === "rejected") {
       additions.push(observation('<varin-context status="unavailable">Current environment observations could not be read. Previously observed facts may be stale.</varin-context>'));
     }
-    additions.push(observation(roster?.content
+    if (roster?.status !== "empty") additions.push(observation(roster?.content
       ? `Current teammates:\n${roster.content}`
-      : (roster?.status === "empty"
-      ? '<varin-status status="empty">No teammates in the current authorized scope.</varin-status>'
-      : '<varin-status status="unavailable">Current teammate status is unknown.</varin-status>')));
+      : '<varin-status status="unavailable">Current teammate status is unknown.</varin-status>'));
     return {
       request: { ...request, context: { ...request.context, messages: [...request.context.messages, ...additions] } },
       ...(material?.content && environmentContent ? {
