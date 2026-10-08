@@ -561,7 +561,7 @@ impl Catalog {
     pub fn request_cancel_operation(&mut self, key: &str) -> Result<Operation> {
         let tx = self.db.transaction()?;
         let mut op: Operation = record(&tx, "operations", key)?;
-        if op.phase == OperationPhase::Terminal || op.cancel_requested {
+        if (op.phase == OperationPhase::Terminal && op.outcome!=Some(Outcome::Indeterminate)) || op.cancel_requested {
             return Ok(op);
         }
         op.cancel_requested = true;

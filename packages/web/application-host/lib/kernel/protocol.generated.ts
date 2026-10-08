@@ -347,6 +347,8 @@ export interface KernelProcessReadResult {
   endCursor: number;
   inputSequence: number;
   inputError: string | null;
+  outputComplete: boolean;
+  outputError: string | null;
 }
 
 export interface KernelProcessWriteResult {

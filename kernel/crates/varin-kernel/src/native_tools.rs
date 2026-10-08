@@ -192,7 +192,7 @@ impl ResourceOperation {
             }
             Self::ProcessSpawn(args) => {
                 let mut params = json!({"workspaceId":binding.workspace_id,"rootId":binding.root_id,
-                    "processId":context.operation_id,"cwd":args.cwd,"command":args.command,"args":args.args,
+                    "processId":context.operation_id,"__nativeRunId":context.run_id,"cwd":args.cwd,"command":args.command,"args":args.args,
                     "env":args.env,"mode":args.mode});
                 if let Some(cols) = args.cols {
                     params["cols"] = json!(cols);
@@ -241,14 +241,36 @@ pub(crate) struct ResourceCall {
 #[derive(Clone)]
 pub(crate) struct NativeResourceClient {
     send: Arc<dyn Fn(ResourceCall) -> Result<(), KernelError> + Send + Sync>,
+    replay: Arc<dyn Fn(Vec<String>) -> Result<(), KernelError> + Send + Sync>,
+    controls: crate::process::ProcessControlRegistry,
 }
 impl NativeResourceClient {
     pub(crate) fn new(
         send: impl Fn(ResourceCall) -> Result<(), KernelError> + Send + Sync + 'static,
+        replay: impl Fn(Vec<String>) -> Result<(), KernelError> + Send + Sync + 'static,
+        controls: crate::process::ProcessControlRegistry,
     ) -> Self {
         Self {
             send: Arc::new(send),
+            replay: Arc::new(replay),
+            controls,
         }
+    }
+    pub(crate) fn replay_process_terminals(
+        &self,
+        process_ids: Vec<String>,
+    ) -> Result<(), KernelError> {
+        (self.replay)(process_ids)
+    }
+    pub(crate) fn cancel_known_process(&self, operation_id: &str) -> Result<bool, KernelError> {
+        self.controls.cancel_known_process(operation_id)
+    }
+    pub(crate) fn cancel_process(
+        &self,
+        operation_id: &str,
+        run_id: &str,
+    ) -> Result<bool, KernelError> {
+        self.controls.cancel_process(operation_id, run_id)
     }
     fn call(
         &self,

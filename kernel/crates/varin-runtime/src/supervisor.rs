@@ -175,6 +175,13 @@ impl RunSupervisor {
         }
         false
     }
+    pub fn cancel_operation_control(&self,operation_id:&str)->bool {
+        self.workers.lock().map(|workers|workers.values().any(|worker|worker.cancel.cancel_child(operation_id))).unwrap_or(false)
+    }
+    pub fn cancel_operation(&self,operation_id:&str)->Result<crate::Operation> {
+        self.cancel_operation_control(operation_id);
+        self.catalog.lock().map_err(error)?.request_cancel_operation(operation_id).map_err(error)
+    }
     pub fn cancel(&self, run_id: &str) -> Result<Run> {
         self.cancel_control(run_id);
         self.catalog

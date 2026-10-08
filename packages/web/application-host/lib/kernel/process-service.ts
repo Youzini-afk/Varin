@@ -50,6 +50,7 @@ export class KernelManagedProcess extends EventEmitter implements ManagedPipedPr
   private inputSequence = 0;
   private acknowledgedInput = -1;
   private inputError: string | null = null;
+  private outputFailure: Error | null = null;
   private lost: Error | null = null;
   private polling = false;
   private ready = false;
@@ -102,14 +103,25 @@ export class KernelManagedProcess extends EventEmitter implements ManagedPipedPr
   invalidate(error: Error): void {
     if (this.closed || this.lost || this.exitConfirmed) return;
     this.lost = error;
-    this.current = { ...this.current, status: "unknown", writerActive: true, reason: "Native process connection was lost; exit is unconfirmed" };
+    const stopped = !this.current.writerActive;
+    if (!stopped) {
+      this.current = { ...this.current, status: "unknown", writerActive: true, reason: "Native process connection was lost; exit is unconfirmed" };
+    }
     this.readyReject(error);
     this.rejectCompletion(error);
     this.emit("error", error);
     this.stdin.destroy(error);
     this.stdout.destroy(error);
     this.stderr.destroy(error);
-    // No exit/close event: only native tree evidence permits writer release.
+    if (stopped) {
+      // A lost log stream cannot invalidate the already observed native tree receipt.
+      // Completion still rejects: unread output was not successfully delivered.
+      this.finishing = true;
+      this.closed = true;
+      this.emit("exit", this.exitCode, this.signalCode);
+      this.emit("close", this.exitCode, this.signalCode);
+    }
+    // Without prior tree evidence there is no synthetic exit/close or writer release.
   }
   private async poll(): Promise<void> {
     try {
@@ -119,6 +131,13 @@ export class KernelManagedProcess extends EventEmitter implements ManagedPipedPr
         this.current = result.process;
         this.acknowledgedInput = result.inputSequence;
         this.inputError = result.inputError;
+        if (typeof result.outputComplete !== "boolean" || (result.outputError !== null && typeof result.outputError !== "string")) {
+          throw new Error("Native process output completion state is invalid");
+        }
+        if (result.outputError !== null && this.outputFailure === null) {
+          this.outputFailure = new Error(result.outputError);
+          this.emit("error", this.outputFailure);
+        }
         if (!this.ready && this.current.pid !== null) {
           this.ready = true;
           this.readyResolve();
@@ -139,7 +158,7 @@ export class KernelManagedProcess extends EventEmitter implements ManagedPipedPr
           }
           if (this.cursor !== result.nextCursor) throw new Error("Native process output cursor did not match its bytes");
         }
-        if (!this.current.writerActive && this.cursor === result.endCursor) {
+        if (!this.current.writerActive && this.cursor === result.endCursor && (result.outputComplete || this.outputFailure !== null)) {
           this.finishing = true;
           this.stdout.push(null);
           this.stderr.push(null);
@@ -149,7 +168,8 @@ export class KernelManagedProcess extends EventEmitter implements ManagedPipedPr
           await this.release().catch((error: unknown) => this.reportError(asError(error)));
           this.closed = true;
           this.emit("close", this.exitCode, this.signalCode);
-          this.resolveCompletion();
+          if (this.outputFailure) this.rejectCompletion(this.outputFailure);
+          else this.resolveCompletion();
           return;
         }
         if (this.current.status === "unknown") throw new Error(this.current.reason ?? "Native process exit remains unknown");

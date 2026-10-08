@@ -16,22 +16,34 @@ use varin_runtime::{Catalog, SubmitInput, supervisor::RunSupervisor, model_sessi
 use std::sync::Mutex;
 
 #[derive(Clone,Default)]
-pub(crate) struct NativeControl(Arc<Mutex<Option<Arc<RunSupervisor>>>>);
+pub(crate) struct NativeControl(Arc<Mutex<Option<NativeOwner>>>);
+struct NativeOwner {runtime:Arc<RunSupervisor>,resources:crate::native_tools::NativeResourceClient}
 impl NativeControl {
     pub(crate) fn cancel_admitted(&self,request:&Value,current_epoch:Option<&str>){
-        if request.get("method").and_then(Value::as_str)!=Some("runtime.run.cancel")||
+        let method=request.get("method").and_then(Value::as_str);
+        if !matches!(method,Some("runtime.run.cancel"|"runtime.operation.cancel"))||
             request.get("v").and_then(Value::as_u64)!=Some(PROTOCOL_VERSION)||
             request.get("kind").and_then(Value::as_str)!=Some("request")||
             request.get("epoch").and_then(Value::as_str)!=current_epoch||current_epoch.is_none()||
             request.get("grantId").is_some()||
             reject_unknown_fields(request,&["v","kind","id","method","params","epoch"],"runtime cancellation").is_err(){return;}
         let Some(params)=request.get("params")else{return;};
-        let Ok(params)=serde_json::from_value::<NativeRunParams>(params.clone())else{return;};
-        if let Ok(control)=self.0.lock(){if let Some(runtime)=control.as_ref(){runtime.cancel_control(&params.run_id);}}
+        if let Ok(control)=self.0.lock(){if let Some(owner)=control.as_ref(){
+            let runtime=&owner.runtime;
+            if method==Some("runtime.run.cancel") {
+                if let Ok(params)=serde_json::from_value::<NativeRunParams>(params.clone()){runtime.cancel_control(&params.run_id);}
+            }else if let Ok(params)=serde_json::from_value::<NativeOperationParams>(params.clone()){
+                runtime.cancel_operation_control(&params.operation_id);
+                let _=owner.resources.cancel_known_process(&params.operation_id);
+            }
+        }}
     }
 }
 
 pub(crate) enum Command {
+    Stop,
+    ProcessTerminal(crate::process::ProcessTerminal),
+    ProcessReplayFailed(String),
     Initialize {
         root: PathBuf,
         epoch: String,
@@ -65,6 +77,19 @@ pub(crate) fn spawn(
         let mut runtime: Option<Arc<RunSupervisor>> = None;
         for command in commands {
             match command {
+                Command::Stop=>break,
+                Command::ProcessTerminal(fact)=>{
+                    if let Some(runtime)=runtime.as_ref(){
+                        let result=apply_process_terminal(runtime,&fact);
+                        if let Err(error)=result {
+                            let catalog=runtime.catalog();
+                            if let Ok(mut catalog)=catalog.lock(){let _=catalog.record_recovery_failure(&fact.process_id,&error.to_string());};
+                        }
+                    }
+                }
+                Command::ProcessReplayFailed(reason)=>{
+                    if let Some(runtime)=runtime.as_ref(){let catalog=runtime.catalog();if let Ok(mut catalog)=catalog.lock(){let _=catalog.record_recovery_failure("process-replay",&reason);};}
+                }
                 Command::Initialize { root, epoch } => {
                     identity = Some((root.join("agent-runtime"), epoch));
                 }
@@ -111,8 +136,12 @@ pub(crate) fn spawn(
                         validate_method_params(method, &params)?;
                         if runtime.is_none() {
                             let owner=Arc::new(RunSupervisor::new(Catalog::open(root).map_err(domain)?));
-                            *control.0.lock().map_err(|_|KernelError::Storage("native control owner failed".into()))?=Some(owner.clone());
-                            runtime=Some(owner);
+                            *control.0.lock().map_err(|_|KernelError::Storage("native control owner failed".into()))?=Some(NativeOwner{runtime:owner.clone(),resources:resources.clone()});
+                            runtime=Some(owner.clone());
+                            let pending={let catalog=owner.catalog();let catalog=catalog.lock().map_err(|_|KernelError::Storage("native catalog owner failed".into()))?;catalog.pending_external_operations("native_process_spawn").map_err(domain)?};
+                            if let Err(error)=resources.replay_process_terminals(pending){
+                                let catalog=owner.catalog();if let Ok(mut catalog)=catalog.lock(){let _=catalog.record_recovery_failure("process-replay",&error.to_string());};
+                            }
                         }
                         let runtime=runtime.as_ref().expect("opened runtime");
                         runtime.reap().map_err(|e|KernelError::Operation(e.to_string()))?;
@@ -134,6 +163,18 @@ pub(crate) fn spawn(
                         if method=="runtime.run.cancel" {
                             let p:NativeRunParams=serde_json::from_value(params)?;
                             return Ok(serde_json::to_value(runtime.cancel(&p.run_id).map_err(|e|KernelError::Operation(e.to_string()))?)?);
+                        }
+                        if method=="runtime.operation.cancel" {
+                            let p:NativeOperationParams=serde_json::from_value(params)?;
+                            let operation=runtime.cancel_operation(&p.operation_id).map_err(|e|KernelError::Operation(e.to_string()))?;
+                            if operation.cancel_requested&&operation.executor.as_deref()==Some("native_process_spawn") {
+                                let known=resources.cancel_known_process(&operation.id)?;
+                                if !known&&matches!(operation.phase,varin_runtime::OperationPhase::Running|varin_runtime::OperationPhase::Settling)
+                                    &&matches!(operation.effect,varin_runtime::Effect::Dispatched|varin_runtime::Effect::Partial|varin_runtime::Effect::Unknown) {
+                                    resources.cancel_process(&operation.id,&operation.run_id)?;
+                                }
+                            }
+                            return Ok(serde_json::to_value(operation)?);
                         }
                         let catalog=runtime.catalog();
                         let mut catalog=catalog.lock().map_err(|_|KernelError::Storage("native catalog owner failed".into()))?;
@@ -231,4 +272,24 @@ fn dispatch(catalog: &mut Catalog, method: &str, params: Value) -> Result<Value,
             "unknown native runtime method".into(),
         )),
     }
+}
+
+fn apply_process_terminal(runtime:&RunSupervisor,fact:&crate::process::ProcessTerminal)->Result<(),KernelError>{
+    use varin_runtime::{Effect,Outcome,ExternalReceipt,RuntimeError};
+    if fact.receipt.get("processId").and_then(Value::as_str)!=Some(fact.process_id.as_str())||fact.receipt.get("kernelEpoch").and_then(Value::as_str)!=Some(fact.kernel_epoch.as_str()){
+        return Err(KernelError::Authorization("process terminal identity mismatch".into()));
+    }
+    let catalog=runtime.catalog();let mut catalog=catalog.lock().map_err(|_|KernelError::Storage("native catalog owner failed".into()))?;
+    let operation=match catalog.operation(&fact.process_id){Ok(op)=>op,Err(RuntimeError::NotFound(_))=>return Ok(()),Err(error)=>return Err(domain(error))};
+    let confirmed=fact.receipt.get("treeConfirmed").and_then(Value::as_bool)==Some(true);
+    let status=fact.receipt.get("status").and_then(Value::as_str);
+    let code=fact.receipt.get("exitCode").and_then(Value::as_i64);
+    let outcome=if !confirmed {Outcome::Indeterminate}
+        else if status==Some("exited")&&code==Some(0){Outcome::Succeeded}
+        else if operation.cancel_requested&&fact.receipt.get("stopApplied").and_then(Value::as_bool)==Some(true){Outcome::Cancelled}
+        else if status==Some("failed"){Outcome::Failed}
+        else if status==Some("exited")&&(code.is_some()||fact.receipt.get("signal").is_some_and(|v|!v.is_null())){Outcome::Failed}
+        else{Outcome::Indeterminate};
+    catalog.record_external_receipt(&fact.process_id,ExternalReceipt{executor:"native_process_spawn".into(),identity:fact.process_id.clone(),epoch:fact.kernel_epoch.clone(),outcome,effect:if !confirmed{Effect::Unknown}else if fact.receipt.get("spawned").and_then(Value::as_bool)==Some(false){Effect::None}else{Effect::Confirmed},result:fact.receipt.clone()}).map_err(domain)?;
+    Ok(())
 }

@@ -15,13 +15,26 @@ use uuid::Uuid;
 enum WorkerRequest {
     Wire(Value, Arc<AtomicBool>),
     Native(crate::native_tools::ResourceCall),
+    ReplayProcessTerminals(Vec<String>),
     Stop,
 }
+
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum WireLane { Storage, Native }
 
 struct ActiveRequest {
     token: Arc<AtomicBool>,
     epoch: Option<String>,
     grant_id: Option<String>,
+    native: Option<varin_runtime::execution::CancellationToken>,
+    wire_lane: Option<WireLane>,
+}
+
+impl ActiveRequest {
+    fn cancel(&self) {
+        if let Some(native) = &self.native { native.cancel(); }
+        else { self.token.store(true, Ordering::Release); }
+    }
 }
 
 fn mark_grant_revoked(
@@ -38,7 +51,7 @@ fn mark_grant_revoked(
     if let Ok(active) = active.lock() {
         for request in active.values() {
             if request.grant_id.as_deref() == Some(grant_id) {
-                request.token.store(true, Ordering::Release);
+                request.cancel();
             }
         }
     }
@@ -334,18 +347,27 @@ pub(crate) fn run() -> Result<(), Box<dyn std::error::Error>> {
     // The Host holds at most this many acknowledgement-backed credits. The
     // stdin reader therefore stays available for cancel/revoke even while the
     // serial Storage worker is busy. Upload chunks consume the same credits.
-    let (request_tx, request_rx) = mpsc::sync_channel::<WorkerRequest>(KERNEL_REQUEST_WINDOW);
+    let (request_tx, request_rx) = mpsc::channel::<WorkerRequest>();
     let (response_tx, response_rx) = mpsc::sync_channel::<Value>(1);
     let cancellations = Arc::new(Mutex::new(HashMap::<String, ActiveRequest>::new()));
     let revoked_grants = Arc::new(Mutex::new(HashSet::<String>::new()));
     let admission_epoch = Arc::new(Mutex::new(None::<String>));
     let writer_failed = Arc::new(AtomicBool::new(false));
-    let (native_tx, native_rx) = mpsc::sync_channel(KERNEL_REQUEST_WINDOW);
+    let (native_tx, native_rx) = mpsc::channel();
+    let (process_terminals, terminal_rx) = mpsc::channel::<crate::process::ProcessTerminal>();
+    let terminal_commands = native_tx.clone();
+    thread::spawn(move || {
+        for terminal in terminal_rx {
+            if terminal_commands.send(crate::native_runtime::Command::ProcessTerminal(terminal)).is_err() { break; }
+        }
+    });
+    let replay_requests = request_tx.clone();
     let native_cancellations = cancellations.clone();
     let resource_requests = request_tx.clone();
     let resource_cancellations = cancellations.clone();
     let resource_revoked = revoked_grants.clone();
     let resource_epoch = admission_epoch.clone();
+    let process_controls = crate::process::ProcessControlRegistry::default();
     let resources = crate::native_tools::NativeResourceClient::new(move |call| {
         let epoch = resource_epoch.lock().map_err(|_| KernelError::Storage("admission identity lock poisoned".into()))?
             .clone().ok_or_else(|| KernelError::Authorization("kernel handshake required".into()))?;
@@ -355,7 +377,7 @@ pub(crate) fn run() -> Result<(), Box<dyn std::error::Error>> {
         }
         let key = format!("native-resource:{}", Uuid::new_v4());
         resource_cancellations.lock().map_err(|_| KernelError::Storage("cancellation state lock poisoned".into()))?
-            .insert(key.clone(), ActiveRequest { token:call.cancellation.shared_flag(), epoch:Some(epoch), grant_id:Some(call.binding.grant_id.clone()) });
+            .insert(key.clone(), ActiveRequest { token:call.cancellation.shared_flag(), epoch:Some(epoch), grant_id:Some(call.binding.grant_id.clone()), native:Some(call.cancellation.clone()), wire_lane:None });
         // The actor clears this registration after the actual resource receipt, never on mere
         // cancellation request. Attach the key to the typed message, not to a JSON envelope.
         let mut call = call;
@@ -365,7 +387,11 @@ pub(crate) fn run() -> Result<(), Box<dyn std::error::Error>> {
             return Err(KernelError::Storage("resource authority stopped before admission".into()));
         }
         Ok(())
-    });
+    }, move |ids| {
+        if ids.is_empty() { return Ok(()); }
+        replay_requests.send(WorkerRequest::ReplayProcessTerminals(ids))
+            .map_err(|_| KernelError::Storage("resource authority stopped before receipt replay".into()))
+    }, process_controls.clone());
     let native_control = crate::native_runtime::NativeControl::default();
     let native_worker = crate::native_runtime::spawn(native_rx, native_control.clone(), resources, response_tx.clone(), move |id| {
         if let Ok(mut active) = native_cancellations.lock() { active.remove(id); }
@@ -382,6 +408,14 @@ pub(crate) fn run() -> Result<(), Box<dyn std::error::Error>> {
             let (request, cancellation) = match message {
                 WorkerRequest::Wire(request, cancellation) => (request, cancellation),
                 WorkerRequest::Stop => break,
+                WorkerRequest::ReplayProcessTerminals(ids) => {
+                    let result = kernel.storage.as_ref().ok_or_else(|| KernelError::Authorization("kernel handshake required".into()))
+                        .and_then(|storage| storage.replay_process_terminals(&ids));
+                    if let Err(error) = result {
+                        let _ = worker_native_tx.send(crate::native_runtime::Command::ProcessReplayFailed(error.to_string()));
+                    }
+                    continue;
+                }
                 WorkerRequest::Native(call) => {
                     let denied = worker_revoked_grants.lock().map(|revoked| revoked.contains(&call.binding.grant_id)).unwrap_or(true);
                     let result = if denied {
@@ -443,6 +477,7 @@ pub(crate) fn run() -> Result<(), Box<dyn std::error::Error>> {
                     .and_then(|result| result.get("kernelEpoch"))
                     .and_then(Value::as_str)
                 {
+                    if let Some(storage) = kernel.storage.as_mut() { storage.set_process_terminal_sender(process_terminals.clone()); storage.set_process_controls(process_controls.clone()); }
                     if let Some(root) = kernel.storage_root.as_ref() {
                         if worker_native_tx.send(crate::native_runtime::Command::Initialize { root: root.clone(), epoch: epoch.to_string() }).is_err() { break; }
                     }
@@ -478,14 +513,13 @@ pub(crate) fn run() -> Result<(), Box<dyn std::error::Error>> {
                 }
             }
             let stopping = method.as_deref() == Some("kernel.shutdown");
+            // Retire execution ownership before its response becomes observable, so a client
+            // using its returned credit cannot race a stale in-flight entry at admission.
+            worker_cancellations.lock().ok().map(|mut active| active.remove(&id));
             if worker_response_tx.send(response).is_err() {
                 worker_writer_failed.store(true, Ordering::Release);
                 break;
             }
-            worker_cancellations
-                .lock()
-                .ok()
-                .map(|mut active| active.remove(&id));
             if stopping {
                 break;
             }
@@ -550,7 +584,7 @@ pub(crate) fn run() -> Result<(), Box<dyn std::error::Error>> {
                     if request.epoch.as_deref() == cancel_epoch
                         && request.grant_id.as_deref() == cancel_grant
                     {
-                        request.token.store(true, Ordering::Release);
+                        request.cancel();
                     }
                 }
             }
@@ -575,42 +609,56 @@ pub(crate) fn run() -> Result<(), Box<dyn std::error::Error>> {
                 mark_grant_revoked(&revoked_grants, &cancellations, &target);
             }
         }
+        let wire_lane = if request.get("method").and_then(Value::as_str).is_some_and(|method| method.starts_with("runtime.")) {
+            WireLane::Native
+        } else { WireLane::Storage };
         if !id.is_empty() {
             if let Ok(mut active) = cancellations.lock() {
                 if active.contains_key(&id) { eprintln!("duplicate in-flight request id"); break; }
+                if active.values().filter(|request| request.wire_lane == Some(wire_lane)).count() >= KERNEL_REQUEST_WINDOW {
+                    eprintln!("kernel external request admission window exceeded"); break;
+                }
                 active.insert(
                     id,
                     ActiveRequest {
                         token: token.clone(),
                         epoch: request_epoch,
                         grant_id: request_grant,
+                        native: None,
+                        wire_lane: Some(wire_lane),
                     },
                 );
             }
         }
         if request.get("method").and_then(Value::as_str).is_some_and(|method|method.starts_with("runtime.")) {
             let current_epoch=admission_epoch.lock().ok().and_then(|epoch|epoch.clone());
-            native_control.cancel_admitted(&request,current_epoch.as_deref());
-            if native_tx.try_send(crate::native_runtime::Command::Request { value: request, cancellation: token }).is_err() {
-                eprintln!("native runtime request admission window exceeded"); break;
+            let cancellation_request = request.get("method").and_then(Value::as_str)
+                .filter(|method| matches!(*method,"runtime.run.cancel"|"runtime.operation.cancel"))
+                .map(|_|request.clone());
+            // Enqueue the intent before fast OS control. A resulting terminal fact can then
+            // never overtake its cancel command in the native owner's FIFO and lose causality.
+            if native_tx.send(crate::native_runtime::Command::Request { value: request, cancellation: token }).is_err() {
+                eprintln!("native runtime control authority disconnected"); break;
             }
+            if let Some(request)=cancellation_request { native_control.cancel_admitted(&request,current_epoch.as_deref()); }
             continue;
         }
-        if request_tx.try_send(WorkerRequest::Wire(request, token)).is_err() {
-            // A sender violating the negotiated window loses this epoch, not
-            // the cancellation/control channel. Never accept a silent drop.
-            eprintln!("kernel request admission window exceeded");
+        if request_tx.send(WorkerRequest::Wire(request, token)).is_err() {
+            // External credits were validated before enqueue. Internal resource/replay work
+            // uses the same typed authority queue without consuming those wire credits.
+            eprintln!("kernel resource authority disconnected");
             break;
         }
     }
     if let Ok(active) = cancellations.lock() {
-        for request in active.values() { request.token.store(true, Ordering::Release); }
+        for request in active.values() { request.cancel(); }
     }
     // Native run workers retain a resource sender. Explicitly stop the owner rather than
     // waiting for all senders to drop, which would create a shutdown channel cycle.
     let _ = request_tx.send(WorkerRequest::Stop);
     drop(request_tx);
     let _ = worker.join();
+    let _ = native_tx.send(crate::native_runtime::Command::Stop);
     drop(native_tx);
     let _ = native_worker.join();
     drop(response_tx);

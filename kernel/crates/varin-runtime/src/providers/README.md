@@ -1,6 +1,6 @@
 # Native model adapters
 
-This module implements OpenAI Responses and Anthropic Messages as execution `ModelProvider`s.
+This module implements OpenAI Responses, OpenAI Chat Completions, Azure Responses and Anthropic Messages as execution `ModelProvider`s.
 It is not a claim that every configured Pi provider, OAuth flow, or production Host path has migrated.
 
 ## Dispatch boundary
@@ -17,7 +17,7 @@ bindings. It never treats an arbitrary reference as an environment variable name
 broker can implement the same interface, including OAuth refresh coordination; OAuth is not implemented
 by the environment resolver. Authentication headers never enter request snapshots or debug output.
 
-`NativeHttpTransport` builds a reqwest TLS client on the execution worker's Tokio runtime. A trusted
+`NativeHttpTransport` lazily creates one persistent reqwest TLS client and Tokio executor per transport instance. Model steps share that client and connection pool; concurrent requests have independent futures and cancellation. No global tenant or credential cache is used. A trusted
 ClientBuilder factory supplies proxy/DNS/certificate policy. Redirects and automatic retries are disabled.
 Cancellation drops the active send/read future. Calling this synchronous adapter from an async runtime
 returns `worker_required`; use a blocking execution worker. The default has no generation deadline;
@@ -45,3 +45,18 @@ Protocol references: OpenAI streaming responses and reasoning guides, Anthropic 
 https://developers.openai.com/api/docs/guides/streaming-responses
 https://developers.openai.com/api/docs/guides/reasoning
 https://platform.claude.com/docs/en/build-with-claude/streaming
+
+## Chat and Azure contracts
+
+Chat requests one choice and accepts complete function calls only after a tool-call finish reason and
+`[DONE]`. It retains usage chunks arriving after the finish reason. The complete assistant wire message
+is preserved once; semantic tool items are retained separately for cross-family compilation, without
+duplicating calls during same-family replay. `legacy_max_tokens`, `include_stream_usage` and
+`reasoning_effort` are explicit configuration choices. Unsupported vendor delta extensions fail rather
+than being silently erased. This is not full behavioral parity with every OpenAI-compatible service.
+
+Azure has its own `azure-openai-responses` continuation family. The host supplies a complete Responses
+endpoint, deployment name and API version. The adapter verifies/appends the API version query, uses the
+deployment in the request model field and shares Responses event parsing. API-key authentication uses
+an `api-key` environment-header binding; a separate credential resolver must implement Entra token
+refresh. Resource defaults and deployment maps are resolved by the host, not guessed from hostnames.

@@ -1,6 +1,8 @@
 //! Native wire adapters. Credentials resolve only at dispatch and never enter RequestSnapshot.
 //! HTTP retries and redirects are disabled: an interrupted generation has ambiguous remote cost.
 pub mod anthropic;
+pub mod azure;
+pub mod chat;
 pub mod responses;
 mod sse;
 #[cfg(test)]
@@ -8,7 +10,7 @@ mod tests;
 
 use crate::execution::*;
 use serde_json::Value;
-use std::sync::Arc;
+use std::sync::{Arc, OnceLock};
 
 pub trait CredentialResolver: Send + Sync {
     /// Return dispatch-only headers. Implementations own refresh/single-flight and cancellation.
@@ -35,6 +37,11 @@ pub trait HttpTransport: Send + Sync {
 /// Must run on a native execution worker, outside an existing Tokio runtime.
 pub struct NativeHttpTransport {
     builder: Arc<dyn Fn() -> reqwest::ClientBuilder + Send + Sync>,
+    state: OnceLock<Result<TransportState, ModelFailure>>,
+}
+struct TransportState {
+    client: reqwest::Client,
+    runtime: tokio::runtime::Runtime,
 }
 impl Default for NativeHttpTransport {
     fn default() -> Self {
@@ -45,6 +52,7 @@ impl NativeHttpTransport {
     pub fn new(builder: impl Fn() -> reqwest::ClientBuilder + Send + Sync + 'static) -> Self {
         Self {
             builder: Arc::new(builder),
+            state: OnceLock::new(),
         }
     }
 }
@@ -65,13 +73,37 @@ impl HttpTransport for NativeHttpTransport {
                 "native model requests must execute on a blocking worker",
             ));
         }
-        let runtime = tokio::runtime::Builder::new_current_thread()
-            .enable_all()
-            .build()
-            .map_err(|_| failure("transport_setup", "could not create outbound worker"))?;
-        runtime.block_on(async {
-            let client = (self.builder)().redirect(reqwest::redirect::Policy::none()).retry(reqwest::retry::never()).build()
-                .map_err(|_| failure("transport_setup", "invalid outbound connection configuration"))?;
+        // State is scoped to this trusted connection configuration, never a global tenant cache.
+        // Separate callers block on their own futures; no request holds an executor-wide mutex.
+        let state = self
+            .state
+            .get_or_init(|| {
+                let runtime = tokio::runtime::Builder::new_multi_thread()
+                    .worker_threads(2)
+                    .enable_all()
+                    .build()
+                    .map_err(|_| {
+                        failure("transport_setup", "could not create outbound executor")
+                    })?;
+                let client = {
+                    let _entered = runtime.enter();
+                    (self.builder)()
+                        .redirect(reqwest::redirect::Policy::none())
+                        .retry(reqwest::retry::never())
+                        .build()
+                        .map_err(|_| {
+                            failure(
+                                "transport_setup",
+                                "invalid outbound connection configuration",
+                            )
+                        })?
+                };
+                Ok(TransportState { client, runtime })
+            })
+            .as_ref()
+            .map_err(Clone::clone)?;
+        state.runtime.block_on(async {
+            let client=&state.client;
             let send = client.post(request.endpoint).headers(request.headers)
                 .header("accept", "text/event-stream").json(request.body).send();
             let mut response = tokio::select! {
@@ -144,6 +176,23 @@ impl Connection {
         protocol_headers: &[(&str, &str)],
         event: &mut dyn FnMut(Value) -> Result<bool, ModelFailure>,
     ) -> Result<(), ModelFailure> {
+        self.run_events(
+            request,
+            cancel,
+            protocol_headers,
+            &mut |value| match value {
+                Some(value) => event(value),
+                None => Ok(false),
+            },
+        )
+    }
+    pub(super) fn run_events(
+        &self,
+        request: &RequestSnapshot,
+        cancel: &CancellationToken,
+        protocol_headers: &[(&str, &str)],
+        event: &mut dyn FnMut(Option<Value>) -> Result<bool, ModelFailure>,
+    ) -> Result<(), ModelFailure> {
         if cancel.is_cancelled() {
             return Err(failure("cancelled", "generation cancelled"));
         }
@@ -172,12 +221,12 @@ impl Connection {
                 }
                 decoder.push(bytes, &mut |data| {
                     if data == "[DONE]" {
-                        return Ok(false);
+                        return event(None);
                     }
                     let value = serde_json::from_str(data).map_err(|_| {
                         failure("invalid_event_json", "model SSE data is not valid JSON")
                     })?;
-                    event(value)
+                    event(Some(value))
                 })
             },
         )?;

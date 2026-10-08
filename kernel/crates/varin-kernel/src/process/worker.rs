@@ -50,6 +50,7 @@ pub struct Environment {
     pub value: String,
 }
 type Output = Arc<Mutex<io::Stdout>>;
+type DataOutput = Arc<Mutex<io::Stderr>>;
 type Input = Box<dyn Write + Send>;
 type Reader = (String, Box<dyn Read + Send>);
 struct Spawned {
@@ -63,6 +64,14 @@ fn send(output: &Output, event: Value) -> io::Result<()> {
         &mut *output
             .lock()
             .map_err(|_| io::Error::other("process output poisoned"))?,
+        &event,
+    )
+}
+fn send_data(output: &DataOutput, event: Value) -> io::Result<()> {
+    write_frame(
+        &mut *output
+            .lock()
+            .map_err(|_| io::Error::other("process data output poisoned"))?,
         &event,
     )
 }
@@ -187,6 +196,10 @@ pub fn run() -> Result<(), Box<dyn std::error::Error>> {
     }
     #[cfg(target_os = "linux")]
     platform::arm_parent_death_signal()?;
+    let output = Arc::new(Mutex::new(io::stdout()));
+    let data_output = Arc::new(Mutex::new(io::stderr()));
+    // The parent must not deliver Unix signals until the handlers above are installed.
+    send(&output, json!({"type":"ready"}))?;
     let config: Config = {
         let Some(frame) = read_frame(&mut io::stdin().lock())? else {
             return Ok(());
@@ -195,7 +208,14 @@ pub fn run() -> Result<(), Box<dyn std::error::Error>> {
     };
     #[cfg(windows)]
     let job = Arc::new(platform::WorkerJob::open(&config.job_name)?);
-    let output = Arc::new(Mutex::new(io::stdout()));
+    if STOP.load(Ordering::Acquire) > 0 {
+        let value = json!({"processId":config.process_id,"kernelEpoch":config.kernel_epoch,
+            "status":"failed","pid":null,"exitCode":null,"signal":null,"reason":"process launch cancelled before spawn",
+            "treeConfirmed":true,"stopApplied":true,"spawned":false});
+        receipt(&config, &value)?;
+        send(&output, json!({"type":"receipt","value":value}))?;
+        return Ok(());
+    }
     let Spawned {
         mut child,
         mut input,
@@ -206,7 +226,7 @@ pub fn run() -> Result<(), Box<dyn std::error::Error>> {
         Err(error) => {
             let value = json!({"processId": config.process_id, "kernelEpoch": config.kernel_epoch,
                 "status": "failed", "pid": null, "exitCode": null, "signal": null,
-                "reason": format!("process spawn failed: {error}"), "treeConfirmed": true});
+                "reason": format!("process spawn failed: {error}"), "treeConfirmed": true,"spawned":false,"stopApplied":false});
             receipt(&config, &value).map_err(|error| {
                 io::Error::other(format!("native exit receipt install: {error}"))
             })?;
@@ -221,12 +241,22 @@ pub fn run() -> Result<(), Box<dyn std::error::Error>> {
     let master = Arc::new(Mutex::new(master));
     let mut readers = readers.into_iter().map(|(channel, mut reader)| {
         let output = output.clone();
+        let data_output = data_output.clone();
         thread::spawn(move || {
             let mut buffer = [0u8; 16384];
+            let mut delivering = true;
             loop {
                 match reader.read(&mut buffer) {
                     Ok(0) => break,
-                    Ok(n) => { if send(&output, json!({"type":"output", "channel":channel, "bytesBase64":BASE64.encode(&buffer[..n])})).is_err() { STOP.store(2, Ordering::Release); break; } }
+                    Ok(n) => {
+                        if delivering && send_data(&data_output, json!({"type":"output", "channel":channel, "bytesBase64":BASE64.encode(&buffer[..n])})).is_err() {
+                            STOP.store(2, Ordering::Release);
+                            delivering = false;
+                            let _ = send(&output, json!({"type":"output-error", "channel":channel}));
+                            // Continue draining target pipes during termination. A failed log sink
+                            // must not make ConPTY cleanup depend on an abandoned pipe reader.
+                        }
+                    }
                     Err(error) if error.kind() == io::ErrorKind::Interrupted => continue,
                     #[cfg(unix)]
                     Err(error) if error.raw_os_error() == Some(libc::EIO) => break,
@@ -276,6 +306,16 @@ pub fn run() -> Result<(), Box<dyn std::error::Error>> {
                 break;
             };
             match value["type"].as_str() {
+                Some("stop") => {
+                    STOP.fetch_max(
+                        if value["force"].as_bool() == Some(true) {
+                            2
+                        } else {
+                            1
+                        },
+                        Ordering::Release,
+                    );
+                }
                 Some("write") => {
                     if let Err(error) = input_tx.try_send(value) {
                         let value = match error {
@@ -315,27 +355,36 @@ pub fn run() -> Result<(), Box<dyn std::error::Error>> {
         control_job.abort();
     });
     let mut stop_started: Option<Instant> = None;
-    let exit = loop {
-        if STOP.load(Ordering::Acquire) > 0 {
-            let started = stop_started.get_or_insert_with(Instant::now);
-            let force =
-                STOP.load(Ordering::Acquire) > 1 || started.elapsed() >= Duration::from_secs(1);
-            #[cfg(unix)]
-            platform::terminate_session(pid, force)?;
-            #[cfg(windows)]
-            {
-                let _ = force;
-                child.kill()?;
+    let mut stop_applied = false;
+    let exit =
+        loop {
+            if let Some(status) = child.try_wait().map_err(|error| {
+                io::Error::other(format!("native target exit observation: {error}"))
+            })? {
+                break status;
             }
-        }
-        if let Some(status) = child
-            .try_wait()
-            .map_err(|error| io::Error::other(format!("native target exit observation: {error}")))?
-        {
-            break status;
-        }
-        thread::sleep(Duration::from_millis(10));
-    };
+            if STOP.load(Ordering::Acquire) > 0 {
+                let started = stop_started.get_or_insert_with(Instant::now);
+                let force =
+                    STOP.load(Ordering::Acquire) > 1 || started.elapsed() >= Duration::from_secs(1);
+                #[cfg(unix)]
+                {
+                    stop_applied |= platform::terminate_session(pid, force)?;
+                }
+                #[cfg(windows)]
+                {
+                    let _ = force;
+                    child.kill()?;
+                    stop_applied = true;
+                }
+            }
+            if let Some(status) = child.try_wait().map_err(|error| {
+                io::Error::other(format!("native target exit observation: {error}"))
+            })? {
+                break status;
+            }
+            thread::sleep(Duration::from_millis(10));
+        };
     // Close ConPTY while its reader is still draining, not after joining it.
     drop(
         master
@@ -374,14 +423,16 @@ pub fn run() -> Result<(), Box<dyn std::error::Error>> {
         }
         thread::sleep(Duration::from_millis(10));
     }
+    let value = json!({"processId":config.process_id, "kernelEpoch":config.kernel_epoch,
+        "status":"exited", "pid":pid, "exitCode":if exit.signal().is_none() { Some(exit.exit_code()) } else { None },
+        "signal":exit.signal(), "reason":null, "treeConfirmed":true,"spawned":true,"stopApplied":stop_applied});
+    receipt(&config, &value)?;
+    send(&output, json!({"type":"receipt", "value":value}))?;
+    // Tree completion and complete-log delivery are different facts. The control receipt is
+    // available before residual output drains, while the guardian stays alive to preserve bytes.
     for reader in readers.drain(..) {
         let _ = reader.join();
     }
-    let value = json!({"processId":config.process_id, "kernelEpoch":config.kernel_epoch,
-        "status":"exited", "pid":pid, "exitCode":if exit.signal().is_none() { Some(exit.exit_code()) } else { None },
-        "signal":exit.signal(), "reason":null, "treeConfirmed":true});
-    receipt(&config, &value)?;
-    send(&output, json!({"type":"receipt", "value":value}))?;
     // Process-local input threads die here. The main binary exits immediately.
     Ok(())
 }

@@ -343,3 +343,266 @@ fn actual_http_sse_reaches_responses_adapter() {
     assert_eq!(result.unwrap(), FinishReason::Stop);
     assert!(events.iter().any(|e|matches!(e,ProviderEvent::ItemCompleted{item} if matches!(&item.content,Content::Text{text} if text=="local transport"))));
 }
+
+#[test]
+fn native_transport_reuses_builder_and_keeps_headers_request_local() {
+    use std::io::{Read, Write};
+    let listener = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
+    let endpoint = format!("http://{}/model", listener.local_addr().unwrap());
+    let server = std::thread::spawn(move || {
+        let mut captured = Vec::new();
+        for _ in 0..2 {
+            let (mut socket, _) = listener.accept().unwrap();
+            let mut bytes = [0u8; 8192];
+            let size = socket.read(&mut bytes).unwrap();
+            captured.push(String::from_utf8(bytes[..size].to_vec()).unwrap());
+            socket.write_all(b"HTTP/1.1 200 OK\r\nContent-Type: text/event-stream\r\nContent-Length: 10\r\nConnection: close\r\n\r\ndata: {}\n\n").unwrap();
+        }
+        captured
+    });
+    let builds = Arc::new(AtomicUsize::new(0));
+    let counted = builds.clone();
+    let transport = NativeHttpTransport::new(move || {
+        counted.fetch_add(1, Ordering::SeqCst);
+        reqwest::Client::builder().no_proxy()
+    });
+    for token in ["fixture-A", "fixture-B"] {
+        let mut headers = reqwest::header::HeaderMap::new();
+        headers.insert("authorization", format!("Bearer {token}").parse().unwrap());
+        transport
+            .stream(
+                HttpRequest {
+                    endpoint: &endpoint,
+                    headers,
+                    body: &json!({}),
+                },
+                &CancellationToken::default(),
+                &mut |_| Ok(true),
+            )
+            .unwrap();
+    }
+    let requests = server.join().unwrap();
+    assert_eq!(builds.load(Ordering::SeqCst), 1);
+    assert!(requests[0].contains("Bearer fixture-A"));
+    assert!(!requests[0].contains("fixture-B"));
+    assert!(requests[1].contains("Bearer fixture-B"));
+    assert!(!requests[1].contains("fixture-A"));
+}
+#[test]
+fn shared_native_transport_has_independent_progress_and_cancellation() {
+    use std::io::{Read, Write};
+    let slow = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
+    let slow_endpoint = format!("http://{}/slow", slow.local_addr().unwrap());
+    let (started_tx, started_rx) = std::sync::mpsc::channel();
+    let (release_tx, release_rx) = std::sync::mpsc::channel();
+    let slow_server = std::thread::spawn(move || {
+        let (mut socket, _) = slow.accept().unwrap();
+        let mut bytes = [0u8; 8192];
+        assert!(socket.read(&mut bytes).unwrap() > 0);
+        started_tx.send(()).unwrap();
+        let _ = release_rx.recv();
+    });
+    let transport = Arc::new(NativeHttpTransport::new(|| {
+        reqwest::Client::builder().no_proxy()
+    }));
+    let cancel = CancellationToken::default();
+    let slow_cancel = cancel.clone();
+    let slow_transport = transport.clone();
+    let (done_tx, done_rx) = std::sync::mpsc::channel();
+    let slow_request = std::thread::spawn(move || {
+        let result = slow_transport.stream(
+            HttpRequest {
+                endpoint: &slow_endpoint,
+                headers: reqwest::header::HeaderMap::new(),
+                body: &json!({}),
+            },
+            &slow_cancel,
+            &mut |_| Ok(true),
+        );
+        done_tx.send(result).unwrap();
+    });
+    started_rx
+        .recv_timeout(std::time::Duration::from_secs(3))
+        .unwrap();
+    let response=b"HTTP/1.1 200 OK\r\nContent-Type: text/event-stream\r\nContent-Length: 10\r\nConnection: close\r\n\r\ndata: {}\n\n".to_vec();
+    let fast_listener = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
+    let fast_endpoint = format!("http://{}/sibling", fast_listener.local_addr().unwrap());
+    let (sibling_started_tx, sibling_started_rx) = std::sync::mpsc::channel();
+    let (sibling_release_tx, sibling_release_rx) = std::sync::mpsc::channel();
+    let fast_server = std::thread::spawn(move || {
+        let (mut socket, _) = fast_listener.accept().unwrap();
+        let mut bytes = [0u8; 8192];
+        assert!(socket.read(&mut bytes).unwrap() > 0);
+        sibling_started_tx.send(()).unwrap();
+        let _ = sibling_release_rx.recv();
+        socket.write_all(&response).unwrap();
+    });
+    let (fast_tx, fast_rx) = std::sync::mpsc::channel();
+    let fast_transport = transport.clone();
+    let fast_request = std::thread::spawn(move || {
+        let result = fast_transport.stream(
+            HttpRequest {
+                endpoint: &fast_endpoint,
+                headers: reqwest::header::HeaderMap::new(),
+                body: &json!({}),
+            },
+            &CancellationToken::default(),
+            &mut |_| Ok(true),
+        );
+        fast_tx.send(result).unwrap();
+    });
+    let sibling_started = sibling_started_rx.recv_timeout(std::time::Duration::from_secs(3));
+    cancel.cancel();
+    let cancelled = done_rx.recv_timeout(std::time::Duration::from_secs(3));
+    let _ = sibling_release_tx.send(());
+    let fast_result = fast_rx.recv_timeout(std::time::Duration::from_secs(3));
+    let _ = release_tx.send(());
+    slow_server.join().unwrap();
+    fast_server.join().unwrap();
+    slow_request.join().unwrap();
+    fast_request.join().unwrap();
+    assert!(
+        sibling_started.is_ok(),
+        "stalled first request blocked the sibling from starting"
+    );
+    assert!(
+        fast_result.unwrap().is_ok(),
+        "one stalled request held the shared connection owner"
+    );
+    assert_eq!(cancelled.unwrap().unwrap_err().code, "cancelled");
+    assert_eq!(Arc::strong_count(&transport), 1);
+}
+
+fn chat_connection(events: Vec<Value>, done: bool) -> Connection {
+    let mut bytes = events
+        .into_iter()
+        .map(|v| format!("data: {v}\n\n"))
+        .collect::<String>();
+    if done {
+        bytes.push_str("data: [DONE]\n\n");
+    }
+    Connection::new(
+        "https://fixture.invalid",
+        Arc::new(Credentials(AtomicUsize::new(0))),
+        Arc::new(Stream {
+            bytes: bytes.into_bytes(),
+            chunk: 1,
+        }),
+    )
+}
+#[test]
+fn chat_complete_tool_fragments_replay_once_and_keep_usage_after_finish() {
+    let p = chat::ChatProvider::new(chat_connection(
+        vec![
+            json!({"id":"chat-1","choices":[{"index":0,"delta":{"role":"assistant","tool_calls":[{"index":0,"id":"call-1","type":"function","function":{"name":"read","arguments":"{\"path\":"}}]},"finish_reason":null}]}),
+            json!({"id":"chat-1","choices":[{"index":0,"delta":{"tool_calls":[{"index":0,"function":{"arguments":"\"文件.rs\"}"}}]},"finish_reason":"tool_calls"}]}),
+            json!({"id":"chat-1","choices":[],"usage":{"prompt_tokens":20,"completion_tokens":4,"total_tokens":24,"prompt_tokens_details":{"cached_tokens":10}}}),
+        ],
+        true,
+    ));
+    let (result, events) = generate(&p, chat::FAMILY);
+    assert_eq!(result.unwrap(), FinishReason::ToolCalls);
+    assert!(events.iter().any(|event|matches!(event,ProviderEvent::Usage{receipt} if receipt.input_tokens==Some(20)&&receipt.output_tokens==Some(4))));
+    let items: Vec<_> = events
+        .into_iter()
+        .filter_map(|e| {
+            if let ProviderEvent::ItemCompleted { item } = e {
+                Some(item)
+            } else {
+                None
+            }
+        })
+        .collect();
+    assert_eq!(items.len(), 2);
+    let mut v = view(chat::FAMILY);
+    v.history = items
+        .into_iter()
+        .map(|i| ConversationItem {
+            id: i.id,
+            provenance: Provenance::Assistant,
+            content: i.content,
+            opaque: i.opaque,
+        })
+        .collect();
+    let replay = p.serialize(&v).unwrap();
+    assert_eq!(replay["messages"].as_array().unwrap().len(), 1);
+    assert_eq!(
+        replay["messages"][0]["tool_calls"]
+            .as_array()
+            .unwrap()
+            .len(),
+        1
+    );
+    assert_eq!(replay["messages"][0]["tool_calls"][0]["id"], "call-1");
+}
+#[test]
+fn chat_truncated_after_finish_does_not_emit_complete_items_and_multiple_choices_reject() {
+    let event = json!({"id":"chat-1","choices":[{"index":0,"delta":{"content":"partial"},"finish_reason":"stop"}]});
+    let p = chat::ChatProvider::new(chat_connection(vec![event], false));
+    let (result, events) = generate(&p, chat::FAMILY);
+    assert_eq!(result.unwrap_err().code, "stream_interrupted");
+    assert!(!events
+        .iter()
+        .any(|e| matches!(e, ProviderEvent::ItemCompleted { .. })));
+    let p = chat::ChatProvider::new(chat_connection(
+        vec![
+            json!({"id":"chat-1","choices":[{"index":0,"delta":{},"finish_reason":"stop"},{"index":1,"delta":{},"finish_reason":"stop"}]}),
+        ],
+        true,
+    ));
+    assert!(generate(&p, chat::FAMILY).0.is_err());
+}
+#[test]
+fn azure_keeps_query_deployment_header_and_distinct_opaque_family() {
+    struct AzureCredential;
+    impl CredentialResolver for AzureCredential {
+        fn headers(
+            &self,
+            _: Option<&str>,
+            _: &CancellationToken,
+        ) -> Result<reqwest::header::HeaderMap, ModelFailure> {
+            let mut headers = reqwest::header::HeaderMap::new();
+            headers.insert("api-key", "fixture-only".parse().unwrap());
+            Ok(headers)
+        }
+    }
+    struct AzureEndpoint;
+    impl HttpTransport for AzureEndpoint {
+        fn stream(
+            &self,
+            request: HttpRequest<'_>,
+            _: &CancellationToken,
+            receive: &mut dyn FnMut(&[u8]) -> Result<bool, ModelFailure>,
+        ) -> Result<(), ModelFailure> {
+            let url = reqwest::Url::parse(request.endpoint).unwrap();
+            let query: std::collections::BTreeMap<_, _> = url.query_pairs().collect();
+            assert_eq!(query.get("tenant").unwrap(), "fixture");
+            assert_eq!(query.get("api-version").unwrap(), "2025-04-01-preview");
+            assert_eq!(request.body["model"], "my-deployment");
+            assert_eq!(request.headers["api-key"], "fixture-only");
+            assert!(!request.headers.contains_key("authorization"));
+            let event = json!({"type":"response.completed","response":{"output":[{"id":"reasoning","type":"reasoning","encrypted_content":"azure-original"}]}});
+            receive(format!("data: {event}\n\n").as_bytes())?;
+            Ok(())
+        }
+    }
+    let connection = Connection::new(
+        "https://azure.example/responses?tenant=fixture",
+        Arc::new(AzureCredential),
+        Arc::new(AzureEndpoint),
+    );
+    let p = azure::AzureResponsesProvider::new(connection, "my-deployment", "2025-04-01-preview")
+        .unwrap();
+    let (result, events) = generate(&p, azure::FAMILY);
+    assert_eq!(result.unwrap(), FinishReason::Stop);
+    assert!(events.iter().any(|e|matches!(e,ProviderEvent::ItemCompleted{item} if item.opaque.as_ref().is_some_and(|o|o.family==azure::FAMILY&&o.value["encrypted_content"]=="azure-original"))));
+    let conflicting = Connection::new(
+        "https://azure.example/responses?api-version=other",
+        Arc::new(AzureCredential),
+        Arc::new(AzureEndpoint),
+    );
+    assert!(
+        azure::AzureResponsesProvider::new(conflicting, "deployment", "2025-04-01-preview")
+            .is_err()
+    );
+}

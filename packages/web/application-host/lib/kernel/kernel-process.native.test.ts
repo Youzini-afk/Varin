@@ -1,4 +1,5 @@
 import assert from "node:assert/strict";
+import { createHash } from "node:crypto";
 import { createIsolatedTerminalSessionApi } from "../terminal/isolated-session-api.test-helper.js";
 import { createShellSupervisor } from "../harness/shell-supervisor.js";
 import { createOutputStore } from "../harness/output-store.js";
@@ -93,7 +94,8 @@ async function drain(client: KernelScopedClient, processId: string, start = 0) {
       cursor += bytes.length;
     }
     assert.equal(cursor, result.nextCursor);
-    if (!result.process.writerActive && cursor === result.endCursor) {
+    if (result.outputError) throw new Error(result.outputError);
+    if (!result.process.writerActive && result.outputComplete && cursor === result.endCursor) {
       return { stdout: Buffer.concat(stdout), stderr: Buffer.concat(stderr), process: result.process, cursor };
     }
     if (Date.now() > deadline) throw new Error(`Process did not exit: ${JSON.stringify(result.process)}`);
@@ -191,14 +193,17 @@ it("native process kill refusal keeps its identity and directory writer active",
   await assert.rejects(f.client.fileRemove({ ...f.address, operationId: "refused-remove", path: "child", recursive: true, force: true }), /writer|exit/);
 }, 30_000);
 
-it("raw output above the native buffer bound is drained without truncation or freezing control", async () => {
+it("raw output above the native buffer bound reaches real exit before any reader and remains byte-exact", async () => {
   const f = await fixture();
-  await f.client.processSpawn(f.spawn("large", "process.stdout.write(Buffer.alloc(3*1024*1024,173));process.stderr.write('done')"));
+  await f.client.processSpawn(f.spawn("large", "process.stdout.write(Buffer.alloc(16*1024*1024,173));process.stderr.write('done');process.exitCode=7"));
   await waitFor(f.client, "large", (s) => s.pid !== null);
   await pause(200);
   assert.equal((await f.client.health()).integrity, "ok");
+  const terminal = await waitFor(f.client, "large", (s) => !s.writerActive);
+  assert.equal(terminal.status, "exited");
+  assert.equal(terminal.exitCode, 7);
   const result = await drain(f.client, "large");
-  assert.deepEqual(result.stdout, Buffer.alloc(3*1024*1024,173));
+  assert.deepEqual(result.stdout, Buffer.alloc(16*1024*1024,173));
   assert.equal(result.stderr.toString(), "done");
 }, 30_000);
 
@@ -398,3 +403,187 @@ it("abrupt Host death closes its private kernel pipe and drains the native proce
     if(host.exitCode===null&&host.signalCode===null){const stopped=new Promise<void>(resolve=>host.once("exit",()=>resolve()));host.kill("SIGKILL");await stopped;}
   }
 },30_000);
+
+
+it("stdin control receipts progress behind unread output without duplicate input", async () => {
+  const f = await fixture();
+  const marker = path.join(f.workspace, "child", "output-written");
+  const script = "const fs=require('node:fs');const b=Buffer.alloc(65536,91);for(let i=0;i<128;i++)fs.writeSync(1,b);fs.writeFileSync("+JSON.stringify(marker)+",'ready');let input=[];process.stdin.on('data',b=>input.push(b));process.stdin.on('end',()=>process.stderr.write(Buffer.concat(input)));";
+  await f.client.processSpawn(f.spawn("unread-input", script));
+  const deadline = Date.now() + 15_000;
+  while (!(await fs.stat(marker).then(() => true, () => false))) {
+    if (Date.now() > deadline) throw new Error("Unread output blocked the child before stdin admission");
+    await pause();
+  }
+  const first = { workspaceId: "ws", processId: "unread-input", sequence: 0, bytesBase64: Buffer.from("first-").toString("base64") };
+  await f.client.processWrite(first);
+  await f.client.processWrite(first);
+  // Acceptance of the next sequence proves the previous control receipt was
+  // delivered; no process.read call has consumed even one output byte.
+  for (;;) {
+    try {
+      await f.client.processWrite({ ...first, sequence: 1, bytesBase64: Buffer.from("second").toString("base64"), eof: true });
+      break;
+    } catch (error) {
+      if (!/awaiting its write receipt/.test(String(error)) || Date.now() > deadline) throw error;
+      await pause();
+    }
+  }
+  assert.equal((await waitFor(f.client, "unread-input", s => !s.writerActive)).exitCode, 0);
+  const result = await drain(f.client, "unread-input");
+  assert.deepEqual(result.stdout, Buffer.alloc(8*1024*1024,91));
+  assert.equal(result.stderr.toString(), "first-second");
+}, 30_000);
+
+it("native termination confirms the real tree while its output remains unread", async () => {
+  const f = await fixture();
+  const marker = path.join(f.workspace, "child", "output-ready");
+  await f.client.processSpawn(f.spawn("unread-kill", "const fs=require('node:fs');const b=Buffer.alloc(65536,47);for(let i=0;i<128;i++)fs.writeSync(1,b);fs.writeFileSync("+JSON.stringify(marker)+",'ready');setInterval(()=>{},1000)"));
+  const deadline = Date.now() + 15_000;
+  while (!(await fs.stat(marker).then(() => true, () => false))) {
+    if (Date.now() > deadline) throw new Error("Unread output blocked native termination fixture");
+    await pause();
+  }
+  await f.client.processKill({ workspaceId: "ws", processId: "unread-kill", force: true });
+  const terminal = await waitFor(f.client, "unread-kill", s => !s.writerActive);
+  assert.equal(terminal.status, "exited");
+  const result = await drain(f.client, "unread-kill");
+  assert.deepEqual(result.stdout, Buffer.alloc(8*1024*1024,47));
+  await f.client.fileRemove({ ...f.address, operationId: "unread-kill-reclaim", path: "child", recursive: true, force: true });
+}, 30_000);
+
+vitestIt.skipIf(!available || process.platform !== "linux")("a truncated guardian control frame terminates its own real child and persists the exit receipt", async () => {
+  const root = await fs.mkdtemp(path.join(os.tmpdir(), "varin-guardian-truncation-"));
+  const receiptPath = path.join(root, "receipt.json");
+  const guardian = nodeSpawn(kernelPath, ["--process-worker"], { stdio: ["pipe", "pipe", "pipe"] });
+  const frames: Array<Record<string, unknown>> = [];
+  let pending = Buffer.alloc(0);
+  guardian.stdout.on("data", (data: Buffer) => {
+    pending = Buffer.concat([pending, data]);
+    while (pending.length >= 4 && pending.length >= pending.readUInt32BE(0) + 4) {
+      const end = pending.readUInt32BE(0) + 4;
+      frames.push(JSON.parse(pending.subarray(4, end).toString()) as Record<string, unknown>);
+      pending = pending.subarray(end);
+    }
+  });
+  guardian.stderr.resume();
+  const exited = new Promise<void>((resolve, reject) => { guardian.once("error", reject); guardian.once("close", () => resolve()); });
+  const config = Buffer.from(JSON.stringify({ processId: "truncated-control", kernelEpoch: "test-epoch", receiptPath, jobName: "", cwd: root, command: process.execPath, args: ["-e", "setInterval(()=>{},1000)"], env: [], mode: "pipe", cols: 80, rows: 24 }));
+  const header = Buffer.alloc(4); header.writeUInt32BE(config.length);
+  try {
+    guardian.stdin.write(Buffer.concat([header, config]));
+    const deadline = Date.now() + 10_000;
+    while (!frames.some(value => value.type === "started")) {
+      if (Date.now() > deadline || guardian.exitCode !== null) throw new Error("Guardian did not start its child");
+      await pause();
+    }
+    guardian.stdin.end(Buffer.from([0, 0, 0, 20, 123]));
+    while (guardian.exitCode === null && guardian.signalCode === null) {
+      if (Date.now() > deadline) throw new Error("Truncated control frame left its child running");
+      await pause();
+    }
+    await exited;
+    const receipt = JSON.parse(await fs.readFile(receiptPath, "utf8")) as Record<string, unknown>;
+    assert.equal(receipt.processId, "truncated-control");
+    assert.equal(receipt.kernelEpoch, "test-epoch");
+    assert.equal(receipt.treeConfirmed, true);
+    assert.equal(receipt.status, "exited");
+    assert.ok(frames.some(frame => frame.type === "receipt"));
+  } finally {
+    if (guardian.exitCode === null && guardian.signalCode === null) {
+      guardian.kill("SIGUSR2");
+      await exited;
+    }
+    await fs.rm(root, { recursive: true, force: true });
+  }
+}, 20_000);
+
+it("spooled output preserves partial-frame cursor replay and rejects acknowledged history", async () => {
+  const f = await fixture();
+  const expected = Buffer.from(Array.from({ length: 131_079 }, (_, index) => index % 251));
+  await f.client.processSpawn(f.spawn("partial-cursor", "process.stdout.write(Buffer.from(Array.from({length:131079},(_,i)=>i%251)))"));
+  await waitFor(f.client, "partial-cursor", s => !s.writerActive);
+  const deadline = Date.now() + 15_000;
+  for (;;) {
+    const state = await f.client.processRead({ workspaceId: "ws", processId: "partial-cursor", cursor: 0, maxBytes: 1 });
+    if (state.outputError) throw new Error(state.outputError);
+    if (state.outputComplete) break;
+    if (Date.now() > deadline) throw new Error("Process log did not reach complete output");
+    await pause();
+  }
+  let cursor = 0;
+  const bytes: Buffer[] = [];
+  for (const maxBytes of [1, 7, 65_535, 13]) {
+    const request = { workspaceId: "ws", processId: "partial-cursor", cursor, maxBytes };
+    const read = await f.client.processRead(request);
+    const replay = await f.client.processRead(request);
+    assert.deepEqual(replay.chunks, read.chunks);
+    for (const chunk of read.chunks) {
+      assert.equal(chunk.offset, cursor);
+      assert.equal(chunk.channel, "stdout");
+      const part = Buffer.from(chunk.bytesBase64, "base64");
+      bytes.push(part);
+      cursor += part.length;
+    }
+    assert.equal(cursor, read.nextCursor);
+    assert.equal(read.nextCursor - request.cursor, maxBytes);
+  }
+  await assert.rejects(f.client.processRead({ workspaceId: "ws", processId: "partial-cursor", cursor: 0 }), /outside retained bytes/);
+  const rest = await drain(f.client, "partial-cursor", cursor);
+  assert.deepEqual(Buffer.concat([...bytes, rest.stdout]), expected);
+}, 30_000);
+
+it("immediate stop after spawn admission retains a provable tree exit even before started observation", async () => {
+  const f = await fixture();
+  for (let index = 0; index < 12; index++) {
+    const processId = `early-stop-${index}`;
+    await f.client.processSpawn(f.spawn(processId, "setInterval(()=>{},1000)"));
+    // Admission permits immediate cancellation. Waiting for pid here would hide
+    // the guardian startup/signal-handler race this regression exercises.
+    await f.client.processKill({ workspaceId: "ws", processId, force: true });
+    const terminal = await waitFor(f.client, processId, snapshot => !snapshot.writerActive);
+    assert.ok(terminal.status === "exited" || terminal.status === "failed");
+    await f.client.processRelease({ workspaceId: "ws", processId });
+  }
+}, 30_000);
+
+
+it("unavailable output storage rejects admission without executing the command or retaining a writer", async () => {
+  const f = await fixture();
+  const processId = "unavailable-spool";
+  const spool = path.join(f.storageRoot, "process-receipts", createHash("sha256").update(processId).digest("hex") + ".output");
+  // A real filesystem failure at the private output destination, without
+  // filling the machine's disk or injecting faults into unrelated processes.
+  await fs.mkdir(spool, { recursive: true });
+  const marker = path.join(f.workspace, "child", "must-not-execute");
+  await assert.rejects(f.client.processSpawn(f.spawn(processId, "require('node:fs').writeFileSync("+JSON.stringify(marker)+",'unexpected')")));
+  const snapshot = await f.client.processInspect({ workspaceId: "ws", processId });
+  assert.equal(snapshot.status, "failed");
+  assert.equal(snapshot.writerActive, false);
+  assert.equal(snapshot.outputAvailable, false);
+  assert.ok(snapshot.reason);
+  assert.equal(await fs.stat(marker).then(() => true, () => false), false);
+  await f.client.fileRemove({ ...f.address, operationId: "failed-spool-reclaim", path: "child", recursive: true, force: true });
+}, 30_000);
+
+it("Host log-drain loss preserves an already confirmed real process exit", async () => {
+  const f = await fixture();
+  const service = createKernelProcessService({ client: f.host, resolveIdentity: async () => ({ workspaceId: "ws", executionWorkspaceId: "ws", canonicalRoot: f.workspace }) });
+  try {
+    const child = await service.spawn(process.execPath, ["-e", "process.stdout.write(Buffer.alloc(8*1024*1024,19));process.exitCode=7"], { cwd: path.join(f.workspace, "child"), env: process.env, stdio: "pipe" });
+    const completion = assert.rejects(child.completion, /kernel|epoch|pipe|Rust|stream|output/i);
+    const deadline = Date.now() + 15_000;
+    // Leave the Host readable undrained so its log delivery cannot complete.
+    while (child.snapshot.writerActive) {
+      if (Date.now() > deadline) throw new Error("Host did not observe terminal control while logs remained unread");
+      await pause();
+    }
+    assert.equal(child.snapshot.status, "exited");
+    assert.equal(child.exitCode, 7);
+    f.kernelChild.kill("SIGKILL");
+    await completion;
+    assert.equal(child.snapshot.status, "exited");
+    assert.equal(child.snapshot.writerActive, false);
+    assert.equal(child.exitCode, 7);
+  } finally { await service.dispose().catch(() => undefined); }
+}, 30_000);

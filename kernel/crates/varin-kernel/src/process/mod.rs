@@ -11,28 +11,34 @@ use base64::{engine::general_purpose::STANDARD as BASE64, Engine};
 use serde_json::{json, Value};
 use sha2::{Digest, Sha256};
 use std::{
-    collections::{HashMap, VecDeque},
-    io,
+    collections::HashMap,
+    fs::{File, OpenOptions},
+    io::{self, Read, Seek, SeekFrom, Write},
     path::{Path, PathBuf},
     process::{Child, Command, Stdio},
     sync::{
         mpsc::{self, SyncSender},
-        Arc, Condvar, Mutex,
+        Arc, Mutex, Weak,
     },
     thread,
     time::{Duration, Instant},
 };
 
-const BUFFER_BYTES: usize = 1024 * 1024;
 pub(crate) const CHUNK_BYTES: usize = 64 * 1024;
-struct Chunk {
-    offset: u64,
-    channel: String,
-    bytes: Vec<u8>,
+/// Produced only by the owning guardian control reader, never by a frontend/model message.
+#[derive(Debug, Clone)]
+pub(crate) struct ProcessTerminal {
+    pub process_id: String,
+    pub kernel_epoch: String,
+    pub receipt: Value,
 }
 #[derive(Default)]
 struct Buffer {
-    chunks: VecDeque<Chunk>,
+    read_position: u64,
+    frame_start: u64,
+    file_end: u64,
+    output_closed: bool,
+    output_error: Option<String>,
     base: u64,
     end: u64,
     closed: bool,
@@ -47,7 +53,6 @@ struct Buffer {
 }
 struct Shared {
     buffer: Mutex<Buffer>,
-    space: Condvar,
 }
 impl Shared {
     fn new() -> Self {
@@ -57,7 +62,6 @@ impl Shared {
                 queued_sequence: -1,
                 ..Buffer::default()
             }),
-            space: Condvar::new(),
         }
     }
     fn lock(&self) -> std::sync::MutexGuard<'_, Buffer> {
@@ -66,17 +70,169 @@ impl Shared {
             .unwrap_or_else(|poison| poison.into_inner())
     }
 }
+struct ControlState {
+    ready: bool,
+    terminal: bool,
+    requested: u8,
+}
+struct ProcessControl {
+    guardian: Arc<Mutex<Child>>,
+    containment: Arc<platform::Containment>,
+    input: Arc<Mutex<Option<SyncSender<Value>>>>,
+    native_run_id: Option<String>,
+    state: Mutex<ControlState>,
+}
+impl ProcessControl {
+    fn apply(&self, state: &ControlState) -> Result<bool, KernelError> {
+        if state.terminal || !state.ready || state.requested == 0 {
+            return Ok(false);
+        }
+        let mut guardian = self
+            .guardian
+            .lock()
+            .map_err(|_| failure("guardian control poisoned"))?;
+        if guardian.try_wait()?.is_some() {
+            return Ok(false);
+        }
+        #[cfg(unix)]
+        self.containment.terminate(&guardian, state.requested > 1)?;
+        #[cfg(windows)]
+        self.input
+            .lock()
+            .map_err(|_| failure("guardian input poisoned"))?
+            .as_ref()
+            .ok_or_else(|| failure("guardian input closed"))?
+            .try_send(json!({"type":"stop","force":state.requested>1}))
+            .map_err(|_| failure("guardian control backpressure; stop remains requested"))?;
+        Ok(true)
+    }
+    fn stop(&self, force: bool) -> Result<bool, KernelError> {
+        let mut state = self
+            .state
+            .lock()
+            .map_err(|_| failure("guardian control poisoned"))?;
+        if state.terminal {
+            return Ok(false);
+        }
+        state.requested = state.requested.max(if force { 2 } else { 1 });
+        self.apply(&state)?;
+        // Before readiness this is an owned stop request, not a claim the target has stopped.
+        Ok(true)
+    }
+    fn ready(&self) -> Result<(), KernelError> {
+        let mut state = self
+            .state
+            .lock()
+            .map_err(|_| failure("guardian control poisoned"))?;
+        state.ready = true;
+        self.apply(&state)?;
+        Ok(())
+    }
+    fn terminal(&self) {
+        if let Ok(mut state) = self.state.lock() {
+            state.terminal = true;
+        }
+    }
+    fn stopped(&self) -> bool {
+        self.state
+            .lock()
+            .map(|state| state.terminal)
+            .unwrap_or(false)
+    }
+    fn stop_requested(&self) -> bool {
+        self.state
+            .lock()
+            .map(|state| state.requested > 0)
+            .unwrap_or(true)
+    }
+}
+#[derive(Default)]
+struct Controls {
+    live: HashMap<String, Weak<ProcessControl>>,
+    pending: HashMap<String, (String, bool)>,
+}
+/// Fast control references to the same live guardians, not another process authority. No PID
+/// loaded from disk is ever signalled. Pending markers require a Catalog-verified native owner.
+#[derive(Clone, Default)]
+pub(crate) struct ProcessControlRegistry(Arc<Mutex<Controls>>);
+impl ProcessControlRegistry {
+    pub(crate) fn cancel_known_process(&self, id: &str) -> Result<bool, KernelError> {
+        let control = self
+            .0
+            .lock()
+            .map_err(|_| failure("process controls poisoned"))?
+            .live
+            .get(id)
+            .and_then(Weak::upgrade);
+        match control {
+            Some(control) if control.native_run_id.is_some() => control.stop(true),
+            _ => Ok(false),
+        }
+    }
+    pub(crate) fn cancel_process(&self, id: &str, run_id: &str) -> Result<bool, KernelError> {
+        let mut controls = self
+            .0
+            .lock()
+            .map_err(|_| failure("process controls poisoned"))?;
+        if let Some(control) = controls.live.get(id).and_then(Weak::upgrade) {
+            if control.native_run_id.as_deref() != Some(run_id) {
+                return Err(KernelError::Authorization(
+                    "process control Run does not match operation owner".into(),
+                ));
+            }
+            drop(controls);
+            return control.stop(true);
+        }
+        if controls
+            .pending
+            .get(id)
+            .is_some_and(|(owner, _)| owner != run_id)
+        {
+            return Err(KernelError::Authorization(
+                "pending process stop belongs to another Run".into(),
+            ));
+        }
+        controls.pending.insert(id.into(), (run_id.into(), true));
+        Ok(false)
+    }
+    fn register(&self, id: &str, control: &Arc<ProcessControl>) -> Result<(), KernelError> {
+        let mut controls = self
+            .0
+            .lock()
+            .map_err(|_| failure("process controls poisoned"))?;
+        if let Some((run_id, force)) = controls.pending.get(id) {
+            if control.native_run_id.as_deref() != Some(run_id.as_str()) {
+                return Err(KernelError::Authorization(
+                    "pending process stop owner mismatch".into(),
+                ));
+            }
+            control.stop(*force)?;
+        }
+        controls.pending.remove(id);
+        controls.live.insert(id.into(), Arc::downgrade(control));
+        Ok(())
+    }
+    fn release(&self, id: &str) {
+        if let Ok(mut controls) = self.0.lock() {
+            controls.live.remove(id);
+            controls.pending.remove(id);
+        }
+    }
+}
 struct LiveProcess {
-    guardian: Child,
-    containment: platform::Containment,
-    input: Option<SyncSender<Value>>,
+    guardian: Arc<Mutex<Child>>,
+    containment: Arc<platform::Containment>,
+    input: Arc<Mutex<Option<SyncSender<Value>>>>,
+    control: Arc<ProcessControl>,
     shared: Arc<Shared>,
     guardian_exited: bool,
-    requested_stop: bool,
+    output_path: PathBuf,
 }
 #[derive(Default)]
 pub(crate) struct ProcessManager {
     live: HashMap<String, LiveProcess>,
+    terminal: Option<mpsc::Sender<ProcessTerminal>>,
+    controls: ProcessControlRegistry,
 }
 fn failure(message: impl Into<String>) -> KernelError {
     KernelError::Operation(message.into())
@@ -86,6 +242,9 @@ pub(crate) fn receipt_path(root: &Path, process_id: &str) -> PathBuf {
         "{}.json",
         hex::encode(Sha256::digest(process_id.as_bytes()))
     ))
+}
+pub(crate) fn output_path(root: &Path, process_id: &str) -> PathBuf {
+    receipt_path(root, process_id).with_extension("output")
 }
 pub(crate) fn job_name(root: &Path, process_id: &str) -> String {
     format!(
@@ -116,6 +275,21 @@ pub(crate) fn read_receipt(
     Ok(Some(value))
 }
 impl ProcessManager {
+    pub(crate) fn set_controls(&mut self, controls: ProcessControlRegistry) {
+        self.controls = controls;
+    }
+    pub(crate) fn set_terminal_sender(&mut self, terminal: mpsc::Sender<ProcessTerminal>) {
+        self.terminal = Some(terminal);
+    }
+    pub(crate) fn replay_terminal(&self, process_id: &str, kernel_epoch: &str, receipt: Value) {
+        if let Some(sender) = &self.terminal {
+            let _ = sender.send(ProcessTerminal {
+                process_id: process_id.into(),
+                kernel_epoch: kernel_epoch.into(),
+                receipt,
+            });
+        }
+    }
     pub(crate) fn spawn(&mut self, id: &str, config: Value) -> Result<(), KernelError> {
         if self.live.contains_key(id) {
             return Err(failure("process identity is already live"));
@@ -125,13 +299,8 @@ impl ProcessManager {
             .arg("--process-worker")
             .stdin(Stdio::piped())
             .stdout(Stdio::piped())
-            .stderr(
-                if std::env::var("VARIN_KERNEL_DEBUG").as_deref() == Ok("1") {
-                    Stdio::inherit()
-                } else {
-                    Stdio::null()
-                },
-            );
+            // Guardian stderr is a private framed data stream; stdout is control-only.
+            .stderr(Stdio::piped());
         #[cfg(windows)]
         {
             use std::os::windows::process::CommandExt;
@@ -157,8 +326,57 @@ impl ProcessManager {
             .stdout
             .take()
             .ok_or_else(|| failure("guardian stdout missing"))?;
+        let mut data = guardian
+            .stderr
+            .take()
+            .ok_or_else(|| failure("guardian data pipe missing"))?;
+        let spool_path = PathBuf::from(
+            config["receiptPath"]
+                .as_str()
+                .ok_or_else(|| failure("receipt path missing"))?,
+        )
+        .with_extension("output");
+        let mut spool = match OpenOptions::new()
+            .write(true)
+            .create_new(true)
+            .open(&spool_path)
+        {
+            Ok(file) => file,
+            Err(error) => {
+                let _ = guardian.kill();
+                let _ = guardian.wait();
+                return Err(error.into());
+            }
+        };
+        let process_id = id.to_string();
+        let kernel_epoch = config["kernelEpoch"]
+            .as_str()
+            .ok_or_else(|| failure("kernel epoch missing"))?
+            .to_string();
+        let terminal = self.terminal.clone();
         let shared = Arc::new(Shared::new());
         let (input, input_rx) = mpsc::sync_channel::<Value>(4);
+        let guardian = Arc::new(Mutex::new(guardian));
+        let containment = Arc::new(containment);
+        let input = Arc::new(Mutex::new(Some(input)));
+        let control = Arc::new(ProcessControl {
+            guardian: guardian.clone(),
+            containment: containment.clone(),
+            input: input.clone(),
+            native_run_id: config["nativeRunId"].as_str().map(str::to_owned),
+            state: Mutex::new(ControlState {
+                ready: false,
+                terminal: false,
+                requested: 0,
+            }),
+        });
+        if let Err(error) = self.controls.register(id, &control) {
+            if let Ok(mut child) = guardian.lock() {
+                let _ = child.kill();
+                let _ = child.wait();
+            }
+            return Err(error);
+        }
         let writer_shared = shared.clone();
         thread::spawn(move || {
             // This is the first message; the guardian cannot spawn before it.
@@ -175,75 +393,131 @@ impl ProcessManager {
             // Dropping stdin triggers the guardian's EOF cleanup, even on Host loss.
         });
         let reader_shared = shared.clone();
+        let reader_control = control.clone();
         thread::spawn(move || {
+            let mut terminal_sent = false;
             let result = (|| -> io::Result<()> {
                 while let Some(frame) = read_frame(&mut stdout)? {
                     let value: Value = serde_json::from_slice(&frame)?;
-                    let mut buffer = reader_shared.lock();
                     match value["type"].as_str() {
-                        Some("started") => buffer.pid = value["pid"].as_u64().map(|pid| pid as u32),
-                        Some("receipt") => buffer.receipt = Some(value["value"].clone()),
+                        Some("ready") => reader_control.ready().map_err(io::Error::other)?,
+                        Some("started") => {
+                            reader_shared.lock().pid = value["pid"].as_u64().map(|pid| pid as u32)
+                        }
+                        Some("receipt") => {
+                            let receipt = &value["value"];
+                            if receipt["processId"].as_str() != Some(process_id.as_str())
+                                || receipt["kernelEpoch"].as_str() != Some(kernel_epoch.as_str())
+                                || receipt["treeConfirmed"].as_bool() != Some(true)
+                                || !matches!(receipt["status"].as_str(), Some("exited" | "failed"))
+                            {
+                                return Err(io::Error::other("invalid native terminal receipt"));
+                            }
+                            reader_control.terminal();
+                            reader_shared.lock().receipt = Some(receipt.clone());
+                            if !terminal_sent {
+                                if let Some(sender) = &terminal {
+                                    let _ = sender.send(ProcessTerminal {
+                                        process_id: process_id.clone(),
+                                        kernel_epoch: kernel_epoch.clone(),
+                                        receipt: receipt.clone(),
+                                    });
+                                }
+                                terminal_sent = true;
+                            }
+                        }
                         Some("input") => {
+                            let mut buffer = reader_shared.lock();
                             buffer.input_sequence = value["sequence"].as_i64().unwrap_or(-1);
                             buffer.input_error = value["error"].as_str().map(str::to_string);
                         }
-                        Some("output") => {
-                            let bytes = BASE64
-                                .decode(value["bytesBase64"].as_str().unwrap_or_default())
-                                .map_err(io::Error::other)?;
-                            if bytes.len() > CHUNK_BYTES {
-                                return Err(io::Error::other(
-                                    "native process frame exceeded chunk bound",
-                                ));
-                            }
-                            let channel = value["channel"]
-                                .as_str()
-                                .filter(|v| matches!(*v, "stdout" | "stderr"))
-                                .ok_or_else(|| io::Error::other("invalid native process channel"))?
-                                .to_string();
-                            while !buffer.discard
-                                && (buffer.end - buffer.base) as usize + bytes.len() > BUFFER_BYTES
-                            {
-                                buffer = reader_shared
-                                    .space
-                                    .wait(buffer)
-                                    .unwrap_or_else(|poison| poison.into_inner());
-                            }
-                            if !buffer.discard {
-                                let offset = buffer.end;
-                                buffer.end += bytes.len() as u64;
-                                buffer.chunks.push_back(Chunk {
-                                    offset,
-                                    channel,
-                                    bytes,
-                                });
-                            }
+                        Some("output-error") => {
+                            reader_shared.lock().output_error =
+                                Some("native output stream failed; log may be incomplete".into())
                         }
-                        Some("output-error" | "control-error") => {
-                            buffer.control_error =
-                                Some("native process stream or PTY control failed".into())
+                        Some("control-error") => {
+                            reader_shared.lock().control_error =
+                                Some("native PTY control failed".into())
                         }
-                        _ => return Err(io::Error::other("invalid native process event")),
+                        _ => return Err(io::Error::other("invalid native control event")),
                     }
                 }
                 Ok(())
             })();
-            let mut buffer = reader_shared.lock();
-            if result.is_err() {
-                buffer.control_error =
-                    Some("native process stream ended without a complete frame".into());
+            {
+                let mut buffer = reader_shared.lock();
+                if result.is_err() {
+                    buffer.control_error =
+                        Some("native control stream ended without a complete frame".into());
+                }
+                buffer.closed = true;
             }
-            buffer.closed = true;
+            if !terminal_sent {
+                if let Some(sender) = &terminal {
+                    let _ = sender.send(ProcessTerminal {
+                    process_id:process_id.clone(), kernel_epoch:kernel_epoch.clone(),
+                    receipt:json!({"processId":process_id,"kernelEpoch":kernel_epoch,"status":"unknown",
+                        "treeConfirmed":false,"reason":"guardian control closed without a terminal receipt"}) });
+                }
+            }
+        });
+        let data_shared = shared.clone();
+        thread::spawn(move || {
+            let result = (|| -> io::Result<()> {
+                while let Some(frame) = read_frame(&mut data)? {
+                    let value: Value = serde_json::from_slice(&frame)?;
+                    if value["type"] != "output" {
+                        return Err(io::Error::other("invalid native data event"));
+                    }
+                    let bytes = BASE64
+                        .decode(value["bytesBase64"].as_str().unwrap_or_default())
+                        .map_err(io::Error::other)?;
+                    if bytes.is_empty() || bytes.len() > CHUNK_BYTES {
+                        return Err(io::Error::other("invalid native output chunk size"));
+                    }
+                    let channel = match value["channel"].as_str() {
+                        Some("stdout") => 1u8,
+                        Some("stderr") => 2u8,
+                        _ => return Err(io::Error::other("invalid native output channel")),
+                    };
+                    if data_shared.lock().discard {
+                        continue;
+                    }
+                    // Disk I/O never holds the control-state mutex. A slow disk cannot hold the
+                    // terminal/ack reader hostage; complete log bytes are not a UI RAM queue.
+                    spool.write_all(&(bytes.len() as u32).to_le_bytes())?;
+                    spool.write_all(&[channel])?;
+                    spool.write_all(&bytes)?;
+                    let position = spool.stream_position()?;
+                    let mut buffer = data_shared.lock();
+                    buffer.end = buffer
+                        .end
+                        .checked_add(bytes.len() as u64)
+                        .ok_or_else(|| io::Error::other("process output cursor overflow"))?;
+                    buffer.file_end = position;
+                }
+                spool.sync_data()
+            })();
+            let mut buffer = data_shared.lock();
+            if let Err(error) = result {
+                buffer.output_error = Some(format!(
+                    "process output storage failed; log is incomplete: {error}"
+                ));
+            }
+            buffer.output_closed = true;
+            // Closing a failed data pipe makes guardian readers request stopping and drain/discard
+            // remaining target output. No successful complete-log claim is made.
         });
         self.live.insert(
             id.into(),
             LiveProcess {
                 guardian,
                 containment,
-                input: Some(input),
+                input,
+                control,
                 shared,
                 guardian_exited: false,
-                requested_stop: false,
+                output_path: spool_path,
             },
         );
         Ok(())
@@ -252,7 +526,14 @@ impl ProcessManager {
         let Some(live) = self.live.get_mut(id) else {
             return Ok(None);
         };
-        if !live.guardian_exited && live.guardian.try_wait()?.is_some() {
+        if !live.guardian_exited
+            && live
+                .guardian
+                .lock()
+                .map_err(|_| failure("guardian control poisoned"))?
+                .try_wait()?
+                .is_some()
+        {
             live.guardian_exited = true;
         }
         let buffer = live.shared.lock();
@@ -264,40 +545,34 @@ impl ProcessManager {
         let mut reason = buffer.control_error.clone();
         let mut exit_code = Value::Null;
         let mut signal = Value::Null;
-        if live.guardian_exited {
+        if let Some(receipt) = buffer.receipt.as_ref() {
+            // A validated, durable tree receipt proves target writers stopped. The guardian may
+            // still be draining its separate log pipe; that is not a live workspace writer.
+            status = receipt["status"].as_str().unwrap_or("unknown");
+            exit_code = receipt["exitCode"].clone();
+            signal = receipt["signal"].clone();
+            reason = receipt["reason"].as_str().map(str::to_string).or(reason);
+        } else if live.guardian_exited && buffer.closed {
             #[cfg(windows)]
-            if !live.containment.empty()? {
-                live.containment.terminate(&live.guardian, true)?;
-            }
-            if buffer.closed && live.containment.empty()? {
-                let receipt = buffer
-                    .receipt
-                    .as_ref()
-                    .filter(|v| v["treeConfirmed"].as_bool() == Some(true));
-                if let Some(receipt) = receipt {
-                    status = receipt["status"].as_str().unwrap_or("unknown");
-                    exit_code = receipt["exitCode"].clone();
-                    signal = receipt["signal"].clone();
-                    reason = receipt["reason"].as_str().map(str::to_string).or(reason);
-                } else {
-                    #[cfg(windows)]
-                    {
-                        status = "exited";
-                        reason = Some("native Job exited; target exit status unavailable".into());
-                    }
-                    #[cfg(unix)]
-                    {
-                        status = "unknown";
-                        reason = Some(
-                            "guardian exited without proof that the process tree stopped".into(),
-                        );
-                    }
+            {
+                if !live.containment.empty()? {
+                    live.control.stop(true)?;
                 }
+                if live.containment.empty()? {
+                    status = "exited";
+                    reason = Some("native Job exited; target exit status unavailable".into());
+                }
+            }
+            #[cfg(unix)]
+            {
+                status = "unknown";
+                reason = Some("guardian exited without proof that the process tree stopped".into());
             }
         }
         Ok(Some(
             json!({"status":status, "pid":buffer.pid, "exitCode":exit_code, "signal":signal,
-            "reason":reason, "writerActive":!matches!(status,"exited"|"failed"), "outputAvailable":true}),
+            "reason":reason, "writerActive":!matches!(status,"exited"|"failed"), "outputAvailable":true,
+            "outputComplete":buffer.output_closed && buffer.output_error.is_none(),"outputError":buffer.output_error}),
         ))
     }
     pub(crate) fn read(
@@ -310,41 +585,86 @@ impl ProcessManager {
             .live
             .get_mut(id)
             .ok_or_else(|| failure("process stream belongs to an unavailable kernel epoch"))?;
-        let mut buffer = live.shared.lock();
-        if cursor < buffer.base || cursor > buffer.end {
+        let (
+            base,
+            end,
+            mut position,
+            mut frame_start,
+            file_end,
+            input_sequence,
+            input_error,
+            output_error,
+            output_complete,
+        ) = {
+            let buffer = live.shared.lock();
+            (
+                buffer.base,
+                buffer.end,
+                buffer.read_position,
+                buffer.frame_start,
+                buffer.file_end,
+                buffer.input_sequence,
+                buffer.input_error.clone(),
+                buffer.output_error.clone(),
+                buffer.output_closed && buffer.output_error.is_none(),
+            )
+        };
+        if cursor < base || cursor > end {
             return Err(failure("process output cursor is outside retained bytes"));
         }
-        while buffer
-            .chunks
-            .front()
-            .is_some_and(|c| c.offset + c.bytes.len() as u64 <= cursor)
-        {
-            buffer.chunks.pop_front();
-        }
-        if let Some(front) = buffer.chunks.front_mut() {
-            if cursor > front.offset {
-                front.bytes.drain(..(cursor - front.offset) as usize);
-                front.offset = cursor;
+        let mut file = File::open(&live.output_path)?;
+        let header = |file: &mut File,
+                      position: u64|
+         -> Result<(usize, &'static str), KernelError> {
+            file.seek(SeekFrom::Start(position))?;
+            let mut header = [0u8; 5];
+            file.read_exact(&mut header)?;
+            let length = u32::from_le_bytes(header[..4].try_into().expect("fixed header")) as usize;
+            if length == 0 || length > CHUNK_BYTES {
+                return Err(failure("invalid process output storage frame"));
             }
+            let channel = match header[4] {
+                1 => "stdout",
+                2 => "stderr",
+                _ => return Err(failure("invalid stored output channel")),
+            };
+            Ok((length, channel))
+        };
+        while frame_start < cursor {
+            let (length, _) = header(&mut file, position)?;
+            if frame_start + length as u64 > cursor {
+                break;
+            }
+            position += 5 + length as u64;
+            frame_start += length as u64;
         }
-        buffer.base = cursor;
-        live.shared.space.notify_all();
+        {
+            let mut buffer = live.shared.lock();
+            buffer.base = cursor;
+            buffer.read_position = position;
+            buffer.frame_start = frame_start;
+        }
         let mut chunks = Vec::new();
         let mut remaining = limit;
         let mut next = cursor;
-        for chunk in &buffer.chunks {
-            if remaining == 0 {
-                break;
-            }
-            let count = remaining.min(chunk.bytes.len());
-            chunks.push(json!({"channel":chunk.channel,"offset":chunk.offset,"bytesBase64":BASE64.encode(&chunk.bytes[..count])}));
+        while remaining > 0 && next < end && position < file_end {
+            let (length, channel) = header(&mut file, position)?;
+            let skip = (next - frame_start) as usize;
+            let count = remaining.min(length - skip);
+            file.seek(SeekFrom::Start(position + 5 + skip as u64))?;
+            let mut bytes = vec![0u8; count];
+            file.read_exact(&mut bytes)?;
+            chunks
+                .push(json!({"channel":channel,"offset":next,"bytesBase64":BASE64.encode(bytes)}));
             next += count as u64;
             remaining -= count;
+            if skip + count == length {
+                position += 5 + length as u64;
+                frame_start += length as u64;
+            }
         }
-        Ok(
-            json!({"chunks":chunks,"nextCursor":next,"endCursor":buffer.end,
-            "inputSequence":buffer.input_sequence,"inputError":buffer.input_error}),
-        )
+        Ok(json!({"chunks":chunks,"nextCursor":next,"endCursor":end,
+            "inputSequence":input_sequence,"inputError":input_error,"outputError":output_error,"outputComplete":output_complete}))
     }
     pub(crate) fn write(
         &mut self,
@@ -357,7 +677,7 @@ impl ProcessManager {
             .live
             .get_mut(id)
             .ok_or_else(|| failure("process handle is not live in this epoch"))?;
-        if live.guardian_exited || live.requested_stop {
+        if live.guardian_exited || live.control.stop_requested() {
             return Err(failure("process is stopping or exited"));
         }
         let decoded = BASE64
@@ -378,6 +698,8 @@ impl ProcessManager {
             ));
         }
         live.input
+            .lock()
+            .map_err(|_| failure("guardian input poisoned"))?
             .as_ref()
             .ok_or_else(|| failure("process input is closed"))?
             .try_send(json!({"type":"write","sequence":sequence,"bytesBase64":bytes,"eof":eof}))
@@ -392,6 +714,8 @@ impl ProcessManager {
             .get(id)
             .ok_or_else(|| failure("process handle is not live in this epoch"))?;
         live.input
+            .lock()
+            .map_err(|_| failure("guardian input poisoned"))?
             .as_ref()
             .ok_or_else(|| failure("process input is closed"))?
             .try_send(json!({"type":"resize","cols":cols,"rows":rows}))
@@ -403,26 +727,28 @@ impl ProcessManager {
             .live
             .get_mut(id)
             .ok_or_else(|| failure("process handle is not live in this epoch"))?;
-        if !live.guardian_exited {
-            live.containment.terminate(&live.guardian, force)?;
-            live.requested_stop = true;
-        }
-        Ok(json!({"requested":true,"exited":false}))
+        let requested = if !live.guardian_exited {
+            live.control.stop(force)?
+        } else {
+            false
+        };
+        Ok(json!({"requested":requested,"exited":live.control.stopped()}))
     }
     pub(crate) fn release(&mut self, id: &str) {
+        self.controls.release(id);
         if let Some(live) = self.live.remove(id) {
             live.shared.lock().discard = true;
-            live.shared.space.notify_all();
         }
     }
     pub(crate) fn shutdown(&mut self) -> Result<(), KernelError> {
         for live in self.live.values_mut() {
             live.shared.lock().discard = true;
-            live.shared.space.notify_all();
             // EOF is a native guardian stop request, not a fabricated exit.
-            live.input.take();
             if !live.guardian_exited {
-                let _ = live.containment.terminate(&live.guardian, true);
+                let _ = live.control.stop(true);
+            }
+            if let Ok(mut input) = live.input.lock() {
+                input.take();
             }
         }
         let deadline = Instant::now() + Duration::from_secs(5);
