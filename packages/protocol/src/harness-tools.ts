@@ -1,15 +1,14 @@
 /**
  * Harness tool mutation attributes.
  *
- * Every harness tool name is mapped to its mutation kind and execution mode.
+ * Every harness tool name is mapped to its workspace mutation kind and execution mode.
  * The recovery turn-coordinator uses `mutation` to decide whether a tool call
  * may produce unjournaled workspace changes (`process` or `unknown` → flag the
  * turn). The pi-host tool definitions use `executionMode` to request parallel
  * or sequential dispatch.
  *
- * Adding a new harness tool in a later phase MUST add its entry here so the
- * cross-check test in `packages/pi-host/test/harness-tools.test.ts` stays
- * exhaustive.
+ * Permission inspection also uses this catalog to recognize SDK-owned tools.
+ * Missing entries can become unknown effects and serialize otherwise independent calls.
  */
 
 export type HarnessToolMutation = 'none' | 'journaled' | 'process';
@@ -18,7 +17,7 @@ export interface HarnessToolMeta {
   mutation: HarnessToolMutation;
   executionMode: 'parallel' | 'sequential';
   /** Permission/audit action when mutation alone is not precise enough. */
-  permissionAction?: 'read' | 'control';
+  permissionAction?: 'read' | 'control' | 'unknown';
 }
 
 export const HARNESS_TOOL_META: Readonly<Record<string, HarnessToolMeta>> = {
@@ -48,17 +47,23 @@ export const HARNESS_TOOL_META: Readonly<Record<string, HarnessToolMeta>> = {
   send: { mutation: 'none', executionMode: 'parallel' },
   read_thread: { mutation: 'none', executionMode: 'parallel' },
   webfetch: { mutation: 'none', executionMode: 'parallel' },
+  network_diag: { mutation: 'none', executionMode: 'parallel', permissionAction: 'read' },
   document_read: { mutation: 'none', executionMode: 'parallel' },
   websearch: { mutation: 'none', executionMode: 'parallel' },
   research_search: { mutation: 'none', executionMode: 'parallel' },
   research_decide: { mutation: 'none', executionMode: 'parallel' },
   materials: { mutation: 'none', executionMode: 'parallel' },
   recall: { mutation: 'none', executionMode: 'parallel' },
+  memory: { mutation: 'none', executionMode: 'sequential', permissionAction: 'control' },
+  // Script calls can target arbitrary apps; retain their existing unknown-effect gate.
+  computer: { mutation: 'process', executionMode: 'sequential', permissionAction: 'unknown' },
   related: { mutation: 'none', executionMode: 'parallel' },
   history: { mutation: 'none', executionMode: 'parallel' },
   symbols: { mutation: 'none', executionMode: 'parallel' },
   definition: { mutation: 'none', executionMode: 'parallel' },
   references: { mutation: 'none', executionMode: 'parallel' },
+  hover: { mutation: 'none', executionMode: 'parallel' },
+  submit_facts: { mutation: 'none', executionMode: 'sequential' },
   experiment: { mutation: 'process', executionMode: 'sequential' },
   resources: { mutation: 'none', executionMode: 'parallel' },
   research_source: { mutation: 'none', executionMode: 'parallel' },
@@ -66,6 +71,8 @@ export const HARNESS_TOOL_META: Readonly<Record<string, HarnessToolMeta>> = {
   settings_read: { mutation: 'none', executionMode: 'parallel', permissionAction: 'read' },
   settings_update: { mutation: 'none', executionMode: 'sequential', permissionAction: 'control' },
   settings_action: { mutation: 'none', executionMode: 'sequential', permissionAction: 'control' },
+  follow_up: { mutation: 'none', executionMode: 'sequential', permissionAction: 'control' },
+  scheduled_task: { mutation: 'process', executionMode: 'sequential', permissionAction: 'control' },
 };
 
 export const toolMutation = (name: string): HarnessToolMutation | 'unknown' => (

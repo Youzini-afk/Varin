@@ -380,6 +380,10 @@ shell/thread controls use their actual target identity. Independent resources ov
 unknown third-party sequential tool stays an ordered barrier, with calls on either side still
 parallel inside their side. The Host Documents/WorkingState gates remain the final mutation
 and alias authority; scheduling does not replace revision checks or recovery.
+Permission inspection recognizes owned tools through the shared Harness catalog;
+network diagnostics and memory reads therefore keep their independent execution plans.
+Memory writes order against other memory operations, including searches across scopes,
+without reserving the whole tool batch.
 The upstream seams are tracked in `packages/pi-host/patches/@earendil-works%2Fpi-agent-core@1.0.4.patch`
 and `packages/pi-host/patches/@earendil-works%2Fpi-coding-agent@1.0.4.patch`: the core builds the
 resource dependency graph in the actual tool-call batch path, while coding-agent

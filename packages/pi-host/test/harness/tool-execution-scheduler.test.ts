@@ -3,6 +3,7 @@ import { test } from "node:test";
 import {
   runAgentLoop,
   type AgentContext,
+  type AgentEvent,
   type AgentLoopConfig,
   type AgentTool,
   type ToolExecutionPlan,
@@ -14,8 +15,11 @@ import {
   type JsonValue,
 } from "@earendil-works/pi-ai";
 import { Type } from "typebox";
-import type { ToolDefinition } from "@earendil-works/pi-coding-agent";
+import type { ExtensionContext, ToolCallEvent, ToolCallEventResult, ToolDefinition } from "@earendil-works/pi-coding-agent";
+import { DEFAULT_HARNESS_SETTINGS, defaultRules, type PermissionInspectParams } from "@varin/protocol";
 import { withToolExecutionResources } from "../../src/harness/tool-execution-resources.js";
+import { createPermissionGateExtension } from "../../src/harness/permission-gate-extension.js";
+import { selectHarnessTools } from "../../src/harness/select-tools.js";
 
 const usage = {
   input: 0,
@@ -55,6 +59,7 @@ const runBatch = async (
   tools: AgentTool[],
   calls: Array<{ id: string; name: string; arguments: Record<string, JsonValue> }>,
   config: Partial<AgentLoopConfig> = {},
+  onEvent?: (event: AgentEvent) => void,
 ) => {
   let request = 0;
   const context: AgentContext = { messages: [{ role: "system", content: "test", timestamp: 0 }], tools };
@@ -67,7 +72,7 @@ const runBatch = async (
       convertToLlm: (input) => input as never,
       ...config,
     },
-    async (event) => { events.push(event); },
+    async (event) => { events.push(event); onEvent?.(event); },
     undefined,
     () => responseStream(request++ === 0
       ? assistant(calls.map((call) => ({ type: "toolCall", ...call })), "toolUse")
@@ -337,5 +342,98 @@ test("retrieval overlaps source writes, unrelated writes and experiment reads", 
     await running;
   }
   assert.ok(log.indexOf("src/source.ts") < log.indexOf("search:end"));
+});
+
+test("registered diagnostics, memory, settings and history finish while retrieval is still running through the permission gate", async () => {
+  const cwd = process.cwd();
+  const bridge = { request: async (method: string, params: PermissionInspectParams) => {
+    if (method === "permission.audit") return { accepted: true };
+    assert.equal(method, "permission.inspect");
+    assert.deepEqual(params.paths, []);
+    return { ...params, executionWorkspaceId: "workspace", owningWorkspaceId: "workspace", paths: [] };
+  } } as never;
+  const definitions = selectHarnessTools(DEFAULT_HARNESS_SETTINGS, {
+    bridge, sessionId: "session", cwd, workspaceMutationJournal: undefined,
+    isOpenAIFamily: false, settingsAvailable: true,
+  });
+  let gate!: (event: ToolCallEvent, ctx: ExtensionContext) => Promise<ToolCallEventResult | void>;
+  createPermissionGateExtension({ policy: { mode: "bypass", rules: defaultRules("bypass") }, sessionId: "session", cwd, bridge })({
+    getAllTools: () => definitions.map(tool => ({ ...tool,
+      sourceInfo: { path: "<sdk>", source: "sdk", scope: "temporary", origin: "top-level" },
+    })),
+    registerCommand: () => {},
+    on: (event: string, handler: typeof gate) => { if (event === "tool_call") gate = handler; },
+  } as never);
+  let release!: () => void;
+  let finished!: () => void;
+  const held = new Promise<void>(resolve => { release = resolve; });
+  const fastFinished = new Promise<void>(resolve => { finished = resolve; });
+  const starts: string[] = [];
+  const ends: Array<Extract<AgentEvent, { type: "tool_execution_end" }>> = [];
+  const tools = definitions.map(tool => ({ ...tool, execute: async () => {
+    starts.push(tool.name);
+    if (tool.name === "explore") await held;
+    return { content: [{ type: "text" as const, text: tool.name }], details: {} };
+  } })) as AgentTool[];
+  const running = runBatch(tools, [
+    { id: "search", name: "explore", arguments: { question: "shell background execution" } },
+    { id: "network", name: "network_diag", arguments: { url: "https://example.com" } },
+    { id: "memory", name: "memory", arguments: { action: "search", query: "shell" } },
+    { id: "settings", name: "settings_search", arguments: { query: "shell" } },
+    { id: "history", name: "history", arguments: { query: "shell" } },
+  ], {
+    beforeToolCall: async ({ toolCall, args }) => (await gate({ type: "tool_call", toolCallId: toolCall.id,
+      toolName: toolCall.name, input: args } as ToolCallEvent, { cwd } as ExtensionContext)) ?? undefined,
+  }, event => {
+    if (event.type !== "tool_execution_end") return;
+    ends.push(event);
+    if (ends.length === 4) finished();
+  });
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  try {
+    await Promise.race([fastFinished, new Promise<never>((_resolve, reject) => {
+      timer = setTimeout(() => reject(new Error("read tools were held behind retrieval")), 5_000);
+    })]);
+    assert.ok(starts.includes("explore"));
+    assert.deepEqual(ends.map(event => event.toolName).sort(), ["history", "memory", "network_diag", "settings_search"]);
+    assert.ok(ends.every(event => !event.isError && starts.includes(event.toolName)));
+  } finally {
+    clearTimeout(timer);
+    release();
+    await running;
+  }
+});
+
+test("memory mutations order later reads while unrelated tools can finish", async () => {
+  let release!: () => void;
+  const held = new Promise<void>(resolve => { release = resolve; });
+  const log: string[] = [];
+  const memory = withToolExecutionResources({
+    name: "memory", label: "memory", description: "memory", executionMode: "sequential" as const,
+    parameters: Type.Object({ action: Type.String() }),
+    execute: async (_id: string, args: { action: string }) => {
+      log.push(`start:${args.action}`);
+      if (args.action === "remember") await held;
+      log.push(`end:${args.action}`);
+      return { content: [], details: {} };
+    },
+  }, process.cwd());
+  const independent: AgentTool = {
+    name: "independent", label: "independent", description: "independent", parameters: Type.Object({}),
+    execute: async () => { log.push("independent"); release(); return { content: [], details: {} }; },
+  };
+  const timer = setTimeout(release, 5_000);
+  try {
+    await runBatch([memory as AgentTool, independent], [
+      { id: "write", name: "memory", arguments: { action: "remember" } },
+      { id: "read", name: "memory", arguments: { action: "search" } },
+      { id: "other", name: "independent", arguments: {} },
+    ]);
+    assert.ok(log.indexOf("independent") < log.indexOf("end:remember"));
+    assert.ok(log.indexOf("start:search") > log.indexOf("end:remember"));
+  } finally {
+    clearTimeout(timer);
+    release();
+  }
 });
 

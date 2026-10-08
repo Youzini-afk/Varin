@@ -111,6 +111,7 @@ export function createMemoryTool(bridge: HostServicesBridge, _sessionId: string)
     name: "memory",
     label: "Memory",
     ...memoryToolPresentation({ mode: 'agent' }),
+    executionMode: "sequential",
     execute: async (_toolCallId, params, _signal, _onUpdate, _ctx) => {
       try {
         switch (params.action) {

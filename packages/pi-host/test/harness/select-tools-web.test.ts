@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import { describe, it } from "node:test";
 import { selectHarnessTools } from "../../src/harness/select-tools.js";
 import { HostServicesBridge } from "../../src/harness/host-services-bridge.js";
-import { DEFAULT_HARNESS_SETTINGS, type HarnessSettings } from "@varin/protocol";
+import { DEFAULT_HARNESS_SETTINGS, HARNESS_TOOL_META, type HarnessSettings } from "@varin/protocol";
 
 function createBridge(): HostServicesBridge {
   return new HostServicesBridge({
@@ -26,6 +26,16 @@ const webSettings: HarnessSettings = {
   ...DEFAULT_HARNESS_SETTINGS,
   web: { search: { provider: "searxng", endpoint: "https://search.example.test" } },
 };
+
+it("recognizes every registered Harness tool in permission and mutation classification", () => {
+  const tools = selectHarnessTools(DEFAULT_HARNESS_SETTINGS, {
+    ...baseDeps, isOpenAIFamily: true, documentReadAvailable: true, documentPathOverlayAvailable: true,
+    lspNavigationAvailable: true, threadRuntimeAvailable: true, experimentAvailable: true,
+    settingsAvailable: true, materialsAvailable: true, followUpAvailable: true, scheduledTasksAvailable: true,
+    sessionToolAllowlist: ["submit_facts"],
+  });
+  for (const tool of tools) assert.ok(HARNESS_TOOL_META[tool.name], `unclassified Harness tool: ${tool.name}`);
+});
 
 describe("selectHarnessTools web tool gating", () => {
   it("includes webfetch and Host-backed websearch when both are available", () => {

@@ -250,6 +250,7 @@ export function createComputerTool(bridge: HostServicesBridge, _sessionId: strin
     name: "computer",
     label: "Computer",
     ...computerToolPresentation(getRole()),
+    executionMode: "sequential",
     execute: async (_toolCallId, params, signal, _onUpdate, _ctx) => {
       let pendingChanges = 0;
       let uncertainChange = false;
