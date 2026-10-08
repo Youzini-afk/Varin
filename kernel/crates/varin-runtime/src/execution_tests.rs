@@ -1192,3 +1192,128 @@ fn recovered_completed_output_never_resends_model_or_reexecutes_cached_receipts(
         }
     }
 }
+
+#[test]
+fn active_context_compiles_summary_and_tail_without_destroying_original_history() {
+    struct ContextProvider;
+    impl ModelProvider for ContextProvider {
+        fn serialize(&self, view: &RequestView) -> Result<Value, ExecutionError> {
+            assert!(matches!(
+                &view.history[0].provenance,
+                Provenance::SystemInstruction { .. }
+            ));
+            assert!(matches!(
+                &view.history[1].provenance,
+                Provenance::ExternalData { .. }
+            ));
+            assert_eq!(view.binding.memory_checkpoint.as_deref(), Some("memory-7"));
+            assert_eq!(
+                view.binding.instruction_sources,
+                vec!["policy-file".to_string()]
+            );
+            assert_eq!(
+                view.history.last().unwrap().opaque.as_ref().unwrap().value,
+                json!({"signature":"tail-original"})
+            );
+            assert!(!view.history.iter().any(
+                |item| matches!(&item.content,Content::Text{text} if text=="read then answer")
+            ));
+            Ok(serde_json::to_value(view).unwrap())
+        }
+        fn generate(
+            &self,
+            _: &RequestSnapshot,
+            _: &CancellationToken,
+            emit: &mut dyn FnMut(ProviderEvent) -> Result<(), ExecutionError>,
+        ) -> Result<FinishReason, ModelFailure> {
+            emit(ProviderEvent::ItemCompleted {
+                item: ProviderItem {
+                    id: "context-answer".into(),
+                    content: Content::Text {
+                        text: "done".into(),
+                    },
+                    opaque: None,
+                },
+            })
+            .unwrap();
+            Ok(FinishReason::Stop)
+        }
+    }
+    let fixture = Fixture::new();
+    let db = fixture.catalog();
+    let mut prepared = input(&db);
+    let ancestor = prepared.binding.history_range.leaf_id.clone().unwrap();
+    let tail = ConversationItem {
+        id: "context-tail".into(),
+        provenance: Provenance::Assistant,
+        content: Content::ProviderOnly,
+        opaque: Some(OpaqueProviderItem {
+            connection_identity: "fixture-connection".into(),
+            family: "test".into(),
+            adapter_version: "1".into(),
+            value: json!({"signature":"tail-original"}),
+        }),
+    };
+    let mut catalog = db.lock().unwrap();
+    catalog
+        .append_history(
+            &prepared.run_id,
+            prepared.owner_generation,
+            Some(&ancestor),
+            crate::HistorySource::Assistant,
+            serde_json::to_value(&tail).unwrap(),
+            None,
+        )
+        .unwrap();
+    let proposal = crate::catalog::context::ContextProposal {
+        key: "context-1".into(),
+        branch_id: "main".into(),
+        through_id: Some(ancestor.clone()),
+        expected_revision: 0,
+        summary: "earlier user context".into(),
+        effective_system_prompt: "trusted system snapshot".into(),
+        instruction_sources: vec!["policy-file".into()],
+        memory_checkpoint: Some("memory-7".into()),
+    };
+    catalog.publish_context(proposal.clone()).unwrap();
+    prepared.history = catalog.execution_history("main").unwrap();
+    prepared.binding.history_range.leaf_id = catalog.head("main").unwrap();
+    catalog.collect_content_objects().unwrap();
+    drop(catalog);
+    let (progress, _receiver) = ProgressSink::channel(1);
+    let engine = ExecutionEngine {
+        persistence: db.clone(),
+        provider: Arc::new(ContextProvider),
+        tools: Arc::new(Tools::default()),
+        policy: Arc::new(DefaultAgentPolicy),
+        progress,
+    };
+    assert_eq!(
+        engine
+            .run(prepared, CancellationToken::default())
+            .unwrap()
+            .state,
+        RunState::Completed
+    );
+    drop(engine);
+    drop(db);
+    let reopened = fixture.catalog();
+    let mut catalog = reopened.lock().unwrap();
+    catalog.collect_content_objects().unwrap();
+    assert_eq!(
+        catalog.active_context("main").unwrap().unwrap().proposal,
+        proposal
+    );
+    let history = catalog.execution_history("main").unwrap();
+    assert!(history
+        .iter()
+        .any(|item| matches!(&item.content,Content::Text{text} if text=="read then answer")));
+    assert_eq!(
+        history
+            .iter()
+            .find(|item| item.id == "context-tail")
+            .unwrap()
+            .opaque,
+        tail.opaque
+    );
+}

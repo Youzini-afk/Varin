@@ -1076,3 +1076,153 @@ fn explicit_model_image_capability_rejects_attachment_before_request_serializati
     };
     assert!(provider.serialize(&request).is_ok());
 }
+
+// AWS eventstream fixture uses Python zlib CRC32, independently of the native decoder.
+struct BedrockFixture {
+    bytes: Vec<u8>,
+    calls: AtomicUsize,
+}
+impl HttpTransport for BedrockFixture {
+    fn stream(
+        &self,
+        _: HttpRequest<'_>,
+        _: &CancellationToken,
+        _: &mut dyn FnMut(&[u8]) -> Result<bool, ModelFailure>,
+    ) -> Result<(), ModelFailure> {
+        panic!("Bedrock must use binary transport")
+    }
+    fn stream_eventstream(
+        &self,
+        _: HttpRequest<'_>,
+        _: &CancellationToken,
+        receive: &mut dyn FnMut(&[u8]) -> Result<bool, ModelFailure>,
+    ) -> Result<(), ModelFailure> {
+        self.calls.fetch_add(1, Ordering::SeqCst);
+        for byte in &self.bytes {
+            receive(&[*byte])?;
+        }
+        Ok(())
+    }
+}
+struct BedrockFixtureCredential;
+impl CredentialResolver for BedrockFixtureCredential {
+    fn headers(
+        &self,
+        _: Option<&str>,
+        _: &CancellationToken,
+    ) -> Result<reqwest::header::HeaderMap, ModelFailure> {
+        let mut headers = reqwest::header::HeaderMap::new();
+        headers.insert("authorization", "Bearer fake-local-only".parse().unwrap());
+        Ok(headers)
+    }
+}
+fn bedrock_fixture(bytes: Vec<u8>) -> (bedrock::BedrockProvider, Arc<BedrockFixture>) {
+    let transport = Arc::new(BedrockFixture {
+        bytes,
+        calls: AtomicUsize::new(0),
+    });
+    (
+        bedrock::BedrockProvider::new(Connection::new(
+            "https://fixture.invalid/model/model/converse-stream",
+            Arc::new(BedrockFixtureCredential),
+            transport.clone(),
+        )),
+        transport,
+    )
+}
+#[test]
+fn bedrock_fragmented_binary_preserves_reasoning_tool_and_trailing_usage() {
+    let (provider, _) =
+        bedrock_fixture(include_bytes!("../../tests/fixtures/bedrock-converse.bin").to_vec());
+    let (result, events) = generate(&provider, bedrock::FAMILY);
+    assert_eq!(result.unwrap(), FinishReason::ToolCalls);
+    assert!(events.iter().any(|event|matches!(event,ProviderEvent::Usage{receipt} if receipt.input_tokens==Some(10)&&receipt.cached_input_tokens==Some(2))));
+    let items: Vec<_> = events
+        .into_iter()
+        .filter_map(|event| {
+            if let ProviderEvent::ItemCompleted { item } = event {
+                Some(item)
+            } else {
+                None
+            }
+        })
+        .collect();
+    assert_eq!(items.len(), 2);
+    assert_eq!(
+        items[0].opaque.as_ref().unwrap().value["block"]["reasoningContent"]["reasoningText"]
+            ["signature"],
+        "opaque-signature"
+    );
+    assert!(
+        matches!(&items[1].content,Content::ToolCall{call} if call.arguments==json!({"path":"file"}))
+    );
+    let mut request = view(bedrock::FAMILY);
+    request.history = items
+        .into_iter()
+        .map(|item| ConversationItem {
+            id: item.id,
+            provenance: Provenance::Assistant,
+            content: item.content,
+            opaque: item.opaque,
+        })
+        .collect();
+    let replay = provider.serialize(&request).unwrap();
+    assert_eq!(
+        replay["messages"][0]["content"][0]["reasoningContent"]["reasoningText"]["signature"],
+        "opaque-signature"
+    );
+    assert_eq!(
+        replay["messages"][0]["content"][1]["toolUse"]["toolUseId"],
+        "call1"
+    );
+}
+#[test]
+fn bedrock_truncated_or_corrupt_frame_fails_and_pre_cancel_never_sends() {
+    let bytes = include_bytes!("../../tests/fixtures/bedrock-converse.bin");
+    let (provider, _) = bedrock_fixture(bytes[..bytes.len() - 2].to_vec());
+    assert!(generate(&provider, bedrock::FAMILY).0.is_err());
+    let mut corrupt = bytes.to_vec();
+    corrupt[15] ^= 1;
+    let (provider, _) = bedrock_fixture(corrupt);
+    assert_eq!(
+        generate(&provider, bedrock::FAMILY).0.unwrap_err().code,
+        "invalid_eventstream"
+    );
+    let (provider, transport) = bedrock_fixture(bytes.to_vec());
+    let view = view(bedrock::FAMILY);
+    let snapshot = RequestSnapshot {
+        serialized: provider.serialize(&view).unwrap(),
+        view,
+    };
+    let cancel = CancellationToken::default();
+    cancel.cancel();
+    assert_eq!(
+        provider
+            .generate(&snapshot, &cancel, &mut |_| Ok(()))
+            .unwrap_err()
+            .code,
+        "cancelled"
+    );
+    assert_eq!(transport.calls.load(Ordering::SeqCst), 0);
+}
+
+#[test]
+fn actual_binary_http_reaches_bedrock_adapter_through_clean_eof() {
+    let bytes = include_bytes!("../../tests/fixtures/bedrock-converse.bin");
+    let mut response=format!("HTTP/1.1 200 OK\r\nContent-Type: application/vnd.amazon.eventstream\r\nContent-Length: {}\r\nConnection: close\r\n\r\n",bytes.len()).into_bytes();
+    response.extend_from_slice(bytes);
+    let (endpoint, server) = loopback_response(response);
+    let provider = bedrock::BedrockProvider::new(Connection::new(
+        endpoint,
+        Arc::new(BedrockFixtureCredential),
+        Arc::new(NativeHttpTransport::new(|| {
+            reqwest::Client::builder().no_proxy()
+        })),
+    ));
+    let (result, events) = generate(&provider, bedrock::FAMILY);
+    server.join().unwrap();
+    assert_eq!(result.unwrap(), FinishReason::ToolCalls);
+    assert!(events.iter().any(
+        |event| matches!(event,ProviderEvent::Usage{receipt} if receipt.output_tokens==Some(4))
+    ));
+}

@@ -51,6 +51,7 @@ struct Reference {
     content_object: String,
 }
 
+#[derive(Clone)]
 pub(crate) struct ContentStore {
     root: PathBuf,
 }
@@ -212,11 +213,14 @@ impl ContentStore {
     /// failures during mark abort sweep, and objects saved by a rolled-back commit are collectible.
     pub(crate) fn collect(&self, db: &Connection) -> Result<u64> {
         let mut live = HashSet::new();
-        let mut stmt = db.prepare("SELECT json_extract(body,'$.request') FROM model_steps
+        let contexts:bool=db.query_row("SELECT EXISTS(SELECT 1 FROM sqlite_master WHERE type='table' AND name='context_checkpoints')",[],|row|row.get(0))?;
+        let mut roots = "SELECT json_extract(body,'$.request') FROM model_steps
              UNION ALL SELECT json_extract(o.value,'$.item') FROM model_steps m, json_each(m.body,'$.original') o
              UNION ALL SELECT json_extract(body,'$.content') FROM history
              UNION ALL SELECT body FROM model_outputs
-             UNION ALL SELECT body FROM input_history_content")?;
+             UNION ALL SELECT body FROM input_history_content".to_string();
+        if contexts {roots.push_str(" UNION ALL SELECT body FROM context_checkpoints");}
+        let mut stmt=db.prepare(&roots)?;
         let rows = stmt.query_map([], |row| row.get::<_, String>(0))?;
         for row in rows {
             let reference: Reference = serde_json::from_str(&row?)?;

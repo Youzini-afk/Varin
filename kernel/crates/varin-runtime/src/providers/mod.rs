@@ -3,6 +3,8 @@
 pub mod anthropic;
 pub mod auth;
 pub mod azure;
+pub mod bedrock;
+mod aws_eventstream;
 pub mod chat;
 pub mod codex;
 pub mod google;
@@ -37,6 +39,11 @@ pub trait HttpTransport: Send + Sync {
         cancel: &CancellationToken,
         receive: &mut dyn FnMut(&[u8]) -> Result<bool, ModelFailure>,
     ) -> Result<(), ModelFailure>;
+    /// AWS binary event streams have their own framing and content type, never SSE decoding.
+    fn stream_eventstream(&self, _request: HttpRequest<'_>, _cancel: &CancellationToken,
+        _receive: &mut dyn FnMut(&[u8]) -> Result<bool, ModelFailure>) -> Result<(), ModelFailure> {
+        Err(failure("unsupported_transport", "transport does not support AWS event streams"))
+    }
     /// Protocols such as GenerateContent terminate the HTTP body after their finish marker.
     /// They must independently reject EOF without that marker.
     fn stream_to_eof(
@@ -73,13 +80,18 @@ impl NativeHttpTransport {
 }
 
 impl HttpTransport for NativeHttpTransport {
+    fn stream_eventstream(&self, request: HttpRequest<'_>, cancel: &CancellationToken,
+        receive: &mut dyn FnMut(&[u8]) -> Result<bool, ModelFailure>) -> Result<(), ModelFailure> {
+        self.stream_internal(request, cancel, receive, true, "application/vnd.amazon.eventstream")
+    }
+
     fn stream(
         &self,
         request: HttpRequest<'_>,
         cancel: &CancellationToken,
         receive: &mut dyn FnMut(&[u8]) -> Result<bool, ModelFailure>,
     ) -> Result<(), ModelFailure> {
-        self.stream_internal(request, cancel, receive, false)
+        self.stream_internal(request, cancel, receive, false, "text/event-stream")
     }
     fn stream_to_eof(
         &self,
@@ -87,7 +99,7 @@ impl HttpTransport for NativeHttpTransport {
         cancel: &CancellationToken,
         receive: &mut dyn FnMut(&[u8]) -> Result<bool, ModelFailure>,
     ) -> Result<(), ModelFailure> {
-        self.stream_internal(request, cancel, receive, true)
+        self.stream_internal(request, cancel, receive, true, "text/event-stream")
     }
 }
 impl NativeHttpTransport {
@@ -97,6 +109,7 @@ impl NativeHttpTransport {
         cancel: &CancellationToken,
         receive: &mut dyn FnMut(&[u8]) -> Result<bool, ModelFailure>,
         allow_eof: bool,
+        content_type: &str,
     ) -> Result<(), ModelFailure> {
         if cancel.is_cancelled() {
             return Err(failure("cancelled", "generation cancelled"));
@@ -139,13 +152,13 @@ impl NativeHttpTransport {
         state.runtime.block_on(async {
             let client=&state.client;
             let send = client.post(request.endpoint).headers(request.headers)
-                .header("accept", "text/event-stream").json(request.body).send();
+                .header("accept", content_type).json(request.body).send();
             let mut response = tokio::select! {
                 biased;
                 _ = cancel.cancelled() => return Err(failure("cancelled", "generation cancelled")),
                 response = send => response.map_err(|_| failure("transport_error", "model connection failed; no automatic retry"))?,
             };
-            let request_id = response.headers().get("x-request-id").or_else(|| response.headers().get("request-id"))
+            let request_id = response.headers().get("x-request-id").or_else(|| response.headers().get("request-id")).or_else(|| response.headers().get("x-amzn-requestid"))
                 .and_then(|v| v.to_str().ok()).map(str::to_owned);
             if !response.status().is_success() {
                 // Never persist arbitrary error bodies: providers can echo prompt/credentials in them.
@@ -156,8 +169,8 @@ impl NativeHttpTransport {
                     provider_request_id: request_id });
             }
             if !response.headers().get("content-type").and_then(|v|v.to_str().ok())
-                .is_some_and(|v| v.split(';').next().is_some_and(|t|t.trim().eq_ignore_ascii_case("text/event-stream"))) {
-                return Err(failure("invalid_content_type", "model endpoint did not return an SSE stream"));
+                .is_some_and(|v| v.split(';').next().is_some_and(|t|t.trim().eq_ignore_ascii_case(content_type))) {
+                return Err(failure("invalid_content_type", "model endpoint returned an unexpected stream content type"));
             }
             loop {
                 let chunk = tokio::select! {
