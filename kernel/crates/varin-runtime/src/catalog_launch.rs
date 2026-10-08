@@ -6,6 +6,8 @@ use serde::Deserialize;
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(deny_unknown_fields)]
 pub struct SourceSelection {
+    #[serde(default)]
+    pub environment_run_id: Option<String>,
     pub materialized: bool,
     pub workspace_id: String,
     pub execution_workspace_id: String,
@@ -15,6 +17,8 @@ pub struct SourceSelection {
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 #[serde(deny_unknown_fields)]
 pub struct LaunchSelection {
+    #[serde(default)]
+    pub credential_scope: Option<crate::providers::auth::CredentialScope>,
     pub connection_identity: String,
     pub provider_family: String,
     pub model: String,
@@ -31,6 +35,7 @@ impl LaunchSelection {
         source: Option<SourceSelection>,
     ) -> Self {
         Self {
+            credential_scope: None,
             connection_identity: binding.connection_identity.clone(),
             provider_family: binding.provider_family.clone(),
             model: binding.model.clone(),
@@ -41,7 +46,7 @@ impl LaunchSelection {
             source,
         }
     }
-    fn validate(&self) -> Result<()> {
+    pub(super) fn validate(&self) -> Result<()> {
         if self.connection_identity.is_empty()
             || self.provider_family.is_empty()
             || self.model.is_empty()
@@ -74,6 +79,8 @@ impl LaunchSelection {
 }
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 pub struct LaunchIntent {
+    #[serde(default)]
+    pub preparation_failure: Option<String>,
     pub run_id: String,
     pub revision: u64,
     pub selection: LaunchSelection,
@@ -135,12 +142,28 @@ impl Catalog {
     ) -> Result<LaunchIntent> {
         selection.validate()?;
         let tx = self.db.transaction()?;
-        let run: Run = record(&tx, "runs", run_id)?;
+        let mut run: Run = record(&tx, "runs", run_id)?;
         fence(&run, self.epoch)?;
         if run.cancel_requested {
             return Err(RuntimeError::Conflict(
                 "Run cancellation is closing launch admission".into(),
             ));
+        }
+        if let Some(source) = selection.source.as_ref() {
+            if let Some(origin_id) = source.environment_run_id.as_ref() {
+                let origin_run: Run = record(&tx, "runs", origin_id)?;
+                let origin: LaunchIntent = record(&tx, "run_launches", origin_id)?;
+                let mut same_source = source.clone();
+                same_source.environment_run_id = None;
+                if origin_run.thread_id != run.thread_id
+                    || !source.materialized
+                    || origin.selection.source.as_ref() != Some(&same_source)
+                {
+                    return Err(RuntimeError::Conflict(
+                        "environment continuation must preserve the original thread source".into(),
+                    ));
+                }
+            }
         }
         let previous: Option<LaunchIntent> = optional_record(&tx, "run_launches", run_id)?;
         let intent = match previous {
@@ -150,11 +173,15 @@ impl Catalog {
                         "launch selection changed; rebind must preserve its frozen identity".into(),
                     ));
                 }
-                if !bound || intent.bound_epoch == Some(self.epoch) {
+                if !bound
+                    || (intent.bound_epoch == Some(self.epoch)
+                        && intent.preparation_failure.is_none())
+                {
                     intent.requires_rebind = intent.bound_epoch != Some(self.epoch);
                     return Ok(intent);
                 }
                 intent.revision += 1;
+                intent.preparation_failure = None;
                 intent.bound_epoch = Some(self.epoch);
                 intent.requires_rebind = false;
                 put(&tx, "run_launches", run_id, &intent)?;
@@ -162,6 +189,7 @@ impl Catalog {
             }
             None => {
                 let intent = LaunchIntent {
+                    preparation_failure: None,
                     run_id: run_id.into(),
                     revision: 1,
                     selection,
@@ -175,6 +203,20 @@ impl Catalog {
                 intent
             }
         };
+        if bound && run.state == RunState::Waiting {
+            if let Some(wait_id) = run.waiting_on.clone() {
+                let mut wait: Wait = record(&tx, "waits", &wait_id)?;
+                if wait.kind == "launch.prepared" {
+                    wait.cancelled = true;
+                    put(&tx, "waits", &wait_id, &wait)?;
+                    run.state = RunState::Runnable;
+                    run.waiting_on = None;
+                    run.revision += 1;
+                    put(&tx, "runs", run_id, &run)?;
+                    event(&tx, run_id, run.revision, "run.prepared", Value::Null)?;
+                }
+            }
+        }
         event(
             &tx,
             run_id,
@@ -185,6 +227,71 @@ impl Catalog {
                 "run.launch_selected"
             },
             serde_json::to_value(&intent)?,
+        )?;
+        tx.commit()?;
+        Ok(intent)
+    }
+    pub fn fail_launch(&mut self, run_id: &str, code: &str) -> Result<LaunchIntent> {
+        if !matches!(
+            code,
+            "preparation_failed"
+                | "source_unavailable"
+                | "credentials_unavailable"
+                | "binding_changed"
+        ) {
+            return Err(RuntimeError::Invalid(
+                "unknown preparation failure code".into(),
+            ));
+        }
+        let tx = self.db.transaction()?;
+        let mut run: Run = record(&tx, "runs", run_id)?;
+        fence(&run, self.epoch)?;
+        if run.cancel_requested
+            || !matches!(
+                run.state,
+                RunState::Accepted | RunState::Preparing | RunState::Runnable | RunState::Waiting
+            )
+        {
+            return Err(RuntimeError::Conflict(
+                "Run has already entered execution".into(),
+            ));
+        }
+        let mut intent: LaunchIntent = record(&tx, "run_launches", run_id)?;
+        let wait_id = format!("preparation:{}", run_id);
+        if run.state == RunState::Waiting && run.waiting_on.as_deref() != Some(&wait_id) {
+            return Err(RuntimeError::Conflict(
+                "execution recovery wait cannot be replaced by preparation failure".into(),
+            ));
+        }
+        let after_cursor: u64 =
+            tx.query_row("SELECT coalesce(max(cursor),0) FROM events", [], |r| {
+                read_number(r, 0)
+            })?;
+        let wait = Wait {
+            id: wait_id.clone(),
+            run_id: run_id.into(),
+            subject: run_id.into(),
+            kind: "launch.prepared".into(),
+            after_cursor,
+            trigger_cursor: None,
+            cancelled: false,
+        };
+        tx.execute("INSERT INTO waits(id,run_id,body) VALUES(?1,?2,?3) ON CONFLICT(id) DO UPDATE SET body=excluded.body",params![wait_id,run_id,encode(&wait)?])?;
+        intent.preparation_failure = Some(code.into());
+        intent.bound_epoch = None;
+        intent.requires_rebind = true;
+        intent.revision += 1;
+        put(&tx, "run_launches", run_id, &intent)?;
+        run.state = RunState::Waiting;
+        run.waiting_on = Some(wait_id);
+        run.revision += 1;
+        put(&tx, "runs", run_id, &run)?;
+        event(
+            &tx,
+            run_id,
+            run.revision,
+            "run.preparation_failed",
+            json!({"code":code}),
         )?;
         tx.commit()?;
         Ok(intent)

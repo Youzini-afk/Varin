@@ -1,3 +1,4 @@
+import { createHostModelRuntime } from './host-model-runtime.js';
 import { join } from "node:path";
 import { randomUUID } from "node:crypto";
 import { Agent } from "@earendil-works/pi-agent-core";
@@ -147,7 +148,7 @@ export class CompactionWorkerRuntime {
       const model = deserializeCompactionModel(spec.model);
       // Same credential and model stores as the owning session
       // (createAgentSessionServices): auth.json/models.json under agentDir.
-      const modelRuntime = await ModelRuntime.create({
+      const modelRuntime = await createHostModelRuntime({
         allowModelNetwork: false,
         authPath: join(this.#agentDir, "auth.json"),
         modelsPath: join(this.#agentDir, "models.json"),

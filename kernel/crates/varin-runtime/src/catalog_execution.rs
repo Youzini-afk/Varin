@@ -448,6 +448,7 @@ impl Catalog {
                         op.phase = OperationPhase::Terminal;
                         op.outcome = Some(Outcome::Failed);
                         op.effect = Effect::None;
+                        op.effect = Effect::None;
                         op.result = Some(json!({"not_dispatched":reason}));
                     }
                     ToolCompletion::Result {

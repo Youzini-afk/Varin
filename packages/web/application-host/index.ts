@@ -1,3 +1,8 @@
+import { sharedHostCredentialAuthority } from '@varin/runtime-broker';
+import { NativeRuntimeClient } from './lib/kernel/native-runtime-client.js';
+import { NativeThreadAdapter } from './lib/kernel/native-thread-adapter.js';
+import { registerNativeThreadRoutes } from './lib/kernel/native-thread-routes.js';
+import { createNativeModelAuthority } from './lib/kernel/native-model-authority.js';
 import 'reflect-metadata';
 import { createBotDataCleanup } from './lib/bots/bot-data-cleanup.js';
 import { createKernelComputeService } from './lib/kernel/compute-service.js';
@@ -2845,6 +2850,17 @@ async function main(options: StartWebUiServerOptions = {}): Promise<WebUiServerC
       );
     }
   }, { appliesToWorkFocus: ['research'] });
+  const nativeThreads = new NativeThreadAdapter(new NativeRuntimeClient(kernelClient),
+    createNativeModelAuthority(options.piRuntimeBroker?.credentialAuthority ?? sharedHostCredentialAuthority(process.env.VARIN_AGENT_DIR)), async source => {
+      // Public source coordinates identify existing Host workspaces, never arbitrary roots/grants.
+      await documentsAuthority.inspectWorkspace(source.workspaceId);
+      await documentsAuthority.inspectWorkspace(source.executionWorkspaceId);
+    }, (runId, _error) => {
+      // Durable launch remains inspectable/resumable. Never log credentials or provider responses.
+      console.error('[NativeThread] Launch preparation requires attention:', runId);
+    });
+  void nativeThreads.recover().catch(() => console.error('[NativeThread] Saved launch discovery requires attention'));
+  registerNativeThreadRoutes(app, nativeThreads, uiAuthController?.requireAuth ?? ((_request, _response, next) => next()));
   registerHarnessThreadRoutes(app, {
     registry: threadRegistry,
     runtime: threadRuntime,

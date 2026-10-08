@@ -109,6 +109,17 @@ Materialized reads share the execution-environment resource claim with process s
 bounded byte ranges, and reject detected concurrent file changes rather than claiming immutable
 snapshot consistency. The Host coordinator owns when an exact revision is materialized and bound.
 
+Materialized `native_file_write` and `native_file_edit` use the existing `file.apply` journal.
+A complete file read or missing-path observation returns a `readVersion` scoped to the grant,
+registered root, path, and exact file state. Mutation compares that version before preparing bytes
+and supplies the observed state as `file.apply`'s conditional precondition. Partial reads do not
+claim a whole-file version. Edits select unique matches in the original text and reject overlaps;
+text mutation rejects symlinks and binary/non-UTF-8 content. The original mode is retained, with
+BOM preservation and line-ending-aware edit matching. Durable intents retain their exact target
+and request identity, so replay does not apply an edit twice. A confirmed apply reports a confirmed
+effect; an error after dispatch remains indeterminate. These tools require an explicit materialized
+source and Host-selected write permission; fixed-branch bindings are not silently mutated.
+
 `file.capture` returns typed missing/file/directory/symlink/unsupported state and installs regular-file bytes as
 kernel content objects; `file.apply` is conditional on an expected state and can consume only an authorized
 object owner. `file.mkdir`, `file.remove`, and `file.rename` use the same root and lease authority. Started file

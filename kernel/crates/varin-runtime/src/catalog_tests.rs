@@ -1218,3 +1218,117 @@ fn launch_selection_survives_restart_before_materialization_and_binding() {
     assert_eq!(bound.bound_epoch, Some(db.epoch()));
     assert!(!bound.requires_rebind);
 }
+
+#[test]
+fn successor_environment_selection_reuses_only_its_original_thread_source() {
+    use super::launches::{LaunchSelection, SourceSelection};
+    let f = Fixture::new();
+    let mut db = f.open();
+    let origin = submit(&mut db);
+    let original_selection = LaunchSelection::from_binding(
+        &request_snapshot(&origin).view.binding,
+        crate::execution::PolicyIdentity {
+            name: "agent".into(),
+            version: "1".into(),
+        },
+        Some(SourceSelection {
+            environment_run_id: None,
+            materialized: true,
+            workspace_id: "workspace".into(),
+            execution_workspace_id: "execution".into(),
+            branch_id: Some("source".into()),
+            revision: Some(7),
+        }),
+    );
+    db.bind_launch(&origin.run_id, original_selection.clone())
+        .unwrap();
+    let queued = db
+        .enqueue_input(&crate::catalog::inputs::EnqueueInput {
+            key: "atomic-successor".into(),
+            thread_id: "thread".into(),
+            branch_id: "main".into(),
+            mode: InputMode::NextRun,
+            input: json!({"text":"next turn"}),
+            configuration: None,
+        })
+        .unwrap();
+    let saved_successor = db
+        .launch_intent(&queued.run_id)
+        .unwrap()
+        .expect("enqueue must atomically preserve the launch selection");
+    assert_eq!(saved_successor.bound_epoch, None);
+    assert!(saved_successor.requires_rebind);
+    assert_eq!(
+        saved_successor
+            .selection
+            .source
+            .as_ref()
+            .unwrap()
+            .environment_run_id,
+        Some(origin.run_id.clone())
+    );
+
+    db.fork_branch("main", "successor", Some(&origin.input_id))
+        .unwrap();
+    let mut next = command();
+    next.key = "next".into();
+    next.branch_id = "successor".into();
+    next.expected_head = Some(origin.input_id.clone());
+    let successor = db.submit(&next).unwrap();
+    let mut inherited = original_selection.clone();
+    inherited.source.as_mut().unwrap().environment_run_id = Some(origin.run_id.clone());
+    let mut wrong = inherited.clone();
+    wrong.source.as_mut().unwrap().revision = Some(8);
+    assert!(db.select_launch(&successor.run_id, wrong).is_err());
+    db.select_launch(&successor.run_id, inherited.clone())
+        .unwrap();
+    db.create_thread("other-thread", "other-branch").unwrap();
+    next.key = "other".into();
+    next.thread_id = "other-thread".into();
+    next.branch_id = "other-branch".into();
+    next.expected_head = None;
+    let other = db.submit(&next).unwrap();
+    assert!(db.select_launch(&other.run_id, inherited.clone()).is_err());
+    drop(db);
+    let db = f.open();
+    assert_eq!(
+        db.launch_intent(&queued.run_id).unwrap().unwrap().selection,
+        saved_successor.selection
+    );
+    assert_eq!(
+        db.launch_intent(&successor.run_id)
+            .unwrap()
+            .unwrap()
+            .selection,
+        inherited
+    );
+}
+
+#[test]
+fn initial_input_and_launch_are_one_durable_idempotent_admission() {
+    let f = Fixture::new();
+    let mut db = f.open();
+    db.create_thread("thread", "main").unwrap();
+    let selection:super::launches::LaunchSelection=serde_json::from_value(json!({"connection_identity":"pinned","provider_family":"fixture","model":"model","configuration_generation":1,"tool_schema_generation":1,"tools":[],"policy":{"name":"agent","version":"1"},"source":null})).unwrap();
+    let admitted = db
+        .submit_with_launch(&command(), Some(selection.clone()))
+        .unwrap();
+    assert_eq!(
+        db.submit_with_launch(&command(), Some(selection.clone()))
+            .unwrap(),
+        admitted
+    );
+    let mut changed = selection.clone();
+    changed.model = "another".into();
+    assert!(db.submit_with_launch(&command(), Some(changed)).is_err());
+    drop(db);
+    let mut db = f.open();
+    let launch = db.launch_intent(&admitted.run_id).unwrap().unwrap();
+    assert_eq!(launch.selection, selection);
+    assert!(launch.requires_rebind);
+    assert_eq!(db.history("main").unwrap().len(), 1);
+    assert_eq!(
+        db.submit_with_launch(&command(), Some(selection)).unwrap(),
+        admitted
+    );
+}

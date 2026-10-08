@@ -33,6 +33,7 @@ import {
   type KernelProcessReadResult,
   type KernelProcessWriteResult,
   type KernelProcessStreamEvent,
+  type NativeRuntimeStreamEvent,
   type KernelProcessSubscribeResult,
 } from "./protocol.generated.js";
 
@@ -536,6 +537,11 @@ export class KernelClient {
   private buffer = Buffer.alloc(0);
   private readonly pending = new Map<string, PendingRequest>();
   private readonly processSubscriptions = new Map<string, ProcessSubscriptionEntry>();
+  private readonly nativeRuntimeListeners = new Set<(event: NativeRuntimeStreamEvent) => void>();
+  onNativeRuntimeEvent(listener: (event: NativeRuntimeStreamEvent) => void): () => void {
+    this.nativeRuntimeListeners.add(listener);
+    return () => this.nativeRuntimeListeners.delete(listener);
+  }
   private readonly credentialBridge: NativeCredentialBridge;
   private window = new KernelRequestWindow(KERNEL_REQUEST_WINDOW);
   private nativeWindow = new KernelRequestWindow(KERNEL_REQUEST_WINDOW);
@@ -749,10 +755,25 @@ export class KernelClient {
       if (this.buffer.byteLength < length + 4) return;
       const body = this.buffer.subarray(4, length + 4);
       this.buffer = this.buffer.subarray(length + 4);
-      let response: KernelResponse | KernelProcessStreamEvent;
-      try { response = JSON.parse(body.toString("utf8")) as KernelResponse | KernelProcessStreamEvent; }
+      let response: KernelResponse | KernelProcessStreamEvent | NativeRuntimeStreamEvent;
+      try { response = JSON.parse(body.toString("utf8")) as KernelResponse | KernelProcessStreamEvent | NativeRuntimeStreamEvent; }
       catch (error) { this.failAll(new KernelClientError({ code: "kernel-protocol-error", message: `Invalid Rust kernel response: ${String(error)}`, retryable: false }), true); return; }
       if (this.credentialBridge.consume(response)) continue;
+      if (response.kind === "runtime-event") {
+        if (response.v !== KERNEL_PROTOCOL_VERSION || response.kernelEpoch !== this.epoch
+          || !["durable", "progress"].includes(response.stream)
+          || (response.stream === "durable" && (!Number.isSafeInteger(response.cursor) || response.cursor < 0))
+          || (response.stream === "progress" && (typeof response.runId !== "string" || typeof response.streamId !== "string"
+            || !Number.isSafeInteger(response.sequence) || response.sequence < 0))) {
+          this.failAll(new KernelClientError({ code: "kernel-protocol-error", message: "Malformed native runtime event", retryable: false }), true);
+          return;
+        }
+        for (const listener of this.nativeRuntimeListeners) {
+          // Presentation consumers cannot take down the authority transport.
+          try { listener(response); } catch { this.nativeRuntimeListeners.delete(listener); }
+        }
+        continue;
+      }
       if (response.kind === "process-event") {
         this.consumeProcessEvent(response);
         if (this.transportFailed) return;

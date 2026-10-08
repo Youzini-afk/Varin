@@ -27,6 +27,10 @@
       "types": "./dist/pi-sdk-packages.d.ts",
       "import": "./dist/pi-sdk-packages.js"
     },
+    "./credentials": {
+      "types": "./dist/credential-authority.d.ts",
+      "import": "./dist/credential-authority.js"
+    },
     "./host": "./dist/host-bootstrap.js"
   },
   "scripts": {

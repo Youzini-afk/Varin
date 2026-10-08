@@ -11,3 +11,5 @@ export * from "./runtime-manager.js";
 export * from "./runtime-selection-store.js";
 export * from "./standalone-runtime.js";
 export * from "./runtime-surface-connection.js";
+
+export { HostCredentialAuthority, sharedHostCredentialAuthority } from '@varin/pi-host/credentials';

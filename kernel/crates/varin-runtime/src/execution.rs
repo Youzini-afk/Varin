@@ -8,7 +8,7 @@ use crate::types::{Effect, Lifetime, Outcome, RunState};
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use std::collections::{BTreeMap, BTreeSet};
-use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::sync::{mpsc, Arc};
 
 #[derive(Debug, Clone, thiserror::Error, Serialize, Deserialize, PartialEq, Eq)]
@@ -516,7 +516,8 @@ pub trait Persistence: Send + Sync {
     ) -> Result<(), ExecutionError>;
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(tag = "kind", content = "data", rename_all = "snake_case")]
 pub enum ExecutionEvent {
     Provider(ProviderEvent),
     ToolCompleted(ToolResult),
@@ -526,12 +527,14 @@ pub enum ExecutionEvent {
 /// Durable completion facts are always available from Persistence, even if progress is dropped.
 #[derive(Debug, Clone)]
 pub struct ProgressUpdate {
+    pub sequence: u64,
     pub run_id: String,
     pub event: ExecutionEvent,
 }
 
 #[derive(Debug, Clone, Default)]
 pub struct ProgressSink {
+    sequence: Arc<AtomicU64>,
     sender: Option<mpsc::SyncSender<ProgressUpdate>>,
 }
 impl ProgressSink {
@@ -539,6 +542,7 @@ impl ProgressSink {
         let (sender, receiver) = mpsc::sync_channel(capacity);
         (
             Self {
+                sequence: Arc::new(AtomicU64::new(0)),
                 sender: Some(sender),
             },
             receiver,
@@ -549,6 +553,7 @@ impl ProgressSink {
         if let Some(sender) = &self.sender {
             // Full and disconnected observers both lose transient updates, never block execution.
             let _ = sender.try_send(ProgressUpdate {
+                sequence: self.sequence.fetch_add(1, Ordering::Relaxed) + 1,
                 run_id: run_id.into(),
                 event,
             });

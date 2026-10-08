@@ -7,10 +7,11 @@ const schemaPath = path.join(root, 'kernel', 'protocol', 'schema.json');
 const schema = JSON.parse(fs.readFileSync(schemaPath, 'utf8'));
 const target = path.join(root, 'packages', 'web', 'application-host', 'lib', 'kernel', 'protocol.generated.ts');
 const rustTarget = path.join(root, 'kernel', 'crates', 'varin-kernel', 'src', 'protocol_generated.rs');
+const nativeProtocolTarget = path.join(root, 'packages', 'protocol', 'src', 'native-runtime.generated.ts');
 const nativeRustTarget = path.join(root, 'kernel', 'crates', 'varin-runtime', 'src', 'types_generated.rs');
 const nativeStructs = Object.entries(schema.nativeRuntimeStructs ?? {}).map(([name, spec]) => {
   const fields = Object.entries(spec.fields).map(([key, value]) => {
-    let type = ({string:"String", number:"u64", boolean:"bool", "string | null":"Option<String>"})[value.type];
+    let type = ({string:"String", number:"u64", boolean:"bool", "string | null":"Option<String>", "number | null":"Option<u64>"})[value.type];
     if (value.optional && type && !type.startsWith("Option<")) type = `Option<${type}>`;
     if (!type) throw new Error(`Unsupported native field type ${value.type}`);
     const field = key.replace(/([a-z0-9])([A-Z])/g, "$1_$2").toLowerCase();
@@ -41,6 +42,7 @@ const renderRequestUnion = () => {
 };
 const renderMethodParams = () => `export type KernelMethodParams = {\n${Object.entries(methodParams).map(([method, paramsType]) => `  ${JSON.stringify(method)}: ${paramsType};`).join('\n')}\n};`;
 const dtoEntries = Object.entries(schema.dto ?? {}).filter(([name]) => !(schema.requestUnion && name === 'KernelRequest'));
+const nativeProtocolGenerated = '// Generated from kernel/protocol/schema.json. Do not hand-edit.\n\n' + dtoEntries.filter(([name]) => name.startsWith('Native')).map(([name, spec]) => renderDto(name, spec)).join('\n\n') + '\n';
 const generated = `/**
  * Generated from \`kernel/protocol/schema.json\`.
  * Do not hand-edit the wire shapes; run \`node scripts/generate-kernel-protocol.mjs\`.
@@ -74,6 +76,7 @@ const rustType = (type) => {
   if (type === 'string | null') return 'RequiredNullable<String>';
   if (type === 'number | null') return 'RequiredNullable<i64>';
   if (type === 'boolean | null') return 'RequiredNullable<bool>';
+  if (type.endsWith(' | null')) return `RequiredNullable<${rustType(type.slice(0, -7))}>`;
   if (type === 'KernelBranchState') return 'PathState';
   return type;
 };
@@ -84,7 +87,7 @@ for (let changed = true; changed;) {
     const spec = schema.dto?.[name];
     if (!spec?.fields) continue;
     for (const descriptor of Object.values(spec.fields)) {
-      const bare = descriptor.type.endsWith('[]') ? descriptor.type.slice(0, -2) : descriptor.type;
+      const bare = descriptor.type.replace(/\[\]$/u, '').replace(/ \| null$/u, '');
       if (schema.dto?.[bare] && !schema.dto[bare].raw && !rustDtoNames.has(bare)) {
         rustDtoNames.add(bare);
         changed = true;
@@ -123,13 +126,15 @@ if (checkOnly) {
   const existing = fs.existsSync(target) ? fs.readFileSync(target, 'utf8') : '';
   const existingRust = fs.existsSync(rustTarget) ? fs.readFileSync(rustTarget, 'utf8') : '';
   const existingNative = fs.existsSync(nativeRustTarget) ? fs.readFileSync(nativeRustTarget, "utf8") : "";
-  if (existing !== generated || existingRust !== rustGenerated || existingNative !== nativeRustGenerated) {
-    const stale = [existing !== generated ? target : null, existingRust !== rustGenerated ? rustTarget : null, existingNative !== nativeRustGenerated ? nativeRustTarget : null].filter(Boolean);
+  const existingNativeProtocol = fs.existsSync(nativeProtocolTarget) ? fs.readFileSync(nativeProtocolTarget, 'utf8') : '';
+  if (existing !== generated || existingRust !== rustGenerated || existingNative !== nativeRustGenerated || existingNativeProtocol !== nativeProtocolGenerated) {
+    const stale = [existing !== generated ? target : null, existingRust !== rustGenerated ? rustTarget : null, existingNative !== nativeRustGenerated ? nativeRustTarget : null, existingNativeProtocol !== nativeProtocolGenerated ? nativeProtocolTarget : null].filter(Boolean);
     console.error(`Kernel protocol DTO is out of date: ${stale.map((entry) => path.relative(root, entry)).join(', ')}`);
     process.exit(1);
   }
   console.log(`Kernel protocol ${schema.protocolVersion} is up to date.`);
 } else {
+  fs.writeFileSync(nativeProtocolTarget, nativeProtocolGenerated);
   fs.writeFileSync(target, generated);
   fs.writeFileSync(rustTarget, rustGenerated);
   fs.writeFileSync(nativeRustTarget, nativeRustGenerated);

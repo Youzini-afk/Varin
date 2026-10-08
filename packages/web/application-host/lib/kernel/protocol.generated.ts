@@ -8,6 +8,9 @@ export const KERNEL_REQUEST_WINDOW = 2 as const;
 export const KERNEL_PROTOCOL_SCHEMA = "varin.kernel.v1" as const;
 
 export type KernelMethod =
+  | "runtime.launch.fail"
+  | "runtime.thread.inspect"
+  | "runtime.thread.list"
   | "runtime.launch.select"
   | "runtime.launch.inspect"
   | "runtime.launch.list"
@@ -126,7 +129,37 @@ export type KernelMethod =
   | "compute.release"
   | "compute.grammar.register";
 
+export interface NativeSubmitLaunch {
+  source: NativeLaunchSourceParams | null;
+  enabledTools: string[];
+  credentialScope?: NativeCredentialScope;
+}
+
+export interface NativeLaunchFailedParams {
+  runId: string;
+  code: string;
+}
+
+export interface NativeThreadParams {
+  threadId: string;
+}
+
+export interface NativeThreadBranch {
+  branch_id: string;
+  head: string | null;
+  active_run_id: string | null;
+  latest_run: NativeRun | null;
+}
+
+export interface NativeThreadSummary {
+  thread_id: string;
+  branches: NativeThreadBranch[];
+}
+
+export type NativeRuntimeStreamEvent = {v: 1; kind: 'runtime-event'; kernelEpoch: string} & ({stream: 'durable'; cursor: number} | {stream: 'progress'; runId: string; streamId: string; sequence: number; event: unknown});
+
 export interface NativeLaunchSourceParams {
+  environmentRunId?: string;
   materialized: boolean;
   workspaceId: string;
   executionWorkspaceId: string;
@@ -136,12 +169,13 @@ export interface NativeLaunchSourceParams {
 
 export interface NativeLaunchSelectParams {
   runId: string;
-  source: NativeLaunchSourceParams;
+  source: NativeLaunchSourceParams | null;
   enabledTools: string[];
   credentialScope?: NativeCredentialScope;
 }
 
 export interface NativeLaunchSource {
+  environment_run_id?: string | null;
   materialized: boolean;
   workspace_id: string;
   execution_workspace_id: string;
@@ -161,6 +195,7 @@ export interface NativeLaunchPolicy {
 }
 
 export interface NativeLaunchSelection {
+  credential_scope: NativeCredentialScope | null;
   connection_identity: string;
   provider_family: string;
   model: string;
@@ -172,6 +207,7 @@ export interface NativeLaunchSelection {
 }
 
 export interface NativeLaunchIntent {
+  preparation_failure: string | null;
   run_id: string;
   revision: number;
   selection: NativeLaunchSelection;
@@ -285,13 +321,14 @@ export interface NativeCredentialScope {
 }
 
 export interface NativeModelSessionConfiguration {
+  providerId?: string;
   providerFamily: string;
   model: string;
   endpoint: string;
   credentialEnvironment: string | null;
   allowAnonymous: boolean;
   configurationGeneration: number;
-  maxOutputTokens: number;
+  maxOutputTokens: number | null;
   azureDeployment?: string | null;
   azureApiVersion?: string | null;
   legacyMaxTokens?: boolean;
@@ -326,6 +363,7 @@ export interface NativeThreadCreateParams {
 }
 
 export interface NativeInputSubmitParams {
+  launch?: NativeSubmitLaunch;
   key: string;
   threadId: string;
   branchId: string;
@@ -1540,6 +1578,9 @@ export interface KernelComputeReadResult {
 }
 
 export type KernelMethodParams = {
+  "runtime.launch.fail": NativeLaunchFailedParams;
+  "runtime.thread.inspect": NativeThreadParams;
+  "runtime.thread.list": KernelEmptyParams;
   "runtime.input.enqueue": NativeInputEnqueueParams;
   "runtime.input.edit": NativeInputEditParams;
   "runtime.input.cancel": NativeInputCancelParams;
@@ -1660,6 +1701,33 @@ export type KernelMethodParams = {
 };
 
 export type KernelRequest =
+  | {
+      v: typeof KERNEL_PROTOCOL_VERSION;
+      kind: "request";
+      id: string;
+      method: "runtime.launch.fail";
+      params: NativeLaunchFailedParams;
+      epoch?: string;
+      grantId?: string;
+    }
+  | {
+      v: typeof KERNEL_PROTOCOL_VERSION;
+      kind: "request";
+      id: string;
+      method: "runtime.thread.inspect";
+      params: NativeThreadParams;
+      epoch?: string;
+      grantId?: string;
+    }
+  | {
+      v: typeof KERNEL_PROTOCOL_VERSION;
+      kind: "request";
+      id: string;
+      method: "runtime.thread.list";
+      params: KernelEmptyParams;
+      epoch?: string;
+      grantId?: string;
+    }
   | {
       v: typeof KERNEL_PROTOCOL_VERSION;
       kind: "request";

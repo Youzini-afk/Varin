@@ -1,3 +1,4 @@
+import { isCredentialStoreResponse } from './credential-store-rpc.js';
 import {
   encodeEnvelope,
   JsonLineDecoder,
@@ -22,6 +23,8 @@ export class IpcHostTransport implements HostTransport {
   start(handler: EnvelopeHandler, onClose?: () => void, onError?: TransportErrorHandler): void {
     if (this.#messageHandler) throw new Error("IPC transport is already started");
     this.#messageHandler = (message) => {
+      // Private secret-bearing owner replies are handled by RemoteCredentialStore, never public RPC.
+      if (isCredentialStoreResponse(message)) return;
       try {
         handler(validateEnvelope(message));
       } catch (error) {

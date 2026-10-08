@@ -34,8 +34,8 @@ The caller can stop waiting immediately; the bounded refresh/persistence operati
   only references, stable account/connection identity and generation, never bearer/refresh material
 - `auth.rs` implements `NativeCredentialBroker`, `CredentialScope`, transactional store/refresh traits
   and a bounded HTTPS refresh client. The production factory needs an injected-resolver binding path
-  and trusted reference/version fields; actual Host/platform storage and provider registrations remain
-  required, and synthetic tests do not establish that integration
+  and trusted reference/version fields. The Host store/IPC integration is now present as described
+  below; additional platform stores and live provider authorization remain separate acceptance gates
 
 ## Codex-specific contract discovered
 
@@ -60,3 +60,30 @@ Responses body to a different URL does not implement this contract.
 - Host: `packages/pi-host/src/provider-configuration.ts` (`inferenceRuntime` and trust composition)
 
 Only source code was inspected. No user credential files or token values were read.
+
+## Integrated Host authority (current source)
+
+The Application Host now owns `sharedHostCredentialAuthority(agentDir)`. Brokered Pi session,
+compaction and inference runtimes inject `RemoteCredentialStore`; private child-process messages are
+handled before public protocol validation and never appear in public event/results. The existing
+`FileAuthStorageBackend` pathname lock remains the authority; the Host writes one credential JSON
+with local binding metadata by temp-file sync and atomic rename under that lock. There is no journal
+or second credential database. Existing mode/ownership is preserved where supported; full Windows
+and extended-ACL parity is not claimed by the current checks.
+
+The reserved per-credential metadata contains an owner-issued local handle and relink generation.
+It is not an invented external account ID. Refresh preserves it; explicit replacement and verified
+account change advance it in the same credential write. Verified provider account metadata is separate
+and Codex requires it. Native model selection comes from the trusted Host catalog; endpoints cannot be
+supplied by the renderer. Durable launch selection pins the scope used when rebinding after restart.
+
+The native kernel rendezvous carries only scope/request metadata outward and transient header replies
+inward. Host HTTP credential writes and utility OAuth refresh also use the shared owner. Standalone
+Pi launches retain their existing owner because they have no parent Application Host channel.
+Credential helper/env keys preserve existing Pi resolution in the child; native bindings to dynamic
+or separately configured models.json key sources remain explicitly gated pending source-owned identity.
+
+Reviewer evidence includes temporary fake-store refresh/relink/reopen, a real Pi worker through the
+production parent client proving the worker's decoy credential file is untouched, and native private
+IPC with fake credentials and real loopback model HTTP. These checks do not use real login tokens or
+prove every cloud auth flow, external SDK variant, or platform filesystem behavior.

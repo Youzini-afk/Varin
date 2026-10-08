@@ -13,8 +13,9 @@ export interface NativeSourceLaunch {
   executionWorkspaceId: string;
   branchId: string;
   revision: number;
+  environmentRunId?: string;
   mode: 'fixed_branch' | 'materialized';
-  tools: readonly ('file_read' | 'process_inspect' | 'process_read' | 'process_spawn')[];
+  tools: readonly ('file_read' | 'file_write' | 'file_edit' | 'process_inspect' | 'process_read' | 'process_spawn')[];
 }
 
 /** Uses the existing Storage authority for source reads, materialization and process containment.
@@ -32,8 +33,8 @@ export async function startNativeRunFromSource(
     || !Number.isSafeInteger(selection.revision) || selection.revision < 0) throw new Error('Native launch requires a complete fixed source identity');
   if (selection.mode !== 'fixed_branch' && selection.mode !== 'materialized') throw new Error('Native source mode is unavailable');
   const tools = [...new Set(selection.tools)];
-  if (tools.some(tool => !['file_read', 'process_inspect', 'process_read', 'process_spawn'].includes(tool))) throw new Error('Native source launch selected an unavailable tool');
-  if (selection.mode === 'fixed_branch' && tools.includes('process_spawn')) throw new Error('Process execution requires the selected source to be materialized');
+  if (tools.some(tool => !['file_read', 'file_write', 'file_edit', 'process_inspect', 'process_read', 'process_spawn'].includes(tool))) throw new Error('Native source launch selected an unavailable tool');
+  if (selection.mode === 'fixed_branch' && tools.some(tool => ['process_spawn', 'file_write', 'file_edit'].includes(tool))) throw new Error('Mutating tools require the selected source to be materialized');
   const run = await runtime.run(selection.runId, signal);
   if (['completed', 'failed', 'cancelled'].includes(run.state) || run.cancel_requested) throw new Error('Native Run is closed to launch');
   const saved = await runtime.launch(run.id, signal);
@@ -41,14 +42,16 @@ export async function startNativeRunFromSource(
     const source = saved.selection.source;
     if (!source || source.workspace_id !== selection.workspaceId || source.execution_workspace_id !== selection.executionWorkspaceId
       || source.branch_id !== selection.branchId || source.revision !== selection.revision
-      || source.materialized !== (selection.mode === 'materialized')) throw new Error('Native rebind cannot change its durable source selection');
+      || source.materialized !== (selection.mode === 'materialized')
+      || (source.environment_run_id ?? undefined) !== selection.environmentRunId) throw new Error('Native rebind cannot change its durable source selection');
     const selectedNames = tools.map(tool => `native_${tool}`).sort();
     if (JSON.stringify(selectedNames) !== JSON.stringify(saved.selection.tools.map(tool => tool.name).sort())) throw new Error('Native rebind cannot change its durable tools');
   }
-  const credentialScope = options.credentialOwner ? await kernel.registerNativeCredentialOwner(run.id, options.credentialOwner) : undefined;
+  const credentialScope = options.credentialOwner ? await options.credentialOwner.scope() : undefined;
   await runtime.selectLaunch({ runId: run.id,
     source: { materialized: selection.mode === 'materialized', workspaceId: selection.workspaceId,
-      executionWorkspaceId: selection.executionWorkspaceId, branchId: selection.branchId, revision: selection.revision },
+      executionWorkspaceId: selection.executionWorkspaceId, branchId: selection.branchId, revision: selection.revision,
+      ...(selection.environmentRunId ? { environmentRunId: selection.environmentRunId } : {}) },
     enabledTools: tools, ...(credentialScope ? { credentialScope } : {}),
   }, signal);
   // Do not use old grants from the durable selection. Each Host lifetime issues its own permit.
@@ -70,9 +73,10 @@ export async function startNativeRunFromSource(
     if (selection.mode === 'materialized') {
       const handshake = kernel.handshake ?? await kernel.start();
       const storageRoot = await canonicalizePathIdentity(handshake.storageRoot);
-      const key = createHash('sha256').update(JSON.stringify([selection.workspaceId, run.id])).digest('hex');
+      const key = createHash('sha256').update(JSON.stringify([selection.workspaceId, selection.environmentRunId ?? run.id])).digest('hex');
       const relativeTarget = `managed/native-runs/${key}`;
       const targetPath = path.resolve(storageRoot, relativeTarget);
+      if (!selection.environmentRunId) {
       const container = await actor.fileRootRegister({ workspaceId: selection.workspaceId, executionWorkspaceId: selection.executionWorkspaceId, canonicalRoot: storageRoot }, signal);
       if (typeof container.rootId !== 'string') throw new Error('Native materialization root registration failed');
       const result = await actor.fileMaterialize({
@@ -83,6 +87,7 @@ export async function startNativeRunFromSource(
         sourceRoot: source.root,
       }, signal);
       if (result.status !== 'materialized') throw new Error('Native source materialization requires reconciliation');
+      }
       const canonicalRoot = await canonicalizePathIdentity(targetPath);
       if (!isPathWithinRoot(canonicalRoot, path.join(storageRoot, 'managed', 'native-runs'))) throw new Error('Native materialization escaped its managed directory');
       const registered = await actor.fileRootRegister({ workspaceId: selection.workspaceId, executionWorkspaceId: selection.executionWorkspaceId, canonicalRoot }, signal);
@@ -94,6 +99,7 @@ export async function startNativeRunFromSource(
       grantId: grant.grantId, runId: run.id, threadId: run.thread_id,
       workspaceId: selection.workspaceId, executionWorkspaceId: selection.executionWorkspaceId,
       enabledTools: tools, sourceMode: selection.mode,
+      ...(selection.environmentRunId ? { environmentRunId: selection.environmentRunId } : {}),
       ...(selection.mode === 'fixed_branch' ? { fileSource: fixed } : { rootId, materializedSource: fixed }),
     };
     return options.credentialOwner

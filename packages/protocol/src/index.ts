@@ -39,3 +39,5 @@ export * from "./runtime.js";
 export * from "./session.js";
 export * from "./session-features.js";
 export * from "./types.js";
+
+export * from "./native-runtime.generated.js";

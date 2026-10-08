@@ -1,4 +1,5 @@
-import { readPiAuthFile as readAuthFile, writePiAuthFile as writeAuthFile } from '../pi-config/storage.js';
+import { sharedHostCredentialAuthority } from '@varin/runtime-broker';
+import { resolvePiAgentDir } from '../pi-config/storage.js';
 import { readPiConfiguration as readConfig } from '../pi-config/storage.js';
 import { getCatalogProvider } from './catalog.js';
 import { getAuthEntryForProvider } from './resolve.js';
@@ -115,7 +116,7 @@ const toGoogleSchema = (schema: unknown): unknown => {
 // refreshed token persisted back into Pi's auth.json.
 // ---------------------------------------------------------------------------
 
-let openaiRefreshPromise: Promise<AuthEntry> | null = null;
+
 
 const decodeJwtClaims = (token: string): Record<string, unknown> | null => {
   try {
@@ -134,45 +135,26 @@ const extractChatgptAccountId = (accessToken: string): string | null => {
   return typeof value === 'string' && value ? value : null;
 };
 
-const refreshOpenaiOauth = async (entry: AuthEntry): Promise<AuthEntry> => {
-  if (!openaiRefreshPromise) {
-    openaiRefreshPromise = (async () => {
-      const response = await fetch(CODEX_TOKEN_URL, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          grant_type: 'refresh_token',
-          refresh_token: entry.refresh,
-          client_id: CODEX_CLIENT_ID,
-        }),
-        signal: AbortSignal.timeout(30_000),
-      });
-      if (!response.ok) {
-        throw await httpError(response, 'OpenAI token refresh');
-      }
-      const payload = asRecord(await response.json()) ?? {};
-      const access = asString(payload.access_token) ?? '';
-      if (!access) {
-        throw new Error('OpenAI token refresh returned no access token');
-      }
-      const refreshed = {
-        ...entry,
-        type: 'oauth',
-        access,
-        refresh: typeof payload?.refresh_token === 'string' && payload.refresh_token
-          ? payload.refresh_token
-          : entry.refresh,
-        expires: Date.now() + (Number(payload?.expires_in) > 0 ? Number(payload.expires_in) : 3600) * 1000,
-      };
-      const auth = readAuthFile();
-      auth.openai = refreshed;
-      writeAuthFile(auth);
-      return refreshed;
-    })().finally(() => {
-      openaiRefreshPromise = null;
+const refreshOpenaiOauth = async (_entry: AuthEntry): Promise<AuthEntry> => {
+  const owner = sharedHostCredentialAuthority(resolvePiAgentDir());
+  const result = await owner.modifyWithIntent('openai', 'refresh', async current => {
+    if (current?.type !== 'oauth') throw new Error('OpenAI OAuth credential is no longer selected');
+    if (current.access && current.expires > Date.now()) return undefined;
+    const response = await fetch(CODEX_TOKEN_URL, {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ grant_type: 'refresh_token', refresh_token: current.refresh, client_id: CODEX_CLIENT_ID }),
+      signal: AbortSignal.timeout(30_000),
     });
-  }
-  return openaiRefreshPromise;
+    if (!response.ok) throw new Error('OpenAI token refresh failed');
+    const payload = asRecord(await response.json()) ?? {};
+    const access = asString(payload.access_token);
+    const expiresIn = Number(payload.expires_in);
+    if (!access || !Number.isFinite(expiresIn) || expiresIn <= 0) throw new Error('OpenAI token refresh returned invalid credentials');
+    return { ...current, type: 'oauth' as const, access,
+      refresh: asString(payload.refresh_token) ?? current.refresh, expires: Date.now() + expiresIn * 1000 };
+  });
+  if (!result) throw new Error('OpenAI OAuth credential is unavailable');
+  return result as AuthEntry;
 };
 
 const ensureFreshOpenaiOauth = async (entry: AuthEntry): Promise<AuthEntry> => {

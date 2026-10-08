@@ -1,3 +1,4 @@
+import { createHostModelRuntime } from './host-model-runtime.js';
 import { randomUUID } from "node:crypto";
 import {
   chmod,
@@ -811,7 +812,7 @@ export class ProviderConfigurationManager {
     const documents = await this.#documents(cwd, false);
     const key = JSON.stringify([documents.user?.data, documents.custom?.data]);
     if (this.#inferenceCatalog?.key !== key) {
-      const catalog = ModelRuntime.create({
+      const catalog = createHostModelRuntime({
         allowModelNetwork: false,
         authPath: join(this.#agentDir, "auth.json"),
         modelsPath: join(this.#agentDir, "models.json"),
