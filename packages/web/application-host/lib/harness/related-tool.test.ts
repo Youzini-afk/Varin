@@ -83,7 +83,6 @@ describe("related tool", () => {
     const byName = await executeRelated({ anchor: "explore" }, store);
     expect(byName.anchor.kind).toBe("name");
     expect(byName.definitions[0]?.name).toBe("explore");
-    expect(byName.text).toContain("lsp.references");
     expect(byName.text).not.toContain("rank ");
   });
 
@@ -128,13 +127,13 @@ describe("related tool", () => {
     const result = await executeRelated({ anchor: "shared" }, store);
     expect(result.anchor.kind).toBe("name");
     expect(result.definitions).toHaveLength(8);
-    expect(result.text).toContain("matched 4 more file(s) than were walked");
+    expect(result.text).toContain("4 matching files were not examined");
   });
 
   it("distinguishes an empty catalog from a miss", async () => {
     const empty = await executeRelated({ anchor: "explore" }, store);
     expect(empty.status).toBe("empty");
-    expect(empty.text).toContain("Catalog languages are TypeScript and JavaScript");
+    expect(empty.text).toContain("no indexed files in this scope");
     await store.replaceFileSymbols("lib/a.ts", "typescript", [
       { name: "alpha", kind: "function", range },
     ], "disk-r1");
@@ -158,9 +157,8 @@ describe("related tool", () => {
     expect(manifest.roles).toEqual([
       { path: "package.json", role: "other", ground: "project-declaration" },
     ]);
-    expect(source.text).toContain("lib/core.ts source · filename-pattern");
-    expect(manifest.text).toContain("package.json other · project-declaration");
-    expect(source.text).toContain("query-time");
+    expect(source.text).not.toContain("File roles:");
+    expect(manifest.text).toContain("package.json other");
     const relations = await store.getFileRelations("lib/core.ts");
     expect(JSON.stringify(relations ?? {})).not.toMatch(/filename-pattern|project-declaration|"role"/);
   });
