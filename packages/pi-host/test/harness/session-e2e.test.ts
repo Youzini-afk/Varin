@@ -754,7 +754,7 @@ describe("session e2e — work focus", () => {
           const actions = JSON.stringify(parameters.properties.action);
           assert.equal(actions.includes('"grant"'), next === 'main');
           assert.equal(actions.includes('"act"'), next !== 'read-only');
-          assert.equal(providerSystemPrompt(contexts.at(-1)).includes('This is the main thread.'), next === 'main');
+          assert.equal(/This is the main thread\b/.test(providerSystemPrompt(contexts.at(-1))), next === 'main');
           if (next === 'read-only') assert.ok(!JSON.stringify(parameters.properties.access).includes('control'));
           const memory = declarations.find(tool => tool.name === 'memory')!;
           assert.ok(!JSON.stringify(memory.parameters).includes('workspace'), 'unbound conversations offer no project scope');

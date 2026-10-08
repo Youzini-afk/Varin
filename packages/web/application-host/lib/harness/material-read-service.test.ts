@@ -112,12 +112,17 @@ describe("material reading authority", () => {
     const f = fixture();
     const readArtifact = vi.fn(async () => ({ name: "plot.pdf", chunks: (async function* () { yield Buffer.from("%PDF-1.7\nplot"); })() }));
     f.host.experimentService = { readArtifact } as never;
-    f.host.threadRegistry = { getSessionBinding: async () => null, listThreads: async () => [] } as never;
+    f.host.threadRegistry = {
+      getSessionBinding: async () => null,
+      resolveSessionOwner: async () => null,
+      listThreads: async () => [],
+    } as never;
     const service = createMaterialReadService(f.host);
     const request = { artifact: { attemptId: "attempt", artifactId: "artifact" }, view: "overview" as const };
     expect((await service.handle(request, context)).status).toBe("failed");
     expect(readArtifact).not.toHaveBeenCalled();
-    await service.handle(request, { ...context, requestSource: "user", authorizedPaths: [] });
+    const imported = await service.handle(request, { ...context, requestSource: "user", authorizedPaths: [] });
+    expect(imported.status).toBe("ok");
     expect(readArtifact).toHaveBeenCalledWith(expect.objectContaining({ sessionId: "session", rootSessionId: "session", allowedThreadIds: [] }), "attempt", "artifact", context.signal);
     expect(f.ingest).toHaveBeenCalledWith(expect.objectContaining({ sourceUrl: "experiment://attempt/artifact", title: "plot.pdf" }), expect.anything(), { view: "overview" });
   });

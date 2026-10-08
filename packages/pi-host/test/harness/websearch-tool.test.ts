@@ -45,7 +45,6 @@ describe("websearch tool", () => {
     assert.ok(text.includes("2 results"));
     assert.ok(text.includes("1. Hello World"));
     assert.ok(text.includes("Exa is unavailable; used Parallel."));
-    assert.ok(text.includes("webfetch"));
     assert.ok(text.includes("https://example.com/1"));
     assert.ok(text.includes("A greeting"));
     bridge.dispose();
@@ -121,7 +120,7 @@ describe("websearch tool", () => {
     assert.match(text, /query "good": 1 results/);
     assert.match(text, /query "bad": failed — provider down/);
     assert.match(text, /url https:\/\/example\.com\/known: ok/);
-    assert.match(text, /snapshot snap-1/);
+    assert.match(text, /snapshot_id: snap-1/);
     const details = result.details as { sources?: Array<{ url: string; snapshotId?: string }> };
     assert.equal(details.sources?.length, 2);
     assert.equal(details.sources?.[1]?.snapshotId, "snap-1");

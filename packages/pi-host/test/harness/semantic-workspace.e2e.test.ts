@@ -84,6 +84,7 @@ interface SemanticSession {
   prompt: (text: string) => Promise<void>;
   observationOrder: string[];
   toolResults: Array<{ toolName: string; result: unknown }>;
+  exploreResults: ExploreQueryFinishResult[];
   close: () => Promise<void>;
 }
 
@@ -255,6 +256,8 @@ async function createSemanticHarness(options: {
     let currentExecution: { id: string; promises: Promise<unknown>[] } | undefined;
     const observationOrder: string[] = [];
     const toolResults: Array<{ toolName: string; result: unknown }> = [];
+    const exploreResults: ExploreQueryFinishResult[] = [];
+    const exploreFinishRequests = new Set<string>();
     const actor = () => ({
       authorityInstanceId: "semantic-public-e2e-authority",
       sessionId,
@@ -278,6 +281,11 @@ async function createSemanticHarness(options: {
 
     const router = createHarnessRouter({
       respond: async (identity, requestId, outcome) => {
+        // Inspect query internals at the Host boundary; public tool output
+        // carries source excerpts without the diagnostic provenance object.
+        if (exploreFinishRequests.delete(requestId) && outcome.ok) {
+          exploreResults.push(outcome.result as ExploreQueryFinishResult);
+        }
         host.respondHarness(identity.sessionId, requestId, outcome);
       },
       resolveActor: (identity) => serviceHost.resolveActor(identity),
@@ -296,6 +304,8 @@ async function createSemanticHarness(options: {
         }
       }
       if (event === "harness.request") {
+        const request = data as HostEventData<"harness.request">;
+        if (request.method === "explore.query.finish") exploreFinishRequests.add(request.requestId);
         if (!serviceHost.hasActor(actor())) {
           serviceHost.registerSession({
             actor: actor(),
@@ -470,7 +480,7 @@ async function createSemanticHarness(options: {
       router.dispose();
       if (hostsByCwd.get(path.resolve(executionRoot)) === host) hostsByCwd.delete(path.resolve(executionRoot));
     };
-    return { host, prompt, observationOrder, toolResults, close };
+    return { host, prompt, observationOrder, toolResults, exploreResults, close };
   };
 
   return {
@@ -502,11 +512,9 @@ const lastToolMessage = (contexts: Context[]): string => {
   return serializedToolResult(context, "explore");
 };
 const exploreDetails = (session: SemanticSession): ExploreQueryFinishResult["details"] => {
-  const result = session.toolResults.findLast((tool) => tool.toolName === "explore")?.result as {
-    details?: { provenance?: ExploreQueryFinishResult["details"] };
-  } | undefined;
-  assert.ok(result?.details?.provenance, "public explore must provide structured provenance");
-  return result.details.provenance;
+  const result = session.exploreResults.at(-1);
+  assert.ok(result, "the public explore call must finish through the Host query service");
+  return result.details;
 };
 
 describe("public explore workspace semantic runtime", () => {
