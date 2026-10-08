@@ -804,6 +804,17 @@ const upsertSummary = (
   ...summaries.filter((candidate) => candidate.id !== summary.id),
 ]);
 
+const updateSummaryName = (summaries: SessionSummary[], sessionId: string, name: string | undefined): SessionSummary[] => {
+  if (!summaries.some(summary => summary.id === sessionId && summary.name !== name)) return summaries;
+  return summaries.map((summary) => {
+    if (summary.id !== sessionId) return summary;
+    const updated = { ...summary };
+    if (name === undefined) delete updated.name;
+    else updated.name = name;
+    return updated;
+  });
+};
+
 const initialFields = (runtimeKey: string): Pick<
   PiSessionStoreState,
   | 'attentionBySession'
@@ -1088,6 +1099,7 @@ export const createPiSessionStore = (
             supersededWorkers.set(snapshot.sessionId, stale);
           }
           set((state) => ({
+            summaries: updateSummaryName(state.summaries, snapshot.sessionId, snapshot.name),
             records: upsertRecord(state.records, snapshot.sessionId, (current) => {
               const view = reconcileSessionTimelineSnapshot(
                 current,
@@ -1310,6 +1322,7 @@ export const createPiSessionStore = (
       }
       const persistedToolResults = collectToolResults(entriesByScope.values());
       set((state) => ({
+        summaries: updateSummaryName(state.summaries, sessionId, snapshot.name),
         records: upsertRecord(state.records, sessionId, (current) => {
           const next: PiSessionViewState = {
             ...current,
@@ -1928,13 +1941,21 @@ export const createPiSessionStore = (
       loadCatalog: async (cwd) => {
         const generation = ++catalogGeneration;
         const requestedCwd = cwd ?? null;
+        const namesAtStart = new Map(Object.entries(get().records).map(([id, record]) => [id, record.snapshot?.name]));
         set({ catalogCwd: requestedCwd, catalogLoading: true, lastError: null });
         try {
           const { result, runtimeKey } = await request('session.list', {
             ...(cwd === undefined ? {} : { cwd }),
           });
           if (generation !== catalogGeneration || !contextIsCurrent(runtimeKey)) return result;
-          const summaries = sortSummaries(result);
+          let summaries = sortSummaries(result);
+          // A background title may land while the catalog request is in flight.
+          // Preserve that newer name instead of flashing the old fallback again.
+          for (const [id, record] of Object.entries(get().records)) {
+            if (record.open && record.snapshot && record.snapshot.name !== namesAtStart.get(id)) {
+              summaries = updateSummaryName(summaries, id, record.snapshot.name);
+            }
+          }
           for (const summary of summaries) deletedSessionIds.delete(summary.id);
           set({
             catalogCwd: requestedCwd,

@@ -1154,8 +1154,12 @@ export class SessionHost {
     sessionId: string,
     name: string,
     sessionFile?: string,
+    onlyIfUnnamed = false,
   ): Promise<{ name?: string; sessionId: string }> {
     if (this.sessionId === sessionId) {
+      if (onlyIfUnnamed && this.session.sessionName?.trim()) {
+        return { name: this.session.sessionName, sessionId };
+      }
       this.session.setSessionName(name);
       const normalized = this.session.sessionName;
       return { ...(normalized === undefined ? {} : { name: normalized }), sessionId };
@@ -1174,7 +1178,7 @@ export class SessionHost {
         `The Pi session file belongs to ${manager.getSessionId()}, not ${sessionId}`,
       );
     }
-    manager.appendSessionInfo(name);
+    if (!onlyIfUnnamed || !manager.getSessionName()?.trim()) manager.appendSessionInfo(name);
     const normalized = manager.getSessionName();
     return { ...(normalized === undefined ? {} : { name: normalized }), sessionId };
   }

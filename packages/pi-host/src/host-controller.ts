@@ -1100,6 +1100,7 @@ export class HostController {
           readString(params, "sessionId"),
           readString(params, "name", { allowEmpty: true }),
           optionalString(params, "sessionFile"),
+          readBoolean(params, "onlyIfUnnamed", { defaultValue: false }),
         );
       case "session.fork": {
         const position = optionalString(params, "position") ?? "before";

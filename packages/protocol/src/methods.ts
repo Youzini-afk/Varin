@@ -516,7 +516,7 @@ export interface HostMethodMap {
     result: SessionHeader | null;
   };
   "session.rename": {
-    params: { name: string; sessionFile?: string; sessionId: string };
+    params: { name: string; onlyIfUnnamed?: boolean; sessionFile?: string; sessionId: string };
     result: { name?: string; sessionId: string };
   };
   "session.snapshot": {
