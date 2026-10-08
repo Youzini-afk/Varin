@@ -73,7 +73,10 @@ vi.mock('@/stores/useUIStore', () => ({
   }),
 }));
 vi.mock('@/stores/usePiSessionStore', () => ({
-  usePiSessionStore: (select: (state: typeof mocks) => unknown) => select(mocks),
+  usePiSessionStore: Object.assign(
+    (select: (state: typeof mocks) => unknown) => select(mocks),
+    { getState: () => mocks, subscribe: () => () => {} },
+  ),
 }));
 vi.mock('@/stores/useWebSourcesStore', () => ({
   useWebSources: () => mocks.webSources,

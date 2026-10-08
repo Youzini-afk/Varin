@@ -556,7 +556,7 @@ describe("harness search service", () => {
     expect(result.status).toBe("ready");
     expect(result.files[0]?.path).toBe("disk.ts");
     expect(readFile).not.toHaveBeenCalled();
-    expect(search).toHaveBeenCalledWith({ query: "match", workspaceId: "ws-1", maxResults: 6, before: 0, after: 0 }, expect.anything());
+    expect(search).toHaveBeenCalledWith({ query: "match", workspaceId: "ws-1", maxResults: 6, before: 0, after: 0, includeHidden: false }, expect.anything());
   });
 
   it("propagates abort while reading a surface snapshot", async () => {
