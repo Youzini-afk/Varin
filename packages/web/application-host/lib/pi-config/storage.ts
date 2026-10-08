@@ -1,3 +1,4 @@
+import { sharedHostCredentialAuthority } from '@varin/runtime-broker';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
@@ -40,30 +41,19 @@ const mergeObjects = (base: JsonObject, override: JsonObject): JsonObject => {
 
 export const readPiAuthFile = (): JsonObject => readJsonObject(getPiAuthFilePath());
 
-export const writePiAuthFile = (auth: JsonObject): void => {
-  const authFile = getPiAuthFilePath();
-  fs.mkdirSync(path.dirname(authFile), { recursive: true });
-  if (fs.existsSync(authFile)) fs.copyFileSync(authFile, `${authFile}.varin.backup`);
-  fs.writeFileSync(authFile, `${JSON.stringify(auth, null, 2)}\n`, { encoding: 'utf8', mode: 0o600 });
-};
-
-export const savePiProviderAuth = (providerId: unknown, entry: JsonObject = {}): unknown => {
+export const savePiProviderAuth = async (providerId: unknown, entry: JsonObject = {}): Promise<unknown> => {
   if (typeof providerId !== 'string' || !providerId.trim()) throw new Error('Provider ID is required');
   const key = typeof entry.key === 'string' ? entry.key.trim() : '';
   if (!key) throw new Error('API key is required');
-  const auth = readPiAuthFile();
-  auth[providerId.trim()] = { type: 'api_key', key };
-  writePiAuthFile(auth);
-  return auth[providerId.trim()];
+  return sharedHostCredentialAuthority(resolvePiAgentDir()).modifyWithIntent(providerId.trim(), 'replace', async () => ({ type: 'api_key', key }));
 };
 
-export const removePiProviderAuth = (providerId: unknown): boolean => {
+export const removePiProviderAuth = async (providerId: unknown): Promise<boolean> => {
   const id = typeof providerId === 'string' ? providerId.trim() : '';
   if (!id) throw new Error('Provider ID is required');
-  const auth = readPiAuthFile();
-  if (!auth[id]) return false;
-  delete auth[id];
-  writePiAuthFile(auth);
+  const owner = sharedHostCredentialAuthority(resolvePiAgentDir());
+  if (!await owner.readRaw(id)) return false;
+  await owner.delete(id);
   return true;
 };
 

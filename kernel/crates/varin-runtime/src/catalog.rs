@@ -157,6 +157,12 @@ impl Catalog {
     }
     pub fn create_thread(&mut self, thread_id: &str, branch_id: &str) -> Result<()> {
         let tx = self.db.transaction()?;
+        let initial:Option<String>=tx.query_row("SELECT json_extract(data,'$.branch_id') FROM events WHERE subject=?1 AND kind='thread.created' ORDER BY cursor LIMIT 1",[thread_id],|r|r.get(0)).optional()?;
+        if let Some(initial)=initial {
+            if initial==branch_id {return Ok(());}
+            return Err(RuntimeError::Conflict("thread was created with another initial branch".into()));
+        }
+
         tx.execute("INSERT INTO threads(id) VALUES(?1)", [thread_id])?;
         tx.execute(
             "INSERT INTO branches(id,thread_id,head) VALUES(?1,?2,NULL)",
@@ -182,9 +188,13 @@ impl Catalog {
             .ok_or_else(|| RuntimeError::NotFound(branch.into()))?)
     }
     pub fn submit(&mut self, command: &SubmitInput) -> Result<Receipt> {
+        self.submit_with_launch(command, None)
+    }
+    pub fn submit_with_launch(&mut self, command: &SubmitInput, launch: Option<launches::LaunchSelection>) -> Result<Receipt> {
+        if let Some(selection)=launch.as_ref(){selection.validate()?;}
         execution_persistence::user_input_items("admission",&command.input)?;
         let history_content = self.content.save_history(&command.input, &None)?;
-        let input = encode(command)?;
+        let input = if let Some(selection)=launch.as_ref(){encode(&json!({"command":command,"launch":selection}))?}else{encode(command)?};
         let tx = self.db.transaction()?;
         let duplicate: Option<(String, String)> = tx
             .query_row(
@@ -244,6 +254,19 @@ impl Catalog {
             "UPDATE branches SET head=?2,active_run=?3 WHERE id=?1",
             params![command.branch_id, input_id, run_id],
         )?;
+        if let Some(selection)=launch {
+            if let Some(source)=selection.source.as_ref() {
+                if let Some(origin_id)=source.environment_run_id.as_ref() {
+                    let origin_run:Run=record(&tx,"runs",origin_id)?;
+                    let origin:launches::LaunchIntent=record(&tx,"run_launches",origin_id)?;
+                    let mut same_source=source.clone();same_source.environment_run_id=None;
+                    if origin_run.thread_id!=run.thread_id || !source.materialized || origin.selection.source.as_ref()!=Some(&same_source) {return Err(RuntimeError::Conflict("environment continuation must preserve the original thread source".into()));}
+                }
+            }
+            let intent=launches::LaunchIntent{run_id:run_id.clone(),revision:1,selection,bound_epoch:None,requires_rebind:true,preparation_failure:None};
+            tx.execute("INSERT INTO run_launches(id,body) VALUES(?1,?2)",params![run_id,encode(&intent)?])?;
+            event(&tx,&run_id,1,"run.launch_selected",Value::Null)?;
+        }
         let cursor = event(
             &tx,
             &run_id,
@@ -1066,3 +1089,6 @@ pub mod launches;
 
 #[path="catalog_recovery.rs"]
 pub mod recovery;
+
+#[path="catalog_observe.rs"]
+mod observe;

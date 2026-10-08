@@ -279,7 +279,22 @@ impl Storage {
         let decoded = BASE64
             .decode(bytes)
             .map_err(|error| KernelError::Operation(format!("invalid bytesBase64: {error}")))?;
-        if decoded.len() > 65536 { return Err(KernelError::Protocol("Upload chunk exceeds transport bound".into())); }
+        if decoded.len() > 65536 {
+            return Err(KernelError::Protocol(
+                "Upload chunk exceeds transport bound".into(),
+            ));
+        }
+        self.stream_blob_bytes(stream_id, sequence, &decoded, grant_id)
+    }
+
+    pub(super) fn stream_blob_bytes(
+        &mut self,
+        stream_id: &str,
+        sequence: u64,
+        bytes: &[u8],
+        grant_id: &str,
+    ) -> Result<(), KernelError> {
+        self.check_cancelled()?;
         let stream = self
             .streams
             .get_mut(stream_id)
@@ -291,7 +306,7 @@ impl Storage {
         }
         let next = stream
             .received
-            .checked_add(decoded.len() as u64)
+            .checked_add(bytes.len() as u64)
             .ok_or_else(|| KernelError::Operation("content stream length overflow".to_string()))?;
         if next > stream.expected_length {
             return Err(KernelError::Operation(
@@ -299,7 +314,7 @@ impl Storage {
             ));
         }
         let mut file = OpenOptions::new().append(true).open(&stream.staging)?;
-        file.write_all(&decoded)?;
+        file.write_all(bytes)?;
         stream.received = next;
         stream.next_sequence += 1;
         Ok(())

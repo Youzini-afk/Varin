@@ -9,7 +9,7 @@ description = "Varin native durable agent coordination and execution"
 sha2.workspace = true
 hex.workspace = true
 fs2.workspace = true
-rusqlite.workspace = true
+rusqlite = { workspace = true, features = ["hooks"] }
 serde.workspace = true
 serde_json.workspace = true
 thiserror.workspace = true

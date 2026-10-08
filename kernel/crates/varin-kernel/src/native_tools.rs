@@ -2,6 +2,9 @@
 //! No second catalog, file writer, process manager, or management-authority fallback exists here.
 use crate::error::{error_code, KernelError};
 use crate::model::Grant;
+use crate::storage::native_file_mutations::{
+    NativeFileEditArgs, NativeFileWriteArgs, NativeTextMutation,
+};
 use crate::storage::Storage;
 use base64::{engine::general_purpose::STANDARD as BASE64, Engine as _};
 use serde::{Deserialize, Serialize};
@@ -18,6 +21,8 @@ use varin_runtime::{Effect, Lifetime, Outcome};
 #[serde(rename_all = "snake_case")]
 pub(crate) enum NativeToolKind {
     FileRead,
+    FileWrite,
+    FileEdit,
     ProcessInspect,
     ProcessRead,
     ProcessSpawn,
@@ -26,6 +31,8 @@ impl NativeToolKind {
     fn name(self) -> &'static str {
         match self {
             Self::FileRead => "native_file_read",
+            Self::FileWrite => "native_file_write",
+            Self::FileEdit => "native_file_edit",
             Self::ProcessInspect => "native_process_inspect",
             Self::ProcessRead => "native_process_read",
             Self::ProcessSpawn => "native_process_spawn",
@@ -34,6 +41,8 @@ impl NativeToolKind {
     fn from_name(name: &str) -> Option<Self> {
         [
             Self::FileRead,
+            Self::FileWrite,
+            Self::FileEdit,
             Self::ProcessInspect,
             Self::ProcessRead,
             Self::ProcessSpawn,
@@ -70,6 +79,8 @@ pub(crate) struct NativeToolBinding {
     #[serde(default)]
     pub source_mode: NativeSourceMode,
     pub materialized_source: Option<FixedFileSource>,
+    /// Source lineage only; resource admission always uses the registered root.
+    pub environment_run_id: Option<String>,
     pub enabled_tools: BTreeSet<NativeToolKind>,
 }
 #[derive(Debug, Clone, Deserialize)]
@@ -114,6 +125,7 @@ struct ProcessSpawnArgs {
 #[derive(Debug, Clone)]
 enum ResourceOperation {
     FileRead(FileReadArgs),
+    FileMutation(NativeTextMutation),
     ProcessInspect(ProcessInspectArgs),
     ProcessRead(ProcessReadArgs),
     ProcessSpawn(ProcessSpawnArgs),
@@ -131,6 +143,12 @@ impl ResourceOperation {
         }
         let parsed = match kind {
             NativeToolKind::FileRead => serde_json::from_value(args.clone()).map(Self::FileRead),
+            NativeToolKind::FileWrite => {
+                serde_json::from_value::<NativeFileWriteArgs>(args.clone())
+                    .map(|args| Self::FileMutation(NativeTextMutation::Write(args)))
+            }
+            NativeToolKind::FileEdit => serde_json::from_value::<NativeFileEditArgs>(args.clone())
+                .map(|args| Self::FileMutation(NativeTextMutation::Edit(args))),
             NativeToolKind::ProcessInspect => {
                 serde_json::from_value(args.clone()).map(Self::ProcessInspect)
             }
@@ -145,6 +163,15 @@ impl ResourceOperation {
         match &parsed {
             Self::FileRead(args) => {
                 normalized_path(&args.path, false)?;
+            }
+            Self::FileMutation(mutation) => {
+                normalized_path(mutation.path(), false)?;
+                if mutation.read_version().is_empty() {
+                    return Err(ExecutionError::new(
+                        "invalid_tool_arguments",
+                        "readVersion is required",
+                    ));
+                }
             }
             Self::ProcessSpawn(args) => {
                 normalized_path(&args.cwd, true)?;
@@ -182,6 +209,11 @@ impl ResourceOperation {
         context: &ToolExecutionContext,
     ) -> (&'static str, Value) {
         match self {
+            Self::FileMutation(mutation) => (
+                "file.apply",
+                json!({"workspaceId":binding.workspace_id,"rootId":binding.root_id,
+                "path":mutation.path(),"operationId":context.operation_id}),
+            ),
             Self::FileRead(args) if binding.source_mode == NativeSourceMode::Materialized => {
                 let mut params = json!({"workspaceId":binding.workspace_id,"rootId":binding.root_id,
                     "path":args.path,"offset":args.offset});
@@ -363,6 +395,17 @@ impl NativeToolExecutor {
                 "file read requires a fixed branch revision",
             ));
         }
+        if binding.source_mode != NativeSourceMode::Materialized
+            && binding
+                .enabled_tools
+                .iter()
+                .any(|kind| matches!(kind, NativeToolKind::FileWrite | NativeToolKind::FileEdit))
+        {
+            return Err(ExecutionError::new(
+                "invalid_tool_binding",
+                "file mutation requires an explicit materialized source",
+            ));
+        }
         if binding.source_mode == NativeSourceMode::Materialized
             && (binding.file_source.is_some()
                 || binding.root_id.as_deref().is_none_or(str::is_empty))
@@ -435,6 +478,11 @@ impl NativeToolExecutor {
     }
     fn contract(&self, call: &ToolCall, operation: &ResourceOperation) -> ToolContract {
         let (resource, access, job) = match operation {
+            ResourceOperation::FileMutation(_) => (
+                format!("environment:{}", self.binding.execution_workspace_id),
+                Access::Write,
+                false,
+            ),
             ResourceOperation::FileRead(_)
                 if self.binding.source_mode == NativeSourceMode::Materialized =>
             {
@@ -477,7 +525,7 @@ impl NativeToolExecutor {
         ToolContract {
             name: call.name.clone(),
             schema_version: "1".into(),
-            read_only: !job,
+            read_only: access == Access::Read,
             completion: if job {
                 CompletionKind::Job
             } else {
@@ -565,6 +613,7 @@ impl ToolExecutor for NativeToolExecutor {
             };
         }
         let spawn = matches!(operation, ResourceOperation::ProcessSpawn(_));
+        let mutation = matches!(operation, ResourceOperation::FileMutation(_));
         match self
             .resources
             .call(&self.binding, context, operation, false, cancel)
@@ -590,6 +639,27 @@ impl ToolExecutor for NativeToolExecutor {
                     }
                 }
             }
+            // The conditional resource owner proved the target was untouched.
+            // Use the explicit no-dispatch receipt; generic mutating Result(None)
+            // is deliberately normalized to unknown by the runtime.
+            Ok(result) if mutation && result["status"] == "conflict" => {
+                ToolCompletion::NotDispatched {
+                    reason: format!("File version conflict; no file was changed. Read the current file before retrying. {result}"),
+                }
+            }
+            Ok(result) if mutation => ToolCompletion::Result {
+                outcome: if result["status"] == "applied" {
+                    Outcome::Succeeded
+                } else {
+                    Outcome::Failed
+                },
+                effect: if result["status"] == "applied" {
+                    Effect::Confirmed
+                } else {
+                    Effect::None
+                },
+                content: result,
+            },
             Ok(result) => ToolCompletion::Result {
                 outcome: Outcome::Succeeded,
                 effect: Effect::None,
@@ -599,12 +669,16 @@ impl ToolExecutor for NativeToolExecutor {
                 reason: failure.error.to_string(),
             },
             Err(failure) => ToolCompletion::Result {
-                outcome: if spawn {
+                outcome: if spawn || mutation {
                     Outcome::Indeterminate
                 } else {
                     Outcome::Failed
                 },
-                effect: if spawn { Effect::Unknown } else { Effect::None },
+                effect: if spawn || mutation {
+                    Effect::Unknown
+                } else {
+                    Effect::None
+                },
                 content: json!({"error":error_code(&failure.error),"message":failure.error.to_string()}),
             },
         }
@@ -613,6 +687,14 @@ impl ToolExecutor for NativeToolExecutor {
 
 fn tool_schema(kind: NativeToolKind) -> Value {
     let (properties, required) = match kind {
+        NativeToolKind::FileWrite => (
+            json!({"path":{"type":"string"},"readVersion":{"type":"string","minLength":1},"content":{"type":"string"}}),
+            vec!["path", "readVersion", "content"],
+        ),
+        NativeToolKind::FileEdit => (
+            json!({"path":{"type":"string"},"readVersion":{"type":"string","minLength":1},"edits":{"type":"array","minItems":1,"items":{"type":"object","additionalProperties":false,"properties":{"oldText":{"type":"string","minLength":1},"newText":{"type":"string"}},"required":["oldText","newText"]}}}),
+            vec!["path", "readVersion", "edits"],
+        ),
         NativeToolKind::FileRead => (
             json!({"path":{"type":"string"},"offset":{"type":"integer","minimum":0},"length":{"type":"integer","minimum":0}}),
             vec!["path"],
@@ -679,6 +761,24 @@ pub(crate) fn serve_resource(
             &params,
         )?;
         validate_binding(&grant, &request.binding, &request.context)?;
+        if let ResourceOperation::FileMutation(mutation) = &request.operation {
+            storage.set_cancellation(request.cancellation.shared_flag());
+            let result = storage.native_file_mutate(
+                &request.binding.workspace_id,
+                request
+                    .binding
+                    .root_id
+                    .as_deref()
+                    .expect("validated materialized root"),
+                &request.context.operation_id,
+                mutation,
+                &grant,
+                !request.authorize_only,
+                &mut dispatched,
+            );
+            storage.clear_cancellation();
+            return result;
+        }
         if method == "file.read" {
             storage.set_cancellation(request.cancellation.shared_flag());
             let result = storage.native_file_read(&authorized, &grant, !request.authorize_only);

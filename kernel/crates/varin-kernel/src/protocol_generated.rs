@@ -13,6 +13,23 @@ pub(crate) struct RequiredNullable<T>(pub(crate) Option<T>);
 
 #[derive(Clone, Debug, Deserialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub(crate) struct NativeLaunchFailedParams {
+    pub(crate) run_id: String,
+    pub(crate) code: String,
+}
+
+#[derive(Clone, Debug, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub(crate) struct NativeThreadParams {
+    pub(crate) thread_id: String,
+}
+
+#[derive(Clone, Debug, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub(crate) struct KernelEmptyParams {}
+
+#[derive(Clone, Debug, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub(crate) struct NativeInputEnqueueParams {
     pub(crate) key: String,
     pub(crate) thread_id: String,
@@ -53,7 +70,7 @@ pub(crate) struct NativeHistoryParams {
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub(crate) struct NativeLaunchSelectParams {
     pub(crate) run_id: String,
-    pub(crate) source: NativeLaunchSourceParams,
+    pub(crate) source: RequiredNullable<NativeLaunchSourceParams>,
     pub(crate) enabled_tools: Vec<String>,
     pub(crate) credential_scope: Option<NativeCredentialScope>,
 }
@@ -63,10 +80,6 @@ pub(crate) struct NativeLaunchSelectParams {
 pub(crate) struct NativeRunParams {
     pub(crate) run_id: String,
 }
-
-#[derive(Clone, Debug, Deserialize)]
-#[serde(rename_all = "camelCase", deny_unknown_fields)]
-pub(crate) struct KernelEmptyParams {}
 
 #[derive(Clone, Debug, Deserialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
@@ -86,6 +99,7 @@ pub(crate) struct NativeThreadCreateParams {
 #[derive(Clone, Debug, Deserialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub(crate) struct NativeInputSubmitParams {
+    pub(crate) launch: Option<NativeSubmitLaunch>,
     pub(crate) key: String,
     pub(crate) thread_id: String,
     pub(crate) branch_id: String,
@@ -1066,6 +1080,7 @@ pub(crate) struct KernelComputeGrammarParams {
 #[derive(Clone, Debug, Deserialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub(crate) struct NativeLaunchSourceParams {
+    pub(crate) environment_run_id: Option<String>,
     pub(crate) materialized: bool,
     pub(crate) workspace_id: String,
     pub(crate) execution_workspace_id: String,
@@ -1080,6 +1095,14 @@ pub(crate) struct NativeCredentialScope {
     pub(crate) authority: String,
     pub(crate) account: String,
     pub(crate) generation: i64,
+}
+
+#[derive(Clone, Debug, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub(crate) struct NativeSubmitLaunch {
+    pub(crate) source: RequiredNullable<NativeLaunchSourceParams>,
+    pub(crate) enabled_tools: Vec<String>,
+    pub(crate) credential_scope: Option<NativeCredentialScope>,
 }
 
 #[derive(Clone, Debug, Deserialize)]
@@ -1303,6 +1326,15 @@ pub(crate) struct KernelVerificationInputIdentity {
 
 pub(crate) fn validate_generated_method_params(method: &str, params: &Value) -> Result<(), String> {
     match method {
+        "runtime.launch.fail" => serde_json::from_value::<NativeLaunchFailedParams>(params.clone())
+            .map(|_| ())
+            .map_err(|error| error.to_string()),
+        "runtime.thread.inspect" => serde_json::from_value::<NativeThreadParams>(params.clone())
+            .map(|_| ())
+            .map_err(|error| error.to_string()),
+        "runtime.thread.list" => serde_json::from_value::<KernelEmptyParams>(params.clone())
+            .map(|_| ())
+            .map_err(|error| error.to_string()),
         "runtime.input.enqueue" => {
             serde_json::from_value::<NativeInputEnqueueParams>(params.clone())
                 .map(|_| ())

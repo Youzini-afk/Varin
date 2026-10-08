@@ -1,3 +1,4 @@
+import { sharedHostCredentialAuthority, CredentialStoreServer, type HostCredentialAuthority } from '@varin/pi-host/credentials';
 import { randomUUID } from "node:crypto";
 import { lstat, realpath, rm, stat } from "node:fs/promises";
 import { isAbsolute, join, relative, resolve, sep } from "node:path";
@@ -333,6 +334,9 @@ const requiresWorkspaceAdmission = (method: HostMethod, params: unknown): boolea
 };
 
 export class PiRuntimeBroker {
+  /** The Application Host's sole credential writer, also used by native model bindings. */
+  readonly credentialAuthority: HostCredentialAuthority;
+  readonly #credentialStoreServer: CredentialStoreServer;
   readonly #authorityInstanceId: string;
   readonly #clients = new Set<PiHostClient>();
   readonly #configWatches = new Map<string, PiHostClient>();
@@ -364,6 +368,8 @@ export class PiRuntimeBroker {
 
   constructor(options: PiRuntimeBrokerOptions) {
     this.#options = options;
+    this.credentialAuthority = sharedHostCredentialAuthority(options.agentDir ?? options.environment?.PI_CODING_AGENT_DIR ?? options.environment?.VARIN_AGENT_DIR);
+    this.#credentialStoreServer = new CredentialStoreServer(this.credentialAuthority);
     this.#authorityInstanceId = options.authorityInstanceId?.trim() || randomUUID();
     this.#runtimeGeneration = options.runtimeGeneration ?? 1;
     if (!Number.isSafeInteger(this.#runtimeGeneration) || this.#runtimeGeneration < 1) {
@@ -1738,6 +1744,7 @@ export class PiRuntimeBroker {
   #createClient(role: RuntimeWorkerRole, workerCwd?: string): PiHostClient {
     const cwd = role === "catalog" ? this.#options.cwd : workerCwd;
     const client = new PiHostClient({
+      credentialAuthority: this.#credentialStoreServer,
       ...(this.#options.agentDir === undefined ? {} : { agentDir: this.#options.agentDir }),
       ...(cwd === undefined ? {} : { cwd }),
       environment: {

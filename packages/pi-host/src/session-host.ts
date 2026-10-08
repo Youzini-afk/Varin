@@ -1,3 +1,4 @@
+import { createHostModelRuntime } from './host-model-runtime.js';
 import { createHash, randomUUID } from "node:crypto";
 import { existsSync, type Dirent } from "node:fs";
 import { copyFile, lstat, mkdir, readdir, rm, stat } from "node:fs/promises";
@@ -3523,6 +3524,9 @@ export class SessionHost {
       const services = await createAgentSessionServices({
         agentDir,
         cwd,
+        ...(process.env.VARIN_PRIVATE_CREDENTIAL_AUTHORITY === '1' ? {
+          modelRuntime: await createHostModelRuntime({ authPath: join(agentDir, 'auth.json'), modelsPath: join(agentDir, 'models.json'), allowModelNetwork: false }),
+        } : {}),
         resourceLoaderOptions: {
           noPromptTemplates: true,
           extensionFactories: [

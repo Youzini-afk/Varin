@@ -1,3 +1,4 @@
+import type { CredentialStoreServer } from '@varin/pi-host/credentials';
 import { type ChildProcess, spawn } from "node:child_process";
 import { randomUUID } from "node:crypto";
 import { isAbsolute, join } from "node:path";
@@ -30,6 +31,8 @@ export interface PiHostExit {
 }
 
 export interface PiHostClientOptions {
+  /** Private parent-only authority; never part of the public Host protocol. */
+  credentialAuthority?: CredentialStoreServer;
   agentDir?: string;
   cwd?: string;
   environment?: NodeJS.ProcessEnv;
@@ -206,6 +209,7 @@ export class PiHostClient {
         ...(this.#options.runtimeSource === undefined
           ? {}
           : { VARIN_RUNTIME_SOURCE: this.#options.runtimeSource }),
+        ...(this.#options.credentialAuthority ? { VARIN_PRIVATE_CREDENTIAL_AUTHORITY: '1' } : {}),
       },
       serialization: "json",
       stdio: ["ignore", "pipe", "pipe", "ipc"],
@@ -350,6 +354,16 @@ export class PiHostClient {
   }
 
   #handleMessage(message: unknown): void {
+    if (message && typeof message === 'object' && (message as { kind?: unknown }).kind === 'credential-store-request') {
+      const authority = this.#options.credentialAuthority;
+      if (!authority) { this.#fail(new Error('Private credential authority is unavailable')); return; }
+      authority.accept(message, this.id, response => new Promise<void>((resolve, reject) => {
+        const child = this.#child;
+        if (!child?.connected) { reject(new Error('Private credential child disconnected')); return; }
+        child.send(response, error => error ? reject(new Error('Private credential reply failed')) : resolve());
+      }));
+      return;
+    }
     let envelope: WireEnvelope;
     try {
       envelope = validateEnvelope(message);
@@ -434,6 +448,7 @@ export class PiHostClient {
   }
 
   #fail(value: unknown): void {
+    this.#options.credentialAuthority?.detach(this.id);
     const error = asError(value);
     this.#terminalError ??= error;
     this.#readyReject?.(error);

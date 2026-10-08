@@ -2,7 +2,7 @@ import { startNativeRunFromSource, type NativeSourceLaunch } from './native-sour
 import type { ExistingHostCredentialOwner } from './native-credential-owner.js';
 import type { KernelClient } from './kernel-client.js';
 import type {
-  NativeLaunchIntent, NativeLaunchSelectParams, NativeInputSubmitParams, NativeReceipt, NativeRun, NativeOperation,
+  NativeThreadSummary, NativeLaunchIntent, NativeLaunchSelectParams, NativeInputSubmitParams, NativeReceipt, NativeRun, NativeOperation,
   NativeHistoryItem, NativeEvent, NativeStatus, NativeRunStartReceipt, NativeInputEnqueueParams, NativeInputReceipt, NativeQueuedInput,
 } from './protocol.generated.js';
 
@@ -10,8 +10,20 @@ import type {
 export class NativeRuntimeClient {
   constructor(private readonly kernel: KernelClient) {}
 
+  onExit(listener: (error: Error) => void): () => void { return this.kernel.subscribeExit(listener); }
+
+  onEvent(listener: Parameters<KernelClient["onNativeRuntimeEvent"]>[0]): () => void {
+    return this.kernel.onNativeRuntimeEvent(listener);
+  }
+
   status(signal?: AbortSignal): Promise<NativeStatus> {
     return this.kernel.nativeRuntimeRequest('runtime.status', {}, signal);
+  }
+  thread(threadId: string, signal?: AbortSignal): Promise<NativeThreadSummary> {
+    return this.kernel.nativeRuntimeRequest('runtime.thread.inspect', { threadId }, signal);
+  }
+  threads(signal?: AbortSignal): Promise<NativeThreadSummary[]> {
+    return this.kernel.nativeRuntimeRequest('runtime.thread.list', {}, signal);
   }
   createThread(threadId: string, branchId: string, signal?: AbortSignal): Promise<{ threadId: string; branchId: string }> {
     return this.kernel.nativeRuntimeRequest('runtime.thread.create', { threadId, branchId }, signal);
@@ -34,6 +46,9 @@ export class NativeRuntimeClient {
   inputs(branchId: string, signal?: AbortSignal): Promise<NativeQueuedInput[]> {
     return this.kernel.nativeRuntimeRequest('runtime.input.list', { branchId }, signal);
   }
+  failLaunch(runId: string, code: 'preparation_failed' | 'source_unavailable' | 'credentials_unavailable' | 'binding_changed', signal?: AbortSignal): Promise<NativeLaunchIntent> {
+    return this.kernel.nativeRuntimeRequest('runtime.launch.fail', { runId, code }, signal);
+  }
   selectLaunch(params: NativeLaunchSelectParams, signal?: AbortSignal): Promise<NativeLaunchIntent> {
     return this.kernel.nativeRuntimeRequest('runtime.launch.select', params, signal);
   }
@@ -50,13 +65,40 @@ export class NativeRuntimeClient {
       return options.credentialOwner ? this.startRunWithCredentialOwner(runId, options.credentialOwner, options.signal) : this.startRun(runId, options.signal);
     }
     if (source.branch_id === null || source.revision === null) throw new Error('Saved environment requires its original Host resource owner');
-    const names = { native_file_read: 'file_read', native_process_inspect: 'process_inspect', native_process_read: 'process_read', native_process_spawn: 'process_spawn' } as const;
+    const names = { native_file_read: 'file_read', native_file_write: 'file_write', native_file_edit: 'file_edit', native_process_inspect: 'process_inspect', native_process_read: 'process_read', native_process_spawn: 'process_spawn' } as const;
     const tools = launch.selection.tools.map(tool => {
       if (!(tool.name in names)) throw new Error('Saved capability requires its original extension owner');
       return names[tool.name as keyof typeof names];
     });
     return this.startFromSource({ runId, workspaceId: source.workspace_id, executionWorkspaceId: source.execution_workspace_id,
-      branchId: source.branch_id, revision: source.revision, mode: source.materialized ? 'materialized' : 'fixed_branch', tools }, options);
+      branchId: source.branch_id, revision: source.revision, mode: source.materialized ? 'materialized' : 'fixed_branch', tools,
+      ...(source.environment_run_id ? { environmentRunId: source.environment_run_id } : {}) }, options);
+  }
+  /** Carry a thread's actual materialized environment into an admitted successor Run. */
+  async continueFromLaunch(previousRunId: string, runId: string, options: { credentialOwner?: ExistingHostCredentialOwner; signal?: AbortSignal } = {}): Promise<NativeRunStartReceipt> {
+    const previous = await this.launch(previousRunId, options.signal);
+    if (!previous) throw new Error('Previous Run has no source launch selection');
+    if (previous.selection.credential_scope) {
+      if (!options.credentialOwner) throw new Error('Continuation requires the selected credential owner');
+      const actual = await options.credentialOwner.scope();
+      const expected = previous.selection.credential_scope;
+      if (actual.reference !== expected.reference || actual.authority !== expected.authority || actual.account !== expected.account || actual.generation !== expected.generation) throw new Error('Continuation credential selection changed');
+    }
+    const source = previous.selection.source;
+    if (!source) {
+      const credentialScope = options.credentialOwner ? await options.credentialOwner.scope() : undefined;
+      await this.selectLaunch({ runId, source: null, enabledTools: [], ...(credentialScope ? { credentialScope } : {}) }, options.signal);
+      return options.credentialOwner ? this.startRunWithCredentialOwner(runId, options.credentialOwner, options.signal) : this.startRun(runId, options.signal);
+    }
+    if (source.branch_id === null || source.revision === null) throw new Error('Environment continuation requires its original Host resource owner');
+    const names = { native_file_read: 'file_read', native_file_write: 'file_write', native_file_edit: 'file_edit', native_process_inspect: 'process_inspect', native_process_read: 'process_read', native_process_spawn: 'process_spawn' } as const;
+    const tools = previous.selection.tools.map(tool => {
+      if (!(tool.name in names)) throw new Error('Saved capability requires its original extension owner');
+      return names[tool.name as keyof typeof names];
+    });
+    return this.startFromSource({ runId, workspaceId: source.workspace_id, executionWorkspaceId: source.execution_workspace_id,
+      branchId: source.branch_id, revision: source.revision, mode: source.materialized ? 'materialized' : 'fixed_branch', tools,
+      ...(source.materialized ? { environmentRunId: source.environment_run_id ?? previousRunId } : {}) }, options);
   }
   launch(runId: string, signal?: AbortSignal): Promise<NativeLaunchIntent | null> {
     return this.kernel.nativeRuntimeRequest('runtime.launch.inspect', { runId }, signal);

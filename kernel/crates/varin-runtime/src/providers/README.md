@@ -89,8 +89,8 @@ https://ai.google.dev/api/generate-content and https://ai.google.dev/gemini-api/
   parity, Bedrock Converse event framing/signing, the separate stateful Mistral Conversations API and
   pi-messages remain explicit work.
 - Environment-key lookup and an injected transactional native OAuth broker are implemented. The broker
-  supports scope pinning and cancellation-safe refresh/persistence; actual Host/platform store bridging,
-  provider registrations, Entra/ADC/AWS identity and live-auth verification remain separate work.
+  supports scope pinning and cancellation-safe refresh/persistence; the Host store/private bridge is now wired and checked with temporary/fake credentials. Platform
+  keychain integration, Entra/ADC/AWS identity and live-auth verification remain separate work.
 - Built-in remote tools and server-job continuation, embeddings/rerank/decision/image purpose-specific
   contracts, model override compatibility, pricing catalogs and complete multimodal support remain
   explicit work. No generic base URL alias should claim those contracts are implemented.
@@ -130,8 +130,9 @@ share an authentication lock. `HttpOAuthRefresher` implements registered HTTPS p
 refreshes with timeout, response budget, disabled redirects and disabled retries. It does not perform
 login, broaden scopes, store client secrets or discover cloud identities.
 
-See `AUTH.md` for the Host/platform authority boundary. Actual persistent-store wiring and end-to-end
-provider registration remain required; synthetic-store tests cannot establish production migration.
+See `AUTH.md` for the Host/platform authority boundary. The Application Host now supplies the existing shared credential owner over the private kernel bridge,
+and brokered Pi runtimes delegate to that same owner. Real temporary-store and Pi-worker IPC checks
+supplement the synthetic broker tests; live cloud authentication remains unverified.
 
 ## Codex SSE contract
 
@@ -145,5 +146,4 @@ from the explicit credential binding; it never decodes JWTs to invent verified a
 The locked SDK does not send `max_output_tokens` to this backend; the adapter does not pretend a common
 configuration capacity is a supported Codex wire budget. Run-budget policy remains a separate concern.
 WebSocket incremental state, account-keyed socket pooling, zstd and full capability parity are not
-implemented by this SSE-only path. Real account authorization and actual Host store wiring remain
-separate acceptance gates; no live credentials were used to develop or validate these modules.
+implemented by this SSE-only path. Real account authorization remains a separate acceptance gate; Host store wiring is now present; no live credentials were used to develop or validate these modules.

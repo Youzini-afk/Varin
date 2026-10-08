@@ -159,12 +159,27 @@ impl Catalog {
         if owner.as_ref().is_some_and(|run|run.cancel_requested||run.state.terminal()){
             return Err(RuntimeError::Conflict("active Run is closing".into()));
         }
+        let predecessor:Option<Run>=if owner.is_some() { owner.clone() } else {
+            let body:Option<String>=tx.query_row("SELECT body FROM runs WHERE branch_id=?1 ORDER BY rowid DESC LIMIT 1",[&command.branch_id],|r|r.get(0)).optional()?;
+            body.map(|body|serde_json::from_str(&body)).transpose()?
+        };
         let immediate=owner.is_none();
         let run_id=if command.mode==InputMode::NextRun||immediate {
             let configuration=command.configuration.clone().or_else(||owner.as_ref().map(|run|run.configuration.clone()))
                 .ok_or_else(||RuntimeError::Invalid("an idle branch requires an explicit launch configuration".into()))?;
             let next=Run{id:id(),thread_id:thread,branch_id:command.branch_id.clone(),state:RunState::Accepted,revision:1,epoch:self.epoch,configuration,cancel_requested:false,waiting_on:None};
-            tx.execute("INSERT INTO runs(id,branch_id,body) VALUES(?1,?2,?3)",params![next.id,next.branch_id,encode(&next)?])?;next.id
+            tx.execute("INSERT INTO runs(id,branch_id,body) VALUES(?1,?2,?3)",params![next.id,next.branch_id,encode(&next)?])?;
+            if let Some(previous)=predecessor.as_ref().filter(|previous|previous.configuration==next.configuration) {
+                if let Some(mut launch)=optional_record::<super::launches::LaunchIntent>(&tx,"run_launches",&previous.id)? {
+                    if let Some(source)=launch.selection.source.as_mut().filter(|source|source.materialized) {
+                        if source.environment_run_id.is_none(){source.environment_run_id=Some(previous.id.clone());}
+                    }
+                    launch.run_id=next.id.clone();launch.revision=1;launch.bound_epoch=None;launch.requires_rebind=true;launch.preparation_failure=None;
+                    tx.execute("INSERT INTO run_launches(id,body) VALUES(?1,?2)",params![next.id,encode(&launch)?])?;
+                    event(&tx,&next.id,1,"run.launch_selected",json!({"inherited_from":previous.id}))?;
+                }
+            }
+            next.id
         }else{
             let owner=owner.as_ref().expect("active owner");
             if command.configuration.as_ref().is_some_and(|value|value!=&owner.configuration){return Err(RuntimeError::Invalid("current-Run input cannot silently change frozen configuration".into()));}

@@ -631,3 +631,56 @@ it('queued source launch survives kernel loss and rebinds fresh authority to the
     expect((await native.launch(next.run_id))?.requires_rebind).toBe(false);
   } finally { await restarted.close(); }
 }, 30_000);
+
+it('native file write and edit return real applied receipts while a stale read version cannot overwrite later text', async () => {
+  const f = await fixture();
+  const revision = await publishSource(f.host, 'mutation-source', 'original text\n');
+  const receipts: Array<{ outcome?: string; effect?: string; content?: { readVersion?: string; status?: string; content?: { text?: string } } }> = [];
+  let firstVersion = '';
+  let turn = 0;
+  let successorReadRequested = false;
+  let successorRead = '';
+  const provider = await localProvider((body, response) => {
+    if (JSON.stringify(body.input).includes('inspect prior edits in successor')) {
+      if (!successorReadRequested) { successorReadRequested = true; toolResponse(response, 'native_file_read', { path: 'source.txt' }, 100); }
+      else {
+        const output = (body.input as Array<Record<string, unknown>>).findLast(item => item.type === 'function_call_output');
+        successorRead = String(output?.output);
+        completeLocalResponse(response, 'mutation-successor-answer', 'successor read finished');
+      }
+      return;
+    }
+    const output = (body.input as Array<Record<string, unknown>>).findLast(item => item.type === 'function_call_output');
+    if (output) receipts.push(JSON.parse(String(output.output)) as (typeof receipts)[number]);
+    const last = receipts.at(-1);
+    turn++;
+    if (turn === 1) toolResponse(response, 'native_file_read', { path: 'source.txt' }, turn);
+    else if (turn === 2) {
+      firstVersion = last?.content?.readVersion ?? '';
+      toolResponse(response, 'native_file_write', { path: 'source.txt', readVersion: firstVersion, content: 'alpha\nbeta\n' }, turn);
+    } else if (turn === 3) toolResponse(response, 'native_file_edit', { path: 'source.txt', readVersion: last?.content?.readVersion, edits: [{ oldText: 'beta', newText: 'gamma' }] }, turn);
+    else if (turn === 4 || turn === 6) toolResponse(response, 'native_file_read', { path: 'source.txt' }, turn);
+    else if (turn === 5) toolResponse(response, 'native_file_write', { path: 'source.txt', readVersion: firstVersion, content: 'must not overwrite newer text' }, turn);
+    else completeLocalResponse(response, 'mutation-answer', 'mutation fixture finished');
+  });
+  await f.native.createThread('mutation-thread', 'mutation-conversation');
+  const run = await f.native.submit({ key: 'mutation-input', threadId: 'mutation-thread', branchId: 'mutation-conversation', expectedHead: null, input: { text: 'update selected source' }, configuration: provider.configuration });
+  await f.native.startFromSource({ runId: run.run_id, workspaceId: 'source-workspace', executionWorkspaceId: 'source-workspace', branchId: 'mutation-source', revision, mode: 'materialized', tools: ['file_read', 'file_write', 'file_edit'] });
+  await expect.poll(async () => (await f.native.run(run.run_id)).state, { timeout: 10_000 }).toMatch(/completed|failed/);
+  expect((await f.native.run(run.run_id)).state, JSON.stringify({ receipts, events: (await f.native.events(0, 100)).slice(-10) })).toBe('completed');
+  expect(receipts).toHaveLength(6);
+  expect(receipts[1]).toMatchObject({ outcome: 'succeeded', effect: 'confirmed', content: { status: 'applied' } });
+  expect(receipts[2]).toMatchObject({ outcome: 'succeeded', effect: 'confirmed', content: { status: 'applied' } });
+  expect(receipts[3]?.content?.content?.text).toBe('alpha\ngamma\n');
+  expect(receipts[4]).toMatchObject({ kind: 'not_dispatched' });
+  expect(JSON.stringify(receipts[4])).toContain('conflict');
+  const conflict = (await f.native.events(0, 256)).find(event => event.kind === 'operation.settled' && JSON.stringify(event.data).includes('File version conflict'));
+  expect(conflict).toBeDefined();
+  expect(await f.native.operation(conflict!.subject)).toMatchObject({ phase: 'terminal', outcome: 'failed', effect: 'none' });
+  expect(receipts[5]?.content?.content?.text).toBe('alpha\ngamma\n');
+  const history = await f.native.history('mutation-conversation');
+  const next = await f.native.submit({ key: 'mutation-successor', threadId: 'mutation-thread', branchId: 'mutation-conversation', expectedHead: history.at(-1)!.id, input: { text: 'inspect prior edits in successor' }, configuration: provider.configuration });
+  await f.native.continueFromLaunch(run.run_id, next.run_id);
+  await expect.poll(async () => (await f.native.run(next.run_id)).state, { timeout: 10_000 }).toBe('completed');
+  expect(successorRead).toContain('alpha\\ngamma\\n');
+}, 30_000);

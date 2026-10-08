@@ -55,7 +55,13 @@ fn file_params_value(params_value: &Value) -> Value {
 pub(super) fn parse_file_params<T: DeserializeOwned>(
     params_value: &Value,
 ) -> Result<T, KernelError> {
-    Ok(serde_json::from_value(file_params_value(params_value))?)
+    let mut value = file_params_value(params_value);
+    // This field is injected only by the typed native adapter. Public wire DTO
+    // validation rejects it; it remains part of the durable intent identity.
+    if let Some(object) = value.as_object_mut() {
+        object.remove("__nativeRequestHash");
+    }
+    Ok(serde_json::from_value(value)?)
 }
 
 pub(super) fn file_mode(metadata: &fs::Metadata) -> u32 {
@@ -397,7 +403,7 @@ impl Storage {
         resolve_admitted_resource(&root, relative, grant, allow_root)
     }
 
-    fn capture_file_state(
+    pub(super) fn capture_file_state(
         &mut self,
         resource: &ResolvedFileResource,
         store: bool,
@@ -1087,9 +1093,21 @@ impl Storage {
         owner_id: Option<&str>,
         workspace_id: Option<&str>,
     ) -> Result<(), KernelError> {
+        let mut durable_result = result.clone();
+        let intent: Option<String> = self.conn.query_row(
+            "SELECT result_json FROM operations WHERE operation_id=?1",
+            params![operation_id],
+            |row| row.get(0),
+        )?;
+        if let Some(intent) = intent {
+            let envelope: Value = serde_json::from_str(&intent)?;
+            if let Some(identity) = envelope["intent"]["__nativeRequestHash"].as_str() {
+                durable_result["__nativeRequestHash"] = json!(identity);
+            }
+        }
         self.conn.execute_batch("BEGIN IMMEDIATE")?;
         let outcome = (|| {
-            self.operation_finish(operation_id, result)?;
+            self.operation_finish(operation_id, &durable_result)?;
             if let (Some(owner_id), Some(workspace_id)) = (owner_id, workspace_id) {
                 self.conn.execute(
                     "DELETE FROM object_owners WHERE owner_id = ?1 AND workspace_id = ?2",
@@ -2442,7 +2460,7 @@ impl Storage {
                 path: resource.path.clone(),
                 subtree: false,
             }],
-            None,
+            params.get("leaseId").and_then(Value::as_str),
         )?;
         self.check_cancelled()?;
         if !read_body {
@@ -2452,7 +2470,9 @@ impl Storage {
         let metadata = match fs::symlink_metadata(&resource.absolute) {
             Ok(value) => value,
             Err(error) if error.kind() == io::ErrorKind::NotFound => {
-                return Ok(json!({"path":path,"source":source,"missing":true}))
+                return Ok(
+                    json!({"path":path,"source":source,"missing":true,"readVersion":super::native_file_mutations::read_version(grant,root_id,&resource.path,&FileState::Missing)?}),
+                )
             }
             Err(error) => return Err(error.into()),
         };
@@ -2533,11 +2553,30 @@ impl Storage {
                 "file changed while being read".into(),
             ));
         }
+        let version = if start == 0 && end == byte_length {
+            let state = FileState::RegularFile {
+                object_hash: format!("sha256-{}", hex::encode(Sha256::digest(&bytes))),
+                byte_length,
+                mode: Some(file_mode(&after)),
+            };
+            Some(super::native_file_mutations::read_version(
+                grant,
+                root_id,
+                &resource.path,
+                &state,
+            )?)
+        } else {
+            None
+        };
         let mut content = json!({"byteLength":byte_length,"offset":start,"nextOffset":end,"eof":end>=byte_length});
         match String::from_utf8(bytes) {
             Ok(text) => content["text"] = Value::String(text),
             Err(error) => content["bytesBase64"] = Value::String(BASE64.encode(error.as_bytes())),
         }
-        Ok(json!({"path":path,"source":source,"missing":false,"content":content}))
+        let mut result = json!({"path":path,"source":source,"missing":false,"content":content});
+        if let Some(version) = version {
+            result["readVersion"] = json!(version);
+        }
+        Ok(result)
     }
 }

@@ -181,6 +181,34 @@ pub(crate) fn spawn(
                         if runtime.is_none() {
                             let owner =
                                 Arc::new(RunSupervisor::new(Catalog::open(root).map_err(domain)?));
+                            let (notify, notifications) = mpsc::sync_channel(1);
+                            owner
+                                .catalog()
+                                .lock()
+                                .map_err(|_| {
+                                    KernelError::Storage("native catalog owner failed".into())
+                                })?
+                                .set_event_notifier(notify.clone())
+                                .map_err(domain)?;
+                            let observed = Arc::downgrade(&owner);
+                            let event_responses = responses.clone();
+                            let event_epoch = epoch.clone();
+                            thread::spawn(move || {
+                                while notifications.recv().is_ok() {
+                                    let Some(owner) = observed.upgrade() else {
+                                        break;
+                                    };
+                                    let cursor = owner
+                                        .catalog()
+                                        .lock()
+                                        .ok()
+                                        .and_then(|catalog| catalog.event_cursor().ok());
+                                    if let Some(cursor) = cursor {
+                                        if event_responses.send(json!({"v":PROTOCOL_VERSION,"kind":"runtime-event","kernelEpoch":event_epoch,"stream":"durable","cursor":cursor})).is_err() { break; }
+                                    }
+                                }
+                            });
+                            let _ = notify.try_send(());
                             let (wake, wakes) = mpsc::channel();
                             owner
                                 .set_wake_sender(wake)
@@ -292,6 +320,7 @@ pub(crate) fn spawn(
                                 catalog.run(&p.run_id).map_err(domain)?
                             };
                             let configuration = serde_json::from_value(run.configuration)?;
+                            let mut selected_credential_scope = None;
                             let mut start = if let Some(scope) = p.credential_scope {
                                 let scope = varin_runtime::providers::auth::CredentialScope {
                                     reference: scope.reference,
@@ -303,6 +332,7 @@ pub(crate) fn spawn(
                                         )
                                     })?,
                                 };
+                                selected_credential_scope = Some(scope.clone());
                                 let resolver = credential_bridge
                                     .resolver(&p.run_id, scope.clone())
                                     .map_err(|_| {
@@ -329,29 +359,48 @@ pub(crate) fn spawn(
                                     );
                                 start.binding.tool_schema_generation =
                                     start.binding.configuration_generation;
-                                let source = varin_runtime::catalog::launches::SourceSelection {
-                                    materialized: selected.source.materialized,
-                                    workspace_id: selected.source.workspace_id,
-                                    execution_workspace_id: selected.source.execution_workspace_id,
-                                    branch_id: selected.source.branch_id.0,
-                                    revision: selected
-                                        .source
-                                        .revision
-                                        .0
-                                        .map(u64::try_from)
-                                        .transpose()
-                                        .map_err(|_| {
-                                            KernelError::Protocol(
-                                                "source revision must be nonnegative".into(),
-                                            )
-                                        })?,
-                                };
-                                let selection =
+                                let source = selected
+                                    .source
+                                    .0
+                                    .map(|source| {
+                                        Ok::<_, KernelError>(
+                                            varin_runtime::catalog::launches::SourceSelection {
+                                                environment_run_id: source.environment_run_id,
+                                                materialized: source.materialized,
+                                                workspace_id: source.workspace_id,
+                                                execution_workspace_id: source
+                                                    .execution_workspace_id,
+                                                branch_id: source.branch_id.0,
+                                                revision: source
+                                                    .revision
+                                                    .0
+                                                    .map(u64::try_from)
+                                                    .transpose()
+                                                    .map_err(|_| {
+                                                        KernelError::Protocol(
+                                                            "source revision must be nonnegative"
+                                                                .into(),
+                                                        )
+                                                    })?,
+                                            },
+                                        )
+                                    })
+                                    .transpose()?;
+                                if source.is_none() && !kinds.is_empty() {
+                                    return Err(KernelError::Protocol(
+                                        "selected tools require a source owner".into(),
+                                    ));
+                                }
+                                if source.is_none() {
+                                    start.binding.tool_schema_generation = 0;
+                                }
+                                let mut selection =
                                     varin_runtime::catalog::launches::LaunchSelection::from_binding(
                                         &start.binding,
                                         start.policy.identity(),
-                                        Some(source),
+                                        source,
                                     );
+                                selection.credential_scope = selected_credential_scope;
                                 let intent = runtime
                                     .catalog()
                                     .lock()
@@ -374,6 +423,7 @@ pub(crate) fn spawn(
                                 }
                                 launch_source =
                                     Some(varin_runtime::catalog::launches::SourceSelection {
+                                        environment_run_id: binding.environment_run_id.clone(),
                                         materialized: binding.source_mode
                                             == crate::native_tools::NativeSourceMode::Materialized,
                                         workspace_id: binding.workspace_id.clone(),
@@ -408,12 +458,13 @@ pub(crate) fn spawn(
                                 start.tools = Arc::new(tools);
                             }
                             {
-                                let selection =
+                                let mut selection =
                                     varin_runtime::catalog::launches::LaunchSelection::from_binding(
                                         &start.binding,
                                         start.policy.identity(),
                                         launch_source,
                                     );
+                                selection.credential_scope = selected_credential_scope;
                                 runtime
                                     .catalog()
                                     .lock()
@@ -423,10 +474,44 @@ pub(crate) fn spawn(
                                     .bind_launch(&p.run_id, selection)
                                     .map_err(domain)?;
                             }
+                            let (progress, updates) =
+                                varin_runtime::execution::ProgressSink::channel(64);
+                            start.progress = progress;
+                            let progress_responses = responses.clone();
+                            let progress_epoch = epoch.clone();
+                            let progress_stream_id = uuid::Uuid::new_v4().to_string();
+                            thread::spawn(move || {
+                                for update in updates {
+                                    let _ = progress_responses.try_send(json!({"v":PROTOCOL_VERSION,"kind":"runtime-event","kernelEpoch":progress_epoch,"stream":"progress","runId":update.run_id,"streamId":progress_stream_id,"sequence":update.sequence,"event":update.event}));
+                                }
+                            });
                             let handle = runtime
                                 .start(&p.run_id, start)
                                 .map_err(|e| KernelError::Operation(e.to_string()))?;
                             return Ok(json!({"runId":handle.run_id,"epoch":handle.epoch}));
+                        }
+                        if method == "runtime.launch.fail" {
+                            let p: NativeLaunchFailedParams = serde_json::from_value(params)?;
+                            if runtime
+                                .status()
+                                .map_err(|e| KernelError::Operation(e.to_string()))?
+                                .iter()
+                                .any(|worker| worker.run_id == p.run_id && !worker.finished)
+                            {
+                                return Err(KernelError::Operation(
+                                    "Run already has a live worker".into(),
+                                ));
+                            }
+                            return Ok(serde_json::to_value(
+                                runtime
+                                    .catalog()
+                                    .lock()
+                                    .map_err(|_| {
+                                        KernelError::Storage("native catalog owner failed".into())
+                                    })?
+                                    .fail_launch(&p.run_id, &p.code)
+                                    .map_err(domain)?,
+                            )?);
                         }
                         if method == "runtime.run.cancel" {
                             let p: NativeRunParams = serde_json::from_value(params)?;
@@ -489,6 +574,15 @@ pub(crate) fn spawn(
     })
 }
 fn dispatch(catalog: &mut Catalog, method: &str, params: Value) -> Result<Value, KernelError> {
+    if method == "runtime.thread.inspect" {
+        let p: NativeThreadParams = serde_json::from_value(params)?;
+        return catalog.inspect_thread(&p.thread_id).map_err(domain);
+    }
+    if method == "runtime.thread.list" {
+        return Ok(serde_json::to_value(
+            catalog.list_threads().map_err(domain)?,
+        )?);
+    }
     if method == "runtime.launch.inspect" {
         let p: NativeRunParams = serde_json::from_value(params)?;
         return Ok(serde_json::to_value(
@@ -523,16 +617,100 @@ fn dispatch(catalog: &mut Catalog, method: &str, params: Value) -> Result<Value,
                     "input idempotency key cannot be empty".into(),
                 ));
             }
+            let launch = p
+                .launch
+                .map(|selected| {
+                    let configuration: varin_runtime::ModelSessionConfiguration =
+                        serde_json::from_value(p.configuration.clone())?;
+                    let scope = selected
+                        .credential_scope
+                        .map(|scope| {
+                            Ok::<_, KernelError>(varin_runtime::providers::auth::CredentialScope {
+                                reference: scope.reference,
+                                authority: scope.authority,
+                                account: scope.account,
+                                generation: u64::try_from(scope.generation).map_err(|_| {
+                                    KernelError::Protocol(
+                                        "credential generation must be nonnegative".into(),
+                                    )
+                                })?,
+                            })
+                        })
+                        .transpose()?;
+                    let identity = if let Some(scope) = scope.as_ref() {
+                        model_session::connection_identity_with_scope(&configuration, scope)
+                    } else {
+                        model_session::connection_identity(&configuration)
+                    }
+                    .map_err(|error| KernelError::Protocol(error.to_string()))?;
+                    let kinds: std::collections::BTreeSet<crate::native_tools::NativeToolKind> =
+                        selected
+                            .enabled_tools
+                            .into_iter()
+                            .map(|kind| serde_json::from_value(Value::String(kind)))
+                            .collect::<std::result::Result<_, _>>()?;
+                    let source = selected
+                        .source
+                        .0
+                        .map(|source| {
+                            Ok::<_, KernelError>(
+                                varin_runtime::catalog::launches::SourceSelection {
+                                    environment_run_id: source.environment_run_id,
+                                    materialized: source.materialized,
+                                    workspace_id: source.workspace_id,
+                                    execution_workspace_id: source.execution_workspace_id,
+                                    branch_id: source.branch_id.0,
+                                    revision: source
+                                        .revision
+                                        .0
+                                        .map(u64::try_from)
+                                        .transpose()
+                                        .map_err(|_| {
+                                            KernelError::Protocol(
+                                                "source revision must be nonnegative".into(),
+                                            )
+                                        })?,
+                                },
+                            )
+                        })
+                        .transpose()?;
+                    if source.is_none() && !kinds.is_empty() {
+                        return Err(KernelError::Protocol(
+                            "selected tools require a source owner".into(),
+                        ));
+                    }
+                    Ok::<_, KernelError>(varin_runtime::catalog::launches::LaunchSelection {
+                        credential_scope: scope,
+                        connection_identity: identity,
+                        provider_family: configuration.provider_family,
+                        model: configuration.model,
+                        configuration_generation: configuration.configuration_generation,
+                        tool_schema_generation: if source.is_some() {
+                            configuration.configuration_generation
+                        } else {
+                            0
+                        },
+                        tools: crate::native_tools::NativeToolExecutor::selected_schemas(&kinds),
+                        policy: varin_runtime::execution::AgentPolicy::identity(
+                            &varin_runtime::execution::DefaultAgentPolicy,
+                        ),
+                        source,
+                    })
+                })
+                .transpose()?;
             Ok(serde_json::to_value(
                 catalog
-                    .submit(&SubmitInput {
-                        key: p.key,
-                        thread_id: p.thread_id,
-                        branch_id: p.branch_id,
-                        expected_head: p.expected_head.0,
-                        input: p.input,
-                        configuration: p.configuration,
-                    })
+                    .submit_with_launch(
+                        &SubmitInput {
+                            key: p.key,
+                            thread_id: p.thread_id,
+                            branch_id: p.branch_id,
+                            expected_head: p.expected_head.0,
+                            input: p.input,
+                            configuration: p.configuration,
+                        },
+                        launch,
+                    )
                     .map_err(domain)?,
             )?)
         }

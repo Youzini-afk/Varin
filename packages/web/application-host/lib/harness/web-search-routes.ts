@@ -16,9 +16,9 @@ const providerOf = (value: unknown): HarnessWebSearchProvider | null => (
 
 export interface WebSearchCredentialRoutesOptions {
   readAuth?: typeof readPiAuthFile;
-  removeAuth?: typeof removePiProviderAuth;
+  removeAuth?: (...args: Parameters<typeof removePiProviderAuth>) => boolean | Promise<boolean>;
   requireAuth?: RequestHandler;
-  saveAuth?: typeof savePiProviderAuth;
+  saveAuth?: (...args: Parameters<typeof savePiProviderAuth>) => unknown | Promise<unknown>;
 }
 
 export const registerWebSearchCredentialRoutes = (
@@ -49,7 +49,7 @@ export const registerWebSearchCredentialRoutes = (
     }
   });
 
-  app.put("/api/harness/web-search/credentials/:provider", requireAuth, (request, response) => {
+  app.put("/api/harness/web-search/credentials/:provider", requireAuth, async (request, response) => {
     response.setHeader("Cache-Control", "no-store");
     const provider = providerOf(request.params.provider);
     const apiKey = typeof request.body?.apiKey === "string" ? request.body.apiKey.trim() : "";
@@ -59,14 +59,14 @@ export const registerWebSearchCredentialRoutes = (
     }
     const credentialRef = webSearchCredentialRef(provider);
     try {
-      saveAuth(credentialRef, { type: "api_key", key: apiKey });
+      await saveAuth(credentialRef, { type: "api_key", key: apiKey });
       response.json({ provider, credentialRef, configured: true });
     } catch {
       response.status(500).json({ error: "Unable to save web search credential" });
     }
   });
 
-  app.delete("/api/harness/web-search/credentials/:provider", requireAuth, (request, response) => {
+  app.delete("/api/harness/web-search/credentials/:provider", requireAuth, async (request, response) => {
     response.setHeader("Cache-Control", "no-store");
     const provider = providerOf(request.params.provider);
     if (!provider) {
@@ -75,7 +75,7 @@ export const registerWebSearchCredentialRoutes = (
     }
     const credentialRef = webSearchCredentialRef(provider);
     try {
-      const removed = removeAuth(credentialRef);
+      const removed = await removeAuth(credentialRef);
       response.json({ provider, credentialRef, configured: false, removed });
     } catch {
       response.status(500).json({ error: "Unable to remove web search credential" });
