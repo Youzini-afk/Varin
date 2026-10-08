@@ -1,5 +1,6 @@
 {
   "protocolVersion": 1,
+  "nativeRuntimeStructs": {"ModelSessionConfiguration": {"fields": {"providerFamily": {"type": "string"}, "model": {"type": "string"}, "endpoint": {"type": "string"}, "credentialEnvironment": {"type": "string | null"}, "allowAnonymous": {"type": "boolean"}, "configurationGeneration": {"type": "number"}, "maxOutputTokens": {"type": "number"}}}},
   "nativeRuntimeEnums": {"RunState": ["Accepted", "Preparing", "Runnable", "Generating", "Executing", "Waiting", "Completed", "Failed", "Cancelled"], "OperationPhase": ["Accepted", "Preparing", "Queued", "Running", "Waiting", "Settling", "Terminal"], "Outcome": ["Succeeded", "Failed", "Cancelled", "Indeterminate"], "Effect": ["None", "Dispatched", "Partial", "Confirmed", "Unknown"], "Lifetime": ["Call", "Run", "Thread", "Environment"], "HistorySource": ["User", "Assistant", "Tool", "Agent", "Environment", "Compaction"], "ModelStepState": ["Prepared", "Dispatched", "Completed", "Interrupted", "Failed", "Cancelled"], "DeliveryState": ["Selected", "Sent", "Committed"]},
   "kernelEpoch": "per-process",
   "framing": "u32be-json",
@@ -10,6 +11,7 @@
   "response": {"v": 1, "kind": "response", "id": "request-id", "ok": true, "result": {}},
   "requestUnion": true,
   "methodParams": {
+    "runtime.run.start": "NativeRunStartParams",
     "runtime.status": "KernelEmptyParams",
     "runtime.thread.create": "NativeThreadCreateParams",
     "runtime.input.submit": "NativeInputSubmitParams",
@@ -117,6 +119,10 @@
     "compute.grammar.register": "KernelComputeGrammarParams"
   },
   "dto": {
+    "NativeExternalReceipt":{"fields":{"executor":{"type":"string"},"identity":{"type":"string"},"epoch":{"type":"string"},"outcome":{"type":"NativeOutcome"},"effect":{"type":"NativeEffect"},"result":{"type":"unknown"}}},
+    "NativeRunStartParams": {"fields":{"runId":{"type":"string"},"toolBinding":{"type":"unknown","optional":true}}},
+    "NativeModelSessionConfiguration": {"fields": {"providerFamily": {"type": "string"}, "model": {"type": "string"}, "endpoint": {"type": "string"}, "credentialEnvironment": {"type": "string | null"}, "allowAnonymous": {"type": "boolean"}, "configurationGeneration": {"type": "number"}, "maxOutputTokens": {"type": "number"}}},
+    "NativeRunStartReceipt": {"fields": {"runId": {"type": "string"}, "epoch": {"type": "number"}}},
     "NativeRunState": {"raw": "export type NativeRunState = \"accepted\" | \"preparing\" | \"runnable\" | \"generating\" | \"executing\" | \"waiting\" | \"completed\" | \"failed\" | \"cancelled\";"},
     "NativeOperationPhase": {"raw": "export type NativeOperationPhase = \"accepted\" | \"preparing\" | \"queued\" | \"running\" | \"waiting\" | \"settling\" | \"terminal\";"},
     "NativeOutcome": {"raw": "export type NativeOutcome = \"succeeded\" | \"failed\" | \"cancelled\" | \"indeterminate\";"},
@@ -134,7 +140,7 @@
     "NativeStatus": {"fields": {"epoch": {"type": "number"}}},
     "NativeReceipt": {"fields": {"thread_id": {"type": "string"}, "branch_id": {"type": "string"}, "run_id": {"type": "string"}, "input_id": {"type": "string"}, "cursor": {"type": "number"}}},
     "NativeRun": {"fields": {"waiting_on": {"type": "string | null"}, "id": {"type": "string"}, "thread_id": {"type": "string"}, "branch_id": {"type": "string"}, "state": {"type": "NativeRunState"}, "revision": {"type": "number"}, "epoch": {"type": "number"}, "configuration": {"type": "unknown"}, "cancel_requested": {"type": "boolean"}}},
-    "NativeOperation": {"fields": {"id": {"type": "string"}, "run_id": {"type": "string"}, "epoch": {"type": "number"}, "revision": {"type": "number"}, "phase": {"type": "NativeOperationPhase"}, "outcome": {"type": "NativeOutcome | null"}, "effect": {"type": "NativeEffect"}, "cancel_requested": {"type": "boolean"}, "lifetime": {"type": "NativeLifetime"}, "handed_off": {"type": "boolean"}, "executor": {"type": "string | null"}, "waiting_on": {"type": "string | null"}, "intent": {"type": "unknown"}, "result": {"type": "unknown"}}},
+    "NativeOperation": {"fields": {"external_receipt":{"type":"NativeExternalReceipt | null"},"id": {"type": "string"}, "run_id": {"type": "string"}, "epoch": {"type": "number"}, "revision": {"type": "number"}, "phase": {"type": "NativeOperationPhase"}, "outcome": {"type": "NativeOutcome | null"}, "effect": {"type": "NativeEffect"}, "cancel_requested": {"type": "boolean"}, "lifetime": {"type": "NativeLifetime"}, "handed_off": {"type": "boolean"}, "executor": {"type": "string | null"}, "waiting_on": {"type": "string | null"}, "intent": {"type": "unknown"}, "result": {"type": "unknown"}}},
     "NativeProviderOriginal": {"fields": {"adapter": {"type": "string"}, "version": {"type": "string"}, "item": {"type": "unknown"}}},
     "NativeHistoryItem": {"fields": {"id": {"type": "string"}, "thread_id": {"type": "string"}, "parent": {"type": "string | null"}, "source": {"type": "NativeHistorySource"}, "content": {"type": "unknown"}, "provider": {"type": "NativeProviderOriginal | null"}}},
     "NativeEvent": {"fields": {"cursor": {"type": "number"}, "subject": {"type": "string"}, "revision": {"type": "number"}, "kind": {"type": "string"}, "data": {"type": "unknown"}}},
@@ -514,6 +520,7 @@
     "KernelComputeReadResult": {"fields":{"jobId":{"type":"string"},"kernelEpoch":{"type":"string"},"workspaceId":{"type":"string"},"status":{"type":"\"queued\" | \"running\" | \"ready\" | \"empty\" | \"partial\" | \"failed\" | \"cancelled\""},"root":{"type":"string | null"},"records":{"type":"KernelComputeRecord[]"},"nextCursor":{"type":"number"},"endCursor":{"type":"number"},"scannedFiles":{"type":"number"},"message":{"type":"string | null"}}}
   },
   "methods": {
+    "runtime.run.start": "Start the explicitly configured native model execution",
     "runtime.status": "Native agent authority: status",
     "runtime.thread.create": "Native agent authority: thread.create",
     "runtime.input.submit": "Native agent authority: input.submit",

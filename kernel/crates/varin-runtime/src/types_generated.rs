@@ -84,3 +84,15 @@ pub enum DeliveryState {
     Sent,
     Committed,
 }
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct ModelSessionConfiguration {
+    pub provider_family: String,
+    pub model: String,
+    pub endpoint: String,
+    pub credential_environment: Option<String>,
+    pub allow_anonymous: bool,
+    pub configuration_generation: u64,
+    pub max_output_tokens: u64,
+}

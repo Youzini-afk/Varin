@@ -616,3 +616,215 @@ fn unfinished_model_tool_exchange_cannot_complete_a_run() {
         .is_err());
     assert_eq!(db.run(&r.run_id).unwrap().state, RunState::Runnable);
 }
+
+fn external(op: &str, outcome: Outcome, effect: Effect) -> ExternalReceipt {
+    ExternalReceipt {
+        executor: "process-executor".into(),
+        identity: op.into(),
+        epoch: "resource-epoch".into(),
+        outcome,
+        effect,
+        result: json!({"exitCode":0}),
+    }
+}
+#[test]
+fn external_terminal_before_explicit_handoff_is_not_lost() {
+    let f = Fixture::new();
+    let mut db = f.open();
+    let r = submit(&mut db);
+    let epoch = db.epoch();
+    db.admit_operation(
+        "job",
+        &r.run_id,
+        epoch,
+        Lifetime::Thread,
+        json!({"command":"true"}),
+    )
+    .unwrap();
+    db.dispatch_operation("job", epoch, "process-executor", true)
+        .unwrap();
+    let receipt = external("job", Outcome::Succeeded, Effect::Confirmed);
+    let early = db.record_external_receipt("job", receipt.clone()).unwrap();
+    assert_eq!(early.phase, OperationPhase::Running);
+    db.handoff_operation("job", epoch).unwrap();
+    let settled = db.operation("job").unwrap();
+    assert_eq!(
+        settled.phase,
+        OperationPhase::Terminal,
+        "early terminal was buffered but never applied at explicit handoff"
+    );
+    assert_eq!(settled.outcome, Some(Outcome::Succeeded));
+    assert_eq!(db.record_external_receipt("job", receipt).unwrap(), settled);
+}
+#[test]
+fn external_receipts_are_idempotent_and_only_same_epoch_unknown_can_refine() {
+    let f = Fixture::new();
+    let mut db = f.open();
+    let r = submit(&mut db);
+    let epoch = db.epoch();
+    db.admit_operation("job", &r.run_id, epoch, Lifetime::Thread, Value::Null)
+        .unwrap();
+    db.dispatch_operation("job", epoch, "process-executor", true)
+        .unwrap();
+    db.handoff_operation("job", epoch).unwrap();
+    let unknown = external("job", Outcome::Indeterminate, Effect::Unknown);
+    let observed = db.record_external_receipt("job", unknown.clone()).unwrap();
+    assert_eq!(
+        db.record_external_receipt("job", unknown).unwrap(),
+        observed
+    );
+    let mut foreign = external("job", Outcome::Succeeded, Effect::Confirmed);
+    foreign.epoch = "wrong-generation".into();
+    assert!(db.record_external_receipt("job", foreign).is_err());
+    let confirmed = external("job", Outcome::Succeeded, Effect::Confirmed);
+    let settled = db
+        .record_external_receipt("job", confirmed.clone())
+        .unwrap();
+    assert_eq!(settled.outcome, Some(Outcome::Succeeded));
+    assert_eq!(
+        db.record_external_receipt("job", confirmed.clone())
+            .unwrap(),
+        settled
+    );
+    let mut conflicting = confirmed;
+    conflicting.result = json!({"exitCode":7});
+    assert!(db.record_external_receipt("job", conflicting).is_err());
+    let mut wrong = external("other-job", Outcome::Succeeded, Effect::Confirmed);
+    assert!(db.record_external_receipt("job", wrong.clone()).is_err());
+    wrong.identity = "job".into();
+    wrong.executor = "other-executor".into();
+    assert!(db.record_external_receipt("job", wrong).is_err());
+}
+#[test]
+fn early_external_terminal_and_model_job_acceptance_converge() {
+    use crate::execution::*;
+    let f = Fixture::new();
+    let mut db = f.open();
+    let r = submit(&mut db);
+    let epoch = db.epoch();
+    let mut snapshot = request_snapshot(&r);
+    snapshot.view.binding.tools = vec![ToolSchema {
+        name: "process-executor".into(),
+        version: "1".into(),
+        schema: json!({"type":"object"}),
+    }];
+    db.commit_execution(
+        &r.run_id,
+        epoch,
+        &ExecutionRecord::RequestPrepared { snapshot },
+    )
+    .unwrap();
+    db.commit_execution(
+        &r.run_id,
+        epoch,
+        &ExecutionRecord::ModelDispatched {
+            request_id: "model-1".into(),
+        },
+    )
+    .unwrap();
+    let call = ToolCall {
+        call_id: "job".into(),
+        name: "process-executor".into(),
+        schema_version: "1".into(),
+        arguments: json!({}),
+    };
+    db.commit_execution(
+        &r.run_id,
+        epoch,
+        &ExecutionRecord::ModelFinished {
+            request_id: "model-1".into(),
+            outcome: ModelOutcome::Completed,
+            finish_reason: Some(FinishReason::ToolCalls),
+            items: vec![ProviderItem {
+                id: "job-call".into(),
+                content: Content::ToolCall { call: call.clone() },
+                opaque: None,
+            }],
+            interrupted_deltas: vec![],
+            usage: UsageReceipt::default(),
+            failure: None,
+        },
+    )
+    .unwrap();
+    db.commit_execution(
+        &r.run_id,
+        epoch,
+        &ExecutionRecord::ToolsAdmitted {
+            request_id: "model-1".into(),
+            tools: vec![AdmittedTool {
+                call,
+                contract: ToolContract {
+                    name: "process-executor".into(),
+                    schema_version: "1".into(),
+                    read_only: false,
+                    completion: CompletionKind::Job,
+                    lifetime: Lifetime::Thread,
+                    resources: vec![],
+                },
+            }],
+        },
+    )
+    .unwrap();
+    db.commit_execution(
+        &r.run_id,
+        epoch,
+        &ExecutionRecord::ToolDispatched {
+            request_id: "model-1".into(),
+            call_id: "job".into(),
+        },
+    )
+    .unwrap();
+    let operation_id = "model-1:tool:job";
+    db.register_wait(
+        "job-wait",
+        &r.run_id,
+        operation_id,
+        "operation.settled",
+        r.cursor,
+    )
+    .unwrap();
+    let receipt = external(operation_id, Outcome::Succeeded, Effect::Confirmed);
+    db.record_external_receipt(operation_id, receipt.clone())
+        .unwrap();
+    let result = ToolResult {
+        request_id: "model-1".into(),
+        call_id: "job".into(),
+        completion: ToolCompletion::JobAccepted {
+            operation_id: operation_id.into(),
+            phase: "accepted".into(),
+            effect: Effect::Dispatched,
+            lifetime: Lifetime::Thread,
+        },
+    };
+    db.commit_execution(
+        &r.run_id,
+        epoch,
+        &ExecutionRecord::ToolSettled {
+            result: result.clone(),
+        },
+    )
+    .unwrap();
+    db.commit_execution(
+        &r.run_id,
+        epoch,
+        &ExecutionRecord::ToolBatchCommitted {
+            request_id: "model-1".into(),
+            results: vec![result],
+        },
+    )
+    .unwrap();
+    assert!(
+        db.pending_resumptions()
+            .unwrap()
+            .iter()
+            .any(|id| id == "job-wait"),
+        "early receipt followed by model handoff never woke the durable waiter"
+    );
+    let settled = db.operation(operation_id).unwrap();
+    assert_eq!(settled.phase, OperationPhase::Terminal);
+    assert_eq!(settled.effect, Effect::Confirmed);
+    assert_eq!(
+        db.record_external_receipt(operation_id, receipt).unwrap(),
+        settled
+    );
+}

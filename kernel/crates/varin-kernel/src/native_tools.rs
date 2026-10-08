@@ -1,0 +1,679 @@
+//! Selected native tools reuse the existing Storage owner through typed in-process messages.
+//! No second catalog, file writer, process manager, or management-authority fallback exists here.
+use crate::error::{error_code, KernelError};
+use crate::model::Grant;
+use crate::storage::Storage;
+use base64::{engine::general_purpose::STANDARD as BASE64, Engine as _};
+use serde::{Deserialize, Serialize};
+use serde_json::{json, Value};
+use std::collections::BTreeSet;
+use std::sync::{mpsc, Arc};
+use varin_runtime::execution::{
+    Access, CancellationToken, CompletionKind, ExecutionError, RequestSnapshot, ResourceClaim,
+    ToolCall, ToolCompletion, ToolContract, ToolExecutionContext, ToolExecutor, ToolSchema,
+};
+use varin_runtime::{Effect, Lifetime, Outcome};
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Deserialize, Serialize)]
+#[serde(rename_all = "snake_case")]
+pub(crate) enum NativeToolKind {
+    FileRead,
+    ProcessInspect,
+    ProcessRead,
+    ProcessSpawn,
+}
+impl NativeToolKind {
+    fn name(self) -> &'static str {
+        match self {
+            Self::FileRead => "native_file_read",
+            Self::ProcessInspect => "native_process_inspect",
+            Self::ProcessRead => "native_process_read",
+            Self::ProcessSpawn => "native_process_spawn",
+        }
+    }
+    fn from_name(name: &str) -> Option<Self> {
+        [
+            Self::FileRead,
+            Self::ProcessInspect,
+            Self::ProcessRead,
+            Self::ProcessSpawn,
+        ]
+        .into_iter()
+        .find(|kind| kind.name() == name)
+    }
+}
+#[derive(Debug, Clone, Deserialize, Serialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub(crate) struct FixedFileSource {
+    pub branch_id: String,
+    pub revision: i64,
+}
+/// Supplied by the trusted Host after resolving its environment/source view, never by model args.
+/// A binding is not itself a grant: the Storage owner revalidates the persisted grant on every call.
+#[derive(Debug, Clone, Deserialize, Serialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub(crate) struct NativeToolBinding {
+    pub grant_id: String,
+    pub run_id: String,
+    pub thread_id: String,
+    pub workspace_id: String,
+    pub execution_workspace_id: String,
+    pub root_id: Option<String>,
+    pub file_source: Option<FixedFileSource>,
+    pub enabled_tools: BTreeSet<NativeToolKind>,
+}
+#[derive(Debug, Clone, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+struct FileReadArgs {
+    path: String,
+    #[serde(default)]
+    offset: u64,
+    length: Option<u64>,
+}
+#[derive(Debug, Clone, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+struct ProcessInspectArgs {
+    process_id: String,
+}
+#[derive(Debug, Clone, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+struct ProcessReadArgs {
+    process_id: String,
+    cursor: u64,
+    max_bytes: Option<u64>,
+}
+#[derive(Debug, Clone, Deserialize, Serialize)]
+#[serde(deny_unknown_fields)]
+struct EnvironmentEntry {
+    name: String,
+    value: String,
+}
+#[derive(Debug, Clone, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+struct ProcessSpawnArgs {
+    cwd: String,
+    command: String,
+    args: Vec<String>,
+    #[serde(default)]
+    env: Vec<EnvironmentEntry>,
+    mode: String,
+    cols: Option<u16>,
+    rows: Option<u16>,
+    windows_raw_arguments: Option<String>,
+}
+#[derive(Debug, Clone)]
+enum ResourceOperation {
+    FileRead(FileReadArgs),
+    ProcessInspect(ProcessInspectArgs),
+    ProcessRead(ProcessReadArgs),
+    ProcessSpawn(ProcessSpawnArgs),
+}
+impl ResourceOperation {
+    fn parse(kind: NativeToolKind, args: &Value) -> Result<Self, ExecutionError> {
+        if args
+            .as_object()
+            .is_some_and(|object| object.values().any(Value::is_null))
+        {
+            return Err(ExecutionError::new(
+                "invalid_tool_arguments",
+                "optional fields must be omitted rather than null",
+            ));
+        }
+        let parsed = match kind {
+            NativeToolKind::FileRead => serde_json::from_value(args.clone()).map(Self::FileRead),
+            NativeToolKind::ProcessInspect => {
+                serde_json::from_value(args.clone()).map(Self::ProcessInspect)
+            }
+            NativeToolKind::ProcessRead => {
+                serde_json::from_value(args.clone()).map(Self::ProcessRead)
+            }
+            NativeToolKind::ProcessSpawn => {
+                serde_json::from_value(args.clone()).map(Self::ProcessSpawn)
+            }
+        }
+        .map_err(|error| ExecutionError::new("invalid_tool_arguments", error.to_string()))?;
+        match &parsed {
+            Self::FileRead(args) => {
+                normalized_path(&args.path, false)?;
+            }
+            Self::ProcessSpawn(args) => {
+                normalized_path(&args.cwd, true)?;
+                if !matches!(args.mode.as_str(), "pipe" | "pty")
+                    || args.command.is_empty()
+                    || args.command.contains('\0')
+                    || args.cols.is_some_and(|value| !(1..=1000).contains(&value))
+                    || args.rows.is_some_and(|value| !(1..=500).contains(&value))
+                {
+                    return Err(ExecutionError::new(
+                        "invalid_tool_arguments",
+                        "invalid process mode or command",
+                    ));
+                }
+            }
+            Self::ProcessInspect(args) if args.process_id.is_empty() => {
+                return Err(ExecutionError::new(
+                    "invalid_tool_arguments",
+                    "processId is empty",
+                ))
+            }
+            Self::ProcessRead(args) if args.process_id.is_empty() || args.max_bytes == Some(0) => {
+                return Err(ExecutionError::new(
+                    "invalid_tool_arguments",
+                    "invalid process output identity or range",
+                ))
+            }
+            _ => {}
+        }
+        Ok(parsed)
+    }
+    fn params(
+        &self,
+        binding: &NativeToolBinding,
+        context: &ToolExecutionContext,
+    ) -> (&'static str, Value) {
+        match self {
+            Self::FileRead(args) => {
+                let source = binding.file_source.as_ref().expect("binding validated");
+                (
+                    "branch.read",
+                    json!({"branchId":source.branch_id,"revision":source.revision,"paths":[args.path]}),
+                )
+            }
+            Self::ProcessInspect(args) => (
+                "process.inspect",
+                json!({"workspaceId":binding.workspace_id,"processId":args.process_id}),
+            ),
+            Self::ProcessRead(args) => {
+                let mut params = json!({"workspaceId":binding.workspace_id,"processId":args.process_id,"cursor":args.cursor});
+                if let Some(limit) = args.max_bytes {
+                    params["maxBytes"] = json!(limit);
+                }
+                ("process.read", params)
+            }
+            Self::ProcessSpawn(args) => {
+                let mut params = json!({"workspaceId":binding.workspace_id,"rootId":binding.root_id,
+                    "processId":context.operation_id,"cwd":args.cwd,"command":args.command,"args":args.args,
+                    "env":args.env,"mode":args.mode});
+                if let Some(cols) = args.cols {
+                    params["cols"] = json!(cols);
+                }
+                if let Some(rows) = args.rows {
+                    params["rows"] = json!(rows);
+                }
+                if let Some(raw) = &args.windows_raw_arguments {
+                    params["windowsRawArguments"] = json!(raw);
+                }
+                ("process.spawn", params)
+            }
+        }
+    }
+}
+fn normalized_path(path: &str, root: bool) -> Result<(), ExecutionError> {
+    if (path.is_empty() && !root)
+        || path.contains('\\')
+        || path.contains('\0')
+        || path.split('/').any(|part| part == "." || part == "..")
+        || path.starts_with('/')
+        || path.contains(':')
+    {
+        return Err(ExecutionError::new(
+            "invalid_tool_arguments",
+            "path must be a normalized relative resource path",
+        ));
+    }
+    Ok(())
+}
+
+pub(crate) struct ResourceFailure {
+    pub error: KernelError,
+    pub dispatched: bool,
+}
+pub(crate) struct ResourceCall {
+    pub admission_key: Option<String>,
+    pub binding: NativeToolBinding,
+    pub context: ToolExecutionContext,
+    operation: ResourceOperation,
+    authorize_only: bool,
+    pub cancellation: CancellationToken,
+    pub reply: mpsc::Sender<Result<Value, ResourceFailure>>,
+}
+/// The Kernel actor injects this sender. Sending does not create another resource authority.
+#[derive(Clone)]
+pub(crate) struct NativeResourceClient {
+    send: Arc<dyn Fn(ResourceCall) -> Result<(), KernelError> + Send + Sync>,
+}
+impl NativeResourceClient {
+    pub(crate) fn new(
+        send: impl Fn(ResourceCall) -> Result<(), KernelError> + Send + Sync + 'static,
+    ) -> Self {
+        Self {
+            send: Arc::new(send),
+        }
+    }
+    fn call(
+        &self,
+        binding: &NativeToolBinding,
+        context: &ToolExecutionContext,
+        operation: ResourceOperation,
+        authorize_only: bool,
+        cancellation: &CancellationToken,
+    ) -> Result<Value, ResourceFailure> {
+        if cancellation.is_cancelled() {
+            return Err(ResourceFailure {
+                error: KernelError::Cancelled,
+                dispatched: false,
+            });
+        }
+        let (reply, result) = mpsc::channel();
+        (self.send)(ResourceCall {
+            admission_key: None,
+            binding: binding.clone(),
+            context: context.clone(),
+            operation,
+            authorize_only,
+            cancellation: cancellation.clone(),
+            reply,
+        })
+        .map_err(|error| ResourceFailure {
+            error,
+            dispatched: false,
+        })?;
+        // Once admitted, cancellation is observed by the executing resource owner. Do not drop
+        // ownership on a local timeout/abort while the process/file operation may still execute.
+        result.recv().map_err(|_| ResourceFailure {
+            error: KernelError::Storage("resource owner disconnected before receipt".into()),
+            dispatched: !authorize_only,
+        })?
+    }
+}
+
+pub(crate) struct NativeToolExecutor {
+    binding: NativeToolBinding,
+    resources: NativeResourceClient,
+}
+impl NativeToolExecutor {
+    pub(crate) fn new(
+        binding: NativeToolBinding,
+        resources: NativeResourceClient,
+    ) -> Result<Self, ExecutionError> {
+        if [
+            &binding.grant_id,
+            &binding.run_id,
+            &binding.thread_id,
+            &binding.workspace_id,
+            &binding.execution_workspace_id,
+        ]
+        .iter()
+        .any(|id| id.trim().is_empty())
+        {
+            return Err(ExecutionError::new(
+                "invalid_tool_binding",
+                "tool binding identities must be nonempty",
+            ));
+        }
+        if binding.enabled_tools.contains(&NativeToolKind::FileRead)
+            && !binding
+                .file_source
+                .as_ref()
+                .is_some_and(|source| !source.branch_id.is_empty() && source.revision >= 0)
+        {
+            return Err(ExecutionError::new(
+                "invalid_tool_binding",
+                "file read requires a fixed branch revision",
+            ));
+        }
+        if binding
+            .enabled_tools
+            .contains(&NativeToolKind::ProcessSpawn)
+            && binding.root_id.as_deref().is_none_or(str::is_empty)
+        {
+            return Err(ExecutionError::new(
+                "invalid_tool_binding",
+                "process spawn requires a registered root",
+            ));
+        }
+        Ok(Self { binding, resources })
+    }
+    pub(crate) fn schemas(&self) -> Vec<ToolSchema> {
+        self.binding
+            .enabled_tools
+            .iter()
+            .map(|kind| ToolSchema {
+                name: kind.name().into(),
+                version: "1".into(),
+                schema: tool_schema(*kind),
+            })
+            .collect()
+    }
+    fn operation(
+        &self,
+        context: Option<&ToolExecutionContext>,
+        call: &ToolCall,
+    ) -> Result<ResourceOperation, ExecutionError> {
+        if context.is_some_and(|context| {
+            context.run_id != self.binding.run_id || context.operation_id.is_empty()
+        }) {
+            return Err(ExecutionError::new(
+                "unauthorized",
+                "tool execution identity does not match bound Run",
+            ));
+        }
+        if call.schema_version != "1" {
+            return Err(ExecutionError::new(
+                "stale_tool_schema",
+                "tool schema version is not bound",
+            ));
+        }
+        let kind = NativeToolKind::from_name(&call.name)
+            .filter(|kind| self.binding.enabled_tools.contains(kind))
+            .ok_or_else(|| {
+                ExecutionError::new("tool_not_bound", "tool is not selected in this Run")
+            })?;
+        ResourceOperation::parse(kind, &call.arguments)
+    }
+    fn contract(&self, call: &ToolCall, operation: &ResourceOperation) -> ToolContract {
+        let (resource, access, job) = match operation {
+            ResourceOperation::FileRead(args) => (
+                format!(
+                    "file:{}:{}:{}",
+                    self.binding.workspace_id,
+                    self.binding
+                        .file_source
+                        .as_ref()
+                        .expect("validated source")
+                        .branch_id,
+                    args.path
+                ),
+                Access::Read,
+                false,
+            ),
+            ResourceOperation::ProcessInspect(args) => (
+                format!("process:{}:{}", self.binding.workspace_id, args.process_id),
+                Access::Read,
+                false,
+            ),
+            ResourceOperation::ProcessRead(args) => (
+                format!("process:{}:{}", self.binding.workspace_id, args.process_id),
+                Access::Read,
+                false,
+            ),
+            ResourceOperation::ProcessSpawn(_) => (
+                format!("environment:{}", self.binding.execution_workspace_id),
+                Access::Write,
+                true,
+            ),
+        };
+        ToolContract {
+            name: call.name.clone(),
+            schema_version: "1".into(),
+            read_only: !job,
+            completion: if job {
+                CompletionKind::Job
+            } else {
+                CompletionKind::Result
+            },
+            lifetime: if job { Lifetime::Thread } else { Lifetime::Run },
+            resources: vec![ResourceClaim {
+                key: resource,
+                access,
+            }],
+        }
+    }
+}
+impl ToolExecutor for NativeToolExecutor {
+    fn prepare(
+        &self,
+        call: &ToolCall,
+        request: &RequestSnapshot,
+    ) -> Result<ToolContract, ExecutionError> {
+        if request.view.run_id != self.binding.run_id {
+            return Err(ExecutionError::new(
+                "unauthorized",
+                "request Run does not match tool binding",
+            ));
+        }
+        let operation = self.operation(None, call)?;
+        let expected = self
+            .schemas()
+            .into_iter()
+            .find(|schema| schema.name == call.name)
+            .expect("selected tool");
+        if !request
+            .view
+            .binding
+            .tools
+            .iter()
+            .any(|schema| schema == &expected)
+        {
+            return Err(ExecutionError::new(
+                "stale_tool_schema",
+                "tool does not match the frozen request schema",
+            ));
+        }
+        Ok(self.contract(call, &operation))
+    }
+    fn authorize(
+        &self,
+        context: &ToolExecutionContext,
+        call: &ToolCall,
+        contract: &ToolContract,
+        cancel: &CancellationToken,
+    ) -> Result<(), ExecutionError> {
+        let operation = self.operation(Some(context), call)?;
+        if &self.contract(call, &operation) != contract {
+            return Err(ExecutionError::new(
+                "stale_tool_contract",
+                "tool contract changed",
+            ));
+        }
+        self.resources
+            .call(&self.binding, context, operation, true, cancel)
+            .map(|_| ())
+            .map_err(|failure| {
+                ExecutionError::new(error_code(&failure.error), failure.error.to_string())
+            })
+    }
+    fn execute(
+        &self,
+        context: &ToolExecutionContext,
+        call: &ToolCall,
+        contract: &ToolContract,
+        cancel: &CancellationToken,
+    ) -> ToolCompletion {
+        let operation = match self.operation(Some(context), call) {
+            Ok(value) => value,
+            Err(error) => {
+                return ToolCompletion::NotDispatched {
+                    reason: error.to_string(),
+                }
+            }
+        };
+        if &self.contract(call, &operation) != contract {
+            return ToolCompletion::NotDispatched {
+                reason: "tool contract changed".into(),
+            };
+        }
+        let spawn = matches!(operation, ResourceOperation::ProcessSpawn(_));
+        match self
+            .resources
+            .call(&self.binding, context, operation, false, cancel)
+        {
+            Ok(result) if spawn => {
+                let phase = result.get("status").and_then(Value::as_str);
+                if result.get("processId").and_then(Value::as_str)
+                    != Some(context.operation_id.as_str())
+                    || phase.is_none()
+                    || matches!(phase, Some("unknown" | "failed"))
+                {
+                    ToolCompletion::Result {
+                        outcome: Outcome::Indeterminate,
+                        effect: Effect::Unknown,
+                        content: result,
+                    }
+                } else {
+                    ToolCompletion::JobAccepted {
+                        operation_id: context.operation_id.clone(),
+                        phase: phase.expect("checked process receipt").into(),
+                        effect: Effect::Dispatched,
+                        lifetime: Lifetime::Thread,
+                    }
+                }
+            }
+            Ok(result) => ToolCompletion::Result {
+                outcome: Outcome::Succeeded,
+                effect: Effect::None,
+                content: result,
+            },
+            Err(failure) if !failure.dispatched => ToolCompletion::NotDispatched {
+                reason: failure.error.to_string(),
+            },
+            Err(failure) => ToolCompletion::Result {
+                outcome: if spawn {
+                    Outcome::Indeterminate
+                } else {
+                    Outcome::Failed
+                },
+                effect: if spawn { Effect::Unknown } else { Effect::None },
+                content: json!({"error":error_code(&failure.error),"message":failure.error.to_string()}),
+            },
+        }
+    }
+}
+
+fn tool_schema(kind: NativeToolKind) -> Value {
+    let (properties, required) = match kind {
+        NativeToolKind::FileRead => (
+            json!({"path":{"type":"string"},"offset":{"type":"integer","minimum":0},"length":{"type":"integer","minimum":0}}),
+            vec!["path"],
+        ),
+        NativeToolKind::ProcessInspect => {
+            (json!({"processId":{"type":"string"}}), vec!["processId"])
+        }
+        NativeToolKind::ProcessRead => (
+            json!({"processId":{"type":"string"},"cursor":{"type":"integer","minimum":0},"maxBytes":{"type":"integer","minimum":1}}),
+            vec!["processId", "cursor"],
+        ),
+        NativeToolKind::ProcessSpawn => (
+            json!({"cwd":{"type":"string"},"command":{"type":"string"},"args":{"type":"array","items":{"type":"string"}},
+            "env":{"type":"array","items":{"type":"object","additionalProperties":false,"properties":{"name":{"type":"string"},"value":{"type":"string"}},"required":["name","value"]}},
+            "mode":{"type":"string","enum":["pipe","pty"]},"cols":{"type":"integer","minimum":1,"maximum":1000},"rows":{"type":"integer","minimum":1,"maximum":500},"windowsRawArguments":{"type":"string"}}),
+            vec!["cwd", "command", "args", "mode"],
+        ),
+    };
+    json!({"type":"object","additionalProperties":false,"properties":properties,"required":required})
+}
+
+fn validate_binding(
+    grant: &Grant,
+    binding: &NativeToolBinding,
+    context: &ToolExecutionContext,
+) -> Result<(), KernelError> {
+    if context.run_id != binding.run_id
+        || grant.run_id.as_deref() != Some(binding.run_id.as_str())
+        || grant.thread_id.as_deref() != Some(binding.thread_id.as_str())
+        || grant.owning_workspace.as_deref() != Some(binding.workspace_id.as_str())
+        || grant
+            .execution_workspace
+            .as_deref()
+            .or(grant.owning_workspace.as_deref())
+            != Some(binding.execution_workspace_id.as_str())
+    {
+        return Err(KernelError::Authorization(
+            "native tool permit does not match actual run/thread/environment".into(),
+        ));
+    }
+    Ok(())
+}
+/// Called only on the sole Storage actor. Host/epoch values come from its handshake, not the model.
+/// Existing domain APIs accept validated Values; no JSON serialization or protocol loopback occurs.
+pub(crate) fn serve_resource(
+    storage: &mut Storage,
+    epoch: &str,
+    host_id: &str,
+    host_generation: &str,
+    request: &ResourceCall,
+) -> Result<Value, ResourceFailure> {
+    let mut dispatched = false;
+    let result = (|| -> Result<Value, KernelError> {
+        if request.cancellation.is_cancelled() {
+            return Err(KernelError::Cancelled);
+        }
+        let (method, params) = request.operation.params(&request.binding, &request.context);
+        let (grant, authorized) = storage.authorize(
+            Some(&request.binding.grant_id),
+            epoch,
+            host_id,
+            host_generation,
+            method,
+            &params,
+        )?;
+        validate_binding(&grant, &request.binding, &request.context)?;
+        if request.authorize_only {
+            return Ok(Value::Null);
+        }
+        storage.set_cancellation(request.cancellation.shared_flag());
+        dispatched = true;
+        let result = storage.dispatch(method, &authorized, Some(&request.binding.grant_id), &grant);
+        storage.clear_cancellation();
+        let result = result?;
+        if let ResourceOperation::FileRead(args) = &request.operation {
+            let source = request
+                .binding
+                .file_source
+                .as_ref()
+                .expect("validated source");
+            let entries = result
+                .get("entries")
+                .and_then(Value::as_array)
+                .ok_or_else(|| KernelError::Storage("branch read omitted entries".into()))?;
+            let state = entries.first().and_then(|entry| entry.get("state"));
+            let Some(state) = state else {
+                return Ok(json!({"path":args.path,"source":source,"missing":true}));
+            };
+            if state.get("kind").and_then(Value::as_str) != Some("regular-file") {
+                return Ok(json!({"path":args.path,"source":source,"state":state,"missing":false}));
+            }
+            let hash = state
+                .get("objectHash")
+                .and_then(Value::as_str)
+                .ok_or_else(|| KernelError::Storage("file state omitted object identity".into()))?;
+            let mut params = json!({"hash":hash,"branchId":source.branch_id,"revision":source.revision,"path":args.path,"offset":args.offset});
+            if let Some(length) = args.length {
+                params["length"] = json!(length);
+            }
+            let (grant, authorized) = storage.authorize(
+                Some(&request.binding.grant_id),
+                epoch,
+                host_id,
+                host_generation,
+                "storage.getBlob",
+                &params,
+            )?;
+            validate_binding(&grant, &request.binding, &request.context)?;
+            if request.cancellation.is_cancelled() {
+                return Err(KernelError::Cancelled);
+            }
+            let mut content = storage.dispatch(
+                "storage.getBlob",
+                &authorized,
+                Some(&request.binding.grant_id),
+                &grant,
+            )?;
+            let encoded = content
+                .get("bytesBase64")
+                .and_then(Value::as_str)
+                .ok_or_else(|| KernelError::Storage("content read omitted bytes".into()))?;
+            let bytes = BASE64.decode(encoded).map_err(|_| {
+                KernelError::Storage("content read returned malformed bytes".into())
+            })?;
+            if let Ok(text) = String::from_utf8(bytes) {
+                let object = content.as_object_mut().expect("content result object");
+                object.remove("bytesBase64");
+                object.insert("text".into(), Value::String(text));
+            }
+            return Ok(json!({"path":args.path,"source":source,"missing":false,"content":content}));
+        }
+        Ok(result)
+    })();
+    result.map_err(|error| ResourceFailure { error, dispatched })
+}

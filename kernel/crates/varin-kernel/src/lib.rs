@@ -4,6 +4,7 @@ mod compute;
 mod error;
 mod model;
 mod native_runtime;
+mod native_tools;
 mod process;
 mod protocol;
 mod protocol_generated;

@@ -12,7 +12,24 @@ use std::sync::{
     mpsc, Arc,
 };
 use std::thread::{self, JoinHandle};
-use varin_runtime::{Catalog, SubmitInput};
+use varin_runtime::{Catalog, SubmitInput, supervisor::RunSupervisor, model_session};
+use std::sync::Mutex;
+
+#[derive(Clone,Default)]
+pub(crate) struct NativeControl(Arc<Mutex<Option<Arc<RunSupervisor>>>>);
+impl NativeControl {
+    pub(crate) fn cancel_admitted(&self,request:&Value,current_epoch:Option<&str>){
+        if request.get("method").and_then(Value::as_str)!=Some("runtime.run.cancel")||
+            request.get("v").and_then(Value::as_u64)!=Some(PROTOCOL_VERSION)||
+            request.get("kind").and_then(Value::as_str)!=Some("request")||
+            request.get("epoch").and_then(Value::as_str)!=current_epoch||current_epoch.is_none()||
+            request.get("grantId").is_some()||
+            reject_unknown_fields(request,&["v","kind","id","method","params","epoch"],"runtime cancellation").is_err(){return;}
+        let Some(params)=request.get("params")else{return;};
+        let Ok(params)=serde_json::from_value::<NativeRunParams>(params.clone())else{return;};
+        if let Ok(control)=self.0.lock(){if let Some(runtime)=control.as_ref(){runtime.cancel_control(&params.run_id);}}
+    }
+}
 
 pub(crate) enum Command {
     Initialize {
@@ -38,12 +55,14 @@ fn domain(error: varin_runtime::RuntimeError) -> KernelError {
 }
 pub(crate) fn spawn(
     commands: mpsc::Receiver<Command>,
+    control:NativeControl,
+    resources:crate::native_tools::NativeResourceClient,
     responses: mpsc::SyncSender<Value>,
     finished: impl Fn(&str) + Send + 'static,
 ) -> JoinHandle<()> {
     thread::spawn(move || {
         let mut identity: Option<(PathBuf, String)> = None;
-        let mut catalog: Option<Catalog> = None;
+        let mut runtime: Option<Arc<RunSupervisor>> = None;
         for command in commands {
             match command {
                 Command::Initialize { root, epoch } => {
@@ -90,10 +109,35 @@ pub(crate) fn spawn(
                             .ok_or_else(|| KernelError::Protocol("method required".into()))?;
                         let params = value.get("params").cloned().unwrap_or_else(|| json!({}));
                         validate_method_params(method, &params)?;
-                        if catalog.is_none() {
-                            catalog = Some(Catalog::open(root).map_err(domain)?);
+                        if runtime.is_none() {
+                            let owner=Arc::new(RunSupervisor::new(Catalog::open(root).map_err(domain)?));
+                            *control.0.lock().map_err(|_|KernelError::Storage("native control owner failed".into()))?=Some(owner.clone());
+                            runtime=Some(owner);
                         }
-                        dispatch(catalog.as_mut().expect("opened catalog"), method, params)
+                        let runtime=runtime.as_ref().expect("opened runtime");
+                        runtime.reap().map_err(|e|KernelError::Operation(e.to_string()))?;
+                        if method=="runtime.run.start" {
+                            let p:NativeRunStartParams=serde_json::from_value(params)?;
+                            let run={let catalog=runtime.catalog();let catalog=catalog.lock().map_err(|_|KernelError::Storage("native catalog owner failed".into()))?;catalog.run(&p.run_id).map_err(domain)?};
+                            let mut start=model_session::bind(serde_json::from_value(run.configuration)?).map_err(|e|KernelError::Operation(e.to_string()))?;
+                            if let Some(binding)=p.tool_binding {
+                                let binding:crate::native_tools::NativeToolBinding=serde_json::from_value(binding)?;
+                                if binding.run_id!=p.run_id||binding.thread_id!=run.thread_id{return Err(KernelError::Authorization("tool binding does not belong to the admitted Run".into()));}
+                                let tools=crate::native_tools::NativeToolExecutor::new(binding,resources.clone()).map_err(|e|KernelError::Authorization(e.to_string()))?;
+                                start.binding.tools=tools.schemas();
+                                start.binding.tool_schema_generation=start.binding.configuration_generation;
+                                start.tools=Arc::new(tools);
+                            }
+                            let handle=runtime.start(&p.run_id,start).map_err(|e|KernelError::Operation(e.to_string()))?;
+                            return Ok(json!({"runId":handle.run_id,"epoch":handle.epoch}));
+                        }
+                        if method=="runtime.run.cancel" {
+                            let p:NativeRunParams=serde_json::from_value(params)?;
+                            return Ok(serde_json::to_value(runtime.cancel(&p.run_id).map_err(|e|KernelError::Operation(e.to_string()))?)?);
+                        }
+                        let catalog=runtime.catalog();
+                        let mut catalog=catalog.lock().map_err(|_|KernelError::Storage("native catalog owner failed".into()))?;
+                        dispatch(&mut catalog, method, params)
                     })();
                     let response = match result {
                         Ok(result) => response_ok(&id, result),
@@ -106,6 +150,8 @@ pub(crate) fn spawn(
                 }
             }
         }
+        if let Some(runtime)=runtime {let _=runtime.shutdown();}
+        if let Ok(mut control)=control.0.lock(){*control=None;}
     })
 }
 fn dispatch(catalog: &mut Catalog, method: &str, params: Value) -> Result<Value, KernelError> {

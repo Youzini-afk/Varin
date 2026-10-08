@@ -377,3 +377,251 @@ fn supervisor_control_reaches_provider_while_catalog_is_locked() {
     assert_eq!(handle.wait().unwrap().state, RunState::Cancelled);
     supervisor.shutdown().unwrap();
 }
+
+#[test]
+fn worker_commit_conflict_cannot_leave_a_workerless_run_generating() {
+    struct ConcurrentInput {
+        catalog: Arc<Mutex<Catalog>>,
+    }
+    impl ModelProvider for ConcurrentInput {
+        fn serialize(&self, view: &RequestView) -> Result<Value, ExecutionError> {
+            Ok(serde_json::to_value(view).unwrap())
+        }
+        fn generate(
+            &self,
+            request: &RequestSnapshot,
+            _: &CancellationToken,
+            emit: &mut dyn FnMut(ProviderEvent) -> Result<(), ExecutionError>,
+        ) -> Result<FinishReason, ModelFailure> {
+            let mut db = self.catalog.lock().unwrap();
+            let epoch = db.epoch();
+            db.append_history(
+                &request.view.run_id,
+                epoch,
+                request.view.binding.history_range.leaf_id.as_deref(),
+                crate::HistorySource::User,
+                json!({"text":"a newly arrived correction"}),
+                None,
+            )
+            .unwrap();
+            drop(db);
+            emit(ProviderEvent::ItemCompleted {
+                item: ProviderItem {
+                    id: "obsolete-answer".into(),
+                    content: Content::Text {
+                        text: "answer to old input".into(),
+                    },
+                    opaque: None,
+                },
+            })
+            .unwrap();
+            Ok(FinishReason::Stop)
+        }
+    }
+    let f = Fixture::new();
+    let db = f.catalog();
+    let input = input(&db);
+    let run_id = input.run_id.clone();
+    let request_id = format!("{}:{}:1", run_id, input.owner_generation);
+    let catalog = match Arc::try_unwrap(db) {
+        Ok(db) => db.into_inner().unwrap(),
+        Err(_) => panic!("unexpected shared catalog"),
+    };
+    let supervisor = crate::supervisor::RunSupervisor::new(catalog);
+    let db = supervisor.catalog();
+    let handle = supervisor
+        .start(
+            &run_id,
+            crate::supervisor::RunStart {
+                binding: input.binding,
+                policy_state: Value::Null,
+                provider: Arc::new(ConcurrentInput {
+                    catalog: db.clone(),
+                }),
+                tools: Arc::new(Tools::default()),
+                policy: Arc::new(DefaultAgentPolicy),
+                progress: ProgressSink::default(),
+            },
+        )
+        .unwrap();
+    assert!(
+        handle.wait().is_err(),
+        "stale output must not commit over the newer input"
+    );
+    supervisor.shutdown().unwrap();
+    let run = db.lock().unwrap().run(&run_id).unwrap();
+    assert!(
+        matches!(run.state, RunState::Failed | RunState::Waiting),
+        "worker has exited after conflict but Run still reports {:?}",
+        run.state
+    );
+    assert!(supervisor.execution_failure(&run_id).unwrap().is_some());
+    assert!(run.waiting_on.is_some());
+    let retained = db
+        .lock()
+        .unwrap()
+        .model_output(&request_id)
+        .unwrap()
+        .unwrap();
+    assert_eq!(retained["status"], "rejected");
+    assert_eq!(retained["record"]["items"][0]["id"], "obsolete-answer");
+    assert!(!db
+        .lock()
+        .unwrap()
+        .history("main")
+        .unwrap()
+        .iter()
+        .any(|item| item.id == "obsolete-answer"));
+    drop(db);
+    drop(supervisor);
+    let reopened = f.catalog();
+    assert_eq!(
+        reopened.lock().unwrap().run(&run_id).unwrap().state,
+        RunState::Waiting
+    );
+    assert_eq!(
+        reopened
+            .lock()
+            .unwrap()
+            .model_output(&request_id)
+            .unwrap()
+            .unwrap(),
+        retained
+    );
+}
+#[test]
+fn independent_fast_tool_finishes_while_another_tool_is_still_running() {
+    struct BatchProvider(AtomicUsize);
+    impl ModelProvider for BatchProvider {
+        fn serialize(&self, v: &RequestView) -> Result<Value, ExecutionError> {
+            Ok(serde_json::to_value(v).unwrap())
+        }
+        fn generate(
+            &self,
+            _: &RequestSnapshot,
+            _: &CancellationToken,
+            emit: &mut dyn FnMut(ProviderEvent) -> Result<(), ExecutionError>,
+        ) -> Result<FinishReason, ModelFailure> {
+            if self.0.fetch_add(1, Ordering::SeqCst) == 0 {
+                for name in ["slow", "fast"] {
+                    emit(ProviderEvent::ItemCompleted {
+                        item: ProviderItem {
+                            id: format!("item-{name}"),
+                            content: Content::ToolCall {
+                                call: ToolCall {
+                                    call_id: name.into(),
+                                    name: name.into(),
+                                    schema_version: "1".into(),
+                                    arguments: json!({}),
+                                },
+                            },
+                            opaque: None,
+                        },
+                    })
+                    .unwrap();
+                }
+                Ok(FinishReason::ToolCalls)
+            } else {
+                emit(ProviderEvent::ItemCompleted {
+                    item: ProviderItem {
+                        id: "answer".into(),
+                        content: Content::Text {
+                            text: "both settled".into(),
+                        },
+                        opaque: None,
+                    },
+                })
+                .unwrap();
+                Ok(FinishReason::Stop)
+            }
+        }
+    }
+    struct IndependentTools {
+        slow_started: std::sync::mpsc::Sender<()>,
+        release_slow: Mutex<std::sync::mpsc::Receiver<()>>,
+        fast_done: std::sync::mpsc::Sender<()>,
+    }
+    impl ToolExecutor for IndependentTools {
+        fn prepare(
+            &self,
+            call: &ToolCall,
+            _: &RequestSnapshot,
+        ) -> Result<ToolContract, ExecutionError> {
+            Ok(ToolContract {
+                name: call.name.clone(),
+                schema_version: "1".into(),
+                read_only: true,
+                completion: CompletionKind::Result,
+                lifetime: Lifetime::Run,
+                resources: vec![ResourceClaim {
+                    key: call.name.clone(),
+                    access: Access::Read,
+                }],
+            })
+        }
+        fn authorize(
+            &self,
+            _: &ToolExecutionContext,
+            _: &ToolCall,
+            _: &ToolContract,
+            _: &CancellationToken,
+        ) -> Result<(), ExecutionError> {
+            Ok(())
+        }
+        fn execute(
+            &self,
+            _: &ToolExecutionContext,
+            call: &ToolCall,
+            _: &ToolContract,
+            _: &CancellationToken,
+        ) -> ToolCompletion {
+            if call.name == "slow" {
+                self.slow_started.send(()).unwrap();
+                self.release_slow.lock().unwrap().recv().unwrap();
+            } else {
+                self.fast_done.send(()).unwrap();
+            }
+            ToolCompletion::Result {
+                outcome: Outcome::Succeeded,
+                effect: Effect::None,
+                content: json!(call.name),
+            }
+        }
+    }
+    let f = Fixture::new();
+    let db = f.catalog();
+    let mut input = input(&db);
+    input.binding.tools = ["slow", "fast"]
+        .into_iter()
+        .map(|name| ToolSchema {
+            name: name.into(),
+            version: "1".into(),
+            schema: json!({"type":"object"}),
+        })
+        .collect();
+    let (start_tx, start_rx) = std::sync::mpsc::channel();
+    let (release_tx, release_rx) = std::sync::mpsc::channel();
+    let (fast_tx, fast_rx) = std::sync::mpsc::channel();
+    let engine = ExecutionEngine {
+        persistence: db,
+        provider: Arc::new(BatchProvider(AtomicUsize::new(0))),
+        tools: Arc::new(IndependentTools {
+            slow_started: start_tx,
+            release_slow: Mutex::new(release_rx),
+            fast_done: fast_tx,
+        }),
+        policy: Arc::new(DefaultAgentPolicy),
+        progress: ProgressSink::default(),
+    };
+    let worker = std::thread::spawn(move || engine.run(input, CancellationToken::default()));
+    let slow_started = start_rx.recv_timeout(std::time::Duration::from_secs(3));
+    let fast_finished = fast_rx.recv_timeout(std::time::Duration::from_secs(3));
+    let _ = release_tx.send(());
+    let report = worker.join().unwrap().unwrap();
+    assert!(slow_started.is_ok());
+    assert!(
+        fast_finished.is_ok(),
+        "independent tool waited for the slow predecessor"
+    );
+    assert_eq!(report.state, RunState::Completed);
+}

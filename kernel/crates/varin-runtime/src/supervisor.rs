@@ -51,6 +51,7 @@ pub struct RunSupervisor {
     stopping:AtomicBool,
     catalog: Arc<Mutex<Catalog>>,
     workers: Mutex<HashMap<String, Worker>>,
+    failures:Arc<Mutex<HashMap<String,ExecutionError>>>,
 }
 impl RunSupervisor {
     pub fn new(catalog: Catalog) -> Self {
@@ -58,6 +59,7 @@ impl RunSupervisor {
             stopping:AtomicBool::new(false),
             catalog: Arc::new(Mutex::new(catalog)),
             workers: Mutex::new(HashMap::new()),
+            failures:Arc::new(Mutex::new(HashMap::new())),
         }
     }
     pub fn catalog(&self) -> Arc<Mutex<Catalog>> {
@@ -111,6 +113,9 @@ impl RunSupervisor {
             progress: start.progress,
         };
         let (tx, rx) = mpsc::channel();
+        let failures=self.failures.clone();
+        let failure_catalog=self.catalog.clone();
+        let failure_run=run_id.to_string();
         let join = thread::Builder::new()
             .name(format!("native-run-{run_id}"))
             .spawn(move || {
@@ -123,6 +128,14 @@ impl RunSupervisor {
                         "native execution worker stopped without a completion receipt",
                     ))
                 });
+                if let Err(error)=&result {
+                    if let Ok(mut failures)=failures.lock(){failures.insert(failure_run.clone(),error.clone());}
+                    if let Ok(mut catalog)=failure_catalog.lock(){
+                        if let Err(commit)=catalog.pause_failed_execution(&failure_run,epoch,&error.code,&error.message){
+                            if let Ok(mut failures)=failures.lock(){failures.insert(failure_run.clone(),ExecutionError::new("recovery_commit_failed",format!("{}; recovery status could not commit: {commit}",error.message)));}
+                        }
+                    }
+                }
                 let _ = tx.send(result);
             });
         match join {
@@ -169,6 +182,9 @@ impl RunSupervisor {
             .map_err(error)?
             .request_cancel_run(run_id)
             .map_err(error)
+    }
+    pub fn execution_failure(&self,run_id:&str)->Result<Option<ExecutionError>> {
+        Ok(self.failures.lock().map_err(error)?.get(run_id).cloned())
     }
     pub fn status(&self) -> Result<Vec<WorkerStatus>> {
         Ok(self

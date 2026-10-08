@@ -1,7 +1,7 @@
 import type { KernelClient } from './kernel-client.js';
 import type {
   NativeInputSubmitParams, NativeReceipt, NativeRun, NativeOperation,
-  NativeHistoryItem, NativeEvent, NativeStatus,
+  NativeHistoryItem, NativeEvent, NativeStatus, NativeRunStartReceipt,
 } from './protocol.generated.js';
 
 /** Explicit native-authority client. Existing Pi thread routes are not silently redirected. */
@@ -16,6 +16,9 @@ export class NativeRuntimeClient {
   }
   submit(input: NativeInputSubmitParams, signal?: AbortSignal): Promise<NativeReceipt> {
     return this.kernel.nativeRuntimeRequest('runtime.input.submit', input, signal);
+  }
+  startRun(runId: string, signal?: AbortSignal, toolBinding?: unknown): Promise<NativeRunStartReceipt> {
+    return this.kernel.nativeRuntimeRequest('runtime.run.start', { runId, ...(toolBinding === undefined ? {} : { toolBinding }) }, signal);
   }
   run(runId: string, signal?: AbortSignal): Promise<NativeRun> {
     return this.kernel.nativeRuntimeRequest('runtime.run.inspect', { runId }, signal);
